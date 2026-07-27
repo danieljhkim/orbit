@@ -199,7 +199,7 @@ Retired features stay listed with their `_archive/` path as a historical record.
 | MCP Session Context | [docs/design/mcp-session-context/](./mcp-session-context/) | codex |
 | Orbit Core | [docs/design/orbit-core/](./orbit-core/) | claude |
 | Orbit Docs | [docs/design/orbit-docs/](./orbit-docs/) | claude |
-| Orbit Graph | [docs/design/orbit-graph/](./orbit-graph/) | claude |
+| Orbit Graph | [docs/design/_archive/orbit-graph/](./_archive/orbit-graph/) | claude |
 | Orbit Search | [docs/design/orbit-search/](./orbit-search/) | claude |
 | Policy & Sandboxing | [docs/design/policy-sandbox/](./policy-sandbox/) | claude |
 | Project Learnings | [docs/design/project-learnings/](./project-learnings/) | claude |

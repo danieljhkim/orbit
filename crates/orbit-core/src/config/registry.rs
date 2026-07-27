@@ -132,11 +132,6 @@ define_config_settings! {
         description: "Environment variable names allow-listed for passthrough into agent subprocesses.",
         resolve: |raw: Option<Vec<String>>| raw.map(normalize_pass_list).unwrap_or_else(|| Ok(default_pass_list())),
     },
-    graph_editing: bool => bool {
-        key: "graph.editing", value_type: "bool",
-        description: "Whether the code graph editing surface is enabled.",
-        resolve: |raw: Option<bool>| Ok::<_, OrbitError>(raw.unwrap_or(false)),
-    },
     pr_task_url_template: Option<String> => String {
         key: "pr.task_url_template", value_type: "string",
         description: "URL template used to link a task ID in PR descriptions.",

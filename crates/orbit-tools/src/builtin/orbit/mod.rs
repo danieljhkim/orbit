@@ -117,8 +117,6 @@ pub fn register(registry: &mut ToolRegistry) {
     );
     registry.register(duel::plan_add::OrbitDuelPlanAddTool);
     registry.register(duel::plan_winner::OrbitDuelPlanWinnerTool);
-    // ORB-00391 removed the v1 orbit-knowledge graph builtins and graph.history
-    // compatibility stub; ORB-10325 keeps v2 exclusively on `orbit graph`.
     registry.register_mcp(
         learning::add::OrbitLearningAddTool,
         agent_operator(McpToolPlacement::Composite),

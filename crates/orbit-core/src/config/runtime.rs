@@ -24,7 +24,6 @@ pub(crate) struct RuntimeConfig {
     pub(crate) persistence: PersistenceConfig,
     pub(crate) pr: PrConfig,
     pub(crate) scoring_enabled: bool,
-    pub(crate) graph_editing: bool,
     /// Persisted default for the v2 `agent_loop` execution backend (§3.1).
     /// `None` means "not configured"; the resolver falls through to the hard-
     /// coded `cli` default.
@@ -85,7 +84,6 @@ impl RuntimeConfig {
                 task_url_template: snapshot.pr_task_url_template.clone(),
             },
             scoring_enabled: snapshot.scoring_enabled,
-            graph_editing: snapshot.graph_editing,
             v2_backend: snapshot.runtime_backend.clone(),
             workflow_base_branch: snapshot.workflow_base_branch.clone(),
             workflow_auto_ship: snapshot.workflow_auto_ship,
@@ -200,7 +198,6 @@ impl RuntimeConfig {
                 task_url_template: snapshot.pr_task_url_template.clone(),
             },
             scoring_enabled: snapshot.scoring_enabled,
-            graph_editing: snapshot.graph_editing,
             v2_backend: snapshot.runtime_backend.clone(),
             workflow_base_branch: snapshot.workflow_base_branch.clone(),
             workflow_auto_ship: snapshot.workflow_auto_ship,

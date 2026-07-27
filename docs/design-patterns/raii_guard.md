@@ -138,29 +138,22 @@ Patterns to copy:
 - **Hold a `'static` mutex as a field.** `_lock: MutexGuard<'static, ()>` makes "one guard at a time, process-wide" structurally impossible to violate.
 - **Hand-rollback on partial install.** `Drop` only runs on values that successfully return; mid-construction failures must unwind their own work before returning `Err`.
 
-## Reference: `DbLockGuard` — resource held until `Drop`
+## Reference: `FileLockGuard` — resource held until `Drop`
 
-From `crates/orbit-graph/src/sync/scanner.rs:150`:
+From `crates/orbit-store/src/file_lock/mod.rs`:
 
 ```rust
-pub(crate) struct DbLockGuard {
+#[must_use = "the advisory lock is released as soon as the guard is dropped"]
+pub(crate) struct FileLockGuard {
     _file: File,
-}
-
-impl DbLockGuard {
-    pub(crate) fn acquire(db_path: &Path) -> Result<Self, GraphError> {
-        let lock_path = lock_path_for(db_path);
-        let file = /* open the sidecar and acquire an exclusive lock */;
-        Ok(Self { _file: file })
-    }
 }
 ```
 
 Patterns to copy:
 
-- **Hold the resource in a field.** `DbLockGuard` keeps the locked sidecar `File` alive in `_file`; dropping the file releases the OS lock. There is no separate explicit release path to call or duplicate.
-
-The live implementation is `crates/orbit-graph/src/sync/scanner.rs:150`. The former `GraphLockGuard` reference belonged to the retired `orbit-knowledge` lock store.
+- **Hold the resource in a field.** `FileLockGuard` keeps the locked `File`
+  alive in `_file`; dropping the file releases the OS advisory lock. There is
+  no separate explicit release path to call or duplicate.
 
 ---
 

@@ -57,7 +57,6 @@ export default defineConfig({
             { slug: 'concepts/tasks', label: 'Tasks' },
             { slug: 'concepts/activities-jobs', label: 'Activities and Jobs' },
             { slug: 'concepts/policies', label: 'Policies' },
-            { slug: 'concepts/knowledge-graph', label: 'Knowledge Graph' },
             { slug: 'concepts/agents', label: 'Agents' },
           ],
         },

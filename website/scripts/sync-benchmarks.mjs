@@ -9,9 +9,7 @@ const targetRoot = path.join(
   'content',
   'docs',
   'benchmarks',
-  'graph',
 );
 
-// The graph benchmark corpus exercises a retired command surface. Keep the
-// source benchmark records in-repo without publishing them as current usage.
+// Benchmark reports are repository-internal evidence, not public product docs.
 await rm(targetRoot, { recursive: true, force: true });

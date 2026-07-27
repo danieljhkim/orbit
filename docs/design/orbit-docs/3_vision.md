@@ -92,9 +92,12 @@ The boundary (rule-with-failure-mode vs. explanatory-context) is the load-bearin
 
 [docs/design/orbit-search/](../orbit-search/) covers the embeddings infrastructure that orbit-search uses for tasks. [ORB-00168] extends that infrastructure to cover docs. The model and vector store stay the same; the index is a sibling of the task index.
 
-### 2.4 Knowledge graph
+### 2.4 Retired graph design
 
-[docs/design/_archive/knowledge-graph/](../_archive/knowledge-graph/) covers the code-symbol graph orbit-graph indexes. Orbit-docs is *not* a knowledge graph: it has no edges between docs except via `related_artifacts`. Cross-doc linking is plain Markdown relative paths. This is intentional — the knowledge graph is for code identifiers, not narrative content.
+[docs/design/_archive/knowledge-graph/](../_archive/knowledge-graph/) preserves
+the retired code-index history. Orbit-docs has no dependency on that removed
+subsystem: relationships between docs use `related_artifacts`, and cross-doc
+links are ordinary Markdown relative paths.
 
 ### 2.5 External: docs.rs, devdocs.io
 

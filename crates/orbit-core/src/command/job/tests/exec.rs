@@ -660,8 +660,8 @@ fn write_fake_codex(path: &Path) {
     write_fake_cli_response(
         path,
         r#"{"type":"thread.started","thread_id":"fake"}
-{"type":"item.started","item":{"id":"item_1","type":"command_execution","command":"orbit graph","aggregated_output":"","exit_code":null,"status":"in_progress"}}
-{"type":"item.completed","item":{"id":"item_1","type":"command_execution","command":"orbit graph","aggregated_output":"ok","exit_code":0,"status":"completed"}}
+{"type":"item.started","item":{"id":"item_1","type":"command_execution","command":"orbit --version","aggregated_output":"","exit_code":null,"status":"in_progress"}}
+{"type":"item.completed","item":{"id":"item_1","type":"command_execution","command":"orbit --version","aggregated_output":"ok","exit_code":0,"status":"completed"}}
 {"schemaVersion":1,"status":"success","result":{"ok":true},"error":null}
 {"type":"turn.completed","usage":{"input_tokens":100,"cached_input_tokens":25,"output_tokens":12}}
 "#,

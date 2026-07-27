@@ -43,17 +43,12 @@ tableOfContents: false
     <h3>Activities &amp; jobs</h3>
     <p>The atomic unit of work. Composable, replayable, scoped by filesystem policy.</p>
   </a>
-  <a class="orbit-card" data-tag="04" href="./concepts/knowledge-graph/">
-    <div class="orbit-card-icon" aria-hidden="true"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="5" cy="6" r="3"/><path d="M5 9v6"/><circle cx="5" cy="18" r="3"/><path d="M12 3v18"/><circle cx="19" cy="6" r="3"/></svg></div>
-    <h3>Knowledge graph</h3>
-    <p>The parked repository-structure model and its selector vocabulary.</p>
-  </a>
-  <a class="orbit-card" data-tag="05" href="./reference/cli/">
+  <a class="orbit-card" data-tag="04" href="./reference/cli/">
     <div class="orbit-card-icon" aria-hidden="true"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg></div>
     <h3>CLI reference</h3>
     <p>A compact map of common commands and workflows.</p>
   </a>
-  <a class="orbit-card" data-tag="06" href="./reference/scoping/">
+  <a class="orbit-card" data-tag="05" href="./reference/scoping/">
     <div class="orbit-card-icon" aria-hidden="true"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" y1="22" x2="4" y2="15"/></svg></div>
     <h3>Policies</h3>
     <p>Declarative scoping rules for what an agent can touch.</p>

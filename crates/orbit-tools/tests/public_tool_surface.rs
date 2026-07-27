@@ -19,8 +19,6 @@ const INACTIVE_TOOL_NAMES: &[&str] = &[
     "orbit.semantic.index",
     "orbit.semantic.install",
     "orbit.semantic.stats",
-    // ORB-00391: the orbit.graph.history compatibility stub was removed entirely
-    // (not merely deactivated), so it is no longer in the full registry surface.
     "orbit.learning.sync",
     "orbit.learning.list",
     "orbit.friction.stats",
@@ -113,8 +111,6 @@ fn workflow_critical_tools_remain_registered() {
         "github.pr.review",
         "github.pr.review.comment",
         "github.pr.view",
-        // ORB-00391 removed the v1 orbit.graph.* builtins; ORB-10325 confirms
-        // the v2 graph remains exclusively on the `orbit graph` CLI surface.
         "orbit.pipeline.invoke",
         "orbit.pipeline.wait",
         "orbit.search",

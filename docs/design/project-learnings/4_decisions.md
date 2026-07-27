@@ -117,7 +117,12 @@ The cross-workspace case ([3_vision.md §1.4](./3_vision.md)) is real but second
 | **Manual `priority`** | Author-supplied. Honest signal when used; degenerates to "everything is high priority" without curation discipline. |
 | **Semantic similarity** | Best signal. Requires embeddings. Cost = embed every learning + run cosine on every query. |
 
-Phase 1's binding constraint is: ship before orbit-search reaches Accepted ([T20260510-3]). That rules out semantic similarity for both scope and ranking. Symbol-aware scope is *technically* available — the knowledge graph already exists — but coupling the learning store to graph rebuilds adds dependency surface and mainly pays off when fused with semantic ranking. Doing one without the other yields a clunky middle state.
+Phase 1's binding constraint was to ship before orbit-search reached Accepted
+([T20260510-3]). That ruled out semantic similarity for both scope and ranking.
+At the time, symbol-aware scope was technically available through the code
+graph, but coupling the learning store to rebuilds added dependency surface and
+mainly paid off when fused with semantic ranking. ADR-0291 / ORB-10491 later
+removed that subsystem, so the reserved symbol field has no live resolver.
 
 **Decision.** Phase 1 supports two scope axes, evaluated as logical OR: path globs (matched via the `orbit-policy` glob engine) and tags (matched as exact strings). The schema reserves `scope.symbols` and `scope.semantic_seed` fields for phase 2 forward compatibility, but neither is read in phase 1. Initial ranking used `updated_at` desc with optional `priority`; [ADR-0157] adds decay-weighted upvotes ahead of those tie-breakers.
 

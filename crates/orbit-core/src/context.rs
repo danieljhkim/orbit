@@ -244,7 +244,6 @@ pub(crate) struct OrbitRuntimeSettings {
     persistence: PersistenceConfig,
     actor: ActorIdentity,
     scoring_enabled: bool,
-    graph_editing: bool,
     pr_config: PrConfig,
     /// Persisted default for the v2 `agent_loop` execution backend (§3.1).
     v2_backend: Option<String>,
@@ -268,7 +267,6 @@ impl OrbitRuntimeSettings {
         persistence: PersistenceConfig,
         actor: ActorIdentity,
         scoring_enabled: bool,
-        graph_editing: bool,
         pr_config: PrConfig,
         v2_backend: Option<String>,
         workflow_base_branch: String,
@@ -282,7 +280,6 @@ impl OrbitRuntimeSettings {
             persistence,
             actor,
             scoring_enabled,
-            graph_editing,
             pr_config,
             v2_backend,
             workflow_base_branch,
@@ -405,10 +402,6 @@ impl OrbitContext {
 
     pub(crate) fn scoring_enabled(&self) -> bool {
         self.runtime.scoring_enabled
-    }
-
-    pub(crate) fn graph_editing(&self) -> bool {
-        self.runtime.graph_editing
     }
 
     pub(crate) fn settings(&self) -> &OrbitRuntimeSettings {

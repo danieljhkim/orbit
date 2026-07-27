@@ -9,7 +9,7 @@ type: design
 summary: Target design for a local Orbit MCP broker with one SSH hub link, hub-only coordination, owner-bound knowledge, checkout-local indexes, role-aware search, capability sets, provenance, and Bridge parity retirement.
 tags: [mcp, remote-access, host-registry, bridge, ssh, routing]
 paths: ["crates/orbit-remote/**", "crates/orbit-mcp/**", "crates/orbit-core/**", "crates/orbit-tools/**", "crates/orbit-store/**", "crates/orbit-common/**"]
-related_features: [mcp-bridge, host-registry, mcp-session-context, remote-access, orbit-search, orbit-graph, project-learnings]
+related_features: [mcp-bridge, host-registry, mcp-session-context, remote-access, orbit-search, project-learnings]
 related_artifacts: [ORB-00424, ORB-10257, ORB-10262, ORB-10267, ORB-10268, ORB-10269, ORB-10271, ORB-10272, ORB-10276, ORB-10302, ORB-10319, ORB-10330, ORB-10332, ADR-0181, ADR-0199, ADR-0200, ADR-0201, ADR-0226, ADR-0227, ADR-0228, ADR-0229, ADR-0230, ADR-0231, ADR-0232, ADR-0235, ADR-0240]
 ---
 
@@ -68,7 +68,6 @@ orbit-cli / orbit-dashboard
               ├── orbit-store
               ├── orbit-tools
               ├── orbit-mcp
-              ├── orbit-graph
               └── orbit-common
 ```
 
@@ -76,8 +75,8 @@ Remote owns every registry-aware policy and SQL statement. Store owns generic
 SQLite connection/transaction lifecycle and the namespaced feature-migration
 ledger; MCP owns generic RMCP framing, structural schema resolution, and raw client
 transport; Tools owns generic builtin definitions; Core owns transport-independent
-runtime and `HubCoordinationExecutor`; Graph owns local-derived indexing and queries;
-Common owns shared DTOs. None of those neutral kernels imports Remote. `orbit-cli`
+runtime and `HubCoordinationExecutor`; Common owns shared DTOs. None of those
+neutral kernels imports Remote. `orbit-cli`
 keeps Clap, client setup/removal, and delegation.
 The same config-resolved `orbit.db` is reused, and Remote v1 adopts the existing
 registry tables in place rather than creating `remote.db` ([ORB-10319], [ADR-0240]).
@@ -776,7 +775,6 @@ Orbit:
 | Capability | Owner after migration |
 |------------|-----------------------|
 | Tasks, frictions, learnings, ADRs, Orbit search | Orbit MCP |
-| Code graph queries | None — the `orbit graph` CLI was removed in ORB-10357; inspect files directly |
 | Host/workspace/crew discovery and workflow submit/observe | Orbit MCP |
 | Sextant search and document retrieval | Bridge/Sextant |
 | Raw one-shot Worker invocation and non-pipeline run control | Bridge/Worker |

@@ -178,10 +178,6 @@ impl DeterministicActionHost for CommitTestHost {
         false
     }
 
-    fn graph_editing(&self) -> bool {
-        false
-    }
-
     fn scoreboard_dir(&self) -> &Path {
         &self.scoreboard_dir
     }

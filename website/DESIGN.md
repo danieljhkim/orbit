@@ -13,7 +13,7 @@ The Orbit website is a **documentation site**, not a marketing site. It exists t
 - Reference documentation (CLI commands, activity/job YAML schemas, policy formats)
 - How-to guides (task lifecycle, writing activities, scoping rules)
 - Architecture summaries grounded in the source tree
-- Conceptual explainers (activity/job model, knowledge graph, agent runtimes)
+- Conceptual explainers (activity/job model, task lifecycle, agent runtimes)
 
 **Primary audience:** engineers evaluating or actively using Orbit. They arrive via search, know roughly what they want, and leave as soon as they have it. The site optimizes for that path.
 
@@ -96,7 +96,10 @@ The homepage uses an in-content hero in place of Starlight's auto-rendered title
 - **Lede + install bar + primary/secondary CTAs.** Install bar carries a `$` prompt and a Copy action.
 - **Orbit diagram** — single rotating ring in the hero column. Respects `prefers-reduced-motion`.
 
-Below the hero: a **Start here** 6-card grid (each card carries a mono numbered tag `01`–`06` and a thin SVG glyph — the only place glyphs appear in content) and a **Why Orbit** 2-column value-prop strip whose columns align to the card grid above. Mono uppercase keys, plain prose values.
+Below the hero: a **Start here** 5-card grid (each card carries a mono numbered
+tag `01`–`05` and a thin SVG glyph — the only place glyphs appear in content)
+and a **Why Orbit** 2-column value-prop strip whose columns align to the card
+grid above. Mono uppercase keys, plain prose values.
 
 Other pages keep Starlight's default chrome (auto title, sidebar, TOC) unchanged.
 
@@ -108,7 +111,7 @@ Initial top-level sections (left nav, in order):
 
 1. **Introduction** — what Orbit is, who it's for, 2-minute read
 2. **Getting Started** — install, first task, activity catalog
-3. **Concepts** — tasks, activities/jobs, policies, knowledge graph, agents
+3. **Concepts** — tasks, activities/jobs, policies, agents
 4. **How-to Guides** — task-oriented recipes
 5. **Reference** — CLI, YAML schemas, config, scoping rules
 6. **Architecture** — current crate boundaries and dependency direction

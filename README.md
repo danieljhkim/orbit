@@ -297,7 +297,8 @@ Couple things to note:
 Pre-1.0 and under active development. Breaking changes ride a minor bump (`0.9.x → 0.10.0`); see [CHANGELOG.md](CHANGELOG.md) and [RELEASING.md](RELEASING.md).
 
 - Core local execution, workflows, MCP, tasks, reviews, ADRs, frictions, and audit infrastructure are usable today.
-- **Parked:** the parsed code-graph index. It exists in-tree as a dependent-free crate but has no CLI, MCP, or tool-registry surface and is not reachable by any command — agents use `grep`/`rg` and direct file reads instead. Historical benchmarks in [`benchmarks/graph/`](benchmarks/graph/).
+- The former parsed code-graph subsystem was removed under ADR-0291. Agents inspect
+  source with `grep`/`rg` and direct file reads.
 
 ---
 

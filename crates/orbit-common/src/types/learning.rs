@@ -109,9 +109,8 @@ pub struct LearningEvidence {
 /// Scope under which a learning applies.
 ///
 /// Phase 1 evaluates `paths` (glob match) OR `tags` (exact match). The
-/// remaining two fields are reserved for phase 2 and persist verbatim:
-/// - `symbols` — symbol-aware scope (`module::ident` IDs from the
-///   knowledge graph).
+/// remaining two fields are reserved for future use and persist verbatim:
+/// - `symbols` — symbol-aware scope identifiers for a future resolver.
 /// - `semantic_seed` — a representative passage used to compute embedding
 ///   similarity at query time.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]

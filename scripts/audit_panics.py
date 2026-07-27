@@ -48,7 +48,6 @@ ALL_CRATES = [
     "orbit-dashboard",
     "orbit-engine",
     "orbit-exec",
-    "orbit-graph",
     "orbit-mcp",
     "orbit-policy",
     "orbit-remote",

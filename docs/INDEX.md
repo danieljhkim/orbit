@@ -59,7 +59,6 @@ a conservative title/status fallback.
 | [Orbit Core](./design/orbit-core/1_overview.md) | Crate boundary and public-surface contract of orbit-core after the ORB-10016 orbit-cmd extraction. | Accepted | claude |
 | [Orbit Docs](./design/orbit-docs/1_overview.md) | Orbit Docs — what the human-authored docs corpus is, why it exists alongside learnings and ADRs, and how agents retrieve from it. | Draft | claude |
 | [Orbit Docs Plugin](./design/orbit-docs-plugin/1_scope.md) | Scope: extract docs + search into a plugin-style feature crate | Draft | — |
-| [Orbit Graph](./design/orbit-graph/1_overview.md) | Orbit Graph is the code-intelligence layer for Orbit: a per-worktree SQLite-backed code index that agents can query for symbols, references, callees, impact, and command traces. | Draft | claude |
 | [Semantic Search](./design/orbit-search/1_overview.md) | Semantic search is a local, offline-first retrieval layer over Orbit's task artifacts (phase 1) and, eventually, the knowledge-graph corpus (phase 2). | Draft | claude |
 | [Policy & Sandboxing](./design/policy-sandbox/1_overview.md) | Policy & Sandboxing is Orbit's safety surface for filesystem access and process execution. | Draft | claude |
 | [Project Learnings](./design/project-learnings/1_overview.md) | Project learnings is a system for preserving and surfacing non-obvious project knowledge — gotchas, root causes from incidents, validated approaches, hard-won workflow insights — so agents can retrieve and apply them when they are relevant. | Draft | claude |

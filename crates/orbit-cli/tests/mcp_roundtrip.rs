@@ -280,18 +280,6 @@ impl McpClient {
             .unwrap_or_else(|| panic!("tools/call `{name}` returned no result: {response}"))
     }
 
-    fn call_tool_with_meta_err(&mut self, name: &str, arguments: Value, meta: Value) -> Value {
-        let result = self.call_tool_with_meta(name, arguments, meta);
-        assert_eq!(
-            result["isError"], true,
-            "`{name}` unexpectedly succeeded: {result}"
-        );
-        result
-            .get("structuredContent")
-            .cloned()
-            .unwrap_or_else(|| panic!("`{name}` returned no structuredContent: {result}"))
-    }
-
     /// `tools/call` that must fail as a structured tool error; returns it.
     fn call_tool_err(&mut self, name: &str, arguments: Value) -> Value {
         let result = self.call_tool(name, arguments);
@@ -411,7 +399,6 @@ fn mcp_serve_lists_canonical_agent_surface_outside_any_checkout() {
         .filter_map(|tool| tool["name"].as_str())
         .collect::<Vec<_>>();
     assert!(names.contains(&"orbit_task_show"));
-    assert!(!names.iter().any(|name| name.starts_with("orbit_graph_")));
 
     let missing = client.call_tool_err("orbit_task_show", json!({ "id": "ORB-00001" }));
     assert!(missing["message"].as_str().is_some_and(|message| {
@@ -474,7 +461,6 @@ fn hub_mcp_serve_is_checkoutless_frame_pure_and_audits_trusted_identity() {
         names.contains(&"orbit_task_add"),
         "missing task surface: {names:?}"
     );
-    assert!(!names.iter().any(|name| name.starts_with("orbit_graph_")));
     assert!(!names.contains(&"orbit_friction_update"));
 
     let created = client.call_tool_with_meta_ok(
@@ -501,30 +487,6 @@ fn hub_mcp_serve_is_checkoutless_frame_pure_and_audits_trusted_identity() {
         }),
     );
     assert_eq!(created["title"], "Checkoutless hub round trip");
-    let graph_denied = client.call_tool_with_meta_err(
-        "orbit_graph_search",
-        json!({"workspace": "ws_mcp-roundtrip", "query": "must-not-run"}),
-        json!({
-            "orbit": {
-                "remote_session_context": {
-                    "workspace": "ws_mcp-roundtrip",
-                    "workspace_id": "ws_mcp-roundtrip",
-                    "caller_machine_id": "hm_spoke",
-                    "caller_host_id": "spoke",
-                    "transport": "ssh-mcp",
-                    "effective_capabilities": ["agent"],
-                    "origin_session_id": "session-spoke",
-                    "mcp_call_id": "mcall-remote-graph-denied"
-                }
-            }
-        }),
-    );
-    assert!(
-        graph_denied["message"]
-            .as_str()
-            .is_some_and(|message| message.contains("not found")),
-        "removed graph tool must be reported as unknown: {graph_denied}"
-    );
     let wire_payload = serde_json::to_string(&(listed, created)).expect("serialize wire payload");
     assert!(!wire_payload.contains(workspace.work.to_string_lossy().as_ref()));
     assert!(!wire_payload.contains(workspace.home.to_string_lossy().as_ref()));
@@ -558,18 +520,6 @@ fn hub_mcp_serve_is_checkoutless_frame_pure_and_audits_trusted_identity() {
     assert_eq!(audit.4.as_deref(), Some("ssh-mcp"));
     assert_eq!(audit.5.as_deref(), Some("[\"agent\"]"));
     assert_eq!(audit.6.as_deref(), Some("mcall-remote-roundtrip"));
-
-    let graph_audit_count: i64 = connection
-        .query_row(
-            "SELECT COUNT(*) FROM audit_events WHERE tool_name = 'orbit.graph.search'",
-            [],
-            |row| row.get(0),
-        )
-        .expect("count removed graph audit rows");
-    assert_eq!(
-        graph_audit_count, 0,
-        "an unrecognized graph name must not enter registered-tool audit dispatch"
-    );
 }
 
 #[test]
@@ -746,7 +696,7 @@ fn mcp_serve_error_paths_return_tool_errors_and_keep_serving() {
 }
 
 #[test]
-fn mcp_registered_calls_are_audited_but_removed_graph_names_are_not_dispatched() {
+fn mcp_registered_calls_are_audited_but_unknown_names_are_not_dispatched() {
     let workspace = McpWorkspace::init();
     let mut client = workspace.serve();
 
@@ -759,10 +709,7 @@ fn mcp_registered_calls_are_audited_but_removed_graph_names_are_not_dispatched()
         json!({ "description": "missing title", "model": "codex" }),
     );
     assert_eq!(error["code"], "invalid_input");
-    let removed = client.call_tool_err(
-        "orbit_graph_search",
-        json!({ "query": "must-not-run", "model": "codex" }),
-    );
+    let removed = client.call_tool_err("orbit_removed_tool", json!({ "model": "codex" }));
     assert_eq!(removed["code"], "tool_not_found");
     drop(client);
 
@@ -795,11 +742,12 @@ fn mcp_registered_calls_are_audited_but_removed_graph_names_are_not_dispatched()
     }
 
     let output = McpWorkspace::orbit_command(&workspace.work, &workspace.home)
-        .args(["audit", "list", "--tool", "orbit.graph.search", "--json"])
+        .args(["audit", "list", "--tool", "orbit.removed.tool", "--json"])
         .output()
-        .expect("query removed graph audit rows");
+        .expect("query unknown-tool audit rows");
     assert!(output.status.success());
-    let rows: Value = serde_json::from_slice(&output.stdout).expect("parse graph audit rows");
+    let rows: Value =
+        serde_json::from_slice(&output.stdout).expect("parse unknown-tool audit rows");
     assert_eq!(rows, json!([]));
 }
 

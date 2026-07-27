@@ -15,7 +15,11 @@ tmpdir="$(mktemp -d)"
 trap 'rm -rf "$tmpdir"' EXIT
 work="$tmpdir/workspace"
 mkdir -p "$work"
-rsync -a "$fixture"/ "$work"/
+rsync -a \
+  --exclude .git \
+  --exclude target \
+  --exclude node_modules \
+  "$fixture"/ "$work"/
 
 run_tool() {
   local name="$1"
@@ -25,19 +29,13 @@ run_tool() {
 
 cd "$work"
 
-run_tool orbit.graph.search '{"query":"main","limit":10}' > "$tmpdir/search.json"
-run_tool orbit.graph.search '{"query":"main","limit":10,"format":"selectors"}' > "$tmpdir/search_selectors.json"
-run_tool orbit.graph.overview '{"format":"summary"}' > "$tmpdir/overview.json"
-run_tool orbit.graph.show '{"selector":"dir:.","depth":1,"siblings":2,"children":5}' > "$tmpdir/show.json"
-run_tool orbit.graph.refs '{"selector":"symbol:src/main.rs#main:function","include":["all"],"include_simple_name":true}' > "$tmpdir/refs.json" || true
-run_tool orbit.graph.callers '{"selector":"symbol:src/main.rs#main:function","depth":2}' > "$tmpdir/callers.json" || true
-run_tool orbit.graph.implementors '{"trait_selector":"symbol:src/main.rs#Runnable:trait"}' > "$tmpdir/implementors.json" || true
-run_tool orbit.graph.deps '{}' > "$tmpdir/deps.json" || true
-run_tool orbit.graph.pack '{"selectors":["dir:."],"summary":true}' > "$tmpdir/pack.json"
-run_tool orbit.graph.write '{"selector":"file:src/equivalence_write.rs","new_source":"fn rewritten_equivalence_fixture() {}\n","reason":"equivalence"}' > "$tmpdir/write.json" || true
-run_tool orbit.graph.add '{"selector":"symbol:src/equivalence_write.rs#added_equivalence_fixture:function","source":"fn added_equivalence_fixture() {}\n","reason":"equivalence"}' > "$tmpdir/add.json" || true
-run_tool orbit.graph.move '{"selector":"symbol:src/equivalence_write.rs#added_equivalence_fixture:function","target_file":"src/equivalence_moved.rs","reason":"equivalence"}' > "$tmpdir/move.json" || true
-run_tool orbit.graph.delete '{"selector":"symbol:src/equivalence_moved.rs#added_equivalence_fixture:function","reason":"equivalence"}' > "$tmpdir/delete.json" || true
+run_tool orbit.search '{"query":"main","kind":"all","limit":10,"model":"codex"}' > "$tmpdir/search_all.json"
+run_tool orbit.search '{"query":"main","kind":"task","limit":10,"model":"codex"}' > "$tmpdir/search_tasks.json"
+run_tool orbit.search '{"query":"main","kind":"doc","limit":10,"model":"codex"}' > "$tmpdir/search_docs.json"
+run_tool orbit.task.list '{"limit":10,"model":"codex"}' > "$tmpdir/tasks.json"
+run_tool orbit.docs.list '{"model":"codex"}' > "$tmpdir/docs.json"
+run_tool orbit.learning.list '{"model":"codex"}' > "$tmpdir/learnings.json"
+run_tool orbit.adr.list '{"model":"codex"}' > "$tmpdir/adrs.json"
 
 if [[ "$mode" == "capture" ]]; then
   cp "$tmpdir"/*.json "$baseline"/

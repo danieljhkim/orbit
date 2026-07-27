@@ -2,7 +2,7 @@ use std::collections::BTreeSet;
 use std::path::Path;
 use std::time::Instant;
 
-use orbit_common::types::{OrbitError, Task};
+use orbit_common::types::OrbitError;
 use orbit_common::utility::selector::anchor_path;
 use serde::{Deserialize, Serialize};
 
@@ -55,7 +55,6 @@ impl OrbitRuntime {
             &mut findings,
         );
         lint_acceptance_criteria(&task.acceptance_criteria, &mut findings);
-        lint_identity_cleanup(&task, &mut findings);
 
         Ok(TaskLintReport {
             task_id: task.id,
@@ -216,38 +215,6 @@ fn context_entry_covers_path(entry: &str, mentioned_path: &str) -> bool {
         || mentioned_anchor
             .strip_prefix(format!("{entry_anchor}/").as_str())
             .is_some()
-}
-
-fn lint_identity_cleanup(task: &Task, findings: &mut Vec<TaskLintFinding>) {
-    const STALE_IDENTITIES: &[(&str, &str)] = &[("orbit-map", "crates/orbit-graph")];
-
-    for (needle, replacement) in STALE_IDENTITIES {
-        let mut reported_locations = BTreeSet::new();
-        if task.description.contains(needle) {
-            reported_locations.insert("description".to_string());
-        }
-        if task.plan.contains(needle) {
-            reported_locations.insert("plan".to_string());
-        }
-        for (index, criterion) in task.acceptance_criteria.iter().enumerate() {
-            if criterion.contains(needle) {
-                reported_locations.insert(format!("acceptance_criteria[{index}]"));
-            }
-        }
-
-        for location in reported_locations {
-            findings.push(TaskLintFinding {
-                severity: TaskLintSeverity::Warning,
-                check: "identity_cleanup".to_string(),
-                message: format!(
-                    "`{needle}` appears in {location}, but that repository identity is stale in this worktree"
-                ),
-                fix_it: format!(
-                    "Replace `{needle}` with the current crate or path name, such as `{replacement}`."
-                ),
-            });
-        }
-    }
 }
 
 #[cfg(test)]

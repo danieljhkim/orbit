@@ -49,7 +49,9 @@ When auditability conflicts with performance, ergonomics, or feature surface, au
 - **Audit trail for everything that touches code.** See above.
 - **Intent attribution at the codebase level.** `task_id` in commit messages, queryable, durable across rewrites.
 - **Reproducibility where possible, recorded non-determinism where not.**
-- **Knowledge-graph–aware tooling.** Agents query a parsed, symbol-level graph. The graph is what makes audit cheap to populate; benchmark validation in `benchmarks/graph/`.
+- **Source-native inspection.** Agents use direct file reads and ubiquitous
+  search tools such as `rg`, keeping repository inspection transparent and
+  independent of a derived index.
 - **Sandboxed-by-default execution** on supported platforms. Disciplines that can be machine-enforced should be.
 - **Cost-visible.** Operator knows what each run costs in tokens and wall-clock.
 - **Git- and GitHub-native.** No custom VCS abstractions.
