@@ -97,6 +97,7 @@ pub enum OrbitBuiltinAction {
     /// action variant carries the verb instead of one variant per verb.
     Friction(FrictionVerb),
     LearningAdd,
+    LearningArchive,
     LearningList,
     LearningPrune,
     LearningShow,

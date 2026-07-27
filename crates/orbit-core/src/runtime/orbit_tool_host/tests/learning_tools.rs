@@ -84,6 +84,7 @@ fn registry_exposes_learning_tools_with_documented_schema_fields() {
         .collect();
     for expected in [
         "orbit.learning.add",
+        "orbit.learning.archive",
         "orbit.learning.list",
         "orbit.learning.prune",
         "orbit.learning.sync",
@@ -220,6 +221,69 @@ fn supersede_excludes_from_default_list_but_surfaces_under_status_superseded() {
         .expect("list");
     let ids = ids_from_array(&superseded);
     assert!(ids.contains(&old.id));
+}
+
+// --- ORB-10469: named single-learning archive (retire without a replacement)
+
+#[test]
+fn archive_retires_a_single_active_learning_without_a_replacement() {
+    let (_guard, runtime, _repo_root) = test_runtime();
+    let _env = human_context_env();
+    let learning = create_minimal(&runtime, "obsolete rule", &[], &[]);
+
+    let response =
+        super::super::learning_tools::archive(&runtime, json!({"id": learning.id}), None, None)
+            .expect("archive");
+    assert_eq!(response["id"], learning.id);
+    assert_eq!(response["status"], "superseded");
+    assert!(response["superseded_by"].is_null());
+
+    let active = super::super::learning_tools::list(&runtime, json!({"status": "active"}))
+        .expect("active list");
+    assert!(!ids_from_array(&active).contains(&learning.id));
+}
+
+#[test]
+fn archive_is_idempotent_on_an_already_archived_learning() {
+    let (_guard, runtime, _repo_root) = test_runtime();
+    let _env = human_context_env();
+    let learning = create_minimal(&runtime, "obsolete rule", &[], &[]);
+
+    super::super::learning_tools::archive(&runtime, json!({"id": learning.id}), None, None)
+        .expect("first archive");
+    let second =
+        super::super::learning_tools::archive(&runtime, json!({"id": learning.id}), None, None)
+            .expect("second archive is a no-op success");
+    assert_eq!(second["status"], "superseded");
+}
+
+#[test]
+fn archive_is_a_no_op_on_a_record_already_superseded_with_a_replacement() {
+    let (_guard, runtime, _repo_root) = test_runtime();
+    let _env = human_context_env();
+    let old = create_minimal(&runtime, "old", &[], &[]);
+    let new = create_minimal(&runtime, "new", &[], &[]);
+    runtime
+        .supersede_learning(&old.id, &new.id)
+        .expect("supersede");
+
+    let response =
+        super::super::learning_tools::archive(&runtime, json!({"id": old.id}), None, None)
+            .expect("archive on already-superseded record is a no-op");
+    assert_eq!(response["status"], "superseded");
+    // The existing replacement pointer is preserved, not clobbered to null.
+    assert_eq!(response["superseded_by"], new.id);
+}
+
+#[test]
+fn archive_rejects_a_missing_id() {
+    let (_guard, runtime, _repo_root) = test_runtime();
+    let _env = human_context_env();
+
+    let err =
+        super::super::learning_tools::archive(&runtime, json!({"id": "L-9999999"}), None, None)
+            .expect_err("missing id is rejected");
+    assert!(matches!(err, OrbitError::NotFound { .. }));
 }
 
 // --- AC #11: sync rebuilds the index from YAML -----------------------
@@ -569,6 +633,10 @@ fn learning_write_tools_refuse_executor_context_and_redirect_to_friction_add() {
                 None,
                 None,
             ),
+        ),
+        (
+            "archive",
+            super::super::learning_tools::archive(&runtime, json!({ "id": old.id }), None, None),
         ),
     ] {
         let message = policy_denied_message(result);

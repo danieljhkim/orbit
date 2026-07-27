@@ -1,4 +1,5 @@
 mod add;
+mod archive;
 mod command;
 mod list;
 mod migrate_layout;

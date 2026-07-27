@@ -181,6 +181,7 @@ orbit learning list [--status active|superseded] [--tag TAG] [--path GLOB]  # --
 orbit learning show <id>                  # loads the full body; emits a learning_shown usage signal
 orbit learning update <id> [--summary ...] [--body-file ...] [--scope ...]
 orbit learning supersede <id> --with <new-id>
+orbit learning archive <id>               # retire a single learning without a replacement [ORB-10469]
 orbit learning upvote --id <id> --model <agent-family> --task <task-id>
 orbit learning sync                       # reconcile SQLite index from YAML
 orbit learning prune [--stale-only]       # report or delete stale learnings
@@ -193,7 +194,7 @@ orbit search path <path> --kind learning [--tag T] [--all] [--status learning:ac
 
 `add`, `update`, and `supersede` write the YAML and update the index atomically. `upvote` appends to the learning's `votes.jsonl` sidecar and is idempotent for `(learning_id, voter_model, task_id)`. `orbit learning list --path/--tag` and `orbit search --kind learning` are the indexed read paths used for pull discovery.
 
-**Authoring is role-gated ([ADR-0250], [ORB-10364]).** `add`, `update`, and `supersede` — and only those three — refuse callers running in an agent-executor context, returning a `policy denied` error that names `orbit friction add` as the correct channel and echoes the attempted content so the observation is not lost. The role comes from the `ORBIT_AGENT_NAME` / `ORBIT_AGENT_MODEL` identity pair the audit middleware already reads: present ⇒ agent, absent ⇒ human. An orchestrator that dispatches curation work *as* an agent opts in deliberately with `ORBIT_LEARNING_AUTHOR=1`. Every read surface, plus `sync`, `prune`, and `stats`, is unaffected in every context.
+**Authoring is role-gated ([ADR-0250], [ORB-10364]; extended to `archive` by [ORB-10469]).** `add`, `update`, `supersede`, and `archive` — and only those four — refuse callers running in an agent-executor context, returning a `policy denied` error that names `orbit friction add` as the correct channel and echoes the attempted content so the observation is not lost. The role comes from the `ORBIT_AGENT_NAME` / `ORBIT_AGENT_MODEL` identity pair the audit middleware already reads: present ⇒ agent, absent ⇒ human. An orchestrator that dispatches curation work *as* an agent opts in deliberately with `ORBIT_LEARNING_AUTHOR=1`. Every read surface, plus `sync`, `prune`, and `stats`, is unaffected in every context.
 
 ### 5.2 MCP tools
 
@@ -205,11 +206,12 @@ orbit search path <path> --kind learning [--tag T] [--all] [--status learning:ac
 | `orbit.learning.show` | `id` | full record plus vote summary |
 | `orbit.learning.update` | `id`, fields | updated record |
 | `orbit.learning.supersede` | `id`, `with` | both records updated |
+| `orbit.learning.archive` | `id` | retired record; idempotent on an already-superseded `id` ([ORB-10469]) |
 | `orbit.learning.upvote` | `id`, `model`, `task?` | vote summary |
 
 `orbit.learning.list` and `orbit.search` are the primary discovery paths; both must stay sub-10ms at expected scale. The standalone per-domain learning-search MCP tool (phase-1 surface) was retired by [ORB-00202] in favor of `orbit.search` with `kind: "learning"`.
 
-`orbit.learning.add`, `orbit.learning.update`, and `orbit.learning.supersede` carry the same [ADR-0250] caller-role gate as their CLI counterparts — the check lives on the shared `OrbitRuntime::author_learning*` surface, so the two entry points cannot drift. A refused tool call returns `{"code": "policy_denied", "error": ...}` and writes nothing.
+`orbit.learning.add`, `orbit.learning.update`, `orbit.learning.supersede`, and `orbit.learning.archive` carry the same [ADR-0250] caller-role gate as their CLI counterparts — the check lives on the shared `OrbitRuntime::author_learning*` surface, so the two entry points cannot drift. A refused tool call returns `{"code": "policy_denied", "error": ...}` and writes nothing.
 
 ### 5.3 Result shape
 
@@ -313,6 +315,16 @@ orbit learning supersede L-0001 --with L-0002
 
 Both records update atomically. The old record's `status` flips to `superseded` and gains a `superseded_by` field; the new record's `supersedes` field points back. Superseded records are excluded from default discovery but retained on disk for history.
 
+### 7.2.1 Archival (retirement without a replacement) [ORB-10469]
+
+Supersession requires a replacement ID; a verified-obsolete learning with no successor (e.g. its subject feature was deleted wholesale, F2026-07-100) previously had no sanctioned single-record retirement path — only the indiscriminate `prune --delete` sweep reached the underlying `archive_learning` store write, and it archives every stale record, not one named ID.
+
+```
+orbit learning archive <id>
+```
+
+Flips `status` to `superseded` with `superseded_by: null` — the same terminal state `prune --delete` writes, reached by name instead of by staleness heuristic. Archiving an already-superseded record is an idempotent no-op: it leaves `superseded_by` exactly as it was (whether that is `null` from a prior archive, or a real replacement ID from a prior `supersede`) rather than clobbering it. `archive` carries the same [ADR-0250] caller-role gate as `add` / `update` / `supersede`, via `OrbitRuntime::author_learning_archive`.
+
 ### 7.3 Staleness detection
 
 A learning is **stale** if any of these are true:
@@ -334,7 +346,7 @@ The sanctioned sequence is:
 3. Run `orbit learning sync --json` to rebuild the workspace's `learnings_index` projection from the remaining artifacts. This removes the deleted record's index row; no checked-in manifest points to learning artifacts. The global allocator keeps its reservation so a deleted ID is never reused.
 4. Re-run the ID grep and confirm the directory and index-backed listing no longer surface the record.
 
-This is intentionally not an `orbit learning archive` command: archival retains a superseded artifact, while approved retirement removes the artifact after its references have been made self-contained.
+This is distinct from `orbit learning archive` ([§7.2.1](#721-archival-retirement-without-a-replacement-orb-10469)): archival retains a superseded artifact, while approved physical retirement removes the artifact after its references have been made self-contained.
 
 ### 7.4 Conflict resolution
 

@@ -230,15 +230,15 @@ fn policy_for_action(action: OrbitBuiltinAction) -> Option<ActionPolicy> {
             path_arrays: &[],
             nested_arrays: &[],
         }),
-        OrbitBuiltinAction::AdrSupersede | OrbitBuiltinAction::LearningSupersede => {
-            Some(ActionPolicy {
-                free_text_fields: &[],
-                free_text_arrays: &[],
-                path_fields: &[],
-                path_arrays: &[],
-                nested_arrays: &[],
-            })
-        }
+        OrbitBuiltinAction::AdrSupersede
+        | OrbitBuiltinAction::LearningSupersede
+        | OrbitBuiltinAction::LearningArchive => Some(ActionPolicy {
+            free_text_fields: &[],
+            free_text_arrays: &[],
+            path_fields: &[],
+            path_arrays: &[],
+            nested_arrays: &[],
+        }),
         _ => None,
     }
 }
@@ -252,6 +252,7 @@ fn is_covered_mutating_action(action: OrbitBuiltinAction) -> bool {
             | OrbitBuiltinAction::LearningAdd
             | OrbitBuiltinAction::LearningUpdate
             | OrbitBuiltinAction::LearningSupersede
+            | OrbitBuiltinAction::LearningArchive
             | OrbitBuiltinAction::TaskAdd
             | OrbitBuiltinAction::TaskUpdate
             | OrbitBuiltinAction::TaskReject
@@ -488,7 +489,8 @@ fn artifact_target(
         }),
         OrbitBuiltinAction::LearningAdd
         | OrbitBuiltinAction::LearningUpdate
-        | OrbitBuiltinAction::LearningSupersede => Ok(ArtifactTarget {
+        | OrbitBuiltinAction::LearningSupersede
+        | OrbitBuiltinAction::LearningArchive => Ok(ArtifactTarget {
             artifact_type: "learning",
             artifact_id: learning_response_id(action, response)?,
             task_id: None,
@@ -543,6 +545,7 @@ fn tool_name(action: OrbitBuiltinAction) -> &'static str {
         OrbitBuiltinAction::LearningAdd => "orbit.learning.add",
         OrbitBuiltinAction::LearningUpdate => "orbit.learning.update",
         OrbitBuiltinAction::LearningSupersede => "orbit.learning.supersede",
+        OrbitBuiltinAction::LearningArchive => "orbit.learning.archive",
         OrbitBuiltinAction::TaskAdd => "orbit.task.add",
         OrbitBuiltinAction::TaskUpdate => "orbit.task.update",
         OrbitBuiltinAction::TaskReject => "orbit.task.reject",

@@ -16,12 +16,13 @@
 //! [`ActorIdentity::from_env`]. There is deliberately no second identity
 //! mechanism to keep in sync.
 //!
-//! **What is gated.** Only the three authoring surfaces named by the policy:
-//! `learning add`, `learning update`, and `learning supersede`, in both their
-//! CLI and `orbit.learning.*` tool forms. Reads (`show`, `list`, `search`,
-//! `stats`) are untouched in every context, as are `sync`, `prune`, and the
-//! store-level writers used by the dashboard's human-driven API, the
-//! multi-host owner-finalize path, and test fixtures.
+//! **What is gated.** The authoring surfaces named by the policy: `learning
+//! add`, `learning update`, `learning supersede`, and `learning archive`
+//! [ORB-10469], in both their CLI and `orbit.learning.*` tool forms. Reads
+//! (`show`, `list`, `search`, `stats`) are untouched in every context, as are
+//! `sync`, `prune`'s own bulk sweep, and the store-level writers used by the
+//! dashboard's human-driven API, the multi-host owner-finalize path, and test
+//! fixtures.
 
 use orbit_common::types::OrbitError;
 
@@ -69,6 +70,10 @@ pub enum LearningWriteAttempt<'a> {
         id: &'a str,
         with: &'a str,
     },
+    /// [ORB-10469] Retire `id` without a replacement.
+    Archive {
+        id: &'a str,
+    },
 }
 
 impl LearningWriteAttempt<'_> {
@@ -77,6 +82,7 @@ impl LearningWriteAttempt<'_> {
             Self::Add { .. } => "learning add",
             Self::Update { .. } => "learning update",
             Self::Supersede { .. } => "learning supersede",
+            Self::Archive { .. } => "learning archive",
         }
     }
 
@@ -97,6 +103,7 @@ impl LearningWriteAttempt<'_> {
                 echo
             }
             Self::Supersede { id, with } => format!("id: {id}\nwith: {with}"),
+            Self::Archive { id } => format!("id: {id}"),
         }
     }
 }

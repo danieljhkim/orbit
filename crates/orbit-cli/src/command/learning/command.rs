@@ -4,6 +4,7 @@ use orbit_core::{OrbitError, OrbitRuntime};
 use crate::command::Execute;
 
 use super::add::LearningAddArgs;
+use super::archive::LearningArchiveArgs;
 use super::list::LearningListArgs;
 use super::migrate_layout::LearningMigrateLayoutArgs;
 use super::prune::LearningPruneArgs;
@@ -40,6 +41,8 @@ pub enum LearningSubcommand {
     Update(LearningUpdateArgs),
     /// Mark a learning as superseded by another
     Supersede(LearningSupersedeArgs),
+    /// Retire a single learning without a replacement
+    Archive(LearningArchiveArgs),
     /// Reconcile the SQLite envelope index from YAML
     Sync(LearningSyncArgs),
     /// Migrate legacy flat learning YAML files to per-entity directories
@@ -57,6 +60,7 @@ impl Execute for LearningSubcommand {
             LearningSubcommand::Stats(args) => args.execute(runtime),
             LearningSubcommand::Update(args) => args.execute(runtime),
             LearningSubcommand::Supersede(args) => args.execute(runtime),
+            LearningSubcommand::Archive(args) => args.execute(runtime),
             LearningSubcommand::Sync(args) => args.execute(runtime),
             LearningSubcommand::MigrateLayout(args) => args.execute(runtime),
             LearningSubcommand::Prune(args) => args.execute(runtime),

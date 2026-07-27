@@ -656,6 +656,41 @@ fn mcp_serve_round_trips_records_against_a_temp_workspace() {
         "lexical search must find the learning: {hits:?}"
     );
 
+    // ORB-10469: named single-learning archive (retire without a replacement).
+    // Success: archives an active learning.
+    let archived = client.call_tool_ok("orbit_learning_archive", json!({ "id": learning_id }));
+    assert_eq!(archived["status"], "superseded");
+    assert!(archived["superseded_by"].is_null());
+
+    // Idempotence: archiving an already-superseded record is a no-op success.
+    let archived_again =
+        client.call_tool_ok("orbit_learning_archive", json!({ "id": learning_id }));
+    assert_eq!(archived_again["status"], "superseded");
+
+    // Missing id: fails rather than silently succeeding.
+    client.call_tool_err("orbit_learning_archive", json!({ "id": "L-9999999" }));
+
+    // Already-superseded-with-a-replacement record: archive is a no-op that
+    // preserves the existing `superseded_by`, it does not clobber it to null.
+    let other = client.call_tool_ok(
+        "orbit_learning_add",
+        json!({ "summary": "mcp-roundtrip-archive-other literal marker" }),
+    );
+    let other_id = other["id"].as_str().expect("id").to_string();
+    let replacement = client.call_tool_ok(
+        "orbit_learning_add",
+        json!({ "summary": "mcp-roundtrip-archive-replacement literal marker" }),
+    );
+    let replacement_id = replacement["id"].as_str().expect("id").to_string();
+    client.call_tool_ok(
+        "orbit_learning_supersede",
+        json!({ "id": other_id, "with": replacement_id.clone() }),
+    );
+    let archived_after_supersede =
+        client.call_tool_ok("orbit_learning_archive", json!({ "id": other_id }));
+    assert_eq!(archived_after_supersede["status"], "superseded");
+    assert_eq!(archived_after_supersede["superseded_by"], replacement_id);
+
     // ADR create → show.
     let adr = client.call_tool_ok(
         "orbit_adr_add",

@@ -74,6 +74,7 @@ tools:
   orbit.learning.show: { placement: owner, scope: workspace-required, allowed_capabilities: [agent, operator] }
   orbit.learning.update: { placement: owner, scope: workspace-required, allowed_capabilities: [agent, operator] }
   orbit.learning.supersede: { placement: owner, scope: workspace-required, allowed_capabilities: [agent, operator] }
+  orbit.learning.archive: { placement: owner, scope: workspace-required, allowed_capabilities: [agent, operator] }
   orbit.auto_task.add: { placement: owner, scope: workspace-required, allowed_capabilities: [agent, operator] }
   orbit.auto_task.show: { placement: owner, scope: workspace-required, allowed_capabilities: [agent, operator] }
   orbit.auto_task.update: { placement: owner, scope: workspace-required, allowed_capabilities: [agent, operator] }

@@ -92,6 +92,21 @@ impl OrbitRuntime {
         self.supersede_learning(old_id, new_id)
     }
 
+    /// [ORB-10469] Role-gated `learning archive` authoring surface: retires
+    /// `id` without a replacement. See [`Self::author_learning`] for the gate
+    /// and [`Self::archive_learning`] for the ungated store-level write this
+    /// wraps.
+    pub fn author_learning_archive(&self, id: &str) -> Result<Learning, OrbitError> {
+        ensure_learning_write_allowed(LearningWriteAttempt::Archive { id })?;
+        if !self.archive_learning(id)? {
+            return Err(OrbitError::not_found(
+                NotFoundKind::Learning,
+                id.to_string(),
+            ));
+        }
+        self.get_learning(id)
+    }
+
     /// Ungated store-level create. Authoring surfaces must go through
     /// [`Self::author_learning`] so the [ORB-10364] caller-role gate applies.
     pub fn create_learning(&self, params: LearningCreateParams) -> Result<Learning, OrbitError> {
@@ -298,6 +313,10 @@ impl OrbitRuntime {
         self.stores().learnings().supersede_learning(old_id, new_id)
     }
 
+    /// Ungated store-level archive. The `prune --delete` sweep calls this
+    /// directly (bulk staleness archival is not an authoring decision).
+    /// Authoring surfaces must go through [`Self::author_learning_archive`]
+    /// so the [ORB-10364] gate applies.
     pub fn archive_learning(&self, id: &str) -> Result<bool, OrbitError> {
         self.stores().learnings().archive_learning(id)
     }

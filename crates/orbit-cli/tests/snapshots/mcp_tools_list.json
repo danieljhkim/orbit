@@ -612,6 +612,27 @@
     "name": "orbit_learning_add"
   },
   {
+    "description": "Retire `id` without a replacement: flips status to `superseded` with `superseded_by: null`. Idempotent — archiving an already-superseded record is a no-op success. Use `orbit.learning.supersede` instead when a replacement learning exists.",
+    "inputSchema": {
+      "additionalProperties": true,
+      "properties": {
+        "id": {
+          "description": "learning ID",
+          "type": "string"
+        },
+        "workspace": {
+          "description": "Workspace selector for broker routing: a registered logical workspace ID or an absolute path to a local checkout (a linked Git worktree resolves to its registered checkout). Optional when the MCP session announced `_meta.orbit.workspace` at initialize; never inferred from process cwd.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    },
+    "name": "orbit_learning_archive"
+  },
+  {
     "description": "Fetch a single learning by ID as JSON. Returns the full record including body and evidence.",
     "inputSchema": {
       "additionalProperties": true,

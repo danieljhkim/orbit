@@ -135,6 +135,12 @@ pub fn register(registry: &mut ToolRegistry) {
         learning::supersede::OrbitLearningSupersedeTool,
         agent_operator(McpToolPlacement::Owner),
     );
+    // ORB-10469: named single-learning retirement without a replacement,
+    // gated the same as add/update/supersede (ADR-0250).
+    registry.register_mcp(
+        learning::archive::OrbitLearningArchiveTool,
+        agent_operator(McpToolPlacement::Owner),
+    );
     registry.register_mcp(
         learning::update::OrbitLearningUpdateTool,
         agent_operator(McpToolPlacement::Owner),
