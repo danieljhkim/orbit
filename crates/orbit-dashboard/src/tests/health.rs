@@ -55,9 +55,15 @@ async fn detailed_healthz_reports_per_check_status() {
     let body = body_json(response).await;
     assert_eq!(body["status"], "ok");
     assert_eq!(check(&body, "sqlite_writable")["status"], "ok");
-    // Fresh workspace: graph index absent degrades to skip, not failure.
-    assert_eq!(check(&body, "graph_index")["status"], "skip");
     assert_eq!(check(&body, "log_sink")["status"], "ok");
+    assert!(
+        body["checks"]
+            .as_array()
+            .expect("checks array")
+            .iter()
+            .all(|check| check["name"] != "graph_index"),
+        "retired graph state is not a readiness subsystem: {body}"
+    );
 }
 
 #[tokio::test]
@@ -104,20 +110,4 @@ async fn detailed_healthz_fails_when_log_path_is_unresolvable() {
     let body = body_json(response).await;
     assert_eq!(check(&body, "log_sink")["status"], "fail");
     assert_eq!(check(&body, "log_sink")["detail"], "no HOME");
-}
-
-#[tokio::test]
-async fn detailed_healthz_reads_present_graph_index() {
-    let runtime = OrbitRuntime::in_memory().expect("build runtime");
-    let graph_dir = runtime.local_root().join("graph");
-    std::fs::create_dir_all(&graph_dir).expect("create graph dir");
-    rusqlite::Connection::open(graph_dir.join("main.4.db")).expect("create graph db");
-    let state = DashboardState::single(Arc::new(runtime));
-
-    let log_dir = tempfile::tempdir().expect("tempdir");
-    let response = detailed_response(&state, Ok(log_dir.path().join("orbit.jsonl"))).await;
-    assert_eq!(response.status(), StatusCode::OK);
-
-    let body = body_json(response).await;
-    assert_eq!(check(&body, "graph_index")["status"], "ok");
 }

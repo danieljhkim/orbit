@@ -34,10 +34,17 @@ fn assert_cli_rejects(args: &[&str], kind: ErrorKind, expected: &str) {
 
 #[test]
 fn cli_parses_doctor_stale_lock_cleanup() {
-    let cli = Cli::parse_from(["orbit", "doctor", "--fix-stale-locks", "--json"]);
+    let cli = Cli::parse_from([
+        "orbit",
+        "doctor",
+        "--fix-stale-locks",
+        "--remove-graph",
+        "--json",
+    ]);
     match cli.command {
         Commands::Doctor(command) => {
             assert!(command.fix_stale_locks);
+            assert!(command.remove_graph);
             assert!(command.json);
         }
         _ => panic!("expected top-level doctor command"),

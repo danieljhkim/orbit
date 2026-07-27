@@ -9,8 +9,8 @@ use serde::{Deserialize, Serialize};
 use crate::OrbitRuntime;
 
 use super::paths::{
-    canonicalize_context_files_for_read, context_workspace_root,
-    emit_graph_unavailable_warning_if_needed, extract_task_path_mentions, task_path_exists,
+    canonicalize_context_files_for_read, context_workspace_root, extract_task_path_mentions,
+    task_path_exists,
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -43,7 +43,6 @@ impl OrbitRuntime {
         let workspace_root = context_workspace_root(&self.paths().repo_root, None);
         let canonical_context_files =
             canonicalize_context_files_for_read(&task.context_files, &workspace_root);
-        emit_graph_unavailable_warning_if_needed(&canonical_context_files, self.data_root_path());
         let description_paths = extract_task_path_mentions(&task.description);
         let mut findings = Vec::new();
 

@@ -5,13 +5,12 @@
 //!
 //! `GET /healthz?detailed=true` runs cheap, time-bounded checks and returns
 //! per-check JSON: the store SQLite database accepts writes (write lock
-//! acquired and rolled back) and the code-graph index is readable for every
-//! workspace this server has open, plus the global JSONL log sink
+//! acquired and rolled back) for every workspace this server has open, plus
+//! the global JSONL log sink
 //! (`~/.orbit/state/logs/orbit.jsonl`, ORB-00415) accepting appends. Overall
 //! `200` when nothing failed, `503` otherwise — point uptime monitoring at
 //! the detailed form. Checks probe only workspaces the server actually has
-//! open (see `DashboardState::open_runtimes`); absent subsystems (no graph
-//! index yet) report `skip`, never failure.
+//! open (see `DashboardState::open_runtimes`).
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -89,7 +88,6 @@ pub(crate) async fn detailed_response(
 
     for (workspace, runtime) in &open {
         checks.push(store_writable_check(workspace.clone(), runtime.clone()).await);
-        checks.push(graph_index_check(workspace.clone(), runtime.clone()).await);
     }
     checks.push(log_sink_check(log_path).await);
 
@@ -124,38 +122,6 @@ async fn store_writable_check(workspace: String, runtime: Arc<OrbitRuntime>) -> 
         },
         Err(detail) => CheckOutcome {
             name: "sqlite_writable",
-            workspace: Some(workspace),
-            status: "fail",
-            detail,
-        },
-    }
-}
-
-/// Code-graph index readable, when one has been built (skip otherwise).
-async fn graph_index_check(workspace: String, runtime: Arc<OrbitRuntime>) -> CheckOutcome {
-    let outcome = run_blocking_check(move || {
-        Ok::<_, String>(
-            runtime
-                .health_check_graph_index()
-                .map(|result| result.map_err(|error| error.to_string())),
-        )
-    })
-    .await;
-    match outcome {
-        Ok(None) => CheckOutcome {
-            name: "graph_index",
-            workspace: Some(workspace),
-            status: "skip",
-            detail: "no graph index built".to_string(),
-        },
-        Ok(Some(Ok(detail))) => CheckOutcome {
-            name: "graph_index",
-            workspace: Some(workspace),
-            status: "ok",
-            detail,
-        },
-        Ok(Some(Err(detail))) | Err(detail) => CheckOutcome {
-            name: "graph_index",
             workspace: Some(workspace),
             status: "fail",
             detail,

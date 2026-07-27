@@ -14,8 +14,7 @@ use super::helpers::{
 use super::params::TaskUpdateParams;
 use super::paths::{
     canonicalize_context_files_for_read, context_files_pruned_history_entry,
-    context_workspace_root, emit_graph_unavailable_warning_if_needed,
-    normalize_context_files_for_write,
+    context_workspace_root, normalize_context_files_for_write,
 };
 use super::transitions::{ensure_task_has_execution_plan, in_progress_transition_requires_plan};
 
@@ -78,14 +77,12 @@ impl OrbitRuntime {
             params.context_files.take()
         {
             let normalized = normalize_context_files_for_write(candidates, &prune_root)?;
-            emit_graph_unavailable_warning_if_needed(&normalized, self.data_root_path());
             // L-0030: explicit replacements preserve draft/future selectors; pruning stays read-time.
             params.context_files = Some(normalized);
             Vec::new()
         } else {
             let normalized = canonicalize_context_files_for_read(&task.context_files, &prune_root);
             if normalized != task.context_files {
-                emit_graph_unavailable_warning_if_needed(&normalized, self.data_root_path());
                 let (kept, dropped) = prune_missing_context_files(&prune_root, normalized);
                 params.context_files = Some(kept);
                 dropped

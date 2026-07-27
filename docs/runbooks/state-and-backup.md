@@ -4,7 +4,7 @@ summary: Locate Orbit state and perform WAL-safe backups, restores, and task mig
 tags: [operations, backup, restore, state, sqlite]
 paths: ["crates/orbit-common/src/types/workspace.rs", "crates/orbit-core/src/config/**", "crates/orbit-store/**"]
 related_features: [orbit-core, remote-access]
-related_artifacts: [ORB-10014, ORB-10294]
+related_artifacts: [ORB-10014, ORB-10294, ORB-10473, ADR-0291]
 ---
 
 # Inventory and Protect Orbit State
@@ -30,7 +30,7 @@ precedence). Path layout is defined in
 | `adrs/`, `learnings/`, `knowledge/` | canonical ADR / learning / knowledge bundles (files) | **authoritative** |
 | `frictions/` | friction records + `tags.yaml` taxonomy | **authoritative** |
 | `resources/` | workspace overrides for activities/jobs/executors/policies | authoritative |
-| `graph/<branch>.<ver>.db` | code-graph SQLite index, per branch/worktree | regenerable, but no command rebuilds it — the `orbit graph` CLI was removed in ORB-10357 |
+| `graph/`, `knowledge/graph/` | retired graph state left by older Orbit versions | non-authoritative; remove explicitly with `orbit doctor --remove-graph` |
 | `state/layout.version` | plain-text workspace layout version marker | regenerable marker (see [upgrades](./upgrades.md)) |
 | `state/layout.lock` | advisory lock taken during layout upgrades | transient |
 | `state/semantic.db` | semantic/vector index (docs, learnings, tasks) | regenerable (`orbit semantic index`) |
@@ -69,6 +69,17 @@ precedence). Path layout is defined in
 > before launching. See [remote-access design §2.1](../design/remote-access/2_design.md) and
 > [ADR-0234](../design/remote-access/4_decisions.md).
 
+### Retired graph state and task selectors
+
+ADR-0291 retired graph as an Orbit capability. Task `symbol:<path>#<symbol>:<kind>` context
+selectors now use only `<path>` as a canonical workspace-contained file anchor; the symbol and
+kind are opaque descriptive metadata. No health, task, or dashboard path probes graph state or
+resolves symbols through it.
+
+Older worktrees may still contain worktree-local `.orbit/graph`, while the shared workspace may
+contain `.orbit/knowledge/graph`. `orbit doctor --remove-graph` removes exactly those two
+locations and is safe to repeat. Ordinary `orbit doctor` is read-only with respect to both.
+
 ### Git-committed versus local state
 
 `orbit workspace init` appends a single `.orbit` line to the repo's `.gitignore`; by
@@ -96,12 +107,12 @@ in git use a selective pattern instead, keeping DBs, locks, and runtime state ou
 
 ### What to back up
 
-- **Workspace:** the `.orbit/` directory. You may skip `state/` and `graph/` because both
-  regenerate. If the repo commits ADRs and learnings through the selective gitignore, git
-  already backs those up.
+- **Workspace:** the `.orbit/` directory. You may skip regenerable `state/` and the retired
+  `graph/` and `knowledge/graph/` locations. If the repo commits ADRs and learnings through the
+  selective gitignore, git already backs those up.
 - **Global root:** `~/.orbit/config.toml`, `workspaces.json`, `tasks/` (canonical bundles),
   and `orbit.db`. The database holds non-derivable audit and run history.
-- **Safe to lose or regenerate:** `graph/*.db`, `state/semantic.db`,
+- **Safe to lose or regenerate:** retired `graph/` and `knowledge/graph/`, `state/semantic.db`,
   `tasks/index.sqlite`, `~/.orbit/embed/`, `~/.orbit/state/logs/`, scoreboard counters.
 
 ### Preserve SQLite consistency
@@ -137,8 +148,7 @@ rm -f ~/.orbit/orbit.db-wal ~/.orbit/orbit.db-shm
 # Rebuild derived indexes as needed.
 orbit task reindex
 orbit semantic index      # if semantic search is installed
-# graph/*.db is not rebuildable from a command — the `orbit graph` CLI was
-# removed in ORB-10357; delete stale files under .orbit/graph/ if present.
+orbit doctor --remove-graph # remove retired local/shared graph state, if present
 
 orbit doctor              # verify; see health-checks.md
 ```

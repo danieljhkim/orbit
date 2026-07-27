@@ -4,7 +4,7 @@ summary: Check Orbit workspace, database, dashboard, log-sink, job-run, and rout
 tags: [operations, health, doctor, dashboard, routines]
 paths: ["crates/orbit-cmd/src/doctor.rs", "crates/orbit-core/src/command/job/run/reconcile.rs"]
 related_features: [orbit-core, activity-job, routines]
-related_artifacts: [ORB-10005, ORB-10070]
+related_artifacts: [ORB-10005, ORB-10070, ORB-10473, ADR-0291]
 ---
 
 # Check Orbit Health
@@ -23,9 +23,9 @@ aborting unless the store itself cannot open.
 | `database` | store DB `PRAGMA quick_check` + schema-ledger version versus this binary |
 | `disk-space` | free space on the volume holding `.orbit` (warn below 1 GiB or 5%; fail below 256 MiB or 1%) |
 | `semantic-index` | stale embedding rows; skipped if never indexed |
-| `graph-index` | newest `graph/*.db` opens read-only; skipped if never built |
 | `stale-locks` | `.lock` files under `state/`, `tasks/`, `learnings/`, and `adrs/.locks/` whose recorded holder PID is dead |
 | `job-runs` | orphaned `pending` or `running` runs whose owner process is gone |
+| `task-relations` | unresolved relation/dependency targets that would block a task-index rebuild |
 
 Example:
 
@@ -36,12 +36,11 @@ $ orbit doctor
 │ database         ok        quick_check ok; schema version 1 matches this binary             │
 │ disk-space       ok        11.2 GiB free of 65.6 GiB (17.1%) on the volume holding …/.orbit │
 │ semantic-index   skipped   no semantic embeddings indexed yet                               │
-│ graph-index      skipped   no graph index built (the code-graph CLI surface was removed in  │
-│                            ORB-10357; this check is a legacy vestige with no build command)  │
 │ stale-locks      warning   1 lock file(s) left by dead holders (the OS already released     │
 │                            the flock; safe to delete): …/state/layout.lock                  │
 │                            (dead pid 154488, op: layout upgrade, since 2026-07-04T09:25…)   │
 │ job-runs         ok        no orphaned job runs                                              │
+│ task-relations   ok        no unresolved relation/dependency targets                        │
 0 failure(s), 1 warning(s).
 ```
 
@@ -49,6 +48,13 @@ The command exits nonzero only when at least one check is `ERROR`; warnings and 
 zero. `--json` emits an array of objects with `check`, `status`, and `message` fields; statuses
 are lowercase. Lock files flagged by `stale-locks` include holder diagnostics and are safe to
 delete only after confirming the holder PID is dead.
+
+Graph is retired under ADR-0291 and is not inspected by ordinary health checks. To remove
+leftover state explicitly, run `orbit doctor --remove-graph`. This deletes only the current
+worktree's `.orbit/graph` and the shared workspace's `.orbit/knowledge/graph`; it is
+idempotent when either is absent. Combine it with `--json` for a single JSON result with no
+cleanup prose on stdout. Without `--remove-graph`, `orbit doctor` leaves both locations
+untouched.
 
 ## Probe dashboard health
 
@@ -68,7 +74,6 @@ Example detailed response:
   "workspaces_open": 1,
   "checks": [
     {"name": "sqlite_writable", "status": "ok",   "detail": "store database accepts writes", "workspace": "default"},
-    {"name": "graph_index",     "status": "skip", "detail": "no graph index built",           "workspace": "default"},
     {"name": "log_sink",        "status": "ok",   "detail": "~/.orbit/state/logs/orbit.jsonl accepts appends"}
   ]
 }

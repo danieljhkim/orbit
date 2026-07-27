@@ -4,7 +4,7 @@ summary: Recover a corrupted Orbit SQLite database from backup, salvage, or rege
 tags: [operations, sqlite, corruption, recovery]
 paths: ["crates/orbit-store/**", "crates/orbit-cmd/src/doctor.rs"]
 related_features: [orbit-core]
-related_artifacts: [ORB-10014]
+related_artifacts: [ORB-10014, ORB-10473, ADR-0291]
 ---
 
 # Recover a Corrupted Database
@@ -60,10 +60,15 @@ Do not install the recovered database unless `PRAGMA integrity_check` returns `o
 
 | DB | Derivable? | Rebuild |
 |---|---|---|
-| `<ws>/.orbit/graph/*.db` | yes | delete the file(s) — the `orbit graph` CLI was removed in ORB-10357, so nothing rebuilds this index; the graph subsystem is a dependent-free vestige awaiting deletion |
 | `<ws>/.orbit/state/semantic.db` | yes | delete the file, then `orbit semantic index` |
 | `~/.orbit/tasks/index.sqlite` | yes, from task bundles | `orbit task reindex` |
 | `~/.orbit/orbit.db` | **no**—audit + run history | restore or salvage; deleting it is a last resort that loses history, although task/ADR/learning content survives in file bundles |
+
+Graph is not a recoverable database subsystem: ADR-0291 retired it. If an older checkout left
+`.orbit/graph` or shared `.orbit/knowledge/graph` state behind, remove both through
+`orbit doctor --remove-graph`. The command is explicit and idempotent; ordinary `orbit doctor`
+does not read or modify either location. Task symbol selectors continue to work from their
+workspace-contained file anchors alone, with symbol/kind text treated as opaque metadata.
 
 ## Verification
 
