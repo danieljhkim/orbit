@@ -873,6 +873,86 @@ fn run_cli_backend_records_resolved_cwd_in_started_event() {
     assert_eq!(cwd, workspace_string);
 }
 
+#[test]
+fn run_cli_backend_emits_provider_pid_between_the_started_and_finished_events() {
+    let temp = tempdir().expect("tempdir");
+    let script = temp.path().join("codex");
+    write_executable(
+        &script,
+        "#!/bin/sh\ncat > /dev/null\nprintf '%s\\n' '{\"schemaVersion\":1,\"status\":\"success\",\"result\":{},\"error\":null}'\n",
+    );
+
+    let sink = Arc::new(RecordingSink::default());
+    let sink_for_writer: Arc<dyn AuditSink> = sink;
+    let audit = Arc::new(V2AuditWriter::new(
+        "job-pid-audit",
+        "codex:gpt-5.5",
+        sink_for_writer,
+    ));
+    let host = TestHost {
+        command: script.display().to_string(),
+        executor_args: Vec::new(),
+        provider_config: HashMap::new(),
+        sandbox: None,
+        task_context: None,
+        workspace_root: None,
+    };
+    let spec = test_agent_loop_spec(Duration::from_secs(5));
+
+    let outcome = run_cli_backend(
+        &host,
+        &spec,
+        "job-pid-audit",
+        audit.clone(),
+        &serde_json::json!({ "prompt": "do it" }),
+        None,
+    )
+    .expect("run succeeds");
+    assert!(outcome.success);
+
+    let events = audit.events_snapshot().expect("events snapshot");
+    let kinds = events
+        .iter()
+        .map(|event| event.kind.event_type())
+        .collect::<Vec<_>>();
+    let started = kinds
+        .iter()
+        .position(|kind| *kind == "cli.invocation.started")
+        .expect("cli.invocation.started event");
+    let process = kinds
+        .iter()
+        .position(|kind| *kind == "cli.invocation.process")
+        .expect("cli.invocation.process event");
+    let finished = kinds
+        .iter()
+        .position(|kind| *kind == "cli.invocation.finished")
+        .expect("cli.invocation.finished event");
+    // The ordering is the contract: the PID must be durable before the child is
+    // waited on, otherwise it only ever lands after the invocation is over —
+    // exactly the window in which an operator needs it.
+    assert!(
+        started < process && process < finished,
+        "pid event must be emitted after spawn and before the exit event: {kinds:?}"
+    );
+
+    let (provider, pid) = events
+        .iter()
+        .find_map(|event| match &event.kind {
+            V2AuditEventKind::CliInvocationProcess { provider, pid, .. } => {
+                Some((provider.clone(), *pid))
+            }
+            _ => None,
+        })
+        .expect("cli.invocation.process payload");
+    assert_eq!(provider, "codex");
+    assert_ne!(pid, 0);
+    assert_ne!(
+        pid,
+        std::process::id(),
+        "the recorded pid must be the provider child, not the engine process"
+    );
+}
+
 const TASK_LOCAL_PIPELINE_YAML: &str =
     include_str!("../../../../../../.orbit/resources/jobs/task_local_pipeline.yaml");
 const TASK_PR_PIPELINE_YAML: &str =

@@ -2,6 +2,7 @@
 
 use crate::{OrbitRuntime, V2AuditEventInsertParams};
 use orbit_common::utility::blob_store::BlobStore;
+use orbit_common::utility::process_identity::ProcessLiveness;
 
 use serde_json::json;
 
@@ -302,4 +303,149 @@ fn malformed_jsonl_and_missing_blobs_are_tolerated() {
     assert_eq!(records[0].stderr, "");
     assert_eq!(records[0].exit_code, Some(1));
     assert!(records[0].timed_out);
+}
+
+#[test]
+fn provider_processes_pair_each_spawn_with_the_exit_that_closes_it() {
+    let runtime = OrbitRuntime::in_memory().expect("build runtime");
+    let run_id = "jrun-provider-processes";
+    seed_v2_audit_events(
+        &runtime,
+        run_id,
+        [
+            json!({
+                "event_id": "evt-run",
+                "ts": "2026-07-27T02:41:00Z",
+                "run_id": run_id,
+                "body_kind": "run_started",
+                "job_name": "task_pr_pipeline"
+            }),
+            json!({
+                "event_id": "evt-step-implement",
+                "ts": "2026-07-27T02:41:01Z",
+                "run_id": run_id,
+                "parent_event_id": "evt-run",
+                "body_kind": "step_started",
+                "step_id": "agent_implement"
+            }),
+            // First attempt: spawned, then exited nonzero.
+            json!({
+                "event_id": "evt-pid-one",
+                "ts": "2026-07-27T02:41:02Z",
+                "run_id": run_id,
+                "parent_event_id": "evt-step-implement",
+                "body_kind": "cli_invocation_process",
+                "provider": "codex",
+                "pid": 1111,
+                "pid_start_time": "ps-lstart-utc-v1:one"
+            }),
+            json!({
+                "event_id": "evt-cli-one",
+                "ts": "2026-07-27T02:41:03Z",
+                "run_id": run_id,
+                "parent_event_id": "evt-step-implement",
+                "body_kind": "cli_invocation_finished",
+                "provider": "codex",
+                "exit_code": 1,
+                "duration_ms": 900,
+                "timed_out": false
+            }),
+            // Retry within the same step: still open.
+            json!({
+                "event_id": "evt-pid-two",
+                "ts": "2026-07-27T02:41:04Z",
+                "run_id": run_id,
+                "parent_event_id": "evt-step-implement",
+                "body_kind": "cli_invocation_process",
+                "provider": "codex",
+                "pid": 2222,
+                "pid_start_time": "ps-lstart-utc-v1:two"
+            }),
+        ],
+    );
+
+    let probed = std::sync::Mutex::new(Vec::new());
+    let records = runtime
+        .collect_run_provider_processes_with(run_id, |pid, token| {
+            probed
+                .lock()
+                .expect("probe lock")
+                .push((pid, token.map(str::to_string)));
+            ProcessLiveness::Alive
+        })
+        .expect("collect provider processes");
+
+    assert_eq!(records.len(), 2);
+
+    assert_eq!(records[0].event_id, "evt-pid-one");
+    assert_eq!(records[0].run_id, run_id);
+    assert_eq!(records[0].pid, 1111);
+    assert_eq!(records[0].step_id.as_deref(), Some("agent_implement"));
+    assert_eq!(records[0].step_index, Some(0));
+    assert_eq!(records[0].provider.as_deref(), Some("codex"));
+    assert!(records[0].finished);
+    assert_eq!(records[0].exit_code, Some(1));
+    assert_eq!(records[0].duration_ms, Some(900));
+    assert!(!records[0].timed_out);
+    assert_eq!(records[0].liveness, ProcessLiveness::Exited);
+
+    assert_eq!(records[1].event_id, "evt-pid-two");
+    assert_eq!(records[1].pid, 2222);
+    assert!(!records[1].finished);
+    assert_eq!(records[1].exit_code, None);
+    assert_eq!(records[1].liveness, ProcessLiveness::Alive);
+
+    // Only the still-open child is worth probing; a reaped one has an exit code.
+    assert_eq!(
+        probed.into_inner().expect("probed pids"),
+        vec![(2222, Some("ps-lstart-utc-v1:two".to_string()))]
+    );
+}
+
+#[test]
+fn an_open_provider_process_reports_the_probed_liveness_verdict() {
+    let runtime = OrbitRuntime::in_memory().expect("build runtime");
+    let run_id = "jrun-provider-dead";
+    seed_v2_audit_events(
+        &runtime,
+        run_id,
+        [
+            json!({
+                "event_id": "evt-step",
+                "ts": "2026-07-27T02:41:01Z",
+                "run_id": run_id,
+                "body_kind": "step_started",
+                "step_id": "agent_implement"
+            }),
+            json!({
+                "event_id": "evt-pid",
+                "ts": "2026-07-27T02:41:02Z",
+                "run_id": run_id,
+                "parent_event_id": "evt-step",
+                "body_kind": "cli_invocation_process",
+                "provider": "codex",
+                "pid": 3333
+            }),
+        ],
+    );
+
+    let records = runtime
+        .collect_run_provider_processes_with(run_id, |_, _| ProcessLiveness::Exited)
+        .expect("collect provider processes");
+
+    assert_eq!(records.len(), 1);
+    assert!(!records[0].finished);
+    assert_eq!(records[0].pid_start_time, None);
+    // The distinction the surface exists for: an open invocation whose child is
+    // gone is a lost implementation agent, not a slow one.
+    assert_eq!(records[0].liveness, ProcessLiveness::Exited);
+}
+
+#[test]
+fn a_run_without_process_events_reports_no_provider_processes() {
+    let runtime = OrbitRuntime::in_memory().expect("build runtime");
+    let records = runtime
+        .collect_run_provider_processes("jrun-missing")
+        .expect("collect provider processes");
+    assert!(records.is_empty());
 }

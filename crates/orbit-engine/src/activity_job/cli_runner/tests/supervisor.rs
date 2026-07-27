@@ -25,6 +25,7 @@ fn spawn_test_request<'a>(
         sandbox: None,
         trace,
         output_capture_limit: None,
+        on_spawn: None,
     }
 }
 
@@ -92,6 +93,58 @@ fn spawn_with_timeout_emits_structured_stdout_and_stderr_events() {
     for event in &events {
         assert_eq!(event.field("cwd"), Some(cwd_string.as_str()));
     }
+}
+
+#[cfg(unix)]
+#[test]
+fn spawn_with_timeout_reports_the_child_pid_while_the_child_is_still_running() {
+    use std::sync::Mutex;
+
+    // The child holds the PID observable long enough for the callback's view of
+    // it to be checked against a live process, which is what the run-status
+    // surface actually needs: a PID reported mid-invocation, not post-mortem.
+    let args = sh_args("printf '%s\\n' started; sleep 0.3");
+    let observed: Mutex<Vec<u32>> = Mutex::new(Vec::new());
+    let alive_at_callback = Mutex::new(None);
+    let on_spawn = |pid: u32| {
+        observed.lock().expect("observed lock").push(pid);
+        *alive_at_callback.lock().expect("alive lock") = Some(process_is_live(pid));
+    };
+
+    let mut request = spawn_test_request(
+        "/bin/sh",
+        &args,
+        None,
+        Duration::from_secs(5),
+        SpawnTraceContext {
+            provider: "codex",
+            job_run_id: "job-pid",
+            task_id: Some("TPID"),
+            cwd: None,
+        },
+    );
+    request.on_spawn = Some(&on_spawn);
+
+    let (stdout, _stderr, exit_code, _duration, timed_out) =
+        spawn_with_timeout(request).expect("spawn succeeds");
+
+    assert_eq!(exit_code, Some(0));
+    assert!(!timed_out);
+    assert_eq!(stdout.bytes(), b"started\n");
+
+    let observed = observed.into_inner().expect("observed pids");
+    assert_eq!(observed.len(), 1, "the pid is reported exactly once");
+    assert_ne!(observed[0], 0);
+    assert_ne!(
+        observed[0],
+        std::process::id(),
+        "the reported pid must be the child, not the supervisor"
+    );
+    assert_eq!(
+        alive_at_callback.into_inner().expect("alive flag"),
+        Some(true),
+        "the pid must be reported while the child is still running"
+    );
 }
 
 #[test]

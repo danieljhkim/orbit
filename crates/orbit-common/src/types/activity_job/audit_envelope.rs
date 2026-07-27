@@ -172,6 +172,25 @@ pub enum V2AuditEventKind {
         cwd: Option<String>,
         wall_clock_timeout_ms: u64,
     },
+    /// [ORB-10496] The CLI backend subprocess exists. Emitted once, immediately
+    /// after spawn and before the wall-clock supervision loop, so the provider
+    /// child is observable *while it runs* rather than only in retrospect.
+    ///
+    /// Pairs with `cli.invocation.finished` within the same step: an unpaired
+    /// process event means the child had not exited when the trail was last
+    /// written, and `pid` (guarded against PID reuse by `pid_start_time`) can be
+    /// probed for liveness. This is the only channel that sees ship-pipeline
+    /// `agent_implement` agents — the Worker-daemon run store behind
+    /// `agent_run_list` does not observe them.
+    CliInvocationProcess {
+        provider: String,
+        pid: u32,
+        /// Versioned process-start identity token for `pid`, when it could be
+        /// probed. Absent when the host cannot run the probe (non-Unix, or a
+        /// sandbox that blocks `ps`).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pid_start_time: Option<String>,
+    },
     /// §7.6 — CLI backend subprocess finished (either naturally or by
     /// wall-clock timeout). `timed_out == true` iff the subprocess was killed
     /// because it exceeded `wall_clock_timeout_ms`.
@@ -224,6 +243,7 @@ impl V2AuditEventKind {
                 "tool_allowlist.harness_delegated"
             }
             V2AuditEventKind::CliInvocationStarted { .. } => "cli.invocation.started",
+            V2AuditEventKind::CliInvocationProcess { .. } => "cli.invocation.process",
             V2AuditEventKind::CliInvocationFinished { .. } => "cli.invocation.finished",
             V2AuditEventKind::TelemetryPersistFailed { .. } => "telemetry.persist_failed",
         }

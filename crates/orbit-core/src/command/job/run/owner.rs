@@ -4,6 +4,13 @@
 
 use orbit_common::types::OrbitError;
 use orbit_common::types::{JobRun, JobRunState};
+#[cfg(target_os = "linux")]
+use orbit_common::utility::process_identity::linux_process_state;
+/// Re-exported so the historical `owner::process_is_alive` path keeps working
+/// for this module's callers and sibling tests; the probe itself now lives in
+/// `orbit-common` so other run surfaces can share it [ORB-10496].
+#[cfg(unix)]
+pub(super) use orbit_common::utility::process_identity::process_is_alive;
 #[cfg(unix)]
 use orbit_common::utility::process_identity::{
     ProbeOutcome, STABLE_TOKEN_PREFIX, legacy_lstart_matches, probe_process_start_identity,
@@ -196,17 +203,6 @@ fn linux_process_group_is_alive(pgid: libc::pid_t) -> Option<bool> {
         }
     }
     found_group_member.then_some(false)
-}
-
-#[cfg(target_os = "linux")]
-fn linux_process_state(pid: u32) -> Option<(char, libc::pid_t)> {
-    let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
-    let (_, tail) = stat.rsplit_once(')')?;
-    let mut fields = tail.split_whitespace();
-    let state = fields.next()?.chars().next()?;
-    let _parent_pid = fields.next()?;
-    let process_group = fields.next()?.parse().ok()?;
-    Some((state, process_group))
 }
 
 #[cfg(unix)]
@@ -449,23 +445,6 @@ where
     } else {
         OwnerIdentity::Missing
     }
-}
-
-#[cfg(unix)]
-pub(super) fn process_is_alive(pid: u32) -> bool {
-    if pid == 0 || pid > i32::MAX as u32 {
-        return false;
-    }
-    #[cfg(target_os = "linux")]
-    if matches!(linux_process_state(pid), Some(('Z', _))) {
-        return false;
-    }
-    // Safety: signal 0 performs existence/permission checking only.
-    let rc = unsafe { libc::kill(pid as libc::pid_t, 0) };
-    if rc == 0 {
-        return true;
-    }
-    std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
 }
 
 /// Builds the diagnostic message recorded in the failure step when a stale

@@ -361,6 +361,24 @@ Narrative lives in the ADR store — retrieve it with `orbit tool run orbit.adr.
 
 ---
 
+## ADR-0297 — Provider subprocess liveness is a separate audit event probed at read time
+
+**Status:** Accepted · 2026-07 · [ORB-10496]
+
+**Context.** A ship-pipeline (`workflow_ship`) implementation agent is a CLI subprocess of the pipeline worker, not of the Worker daemon behind `agent_invoke`, so bridge `agent_run_list` never sees it and `child.id()` existed only inside `cli_runner/supervisor.rs` for process-group cleanup. During run-rescue (F2026-07-083 / [ORB-10257]) a healthy long-running agent was indistinguishable from a dead child without shell process-tree inspection. Two shapes were available: a periodic heartbeat written for as long as the child lives, or a single spawn-time PID record whose liveness the reader probes. Extending `cli.invocation.started` was not available — it is emitted before spawn, so no PID exists yet.
+
+**Decision.** Emit one `cli.invocation.process` event (`provider`, `pid`, `pid_start_time`) immediately after spawn, ordered strictly between `cli.invocation.started` and `cli.invocation.finished`; the envelope writer persists synchronously, so it is readable mid-invocation. Liveness is derived at read time by `orbit_common::utility::process_identity::probe_process_liveness` (`kill(pid, 0)` plus the Linux zombie check, with the recorded start-identity token rejecting a recycled PID). `OrbitRuntime::collect_run_provider_processes` pairs each process event with the exit event that closes it within the same step and probes only the still-open ones; `GET /api/runs/:id` (bridge `workflow_run_status`) and `orbit run show` project the result.
+
+**Consequences.**
+- A long-running `agent_implement` step is distinguishable from a lost child without shell access, which is the decision run-rescue actually has to make.
+- Retries within one step pair in order (newest still-open record wins), so each attempt reports separately instead of collapsing onto the first spawn.
+- A live PID whose versioned start-identity token disagrees reads as `exited`, so PID reuse cannot fake a live agent.
+- An unprobeable host degrades to `alive`/`unknown` rather than `exited`, matching the existing job-run owner-reconciliation policy that a probe which cannot answer is never proof of death.
+- Cost: liveness is only as fresh as the query and only meaningful on the host that ran the child — a remote or later reader sees `exited` for every historical open invocation, because the answer comes from the local process table rather than from the persisted event. A heartbeat would have survived that, at the price of a write per interval per invocation and a staleness threshold to tune.
+- Cost: `pid_start_time` costs one `ps` per provider spawn; a sandbox that blocks `ps` yields `None`, weakening the record to unguarded-PID liveness rather than failing the spawn.
+
+---
+
 ## Task References
 
 - **[T20260419-0002]** — Add workspace provenance and v2 audit envelope events for activity/job execution.
@@ -403,5 +421,6 @@ Narrative lives in the ADR store — retrieve it with `orbit tool run orbit.adr.
 - **[ORB-10338]** — Add the versioned model price table and query-time `derived_cost_usd`, plus a persisted `provider_cost_usd` column for reconciliation.
 - **[ORB-10370]** — Fill provider model/cost trace fields from CLI result JSON and prefer reported model identity at invocation ingest.
 - **[ORB-10369]** — Set pipeline-created commit authors from the persisted resolved crew model without changing aliases or rewriting existing commits.
+- **[ORB-10496]** — Record the spawned provider subprocess PID as its own audit event and expose read-time liveness through run status and `orbit run show`.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

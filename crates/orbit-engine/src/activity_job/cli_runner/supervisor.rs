@@ -154,6 +154,11 @@ pub(super) struct SpawnWithTimeoutRequest<'a> {
     pub(super) sandbox: Option<&'a ResolvedSandbox>,
     pub(super) trace: SpawnTraceContext<'a>,
     pub(super) output_capture_limit: Option<usize>,
+    /// [ORB-10496] Invoked once with the spawned child's PID, immediately after
+    /// spawn and before the supervision loop. The PID is otherwise visible only
+    /// inside this module (process-group cleanup), so a long-running provider
+    /// child has no observable identity while it runs.
+    pub(super) on_spawn: Option<&'a dyn Fn(u32)>,
 }
 
 struct OutputReaderContext {
@@ -183,6 +188,7 @@ pub(super) fn spawn_with_timeout(
         sandbox,
         trace,
         output_capture_limit,
+        on_spawn,
     } = request;
 
     let started = Instant::now();
@@ -196,6 +202,12 @@ pub(super) fn spawn_with_timeout(
             message: format!("spawn {program}: {}", err.message),
         }
     })?;
+
+    // Report the PID before any blocking work: the whole point is to be
+    // observable during a long invocation, and the child is already running.
+    if let Some(on_spawn) = on_spawn {
+        on_spawn(child.id());
+    }
 
     if let Some(mut stdin) = child.stdin.take() {
         let bytes = stdin_bytes.to_vec();

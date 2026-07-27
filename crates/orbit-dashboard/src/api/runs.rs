@@ -6,7 +6,7 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Json, Response};
 use orbit_common::utility::redaction::redact_all;
 use orbit_core::command::job::JobRunListParams;
-use orbit_core::runtime::run_audit::{RunAuditStep, RunCliInvocationRecord};
+use orbit_core::runtime::run_audit::{RunAuditStep, RunCliInvocationRecord, RunProviderProcess};
 use orbit_core::{JobRun, OrbitRuntime, V2AuditEventFilter};
 use serde_json::{Value, json};
 
@@ -233,7 +233,40 @@ pub(super) fn job_run_detail_to_json(runtime: &OrbitRuntime, run: &JobRun) -> Va
         Value::Array(audit_steps.iter().map(audit_step_to_json).collect())
     };
 
-    json!({ "run": full, "steps": steps })
+    // [ORB-10496] Provider subprocesses for this run's agent steps, with a
+    // liveness verdict for any that have not reported an exit. Without this a
+    // healthy long-running ship-pipeline implementation agent is
+    // indistinguishable from a dead child without shell access to the host.
+    let provider_processes = runtime
+        .collect_run_provider_processes(&run.run_id)
+        .unwrap_or_default();
+
+    json!({
+        "run": full,
+        "steps": steps,
+        "provider_processes": provider_processes
+            .iter()
+            .map(run_provider_process_to_json)
+            .collect::<Vec<_>>(),
+    })
+}
+
+fn run_provider_process_to_json(record: &RunProviderProcess) -> Value {
+    json!({
+        "run_id": record.run_id,
+        "event_id": record.event_id,
+        "ts": record.ts.map(|ts| ts.to_rfc3339()),
+        "step_id": record.step_id,
+        "step_index": record.step_index,
+        "provider": record.provider,
+        "pid": record.pid,
+        "pid_start_time": record.pid_start_time,
+        "finished": record.finished,
+        "liveness": record.liveness.as_str(),
+        "exit_code": record.exit_code,
+        "timed_out": record.timed_out,
+        "duration_ms": record.duration_ms,
+    })
 }
 
 fn audit_step_to_json(step: &RunAuditStep) -> Value {
