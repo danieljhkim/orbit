@@ -1,0 +1,60 @@
+schemaVersion: 2
+kind: Activity
+metadata:
+  name: apply_task_pilot_results
+spec:
+  type: deterministic
+  description: >
+    Fail-closed task-pilot apply boundary. It validates complete partition
+    coverage, exact before snapshots, dispositions, canonical in-workspace
+    file/dir/symbol selectors, and target existence before the first mutation.
+    It then replaces only context_files on the prepared tasks. Every other task
+    field, lifecycle state, dispatch state, and recommendation remains unchanged.
+  input_schema_json:
+    type: object
+    required: [prepared, results, workspace_path, crew]
+    properties:
+      prepared:
+        type: object
+      results:
+        type: array
+        items:
+          type: object
+      workspace_path:
+        type: string
+      crew:
+        type: string
+  output_schema_json:
+    type: object
+    required:
+      [status, mode, crew, workspace_path, discovery, partition_decisions,
+       partition_count, failed_partitions, tasks]
+    properties:
+      status:
+        type: string
+        enum: [success]
+      mode:
+        type: string
+        enum: [automatic, explicit]
+      crew:
+        type: string
+      workspace_path:
+        type: string
+      discovery:
+        type: object
+      partition_decisions:
+        type: array
+        items:
+          type: object
+      partition_count:
+        type: number
+      failed_partitions:
+        type: array
+        items:
+          type: object
+      tasks:
+        type: array
+        items:
+          type: object
+  action: apply_task_pilot_results
+  config: {}

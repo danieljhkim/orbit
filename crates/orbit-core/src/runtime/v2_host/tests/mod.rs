@@ -5,6 +5,7 @@ mod learning_reminders;
 mod pipeline_actions;
 mod sandbox;
 mod task_context;
+mod task_pilot;
 mod triage;
 mod v2_host;
 // Replay-transport-backed cases; default-off per [ORB-10414]. [ORB-10434]

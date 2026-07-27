@@ -37,6 +37,10 @@ const DEFAULT_JOB_FILES: &[(&str, &str)] = &[
         include_str!("../../../../assets/jobs/task_local_pipeline.yaml"),
     ),
     (
+        "task_pilot_pipeline",
+        include_str!("../../../../assets/jobs/task_pilot_pipeline.yaml"),
+    ),
+    (
         "task_pr_pipeline",
         include_str!("../../../../assets/jobs/task_pr_pipeline.yaml"),
     ),
@@ -251,6 +255,57 @@ fn default_job_target_refs_resolve_against_default_activities() {
         resolve_job_target_refs(&mut asset.spec, &catalog)
             .unwrap_or_else(|err| panic!("default job {job_name} refs resolve: {err}"));
     }
+}
+
+#[test]
+fn task_pilot_pipeline_defaults_to_luna_and_bounded_all_join_partitions() {
+    let yaml = DEFAULT_JOB_FILES
+        .iter()
+        .find_map(|(name, yaml)| (*name == "task_pilot_pipeline").then_some(*yaml))
+        .expect("task pilot pipeline exists");
+    let asset = load_job_asset(yaml).expect("task pilot pipeline parses");
+    let defaults = asset.spec.default_input.as_ref().expect("default input");
+    assert_eq!(defaults["task_ids"], json!([]));
+    assert_eq!(defaults["crew"], "luna");
+    assert_eq!(defaults["max_partition_size"], 5);
+    assert_eq!(asset.spec.steps.len(), 3);
+
+    let JobV2StepBody::TargetRef(prepare) = &asset.spec.steps[0].body else {
+        panic!("task pilot preparation must be deterministic activity reference");
+    };
+    assert_eq!(prepare.target, "activity:prepare_task_pilot");
+    let prepare_input = prepare.default_input.as_ref().expect("prepare input");
+    assert_eq!(prepare_input["task_ids"], "{{ input.task_ids }}");
+
+    let JobV2StepBody::FanOut { fan_out, fan_in } = &asset.spec.steps[1].body else {
+        panic!("task pilot agent work must fan out");
+    };
+    assert_eq!(fan_out.items, "{{ steps.prepare.output.partitions }}");
+    assert_eq!(fan_out.max_workers, 5);
+    assert_eq!(
+        fan_in.join,
+        orbit_common::types::activity_job::JoinMode::All
+    );
+    assert_eq!(fan_in.collect.as_deref(), Some("pilot_results"));
+    let JobV2StepBody::TargetRef(pilot) = &fan_out.worker.body else {
+        panic!("task pilot worker must reference agent activity");
+    };
+    assert_eq!(pilot.target, "activity:task_pilot");
+    let pilot_input = pilot.default_input.as_ref().expect("pilot input");
+    assert_eq!(pilot_input["task_ids"], "{{ item.task_ids }}");
+    assert_eq!(pilot_input["crew"], "{{ input.crew }}");
+
+    let JobV2StepBody::TargetRef(apply) = &asset.spec.steps[2].body else {
+        panic!("task pilot apply must be deterministic activity reference");
+    };
+    assert_eq!(apply.target, "activity:apply_task_pilot_results");
+    let apply_input = apply.default_input.as_ref().expect("apply input");
+    assert_eq!(apply_input["prepared"], "{{ steps.prepare.output }}");
+    assert_eq!(apply_input["results"], "{{ steps.pilot_results.output }}");
+    assert!(
+        yaml.contains("Invoked-only"),
+        "task pilot must remain an explicitly invoked workflow"
+    );
 }
 
 /// [ORB-10385] Every deterministic action reachable from a shipped job —

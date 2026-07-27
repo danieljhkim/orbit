@@ -41,6 +41,10 @@ const DEFAULT_JOB_FILES: &[(&str, &str)] = &[
         include_str!("../../../assets/jobs/task_local_pipeline.yaml"),
     ),
     (
+        "task_pilot_pipeline",
+        include_str!("../../../assets/jobs/task_pilot_pipeline.yaml"),
+    ),
+    (
         "task_pr_pipeline",
         include_str!("../../../assets/jobs/task_pr_pipeline.yaml"),
     ),

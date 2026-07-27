@@ -15,6 +15,7 @@ mod learning_reminders;
 mod pipeline_actions;
 mod sandbox;
 mod task_context;
+mod task_pilot;
 #[cfg(test)]
 mod test_support;
 #[cfg(test)]

@@ -15,7 +15,7 @@ use crate::runtime::task_locks::{
     requested_task_files, task_lock_conflicts, workspace_orbit_dir, workspace_task_reservation_id,
 };
 
-use super::{backlog_exclusion, pipeline_actions, triage};
+use super::{backlog_exclusion, pipeline_actions, task_pilot, triage};
 
 /// Every deterministic action name this dispatch table can execute.
 ///
@@ -36,6 +36,7 @@ use super::{backlog_exclusion, pipeline_actions, triage};
 /// terminal hook, in `command/job/exec.rs`) and `worktree_gc` (below).
 pub(super) const REGISTERED_DETERMINISTIC_ACTIONS: &[&str] = &[
     "apply_triage_dispositions",
+    "apply_task_pilot_results",
     "context_conflict_check",
     "gate_starvation_fail",
     "git_commit",
@@ -53,6 +54,7 @@ pub(super) const REGISTERED_DETERMINISTIC_ACTIONS: &[&str] = &[
     "pr_open",
     "pr_prepare",
     "pr_promote",
+    "prepare_task_pilot",
     "promote_agent_main",
     "release_locks",
     "reserve_locks",
@@ -290,6 +292,12 @@ pub(super) fn run_deterministic(
         // bounds: candidates-only, `environmental`-only re-backlog, durable
         // re-backlog budget, idempotent under overlap [ORB-10129].
         "apply_triage_dispositions" => triage::apply_triage_dispositions(runtime, action, input),
+        // Materialize a workspace-scoped task-pilot working set and partition
+        // it into bounded groups without promoting or dispatching any task.
+        "prepare_task_pilot" => task_pilot::prepare(runtime, action, input),
+        // Validate all agent proposals before writing, then replace only the
+        // exact prepared tasks' context_files fields.
+        "apply_task_pilot_results" => task_pilot::apply(runtime, action, input),
         // Materialize an epic's working set for the orchestrator:
         // the epic task itself plus non-terminal subtasks
         // (`parent_id == epic_task_id` and status not done, review,

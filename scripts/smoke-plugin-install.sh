@@ -250,10 +250,19 @@ fi
 python3 - "$TMPDIR_ROOT/codex-plugin-add.json" <<'PY'
 import json
 import sys
+from pathlib import Path
 payload = json.load(open(sys.argv[1], encoding="utf-8"))
 if payload.get("name") != "orbit" or payload.get("marketplaceName") != "orbit":
     raise SystemExit(f"FAIL: expected installed orbit@orbit, got {payload!r}")
-print(f"codex plugin installed => {payload.get('installedPath')}")
+installed = Path(payload.get("installedPath", ""))
+required = [
+    installed / "skills" / "orbit-task-pilot" / "SKILL.md",
+    installed / "agents" / "orbit-task-pilot.md",
+]
+missing = [str(path) for path in required if not path.is_file()]
+if missing:
+    raise SystemExit(f"FAIL: installed Orbit plugin is missing task-pilot assets: {missing}")
+print(f"codex plugin installed with task-pilot assets => {installed}")
 PY
 
 if ! "${CODEX_ENV[@]}" codex mcp list --json \
@@ -311,6 +320,7 @@ required = [
     "orbit:orbit-search",
     "orbit:orbit-knowledge",
     "orbit:orbit-graph",
+    "orbit:orbit-task-pilot",
 ]
 missing = [name for name in required if name not in text]
 if missing:
