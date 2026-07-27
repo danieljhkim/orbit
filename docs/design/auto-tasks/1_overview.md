@@ -2,6 +2,7 @@
 title: Auto-tasks — Overview
 owner: claude
 last_updated: 2026-07-26
+last_validated: 2026-07-27
 status: Accepted
 feature: auto-tasks
 doc_role: overview
@@ -90,7 +91,7 @@ becomes just the first definition.
 - ORB-10148 — qa-sweep V1 (first definition; depends on this).
 - ORB-10318 — learning-deprecation-review definition (report-only stale-learning review; superseded by ORB-10348).
 - ORB-10348 — Generalized the definition into artifact-deprecation-review, adding the comment-reference sweep.
-- ORB-10439 — `orbit auto-task generate <name>`, the on-demand manual mint.
+- ORB-10439 — `orbit auto-task mint <name>`, the on-demand manual mint.
 - ORB-10440 — Daily friction-curation definition.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.
