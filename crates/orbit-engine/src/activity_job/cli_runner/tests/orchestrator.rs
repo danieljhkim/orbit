@@ -1722,6 +1722,87 @@ fn non_fast_forward_primary_move_remains_a_typed_drift_failure() {
 }
 
 #[test]
+fn benign_primary_fast_forward_ignores_primary_dirt_disjoint_from_the_run() {
+    let fixture = linked_worktree_fixture();
+    let guard = boundary_guard(&fixture, "ORB-BENIGN-FF-DIRT", "run-benign-ff-dirt");
+
+    fs::write(fixture.assigned.join("candidate.txt"), "candidate\n").expect("write run candidate");
+    advance_primary(&fixture, "merged-pr.txt");
+    let unrelated = fixture.primary.join(".orbit/routines/worktree_gc.yaml");
+    fs::create_dir_all(unrelated.parent().expect("routines parent")).expect("create routines dir");
+    fs::write(&unrelated, "schemaVersion: 1\n").expect("write unrelated primary dirt");
+
+    let (result, events) = capture_events(|| guard.verify());
+    result.expect("an unrelated untracked primary path must not defeat a benign fast-forward");
+
+    assert!(
+        events.iter().any(|event| event
+            .field("ignored_primary_paths")
+            .is_some_and(|paths| paths.contains(".orbit/routines/worktree_gc.yaml"))),
+        "the accepted fast-forward must report the ignored primary path: {events:?}"
+    );
+    assert!(
+        unrelated.exists(),
+        "the guard must not clean the primary dirt it ignored"
+    );
+}
+
+#[test]
+fn primary_dirt_intersecting_the_run_defeats_a_fast_forward() {
+    for (kind, shared) in [("untracked", "shared-new.txt"), ("tracked", "README.md")] {
+        let fixture = linked_worktree_fixture();
+        let run_id = format!("run-{kind}-interference");
+        let task_id = format!("ORB-{}-INTERFERENCE", kind.to_ascii_uppercase());
+        let guard = boundary_guard(&fixture, &task_id, &run_id);
+
+        fs::write(fixture.assigned.join(shared), "run candidate\n").expect("write run candidate");
+        advance_primary(&fixture, "merged-pr.txt");
+        fs::write(fixture.primary.join(shared), "primary escape\n").expect("write primary escape");
+
+        let error = guard
+            .verify()
+            .expect_err("primary dirt on a path the run touched must fail closed");
+
+        assert_worktree_integrity_error(
+            &error,
+            "primary_checkout_drift",
+            (&task_id, &run_id, "codex"),
+            &fixture,
+            shared,
+        );
+        assert_eq!(
+            worktree_integrity_diagnostic(&error)["conflicting_paths"],
+            serde_json::json!([shared]),
+            "{kind} interference must be named as a conflicting path"
+        );
+    }
+}
+
+#[test]
+fn primary_branch_switch_remains_a_typed_drift_failure() {
+    let fixture = linked_worktree_fixture();
+    let guard = boundary_guard(&fixture, "ORB-PRIMARY-BRANCH", "run-primary-branch");
+
+    fs::write(fixture.assigned.join("candidate.txt"), "candidate\n").expect("write run candidate");
+    git_ok(
+        &fixture.primary,
+        &["checkout", "-b", "orbit-primary-switch"],
+    );
+
+    let error = guard
+        .verify()
+        .expect_err("a primary branch switch must remain fail closed");
+
+    assert_worktree_integrity_error(
+        &error,
+        "primary_checkout_drift",
+        ("ORB-PRIMARY-BRANCH", "run-primary-branch", "codex"),
+        &fixture,
+        "<branch-ref>",
+    );
+}
+
+#[test]
 fn primary_escape_is_checked_after_nonzero_exit_and_timeout() {
     for (terminal, trailer, timeout) in [
         ("nonzero", "exit 23", Duration::from_secs(5)),
@@ -1806,6 +1887,37 @@ fn linked_worktree_fixture() -> LinkedWorktreeFixture {
         assigned: assigned.canonicalize().expect("canonical assigned"),
         temp,
     }
+}
+
+/// Capture a boundary guard over the fixture's validated linked-worktree pair.
+fn boundary_guard(
+    fixture: &LinkedWorktreeFixture,
+    task_id: &str,
+    run_id: &str,
+) -> WorktreeBoundaryGuard {
+    let input = worktree_input(fixture, task_id);
+    let pair =
+        validate_declared_worktree_pair(&input, None, run_id, "codex", Some(&fixture.primary))
+            .expect("validate declared pair")
+            .expect("linked worktree pair");
+    WorktreeBoundaryGuard::capture(
+        &input,
+        None,
+        run_id,
+        "codex",
+        Some(&fixture.assigned),
+        Some(&fixture.primary),
+        Some(&pair),
+    )
+    .expect("capture boundary guard")
+    .expect("boundary guard enabled")
+}
+
+/// Fast-forward the registered primary the way a merged sibling PR does.
+fn advance_primary(fixture: &LinkedWorktreeFixture, path: &str) {
+    fs::write(fixture.primary.join(path), "merged\n").expect("write merged PR file");
+    git_ok(&fixture.primary, &["add", "--", path]);
+    git_ok(&fixture.primary, &["commit", "-m", "merge sibling PR"]);
 }
 
 fn git_ok(repo: &Path, args: &[&str]) {

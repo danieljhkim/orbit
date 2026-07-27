@@ -3,7 +3,7 @@ summary: "Activity / Job — Decisions"
 type: design
 title: "Activity / Job — Decisions"
 owner: codex
-last_updated: 2026-07-26
+last_updated: 2026-07-27
 last_validated: 2026-07-26
 status: Draft
 feature: activity-job
@@ -809,8 +809,17 @@ Narrative lives in the ADR store — retrieve it with `orbit tool run orbit.adr.
 
 ---
 
+## ADR-0292 — Primary fast-forward acceptance is decided by interference with the run, not primary dirty-state byte-identity
+
+**Status:** Proposed · 2026-07 · [ORB-10471]
+
+Narrative lives in the ADR store — retrieve it with `orbit tool run orbit.adr.show --input '{"id":"ADR-0292"}'`.
+
+---
+
 ## Task References
 
+- **[ORB-10471]** — Scope the worktree boundary guard's primary dirt check to paths the run touched, so unrelated primary dirt no longer defeats a benign fast-forward ([ADR-0292]).
 - **[ORB-10470]** — Make resume submit a detached run that starts at the failed checkpoint, and reconcile blocked/re-stamped tasks against the run's retry lineage ([ADR-0289]).
 - **[ORB-10467]** — Require independent review to reconcile late task authority and every acceptance criterion ([ADR-0288]).
 - **[ORB-10456]** — Resolve provider launchers at the shared CLI spawn boundary and add provider-aware missing-launcher diagnostics ([ADR-0259]).
