@@ -5,11 +5,12 @@ status: accepted
 owner: claude
 created_at: 2026-07-25T16:33:32.668297097Z
 accepted_at: 2026-07-25T16:33:41.557198863Z
-last_updated: 2026-07-25T16:43:28.897036178Z
+last_updated: 2026-07-27T00:08:29.813656698Z
 related_features:
 - project-learnings
 related_tasks:
 - ORB-10364
+- ORB-10469
 tags:
 - policy
 - knowledge
