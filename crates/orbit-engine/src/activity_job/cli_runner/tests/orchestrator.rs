@@ -1805,187 +1805,46 @@ fn dirty_integrity_failure_persists_and_restores_tracked_and_untracked_content()
 }
 
 #[test]
-fn one_clean_attributed_on_scope_commit_passes_the_provider_boundary_once() {
+fn provider_created_commit_is_a_typed_boundary_failure_without_admission_checks() {
     let fixture = linked_worktree_fixture();
-    let base_sha = String::from_utf8(git_bytes(&fixture.assigned, &["rev-parse", "HEAD"]))
-        .expect("utf8 base")
-        .trim()
-        .to_string();
-    let guard = boundary_guard_with_context(
-        &fixture,
-        "ORB-ADOPT-ONE",
-        "run-adopt-one",
-        &["file:candidate.txt"],
-    );
+    let guard = boundary_guard(&fixture, "ORB-REJECT-COMMIT", "run-reject-commit");
 
-    fs::write(fixture.assigned.join("candidate.txt"), "hook candidate\n")
-        .expect("write hook candidate");
+    fs::write(
+        fixture.assigned.join("candidate.txt"),
+        "provider candidate\n",
+    )
+    .expect("write provider candidate");
     git_ok(&fixture.assigned, &["add", "--", "candidate.txt"]);
     git_ok(
         &fixture.assigned,
         &[
             "commit",
             "-m",
-            "auto-commit",
+            "provider commit",
             "-m",
-            "Agent-Run: run-adopt-one\nAgent-Task: ORB-ADOPT-ONE",
+            "Agent-Run: run-reject-commit\nAgent-Task: ORB-REJECT-COMMIT",
         ],
     );
-    let adopted_sha = String::from_utf8(git_bytes(&fixture.assigned, &["rev-parse", "HEAD"]))
-        .expect("utf8 adopted sha")
-        .trim()
-        .to_string();
-
-    guard
-        .verify()
-        .expect("known clean Stop-hook commit is admissible");
-
-    assert_ne!(adopted_sha, base_sha);
-    assert_eq!(
-        String::from_utf8(git_bytes(
-            &fixture.assigned,
-            &["rev-list", "--count", &format!("{base_sha}..HEAD")],
-        ))
-        .expect("utf8 commit count")
-        .trim(),
-        "1",
-        "boundary validation must not create a second commit"
-    );
-    assert!(
-        String::from_utf8(git_bytes(
-            &fixture.assigned,
-            &["status", "--porcelain=v1", "--untracked-files=all"],
-        ))
-        .expect("utf8 clean status")
-        .trim()
-        .is_empty()
-    );
-}
-
-#[test]
-fn admitted_commit_does_not_mask_conflicting_primary_content() {
-    let fixture = linked_worktree_fixture();
-    let guard = boundary_guard_with_context(
-        &fixture,
-        "ORB-ADOPT-CONFLICT",
-        "run-adopt-conflict",
-        &["file:candidate.txt"],
-    );
-
-    fs::write(fixture.assigned.join("candidate.txt"), "hook candidate\n")
-        .expect("write hook candidate");
-    git_ok(&fixture.assigned, &["add", "--", "candidate.txt"]);
-    git_ok(
-        &fixture.assigned,
-        &[
-            "commit",
-            "-m",
-            "auto-commit",
-            "-m",
-            "Agent-Run: run-adopt-conflict\nAgent-Task: ORB-ADOPT-CONFLICT",
-        ],
-    );
-    fs::write(fixture.primary.join("candidate.txt"), "primary escape\n")
-        .expect("write conflicting primary content");
 
     let error = guard
         .verify()
-        .expect_err("an admissible assigned commit cannot excuse primary interference");
-    assert_worktree_integrity_error(
-        &error,
-        "primary_checkout_drift",
-        ("ORB-ADOPT-CONFLICT", "run-adopt-conflict", "codex"),
-        &fixture,
-        "candidate.txt",
-    );
-    assert_eq!(
-        worktree_integrity_diagnostic(&error)["conflicting_paths"],
-        serde_json::json!(["candidate.txt"])
-    );
-}
-
-#[test]
-fn multiple_or_off_scope_commits_remain_typed_boundary_failures() {
-    for shape in ["multiple", "off-scope"] {
-        let fixture = linked_worktree_fixture();
-        let task_id = format!("ORB-{}", shape.to_ascii_uppercase());
-        let run_id = format!("run-{shape}");
-        let guard =
-            boundary_guard_with_context(&fixture, &task_id, &run_id, &["file:candidate.txt"]);
-
-        fs::write(fixture.assigned.join("candidate.txt"), "candidate\n")
-            .expect("write first candidate");
-        git_ok(&fixture.assigned, &["add", "--", "candidate.txt"]);
-        git_ok(
-            &fixture.assigned,
-            &[
-                "commit",
-                "-m",
-                "first",
-                "-m",
-                &format!("Agent-Run: {run_id}\nAgent-Task: {task_id}"),
-            ],
-        );
-        if shape == "multiple" {
-            fs::write(fixture.assigned.join("candidate.txt"), "second candidate\n")
-                .expect("write second candidate");
-        } else {
-            fs::write(fixture.assigned.join("unrelated.txt"), "unrelated\n")
-                .expect("write off-scope candidate");
+        .expect_err("provider-created commits are never admissible");
+    assert!(matches!(
+        error,
+        DispatchError::WorktreeIntegrity {
+            code: "worktree_content_conflict",
+            ..
         }
-        let path = if shape == "multiple" {
-            "candidate.txt"
-        } else {
-            "unrelated.txt"
-        };
-        git_ok(&fixture.assigned, &["add", "--", path]);
-        if shape == "multiple" {
-            git_ok(
-                &fixture.assigned,
-                &[
-                    "commit",
-                    "-m",
-                    "second",
-                    "-m",
-                    &format!("Agent-Run: {run_id}\nAgent-Task: {task_id}"),
-                ],
-            );
-        } else {
-            git_ok(
-                &fixture.assigned,
-                &[
-                    "commit",
-                    "--amend",
-                    "-m",
-                    "off scope",
-                    "-m",
-                    &format!("Agent-Run: {run_id}\nAgent-Task: {task_id}"),
-                ],
-            );
-        }
-
-        let error = guard
-            .verify()
-            .expect_err("unrelated commit history must fail closed");
-        assert!(matches!(
-            error,
-            DispatchError::WorktreeIntegrity {
-                code: "worktree_content_conflict",
-                ..
-            }
-        ));
-        let diagnostic = worktree_integrity_diagnostic(&error);
-        assert!(
-            diagnostic["reason"]
-                .as_str()
-                .is_some_and(|reason| reason.contains(if shape == "multiple" {
-                    "advanced by 2 commits"
-                } else {
-                    "not confined to the admitted task scope"
-                })),
-            "{shape}: {diagnostic}"
-        );
-    }
+    ));
+    let diagnostic = worktree_integrity_diagnostic(&error);
+    let reason = diagnostic["reason"].as_str().expect("typed reason");
+    assert!(
+        reason.contains("must not create commits or move HEAD"),
+        "{reason}"
+    );
+    assert!(!reason.contains("Agent-Run"), "{reason}");
+    assert!(!reason.contains("Agent-Task"), "{reason}");
+    assert!(!reason.contains("candidate.txt"), "{reason}");
 }
 
 #[test]
@@ -2402,27 +2261,14 @@ fn boundary_guard(
     task_id: &str,
     run_id: &str,
 ) -> WorktreeBoundaryGuard {
-    boundary_guard_with_context(fixture, task_id, run_id, &["dir:."])
-}
-
-fn boundary_guard_with_context(
-    fixture: &LinkedWorktreeFixture,
-    task_id: &str,
-    run_id: &str,
-    context_files: &[&str],
-) -> WorktreeBoundaryGuard {
     let input = worktree_input(fixture, task_id);
     let pair =
         validate_declared_worktree_pair(&input, None, run_id, "codex", Some(&fixture.primary))
             .expect("validate declared pair")
             .expect("linked worktree pair");
-    let task_context = serde_json::json!({
-        "id": task_id,
-        "context_files": context_files,
-    });
     WorktreeBoundaryGuard::capture(
         &input,
-        Some(&task_context),
+        None,
         run_id,
         "codex",
         Some(&fixture.assigned),

@@ -701,7 +701,7 @@ superseded, and its own flag keeps its meaning.
 
 ## ADR-0251 — Pipeline steps consume a base commit pinned at worktree setup, never a moving ref name
 
-**Status:** Accepted · 2026-07 · [ORB-10380] · adoption/history-rewrite policy amended by [ADR-0294]
+**Status:** Accepted · 2026-07 · [ORB-10380] · commit-adoption clauses superseded by [ADR-0299]
 
 **Context.** `worktree_setup` published only the *name* of its start point (`origin/<base>`), and the `commit` step re-resolved that name to decide whether HEAD descended from the base. `refs/remotes/origin/<base>` is shared by every worktree hanging off one `.git`, and any sibling run's setup fetch, any rescue fetch, and every merge moves it. Once it moved, `merge-base --is-ancestor <new tip> HEAD` was false by construction and the commit step failed — so each new run's fetch retroactively invalidated every older in-flight run, making concurrent dispatch unsafe (five failures on 2026-07-25, verified 7/7 against the reflog and reproduced end-to-end). The alternatives were to make `commit` tolerate a moved base by inspecting divergence at commit time — which leaves the step reading state that keeps changing underneath it — or to move base reconciliation earlier, which only relocates the same race.
 
@@ -711,12 +711,14 @@ Three related repairs land with it. A non-descendant HEAD falls back to `merge-b
 
 Commits found above the pinned base are adopted with a loud `warn` naming the shas. Under the pinned base and the pipeline-owned-git-context rule, no sanctioned actor commits during implementation; the known live source is an external editor `Stop` hook that auto-commits inside the worktree. Adoption preserves the work and its authorship, which beats discarding or rewriting it. **Revisit trigger:** once implementing agents and their host hooks are provably non-committing (the activity contract is [ORB-10381]'s), this becomes a hard failure instead of a warning.
 
+**Amendment ([ORB-10519] / [ADR-0299]).** The revisit trigger fired: the provider boundary now rejects every assigned HEAD or branch movement, and `git_commit` compares HEAD directly with the pinned SHA before creating the sole workflow-owned commit. The history counting, merge-base fallback, and commit-adoption clauses above are superseded; the pinned-object-id and moving-ref decisions remain active.
+
 **Consequences.**
 - Concurrent dispatch is safe again: a sibling run's fetch, a rescue fetch, or a merge landing mid-run cannot fail an older run's commit step.
 - A failure in this step now names what was observed, so triage stops inferring a cause from a shared string — the previous message cost three diagnosis cycles, two of which reached confidently wrong conclusions.
 - A side-effect-only task no longer hard-fails when its history cannot be reconciled; it skips the phase as ADR-0219 intended.
-- Cost: `git_commit`'s contract is stricter — a caller that passes only `base_ref` attributes no history at all, rather than silently resolving a name. Direct/leaf invocations must pass a pinned `base_sha` to get commit adoption.
-- Cost: unsanctioned commits inside a worktree are tolerated (loudly) until the revisit trigger fires.
+- Cost: `git_commit`'s contract is stricter — a caller that passes only `base_ref` gets no immutable-HEAD check, rather than silently resolving a name. Direct/leaf invocations must pass a pinned `base_sha` to enforce the setup checkpoint.
+- Cost: after [ADR-0299], unsanctioned commits inside an assigned worktree are rejected even when their content could be proven task-local.
 
 ---
 
@@ -824,16 +826,25 @@ Narrative lives in the ADR store — retrieve it with `orbit tool run orbit.adr.
 Narrative lives in the ADR store — retrieve it with `orbit tool run orbit.adr.show --input '{"id":"ADR-0295"}'`.
 ## ADR-0294 — Preserve failed worktree state before cleanup and admit only proven task commits
 
-**Status:** Accepted · 2026-07 · [ORB-10468]
+**Status:** Superseded by [ADR-0299] · 2026-07 · [ORB-10519]
 
 Narrative lives in the ADR store — retrieve it with `orbit tool run orbit.adr.show --input '{"id":"ADR-0294"}'`.
 
 ---
 
+## ADR-0299 — Workflow alone creates shipment commits while dirty failures remain recoverable
+
+**Status:** Accepted · 2026-07 · [ORB-10519]
+
+Narrative lives in the ADR store — retrieve it with `orbit tool run orbit.adr.show --input '{"id":"ADR-0299"}'`.
+
+---
+
 ## Task References
 
+- **[ORB-10519]** — Restore one workflow-owned shipment commit, reject every provider-side HEAD change, and preserve dirty-work recovery plus process-scoped attribution ([ADR-0299], superseding [ADR-0294] and [ADR-0249]).
 - **[ORB-10499]** — Confirm the duplicate implement invocation as the executor's bounded post-recovery attempt, and let the re-dispatched attempt exit on a write-gated task ([ADR-0295], resolving [F2026-07-174]).
-- **[ORB-10468]** — Preserve dirty integrity failures as run-keyed restorable artifacts and narrow assigned-history adoption to one task/run-attributed on-scope commit ([ADR-0294], amending [ADR-0251]).
+- **[ORB-10468]** — Introduce run-keyed dirty integrity recovery plus the now-superseded provider-commit admission policy ([ADR-0294], superseded by [ADR-0299]).
 - **[ORB-10471]** — Scope the worktree boundary guard's primary dirt check to paths the run touched, so unrelated primary dirt no longer defeats a benign fast-forward ([ADR-0292]).
 - **[ORB-10470]** — Make resume submit a detached run that starts at the failed checkpoint, and reconcile blocked/re-stamped tasks against the run's retry lineage ([ADR-0289]).
 - **[ORB-10467]** — Require independent review to reconcile late task authority and every acceptance criterion ([ADR-0288]).

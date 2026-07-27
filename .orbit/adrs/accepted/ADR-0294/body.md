@@ -1,8 +1,0 @@
-## Context
-The provider boundary can fail after producing either dirty uncommitted work or a clean hook-authored commit. Hash-only diagnostics cannot restore dirty content, while rejecting every assigned-HEAD move prevents the downstream commit phase from adopting a commit it can prove belongs to the admitted run. Alternatives were to retain every failed worktree indefinitely, use the process-global stash namespace, or preserve a run-keyed artifact while narrowly admitting provable commits.
-## Decision
-Before returning a dirty linked-worktree integrity failure, store a binary tracked patch and untracked-file payload under the repository Git common directory keyed by run id, and cite that artifact in the typed diagnostic. Across the provider boundary and commit phase, admit only a clean same-branch one-commit fast-forward whose run/task trailers and changed paths match the admitted task; reject rewrites, branch changes, off-scope or unattributed commits, and mixed commit-plus-dirty state.
-## Consequences
-- Forced worktree cleanup no longer destroys the only copy of uncommitted implementation bytes; the artifact can restore the candidate onto its recorded HEAD.
-- A known Stop-hook commit passes the boundary and is adopted by the commit phase without an extra commit or history rewrite.
-- Cost: preservation duplicates dirty bytes in the Git common directory until an operator removes the recovery artifact, and conservative admission may reject legitimate manually-authored history that lacks run/task trailers or falls outside declared context.

@@ -156,8 +156,8 @@ spec:
        remaining delivery steps; do not preempt a viable pipeline retry. In
        that case:
        - verify the candidate tree still matches the completed implementation;
-       - commit with the implementing crew's identity and set AGENT_MODEL for
-         the prepare-commit-msg hook;
+       - commit with the implementing crew's author identity and the
+         process-scoped Orbit committer identity;
        - resolve the target base to one exact SHA and keep that SHA pinned while
          rebasing, then push the task branch;
        - open or reuse a PR against the intended base, then confirm by query

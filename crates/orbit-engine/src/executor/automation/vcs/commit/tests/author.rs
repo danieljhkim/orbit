@@ -1,5 +1,5 @@
 use std::fs;
-use std::os::unix::fs::PermissionsExt;
+use std::process::Command;
 
 use orbit_common::types::{OrbitError, TaskType};
 use serde_json::json;
@@ -159,10 +159,9 @@ fn git_commit_treats_bare_configured_model_as_opaque() {
 }
 
 #[test]
-fn git_commit_gives_hook_the_same_model_and_preserves_other_trailers() {
+fn git_commit_preserves_model_author_and_coauthors_without_commit_hooks() {
     let temp = initialized_git_repo();
     let workspace = temp.path();
-    install_telemetry_hook(workspace);
     fs::create_dir_all(workspace.join("src")).unwrap();
     fs::write(workspace.join("src/one.txt"), "one\n").unwrap();
     fs::write(workspace.join("src/two.txt"), "two\n").unwrap();
@@ -178,14 +177,14 @@ fn git_commit_gives_hook_the_same_model_and_preserves_other_trailers() {
         "workspace_path": workspace.to_string_lossy().to_string(),
     });
 
-    git_commit(&host, &input).expect("git_commit succeeds with telemetry hook");
+    git_commit(&host, &input).expect("git_commit succeeds without a commit hook");
 
     let author = git_output(workspace, &["log", "-1", "--format=%an"]).expect("read model author");
     let body = git_output(workspace, &["log", "-1", "--format=%B"]).expect("read commit body");
     assert_eq!(author, "orbit[claude-opus-5]");
-    assert!(body.contains("Agent-Run: inherited-run"), "{body}");
-    assert!(body.contains("Agent-Model: claude-opus-5"), "{body}");
-    assert!(body.contains("Agent-Task: T1"), "{body}");
+    assert!(!body.contains("Agent-Run:"), "{body}");
+    assert!(!body.contains("Agent-Model:"), "{body}");
+    assert!(!body.contains("Agent-Task:"), "{body}");
     assert!(
         body.contains("Co-Authored-By: claude <claude@orbit.local>"),
         "{body}"
@@ -281,8 +280,8 @@ fn git_commit_batch_errors_on_empty_stage() {
         format!(
             "commit_batch_changes: nothing to commit for task 'T1' in worktree '{}'. \
              Observed after `git add --all`: 0 staged, 0 unstaged, 0 untracked file(s); \
-             HEAD {base_sha}; pinned base {base_sha}; 0 commit(s) above it. Orbit did not \
-             inspect, stage, reset, or reconcile any other checkout",
+             HEAD {base_sha}; pinned base {base_sha}. Orbit did not inspect, stage, or reset any \
+             other checkout",
             workspace.display()
         )
     );
@@ -293,7 +292,81 @@ fn git_commit_batch_errors_on_empty_stage() {
 }
 
 #[test]
-fn git_commit_batch_adopts_implement_authored_commits_without_rewriting_them() {
+fn git_commit_batch_rejects_detached_head_before_staging() {
+    let temp = initialized_git_repo();
+    let workspace = temp.path();
+    let base_sha = git_output(workspace, &["rev-parse", "HEAD"]).expect("read base checkpoint");
+    git_success(workspace, &["checkout", "--detach", &base_sha]).expect("detach fixture HEAD");
+    fs::write(workspace.join("detached.txt"), "candidate\n").expect("write candidate");
+
+    let task = task_with_file("T1", "Detached task", "detached.txt", "codex");
+    let host = CommitTestHost::new(vec![task], workspace.to_path_buf());
+    let input = json!({
+        "scope": "all",
+        "job_run_id": "batch-1",
+        "workspace_path": workspace.to_string_lossy().to_string(),
+        "base_sha": base_sha,
+    });
+
+    let error = git_commit(&host, &input).expect_err("detached HEAD must fail");
+    assert!(
+        error.to_string().contains("expected a named branch"),
+        "{error}"
+    );
+    assert_eq!(
+        git_output(workspace, &["status", "--porcelain"]).expect("read status"),
+        "?? detached.txt",
+        "named-branch validation must run before staging"
+    );
+}
+
+#[test]
+fn git_commit_batch_rejects_unmerged_changes_before_staging() {
+    let temp = initialized_git_repo();
+    let workspace = temp.path();
+    let original_branch =
+        git_output(workspace, &["rev-parse", "--abbrev-ref", "HEAD"]).expect("read branch");
+
+    git_success(workspace, &["checkout", "-b", "conflict-side"]).expect("create side branch");
+    fs::write(workspace.join("README.md"), "side\n").expect("write side");
+    git_success(workspace, &["add", "README.md"]).expect("stage side");
+    git_success(workspace, &["commit", "-m", "side"]).expect("commit side");
+
+    git_success(workspace, &["checkout", &original_branch]).expect("restore original branch");
+    fs::write(workspace.join("README.md"), "main\n").expect("write main");
+    git_success(workspace, &["add", "README.md"]).expect("stage main");
+    git_success(workspace, &["commit", "-m", "main"]).expect("commit main");
+    let merge = Command::new("git")
+        .args(["merge", "conflict-side"])
+        .current_dir(workspace)
+        .output()
+        .expect("run conflicting merge");
+    assert!(!merge.status.success(), "fixture merge must conflict");
+
+    let task = task_with_file("T1", "Conflict task", "README.md", "codex");
+    let host = CommitTestHost::new(vec![task], workspace.to_path_buf());
+    let input = json!({
+        "scope": "all",
+        "job_run_id": "batch-1",
+        "workspace_path": workspace.to_string_lossy().to_string(),
+    });
+
+    let error = git_commit(&host, &input).expect_err("unmerged changes must fail");
+    assert!(
+        error.to_string().contains("unresolved merge conflicts"),
+        "{error}"
+    );
+    assert!(
+        git_output(workspace, &["status", "--porcelain"])
+            .expect("read status")
+            .lines()
+            .any(|line| line.starts_with("UU README.md")),
+        "unmerged state remains intact"
+    );
+}
+
+#[test]
+fn git_commit_batch_rejects_a_provider_created_commit_without_inspecting_it() {
     let temp = initialized_git_repo();
     let workspace = temp.path();
     let base_sha = git_output(workspace, &["rev-parse", "HEAD"]).expect("read base checkpoint");
@@ -317,14 +390,6 @@ fn git_commit_batch_adopts_implement_authored_commits_without_rewriting_them() {
     .expect("author attributed implementation commit");
 
     let head_before = git_output(workspace, &["rev-parse", "HEAD"]).expect("read authored head");
-    let authored_shas = git_output(
-        workspace,
-        &["rev-list", "--reverse", &format!("{base_sha}..HEAD")],
-    )
-    .expect("read authored commits")
-    .lines()
-    .map(ToOwned::to_owned)
-    .collect::<Vec<_>>();
     let task = task_with_file("T1", "History surgery", "README.md", "codex");
     let host = CommitTestHost::new(vec![task], workspace.to_path_buf());
     let input = json!({
@@ -334,19 +399,18 @@ fn git_commit_batch_adopts_implement_authored_commits_without_rewriting_them() {
         "base_sha": base_sha,
     });
 
-    let result = git_commit(&host, &input).expect("commit-only batch succeeds");
-
-    assert_eq!(result["decision"], "adopted_existing_commits");
-    assert_eq!(result["committed"], false);
-    assert_eq!(result["adopted_commits"], true);
-    assert_eq!(result["task_id"], "T1");
-    assert_eq!(result["job_run_id"], "batch-1");
-    assert_eq!(result["commit_shas"], json!(authored_shas));
-    assert_eq!(result["commit_sha"], head_before);
+    let error = git_commit(&host, &input).expect_err("provider-created commit must be rejected");
+    let message = error.to_string();
+    assert!(message.contains("worktree_head_changed"), "{message}");
+    assert!(message.contains(&base_sha), "{message}");
+    assert!(message.contains(&head_before), "{message}");
+    assert!(!message.contains("Agent-Run"), "{message}");
+    assert!(!message.contains("Agent-Task"), "{message}");
+    assert!(!message.contains("README.md"), "{message}");
     assert_eq!(
         git_output(workspace, &["rev-parse", "HEAD"]).expect("read final head"),
         head_before,
-        "the pipeline must not create or amend a commit"
+        "the pipeline must not adopt, amend, or replace the provider commit"
     );
     assert_eq!(
         git_output(workspace, &["log", "-1", "--format=%an <%ae>"]).expect("read retained author"),
@@ -355,7 +419,7 @@ fn git_commit_batch_adopts_implement_authored_commits_without_rewriting_them() {
 }
 
 #[test]
-fn git_commit_batch_rejects_dirty_residue_above_an_attributed_commit() {
+fn git_commit_batch_rejects_changed_head_before_staging_dirty_residue() {
     let temp = initialized_git_repo();
     let workspace = temp.path();
     let base_sha = git_output(workspace, &["rev-parse", "HEAD"]).expect("read base checkpoint");
@@ -391,16 +455,16 @@ fn git_commit_batch_rejects_dirty_residue_above_an_attributed_commit() {
         "base_sha": base_sha,
     });
 
-    let error = git_commit(&host, &input).expect_err("mixed commit-plus-dirty state is ambiguous");
+    let error = git_commit(&host, &input).expect_err("changed HEAD is immutable");
     assert!(
-        error.to_string().contains("worktree_content_conflict"),
+        error.to_string().contains("worktree_head_changed"),
         "{error}"
     );
-    assert!(error.to_string().contains("residue.txt"), "{error}");
+    assert!(!error.to_string().contains("residue.txt"), "{error}");
     assert_eq!(
         git_output(workspace, &["rev-parse", "HEAD"]).expect("read unchanged head"),
         authored_sha,
-        "the conflict must not create a residue commit"
+        "the immutable-base failure must not create a residue commit"
     );
     assert_eq!(
         git_output(
@@ -447,11 +511,11 @@ fn git_commit_batch_does_not_adopt_commits_reachable_only_from_another_branch() 
     let message = error.to_string();
     assert!(message.contains("nothing to commit"), "{message}");
     assert!(
-        message.contains("0 commit(s) above it"),
-        "the diagnostic reports the observed count, not a guess: {message}"
+        message.contains("pinned base"),
+        "the diagnostic names the immutable checkpoint: {message}"
     );
     assert!(
-        message.contains("Orbit did not inspect, stage, reset, or reconcile any other checkout"),
+        message.contains("Orbit did not inspect, stage, or reset any other checkout"),
         "{message}"
     );
     assert_eq!(
@@ -490,7 +554,7 @@ fn git_commit_batch_rejects_history_rewritten_below_the_pinned_base() {
 
     let error = git_commit(&host, &input).expect_err("rewritten history is never adopted");
     let message = error.to_string();
-    assert!(message.contains("worktree_history_rewritten"), "{message}");
+    assert!(message.contains("worktree_head_changed"), "{message}");
     assert!(message.contains(&base_sha), "{message}");
     assert!(message.contains(&divergent_head), "{message}");
     assert_eq!(
@@ -535,7 +599,7 @@ fn git_commit_empty_diff_never_stages_or_resets_registered_primary_checkout() {
         "the diagnostic reports the assigned worktree, never the primary checkout: {message}"
     );
     assert!(
-        message.contains("Orbit did not inspect, stage, reset, or reconcile any other checkout"),
+        message.contains("Orbit did not inspect, stage, or reset any other checkout"),
         "{message}"
     );
     assert_eq!(
@@ -593,23 +657,4 @@ fn git_commit_batch_rejects_multiple_tasks() {
             .to_string()
             .contains("commit_batch_changes expected exactly one task")
     );
-}
-
-fn install_telemetry_hook(workspace: &std::path::Path) {
-    let hook = workspace
-        .join(".git")
-        .join("orbit-test-empty-hooks")
-        .join("prepare-commit-msg");
-    fs::write(
-        &hook,
-        "#!/bin/sh\n\
-         printf '\\nAgent-Run: inherited-run\\nAgent-Model: %s\\nAgent-Task: T1\\n' \
-         \"${AGENT_MODEL:-}\" >> \"$1\"\n",
-    )
-    .expect("write prepare-commit-msg fixture");
-    let mut permissions = fs::metadata(&hook)
-        .expect("read hook metadata")
-        .permissions();
-    permissions.set_mode(0o755);
-    fs::set_permissions(&hook, permissions).expect("make hook executable");
 }
