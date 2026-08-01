@@ -1461,3 +1461,91 @@ async fn ship_endpoint_rejects_duplicate_task_ids() {
             .is_some_and(|message| message.contains("duplicate task id"))
     );
 }
+
+/// ORB-10540: the MCP `orbit.workflow.ship` tool and `POST /api/workflows/ship`
+/// are two front doors onto one irreversible operation, so they have to agree.
+///
+/// Both calls name the same explicit task ids and neither states a mode, so the
+/// resolved ship mode is derived rather than echoed — the workspace binding here
+/// is `local`, which is *not* the endpoint's historical `pr` fallback, so a
+/// surface that resolved the mode its own way would show up as a mismatch.
+///
+/// The HTTP call goes first on purpose: the endpoint refuses a second dispatch
+/// for a task already carried by a non-terminal run, and the tool has no such
+/// guard, so this is the only order in which both surfaces can dispatch the same
+/// ids. (That asymmetry is a real finding, filed as ORB-10544 rather than fixed
+/// here.)
+///
+/// `ORBIT_OPERATOR` is how this crate's tests reach an operator-authorized tool
+/// call: `run_tool_with_context_and_role` — the form a validated MCP operator
+/// session takes — is crate-private to `orbit-core`, and the session-capability
+/// spelling of these same tools is covered by the `orbit-core` tool-host tests.
+/// Both spellings resolve to `McpCapability::Operator` at the one chokepoint and
+/// then execute the identical tool.
+#[tokio::test]
+async fn mcp_ship_tool_and_http_ship_endpoint_produce_equivalent_runs() {
+    const TASK_IDS: [&str; 2] = ["TST-00001", "TST-00002"];
+
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let global_root = tmp.path().join("global");
+    std::fs::create_dir_all(&global_root).expect("create global root");
+    write_replay_job_under(&global_root, "task_auto_pipeline");
+    let (orbit_dir, repo_root) = seed_ship_workspace(tmp.path(), "alpha");
+    let runtime = OrbitRuntime::from_roots_with_binding(
+        &global_root,
+        &orbit_dir,
+        WorkspaceRuntimeBinding {
+            workspace_id: "ws_alpha".to_string(),
+            repo_root,
+            ship_mode: ShipMode::Local,
+        },
+    )
+    .expect("build bound runtime");
+
+    let response = request_ship(runtime.clone(), Some(json!({ "task_ids": TASK_IDS }))).await;
+    let status = response.status();
+    let http = body_json(response).await;
+    assert_eq!(status, StatusCode::OK, "unexpected ship response: {http}");
+
+    // Scoped to the synchronous tool call: the guard holds a process-wide lock,
+    // which must not span an `.await`.
+    let tool = {
+        let _env = orbit_common::test_env::scoped(
+            std::iter::once((
+                orbit_common::authorization::OPERATOR_OVERRIDE_ENV,
+                Some("1"),
+            ))
+            .chain(
+                orbit_common::test_env::MANAGED_RUN_ENV
+                    .iter()
+                    .map(|name| (*name, None)),
+            ),
+        );
+        runtime
+            .run_tool("orbit.workflow.ship", json!({ "task_ids": TASK_IDS }))
+            .expect("operator ship through the tool surface")
+    };
+
+    assert_eq!(tool["workflow"], http["workflow"]);
+    assert_eq!(tool["job_id"], http["job_id"]);
+    assert_eq!(tool["job_id"], json!("task_auto_pipeline"));
+
+    let run_input = |payload: &Value| {
+        runtime
+            .show_job_run(payload["run_id"].as_str().expect("run id"))
+            .expect("submitted run is persisted")
+            .input
+            .expect("persisted run input")
+    };
+    let http_input = run_input(&http);
+    let tool_input = run_input(&tool);
+
+    assert_ne!(
+        http["run_id"], tool["run_id"],
+        "the two surfaces must produce distinct runs to compare"
+    );
+    assert_eq!(http_input["mode"], json!("local"));
+    assert_eq!(tool_input["mode"], http_input["mode"]);
+    assert_eq!(http_input["task_ids"], json!(TASK_IDS));
+    assert_eq!(tool_input["task_ids"], http_input["task_ids"]);
+}
