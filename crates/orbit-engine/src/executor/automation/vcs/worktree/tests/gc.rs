@@ -10,6 +10,7 @@ use orbit_common::types::{
     ExternalRef, JobRun, JobRunState, NotFoundKind, OrbitError, Task, TaskArtifact, TaskPriority,
     TaskStatus, TaskType,
 };
+use orbit_store::{IdAllocator, IdAllocatorConfig};
 use serde_json::{Value, json};
 use tempfile::tempdir;
 
@@ -733,6 +734,117 @@ fn removal_without_force_fails_closed_on_a_dirty_worktree() {
     );
 }
 
+/// F2026-07-094: forced pipeline cleanup previously discarded the only
+/// readable learning and ADR bodies, leaving their shared allocation rows as
+/// permanently unreadable stubs. Force must not bypass the knowledge guard.
+#[test]
+fn forced_removal_refuses_unique_learning_and_adr_bodies() {
+    let temp = tempdir().unwrap();
+    let repo = temp.path().join("repo");
+    init_repo(&repo);
+    let worktree = repo.join(".orbit/state/worktrees/orbit-jrun-unique-bodies");
+    add_worktree(&repo, &worktree, "orbit/unique-bodies");
+    let allocator = knowledge_allocator(&repo, &worktree);
+    let learning = write_learning_body(&allocator, &worktree, b"only learning body\n");
+    let adr = write_adr_body(&allocator, &worktree, b"only ADR body\n");
+    commit_knowledge_bodies(&worktree);
+
+    let error = remove_worktree(&repo, &worktree, Some("orbit/unique-bodies"), true)
+        .expect_err("forced cleanup must preserve unique knowledge bodies");
+
+    let diagnostic = format!("{error}");
+    assert!(worktree.exists());
+    assert!(
+        diagnostic.contains(&learning),
+        "missing {learning}: {diagnostic}"
+    );
+    assert!(diagnostic.contains(&adr), "missing {adr}: {diagnostic}");
+    assert!(diagnostic.contains("Reconcile each body"), "{diagnostic}");
+    assert!(diagnostic.contains("then retry cleanup"), "{diagnostic}");
+}
+
+/// The GC caller uses the ordinary non-forced removal path. It must surface
+/// the same refusal before `git worktree remove` can discard the body.
+#[test]
+fn gc_refuses_a_worktree_with_a_unique_adr_body() {
+    let temp = tempdir().unwrap();
+    let repo = temp.path().join("repo");
+    init_repo(&repo);
+    let run = pipeline_run("jrun-unique-adr", JobRunState::Success, &["ORB-UNIQUE-ADR"]);
+    let worktree = resolved_task_worktree(&repo, &run);
+    add_worktree(&repo, &worktree, "orbit/unique-adr");
+    let allocator = knowledge_allocator(&repo, &worktree);
+    let adr = write_adr_body(&allocator, &worktree, b"unique GC ADR body\n");
+    commit_knowledge_bodies(&worktree);
+    let host = FakeTaskHost::new(vec![task_fixture("ORB-UNIQUE-ADR", TaskStatus::Done)]);
+
+    let error = collect_worktrees(
+        &repo,
+        &[run],
+        &host,
+        &WorktreeGcOptions {
+            delete: true,
+            ..Default::default()
+        },
+    )
+    .expect_err("GC must preserve a unique ADR body");
+
+    let diagnostic = format!("{error}");
+    assert!(worktree.exists());
+    assert!(diagnostic.contains(&adr), "missing {adr}: {diagnostic}");
+    assert!(diagnostic.contains("only readable body"), "{diagnostic}");
+}
+
+/// A stale worktree-local allocation is safe to collect after its exact body
+/// has landed in the canonical checkout. The allocator row may still point at
+/// the old worktree; body durability, not stale path metadata, is the gate.
+#[test]
+fn forced_removal_succeeds_when_the_learning_body_is_canonical() {
+    let temp = tempdir().unwrap();
+    let repo = temp.path().join("repo");
+    init_repo(&repo);
+    let worktree = repo.join(".orbit/state/worktrees/orbit-jrun-durable-learning");
+    add_worktree(&repo, &worktree, "orbit/durable-learning");
+    let allocator = knowledge_allocator(&repo, &worktree);
+    let body = b"durable learning body\n";
+    let learning = write_learning_body(&allocator, &worktree, body);
+    commit_knowledge_bodies(&worktree);
+    let canonical = repo
+        .join(".orbit/learnings")
+        .join(&learning)
+        .join("learning.yaml");
+    fs::create_dir_all(canonical.parent().unwrap()).unwrap();
+    fs::write(canonical, body).unwrap();
+
+    remove_worktree(&repo, &worktree, Some("orbit/durable-learning"), true)
+        .expect("a canonical copy makes forced removal safe");
+
+    assert!(!worktree.exists());
+}
+
+/// An allocation pinned to a different live worktree is an ordinary remote
+/// stub from the cleanup target's perspective. Its readable body is not at
+/// risk, so it must not make unrelated worktree collection fail.
+#[test]
+fn removal_ignores_a_readable_remote_stub_in_another_worktree() {
+    let temp = tempdir().unwrap();
+    let repo = temp.path().join("repo");
+    init_repo(&repo);
+    let removed = repo.join(".orbit/state/worktrees/orbit-jrun-unrelated");
+    let remote = repo.join(".orbit/state/worktrees/orbit-jrun-remote-body");
+    add_worktree(&repo, &removed, "orbit/unrelated");
+    add_worktree(&repo, &remote, "orbit/remote-body");
+    let allocator = knowledge_allocator(&repo, &remote);
+    write_learning_body(&allocator, &remote, b"readable remote body\n");
+    commit_knowledge_bodies(&remote);
+
+    remove_worktree(&repo, &removed, Some("orbit/unrelated"), true)
+        .expect("an unrelated remote stub must not block cleanup");
+
+    assert!(!removed.exists());
+    assert!(remote.exists());
+}
+
 /// A run record shaped exactly like a real `task_pr_pipeline` run: `task_ids`
 /// as an array, no `branch_prefix`, and no singular `task_id`. Also no
 /// `run_id` — the engine injects that into the activity input at dispatch, so
@@ -822,6 +934,47 @@ fn add_worktree(repo: &Path, path: &Path, branch: &str) {
             "HEAD",
         ],
     );
+}
+
+fn knowledge_allocator(repo: &Path, worktree: &Path) -> IdAllocator {
+    IdAllocator::open(IdAllocatorConfig::new(
+        repo.join(".orbit/state/semantic.db"),
+        repo.join(".orbit/state/.id_alloc.lock"),
+        repo.join(".orbit"),
+        worktree.to_path_buf(),
+        worktree.join(".orbit/adrs"),
+        worktree.join(".orbit/learnings"),
+    ))
+    .unwrap()
+}
+
+fn write_learning_body(allocator: &IdAllocator, worktree: &Path, body: &[u8]) -> String {
+    let id = allocator.allocate_learning().unwrap().id;
+    let path = worktree
+        .join(".orbit/learnings")
+        .join(&id)
+        .join("learning.yaml");
+    fs::create_dir_all(path.parent().unwrap()).unwrap();
+    fs::write(&path, body).unwrap();
+    allocator.record_learning_body_path(&id, &path).unwrap();
+    id
+}
+
+fn write_adr_body(allocator: &IdAllocator, worktree: &Path, body: &[u8]) -> String {
+    let id = allocator.allocate_adr().unwrap().id;
+    let path = worktree
+        .join(".orbit/adrs/proposed")
+        .join(&id)
+        .join("body.md");
+    fs::create_dir_all(path.parent().unwrap()).unwrap();
+    fs::write(&path, body).unwrap();
+    allocator.record_adr_body_path(&id, &path).unwrap();
+    id
+}
+
+fn commit_knowledge_bodies(worktree: &Path) {
+    git(worktree, &["add", ".orbit"]);
+    git(worktree, &["commit", "-m", "knowledge bodies"]);
 }
 
 fn git(current_dir: &Path, args: &[&str]) -> String {
