@@ -32,6 +32,10 @@ const PIPELINE_WAIT_MIN_POLL_SECONDS: u64 = 1;
 const PIPELINE_WORKER_LOG_TAIL_BYTES: u64 = 16 * 1024;
 // ADR-0233: independent review is a post-publication exact-head child Run.
 const INDEPENDENT_REVIEW_JOB: &str = "task_review_pipeline";
+/// [ORB-10544] Cap on the run history scanned by the in-flight ship guard.
+/// Non-terminal runs are always among the newest rows, so a bounded window is
+/// enough to spot a duplicate dispatch without walking the whole history.
+const SHIP_IN_FLIGHT_SCAN_LIMIT: usize = 200;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct PipelineInvokeResult {
@@ -62,11 +66,20 @@ impl OrbitRuntime {
     /// Submit a `ship` workflow run (the `task_auto_pipeline` job).
     ///
     /// Shared entry point for every non-interactive submission surface
-    /// (dashboard HTTP endpoint, `orbit run ship-sweep`). `base_branch`
-    /// falls back to the workspace's `[workflow] base_branch`; an empty
-    /// `task_ids` slice selects auto (backlog-discovery) mode. One-shot:
-    /// returns as soon as the run is persisted and its worker spawned.
-    /// `review_crew` is required and applied only when `review` is enabled.
+    /// (dashboard HTTP endpoint, MCP `orbit.workflow.ship`, `orbit run
+    /// ship-sweep`). `base_branch` falls back to the workspace's `[workflow]
+    /// base_branch`; an empty `task_ids` slice selects auto
+    /// (backlog-discovery) mode. One-shot: returns as soon as the run is
+    /// persisted and its worker spawned. `review_crew` is required and applied
+    /// only when `review` is enabled.
+    ///
+    /// [ORB-10544] An explicit task selection is guarded against duplicate
+    /// dispatch here rather than in any one adapter: if a named task is already
+    /// carried by a non-terminal run, the submission is refused with
+    /// [`OrbitError::ShipRunInFlight`] naming that task and run, so two runs
+    /// cannot contend for one worktree and task reservation no matter which
+    /// surface submitted them. Auto mode has no task ids to key on and is
+    /// unaffected.
     pub fn submit_ship_run(
         &self,
         mode: crate::command::workflow::ShipMode,
@@ -82,6 +95,9 @@ impl OrbitRuntime {
         let base = base_branch.unwrap_or_else(|| self.workflow_base_branch());
         let input =
             crate::command::workflow::build_ship_input(mode, base, task_ids, review, review_crew)?;
+        if let Some(conflict) = self.in_flight_ship_run_for_tasks(task_ids)? {
+            return Err(conflict);
+        }
         if review {
             let review_crew = input
                 .get("review_crew")
@@ -94,6 +110,44 @@ impl OrbitRuntime {
             self.preflight_independent_review(task_ids, review_crew)?;
         }
         self.submit_pipeline_run(workflow.job_id, input, None, actor)
+    }
+
+    /// The duplicate-dispatch refusal for the newest non-terminal run already
+    /// carrying one of `task_ids`, or `None` when the selection is free.
+    ///
+    /// A run's task selection lives in its persisted `input.task_ids`, which is
+    /// what [`Self::submit_ship_run`] writes, so this sees every prior
+    /// submission regardless of the surface that made it.
+    fn in_flight_ship_run_for_tasks(
+        &self,
+        task_ids: &[String],
+    ) -> Result<Option<OrbitError>, OrbitError> {
+        if task_ids.is_empty() {
+            return Ok(None);
+        }
+        let runs = self.list_job_runs(crate::command::job::JobRunListParams {
+            limit: Some(SHIP_IN_FLIGHT_SCAN_LIMIT),
+            ..Default::default()
+        })?;
+        Ok(runs.into_iter().find_map(|run| {
+            if run.state.is_terminal() {
+                return None;
+            }
+            let task_id = run
+                .input
+                .as_ref()
+                .and_then(|input| input.get("task_ids"))
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .filter_map(Value::as_str)
+                .find(|candidate| task_ids.iter().any(|wanted| wanted == candidate))
+                .map(str::to_string)?;
+            Some(OrbitError::ShipRunInFlight {
+                task_id,
+                run_id: run.run_id,
+            })
+        }))
     }
 
     fn preflight_independent_review(

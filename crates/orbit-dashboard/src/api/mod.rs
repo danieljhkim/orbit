@@ -264,8 +264,32 @@ pub(super) fn map_runtime_error(e: orbit_core::OrbitError) -> Response {
         error @ orbit_core::OrbitError::ArtifactNotLocal { .. } => {
             artifact_conflict(error, "artifact_not_local")
         }
+        error @ orbit_core::OrbitError::ShipRunInFlight { .. } => {
+            ship_run_in_flight_conflict(error)
+        }
         other => server_error(other),
     }
+}
+
+/// [ORB-10544] The stable 409 the ship endpoint has always returned for a
+/// duplicate dispatch, now projected from the shared submission path's typed
+/// conflict rather than from an endpoint-local policy.
+fn ship_run_in_flight_conflict(error: orbit_core::OrbitError) -> Response {
+    let (task_id, run_id) = error
+        .ship_run_in_flight()
+        .map_or_else(Default::default, |(task_id, run_id)| {
+            (task_id.to_string(), run_id.to_string())
+        });
+    (
+        StatusCode::CONFLICT,
+        Json(json!({
+            "error": error.to_string(),
+            "code": "ship_run_in_flight",
+            "run_id": run_id,
+            "task_id": task_id,
+        })),
+    )
+        .into_response()
 }
 
 fn artifact_conflict(error: orbit_core::OrbitError, code: &'static str) -> Response {

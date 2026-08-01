@@ -420,6 +420,102 @@ fn review_submission_rejects_unknown_same_or_unmaterializable_crews_before_run_i
     }
 }
 
+/// ORB-10544: the duplicate-dispatch guard lives in the shared submission path,
+/// so it cannot be bypassed by a future adapter that calls `submit_ship_run`
+/// directly instead of going through the dashboard endpoint or the MCP tool.
+/// Asserted here against the shared entry point itself, with no HTTP or tool
+/// surface in the picture.
+#[test]
+fn ship_submission_refuses_a_task_already_carried_by_a_non_terminal_run() {
+    let (_root, runtime) = test_runtime();
+    let in_flight = runtime
+        .stores()
+        .jobs()
+        .insert_job_run(
+            "task_auto_pipeline",
+            1,
+            Utc::now(),
+            Some(serde_json::json!({"mode": "local", "task_ids": ["TST-00001"]})),
+            None,
+        )
+        .expect("insert in-flight run");
+    assert!(!in_flight.state.is_terminal());
+
+    let error = runtime
+        .submit_ship_run(
+            ShipMode::Local,
+            Some("main"),
+            &["TST-00001".to_string()],
+            false,
+            None,
+            Some("test"),
+        )
+        .expect_err("a task with a run in flight must not dispatch a second run");
+
+    let OrbitError::ShipRunInFlight { task_id, run_id } = &error else {
+        panic!("expected ShipRunInFlight, got {error:?}");
+    };
+    assert_eq!(task_id, "TST-00001");
+    assert_eq!(run_id, &in_flight.run_id);
+
+    let runs = runtime
+        .list_job_runs(JobRunListParams::default())
+        .expect("list job runs");
+    assert_eq!(
+        runs.iter().map(|run| &run.run_id).collect::<Vec<_>>(),
+        vec![&in_flight.run_id],
+        "the refused submission must not persist another run"
+    );
+}
+
+/// The shared guard is keyed on the explicit selection: an unrelated task is
+/// still shippable while another one is in flight, and auto (backlog-discovery)
+/// mode — which names no tasks — is never keyed and so never refused.
+///
+/// Neither call is expected to dispatch: this fixture seeds no job asset, so
+/// both fall through the guard to the same job-not-found refusal. That the
+/// refusal is *not* `ShipRunInFlight` is exactly the assertion, and it keeps the
+/// test from spawning a detached pipeline worker.
+#[test]
+fn ship_submission_guard_is_scoped_to_the_selected_tasks() {
+    let (_root, runtime) = test_runtime();
+    runtime
+        .stores()
+        .jobs()
+        .insert_job_run(
+            "task_auto_pipeline",
+            1,
+            Utc::now(),
+            Some(serde_json::json!({"mode": "local", "task_ids": ["TST-00001"]})),
+            None,
+        )
+        .expect("insert in-flight run");
+
+    for (label, task_ids) in [
+        ("an unrelated explicit task", vec!["TST-00002".to_string()]),
+        ("auto discovery", Vec::new()),
+    ] {
+        let error = runtime
+            .submit_ship_run(
+                ShipMode::Local,
+                Some("main"),
+                &task_ids,
+                false,
+                None,
+                Some("test"),
+            )
+            .expect_err("no job asset is deployed in this fixture");
+        assert!(
+            !matches!(error, OrbitError::ShipRunInFlight { .. }),
+            "{label} must pass the in-flight guard: {error:?}"
+        );
+        assert!(
+            matches!(error, OrbitError::NotFound { .. }),
+            "{label} must fail on the missing job asset instead: {error:?}"
+        );
+    }
+}
+
 #[test]
 fn review_submission_fails_closed_when_deployed_review_assets_are_missing() {
     let (_root, runtime) = review_test_runtime();

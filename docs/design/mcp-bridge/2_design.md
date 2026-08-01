@@ -10,7 +10,7 @@ summary: Target design for a local Orbit MCP broker with one SSH hub link, hub-o
 tags: [mcp, remote-access, host-registry, bridge, ssh, routing]
 paths: ["crates/orbit-remote/**", "crates/orbit-mcp/**", "crates/orbit-core/**", "crates/orbit-tools/**", "crates/orbit-store/**", "crates/orbit-common/**"]
 related_features: [mcp-bridge, host-registry, mcp-session-context, remote-access, orbit-search, project-learnings]
-related_artifacts: [ORB-00424, ORB-10257, ORB-10262, ORB-10267, ORB-10268, ORB-10269, ORB-10271, ORB-10272, ORB-10276, ORB-10302, ORB-10319, ORB-10330, ORB-10332, ORB-10534, ORB-10540, ADR-0181, ADR-0199, ADR-0200, ADR-0201, ADR-0226, ADR-0227, ADR-0228, ADR-0229, ADR-0230, ADR-0231, ADR-0232, ADR-0235, ADR-0240]
+related_artifacts: [ORB-00424, ORB-10257, ORB-10262, ORB-10267, ORB-10268, ORB-10269, ORB-10271, ORB-10272, ORB-10276, ORB-10302, ORB-10319, ORB-10330, ORB-10332, ORB-10534, ORB-10540, ORB-10544, ADR-0181, ADR-0199, ADR-0200, ADR-0201, ADR-0226, ADR-0227, ADR-0228, ADR-0229, ADR-0230, ADR-0231, ADR-0232, ADR-0235, ADR-0240, ADR-0303]
 ---
 
 # Orbit MCP Bridge — Design
@@ -759,11 +759,21 @@ and observe ship and resume refused, scrub the same envelope and observe both
 admitted, and show `run.show` / `run.list` still answering inside a managed run.
 The MCP ship tool and `POST /api/workflows/ship` are also compared directly for
 one explicit task-id selection and agree on job id, resolved ship mode, and
-coupled task ids. Two consequences of that comparison are recorded rather than
+coupled task ids. One consequence of that comparison is recorded rather than
 changed here: GitHub CI exports no `ORBIT_*`, so only an on-box run exercises
-the env-to-scope path at all; and the dashboard endpoint's duplicate-dispatch
-guard is endpoint-local, so the MCP tool can still dispatch a second run for a
-task already in flight ([ORB-10544]).
+the env-to-scope path at all.
+
+[ORB-10544] closes the other one. The duplicate-dispatch guard for an explicit
+task selection was endpoint-local, so the MCP tool could dispatch a second run
+for a task already carried by a non-terminal run — two runs then contending for
+one worktree and task reservation. The guard now lives in
+`OrbitRuntime::submit_ship_run` and refuses with a typed
+`OrbitError::ShipRunInFlight { task_id, run_id }`; `orbit.workflow.ship` inherits
+it and projects it as a structured `ship_run_in_flight` error naming both ids,
+the dashboard projects the same conflict as its stable `409`, and any future
+submission adapter inherits it by construction ([ADR-0303]). Auto
+(backlog-discovery) submission names no tasks and is not keyed by the guard. The
+equivalence test above consequently no longer depends on call ordering.
 
 The fixed checkoutless `--hub` endpoint cannot yet execute these checkout-backed
 workflow tools, and remote spoke-to-hub execution is therefore deferred. This is
@@ -1007,5 +1017,8 @@ Required validation:
 - [ORB-10540] — validated that guard end to end from the managed-run environment
   in both directions, and pinned MCP/HTTP ship equivalence for the same explicit
   task ids.
+- [ORB-10544] — moved the ship in-flight duplicate-dispatch guard into the shared
+  submission path, so `orbit.workflow.ship` inherits it and returns the same
+  typed conflict the dashboard maps to `409 ship_run_in_flight` ([ADR-0303]).
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

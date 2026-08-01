@@ -164,6 +164,15 @@ pub enum OrbitError {
         .0.task_id, .0.dependency_id, .0.base_ref, .0.base_sha, .0.detail
     )]
     DependencyNotDelivered(Box<DependencyNotDelivered>),
+    /// A ship submission naming explicit task ids was refused because one of
+    /// them is already carried by a non-terminal run [ORB-10544]. Raised by the
+    /// shared submission path, so every dispatch surface refuses the duplicate
+    /// identically; the payload names the contended task and the run that holds
+    /// it so a caller can wait on or cancel that run rather than re-dispatch.
+    #[error(
+        "task {task_id} already has an in-flight run ({run_id}); wait for it to finish or cancel it"
+    )]
+    ShipRunInFlight { task_id: String, run_id: String },
     #[error("invalid job run state transition: {0}")]
     JobRunStateTransition(String),
     #[error("workspace error: {0}")]
@@ -242,6 +251,16 @@ impl OrbitError {
             Self::InvalidInputDiagnostic { did_you_mean, .. } if !did_you_mean.is_empty() => {
                 Some(did_you_mean)
             }
+            _ => None,
+        }
+    }
+
+    /// The contended `(task_id, run_id)` of a ship duplicate-dispatch refusal,
+    /// so projections (HTTP 409 body, MCP structured error) can name both
+    /// without re-parsing the message.
+    pub fn ship_run_in_flight(&self) -> Option<(&str, &str)> {
+        match self {
+            Self::ShipRunInFlight { task_id, run_id } => Some((task_id, run_id)),
             _ => None,
         }
     }

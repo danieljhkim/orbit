@@ -3,7 +3,7 @@ summary: "User Interface — Decisions"
 type: design
 title: "User Interface — Decisions"
 owner: gemini
-last_updated: 2026-07-26
+last_updated: 2026-08-01
 status: Draft
 feature: user-interface
 doc_role: decisions
@@ -142,6 +142,8 @@ Rejected alternative: reuse `PATCH /api/tasks/:id` with a `comment` field for co
 - A dashboard comment is always attributable to a person, even when the server runs inside a managed Orbit run.
 - Ship failures surface the server's error text instead of silently no-opping.
 - Cost: the ship endpoint now scans a bounded window of recent runs before submitting, and a task with a genuinely stuck non-terminal run must have that run cancelled before it can be re-shipped.
+
+**Amendment ([ORB-10544], [ADR-0303]).** "Covers every surface" was true of the intent, not of the placement: the check lived inside the endpoint, so the MCP `orbit.workflow.ship` tool bypassed it. It now lives in the shared ship submission path and every submission surface inherits it. The endpoint's response is unchanged — it projects the shared typed conflict as the same `409 ship_run_in_flight` body.
 
 ## Task References
 
