@@ -254,9 +254,10 @@ fn doctor_check_semantic_index(runtime: &OrbitRuntime) -> WorkspaceDoctorResult 
     }
 }
 
-/// Lock files whose recorded holder PID is dead. Advisory `flock`s are
-/// released by the OS on process death, so these are leftover metadata
-/// from crashed holders — a crash signal, not an availability problem.
+/// Lock files whose recorded holder PID is dead. Clean lock-guard releases
+/// clear their diagnostic metadata while still holding the advisory `flock`,
+/// so metadata found here is from an interrupted/crashed holder — a crash
+/// signal, not an availability problem.
 fn doctor_check_stale_locks(runtime: &OrbitRuntime) -> WorkspaceDoctorResult {
     let lock_files = collect_lock_files(runtime.paths());
     let mut stale = Vec::new();

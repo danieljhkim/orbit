@@ -14,7 +14,8 @@
 //! and emits a `tracing::warn!` once a waiter has been blocked past a
 //! threshold. Holder metadata is advisory only — the OS `flock` is the source
 //! of truth; the metadata is read solely to enrich the error/warning a blocked
-//! waiter reports.
+//! waiter reports. A clean guard drop clears the metadata while still holding
+//! the flock, while an abrupt process death leaves it behind as a crash signal.
 //!
 //! The returned [`FileLockGuard`] follows the RAII-guard pattern
 //! (`docs/design-patterns/raii_guard.md`): the OS lock is released when the
@@ -61,9 +62,10 @@ impl Default for LockOptions {
     }
 }
 
-/// RAII guard over an exclusive advisory file lock. The lock is released when
-/// the wrapped [`File`] is dropped (`fs2` unlocks on close), so callers hold
-/// the guard for the critical section and rely on scope exit to release it.
+/// RAII guard over an exclusive advisory file lock. A clean drop clears the
+/// diagnostic holder metadata before the wrapped [`File`] is dropped (and
+/// `fs2` unlocks on close), while a process crash leaves the metadata behind
+/// for `orbit doctor` to report.
 #[derive(Debug)]
 #[must_use = "the advisory lock is released as soon as the guard is dropped"]
 pub(crate) struct FileLockGuard {
@@ -71,6 +73,18 @@ pub(crate) struct FileLockGuard {
     // `flock`. Named with a leading underscore so dead-code analysis does not
     // flag the never-read field (mirrors `SignalHandlerGuard::_lock`).
     _file: File,
+}
+
+impl Drop for FileLockGuard {
+    fn drop(&mut self) {
+        // Clear the diagnostic marker before closing the descriptor. The flock
+        // is therefore held throughout the metadata transition, so a waiter
+        // cannot observe a clean release as a stale holder or race a path
+        // replacement. Best-effort matches acquisition metadata handling:
+        // advisory diagnostics must never turn a successful release into an
+        // application failure.
+        let _ = clear_holder(&self._file);
+    }
 }
 
 /// Metadata written into a lock file by its current holder. Advisory and
@@ -238,6 +252,12 @@ fn write_holder_inner(mut file: &File, holder: &LockHolder) -> std::io::Result<(
     file.seek(SeekFrom::Start(0))?;
     file.set_len(0)?;
     file.write_all(json.as_bytes())?;
+    file.flush()?;
+    Ok(())
+}
+
+fn clear_holder(mut file: &File) -> std::io::Result<()> {
+    file.set_len(0)?;
     file.flush()?;
     Ok(())
 }

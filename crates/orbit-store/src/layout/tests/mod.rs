@@ -8,9 +8,11 @@ use orbit_common::types::{OrbitError, TaskStatus};
 
 use super::{
     LAYOUT_MIGRATIONS, LayoutMigration, SUPPORTED_LAYOUT_VERSION, current_layout_version,
-    pending_layout_migrations, pending_with, upgrade_with, upgrade_workspace_layout,
+    pending_layout_migrations, pending_with, upgrade_lock_path, upgrade_with,
+    upgrade_workspace_layout,
 };
 use crate::file::task_store::v2_bundle::read_bundle_at;
+use crate::file_lock::read_lock_holder;
 
 fn temp_orbit_dir() -> tempfile::TempDir {
     tempfile::tempdir().expect("create temp .orbit dir")
@@ -18,6 +20,89 @@ fn temp_orbit_dir() -> tempfile::TempDir {
 
 fn marker_contents(orbit_dir: &Path) -> String {
     fs::read_to_string(orbit_dir.join("state").join("layout.version")).expect("read marker")
+}
+
+#[cfg(unix)]
+const CRASH_CHILD_TEST: &str = "layout::tests::crash_during_layout_upgrade_child";
+
+#[cfg(unix)]
+fn blocking_apply(_orbit_dir: &Path) -> Result<(), OrbitError> {
+    let (Ok(ready_path), Ok(_lock_path)) = (
+        std::env::var("ORBIT_LAYOUT_CRASH_READY"),
+        std::env::var("ORBIT_LAYOUT_CRASH_LOCK"),
+    ) else {
+        return Ok(());
+    };
+    fs::write(ready_path, b"migration started").expect("write migration readiness");
+    std::thread::sleep(std::time::Duration::from_secs(60));
+    Ok(())
+}
+
+#[cfg(unix)]
+const INTERRUPTED_REGISTRY: &[LayoutMigration] = &[LayoutMigration {
+    version: 1,
+    name: "blocking migration",
+    description: "wait for the test process to be interrupted",
+    apply: blocking_apply,
+}];
+
+#[cfg(unix)]
+#[test]
+#[ignore = "helper process for interrupted_layout_upgrade_leaves_stale_holder_metadata"]
+fn crash_during_layout_upgrade_child() {
+    let (Ok(orbit_dir), Ok(lock_path), Ok(ready_path)) = (
+        std::env::var("ORBIT_LAYOUT_CRASH_ORBIT_DIR"),
+        std::env::var("ORBIT_LAYOUT_CRASH_LOCK"),
+        std::env::var("ORBIT_LAYOUT_CRASH_READY"),
+    ) else {
+        return;
+    };
+    let _ = lock_path;
+    let _ = ready_path;
+    upgrade_with(Path::new(&orbit_dir), INTERRUPTED_REGISTRY).expect("child upgrade");
+}
+
+#[cfg(unix)]
+#[test]
+fn interrupted_layout_upgrade_leaves_stale_holder_metadata() {
+    let temp = temp_orbit_dir();
+    let lock_path = upgrade_lock_path(temp.path());
+    let ready_path = temp.path().join("migration-ready");
+    let exe = std::env::current_exe().expect("current test exe");
+    let mut child = std::process::Command::new(exe)
+        .args(["--exact", CRASH_CHILD_TEST, "--ignored"])
+        .env("ORBIT_LAYOUT_CRASH_ORBIT_DIR", temp.path())
+        .env("ORBIT_LAYOUT_CRASH_LOCK", &lock_path)
+        .env("ORBIT_LAYOUT_CRASH_READY", &ready_path)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .expect("spawn layout-upgrade child");
+
+    let start = std::time::Instant::now();
+    while !ready_path.exists() {
+        if start.elapsed() > std::time::Duration::from_secs(20) {
+            let _ = child.kill();
+            let _ = child.wait();
+            panic!("layout-upgrade child never entered migration");
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+
+    let child_pid = child.id();
+    child.kill().expect("SIGKILL layout-upgrade child");
+    child.wait().expect("reap layout-upgrade child");
+
+    let holder = read_lock_holder(&lock_path).expect("crashed holder metadata remains");
+    assert_eq!(holder.pid, child_pid);
+    assert_eq!(holder.label, "layout upgrade");
+    assert_eq!(current_layout_version(temp.path()).expect("version"), 0);
+
+    // The interrupted migration can be resumed, and its clean release clears
+    // the metadata that the crash intentionally left behind.
+    upgrade_with(temp.path(), INTERRUPTED_REGISTRY).expect("resume upgrade");
+    assert_eq!(current_layout_version(temp.path()).expect("version"), 1);
+    assert!(read_lock_holder(&lock_path).is_none());
 }
 
 // ── shipping registry ──
@@ -59,6 +144,10 @@ fn fresh_workspace_adopts_the_baseline_and_stamps_the_marker() {
     assert_eq!(
         current_layout_version(temp.path()).expect("version"),
         SUPPORTED_LAYOUT_VERSION
+    );
+    assert!(
+        read_lock_holder(&upgrade_lock_path(temp.path())).is_none(),
+        "a completed layout upgrade must not leave stale holder metadata"
     );
 }
 

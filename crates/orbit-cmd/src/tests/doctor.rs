@@ -191,6 +191,29 @@ fn dead_holder_lock_file_is_reported_stale() {
 
 #[cfg(unix)]
 #[test]
+fn interrupted_layout_upgrade_is_reported_stale() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let runtime = workspace_runtime(&temp);
+    let lock_path = temp
+        .path()
+        .join("repo")
+        .join(".orbit")
+        .join("state")
+        .join("layout.lock");
+    write_holder_lock(&lock_path, reaped_child_pid(), "layout upgrade");
+
+    let results = runtime.doctor_workspace().expect("doctor");
+    let locks = status_of(&results, "stale-locks");
+    assert_eq!(locks.status, WorkspaceDoctorStatus::Warning, "{locks:?}");
+    assert!(
+        locks.message.contains("layout.lock") && locks.message.contains("layout upgrade"),
+        "message names the interrupted layout upgrade: {}",
+        locks.message
+    );
+}
+
+#[cfg(unix)]
+#[test]
 fn stale_task_learning_and_adr_lock_files_are_removed() {
     let temp = tempfile::tempdir().expect("tempdir");
     let runtime = workspace_runtime(&temp);
