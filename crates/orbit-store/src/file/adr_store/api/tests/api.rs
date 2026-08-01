@@ -961,6 +961,62 @@ fn restore_allocated_adr_refuses_readable_artifact_and_retry_without_overwrite()
     );
 }
 
+// [ORB-10479] An allocation whose worktree was reaped is marked `abandoned`
+// by ORB-10501's repair, which hides it from `adr_allocation`. That is exactly
+// the population restore exists to repair, so it must still be reachable —
+// and a successful restore makes the row live again.
+#[test]
+fn restore_allocated_adr_revives_an_abandoned_allocation() {
+    let (_dir, store) = store_with_index();
+    let allocation = store.id_allocator.allocate_adr().expect("allocate ADR");
+    store
+        .id_allocator
+        .abandon_adr(&allocation.id)
+        .expect("abandon allocation");
+    assert!(
+        store
+            .id_allocator
+            .adr_allocation(&allocation.id)
+            .expect("read allocation")
+            .is_none(),
+        "an abandoned allocation must stay hidden from ordinary reads"
+    );
+
+    let restored = store
+        .restore_allocated_adr(&allocation.id, create_params("Revived", "revived body"))
+        .expect("restore abandoned allocation");
+    assert_eq!(
+        restored.id, allocation.id,
+        "restore must reuse the exact id"
+    );
+
+    let live = store
+        .id_allocator
+        .adr_allocation(&allocation.id)
+        .expect("read allocation")
+        .expect("restored allocation must be live again");
+    assert_eq!(
+        live.body_path.as_deref(),
+        Some(Path::new("proposed/ADR-0001/body.md"))
+    );
+    assert_eq!(
+        store
+            .id_allocator
+            .adr_allocations()
+            .expect("allocations")
+            .len(),
+        1,
+        "restore must not allocate another id"
+    );
+    let AdrArtifactResolution::Local(artifact) = store
+        .resolve_adr_artifact(&restored.id)
+        .expect("resolve revived ADR")
+    else {
+        panic!("revived ADR must resolve locally")
+    };
+    assert_eq!(artifact.body, "revived body");
+}
+
 #[test]
 fn restore_allocated_adr_cleans_up_when_allocation_snapshot_changes() {
     let (_dir, store) = store_with_index();

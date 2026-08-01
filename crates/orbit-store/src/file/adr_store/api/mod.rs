@@ -257,11 +257,17 @@ impl AdrFileStore {
         }
 
         let _lock = acquire_adr_lock(&self.root, id)?;
-        let allocation = self.id_allocator.adr_allocation(id)?.ok_or_else(|| {
-            OrbitError::InvalidInput(format!(
-                "cannot restore ADR {id}: no live ADR allocation exists"
-            ))
-        })?;
+        // [ORB-10479] Includes `abandoned` rows: an allocation whose worktree
+        // was reaped is exactly the loss this repair addresses, and the id
+        // stays permanently reserved to that record either way.
+        let allocation = self
+            .id_allocator
+            .adr_allocation_for_restore(id)?
+            .ok_or_else(|| {
+                OrbitError::InvalidInput(format!(
+                    "cannot restore ADR {id}: no ADR allocation exists"
+                ))
+            })?;
         self.restore_allocated_adr_from_snapshot(id, params, allocation)
     }
 

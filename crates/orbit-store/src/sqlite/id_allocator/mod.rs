@@ -337,6 +337,42 @@ impl IdAllocator {
         self.allocation(IdAllocationKind::Adr, id)
     }
 
+    /// [ORB-10479] Allocation lookup for the exact-id ADR repair path, which
+    /// must also see rows [`Self::abandon_orphaned_adr`] marked `abandoned`
+    /// after their pinned worktree was reaped — the exact population the
+    /// repair exists for.
+    ///
+    /// This is safe precisely because an abandoned row still owns its id
+    /// forever: [`Self::max_sequence`] counts abandoned rows, so the id is
+    /// never handed out again and restoring into it cannot collide with a
+    /// different record. Ordinary reads keep using [`Self::adr_allocation`],
+    /// which hides abandoned rows.
+    pub fn adr_allocation_for_restore(
+        &self,
+        id: &str,
+    ) -> Result<Option<IdAllocationRecord>, OrbitError> {
+        let conn = self.lock_conn()?;
+        let mut stmt = conn
+            .prepare(
+                "SELECT kind, id, allocated_at, worktree_root, branch, status, body_path
+                 FROM id_allocations
+                 WHERE kind = ?1 AND id = ?2",
+            )
+            .map_err(|error| OrbitError::Store(error.to_string()))?;
+        let mut rows = stmt
+            .query_map(
+                params![IdAllocationKind::Adr.as_str(), id],
+                allocation_record_from_row,
+            )
+            .map_err(|error| OrbitError::Store(error.to_string()))?;
+        match rows.next() {
+            Some(row) => row
+                .map(Some)
+                .map_err(|error| OrbitError::Store(error.to_string())),
+            None => Ok(None),
+        }
+    }
+
     pub fn learning_allocation(&self, id: &str) -> Result<Option<IdAllocationRecord>, OrbitError> {
         self.allocation(IdAllocationKind::Learning, id)
     }
@@ -653,10 +689,16 @@ impl IdAllocator {
         let tx = conn
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(|error| OrbitError::Store(error.to_string()))?;
+        // [ORB-10479] `status` moves to `merged` as part of the same
+        // compare-and-set: the restore just wrote a readable body into this
+        // worktree, so an allocation abandoned by `abandon_orphaned` is live
+        // again and must stop being hidden from `adr_allocation`. The WHERE
+        // clause still pins the pre-restore snapshot, so a concurrent change
+        // to any field — `status` included — loses the race as before.
         let updated = tx
             .execute(
                 "UPDATE id_allocations
-                 SET worktree_root = ?8, branch = ?9, body_path = ?10
+                 SET worktree_root = ?8, branch = ?9, body_path = ?10, status = ?11
                  WHERE kind = ?1
                    AND id = ?2
                    AND allocated_at = ?3
@@ -678,6 +720,7 @@ impl IdAllocator {
                     self.inner.worktree_root.to_string_lossy(),
                     branch,
                     relative_body_path.to_string_lossy(),
+                    STATUS_MERGED,
                 ],
             )
             .map_err(|error| OrbitError::Store(error.to_string()))?;

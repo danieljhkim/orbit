@@ -3,7 +3,7 @@ summary: "Agent Families — Decisions"
 type: design
 title: "Agent Families — Decisions"
 owner: grok
-last_updated: 2026-07-27
+last_updated: 2026-08-01
 last_validated: 2026-07-27
 status: Draft
 feature: agent-families
@@ -16,6 +16,8 @@ tags: ["agent-families"]
 ADR entries are append-only and ordered ascending by global ID. New entries are allocated via `orbit.adr.add` *before* the local heading is written — see [../CONVENTIONS.md §4](../CONVENTIONS.md) and the `orbit-knowledge` skill. The local heading uses the allocated global ID verbatim.
 
 Historical note: prior to 2026-05-17, ADR-0154 / ADR-0155 / ADR-0156 in this file were authored with locally-invented IDs (`ADR-0152` / `ADR-0153` / `ADR-0154`) that did not match the global store. They were re-allocated through `orbit.adr.add` per [ORB-00098]; the original local IDs survive as `legacy_ids` so prior citations still resolve.
+
+Historical note ([ORB-10479]): the entries listed below already held a global ADR allocation, but their store bodies were lost when the worktrees that authored them were reaped (see [F2026-07-163]). The narratives were restored into the store at their existing IDs — no ID was reallocated — and their headings reduced to pointer form. Restored here: [ADR-0211].
 
 ## ADR-0151 — Add Grok (xAI) as a fourth peer agent family
 
@@ -98,18 +100,9 @@ AO-002 scope: planning-duel plan quality on the Orbit codebase, single window in
 
 ## ADR-0211 — Default Claude to opus/sonnet CLI aliases; centralize model defaults in orbit-common::model_defaults
 
-**Status:** Proposed · 2026-07-06 · relates [ORB-10051] · cites [ADR-0167](#adr-0167--favor-claude-opus-for-planner-role-on-planning-duels-and-design-shaped-plans)
+**Status:** Accepted · 2026-07-06 · relates [ORB-10051] · cites [ADR-0167](#adr-0167--favor-claude-opus-for-planner-role-on-planning-duels-and-design-shaped-plans)
 
-**Context.** Default model names were hardcoded as version-pinned string literals scattered across ~7 production sites, and the pins had drifted out of sync: the default Claude model appeared as `claude-opus-4-7` (`agent_detect`, seeded crews, `claude.yaml` strong), `claude-sonnet-4-6` (`claude.yaml` weak), and `claude-sonnet-4-5` (`exec_ctx::DEFAULT_MODEL_FOR_SESSION`, `agent_loop_driver::DEFAULT_ANTHROPIC_MODEL`) depending on the code path. The Claude CLI accepts the unversioned `opus`/`sonnet` aliases, which never drift.
-
-**Decision.** Introduce `orbit-common::model_defaults` as the single source of truth for production default model names; every production default now references a constant there (`agent_detect::default_model_for` delegates to `default_model_for_provider`; seeded crews, the Anthropic HTTP session/loop defaults, and the dashboard ADR/friction tool models reference the constants). The default Claude CLI model becomes the unversioned `opus` (strong) / `sonnet` (weak) aliases — planner+reviewer=opus, implementer=sonnet — applied to `assets/executors/claude.yaml` and the Rust crew/duel seeds. codex/gemini/grok keep their existing values (no unversioned aliases invented for CLIs that may not accept them). The Anthropic **HTTP Messages API** default stays version-pinned (`claude-sonnet-4-5`, `ANTHROPIC_HTTP_DEFAULT_MODEL`) because the Messages API rejects bare aliases. Tests keep referencing model strings via frozen `orbit-common::test_fixtures` constants (behind the `test-util` feature) rather than being deleted.
-
-**Consequences.**
-- One edit updates every production default; the opus-4-7 / sonnet-4-6 / sonnet-4-5 drift can no longer recur.
-- Fresh workspaces seed `opus`/`sonnet` for the claude crew and duel default; existing workspaces are unchanged until `orbit init --refresh-defaults` (config.toml is never overwritten; executor defs re-seed only on refresh).
-- Asset ↔ const seam: YAML/TOML assets cannot reference a Rust const, so `claude.yaml` uses the alias directly while `model_defaults` stays authoritative for Rust paths; an executor-asset guard test pins the `claude.yaml` pair to `{CLAUDE_DEFAULT_STRONG, CLAUDE_DEFAULT_WEAK}`.
-- Scoreboard attribution matches model strings exactly, so historical review/duel artifacts recorded as `claude-opus-4-7` stop matching the new `opus` pair; only new runs match. A family-equality fallback was considered and left as a possible follow-up.
-- Cost: default model names now live in two layers (Rust `model_defaults` const for code paths, literal alias duplicated into the executor/config assets); a future model bump must touch both the const and the YAML asset, and the asset↔const guard test is what keeps them honest.
+Narrative lives in the ADR store — retrieve it with `orbit tool run orbit.adr.show --input '{"id":"ADR-0211"}'`.
 
 ## ADR-0213 — Flatten crews to one provider-model assignment
 

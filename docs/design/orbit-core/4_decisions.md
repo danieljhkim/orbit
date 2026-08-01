@@ -1,7 +1,7 @@
 ---
 title: Orbit Core — Decisions
 owner: claude
-last_updated: 2026-07-19
+last_updated: 2026-08-01
 status: Accepted
 feature: orbit-core
 doc_role: decisions
@@ -170,9 +170,16 @@ the bearing itself changes.
   boilerplate (request type, response type, registration) compared to calling
   an inherent method directly.
 
+## ADR-0301 — Exact-id ADR restore is an operator CLI surface that repairs abandoned allocations
+
+**Status:** Accepted · 2026-08 · [ORB-10479], [ORB-10538]
+
+Narrative lives in the ADR store — retrieve it with `orbit tool run orbit.adr.show --input '{"id":"ADR-0301"}'`.
+
 ## Task References
 
 - [ORB-10016] — extracted `orbit-cmd` from orbit-core, converted moved command groups to extension traits, and trimmed root re-exports.
 - [ORB-10026] — authored the ADR-0209 north-star operation-registry architecture bearing.
+- [ORB-10479] — restored the 18 design-doc ADRs whose allocation survived their body, and made the [ORB-10538] repair surface reachable and abandoned-allocation aware ([ADR-0301]).
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

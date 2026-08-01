@@ -502,6 +502,7 @@ impl Commands {
                 let (subcommand, target_id, json) = match &command.command {
                     AdrSubcommand::List(args) => ("list", None, args.json),
                     AdrSubcommand::Show(args) => ("show", Some(args.id.as_str()), args.json),
+                    AdrSubcommand::Restore(args) => ("restore", Some(args.id.as_str()), args.json),
                 };
                 CommandOperation::new(
                     RuntimeNeed::Required,
