@@ -795,6 +795,58 @@ fn gc_refuses_a_worktree_with_a_unique_adr_body() {
     assert!(diagnostic.contains("only readable body"), "{diagnostic}");
 }
 
+/// ORB-10545: the guarded cleanup deadlock is resolved once reconciliation
+/// publishes a verified second copy in another registered checkout. The
+/// allocation remains pinned to the disposable worktree; byte durability is
+/// what permits GC.
+#[test]
+fn gc_succeeds_after_an_adr_body_is_reconciled_to_the_canonical_checkout() {
+    let temp = tempdir().unwrap();
+    let repo = temp.path().join("repo");
+    init_repo(&repo);
+    let run = pipeline_run(
+        "jrun-reconciled-adr",
+        JobRunState::Success,
+        &["ORB-RECONCILED-ADR"],
+    );
+    let worktree = resolved_task_worktree(&repo, &run);
+    add_worktree(&repo, &worktree, "orbit/reconciled-adr");
+    let allocator = knowledge_allocator(&repo, &worktree);
+    let body = b"reconciled ADR body\n";
+    let adr = write_adr_body(&allocator, &worktree, body);
+    commit_knowledge_bodies(&worktree);
+    let host = FakeTaskHost::new(vec![task_fixture("ORB-RECONCILED-ADR", TaskStatus::Done)]);
+
+    collect_worktrees(
+        &repo,
+        std::slice::from_ref(&run),
+        &host,
+        &WorktreeGcOptions {
+            delete: true,
+            ..Default::default()
+        },
+    )
+    .expect_err("the unique source body must initially block GC");
+
+    let canonical = repo.join(".orbit/adrs/proposed").join(&adr).join("body.md");
+    fs::create_dir_all(canonical.parent().unwrap()).unwrap();
+    fs::write(&canonical, body).unwrap();
+
+    collect_worktrees(
+        &repo,
+        &[run],
+        &host,
+        &WorktreeGcOptions {
+            delete: true,
+            ..Default::default()
+        },
+    )
+    .expect("a reconciled second copy permits GC");
+
+    assert!(!worktree.exists());
+    assert_eq!(fs::read(canonical).unwrap(), body);
+}
+
 /// A stale worktree-local allocation is safe to collect after its exact body
 /// has landed in the canonical checkout. The allocator row may still point at
 /// the old worktree; body durability, not stale path metadata, is the gate.

@@ -42,6 +42,8 @@ pub enum AdrSubcommand {
     Show(AdrShowArgs),
     /// Restore an unreadable ADR at its exact existing allocation
     Restore(AdrRestoreArgs),
+    /// Reconcile a federated ADR bundle into the current checkout
+    Reconcile(AdrReconcileArgs),
 }
 
 #[derive(Args)]
@@ -121,12 +123,39 @@ pub struct AdrRestoreArgs {
     pub json: bool,
 }
 
+#[derive(Args)]
+pub struct AdrReconcileArgs {
+    /// Existing canonical ADR ID to reconcile (e.g. `ADR-0184`)
+    pub id: String,
+    /// Registered Git worktree containing the complete source bundle
+    #[arg(long = "source-worktree")]
+    pub source_worktree: PathBuf,
+    /// Output as JSON
+    #[arg(long)]
+    pub json: bool,
+}
+
 impl Execute for AdrCommand {
     fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
         match self.command {
             AdrSubcommand::List(args) => args.execute(runtime),
             AdrSubcommand::Show(args) => args.execute(runtime),
             AdrSubcommand::Restore(args) => args.execute(runtime),
+            AdrSubcommand::Reconcile(args) => args.execute(runtime),
+        }
+    }
+}
+
+impl Execute for AdrReconcileArgs {
+    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+        let adr = runtime.reconcile_federated_adr(&self.id, &self.source_worktree)?;
+        if self.json {
+            let value = serde_json::to_value(&adr)
+                .map_err(|error| OrbitError::Execution(error.to_string()))?;
+            crate::output::json::print_pretty(&value)
+        } else {
+            println!("{}", adr.id);
+            Ok(())
         }
     }
 }

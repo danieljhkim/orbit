@@ -10,7 +10,7 @@ doc_role: decisions
 tags: ["worktree-artifacts"]
 paths: ["crates/orbit-remote/**", "crates/orbit-core/**", "crates/orbit-store/**", "crates/orbit-engine/**", "crates/orbit-cli/**"]
 related_features: ["worktree-artifacts", "host-registry", "mcp-bridge"]
-related_artifacts: ["ORB-00199", "ORB-00200", "ORB-00201", "ORB-10272", "ORB-10297", "ORB-10330", "ORB-10501", "ORB-10535", "ADR-0177", "ADR-0229", "ADR-0296"]
+related_artifacts: ["ORB-00199", "ORB-00200", "ORB-00201", "ORB-10272", "ORB-10297", "ORB-10330", "ORB-10501", "ORB-10535", "ORB-10545", "ADR-0177", "ADR-0229", "ADR-0296", "ADR-0302"]
 ---
 
 # Worktree Artifacts - Decisions
@@ -72,6 +72,18 @@ Orphans that already exist are reported by the `id-allocations` `orbit doctor` c
 - Cost: the orphan test is duplicated per artifact kind (two ~25 LOC store methods) because ADR and learning bodies resolve differently; lifting it into the allocator would push artifact-layout knowledge down into the id authority, which is the boundary ADR-0177 draws.
 - Cost: `worktree_root.exists()` is a liveness heuristic — a worktree on an unmounted volume reads as reaped. The refuse-on-recoverable guard and the opt-in flag bound the blast radius to a status flip that never touches a body file.
 
+## ADR-0302 - Publish superseded ADR bodies as durable decision history
+
+**Status:** Accepted - 2026-08 - [ORB-10545]
+
+Superseded ADR bundles, including their rejected alternatives and supersession
+metadata, travel with the repository. Proposed drafts remain local-only. A
+validated `orbit adr reconcile` operator path copies an existing complete
+federated bundle byte-for-byte into the current registered checkout without
+allocating a new ID or changing lifecycle/allocation metadata. Narrative and
+the explicit rejected alternatives live in the ADR store; retrieve them with
+`orbit tool run orbit.adr.show --input '{"id":"ADR-0302"}'`.
+
 ## Task References
 
 - [ORB-00199] introduced shared/local root resolution.
@@ -90,5 +102,7 @@ Orphans that already exist are reported by the `id-allocations` `orbit doctor` c
   open.
 - [ORB-10535] added the shared pre-removal guard that prevents cleanup from
   creating that orphaned state when the target still holds the unique body.
+- [ORB-10545] added federated ADR reconciliation, published superseded bodies,
+  and resolved the guarded-cleanup deadlock under [ADR-0302].
 
 Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

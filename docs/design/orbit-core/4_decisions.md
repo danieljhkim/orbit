@@ -10,7 +10,7 @@ summary: ADR log for orbit-core crate-boundary decisions, starting with the ORB-
 tags: [orbit-core, orbit-cmd, architecture, north-star]
 paths: ["crates/orbit-core/**", "crates/orbit-cmd/**"]
 related_features: [orbit-core]
-related_artifacts: [ADR-0203, ADR-0209, ORB-10026]
+related_artifacts: [ADR-0203, ADR-0209, ADR-0302, ORB-10026, ORB-10545]
 ---
 
 # Orbit Core — Decisions
@@ -176,10 +176,18 @@ the bearing itself changes.
 
 Narrative lives in the ADR store — retrieve it with `orbit tool run orbit.adr.show --input '{"id":"ADR-0301"}'`.
 
+## ADR-0302 — Publish superseded ADR bodies as durable decision history
+
+**Status:** Accepted · 2026-08 · [ORB-10545]
+
+Narrative lives in the ADR store — retrieve it with `orbit tool run orbit.adr.show --input '{"id":"ADR-0302"}'`.
+
 ## Task References
 
 - [ORB-10016] — extracted `orbit-cmd` from orbit-core, converted moved command groups to extension traits, and trimmed root re-exports.
 - [ORB-10026] — authored the ADR-0209 north-star operation-registry architecture bearing.
 - [ORB-10479] — restored the 18 design-doc ADRs whose allocation survived their body, and made the [ORB-10538] repair surface reachable and abandoned-allocation aware ([ADR-0301]).
+- [ORB-10545] — made superseded ADR bodies repository-published history and
+  added allocation-pinned federated reconciliation ([ADR-0302]).
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.
