@@ -49,11 +49,6 @@ pub fn serve_mcp_stdio(
     // Parse the trusted file, when present, before constructing either server
     // host. Workspace/cwd config never participates in this load.
     let trusted_config = load_trusted_mcp_config(&global_root)?;
-    if !hub && requested_capability.is_some() {
-        return Err(OrbitError::InvalidInput(
-            "--capabilities requires --hub".to_string(),
-        ));
-    }
     let capability = requested_capability.unwrap_or(McpCapability::Agent);
     let (host, mut trusted_context, composition): (
         Arc<dyn McpHost>,

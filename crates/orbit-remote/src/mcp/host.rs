@@ -217,7 +217,7 @@ impl BrokerMcpHost {
             .map(ToString::to_string)
             .collect::<Vec<_>>()
             .join(", ");
-        Err(OrbitError::InvalidInput(format!(
+        Err(OrbitError::CapabilityDenied(format!(
             "MCP capability denied for tool '{}': the effective session set must contain one of [{required}]",
             definition.schema.name
         )))
@@ -659,7 +659,15 @@ impl BrokerMcpHost {
             self.record_preflight_denial(name, &input, &context, &error);
             return Err(error);
         }
-        let require_local = definition.policy.placement() != McpToolPlacement::Hub || with_context;
+        // Hub placement describes coordination ownership. In today's
+        // single-host deployment the workflow executor still needs the exact
+        // selected checkout, so an operator broker short-circuits these tools
+        // through its local runtime. Spokes continue routing them to the hub;
+        // multi-host execution remains deliberately deferred.
+        let local_workflow_execution = name.starts_with("orbit.workflow.") && !self.is_spoke()?;
+        let require_local = definition.policy.placement() != McpToolPlacement::Hub
+            || with_context
+            || local_workflow_execution;
         let (workspace_id, binding) = match self.resolve_workspace(selector, require_local) {
             Ok(resolved) => resolved,
             Err(error) => {
@@ -676,7 +684,10 @@ impl BrokerMcpHost {
             self.record_preflight_denial(name, &input, &context, &error);
             return Err(error);
         }
-        if definition.policy.placement() == McpToolPlacement::Hub && !with_context {
+        if definition.policy.placement() == McpToolPlacement::Hub
+            && !with_context
+            && !local_workflow_execution
+        {
             context.workspace_id = Some(workspace_id.clone());
             context.workspace = Some(workspace_id.clone());
             if let Some(object) = input.as_object_mut()

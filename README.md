@@ -200,7 +200,7 @@ codex plugin add orbit@orbit
 | Shared Orbit skills | Bundled from `plugin/skills/` | Bundled from `plugin/skills/` | Seeded by `orbit workspace init` |
 | Web dashboard (`orbit web serve`) | No | No | Yes |
 | Other agent CLIs | No, scoped to Claude Code | No, scoped to Codex | Yes |
-| Workflows (i.e. `orbit run ship`) | No | No | Yes |
+| Workflows (ship, run show/list/resume) | No — plugin MCP is agent-capability | No — plugin MCP is agent-capability | Yes — CLI, or MCP via `orbit mcp serve --capabilities operator` |
 
 </details>
 
@@ -243,10 +243,19 @@ The surface is namespaced by artifact:
 | `orbit.learning.*` | Author, edit, show, list, supersede project learnings |
 | `orbit.friction.*` | Record, edit, show, list, resolve operational frictions; list taxonomy tags |
 | `orbit.docs.*` | List and show indexed Markdown under `[docs].roots`; register additional roots |
+| `orbit.workflow.*` | Operator-only ship submission plus durable run show, list, and resume |
 
 Not every tool is intended for agent calls. Lifecycle/admin operations (`docs.index`, `docs.migrate`, `semantic.*`, `learning.sync`, `task.locks.*`, and `friction.*` reads/updates) are typically driven by humans via the CLI; the recommended agent permission profile auto-allows discovery/write tools and prompts on the rest. See `.claude/settings.json` (and `.codex/`, `.grok/`, `.gemini/` equivalents) in the seeded workspace for the default agent-facing subset.
 
 A few admin and destructive tools — `orbit.task.delete`, `orbit.task.lint`, `orbit.semantic.uninstall`, `orbit.adr.list` (agents use `orbit search --kind adr`), `orbit.learning.prune` — stay registered for operator use via `orbit tool run` and their CLI equivalents, but are hidden from the agent MCP surface.
+
+In a single-host deployment, start a deliberate operator session with
+`orbit mcp serve --capabilities operator` and announce the workspace through MCP
+initialize metadata (or the tool's `workspace` argument). The default plugin and
+`orbit workspace init --mcp` registrations remain agent-capability sessions and
+do not advertise workflow tools. Workflow ship/resume calls from an
+Orbit-managed run are rejected, so an executing agent cannot recursively fan
+out more runs; run observation remains an operator-only read surface.
 
 ---
 

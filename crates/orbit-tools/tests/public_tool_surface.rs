@@ -114,6 +114,10 @@ fn workflow_critical_tools_remain_registered() {
         "orbit.pipeline.invoke",
         "orbit.pipeline.wait",
         "orbit.search",
+        "orbit.workflow.ship",
+        "orbit.workflow.run.show",
+        "orbit.workflow.run.list",
+        "orbit.workflow.run.resume",
         // ORB-00289: `orbit.semantic.uninstall` is inactive on the agent
         // surface; its inactive-classification is covered by
         // `inactive_ops_tools_*` and `INACTIVE_TOOL_NAMES` above.

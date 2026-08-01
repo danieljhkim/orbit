@@ -261,7 +261,7 @@ impl OrbitToolServer {
                 .map(ToString::to_string)
                 .collect::<Vec<_>>()
                 .join(", ");
-            let denial = OrbitError::InvalidInput(format!(
+            let denial = OrbitError::CapabilityDenied(format!(
                 "MCP capability denied for tool '{canonical}': the effective session set must contain one of [{allowed}]"
             ));
             let denial = self

@@ -82,6 +82,14 @@ pub(super) fn execute(
         OrbitBuiltinAction::TaskShow => super::task_tools::show(runtime, input),
         OrbitBuiltinAction::TaskStart => super::task_tools::start(runtime, input, agent, model),
         OrbitBuiltinAction::TaskUpdate => super::task_tools::update(runtime, input, agent, model),
+        OrbitBuiltinAction::WorkflowShip => {
+            super::workflow_tools::ship(runtime, input, agent, model)
+        }
+        OrbitBuiltinAction::WorkflowRunShow => super::workflow_tools::show(runtime, input),
+        OrbitBuiltinAction::WorkflowRunList => super::workflow_tools::list(runtime, input),
+        OrbitBuiltinAction::WorkflowRunResume => {
+            super::workflow_tools::resume(runtime, input, agent, model)
+        }
     }?;
     super::artifact_redaction::finish_tool_response(
         runtime,

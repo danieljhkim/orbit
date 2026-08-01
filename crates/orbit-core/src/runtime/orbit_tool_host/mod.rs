@@ -13,6 +13,7 @@ mod search_tools;
 mod semantic_tools;
 mod state_tools;
 mod task_tools;
+mod workflow_tools;
 
 #[cfg(test)]
 mod tests;

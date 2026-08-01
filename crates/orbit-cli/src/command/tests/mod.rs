@@ -113,12 +113,18 @@ fn cli_parses_hub_mcp_serve_with_one_exact_capability() {
 }
 
 #[test]
-fn cli_rejects_mcp_capability_without_hub_and_unknown_values() {
-    assert_cli_rejects(
-        &["orbit", "mcp", "serve", "--capabilities", "agent"],
-        ErrorKind::MissingRequiredArgument,
-        "--hub",
-    );
+fn cli_parses_broker_capability_and_rejects_unknown_values() {
+    let cli = Cli::parse_from(["orbit", "mcp", "serve", "--capabilities", "operator"]);
+    match cli.command {
+        Commands::Mcp(command) => match command.command {
+            McpSubcommand::Serve(args) => {
+                assert!(!args.hub);
+                assert_eq!(args.capabilities, Some(McpCapability::Operator));
+            }
+            _ => panic!("expected mcp serve"),
+        },
+        _ => panic!("expected top-level mcp command"),
+    }
     assert_cli_rejects(
         &["orbit", "mcp", "serve", "--hub", "--capabilities", "admin"],
         ErrorKind::ValueValidation,
