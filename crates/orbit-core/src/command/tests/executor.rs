@@ -111,19 +111,22 @@ fn parse_default_executor_installs_macos_sandbox_on_macos_path() {
     );
 }
 
-/// On the Linux seed path no shipped executor carries an OS sandbox — there is
-/// no Linux backend yet — and none of them emit the platform-mismatch warning,
-/// because the selection is deliberate rather than a mismatch to flag.
+/// On Linux every shipped agent uses Bubblewrap while local-shell remains bare.
 #[test]
-fn parse_default_executor_installs_without_sandbox_on_linux_path() {
-    for (name, yaml) in DEFAULT_EXECUTOR_FILES {
-        let def = parse_default_executor_for_platform(name, yaml, LINUX)
+fn parse_default_executor_installs_linux_bwrap_on_linux_path() {
+    for name in SANDBOXED_SHIPPED {
+        let def = parse_default_executor_for_platform(name, yaml_for(name), LINUX)
             .unwrap_or_else(|err| panic!("parse {name}: {err}"));
         assert_eq!(
-            def.sandbox, None,
-            "{name} must install without an OS sandbox on the Linux path"
+            def.sandbox,
+            Some(ExecutorSandboxKind::LinuxBwrap),
+            "{name} must install linux-bwrap on the Linux path"
         );
     }
+    let local_shell =
+        parse_default_executor_for_platform("local-shell", yaml_for("local-shell"), LINUX)
+            .expect("parse local-shell");
+    assert_eq!(local_shell.sandbox, None);
 }
 
 /// The host-platform default entry point defers to the injected core: on the
@@ -132,11 +135,12 @@ fn parse_default_executor_installs_without_sandbox_on_linux_path() {
 #[test]
 fn parse_default_executor_selects_by_host_platform() {
     let def = parse_default_executor("claude", CLAUDE_YAML).expect("parse");
-    if ExecutorSandboxKind::MacosSandboxExec.is_available_on_current_platform() {
-        assert_eq!(def.sandbox, Some(ExecutorSandboxKind::MacosSandboxExec));
-    } else {
-        assert_eq!(def.sandbox, None);
-    }
+    let expected = match std::env::consts::OS {
+        "macos" => Some(ExecutorSandboxKind::MacosSandboxExec),
+        "linux" => Some(ExecutorSandboxKind::LinuxBwrap),
+        _ => None,
+    };
+    assert_eq!(def.sandbox, expected);
 }
 
 /// Re-seeding must re-align a platform-mismatched sandbox left over from a
@@ -150,7 +154,7 @@ fn migrated_default_executor_realigns_platform_mismatched_sandbox_on_linux() {
 
     let migrated = migrated_default_executor_for_platform(&existing, &seeded, LINUX)
         .expect("re-align should produce a migrated def");
-    assert_eq!(migrated.sandbox, None);
+    assert_eq!(migrated.sandbox, Some(ExecutorSandboxKind::LinuxBwrap));
     assert_eq!(migrated.executor_type, ExecutorType::DirectAgent);
 }
 
@@ -211,8 +215,7 @@ fn seed_default_executors_is_idempotent_on_macos_path() {
     }
 }
 
-/// Seeding twice on the Linux path is idempotent and preserves the unsandboxed
-/// value: no default acquires a sandbox and the second pass creates nothing.
+/// Seeding twice on Linux is idempotent and preserves linux-bwrap.
 #[test]
 fn seed_default_executors_is_idempotent_on_linux_path() {
     let store = InMemoryExecutorStore::default();
@@ -223,20 +226,28 @@ fn seed_default_executors_is_idempotent_on_linux_path() {
     let second = seed_default_executors_for_platform(&store, false, LINUX).expect("second seed");
     assert_eq!(second, 0, "re-seed must be a no-op on the Linux path");
 
-    for (name, _) in DEFAULT_EXECUTOR_FILES {
+    for name in SANDBOXED_SHIPPED {
         let def = store
             .get_executor_def(name)
             .expect("get")
             .unwrap_or_else(|| panic!("{name} seeded"));
         assert_eq!(
-            def.sandbox, None,
-            "{name} must stay unsandboxed across idempotent re-seed on Linux"
+            def.sandbox,
+            Some(ExecutorSandboxKind::LinuxBwrap),
+            "{name} must keep linux-bwrap across idempotent re-seed"
         );
     }
+    assert_eq!(
+        store
+            .get_executor_def("local-shell")
+            .expect("get")
+            .expect("local-shell seeded")
+            .sandbox,
+        None
+    );
 }
 
-/// A pre-ORB-10112 Linux install that persisted `macos-sandbox-exec` is healed
-/// on the next seed: the leftover mismatch is re-aligned to unsandboxed.
+/// A pre-ORB-10552 Linux install is upgraded to the native backend.
 #[test]
 fn seed_default_executors_heals_leftover_macos_sandbox_on_linux() {
     let store = InMemoryExecutorStore::default();
@@ -251,8 +262,48 @@ fn seed_default_executors_heals_leftover_macos_sandbox_on_linux() {
         .expect("get")
         .expect("claude present");
     assert_eq!(
-        healed.sandbox, None,
-        "leftover macos-sandbox-exec must be cleared on the Linux seed path"
+        healed.sandbox,
+        Some(ExecutorSandboxKind::LinuxBwrap),
+        "leftover macos-sandbox-exec must become linux-bwrap"
+    );
+}
+
+#[test]
+fn seed_default_executors_upgrades_old_unsandboxed_linux_default() {
+    let store = InMemoryExecutorStore::default();
+    let stale = base_def("claude", ExecutorType::DirectAgent);
+    store
+        .upsert_executor_def(&stale)
+        .expect("seed old Linux def");
+
+    seed_default_executors_for_platform(&store, false, LINUX).expect("seed");
+
+    assert_eq!(
+        store
+            .get_executor_def("claude")
+            .expect("get")
+            .expect("claude present")
+            .sandbox,
+        Some(ExecutorSandboxKind::LinuxBwrap)
+    );
+}
+
+#[test]
+fn custom_executor_sandbox_choice_is_not_rewritten_by_seed_migration() {
+    let store = InMemoryExecutorStore::default();
+    let mut custom = base_def("custom", ExecutorType::DirectAgent);
+    custom.sandbox = Some(ExecutorSandboxKind::MacosSandboxExec);
+    store.upsert_executor_def(&custom).expect("seed custom");
+
+    seed_default_executors_for_platform(&store, false, LINUX).expect("seed defaults");
+
+    assert_eq!(
+        store
+            .get_executor_def("custom")
+            .expect("get")
+            .expect("custom preserved")
+            .sandbox,
+        Some(ExecutorSandboxKind::MacosSandboxExec)
     );
 }
 

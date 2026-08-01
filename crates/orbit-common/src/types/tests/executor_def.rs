@@ -4,6 +4,16 @@ mod sandbox_kind_platform {
     #[test]
     fn target_os_matches_std_env_consts_naming() {
         assert_eq!(ExecutorSandboxKind::MacosSandboxExec.target_os(), "macos");
+        assert_eq!(ExecutorSandboxKind::LinuxBwrap.target_os(), "linux");
+    }
+
+    #[test]
+    fn linux_bwrap_round_trips_as_concrete_wire_value() {
+        let serialized =
+            serde_json::to_string(&ExecutorSandboxKind::LinuxBwrap).expect("serialize");
+        assert_eq!(serialized, "\"linux-bwrap\"");
+        let parsed: ExecutorSandboxKind = serde_json::from_str(&serialized).expect("deserialize");
+        assert_eq!(parsed, ExecutorSandboxKind::LinuxBwrap);
     }
 
     #[test]
@@ -11,6 +21,8 @@ mod sandbox_kind_platform {
         assert!(ExecutorSandboxKind::MacosSandboxExec.is_available_on("macos"));
         assert!(!ExecutorSandboxKind::MacosSandboxExec.is_available_on("linux"));
         assert!(!ExecutorSandboxKind::MacosSandboxExec.is_available_on("windows"));
+        assert!(ExecutorSandboxKind::LinuxBwrap.is_available_on("linux"));
+        assert!(!ExecutorSandboxKind::LinuxBwrap.is_available_on("macos"));
     }
 
     #[cfg(target_os = "macos")]

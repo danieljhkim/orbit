@@ -18,7 +18,7 @@ This document captures the questions Orbit must answer before policy and sandbox
 
 ## 1. Open Questions
 
-1. **How far should Linux sandboxing go after the first backend?** §1.1 proposes a Bubblewrap write-confinement backend for CLI agents. Full read-policy parity, network policy, seccomp, and generic `run_process` adoption remain separate decisions.
+1. **How far should Linux sandboxing go after the first backend?** §1.1 records the shipped Bubblewrap write-confinement boundary. Full read-policy parity, network policy, seccomp, and generic `run_process` adoption remain separate decisions.
 2. **Should enforcement move below the tool layer?** A future tool that skips `enforce_fs_policy` is unguarded unless Orbit adds a `PolicyAwareFs` trait, syscall interception, or linting.
 3. **Should `proc.spawn` consult policy?** Activity program allowlists are not `PolicyDef`; future shapes include `allowExec` / `denyExec` or env access tied to `fsProfile`.
 4. **What is the symlink contract?** `workspace_relative_path` follows symlinks and denies out-of-workspace targets, but the invariant is not yet specified.
@@ -31,14 +31,14 @@ This document captures the questions Orbit must answer before policy and sandbox
 11. **How should concurrent exec handle signals?** `SignalHandlerGuard` serializes installs; worker-pool exec may need sigmasks, cancellation tokens, or a supervisor thread.
 12. **How far should CLI policy coverage go?** macOS `sandbox-exec` narrows writes, but alternatives include trapping CLI fs calls or moving more work to HTTP-backed activities.
 
-### 1.1 Proposed answer: a `linux-bwrap` CLI backend
+### 1.1 Shipped answer: a `linux-bwrap` CLI backend
 
-Orbit should add Bubblewrap as the first Linux OS-level sandbox for CLI-backed agent loops. It
-should reuse the existing executor declaration → `ResolvedSandbox` → CLI spawn path rather than
+Orbit uses Bubblewrap as the first Linux OS-level sandbox for CLI-backed agent loops. It
+reuses the existing executor declaration → `ResolvedSandbox` → CLI spawn path rather than
 starting with the generic `Sandbox` trait: the exposed gap is provider CLIs, and that is already
 the seam where macOS turns an activity's resolved `FsProfile` into an outer process wrapper.
 
-The first version is deliberately a **write-confinement backend**, not a claim of byte-for-byte
+The shipped first version is deliberately a **write-confinement backend**, not a claim of byte-for-byte
 SBPL parity. It materially improves today's bare Linux execution while keeping unsupported policy
 semantics visible instead of silently calling them enforced.
 
@@ -120,7 +120,7 @@ Bubblewrap is the pragmatic first backend because it is an unprivileged policy-c
 not a policy by itself. Orbit remains responsible for the exact mount and namespace arguments.
 The trusted-path rule, `--new-session`, namespace selection, and explicit read-policy limitation
 are therefore part of the security contract rather than incidental implementation details.
-[ORB-10552] tracks implementation of this proposed boundary.
+[ORB-10552] implements this boundary; [ADR-0304] records the choice and its deferred read-policy cost.
 
 ---
 
@@ -190,6 +190,6 @@ External reference categories:
 - **[T20260426-0605]** — Auditability folder linked from §1.10.
 - **[T20260426-0622]** — Add this folder and name the open questions.
 - **[T20260430-23]** — Shorten the policy sandbox design docs while preserving the shipped contract and ADR history.
-- **[ORB-10552]** — Implement the proposed fail-closed Linux Bubblewrap write-confinement backend for CLI agents.
+- **[ORB-10552]** — Implement the shipped fail-closed Linux Bubblewrap write-confinement backend for CLI agents.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

@@ -6,8 +6,9 @@ use std::process::{Child, Command, Stdio};
 use orbit_common::types::ExecutorSandboxKind;
 use orbit_common::utility::redaction::non_sensitive_env_vars;
 use orbit_exec::{
-    MacosSandboxSpawnRequest, compile_macos_sandbox_profile, sandbox_exec_available,
-    sandbox_exec_unavailable_message, spawn_under_macos_sandbox,
+    BwrapProbeOutcome, LinuxBwrapSpawnRequest, MacosSandboxSpawnRequest, compile_linux_bwrap_argv,
+    compile_macos_sandbox_profile, probe_bwrap, sandbox_exec_available,
+    sandbox_exec_unavailable_message, spawn_under_linux_bwrap, spawn_under_macos_sandbox,
 };
 use tempfile::NamedTempFile;
 
@@ -25,6 +26,94 @@ use super::super::dispatcher::ResolvedSandbox;
 pub(crate) struct SpawnError {
     pub(crate) permanent: bool,
     pub(crate) message: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct SandboxDispatchMetadata {
+    pub(super) backend: Option<String>,
+    pub(super) trusted_wrapper: Option<String>,
+    pub(super) probe_outcome: Option<String>,
+    pub(super) write_enforcement: String,
+    pub(super) read_enforcement: String,
+}
+
+pub(super) struct PreparedSandbox<'a> {
+    pub(super) effective: Option<&'a ResolvedSandbox>,
+    pub(super) metadata: SandboxDispatchMetadata,
+}
+
+/// Resolve availability before provider argv construction. This ordering is
+/// security-sensitive: provider-native flags are neutralized only when the
+/// outer wrapper is actually usable, while an explicitly allowed bare
+/// fallback keeps those flags intact.
+pub(super) fn prepare_sandbox_for_dispatch(
+    sandbox: Option<&ResolvedSandbox>,
+) -> Result<PreparedSandbox<'_>, SpawnError> {
+    match sandbox {
+        Some(sandbox) if sandbox.kind == ExecutorSandboxKind::LinuxBwrap => {
+            let probe = probe_bwrap();
+            prepare_linux_sandbox_for_dispatch_with_probe(sandbox, probe)
+        }
+        Some(sandbox) => Ok(PreparedSandbox {
+            effective: Some(sandbox),
+            metadata: SandboxDispatchMetadata {
+                backend: Some(sandbox.kind.as_str().to_string()),
+                trusted_wrapper: None,
+                probe_outcome: None,
+                write_enforcement: "write_enforced".to_string(),
+                read_enforcement: "read_delegated".to_string(),
+            },
+        }),
+        None => Ok(PreparedSandbox {
+            effective: None,
+            metadata: SandboxDispatchMetadata {
+                backend: None,
+                trusted_wrapper: None,
+                probe_outcome: None,
+                write_enforcement: "write_delegated".to_string(),
+                read_enforcement: "read_delegated".to_string(),
+            },
+        }),
+    }
+}
+
+pub(crate) fn prepare_linux_sandbox_for_dispatch_with_probe<'a>(
+    sandbox: &'a ResolvedSandbox,
+    probe: BwrapProbeOutcome,
+) -> Result<PreparedSandbox<'a>, SpawnError> {
+    if probe.available {
+        Ok(PreparedSandbox {
+            effective: Some(sandbox),
+            metadata: SandboxDispatchMetadata {
+                backend: Some("linux-bwrap".to_string()),
+                trusted_wrapper: Some(probe.trusted_path),
+                probe_outcome: Some(probe.detail),
+                write_enforcement: "write_enforced".to_string(),
+                read_enforcement: "read_delegated".to_string(),
+            },
+        })
+    } else if sandbox.allow_fallback {
+        tracing::warn!(
+            target: "orbit.engine.cli_runner",
+            reason = %probe.detail,
+            "linux-bwrap unavailable; falling back to bare exec because executor declares allow_fallback"
+        );
+        Ok(PreparedSandbox {
+            effective: None,
+            metadata: SandboxDispatchMetadata {
+                backend: Some("bare-fallback".to_string()),
+                trusted_wrapper: Some(probe.trusted_path),
+                probe_outcome: Some(probe.detail),
+                write_enforcement: "write_delegated".to_string(),
+                read_enforcement: "read_delegated".to_string(),
+            },
+        })
+    } else {
+        Err(SpawnError::permanent(format!(
+            "{}; declare allow_fallback: true to permit bare exec",
+            probe.detail
+        )))
+    }
 }
 
 impl SpawnError {
@@ -171,8 +260,45 @@ pub(super) fn spawn_child_with_optional_sandbox(
         Some(sb) if sb.kind == ExecutorSandboxKind::MacosSandboxExec => {
             spawn_macos_sandboxed(program, args, env, cwd, sb)
         }
-        Some(_) | None => spawn_bare(program, args, env, cwd),
+        Some(sb) if sb.kind == ExecutorSandboxKind::LinuxBwrap => {
+            spawn_linux_bwrap(program, args, env, cwd, sb)
+        }
+        Some(sb) => Err(SpawnError::permanent(format!(
+            "unsupported sandbox backend `{}`",
+            sb.kind
+        ))),
+        None => spawn_bare(program, args, env, cwd),
     }
+}
+
+fn spawn_linux_bwrap(
+    program: &str,
+    args: &[String],
+    env: &[(String, String)],
+    cwd: Option<&Path>,
+    sandbox: &ResolvedSandbox,
+) -> Result<SpawnedChild, SpawnError> {
+    let plan = compile_linux_bwrap_argv(
+        &sandbox.fs_profile,
+        program,
+        args,
+        cwd,
+        sandbox.managed_worktree,
+    )
+    .map_err(|error| SpawnError::permanent(error.to_string()))?;
+    let child = spawn_under_linux_bwrap(LinuxBwrapSpawnRequest {
+        plan: &plan,
+        env,
+        cwd,
+        stdin: Stdio::piped(),
+        stdout: Stdio::piped(),
+        stderr: Stdio::piped(),
+    })
+    .map_err(|error| SpawnError::transient(error.to_string()))?;
+    Ok(SpawnedChild {
+        child,
+        _profile_temp: None,
+    })
 }
 
 // pub(crate) widened for tests/ layout under ORB-00225; test reaches via exposed surface.

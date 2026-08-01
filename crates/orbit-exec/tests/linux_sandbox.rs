@@ -1,115 +1,149 @@
 #![allow(missing_docs)]
-// [ORB-10009] Fixture setup uses unwrap/expect for readability.
-#![allow(clippy::expect_used, clippy::unwrap_used)]
-#![cfg(target_os = "linux")]
-
-//! [ORB-10009] Linux-side contract tests for orbit-exec's sandbox surface.
-//!
-//! Orbit has no Linux kernel sandbox: `sandbox-exec` (SBPL) is macOS-only,
-//! and no Landlock/seccomp/namespace confinement exists yet. These tests
-//! pin the two halves of that contract on a real Linux host:
-//!
-//! 1. **Fail closed** — the macOS sandbox primitives must refuse to run
-//!    (never silently spawn an *unsandboxed* child) when `sandbox-exec` is
-//!    unavailable. `orbit-core`'s dispatcher-level twin
-//!    (`resolve_executor_sandbox_errors_on_non_macos_platform`) covers the
-//!    executor path.
-//! 2. **Honesty tripwire** — `run_process` + `NoSandbox` provides *zero*
-//!    kernel-level filesystem confinement on Linux; the policy layer
-//!    (`PolicyEngine::check_resolved`, [ORB-00418]) is the only enforcement
-//!    seam and is therefore load-bearing. If Linux sandboxing (e.g.
-//!    Landlock) is ever added, this test flips and forces the expectations
-//!    — and the CI story — to be updated together. Gate any future
-//!    kernel-primitive tests on runtime feature detection (probe, then
-//!    skip-with-message), not compile-time cfg alone.
 
 use std::process::Stdio;
 
+use orbit_common::types::ResolvedFsProfile;
 use orbit_exec::{
-    EnvironmentMode, ExecRequest, MacosSandboxSpawnRequest, NoSandbox, StdinMode, run_process,
-    sandbox_exec_available, sandbox_exec_unavailable_message, spawn_under_macos_sandbox,
+    LinuxBwrapPostRunGuard, LinuxBwrapSpawnRequest, bwrap_path, bwrap_program_for_audit,
+    compile_linux_bwrap_argv, probe_bwrap, spawn_under_linux_bwrap,
 };
 
-/// Skip-with-message helper for host prerequisites (mirrors the
-/// `sandbox_exec_can_apply()` self-skip pattern on the macOS leg).
-#[allow(clippy::print_stderr)]
-fn host_has(path: &str) -> bool {
-    let present = std::path::Path::new(path).exists();
-    if !present {
-        eprintln!("skipping: `{path}` not present on this host");
+fn profile(modify: Vec<String>) -> ResolvedFsProfile {
+    ResolvedFsProfile {
+        name: "test".to_string(),
+        read: vec!["/**".to_string()],
+        modify,
     }
-    present
 }
 
 #[test]
-fn sandbox_exec_is_unavailable_on_linux() {
-    assert!(
-        !sandbox_exec_available(),
-        "no trusted sandbox-exec should exist on Linux"
-    );
-    let message = sandbox_exec_unavailable_message();
-    assert!(
-        message.contains("sandbox-exec"),
-        "unavailable message should name the missing wrapper: {message}"
-    );
+fn trusted_resolution_never_consults_path() {
+    assert_eq!(bwrap_program_for_audit(), "/usr/bin/bwrap");
+    if let Some(path) = bwrap_path() {
+        assert_eq!(path.to_string_lossy(), "/usr/bin/bwrap");
+    }
 }
 
 #[test]
-fn spawn_under_macos_sandbox_fails_closed_on_linux() {
-    // The spawn primitive must error out — not fall back to an unsandboxed
-    // child — when the trusted wrapper is missing.
-    let marker = tempfile::NamedTempFile::new().expect("marker file");
-    let script = format!("echo escaped > {}", marker.path().display());
-    let args = ["-c".to_string(), script];
-    let result = spawn_under_macos_sandbox(MacosSandboxSpawnRequest {
-        profile_text: "(version 1)\n(allow default)\n",
-        program: "/bin/sh",
-        args: &args,
-        env: &[],
-        cwd: None,
-        stdin: Stdio::null(),
-        stdout: Stdio::null(),
-        stderr: Stdio::null(),
-    });
-    assert!(result.is_err(), "must fail closed without sandbox-exec");
-    let content = std::fs::read_to_string(marker.path()).expect("read marker");
-    assert!(
-        content.is_empty(),
-        "no child may run when the sandbox wrapper is unavailable; marker: {content:?}"
-    );
+fn argv_is_deterministic_and_orders_denies_after_writable_parent() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let workspace = temp.path().join("workspace");
+    let denied = workspace.join(".orbit");
+    std::fs::create_dir_all(&denied).expect("create fixture");
+    let resolved = profile(vec![
+        format!("{}/**", workspace.display()),
+        format!("!{}/**", denied.display()),
+    ]);
+
+    let plan = compile_linux_bwrap_argv(&resolved, "/bin/true", &[], Some(&workspace), false)
+        .expect("compile");
+    let joined = plan.args.join(" ");
+    for required in [
+        "--die-with-parent",
+        "--new-session",
+        "--unshare-all",
+        "--share-net",
+        "--ro-bind / /",
+        "--dev /dev",
+        "--proc /proc",
+        "--tmpfs /tmp",
+    ] {
+        assert!(
+            joined.contains(required),
+            "missing `{required}` in {joined}"
+        );
+    }
+    let writable = joined.find(&format!("--bind {0} {0}", workspace.display()));
+    let readonly = joined.find(&format!("--ro-bind {0} {0}", denied.display()));
+    assert!(writable.is_some_and(|index| readonly.is_some_and(|deny| index < deny)));
+
+    let repeated = compile_linux_bwrap_argv(&resolved, "/bin/true", &[], Some(&workspace), false)
+        .expect("compile twice");
+    assert_eq!(plan, repeated);
 }
 
-/// NOTE: this documents *current* behavior, deliberately. A child spawned
-/// through `run_process` on Linux can read any file its uid can — orbit-exec
-/// applies no kernel confinement here. The tool/policy layer
-/// (`orbit-tools` + `PolicyEngine::check_resolved`) is the only Linux
-/// enforcement seam; its integration tests live in
-/// `orbit-tools/tests/fs_enforcement_linux.rs`. If this test ever fails
-/// because confinement appeared, that is a *feature* — rewrite the Linux
-/// enforcement suite around the new primitive.
 #[test]
-fn run_process_applies_no_kernel_fs_confinement_on_linux() {
-    if !host_has("/bin/cat") {
+fn direct_invocation_fails_closed_for_overlapping_non_subtree_deny() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let workspace = temp.path().join("workspace");
+    std::fs::create_dir_all(&workspace).expect("create workspace");
+    let resolved = profile(vec![
+        format!("{}/**", workspace.display()),
+        format!("!{}/**/*.env", workspace.display()),
+    ]);
+    let error = compile_linux_bwrap_argv(&resolved, "/bin/true", &[], None, false)
+        .expect_err("direct invocation must fail closed");
+    assert!(error.to_string().contains("non-subtree denyModify"));
+}
+
+#[test]
+fn managed_worktree_guard_rejects_new_forbidden_match() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let workspace = temp.path().join("workspace");
+    std::fs::create_dir_all(&workspace).expect("create workspace");
+    let resolved = profile(vec![
+        format!("{}/**", workspace.display()),
+        format!("!{}/**/*.env", workspace.display()),
+    ]);
+    let guard = LinuxBwrapPostRunGuard::capture(&resolved)
+        .expect("capture")
+        .expect("guard required");
+    std::fs::write(workspace.join("new.env"), "secret").expect("write forbidden fixture");
+    let error = guard.verify().expect_err("new forbidden match rejected");
+    assert!(error.to_string().contains("before commit"));
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn kernel_enforces_allowed_outside_and_subtree_writes_when_available() {
+    let probe = probe_bwrap();
+    if !probe.available {
+        println!("skipping real Bubblewrap test: {}", probe.detail);
         return;
     }
 
-    // A file well outside any conceivable workspace/profile allowance.
-    let outside = tempfile::NamedTempFile::new().expect("outside file");
-    std::fs::write(outside.path(), "outside-the-profile").expect("write outside file");
-
-    let request = ExecRequest {
-        program: "/bin/cat".to_string(),
-        args: vec![outside.path().display().to_string()],
-        current_dir: None,
-        timeout_ms: Some(10_000),
-        stdin_mode: StdinMode::Null,
-        environment_mode: EnvironmentMode::Inherit,
-        debug: false,
-    };
-    let result = run_process(&request, &NoSandbox).expect("spawn child");
-    assert!(result.success, "stderr: {}", result.stderr);
-    assert_eq!(
-        result.stdout, "outside-the-profile",
-        "child reads outside paths freely: policy-layer checks are the only Linux enforcement"
+    let temp = tempfile::tempdir().expect("tempdir");
+    let workspace = temp.path().join("workspace");
+    let denied = workspace.join(".orbit");
+    let outside = temp.path().join("outside");
+    std::fs::create_dir_all(&denied).expect("create denied root");
+    std::fs::create_dir_all(&outside).expect("create outside root");
+    let allowed_file = workspace.join("allowed.txt");
+    let outside_file = outside.join("outside.txt");
+    let denied_file = denied.join("denied.txt");
+    let resolved = profile(vec![
+        format!("{}/**", workspace.display()),
+        format!("!{}/**", denied.display()),
+    ]);
+    let script = format!(
+        "printf allowed > '{}'; ! printf outside > '{}'; ! printf denied > '{}'",
+        allowed_file.display(),
+        outside_file.display(),
+        denied_file.display()
     );
+    let plan = compile_linux_bwrap_argv(
+        &resolved,
+        "/bin/sh",
+        &["-c".to_string(), script],
+        Some(&workspace),
+        false,
+    )
+    .expect("compile");
+    let mut child = spawn_under_linux_bwrap(LinuxBwrapSpawnRequest {
+        plan: &plan,
+        env: &[],
+        cwd: Some(&workspace),
+        stdin: Stdio::null(),
+        stdout: Stdio::null(),
+        stderr: Stdio::null(),
+    })
+    .expect("spawn");
+    let status = child.wait().expect("wait");
+    assert!(status.success());
+    assert_eq!(
+        std::fs::read_to_string(allowed_file).expect("allowed write"),
+        "allowed"
+    );
+    assert!(!outside_file.exists());
+    assert!(!denied_file.exists());
 }

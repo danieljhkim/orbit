@@ -29,6 +29,7 @@
 //! # Dependency direction
 //! `orbit-types` → `orbit-exec` → orbit-tools
 
+pub mod linux_sandbox;
 pub mod macos_sandbox;
 pub mod process;
 pub mod result;
@@ -36,6 +37,11 @@ pub mod runner;
 pub mod sandbox;
 mod supervision;
 
+pub use linux_sandbox::{
+    BwrapProbeOutcome, LinuxBwrapPlan, LinuxBwrapPostRunGuard, LinuxBwrapSpawnRequest, bwrap_path,
+    bwrap_program_for_audit, bwrap_unavailable_message, compile_linux_bwrap_argv, probe_bwrap,
+    spawn_under_linux_bwrap,
+};
 pub use macos_sandbox::{
     MacosSandboxSpawnRequest, claude_state_dir_from_env, compile_macos_sandbox_profile,
     grok_state_dir_from_env, sandbox_exec_available, sandbox_exec_path,

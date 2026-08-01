@@ -41,6 +41,7 @@ pub(in crate::activity_job::cli_runner) fn sandbox_for_test() -> ResolvedSandbox
             modify: vec!["/tmp".to_string()],
         },
         allow_fallback: false,
+        managed_worktree: false,
     }
 }
 

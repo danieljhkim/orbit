@@ -41,6 +41,9 @@ pub struct ResolvedSandbox {
     pub fs_profile: ResolvedFsProfile,
     /// Whether to fall back to bare exec if the OS primitive is unavailable.
     pub allow_fallback: bool,
+    /// Whether the subprocess runs in an Orbit-owned disposable worktree.
+    /// Linux may snapshot-expand non-subtree deny globs only in this case.
+    pub managed_worktree: bool,
 }
 
 /// Orbit-core-owned responsibilities the v2 dispatcher delegates back across

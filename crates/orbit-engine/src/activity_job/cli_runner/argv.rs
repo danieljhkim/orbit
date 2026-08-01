@@ -1,7 +1,11 @@
 use std::collections::HashMap;
+use std::path::Path;
 
 use orbit_common::types::ExecutorSandboxKind;
-use orbit_exec::{claude_state_dir_from_env, sandbox_exec_program_for_audit};
+use orbit_exec::{
+    bwrap_program_for_audit, claude_state_dir_from_env, compile_linux_bwrap_argv,
+    sandbox_exec_program_for_audit,
+};
 
 use super::super::dispatcher::ResolvedSandbox;
 
@@ -26,12 +30,42 @@ pub(super) fn audit_argv_for_dispatch(
             out.extend(args.iter().cloned());
             out
         }
+        Some(sb) if sb.kind == ExecutorSandboxKind::LinuxBwrap => {
+            try_audit_argv_for_dispatch(program, args, Some(sb), None).unwrap_or_else(|_| {
+                let mut out = vec![
+                    bwrap_program_for_audit().to_string(),
+                    "<invalid-linux-bwrap-plan>".to_string(),
+                    program.to_string(),
+                ];
+                out.extend(args.iter().cloned());
+                out
+            })
+        }
         _ => {
             let mut out = Vec::with_capacity(args.len() + 1);
             out.push(program.to_string());
             out.extend(args.iter().cloned());
             out
         }
+    }
+}
+
+pub(super) fn try_audit_argv_for_dispatch(
+    program: &str,
+    args: &[String],
+    sandbox: Option<&ResolvedSandbox>,
+    cwd: Option<&Path>,
+) -> Result<Vec<String>, orbit_common::types::OrbitError> {
+    match sandbox {
+        Some(sb) if sb.kind == ExecutorSandboxKind::LinuxBwrap => {
+            let plan =
+                compile_linux_bwrap_argv(&sb.fs_profile, program, args, cwd, sb.managed_worktree)?;
+            let mut out = Vec::with_capacity(plan.args.len() + 1);
+            out.push(plan.wrapper);
+            out.extend(plan.args);
+            Ok(out)
+        }
+        _ => Ok(audit_argv_for_dispatch(program, args, sandbox)),
     }
 }
 
