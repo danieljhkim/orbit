@@ -1,3 +1,10 @@
+---
+type: design
+summary: "Spec: Artifact Write Redaction"
+tags: ["auditability"]
+last_validated: 2026-08-01
+---
+
 # Spec: Artifact Write Redaction
 
 Orbit artifact tools persist repo-backed YAML, markdown, and JSON. Their write boundary sanitizes selected input fields after `OrbitBuiltinAction` is known and before typed params are built. The sanitizer is action-keyed rather than field-blind, so structural IDs, statuses, tags, and artifact blobs keep their native validation rules.
