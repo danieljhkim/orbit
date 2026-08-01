@@ -11,10 +11,9 @@ use orbit_core::{OrbitError, OrbitRuntime};
 
 /// `--scope` value shared by `orbit config show` and `orbit config get`.
 ///
-/// `Effective` resolves to whichever single file the runtime would actually
-/// load under replace-not-merge semantics (see the `orbit_core::config`
-/// module doc comment). `Global`/`Workspace` always read that specific file
-/// directly, regardless of which one is effective.
+/// `Effective` asks callers to use the layered runtime view (see the
+/// `orbit_core::config` module documentation). `Global`/`Workspace` always
+/// read one specific file directly, without applying the other layer.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum, Default)]
 pub enum ConfigScopeArg {
     #[default]
@@ -33,8 +32,9 @@ pub(super) fn workspace_config_path(runtime: &OrbitRuntime) -> PathBuf {
     runtime.shared_root().join("config.toml")
 }
 
-/// Resolve `--scope` into the concrete [`ConfigScope`] and file path it
-/// refers to for this runtime.
+/// Resolve `--scope` into a concrete file path. For `Effective`, this returns
+/// the highest-precedence file path for display and compatibility only; show
+/// and get load both layers through `orbit_core::config::load_effective_config`.
 pub(super) fn resolve_scope(
     runtime: &OrbitRuntime,
     scope: ConfigScopeArg,

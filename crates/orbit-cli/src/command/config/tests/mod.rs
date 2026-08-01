@@ -4,6 +4,7 @@ use orbit_core::OrbitRuntime;
 use tempfile::tempdir;
 
 mod set;
+mod show;
 mod support;
 
 /// Build a runtime with independent global/workspace roots so tests can

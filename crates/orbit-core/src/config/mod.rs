@@ -4,10 +4,16 @@
 //! - `~/.orbit/config.toml` — global defaults (agent, env passthrough, execution policy)
 //! - `.orbit/config.toml` — workspace-local overrides
 //!
-//! **Merge semantics are replace-not-merge**: if a workspace config specifies a
-//! key, it completely replaces the global value for that key. There is no deep
-//! merge of nested structures. This avoids surprising implicit inheritance while
-//! still letting workspaces stay minimal by omitting keys they don't need to change.
+//! Ordinary settings inherit per key: workspace values override global values, global values fill omissions, and built-in defaults fill remaining gaps.
+//! Nested tables layer recursively; a scalar, array, or registered table value in
+//! the workspace file replaces the matching global value. Named crew fields also
+//! layer recursively, so a workspace can override one model without restating the
+//! crew or registry.
+//!
+//! Three security-sensitive settings are replace-only when a workspace file
+//! exists: `execution.codex.sandbox`, `execution.codex.approval_policy`, and
+//! `execution.env.pass`. An omitted replace-only setting uses its built-in default
+//! rather than inheriting a machine-specific global policy.
 //!
 //! The `bootstrap` module seeds a default `config.toml` on first `orbit init`.
 //! The `raw` module holds the serde-deserializable structs.
@@ -29,6 +35,10 @@ pub use registry::{
     CONFIG_KEY_REGISTRY, ConfigKeyDescriptor, ConfigSnapshot, describe as describe_config_key,
 };
 pub(crate) use runtime::{CodexExecutionPolicy, DuelConfig, ExecutionEnvPolicy, RuntimeConfig};
+pub use runtime::{
+    ConfigValueSource, ConfigValueSourceKind, EffectiveConfig, EffectiveConfigValue,
+    load_effective_config,
+};
 pub use store::{ConfigScope, ConfigStore, WorkspaceInitMode};
 
 /// Validate the effective (workspace-over-global) `config.toml` without
