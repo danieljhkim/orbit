@@ -221,18 +221,8 @@ fn linked_worktree_artifacts_write_locally_and_remote_lists_return_stubs() {
     let local_orbit_entries = sorted_child_names(&linked_orbit);
     assert_eq!(local_orbit_entries, vec!["adrs", "learnings"]);
 
-    let federated_show = run_orbit_json(
-        &main_repo,
-        &home,
-        &[
-            "tool",
-            "run",
-            "orbit.adr.show",
-            "--input",
-            &format!(r#"{{"id":"{adr_id}","model":"codex"}}"#),
-        ],
-        None,
-    );
+    let federated_show =
+        run_orbit_json(&main_repo, &home, &["adr", "show", &adr_id, "--json"], None);
     assert_eq!(federated_show["id"], adr_id);
     assert!(
         federated_show["body"]
@@ -289,13 +279,13 @@ fn linked_worktree_artifacts_write_locally_and_remote_lists_return_stubs() {
     // subcommand, which routes through `runtime.run_tool` and so bypasses
     // `ensure_tool_agent_facing` while preserving the tool's filter
     // semantics (including `--include-remote`).
-    let adr_default = run_orbit_json(&main_repo, &home, &["adr", "list"], None);
+    let adr_default = run_orbit_json(&main_repo, &home, &["adr", "list", "--json"], None);
     assert!(!array_contains_id(&adr_default, &adr_id));
 
     let adr_remote = run_orbit_json(
         &main_repo,
         &home,
-        &["adr", "list", "--include-remote"],
+        &["adr", "list", "--include-remote", "--json"],
         None,
     );
     let adr_stub = find_id(&adr_remote, &adr_id);
@@ -320,18 +310,8 @@ fn linked_worktree_artifacts_write_locally_and_remote_lists_return_stubs() {
     assert_eq!(learning_stub["remote"], json!(true));
     assert!(learning_stub["body"].is_null());
 
-    let show_output = run_orbit_output(
-        &main_repo,
-        &home,
-        &[
-            "tool",
-            "run",
-            "orbit.adr.show",
-            "--input",
-            &format!(r#"{{"id":"{adr_id}","model":"codex"}}"#),
-        ],
-        None,
-    );
+    let show_output =
+        run_orbit_output(&main_repo, &home, &["adr", "show", &adr_id, "--json"], None);
     assert!(!show_output.status.success());
     let unavailable_payload: Value =
         serde_json::from_slice(&show_output.stdout).expect("structured unavailable error");
@@ -350,6 +330,17 @@ fn linked_worktree_artifacts_write_locally_and_remote_lists_return_stubs() {
             .get("body_path")
             .is_none()
     );
+
+    let unknown_output = run_orbit_output(
+        &main_repo,
+        &home,
+        &["adr", "show", "ADR-9999", "--json"],
+        None,
+    );
+    assert!(!unknown_output.status.success());
+    let unknown_payload: Value =
+        serde_json::from_slice(&unknown_output.stdout).expect("structured not-found error");
+    assert_eq!(unknown_payload["code"], "not_found");
 }
 
 fn assert_root_fields(value: &Value, shared_root: &Path, local_root: &Path) {

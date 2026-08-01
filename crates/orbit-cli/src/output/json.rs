@@ -60,7 +60,10 @@ fn error_code(error: &OrbitError) -> &str {
             NotFoundKind::Job => "job_not_found",
             NotFoundKind::JobRun => "job_run_not_found",
             NotFoundKind::Activity => "activity_not_found",
-            NotFoundKind::Adr => "adr_not_found",
+            // ADR reads expose the same stable distinction as the tool and
+            // federation contracts: absent allocations are `not_found`, while
+            // allocated-but-unreadable bodies are `remote_artifact_unavailable`.
+            NotFoundKind::Adr => "not_found",
             NotFoundKind::DesignFeature => "design_feature_not_found",
             NotFoundKind::Learning => "learning_not_found",
             NotFoundKind::AgentSession => "agent_session_not_found",
