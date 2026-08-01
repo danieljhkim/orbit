@@ -1,0 +1,36 @@
+schemaVersion: 1
+name: qa-sweep
+description: Hands-on validation of recent workspace changes
+enabled: false
+schedule:
+  cron: 50 * * * *
+template:
+  title: Perform QA validation
+  description: |
+    Identify recent changes in this workspace and validate them hands-on. Build
+    and run the changed software, then exercise the affected CLI, API, and
+    feature paths as a user would; do not treat re-running the existing test
+    suite as sufficient validation.
+
+    Before filing anything, search open Orbit tasks tagged `qa-sweep`. For each
+    real issue that is not already filed, create an Orbit task yourself through
+    the Orbit MCP tools or the equivalent `orbit tool run orbit.task.add`
+    command. Give it severity-appropriate priority, tag it `qa-sweep`, and put
+    the relevant commits, observed evidence, and exact reproduction steps in
+    its description. Skip duplicates. Your narrative output is advisory; the
+    tasks you create are the durable side-effect channel.
+  acceptance_criteria:
+  - Recent changes were exercised through their real user-facing paths.
+  - Real, non-duplicate issues were filed as Orbit tasks with evidence and reproduction steps.
+  task_type: chore
+  tags:
+  - qa-sweep
+  - no-diff-expected
+  priority: medium
+  crew: sonnet
+  status: backlog
+dedupe: skip_if_open
+created_by: system
+created_at: 2026-07-12T00:00:00Z
+updated_by: human
+updated_at: 2026-07-12T04:54:45.094136857+00:00
