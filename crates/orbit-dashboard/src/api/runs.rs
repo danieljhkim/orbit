@@ -5,7 +5,6 @@ use axum::extract::{Path, Query};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Json, Response};
 use orbit_common::utility::redaction::redact_all;
-use orbit_core::command::job::JobRunListParams;
 use orbit_core::runtime::run_audit::{RunAuditStep, RunCliInvocationRecord, RunProviderProcess};
 use orbit_core::{JobRun, OrbitRuntime, V2AuditEventFilter};
 use serde_json::{Value, json};
@@ -23,11 +22,6 @@ pub(super) const RUN_EVENTS_MAX_SCAN_LINES: usize = 50_000;
 const RUN_LOG_PREVIEW_MAX_BYTES: usize = 8192;
 /// Maximum lines included in stdout/stderr previews returned by run-log APIs.
 const RUN_LOG_PREVIEW_MAX_LINES: usize = 120;
-
-/// Cap on the run history scanned by the in-flight ship guard. Non-terminal
-/// runs are always among the newest rows, so a bounded window is enough to spot
-/// a duplicate dispatch without walking the whole history.
-const SHIP_IN_FLIGHT_SCAN_LIMIT: usize = 200;
 
 #[derive(serde::Deserialize, Default)]
 pub(super) struct ShipBody {
@@ -60,10 +54,12 @@ pub(super) struct ShipBody {
 /// a workspace with no registry binding (single/embedded mode) keeps the
 /// historical `pr` default.
 ///
-/// Explicitly-selected task ids are additionally guarded against duplicate
-/// dispatch: if any of them is already carried by a non-terminal run, the
-/// request is a 409 naming that run rather than a second run for the same task.
-/// Auto (backlog-discovery) mode has no task ids to guard and is unaffected.
+/// [ORB-10544] Duplicate dispatch of an explicitly-selected task is refused by
+/// the shared submission path, not here: `submit_ship_run` returns
+/// `OrbitError::ShipRunInFlight` when one of the named tasks is already carried
+/// by a non-terminal run, which `map_runtime_error` projects to this endpoint's
+/// stable 409. Auto (backlog-discovery) mode has no task ids to guard and is
+/// unaffected.
 pub(super) async fn ship_workflow_action(
     Ws(runtime): Ws,
     body: Option<Json<ShipBody>>,
@@ -76,11 +72,6 @@ pub(super) async fn ship_workflow_action(
         },
         None => workspace_default_ship_mode(&runtime),
     };
-    match in_flight_run_for_tasks(&runtime, &body.task_ids) {
-        Ok(Some(conflict)) => return ship_conflict(&conflict),
-        Ok(None) => {}
-        Err(e) => return map_runtime_error(e),
-    }
     match runtime.submit_ship_run(
         mode,
         body.base.as_deref(),
@@ -109,64 +100,6 @@ fn workspace_default_ship_mode(runtime: &OrbitRuntime) -> orbit_core::ShipMode {
     runtime
         .workspace_runtime_binding()
         .map_or(orbit_core::ShipMode::Pr, |binding| binding.ship_mode)
-}
-
-/// The newest non-terminal run already carrying one of `task_ids`, if any.
-///
-/// A run's task selection lives in its persisted `input.task_ids`, which is
-/// what `submit_ship_run` writes, so this sees pipeline dispatches regardless of
-/// which surface submitted them.
-fn in_flight_run_for_tasks(
-    runtime: &OrbitRuntime,
-    task_ids: &[String],
-) -> Result<Option<InFlightRun>, orbit_core::OrbitError> {
-    if task_ids.is_empty() {
-        return Ok(None);
-    }
-    let runs = runtime.list_job_runs(JobRunListParams {
-        limit: Some(SHIP_IN_FLIGHT_SCAN_LIMIT),
-        ..Default::default()
-    })?;
-    Ok(runs.into_iter().find_map(|run| {
-        if run.state.is_terminal() {
-            return None;
-        }
-        let matched = run
-            .input
-            .as_ref()
-            .and_then(|input| input.get("task_ids"))
-            .and_then(Value::as_array)
-            .into_iter()
-            .flatten()
-            .filter_map(Value::as_str)
-            .find(|candidate| task_ids.iter().any(|wanted| wanted == candidate))
-            .map(str::to_string)?;
-        Some(InFlightRun {
-            run_id: run.run_id,
-            task_id: matched,
-        })
-    }))
-}
-
-struct InFlightRun {
-    run_id: String,
-    task_id: String,
-}
-
-fn ship_conflict(conflict: &InFlightRun) -> Response {
-    (
-        StatusCode::CONFLICT,
-        Json(json!({
-            "error": format!(
-                "task {} already has an in-flight run ({}); wait for it to finish or cancel it",
-                conflict.task_id, conflict.run_id
-            ),
-            "code": "ship_run_in_flight",
-            "run_id": conflict.run_id,
-            "task_id": conflict.task_id,
-        })),
-    )
-        .into_response()
 }
 
 pub(super) async fn get_run(Ws(runtime): Ws, Path(id): Path<String>) -> Response {

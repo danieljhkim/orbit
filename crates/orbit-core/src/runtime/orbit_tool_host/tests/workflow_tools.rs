@@ -195,6 +195,48 @@ fn unmanaged_environment_admits_operator_ship_and_resume() {
     );
 }
 
+/// ORB-10544: `orbit.workflow.ship` is a thin projection of the shared
+/// submission path, so it inherits that path's duplicate-dispatch guard: a task
+/// already carried by a non-terminal run is refused here with the same typed
+/// conflict the dashboard endpoint maps to its 409, naming both ids. Before this
+/// the check lived only in the endpoint and the tool could dispatch a second run
+/// contending for the same worktree and task reservation.
+#[test]
+fn ship_tool_inherits_the_shared_in_flight_guard() {
+    let _env = unmanaged_tool_env_guard();
+    let (_root, runtime, _repo_root) = test_runtime();
+    write_ship_job_asset(&runtime);
+    let in_flight = runtime
+        .stores()
+        .jobs()
+        .insert_job_run(
+            SHIP_JOB,
+            1,
+            Utc::now(),
+            Some(json!({"mode": "pr", "task_ids": [SHIP_TASK_IDS[0]]})),
+            None,
+        )
+        .expect("insert in-flight run");
+
+    let error = run_tool_as_operator(&runtime, "orbit.workflow.ship", ship_input())
+        .expect_err("the tool must refuse a task already carried by a non-terminal run");
+
+    let OrbitError::ShipRunInFlight { task_id, run_id } = &error else {
+        panic!("expected ShipRunInFlight, got {error:?}");
+    };
+    assert_eq!(task_id, SHIP_TASK_IDS[0]);
+    assert_eq!(run_id, &in_flight.run_id);
+
+    let runs = runtime
+        .list_job_runs(crate::command::job::JobRunListParams::default())
+        .expect("list runs");
+    assert_eq!(
+        runs.iter().map(|run| &run.run_id).collect::<Vec<_>>(),
+        vec![&in_flight.run_id],
+        "a refused tool dispatch must not persist a run"
+    );
+}
+
 /// ORB-10540: the guard is narrow. Inside the same managed envelope that
 /// refuses ship and resume, the read-only verbs still answer — a blanket
 /// in-run denial would break run observation for every agent.

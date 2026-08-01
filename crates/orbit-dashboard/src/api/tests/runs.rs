@@ -1470,11 +1470,12 @@ async fn ship_endpoint_rejects_duplicate_task_ids() {
 /// is `local`, which is *not* the endpoint's historical `pr` fallback, so a
 /// surface that resolved the mode its own way would show up as a mismatch.
 ///
-/// The HTTP call goes first on purpose: the endpoint refuses a second dispatch
-/// for a task already carried by a non-terminal run, and the tool has no such
-/// guard, so this is the only order in which both surfaces can dispatch the same
-/// ids. (That asymmetry is a real finding, filed as ORB-10544 rather than fixed
-/// here.)
+/// ORB-10544 made the duplicate-dispatch guard shared, so each surface now gets
+/// its own disjoint task selection and the call order carries no meaning: the
+/// tool goes first here — the reverse of the order this test was once forced
+/// into — and both surfaces dispatch. Equivalence is asserted on what the two
+/// surfaces *derive* (the resolved mode, the job) and on each having persisted
+/// its own selection verbatim.
 ///
 /// `ORBIT_OPERATOR` is how this crate's tests reach an operator-authorized tool
 /// call: `run_tool_with_context_and_role` — the form a validated MCP operator
@@ -1484,7 +1485,8 @@ async fn ship_endpoint_rejects_duplicate_task_ids() {
 /// then execute the identical tool.
 #[tokio::test]
 async fn mcp_ship_tool_and_http_ship_endpoint_produce_equivalent_runs() {
-    const TASK_IDS: [&str; 2] = ["TST-00001", "TST-00002"];
+    const TOOL_TASK_IDS: [&str; 2] = ["TST-00001", "TST-00002"];
+    const HTTP_TASK_IDS: [&str; 2] = ["TST-00003", "TST-00004"];
 
     let tmp = tempfile::tempdir().expect("tempdir");
     let global_root = tmp.path().join("global");
@@ -1502,11 +1504,6 @@ async fn mcp_ship_tool_and_http_ship_endpoint_produce_equivalent_runs() {
     )
     .expect("build bound runtime");
 
-    let response = request_ship(runtime.clone(), Some(json!({ "task_ids": TASK_IDS }))).await;
-    let status = response.status();
-    let http = body_json(response).await;
-    assert_eq!(status, StatusCode::OK, "unexpected ship response: {http}");
-
     // Scoped to the synchronous tool call: the guard holds a process-wide lock,
     // which must not span an `.await`.
     let tool = {
@@ -1522,9 +1519,14 @@ async fn mcp_ship_tool_and_http_ship_endpoint_produce_equivalent_runs() {
             ),
         );
         runtime
-            .run_tool("orbit.workflow.ship", json!({ "task_ids": TASK_IDS }))
+            .run_tool("orbit.workflow.ship", json!({ "task_ids": TOOL_TASK_IDS }))
             .expect("operator ship through the tool surface")
     };
+
+    let response = request_ship(runtime.clone(), Some(json!({ "task_ids": HTTP_TASK_IDS }))).await;
+    let status = response.status();
+    let http = body_json(response).await;
+    assert_eq!(status, StatusCode::OK, "unexpected ship response: {http}");
 
     assert_eq!(tool["workflow"], http["workflow"]);
     assert_eq!(tool["job_id"], http["job_id"]);
@@ -1546,6 +1548,6 @@ async fn mcp_ship_tool_and_http_ship_endpoint_produce_equivalent_runs() {
     );
     assert_eq!(http_input["mode"], json!("local"));
     assert_eq!(tool_input["mode"], http_input["mode"]);
-    assert_eq!(http_input["task_ids"], json!(TASK_IDS));
-    assert_eq!(tool_input["task_ids"], http_input["task_ids"]);
+    assert_eq!(http_input["task_ids"], json!(HTTP_TASK_IDS));
+    assert_eq!(tool_input["task_ids"], json!(TOOL_TASK_IDS));
 }

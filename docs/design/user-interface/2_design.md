@@ -3,7 +3,7 @@ summary: "User Interface — Design"
 type: design
 title: "User Interface — Design"
 owner: gemini
-last_updated: 2026-07-26
+last_updated: 2026-08-01
 status: Draft
 feature: user-interface
 doc_role: design
@@ -52,7 +52,7 @@ The top-level nav carries exactly the operator's four workflow surfaces — Task
 
 The Tasks tab is writable for the two actions that otherwise force a context switch to the CLI [ORB-10444] [ADR-0257].
 
-**Ship** appears on `backlog` tasks and is one click with no configuration UI: it posts only the task id to `POST /api/workflows/ship`. The crew is resolved by the pipeline from the task's own record and the mode from the selected workspace's registry binding, so that endpoint's omitted-`mode` default is the workspace ship mode (falling back to `pr` for a runtime with no binding). The resulting run id and state are surfaced as a notice, and a failed dispatch shows the server's error text instead of silently no-opping. Duplicate dispatch is refused: an explicit task selection whose id is already carried by a non-terminal run answers `409` with code `ship_run_in_flight` naming that run, and the UI holds a per-task guard across the double-click window.
+**Ship** appears on `backlog` tasks and is one click with no configuration UI: it posts only the task id to `POST /api/workflows/ship`. The crew is resolved by the pipeline from the task's own record and the mode from the selected workspace's registry binding, so that endpoint's omitted-`mode` default is the workspace ship mode (falling back to `pr` for a runtime with no binding). The resulting run id and state are surfaced as a notice, and a failed dispatch shows the server's error text instead of silently no-opping. Duplicate dispatch is refused: an explicit task selection whose id is already carried by a non-terminal run answers `409` with code `ship_run_in_flight` naming that run, and the UI holds a per-task guard across the double-click window. That refusal is the shared ship submission path's typed conflict, not an endpoint-local policy, so the MCP ship tool refuses the same duplicate ([ORB-10544], [ADR-0303]).
 
 **Comments** post to `POST /api/tasks/:id/comments`, which writes through the task's existing review-thread structure rather than adding a field to the task record, so a comment survives a reload like any other task history. Authorship is forced to a human identity: an absent, agent-family, or model-constant author collapses to the `human` label, because the dashboard process may itself run inside a managed Orbit run where the runtime's ambient actor is a model.
 

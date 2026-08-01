@@ -194,6 +194,10 @@ pub fn redact_sensitive_env_error(error: OrbitError) -> OrbitError {
         OrbitError::DependencyNotDelivered(diagnostic) => OrbitError::DependencyNotDelivered(
             redact_dependency_not_delivered(*diagnostic, redact_sensitive_env_text),
         ),
+        OrbitError::ShipRunInFlight { task_id, run_id } => OrbitError::ShipRunInFlight {
+            task_id: redact_sensitive_env_text(&task_id),
+            run_id: redact_sensitive_env_text(&run_id),
+        },
         OrbitError::JobRunStateTransition(m) => {
             OrbitError::JobRunStateTransition(redact_sensitive_env_text(&m))
         }
@@ -307,6 +311,10 @@ pub fn redact_all_error(error: OrbitError) -> OrbitError {
         OrbitError::DependencyNotDelivered(diagnostic) => OrbitError::DependencyNotDelivered(
             redact_dependency_not_delivered(*diagnostic, redact_all),
         ),
+        OrbitError::ShipRunInFlight { task_id, run_id } => OrbitError::ShipRunInFlight {
+            task_id: redact_all(&task_id),
+            run_id: redact_all(&run_id),
+        },
         OrbitError::JobRunStateTransition(m) => OrbitError::JobRunStateTransition(redact_all(&m)),
         OrbitError::Io(m) => OrbitError::Io(redact_all(&m)),
         OrbitError::WorkspaceError(m) => OrbitError::WorkspaceError(redact_all(&m)),
