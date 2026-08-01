@@ -3,6 +3,10 @@ use std::collections::BTreeMap;
 
 #[derive(Debug, Clone, Deserialize)]
 pub(super) struct RawRuntimeConfig {
+    // Deliberately no `deny_unknown_fields`: config.toml is also home to
+    // independently parsed surfaces such as `[docs]`. Runtime admission reads
+    // only its owned keys, while explicit migration guards below reject retired
+    // runtime keys whose continued acceptance would be unsafe or misleading.
     #[allow(dead_code)]
     pub(super) identity: Option<toml::Value>,
     pub(super) task: Option<RawTaskSection>,

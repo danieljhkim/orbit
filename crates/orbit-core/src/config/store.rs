@@ -2,10 +2,9 @@
 //!
 //! [`ConfigStore`] wraps a single `config.toml` file as a `toml_edit::DocumentMut`
 //! so `orbit config set` can edit one key without disturbing any other part of
-//! the file's formatting or hand-written comments. Validation always goes
-//! through [`RuntimeConfig::from_raw_str`] — the exact same pipeline
-//! `RuntimeConfig::load_layered` uses at process startup — so a `set` can never
-//! produce a document the runtime itself would reject.
+//! the file's formatting or hand-written comments. Validation goes through the
+//! same single-document admission pipeline used after runtime layers have been
+//! merged, so a `set` cannot produce a malformed value for its target file.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -39,9 +38,9 @@ impl ConfigScope {
 
 /// How to initialize a workspace `config.toml` that doesn't exist yet, for
 /// the first `orbit config set` write against it. Fail-closed by default: a
-/// bare `set` (without `--global`) must never silently create a workspace
-/// config that would newly shadow the global one under replace-not-merge
-/// semantics (see the `config` module doc comment).
+/// bare `set` (without `--global`) must never silently create a workspace and
+/// thereby switch sandbox, approval, and environment allowlist values from
+/// global policy to built-in workspace defaults.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WorkspaceInitMode {
     /// The workspace file must already exist; error out with a hint otherwise.
@@ -90,10 +89,11 @@ impl ConfigStore {
                 return Err(OrbitError::invalid_input_with_suggestions(
                     format!(
                         "no workspace config exists yet at '{}'; `orbit config set` without \
-                         --global refuses to create one implicitly, since that would newly \
-                         shadow the global config. Rerun with --seed-from-global to copy the \
-                         current global config as a starting point, or --fresh to start from an \
-                         empty file",
+                         --global refuses to create one implicitly because doing so makes the \
+                         security-sensitive sandbox, approval, and environment settings use \
+                         workspace values or built-in defaults. Rerun with --seed-from-global to \
+                         copy the current global policy explicitly, or --fresh to accept built-in \
+                         security defaults and start from an empty file",
                         redact_home_dir(&path.display().to_string())
                     ),
                     Vec::new(),

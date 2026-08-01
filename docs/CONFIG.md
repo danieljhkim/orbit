@@ -1,7 +1,7 @@
 ---
 type: context
 summary: Orbit Configuration
-last_validated: 2026-07-27
+last_validated: 2026-08-01
 ---
 
 # Orbit Configuration
@@ -19,7 +19,24 @@ Two paths are consulted, in order:
 | `<workspace>/.orbit/config.toml` | Workspace-local | Hand-authored (optional) |
 | `~/.orbit/config.toml` | Global / user | `orbit init` |
 
-**Workspace config REPLACES global config — it does not merge.** If `.orbit/config.toml` exists in your workspace, the global file is ignored entirely. This is intentional: per-repo agent behaviour (sandbox mode, approval policy, crew composition) must be fully deterministic and not silently inherit whatever happens to be in the user's global config.
+Ordinary settings inherit per key: workspace values override global values, global values fill omissions, and built-in defaults fill remaining gaps.
+
+Tables layer down to individual settings, while scalar and array values replace the matching global value. The map-valued `duel.models` setting is replaced as a unit when present. Named crews are the deliberate deep-layering exception: they layer by crew name and field, so this is a complete workspace override when the global file already defines `sol`:
+
+```toml
+[crews.sol]
+model = "gpt-5.6-terra"
+```
+
+Three security-sensitive settings deliberately do not inherit from global whenever a distinct workspace file exists:
+
+- `execution.codex.sandbox`
+- `execution.codex.approval_policy`
+- `execution.env.pass`
+
+If the workspace file omits one of these, Orbit uses that setting's built-in default. This keeps repository agent sandboxing, approval, and environment passthrough deterministic instead of depending on a user's global policy. `execution.env.inherit` is not a configurable key: agent subprocesses always start from a cleared environment.
+
+Run `orbit config show` for the effective merged view. Every setting is annotated as `workspace`, `global`, `built-in`, or `environment`, including the source file path where one applies. `orbit config show --json` exposes the same attribution in its `provenance` object. Use `--scope global` or `--scope workspace` to inspect either physical file alone.
 
 The workspace identity file `.orbit/config.yaml` is a separate artifact (it stores `workspace_id` for the canonical task store binding) and is unrelated to runtime config.
 
@@ -201,7 +218,7 @@ Use `[duel]` to constrain which CLIs Orbit will spawn — e.g. drop `grok` from 
 
 | Section | Purpose |
 |---|---|
-| `[execution.env]` | Env vars passed to agent subprocesses. `inherit = false` (default) means only the explicit `pass` list crosses the boundary; useful for keeping secrets out of agent CLIs. |
+| `[execution.env]` | Env vars passed to agent subprocesses. Only the explicit `pass` list crosses the boundary; the process environment is never inherited wholesale. |
 | `[execution.codex]` | Codex CLI sandbox mode. Valid: `read-only`, `workspace-write` (default), `danger-full-access`. Optional `approval_policy = "on-request"` enables escalation prompts. |
 | `[tasks]` | `id_start = N` sets a floor for the local task-id allocator: on runtime build the counter is raised to at least `N` (never lowered), so machines can hold disjoint id ranges (e.g. one `0–9999`, another `10000+`) and avoid cross-machine collisions. Capped by `ORB_TASK_ID_MAX` (99999) — setting it near the ceiling shrinks the usable range. Prefer the one-shot `orbit workspace init --task-id-start N` for the initial seed; the config key keeps the floor sticky across machines that share a config. See [task-migration overview](design/task-migration/1_overview.md). |
 | `[scoring]` | `enabled = true` records per-agent scoreboard counters under `.orbit/state/scoreboard/`. |
@@ -222,4 +239,6 @@ Config is parsed at startup; invalid entries fail loud rather than silently fall
 - `tasks.id_start N exceeds maximum task id 99999` — the allocator start must fit the `ORB-00000` id space.
 - `tasks.id_start N would lower the allocator below its current position M` — the counter only moves forward (raised only via `orbit workspace init --task-id-start`; the config key is a silent forward-only floor).
 
-When in doubt, copy the default ([`crates/orbit-core/assets/config/default-config.toml`](../crates/orbit-core/assets/config/default-config.toml)) into `.orbit/config.toml` and edit from there.
+The runtime parser intentionally accepts sections owned by other readers of the shared file, such as `[docs]`. Consequently, retired keys with no runtime reader can remain syntactically accepted but have no effect. In particular, `execution.env.inherit`, `task.approval.delegate_approval`, and `task.approval.required_for_agent` are inert and should be removed; environment inheritance is fixed off, while agent approval is enforced by the capability/policy surfaces rather than these old flags.
+
+When in doubt, start with a minimal workspace file containing only genuine overrides. The annotated default ([`crates/orbit-core/assets/config/default-config.toml`](../crates/orbit-core/assets/config/default-config.toml)) is a reference for available settings, not a template that must be copied wholesale.
