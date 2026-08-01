@@ -156,6 +156,53 @@ policy:
 }
 
 #[test]
+fn workspace_init_rejects_existing_checkout_path_with_different_id_without_force() {
+    let workspace = tempdir().expect("workspace tempdir");
+    let home = tempdir().expect("home tempdir");
+    let global = home.path().join(".orbit");
+    std::fs::create_dir_all(&global).expect("create global orbit");
+    std::fs::write(
+        global.join("host.toml"),
+        "schema_version = 1\nmachine_id = \"hm_path_collision\"\nhost_id = \"path-collision\"\nmode = \"standalone\"\n",
+    )
+    .expect("write host identity");
+    let _env = EnvGuard::acquire().home(home.path()).cwd(workspace.path());
+    let args = |name: &str| WorkspaceInitArgs {
+        name: Some(name.to_string()),
+        base_branch: Some("agent-main".to_string()),
+        ship_mode: None,
+        role: None,
+        owner: None,
+        task_id_start: None,
+        mcp: false,
+        inject_agent_rules: false,
+        refresh_defaults: false,
+        force: false,
+    };
+    args("path-owner")
+        .execute_without_runtime(None)
+        .expect("initial workspace init");
+    let registry_path = global.join("workspaces.json");
+    let identity_path = workspace.path().join(".orbit/config.yaml");
+    let registry_bytes = std::fs::read_to_string(&registry_path).expect("read protected registry");
+    let identity_bytes = std::fs::read_to_string(&identity_path).expect("read protected identity");
+
+    let error = args("different-id")
+        .execute_without_runtime(None)
+        .expect_err("existing checkout path must require force")
+        .to_string();
+    assert!(error.contains("already exists"), "unexpected: {error}");
+    assert_eq!(
+        std::fs::read_to_string(&registry_path).expect("read registry"),
+        registry_bytes
+    );
+    assert_eq!(
+        std::fs::read_to_string(&identity_path).expect("read identity"),
+        identity_bytes
+    );
+}
+
+#[test]
 fn workspace_init_rejects_existing_durable_id_without_force() {
     let first = tempdir().expect("first workspace tempdir");
     let second = tempdir().expect("second workspace tempdir");

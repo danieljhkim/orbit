@@ -94,8 +94,15 @@ impl McpWorkspace {
             );
         }
 
+        let mut workspace_init_args = vec!["workspace", "init", "--name", "mcp-roundtrip"];
+        if host_mode == Some("hub") {
+            // Hub registration intentionally seeds a checkout identity before
+            // the logical workspace registration. Replacing that bootstrap
+            // identity is explicit reconciliation, so the fixture opts in.
+            workspace_init_args.push("--force");
+        }
         let output = Self::orbit_command(&work, &home)
-            .args(["workspace", "init", "--name", "mcp-roundtrip"])
+            .args(workspace_init_args)
             .output()
             .expect("run workspace init");
         assert!(
