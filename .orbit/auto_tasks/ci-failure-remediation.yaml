@@ -118,7 +118,7 @@ template:
   - github-actions
   - no-diff-expected
   priority: high
-  crew: opus
+  crew: luna
   status: backlog
 dedupe: skip_if_open
 created_by: codex
