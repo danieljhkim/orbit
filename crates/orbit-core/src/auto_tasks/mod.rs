@@ -18,6 +18,13 @@
 //! - [`scheduler`] — the pass itself + the deterministic-action projection.
 //! - [`crud`] — the shared add/list/show/update/toggle/mint domain surface.
 
+use std::borrow::Cow;
+use std::path::Path;
+
+use orbit_common::types::{OrbitError, parse_auto_task_yaml};
+
+use crate::command::seed_embedded_assets;
+
 pub mod crud;
 pub mod loader;
 pub mod schedule;
@@ -35,6 +42,45 @@ pub use scheduler::{
     run_scheduler_action_json,
 };
 pub use state::{AutoTaskCursor, AutoTaskCursorState, cursor_state_path, load_cursor_state};
+
+/// Default definitions embedded in the Orbit binary and materialized into a
+/// workspace on initialization. Defaults are deliberately inert: users must
+/// explicitly mint one or enable it through the existing auto-task surface.
+pub(crate) const DEFAULT_AUTO_TASK_FILES: &[(&str, &str)] = &[(
+    "friction-curation",
+    include_str!("../../assets/auto_tasks/friction-curation.yaml"),
+)];
+
+/// Seed missing default auto-task definitions without changing an existing
+/// workspace-authored definition. Each asset is parsed before it is written so
+/// a release cannot install an unloadable default.
+pub(crate) fn seed_default_auto_tasks(orbit_dir: &Path) -> Result<usize, OrbitError> {
+    let auto_tasks_dir = auto_tasks_dir(orbit_dir);
+    seed_embedded_assets(
+        &auto_tasks_dir,
+        DEFAULT_AUTO_TASK_FILES,
+        false,
+        |name, content| {
+            let definition = parse_auto_task_yaml(content).map_err(|error| {
+                OrbitError::InvalidInput(format!(
+                    "default auto-task `{name}` failed validation: {error}"
+                ))
+            })?;
+            if definition.name != name {
+                return Err(OrbitError::InvalidInput(format!(
+                    "default auto-task file stem `{name}` does not match definition name `{}`",
+                    definition.name
+                )));
+            }
+            if definition.enabled {
+                return Err(OrbitError::InvalidInput(format!(
+                    "default auto-task `{name}` must ship disabled"
+                )));
+            }
+            Ok(Cow::Borrowed(content))
+        },
+    )
+}
 
 #[cfg(test)]
 mod tests;

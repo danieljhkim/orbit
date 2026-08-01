@@ -6,6 +6,7 @@ use orbit_common::types::{OrbitError, WorkspacePaths};
 use orbit_store::{friction_store, global_executor_def_store, global_policy_def_store};
 
 use crate::OrbitRuntime;
+use crate::auto_tasks::seed_default_auto_tasks;
 use crate::command::activity::seed_default_activities;
 use crate::command::executor::seed_default_executors;
 use crate::command::job::seed_default_jobs;
@@ -35,6 +36,7 @@ pub struct InitResult {
     pub refreshed_default_executors: usize,
     pub refreshed_default_policies: usize,
     pub refreshed_default_routines: usize,
+    pub seeded_default_auto_tasks: usize,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -163,6 +165,7 @@ pub fn init_workspace_at_root(
     }
 
     let mut refreshed_default_routines = 0usize;
+    let mut seeded_default_auto_tasks = 0usize;
     let (
         refreshed_default_activities,
         refreshed_default_jobs,
@@ -219,6 +222,10 @@ pub fn init_workspace_at_root(
                 options.force,
             )?;
         }
+        // Auto-task definitions are workspace-authored after seeding. Never
+        // refresh an existing file: `workspace init --force` reconciles
+        // registration and must not overwrite an operator's definition.
+        seeded_default_auto_tasks = seed_default_auto_tasks(&orbit_root)?;
         (
             global_result.refreshed_default_activities,
             global_result.refreshed_default_jobs,
@@ -244,6 +251,7 @@ pub fn init_workspace_at_root(
         refreshed_default_executors,
         refreshed_default_policies,
         refreshed_default_routines,
+        seeded_default_auto_tasks,
     })
 }
 
@@ -675,6 +683,49 @@ mod tests {
             .expect("force-overwritten routine parses");
         assert_eq!(forced.hosts, vec!["host-b".to_string()]);
         assert!(!forced.enabled);
+    }
+
+    #[test]
+    fn workspace_init_seeds_an_inert_friction_curation_default_without_clobbering_edits() {
+        let temp = tempdir().expect("tempdir");
+        let global_root = temp.path().join("global");
+        let orbit_root = temp.path().join("repo/.orbit");
+        let options = InitOptions {
+            global_root_override: Some(global_root),
+            detected: Some(DetectedAgents::default()),
+            ..Default::default()
+        };
+
+        let initial = init_workspace_at_root(&orbit_root, options.clone())
+            .expect("initialize fresh workspace");
+        assert_eq!(initial.seeded_default_auto_tasks, 1);
+        let definition_path = orbit_root.join("auto_tasks/friction-curation.yaml");
+        let seeded = fs::read_to_string(&definition_path).expect("read seeded definition");
+        let definition = orbit_common::types::parse_auto_task_yaml(&seeded)
+            .expect("seeded definition parses through loader schema");
+        assert!(!definition.enabled);
+        assert_eq!(definition.template.crew.as_deref(), Some("luna"));
+        assert!(matches!(
+            definition.dedupe,
+            orbit_common::types::DedupePolicy::SkipIfOpen
+        ));
+        assert!(!orbit_root.join("state/auto-tasks.json").exists());
+        let loaded = crate::auto_tasks::collect_auto_tasks(&orbit_root);
+        assert!(
+            loaded.errors.is_empty(),
+            "seeded definition must load cleanly"
+        );
+        assert_eq!(loaded.definitions.len(), 1);
+        assert_eq!(loaded.definitions[0].definition.name, "friction-curation");
+
+        fs::write(&definition_path, "operator-authored definition\n").expect("write edit");
+        let repeated =
+            init_workspace_at_root(&orbit_root, options).expect("reinitialize workspace");
+        assert_eq!(repeated.seeded_default_auto_tasks, 0);
+        assert_eq!(
+            fs::read_to_string(definition_path).expect("read preserved definition"),
+            "operator-authored definition\n"
+        );
     }
 
     #[test]
