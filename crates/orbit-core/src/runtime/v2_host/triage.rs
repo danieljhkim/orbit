@@ -9,9 +9,9 @@
 //! bounds: only listed candidates may be touched, only `environmental`
 //! classifications may re-backlog, and a durable per-task re-backlog budget
 //! (counted from `triage_rebacklogged` history events) stops the
-//! blocked → backlog → blocked ping-pong. The agent between the two steps
-//! never free-hands a lifecycle transition — its output is data, and this
-//! module is the only writer.
+//! blocked → backlog → blocked ping-pong. The agent's one direct lifecycle
+//! write is an evidence-gated blocked → done reconciliation; every other
+//! transition remains bounded here.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -74,6 +74,17 @@ fn triage_already_gave_up(history: &[TaskHistoryEntry]) -> bool {
     history
         .iter()
         .any(|entry| entry.event == TRIAGE_GAVE_UP_EVENT)
+}
+
+fn triage_already_diagnosed_run(history: &[TaskHistoryEntry], run_id: &str) -> bool {
+    let note_prefix = format!("triage: failed run {run_id} ");
+    history.iter().any(|entry| {
+        entry.event == TRIAGE_DIAGNOSIS_EVENT
+            && entry
+                .note
+                .as_deref()
+                .is_some_and(|note| note.starts_with(&note_prefix))
+    })
 }
 
 /// Bound agent-supplied prose before it lands in a durable task note.
@@ -163,7 +174,9 @@ fn candidate_json(task: &Task, run: &JobRun, rebacklog_count: u64, max_rebacklog
 /// coupled run (or a non-failed one) and is never listed, so the agent step
 /// physically cannot see it. Tasks whose re-backlog budget is exhausted are
 /// diverted to the gave-up path here (durable note + friction, once) and
-/// reported under `exhausted` instead of `candidates`.
+/// reported under `exhausted` instead of `candidates`. An implicit scan also
+/// suppresses a task already diagnosed for its currently-coupled failed run;
+/// a new run id is fresh evidence, and explicit `task_ids` bypass suppression.
 ///
 /// Reuses `reconcile_stale_job_runs` up front so dead-owner runs are settled
 /// (`interrupted`, which keeps their tasks resumable and out of triage)
@@ -232,6 +245,9 @@ pub(super) fn list_triage_candidates(
         let history = runtime
             .get_task_history(&task.id)
             .map_err(|error| action_failed(action, format!("history for {}: {error}", task.id)))?;
+        if explicit_task_ids.is_empty() && triage_already_diagnosed_run(&history, run_id) {
+            continue;
+        }
         let rebacklog_count = triage_rebacklog_count(&history);
         if rebacklog_count >= max_rebacklogs {
             if !triage_already_gave_up(&history) {

@@ -113,8 +113,9 @@ spec:
          `pr_open` but the task's own PR is recorded as merged to the
          landing branch (task history/comments, run logs, `.orbit/state/`,
          or the repo's git refs via `fs.read`) — set the task to `done`
-         via `orbit.task.update`, attaching a comment that cites the exact
-         evidence (PR number, merge commit, where you saw it). Then return
+         via `orbit.task.update` with `status: "done"`, attaching a comment
+         that cites the exact evidence (PR number, merge commit, where you
+         saw it). Then return
          `stay_blocked` as the disposition: the apply step sees the task
          has left `blocked` and skips it. Never `rebacklog` landed work —
          a rerun redoes merged work and risks duplicate PRs. This is the
