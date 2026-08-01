@@ -3,7 +3,7 @@ summary: "Policy & Sandboxing — Decisions"
 type: design
 title: "Policy & Sandboxing — Decisions"
 owner: claude
-last_updated: 2026-05-16
+last_updated: 2026-08-01
 status: Draft
 feature: policy-sandbox
 doc_role: decisions
@@ -13,6 +13,8 @@ tags: ["policy-sandbox"]
 # Policy & Sandboxing — Decisions
 
 This is the append-only ADR log for Policy & Sandboxing. Entries are ordered by ADR number. New entries follow the template in [../CONVENTIONS.md](../CONVENTIONS.md) and cite the task that made the decision real.
+
+Global ADR pointers are retrieved with `orbit tool run orbit.adr.show --input '{"id":"ADR-NNNN"}'`; the artifact store is authoritative for their full Context, Decision, and Consequences.
 
 ---
 
@@ -210,6 +212,8 @@ Use `literal` for the canonical and lock files (predictable names) and `regex` f
 - Availability messages describe the trusted absolute location instead of implying arbitrary `PATH` lookup.
 - Cost: the implementation is intentionally macOS-location-specific; if Apple moves or removes the binary, Orbit must update the trusted location list or add a new backend rather than silently accepting a user-supplied replacement.
 
+- **ADR-0304 — Use Bubblewrap for shipped Linux CLI write confinement** — Accepted.
+
 ---
 
 ## Task References
@@ -227,5 +231,6 @@ Use `literal` for the canonical and lock files (predictable names) and `regex` f
 - **[T20260508-13]** — Add `$HOME/.claude.json{,.lock,.tmp.<pid>.<ms_ts>}` sibling allows to the macOS sandbox profile so Claude can persist its main settings file.
 - **[T20260509-30]** — Resolve `sandbox-exec` from trusted absolute locations rather than inherited `PATH`.
 - **[ORB-00048]** — Extend the unconditional provider state-dir allowance set to include Grok's `$HOME/.grok` state directory while hardening fourth-family scoreboards and analytics.
+- **[ORB-10552]** — Implement fail-closed Linux Bubblewrap write confinement and preserve the explicit read-policy limitation.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

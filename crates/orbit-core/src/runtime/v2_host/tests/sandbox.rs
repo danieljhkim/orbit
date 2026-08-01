@@ -1,7 +1,7 @@
 use orbit_engine::V2RuntimeHost;
 
 use crate::runtime::v2_host::test_support::seeded_runtime_with_executor;
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 use crate::runtime::v2_host::test_support::{runtime_with_workspace_layout, seed_executor};
 
 #[test]
@@ -11,6 +11,63 @@ fn resolve_executor_sandbox_returns_none_when_executor_has_no_sandbox() {
         .resolve_executor_sandbox("codex", None, None)
         .expect("resolve");
     assert!(resolved.is_none());
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn resolve_executor_sandbox_returns_linux_descriptor_with_absolute_mounts() {
+    let runtime =
+        seeded_runtime_with_executor(Some(orbit_common::types::ExecutorSandboxKind::LinuxBwrap));
+    let resolved = runtime
+        .resolve_executor_sandbox("codex", None, None)
+        .expect("resolve")
+        .expect("descriptor");
+    assert_eq!(
+        resolved.kind,
+        orbit_common::types::ExecutorSandboxKind::LinuxBwrap
+    );
+    assert!(!resolved.managed_worktree);
+    for entry in &resolved.fs_profile.modify {
+        let body = entry.strip_prefix('!').unwrap_or(entry);
+        assert!(
+            body.starts_with('/'),
+            "linux-bwrap mount rule must be absolute: {entry}"
+        );
+    }
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn resolve_executor_sandbox_marks_only_specific_orbit_worktree_managed() {
+    let (_root, runtime, repo_root) = runtime_with_workspace_layout();
+    seed_executor(
+        &runtime,
+        "claude",
+        Some(orbit_common::types::ExecutorSandboxKind::LinuxBwrap),
+    );
+    let worktrees = runtime.paths().orbit_dir.join("state/worktrees");
+    let worktree = worktrees.join("orbit-jrun-test");
+    std::fs::create_dir_all(&worktree).expect("create worktree");
+
+    let managed = runtime
+        .resolve_executor_sandbox("claude", None, Some(&worktree))
+        .expect("resolve managed")
+        .expect("descriptor");
+    assert!(managed.managed_worktree);
+    let canonical_worktree = worktree.canonicalize().expect("canonical worktree");
+    assert!(
+        managed
+            .fs_profile
+            .modify
+            .iter()
+            .any(|entry| entry == &format!("{}/**", canonical_worktree.display()))
+    );
+
+    let direct = runtime
+        .resolve_executor_sandbox("claude", None, Some(&repo_root))
+        .expect("resolve direct")
+        .expect("descriptor");
+    assert!(!direct.managed_worktree);
 }
 
 #[cfg(target_os = "macos")]

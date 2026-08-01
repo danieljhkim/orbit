@@ -3,7 +3,7 @@ summary: "Policy & Sandboxing — Design"
 type: design
 title: "Policy & Sandboxing — Design"
 owner: claude
-last_updated: 2026-07-20
+last_updated: 2026-08-01
 status: Draft
 feature: policy-sandbox
 doc_role: design
@@ -12,7 +12,7 @@ tags: ["policy-sandbox"]
 
 # Policy & Sandboxing — Design
 
-This document describes Orbit's shipped policy and sandboxing implementation: v2 `PolicyDef`, profile resolution, last-match-wins path evaluation, HTTP-tool enforcement, activity/job `fsProfile` binding, macOS CLI sandbox wrapping, and `orbit-exec` supervision. See [1_overview.md](./1_overview.md) for purpose and [3_vision.md](./3_vision.md) for forward-looking gaps.
+This document describes Orbit's shipped policy and sandboxing implementation: v2 `PolicyDef`, profile resolution, last-match-wins path evaluation, HTTP-tool enforcement, activity/job `fsProfile` binding, macOS and Linux CLI sandbox wrapping, and `orbit-exec` supervision. See [1_overview.md](./1_overview.md) for purpose and [3_vision.md](./3_vision.md) for forward-looking gaps.
 
 ---
 
@@ -85,6 +85,8 @@ The audit emission goes through `ctx.fs_audit: Option<Arc<dyn FsAuditLogger>>` (
 
 **Backend scope.** This enforcement fires only under `backend: http` when a builtin fs tool runs. `backend: cli` spawns Claude Code, Codex CLI, Gemini, or another harness via `cli_runner.rs`, emits `tool_allowlist.harness_delegated`, and trusts that harness for tool allowlists. On macOS, executors declaring `sandbox: macos-sandbox-exec` also get the OS-level wrapper in §7, so `fsProfile:` can still narrow CLI filesystem writes.
 
+On Linux, shipped agent executors declare `linux-bwrap`. The wrapper enforces writes from the resolved `modify` policy but deliberately records reads as `read_delegated`; this is not general read-allowlist parity.
+
 ---
 
 ## 6. Activity / Job fsProfile Binding
@@ -139,6 +141,14 @@ The child Orbit runtime roots are deliberately narrower than the workspace `.orb
 
 Negated `read` / `modify` rules become explicit SBPL denies after ordinary profile allows to preserve last-match-wins. Simple path and `/**` subtree denials compile to `subpath`; non-subpath globs such as `**/*.env` compile to `regex`. Host-owned provider side roots are the exception because the provider CLI and inherited Orbit subprocesses must write workflow state.
 
+### 7.1 Linux Bubblewrap backend
+
+On Linux, `ExecutorSandboxKind::LinuxBwrap` resolves only `/usr/bin/bwrap` and runs a real capability probe using the same private user, PID, IPC, and UTS namespaces plus mount setup required by provider execution. Absence or probe failure is permanent and fail-closed unless the executor explicitly sets `allow_fallback: true`. The availability decision happens before provider argv construction: an active outer wrapper neutralizes provider-native sandbox flags, while a bare fallback preserves them.
+
+The deterministic argv starts with a read-only bind of `/`, explicitly retains the host network namespace, and applies canonical `modify` mounts in policy order. Positive roots become writable binds; later exact or subtree denies become read-only binds. `/dev`, `/proc`, and `/tmp` are replaced with private minimal mounts, the wrapper creates a fresh session, and parent-death cleanup remains enabled.
+
+Existing matches of non-subtree negative globs are mounted read-only before spawn. Because mount namespaces cannot reject a matching filename created later, direct invocations with an overlapping non-subtree deny fail closed. An Orbit-managed single-writer worktree may run with snapshot expansion, followed by a post-run scan that rejects any newly-created forbidden match before downstream commit. Audit metadata records the effective backend, trusted wrapper, probe outcome, redacted effective argv, `write_enforced` or `write_delegated`, and the honest `read_delegated` boundary. [ORB-10552] [ADR-0304]
+
 ---
 
 ## 8. Process Supervision
@@ -192,23 +202,23 @@ Risk-weighted regression tests sit beside the implementations they guard
   construction and assert no file is written outside the policy store
   ([T20260509-28]).
 
-Tests skip on non-macOS (and on macOS hosts where `sandbox-exec` cannot
-apply) via the existing `cfg(target_os = "macos")` + `sandbox_exec_can_apply()`
-gate. SBPL-text assertions paired with each runtime case keep coverage
-non-empty on Linux CI.
+macOS runtime tests skip where `sandbox-exec` cannot apply. Linux Bubblewrap
+tests compile argv and exercise fail-closed/fallback behavior on every host;
+kernel tests probe real `/usr/bin/bwrap` and skip with its concrete capability
+failure when user or mount namespaces are unavailable.
 
 ---
 
 ## 10. Concerns & Honest Limitations
 
-1. **OS-level CLI sandboxing is macOS-only.** Linux (`bwrap`), Docker, and other wrappers remain future work; generic `run_process` still defaults to `NoSandbox`.
-2. **CLI tool allowlists are delegated.** The macOS wrapper narrows writes, but Orbit still trusts Claude/Codex/Gemini harnesses for declared `tools:`.
+1. **CLI read policy is delegated.** Both shipped OS wrappers confine writes, but Linux Bubblewrap intentionally keeps the host read surface available and neither backend replaces harness enforcement of arbitrary read globs.
+2. **CLI tool allowlists are delegated.** The OS wrappers narrow writes, but Orbit still trusts Claude/Codex/Gemini/Grok harnesses for declared `tools:`.
 3. **Provider state directories are trusted write roots.** `$HOME/.orbit` plus Codex, Claude, and Gemini state dirs are outside the activity workspace and emitted unconditionally.
 4. **Codex side-root appends are config-coupled.** If Codex is configured without the workspace-write side roots, inherited Orbit subprocesses can hit `.orbit` write denials.
 5. **macOS provenance syscall allowances are private.** `vnguard` and `Sandbox`/67 mirror current Codex startup needs and may require review after OS changes.
 6. **Pipeline env fallback can leave `fs_profile = None`.** Legacy contexts without `ORBIT_ACTIVITY_FS_PROFILE` still bypass `enforce_fs_policy`.
 7. **HTTP enforcement is helper-based.** A future builtin or non-builtin tool that skips `enforce_fs_policy` is unguarded.
-8. **Exec has no policy hook.** `proc.spawn` program allowlists are activity-layer data, not part of `PolicyDef` or `effective_profile`.
+8. **Generic exec has no policy hook.** `proc.spawn` program allowlists are activity-layer data, and `run_process + NoSandbox` remains unchanged; the OS wrappers attach only to CLI-agent dispatch.
 9. **Symlink semantics are implicit.** `workspace_relative_path` follows symlinks and rejects out-of-workspace targets, but no spec states that invariant.
 10. **Glob syntax is narrow.** Character classes, brace expansion, and POSIX bracket expressions are unsupported.
 11. **Policy result shapes are parallel.** `PolicyDecision` and `FsPolicyEvaluation` have no bridge for future non-fs evaluators.
@@ -237,5 +247,6 @@ non-empty on Linux CI.
 - **[T20260509-28]** — Validate policy and executor resource names as safe file stems before file-store path construction.
 - **[T20260509-30]** — Resolve `sandbox-exec` from trusted absolute locations and keep availability errors fail-closed and explicit.
 - **[ORB-00129]** — Re-allow narrow workspace child Orbit runtime stores for activity-exposed learning, friction, and job-run state tools without removing the default workspace `.orbit/**` deny.
+- **[ORB-10552]** — Ship fail-closed Linux Bubblewrap write confinement without claiming read-policy parity.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

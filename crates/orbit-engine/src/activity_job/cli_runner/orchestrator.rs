@@ -24,17 +24,18 @@ use super::super::workspace::{
     WorktreeBoundaryGuard, resolve_subprocess_cwd, validate_declared_worktree_pair,
 };
 use super::argv::{
-    apply_provider_static_arg_fixups, audit_argv_for_dispatch, neutralize_inner_sandbox,
+    apply_provider_static_arg_fixups, neutralize_inner_sandbox, try_audit_argv_for_dispatch,
 };
 use super::envelope::{
     cli_agent_envelope_json, parse_cli_invocation_trace, parse_cli_response_result,
     task_id_from_input,
 };
-use super::spawn::resolve_provider_launcher;
+use super::spawn::{prepare_sandbox_for_dispatch, resolve_provider_launcher};
 use super::supervisor::{
     DEFAULT_WALL_CLOCK_TIMEOUT_SECONDS, SpawnTraceContext, SpawnWithTimeoutRequest,
     spawn_with_timeout,
 };
+use orbit_exec::LinuxBwrapPostRunGuard;
 
 const STDOUT_TEXT_PREVIEW_LIMIT_BYTES: usize = 64 * 1024;
 const RESPONSE_DIAGNOSTIC_LIMIT_CHARS: usize = 1024;
@@ -91,8 +92,11 @@ pub fn run_cli_backend(
     let subprocess_cwd_string = subprocess_cwd
         .as_ref()
         .map(|path| path.display().to_string());
-    let sandbox =
+    let resolved_sandbox =
         host.resolve_executor_sandbox(&provider, fs_profile, subprocess_cwd.as_deref())?;
+    let prepared_sandbox = prepare_sandbox_for_dispatch(resolved_sandbox.as_ref())
+        .map_err(|error| DispatchError::CliInvocationPermanent(error.message))?;
+    let sandbox = prepared_sandbox.effective;
 
     let learning_context = cli_learning_context(host, input, tool_ctx.workspace_root.as_deref())?;
     let envelope_json = cli_agent_envelope_json(
@@ -163,7 +167,13 @@ pub fn run_cli_backend(
     // under bare exec it's `<program> <args...>`. The redactor still scrubs
     // the child's program name + args so secrets in argv stay redacted.
     let redaction = PatternRedactor::with_argv_secrets();
-    let audit_argv = audit_argv_for_dispatch(&resolved_program, &subprocess_args, sandbox.as_ref());
+    let audit_argv = try_audit_argv_for_dispatch(
+        &resolved_program,
+        &subprocess_args,
+        sandbox,
+        subprocess_cwd.as_deref(),
+    )
+    .map_err(|error| DispatchError::CliInvocationPermanent(error.to_string()))?;
     let argv_redacted: Vec<String> = audit_argv.iter().map(|a| redaction.apply_str(a)).collect();
 
     let stdin_blob_ref = audit.write_blob(&invocation.stdin);
@@ -191,6 +201,11 @@ pub fn run_cli_backend(
         model: model_redacted,
         cwd: subprocess_cwd_string.clone(),
         wall_clock_timeout_ms: wall_clock_timeout.as_millis() as u64,
+        sandbox_backend: prepared_sandbox.metadata.backend.clone(),
+        sandbox_trusted_wrapper: prepared_sandbox.metadata.trusted_wrapper.clone(),
+        sandbox_probe_outcome: prepared_sandbox.metadata.probe_outcome.clone(),
+        sandbox_write_enforcement: Some(prepared_sandbox.metadata.write_enforcement.clone()),
+        sandbox_read_enforcement: Some(prepared_sandbox.metadata.read_enforcement.clone()),
     });
 
     let task_id = task_id_from_input(input);
@@ -223,6 +238,17 @@ pub fn run_cli_backend(
         });
     };
 
+    let linux_post_run_guard = match sandbox {
+        Some(sandbox)
+            if sandbox.kind == orbit_common::types::ExecutorSandboxKind::LinuxBwrap
+                && sandbox.managed_worktree =>
+        {
+            LinuxBwrapPostRunGuard::capture(&sandbox.fs_profile)
+                .map_err(|error| DispatchError::CliInvocationPermanent(error.to_string()))?
+        }
+        _ => None,
+    };
+
     let spawn_result = spawn_with_timeout(SpawnWithTimeoutRequest {
         program: &resolved_program,
         args: &subprocess_args,
@@ -230,7 +256,7 @@ pub fn run_cli_backend(
         env: &child_env,
         cwd: subprocess_cwd.as_deref(),
         timeout: wall_clock_timeout,
-        sandbox: sandbox.as_ref(),
+        sandbox,
         trace: SpawnTraceContext {
             provider: &provider,
             job_run_id: run_id,
@@ -258,6 +284,12 @@ pub fn run_cli_backend(
             });
         }
     };
+
+    if let Some(guard) = linux_post_run_guard {
+        guard
+            .verify()
+            .map_err(|error| DispatchError::CliInvocationPermanent(error.to_string()))?;
+    }
 
     let stdout_blob_ref = audit.write_blob(stdout.bytes());
     let stderr_blob_ref = audit.write_blob(stderr.bytes());

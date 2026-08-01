@@ -171,6 +171,16 @@ pub enum V2AuditEventKind {
         model: Option<String>,
         cwd: Option<String>,
         wall_clock_timeout_ms: u64,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        sandbox_backend: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        sandbox_trusted_wrapper: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        sandbox_probe_outcome: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        sandbox_write_enforcement: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        sandbox_read_enforcement: Option<String>,
     },
     /// [ORB-10496] The CLI backend subprocess exists. Emitted once, immediately
     /// after spawn and before the wall-clock supervision loop, so the provider
