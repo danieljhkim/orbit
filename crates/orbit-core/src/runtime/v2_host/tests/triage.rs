@@ -48,7 +48,7 @@ fn create_backlog_task(
             dependencies: Vec::new(),
             relations: Vec::new(),
             tags: Vec::new(),
-            plan: String::new(),
+            plan: "test plan".to_string(),
             execution_summary: String::new(),
             context_files: Vec::new(),
             workspace_path: Some(repo_root.to_string_lossy().into_owned()),
@@ -352,6 +352,105 @@ fn non_environmental_diagnoses_stay_blocked_and_deny_rebacklog() {
     assert!(
         note.contains("re-backlog denied"),
         "denied re-backlog must be visible in the diagnosis note: {note}"
+    );
+}
+
+#[test]
+fn diagnosed_run_is_suppressed_until_new_failure_or_explicit_request() {
+    let (_root, runtime, repo_root) = test_runtime();
+    let task_id = create_backlog_task(&runtime, &repo_root, "repeat-diagnosis");
+    let first_run_id = fail_pipeline_run_for_task(&runtime, &task_id);
+
+    let first_listing = list_candidates(&runtime, json!({}));
+    let diagnosed = apply_dispositions(
+        &runtime,
+        json!({
+            "dispositions": [{
+                "task_id": task_id,
+                "classification": "code_defect",
+                "disposition": "stay_blocked",
+                "diagnosis": "tests are genuinely red on this branch",
+            }],
+            "candidates": first_listing["candidates"],
+        }),
+    );
+    assert_eq!(diagnosed["diagnosed_count"], json!(1));
+
+    let repeated = list_candidates(&runtime, json!({}));
+    assert_eq!(
+        repeated["candidate_count"],
+        json!(0),
+        "the same coupled failed run must await human action"
+    );
+
+    let forced = list_candidates(&runtime, json!({ "task_ids": [task_id] }));
+    assert_eq!(forced["candidate_count"], json!(1));
+    assert_eq!(forced["candidates"][0]["run_id"], json!(first_run_id));
+
+    let second_run_id = fail_pipeline_run_for_task(&runtime, &task_id);
+    assert_ne!(second_run_id, first_run_id);
+    let after_new_failure = list_candidates(&runtime, json!({}));
+    assert_eq!(after_new_failure["candidate_count"], json!(1));
+    assert_eq!(
+        after_new_failure["candidates"][0]["run_id"],
+        json!(second_run_id),
+        "a diagnosis for the old run must not suppress new failure evidence"
+    );
+}
+
+#[test]
+fn agent_completed_task_makes_apply_step_a_clean_skip() {
+    let (_root, runtime, repo_root) = test_runtime();
+    let task_id = create_backlog_task(&runtime, &repo_root, "completed-externally");
+    fail_pipeline_run_for_task(&runtime, &task_id);
+    let listing = list_candidates(&runtime, json!({}));
+
+    runtime
+        .apply_task_automation_update(
+            &task_id,
+            TaskAutomationUpdate {
+                status: Some(TaskStatus::Done),
+                status_note: Some(
+                    "triage reconciled externally-completed work: PR #619 merged".to_string(),
+                ),
+                ..TaskAutomationUpdate::default()
+            },
+        )
+        .expect("triage agent reconciles task to done");
+    let history_len_before_apply = runtime
+        .get_task_history(&task_id)
+        .expect("history before apply")
+        .len();
+
+    let applied = apply_dispositions(
+        &runtime,
+        json!({
+            "dispositions": [{
+                "task_id": task_id,
+                "classification": "unknown",
+                "disposition": "stay_blocked",
+                "diagnosis": "work already landed",
+            }],
+            "candidates": listing["candidates"],
+        }),
+    );
+    assert_eq!(applied["skipped_count"], json!(1));
+    assert_eq!(applied["diagnosed_count"], json!(0));
+    assert_eq!(
+        applied["results"][0]["reason"],
+        json!("task is no longer blocked (status: done)")
+    );
+    assert_eq!(
+        runtime.get_task(&task_id).expect("task after apply").status,
+        TaskStatus::Done
+    );
+    assert_eq!(
+        runtime
+            .get_task_history(&task_id)
+            .expect("history after apply")
+            .len(),
+        history_len_before_apply,
+        "the deterministic apply step must not double-write after reconciliation"
     );
 }
 
