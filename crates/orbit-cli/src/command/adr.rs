@@ -9,7 +9,7 @@
 //! input parsing and filter semantics.
 //!
 //! Mirrors the shape of `orbit docs` (ORB-00280): one-file parent command
-//! with a `list` subcommand and a `--json` toggle. Add new ADR
+//! with `list` and `show` subcommands and a `--json` toggle. Add new ADR
 //! subcommands here as they get promoted to the CLI surface.
 
 use clap::{Args, Subcommand};
@@ -29,6 +29,8 @@ pub struct AdrCommand {
 pub enum AdrSubcommand {
     /// List ADRs with optional filters
     List(AdrListArgs),
+    /// Show one ADR, including its body and artifact origin
+    Show(AdrShowArgs),
 }
 
 #[derive(Args)]
@@ -57,10 +59,19 @@ pub struct AdrListArgs {
     /// When set, return only ADRs with `legacy_validation = warned`
     #[arg(long = "validation-warned")]
     pub validation_warned: bool,
-    /// Include allocation rows whose body files are not locally readable as remote stubs
+    /// Include allocated federated ADRs whose body files are not locally readable as remote stubs
     #[arg(long = "include-remote")]
     pub include_remote: bool,
     /// Output as JSON
+    #[arg(long)]
+    pub json: bool,
+}
+
+#[derive(Args)]
+pub struct AdrShowArgs {
+    /// Canonical ADR ID (for example `ADR-0259`)
+    pub id: String,
+    /// Output as JSON, including typed unavailable/not-found errors
     #[arg(long)]
     pub json: bool,
 }
@@ -69,7 +80,17 @@ impl Execute for AdrCommand {
     fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
         match self.command {
             AdrSubcommand::List(args) => args.execute(runtime),
+            AdrSubcommand::Show(args) => args.execute(runtime),
         }
+    }
+}
+
+impl Execute for AdrShowArgs {
+    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+        let value = runtime.run_tool("orbit.adr.show", serde_json::json!({ "id": self.id }))?;
+
+        let _ = self.json;
+        crate::output::json::print_pretty(&value)
     }
 }
 

@@ -499,13 +499,14 @@ impl Commands {
             }
             Commands::Adr(command) => {
                 use super::adr::AdrSubcommand;
-                let subcommand = match &command.command {
-                    AdrSubcommand::List(_) => "list",
+                let (subcommand, target_id, json) = match &command.command {
+                    AdrSubcommand::List(args) => ("list", None, args.json),
+                    AdrSubcommand::Show(args) => ("show", Some(args.id.as_str()), args.json),
                 };
                 CommandOperation::new(
                     RuntimeNeed::Required,
-                    Some(admin_meta("adr", Some(subcommand), Some("adr"), None)),
-                    None,
+                    Some(admin_meta("adr", Some(subcommand), Some("adr"), target_id)),
+                    json.then_some(true),
                     false,
                     runtime_dispatch!(Adr),
                 )
