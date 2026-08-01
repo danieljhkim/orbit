@@ -123,6 +123,7 @@ ci-fast:
 	./scripts/check-changelog-style.sh
 	./scripts/check-error-translation.sh
 	./scripts/check-orphan-modules.sh
+	./scripts/check-embedded-asset-portability.py
 	./scripts/test-validate-codex-plugin.sh
 
 # Verify every workspace crate declares its stability tier
