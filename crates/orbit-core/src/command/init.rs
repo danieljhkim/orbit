@@ -686,7 +686,7 @@ mod tests {
     }
 
     #[test]
-    fn workspace_init_seeds_an_inert_friction_curation_default_without_clobbering_edits() {
+    fn workspace_init_seeds_inert_defaults_without_clobbering_edits() {
         let temp = tempdir().expect("tempdir");
         let global_root = temp.path().join("global");
         let orbit_root = temp.path().join("repo/.orbit");
@@ -698,15 +698,25 @@ mod tests {
 
         let initial = init_workspace_at_root(&orbit_root, options.clone())
             .expect("initialize fresh workspace");
-        assert_eq!(initial.seeded_default_auto_tasks, 1);
-        let definition_path = orbit_root.join("auto_tasks/friction-curation.yaml");
-        let seeded = fs::read_to_string(&definition_path).expect("read seeded definition");
-        let definition = orbit_common::types::parse_auto_task_yaml(&seeded)
-            .expect("seeded definition parses through loader schema");
-        assert!(!definition.enabled);
-        assert_eq!(definition.template.crew.as_deref(), Some("luna"));
+        assert_eq!(initial.seeded_default_auto_tasks, 2);
+        let friction_path = orbit_root.join("auto_tasks/friction-curation.yaml");
+        let qa_path = orbit_root.join("auto_tasks/qa-sweep.yaml");
+        let friction = fs::read_to_string(&friction_path).expect("read seeded friction definition");
+        let friction_definition = orbit_common::types::parse_auto_task_yaml(&friction)
+            .expect("seeded friction definition parses through loader schema");
+        assert!(!friction_definition.enabled);
+        assert_eq!(friction_definition.template.crew.as_deref(), Some("luna"));
         assert!(matches!(
-            definition.dedupe,
+            friction_definition.dedupe,
+            orbit_common::types::DedupePolicy::SkipIfOpen
+        ));
+        let qa = fs::read_to_string(&qa_path).expect("read seeded QA definition");
+        let qa_definition = orbit_common::types::parse_auto_task_yaml(&qa)
+            .expect("seeded QA definition parses through loader schema");
+        assert!(!qa_definition.enabled);
+        assert_eq!(qa_definition.template.crew.as_deref(), Some("sonnet"));
+        assert!(matches!(
+            qa_definition.dedupe,
             orbit_common::types::DedupePolicy::SkipIfOpen
         ));
         assert!(!orbit_root.join("state/auto-tasks.json").exists());
@@ -715,16 +725,34 @@ mod tests {
             loaded.errors.is_empty(),
             "seeded definition must load cleanly"
         );
-        assert_eq!(loaded.definitions.len(), 1);
-        assert_eq!(loaded.definitions[0].definition.name, "friction-curation");
+        assert_eq!(loaded.definitions.len(), 2);
+        assert!(
+            loaded
+                .definitions
+                .iter()
+                .any(|loaded| loaded.definition.name == "friction-curation")
+        );
+        assert!(
+            loaded
+                .definitions
+                .iter()
+                .any(|loaded| loaded.definition.name == "qa-sweep")
+        );
 
-        fs::write(&definition_path, "operator-authored definition\n").expect("write edit");
+        let authored_friction = "operator-authored friction definition\n";
+        let authored_qa = "operator-authored QA definition\n";
+        fs::write(&friction_path, authored_friction).expect("write friction edit");
+        fs::write(&qa_path, authored_qa).expect("write QA edit");
         let repeated =
             init_workspace_at_root(&orbit_root, options).expect("reinitialize workspace");
         assert_eq!(repeated.seeded_default_auto_tasks, 0);
         assert_eq!(
-            fs::read_to_string(definition_path).expect("read preserved definition"),
-            "operator-authored definition\n"
+            fs::read_to_string(friction_path).expect("read preserved friction definition"),
+            authored_friction
+        );
+        assert_eq!(
+            fs::read_to_string(qa_path).expect("read preserved QA definition"),
+            authored_qa
         );
     }
 

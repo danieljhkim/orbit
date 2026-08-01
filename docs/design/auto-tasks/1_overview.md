@@ -78,7 +78,7 @@ becomes just the first definition.
 | Manual mint (`mint`, CLI-only) | `crates/orbit-core/src/auto_tasks/crud.rs` | ORB-10439 |
 | Deterministic action | `crates/orbit-core/src/runtime/v2_host/dispatch.rs` | ORB-10149 |
 | Seeded assets | `crates/orbit-core/assets/{activities,jobs,routines}/…` | ORB-10149 |
-| Default auto-task catalog | `crates/orbit-core/assets/auto_tasks/…` | ORB-10549 |
+| Default auto-task catalog | `crates/orbit-core/assets/auto_tasks/…` | ORB-10549, ORB-10550 |
 
 ## Definitions shipped in this repo
 
@@ -110,5 +110,7 @@ becomes just the first definition.
 - ORB-10549 — Embedded the portable, disabled friction-curation default and
   workspace materialization contract; ADR-0218 should be updated through the
   Orbit ADR surface after this task lands.
+- ORB-10550 — Added the disabled qa-sweep default and standardized agent-facing
+  friction tool invocations on the registered `orbit tool run` surface.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

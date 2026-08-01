@@ -46,10 +46,16 @@ pub use state::{AutoTaskCursor, AutoTaskCursorState, cursor_state_path, load_cur
 /// Default definitions embedded in the Orbit binary and materialized into a
 /// workspace on initialization. Defaults are deliberately inert: users must
 /// explicitly mint one or enable it through the existing auto-task surface.
-pub(crate) const DEFAULT_AUTO_TASK_FILES: &[(&str, &str)] = &[(
-    "friction-curation",
-    include_str!("../../assets/auto_tasks/friction-curation.yaml"),
-)];
+pub(crate) const DEFAULT_AUTO_TASK_FILES: &[(&str, &str)] = &[
+    (
+        "friction-curation",
+        include_str!("../../assets/auto_tasks/friction-curation.yaml"),
+    ),
+    (
+        "qa-sweep",
+        include_str!("../../assets/auto_tasks/qa-sweep.yaml"),
+    ),
+];
 
 /// Seed missing default auto-task definitions without changing an existing
 /// workspace-authored definition. Each asset is parsed before it is written so
