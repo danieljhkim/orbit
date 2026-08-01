@@ -503,6 +503,9 @@ impl Commands {
                     AdrSubcommand::List(args) => ("list", None, args.json),
                     AdrSubcommand::Show(args) => ("show", Some(args.id.as_str()), args.json),
                     AdrSubcommand::Restore(args) => ("restore", Some(args.id.as_str()), args.json),
+                    AdrSubcommand::Reconcile(args) => {
+                        ("reconcile", Some(args.id.as_str()), args.json)
+                    }
                 };
                 CommandOperation::new(
                     RuntimeNeed::Required,

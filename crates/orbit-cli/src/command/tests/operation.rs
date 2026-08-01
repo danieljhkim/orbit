@@ -110,6 +110,24 @@ fn json_error_preferences_are_derived_from_operations() {
 }
 
 #[test]
+fn adr_reconcile_operation_carries_target_and_json_preference() {
+    let operation = operation_for(&[
+        "orbit",
+        "adr",
+        "reconcile",
+        "ADR-0184",
+        "--source-worktree",
+        "/tmp/source",
+        "--json",
+    ]);
+    let meta = operation.audit_meta.expect("ADR reconcile audit metadata");
+    assert_eq!(meta.command, "adr");
+    assert_eq!(meta.subcommand.as_deref(), Some("reconcile"));
+    assert_eq!(meta.target_id.as_deref(), Some("ADR-0184"));
+    assert_eq!(operation.json_error_preference, Some(true));
+}
+
+#[test]
 fn only_pretooluse_suppresses_runtime_and_command_errors() {
     assert!(operation_for(&["orbit", "hook", "pretooluse", "--format", "codex"]).suppress_errors);
     assert!(!operation_for(&["orbit", "hook", "install"]).suppress_errors);

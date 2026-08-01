@@ -9,6 +9,7 @@ use orbit_common::types::{
     Adr, AdrStatus, ArtifactOrigin, ArtifactOriginMode, LegacyValidation, NotFoundKind, OrbitError,
     normalize_adr_paths, normalize_adr_tags,
 };
+use orbit_common::utility::git::run_git;
 use orbit_common::utility::git::{CurrentBranchStatus, current_branch};
 use orbit_common::utility::glob::{compile_glob_regex, normalize_glob_path};
 use orbit_common::utility::redaction::credential_safe_location;
@@ -358,6 +359,126 @@ impl AdrFileStore {
         let adr = bundle_to_adr(bundle);
         self.upsert_index_row(&adr);
         Ok(adr)
+    }
+
+    /// [ORB-10545] Materialize a byte-identical copy of a complete ADR bundle
+    /// from a registered sibling checkout into this checkout.
+    ///
+    /// Unlike exact-id restore, reconciliation preserves the source envelope
+    /// verbatim and leaves the allocation row untouched. The allocator row is
+    /// pinned to the caller-observed snapshot across the final rename, so a
+    /// concurrent repair cannot publish a bundle against stale identity.
+    pub(crate) fn reconcile_federated_adr(
+        &self,
+        id: &str,
+        source_worktree: &Path,
+    ) -> Result<Adr, OrbitError> {
+        validate_adr_id(id)?;
+        let allocation = self.id_allocator.adr_allocation(id)?.ok_or_else(|| {
+            OrbitError::InvalidInput(format!(
+                "cannot reconcile ADR {id}: no live ADR allocation exists"
+            ))
+        })?;
+
+        let local_worktree = canonicalize_checkout(self.id_allocator.worktree_root(), "current")?;
+        let source_worktree = canonicalize_checkout(source_worktree, "source")?;
+        if source_worktree == local_worktree {
+            return Err(OrbitError::InvalidInput(format!(
+                "cannot reconcile ADR {id}: source and destination are the same checkout"
+            )));
+        }
+        let registered = registered_worktree_roots(&local_worktree)?;
+        if !registered.iter().any(|root| root == &local_worktree) {
+            return Err(OrbitError::InvalidInput(format!(
+                "cannot reconcile ADR {id}: current checkout '{}' is not a registered Git worktree",
+                local_worktree.display()
+            )));
+        }
+        if !registered.iter().any(|root| root == &source_worktree) {
+            return Err(OrbitError::InvalidInput(format!(
+                "cannot reconcile ADR {id}: source checkout '{}' is not a registered Git worktree",
+                source_worktree.display()
+            )));
+        }
+
+        let source_adr_root = source_worktree.join(".orbit/adrs");
+        let (first_root, second_root) = if self.root <= source_adr_root {
+            (&self.root, &source_adr_root)
+        } else {
+            (&source_adr_root, &self.root)
+        };
+        let _first_lock = acquire_adr_lock(first_root, id)?;
+        let _second_lock = acquire_adr_lock(second_root, id)?;
+
+        let source = read_reconciliation_source(&source_adr_root, id)?;
+        let expected_source = source.clone();
+        let localized = self
+            .id_allocator
+            .with_unchanged_adr_allocation(&allocation, || {
+                let current_source = read_reconciliation_source(&source_adr_root, id)?;
+                if current_source != expected_source {
+                    return Err(OrbitError::InvalidInput(format!(
+                        "cannot reconcile ADR {id}: source bundle changed concurrently"
+                    )));
+                }
+                self.install_reconciled_bundle(id, &current_source)
+            })?;
+
+        self.upsert_index_row(&localized.doc.adr);
+        Ok(bundle_to_adr(localized))
+    }
+
+    fn install_reconciled_bundle(
+        &self,
+        id: &str,
+        source: &ReconciliationBundle,
+    ) -> Result<AdrBundle, OrbitError> {
+        if let Some((state, dir)) = self.locate_adr(id)? {
+            if state != source.state {
+                return Err(OrbitError::InvalidInput(format!(
+                    "cannot reconcile ADR {id}: destination already has a {} lifecycle artifact",
+                    state.dir_name()
+                )));
+            }
+            let destination = read_reconciliation_bundle(&dir, id, state)?;
+            if destination != *source {
+                return Err(OrbitError::InvalidInput(format!(
+                    "cannot reconcile ADR {id}: destination exists but is not byte-equivalent to the source"
+                )));
+            }
+            return Ok(destination.bundle);
+        }
+
+        let target_dir = adr_dir(&self.root, source.state, id);
+        let parent = target_dir.parent().ok_or_else(|| {
+            OrbitError::Store(format!("cannot resolve reconciliation parent for ADR {id}"))
+        })?;
+        fs::create_dir_all(parent).map_err(|error| OrbitError::Io(error.to_string()))?;
+        let temp_dir = parent.join(format!(".{id}.reconcile-{}", std::process::id()));
+        fs::create_dir(&temp_dir).map_err(|error| {
+            OrbitError::Io(format!(
+                "create ADR reconciliation staging directory '{}': {error}",
+                temp_dir.display()
+            ))
+        })?;
+
+        let install = (|| {
+            fs::write(super::layout::adr_doc_path(&temp_dir), &source.yaml_bytes)
+                .map_err(|error| OrbitError::Io(error.to_string()))?;
+            fs::write(super::layout::body_path(&temp_dir), &source.body_bytes)
+                .map_err(|error| OrbitError::Io(error.to_string()))?;
+            if target_dir.exists() {
+                return Err(OrbitError::InvalidInput(format!(
+                    "cannot reconcile ADR {id}: destination appeared concurrently"
+                )));
+            }
+            fs::rename(&temp_dir, &target_dir).map_err(|error| OrbitError::Io(error.to_string()))
+        })();
+        if let Err(error) = install {
+            let _ = fs::remove_dir_all(&temp_dir);
+            return Err(error);
+        }
+        Ok(source.bundle.clone())
     }
 
     pub(crate) fn get_adr(&self, id: &str) -> Result<Option<Adr>, OrbitError> {
@@ -984,6 +1105,85 @@ impl AdrFileStore {
         }
         Ok(ids)
     }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct ReconciliationBundle {
+    state: AdrStateDir,
+    bundle: AdrBundle,
+    yaml_bytes: Vec<u8>,
+    body_bytes: Vec<u8>,
+}
+
+fn read_reconciliation_source(root: &Path, id: &str) -> Result<ReconciliationBundle, OrbitError> {
+    let mut found = None;
+    for state in AdrStateDir::all() {
+        let dir = adr_dir(root, *state, id);
+        if !dir.exists() {
+            continue;
+        }
+        if found.is_some() {
+            return Err(OrbitError::InvalidInput(format!(
+                "cannot reconcile ADR {id}: source contains multiple lifecycle artifacts"
+            )));
+        }
+        found = Some(read_reconciliation_bundle(&dir, id, *state)?);
+    }
+    found.ok_or_else(|| {
+        OrbitError::InvalidInput(format!(
+            "cannot reconcile ADR {id}: source checkout has no complete ADR bundle"
+        ))
+    })
+}
+
+fn read_reconciliation_bundle(
+    dir: &Path,
+    id: &str,
+    state: AdrStateDir,
+) -> Result<ReconciliationBundle, OrbitError> {
+    let bundle = read_complete_bundle(dir, id)?;
+    if bundle.doc.adr.status != state.to_status() {
+        return Err(OrbitError::InvalidInput(format!(
+            "cannot reconcile ADR {id}: source metadata status '{}' does not match '{}' partition",
+            bundle.doc.adr.status.cli_name(),
+            state.dir_name()
+        )));
+    }
+    let yaml_bytes = fs::read(super::layout::adr_doc_path(dir))
+        .map_err(|error| OrbitError::Io(error.to_string()))?;
+    let body_bytes = fs::read(super::layout::body_path(dir))
+        .map_err(|error| OrbitError::Io(error.to_string()))?;
+    Ok(ReconciliationBundle {
+        state,
+        bundle,
+        yaml_bytes,
+        body_bytes,
+    })
+}
+
+fn canonicalize_checkout(path: &Path, role: &str) -> Result<PathBuf, OrbitError> {
+    fs::canonicalize(path).map_err(|error| {
+        OrbitError::InvalidInput(format!(
+            "cannot reconcile ADR: {role} checkout '{}' is unreadable: {error}",
+            path.display()
+        ))
+    })
+}
+
+fn registered_worktree_roots(repo_root: &Path) -> Result<Vec<PathBuf>, OrbitError> {
+    let output = run_git(repo_root, &["worktree", "list", "--porcelain"])?;
+    if !output.success {
+        return Err(OrbitError::Execution(format!(
+            "cannot enumerate registered Git worktrees: {}",
+            output.stderr.trim()
+        )));
+    }
+    Ok(output
+        .stdout
+        .lines()
+        .filter_map(|line| line.strip_prefix("worktree "))
+        .filter_map(|path| fs::canonicalize(path).ok())
+        .collect())
 }
 
 fn read_complete_bundle(dir: &Path, expected_id: &str) -> Result<AdrBundle, OrbitError> {

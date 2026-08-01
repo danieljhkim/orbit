@@ -1,6 +1,7 @@
 // Migrated from file/adr_store/api.rs per ORB-00231
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 
 use tempfile::{TempDir, tempdir};
 
@@ -19,12 +20,11 @@ struct TwoWorktreeFixture {
 impl TwoWorktreeFixture {
     fn new() -> Self {
         let temp = tempdir().expect("tempdir");
-        let shared_root = temp.path().join("hub/.orbit");
         let local_root = temp.path().join("local");
         let sibling_root = temp.path().join("sibling");
+        init_registered_worktrees(&local_root, &sibling_root);
+        let shared_root = local_root.join(".orbit");
         fs::create_dir_all(&shared_root).expect("shared root");
-        fs::create_dir_all(&local_root).expect("local root");
-        fs::create_dir_all(&sibling_root).expect("sibling root");
         let semantic_db = shared_root.join("state/semantic.db");
         let local = Self::store(&shared_root, &local_root);
         let sibling = Self::store(&shared_root, &sibling_root);
@@ -107,6 +107,43 @@ impl TwoWorktreeFixture {
             fs::read(dir.join("body.md")).expect("read body bytes"),
         )
     }
+}
+
+fn init_registered_worktrees(local_root: &Path, sibling_root: &Path) {
+    fs::create_dir_all(local_root).expect("local worktree root");
+    git_ok(local_root, &["init", "-q"]);
+    git_ok(
+        local_root,
+        &["config", "user.email", "test@example.invalid"],
+    );
+    git_ok(local_root, &["config", "user.name", "Orbit Test"]);
+    fs::write(local_root.join("README.md"), "fixture\n").expect("fixture file");
+    git_ok(local_root, &["add", "README.md"]);
+    git_ok(local_root, &["commit", "-q", "-m", "fixture"]);
+    git_ok(
+        local_root,
+        &[
+            "worktree",
+            "add",
+            "-q",
+            "-b",
+            "sibling",
+            sibling_root.to_str().expect("UTF-8 sibling path"),
+        ],
+    );
+}
+
+fn git_ok(root: &Path, args: &[&str]) {
+    let output = Command::new("git")
+        .args(args)
+        .current_dir(root)
+        .output()
+        .expect("run git");
+    assert!(
+        output.status.success(),
+        "git {args:?} failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
 }
 
 fn create_params(title: &str, body: &str) -> AdrCreateParams {
@@ -243,6 +280,142 @@ fn remote_resolution_rejects_stale_missing_unreadable_and_removed_bundles() {
     let removed = fixture.add_sibling("Removed worktree", "body", AdrStatus::Proposed);
     fs::remove_dir_all(&fixture.sibling_root).expect("remove sibling worktree");
     assert_remote_unavailable(&fixture, &removed.id);
+}
+
+#[test]
+fn reconcile_breaks_the_readable_federated_restore_deadlock_without_reallocation() {
+    let fixture = TwoWorktreeFixture::new();
+    let old = fixture
+        .sibling
+        .add_adr(create_params(
+            "Published history",
+            "rejected alternative body",
+        ))
+        .expect("add old ADR");
+    let replacement = fixture.add_sibling("Replacement", "replacement body", AdrStatus::Accepted);
+    fixture
+        .sibling
+        .supersede_adr(&old.id, &replacement.id)
+        .expect("supersede old ADR");
+    let old = fixture
+        .sibling
+        .get_adr(&old.id)
+        .expect("read superseded ADR")
+        .expect("superseded ADR exists");
+    let source_bytes = TwoWorktreeFixture::bundle_bytes(&fixture.sibling_root, &old);
+    let allocation_before = fixture.allocation_bytes(&old.id);
+
+    let restore_error = fixture
+        .local
+        .restore_allocated_adr(&old.id, create_params("Cannot restore", "new body"))
+        .expect_err("restore refuses a readable federated artifact");
+    assert!(format!("{restore_error}").contains("still readable"));
+
+    let reconciled = fixture
+        .local
+        .reconcile_federated_adr(&old.id, &fixture.sibling_root)
+        .expect("reconcile federated ADR");
+    assert_eq!(reconciled, old);
+    assert_eq!(
+        TwoWorktreeFixture::bundle_bytes(&fixture.local_root, &reconciled),
+        source_bytes,
+        "reconciliation must preserve the complete bundle byte-for-byte"
+    );
+    assert_eq!(fixture.allocation_bytes(&old.id), allocation_before);
+
+    fixture
+        .local
+        .reconcile_federated_adr(&old.id, &fixture.sibling_root)
+        .expect("byte-equivalent destination is idempotent");
+    assert_eq!(fixture.allocation_bytes(&old.id), allocation_before);
+}
+
+#[test]
+fn reconcile_rejects_unregistered_incomplete_and_divergent_sources_without_mutation() {
+    let fixture = TwoWorktreeFixture::new();
+    let adr = fixture.add_sibling("Federated", "source body", AdrStatus::Accepted);
+    let allocation_before = fixture.allocation_bytes(&adr.id);
+    let target = TwoWorktreeFixture::bundle_dir(&fixture.local_root, &adr);
+
+    let unregistered = fixture._temp.path().join("unregistered");
+    fs::create_dir_all(&unregistered).expect("unregistered source");
+    let error = fixture
+        .local
+        .reconcile_federated_adr(&adr.id, &unregistered)
+        .expect_err("unregistered source must fail");
+    assert!(format!("{error}").contains("not a registered Git worktree"));
+    assert!(!target.exists());
+
+    let source_body = TwoWorktreeFixture::bundle_dir(&fixture.sibling_root, &adr).join("body.md");
+    let body = fs::read(&source_body).expect("source body snapshot");
+    fs::remove_file(&source_body).expect("make source incomplete");
+    fixture
+        .local
+        .reconcile_federated_adr(&adr.id, &fixture.sibling_root)
+        .expect_err("incomplete source must fail");
+    assert!(!target.exists());
+    fs::write(&source_body, body).expect("restore source body");
+
+    let accepted_source = TwoWorktreeFixture::bundle_dir(&fixture.sibling_root, &adr);
+    let proposed_source = fixture
+        .sibling_root
+        .join(".orbit/adrs/proposed")
+        .join(&adr.id);
+    fs::create_dir_all(proposed_source.parent().expect("proposed parent"))
+        .expect("proposed partition");
+    fs::rename(&accepted_source, &proposed_source).expect("mispartition source bundle");
+    let error = fixture
+        .local
+        .reconcile_federated_adr(&adr.id, &fixture.sibling_root)
+        .expect_err("metadata and lifecycle partition mismatch must fail");
+    assert!(format!("{error}").contains("metadata status"));
+    assert!(!target.exists());
+    fs::rename(&proposed_source, &accepted_source).expect("restore source partition");
+
+    fixture.copy_to_local(&adr, "divergent local body");
+    let local_before = TwoWorktreeFixture::bundle_bytes(&fixture.local_root, &adr);
+    let error = fixture
+        .local
+        .reconcile_federated_adr(&adr.id, &fixture.sibling_root)
+        .expect_err("divergent destination must fail");
+    assert!(format!("{error}").contains("not byte-equivalent"));
+    assert_eq!(
+        TwoWorktreeFixture::bundle_bytes(&fixture.local_root, &adr),
+        local_before
+    );
+    assert_eq!(fixture.allocation_bytes(&adr.id), allocation_before);
+}
+
+#[test]
+fn reconciliation_allocation_guard_refuses_a_stale_snapshot_before_mutation() {
+    let fixture = TwoWorktreeFixture::new();
+    let adr = fixture.add_sibling("Federated", "source body", AdrStatus::Accepted);
+    let expected = fixture
+        .local
+        .id_allocator
+        .adr_allocation(&adr.id)
+        .expect("read allocation")
+        .expect("allocation exists");
+    rusqlite::Connection::open(&fixture.semantic_db)
+        .expect("open allocator db")
+        .execute(
+            "UPDATE id_allocations SET branch = 'concurrent-change' WHERE id = ?1",
+            [&adr.id],
+        )
+        .expect("mutate allocation snapshot");
+
+    let mut mutated = false;
+    let error = fixture
+        .local
+        .id_allocator
+        .with_unchanged_adr_allocation(&expected, || {
+            mutated = true;
+            Ok(())
+        })
+        .expect_err("stale allocation snapshot must fail");
+    assert!(format!("{error}").contains("changed concurrently"));
+    assert!(!mutated, "mutation closure must not run");
+    assert!(!TwoWorktreeFixture::bundle_dir(&fixture.local_root, &adr).exists());
 }
 
 fn assert_remote_unavailable(fixture: &TwoWorktreeFixture, id: &str) {

@@ -3,14 +3,14 @@ summary: "Worktree Artifacts - Design"
 type: design
 title: "Worktree Artifacts - Design"
 owner: codex
-last_updated: 2026-07-19
+last_updated: 2026-08-01
 status: Accepted
 feature: worktree-artifacts
 doc_role: design
 tags: ["worktree-artifacts"]
 paths: ["crates/orbit-remote/**", "crates/orbit-core/**", "crates/orbit-store/**", "crates/orbit-cli/**"]
 related_features: ["worktree-artifacts", "host-registry", "mcp-bridge"]
-related_artifacts: ["ORB-00199", "ORB-00200", "ORB-00201", "ORB-10272", "ORB-10297", "ORB-10330", "ADR-0177", "ADR-0229"]
+related_artifacts: ["ORB-00199", "ORB-00200", "ORB-00201", "ORB-10272", "ORB-10297", "ORB-10330", "ORB-10545", "ADR-0177", "ADR-0229", "ADR-0302"]
 ---
 
 # Worktree Artifacts - Design
@@ -130,6 +130,24 @@ List and search retain their existing defaults. Readable allocation-owned bundle
 
 ADR document update, accept, and supersede are local-only. A federated or unavailable allocation-owned artifact fails preflight with `artifact_not_local` (HTTP 409 or the same local MCP code) before any bundle, allocation, lifecycle timestamp, index, or audit mutation. Supersede preflights both operands before its first write. Landing the bundle in the current checkout restores ordinary local mutation semantics; a sibling-owned allocation row remains unchanged.
 
+### 5.1 Federated ADR reconciliation
+
+`orbit adr reconcile <id> --source-worktree <path>` localizes an already
+published ADR bundle from an explicitly named registered sibling worktree. It
+does not allocate, reconstruct metadata, change lifecycle state, or repoint the
+allocation row. The store requires both checkouts to appear in the same Git
+worktree registry, reads a complete non-empty bundle whose metadata status
+matches its lifecycle partition, and accepts an existing destination only when
+both files are byte-equivalent.
+
+The source and destination ADR locks cover validation, while the shared
+allocator lock pins the complete allocation snapshot across the final atomic
+rename. A changed source, allocation, incomplete bundle, lifecycle mismatch,
+unregistered checkout, or divergent destination fails before the canonical
+destination changes. This is deliberately distinct from `adr restore`: restore
+authors a replacement only when no readable copy exists; reconciliation
+preserves a readable published bundle verbatim.
+
 ## 6. Indexing Behavior
 
 Learning reindex and docs/ADR search operate on locally readable bodies. Remote-only allocation rows are skipped without error; once the recorded worktree is present and readable again, the same list/reindex path can read and index the body.
@@ -154,5 +172,7 @@ The `worktree_root` column preserves historical rows from earlier phases, so old
   hub allocation into the exact owner checkout via a non-authoritative body-path
   projection, never allocate/abandon/retry, and reject replica/foreign-spoke owners
   before allocation. Public creation stays on the compatibility path until F3.
+- [ORB-10545] added exact-bundle reconciliation and made superseded ADR bodies
+  repository-published decision history under [ADR-0302].
 
 Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

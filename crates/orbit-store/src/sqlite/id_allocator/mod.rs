@@ -337,6 +337,29 @@ impl IdAllocator {
         self.allocation(IdAllocationKind::Adr, id)
     }
 
+    /// Run a filesystem mutation while the ADR allocation is pinned to an
+    /// exact caller-observed snapshot. [ORB-10545]
+    ///
+    /// Reconciliation copies an existing bundle without changing allocation
+    /// ownership or lifecycle metadata. Holding the shared allocator lock
+    /// across the final rename prevents a concurrent allocation repair from
+    /// invalidating the source identity between validation and publication.
+    pub fn with_unchanged_adr_allocation<T>(
+        &self,
+        expected: &IdAllocationRecord,
+        operation: impl FnOnce() -> Result<T, OrbitError>,
+    ) -> Result<T, OrbitError> {
+        let _lock = self.acquire_lock()?;
+        let current = self.allocation(IdAllocationKind::Adr, &expected.id)?;
+        if current.as_ref() != Some(expected) {
+            return Err(OrbitError::InvalidInput(format!(
+                "cannot reconcile ADR {}: its allocation changed concurrently; inspect orbit adr show before retrying",
+                expected.id
+            )));
+        }
+        operation()
+    }
+
     /// [ORB-10479] Allocation lookup for the exact-id ADR repair path, which
     /// must also see rows [`Self::abandon_orphaned_adr`] marked `abandoned`
     /// after their pinned worktree was reaped — the exact population the

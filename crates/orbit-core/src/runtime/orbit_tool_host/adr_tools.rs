@@ -3,6 +3,7 @@
 //! See `docs/design/CONVENTIONS.md` §4 for the authoring rules and `.orbit/adrs/`
 //! for the persisted artifact store.
 
+use std::path::Path;
 use std::str::FromStr;
 
 use orbit_common::types::{
@@ -17,6 +18,21 @@ use orbit_store::{
 use serde_json::{Value, json};
 
 use crate::OrbitRuntime;
+
+impl OrbitRuntime {
+    /// Reconcile a complete federated ADR bundle into this runtime's current
+    /// checkout without changing its allocation or lifecycle state.
+    /// [ORB-10545]
+    pub fn reconcile_federated_adr(
+        &self,
+        id: &str,
+        source_worktree: &Path,
+    ) -> Result<Adr, OrbitError> {
+        self.stores()
+            .adrs()
+            .reconcile_federated_adr(id, source_worktree)
+    }
+}
 
 pub(super) fn add(
     runtime: &OrbitRuntime,

@@ -189,6 +189,14 @@ impl AdrStoreBackend for AdrFileStore {
         self.restore_allocated_adr(id, params)
     }
 
+    fn reconcile_federated_adr(
+        &self,
+        id: &str,
+        source_worktree: &std::path::Path,
+    ) -> Result<Adr, OrbitError> {
+        self.reconcile_federated_adr(id, source_worktree)
+    }
+
     fn get_adr(&self, id: &str) -> Result<Option<Adr>, OrbitError> {
         // ADRs use the WorkspaceOnly strategy per `CLAUDE.md`.
         resolve::<Adr, _>(self, id)
