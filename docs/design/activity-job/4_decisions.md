@@ -3,7 +3,7 @@ summary: "Activity / Job — Decisions"
 type: design
 title: "Activity / Job — Decisions"
 owner: codex
-last_updated: 2026-07-27
+last_updated: 2026-08-01
 last_validated: 2026-07-26
 status: Draft
 feature: activity-job
@@ -18,6 +18,8 @@ This ADR log records the decisions that define the current Activity / Job substr
 The log now keeps four load-bearing rollup ADR bodies. Folded entries remain at their original numbers with `Status: Superseded by ADR-NNN (folded)` and a one-line pointer, per [CONVENTIONS §4a](../CONVENTIONS.md#4a-rollup-adrs).
 
 Historical note ([ORB-10458]): the entries listed below were authored with local IDs that had no record in the ADR store. They were allocated through `orbit.adr.add`, their narratives migrated into the store verbatim, and their headings rewritten to the allocated global ID. The original local IDs survive as `legacy_ids`, so prior citations still resolve via `orbit tool run orbit.adr.show --input '{"legacy_id":"<feature>/ADR-NNN"}'`. Backfilled here: `activity-job/ADR-0252` → ADR-0282, `activity-job/ADR-052` → ADR-0281.
+
+Historical note ([ORB-10479]): the entries listed below already held a global ADR allocation, but their store bodies were lost when the worktrees that authored them were reaped (see [F2026-07-163]). The narratives were restored into the store at their existing IDs — no ID was reallocated — and their headings reduced to pointer form. Restored here: [ADR-0194], [ADR-0225], [ADR-0259].
 
 ---
 
@@ -563,18 +565,9 @@ Narrative lives in the ADR store — retrieve it with `orbit tool run orbit.adr.
 
 ## ADR-0194 — The v2 shell activity surface is removed, not sandboxed
 
-**Status:** Proposed · 2026-06 · [ORB-00374], [ORB-00363]
+**Status:** Accepted · 2026-06 · [ORB-00374], [ORB-00363]
 
-**Context.** The v2 `shell` activity (`ActivityV2Spec::Shell`) dispatched `Command::new(program)` with no OS sandbox, no cwd confinement, and no policy consultation — unlike the `backend: cli` agent path. Its only guard was a `program ∈ allowed_programs` check where both fields came from the same workspace-supplied YAML, so the allowlist was a tautology ([ORB-00363]). The real alternatives were to retrofit the sandbox/policy/cwd pipeline onto `run_shell`, or to remove the surface entirely.
-
-**Decision.** Remove the `shell` activity surface end to end: drop `ShellSpec`, `ActivityV2Spec::Shell`, `run_shell`, the `Shell*` `DispatchError` variants, and every match arm, re-export, demo asset, and doc reference. A workspace activity/job declaring `type: shell` now fails to deserialize at load (the `#[serde(tag = "type")]` enum has no matching variant) instead of executing. Narrow subprocess needs are served by registered `deterministic` actions and the policy-gated `backend: cli` agent path, which enforces `proc_allowed_programs` outside the workspace-supplied spec.
-
-**Consequences.**
-- A malicious or careless workspace can no longer obtain unsandboxed arbitrary-program execution through a self-asserted allowlist; the failure mode is fail-closed (load error), not silent execution.
-- The only built-in dispatch leaf that produced `Ok(success = false)` is gone; every remaining leaf returns `Ok(success = true)` or `Err`. The structural non-success propagation in the job executor (`StepOutcome.success`, parallel / fan-out / loop aggregation) is retained as the general contract for block-level outcomes and any future fallible-but-`Ok` activity.
-- No single code anchor: the constraint is the absence of the variant, enforced by the typed `ActivityV2Spec` enum and review.
-- Cost: the `Ok(success = false)` audit-message path lost its only coverage — the two shell-specific tests asserting it were removed rather than migrated, because `deterministic` actions cannot produce that outcome.
-- Cost: workspaces that legitimately used `type: shell` must migrate to a registered `deterministic` action or an `agent_loop`; there is no compatibility shim, and old YAML fails at load.
+Narrative lives in the ADR store — retrieve it with `orbit tool run orbit.adr.show --input '{"id":"ADR-0194"}'`.
 
 ## ADR-0214 — Pending job runs are owned and reconciled like running runs
 
@@ -641,15 +634,7 @@ superseded, and its own flag keeps its meaning.
 
 **Status:** Accepted · 2026-07 · [ORB-10232]
 
-**Context.** A recovered rebase previously retried the composite `pr_open` action, replaying commit and remote side effects. The alternatives were to make that composite infer prior work from commit subjects and generic divergence, or to expose each handoff phase as durable job state with explicit rewrite provenance.
-
-**Decision.** Model commit, pre-rewrite branch preparation, exact-base rebase, push, PR create-or-reuse, and task promotion as separate `task_pr_pipeline` activity steps. A divergent push is authorized only when a persisted preparation checkpoint names the exact remote SHA observed before the rewrite, the rebase phase confirms that a rewrite occurred, and the push uses a branch-scoped `--force-with-lease=<ref>:<sha>`; all ambiguous or changed remote state fails closed.
-
-**Consequences.**
-- Recovery resumes at the first incomplete job step, while step output records whether each phase was performed, skipped, or reused.
-- Remote-only commits are never treated as implicit authorization to force-push, and PR retries discover the branch PR before creating one.
-- Cost: the shipped workflow and deterministic activity catalog gain three focused activities plus explicit data plumbing between their output schemas.
-- Cost: push performs remote inspection/fetch work before classifying non-current refs, and operators must reconcile ambiguous divergence manually.
+Narrative lives in the ADR store — retrieve it with `orbit tool run orbit.adr.show --input '{"id":"ADR-0225"}'`.
 
 ---
 
@@ -767,16 +752,9 @@ Recognition is the entire change: no safety gate moved. Non-terminal run, `--old
 
 ## ADR-0259 — Provider launchers resolve at the shared CLI spawn boundary
 
-**Status:** Proposed · 2026-07 · [ORB-10456]
+**Status:** Accepted · 2026-07 · [ORB-10456]
 
-**Context.** Dashboard shipment reproduced the same provider-launcher ENOENT previously seen in routine sweeps: independent process entry points inherited different `PATH` values even though every `backend: cli` provider invocation converges on one engine spawn boundary. The alternatives were to keep pinning `PATH` in each service/entry point or resolve configured launcher names once at that shared boundary.
-
-**Decision.** Resolve every bare provider launcher at the orbit-engine CLI spawn boundary. Search the process `PATH` first, then portable per-user fallback directories derived from `HOME`; preserve explicitly pathed commands unchanged. Missing-launcher failures remain permanent and name the provider plus every searched path.
-
-**Consequences.**
-- Dashboard, routine, CLI ship, and direct job dispatch share one provider-launcher resolution mechanism rather than depending on each parent environment being curated.
-- Explicit command paths and `PATH` precedence remain authoritative, while common user-local installations work from scrubbed service environments.
-- Cost: Orbit now recognizes a small ordered set of conventional user-local bin directories outside `PATH`, so moving a launcher into a new convention requires extending and testing that list.
+Narrative lives in the ADR store — retrieve it with `orbit tool run orbit.adr.show --input '{"id":"ADR-0259"}'`.
 
 ---
 

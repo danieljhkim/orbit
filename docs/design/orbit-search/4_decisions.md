@@ -3,7 +3,7 @@ summary: "Semantic Search — Decisions"
 type: design
 title: "Semantic Search — Decisions"
 owner: claude
-last_updated: 2026-07-26
+last_updated: 2026-08-01
 status: Accepted
 feature: orbit-search
 doc_role: decisions
@@ -17,6 +17,8 @@ ADR-style log of non-obvious orbit-search decisions. Each entry names the pressu
 Format for each entry: **Status · Date · Task(s)**, then *Context → Decision → Consequences*. Every ADR names at least one cost. ADRs in this file carry status `Proposed` until the implementing task ships; they flip to `Accepted` with the implementing task ID at that point.
 
 Historical note ([ORB-10458]): the entries listed below were authored with local IDs that had no record in the ADR store. They were allocated through `orbit.adr.add`, their narratives migrated into the store verbatim, and their headings rewritten to the allocated global ID. The original local IDs survive as `legacy_ids`, so prior citations still resolve via `orbit tool run orbit.adr.show --input '{"legacy_id":"<feature>/ADR-NNN"}'`. Backfilled here: `orbit-search/ADR-001` → ADR-0270, `orbit-search/ADR-002` → ADR-0271, `orbit-search/ADR-003` → ADR-0272, `orbit-search/ADR-004` → ADR-0273, `orbit-search/ADR-005` → ADR-0274, `orbit-search/ADR-006` → ADR-0275, `orbit-search/ADR-007` → ADR-0276, `orbit-search/ADR-008` → ADR-0277.
+
+Historical note ([ORB-10479]): the entries listed below already held a global ADR allocation, but their store bodies were lost when the worktrees that authored them were reaped (see [F2026-07-163]). The narratives were restored into the store at their existing IDs — no ID was reallocated — and their headings reduced to pointer form. Restored here: [ADR-0175].
 
 ---
 
@@ -104,16 +106,7 @@ Narrative lives in the ADR store — retrieve it with `orbit tool run orbit.adr.
 
 **Status:** Superseded by ADR-0179 · 2026-05-21 · [ORB-00204]
 
-**Context.** Phase 1 used the semantic name for the hybrid BM25 plus cosine mode toggle and a separate related-task flag for cosine-neighbor lookup. That inverted the intuitive reading of semantic search: users expect semantic plus an ID to mean nearest neighbors, while hybrid is the honest name for the ranking algorithm.
-
-**Decision.** Rename the free-text ranking toggle to `--hybrid` / `hybrid: true` and rename task-neighbor lookup to `--semantic <id>` / `semantic: "<id>"`. Keep lexical search as the default and report JSON mode `hybrid` for hybrid free-text search and `neighbor` for cosine-only task-neighbor lookup.
-
-**Consequences.**
-- The CLI and MCP surfaces match user vocabulary before external consumers depend on the phase-1 names.
-- Historical phase-1 audit payloads that carried `semantic: true` are orphaned by the hard break, matching the no-shim policy for this young surface.
-- Documentation and packaged skills must distinguish the `orbit semantic` lifecycle command from the MCP `semantic: "<id>"` search parameter. ADR-0179 replaces the CLI flag form with `orbit search similar <id>`.
-- Cost: Agents and docs written against phase 1 need a one-time rename sweep, and ORB-00202 may need a rebase because it edits adjacent search surfaces.
-- Cost: historical audit event names `semantic.search` and `semantic.related` become orphaned event types, accepted because no external audit-history consumers exist yet.
+Narrative lives in the ADR store — retrieve it with `orbit tool run orbit.adr.show --input '{"id":"ADR-0175"}'`.
 
 ---
 
