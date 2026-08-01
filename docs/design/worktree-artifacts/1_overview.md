@@ -3,14 +3,14 @@ summary: "Worktree Artifacts - Overview"
 type: design
 title: "Worktree Artifacts - Overview"
 owner: codex
-last_updated: 2026-07-27
+last_updated: 2026-08-01
 status: Accepted
 feature: worktree-artifacts
 doc_role: overview
 tags: ["worktree-artifacts"]
-paths: ["crates/orbit-core/**", "crates/orbit-store/**", "crates/orbit-cli/**"]
+paths: ["crates/orbit-core/**", "crates/orbit-store/**", "crates/orbit-engine/**", "crates/orbit-cli/**"]
 related_features: ["worktree-artifacts"]
-related_artifacts: ["ORB-00199", "ORB-00200", "ORB-00201", "ORB-10501", "ADR-0177", "ADR-0296"]
+related_artifacts: ["ORB-00199", "ORB-00200", "ORB-00201", "ORB-10501", "ORB-10535", "ADR-0177", "ADR-0296"]
 ---
 
 # Worktree Artifacts - Overview
@@ -48,6 +48,7 @@ The three-task sequence split this apart:
 | Learning body storage and federation | `crates/orbit-store/src/file/learning_store/api/crud.rs` | [ORB-00201] |
 | CLI/tool remote listing | `crates/orbit-core/src/runtime/orbit_tool_host/` and `crates/orbit-cli/src/command/learning/` | [ORB-00201] |
 | Orphaned-allocation detection and repair | `crates/orbit-core/src/command/id_allocation.rs`, `crates/orbit-cmd/src/doctor.rs` | [ORB-10501] |
+| Pre-removal unique-body guard | `crates/orbit-engine/src/executor/automation/vcs/worktree/cleanup.rs` | [ORB-10535] |
 | Decision log | `docs/design/worktree-artifacts/4_decisions.md` | [ADR-0177], [ADR-0296] |
 
 ## Task References
@@ -56,5 +57,6 @@ The three-task sequence split this apart:
 - [ORB-00200] introduced the global ADR/Learning allocator and `L-NNNN` learning IDs.
 - [ORB-00201] moved ADR/Learning body writes to the current worktree and added read federation.
 - [ORB-10501] added detection and guarded repair for allocations pinned to a worktree that no longer exists.
+- [ORB-10535] blocks automated worktree removal while a learning or ADR body is readable only in the target worktree.
 
 Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

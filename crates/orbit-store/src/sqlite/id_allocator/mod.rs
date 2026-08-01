@@ -8,7 +8,7 @@ use orbit_common::types::OrbitError;
 use orbit_common::utility::fs::atomic_write_text;
 use orbit_common::utility::git::{CurrentBranchStatus, current_branch};
 use rusqlite::{
-    Connection, OptionalExtension, Transaction, TransactionBehavior, params, types::Type,
+    Connection, OpenFlags, OptionalExtension, Transaction, TransactionBehavior, params, types::Type,
 };
 use serde::{Deserialize, Serialize};
 use serde_yaml::{Mapping, Value};
@@ -77,6 +77,58 @@ impl IdAllocationRecord {
     pub fn worktree_is_missing(&self) -> bool {
         !self.worktree_root.exists()
     }
+}
+
+/// Run an operation against a consistent, read-only snapshot of every live ID
+/// allocation while holding the shared allocator lock.
+///
+/// Worktree cleanup uses this to keep the allocation scan and the destructive
+/// Git operation in one critical section. Opening the existing database
+/// read-only is intentional: a safety preflight must not create schemas,
+/// backfill artifacts, or otherwise repair allocator state as a side effect.
+/// A missing database or allocation table means there are no allocations to
+/// protect yet.
+pub fn with_active_id_allocations<T>(
+    semantic_db_path: &Path,
+    lock_path: &Path,
+    operation: impl FnOnce(&[IdAllocationRecord]) -> Result<T, OrbitError>,
+) -> Result<T, OrbitError> {
+    let _lock = crate::file_lock::acquire_exclusive(lock_path, "worktree cleanup preflight")?;
+    if !semantic_db_path.is_file() {
+        return operation(&[]);
+    }
+
+    let conn = Connection::open_with_flags(semantic_db_path, OpenFlags::SQLITE_OPEN_READ_ONLY)
+        .map_err(|error| OrbitError::Store(error.to_string()))?;
+    let has_allocation_table = conn
+        .query_row(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'id_allocations'",
+            [],
+            |_| Ok(()),
+        )
+        .optional()
+        .map_err(|error| OrbitError::Store(error.to_string()))?
+        .is_some();
+    if !has_allocation_table {
+        return operation(&[]);
+    }
+
+    let mut stmt = conn
+        .prepare(
+            "SELECT kind, id, allocated_at, worktree_root, branch, status, body_path
+             FROM id_allocations
+             WHERE status != ?1
+             ORDER BY kind, id",
+        )
+        .map_err(|error| OrbitError::Store(error.to_string()))?;
+    let rows = stmt
+        .query_map(params![STATUS_ABANDONED], allocation_record_from_row)
+        .map_err(|error| OrbitError::Store(error.to_string()))?;
+    let mut records = Vec::new();
+    for row in rows {
+        records.push(row.map_err(|error| OrbitError::Store(error.to_string()))?);
+    }
+    operation(&records)
 }
 
 #[derive(Debug, Clone)]

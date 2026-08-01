@@ -133,6 +133,7 @@ pub use sqlite::connection::{Store, StoreTx};
 pub use sqlite::id_allocator::{
     IdAllocation, IdAllocationKind, IdAllocationRecord, IdAllocator, IdAllocatorConfig,
     LearningIdMigrationReport, LearningIdRename, ensure_id_allocation_schema,
+    with_active_id_allocations,
 };
 pub use sqlite::invocation_store::{
     ActivityInvocationMetrics, AgentInvocationMetrics, InvocationInsertParams, InvocationQuery,
