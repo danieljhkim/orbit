@@ -81,6 +81,7 @@ pub enum OrbitBuiltinAction {
     AdrAdd,
     AdrShow,
     AdrList,
+    AdrRestore,
     AdrUpdate,
     AdrSupersede,
     AutoTaskAdd,

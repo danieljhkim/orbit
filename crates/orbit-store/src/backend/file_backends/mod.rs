@@ -185,6 +185,10 @@ impl AdrStoreBackend for AdrFileStore {
         self.finalize_preallocated_adr(id, params)
     }
 
+    fn restore_allocated_adr(&self, id: &str, params: AdrCreateParams) -> Result<Adr, OrbitError> {
+        self.restore_allocated_adr(id, params)
+    }
+
     fn get_adr(&self, id: &str) -> Result<Option<Adr>, OrbitError> {
         // ADRs use the WorkspaceOnly strategy per `CLAUDE.md`.
         resolve::<Adr, _>(self, id)

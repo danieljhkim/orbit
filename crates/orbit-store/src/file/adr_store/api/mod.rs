@@ -232,6 +232,128 @@ impl AdrFileStore {
         Ok(adr)
     }
 
+    /// [ORB-10538] Materialize an ADR at an exact existing allocation whose
+    /// artifact is no longer readable, without allocating or overwriting.
+    ///
+    /// The allocation snapshot is compared-and-set after the exclusive local
+    /// bundle write. If another process changes that row in the meantime, the
+    /// partial local bundle is removed and the caller gets an actionable
+    /// retry/concurrency error.
+    pub(crate) fn restore_allocated_adr(
+        &self,
+        id: &str,
+        params: AdrCreateParams,
+    ) -> Result<Adr, OrbitError> {
+        validate_adr_id(id)?;
+        if params.title.trim().is_empty() {
+            return Err(OrbitError::InvalidInput(
+                "ADR title must not be empty".to_string(),
+            ));
+        }
+        if params.owner.trim().is_empty() {
+            return Err(OrbitError::InvalidInput(
+                "ADR owner must not be empty".to_string(),
+            ));
+        }
+
+        let _lock = acquire_adr_lock(&self.root, id)?;
+        let allocation = self.id_allocator.adr_allocation(id)?.ok_or_else(|| {
+            OrbitError::InvalidInput(format!(
+                "cannot restore ADR {id}: no live ADR allocation exists"
+            ))
+        })?;
+        self.restore_allocated_adr_from_snapshot(id, params, allocation)
+    }
+
+    fn restore_allocated_adr_from_snapshot(
+        &self,
+        id: &str,
+        params: AdrCreateParams,
+        allocation: IdAllocationRecord,
+    ) -> Result<Adr, OrbitError> {
+        if let Some((state, _)) = self.locate_adr(id)? {
+            return Err(OrbitError::InvalidInput(format!(
+                "cannot restore ADR {id}: a local {} lifecycle artifact already exists",
+                state.dir_name(),
+            )));
+        }
+        if self.read_complete_adr_allocation(&allocation).is_some() {
+            return Err(OrbitError::InvalidInput(format!(
+                "cannot restore ADR {id}: the allocated artifact is still readable at '{}'",
+                allocation.worktree_root.display(),
+            )));
+        }
+
+        let now = Utc::now();
+        let adr = Adr {
+            id: id.to_string(),
+            title: params.title,
+            status: AdrStatus::Proposed,
+            owner: params.owner,
+            created_at: now,
+            accepted_at: None,
+            last_updated: now,
+            related_features: params.related_features,
+            related_tasks: params.related_tasks,
+            tags: normalize_adr_tags(params.tags),
+            paths: normalize_adr_paths(params.paths),
+            supersedes: Vec::new(),
+            superseded_by: None,
+            legacy_ids: Vec::new(),
+            validation_warnings: Vec::new(),
+            legacy_validation: LegacyValidation::None,
+        };
+        let bundle = AdrBundle {
+            doc: AdrFileDocument {
+                schema_version: ADR_SCHEMA_VERSION,
+                adr,
+            },
+            body: params.body,
+        };
+        validate_bundle(&bundle)?;
+
+        let target_dir = adr_dir(&self.root, AdrStateDir::Proposed, id);
+        let Some(parent) = target_dir.parent() else {
+            return Err(OrbitError::Store(format!(
+                "cannot resolve restore parent for ADR {id}"
+            )));
+        };
+        fs::create_dir_all(parent).map_err(|error| OrbitError::Io(error.to_string()))?;
+        match fs::create_dir(&target_dir) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+                return Err(OrbitError::InvalidInput(format!(
+                    "cannot restore ADR {id}: a concurrent local lifecycle artifact appeared"
+                )));
+            }
+            Err(error) => return Err(OrbitError::Io(error.to_string())),
+        }
+        if let Err(error) = write_bundle_at(&target_dir, &bundle) {
+            let _ = fs::remove_dir_all(&target_dir);
+            return Err(error);
+        }
+        let restored = match self
+            .id_allocator
+            .restore_adr_body_path_if_unchanged(&allocation, &super::layout::body_path(&target_dir))
+        {
+            Ok(restored) => restored,
+            Err(error) => {
+                let _ = fs::remove_dir_all(&target_dir);
+                return Err(error);
+            }
+        };
+        if !restored {
+            let _ = fs::remove_dir_all(&target_dir);
+            return Err(OrbitError::InvalidInput(format!(
+                "cannot restore ADR {id}: its allocation changed concurrently; inspect orbit.adr.show before retrying"
+            )));
+        }
+
+        let adr = bundle_to_adr(bundle);
+        self.upsert_index_row(&adr);
+        Ok(adr)
+    }
+
     pub(crate) fn get_adr(&self, id: &str) -> Result<Option<Adr>, OrbitError> {
         validate_adr_id(id)?;
         let Some((_, dir)) = self.locate_adr(id)? else {

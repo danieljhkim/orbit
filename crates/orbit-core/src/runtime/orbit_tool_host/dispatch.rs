@@ -20,6 +20,7 @@ pub(super) fn execute(
         OrbitBuiltinAction::AdrAdd => super::adr_tools::add(runtime, input, agent, model),
         OrbitBuiltinAction::AdrShow => super::adr_tools::show(runtime, input),
         OrbitBuiltinAction::AdrList => super::adr_tools::list(runtime, input),
+        OrbitBuiltinAction::AdrRestore => super::adr_tools::restore(runtime, input, agent, model),
         OrbitBuiltinAction::AdrUpdate => super::adr_tools::update(runtime, input, agent, model),
         OrbitBuiltinAction::AdrSupersede => {
             super::adr_tools::supersede(runtime, input, agent, model)

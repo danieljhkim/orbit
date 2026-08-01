@@ -37,6 +37,9 @@ pub fn register(registry: &mut ToolRegistry) {
     // `orbit.adr.list` stays available on the CLI / dashboard `runtime.run_tool`
     // path for admin workflows.
     registry.register_inactive(adr::list::OrbitAdrListTool);
+    // Exact-id restore is an operator repair surface. Keep it available to
+    // `orbit tool run` without advertising it to ordinary agent sessions.
+    registry.register_inactive(adr::restore::OrbitAdrRestoreTool);
     registry.register_mcp(
         adr::show::OrbitAdrShowTool,
         agent_operator(McpToolPlacement::Owner),

@@ -868,3 +868,124 @@ fn finalize_preallocated_adr_targets_only_the_selected_worktree() {
     assert!(!TwoWorktreeFixture::bundle_dir(&fixture.sibling_root, &adr).exists());
     assert!(fixture.semantic_db.is_file());
 }
+
+// [ORB-10538] Exact-id repair tests. Unlike hub preallocation finalization,
+// restore requires a live allocation and may only replace an unreadable body.
+
+#[test]
+fn restore_allocated_adr_preserves_id_and_reindexes() {
+    let (_dir, store) = store_with_index();
+    let allocation = store.id_allocator.allocate_adr().expect("allocate ADR");
+
+    let restored = store
+        .restore_allocated_adr(&allocation.id, create_params("Restored", "restored body"))
+        .expect("restore allocated ADR");
+
+    assert_eq!(restored.id, allocation.id);
+    assert_eq!(count_index_rows(&store), 1);
+    let allocations = store.id_allocator.adr_allocations().expect("allocations");
+    assert_eq!(allocations.len(), 1, "restore must not allocate another id");
+    assert_eq!(allocations[0].id, restored.id);
+    assert_eq!(
+        allocations[0].body_path.as_deref(),
+        Some(Path::new("proposed/ADR-0001/body.md"))
+    );
+    let AdrArtifactResolution::Local(artifact) = store
+        .resolve_adr_artifact(&restored.id)
+        .expect("resolve restored ADR")
+    else {
+        panic!("restored ADR must resolve locally")
+    };
+    assert_eq!(artifact.body, "restored body");
+}
+
+#[test]
+fn restore_allocated_adr_refuses_missing_allocation_and_lifecycle_collision() {
+    let (_dir, store) = store_with_index();
+    let missing = store
+        .restore_allocated_adr("ADR-0042", create_params("Missing", "body"))
+        .expect_err("missing allocation must fail");
+    assert!(
+        matches!(missing, OrbitError::InvalidInput(_)),
+        "got {missing:?}"
+    );
+    assert!(!store.root.join("proposed/ADR-0042").exists());
+
+    let allocation = store.id_allocator.allocate_adr().expect("allocate ADR");
+    fs::create_dir_all(store.root.join("accepted").join(&allocation.id))
+        .expect("seed unreadable lifecycle collision");
+    let collision = store
+        .restore_allocated_adr(&allocation.id, create_params("Collision", "body"))
+        .expect_err("lifecycle collision must fail");
+    assert!(
+        matches!(collision, OrbitError::InvalidInput(_)),
+        "got {collision:?}"
+    );
+    assert!(!store.root.join("proposed").join(&allocation.id).exists());
+}
+
+#[test]
+fn restore_allocated_adr_refuses_readable_artifact_and_retry_without_overwrite() {
+    let (_dir, store) = store_with_index();
+    let original = store
+        .add_adr(create_params("Original", "keep me"))
+        .expect("seed readable ADR");
+    let original_body = fs::read(
+        store
+            .root
+            .join("proposed")
+            .join(&original.id)
+            .join("body.md"),
+    )
+    .expect("read original body");
+
+    for attempt in ["first", "retry"] {
+        let error = store
+            .restore_allocated_adr(&original.id, create_params(attempt, "overwrite"))
+            .expect_err("readable artifact must never be restored over");
+        assert!(
+            matches!(error, OrbitError::InvalidInput(_)),
+            "got {error:?}"
+        );
+    }
+    assert_eq!(
+        fs::read(
+            store
+                .root
+                .join("proposed")
+                .join(&original.id)
+                .join("body.md")
+        )
+        .expect("reread original body"),
+        original_body
+    );
+}
+
+#[test]
+fn restore_allocated_adr_cleans_up_when_allocation_snapshot_changes() {
+    let (_dir, store) = store_with_index();
+    let allocation = store.id_allocator.allocate_adr().expect("allocate ADR");
+    let snapshot = store
+        .id_allocator
+        .adr_allocation(&allocation.id)
+        .expect("read allocation")
+        .expect("allocation exists");
+    store
+        .id_allocator
+        .record_adr_body_path(&allocation.id, Path::new("moved/ADR-0001/body.md"))
+        .expect("simulate concurrent allocation change");
+
+    let error = store
+        .restore_allocated_adr_from_snapshot(
+            &allocation.id,
+            create_params("Stale snapshot", "body"),
+            snapshot,
+        )
+        .expect_err("stale allocation snapshot must fail");
+    assert!(
+        matches!(error, OrbitError::InvalidInput(_)),
+        "got {error:?}"
+    );
+    assert!(!store.root.join("proposed").join(&allocation.id).exists());
+    assert_eq!(count_index_rows(&store), 0);
+}
