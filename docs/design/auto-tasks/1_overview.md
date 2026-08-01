@@ -1,7 +1,7 @@
 ---
 title: Auto-tasks — Overview
 owner: claude
-last_updated: 2026-07-27
+last_updated: 2026-08-01
 last_validated: 2026-07-27
 status: Accepted
 feature: auto-tasks
@@ -11,7 +11,7 @@ summary: Dynamically-defined recurring task templates minted by one generic sche
 tags: [auto-tasks]
 paths: ["crates/orbit-core/src/auto_tasks/**"]
 related_features: [auto-tasks]
-related_artifacts: [ORB-10149, ORB-10318, ORB-10348, ORB-10439, ORB-10446, ORB-10514, ADR-0218, ADR-0217]
+related_artifacts: [ORB-10149, ORB-10318, ORB-10348, ORB-10439, ORB-10446, ORB-10514, ORB-10549, ADR-0218, ADR-0217]
 ---
 
 # Auto-tasks — Overview
@@ -56,6 +56,14 @@ becomes just the first definition.
   indistinguishable from a fired instance. Unconditional and cursor-inert: it
   ignores schedule, `dedupe`, and `enabled`, and never touches
   `<orbit_dir>/state/auto-tasks.json` (ORB-10439).
+- **Default catalog** — Orbit embeds a small catalog of workspace definitions.
+  Initialization materializes a missing catalog file under `.orbit/auto_tasks/`
+  but every default is `enabled: false`. Seeding neither mints a task nor
+  enables a routine or auto-task; an operator must explicitly enable the
+  definition or use the existing manual-mint surface. Re-initialization
+  preserves an existing definition byte-for-byte, including with workspace
+  reconciliation `--force`; destructive lower-level initialization reseeds
+  only because it recreates the Orbit directory.
 
 ## 3. At a Glance
 
@@ -70,6 +78,7 @@ becomes just the first definition.
 | Manual mint (`mint`, CLI-only) | `crates/orbit-core/src/auto_tasks/crud.rs` | ORB-10439 |
 | Deterministic action | `crates/orbit-core/src/runtime/v2_host/dispatch.rs` | ORB-10149 |
 | Seeded assets | `crates/orbit-core/assets/{activities,jobs,routines}/…` | ORB-10149 |
+| Default auto-task catalog | `crates/orbit-core/assets/auto_tasks/…` | ORB-10549 |
 
 ## Definitions shipped in this repo
 
@@ -80,7 +89,7 @@ becomes just the first definition.
   and resolved against their registries) via `execution_summary`; never
   mutates learnings, ADRs, tasks, friction records, or comments (ORB-10318,
   ORB-10348, [project-learnings §7.6](../project-learnings/2_design.md#76-recurring-deprecation-review-auto-task)).
-- `friction-curation` — daily evidence-first pass that deduplicates open
+- `friction-curation` — disabled-by-default daily evidence-first pass that deduplicates open
   friction records, re-verifies survivors against current behavior, resolves
   records that no longer reproduce, and files non-duplicate fix tasks for
   verified-real issues (ORB-10440).
@@ -98,5 +107,8 @@ becomes just the first definition.
 - ORB-10439 — `orbit auto-task mint <name>`, the on-demand manual mint.
 - ORB-10440 — Daily friction-curation definition.
 - ORB-10514 — Disabled CI-failure remediation definition.
+- ORB-10549 — Embedded the portable, disabled friction-curation default and
+  workspace materialization contract; ADR-0218 should be updated through the
+  Orbit ADR surface after this task lands.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

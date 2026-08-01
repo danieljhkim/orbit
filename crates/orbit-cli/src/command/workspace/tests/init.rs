@@ -70,6 +70,17 @@ policy:
 "#;
     let routine_path = workspace.path().join(".orbit/routines/ship_sweep.yaml");
     std::fs::write(&routine_path, authored_routine).expect("author routine");
+    let auto_task_path = workspace
+        .path()
+        .join(".orbit/auto_tasks/friction-curation.yaml");
+    let seeded_auto_task =
+        std::fs::read_to_string(&auto_task_path).expect("read seeded friction-curation definition");
+    assert!(
+        seeded_auto_task.contains("enabled: false"),
+        "workspace initialization must not enable a default auto-task"
+    );
+    let authored_auto_task = "operator-authored auto-task definition\n";
+    std::fs::write(&auto_task_path, authored_auto_task).expect("author auto-task definition");
 
     let registry_bytes = std::fs::read_to_string(&registry_path).expect("read protected registry");
     let identity_path = workspace.path().join(".orbit/config.yaml");
@@ -109,6 +120,11 @@ policy:
     assert_eq!(
         std::fs::read_to_string(&routine_path).expect("read authored routine"),
         authored_routine
+    );
+    assert_eq!(
+        std::fs::read_to_string(&auto_task_path).expect("read authored auto-task definition"),
+        authored_auto_task,
+        "workspace --force reconciliation must preserve an authored auto-task definition"
     );
 
     init(None, None, true)
