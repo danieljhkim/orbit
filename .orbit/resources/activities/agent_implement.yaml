@@ -27,6 +27,8 @@ spec:
         type: string
       diff:
         type: string
+      skipped_reason:
+        type: string
   instruction: |
     You are implementing an Orbit task from plan to validated code.
 
@@ -43,6 +45,35 @@ spec:
     writes) just trades one refusal for another. State you persist through Orbit
     (via the MCP tool OR the CLI) is durable; the structured result object you
     return at the end is NOT persisted, so never treat it as the system of record.
+
+    Terminal-task precheck — do this before reading anything else. You are not
+    guaranteed to be the only invocation working this task. The executor may
+    run this activity more than once for a single `run_id`: a step-level
+    `retry:` block re-runs it, and a configured `recovery_activity` grants one
+    post-recovery attempt after a failed one. A step classified as failed is
+    not evidence that the task is untouched — an earlier attempt may have
+    completed its durable work and only failed the executor's outcome
+    contract. Separately, another actor may promote the task through the
+    review/approve surface while you are still working.
+
+    The injected `task` object therefore carries `status` and `terminal`. When
+    `task.terminal` is true, the task record already refuses writes: your
+    `execution_summary` cannot be persisted and anything you implement is
+    discarded. Stop immediately — do not resolve context files, investigate,
+    edit, or validate. Return an outcome of `success` with
+    `skipped_reason: "task_terminal"` and a `summary` naming the observed
+    `task.status`.
+
+    Because a task can also go terminal mid-run, re-check it rather than
+    assuming the dispatch-time snapshot holds. Call `orbit.task.show` and
+    re-read `status` at each checkpoint where the remaining work is still
+    expensive — before your first edit, and again before running validation —
+    and apply the same stop rule to the fresh status. Treat a rejected
+    `orbit.task.update` naming a terminal status the same way: stop there
+    rather than retrying the write or working around it, and return the same
+    skipped result. Do not file friction for any of these outcomes — a
+    re-dispatched or overtaken invocation exiting early is the designed
+    behavior, not a defect.
 
     1. Start with the injected `task` object when present. Treat it as the
        authoritative task context for title, description, acceptance criteria,
