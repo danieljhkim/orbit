@@ -10,7 +10,7 @@ summary: Target design for a local Orbit MCP broker with one SSH hub link, hub-o
 tags: [mcp, remote-access, host-registry, bridge, ssh, routing]
 paths: ["crates/orbit-remote/**", "crates/orbit-mcp/**", "crates/orbit-core/**", "crates/orbit-tools/**", "crates/orbit-store/**", "crates/orbit-common/**"]
 related_features: [mcp-bridge, host-registry, mcp-session-context, remote-access, orbit-search, project-learnings]
-related_artifacts: [ORB-00424, ORB-10257, ORB-10262, ORB-10267, ORB-10268, ORB-10269, ORB-10271, ORB-10272, ORB-10276, ORB-10302, ORB-10319, ORB-10330, ORB-10332, ORB-10534, ADR-0181, ADR-0199, ADR-0200, ADR-0201, ADR-0226, ADR-0227, ADR-0228, ADR-0229, ADR-0230, ADR-0231, ADR-0232, ADR-0235, ADR-0240]
+related_artifacts: [ORB-00424, ORB-10257, ORB-10262, ORB-10267, ORB-10268, ORB-10269, ORB-10271, ORB-10272, ORB-10276, ORB-10302, ORB-10319, ORB-10330, ORB-10332, ORB-10534, ORB-10540, ADR-0181, ADR-0199, ADR-0200, ADR-0201, ADR-0226, ADR-0227, ADR-0228, ADR-0229, ADR-0230, ADR-0231, ADR-0232, ADR-0235, ADR-0240]
 ---
 
 # Orbit MCP Bridge — Design
@@ -753,6 +753,18 @@ marker plus `ORBIT_RUN_ID` into a trusted in-band run scope; ship/resume reject
 that scope before host dispatch, preventing a leaf executor from recursively
 creating runs without trusting model-authored input.
 
+[ORB-10540] pins that guard from the environment rather than from a hand-built
+host: the tool-host tests populate the managed-process marker and `ORBIT_RUN_ID`
+and observe ship and resume refused, scrub the same envelope and observe both
+admitted, and show `run.show` / `run.list` still answering inside a managed run.
+The MCP ship tool and `POST /api/workflows/ship` are also compared directly for
+one explicit task-id selection and agree on job id, resolved ship mode, and
+coupled task ids. Two consequences of that comparison are recorded rather than
+changed here: GitHub CI exports no `ORBIT_*`, so only an on-box run exercises
+the env-to-scope path at all; and the dashboard endpoint's duplicate-dispatch
+guard is endpoint-local, so the MCP tool can still dispatch a second run for a
+task already in flight ([ORB-10544]).
+
 The fixed checkoutless `--hub` endpoint cannot yet execute these checkout-backed
 workflow tools, and remote spoke-to-hub execution is therefore deferred. This is
 an explicit current limitation rather than a fallback to process cwd or a local
@@ -992,5 +1004,8 @@ Required validation:
 - [ORB-10534] — registered the operator-only workflow family, added single-host
   operator broker capability selection, reused runtime ship/show/list/resume,
   and added the managed-run self-dispatch guard.
+- [ORB-10540] — validated that guard end to end from the managed-run environment
+  in both directions, and pinned MCP/HTTP ship equivalence for the same explicit
+  task ids.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

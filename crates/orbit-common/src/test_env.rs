@@ -57,20 +57,37 @@ pub struct ScopedEnv {
 /// Clear `names` for the returned guard's lifetime, restoring prior values on
 /// drop. Names that are already unset are restored as unset.
 pub fn unset<'a>(names: impl IntoIterator<Item = &'a str>) -> ScopedEnv {
+    scoped(names.into_iter().map(|name| (name, None)))
+}
+
+/// Apply an explicit environment for the returned guard's lifetime, restoring
+/// prior values on drop. `Some(value)` sets the variable, `None` clears it.
+///
+/// Use this instead of a bespoke set/restore pair whenever a test needs a
+/// variable *present*: it captures the prior value the same way [`unset`] does
+/// and takes the same process-wide lock, so a test that populates
+/// `ORBIT_MANAGED_RUN_CONTEXT` cannot interleave with a sibling asserting the
+/// unmanaged default (ORB-10540). A guard built here and a guard built by
+/// [`unset`] are mutually exclusive; two independent locks would not be.
+pub fn scoped<'a>(vars: impl IntoIterator<Item = (&'a str, Option<&'a str>)>) -> ScopedEnv {
     static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
     let lock = LOCK
         .get_or_init(|| Mutex::new(()))
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
-    let saved = names
-        .into_iter()
-        .map(|name| (name.to_string(), std::env::var(name).ok()))
+    let requested = vars.into_iter().collect::<Vec<_>>();
+    let saved = requested
+        .iter()
+        .map(|(name, _)| ((*name).to_string(), std::env::var(name).ok()))
         .collect::<Vec<_>>();
     // SAFETY: the guard holds the process-wide lock for the whole mutation
     // window, so no other guarded reader/writer runs concurrently.
     unsafe {
-        for (name, _) in &saved {
-            std::env::remove_var(name);
+        for (name, value) in &requested {
+            match value {
+                Some(value) => std::env::set_var(name, value),
+                None => std::env::remove_var(name),
+            }
         }
     }
     ScopedEnv { _lock: lock, saved }
