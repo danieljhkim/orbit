@@ -10,6 +10,7 @@ pub mod search;
 pub mod semantic;
 pub mod state;
 pub mod task;
+pub mod workflow;
 
 use orbit_common::types::{
     McpToolPlacement, McpToolPolicy, OrbitError, ToolParam, normalize_agent_family_for_model,
@@ -151,6 +152,22 @@ pub fn register(registry: &mut ToolRegistry) {
     registry.register_mcp(
         search::OrbitSearchTool,
         agent_operator(McpToolPlacement::Composite),
+    );
+    registry.register_mcp(
+        workflow::OrbitWorkflowShipTool,
+        McpToolPolicy::operator_only(McpToolPlacement::Hub),
+    );
+    registry.register_mcp(
+        workflow::OrbitWorkflowRunShowTool,
+        McpToolPolicy::operator_only(McpToolPlacement::Hub),
+    );
+    registry.register_mcp(
+        workflow::OrbitWorkflowRunListTool,
+        McpToolPolicy::operator_only(McpToolPlacement::Hub),
+    );
+    registry.register_mcp(
+        workflow::OrbitWorkflowRunResumeTool,
+        McpToolPolicy::operator_only(McpToolPlacement::Hub),
     );
     registry.register_inactive(semantic::install::OrbitSemanticInstallTool);
     // ORB-00289: destructive teardown of the local semantic index —

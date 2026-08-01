@@ -292,6 +292,10 @@ async fn d3_context_membership_filters_tool_list_and_call() {
         .await
         .expect("capability denial is a structured tool error");
     assert_eq!(called.is_error, Some(true));
+    let structured = called
+        .structured_content
+        .expect("capability denial has structured content");
+    assert_eq!(structured["code"], "capability_denied");
 
     let mut operator_context = ToolSessionContext::trusted_local(None, None, None);
     operator_context.effective_capabilities = [McpCapability::Operator].into_iter().collect();

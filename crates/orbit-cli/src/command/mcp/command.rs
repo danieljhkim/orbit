@@ -55,8 +55,8 @@ pub struct ServeArgs {
     /// Serve only checkoutless coordination tools as the fixed local hub.
     #[arg(long)]
     pub hub: bool,
-    /// Exact non-hierarchical capability for this hub server session.
-    #[arg(long, value_name = "CAPABILITY", requires = "hub")]
+    /// Exact non-hierarchical capability for this broker or hub session.
+    #[arg(long, value_name = "CAPABILITY")]
     pub capabilities: Option<McpCapability>,
 }
 

@@ -1,7 +1,7 @@
 ---
 title: Orbit MCP Bridge — Design
 owner: codex
-last_updated: 2026-07-20
+last_updated: 2026-08-01
 status: Accepted
 feature: mcp-bridge
 doc_role: design
@@ -10,7 +10,7 @@ summary: Target design for a local Orbit MCP broker with one SSH hub link, hub-o
 tags: [mcp, remote-access, host-registry, bridge, ssh, routing]
 paths: ["crates/orbit-remote/**", "crates/orbit-mcp/**", "crates/orbit-core/**", "crates/orbit-tools/**", "crates/orbit-store/**", "crates/orbit-common/**"]
 related_features: [mcp-bridge, host-registry, mcp-session-context, remote-access, orbit-search, project-learnings]
-related_artifacts: [ORB-00424, ORB-10257, ORB-10262, ORB-10267, ORB-10268, ORB-10269, ORB-10271, ORB-10272, ORB-10276, ORB-10302, ORB-10319, ORB-10330, ORB-10332, ADR-0181, ADR-0199, ADR-0200, ADR-0201, ADR-0226, ADR-0227, ADR-0228, ADR-0229, ADR-0230, ADR-0231, ADR-0232, ADR-0235, ADR-0240]
+related_artifacts: [ORB-00424, ORB-10257, ORB-10262, ORB-10267, ORB-10268, ORB-10269, ORB-10271, ORB-10272, ORB-10276, ORB-10302, ORB-10319, ORB-10330, ORB-10332, ORB-10534, ADR-0181, ADR-0199, ADR-0200, ADR-0201, ADR-0226, ADR-0227, ADR-0228, ADR-0229, ADR-0230, ADR-0231, ADR-0232, ADR-0235, ADR-0240]
 ---
 
 # Orbit MCP Bridge — Design
@@ -741,6 +741,24 @@ pushes or relays execution.
 V1 is submit + observe. Cancellation and automatic backlog discovery are excluded.
 Generic pipeline invoke/wait tools are not compatibility targets for this surface.
 
+[ORB-10534] implements the single-host slice as four hub-class, operator-only
+tools: `orbit.workflow.ship`, `orbit.workflow.run.show`,
+`orbit.workflow.run.list`, and `orbit.workflow.run.resume`. A deliberate local
+operator obtains that surface with `orbit mcp serve --capabilities operator`;
+ordinary plugin/local registrations remain fixed to `agent`. The broker resolves
+the exact selected checkout and short-circuits workflow execution through its
+runtime, so ship and resume reuse the same durable submission services as the
+dashboard HTTP endpoints. The runtime converts the authenticated managed-process
+marker plus `ORBIT_RUN_ID` into a trusted in-band run scope; ship/resume reject
+that scope before host dispatch, preventing a leaf executor from recursively
+creating runs without trusting model-authored input.
+
+The fixed checkoutless `--hub` endpoint cannot yet execute these checkout-backed
+workflow tools, and remote spoke-to-hub execution is therefore deferred. This is
+an explicit current limitation rather than a fallback to process cwd or a local
+spoke checkout; the single-host operator broker is the supported MCP execution
+path until hub-side run admission owns a checkout-independent execution service.
+
 ## 9. Audit, Identity, and Uncertain Outcomes
 
 Hub-class calls record one canonical action audit on the hub with:
@@ -932,6 +950,10 @@ Required validation:
   binding before `runner` is a security boundary.
 - **Two client registrations remain.** Orbit and Bridge own different domains;
   cosmetic aggregation is not worth recreating duplicate Orbit contracts.
+- **Operator workflow execution is single-host today.** The deliberate local
+  operator broker can submit and observe runs, while the fixed checkoutless hub
+  endpoint and spoke routing do not yet own the runtime service required to
+  execute them. Those paths fail rather than selecting a checkout implicitly.
 
 ## Task References
 
@@ -967,5 +989,8 @@ Required validation:
 - [ORB-10332] — removed the `orbit.host.list` MCP discovery tool as unused; the
   `orbit host list` CLI command and the `orbit.workspace.list` / `orbit.crew.list`
   MCP discovery tools remain.
+- [ORB-10534] — registered the operator-only workflow family, added single-host
+  operator broker capability selection, reused runtime ship/show/list/resume,
+  and added the managed-run self-dispatch guard.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

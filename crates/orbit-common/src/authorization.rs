@@ -129,6 +129,30 @@ impl GovernedOperation {
 ///    process state.
 pub const GOVERNED_OPERATIONS: &[GovernedOperation] = &[
     GovernedOperation {
+        id: "orbit.workflow.ship",
+        surface: OperationSurface::Tool,
+        allowed: &[McpCapability::Operator],
+        rationale: "dispatching a ship workflow creates managed runs and worktrees",
+    },
+    GovernedOperation {
+        id: "orbit.workflow.run.show",
+        surface: OperationSurface::Tool,
+        allowed: &[McpCapability::Operator],
+        rationale: "workflow run observation is an operator surface",
+    },
+    GovernedOperation {
+        id: "orbit.workflow.run.list",
+        surface: OperationSurface::Tool,
+        allowed: &[McpCapability::Operator],
+        rationale: "workflow run observation is an operator surface",
+    },
+    GovernedOperation {
+        id: "orbit.workflow.run.resume",
+        surface: OperationSurface::Tool,
+        allowed: &[McpCapability::Operator],
+        rationale: "resuming a workflow creates another managed run",
+    },
+    GovernedOperation {
         id: "orbit.task.delete",
         surface: OperationSurface::Tool,
         allowed: &[McpCapability::Operator],

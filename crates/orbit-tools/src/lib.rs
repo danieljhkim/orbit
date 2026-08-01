@@ -126,6 +126,10 @@ pub enum OrbitBuiltinAction {
     TaskShow,
     TaskStart,
     TaskUpdate,
+    WorkflowRunList,
+    WorkflowRunResume,
+    WorkflowRunShow,
+    WorkflowShip,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]

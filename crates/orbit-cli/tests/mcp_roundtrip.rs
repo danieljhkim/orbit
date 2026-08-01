@@ -135,8 +135,18 @@ impl McpWorkspace {
     /// this workspace via `_meta.orbit.workspace`), and return the connected
     /// client.
     fn serve(&self) -> McpClient {
+        self.serve_with_args(&[])
+    }
+
+    fn serve_operator(&self) -> McpClient {
+        self.serve_with_args(&["--capabilities", "operator"])
+    }
+
+    fn serve_with_args(&self, extra_args: &[&str]) -> McpClient {
+        let mut args = vec!["mcp", "serve"];
+        args.extend_from_slice(extra_args);
         let child = Self::orbit_command(&self.work, &self.home)
-            .args(["mcp", "serve"])
+            .args(args)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -330,6 +340,10 @@ fn mcp_serve_tools_list_matches_production_snapshot() {
         "orbit_task_delete",
         "orbit_task_lint",
         "orbit_learning_prune",
+        "orbit_workflow_ship",
+        "orbit_workflow_run_show",
+        "orbit_workflow_run_list",
+        "orbit_workflow_run_resume",
     ] {
         assert!(!names.contains(&hidden), "{hidden} leaked into: {names:?}");
     }
@@ -366,6 +380,31 @@ fn mcp_serve_tools_list_matches_production_snapshot() {
          with `ORBIT_MCP_UPDATE_SNAPSHOT=1 cargo test -p orbit-cli --test mcp_roundtrip` and \
          call the release breaking."
     );
+}
+
+#[test]
+fn operator_broker_advertises_and_calls_the_workflow_family() {
+    let workspace = McpWorkspace::init();
+    let mut client = workspace.serve_operator();
+    let response = client.request("tools/list", Value::Null);
+    let names = response["result"]["tools"]
+        .as_array()
+        .expect("tools array")
+        .iter()
+        .filter_map(|tool| tool["name"].as_str())
+        .collect::<BTreeSet<_>>();
+
+    for expected in [
+        "orbit_workflow_ship",
+        "orbit_workflow_run_show",
+        "orbit_workflow_run_list",
+        "orbit_workflow_run_resume",
+    ] {
+        assert!(names.contains(expected), "missing {expected}: {names:?}");
+    }
+
+    let listed = client.call_tool_ok("orbit_workflow_run_list", json!({}));
+    assert_eq!(listed["items"], json!([]));
 }
 
 #[test]
@@ -573,7 +612,7 @@ fn mcp_serve_round_trips_records_against_a_temp_workspace() {
         "orbit_friction_update",
         json!({ "id": friction_id, "status": "triaged", "model": "codex" }),
     );
-    assert_eq!(denied["code"], "invalid_input");
+    assert_eq!(denied["code"], "capability_denied");
     assert!(
         denied["message"]
             .as_str()
@@ -711,9 +750,18 @@ fn mcp_registered_calls_are_audited_but_unknown_names_are_not_dispatched() {
     assert_eq!(error["code"], "invalid_input");
     let removed = client.call_tool_err("orbit_removed_tool", json!({ "model": "codex" }));
     assert_eq!(removed["code"], "tool_not_found");
+    let workflow_denied = client.call_tool_err(
+        "orbit_workflow_ship",
+        json!({ "task_ids": ["ORB-00001"], "model": "codex" }),
+    );
+    assert_eq!(workflow_denied["code"], "capability_denied");
     drop(client);
 
-    for (tool_name, status) in [("orbit.search", "success"), ("orbit.task.add", "failure")] {
+    for (tool_name, status) in [
+        ("orbit.search", "success"),
+        ("orbit.task.add", "failure"),
+        ("orbit.workflow.ship", "denied"),
+    ] {
         let output = McpWorkspace::orbit_command(&workspace.work, &workspace.home)
             .args(["audit", "list", "--tool", tool_name, "--json"])
             .output()
