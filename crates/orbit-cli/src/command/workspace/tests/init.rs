@@ -16,7 +16,7 @@ use super::super::show::format_workspace_show;
 use super::super::support::orbit_gitignore_block;
 
 #[test]
-fn workspace_reinit_merges_explicit_registration_updates_without_resetting_authored_state() {
+fn workspace_reinit_requires_force_and_force_reconciles_matching_registration() {
     let workspace = tempdir().expect("workspace tempdir");
     let home = tempdir().expect("home tempdir");
     let global = home.path().join(".orbit");
@@ -31,7 +31,7 @@ fn workspace_reinit_merges_explicit_registration_updates_without_resetting_autho
 
     let _env = EnvGuard::acquire().home(home.path()).cwd(workspace.path());
 
-    let init = |base_branch: Option<&str>, ship_mode: Option<&str>| WorkspaceInitArgs {
+    let init = |base_branch: Option<&str>, ship_mode: Option<&str>, force| WorkspaceInitArgs {
         name: Some("reinit-merge".to_string()),
         base_branch: base_branch.map(str::to_string),
         ship_mode: ship_mode.map(str::to_string),
@@ -41,9 +41,10 @@ fn workspace_reinit_merges_explicit_registration_updates_without_resetting_autho
         mcp: false,
         inject_agent_rules: false,
         refresh_defaults: false,
+        force,
     };
 
-    init(Some("agent-main"), None)
+    init(Some("agent-main"), None, false)
         .execute_without_runtime(None)
         .expect("initial workspace init");
 
@@ -70,7 +71,24 @@ policy:
     let routine_path = workspace.path().join(".orbit/routines/ship_sweep.yaml");
     std::fs::write(&routine_path, authored_routine).expect("author routine");
 
-    init(None, Some("pr"))
+    let registry_bytes = std::fs::read_to_string(&registry_path).expect("read protected registry");
+    let identity_path = workspace.path().join(".orbit/config.yaml");
+    let identity_bytes = std::fs::read_to_string(&identity_path).expect("read protected identity");
+    let error = init(None, Some("pr"), false)
+        .execute_without_runtime(None)
+        .expect_err("existing checkout must require force")
+        .to_string();
+    assert!(error.contains("already exists"), "unexpected: {error}");
+    assert_eq!(
+        std::fs::read_to_string(&registry_path).expect("read registry"),
+        registry_bytes
+    );
+    assert_eq!(
+        std::fs::read_to_string(&identity_path).expect("read identity"),
+        identity_bytes
+    );
+
+    init(None, Some("pr"), true)
         .execute_without_runtime(None)
         .expect("re-init with explicit PR mode");
     let after_ship_mode = workspace_registry::load_registry_from(&registry_path)
@@ -93,7 +111,7 @@ policy:
         authored_routine
     );
 
-    init(None, None)
+    init(None, None, true)
         .execute_without_runtime(None)
         .expect("re-init with omitted registration options");
     let after_omitted = workspace_registry::load_registry_from(&registry_path)
@@ -111,7 +129,7 @@ policy:
         authored_routine
     );
 
-    init(Some("release"), None)
+    init(Some("release"), None, true)
         .execute_without_runtime(None)
         .expect("re-init with explicit base branch");
     let after_base_branch = workspace_registry::load_registry_from(&registry_path)
@@ -124,7 +142,7 @@ policy:
     assert_eq!(after_base_branch.ship_mode.as_deref(), Some("pr"));
 
     let before_invalid = after_base_branch.clone();
-    let error = init(None, Some("invalid"))
+    let error = init(None, Some("invalid"), true)
         .execute_without_runtime(None)
         .expect_err("invalid ship mode must fail closed");
     assert!(error.to_string().contains("unknown ship mode 'invalid'"));
@@ -135,6 +153,102 @@ policy:
         .next()
         .expect("registered workspace");
     assert_eq!(after_invalid, before_invalid);
+}
+
+#[test]
+fn workspace_init_rejects_existing_durable_id_without_force() {
+    let first = tempdir().expect("first workspace tempdir");
+    let second = tempdir().expect("second workspace tempdir");
+    let home = tempdir().expect("home tempdir");
+    let global = home.path().join(".orbit");
+    std::fs::create_dir_all(&global).expect("create global orbit");
+    std::fs::write(
+        global.join("host.toml"),
+        "schema_version = 1\nmachine_id = \"hm_id_collision\"\nhost_id = \"id-collision\"\nmode = \"standalone\"\n",
+    )
+    .expect("write host identity");
+    let _env = EnvGuard::acquire().home(home.path()).cwd(first.path());
+    let args = |force| WorkspaceInitArgs {
+        name: Some("shared-id".to_string()),
+        base_branch: Some("agent-main".to_string()),
+        ship_mode: None,
+        role: None,
+        owner: None,
+        task_id_start: None,
+        mcp: false,
+        inject_agent_rules: false,
+        refresh_defaults: false,
+        force,
+    };
+    args(false)
+        .execute_without_runtime(None)
+        .expect("initial workspace init");
+    let registry_path = global.join("workspaces.json");
+    let registry_bytes = std::fs::read_to_string(&registry_path).expect("read protected registry");
+
+    std::env::set_current_dir(second.path()).expect("switch to second workspace");
+    let error = args(false)
+        .execute_without_runtime(None)
+        .expect_err("existing durable ID must require force")
+        .to_string();
+    assert!(error.contains("already exists"), "unexpected: {error}");
+    assert_eq!(
+        std::fs::read_to_string(&registry_path).expect("read registry"),
+        registry_bytes
+    );
+    assert!(!second.path().join(".orbit").exists());
+}
+
+#[test]
+fn forced_workspace_reconciliation_preserves_registry_and_identity_on_validation_failure() {
+    let workspace = tempdir().expect("workspace tempdir");
+    let home = tempdir().expect("home tempdir");
+    let global = home.path().join(".orbit");
+    std::fs::create_dir_all(&global).expect("create global orbit");
+    std::fs::write(
+        global.join("host.toml"),
+        "schema_version = 1\nmachine_id = \"hm_force_failure\"\nhost_id = \"force-failure\"\nmode = \"standalone\"\n",
+    )
+    .expect("write host identity");
+    let _env = EnvGuard::acquire().home(home.path()).cwd(workspace.path());
+    let args = |force| WorkspaceInitArgs {
+        name: Some("force-failure".to_string()),
+        base_branch: Some("agent-main".to_string()),
+        ship_mode: Some("pr".to_string()),
+        role: None,
+        owner: None,
+        task_id_start: None,
+        mcp: false,
+        inject_agent_rules: false,
+        refresh_defaults: false,
+        force,
+    };
+    args(false)
+        .execute_without_runtime(None)
+        .expect("initial workspace init");
+    let registry_path = global.join("workspaces.json");
+    let identity_path = workspace.path().join(".orbit/config.yaml");
+    std::fs::write(
+        &identity_path,
+        "schema_version: 1\nworkspace_id: ws_other\n",
+    )
+    .expect("corrupt identity for validation test");
+    let registry_bytes = std::fs::read_to_string(&registry_path).expect("read protected registry");
+    let identity_bytes = std::fs::read_to_string(&identity_path).expect("read protected identity");
+
+    let error = args(true)
+        .execute_without_runtime(None)
+        .expect_err("mismatched identity must reject forced reconciliation")
+        .to_string();
+    assert!(error.contains("checkout identity"), "unexpected: {error}");
+    assert_eq!(
+        std::fs::read_to_string(&registry_path).expect("read registry"),
+        registry_bytes
+    );
+    assert_eq!(
+        std::fs::read_to_string(&identity_path).expect("read identity"),
+        identity_bytes
+    );
 }
 
 #[test]
@@ -163,6 +277,7 @@ fn multi_host_workspace_init_persists_an_explicit_local_owner() {
             mcp: false,
             inject_agent_rules: false,
             refresh_defaults: false,
+            force: false,
         }
         .execute_without_runtime(None)
         .expect("explicit multi-host workspace init");
@@ -203,6 +318,7 @@ fn spoke_workspace_init_can_atomically_declare_a_remote_owner_replica() {
         mcp: false,
         inject_agent_rules: false,
         refresh_defaults: false,
+        force: false,
     }
     .execute_without_runtime(None)
     .expect("atomic replica workspace init");
@@ -253,6 +369,7 @@ fn invalid_replica_init_fails_before_workspace_artifacts_or_registry_mutation() 
             mcp: false,
             inject_agent_rules: false,
             refresh_defaults: false,
+            force: false,
         }
         .execute_without_runtime(None)
         .expect_err("invalid replica declaration must fail before bootstrap")
@@ -317,7 +434,7 @@ fn workspace_init_seeds_disabled_routines_and_reinit_preserves_authored_files() 
 
     let _env = EnvGuard::acquire().home(home.path()).cwd(workspace.path());
 
-    let init = || WorkspaceInitArgs {
+    let init = |force| WorkspaceInitArgs {
         name: Some("routine-seed-test".to_string()),
         base_branch: Some("agent-main".to_string()),
         ship_mode: Some("pr".to_string()),
@@ -327,8 +444,9 @@ fn workspace_init_seeds_disabled_routines_and_reinit_preserves_authored_files() 
         mcp: false,
         inject_agent_rules: false,
         refresh_defaults: false,
+        force,
     };
-    init()
+    init(false)
         .execute_without_runtime(None)
         .expect("first workspace init");
 
@@ -376,7 +494,7 @@ policy:
     std::fs::remove_file(routines_dir.join("task_triage.yaml"))
         .expect("remove one default routine");
 
-    init()
+    init(true)
         .execute_without_runtime(None)
         .expect("second workspace init");
 
@@ -422,6 +540,7 @@ fn workspace_init_seeds_auto_detected_mcp_configs() {
         mcp: true,
         inject_agent_rules: false,
         refresh_defaults: false,
+        force: false,
     }
     .execute_without_runtime(None);
 
@@ -471,6 +590,7 @@ fn workspace_init_skips_mcp_by_default() {
         mcp: false,
         inject_agent_rules: false,
         refresh_defaults: false,
+        force: false,
     }
     .execute_without_runtime(None);
 
@@ -512,6 +632,7 @@ fn workspace_init_under_home_with_global_orbit_creates_repo_orbit() {
         mcp: false,
         inject_agent_rules: false,
         refresh_defaults: false,
+        force: false,
     }
     .execute_without_runtime(None);
 
@@ -546,6 +667,7 @@ fn workspace_init_appends_orbit_to_existing_gitignore() {
         mcp: false,
         inject_agent_rules: false,
         refresh_defaults: false,
+        force: false,
     }
     .execute_without_runtime(None);
 
@@ -569,7 +691,7 @@ fn workspace_init_replaces_legacy_bare_orbit_gitignore_line_with_managed_block()
 
     let _env = EnvGuard::acquire().home(home.path()).cwd(workspace.path());
 
-    let init = || WorkspaceInitArgs {
+    let init = |force| WorkspaceInitArgs {
         name: None,
         base_branch: Some("main".to_string()),
         ship_mode: None,
@@ -579,9 +701,10 @@ fn workspace_init_replaces_legacy_bare_orbit_gitignore_line_with_managed_block()
         mcp: false,
         inject_agent_rules: false,
         refresh_defaults: false,
+        force,
     };
 
-    init()
+    init(false)
         .execute_without_runtime(None)
         .expect("workspace init");
     let expected = format!("target/\n{}", orbit_gitignore_block());
@@ -592,7 +715,7 @@ fn workspace_init_replaces_legacy_bare_orbit_gitignore_line_with_managed_block()
     );
 
     // Re-init is idempotent: the block is not duplicated or reordered.
-    init()
+    init(true)
         .execute_without_runtime(None)
         .expect("workspace re-init");
     assert_eq!(
@@ -622,6 +745,7 @@ fn workspace_init_from_git_subdir_gitignores_repo_orbit_dir() {
         mcp: false,
         inject_agent_rules: false,
         refresh_defaults: false,
+        force: false,
     }
     .execute_without_runtime(None);
 
@@ -652,6 +776,7 @@ fn workspace_init_with_root_override_uses_custom_registry() {
         mcp: false,
         inject_agent_rules: false,
         refresh_defaults: false,
+        force: false,
     }
     .execute_without_runtime(Some(custom_root.as_path()));
 
@@ -702,6 +827,7 @@ fn workspace_init_does_not_create_orbitignore() {
         mcp: false,
         inject_agent_rules: false,
         refresh_defaults: false,
+        force: false,
     }
     .execute_without_runtime(None);
 
@@ -734,6 +860,7 @@ fn workspace_init_preserves_existing_orbitignore() {
         mcp: false,
         inject_agent_rules: false,
         refresh_defaults: false,
+        force: false,
     }
     .execute_without_runtime(None);
 
@@ -767,6 +894,7 @@ fn workspace_init_with_root_override_does_not_modify_repo_gitignore() {
         mcp: false,
         inject_agent_rules: false,
         refresh_defaults: false,
+        force: false,
     }
     .execute_without_runtime(Some(custom_root.as_path()));
 
@@ -824,6 +952,7 @@ fn nameless_tmp_workspace_registers_only_in_isolated_registry() {
             mcp: false,
             inject_agent_rules: false,
             refresh_defaults: false,
+            force: false,
         }
         .execute_without_runtime(None)
         .expect("nameless workspace init");

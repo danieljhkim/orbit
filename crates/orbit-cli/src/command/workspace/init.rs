@@ -12,7 +12,7 @@ use orbit_core::command::init::{InitOptions, init_workspace_at_root};
 use orbit_remote::runtime::RemoteRuntimeFactory;
 use orbit_remote::workspace_registry;
 use orbit_remote::{HostIdentityState, HostMode, inspect_host_identity};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use super::role::CliCheckoutRole;
 use super::support::{detect_git_remote, dir_name_or_fallback, ensure_orbit_gitignore_entry};
@@ -54,6 +54,10 @@ pub struct WorkspaceInitArgs {
     /// No-op (kept for backwards compatibility — defaults are always refreshed on init)
     #[arg(long, hide = true)]
     pub refresh_defaults: bool,
+    /// Reconcile an already registered workspace after validating its complete
+    /// logical, checkout, and durable-identity binding.
+    #[arg(long)]
+    pub force: bool,
 }
 
 impl WorkspaceInitArgs {
@@ -176,6 +180,48 @@ impl WorkspaceInitArgs {
             _ => {}
         }
 
+        let name = self.name.unwrap_or_else(|| dir_name_or_fallback(cwd));
+        let id = canonical_workspace_id(&name);
+        let git_remote = detect_git_remote(cwd);
+        let mut registry = workspace_registry::load_registry_from(registry_path)?;
+        let existing_workspace = registry
+            .workspaces
+            .iter()
+            .find(|workspace| workspace.id == id);
+        let existing_checkout = registry
+            .checkouts
+            .iter()
+            .find(|checkout| checkout.repo_root == cwd || checkout.orbit_dir == orbit_dir);
+        let reconciling_existing = existing_workspace.is_some() || existing_checkout.is_some();
+
+        if reconciling_existing && !self.force {
+            return Err(OrbitError::WorkspaceError(format!(
+                "workspace registration already exists for '{}' or '{}'; rerun with --force to reconcile it",
+                id,
+                cwd.display()
+            )));
+        }
+
+        if reconciling_existing {
+            validate_existing_registration(
+                existing_workspace,
+                existing_checkout,
+                cwd,
+                orbit_dir,
+                &id,
+            )?;
+            validate_workspace_identity(orbit_dir, &id)?;
+        } else if let Some(identity) = read_workspace_identity(orbit_dir)?
+            && identity.workspace_id != id
+        {
+            return Err(OrbitError::WorkspaceError(format!(
+                "workspace identity '{}' at '{}' conflicts with requested workspace '{}'; refusing to overwrite it",
+                identity.workspace_id,
+                orbit_dir.join("config.yaml").display(),
+                id
+            )));
+        }
+
         init_workspace_at_root(
             orbit_dir,
             InitOptions {
@@ -186,13 +232,6 @@ impl WorkspaceInitArgs {
             },
         )?;
         ensure_orbit_gitignore_entry(cwd, orbit_dir)?;
-
-        let name = self.name.unwrap_or_else(|| dir_name_or_fallback(cwd));
-
-        let id = canonical_workspace_id(&name);
-        let git_remote = detect_git_remote(cwd);
-
-        let mut registry = workspace_registry::load_registry_from(registry_path)?;
         let mut checkout_added = false;
         if let Some(existing) = registry.workspaces.iter_mut().find(|w| w.id == id) {
             if let Some(ship_mode) = self.ship_mode {
@@ -252,7 +291,9 @@ impl WorkspaceInitArgs {
             )?;
         }
         workspace_registry::save_registry_to(&registry, registry_path)?;
-        write_workspace_identity(orbit_dir, &id)?;
+        if !reconciling_existing {
+            write_workspace_identity(orbit_dir, &id)?;
+        }
         orbit_core::runtime::HubCoordinationExecutor::register_workspace(global_root, &id, &name)?;
 
         Ok(WorkspaceInitResult {
@@ -292,6 +333,75 @@ pub(super) fn canonical_workspace_id(name: &str) -> String {
 struct WorkspaceIdentityDocument<'a> {
     schema_version: u32,
     workspace_id: &'a str,
+}
+
+#[derive(Deserialize)]
+struct StoredWorkspaceIdentity {
+    schema_version: u32,
+    workspace_id: String,
+}
+
+fn validate_existing_registration(
+    workspace: Option<&Workspace>,
+    checkout: Option<&WorkspaceCheckout>,
+    cwd: &Path,
+    orbit_dir: &Path,
+    workspace_id: &str,
+) -> Result<(), OrbitError> {
+    let workspace = workspace.ok_or_else(|| {
+        OrbitError::WorkspaceError(format!(
+            "cannot reconcile workspace '{workspace_id}': the target checkout is bound to a different durable workspace"
+        ))
+    })?;
+    let checkout = checkout.ok_or_else(|| {
+        OrbitError::WorkspaceError(format!(
+            "cannot reconcile workspace '{workspace_id}': its durable record has no target checkout binding"
+        ))
+    })?;
+    if checkout.workspace_id != workspace.id
+        || checkout.repo_root != cwd
+        || checkout.orbit_dir != orbit_dir
+    {
+        return Err(OrbitError::WorkspaceError(format!(
+            "cannot reconcile workspace '{workspace_id}': logical record and checkout binding do not match the requested checkout"
+        )));
+    }
+    Ok(())
+}
+
+fn read_workspace_identity(
+    orbit_dir: &Path,
+) -> Result<Option<StoredWorkspaceIdentity>, OrbitError> {
+    let path = orbit_dir.join("config.yaml");
+    if !path.exists() {
+        return Ok(None);
+    }
+    let content =
+        std::fs::read_to_string(&path).map_err(|error| OrbitError::Io(error.to_string()))?;
+    let identity = serde_yaml::from_str(&content).map_err(|error| {
+        OrbitError::WorkspaceError(format!(
+            "invalid workspace identity '{}': {error}",
+            path.display()
+        ))
+    })?;
+    Ok(Some(identity))
+}
+
+fn validate_workspace_identity(orbit_dir: &Path, workspace_id: &str) -> Result<(), OrbitError> {
+    let path = orbit_dir.join("config.yaml");
+    let identity = read_workspace_identity(orbit_dir)?.ok_or_else(|| {
+        OrbitError::WorkspaceError(format!(
+            "cannot reconcile workspace '{workspace_id}': checkout identity '{}' is missing",
+            path.display()
+        ))
+    })?;
+    if identity.schema_version != 1 || identity.workspace_id != workspace_id {
+        return Err(OrbitError::WorkspaceError(format!(
+            "cannot reconcile workspace '{workspace_id}': checkout identity '{}' does not match",
+            path.display()
+        )));
+    }
+    Ok(())
 }
 
 fn write_workspace_identity(orbit_dir: &Path, workspace_id: &str) -> Result<(), OrbitError> {
