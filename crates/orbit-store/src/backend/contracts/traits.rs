@@ -70,6 +70,10 @@ pub trait AdrStoreBackend: Send + Sync {
         id: &str,
         params: AdrCreateParams,
     ) -> Result<Adr, OrbitError>;
+
+    /// [ORB-10538] Restore an ADR at an existing allocation whose local and
+    /// canonical artifacts are unreadable. Never allocates or overwrites.
+    fn restore_allocated_adr(&self, id: &str, params: AdrCreateParams) -> Result<Adr, OrbitError>;
     fn get_adr(&self, id: &str) -> Result<Option<Adr>, OrbitError>;
     fn resolve_adr_artifact(&self, id: &str) -> Result<AdrArtifactResolution, OrbitError>;
     fn list_adrs(&self) -> Result<Vec<Adr>, OrbitError>;

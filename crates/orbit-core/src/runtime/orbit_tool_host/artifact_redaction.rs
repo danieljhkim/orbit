@@ -173,7 +173,9 @@ const TASK_ADD_NESTED: &[NestedArrayPolicy] = &[
 
 fn policy_for_action(action: OrbitBuiltinAction) -> Option<ActionPolicy> {
     match action {
-        OrbitBuiltinAction::AdrAdd | OrbitBuiltinAction::AdrUpdate => Some(ActionPolicy {
+        OrbitBuiltinAction::AdrAdd
+        | OrbitBuiltinAction::AdrRestore
+        | OrbitBuiltinAction::AdrUpdate => Some(ActionPolicy {
             free_text_fields: &["title", "body"],
             free_text_arrays: &[],
             path_fields: &[],
@@ -247,6 +249,7 @@ fn is_covered_mutating_action(action: OrbitBuiltinAction) -> bool {
     matches!(
         action,
         OrbitBuiltinAction::AdrAdd
+            | OrbitBuiltinAction::AdrRestore
             | OrbitBuiltinAction::AdrUpdate
             | OrbitBuiltinAction::AdrSupersede
             | OrbitBuiltinAction::LearningAdd
@@ -481,6 +484,7 @@ fn artifact_target(
 ) -> Result<ArtifactTarget<'_>, OrbitError> {
     match action {
         OrbitBuiltinAction::AdrAdd
+        | OrbitBuiltinAction::AdrRestore
         | OrbitBuiltinAction::AdrUpdate
         | OrbitBuiltinAction::AdrSupersede => Ok(ArtifactTarget {
             artifact_type: "adr",
@@ -540,6 +544,7 @@ fn response_string<'a>(response: &'a Value, field: &str) -> Result<&'a str, Orbi
 fn tool_name(action: OrbitBuiltinAction) -> &'static str {
     match action {
         OrbitBuiltinAction::AdrAdd => "orbit.adr.add",
+        OrbitBuiltinAction::AdrRestore => "orbit.adr.restore",
         OrbitBuiltinAction::AdrUpdate => "orbit.adr.update",
         OrbitBuiltinAction::AdrSupersede => "orbit.adr.supersede",
         OrbitBuiltinAction::LearningAdd => "orbit.learning.add",

@@ -24,30 +24,44 @@ pub(super) fn add(
     agent: Option<String>,
     model: Option<String>,
 ) -> Result<Value, OrbitError> {
-    let title = required_string(&input, &["title"], "title")?;
-    let owner = match optional_string(&input, "owner")? {
-        Some(value) => value,
-        None => actor_label(runtime, agent.as_deref(), model.as_deref()),
-    };
-    let body = required_string(&input, &["body"], "body")?;
-    let related_features =
-        optional_string_list_alias(&input, &["related_features", "features"])?.unwrap_or_default();
-    let related_tasks =
-        optional_string_list_alias(&input, &["related_tasks", "tasks"])?.unwrap_or_default();
-    let tags = optional_string_list_alias(&input, &["tags"])?.unwrap_or_default();
-    let paths = optional_string_list_alias(&input, &["paths"])?.unwrap_or_default();
-
-    let adr = runtime.stores().adrs().add_adr(AdrCreateParams {
-        title,
-        owner,
-        related_features,
-        related_tasks,
-        tags,
-        paths,
-        body,
-    })?;
+    let params = create_params(runtime, &input, agent.as_deref(), model.as_deref())?;
+    let adr = runtime.stores().adrs().add_adr(params)?;
     runtime.record_id_allocation_audit("adr", &adr.id)?;
     Ok(adr_to_json(&adr))
+}
+
+pub(super) fn restore(
+    runtime: &OrbitRuntime,
+    input: Value,
+    agent: Option<String>,
+    model: Option<String>,
+) -> Result<Value, OrbitError> {
+    let id = required_string(&input, &["id"], "id")?;
+    let params = create_params(runtime, &input, agent.as_deref(), model.as_deref())?;
+    let adr = runtime.stores().adrs().restore_allocated_adr(&id, params)?;
+    Ok(adr_to_json(&adr))
+}
+
+fn create_params(
+    runtime: &OrbitRuntime,
+    input: &Value,
+    agent: Option<&str>,
+    model: Option<&str>,
+) -> Result<AdrCreateParams, OrbitError> {
+    Ok(AdrCreateParams {
+        title: required_string(input, &["title"], "title")?,
+        owner: match optional_string(input, "owner")? {
+            Some(value) => value,
+            None => actor_label(runtime, agent, model),
+        },
+        related_features: optional_string_list_alias(input, &["related_features", "features"])?
+            .unwrap_or_default(),
+        related_tasks: optional_string_list_alias(input, &["related_tasks", "tasks"])?
+            .unwrap_or_default(),
+        tags: optional_string_list_alias(input, &["tags"])?.unwrap_or_default(),
+        paths: optional_string_list_alias(input, &["paths"])?.unwrap_or_default(),
+        body: required_string(input, &["body"], "body")?,
+    })
 }
 
 pub(super) fn show(runtime: &OrbitRuntime, input: Value) -> Result<Value, OrbitError> {

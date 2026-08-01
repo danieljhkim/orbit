@@ -225,6 +225,28 @@ impl IdAllocator {
         self.project_preallocated(IdAllocationKind::Adr, id, body_path)
     }
 
+    /// [ORB-10538] Repoint an existing ADR allocation to a restored body, but
+    /// only if every allocation field still matches the caller's snapshot.
+    ///
+    /// The compare-and-set makes an exact-id restore fail closed when another
+    /// process finalizes, abandons, or otherwise changes the allocation after
+    /// the store proved its recorded artifact unreadable. It never inserts an
+    /// allocation and therefore cannot adopt an unallocated id.
+    pub fn restore_adr_body_path_if_unchanged(
+        &self,
+        expected: &IdAllocationRecord,
+        body_path: &Path,
+    ) -> Result<bool, OrbitError> {
+        if expected.kind != IdAllocationKind::Adr {
+            return Err(OrbitError::InvalidInput(format!(
+                "cannot restore ADR allocation {} from a {} snapshot",
+                expected.id,
+                expected.kind.as_str(),
+            )));
+        }
+        self.restore_body_path_if_unchanged(expected, body_path)
+    }
+
     /// [ORB-10330] Install a non-authoritative owner-local projection for a
     /// hub-preallocated learning id and its body path. See
     /// [`Self::project_preallocated_adr`] for the invariants.
@@ -565,6 +587,54 @@ impl IdAllocator {
         tx.commit()
             .map_err(|error| OrbitError::Store(error.to_string()))?;
         Ok(())
+    }
+
+    fn restore_body_path_if_unchanged(
+        &self,
+        expected: &IdAllocationRecord,
+        body_path: &Path,
+    ) -> Result<bool, OrbitError> {
+        let relative_body_path = relative_to(body_path, &self.inner.worktree_root);
+        let branch = best_effort_branch(&self.inner.worktree_root);
+        let _lock = self.acquire_lock()?;
+        let mut conn = self.lock_conn()?;
+        let tx = conn
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(|error| OrbitError::Store(error.to_string()))?;
+        let updated = tx
+            .execute(
+                "UPDATE id_allocations
+                 SET worktree_root = ?8, branch = ?9, body_path = ?10
+                 WHERE kind = ?1
+                   AND id = ?2
+                   AND allocated_at = ?3
+                   AND worktree_root = ?4
+                   AND branch IS ?5
+                   AND status = ?6
+                   AND body_path IS ?7",
+                params![
+                    expected.kind.as_str(),
+                    expected.id,
+                    expected.allocated_at,
+                    expected.worktree_root.to_string_lossy(),
+                    expected.branch,
+                    expected.status,
+                    expected
+                        .body_path
+                        .as_ref()
+                        .map(|path| path.to_string_lossy()),
+                    self.inner.worktree_root.to_string_lossy(),
+                    branch,
+                    relative_body_path.to_string_lossy(),
+                ],
+            )
+            .map_err(|error| OrbitError::Store(error.to_string()))?;
+        if updated == 0 {
+            return Ok(false);
+        }
+        tx.commit()
+            .map_err(|error| OrbitError::Store(error.to_string()))?;
+        Ok(true)
     }
 
     fn abandon(&self, kind: IdAllocationKind, id: &str) -> Result<(), OrbitError> {
