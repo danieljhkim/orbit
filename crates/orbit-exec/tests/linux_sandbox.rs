@@ -1,4 +1,6 @@
 #![allow(missing_docs)]
+// Integration tests use unwrap/expect for fixture setup and print skip details.
+#![allow(clippy::expect_used, clippy::print_stdout, clippy::unwrap_used)]
 #![cfg(target_os = "linux")]
 
 use std::process::Stdio;
