@@ -2,6 +2,7 @@
 title: Orbit MCP Bridge — Overview
 owner: codex
 last_updated: 2026-07-18
+last_validated: 2026-08-02
 status: Accepted
 feature: mcp-bridge
 doc_role: overview

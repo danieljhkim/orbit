@@ -1,3 +1,9 @@
+---
+type: design
+summary: Spec: Redaction and Retention Boundaries
+last_validated: 2026-08-02
+---
+
 # Spec: Redaction and Retention Boundaries
 
 Audit storage must preserve enough detail to reconstruct agent behavior while redacting known secret shapes before durable persistence.
