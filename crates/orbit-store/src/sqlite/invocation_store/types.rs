@@ -67,6 +67,31 @@ pub struct InvocationRecord {
     pub derived_cost_usd: Option<f64>,
 }
 
+/// Date window for reconciliation-safe invocation accounting reads.
+///
+/// `until` is always exclusive. Callers capture it before loading so rows
+/// arriving during aggregation cannot make one read internally inconsistent.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct InvocationAccountingQuery {
+    pub since: Option<DateTime<Utc>>,
+    pub until: DateTime<Utc>,
+}
+
+/// One invocation and its distinct task linkage, without detailed tool calls.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct InvocationAccountingFact {
+    pub id: i64,
+    pub ts: DateTime<Utc>,
+    pub input_tokens: u64,
+    pub cache_read_tokens: u64,
+    pub cache_create_tokens: u64,
+    pub cache_create_1h_tokens: u64,
+    pub output_tokens: u64,
+    pub task_ids: Vec<String>,
+    pub provider_cost_usd: Option<f64>,
+    pub derived_cost_usd: Option<f64>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ActivityInvocationMetrics {
     pub activity_id: String,

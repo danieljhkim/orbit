@@ -14,7 +14,8 @@ use orbit_core::command::job::JobRunListParams;
 use orbit_core::metrics::{KnowledgeStatsSummary, aggregate as aggregate_knowledge_stats};
 use orbit_core::{
     ActivityInvocationMetrics, InvocationInsertParams, InvocationQuery, InvocationRecord,
-    JobRunState, OrbitRuntime, TaskInvocationMetrics, ToolInvocationMetrics,
+    JobRunState, OrbitRuntime, OrchestratorInvocationMetrics, OrchestratorMetricsBucketKind,
+    TaskInvocationMetrics, ToolInvocationMetrics,
 };
 use tower::ServiceExt;
 
@@ -265,6 +266,21 @@ async fn metrics_endpoints_return_runtime_shapes() {
         invocations_bytes,
         serde_json::to_vec(&expected_invocations).expect("expected invocations json")
     );
+
+    let orchestrators = request_metrics(runtime.clone(), "/metrics/orchestrators").await;
+    assert_eq!(orchestrators.status(), StatusCode::OK);
+    let orchestrator_bytes = body_bytes(orchestrators).await;
+    let decoded_orchestrators: OrchestratorInvocationMetrics =
+        serde_json::from_slice(&orchestrator_bytes).expect("orchestrator json");
+    assert_eq!(decoded_orchestrators.buckets.len(), 1);
+    assert_eq!(
+        decoded_orchestrators.buckets[0].kind,
+        OrchestratorMetricsBucketKind::Missing
+    );
+    assert_eq!(decoded_orchestrators.buckets[0].orchestrator, None);
+    assert_eq!(decoded_orchestrators.buckets[0].invocation_count, 2);
+    assert_eq!(decoded_orchestrators.buckets[0].linked_task_count, 2);
+    assert!(decoded_orchestrators.until <= decoded_orchestrators.as_of);
 }
 
 #[tokio::test]
@@ -311,6 +327,34 @@ async fn metrics_invocations_reports_invalid_rfc3339_field() {
     let payload = body_json(response).await;
     let message = payload["error"].as_str().expect("error message");
     assert!(message.contains("invalid since:"));
+}
+
+#[tokio::test]
+async fn metrics_orchestrators_validates_rfc3339_and_window_order() {
+    let runtime = seed_metrics_runtime();
+
+    let malformed =
+        request_metrics(runtime.clone(), "/metrics/orchestrators?since=not-a-date").await;
+    assert_eq!(malformed.status(), StatusCode::BAD_REQUEST);
+    let malformed_payload = body_json(malformed).await;
+    assert!(
+        malformed_payload["error"]
+            .as_str()
+            .expect("error message")
+            .contains("invalid since:")
+    );
+
+    let inverted = request_metrics(
+        runtime,
+        "/metrics/orchestrators?since=2026-08-02T00:00:01Z&until=2026-08-02T00:00:00Z",
+    )
+    .await;
+    assert_eq!(inverted.status(), StatusCode::BAD_REQUEST);
+    let inverted_payload = body_json(inverted).await;
+    assert_eq!(
+        inverted_payload["error"],
+        "since must be earlier than until"
+    );
 }
 
 #[tokio::test]
