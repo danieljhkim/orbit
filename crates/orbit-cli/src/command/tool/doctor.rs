@@ -6,7 +6,13 @@ pub(super) fn execute_doctor(runtime: &OrbitRuntime) -> Result<(), OrbitError> {
     let results = runtime.doctor()?;
     let mut issues = 0;
 
-    let mut table = crate::output::table::build_table(&["TOOL", "STATUS", "DETAILS"]);
+    use crate::output::table::{Column, Table};
+    let mut table = Table::new(vec![
+        Column::new("TOOL").fixed(),
+        Column::new("STATUS").fixed(),
+        Column::new("DETAILS"),
+    ])
+    .empty_message("no tools registered");
     for r in &results {
         let status_str = match r.status {
             DoctorStatus::Ok => "ok",
@@ -23,7 +29,7 @@ pub(super) fn execute_doctor(runtime: &OrbitRuntime) -> Result<(), OrbitError> {
             Cell::new(&r.message),
         ]);
     }
-    println!("{table}");
+    table.print();
 
     if issues == 0 {
         println!(

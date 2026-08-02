@@ -19,19 +19,26 @@ impl Execute for ExecutorListArgs {
             let values: Vec<Value> = defs.iter().map(executor_def_json).collect();
             crate::output::json::print_pretty(&Value::Array(values))
         } else {
-            let mut table =
-                crate::output::table::build_table(&["NAME", "TYPE", "COMMAND", "TIMEOUT"]);
+            use crate::output::table::{Column, Table};
+            // `orbit executor show <name>` prints the untruncated command.
+            let mut table = Table::new(vec![
+                Column::new("NAME").fixed(),
+                Column::new("TYPE").fixed(),
+                Column::new("COMMAND").path(),
+                Column::new("TIMEOUT (s)").number(),
+            ])
+            .empty_message("no executors defined");
             for def in &defs {
                 table.add_row(vec![
                     def.name.clone(),
                     def.executor_type.to_string(),
-                    def.command.clone().unwrap_or_default(),
+                    def.command.clone().unwrap_or_else(|| "-".to_string()),
                     def.timeout_seconds
-                        .map(|t| format!("{t}s"))
-                        .unwrap_or_default(),
+                        .map(|seconds| seconds.to_string())
+                        .unwrap_or_else(|| "-".to_string()),
                 ]);
             }
-            println!("{table}");
+            table.print();
             Ok(())
         }
     }

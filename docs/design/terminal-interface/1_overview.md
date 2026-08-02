@@ -1,8 +1,8 @@
 ---
 title: Terminal Interface — Overview
 owner: claude
-last_updated: 2026-08-01
-last_validated: 2026-08-01
+last_updated: 2026-08-02
+last_validated: 2026-08-02
 status: Accepted
 feature: terminal-interface
 doc_role: overview
@@ -22,7 +22,7 @@ Terminal Interface owns what `orbit` writes to stdout and stderr: table layout, 
 
 A CLI's output is read by a human scanning for a status and by a pipeline extracting a field, and those readers want different bytes. The human wants alignment, color, and a screenful; the pipeline wants one record per line and no escape sequences. Orbit currently sends both readers the same bytes, chosen for the human, and the pipeline absorbs the mismatch.
 
-The concrete failures are small and additive. `orbit tool list` draws box rules and wraps long cells across three or four lines, so a row is not a line and `grep` returns fragments ([T20260411-0335] introduced the full-width dynamic arrangement that causes the wrapping). `orbit audit list` aligns its columns with literal padding widths in a format string, so a value wider than the literal breaks the column. `NO_COLOR` is honored on the paths that use the `colored` crate and ignored on the paths that use `comfy-table`. Structured output is a per-command opt-in present on 86 of 150 argument structs. Nothing anywhere asks whether stdout is a terminal, except one log-tailing command that asks locally.
+The concrete failures are small and additive. `orbit tool list` drew box rules and wrapped long cells across three or four lines, so a row was not a line and `grep` returned fragments ([T20260411-0335] introduced the full-width dynamic arrangement that caused the wrapping); every list is now borderless and one line per record [ORB-10567], which is the first piece of this feature to land. `orbit audit list` still aligns its columns with literal padding widths in a format string, so a value wider than the literal breaks the column. `NO_COLOR` is honored on the paths that use the `colored` crate and ignored on the paths that use `comfy-table`. Structured output is a per-command opt-in present on 86 of 150 argument structs. Nothing anywhere asks whether stdout is a terminal, except one log-tailing command that asks locally.
 
 None of these is severe alone. Together they mean output correctness is a property each command has or lacks individually, which is the thing this feature exists to stop.
 

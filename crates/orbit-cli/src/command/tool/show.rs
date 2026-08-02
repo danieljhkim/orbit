@@ -33,8 +33,11 @@ impl Execute for ToolShowArgs {
             println!("{} (none)", bold("Parameters:"));
         } else {
             println!("{}", bold("Parameters:"));
+            // A parameter schema, not a result set: keep every column even when
+            // every parameter happens to share a type or be required.
             let mut table =
-                crate::output::table::build_table(&["NAME", "TYPE", "REQUIRED", "DESCRIPTION"]);
+                crate::output::table::build_table(&["NAME", "TYPE", "REQUIRED", "DESCRIPTION"])
+                    .keep_all_columns();
             for p in &tool.parameters {
                 let req = if p.required { "required" } else { "optional" };
                 table.add_row(vec![
@@ -44,7 +47,7 @@ impl Execute for ToolShowArgs {
                     p.description.clone(),
                 ]);
             }
-            println!("{table}");
+            table.print();
         }
 
         Ok(())

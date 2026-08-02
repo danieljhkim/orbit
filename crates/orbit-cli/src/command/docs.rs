@@ -111,8 +111,16 @@ impl Execute for DocsListArgs {
         if self.json {
             print_json(&records)
         } else {
-            let mut table =
-                crate::output::table::build_table(&["PATH", "TYPE", "SUMMARY", "TAGS", "RELATED"]);
+            use crate::output::table::{Column, Table};
+            // `orbit docs show <path>` prints a doc in full.
+            let mut table = Table::new(vec![
+                Column::new("PATH").path(),
+                Column::new("TYPE").fixed().filtered(doc_type.is_some()),
+                Column::new("SUMMARY"),
+                Column::new("TAGS").filtered(self.tag.is_some()),
+                Column::new("RELATED"),
+            ])
+            .empty_message("no docs matching the given filters");
             for record in records {
                 table.add_row(vec![
                     record.path,
@@ -128,7 +136,7 @@ impl Execute for DocsListArgs {
                         .join(", "),
                 ]);
             }
-            println!("{table}");
+            table.print();
             Ok(())
         }
     }

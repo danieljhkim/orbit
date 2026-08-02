@@ -183,31 +183,33 @@ pub(crate) fn print_run_header_with_state(run: &JobRun, state: Option<&PipelineS
 }
 
 pub(crate) fn print_step_summary_table(steps: &[&JobRunStep]) -> Result<(), OrbitError> {
-    if steps.is_empty() {
-        println!("No steps recorded.");
-        return Ok(());
-    }
-
-    let mut table = crate::output::table::build_table(&[
-        "#",
-        "TARGET",
-        "STATE",
-        "DURATION",
-        "ERROR CODE",
-        "ERROR MESSAGE",
-    ]);
+    use crate::output::table::{Column, Table};
+    // `orbit run show <run_id> -s <step>` prints one step's untruncated record.
+    let mut table = Table::new(vec![
+        Column::new("#").number(),
+        Column::new("TARGET"),
+        Column::new("STATE").fixed(),
+        Column::new("DURATION (ms)").number(),
+        Column::new("ERROR CODE").fixed(),
+        Column::new("ERROR MESSAGE"),
+    ])
+    .empty_message("no steps recorded");
     for step in steps {
         use comfy_table::Cell;
         table.add_row(vec![
             Cell::new(step.step_index),
             Cell::new(&step.target_id),
             crate::output::color::job_state_color_cell(&step.state.to_string()),
-            Cell::new(format_duration(step.duration_ms)),
+            Cell::new(
+                step.duration_ms
+                    .map(|ms| ms.to_string())
+                    .unwrap_or_else(|| "-".to_string()),
+            ),
             Cell::new(step.error_code.as_deref().unwrap_or("-")),
             Cell::new(summarize_error_message(step.error_message.as_deref())),
         ]);
     }
-    println!("{table}");
+    table.print();
     Ok(())
 }
 

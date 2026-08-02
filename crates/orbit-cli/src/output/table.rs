@@ -1,25 +1,406 @@
-use comfy_table::{Attribute, Cell, ContentArrangement, Row, Table, presets};
+//! Borderless list rendering: a header row followed by exactly one line per record.
+//!
+//! No box glyphs, two-space gutters, and cells truncated to width rather than
+//! wrapped, so `grep`/`cut`/`awk` see whole records. The contract is
+//! `docs/design/terminal-interface/specs/table-rendering.md` (ADR-0307).
+//!
+//! [`Table::add_row`] is the only way to add a row and it caps every row at one
+//! line; `comfy_table`'s unbounded row constructor is not reachable from outside
+//! this module.
 
+use std::io::IsTerminal;
+
+use comfy_table::{
+    Attribute, Cell, CellAlignment, ColumnConstraint, ContentArrangement, Row, Table as Grid,
+    Width, presets,
+};
+
+/// Spaces between two rendered columns.
+const GUTTER: usize = 2;
+/// Narrowest a flexible column may be squeezed before it is dropped instead.
+const FLEXIBLE_FLOOR: usize = 8;
+/// Marks a value that did not fit its column.
+const ELLIPSIS: &str = "…";
+
+/// Whether a column may be squeezed when the result set is wider than the sink.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Sizing {
+    /// IDs, statuses, timestamps: rendered whole or not at all.
+    Fixed,
+    /// Prose and names: shrink first, down to [`FLEXIBLE_FLOOR`].
+    Flexible,
+}
+
+/// Which end of an overlong value is sacrificed.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Overflow {
+    /// Prose: the beginning identifies the value.
+    Tail,
+    /// Paths, refs, hashes: both ends identify the value.
+    Middle,
+}
+
+/// One column of a list view: its header plus the policy for width, alignment,
+/// and overflow that the renderer applies to every cell beneath it.
+pub struct Column {
+    header: String,
+    align: CellAlignment,
+    sizing: Sizing,
+    overflow: Overflow,
+    keep_when_uniform: bool,
+}
+
+impl Column {
+    /// A name or prose column: left aligned, shrinks under width pressure, and
+    /// loses its tail when it overflows.
+    ///
+    /// Headers are written uppercase by the caller, so that a unit suffix
+    /// (`DURATION (ms)`) keeps the casing its unit is defined with.
+    pub fn new(header: &str) -> Self {
+        Self {
+            header: header.to_string(),
+            align: CellAlignment::Left,
+            sizing: Sizing::Flexible,
+            overflow: Overflow::Tail,
+            keep_when_uniform: false,
+        }
+    }
+
+    /// An identifier, status, or timestamp: never squeezed, so the value a
+    /// caller would copy out of the list is always whole.
+    #[must_use]
+    pub fn fixed(mut self) -> Self {
+        self.sizing = Sizing::Fixed;
+        self
+    }
+
+    /// A count or duration: right aligned so magnitudes compare vertically, and
+    /// never squeezed. Name the unit in the header (`DURATION (ms)`) rather than
+    /// repeating it in every cell.
+    #[must_use]
+    pub fn number(mut self) -> Self {
+        self.align = CellAlignment::Right;
+        self.sizing = Sizing::Fixed;
+        self
+    }
+
+    /// A path, ref, or hash, whose tail identifies it: overflow eats the middle.
+    #[must_use]
+    pub fn path(mut self) -> Self {
+        self.overflow = Overflow::Middle;
+        self
+    }
+
+    /// Keep this column even when every row carries the same value. Pass the
+    /// filter's presence: a user who asked for `--status done` expects `STATUS`
+    /// to stay on screen even though it now carries no information.
+    #[must_use]
+    pub fn filtered(mut self, filtered: bool) -> Self {
+        self.keep_when_uniform = filtered;
+        self
+    }
+}
+
+/// A list view under construction. Rows are buffered so that column widths and
+/// uniform-column suppression can be computed from the whole result set.
+pub struct Table {
+    columns: Vec<Column>,
+    rows: Vec<Vec<Cell>>,
+    empty_message: String,
+    suppress_uniform: bool,
+}
+
+/// Build a table whose columns are all plain left-aligned text. Commands with
+/// numeric, duration, identifier, or path columns should describe them with
+/// [`Column`] and [`Table::new`] instead.
 pub fn build_table(headers: &[&str]) -> Table {
-    let mut table = Table::new();
-    table.load_preset(presets::UTF8_BORDERS_ONLY);
-    table.set_content_arrangement(ContentArrangement::DynamicFullWidth);
-    table.set_truncation_indicator("…");
-    table.set_header(
-        headers
+    Table::new(headers.iter().map(|header| Column::new(header)).collect())
+}
+
+impl Table {
+    /// Build a table from explicit column policies.
+    pub fn new(columns: Vec<Column>) -> Self {
+        Self {
+            columns,
+            rows: Vec::new(),
+            empty_message: "no results".to_string(),
+            suppress_uniform: true,
+        }
+    }
+
+    /// The line printed to stderr — leaving stdout empty — when there are no
+    /// records. Name what was searched, and why it may be empty where that is
+    /// cheap to say.
+    #[must_use]
+    pub fn empty_message(mut self, message: impl Into<String>) -> Self {
+        self.empty_message = message.into();
+        self
+    }
+
+    /// Render every column even when its value repeats. For fixed-shape views
+    /// (a status readout, a parameter schema) rather than result sets, where a
+    /// missing column reads as a missing field.
+    #[must_use]
+    pub fn keep_all_columns(mut self) -> Self {
+        self.suppress_uniform = false;
+        self
+    }
+
+    /// Add one record. The row occupies exactly one line however long its cells
+    /// are; there is no unbounded variant.
+    pub fn add_row<T: Into<Cell>>(&mut self, cells: Vec<T>) {
+        self.rows.push(cells.into_iter().map(Into::into).collect());
+    }
+
+    /// Write the list to stdout, or the empty-state line to stderr when there
+    /// are no records. Notices about dropped columns go to stderr so that they
+    /// never land in a consumer's record stream.
+    pub fn print(&self) {
+        if self.rows.is_empty() {
+            eprintln!("{}", self.empty_message);
+            return;
+        }
+        let terminal = std::io::stdout().is_terminal();
+        let rendered = self.render(sink_width(terminal), terminal);
+        for notice in &rendered.notices {
+            eprintln!("{notice}");
+        }
+        println!("{}", rendered.body);
+    }
+
+    /// Render at an explicit width. `sink_width` of `None` means the sink has no
+    /// width and nothing is truncated; `styled` carries whether the sink accepts
+    /// ANSI styling.
+    pub(crate) fn render(&self, sink_width: Option<usize>, styled: bool) -> Rendered {
+        let visible = self.visible_columns();
+        let natural = self.natural_widths(&visible);
+        let (layout, dropped) = self.resolve_widths(&visible, &natural, sink_width);
+
+        let mut grid = Grid::new();
+        grid.load_preset(presets::NOTHING);
+        grid.set_content_arrangement(ContentArrangement::Disabled);
+        grid.set_truncation_indicator(ELLIPSIS);
+        if !styled {
+            grid.force_no_tty();
+        }
+        grid.set_header(layout.iter().map(|(index, _)| {
+            Cell::new(&self.columns[*index].header).add_attribute(Attribute::Dim)
+        }));
+        for row in &self.rows {
+            let cells = layout
+                .iter()
+                .map(|(index, width)| self.cell(row, *index, *width))
+                .collect::<Vec<_>>();
+            let mut single_line = Row::from(cells);
+            single_line.max_height(1);
+            grid.add_row(single_line);
+        }
+
+        for (position, (index, width)) in layout.iter().enumerate() {
+            let gutter = if position + 1 == layout.len() {
+                0
+            } else {
+                GUTTER
+            };
+            let Some(column) = grid.column_mut(position) else {
+                continue;
+            };
+            column.set_padding((0, clamp_u16(gutter)));
+            column.set_cell_alignment(self.columns[*index].align);
+            column.set_constraint(ColumnConstraint::Absolute(Width::Fixed(clamp_u16(
+                width + gutter,
+            ))));
+        }
+
+        let body = grid
+            .lines()
+            .map(|line| line.trim_end().to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+        let notices = if dropped.is_empty() {
+            Vec::new()
+        } else {
+            vec![format!(
+                "columns hidden to fit the terminal: {}",
+                dropped.join(", ")
+            )]
+        };
+        Rendered { body, notices }
+    }
+
+    /// Columns that survive uniform-value suppression, in order.
+    fn visible_columns(&self) -> Vec<usize> {
+        let all = (0..self.columns.len()).collect::<Vec<_>>();
+        // A single record is no evidence that a column is uninformative.
+        if !self.suppress_uniform || self.rows.len() < 2 {
+            return all;
+        }
+        let kept = all
             .iter()
-            .map(|h| Cell::new(h).add_attribute(Attribute::Bold)),
-    );
-    table
+            .copied()
+            .filter(|index| self.columns[*index].keep_when_uniform || !self.is_uniform(*index))
+            .collect::<Vec<_>>();
+        // A result set whose every column repeats still has to render as rows.
+        if kept.is_empty() { all } else { kept }
+    }
+
+    fn is_uniform(&self, index: usize) -> bool {
+        let mut values = self
+            .rows
+            .iter()
+            .map(|row| row.get(index).map(Cell::content).unwrap_or_default());
+        let Some(first) = values.next() else {
+            return false;
+        };
+        values.all(|value| value == first)
+    }
+
+    /// Maximum display width of each visible column's header and cells, measured
+    /// in grapheme clusters by the same code that lays the grid out.
+    fn natural_widths(&self, visible: &[usize]) -> Vec<usize> {
+        let mut probe = Grid::new();
+        probe.load_preset(presets::NOTHING);
+        probe.set_content_arrangement(ContentArrangement::Disabled);
+        probe.set_header(
+            visible
+                .iter()
+                .map(|index| Cell::new(&self.columns[*index].header)),
+        );
+        for row in &self.rows {
+            probe.add_row(
+                visible
+                    .iter()
+                    .map(|index| cell_at(row, *index))
+                    .collect::<Vec<_>>(),
+            );
+        }
+        probe
+            .column_max_content_widths()
+            .into_iter()
+            .map(usize::from)
+            .collect()
+    }
+
+    /// Fit the visible columns into `sink_width`: shrink flexible columns widest
+    /// first down to the floor, then drop them from the right. Fixed columns
+    /// never move, so the same result set at two widths differs only in
+    /// truncation and column presence.
+    fn resolve_widths(
+        &self,
+        visible: &[usize],
+        natural: &[usize],
+        sink_width: Option<usize>,
+    ) -> (Vec<(usize, usize)>, Vec<String>) {
+        let mut layout = visible
+            .iter()
+            .copied()
+            .zip(natural.iter().copied())
+            .collect::<Vec<_>>();
+        let mut dropped = Vec::new();
+        let Some(limit) = sink_width else {
+            return (layout, dropped);
+        };
+
+        while total_width(&layout) > limit {
+            let widest = layout
+                .iter_mut()
+                .filter(|(index, width)| {
+                    self.columns[*index].sizing == Sizing::Flexible && *width > FLEXIBLE_FLOOR
+                })
+                .max_by_key(|(_, width)| *width);
+            let Some(column) = widest else {
+                break;
+            };
+            column.1 -= 1;
+        }
+
+        while total_width(&layout) > limit {
+            let Some(position) = layout
+                .iter()
+                .rposition(|(index, _)| self.columns[*index].sizing == Sizing::Flexible)
+            else {
+                break;
+            };
+            let (index, _) = layout.remove(position);
+            dropped.push(self.columns[index].header.clone());
+        }
+
+        (layout, dropped)
+    }
+
+    /// The cell as the grid should receive it. Tail truncation is left to
+    /// `comfy-table`, which is width-accurate and preserves the cell's styling;
+    /// middle truncation has to be applied here because the library has no such
+    /// mode.
+    fn cell(&self, row: &[Cell], index: usize, width: usize) -> Cell {
+        let cell = cell_at(row, index);
+        if self.columns[index].overflow != Overflow::Middle {
+            return cell;
+        }
+        let content = cell.content();
+        if content.chars().count() <= width {
+            return cell;
+        }
+        Cell::new(truncate_middle(&content, width))
+    }
 }
 
-pub fn add_single_line_row(table: &mut Table, cells: Vec<Cell>) {
-    let mut row = Row::from(cells);
-    row.max_height(1);
-    table.add_row(row);
+/// A rendered list plus the notices that belong on stderr.
+pub(crate) struct Rendered {
+    pub(crate) body: String,
+    pub(crate) notices: Vec<String>,
 }
 
-#[allow(dead_code)]
-pub fn print_line(line: impl AsRef<str>) {
-    println!("{}", line.as_ref());
+fn cell_at(row: &[Cell], index: usize) -> Cell {
+    row.get(index).cloned().unwrap_or_else(|| Cell::new(""))
+}
+
+fn total_width(layout: &[(usize, usize)]) -> usize {
+    layout.iter().map(|(_, width)| width).sum::<usize>() + GUTTER * layout.len().saturating_sub(1)
+}
+
+fn clamp_u16(value: usize) -> u16 {
+    u16::try_from(value).unwrap_or(u16::MAX)
+}
+
+/// Keep the head and the identifying tail: `crates/orbit-cli/…/table.rs`.
+///
+/// Width is counted in `char`s rather than display columns because the values
+/// routed here — paths, refs, hashes — are ASCII. A wide-character value would
+/// be measured short, and the row's `max_height(1)` cap is what still
+/// guarantees it renders as one line.
+fn truncate_middle(value: &str, width: usize) -> String {
+    let chars = value.chars().collect::<Vec<_>>();
+    if chars.len() <= width {
+        return value.to_string();
+    }
+    if width <= 1 {
+        return ELLIPSIS.to_string();
+    }
+    let kept = width - 1;
+    let head = kept.div_ceil(2);
+    let tail = kept - head;
+    let mut truncated = chars[..head].iter().collect::<String>();
+    truncated.push_str(ELLIPSIS);
+    truncated.extend(&chars[chars.len() - tail..]);
+    truncated
+}
+
+/// The width the list must fit into.
+///
+/// Piped output has no width and is never truncated, which keeps a redirected
+/// list carrying whole values. On a terminal, `COLUMNS` wins over the terminal
+/// query so a caller can pin the geometry. Sourcing this from an output sink
+/// instead is ADR-0306's work; the width policy above is what consumes it.
+fn sink_width(terminal: bool) -> Option<usize> {
+    if !terminal {
+        return None;
+    }
+    if let Ok(columns) = std::env::var("COLUMNS")
+        && let Ok(width) = columns.trim().parse::<usize>()
+        && width > 0
+    {
+        return Some(width);
+    }
+    Grid::new().width().map(usize::from)
 }

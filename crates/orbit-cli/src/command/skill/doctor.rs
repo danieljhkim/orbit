@@ -20,7 +20,13 @@ impl Execute for SkillDoctorArgs {
         }
 
         let mut issues = 0usize;
-        let mut table = crate::output::table::build_table(&["SKILL", "STATUS", "DETAILS"]);
+        use crate::output::table::{Column, Table};
+        let mut table = Table::new(vec![
+            Column::new("SKILL").fixed(),
+            Column::new("STATUS").fixed(),
+            Column::new("DETAILS"),
+        ])
+        .empty_message("no file skills installed");
         for row in &rows {
             let status = match row.status {
                 SkillDoctorStatus::Ok => "ok",
@@ -37,7 +43,7 @@ impl Execute for SkillDoctorArgs {
                 Cell::new(&row.message),
             ]);
         }
-        println!("{table}");
+        table.print();
 
         if issues == 0 {
             println!(

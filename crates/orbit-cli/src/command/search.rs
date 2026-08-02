@@ -201,8 +201,17 @@ struct SearchInput {
 }
 
 fn print_search_table(results: &[GlobalSearchHit]) {
-    let mut table =
-        crate::output::table::build_table(&["KIND", "SOURCE", "ID/PATH", "TITLE/SUMMARY", "MATCH"]);
+    use crate::output::table::{Column, Table};
+    // Each hit's kind names its own detail command (`orbit task show`,
+    // `orbit docs show`, `orbit learning show`, `orbit adr show`).
+    let mut table = Table::new(vec![
+        Column::new("KIND").fixed(),
+        Column::new("SOURCE").fixed(),
+        Column::new("ID/PATH").path(),
+        Column::new("TITLE/SUMMARY"),
+        Column::new("MATCH").fixed(),
+    ])
+    .empty_message("no results matching the query");
     for hit in results {
         table.add_row(vec![
             hit.kind.clone(),
@@ -215,7 +224,7 @@ fn print_search_table(results: &[GlobalSearchHit]) {
             match_text(hit),
         ]);
     }
-    println!("{table}");
+    table.print();
 }
 
 fn match_text(hit: &GlobalSearchHit) -> String {

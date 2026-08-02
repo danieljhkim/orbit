@@ -71,7 +71,13 @@ impl Execute for DoctorCommand {
             let values = results.iter().map(doctor_row_json).collect::<Vec<_>>();
             crate::output::json::print_pretty(&Value::Array(values))?;
         } else {
-            let mut table = crate::output::table::build_table(&["CHECK", "STATUS", "DETAILS"]);
+            use crate::output::table::{Column, Table};
+            let mut table = Table::new(vec![
+                Column::new("CHECK").fixed(),
+                Column::new("STATUS").fixed(),
+                Column::new("DETAILS"),
+            ])
+            .empty_message("no workspace checks ran");
             for row in &results {
                 use comfy_table::Cell;
                 table.add_row(vec![
@@ -80,7 +86,7 @@ impl Execute for DoctorCommand {
                     Cell::new(human_detail(row)),
                 ]);
             }
-            println!("{table}");
+            table.print();
 
             if failures == 0 && warnings == 0 {
                 println!(

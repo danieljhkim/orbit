@@ -41,13 +41,21 @@ impl Execute for ToolListArgs {
                 .collect();
             crate::output::json::print_pretty(&Value::Array(json_tools))
         } else {
-            let mut table = crate::output::table::build_table(&[
-                "NAME",
-                "STATUS",
-                "BUILTIN",
-                "REQUIRED INPUT",
-                "DESCRIPTION",
-            ]);
+            use crate::output::table::Column;
+            // `orbit tool show <name>` prints the untruncated description and
+            // input schema for any row truncated here.
+            let mut table = crate::output::table::Table::new(vec![
+                Column::new("NAME").fixed(),
+                Column::new("STATUS").fixed(),
+                Column::new("BUILTIN").fixed(),
+                Column::new("REQUIRED INPUT"),
+                Column::new("DESCRIPTION"),
+            ])
+            .empty_message(if self.all {
+                "no tools registered"
+            } else {
+                "no active tools (retry with --all to include inactive tools)"
+            });
             for tool in &tools {
                 use comfy_table::Cell;
                 table.add_row(vec![
@@ -58,7 +66,7 @@ impl Execute for ToolListArgs {
                     Cell::new(&tool.description),
                 ]);
             }
-            println!("{table}");
+            table.print();
             Ok(())
         }
     }

@@ -7,7 +7,7 @@ use serde_json::Value;
 
 use crate::command::Execute;
 
-use super::output::{print_task_table, task_to_json, task_to_signal_json};
+use super::output::{TaskTableFilters, print_task_table, task_to_json, task_to_signal_json};
 
 #[derive(Args)]
 #[command(
@@ -88,6 +88,13 @@ impl Execute for TaskListArgs {
             .map(|system| validate_external_ref_system(&system))
             .transpose()?;
         let ready = self.ready;
+        // A column the caller filtered on stays on screen even when the filter
+        // made it uniform.
+        let filtered = TaskTableFilters {
+            status: !status.is_empty(),
+            priority: priority.is_some(),
+            task_type: task_type.is_some(),
+        };
 
         // `list_tasks_by_tags` returns tasks already ordered newest-first
         // (`created_at DESC`, task ID ascending for ties); the filters below
@@ -143,7 +150,7 @@ impl Execute for TaskListArgs {
                 .collect();
             crate::output::json::print_pretty(&Value::Array(json_tasks))
         } else {
-            print_task_table(&tasks, self.full);
+            print_task_table(&tasks, self.full, filtered);
             Ok(())
         }
     }

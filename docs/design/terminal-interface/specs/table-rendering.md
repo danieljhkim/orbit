@@ -1,7 +1,7 @@
 ---
 type: design
 summary: "Spec: Table Rendering"
-last_validated: 2026-08-01
+last_validated: 2026-08-02
 ---
 
 # Spec: Table Rendering
@@ -10,7 +10,7 @@ A list rendered by `orbit` is a header row followed by one line per record. Bord
 
 ## Why This Exists
 
-The current `build_table` pairs `UTF8_BORDERS_ONLY` with `ContentArrangement::DynamicFullWidth`, which wraps overflowing cells. A wrapped row occupies a variable number of lines, which breaks every line-oriented tool an operator would reach for and forces a horizontal rule to act as the row separator. The border is not decoration to be argued about on taste; it is compensation for the wrapping. Removing the wrapping is what makes removing the border safe. Rationale in [ADR-0307].
+Before [ORB-10567], `build_table` paired `UTF8_BORDERS_ONLY` with `ContentArrangement::DynamicFullWidth`, which wraps overflowing cells. A wrapped row occupies a variable number of lines, which breaks every line-oriented tool an operator would reach for and forces a horizontal rule to act as the row separator. The border is not decoration to be argued about on taste; it is compensation for the wrapping. Removing the wrapping is what makes removing the border safe. Rationale in [ADR-0307].
 
 ## 1. Structure
 
@@ -63,12 +63,16 @@ Widths are computed from the result set, never declared as literals.
 
 The path from current behavior:
 
-1. Change the preset in `crates/orbit-cli/src/output/table.rs` to a borderless one and switch `ContentArrangement` off full-width wrapping.
-2. Make `add_single_line_row` the only exported row constructor; convert the 19 call sites that use `Table::add_row` directly.
-3. Move width computation behind the sink (see [./output-modes.md](./output-modes.md) §1) so it is not resolved by `comfy-table` from a terminal that may not exist.
-4. Convert `print_audit_event_line` and the other hand-padded `println!` sites to the table path.
-5. Add per-column *fixed*/*flexible* and alignment metadata at each call site.
+1. ~~Change the preset in `crates/orbit-cli/src/output/table.rs` to a borderless one and switch `ContentArrangement` off full-width wrapping.~~ Done [ORB-10567].
+2. ~~Make `add_single_line_row` the only exported row constructor; convert the 19 call sites that use `Table::add_row` directly.~~ Done [ORB-10567] — `output::table::Table` wraps `comfy_table`, and its `add_row` is the only constructor reachable from a command module.
+3. Move width computation behind the sink (see [./output-modes.md](./output-modes.md) §1) so it is not resolved from a terminal that may not exist. **Open**, depends on [ADR-0306]. `sink_width` currently reads `COLUMNS`, falls back to the terminal query, and returns no width for a non-terminal sink — the policy of §2 consumes whatever it returns, so only the source moves.
+4. Convert `print_audit_event_line` and the other hand-padded `println!` sites to the table path. **Open** — `orbit audit list` still pads with format-string literals, and the count/summary lines that neighbor a table (`orbit doctor`, `orbit routine list`, `orbit semantic stats`, `orbit migrate status`) still print to stdout rather than stderr.
+5. ~~Add per-column *fixed*/*flexible* and alignment metadata at each call site.~~ Done [ORB-10567] for the 21 table call sites, via `Column::fixed` / `Column::number` / `Column::path` / `Column::filtered`.
 
-Steps 1–2 are mechanical and independently landable. Step 3 depends on [ADR-0306]. Steps 4–5 are per-command and may proceed incrementally.
+Step 3 depends on [ADR-0306]. Step 4 is per-command and may proceed incrementally.
 
-There is no output snapshot suite to update — see [../2_design.md §8](../2_design.md#8-test-coverage-of-output) — so the migration must add fixtures rather than adjust them. At minimum: one golden file per mode at a pinned width, and an assertion that the plain form of an *N*-record result has exactly *N* lines.
+The header is still rendered in the piped form, contrary to §1: suppressing it requires the mode resolution of [./output-modes.md](./output-modes.md) §2, which has not landed. Truncation is already disabled for a non-terminal sink, so the piped form carries whole values today.
+
+There was no output snapshot suite to update — see [../2_design.md §8](../2_design.md#8-test-coverage-of-output) — so the migration added fixtures rather than adjusting them: unit rendering assertions at pinned widths in `crates/orbit-cli/src/output/tests/table.rs`, and an end-to-end *N*-records-is-*N*-lines assertion for `orbit tool list` and `orbit task list` in `crates/orbit-cli/tests/table_rendering.rs`.
+
+Which truncatable column has a detail command, and which four views still lack one, is recorded in [../references/detail-commands.md](../references/detail-commands.md).

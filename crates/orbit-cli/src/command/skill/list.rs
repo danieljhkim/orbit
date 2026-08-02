@@ -18,7 +18,15 @@ impl Execute for SkillListArgs {
             let values = skills.iter().map(skill_summary_json).collect::<Vec<_>>();
             crate::output::json::print_pretty(&Value::Array(values))
         } else {
-            let mut table = crate::output::table::build_table(&["ID", "HASH", "TAGS", "SUMMARY"]);
+            use crate::output::table::{Column, Table};
+            // `orbit skill show <id>` prints a skill's untruncated summary.
+            let mut table = Table::new(vec![
+                Column::new("ID").fixed(),
+                Column::new("HASH").fixed(),
+                Column::new("TAGS").number(),
+                Column::new("SUMMARY"),
+            ])
+            .empty_message("no file skills installed");
             for skill in skills {
                 let summary = skill
                     .meta
@@ -33,7 +41,7 @@ impl Execute for SkillListArgs {
                     summary,
                 ]);
             }
-            println!("{table}");
+            table.print();
             Ok(())
         }
     }

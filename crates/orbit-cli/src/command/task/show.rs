@@ -216,7 +216,17 @@ fn print_related_docs(related_docs: &[TaskRelatedDoc]) {
 
     println!();
     println!("{}", bold("Related Docs:"));
-    let mut table = crate::output::table::build_table(&["PATH", "TYPE", "SUMMARY", "EXCERPT"]);
+    use crate::output::table::{Column, Table};
+    // Part of a detail view: keep every column, and point at `orbit docs show
+    // <path>` for the untruncated doc.
+    let mut table = Table::new(vec![
+        Column::new("PATH").path(),
+        Column::new("TYPE").fixed(),
+        Column::new("SUMMARY"),
+        Column::new("EXCERPT"),
+    ])
+    .keep_all_columns()
+    .empty_message("no related docs");
     for doc in related_docs {
         table.add_row(vec![
             Cell::new(&doc.path),
@@ -225,7 +235,7 @@ fn print_related_docs(related_docs: &[TaskRelatedDoc]) {
             Cell::new(&doc.excerpt),
         ]);
     }
-    println!("{table}");
+    table.print();
 }
 
 fn normalize_task_show_fields(fields: &[String]) -> Result<Vec<String>, OrbitError> {

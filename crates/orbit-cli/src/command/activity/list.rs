@@ -32,7 +32,16 @@ impl Execute for ActivityListArgs {
                 .collect();
             crate::output::json::print_pretty(&Value::Array(values))
         } else {
-            let mut table = crate::output::table::build_table(&["ID", "TYPE", "DESCRIPTION"]);
+            use crate::output::table::{Column, Table};
+            // No `orbit activity show` exists yet, so `--json` (above) is the
+            // only untruncated view of a description. Tracked in
+            // docs/design/terminal-interface/references/detail-commands.md.
+            let mut table = Table::new(vec![
+                Column::new("ID").fixed(),
+                Column::new("TYPE").fixed(),
+                Column::new("DESCRIPTION"),
+            ])
+            .empty_message("no activities registered");
             for name in catalog.names() {
                 use comfy_table::Cell;
                 let Some(spec) = catalog.get(name) else {
@@ -44,7 +53,7 @@ impl Execute for ActivityListArgs {
                     Cell::new(&spec.description),
                 ]);
             }
-            println!("{table}");
+            table.print();
             Ok(())
         }
     }
