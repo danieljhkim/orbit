@@ -853,11 +853,26 @@ pub(super) fn gate_starvation_fail(
                 .collect()
         })
         .unwrap_or_default();
+    // The gate can starve on either axis. Reporting only `conflicting_files`
+    // left a dependency-starved bundle with an empty list and no blocker
+    // named at all, so carry the last-observed unmet dependency IDs too.
+    let waiting_on_deps: Vec<String> = input
+        .get("waiting_on_deps")
+        .and_then(Value::as_array)
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|entry| entry.as_str().map(str::trim))
+                .filter(|entry| !entry.is_empty())
+                .map(ToOwned::to_owned)
+                .collect()
+        })
+        .unwrap_or_default();
 
     let payload = serde_json::json!({
         "task_ids": task_ids_vec,
         "conflicting_files": conflicting_files,
         "conflicts": conflicts,
+        "waiting_on_deps": waiting_on_deps,
         "max_wait_seconds": max_wait_seconds,
     });
 
@@ -912,8 +927,8 @@ pub(super) fn gate_starvation_fail(
         action: action.to_string(),
         message: format!(
             "gate.starvation: admission window never opened for bundle {:?} \
-             (conflicting_files={:?}, max_wait_seconds={:?})",
-            task_ids_vec, conflicting_files, max_wait_seconds
+             (conflicting_files={:?}, waiting_on_deps={:?}, max_wait_seconds={:?})",
+            task_ids_vec, conflicting_files, waiting_on_deps, max_wait_seconds
         ),
     })
 }

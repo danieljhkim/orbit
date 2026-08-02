@@ -826,8 +826,17 @@ Narrative lives in the ADR store — retrieve it with `orbit tool run orbit.adr.
 
 ---
 
+## ADR-0319 — Dispatch admission separates unmet dependencies from unsatisfiable ones
+
+**Status:** Proposed · 2026-08 · [ORB-10593]
+
+Narrative lives in the ADR store — retrieve it with `orbit tool run orbit.adr.show --input '{"id":"ADR-0319"}'`.
+
+---
+
 ## Task References
 
+- **[ORB-10593]** — Fail dispatch immediately when a `blocked_by` target is archived, rejected, or dangling, naming the blocker ([ADR-0319]).
 - **[ORB-10544]** — Move the ship in-flight duplicate-dispatch guard into `submit_ship_run` so HTTP and MCP are thin projections of one typed conflict ([ADR-0303], correcting the surface-local check from [ADR-0257]).
 
 - **[ORB-10519]** — Restore one workflow-owned shipment commit, reject every provider-side HEAD change, and preserve dirty-work recovery plus process-scoped attribution ([ADR-0299], superseding [ADR-0294] and [ADR-0249]).
