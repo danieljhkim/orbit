@@ -7,14 +7,10 @@ use serde_json::Value;
 use crate::OrbitRuntime;
 use orbit_common::types::JobRunState;
 
-use std::ffi::OsString;
-use std::sync::Mutex;
-
+use orbit_common::test_env;
 use tempfile::tempdir;
 
 use crate::command::activity::DEFAULT_ACTIVITY_FILES;
-
-static ENV_LOCK: Mutex<()> = Mutex::new(());
 
 fn test_runtime() -> (tempfile::TempDir, OrbitRuntime, PathBuf, PathBuf) {
     let root = tempdir().expect("create tempdir");
@@ -89,13 +85,16 @@ fn runtime_init_migrates_legacy_learning_ids_and_records_audit_once() {
 
 #[test]
 fn orbit_root_env_selects_workspace_but_not_global_root() {
-    let _guard = ENV_LOCK.lock().expect("lock env");
     let home = tempdir().expect("home tempdir");
     let repo = tempdir().expect("repo tempdir");
     let workspace_root = repo.path().join(".orbit");
     seed_initialized_workspace_root(&workspace_root);
-    let _home = EnvVarGuard::set("HOME", home.path().as_os_str().to_os_string());
-    let _orbit_root = EnvVarGuard::set("ORBIT_ROOT", workspace_root.as_os_str().to_os_string());
+    let home_var = home.path().to_string_lossy().into_owned();
+    let root_var = workspace_root.to_string_lossy().into_owned();
+    let _env = test_env::scoped([
+        ("HOME", Some(home_var.as_str())),
+        ("ORBIT_ROOT", Some(root_var.as_str())),
+    ]);
 
     let resolved_roots =
         OrbitRuntime::resolve_roots_for_cwd(repo.path(), None).expect("resolve roots");
@@ -107,13 +106,13 @@ fn orbit_root_env_selects_workspace_but_not_global_root() {
 
 #[test]
 fn explicit_root_flag_pins_global_registry_root() {
-    let _guard = ENV_LOCK.lock().expect("lock env");
     let home = tempdir().expect("home tempdir");
     let repo = tempdir().expect("repo tempdir");
     let custom_root_parent = tempdir().expect("custom root parent");
     let custom_root = custom_root_parent.path().join("custom-orbit");
     seed_initialized_workspace_root(&custom_root);
-    let _home = EnvVarGuard::set("HOME", home.path().as_os_str().to_os_string());
+    let home_var = home.path().to_string_lossy().into_owned();
+    let _env = test_env::scoped([("HOME", Some(home_var.as_str()))]);
 
     let resolved_roots =
         OrbitRuntime::resolve_roots_for_cwd(repo.path(), Some(custom_root.as_path()))
@@ -131,42 +130,6 @@ fn seed_initialized_workspace_root(path: &Path) {
     std::fs::create_dir_all(path.join("resources")).expect("create resources dir");
     std::fs::create_dir_all(path.join("tasks")).expect("create tasks dir");
     std::fs::create_dir_all(path.join("state")).expect("create state dir");
-}
-
-struct EnvVarGuard {
-    key: &'static str,
-    previous: Option<OsString>,
-}
-
-impl EnvVarGuard {
-    fn set(key: &'static str, value: OsString) -> Self {
-        let previous = std::env::var_os(key);
-        unsafe {
-            std::env::set_var(key, value);
-        }
-        Self { key, previous }
-    }
-
-    fn unset(key: &'static str) -> Self {
-        let previous = std::env::var_os(key);
-        unsafe {
-            std::env::remove_var(key);
-        }
-        Self { key, previous }
-    }
-}
-
-impl Drop for EnvVarGuard {
-    fn drop(&mut self) {
-        match &self.previous {
-            Some(value) => unsafe {
-                std::env::set_var(self.key, value);
-            },
-            None => unsafe {
-                std::env::remove_var(self.key);
-            },
-        }
-    }
 }
 
 fn reopened_stale_run_state(managed_context: Option<&str>, run_id: Option<&str>) -> JobRunState {
@@ -188,14 +151,10 @@ fn reopened_stale_run_state(managed_context: Option<&str>, run_id: Option<&str>)
         .expect("mark run with host-invisible owner");
     drop(runtime);
 
-    let _managed_context = match managed_context {
-        Some(value) => EnvVarGuard::set("ORBIT_MANAGED_RUN_CONTEXT", value.into()),
-        None => EnvVarGuard::unset("ORBIT_MANAGED_RUN_CONTEXT"),
-    };
-    let _run_id = match run_id {
-        Some(value) => EnvVarGuard::set("ORBIT_RUN_ID", value.into()),
-        None => EnvVarGuard::unset("ORBIT_RUN_ID"),
-    };
+    let _env = test_env::scoped([
+        ("ORBIT_MANAGED_RUN_CONTEXT", managed_context),
+        ("ORBIT_RUN_ID", run_id),
+    ]);
     let reopened = OrbitRuntime::from_roots(&global_root, &workspace_root).expect("reopen runtime");
     reopened
         .get_job_run_backend(&run.run_id)
@@ -210,7 +169,6 @@ fn reopened_stale_run_state(managed_context: Option<&str>, run_id: Option<&str>)
 /// recovery remains unchanged.
 #[test]
 fn managed_run_context_skips_workspace_open_reconciliation_but_not_explicit_recovery() {
-    let _guard = ENV_LOCK.lock().expect("lock env");
     let root = tempdir().expect("create tempdir");
     let global_root = root.path().join("global");
     let workspace_root = root.path().join("repo/.orbit");
@@ -229,8 +187,10 @@ fn managed_run_context_skips_workspace_open_reconciliation_but_not_explicit_reco
         .expect("mark run with host-invisible owner");
     drop(runtime);
 
-    let _managed_context = EnvVarGuard::set("ORBIT_MANAGED_RUN_CONTEXT", "true".into());
-    let _run_id = EnvVarGuard::set("ORBIT_RUN_ID", "jrun-managed-child".into());
+    let _env = test_env::scoped([
+        ("ORBIT_MANAGED_RUN_CONTEXT", Some("true")),
+        ("ORBIT_RUN_ID", Some("jrun-managed-child")),
+    ]);
     let reopened = OrbitRuntime::from_roots(&global_root, &workspace_root).expect("reopen runtime");
     let stored = reopened
         .get_job_run_backend(&run.run_id)
@@ -253,7 +213,8 @@ fn managed_run_context_skips_workspace_open_reconciliation_but_not_explicit_reco
 
 #[test]
 fn workspace_open_reconciles_without_a_complete_managed_run_context() {
-    let _guard = ENV_LOCK.lock().expect("lock env");
+    // No lock here: `reopened_stale_run_state` takes the shared `test_env`
+    // guard per iteration, and that mutex is not reentrant.
     for (managed_context, run_id) in [
         (None, Some("jrun-unmanaged")),
         (Some("false"), Some("jrun-false")),

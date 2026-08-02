@@ -238,6 +238,118 @@ fn pending_run_with_dead_claimed_owner_is_reconciled() {
     }));
 }
 
+/// [ORB-10594] The incident shape, end to end through the sweep: a run whose
+/// owner was recorded in another PID namespace survives a full
+/// `reconcile_stale_job_runs` pass. Inside the sandbox that condemned three
+/// healthy runs on 2026-08-02 the owner PID is invisible — 999_999 stands in
+/// for that, since no probe available here can find it either — but the
+/// namespace recorded on the token says the verdict is not this observer's to
+/// make.
+#[cfg(unix)]
+#[test]
+fn sweep_spares_a_run_whose_owner_lives_in_another_pid_namespace() {
+    use orbit_common::utility::process_identity::{STABLE_TOKEN_PREFIX, current_pid_namespace};
+
+    let (_root, runtime) = test_runtime();
+    let Some(current) = current_pid_namespace() else {
+        return; // non-Linux: namespaces are not observable.
+    };
+    let run = insert_pending_run(&runtime, "qa_foreign_ns");
+    let started_at = Utc::now() - Duration::minutes(30);
+    runtime
+        .stores()
+        .jobs()
+        .mark_job_run_running(&run.run_id, started_at, 999_999)
+        .expect("mark running");
+    set_run_pid_start_time(
+        &runtime,
+        &run,
+        &format!("{STABLE_TOKEN_PREFIX}pidns={current}0000:Sun Aug  2 20:13:45 2026"),
+    );
+
+    runtime
+        .reconcile_stale_job_runs(None)
+        .expect("reconcile scan");
+
+    let stored = runtime
+        .get_job_run_backend(&run.run_id)
+        .expect("read run")
+        .expect("run exists");
+    assert_eq!(
+        stored.state,
+        JobRunState::Running,
+        "a run owned in another PID namespace must survive the sweep"
+    );
+    assert!(stored.finished_at.is_none());
+    assert!(stored.duration_ms.is_none());
+}
+
+/// [ORB-10594] The counterpart the fix must not break: same sweep, same
+/// unreachable PID, but the token names *this* namespace, so the run is
+/// genuinely orphaned and is still marked interrupted.
+#[cfg(unix)]
+#[test]
+fn sweep_still_condemns_a_run_whose_owner_died_in_this_pid_namespace() {
+    use orbit_common::utility::process_identity::{STABLE_TOKEN_PREFIX, current_pid_namespace};
+
+    let (_root, runtime) = test_runtime();
+    let Some(current) = current_pid_namespace() else {
+        return;
+    };
+    let run = insert_pending_run(&runtime, "qa_local_ns_dead");
+    let started_at = Utc::now() - Duration::minutes(30);
+    runtime
+        .stores()
+        .jobs()
+        .mark_job_run_running(&run.run_id, started_at, 999_999)
+        .expect("mark running");
+    set_run_pid_start_time(
+        &runtime,
+        &run,
+        &format!("{STABLE_TOKEN_PREFIX}pidns={current}:Sun Aug  2 20:13:45 2026"),
+    );
+
+    runtime
+        .reconcile_stale_job_runs(None)
+        .expect("reconcile scan");
+
+    let shown = runtime.show_job_run(&run.run_id).expect("show run");
+    assert_eq!(shown.state, JobRunState::Interrupted);
+    assert!(shown.steps.iter().any(|step| {
+        step.error_message
+            .as_deref()
+            .is_some_and(|message| message.contains("reason=process_not_found"))
+    }));
+}
+
+/// [ORB-10594] An orphaned run's recorded end of work is when its trail went
+/// quiet, not when a sweep happened to notice. Detection lag used to be booked
+/// as run duration.
+#[test]
+fn orphaned_run_finished_at_tracks_last_audit_activity_not_detection_time() {
+    let (_root, runtime) = test_runtime();
+    let run = insert_pending_run(&runtime, "qa_orphan_timing");
+    let started_at = Utc::now() - Duration::minutes(40);
+    let last_activity = started_at + Duration::minutes(5);
+    runtime
+        .stores()
+        .jobs()
+        .mark_job_run_running(&run.run_id, started_at, 999_999)
+        .expect("mark running with impossible pid");
+    write_run_finished_audit(&runtime, &run.run_id, last_activity);
+
+    let shown = runtime.show_job_run(&run.run_id).expect("show run");
+
+    assert_eq!(shown.state, JobRunState::Interrupted);
+    assert_eq!(shown.finished_at, Some(last_activity));
+    // ~5 minutes of work, not the ~40 minutes back to `started_at`.
+    let duration_ms = shown.duration_ms.expect("duration recorded");
+    assert!(
+        (295_000..=305_000).contains(&duration_ms),
+        "duration must span started_at..last activity, got {duration_ms}ms"
+    );
+}
+
 #[cfg(unix)]
 #[test]
 fn list_job_runs_reconciles_before_state_filtering() {
