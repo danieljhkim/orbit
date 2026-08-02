@@ -396,7 +396,18 @@ mod tests {
             .iter()
             .find(|(name, _)| *name == "task_pilot")
             .expect("task pilot activity is seeded");
+        let workspace_yaml =
+            include_str!("../../../../.orbit/resources/activities/task_pilot.yaml");
+        assert_eq!(
+            *yaml, workspace_yaml,
+            "shipped and workspace task-pilot resources must remain byte-identical"
+        );
         let asset = load_activity_asset(yaml).expect("parse task pilot activity");
+        assert_eq!(
+            asset.spec.fs_profile.as_deref(),
+            Some("reviewer"),
+            "read-only direct activities must not inherit unrestricted workspace writes"
+        );
         assert!(
             asset.spec.output_schema_json.get("required").is_none(),
             "agent-returned task-pilot fields stay advisory until deterministic apply"

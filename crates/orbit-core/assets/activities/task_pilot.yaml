@@ -5,6 +5,10 @@ metadata:
 spec:
   type: agent_loop
   require_response_envelope: true
+  # Read-only direct activities must select a read-only profile explicitly.
+  # Omitting this falls back to unrestricted workspace writes, which both
+  # violates the pilot contract and makes Linux reject non-subtree env denies.
+  fsProfile: reviewer
   description: >
     Read-only task preflight for one explicit bounded partition. The pilot
     inspects the selected workspace and target branch, returns exact canonical

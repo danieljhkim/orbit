@@ -306,6 +306,21 @@ fn task_pilot_pipeline_defaults_to_luna_and_bounded_all_join_partitions() {
         yaml.contains("Invoked-only"),
         "task pilot must remain an explicitly invoked workflow"
     );
+
+    let mut resolved = load_job_asset(yaml).expect("task pilot pipeline parses for resolution");
+    resolve_job_target_refs(&mut resolved.spec, &default_activity_catalog())
+        .expect("task pilot activity references resolve");
+    let JobV2StepBody::FanOut { fan_out, .. } = &resolved.spec.steps[1].body else {
+        panic!("resolved task pilot agent work must remain a fan-out");
+    };
+    let JobV2StepBody::Target(pilot) = &fan_out.worker.body else {
+        panic!("task pilot worker must resolve to an activity target");
+    };
+    assert_eq!(
+        pilot.fs_profile.as_deref(),
+        Some("reviewer"),
+        "resolved task-pilot worker must preserve the read-only filesystem profile"
+    );
 }
 
 /// [ORB-10385] Every deterministic action reachable from a shipped job —
