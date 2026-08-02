@@ -569,6 +569,47 @@ fn dashboard_scoreboard_keeps_managed_cost_ownership_out_of_executor_rankings() 
     assert!(scoreboard.contains("invocation < ${until} (exclusive cutoff"));
 }
 
+#[test]
+fn dashboard_managed_execution_cost_panel_has_responsive_presentation_hooks() {
+    let scoreboard = include_str!("../../assets/dashboard/scoreboard.js");
+    let css = include_str!("../../assets/dashboard/dashboard.css");
+
+    assert!(
+        scoreboard.contains("scoreboard-orchestration-context")
+            && scoreboard.contains("scoreboard-orchestration-buckets")
+            && scoreboard.contains("scoreboard-orchestration-bucket-head"),
+        "scope metadata and ownership buckets need separate presentation groups"
+    );
+    assert!(
+        scoreboard.contains("cost-value")
+            && scoreboard.contains("cost-coverage")
+            && scoreboard.contains("cost-comparison"),
+        "cost amount, coverage, and comparison text need independent styling hooks"
+    );
+    assert!(
+        scoreboard.contains("scoreboard-orchestration-cost primary")
+            && scoreboard.contains("\"reported\",\n      true,"),
+        "provider-reported cost must receive the primary visual treatment"
+    );
+    for kind in ["orchestrator", "shared", "unattributed", "missing"] {
+        assert!(
+            css.contains(&format!(".scoreboard-orchestration-bucket.kind-{kind}")),
+            "the {kind} ownership bucket needs a distinct theme-variable accent"
+        );
+    }
+    assert!(
+        css.contains("#scoreboard-orchestration-panel {\n        align-self: start;")
+            && css.contains("grid-template-columns: repeat(2, minmax(0, 1fr));"),
+        "the desktop panel must stay content-height and use a compact bucket grid"
+    );
+    assert!(
+        css.contains("@media (max-width: 900px)")
+            && css.contains("@media (max-width: 620px)")
+            && css.contains("overflow-wrap: anywhere;"),
+        "the managed-cost layout must collapse and wrap safely at narrow widths"
+    );
+}
+
 /// ORB-10444: the Knowledge artifact list is long enough to scroll the detail
 /// pane out of view mid-read. The pane is pinned below the fixed chrome and
 /// bounded to the remaining viewport so its body scrolls internally rather than

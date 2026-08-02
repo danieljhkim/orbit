@@ -301,20 +301,32 @@ function bucketLabel(bucket) {
   }
 }
 
-function costPopulationLine(label, total, knownCount, invocationCount, unknownCount, kind) {
+function costPopulationLine(label, total, knownCount, invocationCount, unknownCount, kind, primary = false) {
   const known = asScoreboardNumber(knownCount);
   const totalInvocations = asScoreboardNumber(invocationCount);
   const unknown = asScoreboardNumber(unknownCount);
+  const className = primary ? "scoreboard-orchestration-cost primary" : "scoreboard-orchestration-cost";
   if (known === 0) {
-    return `${label}: unknown (0/${totalInvocations} ${kind}; ${unknown} unavailable)`;
+    return el("div", { class: className }, [
+      el("span", { class: "cost-label", text: label }),
+      el("strong", { class: "cost-value unknown", text: "unknown" }),
+      el("span", { class: "cost-coverage", text: `0/${totalInvocations} ${kind} · ${unknown} unavailable` }),
+    ]);
   }
-  return `${label}: ${formatUsd(total)} (${known}/${totalInvocations} ${kind}; ${unknown} unavailable)`;
+  return el("div", { class: className }, [
+    el("span", { class: "cost-label", text: label }),
+    el("strong", { class: "cost-value", text: formatUsd(total) }),
+    el("span", { class: "cost-coverage", text: `${known}/${totalInvocations} ${kind} · ${unknown} unavailable` }),
+  ]);
 }
 
 function renderOrchestrationBucket(bucket) {
   const invocationCount = asScoreboardNumber(bucket?.invocation_count);
   const comparableCount = asScoreboardNumber(bucket?.comparable_cost_count);
-  const lines = [
+  const kind = ["orchestrator", "shared", "unattributed", "missing"].includes(bucket?.kind)
+    ? bucket.kind
+    : "unknown";
+  const costs = [
     costPopulationLine(
       "provider-reported",
       bucket?.provider_cost_usd,
@@ -322,6 +334,7 @@ function renderOrchestrationBucket(bucket) {
       invocationCount,
       bucket?.missing_provider_count,
       "reported",
+      true,
     ),
     costPopulationLine(
       "derived estimate",
@@ -333,16 +346,38 @@ function renderOrchestrationBucket(bucket) {
     ),
   ];
   if (comparableCount > 0) {
-    lines.push(
-      `comparable same-invocation population: provider ${formatUsd(bucket?.comparable_provider_cost_usd)} / derived ${formatUsd(bucket?.comparable_derived_cost_usd)} / delta ${formatUsd(bucket?.comparable_cost_delta_usd)} (${comparableCount}/${invocationCount})`,
-    );
+    costs.push(el("div", { class: "scoreboard-orchestration-cost comparable" }, [
+      el("span", { class: "cost-label", text: "comparable same-invocation population" }),
+      el("span", { class: "cost-comparison" }, [
+        el("span", {}, [
+          el("span", { class: "k", text: "provider" }),
+          el("strong", { text: formatUsd(bucket?.comparable_provider_cost_usd) }),
+        ]),
+        el("span", {}, [
+          el("span", { class: "k", text: "derived" }),
+          el("strong", { text: formatUsd(bucket?.comparable_derived_cost_usd) }),
+        ]),
+        el("span", {}, [
+          el("span", { class: "k", text: "delta" }),
+          el("strong", { text: formatUsd(bucket?.comparable_cost_delta_usd) }),
+        ]),
+      ]),
+      el("span", { class: "cost-coverage", text: `${comparableCount}/${invocationCount} invocations` }),
+    ]));
   } else {
-    lines.push(`comparable: unknown (no shared provider/derived population; do not reconcile partial sums)`);
+    costs.push(el("div", { class: "scoreboard-orchestration-cost comparable" }, [
+      el("span", { class: "cost-label", text: "comparable" }),
+      el("strong", { class: "cost-value unknown", text: "unknown" }),
+      el("span", { class: "cost-coverage", text: "no shared provider/derived population · do not reconcile partial sums" }),
+    ]));
   }
-  return el("article", { class: "scoreboard-orchestration-bucket" }, [
-    el("strong", { text: bucketLabel(bucket) }),
-    el("span", { class: "dim", text: `${invocationCount} managed invocations · ${asScoreboardNumber(bucket?.linked_task_count)} linked tasks` }),
-    ...lines.map((text) => el("div", { text })),
+  return el("article", { class: `scoreboard-orchestration-bucket kind-${kind}` }, [
+    el("div", { class: "scoreboard-orchestration-bucket-head" }, [
+      el("span", { class: "ownership-mark" }),
+      el("strong", { text: bucketLabel(bucket) }),
+    ]),
+    el("span", { class: "bucket-meta", text: `${invocationCount} managed invocations · ${asScoreboardNumber(bucket?.linked_task_count)} linked tasks` }),
+    el("div", { class: "scoreboard-orchestration-costs" }, costs),
   ]);
 }
 
@@ -358,13 +393,19 @@ function renderOrchestrationSummary(orchestration) {
   const since = orchestration.since || "all managed execution retained";
   const until = orchestration.until || orchestration.as_of || "unknown cutoff";
   const children = [
-    el("p", { text: `Managed execution cost only. Direct interactive Codex or Claude orchestration-session overhead is excluded. Window: ${since} ≤ invocation < ${until} (exclusive cutoff; as of ${orchestration.as_of || "unknown"}).` }),
-    el("p", { class: "dim", text: "Provider-first estimate policy: provider-reported values are primary; derived values remain explicitly labeled estimates with their own coverage. Only the explicitly comparable same-invocation population is safe to compare." }),
+    el("div", { class: "scoreboard-orchestration-context" }, [
+      el("div", { class: "scoreboard-orchestration-scope" }, [
+        el("span", { class: "scope-label", text: "Managed execution only" }),
+        el("span", { text: "Direct interactive Codex or Claude orchestration-session overhead is excluded." }),
+      ]),
+      el("div", { class: "scoreboard-orchestration-window", text: `Window: ${since} ≤ invocation < ${until} (exclusive cutoff; as of ${orchestration.as_of || "unknown"}).` }),
+      el("p", { class: "scoreboard-orchestration-policy", text: "Provider-first estimate policy: provider-reported values are primary; derived values remain explicitly labeled estimates with their own coverage. Only the explicitly comparable same-invocation population is safe to compare." }),
+    ]),
   ];
   if (orchestration.buckets.length === 0) {
     children.push(el("div", { class: "empty-state" }, [el("div", { class: "text", text: "No managed invocations in this bounded window." })]));
   } else {
-    children.push(...orchestration.buckets.map(renderOrchestrationBucket));
+    children.push(el("div", { class: "scoreboard-orchestration-buckets" }, orchestration.buckets.map(renderOrchestrationBucket)));
   }
   return el("section", { class: "scoreboard-orchestration-summary" }, children);
 }
