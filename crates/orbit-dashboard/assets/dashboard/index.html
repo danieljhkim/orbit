@@ -180,6 +180,7 @@
               <button class="subtab" data-subtab="runs" type="button">Recent Runs</button>
               <button class="subtab" data-subtab="metrics" type="button">Metrics</button>
               <button class="subtab" data-subtab="errors" type="button">Errors</button>
+              <button class="subtab" data-subtab="reliability" type="button">Reliability</button>
               <button class="subtab" data-subtab="scoreboard" type="button">Scoreboard</button>
             </nav>
             <div class="body scoreboard-table-wrap" id="diag-body" style="display: none;">
@@ -203,6 +204,47 @@
             </div>
           </section>
         </div>
+      </main>
+      <!-- ORB-10588: pipeline reliability. Like the scoreboard it replaces the
+           two-column diagnostics layout with its own full-width <main>. Every
+           rate rendered here states its window (panel header) and its n (in
+           the cell itself); small-n cells are withheld rather than rounded. -->
+      <main id="diagnostics-reliability-main" style="grid-template-columns: 1fr; display: none;">
+        <section class="panel" id="reliability-panel">
+          <header>
+            <span>Pipeline Reliability</span>
+            <span class="count" id="reliability-count">-</span>
+          </header>
+          <div class="scoreboard-controls" id="reliability-controls">
+            <div class="scoreboard-control-group">
+              <span class="scoreboard-control-label">window</span>
+              <span class="scoreboard-window-selector" id="reliability-window-selector" title="window scope">
+                <span class="scoreboard-window-seg" data-window="1h">1h</span>
+                <span class="scoreboard-window-seg" data-window="24h">24h</span>
+                <span class="scoreboard-window-seg on" data-window="7d">7d</span>
+                <span class="scoreboard-window-seg" data-window="30d">30d</span>
+              </span>
+            </div>
+            <span class="scoreboard-controls-spacer"></span>
+            <span class="scoreboard-controls-meta" id="reliability-meta">-</span>
+          </div>
+          <div class="rel-summary" id="reliability-summary"></div>
+          <p class="rel-note" id="reliability-denominator-note"></p>
+          <p class="rel-note rel-note-warn" id="reliability-truncation-note" style="display: none;"></p>
+          <div class="rel-chart-wrap">
+            <div class="rel-chart-title">Job-run failure rate over time</div>
+            <div class="rel-chart" id="reliability-over-time"></div>
+            <div class="rel-chart-axis" id="reliability-over-time-axis"></div>
+          </div>
+        </section>
+        <section class="panel" id="reliability-breakdown-panel">
+          <header><span>Attribution</span></header>
+          <div class="body" id="reliability-breakdown" style="padding: 16px; display: flex; flex-direction: column; gap: 16px; overflow-y: auto; background: var(--bg);"></div>
+        </section>
+        <section class="panel" id="reliability-activities-panel">
+          <header><span>Recovery Evidence</span></header>
+          <div class="body" id="reliability-activities" style="padding: 16px; display: flex; flex-direction: column; gap: 16px; overflow-y: auto; background: var(--bg);"></div>
+        </section>
       </main>
       <!-- Scoreboard is a diagnostics-shaped view, so it lives under the
            Diagnostics tab as a subtab rather than a top-level nav entry. Its

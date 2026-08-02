@@ -5,6 +5,7 @@ import { el, statusPill, stateCell, fetchJson, listItems, requestJson, postJson,
 import { buildChips, cacheCrewPayload, copyTaskIdWithNotice, hasCrewOptions, openVisibleTask, renderTasks, setPinnedExternalTask, wireSearch } from './tasks.js';
 import { applyAuditHashQuery, buildAuditChips, buildAuditHash, fetchAndRenderAudit, fetchAndRenderPolicy, getActiveAuditSubtab, navigateToAuditExecution, renderAuditSummary, setActiveAuditSubtabFromButton, setAuditSubtab, syncAuditControls, wireAuditSearch, } from './audit.js';
 import { renderScoreboard } from './scoreboard.js';
+import { fetchAndRenderReliability, wireReliabilityWindowSelector } from './reliability.js';
 import { initLogTail, fitLogPanelToViewport } from './log-tail.js';
 import { renderDiagnostics, renderImplementOneCard as renderImplOne, } from './diagnostics.js';
 import { renderMarkdown } from './markdown.js';
@@ -160,6 +161,11 @@ function routerContext() {
     // callbacks (close over app.js scope)
     refreshDashboard,
     renderDiagnostics: () => renderDiagnostics(diagnosticsContext()),
+    // ORB-10588: Reliability aggregates server-side across workspaces, so a
+    // subtab switch can fetch straight away instead of waiting for the next
+    // refresh tick (and without the aggregate-view guard the other diagnostics
+    // fetches need).
+    fetchReliability: () => fetchAndRenderReliability().catch((e) => console.error("Failed to fetch reliability metrics", e)),
     fitLogPanelToViewport,
 
     // audit pass-throughs (re-exported here for router; imported at top of this file)
@@ -1374,6 +1380,16 @@ function activeRefreshJobs() {
     // implement_one) take the backend `Ws` extractor and 400 without a concrete
     // workspace — so in aggregate mode skip the whole tab and show placeholders
     // (subtab switches are likewise guarded in router.js setDiagSubtabImpl).
+    // ORB-10588: /api/metrics/reliability takes the whole DashboardState, not
+    // the `Ws` extractor, so it answers in aggregate mode too — it is fetched
+    // ahead of the guard below rather than being placeheld with the rest.
+    if (activeDiagSubtab === "reliability") {
+      jobs.push(
+        fetchAndRenderReliability()
+          .catch((e) => console.error("Failed to fetch reliability metrics", e))
+      );
+      return jobs;
+    }
     if (aggregate) {
       renderDiagnosticsPlaceholders();
       return jobs;
@@ -1639,6 +1655,7 @@ wireGlobalTaskResolver();
 buildAuditChips(auditContext());
 wireAuditSearch(auditContext());
 $("refresh-btn").addEventListener("click", refreshDashboard);
+wireReliabilityWindowSelector();
 
 initRuns(runsContext());
 initRunDetail(runDetailContext());

@@ -1,5 +1,6 @@
 //! Activity/job runtime types and schemaVersion 2 asset loaders.
 
+pub mod activity_roles;
 pub mod activity_v2;
 pub mod asset_loader;
 pub mod audit_envelope;
@@ -9,6 +10,7 @@ pub mod job_v2;
 pub mod schema_header;
 pub mod tool_allowlist;
 
+pub use activity_roles::JobActivityRoles;
 pub use activity_v2::{
     ActivityV2, ActivityV2Spec, AgentLoopSpec, AgentRole, Backend, DeterministicSpec, OnDenial,
     Provider, ProviderAlias, ProviderDeprecation, ProviderDiagnostic, ProviderEntryPoint,

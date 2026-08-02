@@ -26,7 +26,13 @@ const $ = (id) => document.getElementById(id);
 // `run-detail` route. A deprecated tab was retired outright and `scoreboard`,
 // being diagnostics-shaped, now routes as `#diagnostics/scoreboard`.
 const TABS = ["tasks", "audit", "diagnostics", "knowledge", "run-detail"];
-const DIAG_SUBTABS = ["runs", "metrics", "errors", "scoreboard"];
+const DIAG_SUBTABS = ["runs", "metrics", "errors", "reliability", "scoreboard"];
+// ORB-10444/ORB-10588: subtabs that replace the two-column diagnostics layout
+// with their own full-width <main>, keyed by the element they reveal.
+const DIAG_FULL_WIDTH_MAINS = {
+  scoreboard: "diagnostics-scoreboard-main",
+  reliability: "diagnostics-reliability-main",
+};
 const RUN_DETAIL_SUBTABS = ["steps", "events"];
 const KNOWLEDGE_SUBTABS = ["learnings", "adrs", "frictions"];
 
@@ -74,24 +80,32 @@ function setDiagSubtabImpl(ctx, name) {
     subIndicator.style.left = `${activeBtn.offsetLeft}px`;
   }
 
-  // ORB-10444: Scoreboard is a diagnostics subtab. It renders into its own
-  // full-width <main>, so the two-column diagnostics layout (list + summary
-  // side card) is swapped out for it while the subtab nav stays reachable.
-  const scoreboardActive = name === "scoreboard";
-  const scoreboardMain = $("diagnostics-scoreboard-main");
+  // ORB-10444/ORB-10588: Scoreboard and Reliability are diagnostics subtabs
+  // that render into their own full-width <main>, so the two-column
+  // diagnostics layout (list + summary side card) is swapped out for them
+  // while the subtab nav stays reachable.
+  const fullWidthMain = DIAG_FULL_WIDTH_MAINS[name];
   const sideCol = $("diagnostics-side-col");
   const diagMain = $("diagnostics-main");
-  if (scoreboardMain) scoreboardMain.style.display = scoreboardActive ? "grid" : "none";
-  if (sideCol) sideCol.style.display = scoreboardActive ? "none" : "flex";
+  for (const [subtab, mainId] of Object.entries(DIAG_FULL_WIDTH_MAINS)) {
+    const node = $(mainId);
+    if (node) node.style.display = subtab === name ? "grid" : "none";
+  }
+  if (sideCol) sideCol.style.display = fullWidthMain ? "none" : "flex";
   if (diagMain) {
-    diagMain.style.gridTemplateColumns = scoreboardActive
+    diagMain.style.gridTemplateColumns = fullWidthMain
       ? "minmax(0, 1fr)"
       : "minmax(0, 2fr) minmax(280px, 1.15fr)";
   }
-  if (scoreboardActive) {
+  if (fullWidthMain) {
     $("diag-body").style.display = "none";
     $("runs-body").style.display = "none";
-    if (isAggregateView()) renderPanelPlaceholder("scoreboard-body");
+    // Reliability aggregates across workspaces server-side, so it stays live
+    // in the aggregate view; the scoreboard is per-workspace and does not.
+    if (name === "scoreboard" && isAggregateView()) renderPanelPlaceholder("scoreboard-body");
+    if (name === "reliability" && ctx.fetchReliability) {
+      ctx.fetchReliability();
+    }
     return;
   }
 
