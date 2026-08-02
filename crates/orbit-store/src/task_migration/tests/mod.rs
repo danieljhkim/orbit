@@ -61,6 +61,7 @@ fn make_bundle(id: &str, title: &str, relations: Vec<TaskRelation>) -> TaskBundl
             pr_status: None,
             job_run_id: None,
             crew: None,
+            orchestrator: Some("archive-orchestrator".to_string()),
             relations,
             tags: vec!["migration".to_string()],
             context_files: Vec::new(),
@@ -180,6 +181,10 @@ fn round_trip_keeps_ids_and_content() {
     .unwrap();
     assert_eq!(landed_a, a);
     assert_eq!(landed_b, b);
+    assert_eq!(
+        landed_a.envelope.orchestrator.as_deref(),
+        Some("archive-orchestrator")
+    );
 
     // Index rows exist and allocator advanced past ORB-00001.
     assert_eq!(

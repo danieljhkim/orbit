@@ -76,6 +76,7 @@ fn create_context_task_with_status(
             external_refs: Vec::new(),
             source_task_id: None,
             crew: None,
+            orchestrator: None,
             comments: Vec::new(),
         })
         .expect("create task");

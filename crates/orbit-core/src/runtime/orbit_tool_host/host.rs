@@ -262,6 +262,7 @@ impl HubCoordinationExecutor {
             external_refs: Vec::new(),
             source_task_id: None,
             crew: optional_string(&input, "crew")?,
+            orchestrator: optional_string(&input, "orchestrator")?,
             comments: Vec::new(),
         })?;
         self.task_json(&task)
@@ -295,6 +296,7 @@ impl HubCoordinationExecutor {
             "pr_status",
             "job_run_id",
             "crew",
+            "orchestrator",
             "context_files",
             "context",
             "artifacts",
@@ -393,6 +395,15 @@ impl HubCoordinationExecutor {
             .transpose()?;
         let explicit_planned_by = raw_clearable(&input, "planned_by")?;
         let explicit_implemented_by = raw_clearable(&input, "implemented_by")?;
+        let orchestrator = raw_clearable(&input, "orchestrator")?;
+        if orchestrator.is_some() {
+            if !matches!(current.status, TaskStatus::Proposed | TaskStatus::Backlog) {
+                return Err(OrbitError::InvalidInput(format!(
+                    "task {id} is {}; orchestrator can only be changed while proposed or backlog",
+                    current.status
+                )));
+            }
+        }
         self.inner.tasks.document.update_task_document(
             &id,
             TaskDocumentUpdateParams {
@@ -431,6 +442,7 @@ impl HubCoordinationExecutor {
                 source_task_id: raw_clearable(&input, "source_task_id")?,
                 job_run_id: raw_clearable(&input, "job_run_id")?,
                 crew: raw_clearable(&input, "crew")?,
+                orchestrator,
                 created_by: None,
             },
         )?;

@@ -173,6 +173,7 @@ fn task_with_type(task_type: TaskType, title: &str) -> Task {
         relations: Vec::new(),
         job_run_id: None,
         crew: None,
+        orchestrator: None,
         created_at: now,
         updated_at: now,
     }

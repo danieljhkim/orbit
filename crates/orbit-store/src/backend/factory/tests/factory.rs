@@ -35,6 +35,7 @@ fn task_params(title: &str, status: TaskStatus) -> TaskCreateParams {
         external_refs: Vec::new(),
         source_task_id: None,
         crew: None,
+        orchestrator: None,
         comments: Vec::new(),
     }
 }
@@ -91,6 +92,7 @@ fn workspace_task_backends_exposes_create_get_and_list_trait_surface() {
             external_refs: Vec::new(),
             source_task_id: None,
             crew: None,
+            orchestrator: None,
             comments: Vec::new(),
         })
         .expect("create task");

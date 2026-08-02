@@ -59,6 +59,9 @@ pub struct TaskAddArgs {
     /// Named crew to use when running this task
     #[arg(long)]
     pub crew: Option<String>,
+    /// Named crew responsible for orchestration attribution
+    #[arg(long)]
+    pub orchestrator: Option<String>,
     /// Explicit agent model to persist on the task artifact
     #[arg(long)]
     pub model: Option<String>,
@@ -101,6 +104,7 @@ impl Execute for TaskAddArgs {
                     .collect::<Result<Vec<_>, _>>()?,
                 source_task_id: self.source_task.clone(),
                 crew: self.crew,
+                orchestrator: self.orchestrator,
             },
             agent,
             model,

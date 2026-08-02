@@ -120,6 +120,7 @@ pub struct TaskCreateParams {
     pub external_refs: Vec<ExternalRef>,
     pub source_task_id: Option<String>,
     pub crew: Option<String>,
+    pub orchestrator: Option<String>,
     pub comments: Vec<TaskComment>,
 }
 
@@ -153,6 +154,7 @@ pub struct TaskDocumentUpdateParams {
     pub source_task_id: Option<Option<String>>,
     pub job_run_id: Option<Option<String>>,
     pub crew: Option<Option<String>>,
+    pub orchestrator: Option<Option<String>>,
 }
 
 #[derive(Debug, Default, Clone)]

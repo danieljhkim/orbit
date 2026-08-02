@@ -598,6 +598,10 @@ pub struct Task {
     pub job_run_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub crew: Option<String>,
+    /// Explicit named crew that owns orchestration of this task. This is
+    /// attribution metadata only; execution resolution continues to use `crew`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub orchestrator: Option<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }

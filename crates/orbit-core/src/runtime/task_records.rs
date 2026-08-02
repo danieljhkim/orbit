@@ -34,6 +34,7 @@ pub(crate) struct TaskRecordUpdateParams {
     pub(crate) source_task_id: Option<Option<String>>,
     pub(crate) job_run_id: Option<Option<String>>,
     pub(crate) crew: Option<Option<String>>,
+    pub(crate) orchestrator: Option<Option<String>>,
     pub(crate) status_event: Option<String>,
     pub(crate) status_note: Option<String>,
     pub(crate) append_history: Vec<TaskHistoryEntry>,
@@ -63,6 +64,7 @@ impl TaskRecordUpdateParams {
             || self.source_task_id.is_some()
             || self.job_run_id.is_some()
             || self.crew.is_some()
+            || self.orchestrator.is_some()
     }
 
     fn has_history_changes(&self) -> bool {
@@ -140,6 +142,7 @@ impl TaskRecordService<'_> {
                     source_task_id: params.source_task_id.clone(),
                     job_run_id: params.job_run_id.clone(),
                     crew: params.crew.clone(),
+                    orchestrator: params.orchestrator.clone(),
                 },
             )?;
         }

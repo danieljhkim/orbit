@@ -511,6 +511,7 @@ fn test_task_no_attrib(id: &str, status: TaskStatus) -> orbit_common::types::Tas
         relations: Vec::new(),
         job_run_id: None,
         crew: None,
+        orchestrator: None,
         created_at: Utc::now(),
         updated_at: Utc::now(),
     }

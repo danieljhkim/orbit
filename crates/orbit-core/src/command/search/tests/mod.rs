@@ -64,6 +64,7 @@ fn add_task_with_status(runtime: &OrbitRuntime, title: &str, status: TaskStatus)
             external_refs: Vec::new(),
             source_task_id: None,
             crew: None,
+            orchestrator: None,
             comments: Vec::new(),
         })
         .expect("create task")
