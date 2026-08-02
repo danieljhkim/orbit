@@ -15,7 +15,7 @@ impl Execute for ToolShowArgs {
     fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
         let tool = runtime.show_tool(&self.name)?;
 
-        use crate::output::color::{bold, job_state_color};
+        use crate::output::color::{Domain, bold, text};
         println!("{} {}", bold("Name:"), tool.name);
         println!("{} {}", bold("Description:"), tool.description);
         println!(
@@ -26,7 +26,7 @@ impl Execute for ToolShowArgs {
         println!(
             "{} {}",
             bold("Status:"),
-            job_state_color(tool_status(&tool))
+            text(tool_status(&tool), Domain::JobState)
         );
 
         if tool.parameters.is_empty() {

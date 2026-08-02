@@ -638,7 +638,9 @@ fn docs_tools_are_cli_only_and_visible_in_tool_list_all() {
         !output.status.success(),
         "inactive docs tool unexpectedly succeeded through tool run"
     );
-    assert!(String::from_utf8_lossy(&output.stdout).contains("inactive"));
+    // Errors, including the JSON payload, are on stderr [ORB-10570].
+    assert!(output.stdout.is_empty());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("inactive"));
 
     let output = workspace.run_json(&["docs", "list", "--json"], "docs list");
     assert!(!output.as_array().expect("array").is_empty());

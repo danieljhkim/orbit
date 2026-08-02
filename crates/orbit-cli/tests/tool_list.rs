@@ -241,5 +241,8 @@ fn tool_run_rejects_inactive_tools() {
         ])
         .assert()
         .failure()
-        .stdout(predicate::str::contains("inactive"));
+        // The JSON error payload moved to stderr [ORB-10570]; stdout carries
+        // the payload and nothing else.
+        .stdout(predicate::str::is_empty())
+        .stderr(predicate::str::contains("inactive"));
 }

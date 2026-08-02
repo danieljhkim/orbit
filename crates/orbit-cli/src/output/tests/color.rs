@@ -1,9 +1,6 @@
 use comfy_table::{Attribute, Cell};
 
-use super::super::color::{
-    Domain, Role, doctor_status_color_cell, job_state_color, job_state_color_cell, priority_color,
-    priority_color_cell, role_for, status_color, status_color_cell, task_type_color_cell,
-};
+use super::super::color::{Domain, Role, cell, role_for, text};
 
 fn expected_cell(value: &str, role: Role) -> Cell {
     let cell = Cell::new(value);
@@ -63,6 +60,10 @@ const CASES: &[(Domain, &str, Role)] = &[
     (Domain::DoctorStatus, "ERROR", Role::Error),
     (Domain::DoctorStatus, "error", Role::Error),
     (Domain::DoctorStatus, "unknown", Role::Neutral),
+    (Domain::AuditStatus, "success", Role::Ok),
+    (Domain::AuditStatus, "failure", Role::Error),
+    (Domain::AuditStatus, "denied", Role::Warn),
+    (Domain::AuditStatus, "unknown", Role::Neutral),
 ];
 
 #[test]
@@ -77,29 +78,33 @@ fn mapping_matches_expected_role() {
 }
 
 #[test]
-fn cell_and_string_forms_agree_for_every_mapped_value() {
+fn cell_and_text_forms_agree_for_every_mapped_value() {
     for (domain, value, role) in CASES {
-        match domain {
-            Domain::TaskStatus => {
-                assert_eq!(status_color_cell(value), expected_cell(value, *role));
-                assert_eq!(status_color(value), expected_string(value, *role));
-            }
-            Domain::Priority => {
-                assert_eq!(priority_color_cell(value), expected_cell(value, *role));
-                assert_eq!(priority_color(value), expected_string(value, *role));
-            }
-            Domain::JobState => {
-                assert_eq!(job_state_color_cell(value), expected_cell(value, *role));
-                assert_eq!(job_state_color(value), expected_string(value, *role));
-            }
-            Domain::TaskType => {
-                assert_eq!(task_type_color_cell(value), expected_cell(value, *role));
-            }
-            Domain::DoctorStatus => {
-                assert_eq!(doctor_status_color_cell(value), expected_cell(value, *role));
-            }
-        }
+        assert_eq!(
+            cell(value, *domain),
+            expected_cell(value, *role),
+            "{domain:?}/{value} as a cell"
+        );
+        assert_eq!(
+            text(value, *domain),
+            expected_string(value, *role),
+            "{domain:?}/{value} as a line"
+        );
     }
+}
+
+#[test]
+fn tagging_with_a_role_directly_bypasses_the_domain_table() {
+    // A sentence belongs to no vocabulary, so the call site names the role. It
+    // must not be looked up (and found absent, hence neutral) in one.
+    assert_eq!(
+        text("Workspace healthy.", Role::Ok),
+        expected_string("Workspace healthy.", Role::Ok)
+    );
+    assert_eq!(
+        cell("Workspace healthy.", Role::Ok),
+        expected_cell("Workspace healthy.", Role::Ok)
+    );
 }
 
 #[test]
@@ -109,10 +114,13 @@ fn unmapped_value_is_neutral_and_does_not_panic() {
         Role::Neutral
     );
     assert_eq!(
-        status_color_cell("totally-unknown"),
+        cell("totally-unknown", Domain::TaskStatus),
         Cell::new("totally-unknown")
     );
-    assert_eq!(status_color("totally-unknown"), "totally-unknown");
+    assert_eq!(
+        text("totally-unknown", Domain::TaskStatus),
+        "totally-unknown"
+    );
 }
 
 #[test]
@@ -122,6 +130,6 @@ fn backlog_is_no_longer_inconsistent_between_forms() {
     // style) -- same rendering, but two divergent code paths. Both now go
     // through the same table entry (the wildcard), which this asserts by
     // comparing them directly against the plain, unstyled form.
-    assert_eq!(status_color_cell("backlog"), Cell::new("backlog"));
-    assert_eq!(status_color("backlog"), "backlog");
+    assert_eq!(cell("backlog", Domain::TaskStatus), Cell::new("backlog"));
+    assert_eq!(text("backlog", Domain::TaskStatus), "backlog");
 }

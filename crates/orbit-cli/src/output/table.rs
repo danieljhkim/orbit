@@ -7,13 +7,17 @@
 //! [`Table::add_row`] is the only way to add a row and it caps every row at one
 //! line; `comfy_table`'s unbounded row constructor is not reachable from outside
 //! this module.
-
-use std::io::IsTerminal;
+//!
+//! Width and styling both come from `output::sink` (ADR-0306): a zero-width
+//! sink truncates nothing, and a sink that disallows color renders the same
+//! bytes a file redirect would.
 
 use comfy_table::{
     Attribute, Cell, CellAlignment, ColumnConstraint, ContentArrangement, Row, Table as Grid,
     Width, presets,
 };
+
+use crate::output::sink;
 
 /// Spaces between two rendered columns.
 const GUTTER: usize = 2;
@@ -160,8 +164,8 @@ impl Table {
             eprintln!("{}", self.empty_message);
             return;
         }
-        let terminal = std::io::stdout().is_terminal();
-        let rendered = self.render(sink_width(terminal), terminal);
+        let sink = sink::active();
+        let rendered = self.render(sink.truncate_width(), sink.color_allowed());
         for notice in &rendered.notices {
             eprintln!("{notice}");
         }
@@ -171,6 +175,10 @@ impl Table {
     /// Render at an explicit width. `sink_width` of `None` means the sink has no
     /// width and nothing is truncated; `styled` carries whether the sink accepts
     /// ANSI styling.
+    ///
+    /// Both arguments come from the sink in [`Table::print`]. Tests pass them
+    /// directly so geometry and styling are pinned rather than inherited from
+    /// whatever terminal ran `cargo test`.
     pub(crate) fn render(&self, sink_width: Option<usize>, styled: bool) -> Rendered {
         let visible = self.visible_columns();
         let natural = self.natural_widths(&visible);
@@ -180,7 +188,12 @@ impl Table {
         grid.load_preset(presets::NOTHING);
         grid.set_content_arrangement(ContentArrangement::Disabled);
         grid.set_truncation_indicator(ELLIPSIS);
-        if !styled {
+        // Told, never asked. Left to itself `comfy_table` probes stdout and
+        // ignores `NO_COLOR`, which is exactly the disagreement with `colored`
+        // that let a redirect capture escape sequences [ADR-0308].
+        if styled {
+            grid.enforce_styling();
+        } else {
             grid.force_no_tty();
         }
         grid.set_header(layout.iter().map(|(index, _)| {
@@ -384,23 +397,4 @@ fn truncate_middle(value: &str, width: usize) -> String {
     truncated.push_str(ELLIPSIS);
     truncated.extend(&chars[chars.len() - tail..]);
     truncated
-}
-
-/// The width the list must fit into.
-///
-/// Piped output has no width and is never truncated, which keeps a redirected
-/// list carrying whole values. On a terminal, `COLUMNS` wins over the terminal
-/// query so a caller can pin the geometry. Sourcing this from an output sink
-/// instead is ADR-0306's work; the width policy above is what consumes it.
-fn sink_width(terminal: bool) -> Option<usize> {
-    if !terminal {
-        return None;
-    }
-    if let Ok(columns) = std::env::var("COLUMNS")
-        && let Ok(width) = columns.trim().parse::<usize>()
-        && width > 0
-    {
-        return Some(width);
-    }
-    Grid::new().width().map(usize::from)
 }

@@ -1,10 +1,22 @@
+//! Semantic roles, and the two renderings of a role-tagged value.
+//!
+//! A call site tags a value with what it *means* — either directly
+//! ([`Role::Ok`] for a healthy-workspace line) or by naming the vocabulary it
+//! came from ([`role_for`]) — and [`cell`] or [`text`] turns that into ANSI.
+//! No call site names a color, and none asks whether color is permitted:
+//! emission is gated once, by the sink, via
+//! [`OutputSink::apply_color_policy`](crate::output::sink::OutputSink::apply_color_policy)
+//! for the `colored` paths here and by `output::table` for the `comfy_table`
+//! ones. See `docs/design/terminal-interface/specs/color-and-styling.md`
+//! (ADR-0308).
+
 use colored::Colorize;
 use comfy_table::{Attribute, Cell, Color as TableColor};
 
 /// The closed set of semantic roles a domain value can carry.
 /// See `docs/design/terminal-interface/specs/color-and-styling.md` (ADR-0308).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(crate) enum Role {
+pub enum Role {
     Ok,
     Warn,
     Error,
@@ -17,18 +29,19 @@ pub(crate) enum Role {
 /// the same across domains (e.g. `"active"` as a job state vs. `"archived"`
 /// as a task status) so each gets the role its own vocabulary intends.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(crate) enum Domain {
+pub enum Domain {
     TaskStatus,
     Priority,
     TaskType,
     JobState,
     DoctorStatus,
+    AuditStatus,
 }
 
 /// The single value-to-role mapping covering every domain vocabulary in the
 /// crate. Unmapped values resolve to `Role::Neutral` — never a panic, never
 /// an arbitrary color. Adding a status is a one-line edit here.
-pub(crate) fn role_for(domain: Domain, value: &str) -> Role {
+pub fn role_for(domain: Domain, value: &str) -> Role {
     use Domain::*;
     use Role::*;
     match (domain, value) {
@@ -52,13 +65,19 @@ pub(crate) fn role_for(domain: Domain, value: &str) -> Role {
         (DoctorStatus, "warning") => Warn,
         (DoctorStatus, "ERROR" | "error") => Error,
 
+        (AuditStatus, "success") => Ok,
+        (AuditStatus, "failure") => Error,
+        // Denied is a policy outcome, not a fault: it needs attention without
+        // reading as a broken command.
+        (AuditStatus, "denied") => Warn,
+
         // TaskType carries no role today; every value renders neutral.
         _ => Neutral,
     }
 }
 
 impl Role {
-    pub(crate) fn table_color(self) -> Option<TableColor> {
+    pub fn table_color(self) -> Option<TableColor> {
         match self {
             Role::Ok => Some(TableColor::Green),
             Role::Warn => Some(TableColor::Yellow),
@@ -68,7 +87,7 @@ impl Role {
         }
     }
 
-    pub(crate) fn line_color(self) -> Option<colored::Color> {
+    pub fn line_color(self) -> Option<colored::Color> {
         match self {
             Role::Ok => Some(colored::Color::Green),
             Role::Warn => Some(colored::Color::Yellow),
@@ -78,9 +97,48 @@ impl Role {
         }
     }
 
-    pub(crate) fn is_dim(self) -> bool {
+    pub fn is_dim(self) -> bool {
         matches!(self, Role::Muted)
     }
+}
+
+/// How a call site tags a value: with a [`Role`] outright when it knows the
+/// meaning, or with the [`Domain`] the value came from when the mapping table
+/// should decide.
+///
+/// Both spellings exist because both cases are real. `"Workspace healthy."` is
+/// a sentence whose role is `Ok` and which belongs to no vocabulary; a task's
+/// `status` belongs to `TaskStatus` and must get whatever role that table says,
+/// so that adding a status stays a one-line edit in [`role_for`].
+pub trait Tag {
+    /// The role this tag assigns to `value`.
+    fn role_of(self, value: &str) -> Role;
+}
+
+impl Tag for Role {
+    fn role_of(self, _value: &str) -> Role {
+        self
+    }
+}
+
+impl Tag for Domain {
+    fn role_of(self, value: &str) -> Role {
+        role_for(self, value)
+    }
+}
+
+/// A role-tagged value as a table cell.
+///
+/// The role's color is attached unconditionally; whether `comfy_table` emits it
+/// is the sink's call, applied per render in `output::table`.
+pub fn cell(value: &str, tag: impl Tag) -> Cell {
+    cell_for(value, tag.role_of(value))
+}
+
+/// A role-tagged value as a styled line, for the `println!` paths that are not
+/// tables. Emits nothing when the sink disallowed color.
+pub fn text(value: &str, tag: impl Tag) -> String {
+    string_for(value, tag.role_of(value))
 }
 
 fn cell_for(value: &str, role: Role) -> Cell {
@@ -109,42 +167,15 @@ fn string_for(value: &str, role: Role) -> String {
     styled.to_string()
 }
 
-pub fn status_color_cell(status: &str) -> Cell {
-    cell_for(status, role_for(Domain::TaskStatus, status))
-}
-
-pub fn priority_color_cell(priority: &str) -> Cell {
-    cell_for(priority, role_for(Domain::Priority, priority))
-}
-
-pub fn task_type_color_cell(task_type: &str) -> Cell {
-    cell_for(task_type, role_for(Domain::TaskType, task_type))
-}
-
-pub fn job_state_color_cell(state: &str) -> Cell {
-    cell_for(state, role_for(Domain::JobState, state))
-}
-
-pub fn doctor_status_color_cell(status: &str) -> Cell {
-    cell_for(status, role_for(Domain::DoctorStatus, status))
-}
-
-pub fn status_color(status: &str) -> String {
-    string_for(status, role_for(Domain::TaskStatus, status))
-}
-
-pub fn priority_color(priority: &str) -> String {
-    string_for(priority, role_for(Domain::Priority, priority))
-}
-
-pub fn job_state_color(state: &str) -> String {
-    string_for(state, role_for(Domain::JobState, state))
-}
-
+/// Structure, not severity: a field label or the primary identifier column
+/// (spec §3). Never used to mean "worse" — that is what [`Role::Error`] is for.
 pub fn bold(text: &str) -> String {
     text.bold().to_string()
 }
 
+/// De-emphasis for a value the reader may skip. Prefer
+/// `text(value, Role::Muted)` when the dimness is carrying a *meaning*; this is
+/// for incidental chrome such as a bracketed timestamp.
 pub fn dimmed(text: &str) -> String {
     text.dimmed().to_string()
 }

@@ -3,6 +3,7 @@ use orbit_core::{OrbitError, OrbitRuntime};
 use serde_json::{Value, json};
 
 use crate::command::Execute;
+use crate::output::color::Domain;
 
 use super::support::{format_required_tool_input_summary, tool_status};
 
@@ -60,7 +61,7 @@ impl Execute for ToolListArgs {
                 use comfy_table::Cell;
                 table.add_row(vec![
                     Cell::new(&tool.name),
-                    crate::output::color::job_state_color_cell(tool_status(tool)),
+                    crate::output::color::cell(tool_status(tool), Domain::JobState),
                     Cell::new(if tool.builtin { "yes" } else { "no" }),
                     Cell::new(format_required_tool_input_summary(&tool.parameters)),
                     Cell::new(&tool.description),

@@ -2,11 +2,11 @@
 //! feed at `~/.orbit/state/logs/orbit.jsonl` (or wherever `--path` /
 //! `ORBIT_LOG_PATH` points). Renders the v2-terminal-console mockup's four
 //! columns: timestamp, source, code, message. Designed for human eyes by
-//! default and pipeline-friendly when stdout is not a TTY (`--json` or
+//! default and pipeline-friendly when the sink disallows color (`--json` or
 //! plain-text without ANSI escapes).
 
 use std::fs::File;
-use std::io::{self, BufRead, BufReader, IsTerminal, Seek, SeekFrom, Write};
+use std::io::{self, BufRead, BufReader, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::thread;
 use std::time::Duration;
@@ -16,6 +16,7 @@ use orbit_core::{OrbitError, OrbitRuntime};
 use serde_json::Value;
 
 use crate::command::Execute;
+use crate::output::sink;
 
 use super::format::{
     Filters, LevelFilter, build_filters as build_shared_filters, format_event_line,
@@ -60,10 +61,18 @@ impl Execute for TailArgs {
     fn execute(self, _runtime: &OrbitRuntime) -> Result<(), OrbitError> {
         let path = resolve_log_path(self.path.as_deref())?;
         let filters = build_filters(&self)?;
-        let stdout = io::stdout();
-        let use_color = stdout.is_terminal();
-        let mut writer = stdout.lock();
-        run_tail(&path, &self, &filters, use_color, &mut writer).map_err(io_to_orbit)
+        // Whether to colorize is the sink's answer, not this command's: the
+        // local `is_terminal()` check that used to live here ignored NO_COLOR
+        // and disagreed with every table-rendering command (ADR-0308 §2).
+        let use_color = sink::active().color_allowed();
+        let mut writer = io::stdout().lock();
+        match run_tail(&path, &self, &filters, use_color, &mut writer) {
+            Ok(()) => Ok(()),
+            // The reader closing the pipe is how `orbit log tail -f | head`
+            // ends, not a failure to report (spec §5).
+            Err(err) if crate::output::pipe::is_broken_pipe(&err) => Ok(()),
+            Err(err) => Err(io_to_orbit(err)),
+        }
     }
 }
 

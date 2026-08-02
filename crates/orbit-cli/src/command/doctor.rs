@@ -4,6 +4,7 @@ use orbit_core::{OrbitError, OrbitRuntime};
 use serde_json::{Value, json};
 
 use crate::command::Execute;
+use crate::output::color::{Domain, Role};
 
 /// `orbit doctor` — workspace-level self-diagnostics [ORB-10005].
 #[derive(Args)]
@@ -82,7 +83,7 @@ impl Execute for DoctorCommand {
                 use comfy_table::Cell;
                 table.add_row(vec![
                     Cell::new(&row.check_name),
-                    crate::output::color::doctor_status_color_cell(status_label(row.status)),
+                    crate::output::color::cell(status_label(row.status), Domain::DoctorStatus),
                     Cell::new(human_detail(row)),
                 ]);
             }
@@ -91,7 +92,7 @@ impl Execute for DoctorCommand {
             if failures == 0 && warnings == 0 {
                 println!(
                     "\n{}",
-                    crate::output::color::job_state_color("Workspace healthy.")
+                    crate::output::color::text("Workspace healthy.", Role::Ok)
                 );
             } else {
                 eprintln!("\n{failures} failure(s), {warnings} warning(s).");

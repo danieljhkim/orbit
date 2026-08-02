@@ -6,7 +6,7 @@ use serde_json::Value;
 use crate::command::Execute;
 use crate::parse::parse_since;
 
-use super::support::{audit_event_to_json, print_audit_event_line};
+use super::support::{AuditListFilters, audit_event_to_json, print_audit_events};
 
 #[derive(Args)]
 pub struct AuditListArgs {
@@ -63,6 +63,13 @@ pub struct AuditListArgs {
 impl Execute for AuditListArgs {
     fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
         let since = self.since.map(|s| parse_since(&s)).transpose()?;
+        // Captured before the filter consumes them: a column the caller
+        // filtered on stays on screen even though it now reads uniform.
+        let filtered = AuditListFilters {
+            status: self.status.is_some(),
+            role: self.role.is_some(),
+            tool: self.tool.is_some(),
+        };
         let events = runtime.list_audit_events_filtered(&AuditEventFilter {
             since,
             tool_name: self.tool,
@@ -85,9 +92,7 @@ impl Execute for AuditListArgs {
             let values: Vec<Value> = events.iter().map(audit_event_to_json).collect();
             crate::output::json::print_pretty(&Value::Array(values))
         } else {
-            for event in &events {
-                print_audit_event_line(event);
-            }
+            print_audit_events(&events, filtered);
             Ok(())
         }
     }

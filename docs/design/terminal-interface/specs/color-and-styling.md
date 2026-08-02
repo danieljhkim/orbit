@@ -1,7 +1,7 @@
 ---
 type: design
 summary: "Spec: Color and Styling"
-last_validated: 2026-08-01
+last_validated: 2026-08-02
 ---
 
 # Spec: Color and Styling
@@ -41,7 +41,7 @@ Resolved once, at the sink, in this precedence:
 
 `TERM=dumb` forces off regardless of 3 and 4.
 
-**Invariant:** exactly one place in the crate reads these. A call site that consults `NO_COLOR` itself is a defect, including the existing local check in `command/log/tail.rs`.
+**Invariant:** exactly one place in the crate reads these — `output/sink.rs`, enforced by `scripts/check-terminal-state-guard.sh`. A call site that consults them itself is a defect. Because the two styling crates each ship their own probe, "one place" also means the sink must *override* them rather than agree with them: `OutputSink::apply_color_policy` sets `colored`'s global override, and `output::table` passes `enforce_styling`/`force_no_tty` per render. Neither backend is left to ask.
 
 ## 3. Rules
 
@@ -65,9 +65,11 @@ Resolved once, at the sink, in this precedence:
 
 ## 6. Migration
 
-1. Define the role enum and the single domain-value mapping table.
-2. Reimplement the eight existing `*_color*` functions as thin wrappers over it, so no call site changes yet and the drift is fixed immediately.
-3. Move emission gating into the sink; delete the local `is_terminal` check in `command/log/tail.rs`.
-4. Once the sink owns gating, replace the wrappers with role-tagged values at each call site and delete the wrappers.
+1. ~~Define the role enum and the single domain-value mapping table.~~ Done.
+2. ~~Reimplement the eight existing `*_color*` functions as thin wrappers over it, so no call site changes yet and the drift is fixed immediately.~~ Done — this alone resolved the `backlog` inconsistency between `status_color` and `status_color_cell`.
+3. ~~Move emission gating into the sink; delete the local `is_terminal` check in `command/log/tail.rs`.~~ Done [ORB-10570].
+4. ~~Replace the wrappers with role-tagged values at each call site and delete the wrappers.~~ Done [ORB-10570]. A call site now passes either a `Role` it names outright or the `Domain` the value came from; `cell(value, tag)` and `text(value, tag)` are the only two renderings.
 
-Step 2 alone resolves the `backlog` inconsistency between `status_color` and `status_color_cell` and is worth landing on its own.
+**Remaining gap:** §3's "16-color ANSI only" is not met on the table path. `comfy_table` renders a role's color through `crossterm` as a 256-color code (`\e[38;5;10m` for green) while `colored` renders the same role as `\e[32m`. Both honor the sink's decision about *whether* to emit; they disagree about the shade. Closing it means either mapping roles to raw SGR codes and bypassing `comfy_table::Color`, or accepting the 256-color spelling and amending §3.
+
+**Remaining gap:** §3's "never restyle a value the user is filtering on" is unimplemented. `Column::filtered` keeps such a column on screen, but the cell is still painted, in every list command.

@@ -541,8 +541,14 @@ fn executor_context_learning_tools_are_refused_with_the_same_redirect() {
     for (tool, input, echoed) in attempts {
         let output = workspace.try_run_as(&["tool", "run", tool, "--input", input], EXECUTOR);
         assert!(!output.status.success(), "{tool} must be refused");
-        // `tool run` reports failures as a JSON envelope on stdout.
-        let reported: Value = serde_json::from_slice(&output.stdout)
+        // `tool run` reports failures as a JSON envelope on stderr, so
+        // stdout carries the payload and nothing else [ORB-10570].
+        assert!(
+            output.stdout.is_empty(),
+            "{tool} must leave stdout empty on failure: {:?}",
+            String::from_utf8_lossy(&output.stdout)
+        );
+        let reported: Value = serde_json::from_slice(&output.stderr)
             .unwrap_or_else(|e| panic!("{tool} produced invalid JSON: {e}"));
         assert_eq!(reported["code"], "policy_denied", "{tool}");
         let message = reported["error"].as_str().unwrap_or_default();

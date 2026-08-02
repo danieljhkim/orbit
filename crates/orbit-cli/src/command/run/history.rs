@@ -4,6 +4,7 @@ use orbit_core::{OrbitError, OrbitRuntime};
 use serde_json::json;
 
 use crate::command::Execute;
+use crate::output::color::Domain;
 
 use super::format::{format_timestamp, format_waiting_line, summarize_error_message};
 use super::job::job_run_to_json_with_state;
@@ -91,7 +92,7 @@ pub(crate) fn print_run_history(
         }
         row.extend([
             Cell::new(run.attempt.to_string()),
-            crate::output::color::job_state_color_cell(&run.state.to_string()),
+            crate::output::color::cell(&run.state.to_string(), Domain::JobState),
             Cell::new(format_timestamp(run.started_at)),
             Cell::new(format_timestamp(run.finished_at)),
             Cell::new(last.and_then(|s| s.error_code.as_deref()).unwrap_or("-")),
