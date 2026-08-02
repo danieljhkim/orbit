@@ -13,7 +13,8 @@ use orbit_common::utility::process_identity::linux_process_state;
 pub(super) use orbit_common::utility::process_identity::process_is_alive;
 #[cfg(unix)]
 use orbit_common::utility::process_identity::{
-    ProbeOutcome, STABLE_TOKEN_PREFIX, legacy_lstart_matches, probe_process_start_identity,
+    PidNamespaceScope, ProbeOutcome, is_stable_token, legacy_lstart_matches, pid_namespace_scope,
+    probe_process_start_identity, stable_tokens_match,
 };
 #[cfg(unix)]
 use std::thread;
@@ -34,6 +35,12 @@ pub(super) fn signal_run_owner_process(run: &JobRun) -> Result<String, OrbitErro
     };
     if pid == std::process::id() {
         return Ok("self_not_signalled".to_string());
+    }
+    // [ORB-10594] Ahead of the liveness check: from another PID namespace the
+    // owner is invisible, and reporting that as `already_exited` would claim a
+    // cancellation that never reached the process.
+    if pid_namespace_scope(run.pid_start_time.as_deref()) == PidNamespaceScope::Foreign {
+        return Ok("foreign_pid_namespace".to_string());
     }
     if !process_is_alive(pid) {
         return Ok("already_exited".to_string());
@@ -271,7 +278,8 @@ pub(super) fn pending_run_stale_reason(run: &JobRun) -> Option<PendingStaleReaso
             }
             OwnerIdentity::Verified
             | OwnerIdentity::LegacyLiveUnverified
-            | OwnerIdentity::ProbeUnavailable => None,
+            | OwnerIdentity::ProbeUnavailable
+            | OwnerIdentity::ForeignPidNamespace => None,
         };
     }
     pending_run_unclaimed_past_grace(run).then_some(PendingStaleReason::NeverClaimed)
@@ -309,6 +317,8 @@ pub(super) fn stale_pending_run_message(run: &JobRun, reason: PendingStaleReason
         PendingStaleReason::Owner(OwnerIdentity::LegacyLiveUnverified) => "legacy_live_unverified",
         #[cfg(unix)]
         PendingStaleReason::Owner(OwnerIdentity::ProbeUnavailable) => "probe_unavailable",
+        #[cfg(unix)]
+        PendingStaleReason::Owner(OwnerIdentity::ForeignPidNamespace) => "foreign_pid_namespace",
         PendingStaleReason::NeverClaimed => "never_claimed",
     };
     format!(
@@ -341,7 +351,8 @@ pub(super) fn running_run_owner_stale_reason(run: &JobRun) -> Option<OwnerIdenti
         identity @ (OwnerIdentity::Mismatch | OwnerIdentity::Missing) => Some(identity),
         OwnerIdentity::Verified
         | OwnerIdentity::LegacyLiveUnverified
-        | OwnerIdentity::ProbeUnavailable => None,
+        | OwnerIdentity::ProbeUnavailable
+        | OwnerIdentity::ForeignPidNamespace => None,
     }
 }
 
@@ -368,6 +379,11 @@ pub(super) fn running_run_owner_stale_reason(_run: &JobRun) -> Option<()> {
 ///   A transient probe failure must never terminalize a live worker.
 /// - `Missing` — no PID recorded, or both the probe and `kill(pid, 0)`
 ///   agree the PID is gone. Stale.
+/// - `ForeignPidNamespace` — the owner was recorded in a different PID
+///   namespace than this observer's [ORB-10594]. The recorded PID names a
+///   different process here, or none; nothing probed from this side is
+///   evidence about the owner. Stays Running, and cancellation refuses to
+///   signal (the number would name the wrong process, if any).
 #[cfg(unix)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum OwnerIdentity {
@@ -375,6 +391,7 @@ pub(super) enum OwnerIdentity {
     Mismatch,
     LegacyLiveUnverified,
     ProbeUnavailable,
+    ForeignPidNamespace,
     Missing,
 }
 
@@ -383,6 +400,7 @@ pub(super) fn classify_run_owner(run: &JobRun) -> OwnerIdentity {
     classify_run_owner_with_probes(
         run.pid,
         run.pid_start_time.as_deref(),
+        pid_namespace_scope(run.pid_start_time.as_deref()),
         probe_process_start_identity,
         |pid| legacy_lstart_matches(pid, run.pid_start_time.as_deref().unwrap_or_default()),
         process_is_alive,
@@ -392,11 +410,17 @@ pub(super) fn classify_run_owner(run: &JobRun) -> OwnerIdentity {
 /// Inner, testable form of [`classify_run_owner`] with the probes injected.
 /// Production callers go through [`classify_run_owner`]; tests pass
 /// deterministic closures to exercise rare probe states (Unavailable,
-/// NoProcess-but-alive race) without needing real misbehaving processes.
+/// NoProcess-but-alive race, cross-namespace observation) without needing real
+/// misbehaving processes or a real sandbox.
+///
+/// `scope` is passed in rather than derived so the classification stays a pure
+/// function of its inputs: a test asserting genuine-orphan detection must not
+/// change verdict because the test runner itself happens to be sandboxed.
 #[cfg(unix)]
 pub(super) fn classify_run_owner_with_probes<P, L, A>(
     pid: Option<u32>,
     persisted: Option<&str>,
+    scope: PidNamespaceScope,
     probe: P,
     legacy_match: L,
     is_alive: A,
@@ -406,6 +430,12 @@ where
     L: FnOnce(u32) -> bool,
     A: FnOnce(u32) -> bool,
 {
+    // [ORB-10594] Ordered ahead of every probe: inside a private PID namespace
+    // both `ps` and `kill(pid, 0)` answer confidently and wrongly about a PID
+    // that belongs to another namespace.
+    if scope == PidNamespaceScope::Foreign {
+        return OwnerIdentity::ForeignPidNamespace;
+    }
     let Some(pid) = pid else {
         return OwnerIdentity::Missing;
     };
@@ -416,9 +446,11 @@ where
             OwnerIdentity::Missing
         };
     };
-    if persisted.starts_with(STABLE_TOKEN_PREFIX) {
+    if is_stable_token(persisted) {
         return match probe(pid) {
-            ProbeOutcome::Token(current) if current == persisted => OwnerIdentity::Verified,
+            ProbeOutcome::Token(current) if stable_tokens_match(persisted, &current) => {
+                OwnerIdentity::Verified
+            }
             ProbeOutcome::Token(_) => OwnerIdentity::Mismatch,
             ProbeOutcome::NoProcess => {
                 if is_alive(pid) {
@@ -460,6 +492,7 @@ pub(super) fn stale_job_run_message(run: &JobRun, reason: Option<OwnerIdentity>)
         Some(OwnerIdentity::ProbeUnavailable) => "probe_unavailable",
         Some(OwnerIdentity::Verified) => "verified",
         Some(OwnerIdentity::LegacyLiveUnverified) => "legacy_live_unverified",
+        Some(OwnerIdentity::ForeignPidNamespace) => "foreign_pid_namespace",
         None => "unknown",
     };
     format!(

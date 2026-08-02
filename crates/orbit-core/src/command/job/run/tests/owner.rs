@@ -5,13 +5,19 @@ use super::*;
 use super::super::JobRunListParams;
 
 #[cfg(unix)]
-use super::super::owner::{OwnerIdentity, classify_run_owner_with_probes, stale_job_run_message};
+use super::super::owner::{
+    OwnerIdentity, classify_run_owner_with_probes, pending_run_stale_reason,
+    running_run_owner_stale_reason, stale_job_run_message,
+};
 use chrono::{Duration, Utc};
 use orbit_common::types::JobRunState;
 #[cfg(unix)]
-use orbit_common::utility::process_identity::ProbeOutcome;
+use orbit_common::utility::process_identity::{PidNamespaceScope, ProbeOutcome};
 #[cfg(unix)]
-use orbit_common::utility::process_identity::{STABLE_TOKEN_PREFIX, process_start_identity_token};
+use orbit_common::utility::process_identity::{
+    STABLE_TOKEN_PREFIX, STABLE_TOKEN_PREFIX_V1, current_pid_namespace,
+    process_start_identity_token,
+};
 #[cfg(unix)]
 use std::process::{Command, Stdio};
 
@@ -215,6 +221,7 @@ fn probe_unavailable_with_live_pid_classifies_as_probe_unavailable() {
     let identity = classify_run_owner_with_probes(
         Some(4242),
         Some(versioned.as_str()),
+        PidNamespaceScope::Same,
         |_| ProbeOutcome::Unavailable,
         |_| false,
         |_| true,
@@ -235,6 +242,7 @@ fn probe_no_process_with_live_pid_classifies_as_probe_unavailable() {
     let identity = classify_run_owner_with_probes(
         Some(4242),
         Some(versioned.as_str()),
+        PidNamespaceScope::Same,
         |_| ProbeOutcome::NoProcess,
         |_| false,
         |_| true,
@@ -249,6 +257,7 @@ fn probe_unavailable_with_dead_pid_classifies_as_missing() {
     let identity = classify_run_owner_with_probes(
         Some(4242),
         Some(versioned.as_str()),
+        PidNamespaceScope::Same,
         |_| ProbeOutcome::Unavailable,
         |_| false,
         |_| false,
@@ -264,6 +273,7 @@ fn versioned_token_mismatch_with_live_pid_classifies_as_mismatch() {
     let identity = classify_run_owner_with_probes(
         Some(4242),
         Some(persisted.as_str()),
+        PidNamespaceScope::Same,
         |_| ProbeOutcome::Token(format!("{STABLE_TOKEN_PREFIX}fresh-lstart")),
         |_| false,
         |_| true,
@@ -278,6 +288,7 @@ fn versioned_token_match_classifies_as_verified() {
     let identity = classify_run_owner_with_probes(
         Some(4242),
         Some(persisted.as_str()),
+        PidNamespaceScope::Same,
         |_| ProbeOutcome::Token(format!("{STABLE_TOKEN_PREFIX}same-lstart")),
         |_| false,
         |_| true,
@@ -315,6 +326,7 @@ fn running_run_owner_stale_reason_excludes_probe_unavailable() {
     let identity = classify_run_owner_with_probes(
         run.pid,
         run.pid_start_time.as_deref(),
+        PidNamespaceScope::Same,
         |_| ProbeOutcome::Unavailable,
         |_| false,
         |_| true,
@@ -365,6 +377,161 @@ fn stale_failure_message_distinguishes_probe_outcomes() {
         probe_unavailable_message.contains("reason=probe_unavailable"),
         "{probe_unavailable_message}"
     );
+}
+
+// ---- Cross-PID-namespace regression coverage (ORB-10594) ----
+//
+// Incident 2026-08-02: `jrun-20260802-2013-2` ran to a complete success (PR
+// opened at 20:55:49Z) but its run record said `interrupted` since 20:43:00Z,
+// because an Orbit CLI invoked by a sandboxed agent — `bwrap --unshare-all
+// --proc /proc`, i.e. a private PID namespace — swept for orphans. From inside
+// that namespace the host worker PIDs are invisible, so `ps` and
+// `kill(pid, 0)` both reported "gone" for three healthy runs at once.
+
+#[cfg(unix)]
+#[test]
+fn foreign_pid_namespace_never_condemns_a_live_owner() {
+    // The exact incident shape: the observer is in another PID namespace, so
+    // every probe available to it says the owner is gone — `ps` finds no
+    // process and `kill(pid, 0)` agrees. Pre-fix this was `Missing`, which is
+    // the stale set. The recorded owner was in fact mid-run.
+    let persisted = format!("{STABLE_TOKEN_PREFIX}pidns=4026531836:Sun Aug  2 20:13:45 2026");
+    let identity = classify_run_owner_with_probes(
+        Some(83327),
+        Some(persisted.as_str()),
+        PidNamespaceScope::Foreign,
+        |_| ProbeOutcome::NoProcess,
+        |_| false,
+        |_| false,
+    );
+    assert_eq!(identity, OwnerIdentity::ForeignPidNamespace);
+}
+
+#[cfg(unix)]
+#[test]
+fn same_pid_namespace_still_detects_a_genuinely_dead_owner() {
+    // The distinguishing case: identical probe answers, but the observer
+    // shares the owner's namespace, so "not found" really does mean dead.
+    let persisted = format!("{STABLE_TOKEN_PREFIX}pidns=4026531836:Sun Aug  2 20:13:45 2026");
+    let identity = classify_run_owner_with_probes(
+        Some(83327),
+        Some(persisted.as_str()),
+        PidNamespaceScope::Same,
+        |_| ProbeOutcome::NoProcess,
+        |_| false,
+        |_| false,
+    );
+    assert_eq!(identity, OwnerIdentity::Missing);
+}
+
+#[cfg(unix)]
+#[test]
+fn foreign_pid_namespace_is_not_in_the_stale_set_for_running_or_pending_runs() {
+    // End-to-end through the production classifier: a token naming a PID
+    // namespace this process is definitely not in must leave the run alone in
+    // both the running and the pending stale gates.
+    let Some(current) = current_pid_namespace() else {
+        return; // non-Linux: no namespace to compare against.
+    };
+    let foreign = format!("{current}0000");
+    let persisted = format!("{STABLE_TOKEN_PREFIX}pidns={foreign}:Sun Aug  2 20:13:45 2026");
+
+    let mut run = running_run_with_token(999_999, Some(&persisted));
+    assert!(
+        running_run_owner_stale_reason(&run).is_none(),
+        "a run owned in another PID namespace must never be reconciled from here"
+    );
+
+    run.state = JobRunState::Pending;
+    run.created_at = Utc::now() - Duration::days(4);
+    assert!(
+        pending_run_stale_reason(&run).is_none(),
+        "a claimed pending run owned in another PID namespace must stay pending"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn same_pid_namespace_token_still_reconciles_a_dead_owner_end_to_end() {
+    // Counterpart to the test above, through the same production classifier:
+    // a token naming *this* namespace with an impossible PID is still stale,
+    // so the fix cannot be satisfied by never condemning anything.
+    let Some(current) = current_pid_namespace() else {
+        return;
+    };
+    let persisted = format!("{STABLE_TOKEN_PREFIX}pidns={current}:Sun Aug  2 20:13:45 2026");
+    let run = running_run_with_token(999_999, Some(&persisted));
+    assert_eq!(
+        running_run_owner_stale_reason(&run),
+        Some(OwnerIdentity::Missing),
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn v1_token_from_an_older_binary_still_verifies_against_a_v2_probe() {
+    // Upgrade safety: a run claimed before ORB-10594 carries a v1 token with
+    // no namespace field. Re-probing it now yields a v2 token; the owner must
+    // still verify rather than reading as a PID-reuse mismatch.
+    let persisted = format!("{STABLE_TOKEN_PREFIX_V1}Sun Aug  2 20:13:45 2026");
+    let probed = format!("{STABLE_TOKEN_PREFIX}pidns=4026531836:Sun Aug  2 20:13:45 2026");
+    let identity = classify_run_owner_with_probes(
+        Some(4242),
+        Some(persisted.as_str()),
+        PidNamespaceScope::Unknown,
+        |_| ProbeOutcome::Token(probed.clone()),
+        |_| false,
+        |_| true,
+    );
+    assert_eq!(identity, OwnerIdentity::Verified);
+
+    // ...and a genuine PID reuse under a v1 token is still caught.
+    let reused = format!("{STABLE_TOKEN_PREFIX}pidns=4026531836:Mon Aug  3 09:00:00 2026");
+    assert_eq!(
+        classify_run_owner_with_probes(
+            Some(4242),
+            Some(persisted.as_str()),
+            PidNamespaceScope::Unknown,
+            |_| ProbeOutcome::Token(reused),
+            |_| false,
+            |_| true,
+        ),
+        OwnerIdentity::Mismatch,
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn foreign_namespace_diagnostic_is_tagged_distinctly() {
+    let run = running_run_with_token(83327, Some("token"));
+    let message = stale_job_run_message(&run, Some(OwnerIdentity::ForeignPidNamespace));
+    assert!(
+        message.contains("reason=foreign_pid_namespace"),
+        "{message}"
+    );
+}
+
+#[cfg(unix)]
+fn running_run_with_token(pid: u32, token: Option<&str>) -> JobRun {
+    JobRun {
+        run_id: "qa_run".to_string(),
+        job_id: "qa_job".to_string(),
+        attempt: 1,
+        state: JobRunState::Running,
+        scheduled_at: Utc::now(),
+        started_at: Some(Utc::now()),
+        finished_at: None,
+        duration_ms: None,
+        pid: Some(pid),
+        pid_start_time: token.map(str::to_string),
+        input: None,
+        retry_source_run_id: None,
+        created_at: Utc::now(),
+        steps: Vec::new(),
+        knowledge_metrics: None,
+        resolved_crew: None,
+        crew_model: None,
+    }
 }
 
 #[cfg(unix)]
