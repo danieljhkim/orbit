@@ -12,7 +12,7 @@ tags: ["user-interface"]
 
 # User Interface — Overview
 
-Orbit UI covers the local dashboard served by `orbit-cli` and the project-facing web surface. It gives operators a dense, legible way to monitor agents, workflows, telemetry, and audit signals.
+Orbit UI covers the local dashboard served by `orbit-cli` and the project-facing web surface. It gives operators a dense, legible way to monitor agents, workflows, telemetry, and audit signals. Terminal output — what `orbit` writes to stdout — is a separate surface owned by [terminal-interface](../terminal-interface/1_overview.md); the two share operator vocabulary and status semantics but no tokens, components, or rendering assumptions.
 
 ## 1. Motivation
 

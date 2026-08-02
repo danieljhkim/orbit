@@ -208,6 +208,7 @@ Retired features stay listed with their `_archive/` path as a historical record.
 | Routines | [docs/design/routines/](./routines/) | claude |
 | Task Artifacts | [docs/design/task-artifacts/](./task-artifacts/) | codex |
 | Task Sync (archived) | [docs/design/_archive/task-sync/](./_archive/task-sync/) | claude |
+| Terminal Interface | [docs/design/terminal-interface/](./terminal-interface/) | claude |
 | User Interface | [docs/design/user-interface/](./user-interface/) | gemini |
 | Worktree Artifacts | [docs/design/worktree-artifacts/](./worktree-artifacts/) | codex |
 
