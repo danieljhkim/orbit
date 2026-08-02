@@ -11,6 +11,7 @@
 //! behavior the prior implementation produced for pack-less runs.
 
 mod ingest;
+pub mod reliability;
 mod summary;
 
 #[cfg(test)]

@@ -5,7 +5,8 @@ use axum::response::Response;
 use crate::{
     DASHBOARD_CSP, serve_app_js, serve_audit_js, serve_common_js, serve_diagnostics_js,
     serve_index, serve_log_tail_js, serve_markdown_js, serve_marked_js, serve_purify_js,
-    serve_router_js, serve_run_detail_js, serve_runs_js, serve_scoreboard_js, serve_tasks_js,
+    serve_reliability_js, serve_router_js, serve_run_detail_js, serve_runs_js, serve_scoreboard_js,
+    serve_tasks_js,
 };
 
 #[tokio::test]
@@ -20,6 +21,7 @@ async fn dashboard_html_and_js_routes_emit_csp() {
         ("tasks", serve_tasks_js().await),
         ("audit", serve_audit_js().await),
         ("scoreboard", serve_scoreboard_js().await),
+        ("reliability", serve_reliability_js().await),
         ("log_tail", serve_log_tail_js().await),
         ("diagnostics", serve_diagnostics_js().await),
         ("router", serve_router_js().await),
@@ -391,10 +393,14 @@ fn dashboard_guards_diagnostics_and_detail_panels_in_aggregate_view() {
         );
     }
     // ORB-10444 added the scoreboard subtab, so there are three re-render sites.
+    // ORB-10588's reliability subtab is deliberately not a fourth: it is served
+    // by a cross-workspace endpoint (`/api/metrics/reliability` takes the whole
+    // DashboardState, not the `Ws` extractor), so it holds no per-workspace
+    // state to placehold and stays live in the aggregate view.
     assert_eq!(
-        router.matches("if (isAggregateView())").count(),
+        router.matches("isAggregateView()").count(),
         3,
-        "every subtab re-render site in router.js must be guarded"
+        "every per-workspace subtab re-render site in router.js must be guarded"
     );
 
     // Knowledge detail panels: each list guard also replaces its detail panel
@@ -532,8 +538,11 @@ async fn dashboard_scoreboard_is_reachable_under_diagnostics() {
     ] {
         assert!(body.contains(&format!(r#"id="{id}""#)), "{id} must survive");
     }
+    // ORB-10588 appended `reliability` to the same list.
     assert!(
-        router.contains(r#"const DIAG_SUBTABS = ["runs", "metrics", "errors", "scoreboard"];"#),
+        router.contains(
+            r#"const DIAG_SUBTABS = ["runs", "metrics", "errors", "reliability", "scoreboard"];"#
+        ),
         "the scoreboard must route as a diagnostics subtab"
     );
     assert!(
@@ -541,6 +550,121 @@ async fn dashboard_scoreboard_is_reachable_under_diagnostics() {
             && app.contains(r#"fetchJson("/api/scoreboard?window=24h")"#),
         "the scoreboard fetch must hang off the diagnostics subtab branch"
     );
+}
+
+/// ORB-10588: the reliability view routes as a diagnostics subtab and owns the
+/// ids `reliability.js` renders into.
+#[tokio::test]
+async fn dashboard_reliability_is_reachable_under_diagnostics() {
+    let body = response_body(serve_index().await).await;
+    let router = include_str!("../../assets/dashboard/router.js");
+    let app = include_str!("../../assets/dashboard/app.js");
+
+    let diagnostics_at = body
+        .find(r#"<section class="tab-pane" data-tab="diagnostics">"#)
+        .expect("diagnostics pane");
+    let reliability_at = body
+        .find(r#"id="diagnostics-reliability-main""#)
+        .expect("reliability host inside diagnostics");
+    assert!(
+        diagnostics_at < reliability_at,
+        "the reliability markup must live inside the diagnostics pane"
+    );
+    assert!(
+        body.contains(r#"<button class="subtab" data-subtab="reliability" type="button">"#),
+        "Reliability must be offered as a diagnostics subtab"
+    );
+    for id in [
+        "reliability-count",
+        "reliability-window-selector",
+        "reliability-meta",
+        "reliability-summary",
+        "reliability-denominator-note",
+        "reliability-truncation-note",
+        "reliability-over-time",
+        "reliability-breakdown",
+        "reliability-activities",
+    ] {
+        assert!(body.contains(&format!(r#"id="{id}""#)), "{id} must exist");
+    }
+    assert!(
+        app.contains(r#"if (activeDiagSubtab === "reliability")"#)
+            && app.contains("fetchAndRenderReliability()"),
+        "the reliability fetch must hang off the diagnostics subtab branch"
+    );
+    assert!(
+        router.contains(r#"reliability: "diagnostics-reliability-main""#),
+        "the reliability subtab must claim its own full-width main"
+    );
+}
+
+/// ORB-10588: a rate is only actionable with its `n` and its window, and a
+/// denominator too thin to trust must be withheld rather than rounded. Both
+/// rules live in `reliability.js`; this pins them so a later edit cannot
+/// quietly turn a withheld cell back into a confident percentage.
+#[test]
+fn dashboard_reliability_never_renders_a_rate_without_its_denominator() {
+    let reliability = include_str!("../../assets/dashboard/reliability.js");
+    let index = include_str!("../../assets/dashboard/index.html");
+
+    assert!(
+        reliability.contains("rate.low_sample"),
+        "the low-sample flag from the API must be honored"
+    );
+    assert!(
+        reliability.contains("n too small"),
+        "a withheld rate must say why it is withheld"
+    );
+    assert!(
+        reliability.contains("rel-rate-low"),
+        "a withheld rate must be visually distinct from a real one"
+    );
+    assert!(
+        reliability.contains("(n=${n})"),
+        "a rendered percentage must carry its denominator"
+    );
+    assert!(
+        reliability.contains("denominator_label"),
+        "the denominator's meaning must be rendered, not left in the backend"
+    );
+    // `all` would be a rate with no stated range; the endpoint refuses it and
+    // the selector must not offer it.
+    assert!(
+        !reliability.contains(r#""all""#),
+        "an unbounded window must not be offered"
+    );
+    assert!(
+        !index.contains(
+            r#"id="reliability-window-selector" title="window scope">
+                <span class="scoreboard-window-seg" data-window="all">"#
+        ),
+        "the reliability window selector must not offer `all`"
+    );
+}
+
+/// ORB-10588: the recovery rate must be computed from durable run state only.
+/// Friction F-token-disagreement (recorded in the task) makes any token- or
+/// cost-derived input untrustworthy, so the reliability path must not read one.
+#[test]
+fn dashboard_reliability_reads_no_token_or_cost_field() {
+    let reliability = include_str!("../../assets/dashboard/reliability.js");
+    // Field identifiers, not the words: the module's own header explains *why*
+    // it avoids these inputs, so a bare "token" match would flag the rationale.
+    for banned in [
+        "input_tokens",
+        "output_tokens",
+        "total_tokens",
+        "cache_read_tokens",
+        "cache_create_tokens",
+        "provider_cost_usd",
+        "derived_cost_usd",
+        "total_tool_calls",
+    ] {
+        assert!(
+            !reliability.contains(banned),
+            "reliability.js must not read `{banned}` — the token/cost inputs disagree across stores"
+        );
+    }
 }
 
 #[test]
@@ -744,6 +868,10 @@ fn dashboard_assets_carry_no_project_specific_identifiers() {
         (
             "run-detail.js",
             include_str!("../../assets/dashboard/run-detail.js"),
+        ),
+        (
+            "reliability.js",
+            include_str!("../../assets/dashboard/reliability.js"),
         ),
     ];
     // Personal names and layout paths of the machine Orbit is developed on, plus

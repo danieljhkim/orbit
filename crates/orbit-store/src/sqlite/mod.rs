@@ -6,6 +6,7 @@ pub(crate) mod job_run_store;
 pub(crate) mod learning_index;
 pub mod migration;
 pub(crate) mod read_pool;
+pub(crate) mod reliability_store;
 pub(crate) mod routine_store;
 pub(crate) mod session_learning_state_store;
 pub mod task_registry;

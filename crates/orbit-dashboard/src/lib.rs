@@ -48,6 +48,7 @@ const MARKDOWN_JS: &str = include_str!("../assets/dashboard/markdown.js");
 const TASKS_JS: &str = include_str!("../assets/dashboard/tasks.js");
 const AUDIT_JS: &str = include_str!("../assets/dashboard/audit.js");
 const SCOREBOARD_JS: &str = include_str!("../assets/dashboard/scoreboard.js");
+const RELIABILITY_JS: &str = include_str!("../assets/dashboard/reliability.js");
 const LOG_TAIL_JS: &str = include_str!("../assets/dashboard/log-tail.js");
 const DIAGNOSTICS_JS: &str = include_str!("../assets/dashboard/diagnostics.js");
 const ROUTER_JS: &str = include_str!("../assets/dashboard/router.js");
@@ -231,6 +232,7 @@ fn run_server(args: &ServeArgs, state: state::DashboardState) -> Result<(), Orbi
         .route("/static/tasks.js", get(serve_tasks_js))
         .route("/static/audit.js", get(serve_audit_js))
         .route("/static/scoreboard.js", get(serve_scoreboard_js))
+        .route("/static/reliability.js", get(serve_reliability_js))
         .route("/static/log-tail.js", get(serve_log_tail_js))
         .route("/static/diagnostics.js", get(serve_diagnostics_js))
         .route("/static/router.js", get(serve_router_js))
@@ -336,6 +338,10 @@ async fn serve_audit_js() -> Response {
 
 async fn serve_scoreboard_js() -> Response {
     dashboard_response("application/javascript; charset=utf-8", SCOREBOARD_JS)
+}
+
+async fn serve_reliability_js() -> Response {
+    dashboard_response("application/javascript; charset=utf-8", RELIABILITY_JS)
 }
 
 async fn serve_log_tail_js() -> Response {

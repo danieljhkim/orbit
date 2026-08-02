@@ -141,6 +141,9 @@ pub use sqlite::invocation_store::{
     InvocationAccountingQuery, InvocationInsertParams, InvocationQuery, InvocationRecord,
     InvocationToolCallRecord, TaskInvocationMetrics, ToolInvocationMetrics,
 };
+pub use sqlite::reliability_store::{
+    ActivityInvocationCount, BoundedFacts, InvocationRunCoverage, JobRunOutcomeFact,
+};
 pub use sqlite::routine_store::{
     RoutineCursor, RoutineFireIntentParams, RoutineFireRecord, RoutineFireState,
     RoutinePauseRecord, RoutineSweepLock, try_acquire_routine_sweep_lock,

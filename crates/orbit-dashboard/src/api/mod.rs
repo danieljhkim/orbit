@@ -29,6 +29,7 @@ mod jobs;
 mod learnings;
 mod log;
 mod metrics;
+mod reliability;
 mod routines;
 mod runs;
 mod scoreboard;
@@ -422,6 +423,10 @@ pub(super) fn router() -> Router<crate::state::DashboardState> {
         .route("/metrics/tools", get(metrics::tool_metrics))
         .route("/metrics/task/:id", get(metrics::task_metrics))
         .route("/metrics/orchestrators", get(metrics::orchestrator_metrics))
+        .route(
+            "/metrics/reliability",
+            get(reliability::pipeline_reliability),
+        )
         .route(
             "/metrics/invocations",
             get(metrics::invocation_metrics).post(metrics::ingest_invocation),

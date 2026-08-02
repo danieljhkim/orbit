@@ -3,7 +3,7 @@ summary: "User Interface — Decisions"
 type: design
 title: "User Interface — Decisions"
 owner: gemini
-last_updated: 2026-08-01
+last_updated: 2026-08-02
 status: Draft
 feature: user-interface
 doc_role: decisions
@@ -145,6 +145,44 @@ Rejected alternative: reuse `PATCH /api/tasks/:id` with a `comment` field for co
 
 **Amendment ([ORB-10544], [ADR-0303]).** "Covers every surface" was true of the intent, not of the placement: the check lived inside the endpoint, so the MCP `orbit.workflow.ship` tool bypassed it. It now lives in the shared ship submission path and every submission surface inherits it. The endpoint's response is unchanged — it projects the shared typed conflict as the same `409 ship_run_in_flight` body.
 
+## ADR-PENDING — Pipeline reliability from durable run state, with roles discovered from the job catalog
+
+**Status:** Proposed · 2026-08 · [ORB-10588]
+
+> **Global ID not yet allocated.** `orbit.adr.add` was refused during
+> implementation — the executing worktree mounts `.orbit/` read-only, so no
+> record could be written to the ADR store. Allocate the global ID with
+> `orbit tool run orbit.adr.add` from a writable checkout and replace this
+> heading, per the [ORB-10458] convention that narratives live in the store.
+
+**Context.** The dashboard surfaced no measure of pipeline reliability. How often job runs fail, and how often the recovery path fires, were answerable only by opening SQLite by hand. A read-only analysis over a 30-day window found the recovery activity to be the second most common activity in the store — roughly one recovery invocation per 3.6 implementation attempts — a large continuous cost nobody had chosen to accept because nobody could see it. Three constraints shaped the design. The worker run store and orbit's `invocations` table disagree by an order of magnitude on tokens per run and some runs carry no cost figure at all, so any rate built on token or cost fields would display a confidently wrong number. The dashboard seeds every workspace, so no caller-specific workspace name, id prefix, crew name, or hardcoded activity-id list may appear in it. And a rate without a denominator and a stated time range is not actionable.
+
+**Decision.** Compute both rates entirely from persisted `job_runs` and `invocations` rows via count-only store queries that reference no token or cost column, and discover activity roles from the job catalog at query time.
+
+`RunOutcome` partitions the observed `job_runs.state` values. `success` is succeeded. `failed`, `timeout`, and `interrupted` are failures — all three are runs the pipeline intended to finish and did not. `cancelled` (a deliberate operator action) and `skipped` (never ran) are terminal but sit outside the rate. `pending`, `running`, and `retrying` are in flight. Anything unparseable lands in an explicit `unknown` bucket rather than being folded into an outcome. The failure rate divides by settled runs (`succeeded + failed`) only, and the payload carries the total and each excluded bucket so the UI cannot imply that ok + failed is the population.
+
+`JobV2::activity_roles()` walks the declared job structure at any nesting depth and returns the step-activity and recovery-activity sets. Recovery activities are exactly those a job names via `recovery_activity` at job or step level — a property of the workspace's own job definitions, never of Orbit. An activity a catalog uses in both roles is reported as ambiguous and excluded from the numerator, because the store records only an id and cannot say which role a given invocation played.
+
+Every rate is a `Rate { numerator, denominator, denominator_label, value, low_sample }`. `value` is `None` when the denominator is zero, so 0% can never stand in for no data. `low_sample` is set below a threshold of 20 and the frontend withholds the percentage for such cells, showing raw counts and an explicit marker. The window (`label`, `since`, `until`, `bucket`) travels with the payload, and the endpoint refuses an unbounded `all` window outright.
+
+Rejected alternative: extend the existing token-metrics path (`list_activity_invocation_metrics`, the scoreboard cost aggregation). That path selects and aggregates token and cost columns, which are known to disagree across stores. Building reliability on it would put an untrustworthy input in the query path even where the specific figures went unused, and would make the no-token-input property unverifiable by inspection. A dedicated count-only read is a few dozen lines and is checkable.
+
+Rejected alternative: reuse `list_job_runs_for_workspace` rather than adding a projected read. It hydrates full `JobRun` records and issues a per-run step query, so a 30-day window fans out to thousands of extra reads for three fields.
+
+Rejected alternative: enumerate the recovery activity ids in source. The dashboard seeds every workspace; a hardcoded list would be wrong elsewhere and stale here. Discovery costs one already-existing catalog call.
+
+Rejected alternative: count `cancelled` as a failure, or round small-`n` rates instead of withholding them. The first makes deliberate operator intervention register as pipeline breakage; the second turns a 1-of-3 bucket into a 33% spike the evidence does not support.
+
+**Consequences.**
+- Both rates are visible over an explicit window, broken down by workspace, by job, and over time, so a spike is attributable rather than merely alarming.
+- The recovery rate is reported two ways with distinct denominators — per step-activity invocation, and per job run with any recorded invocation — both labelled in the payload and rendered in the UI.
+- Distinct-run coverage needs its own single-pass store query: distinct-run counts do not compose, so summing per-activity `COUNT(DISTINCT job_run_id)` would overcount runs touched by more than one recovery activity.
+- `invocations` has no `workspace_id`, so it is scoped by joining each row back to its owning `job_runs` row. An invocation whose run is absent is excluded rather than attributed arbitrarily.
+- The identifier in `invocations.activity_id` is **not** uniformly the catalog activity name: the job executor records a dispatched step under its **step id**, a recovery dispatch under the **recovery activity name**, and the planning-duel runner under the **activity name**. The step role set therefore holds both the step id and the target's catalog name. This is a latent trap for any future consumer of `activity_id`; an end-to-end test pins it.
+- Rates window and bucket on `created_at`, not `finished_at`, so a long-running run is attributed to when it started. Windows are half-open, so adjacent windows tile without double-counting.
+- The per-run fact read is capped at 200,000 rows and reports `truncated` when the cap binds; the UI warns rather than presenting a partial window as complete.
+- This adds the instrument; it does not assert the readings are stable. The standing measurement hold on efficiency baselines drawn from the current window is unaffected.
+
 ## Task References
 
 - [T20260427-29] introduced the Canon Refined UI direction.
@@ -157,5 +195,6 @@ Rejected alternative: reuse `PATCH /api/tasks/:id` with a `comment` field for co
 - [ORB-00154] unified the Scoreboard tab into a metric-major leaderboard matrix.
 - [ORB-00030] made the dashboard global/multi-workspace (workspace-keyed state, `Ws` extractor, serve-from-anywhere, aggregate endpoints).
 - [ORB-10444] retired the deprecated tab, folded Scoreboard under Diagnostics, pinned the Knowledge detail pane, and added task ship + comments.
+- [ORB-10588] added the Reliability subtab: job-run failure rate and recovery invocation rate from durable run state.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

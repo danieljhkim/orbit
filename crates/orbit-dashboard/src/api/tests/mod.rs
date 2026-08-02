@@ -13,6 +13,7 @@ mod handlers;
 mod learnings;
 mod log;
 mod metrics;
+mod reliability;
 mod routines;
 mod runs;
 mod scoreboard;

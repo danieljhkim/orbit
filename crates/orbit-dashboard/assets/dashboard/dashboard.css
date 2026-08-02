@@ -3523,3 +3523,95 @@
       .log-foot .right { margin-left: auto; cursor: pointer; user-select: none; }
       .log-foot .right.on { color: var(--accent); }
 
+
+      /* ORB-10588 — pipeline reliability.
+         The colour rules here encode the display contract: a real reading is
+         plain, a low-`n` reading is dimmed and struck through with a dashed
+         border, and "no data" is neutral grey. A withheld rate must never be
+         able to pass for a confident one at a glance. */
+      .rel-summary {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+        gap: 10px;
+        padding: 14px 16px;
+        border-bottom: 1px solid var(--border);
+        background: var(--bg);
+      }
+      .rel-tile {
+        display: flex; flex-direction: column; gap: 4px;
+        background: var(--bg-elev);
+        border: 1px solid var(--border);
+        border-radius: 4px;
+        padding: 10px 12px;
+        min-width: 0;
+      }
+      .rel-tile-label {
+        font-family: var(--font-sans); font-size: 10px; font-weight: 600;
+        text-transform: uppercase; letter-spacing: 0.08em; color: var(--fg-dim);
+      }
+      .rel-tile-value {
+        font-family: var(--font-mono); font-size: 18px; color: var(--fg);
+      }
+      .rel-tile-hint {
+        font-family: var(--font-mono); font-size: 10px; color: var(--fg-dim);
+        overflow-wrap: anywhere;
+      }
+      .rel-rate {
+        font-family: var(--font-mono); font-size: 18px; color: var(--fg);
+      }
+      .rel-rate-low {
+        font-size: 12px; color: var(--fg-dim);
+        border: 1px dashed var(--border); border-radius: 3px;
+        padding: 1px 6px; align-self: flex-start;
+      }
+      .rel-rate-empty { font-size: 14px; color: var(--fg-dim); }
+      td .rel-rate { font-size: 12px; }
+      .rel-note {
+        margin: 0; padding: 10px 16px;
+        font-family: var(--font-mono); font-size: 11px; line-height: 1.5;
+        color: var(--fg-dim); border-bottom: 1px solid var(--border);
+      }
+      .rel-note-warn { color: var(--priority-medium); }
+      .rel-chart-wrap { padding: 14px 16px; background: var(--bg); }
+      .rel-chart-title {
+        font-family: var(--font-sans); font-size: 11px; font-weight: 600;
+        text-transform: uppercase; letter-spacing: 0.08em; color: var(--fg-dim);
+        margin-bottom: 10px;
+      }
+      .rel-chart {
+        display: flex; align-items: flex-end; gap: 2px;
+        height: 110px; padding: 6px 8px;
+        background: var(--bg-elev);
+        border: 1px solid var(--border); border-radius: 4px;
+        overflow-x: auto;
+      }
+      .rel-bar-slot {
+        flex: 1 1 auto; min-width: 4px; height: 100%;
+        display: flex; align-items: flex-end;
+      }
+      .rel-bar {
+        width: 100%; background: var(--state-failed); border-radius: 1px 1px 0 0;
+      }
+      /* A bucket whose settled count is below the confidence threshold is drawn
+         muted and hatched, so a 1-of-2 bucket cannot read as a real spike. */
+      .rel-bar-low {
+        background: repeating-linear-gradient(
+          45deg, var(--fg-dim), var(--fg-dim) 2px, transparent 2px, transparent 4px
+        );
+      }
+      .rel-bar-empty { background: var(--border); }
+      .rel-chart-axis {
+        margin-top: 6px;
+        font-family: var(--font-mono); font-size: 10px; color: var(--fg-dim);
+        display: flex; justify-content: space-between;
+      }
+      .rel-table { width: 100%; }
+      .rel-card .card-body { padding: 0; }
+      .rel-role {
+        font-family: var(--font-mono); font-size: 10px;
+        padding: 1px 6px; border-radius: 3px; border: 1px solid var(--border);
+      }
+      .rel-role-recovery { color: var(--state-failed); border-color: var(--state-failed); }
+      .rel-role-step { color: var(--state-success); border-color: var(--state-success); }
+      .rel-role-ambiguous { color: var(--priority-medium); border-color: var(--priority-medium); }
+      .rel-role-unknown { color: var(--fg-dim); }
