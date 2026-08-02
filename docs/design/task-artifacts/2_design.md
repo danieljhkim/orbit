@@ -3,7 +3,7 @@ summary: "Task Artifacts — Design"
 type: design
 title: "Task Artifacts — Design"
 owner: codex
-last_updated: 2026-07-26
+last_updated: 2026-08-02
 status: Draft
 feature: task-artifacts
 doc_role: design
@@ -64,6 +64,8 @@ type: feature
 priority: high
 complexity: hard
 job_run_id: null
+crew: implementer-crew
+orchestrator: orchestration-crew
 relations:
   - type: supersedes
     target: ORB-00000
@@ -79,7 +81,7 @@ created_at: 2026-05-11T00:00:00Z
 updated_at: 2026-05-11T00:00:00Z
 ```
 
-The envelope should not include prose bodies, comments, review message bodies, execution summaries, `workspace_path`, `repo_root`, `agent`, `model`, or the old `batch_id` name. Local execution bindings live in the local task registry, keyed by task ID and workspace binding. Execution fan-out membership is `job_run_id`, a foreign reference to the job-run store rather than a task relation. `relations` can also carry cross-artifact provenance via `produces` and `resolves` targets (`ORB-`, `F`, `L`, or `ADR-` IDs); legacy task relation types remain task-only. `schema_version` restarts at `1` because the reset defines a new artifact family; the cutover command knows how to read the old schema but v2 does not continue its compatibility stream.
+The envelope should not include prose bodies, comments, review message bodies, execution summaries, `workspace_path`, `repo_root`, `agent`, `model`, or the old `batch_id` name. Local execution bindings live in the local task registry, keyed by task ID and workspace binding. Execution fan-out membership is `job_run_id`, a foreign reference to the job-run store rather than a task relation. `crew` selects the named execution crew; `orchestrator` is separate, explicit attribution for the named crew responsible for orchestrating the task. It never selects a model/provider and is never inferred from actor attribution or `crew`. A non-empty orchestrator must name a configured crew and may be set, changed, or cleared only while the task is `proposed` or `backlog`; stored aliases remain readable if configuration later removes them. `relations` can also carry cross-artifact provenance via `produces` and `resolves` targets (`ORB-`, `F`, `L`, or `ADR-` IDs); legacy task relation types remain task-only. `schema_version` remains `1`: readers default a missing `orchestrator` to `null`, but older writers may drop the new field, so forward compatibility is limited to tolerant reads rather than preservation through legacy rewrites.
 
 ## 3. Prose Documents
 

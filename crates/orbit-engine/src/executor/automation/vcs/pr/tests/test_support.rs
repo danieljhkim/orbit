@@ -415,6 +415,7 @@ pub fn task(id: &str, title: &str, execution_summary: &str) -> Task {
         relations: Vec::new(),
         job_run_id: None,
         crew: None,
+        orchestrator: None,
         created_at: now,
         updated_at: now,
     }

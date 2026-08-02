@@ -74,6 +74,7 @@ fn envelope(
         pr_status: None,
         job_run_id: None,
         crew: None,
+        orchestrator: None,
         relations,
         tags,
         context_files: Vec::new(),

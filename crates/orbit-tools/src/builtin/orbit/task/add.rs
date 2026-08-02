@@ -89,6 +89,12 @@ impl Tool for OrbitTaskAddTool {
                 param_type: "string".to_string(),
                 required: false,
             },
+            ToolParam {
+                name: "orchestrator".to_string(),
+                description: "Optional named crew responsible for orchestration attribution; does not select execution".to_string(),
+                param_type: "string".to_string(),
+                required: false,
+            },
         ];
         parameters.extend(super::super::model_identity_params());
 

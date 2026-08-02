@@ -28,6 +28,8 @@ pub struct TaskAddParams {
     pub external_refs: Vec<ExternalRef>,
     pub source_task_id: Option<String>,
     pub crew: Option<String>,
+    /// Named crew responsible for orchestration attribution, not execution.
+    pub orchestrator: Option<String>,
 }
 
 impl Default for TaskAddParams {
@@ -52,6 +54,7 @@ impl Default for TaskAddParams {
             external_refs: Vec::new(),
             source_task_id: None,
             crew: None,
+            orchestrator: None,
         }
     }
 }
@@ -76,6 +79,7 @@ pub struct TaskUpdateParams {
     pub pr_status: Option<Option<String>>,
     pub job_run_id: Option<Option<String>>,
     pub crew: Option<Option<String>>,
+    pub orchestrator: Option<Option<String>>,
     pub context_files: Option<Vec<String>>,
     pub upsert_artifacts: Vec<TaskArtifact>,
 }
@@ -103,6 +107,7 @@ impl TaskUpdateParams {
             || self.pr_status.is_some()
             || self.job_run_id.is_some()
             || self.crew.is_some()
+            || self.orchestrator.is_some()
             || self.context_files.is_some()
             || !self.upsert_artifacts.is_empty()
     }
@@ -132,6 +137,7 @@ impl From<TaskUpdateParams> for TaskRecordUpdateParams {
             pr_status: p.pr_status,
             job_run_id: p.job_run_id,
             crew: p.crew,
+            orchestrator: p.orchestrator,
             context_files: p.context_files,
             upsert_artifacts: p.upsert_artifacts,
             ..Default::default()

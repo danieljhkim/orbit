@@ -66,6 +66,7 @@ fn task(id: &str, title: &str, description: &str, plan: &str) -> Task {
         relations: Vec::new(),
         job_run_id: None,
         crew: None,
+        orchestrator: None,
         created_at: Utc::now(),
         updated_at: Utc::now(),
     }

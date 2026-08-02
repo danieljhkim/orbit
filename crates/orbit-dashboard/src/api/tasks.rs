@@ -102,6 +102,8 @@ pub(super) struct CreateTaskBody {
     source_task_id: Option<String>,
     #[serde(default)]
     crew: Option<String>,
+    #[serde(default)]
+    orchestrator: Option<String>,
 }
 
 fn default_priority() -> TaskPriority {
@@ -143,6 +145,8 @@ pub(super) struct UpdateTaskBody {
     context_files: Option<Vec<String>>,
     #[serde(default, deserialize_with = "deserialize_nullable_string_patch_field")]
     crew: Option<Option<String>>,
+    #[serde(default, deserialize_with = "deserialize_nullable_string_patch_field")]
+    orchestrator: Option<Option<String>>,
 }
 
 fn deserialize_nullable_string_patch_field<'de, D>(
@@ -515,6 +519,7 @@ pub(super) async fn create_task_action(
         external_refs: body.external_refs,
         source_task_id: body.source_task_id,
         crew: body.crew,
+        orchestrator: body.orchestrator,
     };
     match runtime.add_task_with_identity(params, None, None) {
         Ok(task) => match dashboard_status_index(&runtime) {
@@ -556,6 +561,7 @@ pub(super) async fn update_task_action(
         pr_status: body.pr_status,
         job_run_id: None,
         crew: body.crew,
+        orchestrator: body.orchestrator,
         context_files: body.context_files,
         upsert_artifacts: Vec::new(),
     };

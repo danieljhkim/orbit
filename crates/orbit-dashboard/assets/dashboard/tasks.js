@@ -154,6 +154,7 @@ function filterTasks(tasks, context) {
 }
 
 const TASK_META_FIELDS = [
+  ["orchestrator", "orchestrator"],
   ["implemented_by", "implemented_by"],
   ["planned_by", "planned_by"],
   ["created_by", "created_by"],

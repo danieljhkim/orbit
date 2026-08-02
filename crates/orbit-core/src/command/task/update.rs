@@ -101,6 +101,15 @@ impl OrbitRuntime {
         if let Some(crew) = &params.crew {
             self.validate_crew_name(crew.as_deref())?;
         }
+        if let Some(orchestrator) = &params.orchestrator {
+            self.validate_crew_name(orchestrator.as_deref())?;
+            if !matches!(task.status, TaskStatus::Proposed | TaskStatus::Backlog) {
+                return Err(OrbitError::InvalidInput(format!(
+                    "task {id} is {}; orchestrator can only be changed while proposed or backlog",
+                    task.status
+                )));
+            }
+        }
         // Archived tasks accept exactly one mutation: the guarded restore to
         // backlog (formerly `orbit task unarchive`). Everything else requires
         // restoring the task first.

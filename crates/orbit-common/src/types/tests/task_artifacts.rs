@@ -68,6 +68,7 @@ updated_at: 2026-05-10T12:00:00Z
             pr_status: None,
             job_run_id: None,
             crew: None,
+            orchestrator: None,
             relations: Vec::new(),
             tags: Vec::new(),
             context_files: Vec::new(),
@@ -110,6 +111,28 @@ updated_at: 2026-05-10T12:00:00Z
         let mut envelope = valid_envelope("ORB-00001");
         envelope.schema_version = 2;
         assert!(envelope.validate().is_err());
+    }
+
+    #[test]
+    fn version_one_envelope_defaults_missing_orchestrator() {
+        let envelope = serde_yaml::from_str::<TaskEnvelopeV2>(&valid_envelope_yaml("ORB-00001"))
+            .expect("legacy v1 envelope remains readable");
+        assert_eq!(envelope.schema_version, TASK_ARTIFACT_SCHEMA_VERSION);
+        assert_eq!(envelope.orchestrator, None);
+    }
+
+    #[test]
+    fn version_one_envelope_round_trips_orchestrator_without_schema_bump() {
+        let mut envelope = valid_envelope("ORB-00001");
+        envelope.orchestrator = Some("orchestration-crew".to_string());
+
+        let yaml = serde_yaml::to_string(&envelope).expect("serialize envelope");
+        assert!(yaml.contains("schema_version: 1"));
+        assert!(yaml.contains("orchestrator: orchestration-crew"));
+        assert_eq!(
+            serde_yaml::from_str::<TaskEnvelopeV2>(&yaml).expect("deserialize envelope"),
+            envelope
+        );
     }
 
     #[test]

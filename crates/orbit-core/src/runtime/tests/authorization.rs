@@ -58,6 +58,7 @@ fn seed_task(runtime: &OrbitRuntime) -> String {
             external_refs: Vec::new(),
             source_task_id: None,
             crew: None,
+            orchestrator: None,
             comments: Vec::new(),
         })
         .expect("create task")

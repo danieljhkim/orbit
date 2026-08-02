@@ -68,6 +68,9 @@ pub struct TaskEnvelopeV2 {
     pub job_run_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub crew: Option<String>,
+    /// Named crew responsible for task orchestration, distinct from execution crew.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub orchestrator: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub relations: Vec<TaskRelation>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]

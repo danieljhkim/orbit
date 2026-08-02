@@ -44,6 +44,7 @@ impl TaskV2Store {
                 pr_status: None,
                 job_run_id: None,
                 crew: params.crew,
+                orchestrator: params.orchestrator,
                 relations,
                 tags: normalize_task_tags(params.tags),
                 context_files: params.context_files,

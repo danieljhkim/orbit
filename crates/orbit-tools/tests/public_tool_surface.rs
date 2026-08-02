@@ -259,6 +259,7 @@ fn task_add_schema_uses_trimmed_authoring_surface() {
             "type",
             "relations",
             "crew",
+            "orchestrator",
             "model",
         ]
     );
@@ -289,6 +290,13 @@ fn task_update_dependency_params_remain_in_agent_tool_schema() {
     assert!(
         schema.parameters.iter().any(|param| param.name == "crew"),
         "orbit.task.update should expose crew"
+    );
+    assert!(
+        schema
+            .parameters
+            .iter()
+            .any(|param| param.name == "orchestrator"),
+        "orbit.task.update should expose explicit orchestration attribution"
     );
 }
 

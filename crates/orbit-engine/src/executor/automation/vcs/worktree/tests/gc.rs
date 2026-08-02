@@ -91,6 +91,7 @@ fn task_fixture(id: &str, status: TaskStatus) -> Task {
         relations: Vec::new(),
         job_run_id: None,
         crew: None,
+        orchestrator: None,
         created_at: now,
         updated_at: now,
     }

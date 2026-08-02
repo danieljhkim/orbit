@@ -26,6 +26,7 @@ fn task() -> Task {
         relations: Vec::new(),
         job_run_id: None,
         crew: None,
+        orchestrator: None,
         tags: Vec::new(),
         created_at: Utc::now(),
         updated_at: Utc::now(),

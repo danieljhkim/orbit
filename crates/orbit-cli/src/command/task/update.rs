@@ -59,6 +59,9 @@ pub struct TaskUpdateArgs {
     /// Named crew to use when running this task (empty string clears)
     #[arg(long)]
     pub crew: Option<String>,
+    /// Named crew responsible for orchestration attribution (empty string clears)
+    #[arg(long)]
+    pub orchestrator: Option<String>,
     /// Comma-separated task context selectors (empty string clears). Prefer
     /// `file:`, `dir:`, or `symbol:` forms; legacy raw paths are accepted and upgraded.
     #[arg(long = "context", alias = "context-files")]
@@ -94,6 +97,7 @@ impl Execute for TaskUpdateArgs {
             pr_status,
             job_run_id,
             crew,
+            orchestrator,
             context_files,
             artifacts,
             model,
@@ -115,6 +119,13 @@ impl Execute for TaskUpdateArgs {
             }
         });
         let crew = crew.map(|value| {
+            if value.trim().is_empty() {
+                None
+            } else {
+                Some(value)
+            }
+        });
+        let orchestrator = orchestrator.map(|value| {
             if value.trim().is_empty() {
                 None
             } else {
@@ -160,6 +171,7 @@ impl Execute for TaskUpdateArgs {
                 pr_status,
                 job_run_id,
                 crew,
+                orchestrator,
                 context_files: context_files.map(|c| crate::parse::csv_to_vec(&c)),
                 upsert_artifacts,
                 ..Default::default()
