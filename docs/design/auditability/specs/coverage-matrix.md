@@ -1,3 +1,9 @@
+---
+type: design
+summary: Spec: Audit Coverage Matrix
+last_validated: 2026-08-02
+---
+
 # Spec: Audit Coverage Matrix
 
 Every Orbit operation that touches code, task state, persistent runtime state, external services, or provider/tool execution must have an audit channel. This matrix defines the expected channel by operation class.

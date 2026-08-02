@@ -1,3 +1,9 @@
+---
+type: design
+summary: Spec: Audit Event Schema
+last_validated: 2026-08-02
+---
+
 # Spec: Audit Event Schema
 
 Audit events in Orbit are split by operational level, but every channel must preserve enough stable identity, timing, status, and join keys for incident reconstruction.

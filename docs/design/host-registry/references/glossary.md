@@ -1,3 +1,9 @@
+---
+type: design
+summary: Glossary — Host Registry
+last_validated: 2026-08-02
+---
+
 # Glossary — Host Registry
 
 Vocabulary specific to the host-registry feature. Excludes standard industry terms
