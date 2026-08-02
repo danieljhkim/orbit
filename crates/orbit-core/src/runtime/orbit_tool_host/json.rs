@@ -168,13 +168,14 @@ fn task_field_to_json(
         "history" => serialize_history(&runtime.get_task_history(&task.id)?),
         "context_files" => serde_json::to_value(&task.context_files)
             .map_err(serialize_error("serialize context files")),
+        "crew" => serde_json::to_value(&task.crew).map_err(serialize_error("serialize crew")),
         "orchestrator" => serde_json::to_value(&task.orchestrator)
             .map_err(serialize_error("serialize orchestrator")),
         "artifacts" => Ok(serialize_task_artifacts(
             &runtime.get_task_artifacts(&task.id)?,
         )),
         other => Err(OrbitError::InvalidInput(format!(
-            "unknown field selector `{other}`. Valid values: comments, plan, execution_summary, description, acceptance_criteria, dependencies, resolved_dependencies, tags, history, context_files, orchestrator, artifacts"
+            "unknown field selector `{other}`. Valid values: comments, plan, execution_summary, description, acceptance_criteria, dependencies, resolved_dependencies, tags, history, context_files, crew, orchestrator, artifacts"
         ))),
     }
 }
