@@ -2,6 +2,27 @@
 //!
 //! Every case pins the width explicitly rather than reading `COLUMNS`, so the
 //! geometry is the same under `cargo test` and under `--nocapture`.
+//!
+//! ## Why the "table" form's golden coverage lives here (ORB-10571)
+//!
+//! `Table::print` decides whether to truncate and style by calling
+//! `std::io::stdout().is_terminal()` itself, and comfy-table's own
+//! `should_style` performs the same check independently — so a subprocess
+//! test, whose stdout is always a pipe, can never observe genuine "table"
+//! rendering (truncated, at a real width) no matter what `--format` or
+//! `COLUMNS` it passes. [`Table::render`] is called directly here instead,
+//! at an explicit width, which is the only way to exercise that path at all.
+//! The plain and `json` forms *are* reachable end-to-end and are golden-
+//! tested against the real binary in `tests/output_goldens.rs`.
+//!
+//! A corollary, also worth recording: `styled: true` cannot be observed to
+//! differ from `styled: false` in this binary either, for the same reason —
+//! comfy-table's `should_style` will not emit ANSI outside a real terminal
+//! regardless of the flag this crate passes it. Every fixture below renders
+//! with `styled: false`, matching what the flag can actually be shown to do
+//! here.
+
+use std::path::{Path, PathBuf};
 
 use crate::output::table::{Column, Table, build_table};
 
@@ -261,5 +282,183 @@ fn a_multi_line_value_still_occupies_exactly_one_line() {
         !rendered.body.contains("second line"),
         "the wrapped remainder is truncated, not printed: {}",
         rendered.body
+    );
+}
+
+// --- ORB-10571: golden coverage for the "table" form of four real list
+// commands, at a pinned width. Each fixture below reproduces the column
+// layout its command builds (cross-checked against the source at the call
+// site named in its doc comment) fed with representative row data; this
+// mirrors `tool_list` above rather than reaching into `command::task`,
+// `command::policy`, or `command::skill`, which have no seam that returns a
+// `Table` before printing it.
+
+/// Mirrors `command::task::output::print_task_table`'s default (non
+/// `--full`) column set: `orbit task list` with no `--status`/`--priority`/
+/// `--type` filter, so every column is unfiltered.
+fn task_list() -> Table {
+    let mut table = Table::new(vec![
+        Column::new("ID").fixed(),
+        Column::new("TITLE"),
+        Column::new("STATUS").fixed(),
+        Column::new("PRIORITY").fixed(),
+        Column::new("TYPE").fixed(),
+    ]);
+    table.add_row(vec![
+        "ORB-00000",
+        "Fix the flaky retry loop in the sync worker that drops events under backpressure",
+        "proposed",
+        "high",
+        "bug",
+    ]);
+    table.add_row(vec![
+        "ORB-00001",
+        "Document the new sink resolution precedence for --format and ORBIT_FORMAT",
+        "in-progress",
+        "medium",
+        "chore",
+    ]);
+    table.add_row(vec![
+        "ORB-00002",
+        "Add pagination to the audit export command",
+        "proposed",
+        "low",
+        "feature",
+    ]);
+    table
+}
+
+/// Mirrors `command::policy::list::PolicyListArgs::execute`'s column set.
+fn policy_list() -> Table {
+    let mut table = Table::new(vec![
+        Column::new("NAME").fixed(),
+        Column::new("DESCRIPTION"),
+        Column::new("FSPROFILES"),
+        Column::new("UPDATED").fixed(),
+    ]);
+    table.add_row(vec![
+        "default",
+        "Default filesystem profile policy for Orbit activity runs",
+        "docs_writer, implementer, pure_compute, reviewer, unrestricted",
+        "2026-08-02 04:06",
+    ]);
+    table.add_row(vec![
+        "strict-review",
+        "Deny-by-default profile for externally sourced review crews",
+        "reviewer",
+        "2026-08-02 09:15",
+    ]);
+    table
+}
+
+/// Mirrors `command::skill::list::SkillListArgs::execute`'s column set.
+fn skill_list() -> Table {
+    let mut table = Table::new(vec![
+        Column::new("ID").fixed(),
+        Column::new("HASH").fixed(),
+        Column::new("TAGS").number(),
+        Column::new("SUMMARY"),
+    ]);
+    table.add_row(vec![
+        "orbit-search",
+        "e3f03c1208",
+        "3",
+        "Search tasks, docs, learnings, and ADRs through the unified orbit search query surface",
+    ]);
+    table.add_row(vec![
+        "orbit-task",
+        "a1ebb7a6f6",
+        "2",
+        "Create, execute, and review Orbit tasks through the lifecycle with explicit status tracking",
+    ]);
+    table
+}
+
+/// Narrow enough to force at least one flexible column to truncate in every
+/// fixture above, per [`a_zero_width_truncates_nothing_while_a_narrow_width_truncates_with_one_ellipsis`].
+const TABLE_GOLDEN_WIDTH: usize = 60;
+
+fn golden_path(file_name: &str) -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/output_goldens")
+        .join(file_name)
+}
+
+/// Compare against (or, with `ORBIT_UPDATE_OUTPUT_GOLDENS=1`, overwrite) the
+/// checked-in golden file. Shares its golden directory and its regeneration
+/// env var with `tests/output_goldens.rs`'s plain/`json` coverage of the
+/// same four commands, so one command regenerates every golden in this
+/// crate: `ORBIT_UPDATE_OUTPUT_GOLDENS=1 cargo test -p orbit-cli`.
+/// Regenerating is a deliberate act requiring review of the diff — not a
+/// fix for a failing test.
+fn assert_golden(file_name: &str, actual: &str) {
+    let path = golden_path(file_name);
+    if std::env::var("ORBIT_UPDATE_OUTPUT_GOLDENS").as_deref() == Ok("1") {
+        std::fs::write(&path, actual)
+            .unwrap_or_else(|err| panic!("write golden {}: {err}", path.display()));
+        return;
+    }
+    let expected = std::fs::read_to_string(&path).unwrap_or_else(|err| {
+        panic!(
+            "cannot read {} ({err}); regenerate with \
+             `ORBIT_UPDATE_OUTPUT_GOLDENS=1 cargo test -p orbit-cli`",
+            path.display()
+        )
+    });
+    assert_eq!(
+        actual,
+        expected,
+        "{} drifted from its golden. If the new rendering is correct, regenerate with \
+         `ORBIT_UPDATE_OUTPUT_GOLDENS=1 cargo test -p orbit-cli` and review the diff before \
+         committing.",
+        path.display()
+    );
+}
+
+#[test]
+fn table_form_matches_goldens_at_a_pinned_width() {
+    let fixtures: [(&str, Table); 4] = [
+        ("tool_list.table.txt", tool_list()),
+        ("task_list.table.txt", task_list()),
+        ("policy_list.table.txt", policy_list()),
+        ("skill_list.table.txt", skill_list()),
+    ];
+    for (file_name, table) in &fixtures {
+        let rendered = table.render(Some(TABLE_GOLDEN_WIDTH), false);
+        assert_golden(file_name, &rendered.body);
+    }
+}
+
+/// table-rendering.md §4: overflow truncates with a single `…`, and
+/// "truncation never applies to ... the plain piped form." A `None` sink
+/// width is what a non-terminal sink resolves to (output-modes.md §1's
+/// `width == 0` invariant, represented here as `Option::None` rather than
+/// the numeric zero — see this module's top-of-file note on why `table.rs`
+/// does not yet consume `OutputSink` directly), and it must leave every
+/// value whole.
+#[test]
+fn a_zero_width_truncates_nothing_while_a_narrow_width_truncates_with_one_ellipsis() {
+    // A single truncated value carries exactly one ellipsis
+    // (`overflow_is_truncated_with_a_single_ellipsis` above pins that per
+    // cell); a row with more than one flexible column — `policy_list`'s
+    // DESCRIPTION and FSPROFILES both shrink at this width — can validly
+    // carry more than one ellipsis on the same line, so this test checks
+    // presence, not a per-line count.
+    let mut truncated_anywhere = false;
+    for table in [tool_list(), task_list(), policy_list(), skill_list()] {
+        let untruncated = table.render(None, false);
+        assert!(
+            !untruncated.body.contains('…'),
+            "a sink with no width must not truncate: {}",
+            untruncated.body
+        );
+
+        let narrow = table.render(Some(TABLE_GOLDEN_WIDTH), false);
+        truncated_anywhere |= narrow.body.contains('…');
+    }
+    assert!(
+        truncated_anywhere,
+        "width {TABLE_GOLDEN_WIDTH} must be narrow enough to exercise truncation in at least \
+         one fixture, or this test is not testing what its name says"
     );
 }

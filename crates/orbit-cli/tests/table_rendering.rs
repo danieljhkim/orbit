@@ -47,6 +47,40 @@ fn task_list_renders_one_line_per_task() {
     assert_record_lines(&table, 3, "orbit task list");
 }
 
+/// ORB-10571: the same property, for the other two commands covered by
+/// `tests/output_goldens.rs`'s golden-file coverage. Both are seeded by
+/// `orbit workspace init` itself (a default policy, a default skill
+/// catalog), so no fixture setup is needed beyond initializing the
+/// workspace.
+#[test]
+fn policy_list_renders_one_line_per_policy() {
+    let workspace = TestWorkspace::new();
+
+    let json = workspace.run(&["policy", "list", "--json"], "policy list JSON");
+    let policies: Value = serde_json::from_slice(&json.stdout).expect("policy list JSON");
+    let expected = policies.as_array().expect("policy array").len();
+    assert!(expected >= 1, "a fresh workspace seeds a default policy");
+
+    let table = workspace.run(&["policy", "list"], "policy list table");
+    assert_record_lines(&table, expected, "orbit policy list");
+}
+
+#[test]
+fn skill_list_renders_one_line_per_skill() {
+    let workspace = TestWorkspace::new();
+
+    let json = workspace.run(&["skill", "list", "--json"], "skill list JSON");
+    let skills: Value = serde_json::from_slice(&json.stdout).expect("skill list JSON");
+    let expected = skills.as_array().expect("skill array").len();
+    assert!(
+        expected > 1,
+        "a fresh workspace seeds the default skill catalog"
+    );
+
+    let table = workspace.run(&["skill", "list"], "skill list table");
+    assert_record_lines(&table, expected, "orbit skill list");
+}
+
 #[test]
 fn a_list_with_no_matches_leaves_stdout_empty_and_explains_itself_on_stderr() {
     let workspace = TestWorkspace::new();

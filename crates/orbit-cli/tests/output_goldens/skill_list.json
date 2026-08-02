@@ -1,0 +1,38 @@
+[
+  {
+    "content_hash": "552acd4ff4c939efcd9a56e0861d5ebc8f602befaa2d93da39b6d18d7191059c",
+    "id": "orbit",
+    "meta": null,
+    "path": "<HOME>/.orbit/skills/orbit"
+  },
+  {
+    "content_hash": "d955361eef2d5dd7a6d9eeb92f45fb21de291f702137a1213fbc2d4dd1a72137",
+    "id": "orbit-knowledge",
+    "meta": null,
+    "path": "<HOME>/.orbit/skills/orbit-knowledge"
+  },
+  {
+    "content_hash": "e3f03c120897fb033de016160e61586ed2c352049ecc4d5c79d7cfa5225b9a1e",
+    "id": "orbit-search",
+    "meta": null,
+    "path": "<HOME>/.orbit/skills/orbit-search"
+  },
+  {
+    "content_hash": "a1ebb7a6f6eef42065fc6ec43b1c1142f3431e44d4b8050460d8fddf98d8fc1e",
+    "id": "orbit-task",
+    "meta": null,
+    "path": "<HOME>/.orbit/skills/orbit-task"
+  },
+  {
+    "content_hash": "0431be4a4cf30f3486e7972b5245a3056d28b0efd027fdbc2307933bbc4de643",
+    "id": "orbit-task-pilot",
+    "meta": null,
+    "path": "<HOME>/.orbit/skills/orbit-task-pilot"
+  },
+  {
+    "content_hash": "e586b46ea0b9176f6afbc723fc4c850fa6bc322dcd6b2d42c0066b7ce1192f3f",
+    "id": "orbit-workflow",
+    "meta": null,
+    "path": "<HOME>/.orbit/skills/orbit-workflow"
+  }
+]
