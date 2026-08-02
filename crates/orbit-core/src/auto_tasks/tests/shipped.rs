@@ -104,6 +104,64 @@ fn artifact_deprecation_review_is_report_only() {
     }
 }
 
+#[test]
+fn model_price_audit_is_weekly_report_only_and_routes_to_terra() {
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../..")
+        .join(".orbit/auto_tasks/model-price-audit.yaml");
+    let yaml = std::fs::read_to_string(&path)
+        .unwrap_or_else(|error| panic!("read {}: {error}", path.display()));
+    let definition = parse_auto_task_yaml(&yaml).expect("parse model-price-audit");
+
+    assert_eq!(definition.name, "model-price-audit");
+    assert!(definition.enabled, "definition must be enabled");
+    assert_eq!(
+        definition.schedule,
+        AutoTaskSchedule::Cron {
+            cron: "0 6 * * 1".to_string()
+        }
+    );
+    assert!(matches!(definition.dedupe, DedupePolicy::SkipIfOpen));
+    assert_eq!(definition.template.crew.as_deref(), Some("terra"));
+    assert_eq!(
+        definition.template.status,
+        orbit_common::types::TaskStatus::Backlog
+    );
+    for required_tag in ["model-price-audit", "pricing", "no-diff-expected"] {
+        assert!(
+            definition
+                .template
+                .tags
+                .iter()
+                .any(|tag| tag == required_tag),
+            "missing required tag {required_tag}"
+        );
+    }
+
+    let body = definition.template.description.to_lowercase();
+    for required in [
+        "invocationrecord",
+        "authoritative",
+        "source url",
+        "retrieval timestamp",
+        "at most one",
+        "historical rows",
+        "non-overlapping",
+        "short-context",
+        "fast/service-tier",
+        "long-context",
+        "dry-run",
+        "human review",
+        "orchestration-session cost",
+    ] {
+        assert!(
+            body.contains(required),
+            "template should retain '{required}'"
+        );
+    }
+    assert!(body.contains("must not edit model_prices.yaml"));
+}
+
 /// Friction curation is the portable default. It keeps the curation safeguards
 /// while remaining disabled until an operator opts in.
 #[test]

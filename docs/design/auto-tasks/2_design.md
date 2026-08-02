@@ -1,7 +1,7 @@
 ---
 title: Auto-tasks — Design
 owner: claude
-last_updated: 2026-07-26
+last_updated: 2026-08-02
 last_validated: 2026-07-27
 status: Accepted
 feature: auto-tasks
@@ -11,7 +11,7 @@ summary: Current implementation of the auto-task record, due-math, host-local cu
 tags: [auto-tasks]
 paths: ["crates/orbit-core/src/auto_tasks/**"]
 related_features: [auto-tasks]
-related_artifacts: [ORB-10149, ORB-10439, ORB-10441, ORB-10446, ORB-10472, ADR-0218, ADR-0217, ADR-0286]
+related_artifacts: [ORB-10149, ORB-10439, ORB-10441, ORB-10446, ORB-10472, ORB-10583, ADR-0218, ADR-0217, ADR-0286]
 ---
 
 # Auto-tasks — Design
@@ -140,6 +140,25 @@ asks the executor to validate recent changes hands-on and file real findings
 through Orbit. Its `no-diff-expected` tag lets workflow handoff succeed when the
 validation correctly produces only task-side effects.
 
+The workspace-local `model-price-audit` definition (ORB-10583) is an enabled
+weekly report-only consumer: it runs Monday at 06:00 in the host-local timezone,
+uses `skip_if_open`, mints a backlog chore for crew `terra`, and carries
+`model-price-audit`, `pricing`, and `no-diff-expected`. Its template compares
+exact `InvocationRecord.model` strings and every current price-table row against
+authoritative provider pricing/model/cache documentation. It records source
+URLs, retrieval timestamps, rates, units, tiers, and effective boundaries; it
+never edits pricing. A proven material drift may produce at most one deduplicated
+proposed remediation task for normal human review, while unavailable,
+contradictory, or ambiguous official evidence produces a report without a
+remediation task. No routine or portable seeded default is added for this
+workspace-local definition.
+
+Operators may inspect it with `orbit auto-task show model-price-audit --json` and
+use scheduler dry-run inspection before the weekly slot. The generated task's
+`execution_summary` is the audit report and must include no-diff evidence,
+observed models, checked sources, and effective periods when the table is
+accurate.
+
 - **Definitions are not full-text indexed.** Unlike learnings/ADRs, auto-task
   YAML is not in a SQLite/search index; discovery is a directory scan. Acceptable
   at the expected cardinality (a handful of chores per workspace).
@@ -156,5 +175,6 @@ validation correctly produces only task-side effects.
 - ORB-10439 — on-demand manual mint (renamed to `orbit auto-task mint <name>` by ORB-10446).
 - ORB-10441 — mint-time visible title provenance.
 - ORB-10472 — worktree-local, atomic definition refresh.
+- ORB-10583 — workspace-local weekly official model-price audit definition.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.
