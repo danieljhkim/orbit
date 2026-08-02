@@ -278,6 +278,149 @@ fn workspace_init_rejects_existing_durable_id_without_force() {
 }
 
 #[test]
+fn force_replaces_a_checkout_identity_that_no_registration_claims() {
+    let workspace = tempdir().expect("workspace tempdir");
+    let home = tempdir().expect("home tempdir");
+    let global = home.path().join(".orbit");
+    std::fs::create_dir_all(&global).expect("create global orbit");
+    std::fs::write(
+        global.join("host.toml"),
+        "schema_version = 1\nmachine_id = \"hm_bootstrap\"\nhost_id = \"bootstrap-host\"\nmode = \"standalone\"\n",
+    )
+    .expect("write host identity");
+    let _env = EnvGuard::acquire().home(home.path()).cwd(workspace.path());
+
+    // Any command that opens a runtime in an uninitialized checkout seeds a
+    // legacy bootstrap identity here before `workspace init` ever runs.
+    let orbit_dir = workspace.path().join(".orbit");
+    std::fs::create_dir_all(&orbit_dir).expect("create checkout orbit dir");
+    let identity_path = orbit_dir.join("config.yaml");
+    let bootstrap_identity = "schema_version: 1\nworkspace_id: work-a1b2c3\n";
+    std::fs::write(&identity_path, bootstrap_identity).expect("seed bootstrap identity");
+
+    let args = |force| WorkspaceInitArgs {
+        name: Some("bootstrap-claim".to_string()),
+        base_branch: Some("agent-main".to_string()),
+        ship_mode: None,
+        role: None,
+        owner: None,
+        task_id_start: None,
+        mcp: false,
+        inject_agent_rules: false,
+        refresh_defaults: false,
+        force,
+    };
+
+    let registry_path = global.join("workspaces.json");
+    let error = args(false)
+        .execute_without_runtime(None)
+        .expect_err("a conflicting checkout identity must require force")
+        .to_string();
+    assert!(error.contains("rerun with --force"), "unexpected: {error}");
+    assert_eq!(
+        std::fs::read_to_string(&identity_path).expect("read identity"),
+        bootstrap_identity
+    );
+    assert!(!registry_path.exists(), "refusal must not seed a registry");
+
+    args(true)
+        .execute_without_runtime(None)
+        .expect("force must reconcile an unclaimed checkout identity");
+    let expected_id = canonical_workspace_id("bootstrap-claim");
+    assert!(
+        std::fs::read_to_string(&identity_path)
+            .expect("read reconciled identity")
+            .contains(&expected_id),
+        "force must rewrite the checkout identity"
+    );
+    let registry = workspace_registry::load_registry_from(&registry_path).expect("load registry");
+    assert_eq!(registry.workspaces.len(), 1);
+    assert_eq!(registry.workspaces[0].id, expected_id);
+    assert_eq!(registry.checkouts.len(), 1);
+    assert_eq!(registry.checkouts[0].workspace_id, expected_id);
+    assert_eq!(
+        std::fs::canonicalize(&registry.checkouts[0].repo_root).expect("canonical checkout root"),
+        std::fs::canonicalize(workspace.path()).expect("canonical workspace root")
+    );
+}
+
+#[test]
+fn force_refuses_to_replace_a_checkout_identity_a_registration_still_claims() {
+    let workspace = tempdir().expect("workspace tempdir");
+    let home = tempdir().expect("home tempdir");
+    let global = home.path().join(".orbit");
+    std::fs::create_dir_all(&global).expect("create global orbit");
+    std::fs::write(
+        global.join("host.toml"),
+        "schema_version = 1\nmachine_id = \"hm_claimed\"\nhost_id = \"claimed-host\"\nmode = \"standalone\"\n",
+    )
+    .expect("write host identity");
+    let _env = EnvGuard::acquire().home(home.path()).cwd(workspace.path());
+
+    // A registered workspace bound to some *other* checkout: this checkout's
+    // stray identity claims it, so no registry lookup by path reconciles it.
+    let now = Utc::now();
+    let claimed = Workspace {
+        id: "ws_claimed".to_string(),
+        name: "claimed".to_string(),
+        owner_machine_id: None,
+        git_remote: None,
+        ship_mode: None,
+        base_branch: "agent-main".to_string(),
+        status: WorkspaceStatus::Active,
+        created_at: now,
+        updated_at: now,
+    };
+    let other_root = home.path().join("elsewhere");
+    let registry = WorkspaceRegistry {
+        workspaces: vec![claimed.clone()],
+        checkouts: vec![WorkspaceCheckout::owner(
+            claimed.id.clone(),
+            other_root.clone(),
+            other_root.join(".orbit"),
+        )],
+        ..Default::default()
+    };
+    let registry_path = global.join("workspaces.json");
+    workspace_registry::save_registry_to(&registry, &registry_path).expect("seed registry");
+    let registry_bytes = std::fs::read_to_string(&registry_path).expect("read protected registry");
+
+    let orbit_dir = workspace.path().join(".orbit");
+    std::fs::create_dir_all(&orbit_dir).expect("create checkout orbit dir");
+    let identity_path = orbit_dir.join("config.yaml");
+    let claimed_identity = "schema_version: 1\nworkspace_id: ws_claimed\n";
+    std::fs::write(&identity_path, claimed_identity).expect("seed claimed identity");
+
+    let error = WorkspaceInitArgs {
+        name: Some("claim-jumper".to_string()),
+        base_branch: Some("agent-main".to_string()),
+        ship_mode: None,
+        role: None,
+        owner: None,
+        task_id_start: None,
+        mcp: false,
+        inject_agent_rules: false,
+        refresh_defaults: false,
+        force: true,
+    }
+    .execute_without_runtime(None)
+    .expect_err("force must not detach a claimed checkout identity")
+    .to_string();
+    assert!(
+        error.contains("claimed by an existing registration"),
+        "unexpected: {error}"
+    );
+    assert_eq!(
+        std::fs::read_to_string(&identity_path).expect("read identity"),
+        claimed_identity
+    );
+    assert_eq!(
+        std::fs::read_to_string(&registry_path).expect("read registry"),
+        registry_bytes
+    );
+}
+
+#[test]
 fn forced_workspace_reconciliation_preserves_registry_and_identity_on_validation_failure() {
     let workspace = tempdir().expect("workspace tempdir");
     let home = tempdir().expect("home tempdir");
