@@ -78,6 +78,8 @@ impl PolicyDef {
 
         let deny_read = normalize_rule_set(&self.deny_read, "spec.denyRead")?;
         let deny_modify = normalize_rule_set(&self.deny_modify, "spec.denyModify")?;
+        reject_exceptions(&deny_read, "spec.denyRead")?;
+        validate_modify_exceptions(&deny_modify)?;
 
         for (profile_name, profile) in &self.fs_profiles {
             if profile_name.trim().is_empty() {
@@ -138,6 +140,8 @@ impl PolicyDef {
     }
 
     pub fn merged(global: &Self, workspace: &Self) -> Result<Self, OrbitError> {
+        validate_workspace_modify_exceptions(global, workspace)?;
+
         let mut fs_profiles = global.fs_profiles.clone();
         for (name, profile) in &workspace.fs_profiles {
             fs_profiles.insert(name.clone(), profile.clone());
@@ -185,13 +189,20 @@ impl PolicyDef {
         };
 
         let mut read = normalize_rule_set(&base.read, &format!("fsProfile `{profile_name}` read"))?;
-        let mut modify =
+        let base_modify =
             normalize_rule_set(&base.modify, &format!("fsProfile `{profile_name}` modify"))?;
+        let mut modify = base_modify.clone();
         let deny_read = normalize_rule_set(&self.deny_read, "spec.denyRead")?;
         let deny_modify = normalize_rule_set(&self.deny_modify, "spec.denyModify")?;
 
         read.extend(deny_read.into_iter().map(negate_rule));
-        modify.extend(deny_modify.into_iter().map(negate_rule));
+        for rule in deny_modify {
+            if let Some(exception) = rule.strip_prefix('!') {
+                modify.extend(profile_rules_within_exception(&base_modify, exception));
+            } else {
+                modify.push(negate_rule(rule));
+            }
+        }
 
         Ok(ResolvedFsProfile {
             name: profile_name.to_string(),
@@ -256,6 +267,101 @@ fn extend_unique(target: &mut Vec<String>, extra: &[String]) {
             target.push(value.clone());
         }
     }
+}
+
+fn reject_exceptions(rules: &[String], label: &str) -> Result<(), OrbitError> {
+    if let Some(rule) = rules.iter().find(|rule| rule.starts_with('!')) {
+        return Err(OrbitError::InvalidInput(format!(
+            "{label} rule `{rule}` cannot be an exception"
+        )));
+    }
+    Ok(())
+}
+
+fn validate_modify_exceptions(rules: &[String]) -> Result<(), OrbitError> {
+    let mut enclosing_denies: Vec<&str> = Vec::new();
+    for rule in rules {
+        let Some(exception) = rule.strip_prefix('!') else {
+            enclosing_denies.push(rule);
+            continue;
+        };
+        if !is_exact_or_subtree_rule(exception) {
+            return Err(OrbitError::InvalidInput(format!(
+                "spec.denyModify exception `{rule}` must name an exact path or `<path>/**` subtree"
+            )));
+        }
+        if !enclosing_denies
+            .iter()
+            .any(|deny| *deny != exception && rule_covers_path_rule(deny, exception))
+        {
+            return Err(OrbitError::InvalidInput(format!(
+                "spec.denyModify exception `{rule}` must be strictly contained by an earlier denyModify rule"
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn validate_workspace_modify_exceptions(
+    global: &PolicyDef,
+    workspace: &PolicyDef,
+) -> Result<(), OrbitError> {
+    let global_rules = normalize_rule_set(&global.deny_modify, "global spec.denyModify")?;
+    let global_has_denies = global_rules.iter().any(|rule| !rule.starts_with('!'));
+    let global_exceptions: Vec<&str> = global_rules
+        .iter()
+        .filter_map(|rule| rule.strip_prefix('!'))
+        .collect();
+    if !global_has_denies {
+        return Ok(());
+    }
+
+    let workspace_rules = normalize_rule_set(&workspace.deny_modify, "workspace spec.denyModify")?;
+    for exception in workspace_rules
+        .iter()
+        .filter_map(|rule| rule.strip_prefix('!'))
+    {
+        if !global_exceptions
+            .iter()
+            .any(|global| rule_covers_path_rule(global, exception))
+        {
+            return Err(OrbitError::InvalidInput(format!(
+                "workspace policy `{}` denyModify exception `!{exception}` is outside the host policy exception surface",
+                workspace.name
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn is_exact_or_subtree_rule(rule: &str) -> bool {
+    let body = rule.strip_suffix("/**").unwrap_or(rule);
+    !body.contains(['*', '?'])
+}
+
+/// Intersect a host-policy exception with the selected profile instead of
+/// treating the exception itself as new write authority.
+fn profile_rules_within_exception(profile_rules: &[String], exception: &str) -> Vec<String> {
+    let ancestor_decision = profile_rules.iter().rev().find_map(|rule| {
+        let (negated, body) = split_rule(rule);
+        rule_covers_path_rule(body, exception).then_some(!negated)
+    });
+
+    let mut resolved = Vec::new();
+    if ancestor_decision == Some(true) {
+        resolved.push(exception.to_string());
+    }
+    for rule in profile_rules {
+        let (negated, body) = split_rule(rule);
+        if rule_covers_path_rule(exception, body) {
+            resolved.push(if negated {
+                format!("!{body}")
+            } else {
+                body.to_string()
+            });
+        }
+    }
+    resolved
 }
 
 fn reject_explicit_global_deny(
