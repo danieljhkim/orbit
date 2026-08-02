@@ -396,13 +396,13 @@ impl HubCoordinationExecutor {
         let explicit_planned_by = raw_clearable(&input, "planned_by")?;
         let explicit_implemented_by = raw_clearable(&input, "implemented_by")?;
         let orchestrator = raw_clearable(&input, "orchestrator")?;
-        if orchestrator.is_some() {
-            if !matches!(current.status, TaskStatus::Proposed | TaskStatus::Backlog) {
-                return Err(OrbitError::InvalidInput(format!(
-                    "task {id} is {}; orchestrator can only be changed while proposed or backlog",
-                    current.status
-                )));
-            }
+        if orchestrator.is_some()
+            && !matches!(current.status, TaskStatus::Proposed | TaskStatus::Backlog)
+        {
+            return Err(OrbitError::InvalidInput(format!(
+                "task {id} is {}; orchestrator can only be changed while proposed or backlog",
+                current.status
+            )));
         }
         self.inner.tasks.document.update_task_document(
             &id,
@@ -609,8 +609,10 @@ impl HubCoordinationExecutor {
                 )),
                 "tags" => Ok(json!(task.tags)),
                 "context_files" => Ok(json!(task.context_files)),
+                "crew" => Ok(json!(task.crew)),
+                "orchestrator" => Ok(json!(task.orchestrator)),
                 other => Err(OrbitError::InvalidInput(format!(
-                    "unknown field selector `{other}`"
+                    "unknown field selector `{other}`. Valid values: comments, plan, execution_summary, description, acceptance_criteria, dependencies, resolved_dependencies, tags, history, context_files, crew, orchestrator, artifacts"
                 ))),
             }
         };
@@ -941,6 +943,54 @@ mod checkoutless_hub_tests {
             !root.path().join(".orbit").exists(),
             "no fabricated checkout"
         );
+    }
+
+    #[test]
+    fn task_orchestrator_add_update_and_clear_round_trip_without_checkout() {
+        let (_root, executor, context) = executor();
+        let created = executor
+            .execute_tool(
+                "orbit.task.add",
+                json!({
+                    "workspace": "ws_checkoutless",
+                    "title": "Canonical hub orchestrator",
+                    "description": "Validate against the checkoutless registry",
+                    "orchestrator": "  sol  ",
+                    "model": "codex"
+                }),
+                context.clone(),
+            )
+            .expect("add trims and persists orchestrator");
+        let id = created["id"].as_str().expect("task id");
+        assert_eq!(created["orchestrator"], "sol");
+
+        let updated = executor
+            .execute_tool(
+                "orbit.task.update",
+                json!({"id": id, "orchestrator": "  terra  ", "model": "codex"}),
+                context.clone(),
+            )
+            .expect("update trims and persists orchestrator");
+        assert_eq!(updated["orchestrator"], "terra");
+        assert_eq!(
+            executor
+                .execute_tool(
+                    "orbit.task.show",
+                    json!({"id": id, "fields": ["crew", "orchestrator"]}),
+                    context.clone(),
+                )
+                .expect("show execution and orchestration fields"),
+            json!({"crew": null, "orchestrator": "terra"})
+        );
+
+        let cleared = executor
+            .execute_tool(
+                "orbit.task.update",
+                json!({"id": id, "orchestrator": "", "model": "codex"}),
+                context,
+            )
+            .expect("empty string clears orchestrator");
+        assert_eq!(cleared["orchestrator"], Value::Null);
     }
 
     #[test]

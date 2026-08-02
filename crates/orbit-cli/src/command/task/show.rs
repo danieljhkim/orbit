@@ -18,7 +18,8 @@ pub struct TaskShowArgs {
     pub json: bool,
     /// Print only the specified field projection(s). Valid values: comments, plan,
     /// execution_summary, description, acceptance_criteria, dependencies,
-    /// resolved_dependencies, tags, history, context_files, artifacts.
+    /// resolved_dependencies, tags, history, context_files, crew, orchestrator,
+    /// artifacts.
     /// Repeat the flag or use a comma-separated value list. Combined with --json,
     /// a single field returns that field as JSON and multiple fields return a JSON object.
     #[arg(long = "fields", alias = "field", value_delimiter = ',', num_args = 1..)]
@@ -147,6 +148,12 @@ impl Execute for TaskShowArgs {
             if let Some(ref implemented_by) = task.implemented_by {
                 println!("{} {}", bold("Implemented By:"), implemented_by);
             }
+            if let Some(ref crew) = task.crew {
+                println!("{} {}", bold("Execution Crew:"), crew);
+            }
+            if let Some(ref orchestrator) = task.orchestrator {
+                println!("{} {}", bold("Orchestrator:"), orchestrator);
+            }
             let history = runtime.get_task_history(&task.id)?;
             let visible_history: Vec<_> = history
                 .iter()
@@ -259,10 +266,12 @@ fn normalize_task_show_fields(fields: &[String]) -> Result<Vec<String>, OrbitErr
                 | "tags"
                 | "history"
                 | "context_files"
+                | "crew"
+                | "orchestrator"
                 | "artifacts"
         ) {
             return Err(OrbitError::InvalidInput(format!(
-                "unknown field selector `{trimmed}`. Valid values: comments, plan, execution_summary, description, acceptance_criteria, dependencies, resolved_dependencies, tags, history, context_files, artifacts"
+                "unknown field selector `{trimmed}`. Valid values: comments, plan, execution_summary, description, acceptance_criteria, dependencies, resolved_dependencies, tags, history, context_files, crew, orchestrator, artifacts"
             )));
         }
         normalized.push(trimmed.to_string());

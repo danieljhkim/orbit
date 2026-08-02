@@ -870,6 +870,39 @@ async fn list_tasks_includes_complexity_when_set() {
     );
 }
 
+#[tokio::test]
+async fn task_api_projects_orchestrator_separately_from_execution_crew() {
+    let runtime = OrbitRuntime::in_memory().expect("build runtime");
+    let task = runtime
+        .add_task(TaskAddParams {
+            title: "Separate task ownership fields".to_string(),
+            description: "Project execution selection and orchestration attribution.".to_string(),
+            status: Some(TaskStatus::Backlog),
+            crew: Some("sol".to_string()),
+            orchestrator: Some("terra".to_string()),
+            workspace_path: Some(".".to_string()),
+            ..Default::default()
+        })
+        .expect("seed attributed task");
+
+    let response = request(runtime.clone(), "/tasks").await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = body_json(response).await;
+    let listed = task_items(&body)
+        .iter()
+        .find(|candidate| candidate["id"] == task.id)
+        .expect("task present in list");
+    assert_eq!(listed["crew"], "sol");
+    assert_eq!(listed["orchestrator"], "terra");
+    assert_eq!(listed["resolved_crew"], "sol");
+
+    let response = request(runtime, &format!("/tasks/{}", task.id)).await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let detail = body_json(response).await;
+    assert_eq!(detail["crew"], "sol");
+    assert_eq!(detail["orchestrator"], "terra");
+}
+
 fn seed_task_with_status(
     runtime: &OrbitRuntime,
     title: &str,

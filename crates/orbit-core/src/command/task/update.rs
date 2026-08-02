@@ -101,8 +101,8 @@ impl OrbitRuntime {
         if let Some(crew) = &params.crew {
             self.validate_crew_name(crew.as_deref())?;
         }
-        if let Some(orchestrator) = &params.orchestrator {
-            self.validate_crew_name(orchestrator.as_deref())?;
+        if let Some(orchestrator) = &mut params.orchestrator {
+            *orchestrator = self.canonical_crew_name(orchestrator.as_deref())?;
             if !matches!(task.status, TaskStatus::Proposed | TaskStatus::Backlog) {
                 return Err(OrbitError::InvalidInput(format!(
                     "task {id} is {}; orchestrator can only be changed while proposed or backlog",

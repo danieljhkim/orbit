@@ -448,15 +448,23 @@ impl HubMcpHost {
             self.record_outcome(name, &context, &result);
             return result;
         }
-        // Explicit non-empty task-crew assignment is validated against the
-        // owner profile before any allocation/mutation. An omitted or cleared
-        // crew is accepted without a profile, so coordination tasks can still be
-        // filed while an owner is unavailable.
-        if let Some(crew) = explicit_task_crew(name, &input)
-            && let Err(error) = self.validate_task_crew(&workspace_id, &crew)
-        {
-            self.record_denial(name, &context, &error);
-            return Err(error);
+        // Explicit non-empty execution and orchestration crew aliases are
+        // validated against the owner profile before any allocation/mutation.
+        // Omitted or cleared values remain accepted without a profile.
+        for field in ["crew", "orchestrator"] {
+            let Some(crew) = explicit_task_crew(name, &input, field) else {
+                continue;
+            };
+            let canonical = match self.validate_task_crew(&workspace_id, &crew) {
+                Ok(canonical) => canonical,
+                Err(error) => {
+                    self.record_denial(name, &context, &error);
+                    return Err(error);
+                }
+            };
+            if let Some(object) = input.as_object_mut() {
+                object.insert(field.to_string(), Value::String(canonical));
+            }
         }
         let result = HubCoordinationExecutor::new(&self.global_root, workspace_id, None)
             .and_then(|executor| executor.execute_tool(name, input, context.clone()));
@@ -476,10 +484,10 @@ impl HubMcpHost {
     /// Validate an explicit task crew against the workspace owner's current
     /// execution profile. Never falls back to hub-local crews, the registry
     /// cache, a stale replica, or a synchronous owner call.
-    fn validate_task_crew(&self, workspace_id: &str, crew: &str) -> Result<(), OrbitError> {
+    fn validate_task_crew(&self, workspace_id: &str, crew: &str) -> Result<String, OrbitError> {
         crate::ExecutionProfileProjection::at(&self.global_root)?
             .validate_task_crew(workspace_id, crew)
-            .map(|_| ())
+            .map(|validated| validated.resolved_crew.name)
     }
 
     fn registration_result(
@@ -693,14 +701,14 @@ fn registration_partial(
     )
 }
 
-/// The explicit, non-empty `crew` on a task add/update, or `None` for any other
-/// tool, an omitted crew, or an explicit crew-clearing (empty) value.
-fn explicit_task_crew(name: &str, input: &Value) -> Option<String> {
+/// The explicit, non-empty named-crew field on a task add/update, or `None`
+/// for any other tool, an omitted field, or an explicit clearing value.
+fn explicit_task_crew(name: &str, input: &Value, field: &str) -> Option<String> {
     if !matches!(name, "orbit.task.add" | "orbit.task.update") {
         return None;
     }
     input
-        .get("crew")
+        .get(field)
         .and_then(Value::as_str)
         .map(str::trim)
         .filter(|value| !value.is_empty())

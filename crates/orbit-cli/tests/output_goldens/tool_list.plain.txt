@@ -40,7 +40,7 @@ orbit.task.add             title:string, description:string                     
 orbit.task.approve         id:string                                                      Approve an Orbit task and return the updated task JSON
 orbit.task.artifact.put    id:string, source_path:string                                  Store a source file under a task's artifacts directory
 orbit.task.list            -                                                              List Orbit tasks newest-first (default limit 50), across every lifecycle status unless a filter is supplied. Optional filters: status, parent, type, tag, dependency readiness, path.
-orbit.task.show            id:string                                                      Fetch a single Orbit task as JSON. Use the optional `fields` projection (or single-field alias `field`) to retrieve only specific task fields, such as `field: "artifacts"`.
+orbit.task.show            id:string                                                      Fetch a single Orbit task as JSON. Use the optional `fields` projection (or single-field alias `field`) to retrieve only specific task fields, such as `field: "orchestrator"`. The `crew` field selects execution, while `orchestrator` records orchestration attribution.
 orbit.task.start           id:string                                                      Start work on an Orbit task and return the updated task JSON
 orbit.task.update          id:string                                                      Update an Orbit task and return the fresh task JSON
 orbit.workflow.run.list    -                                                              List durable workflow runs newest-first with optional bounded filters.

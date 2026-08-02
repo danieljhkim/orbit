@@ -10,7 +10,7 @@ use orbit_common::types::{
 use orbit_core::runtime::HubCoordinationExecutor;
 use orbit_mcp::McpHost;
 use rusqlite::Connection;
-use serde_json::json;
+use serde_json::{Value, json};
 use tempfile::TempDir;
 
 use super::super::config::{HubTransport, load_trusted_mcp_config};
@@ -434,7 +434,8 @@ fn hub_crew_discovery_and_task_validation_read_the_owner_execution_profile() {
         );
     }
 
-    // A valid explicit crew is accepted and the coordination task lands.
+    // Valid padded execution/orchestration aliases are canonicalized from the
+    // owner profile before the coordination task lands.
     let created = host
         .call_tool(
             "orbit.task.add",
@@ -442,13 +443,58 @@ fn hub_crew_discovery_and_task_validation_read_the_owner_execution_profile() {
                 "workspace": "ws_alpha",
                 "title": "Coordinate",
                 "description": "Body",
-                "crew": "sol",
+                "crew": "  sol  ",
+                "orchestrator": "  sol  ",
                 "model": "codex"
             }),
             workspace_context("mcall-task-valid"),
         )
         .expect("valid crew task add");
     assert_eq!(created["crew"], "sol");
+    assert_eq!(created["orchestrator"], "sol");
+    let task_id = created["id"].as_str().expect("task id");
+
+    let updated = host
+        .call_tool(
+            "orbit.task.update",
+            json!({
+                "workspace": "ws_alpha",
+                "id": task_id,
+                "orchestrator": "  sol  ",
+                "model": "codex"
+            }),
+            workspace_context("mcall-task-update-valid"),
+        )
+        .expect("valid orchestrator task update");
+    assert_eq!(updated["orchestrator"], "sol");
+
+    let error = host
+        .call_tool(
+            "orbit.task.update",
+            json!({
+                "workspace": "ws_alpha",
+                "id": task_id,
+                "orchestrator": "ghost",
+                "model": "codex"
+            }),
+            workspace_context("mcall-task-update-bad-orchestrator"),
+        )
+        .expect_err("unknown update orchestrator rejected");
+    assert!(error.to_string().contains("ghost"), "unexpected: {error}");
+
+    let cleared = host
+        .call_tool(
+            "orbit.task.update",
+            json!({
+                "workspace": "ws_alpha",
+                "id": task_id,
+                "orchestrator": "",
+                "model": "codex"
+            }),
+            workspace_context("mcall-task-update-clear-orchestrator"),
+        )
+        .expect("clear does not require owner-profile validation");
+    assert_eq!(cleared["orchestrator"], Value::Null);
 
     // An unknown explicit crew is rejected before allocation.
     let error = host
@@ -464,6 +510,21 @@ fn hub_crew_discovery_and_task_validation_read_the_owner_execution_profile() {
             workspace_context("mcall-task-bad"),
         )
         .expect_err("unknown crew rejected");
+    assert!(error.to_string().contains("ghost"), "unexpected: {error}");
+
+    let error = host
+        .call_tool(
+            "orbit.task.add",
+            json!({
+                "workspace": "ws_alpha",
+                "title": "Rejected orchestrator",
+                "description": "Body",
+                "orchestrator": "ghost",
+                "model": "codex"
+            }),
+            workspace_context("mcall-task-bad-orchestrator"),
+        )
+        .expect_err("unknown orchestrator rejected");
     assert!(error.to_string().contains("ghost"), "unexpected: {error}");
 
     // Omitting the crew is always accepted, even for coordination filing.
