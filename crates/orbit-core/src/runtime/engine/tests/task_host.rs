@@ -155,6 +155,63 @@ fn run_worktree_setup(runtime: &OrbitRuntime, task_ids: &[String], run_id: &str)
     .expect("run worktree setup")
 }
 
+#[cfg(target_os = "linux")]
+#[test]
+fn worktree_setup_prepares_only_missing_scoped_versioned_config_targets() {
+    let (root, runtime) = test_runtime();
+    let repo = root.path().join("repo");
+    let activities = root.path().join("global/resources/activities");
+    fs::create_dir_all(&activities).expect("create global activities");
+    fs::write(
+        activities.join("agent_implement.yaml"),
+        include_str!("../../../../assets/activities/agent_implement.yaml"),
+    )
+    .expect("seed agent implementation activity");
+    init_git_repo(&repo);
+    let task = runtime
+        .add_task(TaskAddParams {
+            title: "Create versioned Orbit config".to_string(),
+            description: "Exercise trusted missing-target preparation.".to_string(),
+            plan: "Prepare the exact scoped targets and validate the sandbox.".to_string(),
+            workspace_path: Some(".".to_string()),
+            ..Default::default()
+        })
+        .expect("add task");
+    runtime
+        .apply_task_automation_update(
+            &task.id,
+            TaskAutomationUpdate {
+                context_files: Some(vec![
+                    "file:.orbit/config.toml".to_string(),
+                    "dir:.orbit/routines".to_string(),
+                    "file:.orbit/state/forbidden.json".to_string(),
+                    "dir:.orbit/future-store".to_string(),
+                    "file:.env".to_string(),
+                    "file:../outside".to_string(),
+                ]),
+                ..TaskAutomationUpdate::default()
+            },
+        )
+        .expect("persist explicit future selectors");
+    approve_for_execution(&runtime, &task);
+
+    let output = run_worktree_setup(&runtime, std::slice::from_ref(&task.id), "jrun-config");
+    let worktree = Path::new(output["workspace_path"].as_str().expect("workspace path"));
+
+    assert!(worktree.join(".orbit/config.toml").is_file());
+    assert!(worktree.join(".orbit/routines").is_dir());
+    for denied in [".orbit/state/forbidden.json", ".orbit/future-store", ".env"] {
+        assert!(
+            !worktree.join(denied).exists(),
+            "protected or secret target must not be materialized: {denied}"
+        );
+    }
+    assert!(
+        !repo.join(".orbit/config.toml").exists(),
+        "preparation must stay inside the disposable worktree"
+    );
+}
+
 #[test]
 fn apply_task_automation_update_does_not_touch_context_files_when_unset() {
     let (root, runtime) = test_runtime();
