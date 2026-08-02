@@ -146,12 +146,16 @@ orbit web connect my-server
 
 `orbit init` persists the host-appropriate sandbox into the shipped executor artifacts. On Linux that value is `linux-bwrap`, which resolves the trusted wrapper at `/usr/bin/bwrap` and fails closed if its namespace-and-mount capability probe cannot run. Install Bubblewrap before dispatching an agent. Ubuntu 24.04 (Noble) also enables AppArmor restrictions on unprivileged user namespaces; without the distro's narrow Bubblewrap profile, the probe fails with `bwrap: setting up uid map: Permission denied`.
 
-On Ubuntu 24.04, run this remediation and verification sequence. It installs the packaged `bwrap-userns-restrict` profile under `/etc/apparmor.d/`, loads it, confirms that AppArmor knows the profile, and runs the same capability shape Orbit probes:
+On Ubuntu 24.04, run this remediation and verification sequence. The package ships `bwrap-userns-restrict` under `/usr/share/apparmor/extra-profiles/`; copy that narrow profile into `/etc/apparmor.d/`, load it, confirm that AppArmor knows it, and run the same capability shape Orbit probes:
 
 ```bash
 sudo apt-get update
 sudo apt-get install --yes bubblewrap apparmor-profiles
 test -x /usr/bin/bwrap
+test -f /usr/share/apparmor/extra-profiles/bwrap-userns-restrict
+sudo install -m 0644 \
+  /usr/share/apparmor/extra-profiles/bwrap-userns-restrict \
+  /etc/apparmor.d/bwrap-userns-restrict
 test -f /etc/apparmor.d/bwrap-userns-restrict
 sudo apparmor_parser -r /etc/apparmor.d/bwrap-userns-restrict
 grep -Fq 'bwrap-userns-restrict' /sys/kernel/security/apparmor/profiles

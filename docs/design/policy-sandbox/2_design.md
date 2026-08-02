@@ -167,8 +167,8 @@ reports `bwrap: setting up uid map: Permission denied`. A present executable is 
 enough; the real namespace-and-mount probe in `probe_bwrap` must succeed.
 
 The supported Noble remediation is the distro `apparmor-profiles` package's
-`bwrap-userns-restrict` profile. Install Bubblewrap and the profile package, confirm the profile
-is present at `/etc/apparmor.d/bwrap-userns-restrict`, and load it with
+`bwrap-userns-restrict` profile. The package provides it under
+`/usr/share/apparmor/extra-profiles/`; copy it into `/etc/apparmor.d/` and load that copy with
 `apparmor_parser -r`. Verify both that the profile is visible to AppArmor and that the exact
 probe shape used by Orbit exits successfully:
 
@@ -176,6 +176,10 @@ probe shape used by Orbit exits successfully:
 sudo apt-get update
 sudo apt-get install --yes bubblewrap apparmor-profiles
 test -x /usr/bin/bwrap
+test -f /usr/share/apparmor/extra-profiles/bwrap-userns-restrict
+sudo install -m 0644 \
+  /usr/share/apparmor/extra-profiles/bwrap-userns-restrict \
+  /etc/apparmor.d/bwrap-userns-restrict
 test -f /etc/apparmor.d/bwrap-userns-restrict
 sudo apparmor_parser -r /etc/apparmor.d/bwrap-userns-restrict
 grep -Fq 'bwrap-userns-restrict' /sys/kernel/security/apparmor/profiles
@@ -184,9 +188,11 @@ grep -Fq 'bwrap-userns-restrict' /sys/kernel/security/apparmor/profiles
 ```
 
 To roll back only this host remediation, unload the packaged profile with
-`sudo apparmor_parser -R /etc/apparmor.d/bwrap-userns-restrict`; do not delete the
-package-managed file. The probe should then fail again on a host where the global restriction is
-active, and re-running the `-r` command restores the remediation. Do not disable
+`sudo apparmor_parser -R /etc/apparmor.d/bwrap-userns-restrict`, then remove only the copied
+`/etc/apparmor.d/bwrap-userns-restrict` file; leave the package-managed source under
+`/usr/share/apparmor/extra-profiles/` intact. The probe should then fail again on a host where the
+global restriction is active, and repeating the copy-and-load sequence restores the remediation.
+Do not disable
 `kernel.apparmor_restrict_unprivileged_userns` globally or install a broad unconfined profile:
 those changes expand the user-namespace attack surface beyond Bubblewrap. Do not set
 `allow_fallback: true` to hide a failed probe, because that bypasses the fail-closed OS boundary
