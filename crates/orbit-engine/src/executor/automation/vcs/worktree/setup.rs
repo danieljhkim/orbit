@@ -47,9 +47,10 @@ pub(in crate::executor::automation) fn setup_worktree<
     let repo_root_str = host.repo_root()?;
     let repo_root = Path::new(&repo_root_str);
 
-    for task_id in task_ids {
-        ensure_task_can_enter_workflow(host, task_id, "worktree_setup")?;
-    }
+    let tasks = task_ids
+        .iter()
+        .map(|task_id| ensure_task_can_enter_workflow(host, task_id, "worktree_setup"))
+        .collect::<Result<Vec<_>, _>>()?;
 
     let start_point = resolve_worktree_start_point(repo_root, &base, base_sync_mode)?;
     // ORB-10380: `start_point` is a moving name (`origin/<base>`) shared by every
@@ -84,6 +85,22 @@ pub(in crate::executor::automation) fn setup_worktree<
     let worktree_path = identity.path(repo_root)?;
 
     ensure_worktree(repo_root, &worktree_path, &base_sha, &branch_name)?;
+
+    // ORB-10573: the provider's Bubblewrap mount plan can only re-bind an existing child
+    // beneath the read-only `.orbit` mount. Let the runtime host materialize
+    // only targets that survive both task-scope and effective-policy checks,
+    // while this disposable checkout is still under trusted setup control.
+    if let Some(profile) = host.managed_worktree_preparation_profile("agent_implement")? {
+        let context_files = tasks
+            .iter()
+            .flat_map(|task| task.context_files.iter().cloned())
+            .collect::<Vec<_>>();
+        orbit_exec::prepare_linux_bwrap_versioned_config_targets(
+            &worktree_path,
+            &context_files,
+            &profile,
+        )?;
+    }
 
     let workspace_path_str = worktree_path.to_string_lossy().to_string();
 

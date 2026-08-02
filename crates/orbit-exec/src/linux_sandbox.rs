@@ -5,14 +5,30 @@
 //! write confinement, not a general read-policy implementation.
 
 use std::collections::BTreeSet;
+use std::fs::OpenOptions;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 
 use orbit_common::types::{OrbitError, ResolvedFsProfile};
-use orbit_common::utility::glob::compile_glob_regex;
+use orbit_common::utility::glob::{compile_glob_regex, match_glob};
 use orbit_common::utility::redaction::non_sensitive_env_vars;
+use orbit_common::utility::selector::Selector;
 
 const TRUSTED_BWRAP_PATH: &str = "/usr/bin/bwrap";
+
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+enum VersionedConfigTargetKind {
+    File,
+    Directory,
+}
+
+const VERSIONED_CONFIG_TARGETS: [(&str, VersionedConfigTargetKind); 5] = [
+    (".orbit/config.yaml", VersionedConfigTargetKind::File),
+    (".orbit/config.toml", VersionedConfigTargetKind::File),
+    (".orbit/auto_tasks", VersionedConfigTargetKind::Directory),
+    (".orbit/routines", VersionedConfigTargetKind::Directory),
+    (".orbit/resources", VersionedConfigTargetKind::Directory),
+];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BwrapProbeOutcome {
@@ -68,6 +84,140 @@ impl LinuxBwrapPostRunGuard {
         }
         Ok(())
     }
+}
+
+/// Materialize exact missing versioned-config mount anchors inside a trusted
+/// disposable worktree. A context selector is necessary but insufficient:
+/// the effective profile must also leave the same path writable.
+pub fn prepare_linux_bwrap_versioned_config_targets(
+    worktree_path: &Path,
+    context_files: &[String],
+    profile: &ResolvedFsProfile,
+) -> Result<(), OrbitError> {
+    let worktree = worktree_path.canonicalize().map_err(|error| {
+        OrbitError::Execution(format!(
+            "canonicalize managed worktree `{}` before config preparation: {error}",
+            worktree_path.display()
+        ))
+    })?;
+    let mut requested = BTreeSet::new();
+    for selector in context_files
+        .iter()
+        .filter_map(|raw| raw.parse::<Selector>().ok())
+    {
+        let candidate = match selector {
+            Selector::File { path } => Some((path, VersionedConfigTargetKind::File)),
+            Selector::Dir { path } => Some((path, VersionedConfigTargetKind::Directory)),
+            Selector::Symbol { .. } | Selector::Module { .. } | Selector::Command { .. } => None,
+        };
+        let Some((relative, kind)) = candidate else {
+            continue;
+        };
+        let absolute = worktree.join(&relative);
+        if VERSIONED_CONFIG_TARGETS.contains(&(relative.as_str(), kind))
+            && effective_modify_allows(profile, &relative, &absolute)?
+        {
+            requested.insert((relative, kind));
+        }
+    }
+    if requested.is_empty() {
+        return Ok(());
+    }
+
+    let orbit_dir = worktree.join(".orbit");
+    inspect_existing_config_anchor(&orbit_dir, VersionedConfigTargetKind::Directory)?;
+    for (relative, kind) in &requested {
+        inspect_existing_config_anchor(&worktree.join(relative), *kind)?;
+    }
+
+    if !orbit_dir.exists() {
+        std::fs::create_dir(&orbit_dir).map_err(|error| {
+            OrbitError::Execution(format!(
+                "create managed-worktree config parent `{}`: {error}",
+                orbit_dir.display()
+            ))
+        })?;
+    }
+    for (relative, kind) in requested {
+        let target = worktree.join(relative);
+        if target.exists() {
+            continue;
+        }
+        match kind {
+            VersionedConfigTargetKind::File => {
+                OpenOptions::new()
+                    .write(true)
+                    .create_new(true)
+                    .open(&target)
+                    .map_err(|error| {
+                        OrbitError::Execution(format!(
+                            "create managed-worktree config file `{}`: {error}",
+                            target.display()
+                        ))
+                    })?;
+            }
+            VersionedConfigTargetKind::Directory => {
+                std::fs::create_dir(&target).map_err(|error| {
+                    OrbitError::Execution(format!(
+                        "create managed-worktree config directory `{}`: {error}",
+                        target.display()
+                    ))
+                })?;
+            }
+        }
+    }
+    Ok(())
+}
+
+fn inspect_existing_config_anchor(
+    path: &Path,
+    expected: VersionedConfigTargetKind,
+) -> Result<(), OrbitError> {
+    let metadata = match std::fs::symlink_metadata(path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => {
+            return Err(OrbitError::Execution(format!(
+                "inspect managed-worktree config target `{}`: {error}",
+                path.display()
+            )));
+        }
+    };
+    if metadata.file_type().is_symlink() {
+        return Err(OrbitError::InvalidInput(format!(
+            "managed-worktree config target `{}` must not be a symlink",
+            path.display()
+        )));
+    }
+    let expected_matches = match expected {
+        VersionedConfigTargetKind::File => metadata.is_file(),
+        VersionedConfigTargetKind::Directory => metadata.is_dir(),
+    };
+    if !expected_matches {
+        return Err(OrbitError::InvalidInput(format!(
+            "managed-worktree config target `{}` has the wrong filesystem type",
+            path.display()
+        )));
+    }
+    Ok(())
+}
+
+fn effective_modify_allows(
+    profile: &ResolvedFsProfile,
+    relative: &str,
+    absolute: &Path,
+) -> Result<bool, OrbitError> {
+    let absolute = absolute.to_string_lossy();
+    let mut decision = false;
+    for rule in &profile.modify {
+        let (negated, pattern) = rule
+            .strip_prefix('!')
+            .map_or((false, rule.as_str()), |pattern| (true, pattern));
+        if match_glob(pattern, relative)? || match_glob(pattern, &absolute)? {
+            decision = !negated;
+        }
+    }
+    Ok(decision)
 }
 
 pub fn bwrap_program_for_audit() -> &'static str {

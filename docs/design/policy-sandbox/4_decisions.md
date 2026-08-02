@@ -56,16 +56,17 @@ Global ADR pointers are retrieved with `orbit tool run orbit.adr.show --input '{
 
 ## ADR-004 — Deny rules inject as negated profile rules with last-match-wins evaluation
 
-**Status:** Accepted · 2026-04 · amended 2026-08 by [ORB-10560] · [T20260416-0728]
+**Status:** Accepted · 2026-04 · amended 2026-08 by [ORB-10560], [ORB-10573] · [T20260416-0728]
 
 **Context.** A separate "deny pass" before profile evaluation is the obvious shape, but it makes precedence ambiguous when a profile rule and a deny rule both match. Multiple Orbit features (workspace overrides, profile narrowing, denyModify-also-implies-denyRead-for-modify validation) need a single evaluation order.
 
-**Decision.** `effective_profile` appends every entry of `denyRead` to the profile's `read` list as `!<rule>` and walks `denyModify` in order. Ordinary modify entries append as `!<rule>`; a host-policy `!<path>` entry is an explicit exception to an earlier enclosing modify deny and is intersected with the selected profile. Workspace policy may narrow but cannot expand the host exception surface. `check_path` walks the resolved list in order and the **last match wins**. There is no separate deny pass, and task `context_files` are not policy authority.
+**Decision.** `effective_profile` appends every entry of `denyRead` to the profile's `read` list as `!<rule>` and walks `denyModify` in order. Ordinary modify entries append as `!<rule>`; a host-policy `!<path>` entry is an explicit exception to an earlier enclosing modify deny and is intersected with the selected profile. Workspace policy may narrow but cannot expand the host exception surface. `check_path` walks the resolved list in order and the **last match wins**. There is no separate deny pass, and task `context_files` are not policy authority. On Linux, trusted setup may materialize an exact missing versioned-config file or directory anchor only when both the effective exception and a matching task selector authorize that inventory entry; existing targets remain untouched and symlink/type mismatches fail closed.
 
 **Consequences.**
 - Profile rules and deny rules are evaluated in one deterministic pass; appended denies win over earlier positive matches.
 - The host can keep a broad fail-closed boundary such as `.orbit/**` while reviewing a fixed exception inventory for versioned configuration; workspace and profile rules cannot create a new exception.
 - Cost: exception paths must use exact or subtree shapes, and Linux can only bind-mount an existing exception target beneath a read-only parent. Adding a new top-level versioned path requires a shipped host-policy update and global-default refresh.
+- Cost: preparation can leave an empty explicitly scoped anchor in a failed disposable worktree, and each new preparable top-level target requires a reviewed file-versus-directory inventory entry.
 
 ## ADR-005 — Modify rules must be covered by a read rule in the same profile
 
@@ -234,5 +235,6 @@ Use `literal` for the canonical and lock files (predictable names) and `regex` f
 - **[ORB-00048]** — Extend the unconditional provider state-dir allowance set to include Grok's `$HOME/.grok` state directory while hardening fourth-family scoreboards and analytics.
 - **[ORB-10552]** — Implement fail-closed Linux Bubblewrap write confinement and preserve the explicit read-policy limitation.
 - **[ORB-10560]** — Amend global deny resolution with profile-intersected host modify exceptions for versioned `.orbit` configuration.
+- **[ORB-10573]** — Amend Linux delivery with trusted, two-gate preparation of missing versioned-config mount anchors.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

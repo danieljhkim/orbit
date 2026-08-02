@@ -46,6 +46,8 @@ When an activity omits `fsProfile:`, the v2 host uses `UNRESTRICTED_FS_PROFILE`.
 
 The shipped host policy keeps `.orbit/**` protected, then explicitly re-allows only versioned definitions and configuration: `.orbit/auto_tasks/**`, `.orbit/routines/**`, `.orbit/config.yaml`, `.orbit/config.toml`, and `.orbit/resources/**`. Runtime state, Orbit-owned records, databases, locks, and unknown `.orbit` paths stay protected. These exceptions intersect the activity profile; they do not derive authority from task `context_files`.
 
+Linux managed-worktree setup may create a missing exact versioned-config anchor before provider launch because Bubblewrap cannot bind-mount a nonexistent child beneath the read-only `.orbit` parent. Preparation requires both a matching file-versus-directory task selector and permission from the effective profile-intersected host exception. It runs only in the disposable worktree, never opens an existing target for writing, and rejects symlink or filesystem-type mismatches. Task scope is therefore a necessary second gate for materialization, not an independent policy grant. [ORB-10573]
+
 ### 2.4 Enforcement depends on backend
 
 HTTP activities enforce policy in the `orbit-tools` `fs.*` builtins before any read or modify. Denials return `OrbitError::PolicyDenied` and emit audit events. CLI activities do not call those builtins; they rely on harness delegation plus the configured executor sandbox: `sandbox-exec` on macOS and Bubblewrap write confinement on Linux for shipped agent executors.
@@ -66,7 +68,7 @@ When the default policy denies workspace `.orbit/**`, the v2 host re-allows only
 | Allow/deny enum | `crates/orbit-common/src/types/policy_decision.rs` | [T20260426-0622] |
 | Policy facade | `crates/orbit-policy/src/{lib,engine,evaluator,decision}.rs` | [T20260416-0728] |
 | Profile resolution + deny injection | `crates/orbit-common/src/types/policy_def.rs` (`effective_profile`, `check_path`) | [T20260416-0728] |
-| Versioned `.orbit` modify boundary | shipped `default.yaml`, profile resolution, OS sandbox compilers | [ORB-10560] |
+| Versioned `.orbit` modify boundary and missing-target preparation | shipped `default.yaml`, profile resolution, managed-worktree setup, OS sandbox compilers | [ORB-10560], [ORB-10573] |
 | Implicit `unrestricted` materialization | `crates/orbit-core/src/runtime/v2_host/mod.rs` (`tool_context_for_activity`) | [T20260419-0503] |
 | Tool-layer fs enforcement | `crates/orbit-tools/src/builtin/fs/mod.rs` (`enforce_fs_policy`, `emit_fs_event`) | [T20260419-0503] |
 | Activity `fsProfile:` binding | `crates/orbit-engine/src/activity_job/{dispatcher,job_executor,agent_loop_driver}.rs` | [T20260419-0503] |
@@ -89,5 +91,6 @@ When the default policy denies workspace `.orbit/**`, the v2 host re-allows only
 - **[ORB-00129]** — Keep child Orbit runtime write roots narrow under the macOS sandbox while supporting activity-exposed learning, friction, and job-run state tools.
 - **[ORB-10552]** — Add fail-closed Linux Bubblewrap write confinement for shipped CLI agents.
 - **[ORB-10560]** — Permit only explicit versioned `.orbit` configuration beneath the default protected boundary.
+- **[ORB-10573]** — Prepare only missing, exactly scoped versioned-config anchors that remain permitted by the effective host policy/profile.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.
