@@ -70,6 +70,66 @@ fn resolve_executor_sandbox_marks_only_specific_orbit_worktree_managed() {
     assert!(!direct.managed_worktree);
 }
 
+#[cfg(target_os = "linux")]
+#[test]
+fn resolve_executor_sandbox_orders_versioned_orbit_exceptions_after_default_deny() {
+    let (_root, runtime, _repo_root) = runtime_with_workspace_layout();
+    seed_executor(
+        &runtime,
+        "claude",
+        Some(orbit_common::types::ExecutorSandboxKind::LinuxBwrap),
+    );
+    let worktree = runtime
+        .paths()
+        .orbit_dir
+        .join("state/worktrees/orbit-jrun-versioned-config");
+    for directory in ["auto_tasks", "routines", "resources", "state", "tasks"] {
+        std::fs::create_dir_all(worktree.join(".orbit").join(directory))
+            .expect("create worktree Orbit fixture");
+    }
+    for file in ["config.yaml", "config.toml"] {
+        std::fs::write(worktree.join(".orbit").join(file), "versioned = true")
+            .expect("create versioned config fixture");
+    }
+
+    let resolved = runtime
+        .resolve_executor_sandbox("claude", None, Some(&worktree))
+        .expect("resolve")
+        .expect("descriptor");
+    let modify = &resolved.fs_profile.modify;
+    let canonical_worktree = worktree.canonicalize().expect("canonical worktree");
+    let orbit = canonical_worktree.join(".orbit");
+    let deny = format!("!{}/**", orbit.display());
+    let deny_pos = modify
+        .iter()
+        .position(|rule| rule == &deny)
+        .unwrap_or_else(|| panic!("default Orbit deny missing from {modify:?}"));
+
+    for allowed in [
+        format!("{}/auto_tasks/**", orbit.display()),
+        format!("{}/routines/**", orbit.display()),
+        format!("{}/config.yaml", orbit.display()),
+        format!("{}/config.toml", orbit.display()),
+        format!("{}/resources/**", orbit.display()),
+    ] {
+        let allow_pos = modify
+            .iter()
+            .position(|rule| rule == &allowed)
+            .unwrap_or_else(|| panic!("versioned exception `{allowed}` missing from {modify:?}"));
+        assert!(deny_pos < allow_pos, "exception must follow default deny");
+    }
+    for protected in [
+        format!("{}/state/**", orbit.display()),
+        format!("{}/tasks/**", orbit.display()),
+        format!("{}/future-store/**", orbit.display()),
+    ] {
+        assert!(
+            !modify.iter().any(|rule| rule == &protected),
+            "worktree store must not be re-allowed by policy: {protected} in {modify:?}"
+        );
+    }
+}
+
 #[cfg(target_os = "macos")]
 #[test]
 fn resolve_executor_sandbox_returns_descriptor_with_absolutized_modify_paths() {

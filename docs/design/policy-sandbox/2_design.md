@@ -28,8 +28,11 @@ A valid policy declares `name`, optional `description`, global `denyRead` / `den
 2. Every profile name is non-empty.
 3. Every positive `modify` rule is covered by a positive `read` rule in the same profile.
 4. Profile rules do not exactly duplicate global deny entries.
+5. `denyRead` never contains exceptions. A `denyModify` exception uses `!<path>`, names an exact path or `<path>/**` subtree, and is strictly contained by an earlier deny in the same policy.
 
-`PolicyDef::merged(global, workspace)` lets workspace `fsProfiles` overwrite globals by name while global denies accumulate. The merged policy is revalidated.
+`PolicyDef::merged(global, workspace)` lets workspace `fsProfiles` overwrite globals by name while global denies accumulate. A workspace may repeat or narrow a host `denyModify` exception, but cannot introduce an exception outside the host exception surface. Workspace denies are appended after host exceptions and therefore can narrow them. The merged policy is revalidated.
+
+The shipped default expresses the versioned Orbit boundary as an ordered `.orbit/**` deny followed by exceptions for `.orbit/auto_tasks/**`, `.orbit/routines/**`, `.orbit/config.yaml`, `.orbit/config.toml`, and `.orbit/resources/**`. The broad deny continues to cover `.orbit/state/**`, task/learning/ADR/friction stores, databases, locks, and any future or misspelled `.orbit` path. Task `context_files` remain planning and conflict selectors; policy resolution does not convert them into filesystem grants ([ORB-10560]).
 
 ---
 
@@ -39,7 +42,7 @@ A valid policy declares `name`, optional `description`, global `denyRead` / `den
 
 1. **Lookup.** Use the named profile. If the missing name is `unrestricted`, synthesize `read: ["./**"]` and `modify: ["./**"]`; other missing profiles return `OrbitError::InvalidInput`.
 2. **Normalization.** Trim, convert backslashes, strip leading `./`, reject absolute, `~`, and parent-traversal rules, then compile the narrow glob syntax to regex.
-3. **Deny injection.** Append `denyRead` to `read` and `denyModify` to `modify` as negated rules (`!<rule>`), so global denies participate in the same ordered list.
+3. **Deny injection.** Append `denyRead` to `read` as negated rules. Walk `denyModify` in order: ordinary entries append as negated rules, while `!<path>` entries are host exceptions. An exception is intersected with the selected profile, so an empty/read-only profile gains nothing and profile negative rules still narrow the result.
 
 The implicit `unrestricted` profile appears only when an activity omitted `fsProfile:` and the policy did not define `unrestricted`. A real profile with that name shadows the fallback.
 
@@ -139,13 +142,15 @@ The compiled macOS profile denies by default, allows broad reads required by age
 
 The child Orbit runtime roots are deliberately narrower than the workspace `.orbit` tree. They cover stores used by currently activity-exposed Orbit write tools: task/review/artifact/duel writes under `.orbit/tasks/**`, learning curation under `.orbit/learnings/**`, friction reporting under `.orbit/frictions/**`, `orbit.state.set` writes under `.orbit/state/job-runs/**`, and startup/runtime audit, log, semantic-index, and global database writes. Registered stores that are not exposed by the current activity allowlists, including `.orbit/adrs/**` and graph write roots, remain outside this inventory and must be revisited when those write tools are exposed.
 
-Negated `read` / `modify` rules become explicit SBPL denies after ordinary profile allows to preserve last-match-wins. Simple path and `/**` subtree denials compile to `subpath`; non-subpath globs such as `**/*.env` compile to `regex`. Host-owned provider side roots are the exception because the provider CLI and inherited Orbit subprocesses must write workflow state.
+Negated `read` / `modify` rules become explicit SBPL denies in resolved order. Explicit host-policy exceptions and host-owned runtime roots appear after the enclosing deny, preserving last-match-wins without opening unrelated siblings. Simple path and `/**` subtree denials compile to `subpath`; non-subpath globs such as `**/*.env` compile to `regex`.
 
 ### 7.1 Linux Bubblewrap backend
 
 On Linux, `ExecutorSandboxKind::LinuxBwrap` resolves only `/usr/bin/bwrap` and runs a real capability probe using the same private user, PID, IPC, and UTS namespaces plus mount setup required by provider execution. Absence or probe failure is permanent and fail-closed unless the executor explicitly sets `allow_fallback: true`. The availability decision happens before provider argv construction: an active outer wrapper neutralizes provider-native sandbox flags, while a bare fallback preserves them.
 
-The deterministic argv starts with a read-only bind of `/`, explicitly retains the host network namespace, and applies canonical `modify` mounts in policy order. Positive roots become writable binds; later exact or subtree denies become read-only binds. `/dev`, `/proc`, and `/tmp` are replaced with private minimal mounts, the wrapper creates a fresh session, and parent-death cleanup remains enabled.
+The deterministic argv starts with a read-only bind of `/`, explicitly retains the host network namespace, and applies canonical `modify` mounts in policy order. Broad positive roots are mounted before denials. A positive exact/subtree root is mounted after an earlier deny only when it is strictly nested beneath that denied root; equal or ancestor positives cannot mask the protection. This implements versioned-config and trusted runtime-store re-allows while unknown `.orbit` children remain read-only. A re-allowed file or directory must already exist because Bubblewrap cannot bind-mount a nonexistent child beneath a read-only parent. `/dev`, `/proc`, and `/tmp` are replaced with private minimal mounts, the wrapper creates a fresh session, and parent-death cleanup remains enabled.
+
+The policy syntax remains schema v2. Existing policies without `denyModify` exceptions retain their prior behavior. After installing a binary that carries a changed shipped default, `orbit init` refreshes the machine-global policy assets without changing executor sandbox selection or `allow_fallback`; `--force` is unnecessary and would reset the global root. Workspace policy can then narrow the refreshed host boundary but cannot expand its exception surface.
 
 Existing matches of non-subtree negative globs are mounted read-only before spawn. Because mount namespaces cannot reject a matching filename created later, direct invocations with an overlapping non-subtree deny fail closed. An Orbit-managed single-writer worktree may run with snapshot expansion, followed by a post-run scan that rejects any newly-created forbidden match before downstream commit. Audit metadata records the effective backend, trusted wrapper, probe outcome, redacted effective argv, `write_enforced` or `write_delegated`, and the honest `read_delegated` boundary. [ORB-10552] [ADR-0304]
 
@@ -231,21 +236,23 @@ Risk-weighted regression tests sit beside the implementations they guard
 - `crates/orbit-policy/src/engine.rs#tests` — `PolicyEngine::check` boundary
   semantics: positive read-rule matches return `allowed=true` with the rule
   recorded in `matched_rule`; modify paths outside any positive rule resolve
-  to `allowed=false`; global `denyRead` / `denyModify` rules override
+  to `allowed=false`; ordinary global `denyRead` / `denyModify` rules override
   profile-level positive rules under last-match-wins; an unknown profile name
   errors structurally (with the documented `unrestricted` exception); and the
   `matched_rule` field is populated for audit attribution. Traversal inputs
   such as `../secret.txt`, `src/../secret.txt`, and their backslash-normalized
   equivalents are rejected as `OrbitError::InvalidInput` for both read and
-  modify checks ([T20260509-27]).
+  modify checks ([T20260509-27]). The same surface proves host modify
+  exceptions intersect profile authority, workspace exceptions cannot exceed
+  the host surface, and later workspace denies still win ([ORB-10560]).
 - `crates/orbit-exec/src/macos_sandbox/compile.rs#tests` and
   `crates/orbit-exec/src/macos_sandbox/tests/provider_dirs.rs` — trusted wrapper
   resolution ignores `PATH`, including a macOS runtime test that places a fake
   `sandbox-exec` earlier on `PATH` and verifies the fake wrapper is not
   executed ([T20260509-30]). SBPL compilation tests
   cover `denyRead` / `denyModify` clause emission (`subpath` for simple
-  rules, `regex` for non-trivial globs) and the deny-after-allow ordering
-  required for last-match-wins. macOS-gated runtime tests
+  rules, `regex` for non-trivial globs) and resolved deny/re-allow ordering
+  under last-match-wins. macOS-gated runtime tests
   (`compiled_profile_denies_reads_to_negated_read_path` and
   `compiled_profile_for_realistic_agent_loop_profile_allows_repo_writes_denies_dotenv`)
   exercise an `agent_loop`-shaped profile end-to-end against the kernel
@@ -258,7 +265,9 @@ Risk-weighted regression tests sit beside the implementations they guard
 macOS runtime tests skip where `sandbox-exec` cannot apply. Linux Bubblewrap
 tests compile argv and exercise fail-closed/fallback behavior on every host;
 kernel tests probe real `/usr/bin/bwrap` and skip with its concrete capability
-failure when user or mount namespaces are unavailable.
+failure when user or mount namespaces are unavailable. The Linux argv and
+kernel cases also cover writable versioned `.orbit` paths versus protected
+state, record, database/lock, and unknown paths ([ORB-10560]).
 
 ---
 
@@ -302,5 +311,6 @@ failure when user or mount namespaces are unavailable.
 - **[ORB-00129]** — Re-allow narrow workspace child Orbit runtime stores for activity-exposed learning, friction, and job-run state tools without removing the default workspace `.orbit/**` deny.
 - **[ORB-10552]** — Ship fail-closed Linux Bubblewrap write confinement without claiming read-policy parity.
 - **[ORB-10553]** — Rescue the Ubuntu host prerequisite for the shipped Linux Bubblewrap probe.
+- **[ORB-10560]** — Add host-policy modify exceptions for the explicit versioned `.orbit` surface while preserving protected stores and unknown-path denial.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

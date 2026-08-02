@@ -86,3 +86,46 @@ fn default_policy_denies_dotenv_variants_for_read_and_modify() {
         }
     }
 }
+
+#[test]
+fn default_policy_allows_only_versioned_orbit_modify_surface() {
+    let engine = default_policy_engine();
+
+    for path in [
+        ".orbit/auto_tasks/nightly.yaml",
+        ".orbit/routines/release.yaml",
+        ".orbit/config.yaml",
+        ".orbit/config.toml",
+        ".orbit/resources/jobs/task.yaml",
+    ] {
+        let result = engine
+            .check("implementer", FsOperation::Modify, path)
+            .expect("policy check");
+        assert!(result.allowed, "versioned Orbit path should allow `{path}`");
+    }
+
+    for path in [
+        ".orbit/state/job-runs/run.json",
+        ".orbit/tasks/ORB-00001/task.yaml",
+        ".orbit/learnings/L-0001/learning.yaml",
+        ".orbit/adrs/accepted/ADR-0001/adr.yaml",
+        ".orbit/frictions/2026-08/F001.md",
+        ".orbit/orbit.db",
+        ".orbit/config.lock",
+        ".orbit/future-store/record.json",
+        ".orbit/resources/private.env",
+    ] {
+        let result = engine
+            .check("implementer", FsOperation::Modify, path)
+            .expect("policy check");
+        assert!(!result.allowed, "protected Orbit path should deny `{path}`");
+    }
+
+    let reviewer = engine
+        .check("reviewer", FsOperation::Modify, ".orbit/config.yaml")
+        .expect("reviewer policy check");
+    assert!(
+        !reviewer.allowed,
+        "host exceptions must not grant a read-only profile modify authority"
+    );
+}

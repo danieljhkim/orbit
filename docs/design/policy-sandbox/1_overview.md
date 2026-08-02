@@ -3,7 +3,7 @@ summary: "Policy & Sandboxing — Overview"
 type: design
 title: "Policy & Sandboxing — Overview"
 owner: claude
-last_updated: 2026-08-01
+last_updated: 2026-08-02
 status: Draft
 feature: policy-sandbox
 doc_role: overview
@@ -24,7 +24,7 @@ Orbit runs agents against user repositories, so the safety boundary is a product
 
 1. **Default paths stay explicit.** Omitting `fsProfile:` maps to `unrestricted`, then still runs through profile resolution and global denies.
 2. **Profiles are activity-scoped.** A job can mix profiles by activity; evaluation happens per call, not by mutating a process-global mode.
-3. **Deny rules are global.** `denyRead` and `denyModify` are injected into every resolved profile as negated rules, so workspace policy can narrow but not erase global denies.
+3. **Deny rules are global.** `denyRead` and `denyModify` are injected into every resolved profile. A host policy may name a strictly nested `denyModify` exception, but the selected profile must already authorize it and workspace policy cannot expand the host exception surface.
 4. **Execution has two layers.** `orbit-exec` always supervises child processes; CLI-agent writes are OS-confined where the configured executor uses macOS `sandbox-exec` or Linux Bubblewrap.
 5. **Denials are evidence.** HTTP fs denials emit through `FsAuditLogger` into `V2AuditEvent` filesystem entries; [auditability](../auditability/) owns durable storage.
 
@@ -43,6 +43,8 @@ When an activity omits `fsProfile:`, the v2 host uses `UNRESTRICTED_FS_PROFILE`.
 ### 2.3 Path evaluation is last-match-wins over a normalized rule list
 
 `PolicyDef::check_path` evaluates normalized workspace-relative paths against positive and negated rules. The last matching rule wins. Empty positive sets deny with `[]`; unmatched positive sets deny with `<no matching rule>`.
+
+The shipped host policy keeps `.orbit/**` protected, then explicitly re-allows only versioned definitions and configuration: `.orbit/auto_tasks/**`, `.orbit/routines/**`, `.orbit/config.yaml`, `.orbit/config.toml`, and `.orbit/resources/**`. Runtime state, Orbit-owned records, databases, locks, and unknown `.orbit` paths stay protected. These exceptions intersect the activity profile; they do not derive authority from task `context_files`.
 
 ### 2.4 Enforcement depends on backend
 
@@ -64,6 +66,7 @@ When the default policy denies workspace `.orbit/**`, the v2 host re-allows only
 | Allow/deny enum | `crates/orbit-common/src/types/policy_decision.rs` | [T20260426-0622] |
 | Policy facade | `crates/orbit-policy/src/{lib,engine,evaluator,decision}.rs` | [T20260416-0728] |
 | Profile resolution + deny injection | `crates/orbit-common/src/types/policy_def.rs` (`effective_profile`, `check_path`) | [T20260416-0728] |
+| Versioned `.orbit` modify boundary | shipped `default.yaml`, profile resolution, OS sandbox compilers | [ORB-10560] |
 | Implicit `unrestricted` materialization | `crates/orbit-core/src/runtime/v2_host/mod.rs` (`tool_context_for_activity`) | [T20260419-0503] |
 | Tool-layer fs enforcement | `crates/orbit-tools/src/builtin/fs/mod.rs` (`enforce_fs_policy`, `emit_fs_event`) | [T20260419-0503] |
 | Activity `fsProfile:` binding | `crates/orbit-engine/src/activity_job/{dispatcher,job_executor,agent_loop_driver}.rs` | [T20260419-0503] |
@@ -85,5 +88,6 @@ When the default policy denies workspace `.orbit/**`, the v2 host re-allows only
 - **[T20260430-23]** — Shorten the policy sandbox design docs while preserving the shipped contract and ADR history.
 - **[ORB-00129]** — Keep child Orbit runtime write roots narrow under the macOS sandbox while supporting activity-exposed learning, friction, and job-run state tools.
 - **[ORB-10552]** — Add fail-closed Linux Bubblewrap write confinement for shipped CLI agents.
+- **[ORB-10560]** — Permit only explicit versioned `.orbit` configuration beneath the default protected boundary.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

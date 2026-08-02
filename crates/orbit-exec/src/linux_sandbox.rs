@@ -130,9 +130,10 @@ pub fn probe_bwrap() -> BwrapProbeOutcome {
     }
 }
 
-/// Compile a deterministic Bubblewrap argv. Every writable mount is emitted
-/// before every deny mount, so exact and subtree denials always win even when
-/// Orbit/provider runtime roots were appended after policy resolution.
+/// Compile a deterministic Bubblewrap argv. Broad writable roots are emitted
+/// before every deny mount. A positive exact/subtree rule that is strictly
+/// nested under an earlier deny is emitted in rule order as an explicit narrow
+/// re-allow; positive ancestors and equal roots cannot override a deny.
 pub fn compile_linux_bwrap_argv(
     profile: &ResolvedFsProfile,
     program: &str,
@@ -154,26 +155,31 @@ pub fn compile_linux_bwrap_argv(
     ]);
     let writable_roots = positive_mount_roots(profile)?;
 
-    for rule in profile.modify.iter().filter(|rule| !rule.starts_with('!')) {
+    for (index, rule) in profile.modify.iter().enumerate() {
+        if rule.starts_with('!') || is_narrow_reallow(&profile.modify[..index], rule) {
+            continue;
+        }
         for path in mount_paths_for_rule(rule, true)? {
             push_mount(&mut out, "--bind", &path);
         }
     }
-    for denied in profile
-        .modify
-        .iter()
-        .filter_map(|rule| rule.strip_prefix('!'))
-    {
-        if !is_exact_or_subtree(denied)
-            && !managed_worktree
-            && overlaps_writable_root(denied, &writable_roots)
-        {
-            return Err(OrbitError::PolicyDenied(format!(
-                "linux-bwrap cannot enforce non-subtree denyModify `{denied}` for a direct invocation; use a managed worktree"
-            )));
-        }
-        for path in mount_paths_for_rule(denied, false)? {
-            push_mount(&mut out, "--ro-bind", &path);
+    for (index, rule) in profile.modify.iter().enumerate() {
+        if let Some(denied) = rule.strip_prefix('!') {
+            if !is_exact_or_subtree(denied)
+                && !managed_worktree
+                && overlaps_writable_root(denied, &writable_roots)
+            {
+                return Err(OrbitError::PolicyDenied(format!(
+                    "linux-bwrap cannot enforce non-subtree denyModify `{denied}` for a direct invocation; use a managed worktree"
+                )));
+            }
+            for path in mount_paths_for_rule(denied, false)? {
+                push_mount(&mut out, "--ro-bind", &path);
+            }
+        } else if is_narrow_reallow(&profile.modify[..index], rule) {
+            for path in mount_paths_for_rule(rule, false)? {
+                push_mount(&mut out, "--bind", &path);
+            }
         }
     }
 
@@ -256,7 +262,7 @@ fn push_mount(args: &mut Vec<String>, option: &str, path: &Path) {
 fn positive_mount_roots(profile: &ResolvedFsProfile) -> Result<Vec<PathBuf>, OrbitError> {
     let mut roots = BTreeSet::new();
     for rule in profile.modify.iter().filter(|rule| !rule.starts_with('!')) {
-        for root in mount_paths_for_rule(rule, true)? {
+        for root in mount_paths_for_rule(rule, false)? {
             roots.insert(root);
         }
     }
@@ -266,6 +272,9 @@ fn positive_mount_roots(profile: &ResolvedFsProfile) -> Result<Vec<PathBuf>, Orb
 fn mount_paths_for_rule(rule: &str, require_match: bool) -> Result<Vec<PathBuf>, OrbitError> {
     if is_exact_or_subtree(rule) {
         let root = rule.strip_suffix("/**").unwrap_or(rule);
+        if !Path::new(root).exists() && !require_match {
+            return Ok(Vec::new());
+        }
         let path = canonical_existing(Path::new(root), "sandbox mount")?;
         return Ok(vec![path]);
     }
@@ -276,6 +285,21 @@ fn mount_paths_for_rule(rule: &str, require_match: bool) -> Result<Vec<PathBuf>,
         )));
     }
     Ok(matches.into_iter().collect())
+}
+
+fn is_narrow_reallow(prior_rules: &[String], rule: &str) -> bool {
+    let Some(root) = exact_or_subtree_root(rule) else {
+        return false;
+    };
+    prior_rules
+        .iter()
+        .filter_map(|prior| prior.strip_prefix('!'))
+        .filter_map(exact_or_subtree_root)
+        .any(|denied| root != denied && root.starts_with(&denied))
+}
+
+fn exact_or_subtree_root(rule: &str) -> Option<PathBuf> {
+    is_exact_or_subtree(rule).then(|| PathBuf::from(rule.strip_suffix("/**").unwrap_or(rule)))
 }
 
 fn is_exact_or_subtree(rule: &str) -> bool {
