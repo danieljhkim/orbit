@@ -68,9 +68,10 @@ pub mod pr_scoreboard {
 
 pub mod scoreboard_summary {
     pub use crate::file::scoreboard::scoreboard_summary::{
-        AgentSummary, DuelSummary, FrictionSummary, KnowledgeSummary, PlanningDuelSummary,
-        PrSummary, RecentSummary, ScoreboardInputs, ScoreboardSummary, ScoreboardWindow,
-        TokenSummary, TopToolCall, WorkflowRunCount, generate_summary,
+        AgentSummary, DuelSummary, FrictionSummary, KnowledgeSummary, ORCHESTRATION_SCHEMA_VERSION,
+        OrchestrationBucketKind, OrchestrationBucketSummary, OrchestrationSummary,
+        PlanningDuelSummary, PrSummary, RecentSummary, ScoreboardInputs, ScoreboardSummary,
+        ScoreboardWindow, TokenSummary, TopToolCall, WorkflowRunCount, generate_summary,
         generate_summary_with_audit_tool_calls, generate_summary_with_inputs, summary_path,
         write_summary,
     };

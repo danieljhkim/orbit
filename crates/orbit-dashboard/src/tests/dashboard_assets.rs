@@ -527,6 +527,8 @@ async fn dashboard_scoreboard_is_reachable_under_diagnostics() {
         "scoreboard-agent-strip",
         "scoreboard-duel-matrix-host",
         "scoreboard-insights",
+        "scoreboard-orchestration",
+        "scoreboard-orchestration-count",
     ] {
         assert!(body.contains(&format!(r#"id="{id}""#)), "{id} must survive");
     }
@@ -539,6 +541,32 @@ async fn dashboard_scoreboard_is_reachable_under_diagnostics() {
             && app.contains(r#"fetchJson("/api/scoreboard?window=24h")"#),
         "the scoreboard fetch must hang off the diagnostics subtab branch"
     );
+}
+
+#[test]
+fn dashboard_scoreboard_keeps_managed_cost_ownership_out_of_executor_rankings() {
+    let scoreboard = include_str!("../../assets/dashboard/scoreboard.js");
+    let index = include_str!("../../assets/dashboard/index.html");
+
+    assert!(index.contains("Managed Execution Cost"));
+    assert!(scoreboard.contains("renderOrchestrationSummary(summary?.orchestration)"));
+    assert!(scoreboard.contains("named orchestrator"));
+    assert!(scoreboard.contains("shared task ownership"));
+    assert!(scoreboard.contains("unattributed task ownership"));
+    assert!(scoreboard.contains("missing linked task"));
+    assert!(scoreboard.contains("provider-reported"));
+    assert!(scoreboard.contains("Provider-first estimate policy"));
+    assert!(scoreboard.contains("derived estimate"));
+    assert!(scoreboard.contains("if (known === 0)"));
+    assert!(scoreboard.contains("formatUsd(total)"));
+    assert!(scoreboard.contains("comparable same-invocation population"));
+    assert!(scoreboard.contains("do not reconcile partial sums"));
+    assert!(
+        scoreboard.contains(
+            "Direct interactive Codex or Claude orchestration-session overhead is excluded"
+        )
+    );
+    assert!(scoreboard.contains("invocation < ${until} (exclusive cutoff"));
 }
 
 /// ORB-10444: the Knowledge artifact list is long enough to scroll the detail

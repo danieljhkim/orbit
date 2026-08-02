@@ -1,5 +1,6 @@
 use chrono::{Duration, Utc};
 use orbit_common::types::{InvocationTrace, TokenUsage};
+use orbit_store::scoreboard_summary::{ORCHESTRATION_SCHEMA_VERSION, ScoreboardWindow};
 use tempfile::tempdir;
 
 use crate::command::task::TaskAddParams;
@@ -294,6 +295,39 @@ fn orchestrator_accounting_classifies_conservatively_and_reconciles_every_popula
             bucket.comparable_provider_cost_usd - bucket.comparable_derived_cost_usd
         );
     }
+
+    let scoreboard = runtime
+        .generate_scoreboard_summary(Some(ScoreboardWindow::Hour))
+        .expect("generate bounded scoreboard");
+    let orchestration = scoreboard
+        .orchestration
+        .expect("scoreboard preserves orchestration projection");
+    assert_eq!(orchestration.schema_version, ORCHESTRATION_SCHEMA_VERSION);
+    assert_eq!(orchestration.scope, "managed_execution");
+    assert!(orchestration.until <= orchestration.as_of);
+    assert!(orchestration.since.is_some(), "bounded window is preserved");
+    assert_eq!(orchestration.buckets.len(), 4);
+    assert!(orchestration.buckets.iter().any(|bucket| bucket.kind
+        == OrchestratorMetricsBucketKind::Orchestrator
+        && bucket.orchestrator.as_deref() == Some("alpha")));
+    assert!(
+        orchestration
+            .buckets
+            .iter()
+            .any(|bucket| bucket.kind == OrchestratorMetricsBucketKind::Shared)
+    );
+    assert!(
+        orchestration
+            .buckets
+            .iter()
+            .any(|bucket| bucket.kind == OrchestratorMetricsBucketKind::Unattributed)
+    );
+    assert!(
+        orchestration
+            .buckets
+            .iter()
+            .any(|bucket| bucket.kind == OrchestratorMetricsBucketKind::Missing)
+    );
 }
 
 #[test]

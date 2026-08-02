@@ -26,8 +26,11 @@ const SUMMARY_FILENAME: &str = "summary.json";
 // `ScoreboardInputs.window` plumbing — snapshot-sourced per-agent fields
 // (`tokens`, `pr`, `duels`, `task_review.threads`) zero out under non-`All`
 // windows because we lack a timestamped snapshot log to filter against.
+// v7 adds the separately-versioned `orchestration` projection. It deliberately
+// remains separate from execution-agent/model scoreboard rows.
 // Older readers ignore unknown fields.
-const CURRENT_SCHEMA_VERSION: u32 = 6;
+const CURRENT_SCHEMA_VERSION: u32 = 7;
+pub const ORCHESTRATION_SCHEMA_VERSION: u32 = 1;
 const RECENT_WINDOW_DAYS: i64 = 7;
 
 type FamilyScoreboard = BTreeMap<String, BTreeMap<String, u64>>;
@@ -204,7 +207,58 @@ pub struct PlanningDuelSummary {
     pub head_to_head: planning_duel_scoreboard::HeadToHeadMatrix,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+/// Conservative ownership class for managed invocation accounting.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
+#[serde(rename_all = "snake_case")]
+pub enum OrchestrationBucketKind {
+    Missing,
+    Unattributed,
+    Orchestrator,
+    Shared,
+}
+
+/// One managed-execution accounting bucket, classified by canonical task
+/// orchestration ownership rather than executor agent or model identity.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct OrchestrationBucketSummary {
+    pub kind: OrchestrationBucketKind,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub orchestrator: Option<String>,
+    pub invocation_count: u64,
+    pub linked_task_count: u64,
+    pub input_tokens: u64,
+    pub cache_read_tokens: u64,
+    pub cache_create_tokens: u64,
+    pub cache_create_1h_tokens: u64,
+    pub output_tokens: u64,
+    pub provider_cost_usd: f64,
+    pub provider_cost_count: u64,
+    pub derived_cost_usd: f64,
+    pub derived_cost_count: u64,
+    pub comparable_provider_cost_usd: f64,
+    pub comparable_derived_cost_usd: f64,
+    pub comparable_cost_count: u64,
+    pub comparable_cost_delta_usd: f64,
+    pub missing_provider_count: u64,
+    pub unpriced_derived_count: u64,
+}
+
+/// Independently-versioned accounting for managed execution only.
+///
+/// `until` is exclusive and no later than `as_of`. Provider, derived, and
+/// comparable cost populations are separate so partial sums are never implied
+/// to reconcile.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct OrchestrationSummary {
+    pub schema_version: u32,
+    pub scope: String,
+    pub as_of: DateTime<Utc>,
+    pub since: Option<DateTime<Utc>>,
+    pub until: DateTime<Utc>,
+    pub buckets: Vec<OrchestrationBucketSummary>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ScoreboardSummary {
     pub schema_version: u32,
     pub generated_at: String,
@@ -228,6 +282,10 @@ pub struct ScoreboardSummary {
     /// Planning-duel reports that are not naturally per-agent columns.
     #[serde(default)]
     pub planning_duels: PlanningDuelSummary,
+    /// Managed-execution accounting by task orchestrator, deliberately kept
+    /// outside executor-agent rankings. v7+.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub orchestration: Option<OrchestrationSummary>,
     /// Selected scoreboard window in canonical short form (`"1h"`,
     /// `"24h"`, `"7d"`, `"30d"`, `"all"`). v6+. Older readers tolerate
     /// the field's absence via `#[serde(default)]`.
@@ -297,6 +355,9 @@ pub struct ScoreboardInputs<'a> {
     /// sourced fields and filter timestamp-bearing slices to the window.
     /// See [`ScoreboardWindow`] for the per-source semantics. v6+.
     pub window: ScoreboardWindow,
+    /// Runtime/API-sourced accounting for the same bounded window. It does
+    /// not use all-time snapshot token aggregates.
+    pub orchestration: Option<OrchestrationSummary>,
 }
 
 impl<'a> Default for ScoreboardInputs<'a> {
@@ -318,6 +379,7 @@ impl<'a> Default for ScoreboardInputs<'a> {
             frictions: &[],
             now: None,
             window: ScoreboardWindow::All,
+            orchestration: None,
         }
     }
 }
@@ -529,6 +591,7 @@ pub fn generate_summary_with_inputs(
         top_tools,
         recent_7d,
         planning_duels,
+        orchestration: inputs.orchestration.clone(),
         window: inputs.window.as_str().to_string(),
         window_since: since.map(|t| t.to_rfc3339()),
     })

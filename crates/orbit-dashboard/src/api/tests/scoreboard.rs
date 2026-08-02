@@ -6,7 +6,8 @@
 // - `?window=1h` round-trips into the serialized payload + populates
 //   `window_since`
 // - unknown values produce HTTP 400 (not a 500)
-// - schema_version is the post-bump v6 value
+// - schema_version is the post-bump v7 value with its separately-versioned
+//   managed-execution orchestration section
 
 use std::sync::Arc;
 
@@ -37,19 +38,36 @@ async fn get_scoreboard(runtime: OrbitRuntime, query: Option<&str>) -> axum::res
 }
 
 #[tokio::test]
-async fn scoreboard_default_returns_lifetime_window_and_v6_schema() {
+async fn scoreboard_default_returns_lifetime_window_and_v7_schema() {
     let runtime = OrbitRuntime::in_memory().expect("build runtime");
     let response = get_scoreboard(runtime, None).await;
 
     assert_eq!(response.status(), StatusCode::OK);
     let body = body_json(response).await;
-    assert_eq!(body["schema_version"].as_u64(), Some(6));
+    assert_eq!(body["schema_version"].as_u64(), Some(7));
     assert_eq!(body["window"].as_str(), Some("all"));
     assert!(
         body["window_since"].is_null(),
         "window_since is null for lifetime, got {:?}",
         body["window_since"]
     );
+    assert_eq!(body["orchestration"]["schema_version"].as_u64(), Some(1));
+    assert_eq!(body["orchestration"]["scope"], "managed_execution");
+    assert!(
+        chrono::DateTime::parse_from_rfc3339(
+            body["orchestration"]["until"]
+                .as_str()
+                .expect("until timestamp"),
+        )
+        .expect("parse until")
+            <= chrono::DateTime::parse_from_rfc3339(
+                body["orchestration"]["as_of"]
+                    .as_str()
+                    .expect("as_of timestamp"),
+            )
+            .expect("parse as_of")
+    );
+    assert!(body["orchestration"]["buckets"].is_array());
 }
 
 #[tokio::test]
@@ -59,7 +77,7 @@ async fn scoreboard_query_window_1h_populates_window_and_since() {
 
     assert_eq!(response.status(), StatusCode::OK);
     let body = body_json(response).await;
-    assert_eq!(body["schema_version"].as_u64(), Some(6));
+    assert_eq!(body["schema_version"].as_u64(), Some(7));
     assert_eq!(body["window"].as_str(), Some("1h"));
     let since = body["window_since"]
         .as_str()
@@ -67,6 +85,29 @@ async fn scoreboard_query_window_1h_populates_window_and_since() {
     // Surface check: parses as a RFC3339 timestamp.
     let _ =
         chrono::DateTime::parse_from_rfc3339(since).expect("window_since must be valid RFC3339");
+    assert_eq!(
+        chrono::DateTime::parse_from_rfc3339(
+            body["orchestration"]["since"]
+                .as_str()
+                .expect("orchestration since"),
+        )
+        .expect("parse orchestration since"),
+        chrono::DateTime::parse_from_rfc3339(since).expect("parse scoreboard since"),
+    );
+    assert!(
+        chrono::DateTime::parse_from_rfc3339(
+            body["orchestration"]["until"]
+                .as_str()
+                .expect("until timestamp"),
+        )
+        .expect("parse until")
+            <= chrono::DateTime::parse_from_rfc3339(
+                body["orchestration"]["as_of"]
+                    .as_str()
+                    .expect("as_of timestamp"),
+            )
+            .expect("parse as_of")
+    );
 }
 
 #[tokio::test]

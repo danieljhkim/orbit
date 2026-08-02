@@ -11,40 +11,10 @@ use serde::{Deserialize, Serialize};
 
 use crate::OrbitRuntime;
 
-/// Conservative ownership class for managed invocation accounting.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
-#[serde(rename_all = "snake_case")]
-pub enum OrchestratorMetricsBucketKind {
-    Missing,
-    Unattributed,
-    Orchestrator,
-    Shared,
-}
-
-/// Reconciliation fields for one ownership bucket.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct OrchestratorInvocationMetricsBucket {
-    pub kind: OrchestratorMetricsBucketKind,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub orchestrator: Option<String>,
-    pub invocation_count: u64,
-    pub linked_task_count: u64,
-    pub input_tokens: u64,
-    pub cache_read_tokens: u64,
-    pub cache_create_tokens: u64,
-    pub cache_create_1h_tokens: u64,
-    pub output_tokens: u64,
-    pub provider_cost_usd: f64,
-    pub provider_cost_count: u64,
-    pub derived_cost_usd: f64,
-    pub derived_cost_count: u64,
-    pub comparable_provider_cost_usd: f64,
-    pub comparable_derived_cost_usd: f64,
-    pub comparable_cost_count: u64,
-    pub comparable_cost_delta_usd: f64,
-    pub missing_provider_count: u64,
-    pub unpriced_derived_count: u64,
-}
+pub use orbit_store::scoreboard_summary::{
+    OrchestrationBucketKind as OrchestratorMetricsBucketKind,
+    OrchestrationBucketSummary as OrchestratorInvocationMetricsBucket,
+};
 
 /// Stable, managed-execution-only accounting snapshot.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
