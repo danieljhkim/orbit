@@ -67,6 +67,7 @@ a conservative title/status fallback.
 | [Routines](./design/routines/1_overview.md) | Durable, git-versioned scheduler primitive that fires catalog jobs/activities on cron triggers, per host, with local state. | Accepted | claude |
 | [Task Artifacts](./design/task-artifacts/1_overview.md) | Tasks are Orbit's durable intent records: they explain what an agent or human is trying to change, how the work should be validated, what context is relevant, who acted on the work, and how the work connects to other Orbit artifacts. | Draft | codex |
 | [Task Migration](./design/task-migration/1_overview.md) | Move orbit tasks between machines with export/import (tar.zst) and disjoint id ranges, without hand-written SQL. | Draft | claude |
+| [Terminal Interface](./design/terminal-interface/1_overview.md) | House style for orbit-cli terminal output — machine-readable first, borderless single-line tables, semantic color resolved at the sink. | Accepted | claude |
 | [User Interface](./design/user-interface/1_overview.md) | Orbit UI covers the local dashboard served by `orbit-cli` and the project-facing web surface. | Draft | gemini |
 | [Worktree Artifacts](./design/worktree-artifacts/1_overview.md) | Worktree artifacts let ADR and learning body files travel with the branch that created them while preserving one shared ID authority for the whole repository. | Accepted | codex |
 
