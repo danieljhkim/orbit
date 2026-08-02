@@ -34,6 +34,7 @@ impl ArtifactRedactionKind {
 pub(super) struct ArtifactRedactionField {
     pub field_path: String,
     pub kinds: BTreeSet<ArtifactRedactionKind>,
+    pub classes: BTreeSet<&'static str>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -46,11 +47,38 @@ impl ArtifactRedactionReport {
         !self.fields.is_empty()
     }
 
-    fn push(&mut self, field_path: String, kinds: BTreeSet<ArtifactRedactionKind>) {
+    fn push(
+        &mut self,
+        field_path: String,
+        kinds: BTreeSet<ArtifactRedactionKind>,
+        classes: BTreeSet<&'static str>,
+    ) {
         if !kinds.is_empty() {
-            self.fields
-                .push(ArtifactRedactionField { field_path, kinds });
+            self.fields.push(ArtifactRedactionField {
+                field_path,
+                kinds,
+                classes,
+            });
         }
+    }
+
+    fn response_details(&self) -> Value {
+        Value::Array(
+            self.fields
+                .iter()
+                .map(|field| {
+                    json!({
+                        "field_path": field.field_path,
+                        "redaction_kinds": field
+                            .kinds
+                            .iter()
+                            .map(|kind| kind.as_str())
+                            .collect::<Vec<_>>(),
+                        "redaction_classes": field.classes,
+                    })
+                })
+                .collect(),
+        )
     }
 }
 
@@ -100,6 +128,7 @@ pub(super) fn finish_tool_response(
             "redactions_applied".to_string(),
             Value::Bool(report.redactions_applied()),
         );
+        object.insert("redactions".to_string(), report.response_details());
     }
     if report.redactions_applied() {
         emit_audit_events(runtime, action, response, report, agent, model)?;
@@ -273,10 +302,10 @@ fn sanitize_string_field(
     let Some(Value::String(raw)) = object.get(key) else {
         return Ok(());
     };
-    let (sanitized, kinds) = sanitize_string(raw, field_path, mode)?;
+    let (sanitized, kinds, classes) = sanitize_string(raw, field_path, mode)?;
     if sanitized != *raw {
         object.insert(key.to_string(), Value::String(sanitized));
-        report.push(field_path.to_string(), kinds);
+        report.push(field_path.to_string(), kinds, classes);
     }
     Ok(())
 }
@@ -290,10 +319,10 @@ fn sanitize_string_array_field(
 ) -> Result<(), OrbitError> {
     match object.get_mut(key) {
         Some(Value::String(raw)) => {
-            let (sanitized, kinds) = sanitize_string(raw, field_path, mode)?;
+            let (sanitized, kinds, classes) = sanitize_string(raw, field_path, mode)?;
             if sanitized != *raw {
                 *raw = sanitized;
-                report.push(field_path.to_string(), kinds);
+                report.push(field_path.to_string(), kinds, classes);
             }
         }
         Some(Value::Array(items)) => {
@@ -302,10 +331,10 @@ fn sanitize_string_array_field(
                     continue;
                 };
                 let item_path = format!("{field_path}[{index}]");
-                let (sanitized, kinds) = sanitize_string(raw, &item_path, mode)?;
+                let (sanitized, kinds, classes) = sanitize_string(raw, &item_path, mode)?;
                 if sanitized != *raw {
                     *raw = sanitized;
-                    report.push(item_path, kinds);
+                    report.push(item_path, kinds, classes);
                 }
             }
         }
@@ -354,10 +383,10 @@ fn sanitize_nested_string_array_field(
             continue;
         };
         let field_path = format!("{}[{index}].{key}", policy.array_key);
-        let (sanitized, kinds) = sanitize_string(raw, &field_path, policy.mode)?;
+        let (sanitized, kinds, classes) = sanitize_string(raw, &field_path, policy.mode)?;
         if sanitized != *raw {
             entry.insert(key.to_string(), Value::String(sanitized));
-            report.push(field_path, kinds);
+            report.push(field_path, kinds, classes);
         }
     }
     Ok(())
@@ -367,15 +396,24 @@ fn sanitize_string(
     raw: &str,
     field_path: &str,
     mode: TextMode,
-) -> Result<(String, BTreeSet<ArtifactRedactionKind>), OrbitError> {
+) -> Result<
+    (
+        String,
+        BTreeSet<ArtifactRedactionKind>,
+        BTreeSet<&'static str>,
+    ),
+    OrbitError,
+> {
     match mode {
         TextMode::PathOnly => {
             let sanitized = redact_home_dir(raw);
             let mut kinds = BTreeSet::new();
+            let mut classes = BTreeSet::new();
             if sanitized != raw {
                 kinds.insert(ArtifactRedactionKind::HomeDir);
+                classes.insert("home_directory");
             }
-            Ok((sanitized, kinds))
+            Ok((sanitized, kinds, classes))
         }
         TextMode::Free => {
             if is_high_confidence_single_token_credential(raw) {
@@ -389,18 +427,38 @@ fn sanitize_string(
             let pattern_scrubbed = redact_all(raw);
             let sanitized = redact_home_dir(&pattern_scrubbed);
             let mut kinds = BTreeSet::new();
+            let mut classes = BTreeSet::new();
             if env_scrubbed != raw {
                 kinds.insert(ArtifactRedactionKind::Env);
+                classes.insert("sensitive_environment_value");
             }
             if pattern_scrubbed != env_scrubbed {
                 kinds.insert(ArtifactRedactionKind::Pattern);
+                classes.extend(pattern_redaction_classes(&env_scrubbed, &pattern_scrubbed));
             }
             if sanitized != pattern_scrubbed {
                 kinds.insert(ArtifactRedactionKind::HomeDir);
+                classes.insert("home_directory");
             }
-            Ok((sanitized, kinds))
+            Ok((sanitized, kinds, classes))
         }
     }
+}
+
+fn pattern_redaction_classes(before: &str, after: &str) -> BTreeSet<&'static str> {
+    [
+        ("[REDACTED_AUTH]", "authorization"),
+        ("[REDACTED_SECRET]", "credential"),
+        ("[REDACTED_API_KEY]", "credential"),
+        ("[REDACTED_SSH_FINGERPRINT]", "ssh_fingerprint"),
+        ("[REDACTED_SSH_KEY_COMMENT]", "ssh_key_comment"),
+        ("[REDACTED_SSH_HOST]", "ssh_host"),
+    ]
+    .into_iter()
+    .filter_map(|(marker, class)| {
+        (after.matches(marker).count() > before.matches(marker).count()).then_some(class)
+    })
+    .collect()
 }
 
 fn emit_audit_events(
@@ -429,6 +487,7 @@ fn emit_audit_events(
             "actor": actor,
             "tool_name": tool_name,
             "redaction_kinds": redaction_kinds,
+            "redaction_classes": field.classes,
         });
         runtime.record_audit_event(&AuditEventInsertParams {
             execution_id: audit_execution_id("audit-artifact-redaction"),
@@ -768,6 +827,14 @@ mod tests {
             .expect("task add succeeds");
 
         assert_eq!(output["redactions_applied"], true);
+        assert_eq!(
+            output["redactions"],
+            json!([{
+                "field_path": "title",
+                "redaction_kinds": ["env"],
+                "redaction_classes": ["sensitive_environment_value"]
+            }])
+        );
         let id = output["id"].as_str().expect("task id");
         let task = runtime.get_task(id).expect("task persisted");
         assert_eq!(task.title, "leaked [REDACTED_ENV]");
@@ -787,6 +854,37 @@ mod tests {
         assert!(arguments.contains("\"field_path\":\"title\""));
         assert!(arguments.contains("\"env\""));
         assert!(!arguments.contains(token));
+    }
+
+    #[test]
+    fn dispatch_reports_structural_ssh_redaction_classes() {
+        let (_root, runtime, _repo_root) = test_runtime();
+        let fingerprint = format!("SHA256:{}", "A".repeat(43));
+
+        let output = runtime
+            .execute_tool_command(
+                "orbit.task.add",
+                json!({
+                    "title": "SSH diagnostic",
+                    "description": format!(
+                        "debug1: Connecting to build-node.example.test [192.0.2.10] port 22.\n256 {fingerprint} automation@build-node.example.test (ED25519)"
+                    ),
+                    "workspace": ".",
+                }),
+                Some("codex".to_string()),
+                Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
+            )
+            .expect("task add succeeds");
+
+        assert_eq!(output["redactions_applied"], true);
+        assert_eq!(
+            output["redactions"],
+            json!([{
+                "field_path": "description",
+                "redaction_kinds": ["pattern"],
+                "redaction_classes": ["ssh_fingerprint", "ssh_host", "ssh_key_comment"]
+            }])
+        );
     }
 
     #[test]
@@ -862,6 +960,7 @@ mod tests {
             .expect("task update succeeds");
 
         assert_eq!(output["redactions_applied"], false);
+        assert_eq!(output["redactions"], json!([]));
         let events = runtime
             .list_audit_events(None, Some("orbit.task.update".to_string()), None, None, 16)
             .expect("L-0009: same backing query as `orbit audit list --json`");
