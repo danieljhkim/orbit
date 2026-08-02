@@ -3,7 +3,7 @@ summary: "Policy & Sandboxing — Design"
 type: design
 title: "Policy & Sandboxing — Design"
 owner: claude
-last_updated: 2026-08-01
+last_updated: 2026-08-02
 status: Draft
 feature: policy-sandbox
 doc_role: design
@@ -157,6 +157,51 @@ inside that namespace. Top-level runtime opens and explicit host recovery surfac
 normal reconciliation behavior. Do not weaken the PID namespace, enable bare fallback, or infer
 that an invisible host worker is dead from inside a sandboxed child. [ORB-10557]
 
+### 7.2 Linux host readiness on Ubuntu 24.04
+
+Ubuntu 24.04 (Noble) enables AppArmor restriction of unprivileged user namespaces through
+`kernel.apparmor_restrict_unprivileged_userns`. When `/usr/bin/bwrap` starts Orbit's probe,
+Bubblewrap creates the private user namespace and configures its UID map. If AppArmor has no
+narrow profile granting that operation to Bubblewrap, the kernel rejects the setup and bwrap
+reports `bwrap: setting up uid map: Permission denied`. A present executable is therefore not
+enough; the real namespace-and-mount probe in `probe_bwrap` must succeed.
+
+The supported Noble remediation is the distro `apparmor-profiles` package's
+`bwrap-userns-restrict` profile. The package provides it under
+`/usr/share/apparmor/extra-profiles/`; copy it into `/etc/apparmor.d/` and load that copy with
+`apparmor_parser -r`. Verify both that the profile is visible to AppArmor and that the exact
+probe shape used by Orbit exits successfully:
+
+```bash
+sudo apt-get update
+sudo apt-get install --yes bubblewrap apparmor-profiles
+test -x /usr/bin/bwrap
+test -f /usr/share/apparmor/extra-profiles/bwrap-userns-restrict
+sudo install -m 0644 \
+  /usr/share/apparmor/extra-profiles/bwrap-userns-restrict \
+  /etc/apparmor.d/bwrap-userns-restrict
+test -f /etc/apparmor.d/bwrap-userns-restrict
+sudo apparmor_parser -r /etc/apparmor.d/bwrap-userns-restrict
+grep -Fq 'bwrap-userns-restrict' /sys/kernel/security/apparmor/profiles
+/usr/bin/bwrap --die-with-parent --new-session --unshare-all --share-net \
+  --ro-bind / / -- /bin/true
+```
+
+To roll back only this host remediation, unload the packaged profile with
+`sudo apparmor_parser -R /etc/apparmor.d/bwrap-userns-restrict`, then remove only the copied
+`/etc/apparmor.d/bwrap-userns-restrict` file; leave the package-managed source under
+`/usr/share/apparmor/extra-profiles/` intact. The probe should then fail again on a host where the
+global restriction is active, and repeating the copy-and-load sequence restores the remediation.
+Do not disable
+`kernel.apparmor_restrict_unprivileged_userns` globally or install a broad unconfined profile:
+those changes expand the user-namespace attack surface beyond Bubblewrap. Do not set
+`allow_fallback: true` to hide a failed probe, because that bypasses the fail-closed OS boundary
+and runs the provider without `linux-bwrap`.
+
+This subsection records the shipped Linux behavior from [ORB-10552] and the Ubuntu host rescue
+context from [ORB-10553]. No sandbox design decision changed, and this operational remediation
+requires no new ADR.
+
 ---
 
 ## 8. Process Supervision
@@ -256,5 +301,6 @@ failure when user or mount namespaces are unavailable.
 - **[T20260509-30]** — Resolve `sandbox-exec` from trusted absolute locations and keep availability errors fail-closed and explicit.
 - **[ORB-00129]** — Re-allow narrow workspace child Orbit runtime stores for activity-exposed learning, friction, and job-run state tools without removing the default workspace `.orbit/**` deny.
 - **[ORB-10552]** — Ship fail-closed Linux Bubblewrap write confinement without claiming read-policy parity.
+- **[ORB-10553]** — Rescue the Ubuntu host prerequisite for the shipped Linux Bubblewrap probe.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.
