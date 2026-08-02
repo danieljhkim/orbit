@@ -435,6 +435,24 @@ fn dashboard_recent_history_filters_before_limiting() {
     );
 }
 
+#[test]
+fn dashboard_task_detail_shows_orchestrator_as_attribution_not_execution_crew() {
+    let tasks = include_str!("../../assets/dashboard/tasks.js");
+
+    assert!(
+        tasks.contains(r#"["orchestrator", "orchestrator"]"#),
+        "task detail metadata must expose orchestration attribution"
+    );
+    assert!(
+        tasks.contains("for (const [key, label] of TASK_META_FIELDS)"),
+        "task detail must render the orchestrator metadata entry"
+    );
+    assert!(
+        tasks.contains(r#"class: "task-crew-select mono""#),
+        "execution crew must remain a distinct task-row control"
+    );
+}
+
 /// ORB-10444: the top-level nav is exactly Tasks, Audit, Diagnostics, Knowledge.
 /// A deprecated tab was retired outright — nav entry, route and pane — and
 /// Scoreboard, being a diagnostics-shaped view, moved under Diagnostics. A route

@@ -125,7 +125,7 @@ fn orchestrator_is_explicit_mutable_before_start_and_never_routes_execution() {
             title: "Orchestration ownership".to_string(),
             description: "Keep orchestration attribution separate from execution.".to_string(),
             crew: Some("implementer".to_string()),
-            orchestrator: Some("orchestration".to_string()),
+            orchestrator: Some("  orchestration  ".to_string()),
             ..Default::default()
         })
         .expect("add task with orchestration attribution");
@@ -142,7 +142,7 @@ fn orchestrator_is_explicit_mutable_before_start_and_never_routes_execution() {
         .update_task(
             &task.id,
             TaskUpdateParams {
-                orchestrator: Some(Some("implementer".to_string())),
+                orchestrator: Some(Some("  implementer  ".to_string())),
                 ..Default::default()
             },
         )
@@ -193,6 +193,28 @@ fn orchestrator_is_explicit_mutable_before_start_and_never_routes_execution() {
         immutable.to_string().contains("proposed or backlog"),
         "{immutable}"
     );
+}
+
+#[test]
+fn orchestrator_is_rejected_on_non_draft_initial_statuses_including_someday() {
+    let (_root, runtime) = test_runtime();
+
+    for status in [TaskStatus::Someday, TaskStatus::InProgress] {
+        let error = runtime
+            .add_task(TaskAddParams {
+                title: format!("Invalid {status} orchestration attribution"),
+                description: "Orchestration ownership must be assigned before this state."
+                    .to_string(),
+                status: Some(status),
+                orchestrator: Some("orchestration".to_string()),
+                ..Default::default()
+            })
+            .expect_err("non-draft initial status rejects orchestrator");
+        assert!(
+            error.to_string().contains("proposed or backlog"),
+            "{status}: {error}"
+        );
+    }
 }
 
 /// Walks a task through backlog -> in-progress -> review -> done using only

@@ -223,11 +223,15 @@ pub(super) fn task_field_to_json(
         "context_files" => {
             serde_json::to_value(&task.context_files).map_err(|e| OrbitError::Io(e.to_string()))
         }
+        "crew" => serde_json::to_value(&task.crew).map_err(|e| OrbitError::Io(e.to_string())),
+        "orchestrator" => {
+            serde_json::to_value(&task.orchestrator).map_err(|e| OrbitError::Io(e.to_string()))
+        }
         "artifacts" => Ok(task_artifacts_to_json(
             &runtime.get_task_artifacts(&task.id)?,
         )),
         other => Err(OrbitError::InvalidInput(format!(
-            "unknown field selector `{other}`. Valid values: comments, plan, execution_summary, description, acceptance_criteria, dependencies, resolved_dependencies, tags, history, context_files, artifacts"
+            "unknown field selector `{other}`. Valid values: comments, plan, execution_summary, description, acceptance_criteria, dependencies, resolved_dependencies, tags, history, context_files, crew, orchestrator, artifacts"
         ))),
     }
 }
@@ -366,6 +370,14 @@ pub(super) fn print_single_task_field(
             }
             Ok(())
         }
+        "crew" => {
+            print!("{}", task.crew.as_deref().unwrap_or_default());
+            Ok(())
+        }
+        "orchestrator" => {
+            print!("{}", task.orchestrator.as_deref().unwrap_or_default());
+            Ok(())
+        }
         "artifacts" => {
             use crate::output::color::bold;
             let artifacts = runtime.get_task_artifacts(&task.id)?;
@@ -389,7 +401,7 @@ pub(super) fn print_single_task_field(
             Ok(())
         }
         other => Err(OrbitError::InvalidInput(format!(
-            "unknown field selector `{other}`. Valid values: comments, plan, execution_summary, description, acceptance_criteria, dependencies, resolved_dependencies, tags, history, context_files, artifacts"
+            "unknown field selector `{other}`. Valid values: comments, plan, execution_summary, description, acceptance_criteria, dependencies, resolved_dependencies, tags, history, context_files, crew, orchestrator, artifacts"
         ))),
     }
 }

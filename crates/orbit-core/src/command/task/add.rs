@@ -63,7 +63,14 @@ impl OrbitRuntime {
             normalize_workspace_path(&self.paths().repo_root, params.workspace_path.as_deref())?;
         let dependencies = normalize_task_dependencies(params.dependencies.clone())?;
         self.validate_crew_name(params.crew.as_deref())?;
-        self.validate_crew_name(params.orchestrator.as_deref())?;
+        params.orchestrator = self.canonical_crew_name(params.orchestrator.as_deref())?;
+        if params.orchestrator.is_some()
+            && !matches!(initial_status, TaskStatus::Proposed | TaskStatus::Backlog)
+        {
+            return Err(OrbitError::InvalidInput(format!(
+                "initial status {initial_status} cannot carry an orchestrator; orchestrator can only be set while proposed or backlog"
+            )));
+        }
 
         let prune_root = context_workspace_root(&self.paths().repo_root, workspace_path.as_deref());
         let normalized_context_files =

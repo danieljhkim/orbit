@@ -81,7 +81,22 @@ impl McpWorkspace {
             String::from_utf8_lossy(&output.stderr)
         );
 
+        let workspace_init_args = vec!["workspace", "init", "--name", "mcp-roundtrip"];
+        let output = Self::orbit_command(&work, &home)
+            .args(workspace_init_args)
+            .output()
+            .expect("run workspace init");
+        assert!(
+            output.status.success(),
+            "workspace init failed\nstdout:\n{}\nstderr:\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+
         if host_mode == Some("hub") {
+            // Register the hub after the logical workspace identity exists;
+            // host registration must not seed a conflicting bootstrap ID in
+            // the checkout before `workspace init` owns that file.
             let output = Self::orbit_command(&work, &home)
                 .args(["host", "register"])
                 .output()
@@ -93,24 +108,6 @@ impl McpWorkspace {
                 String::from_utf8_lossy(&output.stderr)
             );
         }
-
-        let mut workspace_init_args = vec!["workspace", "init", "--name", "mcp-roundtrip"];
-        if host_mode == Some("hub") {
-            // Hub registration intentionally seeds a checkout identity before
-            // the logical workspace registration. Replacing that bootstrap
-            // identity is explicit reconciliation, so the fixture opts in.
-            workspace_init_args.push("--force");
-        }
-        let output = Self::orbit_command(&work, &home)
-            .args(workspace_init_args)
-            .output()
-            .expect("run workspace init");
-        assert!(
-            output.status.success(),
-            "workspace init failed\nstdout:\n{}\nstderr:\n{}",
-            String::from_utf8_lossy(&output.stdout),
-            String::from_utf8_lossy(&output.stderr)
-        );
 
         Self {
             _temp: temp,
@@ -583,6 +580,8 @@ fn mcp_serve_round_trips_records_against_a_temp_workspace() {
             "description": "Created over the MCP stdio transport",
             "type": "chore",
             "tags": ["mcp-roundtrip"],
+            "crew": "sol",
+            "orchestrator": "terra",
         }),
     );
     let task_id = created["id"].as_str().expect("task id").to_string();
@@ -594,6 +593,47 @@ fn mcp_serve_round_trips_records_against_a_temp_workspace() {
     assert_eq!(shown["title"], "MCP round-trip task");
     assert_eq!(shown["description"], "Created over the MCP stdio transport");
     assert_eq!(shown["tags"], json!(["mcp-roundtrip"]));
+    assert_eq!(shown["crew"], "sol");
+    assert_eq!(shown["orchestrator"], "terra");
+    assert_eq!(
+        client.call_tool_ok(
+            "orbit_task_show",
+            json!({ "id": task_id, "fields": ["crew", "orchestrator"] }),
+        ),
+        json!({"crew": "sol", "orchestrator": "terra"})
+    );
+
+    let output = McpWorkspace::orbit_command(&workspace.work, &workspace.home)
+        .args(["task", "show", &task_id])
+        .output()
+        .expect("show task through the human CLI");
+    assert!(
+        output.status.success(),
+        "human task show failed: {output:?}"
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("Execution Crew: sol"), "{stdout}");
+    assert!(stdout.contains("Orchestrator: terra"), "{stdout}");
+
+    let output = McpWorkspace::orbit_command(&workspace.work, &workspace.home)
+        .args([
+            "task",
+            "show",
+            &task_id,
+            "--json",
+            "--fields",
+            "orchestrator",
+        ])
+        .output()
+        .expect("show orchestrator field through the CLI");
+    assert!(
+        output.status.success(),
+        "field projection failed: {output:?}"
+    );
+    assert_eq!(
+        serde_json::from_slice::<Value>(&output.stdout).expect("orchestrator JSON"),
+        json!("terra")
+    );
 
     let listed = client.call_tool_ok("orbit_task_list", json!({}));
     let items = listed["items"].as_array().expect("task list items");
