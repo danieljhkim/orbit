@@ -19,6 +19,21 @@ use serde::Deserialize;
 
 use super::invocation::TokenUsage;
 
+/// How a provider reports the input-token total carried by [`TokenUsage`].
+///
+/// Most providers report mutually exclusive input and cache buckets. OpenAI
+/// reports a gross input total that already includes cached reads and writes,
+/// so those buckets must be removed before the full input rate is applied.
+#[derive(Debug, Clone, Copy, Default, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum InputTokenBasis {
+    /// `TokenUsage::input` excludes every cache bucket.
+    #[default]
+    Exclusive,
+    /// `TokenUsage::input` includes cache reads and both cache-write buckets.
+    GrossIncludesCache,
+}
+
 const MODEL_PRICES_YAML: &str = include_str!("../../assets/model_prices.yaml");
 
 /// One versioned price row: USD per million tokens, by exact model string
@@ -30,6 +45,10 @@ pub struct PriceRow {
     pub effective_from: DateTime<Utc>,
     #[serde(default)]
     pub effective_until: Option<DateTime<Utc>>,
+    /// Provider reporting convention for [`TokenUsage::input`]. Existing rows
+    /// default to [`InputTokenBasis::Exclusive`] for backward compatibility.
+    #[serde(default)]
+    pub input_token_basis: InputTokenBasis,
     pub input_per_million_usd: f64,
     pub cache_read_per_million_usd: f64,
     /// Rate for standard 5-minute-TTL cache-creation (write) tokens
@@ -51,12 +70,25 @@ impl PriceRow {
             && self.effective_until.is_none_or(|until| at < until)
     }
 
-    fn cost_usd(&self, usage: &TokenUsage) -> f64 {
-        rate(usage.input, self.input_per_million_usd)
-            + rate(usage.cache_read, self.cache_read_per_million_usd)
-            + rate(usage.cache_create, self.cache_create_per_million_usd)
-            + rate(usage.cache_create_1h, self.cache_create_1h_per_million_usd)
-            + rate(usage.output, self.output_per_million_usd)
+    fn cost_usd(&self, usage: &TokenUsage) -> Option<f64> {
+        let input = match self.input_token_basis {
+            InputTokenBasis::Exclusive => usage.input,
+            InputTokenBasis::GrossIncludesCache => {
+                let cache_detail = usage
+                    .cache_read
+                    .checked_add(usage.cache_create)?
+                    .checked_add(usage.cache_create_1h)?;
+                usage.input.checked_sub(cache_detail)?
+            }
+        };
+
+        Some(
+            rate(input, self.input_per_million_usd)
+                + rate(usage.cache_read, self.cache_read_per_million_usd)
+                + rate(usage.cache_create, self.cache_create_per_million_usd)
+                + rate(usage.cache_create_1h, self.cache_create_1h_per_million_usd)
+                + rate(usage.output, self.output_per_million_usd),
+        )
     }
 }
 
@@ -125,7 +157,7 @@ pub(super) fn cost_from_rows(
     // then fall back to the base key with any context-window suffix stripped.
     pick(model)
         .or_else(|| strip_context_suffix(model).and_then(pick))
-        .map(|row| row.cost_usd(usage))
+        .and_then(|row| row.cost_usd(usage))
 }
 
 #[cfg(test)]

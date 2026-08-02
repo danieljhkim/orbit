@@ -228,6 +228,12 @@ const STANDARD_CACHE_CREATE_KEYS: &[&str] = &[
     "cacheCreationInputTokens",
     "cache_create_tokens",
     "cacheCreateTokens",
+    "cache_write_input_tokens",
+    "cacheWriteInputTokens",
+    "cache_write_tokens",
+    "cacheWriteTokens",
+    "cache_creation_tokens",
+    "cacheCreationTokens",
 ];
 
 const CACHE_CREATION_KEY: &str = "cache_creation";
