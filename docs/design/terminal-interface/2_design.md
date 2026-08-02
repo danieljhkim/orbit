@@ -1,13 +1,13 @@
 ---
 title: Terminal Interface — Design
 owner: claude
-last_updated: 2026-08-01
+last_updated: 2026-08-02
 last_validated: 2026-08-01
 status: Accepted
 feature: terminal-interface
 doc_role: design
 type: design
-summary: "Current orbit-cli output implementation — comfy-table bordered tables, duplicated color vocabularies, per-command --json — and where it diverges from the specs."
+summary: "Current orbit-cli output implementation — comfy-table bordered tables, duplicated color vocabularies, per-command --json, and a resolved-but-unconsumed output sink — and where it diverges from the specs."
 tags: [terminal-interface]
 paths: ["crates/orbit-cli/src/output/**", "crates/orbit-cli/src/command/**"]
 related_features: [terminal-interface]
@@ -48,17 +48,19 @@ This file is also where the drift between the two renderings is easiest to see. 
 
 The copies have already drifted: `status_color` maps `backlog` explicitly, `status_color_cell` does not. The two-edit cost is visible in the history — [T20260427-43] added a `friction` arm to both functions, and [ORB-10202] removed it from both when the status was retired. The palette itself is broader than a closed role set — `in-progress` is cyan, `review` is magenta, `done` is bold green — so it encodes more distinctions than the target vocabulary. **Diverges from [./specs/color-and-styling.md](./specs/color-and-styling.md)** [ADR-0308].
 
-## 5. No Sink Resolution
+## 5. Sink Resolution Without Consumers
 
-The CLI never asks whether stdout is a terminal, with one exception: `command/log/tail.rs` calls `stdout.is_terminal()` to decide whether to colorize the tailed stream. That check is local to the command and not reused.
+`output/sink.rs` resolves `is_tty`, `width`, `color_allowed`, and the output mode once per invocation, from `main.rs`, ahead of dispatch [ORB-10569]. It is the only place in the crate that queries terminal state — `COLUMNS`, `TIOCGWINSZ`, `NO_COLOR`, `CLICOLOR_FORCE`, `IsTerminal` — enforced by `scripts/check-terminal-state-guard.sh`, whose allowlist carries the one grandfathered exception: `command/log/tail.rs` still calls `stdout.is_terminal()` locally to decide whether to colorize the tailed stream.
 
-Consequently the two styling backends disagree about emission. `colored` internally honors `NO_COLOR` and TTY state; `comfy_table::Color` writes escape sequences unconditionally. `NO_COLOR=1 orbit task list` still emits color from the table path. Redirecting any table command to a file captures ANSI and box-drawing glyphs. Width is taken from the terminal even when there is no terminal. **Diverges from [./specs/output-modes.md](./specs/output-modes.md) §1** [ADR-0306], [ADR-0308].
+**Nothing consumes the answers yet.** That is step 1 of [./specs/output-modes.md](./specs/output-modes.md) §7, which deliberately changes no rendering: the sink is resolved and logged at `debug`, and every command still renders exactly as it did. So the emission problems below are unchanged. The two styling backends still disagree — `colored` internally honors `NO_COLOR` and TTY state; `comfy_table::Color` writes escape sequences unconditionally — so `NO_COLOR=1 orbit task list` still emits color from the table path, redirecting a table command to a file still captures ANSI and box-drawing glyphs, and `comfy-table` still takes width from the terminal even when there is no terminal. **Still diverges from [./specs/output-modes.md](./specs/output-modes.md) §1** until a renderer reads the sink [ADR-0306], [ADR-0308].
 
 ## 6. Per-Command Structured Output
 
 `--json` is declared independently on each command as `#[arg(long)] pub json: bool` and handled by an `if self.json { … } else { … }` branch inside `execute()`. 86 of 150 argument structs carry it; 64 have no machine-readable path.
 
 Because both branches are written by hand in the same function, they drift. `orbit tool list` emits seven JSON fields (`name`, `description`, `enabled`, `active`, `status`, `builtin`, `parameters`) and five table columns, and the table's `REQUIRED INPUT` column is a summary string produced by `format_required_tool_input_summary` that exists in no payload field. There is also no `ndjson` mode: `--json` on a list command emits one pretty-printed array, which a streaming consumer must buffer whole. **Diverges from [./specs/output-modes.md](./specs/output-modes.md)** [ADR-0306].
+
+A global `--format auto|table|json|ndjson` is accepted on every command that does not already own a `--format` — `audit export` and `hook pretooluse` do, with unrelated value types, and keep theirs. It resolves a mode through §2's precedence and no further: no command body reads the result yet, so passing it is currently inert. `--json` remains the only flag that changes output, unchanged byte for byte [ORB-10569].
 
 ## 7. Empty States and Errors
 
@@ -78,7 +80,7 @@ This cuts both ways: the migration prescribed by the specs will not be blocked b
 
 **The refactor's cost is concentrated in a trait signature.** `Execute::execute` returns `Result<(), OrbitError>` and writes to stdout as a side effect. Making commands return payloads changes that signature across all 154 `impl Execute` blocks, which is a single mechanical change but an unavoidably wide one. It cannot be landed incrementally per command without a transitional dual path.
 
-**Terminal width detection is not currently a dependency.** `comfy-table` resolves width internally. Moving width into an explicit sink means taking a direct dependency on `terminal_size` or equivalent, and deciding the fallback width when there is no terminal (the specs say 0 — emit untruncated — but that is a claim not yet tested against real consumers).
+**Terminal width detection needed no new dependency.** `comfy-table` still resolves width internally for the tables it draws; the sink asks `TIOCGWINSZ` through the `libc` dependency `orbit-cli` already carries on unix, after `COLUMNS`. Non-unix has no query and falls back to `COLUMNS` alone. The 0 fallback ("do not truncate") is asserted in the sink's tests but still untested against a real consumer, because nothing renders through the sink yet.
 
 **The role vocabulary is lossy on purpose and may be wrong.** Collapsing `in-progress`, `review`, and `proposed` into `active`/`neutral` discards distinctions operators may be reading today. No one has checked whether the current colors are load-bearing in practice.
 
@@ -94,5 +96,6 @@ This cuts both ways: the migration prescribed by the specs will not be blocked b
 - [ORB-10202] — removed the `friction` arm from both halves when the status was retired.
 - [ORB-10228] — added trusted MCP session context to the audit event JSON payload, but not to the printed line.
 - [ORB-10356] — made `OrbitError` `#[non_exhaustive]`, adding the `internal_error` catch-all to the payload's `code` discriminator.
+- [ORB-10569] — introduced `output/sink.rs` and the global `--format`, resolved once per invocation and not yet consumed.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.
