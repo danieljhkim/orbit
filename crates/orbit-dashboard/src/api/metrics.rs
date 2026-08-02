@@ -36,6 +36,14 @@ pub(super) struct MetricsInvocationsQuery {
     limit: Option<usize>,
 }
 
+#[derive(Debug, Default, Deserialize)]
+pub(super) struct OrchestratorMetricsQuery {
+    #[serde(default)]
+    since: Option<String>,
+    #[serde(default)]
+    until: Option<String>,
+}
+
 pub(super) async fn knowledge_metrics(Ws(runtime): Ws, Query(q): Query<LimitQuery>) -> Response {
     match runtime.list_job_runs(JobRunListParams {
         limit: q.limit,
@@ -64,6 +72,27 @@ pub(super) async fn task_metrics(Ws(runtime): Ws, Path(id): Path<String>) -> Res
     match runtime.task_invocation_metrics(&id) {
         Ok(row) => Json(row).into_response(),
         Err(e) => map_runtime_error(e),
+    }
+}
+
+/// Returns managed-execution invocation accounting grouped by the explicit
+/// orchestrator ownership on canonical tasks. Direct provider sessions that
+/// do not write managed invocation rows are outside this metric.
+pub(super) async fn orchestrator_metrics(
+    Ws(runtime): Ws,
+    Query(q): Query<OrchestratorMetricsQuery>,
+) -> Response {
+    let since = match parse_rfc3339_opt(q.since, "since") {
+        Ok(value) => value,
+        Err(error) => return map_runtime_error(error),
+    };
+    let until = match parse_rfc3339_opt(q.until, "until") {
+        Ok(value) => value,
+        Err(error) => return map_runtime_error(error),
+    };
+    match runtime.orchestrator_invocation_metrics(since, until) {
+        Ok(metrics) => Json(metrics).into_response(),
+        Err(error) => map_runtime_error(error),
     }
 }
 

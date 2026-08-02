@@ -126,6 +126,8 @@ After [ORB-10338] (see [ADR-0245]), `InvocationInsertParams.trace` carries an op
 
 After [ORB-10579], each price row also declares whether its input count is exclusive or gross-with-cache. Existing rows default to exclusive accounting; GPT-5.6 rows use gross accounting, so derived pricing subtracts cached-read and both cache-write buckets from the gross input total before charging the full input rate. Checked subtraction makes inconsistent rows unknown instead of silently saturating. Codex JSONL and OpenAI-compatible response parsing retain provider-reported cached-read, standard cache-write, and output buckets; OpenAI reports no 1-hour write bucket, while a malformed stored nonzero count still has a nonzero fallback price. GPT-5.6 results are standard short-context API-equivalent derived estimates. Exact Fast/service-tier and long-context billing remains future work because Orbit does not yet retain those per-request dimensions.
 
+After [ORB-10581] / [ADR-0310], `GET /api/metrics/orchestrators?since=&until=` reports managed-execution accounting from one unbounded, half-open invocation-fact read captured at an `as_of` timestamp. Each invocation's distinct linked task ids resolve against canonical tasks and enter exactly one conservative bucket with precedence `missing task > unattributed task > one named orchestrator > shared named orchestrators`; duplicate links and multiple tasks owned by the same orchestrator do not multiply cost. Buckets retain all five token splits and separate provider, derived, and same-population comparable cost sums, counts, and delta. Missing provider values and unpriced/invalid derived values remain explicit counts, so partial sums are never presented as reconciled totals. Direct Codex/Claude orchestration sessions that do not emit managed invocation rows remain outside this endpoint.
+
 The workspace-local `model-price-audit` auto-task ([ORB-10583]) is the evidence
 collection and reconciliation guard around this table. Once weekly, it
 enumerates exact model strings from `InvocationRecord.model` telemetry and every
@@ -209,6 +211,7 @@ Each record contains timestamp, level, target, and structured fields. After [T20
 - **[ORB-10338]** — Added the versioned model price table and query-time `derived_cost_usd`, plus a persisted `provider_cost_usd` column for reconciliation.
 - **[ORB-10370]** — Parsed provider-reported CLI model/cost metadata, preferred the reported model at ingest, and retained structured mismatch evidence.
 - **[ORB-10579]** — Corrected GPT-5.6 price periods and cache-write rates, added gross-input accounting, and retained OpenAI cache buckets for standard short-context estimates.
+- **[ORB-10581]** — Added reconciliation-safe managed invocation accounting by canonical task orchestrator ([ADR-0310]).
 - **[ORB-00106]** — Preserve per-task implementer attribution when `orbit run ship` moves batch PR tasks from Review to Done.
 - **[ORB-10200]** — Derive CLI audit metadata and the other cross-cutting command policies from one exhaustive command-operation registry.
 - **[ORB-10225]** — Route in-process graph MCP calls through the safe-surface allowlist and shared runtime audit boundary.
