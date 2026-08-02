@@ -38,7 +38,11 @@ fn tool_list_all_shows_inactive_lock_reservation_with_required_input_shape() {
         .env("HOME", &home)
         .env("USERPROFILE", &home)
         .env_remove("ORBIT_ROOT")
-        .args(["tool", "list", "--all"])
+        // `--format table` because `assert_cmd` captures through a pipe, where
+        // `auto` resolves to the plain form and suppresses the header
+        // (`specs/output-modes.md` §2). The STATUS *column* is what this test
+        // is about, and naming the mode is how a piped caller asks for it.
+        .args(["tool", "list", "--all", "--format", "table"])
         .assert()
         .success()
         .stdout(predicate::str::contains("orbit.task.locks.reserve"))

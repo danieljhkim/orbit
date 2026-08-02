@@ -3,7 +3,7 @@ use std::path::Path;
 use clap::Args;
 use orbit_core::{OrbitError, OrbitRuntime};
 
-use crate::command::Execute;
+use crate::command::{CommandOut, CommandOutput, Execute};
 
 use super::manifest::{infer_tool_name, load_external_tool_manifest, resolve_manifest_path};
 
@@ -23,7 +23,7 @@ pub struct ToolAddArgs {
 }
 
 impl Execute for ToolAddArgs {
-    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+    fn execute(self, runtime: &OrbitRuntime) -> CommandOut {
         let manifest_path = resolve_manifest_path(Path::new(&self.path), self.manifest.as_deref());
         let manifest = manifest_path
             .as_deref()
@@ -55,6 +55,6 @@ impl Execute for ToolAddArgs {
         if let Some(path) = manifest_path {
             println!("Loaded plugin manifest from {}", path.display());
         }
-        Ok(())
+        Ok(CommandOutput::Silent)
     }
 }

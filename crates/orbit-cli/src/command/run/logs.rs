@@ -3,7 +3,7 @@ use orbit_core::runtime::run_audit::RunCliInvocationRecord;
 use orbit_core::{OrbitError, OrbitRuntime};
 use serde_json::{Value, json};
 
-use crate::command::Execute;
+use crate::command::{CommandOut, CommandOutput, Execute};
 
 use super::steps::{resolve_run, resolve_step_filter};
 
@@ -25,13 +25,16 @@ pub struct RunLogsArgs {
 }
 
 impl Execute for RunLogsArgs {
-    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
-        print_run_logs(
-            runtime,
-            self.run_id.as_deref(),
-            self.step_id.as_deref(),
-            self.json,
-        )
+    fn execute(self, runtime: &OrbitRuntime) -> CommandOut {
+        {
+            print_run_logs(
+                runtime,
+                self.run_id.as_deref(),
+                self.step_id.as_deref(),
+                self.json,
+            )?;
+            Ok(CommandOutput::Silent)
+        }
     }
 }
 

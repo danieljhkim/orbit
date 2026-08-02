@@ -3,7 +3,7 @@ use orbit_core::command::task::TaskLintSeverity;
 use orbit_core::{OrbitError, OrbitRuntime, TaskStatus};
 use serde_json::{Value, json};
 
-use crate::command::Execute;
+use crate::command::{CommandOut, CommandOutput, Execute};
 
 /// Statuses swept when linting without a task ID (the former `prune-context`
 /// active set).
@@ -40,10 +40,16 @@ pub struct TaskLintArgs {
 }
 
 impl Execute for TaskLintArgs {
-    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+    fn execute(self, runtime: &OrbitRuntime) -> CommandOut {
         match &self.id {
-            Some(id) => lint_single_task(runtime, id, self.fix, self.json),
-            None => sweep_stale_context_files(runtime, self.fix, &self.statuses, self.json),
+            Some(id) => {
+                lint_single_task(runtime, id, self.fix, self.json)?;
+                Ok(CommandOutput::Silent)
+            }
+            None => {
+                sweep_stale_context_files(runtime, self.fix, &self.statuses, self.json)?;
+                Ok(CommandOutput::Silent)
+            }
         }
     }
 }

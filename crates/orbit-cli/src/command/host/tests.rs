@@ -3,7 +3,14 @@ use std::collections::BTreeSet;
 use chrono::Utc;
 use orbit_common::types::{HostStatus, RegistryHostV1};
 
-use super::list::format_host_list;
+use super::list::host_table;
+use crate::output::sink::PIPED;
+
+/// The plain rendering of the list view — what a piped caller sees, and what
+/// the hand-padded `format!` this table replaced used to produce.
+fn format_host_list(hosts: &[RegistryHostV1], hub_machine_id: Option<&str>) -> String {
+    host_table(hosts, hub_machine_id).render_plain(&PIPED)
+}
 
 fn host(machine_id: &str, host_id: &str, labels: &[&str]) -> RegistryHostV1 {
     let now = Utc::now();
@@ -26,7 +33,9 @@ fn host(machine_id: &str, host_id: &str, labels: &[&str]) -> RegistryHostV1 {
 
 #[test]
 fn format_host_list_handles_empty() {
-    assert_eq!(format_host_list(&[], None), "no hosts registered\n");
+    // The empty-state line is the renderer's, on stderr — the record stream a
+    // consumer reads is empty rather than carrying prose (spec §5).
+    assert_eq!(format_host_list(&[], None), "");
 }
 
 #[test]

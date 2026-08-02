@@ -3,7 +3,7 @@ use orbit_common::types::DEFAULT_POLICY_NAME;
 use orbit_core::{OrbitError, OrbitRuntime};
 use serde_json::json;
 
-use crate::command::Execute;
+use crate::command::{CommandOut, CommandOutput, Execute, Payload};
 
 use super::support::status_word;
 
@@ -16,7 +16,7 @@ pub struct PolicyCheckArgs {
 }
 
 impl Execute for PolicyCheckArgs {
-    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+    fn execute(self, runtime: &OrbitRuntime) -> CommandOut {
         let def = runtime
             .get_policy_def(DEFAULT_POLICY_NAME)?
             .ok_or_else(|| {
@@ -35,7 +35,7 @@ impl Execute for PolicyCheckArgs {
         )?;
 
         if self.json {
-            return crate::output::json::print_pretty(&json!({
+            return Ok(Payload::document(json!({
                 "policy": DEFAULT_POLICY_NAME,
                 "profile": self.profile_name,
                 "path": self.path,
@@ -47,7 +47,8 @@ impl Execute for PolicyCheckArgs {
                     "allowed": modify.allowed,
                     "matched_rule": modify.matched_rule,
                 },
-            }));
+            }))
+            .into());
         }
 
         println!("Policy:  {}", DEFAULT_POLICY_NAME);
@@ -63,6 +64,6 @@ impl Execute for PolicyCheckArgs {
             status_word(modify.allowed),
             modify.matched_rule
         );
-        Ok(())
+        Ok(CommandOutput::Silent)
     }
 }

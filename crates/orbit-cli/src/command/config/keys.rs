@@ -1,9 +1,9 @@
 use clap::Args;
+use orbit_core::OrbitRuntime;
 use orbit_core::config::CONFIG_KEY_REGISTRY;
-use orbit_core::{OrbitError, OrbitRuntime};
 use serde_json::json;
 
-use crate::command::Execute;
+use crate::command::{CommandOut, CommandOutput, Execute, Payload};
 
 #[derive(Args)]
 pub struct ConfigKeysArgs {
@@ -12,7 +12,7 @@ pub struct ConfigKeysArgs {
 }
 
 impl Execute for ConfigKeysArgs {
-    fn execute(self, _runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+    fn execute(self, _runtime: &OrbitRuntime) -> CommandOut {
         if self.json {
             let keys: Vec<_> = CONFIG_KEY_REGISTRY
                 .iter()
@@ -24,7 +24,7 @@ impl Execute for ConfigKeysArgs {
                     })
                 })
                 .collect();
-            crate::output::json::print_pretty(&json!({ "keys": keys }))
+            Ok(Payload::document(json!({ "keys": keys })).into())
         } else {
             for entry in CONFIG_KEY_REGISTRY {
                 println!(
@@ -32,7 +32,7 @@ impl Execute for ConfigKeysArgs {
                     entry.key, entry.value_type, entry.description
                 );
             }
-            Ok(())
+            Ok(CommandOutput::Silent)
         }
     }
 }

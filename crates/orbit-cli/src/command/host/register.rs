@@ -5,7 +5,7 @@ use orbit_core::{OrbitError, OrbitRuntime};
 use orbit_remote::{HOST_IDENTITY_SCHEMA_VERSION, HostIdentity, HostMode, load_host_identity};
 use orbit_remote::{host_registry_service_at, require_local_hub_identity};
 
-use crate::command::Execute;
+use crate::command::{CommandOut, CommandOutput, Execute};
 
 #[derive(Args)]
 #[command(
@@ -25,7 +25,7 @@ pub struct HostRegisterArgs {
 }
 
 impl Execute for HostRegisterArgs {
-    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+    fn execute(self, runtime: &OrbitRuntime) -> CommandOut {
         let labels: BTreeSet<String> = self.labels.into_iter().collect();
         let local_identity = load_host_identity(&runtime.global_root())?;
         if local_identity.mode == HostMode::Spoke {
@@ -40,7 +40,7 @@ impl Execute for HostRegisterArgs {
                 "registered spoke '{}' (machine_id {}) with the verified hub and refreshed the local registry cache",
                 record.host_id, record.machine_id
             );
-            return Ok(());
+            return Ok(CommandOutput::Silent);
         }
 
         // Direct coordination-store administration remains hub-local.
@@ -91,6 +91,6 @@ impl Execute for HostRegisterArgs {
             "registered host '{}' (machine_id {}), status {}",
             record.host_id, record.machine_id, record.status
         );
-        Ok(())
+        Ok(CommandOutput::Silent)
     }
 }

@@ -7,7 +7,7 @@ use orbit_core::command::job::JobCatalogEntry;
 use orbit_core::{JobRun, OrbitError, OrbitRuntime};
 use serde_json::{Value, json};
 
-use crate::command::Execute;
+use crate::command::{CommandOut, CommandOutput, Execute, Payload};
 
 #[derive(Args)]
 #[command(
@@ -33,7 +33,7 @@ pub struct JobRunArgs {
 }
 
 impl Execute for JobRunArgs {
-    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+    fn execute(self, runtime: &OrbitRuntime) -> CommandOut {
         let input = build_job_run_input(&self.input)?;
         let backend_flag =
             orbit_core::command::backend_resolver::parse_backend_flag(self.backend.as_deref())
@@ -48,7 +48,7 @@ impl Execute for JobRunArgs {
             let result = runtime.run_job_v2_from_yaml(&direct_path, input, backend_flag)?;
             let backend_str = result.resolved_backend.as_str();
             if self.json {
-                return crate::output::json::print_pretty(&json!({
+                return Ok(Payload::document(json!({
                     "run_id": result.run_id,
                     "job_name": result.job_name,
                     "resolved_backend": backend_str,
@@ -56,7 +56,8 @@ impl Execute for JobRunArgs {
                     "message": result.message,
                     "pipeline": result.pipeline,
                     "events_emitted": result.events_emitted,
-                }));
+                }))
+                .into());
             }
             println!(
                 "run_id={};job={};backend={};success={};events={}",
@@ -69,7 +70,7 @@ impl Execute for JobRunArgs {
                 "pipeline: {}",
                 serde_json::to_string_pretty(&result.pipeline).unwrap_or_default()
             );
-            return Ok(());
+            return Ok(CommandOutput::Silent);
         }
 
         let job = runtime.show_job_catalog_entry(&self.job_id)?;
@@ -84,7 +85,7 @@ impl Execute for JobRunArgs {
         let result = runtime.run_job_v2_from_yaml(&job.path, input, backend_flag)?;
         let backend_str = result.resolved_backend.as_str();
         if self.json {
-            crate::output::json::print_pretty(&json!({
+            Ok(Payload::document(json!({
                 "run_id": result.run_id,
                 "job_id": job.job_id.clone(),
                 "kind": job.kind().to_string(),
@@ -94,6 +95,7 @@ impl Execute for JobRunArgs {
                 "pipeline": result.pipeline,
                 "events_emitted": result.events_emitted,
             }))
+            .into())
         } else {
             println!(
                 "run_id={};job_id={};kind={};backend={};success={};events={}",
@@ -111,7 +113,7 @@ impl Execute for JobRunArgs {
                 "pipeline: {}",
                 serde_json::to_string_pretty(&result.pipeline).unwrap_or_default()
             );
-            Ok(())
+            Ok(CommandOutput::Silent)
         }
     }
 }
@@ -127,12 +129,12 @@ pub struct JobReplayArgs {
 }
 
 impl Execute for JobReplayArgs {
-    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+    fn execute(self, runtime: &OrbitRuntime) -> CommandOut {
         let source_run_id = self.run_id;
         let result = runtime.replay_job_run(&source_run_id)?;
         let backend_str = result.resolved_backend.as_str();
         if self.json {
-            return crate::output::json::print_pretty(&json!({
+            return Ok(Payload::document(json!({
                 "run_id": result.run_id,
                 "source_run_id": source_run_id,
                 "job_name": result.job_name,
@@ -141,7 +143,8 @@ impl Execute for JobReplayArgs {
                 "message": result.message,
                 "pipeline": result.pipeline,
                 "events_emitted": result.events_emitted,
-            }));
+            }))
+            .into());
         }
         println!(
             "run_id={};replayed_from={};job={};backend={};success={};events={}",
@@ -159,7 +162,7 @@ impl Execute for JobReplayArgs {
             "pipeline: {}",
             serde_json::to_string_pretty(&result.pipeline).unwrap_or_default()
         );
-        Ok(())
+        Ok(CommandOutput::Silent)
     }
 }
 
@@ -176,12 +179,12 @@ pub struct JobResumeArgs {
 }
 
 impl Execute for JobResumeArgs {
-    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+    fn execute(self, runtime: &OrbitRuntime) -> CommandOut {
         let source_run_id = self.run_id;
         let result = runtime.resume_job_run(&source_run_id)?;
         let backend_str = result.resolved_backend.as_str();
         if self.json {
-            return crate::output::json::print_pretty(&json!({
+            return Ok(Payload::document(json!({
                 "run_id": result.run_id,
                 "resumed_from": source_run_id,
                 "job_name": result.job_name,
@@ -190,7 +193,8 @@ impl Execute for JobResumeArgs {
                 "message": result.message,
                 "pipeline": result.pipeline,
                 "events_emitted": result.events_emitted,
-            }));
+            }))
+            .into());
         }
         println!(
             "run_id={};resumed_from={};job={};backend={};success={};events={}",
@@ -208,7 +212,7 @@ impl Execute for JobResumeArgs {
             "pipeline: {}",
             serde_json::to_string_pretty(&result.pipeline).unwrap_or_default()
         );
-        Ok(())
+        Ok(CommandOutput::Silent)
     }
 }
 
@@ -283,8 +287,11 @@ pub struct JobRunPipelineWorkerArgs {
 }
 
 impl Execute for JobRunPipelineWorkerArgs {
-    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
-        runtime.execute_pipeline_run_worker(&self.run_id)
+    fn execute(self, runtime: &OrbitRuntime) -> CommandOut {
+        {
+            runtime.execute_pipeline_run_worker(&self.run_id)?;
+            Ok(CommandOutput::Silent)
+        }
     }
 }
 

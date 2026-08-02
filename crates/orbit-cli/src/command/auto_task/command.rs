@@ -1,7 +1,7 @@
 use clap::{Args, Subcommand};
-use orbit_core::{OrbitError, OrbitRuntime};
+use orbit_core::OrbitRuntime;
 
-use crate::command::Execute;
+use crate::command::{CommandOut, Execute};
 
 use super::add::AutoTaskAddArgs;
 use super::list::AutoTaskListArgs;
@@ -18,7 +18,7 @@ pub struct AutoTaskCommand {
 }
 
 impl Execute for AutoTaskCommand {
-    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+    fn execute(self, runtime: &OrbitRuntime) -> CommandOut {
         self.command.execute(runtime)
     }
 }
@@ -41,7 +41,7 @@ pub enum AutoTaskSubcommand {
 }
 
 impl Execute for AutoTaskSubcommand {
-    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+    fn execute(self, runtime: &OrbitRuntime) -> CommandOut {
         match self {
             AutoTaskSubcommand::Add(args) => args.execute(runtime),
             AutoTaskSubcommand::List(args) => args.execute(runtime),

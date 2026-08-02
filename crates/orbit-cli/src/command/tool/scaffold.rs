@@ -5,7 +5,7 @@ use clap::Args;
 use orbit_common::types::ToolParam;
 use orbit_core::{OrbitError, OrbitRuntime};
 
-use crate::command::Execute;
+use crate::command::{CommandOut, CommandOutput, Execute};
 
 use super::manifest::{ExternalToolManifest, infer_tool_name, sidecar_manifest_path};
 
@@ -30,7 +30,7 @@ pub struct ToolScaffoldArgs {
 }
 
 impl Execute for ToolScaffoldArgs {
-    fn execute(self, _runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+    fn execute(self, _runtime: &OrbitRuntime) -> CommandOut {
         let script_path = PathBuf::from(&self.path);
         let manifest_path = sidecar_manifest_path(&script_path);
         let tool_name = self
@@ -69,7 +69,7 @@ impl Execute for ToolScaffoldArgs {
         println!("  orbit tool add {}", script_path.display());
         println!("  orbit tool show {}", tool_name);
         println!("  orbit mcp serve");
-        Ok(())
+        Ok(CommandOutput::Silent)
     }
 }
 

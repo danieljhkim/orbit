@@ -1,8 +1,8 @@
 use clap::Args;
-use orbit_core::{OrbitError, OrbitRuntime};
+use orbit_core::OrbitRuntime;
 use serde_json::json;
 
-use crate::command::Execute;
+use crate::command::{CommandOut, CommandOutput, Execute, Payload};
 
 use super::output::learning_to_json;
 
@@ -19,19 +19,20 @@ pub struct LearningSupersedeArgs {
 }
 
 impl Execute for LearningSupersedeArgs {
-    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+    fn execute(self, runtime: &OrbitRuntime) -> CommandOut {
         runtime.author_learning_supersede(&self.id, &self.with)?;
         let old = runtime.get_learning(&self.id)?;
         let new = runtime.get_learning(&self.with)?;
 
         if self.json {
-            crate::output::json::print_pretty(&json!({
+            Ok(Payload::document(json!({
                 "old": learning_to_json(&old),
                 "new": learning_to_json(&new),
             }))
+            .into())
         } else {
             println!("{} superseded by {}", old.id, new.id);
-            Ok(())
+            Ok(CommandOutput::Silent)
         }
     }
 }

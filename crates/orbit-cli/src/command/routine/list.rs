@@ -1,10 +1,10 @@
 use clap::Args;
 use comfy_table::Cell;
-use orbit_core::OrbitError;
 use orbit_remote::routines::routine_statuses;
 use orbit_remote::workspace_registry;
 use serde_json::json;
 
+use crate::command::{CommandOut, Payload};
 use crate::output::table::{Column, Table};
 
 #[derive(Args)]
@@ -15,58 +15,47 @@ pub struct RoutineListArgs {
 }
 
 impl RoutineListArgs {
-    pub fn execute_without_runtime(self) -> Result<(), OrbitError> {
+    pub fn execute_without_runtime(self) -> CommandOut {
         let global_root = workspace_registry::global_orbit_dir()?;
         let report = routine_statuses(&global_root)?;
 
-        if self.json {
-            let statuses: Vec<_> = report
-                .statuses
-                .iter()
-                .map(|status| {
-                    json!({
-                        "name": status.routine.definition.name,
-                        "source": status.routine.source_workspace,
-                        "origin": status.routine.origin.as_str(),
-                        "target": status.routine.definition.target.as_ref_string(),
-                        "enabled": status.routine.definition.enabled,
-                        "hosts": status.routine.definition.hosts,
-                        "pinned_to_host": status.pinned_to_host,
-                        "validation": &status.validation,
-                        "paused_at": status.paused_at,
-                        "effective": status.effective(),
-                        "cron": status.routine.definition.trigger.cron,
-                        "next_due": status.next_due,
-                        "last_fire": status.last_fire.as_ref().map(|fire| json!({
-                            "slot": fire.slot,
-                            "attempt": fire.attempt,
-                            "state": fire.state.as_str(),
-                            "run_id": fire.run_id,
-                        })),
-                    })
+        let statuses: Vec<_> = report
+            .statuses
+            .iter()
+            .map(|status| {
+                json!({
+                    "name": status.routine.definition.name,
+                    "source": status.routine.source_workspace,
+                    "origin": status.routine.origin.as_str(),
+                    "target": status.routine.definition.target.as_ref_string(),
+                    "enabled": status.routine.definition.enabled,
+                    "hosts": status.routine.definition.hosts,
+                    "pinned_to_host": status.pinned_to_host,
+                    "validation": &status.validation,
+                    "paused_at": status.paused_at,
+                    "effective": status.effective(),
+                    "cron": status.routine.definition.trigger.cron,
+                    "next_due": status.next_due,
+                    "last_fire": status.last_fire.as_ref().map(|fire| json!({
+                        "slot": fire.slot,
+                        "attempt": fire.attempt,
+                        "state": fire.state.as_str(),
+                        "run_id": fire.run_id,
+                    })),
                 })
-                .collect();
-            crate::output::json::print_pretty(&json!({
-                "host_id": report.host_id,
-                "machine_id": report.machine_id,
-                "registry": &report.registry,
-                "routines": statuses,
-                "load_errors": report.load_errors.iter().map(|e| json!({
-                    "source_workspace": e.source_workspace,
-                    "path": e.path.as_ref().map(|p| p.display().to_string()),
-                    "message": e.message,
-                })).collect::<Vec<_>>(),
-            }))?;
-            return Ok(());
-        }
-
-        if report.statuses.is_empty() && report.load_errors.is_empty() {
-            eprintln!(
-                "no routines found (host {}); mark a workspace with [routines] role = \"source\"",
-                report.host_id
-            );
-            return Ok(());
-        }
+            })
+            .collect();
+        let doc = json!({
+            "host_id": report.host_id,
+            "machine_id": report.machine_id,
+            "registry": &report.registry,
+            "routines": statuses,
+            "load_errors": report.load_errors.iter().map(|e| json!({
+                "source_workspace": e.source_workspace,
+                "path": e.path.as_ref().map(|p| p.display().to_string()),
+                "message": e.message,
+            })).collect::<Vec<_>>(),
+        });
 
         // `orbit routine show <name>` prints a routine's full definition.
         let mut table = Table::new(vec![
@@ -79,7 +68,10 @@ impl RoutineListArgs {
             Column::new("NEXT DUE").fixed(),
             Column::new("LAST FIRE").fixed(),
         ])
-        .empty_message(format!("no routines found (host {})", report.host_id));
+        .empty_message(format!(
+            "no routines found (host {}); mark a workspace with [routines] role = \"source\"",
+            report.host_id
+        ));
         for status in &report.statuses {
             let last_fire = status
                 .last_fire
@@ -105,8 +97,9 @@ impl RoutineListArgs {
                 Cell::new(last_fire),
             ]);
         }
-        println!("host: {}", report.host_id);
-        println!(
+        // Context about where the list came from, not a record in it (spec §5).
+        eprintln!("host: {}", report.host_id);
+        eprintln!(
             "registry: {}/{}{}",
             report.registry.source,
             report.registry.state,
@@ -116,7 +109,6 @@ impl RoutineListArgs {
                 .map(|age| format!(" ({age}s old)"))
                 .unwrap_or_default()
         );
-        table.print();
         for status in &report.statuses {
             for diagnostic in &status.validation.diagnostics {
                 eprintln!(
@@ -139,6 +131,6 @@ impl RoutineListArgs {
                 error.source_workspace, path, error.message
             );
         }
-        Ok(())
+        Ok(Payload::detail_table(doc, table).into())
     }
 }

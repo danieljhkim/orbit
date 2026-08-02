@@ -2,7 +2,7 @@ use clap::Args;
 use orbit_core::{OrbitError, OrbitRuntime, TaskRelatedDoc};
 use serde_json::Value;
 
-use crate::command::Execute;
+use crate::command::{Block, CommandOut, CommandOutput, Execute, Payload};
 
 use super::output::{
     is_human_visible_history_event, print_task_fields, task_fields_to_json,
@@ -33,7 +33,7 @@ pub struct TaskShowArgs {
 }
 
 impl Execute for TaskShowArgs {
-    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+    fn execute(self, runtime: &OrbitRuntime) -> CommandOut {
         let task = runtime.get_task(&self.id)?;
         let status_by_id = runtime.task_status_index()?;
         let fields = normalize_task_show_fields(&self.fields)?;
@@ -45,14 +45,18 @@ impl Execute for TaskShowArgs {
                 ));
             }
             if self.json {
-                return crate::output::json::print_pretty(&task_fields_to_json(
+                return Ok(Payload::document(task_fields_to_json(
                     runtime,
                     &task,
                     &fields,
                     Some(&status_by_id),
-                )?);
+                )?)
+                .into());
             }
-            return print_task_fields(runtime, &task, &fields, Some(&status_by_id));
+            return {
+                print_task_fields(runtime, &task, &fields, Some(&status_by_id))?;
+                Ok(CommandOutput::Silent)
+            };
         }
 
         let related_docs = if self.with_context {
@@ -60,72 +64,87 @@ impl Execute for TaskShowArgs {
         } else {
             Vec::new()
         };
-        if self.json {
-            let mut value = task_to_json_for_runtime(runtime, &task)?;
-            if self.with_context {
-                insert_related_docs(&mut value, related_docs)?;
-            }
-            crate::output::json::print_pretty(&value)
-        } else {
+        let mut doc = task_to_json_for_runtime(runtime, &task)?;
+        if self.with_context {
+            insert_related_docs(&mut doc, related_docs.clone())?;
+        }
+
+        {
+            use std::fmt::Write as _;
+
+            let mut blocks: Vec<Block> = Vec::new();
+            let mut out = String::new();
             use crate::output::color::{Domain, bold, dimmed, text};
-            println!("{} {}", bold("ID:"), task.id);
+            let _ = writeln!(out, "{} {}", bold("ID:"), task.id);
             if let Some(parent_id) = task.parent_id() {
-                println!("{} {}", bold("Parent Task:"), parent_id);
+                let _ = writeln!(out, "{} {}", bold("Parent Task:"), parent_id);
             }
-            println!("{} {}", bold("Title:"), task.title);
-            println!(
+            let _ = writeln!(out, "{} {}", bold("Title:"), task.title);
+            let _ = writeln!(
+                out,
                 "{} {}",
                 bold("Status:"),
                 text(&task.status.to_string(), Domain::TaskStatus)
             );
-            println!(
+            let _ = writeln!(
+                out,
                 "{} {}",
                 bold("Priority:"),
                 text(&task.priority.to_string(), Domain::Priority)
             );
             if let Some(complexity) = task.complexity {
-                println!("{} {}", bold("Complexity:"), complexity);
+                let _ = writeln!(out, "{} {}", bold("Complexity:"), complexity);
             }
-            println!("{} {}", bold("Type:"), task.task_type);
+            let _ = writeln!(out, "{} {}", bold("Type:"), task.task_type);
             if !task.description.is_empty() {
-                println!("{} {}", bold("Description:"), task.description);
+                let _ = writeln!(out, "{} {}", bold("Description:"), task.description);
             }
             if !task.acceptance_criteria.is_empty() {
-                println!("{}", bold("Acceptance Criteria:"));
+                let _ = writeln!(out, "{}", bold("Acceptance Criteria:"));
                 for criterion in &task.acceptance_criteria {
-                    println!("  - {}", criterion);
+                    let _ = writeln!(out, "  - {}", criterion);
                 }
             }
             if !task.dependencies().is_empty() {
-                println!("{}", bold("Dependencies:"));
+                let _ = writeln!(out, "{}", bold("Dependencies:"));
                 for dependency in orbit_core::resolve_task_dependencies(&task, &status_by_id) {
-                    println!("  - {}", dependency.label());
+                    let _ = writeln!(out, "  - {}", dependency.label());
                 }
             }
             if !task.tags.is_empty() {
-                println!("{} {}", bold("Tags:"), task.tags.join(", "));
+                let _ = writeln!(out, "{} {}", bold("Tags:"), task.tags.join(", "));
             }
             if !task.external_refs.is_empty() {
-                println!("{}", bold("External refs:"));
+                let _ = writeln!(out, "{}", bold("External refs:"));
                 for external_ref in &task.external_refs {
                     if let Some(url) = &external_ref.url {
-                        println!("  - {}: {} [{}]", external_ref.system, external_ref.id, url);
+                        let _ = writeln!(
+                            out,
+                            "  - {}: {} [{}]",
+                            external_ref.system, external_ref.id, url
+                        );
                     } else {
-                        println!("  - {}: {}", external_ref.system, external_ref.id);
+                        let _ = writeln!(out, "  - {}: {}", external_ref.system, external_ref.id);
                     }
                 }
             }
             if !task.plan.is_empty() {
-                println!("{} {}", bold("Plan:"), task.plan);
+                let _ = writeln!(out, "{} {}", bold("Plan:"), task.plan);
             }
             if !task.execution_summary.is_empty() {
-                println!("{} {}", bold("Execution Summary:"), task.execution_summary);
+                let _ = writeln!(
+                    out,
+                    "{} {}",
+                    bold("Execution Summary:"),
+                    task.execution_summary
+                );
             }
             let comments = runtime.get_task_comments(&task.id)?;
             if !comments.is_empty() {
-                println!("{}", bold("Comments:"));
+                let _ = writeln!(out, "{}", bold("Comments:"));
                 for comment in &comments {
-                    println!(
+                    let _ = writeln!(
+                        out,
                         "  {} {}: {}",
                         dimmed(&format!("[{}]", comment.at.to_rfc3339())),
                         comment.by,
@@ -134,25 +153,31 @@ impl Execute for TaskShowArgs {
                 }
             }
             if !task.context_files.is_empty() {
-                println!("{} {}", bold("Context:"), task.context_files.join(", "));
+                let _ = writeln!(
+                    out,
+                    "{} {}",
+                    bold("Context:"),
+                    task.context_files.join(", ")
+                );
             }
             if self.with_context && !related_docs.is_empty() {
-                print_related_docs(&related_docs);
+                blocks.push(Block::text(std::mem::take(&mut out)));
+                blocks.extend(related_docs_blocks(&related_docs));
             }
             if let Some(ref created_by) = task.created_by {
-                println!("{} {}", bold("Created By:"), created_by);
+                let _ = writeln!(out, "{} {}", bold("Created By:"), created_by);
             }
             if let Some(ref planned_by) = task.planned_by {
-                println!("{} {}", bold("Planned By:"), planned_by);
+                let _ = writeln!(out, "{} {}", bold("Planned By:"), planned_by);
             }
             if let Some(ref implemented_by) = task.implemented_by {
-                println!("{} {}", bold("Implemented By:"), implemented_by);
+                let _ = writeln!(out, "{} {}", bold("Implemented By:"), implemented_by);
             }
             if let Some(ref crew) = task.crew {
-                println!("{} {}", bold("Execution Crew:"), crew);
+                let _ = writeln!(out, "{} {}", bold("Execution Crew:"), crew);
             }
             if let Some(ref orchestrator) = task.orchestrator {
-                println!("{} {}", bold("Orchestrator:"), orchestrator);
+                let _ = writeln!(out, "{} {}", bold("Orchestrator:"), orchestrator);
             }
             let history = runtime.get_task_history(&task.id)?;
             let visible_history: Vec<_> = history
@@ -160,10 +185,11 @@ impl Execute for TaskShowArgs {
                 .filter(|entry| is_human_visible_history_event(&entry.event))
                 .collect();
             if !visible_history.is_empty() {
-                println!("{}", bold("History:"));
+                let _ = writeln!(out, "{}", bold("History:"));
                 for entry in visible_history {
                     if let Some(note) = &entry.note {
-                        println!(
+                        let _ = writeln!(
+                            out,
                             "  {} {}: {} ({})",
                             dimmed(&format!("[{}]", entry.at.to_rfc3339())),
                             entry.by,
@@ -171,7 +197,8 @@ impl Execute for TaskShowArgs {
                             note
                         );
                     } else {
-                        println!(
+                        let _ = writeln!(
+                            out,
                             "  {} {}: {}",
                             dimmed(&format!("[{}]", entry.at.to_rfc3339())),
                             entry.by,
@@ -181,22 +208,25 @@ impl Execute for TaskShowArgs {
                 }
             }
             if let Some(ref pr_status) = task.pr_status {
-                println!("{} {}", bold("PR Status:"), pr_status);
+                let _ = writeln!(out, "{} {}", bold("PR Status:"), pr_status);
             }
             if let Some(source_task_id) = task.source_task_id() {
-                println!("{} {}", bold("Source Task:"), source_task_id);
+                let _ = writeln!(out, "{} {}", bold("Source Task:"), source_task_id);
             }
-            println!(
+            let _ = writeln!(
+                out,
                 "{} {}",
                 bold("Created:"),
                 dimmed(&task.created_at.to_rfc3339())
             );
-            println!(
+            let _ = writeln!(
+                out,
                 "{} {}",
                 bold("Updated:"),
                 dimmed(&task.updated_at.to_rfc3339())
             );
-            Ok(())
+            blocks.push(Block::text(out));
+            Ok(Payload::blocks(doc, blocks).into())
         }
     }
 }
@@ -217,12 +247,10 @@ fn insert_related_docs(
     Ok(())
 }
 
-fn print_related_docs(related_docs: &[TaskRelatedDoc]) {
+fn related_docs_blocks(related_docs: &[TaskRelatedDoc]) -> Vec<Block> {
     use crate::output::color::bold;
     use comfy_table::Cell;
 
-    println!();
-    println!("{}", bold("Related Docs:"));
     use crate::output::table::{Column, Table};
     // Part of a detail view: keep every column, and point at `orbit docs show
     // <path>` for the untruncated doc.
@@ -242,7 +270,10 @@ fn print_related_docs(related_docs: &[TaskRelatedDoc]) {
             Cell::new(&doc.excerpt),
         ]);
     }
-    table.print();
+    vec![
+        Block::text(format!("\n{}", bold("Related Docs:"))),
+        Block::table(table),
+    ]
 }
 
 fn normalize_task_show_fields(fields: &[String]) -> Result<Vec<String>, OrbitError> {

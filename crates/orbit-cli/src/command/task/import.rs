@@ -1,11 +1,11 @@
 use std::path::PathBuf;
 
 use clap::{Args, ValueEnum};
+use orbit_core::OrbitRuntime;
 use orbit_core::command::task_migration::{ImportAction, ImportConflictPolicy};
-use orbit_core::{OrbitError, OrbitRuntime};
 use serde_json::json;
 
-use crate::command::Execute;
+use crate::command::{CommandOut, CommandOutput, Execute, Payload};
 
 /// `orbit task import` — import task bundles from a tar.zst archive.
 #[derive(Args)]
@@ -56,7 +56,7 @@ fn action_label(action: ImportAction) -> &'static str {
 }
 
 impl Execute for TaskImportArgs {
-    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+    fn execute(self, runtime: &OrbitRuntime) -> CommandOut {
         let outcome = runtime.import_tasks(
             &self.archive,
             self.workspace.as_deref(),
@@ -75,14 +75,15 @@ impl Execute for TaskImportArgs {
                     })
                 })
                 .collect();
-            return crate::output::json::print_pretty(&json!({
+            return Ok(Payload::document(json!({
                 "workspace_id": outcome.workspace_id,
                 "registered_workspace": outcome.registered_workspace,
                 "id_remap": outcome.id_remap,
                 "id_map_path": outcome.id_map_path.as_ref().map(|p| p.display().to_string()),
                 "projection_degraded": outcome.projection.degraded_reason,
                 "tasks": tasks,
-            }));
+            }))
+            .into());
         }
 
         println!("imported into workspace '{}'", outcome.workspace_id);
@@ -107,6 +108,6 @@ impl Execute for TaskImportArgs {
         if let Some(reason) = &outcome.projection.degraded_reason {
             println!("  warning: projection degraded: {reason}");
         }
-        Ok(())
+        Ok(CommandOutput::Silent)
     }
 }

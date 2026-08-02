@@ -3,7 +3,7 @@ use orbit_cmd::{DoctorCommands, WorkspaceDoctorResult, WorkspaceDoctorStatus};
 use orbit_core::{OrbitError, OrbitRuntime};
 use serde_json::{Value, json};
 
-use crate::command::Execute;
+use crate::command::{Block, CommandOut, Execute, Payload};
 use crate::output::color::{Domain, Role};
 
 /// `orbit doctor` — workspace-level self-diagnostics [ORB-10005].
@@ -33,7 +33,7 @@ pub struct DoctorCommand {
 }
 
 impl Execute for DoctorCommand {
-    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+    fn execute(self, runtime: &OrbitRuntime) -> CommandOut {
         if self.fix_stale_locks {
             let removed = runtime.remove_stale_lock_files()?;
             if !self.json {
@@ -68,10 +68,9 @@ impl Execute for DoctorCommand {
             .filter(|row| row.status == WorkspaceDoctorStatus::Warning)
             .count();
 
-        if self.json {
-            let values = results.iter().map(doctor_row_json).collect::<Vec<_>>();
-            crate::output::json::print_pretty(&Value::Array(values))?;
-        } else {
+        let values = results.iter().map(doctor_row_json).collect::<Vec<_>>();
+        let mut blocks = Vec::new();
+        {
             use crate::output::table::{Column, Table};
             let mut table = Table::new(vec![
                 Column::new("CHECK").fixed(),
@@ -87,13 +86,13 @@ impl Execute for DoctorCommand {
                     Cell::new(human_detail(row)),
                 ]);
             }
-            table.print();
+            blocks.push(Block::table(table));
 
             if failures == 0 && warnings == 0 {
-                println!(
+                blocks.push(Block::text(format!(
                     "\n{}",
                     crate::output::color::text("Workspace healthy.", Role::Ok)
-                );
+                )));
             } else {
                 eprintln!("\n{failures} failure(s), {warnings} warning(s).");
             }
@@ -106,7 +105,7 @@ impl Execute for DoctorCommand {
                 "{failures} doctor check(s) failed"
             )));
         }
-        Ok(())
+        Ok(Payload::blocks(Value::Array(values), blocks).into())
     }
 }
 

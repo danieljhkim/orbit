@@ -25,7 +25,8 @@ use clap::{ArgAction, Args, Subcommand};
 use orbit_core::{OrbitError, OrbitRuntime};
 use serde_json::{Map, Value};
 
-use crate::command::Execute;
+use crate::command::{CommandOut, CommandOutput, Execute, Payload};
+use crate::output::color::Domain;
 
 #[derive(Args)]
 #[command(about = "List and inspect Architecture Decision Records")]
@@ -136,7 +137,7 @@ pub struct AdrReconcileArgs {
 }
 
 impl Execute for AdrCommand {
-    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+    fn execute(self, runtime: &OrbitRuntime) -> CommandOut {
         match self.command {
             AdrSubcommand::List(args) => args.execute(runtime),
             AdrSubcommand::Show(args) => args.execute(runtime),
@@ -147,21 +148,21 @@ impl Execute for AdrCommand {
 }
 
 impl Execute for AdrReconcileArgs {
-    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+    fn execute(self, runtime: &OrbitRuntime) -> CommandOut {
         let adr = runtime.reconcile_federated_adr(&self.id, &self.source_worktree)?;
         if self.json {
             let value = serde_json::to_value(&adr)
                 .map_err(|error| OrbitError::Execution(error.to_string()))?;
-            crate::output::json::print_pretty(&value)
+            Ok(Payload::document(value).into())
         } else {
             println!("{}", adr.id);
-            Ok(())
+            Ok(CommandOutput::Silent)
         }
     }
 }
 
 impl Execute for AdrRestoreArgs {
-    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+    fn execute(self, runtime: &OrbitRuntime) -> CommandOut {
         let body = match (self.body, self.body_file) {
             (Some(_), Some(_)) => {
                 return Err(OrbitError::InvalidInput(
@@ -204,25 +205,25 @@ impl Execute for AdrRestoreArgs {
         let value = runtime.run_tool("orbit.adr.restore", Value::Object(input))?;
 
         if self.json {
-            crate::output::json::print_pretty(&value)
+            Ok(Payload::document(value).into())
         } else {
             println!("{}", value["id"].as_str().unwrap_or_default());
-            Ok(())
+            Ok(CommandOutput::Silent)
         }
     }
 }
 
 impl Execute for AdrShowArgs {
-    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+    fn execute(self, runtime: &OrbitRuntime) -> CommandOut {
         let value = runtime.run_tool("orbit.adr.show", serde_json::json!({ "id": self.id }))?;
 
         let _ = self.json;
-        crate::output::json::print_pretty(&value)
+        Ok(Payload::document(value).into())
     }
 }
 
 impl Execute for AdrListArgs {
-    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+    fn execute(self, runtime: &OrbitRuntime) -> CommandOut {
         let mut input = Map::new();
         if let Some(value) = self.status {
             input.insert("status".to_string(), Value::String(value));
@@ -259,10 +260,63 @@ impl Execute for AdrListArgs {
         // `run_adr_tool` helper.
         let value = runtime.run_tool("orbit.adr.list", Value::Object(input))?;
 
-        // The tool already returns the canonical ADR envelope shape; emit
-        // it pretty-printed in both modes for now. A table renderer can be
-        // added later if/when a richer non-JSON UX is needed.
+        // The tool already returns the canonical ADR envelope shape, so it is
+        // the payload unchanged. Until ORB-10586 this command printed that
+        // shape unconditionally and ignored its own `--json`; the mode now
+        // decides, and the human form is the list view below.
         let _ = self.json;
-        crate::output::json::print_pretty(&value)
+        let Some(records) = value.as_array() else {
+            return Ok(Payload::document(value).into());
+        };
+
+        use crate::output::table::{Column, Table};
+        // `orbit adr show <id>` prints the untruncated body of any row.
+        let mut table = Table::new(vec![
+            Column::new("ID").fixed(),
+            Column::new("STATUS").fixed(),
+            Column::new("OWNER").fixed(),
+            Column::new("TITLE"),
+            Column::new("FEATURES"),
+            Column::new("UPDATED").fixed(),
+        ])
+        .empty_message("no ADRs matching the given filters");
+        for record in records {
+            table.add_row(vec![
+                comfy_table::Cell::new(field_str(record, "id")),
+                crate::output::color::cell(&field_str(record, "status"), Domain::TaskStatus),
+                comfy_table::Cell::new(field_str(record, "owner")),
+                comfy_table::Cell::new(field_str(record, "title")),
+                comfy_table::Cell::new(field_list(record, "related_features")),
+                comfy_table::Cell::new(field_str(record, "last_updated")),
+            ]);
+        }
+        Ok(Payload::list(records.clone(), table).into())
     }
+}
+
+/// A string field of an ADR record, or `-` when it is absent or null.
+///
+/// The records come from the tool as `Value`, not a typed struct, so the list
+/// view reads them defensively rather than unwrapping.
+fn field_str(record: &Value, key: &str) -> String {
+    record
+        .get(key)
+        .and_then(Value::as_str)
+        .unwrap_or("-")
+        .to_string()
+}
+
+/// A string-array field, comma-joined for the table cell.
+fn field_list(record: &Value, key: &str) -> String {
+    let Some(values) = record.get(key).and_then(Value::as_array) else {
+        return "-".to_string();
+    };
+    if values.is_empty() {
+        return "-".to_string();
+    }
+    values
+        .iter()
+        .filter_map(Value::as_str)
+        .collect::<Vec<_>>()
+        .join(", ")
 }

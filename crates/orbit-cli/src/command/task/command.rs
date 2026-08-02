@@ -1,8 +1,8 @@
 use clap::{Args, Subcommand};
-use orbit_core::{OrbitError, OrbitRuntime};
+use orbit_core::OrbitRuntime;
 
-use crate::command::Execute;
 use crate::command::locks::LocksCommand;
+use crate::command::{CommandOut, Execute};
 
 use super::add::TaskAddArgs;
 use super::artifact::TaskArtifactCommand;
@@ -23,7 +23,7 @@ pub struct TaskCommand {
 }
 
 impl Execute for TaskCommand {
-    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+    fn execute(self, runtime: &OrbitRuntime) -> CommandOut {
         self.command.execute(runtime)
     }
 }
@@ -58,7 +58,7 @@ pub enum TaskSubcommand {
 }
 
 impl Execute for TaskSubcommand {
-    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+    fn execute(self, runtime: &OrbitRuntime) -> CommandOut {
         match self {
             TaskSubcommand::Add(args) => args.execute(runtime),
             TaskSubcommand::Artifact(cmd) => cmd.execute(runtime),

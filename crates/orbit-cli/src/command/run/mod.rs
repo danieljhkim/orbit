@@ -17,7 +17,7 @@ pub mod triage;
 
 pub use command::{RunCommand, RunSubcommand};
 pub use job::{JobReplayArgs, JobResumeArgs, JobRunArgs, JobRunPipelineWorkerArgs};
-pub(crate) use show::{print_legacy_logs_summary, print_run_show};
+pub(crate) use show::{legacy_logs_summary_payload, run_show_payload};
 
 #[cfg(test)]
 mod tests;

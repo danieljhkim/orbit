@@ -92,9 +92,25 @@ pub(crate) fn task_to_json_with_sidecars(
         "artifacts".to_string(),
         task_artifact_manifest_to_json(&runtime.get_task_artifact_manifest(&task.id)?),
     );
-    if let Some(projection) = runtime.resolved_crew_projection(task)? {
-        object.insert("resolved_crew".to_string(), Value::String(projection.name));
-        object.insert("crew_model".to_string(), Value::String(projection.model));
+    // `resolved_crew` enriches the record; it does not define it. A task may
+    // name a crew this workspace has no `[crews.*]` entry for — a config gap,
+    // not a corrupt task — and the fields are simply absent then.
+    //
+    // This used to propagate, which was invisible while only `--json` built
+    // this projection. Since ORB-10586 every mode does (the payload is the
+    // same records in both), so propagating would mean `orbit task show`
+    // refusing to display a task whose crew is undefined here. The reason goes
+    // to stderr rather than being swallowed.
+    match runtime.resolved_crew_projection(task) {
+        Ok(Some(projection)) => {
+            object.insert("resolved_crew".to_string(), Value::String(projection.name));
+            object.insert("crew_model".to_string(), Value::String(projection.model));
+        }
+        Ok(None) => {}
+        Err(error) => eprintln!(
+            "warning: crew for task {} could not be resolved: {error}",
+            task.id
+        ),
     }
     Ok(value)
 }
@@ -120,7 +136,13 @@ pub(super) struct TaskTableFilters {
     pub(super) task_type: bool,
 }
 
-pub(super) fn print_task_table(tasks: &[orbit_core::Task], full: bool, filtered: TaskTableFilters) {
+/// Build the list view for `orbit task list`. The renderer decides how it is
+/// projected; this only describes the columns and the rows.
+pub(super) fn task_table(
+    tasks: &[orbit_core::Task],
+    full: bool,
+    filtered: TaskTableFilters,
+) -> crate::output::table::Table {
     use crate::output::table::Column;
     use comfy_table::Cell;
     // `orbit task show <id>` prints the untruncated title and body of any row.
@@ -157,7 +179,7 @@ pub(super) fn print_task_table(tasks: &[orbit_core::Task], full: bool, filtered:
         }
         table.add_row(row);
     }
-    table.print();
+    table
 }
 
 pub(crate) fn print_task_locks(tasks: &[orbit_core::Task], locked_files: &BTreeSet<String>) {

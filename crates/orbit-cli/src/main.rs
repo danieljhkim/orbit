@@ -43,7 +43,7 @@ use orbit_remote::runtime::RemoteRuntimeFactory;
 #[cfg(test)]
 use crate::command::init::InitCommand;
 use crate::command::operation::{CommandOperation, DispatchContext, RuntimeNeed};
-use crate::output::sink::{self, FormatArg, OutputMode, OutputSink};
+use crate::output::sink::{FormatArg, OutputMode, OutputSink};
 
 /// Clap id and long name of the global output-format argument.
 const FORMAT_ARG_ID: &str = "format";
@@ -122,23 +122,53 @@ fn requested_format(matches: &ArgMatches) -> Option<FormatArg> {
     }
 }
 
-/// Parse argv into the derived CLI plus the global `--format` value.
-fn parse_cli() -> (command::Cli, Option<FormatArg>) {
+/// Clap ids of the per-command boolean flags that have always meant "emit the
+/// machine-readable form".
+///
+/// `--ops` is here alongside `--json` because it is the same rung wearing a
+/// different name: on `task list`, `job list`, and `activity list` it selects a
+/// narrower record shape and has always forced JSON. Leaving it out would make
+/// `orbit task list --ops` render a table on a terminal.
+const LEGACY_JSON_ARG_IDS: [&str; 2] = ["json", "ops"];
+
+/// Whether the invoked subcommand's own `--json`/`--ops` boolean was set.
+///
+/// Mode precedence rung 2 (spec §2), read the same way `--format` is: from the
+/// parsed matches rather than from 86 individual argument structs. The flags
+/// stay declared and accepted where they are [ADR-0306]; this is what makes
+/// them route through the resolver instead of each branching for itself.
+fn legacy_json(matches: &ArgMatches) -> bool {
+    let mut level = matches;
+    loop {
+        for id in LEGACY_JSON_ARG_IDS {
+            if matches!(level.try_get_one::<bool>(id), Ok(Some(true))) {
+                return true;
+            }
+        }
+        match level.subcommand() {
+            Some((_, sub)) => level = sub,
+            None => return false,
+        }
+    }
+}
+
+/// Parse argv into the derived CLI plus the two inputs to mode resolution.
+fn parse_cli() -> (command::Cli, Option<FormatArg>, bool) {
     let matches = install_format_arg(command::Cli::command()).get_matches();
     let requested = requested_format(&matches);
+    let legacy = legacy_json(&matches);
     let cli = command::Cli::from_arg_matches(&matches).unwrap_or_else(|err| err.exit());
-    (cli, requested)
+    (cli, requested, legacy)
 }
 
 fn main() {
     orbit_common::utility::logging::init_default_subscriber("warn");
     output::pipe::install_handler();
 
-    let (cli, requested_format) = parse_cli();
-    // Resolved once per invocation, before dispatch, then published so every
-    // renderer reads the same answers instead of re-deriving them.
-    let sink = OutputSink::from_process(requested_format);
-    sink::install(sink);
+    let (cli, requested_format, legacy_json) = parse_cli();
+    // Resolved once per invocation, before dispatch, and passed to the one
+    // renderer that consumes it. Nothing downstream re-derives these answers.
+    let sink = OutputSink::from_process(requested_format, legacy_json);
     sink.apply_color_policy();
     tracing::debug!(
         mode = ?sink.mode(),
@@ -171,7 +201,7 @@ fn main() {
             cli.command,
             DispatchContext::without_runtime(root_override.as_deref()),
         );
-        finish_command(result, suppress_errors, json_error_preference);
+        finish_command(result, &sink, suppress_errors, json_error_preference);
         return;
     }
 
@@ -182,7 +212,7 @@ fn main() {
                 if suppress_errors {
                     return;
                 }
-                print_error(&err, json_error_preference);
+                print_error(&err, &sink, json_error_preference);
                 std::process::exit(1);
             }
         }
@@ -203,7 +233,7 @@ fn main() {
             let mut guard = audit_middleware::AuditGuard::new(&runtime, meta);
             let result = authorize(&runtime).and_then(|()| dispatch(cli.command, context));
             match &result {
-                Ok(()) => guard.mark_success(),
+                Ok(_) => guard.mark_success(),
                 Err(
                     orbit_core::OrbitError::PolicyDenied(msg)
                     | orbit_core::OrbitError::CapabilityDenied(msg),
@@ -215,19 +245,27 @@ fn main() {
         None => authorize(&runtime).and_then(|()| dispatch(cli.command, context)),
     };
 
-    finish_command(result, suppress_errors, json_error_preference);
+    finish_command(result, &sink, suppress_errors, json_error_preference);
 }
 
+/// Render what the command returned, or report why it failed.
+///
+/// This is the only place a command's records reach stdout: `dispatch` hands
+/// back a payload and `output::render` projects it into the mode the sink
+/// resolved (spec §3). A rendering failure is a command failure — a payload
+/// that could not be serialized must not exit `0`.
 fn finish_command(
-    result: Result<(), orbit_core::OrbitError>,
+    result: command::CommandOut,
+    sink: &OutputSink,
     suppress_errors: bool,
     json_error_preference: Option<bool>,
 ) {
-    if let Err(err) = result {
+    let rendered = result.and_then(|output| output::render::emit(output, sink));
+    if let Err(err) = rendered {
         if suppress_errors {
             return;
         }
-        print_error(&err, json_error_preference);
+        print_error(&err, sink, json_error_preference);
         std::process::exit(1);
     }
 }
@@ -246,8 +284,12 @@ fn finish_command(
 /// Whether the report is JSON is the command's declared preference when it has
 /// one, and otherwise the sink's mode — `--format json` on a command with no
 /// `--json` flag of its own still gets a machine-readable failure.
-fn print_error(error: &orbit_core::OrbitError, tool_run_json_output: Option<bool>) {
-    if let Some(pretty) = json_error_format(tool_run_json_output) {
+fn print_error(
+    error: &orbit_core::OrbitError,
+    sink: &OutputSink,
+    tool_run_json_output: Option<bool>,
+) {
+    if let Some(pretty) = json_error_format(sink, tool_run_json_output) {
         let payload = crate::output::json::error_payload(error);
         if let Ok(rendered) = crate::output::json::render(&payload, pretty) {
             eprintln!("{rendered}");
@@ -259,11 +301,10 @@ fn print_error(error: &orbit_core::OrbitError, tool_run_json_output: Option<bool
 }
 
 /// Whether to report an error as JSON, and whether to pretty-print it.
-fn json_error_format(tool_run_json_output: Option<bool>) -> Option<bool> {
+fn json_error_format(sink: &OutputSink, tool_run_json_output: Option<bool>) -> Option<bool> {
     if let Some(pretty) = tool_run_json_output {
         return Some(pretty);
     }
-    let sink = sink::active();
     matches!(sink.mode(), OutputMode::Json | OutputMode::Ndjson).then(|| sink.pretty_json())
 }
 

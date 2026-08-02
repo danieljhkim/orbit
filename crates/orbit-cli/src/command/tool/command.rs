@@ -1,7 +1,7 @@
 use clap::{Args, Subcommand};
-use orbit_core::{OrbitError, OrbitRuntime};
+use orbit_core::OrbitRuntime;
 
-use crate::command::Execute;
+use crate::command::{CommandOut, Execute};
 
 use super::add::ToolAddArgs;
 use super::disable::ToolDisableArgs;
@@ -31,7 +31,7 @@ pub struct ToolCommand {
 }
 
 impl Execute for ToolCommand {
-    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+    fn execute(self, runtime: &OrbitRuntime) -> CommandOut {
         self.command.execute(runtime)
     }
 }
@@ -59,7 +59,7 @@ pub enum ToolSubcommand {
 }
 
 impl Execute for ToolSubcommand {
-    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+    fn execute(self, runtime: &OrbitRuntime) -> CommandOut {
         match self {
             ToolSubcommand::List(args) => args.execute(runtime),
             ToolSubcommand::Show(args) => args.execute(runtime),

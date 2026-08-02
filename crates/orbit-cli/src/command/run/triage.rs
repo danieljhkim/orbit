@@ -4,7 +4,7 @@ use clap::Args;
 use orbit_core::{OrbitError, OrbitRuntime};
 use serde_json::{Value, json};
 
-use crate::command::Execute;
+use crate::command::{CommandOut, CommandOutput, Execute};
 
 use super::support::{dispatch_workflow, print_workflow_dispatch_results};
 
@@ -27,10 +27,13 @@ pub struct TriageCommand {
 }
 
 impl Execute for TriageCommand {
-    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+    fn execute(self, runtime: &OrbitRuntime) -> CommandOut {
         let input = build_triage_input(&self.task_ids)?;
         let runs = dispatch_workflow(runtime, TRIAGE_WORKFLOW, &input, false, false, 1)?;
-        print_workflow_dispatch_results(TRIAGE_WORKFLOW, &runs, self.json)
+        {
+            print_workflow_dispatch_results(TRIAGE_WORKFLOW, &runs, self.json)?;
+            Ok(CommandOutput::Silent)
+        }
     }
 }
 

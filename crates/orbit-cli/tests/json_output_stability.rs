@@ -5,11 +5,16 @@
 //! The per-command `--json` flag predates the global `--format` and must keep
 //! producing exactly the bytes it produced before the sink existed
 //! ([ORB-10569], `docs/design/terminal-interface/specs/output-modes.md` §7
-//! step 1).
+//! steps 1–3).
 //!
 //! Two properties, checked separately: the exact bytes of a stable payload,
 //! and — for commands whose payload embeds machine-specific values — that
-//! nothing on the mode-resolution path perturbs them.
+//! nothing *below* `--json` on the precedence ladder perturbs them.
+//!
+//! Since [ORB-10586] the flag is no longer read by the command body: it is
+//! rung 2 of the mode resolution in `main`, so `ORBIT_FORMAT` (rung 3) cannot
+//! outrank it and an explicit `--format` (rung 1) is meant to. That asymmetry
+//! is the contract §2 describes, and both halves of it are asserted here.
 
 use std::path::Path;
 
@@ -89,14 +94,15 @@ fn json_flag_output_is_untouched_by_the_global_format_machinery() {
             "ORBIT_FORMAT changed `orbit {} --json`",
             command.join(" ")
         );
-        // ...and merely resolving a mode must not reach the command body,
-        // which still renders from its own `--json` boolean.
+        // ...but an explicit `--format` (rung 1) must, which is the whole
+        // point of the ladder: `--json` is a legacy alias for rung 2, not an
+        // override of the flag the caller passed on this invocation.
         let mut with_format = args.clone();
         with_format.extend(["--format", "table"]);
-        assert_eq!(
+        assert_ne!(
             run(&fixture.home, &fixture.work, &with_format, &[]),
             baseline,
-            "--format changed `orbit {} --json`",
+            "`--format table` did not outrank `--json` on `orbit {}`",
             command.join(" ")
         );
     }

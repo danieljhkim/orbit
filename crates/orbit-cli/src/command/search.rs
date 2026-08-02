@@ -1,7 +1,7 @@
 use clap::{ArgAction, Args, Subcommand, ValueEnum};
 use orbit_core::{GlobalSearchHit, GlobalSearchKind, GlobalSearchParams, OrbitError, OrbitRuntime};
 
-use crate::command::Execute;
+use crate::command::{CommandOut, Execute, Payload};
 
 #[derive(Args)]
 #[command(
@@ -98,7 +98,7 @@ impl From<SearchKindArg> for GlobalSearchKind {
 }
 
 impl Execute for SearchCommand {
-    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+    fn execute(self, runtime: &OrbitRuntime) -> CommandOut {
         let input = self.search_input()?;
         let response = runtime.global_search(GlobalSearchParams {
             query: input.query,
@@ -112,15 +112,13 @@ impl Execute for SearchCommand {
             path: input.path,
         })?;
 
-        if self.json {
-            crate::output::json::print_pretty(&serde_json::json!(response))
-        } else {
-            for note in &response.notes {
-                eprintln!("note: {note}");
-            }
-            print_search_table(&response.results);
-            Ok(())
+        for note in &response.notes {
+            eprintln!("note: {note}");
         }
+        // The `--json` shape is the whole response object, not just the hits,
+        // and stays that way: it is the payload [ADR-0306].
+        let doc = serde_json::json!(response);
+        Ok(Payload::detail_table(doc, search_table(&response.results)).into())
     }
 }
 
@@ -200,7 +198,7 @@ struct SearchInput {
     path: Option<String>,
 }
 
-fn print_search_table(results: &[GlobalSearchHit]) {
+fn search_table(results: &[GlobalSearchHit]) -> crate::output::table::Table {
     use crate::output::table::{Column, Table};
     // Each hit's kind names its own detail command (`orbit task show`,
     // `orbit docs show`, `orbit learning show`, `orbit adr show`).
@@ -224,7 +222,7 @@ fn print_search_table(results: &[GlobalSearchHit]) {
             match_text(hit),
         ]);
     }
-    table.print();
+    table
 }
 
 fn match_text(hit: &GlobalSearchHit) -> String {

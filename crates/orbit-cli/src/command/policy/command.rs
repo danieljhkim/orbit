@@ -1,7 +1,7 @@
 use clap::{Args, Subcommand};
-use orbit_core::{OrbitError, OrbitRuntime};
+use orbit_core::OrbitRuntime;
 
-use crate::command::Execute;
+use crate::command::{CommandOut, Execute};
 
 use super::check::PolicyCheckArgs;
 use super::list::PolicyListArgs;
@@ -15,7 +15,7 @@ pub struct PolicyCommand {
 }
 
 impl Execute for PolicyCommand {
-    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+    fn execute(self, runtime: &OrbitRuntime) -> CommandOut {
         self.command.execute(runtime)
     }
 }
@@ -31,7 +31,7 @@ pub enum PolicySubcommand {
 }
 
 impl Execute for PolicySubcommand {
-    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+    fn execute(self, runtime: &OrbitRuntime) -> CommandOut {
         match self {
             PolicySubcommand::List(args) => args.execute(runtime),
             PolicySubcommand::Show(args) => args.execute(runtime),

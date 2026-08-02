@@ -52,7 +52,7 @@ pub(super) struct AuditListFilters {
     pub(super) tool: bool,
 }
 
-/// Render the audit log as a list view.
+/// The audit log's list view.
 ///
 /// This replaces a `"[{}] {:<8} {:<6} {}:{:<20} {}ms"` format string whose
 /// padding was a literal rather than a function of the data, so a tool name
@@ -61,7 +61,7 @@ pub(super) struct AuditListFilters {
 /// result set and the sink; `DURATION (ms)` is a number column, so magnitudes
 /// line up on their right edge and the unit is named once in the header
 /// instead of being suffixed to every value.
-pub(super) fn print_audit_events(events: &[AuditEvent], filters: AuditListFilters) {
+pub(super) fn audit_event_table(events: &[AuditEvent], filters: AuditListFilters) -> Table {
     let mut table = Table::new(vec![
         Column::new("TIME").fixed(),
         Column::new("STATUS").fixed().filtered(filters.status),
@@ -84,5 +84,5 @@ pub(super) fn print_audit_events(events: &[AuditEvent], filters: AuditListFilter
         ]);
     }
 
-    table.print();
+    table
 }

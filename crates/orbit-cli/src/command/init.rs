@@ -14,7 +14,7 @@ use std::collections::BTreeMap;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 
-use crate::command::Execute;
+use crate::command::{CommandOut, CommandOutput, Execute};
 
 #[derive(Args)]
 #[command(about = "Initialize the global Orbit root (~/.orbit)")]
@@ -42,14 +42,20 @@ pub struct InitCommand {
 }
 
 impl Execute for InitCommand {
-    fn execute(self, _runtime: &OrbitRuntime) -> Result<(), OrbitError> {
-        self.run(None)
+    fn execute(self, _runtime: &OrbitRuntime) -> CommandOut {
+        {
+            self.run(None)?;
+            Ok(CommandOutput::Silent)
+        }
     }
 }
 
 impl InitCommand {
-    pub fn execute_without_runtime(self, root_override: Option<&Path>) -> Result<(), OrbitError> {
-        self.run(root_override)
+    pub fn execute_without_runtime(self, root_override: Option<&Path>) -> CommandOut {
+        {
+            self.run(root_override)?;
+            Ok(CommandOutput::Silent)
+        }
     }
 
     fn run(self, root_override: Option<&Path>) -> Result<(), OrbitError> {

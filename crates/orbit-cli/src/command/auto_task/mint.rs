@@ -1,8 +1,8 @@
 use clap::Args;
-use orbit_core::{OrbitError, OrbitRuntime};
+use orbit_core::OrbitRuntime;
 
-use crate::command::Execute;
 use crate::command::task::output::task_to_json_for_runtime;
+use crate::command::{CommandOut, CommandOutput, Execute, Payload};
 
 #[derive(Args)]
 pub struct AutoTaskMintArgs {
@@ -14,14 +14,14 @@ pub struct AutoTaskMintArgs {
 }
 
 impl Execute for AutoTaskMintArgs {
-    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+    fn execute(self, runtime: &OrbitRuntime) -> CommandOut {
         let task = runtime.auto_task_mint(&self.name)?;
 
         if self.json {
-            crate::output::json::print_pretty(&task_to_json_for_runtime(runtime, &task)?)
+            Ok(Payload::document(task_to_json_for_runtime(runtime, &task)?).into())
         } else {
             println!("{} {}", task.id, task.title);
-            Ok(())
+            Ok(CommandOutput::Silent)
         }
     }
 }

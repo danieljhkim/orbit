@@ -4,7 +4,7 @@ use clap::{Args, ValueEnum};
 use orbit_core::{OrbitError, OrbitRuntime, build_ship_input, find_workflow};
 use serde_json::Value;
 
-use crate::command::Execute;
+use crate::command::{CommandOut, CommandOutput, Execute};
 
 use super::support::{dispatch_workflow, print_workflow_dispatch_results};
 
@@ -57,11 +57,14 @@ pub struct ShipCommand {
 }
 
 impl Execute for ShipCommand {
-    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+    fn execute(self, runtime: &OrbitRuntime) -> CommandOut {
         let mode = resolve_ship_mode(&self, runtime)?;
         let plan = build_ship_run_plan(&self, runtime.workflow_base_branch(), mode)?;
         let runs = dispatch_workflow(runtime, plan.workflow_alias, &plan.input, false, false, 1)?;
-        print_workflow_dispatch_results(plan.workflow_alias, &runs, self.json)
+        {
+            print_workflow_dispatch_results(plan.workflow_alias, &runs, self.json)?;
+            Ok(CommandOutput::Silent)
+        }
     }
 }
 
@@ -112,7 +115,7 @@ pub struct LegacyShipLocalCommand {
 }
 
 impl Execute for LegacyShipLocalCommand {
-    fn execute(self, _runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+    fn execute(self, _runtime: &OrbitRuntime) -> CommandOut {
         let _ = self;
         Err(OrbitError::InvalidInput(
             "`orbit run ship-local` was replaced by `orbit run ship --mode local`".to_string(),

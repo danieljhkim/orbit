@@ -1,8 +1,10 @@
-use orbit_core::{OrbitError, OrbitRuntime};
+use orbit_core::OrbitRuntime;
 
+use crate::command::{Block, CommandOut, Payload};
 use crate::output::color::{Domain, Role};
+use serde_json::json;
 
-pub(super) fn execute_doctor(runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+pub(super) fn execute_doctor(runtime: &OrbitRuntime) -> CommandOut {
     use orbit_core::command::tool::DoctorStatus;
 
     let results = runtime.doctor()?;
@@ -31,16 +33,30 @@ pub(super) fn execute_doctor(runtime: &OrbitRuntime) -> Result<(), OrbitError> {
             Cell::new(&r.message),
         ]);
     }
-    table.print();
+    let records = results
+        .iter()
+        .map(|r| {
+            json!({
+                "tool_name": r.tool_name,
+                "status": match r.status {
+                    DoctorStatus::Ok => "ok",
+                    DoctorStatus::Warning => "warning",
+                    DoctorStatus::Error => "error",
+                },
+                "message": r.message,
+            })
+        })
+        .collect::<Vec<_>>();
 
+    let mut blocks = vec![Block::table(table)];
     if issues == 0 {
-        println!(
+        blocks.push(Block::text(format!(
             "\n{}",
             crate::output::color::text("All tools healthy.", Role::Ok)
-        );
+        )));
     } else {
         eprintln!("\n{} issue(s) found.", issues);
     }
 
-    Ok(())
+    Ok(Payload::blocks(serde_json::Value::Array(records), blocks).into())
 }

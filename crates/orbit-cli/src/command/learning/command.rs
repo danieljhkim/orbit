@@ -1,7 +1,7 @@
 use clap::{Args, Subcommand};
-use orbit_core::{OrbitError, OrbitRuntime};
+use orbit_core::OrbitRuntime;
 
-use crate::command::Execute;
+use crate::command::{CommandOut, Execute};
 
 use super::add::LearningAddArgs;
 use super::archive::LearningArchiveArgs;
@@ -22,7 +22,7 @@ pub struct LearningCommand {
 }
 
 impl Execute for LearningCommand {
-    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+    fn execute(self, runtime: &OrbitRuntime) -> CommandOut {
         self.command.execute(runtime)
     }
 }
@@ -52,7 +52,7 @@ pub enum LearningSubcommand {
 }
 
 impl Execute for LearningSubcommand {
-    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+    fn execute(self, runtime: &OrbitRuntime) -> CommandOut {
         match self {
             LearningSubcommand::Add(args) => args.execute(runtime),
             LearningSubcommand::List(args) => args.execute(runtime),

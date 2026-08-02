@@ -1,10 +1,10 @@
 use clap::{ArgAction, Args};
 use orbit_core::command::task::TaskAddParams;
 use orbit_core::{
-    ExternalRef, OrbitError, OrbitRuntime, TaskComplexity, TaskCreateStatus, TaskPriority, TaskType,
+    ExternalRef, OrbitRuntime, TaskComplexity, TaskCreateStatus, TaskPriority, TaskType,
 };
 
-use crate::command::Execute;
+use crate::command::{CommandOut, CommandOutput, Execute, Payload};
 
 use super::output::task_to_json_for_runtime;
 
@@ -71,7 +71,7 @@ pub struct TaskAddArgs {
 }
 
 impl Execute for TaskAddArgs {
-    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+    fn execute(self, runtime: &OrbitRuntime) -> CommandOut {
         let (agent, model) = super::mutation_identity(self.model);
         if let Some(parent_id) = self.parent_id.as_deref()
             && runtime.get_task(parent_id).is_err()
@@ -111,10 +111,10 @@ impl Execute for TaskAddArgs {
         )?;
 
         if self.json {
-            crate::output::json::print_pretty(&task_to_json_for_runtime(runtime, &task)?)
+            Ok(Payload::document(task_to_json_for_runtime(runtime, &task)?).into())
         } else {
             println!("{}", task.id);
-            Ok(())
+            Ok(CommandOutput::Silent)
         }
     }
 }

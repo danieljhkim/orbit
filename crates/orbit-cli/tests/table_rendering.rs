@@ -4,12 +4,19 @@
 
 //! End-to-end coverage for the borderless list contract (ADR-0307,
 //! `docs/design/terminal-interface/specs/table-rendering.md`): a rendered list
-//! is one header line plus exactly one line per record, carries no box-drawing
-//! glyphs, and puts its empty state on stderr.
+//! is exactly one line per record, carries no box-drawing glyphs, and puts its
+//! empty state on stderr.
 //!
 //! Both commands exercised here carry cell values far longer than a terminal
 //! line — tool descriptions and task titles — which is what used to wrap a
 //! single record across three or four lines.
+//!
+//! `assert_cmd` captures stdout through a pipe, so the default form these
+//! subprocesses produce is the *plain* one: `auto` resolving against a
+//! non-terminal sink, which suppresses the header (`specs/output-modes.md` §2).
+//! Since [ORB-10586] each case asserts both that form and the header-bearing
+//! `--format table`, which is the only way to reach the table rendering from a
+//! pipe — and the one-line-per-record invariant is the same in both.
 
 use std::fs;
 use std::path::Path;
@@ -32,8 +39,12 @@ fn tool_list_renders_one_line_per_tool() {
     let expected = tools.as_array().expect("tool array").len();
     assert!(expected > 1, "fixture needs several tools to be meaningful");
 
-    let table = workspace.run(&["tool", "list", "--all"], "tool list table");
-    assert_record_lines(&table, expected, "orbit tool list --all");
+    assert_both_forms(
+        &workspace,
+        &["tool", "list", "--all"],
+        expected,
+        "orbit tool list --all",
+    );
 }
 
 #[test]
@@ -43,8 +54,7 @@ fn task_list_renders_one_line_per_task() {
         workspace.add_task(&format!("{LONG_TITLE} ({index})"));
     }
 
-    let table = workspace.run(&["task", "list"], "task list table");
-    assert_record_lines(&table, 3, "orbit task list");
+    assert_both_forms(&workspace, &["task", "list"], 3, "orbit task list");
 }
 
 /// ORB-10571: the same property, for the other two commands covered by
@@ -61,8 +71,12 @@ fn policy_list_renders_one_line_per_policy() {
     let expected = policies.as_array().expect("policy array").len();
     assert!(expected >= 1, "a fresh workspace seeds a default policy");
 
-    let table = workspace.run(&["policy", "list"], "policy list table");
-    assert_record_lines(&table, expected, "orbit policy list");
+    assert_both_forms(
+        &workspace,
+        &["policy", "list"],
+        expected,
+        "orbit policy list",
+    );
 }
 
 #[test]
@@ -77,8 +91,7 @@ fn skill_list_renders_one_line_per_skill() {
         "a fresh workspace seeds the default skill catalog"
     );
 
-    let table = workspace.run(&["skill", "list"], "skill list table");
-    assert_record_lines(&table, expected, "orbit skill list");
+    assert_both_forms(&workspace, &["skill", "list"], expected, "orbit skill list");
 }
 
 #[test]
@@ -100,8 +113,20 @@ fn a_list_with_no_matches_leaves_stdout_empty_and_explains_itself_on_stderr() {
     );
 }
 
+/// Assert the one-record-per-line invariant plus the absence of borders, for
+/// both renderings of a list: plain (no header) and `--format table` (one).
+fn assert_both_forms(workspace: &TestWorkspace, args: &[&str], records: usize, label: &str) {
+    let plain = workspace.run(args, label);
+    assert_record_lines(&plain, records, false, &format!("{label} (plain)"));
+
+    let mut table_args = args.to_vec();
+    table_args.extend(["--format", "table"]);
+    let table = workspace.run(&table_args, label);
+    assert_record_lines(&table, records, true, &format!("{label} --format table"));
+}
+
 /// Assert the one-record-per-line invariant plus the absence of borders.
-fn assert_record_lines(output: &Output, records: usize, label: &str) {
+fn assert_record_lines(output: &Output, records: usize, header: bool, label: &str) {
     let stdout = String::from_utf8_lossy(&output.stdout);
     let lines = stdout.lines().collect::<Vec<_>>();
 
@@ -109,15 +134,22 @@ fn assert_record_lines(output: &Output, records: usize, label: &str) {
         !stdout.chars().any(|c| BOX_GLYPHS.contains(&c)),
         "{label} must not draw box rules:\n{stdout}"
     );
+    let expected = records + usize::from(header);
     assert_eq!(
         lines.len(),
-        records + 1,
-        "{label} renders {records} records as {records} body lines under one header:\n{stdout}"
+        expected,
+        "{label} renders {records} records as {expected} lines:\n{stdout}"
     );
     assert!(
         lines.iter().all(|line| !line.starts_with(' ')),
         "{label} indents no line:\n{stdout}"
     );
+    if !header {
+        assert!(
+            lines.iter().all(|line| line.contains('\t')) || records == 0,
+            "{label} is the plain form, so fields are tab-separated:\n{stdout}"
+        );
+    }
 }
 
 struct TestWorkspace {

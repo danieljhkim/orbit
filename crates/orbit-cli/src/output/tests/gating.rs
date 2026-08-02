@@ -80,7 +80,7 @@ fn render_table(sink: &OutputSink) -> String {
         comfy_table::Cell::new("second"),
     ]);
     table
-        .render(sink.truncate_width(), sink.color_allowed())
+        .render_at(sink.truncate_width(), sink.color_allowed(), true)
         .body
 }
 
@@ -171,7 +171,7 @@ fn a_zero_width_sink_truncates_nothing() {
     table.add_row(vec![comfy_table::Cell::new(long)]);
     table.add_row(vec![comfy_table::Cell::new("short")]);
 
-    let rendered = table.render(sink.truncate_width(), sink.color_allowed());
+    let rendered = table.render_at(sink.truncate_width(), sink.color_allowed(), true);
 
     assert!(
         rendered.body.contains(long),
@@ -204,7 +204,7 @@ fn a_sized_sink_truncates_to_its_width() {
     )]);
     table.add_row(vec![comfy_table::Cell::new("short")]);
 
-    let rendered = table.render(sink.truncate_width(), sink.color_allowed());
+    let rendered = table.render_at(sink.truncate_width(), sink.color_allowed(), true);
 
     for line in rendered.body.lines() {
         assert!(line.chars().count() <= 40, "line exceeds the sink: {line}");

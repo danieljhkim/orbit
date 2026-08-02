@@ -201,6 +201,7 @@ fn init_host(
         host_mode: host_mode.map(str::to_string),
     }
     .execute_without_runtime(Some(root))
+    .map(|_| ())
 }
 
 /// Non-interactive `--host-name` + `--host-mode` create the identity exactly

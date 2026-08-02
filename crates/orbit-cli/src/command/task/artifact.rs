@@ -2,10 +2,10 @@ use std::path::PathBuf;
 
 use clap::{Args, Subcommand};
 use orbit_common::types::TaskArtifact;
+use orbit_core::OrbitRuntime;
 use orbit_core::command::task::TaskUpdateParams;
-use orbit_core::{OrbitError, OrbitRuntime};
 
-use crate::command::Execute;
+use crate::command::{CommandOut, CommandOutput, Execute, Payload};
 
 use super::output::task_to_json_for_runtime;
 
@@ -17,7 +17,7 @@ pub struct TaskArtifactCommand {
 }
 
 impl Execute for TaskArtifactCommand {
-    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+    fn execute(self, runtime: &OrbitRuntime) -> CommandOut {
         self.command.execute(runtime)
     }
 }
@@ -29,7 +29,7 @@ pub enum TaskArtifactSubcommand {
 }
 
 impl Execute for TaskArtifactSubcommand {
-    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+    fn execute(self, runtime: &OrbitRuntime) -> CommandOut {
         match self {
             TaskArtifactSubcommand::Put(args) => args.execute(runtime),
         }
@@ -54,7 +54,7 @@ pub struct TaskArtifactPutArgs {
 }
 
 impl Execute for TaskArtifactPutArgs {
-    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+    fn execute(self, runtime: &OrbitRuntime) -> CommandOut {
         let TaskArtifactPutArgs {
             id,
             source_path,
@@ -76,10 +76,10 @@ impl Execute for TaskArtifactPutArgs {
         )?;
 
         if json {
-            crate::output::json::print_pretty(&task_to_json_for_runtime(runtime, &task)?)
+            Ok(Payload::document(task_to_json_for_runtime(runtime, &task)?).into())
         } else {
             println!("Stored artifact '{artifact_path}' on task '{}'", task.id);
-            Ok(())
+            Ok(CommandOutput::Silent)
         }
     }
 }

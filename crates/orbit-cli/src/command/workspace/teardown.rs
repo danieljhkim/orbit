@@ -2,7 +2,7 @@ use clap::Args;
 use orbit_core::{OrbitError, OrbitRuntime};
 use orbit_remote::workspace_registry;
 
-use crate::command::Execute;
+use crate::command::{CommandOut, CommandOutput, Execute};
 
 use super::support::{is_dir_empty, remove_symlinks_in};
 
@@ -14,7 +14,7 @@ pub struct WorkspaceTeardownArgs {
 }
 
 impl Execute for WorkspaceTeardownArgs {
-    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+    fn execute(self, runtime: &OrbitRuntime) -> CommandOut {
         if !self.confirm {
             return Err(OrbitError::InvalidInput(
                 "teardown is destructive. Pass --confirm to proceed.".to_string(),
@@ -113,6 +113,6 @@ impl Execute for WorkspaceTeardownArgs {
             println!("  (nothing to remove)");
         }
 
-        Ok(())
+        Ok(CommandOutput::Silent)
     }
 }

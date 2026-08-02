@@ -1,9 +1,9 @@
 use clap::Args;
+use orbit_core::OrbitRuntime;
 use orbit_core::command::skill::{SkillDoctorResult, SkillDoctorStatus};
-use orbit_core::{OrbitError, OrbitRuntime};
 use serde_json::{Value, json};
 
-use crate::command::Execute;
+use crate::command::{Block, CommandOut, Execute, Payload};
 use crate::output::color::{Domain, Role};
 
 #[derive(Args)]
@@ -13,12 +13,9 @@ pub struct SkillDoctorArgs {
 }
 
 impl Execute for SkillDoctorArgs {
-    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+    fn execute(self, runtime: &OrbitRuntime) -> CommandOut {
         let rows = runtime.doctor_file_skills()?;
-        if self.json {
-            let values = rows.iter().map(doctor_row_json).collect::<Vec<_>>();
-            return crate::output::json::print_pretty(&Value::Array(values));
-        }
+        let values = rows.iter().map(doctor_row_json).collect::<Vec<_>>();
 
         let mut issues = 0usize;
         use crate::output::table::{Column, Table};
@@ -44,17 +41,16 @@ impl Execute for SkillDoctorArgs {
                 Cell::new(&row.message),
             ]);
         }
-        table.print();
-
+        let mut blocks = vec![Block::table(table)];
         if issues == 0 {
-            println!(
+            blocks.push(Block::text(format!(
                 "\n{}",
                 crate::output::color::text("All skills healthy.", Role::Ok)
-            );
+            )));
         } else {
             eprintln!("\n{} issue(s) found.", issues);
         }
-        Ok(())
+        Ok(Payload::blocks(Value::Array(values), blocks).into())
     }
 }
 

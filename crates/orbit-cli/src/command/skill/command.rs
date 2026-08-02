@@ -1,7 +1,7 @@
 use clap::{Args, Subcommand};
-use orbit_core::{OrbitError, OrbitRuntime};
+use orbit_core::OrbitRuntime;
 
-use crate::command::Execute;
+use crate::command::{CommandOut, Execute};
 
 use super::doctor::SkillDoctorArgs;
 use super::link::SkillLinkArgs;
@@ -17,7 +17,7 @@ pub struct SkillCommand {
 }
 
 impl Execute for SkillCommand {
-    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+    fn execute(self, runtime: &OrbitRuntime) -> CommandOut {
         self.command.execute(runtime)
     }
 }
@@ -37,7 +37,7 @@ pub enum SkillSubcommand {
 }
 
 impl Execute for SkillSubcommand {
-    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+    fn execute(self, runtime: &OrbitRuntime) -> CommandOut {
         match self {
             SkillSubcommand::List(args) => args.execute(runtime),
             SkillSubcommand::Show(args) => args.execute(runtime),

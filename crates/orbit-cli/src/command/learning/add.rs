@@ -6,7 +6,7 @@ use orbit_core::{
     EvidenceKind, LearningCreateParams, LearningEvidence, LearningScope, OrbitError, OrbitRuntime,
 };
 
-use crate::command::Execute;
+use crate::command::{CommandOut, CommandOutput, Execute, Payload};
 
 use super::output::learning_to_json;
 
@@ -39,7 +39,7 @@ pub struct LearningAddArgs {
 }
 
 impl Execute for LearningAddArgs {
-    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+    fn execute(self, runtime: &OrbitRuntime) -> CommandOut {
         let body = match (self.body, self.body_file) {
             (Some(_), Some(_)) => {
                 return Err(OrbitError::InvalidInput(
@@ -71,10 +71,10 @@ impl Execute for LearningAddArgs {
         })?;
 
         if self.json {
-            crate::output::json::print_pretty(&learning_to_json(&learning))
+            Ok(Payload::document(learning_to_json(&learning)).into())
         } else {
             println!("{}", learning.id);
-            Ok(())
+            Ok(CommandOutput::Silent)
         }
     }
 }

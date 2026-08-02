@@ -5,7 +5,7 @@ use orbit_core::{
 use orbit_remote::runtime::RemoteRuntimeFactory;
 use serde_json::json;
 
-use crate::command::Execute;
+use crate::command::{CommandOut, CommandOutput, Execute};
 
 #[derive(Args)]
 pub struct LearningMigrateLayoutArgs {
@@ -21,10 +21,7 @@ pub struct LearningMigrateLayoutArgs {
 }
 
 impl LearningMigrateLayoutArgs {
-    pub fn execute_without_runtime(
-        self,
-        root_override: Option<&std::path::Path>,
-    ) -> Result<(), OrbitError> {
+    pub fn execute_without_runtime(self, root_override: Option<&std::path::Path>) -> CommandOut {
         let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
         let roots = RemoteRuntimeFactory::resolve_roots_for_cwd(&cwd, root_override)?;
         let dry_run = !self.confirm;
@@ -37,12 +34,15 @@ impl LearningMigrateLayoutArgs {
             let runtime = RemoteRuntimeFactory::open_resolved_roots(roots)?;
             runtime.sync_learnings()?;
         }
-        print_report(&report, dry_run, self.json)
+        {
+            print_report(&report, dry_run, self.json)?;
+            Ok(CommandOutput::Silent)
+        }
     }
 }
 
 impl Execute for LearningMigrateLayoutArgs {
-    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+    fn execute(self, runtime: &OrbitRuntime) -> CommandOut {
         let dry_run = !self.confirm;
         let report = if dry_run {
             runtime.inspect_learning_layout()?
@@ -52,7 +52,10 @@ impl Execute for LearningMigrateLayoutArgs {
         if !dry_run && !report.already_migrated {
             runtime.sync_learnings()?;
         }
-        print_report(&report, dry_run, self.json)
+        {
+            print_report(&report, dry_run, self.json)?;
+            Ok(CommandOutput::Silent)
+        }
     }
 }
 

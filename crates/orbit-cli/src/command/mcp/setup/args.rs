@@ -5,6 +5,7 @@ use orbit_core::OrbitError;
 
 use super::dispatch::{print_action_summary, run_action};
 use super::workspace::{env_home_dir, resolve_workspace_layout};
+use crate::command::{CommandOut, CommandOutput};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum, Default)]
 pub enum ScopeArg {
@@ -174,7 +175,7 @@ pub struct InitArgs {
 }
 
 impl InitArgs {
-    pub fn execute_without_runtime(self, root_override: Option<&Path>) -> Result<(), OrbitError> {
+    pub fn execute_without_runtime(self, root_override: Option<&Path>) -> CommandOut {
         let layout = resolve_workspace_layout(root_override)?;
         let providers = run_action(
             McpAction::Init,
@@ -185,7 +186,7 @@ impl InitArgs {
             self.scope,
         )?;
         print_action_summary(McpAction::Init, &providers);
-        Ok(())
+        Ok(CommandOutput::Silent)
     }
 }
 
@@ -200,7 +201,7 @@ pub struct RemoveArgs {
 }
 
 impl RemoveArgs {
-    pub fn execute_without_runtime(self, root_override: Option<&Path>) -> Result<(), OrbitError> {
+    pub fn execute_without_runtime(self, root_override: Option<&Path>) -> CommandOut {
         let layout = resolve_workspace_layout(root_override)?;
         let providers = run_action(
             McpAction::Remove,
@@ -211,7 +212,7 @@ impl RemoveArgs {
             self.scope,
         )?;
         print_action_summary(McpAction::Remove, &providers);
-        Ok(())
+        Ok(CommandOutput::Silent)
     }
 }
 

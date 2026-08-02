@@ -1,9 +1,9 @@
 use clap::Args;
+use orbit_core::OrbitRuntime;
 use orbit_core::command::init::UnlinkResult;
-use orbit_core::{OrbitError, OrbitRuntime};
 use serde_json::{Value, json};
 
-use crate::command::Execute;
+use crate::command::{CommandOut, CommandOutput, Execute, Payload};
 
 #[derive(Args)]
 pub struct SkillUnlinkArgs {
@@ -12,10 +12,10 @@ pub struct SkillUnlinkArgs {
 }
 
 impl Execute for SkillUnlinkArgs {
-    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+    fn execute(self, runtime: &OrbitRuntime) -> CommandOut {
         let result = orbit_core::command::init::unlink_skills(&runtime.global_root())?;
         if self.json {
-            crate::output::json::print_pretty(&unlink_result_json(&result))
+            Ok(Payload::document(unlink_result_json(&result)).into())
         } else {
             if result.removed_count == 0 {
                 println!("No skill symlinks found to remove.");
@@ -28,7 +28,7 @@ impl Execute for SkillUnlinkArgs {
                     println!("  {}", dir.display());
                 }
             }
-            Ok(())
+            Ok(CommandOutput::Silent)
         }
     }
 }

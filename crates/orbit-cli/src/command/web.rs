@@ -5,9 +5,9 @@
 //! do not pay the axum dependency tax on every change.
 
 use clap::{Args, Subcommand};
-use orbit_core::{OrbitError, OrbitRuntime};
+use orbit_core::OrbitRuntime;
 
-use crate::command::Execute;
+use crate::command::{CommandOut, CommandOutput, Execute};
 
 /// Thin wrapper so `orbit web` continues to work and audit events stay stable.
 #[derive(Args)]
@@ -22,7 +22,7 @@ pub struct WebCommand {
 }
 
 impl Execute for WebCommand {
-    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+    fn execute(self, runtime: &OrbitRuntime) -> CommandOut {
         self.command.execute(runtime)
     }
 }
@@ -36,12 +36,18 @@ pub enum WebSubcommand {
 }
 
 impl Execute for WebSubcommand {
-    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+    fn execute(self, runtime: &OrbitRuntime) -> CommandOut {
         match self {
-            WebSubcommand::Serve(args) => orbit_dashboard::serve(runtime, args),
+            WebSubcommand::Serve(args) => {
+                orbit_dashboard::serve(runtime, args)?;
+                Ok(CommandOutput::Silent)
+            }
             // `connect` is a client-side tunnel helper; the workspace lives on
             // the remote, so it needs no local runtime.
-            WebSubcommand::Connect(args) => orbit_dashboard::connect(args),
+            WebSubcommand::Connect(args) => {
+                orbit_dashboard::connect(args)?;
+                Ok(CommandOutput::Silent)
+            }
         }
     }
 }

@@ -3,7 +3,7 @@ use orbit_common::types::TaskArtifact;
 use orbit_core::command::task::TaskUpdateParams;
 use orbit_core::{OrbitError, OrbitRuntime, TaskComplexity, TaskStatus, TaskType};
 
-use crate::command::Execute;
+use crate::command::{CommandOut, CommandOutput, Execute, Payload};
 
 use super::output::task_to_json_for_runtime;
 
@@ -78,7 +78,7 @@ pub struct TaskUpdateArgs {
 }
 
 impl Execute for TaskUpdateArgs {
-    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+    fn execute(self, runtime: &OrbitRuntime) -> CommandOut {
         let TaskUpdateArgs {
             id,
             title,
@@ -181,10 +181,10 @@ impl Execute for TaskUpdateArgs {
         )?;
 
         if json {
-            crate::output::json::print_pretty(&task_to_json_for_runtime(runtime, &task)?)
+            Ok(Payload::document(task_to_json_for_runtime(runtime, &task)?).into())
         } else {
             println!("Updated task '{}'", task.id);
-            Ok(())
+            Ok(CommandOutput::Silent)
         }
     }
 }

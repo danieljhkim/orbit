@@ -1,7 +1,7 @@
 use clap::{Args, Subcommand};
-use orbit_core::{OrbitError, OrbitRuntime};
+use orbit_core::OrbitRuntime;
 
-use crate::command::Execute;
+use crate::command::{CommandOut, Execute};
 
 use super::list::ExecutorListArgs;
 use super::show::ExecutorShowArgs;
@@ -14,7 +14,7 @@ pub struct ExecutorCommand {
 }
 
 impl Execute for ExecutorCommand {
-    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+    fn execute(self, runtime: &OrbitRuntime) -> CommandOut {
         self.command.execute(runtime)
     }
 }
@@ -28,7 +28,7 @@ pub enum ExecutorSubcommand {
 }
 
 impl Execute for ExecutorSubcommand {
-    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+    fn execute(self, runtime: &OrbitRuntime) -> CommandOut {
         match self {
             ExecutorSubcommand::List(args) => args.execute(runtime),
             ExecutorSubcommand::Show(args) => args.execute(runtime),

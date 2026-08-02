@@ -1,7 +1,7 @@
 use clap::Args;
-use orbit_core::{OrbitError, OrbitRuntime};
+use orbit_core::OrbitRuntime;
 
-use crate::command::Execute;
+use crate::command::{CommandOut, CommandOutput, Execute, Payload};
 
 use super::output::learning_to_json;
 
@@ -15,13 +15,13 @@ pub struct LearningArchiveArgs {
 }
 
 impl Execute for LearningArchiveArgs {
-    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+    fn execute(self, runtime: &OrbitRuntime) -> CommandOut {
         let learning = runtime.author_learning_archive(&self.id)?;
         if self.json {
-            crate::output::json::print_pretty(&learning_to_json(&learning))
+            Ok(Payload::document(learning_to_json(&learning)).into())
         } else {
             println!("{} archived", learning.id);
-            Ok(())
+            Ok(CommandOutput::Silent)
         }
     }
 }

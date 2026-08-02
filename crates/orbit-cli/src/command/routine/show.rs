@@ -1,3 +1,4 @@
+use crate::command::{CommandOut, Payload};
 use clap::Args;
 use orbit_core::OrbitError;
 use orbit_core::routines::recent_fires;
@@ -17,7 +18,7 @@ pub struct RoutineShowArgs {
 }
 
 impl RoutineShowArgs {
-    pub fn execute_without_runtime(self) -> Result<(), OrbitError> {
+    pub fn execute_without_runtime(self) -> CommandOut {
         let global_root = workspace_registry::global_orbit_dir()?;
         let report = routine_statuses(&global_root)?;
         let Some(status) = report
@@ -33,51 +34,52 @@ impl RoutineShowArgs {
         let fires = recent_fires(&global_root, &self.name, RECENT_FIRE_LIMIT)?;
         let definition = &status.routine.definition;
 
-        if self.json {
-            crate::output::json::print_pretty(&json!({
-                "host_id": report.host_id,
-                "machine_id": report.machine_id,
-                "registry": &report.registry,
-                "name": definition.name,
-                "description": definition.description,
-                "source": status.routine.source_workspace,
-                "origin": status.routine.origin.as_str(),
-                "path": status.routine.path.display().to_string(),
-                "enabled": definition.enabled,
-                "hosts": definition.hosts,
-                "pinned_to_host": status.pinned_to_host,
-                "validation": &status.validation,
-                "paused_at": status.paused_at,
-                "effective": status.effective(),
-                "cron": definition.trigger.cron,
-                "missed_run": definition.trigger.missed_run,
-                "target": definition.target.as_ref_string(),
-                "policy": definition.policy,
-                "next_due": status.next_due,
-                "recent_fires": fires.iter().map(|fire| json!({
-                    "slot": fire.slot,
-                    "attempt": fire.attempt,
-                    "state": fire.state.as_str(),
-                    "run_id": fire.run_id,
-                    "detail": fire.detail,
-                    "updated_at": fire.updated_at,
-                })).collect::<Vec<_>>(),
-            }))?;
-            return Ok(());
-        }
+        let doc = json!({
+            "host_id": report.host_id,
+            "machine_id": report.machine_id,
+            "registry": &report.registry,
+            "name": definition.name,
+            "description": definition.description,
+            "source": status.routine.source_workspace,
+            "origin": status.routine.origin.as_str(),
+            "path": status.routine.path.display().to_string(),
+            "enabled": definition.enabled,
+            "hosts": definition.hosts,
+            "pinned_to_host": status.pinned_to_host,
+            "validation": &status.validation,
+            "paused_at": status.paused_at,
+            "effective": status.effective(),
+            "cron": definition.trigger.cron,
+            "missed_run": definition.trigger.missed_run,
+            "target": definition.target.as_ref_string(),
+            "policy": definition.policy,
+            "next_due": status.next_due,
+            "recent_fires": fires.iter().map(|fire| json!({
+                "slot": fire.slot,
+                "attempt": fire.attempt,
+                "state": fire.state.as_str(),
+                "run_id": fire.run_id,
+                "detail": fire.detail,
+                "updated_at": fire.updated_at,
+            })).collect::<Vec<_>>(),
+        });
 
-        println!("Name: {}", definition.name);
+        use std::fmt::Write as _;
+        let mut out = String::new();
+        let _ = writeln!(out, "Name: {}", definition.name);
         if !definition.description.is_empty() {
-            println!("Description: {}", definition.description);
+            let _ = writeln!(out, "Description: {}", definition.description);
         }
-        println!(
+        let _ = writeln!(
+            out,
             "Source: {} ({}, {} origin)",
             status.routine.source_workspace,
             status.routine.path.display(),
             status.routine.origin.as_str()
         );
-        println!("Target: {}", definition.target.as_ref_string());
-        println!(
+        let _ = writeln!(out, "Target: {}", definition.target.as_ref_string());
+        let _ = writeln!(
+            out,
             "Trigger: cron \"{}\" (missed_run: {})",
             definition.trigger.cron,
             match definition.trigger.missed_run {
@@ -85,7 +87,8 @@ impl RoutineShowArgs {
                 orbit_core::MissedRunPolicy::Skip => "skip",
             }
         );
-        println!(
+        let _ = writeln!(
+            out,
             "Policy: timeout {}m, retries max {} (backoff {}m), overlap {}",
             definition.policy.timeout_minutes,
             definition.policy.retries.max,
@@ -95,7 +98,8 @@ impl RoutineShowArgs {
                 orbit_core::OverlapPolicy::Allow => "allow",
             }
         );
-        println!(
+        let _ = writeln!(
+            out,
             "Enabled: {} | Pinned to {}: {} | Paused: {}",
             definition.enabled,
             report.host_id,
@@ -106,7 +110,8 @@ impl RoutineShowArgs {
                 .map(|at| format!("yes (since {at})"))
                 .unwrap_or_else(|| "no".to_string())
         );
-        println!(
+        let _ = writeln!(
+            out,
             "Registry: {}/{}{}",
             report.registry.source,
             report.registry.state,
@@ -117,25 +122,28 @@ impl RoutineShowArgs {
                 .unwrap_or_default()
         );
         for diagnostic in &status.validation.diagnostics {
-            println!(
+            let _ = writeln!(
+                out,
                 "Validation [{}:{}]: {}",
                 diagnostic.severity.as_str(),
                 diagnostic.code,
                 diagnostic.message
             );
         }
-        println!(
+        let _ = writeln!(
+            out,
             "Effective on this host: {}",
             if status.effective() { "yes" } else { "no" }
         );
-        println!(
+        let _ = writeln!(
+            out,
             "Next due: {}",
             status.next_due.as_deref().unwrap_or("unknown")
         );
         if fires.is_empty() {
-            println!("Recent fires: none");
+            let _ = writeln!(out, "Recent fires: none");
         } else {
-            println!("Recent fires:");
+            let _ = writeln!(out, "Recent fires:");
             for fire in &fires {
                 let run = fire
                     .run_id
@@ -147,7 +155,8 @@ impl RoutineShowArgs {
                     .as_deref()
                     .map(|detail| format!(" — {detail}"))
                     .unwrap_or_default();
-                println!(
+                let _ = writeln!(
+                    out,
                     "  [{}] slot {} attempt {}{}{}",
                     fire.state.as_str(),
                     fire.slot,
@@ -157,6 +166,6 @@ impl RoutineShowArgs {
                 );
             }
         }
-        Ok(())
+        Ok(Payload::detail(doc, out).into())
     }
 }

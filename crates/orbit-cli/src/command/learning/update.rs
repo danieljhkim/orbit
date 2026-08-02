@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use clap::{ArgAction, Args};
 use orbit_core::{LearningUpdateParams, OrbitError, OrbitRuntime};
 
-use crate::command::Execute;
+use crate::command::{CommandOut, CommandOutput, Execute, Payload};
 
 use super::output::learning_to_json;
 
@@ -39,7 +39,7 @@ pub struct LearningUpdateArgs {
 }
 
 impl Execute for LearningUpdateArgs {
-    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+    fn execute(self, runtime: &OrbitRuntime) -> CommandOut {
         let body =
             match (self.body, self.body_file) {
                 (Some(_), Some(_)) => {
@@ -85,10 +85,10 @@ impl Execute for LearningUpdateArgs {
         )?;
 
         if self.json {
-            crate::output::json::print_pretty(&learning_to_json(&learning))
+            Ok(Payload::document(learning_to_json(&learning)).into())
         } else {
             println!("{}", learning.id);
-            Ok(())
+            Ok(CommandOutput::Silent)
         }
     }
 }
