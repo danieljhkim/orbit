@@ -301,6 +301,25 @@ fn task_update_dependency_params_remain_in_agent_tool_schema() {
 }
 
 #[test]
+fn task_show_schema_distinguishes_execution_crew_from_orchestrator() {
+    let mut registry = ToolRegistry::new();
+    registry.register_builtins();
+
+    let schema = registry
+        .get_schema("orbit.task.show")
+        .expect("orbit.task.show schema");
+    let fields = schema
+        .parameters
+        .iter()
+        .find(|param| param.name == "fields")
+        .expect("task show fields parameter");
+    assert!(fields.description.contains("crew"));
+    assert!(fields.description.contains("orchestrator"));
+    assert!(schema.description.contains("execution"));
+    assert!(schema.description.contains("orchestration attribution"));
+}
+
+#[test]
 fn task_mutation_schemas_use_model_only_identity() {
     let mut registry = ToolRegistry::new();
     registry.register_builtins();

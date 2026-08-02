@@ -119,10 +119,19 @@ impl OrbitRuntime {
     }
 
     pub fn validate_crew_name(&self, crew: Option<&str>) -> Result<(), OrbitError> {
+        self.canonical_crew_name(crew).map(|_| ())
+    }
+
+    /// Resolve a user-supplied crew name to the exact alias stored in the
+    /// active named-crew registry. Blank optional values remain unset.
+    pub(crate) fn canonical_crew_name(
+        &self,
+        crew: Option<&str>,
+    ) -> Result<Option<String>, OrbitError> {
         let Some(crew) = crew.map(str::trim).filter(|value| !value.is_empty()) else {
-            return Ok(());
+            return Ok(None);
         };
-        resolve_crew(crew, self.context.settings().crews()).map(|_| ())
+        resolve_crew(crew, self.context.settings().crews()).map(|crew| Some(crew.name))
     }
 
     pub fn resolve_crew_for_task(

@@ -1390,6 +1390,12 @@
         "required": false
       },
       {
+        "description": "Optional named crew responsible for orchestration attribution; does not select execution",
+        "name": "orchestrator",
+        "param_type": "string",
+        "required": false
+      },
+      {
         "description": "Preferred provenance field. Pass the canonical agent family (codex, claude, gemini, or grok); full model strings are accepted and auto-normalized.",
         "name": "model",
         "param_type": "string",
@@ -1545,7 +1551,7 @@
   {
     "active": true,
     "builtin": true,
-    "description": "Fetch a single Orbit task as JSON. Use the optional `fields` projection (or single-field alias `field`) to retrieve only specific task fields, such as `field: \"artifacts\"`.",
+    "description": "Fetch a single Orbit task as JSON. Use the optional `fields` projection (or single-field alias `field`) to retrieve only specific task fields, such as `field: \"orchestrator\"`. The `crew` field selects execution, while `orchestrator` records orchestration attribution.",
     "enabled": true,
     "name": "orbit.task.show",
     "parameters": [
@@ -1568,7 +1574,7 @@
         "required": false
       },
       {
-        "description": "Optional field projection as a string or array of strings. When set, returns only the requested field(s) as JSON. Valid values: comments, plan, execution_summary, description, acceptance_criteria, dependencies, resolved_dependencies, history, context_files, artifacts.",
+        "description": "Optional field projection as a string or array of strings. When set, returns only the requested field(s) as JSON. Valid values: comments, plan, execution_summary, description, acceptance_criteria, dependencies, resolved_dependencies, tags, history, context_files, crew, orchestrator, artifacts. `crew` is execution selection; `orchestrator` is separate orchestration attribution.",
         "name": "fields",
         "param_type": "string_list",
         "required": false
@@ -1752,6 +1758,12 @@
       {
         "description": "Named crew to use when running this task (empty string clears)",
         "name": "crew",
+        "param_type": "string",
+        "required": false
+      },
+      {
+        "description": "Named crew responsible for orchestration attribution (empty string clears; mutable only before execution)",
+        "name": "orchestrator",
         "param_type": "string",
         "required": false
       },
