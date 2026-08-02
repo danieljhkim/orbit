@@ -8,10 +8,12 @@
 //!
 //! `main` resolves the sink, [`install`]s it, and calls
 //! [`OutputSink::apply_color_policy`]; every renderer then reads [`active`]
-//! rather than asking the environment. Color emission is decided in exactly one
-//! place: `apply_color_policy` overrides the `colored` crate's own env
-//! detection, and `output::table` hands the same answer to `comfy_table`, so the
-//! two styling backends can no longer disagree about `NO_COLOR` [ADR-0308].
+//! rather than asking the environment. The sink is a process global rather
+//! than a parameter threaded through `Execute::execute` [ADR-0314]. Color
+//! emission is decided in exactly one place: `apply_color_policy` overrides
+//! the `colored` crate's own env detection, and `output::table` hands the
+//! same answer to `comfy_table`, so the two styling backends can no longer
+//! disagree about `NO_COLOR` [ADR-0308].
 
 use std::io::IsTerminal;
 use std::sync::OnceLock;

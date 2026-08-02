@@ -11,7 +11,7 @@ summary: "Current orbit-cli output implementation — borderless single-line tab
 tags: [terminal-interface]
 paths: ["crates/orbit-cli/src/output/**", "crates/orbit-cli/src/command/**"]
 related_features: [terminal-interface]
-related_artifacts: [ADR-0306, ADR-0307, ADR-0308]
+related_artifacts: [ADR-0306, ADR-0307, ADR-0308, ADR-0314]
 ---
 
 # Terminal Interface — Design
@@ -98,7 +98,7 @@ The first rendering assertions arrived with the borderless migration [ORB-10567]
 
 **The sink is a process global.** `sink::active()` is a `OnceLock` read, so a renderer's behavior depends on whether `main` ran. Unit tests get the piped default — the safe answer, but not the one an interactive run gets — so a test that means to exercise the terminal path has to build a sink explicitly and pass it in; `Table::render(width, styled)` exists for that, and `Table::print()` is the only function that reads the global. A future in-process consumer (a test harness, an embedded invocation) cannot render two different sinks concurrently.
 
-The alternative — threading the sink through `Execute::execute` — is the correct end state and is exactly [./specs/output-modes.md](./specs/output-modes.md) §7 step 3's signature change. It was not done here because it would have held the `NO_COLOR` fix behind a 154-impl refactor. Having each renderer call `OutputSink::from_process()` was also rejected: it re-derives terminal state per render, which is the drift [ADR-0306] exists to remove, and defeats the guard script. **This decision has no ADR yet** — the ADR store was not writable in the runner that landed [ORB-10570]; [ORB-10585] tracks filing it, and carries the drafted body.
+This decision — the sink as a process global rather than a parameter threaded through `Execute::execute` — is recorded in [ADR-0314], including the rejected alternatives (threading the sink through `Execute::execute` now, having each renderer call `OutputSink::from_process()` itself, a thread-local instead of a `OnceLock`).
 
 ## Task References
 
