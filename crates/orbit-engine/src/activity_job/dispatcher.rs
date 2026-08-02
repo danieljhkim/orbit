@@ -646,6 +646,8 @@ fn run_agent_loop_via_driver(
         "usage".to_string(),
         serde_json::json!({
             "input_tokens": outcome.usage.input_tokens,
+            "cache_read_input_tokens": outcome.usage.cache_read_input_tokens,
+            "cache_creation_input_tokens": outcome.usage.cache_creation_input_tokens,
             "output_tokens": outcome.usage.output_tokens,
         }),
     );
@@ -686,9 +688,9 @@ pub(crate) fn loop_outcome_trace(
             input: outcome.usage.input_tokens,
             cache_read: outcome.usage.cache_read_input_tokens,
             cache_create: outcome.usage.cache_creation_input_tokens,
-            // The agent loop reports a single cache-creation counter; the 1h/5m
-            // TTL split isn't surfaced here yet, so all cache-creation tokens
-            // are treated as the standard (5m) rate (ORB-10338 follow-up).
+            // OpenAI-compatible and generic agent-loop usage reports a single
+            // cache-creation counter. The 1h/5m TTL split isn't surfaced here,
+            // so all reported writes retain the standard (5m) rate.
             cache_create_1h: 0,
             output: outcome.usage.output_tokens,
         },

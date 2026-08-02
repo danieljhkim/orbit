@@ -156,11 +156,16 @@ mod parse {
             "{\"type\":\"thread.started\",\"thread_id\":\"thread-1\"}\n",
             "{\"type\":\"turn.started\"}\n",
             "{\"type\":\"item.completed\",\"item\":{\"id\":\"item-0\",\"type\":\"agent_message\",\"text\":\"{\\\"schemaVersion\\\":1,\\\"status\\\":\\\"success\\\",\\\"result\\\":{},\\\"error\\\":null}\"}}\n",
-            "{\"type\":\"turn.completed\",\"usage\":{\"input_tokens\":17389,\"cached_input_tokens\":0,\"output_tokens\":22,\"reasoning_output_tokens\":0}}\n"
+            "{\"type\":\"turn.completed\",\"usage\":{\"input_tokens\":17389,\"cached_input_tokens\":2000,\"cache_write_tokens\":300,\"output_tokens\":22,\"reasoning_output_tokens\":0}}\n"
         );
 
         let (_, _, trace) =
             parse_and_validate_response(&exec(stdout, "", Some(0), true)).expect("Codex parses");
+        assert_eq!(trace.usage.input, 17_389);
+        assert_eq!(trace.usage.cache_read, 2_000);
+        assert_eq!(trace.usage.cache_create, 300);
+        assert_eq!(trace.usage.cache_create_1h, 0);
+        assert_eq!(trace.usage.output, 22);
         assert_eq!(trace.provider_model, None);
         assert_eq!(trace.provider_cost_usd, None);
     }

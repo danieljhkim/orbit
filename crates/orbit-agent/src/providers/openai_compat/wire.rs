@@ -106,10 +106,28 @@ pub struct IncomingUsage {
     pub completion_tokens: u64,
     #[serde(default)]
     pub prompt_tokens_details: Option<PromptTokenDetails>,
+    /// Compatibility-layer aggregate when cache writes are reported beside
+    /// `prompt_tokens` rather than inside `prompt_tokens_details`.
+    #[serde(
+        default,
+        alias = "cache_creation_tokens",
+        alias = "cache_write_tokens",
+        alias = "cache_write_input_tokens"
+    )]
+    pub cache_creation_input_tokens: u64,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
 pub struct PromptTokenDetails {
     #[serde(default)]
     pub cached_tokens: u64,
+    /// Standard 5-minute cache writes reported by OpenAI-compatible providers.
+    /// The aliases cover the field names used by common compatibility layers.
+    #[serde(
+        default,
+        alias = "cache_creation_tokens",
+        alias = "cache_creation_input_tokens",
+        alias = "cache_write_input_tokens"
+    )]
+    pub cache_write_tokens: u64,
 }

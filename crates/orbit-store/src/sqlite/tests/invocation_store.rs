@@ -228,6 +228,64 @@ fn invocation_records_round_trip_one_hour_cache_writes_and_derive_ground_truth()
 }
 
 #[test]
+fn historical_invocation_is_repriced_at_query_time_without_a_migration() {
+    let store = Store::open_in_memory().expect("open store");
+
+    store
+        .insert_invocation_trace_record(&InvocationInsertParams {
+            job_run_id: "jrun-historical-gpt".to_string(),
+            activity_id: "implement_one".to_string(),
+            agent: "codex".to_string(),
+            model: Some("gpt-5.6-terra".to_string()),
+            slot: None,
+            task_ids: vec!["ORB-10579".to_string()],
+            trace: InvocationTrace {
+                usage: TokenUsage {
+                    // OpenAI input is gross: 500k uncached + 200k read + 300k write.
+                    input: 1_000_000,
+                    cache_read: 200_000,
+                    cache_create: 300_000,
+                    output: 1_000_000,
+                    ..TokenUsage::default()
+                },
+                ..InvocationTrace::default()
+            },
+        })
+        .expect("insert invocation");
+
+    // Simulate a row stored before the July 30 price change. No schema or row
+    // migration is involved; the query-time lookup uses this persisted date.
+    store
+        .with_transaction(|tx| {
+            tx.connection()
+                .execute(
+                    "UPDATE invocations SET ts = ?1 WHERE job_run_id = ?2",
+                    ["2026-07-29T23:59:59+00:00", "jrun-historical-gpt"],
+                )
+                .map_err(|error| orbit_common::types::OrbitError::Store(error.to_string()))?;
+            Ok(())
+        })
+        .expect("set historical timestamp");
+
+    let records = store
+        .list_invocation_records(&InvocationQuery {
+            job_run_id: Some("jrun-historical-gpt".to_string()),
+            limit: 10,
+            ..InvocationQuery::default()
+        })
+        .expect("list historical invocation");
+
+    let derived = records[0]
+        .derived_cost_usd
+        .expect("historical row is priced");
+    // Historical Terra: 0.5M*$2.50 + 0.2M*$0.25 + 0.3M*$3.125 + 1M*$15.
+    assert!(
+        (derived - 17.2375).abs() < 1e-12,
+        "derived cost was {derived}"
+    );
+}
+
+#[test]
 fn invocation_records_leave_derived_cost_none_for_an_unpriced_model() {
     let store = Store::open_in_memory().expect("open store");
 

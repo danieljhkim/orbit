@@ -3,7 +3,7 @@ summary: "Auditability — Design"
 type: design
 title: "Auditability — Design"
 owner: codex
-last_updated: 2026-07-27
+last_updated: 2026-08-02
 last_validated: 2026-07-27
 status: Draft
 feature: auditability
@@ -124,6 +124,8 @@ After [ORB-10337], `POST /api/metrics/invocations` accepts the existing `Invocat
 
 After [ORB-10338] (see [ADR-0245]), `InvocationInsertParams.trace` carries an optional `provider_cost_usd` — the provider's own reported total, persisted verbatim in a new `invocations.provider_cost_usd` column for Daniel's monthly manual reconciliation. `InvocationRecord` also exposes `derived_cost_usd`, computed at read time (not stored) by `orbit_common::types::pricing::derive_cost_usd` from the row's model, timestamp, and token splits against a versioned price table shipped as `crates/orbit-common/assets/model_prices.yaml` — rows keyed by exact model string plus an `effective_from`/`effective_until` range, loaded once behind a `OnceLock`. Adding or correcting a rate is a YAML edit; no Rust change and no backfill are needed, and existing rows re-price automatically the next time they are read. `derived_cost_usd` is `None` whenever no price row covers the model/date, and it never overwrites `provider_cost_usd`.
 
+After [ORB-10579], each price row also declares whether its input count is exclusive or gross-with-cache. Existing rows default to exclusive accounting; GPT-5.6 rows use gross accounting, so derived pricing subtracts cached-read and both cache-write buckets from the gross input total before charging the full input rate. Checked subtraction makes inconsistent rows unknown instead of silently saturating. Codex JSONL and OpenAI-compatible response parsing retain provider-reported cached-read, standard cache-write, and output buckets; OpenAI reports no 1-hour write bucket, while a malformed stored nonzero count still has a nonzero fallback price. GPT-5.6 results are standard short-context API-equivalent derived estimates. Exact Fast/service-tier and long-context billing remains future work because Orbit does not yet retain those per-request dimensions.
+
 After [ORB-10370], CLI response parsing also fills `InvocationTrace.provider_model` and `provider_cost_usd` directly from provider-owned result metadata. Claude exposes a `modelUsage` map and `total_cost_usd`; when Claude reports its internal helper model beside the requested model, Orbit selects the unique highest-cost map entry and preserves its key verbatim. Gemini exposes an exact model key under `stats.models` but no invocation USD total; Orbit accepts it only when the map has one entry. Codex JSONL and Grok's JSON wrapper do not currently report either value, so they remain `None`. At SQLite ingest, a non-empty provider model wins over the configured request/alias and the configured model remains the fallback. A disagreement emits a retained `WARN` event under `orbit.core.invocation` with job run, activity, CLI, requested model, and provider model fields. This structured mismatch event was chosen instead of a second invocation column: it makes provider routing drift detectable under the default logging filter without migrating or backfilling rows, while `invocations.model` remains the exact model used for pricing and aggregation.
 
 The local dashboard exposes two read-only API surfaces for these traces after [T20260508-14]: `GET /api/runs/:id/logs` returns bounded per-step CLI invocation previews, and `GET /api/diagnostics/errors` returns recent process ERROR rows plus structured agent-stderr error rows sorted newest first. Both endpoints use existing dashboard limit conventions and tolerate missing stored event rows, malformed event JSON, and missing blobs by returning empty or partial arrays.
@@ -191,6 +193,7 @@ Each record contains timestamp, level, target, and structured fields. After [T20
 - **[ORB-10337]** — Added dashboard HTTP ingestion for worker invocation records without changing the invocation schema.
 - **[ORB-10338]** — Added the versioned model price table and query-time `derived_cost_usd`, plus a persisted `provider_cost_usd` column for reconciliation.
 - **[ORB-10370]** — Parsed provider-reported CLI model/cost metadata, preferred the reported model at ingest, and retained structured mismatch evidence.
+- **[ORB-10579]** — Corrected GPT-5.6 price periods and cache-write rates, added gross-input accounting, and retained OpenAI cache buckets for standard short-context estimates.
 - **[ORB-00106]** — Preserve per-task implementer attribution when `orbit run ship` moves batch PR tasks from Review to Done.
 - **[ORB-10200]** — Derive CLI audit metadata and the other cross-cutting command policies from one exhaustive command-operation registry.
 - **[ORB-10225]** — Route in-process graph MCP calls through the safe-surface allowlist and shared runtime audit boundary.

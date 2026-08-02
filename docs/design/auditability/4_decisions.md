@@ -3,7 +3,7 @@ summary: "Auditability — Decisions"
 type: design
 title: "Auditability — Decisions"
 owner: codex
-last_updated: 2026-07-27
+last_updated: 2026-08-02
 last_validated: 2026-07-27
 status: Draft
 feature: auditability
@@ -328,11 +328,11 @@ Narrative lives in the ADR store — retrieve it with `orbit tool run orbit.adr.
 
 ## ADR-0245 — Derive invocation cost at query time from a versioned price table
 
-**Status:** Accepted · 2026-07 · [ORB-10338] [ORB-10370]
+**Status:** Accepted · 2026-07 · [ORB-10338] [ORB-10370] [ORB-10579]
 
 **Context.** The invocation store already retained exact per-invocation token splits, but had no notion of USD cost — cost existed only as a provider-reported total buried in the worker's unparsed per-run JSON, never joined to a model or token split. [ORB-10338] adds cost. Two real alternatives existed: (a) compute cost once at ingest time and store it as a frozen column, or (b) keep rows token-only and derive cost from a versioned price table looked up by exact model string and the invocation's timestamp on every read/aggregate.
 
-**Decision.** Cost is derived at query time, not stored. `orbit_common::types::pricing` ships a versioned price table as an in-repo YAML asset (`crates/orbit-common/assets/model_prices.yaml`), keyed by exact model string plus an `effective_from`/`effective_until` date range, parsed once behind a `OnceLock` cache. `InvocationRecord` gains `derived_cost_usd` (computed at read time from the row's token splits, model, and timestamp against the price table) alongside a new `provider_cost_usd` column that persists the provider's own reported total verbatim for monthly manual reconciliation. Adding or correcting a price row is a YAML edit, not a Rust code change.
+**Decision.** Cost is derived at query time, not stored. `orbit_common::types::pricing` ships a versioned price table as an in-repo YAML asset (`crates/orbit-common/assets/model_prices.yaml`), keyed by exact model string plus an `effective_from`/`effective_until` date range and an input-token billing basis, parsed once behind a `OnceLock` cache. Exclusive input totals remain the backward-compatible default; gross totals include cache buckets, which derived pricing removes with checked arithmetic before charging the full input rate. `InvocationRecord` gains `derived_cost_usd` (computed at read time from the row's token splits, model, and timestamp against the price table) alongside a new `provider_cost_usd` column that persists the provider's own reported total verbatim for monthly manual reconciliation. Adding or correcting a price row is a YAML edit, not a database migration.
 
 **Consequences.**
 - Historical invocation rows re-price automatically when a price row is corrected or backfilled — no migration/backfill script needed to fix a wrong rate.
@@ -340,7 +340,9 @@ Narrative lives in the ADR store — retrieve it with `orbit tool run orbit.adr.
 - `provider_cost_usd` never changes once written, so it stays the ground truth Daniel reconciles against monthly even if `derived_cost_usd` for the same row changes later.
 - [ORB-10370] wires Claude CLI `total_cost_usd` into that column from the same parse that captures provider model identity; providers that report no USD total keep `NULL`.
 - Cost: because derived cost is recomputed on every read instead of frozen at ingest, editing a price row after the fact silently changes the reported cost of every past invocation under that model/date range — there is no record of what a row's derived cost "used to be", unlike the immutable `provider_cost_usd`.
-- Cache-write TTL split: `TokenUsage`/`PriceRow` distinguish 5-minute-TTL cache-creation tokens (`cache_create`, 1.25x input) from 1-hour-TTL (`cache_create_1h`, 2x input), since Anthropic prices them differently; the store persists both. Validated against real worker run 91d7ef01 (`claude-opus-4-8[1m]` → $1.014018 exactly). The ingest path does not yet parse the provider's `ephemeral_1h`/`ephemeral_5m` split, so persisted 1h counts are currently zero (all cache-creation prices at the 5m rate) until that wiring lands — a documented follow-up, matching the pattern by which `provider_cost_usd` was added ahead of its ingest wiring.
+- Cache-write TTL split: `TokenUsage`/`PriceRow` distinguish 5-minute-TTL cache-creation tokens (`cache_create`, 1.25x input) from 1-hour-TTL (`cache_create_1h`, 2x input), since Anthropic prices them differently; the store persists both. Validated against real worker run 91d7ef01 (`claude-opus-4-8[1m]` → $1.014018 exactly). Claude response parsing retains the provider's TTL split. Codex JSONL and OpenAI-compatible parsing retain standard writes when reported; OpenAI's 1-hour bucket stays zero, and an anomalous stored nonzero count is not priced as free.
+- GPT-5.6 cost is a standard short-context API-equivalent estimate. Exact Fast/service-tier and long-context pricing is deliberately unknown until per-request service-tier and context dimensions are retained.
+- Cost: gross-input rows with cache detail larger than the gross total now return unknown rather than producing a partial estimate, so malformed telemetry can reduce reported cost coverage.
 - Model-string keying: rows are keyed by the exact string that lands in `InvocationRecord.model`. A context-window suffix (`claude-opus-4-8[1m]`) is stripped to fall back to the base row rather than duplicating rows, since it bills at base rates; a distinct `model[1m]` row would win by exact match if a long-context premium ever applied. After [ORB-10370], provider-reported CLI model keys replace configured aliases at ingest when available; the configured value remains the fallback, and a structured warning retains requested/reported disagreement without adding a second database column.
 
 ---
@@ -428,6 +430,7 @@ Narrative lives in the ADR store — retrieve it with `orbit tool run orbit.adr.
 - **[ORB-10202]** — Remove the retired friction task status and consolidate task mutation attribution and record-parameter construction.
 - **[ORB-10338]** — Add the versioned model price table and query-time `derived_cost_usd`, plus a persisted `provider_cost_usd` column for reconciliation.
 - **[ORB-10370]** — Fill provider model/cost trace fields from CLI result JSON and prefer reported model identity at invocation ingest.
+- **[ORB-10579]** — Correct GPT-5.6 price periods, cache-write rates, gross-input accounting, and standard short-context estimate boundaries.
 - **[ORB-10519]** — Keep the persisted crew-model author and process-scoped Orbit committer while removing hook-specific trailer input and provider-commit adoption ([ADR-0299], superseding [ADR-0249] and [ADR-0294]).
 - **[ORB-10369]** — Introduce the persisted resolved crew model as the pipeline commit author with generic fallback and no alias resolver ([ADR-0249], superseded by [ADR-0299]).
 - **[ORB-10496]** — Record the spawned provider subprocess PID as its own audit event and expose read-time liveness through run status and `orbit run show`.

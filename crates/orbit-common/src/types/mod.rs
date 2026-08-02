@@ -138,7 +138,7 @@ pub use policy_def::{
     DEFAULT_POLICY_NAME, FsCheckResult, FsOperation, FsProfile, PolicyDef, ResolvedFsProfile,
     UNRESTRICTED_FS_PROFILE,
 };
-pub use pricing::{PriceRow, derive_cost_usd};
+pub use pricing::{InputTokenBasis, PriceRow, derive_cost_usd};
 pub use registry_snapshot::{
     REGISTRY_CACHE_SCHEMA_VERSION, REGISTRY_SNAPSHOT_SCHEMA_VERSION, RegistryAliasV1,
     RegistryCacheV1, RegistryHostV1, RegistryPresenceV1, RegistryProfileV1, RegistrySnapshotV1,
