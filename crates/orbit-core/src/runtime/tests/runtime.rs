@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 use serde_json::Value;
 
 use crate::OrbitRuntime;
+use orbit_common::types::JobRunState;
 
 use std::ffi::OsString;
 use std::sync::Mutex;
@@ -145,6 +146,14 @@ impl EnvVarGuard {
         }
         Self { key, previous }
     }
+
+    fn unset(key: &'static str) -> Self {
+        let previous = std::env::var_os(key);
+        unsafe {
+            std::env::remove_var(key);
+        }
+        Self { key, previous }
+    }
 }
 
 impl Drop for EnvVarGuard {
@@ -157,6 +166,106 @@ impl Drop for EnvVarGuard {
                 std::env::remove_var(self.key);
             },
         }
+    }
+}
+
+fn reopened_stale_run_state(managed_context: Option<&str>, run_id: Option<&str>) -> JobRunState {
+    let root = tempdir().expect("create tempdir");
+    let global_root = root.path().join("global");
+    let workspace_root = root.path().join("repo/.orbit");
+    std::fs::create_dir_all(&global_root).expect("create global root");
+    std::fs::create_dir_all(&workspace_root).expect("create workspace root");
+    let runtime = OrbitRuntime::from_roots(&global_root, &workspace_root).expect("build runtime");
+    let run = runtime
+        .stores()
+        .jobs()
+        .insert_job_run("managed_context_probe", 1, chrono::Utc::now(), None, None)
+        .expect("insert run");
+    runtime
+        .stores()
+        .jobs()
+        .mark_job_run_running(&run.run_id, chrono::Utc::now(), 999_999)
+        .expect("mark run with host-invisible owner");
+    drop(runtime);
+
+    let _managed_context = match managed_context {
+        Some(value) => EnvVarGuard::set("ORBIT_MANAGED_RUN_CONTEXT", value.into()),
+        None => EnvVarGuard::unset("ORBIT_MANAGED_RUN_CONTEXT"),
+    };
+    let _run_id = match run_id {
+        Some(value) => EnvVarGuard::set("ORBIT_RUN_ID", value.into()),
+        None => EnvVarGuard::unset("ORBIT_RUN_ID"),
+    };
+    let reopened = OrbitRuntime::from_roots(&global_root, &workspace_root).expect("reopen runtime");
+    reopened
+        .get_job_run_backend(&run.run_id)
+        .expect("read run")
+        .expect("run exists")
+        .state
+}
+
+/// [ORB-10557] A managed sandbox child may not see the host worker PID. The
+/// impossible PID below models that private-namespace `process_not_found`
+/// shape; workspace open must leave the host-owned run alone, while explicit
+/// recovery remains unchanged.
+#[test]
+fn managed_run_context_skips_workspace_open_reconciliation_but_not_explicit_recovery() {
+    let _guard = ENV_LOCK.lock().expect("lock env");
+    let root = tempdir().expect("create tempdir");
+    let global_root = root.path().join("global");
+    let workspace_root = root.path().join("repo/.orbit");
+    std::fs::create_dir_all(&global_root).expect("create global root");
+    std::fs::create_dir_all(&workspace_root).expect("create workspace root");
+    let runtime = OrbitRuntime::from_roots(&global_root, &workspace_root).expect("build runtime");
+    let run = runtime
+        .stores()
+        .jobs()
+        .insert_job_run("managed_context_probe", 1, chrono::Utc::now(), None, None)
+        .expect("insert run");
+    runtime
+        .stores()
+        .jobs()
+        .mark_job_run_running(&run.run_id, chrono::Utc::now(), 999_999)
+        .expect("mark run with host-invisible owner");
+    drop(runtime);
+
+    let _managed_context = EnvVarGuard::set("ORBIT_MANAGED_RUN_CONTEXT", "true".into());
+    let _run_id = EnvVarGuard::set("ORBIT_RUN_ID", "jrun-managed-child".into());
+    let reopened = OrbitRuntime::from_roots(&global_root, &workspace_root).expect("reopen runtime");
+    let stored = reopened
+        .get_job_run_backend(&run.run_id)
+        .expect("read run")
+        .expect("run exists");
+    assert_eq!(stored.state, JobRunState::Running);
+
+    assert_eq!(
+        reopened
+            .reconcile_stale_job_runs(None)
+            .expect("explicit reconciliation"),
+        1
+    );
+    let reconciled = reopened
+        .get_job_run_backend(&run.run_id)
+        .expect("read reconciled run")
+        .expect("run exists");
+    assert_eq!(reconciled.state, JobRunState::Interrupted);
+}
+
+#[test]
+fn workspace_open_reconciles_without_a_complete_managed_run_context() {
+    let _guard = ENV_LOCK.lock().expect("lock env");
+    for (managed_context, run_id) in [
+        (None, Some("jrun-unmanaged")),
+        (Some("false"), Some("jrun-false")),
+        (Some("not-a-boolean"), Some("jrun-malformed")),
+        (Some("true"), None),
+        (Some("1"), Some("   ")),
+    ] {
+        assert_eq!(
+            reopened_stale_run_state(managed_context, run_id),
+            JobRunState::Interrupted,
+            "managed context={managed_context:?}, run id={run_id:?}",
+        );
     }
 }
 

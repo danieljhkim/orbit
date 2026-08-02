@@ -33,6 +33,7 @@ use orbit_tools::{
 use serde_json::{Map, Value, json};
 
 use crate::OrbitRuntime;
+use crate::runtime::run_input::managed_run_context_run_id_from_env;
 
 pub(crate) fn build_orbit_tool_host(
     runtime: &OrbitRuntime,
@@ -840,16 +841,7 @@ impl OrbitToolHost for RuntimeOrbitToolHost {
 }
 
 fn trusted_env_run_id() -> Option<String> {
-    let managed = std::env::var("ORBIT_MANAGED_RUN_CONTEXT")
-        .ok()
-        .is_some_and(|value| matches!(value.trim(), "1" | "true" | "TRUE"));
-    if !managed {
-        return None;
-    }
-    std::env::var("ORBIT_RUN_ID")
-        .ok()
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty())
+    managed_run_context_run_id_from_env()
 }
 
 #[cfg(test)]

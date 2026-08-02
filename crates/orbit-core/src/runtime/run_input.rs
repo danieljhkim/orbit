@@ -1,5 +1,35 @@
 use serde_json::Value;
 
+/// Environment marker emitted only for an Orbit-managed activity together
+/// with the owning run id. Both values form the managed-run trust boundary:
+/// the marker alone is not enough to attribute work to a run or to grant
+/// managed-child behavior.
+pub(crate) const ORBIT_MANAGED_RUN_CONTEXT_ENV: &str = "ORBIT_MANAGED_RUN_CONTEXT";
+
+/// Return the trusted managed run id from the activity envelope.
+///
+/// A managed child may have a deliberately narrower process view than its
+/// host worker (for example, under Bubblewrap's private PID namespace). Keep
+/// the marker and non-blank run id coupled so callers can make decisions at
+/// that authority boundary without trusting a standalone environment marker.
+pub(crate) fn managed_run_context_run_id_from_env() -> Option<String> {
+    let managed = std::env::var(ORBIT_MANAGED_RUN_CONTEXT_ENV)
+        .ok()
+        .is_some_and(|value| matches!(value.trim(), "1" | "true" | "TRUE"));
+    if !managed {
+        return None;
+    }
+
+    std::env::var("ORBIT_RUN_ID")
+        .ok()
+        .and_then(|value| non_empty(&value).map(ToOwned::to_owned))
+}
+
+/// Whether this process is a trusted child of an Orbit-managed run.
+pub(crate) fn managed_run_context_from_env() -> bool {
+    managed_run_context_run_id_from_env().is_some()
+}
+
 /// Extract the singular task id from run/activity input shapes that are meant
 /// to identify exactly one task.
 pub(crate) fn singular_task_id_from_input(input: &Value) -> Option<&str> {

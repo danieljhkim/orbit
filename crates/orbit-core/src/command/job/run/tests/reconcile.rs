@@ -99,6 +99,7 @@ fn show_job_run_repairs_terminal_run_missing_timing() {
 /// instead of deferring consumers forever.
 #[test]
 fn workspace_open_reconciles_orphaned_pending_children_of_interrupted_parent() {
+    let _env = orbit_common::test_env::unset(["ORBIT_MANAGED_RUN_CONTEXT", "ORBIT_RUN_ID"]);
     let (root, runtime) = test_runtime();
     let parent = insert_pending_run(&runtime, "task_auto_pipeline");
     runtime

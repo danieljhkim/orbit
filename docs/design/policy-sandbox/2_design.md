@@ -149,6 +149,14 @@ The deterministic argv starts with a read-only bind of `/`, explicitly retains t
 
 Existing matches of non-subtree negative globs are mounted read-only before spawn. Because mount namespaces cannot reject a matching filename created later, direct invocations with an overlapping non-subtree deny fail closed. An Orbit-managed single-writer worktree may run with snapshot expansion, followed by a post-run scan that rejects any newly-created forbidden match before downstream commit. Audit metadata records the effective backend, trusted wrapper, probe outcome, redacted effective argv, `write_enforced` or `write_delegated`, and the honest `read_delegated` boundary. [ORB-10552] [ADR-0304]
 
+Bubblewrap's private PID namespace also establishes a liveness-authority boundary. A nested
+`orbit` command receiving both truthy `ORBIT_MANAGED_RUN_CONTEXT` and a non-blank
+`ORBIT_RUN_ID` is a managed child, not an authority for its host pipeline worker. On runtime
+open it skips only the opportunistic orphan scan: the host worker can be alive while invisible
+inside that namespace. Top-level runtime opens and explicit host recovery surfaces retain their
+normal reconciliation behavior. Do not weaken the PID namespace, enable bare fallback, or infer
+that an invisible host worker is dead from inside a sandboxed child. [ORB-10557]
+
 ---
 
 ## 8. Process Supervision
