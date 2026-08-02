@@ -803,6 +803,12 @@
         "required": true
       },
       {
+        "description": "One-line handle identifying the problem, at most 120 characters. This is what lists and searches show, so name the surface and the failure. Derived from the body's opening line when omitted",
+        "name": "title",
+        "param_type": "string",
+        "required": false
+      },
+      {
         "description": "Friction taxonomy tags as a string or array; valid tags: build | docs | lifecycle | naming | other | policy | skill-guidance | tooling; defaults to other",
         "name": "tags",
         "param_type": "string_list",
@@ -940,6 +946,12 @@
       {
         "description": "Optional replacement markdown body",
         "name": "body",
+        "param_type": "string",
+        "required": false
+      },
+      {
+        "description": "Optional replacement one-line title, at most 120 characters; an empty string restores derivation from the body",
+        "name": "title",
         "param_type": "string",
         "required": false
       }

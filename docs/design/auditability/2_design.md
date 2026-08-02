@@ -155,6 +155,8 @@ After [T20260428-17] and [T20260430-4], local task review and GitHub PR review a
 
 After [T20260510-13] and [ORB-00062], friction reporting is outside the task lifecycle: `orbit.friction.add` writes markdown records under `.orbit/frictions/`; `orbit.friction.list/show/tags/update/resolve` expose scan and triage helpers; and `orbit.friction.stats` computes `open`, `triaged`, `resolved_this_month`, total resolved count, and model/tag rates on demand from that corpus plus task completion attribution. After [ORB-10202], `friction` is no longer a `TaskStatus` variant or accepted persisted task value. The dashboard `Knowledge > Frictions` subtab delegates to the same tool helpers through `/api/frictions*`, so human triage and CLI/MCP reads share one vocabulary and stats shape.
 
+After [ORB-10590], a record carries an author-settable `title` — its handle in `friction list`, the dashboard, and the pre-filing search that decides whether a problem is already known. `orbit.friction.add` accepts it and `orbit.friction.update` can retitle a record without touching its append-only body. Callers that supply none get one derived from the body at write time, so the frontmatter always states the handle rather than leaving every reader to re-derive it; records written before the field existed carry no `title` and derive one on read instead, which is why no migration pass is owed. Derivation is structural (`orbit_common::friction::title`): a leading heading is the record's own title only when no sibling heading at its level or shallower follows it, a leading bold run is an inline lead-in whose sentence is the subject, and the result is clamped to `FRICTION_TITLE_MAX_CHARS`. There is no separate `summary` field — [ADR-0323] records why the record keeps exactly one short handle.
+
 ---
 
 ## 9. Global Process Tracing JSONL
@@ -225,5 +227,7 @@ Each record contains timestamp, level, target, and structured fields. After [T20
 - **[ORB-10325]** — Remove graph from MCP and registered tool dispatch while preserving the direct `orbit graph` CLI.
 - **[ORB-10357]** — Remove the direct `orbit graph` CLI too; the graph has no audited surface left.
 - **[ORB-10451]** — Attribute CLI and dashboard runtimes from the canonical agent env envelope, recording unenveloped callers as unknown.
+
+- **[ORB-10590]** — Gave friction records an author-settable `title` and replaced first-line derivation with a structural, write-time fallback ([ADR-0323]).
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

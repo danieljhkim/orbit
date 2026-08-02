@@ -106,6 +106,8 @@ pub(super) struct CreateFrictionBody {
     #[serde(default)]
     model: Option<String>,
     #[serde(default)]
+    title: Option<String>,
+    #[serde(default)]
     body: Option<String>,
     #[serde(default)]
     tags: Option<Vec<String>>,
@@ -119,6 +121,10 @@ pub(super) struct FrictionPatchBody {
     status: Option<String>,
     #[serde(default)]
     tags: Option<Vec<String>>,
+    /// Retitling a record is triage, not a body edit: an operator can give a
+    /// legacy record a usable handle without touching its append-only report.
+    #[serde(default)]
+    title: Option<String>,
 }
 
 pub(super) async fn list_frictions(
@@ -189,6 +195,7 @@ pub(super) async fn create_friction_action(
     let mut call = FrictionCall::new(FrictionVerb::Add);
     let built = (|| {
         call.set_optional("model", body.model.as_deref())?;
+        call.set_optional("title", body.title.as_deref())?;
         if let Some(friction_body) = body.body {
             call.set("body", Value::String(friction_body))?;
         }
@@ -238,8 +245,9 @@ pub(super) async fn update_friction_action(
         return bad_request("request body must include `status` or `tags`".to_string());
     };
     let status = body.status.as_deref().and_then(non_empty_string);
-    if status.is_none() && body.tags.is_none() {
-        return bad_request("request body must include `status` or `tags`".to_string());
+    let title = body.title.as_deref().and_then(non_empty_string);
+    if status.is_none() && body.tags.is_none() && title.is_none() {
+        return bad_request("request body must include `status`, `tags`, or `title`".to_string());
     }
 
     let built = id_call(FrictionVerb::Update, id).and_then(|mut call| {
@@ -248,6 +256,9 @@ pub(super) async fn update_friction_action(
         }
         if let Some(tags) = body.tags {
             call.set("tags", json!(tags))?;
+        }
+        if let Some(title) = title {
+            call.set("title", Value::String(title))?;
         }
         Ok(call)
     });

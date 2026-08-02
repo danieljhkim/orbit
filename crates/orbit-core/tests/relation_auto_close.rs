@@ -28,6 +28,7 @@ fn add_test_friction(runtime: &OrbitRuntime) -> String {
         &runtime.data_root().join("frictions"),
         FrictionAddParams {
             model: "codex".to_string(),
+            title: None,
             body: "Approval should close this friction".to_string(),
             tags: vec!["tooling".to_string()],
             during_task: None,

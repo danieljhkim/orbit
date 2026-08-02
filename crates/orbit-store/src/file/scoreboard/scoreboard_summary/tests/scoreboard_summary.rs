@@ -596,6 +596,7 @@ fn summary_exposes_friction_reported_counts_from_records() {
         crate::friction_store::StoredFrictionRecord {
             record: orbit_common::types::FrictionRecord {
                 id: "F001".to_string(),
+                title: None,
                 model: "codex".to_string(),
                 created_at: Utc::now(),
                 status: orbit_common::types::FrictionStatus::Open,
@@ -610,6 +611,7 @@ fn summary_exposes_friction_reported_counts_from_records() {
         crate::friction_store::StoredFrictionRecord {
             record: orbit_common::types::FrictionRecord {
                 id: "F002".to_string(),
+                title: None,
                 model: "claude-3-opus".to_string(),
                 created_at: Utc::now(),
                 status: orbit_common::types::FrictionStatus::Resolved,

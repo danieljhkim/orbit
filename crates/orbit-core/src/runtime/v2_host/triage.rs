@@ -132,6 +132,10 @@ fn mark_triage_gave_up(
         &runtime.data_root().join("frictions"),
         FrictionAddParams {
             model: "system".to_string(),
+            title: Some(format!(
+                "Triage exhausted its re-backlog budget for task {}",
+                task.id
+            )),
             body: format!(
                 "Triage exhausted its re-backlog budget ({max_rebacklogs}) for task {} — \
                  its workflow runs keep failing (latest: {run_id}). The task stays \

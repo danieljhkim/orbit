@@ -3,7 +3,7 @@ use std::str::FromStr;
 use std::sync::Arc;
 
 use chrono::Utc;
-use orbit_common::friction::FrictionVerb;
+use orbit_common::friction::{FrictionVerb, effective_title, normalize_title};
 use orbit_common::types::{
     FrictionStatus, NotFoundKind, OrbitError, Task, TaskComment, TaskPriority, TaskStatus,
     TaskType, ToolSessionContext, is_valid_friction_id, normalize_optional_attribution_label,
@@ -720,6 +720,9 @@ impl HubCoordinationExecutor {
                     &root,
                     FrictionAddParams {
                         model,
+                        title: optional_raw_string(&input, "title")?
+                            .map(|raw| normalize_title(&redact_all(&raw)))
+                            .transpose()?,
                         body: redact_all(&required_string(
                             &input,
                             &["body", "description"],
@@ -745,9 +748,15 @@ impl HubCoordinationExecutor {
                     .transpose()?;
                 let tags = optional_csv_or_string_list_alias(&input, &["tags", "tag"])?;
                 let body = optional_string(&input, "body")?.map(|value| redact_all(&value));
-                if status.is_none() && tags.is_none() && body.is_none() {
+                let title = match optional_raw_string(&input, "title")? {
+                    None => None,
+                    Some(raw) if raw.trim().is_empty() => Some(None),
+                    Some(raw) => Some(Some(normalize_title(&redact_all(&raw))?)),
+                };
+                if status.is_none() && tags.is_none() && body.is_none() && title.is_none() {
                     return Err(OrbitError::InvalidInput(
-                        "orbit.friction.update requires `status`, `tags`, or `body`".to_string(),
+                        "orbit.friction.update requires `status`, `tags`, `body`, or `title`"
+                            .to_string(),
                     ));
                 }
                 friction_json(update_friction(
@@ -756,6 +765,7 @@ impl HubCoordinationExecutor {
                     FrictionUpdateParams {
                         status,
                         tags,
+                        title,
                         body,
                         resolved_by_task: None,
                         updated_at: Utc::now(),
@@ -812,8 +822,22 @@ fn raw_clearable(input: &Value, field: &str) -> Result<Option<Option<String>>, O
 fn friction_json(
     stored: orbit_store::friction_store::StoredFrictionRecord,
 ) -> Result<Value, OrbitError> {
-    serde_json::to_value(&stored.record)
-        .map_err(|error| OrbitError::Store(format!("serialize friction record: {error}")))
+    let record = &stored.record;
+    let mut value = serde_json::to_value(record)
+        .map_err(|error| OrbitError::Store(format!("serialize friction record: {error}")))?;
+    // Match the checkout-backed projection: `title` is always on the wire, so
+    // a hub consumer never has to know derivation exists.
+    if let Some(object) = value.as_object_mut() {
+        object.insert(
+            "title".to_string(),
+            json!(effective_title(
+                record.title.as_deref(),
+                &record.body,
+                &record.id
+            )),
+        );
+    }
+    Ok(value)
 }
 
 fn strip_private_friction_paths(value: &mut Value) {

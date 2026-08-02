@@ -3,7 +3,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use chrono::{DateTime, Datelike, TimeZone, Utc};
-use orbit_common::friction::DEFAULT_FRICTION_TAGS;
+use orbit_common::friction::{DEFAULT_FRICTION_TAGS, derive_title};
 use orbit_common::types::{
     FrictionFrontmatter, FrictionRecord, FrictionStatus, OrbitError, Task, TaskStatus,
     all_agent_families, infer_agent_family_from_model, normalize_optional_attribution_label,
@@ -235,6 +235,9 @@ fn directory_trees_identical(left: &Path, right: &Path) -> Result<bool, OrbitErr
 #[derive(Debug, Clone)]
 pub struct FrictionAddParams {
     pub model: String,
+    /// The record's handle. Callers pass the author's title, or `None` to let
+    /// the store derive one from the body.
+    pub title: Option<String>,
     pub body: String,
     pub tags: Vec<String>,
     pub during_task: Option<String>,
@@ -255,6 +258,9 @@ pub struct FrictionListFilter {
 pub struct FrictionUpdateParams {
     pub status: Option<FrictionStatus>,
     pub tags: Option<Vec<String>>,
+    /// `Some(Some(title))` sets the stored title; `Some(None)` clears it and
+    /// restores derivation from the body.
+    pub title: Option<Option<String>>,
     pub body: Option<String>,
     pub resolved_by_task: Option<String>,
     pub updated_at: DateTime<Utc>,
@@ -288,10 +294,14 @@ pub fn add_friction(
                 path.display()
             )));
         }
+        // Derivation runs here, not on read, so every new record carries an
+        // explicit handle its next reader can see and correct in the file.
+        let title = params.title.clone().or_else(|| derive_title(&params.body));
         write_record_at(
             &path,
             &FrictionRecord {
                 id,
+                title,
                 model: params.model.trim().to_string(),
                 created_at: params.created_at,
                 status: FrictionStatus::Open,
@@ -398,6 +408,9 @@ pub fn update_friction(
             let taxonomy = load_tag_taxonomy(frictions_root)?;
             stored.record.tags = normalize_and_validate_tags(tags, &taxonomy)?;
         }
+        if let Some(title) = params.title {
+            stored.record.title = title;
+        }
         if let Some(body) = params.body {
             stored.record.body = body;
         }
@@ -437,6 +450,7 @@ pub fn resolve_friction(
         FrictionUpdateParams {
             status: Some(FrictionStatus::Resolved),
             tags: None,
+            title: None,
             body: None,
             resolved_by_task: None,
             updated_at: resolved_at,
@@ -456,6 +470,7 @@ pub fn resolve_friction_by_task(
         FrictionUpdateParams {
             status: Some(FrictionStatus::Resolved),
             tags: None,
+            title: None,
             body: None,
             resolved_by_task: Some(task_id.to_string()),
             updated_at: resolved_at,
@@ -615,6 +630,10 @@ fn record_matches_query(record: &FrictionRecord, raw_query: &str) -> bool {
         return true;
     }
     record.id.to_lowercase().contains(&query)
+        || record
+            .title
+            .as_deref()
+            .is_some_and(|title| title.to_lowercase().contains(&query))
         || record.model.to_lowercase().contains(&query)
         || record.status.as_str().contains(&query)
         || record
@@ -698,6 +717,7 @@ fn write_record_at(
 ) -> Result<StoredFrictionRecord, OrbitError> {
     let frontmatter = FrictionFrontmatter {
         id: record.id.clone(),
+        title: record.title.clone(),
         model: record.model.clone(),
         created_at: record.created_at,
         status: record.status,
@@ -735,6 +755,7 @@ fn read_record_at(path: &Path) -> Result<StoredFrictionRecord, OrbitError> {
     Ok(StoredFrictionRecord {
         record: FrictionRecord {
             id: frontmatter.id,
+            title: frontmatter.title,
             model: frontmatter.model,
             created_at: frontmatter.created_at,
             status: frontmatter.status,

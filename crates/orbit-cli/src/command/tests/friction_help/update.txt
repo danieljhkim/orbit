@@ -10,5 +10,6 @@ Options:
       --status <STATUS>  Optional status: open, triaged, or resolved
       --tag <TAGS>       Optional replacement taxonomy tag; repeat or comma-separate for multiple tags
       --body <BODY>      Optional replacement markdown body
+      --title <TITLE>    Optional replacement title, max 120 chars; empty restores derivation
       --json             Output as JSON
   -h, --help             Print help

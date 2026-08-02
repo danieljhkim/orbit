@@ -130,10 +130,15 @@ Friction bodies are append-only markdown reports under `.orbit/frictions/`; thei
 
 ```bash
 orbit tool run orbit.friction.add --input '{
+  "title": "<one line naming the surface and the failure, max 120 chars>",
   "body": "<what happened, where, and why it caused friction>",
   "tags": ["<tag from table>"], "during_task": "<optional task id>",
   "model": "<agent-family>"
 }'
 ```
+
+**Write the `title` yourself.** It is the record's handle everywhere the corpus is scanned — `friction list`, the dashboard, and the search you run *before* filing to check whether a problem is already known. A record whose handle does not name its subject is invisible to that search, which is how the same bug gets diagnosed twice. Name the surface and the failure (`orbit.task.update rejects an id orbit.task.show resolves`), not the shape of your report.
+
+Omitting `title` is allowed and derives one from the body: the opening line, minus a leading section label, clamped to 120 characters. Derivation cannot invent a subject the opening line does not state, so a body that opens with a section heading gets whatever that section's first sentence says. `orbit friction update --title` retitles an existing record without touching its append-only body.
 
 **Rules:** never silently ignore an Orbit problem — always report; never implement large design changes inline, track them first; name the concrete command/file/workflow that broke; report genuine friction only.

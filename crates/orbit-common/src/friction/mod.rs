@@ -5,10 +5,12 @@
 //! wiring all derive from it.
 
 pub mod operations;
+pub mod title;
 
 pub use operations::{
     FRICTION_OPERATIONS, FrictionOperation, FrictionVerb, friction_operation, friction_operations,
 };
+pub use title::{FRICTION_TITLE_MAX_CHARS, derive_title, effective_title, normalize_title};
 
 /// Default friction tags and their human-readable glosses.
 ///

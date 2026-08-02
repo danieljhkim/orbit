@@ -16,6 +16,7 @@ use crate::operation::{
 use crate::types::McpToolPlacement;
 
 use super::friction_tags_literal;
+use super::title::FRICTION_TITLE_MAX_CHARS;
 
 /// Every verb the friction noun supports.
 ///
@@ -92,6 +93,16 @@ const ADD: FrictionOperation = FrictionOperation {
             cli: Some(CliBinding {
                 kind: flag("body"),
                 help: BODY_HELP,
+            }),
+        },
+        ParamSpec {
+            name: "title",
+            param_type: ParamType::String,
+            required: false,
+            mcp_description: Some(ADD_TITLE_HELP),
+            cli: Some(CliBinding {
+                kind: flag("title"),
+                help: ADD_TITLE_CLI_HELP,
             }),
         },
         ParamSpec {
@@ -247,6 +258,16 @@ const UPDATE: FrictionOperation = FrictionOperation {
             }),
         },
         text_param("body", "Optional replacement markdown body"),
+        ParamSpec {
+            name: "title",
+            param_type: ParamType::String,
+            required: false,
+            mcp_description: Some(UPDATE_TITLE_HELP),
+            cli: Some(CliBinding {
+                kind: flag("title"),
+                help: UPDATE_TITLE_CLI_HELP,
+            }),
+        },
     ],
     rejects_agent_field: false,
     mcp: McpExposure::OperatorOnly(McpToolPlacement::Hub),
@@ -281,6 +302,12 @@ pub fn friction_operation(name: &str) -> Option<&'static FrictionOperation> {
 const FRICTION_ID_HELP: Description = Description::Static("Friction record id, e.g. F2026-05-001");
 const BODY_HELP: Description =
     Description::Static("Markdown body describing what happened and why it caused friction");
+// The MCP descriptions carry the authoring guidance an agent needs at call
+// time; the CLI help stays one line so `--help` keeps its compact layout.
+const ADD_TITLE_HELP: Description = Description::Computed(add_title_description);
+const ADD_TITLE_CLI_HELP: Description = Description::Computed(add_title_cli_help);
+const UPDATE_TITLE_HELP: Description = Description::Computed(update_title_description);
+const UPDATE_TITLE_CLI_HELP: Description = Description::Computed(update_title_cli_help);
 const DURING_TASK_HELP: Description =
     Description::Static("Optional task ID being worked on when friction occurred");
 
@@ -334,6 +361,31 @@ const fn flag(long: &'static str) -> CliArgKind {
         long,
         delimiter: None,
     }
+}
+
+fn add_title_description() -> String {
+    format!(
+        "One-line handle identifying the problem, at most {FRICTION_TITLE_MAX_CHARS} characters. \
+         This is what lists and searches show, so name the surface and the failure. \
+         Derived from the body's opening line when omitted"
+    )
+}
+
+fn update_title_description() -> String {
+    format!(
+        "Optional replacement one-line title, at most {FRICTION_TITLE_MAX_CHARS} characters; \
+         an empty string restores derivation from the body"
+    )
+}
+
+fn add_title_cli_help() -> String {
+    format!("One-line record handle, max {FRICTION_TITLE_MAX_CHARS} chars; derived when omitted")
+}
+
+fn update_title_cli_help() -> String {
+    format!(
+        "Optional replacement title, max {FRICTION_TITLE_MAX_CHARS} chars; empty restores derivation"
+    )
 }
 
 fn add_tags_description() -> String {
