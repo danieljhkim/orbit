@@ -117,6 +117,7 @@ ci-fast:
 	./scripts/test-installer-security.sh
 	./scripts/check-dependency-direction.sh
 	./scripts/check-cli-imports.sh
+	./scripts/check-terminal-state-guard.sh
 	./scripts/check-stability.sh
 	./scripts/check-learning-layout.sh
 	./scripts/check-artifact-redaction-guardrail.sh

@@ -45,6 +45,7 @@ fi
 "$repo_root/scripts/test-installer-security.sh"
 "$repo_root/scripts/check-dependency-direction.sh"
 "$repo_root/scripts/check-cli-imports.sh"
+"$repo_root/scripts/check-terminal-state-guard.sh"
 "$repo_root/scripts/check-stability.sh"
 "$repo_root/scripts/check-learning-layout.sh"
 "$repo_root/scripts/check-artifact-redaction-guardrail.sh"

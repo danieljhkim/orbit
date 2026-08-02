@@ -36,18 +36,114 @@ mod command;
 mod output;
 mod parse;
 
-use clap::Parser;
+use clap::{Arg, ArgMatches, Command, CommandFactory, FromArgMatches};
 use orbit_core::ActorIdentity;
 use orbit_remote::runtime::RemoteRuntimeFactory;
 
 #[cfg(test)]
 use crate::command::init::InitCommand;
 use crate::command::operation::{CommandOperation, DispatchContext, RuntimeNeed};
+use crate::output::sink::{FormatArg, OutputSink};
+
+/// Clap id and long name of the global output-format argument.
+const FORMAT_ARG_ID: &str = "format";
+
+/// The global `--format`, declared exactly once for the whole CLI.
+///
+/// It is built here and grafted onto the parsed command rather than added as a
+/// field on [`command::Cli`] because the staged terminal-interface migration
+/// [ORB-10569] owns `main.rs` while concurrent work owns the `command/` tree.
+/// Either declaration site yields the same surface: one declaration, rendered
+/// under `Options:` in `orbit --help` and accepted after a subcommand.
+fn format_arg() -> Arg {
+    Arg::new(FORMAT_ARG_ID)
+        .long(FORMAT_ARG_ID)
+        .value_name("MODE")
+        .value_parser(clap::value_parser!(FormatArg))
+        .help("Output format (default: auto — a table on a terminal, plain text when piped)")
+}
+
+/// Whether this command already declares a `--format` of its own.
+///
+/// `orbit audit export` and `orbit hook pretooluse` do, with their own value
+/// types. Those two keep their meaning; the global flag is simply not offered
+/// there.
+fn declares_format(command: &Command) -> bool {
+    command
+        .get_arguments()
+        .any(|arg| arg.get_long() == Some(FORMAT_ARG_ID))
+}
+
+/// Add [`format_arg`] to the root and to every subcommand that does not
+/// declare its own `--format`.
+///
+/// This walks the tree instead of using `Arg::global`, which would be the
+/// obvious spelling but panics here. A global arg is keyed by *id*: clap
+/// declines to propagate it into a subcommand that already defines the same id
+/// (so `audit export` keeps its own `--format`), but it then propagates the
+/// *values* of every global id up and down the whole match tree regardless of
+/// type. `orbit audit export --format csv` therefore lands an `ExportFormat`
+/// under the root's `format` id, and `orbit --format json audit export` lands a
+/// `FormatArg` under the subcommand's — each one a downcast panic in the other
+/// reader. Declaring the argument per level keeps every value at the level it
+/// was parsed at, where its type is the one that level expects.
+fn install_format_arg(command: Command) -> Command {
+    let subcommands: Vec<String> = command
+        .get_subcommands()
+        .map(|sub| sub.get_name().to_string())
+        .collect();
+
+    let mut command = if declares_format(&command) {
+        command
+    } else {
+        command.arg(format_arg())
+    };
+    for name in subcommands {
+        command = command.mut_subcommand(name, install_format_arg);
+    }
+    command
+}
+
+/// The `--format` value, taken from the deepest level that parsed one.
+///
+/// A level that owns an unrelated `--format` yields a downcast error rather
+/// than a value, which reads here as "no global format was requested".
+fn requested_format(matches: &ArgMatches) -> Option<FormatArg> {
+    let mut level = matches;
+    let mut requested = None;
+    loop {
+        if let Ok(Some(format)) = level.try_get_one::<FormatArg>(FORMAT_ARG_ID) {
+            requested = Some(*format);
+        }
+        match level.subcommand() {
+            Some((_, sub)) => level = sub,
+            None => return requested,
+        }
+    }
+}
+
+/// Parse argv into the derived CLI plus the global `--format` value.
+fn parse_cli() -> (command::Cli, Option<FormatArg>) {
+    let matches = install_format_arg(command::Cli::command()).get_matches();
+    let requested = requested_format(&matches);
+    let cli = command::Cli::from_arg_matches(&matches).unwrap_or_else(|err| err.exit());
+    (cli, requested)
+}
 
 fn main() {
     orbit_common::utility::logging::init_default_subscriber("warn");
 
-    let cli = command::Cli::parse();
+    let (cli, requested_format) = parse_cli();
+    // Resolved once per invocation, before dispatch. Nothing renders through
+    // it yet — see `output::sink` for where this sits in the migration.
+    let sink = OutputSink::from_process(requested_format);
+    tracing::debug!(
+        mode = ?sink.mode(),
+        is_tty = sink.is_tty(),
+        width = sink.width(),
+        color_allowed = sink.color_allowed(),
+        "resolved output sink"
+    );
     let root_override = cli.root.clone();
     let actor = ActorIdentity::from_env();
     let CommandOperation {
