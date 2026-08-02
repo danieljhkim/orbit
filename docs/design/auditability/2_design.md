@@ -126,6 +126,21 @@ After [ORB-10338] (see [ADR-0245]), `InvocationInsertParams.trace` carries an op
 
 After [ORB-10579], each price row also declares whether its input count is exclusive or gross-with-cache. Existing rows default to exclusive accounting; GPT-5.6 rows use gross accounting, so derived pricing subtracts cached-read and both cache-write buckets from the gross input total before charging the full input rate. Checked subtraction makes inconsistent rows unknown instead of silently saturating. Codex JSONL and OpenAI-compatible response parsing retain provider-reported cached-read, standard cache-write, and output buckets; OpenAI reports no 1-hour write bucket, while a malformed stored nonzero count still has a nonzero fallback price. GPT-5.6 results are standard short-context API-equivalent derived estimates. Exact Fast/service-tier and long-context billing remains future work because Orbit does not yet retain those per-request dimensions.
 
+The workspace-local `model-price-audit` auto-task ([ORB-10583]) is the evidence
+collection and reconciliation guard around this table. Once weekly, it
+enumerates exact model strings from `InvocationRecord.model` telemetry and every
+currently priced row, then records authoritative provider pricing, model, and
+caching sources with URLs, retrieval timestamps, rates, units, tiers, and
+effective boundaries. It is report-only: it never edits pricing. A verified
+material discrepancy may create at most one deduplicated proposed remediation
+task for human review; unavailable, contradictory, or ambiguous official
+evidence creates no remediation task. Any recommendation must preserve
+historical rows and use non-overlapping versioned periods, stating uncertainty
+when the exact effective cutoff is not supported. Standard short-context rates
+remain separate from Fast/service-tier and long-context dimensions, which are
+not approximated into the base table. Direct Codex/Claude orchestration-session
+cost is outside the audit scope.
+
 After [ORB-10370], CLI response parsing also fills `InvocationTrace.provider_model` and `provider_cost_usd` directly from provider-owned result metadata. Claude exposes a `modelUsage` map and `total_cost_usd`; when Claude reports its internal helper model beside the requested model, Orbit selects the unique highest-cost map entry and preserves its key verbatim. Gemini exposes an exact model key under `stats.models` but no invocation USD total; Orbit accepts it only when the map has one entry. Codex JSONL and Grok's JSON wrapper do not currently report either value, so they remain `None`. At SQLite ingest, a non-empty provider model wins over the configured request/alias and the configured model remains the fallback. A disagreement emits a retained `WARN` event under `orbit.core.invocation` with job run, activity, CLI, requested model, and provider model fields. This structured mismatch event was chosen instead of a second invocation column: it makes provider routing drift detectable under the default logging filter without migrating or backfilling rows, while `invocations.model` remains the exact model used for pricing and aggregation.
 
 The local dashboard exposes two read-only API surfaces for these traces after [T20260508-14]: `GET /api/runs/:id/logs` returns bounded per-step CLI invocation previews, and `GET /api/diagnostics/errors` returns recent process ERROR rows plus structured agent-stderr error rows sorted newest first. Both endpoints use existing dashboard limit conventions and tolerate missing stored event rows, malformed event JSON, and missing blobs by returning empty or partial arrays.
