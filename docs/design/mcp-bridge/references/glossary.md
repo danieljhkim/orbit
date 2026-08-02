@@ -1,3 +1,9 @@
+---
+type: glossary
+summary: "Glossary — Orbit MCP Bridge"
+last_validated: 2026-08-02
+---
+
 # Glossary — Orbit MCP Bridge
 
 Vocabulary specific to the singular-hub, placement-aware Orbit MCP feature.
