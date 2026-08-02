@@ -32,7 +32,7 @@ The constraints are the point — they're what keep agent-assisted code shippabl
 
 - **Conflict-aware parallel execution.** For `orbit run ship`, each agent run lands in its own git worktree per task, and the gate pipeline reserves task `context_files` as locks before fanning out, rejecting overlapping reservations up front instead of producing merge conflicts later (see [merge throughput chart](docs/assets/merge-throughput.png)). → [docs/design/activity-job/](docs/design/activity-job/)
 
-- **Sandboxed-by-default execution.** Dispatched agent CLIs run under an OS-level sandbox out of the box — FS access scoped to the worktree, network egress gated by per-activity policy. **macOS only today** (via `sandbox-exec`); on Linux/Windows the agent subprocess runs unsandboxed, with in-process FS guards still covering HTTP tools. → [docs/design/policy-sandbox](docs/design/policy-sandbox/)
+- **Sandboxed-by-default execution.** Dispatched agent CLIs run under an OS-level sandbox out of the box — FS access scoped to the worktree, network egress gated by per-activity policy. macOS uses `sandbox-exec`; Linux uses `linux-bwrap` through `/usr/bin/bwrap` after a capability probe. Windows and other unsupported platforms have no shipped OS-level backend, while in-process FS guards still cover HTTP tools. → [docs/design/policy-sandbox](docs/design/policy-sandbox/)
 
 ---
 
@@ -64,7 +64,7 @@ Paste the prompt below into your agent (Claude Code, Codex CLI, or Gemini CLI) *
 > 1. Ask me where I want to clone the Orbit repository (suggest something like `~/code/orbit` or `~/dev/orbit`).
 > 2. Verify the Rust toolchain. Run `cargo --version` and `rustc --version`. Orbit declares `rust-version = "1.89"` (MSRV), so I need Rust **1.89 or newer**. If cargo is missing, or rustc is older than 1.89, **stop and ask me before installing anything** — the canonical path is `rustup` (`curl https://sh.rustup.rs | sh`), but that modifies shell profile, so I want to confirm first. If rustup is already installed but the toolchain is old, suggest `rustup update stable` and confirm before running.
 > 3. Clone `https://github.com/danieljhkim/orbit` into the location from step 1, then run `make install`. This builds with cargo and copies the `orbit` binary to `$INSTALL_BIN_DIR` (default: `~/.cargo/bin`). Confirm the install path with me before running. Verify with `orbit --version`.
-> 4. Run `orbit init` to initialize global state at `~/.orbit`.
+> 4. Run `orbit init` to initialize global state at `~/.orbit`. It selects the host-appropriate sandbox for the shipped executor definitions: `macos-sandbox-exec` on macOS, `linux-bwrap` on Linux, and no OS-level backend on unsupported platforms. On Linux, after `orbit init`, follow the [Linux Bubblewrap host prerequisite](#linux-bubblewrap-host-prerequisite) below and require its capability probe to pass before dispatching agents.
 > 5. From *this* repository (not the Orbit clone), run `orbit workspace init --mcp`. This creates `.orbit/` here and auto-registers Orbit's MCP server with installed agent CLIs (Claude Code, Codex, Gemini).
 > 6. Ask me whether to enable semantic search (**optional**). `orbit semantic install` downloads a small embedder companion plus the default bge-small model (lives under `~/.orbit/embed/`) and powers `orbit search <query> --hybrid` / `orbit search similar <task-id>` over tasks. It requires macOS arm64 or Linux x86_64/aarch64 with glibc >= 2.38; Intel macOS is unsupported for semantic search. Don't install without my OK. If I accept and tasks already exist in this workspace, also run `orbit semantic index` to backfill the corpus.
 > 7. Read the key documents so you actually understand the model:
@@ -90,7 +90,7 @@ Paste the prompt below into your agent (Claude Code, Codex CLI, or Gemini CLI) *
 
 Faster to get running, and the right choice if you don't need to change how Orbit works: `curl`, Homebrew, or an agent plugin all give you a released, signed build. You give up the ability to reshape Orbit's conventions in place — you can always clone later and keep your `.orbit/` state.
 
-**Prerequisites:** at least one supported agent CLI (Codex, Claude Code, or Gemini CLI), authenticated. For PR-based workflows (i.e., `orbit run ship` in the default `--mode pr`), `gh` installed and authenticated; otherwise use `--mode local`.
+**Prerequisites:** at least one supported agent CLI (Codex, Claude Code, or Gemini CLI), authenticated. For PR-based workflows (i.e., `orbit run ship` in the default `--mode pr`), `gh` installed and authenticated; otherwise use `--mode local`. On Linux, install and verify the [Linux Bubblewrap host prerequisite](#linux-bubblewrap-host-prerequisite) after `orbit init`.
 
 <details>
 <summary><strong>Manual setup commands</strong> — copy these into your terminal (click to expand)</summary>
@@ -141,6 +141,31 @@ orbit web connect my-server
 
 </details>
 <br>
+
+### Linux Bubblewrap host prerequisite
+
+`orbit init` persists the host-appropriate sandbox into the shipped executor artifacts. On Linux that value is `linux-bwrap`, which resolves the trusted wrapper at `/usr/bin/bwrap` and fails closed if its namespace-and-mount capability probe cannot run. Install Bubblewrap before dispatching an agent. Ubuntu 24.04 (Noble) also enables AppArmor restrictions on unprivileged user namespaces; without the distro's narrow Bubblewrap profile, the probe fails with `bwrap: setting up uid map: Permission denied`.
+
+On Ubuntu 24.04, run this remediation and verification sequence. It installs the packaged `bwrap-userns-restrict` profile under `/etc/apparmor.d/`, loads it, confirms that AppArmor knows the profile, and runs the same capability shape Orbit probes:
+
+```bash
+sudo apt-get update
+sudo apt-get install --yes bubblewrap apparmor-profiles
+test -x /usr/bin/bwrap
+test -f /etc/apparmor.d/bwrap-userns-restrict
+sudo apparmor_parser -r /etc/apparmor.d/bwrap-userns-restrict
+grep -Fq 'bwrap-userns-restrict' /sys/kernel/security/apparmor/profiles
+
+/usr/bin/bwrap \
+  --die-with-parent \
+  --new-session \
+  --unshare-all \
+  --share-net \
+  --ro-bind / / \
+  -- /bin/true
+```
+
+The final command must exit successfully. If it still reports the UID-map error, do not disable `kernel.apparmor_restrict_unprivileged_userns` globally and do not enable `allow_fallback`; both weaken or bypass the fail-closed boundary. Re-check the packaged profile path and load output, then rerun the probe. Non-Linux setup paths are unchanged.
 
 Full command reference: `orbit --help` and [orbit-cli.com](https://orbit-cli.com).
 

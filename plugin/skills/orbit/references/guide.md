@@ -10,7 +10,7 @@ Get a first-time user from zero to a usable Orbit workspace, then hand off to `o
 
 ## Canonical sources
 
-The README and config reference live in the Orbit repo. On a non-clone install path (plugin or binary-only install) there is no local copy yet — use `WebFetch` against the raw URLs below instead of answering from this snapshot.
+The README and config reference live in the Orbit repo. On a non-clone install path (plugin or binary-only install) there is no local copy yet — use `WebFetch` against the raw URLs below instead of answering from this snapshot. The README's `Linux Bubblewrap host prerequisite` section is also the canonical source for the volatile Linux package, AppArmor, and capability-verification commands.
 
 - Repo: https://github.com/danieljhkim/orbit
 - Raw README: https://raw.githubusercontent.com/danieljhkim/orbit/main/README.md
@@ -43,7 +43,7 @@ Do not paraphrase the commands here. Re-read the README at invocation time; it m
 
 ## Step 3 — Run setup
 
-Follow the destructive-action confirmation rules stated in the README's "Setup via Agent Prompt" block — that is the source of truth. If a step fails (missing toolchain, permission error, registration error), surface the failure and offer `orbit-task` friction reporting to capture it. First-time setup is exactly the signal that exists for.
+Follow the destructive-action confirmation rules stated in the README's "Setup via Agent Prompt" block — that is the source of truth. If a step fails (missing toolchain, permission error, registration error), surface the failure and offer `orbit-task` friction reporting to capture it. After `orbit init`, re-read the current README and route Linux host-readiness work to its `Linux Bubblewrap host prerequisite` section; require that section's `/usr/bin/bwrap` capability probe to pass before handing off to an agent. First-time setup is exactly the signal that exists for.
 
 ## Step 4 — Verify
 
@@ -112,7 +112,7 @@ launch command.
 
 ## Anti-patterns (DO NOT)
 
-- Don't inline install commands, prereq versions, or destructive-action rules in this file. They rot independently from the README.
+- Don't inline install commands, Linux AppArmor remediation, prerequisite versions, or destructive-action rules in this file. They rot independently from the README.
 - Don't run the README setup block from memory. Read it at invocation time.
 - Don't trigger this reference once `.orbit/` exists — use the rest of the `orbit` skill.
 - Don't author the first task silently. Route through `orbit-task`'s create workflow.
