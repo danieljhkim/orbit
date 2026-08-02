@@ -1,6 +1,8 @@
 use chrono::{Duration, Utc};
 use orbit_common::types::OrbitError;
-use orbit_store::scoreboard_summary::{ScoreboardInputs, ScoreboardWindow};
+use orbit_store::scoreboard_summary::{
+    ORCHESTRATION_SCHEMA_VERSION, OrchestrationSummary, ScoreboardInputs, ScoreboardWindow,
+};
 use orbit_store::{AdrListFilter, JobRunQuery};
 
 use crate::OrbitRuntime;
@@ -29,6 +31,7 @@ impl OrbitRuntime {
         let now = Utc::now();
         let since_recent = now - Duration::days(RECENT_WINDOW_DAYS);
         let since_window = window.duration().map(|d| now - d);
+        let orchestration = self.orchestrator_invocation_metrics(since_window, Some(now))?;
 
         let audit_tool_calls = self.audit_tool_call_counts_by_role(since_window.as_ref())?;
         let audit_tool_calls_by_surface =
@@ -64,6 +67,14 @@ impl OrbitRuntime {
                 frictions: &frictions,
                 now: Some(now),
                 window,
+                orchestration: Some(OrchestrationSummary {
+                    schema_version: ORCHESTRATION_SCHEMA_VERSION,
+                    scope: "managed_execution".to_string(),
+                    as_of: orchestration.as_of,
+                    since: orchestration.since,
+                    until: orchestration.until,
+                    buckets: orchestration.buckets,
+                }),
             },
         )?;
         let _ =

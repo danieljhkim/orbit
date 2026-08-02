@@ -205,6 +205,8 @@ function renderScoreboard(summary) {
   const duelCount = $("scoreboard-duel-count");
   const insightsHost = $("scoreboard-insights");
   const insightsCount = $("scoreboard-insights-count");
+  const orchestrationHost = $("scoreboard-orchestration");
+  const orchestrationCount = $("scoreboard-orchestration-count");
 
   const agentsMap = (summary && summary.agents) || {};
   const entries = Object.entries(agentsMap);
@@ -222,6 +224,8 @@ function renderScoreboard(summary) {
     if (duelCount) duelCount.textContent = "—";
     if (insightsHost) syncNodes(insightsHost, []);
     if (insightsCount) insightsCount.textContent = "—";
+    if (orchestrationHost) syncNodes(orchestrationHost, [emptyOrchestrationNode()]);
+    if (orchestrationCount) orchestrationCount.textContent = "—";
     return;
   }
 
@@ -266,6 +270,103 @@ function renderScoreboard(summary) {
       insightsCount.textContent = fired === 0 ? "—" : String(fired);
     }
   }
+
+  // This deliberately does not feed the execution-agent leaderboard above.
+  // Ownership comes from canonical task orchestrators; executor family/model
+  // remains an independent identity in `summary.agents`.
+  if (orchestrationHost) {
+    const orchestration = renderOrchestrationSummary(summary?.orchestration);
+    syncNodes(orchestrationHost, [orchestration]);
+    if (orchestrationCount) {
+      const count = Array.isArray(summary?.orchestration?.buckets)
+        ? summary.orchestration.buckets.length
+        : 0;
+      orchestrationCount.textContent = count === 0 ? "—" : `${count} buckets`;
+    }
+  }
+}
+
+function formatUsd(value) {
+  const amount = typeof value === "number" && Number.isFinite(value) ? value : 0;
+  return `$${amount.toFixed(4)}`;
+}
+
+function bucketLabel(bucket) {
+  switch (bucket?.kind) {
+    case "orchestrator": return `named orchestrator: ${bucket.orchestrator || "unknown"}`;
+    case "shared": return "shared task ownership";
+    case "unattributed": return "unattributed task ownership";
+    case "missing": return "missing linked task";
+    default: return "unknown ownership";
+  }
+}
+
+function costPopulationLine(label, total, knownCount, invocationCount, unknownCount, kind) {
+  const known = asScoreboardNumber(knownCount);
+  const totalInvocations = asScoreboardNumber(invocationCount);
+  const unknown = asScoreboardNumber(unknownCount);
+  if (known === 0) {
+    return `${label}: unknown (0/${totalInvocations} ${kind}; ${unknown} unavailable)`;
+  }
+  return `${label}: ${formatUsd(total)} (${known}/${totalInvocations} ${kind}; ${unknown} unavailable)`;
+}
+
+function renderOrchestrationBucket(bucket) {
+  const invocationCount = asScoreboardNumber(bucket?.invocation_count);
+  const comparableCount = asScoreboardNumber(bucket?.comparable_cost_count);
+  const lines = [
+    costPopulationLine(
+      "provider-reported",
+      bucket?.provider_cost_usd,
+      bucket?.provider_cost_count,
+      invocationCount,
+      bucket?.missing_provider_count,
+      "reported",
+    ),
+    costPopulationLine(
+      "derived estimate",
+      bucket?.derived_cost_usd,
+      bucket?.derived_cost_count,
+      invocationCount,
+      bucket?.unpriced_derived_count,
+      "priced",
+    ),
+  ];
+  if (comparableCount > 0) {
+    lines.push(
+      `comparable same-invocation population: provider ${formatUsd(bucket?.comparable_provider_cost_usd)} / derived ${formatUsd(bucket?.comparable_derived_cost_usd)} / delta ${formatUsd(bucket?.comparable_cost_delta_usd)} (${comparableCount}/${invocationCount})`,
+    );
+  } else {
+    lines.push(`comparable: unknown (no shared provider/derived population; do not reconcile partial sums)`);
+  }
+  return el("article", { class: "scoreboard-orchestration-bucket" }, [
+    el("strong", { text: bucketLabel(bucket) }),
+    el("span", { class: "dim", text: `${invocationCount} managed invocations · ${asScoreboardNumber(bucket?.linked_task_count)} linked tasks` }),
+    ...lines.map((text) => el("div", { text })),
+  ]);
+}
+
+function emptyOrchestrationNode() {
+  return el("div", { class: "empty-state" }, [
+    el("div", { class: "icon", text: "✧" }),
+    el("div", { class: "text", text: "No managed execution cost data yet." }),
+  ]);
+}
+
+function renderOrchestrationSummary(orchestration) {
+  if (!orchestration || !Array.isArray(orchestration.buckets)) return emptyOrchestrationNode();
+  const since = orchestration.since || "all managed execution retained";
+  const until = orchestration.until || orchestration.as_of || "unknown cutoff";
+  const children = [
+    el("p", { text: `Managed execution cost only. Direct interactive Codex or Claude orchestration-session overhead is excluded. Window: ${since} ≤ invocation < ${until} (exclusive cutoff; as of ${orchestration.as_of || "unknown"}).` }),
+    el("p", { class: "dim", text: "Provider-first estimate policy: provider-reported values are primary; derived values remain explicitly labeled estimates with their own coverage. Only the explicitly comparable same-invocation population is safe to compare." }),
+  ];
+  if (orchestration.buckets.length === 0) {
+    children.push(el("div", { class: "empty-state" }, [el("div", { class: "text", text: "No managed invocations in this bounded window." })]));
+  } else {
+    children.push(...orchestration.buckets.map(renderOrchestrationBucket));
+  }
+  return el("section", { class: "scoreboard-orchestration-summary" }, children);
 }
 
 function canonicalScoreboardRows(agentsMap) {
