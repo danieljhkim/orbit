@@ -4,7 +4,7 @@ summary: Check Orbit workspace, database, dashboard, log-sink, job-run, and rout
 tags: [operations, health, doctor, dashboard, routines]
 paths: ["crates/orbit-cmd/src/doctor.rs", "crates/orbit-core/src/command/job/run/reconcile.rs"]
 related_features: [orbit-core, activity-job, routines]
-related_artifacts: [ORB-10005, ORB-10070, ORB-10473, ORB-10501, ADR-0291, ADR-0296]
+related_artifacts: [ORB-10005, ORB-10070, ORB-10473, ORB-10501, ORB-10558, ADR-0291, ADR-0296]
 ---
 
 # Check Orbit Health
@@ -14,7 +14,7 @@ database recovery, or upgrade.
 
 ## Run `orbit doctor`
 
-`orbit doctor` performs eight checks in order. Every check degrades to a row rather than
+`orbit doctor` performs nine checks in order. Every check degrades to a row rather than
 aborting unless the store itself cannot open.
 
 | Check | What it verifies |
@@ -25,6 +25,7 @@ aborting unless the store itself cannot open.
 | `semantic-index` | stale embedding rows; skipped if never indexed |
 | `stale-locks` | `.lock` files under `state/`, `tasks/`, `learnings/`, and `adrs/.locks/` whose recorded holder PID is dead |
 | `job-runs` | orphaned `pending` or `running` runs whose owner process is gone |
+| `task-reservations` | active reservations whose owner run or terminal task association proves the reservation stale |
 | `task-relations` | unresolved relation/dependency targets that would block a task-index rebuild |
 | `id-allocations` | learning/ADR ids pinned to a worktree that no longer exists, with no readable body |
 
@@ -41,15 +42,46 @@ $ orbit doctor
 │                            the flock; safe to delete): …/state/layout.lock                  │
 │                            (dead pid 154488, op: layout upgrade, since 2026-07-04T09:25…)   │
 │ job-runs         ok        no orphaned job runs                                              │
+│ task-reservations ok       no conclusively stale active task reservations                    │
 │ task-relations   ok        no unresolved relation/dependency targets                        │
 │ id-allocations   ok        no learning/ADR allocations pinned to a missing worktree         │
 0 failure(s), 1 warning(s).
 ```
 
 The command exits nonzero only when at least one check is `ERROR`; warnings and skips exit
-zero. `--json` emits an array of objects with `check`, `status`, and `message` fields; statuses
-are lowercase. Lock files flagged by `stale-locks` include holder diagnostics and are safe to
-delete only after confirming the holder PID is dead.
+zero. `--json` emits an array of objects with `check`, `status`, `message`, and `remediation`
+fields; statuses are lowercase and `remediation` is `null` for healthy/skipped rows. Human
+output prints the same guidance as an `Action:` line. Lock files flagged by `stale-locks`
+include holder diagnostics and are safe to delete only after confirming the holder PID is dead.
+
+### Repair stale task reservations
+
+The `task-reservations` check is read-only and intentionally narrower than task-lock listing.
+It warns only when Orbit can prove one of these conditions:
+
+- the recorded owner run no longer exists;
+- the recorded owner run is terminal;
+- the existing run-owner classifier proves a pending/running owner orphaned; or
+- an unowned reservation has one or more associated tasks and every one is `done`, Orbit's
+  terminal task status.
+
+Fresh reservations, reservations owned by live or inconclusively probed runs, and unowned
+reservations with empty, missing, mixed, or non-terminal task associations remain untouched.
+Each warning names the `reservation-…` id, its task/run context, the stale reason, and the exact
+repair command:
+
+```sh
+orbit doctor --fix-stale-task-locks
+```
+
+The repair re-reads and reclassifies each candidate immediately before releasing it, uses the
+normal task-lock release audit path with the `doctor_stale_task_lock` reason, and is idempotent.
+This is distinct from `--fix-stale-locks`, which handles dead-holder filesystem `.lock` files.
+
+There is deliberately no blanket `--fix` or resolve-all option. Configuration repair, database
+recovery, job cancellation, graph cleanup, id-allocation retirement, filesystem lock deletion,
+and task-reservation release have different evidence and safety gates, so each repair remains
+explicit and safety-scoped.
 
 An `id-allocations` warning means an id was allocated inside a worktree that has since been
 reaped, before its body was merged: the body is unrecoverable and the row would otherwise stay

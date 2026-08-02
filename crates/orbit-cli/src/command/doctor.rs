@@ -17,6 +17,10 @@ pub struct DoctorCommand {
     #[arg(long)]
     pub fix_stale_locks: bool,
 
+    /// Release only task reservations whose owner/task state is conclusively inactive.
+    #[arg(long)]
+    pub fix_stale_task_locks: bool,
+
     /// Remove retired graph state from this worktree and the shared workspace.
     #[arg(long)]
     pub remove_graph: bool,
@@ -33,6 +37,12 @@ impl Execute for DoctorCommand {
             let removed = runtime.remove_stale_lock_files()?;
             if !self.json {
                 println!("Removed {removed} stale lock file(s).");
+            }
+        }
+        if self.fix_stale_task_locks {
+            let released = runtime.clear_stale_task_reservations()?;
+            if !self.json {
+                println!("Released {released} stale task reservation(s).");
             }
         }
         if self.remove_graph {
@@ -67,7 +77,7 @@ impl Execute for DoctorCommand {
                 table.add_row(vec![
                     Cell::new(&row.check_name),
                     crate::output::color::doctor_status_color_cell(status_label(row.status)),
-                    Cell::new(&row.message),
+                    Cell::new(human_detail(row)),
                 ]);
             }
             println!("{table}");
@@ -102,7 +112,14 @@ fn status_label(status: WorkspaceDoctorStatus) -> &'static str {
     }
 }
 
-fn doctor_row_json(row: &WorkspaceDoctorResult) -> Value {
+pub(crate) fn human_detail(row: &WorkspaceDoctorResult) -> String {
+    row.remediation.as_ref().map_or_else(
+        || row.message.clone(),
+        |remediation| format!("{}\nAction: {remediation}", row.message),
+    )
+}
+
+pub(crate) fn doctor_row_json(row: &WorkspaceDoctorResult) -> Value {
     json!({
         "check": row.check_name,
         "status": match row.status {
@@ -112,5 +129,6 @@ fn doctor_row_json(row: &WorkspaceDoctorResult) -> Value {
             WorkspaceDoctorStatus::Skipped => "skipped",
         },
         "message": row.message,
+        "remediation": row.remediation,
     })
 }

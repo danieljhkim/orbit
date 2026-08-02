@@ -25,6 +25,7 @@ mod task_block_on_run_failure;
 mod task_locks;
 mod task_records;
 mod task_reservation_cleanup;
+pub use task_reservation_cleanup::StaleTaskReservation;
 pub(crate) mod tool_exec;
 mod v2_host;
 

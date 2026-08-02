@@ -5,6 +5,8 @@
 //! integrity and schema-ledger version, free disk space on the volume
 //! holding `.orbit`, semantic-index staleness, leftover lock files from
 //! crashed holders, orphaned `running`/`pending` job runs, task
+//! reservations whose owner or terminal task association is conclusively
+//! inactive, task
 //! relation/dependency targets that no longer resolve in the registry
 //! (grandfathered relations that block index rebuilds — ORB-10305), and
 //! learning/ADR id allocations pinned to a worktree that has since been
@@ -49,13 +51,38 @@ pub struct WorkspaceDoctorResult {
     pub status: WorkspaceDoctorStatus,
     /// Human-readable detail line.
     pub message: String,
+    /// Exact repair command or explicit manual next step for warning/error rows.
+    pub remediation: Option<String>,
 }
 
 fn check(name: &str, status: WorkspaceDoctorStatus, message: String) -> WorkspaceDoctorResult {
+    let remediation = matches!(
+        status,
+        WorkspaceDoctorStatus::Warning | WorkspaceDoctorStatus::Error
+    )
+    .then(|| {
+        "Address the condition named in the diagnostic details, then rerun `orbit doctor`."
+            .to_string()
+    });
     WorkspaceDoctorResult {
         check_name: name.to_string(),
         status,
         message,
+        remediation,
+    }
+}
+
+fn actionable_check(
+    name: &str,
+    status: WorkspaceDoctorStatus,
+    message: String,
+    remediation: String,
+) -> WorkspaceDoctorResult {
+    WorkspaceDoctorResult {
+        check_name: name.to_string(),
+        status,
+        message,
+        remediation: Some(remediation),
     }
 }
 
@@ -81,6 +108,9 @@ pub trait DoctorCommands {
     /// is currently held by another process.
     fn remove_stale_lock_files(&self) -> Result<usize, OrbitError>;
 
+    /// Release reservations that remain conclusively stale after a write-boundary recheck.
+    fn clear_stale_task_reservations(&self) -> Result<usize, OrbitError>;
+
     /// Remove retired graph state from the exact worktree-local and shared
     /// workspace locations. Missing locations are a successful no-op.
     fn remove_retired_graph_state(&self) -> Result<usize, OrbitError>;
@@ -104,6 +134,7 @@ impl DoctorCommands for OrbitRuntime {
             doctor_check_semantic_index(self),
             doctor_check_stale_locks(self),
             doctor_check_job_runs(self),
+            doctor_check_task_reservations(self),
             doctor_check_task_relations(self),
             doctor_check_id_allocations(self),
         ])
@@ -117,6 +148,10 @@ impl DoctorCommands for OrbitRuntime {
             }
         }
         Ok(removed)
+    }
+
+    fn clear_stale_task_reservations(&self) -> Result<usize, OrbitError> {
+        self.release_stale_task_reservations()
     }
 
     fn remove_retired_graph_state(&self) -> Result<usize, OrbitError> {
@@ -235,13 +270,14 @@ fn doctor_check_semantic_index(runtime: &OrbitRuntime) -> WorkspaceDoctorResult 
                     "no semantic embeddings indexed yet".to_string(),
                 )
             } else if stats.rows.stale_rows > 0 {
-                check(
+                actionable_check(
                     "semantic-index",
                     WorkspaceDoctorStatus::Warning,
                     format!(
                         "{} of {total} embedding rows are stale; re-run `orbit semantic index`",
                         stats.rows.stale_rows
                     ),
+                    "Run `orbit semantic index`, then rerun `orbit doctor`.".to_string(),
                 )
             } else {
                 check(
@@ -282,7 +318,7 @@ fn doctor_check_stale_locks(runtime: &OrbitRuntime) -> WorkspaceDoctorResult {
             format!("{} lock file(s) scanned, none stale", lock_files.len()),
         )
     } else {
-        check(
+        actionable_check(
             "stale-locks",
             WorkspaceDoctorStatus::Warning,
             format!(
@@ -291,8 +327,61 @@ fn doctor_check_stale_locks(runtime: &OrbitRuntime) -> WorkspaceDoctorResult {
                 stale.len(),
                 stale.join("; ")
             ),
+            "Run `orbit doctor --fix-stale-locks`.".to_string(),
         )
     }
+}
+
+/// Active task reservations are diagnosed separately from filesystem lock
+/// files. The runtime classifier deliberately ignores fresh/live/ambiguous
+/// reservations and reports only owner/task states that prove inactivity.
+fn doctor_check_task_reservations(runtime: &OrbitRuntime) -> WorkspaceDoctorResult {
+    let stale = match runtime.list_stale_task_reservations() {
+        Ok(stale) => stale,
+        Err(error) => {
+            return actionable_check(
+                "task-reservations",
+                WorkspaceDoctorStatus::Warning,
+                format!("cannot inspect active task reservations: {error}"),
+                "Resolve the store/runtime error, then rerun `orbit doctor`.".to_string(),
+            );
+        }
+    };
+    if stale.is_empty() {
+        return check(
+            "task-reservations",
+            WorkspaceDoctorStatus::Ok,
+            "no conclusively stale active task reservations".to_string(),
+        );
+    }
+    let detail = stale
+        .iter()
+        .map(|reservation| {
+            let tasks = if reservation.task_ids.is_empty() {
+                "no associated tasks".to_string()
+            } else {
+                format!("tasks {}", reservation.task_ids.join(", "))
+            };
+            let owner = reservation
+                .owner_run_id
+                .as_deref()
+                .map_or_else(|| "unowned".to_string(), |run_id| format!("run {run_id}"));
+            format!(
+                "{} ({tasks}, {owner}): {}",
+                reservation.reservation_id, reservation.reason
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("; ");
+    actionable_check(
+        "task-reservations",
+        WorkspaceDoctorStatus::Warning,
+        format!(
+            "{} conclusively stale active task reservation(s): {detail}",
+            stale.len()
+        ),
+        "Run `orbit doctor --fix-stale-task-locks`.".to_string(),
+    )
 }
 
 /// Delete one dead-holder lock only after acquiring its advisory lock. A
@@ -443,10 +532,11 @@ fn doctor_check_job_runs(runtime: &OrbitRuntime) -> WorkspaceDoctorResult {
             ids.join(", ")
         ));
     }
-    check(
+    actionable_check(
         "job-runs",
         WorkspaceDoctorStatus::Warning,
         segments.join("; "),
+        "For each named running run use `orbit job resume <run_id>`; for each named pending run use `orbit run cancel <run_id>`.".to_string(),
     )
 }
 
@@ -489,7 +579,7 @@ fn doctor_check_task_relations(runtime: &OrbitRuntime) -> WorkspaceDoctorResult 
                 })
                 .collect::<Vec<_>>()
                 .join("; ");
-            check(
+            actionable_check(
                 "task-relations",
                 WorkspaceDoctorStatus::Warning,
                 format!(
@@ -497,6 +587,7 @@ fn doctor_check_task_relations(runtime: &OrbitRuntime) -> WorkspaceDoctorResult 
                      until fixed or removed: {detail}",
                     dangling.len()
                 ),
+                "Inspect each named source with `orbit task show <task-id>` and update or remove its unresolved relation/dependency target.".to_string(),
             )
         }
     }
@@ -548,7 +639,7 @@ fn doctor_check_id_allocations(runtime: &OrbitRuntime) -> WorkspaceDoctorResult 
     {
         detail.push_str(&format!("; and {remaining} more"));
     }
-    check(
+    actionable_check(
         "id-allocations",
         WorkspaceDoctorStatus::Warning,
         format!(
@@ -557,6 +648,7 @@ fn doctor_check_id_allocations(runtime: &OrbitRuntime) -> WorkspaceDoctorResult 
              --fix-orphaned-allocations`: {detail}",
             orphaned.len()
         ),
+        "Run `orbit doctor --fix-orphaned-allocations` after confirming the named worktrees are gone.".to_string(),
     )
 }
 

@@ -1,10 +1,11 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use chrono::{DateTime, Utc};
-use orbit_common::types::{JobRunState, OrbitError};
+use orbit_common::types::{JobRunState, OrbitError, TaskStatus};
 use orbit_store::{
-    ReleasedTaskReservation, TaskReservationOwnedConflictsParams,
-    TaskReservationReleaseByOwnerParams, TaskReservationReleaseReason,
+    ActiveTaskReservation, ReleasedTaskReservation, TaskReservationOwnedConflictsParams,
+    TaskReservationReleaseByOwnerParams, TaskReservationReleaseParams,
+    TaskReservationReleaseReason,
 };
 use serde_json::json;
 
@@ -15,7 +16,153 @@ use super::task_locks::{
     workspace_task_reservation_id,
 };
 
+/// A task reservation that Orbit can prove is no longer protecting live work.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StaleTaskReservation {
+    pub reservation_id: String,
+    pub task_ids: Vec<String>,
+    pub owner_run_id: Option<String>,
+    pub reason: String,
+}
+
 impl OrbitRuntime {
+    /// Read-only classification used by `orbit doctor`.
+    ///
+    /// A reservation is conclusive only when its owner run is absent,
+    /// terminal, or already satisfies the existing orphan-run classifier; or
+    /// when it is unowned and every associated task is `done` (Orbit's only
+    /// terminal task status). Empty/missing/mixed task associations remain
+    /// ambiguous and are deliberately ignored.
+    pub fn list_stale_task_reservations(&self) -> Result<Vec<StaleTaskReservation>, OrbitError> {
+        let reservations = self
+            .stores()
+            .task_reservations()
+            .inspect_active_task_reservations(
+                &workspace_orbit_dir(self),
+                workspace_task_reservation_id(self)?.as_deref(),
+            )?;
+        let mut stale = Vec::new();
+        for reservation in reservations {
+            if let Some(reason) = self.classify_stale_task_reservation(&reservation)? {
+                stale.push(StaleTaskReservation {
+                    reservation_id: reservation.reservation_id,
+                    task_ids: reservation.task_ids,
+                    owner_run_id: reservation.owner_run_id,
+                    reason,
+                });
+            }
+        }
+        Ok(stale)
+    }
+
+    /// Release reservations that are still conclusively stale when re-read
+    /// immediately before their individual mutation. Replays are no-ops.
+    pub fn release_stale_task_reservations(&self) -> Result<usize, OrbitError> {
+        let candidate_ids = self
+            .list_stale_task_reservations()?
+            .into_iter()
+            .map(|candidate| candidate.reservation_id)
+            .collect::<Vec<_>>();
+        let mut released = 0;
+        for reservation_id in candidate_ids {
+            let current = self
+                .stores()
+                .task_reservations()
+                .inspect_active_task_reservations(
+                    &workspace_orbit_dir(self),
+                    workspace_task_reservation_id(self)?.as_deref(),
+                )?
+                .into_iter()
+                .find(|reservation| reservation.reservation_id == reservation_id);
+            let Some(current) = current else {
+                continue;
+            };
+            let Some(stale_reason) = self.classify_stale_task_reservation(&current)? else {
+                continue;
+            };
+            let result = self.stores().task_reservations().release_task_reservation(
+                TaskReservationReleaseParams {
+                    workspace_orbit_dir: workspace_orbit_dir(self),
+                    workspace_id: workspace_task_reservation_id(self)?,
+                    reservation_id: current.reservation_id.clone(),
+                    release_reason: TaskReservationReleaseReason::DoctorStaleTaskLock,
+                    release_metadata_json: Some(
+                        json!({
+                            "source": "orbit doctor --fix-stale-task-locks",
+                            "stale_reason": stale_reason,
+                            "owner_run_id": current.owner_run_id,
+                            "task_ids": current.task_ids,
+                        })
+                        .to_string(),
+                    ),
+                },
+            )?;
+            emit_expired_reservation_events(self, &result.expired_reservations)?;
+            if let Some(reservation) = result.reservation.as_ref() {
+                emit_task_lock_release_event(
+                    self,
+                    reservation,
+                    TaskReservationReleaseReason::DoctorStaleTaskLock,
+                )?;
+                released += 1;
+            }
+        }
+        Ok(released)
+    }
+
+    fn classify_stale_task_reservation(
+        &self,
+        reservation: &ActiveTaskReservation,
+    ) -> Result<Option<String>, OrbitError> {
+        if let Some(owner_run_id) = reservation.owner_run_id.as_deref() {
+            let Some(run) = self.get_job_run_backend(owner_run_id)? else {
+                return Ok(Some(format!("owner run {owner_run_id} is absent")));
+            };
+            if run.state.is_terminal() {
+                return Ok(Some(format!(
+                    "owner run {owner_run_id} is terminal ({})",
+                    run.state
+                )));
+            }
+            let orphaned_running = self
+                .list_orphaned_running_job_runs()?
+                .into_iter()
+                .any(|orphan| orphan.run_id == owner_run_id);
+            let orphaned_pending = self
+                .list_orphaned_pending_job_runs()?
+                .into_iter()
+                .any(|orphan| orphan.run_id == owner_run_id);
+            if orphaned_running || orphaned_pending {
+                return Ok(Some(format!(
+                    "owner run {owner_run_id} is conclusively orphaned ({})",
+                    run.state
+                )));
+            }
+            return Ok(None);
+        }
+
+        if reservation.task_ids.is_empty() {
+            return Ok(None);
+        }
+        let statuses = self
+            .list_tasks()?
+            .into_iter()
+            .map(|task| (task.id, task.status))
+            .collect::<BTreeMap<_, _>>();
+        let all_done = reservation
+            .task_ids
+            .iter()
+            .all(|task_id| statuses.get(task_id) == Some(&TaskStatus::Done));
+        if all_done {
+            Ok(Some(format!(
+                "unowned reservation references only terminal done task(s): {}",
+                reservation.task_ids.join(", ")
+            )))
+        } else {
+            Ok(None)
+        }
+    }
+
     pub(crate) fn finalize_job_run_with_reservation_cleanup(
         &self,
         run_id: &str,

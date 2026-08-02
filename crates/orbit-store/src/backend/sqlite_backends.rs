@@ -9,9 +9,9 @@ use super::contracts::{
     TaskReservationReleaseResult, TaskReservationReserveParams, TaskReservationReserveResult,
     TaskReservationStoreBackend, ToolStoreBackend,
 };
-use crate::Store;
 use crate::scope::{ScopeStrategy, ScopedStore, resolve};
 use crate::sqlite::audit_event_store::{AuditEventFilter, AuditEventInsertParams};
+use crate::{ActiveTaskReservation, Store};
 
 #[derive(Clone)]
 pub(crate) struct SqliteToolStoreBackend {
@@ -173,6 +173,15 @@ pub(crate) struct SqliteTaskReservationStoreBackend {
 }
 
 impl TaskReservationStoreBackend for SqliteTaskReservationStoreBackend {
+    fn inspect_active_task_reservations(
+        &self,
+        workspace_orbit_dir: &str,
+        workspace_id: Option<&str>,
+    ) -> Result<Vec<ActiveTaskReservation>, OrbitError> {
+        self.store
+            .inspect_active_task_reservations(workspace_orbit_dir, workspace_id)
+    }
+
     fn list_active_task_reservations(
         &self,
         workspace_orbit_dir: &str,
