@@ -46,6 +46,7 @@ use crate::command::workflow::ShipMode;
 use crate::context::ActorIdentity;
 use crate::context::OrbitContext;
 use crate::context::OrbitStores;
+use crate::runtime::run_input::managed_run_context_from_env;
 
 pub use orbit_tool_host::HubCoordinationExecutor;
 pub(crate) use orbit_tool_host::build_orbit_tool_host;
@@ -257,7 +258,15 @@ impl OrbitRuntime {
         // whose recorded owner process is conclusively gone flip to
         // `interrupted` so dashboards and `orbit job resume` see them.
         // Best-effort — a scan failure must never block opening the runtime.
-        runtime.reconcile_stale_job_runs_on_open();
+        //
+        // A managed activity child can intentionally have a private PID
+        // namespace (for example, under Linux Bubblewrap), so it cannot
+        // adjudicate the host worker's liveness. Explicit recovery surfaces
+        // still reconcile; only this opportunistic workspace-open scan is
+        // skipped for the trusted managed-run envelope [ORB-10557].
+        if !managed_run_context_from_env() {
+            runtime.reconcile_stale_job_runs_on_open();
+        }
         Ok(runtime)
     }
 

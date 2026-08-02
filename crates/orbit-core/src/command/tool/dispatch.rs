@@ -14,8 +14,12 @@ use serde_json::Value;
 
 use crate::OrbitRuntime;
 use crate::redact_sensitive_env_text;
+use crate::runtime::run_input::{
+    managed_run_context_from_env, managed_run_context_run_id_from_env,
+};
 
-pub(super) const ORBIT_MANAGED_RUN_CONTEXT_ENV: &str = "ORBIT_MANAGED_RUN_CONTEXT";
+#[cfg(test)]
+pub(super) use crate::runtime::run_input::ORBIT_MANAGED_RUN_CONTEXT_ENV;
 
 /// Where a tool invocation arrived from. Captured in the audit row so a single
 /// audit table can attribute tool calls back to their origin (CLI vs MCP).
@@ -478,29 +482,19 @@ pub fn trusted_mcp_audit_context(
 }
 
 pub(super) fn reservation_owner_from_env() -> Option<ReservationOwnerContext> {
-    if !managed_run_context() {
-        return None;
-    }
-
-    std::env::var("ORBIT_RUN_ID")
-        .ok()
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty())
-        .map(|owner_run_id| ReservationOwnerContext {
-            owner_metadata_json: Some(
-                serde_json::json!({
-                    "source": "orbit_cli",
-                })
-                .to_string(),
-            ),
-            owner_run_id,
-        })
+    managed_run_context_run_id_from_env().map(|owner_run_id| ReservationOwnerContext {
+        owner_metadata_json: Some(
+            serde_json::json!({
+                "source": "orbit_cli",
+            })
+            .to_string(),
+        ),
+        owner_run_id,
+    })
 }
 
 fn managed_run_context() -> bool {
-    std::env::var(ORBIT_MANAGED_RUN_CONTEXT_ENV)
-        .ok()
-        .is_some_and(|value| matches!(value.trim(), "1" | "true" | "TRUE"))
+    managed_run_context_from_env()
 }
 
 fn read_agent_identity_from_env() -> (Option<String>, Option<String>) {

@@ -86,6 +86,13 @@ Reconciliation runs best-effort at workspace open and lazily on
 `orbit run history` / `orbit run show`. `orbit doctor` reports orphans read-only. A run
 whose PID is alive but unverifiable is deliberately left alone.
 
+Nested sandboxed activity commands are not a liveness authority for their host worker. When an
+activity child carries truthy `ORBIT_MANAGED_RUN_CONTEXT` and a non-blank `ORBIT_RUN_ID`, its
+workspace open deliberately skips the opportunistic orphan scan: Bubblewrap may place it in a
+private PID namespace where the live host worker appears absent. Investigate and reconcile from
+the host's top-level Orbit process instead. Do not remove the private PID namespace, enable a
+bare fallback, or treat the child's inability to see the worker as evidence of an orphan.
+
 Example after a worker was SIGKILLed mid-step:
 
 ```text
