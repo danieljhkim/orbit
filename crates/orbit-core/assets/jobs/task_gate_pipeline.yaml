@@ -6,6 +6,11 @@
 # `task_pr_pipeline` or `task_local_pipeline` via `invoke_and_wait`.
 #
 # Behavioral contract
+# - `reserve_locks` refuses admission outright — before the first poll —
+#   when a bundled task's `blocked_by` target is archived, rejected, or
+#   dangling. Those edges can never reach `done`, so polling them to the
+#   iteration ceiling only delays a failure by the full wait budget. The
+#   loop is for edges that can still close.
 # - `wait_for_window` polls by calling `reserve_locks` each iteration. The
 #   reserve step is always executed (never skipped) so its output can be
 #   referenced from `break_when` and from the post-loop starvation guard
@@ -75,6 +80,7 @@ spec:
       default_input:
         task_ids: "{{ input.task_ids }}"
         conflicts: "{{ steps.reserve.output.conflicts }}"
+        waiting_on_deps: "{{ steps.reserve.output.waiting_on_deps }}"
         max_wait_seconds: "{{ input.max_wait_seconds }}"
 
     - id: dispatch_child

@@ -159,6 +159,34 @@ impl TaskStatus {
         matches!(self, TaskStatus::Done)
     }
 
+    /// Classifies a *non*-satisfying status as either a legitimate wait or a
+    /// dead end.
+    ///
+    /// `satisfies_dependency` answers "is this edge satisfied now?"; this
+    /// answers the complementary "could waiting ever satisfy it?". A
+    /// dependency in `backlog` / `proposed` / `in-progress` / `review` /
+    /// `blocked` / `someday` returns `None` — it can still reach `done`, so
+    /// callers must keep waiting. `archived` and `rejected` return `Some`:
+    /// both are restorable, but only by an operator editing the task graph,
+    /// never by the passage of time.
+    ///
+    /// This deliberately does *not* widen what counts as satisfied
+    /// (`Done`-only stays) — it only lets dispatch fail loudly instead of
+    /// polling out its whole budget against an edge that cannot close.
+    pub fn dependency_dead_end(self) -> Option<DependencyDeadEnd> {
+        match self {
+            TaskStatus::Archived => Some(DependencyDeadEnd::Archived),
+            TaskStatus::Rejected => Some(DependencyDeadEnd::Rejected),
+            TaskStatus::Proposed
+            | TaskStatus::Backlog
+            | TaskStatus::InProgress
+            | TaskStatus::Review
+            | TaskStatus::Done
+            | TaskStatus::Blocked
+            | TaskStatus::Someday => None,
+        }
+    }
+
     /// Validates a status transition using a short blocklist of invariants:
     ///
     /// 1. **Done is terminal** — no transitions out of done.
@@ -452,6 +480,64 @@ pub struct ResolvedTaskDependency {
 impl ResolvedTaskDependency {
     pub fn label(&self) -> String {
         format!("{} [{}]", self.id, self.status)
+    }
+}
+
+/// Why a `blocked_by` edge can never close on its own.
+///
+/// Distinct from "unmet": an unmet dependency may simply be unfinished, and
+/// waiting is the correct response. A dead end will still be unmet after any
+/// amount of waiting.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum DependencyDeadEnd {
+    /// The dependency ID resolves to no task in this workspace.
+    Missing,
+    /// Soft-deleted. Restorable via `orbit task restore`, not by waiting.
+    Archived,
+    /// Declined. Re-openable to backlog/in-progress, not by waiting.
+    Rejected,
+}
+
+impl DependencyDeadEnd {
+    /// Operator-facing explanation of why the edge is a dead end, phrased so
+    /// the remedy is obvious from the failure message alone.
+    pub fn explanation(self) -> &'static str {
+        match self {
+            DependencyDeadEnd::Missing => {
+                "no such task in this workspace (dangling dependency; drop the blocked_by edge or restore the task)"
+            }
+            DependencyDeadEnd::Archived => {
+                "archived (soft-deleted; restore it or drop the blocked_by edge)"
+            }
+            DependencyDeadEnd::Rejected => {
+                "rejected (re-open it to backlog or drop the blocked_by edge)"
+            }
+        }
+    }
+}
+
+/// A dependency edge that dispatch must refuse rather than wait on.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct UnsatisfiableTaskDependency {
+    /// The task that declares the edge.
+    pub task_id: OrbitId,
+    /// The `blocked_by` target that can never satisfy it.
+    pub dependency_id: OrbitId,
+    /// The dependency's current status, or `missing` when it does not resolve.
+    pub status: String,
+    pub reason: DependencyDeadEnd,
+}
+
+impl UnsatisfiableTaskDependency {
+    pub fn label(&self) -> String {
+        format!(
+            "{} blocked_by {} [{}]: {}",
+            self.task_id,
+            self.dependency_id,
+            self.status,
+            self.reason.explanation()
+        )
     }
 }
 
@@ -773,6 +859,32 @@ pub fn unmet_task_dependencies(
             status_by_id
                 .get(&dependency.id)
                 .is_none_or(|status| !status.satisfies_dependency())
+        })
+        .collect()
+}
+
+/// Returns the task's dependency edges that can never be satisfied by waiting.
+///
+/// Empty means every unmet edge is a legitimate wait, so the caller should
+/// keep polling. Non-empty means polling is futile and the caller should fail
+/// now, naming these edges.
+pub fn unsatisfiable_task_dependencies(
+    task: &Task,
+    status_by_id: &BTreeMap<OrbitId, TaskStatus>,
+) -> Vec<UnsatisfiableTaskDependency> {
+    task.dependencies()
+        .into_iter()
+        .filter_map(|dependency_id| {
+            let (status, reason) = match status_by_id.get(&dependency_id) {
+                None => ("missing".to_string(), DependencyDeadEnd::Missing),
+                Some(status) => (status.to_string(), status.dependency_dead_end()?),
+            };
+            Some(UnsatisfiableTaskDependency {
+                task_id: task.id.clone(),
+                dependency_id,
+                status,
+                reason,
+            })
         })
         .collect()
 }

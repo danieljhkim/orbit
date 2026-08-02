@@ -331,6 +331,197 @@ fn reserve_locks_records_unmet_dependencies_in_run_state() {
     assert_eq!(state.waiting_on_locks, None);
 }
 
+/// Seeds a run and calls `reserve_locks` for `task_ids`, returning both the
+/// action result and the run id so callers can assert on persisted state.
+fn reserve_locks_for(
+    runtime: &OrbitRuntime,
+    task_ids: Vec<String>,
+) -> (String, Result<serde_json::Value, DispatchError>) {
+    let run = runtime
+        .stores()
+        .jobs()
+        .insert_job_run("task_gate_pipeline", 1, Utc::now(), Some(json!({})), None)
+        .expect("insert run");
+    runtime
+        .stores()
+        .jobs()
+        .write_run_state(
+            &run.run_id,
+            &PipelineState::new(run.run_id.clone(), run.job_id.clone(), json!({})),
+        )
+        .expect("write state");
+
+    let result = runtime.run_deterministic(
+        "reserve_locks",
+        &json!({}),
+        &json!({
+            "run_id": run.run_id,
+            "task_ids": task_ids,
+        }),
+        ToolContext::default(),
+    );
+    (run.run_id, result)
+}
+
+fn expect_reserve_locks_failure(result: Result<serde_json::Value, DispatchError>) -> String {
+    match result {
+        Err(DispatchError::DeterministicActionFailed { action, message }) => {
+            assert_eq!(action, "reserve_locks");
+            message
+        }
+        other => panic!("expected reserve_locks to fail fast, got {other:?}"),
+    }
+}
+
+#[test]
+fn reserve_locks_fails_fast_on_archived_dependency() {
+    let runtime = OrbitRuntime::in_memory().expect("build runtime");
+    let dependency = seed_task(&runtime, "Dependency", TaskStatus::Backlog, Vec::new());
+    let blocked = seed_task(
+        &runtime,
+        "Blocked",
+        TaskStatus::Backlog,
+        vec![dependency.clone()],
+    );
+    runtime
+        .archive_task(&dependency)
+        .expect("archive dependency");
+
+    let (run_id, result) = reserve_locks_for(&runtime, vec![blocked.clone()]);
+    let message = expect_reserve_locks_failure(result);
+
+    assert!(
+        message.contains("task.dependencies.unsatisfiable"),
+        "message must be distinguishable from gate.starvation: {message}"
+    );
+    assert!(
+        message.contains(&dependency),
+        "must name the blocker: {message}"
+    );
+    assert!(
+        message.contains(&blocked),
+        "must name the blocked task: {message}"
+    );
+    assert!(message.contains("archived"), "must explain why: {message}");
+    // The dependency IDs land in run state too, so `orbit run show` reports
+    // them without re-deriving the task graph.
+    let state = runtime
+        .read_run_state(&run_id)
+        .expect("read run state")
+        .expect("state exists");
+    assert_eq!(state.waiting_on_deps, Some(vec![dependency]));
+}
+
+#[test]
+fn reserve_locks_fails_fast_on_rejected_dependency() {
+    let runtime = OrbitRuntime::in_memory().expect("build runtime");
+    let dependency = seed_task(&runtime, "Dependency", TaskStatus::Backlog, Vec::new());
+    let blocked = seed_task(
+        &runtime,
+        "Blocked",
+        TaskStatus::Backlog,
+        vec![dependency.clone()],
+    );
+    runtime
+        .reject_task(&dependency, "Decided against.".to_string(), None)
+        .expect("reject dependency");
+
+    let (_, result) = reserve_locks_for(&runtime, vec![blocked]);
+    let message = expect_reserve_locks_failure(result);
+
+    assert!(
+        message.contains("task.dependencies.unsatisfiable"),
+        "{message}"
+    );
+    assert!(message.contains(&dependency), "{message}");
+    assert!(message.contains("rejected"), "{message}");
+}
+
+#[test]
+fn reserve_locks_fails_fast_on_dangling_dependency() {
+    let runtime = OrbitRuntime::in_memory().expect("build runtime");
+    let dependency = seed_task(&runtime, "Dependency", TaskStatus::Backlog, Vec::new());
+    let blocked = seed_task(
+        &runtime,
+        "Blocked",
+        TaskStatus::Backlog,
+        vec![dependency.clone()],
+    );
+    runtime.delete_task(&dependency).expect("delete dependency");
+
+    let (_, result) = reserve_locks_for(&runtime, vec![blocked]);
+    let message = expect_reserve_locks_failure(result);
+
+    assert!(
+        message.contains("task.dependencies.unsatisfiable"),
+        "{message}"
+    );
+    assert!(message.contains(&dependency), "{message}");
+    assert!(message.contains("no such task"), "{message}");
+}
+
+#[test]
+fn reserve_locks_still_waits_on_a_reachable_dependency() {
+    // The legitimate-wait path must be untouched: `reserved: false` with the
+    // blocker recorded, and no error — the gate loop keeps polling.
+    let runtime = OrbitRuntime::in_memory().expect("build runtime");
+    let dependency = seed_task(&runtime, "Dependency", TaskStatus::InProgress, Vec::new());
+    let blocked = seed_task(
+        &runtime,
+        "Blocked",
+        TaskStatus::Backlog,
+        vec![dependency.clone()],
+    );
+
+    let (run_id, result) = reserve_locks_for(&runtime, vec![blocked]);
+    let output = result.expect("reachable dependency must not fail dispatch");
+
+    assert_eq!(output["reserved"], json!(false));
+    assert_eq!(output["waiting_on_deps"], json!([dependency.clone()]));
+    let state = runtime
+        .read_run_state(&run_id)
+        .expect("read run state")
+        .expect("state exists");
+    assert_eq!(state.waiting_on_deps, Some(vec![dependency]));
+}
+
+#[test]
+fn reserve_locks_reports_only_the_dead_end_when_mixed_with_a_live_wait() {
+    let runtime = OrbitRuntime::in_memory().expect("build runtime");
+    let waiting = seed_task(&runtime, "Waiting", TaskStatus::Backlog, Vec::new());
+    let dead_end = seed_task(&runtime, "Dead end", TaskStatus::Backlog, Vec::new());
+    let blocked = seed_task(
+        &runtime,
+        "Blocked",
+        TaskStatus::Backlog,
+        vec![waiting.clone(), dead_end.clone()],
+    );
+    runtime.archive_task(&dead_end).expect("archive dependency");
+
+    let (_, result) = reserve_locks_for(&runtime, vec![blocked]);
+    let message = expect_reserve_locks_failure(result);
+
+    assert!(message.contains(&dead_end), "{message}");
+    assert!(
+        !message.contains(&waiting),
+        "a still-reachable dependency must not be reported as unsatisfiable: {message}"
+    );
+}
+
+#[test]
+fn reserve_locks_publishes_empty_waiting_on_deps_when_dependencies_are_met() {
+    // The gate pipeline references `steps.reserve.output.waiting_on_deps`
+    // unconditionally, so the key must exist on the lock path too.
+    let runtime = OrbitRuntime::in_memory().expect("build runtime");
+    let ready = seed_task(&runtime, "Ready", TaskStatus::Backlog, Vec::new());
+
+    let (_, result) = reserve_locks_for(&runtime, vec![ready]);
+    let output = result.expect("reserve locks");
+
+    assert_eq!(output["waiting_on_deps"], json!([]));
+    assert_eq!(output["reserved"], json!(true));
+}
+
 #[test]
 fn waiting_locks_from_reserve_output_extracts_unique_conflict_files() {
     let locks = waiting_locks_from_reserve_output(&json!({

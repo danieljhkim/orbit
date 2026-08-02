@@ -2,7 +2,8 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::time::{Duration, Instant};
 
 use orbit_common::types::{
-    McpCapability, OrbitError, Role, optional_string_list_alias, unmet_task_dependencies,
+    McpCapability, OrbitError, Role, UnsatisfiableTaskDependency, optional_string_list_alias,
+    unmet_task_dependencies, unsatisfiable_task_dependencies,
 };
 use orbit_engine::DispatchError;
 use orbit_engine::{StateExecutionContext, execute_deterministic_action};
@@ -321,29 +322,51 @@ pub(super) fn run_deterministic(
         // generic `{tool_name, args}` envelope into the activity's
         // input_schema.
         "reserve_locks" => {
-            let waiting_on_deps =
-                unmet_dependency_ids_for_input(runtime, input).map_err(|err| {
-                    DispatchError::DeterministicActionFailed {
-                        action: action.to_string(),
-                        message: format!("{err}"),
-                    }
-                })?;
-            if !waiting_on_deps.is_empty() {
+            let admission = dependency_admission_for_input(runtime, input).map_err(|err| {
+                DispatchError::DeterministicActionFailed {
+                    action: action.to_string(),
+                    message: format!("{err}"),
+                }
+            })?;
+            // Fail before the first poll: an archived/rejected/dangling
+            // `blocked_by` target cannot be cleared by waiting, so returning
+            // `reserved: false` here would burn the gate's whole iteration
+            // budget and then report a file conflict that does not exist.
+            if !admission.unsatisfiable.is_empty() {
                 update_run_waiting_reasons(
                     runtime,
                     input,
-                    Some(waiting_on_deps.clone()),
+                    non_empty(
+                        admission
+                            .unsatisfiable
+                            .iter()
+                            .map(|dependency| dependency.dependency_id.clone())
+                            .collect(),
+                    ),
+                    None,
+                    action,
+                )?;
+                return Err(DispatchError::DeterministicActionFailed {
+                    action: action.to_string(),
+                    message: admission.unsatisfiable_message(),
+                });
+            }
+            if !admission.waiting_on.is_empty() {
+                update_run_waiting_reasons(
+                    runtime,
+                    input,
+                    Some(admission.waiting_on.clone()),
                     None,
                     action,
                 )?;
                 return Ok(serde_json::json!({
                     "reserved": false,
-                    "waiting_on_deps": waiting_on_deps,
+                    "waiting_on_deps": admission.waiting_on,
                     "conflicts": [],
                 }));
             }
 
-            let output = runtime
+            let mut output = runtime
                 .run_tool_with_context_and_role(
                     "orbit.task.locks.reserve",
                     input.clone(),
@@ -354,6 +377,14 @@ pub(super) fn run_deterministic(
                     action: action.to_string(),
                     message: format!("{err}"),
                 })?;
+            // Always publish `waiting_on_deps` (empty here) so the gate
+            // pipeline can reference `steps.reserve.output.waiting_on_deps`
+            // unconditionally, whichever branch produced the output.
+            if let Some(object) = output.as_object_mut() {
+                object
+                    .entry("waiting_on_deps")
+                    .or_insert_with(|| Value::Array(Vec::new()));
+            }
             let waiting_on_locks = waiting_locks_from_reserve_output(&output);
             update_run_waiting_reasons(runtime, input, None, non_empty(waiting_on_locks), action)?;
             Ok(output)
@@ -438,14 +469,48 @@ fn resolve_workspace_ship_input(
     })
 }
 
-fn unmet_dependency_ids_for_input(
+/// The dependency picture for a bundle, split by what the caller should do
+/// about it.
+///
+/// `waiting_on` is the poll-and-retry set; `unsatisfiable` is the fail-now set.
+/// An edge appears in exactly one of them — every unsatisfiable edge is also
+/// unmet, but it is reported only as unsatisfiable so the two causes never
+/// blur together in a diagnostic.
+#[derive(Debug, Default)]
+pub(super) struct BundleDependencyAdmission {
+    pub(super) waiting_on: Vec<String>,
+    pub(super) unsatisfiable: Vec<UnsatisfiableTaskDependency>,
+}
+
+impl BundleDependencyAdmission {
+    /// Failure message for the unsatisfiable set. Prefixed with a stable
+    /// `task.dependencies.unsatisfiable:` marker so an operator (or an
+    /// epic-level orchestrator parsing run errors) can tell this apart from
+    /// `gate.starvation`, which means the opposite thing: waiting was
+    /// legitimate but ran out of budget.
+    pub(super) fn unsatisfiable_message(&self) -> String {
+        let labels = self
+            .unsatisfiable
+            .iter()
+            .map(UnsatisfiableTaskDependency::label)
+            .collect::<Vec<_>>()
+            .join("; ");
+        format!(
+            "task.dependencies.unsatisfiable: {labels}. \
+             These dependency edges can never reach 'done', so waiting cannot clear them \
+             (no file-lock conflict is involved). Fix the task graph and re-dispatch."
+        )
+    }
+}
+
+fn dependency_admission_for_input(
     runtime: &OrbitRuntime,
     input: &Value,
-) -> Result<Vec<String>, OrbitError> {
+) -> Result<BundleDependencyAdmission, OrbitError> {
     let Some(raw_task_ids) =
         optional_string_list_alias(input, &["task_ids", "taskIds", "task-ids"])?
     else {
-        return Ok(Vec::new());
+        return Ok(BundleDependencyAdmission::default());
     };
     let task_ids = parse_task_ids(&serde_json::json!({ "task_ids": raw_task_ids }))?;
     let tasks = runtime.stores().tasks().list_tasks()?;
@@ -454,16 +519,28 @@ fn unmet_dependency_ids_for_input(
         .into_iter()
         .map(|task| (task.id.clone(), task))
         .collect::<BTreeMap<_, _>>();
-    let mut unmet = BTreeSet::new();
+    let mut waiting_on = BTreeSet::new();
+    let mut unsatisfiable = Vec::new();
     for task_id in task_ids {
         let task = task_by_id
             .get(&task_id)
             .ok_or_else(|| OrbitError::not_found(crate::NotFoundKind::Task, task_id.clone()))?;
+        let dead_ends = unsatisfiable_task_dependencies(task, &status_by_id);
+        let dead_end_ids = dead_ends
+            .iter()
+            .map(|dependency| dependency.dependency_id.clone())
+            .collect::<BTreeSet<_>>();
         for dependency in unmet_task_dependencies(task, &status_by_id) {
-            unmet.insert(dependency.id);
+            if !dead_end_ids.contains(&dependency.id) {
+                waiting_on.insert(dependency.id);
+            }
         }
+        unsatisfiable.extend(dead_ends);
     }
-    Ok(unmet.into_iter().collect())
+    Ok(BundleDependencyAdmission {
+        waiting_on: waiting_on.into_iter().collect(),
+        unsatisfiable,
+    })
 }
 
 // `pub(super)` (not private): the sibling `tests/dispatch.rs` unit-tests this
