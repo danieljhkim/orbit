@@ -430,3 +430,61 @@ fn resume_submission_rejects_a_non_terminal_run_before_persisting_anything() {
         .expect("list runs");
     assert_eq!(runs.len(), 1, "a rejected resume persists no new run");
 }
+
+/// [ORB-10597] A terminal state is not proof the source stopped working.
+/// `interrupted` is written by the orphan sweep without any teardown, so a run
+/// condemned in error is still executing — resuming it would start a second
+/// execution against the same worktree, task claims, and delivery tail.
+#[cfg(unix)]
+#[test]
+fn resume_refuses_an_interrupted_run_whose_worker_is_still_alive() {
+    use orbit_common::utility::process_identity::process_start_identity_token;
+
+    let (_root, runtime, _repo_root, global_root) = test_runtime();
+    let jobs_dir = global_root.join("resources/jobs");
+    std::fs::create_dir_all(&jobs_dir).expect("create jobs dir");
+    write_delivery_tail_job(&jobs_dir.join("qa_resume_live.yaml"), "qa_resume_live");
+
+    let pid = std::process::id();
+    if process_start_identity_token(pid).is_none() {
+        // No identity probe on this host; liveness is unknowable and resume is
+        // deliberately permitted rather than blocked.
+        return;
+    }
+    let run = runtime
+        .stores()
+        .jobs()
+        .insert_job_run("qa_resume_live", 1, Utc::now(), None, None)
+        .expect("insert run");
+    // Owned by this very test process, which is unambiguously alive.
+    runtime
+        .stores()
+        .jobs()
+        .mark_job_run_running(&run.run_id, Utc::now(), pid)
+        .expect("mark running");
+    runtime
+        .stores()
+        .jobs()
+        .finalize_job_run(&run.run_id, JobRunState::Interrupted, Utc::now(), Some(1))
+        .expect("condemn run to interrupted");
+
+    let error = runtime
+        .submit_resume_run(&run.run_id, Some("test"))
+        .expect_err("resume must refuse a source whose worker is still alive");
+    assert!(
+        error.to_string().contains("is still alive"),
+        "the refusal must name the live worker: {error}"
+    );
+    assert!(
+        error.to_string().contains(&pid.to_string()),
+        "the refusal must name the pid so an operator can act on it: {error}"
+    );
+
+    let runs = runtime
+        .list_job_runs(JobRunListParams {
+            job_id: Some("qa_resume_live".to_string()),
+            ..Default::default()
+        })
+        .expect("list runs");
+    assert_eq!(runs.len(), 1, "a refused resume persists no new run");
+}

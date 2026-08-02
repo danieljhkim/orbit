@@ -479,6 +479,50 @@ where
     }
 }
 
+/// [ORB-10597] Whether a run's recorded owner process is still executing,
+/// asked *independently of the run's persisted state*.
+///
+/// Marking a run `interrupted` attaches no teardown, so a terminal state is not
+/// by itself evidence that the work stopped. Callers that must distinguish
+/// "terminal and stopped" from "terminal and still executing" ask this instead
+/// of reading `JobRunState::is_terminal`.
+///
+/// Deliberately three-valued: `Unknown` is not a synonym for either answer, and
+/// each caller picks its own fail-safe direction for it — releasing an
+/// `overlap:forbid` slot requires `Stopped`, refusing a resume requires `Alive`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum RunOwnerLiveness {
+    /// A process with the recorded identity answers a liveness probe. Work may
+    /// still be in flight no matter what the run record says.
+    Alive,
+    /// Conclusively gone: no PID was ever recorded, the PID is absent, or it
+    /// now names a different process than the one that claimed the run.
+    Stopped,
+    /// Nothing observable from here is evidence either way — the owner was
+    /// recorded in a foreign PID namespace [ORB-10594], or this platform has no
+    /// probe at all.
+    Unknown,
+}
+
+#[cfg(unix)]
+pub(crate) fn run_owner_liveness(run: &JobRun) -> RunOwnerLiveness {
+    match classify_run_owner(run) {
+        // `ProbeUnavailable` reaches here only when `kill(pid, 0)` succeeded,
+        // so some process holds the PID even though `ps` could not confirm the
+        // identity token. That is enough to refuse to treat the owner as gone.
+        OwnerIdentity::Verified
+        | OwnerIdentity::LegacyLiveUnverified
+        | OwnerIdentity::ProbeUnavailable => RunOwnerLiveness::Alive,
+        OwnerIdentity::Missing | OwnerIdentity::Mismatch => RunOwnerLiveness::Stopped,
+        OwnerIdentity::ForeignPidNamespace => RunOwnerLiveness::Unknown,
+    }
+}
+
+#[cfg(not(unix))]
+pub(crate) fn run_owner_liveness(_run: &JobRun) -> RunOwnerLiveness {
+    RunOwnerLiveness::Unknown
+}
+
 /// Builds the diagnostic message recorded in the failure step when a stale
 /// owner causes a Running run to be reconciled to Failed.
 #[cfg(unix)]

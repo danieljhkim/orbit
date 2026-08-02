@@ -171,19 +171,27 @@ impl OrbitRuntime {
         duration_ms: Option<u64>,
         release_reason: TaskReservationReleaseReason,
     ) -> Result<bool, OrbitError> {
-        // Capture whether the run was already terminal *before* finalizing:
+        // Capture the state the run was in *before* finalizing:
         // `finalize_run` reports `changed == true` even when re-finalizing an
         // already-terminal run, so it can't distinguish the terminalizing write
         // from a replay. The coupling-out block must fire only on the actual
         // transition into a terminal failure state.
-        let was_terminal_before = self
-            .get_job_run_backend(run_id)?
-            .map(|run| run.state.is_terminal())
-            .unwrap_or(false);
+        let prior_state = self.get_job_run_backend(run_id)?.map(|run| run.state);
+        let was_terminal_before = prior_state.is_some_and(JobRunState::is_terminal);
         let changed =
             self.stores()
                 .jobs()
                 .finalize_job_run(run_id, state, finished_at, duration_ms)?;
+        // [ORB-10597] The store keeps the first terminal state and drops this
+        // one. An identical re-finalization is an ordinary idempotent replay; a
+        // *different* terminal outcome is a real contradiction — most sharply,
+        // a run condemned to `interrupted` while it was still working and then
+        // reporting the success it actually reached. That must not vanish, so
+        // it is recorded on the run instead of discarded. See
+        // `command::job::run::conflict` for why the recorded state still wins.
+        if let Some(prior) = prior_state.filter(|prior| prior.is_terminal() && *prior != state) {
+            self.record_terminal_outcome_conflict(run_id, prior, state, finished_at);
+        }
         if state.is_terminal() {
             self.best_effort_release_task_reservations_for_owner_run_id(run_id, release_reason);
             // Coupling-out: block the run's coupled tasks only on the first

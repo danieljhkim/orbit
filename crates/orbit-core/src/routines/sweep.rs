@@ -15,6 +15,7 @@ use orbit_store::{RoutineFireIntentParams, RoutineFireRecord, RoutineFireState, 
 use serde_json::json;
 
 use crate::OrbitRuntime;
+use crate::command::job::{RunOwnerLiveness, run_owner_liveness};
 
 use super::due::{DueDecision, due_decision, parse_cron};
 use super::loader::{
@@ -45,6 +46,12 @@ pub(crate) trait RoutineDispatch {
 
     /// Current run state for a dispatched fire, when the run is queryable.
     fn run_state(&self, source_orbit_dir: &Path, run_id: &str) -> Option<JobRunState>;
+
+    /// [ORB-10597] Whether the run's recorded owner process is still executing,
+    /// asked independently of its persisted state. Consulted only for runs
+    /// marked `interrupted`, which carries no teardown and so is not evidence
+    /// that the work stopped.
+    fn run_owner_liveness(&self, source_orbit_dir: &Path, run_id: &str) -> RunOwnerLiveness;
 }
 
 /// Production dispatch over the per-workspace runtimes discovered this pass.
@@ -75,6 +82,14 @@ impl RoutineDispatch for RuntimeDispatch<'_> {
             .get(source_orbit_dir)
             .and_then(|runtime| runtime.show_job_run(run_id).ok())
             .map(|run| run.state)
+    }
+
+    fn run_owner_liveness(&self, source_orbit_dir: &Path, run_id: &str) -> RunOwnerLiveness {
+        self.runtimes
+            .get(source_orbit_dir)
+            .and_then(|runtime| runtime.show_job_run(run_id).ok())
+            // An unreadable run is not evidence that its worker stopped.
+            .map_or(RunOwnerLiveness::Unknown, |run| run_owner_liveness(&run))
     }
 }
 
@@ -589,27 +604,71 @@ fn sync_unresolved_fires(
                 )?;
             }
             RoutineFireState::Dispatched => {
-                let run_state = fire.run_id.as_deref().and_then(|run_id| {
-                    routines_by_name
-                        .get(&fire.routine_name)
-                        .and_then(|routine| dispatch.run_state(&routine.source_orbit_dir, run_id))
-                });
+                let run_id = fire.run_id.as_deref();
+                let run_state =
+                    run_id.and_then(|run_id| dispatch.run_state(&routine.source_orbit_dir, run_id));
+                // Reclaiming a fire past the policy timeout is what keeps a
+                // routine from wedging forever; it is also the only sanctioned
+                // way an `overlap:forbid` slot is freed while work may still be
+                // in flight.
+                let timed_out = || {
+                    expired.then_some((
+                        RoutineFireState::TimedOut,
+                        Some("exceeded policy timeout without a terminal run state"),
+                    ))
+                };
                 let outcome = match run_state {
                     Some(JobRunState::Success) => Some((RoutineFireState::Succeeded, None)),
                     Some(JobRunState::Failed) => Some((RoutineFireState::Failed, None)),
                     Some(JobRunState::Timeout) => Some((RoutineFireState::TimedOut, None)),
+                    // Cancellation signals the owner and verifies its
+                    // termination, so a cancelled run has genuinely stopped.
                     Some(JobRunState::Cancelled) => {
                         Some((RoutineFireState::Failed, Some("run cancelled")))
                     }
+                    // [ORB-10597] Resolving a fire is what releases the
+                    // `overlap:forbid` slot, and for `interrupted` alone the
+                    // terminal state is not evidence that the work stopped:
+                    // marking a run interrupted attaches no teardown, so a run
+                    // condemned in error keeps executing. Releasing the slot
+                    // then admits a second instance against the same surface
+                    // while the first is still working.
+                    //
+                    // The distinction to draw is terminal-*and-stopped* versus
+                    // terminal-*and-still-executing*, which the run's recorded
+                    // owner answers. A stopped owner releases exactly as before
+                    // — that case is correct and is why this arm cannot simply
+                    // be deleted. An owner that is alive, or that this host
+                    // cannot conclusively probe, is treated as still in flight:
+                    // the slot stays held and the fire is reclaimed only by the
+                    // policy timeout, the same bound every genuinely in-flight
+                    // run already lives under. That bound is what keeps an
+                    // unprobeable owner from wedging the routine forever.
                     Some(JobRunState::Interrupted) => {
-                        Some((RoutineFireState::Failed, Some("run interrupted")))
+                        let liveness = run_id.map_or(RunOwnerLiveness::Unknown, |run_id| {
+                            dispatch.run_owner_liveness(&routine.source_orbit_dir, run_id)
+                        });
+                        match liveness {
+                            RunOwnerLiveness::Stopped => {
+                                Some((RoutineFireState::Failed, Some("run interrupted")))
+                            }
+                            RunOwnerLiveness::Alive | RunOwnerLiveness::Unknown => {
+                                tracing::warn!(
+                                    target: "orbit.core.routines",
+                                    routine = %fire.routine_name,
+                                    slot = %fire.slot,
+                                    run_id = run_id.unwrap_or("-"),
+                                    liveness = ?liveness,
+                                    "routine run is marked interrupted but its worker has not \
+                                     been shown to have stopped; holding the overlap slot",
+                                );
+                                timed_out()
+                            }
+                        }
                     }
                     // Still in flight (or unqueryable): reclaim once past the
                     // policy timeout, otherwise leave for a later pass.
-                    _ => expired.then_some((
-                        RoutineFireState::TimedOut,
-                        Some("exceeded policy timeout without a terminal run state"),
-                    )),
+                    _ => timed_out(),
                 };
                 if let Some((state, detail)) = outcome {
                     store.routine_mark_fire_outcome(

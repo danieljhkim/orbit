@@ -982,7 +982,7 @@ impl OrbitRuntime {
         )
     }
 
-    fn record_pipeline_audit(
+    pub(crate) fn record_pipeline_audit(
         &self,
         tool_name: &str,
         target_id: Option<&str>,
