@@ -116,6 +116,130 @@ fn id_allocation_resets_across_month_boundary() {
     assert_eq!(next_month.record.id, "F2026-06-001");
 }
 
+/// Titles are resolved once, at write time, so the file itself carries the
+/// handle rather than every reader re-deriving one [ORB-10590].
+#[test]
+fn add_stores_the_authors_title_in_the_frontmatter() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let root = temp.path();
+    let mut add = params(TEST_CODEX_MODEL, Utc::now(), vec!["tooling"]);
+    add.title = Some("Queued runs never reach a worker".to_string());
+
+    let stored = add_friction(root, add).expect("add with title");
+
+    assert_eq!(
+        stored.record.title.as_deref(),
+        Some("Queued runs never reach a worker")
+    );
+    let raw = fs::read_to_string(&stored.path).expect("read record");
+    assert!(
+        raw.contains("title: Queued runs never reach a worker"),
+        "{raw}"
+    );
+    let reread = show_friction(root, &stored.record.id)
+        .expect("show")
+        .expect("record");
+    assert_eq!(reread.record.title, stored.record.title);
+}
+
+#[test]
+fn add_without_a_title_persists_the_derived_one() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let root = temp.path();
+    let mut add = params(TEST_CODEX_MODEL, Utc::now(), vec!["tooling"]);
+    add.body = "## What happened\n\nThe worker exited before claiming the run.\n\n## Evidence\n\nOne log line.".to_string();
+
+    let stored = add_friction(root, add).expect("add without title");
+
+    assert_eq!(
+        stored.record.title.as_deref(),
+        Some("The worker exited before claiming the run.")
+    );
+}
+
+#[test]
+fn update_sets_and_clears_the_stored_title() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let root = temp.path();
+    let stored = add_friction(root, params(TEST_CODEX_MODEL, Utc::now(), vec!["tooling"]))
+        .expect("seed record");
+
+    let retitled = update_friction(
+        root,
+        &stored.record.id,
+        FrictionUpdateParams {
+            status: None,
+            tags: None,
+            title: Some(Some("Queued runs never reach a worker".to_string())),
+            body: None,
+            resolved_by_task: None,
+            updated_at: Utc::now(),
+        },
+    )
+    .expect("set title");
+    assert_eq!(
+        retitled.record.title.as_deref(),
+        Some("Queued runs never reach a worker")
+    );
+
+    let cleared = update_friction(
+        root,
+        &stored.record.id,
+        FrictionUpdateParams {
+            status: None,
+            tags: None,
+            title: Some(None),
+            body: None,
+            resolved_by_task: None,
+            updated_at: Utc::now(),
+        },
+    )
+    .expect("clear title");
+    assert_eq!(cleared.record.title, None);
+}
+
+/// A record written before the field existed still parses; its handle comes
+/// from derivation on read, so no migration pass is owed.
+#[test]
+fn a_record_without_a_title_field_still_parses() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let root = temp.path();
+    let month = root.join("2026-05");
+    fs::create_dir_all(&month).expect("month dir");
+    fs::write(
+        month.join("F001.md"),
+        "---\nid: F2026-05-001\nmodel: codex\ncreated_at: 2026-05-17T04:05:00Z\n\
+         status: open\ntags:\n- tooling\n---\nThe worker exited before claiming the run.\n",
+    )
+    .expect("legacy record");
+
+    let stored = show_friction(root, "F2026-05-001")
+        .expect("show")
+        .expect("record");
+
+    assert_eq!(stored.record.title, None);
+    assert_eq!(
+        stored.record.body,
+        "The worker exited before claiming the run."
+    );
+}
+
+#[test]
+fn the_query_filter_matches_a_stored_title() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let root = temp.path();
+    let mut add = params(TEST_CODEX_MODEL, Utc::now(), vec!["tooling"]);
+    add.title = Some("Queued runs never reach a worker".to_string());
+    add_friction(root, add).expect("add with title");
+
+    let filter = FrictionListFilter {
+        q: Some("never reach".to_string()),
+        ..FrictionListFilter::default()
+    };
+
+    assert_eq!(list_frictions(root, &filter).expect("list").len(), 1);
+}
+
 #[test]
 fn tag_validation_uses_taxonomy_file() {
     let temp = tempfile::tempdir().expect("tempdir");
@@ -173,6 +297,7 @@ fn stats_render_zero_rows_for_known_grok_family() {
 fn params(model: &str, created_at: DateTime<Utc>, tags: Vec<&str>) -> FrictionAddParams {
     FrictionAddParams {
         model: model.to_string(),
+        title: None,
         body: "Body".to_string(),
         tags: tags.into_iter().map(str::to_string).collect(),
         during_task: None,

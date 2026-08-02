@@ -5,7 +5,8 @@
 // docs/design-patterns/test_layout.md.
 
 use orbit_common::friction::{
-    DEFAULT_FRICTION_TAGS, FRICTION_OPERATIONS, FrictionVerb, friction_tags_literal,
+    DEFAULT_FRICTION_TAGS, FRICTION_OPERATIONS, FRICTION_TITLE_MAX_CHARS, FrictionVerb,
+    friction_tags_literal,
 };
 use orbit_common::types::{McpToolPlacement, ToolSchema};
 
@@ -53,8 +54,10 @@ fn tags_parameter_description_lists_default_taxonomy() {
     }
 }
 
-/// The `add` schema as it shipped before the registry existed. Parameter order
-/// is part of the contract: it drives the `mcp_tools_list` snapshot.
+/// The `add` schema. Parameter order is part of the contract: it drives the
+/// `mcp_tools_list` snapshot. `title` was appended after `body` by [ORB-10590],
+/// which gave friction authors a settable record handle; every other parameter
+/// keeps the position and wording it shipped with.
 #[test]
 fn add_schema_matches_the_shipped_contract() {
     let schema = schema_for(FrictionVerb::Add);
@@ -69,6 +72,7 @@ fn add_schema_matches_the_shipped_contract() {
         param_shape(&schema),
         vec![
             ("body", "string", true),
+            ("title", "string", false),
             ("tags", "string_list", false),
             ("during_task", "string", false),
             ("model", "string", true),
@@ -79,13 +83,35 @@ fn add_schema_matches_the_shipped_contract() {
         "Markdown body describing what happened and why it caused friction"
     );
     assert_eq!(
-        schema.parameters[2].description,
+        schema.parameters[3].description,
         "Optional task ID being worked on when friction occurred"
     );
     assert_eq!(
-        schema.parameters[3].description,
+        schema.parameters[4].description,
         "Required agent family for attribution (`codex`, `claude`, `gemini`, or `grok`)"
     );
+}
+
+/// Both write verbs describe the title budget from the one constant that
+/// enforces it, so the schema cannot drift from the validator.
+#[test]
+fn title_parameter_descriptions_quote_the_enforced_budget() {
+    for verb in [FrictionVerb::Add, FrictionVerb::Update] {
+        let schema = schema_for(verb);
+        let title = schema
+            .parameters
+            .iter()
+            .find(|param| param.name == "title")
+            .expect("title parameter");
+
+        assert!(
+            title
+                .description
+                .contains(&FRICTION_TITLE_MAX_CHARS.to_string()),
+            "{}",
+            title.description
+        );
+    }
 }
 
 #[test]
@@ -132,7 +158,7 @@ fn update_schema_keeps_its_spelled_out_id_description() {
         .iter()
         .map(|param| param.name.as_str())
         .collect();
-    assert_eq!(params, vec!["id", "status", "tags", "body"]);
+    assert_eq!(params, vec!["id", "status", "tags", "body", "title"]);
     assert_eq!(
         schema.parameters[0].description,
         "Friction record id, e.g. F2026-05-001"

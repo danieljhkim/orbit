@@ -47,6 +47,14 @@ impl FromStr for FrictionStatus {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct FrictionRecord {
     pub id: String,
+    /// The record's handle in lists, tables, and search.
+    ///
+    /// Author-supplied through `orbit.friction.add` / `.update`, and filled in
+    /// from the body at write time when the author supplies none. `None` for a
+    /// record written before the field existed; those derive a handle on read
+    /// (`orbit_common::friction::effective_title`), so no migration is owed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
     /// Model identifier for this friction record (per-invocation actual execution).
     pub model: String,
     pub created_at: DateTime<Utc>,
@@ -66,6 +74,8 @@ pub struct FrictionRecord {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct FrictionFrontmatter {
     pub id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
     pub model: String,
     pub created_at: DateTime<Utc>,
     #[serde(default)]

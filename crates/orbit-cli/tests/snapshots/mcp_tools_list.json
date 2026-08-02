@@ -516,6 +516,10 @@
           ],
           "description": "Friction taxonomy tags as a string or array; valid tags: build | docs | lifecycle | naming | other | policy | skill-guidance | tooling; defaults to other"
         },
+        "title": {
+          "description": "One-line handle identifying the problem, at most 120 characters. This is what lists and searches show, so name the surface and the failure. Derived from the body's opening line when omitted",
+          "type": "string"
+        },
         "workspace": {
           "description": "Workspace selector for broker routing: a registered logical workspace ID or an absolute path to a local checkout (a linked Git worktree resolves to its registered checkout). Optional when the MCP session announced `_meta.orbit.workspace` at initialize; never inferred from process cwd.",
           "type": "string"

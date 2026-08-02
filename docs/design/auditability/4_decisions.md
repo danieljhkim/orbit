@@ -389,6 +389,26 @@ Narrative lives in the ADR store — retrieve it with `orbit tool run orbit.adr.
 
 ---
 
+## ADR-0323 — Friction records carry an author-settable title; derivation is a structural fallback
+
+**Status:** Proposed · 2026-08 · [ORB-10590]
+
+**Context.** A friction record's handle was not a field. `title` existed only on the wire, derived by the read projection from the body's first non-empty line. No write surface accepted one, and nothing said the first line was load-bearing. On a 41-record corpus the derivation tracked authoring style rather than content: a body opening with a section heading derived that label as its title, a body opening with a long lead paragraph derived the whole paragraph. Two records six days apart documented the same bug under the same generic label, so the pre-filing search for prior art found nothing recognisable.
+
+**Decision.** `title` becomes a stored `Option<String>` on the record and its frontmatter, settable through `orbit.friction.add` and retitleable through `orbit.friction.update` without touching the append-only body. Derivation moves to write time and persists what it produced; it stays as the read-side fallback so records written before the field existed need no migration. Derivation is structural, never lexical: a leading heading is a title only when no sibling heading at its level or shallower follows it, a leading bold run is an inline lead-in whose sentence is the subject, and the result is clamped to `FRICTION_TITLE_MAX_CHARS`. No `summary` field is introduced — the record keeps one short handle plus the full report.
+
+**Consequences.**
+- Every record lands with a handle naming its subject, and the existing corpus self-heals on read for both failure modes.
+- A hardcoded list of generic section headings was rejected: it encodes one language and one house style, needs an edit per new label, and cannot address the overlong case at all. Heading count alone separated every well-titled record from every badly-titled one in the surveyed corpus.
+- Refusing an add whose derived title looks non-identifying was rejected as a break for existing callers and the same brittle judgement in a different place.
+- Cost: the `orbit.friction.add` / `.update` MCP schemas gain a parameter. Additive and optional, but still release-visible schema drift.
+- Cost: the structural rules can still under-serve a body whose subject appears in its second sentence; the stored field is the escape hatch, which is why derivation is only the fallback.
+- Cost: `--title` is unreachable until the deployed `orbit` binary is rebuilt, so records that need a human title cannot be retitled the moment this lands. The data pass for the records that motivated the decision is [ORB-10598].
+
+Full narrative: `orbit tool run orbit.adr.show --input '{"id":"ADR-0323"}'`.
+
+---
+
 ## Task References
 
 - **[T20260419-0002]** — Add workspace provenance and v2 audit envelope events for activity/job execution.
@@ -434,5 +454,7 @@ Narrative lives in the ADR store — retrieve it with `orbit tool run orbit.adr.
 - **[ORB-10519]** — Keep the persisted crew-model author and process-scoped Orbit committer while removing hook-specific trailer input and provider-commit adoption ([ADR-0299], superseding [ADR-0249] and [ADR-0294]).
 - **[ORB-10369]** — Introduce the persisted resolved crew model as the pipeline commit author with generic fallback and no alias resolver ([ADR-0249], superseded by [ADR-0299]).
 - **[ORB-10496]** — Record the spawned provider subprocess PID as its own audit event and expose read-time liveness through run status and `orbit run show`.
+
+- **[ORB-10590]** — Make the friction record handle an author-settable field and derive it structurally when omitted ([ADR-0323]).
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

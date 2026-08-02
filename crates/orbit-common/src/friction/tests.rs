@@ -4,6 +4,8 @@
 //! bijection, names are unique and well-formed, and the shipped MCP/CLI strings
 //! are what consumers already depend on.
 
+mod title;
+
 use std::collections::BTreeSet;
 
 use super::operations::{FRICTION_OPERATIONS, FrictionVerb, friction_operation};
