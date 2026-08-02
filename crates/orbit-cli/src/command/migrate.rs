@@ -109,7 +109,10 @@ fn print_status(
         }));
     }
 
-    let mut table = crate::output::table::build_table(&["COMPONENT", "CURRENT", "SUPPORTED"]);
+    // A fixed-shape status readout, not a result set: every component is named
+    // even when the two version columns happen to agree.
+    let mut table = crate::output::table::build_table(&["COMPONENT", "CURRENT", "SUPPORTED"])
+        .keep_all_columns();
     table.add_row(vec![
         "workspace layout".to_string(),
         status.layout_version.to_string(),
@@ -120,7 +123,7 @@ fn print_status(
         status.schema_version.to_string(),
         status.schema_supported.to_string(),
     ]);
-    println!("{table}");
+    table.print();
     println!(
         "\nworkspace: {} (orbit {})",
         status.orbit_dir.display(),

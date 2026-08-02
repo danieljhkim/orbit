@@ -2,12 +2,12 @@
 title: Terminal Interface — Design
 owner: claude
 last_updated: 2026-08-02
-last_validated: 2026-08-01
+last_validated: 2026-08-02
 status: Accepted
 feature: terminal-interface
 doc_role: design
 type: design
-summary: "Current orbit-cli output implementation — comfy-table bordered tables, duplicated color vocabularies, per-command --json, and a resolved-but-unconsumed output sink — and where it diverges from the specs."
+summary: "Current orbit-cli output implementation — borderless single-line tables, one semantic color mapping behind legacy wrappers, sink resolved but unconsumed — and where it still diverges from the specs."
 tags: [terminal-interface]
 paths: ["crates/orbit-cli/src/output/**", "crates/orbit-cli/src/command/**"]
 related_features: [terminal-interface]
@@ -20,17 +20,17 @@ This document describes what `orbit-cli` renders today. It is deliberately a rec
 
 ## 1. The Output Module
 
-`crates/orbit-cli/src/output/` has three submodules and 217 lines total. `table.rs` builds `comfy_table::Table` values, `color.rs` maps domain values to styles, `json.rs` serializes payloads and error envelopes. There is no renderer abstraction above them: they are helper functions that command bodies call directly.
+`crates/orbit-cli/src/output/` has three submodules and 601 lines total. `table.rs` owns list rendering, `color.rs` maps domain values to styles, `json.rs` serializes payloads and error envelopes. There is no renderer abstraction above them: they are helper functions that command bodies call directly. `table.rs` is the one module with a rendering policy of its own rather than a pass-through to a library (§2).
 
 `json.rs` is the closest thing to a contract. It owns `error_payload`, which projects an `OrbitError` into `{error, code}` plus optional `did_you_mean`, `artifact_origin`, and task-bundle corruption fields. Error output is therefore already payload-shaped in a way that normal output is not. Two caveats: the `code` discriminator gained a `_ => "internal_error"` catch-all when `OrbitError` became `#[non_exhaustive]` [ORB-10356], so an unmapped variant degrades silently rather than failing to compile; and a `RemoteTool` error returns the remote payload verbatim, bypassing the shape entirely, so a consumer cannot assume `code` is present.
 
 ## 2. Table Construction
 
-`build_table` is the single constructor, used by 21 command modules. It applies four settings: the `UTF8_BORDERS_ONLY` preset, `ContentArrangement::DynamicFullWidth`, `…` as the truncation indicator, and a bold header row.
+`output/table.rs` owns a `Table` type that buffers rows and renders them itself; `comfy_table` is an implementation detail it never hands out. `Table::add_row` is the only row constructor and caps every row at `Row::max_height(1)`, so the unbounded path that made a row span three or four lines is unreachable from a command module [ORB-10567]. The 21 command modules construct either `build_table(&headers)` (all columns plain text) or `Table::new(vec![Column…])` when a column is an identifier, a number, or a path.
 
-The preset draws the outer box and the header rule visible in `orbit tool list`. The arrangement expands the table to the terminal width and, on overflow, **wraps** rather than truncates — it was introduced to make tables survive narrow terminals [T20260411-0335], and it does, at the cost described below. The truncation indicator only takes effect on rows whose height is capped, which is what `add_single_line_row` does via `Row::max_height(1)` — and only 2 of the 21 call sites use it (`command/routine/list.rs`, `command/task/output.rs`). The other 19 add rows directly and wrap.
+Rendering applies the `NOTHING` preset with `ContentArrangement::Disabled`, two-space right padding on every column but the last, and a dim header row. Widths are computed from the result set: natural widths first, then flexible columns shrink widest-first to a floor of 8, then flexible columns drop from the right with a notice on stderr. Fixed columns never move. Overflow truncates with `…` — tail truncation is `comfy_table`'s, middle truncation (`Column::path`) is applied before the grid sees the cell.
 
-The practical result is that a row is not a line. `orbit tool list` wraps `REQUIRED INPUT` and `DESCRIPTION` across up to four lines each, which is what makes the border look load-bearing: with variable-height rows, a rule is the only row separator. **Diverges from [./specs/table-rendering.md](./specs/table-rendering.md)**, which requires a borderless preset and a one-line row invariant [ADR-0307].
+Two selection rules run before layout: a column whose value is identical in every row of a result set is suppressed unless the caller marked it `filtered` (the user filtered on it) or the view opted out with `keep_all_columns`, and a result set with no records prints its empty-state line to stderr, leaving stdout empty. Satisfies [./specs/table-rendering.md](./specs/table-rendering.md) §§1–6 [ADR-0307]. **Still diverges on §1's plain form** — the header renders in the piped form too, because mode resolution has not landed [ADR-0306] — and on width *sourcing*: `sink_width` reads `COLUMNS` and the terminal directly rather than an output sink. [./references/detail-commands.md](./references/detail-commands.md) records which truncatable column has a detail command and which four views still lack one.
 
 ## 3. Hand-Padded Line Output
 
@@ -70,9 +70,9 @@ Errors are printed to stdout on the JSON path via `json::print_with_format`, not
 
 ## 8. Test Coverage of Output
 
-There is effectively none. `crates/orbit-cli/src/snapshots/` holds a single file, `audit_guard_event_json_shapes.json`, covering audit event JSON shape; `crates/orbit-cli/tests/snapshots/` holds one more, `mcp_tools_list.json`, covering the MCP tool listing. Both assert on JSON. No test asserts on rendered table text, column alignment, truncation, or ANSI emission.
+There are no output snapshots. `crates/orbit-cli/src/snapshots/` holds a single file, `audit_guard_event_json_shapes.json`, covering audit event JSON shape; `crates/orbit-cli/tests/snapshots/` holds one more, `mcp_tools_list.json`, covering the MCP tool listing. Both assert on JSON.
 
-This cuts both ways: the migration prescribed by the specs will not be blocked by snapshot churn, but it also has nothing to verify against, so the acceptance work has to build its own fixtures.
+The first rendering assertions arrived with the borderless migration [ORB-10567] and are written as behavior, not golden files. `src/output/tests/table.rs` renders at pinned widths — passed as an argument rather than read from `COLUMNS`, so a `--nocapture` run cannot change the geometry — and asserts line count, gutter, truncation, alignment, column suppression, and column dropping. `tests/table_rendering.rs` runs the binary and asserts that an *N*-record `orbit tool list --all` and `orbit task list` are *N* body lines under one header with no box glyphs, and that a zero-result list leaves stdout empty. Nothing yet asserts on ANSI emission.
 
 ## 9. Concerns & Honest Limitations
 

@@ -260,7 +260,13 @@ impl Execute for SemanticStatsArgs {
         if self.json {
             crate::output::json::print_pretty(&json!(result))
         } else {
-            let mut table = crate::output::table::build_table(&["SOURCE_KIND", "MODEL", "ROWS"]);
+            use crate::output::table::{Column, Table};
+            let mut table = Table::new(vec![
+                Column::new("SOURCE_KIND").fixed(),
+                Column::new("MODEL").fixed(),
+                Column::new("ROWS").number(),
+            ])
+            .empty_message("no embedded rows");
             for row in &result.rows.counts {
                 table.add_row(vec![
                     row.source_kind.clone(),
@@ -268,7 +274,7 @@ impl Execute for SemanticStatsArgs {
                     row.rows.to_string(),
                 ]);
             }
-            println!("{table}");
+            table.print();
             println!(
                 "stale_rows={} companion={} version={} active_model={}",
                 result.rows.stale_rows,

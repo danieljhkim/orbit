@@ -30,25 +30,24 @@ impl Execute for PolicyListArgs {
                 .collect();
             crate::output::json::print_pretty(&Value::Array(values))
         } else {
-            if defs.is_empty() {
-                println!("No policy definitions found.");
-                return Ok(());
-            }
-            let mut table = crate::output::table::build_table(&[
-                "NAME",
-                "DESCRIPTION",
-                "FSPROFILES",
-                "UPDATED",
-            ]);
+            use crate::output::table::{Column, Table};
+            // `orbit policy show <name>` prints a definition in full.
+            let mut table = Table::new(vec![
+                Column::new("NAME").fixed(),
+                Column::new("DESCRIPTION"),
+                Column::new("FSPROFILES"),
+                Column::new("UPDATED").fixed(),
+            ])
+            .empty_message("no policy definitions found");
             for def in &defs {
                 table.add_row(vec![
                     def.name.clone(),
-                    def.description.clone().unwrap_or_default(),
+                    def.description.clone().unwrap_or_else(|| "-".to_string()),
                     sorted_profile_names(def).join(", "),
                     def.updated_at.format("%Y-%m-%d %H:%M").to_string(),
                 ]);
             }
-            println!("{table}");
+            table.print();
             Ok(())
         }
     }

@@ -107,23 +107,35 @@ pub(crate) fn task_lock_to_json(task: &orbit_core::Task) -> Value {
     })
 }
 
-pub(super) fn print_task_table(tasks: &[orbit_core::Task], full: bool) {
+/// Which columns the caller filtered on, and so must keep even when the filter
+/// left them carrying a single value.
+#[derive(Clone, Copy, Default)]
+pub(super) struct TaskTableFilters {
+    pub(super) status: bool,
+    pub(super) priority: bool,
+    pub(super) task_type: bool,
+}
+
+pub(super) fn print_task_table(tasks: &[orbit_core::Task], full: bool, filtered: TaskTableFilters) {
+    use crate::output::table::Column;
     use comfy_table::Cell;
-    let headers = if full {
-        vec![
-            "ID",
-            "TITLE",
-            "STATUS",
-            "PRIORITY",
-            "TYPE",
-            "IMPLEMENTED_BY",
-            "CREATED_AT",
-            "UPDATED_AT",
-        ]
-    } else {
-        vec!["ID", "TITLE", "STATUS", "PRIORITY", "TYPE"]
-    };
-    let mut table = crate::output::table::build_table(&headers);
+    // `orbit task show <id>` prints the untruncated title and body of any row.
+    let mut columns = vec![
+        Column::new("ID").fixed(),
+        Column::new("TITLE"),
+        Column::new("STATUS").fixed().filtered(filtered.status),
+        Column::new("PRIORITY").fixed().filtered(filtered.priority),
+        Column::new("TYPE").fixed().filtered(filtered.task_type),
+    ];
+    if full {
+        columns.extend([
+            Column::new("IMPLEMENTED_BY").fixed(),
+            Column::new("CREATED_AT").fixed(),
+            Column::new("UPDATED_AT").fixed(),
+        ]);
+    }
+    let mut table = crate::output::table::Table::new(columns)
+        .empty_message("no tasks matching the given filters");
     for task in tasks {
         let mut row = vec![
             Cell::new(&task.id),
@@ -139,9 +151,9 @@ pub(super) fn print_task_table(tasks: &[orbit_core::Task], full: bool) {
                 Cell::new(format_task_table_timestamp(task.updated_at)),
             ]);
         }
-        crate::output::table::add_single_line_row(&mut table, row);
+        table.add_row(row);
     }
-    println!("{table}");
+    table.print();
 }
 
 pub(crate) fn print_task_locks(tasks: &[orbit_core::Task], locked_files: &BTreeSet<String>) {

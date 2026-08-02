@@ -65,12 +65,15 @@ fn print_run_events(
         }));
     }
 
-    if events.is_empty() {
-        println!("No audit events recorded.");
-        return Ok(());
-    }
-
-    let mut table = crate::output::table::build_table(&["TS", "STEP", "EVENT_TYPE", "SUMMARY"]);
+    use crate::output::table::{Column, Table};
+    // `orbit run trace <run_id>` prints each event's untruncated payload.
+    let mut table = Table::new(vec![
+        Column::new("TS").fixed(),
+        Column::new("STEP").fixed(),
+        Column::new("EVENT_TYPE").fixed(),
+        Column::new("SUMMARY"),
+    ])
+    .empty_message("no audit events recorded");
     for event in &events {
         use comfy_table::Cell;
         table.add_row(vec![
@@ -80,7 +83,7 @@ fn print_run_events(
             Cell::new(summarize_audit_event(event)),
         ]);
     }
-    println!("{table}");
+    table.print();
     Ok(())
 }
 

@@ -49,14 +49,17 @@ impl Execute for JobListArgs {
                 .collect::<Vec<_>>();
             crate::output::json::print_pretty(&Value::Array(values))
         } else {
-            let mut table = crate::output::table::build_table(&[
-                "JOB_ID",
-                "KIND",
-                "TARGET_TYPE",
-                "TARGET_ID",
-                "STATE",
-                "LAST_RUN",
-            ]);
+            use crate::output::table::{Column, Table};
+            // `orbit job show <job_id>` prints a job's full definition.
+            let mut table = Table::new(vec![
+                Column::new("JOB_ID").fixed(),
+                Column::new("KIND").fixed(),
+                Column::new("TARGET_TYPE").fixed(),
+                Column::new("TARGET_ID"),
+                Column::new("STATE").fixed(),
+                Column::new("LAST_RUN").fixed(),
+            ])
+            .empty_message("no jobs matching the given filters");
             for (job, last_run) in &jobs_with_runs {
                 use comfy_table::Cell;
                 let (target_type, target_id) = job_catalog_target_summary(job);
@@ -69,7 +72,7 @@ impl Execute for JobListArgs {
                     Cell::new(format_last_run(last_run.as_ref())),
                 ]);
             }
-            println!("{table}");
+            table.print();
             Ok(())
         }
     }

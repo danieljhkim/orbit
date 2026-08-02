@@ -66,30 +66,22 @@ pub(crate) fn print_run_history(
         return crate::output::json::print_pretty(&json!({ "runs": values }));
     }
 
+    use crate::output::table::{Column, Table};
     let include_job_id = job_id.is_none();
-    let headers = if include_job_id {
-        vec![
-            "RUN_ID",
-            "JOB_ID",
-            "ATTEMPT",
-            "STATE",
-            "STARTED_AT",
-            "FINISHED_AT",
-            "ERROR_CODE",
-            "ERROR_MESSAGE",
-        ]
-    } else {
-        vec![
-            "RUN_ID",
-            "ATTEMPT",
-            "STATE",
-            "STARTED_AT",
-            "FINISHED_AT",
-            "ERROR_CODE",
-            "ERROR_MESSAGE",
-        ]
-    };
-    let mut table = crate::output::table::build_table(&headers);
+    let mut columns = vec![Column::new("RUN_ID").fixed()];
+    if include_job_id {
+        columns.push(Column::new("JOB_ID").fixed());
+    }
+    // `orbit run show <run_id>` prints a run's untruncated error message.
+    columns.extend([
+        Column::new("ATTEMPT").number(),
+        Column::new("STATE").fixed(),
+        Column::new("STARTED_AT").fixed(),
+        Column::new("FINISHED_AT").fixed(),
+        Column::new("ERROR_CODE").fixed(),
+        Column::new("ERROR_MESSAGE"),
+    ]);
+    let mut table = Table::new(columns).empty_message("no runs recorded");
     for run in &runs {
         use comfy_table::Cell;
         let last = run.steps.last();
@@ -109,7 +101,7 @@ pub(crate) fn print_run_history(
         ]);
         table.add_row(row);
     }
-    println!("{table}");
+    table.print();
     for (run, state) in runs.iter().zip(states.iter()) {
         if let Some(line) = format_waiting_line(run.state, state.as_ref()) {
             println!("{line}");

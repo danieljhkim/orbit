@@ -79,8 +79,17 @@ fn print_records_table(value: &Value) -> Result<(), OrbitError> {
         return crate::output::json::print_pretty(value);
     };
 
-    let mut table =
-        crate::output::table::build_table(&["ID", "STATUS", "MODEL", "TAGS", "TASK", "TITLE"]);
+    use crate::output::table::{Column, Table};
+    // `orbit friction show <id>` prints a record in full.
+    let mut table = Table::new(vec![
+        Column::new("ID").fixed(),
+        Column::new("STATUS").fixed(),
+        Column::new("MODEL").fixed(),
+        Column::new("TAGS"),
+        Column::new("TASK").fixed(),
+        Column::new("TITLE"),
+    ])
+    .empty_message("no friction records matching the given filters");
     for record in records {
         table.add_row(vec![
             value_string(record, "id"),
@@ -91,7 +100,7 @@ fn print_records_table(value: &Value) -> Result<(), OrbitError> {
             value_string(record, "title"),
         ]);
     }
-    println!("{table}");
+    table.print();
     Ok(())
 }
 
