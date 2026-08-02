@@ -19,5 +19,6 @@ spec:
     weak: sonnet
   model_flag: --model
   env: {}
+  sandbox: linux-bwrap
   created_at: 2026-07-16T03:30:02.283924475Z
   updated_at: 2026-07-16T03:30:02.283924936Z
