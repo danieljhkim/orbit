@@ -32,6 +32,7 @@ use orbit_store::JobRunQuery;
 use serde_json::Value;
 
 use crate::OrbitRuntime;
+use crate::command::job::{RunOwnerLiveness, run_owner_liveness};
 
 /// Maximum `retry_source_run_id` hops walked upward from the resume source.
 /// A lineage this deep is pathological; the bound keeps a corrupted cycle from
@@ -82,6 +83,43 @@ impl OrbitRuntime {
             return Err(OrbitError::JobValidation(format!(
                 "job run '{}' is {} — resume requires an interrupted, failed, or timed-out run",
                 source_run_id, source.state
+            )));
+        }
+
+        // [ORB-10597] For `interrupted`, a terminal state is not proof the
+        // source stopped working. `interrupted` is the one resumable state
+        // written by an *observer* rather than by the run itself — the orphan
+        // sweep condemns a run it believes is dead, and attaches no teardown —
+        // so a run condemned in error is still executing. Resuming then starts
+        // a second execution against the same worktree, the same task claims,
+        // and the same delivery tail as the first.
+        //
+        // Scoped to `interrupted` deliberately. `failed` and `timeout` are
+        // self-reported: the worker writes them and then exits, so its PID is
+        // routinely still alive for the moment after (and for the blocking
+        // `execute_job` path the recorded owner is the caller's own process,
+        // which stays alive by design). Treating those as concurrent execution
+        // would refuse the most common resume there is.
+        //
+        // Both resume surfaces funnel through this planner (`orbit job resume`
+        // and the CLI/dashboard/`workflow_tools` paths reaching
+        // `submit_resume_run`), so re-verifying here covers all of them.
+        // Fail-safe direction is the opposite of the sweep's: refuse only on a
+        // *confirmed*-alive owner, so an unprobeable one (foreign PID
+        // namespace, non-Unix) does not make a legitimately dead run
+        // unresumable.
+        if source.state == JobRunState::Interrupted
+            && run_owner_liveness(&source) == RunOwnerLiveness::Alive
+        {
+            return Err(OrbitError::JobValidation(format!(
+                "job run '{}' is {} but its recorded worker process (pid {}) is still alive — \
+                 resuming would run alongside it; stop that process or wait for the run to finish",
+                source_run_id,
+                source.state,
+                source
+                    .pid
+                    .map(|pid| pid.to_string())
+                    .unwrap_or_else(|| "-".to_string()),
             )));
         }
 

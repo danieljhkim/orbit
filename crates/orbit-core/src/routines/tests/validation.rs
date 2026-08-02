@@ -12,6 +12,7 @@ use orbit_store::{RoutineFireIntentParams, Store};
 use tempfile::tempdir;
 
 use crate::OrbitError;
+use crate::command::job::RunOwnerLiveness;
 use crate::routines::loader::{LoadedRoutine, RoutineCollection, RoutineOrigin};
 use crate::routines::sweep::{RoutineDispatch, SweepOptions, run_sweep_core_with_registry};
 use crate::routines::validation::{
@@ -351,6 +352,10 @@ impl RoutineDispatch for FakeDispatch {
 
     fn run_state(&self, _source: &Path, _run_id: &str) -> Option<JobRunState> {
         None
+    }
+
+    fn run_owner_liveness(&self, _source: &Path, _run_id: &str) -> RunOwnerLiveness {
+        RunOwnerLiveness::Stopped
     }
 }
 
