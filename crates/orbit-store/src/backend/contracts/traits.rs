@@ -168,6 +168,13 @@ pub trait TaskArtifactStoreBackend: Send + Sync {
 }
 
 pub trait TaskReservationStoreBackend: Send + Sync {
+    /// Read active reservations without expiring or otherwise mutating rows.
+    fn inspect_active_task_reservations(
+        &self,
+        workspace_orbit_dir: &str,
+        workspace_id: Option<&str>,
+    ) -> Result<Vec<ActiveTaskReservation>, OrbitError>;
+
     fn list_active_task_reservations(
         &self,
         workspace_orbit_dir: &str,

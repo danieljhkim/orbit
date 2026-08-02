@@ -199,6 +199,7 @@ pub enum TaskReservationReleaseReason {
     Explicit,
     RunTerminal,
     StaleRunReconciled,
+    DoctorStaleTaskLock,
     TtlExpired,
 }
 
@@ -208,6 +209,7 @@ impl TaskReservationReleaseReason {
             Self::Explicit => "explicit",
             Self::RunTerminal => "run_terminal",
             Self::StaleRunReconciled => "stale_run_reconciled",
+            Self::DoctorStaleTaskLock => "doctor_stale_task_lock",
             Self::TtlExpired => "ttl_expired",
         }
     }

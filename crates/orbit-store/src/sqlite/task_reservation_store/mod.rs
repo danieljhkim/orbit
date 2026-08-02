@@ -16,6 +16,47 @@ use crate::{
 };
 
 impl Store {
+    /// Inspect active reservations through a pooled read connection. Unlike
+    /// the operational list/check paths, this does not opportunistically mark
+    /// expired rows released, which keeps `orbit doctor` strictly read-only.
+    pub fn inspect_active_task_reservations(
+        &self,
+        workspace_orbit_dir: &str,
+        workspace_id: Option<&str>,
+    ) -> Result<Vec<ActiveTaskReservation>, OrbitError> {
+        self.with_read_connection(|conn| {
+            let now = crate::now_string();
+            let sql = format!(
+                "SELECT {}
+                 FROM task_reservations
+                 WHERE {}
+                   AND released_at IS NULL
+                   AND expires_at > ?3
+                 ORDER BY created_at ASC, reservation_id ASC",
+                select_reservation_columns(),
+                reservation_scope_clause(),
+            );
+            let mut stmt = conn
+                .prepare(&sql)
+                .map_err(|error| OrbitError::Store(error.to_string()))?;
+            let rows = stmt
+                .query_map(
+                    params![workspace_id, workspace_orbit_dir, now],
+                    reservation_row,
+                )
+                .map_err(|error| OrbitError::Store(error.to_string()))?;
+
+            let mut reservations = Vec::new();
+            for row in rows {
+                reservations.push(
+                    row.map_err(|error| OrbitError::Store(error.to_string()))?
+                        .into_active()?,
+                );
+            }
+            Ok(reservations)
+        })
+    }
+
     pub fn list_active_task_reservations(
         &self,
         workspace_orbit_dir: &str,

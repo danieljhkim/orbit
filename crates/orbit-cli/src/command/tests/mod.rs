@@ -1,6 +1,7 @@
 // Content moved from inline #[cfg(test)] mod tests in command/mod.rs per ORB-00221.
 // tests/mod.rs can directly contain tests for the declaring parent module (exempt from orphan rules).
 
+mod doctor;
 mod friction;
 mod gc;
 mod init;
@@ -44,6 +45,7 @@ fn cli_parses_doctor_stale_lock_cleanup() {
     match cli.command {
         Commands::Doctor(command) => {
             assert!(command.fix_stale_locks);
+            assert!(!command.fix_stale_task_locks);
             assert!(command.remove_graph);
             assert!(command.json);
             // [ORB-10501] Repairs are opt-in: an unflagged run only diagnoses.
@@ -51,6 +53,25 @@ fn cli_parses_doctor_stale_lock_cleanup() {
         }
         _ => panic!("expected top-level doctor command"),
     }
+}
+
+#[test]
+fn cli_parses_doctor_stale_task_lock_repair_without_blanket_fix() {
+    let cli = Cli::parse_from(["orbit", "doctor", "--fix-stale-task-locks"]);
+    match cli.command {
+        Commands::Doctor(command) => {
+            assert!(command.fix_stale_task_locks);
+            assert!(!command.fix_stale_locks);
+            assert!(!command.fix_orphaned_allocations);
+        }
+        _ => panic!("expected top-level doctor command"),
+    }
+
+    assert_cli_rejects(
+        &["orbit", "doctor", "--fix"],
+        ErrorKind::UnknownArgument,
+        "unexpected argument '--fix'",
+    );
 }
 
 /// [ORB-10501] The guarded repair for allocations pinned to a reaped worktree.

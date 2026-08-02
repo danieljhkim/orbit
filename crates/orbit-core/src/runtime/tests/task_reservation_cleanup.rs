@@ -33,6 +33,22 @@ fn create_context_task(
     id_hint: &str,
     context_file: &str,
 ) -> String {
+    create_context_task_with_status(
+        runtime,
+        repo_root,
+        id_hint,
+        context_file,
+        TaskStatus::Backlog,
+    )
+}
+
+fn create_context_task_with_status(
+    runtime: &OrbitRuntime,
+    repo_root: &std::path::Path,
+    id_hint: &str,
+    context_file: &str,
+    status: TaskStatus,
+) -> String {
     let task = runtime
         .stores()
         .task_records()
@@ -53,7 +69,7 @@ fn create_context_task(
             created_by: Some("test".to_string()),
             planned_by: None,
             implemented_by: None,
-            status: TaskStatus::Backlog,
+            status,
             priority: TaskPriority::Medium,
             complexity: None,
             task_type: TaskType::Chore,
@@ -64,6 +80,30 @@ fn create_context_task(
         })
         .expect("create task");
     task.id
+}
+
+fn reserve_direct(
+    runtime: &OrbitRuntime,
+    task_ids: Vec<String>,
+    file: &str,
+    owner_run_id: Option<&str>,
+) -> String {
+    runtime
+        .stores()
+        .task_reservations()
+        .reserve_task_reservation(TaskReservationReserveParams {
+            workspace_orbit_dir: workspace_orbit_dir(runtime),
+            workspace_id: workspace_task_reservation_id(runtime).expect("workspace reservation id"),
+            task_ids,
+            requested_files: vec![file.to_string()],
+            actor: "test".to_string(),
+            ttl_seconds: 3600,
+            owner_run_id: owner_run_id.map(str::to_string),
+            owner_metadata_json: None,
+        })
+        .expect("reserve directly")
+        .reservation_id
+        .expect("reservation id")
 }
 
 fn insert_running_run(
@@ -146,6 +186,131 @@ fn release_audit_payloads(runtime: &OrbitRuntime) -> Vec<Value> {
         .filter_map(|event| event.arguments_json)
         .map(|raw| serde_json::from_str(&raw).expect("parse audit json"))
         .collect()
+}
+
+#[cfg(unix)]
+#[test]
+fn doctor_repair_releases_only_rechecked_conclusive_stale_classes_and_is_idempotent() {
+    let (_root, runtime, repo_root) = test_runtime();
+    std::fs::create_dir_all(repo_root.join("src")).expect("create src");
+
+    let fresh_task = create_context_task(&runtime, &repo_root, "fresh", "file:src/fresh.rs");
+    let done_task = create_context_task_with_status(
+        &runtime,
+        &repo_root,
+        "done",
+        "file:src/done.rs",
+        TaskStatus::Done,
+    );
+    let live_run = insert_running_run(&runtime, "live", std::process::id());
+    let terminal_run = insert_running_run(&runtime, "terminal", std::process::id());
+    runtime
+        .stores()
+        .jobs()
+        .finalize_job_run(
+            &terminal_run.run_id,
+            JobRunState::Success,
+            Utc::now(),
+            Some(1),
+        )
+        .expect("terminalize owner without cleanup");
+    let orphan_run = insert_running_run(&runtime, "orphan", 999_999);
+
+    let fresh = reserve_direct(&runtime, vec![fresh_task], "file:src/fresh.rs", None);
+    let live = reserve_direct(
+        &runtime,
+        Vec::new(),
+        "file:src/live.rs",
+        Some(&live_run.run_id),
+    );
+    let ambiguous = reserve_direct(
+        &runtime,
+        vec!["ORB-missing".to_string()],
+        "file:src/ambiguous.rs",
+        None,
+    );
+    let absent = reserve_direct(
+        &runtime,
+        Vec::new(),
+        "file:src/absent.rs",
+        Some("jrun-absent"),
+    );
+    let terminal = reserve_direct(
+        &runtime,
+        Vec::new(),
+        "file:src/terminal.rs",
+        Some(&terminal_run.run_id),
+    );
+    let orphan = reserve_direct(
+        &runtime,
+        Vec::new(),
+        "file:src/orphan.rs",
+        Some(&orphan_run.run_id),
+    );
+    let done = reserve_direct(&runtime, vec![done_task], "file:src/done.rs", None);
+
+    let diagnosed = runtime
+        .list_stale_task_reservations()
+        .expect("diagnose reservations");
+    let diagnosed_ids = diagnosed
+        .iter()
+        .map(|candidate| candidate.reservation_id.as_str())
+        .collect::<std::collections::BTreeSet<_>>();
+    assert_eq!(
+        diagnosed_ids,
+        [&absent, &terminal, &orphan, &done]
+            .into_iter()
+            .map(String::as_str)
+            .collect()
+    );
+    assert!(
+        diagnosed
+            .iter()
+            .all(|candidate| !candidate.reason.is_empty()),
+        "every stale class names its reason: {diagnosed:?}"
+    );
+
+    assert_eq!(
+        runtime.release_stale_task_reservations().expect("repair"),
+        4
+    );
+    assert_eq!(
+        runtime
+            .release_stale_task_reservations()
+            .expect("idempotent repair"),
+        0
+    );
+
+    let active = runtime
+        .stores()
+        .task_reservations()
+        .list_active_task_reservations(
+            &workspace_orbit_dir(&runtime),
+            workspace_task_reservation_id(&runtime)
+                .expect("workspace reservation id")
+                .as_deref(),
+        )
+        .expect("list survivors");
+    let survivor_ids = active
+        .reservations
+        .iter()
+        .map(|reservation| reservation.reservation_id.as_str())
+        .collect::<std::collections::BTreeSet<_>>();
+    assert_eq!(
+        survivor_ids,
+        [&fresh, &live, &ambiguous]
+            .into_iter()
+            .map(String::as_str)
+            .collect()
+    );
+
+    let payloads = release_audit_payloads(&runtime);
+    for released_id in [&absent, &terminal, &orphan, &done] {
+        assert!(payloads.iter().any(|payload| {
+            payload["reservation_id"] == released_id.as_str()
+                && payload["release_reason"] == "doctor_stale_task_lock"
+        }));
+    }
 }
 
 #[test]

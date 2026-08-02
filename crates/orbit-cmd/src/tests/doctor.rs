@@ -8,6 +8,7 @@ use fs2::FileExt;
 use orbit_common::types::{JobRun, JobRunState};
 
 use orbit_core::OrbitRuntime;
+use orbit_store::TaskReservationReserveParams;
 
 use crate::doctor::{
     DoctorCommands, WorkspaceDoctorResult, WorkspaceDoctorStatus, collect_lock_files,
@@ -45,7 +46,7 @@ fn healthy_fresh_workspace_has_no_failures() {
     let runtime = OrbitRuntime::in_memory().expect("build runtime");
     let results = runtime.doctor_workspace().expect("doctor");
 
-    assert_eq!(results.len(), 8, "one row per check: {results:?}");
+    assert_eq!(results.len(), 9, "one row per check: {results:?}");
     assert!(
         results
             .iter()
@@ -77,6 +78,10 @@ fn healthy_fresh_workspace_has_no_failures() {
         status_of(&results, "job-runs").status,
         WorkspaceDoctorStatus::Ok
     );
+    assert_eq!(
+        status_of(&results, "task-reservations").status,
+        WorkspaceDoctorStatus::Ok
+    );
     // No tasks yet → no unresolved relation/dependency targets.
     assert_eq!(
         status_of(&results, "task-relations").status,
@@ -86,6 +91,75 @@ fn healthy_fresh_workspace_has_no_failures() {
     assert_eq!(
         status_of(&results, "id-allocations").status,
         WorkspaceDoctorStatus::Ok
+    );
+}
+
+#[test]
+fn every_warning_or_error_has_structured_remediation() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let runtime = workspace_runtime(&temp);
+    fs::write(
+        temp.path().join("repo").join(".orbit").join("config.toml"),
+        "not = [valid toml",
+    )
+    .expect("write broken config");
+
+    let results = runtime.doctor_workspace().expect("doctor");
+    let actionable = results.iter().filter(|row| {
+        matches!(
+            row.status,
+            WorkspaceDoctorStatus::Warning | WorkspaceDoctorStatus::Error
+        )
+    });
+    for row in actionable {
+        assert!(
+            row.remediation
+                .as_ref()
+                .is_some_and(|value| !value.is_empty()),
+            "actionable row needs remediation: {row:?}"
+        );
+    }
+}
+
+#[test]
+fn absent_owner_task_reservation_warning_names_context_reason_and_exact_repair() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let runtime = workspace_runtime(&temp);
+    let store = runtime.sqlite_store().expect("store");
+    let reservation = store
+        .reserve_task_reservation(&TaskReservationReserveParams {
+            workspace_orbit_dir: runtime.paths().orbit_dir.to_string_lossy().into_owned(),
+            workspace_id: None,
+            task_ids: vec!["ORB-12345".to_string()],
+            requested_files: vec!["file:src/lib.rs".to_string()],
+            actor: "test".to_string(),
+            ttl_seconds: 3600,
+            owner_run_id: Some("jrun-missing".to_string()),
+            owner_metadata_json: None,
+        })
+        .expect("reserve")
+        .reservation_id
+        .expect("reservation id");
+
+    let results = runtime.doctor_workspace().expect("doctor");
+    let row = status_of(&results, "task-reservations");
+    assert_eq!(row.status, WorkspaceDoctorStatus::Warning, "{row:?}");
+    assert!(row.message.contains(&reservation), "{}", row.message);
+    assert!(row.message.contains("ORB-12345"), "{}", row.message);
+    assert!(row.message.contains("jrun-missing"), "{}", row.message);
+    assert!(row.message.contains("is absent"), "{}", row.message);
+    assert_eq!(
+        row.remediation.as_deref(),
+        Some("Run `orbit doctor --fix-stale-task-locks`.")
+    );
+    let still_active = store
+        .inspect_active_task_reservations(&runtime.paths().orbit_dir.to_string_lossy(), None)
+        .expect("inspect after read-only doctor");
+    assert!(
+        still_active
+            .iter()
+            .any(|candidate| candidate.reservation_id == reservation),
+        "ordinary doctor must not release a diagnosed reservation"
     );
 }
 
