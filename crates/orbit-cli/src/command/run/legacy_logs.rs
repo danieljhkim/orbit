@@ -1,8 +1,8 @@
 use clap::Args;
-use orbit_core::{OrbitError, OrbitRuntime};
+use orbit_core::OrbitRuntime;
 
-use crate::command::Execute;
 use crate::command::run;
+use crate::command::{CommandOut, Execute};
 
 #[derive(Args)]
 #[command(about = "View execution logs for a job run")]
@@ -20,11 +20,11 @@ pub struct LogsCommand {
 }
 
 impl Execute for LogsCommand {
-    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+    fn execute(self, runtime: &OrbitRuntime) -> CommandOut {
         eprintln!(
             "[deprecated] use \"orbit run show {}\" for the step table or \"orbit run logs {}\" for raw stdout/stderr",
             self.run_id, self.run_id
         );
-        run::print_legacy_logs_summary(runtime, &self.run_id, self.step.as_deref(), self.json)
+        run::legacy_logs_summary_payload(runtime, &self.run_id, self.step.as_deref())
     }
 }

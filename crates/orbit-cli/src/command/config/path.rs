@@ -1,7 +1,7 @@
 use clap::Args;
-use orbit_core::{OrbitError, OrbitRuntime};
+use orbit_core::OrbitRuntime;
 
-use crate::command::Execute;
+use crate::command::{CommandOut, CommandOutput, Execute};
 
 use super::support::global_config_path;
 
@@ -13,13 +13,13 @@ pub struct ConfigPathArgs {
 }
 
 impl Execute for ConfigPathArgs {
-    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+    fn execute(self, runtime: &OrbitRuntime) -> CommandOut {
         let path = if self.global {
             global_config_path(runtime)
         } else {
             runtime.config_path()
         };
         println!("{}", path.to_string_lossy());
-        Ok(())
+        Ok(CommandOutput::Silent)
     }
 }

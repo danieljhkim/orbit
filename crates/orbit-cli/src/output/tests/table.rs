@@ -66,7 +66,7 @@ fn renders_one_line_per_record_with_a_header_and_no_box_glyphs() {
     let table = tool_list();
 
     for width in [None, Some(200), Some(120), Some(80), Some(40)] {
-        let rendered = table.render(width, false);
+        let rendered = table.render_at(width, false, true);
         let lines = lines(&rendered.body);
         assert_eq!(
             lines.len(),
@@ -88,7 +88,7 @@ fn columns_are_two_spaces_apart_with_no_leading_indent() {
     table.add_row(vec!["T1", "first"]);
     table.add_row(vec!["T2", "second"]);
 
-    let rendered = table.render(None, false);
+    let rendered = table.render_at(None, false, true);
 
     assert_eq!(rendered.body.lines().next(), Some("ID  TITLE"));
     assert_eq!(rendered.body.lines().nth(1), Some("T1  first"));
@@ -98,7 +98,7 @@ fn columns_are_two_spaces_apart_with_no_leading_indent() {
 
 #[test]
 fn overflow_is_truncated_with_a_single_ellipsis() {
-    let rendered = tool_list().render(Some(80), false);
+    let rendered = tool_list().render_at(Some(80), false, true);
 
     assert!(
         rendered.body.contains('…'),
@@ -121,8 +121,8 @@ fn overflow_is_truncated_with_a_single_ellipsis() {
 fn fixed_columns_keep_their_width_while_flexible_ones_shrink() {
     let table = tool_list();
 
-    let wide = table.render(Some(200), false);
-    let narrow = table.render(Some(60), false);
+    let wide = table.render_at(Some(200), false, true);
+    let narrow = table.render_at(Some(60), false, true);
 
     for rendered in [&wide, &narrow] {
         assert!(
@@ -144,7 +144,7 @@ fn fixed_columns_keep_their_width_while_flexible_ones_shrink() {
 fn flexible_columns_drop_from_the_right_and_say_so_on_stderr() {
     // The fixed columns plus a floored DESCRIPTION need 44 columns, so the
     // flexible one is dropped rather than squeezed below its floor.
-    let rendered = tool_list().render(Some(40), false);
+    let rendered = tool_list().render_at(Some(40), false, true);
 
     assert!(
         !rendered.body.contains("DESCRIPTION"),
@@ -161,7 +161,7 @@ fn flexible_columns_drop_from_the_right_and_say_so_on_stderr() {
 
 #[test]
 fn a_column_with_one_value_across_every_row_is_suppressed() {
-    let rendered = tool_list().render(None, false);
+    let rendered = tool_list().render_at(None, false, true);
 
     assert!(
         !rendered.body.contains("BUILTIN"),
@@ -184,7 +184,7 @@ fn a_suppressed_column_survives_when_the_caller_filtered_on_it() {
     table.add_row(vec!["T1", "done"]);
     table.add_row(vec!["T2", "done"]);
 
-    let rendered = table.render(None, false);
+    let rendered = table.render_at(None, false, true);
 
     assert!(
         rendered.body.starts_with("ID  STATUS"),
@@ -199,7 +199,7 @@ fn keep_all_columns_opts_a_fixed_shape_view_out_of_suppression() {
     table.add_row(vec!["workspace layout", "3"]);
     table.add_row(vec!["store schema", "3"]);
 
-    let rendered = table.render(None, false);
+    let rendered = table.render_at(None, false, true);
 
     assert!(
         rendered.body.contains("CURRENT"),
@@ -214,7 +214,7 @@ fn a_single_record_keeps_every_column() {
     let mut table = build_table(&["ID", "STATUS"]);
     table.add_row(vec!["T1", "done"]);
 
-    let rendered = table.render(None, false);
+    let rendered = table.render_at(None, false, true);
 
     assert_eq!(lines(&rendered.body), vec!["ID  STATUS", "T1  done"]);
 }
@@ -229,7 +229,7 @@ fn numeric_columns_are_right_aligned_under_a_unit_header() {
     table.add_row(vec!["1", "success", "187"]);
     table.add_row(vec!["2", "failed", "42910"]);
 
-    let rendered = table.render(None, false);
+    let rendered = table.render_at(None, false, true);
 
     assert_eq!(
         lines(&rendered.body),
@@ -255,7 +255,7 @@ fn a_path_loses_its_middle_rather_than_its_identifying_tail() {
     ]);
     table.add_row(vec!["docs/design/terminal-interface/1_overview.md", "spec"]);
 
-    let rendered = table.render(Some(40), false);
+    let rendered = table.render_at(Some(40), false, true);
 
     assert!(
         rendered.body.contains("le-rendering.md") && rendered.body.contains("1_overview.md"),
@@ -275,7 +275,7 @@ fn a_multi_line_value_still_occupies_exactly_one_line() {
     table.add_row(vec!["T1", "first line\nsecond line\nthird line"]);
     table.add_row(vec!["T2", "single line"]);
 
-    let rendered = table.render(None, false);
+    let rendered = table.render_at(None, false, true);
 
     assert_eq!(lines(&rendered.body).len(), 3);
     assert!(
@@ -424,7 +424,7 @@ fn table_form_matches_goldens_at_a_pinned_width() {
         ("skill_list.table.txt", skill_list()),
     ];
     for (file_name, table) in &fixtures {
-        let rendered = table.render(Some(TABLE_GOLDEN_WIDTH), false);
+        let rendered = table.render_at(Some(TABLE_GOLDEN_WIDTH), false, true);
         assert_golden(file_name, &rendered.body);
     }
 }
@@ -446,14 +446,14 @@ fn a_zero_width_truncates_nothing_while_a_narrow_width_truncates_with_one_ellips
     // presence, not a per-line count.
     let mut truncated_anywhere = false;
     for table in [tool_list(), task_list(), policy_list(), skill_list()] {
-        let untruncated = table.render(None, false);
+        let untruncated = table.render_at(None, false, true);
         assert!(
             !untruncated.body.contains('…'),
             "a sink with no width must not truncate: {}",
             untruncated.body
         );
 
-        let narrow = table.render(Some(TABLE_GOLDEN_WIDTH), false);
+        let narrow = table.render_at(Some(TABLE_GOLDEN_WIDTH), false, true);
         truncated_anywhere |= narrow.body.contains('…');
     }
     assert!(

@@ -1,8 +1,8 @@
 use clap::Args;
-use orbit_core::{LearningUsageStat, OrbitError, OrbitRuntime};
+use orbit_core::{LearningUsageStat, OrbitRuntime};
 use serde_json::Value;
 
-use crate::command::Execute;
+use crate::command::{CommandOut, CommandOutput, Execute, Payload};
 use crate::parse::parse_since;
 
 #[derive(Args)]
@@ -16,18 +16,18 @@ pub struct LearningStatsArgs {
 }
 
 impl Execute for LearningStatsArgs {
-    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+    fn execute(self, runtime: &OrbitRuntime) -> CommandOut {
         let since = self.since.map(|s| parse_since(&s)).transpose()?;
         let stats = runtime.learning_usage_stats(since)?;
 
         if self.json {
             let array = Value::Array(stats.iter().map(usage_stat_to_json).collect());
-            return crate::output::json::print_pretty(&array);
+            return Ok(Payload::document(array).into());
         }
 
         if stats.is_empty() {
             println!("no learning injection or show events recorded");
-            return Ok(());
+            return Ok(CommandOutput::Silent);
         }
         println!("ID\tINJECTED\tSHOWN\tSHOWN_RATIO\tLAST_INJECTED\tLAST_SHOWN");
         for stat in &stats {
@@ -47,7 +47,7 @@ impl Execute for LearningStatsArgs {
                     .unwrap_or_else(|| "-".to_string()),
             );
         }
-        Ok(())
+        Ok(CommandOutput::Silent)
     }
 }
 

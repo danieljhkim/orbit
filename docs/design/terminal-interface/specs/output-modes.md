@@ -76,11 +76,19 @@ Precedence, first match wins:
 ## 7. Migration
 
 1. ~~Introduce the sink and the global `--format`; leave every command body untouched.~~ Done [ORB-10569].
-2. Route the existing per-command `--json` branches through the resolver so precedence is centralized. Still no behavior change for explicit callers. **Not started** — the flag lives on 86 argument structs and `OutputSink::resolve`'s `legacy_json` rung is still passed `false`.
-3. Convert command bodies to return payloads. This changes `Execute::execute`'s signature across all 154 `impl Execute` blocks and is the expensive step; it can be staged with a transitional trait method that defaults to the current side-effecting path. **Not started.**
-4. Once a command returns a payload, delete its inline table construction and let the renderer own it. **Not started.**
+2. ~~Route the existing per-command `--json` branches through the resolver so precedence is centralized.~~ Done [ORB-10586]. `main` reads the invoked subcommand's `--json`/`--ops` boolean out of the parsed matches — the same walk `--format` uses — rather than from 86 argument structs, and passes it as `OutputSink::resolve`'s `legacy_json` rung.
+3. ~~Convert command bodies to return payloads.~~ Done [ORB-10586]. `Execute::execute` returns `CommandOut` (`Result<CommandOutput, OrbitError>`) across all 154 impls; `output::render::emit` is the only place a record reaches stdout. No transitional default method was introduced — the signature changed everywhere in one step, so there was never a second way to write output to delete.
+4. ~~Once a command returns a payload, delete its inline table construction and let the renderer own it.~~ Done for every list and detail command [ORB-10586]. A command builds a `Table` and hands it back inside the payload; `Table::print` is gone, and `Table::emit` is called only by the renderer.
 5. ~~Move error output to stderr and audit exit codes.~~ Done [ORB-10570].
 
 Steps 1 and 5 landed out of order deliberately: gating color and width at the sink (step 1's payoff) and moving errors off stdout (step 5) are both independent of the payload conversion, and holding them behind a 154-impl signature change would have left `NO_COLOR` broken for the duration.
 
 Step 5 is the only user-visible break for existing scripts (an error object moves from stdout to stderr). It is recorded against [ORB-10570] for the release drafter; per `RELEASING.md` step 2, `CHANGELOG.md` is compiled at release time rather than accumulated per-PR, so the entry is written there, not here. Do not ship it quietly.
+
+Steps 2–4 shipped together in [ORB-10586] and change three things for existing callers, none of them the bytes of a successful `--json` invocation (verified by diffing the pre-change binary against the new one across 20 commands):
+
+- The **default piped form** of a list command is now plain — no header, tab-separated — where it used to be the header-bearing table. That is §2's contract finally taking effect; `--format table` asks for the old shape from a pipe.
+- An explicit **`--format` now outranks `--json`** (rungs 1 and 2). While `--format` was inert, `orbit task list --json --format table` emitted JSON; it emits a table now.
+- A **failing `--json` command reports its error as JSON on stderr**, because `--json` resolves the mode and §5 makes json-mode errors machine-readable. stdout is unaffected and still carries nothing on failure.
+
+One deliberate deviation from §3, recorded here because it is a deviation: `--json` pretty-prints in every sink, while `--format json` pretty-prints only for a terminal. Every branch `--json` replaced called `print_pretty` unconditionally, and byte-identity for those invocations is an [ADR-0306] requirement, so the legacy rung keeps the bytes it had.

@@ -3,12 +3,12 @@ use orbit_core::runtime::run_audit::RunProviderProcess;
 use orbit_core::{NotFoundKind, OrbitError, OrbitRuntime};
 use serde_json::{Value, json};
 
-use crate::command::Execute;
+use crate::command::{Block, CommandOut, Execute, Payload};
 
 use super::job::job_run_to_json_with_state;
 use super::steps::{
-    filtered_steps, legacy_step_to_json, print_run_header, print_run_header_with_state,
-    print_step_record, print_step_summary_table, resolve_run, resolve_run_step,
+    filtered_steps, legacy_step_to_json, resolve_run, resolve_run_step, run_header_text,
+    run_header_text_with_state, step_record_payload, step_summary_table,
 };
 
 #[derive(Args)]
@@ -29,22 +29,16 @@ pub struct RunShowArgs {
 }
 
 impl Execute for RunShowArgs {
-    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
-        print_run_show(
-            runtime,
-            self.run_id.as_deref(),
-            self.step_id.as_deref(),
-            self.json,
-        )
+    fn execute(self, runtime: &OrbitRuntime) -> CommandOut {
+        run_show_payload(runtime, self.run_id.as_deref(), self.step_id.as_deref())
     }
 }
 
-pub(crate) fn print_run_show(
+pub(crate) fn run_show_payload(
     runtime: &OrbitRuntime,
     run_id: Option<&str>,
     step_id: Option<&str>,
-    json_output: bool,
-) -> Result<(), OrbitError> {
+) -> CommandOut {
     let run = resolve_run(runtime, run_id)?;
     let state = runtime.read_run_state(&run.run_id)?;
 
@@ -54,7 +48,7 @@ pub(crate) fn print_run_show(
             .as_ref()
             .and_then(|state| state.step_outputs.get(&step.step_index))
             .cloned();
-        return print_step_record(&run, &step, step_output, json_output);
+        return step_record_payload(&run, &step, step_output);
     }
 
     // [ORB-10496] Provider subprocesses spawned by this run's agent steps. A
@@ -62,53 +56,63 @@ pub(crate) fn print_run_show(
     // of the Worker daemon, so this is the only place it is observable.
     let provider_processes = runtime.collect_run_provider_processes(&run.run_id)?;
 
-    if json_output {
-        return crate::output::json::print_pretty(&json!({
-            "run": job_run_to_json_with_state(&run, state.as_ref()),
-            "pipeline_state": state,
-            "provider_processes": provider_processes
-                .iter()
-                .map(provider_process_to_json)
-                .collect::<Vec<_>>(),
-        }));
-    }
+    let doc = json!({
+        "run": job_run_to_json_with_state(&run, state.as_ref()),
+        "pipeline_state": state,
+        "provider_processes": provider_processes
+            .iter()
+            .map(provider_process_to_json)
+            .collect::<Vec<_>>(),
+    });
 
-    print_run_header_with_state(&run, state.as_ref());
+    let mut header = run_header_text_with_state(&run, state.as_ref());
     if let Some(state) = &state {
-        println!(
-            "{} iteration={} step_outputs={} updated_at={}",
+        header.push_str(&format!(
+            "\n{} iteration={} step_outputs={} updated_at={}",
             crate::output::color::bold("Pipeline:"),
             state.iteration,
             state.step_outputs.len(),
             state.updated_at.to_rfc3339(),
-        );
+        ));
     }
-    print_live_provider_processes(&provider_processes);
-    println!();
+    header.push_str(&live_provider_process_lines(&provider_processes));
+    header.push('\n');
+
     let steps = run.steps.iter().collect::<Vec<_>>();
-    print_step_summary_table(&steps)
+    Ok(Payload::blocks(
+        doc,
+        vec![
+            Block::text(header),
+            Block::table(step_summary_table(&steps)),
+        ],
+    )
+    .into())
 }
 
-/// Print one line per provider subprocess that has not reported an exit.
+/// One line per provider subprocess that has not reported an exit.
 ///
 /// Finished children are omitted: their outcome is already in the step table,
 /// and the question this answers is "is the agent still running or is the child
 /// lost", which only applies to an open invocation.
-fn print_live_provider_processes(processes: &[RunProviderProcess]) {
-    for process in processes.iter().filter(|process| !process.finished) {
-        println!(
-            "{} provider={} pid={} step={} liveness={} started_at={}",
-            crate::output::color::bold("Agent:"),
-            process.provider.as_deref().unwrap_or("-"),
-            process.pid,
-            process.step_id.as_deref().unwrap_or("-"),
-            process.liveness.as_str(),
-            process
-                .ts
-                .map(|ts| ts.to_rfc3339())
-                .unwrap_or_else(|| "-".to_string()),
-        );
-    }
+fn live_provider_process_lines(processes: &[RunProviderProcess]) -> String {
+    processes
+        .iter()
+        .filter(|process| !process.finished)
+        .map(|process| {
+            format!(
+                "\n{} provider={} pid={} step={} liveness={} started_at={}",
+                crate::output::color::bold("Agent:"),
+                process.provider.as_deref().unwrap_or("-"),
+                process.pid,
+                process.step_id.as_deref().unwrap_or("-"),
+                process.liveness.as_str(),
+                process
+                    .ts
+                    .map(|ts| ts.to_rfc3339())
+                    .unwrap_or_else(|| "-".to_string()),
+            )
+        })
+        .collect()
 }
 
 fn provider_process_to_json(process: &RunProviderProcess) -> Value {
@@ -128,26 +132,29 @@ fn provider_process_to_json(process: &RunProviderProcess) -> Value {
     })
 }
 
-pub(crate) fn print_legacy_logs_summary(
+pub(crate) fn legacy_logs_summary_payload(
     runtime: &OrbitRuntime,
     run_id: &str,
     step_id: Option<&str>,
-    json_output: bool,
-) -> Result<(), OrbitError> {
+) -> CommandOut {
     let run = runtime
         .show_job_run(run_id)
         .map_err(|_| OrbitError::not_found(NotFoundKind::JobRun, run_id.to_string()))?;
     let steps = filtered_steps(&run, step_id)?;
 
-    if json_output {
-        let values = steps
-            .iter()
-            .map(|step| legacy_step_to_json(step))
-            .collect::<Vec<_>>();
-        return crate::output::json::print_pretty(&Value::Array(values));
-    }
+    let values = steps
+        .iter()
+        .map(|step| legacy_step_to_json(step))
+        .collect::<Vec<_>>();
 
-    print_run_header(&run);
-    println!();
-    print_step_summary_table(&steps)
+    let mut header = run_header_text(&run);
+    header.push('\n');
+    Ok(Payload::blocks(
+        Value::Array(values),
+        vec![
+            Block::text(header),
+            Block::table(step_summary_table(&steps)),
+        ],
+    )
+    .into())
 }

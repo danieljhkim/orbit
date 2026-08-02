@@ -1,8 +1,8 @@
 use clap::Args;
-use orbit_core::{LearningStatus, OrbitError, OrbitRuntime};
+use orbit_core::{LearningStatus, OrbitRuntime};
 use serde_json::json;
 
-use crate::command::Execute;
+use crate::command::{CommandOut, CommandOutput, Execute, Payload};
 
 #[derive(Args)]
 pub struct LearningSyncArgs {
@@ -12,7 +12,7 @@ pub struct LearningSyncArgs {
 }
 
 impl Execute for LearningSyncArgs {
-    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+    fn execute(self, runtime: &OrbitRuntime) -> CommandOut {
         runtime.sync_learnings()?;
         let active = runtime.list_learnings(Some(LearningStatus::Active))?.len();
         let superseded = runtime
@@ -20,10 +20,10 @@ impl Execute for LearningSyncArgs {
             .len();
         let rebuilt = active + superseded;
         if self.json {
-            crate::output::json::print_pretty(&json!({ "rebuilt_count": rebuilt }))
+            Ok(Payload::document(json!({ "rebuilt_count": rebuilt })).into())
         } else {
             println!("Synced {rebuilt} learnings ({active} active, {superseded} superseded)");
-            Ok(())
+            Ok(CommandOutput::Silent)
         }
     }
 }

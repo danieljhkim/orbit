@@ -12,7 +12,7 @@ use orbit_common::types::{normalize_agent_family_for_model, normalize_optional_a
 use orbit_core::{ActorIdentity, OrbitError, OrbitRuntime};
 use serde_json::Value;
 
-use super::{Commands, Execute};
+use super::{CommandOut, CommandOutput, Commands, Execute};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CommandMeta {
@@ -61,7 +61,7 @@ impl<'a> DispatchContext<'a> {
     }
 }
 
-pub type CommandDispatch = for<'a> fn(Commands, DispatchContext<'a>) -> Result<(), OrbitError>;
+pub type CommandDispatch = for<'a> fn(Commands, DispatchContext<'a>) -> CommandOut;
 
 pub struct CommandOperation {
     pub runtime_need: RuntimeNeed,
@@ -156,7 +156,7 @@ macro_rules! boxed_runtime_dispatch {
     }};
 }
 
-fn dispatch_mismatch(variant: &str) -> Result<(), OrbitError> {
+fn dispatch_mismatch(variant: &str) -> CommandOut {
     Err(OrbitError::Execution(format!(
         "command operation dispatch invariant violated for {variant}"
     )))
@@ -893,14 +893,14 @@ impl Commands {
     }
 }
 
-fn dispatch_init(command: Commands, context: DispatchContext<'_>) -> Result<(), OrbitError> {
+fn dispatch_init(command: Commands, context: DispatchContext<'_>) -> CommandOut {
     match command {
         Commands::Init(command) => command.execute_without_runtime(context.root_override),
         _ => dispatch_mismatch("Init"),
     }
 }
 
-fn dispatch_workspace(command: Commands, context: DispatchContext<'_>) -> Result<(), OrbitError> {
+fn dispatch_workspace(command: Commands, context: DispatchContext<'_>) -> CommandOut {
     use super::workspace::{WorkspaceCommand, WorkspaceSubcommand};
     match command {
         Commands::Workspace(WorkspaceCommand {
@@ -911,7 +911,7 @@ fn dispatch_workspace(command: Commands, context: DispatchContext<'_>) -> Result
     }
 }
 
-fn dispatch_mcp(command: Commands, context: DispatchContext<'_>) -> Result<(), OrbitError> {
+fn dispatch_mcp(command: Commands, context: DispatchContext<'_>) -> CommandOut {
     use super::mcp::{McpCommand, McpSubcommand};
     match command {
         Commands::Mcp(McpCommand {
@@ -927,7 +927,7 @@ fn dispatch_mcp(command: Commands, context: DispatchContext<'_>) -> Result<(), O
     }
 }
 
-fn dispatch_migrate(command: Commands, context: DispatchContext<'_>) -> Result<(), OrbitError> {
+fn dispatch_migrate(command: Commands, context: DispatchContext<'_>) -> CommandOut {
     match command {
         Commands::Migrate(command) if !command.confirm => {
             command.execute_without_runtime(context.root_override)
@@ -937,7 +937,7 @@ fn dispatch_migrate(command: Commands, context: DispatchContext<'_>) -> Result<(
     }
 }
 
-fn dispatch_learning(command: Commands, context: DispatchContext<'_>) -> Result<(), OrbitError> {
+fn dispatch_learning(command: Commands, context: DispatchContext<'_>) -> CommandOut {
     use super::learning::{LearningCommand, LearningSubcommand};
     match command {
         Commands::Learning(LearningCommand {
@@ -948,7 +948,7 @@ fn dispatch_learning(command: Commands, context: DispatchContext<'_>) -> Result<
     }
 }
 
-fn dispatch_run(command: Commands, context: DispatchContext<'_>) -> Result<(), OrbitError> {
+fn dispatch_run(command: Commands, context: DispatchContext<'_>) -> CommandOut {
     use super::run::{RunCommand, RunSubcommand};
     match command {
         Commands::Run(RunCommand {
@@ -959,29 +959,35 @@ fn dispatch_run(command: Commands, context: DispatchContext<'_>) -> Result<(), O
     }
 }
 
-fn dispatch_sweep(command: Commands, _context: DispatchContext<'_>) -> Result<(), OrbitError> {
+fn dispatch_sweep(command: Commands, _context: DispatchContext<'_>) -> CommandOut {
     match command {
         Commands::Sweep(command) => command.execute_without_runtime(),
         _ => dispatch_mismatch("Sweep"),
     }
 }
 
-fn dispatch_routine(command: Commands, _context: DispatchContext<'_>) -> Result<(), OrbitError> {
+fn dispatch_routine(command: Commands, _context: DispatchContext<'_>) -> CommandOut {
     match command {
         Commands::Routine(command) => command.execute_without_runtime(),
         _ => dispatch_mismatch("Routine"),
     }
 }
 
-fn dispatch_web(command: Commands, context: DispatchContext<'_>) -> Result<(), OrbitError> {
+fn dispatch_web(command: Commands, context: DispatchContext<'_>) -> CommandOut {
     use super::web::{WebCommand, WebSubcommand};
     match command {
         Commands::Web(WebCommand {
             command: WebSubcommand::Serve(args),
-        }) => orbit_dashboard::serve_from_env(args, context.root_override),
+        }) => {
+            orbit_dashboard::serve_from_env(args, context.root_override)?;
+            Ok(CommandOutput::Silent)
+        }
         Commands::Web(WebCommand {
             command: WebSubcommand::Connect(args),
-        }) => orbit_dashboard::connect(args),
+        }) => {
+            orbit_dashboard::connect(args)?;
+            Ok(CommandOutput::Silent)
+        }
         _ => dispatch_mismatch("Web"),
     }
 }

@@ -1,8 +1,8 @@
 use clap::Args;
-use orbit_core::{OrbitError, OrbitRuntime};
+use orbit_core::OrbitRuntime;
 
-use crate::command::Execute;
 use crate::command::hook::render::HookOutputFormat;
+use crate::command::{CommandOut, CommandOutput, Execute};
 
 #[derive(Args)]
 pub struct PretooluseArgs {
@@ -12,11 +12,11 @@ pub struct PretooluseArgs {
 }
 
 impl Execute for PretooluseArgs {
-    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+    fn execute(self, runtime: &OrbitRuntime) -> CommandOut {
         if let Some(output) = orbit_cmd::learning_hook::run_pretooluse(runtime, self.format.into())
         {
             println!("{output}");
         }
-        Ok(())
+        Ok(CommandOutput::Silent)
     }
 }

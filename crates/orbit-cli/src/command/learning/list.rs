@@ -5,7 +5,7 @@ use orbit_common::utility::glob::{compile_glob_regex, normalize_glob_path};
 use orbit_core::{LearningListEntry, LearningStatus, OrbitError, OrbitRuntime};
 use serde_json::Value;
 
-use crate::command::Execute;
+use crate::command::{CommandOut, Execute, Payload};
 
 use super::output::learning_to_json;
 
@@ -31,7 +31,7 @@ pub struct LearningListArgs {
 }
 
 impl Execute for LearningListArgs {
-    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+    fn execute(self, runtime: &OrbitRuntime) -> CommandOut {
         let status = self
             .status
             .as_deref()
@@ -61,32 +61,39 @@ impl Execute for LearningListArgs {
             })
             .collect();
 
-        if self.json {
-            let array = Value::Array(filtered.iter().map(learning_entry_to_json).collect());
-            crate::output::json::print_pretty(&array)
-        } else {
-            for entry in &filtered {
-                match entry {
-                    LearningListEntry::Local(learning) => {
-                        println!(
-                            "{}\t{}\t{}",
-                            learning.id,
-                            learning.status.as_str(),
-                            learning.summary
-                        );
-                    }
-                    LearningListEntry::Remote(stub) => {
-                        println!(
-                            "{}\t{}\t[remote: {}]",
-                            stub.id,
-                            stub.status,
-                            stub.worktree_root.display()
-                        );
-                    }
-                }
+        let records: Vec<Value> = filtered.iter().map(learning_entry_to_json).collect();
+
+        use crate::output::table::{Column, Table};
+        // Was a hand-rolled `println!("{}\t{}\t{}")` with no header and no
+        // width awareness. The tab-separated form it produced is exactly what
+        // the plain rendering of this table emits, so a piped caller sees the
+        // same three fields; a terminal now gets aligned columns
+        // (`specs/table-rendering.md`, ORB-10586).
+        //
+        // `orbit learning show <id>` prints an entry's untruncated body.
+        let mut table = Table::new(vec![
+            Column::new("ID").fixed(),
+            Column::new("STATUS")
+                .fixed()
+                .filtered(self.status.is_some()),
+            Column::new("SUMMARY"),
+        ])
+        .empty_message("no learnings matching the given filters");
+        for entry in &filtered {
+            match entry {
+                LearningListEntry::Local(learning) => table.add_row(vec![
+                    learning.id.clone(),
+                    learning.status.as_str().to_string(),
+                    learning.summary.clone(),
+                ]),
+                LearningListEntry::Remote(stub) => table.add_row(vec![
+                    stub.id.clone(),
+                    stub.status.clone(),
+                    format!("[remote: {}]", stub.worktree_root.display()),
+                ]),
             }
-            Ok(())
         }
+        Ok(Payload::list(records, table).into())
     }
 }
 

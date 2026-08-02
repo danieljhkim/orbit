@@ -2,7 +2,7 @@ use clap::{Args, ValueEnum};
 use orbit_core::{OrbitError, OrbitRuntime};
 use serde_json::{Map, Value};
 
-use crate::command::Execute;
+use crate::command::{CommandOut, CommandOutput, Execute, Payload};
 
 #[derive(Clone, ValueEnum, Default)]
 pub enum OutputFormat {
@@ -48,7 +48,7 @@ pub struct ToolRunArgs {
 }
 
 impl Execute for ToolRunArgs {
-    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+    fn execute(self, runtime: &OrbitRuntime) -> CommandOut {
         let input: Value = if let Some(path) = &self.input_file {
             let raw = std::fs::read_to_string(path).map_err(|e| {
                 OrbitError::InvalidInput(format!("cannot read input file '{path}': {e}"))
@@ -79,7 +79,7 @@ impl Execute for ToolRunArgs {
             } else {
                 println!("Missing params: {}", result.missing_params.join(", "));
             }
-            return Ok(());
+            return Ok(CommandOutput::Silent);
         }
 
         let output =
@@ -89,14 +89,17 @@ impl Execute for ToolRunArgs {
         match self.output {
             OutputFormat::Json => {
                 if self.pretty {
-                    crate::output::json::print_pretty(&output)
+                    Ok(Payload::document(output).into())
                 } else {
-                    crate::output::json::print(&output)
+                    {
+                        crate::output::json::print(&output)?;
+                        Ok(CommandOutput::Silent)
+                    }
                 }
             }
             OutputFormat::Text => {
                 println!("{}", output);
-                Ok(())
+                Ok(CommandOutput::Silent)
             }
         }
     }

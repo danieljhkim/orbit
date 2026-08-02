@@ -1,7 +1,7 @@
 use clap::Args;
-use orbit_core::{OrbitError, OrbitRuntime};
+use orbit_core::OrbitRuntime;
 
-use crate::command::Execute;
+use crate::command::{CommandOut, CommandOutput, Execute};
 
 // ADR-0248: kept as a deliberate, human-invoked opt-in — `workspace init`
 // no longer wires this up automatically.
@@ -9,14 +9,14 @@ use crate::command::Execute;
 pub struct HookInstallArgs;
 
 impl Execute for HookInstallArgs {
-    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+    fn execute(self, runtime: &OrbitRuntime) -> CommandOut {
         let providers = orbit_cmd::hook_install::install_for_runtime(runtime)?;
         if providers.is_empty() {
             println!("no hook providers auto-detected");
         } else {
             println!("installed hook integrations for {}", providers.join(", "));
         }
-        Ok(())
+        Ok(CommandOutput::Silent)
     }
 }
 
@@ -24,13 +24,13 @@ impl Execute for HookInstallArgs {
 pub struct HookUninstallArgs;
 
 impl Execute for HookUninstallArgs {
-    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+    fn execute(self, runtime: &OrbitRuntime) -> CommandOut {
         let providers = orbit_cmd::hook_install::uninstall_for_runtime(runtime)?;
         if providers.is_empty() {
             println!("no hook integrations found");
         } else {
             println!("removed hook integrations for {}", providers.join(", "));
         }
-        Ok(())
+        Ok(CommandOutput::Silent)
     }
 }

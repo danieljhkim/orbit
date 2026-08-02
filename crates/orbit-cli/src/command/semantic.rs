@@ -6,7 +6,7 @@ use orbit_core::command::semantic::{
 use orbit_core::{OrbitError, OrbitRuntime};
 use serde_json::json;
 
-use crate::command::Execute;
+use crate::command::{Block, CommandOut, CommandOutput, Execute, Payload};
 
 #[derive(Args)]
 #[command(about = "Manage local orbit-search indexing")]
@@ -94,13 +94,13 @@ pub struct SemanticStatsArgs {
 }
 
 impl Execute for SemanticCommand {
-    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+    fn execute(self, runtime: &OrbitRuntime) -> CommandOut {
         self.command.execute(runtime)
     }
 }
 
 impl Execute for SemanticSubcommand {
-    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+    fn execute(self, runtime: &OrbitRuntime) -> CommandOut {
         match self {
             SemanticSubcommand::Install(args) => args.execute(runtime),
             SemanticSubcommand::Uninstall(args) => args.execute(runtime),
@@ -111,13 +111,13 @@ impl Execute for SemanticSubcommand {
 }
 
 impl Execute for SemanticInstallArgs {
-    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+    fn execute(self, runtime: &OrbitRuntime) -> CommandOut {
         let result = runtime.semantic_install(SemanticInstallParams {
             model: self.model,
             force: self.force,
         })?;
         if self.json {
-            crate::output::json::print_pretty(&json!(result))
+            Ok(Payload::document(json!(result)).into())
         } else {
             println!(
                 "Installed semantic search: companion={} model={} companion_changed={} model_changed={}",
@@ -126,19 +126,19 @@ impl Execute for SemanticInstallArgs {
                 result.companion_changed,
                 result.model_installed
             );
-            Ok(())
+            Ok(CommandOutput::Silent)
         }
     }
 }
 
 impl Execute for SemanticUninstallArgs {
-    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+    fn execute(self, runtime: &OrbitRuntime) -> CommandOut {
         let result = runtime.semantic_uninstall(SemanticUninstallParams {
             model: self.model,
             all: self.all,
         })?;
         if self.json {
-            crate::output::json::print_pretty(&json!(result))
+            Ok(Payload::document(json!(result)).into())
         } else {
             println!(
                 "Removed semantic search assets: companion={} models={}",
@@ -149,22 +149,25 @@ impl Execute for SemanticUninstallArgs {
                     result.removed_models.join(", ")
                 }
             );
-            Ok(())
+            Ok(CommandOutput::Silent)
         }
     }
 }
 
 impl Execute for SemanticIndexArgs {
-    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+    fn execute(self, runtime: &OrbitRuntime) -> CommandOut {
         let result = runtime.semantic_index(SemanticIndexParams {
             model: self.model,
             force: self.force,
             kind: Some(self.kind.into()),
         })?;
         if self.json {
-            crate::output::json::print_pretty(&json!(result))
+            Ok(Payload::document(json!(result)).into())
         } else {
-            print_semantic_index_text(result)
+            {
+                print_semantic_index_text(result)?;
+                Ok(CommandOutput::Silent)
+            }
         }
     }
 }
@@ -255,11 +258,10 @@ fn print_semantic_index_text(result: SemanticIndexResult) -> Result<(), OrbitErr
 }
 
 impl Execute for SemanticStatsArgs {
-    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+    fn execute(self, runtime: &OrbitRuntime) -> CommandOut {
         let result = runtime.semantic_stats()?;
-        if self.json {
-            crate::output::json::print_pretty(&json!(result))
-        } else {
+        let doc = json!(result);
+        {
             use crate::output::table::{Column, Table};
             let mut table = Table::new(vec![
                 Column::new("SOURCE_KIND").fixed(),
@@ -274,8 +276,7 @@ impl Execute for SemanticStatsArgs {
                     row.rows.to_string(),
                 ]);
             }
-            table.print();
-            println!(
+            let trailer = format!(
                 "stale_rows={} companion={} version={} active_model={}",
                 result.rows.stale_rows,
                 if result.companion.installed {
@@ -286,7 +287,7 @@ impl Execute for SemanticStatsArgs {
                 result.companion.version.as_deref().unwrap_or("-"),
                 result.companion.model.as_deref().unwrap_or("-")
             );
-            Ok(())
+            Ok(Payload::blocks(doc, vec![Block::table(table), Block::text(trailer)]).into())
         }
     }
 }

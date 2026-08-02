@@ -14,27 +14,29 @@ pub(super) fn policy_json(def: &PolicyDef) -> Result<Value, OrbitError> {
     }))
 }
 
-pub(super) fn print_policy(def: &PolicyDef) -> Result<(), OrbitError> {
-    println!("Name:        {}", def.name);
+pub(super) fn policy_text(def: &PolicyDef) -> Result<String, OrbitError> {
+    use std::fmt::Write as _;
+    let mut out = String::new();
+    let _ = writeln!(out, "Name:        {}", def.name);
     if let Some(desc) = &def.description {
-        println!("Description: {desc}");
+        let _ = writeln!(out, "Description: {desc}");
     }
-    println!("Created:     {}", def.created_at.to_rfc3339());
-    println!("Updated:     {}", def.updated_at.to_rfc3339());
+    let _ = writeln!(out, "Created:     {}", def.created_at.to_rfc3339());
+    let _ = writeln!(out, "Updated:     {}", def.updated_at.to_rfc3339());
 
-    println!("\nGlobal Denies:");
-    println!("  denyRead:   {}", render_rule_list(&def.deny_read));
-    println!("  denyModify: {}", render_rule_list(&def.deny_modify));
+    let _ = writeln!(out, "\nGlobal Denies:");
+    let _ = writeln!(out, "  denyRead:   {}", render_rule_list(&def.deny_read));
+    let _ = writeln!(out, "  denyModify: {}", render_rule_list(&def.deny_modify));
 
-    println!("\nfsProfiles:");
+    let _ = writeln!(out, "\nfsProfiles:");
     for profile_name in sorted_profile_names(def) {
         let effective = def.effective_profile(&profile_name)?;
-        println!("  {}:", profile_name);
-        println!("    read:   {}", render_rule_list(&effective.read));
-        println!("    modify: {}", render_rule_list(&effective.modify));
+        let _ = writeln!(out, "  {}:", profile_name);
+        let _ = writeln!(out, "    read:   {}", render_rule_list(&effective.read));
+        let _ = writeln!(out, "    modify: {}", render_rule_list(&effective.modify));
     }
 
-    Ok(())
+    Ok(out)
 }
 
 fn effective_profiles_json(def: &PolicyDef) -> Result<Value, OrbitError> {

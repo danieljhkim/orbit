@@ -1,8 +1,8 @@
 use clap::{Args, Subcommand};
-use orbit_core::{OrbitError, OrbitRuntime};
+use orbit_core::OrbitRuntime;
 
-use crate::command::Execute;
 use crate::command::run::{JobReplayArgs, JobResumeArgs, JobRunArgs, JobRunPipelineWorkerArgs};
+use crate::command::{CommandOut, Execute};
 
 use super::list::JobListArgs;
 use super::show::JobShowArgs;
@@ -15,7 +15,7 @@ pub struct JobCommand {
 }
 
 impl Execute for JobCommand {
-    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+    fn execute(self, runtime: &OrbitRuntime) -> CommandOut {
         self.command.execute(runtime)
     }
 }
@@ -39,7 +39,7 @@ pub enum JobSubcommand {
 }
 
 impl Execute for JobSubcommand {
-    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+    fn execute(self, runtime: &OrbitRuntime) -> CommandOut {
         match self {
             JobSubcommand::List(args) => args.execute(runtime),
             JobSubcommand::Show(args) => args.execute(runtime),

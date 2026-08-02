@@ -1,10 +1,10 @@
 use clap::Args;
 use orbit_common::utility::redaction::redact_home_dir;
+use orbit_core::OrbitRuntime;
 use orbit_core::config::{EffectiveConfigValue, load_effective_config};
-use orbit_core::{OrbitError, OrbitRuntime};
 use serde_json::{Map, Value as JsonValue, json};
 
-use crate::command::Execute;
+use crate::command::{CommandOut, Execute, Payload};
 
 use super::support::{ConfigScopeArg, global_config_path, open_store_for_scope};
 
@@ -17,35 +17,26 @@ pub struct ConfigShowArgs {
 }
 
 impl Execute for ConfigShowArgs {
-    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+    fn execute(self, runtime: &OrbitRuntime) -> CommandOut {
         if self.scope == ConfigScopeArg::Effective {
             let effective = load_effective_config(&runtime.global_root(), &runtime.shared_root())?;
-            return if self.json {
-                print_effective_json(runtime, effective.values())
-            } else {
-                print_effective_text(runtime, effective.values());
-                Ok(())
-            };
+            return Ok(Payload::detail(
+                effective_json(runtime, effective.values()),
+                effective_text(runtime, effective.values()),
+            )
+            .into());
         }
 
         let store = open_store_for_scope(runtime, self.scope)?;
         let snapshot = store.snapshot()?;
         let settings = snapshot.all_values();
 
-        if self.json {
-            print_json(runtime, &store, &snapshot, &settings)
-        } else {
-            print_text(runtime, &store, &snapshot, &settings);
-            Ok(())
-        }
+        Ok(Payload::detail(
+            scoped_json(runtime, &store, &snapshot, &settings),
+            scoped_text(runtime, &store, &snapshot, &settings),
+        )
+        .into())
     }
-}
-
-fn print_effective_json(
-    runtime: &OrbitRuntime,
-    values: &[EffectiveConfigValue],
-) -> Result<(), OrbitError> {
-    crate::output::json::print_pretty(&effective_json(runtime, values))
 }
 
 pub(super) fn effective_json(runtime: &OrbitRuntime, values: &[EffectiveConfigValue]) -> JsonValue {
@@ -87,13 +78,17 @@ pub(super) fn effective_json(runtime: &OrbitRuntime, values: &[EffectiveConfigVa
     })
 }
 
-fn print_effective_text(runtime: &OrbitRuntime, values: &[EffectiveConfigValue]) {
-    println!("source: effective layered configuration");
-    println!(
+fn effective_text(runtime: &OrbitRuntime, values: &[EffectiveConfigValue]) -> String {
+    use std::fmt::Write as _;
+    let mut out = String::new();
+    let _ = writeln!(out, "source: effective layered configuration");
+    let _ = writeln!(
+        out,
         "  global:    {}",
         redact_home_dir(&global_config_path(runtime).display().to_string())
     );
-    println!(
+    let _ = writeln!(
+        out,
         "  workspace: {}",
         redact_home_dir(
             &runtime
@@ -103,9 +98,9 @@ fn print_effective_text(runtime: &OrbitRuntime, values: &[EffectiveConfigValue])
                 .to_string()
         )
     );
-    println!();
+    let _ = writeln!(out);
 
-    println!("settings:");
+    let _ = writeln!(out, "settings:");
     for entry in values {
         let source = match entry.source.path() {
             Some(path) => format!(
@@ -115,44 +110,50 @@ fn print_effective_text(runtime: &OrbitRuntime, values: &[EffectiveConfigValue])
             ),
             None => entry.source.kind().label().to_string(),
         };
-        println!(
+        let _ = writeln!(
+            out,
             "  {:<36} {:<24} [{}]",
             entry.key,
             render_value(&entry.value),
             source
         );
     }
-    println!();
+    let _ = writeln!(out);
 
-    println!("derived:");
-    println!(
+    let _ = writeln!(out, "derived:");
+    let _ = writeln!(
+        out,
         "  {:<36} {}",
         "global_root",
         runtime.global_root().to_string_lossy()
     );
-    println!(
+    let _ = writeln!(
+        out,
         "  {:<36} {}",
         "shared_root",
         runtime.shared_root().to_string_lossy()
     );
-    println!(
+    let _ = writeln!(
+        out,
         "  {:<36} {}",
         "local_root",
         runtime.local_root().to_string_lossy()
     );
-    println!(
+    let _ = writeln!(
+        out,
         "  {:<36} {}",
         "persistence",
         runtime.persistence_config_json()
     );
+    out
 }
 
-fn print_json(
+fn scoped_json(
     runtime: &OrbitRuntime,
     store: &orbit_core::config::ConfigStore,
     snapshot: &orbit_core::config::ConfigSnapshot,
     settings: &[(&'static str, JsonValue)],
-) -> Result<(), OrbitError> {
+) -> JsonValue {
     let mut settings_obj = Map::new();
     for (key, value) in settings {
         settings_obj.insert((*key).to_string(), value.clone());
@@ -166,7 +167,7 @@ fn print_json(
     // `derived:` grouping the task asks for is rendered in the human-
     // readable text output below; the JSON shape keeps these pre-existing
     // field names and positions unchanged.
-    crate::output::json::print_pretty(&json!({
+    json!({
         "source": {
             "scope": store.scope().label(),
             "path": store.path().to_string_lossy(),
@@ -179,54 +180,68 @@ fn print_json(
         "local_root": runtime.local_root().to_string_lossy(),
         "config_path": store.path().to_string_lossy(),
         "persistence": runtime.persistence_config_json(),
-    }))
+    })
 }
 
-fn print_text(
+fn scoped_text(
     runtime: &OrbitRuntime,
     store: &orbit_core::config::ConfigStore,
     snapshot: &orbit_core::config::ConfigSnapshot,
     settings: &[(&'static str, JsonValue)],
-) {
-    println!(
+) -> String {
+    use std::fmt::Write as _;
+    let mut out = String::new();
+    let _ = writeln!(
+        out,
         "source: {} ({})",
         store.scope().label(),
         redact_home_dir(&store.path().display().to_string())
     );
-    println!();
+    let _ = writeln!(out);
 
-    println!("settings:");
+    let _ = writeln!(out, "settings:");
     for (key, value) in settings {
-        println!("  {key:<36} {}", render_value(value));
+        let _ = writeln!(out, "  {key:<36} {}", render_value(value));
     }
-    println!();
+    let _ = writeln!(out);
 
-    println!("derived:");
-    println!(
+    let _ = writeln!(out, "derived:");
+    let _ = writeln!(
+        out,
         "  {:<36} {}",
         "execution_env_inherit", snapshot.execution_env_inherit
     );
-    println!(
+    let _ = writeln!(
+        out,
         "  {:<36} {}",
         "global_root",
         runtime.global_root().to_string_lossy()
     );
-    println!(
+    let _ = writeln!(
+        out,
         "  {:<36} {}",
         "shared_root",
         runtime.shared_root().to_string_lossy()
     );
-    println!(
+    let _ = writeln!(
+        out,
         "  {:<36} {}",
         "local_root",
         runtime.local_root().to_string_lossy()
     );
-    println!("  {:<36} {}", "config_path", store.path().to_string_lossy());
-    println!(
+    let _ = writeln!(
+        out,
+        "  {:<36} {}",
+        "config_path",
+        store.path().to_string_lossy()
+    );
+    let _ = writeln!(
+        out,
         "  {:<36} {}",
         "persistence",
         runtime.persistence_config_json()
     );
+    out
 }
 
 fn render_value(value: &JsonValue) -> String {

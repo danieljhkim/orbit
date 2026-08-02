@@ -1,7 +1,7 @@
 use clap::{Args, Subcommand};
-use orbit_core::{OrbitError, OrbitRuntime};
+use orbit_core::OrbitRuntime;
 
-use crate::command::Execute;
+use crate::command::{CommandOut, Execute};
 
 use super::get::ConfigGetArgs;
 use super::keys::ConfigKeysArgs;
@@ -17,7 +17,7 @@ pub struct ConfigCommand {
 }
 
 impl Execute for ConfigCommand {
-    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+    fn execute(self, runtime: &OrbitRuntime) -> CommandOut {
         self.command.execute(runtime)
     }
 }
@@ -37,7 +37,7 @@ pub enum ConfigSubcommand {
 }
 
 impl Execute for ConfigSubcommand {
-    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+    fn execute(self, runtime: &OrbitRuntime) -> CommandOut {
         match self {
             ConfigSubcommand::Show(args) => args.execute(runtime),
             ConfigSubcommand::Get(args) => args.execute(runtime),

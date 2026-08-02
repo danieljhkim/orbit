@@ -1,9 +1,9 @@
 use clap::Args;
+use orbit_core::OrbitRuntime;
 use orbit_core::command::init::LinkResult;
-use orbit_core::{OrbitError, OrbitRuntime};
 use serde_json::{Value, json};
 
-use crate::command::Execute;
+use crate::command::{CommandOut, CommandOutput, Execute, Payload};
 
 #[derive(Args)]
 pub struct SkillLinkArgs {
@@ -12,10 +12,10 @@ pub struct SkillLinkArgs {
 }
 
 impl Execute for SkillLinkArgs {
-    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+    fn execute(self, runtime: &OrbitRuntime) -> CommandOut {
         let result = orbit_core::command::init::link_skills(&runtime.global_root())?;
         if self.json {
-            crate::output::json::print_pretty(&link_result_json(&result))
+            Ok(Payload::document(link_result_json(&result)).into())
         } else {
             if result.linked_count == 0 {
                 println!("Skill symlinks are already up to date.");
@@ -25,7 +25,7 @@ impl Execute for SkillLinkArgs {
                     println!("  {}", root.display());
                 }
             }
-            Ok(())
+            Ok(CommandOutput::Silent)
         }
     }
 }

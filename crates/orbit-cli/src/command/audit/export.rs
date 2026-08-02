@@ -4,7 +4,7 @@ use clap::{Args, ValueEnum};
 use orbit_core::{AuditEvent, OrbitError, OrbitRuntime};
 use serde_json::Value;
 
-use crate::command::Execute;
+use crate::command::{CommandOut, CommandOutput, Execute};
 use crate::parse::parse_since;
 
 use super::support::audit_event_to_json;
@@ -32,13 +32,19 @@ pub struct AuditExportArgs {
 }
 
 impl Execute for AuditExportArgs {
-    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+    fn execute(self, runtime: &OrbitRuntime) -> CommandOut {
         let since = self.since.map(|s| parse_since(&s)).transpose()?;
         let events = runtime.list_audit_events(since, self.tool, None, None, 0)?;
 
         match self.format {
-            ExportFormat::Json => export_json(&self.output, &events),
-            ExportFormat::Csv => export_csv(&self.output, &events),
+            ExportFormat::Json => {
+                export_json(&self.output, &events)?;
+                Ok(CommandOutput::Silent)
+            }
+            ExportFormat::Csv => {
+                export_csv(&self.output, &events)?;
+                Ok(CommandOutput::Silent)
+            }
         }
     }
 }

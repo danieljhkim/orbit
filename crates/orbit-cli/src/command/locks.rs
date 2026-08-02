@@ -12,11 +12,11 @@
 use std::collections::BTreeSet;
 
 use clap::{Args, Subcommand};
-use orbit_core::{OrbitError, OrbitRuntime, TaskStatus};
+use orbit_core::{OrbitRuntime, TaskStatus};
 use serde_json::{Map, Value, json};
 
 use crate::command::task::output::{print_task_locks, task_lock_to_json};
-use crate::command::{Execute, require_confirmation};
+use crate::command::{CommandOut, CommandOutput, Execute, Payload, require_confirmation};
 
 #[derive(Args)]
 #[command(about = "Inspect and release task file locks")]
@@ -26,7 +26,7 @@ pub struct LocksCommand {
 }
 
 impl Execute for LocksCommand {
-    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+    fn execute(self, runtime: &OrbitRuntime) -> CommandOut {
         self.command.execute(runtime)
     }
 }
@@ -40,7 +40,7 @@ pub enum LocksSubcommand {
 }
 
 impl Execute for LocksSubcommand {
-    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+    fn execute(self, runtime: &OrbitRuntime) -> CommandOut {
         match self {
             LocksSubcommand::List(args) => args.execute(runtime),
             LocksSubcommand::Release(args) => args.execute(runtime),
@@ -57,7 +57,7 @@ pub struct LocksListArgs {
 }
 
 impl Execute for LocksListArgs {
-    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+    fn execute(self, runtime: &OrbitRuntime) -> CommandOut {
         let mut tasks: Vec<_> = runtime
             .list_tasks()?
             .into_iter()
@@ -78,15 +78,16 @@ impl Execute for LocksListArgs {
 
         if self.json {
             let by_task: Vec<Value> = tasks.iter().map(task_lock_to_json).collect();
-            crate::output::json::print_pretty(&json!({
+            Ok(Payload::document(json!({
                 "locked_files": locked_files.iter().cloned().collect::<Vec<_>>(),
                 "by_task": by_task,
                 "total_locked": locked_files.len(),
                 "total_tasks": tasks.len(),
             }))
+            .into())
         } else {
             print_task_locks(&tasks, &locked_files);
-            Ok(())
+            Ok(CommandOutput::Silent)
         }
     }
 }
@@ -110,7 +111,7 @@ pub struct LocksReleaseArgs {
 }
 
 impl Execute for LocksReleaseArgs {
-    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+    fn execute(self, runtime: &OrbitRuntime) -> CommandOut {
         require_confirmation(self.confirm, "task lock release")?;
         let mut input = Map::new();
         input.insert(
@@ -118,6 +119,6 @@ impl Execute for LocksReleaseArgs {
             Value::String(self.reservation_id),
         );
         let value = runtime.run_tool("orbit.task.locks.release", Value::Object(input))?;
-        crate::output::json::print_pretty(&value)
+        Ok(Payload::document(value).into())
     }
 }

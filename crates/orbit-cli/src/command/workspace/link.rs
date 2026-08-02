@@ -3,7 +3,7 @@ use orbit_core::{OrbitError, OrbitRuntime};
 use orbit_remote::workspace_registry;
 use orbit_remote::{host_registry_service_at, require_local_hub_identity};
 
-use crate::command::Execute;
+use crate::command::{CommandOut, CommandOutput, Execute};
 
 #[derive(Args)]
 #[command(about = "Bind a workspace's singular owner by human host name (hub-side)")]
@@ -16,7 +16,7 @@ pub struct WorkspaceLinkArgs {
 }
 
 impl Execute for WorkspaceLinkArgs {
-    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+    fn execute(self, runtime: &OrbitRuntime) -> CommandOut {
         let global_root = runtime.global_root();
         let local_hub = require_local_hub_identity(&global_root)?;
         let service = host_registry_service_at(&global_root)?;
@@ -39,6 +39,6 @@ impl Execute for WorkspaceLinkArgs {
             "workspace '{}' owner bound to machine_id {}",
             workspace_id, link.ownership.owner_machine_id
         );
-        Ok(())
+        Ok(CommandOutput::Silent)
     }
 }

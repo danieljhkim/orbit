@@ -1,8 +1,8 @@
 use clap::Args;
-use orbit_core::{OrbitError, OrbitRuntime};
+use orbit_core::OrbitRuntime;
 use serde_json::json;
 
-use crate::command::Execute;
+use crate::command::{CommandOut, CommandOutput, Execute, Payload};
 
 /// `orbit task reindex` — rebuild the registry index from on-disk bundles.
 #[derive(Args)]
@@ -16,16 +16,17 @@ pub struct TaskReindexArgs {
 }
 
 impl Execute for TaskReindexArgs {
-    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+    fn execute(self, runtime: &OrbitRuntime) -> CommandOut {
         let outcome = runtime.reindex_tasks(self.workspace.as_deref())?;
 
         if self.json {
-            crate::output::json::print_pretty(&json!({
+            Ok(Payload::document(json!({
                 "workspace_id": outcome.workspace_id,
                 "indexed": outcome.indexed,
                 "removed_stale": outcome.removed_stale,
                 "projection_degraded": outcome.projection.degraded_reason,
             }))
+            .into())
         } else {
             println!(
                 "reindexed workspace '{}': {} bundle(s), {} stale binding(s) dropped",
@@ -34,7 +35,7 @@ impl Execute for TaskReindexArgs {
             if let Some(reason) = &outcome.projection.degraded_reason {
                 println!("  warning: projection degraded: {reason}");
             }
-            Ok(())
+            Ok(CommandOutput::Silent)
         }
     }
 }

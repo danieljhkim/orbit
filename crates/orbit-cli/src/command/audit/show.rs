@@ -1,7 +1,7 @@
 use clap::Args;
-use orbit_core::{OrbitError, OrbitRuntime};
+use orbit_core::OrbitRuntime;
 
-use crate::command::Execute;
+use crate::command::{CommandOut, Execute, Payload};
 
 use super::support::audit_event_to_json;
 
@@ -15,94 +15,109 @@ pub struct AuditShowArgs {
 }
 
 impl Execute for AuditShowArgs {
-    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+    fn execute(self, runtime: &OrbitRuntime) -> CommandOut {
         let event = runtime.show_audit_event(self.id)?;
-        if self.json {
-            crate::output::json::print_pretty(&audit_event_to_json(&event))
-        } else {
-            println!("ID:                {}", event.id);
-            println!("Execution ID:      {}", event.execution_id);
-            println!("Timestamp:         {}", event.timestamp.to_rfc3339());
-            println!("Command:           {}", event.command);
-            println!(
-                "Subcommand:        {}",
-                event.subcommand.as_deref().unwrap_or("-")
-            );
-            println!(
-                "Tool:              {}",
-                event.tool_name.as_deref().unwrap_or("-")
-            );
-            println!(
-                "Target type:       {}",
-                event.target_type.as_deref().unwrap_or("-")
-            );
-            println!(
-                "Target ID:         {}",
-                event.target_id.as_deref().unwrap_or("-")
-            );
-            println!("Role:              {}", event.role);
-            println!("Status:            {}", event.status);
-            println!("Exit code:         {}", event.exit_code);
-            println!("Duration (ms):     {}", event.duration_ms);
-            println!("Working dir:       {}", event.working_directory);
-            println!("PID:               {}", event.pid);
-            println!(
-                "Host:              {}",
-                event.host.as_deref().unwrap_or("-")
-            );
-            println!(
-                "Workspace ID:      {}",
-                event.workspace_id.as_deref().unwrap_or("-")
-            );
-            println!(
-                "Caller machine:    {}",
-                event.caller_machine_id.as_deref().unwrap_or("-")
-            );
-            println!(
-                "Caller host:       {}",
-                event.caller_host_id.as_deref().unwrap_or("-")
-            );
-            println!(
-                "Process machine:   {}",
-                event.process_machine_id.as_deref().unwrap_or("-")
-            );
-            println!(
-                "Process host ID:   {}",
-                event.process_host_id.as_deref().unwrap_or("-")
-            );
-            println!(
-                "Transport:         {}",
-                event
-                    .transport
-                    .map(|value| value.to_string())
-                    .as_deref()
-                    .unwrap_or("-")
-            );
-            println!(
-                "Capabilities:      {}",
-                event
-                    .effective_capabilities
-                    .iter()
-                    .map(ToString::to_string)
-                    .collect::<Vec<_>>()
-                    .join(",")
-            );
-            println!(
-                "Origin session:    {}",
-                event.origin_session_id.as_deref().unwrap_or("-")
-            );
-            println!(
-                "MCP call:          {}",
-                event.mcp_call_id.as_deref().unwrap_or("-")
-            );
-            println!(
-                "Lease:             {}",
-                event.lease_id.as_deref().unwrap_or("-")
-            );
-            if let Some(ref err) = event.error_message {
-                println!("Error:             {err}");
-            }
-            Ok(())
+        let doc = audit_event_to_json(&event);
+
+        use std::fmt::Write as _;
+        let mut out = String::new();
+        let _ = writeln!(out, "ID:                {}", event.id);
+        let _ = writeln!(out, "Execution ID:      {}", event.execution_id);
+        let _ = writeln!(out, "Timestamp:         {}", event.timestamp.to_rfc3339());
+        let _ = writeln!(out, "Command:           {}", event.command);
+        let _ = writeln!(
+            out,
+            "Subcommand:        {}",
+            event.subcommand.as_deref().unwrap_or("-")
+        );
+        let _ = writeln!(
+            out,
+            "Tool:              {}",
+            event.tool_name.as_deref().unwrap_or("-")
+        );
+        let _ = writeln!(
+            out,
+            "Target type:       {}",
+            event.target_type.as_deref().unwrap_or("-")
+        );
+        let _ = writeln!(
+            out,
+            "Target ID:         {}",
+            event.target_id.as_deref().unwrap_or("-")
+        );
+        let _ = writeln!(out, "Role:              {}", event.role);
+        let _ = writeln!(out, "Status:            {}", event.status);
+        let _ = writeln!(out, "Exit code:         {}", event.exit_code);
+        let _ = writeln!(out, "Duration (ms):     {}", event.duration_ms);
+        let _ = writeln!(out, "Working dir:       {}", event.working_directory);
+        let _ = writeln!(out, "PID:               {}", event.pid);
+        let _ = writeln!(
+            out,
+            "Host:              {}",
+            event.host.as_deref().unwrap_or("-")
+        );
+        let _ = writeln!(
+            out,
+            "Workspace ID:      {}",
+            event.workspace_id.as_deref().unwrap_or("-")
+        );
+        let _ = writeln!(
+            out,
+            "Caller machine:    {}",
+            event.caller_machine_id.as_deref().unwrap_or("-")
+        );
+        let _ = writeln!(
+            out,
+            "Caller host:       {}",
+            event.caller_host_id.as_deref().unwrap_or("-")
+        );
+        let _ = writeln!(
+            out,
+            "Process machine:   {}",
+            event.process_machine_id.as_deref().unwrap_or("-")
+        );
+        let _ = writeln!(
+            out,
+            "Process host ID:   {}",
+            event.process_host_id.as_deref().unwrap_or("-")
+        );
+        let _ = writeln!(
+            out,
+            "Transport:         {}",
+            event
+                .transport
+                .map(|value| value.to_string())
+                .as_deref()
+                .unwrap_or("-")
+        );
+        let _ = writeln!(
+            out,
+            "Capabilities:      {}",
+            event
+                .effective_capabilities
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+                .join(",")
+        );
+        let _ = writeln!(
+            out,
+            "Origin session:    {}",
+            event.origin_session_id.as_deref().unwrap_or("-")
+        );
+        let _ = writeln!(
+            out,
+            "MCP call:          {}",
+            event.mcp_call_id.as_deref().unwrap_or("-")
+        );
+        let _ = writeln!(
+            out,
+            "Lease:             {}",
+            event.lease_id.as_deref().unwrap_or("-")
+        );
+        if let Some(ref err) = event.error_message {
+            let _ = writeln!(out, "Error:             {err}");
         }
+        Ok(Payload::detail(doc, out).into())
     }
 }

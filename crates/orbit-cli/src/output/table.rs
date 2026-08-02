@@ -8,16 +8,16 @@
 //! line; `comfy_table`'s unbounded row constructor is not reachable from outside
 //! this module.
 //!
-//! Width and styling both come from `output::sink` (ADR-0306): a zero-width
-//! sink truncates nothing, and a sink that disallows color renders the same
-//! bytes a file redirect would.
+//! Width and styling both come from the `OutputSink` the renderer passes in
+//! (ADR-0306): a zero-width sink truncates nothing, and a sink that disallows
+//! color renders the same bytes a file redirect would.
 
 use comfy_table::{
     Attribute, Cell, CellAlignment, ColumnConstraint, ContentArrangement, Row, Table as Grid,
     Width, presets,
 };
 
-use crate::output::sink;
+use crate::output::sink::{OutputMode, OutputSink};
 
 /// Spaces between two rendered columns.
 const GUTTER: usize = 2;
@@ -156,31 +156,69 @@ impl Table {
         self.rows.push(cells.into_iter().map(Into::into).collect());
     }
 
-    /// Write the list to stdout, or the empty-state line to stderr when there
-    /// are no records. Notices about dropped columns go to stderr so that they
-    /// never land in a consumer's record stream.
-    pub fn print(&self) {
+    /// Write the list to stdout in the sink's mode, or the empty-state line to
+    /// stderr when there are no records. Notices about dropped columns go to
+    /// stderr so that they never land in a consumer's record stream.
+    ///
+    /// Called only by `output::render`; a command hands its table back inside a
+    /// payload rather than emitting one itself.
+    pub(crate) fn emit(&self, sink: &OutputSink) {
         if self.rows.is_empty() {
             eprintln!("{}", self.empty_message);
             return;
         }
-        let sink = sink::active();
-        let rendered = self.render(sink.truncate_width(), sink.color_allowed());
+        if sink.mode() == OutputMode::Plain {
+            println!("{}", self.render_plain(sink));
+            return;
+        }
+        let rendered = self.render_at(
+            sink.truncate_width(),
+            sink.color_allowed(),
+            sink.suppress_uniform_columns(),
+        );
         for notice in &rendered.notices {
             eprintln!("{notice}");
         }
         println!("{}", rendered.body);
     }
 
+    /// The plain form: the same visible columns and the same cell values as
+    /// `table`, with the header suppressed, no borders or ANSI, no truncation,
+    /// and a single tab between fields — what `cut -f` expects (spec §2).
+    ///
+    /// Truncation is disabled by construction rather than by passing a width:
+    /// a plain sink has no width, and silently shortening a value on its way
+    /// into a pipe is the failure this form exists to avoid.
+    pub(crate) fn render_plain(&self, sink: &OutputSink) -> String {
+        let visible = self.visible_columns(sink.suppress_uniform_columns());
+        self.rows
+            .iter()
+            .map(|row| {
+                visible
+                    .iter()
+                    .map(|index| cell_at(row, *index).content())
+                    .collect::<Vec<_>>()
+                    .join("\t")
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
     /// Render at an explicit width. `sink_width` of `None` means the sink has no
     /// width and nothing is truncated; `styled` carries whether the sink accepts
-    /// ANSI styling.
+    /// ANSI styling, and `suppress_uniform` whether a column whose value repeats
+    /// may be dropped.
     ///
-    /// Both arguments come from the sink in [`Table::print`]. Tests pass them
-    /// directly so geometry and styling are pinned rather than inherited from
-    /// whatever terminal ran `cargo test`.
-    pub(crate) fn render(&self, sink_width: Option<usize>, styled: bool) -> Rendered {
-        let visible = self.visible_columns();
+    /// All three come from the sink in [`Table::emit`]. Tests pass them directly
+    /// so geometry and styling are pinned rather than inherited from whatever
+    /// terminal ran `cargo test`.
+    pub(crate) fn render_at(
+        &self,
+        sink_width: Option<usize>,
+        styled: bool,
+        suppress_uniform: bool,
+    ) -> Rendered {
+        let visible = self.visible_columns(suppress_uniform);
         let natural = self.natural_widths(&visible);
         let (layout, dropped) = self.resolve_widths(&visible, &natural, sink_width);
 
@@ -242,10 +280,14 @@ impl Table {
     }
 
     /// Columns that survive uniform-value suppression, in order.
-    fn visible_columns(&self) -> Vec<usize> {
+    ///
+    /// `sink_allows` is the sink's answer (`--format table` asked for the full
+    /// shape); `self.suppress_uniform` is the table's own (a fixed-shape view
+    /// is not a result set). Either one is enough to keep every column.
+    fn visible_columns(&self, sink_allows: bool) -> Vec<usize> {
         let all = (0..self.columns.len()).collect::<Vec<_>>();
         // A single record is no evidence that a column is uninformative.
-        if !self.suppress_uniform || self.rows.len() < 2 {
+        if !sink_allows || !self.suppress_uniform || self.rows.len() < 2 {
             return all;
         }
         let kept = all

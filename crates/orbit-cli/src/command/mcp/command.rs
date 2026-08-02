@@ -4,7 +4,7 @@ use clap::{Args, Subcommand};
 use orbit_common::types::McpCapability;
 use orbit_core::{OrbitError, OrbitRuntime};
 
-use crate::command::Execute;
+use crate::command::{CommandOut, CommandOutput, Execute};
 
 use super::setup::{InitArgs, RemoveArgs};
 
@@ -20,7 +20,7 @@ pub struct McpCommand {
 }
 
 impl Execute for McpCommand {
-    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+    fn execute(self, runtime: &OrbitRuntime) -> CommandOut {
         self.command.execute(runtime)
     }
 }
@@ -36,7 +36,7 @@ pub enum McpSubcommand {
 }
 
 impl Execute for McpSubcommand {
-    fn execute(self, _runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+    fn execute(self, _runtime: &OrbitRuntime) -> CommandOut {
         match self {
             // All MCP subcommands are dispatched runtime-free via main.rs's
             // pattern match before runtime initialization. They reach this
@@ -61,13 +61,16 @@ pub struct ServeArgs {
 }
 
 impl ServeArgs {
-    pub fn execute_without_runtime(self, root_override: Option<&Path>) -> Result<(), OrbitError> {
+    pub fn execute_without_runtime(self, root_override: Option<&Path>) -> CommandOut {
         if root_override.is_some() {
             return Err(OrbitError::InvalidInput(
                 "orbit mcp serve does not accept a workspace root override; select a workspace per initialize or tool call"
                     .to_string(),
             ));
         }
-        orbit_remote::serve_mcp_stdio(self.hub, self.capabilities)
+        {
+            orbit_remote::serve_mcp_stdio(self.hub, self.capabilities)?;
+            Ok(CommandOutput::Silent)
+        }
     }
 }

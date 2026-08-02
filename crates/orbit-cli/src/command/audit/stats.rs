@@ -1,8 +1,8 @@
 use clap::Args;
-use orbit_core::{AuditStats, OrbitError, OrbitRuntime};
+use orbit_core::{AuditStats, OrbitRuntime};
 use serde_json::{Value, json};
 
-use crate::command::Execute;
+use crate::command::{CommandOut, CommandOutput, Execute, Payload};
 use crate::parse::parse_since;
 
 #[derive(Args)]
@@ -19,12 +19,12 @@ pub struct AuditStatsArgs {
 }
 
 impl Execute for AuditStatsArgs {
-    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+    fn execute(self, runtime: &OrbitRuntime) -> CommandOut {
         let since = self.since.map(|s| parse_since(&s)).transpose()?;
         let stats = runtime.audit_event_stats(since, self.tool)?;
 
         if self.json {
-            crate::output::json::print_pretty(&stats_to_json(&stats))
+            Ok(Payload::document(stats_to_json(&stats)).into())
         } else {
             println!("Total:             {}", stats.total);
             println!("Success:           {}", stats.success_count);
@@ -33,7 +33,7 @@ impl Execute for AuditStatsArgs {
             println!("Avg duration (ms): {:.1}", stats.avg_duration_ms);
             println!("P95 duration (ms): {}", stats.p95_duration_ms);
             println!("Max duration (ms): {}", stats.max_duration_ms);
-            Ok(())
+            Ok(CommandOutput::Silent)
         }
     }
 }

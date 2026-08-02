@@ -6,17 +6,17 @@
 //! is the only place in the crate that queries terminal state, a property
 //! enforced by `scripts/check-terminal-state-guard.sh`.
 //!
-//! `main` resolves the sink, [`install`]s it, and calls
-//! [`OutputSink::apply_color_policy`]; every renderer then reads [`active`]
-//! rather than asking the environment. The sink is a process global rather
-//! than a parameter threaded through `Execute::execute` [ADR-0314]. Color
-//! emission is decided in exactly one place: `apply_color_policy` overrides
-//! the `colored` crate's own env detection, and `output::table` hands the
-//! same answer to `comfy_table`, so the two styling backends can no longer
-//! disagree about `NO_COLOR` [ADR-0308].
+//! `main` resolves the sink, calls [`OutputSink::apply_color_policy`], and
+//! hands the sink to `output::render`, which is the only consumer. Commands
+//! return payloads and never see a sink at all, so there is no process global
+//! to read: the value is a parameter of the single render call [ORB-10586,
+//! superseding ADR-0314's process-global decision]. Color emission is decided
+//! in exactly one place: `apply_color_policy` overrides the `colored` crate's
+//! own env detection, and `output::table` is handed the same answer for
+//! `comfy_table`, so the two styling backends can no longer disagree about
+//! `NO_COLOR` [ADR-0308].
 
 use std::io::IsTerminal;
-use std::sync::OnceLock;
 
 use clap::ValueEnum;
 
@@ -94,14 +94,18 @@ pub struct OutputSink {
     width: u16,
     color_allowed: bool,
     mode: OutputMode,
+    explicit_table: bool,
+    legacy_json: bool,
 }
 
 impl OutputSink {
     /// Resolve the sink for this invocation from the real process environment.
     ///
     /// Called exactly once, from `main`. `requested` is the global `--format`
-    /// value, absent when the flag was not passed.
-    pub fn from_process(requested: Option<FormatArg>) -> Self {
+    /// value, absent when the flag was not passed; `legacy_json` is whether the
+    /// invoked subcommand's own `--json`/`--ops` boolean was set (mode
+    /// precedence rung 2, migration step 2).
+    pub fn from_process(requested: Option<FormatArg>, legacy_json: bool) -> Self {
         let is_tty = std::io::stdout().is_terminal();
         // Only ask the terminal for its size when there is a terminal; a
         // non-TTY sink has width 0 no matter what the ioctl would report.
@@ -111,11 +115,7 @@ impl OutputSink {
             &SinkEnv::from_process(),
             terminal_width,
             requested,
-            // Migration step 2 threads the per-command `--json` boolean in
-            // here. It lives on 86 individual argument structs, so until those
-            // are converted the legacy rung is inert and every `--json` branch
-            // still decides for itself.
-            false,
+            legacy_json,
         )
     }
 
@@ -141,6 +141,8 @@ impl OutputSink {
             width: resolve_width(is_tty, env, terminal_width),
             color_allowed: resolve_color(is_tty, env),
             mode: resolve_mode(is_tty, env, requested, legacy_json),
+            explicit_table: requested == Some(FormatArg::Table),
+            legacy_json,
         }
     }
 
@@ -182,9 +184,29 @@ impl OutputSink {
         self.is_tty && !matches!(self.mode, OutputMode::Json | OutputMode::Ndjson)
     }
 
-    /// Whether JSON should be pretty-printed: only for a human (spec §3).
+    /// Whether JSON should be pretty-printed.
+    ///
+    /// Spec §3 says "only when `is_tty`", and that is what `--format json`
+    /// does. The legacy per-command `--json` rung is pinned to pretty
+    /// regardless: every one of those branches called
+    /// `output::json::print_pretty` unconditionally before the conversion, and
+    /// ADR-0306 requires byte-identity for existing `--json` invocations. The
+    /// two rungs therefore differ deliberately — `--json | jq` keeps the bytes
+    /// it has always had, and `--format json` gets the spec's shape.
     pub fn pretty_json(&self) -> bool {
-        self.is_tty
+        self.is_tty || self.legacy_json
+    }
+
+    /// Whether a column carrying the same value in every row may be dropped
+    /// (`specs/table-rendering.md` §5).
+    ///
+    /// Suppression is a readability heuristic for the default view. Asking for
+    /// `--format table` explicitly is asking for the table's full shape, so it
+    /// turns the heuristic off; `auto` retains it. A command that renders a
+    /// fixed-shape view rather than a result set opts out separately, via
+    /// [`Table::keep_all_columns`](crate::output::table::Table::keep_all_columns).
+    pub fn suppress_uniform_columns(&self) -> bool {
+        !self.explicit_table
     }
 
     /// Point the `colored` crate at this sink's answer instead of its own
@@ -202,35 +224,27 @@ impl OutputSink {
 }
 
 /// A sink for a destination that is not a terminal: no color, no width, plain
-/// rendering. Used before [`install`] runs — in unit tests, and in any code
-/// path that renders before `main` has resolved the real one — because
-/// assuming "no terminal" degrades to correct output, while assuming one
-/// writes escape sequences into a file.
-const PIPED: OutputSink = OutputSink {
+/// rendering.
+///
+/// This is what a test renders against unless it resolves a sink of its own,
+/// and it is what `main` falls back to on the paths that report a failure
+/// before a sink exists. Assuming "no terminal" degrades to correct output,
+/// while assuming one writes escape sequences into a file.
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "only tests render without resolving a sink; `main` always resolves one"
+    )
+)]
+pub const PIPED: OutputSink = OutputSink {
     is_tty: false,
     width: 0,
     color_allowed: false,
     mode: OutputMode::Plain,
+    explicit_table: false,
+    legacy_json: false,
 };
-
-static ACTIVE: OnceLock<OutputSink> = OnceLock::new();
-
-/// Publish the sink resolved for this invocation.
-///
-/// Called once, from `main`, before dispatch. A second call is ignored rather
-/// than a panic: the sink is a read-mostly global and a duplicate install is a
-/// programming error worth neither aborting a user's command nor silently
-/// changing rendering halfway through it.
-pub fn install(sink: OutputSink) {
-    if ACTIVE.set(sink).is_err() {
-        tracing::debug!("output sink already installed; ignoring duplicate install");
-    }
-}
-
-/// The sink for this invocation, or [`PIPED`] when none was installed.
-pub fn active() -> OutputSink {
-    ACTIVE.get().copied().unwrap_or(PIPED)
-}
 
 /// `COLUMNS` first, then what the terminal reported, then 0.
 ///

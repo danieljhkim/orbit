@@ -3,7 +3,7 @@
 use clap::{Args, Subcommand};
 use orbit_core::{OrbitError, OrbitRuntime};
 
-use crate::command::Execute;
+use crate::command::{CommandOut, CommandOutput, Execute, Payload};
 
 #[derive(Args)]
 #[command(about = "Inspect and explicitly reap Orbit-managed garbage")]
@@ -13,7 +13,7 @@ pub struct GcCommand {
 }
 
 impl Execute for GcCommand {
-    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+    fn execute(self, runtime: &OrbitRuntime) -> CommandOut {
         self.target.execute(runtime)
     }
 }
@@ -27,7 +27,7 @@ pub enum GcTarget {
 }
 
 impl Execute for GcTarget {
-    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+    fn execute(self, runtime: &OrbitRuntime) -> CommandOut {
         match self {
             Self::Worktrees(args) => args.execute(runtime),
         }
@@ -58,21 +58,22 @@ pub struct WorktreeGcArgs {
 }
 
 impl Execute for WorktreeGcArgs {
-    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+    fn execute(self, runtime: &OrbitRuntime) -> CommandOut {
         let result = runtime.gc_worktrees(self.confirm, self.run, self.older_than_hours)?;
         if self.json {
-            return crate::output::json::print_pretty(&serde_json::to_value(result).map_err(
-                |error| {
+            return Ok(
+                Payload::document(serde_json::to_value(result).map_err(|error| {
                     OrbitError::Execution(format!(
                         "failed to serialize worktree GC report: {error}"
                     ))
-                },
-            )?);
+                })?)
+                .into(),
+            );
         }
 
         if result.reports.is_empty() {
             println!("No worktrees matched.");
-            return Ok(());
+            return Ok(CommandOutput::Silent);
         }
         for report in &result.reports {
             println!(
@@ -96,6 +97,6 @@ impl Execute for WorktreeGcArgs {
             );
         }
         println!("total_bytes_reclaimed={}", result.bytes_reclaimed);
-        Ok(())
+        Ok(CommandOutput::Silent)
     }
 }

@@ -5,7 +5,7 @@ use orbit_common::types::AgentFamily;
 use orbit_core::{OrbitError, OrbitRuntime, find_workflow};
 use serde_json::{Value, json};
 
-use crate::command::Execute;
+use crate::command::{CommandOut, CommandOutput, Execute};
 
 use super::support::{dispatch_workflow, print_workflow_dispatch_results};
 
@@ -42,7 +42,7 @@ pub struct DuelPlanCommand {
 }
 
 impl Execute for DuelPlanCommand {
-    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+    fn execute(self, runtime: &OrbitRuntime) -> CommandOut {
         let plan = build_duel_plan_run_plan(
             &self,
             runtime.workflow_base_branch(),
@@ -56,7 +56,10 @@ impl Execute for DuelPlanCommand {
             plan.wait_for_completion,
             1,
         )?;
-        print_workflow_dispatch_results(plan.workflow_alias, &runs, self.json)
+        {
+            print_workflow_dispatch_results(plan.workflow_alias, &runs, self.json)?;
+            Ok(CommandOutput::Silent)
+        }
     }
 }
 

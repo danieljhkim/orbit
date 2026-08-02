@@ -17,6 +17,7 @@ use serde::{Deserialize, Serialize};
 
 use super::role::CliCheckoutRole;
 use super::support::{detect_git_remote, dir_name_or_fallback, ensure_orbit_gitignore_entry};
+use crate::command::{CommandOut, CommandOutput};
 
 #[derive(Args)]
 pub struct WorkspaceInitArgs {
@@ -63,7 +64,7 @@ pub struct WorkspaceInitArgs {
 }
 
 impl WorkspaceInitArgs {
-    pub fn execute_without_runtime(self, root_override: Option<&Path>) -> Result<(), OrbitError> {
+    pub fn execute_without_runtime(self, root_override: Option<&Path>) -> CommandOut {
         let cwd = std::env::current_dir().map_err(|e| OrbitError::Io(e.to_string()))?;
         let roots = RemoteRuntimeFactory::resolve_bootstrap_roots_for_cwd(&cwd, root_override)?;
         let orbit_dir = roots.shared_root;
@@ -123,7 +124,7 @@ impl WorkspaceInitArgs {
             }
         }
 
-        Ok(())
+        Ok(CommandOutput::Silent)
     }
 
     fn execute_at_path(

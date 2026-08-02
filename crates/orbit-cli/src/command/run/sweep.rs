@@ -15,6 +15,7 @@ use serde_json::{Value, json};
 
 use super::ship::ShipMode;
 use super::support::TASK_AUTO_PIPELINE_JOB;
+use crate::command::{CommandOut, CommandOutput};
 
 #[derive(Args)]
 #[command(
@@ -105,7 +106,7 @@ impl ShipSweepCommand {
     /// Runs without a pre-initialized runtime: the sweep resolves every
     /// workspace from the global registry and must never bootstrap a
     /// `.orbit/` in the scheduler's working directory.
-    pub fn execute_without_runtime(self) -> Result<(), OrbitError> {
+    pub fn execute_without_runtime(self) -> CommandOut {
         let global_root = workspace_registry::global_orbit_dir()?;
         let registry_path = workspace_registry::registry_path_for(&global_root);
         let mut registry = workspace_registry::load_registry_from(&registry_path)?;
@@ -150,7 +151,7 @@ impl ShipSweepCommand {
                 reports.len()
             )));
         }
-        Ok(())
+        Ok(CommandOutput::Silent)
     }
 }
 

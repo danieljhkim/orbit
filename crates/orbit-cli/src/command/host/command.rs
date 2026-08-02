@@ -3,7 +3,7 @@ use orbit_common::types::HostNameResolution;
 use orbit_core::{OrbitError, OrbitRuntime};
 use orbit_remote::HostRegistryService;
 
-use crate::command::Execute;
+use crate::command::{CommandOut, Execute};
 
 use super::list::HostListArgs;
 use super::register::HostRegisterArgs;
@@ -18,7 +18,7 @@ pub struct HostCommand {
 }
 
 impl Execute for HostCommand {
-    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+    fn execute(self, runtime: &OrbitRuntime) -> CommandOut {
         self.command.execute(runtime)
     }
 }
@@ -36,7 +36,7 @@ pub enum HostSubcommand {
 }
 
 impl Execute for HostSubcommand {
-    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+    fn execute(self, runtime: &OrbitRuntime) -> CommandOut {
         match self {
             HostSubcommand::Register(args) => args.execute(runtime),
             HostSubcommand::List(args) => args.execute(runtime),

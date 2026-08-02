@@ -4,6 +4,7 @@ use orbit_core::runtime::run_audit::RunAuditStep;
 use orbit_core::{JobRun, JobRunStep, JobTargetType, NotFoundKind, OrbitError, OrbitRuntime};
 use serde_json::{Value, json};
 
+use crate::command::{CommandOut, Payload};
 use crate::output::color::Domain;
 
 use super::format::{
@@ -155,36 +156,39 @@ impl RunStepRecord {
     }
 }
 
-pub(crate) fn print_run_header(run: &JobRun) {
-    print_run_header_with_state(run, None);
+pub(crate) fn run_header_text(run: &JobRun) -> String {
+    run_header_text_with_state(run, None)
 }
 
-pub(crate) fn print_run_header_with_state(run: &JobRun, state: Option<&PipelineState>) {
+pub(crate) fn run_header_text_with_state(run: &JobRun, state: Option<&PipelineState>) -> String {
     use crate::output::color::{Domain, bold, dimmed, text};
-    println!("{} {}", bold("Run ID:"), run.run_id);
-    println!("{} {}", bold("Job ID:"), run.job_id);
-    println!(
-        "{} {}",
-        bold("State:"),
-        text(&run.state.to_string(), Domain::JobState)
-    );
-    println!(
-        "{} {}",
-        bold("Started:"),
-        dimmed(&format_timestamp(run.started_at))
-    );
-    println!(
-        "{} {}",
-        bold("Finished:"),
-        dimmed(&format_timestamp(run.finished_at))
-    );
-    println!("{} {}", bold("Duration:"), format_duration(run.duration_ms));
+    let mut lines = vec![
+        format!("{} {}", bold("Run ID:"), run.run_id),
+        format!("{} {}", bold("Job ID:"), run.job_id),
+        format!(
+            "{} {}",
+            bold("State:"),
+            text(&run.state.to_string(), Domain::JobState)
+        ),
+        format!(
+            "{} {}",
+            bold("Started:"),
+            dimmed(&format_timestamp(run.started_at))
+        ),
+        format!(
+            "{} {}",
+            bold("Finished:"),
+            dimmed(&format_timestamp(run.finished_at))
+        ),
+        format!("{} {}", bold("Duration:"), format_duration(run.duration_ms)),
+    ];
     if let Some(line) = format_waiting_line(run.state, state) {
-        println!("{line}");
+        lines.push(line);
     }
+    lines.join("\n")
 }
 
-pub(crate) fn print_step_summary_table(steps: &[&JobRunStep]) -> Result<(), OrbitError> {
+pub(crate) fn step_summary_table(steps: &[&JobRunStep]) -> crate::output::table::Table {
     use crate::output::table::{Column, Table};
     // `orbit run show <run_id> -s <step>` prints one step's untruncated record.
     let mut table = Table::new(vec![
@@ -211,72 +215,69 @@ pub(crate) fn print_step_summary_table(steps: &[&JobRunStep]) -> Result<(), Orbi
             Cell::new(summarize_error_message(step.error_message.as_deref())),
         ]);
     }
-    table.print();
-    Ok(())
+    table
 }
 
-pub(crate) fn print_step_record(
+pub(crate) fn step_record_payload(
     run: &JobRun,
     step: &RunStepRecord,
     step_output: Option<Value>,
-    json_output: bool,
-) -> Result<(), OrbitError> {
-    if json_output {
-        return crate::output::json::print_pretty(&json!({
-            "run_id": run.run_id,
-            "job_id": run.job_id,
-            "step": run_step_record_to_json(step),
-            "step_output": step_output,
-        }));
-    }
+) -> CommandOut {
+    let doc = json!({
+        "run_id": run.run_id,
+        "job_id": run.job_id,
+        "step": run_step_record_to_json(step),
+        "step_output": step_output,
+    });
 
     use crate::output::color::{Domain, bold, dimmed, text};
-    println!("{} {}", bold("Run ID:"), run.run_id);
-    println!("{} {}", bold("Job ID:"), run.job_id);
-    println!("{} {}", bold("Target ID:"), step.target_id);
-    println!("{} {}", bold("Target Type:"), step.target_type);
-    println!("{} {}", bold("State:"), text(&step.state, Domain::JobState));
-    println!(
-        "{} {}",
-        bold("Started:"),
-        dimmed(&format_timestamp(step.started_at))
-    );
-    println!(
-        "{} {}",
-        bold("Finished:"),
-        dimmed(&format_timestamp(step.finished_at))
-    );
-    println!(
-        "{} {}",
-        bold("Duration:"),
-        format_duration(step.duration_ms)
-    );
-    println!(
-        "{} {}",
-        bold("Exit Code:"),
-        step.exit_code
-            .map(|value| value.to_string())
-            .unwrap_or_else(|| "-".to_string())
-    );
-    println!(
-        "{} {}",
-        bold("Error Code:"),
-        step.error_code.as_deref().unwrap_or("-")
-    );
-    println!(
-        "{} {}",
-        bold("Error Message:"),
-        step.error_message.as_deref().unwrap_or("-")
-    );
-    if let Some(output) = step_output {
-        println!("{}", bold("Step Output:"));
-        println!(
-            "{}",
-            serde_json::to_string_pretty(&output)
-                .map_err(|err| OrbitError::Store(err.to_string()))?
+    let mut lines = vec![
+        format!("{} {}", bold("Run ID:"), run.run_id),
+        format!("{} {}", bold("Job ID:"), run.job_id),
+        format!("{} {}", bold("Target ID:"), step.target_id),
+        format!("{} {}", bold("Target Type:"), step.target_type),
+        format!("{} {}", bold("State:"), text(&step.state, Domain::JobState)),
+        format!(
+            "{} {}",
+            bold("Started:"),
+            dimmed(&format_timestamp(step.started_at))
+        ),
+        format!(
+            "{} {}",
+            bold("Finished:"),
+            dimmed(&format_timestamp(step.finished_at))
+        ),
+        format!(
+            "{} {}",
+            bold("Duration:"),
+            format_duration(step.duration_ms)
+        ),
+        format!(
+            "{} {}",
+            bold("Exit Code:"),
+            step.exit_code
+                .map(|value| value.to_string())
+                .unwrap_or_else(|| "-".to_string())
+        ),
+        format!(
+            "{} {}",
+            bold("Error Code:"),
+            step.error_code.as_deref().unwrap_or("-")
+        ),
+        format!(
+            "{} {}",
+            bold("Error Message:"),
+            step.error_message.as_deref().unwrap_or("-")
+        ),
+    ];
+    if let Some(output) = doc.get("step_output").filter(|value| !value.is_null()) {
+        lines.push(bold("Step Output:").to_string());
+        lines.push(
+            serde_json::to_string_pretty(output)
+                .map_err(|err| OrbitError::Store(err.to_string()))?,
         );
     }
-    Ok(())
+    Ok(Payload::detail(doc.clone(), lines.join("\n")).into())
 }
 
 fn run_step_record_to_json(step: &RunStepRecord) -> Value {

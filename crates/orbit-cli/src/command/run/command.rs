@@ -1,7 +1,7 @@
 use clap::{Args, Subcommand};
-use orbit_core::{OrbitError, OrbitRuntime};
+use orbit_core::OrbitRuntime;
 
-use crate::command::Execute;
+use crate::command::{CommandOut, Execute};
 
 use super::cancel::RunCancelArgs;
 use super::duel;
@@ -74,7 +74,7 @@ pub struct RunCommand {
 }
 
 impl Execute for RunCommand {
-    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+    fn execute(self, runtime: &OrbitRuntime) -> CommandOut {
         self.command.execute(runtime)
     }
 }
@@ -111,7 +111,7 @@ pub enum RunSubcommand {
 }
 
 impl Execute for RunSubcommand {
-    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+    fn execute(self, runtime: &OrbitRuntime) -> CommandOut {
         match self {
             RunSubcommand::Ship(command) => command.execute(runtime),
             RunSubcommand::ShipLocal(command) => command.execute(runtime),

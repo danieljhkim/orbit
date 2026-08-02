@@ -7,7 +7,7 @@ use orbit_remote::{
     require_local_hub_identity,
 };
 
-use crate::command::Execute;
+use crate::command::{CommandOut, CommandOutput, Execute};
 
 use super::command::resolve_machine_id;
 
@@ -21,7 +21,7 @@ pub struct HostRenameArgs {
 }
 
 impl Execute for HostRenameArgs {
-    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+    fn execute(self, runtime: &OrbitRuntime) -> CommandOut {
         let global_root = runtime.global_root();
         let local_hub = require_local_hub_identity(&global_root)?;
         let service = host_registry_service_at(&global_root)?;
@@ -49,7 +49,7 @@ impl Execute for HostRenameArgs {
                  registry now agree",
                 record.host_id, record.machine_id
             );
-            Ok(())
+            Ok(CommandOutput::Silent)
         } else {
             // Registry-only rename for another machine; its local host.toml is
             // never pretended to be updated.
@@ -59,7 +59,7 @@ impl Execute for HostRenameArgs {
                  host.toml was not modified",
                 record.host_id, record.machine_id
             );
-            Ok(())
+            Ok(CommandOutput::Silent)
         }
     }
 }

@@ -1,30 +1,55 @@
 use clap::Args;
 use orbit_common::types::WorkspaceRegistry;
-use orbit_core::{OrbitError, OrbitRuntime};
+use orbit_core::OrbitRuntime;
 use orbit_remote::workspace_registry;
+use serde_json::{Value, json};
 
-use crate::command::Execute;
+use crate::command::{CommandOut, Execute, Payload};
 
 #[derive(Args)]
 pub struct WorkspaceListArgs {}
 
 impl Execute for WorkspaceListArgs {
-    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+    fn execute(self, runtime: &OrbitRuntime) -> CommandOut {
         let global_root = runtime.global_root();
         let registry_path = workspace_registry::registry_path_for(&global_root);
         let mut registry = workspace_registry::load_registry_from(&registry_path)?;
         workspace_registry::validate_workspaces(&mut registry);
 
-        if registry.workspaces.is_empty() {
-            print!("{}", format_workspace_list(&registry));
-            return Ok(());
+        if !registry.workspaces.is_empty() {
+            // Save back if staleness changed any status
+            workspace_registry::save_registry_to(&registry, &registry_path)?;
         }
-
-        // Save back if staleness changed any status
-        workspace_registry::save_registry_to(&registry, &registry_path)?;
-        print!("{}", format_workspace_list(&registry));
-        Ok(())
+        Ok(Payload::detail(
+            workspace_list_json(&registry),
+            format_workspace_list(&registry),
+        )
+        .into())
     }
+}
+
+/// `workspace list` had no machine-readable form either; one record per
+/// registered workspace, carrying the same fields the text columns show
+/// (ORB-10586).
+pub(super) fn workspace_list_json(registry: &WorkspaceRegistry) -> Value {
+    Value::Array(
+        registry
+            .workspaces
+            .iter()
+            .map(|workspace| {
+                let checkout = workspace_registry::find_checkout(registry, &workspace.id);
+                json!({
+                    "id": workspace.id,
+                    "name": workspace.name,
+                    "status": workspace.status.to_string(),
+                    "ship_mode": orbit_core::resolved_ship_mode(workspace).as_input_value(),
+                    "owner_machine_id": workspace.owner_machine_id,
+                    "role": checkout.and_then(|checkout| checkout.role.map(|role| role.to_string())),
+                    "repo_root": checkout.map(|checkout| checkout.repo_root.to_string_lossy()),
+                })
+            })
+            .collect(),
+    )
 }
 
 pub(super) fn format_workspace_list(registry: &WorkspaceRegistry) -> String {

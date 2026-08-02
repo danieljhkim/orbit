@@ -36,8 +36,20 @@ use std::path::PathBuf;
 use clap::{Parser, Subcommand};
 use orbit_core::{OrbitError, OrbitRuntime};
 
+// Re-exported so a command file imports its return type from the module that
+// defines the trait, rather than reaching into `output` for half of it.
+pub use crate::output::payload::{Block, CommandOutput, Payload};
+
+/// What every command body returns: the records it produced, or
+/// [`CommandOutput::Silent`] when its effect was its output.
+///
+/// A command never writes a record to stdout and never inspects the sink;
+/// `output::render` projects this into the resolved mode
+/// (`docs/design/terminal-interface/specs/output-modes.md` §3, ADR-0306).
+pub type CommandOut = Result<CommandOutput, OrbitError>;
+
 pub trait Execute {
-    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError>;
+    fn execute(self, runtime: &OrbitRuntime) -> CommandOut;
 }
 
 /// Require the standard non-interactive confirmation flag before an

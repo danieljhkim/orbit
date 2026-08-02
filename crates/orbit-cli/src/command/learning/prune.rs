@@ -1,8 +1,8 @@
 use clap::Args;
-use orbit_core::{OrbitError, OrbitRuntime};
+use orbit_core::OrbitRuntime;
 use serde_json::json;
 
-use crate::command::Execute;
+use crate::command::{CommandOut, CommandOutput, Execute, Payload};
 
 #[derive(Args)]
 pub struct LearningPruneArgs {
@@ -18,13 +18,14 @@ pub struct LearningPruneArgs {
 }
 
 impl Execute for LearningPruneArgs {
-    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+    fn execute(self, runtime: &OrbitRuntime) -> CommandOut {
         let (stale, deleted) = runtime.prune_learnings(self.confirm)?;
         if self.json {
-            crate::output::json::print_pretty(&json!({
+            Ok(Payload::document(json!({
                 "stale": stale,
                 "deleted": deleted,
             }))
+            .into())
         } else {
             if stale.is_empty() {
                 println!("No stale learnings.");
@@ -37,7 +38,7 @@ impl Execute for LearningPruneArgs {
             if !deleted.is_empty() {
                 println!("Archived {} stale learning(s).", deleted.len());
             }
-            Ok(())
+            Ok(CommandOutput::Silent)
         }
     }
 }
