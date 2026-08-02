@@ -4,7 +4,8 @@ use chrono::Utc;
 use clap::Args;
 use orbit_cmd::agent_rules::{InjectionAction, inject_agent_rules};
 use orbit_common::types::{
-    Workspace, WorkspaceCheckout, WorkspaceCheckoutRole, WorkspaceStatus, validate_machine_id,
+    Workspace, WorkspaceCheckout, WorkspaceCheckoutRole, WorkspaceRegistry, WorkspaceStatus,
+    validate_machine_id,
 };
 use orbit_common::utility::fs::atomic_write_text;
 use orbit_core::OrbitError;
@@ -55,7 +56,8 @@ pub struct WorkspaceInitArgs {
     #[arg(long, hide = true)]
     pub refresh_defaults: bool,
     /// Reconcile an already registered workspace after validating its complete
-    /// logical, checkout, and durable-identity binding.
+    /// logical, checkout, and durable-identity binding, or replace a checkout
+    /// identity that no registration claims.
     #[arg(long)]
     pub force: bool,
 }
@@ -214,12 +216,27 @@ impl WorkspaceInitArgs {
         } else if let Some(identity) = read_workspace_identity(orbit_dir)?
             && identity.workspace_id != id
         {
-            return Err(OrbitError::WorkspaceError(format!(
-                "workspace identity '{}' at '{}' conflicts with requested workspace '{}'; refusing to overwrite it",
-                identity.workspace_id,
-                orbit_dir.join("config.yaml").display(),
-                id
-            )));
+            // A checkout can carry an identity the registry never recorded:
+            // any command that opens a runtime in an uninitialized checkout
+            // seeds a bootstrap id. Replacing one is explicit reconciliation,
+            // so it needs --force — but --force must not detach an identity a
+            // durable registration still claims.
+            if !self.force {
+                return Err(OrbitError::WorkspaceError(format!(
+                    "workspace identity '{}' at '{}' conflicts with requested workspace '{}'; rerun with --force to reconcile it",
+                    identity.workspace_id,
+                    orbit_dir.join("config.yaml").display(),
+                    id
+                )));
+            }
+            if registry_claims(&registry, &identity.workspace_id) {
+                return Err(OrbitError::WorkspaceError(format!(
+                    "cannot reconcile workspace '{}': checkout identity '{}' at '{}' is claimed by an existing registration",
+                    id,
+                    identity.workspace_id,
+                    orbit_dir.join("config.yaml").display()
+                )));
+            }
         }
 
         init_workspace_at_root(
@@ -367,6 +384,18 @@ fn validate_existing_registration(
         )));
     }
     Ok(())
+}
+
+/// True when either registry authority still binds `workspace_id`.
+fn registry_claims(registry: &WorkspaceRegistry, workspace_id: &str) -> bool {
+    registry
+        .workspaces
+        .iter()
+        .any(|workspace| workspace.id == workspace_id)
+        || registry
+            .checkouts
+            .iter()
+            .any(|checkout| checkout.workspace_id == workspace_id)
 }
 
 fn read_workspace_identity(
