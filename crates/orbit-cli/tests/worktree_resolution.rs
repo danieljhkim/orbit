@@ -254,8 +254,10 @@ fn linked_worktree_artifacts_write_locally_and_remote_lists_return_stubs() {
         None,
     );
     assert!(!rejected_update.status.success());
+    // The JSON error payload is on stderr in every mode [ORB-10570].
+    assert!(rejected_update.stdout.is_empty());
     let rejected_payload: Value =
-        serde_json::from_slice(&rejected_update.stdout).expect("structured update error");
+        serde_json::from_slice(&rejected_update.stderr).expect("structured update error");
     assert_eq!(rejected_payload["code"], "artifact_not_local");
     assert_eq!(rejected_payload["artifact_origin"]["mode"], "federated");
     assert!(
@@ -313,8 +315,9 @@ fn linked_worktree_artifacts_write_locally_and_remote_lists_return_stubs() {
     let show_output =
         run_orbit_output(&main_repo, &home, &["adr", "show", &adr_id, "--json"], None);
     assert!(!show_output.status.success());
+    assert!(show_output.stdout.is_empty());
     let unavailable_payload: Value =
-        serde_json::from_slice(&show_output.stdout).expect("structured unavailable error");
+        serde_json::from_slice(&show_output.stderr).expect("structured unavailable error");
     assert_eq!(unavailable_payload["code"], "remote_artifact_unavailable");
     assert_eq!(unavailable_payload["artifact_origin"]["mode"], "federated");
     assert_eq!(
@@ -338,8 +341,9 @@ fn linked_worktree_artifacts_write_locally_and_remote_lists_return_stubs() {
         None,
     );
     assert!(!unknown_output.status.success());
+    assert!(unknown_output.stdout.is_empty());
     let unknown_payload: Value =
-        serde_json::from_slice(&unknown_output.stdout).expect("structured not-found error");
+        serde_json::from_slice(&unknown_output.stderr).expect("structured not-found error");
     assert_eq!(unknown_payload["code"], "not_found");
 }
 

@@ -1,7 +1,7 @@
 ---
 type: design
 summary: "Spec: Output Modes and Sink Resolution"
-last_validated: 2026-08-01
+last_validated: 2026-08-02
 ---
 
 # Spec: Output Modes and Sink Resolution
@@ -63,7 +63,7 @@ Precedence, first match wins:
 ## 5. Streams
 
 - **stdout carries the payload and nothing else.** Progress, warnings, counts, empty-state prose, and diagnostics go to stderr, in every mode.
-- **Errors go to stderr.** In `json`/`ndjson` modes an error is a single JSON object on stderr using the existing `error_payload` shape (`error`, `code`, and the optional `did_you_mean` / `artifact_origin` / task-bundle fields); in other modes it is a plain message. This is a change from current behavior, which writes the JSON error payload to stdout.
+- **Errors go to stderr.** In `json`/`ndjson` modes an error is a single JSON object on stderr using the existing `error_payload` shape (`error`, `code`, and the optional `did_you_mean` / `artifact_origin` / task-bundle fields); in other modes it is a plain message. Implemented in [ORB-10570]; the payload previously went to stdout, which is a **breaking change** for a script that parsed it there.
 - **Exit codes are load-bearing.** `0` success, `1` command failure, `2` usage error. A command that printed an error object must not exit `0`.
 - **A broken pipe is not an error.** `EPIPE` on stdout exits `0` silently — `orbit task list | head` must not print a panic.
 
@@ -75,10 +75,12 @@ Precedence, first match wins:
 
 ## 7. Migration
 
-1. Introduce the sink and the global `--format`; leave every command body untouched. `auto` initially resolves to today's rendering, so nothing changes yet.
-2. Route the existing per-command `--json` branches through the resolver so precedence is centralized. Still no behavior change for explicit callers.
-3. Convert command bodies to return payloads. This changes `Execute::execute`'s signature across all 154 `impl Execute` blocks and is the expensive step; it can be staged with a transitional trait method that defaults to the current side-effecting path.
-4. Once a command returns a payload, delete its inline table construction and let the renderer own it.
-5. Move error output to stderr and audit exit codes.
+1. ~~Introduce the sink and the global `--format`; leave every command body untouched.~~ Done [ORB-10569].
+2. Route the existing per-command `--json` branches through the resolver so precedence is centralized. Still no behavior change for explicit callers. **Not started** — the flag lives on 86 argument structs and `OutputSink::resolve`'s `legacy_json` rung is still passed `false`.
+3. Convert command bodies to return payloads. This changes `Execute::execute`'s signature across all 154 `impl Execute` blocks and is the expensive step; it can be staged with a transitional trait method that defaults to the current side-effecting path. **Not started.**
+4. Once a command returns a payload, delete its inline table construction and let the renderer own it. **Not started.**
+5. ~~Move error output to stderr and audit exit codes.~~ Done [ORB-10570].
 
-Step 5 is the only user-visible break for existing scripts (an error object moves from stdout to stderr). Call it out in the changelog rather than shipping it quietly.
+Steps 1 and 5 landed out of order deliberately: gating color and width at the sink (step 1's payoff) and moving errors off stdout (step 5) are both independent of the payload conversion, and holding them behind a 154-impl signature change would have left `NO_COLOR` broken for the duration.
+
+Step 5 is the only user-visible break for existing scripts (an error object moves from stdout to stderr). It is recorded against [ORB-10570] for the release drafter; per `RELEASING.md` step 2, `CHANGELOG.md` is compiled at release time rather than accumulated per-PR, so the entry is written there, not here. Do not ship it quietly.

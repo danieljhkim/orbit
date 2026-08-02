@@ -4,6 +4,7 @@ use orbit_core::{OrbitError, OrbitRuntime};
 use serde_json::Value;
 
 use crate::command::Execute;
+use crate::output::color::Domain;
 
 use super::support::{
     format_last_run, job_catalog_filter, job_catalog_target_summary,
@@ -68,7 +69,7 @@ impl Execute for JobListArgs {
                     Cell::new(job.kind().to_string()),
                     Cell::new(target_type),
                     Cell::new(target_id),
-                    crate::output::color::job_state_color_cell(&job.state().to_string()),
+                    crate::output::color::cell(&job.state().to_string(), Domain::JobState),
                     Cell::new(format_last_run(last_run.as_ref())),
                 ]);
             }

@@ -4,6 +4,7 @@ use orbit_core::{OrbitError, OrbitRuntime};
 use serde_json::{Value, json};
 
 use crate::command::Execute;
+use crate::output::color::{Domain, Role};
 
 #[derive(Args)]
 pub struct SkillDoctorArgs {
@@ -39,7 +40,7 @@ impl Execute for SkillDoctorArgs {
             use comfy_table::Cell;
             table.add_row(vec![
                 Cell::new(&row.skill_name),
-                crate::output::color::doctor_status_color_cell(status),
+                crate::output::color::cell(status, Domain::DoctorStatus),
                 Cell::new(&row.message),
             ]);
         }
@@ -48,7 +49,7 @@ impl Execute for SkillDoctorArgs {
         if issues == 0 {
             println!(
                 "\n{}",
-                crate::output::color::job_state_color("All skills healthy.")
+                crate::output::color::text("All skills healthy.", Role::Ok)
             );
         } else {
             eprintln!("\n{} issue(s) found.", issues);

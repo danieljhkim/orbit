@@ -2,18 +2,19 @@
 //!
 //! Resolved once at startup from stdout, the process environment, and the
 //! global `--format` argument, per `docs/design/terminal-interface/specs/output-modes.md`
-//! §1–§2 ([ADR-0306]). Nothing downstream re-derives these answers: the sink is
-//! the only place in this crate that queries terminal state, apart from the
-//! pre-existing local check in `command/log/tail.rs`. That property is enforced
-//! by `scripts/check-terminal-state-guard.sh`.
+//! §1–§2 ([ADR-0306]). Nothing downstream re-derives these answers: this module
+//! is the only place in the crate that queries terminal state, a property
+//! enforced by `scripts/check-terminal-state-guard.sh`.
 //!
-//! This is step 1 of the spec's §7 migration: the sink is *resolved* but not yet
-//! *consumed*, so rendering is byte-for-byte unchanged. Later steps route the
-//! per-command `--json` booleans through [`OutputSink::resolve`]'s `legacy_json`
-//! rung, then let renderers read [`OutputSink::width`] and
-//! [`OutputSink::color_allowed`].
+//! `main` resolves the sink, [`install`]s it, and calls
+//! [`OutputSink::apply_color_policy`]; every renderer then reads [`active`]
+//! rather than asking the environment. Color emission is decided in exactly one
+//! place: `apply_color_policy` overrides the `colored` crate's own env
+//! detection, and `output::table` hands the same answer to `comfy_table`, so the
+//! two styling backends can no longer disagree about `NO_COLOR` [ADR-0308].
 
 use std::io::IsTerminal;
+use std::sync::OnceLock;
 
 use clap::ValueEnum;
 
@@ -109,9 +110,9 @@ impl OutputSink {
             terminal_width,
             requested,
             // Migration step 2 threads the per-command `--json` boolean in
-            // here. Step 1 has no access to it — the flag lives on 86
-            // individual argument structs — so the legacy rung is inert and
-            // every `--json` branch still decides for itself.
+            // here. It lives on 86 individual argument structs, so until those
+            // are converted the legacy rung is inert and every `--json` branch
+            // still decides for itself.
             false,
         )
     }
@@ -162,6 +163,71 @@ impl OutputSink {
     pub fn mode(&self) -> OutputMode {
         self.mode
     }
+
+    /// The width to fit a rendering into, or `None` when the sink has none and
+    /// nothing may be truncated. The `0`-means-no-truncation encoding of
+    /// [`OutputSink::width`] is converted here so no renderer has to know it.
+    pub fn truncate_width(&self) -> Option<usize> {
+        (self.width > 0).then(|| usize::from(self.width))
+    }
+
+    /// Whether a spinner, bar, or ticker may be drawn (spec §6).
+    ///
+    /// A terminal is necessary but not sufficient: `json` and `ndjson` are
+    /// chosen by consumers who are not watching, so they stay silent on a TTY
+    /// too.
+    pub fn progress_allowed(&self) -> bool {
+        self.is_tty && !matches!(self.mode, OutputMode::Json | OutputMode::Ndjson)
+    }
+
+    /// Whether JSON should be pretty-printed: only for a human (spec §3).
+    pub fn pretty_json(&self) -> bool {
+        self.is_tty
+    }
+
+    /// Point the `colored` crate at this sink's answer instead of its own
+    /// environment detection.
+    ///
+    /// `colored` and `comfy_table` each ship a private `NO_COLOR`/TTY probe, and
+    /// they do not agree — that disagreement is why a redirect used to capture
+    /// escape sequences from the line-rendering paths. Overriding here, once,
+    /// makes the sink the single decider for both: `comfy_table` is told
+    /// per-render by `output::table`, and every `colored` call in the crate is
+    /// covered by this override.
+    pub fn apply_color_policy(&self) {
+        colored::control::set_override(self.color_allowed);
+    }
+}
+
+/// A sink for a destination that is not a terminal: no color, no width, plain
+/// rendering. Used before [`install`] runs — in unit tests, and in any code
+/// path that renders before `main` has resolved the real one — because
+/// assuming "no terminal" degrades to correct output, while assuming one
+/// writes escape sequences into a file.
+const PIPED: OutputSink = OutputSink {
+    is_tty: false,
+    width: 0,
+    color_allowed: false,
+    mode: OutputMode::Plain,
+};
+
+static ACTIVE: OnceLock<OutputSink> = OnceLock::new();
+
+/// Publish the sink resolved for this invocation.
+///
+/// Called once, from `main`, before dispatch. A second call is ignored rather
+/// than a panic: the sink is a read-mostly global and a duplicate install is a
+/// programming error worth neither aborting a user's command nor silently
+/// changing rendering halfway through it.
+pub fn install(sink: OutputSink) {
+    if ACTIVE.set(sink).is_err() {
+        tracing::debug!("output sink already installed; ignoring duplicate install");
+    }
+}
+
+/// The sink for this invocation, or [`PIPED`] when none was installed.
+pub fn active() -> OutputSink {
+    ACTIVE.get().copied().unwrap_or(PIPED)
 }
 
 /// `COLUMNS` first, then what the terminal reported, then 0.

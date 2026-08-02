@@ -66,7 +66,7 @@ impl Execute for TaskShowArgs {
             }
             crate::output::json::print_pretty(&value)
         } else {
-            use crate::output::color::{bold, dimmed, priority_color, status_color};
+            use crate::output::color::{Domain, bold, dimmed, text};
             println!("{} {}", bold("ID:"), task.id);
             if let Some(parent_id) = task.parent_id() {
                 println!("{} {}", bold("Parent Task:"), parent_id);
@@ -75,12 +75,12 @@ impl Execute for TaskShowArgs {
             println!(
                 "{} {}",
                 bold("Status:"),
-                status_color(&task.status.to_string())
+                text(&task.status.to_string(), Domain::TaskStatus)
             );
             println!(
                 "{} {}",
                 bold("Priority:"),
-                priority_color(&task.priority.to_string())
+                text(&task.priority.to_string(), Domain::Priority)
             );
             if let Some(complexity) = task.complexity {
                 println!("{} {}", bold("Complexity:"), complexity);

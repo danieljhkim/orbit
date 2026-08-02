@@ -4,6 +4,8 @@ use orbit_core::runtime::run_audit::RunAuditStep;
 use orbit_core::{JobRun, JobRunStep, JobTargetType, NotFoundKind, OrbitError, OrbitRuntime};
 use serde_json::{Value, json};
 
+use crate::output::color::Domain;
+
 use super::format::{
     format_duration, format_timestamp, format_waiting_line, summarize_error_message,
 };
@@ -158,13 +160,13 @@ pub(crate) fn print_run_header(run: &JobRun) {
 }
 
 pub(crate) fn print_run_header_with_state(run: &JobRun, state: Option<&PipelineState>) {
-    use crate::output::color::{bold, dimmed, job_state_color};
+    use crate::output::color::{Domain, bold, dimmed, text};
     println!("{} {}", bold("Run ID:"), run.run_id);
     println!("{} {}", bold("Job ID:"), run.job_id);
     println!(
         "{} {}",
         bold("State:"),
-        job_state_color(&run.state.to_string())
+        text(&run.state.to_string(), Domain::JobState)
     );
     println!(
         "{} {}",
@@ -199,7 +201,7 @@ pub(crate) fn print_step_summary_table(steps: &[&JobRunStep]) -> Result<(), Orbi
         table.add_row(vec![
             Cell::new(step.step_index),
             Cell::new(&step.target_id),
-            crate::output::color::job_state_color_cell(&step.state.to_string()),
+            crate::output::color::cell(&step.state.to_string(), Domain::JobState),
             Cell::new(
                 step.duration_ms
                     .map(|ms| ms.to_string())
@@ -228,12 +230,12 @@ pub(crate) fn print_step_record(
         }));
     }
 
-    use crate::output::color::{bold, dimmed, job_state_color};
+    use crate::output::color::{Domain, bold, dimmed, text};
     println!("{} {}", bold("Run ID:"), run.run_id);
     println!("{} {}", bold("Job ID:"), run.job_id);
     println!("{} {}", bold("Target ID:"), step.target_id);
     println!("{} {}", bold("Target Type:"), step.target_type);
-    println!("{} {}", bold("State:"), job_state_color(&step.state));
+    println!("{} {}", bold("State:"), text(&step.state, Domain::JobState));
     println!(
         "{} {}",
         bold("Started:"),

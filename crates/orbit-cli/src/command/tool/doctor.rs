@@ -1,5 +1,7 @@
 use orbit_core::{OrbitError, OrbitRuntime};
 
+use crate::output::color::{Domain, Role};
+
 pub(super) fn execute_doctor(runtime: &OrbitRuntime) -> Result<(), OrbitError> {
     use orbit_core::command::tool::DoctorStatus;
 
@@ -25,7 +27,7 @@ pub(super) fn execute_doctor(runtime: &OrbitRuntime) -> Result<(), OrbitError> {
         use comfy_table::Cell;
         table.add_row(vec![
             Cell::new(&r.tool_name),
-            crate::output::color::doctor_status_color_cell(status_str),
+            crate::output::color::cell(status_str, Domain::DoctorStatus),
             Cell::new(&r.message),
         ]);
     }
@@ -34,7 +36,7 @@ pub(super) fn execute_doctor(runtime: &OrbitRuntime) -> Result<(), OrbitError> {
     if issues == 0 {
         println!(
             "\n{}",
-            crate::output::color::job_state_color("All tools healthy.")
+            crate::output::color::text("All tools healthy.", Role::Ok)
         );
     } else {
         eprintln!("\n{} issue(s) found.", issues);

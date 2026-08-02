@@ -5,6 +5,8 @@ use orbit_common::types::{ArtifactManifestFileV2, TaskArtifact};
 use orbit_core::{OrbitError, OrbitRuntime, TaskStatus, resolve_task_dependencies};
 use serde_json::{Value, json};
 
+use crate::output::color::Domain;
+
 /// Legacy bare `commented` history entries duplicate the authoritative Comments
 /// list, so human-facing history rendering omits them (ORB-10311). Raw JSON/MCP
 /// history projections keep every event for backward compatibility.
@@ -140,9 +142,9 @@ pub(super) fn print_task_table(tasks: &[orbit_core::Task], full: bool, filtered:
         let mut row = vec![
             Cell::new(&task.id),
             Cell::new(&task.title),
-            crate::output::color::status_color_cell(&task.status.to_string()),
-            crate::output::color::priority_color_cell(&task.priority.to_string()),
-            crate::output::color::task_type_color_cell(&task.task_type.to_string()),
+            crate::output::color::cell(&task.status.to_string(), Domain::TaskStatus),
+            crate::output::color::cell(&task.priority.to_string(), Domain::Priority),
+            crate::output::color::cell(&task.task_type.to_string(), Domain::TaskType),
         ];
         if full {
             row.extend([

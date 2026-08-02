@@ -43,7 +43,7 @@ use orbit_remote::runtime::RemoteRuntimeFactory;
 #[cfg(test)]
 use crate::command::init::InitCommand;
 use crate::command::operation::{CommandOperation, DispatchContext, RuntimeNeed};
-use crate::output::sink::{FormatArg, OutputSink};
+use crate::output::sink::{self, FormatArg, OutputMode, OutputSink};
 
 /// Clap id and long name of the global output-format argument.
 const FORMAT_ARG_ID: &str = "format";
@@ -132,16 +132,20 @@ fn parse_cli() -> (command::Cli, Option<FormatArg>) {
 
 fn main() {
     orbit_common::utility::logging::init_default_subscriber("warn");
+    output::pipe::install_handler();
 
     let (cli, requested_format) = parse_cli();
-    // Resolved once per invocation, before dispatch. Nothing renders through
-    // it yet — see `output::sink` for where this sits in the migration.
+    // Resolved once per invocation, before dispatch, then published so every
+    // renderer reads the same answers instead of re-deriving them.
     let sink = OutputSink::from_process(requested_format);
+    sink::install(sink);
+    sink.apply_color_policy();
     tracing::debug!(
         mode = ?sink.mode(),
         is_tty = sink.is_tty(),
         width = sink.width(),
         color_allowed = sink.color_allowed(),
+        progress_allowed = sink.progress_allowed(),
         "resolved output sink"
     );
     let root_override = cli.root.clone();
@@ -228,15 +232,39 @@ fn finish_command(
     }
 }
 
+/// Report a failed command on **stderr**, in every mode.
+///
+/// The JSON error payload used to go to stdout, which meant a `--json` caller
+/// piping stdout into a parser received an error object where a result was
+/// expected, and had to distinguish the two by shape. Spec §5 puts the payload
+/// on stderr and leaves stdout carrying the payload and nothing else.
+///
+/// **Breaking change**: a script parsing `orbit ... --json` errors off stdout
+/// reads them from stderr now (`2>&1`, or check the exit code, which was
+/// already `1`).
+///
+/// Whether the report is JSON is the command's declared preference when it has
+/// one, and otherwise the sink's mode — `--format json` on a command with no
+/// `--json` flag of its own still gets a machine-readable failure.
 fn print_error(error: &orbit_core::OrbitError, tool_run_json_output: Option<bool>) {
-    if let Some(pretty) = tool_run_json_output {
+    if let Some(pretty) = json_error_format(tool_run_json_output) {
         let payload = crate::output::json::error_payload(error);
-        if crate::output::json::print_with_format(&payload, pretty).is_ok() {
+        if let Ok(rendered) = crate::output::json::render(&payload, pretty) {
+            eprintln!("{rendered}");
             return;
         }
     }
 
     eprintln!("error: {error}");
+}
+
+/// Whether to report an error as JSON, and whether to pretty-print it.
+fn json_error_format(tool_run_json_output: Option<bool>) -> Option<bool> {
+    if let Some(pretty) = tool_run_json_output {
+        return Some(pretty);
+    }
+    let sink = sink::active();
+    matches!(sink.mode(), OutputMode::Json | OutputMode::Ndjson).then(|| sink.pretty_json())
 }
 
 #[cfg(test)]

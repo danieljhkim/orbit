@@ -143,7 +143,7 @@ fn print_status(
     if status.pending_total() == 0 {
         println!(
             "\n{}",
-            crate::output::color::job_state_color("Workspace is up to date.")
+            crate::output::color::text("Workspace is up to date.", crate::output::color::Role::Ok)
         );
         return Ok(());
     }

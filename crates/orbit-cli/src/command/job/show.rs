@@ -18,13 +18,13 @@ impl Execute for JobShowArgs {
         if self.json {
             crate::output::json::print_pretty(&job_catalog_to_json_with_last_run(&job, None))
         } else {
-            use crate::output::color::{bold, job_state_color};
+            use crate::output::color::{Domain, bold, text};
             println!("{} {}", bold("Job ID:"), job.job_id.as_str());
             println!("{} {}", bold("Kind:"), job.kind());
             println!(
                 "{} {}",
                 bold("State:"),
-                job_state_color(&job.state().to_string())
+                text(&job.state().to_string(), Domain::JobState)
             );
             println!("{} {}", bold("Max Active Runs:"), job.max_active_runs());
             println!("{} {}", bold("Path:"), job.path.display());
