@@ -4,7 +4,7 @@ type: design
 title: "Auditability — Design"
 owner: codex
 last_updated: 2026-08-02
-last_validated: 2026-07-27
+last_validated: 2026-08-02
 status: Draft
 feature: auditability
 doc_role: design
@@ -89,7 +89,7 @@ Loop events reference hashes for request bodies, response bodies, tool inputs, a
 
 `crates/orbit-common/src/utility/blob_store.rs` writes content-addressed blobs under `{root}/{hash_prefix}/{hash}`. The hash is computed after redaction, and existing blob paths are reused.
 
-`crates/orbit-common/src/utility/redaction.rs` centralizes sensitive live environment value scrubbing plus regex-based HTTP/argv patterns for authorization headers, API keys, bearer tokens, JSON API-key fields, and high-confidence provider token shapes. CLI audit errors, blob bytes, selected pipeline outputs/errors, artifact write tools, and the default tracing subscriber all redact before persistence or terminal/JSONL output. Artifact tool coverage and refuse-vs-mask rules live in [specs/artifact-redaction.md](./specs/artifact-redaction.md). The smoke example `crates/orbit-agent/examples/redaction_smoke.rs` verifies stored blob bytes omit the raw secret and contain a marker.
+`crates/orbit-common/src/utility/redaction.rs` centralizes sensitive live environment value scrubbing plus regex-based HTTP/argv/SSH patterns for authorization headers, API keys, bearer tokens, JSON API-key fields, high-confidence provider token shapes, SSH public-key fingerprints and comments, and hosts in canonical OpenSSH diagnostic sentences. CLI audit errors, blob bytes, selected pipeline outputs/errors, artifact write tools, and the default tracing subscriber all redact before persistence or terminal/JSONL output. Artifact tool coverage, the current pattern-family inventory, and refuse-vs-mask rules live in [specs/artifact-redaction.md](./specs/artifact-redaction.md). The smoke example `crates/orbit-agent/examples/redaction_smoke.rs` verifies stored blob bytes omit the raw secret and contain a marker. [ORB-10591]
 
 Dashboard log previews added by [T20260508-14] are derived views over the `v2_audit_events` SQLite store and `.orbit/state/audit/blobs`; they do not duplicate full transcripts into a separate transcript store. Preview responses are byte- and line-capped, apply defensive read-time redaction with the shared redactor, and preserve existing write-time redaction markers. The focused diagnostics error feed is also derived, combining global ERROR tracing rows with structured `ERROR <target>:` lines found in agent stderr blobs. No `.orbit/state/diagnostics/errors/` store exists in this design; retention remains bounded by the existing v2 audit, blob, and global log retention roots.
 
@@ -215,6 +215,7 @@ Each record contains timestamp, level, target, and structured fields. After [T20
 - **[ORB-10579]** — Corrected GPT-5.6 price periods and cache-write rates, added gross-input accounting, and retained OpenAI cache buckets for standard short-context estimates.
 - **[ORB-10581]** — Added reconciliation-safe managed invocation accounting by canonical task orchestrator ([ADR-0310]).
 - **[ORB-10582]** — Projected managed-execution orchestration accounting into the separately versioned dashboard scoreboard section without merging it into executor rankings.
+- **[ORB-10591]** — Document the artifact-write redaction boundary, add structural SSH identifier coverage, and return field-level redaction details.
 - **[ORB-00106]** — Preserve per-task implementer attribution when `orbit run ship` moves batch PR tasks from Review to Done.
 - **[ORB-10200]** — Derive CLI audit metadata and the other cross-cutting command policies from one exhaustive command-operation registry.
 - **[ORB-10225]** — Route in-process graph MCP calls through the safe-surface allowlist and shared runtime audit boundary.

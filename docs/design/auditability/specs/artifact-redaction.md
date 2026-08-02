@@ -2,12 +2,14 @@
 type: design
 summary: "Spec: Artifact Write Redaction"
 tags: ["auditability"]
-last_validated: 2026-08-01
+last_validated: 2026-08-02
 ---
 
 # Spec: Artifact Write Redaction
 
 Orbit artifact tools persist repo-backed YAML, markdown, and JSON. Their write boundary sanitizes selected input fields after `OrbitBuiltinAction` is known and before typed params are built. The sanitizer is action-keyed rather than field-blind, so structural IDs, statuses, tags, and artifact blobs keep their native validation rules.
+
+This is the author-facing inventory for the shipped artifact-write redactor. Redaction is a backstop: authors should summarize terminal diagnostics and environment dumps instead of pasting them verbatim whenever the source can be reduced safely.
 
 ## Field Policy
 
@@ -25,6 +27,20 @@ Orbit artifact tools persist repo-backed YAML, markdown, and JSON. Their write b
 
 Task and friction tags are taxonomy fields and pass through verbatim. Learning `scope.tags[]` are matching metadata and are treated as free text.
 
+The table establishes the knowledge-primitive boundary: ADRs, learnings, tasks, and frictions are covered on their listed add/update operations. Registered docs are ordinary repository files rather than an Orbit mutation primitive, so doc edits do not pass through this write sanitizer.
+
+## Pattern Set
+
+Free-text fields first replace values of live environment variables whose names are credential-shaped (`SECRET`, `TOKEN`, `PASSWORD`, `API_KEY`, `PRIVATE`, `CREDENTIAL`, `COOKIE`, `SESSION`, `BEARER`, or `AUTH`). The shared structural patterns then mask:
+
+- JSON and raw header forms of `Authorization`, `x-api-key`, and `api_key`; bearer values; and `key` query parameters
+- OpenAI, Google, GitLab, GitHub, AWS, npm, and Slack credential token shapes, AWS secret assignments, and URI user-info passwords
+- OpenSSH `SHA256:` public-key fingerprints
+- comments on serialized OpenSSH public keys, and the key descriptor/comment on `ssh-keygen -l` and canonical verbose key-offer lines
+- host/address identifiers only in canonical OpenSSH `Connecting to`, `Authenticating to`, and `Authenticated to` diagnostics
+
+SSH replacements are class-labelled as `[REDACTED_SSH_FINGERPRINT]`, `[REDACTED_SSH_KEY_COMMENT]`, or `[REDACTED_SSH_HOST]`. Host matching is deliberately contextual rather than a general hostname rule. Commit SHAs, lowercase content hashes, run ids, task ids, worktree paths, repository names, and model strings are not secret classes and are preserved unless they literally contain a separately recognized credential or live sensitive environment value. [ORB-10591]
+
 ## Refuse vs Mask
 
 Free-text fields reject a value that is exactly one high-confidence credential token:
@@ -37,7 +53,7 @@ The rejection is a typed `OrbitError::SensitiveInput` and never includes the tok
 
 ## Response and Audit Contract
 
-Covered mutating tools add `redactions_applied: bool` to object responses. It is `true` only when at least one persisted field changed from the caller's input. Re-running a write with already-redacted text is idempotent: no field changes means `redactions_applied: false` and no redaction audit event.
+Covered mutating tools add `redactions_applied: bool` and `redactions: [{field_path, redaction_kinds, redaction_classes}]` to object responses. The boolean is `true` only when at least one persisted field changed from the caller's input. The detail list names every changed field, whether environment, structural-pattern, or home-directory normalization acted, and concrete safe classes such as `credential`, `ssh_fingerprint`, `ssh_key_comment`, or `ssh_host`. Re-running a write with already-redacted text is idempotent: no field changes means `redactions_applied: false`, `redactions: []`, and no redaction audit event.
 
 When a field changes, Orbit emits one command-audit row per field. The payload contains only:
 
@@ -46,6 +62,7 @@ When a field changes, Orbit emits one command-audit row per field. The payload c
 - actor
 - tool name
 - redaction kinds: `env`, `pattern`, `home_dir`
+- redaction classes: `sensitive_environment_value`, `home_directory`, `authorization`, `credential`, or the structural SSH classes above
 
 Original and redacted values are not recorded. Tests should inspect these rows through the same backing surface as `orbit audit list --json` per L-0009.
 
@@ -55,3 +72,4 @@ Original and redacted values are not recorded. Tests should inspect these rows t
 - Raw task artifact blob redaction through `orbit.task.artifact.put` or task `artifacts` / `upsert_artifacts`.
 - General-purpose schema validation in the sanitizer; existing typed parsers keep reporting shape errors.
 - Auto-publish, commit, or remote cleanup behavior after a secret has already entered history.
+- Automatic sweeps of existing authored records or git history rewriting; see the forward-only decision recorded for [ORB-10591].

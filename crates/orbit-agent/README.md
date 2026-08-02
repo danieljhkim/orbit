@@ -164,6 +164,12 @@ the default env-value and pattern redaction. The default ruleset scrubs:
 - `Bearer <token>` anywhere in the payload
 - high-confidence provider token shapes such as `sk-...`, `ghp_...`, and
   `xox...` values
+- structural OpenSSH public-key fingerprints and comments, plus host/address
+  identifiers in canonical connection diagnostics
+
+The author-facing field policy, complete pattern-family inventory, and response
+detail contract live in
+[`docs/design/auditability/specs/artifact-redaction.md`](../../docs/design/auditability/specs/artifact-redaction.md).
 
 Redaction runs at **write time**, not read time — the stored bytes are
 already safe, and blob references point to the redacted content hash. A future

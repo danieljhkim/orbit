@@ -19,6 +19,7 @@ Auditability and secrecy pull in opposite directions. Orbit needs faithful recor
 - Pipeline outputs persisted by runtime helpers are scrubbed for sensitive live environment values.
 - HTTP-shaped payload redaction covers authorization headers, x-api-key headers, JSON API-key fields, and bearer tokens.
 - Shared pattern redaction covers high-confidence provider token shapes embedded in prose; exact whole-token artifact fields are rejected instead of persisted.
+- Shared pattern redaction covers structural OpenSSH fingerprints, public-key comments, and connection hosts without applying a general hostname or high-entropy-string heuristic.
 - CLI argv redaction uses HTTP defaults plus bare `sk-...` token scrubbing when argv-shaped data is being persisted.
 - Orbit artifact write tools use the action-keyed field policy in [artifact-redaction.md](./artifact-redaction.md) before YAML/markdown/JSON persistence.
 - Default tracing output redacts string field values, `Debug`-formatted field values, and unstructured `message` fields before writing stderr or `~/.orbit/state/logs/orbit.jsonl`.
@@ -60,6 +61,8 @@ Global process tracing:
 - If pruning deletes command audit rows, file-backed run traces and blobs are not automatically pruned unless a future retention task adds that coupling.
 
 ## Migration Path
+
+Redaction changes are forward-only. Orbit does not automatically sweep existing authored records, because masking without an author review can destroy their meaning. Git history rewriting is outside the artifact-write boundary and requires a separate, explicit operator incident-response decision. [ORB-10591]
 
 Future retention work should add:
 

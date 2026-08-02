@@ -93,6 +93,45 @@ fn redact_all_scrubs_provider_scm_cloud_tokens_and_connection_passwords() {
 }
 
 #[test]
+fn redact_all_scrubs_structural_ssh_key_and_host_identifiers() {
+    let fingerprint = format!("SHA256:{}", "A".repeat(43));
+    let public_key = format!("ssh-ed25519 {}", "B".repeat(48));
+    let raw = format!(
+        "256 {fingerprint} automation@build-node.example.test (ED25519)\n\
+         debug1: Offering public key: automation@build-node.example.test ED25519 {fingerprint} agent\n\
+         {public_key} deploy@mirror-node.example.test\n\
+         debug1: Connecting to build-node.example.test [192.0.2.10] port 22.\n\
+         debug1: Authenticating to build-node.example.test:22 as 'git'\n\
+         Authenticated to build-node.example.test ([192.0.2.10]:22)."
+    );
+
+    let redacted = redact_all(&raw);
+
+    assert!(!redacted.contains(&fingerprint));
+    assert!(!redacted.contains("automation@build-node.example.test"));
+    assert!(!redacted.contains("deploy@mirror-node.example.test"));
+    assert!(!redacted.contains("build-node.example.test"));
+    assert!(!redacted.contains("192.0.2.10"));
+    assert_eq!(redacted.matches("[REDACTED_SSH_FINGERPRINT]").count(), 2);
+    assert_eq!(redacted.matches("[REDACTED_SSH_KEY_COMMENT]").count(), 3);
+    assert_eq!(redacted.matches("[REDACTED_SSH_HOST]").count(), 3);
+    assert!(redacted.contains(&public_key));
+}
+
+#[test]
+fn redact_all_preserves_knowledge_record_identifiers_and_paths() {
+    let legitimate = concat!(
+        "commit 238a89cbec9abf478d13ed2bf3ca7d28a722c21c\n",
+        "run jrun-20260802-2012-4 task ORB-12345\n",
+        "worktree /srv/worktrees/jrun-20260802-2012-4/src/module\n",
+        "model gpt-5.6-sol\n",
+        "blob sha256:4f1c2a709db7089bd3da48e35a3a2f77d6c0f41d8d792f0dcb163a7d89fd53e0"
+    );
+
+    assert_eq!(redact_all(legitimate), legitimate);
+}
+
+#[test]
 fn high_confidence_single_token_detection_covers_provider_scm_cloud_families() {
     let credentials = [
         format!("AIza{}", "A".repeat(35)),
