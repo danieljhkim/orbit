@@ -1,4 +1,5 @@
 #![allow(missing_docs)]
+#![cfg(target_os = "linux")]
 
 use std::process::Stdio;
 
