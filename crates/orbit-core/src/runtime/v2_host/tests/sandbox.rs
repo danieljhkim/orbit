@@ -62,6 +62,16 @@ fn resolve_executor_sandbox_marks_only_specific_orbit_worktree_managed() {
             .iter()
             .any(|entry| entry == &format!("{}/**", canonical_worktree.display()))
     );
+    for allowed in [".orbit/adrs/proposed", ".orbit/adrs/.locks"] {
+        assert!(
+            managed
+                .fs_profile
+                .modify
+                .iter()
+                .any(|entry| entry == &canonical_worktree.join(allowed).display().to_string()),
+            "managed worktree must narrowly re-allow {allowed}"
+        );
+    }
 
     let direct = runtime
         .resolve_executor_sandbox("claude", None, Some(&repo_root))
@@ -121,6 +131,9 @@ fn resolve_executor_sandbox_orders_versioned_orbit_exceptions_after_default_deny
     for protected in [
         format!("{}/state/**", orbit.display()),
         format!("{}/tasks/**", orbit.display()),
+        format!("{}/learnings/**", orbit.display()),
+        format!("{}/adrs/accepted/**", orbit.display()),
+        format!("{}/adrs/superseded/**", orbit.display()),
         format!("{}/future-store/**", orbit.display()),
     ] {
         assert!(
@@ -128,6 +141,47 @@ fn resolve_executor_sandbox_orders_versioned_orbit_exceptions_after_default_deny
             "worktree store must not be re-allowed by policy: {protected} in {modify:?}"
         );
     }
+    for allowed in ["adrs/proposed", "adrs/.locks"] {
+        assert!(
+            modify
+                .iter()
+                .any(|rule| rule == &orbit.join(allowed).display().to_string()),
+            "the active worktree Proposed ADR surface must be allowed: {modify:?}"
+        );
+    }
+    assert!(
+        !modify
+            .iter()
+            .any(|rule| rule == &orbit.join("adrs").display().to_string()),
+        "the ADR parent must remain read-only: {modify:?}"
+    );
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn resolve_executor_sandbox_rejects_symlinked_managed_worktree_adr_root() {
+    use std::os::unix::fs::symlink;
+
+    let (root, runtime, _repo_root) = runtime_with_workspace_layout();
+    seed_executor(
+        &runtime,
+        "claude",
+        Some(orbit_common::types::ExecutorSandboxKind::LinuxBwrap),
+    );
+    let worktree = runtime
+        .paths()
+        .orbit_dir
+        .join("state/worktrees/orbit-jrun-symlinked-adrs");
+    let adrs = worktree.join(".orbit/adrs");
+    let outside = root.path().join("outside-proposals");
+    std::fs::create_dir_all(&adrs).expect("ADR parent");
+    std::fs::create_dir(&outside).expect("outside proposals");
+    symlink(&outside, adrs.join("proposed")).expect("symlink proposed root");
+
+    let error = runtime
+        .resolve_executor_sandbox("claude", None, Some(&worktree))
+        .expect_err("symlinked Proposed root must fail closed");
+    assert!(error.to_string().contains("must be a real directory"));
 }
 
 #[cfg(target_os = "macos")]

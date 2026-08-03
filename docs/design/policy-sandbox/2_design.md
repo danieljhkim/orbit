@@ -140,7 +140,11 @@ The compiled macOS profile denies by default, allows broad reads required by age
 - Codex side-write roots from runtime provider config, appended after policy denies so workflow state remains writable under the outer sandbox
 - narrow child Orbit runtime roots appended by the v2 host after policy denies: global logs, global `orbit.db*`, global tasks, workspace `.orbit/tasks/**`, workspace `.orbit/learnings/**`, workspace `.orbit/frictions/**`, workspace audit/logs, workspace semantic DB sidecars, and workspace `.orbit/state/job-runs/**`
 
-The child Orbit runtime roots are deliberately narrower than the workspace `.orbit` tree. They cover stores used by currently activity-exposed Orbit write tools: task/review/artifact/duel writes under `.orbit/tasks/**`, learning curation under `.orbit/learnings/**`, friction reporting under `.orbit/frictions/**`, `orbit.state.set` writes under `.orbit/state/job-runs/**`, and startup/runtime audit, log, semantic-index, and global database writes. Registered stores that are not exposed by the current activity allowlists, including `.orbit/adrs/**` and graph write roots, remain outside this inventory and must be revisited when those write tools are exposed.
+The child Orbit runtime roots are deliberately narrower than the workspace `.orbit` tree. They cover stores used by currently activity-exposed Orbit write tools: task/review/artifact/duel writes under `.orbit/tasks/**`, learning curation under `.orbit/learnings/**`, friction reporting under `.orbit/frictions/**`, `orbit.state.set` writes under `.orbit/state/job-runs/**`, and startup/runtime audit, log, semantic-index, and global database writes. Graph write roots and every unlisted or future store remain outside this inventory.
+
+`agent_implement` also exposes `orbit.adr.add` and `orbit.adr.update` ([ORB-10596]). On Linux, only the active managed worktree's `.orbit/adrs/proposed` and `.orbit/adrs/.locks` directories are bind-mounted writable after the enclosing worktree `.orbit/**` read-only mount; Accepted/Superseded ADRs and learning, task, state, and unknown local stores remain read-only. Allocation still uses the workspace-shared semantic database and `.id_alloc.lock`, so simultaneous worktrees serialize ID selection while each Proposed body lands under `<job-worktree>/.orbit/adrs/proposed/<id>/`. The allocator records that worktree-relative body path, allowing an orchestrator runtime to resolve and search it as a federated artifact while the worktree is live. macOS already re-allows the active job worktree as a whole after the policy deny, so this change adds no macOS SBPL allowance and changes no policy YAML.
+
+Creation remains Proposed-only. In a managed-run context, `orbit.adr.update` may correct the title, body, and metadata of a Proposed record, but it cannot transition lifecycle status or modify an Accepted record. Acceptance and historical correction remain separate unmanaged human/orchestrator actions. A hub-side allocator or a second pending-decision queue was rejected: the existing shared allocator and federated artifact resolution already provide collision safety and discovery, while another protocol would duplicate allocation and introduce a second promotion lifecycle.
 
 Negated `read` / `modify` rules become explicit SBPL denies in resolved order. Explicit host-policy exceptions and host-owned runtime roots appear after the enclosing deny, preserving last-match-wins without opening unrelated siblings. Simple path and `/**` subtree denials compile to `subpath`; non-subpath globs such as `**/*.env` compile to `regex`.
 
@@ -149,6 +153,8 @@ Negated `read` / `modify` rules become explicit SBPL denies in resolved order. E
 On Linux, `ExecutorSandboxKind::LinuxBwrap` resolves only `/usr/bin/bwrap` and runs a real capability probe using the same private user, PID, IPC, and UTS namespaces plus mount setup required by provider execution. Absence or probe failure is permanent and fail-closed unless the executor explicitly sets `allow_fallback: true`. The availability decision happens before provider argv construction: an active outer wrapper neutralizes provider-native sandbox flags, while a bare fallback preserves them.
 
 The deterministic argv starts with a read-only bind of `/`, explicitly retains the host network namespace, and applies canonical `modify` mounts in policy order. Broad positive roots are mounted before denials. A positive exact/subtree root is mounted after an earlier deny only when it is strictly nested beneath that denied root; equal or ancestor positives cannot mask the protection. This implements versioned-config and trusted runtime-store re-allows while unknown `.orbit` children remain read-only. A re-allowed file or directory must already exist because Bubblewrap cannot bind-mount a nonexistent child beneath a read-only parent. `/dev`, `/proc`, and `/tmp` are replaced with private minimal mounts, the wrapper creates a fresh session, and parent-death cleanup remains enabled.
+
+The ADR authoring exception follows that same ordering: trusted host setup ensures only `<active-worktree>/.orbit/adrs/{proposed,.locks}` exists, then mounts those exact directories writable after the local `.orbit/**` deny. The ADR parent and its Accepted/Superseded lifecycle directories remain read-only. This does not add a policy exception, does not re-allow the shared workspace ADR tree, and does not expose any sibling under the worktree-local `.orbit` directory.
 
 Before provider launch, `worktree_setup` asks the runtime host to prepare missing versioned-config mount anchors for `agent_implement`. The runtime resolves that activity's effective profile, then intersects it with each task's exact canonical selector and a fixed file/directory inventory. Files use create-new semantics; directories use single-directory creation. A preflight rejects symlinks and wrong filesystem types, and existing targets are never opened for writing. The only parent it may create is the worktree-local `.orbit` directory needed by an otherwise-authorized target. Protected stores, unknown `.orbit` children, dotenv/secret paths, traversal, profile-denied targets, and any path outside the canonical disposable worktree are not candidates. The parent workspace and task records are untouched by preparation. [ORB-10573]
 
@@ -269,7 +275,12 @@ tests compile argv and exercise fail-closed/fallback behavior on every host;
 kernel tests probe real `/usr/bin/bwrap` and skip with its concrete capability
 failure when user or mount namespaces are unavailable. The Linux argv and
 kernel cases also cover writable versioned `.orbit` paths versus protected
-state, record, database/lock, and unknown paths ([ORB-10560]).
+state, record, database/lock, and unknown paths ([ORB-10560]). Runtime-host
+tests pin the managed-worktree ADR mount as the sole local record-store
+exception, tool-host tests prove executors can refine Proposed ADRs but cannot
+accept or rewrite Accepted records, and the SQLite allocator race test launches
+two child processes with distinct worktree roots against one database/lock and
+asserts 100 collision-free dense IDs per artifact kind ([ORB-10596]).
 
 ---
 
@@ -315,5 +326,6 @@ state, record, database/lock, and unknown paths ([ORB-10560]).
 - **[ORB-10553]** — Rescue the Ubuntu host prerequisite for the shipped Linux Bubblewrap probe.
 - **[ORB-10560]** — Add host-policy modify exceptions for the explicit versioned `.orbit` surface while preserving protected stores and unknown-path denial.
 - **[ORB-10573]** — Materialize only exact missing versioned-config anchors gated by both task scope and the effective host policy/profile before Linux provider launch.
+- **[ORB-10596]** — Allow executor-authored Proposed ADRs through one narrow managed-worktree mount while preserving global allocation, federated discovery, and separate acceptance.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

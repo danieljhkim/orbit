@@ -271,7 +271,7 @@ fn learning_id_format_migration_renames_and_is_idempotent() {
 }
 
 #[test]
-fn multi_process_allocation_is_dense_for_adrs_and_learnings() {
+fn multi_process_allocation_is_dense_across_worktrees_for_adrs_and_learnings() {
     for kind in [IdAllocationKind::Adr, IdAllocationKind::Learning] {
         assert_multi_process_dense(kind);
     }
@@ -283,6 +283,7 @@ fn allocate_ids_child() {
         return;
     };
     let root = std::env::var("ORBIT_ID_ALLOCATOR_CHILD_ROOT").expect("root env");
+    let worktree = std::env::var("ORBIT_ID_ALLOCATOR_CHILD_WORKTREE").expect("worktree env");
     let output = std::env::var("ORBIT_ID_ALLOCATOR_CHILD_OUTPUT").expect("output env");
     let count: usize = std::env::var("ORBIT_ID_ALLOCATOR_CHILD_COUNT")
         .expect("count env")
@@ -293,7 +294,11 @@ fn allocate_ids_child() {
         "learning" => IdAllocationKind::Learning,
         other => panic!("unknown kind {other}"),
     };
-    let allocator = IdAllocator::open(allocator_config(Path::new(&root))).expect("allocator");
+    let allocator = IdAllocator::open(allocator_config_for_worktree(
+        Path::new(&root),
+        Path::new(&worktree),
+    ))
+    .expect("allocator");
     let mut ids = Vec::with_capacity(count);
     for _ in 0..count {
         let allocation = match kind {
@@ -312,6 +317,10 @@ fn assert_multi_process_dense(kind: IdAllocationKind) {
     let count = 50usize;
     let output_a = temp.path().join("ids-a.txt");
     let output_b = temp.path().join("ids-b.txt");
+    let worktree_a = temp.path().join("worktree-a");
+    let worktree_b = temp.path().join("worktree-b");
+    std::fs::create_dir_all(&worktree_a).expect("worktree a");
+    std::fs::create_dir_all(&worktree_b).expect("worktree b");
     let kind_name = kind.as_str();
 
     let mut child_a = Command::new(&exe)
@@ -322,6 +331,7 @@ fn assert_multi_process_dense(kind: IdAllocationKind) {
         ])
         .env("ORBIT_ID_ALLOCATOR_CHILD_KIND", kind_name)
         .env("ORBIT_ID_ALLOCATOR_CHILD_ROOT", temp.path())
+        .env("ORBIT_ID_ALLOCATOR_CHILD_WORKTREE", &worktree_a)
         .env("ORBIT_ID_ALLOCATOR_CHILD_OUTPUT", &output_a)
         .env("ORBIT_ID_ALLOCATOR_CHILD_COUNT", count.to_string())
         .spawn()
@@ -334,6 +344,7 @@ fn assert_multi_process_dense(kind: IdAllocationKind) {
         ])
         .env("ORBIT_ID_ALLOCATOR_CHILD_KIND", kind_name)
         .env("ORBIT_ID_ALLOCATOR_CHILD_ROOT", temp.path())
+        .env("ORBIT_ID_ALLOCATOR_CHILD_WORKTREE", &worktree_b)
         .env("ORBIT_ID_ALLOCATOR_CHILD_OUTPUT", &output_b)
         .env("ORBIT_ID_ALLOCATOR_CHILD_COUNT", count.to_string())
         .spawn()
@@ -354,16 +365,33 @@ fn assert_multi_process_dense(kind: IdAllocationKind) {
         })
         .collect();
     assert_eq!(sequences, (1..=(count as u32 * 2)).collect::<Vec<_>>());
+
+    let allocator = IdAllocator::open(allocator_config(temp.path())).expect("inspect allocator");
+    let records = match kind {
+        IdAllocationKind::Adr => allocator.adr_allocations(),
+        IdAllocationKind::Learning => allocator.learning_allocations(),
+    }
+    .expect("allocation records");
+    let by_worktree = records.iter().fold(BTreeMap::new(), |mut counts, record| {
+        *counts.entry(record.worktree_root.clone()).or_insert(0usize) += 1;
+        counts
+    });
+    assert_eq!(by_worktree.get(&worktree_a), Some(&count));
+    assert_eq!(by_worktree.get(&worktree_b), Some(&count));
 }
 
 fn allocator_config(root: &Path) -> IdAllocatorConfig {
+    allocator_config_for_worktree(root, root)
+}
+
+fn allocator_config_for_worktree(root: &Path, worktree: &Path) -> IdAllocatorConfig {
     IdAllocatorConfig::new(
         root.join(".orbit/state/semantic.db"),
         root.join(".orbit/state/.id_alloc.lock"),
         root.join(".orbit"),
-        root.to_path_buf(),
-        root.join(".orbit/adrs"),
-        root.join(".orbit/learnings"),
+        worktree.to_path_buf(),
+        worktree.join(".orbit/adrs"),
+        worktree.join(".orbit/learnings"),
     )
 }
 
