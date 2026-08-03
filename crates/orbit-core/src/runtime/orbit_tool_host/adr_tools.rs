@@ -18,6 +18,7 @@ use orbit_store::{
 use serde_json::{Value, json};
 
 use crate::OrbitRuntime;
+use crate::runtime::run_input::managed_run_context_from_env;
 
 impl OrbitRuntime {
     /// Reconcile a complete federated ADR bundle into this runtime's current
@@ -169,6 +170,8 @@ pub(super) fn update(
         .map(|raw| AdrStatus::from_str(&raw).map_err(OrbitError::InvalidInput))
         .transpose()?;
 
+    ensure_managed_run_update_allowed(&existing, new_status)?;
+
     let fields = AdrDocumentUpdateParams {
         title: optional_string(&input, "title")?,
         owner: optional_string(&input, "owner")?,
@@ -246,6 +249,32 @@ pub(super) fn update(
         .get_adr(&id)?
         .ok_or_else(|| OrbitError::not_found(NotFoundKind::Adr, id.clone()))?;
     Ok(adr_to_json(&updated))
+}
+
+/// Executors may refine the Proposed record they just authored, but approval
+/// remains a separate human/orchestrator action. The preflight runs before any
+/// document write so a combined body+status request cannot partially mutate
+/// the ADR before its lifecycle transition is denied.
+fn ensure_managed_run_update_allowed(
+    existing: &Adr,
+    target: Option<AdrStatus>,
+) -> Result<(), OrbitError> {
+    if !managed_run_context_from_env() {
+        return Ok(());
+    }
+    if existing.status != AdrStatus::Proposed {
+        return Err(OrbitError::PolicyDenied(format!(
+            "managed-run executors may update only Proposed ADRs; {} is {}",
+            existing.id, existing.status
+        )));
+    }
+    if target.is_some_and(|status| status != AdrStatus::Proposed) {
+        return Err(OrbitError::PolicyDenied(format!(
+            "managed-run executors cannot transition ADR lifecycle status; {} must remain Proposed for separate approval",
+            existing.id
+        )));
+    }
+    Ok(())
 }
 
 pub(super) fn supersede(

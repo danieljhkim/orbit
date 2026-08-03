@@ -69,7 +69,7 @@ pub(super) fn resolve_executor_sandbox(
                         ))
                     })?;
                 append_codex_side_write_roots(runtime, provider, &mut resolved)?;
-                append_linux_runtime_write_roots(runtime, &mut resolved)?;
+                append_linux_runtime_write_roots(runtime, subprocess_cwd, &mut resolved)?;
                 append_linux_provider_state_roots(&mut resolved)?;
                 let managed_worktree = subprocess_cwd
                     .and_then(|cwd| active_worktree_subpath(runtime, cwd))
@@ -230,6 +230,7 @@ fn append_unique_modify_root(resolved: &mut ResolvedFsProfile, root: String) {
 #[cfg(target_os = "linux")]
 fn append_linux_runtime_write_roots(
     runtime: &OrbitRuntime,
+    subprocess_cwd: Option<&Path>,
     resolved: &mut ResolvedFsProfile,
 ) -> Result<(), DispatchError> {
     let global = runtime
@@ -267,6 +268,17 @@ fn append_linux_runtime_write_roots(
     ] {
         if file.exists() {
             append_unique_modify_root(resolved, file.display().to_string());
+        }
+    }
+
+    // `orbit.adr.add` writes the Proposed bundle into the invoking checkout,
+    // not the shared workspace root. Re-allow only Proposed bundles and their
+    // per-record lock directory inside a recognized managed worktree; the
+    // surrounding worktree `.orbit/**` mount stays read-only, including the
+    // accepted/superseded ADR states and every unrelated/future store.
+    if let Some(worktree) = subprocess_cwd.and_then(|cwd| active_worktree_root(runtime, cwd)) {
+        for directory in ensure_managed_worktree_adr_roots(&worktree)? {
+            append_unique_modify_root(resolved, directory.display().to_string());
         }
     }
     Ok(())
@@ -315,6 +327,65 @@ fn ensure_owned_directory(path: &Path) -> Result<(), DispatchError> {
     })
 }
 
+#[cfg(target_os = "linux")]
+fn ensure_managed_worktree_adr_roots(worktree: &Path) -> Result<[PathBuf; 2], DispatchError> {
+    let orbit = worktree.join(".orbit");
+    let adrs = orbit.join("adrs");
+    for parent in [&orbit, &adrs] {
+        match std::fs::symlink_metadata(parent) {
+            Ok(metadata) if !metadata.file_type().is_symlink() && metadata.is_dir() => {}
+            Ok(_) => {
+                return Err(DispatchError::CliInvocationPermanent(format!(
+                    "managed-worktree ADR parent `{}` must be a real directory",
+                    parent.display()
+                )));
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                std::fs::create_dir(parent).map_err(|error| {
+                    DispatchError::CliInvocationPermanent(format!(
+                        "create managed-worktree ADR parent `{}`: {error}",
+                        parent.display()
+                    ))
+                })?;
+            }
+            Err(error) => {
+                return Err(DispatchError::CliInvocationPermanent(format!(
+                    "inspect managed-worktree ADR parent `{}`: {error}",
+                    parent.display()
+                )));
+            }
+        }
+    }
+
+    let roots = [adrs.join("proposed"), adrs.join(".locks")];
+    for directory in &roots {
+        match std::fs::symlink_metadata(directory) {
+            Ok(metadata) if !metadata.file_type().is_symlink() && metadata.is_dir() => {}
+            Ok(_) => {
+                return Err(DispatchError::CliInvocationPermanent(format!(
+                    "managed-worktree ADR root `{}` must be a real directory",
+                    directory.display()
+                )));
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                std::fs::create_dir(directory).map_err(|error| {
+                    DispatchError::CliInvocationPermanent(format!(
+                        "create managed-worktree ADR root `{}`: {error}",
+                        directory.display()
+                    ))
+                })?;
+            }
+            Err(error) => {
+                return Err(DispatchError::CliInvocationPermanent(format!(
+                    "inspect managed-worktree ADR root `{}`: {error}",
+                    directory.display()
+                )));
+            }
+        }
+    }
+    Ok(roots)
+}
+
 /// Re-allow the active job-run worktree under `<workspace>/.orbit/state/worktrees/`
 /// for every provider, after the policy's `denyModify .orbit/**` rule. Without
 /// this, `task_pr_pipeline` runs whose subprocess cwd lives under
@@ -346,6 +417,10 @@ fn append_active_worktree_root(
 }
 
 fn active_worktree_subpath(runtime: &OrbitRuntime, subprocess_cwd: &Path) -> Option<String> {
+    active_worktree_root(runtime, subprocess_cwd).map(|worktree| worktree.display().to_string())
+}
+
+fn active_worktree_root(runtime: &OrbitRuntime, subprocess_cwd: &Path) -> Option<PathBuf> {
     let cwd = subprocess_cwd
         .canonicalize()
         .unwrap_or_else(|_| subprocess_cwd.to_path_buf());
@@ -361,8 +436,7 @@ fn active_worktree_subpath(runtime: &OrbitRuntime, subprocess_cwd: &Path) -> Opt
     let relative = cwd.strip_prefix(&worktrees_root).ok()?;
     let mut components = relative.components();
     let first = components.next()?;
-    let worktree_dir = worktrees_root.join(first.as_os_str());
-    Some(worktree_dir.display().to_string())
+    Some(worktrees_root.join(first.as_os_str()))
 }
 
 fn absolutize_side_write_root(workspace_root: &str, path: &str) -> Option<String> {
