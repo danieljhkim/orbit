@@ -41,7 +41,7 @@ fn worktree_profile(worktree: &std::path::Path, reallows: Vec<String>) -> Resolv
 }
 
 #[test]
-fn absent_granted_file_and_directory_targets_are_both_materialized() {
+fn absent_anchor_kind_comes_from_rule_semantics_not_filename_shape() {
     let temp = tempfile::tempdir().expect("tempdir");
     let worktree = temp.path().join("worktree");
     std::fs::create_dir_all(&worktree).expect("worktree");
@@ -49,10 +49,10 @@ fn absent_granted_file_and_directory_targets_are_both_materialized() {
     let resolved = worktree_profile(
         &worktree,
         vec![
-            // Absent file grant, spelled as an exact leaf.
-            orbit.join("config.toml").display().to_string(),
-            // Absent directory grant, spelled as a subtree.
-            format!("{}/**", orbit.join("auto_tasks").display()),
+            // Exact rules denote files, including extensionless names.
+            orbit.join("config").display().to_string(),
+            // Subtree rules denote directories, including dotted names.
+            format!("{}/**", orbit.join("cache.v1").display()),
             // A file grant *beneath* a granted directory: the case the old
             // hardcoded `(path, kind)` table missed, because it matched the
             // directory entry by exact tuple and never created the parent.
@@ -64,12 +64,12 @@ fn absent_granted_file_and_directory_targets_are_both_materialized() {
         prepare_linux_bwrap_write_grants(&resolved, &worktree).expect("prepare policy grants");
 
     assert!(
-        orbit.join("config.toml").is_file(),
-        "an absent granted file target must be materialized"
+        orbit.join("config").is_file(),
+        "an absent extensionless exact grant must be materialized as a file"
     );
     assert!(
-        orbit.join("auto_tasks").is_dir(),
-        "an absent granted directory target must be materialized"
+        orbit.join("cache.v1").is_dir(),
+        "an absent dotted subtree grant must be materialized as a directory"
     );
     assert!(orbit.join("routines").is_dir());
     assert_eq!(prepared.created.len(), 3, "{:?}", prepared.created);
@@ -84,7 +84,7 @@ fn absent_granted_file_and_directory_targets_are_both_materialized() {
         .expect("compile");
     assert!(plan.dropped_grants.is_empty(), "{:?}", plan.dropped_grants);
     let joined = plan.args.join(" ");
-    for anchor in ["config.toml", "auto_tasks", "routines"] {
+    for anchor in ["config", "cache.v1", "routines"] {
         assert!(
             joined.contains(&format!("--bind {0} {0}", orbit.join(anchor).display())),
             "missing re-allow mount for {anchor} in {joined}"
@@ -151,7 +151,7 @@ fn definition_and_cursor_roots_stay_separate_across_local_and_shared_orbit_dirs(
         ],
     );
 
-    let grants = linux_bwrap_write_grants(&resolved);
+    let grants = linux_bwrap_write_grants(&resolved).expect("derive grants");
     let definitions = grants
         .iter()
         .find(|grant| grant.anchor == local_definitions)
@@ -221,8 +221,109 @@ fn write_grant_preparation_rejects_symlink_escape() {
     let error = prepare_linux_bwrap_write_grants(&resolved, &worktree)
         .expect_err("symlink escape must fail closed");
 
-    assert!(error.to_string().contains("must not be a symlink"));
+    assert!(error.to_string().contains("resolves through symlink"));
     assert!(!outside.join("config.toml").exists());
+}
+
+#[cfg(unix)]
+#[test]
+fn existing_write_grant_rejects_intermediate_symlink_escape() {
+    use std::os::unix::fs::symlink;
+
+    let temp = tempfile::tempdir().expect("tempdir");
+    let worktree = temp.path().join("worktree");
+    let outside = temp.path().join("outside");
+    std::fs::create_dir_all(&worktree).expect("worktree");
+    std::fs::create_dir_all(&outside).expect("outside");
+    std::fs::write(outside.join("config.toml"), "outside").expect("outside target");
+    symlink(&outside, worktree.join(".orbit")).expect("symlink Orbit root");
+    let resolved = worktree_profile(
+        &worktree,
+        vec![worktree.join(".orbit/config.toml").display().to_string()],
+    );
+
+    let error = prepare_linux_bwrap_write_grants(&resolved, &worktree)
+        .expect_err("an existing target through an intermediate symlink must fail closed");
+
+    let message = error.to_string();
+    assert!(message.contains("config.toml"), "{message}");
+    assert!(message.contains("resolves through symlink"), "{message}");
+    assert_eq!(
+        std::fs::read_to_string(outside.join("config.toml")).expect("outside unchanged"),
+        "outside"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn existing_write_grant_rejects_final_symlink() {
+    use std::os::unix::fs::symlink;
+
+    let temp = tempfile::tempdir().expect("tempdir");
+    let worktree = temp.path().join("worktree");
+    let orbit = worktree.join(".orbit");
+    let outside = temp.path().join("outside.toml");
+    std::fs::create_dir_all(&orbit).expect("Orbit root");
+    std::fs::write(&outside, "outside").expect("outside target");
+    symlink(&outside, orbit.join("config.toml")).expect("symlink final anchor");
+    let resolved = worktree_profile(
+        &worktree,
+        vec![orbit.join("config.toml").display().to_string()],
+    );
+
+    let error = prepare_linux_bwrap_write_grants(&resolved, &worktree)
+        .expect_err("a final symlink must fail closed");
+
+    let message = error.to_string();
+    assert!(message.contains("config.toml"), "{message}");
+    assert!(message.contains("resolves through symlink"), "{message}");
+}
+
+#[test]
+fn materialization_uses_final_last_match_wins_decision() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let worktree = temp.path().join("worktree");
+    let orbit = worktree.join(".orbit");
+    std::fs::create_dir_all(&worktree).expect("worktree");
+    let denied_file = orbit.join("workspace-denied");
+    let partially_writable = orbit.join("cache.v1");
+    let resolved = worktree_profile(
+        &worktree,
+        vec![
+            denied_file.display().to_string(),
+            format!("!{}", denied_file.display()),
+            format!("{}/**", partially_writable.display()),
+            format!("!{}/private/**", partially_writable.display()),
+        ],
+    );
+
+    let grants = linux_bwrap_write_grants(&resolved).expect("derive effective grants");
+    assert!(
+        grants.iter().all(|grant| grant.anchor != denied_file),
+        "a later exact deny must remove the shadowed materialization candidate: {grants:?}"
+    );
+    assert!(
+        grants
+            .iter()
+            .any(|grant| grant.anchor == partially_writable),
+        "a narrower child deny must preserve the writable remainder: {grants:?}"
+    );
+
+    let prepared =
+        prepare_linux_bwrap_write_grants(&resolved, &worktree).expect("prepare effective grants");
+    assert!(!denied_file.exists());
+    assert!(partially_writable.is_dir());
+    assert_eq!(prepared.created, vec![partially_writable.clone()]);
+
+    let plan = compile_linux_bwrap_argv(&resolved, "/bin/true", &[], Some(&worktree), true)
+        .expect("compile");
+    assert!(
+        plan.dropped_grants
+            .iter()
+            .all(|grant| grant.anchor != denied_file),
+        "a finally denied rule is not an unsatisfied grant: {:?}",
+        plan.dropped_grants
+    );
 }
 
 #[test]

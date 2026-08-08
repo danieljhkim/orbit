@@ -30,7 +30,9 @@ use super::envelope::{
     cli_agent_envelope_json, parse_cli_invocation_trace, parse_cli_response_result,
     task_id_from_input,
 };
-use super::spawn::{prepare_sandbox_for_dispatch, resolve_provider_launcher};
+use super::spawn::{
+    linux_bwrap_failed_write_diagnostic, prepare_sandbox_for_dispatch, resolve_provider_launcher,
+};
 use super::supervisor::{
     DEFAULT_WALL_CLOCK_TIMEOUT_SECONDS, SpawnTraceContext, SpawnWithTimeoutRequest,
     spawn_with_timeout,
@@ -318,6 +320,24 @@ pub fn run_cli_backend(
     // and diagnostics, but only make them authoritative when the activity
     // explicitly declares that downstream templates require them.
     let exit_success = !timed_out && matches!(exit_code, Some(0));
+    let sandbox_write_diagnostic = if exit_success {
+        None
+    } else {
+        match sandbox {
+            Some(sandbox)
+                if sandbox.kind == orbit_common::types::ExecutorSandboxKind::LinuxBwrap =>
+            {
+                linux_bwrap_failed_write_diagnostic(
+                    &sandbox.fs_profile,
+                    stderr.protocol_bytes(),
+                    subprocess_cwd.as_deref(),
+                )
+                .map_err(|error| DispatchError::CliInvocationPermanent(error.to_string()))?
+                .map(|diagnostic| bounded_diagnostic(&diagnostic, &redaction))
+            }
+            _ => None,
+        }
+    };
     // A truncated capture retains the final complete JSONL events separately
     // from its diagnostic prefix. Protocol parsing must use that tail so a
     // verbose provider's final Orbit envelope remains authoritative.
@@ -373,7 +393,11 @@ pub fn run_cli_backend(
             timeout_seconds
         ))
     } else if !exit_success {
-        Some(format!("cli subprocess exited with code {:?}", exit_code))
+        Some(
+            sandbox_write_diagnostic
+                .clone()
+                .unwrap_or_else(|| format!("cli subprocess exited with code {:?}", exit_code)),
+        )
     } else if spec.require_response_envelope
         && matches!(envelope_status.as_deref(), Some("failed") | Some("timeout"))
     {
@@ -439,6 +463,10 @@ pub fn run_cli_backend(
         (
             "completion_envelope_error",
             completion_envelope_error.map_or(Value::Null, Value::String),
+        ),
+        (
+            "sandbox_write_diagnostic",
+            sandbox_write_diagnostic.map_or(Value::Null, Value::String),
         ),
         ("stdout_text", Value::String(stdout_text)),
         (

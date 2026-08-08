@@ -13,6 +13,8 @@ use orbit_common::test_fixtures::{TEST_CLAUDE_MODEL, TEST_CODEX_MODEL};
 use orbit_common::types::activity_job::{
     AgentRole, JobV2StepBody, V2AuditEventKind, load_job_asset,
 };
+#[cfg(target_os = "linux")]
+use orbit_exec::probe_bwrap;
 use orbit_store::Store;
 use tempfile::{TempDir, tempdir};
 
@@ -22,6 +24,8 @@ use crate::template::{self, TemplateContext};
 use super::super::super::agent_role::{apply_resolved_settings, resolve_agent_settings};
 use super::super::super::audit_writer::V2AuditWriter;
 use super::super::super::dispatcher::DispatchError;
+#[cfg(target_os = "linux")]
+use super::super::super::dispatcher::ResolvedSandbox;
 use super::super::super::sqlite_sink::V2SqliteSink;
 use super::super::super::workspace::{WorktreeBoundaryGuard, validate_declared_worktree_pair};
 use super::super::run_cli_backend;
@@ -871,6 +875,80 @@ fn run_cli_backend_records_resolved_cwd_in_started_event() {
         })
         .expect("cli.invocation.started cwd");
     assert_eq!(cwd, workspace_string);
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn linux_bwrap_failed_invocation_names_ungranted_write_path_and_deny() {
+    if !probe_bwrap().available {
+        return;
+    }
+
+    let temp = tempdir().expect("tempdir");
+    let workspace = temp.path().join("worktree");
+    let orbit = workspace.join(".orbit");
+    fs::create_dir_all(&orbit).expect("denied Orbit root");
+    let script = workspace.join("codex");
+    write_executable(
+        &script,
+        "#!/bin/sh\ncat > /dev/null\ntouch \"$PWD/.orbit/ungranted\"\n",
+    );
+    let blocked_path = orbit.join("ungranted");
+    let profile = orbit_common::types::ResolvedFsProfile {
+        name: "implementer".to_string(),
+        read: vec![format!("{}/**", workspace.display())],
+        modify: vec![
+            format!("{}/**", workspace.display()),
+            format!("!{}/**", orbit.display()),
+        ],
+    };
+
+    let sink = Arc::new(RecordingSink::default());
+    let sink_for_writer: Arc<dyn AuditSink> = sink;
+    let audit = Arc::new(V2AuditWriter::new(
+        "job-linux-write-denial",
+        "codex:test",
+        sink_for_writer,
+    ));
+    let host = TestHost {
+        command: script.display().to_string(),
+        executor_args: Vec::new(),
+        provider_config: HashMap::new(),
+        sandbox: Some(ResolvedSandbox {
+            kind: orbit_common::types::ExecutorSandboxKind::LinuxBwrap,
+            fs_profile: profile,
+            allow_fallback: false,
+            managed_worktree: true,
+        }),
+        task_context: Some(serde_json::json!({
+            "workspace_path": workspace.display().to_string()
+        })),
+        workspace_root: None,
+    };
+    let spec = test_agent_loop_spec(Duration::from_secs(5));
+
+    let outcome = run_cli_backend(
+        &host,
+        &spec,
+        "job-linux-write-denial",
+        audit,
+        &serde_json::json!({"prompt": "attempt the write"}),
+        None,
+    )
+    .expect("the invocation outcome should be classified");
+
+    assert!(!outcome.success);
+    let message = outcome.message.expect("Orbit-owned denial diagnostic");
+    assert!(
+        message.contains(&blocked_path.display().to_string()),
+        "diagnostic must name the attempted path: {message}"
+    );
+    assert!(
+        message.contains("denyModify rule"),
+        "diagnostic must name the shadowing deny: {message}"
+    );
+    assert_eq!(outcome.output["sandbox_write_diagnostic"], message);
+    assert!(!blocked_path.exists());
 }
 
 #[test]

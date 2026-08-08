@@ -3,13 +3,13 @@ use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 
-use orbit_common::types::ExecutorSandboxKind;
+use orbit_common::types::{ExecutorSandboxKind, OrbitError, ResolvedFsProfile};
 use orbit_common::utility::redaction::non_sensitive_env_vars;
 use orbit_exec::{
     BwrapProbeOutcome, LinuxBwrapSpawnRequest, MacosSandboxSpawnRequest, UnsatisfiedWriteGrant,
-    compile_linux_bwrap_argv, compile_macos_sandbox_profile, prepare_linux_bwrap_write_grants,
-    probe_bwrap, sandbox_exec_available, sandbox_exec_unavailable_message, spawn_under_linux_bwrap,
-    spawn_under_macos_sandbox,
+    compile_linux_bwrap_argv, compile_macos_sandbox_profile, linux_bwrap_write_grant_diagnostic,
+    prepare_linux_bwrap_write_grants, probe_bwrap, sandbox_exec_available,
+    sandbox_exec_unavailable_message, spawn_under_linux_bwrap, spawn_under_macos_sandbox,
 };
 use tempfile::NamedTempFile;
 
@@ -357,6 +357,76 @@ fn describe_grants(grants: &[UnsatisfiedWriteGrant]) -> String {
         .map(UnsatisfiedWriteGrant::describe)
         .collect::<Vec<_>>()
         .join("; ")
+}
+
+/// Turn a child-reported EROFS into a policy-owned denial when the failing
+/// program included the attempted path in stderr. This runs after the real
+/// Bubblewrap child exits, so it covers the production invocation boundary
+/// rather than merely explaining a path supplied by a unit test.
+pub(super) fn linux_bwrap_failed_write_diagnostic(
+    profile: &ResolvedFsProfile,
+    stderr: &[u8],
+    cwd: Option<&Path>,
+) -> Result<Option<String>, OrbitError> {
+    let stderr = String::from_utf8_lossy(stderr);
+    for line in stderr.lines().rev() {
+        if !line.contains("Read-only file system") && !line.contains("EROFS") {
+            continue;
+        }
+        for candidate in failed_write_path_candidates(line).into_iter().rev() {
+            let path = Path::new(&candidate);
+            let attempted = if path.is_absolute() {
+                path.to_path_buf()
+            } else if let Some(cwd) = cwd {
+                cwd.join(path)
+            } else {
+                continue;
+            };
+            if let Some(diagnostic) = linux_bwrap_write_grant_diagnostic(profile, &attempted)? {
+                return Ok(Some(format!(
+                    "Orbit linux-bwrap policy denied the attempted write: {diagnostic}"
+                )));
+            }
+        }
+    }
+    Ok(None)
+}
+
+fn failed_write_path_candidates(line: &str) -> Vec<String> {
+    let mut candidates = Vec::new();
+    for quote in ['\'', '"', '`'] {
+        let mut remainder = line;
+        while let Some(start) = remainder.find(quote) {
+            let after_start = &remainder[start + quote.len_utf8()..];
+            let Some(end) = after_start.find(quote) else {
+                break;
+            };
+            let candidate = after_start[..end].trim();
+            if !candidate.is_empty() {
+                candidates.push(candidate.to_string());
+            }
+            remainder = &after_start[end + quote.len_utf8()..];
+        }
+    }
+
+    // Coreutils quotes paths, but language runtimes often render
+    // `...: /path: Read-only file system`. Keep a conservative token fallback
+    // so those failures are attributable too.
+    let prefix = line
+        .split_once("Read-only file system")
+        .or_else(|| line.split_once("EROFS"))
+        .map_or(line, |(prefix, _)| prefix);
+    if let Some(token) = prefix.split_whitespace().next_back() {
+        let candidate = token
+            .trim_matches(|character: char| {
+                matches!(character, '\'' | '"' | '`' | ':' | '(' | ')' | '[' | ']')
+            })
+            .trim();
+        if !candidate.is_empty() && !candidates.iter().any(|known| known == candidate) {
+            candidates.push(candidate.to_string());
+        }
+    }
+    candidates
 }
 
 // pub(crate) widened for tests/ layout under ORB-00225; test reaches via exposed surface.
