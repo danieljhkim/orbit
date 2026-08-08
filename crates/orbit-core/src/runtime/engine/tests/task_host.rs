@@ -155,9 +155,18 @@ fn run_worktree_setup(runtime: &OrbitRuntime, task_ids: &[String], run_id: &str)
     .expect("run worktree setup")
 }
 
+/// ORB-10602: worktree setup no longer materializes sandbox mount anchors.
+///
+/// It only ever saw a snapshot of the task's context files and a policy profile
+/// that was neither absolutized against the worktree nor augmented with the
+/// host's run roots, so the grant set it computed could not match the one the
+/// kernel would enforce. Anchors are now derived from the effective profile at
+/// each spawn (`orbit_exec::prepare_linux_bwrap_write_grants`); setup must
+/// leave the checkout's `.orbit` exactly as `git worktree add` produced it, and
+/// must never touch the registered primary checkout.
 #[cfg(target_os = "linux")]
 #[test]
-fn worktree_setup_prepares_only_missing_scoped_versioned_config_targets() {
+fn worktree_setup_materializes_no_orbit_targets_from_context_files() {
     let (root, runtime) = test_runtime();
     let repo = root.path().join("repo");
     let activities = root.path().join("global/resources/activities");
@@ -198,17 +207,21 @@ fn worktree_setup_prepares_only_missing_scoped_versioned_config_targets() {
     let output = run_worktree_setup(&runtime, std::slice::from_ref(&task.id), "jrun-config");
     let worktree = Path::new(output["workspace_path"].as_str().expect("workspace path"));
 
-    assert!(worktree.join(".orbit/config.toml").is_file());
-    assert!(worktree.join(".orbit/routines").is_dir());
-    for denied in [".orbit/state/forbidden.json", ".orbit/future-store", ".env"] {
+    for target in [
+        ".orbit/config.toml",
+        ".orbit/routines",
+        ".orbit/state/forbidden.json",
+        ".orbit/future-store",
+        ".env",
+    ] {
         assert!(
-            !worktree.join(denied).exists(),
-            "protected or secret target must not be materialized: {denied}"
+            !worktree.join(target).exists(),
+            "setup must not materialize any context-file target: {target}"
         );
     }
     assert!(
         !repo.join(".orbit/config.toml").exists(),
-        "preparation must stay inside the disposable worktree"
+        "setup must never write into the registered primary checkout"
     );
 }
 

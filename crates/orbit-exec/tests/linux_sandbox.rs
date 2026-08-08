@@ -7,8 +7,9 @@ use std::process::Stdio;
 
 use orbit_common::types::ResolvedFsProfile;
 use orbit_exec::{
-    LinuxBwrapPostRunGuard, LinuxBwrapSpawnRequest, bwrap_path, bwrap_program_for_audit,
-    compile_linux_bwrap_argv, prepare_linux_bwrap_versioned_config_targets, probe_bwrap,
+    LinuxBwrapPostRunGuard, LinuxBwrapSpawnRequest, WriteAnchorKind, bwrap_path,
+    bwrap_program_for_audit, compile_linux_bwrap_argv, linux_bwrap_write_grant_diagnostic,
+    linux_bwrap_write_grants, prepare_linux_bwrap_write_grants, probe_bwrap,
     spawn_under_linux_bwrap,
 };
 
@@ -28,54 +29,182 @@ fn trusted_resolution_never_consults_path() {
     }
 }
 
+/// A worktree-shaped profile: broad writable root, the blanket `.orbit` deny,
+/// then whatever narrow re-allows the caller wants to exercise.
+fn worktree_profile(worktree: &std::path::Path, reallows: Vec<String>) -> ResolvedFsProfile {
+    let mut modify = vec![
+        format!("{}/**", worktree.display()),
+        format!("!{}/.orbit/**", worktree.display()),
+    ];
+    modify.extend(reallows);
+    profile(modify)
+}
+
 #[test]
-fn versioned_config_preparation_preserves_existing_targets_and_profile_narrowing() {
+fn absent_granted_file_and_directory_targets_are_both_materialized() {
     let temp = tempfile::tempdir().expect("tempdir");
     let worktree = temp.path().join("worktree");
-    std::fs::create_dir_all(worktree.join(".orbit/routines")).expect("existing routines");
-    std::fs::write(worktree.join(".orbit/config.toml"), "existing = true\n")
-        .expect("existing config");
-    let resolved = profile(vec![
-        "**".to_string(),
-        "!.orbit/**".to_string(),
-        ".orbit/config.yaml".to_string(),
-        ".orbit/config.toml".to_string(),
-        ".orbit/auto_tasks/**".to_string(),
-        ".orbit/routines/**".to_string(),
-    ]);
-
-    prepare_linux_bwrap_versioned_config_targets(
+    std::fs::create_dir_all(&worktree).expect("worktree");
+    let orbit = worktree.join(".orbit");
+    let resolved = worktree_profile(
         &worktree,
-        &[
-            "file:.orbit/config.toml".to_string(),
-            "dir:.orbit/routines".to_string(),
-            "dir:.orbit/resources".to_string(),
-            "dir:.orbit/config.yaml".to_string(),
-            "file:.orbit/auto_tasks".to_string(),
+        vec![
+            // Absent file grant, spelled as an exact leaf.
+            orbit.join("config.toml").display().to_string(),
+            // Absent directory grant, spelled as a subtree.
+            format!("{}/**", orbit.join("auto_tasks").display()),
+            // A file grant *beneath* a granted directory: the case the old
+            // hardcoded `(path, kind)` table missed, because it matched the
+            // directory entry by exact tuple and never created the parent.
+            format!("{}/**", orbit.join("routines").display()),
         ],
-        &resolved,
-    )
-    .expect("prepare exact allowed targets");
+    );
 
-    assert_eq!(
-        std::fs::read_to_string(worktree.join(".orbit/config.toml")).expect("read existing config"),
-        "existing = true\n"
-    );
-    assert!(worktree.join(".orbit/routines").is_dir());
-    assert!(!worktree.join(".orbit/resources").exists());
+    let prepared =
+        prepare_linux_bwrap_write_grants(&resolved, &worktree).expect("prepare policy grants");
+
     assert!(
-        !worktree.join(".orbit/config.yaml").exists(),
-        "a directory selector must not prepare a file target"
+        orbit.join("config.toml").is_file(),
+        "an absent granted file target must be materialized"
     );
     assert!(
-        !worktree.join(".orbit/auto_tasks").exists(),
-        "a file selector must not prepare a directory target"
+        orbit.join("auto_tasks").is_dir(),
+        "an absent granted directory target must be materialized"
     );
+    assert!(orbit.join("routines").is_dir());
+    assert_eq!(prepared.created.len(), 3, "{:?}", prepared.created);
+    assert!(
+        prepared.unsatisfied.is_empty(),
+        "{:?}",
+        prepared.unsatisfied
+    );
+
+    // Every prepared anchor now mounts; nothing is dropped.
+    let plan = compile_linux_bwrap_argv(&resolved, "/bin/true", &[], Some(&worktree), true)
+        .expect("compile");
+    assert!(plan.dropped_grants.is_empty(), "{:?}", plan.dropped_grants);
+    let joined = plan.args.join(" ");
+    for anchor in ["config.toml", "auto_tasks", "routines"] {
+        assert!(
+            joined.contains(&format!("--bind {0} {0}", orbit.join(anchor).display())),
+            "missing re-allow mount for {anchor} in {joined}"
+        );
+    }
+}
+
+#[test]
+fn ungranted_paths_are_never_materialized_and_report_the_deny_that_shadows_them() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let worktree = temp.path().join("worktree");
+    std::fs::create_dir_all(&worktree).expect("worktree");
+    let orbit = worktree.join(".orbit");
+    let resolved = worktree_profile(
+        &worktree,
+        vec![format!("{}/**", orbit.join("auto_tasks").display())],
+    );
+
+    prepare_linux_bwrap_write_grants(&resolved, &worktree).expect("prepare policy grants");
+
+    // Granted sibling exists; the ungranted store does not, and preparation
+    // must not invent it just because it sits under the same denied parent.
+    assert!(orbit.join("auto_tasks").is_dir());
+    assert!(
+        !orbit.join("tasks").exists(),
+        "a path the policy does not grant must never be materialized"
+    );
+
+    assert!(
+        linux_bwrap_write_grant_diagnostic(&resolved, &orbit.join("auto_tasks/x.yaml"))
+            .expect("diagnose granted path")
+            .is_none()
+    );
+    let denied = linux_bwrap_write_grant_diagnostic(&resolved, &orbit.join("tasks/x.yaml"))
+        .expect("diagnose ungranted path")
+        .expect("ungranted path must be attributable");
+    assert!(
+        denied.contains("tasks/x.yaml") && denied.contains("denyModify rule"),
+        "diagnostic must name the path and the deny that shadows it: {denied}"
+    );
+}
+
+/// ADR-0286: auto-task *definitions* resolve through the runtime local root
+/// (the worktree), while scheduler cursors and coordination state stay under
+/// the shared root. Grant computation must keep those two roots apart: the
+/// definition anchor is a narrow re-allow beneath the worktree's own `.orbit`
+/// deny and is materialized here, while shared-root coordination state is a
+/// host-owned broad root this layer never creates and never relocates into the
+/// worktree.
+#[test]
+fn definition_and_cursor_roots_stay_separate_across_local_and_shared_orbit_dirs() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let shared = temp.path().join("primary/.orbit");
+    let worktree = shared.join("state/worktrees/orbit-jrun-test");
+    std::fs::create_dir_all(&worktree).expect("worktree");
+    let local_definitions = worktree.join(".orbit/auto_tasks");
+    let shared_cursor_state = shared.join("state/auto-tasks.json");
+
+    let resolved = worktree_profile(
+        &worktree,
+        vec![
+            format!("{}/**", local_definitions.display()),
+            shared_cursor_state.display().to_string(),
+        ],
+    );
+
+    let grants = linux_bwrap_write_grants(&resolved);
+    let definitions = grants
+        .iter()
+        .find(|grant| grant.anchor == local_definitions)
+        .expect("definition grant resolves through the local root");
+    assert_eq!(definitions.kind, WriteAnchorKind::Directory);
+
+    assert!(
+        grants
+            .iter()
+            .all(|grant| grant.anchor.starts_with(&worktree)),
+        "cursor/coordination state under the shared root is never a worktree write grant: {grants:?}"
+    );
+
+    let prepared =
+        prepare_linux_bwrap_write_grants(&resolved, &worktree).expect("prepare policy grants");
+
+    assert_eq!(prepared.created, vec![local_definitions.clone()]);
+    assert!(
+        prepared.unsatisfied.is_empty(),
+        "{:?}",
+        prepared.unsatisfied
+    );
+    assert!(
+        local_definitions.is_dir(),
+        "definitions are materialized under the runtime local root"
+    );
+    assert!(
+        !shared.join("auto_tasks").exists(),
+        "the local-root definition grant must not reach into the shared root"
+    );
+    assert!(
+        !shared_cursor_state.exists(),
+        "shared-root coordination state is the host's to create, not the worktree preparer's"
+    );
+
+    // The cursor root is a broad host-owned root, not a narrow exception, so
+    // compilation refuses to proceed until the host has materialized it. That
+    // refusal is what keeps the two roots from collapsing into one.
+    let error = compile_linux_bwrap_argv(&resolved, "/bin/true", &[], Some(&worktree), true)
+        .expect_err("an absent host-owned root must fail closed");
+    assert!(error.to_string().contains("auto-tasks.json"), "{error}");
+
+    std::fs::write(&shared_cursor_state, "{}").expect("host materializes cursor state");
+    let plan = compile_linux_bwrap_argv(&resolved, "/bin/true", &[], Some(&worktree), true)
+        .expect("compile");
+    let joined = plan.args.join(" ");
+    assert!(joined.contains(&format!("--bind {0} {0}", shared_cursor_state.display())));
+    assert!(joined.contains(&format!("--bind {0} {0}", local_definitions.display())));
 }
 
 #[cfg(unix)]
 #[test]
-fn versioned_config_preparation_rejects_symlink_escape() {
+fn write_grant_preparation_rejects_symlink_escape() {
     use std::os::unix::fs::symlink;
 
     let temp = tempfile::tempdir().expect("tempdir");
@@ -84,18 +213,13 @@ fn versioned_config_preparation_rejects_symlink_escape() {
     std::fs::create_dir_all(&worktree).expect("worktree");
     std::fs::create_dir_all(&outside).expect("outside");
     symlink(&outside, worktree.join(".orbit")).expect("symlink Orbit root");
-    let resolved = profile(vec![
-        "**".to_string(),
-        "!.orbit/**".to_string(),
-        ".orbit/config.toml".to_string(),
-    ]);
-
-    let error = prepare_linux_bwrap_versioned_config_targets(
+    let resolved = worktree_profile(
         &worktree,
-        &["file:.orbit/config.toml".to_string()],
-        &resolved,
-    )
-    .expect_err("symlink escape must fail closed");
+        vec![worktree.join(".orbit/config.toml").display().to_string()],
+    );
+
+    let error = prepare_linux_bwrap_write_grants(&resolved, &worktree)
+        .expect_err("symlink escape must fail closed");
 
     assert!(error.to_string().contains("must not be a symlink"));
     assert!(!outside.join("config.toml").exists());
@@ -177,6 +301,15 @@ fn argv_reallows_only_narrow_existing_paths_after_orbit_deny() {
     assert!(
         !joined.contains("missing-config.toml"),
         "a missing narrow exception is skipped instead of making every sandbox invocation fail"
+    );
+    let dropped = plan
+        .dropped_grants
+        .iter()
+        .find(|grant| grant.anchor.ends_with("missing-config.toml"))
+        .expect("a skipped narrow exception must be reported, never silently dropped");
+    assert_eq!(
+        dropped.rule,
+        orbit.join("missing-config.toml").display().to_string()
     );
     assert_eq!(
         joined
@@ -327,27 +460,24 @@ fn kernel_enforces_versioned_orbit_exceptions_and_protected_stores_when_availabl
     ]);
     assert!(!orbit.join("config.toml").exists());
     assert!(!orbit.join("routines").exists());
-    prepare_linux_bwrap_versioned_config_targets(
-        &workspace,
-        &[
-            "file:.orbit/config.toml".to_string(),
-            "dir:.orbit/routines".to_string(),
-            "file:.orbit/state/new.json".to_string(),
-            "dir:.orbit/future-store-new".to_string(),
-            "file:.orbit/resources/new.env".to_string(),
-        ],
-        &resolved,
-    )
-    .expect("trusted setup prepares absent allowed targets");
+    assert!(!orbit.join("auto_tasks").exists());
+    prepare_linux_bwrap_write_grants(&resolved, &workspace)
+        .expect("trusted setup prepares absent granted anchors");
     assert_eq!(
         std::fs::read_to_string(orbit.join("config.toml")).expect("prepared empty config"),
         ""
     );
     assert!(orbit.join("routines").is_dir());
+    assert!(orbit.join("auto_tasks").is_dir());
+    // Ungranted paths under the same denied parent stay absent and unwritable.
     assert!(!orbit.join("state/new.json").exists());
     assert!(!orbit.join("future-store-new").exists());
     assert!(!orbit.join("resources/new.env").exists());
-    let allowed = [orbit.join("routines/new.yaml"), orbit.join("config.toml")];
+    let allowed = [
+        orbit.join("routines/new.yaml"),
+        orbit.join("auto_tasks/new.yaml"),
+        orbit.join("config.toml"),
+    ];
     let denied = [
         orbit.join("state/run.json"),
         orbit.join("tasks/task.yaml"),

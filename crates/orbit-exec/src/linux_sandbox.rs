@@ -10,25 +10,10 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 
 use orbit_common::types::{OrbitError, ResolvedFsProfile};
-use orbit_common::utility::glob::{compile_glob_regex, match_glob};
+use orbit_common::utility::glob::compile_glob_regex;
 use orbit_common::utility::redaction::non_sensitive_env_vars;
-use orbit_common::utility::selector::Selector;
 
 const TRUSTED_BWRAP_PATH: &str = "/usr/bin/bwrap";
-
-#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
-enum VersionedConfigTargetKind {
-    File,
-    Directory,
-}
-
-const VERSIONED_CONFIG_TARGETS: [(&str, VersionedConfigTargetKind); 5] = [
-    (".orbit/config.yaml", VersionedConfigTargetKind::File),
-    (".orbit/config.toml", VersionedConfigTargetKind::File),
-    (".orbit/auto_tasks", VersionedConfigTargetKind::Directory),
-    (".orbit/routines", VersionedConfigTargetKind::Directory),
-    (".orbit/resources", VersionedConfigTargetKind::Directory),
-];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BwrapProbeOutcome {
@@ -41,6 +26,10 @@ pub struct BwrapProbeOutcome {
 pub struct LinuxBwrapPlan {
     pub wrapper: String,
     pub args: Vec<String>,
+    /// Narrow write grants the policy expresses but this argv could not mount,
+    /// because their anchor does not exist. Never silently discarded: the
+    /// caller reports each one against the rule that granted it.
+    pub dropped_grants: Vec<UnsatisfiedWriteGrant>,
 }
 
 #[derive(Debug)]
@@ -86,138 +75,279 @@ impl LinuxBwrapPostRunGuard {
     }
 }
 
-/// Materialize exact missing versioned-config mount anchors inside a trusted
-/// disposable worktree. A context selector is necessary but insufficient:
-/// the effective profile must also leave the same path writable.
-pub fn prepare_linux_bwrap_versioned_config_targets(
-    worktree_path: &Path,
-    context_files: &[String],
-    profile: &ResolvedFsProfile,
-) -> Result<(), OrbitError> {
-    let worktree = worktree_path.canonicalize().map_err(|error| {
-        OrbitError::Execution(format!(
-            "canonicalize managed worktree `{}` before config preparation: {error}",
-            worktree_path.display()
-        ))
-    })?;
-    let mut requested = BTreeSet::new();
-    for selector in context_files
-        .iter()
-        .filter_map(|raw| raw.parse::<Selector>().ok())
-    {
-        let candidate = match selector {
-            Selector::File { path } => Some((path, VersionedConfigTargetKind::File)),
-            Selector::Dir { path } => Some((path, VersionedConfigTargetKind::Directory)),
-            Selector::Symbol { .. } | Selector::Module { .. } | Selector::Command { .. } => None,
-        };
-        let Some((relative, kind)) = candidate else {
+/// The filesystem shape a granted write anchor must have for Bubblewrap to
+/// bind it. Derived from the granting rule, never from a table of known paths.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum WriteAnchorKind {
+    File,
+    Directory,
+}
+
+/// One narrow write exception the effective profile grants, together with the
+/// mount anchor Bubblewrap needs on disk in order to honor it.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct WriteGrant {
+    /// The `modify` rule, exactly as the effective profile spells it.
+    pub rule: String,
+    /// The path that must exist for the rule to become a mount.
+    pub anchor: PathBuf,
+    pub kind: WriteAnchorKind,
+}
+
+/// A grant that policy expresses but the mount plan cannot honor. Carries the
+/// path *and* the rule so a denial is attributable without reading argv.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct UnsatisfiedWriteGrant {
+    pub rule: String,
+    pub anchor: PathBuf,
+    pub reason: String,
+}
+
+impl UnsatisfiedWriteGrant {
+    pub fn describe(&self) -> String {
+        format!(
+            "write grant `{}` (rule `{}`) was not applied: {}",
+            self.anchor.display(),
+            self.rule,
+            self.reason
+        )
+    }
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct PreparedWriteGrants {
+    /// Anchors materialized by this call, in profile order.
+    pub created: Vec<PathBuf>,
+    /// Grants left unmountable because their anchor is absent and lies outside
+    /// the trusted preparation root, so creating it is not this layer's call.
+    pub unsatisfied: Vec<UnsatisfiedWriteGrant>,
+}
+
+/// Every narrow write re-allow in the effective profile — the positive
+/// exact/subtree rules nested under an earlier deny — paired with the anchor
+/// each one needs. Broad writable roots are excluded: they are required to
+/// exist by [`compile_linux_bwrap_argv`] and are not exceptions to a deny.
+///
+/// This is the whole grant set. It is read off the profile that will compile
+/// the argv, so it cannot drift from what the sandbox actually enforces.
+pub fn linux_bwrap_write_grants(profile: &ResolvedFsProfile) -> Vec<WriteGrant> {
+    let mut grants = Vec::new();
+    for (index, rule) in profile.modify.iter().enumerate() {
+        if rule.starts_with('!') || !is_narrow_reallow(&profile.modify[..index], rule) {
+            continue;
+        }
+        let Some(anchor) = exact_or_subtree_root(rule) else {
             continue;
         };
-        let absolute = worktree.join(&relative);
-        if VERSIONED_CONFIG_TARGETS.contains(&(relative.as_str(), kind))
-            && effective_modify_allows(profile, &relative, &absolute)?
-        {
-            requested.insert((relative, kind));
+        let kind = write_anchor_kind(&anchor, rule, &profile.modify);
+        grants.push(WriteGrant {
+            rule: rule.clone(),
+            anchor,
+            kind,
+        });
+    }
+    grants
+}
+
+/// Materialize every granted-but-absent write anchor that falls inside a
+/// trusted, disposable preparation root (the managed worktree).
+///
+/// A positive re-allow only becomes a bind mount if its anchor exists, so an
+/// absent anchor silently leaves the path under the surrounding read-only
+/// bind. Creating the anchor grants nothing the policy did not already grant —
+/// the effective profile is the sole authority for *which* paths appear here.
+pub fn prepare_linux_bwrap_write_grants(
+    profile: &ResolvedFsProfile,
+    containment_root: &Path,
+) -> Result<PreparedWriteGrants, OrbitError> {
+    let root = containment_root.canonicalize().map_err(|error| {
+        OrbitError::Execution(format!(
+            "canonicalize trusted write-grant preparation root `{}`: {error}",
+            containment_root.display()
+        ))
+    })?;
+    let mut prepared = PreparedWriteGrants::default();
+    for grant in linux_bwrap_write_grants(profile) {
+        if ensure_write_anchor(&root, &grant, &mut prepared)? {
+            prepared.created.push(grant.anchor);
         }
     }
-    if requested.is_empty() {
-        return Ok(());
+    Ok(prepared)
+}
+
+/// Explain a path against the effective profile's write rules: `None` when the
+/// path is granted, otherwise the deny that shadows it and the exception that
+/// would be needed. This is what turns an EROFS into an attributable refusal.
+pub fn linux_bwrap_write_grant_diagnostic(
+    profile: &ResolvedFsProfile,
+    path: &Path,
+) -> Result<Option<String>, OrbitError> {
+    let rendered = path.to_string_lossy().replace('\\', "/");
+    let mut decision: Option<&str> = None;
+    for rule in &profile.modify {
+        let body = rule.strip_prefix('!').unwrap_or(rule.as_str());
+        if compile_glob_regex(body)
+            .map_err(|error| {
+                OrbitError::InvalidInput(format!(
+                    "invalid linux-bwrap filesystem glob `{body}`: {error}"
+                ))
+            })?
+            .is_match(&rendered)
+        {
+            decision = Some(rule);
+        }
+    }
+    match decision {
+        Some(rule) if !rule.starts_with('!') => Ok(None),
+        Some(denied) => Ok(Some(format!(
+            "`{}` is not writable inside the sandbox: denyModify rule `{}` shadows it and no later narrow re-allow grants it; add an exception such as `{}` to the effective policy",
+            path.display(),
+            denied,
+            rendered
+        ))),
+        None => Ok(Some(format!(
+            "`{}` is not writable inside the sandbox: no modify rule in fsProfile `{}` grants it",
+            path.display(),
+            profile.name
+        ))),
+    }
+}
+
+/// Returns `Ok(true)` when this call created the anchor. Records an
+/// unsatisfied grant instead of creating anything outside `root`.
+fn ensure_write_anchor(
+    root: &Path,
+    grant: &WriteGrant,
+    prepared: &mut PreparedWriteGrants,
+) -> Result<bool, OrbitError> {
+    match std::fs::symlink_metadata(&grant.anchor) {
+        Ok(metadata) => {
+            if metadata.file_type().is_symlink() {
+                return Err(OrbitError::InvalidInput(format!(
+                    "write-grant anchor `{}` (rule `{}`) must not be a symlink",
+                    grant.anchor.display(),
+                    grant.rule
+                )));
+            }
+            let matches = match grant.kind {
+                WriteAnchorKind::File => metadata.is_file(),
+                WriteAnchorKind::Directory => metadata.is_dir(),
+            };
+            if !matches {
+                return Err(OrbitError::InvalidInput(format!(
+                    "write-grant anchor `{}` (rule `{}`) exists with the wrong filesystem type",
+                    grant.anchor.display(),
+                    grant.rule
+                )));
+            }
+            return Ok(false);
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => {
+            return Err(OrbitError::Execution(format!(
+                "inspect write-grant anchor `{}` (rule `{}`): {error}",
+                grant.anchor.display(),
+                grant.rule
+            )));
+        }
     }
 
-    let orbit_dir = worktree.join(".orbit");
-    inspect_existing_config_anchor(&orbit_dir, VersionedConfigTargetKind::Directory)?;
-    for (relative, kind) in &requested {
-        inspect_existing_config_anchor(&worktree.join(relative), *kind)?;
+    let Ok(relative) = grant.anchor.strip_prefix(root) else {
+        prepared.unsatisfied.push(UnsatisfiedWriteGrant {
+            rule: grant.rule.clone(),
+            anchor: grant.anchor.clone(),
+            reason: format!(
+                "the anchor does not exist and lies outside the trusted preparation root `{}`, so the host must create it before dispatch",
+                root.display()
+            ),
+        });
+        return Ok(false);
+    };
+
+    // Every component the preparation root owns must be a real directory. A
+    // symlink anywhere on that chain would let an absent anchor be created
+    // outside the root, which is the one escape this layer can cause.
+    let mut current = root.to_path_buf();
+    for component in relative.components() {
+        current.push(component);
+        if std::fs::symlink_metadata(&current)
+            .is_ok_and(|metadata| metadata.file_type().is_symlink())
+        {
+            return Err(OrbitError::InvalidInput(format!(
+                "write-grant anchor `{}` (rule `{}`) resolves through symlink `{}`; components inside the preparation root must not be a symlink",
+                grant.anchor.display(),
+                grant.rule,
+                current.display()
+            )));
+        }
     }
 
-    if !orbit_dir.exists() {
-        std::fs::create_dir(&orbit_dir).map_err(|error| {
+    if let Some(parent) = grant.anchor.parent() {
+        std::fs::create_dir_all(parent).map_err(|error| {
             OrbitError::Execution(format!(
-                "create managed-worktree config parent `{}`: {error}",
-                orbit_dir.display()
+                "create write-grant anchor parent `{}` (rule `{}`): {error}",
+                parent.display(),
+                grant.rule
             ))
         })?;
     }
-    for (relative, kind) in requested {
-        let target = worktree.join(relative);
-        if target.exists() {
-            continue;
-        }
-        match kind {
-            VersionedConfigTargetKind::File => {
-                OpenOptions::new()
-                    .write(true)
-                    .create_new(true)
-                    .open(&target)
-                    .map_err(|error| {
-                        OrbitError::Execution(format!(
-                            "create managed-worktree config file `{}`: {error}",
-                            target.display()
-                        ))
-                    })?;
-            }
-            VersionedConfigTargetKind::Directory => {
-                std::fs::create_dir(&target).map_err(|error| {
+    match grant.kind {
+        WriteAnchorKind::File => {
+            OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&grant.anchor)
+                .map_err(|error| {
                     OrbitError::Execution(format!(
-                        "create managed-worktree config directory `{}`: {error}",
-                        target.display()
+                        "create write-grant anchor file `{}` (rule `{}`): {error}",
+                        grant.anchor.display(),
+                        grant.rule
                     ))
                 })?;
-            }
+        }
+        WriteAnchorKind::Directory => {
+            std::fs::create_dir(&grant.anchor).map_err(|error| {
+                OrbitError::Execution(format!(
+                    "create write-grant anchor directory `{}` (rule `{}`): {error}",
+                    grant.anchor.display(),
+                    grant.rule
+                ))
+            })?;
         }
     }
-    Ok(())
+    Ok(true)
 }
 
-fn inspect_existing_config_anchor(
-    path: &Path,
-    expected: VersionedConfigTargetKind,
-) -> Result<(), OrbitError> {
-    let metadata = match std::fs::symlink_metadata(path) {
-        Ok(metadata) => metadata,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
-        Err(error) => {
-            return Err(OrbitError::Execution(format!(
-                "inspect managed-worktree config target `{}`: {error}",
-                path.display()
-            )));
-        }
-    };
-    if metadata.file_type().is_symlink() {
-        return Err(OrbitError::InvalidInput(format!(
-            "managed-worktree config target `{}` must not be a symlink",
-            path.display()
-        )));
+/// Derive the anchor's shape from evidence, in decreasing order of authority:
+/// what is already on disk, the rule's own syntax (`<root>/**` can only be a
+/// directory), whether another rule nests beneath it, and finally whether the
+/// leaf looks like a file. Directory is the safe default for the residual case:
+/// a directory anchor still admits files created inside it, a file anchor
+/// admits nothing.
+fn write_anchor_kind(anchor: &Path, rule: &str, rules: &[String]) -> WriteAnchorKind {
+    if let Ok(metadata) = std::fs::metadata(anchor) {
+        return if metadata.is_dir() {
+            WriteAnchorKind::Directory
+        } else {
+            WriteAnchorKind::File
+        };
     }
-    let expected_matches = match expected {
-        VersionedConfigTargetKind::File => metadata.is_file(),
-        VersionedConfigTargetKind::Directory => metadata.is_dir(),
-    };
-    if !expected_matches {
-        return Err(OrbitError::InvalidInput(format!(
-            "managed-worktree config target `{}` has the wrong filesystem type",
-            path.display()
-        )));
+    if rule.ends_with("/**") {
+        return WriteAnchorKind::Directory;
     }
-    Ok(())
-}
-
-fn effective_modify_allows(
-    profile: &ResolvedFsProfile,
-    relative: &str,
-    absolute: &Path,
-) -> Result<bool, OrbitError> {
-    let absolute = absolute.to_string_lossy();
-    let mut decision = false;
-    for rule in &profile.modify {
-        let (negated, pattern) = rule
-            .strip_prefix('!')
-            .map_or((false, rule.as_str()), |pattern| (true, pattern));
-        if match_glob(pattern, relative)? || match_glob(pattern, &absolute)? {
-            decision = !negated;
-        }
+    let nested = format!("{}/", anchor.display());
+    if rules
+        .iter()
+        .map(|other| other.strip_prefix('!').unwrap_or(other.as_str()))
+        .any(|other| other.starts_with(&nested))
+    {
+        return WriteAnchorKind::Directory;
     }
-    Ok(decision)
+    if anchor.extension().is_some() {
+        WriteAnchorKind::File
+    } else {
+        WriteAnchorKind::Directory
+    }
 }
 
 pub fn bwrap_program_for_audit() -> &'static str {
@@ -284,6 +414,11 @@ pub fn probe_bwrap() -> BwrapProbeOutcome {
 /// before every deny mount. A positive exact/subtree rule that is strictly
 /// nested under an earlier deny is emitted in rule order as an explicit narrow
 /// re-allow; positive ancestors and equal roots cannot override a deny.
+///
+/// A narrow re-allow whose anchor is absent cannot be mounted. It is reported
+/// on [`LinuxBwrapPlan::dropped_grants`] rather than dropped, so the caller can
+/// attribute the resulting denial to a path and a rule instead of leaving the
+/// sandboxed process to interpret an EROFS.
 pub fn compile_linux_bwrap_argv(
     profile: &ResolvedFsProfile,
     program: &str,
@@ -292,6 +427,7 @@ pub fn compile_linux_bwrap_argv(
     managed_worktree: bool,
 ) -> Result<LinuxBwrapPlan, OrbitError> {
     let mut out = base_namespace_args();
+    let mut dropped_grants = Vec::new();
     // Replace mutable host pseudo-filesystems and scratch before applying
     // policy mounts. A writable worktree nested below `/tmp` is then re-bound
     // narrowly without exposing the rest of the host scratch tree.
@@ -327,7 +463,17 @@ pub fn compile_linux_bwrap_argv(
                 push_mount(&mut out, "--ro-bind", &path);
             }
         } else if is_narrow_reallow(&profile.modify[..index], rule) {
-            for path in mount_paths_for_rule(rule, false)? {
+            let paths = mount_paths_for_rule(rule, false)?;
+            if paths.is_empty() {
+                dropped_grants.push(UnsatisfiedWriteGrant {
+                    rule: rule.clone(),
+                    anchor: exact_or_subtree_root(rule)
+                        .unwrap_or_else(|| static_prefix(rule.as_str())),
+                    reason: "no path on disk matches the rule, so Bubblewrap has nothing to bind and the grant stays under the surrounding read-only mount".to_string(),
+                });
+                continue;
+            }
+            for path in paths {
                 push_mount(&mut out, "--bind", &path);
             }
         }
@@ -345,6 +491,7 @@ pub fn compile_linux_bwrap_argv(
     Ok(LinuxBwrapPlan {
         wrapper: TRUSTED_BWRAP_PATH.to_string(),
         args: out,
+        dropped_grants,
     })
 }
 
