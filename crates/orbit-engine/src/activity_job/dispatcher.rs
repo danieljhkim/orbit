@@ -217,6 +217,16 @@ pub trait V2RuntimeHost: Send + Sync {
         self.agent_role_config(role)
     }
 
+    /// Resolve the dedicated, provider-lane-preserving crew for the bounded
+    /// `step_failure_recovery` activity. Implementations must derive the lane
+    /// from the persisted run identity, rather than current CLI availability
+    /// or the activity's inline defaults.
+    fn recovery_agent_crew_config(&self, run_id: &str) -> Result<AgentRoleConfig, DispatchError> {
+        Err(DispatchError::JobValidation(format!(
+            "step_failure_recovery requires a durable provider lane for run `{run_id}`, but this runtime host does not provide recovery crew resolution"
+        )))
+    }
+
     /// Resolve a flat crew selected explicitly by the rendered activity
     /// input. This is separate from role-tag lookup: modern crews have one
     /// assignment, so an activity carrying `crew` does not need a synthetic

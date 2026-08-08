@@ -189,6 +189,29 @@ fn default_activity_catalog() -> V2ActivityCatalog {
     catalog
 }
 
+#[test]
+fn seeded_step_failure_recovery_asset_stays_aligned_and_keeps_its_reviewer_label() {
+    let seeded = DEFAULT_ACTIVITY_FILES
+        .iter()
+        .find_map(|(name, yaml)| (*name == "step_failure_recovery").then_some(*yaml))
+        .expect("seeded step failure recovery activity");
+    assert_eq!(
+        seeded,
+        include_str!("../../../../../../.orbit/resources/activities/step_failure_recovery.yaml"),
+        "dogfood and seeded recovery activity assets must remain behaviorally aligned"
+    );
+
+    let asset = load_activity_asset(seeded).expect("parse recovery activity");
+    let ActivityV2Spec::AgentLoop(spec) = asset.spec.spec else {
+        panic!("step_failure_recovery must remain an agent loop");
+    };
+    assert_eq!(
+        spec.role,
+        Some(orbit_common::types::activity_job::AgentRole::Reviewer),
+        "recovery retains its prompt/telemetry reviewer role while executor routing selects the middleweight crew"
+    );
+}
+
 fn assert_condition_tokens_are_paths(condition: &str) {
     let mut remaining = condition;
     while let Some(start) = remaining.find("{{") {
