@@ -3,7 +3,7 @@ summary: "Policy & Sandboxing — Design"
 type: design
 title: "Policy & Sandboxing — Design"
 owner: claude
-last_updated: 2026-08-02
+last_updated: 2026-08-08
 status: Draft
 feature: policy-sandbox
 doc_role: design
@@ -158,13 +158,13 @@ The ADR authoring exception follows that same ordering: trusted host setup ensur
 
 #### 7.1.1 Write-grant anchors are derived from the effective profile at each spawn
 
-`spawn_linux_bwrap` prepares mount anchors immediately before compiling argv, from the same `ResolvedFsProfile` that compiles it. The grant set is every positive exact/subtree `modify` rule that is a narrow re-allow beneath an earlier deny — the rules that need an anchor to become a bind. Broad writable roots are excluded; they are host-owned and must already exist, so an absent one still fails closed at compile.
+`spawn_linux_bwrap` prepares mount anchors immediately before compiling argv, from the same `ResolvedFsProfile` that compiles it. The grant set is every positive exact/subtree `modify` rule that is a narrow re-allow beneath an earlier deny and remains writable at its anchor after the full ordered rule list is evaluated. A later deny covering the anchor therefore prevents materialization, while a narrower deny below a writable subtree leaves the remaining subtree grant intact. Broad writable roots are excluded; they are host-owned and must already exist, so an absent one still fails closed at compile.
 
-Anchor shape is derived from evidence rather than an inventory: what is already on disk, then the rule's own syntax (`<root>/**` can only be a directory), then whether another rule nests beneath the anchor, then whether the leaf carries a file extension. Directory is the residual default because a directory anchor still admits files created inside it. This is why a grant naming a file *beneath* a granted directory now works: the directory anchor comes from the rule, not from whatever a task happened to name.
+The policy grammar is the explicit anchor-type contract: an exact rule denotes a file, while `<root>/**` denotes a directory subtree. Filename punctuation is never type evidence, so an extensionless exact rule materializes a file and a dotted subtree root materializes a directory without any hardcoded path inventory. An existing target whose filesystem type contradicts its rule fails closed.
 
-Creation is confined to the managed worktree, which is trusted and disposable. Every path component the worktree owns is checked for symlinks, files use create-new semantics, and an existing anchor of the wrong filesystem type fails closed naming the path and its rule. Anchors outside that root are the host's to create and are reported, not invented. Creating an anchor grants nothing new — the effective profile already decided the path is writable — so this is materialization, not policy.
+Creation is confined to the canonical managed worktree, which is trusted and disposable. Every worktree-owned component is checked for symlinks before both existing- and absent-target handling, the resolved existing anchor (or newly created parent) must remain inside the canonical root, and files use create-new semantics. Anchors outside that root are the host's to create and are reported, not invented. Creating an anchor grants nothing new — the final effective profile already decided the path is writable — so this is materialization, not policy.
 
-Two consequences follow from deriving at spawn rather than during `worktree_setup`. The grant set matches the profile the kernel will enforce, including the host-appended run roots that setup never saw; and it is recomputed for each provider launch, so a run whose needs grow does not depend on a snapshot taken before it started. [ORB-10602]
+Two consequences follow from deriving at spawn rather than during `worktree_setup`. The grant set matches the profile the kernel will enforce, including the host-appended run roots that setup never saw; and it is recomputed for each provider launch, so a run whose needs grow does not depend on a snapshot taken before it started. After a failed Bubblewrap child, the executor inspects EROFS stderr that names an attempted path and evaluates that path against the same effective profile, replacing a generic nonzero-exit message with an Orbit-owned missing-grant or shadowing-deny diagnostic. Children that omit the path retain the generic failure. [ORB-10602] [ORB-10607] [ADR-0329]
 
 The policy syntax remains schema v2. Existing policies without `denyModify` exceptions retain their prior behavior. After installing a binary that carries a changed shipped default, `orbit init` refreshes the machine-global policy assets without changing executor sandbox selection or `allow_fallback`; `--force` is unnecessary and would reset the global root. Workspace policy can then narrow the refreshed host boundary but cannot expand its exception surface.
 
