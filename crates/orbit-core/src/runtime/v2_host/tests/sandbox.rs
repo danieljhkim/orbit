@@ -1,4 +1,6 @@
 use orbit_engine::V2RuntimeHost;
+#[cfg(target_os = "linux")]
+use orbit_exec::{compile_linux_bwrap_argv, prepare_linux_bwrap_write_grants};
 
 use crate::runtime::v2_host::test_support::seeded_runtime_with_executor;
 #[cfg(any(target_os = "macos", target_os = "linux"))]
@@ -63,15 +65,44 @@ fn resolve_executor_sandbox_marks_only_specific_orbit_worktree_managed() {
             .any(|entry| entry == &format!("{}/**", canonical_worktree.display()))
     );
     for allowed in [".orbit/adrs/proposed", ".orbit/adrs/.locks"] {
+        let directory = canonical_worktree.join(allowed);
+        let exact = directory.display().to_string();
+        let rule = format!("{exact}/**");
         assert!(
-            managed
+            managed.fs_profile.modify.iter().any(|entry| entry == &rule),
+            "managed worktree must narrowly re-allow {allowed}"
+        );
+        assert!(
+            !managed
                 .fs_profile
                 .modify
                 .iter()
-                .any(|entry| entry == &canonical_worktree.join(allowed).display().to_string()),
-            "managed worktree must narrowly re-allow {allowed}"
+                .any(|entry| entry == &exact),
+            "managed ADR directory must not be emitted as an exact file grant"
         );
+        assert!(directory.is_dir(), "managed ADR root must be a directory");
     }
+
+    let prepared = prepare_linux_bwrap_write_grants(&managed.fs_profile, &worktree)
+        .expect("prepare resolved managed-worktree grants");
+    assert!(
+        prepared.unsatisfied.is_empty(),
+        "resolved managed-worktree grants must all be mountable: {:?}",
+        prepared.unsatisfied
+    );
+    let plan = compile_linux_bwrap_argv(
+        &managed.fs_profile,
+        "/bin/true",
+        &[],
+        Some(&worktree),
+        managed.managed_worktree,
+    )
+    .expect("compile resolved managed-worktree sandbox");
+    assert!(
+        plan.dropped_grants.is_empty(),
+        "prepared managed-worktree grants must not be dropped: {:?}",
+        plan.dropped_grants
+    );
 
     let direct = runtime
         .resolve_executor_sandbox("claude", None, Some(&repo_root))

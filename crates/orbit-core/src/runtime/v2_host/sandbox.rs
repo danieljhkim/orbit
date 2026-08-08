@@ -278,7 +278,7 @@ fn append_linux_runtime_write_roots(
     // accepted/superseded ADR states and every unrelated/future store.
     if let Some(worktree) = subprocess_cwd.and_then(|cwd| active_worktree_root(runtime, cwd)) {
         for directory in ensure_managed_worktree_adr_roots(&worktree)? {
-            append_unique_modify_root(resolved, directory.display().to_string());
+            append_unique_modify_root(resolved, format!("{}/**", directory.display()));
         }
     }
     Ok(())
