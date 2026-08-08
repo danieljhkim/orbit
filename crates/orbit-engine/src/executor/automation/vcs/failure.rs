@@ -19,6 +19,7 @@ use super::push::push_batch_changes_inner;
 
 const CONFLICT_BLOCKED_EVENT: &str = "pr_conflict_blocked";
 const FAILURE_HANDOFF_EVENT: &str = "pr_failure_handoff";
+const REVIEW_NOT_STARTED_EVENT: &str = "independent_review_not_started";
 
 /// ADR-0246 terminal hook for `task_pr_pipeline`.
 ///
@@ -39,24 +40,6 @@ pub(in crate::executor::automation) fn pr_failure_handoff<
     let job_input = input
         .get("job_input")
         .ok_or_else(|| OrbitError::InvalidInput("missing required input.job_input".to_string()))?;
-    let worktree = pipeline_step(input, "worktree")?;
-    let workspace_path = canonicalize_existing_dir(
-        required_input_string(worktree, "workspace_path")?,
-        "pipeline.worktree.workspace_path",
-    )?;
-
-    let mut conflicting_paths = unmerged_paths(&workspace_path)?;
-    let rebase_aborted = git_command_success(&workspace_path, &["rebase", "--abort"])?;
-    if !conflicting_paths.is_empty() && !rebase_aborted {
-        return Err(OrbitError::Execution(
-            "pr_failure_handoff: conflicts exist but the in-progress rebase could not be aborted"
-                .to_string(),
-        ));
-    }
-    if conflicting_paths.is_empty() {
-        conflicting_paths = conflicts_from_error(error_message);
-    }
-
     let task_ids = job_input
         .get("task_ids")
         .and_then(Value::as_array)
@@ -82,6 +65,48 @@ pub(in crate::executor::automation) fn pr_failure_handoff<
             "pr_failure_handoff: task '{}' no longer belongs to run '{}'",
             task.id, run_id
         )));
+    }
+
+    // ADR-0328: a failed child with no reviewer checkpoint is not evidence
+    // that the candidate needs code reconciliation. Record the infrastructure
+    // boundary and leave the already-published task in review for a clean
+    // retry. No Git or provider operation runs on this path.
+    if error_code == REVIEW_NOT_STARTED_EVENT {
+        let note = format!(
+            "independent review could not start: run={run_id}, failed_step={failed_step_id}, error={error_message}; candidate remains in review and no blocked failure handoff was published"
+        );
+        host.apply_task_automation_update(
+            &task.id,
+            TaskAutomationUpdate {
+                status_event: Some(REVIEW_NOT_STARTED_EVENT.to_string()),
+                status_note: Some(note),
+                ..TaskAutomationUpdate::default()
+            },
+        )?;
+        return Ok(json!({
+            "phase": "failure_handoff",
+            "decision": "review_not_started",
+            "failed_step_id": failed_step_id,
+            "task_status": task.status.to_string(),
+        }));
+    }
+
+    let worktree = pipeline_step(input, "worktree")?;
+    let workspace_path = canonicalize_existing_dir(
+        required_input_string(worktree, "workspace_path")?,
+        "pipeline.worktree.workspace_path",
+    )?;
+
+    let mut conflicting_paths = unmerged_paths(&workspace_path)?;
+    let rebase_aborted = git_command_success(&workspace_path, &["rebase", "--abort"])?;
+    if !conflicting_paths.is_empty() && !rebase_aborted {
+        return Err(OrbitError::Execution(
+            "pr_failure_handoff: conflicts exist but the in-progress rebase could not be aborted"
+                .to_string(),
+        ));
+    }
+    if conflicting_paths.is_empty() {
+        conflicting_paths = conflicts_from_error(error_message);
     }
 
     let (head_sha, committed_files) =

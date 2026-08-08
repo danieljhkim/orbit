@@ -158,6 +158,7 @@ spec:
         run_input:
           task_ids: "{{ input.task_ids }}"
           workspace_path: "{{ steps.worktree.output.workspace_path }}"
+          repo_root: "{{ steps.worktree.output.workspace_path }}"
           base_branch: "{{ input.base_branch }}"
           crew: "{{ input.review_crew }}"
           parent_run_id: "{{ steps.worktree.output.job_run_id }}"
@@ -174,6 +175,9 @@ spec:
       default_input:
         context: task_pr_pipeline independent review
         result: "{{ steps.independent_review.output }}"
+        review_step: independent_review
+        verdict_step: require_exact_head_verdict
+        required_verdict: approve
 
     - id: promote_no_diff
       when: "{{ steps.commit.output.skipped_no_diff_expected }} == true"

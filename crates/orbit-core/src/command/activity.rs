@@ -375,6 +375,12 @@ mod tests {
             asset.spec.output_schema_json["required"],
             serde_json::json!(["verdict", "reviewed_head_sha"])
         );
+        assert!(
+            asset.spec.input_schema_json["required"]
+                .as_array()
+                .is_some_and(|required| required.iter().any(|field| field == "repo_root")),
+            "agent_review must require the second half of the declared worktree pair"
+        );
         match asset.spec.spec {
             ActivityV2Spec::AgentLoop(spec) => {
                 assert!(spec.require_response_envelope);
