@@ -22,7 +22,7 @@ use crate::config::{
     agent_detect::{DetectedAgents, RealAgentEnvProbe, detect},
     seed_default_config,
 };
-use crate::runtime::resolve_global_root;
+use crate::runtime::{is_global_orbit_root, resolve_global_root};
 
 const LEGACY_WORKSPACE_SEEDED_SKILL_IDS: [&str; 2] = ["orbit-approve-task", "orbit-pr"];
 
@@ -157,7 +157,11 @@ pub fn init_workspace_at_root(
 
     let skill_ids = default_skill_ids();
     let mut created_skills_symlink = false;
-    if options.global_only && options.link_global_skills {
+    // Home-scoped skill link directories (`~/.agents/skills`, `~/.claude/skills`)
+    // are only ever touched for the true global Orbit root. A non-global root
+    // (a validation root, an alternate `--root`, a workspace root) must leave
+    // them exactly as found — no removal, no re-creation, no replacement.
+    if options.global_only && options.link_global_skills && is_global_orbit_root(&orbit_root) {
         for skills_links_root in &init_target.skills_links_roots {
             created_skills_symlink |=
                 ensure_skill_links(&skills_root, &skill_ids, skills_links_root, options.force)?;
