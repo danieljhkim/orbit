@@ -2,7 +2,8 @@ use chrono::{DateTime, Utc};
 
 use crate::types::TokenUsage;
 use crate::types::pricing::{
-    InputTokenBasis, PriceRow, cost_from_rows, derive_cost_usd, shipped_price_table,
+    InputTokenBasis, PriceRow, cost_from_rows, derive_cost_usd, normalize_token_usage,
+    shipped_price_table,
 };
 
 fn dt(rfc3339: &str) -> DateTime<Utc> {
@@ -283,6 +284,29 @@ fn gross_openai_input_is_split_into_uncached_read_and_write_buckets() {
         (combined_cost - 4.475).abs() < 1e-12,
         "cost was {combined_cost}"
     );
+}
+
+#[test]
+fn normalization_keeps_every_cache_bucket_mutually_exclusive() {
+    let gross = TokenUsage {
+        input: 100,
+        cache_read: 20,
+        cache_create: 30,
+        cache_create_1h: 10,
+        output: 5,
+    };
+    let normalized = normalize_token_usage("gpt-5.6-sol", dt("2026-07-30T00:00:00Z"), &gross)
+        .expect("covered gross model");
+    assert_eq!(normalized.input, 40);
+    assert_eq!(normalized.cache_read, 20);
+    assert_eq!(normalized.cache_create, 30);
+    assert_eq!(normalized.cache_create_1h, 10);
+    assert_eq!(normalized.output, 5);
+
+    let exclusive = normalize_token_usage("claude-opus-4-7", dt("2026-07-30T00:00:00Z"), &gross)
+        .expect("covered exclusive model");
+    assert_eq!(exclusive, gross);
+    assert!(normalize_token_usage("unknown", dt("2026-07-30T00:00:00Z"), &gross).is_none());
 }
 
 #[test]

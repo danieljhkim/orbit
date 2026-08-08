@@ -48,6 +48,23 @@ async fn dashboard_index_self_hosts_markdown_runtime() {
 }
 
 #[test]
+fn dashboard_renders_normalized_managed_token_usage_without_provider_ranking() {
+    let scoreboard = include_str!("../../assets/dashboard/scoreboard.js");
+    let css = include_str!("../../assets/dashboard/dashboard.css");
+
+    assert!(scoreboard.contains("Normalized token usage"));
+    assert!(scoreboard.contains("unknown model/input basis (excluded, never guessed)"));
+    assert!(scoreboard.contains("vs preceding equal window"));
+    assert!(scoreboard.contains("lifetime window · no comparison baseline"));
+    assert!(scoreboard.contains("Model attribution (not a cross-provider ranking)"));
+    assert!(scoreboard.contains(
+        "Direct interactive Codex or Claude orchestration-session overhead is excluded."
+    ));
+    assert!(css.contains(".scoreboard-token-usage"));
+    assert!(css.contains("@media (max-width: 620px)"));
+}
+
+#[test]
 fn dashboard_markdown_call_sites_use_sanitizing_wrapper() {
     let wrapper = include_str!("../../assets/dashboard/markdown.js");
     let app = include_str!("../../assets/dashboard/app.js");

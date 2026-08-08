@@ -1,7 +1,8 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use chrono::{DateTime, Utc};
-use orbit_common::types::OrbitError;
+use orbit_common::types::{OrbitError, TokenUsage, normalize_token_usage};
+use orbit_store::scoreboard_summary::{NormalizedTokenSummary, OrchestrationModelSummary};
 use orbit_store::{
     ActivityInvocationMetrics, AgentInvocationMetrics, InvocationAccountingFact,
     InvocationAccountingQuery, InvocationInsertParams, InvocationQuery, InvocationRecord, Store,
@@ -24,6 +25,7 @@ pub struct OrchestratorInvocationMetrics {
     /// Effective exclusive upper cutoff (never later than `as_of`).
     pub until: DateTime<Utc>,
     pub buckets: Vec<OrchestratorInvocationMetricsBucket>,
+    pub normalized_tokens: NormalizedTokenSummary,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -50,6 +52,79 @@ struct BucketAccumulator {
     comparable_cost_count: u64,
     missing_provider_count: u64,
     unpriced_derived_count: u64,
+    normalized_tokens: TokenAccumulator,
+    models: BTreeMap<String, TokenAccumulator>,
+}
+
+#[derive(Debug, Default)]
+struct TokenAccumulator {
+    linked_task_ids: BTreeSet<String>,
+    summary: NormalizedTokenSummary,
+}
+
+impl TokenAccumulator {
+    fn add(&mut self, fact: &InvocationAccountingFact) {
+        self.summary.invocation_count = self.summary.invocation_count.saturating_add(1);
+        self.linked_task_ids.extend(fact.task_ids.iter().cloned());
+        let Some(model) = fact.model.as_deref() else {
+            self.summary.unknown_input_basis_or_model_count = self
+                .summary
+                .unknown_input_basis_or_model_count
+                .saturating_add(1);
+            return;
+        };
+        let usage = TokenUsage {
+            input: fact.input_tokens,
+            cache_read: fact.cache_read_tokens,
+            cache_create: fact.cache_create_tokens,
+            cache_create_1h: fact.cache_create_1h_tokens,
+            output: fact.output_tokens,
+        };
+        let Some(usage) = normalize_token_usage(model, fact.ts, &usage) else {
+            self.summary.unknown_input_basis_or_model_count = self
+                .summary
+                .unknown_input_basis_or_model_count
+                .saturating_add(1);
+            return;
+        };
+        self.add_usage(&usage);
+    }
+
+    fn add_usage(&mut self, usage: &TokenUsage) {
+        self.summary.covered_invocation_count =
+            self.summary.covered_invocation_count.saturating_add(1);
+        self.summary.uncached_input_tokens = self
+            .summary
+            .uncached_input_tokens
+            .saturating_add(usage.input);
+        self.summary.cache_read_tokens = self
+            .summary
+            .cache_read_tokens
+            .saturating_add(usage.cache_read);
+        self.summary.cache_create_tokens = self
+            .summary
+            .cache_create_tokens
+            .saturating_add(usage.cache_create);
+        self.summary.cache_create_1h_tokens = self
+            .summary
+            .cache_create_1h_tokens
+            .saturating_add(usage.cache_create_1h);
+        self.summary.output_tokens = self.summary.output_tokens.saturating_add(usage.output);
+        self.summary.normalized_token_total = self
+            .summary
+            .normalized_token_total
+            .saturating_add(usage.input)
+            .saturating_add(usage.cache_read)
+            .saturating_add(usage.cache_create)
+            .saturating_add(usage.cache_create_1h)
+            .saturating_add(usage.output);
+    }
+
+    fn finish(&self) -> NormalizedTokenSummary {
+        let mut summary = self.summary.clone();
+        summary.linked_task_count = self.linked_task_ids.len() as u64;
+        summary
+    }
 }
 
 impl BucketAccumulator {
@@ -67,6 +142,25 @@ impl BucketAccumulator {
             .saturating_add(fact.cache_create_1h_tokens);
         self.output_tokens = self.output_tokens.saturating_add(fact.output_tokens);
         self.linked_task_ids.extend(fact.task_ids.iter().cloned());
+        self.normalized_tokens.add(fact);
+        if let Some(model) = fact.model.as_deref() {
+            let usage = TokenUsage {
+                input: fact.input_tokens,
+                cache_read: fact.cache_read_tokens,
+                cache_create: fact.cache_create_tokens,
+                cache_create_1h: fact.cache_create_1h_tokens,
+                output: fact.output_tokens,
+            };
+            if let Some(usage) = normalize_token_usage(model, fact.ts, &usage) {
+                let model_tokens = self.models.entry(model.to_string()).or_default();
+                model_tokens.summary.invocation_count =
+                    model_tokens.summary.invocation_count.saturating_add(1);
+                model_tokens
+                    .linked_task_ids
+                    .extend(fact.task_ids.iter().cloned());
+                model_tokens.add_usage(&usage);
+            }
+        }
 
         let provider = fact.provider_cost_usd.filter(|cost| valid_cost(*cost));
         let derived = fact.derived_cost_usd.filter(|cost| valid_cost(*cost));
@@ -96,6 +190,15 @@ impl BucketAccumulator {
         kind: OrchestratorMetricsBucketKind,
         orchestrator: Option<String>,
     ) -> OrchestratorInvocationMetricsBucket {
+        let normalized_tokens = self.normalized_tokens.finish();
+        let models = self
+            .models
+            .into_iter()
+            .map(|(model, tokens)| OrchestrationModelSummary {
+                model,
+                tokens: tokens.finish(),
+            })
+            .collect();
         OrchestratorInvocationMetricsBucket {
             kind,
             orchestrator,
@@ -117,6 +220,8 @@ impl BucketAccumulator {
                 - self.comparable_derived_cost_usd,
             missing_provider_count: self.missing_provider_count,
             unpriced_derived_count: self.unpriced_derived_count,
+            normalized_tokens,
+            models,
         }
     }
 }
@@ -196,9 +301,11 @@ impl OrbitRuntime {
             .collect::<HashMap<_, _>>();
 
         let mut grouped = BTreeMap::<BucketKey, BucketAccumulator>::new();
+        let mut normalized_tokens = TokenAccumulator::default();
         for fact in &facts {
             let key = classify_invocation(&fact.task_ids, &task_orchestrators);
             grouped.entry(key).or_default().add(fact);
+            normalized_tokens.add(fact);
         }
         let buckets = grouped
             .into_iter()
@@ -210,6 +317,7 @@ impl OrbitRuntime {
             since,
             until: effective_until,
             buckets,
+            normalized_tokens: normalized_tokens.finish(),
         })
     }
 }

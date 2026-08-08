@@ -32,6 +32,13 @@ impl OrbitRuntime {
         let since_recent = now - Duration::days(RECENT_WINDOW_DAYS);
         let since_window = window.duration().map(|d| now - d);
         let orchestration = self.orchestrator_invocation_metrics(since_window, Some(now))?;
+        let previous_normalized_tokens = match (since_window, window.duration()) {
+            (Some(since), Some(duration)) => Some(
+                self.orchestrator_invocation_metrics(Some(since - duration), Some(since))?
+                    .normalized_tokens,
+            ),
+            _ => None,
+        };
 
         let audit_tool_calls = self.audit_tool_call_counts_by_role(since_window.as_ref())?;
         let audit_tool_calls_by_surface =
@@ -74,6 +81,8 @@ impl OrbitRuntime {
                     since: orchestration.since,
                     until: orchestration.until,
                     buckets: orchestration.buckets,
+                    normalized_tokens: orchestration.normalized_tokens,
+                    previous_normalized_tokens,
                 }),
             },
         )?;

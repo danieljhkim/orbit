@@ -26,11 +26,12 @@ const SUMMARY_FILENAME: &str = "summary.json";
 // `ScoreboardInputs.window` plumbing — snapshot-sourced per-agent fields
 // (`tokens`, `pr`, `duels`, `task_review.threads`) zero out under non-`All`
 // windows because we lack a timestamped snapshot log to filter against.
-// v7 adds the separately-versioned `orchestration` projection. It deliberately
-// remains separate from execution-agent/model scoreboard rows.
+// v7 adds the separately-versioned `orchestration` projection. Its v2 token
+// extension normalizes provider input semantics and retains model attribution
+// without folding it into execution-agent/model scoreboard rows.
 // Older readers ignore unknown fields.
 const CURRENT_SCHEMA_VERSION: u32 = 7;
-pub const ORCHESTRATION_SCHEMA_VERSION: u32 = 1;
+pub const ORCHESTRATION_SCHEMA_VERSION: u32 = 2;
 const RECENT_WINDOW_DAYS: i64 = 7;
 
 type FamilyScoreboard = BTreeMap<String, BTreeMap<String, u64>>;
@@ -241,6 +242,32 @@ pub struct OrchestrationBucketSummary {
     pub comparable_cost_delta_usd: f64,
     pub missing_provider_count: u64,
     pub unpriced_derived_count: u64,
+    /// Normalized, mutually-exclusive token usage for covered models only.
+    #[serde(default)]
+    pub normalized_tokens: NormalizedTokenSummary,
+    /// Model attribution is descriptive only; tokenizers are not ranked.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub models: Vec<OrchestrationModelSummary>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct NormalizedTokenSummary {
+    pub invocation_count: u64,
+    pub linked_task_count: u64,
+    pub uncached_input_tokens: u64,
+    pub cache_read_tokens: u64,
+    pub cache_create_tokens: u64,
+    pub cache_create_1h_tokens: u64,
+    pub output_tokens: u64,
+    pub normalized_token_total: u64,
+    pub covered_invocation_count: u64,
+    pub unknown_input_basis_or_model_count: u64,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct OrchestrationModelSummary {
+    pub model: String,
+    pub tokens: NormalizedTokenSummary,
 }
 
 /// Independently-versioned accounting for managed execution only.
@@ -256,6 +283,10 @@ pub struct OrchestrationSummary {
     pub since: Option<DateTime<Utc>>,
     pub until: DateTime<Utc>,
     pub buckets: Vec<OrchestrationBucketSummary>,
+    #[serde(default)]
+    pub normalized_tokens: NormalizedTokenSummary,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub previous_normalized_tokens: Option<NormalizedTokenSummary>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

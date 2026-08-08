@@ -51,7 +51,12 @@ async fn scoreboard_default_returns_lifetime_window_and_v7_schema() {
         "window_since is null for lifetime, got {:?}",
         body["window_since"]
     );
-    assert_eq!(body["orchestration"]["schema_version"].as_u64(), Some(1));
+    assert!(body["orchestration"]["previous_normalized_tokens"].is_null());
+    assert_eq!(body["orchestration"]["schema_version"].as_u64(), Some(2));
+    assert_eq!(
+        body["orchestration"]["normalized_tokens"]["normalized_token_total"].as_u64(),
+        Some(0)
+    );
     assert_eq!(body["orchestration"]["scope"], "managed_execution");
     assert!(
         chrono::DateTime::parse_from_rfc3339(
@@ -79,6 +84,7 @@ async fn scoreboard_query_window_1h_populates_window_and_since() {
     let body = body_json(response).await;
     assert_eq!(body["schema_version"].as_u64(), Some(7));
     assert_eq!(body["window"].as_str(), Some("1h"));
+    assert!(body["orchestration"]["previous_normalized_tokens"].is_object());
     let since = body["window_since"]
         .as_str()
         .expect("window_since is RFC3339 string for non-all window");
