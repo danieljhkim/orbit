@@ -2127,6 +2127,7 @@ dependencies = [
  "libc",
  "orbit-common",
  "orbit-engine",
+ "orbit-exec",
  "orbit-policy",
  "orbit-search",
  "orbit-store",
