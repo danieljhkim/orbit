@@ -4,11 +4,12 @@ type: design
 title: "MCP Session Context — Vision"
 owner: codex
 last_updated: 2026-07-18
+last_validated: 2026-08-08
 status: Accepted
 feature: mcp-session-context
 doc_role: vision
 tags: ["mcp-session-context", "mcp", "workspace"]
-paths: ["crates/orbit-mcp/**", "crates/orbit-remote/src/mcp/**", "crates/orbit-tools/**", "crates/orbit-core/src/command/tool.rs"]
+paths: ["crates/orbit-mcp/**", "crates/orbit-remote/src/mcp/**", "crates/orbit-tools/**", "crates/orbit-core/src/command/tool/**"]
 related_features: ["mcp-session-context", "task-artifacts"]
 related_artifacts: ["ORB-00256", "ORB-10228", "ORB-10319", "ADR-0181", "ADR-0149"]
 ---
