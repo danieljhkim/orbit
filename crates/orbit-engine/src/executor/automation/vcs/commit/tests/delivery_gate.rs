@@ -1,8 +1,12 @@
 //! ORB-10313 regression: `commit_batch_changes` must fail closed on the durable
-//! execution outcome before it resolves the checkout, stages files, mutates the
-//! index, or creates a commit. An explicit `Outcome: failed` line — like an
-//! empty/placeholder summary — leaves HEAD, the index, and the worktree exactly
-//! as they were, while other meaningful summaries remain deliverable.
+//! execution outcome before it stages files, mutates the index, or creates a
+//! commit. An explicit `Outcome: failed` line — like an empty/placeholder
+//! summary — leaves HEAD, the index, and the worktree exactly as they were,
+//! while other meaningful summaries remain deliverable.
+//!
+//! ORB-10603 moved read-only checkout resolution and validation ahead of the
+//! gate, because the derived summary reads the worktree the gate protects.
+//! Nothing that runs before the gate mutates Git state.
 
 use std::fs;
 use std::path::Path;
@@ -14,6 +18,7 @@ use super::super::git_commit;
 use super::test_support::*;
 
 use super::super::super::git::git_output;
+use super::super::super::handoff::reject_failed_delivery;
 
 const GATED_TASK_ID: &str = "ORB-10313-GATE";
 
@@ -109,10 +114,22 @@ fn commit_batch_blocks_failed_outcome_before_any_git_mutation() {
     );
 }
 
+/// ORB-10603: the gate itself is unchanged — empty and placeholder summaries are
+/// still refused. What changed is upstream: the commit step now derives a
+/// summary from the delivered change first, so this rejection is unreachable in
+/// the ordinary case. `summary.rs` covers both halves of that behaviour.
 #[test]
-fn commit_batch_blocks_empty_summary_before_any_git_mutation() {
-    // Empty/placeholder rejection remains intact under the failed-outcome gate.
-    assert_delivery_blocked("   \n", "meaningful persisted execution_summary");
+fn delivery_gate_still_rejects_empty_and_placeholder_summaries() {
+    for summary in ["", "   \n", "TBD", "n/a", "no summary provided"] {
+        let error = reject_failed_delivery(&task_with_summary(summary))
+            .expect_err("the delivery gate refuses a summary that says nothing");
+        let message = error.to_string();
+        assert!(
+            message.contains(GATED_TASK_ID)
+                && message.contains("meaningful persisted execution_summary"),
+            "gate names the task and the missing field for '{summary}': {message}"
+        );
+    }
 }
 
 #[test]

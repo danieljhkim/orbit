@@ -2,6 +2,7 @@ mod author;
 mod git_ops;
 mod message;
 mod scope;
+mod summary;
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
@@ -21,6 +22,7 @@ use git_ops::{
 };
 use message::{batch_commit_message, finalize_commit_message, task_commit_message};
 use scope::{changed_files_for_task, collect_worktree_changes, filter_changed_files_for_task};
+use summary::ensure_durable_execution_summary;
 
 pub(in crate::executor::automation) fn git_commit<
     H: TaskHost + DeterministicActionHost + ?Sized,
@@ -181,14 +183,23 @@ pub(super) fn commit_batch_changes<H: TaskHost + DeterministicActionHost + ?Size
         )));
     };
 
-    // ORB-10313: fail closed on the durable execution outcome before resolving
-    // the delivery checkout, staging files, mutating the index, or committing.
-    reject_failed_delivery(task)?;
-
     let workspace_path = resolve_workspace_path(host, input, batch_id)?;
     ensure_named_branch(&workspace_path)?;
 
     ensure_no_unmerged_changes(&workspace_path)?;
+
+    // ORB-10603: the summary the gate reads is durable state, and nothing in the
+    // pipeline filled it when the implementing agent skipped the instruction to
+    // persist one. Derive it read-only from the change about to be delivered —
+    // never from the agent's advisory response envelope — and only when the
+    // agent persisted nothing of its own.
+    let task = ensure_durable_execution_summary(host, task.clone(), &workspace_path, batch_id)?;
+
+    // ORB-10313: fail closed on the durable execution outcome before staging
+    // files, mutating the index, or committing. Only read-only resolution and
+    // validation run ahead of it; the gate itself is unchanged, and an empty or
+    // underivable summary still refuses delivery here.
+    reject_failed_delivery(&task)?;
 
     // ADR-0219: an explicitly side-effect-only task skips this phase instead of
     // failing it. Read the tag before any gate so the carve-out is reachable
@@ -229,7 +240,7 @@ pub(super) fn commit_batch_changes<H: TaskHost + DeterministicActionHost + ?Size
         )?);
     }
 
-    let message = batch_commit_message(task);
+    let message = batch_commit_message(&task);
     let resolved_model = host.resolved_crew_model(batch_id)?;
 
     git_commit_with_identity(&workspace_path, &message, resolved_model.as_deref())?;
