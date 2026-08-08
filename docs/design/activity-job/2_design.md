@@ -3,7 +3,7 @@ summary: "Activity / Job — Design"
 type: design
 title: "Activity / Job — Design"
 owner: codex
-last_updated: 2026-07-27
+last_updated: 2026-08-08
 last_validated: 2026-07-26
 status: Draft
 feature: activity-job
@@ -315,9 +315,19 @@ and the violation. Concretely, for `implement_one` in `task_pr_pipeline`:
   one.
 
 The durable `execution_summary` delivery gate ([ORB-10313] / [ADR-0236]) is
-unchanged and remains the last line. Nothing here weakens it, bypasses it, or
-synthesizes a summary to satisfy it — this check simply means a stalled
-implementer no longer reaches it.
+unchanged and remains the last line. Nothing here weakens it or bypasses it —
+this check simply means a stalled implementer no longer reaches it.
+
+After [ORB-10603] / [ADR-0326], the gate is also no longer reachable in the
+ordinary case, because the commit step fills the field it reads. When — and only
+when — durable state carries no meaningful summary, `commit_batch_changes`
+derives one from `git status` in the delivery worktree (the same file set
+`git add --all` will stage), persists it to the task record with an
+`execution_summary_derived` event, and then meets the unchanged gate. The
+derivation reads durable, re-checkable state and never the agent's advisory
+response envelope ([L-0115]); an agent-authored summary is always preserved; and
+a worktree with nothing to describe still yields no summary and is still
+refused.
 
 **Declared exceptions.** `dispatch_agent` is the only activity shipping
 `require_completion_envelope: false`: its backlog-grouping notes are advisory,
@@ -688,5 +698,6 @@ Read-only history does not need the same dependencies as live execution. [T20260
 - **[ORB-10464]** — Verify that done dependencies are delivered into the pinned base before a worktree is created.
 - **[ORB-10499]** — Identify the bounded post-recovery attempt as the duplicate implement invocation, and let a re-dispatched attempt exit on a write-gated task.
 - **[ORB-10593]** — Fail dispatch at admission when a `blocked_by` target is archived, rejected, or dangling, naming the blocker.
+- **[ORB-10603]** — Derive the durable `execution_summary` from the delivered change when the implementing agent persisted none, leaving the delivery gate itself unchanged ([ADR-0326]).
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.
