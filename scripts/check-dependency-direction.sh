@@ -37,7 +37,9 @@ allowed_internal_deps() {
       echo "orbit-agent orbit-common orbit-exec orbit-store orbit-tools"
       ;;
     orbit-core)
-      echo "orbit-common orbit-search orbit-engine orbit-policy orbit-store orbit-tools"
+      # ORB-10617: Linux sandbox regression tests compose Core with Exec; this
+      # remains test-only and does not widen Core's production dependency graph.
+      echo "orbit-common orbit-search orbit-engine orbit-exec orbit-policy orbit-store orbit-tools"
       ;;
     orbit-cmd)
       # ORB-10016: CLI-facing command layer extracted from orbit-core.

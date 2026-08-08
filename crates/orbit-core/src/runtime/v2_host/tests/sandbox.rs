@@ -176,8 +176,14 @@ fn resolve_executor_sandbox_orders_versioned_orbit_exceptions_after_default_deny
         assert!(
             modify
                 .iter()
-                .any(|rule| rule == &orbit.join(allowed).display().to_string()),
+                .any(|rule| rule == &format!("{}/**", orbit.join(allowed).display())),
             "the active worktree Proposed ADR surface must be allowed: {modify:?}"
+        );
+        assert!(
+            !modify
+                .iter()
+                .any(|rule| rule == &orbit.join(allowed).display().to_string()),
+            "the active worktree Proposed ADR surface must not use an exact file grant: {modify:?}"
         );
     }
     assert!(
