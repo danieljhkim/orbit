@@ -65,6 +65,54 @@ fn cancelled_pending_run_is_not_claimed_by_pipeline_worker() {
 }
 
 #[test]
+fn failed_run_wait_entry_carries_the_terminal_step_diagnostic() {
+    let (_root, runtime) = test_runtime();
+    let run = insert_pending_run(&runtime, "task_review_pipeline");
+    let started_at = Utc::now() - Duration::seconds(2);
+    let finished_at = Utc::now();
+    runtime
+        .stores()
+        .jobs()
+        .mark_job_run_running(&run.run_id, started_at, std::process::id())
+        .expect("mark review run running");
+    runtime
+        .stores()
+        .jobs()
+        .complete_job_run_step(
+            &run.run_id,
+            &orbit_store::JobRunStepParams {
+                step_index: 0,
+                target_type: orbit_common::types::JobTargetType::Activity,
+                target_id: "agent_review".to_string(),
+                started_at,
+                finished_at,
+                duration_ms: Some(2_000),
+                exit_code: None,
+                agent_response_json: None,
+                state: JobRunState::Failed,
+                error_code: Some("worktree_mismatch".to_string()),
+                error_message: Some("declared path pair is incomplete".to_string()),
+            },
+        )
+        .expect("record review startup failure");
+    runtime
+        .stores()
+        .jobs()
+        .finalize_job_run(&run.run_id, JobRunState::Failed, finished_at, Some(2_000))
+        .expect("finalize failed review run");
+
+    let waited = runtime
+        .wait_pipeline_runs(std::slice::from_ref(&run.run_id), 1, 1, Some("test"))
+        .expect("wait failed review run");
+
+    assert_eq!(waited.results[0].status, "failed");
+    assert_eq!(
+        waited.results[0].error.as_deref(),
+        Some("worktree_mismatch: declared path pair is incomplete")
+    );
+}
+
+#[test]
 fn cancelled_run_wait_status_reports_cancelled() {
     let (_root, runtime) = test_runtime();
     let run = insert_pending_run(&runtime, "qa_cancel_wait");

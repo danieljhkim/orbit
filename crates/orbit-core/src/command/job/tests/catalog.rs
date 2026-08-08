@@ -548,6 +548,10 @@ fn pr_review_materializes_one_exact_head_child_with_the_explicit_crew() {
         "{{ steps.worktree.output.workspace_path }}"
     );
     assert_eq!(
+        run_input["repo_root"],
+        "{{ steps.worktree.output.workspace_path }}"
+    );
+    assert_eq!(
         run_input["candidate_head"],
         "{{ steps.push.output.branch }}"
     );
@@ -580,6 +584,20 @@ fn pr_review_materializes_one_exact_head_child_with_the_explicit_crew() {
             "review must run after {prerequisite}"
         );
     }
+
+    let guard = asset
+        .spec
+        .steps
+        .iter()
+        .find(|step| step.id == "require_independent_review_success")
+        .expect("independent review gate");
+    let JobV2StepBody::TargetRef(guard) = &guard.body else {
+        panic!("independent review gate must be an activity reference");
+    };
+    let guard_input = guard.default_input.as_ref().expect("guard input");
+    assert_eq!(guard_input["review_step"], "independent_review");
+    assert_eq!(guard_input["verdict_step"], "require_exact_head_verdict");
+    assert_eq!(guard_input["required_verdict"], "approve");
 
     for job_name in ["task_pr_pipeline", "task_local_pipeline"] {
         let yaml = DEFAULT_JOB_FILES
@@ -690,6 +708,7 @@ fn independent_review_job_requires_structured_exact_head_verdict() {
     for field in [
         "task_ids",
         "workspace_path",
+        "repo_root",
         "crew",
         "parent_run_id",
         "candidate_head",

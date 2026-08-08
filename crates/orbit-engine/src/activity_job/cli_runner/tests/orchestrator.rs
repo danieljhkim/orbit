@@ -1035,6 +1035,8 @@ const TASK_LOCAL_PIPELINE_YAML: &str =
     include_str!("../../../../../../.orbit/resources/jobs/task_local_pipeline.yaml");
 const TASK_PR_PIPELINE_YAML: &str =
     include_str!("../../../../../../.orbit/resources/jobs/task_pr_pipeline.yaml");
+const TASK_REVIEW_PIPELINE_YAML: &str =
+    include_str!("../../../../../../.orbit/resources/jobs/task_review_pipeline.yaml");
 
 #[test]
 fn actual_ship_pipeline_implementers_run_for_each_provider_and_stay_in_the_worktree() {
@@ -1095,6 +1097,56 @@ printf '%s\n' '{{"schemaVersion":1,"status":"success","result":{{}},"error":null
         ]),
         "the matrix must load and render both committed shipment assets"
     );
+}
+
+#[test]
+fn actual_review_pipeline_runs_each_supported_provider_in_the_candidate_worktree() {
+    for provider in ["claude", "codex", "gemini", "grok"] {
+        let fixture = linked_worktree_fixture();
+        let script = fixture.root().join(provider);
+        let assigned = fixture.assigned.display().to_string();
+        let input = rendered_review_input_from_asset(&fixture.assigned, provider);
+        write_executable(
+            &script,
+            &format!(
+                r#"#!/bin/sh
+cat > /dev/null
+test "$(pwd -P)" = '{assigned}' || exit 41
+test "$(git rev-parse --show-toplevel)" = '{assigned}' || exit 42
+printf '%s\n' '{provider}' > observed-review-provider.txt
+printf '%s\n' '{{"schemaVersion":1,"status":"success","result":{{"verdict":"approve","reviewed_head_sha":"candidate-sha"}},"error":null}}'
+"#
+            ),
+        );
+        let mut host = TestHost::with_command(script.display().to_string());
+        host.workspace_root = Some(fixture.primary.clone());
+        let spec = test_agent_loop_spec_for(provider, Duration::from_secs(5));
+        let run_id = format!("run-review-{provider}");
+
+        let outcome = run_cli_backend(
+            &host,
+            &spec,
+            &run_id,
+            test_audit(&run_id, provider),
+            &input,
+            None,
+        )
+        .unwrap_or_else(|error| panic!("review/{provider} invocation: {error}"));
+
+        assert!(outcome.success, "review/{provider} should succeed");
+        assert_eq!(
+            fs::read_to_string(fixture.assigned.join("observed-review-provider.txt"))
+                .expect("assigned review marker"),
+            format!("{provider}\n")
+        );
+        assert!(
+            !fixture
+                .primary
+                .join("observed-review-provider.txt")
+                .exists(),
+            "review/{provider} must not write the registered primary checkout"
+        );
+    }
 }
 
 #[test]
@@ -2479,6 +2531,95 @@ fn rendered_implement_input_from_asset(
     assert_eq!(rendered["workspace_path"], assigned);
     assert_eq!(rendered["repo_root"], assigned);
     (asset.name, rendered)
+}
+
+fn rendered_review_input_from_asset(assigned_root: &Path, provider: &str) -> serde_json::Value {
+    let parent = load_job_asset(TASK_PR_PIPELINE_YAML).expect("PR pipeline asset parses");
+    let dispatch = parent
+        .spec
+        .steps
+        .iter()
+        .find(|step| step.id == "independent_review")
+        .expect("PR pipeline dispatches independent review");
+    let JobV2StepBody::TargetRef(dispatch) = &dispatch.body else {
+        panic!("parent independent_review must reference invoke_and_wait");
+    };
+    let parent_run_input = dispatch
+        .default_input
+        .as_ref()
+        .and_then(|input| input.get("run_input"))
+        .expect("parent review run_input");
+    let assigned = assigned_root.display().to_string();
+    let mut parent_steps = HashMap::new();
+    parent_steps.insert(
+        "worktree".to_string(),
+        serde_json::json!({
+            "output": {
+                "workspace_path": assigned,
+                "job_run_id": "jrun-parent"
+            }
+        }),
+    );
+    parent_steps.insert(
+        "push".to_string(),
+        serde_json::json!({
+            "output": {
+                "branch": "orbit/review-candidate",
+                "local_sha": "candidate-sha"
+            }
+        }),
+    );
+    parent_steps.insert(
+        "pr_open".to_string(),
+        serde_json::json!({
+            "output": {
+                "pr_number": "42",
+                "pr_url": "https://example.invalid/pr/42"
+            }
+        }),
+    );
+    let parent_context = TemplateContext {
+        input: serde_json::json!({
+            "task_ids": ["ORB-REVIEW-ASSET"],
+            "base_branch": "agent-main",
+            "review_crew": format!("{provider}-review"),
+        }),
+        steps: parent_steps,
+        ..TemplateContext::default()
+    };
+    let dispatched = render_asset_value(parent_run_input, &parent_context);
+    assert_eq!(dispatched["workspace_path"], assigned);
+    assert_eq!(dispatched["repo_root"], assigned);
+
+    let asset = load_job_asset(TASK_REVIEW_PIPELINE_YAML).expect("review pipeline asset parses");
+    assert_eq!(asset.name, "task_review_pipeline");
+    let review = asset
+        .spec
+        .steps
+        .iter()
+        .find(|step| step.id == "independent_review")
+        .expect("review pipeline has independent_review");
+    let JobV2StepBody::TargetRef(review) = &review.body else {
+        panic!("independent_review must reference agent_review");
+    };
+    assert_eq!(review.target, "activity:agent_review");
+    let template_input = review.default_input.as_ref().expect("review step input");
+    for field in ["workspace_path", "repo_root"] {
+        assert_eq!(
+            template_input[field],
+            format!("{{{{ input.{field} }}}}"),
+            "review must forward the complete declared worktree pair"
+        );
+    }
+
+    let context = TemplateContext {
+        input: dispatched,
+        ..TemplateContext::default()
+    };
+    let rendered = render_asset_value(template_input, &context);
+    assert_eq!(rendered["workspace_path"], assigned);
+    assert_eq!(rendered["repo_root"], assigned);
+    rendered
 }
 
 fn render_asset_value(value: &serde_json::Value, context: &TemplateContext) -> serde_json::Value {

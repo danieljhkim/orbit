@@ -404,6 +404,12 @@ pub(super) fn pipeline_success_guard(action: &str, input: &Value) -> Result<Valu
         .get("context")
         .and_then(Value::as_str)
         .unwrap_or("pipeline child run");
+    if ["review_step", "verdict_step", "required_verdict"]
+        .iter()
+        .any(|field| input.get(*field).is_some())
+    {
+        return review_pipeline_success_guard(action, input, context);
+    }
     let mut checked_count = 0usize;
     let mut failures = Vec::new();
 
@@ -451,6 +457,88 @@ pub(super) fn pipeline_success_guard(action: &str, input: &Value) -> Result<Valu
     Ok(serde_json::json!({
         "succeeded": true,
         "checked_count": checked_count,
+    }))
+}
+
+/// Review-aware specialization of the generic child-run gate.
+///
+/// A successful step checkpoint is the durable boundary between "the reviewer
+/// never produced a review" and "review ran but did not pass". This keeps the
+/// classification independent of provider-specific error prose while still
+/// preserving that prose in the parent diagnostic.
+fn review_pipeline_success_guard(
+    action: &str,
+    input: &Value,
+    context: &str,
+) -> Result<Value, DispatchError> {
+    let review_step = non_blank_str(input, "review_step")
+        .ok_or_else(|| action_failed(action, "missing non-blank `review_step`".to_string()))?;
+    let verdict_step = non_blank_str(input, "verdict_step")
+        .ok_or_else(|| action_failed(action, "missing non-blank `verdict_step`".to_string()))?;
+    let required_verdict = non_blank_str(input, "required_verdict")
+        .ok_or_else(|| action_failed(action, "missing non-blank `required_verdict`".to_string()))?;
+    let result = input
+        .get("result")
+        .filter(|value| !value.is_null())
+        .ok_or_else(|| {
+            action_failed(
+                action,
+                "review-aware guard requires one non-null `result`".to_string(),
+            )
+        })?;
+    let status = result
+        .get("status")
+        .and_then(Value::as_str)
+        .ok_or_else(|| action_failed(action, "result missing string status".to_string()))?;
+    let run_id = result
+        .get("run_id")
+        .and_then(Value::as_str)
+        .unwrap_or("<unknown>");
+    let pipeline = result.get("pipeline").and_then(Value::as_object);
+    let review_checkpoint = pipeline
+        .and_then(|pipeline| pipeline.get(review_step))
+        .filter(|value| !value.is_null());
+
+    if status != "succeeded" {
+        let failure = pipeline_wait_entry_failure("result", result)
+            .unwrap_or_else(|| format!("result run {run_id} status {status}"));
+        if review_checkpoint.is_none() {
+            return Err(DispatchError::IndependentReviewNotStarted {
+                diagnostic: format!("{context}: {failure}"),
+            });
+        }
+        return Err(action_failed(
+            action,
+            format!("{context} ran but did not pass: {failure}"),
+        ));
+    }
+
+    let verdict = pipeline
+        .and_then(|pipeline| pipeline.get(verdict_step))
+        .and_then(|checkpoint| checkpoint.get("verdict"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| {
+            action_failed(
+                action,
+                format!(
+                    "{context} ran but did not produce a durable verdict in child run {run_id} checkpoint `{verdict_step}`"
+                ),
+            )
+        })?;
+    if verdict != required_verdict {
+        return Err(action_failed(
+            action,
+            format!(
+                "{context} ran and returned verdict '{verdict}' in child run {run_id} (required '{required_verdict}'); review findings are persisted on the task"
+            ),
+        ));
+    }
+
+    Ok(serde_json::json!({
+        "succeeded": true,
+        "checked_count": 1,
     }))
 }
 

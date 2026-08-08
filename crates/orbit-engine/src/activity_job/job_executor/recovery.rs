@@ -118,6 +118,7 @@ pub(super) fn attempt_failure_activity(
     );
     let error_code = match original_err {
         DispatchError::WorktreeIntegrity { code, .. } => *code,
+        DispatchError::IndependentReviewNotStarted { .. } => "independent_review_not_started",
         _ => "pipeline_step_failed",
     };
     let input = serde_json::json!({

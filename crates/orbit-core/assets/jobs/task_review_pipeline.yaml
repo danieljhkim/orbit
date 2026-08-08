@@ -18,6 +18,7 @@ spec:
   default_input:
     task_ids: []
     workspace_path: null
+    repo_root: null
     base_branch: null
     crew: null
     parent_run_id: null
@@ -32,6 +33,7 @@ spec:
       default_input:
         task_ids: "{{ input.task_ids }}"
         workspace_path: "{{ input.workspace_path }}"
+        repo_root: "{{ input.repo_root }}"
         base_branch: "{{ input.base_branch }}"
         crew: "{{ input.crew }}"
         parent_run_id: "{{ input.parent_run_id }}"

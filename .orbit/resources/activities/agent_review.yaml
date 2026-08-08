@@ -13,7 +13,7 @@ spec:
   input_schema_json:
     type: object
     required:
-      [task_ids, workspace_path, base_branch, crew, parent_run_id, candidate_head,
+      [task_ids, workspace_path, repo_root, base_branch, crew, parent_run_id, candidate_head,
        candidate_head_sha, pr_number]
     properties:
       task_ids:
@@ -21,6 +21,8 @@ spec:
         items:
           type: string
       workspace_path:
+        type: string
+      repo_root:
         type: string
       base_branch:
         type: string
@@ -80,7 +82,8 @@ spec:
 
     Procedure:
 
-    1. Treat `input.workspace_path` as the active worktree. Before reviewing,
+    1. Treat the matching `input.workspace_path` / `input.repo_root` pair as
+       the active worktree declaration. Before reviewing,
        use `proc.spawn` git to obtain `git rev-parse HEAD` and `git status
        --porcelain`. The resolved HEAD MUST equal `input.candidate_head_sha`
        exactly and the worktree MUST be clean. Also resolve

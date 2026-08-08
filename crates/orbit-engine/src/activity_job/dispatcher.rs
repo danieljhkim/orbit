@@ -340,6 +340,13 @@ pub enum DispatchError {
         diagnostic: String,
     },
 
+    /// The independent-review child reached a terminal failure before it
+    /// persisted a successful reviewer-step checkpoint. The parent uses this
+    /// distinct class to fail the gate without publishing a blocked/manual
+    /// reconciliation handoff for code that was never reviewed.
+    #[error("independent review could not start: {diagnostic}")]
+    IndependentReviewNotStarted { diagnostic: String },
+
     /// Tool-allowlist denial (§6). Non-retryable — the retry wrapper must not
     /// re-attempt a denied call. Phase 2 formerly translated this to
     /// `Ok(terminated)`; Phase 3 surfaces it structurally so the DAG executor
@@ -388,6 +395,7 @@ impl DispatchError {
                 | DispatchError::UnresolvedAutoBackend { .. }
                 | DispatchError::CliInvocationPermanent(_)
                 | DispatchError::WorktreeIntegrity { .. }
+                | DispatchError::IndependentReviewNotStarted { .. }
         )
     }
 

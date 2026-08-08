@@ -80,6 +80,106 @@ fn pipeline_success_guard_rejects_mixed_results() {
 }
 
 #[test]
+fn review_pipeline_guard_accepts_only_the_required_durable_verdict() {
+    let output = pipeline_success_guard(
+        "pipeline_success_guard",
+        &json!({
+            "context": "task_pr_pipeline independent review",
+            "result": {
+                "run_id": "jrun-review-approved",
+                "status": "succeeded",
+                "pipeline": {
+                    "independent_review": {"verdict": "approve"},
+                    "require_exact_head_verdict": {"verdict": "approve"}
+                }
+            },
+            "review_step": "independent_review",
+            "verdict_step": "require_exact_head_verdict",
+            "required_verdict": "approve"
+        }),
+    )
+    .expect("approved durable verdict should pass");
+
+    assert_eq!(output["succeeded"], json!(true));
+    assert_eq!(output["checked_count"], json!(1));
+}
+
+#[test]
+fn review_pipeline_guard_distinguishes_reviewer_rejection_from_startup_failure() {
+    let rejected = pipeline_success_guard(
+        "pipeline_success_guard",
+        &json!({
+            "context": "task_pr_pipeline independent review",
+            "result": {
+                "run_id": "jrun-review-rejected",
+                "status": "succeeded",
+                "pipeline": {
+                    "independent_review": {"verdict": "request_changes"},
+                    "require_exact_head_verdict": {"verdict": "request_changes"}
+                }
+            },
+            "review_step": "independent_review",
+            "verdict_step": "require_exact_head_verdict",
+            "required_verdict": "approve"
+        }),
+    )
+    .expect_err("request_changes must fail the parent gate");
+    let message = action_failure_message(rejected, "pipeline_success_guard");
+    assert!(message.contains("ran and returned verdict 'request_changes'"));
+    assert!(message.contains("review findings are persisted on the task"));
+
+    let not_started = pipeline_success_guard(
+        "pipeline_success_guard",
+        &json!({
+            "context": "task_pr_pipeline independent review",
+            "result": {
+                "run_id": "jrun-review-not-started",
+                "status": "failed",
+                "pipeline": {"task_ids": ["ORB-10606"]},
+                "error": "worktree integrity violation `worktree_mismatch`: declared pair incomplete"
+            },
+            "review_step": "independent_review",
+            "verdict_step": "require_exact_head_verdict",
+            "required_verdict": "approve"
+        }),
+    )
+    .expect_err("missing reviewer checkpoint is a startup failure");
+    match not_started {
+        DispatchError::IndependentReviewNotStarted { diagnostic } => {
+            assert!(diagnostic.contains("jrun-review-not-started"));
+            assert!(diagnostic.contains("worktree integrity violation"));
+        }
+        other => panic!("expected IndependentReviewNotStarted, got {other}"),
+    }
+}
+
+#[test]
+fn review_pipeline_guard_treats_failure_after_reviewer_checkpoint_as_review_ran() {
+    let error = pipeline_success_guard(
+        "pipeline_success_guard",
+        &json!({
+            "context": "task_pr_pipeline independent review",
+            "result": {
+                "run_id": "jrun-review-guard-failed",
+                "status": "failed",
+                "pipeline": {
+                    "independent_review": {"verdict": "approve"}
+                },
+                "error": "exact-head record did not cover criterion 2"
+            },
+            "review_step": "independent_review",
+            "verdict_step": "require_exact_head_verdict",
+            "required_verdict": "approve"
+        }),
+    )
+    .expect_err("failure after reviewer checkpoint must fail as reviewed");
+
+    let message = action_failure_message(error, "pipeline_success_guard");
+    assert!(message.contains("ran but did not pass"));
+    assert!(message.contains("exact-head record did not cover criterion 2"));
+}
+
+#[test]
 fn invoke_and_wait_dedupe_reuses_one_run_and_rejects_multiple_matches() {
     let runtime = OrbitRuntime::in_memory().expect("runtime");
     let first = runtime

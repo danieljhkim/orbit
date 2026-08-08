@@ -209,11 +209,13 @@ impl OrbitRuntime {
         };
         if agent_spec.role.is_some()
             || !agent_spec.require_response_envelope
+            || !schema_requires(&agent_review.input_schema_json, "workspace_path")
+            || !schema_requires(&agent_review.input_schema_json, "repo_root")
             || !schema_requires(&agent_review.output_schema_json, "verdict")
             || !schema_requires(&agent_review.output_schema_json, "reviewed_head_sha")
         {
             return Err(review_asset_error(
-                "deployed agent_review still relies on a role or does not require a structured exact-head verdict",
+                "deployed agent_review still relies on a role, omits the declared worktree pair, or does not require a structured exact-head verdict",
             ));
         }
 
@@ -750,12 +752,29 @@ impl OrbitRuntime {
                 } else {
                     self.read_run_state(run_id)?.map(|state| state.pipeline)
                 };
+                let error = if matches!(status.as_str(), "failed" | "cancelled" | "interrupted") {
+                    let (code, message) = run
+                        .steps
+                        .iter()
+                        .rev()
+                        .find(|step| step.error_code.is_some() || step.error_message.is_some())
+                        .map(|step| (step.error_code.clone(), step.error_message.clone()))
+                        .unwrap_or((None, None));
+                    match (code, message) {
+                        (Some(code), Some(message)) => Some(format!("{code}: {message}")),
+                        (Some(code), None) => Some(code),
+                        (None, Some(message)) => Some(message),
+                        (None, None) => None,
+                    }
+                } else {
+                    None
+                };
                 Ok(PipelineWaitEntry {
                     run_id: run_id.clone(),
                     status,
                     finished_at: run.finished_at.map(|value| value.to_rfc3339()),
                     pipeline,
-                    error: None,
+                    error,
                 })
             })
             .collect()
@@ -1179,6 +1198,7 @@ fn validate_pr_review_contract(job: &JobV2) -> Result<(), OrbitError> {
     for field in [
         "task_ids",
         "workspace_path",
+        "repo_root",
         "crew",
         "parent_run_id",
         "candidate_head",
@@ -1228,6 +1248,23 @@ fn validate_pr_review_contract(job: &JobV2) -> Result<(), OrbitError> {
             "deployed task_pr_pipeline independent review gate has the wrong activity",
         ));
     }
+    let guard_input = match &guard.body {
+        JobV2StepBody::TargetRef(target) => target.default_input.as_ref(),
+        _ => None,
+    }
+    .and_then(Value::as_object)
+    .ok_or_else(|| review_asset_error("deployed independent review gate has no input object"))?;
+    for (field, expected) in [
+        ("review_step", "independent_review"),
+        ("verdict_step", "require_exact_head_verdict"),
+        ("required_verdict", "approve"),
+    ] {
+        if guard_input.get(field).and_then(Value::as_str) != Some(expected) {
+            return Err(review_asset_error(format!(
+                "deployed independent review gate does not set {field}='{expected}'"
+            )));
+        }
+    }
 
     Ok(())
 }
@@ -1258,6 +1295,7 @@ fn validate_review_job_contract(job: &JobV2) -> Result<(), OrbitError> {
     for field in [
         "task_ids",
         "workspace_path",
+        "repo_root",
         "crew",
         "parent_run_id",
         "candidate_head",
