@@ -185,7 +185,7 @@ fn resolve_roots(
     //    corrupt user state.
     if let Some(repo_root) = paths::find_git_repo_root(cwd) {
         let candidate = repo_root.join(".orbit");
-        if !is_global_orbit_dir(&candidate) {
+        if !is_global_orbit_root(&candidate) {
             return Ok(log_resolved_roots(
                 cwd,
                 "git_repo_root",
@@ -196,7 +196,7 @@ fn resolve_roots(
 
     // 7. Fallback: <cwd>/.orbit, but never the global $HOME/.orbit.
     let cwd_root = paths::cwd_orbit_root(cwd);
-    if is_global_orbit_dir(&cwd_root) {
+    if is_global_orbit_root(&cwd_root) {
         return Err(OrbitError::InvalidInput(format!(
             "{} is the global Orbit root, not a workspace; run `orbit workspace init` from inside a project directory or pass `--root <path/to/.orbit>`",
             cwd_root.display()
@@ -235,7 +235,7 @@ fn find_orbit_dir_walk_up(start: &Path, boundaries: &[PathBuf]) -> Option<PathBu
     let mut current = start;
     loop {
         let candidate = current.join(".orbit");
-        if candidate.is_dir() && !is_global_orbit_dir(&candidate) {
+        if candidate.is_dir() && !is_global_orbit_root(&candidate) {
             return Some(candidate);
         }
         if boundaries
@@ -267,7 +267,13 @@ fn home_dir_boundary() -> Option<PathBuf> {
     paths::home_dir()
 }
 
-fn is_global_orbit_dir(candidate: &Path) -> bool {
+/// Whether `candidate` resolves to the global Orbit root (`$HOME/.orbit`,
+/// or `%USERPROFILE%\.orbit`). This is the single source of truth for
+/// "is this root the global one" — anything that needs to make a decision
+/// contingent on that (whether to touch home-scoped skill link
+/// directories, what path to report to the user) should call this rather
+/// than re-deriving the comparison.
+pub fn is_global_orbit_root(candidate: &Path) -> bool {
     let Some(global) = paths::home_dir().map(|home| home.join(".orbit")) else {
         return false;
     };

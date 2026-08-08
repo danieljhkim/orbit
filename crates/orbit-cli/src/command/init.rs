@@ -279,7 +279,7 @@ struct ReportedInitPaths {
 }
 
 fn reported_init_paths(root_override: Option<&Path>) -> ReportedInitPaths {
-    if root_override.is_some_and(|path| !is_global_orbit_root(path)) {
+    if root_override.is_some_and(|path| !orbit_core::runtime::is_global_orbit_root(path)) {
         ReportedInitPaths {
             skills_root: "<custom orbit root>/skills",
             config_path: "<custom orbit root>/config.toml",
@@ -290,13 +290,4 @@ fn reported_init_paths(root_override: Option<&Path>) -> ReportedInitPaths {
             config_path: "~/.orbit/config.toml",
         }
     }
-}
-
-fn is_global_orbit_root(path: &Path) -> bool {
-    global_orbit_root().is_some_and(|expected| path == expected)
-}
-
-fn global_orbit_root() -> Option<PathBuf> {
-    let home = std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE"))?;
-    Some(PathBuf::from(home).join(".orbit"))
 }

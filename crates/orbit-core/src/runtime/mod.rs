@@ -60,7 +60,7 @@ pub use resolve::{
 };
 // `pub` for the runtime-less `orbit migrate --dry-run` inspection that moved
 // to `orbit-cmd` [ORB-10016].
-pub use resolve::{resolve_global_root, try_resolve_initialized_roots};
+pub use resolve::{is_global_orbit_root, resolve_global_root, try_resolve_initialized_roots};
 pub(crate) use task_records::TaskRecordUpdateParams;
 
 #[derive(Clone)]

@@ -54,11 +54,13 @@ fn existing_config_short_circuits_before_prompts() {
     assert!(matches!(result, Ok(None)));
 }
 
-/// End-to-end: temporary-root validation runs with an isolated discovery
-/// home, preserving the invoking account's existing skill links while it
-/// produces a fresh config.toml with generated crew tables.
+/// End-to-end: initializing against a non-global (temporary/custom) orbit
+/// root must leave the invoking account's home-scoped skill link
+/// directories untouched entirely — no removal, no re-creation, no
+/// replacement — while it still produces a fresh config.toml with generated
+/// crew tables in the custom root.
 #[test]
-fn non_interactive_init_isolates_temporary_root_skill_discovery() {
+fn non_interactive_init_against_non_global_root_leaves_home_skill_links_untouched() {
     let live_home = tempdir().expect("live home tempdir");
     let validation_home = tempdir().expect("validation home tempdir");
     let validation_root = tempdir().expect("validation root tempdir");
@@ -98,22 +100,22 @@ fn non_interactive_init_isolates_temporary_root_skill_discovery() {
     assert_discovery_sentinel(&agents_link, &agents_target);
     assert_discovery_sentinel(&claude_link, &claude_target);
     assert!(
-        validation_home
+        !validation_home
             .path()
             .join(".agents")
             .join("skills")
             .join("orbit")
-            .is_symlink(),
-        "validation links belong under the isolated HOME"
+            .exists(),
+        "a non-global root must not create home-scoped skill links"
     );
     assert!(
-        validation_home
+        !validation_home
             .path()
             .join(".claude")
             .join("skills")
             .join("orbit")
-            .is_symlink(),
-        "validation links belong under the isolated HOME"
+            .exists(),
+        "a non-global root must not create home-scoped skill links"
     );
 
     let config_path = validation_root.path().join(".orbit").join("config.toml");
