@@ -260,6 +260,11 @@ mod tests {
             .iter()
             .find(|(name, _)| *name == "agent_implement")
             .expect("agent implement activity is seeded");
+        assert_eq!(
+            *yaml,
+            include_str!("../../../../.orbit/resources/activities/agent_implement.yaml"),
+            "shipped and workspace implementation activities must remain byte-identical"
+        );
         let asset = load_activity_asset(yaml).expect("parse agent implement activity");
         match asset.spec.spec {
             ActivityV2Spec::AgentLoop(spec) => {
@@ -267,14 +272,31 @@ mod tests {
                     .instruction
                     .split_whitespace()
                     .collect::<Vec<_>>()
-                    .join(" ");
+                    .join(" ")
+                    .to_lowercase();
                 assert_eq!(spec.role, Some(AgentRole::Implementer));
                 assert!(instruction.contains("not as a perfect inventory"));
                 assert!(instruction.contains("make the smallest compatible change"));
-                assert!(instruction.contains("Stop after commenting"));
-                assert!(instruction.contains("Before the first write"));
+                assert!(instruction.contains("stop after a task comment"));
+                assert!(instruction.contains("before the first edit"));
+                assert!(instruction.contains("before validation"));
                 assert!(instruction.contains("git rev-parse --show-toplevel"));
                 assert!(instruction.contains("worktree_mismatch"));
+                for contract in [
+                    "task.terminal",
+                    "pwd -p",
+                    "context_files",
+                    "eperm",
+                    "orbit.friction.add",
+                    "orbit.task.start",
+                    "move the task to `review`",
+                    "execution_summary",
+                ] {
+                    assert!(
+                        instruction.contains(contract),
+                        "implementation contract disappeared: {contract}"
+                    );
+                }
             }
             other => panic!("expected agent_loop activity, got {other:?}"),
         }
@@ -370,6 +392,11 @@ mod tests {
             .iter()
             .find(|(name, _)| *name == "agent_review")
             .expect("agent review activity is seeded");
+        assert_eq!(
+            *yaml,
+            include_str!("../../../../.orbit/resources/activities/agent_review.yaml"),
+            "shipped and workspace review activities must remain byte-identical"
+        );
         let asset = load_activity_asset(yaml).expect("parse agent review activity");
         assert_eq!(
             asset.spec.output_schema_json["required"],
@@ -391,6 +418,15 @@ mod tests {
                 assert!(!spec.tools.iter().any(|tool| tool == "fs.delete"));
                 assert!(spec.instruction.contains("candidate_head_sha"));
                 assert!(spec.instruction.contains("Do not edit"));
+                assert!(spec.instruction.contains("[independent-review]"));
+                assert!(spec.instruction.contains("orbit.friction.add"));
+                assert!(spec.instruction.contains("result.reviewed_head_sha"));
+                assert!(
+                    !spec
+                        .instruction
+                        .contains(r#"{"schemaVersion":1,"status":"success""#),
+                    "the provider renderer, not the activity, owns the response frame"
+                );
             }
             other => panic!("expected agent_loop agent_review, got {other:?}"),
         }

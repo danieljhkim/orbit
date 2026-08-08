@@ -53,7 +53,8 @@ fn cli_agent_envelope_carries_input_run_id_and_task_context() {
         })),
         workspace_root: None,
     };
-    let spec = test_agent_loop_spec(Duration::from_secs(5));
+    let mut spec = test_agent_loop_spec(Duration::from_secs(5));
+    spec.instruction = "perform the requested task".to_string();
     let input = serde_json::json!({
         "prompt": "do it",
         "task_id": "TCTX",
@@ -77,6 +78,11 @@ fn cli_agent_envelope_carries_input_run_id_and_task_context() {
     assert_eq!(envelope["input"]["workspace_path"], "/tmp/orbit-worktree");
     assert_eq!(envelope["task"]["id"], "TCTX");
     assert_eq!(envelope["task"]["workspace_path"], "/tmp/orbit-worktree");
+    assert_eq!(envelope["instruction"], "perform the requested task");
+    assert!(
+        envelope.get("response_schema").is_none(),
+        "the provider renderer owns response framing; the embedded task envelope must not duplicate it"
+    );
 }
 
 #[test]
