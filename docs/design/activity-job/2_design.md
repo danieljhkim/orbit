@@ -473,9 +473,13 @@ The CLI does not own envelope storage. `orbit-core` exposes accessors for v2 aud
 
 ### 8.9 Workflow worktree base synchronization
 
-Task-shipping workflows that create worktrees (`task_pr_pipeline`, `task_local_pipeline`, and callers such as `task_auto_pipeline`) default `base_sync` to `remote` after [T20260427-45]. Remote mode fetches `origin/<base_branch>` and creates, resets, compares, and rebases task branches against that remote-tracking ref; it does not mutate the repo root checkout or prefer stale local base branches.
+Task-shipping workflows that create worktrees (`task_pr_pipeline`, `task_local_pipeline`, and callers such as `task_auto_pipeline`) default `base_sync` to `remote` after [T20260427-45]. Remote mode fetches `origin/<base_branch>` and creates or resets task worktrees at that remote-tracking ref, so every candidate starts from published history rather than a stale local base.
 
 Direct callers can set `base_sync: local` for local-only repos or unpublished base branches. That mode resolves the local base ref and skips origin fetch.
+
+The local pipeline deliberately separates those two moments after [ORB-10604]: worktree setup still honors the caller's sync mode, but its merge checkpoint always uses `base_sync: local`. A previous bundle can advance the shared local base and then fail during bookkeeping or publication; treating that in-session commit as the next merge's rebase target prevents one post-merge failure from turning every later bundle into the remote-mode "local base is ahead" refusal. Each retry re-resolves the current local base and rebases only its own worktree, so concurrent disjoint bundles converge through the existing fast-forward/rebase loop. Exhausted contention can still fail one bundle, but it does not poison the base for later local merges.
+
+The remote-mode refusal remains part of `git_merge`: a caller that requests remote synchronization still fails when the local base carries commits absent from the fetched remote. Local mode is safe here by construction because the local pipeline owns the in-session base history. Publishing before bookkeeping was rejected as the general repair because local pipelines may intentionally run with `auto_push: false`; making publication unconditional would change the workflow's external-side-effect contract, while leaving it conditional would preserve the cascade for those sessions.
 
 ### 8.10 Workflow task admission
 
@@ -699,5 +703,6 @@ Read-only history does not need the same dependencies as live execution. [T20260
 - **[ORB-10499]** — Identify the bounded post-recovery attempt as the duplicate implement invocation, and let a re-dispatched attempt exit on a write-gated task.
 - **[ORB-10593]** — Fail dispatch at admission when a `blocked_by` target is archived, rejected, or dangling, naming the blocker.
 - **[ORB-10603]** — Derive the durable `execution_summary` from the delivered change when the implementing agent persisted none, leaving the delivery gate itself unchanged ([ADR-0326]).
+- **[ORB-10604]** — Reconcile local-pipeline merges against the current in-session base while retaining the remote-mode divergence refusal.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

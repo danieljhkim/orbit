@@ -368,7 +368,7 @@ fn default_deterministic_activities_are_registered_in_the_runtime() {
 }
 
 #[test]
-fn local_task_pipeline_commits_before_merge() {
+fn local_task_pipeline_commits_before_merge_and_reconciles_with_local_base() {
     let yaml = DEFAULT_JOB_FILES
         .iter()
         .find_map(|(name, yaml)| (*name == "task_local_pipeline").then_some(*yaml))
@@ -392,6 +392,21 @@ fn local_task_pipeline_commits_before_merge() {
     assert!(
         commit_index < merge_index,
         "task local pipeline must commit before merge"
+    );
+
+    let merge = asset
+        .spec
+        .steps
+        .iter()
+        .find(|step| step.id == "merge")
+        .expect("task local pipeline has merge step");
+    let JobV2StepBody::TargetRef(merge) = &merge.body else {
+        panic!("task local pipeline merge must reference git_merge");
+    };
+    let merge_input = merge.default_input.as_ref().expect("merge input");
+    assert_eq!(
+        merge_input["base_sync"], "local",
+        "an unpublished earlier merge must be a valid base for the next local merge"
     );
 }
 

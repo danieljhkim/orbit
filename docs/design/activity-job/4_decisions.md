@@ -3,7 +3,7 @@ summary: "Activity / Job — Decisions"
 type: design
 title: "Activity / Job — Decisions"
 owner: codex
-last_updated: 2026-08-01
+last_updated: 2026-08-08
 last_validated: 2026-07-26
 status: Draft
 feature: activity-job
@@ -268,11 +268,11 @@ Folded into ADR-007's rollup for durable run state and operator inspection.
 
 ## ADR-023 — Seeded task-shipment workflows are deterministic, recoverable, and lock-aware
 
-**Status:** Accepted · 2026-05 · [T20260427-33], [T20260425-2010], [T20260427-45], [T20260430-9], [T20260430-12], [T20260430-14], [T20260421-0542-2], [T20260430-27], [T20260430-30], [T20260430-26], [T20260427-34], [T20260427-36], [T20260505-2], [T20260505-10], [T20260506-18], [T20260509-14]
+**Status:** Accepted · 2026-05 · [T20260427-33], [T20260425-2010], [T20260427-45], [T20260430-9], [T20260430-12], [T20260430-14], [T20260421-0542-2], [T20260430-27], [T20260430-30], [T20260430-26], [T20260427-34], [T20260427-36], [T20260505-2], [T20260505-10], [T20260506-18], [T20260509-14], [ORB-10604]
 
 **Context.** The seeded task workflows added many small ADRs as shipment behavior grew: run aliases, deterministic auto-dispatch, remote base selection, recovery hooks, backlog exclusions, operator status, and lock cleanup. They are one decision family: task shipment is an explicit durable workflow, not an advisory agent step or hidden side effect.
 
-**Decision.** Keep `orbit run` workflow aliases focused on execution, make automatic task shipment deterministic from backlog listing through gate fan-out, default shipping worktrees to fetched remote base refs, admit tasks through status-aware workflow gates, and protect overlapping work with durable task-lock reservations whose seeded TTL covers the child wait budget. Recovery is bounded, step-scoped on direct shipment workflows, and assigned through the configured reviewer role; child pipeline joins are followed by deterministic success guards after required cleanup, operator status is derived from persisted pipeline state, and run-owned reservations clean up when their owner run reaches a terminal state.
+**Decision.** Keep `orbit run` workflow aliases focused on execution, make automatic task shipment deterministic from backlog listing through gate fan-out, default shipping worktrees to fetched remote base refs, admit tasks through status-aware workflow gates, and protect overlapping work with durable task-lock reservations whose seeded TTL covers the child wait budget. Recovery is bounded, step-scoped on direct shipment workflows, and assigned through the configured reviewer role; child pipeline joins are followed by deterministic success guards after required cleanup, operator status is derived from persisted pipeline state, and run-owned reservations clean up when their owner run reaches a terminal state. For local shipment, use the caller-selected sync mode to construct the worktree but reconcile the merge checkpoint against the current local base, preserving commits applied by earlier bundles in the same session. Publishing before bookkeeping is not the general invariant because `auto_push: false` is a supported local-pipeline contract.
 
 Folded instances:
 
@@ -291,6 +291,7 @@ Folded instances:
 
 **Consequences.**
 - Task shipment workflows expose durable admission, recovery, status, and lock state without asking downstream steps to parse model output.
+- A failed post-merge checkpoint does not make the shared local base unusable for the next local bundle; the existing remote-mode divergence refusal still protects callers that require the fetched remote to be authoritative.
 - Auto-dispatch no longer depends on provider credentials before it has deterministic backlog bundles.
 - Gate-owned reservations serialize overlapping bundles while their owner run is alive and are released by both seeded early-release steps and engine-owned terminal cleanup.
 - Seeded gate defaults require `ttl_seconds >= dispatch_timeout_seconds` so a legal child shipment wait cannot outlive its admission reservation.
@@ -298,6 +299,7 @@ Folded instances:
 - Cost: the auto-dispatch audit trail no longer contains a model-authored advisory grouping note.
 - Cost: users of `orbit run ship local`, `orbit run ship list/show`, and `orbit run duel list/show` must update their command muscle memory and scripts.
 - Cost: default shipping workflows now require the configured base branch to be fetchable from `origin`; callers that intentionally operate without a remote must opt into `base_sync: local`.
+- Cost: the local pipeline's merge checkpoint trusts in-session local-base history and therefore does not use that checkpoint to detect unpublished local commits; callers needing that refusal must invoke remote synchronization outside this safe-by-construction path.
 - Cost: job authors must make the recovery activity generic enough for every retryable step in that job.
 - Cost: this is intentionally conservative; it does not perform semantic git cleanup, task mutation, or child-run reconciliation until a more specific recovery policy is justified.
 - Cost: default recovery now depends on the configured reviewer agent being available, and authors must decide which steps deserve recovery rather than flipping one workflow-level switch.
@@ -926,5 +928,6 @@ Narrative lives in the ADR store — retrieve it with `orbit tool run orbit.adr.
 - **[ORB-10332]** — Remove the unused Groundhog activity kind and the epic/parallel pipeline layer (`task_epic_pipeline`, `epic_orchestrator`, `pipeline_wait`, legacy parallel-batch executor).
 - **[ORB-10449]** — Split step-completion protocol from response content so a stalled agent-loop step fails where it happened ([ADR-0258], amending [ADR-0224]; see [§7.6a of `2_design.md`](./2_design.md)).
 - **[ORB-10464]** — Refuse workflow admission when a done dependency's work is not in the base the worktree would be cut from ([ADR-0290], resolving [F2026-07-038]).
+- **[ORB-10604]** — Split remote worktree construction from local merge reconciliation so post-merge failures do not cascade through a shipment session.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.
