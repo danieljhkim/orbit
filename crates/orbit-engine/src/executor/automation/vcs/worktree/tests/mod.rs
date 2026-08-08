@@ -2,4 +2,5 @@
 
 mod dependency_delivery;
 mod gc;
+mod merge;
 mod setup;
