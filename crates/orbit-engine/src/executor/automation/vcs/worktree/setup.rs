@@ -47,10 +47,9 @@ pub(in crate::executor::automation) fn setup_worktree<
     let repo_root_str = host.repo_root()?;
     let repo_root = Path::new(&repo_root_str);
 
-    let tasks = task_ids
-        .iter()
-        .map(|task_id| ensure_task_can_enter_workflow(host, task_id, "worktree_setup"))
-        .collect::<Result<Vec<_>, _>>()?;
+    for task_id in task_ids {
+        ensure_task_can_enter_workflow(host, task_id, "worktree_setup")?;
+    }
 
     let start_point = resolve_worktree_start_point(repo_root, &base, base_sync_mode)?;
     // ORB-10380: `start_point` is a moving name (`origin/<base>`) shared by every
@@ -86,21 +85,12 @@ pub(in crate::executor::automation) fn setup_worktree<
 
     ensure_worktree(repo_root, &worktree_path, &base_sha, &branch_name)?;
 
-    // ORB-10573: the provider's Bubblewrap mount plan can only re-bind an existing child
-    // beneath the read-only `.orbit` mount. Let the runtime host materialize
-    // only targets that survive both task-scope and effective-policy checks,
-    // while this disposable checkout is still under trusted setup control.
-    if let Some(profile) = host.managed_worktree_preparation_profile("agent_implement")? {
-        let context_files = tasks
-            .iter()
-            .flat_map(|task| task.context_files.iter().cloned())
-            .collect::<Vec<_>>();
-        orbit_exec::prepare_linux_bwrap_versioned_config_targets(
-            &worktree_path,
-            &context_files,
-            &profile,
-        )?;
-    }
+    // ORB-10602: mount-anchor materialization deliberately does *not* happen
+    // here any more. Setup only ever saw a snapshot of the task's context files
+    // and the un-absolutized policy profile, so the grant set it computed could
+    // not match the one the sandbox would enforce, and could not grow with the
+    // run. Anchors are now derived from the effective profile at each spawn —
+    // see `activity_job::cli_runner::spawn::spawn_linux_bwrap`.
 
     let workspace_path_str = worktree_path.to_string_lossy().to_string();
 

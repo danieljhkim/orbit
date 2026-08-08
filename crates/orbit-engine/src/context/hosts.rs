@@ -233,15 +233,6 @@ pub trait DeterministicActionHost {
         ))
     }
     fn data_root(&self) -> &Path;
-    /// Resolve the policy/profile authority used to prepare trusted mount
-    /// anchors before an activity provider enters its OS sandbox. Hosts that
-    /// do not own a managed-worktree sandbox boundary return `None`.
-    fn managed_worktree_preparation_profile(
-        &self,
-        _activity_name: &str,
-    ) -> Result<Option<orbit_common::types::ResolvedFsProfile>, OrbitError> {
-        Ok(None)
-    }
     fn cancel_job_run(&self, run_id: &str) -> Result<(), OrbitError> {
         Err(OrbitError::Execution(format!(
             "cancel_job_run is not implemented for run '{run_id}'"

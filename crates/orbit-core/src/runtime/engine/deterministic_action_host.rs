@@ -26,35 +26,6 @@ impl DeterministicActionHost for OrbitRuntime {
         self.context.data_root()
     }
 
-    fn managed_worktree_preparation_profile(
-        &self,
-        activity_name: &str,
-    ) -> Result<Option<orbit_common::types::ResolvedFsProfile>, OrbitError> {
-        #[cfg(not(target_os = "linux"))]
-        {
-            let _ = activity_name;
-            return Ok(None);
-        }
-        #[cfg(target_os = "linux")]
-        {
-            let activity = match self.v2_activity(activity_name) {
-                Ok(activity) => activity,
-                Err(OrbitError::InvalidInput(message))
-                    if message == format!("v2 activity '{activity_name}' not found") =>
-                {
-                    return Ok(None);
-                }
-                Err(error) => return Err(error),
-            };
-            let profile_name = activity
-                .fs_profile
-                .as_deref()
-                .unwrap_or(orbit_common::types::UNRESTRICTED_FS_PROFILE);
-            let profile = self.policy_engine().def().effective_profile(profile_name)?;
-            Ok(Some(profile))
-        }
-    }
-
     fn cancel_job_run(&self, run_id: &str) -> Result<(), OrbitError> {
         OrbitRuntime::cancel_job_run(self, run_id).map(|_| ())
     }

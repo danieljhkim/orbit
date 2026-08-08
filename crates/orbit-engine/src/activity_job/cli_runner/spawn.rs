@@ -6,9 +6,10 @@ use std::process::{Child, Command, Stdio};
 use orbit_common::types::ExecutorSandboxKind;
 use orbit_common::utility::redaction::non_sensitive_env_vars;
 use orbit_exec::{
-    BwrapProbeOutcome, LinuxBwrapSpawnRequest, MacosSandboxSpawnRequest, compile_linux_bwrap_argv,
-    compile_macos_sandbox_profile, probe_bwrap, sandbox_exec_available,
-    sandbox_exec_unavailable_message, spawn_under_linux_bwrap, spawn_under_macos_sandbox,
+    BwrapProbeOutcome, LinuxBwrapSpawnRequest, MacosSandboxSpawnRequest, UnsatisfiedWriteGrant,
+    compile_linux_bwrap_argv, compile_macos_sandbox_profile, prepare_linux_bwrap_write_grants,
+    probe_bwrap, sandbox_exec_available, sandbox_exec_unavailable_message, spawn_under_linux_bwrap,
+    spawn_under_macos_sandbox,
 };
 use tempfile::NamedTempFile;
 
@@ -271,6 +272,18 @@ pub(super) fn spawn_child_with_optional_sandbox(
     }
 }
 
+/// Materialize the profile's narrow write grants, then compile argv.
+///
+/// Preparation happens here, at every spawn, rather than once during worktree
+/// setup: this is the only layer that sees the *effective* profile — policy
+/// rules absolutized against the subprocess cwd plus the host-appended run
+/// roots — so it is the only layer whose grant set cannot drift from what the
+/// kernel will enforce. Re-deriving per spawn is also what lets a run whose
+/// needs grow mid-run pick up anchors on its next provider launch.
+///
+/// Anchors are only created inside the managed worktree, which is trusted and
+/// disposable. Creating one grants nothing new: the effective profile already
+/// decided the path is writable.
 fn spawn_linux_bwrap(
     program: &str,
     args: &[String],
@@ -278,6 +291,18 @@ fn spawn_linux_bwrap(
     cwd: Option<&Path>,
     sandbox: &ResolvedSandbox,
 ) -> Result<SpawnedChild, SpawnError> {
+    if let Some(worktree) = sandbox.managed_worktree.then_some(cwd).flatten() {
+        let prepared = prepare_linux_bwrap_write_grants(&sandbox.fs_profile, worktree)
+            .map_err(|error| SpawnError::permanent(error.to_string()))?;
+        if !prepared.created.is_empty() {
+            tracing::info!(
+                target: "orbit.engine.cli_runner",
+                anchors = ?prepared.created,
+                "materialized policy-granted sandbox write anchors before launch"
+            );
+        }
+        report_unsatisfied_grants(&prepared.unsatisfied);
+    }
     let plan = compile_linux_bwrap_argv(
         &sandbox.fs_profile,
         program,
@@ -286,6 +311,18 @@ fn spawn_linux_bwrap(
         sandbox.managed_worktree,
     )
     .map_err(|error| SpawnError::permanent(error.to_string()))?;
+    // Inside a managed worktree, preparation should have satisfied every grant.
+    // Anything still unmountable is a defect in the grant set, and failing here
+    // — before the provider starts — keeps the denial attributable to a path
+    // and a rule instead of surfacing as an EROFS mid-turn.
+    if sandbox.managed_worktree && !plan.dropped_grants.is_empty() {
+        return Err(SpawnError::permanent(format!(
+            "linux-bwrap could not apply {} policy write grant(s): {}",
+            plan.dropped_grants.len(),
+            describe_grants(&plan.dropped_grants)
+        )));
+    }
+    report_unsatisfied_grants(&plan.dropped_grants);
     let child = spawn_under_linux_bwrap(LinuxBwrapSpawnRequest {
         plan: &plan,
         env,
@@ -299,6 +336,27 @@ fn spawn_linux_bwrap(
         child,
         _profile_temp: None,
     })
+}
+
+/// Host-owned anchors outside the managed worktree are the host's to create,
+/// so a miss there is reported rather than fatal — but never silently.
+fn report_unsatisfied_grants(grants: &[UnsatisfiedWriteGrant]) {
+    if grants.is_empty() {
+        return;
+    }
+    tracing::warn!(
+        target: "orbit.engine.cli_runner",
+        detail = %describe_grants(grants),
+        "policy grants a sandbox write path that could not be mounted"
+    );
+}
+
+fn describe_grants(grants: &[UnsatisfiedWriteGrant]) -> String {
+    grants
+        .iter()
+        .map(UnsatisfiedWriteGrant::describe)
+        .collect::<Vec<_>>()
+        .join("; ")
 }
 
 // pub(crate) widened for tests/ layout under ORB-00225; test reaches via exposed surface.
