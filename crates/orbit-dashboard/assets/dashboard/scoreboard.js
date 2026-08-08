@@ -291,6 +291,43 @@ function formatUsd(value) {
   return `$${amount.toFixed(4)}`;
 }
 
+function formatTokenDelta(current, previous) {
+  if (!previous) return "lifetime window · no comparison baseline";
+  const delta = asScoreboardNumber(current) - asScoreboardNumber(previous.normalized_token_total);
+  return `${delta >= 0 ? "+" : ""}${fmtScoreboardCount(delta)} vs preceding equal window`;
+}
+
+function renderNormalizedTokenUsage(tokens, previous) {
+  const usage = tokens || {};
+  const total = asScoreboardNumber(usage.normalized_token_total);
+  const invocations = asScoreboardNumber(usage.invocation_count);
+  const tasks = asScoreboardNumber(usage.linked_task_count);
+  const perInvocation = invocations === 0 ? "— (0 invocations)" : fmtScoreboardCount(Math.round(total / invocations));
+  const perTask = tasks === 0 ? "— (0 linked tasks)" : fmtScoreboardCount(Math.round(total / tasks));
+  const bucketText = [
+    `uncached input ${fmtScoreboardCount(usage.uncached_input_tokens)}`,
+    `cache read ${fmtScoreboardCount(usage.cache_read_tokens)}`,
+    `5m cache write ${fmtScoreboardCount(usage.cache_create_tokens)}`,
+    `1h cache write ${fmtScoreboardCount(usage.cache_create_1h_tokens)}`,
+    `output ${fmtScoreboardCount(usage.output_tokens)}`,
+  ].join(" · ");
+  return el("section", { class: "scoreboard-token-usage" }, [
+    el("div", { class: "scoreboard-token-usage-head" }, [
+      el("span", { class: "token-label", text: "Normalized token usage" }),
+      el("strong", { class: "token-total", text: fmtScoreboardCount(total) }),
+      el("span", { class: "token-delta", text: formatTokenDelta(total, previous) }),
+    ]),
+    el("span", { class: "token-buckets", text: bucketText }),
+    el("div", { class: "token-ratios" }, [
+      el("span", { text: `${fmtScoreboardCount(invocations)} invocations` }),
+      el("span", { text: `${fmtScoreboardCount(tasks)} linked tasks` }),
+      el("span", { text: `${perInvocation} tokens / invocation` }),
+      el("span", { text: `${perTask} tokens / linked task` }),
+    ]),
+    el("span", { class: "token-coverage", text: `${fmtScoreboardCount(usage.covered_invocation_count)}/${fmtScoreboardCount(invocations)} invocations normalized · ${fmtScoreboardCount(usage.unknown_input_basis_or_model_count)} unknown model/input basis (excluded, never guessed).` }),
+  ]);
+}
+
 function bucketLabel(bucket) {
   switch (bucket?.kind) {
     case "orchestrator": return `named orchestrator: ${bucket.orchestrator || "unknown"}`;
@@ -378,6 +415,9 @@ function renderOrchestrationBucket(bucket) {
     ]),
     el("span", { class: "bucket-meta", text: `${invocationCount} managed invocations · ${asScoreboardNumber(bucket?.linked_task_count)} linked tasks` }),
     el("div", { class: "scoreboard-orchestration-costs" }, costs),
+    Array.isArray(bucket?.models) && bucket.models.length > 0
+      ? el("span", { class: "token-models", text: `Model attribution (not a cross-provider ranking): ${bucket.models.map((model) => `${model.model} ${fmtScoreboardCount(model?.tokens?.normalized_token_total)}`).join(" · ")}` })
+      : el("span", { class: "token-models", text: "Model attribution unavailable for normalized coverage." }),
   ]);
 }
 
@@ -401,6 +441,7 @@ function renderOrchestrationSummary(orchestration) {
       el("div", { class: "scoreboard-orchestration-window", text: `Window: ${since} ≤ invocation < ${until} (exclusive cutoff; as of ${orchestration.as_of || "unknown"}).` }),
       el("p", { class: "scoreboard-orchestration-policy", text: "Provider-first estimate policy: provider-reported values are primary; derived values remain explicitly labeled estimates with their own coverage. Only the explicitly comparable same-invocation population is safe to compare." }),
     ]),
+    renderNormalizedTokenUsage(orchestration.normalized_tokens, orchestration.previous_normalized_tokens),
   ];
   if (orchestration.buckets.length === 0) {
     children.push(el("div", { class: "empty-state" }, [el("div", { class: "text", text: "No managed invocations in this bounded window." })]));

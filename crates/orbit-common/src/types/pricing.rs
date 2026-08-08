@@ -139,6 +139,38 @@ pub fn derive_cost_usd(model: &str, at: DateTime<Utc>, usage: &TokenUsage) -> Op
     cost_from_rows(price_table(), model, at, usage)
 }
 
+/// Converts provider-reported usage into mutually-exclusive token buckets.
+///
+/// This deliberately requires a covering, versioned model row: an unknown
+/// model means its input convention is unknown too, and callers must surface
+/// that coverage rather than assume the input counter is exclusive.
+pub fn normalize_token_usage(
+    model: &str,
+    at: DateTime<Utc>,
+    usage: &TokenUsage,
+) -> Option<TokenUsage> {
+    let pick = |model: &str| {
+        price_table()
+            .iter()
+            .filter(|row| row.covers(model, at))
+            .max_by(|a, b| a.effective_from.cmp(&b.effective_from))
+    };
+    let row = pick(model).or_else(|| strip_context_suffix(model).and_then(pick))?;
+    let input = match row.input_token_basis {
+        InputTokenBasis::Exclusive => usage.input,
+        InputTokenBasis::GrossIncludesCache => usage.input.checked_sub(
+            usage
+                .cache_read
+                .checked_add(usage.cache_create)?
+                .checked_add(usage.cache_create_1h)?,
+        )?,
+    };
+    Some(TokenUsage {
+        input,
+        ..usage.clone()
+    })
+}
+
 /// Selection algorithm shared by [`derive_cost_usd`] and its tests: pick the
 /// covering row with the latest `effective_from` (in case ranges ever
 /// overlap) and price `usage` against it.

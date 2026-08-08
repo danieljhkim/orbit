@@ -409,6 +409,7 @@ fn map_invocation_accounting_fact(
     Ok(InvocationAccountingFact {
         id: row.get(0)?,
         ts,
+        model,
         input_tokens,
         cache_read_tokens,
         cache_create_tokens,

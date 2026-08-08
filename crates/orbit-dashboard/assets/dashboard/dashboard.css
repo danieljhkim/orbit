@@ -1929,6 +1929,21 @@
         line-height: 1.45;
       }
 
+      .scoreboard-token-usage {
+        display: grid;
+        gap: 7px;
+        padding: 12px;
+        border-top: 1px solid var(--border);
+        border-bottom: 1px solid var(--border);
+        background: rgba(110, 159, 255, 0.05);
+      }
+      .scoreboard-token-usage-head, .token-ratios { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: baseline; }
+      .token-label, .token-buckets, .token-coverage, .token-delta, .token-models { color: var(--fg-dim); font-size: 10px; overflow-wrap: anywhere; }
+      .token-label { font-family: var(--font-mono); text-transform: uppercase; letter-spacing: .06em; }
+      .token-total { color: var(--accent-hi); font-family: var(--font-mono); font-size: 18px; }
+      .token-ratios { font-family: var(--font-mono); font-size: 11px; color: var(--fg); }
+      .token-models { display: block; margin-top: 8px; }
+
       .scoreboard-orchestration-buckets {
         display: grid;
         grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -2100,6 +2115,7 @@
         .scoreboard-orchestration-context {
           padding: 10px 12px;
         }
+        .scoreboard-token-usage { padding: 10px 12px; }
         .scoreboard-orchestration-scope {
           align-items: flex-start;
           flex-direction: column;

@@ -82,6 +82,7 @@ pub struct InvocationAccountingQuery {
 pub struct InvocationAccountingFact {
     pub id: i64,
     pub ts: DateTime<Utc>,
+    pub model: Option<String>,
     pub input_tokens: u64,
     pub cache_read_tokens: u64,
     pub cache_create_tokens: u64,

@@ -246,6 +246,16 @@ fn orchestrator_accounting_classifies_conservatively_and_reconciles_every_popula
             .sum::<u64>(),
         40
     );
+    let normalized = &metrics.normalized_tokens;
+    assert_eq!(normalized.invocation_count, 8);
+    assert_eq!(normalized.covered_invocation_count, 5);
+    assert_eq!(normalized.unknown_input_basis_or_model_count, 3);
+    assert_eq!(normalized.uncached_input_tokens, 50);
+    assert_eq!(normalized.cache_read_tokens, 10);
+    assert_eq!(normalized.cache_create_tokens, 15);
+    assert_eq!(normalized.cache_create_1h_tokens, 20);
+    assert_eq!(normalized.output_tokens, 25);
+    assert_eq!(normalized.normalized_token_total, 120);
     assert_eq!(
         metrics
             .buckets
@@ -307,6 +317,7 @@ fn orchestrator_accounting_classifies_conservatively_and_reconciles_every_popula
     assert!(orchestration.until <= orchestration.as_of);
     assert!(orchestration.since.is_some(), "bounded window is preserved");
     assert_eq!(orchestration.buckets.len(), 4);
+    assert_eq!(orchestration.normalized_tokens.normalized_token_total, 120);
     assert!(orchestration.buckets.iter().any(|bucket| bucket.kind
         == OrchestratorMetricsBucketKind::Orchestrator
         && bucket.orchestrator.as_deref() == Some("alpha")));

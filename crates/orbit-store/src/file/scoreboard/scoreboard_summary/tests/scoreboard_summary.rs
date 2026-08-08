@@ -915,7 +915,11 @@ fn orchestration_section_is_independently_versioned_and_legacy_reads_default_it(
                     comparable_cost_delta_usd: 0.0,
                     missing_provider_count: 0,
                     unpriced_derived_count: 1,
+                    normalized_tokens: NormalizedTokenSummary::default(),
+                    models: Vec::new(),
                 }],
+                normalized_tokens: NormalizedTokenSummary::default(),
+                previous_normalized_tokens: None,
             }),
             ..ScoreboardInputs::default()
         },
