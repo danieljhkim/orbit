@@ -139,7 +139,7 @@ fn first_prose_paragraph(lines: &[&str], first_index: usize) -> Option<String> {
 /// the bold run is itself the subject.
 fn strip_bold_lead(text: &str) -> String {
     match split_bold_lead(text) {
-        Some((label, rest)) if rest.is_empty() => label.to_string(),
+        Some((label, "")) => label.to_string(),
         Some((_, rest)) => rest.to_string(),
         None => text.to_string(),
     }

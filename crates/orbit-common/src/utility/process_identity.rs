@@ -113,7 +113,7 @@ pub fn current_pid_namespace() -> Option<&'static str> {
     {
         use std::sync::OnceLock;
         static NAMESPACE: OnceLock<Option<String>> = OnceLock::new();
-        return NAMESPACE
+        NAMESPACE
             .get_or_init(|| {
                 let link = std::fs::read_link("/proc/self/ns/pid").ok()?;
                 let rendered = link.to_string_lossy();
@@ -121,7 +121,7 @@ pub fn current_pid_namespace() -> Option<&'static str> {
                 let (inode, _) = tail.split_once(']')?;
                 (!inode.is_empty()).then(|| inode.to_string())
             })
-            .as_deref();
+            .as_deref()
     }
     #[cfg(not(target_os = "linux"))]
     None
