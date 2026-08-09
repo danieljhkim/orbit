@@ -12,7 +12,10 @@ pass = [
 sandbox = "danger-full-access"
 
 [workflow]
+auto_ship = true
+base_branch = "agent-main"
 default_crew = "sol"
+system_crew = "luna"
 
 [crews.opus]
 backend = "cli"
@@ -62,14 +65,6 @@ backend = "cli"
 
 [pr]
 task_url_template = "https://orbit-cli.com/tasks/{task_id}"
-
-[duel]
-candidates = ["codex", "claude", "grok"]
-
-[duel.models]
-codex  = "gpt-5.6-terra"
-claude = "opus"
-grok = "grok-build"
 
 [docs]
 roots = ["docs/"]
