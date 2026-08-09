@@ -9,7 +9,7 @@ use std::time::{Duration, Instant};
 use chrono::Utc;
 use orbit_common::types::{
     AuditEventStatus, JobRun, JobRunState, JobScheduleState, JobTargetType, NotFoundKind,
-    OrbitError, OrbitEvent, PipelineState, audit_execution_id,
+    OrbitError, OrbitEvent, audit_execution_id,
 };
 use orbit_store::{AuditEventInsertParams, JobRunStepParams, TaskReservationReleaseReason};
 use serde::Serialize;
@@ -17,6 +17,7 @@ use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
 use crate::OrbitRuntime;
+use crate::command::job::exec::V2RunFinalizationOptions;
 use crate::command::job::resume::ResumePlan;
 
 #[cfg(unix)]
@@ -214,16 +215,7 @@ impl OrbitRuntime {
                 Some(input.clone()),
                 resume.map(|plan| plan.source.run_id.clone()),
             )?;
-            let initial_state = match resume.and_then(|plan| plan.resume_state.as_ref()) {
-                Some(source_state) => super::exec::seeded_resume_state(source_state, &run),
-                None => PipelineState::new(run.run_id.clone(), run.job_id.clone(), input.clone()),
-            };
-            self.stores()
-                .jobs()
-                .write_run_state(&run.run_id, &initial_state)?;
-            if let Some(plan) = resume {
-                self.reconcile_resume_task_ownership(plan, &run.run_id)?;
-            }
+            self.seed_v2_pipeline_run(&run, &input, resume)?;
 
             self.reconcile_stale_job_runs(Some(job_name))?;
             let active_runs = self
@@ -460,66 +452,15 @@ impl OrbitRuntime {
             resume.as_ref(),
         );
         let finished_at = Utc::now();
-        let duration_ms = Some(
-            finished_at
-                .signed_duration_since(started_at)
-                .num_milliseconds()
-                .max(0) as u64,
-        );
-
-        match outcome {
-            Ok(result) => {
-                let mut state = self.read_run_state(&run.run_id)?.unwrap_or_else(|| {
-                    PipelineState::new(run.run_id.clone(), run.job_id.clone(), input)
-                });
-                state.sync_pipeline(result.pipeline.clone());
-                self.stores().jobs().write_run_state(&run.run_id, &state)?;
-
-                let final_state = if result.success {
-                    JobRunState::Success
-                } else {
-                    let fallback = "job completed with success=false but emitted no failure detail";
-                    let message = result.message.as_deref().unwrap_or(fallback);
-                    let _ =
-                        self.record_pipeline_failure_step(run, started_at, finished_at, message);
-                    JobRunState::Failed
-                };
-                self.finalize_job_run_with_reservation_cleanup(
-                    &run.run_id,
-                    final_state,
-                    finished_at,
-                    duration_ms,
-                    TaskReservationReleaseReason::RunTerminal,
-                )?;
-                self.record_event(OrbitEvent::JobRunCompleted {
-                    job_id: run.job_id.clone(),
-                    run_id: run.run_id.clone(),
-                    state: final_state.to_string(),
-                })?;
-                Ok(())
-            }
-            Err(error) => {
-                let _ = self.record_pipeline_failure_step(
-                    run,
-                    started_at,
-                    finished_at,
-                    &error.to_string(),
-                );
-                self.finalize_job_run_with_reservation_cleanup(
-                    &run.run_id,
-                    JobRunState::Failed,
-                    finished_at,
-                    duration_ms,
-                    TaskReservationReleaseReason::RunTerminal,
-                )?;
-                self.record_event(OrbitEvent::JobRunCompleted {
-                    job_id: run.job_id.clone(),
-                    run_id: run.run_id.clone(),
-                    state: JobRunState::Failed.to_string(),
-                })?;
-                Err(error)
-            }
-        }
+        self.finalize_v2_pipeline_run(
+            run,
+            &input,
+            started_at,
+            finished_at,
+            outcome.as_ref(),
+            V2RunFinalizationOptions::DETACHED_WORKER,
+        )?;
+        outcome.map(|_| ())
     }
 
     pub(crate) fn record_pipeline_failure_step(
