@@ -68,8 +68,24 @@ pub(super) fn resolve_executor_sandbox(
                             "resolve fsProfile for linux-bwrap: {err}"
                         ))
                     })?;
-                append_codex_side_write_roots(runtime, provider, &mut resolved)?;
-                append_linux_runtime_write_roots(runtime, subprocess_cwd, &mut resolved)?;
+                // Runtime and provider conveniences must not turn an activity
+                // profile with an empty modify surface into a workspace writer.
+                // Besides violating that profile, workspace re-allows make a
+                // direct Bubblewrap invocation unable to enforce global
+                // non-subtree denies such as `**/.env` for paths created after
+                // spawn. Provider state and global Orbit runtime roots remain
+                // available below; neither overlaps workspace-relative denies.
+                let grants_workspace_modify =
+                    resolved.modify.iter().any(|rule| !rule.starts_with('!'));
+                if grants_workspace_modify {
+                    append_codex_side_write_roots(runtime, provider, &mut resolved)?;
+                }
+                append_linux_runtime_write_roots(
+                    runtime,
+                    subprocess_cwd,
+                    grants_workspace_modify,
+                    &mut resolved,
+                )?;
                 append_linux_provider_state_roots(&mut resolved)?;
                 let managed_worktree = subprocess_cwd
                     .and_then(|cwd| active_worktree_subpath(runtime, cwd))
@@ -231,6 +247,7 @@ fn append_unique_modify_root(resolved: &mut ResolvedFsProfile, root: String) {
 fn append_linux_runtime_write_roots(
     runtime: &OrbitRuntime,
     subprocess_cwd: Option<&Path>,
+    grants_workspace_modify: bool,
     resolved: &mut ResolvedFsProfile,
 ) -> Result<(), DispatchError> {
     let global = runtime
@@ -244,9 +261,25 @@ fn append_linux_runtime_write_roots(
         .canonicalize()
         .unwrap_or_else(|_| runtime.paths().orbit_dir.clone());
 
+    for directory in [global.join("state/logs"), global.join("tasks")] {
+        ensure_owned_directory(&directory)?;
+        append_unique_modify_root(resolved, directory.display().to_string());
+    }
+    for file in [
+        global.join("orbit.db"),
+        global.join("orbit.db-wal"),
+        global.join("orbit.db-shm"),
+    ] {
+        if file.exists() {
+            append_unique_modify_root(resolved, file.display().to_string());
+        }
+    }
+
+    if !grants_workspace_modify {
+        return Ok(());
+    }
+
     for directory in [
-        global.join("state/logs"),
-        global.join("tasks"),
         workspace.join("tasks"),
         workspace.join("learnings"),
         workspace.join("frictions"),
@@ -258,9 +291,6 @@ fn append_linux_runtime_write_roots(
         append_unique_modify_root(resolved, directory.display().to_string());
     }
     for file in [
-        global.join("orbit.db"),
-        global.join("orbit.db-wal"),
-        global.join("orbit.db-shm"),
         workspace.join("state/.id_alloc.lock"),
         workspace.join("state/semantic.db"),
         workspace.join("state/semantic.db-wal"),

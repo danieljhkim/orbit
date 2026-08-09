@@ -40,6 +40,65 @@ fn resolve_executor_sandbox_returns_linux_descriptor_with_absolute_mounts() {
 
 #[cfg(target_os = "linux")]
 #[test]
+fn direct_reviewer_profile_does_not_gain_workspace_runtime_writes() {
+    let (_root, runtime, repo_root) = runtime_with_workspace_layout();
+    seed_executor(
+        &runtime,
+        "claude",
+        Some(orbit_common::types::ExecutorSandboxKind::LinuxBwrap),
+    );
+
+    let reviewer = runtime
+        .resolve_executor_sandbox("claude", Some("reviewer"), Some(&repo_root))
+        .expect("resolve reviewer sandbox")
+        .expect("descriptor");
+    assert!(!reviewer.managed_worktree);
+    let canonical_repo = repo_root.canonicalize().expect("canonical repo");
+    assert!(
+        reviewer
+            .fs_profile
+            .modify
+            .iter()
+            .filter(|rule| !rule.starts_with('!'))
+            .all(|rule| !rule.starts_with(&canonical_repo.display().to_string())),
+        "read-only activity profile must not gain workspace runtime writes: {:?}",
+        reviewer.fs_profile.modify
+    );
+    assert!(
+        reviewer
+            .fs_profile
+            .read
+            .iter()
+            .any(|rule| rule.starts_with('!') && rule.ends_with("/**/*.env")),
+        "global denyRead rules must remain in the resolved profile: {:?}",
+        reviewer.fs_profile.read
+    );
+    compile_linux_bwrap_argv(
+        &reviewer.fs_profile,
+        "/bin/true",
+        &[],
+        Some(&canonical_repo),
+        reviewer.managed_worktree,
+    )
+    .expect("direct reviewer sandbox must compile with default dotenv denies");
+
+    let writer = runtime
+        .resolve_executor_sandbox("claude", None, Some(&repo_root))
+        .expect("resolve write-capable sandbox")
+        .expect("descriptor");
+    let error = compile_linux_bwrap_argv(
+        &writer.fs_profile,
+        "/bin/true",
+        &[],
+        Some(&canonical_repo),
+        writer.managed_worktree,
+    )
+    .expect_err("a direct write-capable sandbox must still fail closed");
+    assert!(error.to_string().contains("non-subtree denyModify"));
+}
+
+#[cfg(target_os = "linux")]
+#[test]
 fn resolve_executor_sandbox_marks_only_specific_orbit_worktree_managed() {
     let (_root, runtime, repo_root) = runtime_with_workspace_layout();
     seed_executor(

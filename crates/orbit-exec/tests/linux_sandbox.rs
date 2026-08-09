@@ -426,6 +426,26 @@ fn argv_reallows_only_narrow_existing_paths_after_orbit_deny() {
 }
 
 #[test]
+fn direct_invocation_allows_non_subtree_denies_without_writable_roots() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let workspace = temp.path().join("workspace");
+    std::fs::create_dir_all(&workspace).expect("create workspace");
+    let resolved = profile(vec![
+        format!("!{}/**/.env", workspace.display()),
+        format!("!{}/**/*.env", workspace.display()),
+    ]);
+
+    let plan = compile_linux_bwrap_argv(&resolved, "/bin/true", &[], None, false)
+        .expect("a read-only direct invocation needs no mount-based write exclusion");
+
+    assert!(
+        !plan.args.iter().any(|arg| arg == "--bind"),
+        "a no-modify profile must not gain a writable bind: {:?}",
+        plan.args
+    );
+}
+
+#[test]
 fn direct_invocation_fails_closed_for_overlapping_non_subtree_deny() {
     let temp = tempfile::tempdir().expect("tempdir");
     let workspace = temp.path().join("workspace");
