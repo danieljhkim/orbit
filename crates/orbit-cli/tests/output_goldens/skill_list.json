@@ -6,7 +6,7 @@
     "path": "<HOME>/.orbit/skills/orbit"
   },
   {
-    "content_hash": "8b9c662de6dc8477b25f04eb3db3e82f08cdd6464fd07a83021384f3d99fe3ca",
+    "content_hash": "bcdae5ba3240e3cb44fc9389030af1114a3f25755a54b0e769f895b9ae0614fb",
     "id": "orbit-knowledge",
     "meta": null,
     "path": "<HOME>/.orbit/skills/orbit-knowledge"
@@ -30,7 +30,7 @@
     "path": "<HOME>/.orbit/skills/orbit-task-pilot"
   },
   {
-    "content_hash": "bbbd2fb05fad007eaac7478effb4f8f2c0919343da71ffbe8ee5d539fd5f8452",
+    "content_hash": "57dfe86f9c26b5d00598fc9b76fdc6318f682cab502b1cc2f15fc7f2026eaf71",
     "id": "orbit-workflow",
     "meta": null,
     "path": "<HOME>/.orbit/skills/orbit-workflow"

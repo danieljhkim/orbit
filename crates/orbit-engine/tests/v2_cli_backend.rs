@@ -167,9 +167,13 @@ fn scenario_c_wall_clock_timeout() -> Result<(), Box<dyn std::error::Error>> {
         host: Some(&host),
     })?;
     let elapsed = started.elapsed();
+    // 5s, matching this scenario's documented contract above. The point of the
+    // bound is that the 2s timeout kills the `sleep 10` rather than waiting it
+    // out, so anything well under 10s proves it. The previous 3s left only ~1s
+    // of slack for subprocess teardown and flaked on loaded CI runners.
     assert!(
-        elapsed < Duration::from_secs(3),
-        "AC #7: timeout did not kill subprocess within 3s (elapsed {:?})",
+        elapsed < Duration::from_secs(5),
+        "AC #7: timeout did not kill subprocess within 5s (elapsed {:?})",
         elapsed
     );
 
@@ -232,8 +236,8 @@ fn scenario_e_loader_rejection_loop_session_cli() -> Result<(), Box<dyn std::err
         ..
     } = &err;
     assert_eq!(asset_path, "synthetic/loop_session_cli.yaml");
-    assert_eq!(step_id, "review");
-    assert_eq!(session_name, "reviewer");
+    assert_eq!(step_id, "assess");
+    assert_eq!(session_name, "assessor");
     assert_eq!(*item_number, 1);
     println!(
         "    §3.2 item {} rejection for step `{}`",
@@ -250,7 +254,7 @@ fn scenario_f_loader_rejection_auto_resolved_to_cli() -> Result<(), Box<dyn std:
     let err = validate_job_loop_session_backends(&job, "synthetic/loop_session_auto.yaml")
         .expect_err("expected rejection");
     let BackendConstraintError::LoopSessionOnCli { step_id, .. } = &err;
-    assert_eq!(step_id, "review");
+    assert_eq!(step_id, "assess");
     println!("    auto-resolved-to-cli rejected for step `{}`", step_id);
     Ok(())
 }
