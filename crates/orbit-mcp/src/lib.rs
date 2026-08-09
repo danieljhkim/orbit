@@ -16,12 +16,18 @@
 //! domain policy belongs in higher-level composition crates.
 //!
 //! # Transport
-//! Only stdio is supported in this cut. HTTP/SSE/streamable-http transports
-//! are follow-up work once authentication is in scope.
+//! Stdio and TCP are supported. The protocol handler performs no IO, so the
+//! two transports share framing, dispatch, and capability filtering unchanged;
+//! they differ only in how a byte stream arrives and in how many sessions one
+//! server process owns. HTTP/SSE/streamable-http remain follow-up work.
+//! Authenticating a network endpoint is the deployment's concern, not this
+//! crate's — see [`McpTcpServer`].
 
 mod adapter;
 mod client;
 mod error;
+mod session;
+mod tcp;
 
 use std::future::Future;
 use std::pin::Pin;
@@ -38,6 +44,8 @@ pub use adapter::OrbitToolServer;
 pub use client::{
     McpClientInitialization, McpClientRequestError, McpToolResponse, RawOrbitMcpClient,
 };
+pub use session::McpSessionFactory;
+pub use tcp::{McpTcpServer, serve_tcp_with_context_and_composition};
 
 /// Complete JSON input schema advertised for one MCP tool.
 pub type McpInputSchema = Map<String, Value>;
@@ -454,6 +462,10 @@ pub trait McpHost: Send + Sync + 'static {
 /// Runs until the client disconnects or the server encounters a fatal
 /// transport error. The function is async and expects to be driven by a tokio
 /// runtime (see `tokio::runtime::Runtime::block_on`).
+///
+/// A stdio process serves exactly one client for its lifetime, so these entry
+/// points build one server and keep it. Use [`McpTcpServer`] when more than one
+/// client can arrive, since that server must not be shared.
 pub async fn serve_stdio(host: Arc<dyn McpHost>) -> Result<(), OrbitError> {
     serve_stdio_with_context(host, ToolSessionContext::trusted_local(None, None, None)).await
 }

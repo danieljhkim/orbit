@@ -3,7 +3,7 @@ summary: "MCP Session Context — Decisions"
 type: design
 title: "MCP Session Context — Decisions"
 owner: codex
-last_updated: 2026-08-01
+last_updated: 2026-08-09
 last_validated: 2026-08-08
 status: Accepted
 feature: mcp-session-context
@@ -11,7 +11,7 @@ doc_role: decisions
 tags: ["mcp-session-context", "mcp", "workspace"]
 paths: ["crates/orbit-mcp/**", "crates/orbit-remote/src/mcp/**", "crates/orbit-tools/**", "crates/orbit-core/src/command/tool/**"]
 related_features: ["mcp-session-context", "task-artifacts"]
-related_artifacts: ["ORB-00256", "ORB-00406", "ORB-10228", "ORB-10262", "ORB-10319", "ORB-10448", "ADR-0181", "ADR-0199", "ADR-0149"]
+related_artifacts: ["ORB-00256", "ORB-00406", "ORB-10228", "ORB-10262", "ORB-10319", "ORB-10448", "ORB-10690", "ADR-0181", "ADR-0199", "ADR-0149", "ADR-0348"]
 ---
 
 # MCP Session Context — Decisions
@@ -34,10 +34,17 @@ Narrative lives in the ADR store — retrieve it with `orbit tool run orbit.adr.
 
 Narrative lives in the ADR store — retrieve it with `orbit tool run orbit.adr.show --input '{"id":"ADR-0199"}'`.
 
+## ADR-0348 — Serve MCP over TCP with one server instance per session
+
+**Status:** Proposed · 2026-08 · [ORB-10690]
+
+Narrative lives in the ADR store — retrieve it with `orbit tool run orbit.adr.show --input '{"id":"ADR-0348"}'`.
+
 ## Task References
 
 - [ORB-00256] implemented MCP ambient workspace session context.
 - [ORB-00406] proposes workspace_path-addressable host tools ([ADR-0199]).
+- [ORB-10690] added the MCP TCP transport with per-session server construction ([ADR-0348]).
 - [ORB-10228] accepted and implemented the trusted-provenance amendment to [ADR-0181].
 - [ORB-10262] accepted and implemented ADR-0199 through the exact-checkout local broker.
 - [ORB-10319] consolidated the broker/session implementation in `orbit-remote`; it does not change ADR-0181 or ADR-0199 semantics.

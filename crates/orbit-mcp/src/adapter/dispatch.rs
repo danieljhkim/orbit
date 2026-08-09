@@ -156,13 +156,16 @@ impl OrbitToolServer {
         }
     }
 
-    pub(super) fn replace_session_context(&self, session_context: ToolSessionContext) {
+    // Crate-visible so the session-isolation tests can observe and overwrite
+    // exactly the state `initialize` mutates, from the crate-root module that
+    // owns per-session construction.
+    pub(crate) fn replace_session_context(&self, session_context: ToolSessionContext) {
         if let Ok(mut guard) = self.session_context.write() {
             *guard = session_context;
         }
     }
 
-    pub(super) fn session_context(&self) -> ToolSessionContext {
+    pub(crate) fn session_context(&self) -> ToolSessionContext {
         self.session_context
             .read()
             .map(|guard| guard.clone())
