@@ -50,6 +50,19 @@ fn managed_run_rejects_dispatch_before_host_resolution() {
 }
 
 #[test]
+fn ship_schema_has_no_retired_review_controls() {
+    let schema = OrbitWorkflowShipTool.schema();
+    let names = schema
+        .parameters
+        .iter()
+        .map(|parameter| parameter.name.as_str())
+        .collect::<Vec<_>>();
+
+    assert!(!names.contains(&"review"));
+    assert!(!names.contains(&"review_crew"));
+}
+
+#[test]
 fn observation_remains_non_mutating_inside_managed_run() {
     let context = managed_context();
 

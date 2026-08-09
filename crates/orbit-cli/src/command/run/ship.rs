@@ -29,7 +29,7 @@ impl ShipMode {
 #[command(
     about = "Ship backlog or explicitly selected tasks through the gated task pipeline",
     override_usage = "orbit run ship [<TASK_ID>...] [OPTIONS]",
-    after_help = "Examples:\n  orbit run ship\n  orbit run ship T123\n  orbit run ship T123 T456 --mode local\n  orbit run ship T123 --base main\n  orbit run ship T123 --review --review-crew opus-review\n\nInspect submitted runs with `orbit run history -j task_auto_pipeline` and `orbit run show <RUN_ID>`."
+    after_help = "Examples:\n  orbit run ship\n  orbit run ship T123\n  orbit run ship T123 T456 --mode local\n  orbit run ship T123 --base main\n\nInspect submitted runs with `orbit run history -j task_auto_pipeline` and `orbit run show <RUN_ID>`."
 )]
 pub struct ShipCommand {
     /// Optional task IDs to seed explicit gated shipment. Omit for auto mode.
@@ -44,13 +44,6 @@ pub struct ShipCommand {
     /// `[workflow] base_branch` from `config.toml` (or `main` if unset).
     #[arg(short = 'b', long)]
     pub base: Option<String>,
-    /// Run an independent review after implementation and before shipment.
-    /// Requires `--review-crew`.
-    #[arg(long)]
-    pub review: bool,
-    /// Explicit crew used only for the independent review step.
-    #[arg(long, value_name = "CREW")]
-    pub review_crew: Option<String>,
     /// Output as JSON.
     #[arg(long)]
     pub json: bool,
@@ -140,13 +133,7 @@ pub(crate) fn build_ship_run_plan(
     let base = args.base.as_deref().unwrap_or(config_base_branch);
     Ok(WorkflowRunPlan {
         workflow_alias,
-        input: build_ship_input(
-            mode,
-            base,
-            &args.task_ids,
-            args.review,
-            args.review_crew.as_deref(),
-        )?,
+        input: build_ship_input(mode, base, &args.task_ids)?,
     })
 }
 

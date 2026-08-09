@@ -235,7 +235,7 @@ fn sweep_active_workspace(
         });
     }
 
-    let invoke = runtime.submit_ship_run(mode, None, &[], false, None, Some("ship-sweep"))?;
+    let invoke = runtime.submit_ship_run(mode, None, &[], Some("ship-sweep"))?;
     Ok(SweepReport {
         workspace_id: ws.id.clone(),
         workspace_name: ws.name.clone(),

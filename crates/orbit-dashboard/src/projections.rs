@@ -160,7 +160,6 @@ pub(crate) fn job_run_to_json_with_state(run: &JobRun, state: Option<&PipelineSt
         "knowledge_metrics": run.knowledge_metrics,
         "resolved_crew": run.resolved_crew,
         "crew_model": run.crew_model,
-        "review_lineage": independent_review_lineage(run),
         "steps": run.steps.iter().map(|s| json!({
             "step_index": s.step_index,
             "target_type": s.target_type.to_string(),
@@ -176,22 +175,6 @@ pub(crate) fn job_run_to_json_with_state(run: &JobRun, state: Option<&PipelineSt
         })).collect::<Vec<_>>(),
         "created_at": run.created_at.to_rfc3339(),
     })
-}
-
-fn independent_review_lineage(run: &JobRun) -> Option<Value> {
-    if run.job_id != "task_review_pipeline" {
-        return None;
-    }
-    let input = run.input.as_ref()?.as_object()?;
-    Some(json!({
-        "parent_run_id": input.get("parent_run_id"),
-        "task_ids": input.get("task_ids"),
-        "workspace_path": input.get("workspace_path"),
-        "candidate_head": input.get("candidate_head"),
-        "candidate_head_sha": input.get("candidate_head_sha"),
-        "pr_number": input.get("pr_number"),
-        "pr_url": input.get("pr_url"),
-    }))
 }
 
 pub(crate) fn task_to_json(task: &Task, status_by_id: &BTreeMap<String, TaskStatus>) -> Value {

@@ -1,7 +1,7 @@
 ---
 title: Resident Orchestrator — Design
 owner: codex
-last_updated: 2026-07-20
+last_updated: 2026-08-09
 status: Draft
 feature: resident-orchestrator
 doc_role: design
@@ -140,13 +140,12 @@ supervisor. During each cycle it must:
 5. dispatch only explicit ready child IDs through the workspace's normal shipment workflow;
 6. query the authoritative run-list projection by each ready child task ID before dispatching;
    observe any non-terminal matching run instead of submitting another shipment;
-7. obtain and enforce the workspace's independent-review policy;
-8. treat waiting for human review/merge approval as an explicit gate: record the pending PR and
+7. treat waiting for human review/merge approval as an explicit gate: record the pending PR and
    required approver evidence, then exit until that evidence exists;
-9. resolve failures, review findings, merge conflicts, and stale branches within its workspace;
-10. verify landed commits and child lifecycle state rather than trusting agent prose or a PR merge
+8. resolve failures, review findings, merge conflicts, and stale branches within its workspace;
+9. verify landed commits and child lifecycle state rather than trusting agent prose or a PR merge
    button; and
-11. complete the parent only after every required child is terminal and the parent-level acceptance
+10. complete the parent only after every required child is terminal and the parent-level acceptance
     criteria have been verified as an integrated outcome.
 
 Shipment submission takes explicit child task IDs. Before a Run becomes dispatchable, the shipment
@@ -156,9 +155,8 @@ execution summaries, and resident checkpoints may point to that association, but
 source of truth. This makes the pre-dispatch query reliable even if the resident crashes immediately
 after submission and before writing its own checkpoint.
 
-For the `ws_orbit` canary, the review gate is Daniel's human merge approval; agent review is off by
-default. Planner, implementer, and reviewer crew labels are activity labels on one resolved
-provider/model/backend assignment and do not establish independent review. The resident may prepare
+For the `ws_orbit` canary, the review gate is Daniel's human merge approval. Planner, implementer,
+and reviewer crew labels are activity labels on one resolved provider/model/backend assignment. The resident may prepare
 and repair the candidate, but it must enter the human-approval wait state rather than approving or
 merging on Daniel's behalf.
 
@@ -230,7 +228,7 @@ the routine timeout by at least the same delta while retaining explicit headroom
 The resident reuses existing leaf delivery workflows. It does not implement code inside the epic
 cycle unless the workspace's delivery policy explicitly treats a bounded change as direct work.
 Normally it promotes ready children and invokes shipment with explicit task IDs, selected mode,
-crew, base branch, and independent review configuration.
+crew and base branch.
 
 An epic may have sequential and parallel children. Ordering is expressed durably by creating
 `BlockedBy` relations on child tasks; `dependencies` is the read projection of those relations, not

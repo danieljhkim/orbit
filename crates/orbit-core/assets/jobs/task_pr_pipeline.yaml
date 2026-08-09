@@ -13,15 +13,6 @@
 #   for automation that requires a human/orchestrator decision to clear. Tasks
 #   already in `review`/`done` are left untouched.
 #
-# Optional independent review:
-# - `independent_review` starts exactly one durable `task_review_pipeline`
-#   child only after the candidate branch is pushed, the PR is published, and
-#   the participating tasks are promoted to review. Its input snapshots the
-#   parent run, task bundle, worktree, PR, candidate branch, and exact pushed
-#   SHA. The child uses only the required explicit `input.review_crew` and
-#   cannot mutate the published candidate. A structured exact-head verdict is
-#   required before this parent may succeed.
-
 schemaVersion: 2
 kind: Job
 metadata:
@@ -37,8 +28,6 @@ spec:
     task_ids: []
     base_branch: main
     base_sync: remote
-    review: false
-    review_crew: null
     title: null
     body: null
 
@@ -149,35 +138,6 @@ spec:
         base_ref: "{{ steps.sync_base.output.base_ref }}"
         pr_number: "{{ steps.pr_open.output.pr_number }}"
         pr_url: "{{ steps.pr_open.output.pr_url }}"
-
-    - id: independent_review
-      when: "{{ input.review }} == true && {{ steps.commit.output.skipped_no_diff_expected }} != true"
-      target: activity:invoke_and_wait
-      default_input:
-        job_name: task_review_pipeline
-        run_input:
-          task_ids: "{{ input.task_ids }}"
-          workspace_path: "{{ steps.worktree.output.workspace_path }}"
-          repo_root: "{{ steps.worktree.output.workspace_path }}"
-          base_branch: "{{ input.base_branch }}"
-          crew: "{{ input.review_crew }}"
-          parent_run_id: "{{ steps.worktree.output.job_run_id }}"
-          candidate_head: "{{ steps.push.output.branch }}"
-          candidate_head_sha: "{{ steps.push.output.local_sha }}"
-          pr_number: "{{ steps.pr_open.output.pr_number }}"
-          pr_url: "{{ steps.pr_open.output.pr_url }}"
-        dedupe_run_input_field: parent_run_id
-        timeout_seconds: 7200
-
-    - id: require_independent_review_success
-      when: "{{ input.review }} == true && {{ steps.commit.output.skipped_no_diff_expected }} != true"
-      target: activity:pipeline_success_guard
-      default_input:
-        context: task_pr_pipeline independent review
-        result: "{{ steps.independent_review.output }}"
-        review_step: independent_review
-        verdict_step: require_exact_head_verdict
-        required_verdict: approve
 
     - id: promote_no_diff
       when: "{{ steps.commit.output.skipped_no_diff_expected }} == true"

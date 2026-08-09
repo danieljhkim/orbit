@@ -1,7 +1,7 @@
 ---
 title: Resident Orchestrator — Overview
 owner: codex
-last_updated: 2026-07-20
+last_updated: 2026-08-09
 status: Draft
 feature: resident-orchestrator
 doc_role: overview
@@ -69,7 +69,7 @@ ordinary lifecycle, dependency, crew, validation, review, and PR machinery; the 
 create a second execution model.
 
 **Shepherding.** The resident's responsibility for the entire workspace-local delivery loop:
-decomposition, explicit dispatch, run observation, failure recovery, independent review,
+decomposition, explicit dispatch, run observation, failure recovery,
 conflict/finding resolution, merge verification, child closure, and finally parent closure.
 
 ## 3. At a Glance

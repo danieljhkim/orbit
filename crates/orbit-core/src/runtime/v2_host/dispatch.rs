@@ -44,7 +44,6 @@ pub(super) const REGISTERED_DETERMINISTIC_ACTIONS: &[&str] = &[
     "git_merge",
     "git_push",
     "git_rebase",
-    "independent_review_guard",
     "invoke_and_wait",
     "list_backlog_tasks",
     "list_triage_candidates",
@@ -411,11 +410,6 @@ pub(super) fn run_deterministic(
         // Fail a workflow if one or more child pipeline wait results did not
         // reach `succeeded`.
         "pipeline_success_guard" => pipeline_actions::pipeline_success_guard(action, input),
-        // Require the independent reviewer to return a structured verdict for
-        // the exact candidate SHA snapshotted by the PR pipeline.
-        "independent_review_guard" => {
-            pipeline_actions::independent_review_guard(runtime, action, input)
-        }
         // Post-loop gate signal: the admission window never opened in
         // time. Emits a `gate.starvation` audit event with task_ids and
         // conflicting_files so an epic-orchestrator parent can decide
@@ -446,8 +440,6 @@ fn resolve_workspace_ship_input(
             binding.ship_mode,
             runtime.workflow_base_branch(),
             &[],
-            false,
-            None,
         )
         .map_err(|error| DispatchError::DeterministicActionFailed {
             action: action.to_string(),
@@ -459,8 +451,6 @@ fn resolve_workspace_ship_input(
         crate::command::workflow::ShipMode::Local,
         runtime.workflow_base_branch(),
         &[],
-        false,
-        None,
     )
     .map_err(|error| DispatchError::DeterministicActionFailed {
         action: action.to_string(),

@@ -504,8 +504,8 @@ fn fake_cli(basename: &str, body: &str) -> Result<FakeCli, Box<dyn std::error::E
 }
 
 fn synthetic_loop_session_cli_job() -> JobV2 {
-    let review_step = JobV2Step {
-        id: "review".to_string(),
+    let assess_step = JobV2Step {
+        id: "assess".to_string(),
         when: None,
         retry: None,
         recovery_activity: None,
@@ -529,12 +529,12 @@ fn synthetic_loop_session_cli_job() -> JobV2 {
             fs_profile: None,
             default_input: None,
             timeout_seconds: 0,
-            session: Some("reviewer".to_string()),
+            session: Some("assessor".to_string()),
             role: None,
         }),
     };
     let loop_step = JobV2Step {
-        id: "review_fix".to_string(),
+        id: "assess_fix".to_string(),
         when: None,
         retry: None,
         recovery_activity: None,
@@ -544,7 +544,7 @@ fn synthetic_loop_session_cli_job() -> JobV2 {
                 items: None,
                 max_iterations: 3,
                 break_when: None,
-                steps: vec![review_step],
+                steps: vec![assess_step],
             },
         },
     };

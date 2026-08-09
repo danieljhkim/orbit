@@ -7,15 +7,10 @@ use super::super::codex_cli::CodexCliTransport;
 
 const IMPLEMENT_ACTIVITY: &str =
     include_str!("../../../../../orbit-core/assets/activities/agent_implement.yaml");
-const REVIEW_ACTIVITY: &str =
-    include_str!("../../../../../orbit-core/assets/activities/agent_review.yaml");
 const RESPONSE_SCHEMA: &str =
     r#"{"schemaVersion":1,"status":"success|failed|timeout","result":{...},"error":null}"#;
 const BASELINE_IMPLEMENT_BYTES: usize = 11_760;
-const BASELINE_REVIEW_BYTES: usize = 7_294;
-const BASELINE_AGGREGATE_BYTES: usize = 19_054;
-const MAX_AGGREGATE_BYTES: usize = BASELINE_AGGREGATE_BYTES * 80 / 100;
-const MAX_AGGREGATE_TOKENS: usize = 3_500;
+const MAX_IMPLEMENT_TOKENS: usize = 2_500;
 
 #[derive(Deserialize)]
 struct ActivityAsset {
@@ -70,53 +65,23 @@ fn representative_activity_prompts_fit_budget_and_preserve_contracts() {
         "workspace_path": workspace,
         "repo_root": workspace,
     });
-    let review_input = json!({
-        "task_ids": ["ORB-00001"],
-        "workspace_path": workspace,
-        "repo_root": workspace,
-        "base_branch": "agent-main",
-        "crew": "sol",
-        "parent_run_id": "jrun-parent",
-        "candidate_head": "refs/heads/orbit-task",
-        "candidate_head_sha": "0123456789abcdef0123456789abcdef01234567",
-        "pr_number": "123",
-        "pr_url": "https://example.invalid/pr/123",
-    });
-
     let implement = representative_prompt(IMPLEMENT_ACTIVITY, implement_input, Some(task));
-    let review = representative_prompt(REVIEW_ACTIVITY, review_input, None);
     let tokenizer = tiktoken_rs::cl100k_base_singleton();
     let implement_tokens = tokenizer
         .encode_with_special_tokens(std::str::from_utf8(&implement).expect("utf-8 prompt"))
         .len();
-    let review_tokens = tokenizer
-        .encode_with_special_tokens(std::str::from_utf8(&review).expect("utf-8 prompt"))
-        .len();
-
     assert!(
-        implement.len() + review.len() <= MAX_AGGREGATE_BYTES,
-        "representative prompts grew beyond the accepted 20% reduction: implement={} review={} aggregate={} max={MAX_AGGREGATE_BYTES}",
-        implement.len(),
-        review.len(),
-        implement.len() + review.len(),
-    );
-    assert!(
-        implement_tokens + review_tokens <= MAX_AGGREGATE_TOKENS,
-        "cl100k token estimate grew beyond budget: implement={implement_tokens} review={review_tokens} aggregate={} max={MAX_AGGREGATE_TOKENS}",
-        implement_tokens + review_tokens,
+        implement_tokens <= MAX_IMPLEMENT_TOKENS,
+        "cl100k token estimate grew beyond budget: implement={implement_tokens} max={MAX_IMPLEMENT_TOKENS}",
     );
     assert!(implement.len() < BASELINE_IMPLEMENT_BYTES);
-    assert!(review.len() < BASELINE_REVIEW_BYTES);
-    for (name, prompt) in [("implement", &implement), ("review", &review)] {
-        let text = std::str::from_utf8(prompt).expect("utf-8 prompt");
-        assert_eq!(
-            text.matches(RESPONSE_SCHEMA).count(),
-            1,
-            "{name} must receive the exact response schema only from the provider renderer"
-        );
-    }
-
     let implement_text = std::str::from_utf8(&implement).expect("utf-8 implement prompt");
+    assert_eq!(
+        implement_text.matches(RESPONSE_SCHEMA).count(),
+        1,
+        "implementation must receive the exact response schema only from the provider renderer"
+    );
+
     for contract in [
         "task.terminal",
         "before the first edit",
@@ -134,21 +99,6 @@ fn representative_activity_prompts_fit_budget_and_preserve_contracts() {
         assert!(
             implement_text.contains(contract),
             "implementation contract disappeared: {contract}"
-        );
-    }
-    let review_text = std::str::from_utf8(&review).expect("utf-8 review prompt");
-    for contract in [
-        "candidate_head_sha",
-        "git status --porcelain",
-        "Do not edit",
-        "[independent-review]",
-        "reconciled_through",
-        "orbit.friction.add",
-        "result.reviewed_head_sha",
-    ] {
-        assert!(
-            review_text.contains(contract),
-            "review contract disappeared: {contract}"
         );
     }
 }

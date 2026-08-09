@@ -916,7 +916,6 @@ fn pipeline_run(id: &str, state: JobRunState, task_ids: &[&str]) -> JobRun {
             "base_branch": "agent-main",
             "base_sync": "remote",
             "review": false,
-            "review_crew": null,
             "task_ids": task_ids,
         }),
     )

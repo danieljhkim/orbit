@@ -25,28 +25,27 @@ spec:
         task_id: "{{ input.task_id }}"
         workspace_path: "{{ steps.worktree.output.workspace_path }}"
 
-    # Review↔fix collapsed into one loop: per §4.2. Reviewer holds the
-    # Session across iterations; fixer does not. §3.2 item 1 pins the
-    # reviewer to `backend: http` — agent_review_diff declares that
-    # explicitly. The fixer is `backend: auto`.
-    - id: review_fix
+    # Assessment and fixes share one loop. The assessor holds the Session
+    # across iterations; the fixer does not. Cross-iteration sessions require
+    # `backend: http`, which agent_assess_diff declares explicitly.
+    - id: assess_fix
       loop:
         max_iterations: 5
-        break_when: "{{ steps.review.output.decision }} == approved"
+        break_when: "{{ steps.assess.output.decision }} == approved"
         steps:
-          - id: review
-            target: activity:agent_review_diff
-            session: reviewer
+          - id: assess
+            target: activity:agent_assess_diff
+            session: assessor
             default_input:
               diff: "{{ steps.implement.output.diff }}"
               branch: "{{ steps.worktree.output.head_ref }}"
               iteration: "{{ iteration }}"
 
           - id: fix
-            when: "{{ steps.review.output.blocking_count }} != 0"
+            when: "{{ steps.assess.output.blocking_count }} != 0"
             target: activity:agent_apply_fixes
             default_input:
-              findings: "{{ steps.review.output.findings }}"
+              findings: "{{ steps.assess.output.findings }}"
               branch: "{{ steps.worktree.output.head_ref }}"
               iteration: "{{ iteration }}"
 
