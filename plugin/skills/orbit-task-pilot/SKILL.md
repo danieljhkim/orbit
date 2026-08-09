@@ -21,6 +21,8 @@ For each task:
 
 Never write: no editing, creating, moving, or deleting repository files; no task updates or lifecycle transitions; no promotion, dispatch, implementation, pipeline invocation, commit, push, merge, PR, or approval.
 
+Never update an Orbit task.
+
 Never expand the partition beyond the supplied IDs, except to cite a concrete dependency, duplicate, or accepted ADR.
 
 Task-pilot is an operational role, not a crew, actor identity, or scheduler.
