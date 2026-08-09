@@ -44,17 +44,6 @@ pub struct ResolvedSandbox {
     pub managed_worktree: bool,
 }
 
-/// Orbit-core-owned responsibilities the v2 dispatcher delegates back across
-/// the engine→core boundary: deterministic action execution (which needs the
-/// runtime's tool registry + ToolContext) and provider credential sourcing
-/// (which needs env/config access).
-///
-/// Agent-loop construction itself is NOT on this trait — it lives in
-/// `orbit_engine::activity_job::agent_loop_driver::drive_agent_loop`, so implementors
-/// never have to name orbit-agent types. The dispatcher calls
-/// `host.api_key_for(provider)?` then `drive_agent_loop(spec, &api_key, ...)`
-/// directly.
-
 /// Input bundle for a single v2 activity dispatch.
 pub struct V2DispatchInput<'a> {
     pub activity_name: &'a str,
