@@ -14,6 +14,7 @@ use std::sync::{Mutex, MutexGuard, OnceLock};
 use orbit_common::types::activity_job::{AgentLoopSpec, Backend, OnDenial, Provider};
 use orbit_common::types::{TaskPriority, TaskStatus, TaskType};
 use orbit_engine::{V2AuditWriter, drive_agent_loop, reset_replay_transport};
+use orbit_store::Store;
 use tempfile::NamedTempFile;
 
 use super::super::test_support::{runtime_with_workspace_layout, seed_list_backlog_task};

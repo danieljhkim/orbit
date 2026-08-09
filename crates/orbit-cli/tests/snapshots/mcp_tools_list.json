@@ -1313,6 +1313,10 @@
           "description": "PR review status (e.g. approve, request-changes; empty string clears)",
           "type": "string"
         },
+        "priority": {
+          "description": "New dispatch priority (low, medium, high, or critical)",
+          "type": "string"
+        },
         "relations": {
           "description": "Replacement typed task relations as an array of {type, target} objects",
           "type": "array"
