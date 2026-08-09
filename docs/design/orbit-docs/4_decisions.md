@@ -10,6 +10,7 @@ summary: "Orbit Docs — accepted ADRs: locked frontmatter schema, `.orbit/` vs 
 tags: [orbit-docs]
 related_features: [orbit-docs]
 related_artifacts: [ADR-0169, ADR-0170, ADR-0171, ADR-0180, ORB-00163, ORB-00206]
+last_validated: 2026-08-09
 ---
 
 # Orbit Docs — Decisions
