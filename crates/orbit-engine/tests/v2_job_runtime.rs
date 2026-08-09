@@ -11,7 +11,7 @@
 //! Phase 3 end-to-end integration coverage for the v2 job DAG executor.
 //!
 //! Runs each sample under `crates/orbit-core/assets/jobs/` through
-//! `orbit_engine::execute_job` and asserts the expected §7 envelope
+//! `orbit_engine::execute_job_with_resume` and asserts the expected §7 envelope
 //! events appear (or — for the denial sample — don't appear).
 //!
 //! No credentials needed: the loop + denial samples use the replay path
@@ -26,8 +26,8 @@ use std::sync::Arc;
 use orbit_agent::loop_engine::{InMemorySink, LoopAuditEvent};
 use orbit_common::types::activity_job::{V2AuditEventKind, load_job_asset};
 use orbit_engine::{
-    DispatchError, ResolvedCliExecutor, V2AuditWriter, V2RuntimeHost, V2SqliteSink, execute_job,
-    reset_replay_transport,
+    DispatchError, ResolvedCliExecutor, V2AuditWriter, V2RuntimeHost, V2SqliteSink,
+    execute_job_with_resume, reset_replay_transport,
 };
 use serde_json::Value;
 
@@ -149,7 +149,7 @@ fn smoke_denial_no_retry(samples: &Path, audit_root: &Path) -> Result<(), String
     // error IS the expected outcome. Inspect the persisted audit writer.
     let events = match events_res {
         Ok(events) => events,
-        Err(err) if err.contains("execute_job errored: tool") => take_last_events(),
+        Err(err) if err.contains("execute_job_with_resume errored: tool") => take_last_events(),
         Err(err) => return Err(err),
     };
 
@@ -177,7 +177,7 @@ fn smoke_denial_no_retry(samples: &Path, audit_root: &Path) -> Result<(), String
 // Helpers
 // ---------------------------------------------------------------------------
 
-/// Run a sample through `execute_job`, return the emitted envelope events,
+/// Run a sample through `execute_job_with_resume`, return the emitted envelope events,
 /// and stash the underlying loop-engine events for callers that inspect them.
 fn run_sample(
     path: PathBuf,
@@ -208,7 +208,7 @@ fn run_sample(
             .with_envelope_sink(envelope),
     );
 
-    let result = execute_job(&spec, input, run_id, writer.clone(), &StubHost);
+    let result = execute_job_with_resume(&spec, input, run_id, writer.clone(), &StubHost, None);
 
     // Stash loop-engine events for loop/denial smokes.
     *LAST_LOOP.lock().unwrap() = inner.events();
@@ -228,7 +228,7 @@ fn run_sample(
             }
             Ok(events)
         }
-        Err(err) => Err(format!("execute_job errored: {err}")),
+        Err(err) => Err(format!("execute_job_with_resume errored: {err}")),
     }
 }
 
@@ -240,7 +240,7 @@ fn find_event<'a>(
 }
 
 // Last-seen-buffers so the denial smoke can inspect events after a failed
-// `execute_job` call bubbles up as Err().
+// `execute_job_with_resume` call bubbles up as Err().
 use std::sync::Mutex;
 static LAST_ENVELOPE: Mutex<Vec<orbit_common::types::activity_job::V2AuditEvent>> =
     Mutex::new(Vec::new());
