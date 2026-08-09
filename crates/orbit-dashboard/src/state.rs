@@ -373,6 +373,7 @@ impl DashboardState {
     /// used by [`crate::serve`] and by every handler test (which builds an
     /// in-memory runtime and wants a trivial single-workspace harness).
     pub(crate) fn single(runtime: Arc<OrbitRuntime>) -> Self {
+        let global_root = runtime.global_root().to_path_buf();
         let entry = WsEntry {
             id: SINGLE_WORKSPACE_ID.to_string(),
             name: SINGLE_WORKSPACE_ID.to_string(),
@@ -400,7 +401,7 @@ impl DashboardState {
             },
         );
         Self::from_parts(
-            PathBuf::new(),
+            global_root,
             SnapshotData {
                 entries: vec![entry],
                 default_workspace: Some(SINGLE_WORKSPACE_ID.to_string()),
@@ -485,10 +486,10 @@ impl DashboardState {
         self.inner.snapshot().entries.clone()
     }
 
-    /// Global orbit root (`~/.orbit`) this server was launched against. Empty
-    /// in single mode ([`DashboardState::single`]). Host-level views (routine
-    /// scheduler health) read from here rather than any one workspace runtime,
-    /// because routine fires live in the global store.
+    /// Global orbit root (`~/.orbit`) this server was launched against.
+    /// Host-level views (routine scheduler health and MCP composition) read
+    /// from here rather than any one workspace runtime, because their state
+    /// lives in the global store.
     pub(crate) fn global_root(&self) -> &std::path::Path {
         &self.inner.global_root
     }

@@ -155,10 +155,12 @@ fn cli_parses_broker_capability_and_rejects_unknown_values() {
 
 #[test]
 fn cli_parses_web_serve() {
-    let cli = Cli::parse_from(["orbit", "web", "serve"]);
+    let cli = Cli::parse_from(["orbit", "web", "serve", "--capabilities", "operator"]);
     match cli.command {
         Commands::Web(command) => match command.command {
-            WebSubcommand::Serve(_) => {}
+            WebSubcommand::Serve(args) => {
+                assert_eq!(args.capabilities, Some(McpCapability::Operator));
+            }
             WebSubcommand::Connect(_) => panic!("expected serve"),
         },
         _ => panic!("expected top-level web command"),

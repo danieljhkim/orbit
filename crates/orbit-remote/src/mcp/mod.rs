@@ -16,6 +16,7 @@ mod transport;
 mod tests;
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use orbit_common::types::{McpCapability, ToolSessionContext};
@@ -37,6 +38,22 @@ use self::transport::{PrivateHubRequestHandler, RemoteCallContextResolver};
 pub use self::host::{canonical_mcp_tool_definitions, safe_mcp_tool_names};
 pub use self::registration::register_local_spoke;
 
+struct McpEndpointComposition {
+    host: Arc<dyn McpHost>,
+    trusted_context: ToolSessionContext,
+    composition: McpServerComposition,
+}
+
+impl McpEndpointComposition {
+    fn session_factory(&self) -> orbit_mcp::McpSessionFactory {
+        orbit_mcp::McpSessionFactory::new(
+            Arc::clone(&self.host),
+            self.trusted_context.clone(),
+            self.composition.clone(),
+        )
+    }
+}
+
 /// Serve the local broker or fixed coordination hub over MCP stdio.
 ///
 /// This is intentionally independent of Clap so alternate front ends can
@@ -46,6 +63,46 @@ pub fn serve_mcp_stdio(
     requested_capability: Option<McpCapability>,
 ) -> Result<(), OrbitError> {
     let global_root = resolve_global_root()?;
+    let endpoint = compose_mcp_endpoint(global_root, hub, requested_capability)?;
+
+    let tokio_runtime = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .map_err(|error| OrbitError::Execution(format!("tokio runtime: {error}")))?;
+    tokio_runtime.block_on(orbit_mcp::serve_stdio_with_context_and_composition(
+        endpoint.host,
+        endpoint.trusted_context,
+        endpoint.composition,
+    ))
+}
+
+/// Build the local broker as an embeddable stateful Streamable HTTP service.
+///
+/// `global_root` is explicit so the dashboard and tests use the same authority
+/// as their already-resolved state rather than consulting process cwd. The
+/// service keeps rmcp's loopback Host validation, and a missing capability is
+/// the least-privileged agent surface.
+pub fn mcp_http_service(
+    global_root: PathBuf,
+    requested_capability: Option<McpCapability>,
+) -> Result<
+    (
+        orbit_mcp::McpStreamableHttpService,
+        orbit_mcp::McpHttpServerControl,
+    ),
+    OrbitError,
+> {
+    let endpoint = compose_mcp_endpoint(global_root, false, requested_capability)?;
+    Ok(orbit_mcp::streamable_http_service(
+        endpoint.session_factory(),
+    ))
+}
+
+fn compose_mcp_endpoint(
+    global_root: PathBuf,
+    hub: bool,
+    requested_capability: Option<McpCapability>,
+) -> Result<McpEndpointComposition, OrbitError> {
     // Parse the trusted file, when present, before constructing either server
     // host. Workspace/cwd config never participates in this load.
     let trusted_config = load_trusted_mcp_config(&global_root)?;
@@ -109,15 +166,11 @@ pub fn serve_mcp_stdio(
     };
     trusted_context.effective_capabilities = BTreeSet::from([capability]);
 
-    let tokio_runtime = tokio::runtime::Builder::new_multi_thread()
-        .enable_all()
-        .build()
-        .map_err(|error| OrbitError::Execution(format!("tokio runtime: {error}")))?;
-    tokio_runtime.block_on(orbit_mcp::serve_stdio_with_context_and_composition(
+    Ok(McpEndpointComposition {
         host,
         trusted_context,
         composition,
-    ))
+    })
 }
 
 fn broker_server_composition(host: Arc<BrokerMcpHost>) -> McpServerComposition {

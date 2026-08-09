@@ -50,8 +50,10 @@ pub use host_identity::{
 pub use host_registry::{HostRegistryService, WorkspaceLink, require_local_hub_identity};
 pub use knowledge::{HubKnowledgeSequenceService, scan_registered_knowledge_inventories};
 pub use mcp::{
-    canonical_mcp_tool_definitions, register_local_spoke, safe_mcp_tool_names, serve_mcp_stdio,
+    canonical_mcp_tool_definitions, mcp_http_service, register_local_spoke, safe_mcp_tool_names,
+    serve_mcp_stdio,
 };
+pub use orbit_mcp::{McpHttpServerControl, McpStreamableHttpService};
 pub use persistence::RemoteStore;
 pub use profile::build_execution_profile_v1;
 pub use registry_cache::{RegistryCacheOutcome, RegistryCacheService, RegistryCacheState};

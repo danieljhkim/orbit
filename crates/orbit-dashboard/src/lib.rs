@@ -1,4 +1,4 @@
-//! `orbit-dashboard` — read-only web dashboard and JSON API server.
+//! `orbit-dashboard` — dashboard, JSON API, and network MCP server.
 //!
 //! This crate isolates the axum-based dashboard (HTML/JS assets + `/api/*`
 //! handlers) from orbit-cli so that CLI changes do not force rebuilds of the
@@ -27,15 +27,16 @@ pub use connect::{ConnectArgs, connect};
 use std::net::{IpAddr, SocketAddr};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::{future::Future, io};
 
 use axum::Router;
 use axum::http::{HeaderValue, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use clap::Args;
-use orbit_common::types::{WorkspaceRegistry, WorkspaceStatus};
+use orbit_common::types::{McpCapability, WorkspaceRegistry, WorkspaceStatus};
 use orbit_core::{OrbitError, OrbitRuntime};
-use orbit_remote::workspace_registry;
+use orbit_remote::{McpHttpServerControl, mcp_http_service, workspace_registry};
 
 const INDEX_HTML: &str = include_str!("../assets/dashboard/index.html");
 const DASHBOARD_CSS: &str = include_str!("../assets/dashboard/dashboard.css");
@@ -73,7 +74,7 @@ pub(crate) const DEFAULT_DASHBOARD_PORT: u16 = 7878;
 
 /// Arguments for `orbit web serve` (and the library entry point).
 #[derive(Args, Clone)]
-#[command(about = "Run the Orbit dashboard")]
+#[command(about = "Run the Orbit dashboard and network MCP endpoint")]
 pub struct ServeArgs {
     /// Host or IP to bind to. Defaults to loopback for safety.
     #[arg(long, default_value = "127.0.0.1")]
@@ -94,6 +95,11 @@ pub struct ServeArgs {
     /// — removing it would break tunnels against an old/new binary mix.
     #[arg(long)]
     pub global: bool,
+
+    /// Exact non-hierarchical capability exposed by the MCP endpoint.
+    /// Defaults to the least-privileged agent surface.
+    #[arg(long, value_name = "CAPABILITY")]
+    pub capabilities: Option<McpCapability>,
 }
 
 /// Boot the dashboard for a single, already-built runtime and block until
@@ -220,27 +226,7 @@ fn run_server(args: &ServeArgs, state: state::DashboardState) -> Result<(), Orbi
     let addr = SocketAddr::new(args.host, args.port);
     let url = format!("http://{addr}");
     let no_open = args.no_open;
-
-    let app = Router::new()
-        .route("/", get(serve_index))
-        .route("/static/dashboard.css", get(serve_dashboard_css))
-        .route("/static/marked.umd.js", get(serve_marked_js))
-        .route("/static/purify.min.js", get(serve_purify_js))
-        .route("/static/app.js", get(serve_app_js))
-        .route("/static/common.js", get(serve_common_js))
-        .route("/static/markdown.js", get(serve_markdown_js))
-        .route("/static/tasks.js", get(serve_tasks_js))
-        .route("/static/audit.js", get(serve_audit_js))
-        .route("/static/scoreboard.js", get(serve_scoreboard_js))
-        .route("/static/reliability.js", get(serve_reliability_js))
-        .route("/static/log-tail.js", get(serve_log_tail_js))
-        .route("/static/diagnostics.js", get(serve_diagnostics_js))
-        .route("/static/router.js", get(serve_router_js))
-        .route("/static/runs.js", get(serve_runs_js))
-        .route("/static/run-detail.js", get(serve_run_detail_js))
-        .route("/healthz", get(health::healthz))
-        .nest("/api", api::router())
-        .with_state(state);
+    let (app, mcp_control) = build_app(state, args.capabilities)?;
 
     let tokio_runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
@@ -261,13 +247,63 @@ fn run_server(args: &ServeArgs, state: state::DashboardState) -> Result<(), Orbi
             open_browser(&url);
         }
 
-        axum::serve(listener, app)
-            .with_graceful_shutdown(shutdown_signal())
-            .await
-            .map_err(|e| OrbitError::Execution(format!("serve: {e}")))?;
-
-        Ok::<(), OrbitError>(())
+        serve_listener(listener, app, mcp_control, shutdown_signal()).await
     })
+}
+
+fn build_app(
+    state: state::DashboardState,
+    capability: Option<McpCapability>,
+) -> Result<(Router, McpHttpServerControl), OrbitError> {
+    let (mcp_service, mcp_control) =
+        mcp_http_service(state.global_root().to_path_buf(), capability)?;
+    let app = Router::new()
+        .route("/", get(serve_index))
+        .route("/static/dashboard.css", get(serve_dashboard_css))
+        .route("/static/marked.umd.js", get(serve_marked_js))
+        .route("/static/purify.min.js", get(serve_purify_js))
+        .route("/static/app.js", get(serve_app_js))
+        .route("/static/common.js", get(serve_common_js))
+        .route("/static/markdown.js", get(serve_markdown_js))
+        .route("/static/tasks.js", get(serve_tasks_js))
+        .route("/static/audit.js", get(serve_audit_js))
+        .route("/static/scoreboard.js", get(serve_scoreboard_js))
+        .route("/static/reliability.js", get(serve_reliability_js))
+        .route("/static/log-tail.js", get(serve_log_tail_js))
+        .route("/static/diagnostics.js", get(serve_diagnostics_js))
+        .route("/static/router.js", get(serve_router_js))
+        .route("/static/runs.js", get(serve_runs_js))
+        .route("/static/run-detail.js", get(serve_run_detail_js))
+        .route("/healthz", get(health::healthz))
+        // ADR-0349: MCP clients are not browser API callers. Keep this route
+        // outside `/api` so it never inherits browser-origin middleware.
+        .nest_service("/mcp", mcp_service)
+        .nest("/api", api::router())
+        .with_state(state);
+    Ok((app, mcp_control))
+}
+
+async fn serve_listener<F>(
+    listener: tokio::net::TcpListener,
+    app: Router,
+    mcp_control: McpHttpServerControl,
+    shutdown: F,
+) -> Result<(), OrbitError>
+where
+    F: Future<Output = ()> + Send + 'static,
+{
+    let shutdown_control = mcp_control.clone();
+    let result = axum::serve(listener, app)
+        .with_graceful_shutdown(async move {
+            shutdown.await;
+            // Cancel sessions before Axum waits for open response bodies to
+            // drain, or a long-lived MCP SSE stream can stall shutdown.
+            shutdown_control.cancel();
+        })
+        .await;
+    // Also cancel if the listener itself exits before the shutdown signal.
+    mcp_control.cancel();
+    result.map_err(|e: io::Error| OrbitError::Execution(format!("serve: {e}")))
 }
 
 /// Reject binding the dashboard to anything other than a loopback address.

@@ -9,9 +9,9 @@ status: Accepted
 feature: mcp-session-context
 doc_role: design
 tags: ["mcp-session-context", "mcp", "workspace"]
-paths: ["crates/orbit-mcp/**", "crates/orbit-remote/src/mcp/**", "crates/orbit-tools/**", "crates/orbit-core/src/command/tool/**"]
+paths: ["crates/orbit-mcp/**", "crates/orbit-remote/src/mcp/**", "crates/orbit-dashboard/src/**", "crates/orbit-tools/**", "crates/orbit-core/src/command/tool/**"]
 related_features: ["mcp-session-context", "task-artifacts"]
-related_artifacts: ["ORB-00256", "ORB-10228", "ORB-10262", "ORB-10319", "ORB-10448", "ORB-10690", "ADR-0181", "ADR-0199", "ADR-0149", "ADR-0348"]
+related_artifacts: ["ORB-00256", "ORB-10228", "ORB-10262", "ORB-10319", "ORB-10448", "ORB-10690", "ORB-10691", "ADR-0181", "ADR-0199", "ADR-0149", "ADR-0348", "ADR-0349"]
 ---
 
 # MCP Session Context — Design
@@ -40,7 +40,7 @@ Clients announce workspace with:
 
 `OrbitToolServer` stores a `ToolSessionContext` in an `RwLock` for the lifetime of one session. Each `tools/call` snapshots that context, generates exactly one unique `mcp_call_id` before name/exposure preflight, and passes the same snapshot through registry-backed dispatch.
 
-That state is per session, not per process. A stdio server serves exactly one client for its lifetime, so the two coincide there; a listener does not. `McpSessionFactory::build_session` therefore constructs one `OrbitToolServer` per session, and `McpTcpServer` hands each accepted connection its own. Sharing one server across connections would let the last client to `initialize` overwrite every other client's workspace selector and return another workspace's data as a success. [ADR-0348], [ORB-10690]
+That state is per session, not per process. A stdio server serves exactly one client for its lifetime, so the two coincide there; a listener does not. `McpSessionFactory::build_session` therefore constructs one `OrbitToolServer` per session. `McpTcpServer` hands each accepted connection its own, while the stateful Streamable HTTP session manager invokes the same factory for each initialized HTTP session. Sharing one server across sessions would let the last client to `initialize` overwrite every other client's workspace selector and return another workspace's data as a success. [ADR-0348], [ORB-10690], [ADR-0349], [ORB-10691]
 
 The Remote-owned `BrokerMcpHost` resolves and validates the logical workspace plus any exact local checkout before constructing or selecting an `OrbitRuntime`, then forwards the trusted context into `OrbitRuntime::execute_tool_command_dispatch_with_session_context`, which places it on `ToolContext` and audit. Unknown/unexposed denial and runtime success/failure retain the same per-call context. `orbit-cli` only delegates `mcp serve` into this composition. Graph commands have no MCP or CLI surface as of ORB-10357.
 
@@ -105,7 +105,9 @@ The trusted context carries the entire effective capability set. [ORB-10262] tes
 
 ## 6. Concerns & Honest Limitations
 
-The session context covers stdio and TCP sessions. [ORB-10690] established per-session isolation for the multi-client case; any future HTTP transport must go through the same session-construction seam rather than promoting the value to process-global state. The TCP endpoint carries no authentication of its own — reachability is the deployment's concern — and its capability set is chosen by the caller that starts it, never by the client.
+The session context covers stdio, TCP, and stateful Streamable HTTP sessions. [ORB-10690] established per-session isolation for the multi-client case; [ORB-10691] routes the HTTP session manager through that same construction seam and mounts `/mcp` on the dashboard listener. The MCP route is outside the dashboard `/api` origin middleware because non-browser MCP clients may legitimately present a non-localhost `Origin`. Loopback-only binding and rmcp's loopback `Host` validation remain in force. The endpoint carries no authentication of its own — reverse-proxy reachability and authentication are the deployment's concern — and its single effective capability is chosen at process start, defaulting to `agent` and never accepted from client metadata. [ADR-0349]
+
+Streamable HTTP emits SSE frames incrementally at the origin. An intermediary can still buffer a correct stream, so deployment-path streaming requires separate verification. Graceful shutdown cancels MCP sessions before Axum drains HTTP connections; without that ordering an open SSE session could keep the process alive indefinitely.
 
 The external channel carries a workspace address, not a trusted workspace ID. The local broker validates an absolute path against Git common-directory identity, `.orbit/config.yaml`, the logical registry, local role, and owner before separately populating `workspace_id`. Process cwd and `ORBIT_ROOT` are not fallbacks. Hub-link negotiation remains a later MCP Bridge unit.
 
@@ -117,5 +119,6 @@ The external channel carries a workspace address, not a trusted workspace ID. Th
 - [ORB-10319] moved broker/session resolution and MCP composition into the vertical `orbit-remote` feature crate while leaving runtime audit/dispatch in Core.
 - [ORB-10448] advertised the workspace selector on every workspace-scoped tool and routed hub-placement coordination reads by checkout identity, making the [ADR-0181] "clients that cannot send initialize metadata pass `workspace` explicitly" path reachable from a managed worktree activity.
 - [ORB-10690] added the TCP transport and moved session construction behind `McpSessionFactory` so concurrent clients cannot observe or overwrite each other's session context ([ADR-0348]).
+- [ORB-10691] mounted stateful Streamable HTTP at the dashboard `/mcp` route, isolated its middleware, defaulted it to the agent capability, and coupled MCP session cancellation to HTTP graceful shutdown ([ADR-0349]).
 
 Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

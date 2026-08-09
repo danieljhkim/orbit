@@ -29,6 +29,7 @@ url.workspace = true
 
 [dev-dependencies]
 orbit-common = { path = "../orbit-common", features = ["test-util"] }
+reqwest.workspace = true
 serde_yaml.workspace = true
 tempfile = "3"
 tower = { version = "0.5", features = ["util"] }

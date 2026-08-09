@@ -31,7 +31,7 @@ pub enum McpSubcommand {
     Init(InitArgs),
     /// Remove MCP client integration for the current workspace
     Remove(RemoveArgs),
-    /// Serve the Orbit tool registry over Model Context Protocol
+    /// Serve the Orbit tool registry over Model Context Protocol on stdio
     Serve(ServeArgs),
 }
 
@@ -50,7 +50,7 @@ impl Execute for McpSubcommand {
 }
 
 #[derive(Args)]
-#[command(about = "Serve the Orbit tool registry over Model Context Protocol")]
+#[command(about = "Serve the Orbit tool registry over Model Context Protocol on stdio")]
 pub struct ServeArgs {
     /// Serve only checkoutless coordination tools as the fixed local hub.
     #[arg(long)]

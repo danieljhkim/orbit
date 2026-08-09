@@ -16,16 +16,17 @@
 //! domain policy belongs in higher-level composition crates.
 //!
 //! # Transport
-//! Stdio and TCP are supported. The protocol handler performs no IO, so the
-//! two transports share framing, dispatch, and capability filtering unchanged;
-//! they differ only in how a byte stream arrives and in how many sessions one
-//! server process owns. HTTP/SSE/streamable-http remain follow-up work.
+//! Stdio, TCP, and Streamable HTTP are supported. The protocol handler performs
+//! no IO, so the transports share framing, dispatch, and capability filtering
+//! unchanged; they differ only in how a byte stream arrives and in how many
+//! sessions one server process owns.
 //! Authenticating a network endpoint is the deployment's concern, not this
-//! crate's — see [`McpTcpServer`].
+//! crate's — see [`McpTcpServer`] and [`McpStreamableHttpService`].
 
 mod adapter;
 mod client;
 mod error;
+mod http;
 mod session;
 mod tcp;
 
@@ -44,6 +45,7 @@ pub use adapter::OrbitToolServer;
 pub use client::{
     McpClientInitialization, McpClientRequestError, McpToolResponse, RawOrbitMcpClient,
 };
+pub use http::{McpHttpServerControl, McpStreamableHttpService, streamable_http_service};
 pub use session::McpSessionFactory;
 pub use tcp::{McpTcpServer, serve_tcp_with_context_and_composition};
 

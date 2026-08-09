@@ -37,8 +37,10 @@ fn checkout(id: &str, root: &str) -> WorkspaceCheckout {
 #[test]
 fn single_mode_exposes_one_default_workspace() {
     let runtime = OrbitRuntime::in_memory().expect("build runtime");
+    let global_root = runtime.global_root().to_path_buf();
     let state = DashboardState::single(Arc::new(runtime));
 
+    assert_eq!(state.global_root(), global_root);
     assert_eq!(state.entries().len(), 1);
     assert_eq!(state.default_workspace().as_deref(), Some("default"));
     assert!(state.runtime_for("default").is_ok());
