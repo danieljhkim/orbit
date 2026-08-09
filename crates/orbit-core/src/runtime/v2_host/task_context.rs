@@ -83,7 +83,10 @@ fn agent_task_context_json(
     let (kept_context_files, _dropped) =
         prune_missing_context_files(&prune_root, canonical_context_files);
 
-    let mut context = serde_json::json!({
+    // `json!` with a braced literal always yields `Value::Object`; the fallback
+    // arm keeps this total so the agent context never panics on a malformed
+    // literal, and takes the map by value instead of cloning it.
+    let mut context = match serde_json::json!({
         "id": task.id.clone(),
         "status": task.status.cli_name(),
         "terminal": refuses_implementer_writes(task.status),
@@ -96,10 +99,10 @@ fn agent_task_context_json(
         "external_refs": task.external_refs.clone(),
         "workspace_path": workspace_path,
         "repo_root": repo_root,
-    })
-    .as_object()
-    .expect("agent task context is an object")
-    .clone();
+    }) {
+        Value::Object(map) => map,
+        _ => serde_json::Map::new(),
+    };
 
     if !task.execution_summary.trim().is_empty() {
         context.insert(
