@@ -106,6 +106,7 @@ pub(crate) struct RuntimeConfig {
     /// Named provider-model assignments from `[crews.<name>]`.
     pub(crate) crews: BTreeMap<String, Crew>,
     pub(crate) default_crew: Option<String>,
+    pub(crate) system_crew: String,
     /// Optional floor for the local task-id allocator (`[tasks] id_start`).
     /// Applied forward-only on runtime build so machines can hold disjoint id
     /// ranges. `None` leaves the allocator untouched.
@@ -135,6 +136,7 @@ impl RuntimeConfig {
             routines_source: snapshot.routines_role.as_deref() == Some("source"),
             crews: default_crews(),
             default_crew: snapshot.workflow_default_crew.clone(),
+            system_crew: snapshot.workflow_system_crew.clone(),
             tasks_id_start: snapshot.tasks_id_start,
             snapshot,
         }
@@ -221,6 +223,7 @@ impl RuntimeConfig {
             routines_source: snapshot.routines_role.as_deref() == Some("source"),
             crews,
             default_crew: snapshot.workflow_default_crew.clone(),
+            system_crew: snapshot.workflow_system_crew.clone(),
             tasks_id_start: snapshot.tasks_id_start,
             snapshot,
         })
@@ -242,6 +245,13 @@ impl RuntimeConfig {
 
     pub(crate) fn workflow_auto_ship(&self) -> bool {
         self.workflow_auto_ship
+    }
+
+    /// Configured crew for system activities. Resolution of the named crew is
+    /// deliberately deferred to dispatch so a bad system crew does not stop
+    /// unrelated activity execution.
+    pub(crate) fn system_crew(&self) -> &str {
+        &self.system_crew
     }
 
     pub(crate) fn routines_source(&self) -> bool {

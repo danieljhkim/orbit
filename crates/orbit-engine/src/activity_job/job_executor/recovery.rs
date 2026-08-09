@@ -46,14 +46,42 @@ pub(super) fn attempt_recovery_activity(
     attempt: u32,
     max_attempts: u32,
 ) -> bool {
-    let input = serde_json::json!({
+    let mut input = serde_json::json!({
         "failed_step_id": step.id,
         "activity_name": step_activity_name(step),
         "error_message": original_err.to_string(),
         "attempt": attempt,
         "max_attempts": max_attempts,
     });
-    let role_overridden_spec = match role_overridden_recovery_spec(recovery, ctx) {
+    if recovery.name == "step_failure_recovery"
+        && let Some(object) = input.as_object_mut()
+    {
+        object.insert("system_crew".to_string(), Value::Bool(true));
+    }
+    let input = match inject_system_crew_input(ctx.host, &input) {
+        Ok(input) => input,
+        Err(error) => {
+            tracing::warn!(
+                target: "orbit.engine.job_executor",
+                run_id = %ctx.run_id,
+                failed_step_id = %step.id,
+                recovery_activity = %recovery.name,
+                error = %error,
+                "step recovery crew resolution failed; preserving original step outcome"
+            );
+            emit_job_event_lossy(
+                &ctx.audit,
+                ctx.task_id(),
+                V2AuditEventKind::StepRecoveryAttempted {
+                    step_id: step.id.clone(),
+                    recovery_activity: recovery.name.clone(),
+                    recovery_succeeded: false,
+                },
+            );
+            return false;
+        }
+    };
+    let role_overridden_spec = match role_overridden_recovery_spec(recovery, ctx, &input) {
         Ok(spec) => spec,
         Err(error) => {
             tracing::warn!(
@@ -187,18 +215,21 @@ pub(super) fn attempt_failure_activity(
 pub(super) fn role_overridden_recovery_spec(
     recovery: &ResolvedRecoveryActivity,
     ctx: &ExecCtx<'_>,
+    input: &Value,
 ) -> Result<Option<ActivityV2Spec>, DispatchError> {
     let ActivityV2Spec::AgentLoop(inline_spec) = &recovery.spec else {
         return Ok(None);
     };
-    let resolved = if recovery.name == "step_failure_recovery" {
-        resolve_recovery_agent_settings(ctx.host, &ctx.run_id, inline_spec)?
-    } else {
-        let Some(role) = inline_spec.role else {
-            return Ok(None);
+    let input = inject_system_crew_input(ctx.host, input)?;
+    let resolved =
+        if let Some(resolved) = resolve_explicit_crew_settings(ctx.host, inline_spec, &input)? {
+            resolved
+        } else {
+            let Some(role) = inline_spec.role else {
+                return Ok(None);
+            };
+            resolve_agent_settings(role, ctx.host, inline_spec, &ctx.input)
         };
-        resolve_agent_settings(role, ctx.host, inline_spec, &ctx.input)
-    };
     let mut spec = inline_spec.clone();
     apply_resolved_settings(&mut spec, &resolved);
     Ok(Some(ActivityV2Spec::AgentLoop(spec)))

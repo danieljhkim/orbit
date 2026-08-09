@@ -17,6 +17,7 @@
 //! typo'd config does not silently coerce dispatch onto a wrong runtime.
 
 use orbit_common::types::activity_job::{AgentLoopSpec, AgentRole, Backend, Provider};
+use serde_json::Value;
 
 use crate::context::AgentRoleConfig;
 
@@ -44,20 +45,6 @@ pub fn resolve_agent_settings(
     resolve_from_config(config.as_ref(), inline)
 }
 
-/// Resolve the explicit middleweight crew for `step_failure_recovery`.
-///
-/// Unlike ordinary role resolution, recovery must not inherit the task crew:
-/// its host derives the failed run's persisted provider lane and validates the
-/// configured lane-local recovery crew before this fallback merge occurs.
-pub fn resolve_recovery_agent_settings(
-    host: &dyn V2RuntimeHost,
-    run_id: &str,
-    inline: &AgentLoopSpec,
-) -> Result<ResolvedAgentSettings, DispatchError> {
-    let config = host.recovery_agent_crew_config(run_id)?;
-    Ok(resolve_from_config(Some(&config), inline))
-}
-
 /// Resolve the flat crew selected explicitly by a rendered activity input.
 /// Returns `None` only when the input did not select a crew, leaving untagged
 /// activities on their inline baseline. A selected crew that the host cannot
@@ -71,6 +58,37 @@ pub fn resolve_explicit_crew_settings(
         return Ok(None);
     };
     Ok(Some(resolve_from_config(Some(&config), inline)))
+}
+
+/// Add the configured system crew to an activity input that explicitly opts
+/// into the system route. The marker is asset data, while the crew is read
+/// from the runtime host for each dispatch.
+pub fn inject_system_crew_input(
+    host: &dyn V2RuntimeHost,
+    input: &Value,
+) -> Result<Value, DispatchError> {
+    if input.get("system_crew").and_then(Value::as_bool) != Some(true) {
+        return Ok(input.clone());
+    }
+    let crew = host.system_crew_for_dispatch().ok_or_else(|| {
+        DispatchError::JobValidation(
+            "system activity requests `workflow.system_crew`, but this runtime host does not provide that configuration"
+                .to_string(),
+        )
+    })?;
+    let mut input = input.clone();
+    let object = input.as_object_mut().ok_or_else(|| {
+        DispatchError::JobValidation(
+            "system activity requests `workflow.system_crew`, but its input must be an object"
+                .to_string(),
+        )
+    })?;
+    object.insert("crew".to_string(), Value::String(crew));
+    object.insert(
+        "crew_config_key".to_string(),
+        Value::String("workflow.system_crew".to_string()),
+    );
+    Ok(input)
 }
 
 /// Pure helper used by both the host-driven path and the unit tests so the

@@ -203,9 +203,8 @@ pub(super) fn run_agent_loop_outcome(
     })
 }
 
-/// Build a crew-overridden clone of an [`AgentLoopSpec`]. A declared activity
-/// role uses the role-labelled path; otherwise an explicit rendered `crew`
-/// input may select the modern flat crew assignment without inventing a role.
+/// Build a crew-overridden clone of an [`AgentLoopSpec`]. An explicit rendered
+/// `crew` always wins over a descriptive role label.
 pub(super) fn role_overridden_spec(
     t: &TargetStep,
     ctx: &ExecCtx<'_>,
@@ -214,18 +213,16 @@ pub(super) fn role_overridden_spec(
     let ActivityV2Spec::AgentLoop(inline_spec) = &t.spec else {
         return Ok(None);
     };
-    let resolved = match t.role.or(inline_spec.role) {
-        Some(effective_role) => {
-            resolve_agent_settings(effective_role, ctx.host, inline_spec, &ctx.input)
-        }
-        None => {
-            let Some(resolved) =
-                resolve_explicit_crew_settings(ctx.host, inline_spec, rendered_input)?
-            else {
-                return Ok(None);
-            };
-            resolved
-        }
+    let rendered_input = inject_system_crew_input(ctx.host, rendered_input)?;
+    let resolved = if let Some(resolved) =
+        resolve_explicit_crew_settings(ctx.host, inline_spec, &rendered_input)?
+    {
+        resolved
+    } else {
+        let Some(effective_role) = t.role.or(inline_spec.role) else {
+            return Ok(None);
+        };
+        resolve_agent_settings(effective_role, ctx.host, inline_spec, &ctx.input)
     };
     let mut spec = inline_spec.clone();
     apply_resolved_settings(&mut spec, &resolved);

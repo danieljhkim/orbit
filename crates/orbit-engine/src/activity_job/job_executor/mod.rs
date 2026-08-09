@@ -46,8 +46,8 @@ use crate::template::{self, TemplateContext};
 
 use super::agent_loop_driver::drive_agent_loop_with_session;
 use super::agent_role::{
-    apply_resolved_settings, resolve_agent_settings, resolve_explicit_crew_settings,
-    resolve_recovery_agent_settings,
+    apply_resolved_settings, inject_system_crew_input, resolve_agent_settings,
+    resolve_explicit_crew_settings,
 };
 use super::audit_writer::{V2AuditWriter, WriteError};
 use super::dispatcher::{

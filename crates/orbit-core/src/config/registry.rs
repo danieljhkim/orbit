@@ -21,6 +21,7 @@ use serde_json::{Value as JsonValue, json};
 
 const DEFAULT_WORKFLOW_BASE_BRANCH: &str = "main";
 const DEFAULT_WORKFLOW_CREW: &str = "opus";
+const DEFAULT_WORKFLOW_SYSTEM_CREW: &str = "qa";
 const LEGACY_DEFAULT_WORKFLOW_CREW: &str = "claude";
 const CONSTELLATION_DEFAULT_PROVIDER_ENV: &str = "CONSTELLATION_DEFAULT_PROVIDER";
 
@@ -175,6 +176,11 @@ define_config_settings! {
         key: "workflow.default_crew", value_type: "string",
         description: "Named crew used when a task does not declare `crew` and no CLI override is given.",
         resolve: |raw: Option<String>| resolve_optional_non_empty(raw, "workflow.default_crew"),
+    },
+    workflow_system_crew: String => String {
+        key: "workflow.system_crew", value_type: "string",
+        description: "Named crew used by system activities such as step-failure recovery and failed-run triage.",
+        resolve: |raw: Option<String>| resolve_non_empty(raw, DEFAULT_WORKFLOW_SYSTEM_CREW, "workflow.system_crew"),
     },
 }
 
