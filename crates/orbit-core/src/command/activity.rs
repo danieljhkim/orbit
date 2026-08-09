@@ -27,10 +27,6 @@ pub(crate) const DEFAULT_ACTIVITY_FILES: &[(&str, &str)] = &[
         include_str!("../../assets/activities/apply_task_pilot_results.yaml"),
     ),
     (
-        "dispatch_agent",
-        include_str!("../../assets/activities/dispatch_agent.yaml"),
-    ),
-    (
         "gate_starvation_fail",
         include_str!("../../assets/activities/gate_starvation_fail.yaml"),
     ),
@@ -65,10 +61,6 @@ pub(crate) const DEFAULT_ACTIVITY_FILES: &[(&str, &str)] = &[
     (
         "list_triage_candidates",
         include_str!("../../assets/activities/list_triage_candidates.yaml"),
-    ),
-    (
-        "load_epic",
-        include_str!("../../assets/activities/load_epic.yaml"),
     ),
     (
         "pr_open",
@@ -110,10 +102,6 @@ pub(crate) const DEFAULT_ACTIVITY_FILES: &[(&str, &str)] = &[
     (
         "step_failure_recovery",
         include_str!("../../assets/activities/step_failure_recovery.yaml"),
-    ),
-    (
-        "summarize_epic",
-        include_str!("../../assets/activities/summarize_epic.yaml"),
     ),
     (
         "task_pilot",
@@ -297,13 +285,11 @@ mod tests {
     ///
     /// The flag defaults to `true`, so a new activity inherits the check by
     /// omitting it; this test exists to make the opt-out list explicit and to
-    /// force a deliberate edit here when one is added. `dispatch_agent` is the
-    /// sole entry: its notes are advisory and nothing consumes them, so its
-    /// non-completion is harmless. Everything else does work whose absence must
-    /// stop the pipeline.
+    /// force a deliberate edit here when one is added. Every seeded agent-loop
+    /// activity does work whose absence must stop the pipeline.
     #[test]
     fn agent_step_completion_contract_is_required_except_where_declared() {
-        const DECLARED_OPT_OUTS: &[&str] = &["dispatch_agent"];
+        const DECLARED_OPT_OUTS: &[&str] = &[];
 
         let mut checked = 0;
         for (name, yaml) in DEFAULT_ACTIVITY_FILES {

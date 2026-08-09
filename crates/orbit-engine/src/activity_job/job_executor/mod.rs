@@ -116,19 +116,6 @@ pub fn resolve_job_catalog_refs_for_execution(
         .map_err(|err| DispatchError::JobValidation(err.to_string()))
 }
 
-/// Execute a v2 Job against the given host. Mutates pipeline context across
-/// steps, writes §7 envelope events through `audit`, and returns the final
-/// pipeline map serialized as JSON.
-pub fn execute_job(
-    job: &JobV2,
-    input: Value,
-    run_id: &str,
-    audit: Arc<V2AuditWriter>,
-    host: &dyn V2RuntimeHost,
-) -> Result<JobOutcome, DispatchError> {
-    execute_job_with_resume(job, input, run_id, audit, host, None)
-}
-
 /// [ORB-10002] Execute a v2 Job, optionally resuming from a persisted
 /// checkpoint state.
 ///

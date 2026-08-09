@@ -25,7 +25,8 @@ use super::{backlog_exclusion, pipeline_actions, task_pilot, triage};
 /// before a run's first step so a catalog asset naming an action this binary
 /// does not implement fails admission instead of a terminal hook. Retired
 /// stubs (`promote_agent_main`, `revert_on_red`) stay listed on purpose: they
-/// *are* dispatchable and answer with an actionable retirement message.
+/// are referenced by non-seeded example assets and answer with an actionable
+/// retirement message.
 ///
 /// Adding an arm below without adding its name here makes validation reject a
 /// job the runtime could actually run; adding a name here without an arm
@@ -47,7 +48,6 @@ pub(super) const REGISTERED_DETERMINISTIC_ACTIONS: &[&str] = &[
     "invoke_and_wait",
     "list_backlog_tasks",
     "list_triage_candidates",
-    "load_epic",
     "orbit_tool_call",
     "pipeline_success_guard",
     "pr_failure_handoff",
@@ -62,7 +62,6 @@ pub(super) const REGISTERED_DETERMINISTIC_ACTIONS: &[&str] = &[
     "revert_on_red",
     "run_auto_task_scheduler",
     "sleep",
-    "summarize_epic",
     "update_task",
     "validate_bundles",
     "worktree_gc",
@@ -297,17 +296,6 @@ pub(super) fn run_deterministic(
         // Validate all agent proposals before writing, then replace only the
         // exact prepared tasks' context_files fields.
         "apply_task_pilot_results" => task_pilot::apply(runtime, action, input),
-        // Materialize an epic's working set for the orchestrator:
-        // the epic task itself plus non-terminal subtasks
-        // (`parent_id == epic_task_id` and status not done, review,
-        // blocked, archived, or rejected).
-        // Full descriptions ride along because the orchestrator
-        // reasons about dependency ordering from prose.
-        "load_epic" => backlog_exclusion::load_epic(runtime, action, input),
-        // Fold the deterministic final task-state snapshot into counters
-        // + a human-readable one-liner. Pure aggregation — the
-        // orchestrator's final response is audit-only.
-        "summarize_epic" => backlog_exclusion::summarize_epic(input),
         // Guard the auto-dispatch bundle output before fan_out.
         // Rejects duplicated task_ids, unknown ids, and oversize
         // bundles with a structured error so a misgrouped backlog

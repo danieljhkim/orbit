@@ -36,6 +36,16 @@ fn test_writer(run_id: &str) -> V2AuditWriter {
     V2AuditWriter::new(run_id, "test-agent", inner)
 }
 
+fn execute_job(
+    job: &JobV2,
+    input: Value,
+    run_id: &str,
+    audit: std::sync::Arc<V2AuditWriter>,
+    host: &dyn V2RuntimeHost,
+) -> Result<JobOutcome, DispatchError> {
+    super::execute_job_with_resume(job, input, run_id, audit, host, None)
+}
+
 /// [ORB-00414] Envelope sink that always fails, used to exercise the non-fatal
 /// audit-failure recording path (counter + tracing error + degraded flag).
 struct FailingEnvelopeSink;
