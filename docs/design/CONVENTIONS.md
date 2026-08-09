@@ -1,7 +1,7 @@
 ---
 title: Design Doc Conventions
 owner: daniel
-last_updated: 2026-07-26
+last_updated: 2026-08-09
 last_validated: 2026-07-26
 status: Accepted
 ---
@@ -84,7 +84,7 @@ Rules:
 - **Allocate first.** `orbit.adr.add` returns the global `ADR-NNNN` (4-digit, zero-padded). That ID is your local pointer. Never hand-author an `ADR-NNNN` pointer without an allocation behind it. Bypassing this is the failure mode [ORB-00098] resolved; see [ADR-0153].
 - **Inline cross-references** use the global ID (`[ADR-0042]`), resolvable via `orbit tool run orbit.adr.show --input '{"id":"ADR-0042"}'`.
 - Numbers are append-only; superseded records stay in the index with their store status.
-- `Proposed` is allowed only before the relevant task ships. Flip the store record to `Accepted` via `orbit.adr.update` when it lands, then refresh the index status on its next edit.
+- `Proposed` is allowed only before the relevant task ships. Flip the store record to `Accepted` via `orbit.adr.update` — or `orbit adr update <id> --status accepted` from the checkout that owns the bundle ([ADR-0342]) — when it lands, then refresh the index status on its next edit.
 - Every ADR body must cite at least one cost. No cost = the decision wasn't real.
 - **Legacy 3-digit headings.** Existing local 3-digit headings (`## ADR-NNN`) authored before the global-ID convention are grandfathered narrative records until separately backfilled. When backfilled, allocate the global ID first, preserve the original local ID as a `legacy_id` in the store record, verify that the store body carries the narrative, and replace the local body with its global pointer. See `docs/design/project-learnings/4_decisions.md` and `docs/design/agent-families/4_decisions.md` for worked examples.
 

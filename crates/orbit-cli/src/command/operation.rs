@@ -494,8 +494,15 @@ impl Commands {
             Commands::Adr(command) => {
                 use super::adr::AdrSubcommand;
                 let (subcommand, target_id, json) = match &command.command {
+                    // `add` allocates its ID inside the tool, so there is no
+                    // target to name until the response comes back.
+                    AdrSubcommand::Add(args) => ("add", None, args.json),
                     AdrSubcommand::List(args) => ("list", None, args.json),
                     AdrSubcommand::Show(args) => ("show", Some(args.id.as_str()), args.json),
+                    AdrSubcommand::Update(args) => ("update", Some(args.id.as_str()), args.json),
+                    AdrSubcommand::Supersede(args) => {
+                        ("supersede", Some(args.id.as_str()), args.json)
+                    }
                     AdrSubcommand::Restore(args) => ("restore", Some(args.id.as_str()), args.json),
                     AdrSubcommand::Reconcile(args) => {
                         ("reconcile", Some(args.id.as_str()), args.json)

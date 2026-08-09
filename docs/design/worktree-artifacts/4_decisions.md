@@ -10,7 +10,7 @@ doc_role: decisions
 tags: ["worktree-artifacts"]
 paths: ["crates/orbit-remote/**", "crates/orbit-core/**", "crates/orbit-store/**", "crates/orbit-engine/**", "crates/orbit-cli/**"]
 related_features: ["worktree-artifacts", "host-registry", "mcp-bridge"]
-related_artifacts: ["ORB-00199", "ORB-00200", "ORB-00201", "ORB-10272", "ORB-10297", "ORB-10330", "ORB-10501", "ORB-10535", "ORB-10545", "ORB-10669", "ADR-0177", "ADR-0229", "ADR-0296", "ADR-0302", "ADR-0339"]
+related_artifacts: ["ORB-00199", "ORB-00200", "ORB-00201", "ORB-10272", "ORB-10297", "ORB-10330", "ORB-10501", "ORB-10535", "ORB-10545", "ORB-10668", "ORB-10669", "ADR-0177", "ADR-0229", "ADR-0296", "ADR-0302", "ADR-0339", "ADR-0342"]
 ---
 
 # Worktree Artifacts - Decisions
@@ -102,6 +102,24 @@ partition named in a warning. Narrative and the explicit rejected alternatives
 live in the ADR store; retrieve them with
 `orbit tool run orbit.adr.show --input '{"id":"ADR-0339"}'`.
 
+## ADR-0342 - orbit adr owns ADR authoring and lifecycle; reconcile stays the cross-checkout verb
+
+**Status:** Proposed - 2026-08 - [ORB-10668]
+
+`orbit adr` gains `add`, `update`, and `supersede`, each a thin delegation to the
+matching `orbit.adr.*` tool, so an ADR authored in a managed job worktree can be
+carried `proposed → accepted` from that worktree with the CLI alone. The tool
+surface stays the single implementation of ADR semantics, and the §5 mutation
+boundary is untouched: a non-local target still fails closed with
+`artifact_not_local` and its `artifact_origin` payload. `orbit adr reconcile` is
+*not* the answer for the in-owning-worktree case — the ADR is already local
+there — and remains the verb for mutating an ADR from a checkout that does not
+own it (§5.1, §6.1). The discoverability half is fixed as help text:
+`orbit adr update --help` names the lifecycle transitions, the
+`artifact_not_local` failure, and the reconcile escape hatch. Narrative and the
+explicit rejected alternatives live in the ADR store; retrieve them with
+`orbit tool run orbit.adr.show --input '{"id":"ADR-0342"}'`.
+
 ## Task References
 
 - [ORB-00199] introduced shared/local root resolution.
@@ -126,5 +144,8 @@ live in the ADR store; retrieve them with
   `.gitignore` block retire its own superseded lines so re-init converges, and
   replaced first-hit-wins resolution with the explicit lifecycle precedence
   under [ADR-0339].
+- [ORB-10668] added the `orbit adr add` / `update` / `supersede` CLI verbs so the
+  owning worktree can complete the lifecycle without `orbit tool run`, under
+  [ADR-0342].
 
 Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

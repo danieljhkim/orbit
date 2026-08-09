@@ -347,6 +347,119 @@ fn linked_worktree_artifacts_write_locally_and_remote_lists_return_stubs() {
     assert_eq!(unknown_payload["code"], "not_found");
 }
 
+/// ORB-10668: the operator path the tool surface could not serve — an ADR
+/// authored inside a job worktree, carried proposed -> accepted with `orbit adr`
+/// alone from that worktree, while the same command run from the hub still
+/// fails closed on the federation guard.
+#[test]
+fn adr_cli_accepts_in_owning_worktree_and_rejects_a_non_local_update() {
+    let temp = tempdir().expect("tempdir");
+    let home = temp.path().join("home");
+    let main_repo = temp.path().join("repo");
+    let linked_worktree = temp.path().join("repo-adr-lifecycle");
+    fs::create_dir_all(&home).expect("create home");
+    fs::create_dir_all(&main_repo).expect("create main repo");
+
+    init_git_repo(&main_repo);
+    run_git(
+        &main_repo,
+        &[
+            "worktree",
+            "add",
+            "-b",
+            "orbit-worktree-adr-lifecycle",
+            linked_worktree.to_str().expect("utf8 worktree path"),
+        ],
+    );
+    run_orbit_success(&main_repo, &home, &["workspace", "init"], None);
+
+    let main_repo = fs::canonicalize(&main_repo).expect("canonicalize main repo");
+    let linked_worktree = fs::canonicalize(&linked_worktree).expect("canonicalize linked worktree");
+
+    let created = run_orbit_json(
+        &linked_worktree,
+        &home,
+        &[
+            "adr",
+            "add",
+            "--title",
+            "Worktree ADR lifecycle",
+            "--body",
+            "## Context\nAuthored in a job worktree.\n\n## Decision\nAccept from the CLI.\n\n## Consequences\n- Cost: none.\n",
+            "--owner",
+            "codex",
+            "--related-task",
+            "ORB-10668",
+            "--json",
+        ],
+        None,
+    );
+    let adr_id = string_field(&created, "id").to_string();
+    assert!(adr_id.starts_with("ADR-"));
+    assert_eq!(created["status"], "proposed");
+
+    // The whole point of the task: no `orbit tool run`, no hand-edited
+    // `.orbit/adrs/`.
+    let accepted = run_orbit_json(
+        &linked_worktree,
+        &home,
+        &["adr", "update", &adr_id, "--status", "accepted", "--json"],
+        None,
+    );
+    assert_eq!(accepted["id"], adr_id);
+    assert_eq!(accepted["status"], "accepted");
+    assert_eq!(
+        run_orbit_json(
+            &linked_worktree,
+            &home,
+            &["adr", "show", &adr_id, "--json"],
+            None
+        )["status"],
+        "accepted"
+    );
+
+    // Same command from the hub: the federation guard is unchanged, and the
+    // structured error still lands on stderr [ORB-10570].
+    let rejected = run_orbit_output(
+        &main_repo,
+        &home,
+        &[
+            "adr",
+            "update",
+            &adr_id,
+            "--title",
+            "must not mutate",
+            "--json",
+        ],
+        None,
+    );
+    assert!(!rejected.status.success());
+    assert!(rejected.stdout.is_empty());
+    let payload: Value = serde_json::from_slice(&rejected.stderr).expect("structured update error");
+    assert_eq!(payload["code"], "artifact_not_local");
+    assert_eq!(payload["artifact_origin"]["mode"], "federated");
+    assert_eq!(
+        payload["artifact_origin"]["worktree_root"],
+        linked_worktree.to_string_lossy().as_ref()
+    );
+    assert_eq!(
+        payload["artifact_origin"]["branch"],
+        "orbit-worktree-adr-lifecycle"
+    );
+    assert!(payload["artifact_origin"].get("body_path").is_none());
+
+    // The refused write left the record exactly as the worktree accepted it.
+    assert_eq!(
+        run_orbit_json(
+            &linked_worktree,
+            &home,
+            &["adr", "show", &adr_id, "--json"],
+            None
+        )["title"],
+        "Worktree ADR lifecycle"
+    );
+}
+
 fn assert_root_fields(value: &Value, shared_root: &Path, local_root: &Path) {
     let shared = shared_root.to_string_lossy();
     let local = local_root.to_string_lossy();
@@ -421,11 +534,18 @@ fn run_orbit_output(
 /// running this suite inside a managed Orbit run would otherwise be refused
 /// (the ORB-10350 hazard). These tests cover worktree artifact routing, not the
 /// role gate, so they state the context they need rather than inheriting it.
+///
+/// [ORB-10668] adds the managed-run pair for the same reason: an inherited
+/// `ORBIT_MANAGED_RUN_CONTEXT` + `ORBIT_RUN_ID` marks the child a managed-run
+/// executor, and those may refine a Proposed ADR but never transition its
+/// lifecycle — which is exactly what the ADR lifecycle test exercises.
 fn clear_agent_identity_env(command: &mut AssertCommand) {
     command
         .env_remove("ORBIT_AGENT_NAME")
         .env_remove("ORBIT_AGENT_MODEL")
-        .env_remove("ORBIT_LEARNING_AUTHOR");
+        .env_remove("ORBIT_LEARNING_AUTHOR")
+        .env_remove("ORBIT_MANAGED_RUN_CONTEXT")
+        .env_remove("ORBIT_RUN_ID");
 }
 
 fn set_orbit_root_env(command: &mut AssertCommand, orbit_root: Option<&Path>) {
