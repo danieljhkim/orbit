@@ -7,10 +7,36 @@ use orbit_common::types::{
     DeterministicAction, NO_DIFF_EXPECTED_TAG, PipelineState, TaskPriority, TaskStatus, TaskType,
 };
 use orbit_engine::DispatchError;
-use orbit_engine::V2RuntimeHost;
+use orbit_engine::RuntimeHost;
 use orbit_tools::ToolContext;
 use serde_json::json;
 use tempfile::tempdir;
+
+fn dispatch_declared_action(
+    runtime: &OrbitRuntime,
+    action: &str,
+    input: &serde_json::Value,
+) -> Result<serde_json::Value, DispatchError> {
+    match DeterministicAction::parse(action) {
+        Some(DeterministicAction::Engine(engine_action)) => {
+            orbit_engine::execute_deterministic_action(
+                runtime,
+                engine_action.name(),
+                input,
+                false,
+                &std::collections::HashMap::new(),
+                None,
+            )
+            .map_err(|error| DispatchError::DeterministicActionFailed {
+                action: action.to_string(),
+                message: error.to_string(),
+            })
+        }
+        Some(DeterministicAction::Core(_)) | None => {
+            runtime.run_deterministic(action, &json!({}), input, ToolContext::default())
+        }
+    }
+}
 
 fn seed_task(
     runtime: &OrbitRuntime,
@@ -73,8 +99,7 @@ fn checkpointed_pr_handoff_actions_are_dispatched_by_v2_host() {
     // These inputs stop at action-specific validation, proving the v2 host
     // forwarded them to the engine instead of rejecting their names.
     for action in ["pr_prepare", "git_rebase"] {
-        let err = runtime
-            .run_deterministic(action, &json!({}), &json!({}), ToolContext::default())
+        let err = dispatch_declared_action(&runtime, action, &json!({}))
             .expect_err("incomplete fixture input should fail inside the action");
         match err {
             DispatchError::DeterministicActionFailed {
@@ -90,19 +115,17 @@ fn checkpointed_pr_handoff_actions_are_dispatched_by_v2_host() {
         "No-diff promotion",
         vec![NO_DIFF_EXPECTED_TAG.to_string()],
     );
-    let no_diff = runtime
-        .run_deterministic(
-            "pr_promote",
-            &json!({}),
-            &json!({
-                "job_run_id": "checkpoint-run",
-                "completed_task_ids": [no_diff_task.clone()],
-                "workspace_path": ".",
-                "no_diff_expected": true,
-            }),
-            ToolContext::default(),
-        )
-        .expect("promote no-diff handoff");
+    let no_diff = dispatch_declared_action(
+        &runtime,
+        "pr_promote",
+        &json!({
+            "job_run_id": "checkpoint-run",
+            "completed_task_ids": [no_diff_task.clone()],
+            "workspace_path": ".",
+            "no_diff_expected": true,
+        }),
+    )
+    .expect("promote no-diff handoff");
     assert_eq!(no_diff["decision"], json!("performed"));
     assert!(no_diff["pr_number"].is_null());
     let no_diff_task = runtime
@@ -112,20 +135,18 @@ fn checkpointed_pr_handoff_actions_are_dispatched_by_v2_host() {
     assert!(no_diff_task.github_pr_number().is_none());
 
     let diff_task = seed_pr_handoff_task(&runtime, "PR promotion", Vec::new());
-    let diff = runtime
-        .run_deterministic(
-            "pr_promote",
-            &json!({}),
-            &json!({
-                "job_run_id": "checkpoint-run",
-                "completed_task_ids": [diff_task.clone()],
-                "workspace_path": ".",
-                "pr_number": "42",
-                "pr_url": "https://example.test/pull/42",
-            }),
-            ToolContext::default(),
-        )
-        .expect("promote PR handoff");
+    let diff = dispatch_declared_action(
+        &runtime,
+        "pr_promote",
+        &json!({
+            "job_run_id": "checkpoint-run",
+            "completed_task_ids": [diff_task.clone()],
+            "workspace_path": ".",
+            "pr_number": "42",
+            "pr_url": "https://example.test/pull/42",
+        }),
+    )
+    .expect("promote PR handoff");
     assert_eq!(diff["decision"], json!("performed"));
     assert_eq!(diff["pr_number"], json!("42"));
     let diff_task = runtime.get_task(&diff_task).expect("promoted PR task");
@@ -141,8 +162,7 @@ fn every_declared_deterministic_action_reaches_an_implementation() {
     let runtime = OrbitRuntime::in_memory().expect("build runtime");
 
     for action in DeterministicAction::NAMES {
-        let result =
-            runtime.run_deterministic(action, &json!({}), &json!({}), ToolContext::default());
+        let result = dispatch_declared_action(&runtime, action, &json!({}));
         assert!(
             !matches!(
                 result,
@@ -189,14 +209,9 @@ fn worktree_gc_is_dispatchable_directly_through_the_v2_host() {
         String::from_utf8_lossy(&git_init.stderr)
     );
 
-    let output = runtime
-        .run_deterministic(
-            "worktree_gc",
-            &json!({}),
-            &json!({ "older_than_hours": 24 }),
-            ToolContext::default(),
-        )
-        .expect("worktree_gc must dispatch through the v2 host");
+    let output =
+        dispatch_declared_action(&runtime, "worktree_gc", &json!({ "older_than_hours": 24 }))
+            .expect("worktree_gc must dispatch through the v2 host");
 
     // This workspace has recorded no job runs, so the reaper considers no
     // worktrees. The assertion is the envelope itself: only the real

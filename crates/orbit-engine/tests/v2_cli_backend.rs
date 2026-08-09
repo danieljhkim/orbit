@@ -34,7 +34,7 @@ use orbit_common::types::activity_job::{
     resolve_job_backends, validate_job_loop_session_backends,
 };
 use orbit_engine::{
-    DispatchError, ResolvedCliExecutor, V2AuditWriter, V2DispatchInput, V2RuntimeHost,
+    DispatchError, ResolvedCliExecutor, RuntimeHost, V2AuditWriter, V2DispatchInput,
     dispatch_v2_activity,
 };
 use serde_json::Value;
@@ -587,7 +587,7 @@ impl ScriptHost {
         }
     }
 }
-impl V2RuntimeHost for ScriptHost {
+impl RuntimeHost for ScriptHost {
     fn run_deterministic(
         &self,
         _action: &str,
@@ -621,7 +621,7 @@ impl V2RuntimeHost for ScriptHost {
 }
 
 struct NullCliHost;
-impl V2RuntimeHost for NullCliHost {
+impl RuntimeHost for NullCliHost {
     fn run_deterministic(
         &self,
         _action: &str,

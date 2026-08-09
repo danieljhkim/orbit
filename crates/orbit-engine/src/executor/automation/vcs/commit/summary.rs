@@ -19,7 +19,7 @@ use std::path::Path;
 
 use orbit_common::types::{OrbitError, Task};
 
-use crate::context::{TaskAutomationUpdate, TaskHost};
+use crate::context::{RuntimeHost, TaskAutomationUpdate};
 
 use super::super::git::git_output_raw;
 use super::super::pr::meaningful_execution_summary;
@@ -36,7 +36,7 @@ pub(super) const MAX_LISTED_FILES: usize = 25;
 /// meaningful summary is already persisted or when the worktree carries no
 /// change to describe, otherwise carrying the derived summary that was just
 /// written to the task record.
-pub(super) fn ensure_durable_execution_summary<H: TaskHost + ?Sized>(
+pub(super) fn ensure_durable_execution_summary<H: RuntimeHost + ?Sized>(
     host: &H,
     task: Task,
     workspace_path: &Path,

@@ -31,7 +31,7 @@ impl CrewHost {
     }
 }
 
-impl V2RuntimeHost for CrewHost {
+impl RuntimeHost for CrewHost {
     fn run_deterministic(
         &self,
         _action: &str,
@@ -116,7 +116,7 @@ fn target_step(spec: ActivityV2Spec) -> TargetStep {
     }
 }
 
-fn exec_ctx<'a>(host: &'a dyn V2RuntimeHost) -> ExecCtx<'a> {
+fn exec_ctx<'a>(host: &'a dyn RuntimeHost) -> ExecCtx<'a> {
     ExecCtx {
         run_id: "run-crew-override".to_string(),
         audit: std::sync::Arc::new(test_writer("run-crew-override")),
@@ -203,7 +203,7 @@ fn crew_resolution_does_not_apply_to_deterministic_specs() {
 
 struct FailingTelemetryHost;
 
-impl V2RuntimeHost for FailingTelemetryHost {
+impl RuntimeHost for FailingTelemetryHost {
     fn run_deterministic(
         &self,
         _action: &str,

@@ -9,7 +9,7 @@ use orbit_tools::ToolContext;
 use serde_json::{Value, json};
 use tempfile::tempdir;
 
-use crate::context::DeterministicActionHost;
+use crate::context::RuntimeHost;
 
 use super::super::merge::merge_batch_worktree_into_base;
 
@@ -178,7 +178,7 @@ impl MergeTestHost {
     }
 }
 
-impl DeterministicActionHost for MergeTestHost {
+impl RuntimeHost for MergeTestHost {
     fn record_event(&self, _event: OrbitEvent) -> Result<(), OrbitError> {
         Ok(())
     }

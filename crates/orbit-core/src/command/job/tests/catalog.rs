@@ -358,7 +358,7 @@ fn default_deterministic_activities_are_registered_in_the_runtime() {
             continue;
         };
         assert!(
-            orbit_engine::V2RuntimeHost::has_deterministic_action(&runtime, &spec.action),
+            orbit_engine::RuntimeHost::has_deterministic_action(&runtime, &spec.action),
             "seeded activity `{name}` names deterministic action `{}`, which this runtime cannot dispatch",
             spec.action
         );

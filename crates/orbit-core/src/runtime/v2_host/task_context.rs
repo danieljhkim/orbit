@@ -8,7 +8,7 @@ use crate::OrbitRuntime;
 use crate::command::task::{canonicalize_context_files_for_read, context_workspace_root};
 use crate::runtime::run_input::singular_task_id_from_input;
 
-pub(super) fn associated_task_ids(input: &Value) -> Vec<String> {
+pub(crate) fn associated_task_ids(input: &Value) -> Vec<String> {
     let mut task_ids = Vec::new();
     if let Some(task_id) = input.get("task_id").and_then(Value::as_str) {
         push_unique_task_id(&mut task_ids, task_id);
@@ -38,7 +38,7 @@ pub(super) fn associated_task_ids(input: &Value) -> Vec<String> {
     task_ids
 }
 
-pub(super) fn task_context_for_agent_input(
+pub(crate) fn task_context_for_agent_input(
     runtime: &OrbitRuntime,
     input: &Value,
 ) -> Result<Option<Value>, DispatchError> {

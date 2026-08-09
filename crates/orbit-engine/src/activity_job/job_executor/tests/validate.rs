@@ -173,7 +173,7 @@ spec:
     let mut catalog = V2ActivityCatalog::new();
     catalog.insert(
         "worktree_setup",
-        deterministic_catalog_activity("worktree_setup"),
+        deterministic_catalog_activity("test_worktree_setup"),
     );
     catalog.insert(
         "pr_failure_handoff",
@@ -190,7 +190,7 @@ fn catalog_action_missing_from_runtime_fails_before_any_step_dispatches() {
     // validation rather than admit a task, build a worktree, and discover the
     // skew from the terminal hook.
     let job = pr_pipeline_shaped_job();
-    let host = ScriptedHost::new([("worktree_setup", vec![Action::Ok(json!({"ok": true}))])])
+    let host = ScriptedHost::new([("test_worktree_setup", vec![Action::Ok(json!({"ok": true}))])])
         .without_registered_actions(&["pr_failure_handoff"]);
     let writer = std::sync::Arc::new(test_writer("run-catalog-skew"));
 
@@ -212,7 +212,7 @@ fn catalog_action_missing_from_runtime_fails_before_any_step_dispatches() {
         0,
         "validation must reject the job before the first step dispatches"
     );
-    assert_eq!(host.call_count("worktree_setup"), 0);
+    assert_eq!(host.call_count("test_worktree_setup"), 0);
 }
 
 #[test]
@@ -239,14 +239,14 @@ fn registered_failure_activity_still_loads_and_runs() {
     // The healthy pairing — catalog asset plus a runtime that implements the
     // action — is untouched, and unknown actions are never silently skipped.
     let job = pr_pipeline_shaped_job();
-    let host = ScriptedHost::new([("worktree_setup", vec![Action::Ok(json!({"ok": true}))])]);
+    let host = ScriptedHost::new([("test_worktree_setup", vec![Action::Ok(json!({"ok": true}))])]);
     let writer = std::sync::Arc::new(test_writer("run-catalog-healthy"));
 
     let outcome = execute_job(&job, json!({}), "run-catalog-healthy", writer, &host)
         .expect("healthy pipeline must still run");
 
     assert!(outcome.success);
-    assert_eq!(host.call_count("worktree_setup"), 1);
+    assert_eq!(host.call_count("test_worktree_setup"), 1);
 }
 
 #[test]
@@ -297,10 +297,11 @@ fn failure_activity_unavailable_after_admission_preserves_original_step_error() 
     // answered "not registered" at dispatch — an in-flight skew. The terminal
     // hook's own failure must never displace the failed step's error.
     let mut job = pr_pipeline_shaped_job();
+    job.resolved_failure_activity = Some(deterministic_catalog_activity("test_pr_failure_handoff"));
     job.steps
         .push(target_step("implement", "agent_implement_stub"));
     let host = ScriptedHost::new([
-        ("worktree_setup", vec![Action::Ok(json!({"ok": true}))]),
+        ("test_worktree_setup", vec![Action::Ok(json!({"ok": true}))]),
         (
             "agent_implement_stub",
             vec![Action::Err(DispatchError::JobExecution(
@@ -308,9 +309,11 @@ fn failure_activity_unavailable_after_admission_preserves_original_step_error() 
             ))],
         ),
         (
-            "pr_failure_handoff",
+            "test_pr_failure_handoff",
             vec![Action::Err(
-                DispatchError::DeterministicActionNotRegistered("pr_failure_handoff".to_string()),
+                DispatchError::DeterministicActionNotRegistered(
+                    "test_pr_failure_handoff".to_string(),
+                ),
             )],
         ),
     ]);
@@ -324,7 +327,7 @@ fn failure_activity_unavailable_after_admission_preserves_original_step_error() 
         "failure hook must not replace the original error, got {err:?}"
     );
     assert_eq!(
-        host.call_count("pr_failure_handoff"),
+        host.call_count("test_pr_failure_handoff"),
         1,
         "the terminal hook is still attempted once"
     );

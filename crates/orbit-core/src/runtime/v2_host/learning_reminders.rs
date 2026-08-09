@@ -12,7 +12,7 @@ use crate::OrbitRuntime;
 use crate::command::task::{canonicalize_context_files_for_read, context_workspace_root};
 use crate::runtime::run_input::singular_task_id_from_input;
 
-pub(super) fn learning_reminders_for_task(
+pub(crate) fn learning_reminders_for_task(
     runtime: &OrbitRuntime,
     input: &Value,
     caps: LearningInjectionCaps,

@@ -18,7 +18,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use chrono::Utc;
 use orbit_common::types::{JobRun, Task, TaskHistoryEntry, TaskStatus};
 use orbit_engine::DispatchError;
-use orbit_engine::{TaskAutomationUpdate, TaskWriteHost};
+use orbit_engine::{RuntimeHost, TaskAutomationUpdate};
 use orbit_store::friction_store::{FrictionAddParams, add_friction};
 use serde_json::{Value, json};
 

@@ -4,9 +4,7 @@ use orbit_common::types::OrbitError;
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
-use crate::context::{
-    DeterministicActionHost, TaskAutomationUpdate, TaskHost, ensure_task_can_enter_workflow,
-};
+use crate::context::{RuntimeHost, TaskAutomationUpdate};
 use crate::executor::automation::input::input_string_field;
 
 use super::super::git::{
@@ -27,9 +25,7 @@ const DEFAULT_BASE: &str = "main";
 ///
 /// Generic automation — not tied to any specific workflow. Any
 /// pipeline can reuse this by passing a `branch_prefix`.
-pub(in crate::executor::automation) fn setup_worktree<
-    H: DeterministicActionHost + TaskHost + ?Sized,
->(
+pub(in crate::executor::automation) fn setup_worktree<H: RuntimeHost + ?Sized>(
     host: &H,
     input: &Value,
 ) -> Result<Value, OrbitError> {
@@ -46,10 +42,6 @@ pub(in crate::executor::automation) fn setup_worktree<
 
     let repo_root_str = host.repo_root()?;
     let repo_root = Path::new(&repo_root_str);
-
-    for task_id in task_ids {
-        ensure_task_can_enter_workflow(host, task_id, "worktree_setup")?;
-    }
 
     let start_point = resolve_worktree_start_point(repo_root, &base, base_sync_mode)?;
     // ORB-10380: `start_point` is a moving name (`origin/<base>`) shared by every

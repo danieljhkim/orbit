@@ -3,7 +3,7 @@ use super::super::promote::pr_promote;
 use super::test_support::*;
 
 use super::super::body::GITHUB_PR_BODY_BYTE_LIMIT;
-use crate::context::TaskReadHost;
+use crate::context::RuntimeHost;
 use orbit_common::types::TaskStatus;
 use serde_json::json;
 

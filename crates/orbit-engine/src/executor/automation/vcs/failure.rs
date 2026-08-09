@@ -4,7 +4,7 @@ use chrono::Utc;
 use orbit_common::types::{ExternalRef, OrbitError, TaskComment, TaskStatus};
 use serde_json::{Value, json};
 
-use crate::context::{DeterministicActionHost, TaskAutomationUpdate, TaskHost};
+use crate::context::{RuntimeHost, TaskAutomationUpdate};
 use crate::executor::automation::input::{
     canonicalize_existing_dir, input_string_field, required_input_string,
 };
@@ -26,9 +26,7 @@ const FAILURE_HANDOFF_EVENT: &str = "pr_failure_handoff";
 /// candidate recoverable: restore the pre-rebase branch, commit dirtiness,
 /// push without rewriting unknown remote history, publish a blocked PR, and
 /// leave the task in `blocked` rather than `review`.
-pub(in crate::executor::automation) fn pr_failure_handoff<
-    H: DeterministicActionHost + TaskHost + Sync + ?Sized,
->(
+pub(in crate::executor::automation) fn pr_failure_handoff<H: RuntimeHost + Sync + ?Sized>(
     host: &H,
     input: &Value,
 ) -> Result<Value, OrbitError> {

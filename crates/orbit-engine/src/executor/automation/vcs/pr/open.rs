@@ -2,7 +2,7 @@ use orbit_common::types::{OrbitError, Role};
 use orbit_tools::ToolContext;
 use serde_json::{Value, json};
 
-use crate::context::{DeterministicActionHost, TaskHost};
+use crate::context::RuntimeHost;
 
 use super::super::super::input::{
     input_string_field, json_number_to_string, required_input_string,
@@ -17,9 +17,7 @@ use super::body::{
     GITHUB_PR_BODY_BYTE_LIMIT, bound_pr_body, build_batch_pr_body, default_pr_title,
 };
 
-pub(in crate::executor::automation) fn pr_open<
-    H: DeterministicActionHost + TaskHost + Sync + ?Sized,
->(
+pub(in crate::executor::automation) fn pr_open<H: RuntimeHost + Sync + ?Sized>(
     host: &H,
     input: &Value,
 ) -> Result<Value, OrbitError> {
@@ -33,7 +31,7 @@ pub(in crate::executor::automation) fn pr_open<
     }
 }
 
-fn open_or_reuse_pr<H: DeterministicActionHost + TaskHost + ?Sized>(
+fn open_or_reuse_pr<H: RuntimeHost + ?Sized>(
     host: &H,
     input: &Value,
     context: &HandoffContext,
@@ -173,9 +171,7 @@ fn open_or_reuse_pr<H: DeterministicActionHost + TaskHost + ?Sized>(
 /// Create or reuse a PR for an already-pushed recovery branch without the
 /// normal freshness/success gate. The caller owns candidate validation and
 /// must block, never promote, the associated task.
-pub(in crate::executor::automation::vcs) fn open_or_reuse_unchecked<
-    H: DeterministicActionHost + ?Sized,
->(
+pub(in crate::executor::automation::vcs) fn open_or_reuse_unchecked<H: RuntimeHost + ?Sized>(
     host: &H,
     workspace_path: &std::path::Path,
     head: &str,
@@ -224,7 +220,7 @@ fn invalid_prepare(error: OrbitError) -> (FailedHandoffPhase, OrbitError) {
     (FailedHandoffPhase::PrLookup, error)
 }
 
-fn view_pr<H: DeterministicActionHost + ?Sized>(
+fn view_pr<H: RuntimeHost + ?Sized>(
     host: &H,
     selector: &str,
     tool_context: ToolContext,
@@ -253,7 +249,7 @@ fn view_pr<H: DeterministicActionHost + ?Sized>(
     Ok((pr_number, pr_url))
 }
 
-fn find_pr_by_head<H: DeterministicActionHost + ?Sized>(
+fn find_pr_by_head<H: RuntimeHost + ?Sized>(
     host: &H,
     head: &str,
     tool_context: ToolContext,

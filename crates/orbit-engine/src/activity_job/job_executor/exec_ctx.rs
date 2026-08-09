@@ -9,7 +9,7 @@ pub(super) const DEFAULT_MODEL_FOR_SESSION: &str =
 pub(super) struct ExecCtx<'a> {
     pub(super) run_id: String,
     pub(super) audit: Arc<V2AuditWriter>,
-    pub(super) host: &'a dyn V2RuntimeHost,
+    pub(super) host: &'a dyn RuntimeHost,
     pub(super) input: Value,
     pub(super) pipeline: Arc<Mutex<HashMap<String, Value>>>,
     pub(super) sessions: Arc<Mutex<HashMap<String, Session>>>,

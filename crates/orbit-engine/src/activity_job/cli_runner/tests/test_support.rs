@@ -26,11 +26,10 @@ use tracing::field::{Field, Visit};
 use tracing::{Event, Metadata, Subscriber, span};
 use tracing_subscriber::{Registry, fmt as tracing_fmt, fmt::MakeWriter, layer::SubscriberExt};
 
-use super::super::super::dispatcher::{
-    DispatchError, ResolvedCliExecutor, ResolvedSandbox, V2RuntimeHost,
-};
+use super::super::super::dispatcher::{DispatchError, ResolvedCliExecutor, ResolvedSandbox};
 use super::super::spawn::SpawnError;
 use super::super::supervisor::SpawnOutput;
+use crate::context::RuntimeHost;
 
 pub(in crate::activity_job::cli_runner) fn sandbox_for_test() -> ResolvedSandbox {
     ResolvedSandbox {
@@ -257,7 +256,7 @@ impl TestHost {
     }
 }
 
-impl V2RuntimeHost for TestHost {
+impl RuntimeHost for TestHost {
     fn run_deterministic(
         &self,
         _action: &str,

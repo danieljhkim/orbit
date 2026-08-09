@@ -41,7 +41,7 @@ fn execute_job(
     input: Value,
     run_id: &str,
     audit: std::sync::Arc<V2AuditWriter>,
-    host: &dyn V2RuntimeHost,
+    host: &dyn RuntimeHost,
 ) -> Result<JobOutcome, DispatchError> {
     super::execute_job_with_resume(job, input, run_id, audit, host, None)
 }
@@ -178,7 +178,7 @@ impl Visit for FieldCapture {
 // Shared scripted host for executor-block tests
 // --------------------------------------------------------------------------
 //
-// `ScriptedHost` is a minimal `V2RuntimeHost` returning scripted outcomes
+// `ScriptedHost` is a minimal `RuntimeHost` returning scripted outcomes
 // per deterministic-action name. Per ADR-047 each executor-block test module
 // reuses this scaffolding instead of re-deriving its own; broadening the
 // surface (e.g. agent_loop or shell hosts) belongs here rather than in any
@@ -258,7 +258,7 @@ impl ScriptedHost {
     }
 }
 
-impl V2RuntimeHost for ScriptedHost {
+impl RuntimeHost for ScriptedHost {
     fn run_deterministic(
         &self,
         action: &str,

@@ -17,9 +17,7 @@ use serde_json::Value;
 use crate::context::{ProvenanceEnv, provenance_env};
 
 use super::super::audit_writer::V2AuditWriter;
-use super::super::dispatcher::{
-    DispatchError, DispatchInvocationTrace, DispatchOutcome, V2RuntimeHost,
-};
+use super::super::dispatcher::{DispatchError, DispatchInvocationTrace, DispatchOutcome};
 use super::super::workspace::{
     WorktreeBoundaryGuard, resolve_subprocess_cwd, validate_declared_worktree_pair,
 };
@@ -37,13 +35,14 @@ use super::supervisor::{
     DEFAULT_WALL_CLOCK_TIMEOUT_SECONDS, SpawnTraceContext, SpawnWithTimeoutRequest,
     spawn_with_timeout,
 };
+use crate::context::RuntimeHost;
 use orbit_exec::LinuxBwrapPostRunGuard;
 
 const STDOUT_TEXT_PREVIEW_LIMIT_BYTES: usize = 64 * 1024;
 const RESPONSE_DIAGNOSTIC_LIMIT_CHARS: usize = 1024;
 
 pub fn run_cli_backend(
-    host: &dyn V2RuntimeHost,
+    host: &dyn RuntimeHost,
     spec: &AgentLoopSpec,
     run_id: &str,
     audit: Arc<V2AuditWriter>,
@@ -564,7 +563,7 @@ struct CliLearningContext {
 }
 
 fn cli_learning_context(
-    host: &dyn V2RuntimeHost,
+    host: &dyn RuntimeHost,
     input: &Value,
     workspace_root: Option<&std::path::Path>,
 ) -> Result<CliLearningContext, DispatchError> {

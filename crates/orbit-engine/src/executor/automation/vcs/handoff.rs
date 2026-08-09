@@ -4,7 +4,7 @@ use chrono::Utc;
 use orbit_common::types::{OrbitError, Task, TaskComment, TaskStatus};
 use serde_json::Value;
 
-use crate::context::{TaskAutomationUpdate, TaskHost};
+use crate::context::{RuntimeHost, TaskAutomationUpdate};
 
 use super::super::input::{
     canonicalize_existing_dir, input_string_field, required_input_string, required_job_run_id,
@@ -56,7 +56,7 @@ pub(super) struct HandoffContext {
     pub(super) tasks: Vec<Task>,
 }
 
-pub(super) fn load_handoff_context<H: TaskHost + ?Sized>(
+pub(super) fn load_handoff_context<H: RuntimeHost + ?Sized>(
     host: &H,
     input: &Value,
     action: &str,
@@ -143,7 +143,7 @@ impl FailedHandoffPhase {
     }
 }
 
-pub(super) fn record_failed_handoff<H: TaskHost + ?Sized>(
+pub(super) fn record_failed_handoff<H: RuntimeHost + ?Sized>(
     host: &H,
     context: &HandoffContext,
     input: &Value,

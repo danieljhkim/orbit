@@ -12,9 +12,7 @@ use orbit_tools::ToolContext;
 use serde_json::Value;
 use tempfile::tempdir;
 
-use crate::context::{
-    DeterministicActionHost, TaskActivityUpdate, TaskAutomationUpdate, TaskReadHost, TaskWriteHost,
-};
+use crate::context::{RuntimeHost, TaskActivityUpdate, TaskAutomationUpdate};
 
 use super::super::super::git::git_success;
 
@@ -63,7 +61,7 @@ impl CommitTestHost {
     }
 }
 
-impl TaskReadHost for CommitTestHost {
+impl RuntimeHost for CommitTestHost {
     fn get_task(&self, task_id: &str) -> Result<Task, OrbitError> {
         self.tasks
             .lock()
@@ -115,9 +113,7 @@ impl TaskReadHost for CommitTestHost {
             .cloned()
             .collect())
     }
-}
 
-impl TaskWriteHost for CommitTestHost {
     fn start_task(
         &self,
         _task_id: &str,
@@ -164,9 +160,7 @@ impl TaskWriteHost for CommitTestHost {
         }
         Ok(())
     }
-}
 
-impl DeterministicActionHost for CommitTestHost {
     fn record_event(&self, _event: OrbitEvent) -> Result<(), OrbitError> {
         Ok(())
     }

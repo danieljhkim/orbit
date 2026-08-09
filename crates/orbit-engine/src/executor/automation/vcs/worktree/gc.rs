@@ -8,7 +8,7 @@ use orbit_common::types::{JobRun, JobRunState, OrbitError, Task, TaskStatus};
 use serde::Serialize;
 use serde_json::Value;
 
-use crate::context::TaskReadHost;
+use crate::context::RuntimeHost;
 
 use super::cleanup::remove_worktree;
 use super::{WorktreeIdentity, resolve_shared_worktree_path};
@@ -50,7 +50,7 @@ pub struct WorktreeGcResult {
     pub reports: Vec<WorktreeGcReport>,
 }
 
-pub fn collect_worktrees<H: TaskReadHost + ?Sized>(
+pub fn collect_worktrees<H: RuntimeHost + ?Sized>(
     repo_root: &Path,
     runs: &[JobRun],
     task_host: &H,
@@ -134,7 +134,7 @@ pub fn collect_worktrees<H: TaskReadHost + ?Sized>(
     })
 }
 
-fn classify_known<H: TaskReadHost + ?Sized>(
+fn classify_known<H: RuntimeHost + ?Sized>(
     repo_root: &Path,
     path: &Path,
     run: &JobRun,

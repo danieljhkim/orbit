@@ -1,5 +1,5 @@
 use orbit_common::types::{LearningInjectionCaps, LearningScope, Task};
-use orbit_engine::V2RuntimeHost;
+use orbit_engine::RuntimeHost;
 use orbit_store::{LearningCreateParams, LearningSearchParams};
 use serde_json::json;
 

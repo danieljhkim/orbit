@@ -10,7 +10,7 @@
 
 //! Phase 2b v2 runtime integration coverage, updated for Phase 2d + Phase 3:
 //!
-//! 1. Deterministic reference — a stub `V2RuntimeHost` echoes the action.
+//! 1. Deterministic reference — a stub `RuntimeHost` echoes the action.
 //! 2. Agent_loop reference — exercised via `drive_agent_loop` under
 //!    `ORBIT_V2_REPLAY=tool_denial`. Phase 3 surfaces `DispatchError::ToolDenied`
 //!    structurally, so the expected result is `Err(ToolDenied)` and the §7
@@ -26,8 +26,8 @@ use orbit_common::types::activity_job::{
     ActivityV2, ActivityV2Spec, V2AuditEventKind, load_activity_asset,
 };
 use orbit_engine::{
-    DispatchError, ResolvedCliExecutor, V2AuditWriter, V2DispatchInput, V2RuntimeHost,
-    V2SqliteSink, dispatch_v2_activity, drive_agent_loop,
+    DispatchError, ResolvedCliExecutor, RuntimeHost, V2AuditWriter, V2DispatchInput, V2SqliteSink,
+    dispatch_v2_activity, drive_agent_loop,
 };
 use serde_json::Value;
 use std::env;
@@ -171,7 +171,7 @@ fn smoke_dispatch_agent_loop(
 
 struct EchoHost;
 
-impl V2RuntimeHost for EchoHost {
+impl RuntimeHost for EchoHost {
     fn run_deterministic(
         &self,
         action: &str,

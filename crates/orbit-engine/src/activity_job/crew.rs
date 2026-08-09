@@ -10,7 +10,8 @@ use serde_json::Value;
 
 use crate::context::CrewConfig;
 
-use super::dispatcher::{DispatchError, V2RuntimeHost};
+use super::dispatcher::DispatchError;
+use crate::context::RuntimeHost;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ResolvedAgentSettings {
@@ -22,7 +23,7 @@ pub struct ResolvedAgentSettings {
 /// Resolve one crew assignment for an activity. Explicit activity input wins;
 /// absent that, the run input preserves the run's resolved crew selection.
 pub fn resolve_crew_settings(
-    host: &dyn V2RuntimeHost,
+    host: &dyn RuntimeHost,
     inline: &AgentLoopSpec,
     activity_input: &Value,
     run_input: &Value,
@@ -42,7 +43,7 @@ pub fn resolve_crew_settings(
 /// into the system route. The marker is asset data, while the crew is read
 /// from the runtime host for each dispatch.
 pub fn inject_system_crew_input(
-    host: &dyn V2RuntimeHost,
+    host: &dyn RuntimeHost,
     input: &Value,
 ) -> Result<Value, DispatchError> {
     if input.get("system_crew").and_then(Value::as_bool) != Some(true) {

@@ -4,8 +4,7 @@
 //! paths (and the crate-root re-exports in `lib.rs`) stay stable:
 //! - [`outcome`] — run outcome types, error-code constants, and
 //!   workflow-failure helpers.
-//! - [`hosts`] — the host trait boundary (`JobRunHost`, `TaskHost`,
-//!   `EnvironmentHost`, `DeterministicActionHost`, ...) and the task-update param types.
+//! - [`hosts`] — the unified [`RuntimeHost`] boundary and task-update types.
 //! - [`env`] — subprocess provenance environment variables shared by every
 //!   engine spawn path.
 
@@ -17,10 +16,7 @@ mod outcome;
 mod tests;
 
 pub(crate) use env::{ProvenanceEnv, provenance_env};
-pub use hosts::{
-    CrewConfig, DeterministicActionHost, EnvironmentHost, JobRunHost, PrConfig, TaskActivityUpdate,
-    TaskAutomationUpdate, TaskHost, TaskReadHost, TaskWriteHost, ensure_task_can_enter_workflow,
-};
+pub use hosts::{CrewConfig, PrConfig, RuntimeHost, TaskActivityUpdate, TaskAutomationUpdate};
 pub use outcome::{
     AGENT_INVOCATION_FAILED, AGENT_TIMEOUT, ActivityInvocationResult, WORKFLOW_RUN_FAILED_EVENT,
     blocked_workflow_failure_update,

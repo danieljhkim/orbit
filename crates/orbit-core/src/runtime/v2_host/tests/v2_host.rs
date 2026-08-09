@@ -52,17 +52,17 @@ backend = "cli"
     let (_root, runtime) = runtime_with_recovery_config(config);
     let run_id = seed_running_job_run(&runtime, "recovery_telemetry_job");
     assert_eq!(
-        V2RuntimeHost::system_crew_for_dispatch(&runtime).as_deref(),
+        RuntimeHost::system_crew_for_dispatch(&runtime).as_deref(),
         Some("qa")
     );
-    let recovery = V2RuntimeHost::agent_crew_config_for_input(
+    let recovery = RuntimeHost::agent_crew_config_for_input(
         &runtime,
         &serde_json::json!({ "crew": "qa", "crew_config_key": "workflow.system_crew" }),
     )
     .expect("resolve configured system crew")
     .expect("configured system crew exists");
 
-    V2RuntimeHost::persist_invocation_trace(
+    RuntimeHost::persist_invocation_trace(
         &runtime,
         &run_id,
         "step_failure_recovery",
@@ -130,7 +130,7 @@ fn persist_invocation_trace_prefers_provider_model_over_requested_alias() {
         ..InvocationTrace::default()
     };
 
-    V2RuntimeHost::persist_invocation_trace(
+    RuntimeHost::persist_invocation_trace(
         &runtime,
         &run_id,
         "implement_one",
@@ -154,7 +154,7 @@ fn persist_invocation_trace_prefers_provider_model_over_requested_alias() {
 }
 
 fn persist_test_trace(runtime: &OrbitRuntime, run_id: &str, trace: &InvocationTrace) {
-    V2RuntimeHost::persist_invocation_trace(
+    RuntimeHost::persist_invocation_trace(
         runtime,
         run_id,
         "knowledge_step",
@@ -228,7 +228,7 @@ fn tool_context_for_activity_passes_proc_allowlist() {
     let (_root, runtime, _repo_root) = runtime_with_workspace_layout();
 
     // No allowlist -> not activity-scoped (legacy unrestricted path).
-    let unscoped = <OrbitRuntime as V2RuntimeHost>::tool_context_for_activity(
+    let unscoped = <OrbitRuntime as RuntimeHost>::tool_context_for_activity(
         &runtime,
         Some("run-allowlist-test"),
         None,
@@ -240,7 +240,7 @@ fn tool_context_for_activity_passes_proc_allowlist() {
 
     // Activity-scoped allowlist propagates verbatim and flips the bool.
     let programs = vec!["git".to_string(), "rg".to_string()];
-    let scoped = <OrbitRuntime as V2RuntimeHost>::tool_context_for_activity(
+    let scoped = <OrbitRuntime as RuntimeHost>::tool_context_for_activity(
         &runtime,
         Some("run-allowlist-test"),
         None,
@@ -251,7 +251,7 @@ fn tool_context_for_activity_passes_proc_allowlist() {
     assert!(scoped.proc_spawn_activity_scoped);
 
     // Empty Some([]) is meaningful: fail-closed when activity-scoped.
-    let empty_scoped = <OrbitRuntime as V2RuntimeHost>::tool_context_for_activity(
+    let empty_scoped = <OrbitRuntime as RuntimeHost>::tool_context_for_activity(
         &runtime,
         Some("run-allowlist-test"),
         None,

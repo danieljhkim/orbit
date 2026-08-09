@@ -19,9 +19,9 @@ pub struct StateExecutionContext {
 }
 
 pub fn execute_action<
-    H: crate::context::DeterministicActionHost
-        + crate::context::TaskHost
-        + crate::context::EnvironmentHost
+    H: crate::context::RuntimeHost
+        + crate::context::RuntimeHost
+        + crate::context::RuntimeHost
         + Sync
         + ?Sized,
 >(
@@ -40,10 +40,10 @@ pub fn execute_action<
     execute_engine_action(host, action, input, state_context)
 }
 
-fn execute_engine_action<
-    H: crate::context::DeterministicActionHost
-        + crate::context::TaskHost
-        + crate::context::EnvironmentHost
+pub(crate) fn execute_engine_action<
+    H: crate::context::RuntimeHost
+        + crate::context::RuntimeHost
+        + crate::context::RuntimeHost
         + Sync
         + ?Sized,
 >(

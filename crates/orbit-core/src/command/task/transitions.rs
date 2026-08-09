@@ -372,34 +372,44 @@ impl OrbitRuntime {
     /// and is answered there before the worktree is created (ORB-10464,
     /// `orbit-engine`'s `vcs::worktree::dependency_delivery`). Both halves
     /// must hold for a task to be genuinely ready.
-    pub(crate) fn admit_task_for_workflow_as_system(
+    pub(crate) fn ensure_task_can_enter_workflow_as_system(
         &self,
         id: &str,
         workflow: &str,
     ) -> Result<Task, OrbitError> {
         let task = self.get_task(id)?;
+        if matches!(
+            task.status,
+            TaskStatus::Proposed
+                | TaskStatus::Backlog
+                | TaskStatus::Rejected
+                | TaskStatus::Archived
+                | TaskStatus::InProgress
+        ) {
+            return Ok(task);
+        }
+
+        Err(OrbitError::InvalidInput(format!(
+            "task '{id}' is in status '{}'; workflow admission for '{workflow}' requires 'proposed', 'backlog', 'rejected', 'archived', or 'in-progress'",
+            task.status
+        )))
+    }
+
+    pub(crate) fn admit_task_for_workflow_as_system(
+        &self,
+        id: &str,
+        workflow: &str,
+    ) -> Result<Task, OrbitError> {
         let workflow = workflow.trim();
         let workflow = if workflow.is_empty() {
             "workflow"
         } else {
             workflow
         };
+        let task = self.ensure_task_can_enter_workflow_as_system(id, workflow)?;
 
         if task.status == TaskStatus::InProgress {
             return Ok(task);
-        }
-
-        if !matches!(
-            task.status,
-            TaskStatus::Proposed
-                | TaskStatus::Backlog
-                | TaskStatus::Rejected
-                | TaskStatus::Archived
-        ) {
-            return Err(OrbitError::InvalidInput(format!(
-                "task '{id}' is in status '{}'; workflow admission for '{workflow}' requires 'proposed', 'backlog', 'rejected', 'archived', or 'in-progress'",
-                task.status
-            )));
         }
 
         let note = Some(format!("workflow admission: {workflow}"));

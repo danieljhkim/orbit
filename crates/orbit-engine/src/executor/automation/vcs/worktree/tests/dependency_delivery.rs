@@ -21,9 +21,7 @@ use orbit_tools::ToolContext;
 use serde_json::{Value, json};
 use tempfile::tempdir;
 
-use crate::context::{
-    DeterministicActionHost, TaskActivityUpdate, TaskAutomationUpdate, TaskReadHost, TaskWriteHost,
-};
+use crate::context::{RuntimeHost, TaskActivityUpdate, TaskAutomationUpdate};
 
 use super::super::dependency_delivery::{
     DependencyDeliveryMode, dependency_delivery_mode_from_input,
@@ -356,7 +354,7 @@ impl FakeHost {
     }
 }
 
-impl TaskReadHost for FakeHost {
+impl RuntimeHost for FakeHost {
     fn get_task(&self, task_id: &str) -> Result<Task, OrbitError> {
         self.tasks
             .get(task_id)
@@ -379,9 +377,7 @@ impl TaskReadHost for FakeHost {
     ) -> Result<Vec<Task>, OrbitError> {
         Ok(self.tasks.values().cloned().collect())
     }
-}
 
-impl TaskWriteHost for FakeHost {
     fn start_task(
         &self,
         _task_id: &str,
@@ -418,9 +414,7 @@ impl TaskWriteHost for FakeHost {
     ) -> Result<(), OrbitError> {
         Ok(())
     }
-}
 
-impl DeterministicActionHost for FakeHost {
     fn record_event(&self, _event: OrbitEvent) -> Result<(), OrbitError> {
         Ok(())
     }

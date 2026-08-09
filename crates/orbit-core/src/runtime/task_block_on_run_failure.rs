@@ -10,12 +10,12 @@
 //! (`workflow_run_failed`) and note format stay consistent across paths.
 //!
 //! `blocked` is a deliberate dead end for automation: `Blocked` is not in the
-//! workflow-admission allowlist (`ensure_task_can_enter_workflow`), so the ship
+//! workflow-admission allowlist, so the ship
 //! sweep skips these tasks. The only way out is a human/orchestrator decision
 //! (`orbit task start`, which accepts `Blocked`, or moving it back to backlog).
 
 use orbit_common::types::{JobRun, JobRunState, OrbitError, TaskStatus};
-use orbit_engine::{TaskWriteHost, blocked_workflow_failure_update};
+use orbit_engine::{RuntimeHost, blocked_workflow_failure_update};
 
 use crate::OrbitRuntime;
 

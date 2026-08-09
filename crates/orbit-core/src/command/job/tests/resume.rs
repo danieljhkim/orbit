@@ -10,7 +10,7 @@ use std::path::Path;
 
 use chrono::Utc;
 use orbit_common::types::{JobRunState, TaskStatus};
-use orbit_engine::V2RuntimeHost;
+use orbit_engine::RuntimeHost;
 use orbit_store::TaskReservationReleaseReason;
 use serde_json::json;
 
@@ -121,7 +121,7 @@ fn seed_failed_delivery_run(
         .mark_job_run_running(&run.run_id, Utc::now(), std::process::id())
         .expect("mark source run running");
 
-    <OrbitRuntime as V2RuntimeHost>::checkpoint_step(
+    <OrbitRuntime as RuntimeHost>::checkpoint_step(
         runtime,
         &run.run_id,
         0,
@@ -130,7 +130,7 @@ fn seed_failed_delivery_run(
         &json!({"worktree": {"job_run_id": run.run_id, "batch_id": run.run_id}}),
     )
     .expect("checkpoint worktree step");
-    <OrbitRuntime as V2RuntimeHost>::checkpoint_step(
+    <OrbitRuntime as RuntimeHost>::checkpoint_step(
         runtime,
         &run.run_id,
         1,

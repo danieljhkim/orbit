@@ -22,7 +22,7 @@ use std::path::Path;
 use orbit_common::types::{DependencyNotDelivered, OrbitError};
 use serde_json::Value;
 
-use crate::context::TaskReadHost;
+use crate::context::RuntimeHost;
 
 use super::super::delivery_marker::commits_matching;
 
@@ -82,7 +82,7 @@ struct UndeliveredDependency {
 /// different from the one the worktree is created at. `base_ref` is carried
 /// only to name the base in the diagnostic.
 pub(in crate::executor::automation) fn ensure_dependencies_delivered_into_base<
-    H: TaskReadHost + ?Sized,
+    H: RuntimeHost + ?Sized,
 >(
     host: &H,
     repo_root: &Path,

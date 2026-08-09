@@ -46,7 +46,7 @@ pub fn validate_job(job: &JobV2) -> Result<(), DispatchError> {
 /// to the structural error the dispatcher already raises.
 pub fn validate_job_deterministic_actions(
     job: &JobV2,
-    host: &dyn V2RuntimeHost,
+    host: &dyn RuntimeHost,
 ) -> Result<(), DispatchError> {
     check_activity_action(
         job.resolved_recovery_activity.as_ref().map(|a| &a.spec),
@@ -66,7 +66,7 @@ pub fn validate_job_deterministic_actions(
 
 fn validate_step_deterministic_actions(
     step: &JobV2Step,
-    host: &dyn V2RuntimeHost,
+    host: &dyn RuntimeHost,
 ) -> Result<(), DispatchError> {
     check_activity_action(
         step.resolved_recovery_activity.as_ref().map(|a| &a.spec),
@@ -104,7 +104,7 @@ fn validate_step_deterministic_actions(
 fn check_activity_action(
     spec: Option<&ActivityV2Spec>,
     label: impl Fn() -> String,
-    host: &dyn V2RuntimeHost,
+    host: &dyn RuntimeHost,
 ) -> Result<(), DispatchError> {
     let Some(ActivityV2Spec::Deterministic(deterministic)) = spec else {
         return Ok(());

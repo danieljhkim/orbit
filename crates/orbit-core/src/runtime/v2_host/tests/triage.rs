@@ -6,7 +6,7 @@
 
 use chrono::Utc;
 use orbit_common::types::{JobRunState, JobTargetType, TaskPriority, TaskStatus, TaskType};
-use orbit_engine::{TaskAutomationUpdate, TaskWriteHost, WORKFLOW_RUN_FAILED_EVENT};
+use orbit_engine::{RuntimeHost, TaskAutomationUpdate, WORKFLOW_RUN_FAILED_EVENT};
 use orbit_store::friction_store::{FrictionListFilter, list_frictions};
 use orbit_store::{JobRunStepParams, TaskCreateParams, TaskReservationReleaseReason};
 use serde_json::{Value, json};

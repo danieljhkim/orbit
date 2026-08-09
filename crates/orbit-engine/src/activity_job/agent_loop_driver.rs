@@ -31,8 +31,9 @@ use orbit_tools::ToolContext;
 use serde_json::Value;
 
 use super::audit_writer::V2AuditWriter;
-use super::dispatcher::{DispatchError, V2RuntimeHost, v2_fs_audit_logger};
+use super::dispatcher::{DispatchError, v2_fs_audit_logger};
 use super::tool_enforcement::EnforcedAuditSink;
+use crate::context::RuntimeHost;
 
 /// Drive a v2 agent_loop activity end-to-end with a fresh `Session`.
 ///
@@ -44,7 +45,7 @@ pub fn drive_agent_loop(
     run_id: &str,
     audit: Arc<V2AuditWriter>,
     input: &Value,
-    host: &dyn V2RuntimeHost,
+    host: &dyn RuntimeHost,
     fs_profile: Option<&str>,
 ) -> Result<LoopOutcome, DispatchError> {
     let model = resolve_model(spec);
@@ -83,7 +84,7 @@ pub fn drive_agent_loop_with_session(
     audit: Arc<V2AuditWriter>,
     session: &mut Session,
     input: &Value,
-    host: &dyn V2RuntimeHost,
+    host: &dyn RuntimeHost,
     fs_profile: Option<&str>,
 ) -> Result<LoopOutcome, DispatchError> {
     let model = resolve_model(spec);
@@ -117,7 +118,7 @@ fn drive_inner(
     session: &mut Session,
     input: &Value,
     tool_ctx: ToolContext,
-    host: Option<&dyn V2RuntimeHost>,
+    host: Option<&dyn RuntimeHost>,
 ) -> Result<LoopOutcome, DispatchError> {
     let model = resolve_model(spec);
     let user_prompt = user_prompt_from_input(input)?;
@@ -166,7 +167,7 @@ fn drive_inner(
 
 fn maybe_prepend_learning_reminders(
     user_prompt: String,
-    host: Option<&dyn V2RuntimeHost>,
+    host: Option<&dyn RuntimeHost>,
     input: &Value,
     session: &mut Session,
     tool_ctx: &ToolContext,
@@ -190,7 +191,7 @@ fn maybe_prepend_learning_reminders(
 }
 
 fn persist_session_learning_state(
-    host: &dyn V2RuntimeHost,
+    host: &dyn RuntimeHost,
     tool_ctx: &ToolContext,
     session: &Session,
     _admitted: &[LearningReminder],

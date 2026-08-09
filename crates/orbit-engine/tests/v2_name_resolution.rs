@@ -36,7 +36,7 @@ use orbit_common::types::activity_job::{
     resolve_job_target_refs, validate_job_loop_session_backends,
 };
 use orbit_engine::{
-    DispatchError, ResolvedCliExecutor, V2AuditWriter, V2DispatchInput, V2RuntimeHost,
+    DispatchError, ResolvedCliExecutor, RuntimeHost, V2AuditWriter, V2DispatchInput,
     dispatch_v2_activity,
 };
 use serde_json::Value;
@@ -267,7 +267,7 @@ fn build_writer(
 /// Host that models the post-sweep deterministic action surface.
 struct PipelineHost;
 
-impl V2RuntimeHost for PipelineHost {
+impl RuntimeHost for PipelineHost {
     fn run_deterministic(
         &self,
         action: &str,
