@@ -3,7 +3,7 @@ summary: "Project Learnings — Vision"
 type: design
 title: "Project Learnings — Vision"
 owner: claude
-last_updated: 2026-07-25
+last_updated: 2026-08-09
 status: Draft
 feature: project-learnings
 doc_role: vision
@@ -81,13 +81,13 @@ The third is probably right; phase 1 ships option 1.
 
 ### 1.5 Pull discovery quality
 
-Automatic delivery was retired in [ORB-10346] after the hook relevancy audit showed that it added broad tool-call overhead without a useful direct signal. The remaining discovery model must make the right record easy to locate without vendor-specific hooks.
+[ORB-10346] retired the Claude Code `PreToolUse` hook layer after the relevancy audit showed it added broad tool-call overhead without a useful direct signal, but left the other two automatic-delivery layers active: engine pre-prompt injection and the MCP sidecar decorator (source locations and status: [4_decisions.md ADR-0108 amendment](./4_decisions.md)). The discovery model below layers on top of that live push delivery, not in its absence.
 
 - **Search and show only.** Lowest runtime overhead and portable across every agent, but relies on the query being meaningful.
 - **Search and show plus reference comments.** A concise artifact ID and rationale at a code or workflow boundary give agents a concrete locator before they retrieve the authoritative body.
-- **Restore automatic injection.** Reopens the audit's low-relevancy, vendor- and transport-specific hot path; it needs evidence beyond the frozen historical counters.
+- **Restore the Claude Code hook layer.** Reopens the audit's low-relevancy, vendor-locked hot path; it needs evidence beyond the frozen historical counters.
 
-Phase 1 uses search/show plus reference comments. Future ranking work should improve the pull results rather than reintroduce an automatic tool-call hook.
+Phase 1 uses search/show plus reference comments, on top of the two still-active push layers. Future ranking work should improve the pull results rather than reintroduce the Claude Code hook.
 
 ### 1.6 Privacy of learning content under shared repos
 
@@ -142,7 +142,7 @@ Migrations follow the same pattern as task `schemaVersion: 2` — additive when 
 ### 2.3 What was rejected
 
 - **Flat markdown directory** (`docs/learnings/*.md`). Easy to author, impossible to query at agent runtime. Rejected as the storage substrate; see [4_decisions.md ADR-002](./4_decisions.md).
-- **Automatic delivery via hooks, pre-prompts, or MCP sidecars.** Retired after the 2026-07-18 relevancy audit; the historical injection counters are retained only as calibration data. See [2_design.md §4.3](./2_design.md).
+- **The Claude Code `PreToolUse` hook layer of automatic delivery.** Retired after the 2026-07-18 relevancy audit; the historical injection counters are retained only as calibration data. Engine pre-prompt injection and the MCP sidecar decorator, the other two automatic-delivery layers, remain active. See [2_design.md §4.3](./2_design.md).
 - **CLAUDE.md fragments**. Loaded on every session regardless of relevance. Pollutes context for unrelated work. Rejected; learnings need scope filtering.
 - **Workspace-private storage** (under `.orbit/state/` only, not checked in). Loses cross-collaborator value; same defect as agent `MEMORY.md` for this content type. See [4_decisions.md ADR-003](./4_decisions.md).
 
@@ -193,6 +193,6 @@ indexer.
 ## Task References
 
 - [T20260510-11] — Design + build project-learnings system as native Orbit primitive. The task that produced this folder.
-- [ORB-10346] — Retired automatic delivery in favor of pull discovery and reference comments.
+- [ORB-10346] — Retired the Claude Code `PreToolUse` hook layer; engine pre-prompt injection and the MCP sidecar decorator remain active alongside pull discovery and reference comments.
 
 Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

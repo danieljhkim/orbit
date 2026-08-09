@@ -3,7 +3,7 @@ summary: "Project Learnings — Decisions"
 type: design
 title: "Project Learnings — Decisions"
 owner: claude
-last_updated: 2026-08-01
+last_updated: 2026-08-09
 status: Draft
 feature: project-learnings
 doc_role: decisions
@@ -22,11 +22,11 @@ Historical note ([ORB-10479]): the entries listed below already held a global AD
 
 ---
 
-## ADR-0108 — Push-based discovery via context injection, not pull-only via search (superseded)
+## ADR-0108 — Push-based discovery via context injection, not pull-only via search
 
-**Status:** Superseded · 2026-07 · [ORB-10346] · legacy_id: `project-learnings/ADR-001`
+**Status:** Accepted · 2026-05 · [T20260510-11] · legacy_id: `project-learnings/ADR-001`
 
-**Supersession note.** Automatic delivery was retired after the 2026-07-18 relevancy audit. The current model is pull discovery through search/show plus concise reference comments; this entry remains as the historical decision it replaced.
+**Amendment — ORB-10346.** Only the Claude Code `PreToolUse` hook layer was retired, on 2026-07-20, after the 2026-07-18 relevancy audit. The other two layers this decision shipped remain active and fire on every run: engine pre-prompt injection (`maybe_prepend_learning_reminders` in `crates/orbit-engine/src/activity_job/agent_loop_driver.rs`, called from the sole agent-loop entry `drive_inner`) and the MCP sidecar decorator (`LearningSidecarDecorator` / `maybe_attach_learning_sidecar` in `crates/orbit-remote/src/mcp/learning.rs`, registered on both the broker and hub compositions in `crates/orbit-remote/src/mcp/mod.rs`). Pull discovery through search/show plus concise reference comments ships alongside these two live layers, not in place of them.
 
 **Context.** Three classes of discovery were on the table:
 
@@ -138,11 +138,11 @@ Phase 2 ([3_vision.md §1.1](./3_vision.md), [§1.2](./3_vision.md)) layers symb
 
 ---
 
-## ADR-0112 — Three-layer push pipeline (engine pre-prompt + MCP sidecar + Claude Code hook), not single-layer (superseded)
+## ADR-0112 — Three-layer push pipeline (engine pre-prompt + MCP sidecar + Claude Code hook), not single-layer
 
-**Status:** Superseded · 2026-07 · [ORB-10346] · legacy_id: `project-learnings/ADR-005`
+**Status:** Accepted · 2026-05 · [T20260510-11] · legacy_id: `project-learnings/ADR-005`
 
-**Supersession note.** The three automatic-delivery layers are no longer active. [ORB-10346] removes the repository hook registrations and retains explicit search/show retrieval with point-of-use reference comments.
+**Amendment — ORB-10346.** Only one of the three automatic-delivery layers is no longer active: [ORB-10346] removed the Claude Code `PreToolUse` hook registration. Engine pre-prompt injection and the MCP sidecar decorator (source locations in the ADR-0108 amendment above) remain active and fire on every run, alongside the explicit search/show retrieval and point-of-use reference comments [ORB-10346] added.
 
 **Context.** The push-injection layer ([2_design.md §4](./2_design.md)) has multiple natural placements, each with different coverage:
 
@@ -238,7 +238,7 @@ Alternatives considered:
 
 **Decision.** Injection projects only the learning id, one-line summary, and scope tags; the full body is retrieved via `orbit learning show <id>`, which records a `learning_shown` audit event (keyed by learning id + session) in the host-global `~/.orbit/orbit.db` — the passive usage signal. `orbit learning stats` folds `learning_injected` + `learning_shown` into a per-learning rollup (injected, shown, shown ratio, last-injected/last-shown). Both emissions **fail open**: an unavailable audit backend logs a warning and the injection/show still completes. Session dedup keys on the first resolvable anchor: `ORBIT_SESSION_ID` env → the `session_id` field the hook payload carries → ppid-tmpfile last resort. **No ack surface** — no `orbit learning ack`, no `orbit.learning.ack`, no ack instruction in the injected block.
 
-**Amendment — ORB-10346.** The injection half of this decision is retired: automatic delivery stopped on 2026-07-20 and its counters are frozen historical calibration. `orbit learning show`, its `learning_shown` audit event, and the `orbit learning stats` rollup remain active; a zero-new-injections future is valid.
+**Amendment — ORB-10346.** Only the Claude Code `PreToolUse` hook path of this decision is retired, as of 2026-07-20. Engine pre-prompt injection and the MCP sidecar decorator (source locations in the ADR-0108 amendment above) still inject on every run. The `learning_injected` audit event was only ever emitted by the removed hook (`crates/orbit-cmd/src/learning_hook.rs`), so its counters are frozen historical calibration even though push delivery continues, unaudited, through the other two layers. `orbit learning show`, its `learning_shown` audit event, and the `orbit learning stats` rollup remain active.
 
 **Consequences.**
 - The rollup is the designed input for downstream deprecation policy (ORB-10318); decay/TTL is deliberately follow-up work, not implemented at this layer.
@@ -297,7 +297,7 @@ Alternatives considered:
 - [T20260510-11] — Design + build project-learnings system as native Orbit primitive. The task that produced this folder.
 - [ORB-10046] — Remove the vote and comment surfaces from the learning subsystem (ADR-0210 supersedes ADR-0157).
 - [ORB-10316] — Teaser injection + `learning_shown` usage signal + `orbit learning stats` rollup + payload-derived session dedup (ADR-0242).
-- [ORB-10346] — Retired automatic learning delivery while retaining pull discovery, `learning_shown`, and historical usage stats.
+- [ORB-10346] — Retired the Claude Code `PreToolUse` hook layer (one of three automatic-delivery layers) while retaining pull discovery, `learning_shown`, and historical usage stats. Engine pre-prompt injection and the MCP sidecar decorator remain active.
 - [ORB-10366] — Removed the `--hooks` flag from `orbit workspace init` and the tracked inert shims; kept `orbit hook install` as an opt-in escape hatch (ADR-0248).
 - [ORB-10364] — Gated the learning authoring surfaces on caller role and redirected executors to `friction add` (ADR-0250).
 - [ORB-10452] — Made the legacy learning-layout migration report-only by default and require the standard `--confirm` apply flag (ADR-0110 amendment).

@@ -24,9 +24,14 @@ template:
        `orbit tool run orbit.learning.stats` where the CLI is unavailable).
        Each row carries `injected_count`, `shown_count`, `shown_ratio`,
        `last_injected_at`, and `last_shown_at`. Injection-side counters are
-       frozen as of 2026-07-20 because automatic delivery ended; zero new
-       injections is expected and is not an error. Combine with each learning's
-       age from `orbit learning list --json` (`created_at` / `updated_at`).
+       frozen as of 2026-07-20 because the Claude Code `PreToolUse` hook
+       layer — the only layer that ever emitted the `learning_injected`
+       audit event — was retired; engine pre-prompt injection and the MCP
+       sidecar decorator remain active and continue to push scope-matched
+       learnings on every run, just without emitting this event. Zero new
+       `learning_injected` events is expected and is not an error. Combine
+       with each learning's age from `orbit learning list --json`
+       (`created_at` / `updated_at`).
        A learning that is old and has never been shown, or that was injected
        historically but never shown, is a candidate.
     2. Anchor health — from `orbit learning list --json`, inspect each active
