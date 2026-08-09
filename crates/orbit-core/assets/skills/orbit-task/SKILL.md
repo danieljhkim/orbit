@@ -53,7 +53,7 @@ Exit: the task exists with a strong description, clear acceptance criteria, and 
 
 Carry a task from intent to verified implementation with explicit lifecycle tracking.
 
-**Step 1 — Load.** `orbit.task.show`, then extract `description`/`acceptance_criteria` (the required outcome), `plan` (author one if blank or placeholder), `context_files` (resolve each with `fs.read`; for a `dir:` scope read the listing plus its key files), and `status`. Then `orbit.search` with `semantic: "<task-id>"`, `limit: 5` to surface prior related decisions — non-blocking, skip it if nothing is relevant. No ID yet? Clarify intent with the human, then use Create above.
+**Step 1 — Load.** `orbit.task.show`, then extract `description`/`acceptance_criteria` (the required outcome), `plan` (author one if blank or placeholder), `context_files`, and `status`. Read each `file:` target with `fs.read`. For a `dir:` selector, do not call `fs.read` on the directory: after verifying it resolves beneath the workspace root, use `rg --files <directory>` to list it, then use `fs.read` only for its key files. Then `orbit.search` with `semantic: "<task-id>"`, `limit: 5` to surface prior related decisions — non-blocking, skip it if nothing is relevant. No ID yet? Clarify intent with the human, then use Create above.
 
 **Step 2 — Plan.** `orbit.task.update` with a concrete markdown `plan` — target files, validation commands, risks — if one doesn't exist.
 

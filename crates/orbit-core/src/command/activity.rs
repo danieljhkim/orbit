@@ -315,6 +315,31 @@ backend = "cli"
     }
 
     #[test]
+    fn agent_implement_context_loading_reads_files_and_lists_directories() {
+        let (_, yaml) = DEFAULT_ACTIVITY_FILES
+            .iter()
+            .find(|(name, _)| *name == "agent_implement")
+            .expect("agent implement activity is seeded");
+        let asset = load_activity_asset(yaml).expect("parse agent implement activity");
+        let ActivityV2Spec::AgentLoop(spec) = asset.spec.spec else {
+            panic!("expected agent_loop activity");
+        };
+        let instruction = spec
+            .instruction
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ")
+            .to_lowercase();
+
+        assert!(instruction.contains("each `file:` target with `fs.read`"));
+        assert!(instruction.contains("each `dir:` selector"));
+        assert!(instruction.contains("do not call `fs.read` on the directory"));
+        assert!(instruction.contains("resolves beneath the workspace root"));
+        assert!(instruction.contains("`rg --files <directory>`"));
+        assert!(!instruction.contains("is a directory"));
+    }
+
+    #[test]
     fn agent_implement_grants_allocate_then_update_adr() {
         let (_, yaml) = DEFAULT_ACTIVITY_FILES
             .iter()
