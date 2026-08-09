@@ -3,7 +3,7 @@ summary: "Task Artifacts — Decisions"
 type: design
 title: "Task Artifacts — Decisions"
 owner: codex
-last_updated: 2026-07-26
+last_updated: 2026-08-09
 status: Draft
 feature: task-artifacts
 doc_role: decisions
@@ -107,9 +107,18 @@ Narrative lives in the ADR store — retrieve it with `orbit tool run orbit.adr.
 
 ---
 
+## ADR-0340 — History notes elide only what another record retains in full
+
+**Status:** Accepted · 2026-08 · [ORB-10343]
+
+Narrative lives in the ADR store — retrieve it with `orbit tool run orbit.adr.show --input '{"id":"ADR-0340"}'`.
+
+---
+
 ## Task References
 
 - ORB-00093
 - ORB-00273
+- ORB-10343
 
 Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

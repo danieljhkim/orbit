@@ -118,6 +118,7 @@ ci-fast:
 	./scripts/check-dependency-direction.sh
 	./scripts/check-cli-imports.sh
 	./scripts/check-terminal-state-guard.sh
+	./scripts/check-history-note-size.sh
 	./scripts/check-stability.sh
 	./scripts/check-learning-layout.sh
 	./scripts/check-artifact-redaction-guardrail.sh
