@@ -661,22 +661,60 @@ mod tests {
         }
     }
 
-    /// Every portability violation in `root`, each prefixed with its path
-    /// relative to `crates/orbit-core/assets/` for a readable failure report.
-    fn portability_failures_under(label: &str, root: &Path) -> Vec<String> {
+    /// Portability violations and visibly skipped non-text files under `root`.
+    #[derive(Debug, PartialEq, Eq)]
+    struct PortabilityScan {
+        failures: Vec<String>,
+        skipped: Vec<String>,
+    }
+
+    /// Scan `root`, prefixing each result with its path relative to
+    /// `crates/orbit-core/assets/` for a readable failure report.
+    fn portability_scan_under(label: &str, root: &Path) -> PortabilityScan {
         let files = collect_relative_files(root)
             .unwrap_or_else(|e| panic!("collect_relative_files({}): {e}", root.display()));
 
         let mut failures = Vec::new();
+        let mut skipped = Vec::new();
         for relative in files {
             let path = root.join(&relative);
-            let content = std::fs::read_to_string(&path)
-                .unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
+            let content = match std::fs::read_to_string(&path) {
+                Ok(content) => content,
+                Err(error) if error.kind() == std::io::ErrorKind::InvalidData => {
+                    skipped.push(format!(
+                        "  {label}/{}: skipped non-UTF-8 file",
+                        relative.display()
+                    ));
+                    continue;
+                }
+                Err(error) => panic!("read {}: {error}", path.display()),
+            };
             for violation in portability_violations(&content) {
                 failures.push(format!("  {label}/{}: {violation}", relative.display()));
             }
         }
-        failures
+        PortabilityScan { failures, skipped }
+    }
+
+    #[test]
+    fn portability_checker_skips_non_utf8_files_without_hiding_text_violations() {
+        let root = tempfile::tempdir().expect("create temporary assets root");
+        std::fs::write(
+            root.path().join("bad.md"),
+            "See ORB-10530 before handoff.\n",
+        )
+        .expect("write text fixture");
+        std::fs::write(root.path().join("binary.dat"), [0xff, 0xfe]).expect("write binary fixture");
+
+        let scan = portability_scan_under("skills", root.path());
+        assert_eq!(
+            scan.failures,
+            vec!["  skills/bad.md: workspace-local artifact id `ORB-10530`"]
+        );
+        assert_eq!(
+            scan.skipped,
+            vec!["  skills/binary.dat: skipped non-UTF-8 file"]
+        );
     }
 
     #[test]
@@ -688,11 +726,10 @@ mod tests {
         // Activities were outside this check until a task description's own
         // wording — a maintainer's name plus a concrete ADR id — was copied
         // verbatim into `agent_implement.yaml` (PR #702).
-        let mut failures = portability_failures_under("skills", &assets_skills_dir());
-        failures.extend(portability_failures_under(
-            "activities",
-            &assets_activities_dir(),
-        ));
+        let skills = portability_scan_under("skills", &assets_skills_dir());
+        let activities = portability_scan_under("activities", &assets_activities_dir());
+        let mut failures = skills.failures;
+        failures.extend(activities.failures);
 
         assert!(
             failures.is_empty(),
