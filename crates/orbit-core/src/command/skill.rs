@@ -276,6 +276,15 @@ mod tests {
     }
 
     #[test]
+    fn orbit_task_skill_matches_plugin_copy() {
+        assert_eq!(
+            include_str!("../../assets/skills/orbit-task/SKILL.md"),
+            include_str!("../../../../plugin/skills/orbit-task/SKILL.md"),
+            "the embedded and plugin copies of orbit-task must remain byte-identical"
+        );
+    }
+
+    #[test]
     fn plugin_package_configuration_is_valid() {
         let repo = repo_root();
         let claude_mcp_path = repo.join("plugin/.mcp.json");
