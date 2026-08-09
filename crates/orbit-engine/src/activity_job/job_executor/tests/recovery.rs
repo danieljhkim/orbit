@@ -228,6 +228,7 @@ fn recovery_agent_loop_uses_reviewer_role_config() {
     ));
 
     let overridden = role_overridden_recovery_spec(&recovery, &ctx)
+        .expect("generic recovery role resolution should succeed")
         .expect("role-tagged recovery should resolve");
 
     let ActivityV2Spec::AgentLoop(spec) = overridden else {
@@ -251,6 +252,7 @@ fn recovery_agent_loop_without_reviewer_config_keeps_inline_defaults() {
     ));
 
     let overridden = role_overridden_recovery_spec(&recovery, &ctx)
+        .expect("generic recovery inline fallback should succeed")
         .expect("role-tagged recovery should still produce dispatch spec");
 
     let ActivityV2Spec::AgentLoop(spec) = overridden else {
@@ -260,6 +262,55 @@ fn recovery_agent_loop_without_reviewer_config_keeps_inline_defaults() {
     assert_eq!(spec.model, None);
     assert_eq!(spec.backend, Backend::Http);
     assert_eq!(host.observed_role_lookups(), vec![AgentRole::Reviewer]);
+}
+
+#[test]
+fn step_failure_recovery_uses_the_lane_middleweight_config() {
+    for (provider, model) in [
+        (Provider::Codex, "gpt-5.6-terra"),
+        (Provider::Claude, "sonnet"),
+    ] {
+        let host = RecoveryHost::empty().with_recovery_config(AgentRoleConfig {
+            provider: Some(provider),
+            model: Some(model.to_string()),
+            backend: Some(Backend::Cli),
+        });
+        let ctx = recovery_exec_ctx(&host);
+        let recovery = step_failure_recovery_agent_loop_activity(recovery_agent_loop_spec(
+            Some(AgentRole::Reviewer),
+            Provider::Gemini,
+            Backend::Http,
+            Some("inline-model"),
+        ));
+
+        let overridden = role_overridden_recovery_spec(&recovery, &ctx)
+            .expect("middleweight recovery config should resolve")
+            .expect("agent loop recovery should produce a dispatch spec");
+        let ActivityV2Spec::AgentLoop(spec) = overridden else {
+            panic!("expected agent_loop recovery spec");
+        };
+        assert_eq!(spec.provider, provider);
+        assert_eq!(spec.model.as_deref(), Some(model));
+        assert_eq!(spec.backend, Backend::Cli);
+        assert!(host.observed_role_lookups().is_empty());
+    }
+}
+
+#[test]
+fn step_failure_recovery_requires_a_middleweight_config() {
+    let host = RecoveryHost::empty();
+    let ctx = recovery_exec_ctx(&host);
+    let recovery = step_failure_recovery_agent_loop_activity(recovery_agent_loop_spec(
+        Some(AgentRole::Reviewer),
+        Provider::Codex,
+        Backend::Cli,
+        Some("gpt-5.6-sol"),
+    ));
+
+    let err = role_overridden_recovery_spec(&recovery, &ctx)
+        .expect_err("step recovery must not fall back to its implementation crew");
+
+    assert!(err.to_string().contains("durable provider lane"));
 }
 
 #[test]
@@ -650,6 +701,13 @@ fn agent_loop_recovery_activity(spec: AgentLoopSpec) -> ResolvedRecoveryActivity
     }
 }
 
+fn step_failure_recovery_agent_loop_activity(spec: AgentLoopSpec) -> ResolvedRecoveryActivity {
+    ResolvedRecoveryActivity {
+        name: "step_failure_recovery".to_string(),
+        spec: ActivityV2Spec::AgentLoop(spec),
+    }
+}
+
 fn recovery_agent_loop_spec(
     role: Option<AgentRole>,
     provider: Provider,
@@ -722,6 +780,7 @@ struct RecoveryHost {
     calls: StdMutex<Vec<DeterministicCall>>,
     pending_fs_profiles: StdMutex<VecDeque<Option<String>>>,
     role_config: StdMutex<HashMap<AgentRole, AgentRoleConfig>>,
+    recovery_config: StdMutex<Option<AgentRoleConfig>>,
     observed_role_lookups: StdMutex<Vec<AgentRole>>,
 }
 
@@ -741,12 +800,18 @@ impl RecoveryHost {
             calls: StdMutex::new(Vec::new()),
             pending_fs_profiles: StdMutex::new(VecDeque::new()),
             role_config: StdMutex::new(HashMap::new()),
+            recovery_config: StdMutex::new(None),
             observed_role_lookups: StdMutex::new(Vec::new()),
         }
     }
 
     fn with_role_config(self, config: HashMap<AgentRole, AgentRoleConfig>) -> Self {
         *self.role_config.lock().expect("role config lock") = config;
+        self
+    }
+
+    fn with_recovery_config(self, config: AgentRoleConfig) -> Self {
+        *self.recovery_config.lock().expect("recovery config lock") = Some(config);
         self
     }
 
@@ -864,5 +929,18 @@ impl V2RuntimeHost for RecoveryHost {
             .expect("role config lock")
             .get(&role)
             .cloned()
+    }
+
+    fn recovery_agent_crew_config(&self, _run_id: &str) -> Result<AgentRoleConfig, DispatchError> {
+        self.recovery_config
+            .lock()
+            .expect("recovery config lock")
+            .clone()
+            .ok_or_else(|| {
+                DispatchError::JobValidation(
+                    "step_failure_recovery requires a durable provider lane in this test host"
+                        .to_string(),
+                )
+            })
     }
 }

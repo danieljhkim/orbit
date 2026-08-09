@@ -201,6 +201,9 @@ spec:
     - orbit
     - rg
   on_denial: terminate
+  # The reviewer role remains a prompt and telemetry label. The executor
+  # resolves this named recovery activity through the failed run's durable
+  # provider lane: Codex -> terra and Claude -> sonnet.
   role: reviewer
   # One hour accommodates provider startup plus networked git/PR operations
   # and a resumed pipeline while retaining a hard terminal bound. This bound is
