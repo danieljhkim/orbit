@@ -108,16 +108,16 @@ Narrative lives in the ADR store — retrieve it with `orbit tool run orbit.adr.
 
 **Status:** Accepted · 2026-07-11 · [ORB-10130] · amended by ADR-0330 and [ORB-10620] · supersedes ADR-0154
 
-**Context.** Named crews carried separate planner, implementer, and reviewer assignments, but production crews were homogeneous and only implementer was on the primary ship path. Role labels still matter for prompts and telemetry; three independent model-selection slots added configuration and persistence complexity without selecting distinct behavior.
+**Context.** Named crews carried separate planner, implementer, and reviewer assignments, but production crews were homogeneous and only implementer was on the primary ship path. Three independent model-selection slots added configuration and persistence complexity without selecting distinct behavior.
 
-**Decision.** A crew is one provider-model-backend assignment. Every activity role resolves to it and duel participant selection stays independent. ADR-0330 retires the former three-role crew tables: config loading rejects them with guidance to write the flat `model`, `provider`, and `backend` fields.
+**Decision.** A crew is one provider-model-backend assignment. ADR-0330 completes the flattening: config loading rejects former three-role crew tables, activity/job schemas reject `role`, an explicit activity `crew` input selects a non-default crew, and otherwise dispatch uses the run's resolved crew.
 
 **Consequences.**
 - Per-task and default crew selection directly choose one provider-model binding.
 - Run records and projections expose one crew model; legacy SQLite role columns remain nullable for compatibility.
 - Cost: workspaces using the retired role-table schema must rewrite their crew entries before config can load; cross-provider review must use duel machinery or a future explicit mechanism.
 
-- **ADR-0330 — Retire crew role slots and role-based model resolution** — Proposed.
+- **ADR-0330 — Retire crew role slots and role-based model resolution** — Proposed; implemented by [ORB-10622], pending separate lifecycle approval.
 - **ADR-0332 — Remove the planning duel and retain compatibility-only residue** — Proposed; supersedes ADR-0010 and ADR-0155 after approval. [ORB-10627]
 
 ## Task References
@@ -128,6 +128,7 @@ Narrative lives in the ADR store — retrieve it with `orbit tool run orbit.adr.
 - ORB-00080: Collapse agent identity to family; isolate model strings to invocation surface.
 - ORB-10130: Flatten each crew to one provider-model assignment.
 - ORB-10620: Reject legacy crew role sub-tables at config load.
+- ORB-10622: Retire activity roles and role-based crew resolution.
 - ORB-10627: Remove the planning duel and its parallel model-selection path.
 
 Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

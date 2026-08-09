@@ -340,7 +340,6 @@ fn synthetic_job_using_ref(target_name: &str) -> JobV2 {
                 default_input: None,
                 timeout_seconds: 0,
                 session: Some("assessor".to_string()),
-                role: None,
             }),
         }],
     }
@@ -358,7 +357,6 @@ fn pipeline_with_assessor_loop() -> JobV2 {
             default_input: None,
             timeout_seconds: 0,
             session: Some("assessor".to_string()),
-            role: None,
         }),
     };
     JobV2 {

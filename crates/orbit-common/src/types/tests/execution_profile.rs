@@ -1,7 +1,7 @@
 use chrono::{Duration, TimeZone, Utc};
 
 use super::super::{
-    Crew, CrewRoleAssignment, ExecutionProfileCrewV1, ExecutionProfileShipV1, ExecutionProfileV1,
+    Crew, CrewAssignment, ExecutionProfileCrewV1, ExecutionProfileShipV1, ExecutionProfileV1,
 };
 use crate::types::activity_job::Backend;
 
@@ -39,7 +39,7 @@ fn profile() -> ExecutionProfileV1 {
 fn crew_normalization_canonicalizes_alias_metadata_and_auto_backend() {
     let crew = Crew {
         name: " alpha ".to_string(),
-        assignment: CrewRoleAssignment {
+        assignment: CrewAssignment {
             provider: " OpenAI ".to_string(),
             model: " gpt-test ".to_string(),
             backend: "auto".to_string(),

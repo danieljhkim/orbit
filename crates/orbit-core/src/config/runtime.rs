@@ -6,14 +6,14 @@ use orbit_common::model_defaults::{
     CLAUDE_DEFAULT_STRONG, CLAUDE_DEFAULT_WEAK, CLAUDE_FABLE_MODEL, CODEX_LUNA_MODEL,
     CODEX_SOL_MODEL, CODEX_TERRA_MODEL, GEMINI_CREW_MODEL, GROK_DEFAULT_MODEL,
 };
-use orbit_common::types::{Crew, CrewRoleAssignment, OrbitError};
+use orbit_common::types::{Crew, CrewAssignment, OrbitError};
 use orbit_common::utility::redaction::redact_home_dir;
 use orbit_engine::PrConfig;
 
 use crate::paths;
 
 use super::persistence::PersistenceConfig;
-use super::raw::{RawAgentRoleConfig, RawCrewEntry, RawRuntimeConfig, RawTaskSection};
+use super::raw::{RawCrewEntry, RawRuntimeConfig, RawTaskSection};
 use super::registry::ConfigSnapshot;
 
 const WORKSPACE_REPLACE_ONLY_KEYS: &[&str] = &[
@@ -193,7 +193,7 @@ impl RuntimeConfig {
         }
 
         validate_task_artifact_store_from_raw(parsed.task.as_ref())?;
-        reject_stale_agent_role_tables(parsed.agent.as_ref())?;
+        reject_stale_agent_tables(parsed.agent.as_ref())?;
         let crews = crews_from_raw(parsed.crews.as_ref())?;
         let snapshot = ConfigSnapshot::admit(&document, config_path, &crews)?;
 
@@ -578,7 +578,7 @@ pub(crate) fn default_crews() -> BTreeMap<String, Crew> {
             name.to_string(),
             Crew {
                 name: name.to_string(),
-                assignment: crew_role(model, provider, "cli"),
+                assignment: crew_assignment(model, provider, "cli"),
                 description: None,
                 tags: Vec::new(),
             },
@@ -587,16 +587,16 @@ pub(crate) fn default_crews() -> BTreeMap<String, Crew> {
     crews
 }
 
-fn crew_role(model: &str, provider: &str, backend: &str) -> CrewRoleAssignment {
-    CrewRoleAssignment {
+fn crew_assignment(model: &str, provider: &str, backend: &str) -> CrewAssignment {
+    CrewAssignment {
         model: model.to_string(),
         provider: provider.to_string(),
         backend: backend.to_string(),
     }
 }
 
-fn reject_stale_agent_role_tables(
-    raw: Option<&BTreeMap<String, RawAgentRoleConfig>>,
+fn reject_stale_agent_tables(
+    raw: Option<&BTreeMap<String, toml::Value>>,
 ) -> Result<(), OrbitError> {
     if raw.is_some() {
         return Err(OrbitError::InvalidInput(
@@ -653,17 +653,14 @@ fn normalized_crew_tags(raw: &[String]) -> Vec<String> {
     tags
 }
 
-fn crew_assignment_from_raw(
-    crew: &str,
-    raw: &RawCrewEntry,
-) -> Result<CrewRoleAssignment, OrbitError> {
+fn crew_assignment_from_raw(crew: &str, raw: &RawCrewEntry) -> Result<CrewAssignment, OrbitError> {
     let has_legacy = raw.planner.is_some() || raw.implementer.is_some() || raw.reviewer.is_some();
     if has_legacy {
         return Err(OrbitError::InvalidInput(format!(
             "[crews.{crew}] uses retired planner/implementer/reviewer role tables; rewrite it with flat `model`, `provider`, and `backend` fields only"
         )));
     }
-    Ok(CrewRoleAssignment {
+    Ok(CrewAssignment {
         model: required_crew_field(crew, "model", raw.model.as_deref())?,
         provider: required_crew_field(crew, "provider", raw.provider.as_deref())?,
         backend: required_crew_field(crew, "backend", raw.backend.as_deref())?,

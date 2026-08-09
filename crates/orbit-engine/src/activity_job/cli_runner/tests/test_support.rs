@@ -11,12 +11,12 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use orbit_common::test_fixtures::{TEST_CLAUDE_MODEL, TEST_CODEX_MODEL};
+use orbit_common::test_fixtures::TEST_CODEX_MODEL;
 
-use crate::context::AgentRoleConfig;
+use crate::context::CrewConfig;
 use orbit_agent::loop_engine::audit::{AuditSink, LoopAuditEvent};
 use orbit_common::types::ExecutorSandboxKind;
-use orbit_common::types::activity_job::{AgentLoopSpec, AgentRole, Backend, OnDenial, Provider};
+use orbit_common::types::activity_job::{AgentLoopSpec, Backend, OnDenial, Provider};
 use orbit_common::utility::logging::RedactingFields;
 #[cfg(target_os = "macos")]
 use orbit_exec::sandbox_exec_path;
@@ -296,28 +296,19 @@ impl V2RuntimeHost for TestHost {
         Ok(self.task_context.clone())
     }
 
-    fn agent_role_config_for_input(
+    fn agent_crew_config_for_input(
         &self,
-        role: AgentRole,
         input: &Value,
-    ) -> Option<AgentRoleConfig> {
+    ) -> Result<Option<CrewConfig>, DispatchError> {
         let crew = input.get("crew").and_then(|v| v.as_str()).unwrap_or("");
-        if crew != "mixed-fixture" {
-            return None;
+        if crew != "single-fixture" {
+            return Ok(None);
         }
-        match role {
-            AgentRole::Planner => Some(AgentRoleConfig {
-                provider: Some(Provider::Claude),
-                model: Some(TEST_CLAUDE_MODEL.to_string()),
-                backend: None,
-            }),
-            AgentRole::Implementer => Some(AgentRoleConfig {
-                provider: Some(Provider::Codex),
-                model: Some(TEST_CODEX_MODEL.to_string()),
-                backend: None,
-            }),
-            _ => None,
-        }
+        Ok(Some(CrewConfig {
+            provider: Some(Provider::Codex),
+            model: Some(TEST_CODEX_MODEL.to_string()),
+            backend: None,
+        }))
     }
 
     fn tool_context_for_activity(
@@ -348,7 +339,6 @@ pub(in crate::activity_job::cli_runner) fn test_agent_loop_spec(
         wall_clock_timeout_seconds: timeout.as_secs(),
         require_response_envelope: false,
         require_completion_envelope: true,
-        role: None,
         proc_allowed_programs: None,
     }
 }
@@ -375,7 +365,6 @@ pub(in crate::activity_job::cli_runner) fn test_agent_loop_spec_for(
         wall_clock_timeout_seconds: timeout.as_secs(),
         require_response_envelope: false,
         require_completion_envelope: true,
-        role: None,
         proc_allowed_programs: None,
     }
 }

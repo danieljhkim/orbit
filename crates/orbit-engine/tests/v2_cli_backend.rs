@@ -442,7 +442,6 @@ fn cli_agent_loop_spec(provider: Option<Provider>) -> AgentLoopSpec {
         wall_clock_timeout_seconds: 30,
         require_response_envelope: false,
         require_completion_envelope: true,
-        role: None,
         proc_allowed_programs: None,
     }
 }
@@ -522,7 +521,6 @@ fn synthetic_loop_session_cli_job() -> JobV2 {
                 wall_clock_timeout_seconds: 30,
                 require_response_envelope: false,
                 require_completion_envelope: true,
-                role: None,
                 proc_allowed_programs: None,
             }),
             activity_name: None,
@@ -530,7 +528,6 @@ fn synthetic_loop_session_cli_job() -> JobV2 {
             default_input: None,
             timeout_seconds: 0,
             session: Some("assessor".to_string()),
-            role: None,
         }),
     };
     let loop_step = JobV2Step {

@@ -55,7 +55,7 @@ backend = "cli"
         V2RuntimeHost::system_crew_for_dispatch(&runtime).as_deref(),
         Some("qa")
     );
-    let recovery = V2RuntimeHost::explicit_agent_crew_config_for_input(
+    let recovery = V2RuntimeHost::agent_crew_config_for_input(
         &runtime,
         &serde_json::json!({ "crew": "qa", "crew_config_key": "workflow.system_crew" }),
     )

@@ -2,7 +2,7 @@
 
 use chrono::{DateTime, Utc};
 use orbit_common::types::{
-    Crew, CrewRoleAssignment, EXECUTION_PROFILE_SCHEMA_VERSION, ExecutionProfileCrewV1,
+    Crew, CrewAssignment, EXECUTION_PROFILE_SCHEMA_VERSION, ExecutionProfileCrewV1,
     ExecutionProfileShipV1, ExecutionProfileV1, OrbitError, Workspace,
 };
 use orbit_core::{ExecutionEnvironmentSnapshot, resolved_ship_mode};
@@ -61,7 +61,7 @@ pub fn build_execution_profile_v1(
             ExecutionProfileCrewV1::from_crew(
                 &Crew {
                     name: crew.name,
-                    assignment: CrewRoleAssignment {
+                    assignment: CrewAssignment {
                         provider: crew.provider,
                         model: crew.model,
                         backend: crew.backend,

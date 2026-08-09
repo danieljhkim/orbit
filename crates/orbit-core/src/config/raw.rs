@@ -14,23 +14,23 @@ pub(super) struct RawRuntimeConfig {
     pub(super) watch: Option<toml::Value>,
     /// Removed in ORB-00058. Kept only so config loading can reject stale
     /// `[agent.<role>]` tables with an explicit migration error.
-    pub(super) agent: Option<BTreeMap<String, RawAgentRoleConfig>>,
+    pub(super) agent: Option<BTreeMap<String, toml::Value>>,
     /// `[crews.<name>]` registry. Each table supplies one assignment Orbit
-    /// resolves for every activity role at task run start.
+    /// resolves for activity dispatch at run start.
     pub(super) crews: Option<BTreeMap<String, RawCrewEntry>>,
     /// Retired in ORB-10627. Existing workspaces may still carry the section
     /// written by older `orbit init`; loaders warn and ignore it.
     pub(super) duel: Option<toml::Value>,
 }
 
-/// Schema for a single role assignment in `[crews.<name>]`.
+/// Schema for one provider-model-backend crew assignment.
 ///
 /// Serialize is derived so the writer in `bootstrap` can emit fresh entries
 /// without hand-rolling TOML. The struct is `pub` so the CLI can hand a map
-/// of these directly into `InitOptions::role_settings` when running
+/// of these directly into `InitOptions::crew_settings` when running
 /// interactive prompts.
 #[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, Eq)]
-pub struct RawAgentRoleConfig {
+pub struct RawCrewAssignment {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub provider: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -55,11 +55,11 @@ pub struct RawCrewEntry {
     /// with rewrite guidance at load time. They are not part of the crew
     /// schema and never participate in assignment resolution or serialization.
     #[serde(default, skip_serializing)]
-    pub planner: Option<RawAgentRoleConfig>,
+    pub planner: Option<BTreeMap<String, String>>,
     #[serde(default, skip_serializing)]
-    pub implementer: Option<RawAgentRoleConfig>,
+    pub implementer: Option<BTreeMap<String, String>>,
     #[serde(default, skip_serializing)]
-    pub reviewer: Option<RawAgentRoleConfig>,
+    pub reviewer: Option<BTreeMap<String, String>>,
 }
 
 #[derive(Debug, Clone, Deserialize)]

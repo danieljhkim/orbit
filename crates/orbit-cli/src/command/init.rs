@@ -1,9 +1,9 @@
 use clap::Args;
 use orbit_core::command::init::{InitOptions, init_global};
-use orbit_core::config::RawAgentRoleConfig;
+use orbit_core::config::RawCrewAssignment;
 use orbit_core::config::agent_detect::{DetectedAgents, RealAgentEnvProbe, detect};
 use orbit_core::config::agent_prompt::{
-    StdinPrompter, collect_qa_crew_setting, collect_role_settings,
+    StdinPrompter, collect_crew_setting, collect_qa_crew_setting,
 };
 use orbit_core::{OrbitError, OrbitRuntime};
 use orbit_remote::workspace_registry::global_orbit_dir;
@@ -60,7 +60,7 @@ impl InitCommand {
 
     fn run(self, root_override: Option<&Path>) -> Result<(), OrbitError> {
         let detected = detect(&RealAgentEnvProbe);
-        let role_settings = collect_role_settings_for_init(
+        let crew_settings = collect_crew_settings_for_init(
             root_override,
             self.force,
             self.non_interactive,
@@ -71,7 +71,7 @@ impl InitCommand {
             InitOptions {
                 force: self.force,
                 refresh_defaults: true,
-                role_settings,
+                crew_settings,
                 detected: Some(detected),
                 ..Default::default()
             },
@@ -204,18 +204,18 @@ fn read_line(prompt: &str) -> Result<String, OrbitError> {
     Ok(line.trim().to_string())
 }
 
-/// Decide whether to prompt for `[agent.<role>]` settings and collect them.
+/// Decide whether to prompt for the default and QA crew settings.
 ///
 /// Prompts run only when ALL of:
 /// - `--non-interactive` is unset
 /// - the target config.toml does not already exist (or `--force` is set, which
 ///   wipes it)
-pub(crate) fn collect_role_settings_for_init(
+pub(crate) fn collect_crew_settings_for_init(
     root_override: Option<&Path>,
     force: bool,
     non_interactive: bool,
     detected: &DetectedAgents,
-) -> Result<Option<BTreeMap<String, RawAgentRoleConfig>>, OrbitError> {
+) -> Result<Option<BTreeMap<String, RawCrewAssignment>>, OrbitError> {
     if non_interactive {
         return Ok(None);
     }
@@ -226,8 +226,9 @@ pub(crate) fn collect_role_settings_for_init(
     }
 
     let mut prompter = StdinPrompter;
-    let mut collected = collect_role_settings(detected, &mut prompter)
+    let custom = collect_crew_setting(detected, &mut prompter)
         .map_err(|err| OrbitError::Io(format!("agent prompts failed: {err}")))?;
+    let mut collected = BTreeMap::from([("custom".to_string(), custom)]);
     let qa = collect_qa_crew_setting(detected, &mut prompter)
         .map_err(|err| OrbitError::Io(format!("QA crew prompt failed: {err}")))?;
     if let Some(qa) = qa {

@@ -151,13 +151,89 @@ pub(crate) fn seed_default_activities(
 
 #[cfg(test)]
 mod tests {
-    use orbit_common::types::activity_job::{
-        AgentRole, OnDenial, tool_allowed, validate_tool_allowlist,
-    };
+    use std::collections::BTreeMap;
+
+    use orbit_common::types::activity_job::{OnDenial, tool_allowed, validate_tool_allowlist};
     use orbit_common::types::{ActivityV2Spec, load_activity_asset};
+    use orbit_engine::{inject_system_crew_input, resolve_crew_settings};
+    use serde_json::json;
     use tempfile::tempdir;
 
     use super::*;
+
+    #[test]
+    fn shipped_agent_catalog_preserves_provider_and_model_routing() {
+        let root = tempdir().expect("create tempdir");
+        let global = root.path().join("global");
+        let workspace = root.path().join("workspace");
+        std::fs::create_dir_all(&global).expect("create global root");
+        std::fs::create_dir_all(&workspace).expect("create workspace root");
+        std::fs::write(
+            workspace.join("config.toml"),
+            r#"[workflow]
+default_crew = "sol"
+system_crew = "qa"
+
+[crews.sol]
+provider = "codex"
+model = "gpt-5.6-sol"
+backend = "cli"
+
+[crews.luna]
+provider = "codex"
+model = "gpt-5.6-luna"
+backend = "cli"
+
+[crews.qa]
+provider = "codex"
+model = "gpt-5.6-terra"
+backend = "cli"
+"#,
+        )
+        .expect("write crew config");
+        let runtime = crate::OrbitRuntime::from_roots(&global, &workspace)
+            .expect("build catalog routing runtime");
+        let run_input = json!({ "crew": "sol" });
+
+        let expected = BTreeMap::from([
+            ("agent_implement", ("codex", "gpt-5.6-sol".to_string())),
+            (
+                "step_failure_recovery",
+                ("codex", "gpt-5.6-terra".to_string()),
+            ),
+            ("task_pilot", ("codex", "gpt-5.6-luna".to_string())),
+            ("triage_failed_runs", ("codex", "gpt-5.6-terra".to_string())),
+        ]);
+        let mut actual = BTreeMap::new();
+
+        for (name, yaml) in DEFAULT_ACTIVITY_FILES {
+            let asset = load_activity_asset(yaml)
+                .unwrap_or_else(|error| panic!("load shipped activity {name}: {error}"));
+            let ActivityV2Spec::AgentLoop(spec) = asset.spec.spec else {
+                continue;
+            };
+            let activity_input = match *name {
+                "task_pilot" => json!({ "crew": "luna" }),
+                "step_failure_recovery" | "triage_failed_runs" => {
+                    inject_system_crew_input(&runtime, &json!({ "system_crew": true }))
+                        .expect("inject configured system crew")
+                }
+                _ => json!({}),
+            };
+            let resolved = resolve_crew_settings(&runtime, &spec, &activity_input, &run_input)
+                .unwrap_or_else(|error| panic!("resolve shipped activity {name}: {error}"))
+                .unwrap_or_else(|| panic!("shipped activity {name} did not resolve a crew"));
+            actual.insert(
+                *name,
+                (
+                    resolved.provider.as_str(),
+                    resolved.model.expect("shipped crew has a model"),
+                ),
+            );
+        }
+
+        assert_eq!(actual, expected);
+    }
 
     #[test]
     fn seeded_deterministic_activities_match_actions() {
@@ -210,7 +286,7 @@ mod tests {
                     .collect::<Vec<_>>()
                     .join(" ")
                     .to_lowercase();
-                assert_eq!(spec.role, Some(AgentRole::Implementer));
+                assert!(!yaml.contains("\n  role:"));
                 assert!(instruction.contains("not as a perfect inventory"));
                 assert!(instruction.contains("make the smallest compatible change"));
                 assert!(instruction.contains("stop after a task comment"));
@@ -345,7 +421,6 @@ mod tests {
         match asset.spec.spec {
             ActivityV2Spec::AgentLoop(spec) => {
                 assert!(spec.require_response_envelope);
-                assert_eq!(spec.role, None, "task-pilot is not a new crew role");
                 assert_eq!(spec.on_denial, OnDenial::Terminate);
                 assert!(!spec.tools.iter().any(|tool| tool == "orbit.task.update"));
                 assert!(!spec.tools.iter().any(|tool| tool == "orbit.task.*"));
@@ -395,7 +470,7 @@ mod tests {
         let asset = load_activity_asset(yaml).expect("parse triage agent activity");
         match asset.spec.spec {
             ActivityV2Spec::AgentLoop(spec) => {
-                assert_eq!(spec.role, Some(AgentRole::Reviewer));
+                assert!(!yaml.contains("\n  role:"));
                 assert_eq!(spec.on_denial, OnDenial::Terminate);
                 for denied in [
                     // code edits
@@ -471,7 +546,7 @@ mod tests {
         );
         match asset.spec.spec {
             ActivityV2Spec::AgentLoop(spec) => {
-                assert_eq!(spec.role, Some(AgentRole::Reviewer));
+                assert!(!yaml.contains("\n  role:"));
                 assert!(!yaml.contains("\n  backend:"));
                 assert!(!yaml.contains("\n  provider:"));
                 assert!(

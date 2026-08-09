@@ -13,13 +13,12 @@ pub(super) fn run_target(
     let tctx = ctx.template_ctx();
     let rendered_input = render_input(t.default_input.as_ref(), &ctx.input, &tctx)?;
 
-    // Agent settings override — `step.role` (TargetStep) wins over
-    // `activity.role` (AgentLoopSpec) when both are set; without either role,
-    // a rendered explicit `crew` may select the modern flat assignment.
-    let role_override = role_overridden_spec(t, ctx, &rendered_input)?;
+    // A rendered activity `crew` selects a non-default assignment; otherwise
+    // dispatch inherits the run's resolved crew.
+    let crew_override = crew_overridden_spec(t, ctx, &rendered_input)?;
     match (&t.spec, &t.session) {
         (ActivityV2Spec::AgentLoop(inline_spec), Some(binding)) => {
-            let agent_spec_owned = role_override.clone();
+            let agent_spec_owned = crew_override.clone();
             let agent_spec = agent_spec_owned.as_ref().unwrap_or(inline_spec);
             // Sessions only bind in HTTP mode; the loader rejects `loop +
             // session + cli` via `validate_job_loop_session_backends`, but we
@@ -67,10 +66,9 @@ pub(super) fn run_target(
         (ActivityV2Spec::AgentLoop(_inline_spec), None) => {
             // Route through the backend-aware dispatcher so a step with
             // `backend: cli` lands on the CLI runner rather than the HTTP
-            // driver. When an effective role is present, swap the spec for
-            // the resolver-overridden one before dispatch so the runner sees
-            // `[agent.<role>]` values instead of inline ones.
-            let dispatched_spec_storage = role_override
+            // driver. Swap in the crew-resolved clone when the host has a
+            // configuration layer; isolated hosts may retain inline values.
+            let dispatched_spec_storage = crew_override
                 .as_ref()
                 .map(|spec| ActivityV2Spec::AgentLoop(spec.clone()));
             let dispatched_spec = dispatched_spec_storage.as_ref().unwrap_or(&t.spec);
@@ -204,8 +202,8 @@ pub(super) fn run_agent_loop_outcome(
 }
 
 /// Build a crew-overridden clone of an [`AgentLoopSpec`]. An explicit rendered
-/// `crew` always wins over a descriptive role label.
-pub(super) fn role_overridden_spec(
+/// `crew` wins; otherwise the run input supplies the resolved fallback crew.
+pub(super) fn crew_overridden_spec(
     t: &TargetStep,
     ctx: &ExecCtx<'_>,
     rendered_input: &Value,
@@ -214,15 +212,9 @@ pub(super) fn role_overridden_spec(
         return Ok(None);
     };
     let rendered_input = inject_system_crew_input(ctx.host, rendered_input)?;
-    let resolved = if let Some(resolved) =
-        resolve_explicit_crew_settings(ctx.host, inline_spec, &rendered_input)?
-    {
-        resolved
-    } else {
-        let Some(effective_role) = t.role.or(inline_spec.role) else {
-            return Ok(None);
-        };
-        resolve_agent_settings(effective_role, ctx.host, inline_spec, &ctx.input)
+    let Some(resolved) = resolve_crew_settings(ctx.host, inline_spec, &rendered_input, &ctx.input)?
+    else {
+        return Ok(None);
     };
     let mut spec = inline_spec.clone();
     apply_resolved_settings(&mut spec, &resolved);

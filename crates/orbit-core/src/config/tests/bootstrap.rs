@@ -1,38 +1,20 @@
 use super::super::agent_detect::{DetectedAgents, detect, testing::MockAgentEnvProbe};
 use super::super::bootstrap::*;
-use super::super::raw::RawAgentRoleConfig;
+use super::super::raw::RawCrewAssignment;
 use super::super::raw::RawRuntimeConfig;
 use super::super::runtime::RuntimeConfig;
 use std::collections::BTreeMap;
 use tempfile::tempdir;
 
-fn sample_roles() -> BTreeMap<String, RawAgentRoleConfig> {
-    let mut roles = BTreeMap::new();
-    roles.insert(
-        "reviewer".to_string(),
-        RawAgentRoleConfig {
-            provider: Some("claude".into()),
-            backend: Some("cli".into()),
-            model: Some(orbit_common::test_fixtures::TEST_CLAUDE_MODEL.into()),
-        },
-    );
-    roles.insert(
-        "implementer".to_string(),
-        RawAgentRoleConfig {
+fn sample_crew_settings() -> BTreeMap<String, RawCrewAssignment> {
+    BTreeMap::from([(
+        "custom".to_string(),
+        RawCrewAssignment {
             provider: Some("codex".into()),
             backend: Some("cli".into()),
             model: Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.into()),
         },
-    );
-    roles.insert(
-        "planner".to_string(),
-        RawAgentRoleConfig {
-            provider: Some("claude".into()),
-            backend: Some("http".into()),
-            model: Some(orbit_common::test_fixtures::TEST_CLAUDE_MODEL.into()),
-        },
-    );
-    roles
+    )])
 }
 
 #[test]
@@ -217,7 +199,7 @@ fn seeded_configs_round_trip_for_detection_permutations() {
 }
 
 #[test]
-fn seed_with_no_role_settings_keeps_static_template_content() {
+fn seed_with_no_crew_settings_keeps_static_template_content() {
     let dir = tempdir().expect("tempdir");
     let path = dir.path().join("config.toml");
     let detected = DetectedAgents::default();
@@ -232,11 +214,11 @@ fn seed_with_no_role_settings_keeps_static_template_content() {
 
 fn seed_contents(
     detected: &DetectedAgents,
-    role_settings: Option<&BTreeMap<String, RawAgentRoleConfig>>,
+    crew_settings: Option<&BTreeMap<String, RawCrewAssignment>>,
 ) -> String {
     let dir = tempdir().expect("tempdir");
     let path = dir.path().join("config.toml");
-    let created = seed_default_config(&path, detected, role_settings).expect("seed");
+    let created = seed_default_config(&path, detected, crew_settings).expect("seed");
     assert!(created);
     std::fs::read_to_string(&path).expect("read")
 }
@@ -298,12 +280,12 @@ fn no_active_role_section(contents: &str) -> bool {
 }
 
 #[test]
-fn seed_with_role_settings_writes_custom_crew() {
+fn seed_with_crew_settings_writes_custom_crew() {
     let dir = tempdir().expect("tempdir");
     let path = dir.path().join("config.toml");
-    let roles = sample_roles();
+    let settings = sample_crew_settings();
     let detected = DetectedAgents::default();
-    let created = seed_default_config(&path, &detected, Some(&roles)).expect("seed");
+    let created = seed_default_config(&path, &detected, Some(&settings)).expect("seed");
     assert!(created);
     let contents = std::fs::read_to_string(&path).expect("read");
 
@@ -345,9 +327,9 @@ fn seed_with_existing_file_is_noop() {
     let path = dir.path().join("config.toml");
     std::fs::write(&path, "# pre-existing user content\n").expect("preseed");
 
-    let roles = sample_roles();
+    let settings = sample_crew_settings();
     let detected = DetectedAgents::default();
-    let created = seed_default_config(&path, &detected, Some(&roles)).expect("seed");
+    let created = seed_default_config(&path, &detected, Some(&settings)).expect("seed");
     assert!(!created);
 
     let contents = std::fs::read_to_string(&path).expect("read");
@@ -355,12 +337,12 @@ fn seed_with_existing_file_is_noop() {
 }
 
 #[test]
-fn seed_with_empty_role_map_uses_no_provider_behavior() {
+fn seed_with_empty_crew_map_uses_no_provider_behavior() {
     let dir = tempdir().expect("tempdir");
     let path = dir.path().join("config.toml");
-    let roles: BTreeMap<String, RawAgentRoleConfig> = BTreeMap::new();
+    let settings: BTreeMap<String, RawCrewAssignment> = BTreeMap::new();
     let detected = DetectedAgents::default();
-    let created = seed_default_config(&path, &detected, Some(&roles)).expect("seed");
+    let created = seed_default_config(&path, &detected, Some(&settings)).expect("seed");
     assert!(created);
     let contents = std::fs::read_to_string(&path).expect("read");
     let parsed = parsed_config(&contents);
@@ -369,18 +351,14 @@ fn seed_with_empty_role_map_uses_no_provider_behavior() {
 }
 
 #[test]
-fn seed_with_incomplete_role_settings_fails() {
+fn seed_with_incomplete_crew_settings_fails() {
     let dir = tempdir().expect("tempdir");
     let path = dir.path().join("config.toml");
-    let mut roles = sample_roles();
-    roles
-        .get_mut("implementer")
-        .expect("implementer")
-        .model
-        .take();
+    let mut settings = sample_crew_settings();
+    settings.get_mut("custom").expect("custom").model.take();
     let detected = DetectedAgents::default();
     let error =
-        seed_default_config(&path, &detected, Some(&roles)).expect_err("missing model fails");
+        seed_default_config(&path, &detected, Some(&settings)).expect_err("missing model fails");
     assert!(
         error
             .to_string()

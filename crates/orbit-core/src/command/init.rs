@@ -18,7 +18,7 @@ use crate::command::skill::{
 use orbit_common::utility::fs::{create_dir_symlink, remove_path_if_exists};
 
 use crate::config::{
-    RawAgentRoleConfig, RuntimeConfig,
+    RawCrewAssignment, RuntimeConfig,
     agent_detect::{DetectedAgents, RealAgentEnvProbe, detect},
     seed_default_config,
 };
@@ -56,12 +56,12 @@ pub struct InitOptions {
     pub routine_host_id: Option<String>,
     /// When true, create/update user-level skill symlinks for global skills.
     pub link_global_skills: bool,
-    /// Agent settings collected by the legacy init prompt. The implementer
-    /// assignment is embedded as the flat `[crews.custom]` table. `None` and
+    /// Crew settings collected by the init prompt. The `custom` assignment is
+    /// embedded as the flat `[crews.custom]` table. `None` and
     /// an empty map both mean "use
     /// the default crew template". Ignored when config.toml already exists
     /// — init remains idempotent.
-    pub role_settings: Option<BTreeMap<String, RawAgentRoleConfig>>,
+    pub crew_settings: Option<BTreeMap<String, RawCrewAssignment>>,
     /// Agent availability snapshot used to freeze agent-dependent config at
     /// init time. When omitted, init probes the real host environment.
     pub detected: Option<DetectedAgents>,
@@ -150,7 +150,7 @@ pub fn init_workspace_at_root(
             .detected
             .clone()
             .unwrap_or_else(|| detect(&RealAgentEnvProbe));
-        seed_default_config(&config_path, &detected, options.role_settings.as_ref())?
+        seed_default_config(&config_path, &detected, options.crew_settings.as_ref())?
     } else {
         false
     };
@@ -203,7 +203,7 @@ pub fn init_workspace_at_root(
                 refresh_defaults: options.refresh_defaults,
                 global_only: true,
                 link_global_skills: options.link_global_skills || options.refresh_defaults,
-                role_settings: options.role_settings.clone(),
+                crew_settings: options.crew_settings.clone(),
                 detected: options.detected.clone(),
                 ..Default::default()
             },
@@ -887,7 +887,7 @@ mod tests {
     }
 
     #[test]
-    fn global_init_writes_role_settings_as_custom_crew_to_config_toml() {
+    fn global_init_writes_crew_settings_as_custom_crew_to_config_toml() {
         let _guard = ENV_LOCK.lock().expect("lock env");
         let home = tempdir().expect("home tempdir");
         let previous_home = std::env::var_os("HOME");
@@ -895,37 +895,20 @@ mod tests {
             std::env::set_var("HOME", home.path());
         }
 
-        let mut roles: BTreeMap<String, RawAgentRoleConfig> = BTreeMap::new();
-        roles.insert(
-            "reviewer".into(),
-            RawAgentRoleConfig {
-                provider: Some("claude".into()),
-                backend: Some("cli".into()),
-                model: Some(orbit_common::test_fixtures::TEST_CLAUDE_MODEL.into()),
-            },
-        );
-        roles.insert(
-            "implementer".into(),
-            RawAgentRoleConfig {
+        let settings = BTreeMap::from([(
+            "custom".into(),
+            RawCrewAssignment {
                 provider: Some("codex".into()),
                 backend: Some("cli".into()),
                 model: Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.into()),
             },
-        );
-        roles.insert(
-            "planner".into(),
-            RawAgentRoleConfig {
-                provider: Some("gemini".into()),
-                backend: Some("http".into()),
-                model: Some(orbit_common::test_fixtures::TEST_GEMINI_MODEL.into()),
-            },
-        );
+        )]);
 
         let result = init_global(
             None,
             InitOptions {
                 refresh_defaults: true,
-                role_settings: Some(roles),
+                crew_settings: Some(settings),
                 detected: Some(DetectedAgents::default()),
                 ..Default::default()
             },
@@ -933,7 +916,7 @@ mod tests {
 
         restore_home(previous_home);
 
-        let result = result.expect("init global with role settings");
+        let result = result.expect("init global with crew settings");
         assert!(result.created_config);
 
         let config_path = home.path().join(".orbit").join("config.toml");
@@ -966,7 +949,7 @@ mod tests {
     }
 
     #[test]
-    fn global_init_with_existing_config_does_not_overwrite_role_settings() {
+    fn global_init_with_existing_config_does_not_overwrite_crew_settings() {
         let _guard = ENV_LOCK.lock().expect("lock env");
         let home = tempdir().expect("home tempdir");
         let previous_home = std::env::var_os("HOME");
@@ -981,21 +964,20 @@ mod tests {
         let user_content = "# pre-existing user config\n";
         fs::write(&config_path, user_content).expect("preseed");
 
-        let mut roles: BTreeMap<String, RawAgentRoleConfig> = BTreeMap::new();
-        roles.insert(
-            "reviewer".into(),
-            RawAgentRoleConfig {
+        let settings = BTreeMap::from([(
+            "custom".into(),
+            RawCrewAssignment {
                 provider: Some("claude".into()),
                 backend: Some("cli".into()),
                 model: None,
             },
-        );
+        )]);
 
         let result = init_global(
             None,
             InitOptions {
                 refresh_defaults: true,
-                role_settings: Some(roles),
+                crew_settings: Some(settings),
                 detected: Some(DetectedAgents::default()),
                 ..Default::default()
             },
@@ -1010,7 +992,7 @@ mod tests {
     }
 
     #[test]
-    fn global_init_without_role_settings_writes_clean_template() {
+    fn global_init_without_crew_settings_writes_clean_template() {
         let _guard = ENV_LOCK.lock().expect("lock env");
         let home = tempdir().expect("home tempdir");
         let previous_home = std::env::var_os("HOME");
@@ -1022,7 +1004,7 @@ mod tests {
             None,
             InitOptions {
                 refresh_defaults: true,
-                role_settings: None,
+                crew_settings: None,
                 detected: Some(DetectedAgents::default()),
                 ..Default::default()
             },

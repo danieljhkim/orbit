@@ -30,7 +30,7 @@ mod store;
 
 pub(crate) use bootstrap::seed_default_config;
 pub(crate) use persistence::PersistenceConfig;
-pub use raw::{RawAgentRoleConfig, RawCrewEntry};
+pub use raw::{RawCrewAssignment, RawCrewEntry};
 pub use registry::{
     CONFIG_KEY_REGISTRY, ConfigKeyDescriptor, ConfigSnapshot, describe as describe_config_key,
 };

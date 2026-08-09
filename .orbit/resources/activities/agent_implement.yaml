@@ -126,5 +126,4 @@ spec:
     - rg
     - orbit
   on_denial: terminate
-  role: implementer
   wall_clock_timeout_seconds: 5400

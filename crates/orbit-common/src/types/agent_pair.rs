@@ -37,17 +37,17 @@ impl AgentModelPair {
 
 /// The provider-model-backend assignment selected by a named crew.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct CrewRoleAssignment {
+pub struct CrewAssignment {
     pub model: String,
     pub provider: String,
     pub backend: String,
 }
 
-/// A named provider-model assignment used for every activity role.
+/// A named provider-model assignment used for activity dispatch.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Crew {
     pub name: String,
-    pub assignment: CrewRoleAssignment,
+    pub assignment: CrewAssignment,
     /// Optional human-facing summary carried through every canonical crew
     /// projection. Execution-profile publication normalizes blank values to
     /// `None`.
@@ -57,16 +57,6 @@ pub struct Crew {
     /// a sorted, deduplicated list of non-empty strings.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tags: Vec<String>,
-}
-
-impl Crew {
-    pub fn role(&self, role: &str) -> Option<&CrewRoleAssignment> {
-        // ADR-0213: roles remain labels; a crew selects exactly one assignment.
-        match role {
-            "planner" | "implementer" | "reviewer" => Some(&self.assignment),
-            _ => None,
-        }
-    }
 }
 
 /// Resolve a named crew from the active registry.

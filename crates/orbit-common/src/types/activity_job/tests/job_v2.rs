@@ -1,4 +1,4 @@
-use super::super::{AgentRole, job_v2::*};
+use super::super::job_v2::*;
 
 fn assert_step_body_shape_error(yaml: &str) {
     let err = serde_yaml::from_str::<JobV2Step>(yaml).expect_err("step should fail to parse");
@@ -55,7 +55,7 @@ when: "{{ input.ready }}"
 }
 
 #[test]
-fn target_step_yaml_carries_step_level_role() {
+fn target_step_yaml_rejects_step_level_role() {
     let yaml = r#"
 id: my_step
 role: implementer
@@ -63,38 +63,25 @@ spec:
   type: agent_loop
   instruction: hi
 "#;
-    let parsed: JobV2Step = serde_yaml::from_str(yaml).expect("parse step");
-    let JobV2StepBody::Target(target) = parsed.body else {
-        panic!("expected inline target body, got {:?}", parsed.body);
-    };
-    assert_eq!(target.role, Some(AgentRole::Implementer));
+    let error = serde_yaml::from_str::<JobV2Step>(yaml).expect_err("role must be rejected");
+    assert!(
+        error
+            .to_string()
+            .contains("pass `crew` in the activity input")
+    );
 }
 
 #[test]
-fn target_ref_yaml_carries_step_level_role() {
+fn target_ref_yaml_rejects_step_level_role() {
     let yaml = r#"
 id: my_step
 role: planner
 target: activity:something
 "#;
-    let parsed: JobV2Step = serde_yaml::from_str(yaml).expect("parse step");
-    let JobV2StepBody::TargetRef(target_ref) = parsed.body else {
-        panic!("expected target ref body, got {:?}", parsed.body);
-    };
-    assert_eq!(target_ref.role, Some(AgentRole::Planner));
-}
-
-#[test]
-fn target_step_yaml_without_role_defaults_to_none() {
-    let yaml = r#"
-id: my_step
-spec:
-  type: agent_loop
-  instruction: hi
-"#;
-    let parsed: JobV2Step = serde_yaml::from_str(yaml).expect("parse step");
-    let JobV2StepBody::Target(target) = parsed.body else {
-        panic!("expected inline target body, got {:?}", parsed.body);
-    };
-    assert_eq!(target.role, None);
+    let error = serde_yaml::from_str::<JobV2Step>(yaml).expect_err("role must be rejected");
+    assert!(
+        error
+            .to_string()
+            .contains("pass `crew` in the activity input")
+    );
 }

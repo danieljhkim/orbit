@@ -48,14 +48,14 @@ fn attribution_test_config() -> &'static str {
 default_crew = "claude-team"
 
 [crews.claude-team]
-planner = { model = "claude-opus-4-7", provider = "claude", backend = "cli" }
-implementer = { model = "claude-sonnet-4-6", provider = "claude", backend = "cli" }
-reviewer = { model = "claude-opus-4-7", provider = "claude", backend = "cli" }
+model = "claude-sonnet-4-6"
+provider = "claude"
+backend = "cli"
 
 [crews.codex-team]
-planner = { model = "gpt-5.5", provider = "codex", backend = "cli" }
-implementer = { model = "gpt-5.5", provider = "codex", backend = "cli" }
-reviewer = { model = "gpt-5.5", provider = "codex", backend = "cli" }
+model = "gpt-5.5"
+provider = "codex"
+backend = "cli"
 "#
 }
 
@@ -544,12 +544,12 @@ fn update_task_automation_records_status_history_as_system() {
 }
 
 #[test]
-fn v2_update_task_activity_uses_resolved_crew_implementer_identity() {
+fn v2_update_task_activity_uses_resolved_crew_identity() {
     let (_root, runtime) = test_runtime_with_config(attribution_test_config());
     let task = runtime
         .add_task(TaskAddParams {
             title: "Review attributed update".to_string(),
-            description: "Exercise update_task activity implementer attribution.".to_string(),
+            description: "Exercise update_task activity crew attribution.".to_string(),
             workspace_path: Some(".".to_string()),
             crew: Some("claude-team".to_string()),
             ..Default::default()

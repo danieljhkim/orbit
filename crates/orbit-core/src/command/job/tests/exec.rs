@@ -35,6 +35,21 @@ pub(super) fn test_runtime() -> (tempfile::TempDir, OrbitRuntime, PathBuf, PathB
     (root, runtime, repo_root, global_root)
 }
 
+fn test_runtime_with_workspace_config(
+    config: &str,
+) -> (tempfile::TempDir, OrbitRuntime, PathBuf, PathBuf) {
+    let root = tempdir().expect("create tempdir");
+    let global_root = root.path().join("global");
+    let repo_root = root.path().join("repo");
+    let workspace_root = repo_root.join(".orbit");
+    std::fs::create_dir_all(&global_root).expect("create global root");
+    std::fs::create_dir_all(&workspace_root).expect("create workspace root");
+    std::fs::write(workspace_root.join("config.toml"), config).expect("write workspace config");
+    let runtime =
+        OrbitRuntime::from_roots(&global_root, &workspace_root).expect("build test runtime");
+    (root, runtime, repo_root, global_root)
+}
+
 fn seed_default_catalogs(global_root: &Path) {
     seed_default_activities(&global_root.join("resources/activities"), true)
         .expect("seed default activities");
@@ -895,7 +910,11 @@ fn v2_cli_agent_loop_persists_invocation_metrics() {
     let result = runtime
         .run_job_v2_from_yaml(
             &yaml_path,
-            json!({"prompt": "collect metrics", "task_id": task.id.clone()}),
+            json!({
+                "prompt": "collect metrics",
+                "task_id": task.id.clone(),
+                "crew": "sol"
+            }),
             None,
         )
         .expect("cli metrics job succeeds");
@@ -911,7 +930,10 @@ fn v2_cli_agent_loop_persists_invocation_metrics() {
     let record = &records[0];
     assert_eq!(record.activity_id, "codex_metrics");
     assert_eq!(record.agent, "codex");
-    assert_eq!(record.model.as_deref(), Some("gpt-test"));
+    assert_eq!(
+        record.model.as_deref(),
+        Some(orbit_common::model_defaults::CODEX_SOL_MODEL)
+    );
     assert_eq!(record.input_tokens, 100);
     assert_eq!(record.cache_read_tokens, 25);
     assert_eq!(record.output_tokens, 12);
@@ -925,7 +947,7 @@ fn v2_cli_agent_loop_persists_invocation_metrics() {
     assert!(activity.iter().any(|row| {
         row.activity_id == "codex_metrics"
             && row.agent == "codex"
-            && row.model.as_deref() == Some("gpt-test")
+            && row.model.as_deref() == Some(orbit_common::model_defaults::CODEX_SOL_MODEL)
             && row.total_input_tokens == 100
             && row.total_output_tokens == 12
             && row.total_tool_calls == 1
@@ -997,7 +1019,12 @@ fn v2_claude_fable_alias_persists_provider_reported_model_and_cost() {
 #[cfg(unix)]
 #[test]
 fn task_triage_pipeline_applies_multiple_cli_envelope_dispositions() {
-    let (_root, runtime, repo_root, global_root) = test_runtime();
+    let (_root, runtime, repo_root, global_root) = test_runtime_with_workspace_config(
+        r#"
+[workflow]
+system_crew = "sonnet"
+"#,
+    );
     seed_default_catalogs(&global_root);
     let environmental = seed_failed_triage_candidate(&runtime, "Environmental triage fixture");
     let code_defect = seed_failed_triage_candidate(&runtime, "Code-defect triage fixture");

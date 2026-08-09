@@ -5,10 +5,10 @@ use std::time::Instant;
 
 use orbit_common::types::activity_job::V2AuditEventKind;
 use orbit_common::types::activity_job::{
-    ActivityV2Spec, AgentLoopSpec, AgentRole, Backend, DeterministicSpec,
+    ActivityV2Spec, AgentLoopSpec, Backend, DeterministicSpec,
 };
 
-use crate::context::AgentRoleConfig;
+use crate::context::CrewConfig;
 use orbit_common::types::{
     ExecutorSandboxKind, InvocationTrace, LearningInjectionCaps, LearningInjectionState,
     LearningReminder, OrbitError, ResolvedFsProfile, TokenUsage, ToolCallTrace,
@@ -197,26 +197,6 @@ pub trait V2RuntimeHost: Send + Sync {
         Ok(())
     }
 
-    /// Resolve the selected crew role from the active workspace's
-    /// `config.toml`.
-    /// Mirrors [`crate::context::EnvironmentHost::agent_role_config`]; the
-    /// engine's job dispatcher receives only `&dyn V2RuntimeHost`, so this
-    /// method is the seam dispatch consults at run time. Default returns
-    /// `None`, which makes the resolver fall through to inline activity
-    /// values (preserving pre-ADR-029 dispatch behaviour for tests and other
-    /// hosts that have no role-config layer).
-    fn agent_role_config(&self, _role: AgentRole) -> Option<AgentRoleConfig> {
-        None
-    }
-
-    fn agent_role_config_for_input(
-        &self,
-        role: AgentRole,
-        _input: &Value,
-    ) -> Option<AgentRoleConfig> {
-        self.agent_role_config(role)
-    }
-
     /// Return the configured system crew for a dispatch. The engine injects
     /// this value into system-activity input immediately before resolving its
     /// explicit `crew`, rather than deriving a crew from a role or provider.
@@ -225,14 +205,15 @@ pub trait V2RuntimeHost: Send + Sync {
         None
     }
 
-    /// Resolve a flat crew selected explicitly by the rendered activity
-    /// input. This is separate from role-tag lookup: modern crews have one
-    /// assignment, so an activity carrying `crew` does not need a synthetic
-    /// reviewer/implementer/planner role merely to select that assignment.
-    fn explicit_agent_crew_config_for_input(
+    /// Resolve the crew selected for an activity dispatch. The engine passes
+    /// rendered activity input when it contains an explicit `crew`; otherwise
+    /// it passes the run input so the run's resolved crew is the fallback.
+    /// Hosts without a crew registry may return `None` only when no explicit
+    /// crew was requested, preserving inline settings in isolated tests.
+    fn agent_crew_config_for_input(
         &self,
         input: &Value,
-    ) -> Result<Option<AgentRoleConfig>, DispatchError> {
+    ) -> Result<Option<CrewConfig>, DispatchError> {
         if let Some(crew) = input
             .get("crew")
             .and_then(Value::as_str)

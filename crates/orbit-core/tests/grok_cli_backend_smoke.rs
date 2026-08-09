@@ -75,7 +75,6 @@ fn installed_grok_cli_backend_smoke_captures_stdout_artifact() {
         wall_clock_timeout_seconds: 120,
         require_response_envelope: true,
         require_completion_envelope: true,
-        role: None,
         proc_allowed_programs: None,
     };
 

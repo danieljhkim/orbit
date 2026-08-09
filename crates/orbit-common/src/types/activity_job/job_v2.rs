@@ -6,7 +6,7 @@ use serde_json::Value;
 
 use crate::types::JobScheduleState;
 
-use super::activity_v2::{ActivityV2, ActivityV2Spec, AgentRole};
+use super::activity_v2::{ActivityV2, ActivityV2Spec};
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[cfg_attr(feature = "clap", derive(clap::ValueEnum))]
@@ -117,6 +117,12 @@ impl<'de> Deserialize<'de> for JobV2Step {
             .remove("recovery_activity")
             .and_then(|x| x.as_str().map(String::from));
 
+        if obj.contains_key("role") {
+            return Err(D::Error::custom(
+                "step declares retired `role`; remove it and pass `crew` in the activity input to select a non-default crew",
+            ));
+        }
+
         let has_parallel = obj.contains_key("parallel");
         let has_fan_out = obj.contains_key("fan_out");
         let has_loop = obj.contains_key("loop");
@@ -209,13 +215,6 @@ pub struct TargetStep {
     /// map (loop body only), conversation history persists across iterations.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub session: Option<String>,
-    /// Step-level role tag (ADR-029). Wins over the activity-level role on
-    /// `AgentLoopSpec` when present. The dispatcher
-    /// resolves the effective role to a `(provider, model, backend)` triple
-    /// from `[agent.<role>]` in `config.toml` and overrides the inline values
-    /// on the cloned spec before invoking the runner.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub role: Option<AgentRole>,
 }
 
 /// Named target reference — `target: activity:<name>` in YAML. Phase 4
@@ -237,10 +236,6 @@ pub struct TargetRef {
     pub timeout_seconds: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub session: Option<String>,
-    /// Step-level role carried through to [`TargetStep::role`] when the ref
-    /// is resolved against the workspace catalog.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub role: Option<AgentRole>,
 }
 
 /// Retry modifier (§4.1). Applied per-step wrapper; counts re-runs of the

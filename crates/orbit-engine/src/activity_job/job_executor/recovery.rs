@@ -81,7 +81,7 @@ pub(super) fn attempt_recovery_activity(
             return false;
         }
     };
-    let role_overridden_spec = match role_overridden_recovery_spec(recovery, ctx, &input) {
+    let crew_overridden_spec = match crew_overridden_recovery_spec(recovery, ctx, &input) {
         Ok(spec) => spec,
         Err(error) => {
             tracing::warn!(
@@ -104,7 +104,7 @@ pub(super) fn attempt_recovery_activity(
             return false;
         }
     };
-    let spec = role_overridden_spec.as_ref().unwrap_or(&recovery.spec);
+    let spec = crew_overridden_spec.as_ref().unwrap_or(&recovery.spec);
     let dispatch = dispatch_v2_activity_without_run_id_injection(V2DispatchInput {
         activity_name: &recovery.name,
         spec,
@@ -211,7 +211,7 @@ pub(super) fn attempt_failure_activity(
     }
 }
 
-pub(super) fn role_overridden_recovery_spec(
+pub(super) fn crew_overridden_recovery_spec(
     recovery: &ResolvedRecoveryActivity,
     ctx: &ExecCtx<'_>,
     input: &Value,
@@ -220,15 +220,9 @@ pub(super) fn role_overridden_recovery_spec(
         return Ok(None);
     };
     let input = inject_system_crew_input(ctx.host, input)?;
-    let resolved =
-        if let Some(resolved) = resolve_explicit_crew_settings(ctx.host, inline_spec, &input)? {
-            resolved
-        } else {
-            let Some(role) = inline_spec.role else {
-                return Ok(None);
-            };
-            resolve_agent_settings(role, ctx.host, inline_spec, &ctx.input)
-        };
+    let Some(resolved) = resolve_crew_settings(ctx.host, inline_spec, &input, &ctx.input)? else {
+        return Ok(None);
+    };
     let mut spec = inline_spec.clone();
     apply_resolved_settings(&mut spec, &resolved);
     Ok(Some(ActivityV2Spec::AgentLoop(spec)))
