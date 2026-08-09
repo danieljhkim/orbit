@@ -2,8 +2,9 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::time::{Duration, Instant};
 
 use orbit_common::types::{
-    McpCapability, OrbitError, Role, UnsatisfiableTaskDependency, optional_string_list_alias,
-    unmet_task_dependencies, unsatisfiable_task_dependencies,
+    CoreDeterministicAction, DeterministicAction, McpCapability, OrbitError, Role,
+    UnsatisfiableTaskDependency, optional_string_list_alias, unmet_task_dependencies,
+    unsatisfiable_task_dependencies,
 };
 use orbit_engine::DispatchError;
 use orbit_engine::{StateExecutionContext, execute_deterministic_action};
@@ -18,60 +19,10 @@ use crate::runtime::task_locks::{
 
 use super::{backlog_exclusion, pipeline_actions, task_pilot, triage};
 
-/// Every deterministic action name this dispatch table can execute.
-///
-/// [ORB-10385] This is the runtime's advertised capability list. It backs
-/// [`is_deterministic_action_registered`], which job validation consults
-/// before a run's first step so a catalog asset naming an action this binary
-/// does not implement fails admission instead of a terminal hook. Retired
-/// stubs (`promote_agent_main`, `revert_on_red`) stay listed on purpose: they
-/// are referenced by non-seeded example assets and answer with an actionable
-/// retirement message.
-///
-/// Adding an arm below without adding its name here makes validation reject a
-/// job the runtime could actually run; adding a name here without an arm
-/// reintroduces exactly the skew this list exists to prevent. The seeded-asset
-/// coverage tests in `command/job/catalog.rs` pin the direction that broke in
-/// production — every shipped deterministic activity's action must be
-/// registered here — and [ORB-10410] adds behavioral cover for the two actions
-/// the skew actually reached: `pr_failure_handoff` (the `task_pr_pipeline`
-/// terminal hook, in `command/job/exec.rs`) and `worktree_gc` (below).
-pub(super) const REGISTERED_DETERMINISTIC_ACTIONS: &[&str] = &[
-    "apply_triage_dispositions",
-    "apply_task_pilot_results",
-    "context_conflict_check",
-    "gate_starvation_fail",
-    "git_commit",
-    "git_merge",
-    "git_push",
-    "git_rebase",
-    "invoke_and_wait",
-    "list_backlog_tasks",
-    "list_triage_candidates",
-    "orbit_tool_call",
-    "pipeline_success_guard",
-    "pr_failure_handoff",
-    "pr_open",
-    "pr_prepare",
-    "pr_promote",
-    "prepare_task_pilot",
-    "promote_agent_main",
-    "release_locks",
-    "reserve_locks",
-    "resolve_workspace_ship_input",
-    "revert_on_red",
-    "run_auto_task_scheduler",
-    "sleep",
-    "update_task",
-    "validate_bundles",
-    "worktree_gc",
-    "worktree_setup",
-];
-
 /// Whether `action` is dispatchable by this runtime — the capability probe
 /// behind `V2RuntimeHost::has_deterministic_action` [ORB-10385].
 pub(super) fn is_deterministic_action_registered(action: &str) -> bool {
-    REGISTERED_DETERMINISTIC_ACTIONS.contains(&action)
+    DeterministicAction::parse(action).is_some()
 }
 
 pub(super) fn run_deterministic(
@@ -81,14 +32,8 @@ pub(super) fn run_deterministic(
     input: &Value,
     mut tool_context: ToolContext,
 ) -> Result<Value, DispatchError> {
-    // Reject anything the advertised capability list does not claim, so
-    // `has_deterministic_action` can never report an action this function then
-    // refuses [ORB-10385].
-    if !is_deterministic_action_registered(action) {
-        return Err(DispatchError::DeterministicActionNotRegistered(
-            action.to_string(),
-        ));
-    }
+    let deterministic_action = DeterministicAction::parse(action)
+        .ok_or_else(|| DispatchError::DeterministicActionNotRegistered(action.to_string()))?;
     // ORB-10453: this is the run's own machinery, not the agent it hosts, so
     // it carries `Runner` — the grant that lets a run perform the destruction
     // it exists to perform (`release_locks` frees another run's reservation).
@@ -99,8 +44,31 @@ pub(super) fn run_deterministic(
         .session_context
         .effective_capabilities
         .insert(McpCapability::Runner);
-    match action {
-        "orbit_tool_call" => {
+    match deterministic_action {
+        DeterministicAction::Engine(engine_action) => {
+            let state_context = StateExecutionContext {
+                run_id: input
+                    .get("run_id")
+                    .and_then(Value::as_str)
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                    .map(ToOwned::to_owned),
+                ..StateExecutionContext::default()
+            };
+            execute_deterministic_action(
+                runtime,
+                engine_action.name(),
+                input,
+                false,
+                &HashMap::new(),
+                Some(&state_context),
+            )
+            .map_err(|err| DispatchError::DeterministicActionFailed {
+                action: action.to_string(),
+                message: format!("{err}"),
+            })
+        }
+        DeterministicAction::Core(CoreDeterministicAction::OrbitToolCall) => {
             // The `config` block shape (see deterministic_reference.yaml):
             //   config: { tool_name: <name>, args: <object> }
             // Input overrides config when both are present.
@@ -125,43 +93,12 @@ pub(super) fn run_deterministic(
                     message: format!("{err}"),
                 })
         }
-        // Forwarded to orbit-engine's automation registry. `pr_failure_handoff`
-        // and `worktree_gc` were shipped as activity assets and referenced by
-        // `task_pr_pipeline` / `worktree_gc_pipeline` while this arm still
-        // omitted them, so both dispatched as "not registered" — the skew
-        // ORB-10385 fixes. Keep this list in sync with
-        // `REGISTERED_DETERMINISTIC_ACTIONS`.
-        "git_commit" | "git_merge" | "git_push" | "git_rebase" | "pr_failure_handoff"
-        | "pr_open" | "pr_prepare" | "pr_promote" | "update_task" | "worktree_gc"
-        | "worktree_setup" => {
-            let state_context = StateExecutionContext {
-                run_id: input
-                    .get("run_id")
-                    .and_then(Value::as_str)
-                    .map(str::trim)
-                    .filter(|value| !value.is_empty())
-                    .map(ToOwned::to_owned),
-                ..StateExecutionContext::default()
-            };
-            execute_deterministic_action(
-                runtime,
-                action,
-                input,
-                false,
-                &HashMap::new(),
-                Some(&state_context),
-            )
-            .map_err(|err| DispatchError::DeterministicActionFailed {
-                action: action.to_string(),
-                message: format!("{err}"),
-            })
-        }
         // Retired Phase 4 stubs. These used to return structured skipped
         // success, which made unavailable git/API behavior look like a
         // completed deterministic action. Keep the action names registered
         // so legacy assets fail with an actionable message instead of an
         // "unknown action" error.
-        "promote_agent_main" => {
+        DeterministicAction::Core(CoreDeterministicAction::PromoteAgentMain) => {
             let target = input
                 .get("target_branch")
                 .and_then(Value::as_str)
@@ -177,7 +114,7 @@ pub(super) fn run_deterministic(
                 ),
             })
         }
-        "revert_on_red" => {
+        DeterministicAction::Core(CoreDeterministicAction::RevertOnRed) => {
             let sha = input
                 .get("commit_sha")
                 .and_then(Value::as_str)
@@ -189,7 +126,7 @@ pub(super) fn run_deterministic(
                 ),
             })
         }
-        "context_conflict_check" => {
+        DeterministicAction::Core(CoreDeterministicAction::ContextConflictCheck) => {
             let task_ids = parse_task_ids(input).map_err(|error| {
                 DispatchError::DeterministicActionFailed {
                     action: action.to_string(),
@@ -241,7 +178,7 @@ pub(super) fn run_deterministic(
                 "conflicts": conflicts,
             }))
         }
-        "sleep" => {
+        DeterministicAction::Core(CoreDeterministicAction::Sleep) => {
             let seconds = input
                 .get("seconds")
                 .and_then(Value::as_f64)
@@ -265,49 +202,66 @@ pub(super) fn run_deterministic(
         // its template [ORB-10149]. Reads definitions from this workspace's
         // `.orbit/auto_tasks/`; catch-up collapses and `skip_if_open` dedupe
         // are enforced in the scheduler core.
-        "run_auto_task_scheduler" => crate::auto_tasks::run_scheduler_action_json(runtime, input)
-            .map_err(|error| DispatchError::DeterministicActionFailed {
-                action: action.to_string(),
-                message: error.to_string(),
-            }),
+        DeterministicAction::Core(CoreDeterministicAction::RunAutoTaskScheduler) => {
+            crate::auto_tasks::run_scheduler_action_json(runtime, input).map_err(|error| {
+                DispatchError::DeterministicActionFailed {
+                    action: action.to_string(),
+                    message: error.to_string(),
+                }
+            })
+        }
         // ADR-0223: scheduled shipment resolves only the active runtime's
         // canonical ship input; cross-workspace enumeration stays in the
         // legacy CLI sweep and `workflow.auto_ship` is deliberately ignored.
-        "resolve_workspace_ship_input" => resolve_workspace_ship_input(runtime, action),
+        DeterministicAction::Core(CoreDeterministicAction::ResolveWorkspaceShipInput) => {
+            resolve_workspace_ship_input(runtime, action)
+        }
         // Materialize the workspace backlog for auto-dispatch.
         // Filters by `status: backlog`. In automatic mode, drops any backlog
         // task group whose context overlaps files
         // already held by `in-progress`/`review` tasks. Sorts critical →
         // high → medium → low then by `created_at` ascending so older
         // high-priority work ships first. Caps at `max_tasks` (default 50).
-        "list_backlog_tasks" => backlog_exclusion::list_backlog_tasks(runtime, action, input),
+        DeterministicAction::Core(CoreDeterministicAction::ListBacklogTasks) => {
+            backlog_exclusion::list_backlog_tasks(runtime, action, input)
+        }
         // Materialize blocked tasks attributable to a terminally-failed job
         // run for the triage pipeline [ORB-10129]. Human-blocked tasks (no
         // `job_run_id`, or a non-failed run) never appear; tasks whose
         // re-backlog budget is exhausted take the gave-up path here.
-        "list_triage_candidates" => triage::list_triage_candidates(runtime, action, input),
+        DeterministicAction::Core(CoreDeterministicAction::ListTriageCandidates) => {
+            triage::list_triage_candidates(runtime, action, input)
+        }
         // Apply the triage agent's per-task verdicts under deterministic
         // bounds: candidates-only, `environmental`-only re-backlog, durable
         // re-backlog budget, idempotent under overlap [ORB-10129].
-        "apply_triage_dispositions" => triage::apply_triage_dispositions(runtime, action, input),
+        DeterministicAction::Core(CoreDeterministicAction::ApplyTriageDispositions) => {
+            triage::apply_triage_dispositions(runtime, action, input)
+        }
         // Materialize a workspace-scoped task-pilot working set and partition
         // it into bounded groups without promoting or dispatching any task.
-        "prepare_task_pilot" => task_pilot::prepare(runtime, action, input),
+        DeterministicAction::Core(CoreDeterministicAction::PrepareTaskPilot) => {
+            task_pilot::prepare(runtime, action, input)
+        }
         // Validate all agent proposals before writing, then replace only the
         // exact prepared tasks' context_files fields.
-        "apply_task_pilot_results" => task_pilot::apply(runtime, action, input),
+        DeterministicAction::Core(CoreDeterministicAction::ApplyTaskPilotResults) => {
+            task_pilot::apply(runtime, action, input)
+        }
         // Guard the auto-dispatch bundle output before fan_out.
         // Rejects duplicated task_ids, unknown ids, and oversize
         // bundles with a structured error so a misgrouped backlog
         // never silently dispatches.
-        "validate_bundles" => pipeline_actions::validate_bundles(action, input),
+        DeterministicAction::Core(CoreDeterministicAction::ValidateBundles) => {
+            pipeline_actions::validate_bundles(action, input)
+        }
         // Thin passthrough over `orbit.task.locks.reserve`. Exists as a
         // dedicated action (rather than a `orbit_tool_call` config) so a
         // workflow inside a `loop:` with `break_when:` can reference
         // `steps.<id>.output.reserved` directly without leaking the
         // generic `{tool_name, args}` envelope into the activity's
         // input_schema.
-        "reserve_locks" => {
+        DeterministicAction::Core(CoreDeterministicAction::ReserveLocks) => {
             let admission = dependency_admission_for_input(runtime, input).map_err(|err| {
                 DispatchError::DeterministicActionFailed {
                     action: action.to_string(),
@@ -377,7 +331,7 @@ pub(super) fn run_deterministic(
         }
         // Thin passthrough over `orbit.task.locks.release` so workflows
         // can free admission-window reservations after child runs finish.
-        "release_locks" => runtime
+        DeterministicAction::Core(CoreDeterministicAction::ReleaseLocks) => runtime
             .run_tool_with_context_and_role(
                 "orbit.task.locks.release",
                 input.clone(),
@@ -392,29 +346,20 @@ pub(super) fn run_deterministic(
         // Chains `orbit.pipeline.invoke` + `orbit.pipeline.wait` so
         // workflows can model "dispatch and join" as a single step
         // with `{status, run_id, pipeline?, error?}` output.
-        "invoke_and_wait" => {
+        DeterministicAction::Core(CoreDeterministicAction::InvokeAndWait) => {
             pipeline_actions::invoke_and_wait(runtime, action, input, tool_context)
         }
         // Fail a workflow if one or more child pipeline wait results did not
         // reach `succeeded`.
-        "pipeline_success_guard" => pipeline_actions::pipeline_success_guard(action, input),
+        DeterministicAction::Core(CoreDeterministicAction::PipelineSuccessGuard) => {
+            pipeline_actions::pipeline_success_guard(action, input)
+        }
         // Post-loop gate signal: the admission window never opened in
         // time. Emits a `gate.starvation` audit event with task_ids and
         // conflicting_files so an epic-orchestrator parent can decide
         // to replan, then fails the Run with a structured error.
-        "gate_starvation_fail" => pipeline_actions::gate_starvation_fail(runtime, action, input),
-        other => {
-            // Unreachable for a well-formed table: the guard above already
-            // rejected every unlisted name. Reaching here means a name was
-            // added to `REGISTERED_DETERMINISTIC_ACTIONS` without an arm —
-            // the capability list over-promising [ORB-10385].
-            debug_assert!(
-                !is_deterministic_action_registered(other),
-                "`{other}` is in REGISTERED_DETERMINISTIC_ACTIONS but has no dispatch arm"
-            );
-            Err(DispatchError::DeterministicActionNotRegistered(
-                other.to_string(),
-            ))
+        DeterministicAction::Core(CoreDeterministicAction::GateStarvationFail) => {
+            pipeline_actions::gate_starvation_fail(runtime, action, input)
         }
     }
 }

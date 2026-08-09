@@ -845,12 +845,26 @@ Narrative lives in the ADR store — retrieve it with `orbit tool run orbit.adr.
 
 ---
 
+## ADR-0337 — Typed deterministic action declaration spans core and engine
+
+**Status:** Proposed · 2026-08 · [ORB-10630]
+
+**Context.** Deterministic action names had independent core advertisement, core forwarding, engine constants, and engine dispatch lists. That duplication shipped asset actions that were not invocable.
+
+**Decision.** Declare each action's name and core-or-engine ownership once in `orbit-common`, generating typed core and engine action enums plus parsing and advertised names. Core and engine dispatch each exhaustively match their respective generated type.
+
+**Consequences.**
+- A declared action without an implementation fails compilation through an exhaustive match, and implementations cannot name an undeclared typed action.
+- Catalog coverage stays because YAML still provides external string inputs.
+- Cost: adding an action must choose ownership at the shared declaration boundary.
+
 ## Task References
 
 - **[ORB-10644]** — Refuse to open or promote a PR against a base branch that is gone from `origin` or has already landed on the declared landing branch ([ADR-0336], extending [ADR-0290]'s marker rule to the base itself).
 - **[ORB-10593]** — Fail dispatch immediately when a `blocked_by` target is archived, rejected, or dangling, naming the blocker ([ADR-0319]).
 - **[ORB-10544]** — Move the ship in-flight duplicate-dispatch guard into `submit_ship_run` so HTTP and MCP are thin projections of one typed conflict ([ADR-0303], correcting the surface-local check from [ADR-0257]).
 - **[ORB-10631]** — Route interactive `orbit run ship` through `submit_ship_run` as well, completing the shared submission boundary for CLI, dashboard, MCP, and routine dispatch ([ADR-0303]).
+- **[ORB-10630]** — Derive deterministic action advertisement, forwarding, and engine dispatch from one typed common declaration ([ADR-0337], Proposed).
 
 - **[ORB-10519]** — Restore one workflow-owned shipment commit, reject every provider-side HEAD change, and preserve dirty-work recovery plus process-scoped attribution ([ADR-0299], superseding [ADR-0294] and [ADR-0249]).
 - **[ORB-10499]** — Confirm the duplicate implement invocation as the executor's bounded post-recovery attempt, and let the re-dispatched attempt exit on a write-gated task (resolving [F2026-07-174]).

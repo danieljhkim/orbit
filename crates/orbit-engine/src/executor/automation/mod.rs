@@ -6,23 +6,8 @@ pub(crate) mod vcs;
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-use orbit_common::types::OrbitError;
+use orbit_common::types::{DeterministicAction, EngineDeterministicAction, OrbitError};
 use serde_json::Value;
-
-// ---- retained internal actions ----
-const UPDATE_TASK_ACTION: &str = "update_task";
-
-// ---- generic built-in automation actions ----
-const GIT_COMMIT_ACTION: &str = "git_commit";
-const GIT_REBASE_ACTION: &str = "git_rebase";
-const PR_FAILURE_HANDOFF_ACTION: &str = "pr_failure_handoff";
-const GIT_PUSH_ACTION: &str = "git_push";
-const GIT_MERGE_ACTION: &str = "git_merge";
-const WORKTREE_SETUP_ACTION: &str = "worktree_setup";
-const WORKTREE_GC_ACTION: &str = "worktree_gc";
-const PR_OPEN_ACTION: &str = "pr_open";
-const PR_PREPARE_ACTION: &str = "pr_prepare";
-const PR_PROMOTE_ACTION: &str = "pr_promote";
 
 #[derive(Debug, Clone, Default)]
 pub struct StateExecutionContext {
@@ -47,18 +32,40 @@ pub fn execute_action<
     _steps_outputs: &HashMap<String, Value>,
     state_context: Option<&StateExecutionContext>,
 ) -> Result<Value, OrbitError> {
+    let Some(DeterministicAction::Engine(action)) = DeterministicAction::parse(action) else {
+        return Err(OrbitError::InvalidInput(format!(
+            "unsupported automation action '{action}'"
+        )));
+    };
+    execute_engine_action(host, action, input, state_context)
+}
+
+fn execute_engine_action<
+    H: crate::context::DeterministicActionHost
+        + crate::context::TaskHost
+        + crate::context::EnvironmentHost
+        + Sync
+        + ?Sized,
+>(
+    host: &H,
+    action: EngineDeterministicAction,
+    input: &Value,
+    state_context: Option<&StateExecutionContext>,
+) -> Result<Value, OrbitError> {
     match action {
         // ---- retained internal actions ----
-        UPDATE_TASK_ACTION => task_update::update_task(host, input, state_context),
+        EngineDeterministicAction::UpdateTask => {
+            task_update::update_task(host, input, state_context)
+        }
 
         // ---- generic built-in actions ----
-        GIT_COMMIT_ACTION => vcs::git_commit(host, input),
-        GIT_REBASE_ACTION => vcs::rebase_pr_branch(host, input),
-        PR_FAILURE_HANDOFF_ACTION => vcs::pr_failure_handoff(host, input),
-        GIT_PUSH_ACTION => vcs::push_batch_changes(host, input),
-        GIT_MERGE_ACTION => vcs::git_merge(host, input),
-        WORKTREE_SETUP_ACTION => vcs::setup_worktree(host, input),
-        WORKTREE_GC_ACTION => {
+        EngineDeterministicAction::GitCommit => vcs::git_commit(host, input),
+        EngineDeterministicAction::GitRebase => vcs::rebase_pr_branch(host, input),
+        EngineDeterministicAction::PrFailureHandoff => vcs::pr_failure_handoff(host, input),
+        EngineDeterministicAction::GitPush => vcs::push_batch_changes(host, input),
+        EngineDeterministicAction::GitMerge => vcs::git_merge(host, input),
+        EngineDeterministicAction::WorktreeSetup => vcs::setup_worktree(host, input),
+        EngineDeterministicAction::WorktreeGc => {
             let runs = host.list_job_runs_for_gc()?;
             let repo_root = host.repo_root()?;
             let older_than = input
@@ -92,13 +99,9 @@ pub fn execute_action<
                 OrbitError::Execution(format!("failed to serialize worktree GC result: {error}"))
             })
         }
-        PR_OPEN_ACTION => vcs::pr_open(host, input),
-        PR_PREPARE_ACTION => vcs::prepare_pr_handoff(host, input),
-        PR_PROMOTE_ACTION => vcs::pr_promote(host, input),
-
-        other => Err(OrbitError::InvalidInput(format!(
-            "unsupported automation action '{other}'"
-        ))),
+        EngineDeterministicAction::PrOpen => vcs::pr_open(host, input),
+        EngineDeterministicAction::PrPrepare => vcs::prepare_pr_handoff(host, input),
+        EngineDeterministicAction::PrPromote => vcs::pr_promote(host, input),
     }
 }
 
