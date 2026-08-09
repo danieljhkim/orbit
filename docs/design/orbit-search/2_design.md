@@ -4,6 +4,7 @@ type: design
 title: "Semantic Search — Design"
 owner: claude
 last_updated: 2026-07-26
+last_validated: 2026-08-09
 status: Accepted
 feature: orbit-search
 doc_role: design
@@ -12,27 +13,27 @@ tags: ["orbit-search"]
 
 # Semantic Search — Design
 
-This document specifies phase-1 semantic search: the two new `orbit-embed*` crates and their place in the architecture, the companion-binary inference model, the SQLite vector storage schema, the per-field embedding strategy, the hybrid (BM25 + cosine) retrieval pipeline, the MCP and CLI surface, the index-maintenance lifecycle, and the concerns the design deliberately leaves to follow-ups.
+This document specifies the semantic-search implementation: the `orbit-search` crate and its optional companion binary, the companion-binary inference model, the SQLite vector storage schema, the per-field embedding strategy, the hybrid (BM25 + cosine) retrieval pipeline, the MCP and CLI surface, the index-maintenance lifecycle, and the concerns the design deliberately leaves to follow-ups.
 
 ---
 
 ## 1. Architectural Placement
 
-Two new crates land:
+The `orbit-search` crate contains the library and the optional companion binary target:
 
-- **`orbit-embed`** — small client library. Owns the `Embedder` trait, the JSON-RPC request/response types, and `SubprocessEmbedder` (the trait impl that locates and talks to the companion). Depends only on `orbit-common`. **Does not depend on fastembed-rs**, so it adds negligible binary cost. Linked into the main `orbit` binary.
-- **`orbit-embed-companion`** — binary crate. Depends on `orbit-embed` (for the RPC types) and on fastembed-rs (for the actual ONNX inference). Produces the standalone `orbit-embed-companion` executable distributed via GitHub Releases per platform. **Not built into `orbit`**; users opt in by running `orbit semantic install`. Per [4_decisions.md ADR-005](./4_decisions.md).
+- **`orbit-search`** — small client and storage library. Owns the `Embedder` trait, the JSON-RPC request/response types, `SubprocessEmbedder`, vector storage, and the install/index/query commands. Its default feature does not enable fastembed-rs, so the main `orbit` binary remains slim.
+- **`orbit-search-companion`** — optional binary target behind the `companion` feature. It depends on fastembed-rs for ONNX inference and is distributed separately per platform. **Not built into `orbit`**; users opt in by running `orbit semantic install`. Per [4_decisions.md ADR-005](./4_decisions.md).
 
 Updated dependency graph:
 
 ```
-orbit-common → orbit-embed → orbit-store → ... (existing graph; orbit-embed has no fastembed dep)
-                          ↘ orbit-embed-companion (separate crate, separate binary, fastembed-rs lives here)
+orbit-common → orbit-search → orbit-core → orbit-cli
+                       ↘ orbit-search-companion (optional binary target, fastembed-rs lives here)
 ```
 
-`orbit-store` gains a new submodule `vector::` alongside the existing `file::` and `sqlite::` layers. `vector::` owns the `embeddings` table schema, write/upsert/delete API, and the brute-force cosine helper implementation. It depends on `orbit-embed` for the `Embedder` trait but treats the embedder as injected — tests pass a `NoopEmbedder` that returns deterministic vectors so unit tests never need the companion to be installed.
+`orbit-search::vector` owns the `embeddings` table schema, write/upsert/delete API, and the brute-force cosine helper implementation. It opens the workspace-local SQLite database directly and treats the embedder as injected — tests pass a `NoopEmbedder` that returns deterministic vectors so unit tests never need the companion to be installed.
 
-The vector SQLite store is workspace-local at `.orbit/state/semantic.db`, not in the global `~/.orbit/orbit.db` audit/tool database. This preserves the task scoping rule: task-derived embeddings and FTS rows do not leak across workspaces.
+The vector SQLite store is workspace-local at `.orbit/state/semantic.db`, not in the global `~/.orbit/orbit.db` audit/tool database. This preserves the workspace scoping rule: task, doc, learning, and ADR embeddings and FTS rows do not leak across workspaces.
 
 `orbit-tools` exposes `orbit.search` as the MCP query tool, and `orbit-cli` exposes `orbit search` for queries plus `orbit semantic` for companion lifecycle (`install`, `uninstall`, `stats`, `index`). These surfaces are thin shells over the shared search runtime.
 
@@ -42,7 +43,7 @@ The vector SQLite store is workspace-local at `.orbit/state/semantic.db`, not in
 
 ### 2.1 Trait
 
-Defined in `orbit-embed`:
+Defined in `orbit-search`:
 
 ```rust
 pub trait Embedder: Send + Sync {
@@ -58,18 +59,18 @@ Batch input is mandatory — fastembed-rs is meaningfully faster on batches than
 
 ### 2.2 Companion-binary architecture
 
-Phase 1 ships a single trait impl: `SubprocessEmbedder` (in `orbit-embed`). It does not perform inference itself — it spawns and talks to the `orbit-embed-companion` binary that the user installed with `orbit semantic install`. The arrangement looks like:
+The library ships a single production trait impl: `SubprocessEmbedder` (in `orbit-search`). It does not perform inference itself — it spawns and talks to the `orbit-search-companion` binary that the user installed with `orbit semantic install`. The arrangement looks like:
 
 ```
-orbit (main binary)                          orbit-embed-companion (installed binary)
+orbit (main binary)                          orbit-search-companion (installed binary)
 ├── SubprocessEmbedder                       ├── fastembed-rs
 │     ↕ stdio JSON-RPC                       │     ↕ ONNX Runtime
-└── orbit-store::vector                      └── BGE-small / MiniLM-L6 / Nomic-v1.5
+└── orbit-search::vector                     └── BGE-small / MiniLM-L6 / Nomic-v1.5
 ```
 
 Lifecycle:
 
-- `SubprocessEmbedder::new()` resolves the companion path under `~/.orbit/embed/bin/orbit-embed-companion-<platform>` and starts the subprocess. ~100–300ms cold-start latency for ORT init.
+- `SubprocessEmbedder::new()` resolves the companion path under `~/.orbit/embed/bin/orbit-search-companion-<platform>` and starts the subprocess. ~100–300ms cold-start latency for ORT init.
 - The subprocess stays alive for the duration of the parent process or until explicitly dropped. Indexing batches and multi-query interactive sessions reuse the same subprocess.
 - On process exit, the parent sends an `exit` RPC and waits up to 1s; if unresponsive, sends SIGTERM.
 
@@ -112,15 +113,14 @@ The three supported models per [3_vision.md §1](./3_vision.md):
 
 On first use of any embedder-touching path, `SubprocessEmbedder::new()` checks:
 
-1. `$ORBIT_EMBED_COMPANION` env var → explicit path override (used by tests and airgapped operators).
-2. `~/.orbit/embed/bin/orbit-embed-companion-<platform>` → standard install path.
-3. `$PATH` → fallback for unusual deployments.
+1. `~/.orbit/embed/bin/orbit-search-companion-<platform>` → standard managed-install path.
+2. `$ORBIT_SEARCH_COMPANION` → developer-only absolute path override when the explicit unsafe override gate is enabled.
 
 If none resolve, the embedder returns `OrbitError::CompanionNotInstalled` with a remediation message: `"Run \`orbit semantic install\` to enable semantic search."` Indexing-path callers log and skip (semantic search is not on the critical path of task mutation; see [§7.1](#71-on-mutation-indexing)). Query-path callers surface the error directly to the user.
 
 ### 2.6 Alternative backends
 
-The trait + RPC protocol make alternative companions viable without changing storage or retrieval. A future `orbit-embed-companion-candle` could speak the same protocol and ship as a separate downloadable. None ship in phase 1; the protocol exists to keep that door open. The full backend comparison is in [4_decisions.md ADR-001](./4_decisions.md); the packaging decision is in [4_decisions.md ADR-005](./4_decisions.md).
+The trait + RPC protocol make alternative companions viable without changing storage or retrieval. A future Candle-based companion could speak the same protocol and ship as a separate downloadable. None ship today; the protocol exists to keep that door open. The full backend comparison is in [4_decisions.md ADR-001](./4_decisions.md); the packaging decision is in [4_decisions.md ADR-005](./4_decisions.md).
 
 ---
 
@@ -132,8 +132,8 @@ A new SQLite table in the existing per-workspace store:
 
 ```sql
 CREATE TABLE embeddings (
-    source_kind TEXT NOT NULL,         -- "task" (phase 1); "symbol" (phase 2 reserved)
-    source_id   TEXT NOT NULL,         -- task ID or future symbol ID
+    source_kind TEXT NOT NULL,         -- "task", "doc", "learning", or "adr"
+    source_id   TEXT NOT NULL,         -- task ID or corpus-specific source ID
     field       TEXT NOT NULL,         -- "purpose", "plan", "comment_3", "review_1_msg_2", ...
     chunk_idx   INTEGER NOT NULL,      -- 0 for unchunked; >0 for splits of long fields
     content_hash TEXT NOT NULL,        -- BLAKE3 of the embedded text; cheap re-index gate
@@ -209,10 +209,11 @@ Token counting uses fastembed-rs's tokenizer for the active model — exact, not
 
 ### 5.1 FTS5 virtual table
 
-A second new table mirrors task content for lexical search:
+A virtual table mirrors corpus content for lexical search:
 
 ```sql
-CREATE VIRTUAL TABLE tasks_fts USING fts5(
+CREATE VIRTUAL TABLE corpus_fts USING fts5(
+    source_kind UNINDEXED,
     source_id UNINDEXED,
     field UNINDEXED,
     content,
@@ -254,16 +255,16 @@ orbit semantic uninstall [--model MODEL] [--all]
 orbit search <query> [--hybrid] [--kind task|doc|learning|adr|all] [--limit N]
 orbit search similar <task-id> [--limit N]
 orbit search path <path> [--kind task|doc|learning|adr|all] [--limit N]
-orbit semantic index     [--force] [--model MODEL]
+orbit semantic index     [--force] [--model MODEL] [--kind tasks|docs|adrs|learnings|all]
 orbit docs index         [--force] [--model MODEL]
 orbit semantic stats
 ```
 
-`install` is the gate that enables every other subcommand. It downloads the platform-appropriate `orbit-embed-companion` binary from the published release URL and the chosen model from HuggingFace, both into `~/.orbit/embed/`. Default model is `bge-small`; users can override per [§2.4](#24-default-model-and-install-time-model-selection). Re-running `install` with a different `--model` adds that model alongside existing ones. Re-running `install` after an Orbit upgrade also refreshes a stale companion automatically because the existing binary's `--version-info` output is compared to the current package version; `--force` is the explicit override for reinstalling the current version.
+`install` is the gate that enables every other subcommand. It downloads the platform-appropriate `orbit-search-companion` binary from the published release URL and the chosen model from HuggingFace, both into `~/.orbit/embed/`. Default model is `bge-small`; users can override per [§2.4](#24-default-model-and-install-time-model-selection). Re-running `install` with a different `--model` adds that model alongside the existing ones. Re-running `install` after an Orbit upgrade also refreshes a stale companion automatically because the existing binary's `--version-info` output is compared to the current package version; `--force` is the explicit override for reinstalling the current version.
 
 `uninstall` removes the companion binary and (by default) the currently active model. `--model M` removes only model M. `--all` removes the companion plus every installed model.
 
-`orbit search` defaults to lexical matching across tasks, docs, learnings, and ADRs. `--hybrid --kind task` runs the hybrid pipeline over task vectors; `--hybrid --kind doc` blends docs lexical scoring with cosine over rows built by `orbit docs index`; learnings and ADRs remain lexical. `orbit search similar <task-id>` embeds the target task's `purpose + summary` and runs cosine-only against other tasks (lexical fusion adds noise here). `orbit search path <path>` performs applicability lookup over path-scoped artifacts. `orbit semantic index` rebuilds task `embeddings` rows; `orbit docs index` rebuilds doc rows and sweeps stale doc paths. `--force` ignores `content_hash` and re-embeds everything. `stats` reports row counts, model distribution, stale-row count, and companion-install status.
+`orbit search` defaults to lexical matching across tasks, docs, learnings, and ADRs. `--hybrid` blends lexical scoring with cosine over the selected corpus; `orbit search similar <task-id>` embeds the target task and runs cosine-neighbor lookup against other tasks; `orbit search path <path>` performs applicability lookup over path-scoped artifacts. `orbit semantic index` rebuilds the selected corpus (`tasks` by default, or `docs`, `adrs`, `learnings`, `all` via `--kind`); `orbit docs index` is the docs-specific alias and sweeps stale doc paths. `--force` ignores `content_hash` and re-embeds everything. `stats` reports row counts, model distribution, stale-row count, and companion-install status.
 
 If the companion is not installed, task-hybrid search, `orbit search similar <task-id>`, `orbit semantic index`, and `orbit docs index` exit non-zero with: `"Semantic search not enabled. Run \`orbit semantic install\` to download the inference companion."` Doc-hybrid search is softer: it emits a warning/note and falls back to lexical doc results.
 

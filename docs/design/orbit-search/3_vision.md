@@ -4,6 +4,7 @@ type: design
 title: "Semantic Search — Vision"
 owner: claude
 last_updated: 2026-05-21
+last_validated: 2026-08-09
 status: Draft
 feature: orbit-search
 doc_role: vision
@@ -30,7 +31,7 @@ The cost of deferring: phase-1 ships with a default chosen on published benchmar
 
 ### 1.2 Airgapped install path
 
-The companion-binary architecture ([4_decisions.md ADR-005](./4_decisions.md)) makes airgapped install harder than a bundled design would have been: operators need to obtain *both* the platform-appropriate `orbit-embed-companion` binary *and* the chosen model files, neither of which is in the main `orbit` release. Options:
+The companion-binary architecture ([4_decisions.md ADR-005](./4_decisions.md)) makes airgapped install harder than a bundled design would have been: operators need to obtain *both* the platform-appropriate `orbit-search-companion` binary *and* the chosen model files, neither of which is in the main `orbit` release. Options:
 
 - **Documented manual placement.** Operator runs `orbit semantic install` on a connected machine, then copies `~/.orbit/embed/` (companion binary + models) onto the airgapped target. Requires documenting the exact file layout. Phase-1 default.
 - **`orbit semantic install --from <path>`.** Operator points the install command at a pre-staged tarball of companion + models. Removes the need to document the directory layout. Probably the right phase-2 ergonomic improvement.
@@ -137,11 +138,11 @@ Three properties separate this design from the prior art it draws on.
 
 ### 3.1 Single-binary local-only by construction
 
-Every published "hybrid retrieval" production system above runs as a service. Orbit's constraint inverts that: no daemon, no service, no API surface, no auth posture to defend. The design is small enough to fit in-process precisely because the corpus is small (tasks, not the whole web). The `Embedder` trait + brute-force cosine + FTS5 + RRF stack adds up to "hybrid retrieval" but ships as four files in two crates rather than four services.
+Every published "hybrid retrieval" production system above runs as a service. Orbit's constraint inverts that: no daemon, no service, no cloud API, no auth posture to defend. The design is small enough to fit in-process precisely because the corpus is local (tasks and other workspace artifacts, not the whole web). The `Embedder` trait + brute-force cosine + FTS5 + RRF stack adds up to "hybrid retrieval" while shipping as one library crate plus an optional companion binary target rather than four services.
 
-### 3.2 Forward compatibility with the graph corpus
+### 3.2 One vector store for multiple local corpora
 
-The schema's `source_kind` discriminator is not future-proofing for its own sake; it commits to a specific phase-2 path where graph symbols join the same vector store under a different `source_kind`. The brute-force ceiling and the `sqlite-vec` upgrade path are sized against that future corpus, not against today's task-only corpus. Most orbit-search-on-tasks projects assume tasks are the whole story; this one explicitly does not.
+The schema's `source_kind` discriminator is not future-proofing for its own sake; it lets tasks, docs, learnings, and ADRs share one workspace-local vector store while retaining corpus-specific indexing and filters. The brute-force implementation stays appropriate for the current corpus size, and the `sqlite-vec` upgrade path remains available if future local corpora make that necessary. Most orbit-search-on-tasks projects assume tasks are the whole story; this one explicitly does not.
 
 ### 3.3 Failure-mode honesty in the score breakdown
 

@@ -4,6 +4,7 @@ type: design
 title: "Semantic Search — Overview"
 owner: claude
 last_updated: 2026-05-20
+last_validated: 2026-08-09
 status: Draft
 feature: orbit-search
 doc_role: overview
@@ -28,7 +29,7 @@ The task store is already growing past the point where lexical recall is suffici
 
 Lexical search via SQLite FTS5 (BM25) is part of the answer — it handles literal identifiers, error codes, and task IDs better than embeddings. But it misses the cases where the user's vocabulary doesn't match the document's. Semantic search via local embeddings handles that. The two are complementary, not competing, which is why phase 1 ships them together as a hybrid retrieval pipeline ([4_decisions.md ADR-004](./4_decisions.md)).
 
-The constraint that shapes every other decision: **the default `orbit` install is single-binary, no-daemon, and no cloud dependency**. That rules out hosted embedding APIs and rules out an always-on inference daemon. Phase 1 keeps the default `orbit` binary slim by moving fastembed-rs into a separate `orbit-embed-companion` binary that the user opts into via `orbit semantic install` ([4_decisions.md ADR-001](./4_decisions.md), [ADR-0117](./4_decisions.md)).
+The constraint that shapes every other decision: **the default `orbit` install is single-binary, no-daemon, and no cloud dependency**. That rules out hosted embedding APIs and rules out an always-on inference daemon. The `orbit-search` library keeps the main `orbit` binary slim by making fastembed-rs an optional companion-only dependency; users opt into inference via `orbit semantic install` ([4_decisions.md ADR-001](./4_decisions.md), [ADR-0117](./4_decisions.md)).
 
 ---
 
@@ -36,19 +37,19 @@ The constraint that shapes every other decision: **the default `orbit` install i
 
 ### 2.1 Embedding backend (companion-binary architecture)
 
-Two new crates land. `orbit-embed` is a small client library in the main `orbit` binary; it owns the `Embedder` trait, the JSON-RPC types, and a `SubprocessEmbedder` impl that talks to the companion. `orbit-embed-companion` is a separate binary built from its own crate; it depends on [fastembed-rs](https://github.com/Anush008/fastembed-rs) and ONNX Runtime and runs the actual inference. The main `orbit` binary has no fastembed dependency.
+The `orbit-search` crate owns the `Embedder` trait, JSON-RPC types, `SubprocessEmbedder`, vector storage, and command implementations. Its optional `orbit-search-companion` binary target depends on fastembed-rs and runs the actual inference; the main `orbit` binary uses the library without that optional feature and therefore does not link fastembed-rs.
 
-Users opt into semantic search by running `orbit semantic install [--model bge-small | minilm-l6 | nomic-v1.5]`, which downloads the platform-appropriate companion plus the chosen model into `~/.orbit/embed/`. Default model is BGE-small-en-v1.5 (384 dim, ~30MB). The trait abstraction exists so a future `orbit-embed-companion-candle` (or any other backend) can be swapped in without changing storage or retrieval. Airgapped operators have a manual-placement path described in [3_vision.md §1.2](./3_vision.md). The full backend selection rationale is in [4_decisions.md ADR-001](./4_decisions.md); the packaging decision is in [4_decisions.md ADR-005](./4_decisions.md).
+Users opt into semantic search by running `orbit semantic install [--model bge-small | minilm-l6 | nomic-v1.5]`, which downloads the platform-appropriate companion plus the chosen model into `~/.orbit/embed/`. Default model is BGE-small-en-v1.5 (384 dim, ~30MB). The trait abstraction leaves room for a future companion backend without changing storage or retrieval. Airgapped operators have a manual-placement path described in [3_vision.md §1.2](./3_vision.md). The full backend selection rationale is in [4_decisions.md ADR-001](./4_decisions.md); the packaging decision is in [4_decisions.md ADR-005](./4_decisions.md).
 
 ### 2.2 Vector store
 
-A new SQLite table `embeddings` stored alongside the existing task store. Each row holds `(source_kind, source_id, field, content_hash, model_id, dim, embedding BLOB)`. `source_kind` discriminates between rows that index task content and rows that will eventually index graph symbols; `field` distinguishes per-field embeddings within a task (one row each for `purpose`, `plan`, `comments_<idx>`, `review_<idx>`).
+A new SQLite table `embeddings` is stored in the workspace-local semantic database alongside the `corpus_fts` virtual table. Each row holds `(source_kind, source_id, field, chunk_idx, content_hash, model_id, dim, embedding BLOB)`. `source_kind` currently distinguishes task, doc, learning, and ADR rows; `field` distinguishes per-source fields and chunks.
 
-Phase 1 uses **brute-force cosine similarity** in Rust over the BLOBs. At task-corpus scale (low thousands of artifacts × small number of fields per task = tens of thousands of vectors at 384d), brute force is sub-millisecond per query and adds zero new dependencies. The on-disk format is forward-compatible with `sqlite-vec` should the graph corpus later push past brute-force scaling limits ([4_decisions.md ADR-002](./4_decisions.md)).
+The implementation uses **brute-force cosine similarity** in Rust over the BLOBs. At the current corpus scale (low thousands of artifacts × a small number of fields per source = tens of thousands of vectors at 384d), brute force is sub-millisecond per query and adds zero new dependencies. The on-disk format remains forward-compatible with `sqlite-vec` should future local corpus growth push past brute-force scaling limits ([4_decisions.md ADR-002](./4_decisions.md)).
 
 ### 2.3 Hybrid retrieval
 
-Queries run two retrievers in parallel: SQLite FTS5 (BM25) over a `tasks_fts` virtual table, and brute-force cosine over the `embeddings` table. The two ranked lists are fused via Reciprocal Rank Fusion (RRF, k=60) to produce the final ordering. RRF is an unweighted, parameter-light fuse that consistently outperforms either retriever alone in the published evaluation literature; it does not require either retriever's score to be calibrated to the other.
+Queries run two retrievers in parallel: SQLite FTS5 (BM25) over the `corpus_fts` virtual table, and brute-force cosine over the `embeddings` table. The two ranked lists are fused via Reciprocal Rank Fusion (RRF, k=60) to produce the final ordering. RRF is an unweighted, parameter-light fuse that consistently outperforms either retriever alone in the published evaluation literature; it does not require either retriever's score to be calibrated to the other.
 
 This is the single most important quality choice in the design. Pure semantic search loses on literal-identifier queries (function names, error codes, task IDs, file paths); pure lexical search loses on vocabulary-mismatch queries. RRF avoids picking one failure mode over the other ([4_decisions.md ADR-004](./4_decisions.md)).
 
@@ -58,7 +59,7 @@ A task is indexed as multiple rows, one per field: `purpose`, `summary`, `plan`,
 
 ### 2.5 Phase boundary
 
-Phase 1 covers tasks only. Phase 2 will add `source_kind = symbol` rows that embed graph nodes (module path + symbol name + docstring). The vector store schema is designed to accommodate this without migration, but phase 2 has its own design questions (which symbols, what to embed for them, how to keep embeddings fresh as code changes) that this folder does not pre-commit. Phase 2 lands as a separate task and a separate ADR cluster.
+The shipped index covers tasks plus explicitly indexed docs, learnings, and ADRs. The old graph-corpus proposal was retired by ADR-0291 / ORB-10491; no current implementation or roadmap depends on `source_kind = symbol` rows.
 
 ---
 
@@ -69,7 +70,7 @@ Phase 1 covers tasks only. Phase 2 will add `source_kind = symbol` rows that emb
 | Folder layout, frontmatter, ADR template | [docs/design/CONVENTIONS.md](../CONVENTIONS.md) | — |
 | Inference backend choice (fastembed-rs) | [2_design.md §2](./2_design.md), [4_decisions.md ADR-001](./4_decisions.md) | [T20260510-3] |
 | Companion-binary packaging + on-demand install | [2_design.md §2.2–§2.5](./2_design.md), [4_decisions.md ADR-005](./4_decisions.md) | [T20260510-3] |
-| `orbit-embed` and `orbit-embed-companion` crate placement | [2_design.md §1](./2_design.md) | [T20260510-9] |
+| `orbit-search` crate and `orbit-search-companion` binary placement | [2_design.md §1](./2_design.md) | [T20260510-9] |
 | Stdio JSON-RPC protocol | [2_design.md §2.3](./2_design.md) | [T20260510-9] |
 | `embeddings` SQLite table schema | [2_design.md §3](./2_design.md), [4_decisions.md ADR-002](./4_decisions.md) | [T20260510-9] |
 | Per-field embedding strategy | [2_design.md §4](./2_design.md), [4_decisions.md ADR-003](./4_decisions.md) | [T20260510-9] |
