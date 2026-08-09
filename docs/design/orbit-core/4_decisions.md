@@ -2,6 +2,7 @@
 title: Orbit Core — Decisions
 owner: claude
 last_updated: 2026-08-01
+last_validated: 2026-08-09
 status: Accepted
 feature: orbit-core
 doc_role: decisions
@@ -99,7 +100,7 @@ owning module or crate.
 
 ## ADR-0209 — North-star architecture bearing: operations as data behind an operation registry
 
-**Status:** Proposed · 2026-07 · [ORB-10026]
+**Status:** Accepted · 2026-07-14 · [ORB-10026]
 
 **Context.** Orbit's four consumer surfaces — the CLI (`orbit-cli`), MCP
 (`orbit-mcp`), the web dashboard (`orbit-dashboard`), and the in-runtime agent

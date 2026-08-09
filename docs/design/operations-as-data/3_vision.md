@@ -2,6 +2,7 @@
 title: Operations as Data — Vision
 owner: claude
 last_updated: 2026-07-26
+last_validated: 2026-08-09
 status: Accepted
 feature: operations-as-data
 doc_role: vision
@@ -57,7 +58,7 @@ schedule migrations.
 
 - **ADR-0209** — the north-star bearing this feature implements, now carrying the
   pilot outcome and the ratchet.
-- **`orbit-cli/src/command/operation.rs`** — the pre-existing "commands as data"
+- **`crates/orbit-cli/src/command/operation.rs`** — the pre-existing "commands as data"
   table for *top-level CLI dispatch* (runtime need, audit metadata, JSON error
   preference). Same instinct, different axis: it declares cross-cutting policy
   per top-level command, where this feature declares the operation itself. The
