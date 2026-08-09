@@ -3,7 +3,7 @@ summary: "Agent Families — Decisions"
 type: design
 title: "Agent Families — Decisions"
 owner: grok
-last_updated: 2026-08-01
+last_updated: 2026-08-09
 last_validated: 2026-07-27
 status: Draft
 feature: agent-families
@@ -106,17 +106,18 @@ Narrative lives in the ADR store — retrieve it with `orbit tool run orbit.adr.
 
 ## ADR-0213 — Flatten crews to one provider-model assignment
 
-**Status:** Accepted · 2026-07-11 · [ORB-10130] · supersedes ADR-0154
+**Status:** Accepted · 2026-07-11 · [ORB-10130] · amended by ADR-0330 and [ORB-10620] · supersedes ADR-0154
 
 **Context.** Named crews carried separate planner, implementer, and reviewer assignments, but production crews were homogeneous and only implementer was on the primary ship path. Role labels still matter for prompts and telemetry; three independent model-selection slots added configuration and persistence complexity without selecting distinct behavior.
 
-**Decision.** A crew is one provider-model-backend assignment. Every activity role resolves to it; role labels remain descriptive, duel participant selection stays independent, and legacy three-role config is accepted by choosing implementer while warning when discarded roles diverge.
+**Decision.** A crew is one provider-model-backend assignment. Every activity role resolves to it and duel participant selection stays independent. ADR-0330 retires the former three-role crew tables: config loading rejects them with guidance to write the flat `model`, `provider`, and `backend` fields.
 
 **Consequences.**
 - Per-task and default crew selection directly choose one provider-model binding.
 - Run records and projections expose one crew model; legacy SQLite role columns remain nullable for compatibility.
-- Existing homogeneous legacy crew configuration continues to load without behavior changes.
-- Cost: deliberately heterogeneous legacy crews collapse to their implementer assignment and require a warning-guided config rewrite; cross-provider review must use duel machinery or a future explicit mechanism.
+- Cost: workspaces using the retired role-table schema must rewrite their crew entries before config can load; cross-provider review must use duel machinery or a future explicit mechanism.
+
+- **ADR-0330 — Retire crew role slots and role-based model resolution** — Proposed.
 
 ## Task References
 
@@ -125,5 +126,6 @@ Narrative lives in the ADR store — retrieve it with `orbit tool run orbit.adr.
 - ORB-00072: Make duel-plan agent pool and per-family model configurable via `[duel]`.
 - ORB-00080: Collapse agent identity to family; isolate model strings to invocation surface.
 - ORB-10130: Flatten each crew to one provider-model assignment.
+- ORB-10620: Reject legacy crew role sub-tables at config load.
 
 Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.
