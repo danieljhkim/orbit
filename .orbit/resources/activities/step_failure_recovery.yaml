@@ -30,6 +30,10 @@ spec:
       max_attempts:
         type: integer
         minimum: 1
+      # Injected by the recovery dispatcher only. It records that this system
+      # activity must resolve workflow.system_crew into its crew input.
+      system_crew:
+        type: boolean
   # Advisory reporting surface only — never a contract anything depends on.
   #
   # Nothing consumes these fields. A step's `recovery_activity` has no step id,
@@ -201,9 +205,8 @@ spec:
     - orbit
     - rg
   on_denial: terminate
-  # The reviewer role remains a prompt and telemetry label. The executor
-  # resolves this named recovery activity through the failed run's durable
-  # provider lane: Codex -> terra and Claude -> sonnet.
+  # The reviewer role remains a prompt and telemetry label. Dispatch supplies
+  # the configured workflow.system_crew as an explicit crew input.
   role: reviewer
   # One hour accommodates provider startup plus networked git/PR operations
   # and a resumed pipeline while retaining a hard terminal bound. This bound is

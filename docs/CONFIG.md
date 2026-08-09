@@ -48,10 +48,12 @@ The workspace identity file `.orbit/config.yaml` is a separate artifact (it stor
 [workflow]
 base_branch = "main"        # default merge-base for ship
 default_crew = "sol"        # fallback crew when a task has no `crew` set
+system_crew = "qa"           # recovery and failed-run-triage crew
 ```
 
 - **`base_branch`** — the branch `orbit run ship` rebases against and targets with PRs. Override per-invocation with `--base <branch>`. If your repo uses a two-branch pattern like this repo does (`main` = release, `agent-main` = dev integration), set `base_branch = "agent-main"`.
 - **`default_crew`** — name of the crew under `[crews.<name>]` used for any task whose own `crew` field is unset. Must match a defined crew or config load fails. See [Per-task crew override](#per-task-crew-override) for how individual tasks select a different crew.
+- **`system_crew`** — name of the crew for `step_failure_recovery` and `triage_failed_runs`; defaults to `qa`, which `orbit init` seeds when it can configure an agent. It is resolved at every dispatch through the activities' explicit crew input, so it does not inherit a failed task's crew or the workspace default. A missing or unusable crew leaves the original failed step failed and emits a diagnostic naming `workflow.system_crew` and the configured crew.
 
 ---
 
@@ -81,24 +83,6 @@ tags = ["implementation", "review"]
 Fresh `orbit init` configuration advertises only detected provider CLIs. Claude seeds `opus`, `sonnet`, and `fable`; Codex seeds `sol`, `terra`, and `luna`; Gemini seeds `gemini`; and Grok seeds `grok`. When Codex or Claude is available, `qa` uses Terra or Sonnet respectively. Every generated entry uses the CLI backend. If no supported provider CLI is detected, init leaves both the crew registry and `workflow.default_crew` unset instead of writing an unusable provider.
 
 You can define any number of crews. Set the workspace-wide fallback with `workflow.default_crew`; assign a specific crew to individual tasks via the [per-task crew override](#per-task-crew-override). Crews are validated at load time: each crew must have non-empty `model`, `provider`, and `backend`; `workflow.default_crew` must name a defined crew.
-
-### Step-failure recovery crews
-
-`step_failure_recovery` is intentionally cheaper than a normal implementation
-attempt. It keeps the failed run's persisted provider lane and selects the
-configured middleweight crew in that lane: Codex runs recovery through
-`terra`; Claude runs it through `sonnet`. This mapping applies even if the
-failed task used `sol`, `opus`, or a lower-tier crew. The reviewer role on the
-activity remains a prompt and telemetry label; it does not select the recovery
-model.
-
-Both mapped crews must exist and remain usable for their own provider
-(`provider`, non-empty `model`, and `backend = "cli"`). A missing or
-cross-provider `terra`/`sonnet` fails recovery with an actionable diagnostic;
-Orbit preserves the original failed-step outcome and never changes provider
-families or escalates back to the implementation model. The recovery
-invocation trace records the selected provider and model separately for token
-and cost attribution.
 
 Crew metadata is canonical runtime data, not display-only TOML. Orbit trims
 `description` (blank becomes absent), trims each tag, drops blank tags, and stores

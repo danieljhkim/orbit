@@ -258,6 +258,7 @@ pub(crate) struct OrbitRuntimeSettings {
     routines_source: bool,
     crews: std::collections::BTreeMap<String, Crew>,
     default_crew: Option<String>,
+    system_crew: String,
 }
 
 impl OrbitRuntimeSettings {
@@ -273,6 +274,7 @@ impl OrbitRuntimeSettings {
         routines_source: bool,
         crews: std::collections::BTreeMap<String, Crew>,
         default_crew: Option<String>,
+        system_crew: String,
     ) -> Self {
         Self {
             persistence,
@@ -285,6 +287,7 @@ impl OrbitRuntimeSettings {
             routines_source,
             crews,
             default_crew,
+            system_crew,
         }
     }
 
@@ -314,6 +317,10 @@ impl OrbitRuntimeSettings {
 
     pub(crate) fn default_crew(&self) -> Option<&str> {
         self.default_crew.as_deref()
+    }
+
+    pub(crate) fn system_crew(&self) -> &str {
+        &self.system_crew
     }
 }
 

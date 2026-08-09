@@ -29,6 +29,9 @@ enabled = true
 # Default base branch for `orbit run ship`.
 # Override per-invocation with `--base <branch>`.
 base_branch = "main"
+# Crew used by bounded system activities such as recovery and failed-run triage.
+# `orbit init` seeds the default `qa` crew whenever it detects a supported CLI.
+system_crew = "qa"
 
 [runtime]
 # `backend` selects the v2 `agent_loop` execution backend: "cli" | "http" | "auto".

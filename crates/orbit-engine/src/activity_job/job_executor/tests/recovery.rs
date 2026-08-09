@@ -227,7 +227,7 @@ fn recovery_agent_loop_uses_reviewer_role_config() {
         None,
     ));
 
-    let overridden = role_overridden_recovery_spec(&recovery, &ctx)
+    let overridden = role_overridden_recovery_spec(&recovery, &ctx, &json!({}))
         .expect("generic recovery role resolution should succeed")
         .expect("role-tagged recovery should resolve");
 
@@ -251,7 +251,7 @@ fn recovery_agent_loop_without_reviewer_config_keeps_inline_defaults() {
         None,
     ));
 
-    let overridden = role_overridden_recovery_spec(&recovery, &ctx)
+    let overridden = role_overridden_recovery_spec(&recovery, &ctx, &json!({}))
         .expect("generic recovery inline fallback should succeed")
         .expect("role-tagged recovery should still produce dispatch spec");
 
@@ -283,9 +283,13 @@ fn step_failure_recovery_uses_the_lane_middleweight_config() {
             Some("inline-model"),
         ));
 
-        let overridden = role_overridden_recovery_spec(&recovery, &ctx)
-            .expect("middleweight recovery config should resolve")
-            .expect("agent loop recovery should produce a dispatch spec");
+        let overridden = role_overridden_recovery_spec(
+            &recovery,
+            &ctx,
+            &json!({ "crew": "qa", "crew_config_key": "workflow.system_crew" }),
+        )
+        .expect("middleweight recovery config should resolve")
+        .expect("agent loop recovery should produce a dispatch spec");
         let ActivityV2Spec::AgentLoop(spec) = overridden else {
             panic!("expected agent_loop recovery spec");
         };
@@ -307,10 +311,10 @@ fn step_failure_recovery_requires_a_middleweight_config() {
         Some("gpt-5.6-sol"),
     ));
 
-    let err = role_overridden_recovery_spec(&recovery, &ctx)
+    let err = role_overridden_recovery_spec(&recovery, &ctx, &json!({ "system_crew": true }))
         .expect_err("step recovery must not fall back to its implementation crew");
 
-    assert!(err.to_string().contains("durable provider lane"));
+    assert!(err.to_string().contains("workflow.system_crew"));
 }
 
 #[test]
@@ -931,15 +935,25 @@ impl V2RuntimeHost for RecoveryHost {
             .cloned()
     }
 
-    fn recovery_agent_crew_config(&self, _run_id: &str) -> Result<AgentRoleConfig, DispatchError> {
+    fn system_crew_for_dispatch(&self) -> Option<String> {
+        Some("qa".to_string())
+    }
+
+    fn explicit_agent_crew_config_for_input(
+        &self,
+        input: &Value,
+    ) -> Result<Option<AgentRoleConfig>, DispatchError> {
+        if input.get("crew").and_then(Value::as_str).is_none() {
+            return Ok(None);
+        }
         self.recovery_config
             .lock()
             .expect("recovery config lock")
             .clone()
+            .map(Some)
             .ok_or_else(|| {
                 DispatchError::JobValidation(
-                    "step_failure_recovery requires a durable provider lane in this test host"
-                        .to_string(),
+                    "workflow.system_crew test crew is unavailable".to_string(),
                 )
             })
     }

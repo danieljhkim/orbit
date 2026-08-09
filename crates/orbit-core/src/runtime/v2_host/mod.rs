@@ -26,10 +26,10 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
 
-use orbit_common::types::activity_job::{AgentRole, Backend, Provider};
+use orbit_common::types::activity_job::AgentRole;
 use orbit_common::types::{
-    InvocationTrace, LearningInjectionCaps, LearningInjectionState, LearningReminder, RoleSlot,
-    UNRESTRICTED_FS_PROFILE, resolve_crew,
+    InvocationTrace, LearningInjectionCaps, LearningInjectionState, LearningReminder,
+    UNRESTRICTED_FS_PROFILE,
 };
 use orbit_engine::{AgentRoleConfig, EnvironmentHost};
 use orbit_engine::{DispatchError, ResolvedCliExecutor, ResolvedSandbox, V2RuntimeHost};
@@ -296,76 +296,8 @@ impl V2RuntimeHost for OrbitRuntime {
         )
     }
 
-    fn recovery_agent_crew_config(&self, run_id: &str) -> Result<AgentRoleConfig, DispatchError> {
-        let run = self.get_job_run_backend(run_id).map_err(|error| {
-            DispatchError::JobExecution(format!(
-                "read persisted provider lane for step_failure_recovery run `{run_id}`: {error}"
-            ))
-        })?
-        .ok_or_else(|| {
-            DispatchError::JobValidation(format!(
-                "step_failure_recovery requires a persisted provider lane for run `{run_id}`; no run record was found"
-            ))
-        })?;
-
-        let source_crew_name = run
-            .resolved_crew
-            .as_deref()
-            .map(str::trim)
-            .filter(|crew| !crew.is_empty())
-            .ok_or_else(|| {
-                DispatchError::JobValidation(format!(
-                    "step_failure_recovery requires a persisted resolved crew for run `{run_id}`; no provider lane is available"
-                ))
-            })?;
-        let source_crew = resolve_crew(source_crew_name, self.context.settings().crews()).map_err(
-            |error| {
-                DispatchError::JobValidation(format!(
-                    "step_failure_recovery cannot resolve persisted crew `{source_crew_name}` for run `{run_id}`: {error}; refusing to select a provider from ambient CLI availability"
-                ))
-            },
-        )?;
-        let provider = Provider::parse(&source_crew.assignment.provider).map_err(|error| {
-            DispatchError::JobValidation(format!(
-                "step_failure_recovery cannot determine the persisted provider lane from crew `{source_crew_name}` for run `{run_id}`: {error}"
-            ))
-        })?;
-        let required_crew = match provider {
-            Provider::Codex => "terra",
-            Provider::Claude => "sonnet",
-            other => {
-                return Err(DispatchError::JobValidation(format!(
-                    "step_failure_recovery has no configured middleweight crew for persisted provider `{}` on run `{run_id}`; required crew mapping is codex -> terra or claude -> sonnet",
-                    other.as_str()
-                )));
-            }
-        };
-        let recovery_crew = resolve_crew(required_crew, self.context.settings().crews()).map_err(
-            |error| {
-                DispatchError::JobValidation(format!(
-                    "step_failure_recovery requires provider `{}` crew `{required_crew}` for run `{run_id}`, but it is unavailable or invalid: {error}",
-                    provider.as_str()
-                ))
-            },
-        )?;
-        let config = crate::runtime::engine::environment_host::typed_role_config_from_assignment(
-            AgentRole::Reviewer,
-            &recovery_crew.assignment,
-        );
-        let usable = config.provider == Some(provider)
-            && config
-                .model
-                .as_deref()
-                .is_some_and(|model| !model.trim().is_empty())
-            && config.backend == Some(Backend::Cli);
-        if !usable {
-            return Err(DispatchError::JobValidation(format!(
-                "step_failure_recovery requires provider `{}` crew `{required_crew}` with provider `{}`, a non-empty model, and backend `cli` for run `{run_id}`; configured crew is unusable",
-                provider.as_str(),
-                provider.as_str(),
-            )));
-        }
-        Ok(config)
+    fn system_crew_for_dispatch(&self) -> Option<String> {
+        Some(self.context.settings().system_crew().to_string())
     }
 
     fn explicit_agent_crew_config_for_input(
@@ -380,11 +312,31 @@ impl V2RuntimeHost for OrbitRuntime {
         else {
             return Ok(None);
         };
+        let config_key = input
+            .get("crew_config_key")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty());
+        let (crew_name, config_key) = match config_key {
+            Some("workflow.system_crew") => (
+                self.context.settings().system_crew(),
+                Some("workflow.system_crew"),
+            ),
+            Some(other) => {
+                return Err(DispatchError::JobValidation(format!(
+                    "explicit activity crew `{explicit}` names unsupported configuration key `{other}`"
+                )));
+            }
+            None => (explicit, None),
+        };
         let crew = self
-            .resolve_crew_for_task(Some(explicit), None)
+            .resolve_crew_for_task(Some(crew_name), None)
             .map_err(|error| {
+                let source = config_key
+                    .map(|key| format!("configured by `{key}`"))
+                    .unwrap_or_else(|| "from activity input".to_string());
                 DispatchError::JobValidation(format!(
-                    "explicit activity crew '{explicit}' cannot be resolved: {error}"
+                    "explicit activity crew `{crew_name}` ({source}) cannot be resolved or used: {error}"
                 ))
             })?;
         Ok(Some(
