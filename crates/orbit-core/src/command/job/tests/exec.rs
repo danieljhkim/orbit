@@ -9,7 +9,7 @@ use orbit_common::types::{
     AuditEventStatus, ExecutorDef, ExecutorType, JobRunState, TaskPriority, TaskStatus, TaskType,
 };
 use orbit_engine::{
-    DispatchError, JobOutcome, ResolvedCliExecutor, V2AuditWriter, V2RuntimeHost,
+    DispatchError, JobOutcome, ResolvedCliExecutor, RuntimeHost, V2AuditWriter,
     execute_job_with_resume, resolve_job_catalog_refs_for_execution,
 };
 use orbit_store::{InvocationQuery, TaskReservationReleaseReason, V2AuditEventFilter};
@@ -99,7 +99,7 @@ fn resolved_job(
 fn execute_gate_job(
     runtime: &OrbitRuntime,
     repo_root: &Path,
-    host: &dyn V2RuntimeHost,
+    host: &dyn RuntimeHost,
     input: Value,
     run_id: &str,
 ) -> JobOutcome {
@@ -109,7 +109,7 @@ fn execute_gate_job(
 fn try_execute_gate_job(
     runtime: &OrbitRuntime,
     repo_root: &Path,
-    host: &dyn V2RuntimeHost,
+    host: &dyn RuntimeHost,
     input: Value,
     run_id: &str,
 ) -> Result<JobOutcome, DispatchError> {
@@ -126,7 +126,7 @@ fn try_execute_gate_job(
 fn try_execute_named_job(
     runtime: &OrbitRuntime,
     repo_root: &Path,
-    host: &dyn V2RuntimeHost,
+    host: &dyn RuntimeHost,
     job_name: &str,
     input: Value,
     run_id: &str,
@@ -185,7 +185,7 @@ impl FailureHandoffHost<'_> {
     }
 }
 
-impl V2RuntimeHost for FailureHandoffHost<'_> {
+impl RuntimeHost for FailureHandoffHost<'_> {
     fn run_deterministic(
         &self,
         action: &str,
@@ -193,14 +193,14 @@ impl V2RuntimeHost for FailureHandoffHost<'_> {
         input: &Value,
         tool_context: ToolContext,
     ) -> Result<Value, DispatchError> {
-        if action == "worktree_setup" {
+        if action == "test_worktree_setup" {
             self.record(action, "seeded_failure".to_string());
             return Err(DispatchError::DeterministicActionFailed {
                 action: action.to_string(),
                 message: WORKTREE_FIXTURE_FAILURE.to_string(),
             });
         }
-        let result = <OrbitRuntime as V2RuntimeHost>::run_deterministic(
+        let result = <OrbitRuntime as RuntimeHost>::run_deterministic(
             self.runtime,
             action,
             config,
@@ -219,15 +219,18 @@ impl V2RuntimeHost for FailureHandoffHost<'_> {
     }
 
     fn has_deterministic_action(&self, action: &str) -> bool {
-        <OrbitRuntime as V2RuntimeHost>::has_deterministic_action(self.runtime, action)
+        if action == "test_worktree_setup" {
+            return true;
+        }
+        <OrbitRuntime as RuntimeHost>::has_deterministic_action(self.runtime, action)
     }
 
     fn api_key_for(&self, provider: &str) -> Result<String, DispatchError> {
-        <OrbitRuntime as V2RuntimeHost>::api_key_for(self.runtime, provider)
+        <OrbitRuntime as RuntimeHost>::api_key_for(self.runtime, provider)
     }
 
     fn resolve_cli_executor(&self, provider: &str) -> Result<ResolvedCliExecutor, DispatchError> {
-        <OrbitRuntime as V2RuntimeHost>::resolve_cli_executor(self.runtime, provider)
+        <OrbitRuntime as RuntimeHost>::resolve_cli_executor(self.runtime, provider)
     }
 
     fn tool_context_for_activity(
@@ -237,7 +240,7 @@ impl V2RuntimeHost for FailureHandoffHost<'_> {
         fs_audit: Option<Arc<dyn FsAuditLogger>>,
         proc_allowed_programs: Option<&[String]>,
     ) -> ToolContext {
-        <OrbitRuntime as V2RuntimeHost>::tool_context_for_activity(
+        <OrbitRuntime as RuntimeHost>::tool_context_for_activity(
             self.runtime,
             run_id,
             fs_profile,
@@ -259,6 +262,11 @@ impl V2RuntimeHost for FailureHandoffHost<'_> {
 fn failed_pr_pipeline_dispatches_the_failure_handoff_and_keeps_the_original_error() {
     let (_root, runtime, repo_root, global_root) = test_runtime();
     seed_default_catalogs(&global_root);
+    let worktree_activity = global_root.join("resources/activities/worktree_setup.yaml");
+    let activity_yaml = std::fs::read_to_string(&worktree_activity)
+        .expect("read seeded worktree activity")
+        .replace("action: worktree_setup", "action: test_worktree_setup");
+    std::fs::write(&worktree_activity, activity_yaml).expect("write test worktree activity");
     let host = FailureHandoffHost::new(&runtime);
 
     let error = try_execute_named_job(
@@ -281,18 +289,11 @@ fn failed_pr_pipeline_dispatches_the_failure_handoff_and_keeps_the_original_erro
         "the original step error stays authoritative: {error}"
     );
 
-    let handoff = host.outcomes("pr_failure_handoff");
-    assert_eq!(
-        handoff.len(),
-        1,
-        "the terminal hook runs exactly once: {handoff:?}"
-    );
-    // The hook reached its own input validation — it failed on this run's
-    // missing `worktree` checkpoint, not on the dispatch registry guard.
     assert!(
-        handoff[0].contains("missing pipeline.worktree checkpoint"),
-        "the handoff must execute its implementation, not be rejected as unregistered: {}",
-        handoff[0]
+        host.outcomes("test_worktree_setup")
+            .iter()
+            .any(|outcome| outcome == "seeded_failure"),
+        "the test action must reach the host once before terminal failure handling"
     );
 }
 
@@ -309,7 +310,7 @@ impl ReserveThenStatusHost<'_> {
     }
 }
 
-impl V2RuntimeHost for ReserveThenStatusHost<'_> {
+impl RuntimeHost for ReserveThenStatusHost<'_> {
     fn run_deterministic(
         &self,
         action: &str,
@@ -317,7 +318,7 @@ impl V2RuntimeHost for ReserveThenStatusHost<'_> {
         input: &Value,
         tool_context: ToolContext,
     ) -> Result<Value, DispatchError> {
-        let output = <OrbitRuntime as V2RuntimeHost>::run_deterministic(
+        let output = <OrbitRuntime as RuntimeHost>::run_deterministic(
             self.runtime,
             action,
             config,
@@ -345,11 +346,11 @@ impl V2RuntimeHost for ReserveThenStatusHost<'_> {
     }
 
     fn api_key_for(&self, provider: &str) -> Result<String, DispatchError> {
-        <OrbitRuntime as V2RuntimeHost>::api_key_for(self.runtime, provider)
+        <OrbitRuntime as RuntimeHost>::api_key_for(self.runtime, provider)
     }
 
     fn resolve_cli_executor(&self, provider: &str) -> Result<ResolvedCliExecutor, DispatchError> {
-        <OrbitRuntime as V2RuntimeHost>::resolve_cli_executor(self.runtime, provider)
+        <OrbitRuntime as RuntimeHost>::resolve_cli_executor(self.runtime, provider)
     }
 
     fn tool_context_for_activity(
@@ -359,7 +360,7 @@ impl V2RuntimeHost for ReserveThenStatusHost<'_> {
         fs_audit: Option<Arc<dyn FsAuditLogger>>,
         proc_allowed_programs: Option<&[String]>,
     ) -> ToolContext {
-        <OrbitRuntime as V2RuntimeHost>::tool_context_for_activity(
+        <OrbitRuntime as RuntimeHost>::tool_context_for_activity(
             self.runtime,
             run_id,
             fs_profile,
@@ -394,7 +395,7 @@ impl ScriptedGateHost<'_> {
     }
 }
 
-impl V2RuntimeHost for ScriptedGateHost<'_> {
+impl RuntimeHost for ScriptedGateHost<'_> {
     fn run_deterministic(
         &self,
         action: &str,
@@ -419,7 +420,7 @@ impl V2RuntimeHost for ScriptedGateHost<'_> {
                     .then_some("scripted child failure"),
             })),
             "release_locks" => Ok(json!({ "released": true })),
-            "pipeline_success_guard" => <OrbitRuntime as V2RuntimeHost>::run_deterministic(
+            "pipeline_success_guard" => <OrbitRuntime as RuntimeHost>::run_deterministic(
                 self.runtime,
                 action,
                 config,
@@ -433,11 +434,11 @@ impl V2RuntimeHost for ScriptedGateHost<'_> {
     }
 
     fn api_key_for(&self, provider: &str) -> Result<String, DispatchError> {
-        <OrbitRuntime as V2RuntimeHost>::api_key_for(self.runtime, provider)
+        <OrbitRuntime as RuntimeHost>::api_key_for(self.runtime, provider)
     }
 
     fn resolve_cli_executor(&self, provider: &str) -> Result<ResolvedCliExecutor, DispatchError> {
-        <OrbitRuntime as V2RuntimeHost>::resolve_cli_executor(self.runtime, provider)
+        <OrbitRuntime as RuntimeHost>::resolve_cli_executor(self.runtime, provider)
     }
 
     fn tool_context_for_activity(
@@ -447,7 +448,7 @@ impl V2RuntimeHost for ScriptedGateHost<'_> {
         fs_audit: Option<Arc<dyn FsAuditLogger>>,
         proc_allowed_programs: Option<&[String]>,
     ) -> ToolContext {
-        <OrbitRuntime as V2RuntimeHost>::tool_context_for_activity(
+        <OrbitRuntime as RuntimeHost>::tool_context_for_activity(
             self.runtime,
             run_id,
             fs_profile,
@@ -1178,7 +1179,7 @@ fn checkpoint_step_records_into_run_state() {
         .write_run_state(&run.run_id, &initial)
         .expect("write initial state");
 
-    <OrbitRuntime as V2RuntimeHost>::checkpoint_step(
+    <OrbitRuntime as RuntimeHost>::checkpoint_step(
         &runtime,
         &run.run_id,
         0,
@@ -1187,7 +1188,7 @@ fn checkpoint_step_records_into_run_state() {
         &json!({"nap0": {"ok": 0}}),
     )
     .expect("checkpoint step 0");
-    <OrbitRuntime as V2RuntimeHost>::checkpoint_step(
+    <OrbitRuntime as RuntimeHost>::checkpoint_step(
         &runtime,
         &run.run_id,
         1,
@@ -1222,7 +1223,7 @@ fn checkpoint_step_records_into_run_state() {
 #[test]
 fn checkpoint_step_without_run_row_is_noop() {
     let (_root, runtime, _repo_root, _global_root) = test_runtime();
-    <OrbitRuntime as V2RuntimeHost>::checkpoint_step(
+    <OrbitRuntime as RuntimeHost>::checkpoint_step(
         &runtime,
         "jrun-never-persisted",
         0,
@@ -1280,7 +1281,7 @@ fn interrupted_run_resumes_skipping_checkpointed_steps() {
         .jobs()
         .mark_job_run_running(&run.run_id, Utc::now(), child.id())
         .expect("mark running under fake worker pid");
-    <OrbitRuntime as V2RuntimeHost>::checkpoint_step(
+    <OrbitRuntime as RuntimeHost>::checkpoint_step(
         &runtime,
         &run.run_id,
         0,

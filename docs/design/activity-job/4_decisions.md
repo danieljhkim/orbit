@@ -858,6 +858,14 @@ Narrative lives in the ADR store — retrieve it with `orbit tool run orbit.adr.
 - Catalog coverage stays because YAML still provides external string inputs.
 - Cost: adding an action must choose ownership at the shared declaration boundary.
 
+## ADR-0341 — Job execution crosses one RuntimeHost boundary
+
+**Status:** Proposed · 2026-08 · [ORB-10633]
+
+Narrative lives in the ADR store — retrieve it with `orbit tool run orbit.adr.show --input '{"id":"ADR-0341"}'`.
+
+---
+
 ## Task References
 
 - **[ORB-10644]** — Refuse to open or promote a PR against a base branch that is gone from `origin` or has already landed on the declared landing branch ([ADR-0336], extending [ADR-0290]'s marker rule to the base itself).

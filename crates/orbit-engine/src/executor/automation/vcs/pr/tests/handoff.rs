@@ -6,7 +6,7 @@ use serde_json::{Value, json};
 use super::super::open::pr_open;
 use super::super::promote::pr_promote;
 use super::test_support::*;
-use crate::context::TaskReadHost;
+use crate::context::RuntimeHost;
 use crate::executor::automation::vcs::failure::pr_failure_handoff;
 use crate::executor::automation::vcs::freshness::{prepare_pr_handoff, rebase_pr_branch};
 use crate::executor::automation::vcs::push::push_batch_changes;

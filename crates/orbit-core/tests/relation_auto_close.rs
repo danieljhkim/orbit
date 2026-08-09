@@ -4,7 +4,7 @@
 use chrono::{TimeZone, Utc};
 use orbit_common::types::{FrictionStatus, TaskStatus};
 use orbit_core::OrbitRuntime;
-use orbit_engine::{TaskAutomationUpdate, TaskWriteHost};
+use orbit_engine::{RuntimeHost, TaskAutomationUpdate};
 use orbit_store::friction_store::{
     FrictionAddParams, add_friction, resolve_friction_by_task, show_friction,
 };

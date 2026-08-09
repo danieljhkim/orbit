@@ -17,7 +17,7 @@ use crate::activity_job::dispatcher::DispatchError;
 use orbit_tools::ToolContext;
 use serde_json::Value;
 
-use crate::V2RuntimeHost;
+use crate::RuntimeHost;
 use orbit_agent::loop_engine::{ContentBlock, Session};
 
 struct ReplayEnvGuard {
@@ -52,7 +52,7 @@ impl Drop for ReplayEnvGuard {
 
 struct ReplayHost;
 
-impl V2RuntimeHost for ReplayHost {
+impl RuntimeHost for ReplayHost {
     fn run_deterministic(
         &self,
         _action: &str,
@@ -95,7 +95,7 @@ struct LearningReplayHost {
     reminders: Vec<LearningReminder>,
 }
 
-impl V2RuntimeHost for LearningReplayHost {
+impl RuntimeHost for LearningReplayHost {
     fn run_deterministic(
         &self,
         _action: &str,

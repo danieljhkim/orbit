@@ -3,7 +3,7 @@ use std::path::Path;
 use orbit_common::types::OrbitError;
 use serde_json::{Value, json};
 
-use crate::context::DeterministicActionHost;
+use crate::context::RuntimeHost;
 use crate::executor::automation::input::{canonicalize_existing_dir, input_string_field};
 
 use super::super::git::{
@@ -15,9 +15,7 @@ use super::resolve_shared_worktree_path;
 const DEFAULT_BASE: &str = "main";
 const MAX_REBASE_RETRY_ATTEMPTS: usize = 2;
 
-pub(in crate::executor::automation) fn merge_batch_worktree_into_base<
-    H: DeterministicActionHost + ?Sized,
->(
+pub(in crate::executor::automation) fn merge_batch_worktree_into_base<H: RuntimeHost + ?Sized>(
     host: &H,
     input: &Value,
 ) -> Result<Value, OrbitError> {

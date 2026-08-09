@@ -1,12 +1,12 @@
 use orbit_common::types::{OrbitError, TaskStatus};
 use serde_json::{Value, json};
 
-use crate::context::{DeterministicActionHost, TaskActivityUpdate, TaskHost};
+use crate::context::{RuntimeHost, TaskActivityUpdate};
 
 use super::StateExecutionContext;
 use super::input::{input_string_field, required_input_string};
 
-pub(super) fn update_task<H: DeterministicActionHost + TaskHost + ?Sized>(
+pub(super) fn update_task<H: RuntimeHost + ?Sized>(
     host: &H,
     input: &Value,
     state_context: Option<&StateExecutionContext>,
@@ -51,7 +51,7 @@ pub(super) fn update_task<H: DeterministicActionHost + TaskHost + ?Sized>(
     Ok(json!({}))
 }
 
-fn activity_identity<H: DeterministicActionHost + ?Sized>(
+fn activity_identity<H: RuntimeHost + ?Sized>(
     host: &H,
     input: &Value,
     state_context: Option<&StateExecutionContext>,

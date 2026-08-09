@@ -14,10 +14,7 @@ use orbit_tools::ToolContext;
 use serde_json::{Value, json};
 use tempfile::{TempDir, tempdir};
 
-use crate::context::{
-    DeterministicActionHost, PrConfig, TaskActivityUpdate, TaskAutomationUpdate, TaskReadHost,
-    TaskWriteHost,
-};
+use crate::context::{PrConfig, RuntimeHost, TaskActivityUpdate, TaskAutomationUpdate};
 
 use super::super::super::freshness::BranchFreshness;
 
@@ -123,7 +120,7 @@ impl PrOpenTestHost {
     }
 }
 
-impl TaskReadHost for PrOpenTestHost {
+impl RuntimeHost for PrOpenTestHost {
     fn get_task(&self, task_id: &str) -> Result<Task, OrbitError> {
         self.tasks
             .lock()
@@ -185,9 +182,7 @@ impl TaskReadHost for PrOpenTestHost {
             .cloned()
             .collect())
     }
-}
 
-impl TaskWriteHost for PrOpenTestHost {
     fn start_task(
         &self,
         _task_id: &str,
@@ -265,9 +260,7 @@ impl TaskWriteHost for PrOpenTestHost {
         }
         Ok(())
     }
-}
 
-impl DeterministicActionHost for PrOpenTestHost {
     fn record_event(&self, _event: OrbitEvent) -> Result<(), OrbitError> {
         Ok(())
     }

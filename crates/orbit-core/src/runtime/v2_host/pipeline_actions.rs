@@ -1,7 +1,7 @@
 use orbit_common::types::{
     AuditEventStatus, Role, TaskStatus, audit_execution_id, optional_string_list_alias,
 };
-use orbit_engine::{DispatchError, ensure_task_can_enter_workflow};
+use orbit_engine::DispatchError;
 use orbit_store::AuditEventInsertParams;
 use orbit_tools::ToolContext;
 use serde_json::Value;
@@ -197,7 +197,7 @@ fn stale_gate_admission_noop(
     let mut admission_errors = Vec::new();
 
     for task_id in &task_ids {
-        match ensure_task_can_enter_workflow(runtime, task_id, workflow) {
+        match runtime.ensure_task_can_enter_workflow_as_system(task_id, workflow) {
             Ok(task) => {
                 task_statuses.push(serde_json::json!({
                     "task_id": task.id,

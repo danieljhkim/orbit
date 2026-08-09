@@ -1,7 +1,7 @@
 use super::super::merge::merge_batch_pr;
 use super::test_support::*;
 
-use crate::context::TaskReadHost;
+use crate::context::RuntimeHost;
 use orbit_common::types::TaskStatus;
 use serde_json::json;
 

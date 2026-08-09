@@ -697,7 +697,7 @@ fn recovery_agent_loop_spec(
     }
 }
 
-fn recovery_exec_ctx<'a>(host: &'a dyn V2RuntimeHost) -> ExecCtx<'a> {
+fn recovery_exec_ctx<'a>(host: &'a dyn RuntimeHost) -> ExecCtx<'a> {
     ExecCtx {
         run_id: "run-recovery-role".to_string(),
         audit: std::sync::Arc::new(test_writer("run-recovery-role")),
@@ -810,7 +810,7 @@ impl RecoveryHost {
     }
 }
 
-impl V2RuntimeHost for RecoveryHost {
+impl RuntimeHost for RecoveryHost {
     fn run_deterministic(
         &self,
         action: &str,

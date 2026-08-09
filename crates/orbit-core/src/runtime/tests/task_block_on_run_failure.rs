@@ -5,9 +5,7 @@
 
 use chrono::Utc;
 use orbit_common::types::{JobRun, JobRunState, JobTargetType, TaskPriority, TaskStatus, TaskType};
-use orbit_engine::{
-    TaskAutomationUpdate, TaskWriteHost, WORKFLOW_RUN_FAILED_EVENT, ensure_task_can_enter_workflow,
-};
+use orbit_engine::{RuntimeHost, TaskAutomationUpdate, WORKFLOW_RUN_FAILED_EVENT};
 use orbit_store::{JobRunStepParams, TaskCreateParams, TaskReservationReleaseReason};
 use tempfile::tempdir;
 
@@ -342,7 +340,8 @@ fn blocked_task_is_rejected_by_workflow_admission() {
 
     // Backlog discovery / the ship sweep only pick up admittable statuses;
     // a blocked task is skipped because admission rejects it.
-    ensure_task_can_enter_workflow(&runtime, &task_id, "worktree_setup")
+    runtime
+        .ensure_task_can_enter_workflow_as_system(&task_id, "worktree_setup")
         .expect_err("blocked task must not be admissible into a workflow");
     runtime
         .admit_task_for_workflow_as_system(&task_id, "worktree_setup")

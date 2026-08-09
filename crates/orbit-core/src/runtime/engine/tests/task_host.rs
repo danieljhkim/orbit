@@ -9,7 +9,7 @@ use chrono::Utc;
 use orbit_common::types::activity_job::{ActivityV2Spec, DeterministicSpec};
 use orbit_common::types::{Task, TaskStatus};
 use orbit_engine::{
-    TaskActivityUpdate, TaskAutomationUpdate, TaskWriteHost, V2AuditWriter, V2DispatchInput,
+    RuntimeHost, TaskActivityUpdate, TaskAutomationUpdate, V2AuditWriter, V2DispatchInput,
 };
 use serde_json::{Value, json};
 use tempfile::tempdir;

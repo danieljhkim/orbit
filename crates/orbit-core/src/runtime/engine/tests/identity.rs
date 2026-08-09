@@ -4,13 +4,13 @@
 //! `ActivityExecutorRegistry`. [ORB-10395] deleted that registry, so the lookup
 //! now reads the executor def store directly. These tests pin that wiring: a
 //! `model_pair_override` seeded into the store must be observable through the
-//! public `DeterministicActionHost::resolved_agent_model_pair` surface.
+//! public `RuntimeHost::resolved_agent_model_pair` surface.
 
 use std::collections::HashMap;
 
 use chrono::Utc;
 use orbit_common::types::{AgentModelPair, ExecutorDef, ExecutorType, ModelPairOverride};
-use orbit_engine::DeterministicActionHost;
+use orbit_engine::RuntimeHost;
 
 use crate::OrbitRuntime;
 
@@ -47,7 +47,7 @@ fn resolved_agent_model_pair_reads_the_executor_def_store() {
         .expect("seed executor def");
 
     assert_eq!(
-        DeterministicActionHost::resolved_agent_model_pair(&runtime, "claude"),
+        RuntimeHost::resolved_agent_model_pair(&runtime, "claude"),
         Some(AgentModelPair::new("claude-orchestrator", "claude-helper"))
     );
 }
@@ -60,7 +60,7 @@ fn resolved_agent_model_pair_is_none_without_an_override() {
         .expect("seed executor def");
 
     assert_eq!(
-        DeterministicActionHost::resolved_agent_model_pair(&runtime, "codex"),
+        RuntimeHost::resolved_agent_model_pair(&runtime, "codex"),
         None
     );
 }
@@ -70,7 +70,7 @@ fn resolved_agent_model_pair_is_none_for_an_unregistered_executor() {
     let runtime = OrbitRuntime::in_memory().expect("build runtime");
 
     assert_eq!(
-        DeterministicActionHost::resolved_agent_model_pair(&runtime, "not-registered"),
+        RuntimeHost::resolved_agent_model_pair(&runtime, "not-registered"),
         None
     );
 }

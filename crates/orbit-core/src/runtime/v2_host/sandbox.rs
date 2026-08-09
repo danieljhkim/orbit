@@ -2,12 +2,12 @@ use std::path::Path;
 use std::path::PathBuf;
 
 use orbit_common::types::{ExecutorSandboxKind, ResolvedFsProfile, UNRESTRICTED_FS_PROFILE};
-use orbit_engine::EnvironmentHost;
+use orbit_engine::RuntimeHost;
 use orbit_engine::{DispatchError, ResolvedSandbox};
 
 use crate::OrbitRuntime;
 
-pub(super) fn resolve_executor_sandbox(
+pub(crate) fn resolve_executor_sandbox(
     runtime: &OrbitRuntime,
     provider: &str,
     fs_profile: Option<&str>,
@@ -158,7 +158,7 @@ fn append_codex_side_write_roots(
         return Ok(());
     }
 
-    let config = EnvironmentHost::agent_provider_config(runtime);
+    let config = RuntimeHost::agent_provider_config(runtime);
     let Some(raw_dirs) = config.get("writable_dirs_json") else {
         return Ok(());
     };
