@@ -93,12 +93,19 @@ pub(crate) const MIGRATIONS: &[Migration] = &[
         name: "routine_scheduler_schema",
         apply: super::apply_routine_scheduler_schema,
     },
+    // ORB-10680: hub friction records leave the Markdown tree for the
+    // host-global store, keyed by `(workspace_id, friction_id)`.
+    Migration {
+        version: 12,
+        name: "friction_records_sqlite",
+        apply: super::apply_friction_records_schema,
+    },
 ];
 
 /// Highest schema version this binary knows how to produce. Public for
 /// the future `orbit migrate` surface (P3.4), alongside
 /// [`AppliedMigration`] and the `Store` version accessors.
-pub const SUPPORTED_SCHEMA_VERSION: u32 = 11;
+pub const SUPPORTED_SCHEMA_VERSION: u32 = 12;
 
 const LEDGER_KEY_PREFIX: &str = "migration.v";
 

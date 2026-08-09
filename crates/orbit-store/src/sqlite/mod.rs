@@ -1,5 +1,6 @@
 pub(crate) mod audit_event_store;
 pub(crate) mod connection;
+pub mod friction_store;
 pub(crate) mod id_allocator;
 pub(crate) mod invocation_store;
 pub(crate) mod job_run_store;

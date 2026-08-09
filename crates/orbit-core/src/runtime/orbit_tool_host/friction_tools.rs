@@ -16,9 +16,8 @@ use orbit_common::types::{
     optional_raw_string, optional_string, required_string,
 };
 use orbit_store::friction_store::{
-    FrictionAddParams, FrictionListFilter, FrictionUpdateParams, StoredFrictionRecord,
-    add_friction, friction_stats, friction_tags, list_frictions, resolve_friction, show_friction,
-    update_friction,
+    FrictionAddParams, FrictionListFilter, FrictionStore, FrictionUpdateParams,
+    StoredFrictionRecord,
 };
 use serde_json::{Value, json};
 
@@ -45,6 +44,20 @@ pub(super) fn dispatch(
     }
 }
 
+/// Open the workspace-partitioned friction store this runtime writes through.
+///
+/// The record tables are host-global and keyed by `(workspace_id,
+/// friction_id)`, so the workspace ID — not the checkout path — is what scopes
+/// every read and write (L-0072). The checkout's `frictions/` directory still
+/// supplies the tag taxonomy and the legacy tree imported once.
+pub(crate) fn store_for(runtime: &OrbitRuntime) -> Result<FrictionStore, OrbitError> {
+    FrictionStore::open(
+        runtime.sqlite_store()?,
+        runtime.workspace_id()?,
+        runtime.data_root().join("frictions"),
+    )
+}
+
 fn add(runtime: &OrbitRuntime, input: Value, model: Option<String>) -> Result<Value, OrbitError> {
     let body = required_string(&input, &["body", "description"], "body")?;
     let title = optional_raw_string(&input, "title")?
@@ -59,25 +72,24 @@ fn add(runtime: &OrbitRuntime, input: Value, model: Option<String>) -> Result<Va
         .ok_or_else(|| {
             OrbitError::InvalidInput("orbit.friction.add requires `model`".to_string())
         })?;
-    let stored = add_friction(
-        &runtime.data_root().join("frictions"),
-        FrictionAddParams {
-            model,
-            title,
-            body,
-            tags,
-            during_task,
-            created_at: Utc::now(),
-        },
-    )?;
+    let stored = store_for(runtime)?.add(FrictionAddParams {
+        model,
+        title,
+        body,
+        tags,
+        during_task,
+        created_at: Utc::now(),
+    })?;
     record_to_json(stored)
 }
 
 fn list(runtime: &OrbitRuntime, input: Value) -> Result<Value, OrbitError> {
-    list_at_root(&runtime.data_root().join("frictions"), input)
+    list_in(&store_for(runtime)?, input)
 }
 
-pub(super) fn list_at_root(root: &std::path::Path, input: Value) -> Result<Value, OrbitError> {
+/// Translate the wire filter into the store filter, including the page, so
+/// SQLite decides which rows exist before any body is decoded.
+pub(super) fn list_in(store: &FrictionStore, input: Value) -> Result<Value, OrbitError> {
     let month_bounds = optional_string(&input, "month")?
         .map(|raw| parse_month_bounds(&raw))
         .transpose()?;
@@ -99,27 +111,25 @@ pub(super) fn list_at_root(root: &std::path::Path, input: Value) -> Result<Value
             .map(|raw| parse_timestamp("to", &raw))
             .transpose()?
             .or(month_to),
+        limit: optional_usize(&input, "limit")?,
+        offset: optional_usize(&input, "offset")?.unwrap_or(0),
     };
-    let limit = optional_usize(&input, "limit")?;
-    let offset = optional_usize(&input, "offset")?.unwrap_or(0);
-    let records = list_frictions(root, &filter)?;
     Ok(Value::Array(
-        records
+        store
+            .list(&filter)?
             .into_iter()
-            .skip(offset)
-            .take(limit.unwrap_or(usize::MAX))
             .map(record_to_json)
             .collect::<Result<Vec<_>, _>>()?,
     ))
 }
 
 fn show(runtime: &OrbitRuntime, input: Value) -> Result<Value, OrbitError> {
-    show_at_root(&runtime.data_root().join("frictions"), input)
+    show_in(&store_for(runtime)?, input)
 }
 
-pub(super) fn show_at_root(root: &std::path::Path, input: Value) -> Result<Value, OrbitError> {
+pub(super) fn show_in(store: &FrictionStore, input: Value) -> Result<Value, OrbitError> {
     let id = required_string(&input, &["id"], "id")?;
-    let Some(stored) = show_friction(root, &id)? else {
+    let Some(stored) = store.show(&id)? else {
         return Err(OrbitError::InvalidInput(format!(
             "friction record not found: {id}"
         )));
@@ -129,13 +139,11 @@ pub(super) fn show_at_root(root: &std::path::Path, input: Value) -> Result<Value
 
 fn stats(runtime: &OrbitRuntime) -> Result<Value, OrbitError> {
     let tasks = runtime.list_tasks()?;
-    friction_stats(&runtime.data_root().join("frictions"), &tasks)
+    store_for(runtime)?.stats(&tasks)
 }
 
 fn tags(runtime: &OrbitRuntime) -> Result<Value, OrbitError> {
-    Ok(json!(friction_tags(
-        &runtime.data_root().join("frictions")
-    )?))
+    Ok(json!(store_for(runtime)?.tags()?))
 }
 
 fn update(runtime: &OrbitRuntime, input: Value) -> Result<Value, OrbitError> {
@@ -157,8 +165,7 @@ fn update(runtime: &OrbitRuntime, input: Value) -> Result<Value, OrbitError> {
             "orbit.friction.update requires `status`, `tags`, `body`, or `title`".to_string(),
         ));
     }
-    let stored = update_friction(
-        &runtime.data_root().join("frictions"),
+    let stored = store_for(runtime)?.update(
         &id,
         FrictionUpdateParams {
             status,
@@ -174,7 +181,7 @@ fn update(runtime: &OrbitRuntime, input: Value) -> Result<Value, OrbitError> {
 
 fn resolve(runtime: &OrbitRuntime, input: Value) -> Result<Value, OrbitError> {
     let id = required_string(&input, &["id"], "id")?;
-    let stored = resolve_friction(&runtime.data_root().join("frictions"), &id, Utc::now())?;
+    let stored = store_for(runtime)?.resolve(&id, Utc::now())?;
     record_to_json(stored)
 }
 
@@ -247,7 +254,16 @@ fn record_to_json(stored: StoredFrictionRecord) -> Result<Value, OrbitError> {
     let mut value = serde_json::to_value(&stored.record)
         .map_err(|error| OrbitError::Store(format!("serialize friction record: {error}")))?;
     if let Some(object) = value.as_object_mut() {
-        object.insert("path".to_string(), json!(stored.path.to_string_lossy()));
+        // ADR-0345: `path` stays on the wire, but it now reports the legacy
+        // evidence file an imported record came from and `null` for anything
+        // written after the SQLite cutover — never a fabricated location.
+        object.insert(
+            "path".to_string(),
+            match &stored.path {
+                Some(path) => json!(path.to_string_lossy()),
+                None => Value::Null,
+            },
+        );
         // `title` is always present on the wire: a record written before the
         // field existed derives one here rather than reaching consumers blank.
         object.insert("title".to_string(), json!(record_title(&stored.record)));
@@ -277,7 +293,7 @@ mod tests {
                 resolved_by_task: Some("ORB-00093".to_string()),
                 body: body.to_string(),
             },
-            path: "frictions/2026-05/F007.md".into(),
+            path: Some("frictions/2026-05/F007.md".into()),
         }
     }
 

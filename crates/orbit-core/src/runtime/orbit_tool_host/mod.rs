@@ -3,7 +3,7 @@ mod artifact_redaction;
 mod auto_task_tools;
 mod dispatch;
 mod docs_tools;
-mod friction_tools;
+pub(crate) mod friction_tools;
 mod host;
 mod input;
 mod json;

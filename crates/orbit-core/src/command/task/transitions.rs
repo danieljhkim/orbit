@@ -3,7 +3,6 @@ use orbit_common::types::{
     NotFoundKind, OrbitError, OrbitEvent, Task, TaskHistoryEntry, TaskRelationType, TaskStatus,
     is_valid_friction_id, unmet_task_dependencies,
 };
-use orbit_store::friction_store::{resolve_friction_by_task, show_friction};
 
 use crate::OrbitRuntime;
 use crate::runtime::TaskRecordUpdateParams as StoreTaskUpdateParams;
@@ -126,8 +125,26 @@ impl OrbitRuntime {
     }
 
     pub(crate) fn apply_resolves_side_effects(&self, task: &Task) -> Vec<OrbitEvent> {
-        let frictions_root = self.data_root().join("frictions");
         let mut events = Vec::new();
+        let frictions = match crate::runtime::orbit_tool_host::friction_tools::store_for(self) {
+            Ok(store) => store,
+            Err(error) => {
+                // Without a store there is no per-relation verdict to give, so
+                // report the failure once against each `resolves` target.
+                return task
+                    .relations
+                    .iter()
+                    .filter(|relation| relation.relation_type == TaskRelationType::Resolves)
+                    .filter(|relation| is_valid_friction_id(&relation.target))
+                    .map(|relation| OrbitEvent::TaskRelationSideEffectFailed {
+                        task_id: task.id.clone(),
+                        target: relation.target.clone(),
+                        relation: RELATION_RESOLVES.to_string(),
+                        reason: error.to_string(),
+                    })
+                    .collect();
+            }
+        };
         for relation in &task.relations {
             if relation.relation_type != TaskRelationType::Resolves {
                 continue;
@@ -136,21 +153,19 @@ impl OrbitRuntime {
             if !is_valid_friction_id(target) {
                 continue;
             }
-            match show_friction(&frictions_root, target) {
-                Ok(Some(_)) => {
-                    match resolve_friction_by_task(&frictions_root, target, &task.id, Utc::now()) {
-                        Ok(_) => events.push(OrbitEvent::FrictionAutoResolved {
-                            task_id: task.id.clone(),
-                            friction_id: target.to_string(),
-                        }),
-                        Err(error) => events.push(OrbitEvent::TaskRelationSideEffectFailed {
-                            task_id: task.id.clone(),
-                            target: target.to_string(),
-                            relation: RELATION_RESOLVES.to_string(),
-                            reason: error.to_string(),
-                        }),
-                    }
-                }
+            match frictions.show(target) {
+                Ok(Some(_)) => match frictions.resolve_by_task(target, &task.id, Utc::now()) {
+                    Ok(_) => events.push(OrbitEvent::FrictionAutoResolved {
+                        task_id: task.id.clone(),
+                        friction_id: target.to_string(),
+                    }),
+                    Err(error) => events.push(OrbitEvent::TaskRelationSideEffectFailed {
+                        task_id: task.id.clone(),
+                        target: target.to_string(),
+                        relation: RELATION_RESOLVES.to_string(),
+                        reason: error.to_string(),
+                    }),
+                },
                 Ok(None) => events.push(OrbitEvent::TaskRelationDangling {
                     task_id: task.id.clone(),
                     target: target.to_string(),

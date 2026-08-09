@@ -409,6 +409,26 @@ Full narrative: `orbit tool run orbit.adr.show --input '{"id":"ADR-0323"}'`.
 
 ---
 
+## ADR-0345 — Friction records move to SQLite with a legacy-evidence `path` projection
+
+**Status:** Proposed · 2026-08 · [ORB-10680]
+
+**Context.** Friction list, filtered-query, and stats operations discovered every Markdown record under a workspace's friction tree, parsed every YAML envelope and body, allocated the complete corpus as `Vec<StoredFrictionRecord>`, and only then filtered, sorted, paginated, or aggregated. Peak memory and parse work therefore grew with total retained friction history even when a caller asked for a 50-row page or a narrow status filter. The file-backed rationale no longer matched the runtime contract: frictions are hub-only coordination state, writes go through Orbit surfaces rather than human file edits, and the canonical hub already copies checkout-local records into a global per-workspace file tree. A public `path` field pointed at the backing Markdown file, so moving persistence could not silently leave it fictitious.
+
+**Decision.** Friction records move into the host-global store under schema migration v12 `friction_records_sqlite`, keyed by the composite `(workspace_id, friction_id)` so IDs stay workspace-local and identical IDs in two workspaces coexist ([L-0072]). Every list predicate — workspace, status, model, tag, date range, free text — plus the ordering, the page, and every stats aggregate is pushed into SQL, so a bounded request decodes at most the rows it asked for and `stats` decodes none. Monthly ID allocation runs inside the same write transaction as the insert, backed by a unique `(workspace_id, month, seq)` index. Each workspace's legacy tree is imported exactly once, transactionally and idempotently: a malformed record, a friction ID claimed twice in one source tree, an ID that does not address the file holding it, or a discovered/handled count mismatch aborts the transaction, and an interrupted import commits nothing. After the marker commits, SQLite is the sole live read and write source. The public `path` field is retained and now reports the legacy evidence file an imported record came from, and `null` for any record written after cutover, rather than a fabricated location; the CLI renders it as `Legacy file`. The tag taxonomy stays a small YAML configuration file — moving record persistence does not move configuration.
+
+**Consequences.**
+- Bounded scan memory and indexed workspace-local reads for the CLI, MCP, HTTP, dashboard, Bridge-facing, and scoreboard friction paths; the scoreboard consumes a per-model SQL aggregate (`ScoreboardInputs::friction_reported`) instead of the full record slice.
+- Legacy trees stay untouched, read-only rollback evidence for one release, and `export_workspace_frictions` re-materializes the live corpus in the same Markdown layout for inspection.
+- No retention, deletion, cold archival, body compression, or disk-reclamation policy is introduced; removing legacy trees needs an explicit later finalize path that also drops `legacy_path`.
+- Free-text `q` matching moves from Rust's Unicode-aware lowercasing to SQLite's ASCII `lower()`, so a non-ASCII uppercase query term matches case-sensitively where it previously did not.
+- Cost: a consumer that read `path` as an always-present file location now sees `null` for post-cutover records and must treat it as an optional legacy pointer.
+- Rejected alternative: keeping the file store and adding a SQLite index sidecar. That would have preserved two sources of truth for the same records and left the full parse cost on every cold read and index rebuild.
+
+Full narrative: `orbit tool run orbit.adr.show --input '{"id":"ADR-0345"}'`.
+
+---
+
 ## Task References
 
 - **[T20260419-0002]** — Add workspace provenance and v2 audit envelope events for activity/job execution.
@@ -456,5 +476,6 @@ Full narrative: `orbit tool run orbit.adr.show --input '{"id":"ADR-0323"}'`.
 - **[ORB-10496]** — Record the spawned provider subprocess PID as its own audit event and expose read-time liveness through run status and `orbit run show`.
 
 - **[ORB-10590]** — Make the friction record handle an author-settable field and derive it structurally when omitted ([ADR-0323]).
+- **[ORB-10680]** — Moved hub friction records into the host-global SQLite store to bound scan memory ([ADR-0345]).
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

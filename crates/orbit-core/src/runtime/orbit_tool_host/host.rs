@@ -15,16 +15,15 @@ use orbit_common::types::{
 use orbit_common::utility::redaction::redact_all;
 use orbit_common::utility::selector::canonical_selector;
 use orbit_store::friction_store::{
-    FrictionAddParams, FrictionUpdateParams, add_friction, friction_tags,
-    prepare_hub_friction_root, readable_hub_friction_root, resolve_friction_by_task,
-    update_friction,
+    FrictionAddParams, FrictionStore, FrictionUpdateParams, prepare_hub_friction_root,
+    readable_hub_friction_root,
 };
 use orbit_store::sqlite::task_registry::{
     RegisterWorkspaceParams, TaskRegistryStore, task_registry_path,
 };
 use orbit_store::{
-    TaskArtifactUpdateParams, TaskCreateParams, TaskDocumentUpdateParams, TaskHistoryUpdateParams,
-    WorkspaceTaskBackends, coordination_task_backends,
+    Store, TaskArtifactUpdateParams, TaskCreateParams, TaskDocumentUpdateParams,
+    TaskHistoryUpdateParams, WorkspaceTaskBackends, coordination_task_backends,
 };
 use orbit_tools::{
     OrbitBuiltinAction, OrbitTaskScope, OrbitToolHost, ReservationOwnerContext, ToolContext,
@@ -479,13 +478,12 @@ impl HubCoordinationExecutor {
         let updated = self.task(&id)?;
         if updated.status == TaskStatus::Done
             && current.status != TaskStatus::Done
-            && let Ok(root) = self.friction_root()
+            && let Ok(frictions) = self.friction_store()
         {
             for relation in &updated.relations {
                 if relation.relation_type == orbit_common::types::TaskRelationType::Resolves
                     && is_valid_friction_id(&relation.target)
-                    && let Err(error) =
-                        resolve_friction_by_task(&root, &relation.target, &id, Utc::now())
+                    && let Err(error) = frictions.resolve_by_task(&relation.target, &id, Utc::now())
                 {
                     tracing::warn!(
                         task_id = id,
@@ -681,6 +679,30 @@ impl HubCoordinationExecutor {
         )
     }
 
+    /// The hub's friction store, partitioned by the logical workspace ID.
+    ///
+    /// Records live in the host-global SQLite database; the hub file tree is
+    /// still resolved because it carries the tag taxonomy and, until the
+    /// one-time import commits, the legacy records to import. `friction_root`
+    /// publishes the checkout-local tree into the canonical hub location
+    /// first, so a workspace that never opened the hub before still imports
+    /// its own history exactly once.
+    fn friction_store(&self) -> Result<FrictionStore, OrbitError> {
+        let files_root = match self.friction_root() {
+            Ok(root) => root,
+            Err(_) => self.readable_friction_root()?,
+        };
+        let database = crate::config::resolved_audit_db_path(
+            &self.inner.global_root,
+            &self.inner.global_root,
+        )?;
+        FrictionStore::open(
+            Store::open(&database)?,
+            self.inner.workspace_id.clone(),
+            files_root,
+        )
+    }
+
     /// The hub-coordination half of the friction handler table.
     ///
     /// Exhaustive over [`FrictionVerb`] on purpose (ADR-0209 bearing 1,
@@ -694,51 +716,37 @@ impl HubCoordinationExecutor {
     ) -> Result<Value, OrbitError> {
         match verb {
             FrictionVerb::List => {
-                let root = self.readable_friction_root()?;
-                let mut value = super::friction_tools::list_at_root(&root, input)?;
+                let mut value = super::friction_tools::list_in(&self.friction_store()?, input)?;
                 strip_private_friction_paths(&mut value);
                 Ok(value)
             }
             FrictionVerb::Show => {
-                let root = self.readable_friction_root()?;
-                let mut value = super::friction_tools::show_at_root(&root, input)?;
+                let mut value = super::friction_tools::show_in(&self.friction_store()?, input)?;
                 strip_private_friction_paths(&mut value);
                 Ok(value)
             }
-            FrictionVerb::Tags => {
-                let root = self.readable_friction_root()?;
-                Ok(json!(friction_tags(&root)?))
-            }
+            FrictionVerb::Tags => Ok(json!(self.friction_store()?.tags()?)),
             FrictionVerb::Add => {
-                let root = self.friction_root()?;
                 let model = model
                     .filter(|value| !value.trim().is_empty())
                     .ok_or_else(|| {
                         OrbitError::InvalidInput("orbit.friction.add requires `model`".to_string())
                     })?;
-                let stored = add_friction(
-                    &root,
-                    FrictionAddParams {
-                        model,
-                        title: optional_raw_string(&input, "title")?
-                            .map(|raw| normalize_title(&redact_all(&raw)))
-                            .transpose()?,
-                        body: redact_all(&required_string(
-                            &input,
-                            &["body", "description"],
-                            "body",
-                        )?),
-                        tags: optional_csv_or_string_list_alias(&input, &["tags", "tag"])?
-                            .unwrap_or_default(),
-                        during_task: optional_string(&input, "during_task")?
-                            .or(optional_string(&input, "task_id")?),
-                        created_at: Utc::now(),
-                    },
-                )?;
+                let stored = self.friction_store()?.add(FrictionAddParams {
+                    model,
+                    title: optional_raw_string(&input, "title")?
+                        .map(|raw| normalize_title(&redact_all(&raw)))
+                        .transpose()?,
+                    body: redact_all(&required_string(&input, &["body", "description"], "body")?),
+                    tags: optional_csv_or_string_list_alias(&input, &["tags", "tag"])?
+                        .unwrap_or_default(),
+                    during_task: optional_string(&input, "during_task")?
+                        .or(optional_string(&input, "task_id")?),
+                    created_at: Utc::now(),
+                })?;
                 friction_json(stored)
             }
             FrictionVerb::Update => {
-                let root = self.friction_root()?;
                 let id = required_string(&input, &["id"], "id")?;
                 let status = optional_string(&input, "status")?
                     .map(|value| {
@@ -759,8 +767,7 @@ impl HubCoordinationExecutor {
                             .to_string(),
                     ));
                 }
-                friction_json(update_friction(
-                    &root,
+                friction_json(self.friction_store()?.update(
                     &id,
                     FrictionUpdateParams {
                         status,
@@ -1017,28 +1024,39 @@ mod checkoutless_hub_tests {
         assert_eq!(cleared["orchestrator"], Value::Null);
     }
 
+    /// After ORB-10680 the partition is the `(workspace_id, friction_id)` key
+    /// in the host-global store, not a per-workspace directory: a record filed
+    /// through one workspace's hub executor is invisible to another's.
     #[test]
-    fn friction_writes_use_canonical_workspace_partition() {
+    fn friction_writes_use_the_workspace_sqlite_partition() {
         let (root, executor, context) = executor();
         let result = executor
             .execute_tool(
                 "orbit.friction.add",
                 json!({"body": "Hub friction", "tags": ["tooling"], "model": "codex"}),
-                context,
+                context.clone(),
             )
             .expect("add friction");
         assert!(result.get("path").is_none(), "hub responses are path-free");
-        let month = Utc::now().format("%Y-%m").to_string();
-        let directory = root
-            .path()
-            .join("frictions/workspaces/ws_checkoutless")
-            .join(month);
-        assert!(
-            std::fs::read_dir(directory)
-                .expect("workspace friction month")
-                .flatten()
-                .any(|entry| entry.path().extension().is_some_and(|ext| ext == "md")),
-            "friction persisted in the canonical workspace partition"
+        let id = result["id"].as_str().expect("friction id").to_string();
+
+        let listed = executor
+            .execute_tool("orbit.friction.list", json!({}), context.clone())
+            .expect("list frictions");
+        assert_eq!(listed.as_array().map(Vec::len), Some(1));
+        assert_eq!(listed[0]["id"], json!(id));
+
+        HubCoordinationExecutor::register_workspace(root.path(), "ws_other", "other")
+            .expect("register second workspace");
+        let other = HubCoordinationExecutor::new(root.path(), "ws_other", None)
+            .expect("second coordination executor");
+        let other_listed = other
+            .execute_tool("orbit.friction.list", json!({}), context)
+            .expect("list frictions in the other workspace");
+        assert_eq!(
+            other_listed.as_array().map(Vec::len),
+            Some(0),
+            "a second workspace must not see the first workspace's records"
         );
     }
 

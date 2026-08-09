@@ -7,7 +7,7 @@
 use chrono::Utc;
 use orbit_common::types::{JobRunState, JobTargetType, TaskPriority, TaskStatus, TaskType};
 use orbit_engine::{RuntimeHost, TaskAutomationUpdate, WORKFLOW_RUN_FAILED_EVENT};
-use orbit_store::friction_store::{FrictionListFilter, list_frictions};
+use orbit_store::friction_store::FrictionListFilter;
 use orbit_store::{JobRunStepParams, TaskCreateParams, TaskReservationReleaseReason};
 use serde_json::{Value, json};
 use tempfile::tempdir;
@@ -163,12 +163,11 @@ fn history_events(runtime: &OrbitRuntime, task_id: &str, event: &str) -> usize {
 }
 
 fn friction_count(runtime: &OrbitRuntime) -> usize {
-    list_frictions(
-        &runtime.data_root().join("frictions"),
-        &FrictionListFilter::default(),
-    )
-    .expect("list frictions")
-    .len()
+    crate::runtime::orbit_tool_host::friction_tools::store_for(runtime)
+        .expect("friction store")
+        .list(&FrictionListFilter::default())
+        .expect("list frictions")
+        .len()
 }
 
 #[test]

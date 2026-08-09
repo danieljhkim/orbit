@@ -238,13 +238,25 @@ fn friction_add_writes_markdown_record_and_validates_tags() {
         )
         .expect("friction add succeeds");
 
-    let path = output["path"].as_str().expect("record path");
-    let raw = std::fs::read_to_string(path).expect("read friction markdown");
-    assert!(raw.starts_with("---\n"), "{raw}");
-    assert!(raw.contains("id: F"), "{raw}");
-    assert!(raw.contains("model: codex"), "{raw}");
-    assert!(raw.contains("tooling"), "{raw}");
-    assert!(raw.contains("skill-guidance"), "{raw}");
+    // ADR-0345: records written after the SQLite cutover report `path: null`
+    // rather than a file location nothing could open.
+    assert_eq!(output["path"], Value::Null);
+    let id = output["id"].as_str().expect("record id");
+    assert!(id.starts_with('F'), "{id}");
+    assert_eq!(output["model"], json!("codex"));
+
+    let shown = runtime
+        .execute_tool_command(
+            "orbit.friction.show",
+            json!({ "id": id }),
+            Some("codex".to_string()),
+            Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
+        )
+        .expect("friction show succeeds");
+    assert_eq!(shown["id"], json!(id));
+    assert_eq!(shown["status"], json!("open"));
+    assert_eq!(shown["tags"], json!(["skill-guidance", "tooling"]));
+    assert_eq!(shown["path"], Value::Null);
 
     let message = invalid_input_message(runtime.execute_tool_command(
         "orbit.friction.add",
