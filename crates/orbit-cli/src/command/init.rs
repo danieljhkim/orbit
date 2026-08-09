@@ -93,7 +93,10 @@ impl InitCommand {
             config_path: paths.config_path,
             created_config: result.created_config,
             refreshed_default_activities: result.refreshed_default_activities,
+            retired_default_activities: result.retired_default_activities,
             refreshed_default_jobs: result.refreshed_default_jobs,
+            retired_default_jobs: result.retired_default_jobs,
+            managed_asset_warnings: result.managed_asset_warnings,
             refreshed_default_executors: result.refreshed_default_executors,
             refreshed_default_policies: result.refreshed_default_policies,
         });
@@ -247,20 +250,25 @@ fn resolve_config_path(root_override: Option<&Path>) -> Result<PathBuf, OrbitErr
 
 fn print_init_result(output: InitOutput) {
     println!(
-        "skills: root={}, refreshed={}, symlink_created={}; config: path={}, created={}; default_activities_refreshed={}; default_jobs_refreshed={}; default_executors_refreshed={}; default_policies_refreshed={}",
+        "skills: root={}, refreshed={}, symlink_created={}; config: path={}, created={}; default_activities_refreshed={}, retired={}; default_jobs_refreshed={}, retired={}; default_executors_refreshed={}; default_policies_refreshed={}",
         output.skills_root,
         output.refreshed_skill_files,
         output.created_skills_symlink,
         output.config_path,
         output.created_config,
         output.refreshed_default_activities,
+        output.retired_default_activities,
         output.refreshed_default_jobs,
+        output.retired_default_jobs,
         output.refreshed_default_executors,
         output.refreshed_default_policies,
     );
+    for warning in output.managed_asset_warnings {
+        eprintln!("warning: {warning}");
+    }
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 struct InitOutput {
     skills_root: &'static str,
     refreshed_skill_files: usize,
@@ -268,7 +276,10 @@ struct InitOutput {
     config_path: &'static str,
     created_config: bool,
     refreshed_default_activities: usize,
+    retired_default_activities: usize,
     refreshed_default_jobs: usize,
+    retired_default_jobs: usize,
+    managed_asset_warnings: Vec<String>,
     refreshed_default_executors: usize,
     refreshed_default_policies: usize,
 }

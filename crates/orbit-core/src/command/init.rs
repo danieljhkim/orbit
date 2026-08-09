@@ -32,7 +32,10 @@ pub struct InitResult {
     pub created_skills_symlink: bool,
     pub created_config: bool,
     pub refreshed_default_activities: usize,
+    pub retired_default_activities: usize,
     pub refreshed_default_jobs: usize,
+    pub retired_default_jobs: usize,
+    pub managed_asset_warnings: Vec<String>,
     pub refreshed_default_executors: usize,
     pub refreshed_default_policies: usize,
     pub refreshed_default_routines: usize,
@@ -172,7 +175,10 @@ pub fn init_workspace_at_root(
     let mut seeded_default_auto_tasks = 0usize;
     let (
         refreshed_default_activities,
+        retired_default_activities,
         refreshed_default_jobs,
+        retired_default_jobs,
+        managed_asset_warnings,
         refreshed_default_executors,
         refreshed_default_policies,
         scoring_enabled,
@@ -182,12 +188,16 @@ pub fn init_workspace_at_root(
         let refreshed_default_executors =
             seed_default_executors(executor_store.as_ref(), overwrite)?;
         let refreshed_default_policies = seed_default_policies(policy_store.as_ref(), overwrite)?;
-        let refreshed_default_activities =
-            seed_default_activities(&layout.activities_dir, overwrite)?;
-        let refreshed_default_jobs = seed_default_jobs(&layout.jobs_dir, overwrite)?;
+        let activity_reconciliation = seed_default_activities(&layout.activities_dir, overwrite)?;
+        let job_reconciliation = seed_default_jobs(&layout.jobs_dir, overwrite)?;
+        let mut managed_asset_warnings = activity_reconciliation.warnings;
+        managed_asset_warnings.extend(job_reconciliation.warnings);
         (
-            refreshed_default_activities,
-            refreshed_default_jobs,
+            activity_reconciliation.refreshed,
+            activity_reconciliation.retired,
+            job_reconciliation.refreshed,
+            job_reconciliation.retired,
+            managed_asset_warnings,
             refreshed_default_executors,
             refreshed_default_policies,
             false,
@@ -232,7 +242,10 @@ pub fn init_workspace_at_root(
         seeded_default_auto_tasks = seed_default_auto_tasks(&orbit_root)?;
         (
             global_result.refreshed_default_activities,
+            global_result.retired_default_activities,
             global_result.refreshed_default_jobs,
+            global_result.retired_default_jobs,
+            global_result.managed_asset_warnings,
             global_result.refreshed_default_executors,
             global_result.refreshed_default_policies,
             RuntimeConfig::load_layered(&global_root, &orbit_root)?.scoring_enabled,
@@ -251,7 +264,10 @@ pub fn init_workspace_at_root(
         created_skills_symlink,
         created_config,
         refreshed_default_activities,
+        retired_default_activities,
         refreshed_default_jobs,
+        retired_default_jobs,
+        managed_asset_warnings,
         refreshed_default_executors,
         refreshed_default_policies,
         refreshed_default_routines,

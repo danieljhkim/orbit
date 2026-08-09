@@ -866,8 +866,42 @@ Narrative lives in the ADR store — retrieve it with `orbit tool run orbit.adr.
 
 ---
 
+## ADR-0346 — Track bundled activity and job ownership by content digest before retirement
+
+**Status:** Proposed · 2026-08 · [ORB-10684]
+
+**Context.** Embedded activity and job assets are materialized into the global
+resource catalog, but an additive refresh cannot distinguish a retired bundled
+file from an operator-authored file by name alone. Filename-only pruning would
+deactivate stale shipped subsystems, but it could also destroy legitimate local
+resources on legacy installations.
+
+**Decision.** Persist a per-resource-kind managed manifest containing the
+SHA-256 digest last written for each bundled activity or job. Refresh removes
+retired files only when their bytes still match that digest, moves locally
+modified retired managed files into a non-catalog backup area, preserves
+untracked legacy YAML in place, and emits actionable recovery warnings; the
+same reconciliation implementation governs both resource kinds.
+
+**Consequences.**
+- A current release can retire assets seeded by an earlier manifest-aware
+  release without leaving them active in catalog construction.
+- Existing installations without a manifest migrate safely: exact current
+  bundled bytes gain provenance, while untracked YAML remains active and is
+  named in a manual-recovery warning.
+- Locally modified retired assets remain recoverable outside active catalog
+  directories instead of breaking unrelated catalog/list operations.
+- Cost: managed manifests and preserved-retirement backups add local state and
+  make the first legacy refresh potentially require operator review before an
+  ambiguous stale file can be removed.
+
+---
+
 ## Task References
 
+- **[ORB-10684]** — Reconcile retired managed activity and job assets by
+  content provenance while preserving modified and ambiguous legacy files
+  ([ADR-0346], Proposed).
 - **[ORB-10644]** — Refuse to open or promote a PR against a base branch that is gone from `origin` or has already landed on the declared landing branch ([ADR-0336], extending [ADR-0290]'s marker rule to the base itself).
 - **[ORB-10593]** — Fail dispatch immediately when a `blocked_by` target is archived, rejected, or dangling, naming the blocker ([ADR-0319]).
 - **[ORB-10544]** — Move the ship in-flight duplicate-dispatch guard into `submit_ship_run` so HTTP and MCP are thin projections of one typed conflict ([ADR-0303], correcting the surface-local check from [ADR-0257]).
