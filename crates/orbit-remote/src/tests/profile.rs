@@ -71,6 +71,7 @@ fn profile_runtime(config: &str) -> (tempfile::TempDir, OrbitRuntime, PathBuf, P
         InitOptions {
             global_only: true,
             refresh_defaults: true,
+            detected: Some(Default::default()),
             ..InitOptions::default()
         },
     )
@@ -324,8 +325,11 @@ fn closure_digest_tracks_execution_precedence_jobs_activities_recovery_and_ignor
         baseline.ship.ship_closure_digest
     );
 
-    let auto_body =
-        recovery_body.replacen("  role: reviewer", "  backend: auto\n  role: reviewer", 1);
+    let auto_body = recovery_body.replacen(
+        "  on_denial: terminate",
+        "  backend: auto\n  on_denial: terminate",
+        1,
+    );
     fs::write(&recovery_path, &auto_body).expect("use backend auto");
     let auto_resolved = build_profile(&runtime, &workspace);
     assert_eq!(

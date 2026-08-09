@@ -76,7 +76,7 @@ pub use adr::{
 };
 pub use agent_family::AgentFamily;
 pub use agent_pair::{
-    AgentModelPair, Crew, CrewRoleAssignment, agent_family_from_cli, all_agent_families,
+    AgentModelPair, Crew, CrewAssignment, agent_family_from_cli, all_agent_families,
     infer_agent_family_from_model, normalize_agent_family_for_model, resolve_crew,
 };
 pub use artifact_ids::{

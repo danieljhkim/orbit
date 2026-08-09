@@ -1,6 +1,6 @@
 use orbit_common::types::activity_job::ProviderSource;
 use orbit_common::types::{
-    Crew, CrewRoleAssignment, OrbitError, Task, all_agent_families, infer_agent_family_from_model,
+    Crew, CrewAssignment, OrbitError, Task, all_agent_families, infer_agent_family_from_model,
     resolve_crew,
 };
 use serde::Serialize;
@@ -304,7 +304,7 @@ impl OrbitRuntime {
     }
 }
 
-fn family_from_assignment(assignment: &CrewRoleAssignment) -> Option<String> {
+fn family_from_assignment(assignment: &CrewAssignment) -> Option<String> {
     let provider = assignment.provider.trim().to_ascii_lowercase();
     if all_agent_families()
         .iter()

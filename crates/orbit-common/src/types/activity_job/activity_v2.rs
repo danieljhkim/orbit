@@ -116,12 +116,6 @@ pub struct AgentLoopSpec {
     /// has its own termination accounting and never renders this envelope.
     #[serde(default = "default_require_completion_envelope")]
     pub require_completion_envelope: bool,
-    /// Optional role tag (ADR-029). When set, the engine consults
-    /// `[agent.<role>]` in `config.toml` and overrides `provider`/`model`/
-    /// `backend` field-by-field at dispatch time. The step-level role on
-    /// `TargetStep` takes precedence over this activity-level role.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub role: Option<AgentRole>,
     /// Program allowlist enforced before `proc.spawn` executes a request.
     /// `None` means `proc.spawn` is not constrained at the activity layer
     /// (legacy / human-driven paths); an empty `Some(vec![])` denies all
@@ -166,7 +160,7 @@ impl Backend {
 ///
 /// This is the **single canonical provider-identity surface** for Orbit
 /// (ORB-10091): every crew/runtime path that turns a string into a provider —
-/// crew-role parsing, agent-role resolution, CLI executor selection, setup
+/// crew parsing, activity resolution, CLI executor selection, setup
 /// detection — routes through [`Provider::parse`] so canonical IDs, alias
 /// normalization, and capability predicates cannot drift across layers or
 /// disagree with Worker/Bridge. The set mirrors the Constellation
@@ -650,38 +644,6 @@ pub struct DeterministicSpec {
     /// Optional literal configuration passed through to the action.
     #[serde(default)]
     pub config: Value,
-}
-
-/// Role tag for an `agent_loop` activity (ADR-029). Maps to
-/// `[agent.<role>]` blocks in `config.toml`; the dispatcher resolves the
-/// effective role to a `(provider, model, backend)` triple before invoking
-/// the runner. The set is closed because `orbit init` only prompts for these
-/// three roles today; widening it requires a config-schema change.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
-#[serde(rename_all = "lowercase")]
-pub enum AgentRole {
-    Reviewer,
-    Implementer,
-    Planner,
-}
-
-impl AgentRole {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            AgentRole::Reviewer => "reviewer",
-            AgentRole::Implementer => "implementer",
-            AgentRole::Planner => "planner",
-        }
-    }
-
-    pub fn parse(raw: &str) -> Option<Self> {
-        match raw.trim() {
-            "reviewer" => Some(AgentRole::Reviewer),
-            "implementer" => Some(AgentRole::Implementer),
-            "planner" => Some(AgentRole::Planner),
-            _ => None,
-        }
-    }
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]

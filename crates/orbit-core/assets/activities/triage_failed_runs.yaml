@@ -159,5 +159,4 @@ spec:
   proc_allowed_programs:
     - rg
   on_denial: terminate
-  role: reviewer
   wall_clock_timeout_seconds: 1200

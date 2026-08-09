@@ -18,9 +18,8 @@ mod tests;
 
 pub(crate) use env::{ProvenanceEnv, provenance_env};
 pub use hosts::{
-    AgentRoleConfig, DeterministicActionHost, EnvironmentHost, JobRunHost, PrConfig,
-    TaskActivityUpdate, TaskAutomationUpdate, TaskHost, TaskReadHost, TaskWriteHost,
-    ensure_task_can_enter_workflow,
+    CrewConfig, DeterministicActionHost, EnvironmentHost, JobRunHost, PrConfig, TaskActivityUpdate,
+    TaskAutomationUpdate, TaskHost, TaskReadHost, TaskWriteHost, ensure_task_can_enter_workflow,
 };
 pub use outcome::{
     AGENT_INVOCATION_FAILED, AGENT_TIMEOUT, ActivityInvocationResult, WORKFLOW_RUN_FAILED_EVENT,

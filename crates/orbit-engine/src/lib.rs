@@ -40,14 +40,15 @@ mod template;
 mod tests;
 
 pub use activity_job::{
-    DispatchError, DispatchOutcome, EnforcedAuditSink, JobOutcome, ResolvedCliExecutor,
-    ResolvedSandbox, V2AuditWriter, V2DispatchInput, V2RuntimeHost, V2SqliteSink,
-    dispatch_error_to_orbit, dispatch_v2_activity, drive_agent_loop, execute_job_with_resume,
-    reset_replay_transport, resolve_job_catalog_refs_for_execution, validate_job,
+    DispatchError, DispatchOutcome, EnforcedAuditSink, JobOutcome, ResolvedAgentSettings,
+    ResolvedCliExecutor, ResolvedSandbox, V2AuditWriter, V2DispatchInput, V2RuntimeHost,
+    V2SqliteSink, dispatch_error_to_orbit, dispatch_v2_activity, drive_agent_loop,
+    execute_job_with_resume, inject_system_crew_input, reset_replay_transport,
+    resolve_crew_settings, resolve_job_catalog_refs_for_execution, validate_job,
     validate_job_deterministic_actions,
 };
 pub use context::{
-    AGENT_INVOCATION_FAILED, AGENT_TIMEOUT, ActivityInvocationResult, AgentRoleConfig,
+    AGENT_INVOCATION_FAILED, AGENT_TIMEOUT, ActivityInvocationResult, CrewConfig,
     DeterministicActionHost, EnvironmentHost, JobRunHost, PrConfig, TaskActivityUpdate,
     TaskAutomationUpdate, TaskHost, TaskReadHost, TaskWriteHost, WORKFLOW_RUN_FAILED_EVENT,
     blocked_workflow_failure_update, ensure_task_can_enter_workflow,

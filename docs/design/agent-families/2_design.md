@@ -24,7 +24,7 @@ Adding a family is still a cross-cutting change: executor assets, sandbox behavi
 
 ## 2. Crew Registry
 
-Workspace config defines one concrete assignment under each `[crews.<name>]`: flat `model`, `provider`, and `backend` fields. Activity roles remain labels, but all resolve through the same assignment.
+Workspace config defines one concrete assignment under each `[crews.<name>]`: flat `model`, `provider`, and `backend` fields. A rendered activity input may select a named `crew`; without one, dispatch uses the run's resolved crew. Activity and job schemas reject the retired `role` key.
 
 `crates/orbit-core/src/config/raw.rs` owns the TOML shape, and `crates/orbit-core/src/config/runtime.rs` materializes it into `Crew` values from `orbit-common`. Runtime loading rejects incomplete crews, retired `planner`/`implementer`/`reviewer` role sub-tables with guidance to write flat `model`, `provider`, and `backend` fields, and `[workflow].default_crew` values that do not name a defined crew.
 
@@ -40,6 +40,8 @@ The precedence chain is:
 2. `Task.crew`
 3. `[workflow].default_crew`
 
+This chain resolves the run crew. At activity dispatch there is one additional, explicit authoring choice: a rendered `crew` input selects a different named crew for that activity. With no such input, the run crew is the fallback. No role-keyed lookup participates in either selection.
+
 `orbit.task.show` surfaces the task field and, when the current registry resolves it, the effective crew name plus one `crew_model` string.
 
 ## 4. Run Records
@@ -52,7 +54,7 @@ Legacy records without crew fields still deserialize because the run-record fiel
 
 Crew names are workspace-local strings. Renaming or deleting a crew can break a task that still references the old name, though existing run records keep the resolved model strings.
 
-Task-level per-role overrides were deferred; today a task picks an entire crew, not a single replacement planner or reviewer.
+An activity-specific crew is carried in rendered input rather than persisted as separate per-step routing metadata. Authors must ensure that input is visible in the job asset when a step intentionally differs from its run.
 
 ## Task References
 
@@ -60,5 +62,6 @@ Task-level per-role overrides were deferred; today a task picks an entire crew, 
 - ORB-00058: Introduce per-task crew override for agent model selection.
 - ORB-10315: Seed model-specific crews only for providers available during initialization.
 - ORB-10620: Reject retired crew role sub-tables during config load.
+- ORB-10622: Remove activity roles and make the run crew the activity fallback.
 
 Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

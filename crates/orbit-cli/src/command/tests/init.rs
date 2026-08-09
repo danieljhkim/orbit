@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use tempfile::tempdir;
 
 use crate::InitCommand;
-use crate::command::init::collect_role_settings_for_init;
+use crate::command::init::collect_crew_settings_for_init;
 use crate::tests::env_isolation::EnvGuard;
 use orbit_common::utility::fs::create_dir_symlink;
 use orbit_core::config::agent_detect::DetectedAgents;
@@ -27,7 +27,7 @@ fn assert_discovery_sentinel(link: &Path, target: &Path) {
     );
 }
 
-/// `collect_role_settings_for_init` short-circuits when --non-interactive
+/// `collect_crew_settings_for_init` short-circuits when --non-interactive
 /// is set, regardless of whether config.toml exists. No prompts are
 /// attempted (we can't stub stdin from here, so the test passing without
 /// hanging is the proof).
@@ -36,7 +36,7 @@ fn non_interactive_short_circuits_before_prompts() {
     let _env = EnvGuard::acquire();
     let home = tempdir().expect("home tempdir");
     let detected = DetectedAgents::default();
-    let result = collect_role_settings_for_init(Some(home.path()), false, true, &detected);
+    let result = collect_crew_settings_for_init(Some(home.path()), false, true, &detected);
     assert!(matches!(result, Ok(None)));
 }
 
@@ -50,7 +50,7 @@ fn existing_config_short_circuits_before_prompts() {
     fs::write(&config_path, "# pre-existing\n").expect("preseed");
 
     let detected = DetectedAgents::default();
-    let result = collect_role_settings_for_init(Some(root.path()), false, false, &detected);
+    let result = collect_crew_settings_for_init(Some(root.path()), false, false, &detected);
     assert!(matches!(result, Ok(None)));
 }
 

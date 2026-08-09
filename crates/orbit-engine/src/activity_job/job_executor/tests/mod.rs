@@ -364,7 +364,6 @@ pub(super) fn deterministic_target(action: &str) -> TargetStep {
         default_input: None,
         timeout_seconds: 0,
         session: None,
-        role: None,
     }
 }
 

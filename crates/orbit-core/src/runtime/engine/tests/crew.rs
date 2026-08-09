@@ -79,8 +79,7 @@ fn run_input_task_ids_singleton_resolves_task_crew() {
 
     assert_eq!(crew.name, "beta");
     assert_eq!(crew.assignment.model, "beta-model");
-    assert_eq!(crew.role("planner"), Some(&crew.assignment));
-    assert_eq!(crew.role("reviewer"), Some(&crew.assignment));
+    assert_eq!(crew.assignment.provider, "codex");
 }
 
 #[test]

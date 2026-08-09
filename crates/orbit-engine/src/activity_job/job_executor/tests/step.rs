@@ -291,7 +291,6 @@ fn agent_implement_shaped_step(id: &str, retry: Option<RetrySpec>) -> JobV2Step 
         wall_clock_timeout_seconds: 30,
         require_response_envelope: false,
         require_completion_envelope: true,
-        role: None,
         proc_allowed_programs: None,
     };
     JobV2Step {
@@ -307,7 +306,6 @@ fn agent_implement_shaped_step(id: &str, retry: Option<RetrySpec>) -> JobV2Step 
             default_input: None,
             timeout_seconds: 0,
             session: None,
-            role: None,
         }),
     }
 }

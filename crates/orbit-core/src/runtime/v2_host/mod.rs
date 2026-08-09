@@ -26,12 +26,11 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
 
-use orbit_common::types::activity_job::AgentRole;
 use orbit_common::types::{
     InvocationTrace, LearningInjectionCaps, LearningInjectionState, LearningReminder,
     UNRESTRICTED_FS_PROFILE,
 };
-use orbit_engine::{AgentRoleConfig, EnvironmentHost};
+use orbit_engine::{CrewConfig, EnvironmentHost};
 use orbit_engine::{DispatchError, ResolvedCliExecutor, ResolvedSandbox, V2RuntimeHost};
 use orbit_store::{InvocationInsertParams, Store, token_scoreboard};
 use orbit_tools::{FsAuditLogger, ReservationOwnerContext, ToolContext};
@@ -268,80 +267,54 @@ impl V2RuntimeHost for OrbitRuntime {
         Ok(())
     }
 
-    fn agent_role_config(&self, role: AgentRole) -> Option<AgentRoleConfig> {
-        EnvironmentHost::agent_role_config(self, role)
-    }
-
-    fn agent_role_config_for_input(
-        &self,
-        role: AgentRole,
-        input: &serde_json::Value,
-    ) -> Option<AgentRoleConfig> {
-        let crew = self
-            .resolve_crew_for_run_input(input)
-            .map_err(|error| {
-                tracing::warn!(
-                    target: "orbit.config.crew",
-                    error = %error,
-                    "failed to resolve crew for activity input; falling back to default role config",
-                );
-                error
-            })
-            .ok()?;
-        let assignment = crew.role(role.as_str())?;
-        Some(
-            crate::runtime::engine::environment_host::typed_role_config_from_assignment(
-                role, assignment,
-            ),
-        )
-    }
-
     fn system_crew_for_dispatch(&self) -> Option<String> {
         Some(self.context.settings().system_crew().to_string())
     }
 
-    fn explicit_agent_crew_config_for_input(
+    fn agent_crew_config_for_input(
         &self,
         input: &serde_json::Value,
-    ) -> Result<Option<AgentRoleConfig>, DispatchError> {
-        let Some(explicit) = input
+    ) -> Result<Option<CrewConfig>, DispatchError> {
+        let explicit = input
             .get("crew")
             .and_then(Value::as_str)
             .map(str::trim)
-            .filter(|value| !value.is_empty())
-        else {
-            return Ok(None);
-        };
+            .filter(|value| !value.is_empty());
         let config_key = input
             .get("crew_config_key")
             .and_then(Value::as_str)
             .map(str::trim)
             .filter(|value| !value.is_empty());
-        let (crew_name, config_key) = match config_key {
-            Some("workflow.system_crew") => (
-                self.context.settings().system_crew(),
-                Some("workflow.system_crew"),
-            ),
+        let crew = match config_key {
+            Some("workflow.system_crew") => self
+                .resolve_crew_for_task(Some(self.context.settings().system_crew()), None)
+                .map_err(|error| {
+                    DispatchError::JobValidation(format!(
+                        "activity crew configured by `workflow.system_crew` cannot be resolved or used: {error}"
+                    ))
+                })?,
             Some(other) => {
                 return Err(DispatchError::JobValidation(format!(
-                    "explicit activity crew `{explicit}` names unsupported configuration key `{other}`"
+                    "activity crew names unsupported configuration key `{other}`"
                 )));
             }
-            None => (explicit, None),
+            None => match explicit {
+                Some(crew_name) => self
+                    .resolve_crew_for_task(Some(crew_name), None)
+                    .map_err(|error| {
+                        DispatchError::JobValidation(format!(
+                            "explicit activity crew `{crew_name}` cannot be resolved or used: {error}"
+                        ))
+                    })?,
+                None => self.resolve_crew_for_run_input(input).map_err(|error| {
+                    DispatchError::JobValidation(format!(
+                        "run crew cannot be resolved or used for activity dispatch: {error}"
+                    ))
+                })?,
+            },
         };
-        let crew = self
-            .resolve_crew_for_task(Some(crew_name), None)
-            .map_err(|error| {
-                let source = config_key
-                    .map(|key| format!("configured by `{key}`"))
-                    .unwrap_or_else(|| "from activity input".to_string());
-                DispatchError::JobValidation(format!(
-                    "explicit activity crew `{crew_name}` ({source}) cannot be resolved or used: {error}"
-                ))
-            })?;
         Ok(Some(
-            crate::runtime::engine::environment_host::typed_role_config_from_assignment(
-                AgentRole::Reviewer,
+            crate::runtime::engine::environment_host::typed_crew_config_from_assignment(
                 &crew.assignment,
             ),
         ))

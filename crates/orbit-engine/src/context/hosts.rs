@@ -2,7 +2,7 @@
 //! implementors, plus the task-update param types those traits consume.
 
 use orbit_agent::AgentConfig;
-use orbit_common::types::activity_job::{AgentRole, Backend, Provider};
+use orbit_common::types::activity_job::{Backend, Provider};
 use orbit_common::types::{
     ActivityV2, AgentModelPair, ExternalRef, JobRun, JobRunState, OrbitError, OrbitEvent,
     PipelineState, Role, Task, TaskArtifact, TaskComment, TaskHistoryEntry, TaskPriority,
@@ -147,17 +147,17 @@ pub fn ensure_task_can_enter_workflow<H: TaskReadHost + ?Sized>(
     )))
 }
 
-/// Resolved crew role assignment from `config.toml`. Each field
+/// Resolved crew assignment from `config.toml`. Each field
 /// is independently optional — the resolver in
-/// `crate::activity_job::agent_role` falls back to the inline activity value
+/// `crate::activity_job::crew` falls back to the inline activity value
 /// for any field the config does not specify.
 ///
-/// String fields from the on-disk `RawAgentRoleConfig` are parsed into the
-/// strongly-typed activity-job enums at the orbit-core boundary; an
+/// String fields from the on-disk crew assignment are parsed into the
+/// strongly typed activity-job enums at the orbit-core boundary; an
 /// unrecognized provider/backend yields `None` for that field rather than
 /// silently coercing dispatch to a wrong runtime.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct AgentRoleConfig {
+pub struct CrewConfig {
     pub provider: Option<Provider>,
     pub model: Option<String>,
     pub backend: Option<Backend>,
@@ -180,16 +180,6 @@ pub trait EnvironmentHost {
     fn orbit_root(&self) -> Option<String>;
     fn cli_command_environment(&self, env_extra: &[String]) -> Vec<(String, String)>;
     fn missing_required_environment_vars(&self, required_env_vars: &[&str]) -> Vec<String>;
-
-    /// Resolved crew role assignment from the active workspace's
-    /// `config.toml`, if any. The default returns `None`, which means
-    /// dispatch falls back to the inline `provider`/`model`/`backend` on the
-    /// activity. orbit-core's implementation reads the selected
-    /// `[crews.<name>]` entry and parses the string fields into the
-    /// strongly-typed activity-job enums.
-    fn agent_role_config(&self, _role: AgentRole) -> Option<AgentRoleConfig> {
-        None
-    }
 
     // ── Default implementations (use accessors above) ──────────────────
 

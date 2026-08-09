@@ -1,6 +1,6 @@
 use super::super::ConfigSnapshot;
 use super::super::runtime::*;
-use orbit_common::types::{Crew, CrewRoleAssignment, OrbitError};
+use orbit_common::types::{Crew, CrewAssignment, OrbitError};
 use std::collections::BTreeMap;
 use std::path::Path;
 use tempfile::tempdir;
@@ -10,14 +10,14 @@ fn write_config(dir: &Path, body: &str) {
 }
 
 fn single_family_crew(name: &str) -> Crew {
-    let role = CrewRoleAssignment {
+    let assignment = CrewAssignment {
         model: format!("{name}-model"),
         provider: name.to_string(),
         backend: "cli".to_string(),
     };
     Crew {
         name: name.to_string(),
-        assignment: role,
+        assignment,
         description: None,
         tags: Vec::new(),
     }

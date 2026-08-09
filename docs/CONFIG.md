@@ -59,13 +59,13 @@ system_crew = "qa"           # recovery and failed-run-triage crew
 
 ## `[crews.<name>]` — which provider-model runs the task
 
-A **crew** is one provider-model-backend assignment. Every activity role (`planner`, `implementer`, or `reviewer`) resolves to that same assignment; the role remains a prompt and telemetry label, not a separate model-selection slot.
+A **crew** is one provider-model-backend assignment. Activities do not carry a model-selection role: a rendered activity input may name a `crew`, and otherwise the activity inherits the run's resolved crew.
 
 | Field | Purpose | Values |
 |---|---|---|
 | `model` | Model identifier passed to the provider CLI | Provider-specific (e.g. `opus`, `sonnet`, `gpt-5.6-sol`, `pro`, `grok-build`) |
 | `provider` | Agent family | `claude`, `codex`, `gemini`, `grok` (the CLI-executable families; see [Provider identity and resolution](#provider-identity-and-resolution) for the full canonical set) |
-| `backend` | How Orbit dispatches the agent | `cli` (today the only supported value for these roles) |
+| `backend` | How Orbit dispatches the agent | `cli` (today the only supported value for crew dispatch) |
 | `description` | Optional human-facing crew summary | Any non-empty string after trimming |
 | `tags` | Optional discovery labels | Array of strings; normalized, sorted, and deduplicated |
 
@@ -102,7 +102,7 @@ cannot be canonicalized to a concrete executable combination.
 
 ## Provider identity and resolution
 
-Every `provider` string Orbit reads — in `[crews.<name>]`, in an activity's inline `provider`, and in setup detection — is parsed through **one canonical surface** (`orbit_common::types::activity_job::Provider`, ORB-10091). Centralizing parsing means the crew layer, the agent-role resolver, the CLI executor, and reconciliation cannot disagree with each other or with Worker/Bridge about what a provider name means.
+Every `provider` string Orbit reads — in `[crews.<name>]`, in an activity's inline `provider`, and in setup detection — is parsed through **one canonical surface** (`orbit_common::types::activity_job::Provider`, ORB-10091). Centralizing parsing means the crew resolver, the CLI executor, and reconciliation cannot disagree with each other or with Worker/Bridge about what a provider name means.
 
 ### Canonical providers
 
@@ -131,7 +131,7 @@ Every `provider` string Orbit reads — in `[crews.<name>]`, in an activity's in
 
 ### Resolution precedence
 
-Provider selection is **two composed steps**, not one. Describe them precisely — the inline `provider` on an activity is the *template baseline*, **not** an explicit override that outranks the crew.
+Provider selection is **three composed steps**, not one. Describe them precisely — the inline `provider` on an activity is the *template baseline*, **not** an explicit override that outranks the crew.
 
 **1 — Which crew is dispatched** (`resolve_crew_for_task`). The crew *name* is chosen by the Constellation provider-resolution precedence (contract §3), first non-empty tier wins:
 
@@ -141,7 +141,9 @@ Provider selection is **two composed steps**, not one. Describe them precisely �
 4. **environment_default** — the `CONSTELLATION_DEFAULT_PROVIDER` environment variable (a canonical provider id, which names the same-named single-family crew).
 5. **system_default** — the canonical baseline (see below).
 
-**2 — The selected crew's assignment overrides the activity's inline baseline** (`resolve_from_config`). For each `(provider, model, backend)` field independently: the selected crew value wins **when present**; otherwise the activity's inline `agent_loop` value stands. A crew override that omits a field (or whose `provider` string is unparseable) leaves the inline baseline in place — so a config typo never coerces dispatch onto a wrong runtime. This is also why **persisted provider identity is never re-defaulted** during reconciliation: a provider already frozen on a run record is reused verbatim, not reset to the enum default.
+**2 — Which crew an activity uses.** A non-empty `crew` in the activity's rendered input selects that named crew. Without one, the activity uses the run's resolved crew from step 1. This is the only activity-authoring routing mechanism. Activity and job assets that declare `role` are rejected with guidance to pass `crew` in the activity input instead.
+
+**3 — The activity crew's assignment overrides the inline baseline** (`resolve_from_config`). For each `(provider, model, backend)` field independently: the selected crew value wins **when present**; otherwise the activity's inline `agent_loop` value stands. A crew assignment that omits a field (or whose `provider` string is unparseable) leaves the inline baseline in place — so a config typo never coerces dispatch onto a wrong runtime. This is also why **persisted provider identity is never re-defaulted** during reconciliation: a provider already frozen on a run record is reused verbatim, not reset to the enum default.
 
 ### The one setting that changes the default — `CONSTELLATION_DEFAULT_PROVIDER`
 

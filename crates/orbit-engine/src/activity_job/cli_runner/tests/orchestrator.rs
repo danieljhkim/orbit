@@ -9,10 +9,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use orbit_agent::loop_engine::audit::AuditSink;
-use orbit_common::test_fixtures::{TEST_CLAUDE_MODEL, TEST_CODEX_MODEL};
-use orbit_common::types::activity_job::{
-    AgentRole, JobV2StepBody, V2AuditEventKind, load_job_asset,
-};
+use orbit_common::test_fixtures::TEST_CODEX_MODEL;
+use orbit_common::types::activity_job::{JobV2StepBody, V2AuditEventKind, load_job_asset};
 #[cfg(target_os = "linux")]
 use orbit_exec::probe_bwrap;
 use orbit_store::Store;
@@ -21,8 +19,8 @@ use tempfile::{TempDir, tempdir};
 use crate::context::{ProvenanceEnv, provenance_env};
 use crate::template::{self, TemplateContext};
 
-use super::super::super::agent_role::{apply_resolved_settings, resolve_agent_settings};
 use super::super::super::audit_writer::V2AuditWriter;
+use super::super::super::crew::{apply_resolved_settings, resolve_crew_settings};
 use super::super::super::dispatcher::DispatchError;
 #[cfg(target_os = "linux")]
 use super::super::super::dispatcher::ResolvedSandbox;
@@ -3008,77 +3006,14 @@ fn run_cli_backend_keeps_success_when_envelope_reports_success() {
 /// implementer (identity attribution stays family; no leakage of family name
 /// into the --model flag that reaches the CLI).
 #[test]
-fn mixed_crew_drives_exact_models_to_planner_and_implementer() {
+fn single_crew_drives_exact_model_to_agent() {
     let temp = tempdir().expect("tempdir");
-    let claude_script = temp.path().join("claude");
     let codex_script = temp.path().join("codex");
-    write_executable(
-        &claude_script,
-        "#!/bin/sh\nprintf '{\"schemaVersion\":1,\"status\":\"success\",\"result\":{},\"error\":null}\\n'\n",
-    );
     write_executable(
         &codex_script,
         "#!/bin/sh\nprintf '{\"schemaVersion\":1,\"status\":\"success\",\"result\":{},\"error\":null}\\n'\n",
     );
 
-    // planner leg via mixed fixture crew
-    let sink_for_writer_p: Arc<dyn AuditSink> = Arc::new(RecordingSink::default());
-    let audit_p = Arc::new(V2AuditWriter::new(
-        "job-crew-planner",
-        format!("claude:{TEST_CLAUDE_MODEL}"),
-        sink_for_writer_p,
-    ));
-    let host_p = TestHost::with_command(claude_script.display().to_string());
-    let mut spec_p = test_agent_loop_spec_for("claude", Duration::from_secs(5));
-    spec_p.role = Some(AgentRole::Planner);
-    let input_p = serde_json::json!({
-        "prompt": "draft plan",
-        "crew": "mixed-fixture",
-        "task_id": "T-crew"
-    });
-    let resolved_p = resolve_agent_settings(AgentRole::Planner, &host_p, &spec_p, &input_p);
-    assert_eq!(resolved_p.model.as_deref(), Some(TEST_CLAUDE_MODEL));
-    let mut spec_p_run = spec_p.clone();
-    apply_resolved_settings(&mut spec_p_run, &resolved_p);
-    let _ = run_cli_backend(
-        &host_p,
-        &spec_p_run,
-        "job-crew-planner",
-        audit_p.clone(),
-        &input_p,
-        None,
-    )
-    .expect("planner cli run");
-
-    let events_p = audit_p.events_snapshot().expect("planner events");
-    let argv_p = events_p
-        .iter()
-        .find_map(|e| match &e.kind {
-            V2AuditEventKind::CliInvocationStarted {
-                argv_redacted,
-                provider,
-                ..
-            } => {
-                assert_eq!(
-                    provider, "claude",
-                    "identity attribution must be claude family"
-                );
-                Some(argv_redacted.clone())
-            }
-            _ => None,
-        })
-        .expect("planner started event");
-    let model_idx_p = argv_p
-        .iter()
-        .position(|a| a == "--model")
-        .expect("planner argv has --model");
-    assert_eq!(
-        argv_p.get(model_idx_p + 1).map(String::as_str),
-        Some(TEST_CLAUDE_MODEL),
-        "planner --model must be exact {TEST_CLAUDE_MODEL}, not family"
-    );
-
-    // implementer leg via same crew
     let sink_for_writer_i: Arc<dyn AuditSink> = Arc::new(RecordingSink::default());
     let audit_i = Arc::new(V2AuditWriter::new(
         "job-crew-impl",
@@ -3086,14 +3021,15 @@ fn mixed_crew_drives_exact_models_to_planner_and_implementer() {
         sink_for_writer_i,
     ));
     let host_i = TestHost::with_command(codex_script.display().to_string());
-    let mut spec_i = test_agent_loop_spec_for("codex", Duration::from_secs(5));
-    spec_i.role = Some(AgentRole::Implementer);
+    let spec_i = test_agent_loop_spec_for("codex", Duration::from_secs(5));
     let input_i = serde_json::json!({
         "prompt": "implement",
-        "crew": "mixed-fixture",
+        "crew": "single-fixture",
         "task_id": "T-crew"
     });
-    let resolved_i = resolve_agent_settings(AgentRole::Implementer, &host_i, &spec_i, &input_i);
+    let resolved_i = resolve_crew_settings(&host_i, &spec_i, &input_i, &input_i)
+        .expect("crew resolution")
+        .expect("fixture crew config");
     assert_eq!(resolved_i.model.as_deref(), Some(TEST_CODEX_MODEL));
     let mut spec_i_run = spec_i.clone();
     apply_resolved_settings(&mut spec_i_run, &resolved_i);

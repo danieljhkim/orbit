@@ -25,14 +25,14 @@ fn accounting_runtime() -> (tempfile::TempDir, OrbitRuntime) {
 default_crew = "alpha"
 
 [crews.alpha]
-planner = { model = "alpha-plan", provider = "codex", backend = "cli" }
-implementer = { model = "alpha-implement", provider = "codex", backend = "cli" }
-reviewer = { model = "alpha-review", provider = "codex", backend = "cli" }
+model = "alpha-implement"
+provider = "codex"
+backend = "cli"
 
 [crews.beta]
-planner = { model = "beta-plan", provider = "claude", backend = "cli" }
-implementer = { model = "beta-implement", provider = "claude", backend = "cli" }
-reviewer = { model = "beta-review", provider = "claude", backend = "cli" }
+model = "beta-implement"
+provider = "claude"
+backend = "cli"
 "#,
     )
     .expect("write config");
