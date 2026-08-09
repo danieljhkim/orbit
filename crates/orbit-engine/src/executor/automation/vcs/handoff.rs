@@ -124,6 +124,7 @@ pub(super) enum FailedHandoffPhase {
     PrView,
     Promote,
     EmptyBranch,
+    ObsoleteBase,
 }
 
 impl FailedHandoffPhase {
@@ -137,6 +138,7 @@ impl FailedHandoffPhase {
             Self::PrView => "github.pr.view",
             Self::Promote => "promote",
             Self::EmptyBranch => "empty-branch",
+            Self::ObsoleteBase => "obsolete-base",
         }
     }
 }

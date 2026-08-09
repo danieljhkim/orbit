@@ -7,6 +7,7 @@ use crate::context::{DeterministicActionHost, TaskHost};
 use super::super::super::input::{
     input_string_field, json_number_to_string, required_input_string,
 };
+use super::super::base_obsolescence::ensure_base_can_still_land;
 use super::super::freshness::branch_freshness_against_ref;
 use super::super::git::git_output;
 use super::super::handoff::{
@@ -55,6 +56,12 @@ fn open_or_reuse_pr<H: DeterministicActionHost + TaskHost + ?Sized>(
             )),
         ));
     }
+    // ORB-10644: divergence against the pinned base says nothing about whether
+    // that base is still a branch work can land through. A base that merged and
+    // was deleted (or restored to its pre-merge tip) still resolves, so every
+    // later step would report success against a PR nobody merges again.
+    ensure_base_can_still_land(&context.workspace_path, "pr_open", base, base_sha, input)
+        .map_err(|error| (FailedHandoffPhase::ObsoleteBase, error))?;
     let freshness = branch_freshness_against_ref(&context.workspace_path, head, base_ref, base_sha)
         .map_err(invalid_prepare)?;
     if freshness.commits_behind != 0 || freshness.commits_ahead == 0 {

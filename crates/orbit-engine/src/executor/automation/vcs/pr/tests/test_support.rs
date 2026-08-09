@@ -21,6 +21,9 @@ use crate::context::{
 
 use super::super::super::freshness::BranchFreshness;
 
+/// The intermediate branch of the stacked fixtures (ORB-10644).
+pub const STACKED_BASE_BRANCH: &str = "orbit/ORB-10643";
+
 #[derive(Clone, Debug)]
 pub struct ToolCall {
     pub name: String,
@@ -597,6 +600,110 @@ pub fn rebase_conflict_pr_workspace() -> PrWorkspace {
     git(&repo, &["checkout", "orbit/test-batch"]);
 
     PrWorkspace { _temp: temp, repo }
+}
+
+/// The stacked shape ORB-10644 is about: `orbit/test-batch` is cut from the
+/// intermediate branch `STACKED_BASE_BRANCH`, which is itself cut from the
+/// landing branch `agent-main`. All three exist on `origin`, so the base is a
+/// live delivery target until `land_stacked_base_by_squash` lands it.
+pub fn stacked_pr_workspace() -> PrWorkspace {
+    let temp = tempdir().expect("tempdir");
+    let repo = temp.path().join("repo");
+    let remote = temp.path().join("remote.git");
+    git(
+        temp.path(),
+        &["init", "--bare", remote.to_str().expect("remote path")],
+    );
+    fs::create_dir_all(&repo).expect("create repo dir");
+    git(&repo, &["init"]);
+    git(&repo, &["checkout", "-b", "agent-main"]);
+    git(&repo, &["config", "user.name", "Orbit Test"]);
+    git(&repo, &["config", "user.email", "orbit-test@example.com"]);
+    // A machine-global `core.hooksPath` rewrites fixture commit messages
+    // (ORB-10350); the delivery markers this fixture is grepped for must be
+    // exactly what it wrote.
+    let hooks = repo.join(".git").join("orbit-test-empty-hooks");
+    fs::create_dir_all(&hooks).expect("create empty hooks dir");
+    git(
+        &repo,
+        &["config", "core.hooksPath", &hooks.to_string_lossy()],
+    );
+    fs::write(repo.join("README.md"), "base\n").expect("write readme");
+    git(&repo, &["add", "README.md"]);
+    git(&repo, &["commit", "-m", "[ORB-10600] base"]);
+    git(
+        &repo,
+        &[
+            "remote",
+            "add",
+            "origin",
+            remote.to_str().expect("remote path"),
+        ],
+    );
+    git(&repo, &["push", "-u", "origin", "agent-main"]);
+
+    git(&repo, &["checkout", "-b", STACKED_BASE_BRANCH]);
+    fs::write(repo.join("parent.txt"), "parent\n").expect("write parent");
+    git(&repo, &["add", "parent.txt"]);
+    git(&repo, &["commit", "-m", "[ORB-10643] parent work"]);
+    git(&repo, &["push", "-u", "origin", STACKED_BASE_BRANCH]);
+
+    git(&repo, &["checkout", "-b", "orbit/test-batch"]);
+    fs::create_dir_all(repo.join("src")).expect("create src dir");
+    fs::write(repo.join("src/lib.rs"), "pub fn changed() {}\n").expect("write lib");
+    git(&repo, &["add", "src/lib.rs"]);
+    git(&repo, &["commit", "-m", "[ORB-10644] child work"]);
+    git(&repo, &["push", "-u", "origin", "orbit/test-batch"]);
+
+    PrWorkspace { _temp: temp, repo }
+}
+
+/// The intermediate branch's own PR squash-merges into `agent-main` — Orbit's
+/// own merge strategy — and the branch is left behind on `origin` at its
+/// pre-merge tip, exactly as a restored or never-pruned branch is. Nothing
+/// about `STACKED_BASE_BRANCH` stops resolving; it simply stops leading
+/// anywhere.
+pub fn land_stacked_base_by_squash(repo: &Path) {
+    let head = git(repo, &["rev-parse", "--abbrev-ref", "HEAD"]);
+    git(repo, &["checkout", "agent-main"]);
+    git(repo, &["merge", "--squash", STACKED_BASE_BRANCH]);
+    git(repo, &["commit", "-m", "[ORB-10643] parent work (#901)"]);
+    git(repo, &["push", "origin", "agent-main"]);
+    git(repo, &["checkout", &head]);
+}
+
+pub fn stacked_pr_open_input(repo: &Path, completed_task_ids: Vec<&str>) -> Value {
+    let base_sha = git(repo, &["rev-parse", STACKED_BASE_BRANCH]);
+    json!({
+        "workspace_path": repo.to_string_lossy(),
+        "job_run_id": "batch-1",
+        "completed_task_ids": completed_task_ids,
+        "base": STACKED_BASE_BRANCH,
+        "base_ref": STACKED_BASE_BRANCH,
+        "base_sha": base_sha,
+        "head": "orbit/test-batch",
+        "base_sync": "local",
+        "landing_branch": "agent-main",
+    })
+}
+
+/// The promote step's input, carrying the same base and landing declaration the
+/// open step was given.
+pub fn promote_input_from(open_input: &Value, pr_number: &Value, pr_url: &Value) -> Value {
+    let mut input = open_input.clone();
+    input["pr_number"] = pr_number.clone();
+    input["pr_url"] = pr_url.clone();
+    input
+}
+
+pub fn is_ancestor(repo: &Path, ancestor: &str, descendant: &str) -> bool {
+    Command::new("git")
+        .args(["merge-base", "--is-ancestor", ancestor, descendant])
+        .current_dir(repo)
+        .output()
+        .expect("run git merge-base")
+        .status
+        .success()
 }
 
 pub fn pr_open_input(repo: &Path, completed_task_ids: Vec<&str>) -> Value {
