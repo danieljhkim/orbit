@@ -11,7 +11,7 @@
 //!
 //! Exercises:
 //!   A) `V2ActivityCatalog::load_dir` picks up the four new v2 activities
-//!      (`agent_review_diff`, `agent_apply_fixes`, `promote_agent_main`,
+//!      (`agent_assess_diff`, `agent_apply_fixes`, `promote_agent_main`,
 //!      `revert_on_red`) and skips v1 assets silently.
 //!   B) `resolve_job_target_refs` rewrites `target: activity:<name>` refs
 //!      into inline `TargetStep`s using the catalog.
@@ -59,7 +59,7 @@ fn scenario_a_catalog_loads_new_activities() -> Result<(), Box<dyn std::error::E
     let dir = repo_root().join("crates/orbit-core/assets/activities");
     catalog.load_dir(&dir)?;
 
-    for name in ["agent_review_diff", "agent_apply_fixes", "revert_on_red"] {
+    for name in ["agent_assess_diff", "agent_apply_fixes", "revert_on_red"] {
         assert!(
             catalog.get(name).is_some(),
             "catalog missing new activity `{}` (present: {:?})",
@@ -67,12 +67,12 @@ fn scenario_a_catalog_loads_new_activities() -> Result<(), Box<dyn std::error::E
             catalog.names().collect::<Vec<_>>()
         );
     }
-    // Pinning: reviewer must be backend: http (§3.2 item 1).
-    let reviewer = catalog.get("agent_review_diff").expect("present");
-    let ActivityV2Spec::AgentLoop(spec) = &reviewer.spec else {
-        panic!("agent_review_diff should be agent_loop");
+    // Pinning: cross-iteration assessment must be backend: http.
+    let assessor = catalog.get("agent_assess_diff").expect("present");
+    let ActivityV2Spec::AgentLoop(spec) = &assessor.spec else {
+        panic!("agent_assess_diff should be agent_loop");
     };
-    assert_eq!(spec.backend, Backend::Http, "reviewer must pin http");
+    assert_eq!(spec.backend, Backend::Http, "assessor must pin http");
     assert_eq!(spec.provider, Provider::Claude);
 
     // Fixer is auto — no `session:` binding in the activity itself.
@@ -100,7 +100,7 @@ fn scenario_b_target_ref_resolves() -> Result<(), Box<dyn std::error::Error>> {
     println!("  B) resolve_job_target_refs rewrites named refs to inline specs");
     let catalog = load_reference_catalog()?;
 
-    let mut job = synthetic_job_using_ref("agent_review_diff");
+    let mut job = synthetic_job_using_ref("agent_assess_diff");
     resolve_job_target_refs(&mut job, &catalog)?;
 
     // After resolution the body must be an inline Target, not a TargetRef.
@@ -114,8 +114,8 @@ fn scenario_b_target_ref_resolves() -> Result<(), Box<dyn std::error::Error>> {
         panic!("expected agent_loop spec");
     };
     assert_eq!(spec.backend, Backend::Http);
-    assert_eq!(t.session.as_deref(), Some("reviewer"));
-    println!("    resolved ref → inline Target with session=reviewer");
+    assert_eq!(t.session.as_deref(), Some("assessor"));
+    println!("    resolved ref → inline Target with session=assessor");
     Ok(())
 }
 
@@ -182,31 +182,31 @@ fn scenario_d_pipeline_yaml_partial_resolution() -> Result<(), Box<dyn std::erro
 }
 
 fn scenario_e_backend_rejection_runs_after_resolution() -> Result<(), Box<dyn std::error::Error>> {
-    println!("  E) §3.2 rejection operates on resolved specs — reviewer session survives");
+    println!("  E) §3.2 rejection operates on resolved specs — assessor session survives");
     let catalog = load_reference_catalog()?;
-    let mut job = pipeline_with_reviewer_loop();
+    let mut job = pipeline_with_assessor_loop();
     resolve_job_target_refs(&mut job, &catalog)?;
-    // After resolution, the reviewer step has Backend::Http pinned (from
+    // After resolution, the assessor step has Backend::Http pinned (from
     // the asset file), so backend auto-resolution + §3.2 validator pass.
     resolve_job_backends(&mut job, Backend::Http);
     validate_job_loop_session_backends(&job, "synthetic")?;
-    println!("    loop+session+http reviewer accepted by validator");
+    println!("    loop+session+http assessor accepted by validator");
 
-    // Flipping the reviewer activity to cli in-catalog triggers the §3.2
+    // Flipping the assessor activity to cli in-catalog triggers the §3.2
     // rejection once resolution inlines the spec.
     let mut cli_catalog = V2ActivityCatalog::new();
-    let mut reviewer_cli = catalog.get("agent_review_diff").expect("present").clone();
-    if let ActivityV2Spec::AgentLoop(spec) = &mut reviewer_cli.spec {
+    let mut assessor_cli = catalog.get("agent_assess_diff").expect("present").clone();
+    if let ActivityV2Spec::AgentLoop(spec) = &mut assessor_cli.spec {
         spec.backend = Backend::Cli;
     }
-    cli_catalog.insert("agent_review_diff", reviewer_cli);
-    let mut job = pipeline_with_reviewer_loop();
+    cli_catalog.insert("agent_assess_diff", assessor_cli);
+    let mut job = pipeline_with_assessor_loop();
     resolve_job_target_refs(&mut job, &cli_catalog)?;
     resolve_job_backends(&mut job, Backend::Cli);
     let err =
         validate_job_loop_session_backends(&job, "synthetic").expect_err("expected §3.2 rejection");
     println!(
-        "    flipping reviewer backend → cli triggers rejection: {}",
+        "    flipping assessor backend → cli triggers rejection: {}",
         err
     );
     Ok(())
@@ -339,25 +339,25 @@ fn synthetic_job_using_ref(target_name: &str) -> JobV2 {
                 target: format!("activity:{}", target_name),
                 default_input: None,
                 timeout_seconds: 0,
-                session: Some("reviewer".to_string()),
+                session: Some("assessor".to_string()),
                 role: None,
             }),
         }],
     }
 }
 
-fn pipeline_with_reviewer_loop() -> JobV2 {
-    let review_step = JobV2Step {
-        id: "review".to_string(),
+fn pipeline_with_assessor_loop() -> JobV2 {
+    let assess_step = JobV2Step {
+        id: "assess".to_string(),
         when: None,
         retry: None,
         recovery_activity: None,
         resolved_recovery_activity: None,
         body: JobV2StepBody::TargetRef(TargetRef {
-            target: "activity:agent_review_diff".to_string(),
+            target: "activity:agent_assess_diff".to_string(),
             default_input: None,
             timeout_seconds: 0,
-            session: Some("reviewer".to_string()),
+            session: Some("assessor".to_string()),
             role: None,
         }),
     };
@@ -371,7 +371,7 @@ fn pipeline_with_reviewer_loop() -> JobV2 {
         max_active_runs: 1,
         kind: JobKind::Workflow,
         steps: vec![JobV2Step {
-            id: "review_fix".to_string(),
+            id: "assess_fix".to_string(),
             when: None,
             retry: None,
             recovery_activity: None,
@@ -381,7 +381,7 @@ fn pipeline_with_reviewer_loop() -> JobV2 {
                     items: None,
                     max_iterations: 3,
                     break_when: None,
-                    steps: vec![review_step],
+                    steps: vec![assess_step],
                 },
             },
         }],

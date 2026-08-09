@@ -19,10 +19,6 @@ pub(crate) const DEFAULT_ACTIVITY_FILES: &[(&str, &str)] = &[
         include_str!("../../assets/activities/agent_implement.yaml"),
     ),
     (
-        "agent_review",
-        include_str!("../../assets/activities/agent_review.yaml"),
-    ),
-    (
         "apply_triage_dispositions",
         include_str!("../../assets/activities/apply_triage_dispositions.yaml"),
     ),
@@ -57,10 +53,6 @@ pub(crate) const DEFAULT_ACTIVITY_FILES: &[(&str, &str)] = &[
     (
         "invoke_and_wait",
         include_str!("../../assets/activities/invoke_and_wait.yaml"),
-    ),
-    (
-        "independent_review_guard",
-        include_str!("../../assets/activities/independent_review_guard.yaml"),
     ),
     (
         "pipeline_success_guard",
@@ -192,7 +184,6 @@ mod tests {
             ("pr_failure_handoff", "pr_failure_handoff"),
             ("pr_promote", "pr_promote"),
             ("release_locks", "release_locks"),
-            ("independent_review_guard", "independent_review_guard"),
             ("list_triage_candidates", "list_triage_candidates"),
             ("apply_triage_dispositions", "apply_triage_dispositions"),
             ("worktree_gc", "worktree_gc"),
@@ -284,11 +275,7 @@ mod tests {
 
     #[test]
     fn agent_response_contract_matches_durable_handoff_shape() {
-        for (name, required) in [
-            ("agent_implement", false),
-            ("agent_review", true),
-            ("triage_failed_runs", true),
-        ] {
+        for (name, required) in [("agent_implement", false), ("triage_failed_runs", true)] {
             let (_, yaml) = DEFAULT_ACTIVITY_FILES
                 .iter()
                 .find(|(candidate, _)| *candidate == name)
@@ -341,52 +328,6 @@ mod tests {
             );
         }
         assert!(checked > 1, "expected several agent_loop activities");
-    }
-
-    #[test]
-    fn agent_review_is_read_only_and_requires_an_exact_head_verdict() {
-        let (_, yaml) = DEFAULT_ACTIVITY_FILES
-            .iter()
-            .find(|(name, _)| *name == "agent_review")
-            .expect("agent review activity is seeded");
-        assert_eq!(
-            *yaml,
-            include_str!("../../../../.orbit/resources/activities/agent_review.yaml"),
-            "shipped and workspace review activities must remain byte-identical"
-        );
-        let asset = load_activity_asset(yaml).expect("parse agent review activity");
-        assert_eq!(
-            asset.spec.output_schema_json["required"],
-            serde_json::json!(["verdict", "reviewed_head_sha"])
-        );
-        assert!(
-            asset.spec.input_schema_json["required"]
-                .as_array()
-                .is_some_and(|required| required.iter().any(|field| field == "repo_root")),
-            "agent_review must require the second half of the declared worktree pair"
-        );
-        match asset.spec.spec {
-            ActivityV2Spec::AgentLoop(spec) => {
-                assert!(spec.require_response_envelope);
-                assert_eq!(
-                    spec.role, None,
-                    "flat review crew must not need a role field"
-                );
-                assert!(!spec.tools.iter().any(|tool| tool == "fs.delete"));
-                assert!(spec.instruction.contains("candidate_head_sha"));
-                assert!(spec.instruction.contains("Do not edit"));
-                assert!(spec.instruction.contains("[independent-review]"));
-                assert!(spec.instruction.contains("orbit.friction.add"));
-                assert!(spec.instruction.contains("result.reviewed_head_sha"));
-                assert!(
-                    !spec
-                        .instruction
-                        .contains(r#"{"schemaVersion":1,"status":"success""#),
-                    "the provider renderer, not the activity, owns the response frame"
-                );
-            }
-            other => panic!("expected agent_loop agent_review, got {other:?}"),
-        }
     }
 
     #[test]

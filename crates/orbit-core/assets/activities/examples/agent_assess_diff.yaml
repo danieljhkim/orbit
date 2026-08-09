@@ -1,0 +1,47 @@
+schemaVersion: 2
+kind: Activity
+metadata:
+  name: agent_assess_diff
+spec:
+  type: agent_loop
+  description: >
+    Assessment step for the v2 assess-and-fix loop example. Consumes the
+    current diff plus accumulated Session history and emits a structured
+    verdict. Cross-iteration sessions require the HTTP backend.
+  input_schema_json:
+    type: object
+    required: [diff]
+    properties:
+      diff:
+        type: string
+      branch:
+        type: string
+      iteration:
+        type: integer
+  output_schema_json:
+    type: object
+    required: [decision, blocking_count]
+    properties:
+      decision:
+        type: string
+        enum: [approved, changes_requested, rejected]
+      blocking_count:
+        type: integer
+      findings:
+        type: array
+        items:
+          type: object
+  instruction: |
+    Assess the diff and return a structured verdict. Emit `decision: approved`
+    only when there are no blocking issues; otherwise emit
+    `changes_requested` with findings and a non-zero `blocking_count`. Use the
+    Session to track previously raised findings so the loop converges.
+  tools:
+    - fs.read
+    - orbit.audit.*
+  on_denial: terminate
+  max_iterations: 1
+  role: reviewer
+  backend: http
+  provider: claude
+  wall_clock_timeout_seconds: 300

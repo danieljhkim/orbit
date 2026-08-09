@@ -15,7 +15,6 @@ use crate::command::job::pipeline::{
     configure_pipeline_worker_command, configure_pipeline_worker_stdio, pipeline_worker_log_path,
     resolve_pipeline_worker_executable,
 };
-use crate::command::task::TaskAddParams;
 use crate::command::workflow::ShipMode;
 
 fn test_runtime() -> (TempDir, OrbitRuntime) {
@@ -27,65 +26,6 @@ fn test_runtime() -> (TempDir, OrbitRuntime) {
     let runtime =
         OrbitRuntime::from_roots(&global_root, &workspace_root).expect("build test runtime");
     (root, runtime)
-}
-
-fn review_test_runtime() -> (TempDir, OrbitRuntime) {
-    let root = TempDir::new().expect("tempdir");
-    let global_root = root.path().join("global");
-    let workspace_root = root.path().join("repo/.orbit");
-    std::fs::create_dir_all(&global_root).expect("create global root");
-    std::fs::create_dir_all(&workspace_root).expect("create workspace root");
-    std::fs::write(
-        workspace_root.join("config.toml"),
-        r#"
-[workflow]
-base_branch = "main"
-default_crew = "sol"
-
-[crews.sol]
-model = "gpt-5.6-sol"
-provider = "codex"
-backend = "cli"
-
-[crews.opus]
-model = "opus"
-provider = "claude"
-backend = "cli"
-
-[crews.opus_alias]
-model = "opus"
-provider = "claude"
-backend = "cli"
-
-[crews.opus_vendor_alias]
-model = "opus"
-provider = "anthropic"
-backend = "cli"
-
-[crews.unmaterializable]
-model = "mystery"
-provider = "not-a-provider"
-backend = "cli"
-"#,
-    )
-    .expect("write config");
-    let runtime =
-        OrbitRuntime::from_roots(&global_root, &workspace_root).expect("build test runtime");
-    (root, runtime)
-}
-
-fn add_review_test_task(runtime: &OrbitRuntime, crew: &str) -> String {
-    runtime
-        .add_task(TaskAddParams {
-            title: "review preflight fixture".to_string(),
-            description: "prove review validation occurs before submission".to_string(),
-            plan: "validate without implementation side effects".to_string(),
-            status: Some(orbit_common::types::TaskStatus::Backlog),
-            crew: Some(crew.to_string()),
-            ..TaskAddParams::default()
-        })
-        .expect("add task")
-        .id
 }
 
 #[test]
@@ -378,48 +318,6 @@ fn deleted_current_executable_resolves_to_replaced_installed_path() {
     );
 }
 
-#[test]
-fn review_submission_rejects_unknown_same_or_unmaterializable_crews_before_run_insert() {
-    for (review_crew, expected) in [
-        ("missing", "is not defined"),
-        ("sol", "is not independent"),
-        ("opus_alias", "is not independent"),
-        ("opus_vendor_alias", "is not independent"),
-        ("unmaterializable", "unmaterializable provider"),
-    ] {
-        let (_root, runtime) = review_test_runtime();
-        let implementation_crew = if matches!(review_crew, "opus_alias" | "opus_vendor_alias") {
-            "opus"
-        } else {
-            "sol"
-        };
-        let task_id = add_review_test_task(&runtime, implementation_crew);
-
-        let error = runtime
-            .submit_ship_run(
-                ShipMode::Pr,
-                Some("main"),
-                &[task_id],
-                true,
-                Some(review_crew),
-                Some("test"),
-            )
-            .expect_err("invalid review crew must fail before submission");
-
-        assert!(
-            error.to_string().contains(expected),
-            "unexpected error for {review_crew}: {error}"
-        );
-        assert!(
-            runtime
-                .list_job_runs(JobRunListParams::default())
-                .expect("list job runs")
-                .is_empty(),
-            "validation failure must not persist an implementation run"
-        );
-    }
-}
-
 /// ORB-10544: the duplicate-dispatch guard lives in the shared submission path,
 /// so it cannot be bypassed by a future adapter that calls `submit_ship_run`
 /// directly instead of going through the dashboard endpoint or the MCP tool.
@@ -446,8 +344,6 @@ fn ship_submission_refuses_a_task_already_carried_by_a_non_terminal_run() {
             ShipMode::Local,
             Some("main"),
             &["TST-00001".to_string()],
-            false,
-            None,
             Some("test"),
         )
         .expect_err("a task with a run in flight must not dispatch a second run");
@@ -496,14 +392,7 @@ fn ship_submission_guard_is_scoped_to_the_selected_tasks() {
         ("auto discovery", Vec::new()),
     ] {
         let error = runtime
-            .submit_ship_run(
-                ShipMode::Local,
-                Some("main"),
-                &task_ids,
-                false,
-                None,
-                Some("test"),
-            )
+            .submit_ship_run(ShipMode::Local, Some("main"), &task_ids, Some("test"))
             .expect_err("no job asset is deployed in this fixture");
         assert!(
             !matches!(error, OrbitError::ShipRunInFlight { .. }),
@@ -514,29 +403,4 @@ fn ship_submission_guard_is_scoped_to_the_selected_tasks() {
             "{label} must fail on the missing job asset instead: {error:?}"
         );
     }
-}
-
-#[test]
-fn review_submission_fails_closed_when_deployed_review_assets_are_missing() {
-    let (_root, runtime) = review_test_runtime();
-    let task_id = add_review_test_task(&runtime, "sol");
-
-    let error = runtime
-        .submit_ship_run(
-            ShipMode::Pr,
-            Some("main"),
-            &[task_id],
-            true,
-            Some("opus"),
-            Some("test"),
-        )
-        .expect_err("missing review assets must fail before submission");
-
-    assert!(error.to_string().contains("job not found"), "{error}");
-    assert!(
-        runtime
-            .list_job_runs(JobRunListParams::default())
-            .expect("list job runs")
-            .is_empty()
-    );
 }

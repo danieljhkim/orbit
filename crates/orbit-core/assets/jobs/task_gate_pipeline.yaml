@@ -50,8 +50,6 @@ spec:
     mode: pr
     base_branch: main
     base_sync: remote
-    review: false
-    review_crew: null
     max_wait_seconds: 3600
     poll_interval_seconds: 30
     ttl_seconds: 7200
@@ -92,8 +90,6 @@ spec:
           task_ids: "{{ input.task_ids }}"
           base_branch: "{{ input.base_branch }}"
           base_sync: "{{ input.base_sync }}"
-          review: "{{ input.review }}"
-          review_crew: "{{ input.review_crew }}"
           auto_push: true
         admission_task_ids: "{{ input.task_ids }}"
         admission_workflow: worktree_setup

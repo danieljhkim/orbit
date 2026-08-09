@@ -645,21 +645,6 @@ Narrative lives in the ADR store — retrieve it with `orbit tool run orbit.adr.
 
 ---
 
-## ADR-0233 — Materialize independent review as a post-publication child Run
-
-**Status:** Accepted · 2026-07 · [ORB-10266]
-
-**Context.** An inline `agent_review` step ran before the PR candidate was committed, pushed, or published and left no independently addressable review Run. Orbit could keep that inline activity and add more output checks, or materialize review only after publication as its own durable child bound to the pushed SHA.
-
-**Decision.** For explicit-task PR shipment with review enabled, dispatch exactly one `task_review_pipeline` child after push, PR publication, and task promotion. Snapshot the parent run, task IDs, workspace, explicit review crew, candidate branch, pushed SHA, and PR identity in the child input; require a structured verdict whose reviewed SHA exactly matches that snapshot. Preflight the selected crew and deployed job/activity contract before inserting the implementation run, and reject review outside PR mode.
-
-**Consequences.**
-- Independent review is observable and resumable through normal job-run records and cannot silently inherit the implementation crew.
-- `review=false` keeps the implementation-only shipment path, while review-enabled no-diff and local shipments do not invent an unpublished candidate to review.
-- Cost: review-enabled shipment adds a child Run and wait boundary after PR publication, increasing latency and requiring source/shipped workflow assets to stay synchronized.
-
----
-
 ## ADR-0236 — Fail delivery before Git mutation when execution outcome is not success
 
 **Status:** Accepted · 2026-07 · [ORB-10313]
@@ -783,24 +768,6 @@ while common user-local installations work from scrubbed service environments.
 **Status:** Proposed · 2026-07 · [ORB-10470]
 
 Narrative lives in the ADR store — retrieve it with `orbit tool run orbit.adr.show --input '{"id":"ADR-0289"}'`.
-## ADR-0288 — Independent review approves from durable per-criterion records, not a scalar response
-
-**Status:** Proposed · 2026-07 · [ORB-10467]
-
-**Context.** The independent-review child Run bound its verdict to the published candidate SHA and nothing else: `agent_review` loaded a task's description, criteria, plan, and context files and returned one `approve`/`request_changes` string, and the guard checked only that the reported SHA matched. Later task comments — where a scope correction actually lands — were never required reading, and an approval said nothing per acceptance criterion, so an unassessed criterion looked exactly like a met one. A published candidate was approved while violating a final scope deferral, and only a later manual patch audit caught it. The alternatives were to enrich the reviewer's response with per-criterion fields and gate on them, to parse the reviewer's prose for coverage, or to require a machine-readable record persisted on the task and gate on that. The first makes an advisory agent response load-bearing, and the second converts scalar prose into an unverified approval.
-
-**Decision.** The reviewer persists one `[independent-review]` record per participating task as a task comment before returning — candidate SHA, verdict, `reconciled_through`, `late_corrections`, and one `met`/`not_met` entry per acceptance criterion indexed from 1 — under an instruction that states the authority ordering: the newest comment or history entry that narrows, defers, or corrects the work outranks the acceptance criteria, which outrank the description and plan. `independent_review_guard` becomes runtime-backed, takes the bundle from the run's own input, reloads each task's criteria and comments, and recovers the newest record for the published SHA. The response verdict is cross-checked and disagreement fails the step; approval further requires full criterion coverage, every criterion `met`, and `reconciled_through` no older than the newest comment that is not itself a review record. Blocking verdicts are recorded without the coverage gate, and ship preflight rejects a deployed guard step that is not handed `task_ids` and `candidate_head_sha`.
-
-**Consequences.**
-- An approval carries durable, re-readable evidence of which criteria were assessed, on what candidate, and how current the reviewer's reading of task authority was.
-- Approving against an older reading of the task fails the review run instead of reaching the parent success gate, so a late correction cannot be silently outrun.
-- The reviewer's structured response stays advisory and is only cross-checked, so a missing response no longer decides anything by itself.
-- Cost: the review activity now writes task comments, so it is no longer read-only with respect to Orbit state, and an unpersisted or malformed record fails the run even when the review itself was sound.
-- Cost: a deployed `task_review_pipeline` predating this change fails closed at run time; asset and binary must be upgraded together (preflight names the missing field for ship submissions).
-- Cost: approval requires every criterion to be reported `met`, so criteria that no longer describe the agreed scope must be corrected before review can approve.
-
----
-
 ## ADR-0290 — Workflow admission verifies dependency delivery into the pinned base, not just lifecycle completion
 
 **Status:** Proposed · 2026-07 · [ORB-10464]
@@ -870,17 +837,8 @@ Narrative lives in the ADR store — retrieve it with `orbit tool run orbit.adr.
 
 ---
 
-## ADR-0328 — Classify independent-review startup separately from reviewer rejection
-
-**Status:** Proposed · 2026-08 · [ORB-10606]
-
-Narrative lives in the ADR store — retrieve it with `orbit tool run orbit.adr.show --input '{"id":"ADR-0328"}'`.
-
----
-
 ## Task References
 
-- **[ORB-10606]** — Supply the complete reviewer worktree pair and distinguish review startup failure from a reviewer rejection at the parent and task-history boundaries ([ADR-0328]).
 - **[ORB-10593]** — Fail dispatch immediately when a `blocked_by` target is archived, rejected, or dangling, naming the blocker ([ADR-0319]).
 - **[ORB-10544]** — Move the ship in-flight duplicate-dispatch guard into `submit_ship_run` so HTTP and MCP are thin projections of one typed conflict ([ADR-0303], correcting the surface-local check from [ADR-0257]).
 
@@ -889,7 +847,6 @@ Narrative lives in the ADR store — retrieve it with `orbit tool run orbit.adr.
 - **[ORB-10468]** — Introduce run-keyed dirty integrity recovery plus the now-superseded provider-commit admission policy ([ADR-0294], superseded by [ADR-0299]).
 - **[ORB-10471]** — Scope the worktree boundary guard's primary dirt check to paths the run touched, so unrelated primary dirt no longer defeats a benign fast-forward ([ADR-0292]).
 - **[ORB-10470]** — Make resume submit a detached run that starts at the failed checkpoint, and reconcile blocked/re-stamped tasks against the run's retry lineage ([ADR-0289]).
-- **[ORB-10467]** — Require independent review to reconcile late task authority and every acceptance criterion ([ADR-0288]).
 - **[ORB-10456]** — Resolve provider launchers at the shared CLI spawn boundary and add provider-aware missing-launcher diagnostics ([ADR-0259]).
 - **[ORB-10454]** — Allocate [ADR-0258] for the step-completion / response-content split and retire the IOU in ADR-0224's amendment block.
 - **[ORB-10427]** — Share one worktree-path derivation between `setup_worktree` and gc; collect bundles only when every member has settled.
@@ -965,7 +922,6 @@ Narrative lives in the ADR store — retrieve it with `orbit tool run orbit.adr.
 - **[ORB-00374]** — Remove the `shell` activity variant and `run_shell` dispatch (fail-closed resolution of [ORB-00363]).
 - **[ORB-10202]** — Remove the retired friction task status while preserving workflow admission and triage behavior.
 - **[ORB-10232]** — Model recoverable PR handoff as checkpointed job activities with exact-SHA force-push provenance.
-- **[ORB-10266]** — Materialize independent review as a durable exact-head child Run or fail before implementation.
 - **[ORB-10313]** — Fail delivery before Git mutation when the durable execution outcome is not `Outcome: success`.
 - **[ORB-10363]** — Rebase task candidates after concurrent base advances and publish blocked PRs instead of stranding failed work.
 - **[ORB-10332]** — Remove the unused Groundhog activity kind and the epic/parallel pipeline layer (`task_epic_pipeline`, `epic_orchestrator`, `pipeline_wait`, legacy parallel-batch executor).

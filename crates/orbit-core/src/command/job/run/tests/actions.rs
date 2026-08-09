@@ -67,14 +67,14 @@ fn cancelled_pending_run_is_not_claimed_by_pipeline_worker() {
 #[test]
 fn failed_run_wait_entry_carries_the_terminal_step_diagnostic() {
     let (_root, runtime) = test_runtime();
-    let run = insert_pending_run(&runtime, "task_review_pipeline");
+    let run = insert_pending_run(&runtime, "task_pilot_pipeline");
     let started_at = Utc::now() - Duration::seconds(2);
     let finished_at = Utc::now();
     runtime
         .stores()
         .jobs()
         .mark_job_run_running(&run.run_id, started_at, std::process::id())
-        .expect("mark review run running");
+        .expect("mark child run running");
     runtime
         .stores()
         .jobs()
@@ -83,7 +83,7 @@ fn failed_run_wait_entry_carries_the_terminal_step_diagnostic() {
             &orbit_store::JobRunStepParams {
                 step_index: 0,
                 target_type: orbit_common::types::JobTargetType::Activity,
-                target_id: "agent_review".to_string(),
+                target_id: "task_pilot".to_string(),
                 started_at,
                 finished_at,
                 duration_ms: Some(2_000),
@@ -94,12 +94,12 @@ fn failed_run_wait_entry_carries_the_terminal_step_diagnostic() {
                 error_message: Some("declared path pair is incomplete".to_string()),
             },
         )
-        .expect("record review startup failure");
+        .expect("record child startup failure");
     runtime
         .stores()
         .jobs()
         .finalize_job_run(&run.run_id, JobRunState::Failed, finished_at, Some(2_000))
-        .expect("finalize failed review run");
+        .expect("finalize failed child run");
 
     let waited = runtime
         .wait_pipeline_runs(std::slice::from_ref(&run.run_id), 1, 1, Some("test"))

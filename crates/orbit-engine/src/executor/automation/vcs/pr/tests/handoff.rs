@@ -329,57 +329,6 @@ fn conflicting_rebase_publishes_clean_pre_rebase_branch_and_blocks_task() {
 }
 
 #[test]
-fn review_not_started_records_history_without_blocking_or_republishing_candidate() {
-    let workspace = pr_workspace();
-    let task_id = "ORB-REVIEW-NOT-STARTED";
-    let host = PrOpenTestHost::new(
-        vec![review_batch_task(task_id, Some("codex"), Some("codex"))],
-        workspace.repo.clone(),
-    );
-
-    let result = pr_failure_handoff(
-        &host,
-        &json!({
-            "failed_step_id": "require_independent_review_success",
-            "activity_name": "pipeline_success_guard",
-            "error_code": "independent_review_not_started",
-            "error_message": "child jrun-review failed before agent_review: worktree_mismatch",
-            "run_id": "batch-1",
-            "job_input": {
-                "task_ids": [task_id],
-                "base_branch": "agent-main",
-            },
-            "pipeline": {},
-        }),
-    )
-    .expect("review startup failure is recorded without a VCS handoff");
-
-    assert_eq!(result["decision"], json!("review_not_started"));
-    assert_eq!(result["task_status"], json!("review"));
-    assert!(host.tool_calls().is_empty(), "no GitHub or Git tool calls");
-    assert_eq!(
-        host.get_task(task_id)
-            .expect("task remains available")
-            .status,
-        TaskStatus::Review
-    );
-    let updates = host.automation_updates();
-    assert_eq!(updates.len(), 1);
-    assert_eq!(updates[0].1.status, None);
-    assert_eq!(
-        updates[0].1.status_event.as_deref(),
-        Some("independent_review_not_started")
-    );
-    assert!(
-        updates[0]
-            .1
-            .status_note
-            .as_deref()
-            .is_some_and(|note| note.contains("no blocked failure handoff was published"))
-    );
-}
-
-#[test]
 fn non_fast_forward_drift_handoff_commits_dirty_work_and_raises_pr() {
     let workspace = no_diff_pr_workspace();
     fs::create_dir_all(workspace.repo.join("src")).expect("create source dir");

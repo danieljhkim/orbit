@@ -8,7 +8,7 @@ use serde_json::{Value, json};
 use crate::command::job::JobRunListParams;
 use crate::{OrbitRuntime, ShipMode};
 
-use super::input::{optional_bool_alias, parse_string_array_field};
+use super::input::parse_string_array_field;
 use super::json::serialize_error;
 
 const DEFAULT_RUN_LIST_LIMIT: usize = 25;
@@ -34,17 +34,8 @@ pub(super) fn ship(
             .map_or(ShipMode::Pr, |binding| binding.ship_mode),
     };
     let base = optional_string(&input, "base")?;
-    let review = optional_bool_alias(&input, &["review"])?.unwrap_or(false);
-    let review_crew = optional_string(&input, "review_crew")?;
     let actor = actor(runtime, agent.as_deref(), model.as_deref());
-    let invoke = runtime.submit_ship_run(
-        mode,
-        base.as_deref(),
-        &task_ids,
-        review,
-        review_crew.as_deref(),
-        Some(&actor),
-    )?;
+    let invoke = runtime.submit_ship_run(mode, base.as_deref(), &task_ids, Some(&actor))?;
     Ok(json!({
         "workflow": "ship",
         "job_id": invoke.job_name,

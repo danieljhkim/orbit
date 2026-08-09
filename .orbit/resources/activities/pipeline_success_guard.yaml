@@ -6,10 +6,8 @@ spec:
   type: deterministic
   description: >
     Fail the current workflow when one or more child pipeline wait entries did
-    not reach `status: succeeded`. An opt-in review contract additionally
-    distinguishes a missing reviewer checkpoint from a review that ran and
-    enforces the required durable verdict. Use this after any required cleanup
-    steps that still need access to the raw child status.
+    not reach `status: succeeded`. Use this after any required cleanup steps
+    that still need access to the raw child status.
   input_schema_json:
     type: object
     properties:
@@ -39,12 +37,6 @@ spec:
               type: string
             pipeline:
               type: object
-      review_step:
-        type: string
-      verdict_step:
-        type: string
-      required_verdict:
-        type: string
     anyOf:
       - required: [result]
       - required: [results]

@@ -41,10 +41,6 @@ const DEFAULT_JOB_FILES: &[(&str, &str)] = &[
         include_str!("../../../../assets/jobs/task_pr_pipeline.yaml"),
     ),
     (
-        "task_review_pipeline",
-        include_str!("../../../../assets/jobs/task_review_pipeline.yaml"),
-    ),
-    (
         "task_triage_pipeline",
         include_str!("../../../../assets/jobs/task_triage_pipeline.yaml"),
     ),
@@ -417,225 +413,6 @@ fn local_task_pipeline_commits_before_merge_and_reconciles_with_local_base() {
 }
 
 #[test]
-fn ship_review_controls_propagate_through_auto_and_gate_pipelines() {
-    let auto_yaml = DEFAULT_JOB_FILES
-        .iter()
-        .find_map(|(name, yaml)| (*name == "task_auto_pipeline").then_some(*yaml))
-        .expect("task auto pipeline default exists");
-    let auto = load_job_asset(auto_yaml).expect("parse task auto pipeline");
-    let auto_defaults = auto
-        .spec
-        .default_input
-        .as_ref()
-        .expect("task auto pipeline default input");
-    assert_eq!(auto_defaults["review"], false);
-    assert_eq!(auto_defaults["review_crew"], Value::Null);
-
-    let auto_dispatch = auto
-        .spec
-        .steps
-        .iter()
-        .find(|step| step.id == "dispatch")
-        .expect("task auto pipeline dispatch step");
-    let JobV2StepBody::FanOut { fan_out, .. } = &auto_dispatch.body else {
-        panic!("task auto pipeline dispatch must be a fan-out");
-    };
-    let JobV2StepBody::TargetRef(auto_target) = &fan_out.worker.body else {
-        panic!("task auto pipeline worker must reference invoke_and_wait");
-    };
-    let auto_run_input = &auto_target
-        .default_input
-        .as_ref()
-        .expect("task auto pipeline dispatch input");
-    assert_eq!(auto_run_input["job_name"], "task_gate_pipeline");
-    let auto_run_input = &auto_run_input["run_input"];
-    assert_eq!(auto_run_input["review"], "{{ input.review }}");
-    assert_eq!(auto_run_input["review_crew"], "{{ input.review_crew }}");
-
-    let gate_yaml = DEFAULT_JOB_FILES
-        .iter()
-        .find_map(|(name, yaml)| (*name == "task_gate_pipeline").then_some(*yaml))
-        .expect("task gate pipeline default exists");
-    let gate = load_job_asset(gate_yaml).expect("parse task gate pipeline");
-    let gate_defaults = gate
-        .spec
-        .default_input
-        .as_ref()
-        .expect("task gate pipeline default input");
-    assert_eq!(gate_defaults["review"], false);
-    assert_eq!(gate_defaults["review_crew"], Value::Null);
-
-    let gate_dispatch = gate
-        .spec
-        .steps
-        .iter()
-        .find(|step| step.id == "dispatch_child")
-        .expect("task gate pipeline child dispatch step");
-    let JobV2StepBody::TargetRef(gate_target) = &gate_dispatch.body else {
-        panic!("task gate pipeline dispatch must reference invoke_and_wait");
-    };
-    let gate_run_input = &gate_target
-        .default_input
-        .as_ref()
-        .expect("task gate pipeline dispatch input");
-    assert_eq!(gate_run_input["job_name"], "task_{{ input.mode }}_pipeline");
-    let gate_run_input = &gate_run_input["run_input"];
-    assert_eq!(gate_run_input["review"], "{{ input.review }}");
-    assert_eq!(gate_run_input["review_crew"], "{{ input.review_crew }}");
-}
-
-#[test]
-fn pr_review_materializes_one_exact_head_child_with_the_explicit_crew() {
-    let yaml = DEFAULT_JOB_FILES
-        .iter()
-        .find_map(|(name, yaml)| (*name == "task_pr_pipeline").then_some(*yaml))
-        .expect("task PR pipeline exists");
-    let asset = load_job_asset(yaml).expect("task PR pipeline parses");
-    let defaults = asset.spec.default_input.as_ref().expect("default input");
-    assert_eq!(defaults["review"], false);
-    assert_eq!(defaults["review_crew"], Value::Null);
-    assert!(
-        asset
-            .spec
-            .steps
-            .iter()
-            .all(|step| step.id != "review_bundle"),
-        "the implementation run must not inline the independent reviewer"
-    );
-
-    let review_steps = asset
-        .spec
-        .steps
-        .iter()
-        .filter(|step| {
-            matches!(
-                &step.body,
-                JobV2StepBody::TargetRef(target)
-                    if target.target == "activity:invoke_and_wait"
-                        && target
-                            .default_input
-                            .as_ref()
-                            .and_then(|input| input.get("job_name"))
-                            .and_then(Value::as_str)
-                            == Some("task_review_pipeline")
-            )
-        })
-        .collect::<Vec<_>>();
-    assert_eq!(review_steps.len(), 1, "exactly one review Run is submitted");
-    let review = review_steps[0];
-    assert_eq!(review.id, "independent_review");
-    assert_eq!(review.retry, None);
-    assert_eq!(review.recovery_activity, None);
-    assert_eq!(
-        review.when.as_deref(),
-        Some(
-            "{{ input.review }} == true && {{ steps.commit.output.skipped_no_diff_expected }} != true"
-        )
-    );
-    let JobV2StepBody::TargetRef(target) = &review.body else {
-        panic!("independent review must use invoke_and_wait");
-    };
-    assert_eq!(target.target, "activity:invoke_and_wait");
-    let input = target
-        .default_input
-        .as_ref()
-        .expect("review dispatch input");
-    assert_eq!(input["job_name"], "task_review_pipeline");
-    assert_eq!(input["dedupe_run_input_field"], "parent_run_id");
-    let run_input = &input["run_input"];
-    assert_eq!(run_input["crew"], "{{ input.review_crew }}");
-    assert_eq!(
-        run_input["parent_run_id"],
-        "{{ steps.worktree.output.job_run_id }}"
-    );
-    assert_eq!(run_input["task_ids"], "{{ input.task_ids }}");
-    assert_eq!(
-        run_input["workspace_path"],
-        "{{ steps.worktree.output.workspace_path }}"
-    );
-    assert_eq!(
-        run_input["repo_root"],
-        "{{ steps.worktree.output.workspace_path }}"
-    );
-    assert_eq!(
-        run_input["candidate_head"],
-        "{{ steps.push.output.branch }}"
-    );
-    assert_eq!(
-        run_input["candidate_head_sha"],
-        "{{ steps.push.output.local_sha }}"
-    );
-    assert_eq!(
-        run_input["pr_number"],
-        "{{ steps.pr_open.output.pr_number }}"
-    );
-
-    let step_ids = asset
-        .spec
-        .steps
-        .iter()
-        .map(|step| step.id.as_str())
-        .collect::<Vec<_>>();
-    let review_index = step_ids
-        .iter()
-        .position(|id| *id == "independent_review")
-        .expect("review index");
-    for prerequisite in ["push", "pr_open", "promote_tasks"] {
-        assert!(
-            step_ids
-                .iter()
-                .position(|id| *id == prerequisite)
-                .expect("phase")
-                < review_index,
-            "review must run after {prerequisite}"
-        );
-    }
-
-    let guard = asset
-        .spec
-        .steps
-        .iter()
-        .find(|step| step.id == "require_independent_review_success")
-        .expect("independent review gate");
-    let JobV2StepBody::TargetRef(guard) = &guard.body else {
-        panic!("independent review gate must be an activity reference");
-    };
-    let guard_input = guard.default_input.as_ref().expect("guard input");
-    assert_eq!(guard_input["review_step"], "independent_review");
-    assert_eq!(guard_input["verdict_step"], "require_exact_head_verdict");
-    assert_eq!(guard_input["required_verdict"], "approve");
-
-    for job_name in ["task_pr_pipeline", "task_local_pipeline"] {
-        let yaml = DEFAULT_JOB_FILES
-            .iter()
-            .find_map(|(name, yaml)| (*name == job_name).then_some(*yaml))
-            .unwrap_or_else(|| panic!("default job {job_name} exists"));
-        let asset = load_job_asset(yaml).expect("leaf job parses");
-        let implement = asset
-            .spec
-            .steps
-            .iter()
-            .find(|step| step.id == "implement_bundle")
-            .expect("implement bundle");
-        let JobV2StepBody::Loop { loop_ } = &implement.body else {
-            panic!("implement bundle must be a loop");
-        };
-        let JobV2StepBody::TargetRef(implement_target) = &loop_.steps[0].body else {
-            panic!("implement step must reference agent_implement");
-        };
-        assert!(
-            implement_target
-                .default_input
-                .as_ref()
-                .expect("implement input")
-                .get("crew")
-                .is_none(),
-            "review crew must not reach {job_name} implementation"
-        );
-    }
-}
-
-#[test]
 fn task_shipment_implementers_pin_workspace_and_repo_roots_to_the_worktree() {
     for job_name in ["task_local_pipeline", "task_pr_pipeline"] {
         let yaml = DEFAULT_JOB_FILES
@@ -699,75 +476,6 @@ fn task_shipment_commit_steps_use_the_worktree_base_checkpoint() {
 }
 
 #[test]
-fn independent_review_job_requires_structured_exact_head_verdict() {
-    let yaml = DEFAULT_JOB_FILES
-        .iter()
-        .find_map(|(name, yaml)| (*name == "task_review_pipeline").then_some(*yaml))
-        .expect("review pipeline exists");
-    let asset = load_job_asset(yaml).expect("review pipeline parses");
-    assert_eq!(asset.spec.steps.len(), 2);
-    let JobV2StepBody::TargetRef(review) = &asset.spec.steps[0].body else {
-        panic!("review step must be an activity reference");
-    };
-    assert_eq!(review.target, "activity:agent_review");
-    let review_input = review.default_input.as_ref().expect("review input");
-    for field in [
-        "task_ids",
-        "workspace_path",
-        "repo_root",
-        "crew",
-        "parent_run_id",
-        "candidate_head",
-        "candidate_head_sha",
-        "pr_number",
-    ] {
-        assert!(review_input.get(field).is_some(), "missing {field}");
-    }
-    let JobV2StepBody::TargetRef(guard) = &asset.spec.steps[1].body else {
-        panic!("verdict guard must be an activity reference");
-    };
-    assert_eq!(guard.target, "activity:independent_review_guard");
-    // The guard reads acceptance criteria and comment authority from the task
-    // records, so it must be handed the run's own bundle. Templating these off
-    // the reviewer's response would let the thing being checked narrow the set
-    // of criteria that must be covered.
-    let guard_input = guard.default_input.as_ref().expect("guard input");
-    for (field, expected) in [
-        ("candidate_head_sha", "{{ input.candidate_head_sha }}"),
-        ("task_ids", "{{ input.task_ids }}"),
-    ] {
-        assert_eq!(
-            guard_input[field], expected,
-            "verdict guard must take {field} from the run input"
-        );
-    }
-}
-
-#[test]
-fn local_review_fails_before_worktree_or_implementation() {
-    let yaml = DEFAULT_JOB_FILES
-        .iter()
-        .find_map(|(name, yaml)| (*name == "task_local_pipeline").then_some(*yaml))
-        .expect("local pipeline exists");
-    let asset = load_job_asset(yaml).expect("local pipeline parses");
-    let first = asset.spec.steps.first().expect("local pipeline has steps");
-    assert_eq!(first.id, "reject_unsupported_review");
-    assert_eq!(first.when.as_deref(), Some("{{ input.review }} == true"));
-    assert!(matches!(
-        &first.body,
-        JobV2StepBody::TargetRef(target)
-            if target.target == "activity:pipeline_success_guard"
-    ));
-    assert!(
-        asset
-            .spec
-            .steps
-            .iter()
-            .all(|step| step.id != "review_bundle")
-    );
-}
-
-#[test]
 fn pr_pipeline_models_handoff_phases_as_ordered_activity_checkpoints() {
     let yaml = DEFAULT_JOB_FILES
         .iter()
@@ -813,12 +521,6 @@ fn pr_pipeline_models_handoff_phases_as_ordered_activity_checkpoints() {
                 "promote_tasks",
                 "activity:pr_promote",
                 Some("step_failure_recovery")
-            ),
-            ("independent_review", "activity:invoke_and_wait", None),
-            (
-                "require_independent_review_success",
-                "activity:pipeline_success_guard",
-                None
             ),
             (
                 "promote_no_diff",
@@ -1141,16 +843,6 @@ fn default_jobs_template_only_declared_agent_loop_handoffs() {
             "task_triage_pipeline",
             "triage",
             "steps.triage.output.dispositions",
-        ),
-        (
-            "task_review_pipeline",
-            "independent_review",
-            "steps.independent_review.output.verdict",
-        ),
-        (
-            "task_review_pipeline",
-            "independent_review",
-            "steps.independent_review.output.reviewed_head_sha",
         ),
     ]);
 

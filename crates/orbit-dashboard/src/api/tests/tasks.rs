@@ -1473,27 +1473,23 @@ async fn post_task_comment(runtime: OrbitRuntime, task_id: &str, body: Value) ->
         .expect("response")
 }
 
-/// ORB-10444: a human can comment on a task from the dashboard, and the comment
-/// survives the request — it is read back from the task's own review-thread
-/// structure (the bundle's comments store), not from a new field on the task
-/// record, so a page reload shows it.
+/// Historical independent-review records are now ordinary comments. They must
+/// remain loadable and render unchanged through the dashboard task response.
 #[tokio::test]
-async fn task_comment_endpoint_persists_into_the_review_thread_structure() {
+async fn historical_review_record_renders_as_an_opaque_task_comment() {
     let runtime = OrbitRuntime::in_memory().expect("build runtime");
     let task = seed_backlog_task(&runtime, "commentable task");
+    let historical = r#"[independent-review]
+{"candidate_head_sha":"abc123","verdict":"approve","criteria":[{"index":1,"verdict":"met"}]}"#;
 
-    let response = post_task_comment(
-        runtime.clone(),
-        &task.id,
-        json!({ "message": "  needs a smaller first commit  " }),
-    )
-    .await;
+    let response =
+        post_task_comment(runtime.clone(), &task.id, json!({ "message": historical })).await;
 
     assert_eq!(response.status(), StatusCode::OK);
     let body = body_json(response).await;
     assert_eq!(
         body["comments"][0]["message"].as_str(),
-        Some("needs a smaller first commit"),
+        Some(historical),
         "the response must echo the stored comment: {body}"
     );
 
@@ -1501,7 +1497,7 @@ async fn task_comment_endpoint_persists_into_the_review_thread_structure() {
     // is what a subsequent page load renders from.
     let stored = runtime.get_task_comments(&task.id).expect("task comments");
     assert_eq!(stored.len(), 1);
-    assert_eq!(stored[0].message, "needs a smaller first commit");
+    assert_eq!(stored[0].message, historical);
     assert!(
         runtime
             .get_task(&task.id)

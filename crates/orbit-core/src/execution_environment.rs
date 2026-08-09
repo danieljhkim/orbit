@@ -113,7 +113,6 @@ impl OrbitRuntime {
                 explicit_task_ids: "non-empty task_ids select exactly those tasks; empty selects backlog",
                 supported_modes: ["local", "pr"],
                 base_semantics: "submission uses the effective runtime workflow base branch",
-                review_semantics: "review is PR-only and requires explicit task_ids plus review_crew",
             },
             jobs,
             activities,
@@ -143,7 +142,6 @@ struct ShipContractSemanticV1 {
     explicit_task_ids: &'static str,
     supported_modes: [&'static str; 2],
     base_semantics: &'static str,
-    review_semantics: &'static str,
 }
 
 #[derive(Serialize)]

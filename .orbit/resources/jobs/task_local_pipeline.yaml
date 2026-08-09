@@ -6,12 +6,6 @@
 # - If all implementations succeed, `commit` snapshots the bundle branch before merge.
 # - Tasks move to `review` only after the full bundle commits and merges cleanly.
 #
-# Independent review is a published-candidate contract and is supported only
-# by `task_pr_pipeline`. The canonical ship surface rejects local review
-# before submission; the first step below also fails closed for direct leaf
-# invocations so an enabled review cannot be silently ignored or start local
-# implementation work.
-
 schemaVersion: 2
 kind: Job
 metadata:
@@ -25,19 +19,8 @@ spec:
     auto_push: false
     base_branch: main
     base_sync: remote
-    review: false
-    review_crew: null
   
   steps:
-    - id: reject_unsupported_review
-      when: "{{ input.review }} == true"
-      target: activity:pipeline_success_guard
-      default_input:
-        context: task_local_pipeline review is unsupported
-        result:
-          status: failed
-          error: independent review requires PR mode and a published candidate
-
     - id: worktree
       target: activity:worktree_setup
       retry:

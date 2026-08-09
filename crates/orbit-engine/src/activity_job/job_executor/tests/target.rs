@@ -230,7 +230,7 @@ fn explicit_flat_crew_overrides_untagged_agent_activity() {
     );
     let host = RoleHost::new(config);
     let ctx = exec_ctx(&host);
-    let rendered_input = json!({ "crew": "independent-review" });
+    let rendered_input = json!({ "crew": "assessor" });
     let target = target_step_with_role(inline_agent_loop_spec(), None);
 
     let overridden = role_overridden_spec(&target, &ctx, &rendered_input)

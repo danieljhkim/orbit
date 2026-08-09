@@ -62,18 +62,6 @@ impl Tool for OrbitWorkflowShipTool {
                 param_type: "string".to_string(),
                 required: false,
             },
-            ToolParam {
-                name: "review".to_string(),
-                description: "Whether to run an independent review before shipment.".to_string(),
-                param_type: "boolean".to_string(),
-                required: false,
-            },
-            ToolParam {
-                name: "review_crew".to_string(),
-                description: "Explicit crew for the independent review step.".to_string(),
-                param_type: "string".to_string(),
-                required: false,
-            },
         ];
         parameters.extend(super::model_identity_params());
         ToolSchema {

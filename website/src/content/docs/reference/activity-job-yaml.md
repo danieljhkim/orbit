@@ -54,8 +54,8 @@ spec:
 Reference an activity:
 
 ```yaml
-- id: review
-  target: activity:agent_review_diff
+- id: assess
+  target: activity:agent_assess_diff
 ```
 
 Inline a full activity spec:
@@ -71,14 +71,14 @@ Inline a full activity spec:
 Run branches in parallel:
 
 ```yaml
-- id: parallel_review
+- id: parallel_assessment
   parallel:
     join: { mode: all }
     branches:
       - id: branch_a
-        target: activity:review_a
+        target: activity:assess_a
       - id: branch_b
-        target: activity:review_b
+        target: activity:assess_b
 ```
 
 ## Modifiers

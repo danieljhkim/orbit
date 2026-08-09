@@ -7,17 +7,14 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use chrono::Utc;
-use orbit_common::types::activity_job::{ActivityV2Spec, Backend, JobV2StepBody, Provider};
 use orbit_common::types::{
-    AuditEventStatus, Crew, JobRun, JobRunState, JobScheduleState, JobTargetType, JobV2,
-    NotFoundKind, OrbitError, OrbitEvent, PipelineState, audit_execution_id,
+    AuditEventStatus, JobRun, JobRunState, JobScheduleState, JobTargetType, NotFoundKind,
+    OrbitError, OrbitEvent, PipelineState, audit_execution_id,
 };
 use orbit_store::{AuditEventInsertParams, JobRunStepParams, TaskReservationReleaseReason};
 use serde::Serialize;
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
-
-use orbit_engine::V2RuntimeHost;
 
 use crate::OrbitRuntime;
 use crate::command::job::resume::ResumePlan;
@@ -30,8 +27,6 @@ const PIPELINE_WAIT_MAX_TIMEOUT_SECONDS: u64 = 7200;
 const PIPELINE_WAIT_DEFAULT_POLL_SECONDS: u64 = 5;
 const PIPELINE_WAIT_MIN_POLL_SECONDS: u64 = 1;
 const PIPELINE_WORKER_LOG_TAIL_BYTES: u64 = 16 * 1024;
-// ADR-0233: independent review is a post-publication exact-head child Run.
-const INDEPENDENT_REVIEW_JOB: &str = "task_review_pipeline";
 /// [ORB-10544] Cap on the run history scanned by the in-flight ship guard.
 /// Non-terminal runs are always among the newest rows, so a bounded window is
 /// enough to spot a duplicate dispatch without walking the whole history.
@@ -70,8 +65,7 @@ impl OrbitRuntime {
     /// ship-sweep`). `base_branch` falls back to the workspace's `[workflow]
     /// base_branch`; an empty `task_ids` slice selects auto
     /// (backlog-discovery) mode. One-shot: returns as soon as the run is
-    /// persisted and its worker spawned. `review_crew` is required and applied
-    /// only when `review` is enabled.
+    /// persisted and its worker spawned.
     ///
     /// [ORB-10544] An explicit task selection is guarded against duplicate
     /// dispatch here rather than in any one adapter: if a named task is already
@@ -85,29 +79,15 @@ impl OrbitRuntime {
         mode: crate::command::workflow::ShipMode,
         base_branch: Option<&str>,
         task_ids: &[String],
-        review: bool,
-        review_crew: Option<&str>,
         actor: Option<&str>,
     ) -> Result<PipelineInvokeResult, OrbitError> {
         let workflow =
             crate::command::workflow::find_workflow(crate::command::workflow::SHIP_WORKFLOW_ALIAS)
                 .ok_or_else(|| OrbitError::InvalidInput("unknown workflow 'ship'".to_string()))?;
         let base = base_branch.unwrap_or_else(|| self.workflow_base_branch());
-        let input =
-            crate::command::workflow::build_ship_input(mode, base, task_ids, review, review_crew)?;
+        let input = crate::command::workflow::build_ship_input(mode, base, task_ids)?;
         if let Some(conflict) = self.in_flight_ship_run_for_tasks(task_ids)? {
             return Err(conflict);
-        }
-        if review {
-            let review_crew = input
-                .get("review_crew")
-                .and_then(Value::as_str)
-                .ok_or_else(|| {
-                    OrbitError::InvalidInput(
-                        "ship review requires a materialized review crew".to_string(),
-                    )
-                })?;
-            self.preflight_independent_review(task_ids, review_crew)?;
         }
         self.submit_pipeline_run(workflow.job_id, input, None, actor)
     }
@@ -148,106 +128,6 @@ impl OrbitRuntime {
                 run_id: run.run_id,
             })
         }))
-    }
-
-    fn preflight_independent_review(
-        &self,
-        task_ids: &[String],
-        review_crew_name: &str,
-    ) -> Result<(), OrbitError> {
-        // L-0094: opt-in workflow promises must be materializable before the parent Run exists.
-        let review_crew = self.resolve_crew_for_task(Some(review_crew_name), None)?;
-        validate_review_crew_runtime(self, &review_crew)?;
-
-        for task_id in task_ids {
-            let task = self.get_task(task_id)?;
-            let implementation_crew = self.resolve_crew_for_task(None, task.crew.as_deref())?;
-            if implementation_crew.name == review_crew.name
-                || crews_share_runtime_assignment(&implementation_crew, &review_crew)
-            {
-                return Err(OrbitError::InvalidInput(format!(
-                    "ship review crew '{}' is not independent from task {} implementation crew '{}'",
-                    review_crew.name, task.id, implementation_crew.name
-                )));
-            }
-        }
-
-        self.preflight_independent_review_assets()
-    }
-
-    fn preflight_independent_review_assets(&self) -> Result<(), OrbitError> {
-        let load_job = |name: &str| {
-            self.load_v2_job_asset_by_name(name)
-                .map_err(|error| review_asset_error(format!("load deployed {name}: {error}")))
-        };
-        let (_, auto) = load_job("task_auto_pipeline")?;
-        let (_, gate) = load_job("task_gate_pipeline")?;
-        for (name, job) in [("task_auto_pipeline", &auto), ("task_gate_pipeline", &gate)] {
-            if !job_forwards_review_controls(job) {
-                return Err(review_asset_error(format!(
-                    "deployed {name} does not forward review and review_crew"
-                )));
-            }
-        }
-
-        let (_, pr) = load_job("task_pr_pipeline")?;
-        validate_pr_review_contract(&pr)?;
-
-        let (_, review) = load_job(INDEPENDENT_REVIEW_JOB)?;
-        validate_review_job_contract(&review)?;
-
-        let activities = self.v2_activity_catalog().map_err(|error| {
-            review_asset_error(format!("load deployed review activities: {error}"))
-        })?;
-        let agent_review = activities
-            .get("agent_review")
-            .ok_or_else(|| review_asset_error("deployed agent_review activity is missing"))?;
-        let ActivityV2Spec::AgentLoop(agent_spec) = &agent_review.spec else {
-            return Err(review_asset_error(
-                "deployed agent_review is not an agent_loop activity",
-            ));
-        };
-        if agent_spec.role.is_some()
-            || !agent_spec.require_response_envelope
-            || !schema_requires(&agent_review.input_schema_json, "workspace_path")
-            || !schema_requires(&agent_review.input_schema_json, "repo_root")
-            || !schema_requires(&agent_review.output_schema_json, "verdict")
-            || !schema_requires(&agent_review.output_schema_json, "reviewed_head_sha")
-        {
-            return Err(review_asset_error(
-                "deployed agent_review still relies on a role, omits the declared worktree pair, or does not require a structured exact-head verdict",
-            ));
-        }
-
-        let guard = activities
-            .get("independent_review_guard")
-            .ok_or_else(|| review_asset_error("deployed independent_review_guard is missing"))?;
-        match &guard.spec {
-            ActivityV2Spec::Deterministic(spec) if spec.action == "independent_review_guard" => {}
-            _ => {
-                return Err(review_asset_error(
-                    "deployed independent_review_guard has the wrong action",
-                ));
-            }
-        }
-        for (name, action) in [
-            ("invoke_and_wait", "invoke_and_wait"),
-            ("pipeline_success_guard", "pipeline_success_guard"),
-        ] {
-            let activity = activities.get(name).ok_or_else(|| {
-                review_asset_error(format!("deployed {name} activity is missing"))
-            })?;
-            match &activity.spec {
-                ActivityV2Spec::Deterministic(spec) if spec.action == action => {}
-                _ => {
-                    return Err(review_asset_error(format!(
-                        "deployed {name} activity has the wrong action"
-                    )));
-                }
-            }
-        }
-
-        Ok(())
     }
 
     /// [ORB-10470] Submit a resume of a terminal run as a detached run.
@@ -1053,310 +933,6 @@ impl OrbitRuntime {
             step_index: None,
         })
     }
-}
-
-fn validate_review_crew_runtime(runtime: &OrbitRuntime, crew: &Crew) -> Result<(), OrbitError> {
-    if crew.assignment.model.trim().is_empty() {
-        return Err(OrbitError::InvalidInput(format!(
-            "ship review crew '{}' has no materializable model",
-            crew.name
-        )));
-    }
-    let provider = Provider::parse(&crew.assignment.provider).map_err(|error| {
-        OrbitError::InvalidInput(format!(
-            "ship review crew '{}' has an unmaterializable provider: {error}",
-            crew.name
-        ))
-    })?;
-    let backend = Backend::parse(&crew.assignment.backend).ok_or_else(|| {
-        OrbitError::InvalidInput(format!(
-            "ship review crew '{}' has unknown backend '{}'",
-            crew.name, crew.assignment.backend
-        ))
-    })?;
-
-    match backend {
-        Backend::Cli => V2RuntimeHost::resolve_cli_executor(runtime, provider.as_str())
-            .map(|_| ())
-            .map_err(|error| {
-                OrbitError::InvalidInput(format!(
-                    "ship review crew '{}' cannot materialize its CLI executor: {error}",
-                    crew.name
-                ))
-            }),
-        Backend::Http if provider.has_http_transport() => Ok(()),
-        Backend::Http => Err(OrbitError::InvalidInput(format!(
-            "ship review crew '{}' selects provider '{}' without an HTTP transport",
-            crew.name, provider
-        ))),
-        Backend::Auto => Err(OrbitError::InvalidInput(format!(
-            "ship review crew '{}' must resolve to a concrete backend before submission",
-            crew.name
-        ))),
-    }
-}
-
-fn crews_share_runtime_assignment(left: &Crew, right: &Crew) -> bool {
-    left.assignment.model.trim() == right.assignment.model.trim()
-        && Provider::parse(&left.assignment.provider).ok()
-            == Provider::parse(&right.assignment.provider).ok()
-        && Backend::parse(&left.assignment.backend) == Backend::parse(&right.assignment.backend)
-}
-
-fn job_forwards_review_controls(job: &JobV2) -> bool {
-    let Some(defaults) = job.default_input.as_ref() else {
-        return false;
-    };
-    if defaults.get("review") != Some(&Value::Bool(false))
-        || defaults.get("review_crew") != Some(&Value::Null)
-    {
-        return false;
-    }
-    serde_json::to_value(job)
-        .ok()
-        .is_some_and(|value| value_contains_review_forwarding(&value))
-}
-
-fn value_contains_review_forwarding(value: &Value) -> bool {
-    match value {
-        Value::Object(map) => {
-            let matches = map.get("review").and_then(Value::as_str) == Some("{{ input.review }}")
-                && map.get("review_crew").and_then(Value::as_str)
-                    == Some("{{ input.review_crew }}");
-            matches || map.values().any(value_contains_review_forwarding)
-        }
-        Value::Array(values) => values.iter().any(value_contains_review_forwarding),
-        _ => false,
-    }
-}
-
-fn validate_pr_review_contract(job: &JobV2) -> Result<(), OrbitError> {
-    let review_steps = job
-        .steps
-        .iter()
-        .filter(|step| {
-            matches!(
-                &step.body,
-                JobV2StepBody::TargetRef(target)
-                    if target.target == "activity:invoke_and_wait"
-                        && target
-                            .default_input
-                            .as_ref()
-                            .and_then(|input| input.get("job_name"))
-                            .and_then(Value::as_str)
-                            == Some(INDEPENDENT_REVIEW_JOB)
-            )
-        })
-        .collect::<Vec<_>>();
-    if review_steps.len() != 1 {
-        return Err(review_asset_error(format!(
-            "deployed task_pr_pipeline has {} independent review dispatches (expected exactly one)",
-            review_steps.len()
-        )));
-    }
-    let review = review_steps[0];
-    if review.id != "independent_review" {
-        return Err(review_asset_error(
-            "deployed task_pr_pipeline review dispatch has the wrong step id",
-        ));
-    }
-    if review.retry.is_some() || review.recovery_activity.is_some() {
-        return Err(review_asset_error(
-            "deployed task_pr_pipeline review dispatch can retry and create multiple review Runs",
-        ));
-    }
-    if review.when.as_deref().is_none_or(|when| {
-        !when.contains("input.review") || !when.contains("skipped_no_diff_expected")
-    }) {
-        return Err(review_asset_error(
-            "deployed task_pr_pipeline review dispatch is not opt-in and candidate-gated",
-        ));
-    }
-    let JobV2StepBody::TargetRef(target) = &review.body else {
-        return Err(review_asset_error(
-            "deployed task_pr_pipeline review dispatch is not an activity reference",
-        ));
-    };
-    if target.target != "activity:invoke_and_wait" {
-        return Err(review_asset_error(
-            "deployed task_pr_pipeline review dispatch does not create a durable child Run",
-        ));
-    }
-    let input = target
-        .default_input
-        .as_ref()
-        .ok_or_else(|| review_asset_error("deployed review dispatch has no input"))?;
-    if input.get("dedupe_run_input_field").and_then(Value::as_str) != Some("parent_run_id") {
-        return Err(review_asset_error(
-            "deployed review dispatch does not deduplicate retry/resume by parent_run_id",
-        ));
-    }
-    let run_input = input
-        .get("run_input")
-        .and_then(Value::as_object)
-        .ok_or_else(|| review_asset_error("deployed review dispatch has no run_input object"))?;
-    for field in [
-        "task_ids",
-        "workspace_path",
-        "repo_root",
-        "crew",
-        "parent_run_id",
-        "candidate_head",
-        "candidate_head_sha",
-        "pr_number",
-    ] {
-        if !run_input.contains_key(field) {
-            return Err(review_asset_error(format!(
-                "deployed review dispatch omits lineage field '{field}'"
-            )));
-        }
-    }
-
-    let review_index = job
-        .steps
-        .iter()
-        .position(|step| step.id == "independent_review")
-        .unwrap_or_default();
-    for prerequisite in ["push", "pr_open", "promote_tasks"] {
-        let Some(index) = job.steps.iter().position(|step| step.id == prerequisite) else {
-            return Err(review_asset_error(format!(
-                "deployed task_pr_pipeline omits prerequisite '{prerequisite}'"
-            )));
-        };
-        if index >= review_index {
-            return Err(review_asset_error(format!(
-                "deployed task_pr_pipeline starts review before '{prerequisite}'"
-            )));
-        }
-    }
-
-    let Some(guard) = job
-        .steps
-        .iter()
-        .skip(review_index + 1)
-        .find(|step| step.id == "require_independent_review_success")
-    else {
-        return Err(review_asset_error(
-            "deployed task_pr_pipeline does not gate on the independent review Run",
-        ));
-    };
-    if !matches!(
-        &guard.body,
-        JobV2StepBody::TargetRef(target) if target.target == "activity:pipeline_success_guard"
-    ) {
-        return Err(review_asset_error(
-            "deployed task_pr_pipeline independent review gate has the wrong activity",
-        ));
-    }
-    let guard_input = match &guard.body {
-        JobV2StepBody::TargetRef(target) => target.default_input.as_ref(),
-        _ => None,
-    }
-    .and_then(Value::as_object)
-    .ok_or_else(|| review_asset_error("deployed independent review gate has no input object"))?;
-    for (field, expected) in [
-        ("review_step", "independent_review"),
-        ("verdict_step", "require_exact_head_verdict"),
-        ("required_verdict", "approve"),
-    ] {
-        if guard_input.get(field).and_then(Value::as_str) != Some(expected) {
-            return Err(review_asset_error(format!(
-                "deployed independent review gate does not set {field}='{expected}'"
-            )));
-        }
-    }
-
-    Ok(())
-}
-
-fn validate_review_job_contract(job: &JobV2) -> Result<(), OrbitError> {
-    let agent_steps = job
-        .steps
-        .iter()
-        .filter(|step| {
-            matches!(
-                &step.body,
-                JobV2StepBody::TargetRef(target) if target.target == "activity:agent_review"
-            )
-        })
-        .collect::<Vec<_>>();
-    if agent_steps.len() != 1 {
-        return Err(review_asset_error(format!(
-            "deployed task_review_pipeline has {} agent_review steps (expected exactly one)",
-            agent_steps.len()
-        )));
-    }
-    let agent_input = match &agent_steps[0].body {
-        JobV2StepBody::TargetRef(target) => target.default_input.as_ref(),
-        _ => None,
-    }
-    .and_then(Value::as_object)
-    .ok_or_else(|| review_asset_error("deployed agent_review step has no input object"))?;
-    for field in [
-        "task_ids",
-        "workspace_path",
-        "repo_root",
-        "crew",
-        "parent_run_id",
-        "candidate_head",
-        "candidate_head_sha",
-        "pr_number",
-    ] {
-        if !agent_input.contains_key(field) {
-            return Err(review_asset_error(format!(
-                "deployed agent_review step omits lineage field '{field}'"
-            )));
-        }
-    }
-
-    let guards = job
-        .steps
-        .iter()
-        .filter_map(|step| match &step.body {
-            JobV2StepBody::TargetRef(target)
-                if target.target == "activity:independent_review_guard" =>
-            {
-                Some(target)
-            }
-            _ => None,
-        })
-        .collect::<Vec<_>>();
-    if guards.len() != 1 {
-        return Err(review_asset_error(format!(
-            "deployed task_review_pipeline has {} exact-head verdict guards (expected one)",
-            guards.len()
-        )));
-    }
-    // The guard reads acceptance criteria and comment authority from the task
-    // records themselves, so a deployed guard step that is not handed the run's
-    // own bundle would silently degrade to the head-binding check alone.
-    let guard_input = guards[0]
-        .default_input
-        .as_ref()
-        .and_then(Value::as_object)
-        .ok_or_else(|| review_asset_error("deployed verdict guard step has no input object"))?;
-    for field in ["candidate_head_sha", "task_ids"] {
-        if !guard_input.contains_key(field) {
-            return Err(review_asset_error(format!(
-                "deployed verdict guard step omits '{field}', so approval coverage cannot be checked against durable task state"
-            )));
-        }
-    }
-    Ok(())
-}
-
-fn schema_requires(schema: &Value, field: &str) -> bool {
-    schema
-        .get("required")
-        .and_then(Value::as_array)
-        .is_some_and(|required| required.iter().any(|value| value.as_str() == Some(field)))
-}
-
-fn review_asset_error(message: impl Into<String>) -> OrbitError {
-    OrbitError::InvalidInput(format!(
-        "ship review cannot be materialized by deployed assets: {}",
-        message.into()
-    ))
 }
 
 /// Return a stable path suitable for launching a fresh worker process.

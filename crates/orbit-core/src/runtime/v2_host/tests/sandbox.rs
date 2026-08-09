@@ -432,7 +432,7 @@ fn resolve_executor_sandbox_appends_gemini_orbit_runtime_roots_without_home_real
         "gemini sandbox must not re-allow the whole workspace .orbit root: {modify:?}"
     );
     // Registered-but-not-activity-exposed write stores are intentionally
-    // outside this child-runtime inventory. If agent_implement, agent_review,
+    // outside this child-runtime inventory. If agent_implement,
     // step_failure_recovery, or dispatch_agent exposes ADR or graph write
     // tools, revisit this allowlist alongside those surfaces.
     for excluded in [

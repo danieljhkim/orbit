@@ -233,6 +233,8 @@ fn rewrite_document_and_append_logs_are_durable() {
             },
         )
         .expect("append event");
+    let historical_review_record = r#"[independent-review]
+{"candidate_head_sha":"abc123","verdict":"approve","criteria":[{"index":1,"verdict":"met"}]}"#;
     store
         .append_comment(
             "ORB-00000",
@@ -241,7 +243,7 @@ fn rewrite_document_and_append_logs_are_durable() {
                 comment_id: "C-0002".to_string(),
                 at: now,
                 by: "daniel".to_string(),
-                body: "Ship it.".to_string(),
+                body: historical_review_record.to_string(),
             },
         )
         .expect("append comment");
@@ -253,6 +255,7 @@ fn rewrite_document_and_append_logs_are_durable() {
     assert_eq!(read.execution_summary, "Outcome: success\n");
     assert_eq!(read.events.len(), 2);
     assert_eq!(read.comments.len(), 2);
+    assert_eq!(read.comments[1].body, historical_review_record);
 }
 
 #[test]
