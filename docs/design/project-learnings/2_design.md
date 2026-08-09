@@ -3,7 +3,7 @@ summary: "Project Learnings — Design"
 type: design
 title: "Project Learnings — Design"
 owner: claude
-last_updated: 2026-07-26
+last_updated: 2026-08-09
 status: Draft
 feature: project-learnings
 doc_role: design
@@ -171,7 +171,7 @@ Do not place workspace-local artifact IDs in shipped skills, prompt templates, o
 
 ### 4.3 Historical injection data
 
-Automatic learning injection is no longer registered in the repository settings. `learning_injected` audit events and their counters remain readable as historical data, frozen as of 2026-07-20. No new injected events are expected; a zero-new-injections future is valid. `learning_shown` continues to be emitted when an agent explicitly opens a learning and is the active usage signal.
+Only the Claude Code `PreToolUse` hook registration was removed from the repository settings ([ORB-10346], 2026-07-20); it was the sole layer that emitted the `learning_injected` audit event (`crates/orbit-cmd/src/learning_hook.rs`). Engine pre-prompt injection (`maybe_prepend_learning_reminders` in `crates/orbit-engine/src/activity_job/agent_loop_driver.rs`) and the MCP sidecar decorator (`LearningSidecarDecorator` in `crates/orbit-remote/src/mcp/learning.rs`, registered in `crates/orbit-remote/src/mcp/mod.rs`) remain active and fire on every run, but neither emits `learning_injected` — so `learning_injected` audit events and their counters are frozen as of 2026-07-20 and read as historical calibration data, not as evidence that push delivery stopped. `learning_shown` continues to be emitted when an agent explicitly opens a learning and is the active usage signal.
 
 ---
 
@@ -265,7 +265,7 @@ Search ranking remains scope-filtered first. Within the matched set, rows sort b
 
 Two audit event kinds in the host-global `~/.orbit/orbit.db` describe historical delivery and current explicit use:
 
-- **`learning_injected`** — historical automatic-delivery evidence. Its final values are frozen as of 2026-07-20; the system must tolerate no new events.
+- **`learning_injected`** — historical evidence from the retired Claude Code hook layer only. Its final values are frozen as of 2026-07-20; the system must tolerate no new events. Engine pre-prompt injection and the MCP sidecar decorator continue to inject on every run without emitting this event — the freeze reflects that audit source going away, not push delivery stopping (see [§4.3](#43-historical-injection-data)).
 - **`learning_shown`** — recorded when an agent opens a learning's full body via `orbit learning show` (CLI) or the `orbit.learning.show` MCP tool. This is the active, passive usage signal for explicit retrieval.
 
 `learning_shown` emission **fails open**: an unavailable audit backend logs a warning and the `show` read still completes. The signal is best-effort observability and must never break retrieval.
@@ -429,7 +429,7 @@ Learnings are workspace-scoped and checked into the repo. They travel exactly wh
 - [ORB-00090] — Aligned learning identity examples with the agent-family convention.
 - [ORB-10316] — Added `learning_shown` and the `learning_injected`/`learning_shown` stats rollup retained as historical data ([§5.5](#55-usage-instrumentation-and-feedback)).
 - [ORB-10318] — Report-only recurring learning-deprecation review as an auto-task; surfaces stale candidates via `execution_summary` from usage rollups + anchor health, no bespoke sweep engine ([§7.6](#76-recurring-deprecation-review-auto-task)).
-- [ORB-10346] — Removed automatic learning delivery and adopted pull delivery with reference comments.
+- [ORB-10346] — Removed the Claude Code `PreToolUse` hook layer of automatic learning delivery and added pull delivery with reference comments; engine pre-prompt injection and the MCP sidecar decorator remain active ([§4.3](#43-historical-injection-data)).
 - [ORB-10348] — Generalized the review into `artifact-deprecation-review`: added the comment-reference sweep (Stream B) alongside the original learning-corpus-health stream ([§7.6](#76-recurring-deprecation-review-auto-task)).
 - [ORB-10364] — Gated the `add`/`update`/`supersede` authoring surfaces on caller role and redirected executors to `friction add` ([§5.1](#51-cli), [§5.2](#52-mcp-tools), ADR-0250).
 - [ORB-10452] — Made learning layout migration and stale-learning pruning non-destructive by default, with the shared non-interactive `--confirm` apply convention.

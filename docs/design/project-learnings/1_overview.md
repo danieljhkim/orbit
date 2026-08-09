@@ -3,7 +3,7 @@ summary: "Project Learnings — Overview"
 type: design
 title: "Project Learnings — Overview"
 owner: claude
-last_updated: 2026-07-25
+last_updated: 2026-08-09
 status: Draft
 feature: project-learnings
 doc_role: overview
@@ -12,7 +12,7 @@ tags: ["project-learnings"]
 
 # Project Learnings — Overview
 
-Project learnings is a system for preserving and surfacing non-obvious project knowledge — gotchas, root causes from incidents, validated approaches, hard-won workflow insights — so agents can retrieve and apply them when they are relevant. Delivery is **pull-based**: agents discover learnings with `orbit search` and open the full record with `orbit learning show`. Point-of-use reference comments make the relevant artifact discoverable in the code without injecting it into every tool call.
+Project learnings is a system for preserving and surfacing non-obvious project knowledge — gotchas, root causes from incidents, validated approaches, hard-won workflow insights — so agents can retrieve and apply them when they are relevant. Delivery combines push and pull: engine pre-prompt injection and an MCP sidecar decorator push scope-matched learnings into every agent run automatically (source locations: [4_decisions.md ADR-0108 amendment](./4_decisions.md)), and agents can also pull with `orbit search` and open the full record with `orbit learning show`. Point-of-use reference comments make the relevant artifact discoverable in the code as a lighter-weight locator alongside both.
 
 Phase 1 ships the native primitive (`learning` resource type alongside `task`), the pull surface, and the reference-comment convention. Phase 2, deferred until [docs/design/orbit-search/](../orbit-search/) reaches Accepted, layers semantic-similarity ranking on top of the path-glob scoping that phase 1 uses.
 
@@ -103,6 +103,6 @@ Accepted because the relevance-ranking layer wants real semantic similarity.
 - [T20260510-11] — Design + build project-learnings system as native Orbit primitive. The task that produced this folder.
 - [T20260510-12] — Add `tags` field to `Task` schema. Hard prerequisite for Layer 1's tag-axis matching.
 - [ORB-00095] — Add task-anchored learning upvotes and decay-weighted search ranking.
-- [ORB-10346] — Remove automatic learning delivery; retain pull discovery, `learning_shown`, and historical usage stats.
+- [ORB-10346] — Remove the Claude Code `PreToolUse` hook layer of automatic learning delivery; retain pull discovery, `learning_shown`, historical usage stats, and the still-active engine pre-prompt and MCP sidecar layers.
 
 Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

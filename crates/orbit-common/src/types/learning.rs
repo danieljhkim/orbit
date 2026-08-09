@@ -3,8 +3,12 @@
 //! A [`Learning`] is a durable, structured note that captures non-obvious
 //! project knowledge — the kind of thing that would otherwise live as a
 //! one-off comment in a single PR. Learnings are workspace-scoped, checked
-//! into git, and surfaced via the three-layer push-injection pipeline
-//! (engine pre-prompt, MCP sidecar, Claude Code hook).
+//! into git, and surfaced via push injection — engine pre-prompt
+//! (`orbit-engine`'s `maybe_prepend_learning_reminders`) and an MCP sidecar
+//! decorator (`orbit-remote`'s `LearningSidecarDecorator`) — plus pull
+//! retrieval via `orbit search` / `orbit learning show`. The Claude Code
+//! `PreToolUse` hook layer was retired [ORB-10346]; the other two push
+//! layers remain active on every run.
 //!
 //! Phase 1's on-disk schema reserves `scope.symbols` and
 //! `scope.semantic_seed` for phase-2 symbol-aware scope and semantic
