@@ -24,6 +24,7 @@ fn show_job_run_reconciles_stale_running_owner() {
     assert!(shown.duration_ms.is_some_and(|value| value > 0));
     assert!(shown.steps.iter().any(|step| {
         step.state == JobRunState::Interrupted
+            && step.error_code.as_deref() == Some("process_not_found")
             && step.error_message.as_deref().is_some_and(|message| {
                 message.contains("recorded worker process is no longer alive")
             })
@@ -142,6 +143,7 @@ fn workspace_open_reconciles_orphaned_pending_children_of_interrupted_parent() {
         let shown = reopened.show_job_run(&child.run_id).expect("show child");
         assert!(shown.steps.iter().any(|step| {
             step.state == JobRunState::Interrupted
+                && step.error_code.as_deref() == Some("never_claimed")
                 && step
                     .error_message
                     .as_deref()
@@ -316,9 +318,10 @@ fn sweep_still_condemns_a_run_whose_owner_died_in_this_pid_namespace() {
     let shown = runtime.show_job_run(&run.run_id).expect("show run");
     assert_eq!(shown.state, JobRunState::Interrupted);
     assert!(shown.steps.iter().any(|step| {
-        step.error_message
-            .as_deref()
-            .is_some_and(|message| message.contains("reason=process_not_found"))
+        step.error_code.as_deref() == Some("process_not_found")
+            && step.error_message.as_deref().is_some_and(|message| {
+                message.contains("recorded worker process is no longer alive")
+            })
     }));
 }
 
