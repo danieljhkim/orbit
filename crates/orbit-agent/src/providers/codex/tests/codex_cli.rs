@@ -151,16 +151,6 @@ fn representative_activity_prompts_fit_budget_and_preserve_contracts() {
             "review contract disappeared: {contract}"
         );
     }
-
-    eprintln!(
-        "representative prompts (cl100k_base): implement={} bytes/{} tokens (baseline {BASELINE_IMPLEMENT_BYTES}), review={} bytes/{} tokens (baseline {BASELINE_REVIEW_BYTES}), aggregate={} bytes/{} tokens (baseline {BASELINE_AGGREGATE_BYTES})",
-        implement.len(),
-        implement_tokens,
-        review.len(),
-        review_tokens,
-        implement.len() + review.len(),
-        implement_tokens + review_tokens,
-    );
 }
 
 mod args {

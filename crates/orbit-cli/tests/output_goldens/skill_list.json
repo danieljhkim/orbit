@@ -1,36 +1,36 @@
 [
   {
-    "content_hash": "552acd4ff4c939efcd9a56e0861d5ebc8f602befaa2d93da39b6d18d7191059c",
+    "content_hash": "9ca1618f6c3c3f66729db93b78065e4ccc157cd16f8ea4777b3d7f5f579c8235",
     "id": "orbit",
     "meta": null,
     "path": "<HOME>/.orbit/skills/orbit"
   },
   {
-    "content_hash": "d955361eef2d5dd7a6d9eeb92f45fb21de291f702137a1213fbc2d4dd1a72137",
+    "content_hash": "8b9c662de6dc8477b25f04eb3db3e82f08cdd6464fd07a83021384f3d99fe3ca",
     "id": "orbit-knowledge",
     "meta": null,
     "path": "<HOME>/.orbit/skills/orbit-knowledge"
   },
   {
-    "content_hash": "e3f03c120897fb033de016160e61586ed2c352049ecc4d5c79d7cfa5225b9a1e",
+    "content_hash": "1798743682c18be8833915f8294389c3d082207fc2899b87e0ce022eafad9941",
     "id": "orbit-search",
     "meta": null,
     "path": "<HOME>/.orbit/skills/orbit-search"
   },
   {
-    "content_hash": "a1ebb7a6f6eef42065fc6ec43b1c1142f3431e44d4b8050460d8fddf98d8fc1e",
+    "content_hash": "8e2a4d01c8f156db928cac77778292b2bfb811acbe9569a171cb286bf0afaf12",
     "id": "orbit-task",
     "meta": null,
     "path": "<HOME>/.orbit/skills/orbit-task"
   },
   {
-    "content_hash": "0431be4a4cf30f3486e7972b5245a3056d28b0efd027fdbc2307933bbc4de643",
+    "content_hash": "9901c1764ce0d69c1deef6444227878a635b20235d9c5ce3ba3c7021dffacbc3",
     "id": "orbit-task-pilot",
     "meta": null,
     "path": "<HOME>/.orbit/skills/orbit-task-pilot"
   },
   {
-    "content_hash": "e586b46ea0b9176f6afbc723fc4c850fa6bc322dcd6b2d42c0066b7ce1192f3f",
+    "content_hash": "bbbd2fb05fad007eaac7478effb4f8f2c0919343da71ffbe8ee5d539fd5f8452",
     "id": "orbit-workflow",
     "meta": null,
     "path": "<HOME>/.orbit/skills/orbit-workflow"
