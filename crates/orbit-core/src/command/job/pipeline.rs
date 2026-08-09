@@ -474,6 +474,7 @@ impl OrbitRuntime {
             run,
             started_at,
             finished_at,
+            None,
             message,
             JobRunState::Failed,
         )
@@ -486,6 +487,7 @@ impl OrbitRuntime {
         run: &JobRun,
         started_at: chrono::DateTime<Utc>,
         finished_at: chrono::DateTime<Utc>,
+        error_code: Option<&str>,
         message: &str,
         state: JobRunState,
     ) -> Result<(), OrbitError> {
@@ -521,7 +523,7 @@ impl OrbitRuntime {
             exit_code: None,
             agent_response_json: None,
             state,
-            error_code: None,
+            error_code: error_code.map(str::to_string),
             error_message: Some(message.to_string()),
         };
         let _ = self
@@ -757,6 +759,7 @@ impl OrbitRuntime {
             run,
             run.scheduled_at,
             finished_at,
+            None,
             message,
             JobRunState::Interrupted,
         )?;

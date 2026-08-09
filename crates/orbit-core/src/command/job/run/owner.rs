@@ -261,6 +261,18 @@ pub(super) enum PendingStaleReason {
     NeverClaimed,
 }
 
+impl PendingStaleReason {
+    /// Stable machine-readable vocabulary persisted in interrupted pipeline
+    /// steps. The diagnostic message may evolve independently of these codes.
+    pub(super) const fn error_code(self) -> &'static str {
+        match self {
+            #[cfg(unix)]
+            Self::Owner(identity) => owner_identity_error_code(Some(identity)),
+            Self::NeverClaimed => "never_claimed",
+        }
+    }
+}
+
 /// Returns `Some(reason)` only when a `pending` run is conclusively orphaned:
 /// its claimed owner process is gone (Mismatch/Missing), or it was never
 /// claimed and is older than [`PENDING_RUN_UNCLAIMED_GRACE_MINUTES`].
@@ -303,24 +315,7 @@ fn pending_run_unclaimed_past_grace(run: &JobRun) -> bool {
 /// Builds the diagnostic message recorded in the interrupted step when an
 /// orphaned `pending` run is reconciled.
 pub(super) fn stale_pending_run_message(run: &JobRun, reason: PendingStaleReason) -> String {
-    let reason_str = match reason {
-        #[cfg(unix)]
-        PendingStaleReason::Owner(OwnerIdentity::Mismatch) => "token_mismatch",
-        #[cfg(unix)]
-        PendingStaleReason::Owner(OwnerIdentity::Missing) => "process_not_found",
-        // Verified / LegacyLiveUnverified / ProbeUnavailable never reach the
-        // stale path; keep them tagged so a future caller is never silently
-        // wrong (mirrors `stale_job_run_message`).
-        #[cfg(unix)]
-        PendingStaleReason::Owner(OwnerIdentity::Verified) => "verified",
-        #[cfg(unix)]
-        PendingStaleReason::Owner(OwnerIdentity::LegacyLiveUnverified) => "legacy_live_unverified",
-        #[cfg(unix)]
-        PendingStaleReason::Owner(OwnerIdentity::ProbeUnavailable) => "probe_unavailable",
-        #[cfg(unix)]
-        PendingStaleReason::Owner(OwnerIdentity::ForeignPidNamespace) => "foreign_pid_namespace",
-        PendingStaleReason::NeverClaimed => "never_claimed",
-    };
+    let reason_str = reason.error_code();
     format!(
         "queued job run marked interrupted because no live worker process owns it (reason={}, pid={}, pid_start_time={}, created_at={}, unclaimed_grace_minutes={})",
         reason_str,
@@ -527,7 +522,20 @@ pub(crate) fn run_owner_liveness(_run: &JobRun) -> RunOwnerLiveness {
 /// owner causes a Running run to be reconciled to Failed.
 #[cfg(unix)]
 pub(super) fn stale_job_run_message(run: &JobRun, reason: Option<OwnerIdentity>) -> String {
-    let reason_str = match reason {
+    let reason_str = owner_identity_error_code(reason);
+    format!(
+        "job run marked interrupted because recorded worker process is no longer alive (reason={}, pid={}, pid_start_time={})",
+        reason_str,
+        run.pid
+            .map(|pid| pid.to_string())
+            .unwrap_or_else(|| "-".to_string()),
+        run.pid_start_time.as_deref().unwrap_or("-")
+    )
+}
+
+#[cfg(unix)]
+pub(super) const fn owner_identity_error_code(reason: Option<OwnerIdentity>) -> &'static str {
+    match reason {
         Some(OwnerIdentity::Mismatch) => "token_mismatch",
         Some(OwnerIdentity::Missing) => "process_not_found",
         // ProbeUnavailable / Verified / LegacyLiveUnverified never reach the
@@ -538,15 +546,12 @@ pub(super) fn stale_job_run_message(run: &JobRun, reason: Option<OwnerIdentity>)
         Some(OwnerIdentity::LegacyLiveUnverified) => "legacy_live_unverified",
         Some(OwnerIdentity::ForeignPidNamespace) => "foreign_pid_namespace",
         None => "unknown",
-    };
-    format!(
-        "job run marked interrupted because recorded worker process is no longer alive (reason={}, pid={}, pid_start_time={})",
-        reason_str,
-        run.pid
-            .map(|pid| pid.to_string())
-            .unwrap_or_else(|| "-".to_string()),
-        run.pid_start_time.as_deref().unwrap_or("-")
-    )
+    }
+}
+
+#[cfg(not(unix))]
+pub(super) const fn owner_identity_error_code(_reason: Option<()>) -> &'static str {
+    "unknown"
 }
 
 #[cfg(not(unix))]

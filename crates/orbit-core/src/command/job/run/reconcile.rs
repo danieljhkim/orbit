@@ -7,8 +7,8 @@ use orbit_store::TaskReservationReleaseReason;
 use crate::OrbitRuntime;
 
 use super::owner::{
-    pending_run_stale_reason, running_run_owner_is_stale, running_run_owner_stale_reason,
-    stale_job_run_message, stale_pending_run_message,
+    owner_identity_error_code, pending_run_stale_reason, running_run_owner_is_stale,
+    running_run_owner_stale_reason, stale_job_run_message, stale_pending_run_message,
 };
 
 impl OrbitRuntime {
@@ -96,20 +96,33 @@ impl OrbitRuntime {
         // or never claimed past the grace window) finalize exactly like
         // orphaned running runs.
         if let Some(reason) = pending_run_stale_reason(run) {
-            return self.finalize_orphaned_job_run(run, &stale_pending_run_message(run, reason));
+            return self.finalize_orphaned_job_run(
+                run,
+                reason.error_code(),
+                &stale_pending_run_message(run, reason),
+            );
         }
         if !running_run_owner_is_stale(run) {
             return Ok(false);
         }
         let stale_reason = running_run_owner_stale_reason(run);
-        self.finalize_orphaned_job_run(run, &stale_job_run_message(run, stale_reason))
+        self.finalize_orphaned_job_run(
+            run,
+            owner_identity_error_code(stale_reason),
+            &stale_job_run_message(run, stale_reason),
+        )
     }
 
     /// [ORB-10002] Orphaned runs (owner process conclusively gone) become
     /// `interrupted`, not `failed`: the job did not fail, its worker died.
     /// Interrupted runs are resumable from their step checkpoints via
     /// `orbit job resume <run_id>`.
-    fn finalize_orphaned_job_run(&self, run: &JobRun, message: &str) -> Result<bool, OrbitError> {
+    fn finalize_orphaned_job_run(
+        &self,
+        run: &JobRun,
+        error_code: &str,
+        message: &str,
+    ) -> Result<bool, OrbitError> {
         let finished_at = self.orphaned_run_finished_at(run);
         let duration_ms = run.started_at.map(|started_at| {
             finished_at
@@ -140,6 +153,7 @@ impl OrbitRuntime {
             run,
             step_started_at,
             finished_at,
+            Some(error_code),
             message,
             JobRunState::Interrupted,
         );
