@@ -31,7 +31,22 @@ const DEFAULT_SKILL_FILES: [(&str, &str); 6] = [
     ),
 ];
 
-const DEFAULT_SKILL_RESOURCE_FILES: [(&str, &str, &str); 4] = [
+const DEFAULT_SKILL_RESOURCE_FILES: [(&str, &str, &str); 7] = [
+    (
+        "orbit-task",
+        "references/review.md",
+        include_str!("../../assets/skills/orbit-task/references/review.md"),
+    ),
+    (
+        "orbit-task",
+        "references/friction.md",
+        include_str!("../../assets/skills/orbit-task/references/friction.md"),
+    ),
+    (
+        "orbit-search",
+        "references/docs-corpus.md",
+        include_str!("../../assets/skills/orbit-search/references/docs-corpus.md"),
+    ),
     (
         "orbit-workflow",
         "references/debug-job-failure.md",

@@ -1,6 +1,6 @@
 ---
 name: orbit-workflow
-description: How to use Orbit's execution layer — jobs, activities, routines, `orbit sweep`, and `orbit run` — and how to diagnose a failed, stuck, cancelled, or suspicious job run. Triggers on running/inspecting a job or pipeline, scheduling routines, or when a human provides a `jrun-*` id, says a job failed, asks why a run is stuck, which task a run is handling, whether to kill a run, or wants a failure diagnosis involving Orbit activities/jobs.
+description: Orbit's execution layer — jobs, activities, routines, `orbit sweep`, and `orbit run` — plus diagnosing a failed, stuck, or cancelled run. Triggers on running or inspecting a job or pipeline, scheduling routines, or a `jrun-*` id.
 ---
 
 # Orbit Workflow
@@ -45,21 +45,15 @@ Fires appear in `orbit run history` under actor `routine/<name>`. `orbit routine
 
 Consult `orbit routine --help` for the full field schema before hand-authoring a routine — don't answer field semantics from memory.
 
-## Checking Operational Logs
+## Diagnosis
 
-For a host-level incident, service warning, JSONL tracing problem, or missing
-run output, use [references/operational-logs.md](references/operational-logs.md).
-It separates journal/service logs, global JSONL tracing, and per-run evidence
-and keeps runtime state read-only during diagnosis.
-
-## Diagnosing a failed/stuck/cancelled run
-
-Given a `jrun-*` id, see [references/debug-job-failure.md](references/debug-job-failure.md) for the full investigation flow (run bundle, v2 audit trail, logs/blobs, failure classification, task/git/process state, kill procedure, report format). Don't use it for ordinary task implementation unless the request is specifically about a failed run.
+- Host-level incident, service warning, JSONL tracing problem, or missing run output → [references/operational-logs.md](references/operational-logs.md).
+- A `jrun-*` id that failed, stuck, or was cancelled → [references/debug-job-failure.md](references/debug-job-failure.md) for the full flow: run bundle, v2 audit trail, logs and blobs, failure classification, task/git/process state, kill procedure, report format.
 
 **Safety, up front:**
-- Do not edit files under `.orbit/state/job-runs/` or `.orbit/state/audit/` to "fix" a run — treat them as evidence.
-- Do not kill a process until you've matched run id → `pid`/`pgid`/task id(s)/command; prefer terminating the process group for that run id only.
-- Do not kill parent auto/gate runs unless you've verified they own the same task(s).
-- Do not rely on top-level `state: failed` alone — find the first failed step/activity.
-- Do not parse agent prose as the durable handoff when task state, run state, or `orbit.state.*` records exist.
-- If Orbit tooling or diagnostics are misleading, file friction via `orbit-task`.
+
+- Files under `.orbit/state/job-runs/` and `.orbit/state/audit/` are evidence. Never edit them to "fix" a run.
+- Never kill a process before matching run id → `pid`/`pgid`/task id(s)/command; terminate the process group for that run id only. Never kill a parent auto or gate run without verifying it owns the same task(s).
+- Top-level `state: failed` is not a diagnosis — find the first failed step or activity.
+- Task state, run state, and `orbit.state.*` records are the durable handoff. Never parse agent prose in their place.
+- If Orbit's own tooling or diagnostics mislead you, file friction (`orbit-task`).
