@@ -1,0 +1,25 @@
+schema_version: 2
+id: ADR-0243
+title: Drop the autonomous spoke runner track in favor of orchestrator-driven dispatch
+status: proposed
+owner: human
+created_at: 2026-07-19T21:59:19.974550248Z
+last_updated: 2026-07-19T21:59:19.974550248Z
+related_features: []
+related_tasks:
+- ORB-10281
+- ORB-10282
+- ORB-10283
+- ORB-10284
+- ORB-10246
+- ORB-10269
+tags:
+- host-registry
+- mcp-bridge
+- runner
+- execution-placement
+paths: []
+supersedes: []
+legacy_ids: []
+validation_warnings: []
+legacy_validation: none

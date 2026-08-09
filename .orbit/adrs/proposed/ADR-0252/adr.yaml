@@ -1,0 +1,19 @@
+schema_version: 2
+id: ADR-0252
+title: Retire the External Executor Protocol v1
+status: proposed
+owner: human
+created_at: 2026-07-25T22:59:08.214884493Z
+last_updated: 2026-07-25T22:59:08.214884493Z
+related_features: []
+related_tasks:
+- ORB-10395
+tags:
+- v1-phaseout
+- executors
+- cleanup
+paths: []
+supersedes: []
+legacy_ids: []
+validation_warnings: []
+legacy_validation: none

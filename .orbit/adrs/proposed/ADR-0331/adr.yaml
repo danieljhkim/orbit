@@ -1,0 +1,31 @@
+schema_version: 2
+id: ADR-0331
+title: WITHDRAWN — Task owns its reviewer; Orbit holds no reviewer-independence policy
+status: proposed
+owner: claude
+created_at: 2026-08-09T00:27:27.471370179Z
+last_updated: 2026-08-09T02:02:02.081939015Z
+related_features:
+- activity-job
+related_tasks:
+- ORB-10628
+tags:
+- workflow
+- independent-review
+- crew
+- task-schema
+paths:
+- crates/orbit-common/src/types/task.rs
+- crates/orbit-common/src/types/task_artifacts.rs
+- crates/orbit-core/src/command/job/pipeline.rs
+- crates/orbit-core/src/command/workflow.rs
+- crates/orbit-core/assets/jobs/task_pr_pipeline.yaml
+- crates/orbit-core/assets/jobs/task_review_pipeline.yaml
+- crates/orbit-core/assets/activities/agent_review.yaml
+- crates/orbit-store/src/**
+- crates/orbit-dashboard/src/**
+- docs/CONFIG.md
+supersedes: []
+legacy_ids: []
+validation_warnings: []
+legacy_validation: none

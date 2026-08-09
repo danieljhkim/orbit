@@ -1,0 +1,22 @@
+schema_version: 2
+id: ADR-0323
+title: Friction records carry an author-settable title; derivation is a structural fallback
+status: proposed
+owner: claude
+created_at: 2026-08-02T23:38:50.944727904Z
+last_updated: 2026-08-02T23:41:57.916629966Z
+related_features:
+- auditability
+related_tasks:
+- ORB-10590
+- ORB-10598
+tags:
+- friction
+- knowledge
+paths:
+- crates/orbit-common/src/friction/**
+- crates/orbit-store/src/file/friction_store/**
+supersedes: []
+legacy_ids: []
+validation_warnings: []
+legacy_validation: none
