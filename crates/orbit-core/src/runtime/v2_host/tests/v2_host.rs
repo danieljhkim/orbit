@@ -1,6 +1,7 @@
 //! Sibling tests for `mod.rs` (the v2_host module root; migrated per ORB-10387 /
 //! docs/design-patterns/test_layout.md).
 
+use orbit_common::types::activity_job::Provider;
 use orbit_common::types::{InvocationTrace, JobRunState, TokenUsage, ToolCallTrace};
 use orbit_store::InvocationQuery;
 
@@ -19,6 +20,126 @@ fn seed_running_job_run(runtime: &OrbitRuntime, job_id: &str) -> String {
         .mark_job_run_running(&run.run_id, chrono::Utc::now(), std::process::id())
         .expect("mark run running");
     run.run_id
+}
+
+fn runtime_with_recovery_config(config: &str) -> (tempfile::TempDir, OrbitRuntime) {
+    let root = tempfile::tempdir().expect("create tempdir");
+    let global = root.path().join("home/.orbit");
+    let workspace = root.path().join("repo/.orbit");
+    std::fs::create_dir_all(&global).expect("global orbit dir");
+    std::fs::create_dir_all(&workspace).expect("workspace orbit dir");
+    std::fs::write(workspace.join("config.toml"), config).expect("write recovery config");
+    let runtime = OrbitRuntime::from_roots(&global, &workspace).expect("build runtime");
+    (root, runtime)
+}
+
+#[test]
+fn recovery_crew_maps_persisted_codex_and_claude_lanes_to_middleweight_models() {
+    let (_root, runtime, _repo_root) = runtime_with_workspace_layout();
+
+    for (source_crew, expected_provider, expected_model) in [
+        ("sol", Provider::Codex, "gpt-5.6-terra"),
+        ("terra", Provider::Codex, "gpt-5.6-terra"),
+        ("luna", Provider::Codex, "gpt-5.6-terra"),
+        ("opus", Provider::Claude, "sonnet"),
+        ("sonnet", Provider::Claude, "sonnet"),
+        ("fable", Provider::Claude, "sonnet"),
+    ] {
+        let run_id = seed_running_job_run(&runtime, "recovery_lane_job");
+        runtime
+            .record_run_crew_from_input(&run_id, &serde_json::json!({ "crew": source_crew }))
+            .expect("persist source crew");
+
+        let config = V2RuntimeHost::recovery_agent_crew_config(&runtime, &run_id)
+            .expect("resolve lane-local middleweight recovery crew");
+        assert_eq!(
+            config.provider,
+            Some(expected_provider),
+            "source {source_crew}"
+        );
+        assert_eq!(
+            config.model.as_deref(),
+            Some(expected_model),
+            "source {source_crew}"
+        );
+    }
+}
+
+#[test]
+fn recovery_crew_missing_or_cross_provider_config_is_an_actionable_error() {
+    let missing_terra = r#"
+[workflow]
+default_crew = "sol"
+
+[crews.sol]
+model = "gpt-5.6-sol"
+provider = "codex"
+backend = "cli"
+"#;
+    let (_root, runtime) = runtime_with_recovery_config(missing_terra);
+    let run_id = seed_running_job_run(&runtime, "recovery_missing_crew");
+    runtime
+        .record_run_crew_from_input(&run_id, &serde_json::json!({ "crew": "sol" }))
+        .expect("persist source crew");
+    let err = V2RuntimeHost::recovery_agent_crew_config(&runtime, &run_id)
+        .expect_err("missing terra must not fall back to another provider or model");
+    assert!(err.to_string().contains("provider `codex` crew `terra`"));
+
+    let malformed_terra = r#"
+[workflow]
+default_crew = "sol"
+
+[crews.sol]
+model = "gpt-5.6-sol"
+provider = "codex"
+backend = "cli"
+
+[crews.terra]
+model = "sonnet"
+provider = "claude"
+backend = "cli"
+"#;
+    let (_root, runtime) = runtime_with_recovery_config(malformed_terra);
+    let run_id = seed_running_job_run(&runtime, "recovery_malformed_crew");
+    runtime
+        .record_run_crew_from_input(&run_id, &serde_json::json!({ "crew": "sol" }))
+        .expect("persist source crew");
+    let err = V2RuntimeHost::recovery_agent_crew_config(&runtime, &run_id)
+        .expect_err("cross-provider terra must fail closed");
+    assert!(err.to_string().contains("provider `codex` crew `terra`"));
+}
+
+#[test]
+fn recovery_invocation_persists_the_selected_middleweight_provider_and_model() {
+    let (_root, runtime, _repo_root) = runtime_with_workspace_layout();
+    let run_id = seed_running_job_run(&runtime, "recovery_telemetry_job");
+    runtime
+        .record_run_crew_from_input(&run_id, &serde_json::json!({ "crew": "sol" }))
+        .expect("persist source crew");
+    let recovery = V2RuntimeHost::recovery_agent_crew_config(&runtime, &run_id)
+        .expect("resolve terra recovery crew");
+
+    V2RuntimeHost::persist_invocation_trace(
+        &runtime,
+        &run_id,
+        "step_failure_recovery",
+        recovery.provider.expect("validated provider").as_str(),
+        recovery.model.as_deref(),
+        &serde_json::json!({ "task_id": "ORB-10615" }),
+        &InvocationTrace::default(),
+    )
+    .expect("persist recovery invocation");
+
+    let records = runtime
+        .invocation_records(InvocationQuery {
+            job_run_id: Some(run_id),
+            limit: 1,
+            ..InvocationQuery::default()
+        })
+        .expect("query recovery invocation");
+    assert_eq!(records.len(), 1);
+    assert_eq!(records[0].agent, "codex");
+    assert_eq!(records[0].model.as_deref(), Some("gpt-5.6-terra"));
 }
 
 fn payload_tool_call(seq: u32, tool_name: &str, payload: Value) -> ToolCallTrace {

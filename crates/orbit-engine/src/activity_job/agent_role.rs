@@ -44,6 +44,20 @@ pub fn resolve_agent_settings(
     resolve_from_config(config.as_ref(), inline)
 }
 
+/// Resolve the explicit middleweight crew for `step_failure_recovery`.
+///
+/// Unlike ordinary role resolution, recovery must not inherit the task crew:
+/// its host derives the failed run's persisted provider lane and validates the
+/// configured lane-local recovery crew before this fallback merge occurs.
+pub fn resolve_recovery_agent_settings(
+    host: &dyn V2RuntimeHost,
+    run_id: &str,
+    inline: &AgentLoopSpec,
+) -> Result<ResolvedAgentSettings, DispatchError> {
+    let config = host.recovery_agent_crew_config(run_id)?;
+    Ok(resolve_from_config(Some(&config), inline))
+}
+
 /// Resolve the flat crew selected explicitly by a rendered activity input.
 /// Returns `None` only when the input did not select a crew, leaving untagged
 /// activities on their inline baseline. A selected crew that the host cannot

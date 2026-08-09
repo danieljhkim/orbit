@@ -1,65 +1,61 @@
 ---
 name: orbit-knowledge
-description: Create, search, update, supersede, prune, or audit Orbit's two durable-decision primitives — project learnings (recurring gotchas, incident root-causes, cross-session guardrails, push-injected by scope) and Architecture Decision Records (ADRs — decisions with a real alternative, accepted/proposed/superseded lifecycle, global ID allocation). Triggers on "learning", "gotcha", "guardrail", "ADR", "decision record", editing an ADR decision-record file, accepting/superseding a decision, or adding a `## ADR-` heading. Covers scope-OR matching, evidence shape, update-vs-supersede (there is no comment or vote surface — corrections go through `update`/`supersede`, provenance through `evidence`), and why to never hand-edit `.orbit/learnings/` or `.orbit/adrs/`.
+description: Author, update, supersede, prune, and audit Orbit's two durable-decision primitives — project learnings (scope-injected guardrails) and ADRs. Use before adding or renaming a `## ADR-` heading by hand, since IDs are allocated globally.
 ---
 
 # Orbit Knowledge
 
-Two sibling primitives, one shared lifecycle discipline. **Learnings** are push-injected guidance: when an agent touches a file/dir/workflow matching a learning's `scope`, it's injected into the prompt automatically — this skill is the pull/curate side (author, find, replace, archive). **ADRs** record decisions with a real alternative, a constraint on future work, and non-trivial cost — stricter lifecycle, global ID allocation.
+Two sibling primitives, one lifecycle discipline.
 
-Both surfaces (MCP `orbit_learning_*`/`orbit_adr_*`, CLI `orbit tool run orbit.learning.*`/`orbit.adr.*`) accept identical JSON; always include `model` (agent family: `codex`/`claude`/`gemini`/`grok`). Prefer `--body-file`/`--input-file` over inline JSON so multi-line markdown isn't mangled by shell quoting.
+**Learnings** are push-injected: when an agent touches a file, dir, or workflow matching a learning's `scope`, it lands in that agent's prompt automatically. This skill is the pull side — author, find, replace, archive.
 
-## Shared rules (apply to both)
+**ADRs** record a decision that had a real alternative, constrains future work, and is costly to reverse. Stricter lifecycle, globally allocated IDs.
 
-- **Never hand-edit `.orbit/learnings/<id>/learning.yaml` or `.orbit/adrs/<status>/<id>/{adr.yaml,body.md}`.** All writes go through the tools so envelope cache, supersede pointers, and audit events stay consistent.
-- **Never invent an ID.** `add` allocates both learning and ADR IDs globally; cite the returned ID verbatim.
-- **Stage new artifact files from the current worktree** alongside the code/doc change that motivated them — sibling worktrees see remote stubs until that worktree's body files are locally readable.
-- **Update replaces, does not merge** — re-pass unchanged fields (`scope`/`evidence` for learnings; full body for ADRs) or you'll silently wipe them. **Supersede** when guidance/decision materially changes; it writes both pointers atomically and excludes the old record from default search. `update` is rejected on an already-superseded record — `supersede` again instead.
-- **Citation-at-anchor, with a hard prohibition.** When a learning/ADR encodes a convention enforced at a specific code site, drop a one-line citation (`// L-NNNN: <rationale>` or `// <adr-id>: <rationale>`) at that site. **Never** place the citation inside shipped instruction or prompt assets (skill files, prompt templates, bundled plugin assets) or any other consumer-facing surface served to other workspaces — workspace-local artifact IDs become dangling references there. At those surfaces, the push-injected learning (or a `## Consequences` sentence for ADRs) is the delivery mechanism instead.
-- **Search before adding**, to avoid duplicate/contradicting records covering the same scope.
+Both surfaces (MCP `orbit_learning_*` / `orbit_adr_*`, CLI `orbit tool run orbit.learning.*` / `orbit.adr.*`) take identical JSON and need `model`. Prefer `--body-file` / `--input-file` over inline JSON so multi-line markdown survives shell quoting.
+
+## Rules for both
+
+- **Never hand-edit `.orbit/learnings/<id>/learning.yaml` or `.orbit/adrs/<status>/<id>/{adr.yaml,body.md}`.** Writes go through the tools so the envelope cache, supersede pointers, and audit events stay consistent.
+- **Never invent an ID.** `add` allocates globally; cite the returned ID verbatim.
+- **Search before adding.** Two overlapping-scope records inject twice and contradict each other.
+- **Update replaces, it does not merge** — re-pass unchanged fields (`scope`/`evidence` for learnings, the full body for ADRs) or you silently wipe them. Use `supersede` when the guidance or decision *materially changes*: it writes both pointers atomically and drops the old record from default search. `update` is rejected on an already-superseded record; supersede again instead. There is no comment or vote surface — corrections go through `update`/`supersede`, provenance through `evidence`.
+- **Stage new artifact files from the current worktree**, alongside the change that motivated them. Sibling worktrees see remote stubs until those body files are locally readable.
+- **Citation-at-anchor.** When a record encodes a convention enforced at a specific code site, drop a one-line citation there (`// L-NNNN: <rationale>`). **Never** put such a citation in a shipped instruction or prompt asset — skill files, prompt templates, bundled plugin assets, anything served to other workspaces — because workspace-local IDs are dangling references there. At those surfaces the push-injected learning, or an ADR's `## Consequences` sentence, is the delivery mechanism.
 
 ## Learnings
 
-| Tool / workflow | MCP | CLI |
+| Workflow | MCP | CLI |
 |------|-----|-----|
 | Add | `orbit_learning_add({...})` | `orbit learning add --summary "..." --path "src/**/*.rs" --tag rust --body-file note.md` |
-| Search | `orbit_search({...})` | `orbit search --kind learning <text>` (add `--hybrid` after `orbit semantic index --kind learnings`) |
-| Show / update / supersede | `orbit_learning_show/update/supersede({...})` | `orbit learning show L-NNNN` / `update --id L-NNNN --priority 200` / `supersede --id L-NNNN --with L-MMMM` |
-| List/audit, prune, sync | CLI-only | `orbit learning list --status active --tag rust [--path <glob>]`, `orbit learning prune --stale-only [--delete]`, `orbit learning sync` |
+| Search | `orbit_search({...})` | `orbit search --kind learning <text>` (`--hybrid` after `orbit semantic index --kind learnings`) |
+| Show / update / supersede | `orbit_learning_show/update/supersede({...})` | `orbit learning show L-NNNN` · `update --id L-NNNN --priority 200` · `supersede --id L-NNNN --with L-MMMM` |
+| List, prune, sync | CLI-only | `orbit learning list --status active --tag rust [--path <glob>]` · `prune --stale-only [--delete]` · `sync` |
 
-**Workflow:** (1) search first — `orbit learning list --path/--tag` or `orbit search --kind learning` — prefer `update`/`supersede` over a duplicate. (2) Add with tight `scope: { paths?, tags? }` (OR semantics — fires on *any* path glob OR *any* tag; split concerns into separate learnings rather than over-broadening one). Include `evidence: [{kind: "task"|"commit"|"external", ref: "..."}]` whenever it came from a real incident/PR/task — a learning you can't cite a source for is a hunch. `priority` (0–255) is a secondary search-ranking key, not an importance badge. Keep `summary` ≤280 chars, written as a directive ("Always X before Y in `<crate>`"), since push-injection surfaces it first. (3) `prune --stale-only` periodically to surface learnings whose `scope.paths` no longer resolve; read before `--delete`. (4) `sync` (CLI-only) re-syncs the SQLite envelope index if YAML was touched out-of-band (merge, branch switch) — YAML is the source of truth.
+`scope: { paths?, tags? }` is **OR** semantics — it fires on *any* matching path glob or *any* matching tag. Split concerns into separate learnings rather than over-broadening one, and note that a scope with neither `paths` nor `tags` never injects at all.
 
-Legacy `L<YYYYMMDD>-N` IDs were migrated and should only appear in `legacy_ids`; canonical format is `L-NNNN`. Corrections to current wording go through `update`; material changes go through `supersede`; provenance for a new observation goes into `evidence`. (The vote and comment surfaces were removed — `priority` + search rank cover ranking, and `update`/`supersede`/`evidence` cover corrections/provenance.)
+Write `summary` as a directive ("Always X before Y in `<crate>`"), ≤280 chars, since push-injection surfaces it first. Attach `evidence: [{kind: "task"|"commit"|"external", ref: "..."}]` whenever the learning came from a real incident, PR, or task — one you can't cite a source for is a hunch. `priority` (0–255) is a secondary search-ranking key, not an importance badge.
 
-```bash
-orbit learning add --summary "Always run the repo formatter before committing under src/ — the linter fails on stray spacing" \
-  --path "src/**/*.rs" --tag lang --tag formatting --body-file /tmp/learning.md \
-  --evidence task:<task-id> --priority 100 --json
-```
+`prune --stale-only` surfaces learnings whose `scope.paths` no longer resolve; read them before `--delete`. `sync` re-syncs the SQLite envelope index when YAML was touched out-of-band by a merge or branch switch — YAML is the source of truth.
 
-Common mistakes: hand-writing YAML (skips envelope+attribution — use the tools); creating a duplicate without checking first (two overlapping-scope records inject twice and contradict); `update` to "fix" a fundamental change in advice (loses the supersede chain — `supersede` instead); `scope` with no `paths` and no `tags` (never injects).
+Legacy `L<YYYYMMDD>-N` IDs were migrated and should now appear only in `legacy_ids`; `L-NNNN` is canonical.
 
-Exit: the learning exists/updates through `orbit.learning.*`, has a directive `summary`, ≥1 `paths`/`tags` entry, evidence when it exists, and is retrievable via `orbit learning show <ID>`. A code-anchored learning ships its citation in the same change.
+Exit: the learning lives in `orbit.learning.*`, has a directive summary, at least one `paths` or `tags` entry, evidence where it exists, and reads back via `orbit learning show <ID>`. A code-anchored learning ships its citation in the same change.
 
 ## ADRs
 
 | Tool | MCP | CLI |
 |------|-----|-----|
-| Add / show / update / supersede | `orbit_adr_add/show/update/supersede({...})` | `orbit tool run orbit.adr.add --input-file adr.json` / `.show --input '{"id":"<id>"}'` / `.update --input-file update.json` / `.supersede --input '{"old_id":"...","new_id":"..."}'` |
+| Add / show / update / supersede | `orbit_adr_add/show/update/supersede({...})` | `orbit tool run orbit.adr.add --input-file adr.json` · `.show --input '{"id":"<id>"}'` · `.update --input-file update.json` · `.supersede --input '{"old_id":"...","new_id":"..."}'` |
 
-Listing is **not** on the agent MCP surface — use `orbit search --kind adr` for read-side discovery; CLI/admin retains `orbit tool run orbit.adr.list --input '{"feature":"<feature>"}'` (agents shouldn't call it via MCP). ADRs and docs are sibling indexes: `orbit search --kind all|doc|adr` federates ADR metadata read-only; `--hybrid` applies to `--kind adr` after `orbit semantic index --kind adrs`.
+Listing is deliberately not on the agent MCP surface — discover with `orbit search --kind adr`. (`orbit tool run orbit.adr.list` remains for CLI admin.)
 
-**When your repo keeps ADR headings in a docs file and you edit one directly:** if you're about to add or rename a `## ADR-` heading, **stop and run `orbit.adr.add` first**, then use the allocated global ID as the local heading verbatim. (Where that file lives — its name and location — follows the target repo's own instructions and configured docs roots, not a fixed convention.) Picking the next sequential local number, or a number that merely "looks global," both produce orphan decisions invisible to `orbit search --kind adr` / `orbit.adr.show` / legacy_id resolution. Backfill an existing local-numbered ADR via `orbit.adr.add` and set `legacy_ids`.
+**If your repo keeps ADR headings inside a docs file and you're about to add or rename a `## ADR-` heading: stop and run `orbit.adr.add` first**, then use the allocated global ID as the heading verbatim. Picking the next sequential local number — or one that merely looks global — produces an orphan decision invisible to `orbit search --kind adr`, `orbit.adr.show`, and legacy-ID resolution. Backfill an existing local-numbered ADR through `orbit.adr.add` with `legacy_ids` set. Where that file lives follows the target repo's own instructions and configured docs roots, not a fixed convention.
 
-**Workflow:** (1) inspect nearby decisions first (`orbit search "<concept>" --kind adr`, `orbit.adr.show`, `legacy_id` lookup for migrated per-feature refs). (2) new decision → `add`; body/metadata correction → `update`; reversal of an accepted ADR → create the replacement, accept it with a related task, then `supersede`. (3) body needs exactly `## Context`, `## Decision`, `## Consequences`, with ≥1 consequences bullet starting `Cost:`. (4) `related_features` = feature/area names; `tags` = free-form cross-artifact labels; `paths` = repo-relative globs the decision constrains. (5) `related_tasks` may be empty for a speculative proposed ADR — don't invent a task just to satisfy one; **acceptance requires a real related task**. (6) verify with `.show` or `orbit search --kind adr`.
+**Propose an ADR only when both hold:** a real alternative was on the table, *and* the choice is meaningfully costly to reverse. "Surprising without context" is a strong signal but not a third requirement — lock-in can be real without being surprising (a Postgres or monorepo pick), so weigh it as a tiebreaker. Qualifying shapes: a deliberate deviation from the obvious path; a constraint invisible in the code itself; a non-obvious rejected alternative worth recording; a technology choice with real lock-in. Everything else belongs in a design doc, a spec, or an existing ADR's instance table.
 
-Propose an ADR only when both hold: a real alternative was on the table, and the choice is meaningfully costly to reverse. Treat "surprising without context" as a strong signal, not a third hard requirement — lock-in can be real without being surprising (e.g. a Postgres or monorepo pick), so weigh it as a tiebreaker rather than a filter. Qualifies:
-- A deliberate deviation from the obvious path (e.g. deliberately keeping tuning knobs out of specs).
-- A constraint not visible in the code itself.
-- A non-obvious rejected alternative worth recording.
-- A technology/architecture choice with real lock-in.
+**Workflow.** Inspect nearby decisions first (`orbit search "<concept>" --kind adr`, `orbit.adr.show`, legacy-ID lookup). New decision → `add`; body or metadata correction → `update`; reversal of an accepted ADR → create the replacement, accept it with a related task, then `supersede`. `related_features` are feature/area names, `tags` free-form cross-artifact labels, `paths` repo-relative globs the decision constrains. `related_tasks` may be empty for a speculative *proposed* ADR — don't invent a task to satisfy one — but **acceptance requires a real related task**, added in the same `update` call.
 
-Otherwise put the detail in a design doc, a spec, or an existing ADR's instance table.
+The body needs exactly `## Context`, `## Decision`, `## Consequences`, with at least one consequences bullet starting `Cost:` — the validator rejects new ADRs without it.
 
 ```markdown
 ## Context
@@ -71,12 +67,4 @@ Otherwise put the detail in a design doc, a spec, or an existing ADR's instance 
 - Cost: <explicit tradeoff future readers need to know>
 ```
 
-```bash
-orbit tool run orbit.adr.add --input-file /tmp/orbit-adr.json --pretty
-# {"title":"...","body":"## Context\n...\n## Decision\n...\n## Consequences\n- ...\n- Cost: ...\n",
-#  "owner":"codex","related_features":["task-artifacts"],"related_tasks":[],"tags":[...],"paths":[...],"model":"<agent-family>"}
-```
-
-Common mistakes: hand-writing `.orbit/adrs/...` (skips allocation/validation/provenance); creating a task just to propose (proposed ADRs allow empty `related_tasks`); accepting without a real task (acceptance requires one, add it in the same `update` call); omitting `Cost:` (validator rejects new ADRs without it); treating a local heading number as global (use the allocated ID, alias via `legacy_ids`).
-
-Exit: the ADR exists/updates through `orbit.adr.*`, has a valid body, names relevant features, preserves meaningful legacy aliases, and reads back via `.show`. A code-anchored ADR ships its citation in the same PR.
+Exit: the ADR lives in `orbit.adr.*`, has a valid body, names relevant features, preserves meaningful legacy aliases, and reads back via `.show`. A code-anchored ADR ships its citation in the same PR.

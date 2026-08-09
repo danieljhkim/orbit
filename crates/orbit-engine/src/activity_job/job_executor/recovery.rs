@@ -53,7 +53,29 @@ pub(super) fn attempt_recovery_activity(
         "attempt": attempt,
         "max_attempts": max_attempts,
     });
-    let role_overridden_spec = role_overridden_recovery_spec(recovery, ctx);
+    let role_overridden_spec = match role_overridden_recovery_spec(recovery, ctx) {
+        Ok(spec) => spec,
+        Err(error) => {
+            tracing::warn!(
+                target: "orbit.engine.job_executor",
+                run_id = %ctx.run_id,
+                failed_step_id = %step.id,
+                recovery_activity = %recovery.name,
+                error = %error,
+                "step recovery crew resolution failed; preserving original step outcome"
+            );
+            emit_job_event_lossy(
+                &ctx.audit,
+                ctx.task_id(),
+                V2AuditEventKind::StepRecoveryAttempted {
+                    step_id: step.id.clone(),
+                    recovery_activity: recovery.name.clone(),
+                    recovery_succeeded: false,
+                },
+            );
+            return false;
+        }
+    };
     let spec = role_overridden_spec.as_ref().unwrap_or(&recovery.spec);
     let dispatch = dispatch_v2_activity_without_run_id_injection(V2DispatchInput {
         activity_name: &recovery.name,
@@ -165,13 +187,19 @@ pub(super) fn attempt_failure_activity(
 pub(super) fn role_overridden_recovery_spec(
     recovery: &ResolvedRecoveryActivity,
     ctx: &ExecCtx<'_>,
-) -> Option<ActivityV2Spec> {
+) -> Result<Option<ActivityV2Spec>, DispatchError> {
     let ActivityV2Spec::AgentLoop(inline_spec) = &recovery.spec else {
-        return None;
+        return Ok(None);
     };
-    let role = inline_spec.role?;
-    let resolved = resolve_agent_settings(role, ctx.host, inline_spec, &ctx.input);
+    let resolved = if recovery.name == "step_failure_recovery" {
+        resolve_recovery_agent_settings(ctx.host, &ctx.run_id, inline_spec)?
+    } else {
+        let Some(role) = inline_spec.role else {
+            return Ok(None);
+        };
+        resolve_agent_settings(role, ctx.host, inline_spec, &ctx.input)
+    };
     let mut spec = inline_spec.clone();
     apply_resolved_settings(&mut spec, &resolved);
-    Some(ActivityV2Spec::AgentLoop(spec))
+    Ok(Some(ActivityV2Spec::AgentLoop(spec)))
 }
