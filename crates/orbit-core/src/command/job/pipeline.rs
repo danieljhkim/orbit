@@ -750,6 +750,16 @@ impl OrbitRuntime {
         }
 
         let finished_at = Utc::now();
+        // Persist the diagnostic step before terminalizing the run: an observer
+        // polling for a terminal state must never be able to see one without its
+        // startup diagnostic already durable.
+        self.record_pipeline_diagnostic_step(
+            run,
+            run.scheduled_at,
+            finished_at,
+            message,
+            JobRunState::Interrupted,
+        )?;
         let changed = self.finalize_job_run_with_reservation_cleanup(
             &run.run_id,
             JobRunState::Interrupted,
@@ -758,13 +768,6 @@ impl OrbitRuntime {
             TaskReservationReleaseReason::RunTerminal,
         )?;
         if changed {
-            self.record_pipeline_diagnostic_step(
-                run,
-                run.scheduled_at,
-                finished_at,
-                message,
-                JobRunState::Interrupted,
-            )?;
             self.record_event(OrbitEvent::JobRunCompleted {
                 job_id: run.job_id.clone(),
                 run_id: run.run_id.clone(),

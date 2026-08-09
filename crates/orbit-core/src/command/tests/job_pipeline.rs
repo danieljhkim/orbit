@@ -103,17 +103,19 @@ fn worker_exit_before_claim_terminalizes_persisted_run_with_diagnostic() {
     assert!(durable_output.contains("worker stdout context"));
     assert!(durable_output.contains("action registration missing: routine_dispatch"));
 
-    let audits = runtime
-        .list_audit_events(None, None, Some(AuditEventStatus::Failure), None, 20)
-        .expect("list startup failure audit");
-    assert!(audits.iter().any(|audit| {
-        audit.tool_name.as_deref() == Some("pipeline.worker.startup")
-            && audit.target_id.as_deref() == Some(run.run_id.as_str())
-            && audit
-                .error_message
-                .as_deref()
-                .is_some_and(|error| error.contains("before claiming"))
-    }));
+    wait_for_pipeline_audit_event(
+        &runtime,
+        Some(AuditEventStatus::Failure),
+        "startup failure audit",
+        |audit| {
+            audit.tool_name.as_deref() == Some("pipeline.worker.startup")
+                && audit.target_id.as_deref() == Some(run.run_id.as_str())
+                && audit
+                    .error_message
+                    .as_deref()
+                    .is_some_and(|error| error.contains("before claiming"))
+        },
+    );
 }
 
 #[cfg(unix)]
@@ -154,23 +156,10 @@ fn routine_style_detached_worker_is_claimed_within_ownership_window() {
         "detached routine worker exceeded ownership window"
     );
 
-    let deadline = Instant::now() + Duration::from_secs(2);
-    loop {
-        let audits = runtime
-            .list_audit_events(None, None, None, None, 20)
-            .expect("list claimed-worker audit");
-        if audits.iter().any(|audit| {
-            audit.tool_name.as_deref() == Some("pipeline.worker.claimed")
-                && audit.target_id.as_deref() == Some(run.run_id.as_str())
-        }) {
-            break;
-        }
-        assert!(
-            Instant::now() < deadline,
-            "ownership observer did not persist a claimed audit"
-        );
-        thread::sleep(Duration::from_millis(10));
-    }
+    wait_for_pipeline_audit_event(&runtime, None, "claimed-worker audit", |audit| {
+        audit.tool_name.as_deref() == Some("pipeline.worker.claimed")
+            && audit.target_id.as_deref() == Some(run.run_id.as_str())
+    });
 
     assert_eq!(
         log_path,
@@ -193,6 +182,31 @@ fn wait_for_worker_ownership_outcome(
         assert!(
             Instant::now() < deadline,
             "worker remained pending and unclaimed beyond ownership window"
+        );
+        thread::sleep(Duration::from_millis(10));
+    }
+}
+
+/// Retry a pipeline audit lookup instead of asserting on a single snapshot:
+/// the audit event is written after the run's terminal state and diagnostic
+/// step, so an observer that only waits for those can still race the audit.
+fn wait_for_pipeline_audit_event(
+    runtime: &OrbitRuntime,
+    status: Option<AuditEventStatus>,
+    description: &str,
+    predicate: impl Fn(&orbit_common::types::AuditEvent) -> bool,
+) -> orbit_common::types::AuditEvent {
+    let deadline = Instant::now() + Duration::from_secs(2);
+    loop {
+        let audits = runtime
+            .list_audit_events(None, None, status, None, 20)
+            .expect("list pipeline audit events");
+        if let Some(audit) = audits.into_iter().find(|audit| predicate(audit)) {
+            return audit;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "expected {description} was not persisted within the window"
         );
         thread::sleep(Duration::from_millis(10));
     }
