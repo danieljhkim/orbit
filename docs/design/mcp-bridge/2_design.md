@@ -472,14 +472,19 @@ serves it only when the hub owns that workspace, and never proxies to a spoke ow
 Every other machine reads a pulled Git replica explicitly or routes actionable work
 as a task to the owner. Graph/docs remain local.
 
-Hub friction state is partitioned at
-`<global_root>/frictions/workspaces/<workspace_id>`. Legacy checkout-local state
-is copied to a staging tree and atomically published before a separate completion
-marker commits the migration. Identical repeats are idempotent, differing trees
-fail closed, and reads remain on the legacy tree until the marker exists. A caller
-that has no legacy-root binding may use the canonical root but cannot commit the
-migration marker; read-only list/show resolution never prepares or commits a
-migration.
+Hub friction records are partitioned by the composite `(workspace_id,
+friction_id)` key in the host-global store after [ORB-10680] ([ADR-0345]), so
+the logical workspace ID alone scopes every hub read and write and identical
+IDs in two workspaces coexist. `<global_root>/frictions/workspaces/<workspace_id>`
+remains the file tree that carries the tag taxonomy and, until the one-time
+import commits, the legacy records to import. Legacy checkout-local state is
+still copied to a staging tree and atomically published before a separate
+completion marker commits that publication: identical repeats are idempotent,
+differing trees fail closed, and the readable root stays the legacy tree until
+the marker exists. A caller that has no legacy-root binding may use the
+canonical root but cannot commit the publication marker. The record import
+itself is a separate transactional, idempotent, fail-closed step, after which
+SQLite is the sole live source and legacy files are read-only evidence.
 
 `orbit.task.artifact.put` completes capability, workspace, and placement
 preflight before opening the caller-local source. It reads at most the typed
@@ -489,7 +494,9 @@ The hub accepts that preloaded form only on authenticated `ssh-mcp`; caller-loca
 paths never cross the coordination boundary. The public `orbit.task.update` schema
 does not accept inline artifacts, so this private form is reachable only through
 `orbit.task.artifact.put`. Hub friction responses likewise omit their private
-backing-file path [ORB-10271].
+backing-file path [ORB-10271] — after [ORB-10680] that field is the legacy
+evidence pointer of an imported record, and `null` for anything written since,
+but it stays hub-private either way.
 
 ### 6.2 Knowledge creation
 

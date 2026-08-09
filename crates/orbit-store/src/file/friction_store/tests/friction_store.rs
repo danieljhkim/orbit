@@ -1,8 +1,7 @@
 // Migrated from file/friction_store.rs per ORB-00231
 use super::super::*;
-use chrono::TimeZone;
-use orbit_common::test_fixtures::TEST_CODEX_MODEL;
-use orbit_common::types::{TaskPriority, TaskType};
+use chrono::Utc;
+use orbit_common::types::FrictionStatus;
 
 #[test]
 fn hub_migration_publishes_complete_tree_and_is_idempotent() {
@@ -97,125 +96,53 @@ fn hub_migration_conflict_fails_closed_and_preserves_legacy_reads() {
     );
 }
 
+/// The legacy layout is still the shape the importer reads and the export
+/// route writes, so the round trip has to stay lossless.
 #[test]
-fn id_allocation_resets_across_month_boundary() {
+fn a_record_round_trips_through_the_legacy_markdown_layout() {
     let temp = tempfile::tempdir().expect("tempdir");
-    let root = temp.path();
-    let may = Utc.with_ymd_and_hms(2026, 5, 31, 23, 59, 0).unwrap();
-    let june = Utc.with_ymd_and_hms(2026, 6, 1, 0, 0, 0).unwrap();
+    let path = temp.path().join("2026-05/F001.md");
+    let record = FrictionRecord {
+        id: "F2026-05-001".to_string(),
+        title: Some("Queued runs never reach a worker".to_string()),
+        model: "codex".to_string(),
+        created_at: Utc::now(),
+        status: FrictionStatus::Triaged,
+        tags: vec!["tooling".to_string()],
+        resolved_at: None,
+        during_task: Some("ORB-00001".to_string()),
+        resolved_by_task: None,
+        body: "The worker exited before claiming the run.".to_string(),
+    };
 
-    let first =
-        add_friction(root, params(TEST_CODEX_MODEL, may, vec!["tooling"])).expect("first add");
-    let second =
-        add_friction(root, params(TEST_CODEX_MODEL, may, vec!["docs"])).expect("second add");
-    let next_month =
-        add_friction(root, params(TEST_CODEX_MODEL, june, vec!["build"])).expect("next month add");
+    write_record_at(&path, &record).expect("write record");
+    let stored = read_record_at(&path).expect("read record");
 
-    assert_eq!(first.record.id, "F2026-05-001");
-    assert_eq!(second.record.id, "F2026-05-002");
-    assert_eq!(next_month.record.id, "F2026-06-001");
+    assert_eq!(stored.record.id, record.id);
+    assert_eq!(stored.record.title, record.title);
+    assert_eq!(stored.record.status, record.status);
+    assert_eq!(stored.record.tags, record.tags);
+    assert_eq!(stored.record.during_task, record.during_task);
+    assert_eq!(stored.record.body, record.body);
+    assert_eq!(stored.path.as_deref(), Some(path.as_path()));
 }
 
-/// Titles are resolved once, at write time, so the file itself carries the
-/// handle rather than every reader re-deriving one [ORB-10590].
-#[test]
-fn add_stores_the_authors_title_in_the_frontmatter() {
-    let temp = tempfile::tempdir().expect("tempdir");
-    let root = temp.path();
-    let mut add = params(TEST_CODEX_MODEL, Utc::now(), vec!["tooling"]);
-    add.title = Some("Queued runs never reach a worker".to_string());
-
-    let stored = add_friction(root, add).expect("add with title");
-
-    assert_eq!(
-        stored.record.title.as_deref(),
-        Some("Queued runs never reach a worker")
-    );
-    let raw = fs::read_to_string(&stored.path).expect("read record");
-    assert!(
-        raw.contains("title: Queued runs never reach a worker"),
-        "{raw}"
-    );
-    let reread = show_friction(root, &stored.record.id)
-        .expect("show")
-        .expect("record");
-    assert_eq!(reread.record.title, stored.record.title);
-}
-
-#[test]
-fn add_without_a_title_persists_the_derived_one() {
-    let temp = tempfile::tempdir().expect("tempdir");
-    let root = temp.path();
-    let mut add = params(TEST_CODEX_MODEL, Utc::now(), vec!["tooling"]);
-    add.body = "## What happened\n\nThe worker exited before claiming the run.\n\n## Evidence\n\nOne log line.".to_string();
-
-    let stored = add_friction(root, add).expect("add without title");
-
-    assert_eq!(
-        stored.record.title.as_deref(),
-        Some("The worker exited before claiming the run.")
-    );
-}
-
-#[test]
-fn update_sets_and_clears_the_stored_title() {
-    let temp = tempfile::tempdir().expect("tempdir");
-    let root = temp.path();
-    let stored = add_friction(root, params(TEST_CODEX_MODEL, Utc::now(), vec!["tooling"]))
-        .expect("seed record");
-
-    let retitled = update_friction(
-        root,
-        &stored.record.id,
-        FrictionUpdateParams {
-            status: None,
-            tags: None,
-            title: Some(Some("Queued runs never reach a worker".to_string())),
-            body: None,
-            resolved_by_task: None,
-            updated_at: Utc::now(),
-        },
-    )
-    .expect("set title");
-    assert_eq!(
-        retitled.record.title.as_deref(),
-        Some("Queued runs never reach a worker")
-    );
-
-    let cleared = update_friction(
-        root,
-        &stored.record.id,
-        FrictionUpdateParams {
-            status: None,
-            tags: None,
-            title: Some(None),
-            body: None,
-            resolved_by_task: None,
-            updated_at: Utc::now(),
-        },
-    )
-    .expect("clear title");
-    assert_eq!(cleared.record.title, None);
-}
-
-/// A record written before the field existed still parses; its handle comes
-/// from derivation on read, so no migration pass is owed.
+/// A record written before `title` existed still parses; its handle comes from
+/// derivation on read, so no rewrite pass is owed before import.
 #[test]
 fn a_record_without_a_title_field_still_parses() {
     let temp = tempfile::tempdir().expect("tempdir");
-    let root = temp.path();
-    let month = root.join("2026-05");
+    let month = temp.path().join("2026-05");
     fs::create_dir_all(&month).expect("month dir");
+    let path = month.join("F001.md");
     fs::write(
-        month.join("F001.md"),
+        &path,
         "---\nid: F2026-05-001\nmodel: codex\ncreated_at: 2026-05-17T04:05:00Z\n\
          status: open\ntags:\n- tooling\n---\nThe worker exited before claiming the run.\n",
     )
     .expect("legacy record");
 
-    let stored = show_friction(root, "F2026-05-001")
-        .expect("show")
-        .expect("record");
+    let stored = read_record_at(&path).expect("read record");
 
     assert_eq!(stored.record.title, None);
     assert_eq!(
@@ -224,112 +151,43 @@ fn a_record_without_a_title_field_still_parses() {
     );
 }
 
+/// The taxonomy is configuration, not record state: ORB-10680 left it a file.
 #[test]
-fn the_query_filter_matches_a_stored_title() {
+fn the_tag_taxonomy_is_seeded_and_read_from_the_workspace_file() {
     let temp = tempfile::tempdir().expect("tempdir");
     let root = temp.path();
-    let mut add = params(TEST_CODEX_MODEL, Utc::now(), vec!["tooling"]);
-    add.title = Some("Queued runs never reach a worker".to_string());
-    add_friction(root, add).expect("add with title");
 
-    let filter = FrictionListFilter {
-        q: Some("never reach".to_string()),
-        ..FrictionListFilter::default()
-    };
-
-    assert_eq!(list_frictions(root, &filter).expect("list").len(), 1);
-}
-
-#[test]
-fn tag_validation_uses_taxonomy_file() {
-    let temp = tempfile::tempdir().expect("tempdir");
-    let root = temp.path();
-    ensure_default_tag_taxonomy(root).expect("taxonomy");
-    let err = add_friction(
-        root,
-        params(TEST_CODEX_MODEL, Utc::now(), vec!["surprise-tag"]),
-    )
-    .expect_err("unknown tag fails");
-    assert!(err.to_string().contains("valid tags"), "{err}");
+    let path = ensure_default_tag_taxonomy(root).expect("seed taxonomy");
+    assert!(path.ends_with(TAGS_FILENAME));
+    assert!(load_tag_taxonomy(root).expect("load").contains("tooling"));
 
     fs::write(root.join(TAGS_FILENAME), "surprise-tag: allowed\n").expect("rewrite taxonomy");
-    add_friction(
-        root,
-        params(TEST_CODEX_MODEL, Utc::now(), vec!["surprise-tag"]),
-    )
-    .expect("new taxonomy tag succeeds");
+    let taxonomy = load_tag_taxonomy(root).expect("reload");
+    assert!(taxonomy.contains("surprise-tag"));
+    assert!(!taxonomy.contains("tooling"));
 }
 
+/// The record walk is what the importer streams; it must find every month's
+/// records in a stable order and ignore configuration files at the root.
 #[test]
-fn stats_render_zero_task_model_rate_as_na() {
+fn the_record_walk_lists_month_records_in_order() {
     let temp = tempfile::tempdir().expect("tempdir");
     let root = temp.path();
-    add_friction(root, params("grok", Utc::now(), vec!["tooling"])).expect("add friction");
-    let mut done = task("T1", TaskStatus::Done);
-    done.implemented_by = Some("codex".to_string());
+    fs::create_dir_all(root.join("2026-05")).unwrap();
+    fs::create_dir_all(root.join("2026-06")).unwrap();
+    fs::write(root.join("tags.yaml"), "tooling: Tools\n").unwrap();
+    fs::write(root.join("2026-06/F001.md"), "later\n").unwrap();
+    fs::write(root.join("2026-05/F002.md"), "second\n").unwrap();
+    fs::write(root.join("2026-05/F001.md"), "first\n").unwrap();
 
-    let stats = friction_stats(root, &[done]).expect("stats");
+    let paths = friction_record_paths(root).expect("walk");
+
     assert_eq!(
-        stats["by_family"]["grok"]["frictions_per_10_tasks"],
-        json!("n/a")
+        paths,
+        vec![
+            root.join("2026-05/F001.md"),
+            root.join("2026-05/F002.md"),
+            root.join("2026-06/F001.md"),
+        ]
     );
-    assert_eq!(
-        stats["by_family"]["codex"]["frictions_per_10_tasks"],
-        json!(0.0)
-    );
-}
-
-#[test]
-fn stats_render_zero_rows_for_known_grok_family() {
-    let temp = tempfile::tempdir().expect("tempdir");
-    let root = temp.path();
-
-    let stats = friction_stats(root, &[]).expect("stats");
-
-    assert_eq!(stats["by_family"]["grok"]["frictions"], json!(0));
-    assert_eq!(stats["by_family"]["grok"]["tasks_done"], json!(0));
-    assert_eq!(
-        stats["by_family"]["grok"]["frictions_per_10_tasks"],
-        json!("n/a")
-    );
-}
-
-fn params(model: &str, created_at: DateTime<Utc>, tags: Vec<&str>) -> FrictionAddParams {
-    FrictionAddParams {
-        model: model.to_string(),
-        title: None,
-        body: "Body".to_string(),
-        tags: tags.into_iter().map(str::to_string).collect(),
-        during_task: None,
-        created_at,
-    }
-}
-
-fn task(id: &str, status: TaskStatus) -> Task {
-    let now = Utc.with_ymd_and_hms(2026, 5, 10, 0, 0, 0).unwrap();
-    Task {
-        id: id.to_string(),
-        title: id.to_string(),
-        description: String::new(),
-        acceptance_criteria: Vec::new(),
-        tags: Vec::new(),
-        plan: String::new(),
-        execution_summary: String::new(),
-        context_files: Vec::new(),
-        created_by: None,
-        planned_by: None,
-        implemented_by: None,
-        status,
-        priority: TaskPriority::Medium,
-        complexity: None,
-        task_type: TaskType::Chore,
-        pr_status: None,
-        external_refs: Vec::new(),
-        relations: Vec::new(),
-        job_run_id: None,
-        crew: None,
-        orchestrator: None,
-        created_at: now,
-        updated_at: now,
-    }
 }

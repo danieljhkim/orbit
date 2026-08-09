@@ -50,13 +50,19 @@ pub mod skill_store {
     pub use crate::file::skill_store::*;
 }
 
+/// Friction records. Live reads and writes go through [`FrictionStore`]
+/// (SQLite, ORB-10680); the file-layout helpers re-exported here own the hub
+/// publication decision and the legacy tree kept as read-only evidence.
 pub mod friction_store {
+    pub use orbit_common::types::validate_friction_id;
+
     pub use crate::file::friction_store::{
-        FrictionAddParams, FrictionListFilter, FrictionUpdateParams, StoredFrictionRecord,
-        add_friction, canonical_hub_friction_root, ensure_default_tag_taxonomy, friction_stats,
-        friction_tags, list_frictions, prepare_hub_friction_root, readable_hub_friction_root,
-        resolve_friction, resolve_friction_by_task, show_friction, update_friction,
-        validate_friction_id,
+        canonical_hub_friction_root, ensure_default_tag_taxonomy, prepare_hub_friction_root,
+        readable_hub_friction_root,
+    };
+    pub use crate::sqlite::friction_store::{
+        FrictionAddParams, FrictionImportReport, FrictionListFilter, FrictionReportedCount,
+        FrictionStore, FrictionUpdateParams, StoredFrictionRecord, export_workspace_frictions,
     };
 }
 

@@ -11,7 +11,7 @@ use orbit_common::types::{
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::friction_store::StoredFrictionRecord;
+use crate::friction_store::FrictionReportedCount;
 use crate::{AuditToolCallCountsByRole, AuditToolCallCountsBySurfaceAndRole, AuditTopToolCall};
 use orbit_common::utility::fs::atomic_write_text_volatile as write_atomic;
 
@@ -357,10 +357,14 @@ pub struct ScoreboardInputs<'a> {
     pub learnings: &'a [Learning],
     /// Workspace ADR records, used for knowledge-stewardship counters.
     pub adrs: &'a [Adr],
-    /// Append-only friction records from `.orbit/frictions/`. Used to populate
-    /// per-family `friction.reported` counts (so the dashboard `frict r` column
-    /// and `orbit.friction.stats` agree, without using tool call surface counts).
-    pub frictions: &'a [StoredFrictionRecord],
+    /// Friction counts per reporting model label, already windowed by the
+    /// caller with the same cutoff this module derives from `now`/`window`.
+    /// Populates per-family `friction.reported` counts (so the dashboard
+    /// `frict r` column and `orbit.friction.stats` agree, without using tool
+    /// call surface counts). ORB-10680 replaced the full record slice with
+    /// this aggregate so scoreboard memory tracks distinct models, not corpus
+    /// size.
+    pub friction_reported: &'a [FrictionReportedCount],
     /// Reference "now" for recency windowing. `None` means no recency
     /// section is emitted (used by legacy callers).
     pub now: Option<DateTime<Utc>>,
@@ -390,7 +394,7 @@ impl<'a> Default for ScoreboardInputs<'a> {
             top_tool_calls: &EMPTY_TOP,
             learnings: &EMPTY_LEARNING,
             adrs: &EMPTY_ADR,
-            frictions: &[],
+            friction_reported: &[],
             now: None,
             window: ScoreboardWindow::All,
             orchestration: None,
@@ -489,7 +493,7 @@ pub fn generate_summary_with_inputs(
     overlay_audit_tool_calls_by_surface(&mut agents, inputs.audit_tool_calls_by_surface);
 
     overlay_knowledge_counters(&mut agents, inputs, since);
-    overlay_friction_reported(&mut agents, inputs.frictions, since);
+    overlay_friction_reported(&mut agents, inputs.friction_reported);
 
     for task in tasks {
         if matches!(task.status, TaskStatus::Done | TaskStatus::Archived)
@@ -787,22 +791,21 @@ fn overlay_knowledge_counters(
     }
 }
 
+/// Fold per-model friction counts into per-family agent rows. The caller has
+/// already applied the window cutoff in SQL, so this only maps model labels to
+/// families and sums collisions.
 fn overlay_friction_reported(
     agents: &mut BTreeMap<String, AgentSummary>,
-    frictions: &[StoredFrictionRecord],
-    since: Option<DateTime<Utc>>,
+    reported: &[FrictionReportedCount],
 ) {
     let mut counts: BTreeMap<String, u64> = BTreeMap::new();
-    for stored in frictions {
-        if !in_window(Some(stored.record.created_at), since) {
-            continue;
-        }
+    for entry in reported {
         let family = {
-            let normalized = normalize_optional_attribution_label(Some(&stored.record.model), None)
-                .unwrap_or_default();
+            let normalized =
+                normalize_optional_attribution_label(Some(&entry.model), None).unwrap_or_default();
             infer_agent_family_from_model(&normalized).unwrap_or(normalized)
         };
-        *counts.entry(family).or_insert(0) += 1;
+        *counts.entry(family).or_insert(0) += entry.count;
     }
     for (family, count) in counts {
         let summary = agents.entry(family).or_default();

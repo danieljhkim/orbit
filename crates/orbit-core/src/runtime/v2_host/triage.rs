@@ -19,7 +19,7 @@ use chrono::Utc;
 use orbit_common::types::{JobRun, Task, TaskHistoryEntry, TaskStatus};
 use orbit_engine::DispatchError;
 use orbit_engine::{RuntimeHost, TaskAutomationUpdate};
-use orbit_store::friction_store::{FrictionAddParams, add_friction};
+use orbit_store::friction_store::FrictionAddParams;
 use serde_json::{Value, json};
 
 use crate::OrbitRuntime;
@@ -128,26 +128,27 @@ fn mark_triage_gave_up(
         );
         return;
     }
-    if let Err(error) = add_friction(
-        &runtime.data_root().join("frictions"),
-        FrictionAddParams {
-            model: "system".to_string(),
-            title: Some(format!(
-                "Triage exhausted its re-backlog budget for task {}",
-                task.id
-            )),
-            body: format!(
-                "Triage exhausted its re-backlog budget ({max_rebacklogs}) for task {} — \
+    if let Err(error) = crate::runtime::orbit_tool_host::friction_tools::store_for(runtime)
+        .and_then(|frictions| {
+            frictions.add(FrictionAddParams {
+                model: "system".to_string(),
+                title: Some(format!(
+                    "Triage exhausted its re-backlog budget for task {}",
+                    task.id
+                )),
+                body: format!(
+                    "Triage exhausted its re-backlog budget ({max_rebacklogs}) for task {} — \
                  its workflow runs keep failing (latest: {run_id}). The task stays \
                  blocked until a human decides; the repeated failure likely has a \
                  systemic cause worth fixing.",
-                task.id
-            ),
-            tags: vec!["lifecycle".to_string()],
-            during_task: Some(task.id.to_string()),
-            created_at: Utc::now(),
-        },
-    ) {
+                    task.id
+                ),
+                tags: vec!["lifecycle".to_string()],
+                during_task: Some(task.id.to_string()),
+                created_at: Utc::now(),
+            })
+        })
+    {
         tracing::warn!(
             task_id = %task.id,
             run_id,

@@ -591,36 +591,14 @@ fn summary_exposes_friction_reported_counts_from_records() {
     // depend on disk state.
     let temp = tempfile::tempdir().expect("create tempdir");
 
-    let frictions: Vec<crate::friction_store::StoredFrictionRecord> = vec![
-        crate::friction_store::StoredFrictionRecord {
-            record: orbit_common::types::FrictionRecord {
-                id: "F001".to_string(),
-                title: None,
-                model: "codex".to_string(),
-                created_at: Utc::now(),
-                status: orbit_common::types::FrictionStatus::Open,
-                tags: vec![],
-                resolved_at: None,
-                during_task: None,
-                resolved_by_task: None,
-                body: "seed for codex family".to_string(),
-            },
-            path: std::path::PathBuf::from("frictions/2026-05/F001.md"),
+    let friction_reported = vec![
+        crate::friction_store::FrictionReportedCount {
+            model: "codex".to_string(),
+            count: 1,
         },
-        crate::friction_store::StoredFrictionRecord {
-            record: orbit_common::types::FrictionRecord {
-                id: "F002".to_string(),
-                title: None,
-                model: "claude-3-opus".to_string(),
-                created_at: Utc::now(),
-                status: orbit_common::types::FrictionStatus::Resolved,
-                tags: vec!["test".to_string()],
-                resolved_at: Some(Utc::now()),
-                during_task: None,
-                resolved_by_task: None,
-                body: "seed for claude family (normalized)".to_string(),
-            },
-            path: std::path::PathBuf::from("frictions/2026-05/F002.md"),
+        crate::friction_store::FrictionReportedCount {
+            model: "claude-3-opus".to_string(),
+            count: 1,
         },
     ];
 
@@ -628,7 +606,7 @@ fn summary_exposes_friction_reported_counts_from_records() {
         temp.path(),
         &[],
         &ScoreboardInputs {
-            frictions: &frictions,
+            friction_reported: &friction_reported,
             ..ScoreboardInputs::default()
         },
     )

@@ -55,10 +55,11 @@ impl OrbitRuntime {
             .stores()
             .adrs()
             .list_adrs_filtered(AdrListFilter::default())?;
-        let frictions = orbit_store::friction_store::list_frictions(
-            &self.data_root().join("frictions"),
-            &orbit_store::friction_store::FrictionListFilter::default(),
-        )?;
+        // Same cutoff `generate_summary_with_inputs` derives internally, applied
+        // in SQL so the scoreboard never materializes the friction corpus
+        // (ORB-10680).
+        let friction_reported = crate::runtime::orbit_tool_host::friction_tools::store_for(self)?
+            .reported_by_model(since_window)?;
 
         let summary = orbit_store::scoreboard_summary::generate_summary_with_inputs(
             &self.paths().scoreboard_dir,
@@ -71,7 +72,7 @@ impl OrbitRuntime {
                 top_tool_calls: &top_tool_calls,
                 learnings: &learnings,
                 adrs: &adrs,
-                frictions: &frictions,
+                friction_reported: &friction_reported,
                 now: Some(now),
                 window,
                 orchestration: Some(OrchestrationSummary {

@@ -234,12 +234,21 @@ fn long_lived_worker_reopens_and_applies_compatible_pending_schema() {
     {
         let connection = store.connection();
         let conn = connection.lock().expect("store connection");
-        conn.execute("DELETE FROM schema_meta WHERE key = 'migration.v0011'", [])
-            .expect("rewind routine migration ledger");
+        // Rewind past the newest ledger entry as well: the recorded version is
+        // the highest key present, so leaving v0012 behind would report the
+        // store as current and apply nothing.
+        conn.execute(
+            "DELETE FROM schema_meta WHERE key IN ('migration.v0011', 'migration.v0012')",
+            [],
+        )
+        .expect("rewind routine migration ledger");
         conn.execute_batch(
             "DROP TABLE routine_pauses;
              DROP TABLE routine_fires;
-             DROP TABLE routine_cursors;",
+             DROP TABLE routine_cursors;
+             DROP TABLE friction_import_state;
+             DROP TABLE friction_record_tags;
+             DROP TABLE friction_records;",
         )
         .expect("rewind routine schema");
     }
@@ -254,17 +263,18 @@ fn long_lived_worker_reopens_and_applies_compatible_pending_schema() {
     );
     let connection = store.connection();
     let conn = connection.lock().expect("store connection");
-    let routine_tables: i64 = conn
+    let restored_tables: i64 = conn
         .query_row(
             "SELECT COUNT(*) FROM sqlite_master
              WHERE type = 'table' AND name IN (
-                 'routine_cursors', 'routine_fires', 'routine_pauses'
+                 'routine_cursors', 'routine_fires', 'routine_pauses',
+                 'friction_records', 'friction_record_tags', 'friction_import_state'
              )",
             [],
             |row| row.get(0),
         )
-        .expect("count routine tables");
-    assert_eq!(routine_tables, 3);
+        .expect("count restored tables");
+    assert_eq!(restored_tables, 6);
 }
 
 #[test]

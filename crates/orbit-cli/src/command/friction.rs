@@ -124,9 +124,12 @@ fn record_payload(value: &Value) -> CommandOut {
     if !task.is_empty() {
         lines.push(format!("Task: {task}"));
     }
+    // ADR-0345: `path` is the legacy evidence file an imported record came
+    // from. Records written after the SQLite cutover carry `null` and render
+    // no row rather than a location nothing could open.
     let path = value_string(value, "path");
     if !path.is_empty() {
-        lines.push(format!("Path: {path}"));
+        lines.push(format!("Legacy file: {path}"));
     }
     let body = value_string(value, "body");
     if !body.is_empty() {

@@ -1,0 +1,23 @@
+schema_version: 2
+id: ADR-0345
+title: Friction records move to SQLite with a legacy-evidence path projection
+status: proposed
+owner: claude
+created_at: 2026-08-09T20:25:57.877485310Z
+last_updated: 2026-08-09T20:25:57.877485310Z
+related_features:
+- auditability
+related_tasks:
+- ORB-10680
+tags:
+- storage
+- sqlite
+- migration
+- performance
+paths:
+- crates/orbit-store/src/sqlite/friction_store/**
+- crates/orbit-store/src/file/friction_store/**
+supersedes: []
+legacy_ids: []
+validation_warnings: []
+legacy_validation: none
