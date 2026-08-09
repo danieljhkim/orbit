@@ -41,8 +41,8 @@ mod tests;
 
 pub use activity_job::{
     DispatchError, DispatchOutcome, EnforcedAuditSink, JobOutcome, ResolvedCliExecutor,
-    ResolvedSandbox, V2AgentDispatchOverride, V2AuditWriter, V2DispatchInput, V2RuntimeHost,
-    V2SqliteSink, dispatch_error_to_orbit, dispatch_v2_activity, drive_agent_loop, execute_job,
+    ResolvedSandbox, V2AuditWriter, V2DispatchInput, V2RuntimeHost, V2SqliteSink,
+    dispatch_error_to_orbit, dispatch_v2_activity, drive_agent_loop, execute_job,
     execute_job_with_resume, reset_replay_transport, resolve_job_catalog_refs_for_execution,
     validate_job, validate_job_deterministic_actions,
 };

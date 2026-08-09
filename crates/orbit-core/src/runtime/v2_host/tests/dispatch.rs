@@ -175,30 +175,6 @@ fn worktree_gc_is_dispatchable_directly_through_the_v2_host() {
 }
 
 #[test]
-fn run_planning_duel_is_registered_for_v2_deterministic_dispatch() {
-    let runtime = OrbitRuntime::in_memory().expect("build runtime");
-    let err = runtime
-        .run_deterministic(
-            "run_planning_duel",
-            &json!({}),
-            &json!({}),
-            ToolContext::default(),
-        )
-        .expect_err("empty input should fail validation inside the action");
-
-    match err {
-        DispatchError::DeterministicActionFailed { action, message } => {
-            assert_eq!(action, "run_planning_duel");
-            assert!(
-                message.contains("missing required input.task_id"),
-                "unexpected validation message: {message}"
-            );
-        }
-        other => panic!("expected registered action failure, got {other}"),
-    }
-}
-
-#[test]
 fn workspace_ship_input_prefers_the_registry_neutral_runtime_binding() {
     let root = tempdir().expect("tempdir");
     let global = root.path().join("global");

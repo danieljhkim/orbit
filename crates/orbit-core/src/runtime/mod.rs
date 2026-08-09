@@ -403,7 +403,7 @@ impl OrbitRuntime {
         self.context.settings().v2_backend()
     }
 
-    /// Default base branch for ship/duel-plan workflows. Sourced
+    /// Default base branch for ship workflows. Sourced
     /// from `[workflow] base_branch` in the active `config.toml`; defaults
     /// to `"main"` when no key is present.
     pub fn workflow_base_branch(&self) -> &str {
@@ -424,16 +424,6 @@ impl OrbitRuntime {
     /// definitions nobody registered explicitly.
     pub fn routines_source(&self) -> bool {
         self.context.settings().routines_source()
-    }
-
-    /// Returns the configured `[duel] candidates` list (e.g. ["codex", "claude", "gemini", "grok"]).
-    /// Used by `orbit run duel-plan --planner-a ...` overrides to validate explicit families.
-    pub fn duel_candidate_families(&self) -> Vec<String> {
-        self.context.settings().duel_config().candidates.clone()
-    }
-
-    pub(crate) fn duel_config(&self) -> &crate::config::DuelConfig {
-        self.context.settings().duel_config()
     }
 
     /// Build the activity catalog for `target: activity:<name>` resolution

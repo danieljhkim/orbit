@@ -102,15 +102,6 @@ fn run_ship_local_audit_meta_uses_deprecated_top_level_command() {
 }
 
 #[test]
-fn run_duel_plan_audit_meta_targets_task() {
-    let meta = meta_for(&["orbit", "run", "duel-plan", "T1"]);
-    assert_eq!(meta.command, "run");
-    assert_eq!(meta.subcommand.as_deref(), Some("duel-plan"));
-    assert_eq!(meta.target_type.as_deref(), Some("task"));
-    assert_eq!(meta.target_id.as_deref(), Some("T1"));
-}
-
-#[test]
 fn tool_run_audit_meta_uses_agent_flags_for_role() {
     let meta = meta_for(&[
         "orbit",

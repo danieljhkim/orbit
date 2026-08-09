@@ -416,7 +416,6 @@ spec:
                 activity_id: activity_id.to_string(),
                 agent: "agent".to_string(),
                 model: Some("model".to_string()),
-                slot: None,
                 task_ids: Vec::new(),
                 trace: InvocationTrace::default(),
             })

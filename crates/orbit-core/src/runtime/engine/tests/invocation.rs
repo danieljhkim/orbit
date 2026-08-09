@@ -66,7 +66,6 @@ fn insert(
             activity_id: "agent_implement".to_string(),
             agent: "codex".to_string(),
             model: Some(model.to_string()),
-            slot: None,
             task_ids,
             trace: InvocationTrace {
                 usage: TokenUsage {
@@ -350,7 +349,6 @@ fn orchestrator_accounting_treats_invalid_gross_price_inputs_as_unpriced() {
             activity_id: "agent_implement".to_string(),
             agent: "codex".to_string(),
             model: Some("openai/gpt-5.6-sol-2026-07-20".to_string()),
-            slot: None,
             task_ids: Vec::new(),
             trace: InvocationTrace {
                 usage: TokenUsage {

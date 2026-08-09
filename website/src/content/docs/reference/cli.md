@@ -21,8 +21,6 @@ sidebar:
 | `orbit run job <job_id>` | Run an arbitrary job by ID. |
 | `orbit run ship [task_id ...]` | Submit backlog or explicitly selected tasks through the gated shipment pipeline and return a run ID immediately. |
 | `orbit run ship --mode local [task_id ...]` | Run the local-only task path for backlog or explicitly selected tasks. |
-| `orbit run duel-plan <task_id>` | Submit a planning duel for one task and return a run ID immediately. |
-| `orbit run duel-plan <task_id> --wait` | Submit a planning duel and wait for its terminal status before returning. |
 | `orbit task` | Create, update, and manage tasks. |
 | `orbit task artifact put <task_id> <source_path>` | Store a UTF-8 file under a task's artifacts directory. |
 | `orbit search <query>` | Search tasks, docs, learnings, and ADRs; add `--hybrid` for task/doc vector ranking, use `orbit search similar <id>` for task neighbors, or `orbit search path <path>` for applicability lookup. |

@@ -97,7 +97,6 @@ pub(super) async fn scoreboard(Ws(runtime): Ws, Query(query): Query<ScoreboardQu
                 json!({
                     "tasks_completed": 0,
                     "tokens": { "total": 0, "output": 0 },
-                    "duels": { "wins": 0, "losses": 0, "participated": 0 },
                     "pr": { "review_comments": 0, "merged_clean": 0, "merged_with_revision": 0 },
                     "task_review": { "threads": 0 },
                     "friction": { "reported": 0 },

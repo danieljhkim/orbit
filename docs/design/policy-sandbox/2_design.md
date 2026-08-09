@@ -3,7 +3,7 @@ summary: "Policy & Sandboxing — Design"
 type: design
 title: "Policy & Sandboxing — Design"
 owner: claude
-last_updated: 2026-08-08
+last_updated: 2026-08-09
 status: Draft
 feature: policy-sandbox
 doc_role: design
@@ -140,7 +140,7 @@ The compiled macOS profile denies by default, allows broad reads required by age
 - Codex side-write roots from runtime provider config, appended after policy denies so workflow state remains writable under the outer sandbox
 - narrow child Orbit runtime roots appended by the v2 host after policy denies: global logs, global `orbit.db*`, global tasks, workspace `.orbit/tasks/**`, workspace `.orbit/learnings/**`, workspace `.orbit/frictions/**`, workspace audit/logs, workspace semantic DB sidecars, and workspace `.orbit/state/job-runs/**`
 
-The child Orbit runtime roots are deliberately narrower than the workspace `.orbit` tree. They cover stores used by currently activity-exposed Orbit write tools: task/review/artifact/duel writes under `.orbit/tasks/**`, learning curation under `.orbit/learnings/**`, friction reporting under `.orbit/frictions/**`, `orbit.state.set` writes under `.orbit/state/job-runs/**`, and startup/runtime audit, log, semantic-index, and global database writes. Graph write roots and every unlisted or future store remain outside this inventory.
+The child Orbit runtime roots are deliberately narrower than the workspace `.orbit` tree. They cover stores used by currently activity-exposed Orbit write tools: task/review/artifact writes under `.orbit/tasks/**`, learning curation under `.orbit/learnings/**`, friction reporting under `.orbit/frictions/**`, `orbit.state.set` writes under `.orbit/state/job-runs/**`, and startup/runtime audit, log, semantic-index, and global database writes. Graph write roots and every unlisted or future store remain outside this inventory.
 
 `agent_implement` also exposes `orbit.adr.add` and `orbit.adr.update` ([ORB-10596]). On Linux, only the active managed worktree's `.orbit/adrs/proposed` and `.orbit/adrs/.locks` directories are bind-mounted writable after the enclosing worktree `.orbit/**` read-only mount; Accepted/Superseded ADRs and learning, task, state, and unknown local stores remain read-only. Allocation still uses the workspace-shared semantic database and `.id_alloc.lock`, so simultaneous worktrees serialize ID selection while each Proposed body lands under `<job-worktree>/.orbit/adrs/proposed/<id>/`. The allocator records that worktree-relative body path, allowing an orchestrator runtime to resolve and search it as a federated artifact while the worktree is live. macOS already re-allows the active job worktree as a whole after the policy deny, so this change adds no macOS SBPL allowance and changes no policy YAML.
 

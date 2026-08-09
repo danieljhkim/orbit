@@ -34,7 +34,7 @@ precedence). Path layout is defined in
 | `state/layout.version` | plain-text workspace layout version marker | regenerable marker (see [upgrades](./upgrades.md)) |
 | `state/layout.lock` | advisory lock taken during layout upgrades | transient |
 | `state/semantic.db` | semantic/vector index (docs, learnings, tasks) | regenerable (`orbit semantic index`) |
-| `state/scoreboard/` | rolling counters (`pr.json`, `task_review.json`, `duel.json`, …) | mostly regenerable; `duel.json` is an append-only record |
+| `state/scoreboard/` | rolling counters (`pr.json`, `task_review.json`, `tokens.json`, …) | mostly regenerable |
 | `state/job-runs/` | legacy file-based run bundles; current runs live in SQLite | regenerable |
 | `state/audit/`, `state/logs/`, `state/diagnostics/`, `state/worktrees/` | scratch dirs; canonical audit and logs are global | regenerable |
 

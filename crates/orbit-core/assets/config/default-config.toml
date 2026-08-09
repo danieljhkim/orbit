@@ -26,7 +26,7 @@ sandbox = "danger-full-access"
 enabled = true
 
 [workflow]
-# Default base branch for `orbit run ship` and `duel-plan`.
+# Default base branch for `orbit run ship`.
 # Override per-invocation with `--base <branch>`.
 base_branch = "main"
 

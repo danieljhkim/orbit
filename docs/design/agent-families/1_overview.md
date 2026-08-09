@@ -3,7 +3,7 @@ summary: "Agent Families — Overview"
 type: design
 title: "Agent Families — Overview"
 owner: grok
-last_updated: 2026-07-27
+last_updated: 2026-08-09
 last_validated: 2026-07-27
 status: Draft
 feature: agent-families
@@ -19,7 +19,7 @@ Orbit models AI coding systems as first-class agent families and groups concrete
 
 Orbit was initially built around three dominant agent CLIs: Claude Code, Codex (OpenAI), and Gemini. As more agents gained strong coding capabilities, including Grok via Grok Build and the xAI API, Orbit needed stable family identifiers for attribution, execution, review, and analytics.
 
-Family defaults were originally also used to pick activity role models, but that made per-task model experiments require editing workspace config. The crew registry introduced by [ORB-00058] separates model selection from family discovery: workspaces define named assignments in `[crews.<name>]`, tasks may pin `crew`, and operators may override the crew for a single run. Duel-plan role selection has a narrower workspace knob under `[duel]`: operators can allowlist candidate families and pin duel-only orchestrator models without changing executor YAML or affecting non-duel callers.
+Family defaults were originally also used to pick activity role models, but that made per-task model experiments require editing workspace config. The crew registry introduced by [ORB-00058] separates model selection from family discovery: workspaces define named assignments in `[crews.<name>]`, tasks may pin `crew`, and operators may override the crew for a single run.
 
 ## 2. Core Concepts
 
@@ -39,7 +39,6 @@ Family defaults were originally also used to pick activity role models, but that
 | Runtime config loading | `crates/orbit-core/src/config/runtime.rs` | [ORB-00058] |
 | Default config template | `crates/orbit-core/assets/config/default-config.toml` | [ORB-00058] |
 | Run-time crew resolution | `crates/orbit-core/src/runtime/engine/crew.rs` | [ORB-00058] |
-| Duel candidate and model config | `crates/orbit-core/src/config/runtime.rs` | [ORB-00072] |
 | Tool and CLI crew surfaces | `crates/orbit-tools/src/builtin/orbit/task/` | [ORB-00058] |
 | Grok family onboarding | `crates/orbit-common/src/types/actor.rs`, `crates/orbit-common/src/types/agent_pair.rs` | [ORB-00042] |
 
@@ -47,9 +46,7 @@ Family defaults were originally also used to pick activity role models, but that
 
 - ORB-00042: Onboard Grok (xAI) as a first-class supported agent family.
 - ORB-00043: Add Grok to agent_from_model, all_agent_families, and provider_from_model.
-- ORB-00048: Harden duels, scoreboards, review sync, friction stats, and analytics for the fourth family.
 - ORB-00058: Introduce per-task crew override for agent model selection.
-- ORB-00072: Make duel-plan agent pool and per-family model configurable via `[duel]`.
 - ORB-10130: Flatten each crew to one provider-model assignment.
 
 Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

@@ -73,7 +73,7 @@ Paste the prompt below into your agent (Claude Code, Codex CLI, or Gemini CLI) *
 >    - `CLAUDE.md` — agent operating rules (commit timing, task ID convention, lint constraints)
 >    - `ARCHITECTURE.md` — crate layering and dependency rules
 >    - `docs/design/CONVENTIONS.md` — design-doc structure
->    - `docs/CONFIG.md` — config reference: crew/workflow/duel knobs and per-task crew override
+>    - `docs/CONFIG.md` — config reference: crew/workflow knobs and per-task crew override
 > 8. After setup, run `orbit task list` and `orbit semantic stats` and show me the output.
 > 9. Ask me what my first real task should be and create it properly using Orbit's task surface (use the `orbit-task` skill — it should be auto-discovered after step 5).
 >
@@ -173,7 +173,7 @@ The final command must exit successfully. If it still reports the UID-map error,
 
 Full command reference: `orbit --help` and [orbit-cli.com](https://orbit-cli.com).
 
-Customizing crews (which provider-model runs a task), the base branch, and `duel-plan` candidates: see [docs/CONFIG.md](docs/CONFIG.md).
+Customizing crews (which provider-model runs a task) and the base branch: see [docs/CONFIG.md](docs/CONFIG.md).
 
 ---
 

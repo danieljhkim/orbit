@@ -1,4 +1,3 @@
-mod duel;
 mod input;
 pub(crate) mod review;
 mod task_update;
@@ -10,9 +9,8 @@ use std::path::PathBuf;
 use orbit_common::types::OrbitError;
 use serde_json::Value;
 
-// ---- retained internal actions (still referenced by duel/worker jobs) ----
+// ---- retained internal actions ----
 const UPDATE_TASK_ACTION: &str = "update_task";
-const RUN_PLANNING_DUEL_ACTION: &str = "run_planning_duel";
 
 // ---- generic built-in automation actions ----
 const GIT_COMMIT_ACTION: &str = "git_commit";
@@ -45,14 +43,13 @@ pub fn execute_action<
     host: &H,
     action: &str,
     input: &Value,
-    debug: bool,
+    _debug: bool,
     _steps_outputs: &HashMap<String, Value>,
     state_context: Option<&StateExecutionContext>,
 ) -> Result<Value, OrbitError> {
     match action {
         // ---- retained internal actions ----
         UPDATE_TASK_ACTION => task_update::update_task(host, input, state_context),
-        RUN_PLANNING_DUEL_ACTION => duel::run_planning_duel(host, input, debug),
 
         // ---- generic built-in actions ----
         GIT_COMMIT_ACTION => vcs::git_commit(host, input),

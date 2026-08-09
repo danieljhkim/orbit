@@ -3,7 +3,7 @@ summary: "User Interface — Decisions"
 type: design
 title: "User Interface — Decisions"
 owner: gemini
-last_updated: 2026-08-02
+last_updated: 2026-08-09
 status: Draft
 feature: user-interface
 doc_role: decisions
@@ -18,6 +18,10 @@ run orbit.adr.show --input '{"id":"ADR-NNNN"}'`. Legacy entries below remain
 unchanged until their narratives are separately verified in the ADR store.
 
 Historical note ([ORB-10458]): the entries listed below were authored with local IDs that had no record in the ADR store. They were allocated through `orbit.adr.add`, their narratives migrated into the store verbatim, and their headings rewritten to the allocated global ID. The original local IDs survive as `legacy_ids`, so prior citations still resolve via `orbit tool run orbit.adr.show --input '{"legacy_id":"<feature>/ADR-NNN"}'`. Backfilled here: `user-interface/ADR-00030` → ADR-0284, `user-interface/ADR-001` → ADR-0283.
+
+ADR-0332 proposes removal of the retired planning competition and its
+scoreboard projections. [ORB-10627] removes those UI surfaces; the ADR remains
+Proposed until its separate lifecycle approval.
 
 ## ADR-0283 — Canon Refined Aesthetic
 

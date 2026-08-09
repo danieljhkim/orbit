@@ -3,7 +3,6 @@
 use serde_json::{Map, Value, json};
 
 use super::super::dispatcher::agent_loop_output_from_final_message;
-use super::super::dispatcher::{V2AgentDispatchOverride, overridden_agent_spec};
 
 #[test]
 fn agent_loop_output_exposes_structured_final_message_fields() {
@@ -103,49 +102,4 @@ fn dispatch_error_to_orbit_keeps_validation_variant_and_buckets_the_rest() {
         dispatch_error_to_orbit(other),
         OrbitError::InvalidInput(m) if m == expected
     ));
-}
-
-#[test]
-fn per_dispatch_agent_override_sets_provider_model_and_renders_family() {
-    use orbit_common::types::activity_job::{
-        ActivityV2Spec, AgentLoopSpec, Backend, OnDenial, Provider,
-    };
-
-    let spec = ActivityV2Spec::AgentLoop(AgentLoopSpec {
-        instruction: "family={{agent_family}}".to_string(),
-        backend: Backend::Cli,
-        provider: Provider::Claude,
-        model: Some("asset-default".to_string()),
-        tools: Vec::new(),
-        on_denial: OnDenial::Terminate,
-        max_iterations: 20,
-        wall_clock_timeout_seconds: 300,
-        require_response_envelope: false,
-        require_completion_envelope: true,
-        role: None,
-        proc_allowed_programs: None,
-    });
-    let overridden = overridden_agent_spec(
-        &spec,
-        Some(V2AgentDispatchOverride {
-            provider: "codex",
-            model: Some("gpt-duel-a"),
-        }),
-    )
-    .expect("apply override")
-    .expect("overridden spec");
-
-    let ActivityV2Spec::AgentLoop(agent) = overridden else {
-        panic!("expected agent-loop override");
-    };
-    assert_eq!(agent.provider, Provider::Codex);
-    assert_eq!(agent.model.as_deref(), Some("gpt-duel-a"));
-    assert_eq!(agent.instruction, "family=codex");
-
-    let ActivityV2Spec::AgentLoop(original) = spec else {
-        panic!("expected original agent-loop spec");
-    };
-    assert_eq!(original.provider, Provider::Claude);
-    assert_eq!(original.model.as_deref(), Some("asset-default"));
-    assert_eq!(original.instruction, "family={{agent_family}}");
 }

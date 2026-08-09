@@ -219,8 +219,8 @@ Artifacts are stored under `artifacts/files/` and listed in `artifacts/manifest.
 ```yaml
 schema_version: 1
 files:
-  - path: planning-duel/winner.json
-    blob: files/planning-duel/winner.json
+  - path: reports/result.json
+    blob: files/reports/result.json
     media_type: application/json
     sha256: "<64 lowercase hex chars>"
     size_bytes: 1234

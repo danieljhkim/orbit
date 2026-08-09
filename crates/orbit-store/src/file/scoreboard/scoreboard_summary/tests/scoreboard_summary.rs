@@ -37,7 +37,6 @@ fn summary_includes_zero_rows_for_known_families() {
 
     let grok = summary.agents.get("grok").expect("grok summary");
     assert_eq!(grok.tasks_completed, 0);
-    assert_eq!(grok.duels.participated, 0);
 }
 
 #[test]
@@ -928,6 +927,8 @@ fn orchestration_section_is_independently_versioned_and_legacy_reads_default_it(
 
     let encoded = serde_json::to_value(&summary).expect("serialize summary");
     assert_eq!(encoded["schema_version"], CURRENT_SCHEMA_VERSION);
+    assert!(encoded.get("duels").is_none());
+    assert!(encoded.get("planning_duels").is_none());
     assert_eq!(
         encoded["orchestration"]["schema_version"],
         ORCHESTRATION_SCHEMA_VERSION

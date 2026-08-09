@@ -62,7 +62,6 @@ pub(super) fn attempt_recovery_activity(
         input: input.clone(),
         audit: ctx.audit.clone(),
         run_id: &ctx.run_id,
-        agent_override: None,
         host: Some(ctx.host),
     });
 
@@ -137,7 +136,6 @@ pub(super) fn attempt_failure_activity(
         input: input.clone(),
         audit: ctx.audit.clone(),
         run_id: &ctx.run_id,
-        agent_override: None,
         host: Some(ctx.host),
     });
     match dispatch {

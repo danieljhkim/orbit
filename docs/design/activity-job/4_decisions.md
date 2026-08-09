@@ -3,7 +3,7 @@ summary: "Activity / Job — Decisions"
 type: design
 title: "Activity / Job — Decisions"
 owner: codex
-last_updated: 2026-08-08
+last_updated: 2026-08-09
 last_validated: 2026-07-26
 status: Draft
 feature: activity-job
@@ -16,6 +16,11 @@ tags: ["activity-job"]
 This ADR log records the decisions that define the current Activity / Job substrate. Entries are append-only and stay in place when later ADRs supersede or fold them. See [1_overview.md](./1_overview.md) for the feature summary, [2_design.md](./2_design.md) for the current implementation, and [3_vision.md](./3_vision.md) for the questions that may force more decisions.
 
 The log now keeps four load-bearing rollup ADR bodies. Folded entries remain at their original numbers with `Status: Superseded by ADR-NNN (folded)` and a one-line pointer, per [CONVENTIONS §4a](../CONVENTIONS.md#4a-rollup-adrs).
+
+ADR-0332 proposes retiring the planning competition and superseding the two
+store-backed decisions dedicated to its plan-selection and dispatch-override
+mechanisms. Its lifecycle transition requires separate approval; [ORB-10627]
+removes their implementation while that proposal remains pending.
 
 Historical note ([ORB-10458]): the entries listed below were authored with local IDs that had no record in the ADR store. They were allocated through `orbit.adr.add`, their narratives migrated into the store verbatim, and their headings rewritten to the allocated global ID. The original local IDs survive as `legacy_ids`, so prior citations still resolve via `orbit tool run orbit.adr.show --input '{"legacy_id":"<feature>/ADR-NNN"}'`. Backfilled here: `activity-job/ADR-0252` → ADR-0282, `activity-job/ADR-052` → ADR-0281.
 

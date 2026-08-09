@@ -88,7 +88,7 @@ Environment:
   migrate     Apply or inspect pending .orbit layout/schema migrations
 
 Operate:
-  run         Run a workflow (ship, duel-plan, job)
+  run         Run a workflow (ship, job)
   gc          Inspect and explicitly reap Orbit-managed garbage
   task        Create, update, and manage tasks
   docs        Search and manage the indexed docs corpus

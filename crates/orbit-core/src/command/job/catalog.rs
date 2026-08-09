@@ -13,8 +13,7 @@ use crate::command::seed_embedded_assets;
 /// Shippable default workflow assets, seeded under
 /// `<orbit_root>/resources/jobs/<name>.yaml` on `orbit init`. The entries
 /// here are the admission-controlled task shipment workflows
-/// (auto / gate / local / pr), the planning-duel workflow, and the
-/// failed-run triage workflow [ORB-10129].
+/// (auto / gate / local / pr) and the failed-run triage workflow [ORB-10129].
 /// Example and smoke fixtures live
 /// under `crates/orbit-core/assets/jobs/examples/` and are NOT seeded —
 /// they exist for `crates/orbit-engine/examples/v2_job_runtime_smoke.rs`
@@ -23,10 +22,6 @@ const DEFAULT_JOB_FILES: &[(&str, &str)] = &[
     (
         "auto_task_scheduler_pipeline",
         include_str!("../../../assets/jobs/auto_task_scheduler_pipeline.yaml"),
-    ),
-    (
-        "job_duel_plan_pipeline",
-        include_str!("../../../assets/jobs/job_duel_plan_pipeline.yaml"),
     ),
     (
         "task_auto_pipeline",

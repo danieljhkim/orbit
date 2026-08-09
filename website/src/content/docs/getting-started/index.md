@@ -20,7 +20,7 @@ Use this section when you are setting up Orbit for the first time.
   </a>
   <a class="orbit-card" href="./workflows/">
     <h3>Default Workflows</h3>
-    <p>Run ship and duel-plan.</p>
+    <p>Run the built-in ship workflow.</p>
   </a>
 </div>
 

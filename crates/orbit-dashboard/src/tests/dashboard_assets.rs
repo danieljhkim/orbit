@@ -48,6 +48,17 @@ async fn dashboard_index_self_hosts_markdown_runtime() {
 }
 
 #[test]
+fn dashboard_omits_retired_duel_surfaces() {
+    let index = include_str!("../../assets/dashboard/index.html");
+    let scoreboard = include_str!("../../assets/dashboard/scoreboard.js");
+    let css = include_str!("../../assets/dashboard/dashboard.css");
+
+    for asset in [index, scoreboard, css] {
+        assert!(!asset.to_ascii_lowercase().contains("duel"));
+    }
+}
+
+#[test]
 fn dashboard_renders_normalized_managed_token_usage_without_provider_ranking() {
     let scoreboard = include_str!("../../assets/dashboard/scoreboard.js");
     let css = include_str!("../../assets/dashboard/dashboard.css");
@@ -548,7 +559,6 @@ async fn dashboard_scoreboard_is_reachable_under_diagnostics() {
         "scoreboard-window-selector",
         "scoreboard-narrative",
         "scoreboard-agent-strip",
-        "scoreboard-duel-matrix-host",
         "scoreboard-insights",
         "scoreboard-orchestration",
         "scoreboard-orchestration-count",

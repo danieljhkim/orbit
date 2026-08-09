@@ -12,8 +12,6 @@
 //! uniformly the catalog activity name. The job executor persists a dispatched
 //! step's trace under the **step id**, while a recovery dispatch — which has
 //! no step of its own — is persisted under the **recovery activity name**.
-//! A third writer (the planning-duel runner) persists under the activity name.
-//!
 //! [`JobActivityRoles::step`] therefore holds both identifiers a step
 //! invocation can be recorded under: the step's `id`, and the catalog name
 //! from its `target` (an inlined [`TargetStep`]'s `activity_name`, or an

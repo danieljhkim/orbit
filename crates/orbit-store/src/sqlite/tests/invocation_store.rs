@@ -3,8 +3,8 @@
 // docs/design-patterns/test_layout.md.
 
 use chrono::{TimeZone, Utc};
-use orbit_common::test_fixtures::{TEST_CODEX_MODEL, TEST_GEMINI_MODEL};
-use orbit_common::types::{InvocationTrace, RoleSlot, TokenUsage, ToolCallTrace};
+use orbit_common::test_fixtures::TEST_CODEX_MODEL;
+use orbit_common::types::{InvocationTrace, TokenUsage, ToolCallTrace};
 
 // Frozen production Claude model literal, chosen because the shipped
 // `assets/model_prices.yaml` prices it (unlike the frozen test fixtures,
@@ -17,61 +17,6 @@ use super::super::invocation_store::{
 use crate::Store;
 
 #[test]
-fn invocation_records_persist_planning_duel_slot() {
-    let store = Store::open_in_memory().expect("open store");
-
-    store
-        .insert_invocation_trace_record(&InvocationInsertParams {
-            job_run_id: "jrun-1".to_string(),
-            activity_id: "propose_duel_plan".to_string(),
-            agent: "gemini".to_string(),
-            model: Some(TEST_GEMINI_MODEL.to_string()),
-            slot: Some(RoleSlot::PlannerA),
-            task_ids: vec!["ORB-1".to_string()],
-            trace: InvocationTrace::default(),
-        })
-        .expect("insert invocation");
-
-    let records = store
-        .list_invocation_records(&InvocationQuery {
-            job_run_id: Some("jrun-1".to_string()),
-            slot: Some(RoleSlot::PlannerA),
-            limit: 10,
-            ..InvocationQuery::default()
-        })
-        .expect("list records");
-    assert_eq!(records.len(), 1);
-    assert_eq!(records[0].slot, Some(RoleSlot::PlannerA));
-}
-
-#[test]
-fn invocation_records_persist_non_duel_slot_as_null() {
-    let store = Store::open_in_memory().expect("open store");
-
-    store
-        .insert_invocation_trace_record(&InvocationInsertParams {
-            job_run_id: "jrun-2".to_string(),
-            activity_id: "implement_one".to_string(),
-            agent: "codex".to_string(),
-            model: Some(TEST_CODEX_MODEL.to_string()),
-            slot: None,
-            task_ids: vec!["ORB-2".to_string()],
-            trace: InvocationTrace::default(),
-        })
-        .expect("insert invocation");
-
-    let records = store
-        .list_invocation_records(&InvocationQuery {
-            job_run_id: Some("jrun-2".to_string()),
-            limit: 10,
-            ..InvocationQuery::default()
-        })
-        .expect("list records");
-    assert_eq!(records.len(), 1);
-    assert_eq!(records[0].slot, None);
-}
-
-#[test]
 fn invocation_records_filter_by_nested_task_and_tool() {
     let store = Store::open_in_memory().expect("open store");
 
@@ -81,7 +26,6 @@ fn invocation_records_filter_by_nested_task_and_tool() {
             activity_id: "implement_one".to_string(),
             agent: "codex".to_string(),
             model: Some(TEST_CODEX_MODEL.to_string()),
-            slot: None,
             task_ids: vec!["ORB-1".to_string()],
             trace: InvocationTrace {
                 usage: TokenUsage {
@@ -107,7 +51,6 @@ fn invocation_records_filter_by_nested_task_and_tool() {
             activity_id: "implement_one".to_string(),
             agent: "codex".to_string(),
             model: Some(TEST_CODEX_MODEL.to_string()),
-            slot: None,
             task_ids: vec!["ORB-2".to_string()],
             trace: InvocationTrace {
                 tool_calls: vec![ToolCallTrace {
@@ -147,7 +90,6 @@ fn invocation_records_derive_cost_from_price_table_and_keep_provider_cost() {
             activity_id: "implement_one".to_string(),
             agent: "claude".to_string(),
             model: Some(PRICED_MODEL.to_string()),
-            slot: None,
             task_ids: vec!["ORB-3".to_string()],
             trace: InvocationTrace {
                 usage: TokenUsage {
@@ -197,7 +139,6 @@ fn invocation_records_round_trip_one_hour_cache_writes_and_derive_ground_truth()
             activity_id: "implement_one".to_string(),
             agent: "claude".to_string(),
             model: Some("claude-opus-4-8[1m]".to_string()),
-            slot: None,
             task_ids: vec!["ORB-5".to_string()],
             trace: InvocationTrace {
                 usage: TokenUsage {
@@ -240,7 +181,6 @@ fn historical_invocation_is_repriced_at_query_time_without_a_migration() {
             activity_id: "implement_one".to_string(),
             agent: "codex".to_string(),
             model: Some("gpt-5.6-terra".to_string()),
-            slot: None,
             task_ids: vec!["ORB-10579".to_string()],
             trace: InvocationTrace {
                 usage: TokenUsage {
@@ -298,7 +238,6 @@ fn invocation_records_leave_derived_cost_none_for_an_unpriced_model() {
             activity_id: "implement_one".to_string(),
             agent: "codex".to_string(),
             model: Some("some-unpriced-model".to_string()),
-            slot: None,
             task_ids: vec!["ORB-4".to_string()],
             trace: InvocationTrace::default(),
         })
@@ -336,7 +275,6 @@ fn accounting_facts_are_unbounded_distinct_and_half_open_without_tool_hydration(
                 activity_id: "implement".to_string(),
                 agent: "codex".to_string(),
                 model: Some(PRICED_MODEL.to_string()),
-                slot: None,
                 task_ids: vec![
                     "ORB-DUPLICATE".to_string(),
                     "ORB-DUPLICATE".to_string(),

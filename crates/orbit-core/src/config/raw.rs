@@ -18,6 +18,9 @@ pub(super) struct RawRuntimeConfig {
     /// `[crews.<name>]` registry. Each table supplies one assignment Orbit
     /// resolves for every activity role at task run start.
     pub(super) crews: Option<BTreeMap<String, RawCrewEntry>>,
+    /// Retired in ORB-10627. Existing workspaces may still carry the section
+    /// written by older `orbit init`; loaders warn and ignore it.
+    pub(super) duel: Option<toml::Value>,
 }
 
 /// Schema for a single role assignment in `[crews.<name>]`.
@@ -57,14 +60,6 @@ pub struct RawCrewEntry {
     pub implementer: Option<RawAgentRoleConfig>,
     #[serde(default, skip_serializing)]
     pub reviewer: Option<RawAgentRoleConfig>,
-}
-
-/// Bootstrap writer shape for the fixed planning-duel section. Runtime
-/// admission reads these keys through the registry table.
-#[derive(Debug, Clone, Deserialize, Serialize)]
-pub(super) struct RawDuelSection {
-    pub(super) candidates: Option<Vec<String>>,
-    pub(super) models: Option<BTreeMap<String, String>>,
 }
 
 #[derive(Debug, Clone, Deserialize)]

@@ -70,7 +70,6 @@ fn smoke_dispatch_deterministic(
         input: Value::Null,
         audit: writer.clone(),
         run_id,
-        agent_override: None,
         host: Some(&host),
     })
     .map_err(|e| format!("dispatch: {e}"))?;

@@ -144,7 +144,7 @@ fn compiled_profile_allows_nested_orbit_runtime_writes_without_home_orbit_reallo
     let log_path = global.join("state/logs/orbit.jsonl");
     let db_wal_path = global.join("orbit.db-wal");
     let artifact_path = global
-        .join("tasks/workspaces/orbit-test/ORB-00009/artifacts/files/planning-duel")
+        .join("tasks/workspaces/orbit-test/ORB-00009/artifacts/files/reports")
         .join("planner_a.md");
     let id_alloc_lock_path = workspace.join("state/.id_alloc.lock");
     let semantic_wal_path = workspace.join("state/semantic.db-wal");

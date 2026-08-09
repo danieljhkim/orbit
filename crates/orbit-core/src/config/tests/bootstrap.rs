@@ -3,7 +3,6 @@ use super::super::bootstrap::*;
 use super::super::raw::RawAgentRoleConfig;
 use super::super::raw::RawRuntimeConfig;
 use super::super::runtime::RuntimeConfig;
-use orbit_common::types::all_agent_families;
 use std::collections::BTreeMap;
 use tempfile::tempdir;
 
@@ -127,48 +126,6 @@ fn no_supported_cli_seeds_no_crews_or_dangling_default() {
 }
 
 #[test]
-fn seed_with_three_available_families_writes_duel_candidates_and_models() {
-    let detected = detect(
-        &MockAgentEnvProbe::new()
-            .with_binary("claude")
-            .with_binary("codex")
-            .with_binary("gemini"),
-    );
-    let contents = seed_contents(&detected, None);
-    let parsed: toml::Value = toml::from_str(&contents).expect("parse seeded config");
-
-    let candidates = parsed
-        .get("duel")
-        .and_then(|duel| duel.get("candidates"))
-        .and_then(|candidates| candidates.as_array())
-        .expect("duel candidates");
-    let candidates: Vec<&str> = candidates
-        .iter()
-        .map(|candidate| candidate.as_str().expect("candidate string"))
-        .collect();
-    assert_eq!(candidates, vec!["claude", "codex", "gemini"]);
-
-    let models = parsed
-        .get("duel")
-        .and_then(|duel| duel.get("models"))
-        .and_then(|models| models.as_table())
-        .expect("duel models");
-    assert_eq!(models.len(), 3);
-    assert_eq!(
-        models.get("claude").and_then(|v| v.as_str()),
-        Some(orbit_common::model_defaults::CLAUDE_DEFAULT_STRONG)
-    );
-    assert_eq!(
-        models.get("codex").and_then(|v| v.as_str()),
-        Some(orbit_common::model_defaults::CODEX_DEFAULT_MODEL)
-    );
-    assert_eq!(
-        models.get("gemini").and_then(|v| v.as_str()),
-        Some(orbit_common::model_defaults::GEMINI_DEFAULT_MODEL)
-    );
-}
-
-#[test]
 fn multi_provider_seed_includes_each_available_family_and_excludes_unavailable() {
     let detected = detect(
         &MockAgentEnvProbe::new()
@@ -203,20 +160,6 @@ fn multi_provider_seed_includes_each_available_family_and_excludes_unavailable()
             Some("gemini")
         );
     }
-}
-
-#[test]
-fn seed_with_fewer_than_three_families_omits_duel_and_runtime_falls_back() {
-    let detected = detect(&MockAgentEnvProbe::new().with_binary("claude"));
-    let contents = seed_contents(&detected, None);
-
-    assert!(!contents.contains("[duel"));
-    let config = load_seeded_config(&contents);
-    let expected: Vec<String> = all_agent_families()
-        .into_iter()
-        .map(str::to_string)
-        .collect();
-    assert_eq!(config.duel.candidates, expected);
 }
 
 #[test]

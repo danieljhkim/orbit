@@ -20,7 +20,6 @@ steps:
     .activity_roles();
 
     // Both identifiers a step invocation can be recorded under: the executor
-    // persists a dispatched step under its step id, the planning-duel runner
     // under the activity name.
     assert_eq!(
         roles.step.iter().cloned().collect::<Vec<_>>(),

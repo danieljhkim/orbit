@@ -34,7 +34,6 @@ DURATION_STEPS = {
     "dispatch_and_plan_batch",
     "plan_batch_tasks",
     "review_batch_pr",
-    "run_planning_duel",
     "review_pr",
     "finalize_tasks",
 }
@@ -44,7 +43,6 @@ STEP_COLORS = {
     "dispatch_and_plan_batch":"#F5A623",
     "plan_batch_tasks":       "#F5A623",
     "review_batch_pr":        "#7ED321",
-    "run_planning_duel":      "#BD10E0",
     "review_pr":              "#50E3C2",
     "finalize_tasks":         "#D0021B",
 }

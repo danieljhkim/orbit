@@ -13,7 +13,7 @@ use orbit_store::{
 };
 use orbit_tools::ToolRegistry;
 
-use crate::config::{CodexExecutionPolicy, DuelConfig, ExecutionEnvPolicy, PersistenceConfig};
+use crate::config::{CodexExecutionPolicy, ExecutionEnvPolicy, PersistenceConfig};
 use crate::skill_catalog::SkillCatalog;
 
 const ORBIT_AGENT_NAME: &str = "ORBIT_AGENT_NAME";
@@ -247,7 +247,7 @@ pub(crate) struct OrbitRuntimeSettings {
     pr_config: PrConfig,
     /// Persisted default for the v2 `agent_loop` execution backend (§3.1).
     v2_backend: Option<String>,
-    /// Default base branch for ship/duel-plan workflows
+    /// Default base branch for ship workflows
     /// (`[workflow] base_branch` in `config.toml`, default `"main"`).
     workflow_base_branch: String,
     /// Opt-in for unattended ship dispatch
@@ -258,7 +258,6 @@ pub(crate) struct OrbitRuntimeSettings {
     routines_source: bool,
     crews: std::collections::BTreeMap<String, Crew>,
     default_crew: Option<String>,
-    duel: DuelConfig,
 }
 
 impl OrbitRuntimeSettings {
@@ -274,7 +273,6 @@ impl OrbitRuntimeSettings {
         routines_source: bool,
         crews: std::collections::BTreeMap<String, Crew>,
         default_crew: Option<String>,
-        duel: DuelConfig,
     ) -> Self {
         Self {
             persistence,
@@ -287,7 +285,6 @@ impl OrbitRuntimeSettings {
             routines_source,
             crews,
             default_crew,
-            duel,
         }
     }
 
@@ -317,10 +314,6 @@ impl OrbitRuntimeSettings {
 
     pub(crate) fn default_crew(&self) -> Option<&str> {
         self.default_crew.as_deref()
-    }
-
-    pub(crate) fn duel_config(&self) -> &DuelConfig {
-        &self.duel
     }
 }
 

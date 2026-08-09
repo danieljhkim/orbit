@@ -34,7 +34,7 @@ pub use raw::{RawAgentRoleConfig, RawCrewEntry};
 pub use registry::{
     CONFIG_KEY_REGISTRY, ConfigKeyDescriptor, ConfigSnapshot, describe as describe_config_key,
 };
-pub(crate) use runtime::{CodexExecutionPolicy, DuelConfig, ExecutionEnvPolicy, RuntimeConfig};
+pub(crate) use runtime::{CodexExecutionPolicy, ExecutionEnvPolicy, RuntimeConfig};
 pub use runtime::{
     ConfigValueSource, ConfigValueSourceKind, EffectiveConfig, EffectiveConfigValue,
     load_effective_config,

@@ -48,7 +48,7 @@ use orbit_policy::PolicyEngine;
 use serde_json::{Map, Value};
 
 use orbit_common::friction::FrictionVerb;
-use orbit_common::types::{OrbitError, RoleSlot, ToolSchema};
+use orbit_common::types::{OrbitError, ToolSchema};
 
 /// Fast operation timeout (1 s). Used for local command resolution (e.g. `which`).
 pub const TIMEOUT_FAST_MS: u64 = 1_000;
@@ -197,9 +197,6 @@ pub struct ToolContext {
     /// Resolved model identifier (e.g. `"opus-4.6"`). Used alongside `agent_name`
     /// for the attribution footer.
     pub model_name: Option<String>,
-    /// Planning-duel slot asserted by the runtime envelope, when this tool call
-    /// is made from a planning-duel activity.
-    pub role_slot: Option<RoleSlot>,
     /// Program allowlist for `proc.spawn`. When `proc_spawn_activity_scoped`
     /// is `true`, an empty list denies every program (fail-closed). When
     /// `proc_spawn_activity_scoped` is `false`, an empty list preserves the
@@ -232,7 +229,6 @@ impl std::fmt::Debug for ToolContext {
             .field("workspace_root", &self.workspace_root)
             .field("agent_name", &self.agent_name)
             .field("model_name", &self.model_name)
-            .field("role_slot", &self.role_slot)
             .field("proc_allowed_programs", &self.proc_allowed_programs)
             .field(
                 "proc_spawn_activity_scoped",

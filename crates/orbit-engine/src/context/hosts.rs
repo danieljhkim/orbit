@@ -6,7 +6,7 @@ use orbit_common::types::activity_job::{AgentRole, Backend, Provider};
 use orbit_common::types::{
     ActivityV2, AgentModelPair, ExternalRef, JobRun, JobRunState, OrbitError, OrbitEvent,
     PipelineState, Role, Task, TaskArtifact, TaskComment, TaskHistoryEntry, TaskPriority,
-    TaskStatus, all_agent_families,
+    TaskStatus,
 };
 use orbit_exec::EnvironmentMode;
 use orbit_store::JobRunStepParams;
@@ -293,15 +293,6 @@ pub trait DeterministicActionHost {
     ) -> Result<(), OrbitError>;
     fn resolved_agent_model_pair(&self, agent_cli: &str) -> Option<AgentModelPair> {
         let _ = agent_cli;
-        None
-    }
-    fn duel_candidate_families(&self) -> Vec<String> {
-        all_agent_families()
-            .iter()
-            .map(|family| (*family).to_string())
-            .collect()
-    }
-    fn duel_orchestrator_model(&self, _family: &str) -> Option<String> {
         None
     }
     fn canonical_model_name(&self, _agent_cli: &str, model: Option<&str>) -> Option<String> {

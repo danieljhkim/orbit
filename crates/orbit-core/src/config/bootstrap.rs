@@ -2,14 +2,11 @@ use std::collections::BTreeMap;
 use std::path::Path;
 
 use orbit_common::types::OrbitError;
-use serde::Serialize;
 
 use orbit_common::utility::fs::write_text_with_parent;
 
-use super::agent_detect::{
-    DetectedAgents, available_crew_families, default_crew_name, default_model_for,
-};
-use super::raw::{RawAgentRoleConfig, RawCrewEntry, RawDuelSection};
+use super::agent_detect::{DetectedAgents, available_crew_families, default_crew_name};
+use super::raw::{RawAgentRoleConfig, RawCrewEntry};
 use super::runtime::default_crews;
 
 pub(crate) const DEFAULT_CONFIG_TEMPLATE: &str =
@@ -55,7 +52,6 @@ fn render_seeded_config(
     }
     body.push('\n');
     body.push_str(&render_crews(detected, role_settings)?);
-    body.push_str(&render_duel(detected)?);
     Ok(body)
 }
 
@@ -198,41 +194,6 @@ fn render_crew_table(name: &str, entry: &RawCrewEntry) -> Result<String, OrbitEr
         rendered.push_str(&format!("tags = {}\n", toml::Value::Array(tags)));
     }
     rendered.push('\n');
-    Ok(rendered)
-}
-
-fn render_duel(detected: &DetectedAgents) -> Result<String, OrbitError> {
-    let candidates = available_crew_families(detected);
-    if candidates.len() < 3 {
-        return Ok(String::new());
-    }
-
-    #[derive(Serialize)]
-    struct DuelConfig {
-        duel: RawDuelSection,
-    }
-
-    let mut models = BTreeMap::new();
-    for family in &candidates {
-        let model = default_model_for(family).ok_or_else(|| {
-            OrbitError::InvalidInput(format!("no default model configured for `{family}`"))
-        })?;
-        models.insert((*family).to_string(), model.to_string());
-    }
-
-    let mut rendered = toml::to_string(&DuelConfig {
-        duel: RawDuelSection {
-            candidates: Some(candidates.into_iter().map(str::to_string).collect()),
-            models: Some(models),
-        },
-    })
-    .map_err(|err| OrbitError::Io(format!("serialize [duel] sections: {err}")))?;
-    if !rendered.starts_with('\n') {
-        rendered.insert(0, '\n');
-    }
-    if !rendered.ends_with('\n') {
-        rendered.push('\n');
-    }
     Ok(rendered)
 }
 
