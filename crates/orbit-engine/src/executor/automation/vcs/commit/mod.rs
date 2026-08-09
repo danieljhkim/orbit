@@ -1,3 +1,4 @@
+mod adr_handoff;
 mod author;
 mod git_ops;
 mod message;
@@ -15,6 +16,7 @@ use crate::context::{DeterministicActionHost, TaskHost};
 use super::super::input::{canonicalize_existing_dir, input_string_field, required_job_run_id};
 use super::git::{git_output, git_success};
 use super::handoff::reject_failed_delivery;
+use adr_handoff::stage_proposed_adr_bundles;
 use author::{append_co_author_trailers, commit_author_for_tasks};
 use git_ops::{
     ensure_named_branch, ensure_no_unmerged_changes, git_commit_with_identity, stage_paths,
@@ -221,6 +223,13 @@ pub(super) fn commit_batch_changes<H: TaskHost + DeterministicActionHost + ?Size
             ));
         }
     };
+
+    // A proposed ADR the run allocated lives in an ignored partition, so
+    // `git add --all` below would skip it and ship the code without the
+    // decision documenting it. Hand it off first: this is the step that can
+    // fail on read-only worktree metadata, and going first means that failure
+    // names the bundle instead of surfacing as a bare `git add` error.
+    stage_proposed_adr_bundles(&workspace_path, &task.id)?;
 
     git_success(&workspace_path, &["add", "--all", "--", "."])?;
 

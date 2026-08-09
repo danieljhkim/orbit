@@ -1,0 +1,22 @@
+schema_version: 2
+id: ADR-0338
+title: Force-stage run-allocated proposed ADR bundles at delivery
+status: proposed
+owner: claude
+created_at: 2026-08-09T06:43:36.172167363Z
+last_updated: 2026-08-09T06:43:36.172167363Z
+related_features:
+- worktree-artifacts
+- delivery
+related_tasks:
+- ORB-10653
+tags:
+- vcs
+- adr-lifecycle
+- delivery
+paths:
+- crates/orbit-engine/src/executor/automation/vcs/commit/**
+supersedes: []
+legacy_ids: []
+validation_warnings: []
+legacy_validation: none
