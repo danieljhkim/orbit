@@ -113,6 +113,34 @@ Activity resolution is likewise execution-oriented, but its directory order is e
 
 This is an intentional default-shadowing asymmetry: job *listing* is workspace-preferred, while named job execution and activity resolution keep shipped defaults authoritative over workspace resources. The split follows [L-0060] and its originating security fix [ORB-00356]: display/catalog override semantics must not make checked-in workspace YAML executable in place of a trusted shipped default. That learning is the rationale; the runtime and job catalog code are authoritative for the exact loading behavior.
 
+### 4.1 Managed materialization and retirement
+
+Global activity and job defaults materialized by `orbit init` are managed
+resources, not merely additive examples. After [ORB-10684] / [ADR-0346], each
+resource directory carries a hidden `.orbit-managed-assets.json` manifest. Its
+entry for a bundled file is the SHA-256 digest of the content Orbit last wrote;
+the manifest is therefore the ownership authority for later retirement, while
+the YAML filename alone never authorizes deletion.
+
+Refresh applies the same reconciliation to activities and jobs:
+
+- a previously managed name absent from the current embedded list is deleted
+  when its bytes still match the recorded digest;
+- a locally modified retired managed file is moved to
+  `resources/.retired-managed/{activities,jobs}/`, preserving its content while
+  keeping recursively loaded catalogs from activating it;
+- an installation without a manifest adopts only exact current bundled bytes
+  as managed; other YAML remains in place and `orbit init` warns with the paths
+  plus the manual remedy to move or delete a stale legacy file;
+- the new manifest contains only current assets whose managed ownership is
+  established, so repeating refresh is idempotent.
+
+This means a manifest-aware upgrade cannot leave a retired managed activity
+with removed tool grants—or a retired managed job with removed actions—in the
+catalog. Legacy files whose history cannot be proven remain operator-owned:
+Orbit will not guess from their names, and the warning is the recovery contract
+for installations predating managed provenance.
+
 Direct single-activity runtime helpers:
 
 1. Read YAML from disk.

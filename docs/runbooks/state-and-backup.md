@@ -49,7 +49,8 @@ precedence). Path layout is defined in
 | `orbit.db` (+ `-wal`, `-shm`) | **the** store DB: audit events (`audit_events`, `v2_audit_events`), job runs + checkpoints (`job_runs`, `job_run_steps`), task reservations, ADR/learning indexes, host registry (`hosts`, `host_aliases`, `workspace_ownership`, `host_workspace_presence`, `workspace_execution_profiles`, `hub_registry_metadata`), `schema_meta` migration ledger | **authoritative** (history is not derivable) |
 | `tasks/index.sqlite` | global task-ID allocator + registry index | regenerable (`orbit task reindex`) |
 | `tasks/workspaces/<ws-id>/<task-id>/` | canonical task bundles (survive repo moves) | **authoritative** |
-| `resources/`, `skills/` | default activity/job/executor/policy defs, skills | regenerable (`orbit init` reseeds) |
+| `resources/activities/`, `resources/jobs/` | managed defaults plus operator-authored activity/job YAML; hidden manifests retain managed content provenance | mixed: current defaults are regenerable, but untracked YAML and `resources/.retired-managed/` backups are **authoritative until reviewed** |
+| other `resources/`, `skills/` | default executor/policy defs and skills | regenerable (`orbit init` reseeds) |
 | `state/logs/orbit.jsonl` (+ rotated archives) | unified JSONL log sink for all Orbit processes | disposable |
 | `embed/` | semantic-search companion binary + models | regenerable (`orbit semantic install`) |
 | `bin/` | installed Orbit binary (when installed via `install.sh`) | reinstallable |
@@ -68,6 +69,16 @@ precedence). Path layout is defined in
 > parses again. A malformed registry present *at server startup* is still fatal — fix the file
 > before launching. See [remote-access design §2.1](../design/remote-access/2_design.md) and
 > [ADR-0234](../design/remote-access/4_decisions.md).
+
+> **Managed activity/job refresh (ORB-10684 / ADR-0346).** `orbit init` records
+> the digest it wrote for each bundled activity and job in the resource
+> directory's `.orbit-managed-assets.json`. A later refresh deletes a retired
+> file only when it still matches that digest. Locally modified retired files
+> move to `resources/.retired-managed/{activities,jobs}/`, outside active
+> catalogs; back up and review those files as operator data. On a legacy root
+> with no manifest, non-matching YAML stays in place and init names it in a
+> warning. Move or delete only the named stale file after confirming it came
+> from an older release, then rerun `orbit init` and the affected list command.
 
 ### Retired graph state and task selectors
 
@@ -111,7 +122,8 @@ in git use a selective pattern instead, keeping DBs, locks, and runtime state ou
   `graph/` and `knowledge/graph/` locations. If the repo commits ADRs and learnings through the
   selective gitignore, git already backs those up.
 - **Global root:** `~/.orbit/config.toml`, `workspaces.json`, `tasks/` (canonical bundles),
-  and `orbit.db`. The database holds non-derivable audit and run history.
+  `orbit.db`, and `resources/` whenever it contains operator-authored YAML or
+  `.retired-managed/` recovery copies. The database holds non-derivable audit and run history.
 - **Safe to lose or regenerate:** retired `graph/` and `knowledge/graph/`, `state/semantic.db`,
   `tasks/index.sqlite`, `~/.orbit/embed/`, `~/.orbit/state/logs/`, scoreboard counters.
 
