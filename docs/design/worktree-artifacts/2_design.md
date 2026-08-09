@@ -10,7 +10,7 @@ doc_role: design
 tags: ["worktree-artifacts"]
 paths: ["crates/orbit-remote/**", "crates/orbit-core/**", "crates/orbit-store/**", "crates/orbit-cli/**"]
 related_features: ["worktree-artifacts", "host-registry", "mcp-bridge"]
-related_artifacts: ["ORB-00199", "ORB-00200", "ORB-00201", "ORB-10272", "ORB-10297", "ORB-10330", "ORB-10545", "ORB-10669", "ADR-0177", "ADR-0229", "ADR-0302", "ADR-0339"]
+related_artifacts: ["ORB-00199", "ORB-00200", "ORB-00201", "ORB-10272", "ORB-10297", "ORB-10330", "ORB-10545", "ORB-10668", "ORB-10669", "ADR-0177", "ADR-0229", "ADR-0302", "ADR-0339", "ADR-0342"]
 ---
 
 # Worktree Artifacts - Design
@@ -129,6 +129,12 @@ List and search retain their existing defaults. Readable allocation-owned bundle
 ## 5. Mutation Boundary
 
 ADR document update, accept, and supersede are local-only. A federated or unavailable allocation-owned artifact fails preflight with `artifact_not_local` (HTTP 409 or the same local MCP code) before any bundle, allocation, lifecycle timestamp, index, or audit mutation. Supersede preflights both operands before its first write. Landing the bundle in the current checkout restores ordinary local mutation semantics; a sibling-owned allocation row remains unchanged.
+
+Local-only is a boundary on *where* the write runs, not on which surface may run
+it. `orbit adr add`, `orbit adr update`, and `orbit adr supersede` ([ADR-0342],
+[ORB-10668]) delegate to the same `orbit.adr.*` tools and so inherit this
+preflight unchanged; they exist so the checkout that owns a bundle can complete
+the lifecycle from a shell, which is the only place the 409 leaves open.
 
 ### 5.1 Federated ADR reconciliation
 

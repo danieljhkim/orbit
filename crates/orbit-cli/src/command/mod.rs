@@ -92,7 +92,7 @@ Operate:
   gc          Inspect and explicitly reap Orbit-managed garbage
   task        Create, update, and manage tasks
   docs        Search and manage the indexed docs corpus
-  adr         List and inspect Architecture Decision Records
+  adr         Author, inspect, and advance Architecture Decision Records
   friction    Report, list, and triage friction records
   learning    Create, search, and curate project learnings
 
