@@ -7,7 +7,7 @@ use super::super::JobRunListParams;
 #[cfg(unix)]
 use super::super::owner::{
     OwnerIdentity, classify_run_owner_with_probes, pending_run_stale_reason,
-    running_run_owner_stale_reason, stale_job_run_message,
+    running_run_owner_stale_reason, stale_job_run_message, verify_owner_termination,
 };
 use chrono::{Duration, Utc};
 use orbit_common::types::JobRunState;
@@ -20,6 +20,34 @@ use orbit_common::utility::process_identity::{
 };
 #[cfg(unix)]
 use std::process::{Command, Stdio};
+
+#[cfg(unix)]
+struct ReapingChild(std::process::Child);
+
+#[cfg(unix)]
+impl ReapingChild {
+    fn id(&self) -> u32 {
+        self.0.id()
+    }
+
+    fn kill(&mut self) -> std::io::Result<()> {
+        self.0.kill()
+    }
+
+    fn wait(&mut self) -> std::io::Result<std::process::ExitStatus> {
+        self.0.wait()
+    }
+}
+
+#[cfg(unix)]
+impl Drop for ReapingChild {
+    fn drop(&mut self) {
+        if self.0.try_wait().ok().flatten().is_none() {
+            let _ = self.0.kill();
+        }
+        let _ = self.0.wait();
+    }
+}
 
 static TZ_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
@@ -54,14 +82,56 @@ impl Drop for TzGuard {
 }
 
 #[cfg(unix)]
-fn spawn_sentinel() -> std::process::Child {
-    Command::new("sleep")
+fn spawn_sentinel() -> ReapingChild {
+    ReapingChild(
+        Command::new("sleep")
+            .arg("30")
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("spawn sentinel"),
+    )
+}
+
+#[cfg(unix)]
+#[test]
+fn live_isolated_group_returns_typed_cancellation_evidence() {
+    use std::os::unix::process::CommandExt;
+
+    let mut command = Command::new("sleep");
+    command
         .arg("30")
         .stdin(Stdio::null())
         .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-        .expect("spawn sentinel")
+        .stderr(Stdio::null());
+    unsafe {
+        command.pre_exec(|| {
+            if libc::setsid() == -1 {
+                return Err(std::io::Error::last_os_error());
+            }
+            Ok(())
+        });
+    }
+    let mut survivor = ReapingChild(command.spawn().expect("spawn isolated survivor"));
+    let pid = survivor.id();
+
+    let error = verify_owner_termination(pid, Some(pid as libc::pid_t), true, true)
+        .expect_err("a genuine survivor must remain non-terminal");
+    assert!(matches!(
+        error,
+        orbit_common::types::OrbitError::RunCancellationIncomplete {
+            pid: error_pid,
+            pgid: Some(error_pgid),
+            term_sent: true,
+            kill_sent: true,
+            leader_alive: true,
+            group_alive: true,
+        } if error_pid == pid && error_pgid == pid as libc::pid_t
+    ));
+
+    survivor.kill().expect("kill isolated survivor");
+    survivor.wait().expect("reap isolated survivor");
 }
 
 #[cfg(unix)]

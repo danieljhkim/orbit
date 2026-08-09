@@ -1,4 +1,4 @@
-name: macOS Sandbox
+name: macOS Platform
 
 # The orbit-exec macOS sandbox tests (`#[cfg(target_os = "macos")]`, gated on
 # `sandbox_exec_can_apply()`) compile generated SBPL profiles through the real
@@ -19,6 +19,13 @@ on:
       - "crates/orbit-policy/**"
       - "crates/orbit-common/src/types/policy_def.rs"
       - "crates/orbit-common/src/utility/glob.rs"
+      # [ORB-10682] Darwin owner/cancellation liveness uses native libproc
+      # state so unreaped zombies do not look like surviving work.
+      - "crates/orbit-common/src/utility/process_identity.rs"
+      - "crates/orbit-common/src/utility/tests/process_identity.rs"
+      - "crates/orbit-core/src/command/job/run/owner.rs"
+      - "crates/orbit-core/src/command/job/run/tests/actions.rs"
+      - "crates/orbit-core/src/command/job/run/tests/owner.rs"
       - "Cargo.lock"
       - ".github/workflows/ci-macos.yml"
 
@@ -57,3 +64,11 @@ jobs:
       # apply-time tests rather than failing — never worse than the Linux gate.
       - name: Run orbit-exec sandbox tests (real sandbox-exec)
         run: cargo test -p orbit-exec --locked
+
+      # Linux cannot exercise Darwin's libproc zombie/group semantics. Keep
+      # these filters aligned with the owner/liveness path triggers above.
+      - name: Run process identity and job-run owner tests
+        run: |
+          cargo test -p orbit-common --locked process_identity -- --nocapture
+          cargo test -p orbit-core --locked command::job::run::tests::owner -- --nocapture
+          cargo test -p orbit-core --locked command::job::run::tests::actions -- --nocapture

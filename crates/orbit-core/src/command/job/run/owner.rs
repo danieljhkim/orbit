@@ -4,8 +4,6 @@
 
 use orbit_common::types::OrbitError;
 use orbit_common::types::{JobRun, JobRunState};
-#[cfg(target_os = "linux")]
-use orbit_common::utility::process_identity::linux_process_state;
 /// Re-exported so the historical `owner::process_is_alive` path keeps working
 /// for this module's callers and sibling tests; the probe itself now lives in
 /// `orbit-common` so other run surfaces can share it [ORB-10496].
@@ -13,8 +11,9 @@ use orbit_common::utility::process_identity::linux_process_state;
 pub(super) use orbit_common::utility::process_identity::process_is_alive;
 #[cfg(unix)]
 use orbit_common::utility::process_identity::{
-    PidNamespaceScope, ProbeOutcome, is_stable_token, legacy_lstart_matches, pid_namespace_scope,
-    probe_process_start_identity, stable_tokens_match,
+    KernelLiveness, PidNamespaceScope, ProbeOutcome, is_stable_token, legacy_lstart_matches,
+    pid_namespace_scope, probe_process_group_liveness, probe_process_start_identity,
+    stable_tokens_match,
 };
 #[cfg(unix)]
 use std::thread;
@@ -172,44 +171,7 @@ fn wait_for_process_group_exit(pgid: libc::pid_t, timeout: Duration) -> bool {
 
 #[cfg(unix)]
 fn process_group_is_alive(pgid: libc::pid_t) -> bool {
-    if pgid <= 1 {
-        return false;
-    }
-    #[cfg(target_os = "linux")]
-    if let Some(alive) = linux_process_group_is_alive(pgid) {
-        return alive;
-    }
-    let rc = unsafe { libc::kill(-pgid, 0) };
-    if rc == 0 {
-        return true;
-    }
-    std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
-}
-
-/// Linux keeps unreaped processes visible to `kill(..., 0)`, even though they
-/// can no longer run or receive signals. Treat a group consisting solely of
-/// zombies as terminated so a parent which reaps after cancellation does not
-/// make a successful cancellation look incomplete.
-#[cfg(target_os = "linux")]
-fn linux_process_group_is_alive(pgid: libc::pid_t) -> Option<bool> {
-    let entries = std::fs::read_dir("/proc").ok()?;
-    let mut found_group_member = false;
-    for entry in entries.flatten() {
-        let Ok(pid) = entry.file_name().to_string_lossy().parse::<u32>() else {
-            continue;
-        };
-        let Some((state, member_pgid)) = linux_process_state(pid) else {
-            continue;
-        };
-        if member_pgid != pgid {
-            continue;
-        }
-        found_group_member = true;
-        if state != 'Z' {
-            return Some(true);
-        }
-    }
-    found_group_member.then_some(false)
+    !matches!(probe_process_group_liveness(pgid), KernelLiveness::Exited)
 }
 
 #[cfg(unix)]

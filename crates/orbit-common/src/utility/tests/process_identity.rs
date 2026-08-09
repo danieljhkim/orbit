@@ -92,4 +92,71 @@ mod liveness {
         assert_eq!(ProcessLiveness::Exited.as_str(), "exited");
         assert_eq!(ProcessLiveness::Unknown.as_str(), "unknown");
     }
+
+    #[test]
+    fn live_and_missing_process_groups_are_distinguished() {
+        let own_group = unsafe { libc::getpgrp() };
+        assert_eq!(
+            probe_process_group_liveness(own_group),
+            KernelLiveness::Alive
+        );
+        assert_eq!(
+            probe_process_group_liveness(i32::MAX),
+            KernelLiveness::Exited
+        );
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn darwin_native_probes_classify_an_unreaped_zombie_and_its_group_as_exited() {
+        use std::os::unix::process::CommandExt;
+        use std::process::{Command, Stdio};
+        use std::time::{Duration, Instant};
+
+        struct ReapingChild(std::process::Child);
+
+        impl Drop for ReapingChild {
+            fn drop(&mut self) {
+                if self.0.try_wait().ok().flatten().is_none() {
+                    let _ = self.0.kill();
+                }
+                let _ = self.0.wait();
+            }
+        }
+
+        let mut command = Command::new("/bin/sh");
+        command
+            .arg("-c")
+            .arg("exit 0")
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
+        // Safety: the child has not spawned yet; setsid isolates the process
+        // group queried by this test from the test runner's group.
+        unsafe {
+            command.pre_exec(|| {
+                if libc::setsid() == -1 {
+                    return Err(std::io::Error::last_os_error());
+                }
+                Ok(())
+            });
+        }
+        let mut child = ReapingChild(command.spawn().expect("spawn isolated child"));
+        let pid = child.0.id();
+        let deadline = Instant::now() + Duration::from_secs(3);
+        while process_is_alive(pid) && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+
+        assert!(
+            !process_is_alive(pid),
+            "unreaped Darwin zombie must not count as live"
+        );
+        assert_eq!(
+            probe_process_group_liveness(pid as libc::pid_t),
+            KernelLiveness::Exited,
+            "a zombie-only Darwin group must be stopped"
+        );
+        child.0.wait().expect("reap isolated zombie");
+    }
 }

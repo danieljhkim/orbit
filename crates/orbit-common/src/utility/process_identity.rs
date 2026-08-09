@@ -315,11 +315,44 @@ pub fn probe_process_liveness(_pid: u32, _pid_start_time: Option<&str>) -> Proce
     ProcessLiveness::Unknown
 }
 
+/// Kernel-level activity state for a PID or process group.
+///
+/// `Unknown` is deliberately distinct from `Exited`: callers which make a
+/// safety decision must preserve the possibility that work is still running.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum KernelLiveness {
+    Alive,
+    Exited,
+    Unknown,
+}
+
+#[cfg(unix)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SignalPresence {
+    Present,
+    Missing,
+    Unknown,
+}
+
+#[cfg(unix)]
+fn signal_presence(target: libc::pid_t) -> SignalPresence {
+    // Safety: signal 0 performs existence/permission checking only.
+    let rc = unsafe { libc::kill(target, 0) };
+    if rc == 0 {
+        return SignalPresence::Present;
+    }
+    match std::io::Error::last_os_error().raw_os_error() {
+        Some(libc::EPERM) => SignalPresence::Present,
+        Some(libc::ESRCH) => SignalPresence::Missing,
+        _ => SignalPresence::Unknown,
+    }
+}
+
 /// True when `pid` names a process that can still run.
 ///
-/// Linux keeps unreaped zombies visible to `kill(pid, 0)`; they are reported
-/// dead here because they can no longer do work. `EPERM` counts as alive: the
-/// process exists, we merely may not signal it.
+/// Linux and macOS keep unreaped zombies visible to `kill(pid, 0)`; native
+/// state probes report those processes dead here because they can no longer do
+/// work. An unavailable native probe and `EPERM` remain conservatively alive.
 #[cfg(unix)]
 pub fn process_is_alive(pid: u32) -> bool {
     if pid == 0 || pid > i32::MAX as u32 {
@@ -329,12 +362,11 @@ pub fn process_is_alive(pid: u32) -> bool {
     if matches!(linux_process_state(pid), Some(('Z', _))) {
         return false;
     }
-    // Safety: signal 0 performs existence/permission checking only.
-    let rc = unsafe { libc::kill(pid as libc::pid_t, 0) };
-    if rc == 0 {
-        return true;
+    #[cfg(target_os = "macos")]
+    if let Some((is_zombie, _)) = darwin_process_state(pid) {
+        return !is_zombie;
     }
-    std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
+    !matches!(signal_presence(pid as libc::pid_t), SignalPresence::Missing)
 }
 
 #[cfg(not(unix))]
@@ -355,4 +387,160 @@ pub fn linux_process_state(pid: u32) -> Option<(char, libc::pid_t)> {
     let _parent_pid = fields.next()?;
     let process_group = fields.next()?.parse().ok()?;
     Some((state, process_group))
+}
+
+/// Native Darwin process state and process-group id.
+///
+/// `proc_pidinfo(PROC_PIDTBSDINFO)` is a syscall-backed libproc query, so the
+/// 50 ms cancellation poll never spawns `ps`. A failed query is inconclusive;
+/// callers retain `kill(..., 0)` as a conservative existence/permission probe.
+#[cfg(target_os = "macos")]
+fn darwin_process_state(pid: u32) -> Option<(bool, libc::pid_t)> {
+    use std::mem::{MaybeUninit, size_of};
+
+    let mut info = MaybeUninit::<libc::proc_bsdinfo>::uninit();
+    let expected = i32::try_from(size_of::<libc::proc_bsdinfo>()).ok()?;
+    // Safety: `info` points to `expected` writable bytes and is initialized
+    // only when libproc reports that it filled the complete structure.
+    let written = unsafe {
+        libc::proc_pidinfo(
+            pid as libc::pid_t,
+            libc::PROC_PIDTBSDINFO,
+            0,
+            info.as_mut_ptr().cast(),
+            expected,
+        )
+    };
+    if written != expected {
+        return None;
+    }
+    // Safety: the full structure was written above.
+    let info = unsafe { info.assume_init() };
+    let process_group = libc::pid_t::try_from(info.pbi_pgid).ok()?;
+    Some((info.pbi_status == libc::SZOMB, process_group))
+}
+
+/// Probe whether a process group contains at least one process that can still
+/// run. Zombie-only groups are `Exited`; failures to enumerate or inspect an
+/// existing member are `Unknown`, never evidence of death.
+#[cfg(unix)]
+pub fn probe_process_group_liveness(pgid: libc::pid_t) -> KernelLiveness {
+    if pgid <= 1 {
+        return KernelLiveness::Exited;
+    }
+    #[cfg(target_os = "linux")]
+    if let Some(liveness) = linux_process_group_liveness(pgid) {
+        return liveness;
+    }
+    #[cfg(target_os = "macos")]
+    if let Some(liveness) = darwin_process_group_liveness(pgid) {
+        return liveness;
+    }
+    match signal_presence(-pgid) {
+        SignalPresence::Present => KernelLiveness::Alive,
+        SignalPresence::Missing => KernelLiveness::Exited,
+        SignalPresence::Unknown => KernelLiveness::Unknown,
+    }
+}
+
+#[cfg(not(unix))]
+pub fn probe_process_group_liveness(_pgid: libc::pid_t) -> KernelLiveness {
+    KernelLiveness::Unknown
+}
+
+/// Linux `/proc` group scan which distinguishes zombie-only groups from live
+/// groups without changing the generic fail-safe behavior when `/proc` is
+/// unavailable or incomplete.
+#[cfg(target_os = "linux")]
+fn linux_process_group_liveness(pgid: libc::pid_t) -> Option<KernelLiveness> {
+    let entries = std::fs::read_dir("/proc").ok()?;
+    let mut found_group_member = false;
+    for entry in entries.flatten() {
+        let Ok(pid) = entry.file_name().to_string_lossy().parse::<u32>() else {
+            continue;
+        };
+        let Some((state, member_pgid)) = linux_process_state(pid) else {
+            continue;
+        };
+        if member_pgid != pgid {
+            continue;
+        }
+        found_group_member = true;
+        if state != 'Z' {
+            return Some(KernelLiveness::Alive);
+        }
+    }
+    found_group_member.then_some(KernelLiveness::Exited)
+}
+
+/// Darwin libproc group scan. The buffer is retried when libproc fills it,
+/// avoiding a truncated scan being mistaken for a zombie-only group.
+#[cfg(target_os = "macos")]
+fn darwin_process_group_liveness(pgid: libc::pid_t) -> Option<KernelLiveness> {
+    use std::ffi::c_void;
+    use std::mem::size_of;
+
+    // Safety: a null/zero probe asks the wrapper for the required PID count.
+    // Unlike `proc_listpids`, `proc_listpgrppids` divides the kernel's byte
+    // count by `sizeof(int)` before returning.
+    let required = unsafe { libc::proc_listpgrppids(pgid, std::ptr::null_mut(), 0) };
+    if required <= 0 {
+        return match signal_presence(-pgid) {
+            SignalPresence::Missing => Some(KernelLiveness::Exited),
+            SignalPresence::Present | SignalPresence::Unknown => None,
+        };
+    }
+
+    let pid_size = size_of::<libc::pid_t>();
+    let mut slots = usize::try_from(required).ok()?.saturating_mul(2).max(16);
+    for _ in 0..3 {
+        let mut pids = vec![0 as libc::pid_t; slots];
+        let buffer_size = i32::try_from(pids.len().saturating_mul(pid_size)).ok()?;
+        // Safety: `pids` is writable for exactly `buffer_size` bytes.
+        let written_count = unsafe {
+            libc::proc_listpgrppids(pgid, pids.as_mut_ptr().cast::<c_void>(), buffer_size)
+        };
+        if written_count < 0 {
+            return None;
+        }
+        let written_count = usize::try_from(written_count).ok()?;
+        if written_count == pids.len() {
+            slots = slots.saturating_mul(2);
+            continue;
+        }
+        pids.truncate(written_count);
+        return Some(darwin_group_liveness_from_pids(pgid, &pids));
+    }
+    None
+}
+
+#[cfg(target_os = "macos")]
+fn darwin_group_liveness_from_pids(pgid: libc::pid_t, pids: &[libc::pid_t]) -> KernelLiveness {
+    let mut found_zombie = false;
+    let mut unknown_member = false;
+    for &pid in pids.iter().filter(|pid| **pid > 0) {
+        let Ok(pid_u32) = u32::try_from(pid) else {
+            unknown_member = true;
+            continue;
+        };
+        match darwin_process_state(pid_u32) {
+            Some((false, member_pgid)) if member_pgid == pgid => return KernelLiveness::Alive,
+            Some((true, member_pgid)) if member_pgid == pgid => found_zombie = true,
+            Some(_) => {}
+            None => match signal_presence(pid) {
+                SignalPresence::Missing => {}
+                SignalPresence::Present | SignalPresence::Unknown => unknown_member = true,
+            },
+        }
+    }
+    if unknown_member {
+        KernelLiveness::Unknown
+    } else if found_zombie {
+        KernelLiveness::Exited
+    } else {
+        match signal_presence(-pgid) {
+            SignalPresence::Missing => KernelLiveness::Exited,
+            SignalPresence::Present | SignalPresence::Unknown => KernelLiveness::Unknown,
+        }
+    }
 }
