@@ -12,7 +12,47 @@ pass = [
 sandbox = "danger-full-access"
 
 [workflow]
-default_crew = "opus"
+default_crew = "sol"
+
+[crews.opus]
+backend = "cli"
+model = "opus"
+provider = "claude"
+
+[crews.sonnet]
+backend = "cli"
+model = "sonnet"
+provider = "claude"
+
+[crews.fable]
+backend = "cli"
+model = "fable"
+provider = "claude"
+
+[crews.sol]
+backend = "cli"
+model = "gpt-5.6-sol"
+provider = "codex"
+
+[crews.terra]
+backend = "cli"
+model = "gpt-5.6-terra"
+provider = "codex"
+
+[crews.luna]
+backend = "cli"
+model = "gpt-5.6-luna"
+provider = "codex"
+
+[crews.gemini]
+backend = "cli"
+model = "pro"
+provider = "gemini"
+
+[crews.grok]
+backend = "cli"
+model = "grok-build"
+provider = "grok"
 
 [crews.qa]
 model = "gpt-5.6-terra"
