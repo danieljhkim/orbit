@@ -61,6 +61,8 @@ Carry a task from intent to verified implementation with explicit lifecycle trac
 
 **Step 4 — Implement and validate.** Follow the plan, inspecting files with `fs.read`. Verify transitive impact with `rg` or by reading callers directly. Run the repo-approved verification commands, honoring repo instructions if tests are forbidden.
 
+If implementation surfaces a file outside the original `context_files`, append its canonical selector via `orbit.task.update` as soon as you discover it — don't wait until handoff. Reservation itself is the system's job, not yours: there is no worker-callable lock tool, and none should be reached for. Keeping `context_files` current is how a worker excludes others from files it owns, since conflict detection reads live from in-flight tasks, not only from reservation records. One caveat: an added entry only binds reservations requested *after* the update — it does not retroactively revoke a reservation a concurrent run already holds.
+
 In a linked pipeline worktree, never use positional `git stash` / `git stash pop`: refs and the stash list are repository-global, so a positional pop can restore another session's work. Record the worktree's initial `git rev-parse HEAD` and compare against that explicit baseline with `git diff <baseline-sha> -- <paths>`.
 
 **Step 5 — Summarize and hand off.** Persist `execution_summary` via `orbit.task.update` first. Then consider friction: if the task surfaced a contradicted assumption, a recurring failure mode, a non-obvious gotcha, or an incident root cause, file it (see [references/friction.md](references/friction.md)). Do not reach for `orbit.learning.add` here — the authoring gate refuses learnings from executor context, so the call is wasted rather than a judgment call. Then:
