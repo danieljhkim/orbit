@@ -1,7 +1,7 @@
 use std::path::Path;
 
-use orbit_common::types::{Task, TaskStatus, prune_missing_context_files};
-use orbit_engine::DispatchError;
+use orbit_common::types::{Task, TaskHistoryEntry, TaskStatus, prune_missing_context_files};
+use orbit_engine::{DispatchError, WORKFLOW_RUN_FAILED_EVENT};
 use serde_json::Value;
 
 use crate::OrbitRuntime;
@@ -50,14 +50,25 @@ pub(super) fn task_context_for_agent_input(
             "load task `{task_id}` for agent envelope: {err}"
         ))
     })?;
+    let task_history = runtime.get_task_history(task_id).map_err(|err| {
+        DispatchError::CliInvocationFailed(format!(
+            "load task `{task_id}` history for agent envelope: {err}"
+        ))
+    })?;
     Ok(Some(agent_task_context_json(
         &task,
+        &task_history,
         input,
         &runtime.paths().repo_root,
     )))
 }
 
-fn agent_task_context_json(task: &Task, input: &Value, fallback_repo_root: &Path) -> Value {
+fn agent_task_context_json(
+    task: &Task,
+    task_history: &[TaskHistoryEntry],
+    input: &Value,
+    fallback_repo_root: &Path,
+) -> Value {
     let workspace_path = input
         .get("workspace_path")
         .and_then(Value::as_str)
@@ -72,7 +83,7 @@ fn agent_task_context_json(task: &Task, input: &Value, fallback_repo_root: &Path
     let (kept_context_files, _dropped) =
         prune_missing_context_files(&prune_root, canonical_context_files);
 
-    serde_json::json!({
+    let mut context = serde_json::json!({
         "id": task.id.clone(),
         "status": task.status.cli_name(),
         "terminal": refuses_implementer_writes(task.status),
@@ -85,6 +96,33 @@ fn agent_task_context_json(task: &Task, input: &Value, fallback_repo_root: &Path
         "external_refs": task.external_refs.clone(),
         "workspace_path": workspace_path,
         "repo_root": repo_root,
+    })
+    .as_object()
+    .expect("agent task context is an object")
+    .clone();
+
+    if !task.execution_summary.trim().is_empty() {
+        context.insert(
+            "execution_summary".to_string(),
+            Value::String(task.execution_summary.clone()),
+        );
+    }
+    if let Some(status_note) = workflow_failure_status_note(task_history) {
+        context.insert(
+            "status_note".to_string(),
+            Value::String(status_note.to_string()),
+        );
+    }
+
+    Value::Object(context)
+}
+
+fn workflow_failure_status_note(task_history: &[TaskHistoryEntry]) -> Option<&str> {
+    task_history.iter().rev().find_map(|entry| {
+        (entry.event == WORKFLOW_RUN_FAILED_EVENT)
+            .then_some(entry.note.as_deref())
+            .flatten()
+            .filter(|note| !note.trim().is_empty())
     })
 }
 
