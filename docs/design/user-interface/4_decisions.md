@@ -187,6 +187,18 @@ Rejected alternative: count `cancelled` as a failure, or round small-`n` rates i
 - The per-run fact read is capped at 200,000 rows and reports `truncated` when the cap binds; the UI warns rather than presenting a partial window as complete.
 - This adds the instrument; it does not assert the readings are stable. The standing measurement hold on efficiency baselines drawn from the current window is unaffected.
 
+## ADR-0334 — All-or-Nothing Rejection of Unsupported Task Body Fields
+
+**Status:** Proposed · 2026-08 · [ORB-10648]
+
+Narrative lives in the ADR store — retrieve it with `orbit tool run orbit.adr.show --input '{"id":"ADR-0334"}'`.
+
+Summary: `POST /api/tasks` and `PATCH /api/tasks/:id` no longer discard keys they
+do not declare. Unknown keys are captured with `#[serde(flatten)]` and refused
+with a 400 that names them, `priority` becomes a supported update field end to
+end, `model` becomes declared provenance, and `agent` is a trap field pointing at
+`model` — extending the ORB-00042 `workspace` trap shape to the whole body.
+
 ## Task References
 
 - [T20260427-29] introduced the Canon Refined UI direction.
@@ -200,5 +212,6 @@ Rejected alternative: count `cancelled` as a failure, or round small-`n` rates i
 - [ORB-00030] made the dashboard global/multi-workspace (workspace-keyed state, `Ws` extractor, serve-from-anywhere, aggregate endpoints).
 - [ORB-10444] retired the deprecated tab, folded Scoreboard under Diagnostics, pinned the Knowledge detail pane, and added task ship + comments.
 - [ORB-10588] added the Reliability subtab: job-run failure rate and recovery invocation rate from durable run state.
+- [ORB-10648] made the task create/update bodies reject unsupported fields instead of discarding them silently.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

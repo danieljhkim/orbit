@@ -474,6 +474,60 @@ fn task_add_and_show_tools_roundtrip_crew() {
     assert_eq!(shown.get("orchestrator"), Some(&json!("sol")));
 }
 
+/// ORB-10648: `priority` is an advertised and applied update field. The record
+/// layer could always persist it, but neither the tool schema nor the update
+/// handler read it, so a caller's re-prioritization was discarded while the
+/// tool answered with the unchanged task.
+#[test]
+fn task_update_tool_persists_priority() {
+    let (_root, runtime, _repo_root) = test_runtime();
+    let added = runtime
+        .execute_tool_command(
+            "orbit.task.add",
+            json!({
+                "title": "Priority update task",
+                "description": "Starts at the default priority and is raised on update.",
+                "workspace": ".",
+            }),
+            Some("codex".to_string()),
+            Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
+        )
+        .expect("task add tool succeeds");
+    let task_id = added["id"].as_str().expect("task id");
+    assert_eq!(added.get("priority"), Some(&json!("medium")));
+
+    let updated = runtime
+        .execute_tool_command(
+            "orbit.task.update",
+            json!({ "id": task_id, "priority": "high" }),
+            Some("codex".to_string()),
+            Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
+        )
+        .expect("priority update succeeds");
+    assert_eq!(updated.get("priority"), Some(&json!("high")));
+
+    let shown = runtime
+        .execute_tool_command(
+            "orbit.task.show",
+            json!({ "id": task_id }),
+            Some("codex".to_string()),
+            Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
+        )
+        .expect("task show succeeds");
+    assert_eq!(shown.get("priority"), Some(&json!("high")));
+
+    let message = invalid_input_message(runtime.execute_tool_command(
+        "orbit.task.update",
+        json!({ "id": task_id, "priority": "nonsense" }),
+        Some("codex".to_string()),
+        Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
+    ));
+    assert!(
+        message.contains("priority"),
+        "an unparseable priority names the field: {message}"
+    );
+}
+
 #[test]
 fn task_update_tool_persists_complexity_without_adding_history() {
     let (_root, runtime, _repo_root) = test_runtime();

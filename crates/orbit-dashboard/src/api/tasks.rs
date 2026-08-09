@@ -16,7 +16,7 @@ use orbit_core::{
     TaskPriority, TaskStatus, TaskType,
 };
 use serde::{Deserialize, Deserializer};
-use serde_json::{Value, json};
+use serde_json::{Map, Value, json};
 
 use super::{bad_request, map_runtime_error, non_empty_string, server_error, validate_id};
 use crate::projections::{task_locks_json, task_to_json_with_sidecars};
@@ -104,15 +104,87 @@ pub(super) struct CreateTaskBody {
     crew: Option<String>,
     #[serde(default)]
     orchestrator: Option<String>,
+    /// Caller-supplied provenance, forwarded as the write's model identity the
+    /// same way `POST /api/adrs` and `POST /api/frictions` take it. Before
+    /// ORB-10648 this key was undeclared, so serde dropped it and the task was
+    /// attributed to the ambient identity while the caller was told `model` had
+    /// been applied.
+    #[serde(default)]
+    model: Option<String>,
+    /// Retired create input, declared so it stays *knowingly* tolerated rather
+    /// than falling into [`CreateTaskBody::unsupported`]. `comment` is one of
+    /// [`RETIRED_TASK_ADD_INPUT_FIELDS`](orbit_common::types::RETIRED_TASK_ADD_INPUT_FIELDS):
+    /// the native `orbit.task.add` tool strips it with a warning instead of
+    /// failing, and this endpoint keeps that contract. Comment on a task with
+    /// `POST /tasks/:id/comments`.
+    #[serde(default)]
+    comment: Option<String>,
+    /// Trap field (ORB-10648): attribution was consolidated to `model`-only, so
+    /// an `agent` key is a caller bug rather than a usable input. The native
+    /// tool surface rejects it outright (`reject_agent_field`); this body does
+    /// the same instead of dropping it.
+    #[serde(default)]
+    agent: Option<String>,
+    /// Every key this endpoint does not declare, captured rather than dropped.
+    /// See [`reject_unsupported_task_body_fields`].
+    #[serde(flatten)]
+    unsupported: Map<String, Value>,
 }
 
 fn default_priority() -> TaskPriority {
     TaskPriority::Medium
 }
 
+/// Reject a task body carrying keys the endpoint would otherwise discard.
+///
+/// ORB-10648: both task bodies derived a plain `Deserialize`, so any undeclared
+/// key (`priority` on update, an `agent` typo, a field only the native
+/// `orbit.task.update` tool declares) was silently dropped and the handler
+/// still answered `200` with the task JSON. A caller that reports per-field
+/// application — bridge's `orbit_task_update` write confirmation — then
+/// affirmatively reports a field as applied that was never persisted, and a
+/// false "applied" is worse than an error because nothing prompts a read-back.
+///
+/// The contract is all-or-nothing: an unsupported key fails the whole request,
+/// so no write lands partially. The keys are captured through
+/// `#[serde(flatten)]` rather than `#[serde(deny_unknown_fields)]` for the same
+/// reason [`CreateTaskBody::workspace`] is a declared trap field (ORB-00042):
+/// the diagnostic stays Orbit's own, naming every offending key and pointing at
+/// the surface that does accept it, instead of serde's opaque message.
+fn reject_unsupported_task_body_fields(
+    agent: Option<&String>,
+    unsupported: &Map<String, Value>,
+    endpoint: &str,
+) -> Option<Response> {
+    if agent.is_some() {
+        return Some(bad_request(format!(
+            "{endpoint} no longer accepts `agent`; use `model` with the agent \
+             family (codex, claude, gemini, or grok) for attribution"
+        )));
+    }
+    if unsupported.is_empty() {
+        return None;
+    }
+    let mut names = unsupported.keys().cloned().collect::<Vec<_>>();
+    names.sort();
+    let names = names
+        .iter()
+        .map(|name| format!("`{name}`"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    Some(bad_request(format!(
+        "unsupported body field(s) {names}: {endpoint} does not apply them, so the \
+         request is rejected rather than reporting a write that would not land"
+    )))
+}
+
 /// Partial-update body for `PATCH /tasks/:id`. Each field is `Option<...>`;
 /// fields absent from the JSON body remain unchanged.
 ///
+/// Every key the caller sends is either applied or refused: unknown keys land
+/// in [`UpdateTaskBody::unsupported`] and fail the request
+/// ([`reject_unsupported_task_body_fields`], ORB-10648). Nothing is dropped in
+/// silence.
 #[derive(Deserialize, Default)]
 pub(super) struct UpdateTaskBody {
     #[serde(default)]
@@ -135,6 +207,11 @@ pub(super) struct UpdateTaskBody {
     comment: Option<String>,
     #[serde(default)]
     status: Option<TaskStatus>,
+    /// Replacement dispatch priority (ORB-10648). Previously undeclared here
+    /// even though the record layer could persist it, so an operator's
+    /// re-prioritization was dropped while the response reported success.
+    #[serde(default)]
+    priority: Option<TaskPriority>,
     #[serde(default)]
     complexity: Option<TaskComplexity>,
     #[serde(default)]
@@ -147,6 +224,17 @@ pub(super) struct UpdateTaskBody {
     crew: Option<Option<String>>,
     #[serde(default, deserialize_with = "deserialize_nullable_string_patch_field")]
     orchestrator: Option<Option<String>>,
+    /// Caller-supplied provenance, forwarded as the write's model identity.
+    /// See [`CreateTaskBody::model`].
+    #[serde(default)]
+    model: Option<String>,
+    /// Trap field. See [`CreateTaskBody::agent`].
+    #[serde(default)]
+    agent: Option<String>,
+    /// Every key this endpoint does not declare, captured rather than dropped.
+    /// See [`reject_unsupported_task_body_fields`].
+    #[serde(flatten)]
+    unsupported: Map<String, Value>,
 }
 
 fn deserialize_nullable_string_patch_field<'de, D>(
@@ -499,6 +587,21 @@ pub(super) async fn create_task_action(
                 .to_string(),
         );
     }
+    if let Some(response) = reject_unsupported_task_body_fields(
+        body.agent.as_ref(),
+        &body.unsupported,
+        "POST /api/tasks",
+    ) {
+        return response;
+    }
+    if body.comment.is_some() {
+        tracing::warn!(
+            target: "orbit.dashboard.tasks",
+            field = "comment",
+            "ignored retired POST /api/tasks field; comment with POST /api/tasks/:id/comments"
+        );
+    }
+    let model = body.model.as_deref().and_then(non_empty_string);
     let params = TaskAddParams {
         parent_id: body.parent_id,
         title: body.title,
@@ -521,7 +624,7 @@ pub(super) async fn create_task_action(
         crew: body.crew,
         orchestrator: body.orchestrator,
     };
-    match runtime.add_task_with_identity(params, None, None) {
+    match runtime.add_task_with_identity(params, None, model) {
         Ok(task) => match dashboard_status_index(&runtime) {
             Ok(status_by_id) => match task_to_json_with_sidecars(&runtime, &task, &status_by_id) {
                 Ok(value) => Json(value).into_response(),
@@ -533,6 +636,12 @@ pub(super) async fn create_task_action(
     }
 }
 
+/// `PATCH /tasks/:id` — apply a partial update to a task.
+///
+/// Every submitted key is applied or refused (ORB-10648): declared fields go
+/// into [`TaskUpdateParams`], `model` becomes the write's provenance, and any
+/// other key is a 400 from [`reject_unsupported_task_body_fields`]. A caller
+/// therefore never receives a `200` for a field this endpoint discarded.
 pub(super) async fn update_task_action(
     Ws(runtime): Ws,
     Path(id): Path<String>,
@@ -542,6 +651,14 @@ pub(super) async fn update_task_action(
         Ok(id) => id,
         Err(message) => return bad_request(message),
     };
+    if let Some(response) = reject_unsupported_task_body_fields(
+        body.agent.as_ref(),
+        &body.unsupported,
+        "PATCH /api/tasks/:id",
+    ) {
+        return response;
+    }
+    let model = body.model.as_deref().and_then(non_empty_string);
     let params = TaskUpdateParams {
         title: body.title,
         description: body.description,
@@ -553,6 +670,7 @@ pub(super) async fn update_task_action(
         execution_summary: body.execution_summary,
         comment: body.comment,
         status: body.status,
+        priority: body.priority,
         complexity: body.complexity,
         task_type: body.task_type,
         source_task_id: None,
@@ -565,7 +683,7 @@ pub(super) async fn update_task_action(
         context_files: body.context_files,
         upsert_artifacts: Vec::new(),
     };
-    match runtime.update_task_with_identity(id, params, None, None) {
+    match runtime.update_task_with_identity(id, params, None, model) {
         Ok(task) => match dashboard_status_index(&runtime) {
             Ok(status_by_id) => match task_to_json_with_sidecars(&runtime, &task, &status_by_id) {
                 Ok(value) => Json(value).into_response(),

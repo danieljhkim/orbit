@@ -303,6 +303,9 @@ pub(super) fn update(
             status: optional_string(&input, "status")?
                 .map(|value| parse_task_status("status", &value))
                 .transpose()?,
+            priority: optional_string(&input, "priority")?
+                .map(|value| parse_task_priority("priority", &value))
+                .transpose()?,
             complexity: optional_string(&input, "complexity")?
                 .map(|value| parse_task_complexity("complexity", &value))
                 .transpose()?,

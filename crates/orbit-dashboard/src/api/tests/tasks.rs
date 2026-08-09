@@ -1571,6 +1571,220 @@ async fn task_comment_author_rejects_model_constants_but_keeps_human_names() {
     assert_eq!(stored[0].by, "operator");
 }
 
+async fn patch_task(runtime: Arc<OrbitRuntime>, task_id: &str, body: Value) -> Response {
+    router()
+        .with_state(crate::state::DashboardState::single(runtime))
+        .oneshot(patch_json(&format!("/tasks/{task_id}"), body))
+        .await
+        .expect("response")
+}
+
+async fn post_task(runtime: Arc<OrbitRuntime>, body: Value) -> Response {
+    router()
+        .with_state(crate::state::DashboardState::single(runtime))
+        .oneshot(post_json("/tasks", body))
+        .await
+        .expect("response")
+}
+
+/// ORB-10648: `priority` is now a declared update field. It was undeclared
+/// while the record layer could persist it, so a re-prioritization was dropped
+/// by serde and the endpoint still answered `200` with the old priority — the
+/// exact reproduction in the filing. It must be visible in the immediate PATCH
+/// response and on the next read.
+#[tokio::test]
+async fn update_task_applies_priority_and_reads_it_back() {
+    let runtime = Arc::new(OrbitRuntime::in_memory().expect("build runtime"));
+    let task = seed_backlog_task(&runtime, "Re-prioritized task");
+    assert_eq!(task.priority.to_string(), "medium", "fixture precondition");
+
+    let response = patch_task(runtime.clone(), &task.id, json!({ "priority": "high" })).await;
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let patched = body_json(response).await;
+    assert_eq!(patched["priority"], json!("high"));
+    let fetched = body_json(request_shared(runtime, &format!("/tasks/{}", task.id)).await).await;
+    assert_eq!(fetched["priority"], json!("high"), "read-back agrees");
+}
+
+/// ORB-10648: every field a partial update reports back is genuinely persisted.
+/// This is the regression guard for the whole class — a field that the body
+/// deserializes but the handler never plumbs would show up here as a response
+/// value that the next read contradicts.
+#[tokio::test]
+async fn update_task_response_fields_survive_a_read_back() {
+    let runtime = Arc::new(OrbitRuntime::in_memory().expect("build runtime"));
+    let task = seed_backlog_task(&runtime, "Partially updated task");
+
+    let response = patch_task(
+        runtime.clone(),
+        &task.id,
+        json!({
+            "title": "Renamed by PATCH",
+            "plan": "1. land the fix",
+            "execution_summary": "not yet run",
+            "tags": ["alpha", "beta"],
+            "priority": "critical",
+            "complexity": "hard",
+            "task_type": "bug",
+            "context_files": ["file:src/lib.rs"],
+        }),
+    )
+    .await;
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let patched = body_json(response).await;
+    // (submitted key, projected key, expected value)
+    let expected = [
+        ("title", "title", json!("Renamed by PATCH")),
+        ("plan", "plan", json!("1. land the fix")),
+        (
+            "execution_summary",
+            "execution_summary",
+            json!("not yet run"),
+        ),
+        ("tags", "tags", json!(["alpha", "beta"])),
+        ("priority", "priority", json!("critical")),
+        ("complexity", "complexity", json!("hard")),
+        ("task_type", "type", json!("bug")),
+        ("context_files", "context_files", json!(["file:src/lib.rs"])),
+    ];
+    let fetched = body_json(request_shared(runtime, &format!("/tasks/{}", task.id)).await).await;
+    for (submitted, projected, value) in expected {
+        assert_eq!(
+            patched[projected], value,
+            "`{submitted}` must be applied in the PATCH response"
+        );
+        assert_eq!(
+            fetched[projected], patched[projected],
+            "`{submitted}` must still be there on read-back"
+        );
+    }
+}
+
+/// ORB-10648: the previously-false-positive case. An undeclared key used to be
+/// discarded by serde while the endpoint answered `200` with the task JSON, so
+/// a caller comparing its request against that response could report the field
+/// as applied. It is now a 400 that names the key, and — the all-or-nothing
+/// half of the contract — the declared fields in the same body do not land
+/// either.
+#[tokio::test]
+async fn update_task_rejects_an_undeclared_body_field_without_partial_application() {
+    let runtime = Arc::new(OrbitRuntime::in_memory().expect("build runtime"));
+    let task = seed_backlog_task(&runtime, "Untouched task");
+
+    let response = patch_task(
+        runtime.clone(),
+        &task.id,
+        json!({ "title": "must not land", "urgency": "high" }),
+    )
+    .await;
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let message = body_json(response).await["error"]
+        .as_str()
+        .expect("error message")
+        .to_string();
+    assert!(message.contains("urgency"), "names the offending key");
+    let fetched = body_json(request_shared(runtime, &format!("/tasks/{}", task.id)).await).await;
+    assert_eq!(
+        fetched["title"],
+        json!("Untouched task"),
+        "a rejected body applies nothing"
+    );
+}
+
+/// ORB-10648: the same contract on create — `POST /api/tasks` no longer absorbs
+/// keys it cannot apply. The tailored `workspace` diagnostic (ORB-00042) still
+/// wins for that key, since it is a declared trap field.
+#[tokio::test]
+async fn create_task_rejects_an_undeclared_body_field() {
+    let runtime = Arc::new(OrbitRuntime::in_memory().expect("build runtime"));
+
+    let response = post_task(
+        runtime.clone(),
+        json!({
+            "title": "undeclared input",
+            "description": "carries a key the endpoint cannot apply",
+            "assignee": "someone",
+        }),
+    )
+    .await;
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let message = body_json(response).await["error"]
+        .as_str()
+        .expect("error message")
+        .to_string();
+    assert!(message.contains("assignee"), "names the offending key");
+    assert!(
+        runtime.list_tasks().expect("list tasks").is_empty(),
+        "a rejected create writes nothing"
+    );
+}
+
+/// ORB-10648 / L-0103: attribution is `model`-only. An `agent` key is a caller
+/// bug, so both task bodies refuse it the way the native tool surface does
+/// rather than dropping it and attributing the write to the ambient identity.
+#[tokio::test]
+async fn task_bodies_reject_the_retired_agent_attribution_key() {
+    let runtime = Arc::new(OrbitRuntime::in_memory().expect("build runtime"));
+    let task = seed_backlog_task(&runtime, "Attribution task");
+
+    for response in [
+        patch_task(
+            runtime.clone(),
+            &task.id,
+            json!({ "status": "someday", "agent": "codex" }),
+        )
+        .await,
+        post_task(
+            runtime.clone(),
+            json!({
+                "title": "agent attribution",
+                "description": "agent is not an accepted key",
+                "agent": "codex",
+            }),
+        )
+        .await,
+    ] {
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let message = body_json(response).await["error"]
+            .as_str()
+            .expect("error message")
+            .to_string();
+        assert!(message.contains("agent"), "names the offending key");
+        assert!(message.contains("model"), "points at the accepted field");
+    }
+}
+
+/// ORB-10648: `model` was forwarded by callers, deserialized by neither task
+/// body, and still reported as applied — an affirmative false "applied". It is
+/// now the write's provenance (as on `POST /api/adrs` and `POST /api/frictions`),
+/// so the report is true: the comment this update appends is authored by the
+/// supplied model rather than by the ambient identity.
+#[tokio::test]
+async fn update_task_applies_model_provenance() {
+    let runtime = Arc::new(OrbitRuntime::in_memory().expect("build runtime"));
+    let task = seed_backlog_task(&runtime, "Attributed task");
+
+    let response = patch_task(
+        runtime.clone(),
+        &task.id,
+        json!({ "comment": "attributed note", "model": TEST_CODEX_MODEL }),
+    )
+    .await;
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let stored = runtime.get_task_comments(&task.id).expect("task comments");
+    assert_eq!(stored.len(), 1);
+    assert!(
+        stored[0].by.contains(TEST_CODEX_MODEL),
+        "supplied model must author the write, got `{}`",
+        stored[0].by
+    );
+}
+
 /// An empty (or whitespace-only) comment is a clean 400 rather than an empty
 /// row in the thread.
 #[tokio::test]
