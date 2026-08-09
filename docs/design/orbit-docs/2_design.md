@@ -11,6 +11,7 @@ tags: [orbit-docs]
 paths: ["crates/orbit-core/src/command/docs/**", "crates/orbit-core/src/runtime/orbit_tool_host/docs_tools.rs", "crates/orbit-tools/src/builtin/orbit/docs.rs", "crates/orbit-remote/src/mcp/host.rs", "crates/orbit-cli/src/command/docs.rs"]
 related_features: [orbit-docs]
 related_artifacts: [ORB-00163, ORB-00206, ORB-10319, ADR-0169, ADR-0170, ADR-0171, ADR-0180]
+last_validated: 2026-08-09
 ---
 
 # Orbit Docs — Design
@@ -56,13 +57,13 @@ The tolerant indexer populates `tags` with the feature slug for design docs (e.g
 
 ### 1.4 `paths` (optional)
 
-Glob string list. Names file paths the doc applies to. This is the join key for hook-time scoping ([ORB-00167]): when an agent is about to Edit / Read / Write a file, the hook can surface docs whose `paths` glob matches.
+Glob string list. Names file paths the doc applies to. This is the join key for task-context scoping and planned hook-time scoping ([ORB-00167]): task context can surface docs whose `paths` glob matches, and a future hook can do the same for Edit / Read / Write operations.
 
 Not used by `orbit search --kind doc` ranking in v1; the field exists for the injection wiring.
 
 ### 1.5 `related_features` (optional)
 
-Free-form string list. The join key for task-time scoping ([ORB-00166]): when an agent runs `task show <id> --with-context`, the renderer can surface docs whose `related_features` overlaps with the task's `related_features`.
+Free-form string list. The join key for task-time scoping ([ORB-00166]): when an agent runs `task show <id> --with-context`, the renderer can surface docs whose `related_features` overlaps with the task's normalized tags, which currently act as feature selectors.
 
 ### 1.6 `related_artifacts` (optional)
 
@@ -192,7 +193,7 @@ Default limit is 20. `--limit N` (CLI) or `limit` field (MCP) caps results. v1 d
 ### 5.4 What's missing
 
 - No body-text scoring. The whole point of frontmatter is that the body is unstructured; ranking against arbitrary Markdown adds noise without semantic ranking.
-- No semantic embeddings. Deferred to [ORB-00168].
+- Semantic embeddings are opt-in through `orbit docs index` and `orbit search --hybrid`; lexical search remains the default.
 - No `paths` or `related_features` scoring. These fields exist for *injection-time* scoping (hook + task.show), not for direct search.
 
 ---
@@ -272,10 +273,8 @@ When the section is absent or the file is empty, the default root is `["docs/"]`
 ## 9. Concerns & Honest Limitations
 
 - **Lexical search is still frontmatter-only.** Plain `orbit search --kind doc` scores summary + tags + type only. Body-level concept recall requires `orbit docs index` plus `orbit search --kind doc --hybrid`.
-- **`migration_diff` is not a real diff.** It prints the first 12 lines of `before` and first 16 lines of `after` glued together with `@@` markers. Misleading label. [ORB-00164] tracks the fix.
-- **`update_existing_frontmatter` hand-edits YAML by line.** Works for simple `key: scalar` legacy headers. Will misbehave on multi-line block scalars (`description: |`) and quoted values containing colons. [ORB-00164] tracks the round-trip-through-`serde_yaml` fix.
-- **`is_git_ignored` shells out per file.** Acceptable at ~100 docs. Will degrade at thousands. [ORB-00164] tracks the batched-stdin or `ignore`-crate fix.
-- **No hook-time or task-time injection yet.** The retrieval primitive ships in v1; injection is [ORB-00166] and [ORB-00167].
+- **Migration uses a generated line diff.** The migrator now compares the complete before/after documents, while YAML frontmatter updates are round-tripped through `serde_yaml`.
+- **Hook-time injection is not wired yet.** Task-time related-doc injection is available through `task show --with-context`; PreToolUse hook integration remains [ORB-00167].
 - **Doc semantic freshness is explicit.** Task writes enqueue background embeddings, but docs require `orbit docs index` until a future watcher/background indexer exists.
 - **ADRs are not in the corpus.** [ORB-00169] is the design question.
 

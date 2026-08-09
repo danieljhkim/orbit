@@ -10,15 +10,16 @@ summary: "Orbit Docs — what the human-authored docs corpus is, why it exists a
 tags: [orbit-docs]
 related_features: [orbit-docs]
 related_artifacts: [ORB-00163, ORB-00206, ORB-10319, ADR-0169, ADR-0170, ADR-0171, ADR-0180]
+last_validated: 2026-08-09
 ---
 
 # Orbit Docs — Overview
 
-Orbit Docs is the human-authored knowledge corpus for an Orbit workspace. It indexes the Markdown a team writes for itself — design narratives, reusable code patterns, runbooks, glossaries — and exposes CLI/admin verbs under `orbit docs` plus agent retrieval through the unified `orbit.search` MCP tool. It deliberately does not own the corpus's storage shape: docs are PR-reviewed files under a configurable `docs/` root, and Orbit's only on-disk artifact is the `[docs].roots` entry in `.orbit/config.toml`.
+Orbit Docs is the human-authored knowledge corpus for an Orbit workspace. It indexes the Markdown a team writes for itself — design narratives, reusable code patterns, runbooks, glossaries — and exposes CLI/admin verbs under `orbit docs` plus agent retrieval through the unified `orbit.search` MCP tool. It deliberately does not own a tool-managed copy of the corpus: docs remain PR-reviewed files under configurable `[docs].roots` entries.
 
-The system is **pull-first**: agents call `orbit search --kind doc` (or `--kind all` for federated doc+ADR) or `orbit docs show` when they need context. Push-style injection (PreToolUse hook surfaces, `task show --with-context`) is a downstream feature, designed but not yet wired ([ORB-00166], [ORB-00167]).
+The system is **pull-first**: agents call `orbit search --kind doc` (or `--kind all` for federated doc+ADR) or `orbit docs show` when they need context. Task-time related-doc injection is available through `task show --with-context`; PreToolUse hook surfaces remain downstream work ([ORB-00166], [ORB-00167]).
 
-Phase 1 ships the corpus, the locked frontmatter schema, the six-verb surface, the `orbit-docs` skill, doc-corpus embeddings via `orbit docs index`, and a one-shot migrator that backfills legacy `docs/design/<feature>/` and `docs/design-patterns/` files. [2_design.md](./2_design.md) specifies the schema, walker, surface, tolerant indexer, and hybrid search path; [3_vision.md](./3_vision.md) names open questions and the remaining roadmap (ADR folding, hook integration); [4_decisions.md](./4_decisions.md) is the ADR log.
+Phase 1 ships the corpus, the locked frontmatter schema, the six-verb surface, the `orbit-docs` skill, doc-corpus embeddings via `orbit docs index`, and a one-shot migrator that backfills legacy `docs/design/<feature>/` and `docs/design-patterns/` files. [2_design.md](./2_design.md) specifies the schema, walker, surface, tolerant indexer, and hybrid search path; [3_vision.md](./3_vision.md) names open questions and the remaining roadmap (hook integration, ADR folding); [4_decisions.md](./4_decisions.md) is the ADR log.
 
 ---
 
@@ -51,8 +52,8 @@ Six fields, two required, four optional:
 | `type` | yes | enum: `design \| pattern \| context \| glossary \| runbook` | Coarse classifier for filtering. |
 | `summary` | yes | non-empty single line | One-line retrieval hook; what the doc is about. |
 | `tags` | no | string list | Free-form labels; used by `orbit docs list --tag`. |
-| `paths` | no | glob string list | File-scope patterns this doc applies to (e.g. `crates/orbit-cli/**`). Used by hook-time injection. |
-| `related_features` | no | string list | Feature slugs this doc covers; join key with task `related_features`. |
+| `paths` | no | glob string list | File-scope patterns this doc applies to (e.g. `crates/orbit-cli/**`). Used by task-context matching and planned hook-time injection. |
+| `related_features` | no | string list | Feature slugs this doc covers; join key with normalized task tags used as feature selectors. |
 | `related_artifacts` | no | string list | Cross-references to other Orbit artifacts via [ADR-0171] ID-prefix dispatch. |
 
 Schema rationale and the closed-by-default choice: [ADR-0169]. Why ID-prefix dispatch over object-shape references: [ADR-0171].
@@ -109,9 +110,9 @@ If you find yourself wanting to write "rule: do X because Y" in a doc, that's a 
 | Backfill migrator | `orbit docs migrate` | [ORB-00163] |
 | Internal hardening (real diff, robust YAML edit, batched gitignore) | [crates/orbit-core/src/command/docs/](../../../crates/orbit-core/src/command/docs/) | [ORB-00164] |
 | Retire `orbit-design` skill | [crates/orbit-core/assets/skills/orbit-design/](../../../crates/orbit-core/assets/skills/orbit-design/) | [ORB-00165] |
-| Inject into `task show --with-context` | [crates/orbit-cli/src/command/task/](../../../crates/orbit-cli/src/command/task/) | [ORB-00166] |
+| Inject into `task show --with-context` | [crates/orbit-cli/src/command/task/](../../../crates/orbit-cli/src/command/task/) | [ORB-00166] (shipped) |
 | Extend PreToolUse hook to surface docs | [crates/orbit-cmd/src/learning_hook.rs](../../../crates/orbit-cmd/src/learning_hook.rs) | [ORB-00167] |
-| Semantic embeddings ranker (v2) | [crates/orbit-core/src/command/semantic.rs](../../../crates/orbit-core/src/command/semantic.rs) | [ORB-00168] |
+| Doc semantic embeddings and hybrid ranker | [crates/orbit-core/src/command/semantic.rs](../../../crates/orbit-core/src/command/semantic.rs) | [ORB-00206] (shipped) |
 | Fold `.orbit/adrs/` into corpus (v2 design) | [.orbit/adrs/](../../../.orbit/adrs/) | [ORB-00169] |
 
 ---

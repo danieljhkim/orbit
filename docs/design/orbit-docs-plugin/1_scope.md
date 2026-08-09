@@ -1,3 +1,10 @@
+---
+type: design
+summary: "Scope: extract docs + search into a plugin-style feature crate"
+tags: [orbit-docs-plugin]
+last_validated: 2026-08-09
+---
+
 # Scope: extract docs + search into a plugin-style feature crate
 
 Status: draft (uncommitted) — scoping for the docs+search pluginization pilot.
