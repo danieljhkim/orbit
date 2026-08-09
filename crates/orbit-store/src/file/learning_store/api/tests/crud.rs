@@ -239,7 +239,7 @@ fn shared_allocator_assigns_distinct_learning_ids_across_divergent_worktrees() {
 
 #[test]
 fn canonical_self_root_copy_wins_over_stale_worktree_body_path() {
-    // F2026-06-001 / ORB-00373. A learning first allocated inside a job-run
+    // A learning first allocated inside a job-run
     // worktree records that worktree's `body_path` in the shared allocator. A
     // later supersede/update rewrites only the canonical `self.root` copy,
     // leaving the worktree copy active. `list`/`show` must report the canonical

@@ -1,4 +1,4 @@
-// ORB-00004: this implementation tree is crate-private; some planned or
+// This implementation tree is crate-private; some planned or
 // connector-specific tools are intentionally not registered by default yet.
 #![allow(dead_code)]
 

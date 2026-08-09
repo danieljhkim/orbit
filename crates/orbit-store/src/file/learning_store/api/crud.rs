@@ -470,7 +470,7 @@ impl LearningFileStore {
         // later supersede/update/sync rewrites only the canonical `self.root`
         // copy (+ the SQLite index), leaving stale worktree copies behind. If
         // we read the recorded `body_path` first, `list`/`show` report
-        // superseded learnings as active (F2026-06-001). The `body_path` is a
+        // superseded learnings as active. The `body_path` is a
         // fallback only for learnings genuinely absent from `self.root`
         // (sibling-worktree / remote stubs).
         if let Some(local) = self.get_learning(&record.id)? {

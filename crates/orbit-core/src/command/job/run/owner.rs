@@ -370,7 +370,7 @@ pub(super) fn running_run_owner_stale_reason(_run: &JobRun) -> Option<()> {
 ///   environment) matches the live process: the worker is the original owner.
 /// - `Mismatch` — versioned persisted token disagrees with the live process's
 ///   current token: a different process is holding the PID. Stale.
-/// - `LegacyLiveUnverified` — legacy (pre-ORB-00036) unversioned token cannot
+/// - `LegacyLiveUnverified` — a legacy unversioned token cannot
 ///   be re-derived under either environment, but `kill(pid, 0)` confirms the
 ///   PID is still alive. Stays Running; cancellation still refuses to signal
 ///   it (PID-reuse protection).

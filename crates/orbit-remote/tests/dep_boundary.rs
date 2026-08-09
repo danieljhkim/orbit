@@ -10,9 +10,9 @@ const MANIFEST: &str = include_str!("../Cargo.toml");
 
 #[test]
 fn vertical_feature_depends_only_on_approved_runtime_layers() {
-    // ADR-0240 + ADR-0241: Remote composes neutral Core kernels, Store
-    // persistence, and the generic MCP/tool kernels; graph navigation remains
-    // CLI-only and no lower layer depends back on this feature crate.
+    // ADR-0240: Remote composes neutral Core kernels, Store persistence, and
+    // the generic MCP/tool kernels. ADR-0291 superseded ADR-0241 and retired
+    // graph navigation; no lower layer depends back on this feature crate.
     let manifest = parse_manifest();
     let mut dependency_names = BTreeSet::new();
 

@@ -1,5 +1,5 @@
 #![deny(clippy::print_stderr, clippy::print_stdout)]
-// ORB-00004: internal feature surfaces still need a focused documentation pass.
+// Internal feature surfaces still need a focused documentation pass.
 #![allow(missing_docs)]
 // Unit tests use unwrap/expect for fixture setup; production call sites remain linted.
 #![cfg_attr(test, allow(clippy::expect_used, clippy::unwrap_used))]

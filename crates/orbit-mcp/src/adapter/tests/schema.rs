@@ -558,7 +558,7 @@ async fn orbit_learning_update_via_mcp_adapter_accepts_evidence_array_live_repro
         .expect("seed id")
         .to_string();
 
-    // now the live repro: update evidence via MCP (the F2026-05-025 case)
+    // Now the live reproduction: update evidence via MCP.
     let new_evidence = json!([{ "kind": "task", "ref": "ORB-00022" }]);
     let upd_req = request_with_args(
         "orbit.learning.update",
