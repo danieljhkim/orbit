@@ -87,6 +87,12 @@ impl OrbitRuntime {
                 .ok_or_else(|| OrbitError::InvalidInput("unknown workflow 'ship'".to_string()))?;
         let base = base_branch.unwrap_or_else(|| self.workflow_base_branch());
         let input = crate::command::workflow::build_ship_input(mode, base, task_ids)?;
+        // Validate explicit selections before inspecting runs or creating a
+        // pipeline record. Auto mode intentionally carries no task ids: the
+        // worker discovers eligible backlog tasks after it starts.
+        for task_id in task_ids {
+            self.get_task(task_id)?;
+        }
         if let Some(conflict) = self.in_flight_ship_run_for_tasks(task_ids)? {
             return Err(conflict);
         }

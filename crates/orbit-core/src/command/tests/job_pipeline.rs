@@ -15,6 +15,7 @@ use crate::command::job::pipeline::{
     configure_pipeline_worker_command, configure_pipeline_worker_stdio, pipeline_worker_log_path,
     resolve_pipeline_worker_executable,
 };
+use crate::command::task::TaskAddParams;
 use crate::command::workflow::ShipMode;
 
 fn test_runtime() -> (TempDir, OrbitRuntime) {
@@ -26,6 +27,17 @@ fn test_runtime() -> (TempDir, OrbitRuntime) {
     let runtime =
         OrbitRuntime::from_roots(&global_root, &workspace_root).expect("build test runtime");
     (root, runtime)
+}
+
+fn add_backlog_task(runtime: &OrbitRuntime) -> String {
+    runtime
+        .add_task(TaskAddParams {
+            title: "Ship submission fixture".to_string(),
+            description: "A task selected by a ship-submission test.".to_string(),
+            ..Default::default()
+        })
+        .expect("create backlog task")
+        .id
 }
 
 #[test]
@@ -350,6 +362,7 @@ fn deleted_current_executable_resolves_to_replaced_installed_path() {
 #[test]
 fn ship_submission_refuses_a_task_already_carried_by_a_non_terminal_run() {
     let (_root, runtime) = test_runtime();
+    let selected_task_id = add_backlog_task(&runtime);
     let in_flight = runtime
         .stores()
         .jobs()
@@ -357,7 +370,7 @@ fn ship_submission_refuses_a_task_already_carried_by_a_non_terminal_run() {
             "task_auto_pipeline",
             1,
             Utc::now(),
-            Some(serde_json::json!({"mode": "local", "task_ids": ["TST-00001"]})),
+            Some(serde_json::json!({"mode": "local", "task_ids": [selected_task_id]})),
             None,
         )
         .expect("insert in-flight run");
@@ -367,15 +380,19 @@ fn ship_submission_refuses_a_task_already_carried_by_a_non_terminal_run() {
         .submit_ship_run(
             ShipMode::Local,
             Some("main"),
-            &["TST-00001".to_string()],
+            std::slice::from_ref(&selected_task_id),
             Some("test"),
         )
         .expect_err("a task with a run in flight must not dispatch a second run");
 
-    let OrbitError::ShipRunInFlight { task_id, run_id } = &error else {
+    let OrbitError::ShipRunInFlight {
+        task_id: guarded_task_id,
+        run_id,
+    } = &error
+    else {
         panic!("expected ShipRunInFlight, got {error:?}");
     };
-    assert_eq!(task_id, "TST-00001");
+    assert_eq!(guarded_task_id, &selected_task_id);
     assert_eq!(run_id, &in_flight.run_id);
 
     let runs = runtime
@@ -399,6 +416,8 @@ fn ship_submission_refuses_a_task_already_carried_by_a_non_terminal_run() {
 #[test]
 fn ship_submission_guard_is_scoped_to_the_selected_tasks() {
     let (_root, runtime) = test_runtime();
+    let in_flight_task_id = add_backlog_task(&runtime);
+    let unrelated_task_id = add_backlog_task(&runtime);
     runtime
         .stores()
         .jobs()
@@ -406,13 +425,13 @@ fn ship_submission_guard_is_scoped_to_the_selected_tasks() {
             "task_auto_pipeline",
             1,
             Utc::now(),
-            Some(serde_json::json!({"mode": "local", "task_ids": ["TST-00001"]})),
+            Some(serde_json::json!({"mode": "local", "task_ids": [in_flight_task_id]})),
             None,
         )
         .expect("insert in-flight run");
 
     for (label, task_ids) in [
-        ("an unrelated explicit task", vec!["TST-00002".to_string()]),
+        ("an unrelated explicit task", vec![unrelated_task_id]),
         ("auto discovery", Vec::new()),
     ] {
         let error = runtime
@@ -427,4 +446,68 @@ fn ship_submission_guard_is_scoped_to_the_selected_tasks() {
             "{label} must fail on the missing job asset instead: {error:?}"
         );
     }
+}
+
+/// Explicit task validation belongs in the shared runtime path, ahead of
+/// pipeline persistence, so every submission surface reports a typo directly
+/// and cannot leave an orphaned worker/run behind.
+#[test]
+fn ship_submission_refuses_a_missing_explicit_task_before_persisting_a_run() {
+    let (_root, runtime) = test_runtime();
+    let missing_id = "ORB-99999".to_string();
+
+    let error = runtime
+        .submit_ship_run(
+            ShipMode::Local,
+            Some("main"),
+            std::slice::from_ref(&missing_id),
+            Some("test"),
+        )
+        .expect_err("a missing explicit task must be rejected before dispatch");
+
+    assert!(matches!(
+        error,
+        OrbitError::NotFound {
+            kind: orbit_common::types::NotFoundKind::Task,
+            id,
+        } if id == missing_id
+    ));
+    assert!(
+        runtime
+            .list_job_runs(JobRunListParams::default())
+            .expect("list job runs")
+            .is_empty(),
+        "the refusal must not persist a run or spawn a worker"
+    );
+}
+
+#[test]
+fn ship_submission_mixed_explicit_selection_identifies_the_missing_task() {
+    let (_root, runtime) = test_runtime();
+    let existing_id = add_backlog_task(&runtime);
+    let missing_id = "ORB-99999".to_string();
+
+    let error = runtime
+        .submit_ship_run(
+            ShipMode::Local,
+            Some("main"),
+            &[existing_id, missing_id.clone()],
+            Some("test"),
+        )
+        .expect_err("mixed selections must refuse their missing task before dispatch");
+
+    assert!(matches!(
+        error,
+        OrbitError::NotFound {
+            kind: orbit_common::types::NotFoundKind::Task,
+            id,
+        } if id == missing_id
+    ));
+    assert!(
+        runtime
+            .list_job_runs(JobRunListParams::default())
+            .expect("list job runs")
+            .is_empty(),
+        "mixed-selection refusal must not persist a run"
+    );
 }
