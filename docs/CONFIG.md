@@ -84,13 +84,15 @@ You can define any number of crews. Set the workspace-wide fallback with `workfl
 
 Crew metadata is canonical runtime data, not display-only TOML. Orbit trims
 `description` (blank becomes absent), trims each tag, drops blank tags, and stores
-tags in sorted deduplicated order. Legacy crew entries without these fields
-normalize to no description and an empty tag list. Owner execution-profile
-publication carries this complete projection to the hub; publication is stricter
-than legacy dispatch compatibility and fails closed if provider or backend cannot
-be canonicalized to a concrete executable combination.
+tags in sorted deduplicated order. Owner execution-profile publication carries
+this complete projection to the hub and fails closed if provider or backend
+cannot be canonicalized to a concrete executable combination.
 
-> **Legacy compatibility.** Orbit still accepts the former `planner` / `implementer` / `reviewer` inline-table shape. It uses the `implementer` assignment for every role and logs an `orbit.config.crew` warning when planner or reviewer differs. Rewrite legacy crews to the flat shape above; cross-provider comparison belongs in the duel system.
+> **Retired crew shape.** `planner`, `implementer`, and `reviewer` sub-tables
+> are no longer accepted in a crew entry. A workspace using that old shape must
+> rewrite every `[crews.<name>]` entry to set flat `model`, `provider`, and
+> `backend` fields before Orbit can load its configuration. Use the duel system
+> for cross-provider comparison.
 
 > **Note.** Earlier Orbit versions used `[agent.<role>]` tables. That schema was removed in [ORB-00058](../.orbit/) — config load now hard-errors if `[agent.*]` is present. Migrate to `[crews.<name>]` + `workflow.default_crew`.
 

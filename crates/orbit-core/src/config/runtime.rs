@@ -347,7 +347,6 @@ fn load_layered_runtime(
                 set_value_at_path(&mut merged, descriptor.key, value.clone());
             }
         }
-        reconcile_layered_crew_shapes(&mut merged, global.as_ref(), workspace_document);
         for key in WORKSPACE_REPLACE_ONLY_KEYS {
             if value_at_path(&workspace_document.value, key).is_none() {
                 remove_value_at_path(&mut merged, key);
@@ -372,65 +371,6 @@ fn load_layered_runtime(
         global,
         workspace,
     })
-}
-
-fn reconcile_layered_crew_shapes(
-    merged: &mut toml::Value,
-    global: Option<&ConfigDocument>,
-    workspace: &ConfigDocument,
-) {
-    let Some(workspace_crews) = value_at_path(&workspace.value, "crews").and_then(|v| v.as_table())
-    else {
-        return;
-    };
-    let Some(merged_crews) = value_at_path_mut(merged, "crews").and_then(|v| v.as_table_mut())
-    else {
-        return;
-    };
-
-    for (name, workspace_crew) in workspace_crews {
-        let Some(workspace_crew) = workspace_crew.as_table() else {
-            continue;
-        };
-        let has_flat = ["model", "provider", "backend"]
-            .iter()
-            .any(|field| workspace_crew.contains_key(*field));
-        let has_legacy = ["planner", "implementer", "reviewer"]
-            .iter()
-            .any(|field| workspace_crew.contains_key(*field));
-        // Preserve the normal validation error when one physical entry mixes
-        // both schemas. Only reconcile a shape boundary between two layers.
-        if has_flat == has_legacy {
-            continue;
-        }
-        let Some(merged_crew) = merged_crews.get_mut(name).and_then(|v| v.as_table_mut()) else {
-            continue;
-        };
-        if has_flat {
-            // A partial flat workspace entry may inherit missing assignment
-            // fields from a legacy global entry's implementer assignment.
-            if let Some(global_implementer) = global
-                .and_then(|document| crew_entry(&document.value, name))
-                .and_then(|crew| crew.get("implementer"))
-                .and_then(|value| value.as_table())
-            {
-                for field in ["model", "provider", "backend"] {
-                    if !merged_crew.contains_key(field)
-                        && let Some(value) = global_implementer.get(field)
-                    {
-                        merged_crew.insert(field.to_string(), value.clone());
-                    }
-                }
-            }
-            for field in ["planner", "implementer", "reviewer"] {
-                merged_crew.remove(field);
-            }
-        } else {
-            for field in ["model", "provider", "backend"] {
-                merged_crew.remove(field);
-            }
-        }
-    }
 }
 
 fn read_config_document(path: &Path) -> Result<Option<ConfigDocument>, OrbitError> {
@@ -479,14 +419,6 @@ fn value_at_path<'a>(document: &'a toml::Value, key: &str) -> Option<&'a toml::V
     let mut value = document;
     for segment in key.split('.') {
         value = value.as_table()?.get(segment)?;
-    }
-    Some(value)
-}
-
-fn value_at_path_mut<'a>(document: &'a mut toml::Value, key: &str) -> Option<&'a mut toml::Value> {
-    let mut value = document;
-    for segment in key.split('.') {
-        value = value.as_table_mut()?.get_mut(segment)?;
     }
     Some(value)
 }
@@ -626,11 +558,7 @@ fn source_for_crew_field(
     ] {
         if let Some(document) = document
             && let Some(entry) = crew_entry(&document.value, crew)
-            && (entry.contains_key(field)
-                || entry
-                    .get("implementer")
-                    .and_then(|value| value.as_table())
-                    .is_some_and(|implementer| implementer.contains_key(field)))
+            && entry.contains_key(field)
         {
             return file_source(kind, &document.path);
         }
@@ -747,60 +675,16 @@ fn crew_assignment_from_raw(
     crew: &str,
     raw: &RawCrewEntry,
 ) -> Result<CrewRoleAssignment, OrbitError> {
-    let has_flat = raw.model.is_some() || raw.provider.is_some() || raw.backend.is_some();
     let has_legacy = raw.planner.is_some() || raw.implementer.is_some() || raw.reviewer.is_some();
-    if has_flat && has_legacy {
+    if has_legacy {
         return Err(OrbitError::InvalidInput(format!(
-            "[crews.{crew}] mixes the flat {{ model, provider, backend }} shape with legacy planner/implementer/reviewer assignments"
+            "[crews.{crew}] uses retired planner/implementer/reviewer role tables; rewrite it with flat `model`, `provider`, and `backend` fields only"
         )));
     }
-    if has_flat {
-        return Ok(CrewRoleAssignment {
-            model: required_crew_field(crew, "model", raw.model.as_deref())?,
-            provider: required_crew_field(crew, "provider", raw.provider.as_deref())?,
-            backend: required_crew_field(crew, "backend", raw.backend.as_deref())?,
-        });
-    }
-
-    let implementer = required_legacy_assignment(crew, "implementer", raw.implementer.as_ref())?;
-    let planner = required_legacy_assignment(crew, "planner", raw.planner.as_ref())?;
-    let reviewer = required_legacy_assignment(crew, "reviewer", raw.reviewer.as_ref())?;
-    if planner != implementer || reviewer != implementer {
-        tracing::warn!(
-            target: "orbit.config.crew",
-            crew,
-            "legacy three-role crew assignments diverge; using implementer for every role — rewrite [crews.<name>] with flat model/provider/backend fields",
-        );
-    }
-    Ok(implementer)
-}
-
-fn required_legacy_assignment(
-    crew: &str,
-    role: &str,
-    raw: Option<&RawAgentRoleConfig>,
-) -> Result<CrewRoleAssignment, OrbitError> {
-    let raw = raw.ok_or_else(|| {
-        OrbitError::InvalidInput(format!(
-            "[crews.{crew}] must define {role} = {{ model, provider, backend }}"
-        ))
-    })?;
     Ok(CrewRoleAssignment {
-        model: required_legacy_field(crew, role, "model", raw.model.as_deref())?,
-        provider: required_legacy_field(crew, role, "provider", raw.provider.as_deref())?,
-        backend: required_legacy_field(crew, role, "backend", raw.backend.as_deref())?,
-    })
-}
-
-fn required_legacy_field(
-    crew: &str,
-    role: &str,
-    field: &str,
-    value: Option<&str>,
-) -> Result<String, OrbitError> {
-    let value = value.map(str::trim).filter(|value| !value.is_empty());
-    value.map(ToOwned::to_owned).ok_or_else(|| {
-        OrbitError::InvalidInput(format!("[crews.{crew}].{role}.{field} must not be empty"))
+        model: required_crew_field(crew, "model", raw.model.as_deref())?,
+        provider: required_crew_field(crew, "provider", raw.provider.as_deref())?,
+        backend: required_crew_field(crew, "backend", raw.backend.as_deref())?,
     })
 }
 

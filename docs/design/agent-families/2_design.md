@@ -3,7 +3,7 @@ summary: "Agent Families — Design"
 type: design
 title: "Agent Families — Design"
 owner: human
-last_updated: 2026-07-27
+last_updated: 2026-08-09
 last_validated: 2026-07-27
 status: Draft
 feature: agent-families
@@ -27,7 +27,7 @@ Adding a family is still a cross-cutting change: executor assets, sandbox behavi
 
 Workspace config defines one concrete assignment under each `[crews.<name>]`: flat `model`, `provider`, and `backend` fields. Activity roles remain labels, but all resolve through the same assignment.
 
-`crates/orbit-core/src/config/raw.rs` owns the TOML shape, and `crates/orbit-core/src/config/runtime.rs` materializes it into `Crew` values from `orbit-common`. Runtime loading rejects incomplete crews and rejects `[workflow].default_crew` when it does not name a defined crew.
+`crates/orbit-core/src/config/raw.rs` owns the TOML shape, and `crates/orbit-core/src/config/runtime.rs` materializes it into `Crew` values from `orbit-common`. Runtime loading rejects incomplete crews, retired `planner`/`implementer`/`reviewer` role sub-tables with guidance to write flat `model`, `provider`, and `backend` fields, and `[workflow].default_crew` values that do not name a defined crew.
 
 The built-in runtime registry uses model-specific standard crews: Claude provides `opus`, `sonnet`, and `fable`; Codex provides `sol`, `terra`, and `luna`; Gemini provides `gemini`; and Grok provides `grok`. Fresh `orbit init` config filters that registry by detected provider CLIs, always writes `backend = "cli"`, and chooses the first emitted standard crew as `[workflow].default_crew` (`opus`, `sol`, `gemini`, or `grok`). It adds `qa` on Terra when Codex is available, otherwise on Sonnet when Claude is available. With no supported provider CLI, initialization emits neither crews nor a dangling default.
 
@@ -72,5 +72,6 @@ Task-level per-role overrides were deferred; today a task picks an entire crew, 
 - ORB-00058: Introduce per-task crew override for agent model selection.
 - ORB-00072: Make duel-plan agent pool and per-family model configurable via `[duel]`.
 - ORB-10315: Seed model-specific crews only for providers available during initialization.
+- ORB-10620: Reject retired crew role sub-tables during config load.
 
 Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

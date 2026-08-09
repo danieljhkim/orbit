@@ -48,13 +48,14 @@ pub struct RawCrewEntry {
     pub description: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tags: Vec<String>,
-    /// Legacy three-role fields retained for compatibility. Runtime loading
-    /// selects `implementer` and warns when the discarded roles diverge.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    /// Retired role tables are retained only to reject stale configuration
+    /// with rewrite guidance at load time. They are not part of the crew
+    /// schema and never participate in assignment resolution or serialization.
+    #[serde(default, skip_serializing)]
     pub planner: Option<RawAgentRoleConfig>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing)]
     pub implementer: Option<RawAgentRoleConfig>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing)]
     pub reviewer: Option<RawAgentRoleConfig>,
 }
 

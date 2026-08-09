@@ -343,6 +343,22 @@ default_crew = "codex"
 }
 
 #[test]
+fn absent_crews_use_built_in_defaults() {
+    let config = load_config("[scoring]\nenabled = true\n").expect("config without crews loads");
+
+    assert_eq!(config.crews, default_crews());
+    assert_eq!(config.default_crew.as_deref(), Some("opus"));
+}
+
+#[test]
+fn explicitly_empty_crews_preserve_an_empty_registry() {
+    let config = load_config("[crews]\n").expect("empty crew registry loads");
+
+    assert!(config.crews.is_empty());
+    assert_eq!(config.default_crew, None);
+}
+
+#[test]
 fn default_crew_must_reference_defined_crew() {
     let global = tempdir().expect("global tempdir");
     let workspace = tempdir().expect("workspace tempdir");
@@ -468,8 +484,8 @@ provider = "codex"
 }
 
 #[test]
-fn legacy_divergent_crew_uses_implementer_assignment() {
-    let config = load_config(
+fn legacy_role_tables_fail_with_flat_shape_rewrite_guidance() {
+    let error = load_config(
         r#"
 [crews.legacy]
 planner = { model = "planner-model", provider = "claude", backend = "cli" }
@@ -480,11 +496,49 @@ reviewer = { model = "reviewer-model", provider = "gemini", backend = "cli" }
 default_crew = "legacy"
 "#,
     )
-    .expect("legacy crew loads");
+    .expect_err("legacy role tables must fail config load");
+    let message = error.to_string();
 
-    let crew = config.crews.get("legacy").expect("legacy crew");
-    assert_eq!(crew.assignment.model, "implementer-model");
-    assert_eq!(crew.assignment.provider, "codex");
+    for expected in [
+        "[crews.legacy]",
+        "planner/implementer/reviewer",
+        "model",
+        "provider",
+        "backend",
+    ] {
+        assert!(
+            message.contains(expected),
+            "expected {message:?} to contain {expected:?}"
+        );
+    }
+}
+
+#[test]
+fn flat_crew_mixed_with_role_tables_fails_with_flat_shape_rewrite_guidance() {
+    let error = load_config(
+        r#"
+[crews.mixed]
+model = "gpt-test"
+provider = "codex"
+backend = "cli"
+implementer = { model = "gpt-test", provider = "codex", backend = "cli" }
+"#,
+    )
+    .expect_err("mixed crew shape must fail config load");
+    let message = error.to_string();
+
+    for expected in [
+        "[crews.mixed]",
+        "planner/implementer/reviewer",
+        "model",
+        "provider",
+        "backend",
+    ] {
+        assert!(
+            message.contains(expected),
+            "expected {message:?} to contain {expected:?}"
+        );
+    }
 }
 
 #[test]
@@ -621,7 +675,7 @@ model = "workspace-model"
 }
 
 #[test]
-fn flat_workspace_crew_can_layer_over_legacy_global_crew() {
+fn layered_config_rejects_legacy_global_crew_before_flat_workspace_override() {
     let global = tempdir().expect("global tempdir");
     let workspace = tempdir().expect("workspace tempdir");
     write_config(
@@ -644,13 +698,15 @@ model = "new-model"
 "#,
     );
 
-    let config = RuntimeConfig::load_layered(global.path(), workspace.path())
-        .expect("cross-shape layered crew config loads");
-    let build = config.crews.get("build").expect("build crew");
+    let error = RuntimeConfig::load_layered(global.path(), workspace.path())
+        .expect_err("legacy global crew must not be masked by workspace fields");
+    let message = error.to_string();
 
-    assert_eq!(build.assignment.model, "new-model");
-    assert_eq!(build.assignment.provider, "codex");
-    assert_eq!(build.assignment.backend, "cli");
+    assert!(message.contains("[crews.build]"), "{message}");
+    assert!(
+        message.contains("planner/implementer/reviewer"),
+        "{message}"
+    );
 }
 
 #[test]
@@ -712,11 +768,26 @@ model = "workspace-model"
         values["crews.build.provider"].source.kind(),
         ConfigValueSourceKind::Global
     );
+    assert_eq!(
+        values["crews.build.backend"].source.kind(),
+        ConfigValueSourceKind::Global
+    );
     let workspace_config_path = workspace.path().join("config.toml");
     assert_eq!(
         values["scoring.enabled"].source.path(),
         Some(workspace_config_path.as_path())
     );
+    let global_config_path = global.path().join("config.toml");
+    assert_eq!(
+        values["crews.build.model"].source.path(),
+        Some(workspace_config_path.as_path())
+    );
+    for key in ["crews.build.provider", "crews.build.backend"] {
+        assert_eq!(
+            values[key].source.path(),
+            Some(global_config_path.as_path())
+        );
+    }
 }
 
 #[test]
