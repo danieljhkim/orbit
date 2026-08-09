@@ -1,4 +1,4 @@
-.PHONY: help build release run check test fmt fmt-check clippy clean install uninstall dev watch audit tree ci ci-fast stability release-check docs-index cleanup-branches
+.PHONY: help build release run check test fmt fmt-check clippy clean install uninstall dev watch audit tree ci ci-fast ci-lint stability release-check docs-index cleanup-branches
 
 # ------------------------------------------------------------
 # Config
@@ -49,6 +49,7 @@ help:
 	@echo "  make tree         Print dependency tree"
 	@echo "  make ci           Full CI pass (clippy + tests + doc + guardrails; also runs on PRs)"
 	@echo "  make ci-fast      Pre-handoff gate for agents (fmt-check + guardrail scripts; no compile)"
+	@echo "  make ci-lint      Pre-handoff clippy gate for agents (compiles all workspace targets)"
 	@echo "  make docs-index   Regenerate docs/INDEX.md"
 	@echo "  make stability    Verify per-crate stability tier markers"
 	@echo "  make release-check  Verify /plugin install orbit version lockstep (see docs/runbooks/release.md)"
@@ -127,6 +128,11 @@ ci-fast:
 	./scripts/check-orphan-modules.sh
 	./scripts/check-embedded-asset-portability.py
 	./scripts/test-validate-codex-plugin.sh
+
+# Compile-time pre-handoff gate for agents. Keep this invocation aligned with
+# the default workspace clippy pass in scripts/ci-guardrails.sh.
+ci-lint:
+	$(CARGO) clippy $(WORKSPACE) --all-targets -- -D warnings
 
 # Verify every workspace crate declares its stability tier
 stability:

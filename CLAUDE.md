@@ -17,7 +17,7 @@ Project instructions for agents working on Orbit (loaded as both `AGENTS.md` and
 
 ## Build / Lint
 
-`make ci-fast` (fmt-check + guardrail scripts; no compile) must pass before a task moves to `review`. The full `make ci` is the canonical merge gate via [`.github/workflows/ci.yml`](.github/workflows/ci.yml) on every PR — don't run it per task locally.
+`make ci-fast` (fmt-check + guardrail scripts; no compile) and `make ci-lint` (the same workspace-wide, all-target clippy pass as CI, with warnings denied) must both pass before a task moves to `review`. Each task therefore pays for one workspace clippy compile; cold runs can take several minutes, while warm runs reuse Cargo's incremental cache. The full `make ci` is the canonical merge gate via [`.github/workflows/ci.yml`](.github/workflows/ci.yml) on every PR — don't run it per task locally.
 
 
 ## Architecture
