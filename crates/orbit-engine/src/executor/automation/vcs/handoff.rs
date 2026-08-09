@@ -162,8 +162,15 @@ pub(super) fn record_failed_handoff<H: TaskHost + ?Sized>(
     let base_ref = input_string_field(input, "base_ref")
         .map(|value| format!("Base checkpoint: {value}\n"))
         .unwrap_or_default();
+    let recovery = if matches!(phase, FailedHandoffPhase::Rebase)
+        && rebase_in_progress(&context.workspace_path).unwrap_or(false)
+    {
+        "Worktree state: rebase stopped with unresolved conflicts.\n\nRecovery:\n  Resolve the conflicting paths in this worktree, stage them, run `git rebase --continue`, then resume the same job step. Later handoff phases have not been replayed."
+    } else {
+        "Recovery:\n  Reconcile the recorded phase in this worktree, then resume the same job step. Later handoff phases have not been replayed."
+    };
     let message = format!(
-        "{header}\n\nHead branch: {head}\nWorktree: {worktree}\nBase branch: {base}\n{base_ref}Failing phase: {phase}\nError: {error}\n\nRecovery:\n  Reconcile the recorded phase in this worktree, then resume the same job step. Later handoff phases have not been replayed.",
+        "{header}\n\nHead branch: {head}\nWorktree: {worktree}\nBase branch: {base}\n{base_ref}Failing phase: {phase}\nError: {error}\n\n{recovery}",
         worktree = context.workspace_path.display(),
         phase = phase.label(),
     );
@@ -189,6 +196,24 @@ pub(super) fn record_failed_handoff<H: TaskHost + ?Sized>(
         )?;
     }
     Ok(())
+}
+
+pub(super) fn rebase_in_progress(workspace_path: &Path) -> Result<bool, OrbitError> {
+    for state_dir in ["rebase-merge", "rebase-apply"] {
+        let path = PathBuf::from(super::git::git_output(
+            workspace_path,
+            &["rev-parse", "--git-path", state_dir],
+        )?);
+        let path = if path.is_absolute() {
+            path
+        } else {
+            workspace_path.join(path)
+        };
+        if path.is_dir() {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 fn current_branch(workspace_path: &Path) -> Option<String> {
