@@ -144,6 +144,30 @@ Convenience reads:
 
 Writers must not rewrite prior event lines except during explicit cutover or repair commands. Appends must write one JSON object plus newline, flush and sync the file before success, and preserve a valid prefix if the process crashes. Readers must tolerate a final unterminated or invalid JSON line as tail corruption; repair may truncate only that final corrupt tail.
 
+### Notes must not inline bulk
+
+`note` is a human-readable summary, not a payload channel. A writer must not
+inline a machine-generated blob — a serialized structure, a path list, a
+captured stream — into it. Because `events.jsonl` is append-only, an oversized
+note is permanent: it dilutes every downstream reader of that task (history
+scanning, memory distillation, triage, and the agent task context assembled in
+`v2_host/task_context.rs`) for the life of the record.
+
+A writer whose note would carry such a payload must instead keep a leading
+excerpt and name, **inside the note itself**, the command that reads the full
+text back. Eliding is only permitted where the full value is independently
+durable: the note carries a copy, and the copy is what gets dropped. Discarding
+a value that exists nowhere else is not permitted at write time — the note is a
+durable record and a lossy write cannot be undone later.
+
+The one such elision today is the `workflow_run_failed` note, whose
+`error_message` is retained in full by `job_run_steps.error_message` and read
+back with `orbit run show <run_id> --json` (field `.run.steps[].error_message`).
+Its size threshold is declared exactly once, in `orbit-engine`'s
+`context::outcome`, and `scripts/check-history-note-size.sh` fails the build if
+a second threshold or a second `workflow_run_failed` note producer appears.
+Re-measure the surface with `scripts/measure-history-signal.py`. [ORB-10343]
+
 ## Comments
 
 `comments.jsonl` is append-only. Each line is a JSON object with:
@@ -256,4 +280,4 @@ Cutover must be idempotent for interrupted local runs. A partially converted tas
 
 ## Agent Signature
 
-Last revised by `codex` on 2026-07-26 for [ORB-10466].
+Last revised by `claude` on 2026-08-09 for [ORB-10343].
