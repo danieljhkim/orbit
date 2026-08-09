@@ -1,7 +1,6 @@
-use serde_json::json;
-
 use crate::command::Execute;
 use orbit_core::{OrbitError, OrbitRuntime};
+use serde_json::json;
 
 use super::super::ship::*;
 
@@ -151,5 +150,81 @@ fn ship_rejects_duplicate_task_ids() {
     assert!(
         err.to_string().contains("duplicate task id"),
         "unexpected error: {err}"
+    );
+}
+
+fn write_ship_job_asset(runtime: &OrbitRuntime) {
+    let jobs_dir = runtime.data_root().join("resources/jobs");
+    std::fs::create_dir_all(&jobs_dir).expect("create jobs directory");
+    std::fs::write(
+        jobs_dir.join("task_auto_pipeline.yaml"),
+        r#"schemaVersion: 2
+kind: Job
+metadata:
+  name: task_auto_pipeline
+spec:
+  state: enabled
+  kind: workflow
+  steps:
+    - id: wait
+      spec:
+        type: deterministic
+        action: sleep
+        config:
+          seconds: 30
+"#,
+    )
+    .expect("write ship job fixture");
+}
+
+/// The interactive command must enter the same runtime submission path as the
+/// dashboard, MCP tool, and routine action. A generic workflow dispatch would
+/// insert a second run here instead of returning this typed shared conflict.
+#[test]
+fn interactive_ship_inherits_the_shared_in_flight_guard() {
+    let runtime = OrbitRuntime::in_memory().expect("build runtime");
+    write_ship_job_asset(&runtime);
+    ship_args(&["TST-00001"], ShipMode::Local, Some("main"))
+        .execute(&runtime)
+        .expect("first interactive ship dispatch");
+    let first_run = runtime
+        .list_job_runs(Default::default())
+        .expect("list first CLI run")
+        .into_iter()
+        .next()
+        .expect("first CLI dispatch persists a run");
+    assert_eq!(
+        first_run.input,
+        Some(json!({
+            "mode": "local",
+            "base_branch": "main",
+            "task_ids": ["TST-00001"],
+        }))
+    );
+    let audits = runtime
+        .list_audit_events(None, None, None, None, 20)
+        .expect("list CLI submission audits");
+    assert!(audits.iter().any(|audit| {
+        audit.tool_name.as_deref() == Some("pipeline.invoke")
+            && audit.target_id.as_deref() == Some(first_run.run_id.as_str())
+    }));
+
+    let error = ship_args(&["TST-00001"], ShipMode::Local, Some("main"))
+        .execute(&runtime)
+        .expect_err("an interactive ship must refuse a task already in flight");
+
+    let OrbitError::ShipRunInFlight { task_id, run_id } = &error else {
+        panic!("expected ShipRunInFlight, got {error:?}");
+    };
+    assert_eq!(task_id, "TST-00001");
+    assert!(run_id.starts_with("jrun-"), "unexpected run id: {run_id}");
+
+    let runs = runtime
+        .list_job_runs(Default::default())
+        .expect("list job runs");
+    assert_eq!(
+        runs.len(),
+        1,
+        "a refused CLI submission must not insert a run"
     );
 }

@@ -1,12 +1,15 @@
 //! `orbit run ship` CLI entrypoint.
 
 use clap::{Args, ValueEnum};
-use orbit_core::{OrbitError, OrbitRuntime, build_ship_input, find_workflow};
+#[cfg(test)]
+use orbit_core::build_ship_input;
+use orbit_core::{OrbitError, OrbitRuntime, find_workflow};
+#[cfg(test)]
 use serde_json::Value;
 
 use crate::command::{CommandOut, CommandOutput, Execute};
 
-use super::support::{dispatch_workflow, print_workflow_dispatch_results};
+use super::support::{WorkflowDispatchResult, print_workflow_dispatch_results};
 
 pub(super) const SHIP_WORKFLOW: &str = "ship";
 
@@ -52,10 +55,26 @@ pub struct ShipCommand {
 impl Execute for ShipCommand {
     fn execute(self, runtime: &OrbitRuntime) -> CommandOut {
         let mode = resolve_ship_mode(&self, runtime)?;
-        let plan = build_ship_run_plan(&self, runtime.workflow_base_branch(), mode)?;
-        let runs = dispatch_workflow(runtime, plan.workflow_alias, &plan.input, false, false, 1)?;
+        validate_task_selection(&self.task_ids)?;
+        ensure_workflow_exists(SHIP_WORKFLOW)?;
+        // Ship is the one workflow whose submission carries task-level
+        // admission checks, so it must not use the generic CLI dispatcher.
+        let invoke = runtime.submit_ship_run(mode, self.base.as_deref(), &self.task_ids, None)?;
+        let run = WorkflowDispatchResult {
+            workflow_alias: SHIP_WORKFLOW,
+            job_id: invoke.job_name,
+            run_id: invoke.run_id,
+            state: if invoke.queued {
+                "queued".to_string()
+            } else {
+                "submitted".to_string()
+            },
+            attempt: 1,
+            error_code: None,
+            error_message: None,
+        };
         {
-            print_workflow_dispatch_results(plan.workflow_alias, &runs, self.json)?;
+            print_workflow_dispatch_results(SHIP_WORKFLOW, &[run], self.json)?;
             Ok(CommandOutput::Silent)
         }
     }
@@ -116,12 +135,14 @@ impl Execute for LegacyShipLocalCommand {
     }
 }
 
+#[cfg(test)]
 #[derive(Debug)]
 pub(crate) struct WorkflowRunPlan {
     pub workflow_alias: &'static str,
     pub input: Value,
 }
 
+#[cfg(test)]
 pub(crate) fn build_ship_run_plan(
     args: &ShipCommand,
     config_base_branch: &str,
