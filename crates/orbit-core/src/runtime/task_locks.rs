@@ -90,6 +90,7 @@ pub(super) fn release(
         &["reservation_id", "reservationId", "reservation-id"],
         "reservation_id",
     )?;
+    validate_reservation_id_form(&reservation_id)?;
     let result = runtime
         .stores()
         .task_reservations()
@@ -140,6 +141,22 @@ pub(super) fn release(
         )?;
     }
     Ok(json!({ "released": result.released }))
+}
+
+/// Reservation ids are minted as `reservation-<nanos>`
+/// (`orbit_store::sqlite::task_reservation_store::reserve_task_reservation`). A
+/// task id or other identifier passed here can never match a stored
+/// reservation, so without this check `release` falls through to the "no
+/// matching row" path and returns a falsy `{"released": false}` — indistinguishable
+/// from a completed release.
+fn validate_reservation_id_form(reservation_id: &str) -> Result<(), OrbitError> {
+    const RESERVATION_ID_PREFIX: &str = "reservation-";
+    if reservation_id.starts_with(RESERVATION_ID_PREFIX) {
+        return Ok(());
+    }
+    Err(OrbitError::InvalidInput(format!(
+        "`reservation_id` must have the form `{RESERVATION_ID_PREFIX}<id>` (see `orbit task locks list --json`); got `{reservation_id}`, which does not look like a reservation id"
+    )))
 }
 
 pub(super) fn reserve(
@@ -607,6 +624,7 @@ fn task_lock_to_json(task: &Task) -> Value {
         "status": task.status.to_string(),
         "job_run_id": task.job_run_id,
         "crew": task.crew,
+        "orchestrator": task.orchestrator,
         "context_files": task.context_files,
     })
 }

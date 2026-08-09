@@ -311,6 +311,27 @@ fn reservation_conflicts_clear_immediately_after_release() {
 }
 
 #[test]
+fn release_rejects_an_identifier_of_the_wrong_form_instead_of_a_falsy_no_op() {
+    // ORB-10651: reservation ids are minted as `reservation-<nanos>`. Passing
+    // a task id (or any other identifier shape) must not fall through to the
+    // "no matching row" path, which reads as a completed release.
+    let _env = unmanaged_tool_env_guard();
+    let (_root, runtime, _repo_root) = test_runtime();
+
+    let message = invalid_input_message(run_tool_as_operator(
+        &runtime,
+        "orbit.task.locks.release",
+        json!({
+            "reservation_id": "ORB-10651",
+            "model": orbit_common::test_fixtures::TEST_CODEX_MODEL,
+        }),
+    ));
+    assert!(message.contains("reservation_id"), "{message}");
+    assert!(message.contains("reservation-"), "{message}");
+    assert!(message.contains("ORB-10651"), "{message}");
+}
+
+#[test]
 fn v2_task_locks_store_workspace_binding_id() {
     let _env = unmanaged_tool_env_guard();
     let (_root, runtime, repo_root) = v2_test_runtime();
