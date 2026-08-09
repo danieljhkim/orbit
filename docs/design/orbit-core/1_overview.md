@@ -2,6 +2,7 @@
 title: Orbit Core — Overview
 owner: claude
 last_updated: 2026-07-25
+last_validated: 2026-08-09
 status: Accepted
 feature: orbit-core
 doc_role: overview
