@@ -4,6 +4,7 @@ type: design
 title: "Semantic Search — Decisions"
 owner: claude
 last_updated: 2026-08-01
+last_validated: 2026-08-09
 status: Accepted
 feature: orbit-search
 doc_role: decisions
@@ -14,7 +15,7 @@ tags: ["orbit-search"]
 
 ADR-style log of non-obvious orbit-search decisions. Each entry names the pressure, the choice, and the tradeoff. Entries are append-only and keyed by number; superseded entries are marked, not deleted.
 
-Format for each entry: **Status · Date · Task(s)**, then *Context → Decision → Consequences*. Every ADR names at least one cost. ADRs in this file carry status `Proposed` until the implementing task ships; they flip to `Accepted` with the implementing task ID at that point.
+Format for each entry: **Status · Date · Task(s)**, then *Context → Decision → Consequences*. Every ADR names at least one cost. Entries retain their recorded lifecycle status; implemented entries are `Accepted` and point to the task that shipped them.
 
 Historical note ([ORB-10458]): the entries listed below were authored with local IDs that had no record in the ADR store. They were allocated through `orbit.adr.add`, their narratives migrated into the store verbatim, and their headings rewritten to the allocated global ID. The original local IDs survive as `legacy_ids`, so prior citations still resolve via `orbit tool run orbit.adr.show --input '{"legacy_id":"<feature>/ADR-NNN"}'`. Backfilled here: `orbit-search/ADR-001` → ADR-0270, `orbit-search/ADR-002` → ADR-0271, `orbit-search/ADR-003` → ADR-0272, `orbit-search/ADR-004` → ADR-0273, `orbit-search/ADR-005` → ADR-0274, `orbit-search/ADR-006` → ADR-0275, `orbit-search/ADR-007` → ADR-0276, `orbit-search/ADR-008` → ADR-0277.
 
@@ -92,13 +93,13 @@ Narrative lives in the ADR store — retrieve it with `orbit tool run orbit.adr.
 
 **Context.** `orbit semantic` mixed embedding-companion lifecycle (`install`, `uninstall`, `stats`, `index`) with user query verbs (`search`, `related`). The phase-1 search engine now owns both lexical and vector ranking, so leaving queries under `semantic` would make users choose an implementation detail before they search.
 
-**Decision.** `orbit semantic` is only the lifecycle namespace for the local embedding companion. `orbit search` is the unified query surface; lexical ranking is the default, `--hybrid` opts into hybrid BM25 plus cosine for task vectors, and `--semantic <id>` performs cosine-neighbor lookup for indexed tasks.
+**Decision.** `orbit semantic` is only the lifecycle namespace for the local embedding companion. `orbit search` is the unified query surface; lexical ranking is the default, `--hybrid` opts into hybrid BM25 plus cosine for indexed corpora, and `orbit search similar <id>` performs cosine-neighbor lookup for indexed tasks.
 
 **Consequences.**
 - Establishes a precedent that lifecycle namespaces manage local subsystems while query namespaces describe what users are trying to do.
 - `orbit semantic search`, `orbit semantic related`, and `orbit semantic reindex` are hard breaks with no shim because there are no known external consumers yet.
-- Per-domain search commands stay untouched for phase 1; a later task decides whether they thin-wrap `orbit search`, demote to filters, or retire.
-- At this phase, docs, learnings, and ADRs used lexical matching even when `--hybrid` was set; ADR-0180 later adds opt-in doc vectors while keeping learnings and ADRs lexical.
+- Per-domain search commands were subsequently removed by ADR-0176; structural filters now live under the relevant `list` commands.
+- ADR-0180 and its follow-up indexing work extend hybrid retrieval to docs, learnings, and ADRs while retaining lexical fallback when vectors are unavailable.
 
 ---
 
@@ -112,19 +113,19 @@ Narrative lives in the ADR store — retrieve it with `orbit tool run orbit.adr.
 
 ## ADR-0176 — Consolidate per-domain search; cross-kind `--path` and `--tag` filters; learning list `--path` semantics flip
 
-**Status:** Proposed · 2026-05-20 · [ORB-00202]
+**Status:** Accepted · 2026-05-20 · [ORB-00202]
 
 **Context.** After [ADR-0174] and [ADR-0175] consolidated `orbit search` as the unified query surface, the per-domain `task`, `docs`, and `learning` `search` subcommands of `orbit` became redundant for content-similarity queries. The `learning` variant in particular bundled three unrelated operations under one verb: substring search (content), path-glob applicability lookup (structural), and tag filter (structural). Agents pre-edit also need a single cross-kind command that answers *"given this file path, what tasks / learnings / ADRs apply here?"* — the context-pack query.
 
-**Decision.** Hard-remove the per-domain `task`, `docs`, and `learning` `search` subcommands of `orbit` (CLI + MCP). Re-home their filters under the unified search surface: `--tag <T>` (AND semantics, repeatable, case-insensitive), `--all` (kind-aware status widener), `--status` (superseded by ADR-0179's `kind:value` syntax), and path applicability lookup (superseded by ADR-0179's `orbit search path <path>` CLI form; MCP keeps the `path` parameter). Add `orbit task list --path`; flip `orbit learning list --path` from exact-match to glob-containment. The old `--include-superseded` mental model from the retired per-domain doc surface is replaced by `orbit search --kind adr --all`. The structural-vs-content split — `search` for indexed content, `list` for structural filters — is enforced by the command layout.
+**Decision.** Hard-remove the per-domain `task`, `docs`, and `learning` `search` subcommands of `orbit` (CLI + MCP). Re-home their filters under the unified search surface: `--tag <T>` (AND semantics, repeatable, case-insensitive), `--all` (kind-aware status widener), `--status` (superseded by ADR-0179's `kind:value` syntax), and path applicability lookup (superseded by ADR-0179's `orbit search path <path>` CLI form; MCP keeps the `path` parameter). Add `orbit task list --path`; flip `orbit learning list --path` from exact-match to glob-containment. The old `--include-superseded` mental model from the retired per-domain doc surface is replaced by `orbit search --kind adr --all`. The structural-vs-content split — `search` for indexed content, `list` for structural filters — is enforced by the command layout. ORB-00203 subsequently made ADR tags and paths real filters rather than no-op branches.
 
 **Consequences.**
 - One mental model: `orbit search` queries indexed content, `orbit <kind> list` filters structural metadata.
 - The agent context-pack query collapses to a single command (`orbit search path <file> --kind all`).
 - Universal `--all` / `--status kind:value` vocabulary replaces the patchwork of kind-specific flags (`--include-superseded`).
-- ORB-00203 fills the ADR filter branches by adding ADR `tags` and `paths`, without changing the public search surface.
+- ORB-00203 filled the ADR filter branches by adding ADR `tags` and `paths`, without changing the public search surface.
 - Cost: the `learning list --path` semantics flip is the only observable behavior change. Scripts calling `orbit learning list --path 'src/auth/**'` expecting exact-match scoped lookups will now also see paths *inside* that glob. The migration target for ex-`learning search --path` callers is unchanged because the new semantics match what that deleted command already did.
-- Cost: during phase 2, ADR carried `--tag` and `--path` placeholders in two flag positions; ORB-00203 closes that gap by making those positions real filters.
+- Cost: ADR tag and path filters required a later schema/indexing follow-up (ORB-00203) before they could participate in the unified surface.
 - Cost: `AdrStatus` has no `Deprecated` variant, so `--all` adds `Superseded` only on ADRs. Asymmetric with task widening (which gets multiple terminal states); revisited if a deprecated state ever becomes load-bearing.
 - Audit-row granularity is preserved by mapping `--kind` onto the `subcommand` field. Before consolidation, `orbit task search` / `orbit docs search` / `orbit learning search` produced distinct `(command, subcommand)` rows; after consolidation, `orbit search --kind X` produces `(command="search", subcommand="<kind>")` so downstream audit queries can still distinguish task / doc / learning / adr searches. Free-text content vs. structural lookup is not currently captured in the audit schema and is out of scope for this ADR.
 
@@ -153,7 +154,7 @@ Narrative lives in the ADR store — retrieve it with `orbit tool run orbit.adr.
 
 **Context.** Doc search was lexical-only after [ORB-00202] unified the query surface, while the orbit-search store already had a `source_kind` discriminator that could hold docs. The alternatives were to keep semantic ranking deferred, add a separate docs search verb, or reuse the existing vector store behind the unified `orbit search --kind doc --hybrid` path.
 
-**Decision.** Use `orbit docs index` as the explicit admin verb that embeds configured docs roots into `source_kind = "doc"` rows, and keep retrieval opt-in through `orbit search <query> --kind doc --hybrid`. Lexical doc search remains the default, ADRs stay lifecycle-owned and lexical-only, and `[docs.search].semantic_weight` tunes the blend without adding another CLI flag.
+**Decision.** Use `orbit docs index` as the explicit admin verb that embeds configured docs roots into `source_kind = "doc"` rows, and keep retrieval opt-in through `orbit search <query> --kind doc --hybrid`. Lexical doc search remains the default, while the same companion and vector store now also support explicitly indexed learning and ADR corpora.
 
 **Consequences.**
 - `orbit docs index` shares the semantic companion, model catalog, and `embeddings` table with task vectors rather than creating a doc-specific store.
