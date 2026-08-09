@@ -1,6 +1,8 @@
 // Existing expect calls in this module document local invariants; keep the allow scoped while the workspace lint is ratcheted.
 #![allow(clippy::expect_used)]
 
+use std::collections::BTreeMap;
+use std::collections::btree_map::Entry;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -528,8 +530,15 @@ impl AdrFileStore {
         }))
     }
 
+    /// Lists every locally readable ADR, one entry per ID.
+    ///
+    /// An ID duplicated across partitions by a merge collapses to its
+    /// authoritative bundle under the same [`AdrStateDir::lifecycle_rank`]
+    /// precedence [`Self::locate_adr`] uses, so a stale draft can neither
+    /// double-count in a listing nor race the accepted row into the index
+    /// during a rebuild.
     pub(crate) fn list_adrs(&self) -> Result<Vec<Adr>, OrbitError> {
-        let mut adrs = Vec::new();
+        let mut by_id: BTreeMap<String, (AdrStateDir, Adr)> = BTreeMap::new();
         for state in AdrStateDir::all() {
             let dir = state_dir_path(&self.root, *state);
             if !dir.exists() {
@@ -541,11 +550,28 @@ impl AdrFileStore {
                 if !doc_path.is_file() {
                     continue;
                 }
-                let bundle = read_bundle_at(&adr_dir_path)?;
-                adrs.push(bundle_to_adr(bundle));
+                let adr = bundle_to_adr(read_bundle_at(&adr_dir_path)?);
+                match by_id.entry(adr.id.clone()) {
+                    Entry::Vacant(slot) => {
+                        slot.insert((*state, adr));
+                    }
+                    Entry::Occupied(mut slot) => {
+                        let kept_state = slot.get().0;
+                        let (winner, shadowed) =
+                            if state.lifecycle_rank() > kept_state.lifecycle_rank() {
+                                (*state, kept_state)
+                            } else {
+                                (kept_state, *state)
+                            };
+                        warn_shadowed_partition(&adr.id, winner, shadowed);
+                        if winner == *state {
+                            slot.insert((*state, adr));
+                        }
+                    }
+                }
             }
         }
-        Ok(adrs)
+        Ok(by_id.into_values().map(|(_, adr)| adr).collect())
     }
 
     /// Lists ADRs filtered by envelope fields.
@@ -912,17 +938,32 @@ impl AdrFileStore {
         })
     }
 
+    /// Finds the authoritative on-disk bundle for `id`.
+    ///
+    /// Scans every lifecycle partition rather than stopping at the first hit.
+    /// A merge can leave one ID in two partitions at once (see
+    /// [`AdrStateDir::lifecycle_rank`]); when it does, the most-advanced
+    /// lifecycle state wins by that documented precedence and the shadowed
+    /// copies are named in a warning, so the outcome is deterministic and the
+    /// leftover is visible instead of silently deciding the read.
     fn locate_adr(&self, id: &str) -> Result<Option<(AdrStateDir, PathBuf)>, OrbitError> {
+        let mut found: Vec<(AdrStateDir, PathBuf)> = Vec::new();
         for state in AdrStateDir::all() {
             let dir = adr_dir(&self.root, *state, id);
             if dir.is_dir() {
                 // A stray same-named dir without adr.yaml still counts as "located"
                 // here so the caller gets a sensible missing-ADR / corruption error
                 // from read_bundle_at.
-                return Ok(Some((*state, dir)));
+                found.push((*state, dir));
             }
         }
-        Ok(None)
+        let Some(winner_index) = index_of_authoritative_state(&found) else {
+            return Ok(None);
+        };
+        if found.len() > 1 {
+            warn_duplicate_partitions(id, &found, found[winner_index].0);
+        }
+        Ok(Some(found.swap_remove(winner_index)))
     }
 
     fn read_adr_allocation(&self, record: &IdAllocationRecord) -> Result<Option<Adr>, OrbitError> {
@@ -1105,6 +1146,44 @@ impl AdrFileStore {
         }
         Ok(ids)
     }
+}
+
+/// Index of the most-advanced lifecycle partition among `found`, or `None`
+/// when nothing was found.
+///
+/// Ties are impossible: each partition contributes at most one entry, and
+/// [`AdrStateDir::lifecycle_rank`] is injective.
+fn index_of_authoritative_state(found: &[(AdrStateDir, PathBuf)]) -> Option<usize> {
+    found
+        .iter()
+        .enumerate()
+        .max_by_key(|(_, (state, _))| state.lifecycle_rank())
+        .map(|(index, _)| index)
+}
+
+fn warn_duplicate_partitions(id: &str, found: &[(AdrStateDir, PathBuf)], winner: AdrStateDir) {
+    for (state, dir) in found {
+        if *state == winner {
+            continue;
+        }
+        orbit_common::tracing::warn!(
+            adr_id = id,
+            resolved_partition = winner.dir_name(),
+            shadowed_partition = state.dir_name(),
+            shadowed_path = %dir.display(),
+            "ADR exists in multiple lifecycle partitions; resolving to the most-advanced state \
+             and ignoring the stale bundle"
+        );
+    }
+}
+
+fn warn_shadowed_partition(id: &str, winner: AdrStateDir, shadowed: AdrStateDir) {
+    orbit_common::tracing::warn!(
+        adr_id = id,
+        resolved_partition = winner.dir_name(),
+        shadowed_partition = shadowed.dir_name(),
+        "ADR exists in multiple lifecycle partitions; listing only the most-advanced state"
+    );
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

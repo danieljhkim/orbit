@@ -722,6 +722,120 @@ fn list_adrs_returns_all_adrs_across_state_dirs() {
     );
 }
 
+/// Copies an ADR bundle directory verbatim, creating the destination.
+///
+/// Stands in for what git does when a branch that predates a lifecycle
+/// transition merges after it: the pre-transition partition directory and the
+/// post-transition one are unrelated paths, so both land without a conflict.
+fn copy_bundle_dir(source: &Path, target: &Path) {
+    fs::create_dir_all(target).expect("bundle dir");
+    for entry in fs::read_dir(source).expect("read bundle dir") {
+        let entry = entry.expect("bundle entry");
+        fs::copy(entry.path(), target.join(entry.file_name())).expect("copy bundle file");
+    }
+}
+
+#[test]
+fn merged_stale_proposed_bundle_does_not_mask_the_accepted_adr() {
+    // ORB-10669: every ADR partition is now tracked, so a branch cut before
+    // acceptance carries `proposed/<id>` and merging it re-adds that directory
+    // next to `accepted/<id>`. Resolution must follow the documented
+    // lifecycle precedence (most-advanced state wins) rather than partition
+    // declaration order, which would have read the stale draft.
+    let (dir, store) = store_with_index();
+    let root = dir.path();
+    let adr = store
+        .add_adr(create_params("Precedence", "Draft body"))
+        .expect("add");
+
+    // Snapshot the bundle exactly as the pre-acceptance branch has it.
+    let branch_snapshot = root.join("branch-snapshot");
+    copy_bundle_dir(&root.join("proposed").join(&adr.id), &branch_snapshot);
+
+    store
+        .update_adr_status(&adr.id, AdrStatus::Accepted)
+        .expect("accept");
+
+    // The merge re-adds the stale partition directory.
+    copy_bundle_dir(&branch_snapshot, &root.join("proposed").join(&adr.id));
+    assert!(root.join("proposed").join(&adr.id).is_dir());
+    assert!(root.join("accepted").join(&adr.id).is_dir());
+
+    let resolved = store.get_adr(&adr.id).expect("get").expect("adr present");
+    assert_eq!(
+        resolved.status,
+        AdrStatus::Accepted,
+        "the stale proposed bundle must not mask the accepted record"
+    );
+
+    let listed = store.list_adrs().expect("list");
+    assert_eq!(listed.len(), 1, "a duplicated ID must not double-count");
+    assert_eq!(listed[0].status, AdrStatus::Accepted);
+
+    store.rebuild_index().expect("rebuild index");
+    assert_eq!(count_index_rows(&store), 1);
+}
+
+#[test]
+fn duplicate_partition_precedence_holds_for_later_lifecycle_transitions() {
+    // The same merge shape applies to every other sanctioned forward
+    // transition: a merged `accepted/<id>` must not pull a superseded ADR back
+    // to accepted, and a merged `proposed/<id>` must not resurrect a deleted
+    // one.
+    let tempdir = tempdir().expect("tempdir");
+    let root = tempdir.path().to_path_buf();
+    let store = AdrFileStore::new(root.clone());
+
+    let superseded = store
+        .add_adr(create_params("Superseded", "Body"))
+        .expect("add");
+    store
+        .update_adr_status(&superseded.id, AdrStatus::Accepted)
+        .expect("accept");
+    let accepted_snapshot = root.join("accepted-snapshot");
+    copy_bundle_dir(
+        &root.join("accepted").join(&superseded.id),
+        &accepted_snapshot,
+    );
+    store
+        .update_adr_status(&superseded.id, AdrStatus::Superseded)
+        .expect("supersede");
+    copy_bundle_dir(
+        &accepted_snapshot,
+        &root.join("accepted").join(&superseded.id),
+    );
+
+    let deleted = store
+        .add_adr(create_params("Deleted", "Body"))
+        .expect("add");
+    let proposed_snapshot = root.join("proposed-snapshot");
+    copy_bundle_dir(&root.join("proposed").join(&deleted.id), &proposed_snapshot);
+    store
+        .update_adr_status(&deleted.id, AdrStatus::Deleted)
+        .expect("delete");
+    copy_bundle_dir(&proposed_snapshot, &root.join("proposed").join(&deleted.id));
+
+    assert_eq!(
+        store
+            .get_adr(&superseded.id)
+            .expect("get")
+            .expect("present")
+            .status,
+        AdrStatus::Superseded
+    );
+    assert_eq!(
+        store
+            .get_adr(&deleted.id)
+            .expect("get")
+            .expect("present")
+            .status,
+        AdrStatus::Deleted
+    );
+
+    let listed = store.list_adrs().expect("list");
+    assert_eq!(listed.len(), 2, "each ID must collapse to one entry");
+}
+
 // ----- Index-integration tests (Phase 3) -------------------------------
 
 fn store_with_index() -> (tempfile::TempDir, AdrFileStore) {

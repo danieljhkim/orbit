@@ -3,14 +3,14 @@ summary: "Worktree Artifacts - Design"
 type: design
 title: "Worktree Artifacts - Design"
 owner: codex
-last_updated: 2026-08-01
+last_updated: 2026-08-09
 status: Accepted
 feature: worktree-artifacts
 doc_role: design
 tags: ["worktree-artifacts"]
 paths: ["crates/orbit-remote/**", "crates/orbit-core/**", "crates/orbit-store/**", "crates/orbit-cli/**"]
 related_features: ["worktree-artifacts", "host-registry", "mcp-bridge"]
-related_artifacts: ["ORB-00199", "ORB-00200", "ORB-00201", "ORB-10272", "ORB-10297", "ORB-10330", "ORB-10545", "ADR-0177", "ADR-0229", "ADR-0302"]
+related_artifacts: ["ORB-00199", "ORB-00200", "ORB-00201", "ORB-10272", "ORB-10297", "ORB-10330", "ORB-10545", "ORB-10669", "ADR-0177", "ADR-0229", "ADR-0302", "ADR-0339"]
 ---
 
 # Worktree Artifacts - Design
@@ -148,11 +148,53 @@ destination changes. This is deliberately distinct from `adr restore`: restore
 authors a replacement only when no readable copy exists; reconciliation
 preserves a readable published bundle verbatim.
 
-## 6. Indexing Behavior
+## 6. Publication Policy and Duplicate Partitions
+
+Every ADR lifecycle partition — `proposed/`, `accepted/`, `superseded/`,
+`deleted/` — is tracked by git and travels with the repository [ORB-10669].
+Publishing `proposed/` puts the decision under review in the same PR as the
+change that motivates it, and means an ADR authored inside a managed job
+worktree lands on that run's branch instead of stranding on the box until an
+operator reconciles it. Only the rebuildable `adrs/index.sqlite*` and the
+host-local `*.lock` files stay ignored. The managed `.gitignore` block that
+`orbit workspace init` writes carries this policy to every workspace; re-init
+over an older block retires that block's `proposed/` and `superseded/` ignore
+lines rather than leaving them to out-rank the appended re-include.
+
+Publishing every partition makes a duplicate ID reachable. Acceptance is a
+directory rename, so a branch cut before acceptance still carries
+`proposed/<id>`; merging it re-adds that directory next to `accepted/<id>`, and
+git merges both without a conflict because the two paths are unrelated.
+Resolution follows one explicit precedence: **the most-advanced lifecycle state
+wins** (`proposed` < `accepted` < `superseded` < `deleted`), because every
+sanctioned transition moves forward and `accepted → proposed` is rejected
+outright — so the lower-ranked copy is always the stale one. `get_adr`, every
+mutation preflight, and `list_adrs` share that precedence, and each shadowed
+partition is named in a `warn` log with its path, so the leftover is visible and
+removable rather than silently deciding the read. This replaces the implicit
+precedence that fell out of partition declaration order. `orbit adr reconcile`
+keeps its stricter contract: a source checkout holding more than one lifecycle
+artifact for an ID is refused, not resolved.
+
+### 6.1 Managed job-worktree drafts
+
+A managed job-run worktree scaffolds a real `.orbit/adrs/proposed` for its run.
+Drafts written there are now tracked, so the on-box auto-commit sweeps them into
+the run's branch. That is the intended disposition for work that ships: the
+draft rides its PR and merges with the code. For a run that is abandoned or
+whose PR is rejected, the disposition is that **the draft dies with the branch**
+— no operator cleanup step, no reconciliation. Nothing reaches `agent-main`
+unless the branch merges, and the ID allocation left behind is an ordinary valid
+gap (§2). Deleting the worktree removes the only copy; that is expected and is
+not the orphaned-allocation condition ORB-10501 repairs. An operator who instead
+wants to keep a draft from a discarded branch pulls it over with
+`orbit adr reconcile` before the worktree is reaped.
+
+## 7. Indexing Behavior
 
 Learning reindex and docs/ADR search operate on locally readable bodies. Remote-only allocation rows are skipped without error; once the recorded worktree is present and readable again, the same list/reindex path can read and index the body.
 
-## 7. Concerns & Honest Limitations
+## 8. Concerns & Honest Limitations
 
 Remote stubs are intentionally envelope-poor. They expose allocation metadata, not the artifact title, summary, or body, because those fields live in the unreadable body file. Filters that require body fields can only apply to locally readable artifacts.
 
@@ -174,5 +216,8 @@ The `worktree_root` column preserves historical rows from earlier phases, so old
   before allocation. Public creation stays on the compatibility path until F3.
 - [ORB-10545] added exact-bundle reconciliation and made superseded ADR bodies
   repository-published decision history under [ADR-0302].
+- [ORB-10669] published the remaining partitions (§6) under [ADR-0339], made the
+  managed `.gitignore` block retire its own superseded lines, and replaced
+  first-hit-wins ADR resolution with the explicit lifecycle precedence.
 
 Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.
