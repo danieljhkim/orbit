@@ -947,6 +947,80 @@ fn workspace_init_replaces_legacy_bare_orbit_gitignore_line_with_managed_block()
 }
 
 #[test]
+fn workspace_init_retires_older_managed_block_lines_for_published_adr_partitions() {
+    // ORB-10669 published the proposed partition (amending ADR-0302, which had
+    // already published superseded). A checkout carrying the older block still
+    // has those two ignore lines; because `!.orbit/adrs/` re-includes only the
+    // `adrs` directory itself, a surviving `.orbit/adrs/proposed/` would remain
+    // the last pattern matching that subdirectory and would keep the partition
+    // ignored even with the new block appended below it. Re-init must retire
+    // them.
+    let workspace = tempdir().expect("workspace tempdir");
+    let home = tempdir().expect("home tempdir");
+    std::fs::create_dir_all(workspace.path().join(".git")).expect("create .git");
+    let older_managed_block = concat!(
+        "target/\n",
+        ".orbit/*\n",
+        "!.orbit/adrs/\n",
+        ".orbit/adrs/index.sqlite*\n",
+        ".orbit/adrs/proposed/\n",
+        ".orbit/adrs/superseded/\n",
+        "!.orbit/learnings/\n",
+        "!.orbit/auto_tasks/\n",
+        "!.orbit/resources/\n",
+        "!.orbit/routines/\n",
+        "!.orbit/config.toml\n",
+        ".orbit/**/*.lock\n",
+    );
+    std::fs::write(workspace.path().join(".gitignore"), older_managed_block)
+        .expect("write .gitignore");
+
+    let _env = EnvGuard::acquire().home(home.path()).cwd(workspace.path());
+
+    let init = |force| WorkspaceInitArgs {
+        name: None,
+        base_branch: Some("main".to_string()),
+        ship_mode: None,
+        role: None,
+        owner: None,
+        task_id_start: None,
+        mcp: false,
+        inject_agent_rules: false,
+        refresh_defaults: false,
+        force,
+    };
+
+    init(false)
+        .execute_without_runtime(None)
+        .expect("workspace init");
+    let expected = format!("target/\n{}", orbit_gitignore_block());
+    assert_eq!(
+        std::fs::read_to_string(workspace.path().join(".gitignore")).expect("read .gitignore"),
+        expected,
+        "retired partition lines must be stripped, not stacked under a second block"
+    );
+
+    // Re-init converges: no duplicated block, no resurrected retired line.
+    init(true)
+        .execute_without_runtime(None)
+        .expect("workspace re-init");
+    let converged =
+        std::fs::read_to_string(workspace.path().join(".gitignore")).expect("read .gitignore");
+    assert_eq!(converged, expected, "re-init must converge on one block");
+    for retired in [".orbit/adrs/proposed/", ".orbit/adrs/superseded/"] {
+        assert!(
+            !converged.lines().any(|line| line.trim() == retired),
+            "published partition `{retired}` must not be ignored"
+        );
+    }
+    assert_eq!(
+        converged.matches(".orbit/*\n").count(),
+        1,
+        "the managed block must appear exactly once"
+    );
+}
+
+#[test]
 fn workspace_init_from_git_subdir_gitignores_repo_orbit_dir() {
     let repo = tempdir().expect("repo tempdir");
     let home = tempdir().expect("home tempdir");

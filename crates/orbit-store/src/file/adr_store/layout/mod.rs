@@ -29,6 +29,11 @@ impl AdrStateDir {
         }
     }
 
+    /// Scan order for the four partitions.
+    ///
+    /// This order carries no resolution meaning. When one ID exists in more
+    /// than one partition, use [`AdrStateDir::lifecycle_rank`] to pick the
+    /// authoritative one — never "first hit wins".
     pub(super) fn all() -> &'static [AdrStateDir] {
         &[
             AdrStateDir::Proposed,
@@ -36,6 +41,30 @@ impl AdrStateDir {
             AdrStateDir::Superseded,
             AdrStateDir::Deleted,
         ]
+    }
+
+    /// How far along the ADR lifecycle this partition sits, ascending.
+    ///
+    /// Every sanctioned transition moves an ADR forward (`proposed →
+    /// accepted → superseded`, and `→ deleted` as the terminal tombstone);
+    /// `accepted → proposed` is rejected outright. So when a single ID is
+    /// found in two partitions, the higher rank is the later — and therefore
+    /// the authoritative — state, and the lower one is a stale copy.
+    ///
+    /// The duplicate is reachable now that every partition is tracked
+    /// (ORB-10669): a branch cut before acceptance still carries
+    /// `proposed/<id>`, and merging it re-adds that directory alongside
+    /// `accepted/<id>` — two unrelated paths, so git merges both without
+    /// conflict. This ranking is the explicit precedence that resolves it,
+    /// replacing the implicit one that fell out of declaration order in
+    /// [`AdrStateDir::all`].
+    pub(super) fn lifecycle_rank(self) -> u8 {
+        match self {
+            AdrStateDir::Proposed => 0,
+            AdrStateDir::Accepted => 1,
+            AdrStateDir::Superseded => 2,
+            AdrStateDir::Deleted => 3,
+        }
     }
 
     pub(super) fn from_status(status: AdrStatus) -> Self {

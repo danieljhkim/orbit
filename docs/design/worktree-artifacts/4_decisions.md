@@ -3,14 +3,14 @@ summary: "Worktree Artifacts - Decisions"
 type: design
 title: "Worktree Artifacts - Decisions"
 owner: codex
-last_updated: 2026-08-01
+last_updated: 2026-08-09
 status: Accepted
 feature: worktree-artifacts
 doc_role: decisions
 tags: ["worktree-artifacts"]
 paths: ["crates/orbit-remote/**", "crates/orbit-core/**", "crates/orbit-store/**", "crates/orbit-engine/**", "crates/orbit-cli/**"]
 related_features: ["worktree-artifacts", "host-registry", "mcp-bridge"]
-related_artifacts: ["ORB-00199", "ORB-00200", "ORB-00201", "ORB-10272", "ORB-10297", "ORB-10330", "ORB-10501", "ORB-10535", "ORB-10545", "ADR-0177", "ADR-0229", "ADR-0296", "ADR-0302"]
+related_artifacts: ["ORB-00199", "ORB-00200", "ORB-00201", "ORB-10272", "ORB-10297", "ORB-10330", "ORB-10501", "ORB-10535", "ORB-10545", "ORB-10669", "ADR-0177", "ADR-0229", "ADR-0296", "ADR-0302", "ADR-0339"]
 ---
 
 # Worktree Artifacts - Decisions
@@ -84,6 +84,24 @@ allocating a new ID or changing lifecycle/allocation metadata. Narrative and
 the explicit rejected alternatives live in the ADR store; retrieve them with
 `orbit tool run orbit.adr.show --input '{"id":"ADR-0302"}'`.
 
+## ADR-0339 - Publish every ADR lifecycle partition and resolve duplicates by explicit precedence
+
+**Status:** Proposed - 2026-08 - [ORB-10669]
+
+Amends [ADR-0302]. Every ADR lifecycle partition — proposed included — travels
+with the repository, so the decision under review is visible in the PR that
+motivates it and a draft authored in a managed job worktree lands on that run's
+branch instead of stranding on the box. Only the rebuildable index and the
+host-local lock files stay ignored. The managed `.gitignore` block that
+`orbit workspace init` writes carries the policy to every workspace and retires
+the `proposed/` and `superseded/` ignore lines older blocks wrote, so re-init
+converges instead of preserving the old policy. Publishing every partition makes
+a duplicate ID reachable through an ordinary merge; it resolves by one explicit
+precedence — the most-advanced lifecycle state wins — with each shadowed
+partition named in a warning. Narrative and the explicit rejected alternatives
+live in the ADR store; retrieve them with
+`orbit tool run orbit.adr.show --input '{"id":"ADR-0339"}'`.
+
 ## Task References
 
 - [ORB-00199] introduced shared/local root resolution.
@@ -104,5 +122,9 @@ the explicit rejected alternatives live in the ADR store; retrieve them with
   creating that orphaned state when the target still holds the unique body.
 - [ORB-10545] added federated ADR reconciliation, published superseded bodies,
   and resolved the guarded-cleanup deadlock under [ADR-0302].
+- [ORB-10669] published the remaining ADR partitions, made the shipped
+  `.gitignore` block retire its own superseded lines so re-init converges, and
+  replaced first-hit-wins resolution with the explicit lifecycle precedence
+  under [ADR-0339].
 
 Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.
