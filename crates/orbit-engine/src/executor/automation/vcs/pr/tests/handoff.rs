@@ -130,6 +130,38 @@ fn recovered_rebase_continues_remaining_handoff_phases_without_replay() {
     assert_eq!(prepared["decision"], json!("rebase_required"));
     let rebase_input = rebase_input(&input, &prepared);
     rebase_pr_branch(&host, &rebase_input).expect_err("first rebase conflicts");
+    let retry_error =
+        rebase_pr_branch(&host, &rebase_input).expect_err("retry reports the still-stopped rebase");
+    let retry_message = retry_error.to_string();
+    assert!(
+        retry_message.contains("rebase remains stopped with unresolved conflicts"),
+        "{retry_message}"
+    );
+    assert!(
+        retry_message.contains("conflicting paths: src/lib.rs"),
+        "{retry_message}"
+    );
+    assert!(
+        !retry_message.contains("prepared branch"),
+        "stopped rebase must not be misclassified as a checkout mismatch: {retry_message}"
+    );
+    let failure_comment = host
+        .comments_for(task_id)
+        .into_iter()
+        .find(|comment| comment.message.contains("[phase=rebase]"))
+        .expect("rebase failure handoff comment");
+    assert!(
+        failure_comment
+            .message
+            .contains("Worktree state: rebase stopped with unresolved conflicts."),
+        "{}",
+        failure_comment.message
+    );
+    assert!(
+        failure_comment.message.contains("`git rebase --continue`"),
+        "{}",
+        failure_comment.message
+    );
 
     fs::write(
         workspace.repo.join("src/lib.rs"),
@@ -198,6 +230,39 @@ fn recovered_rebase_continues_remaining_handoff_phases_without_replay() {
     let task = host.get_task(task_id).expect("task");
     assert_eq!(task.status, TaskStatus::Review);
     assert_eq!(task.github_pr_number(), Some("42"));
+}
+
+#[test]
+fn rebase_retry_distinguishes_wrong_branch_from_stopped_rebase() {
+    let workspace = rebase_conflict_pr_workspace();
+    let task_id = "ORB-WRONG-BRANCH";
+    let host = PrOpenTestHost::new(
+        vec![batch_task(
+            task_id,
+            "Reject wrong branch",
+            "Outcome: success\nChanges:\n- Candidate is ready.",
+        )],
+        workspace.repo.clone(),
+    );
+    let input = json!({
+        "workspace_path": workspace.repo,
+        "job_run_id": "batch-1",
+        "completed_task_ids": [task_id],
+        "base": "agent-main",
+        "base_sync": "local",
+    });
+    let prepared = prepare_pr_handoff(&host, &input).expect("prepare branch checkpoint");
+    git(&workspace.repo, &["checkout", "agent-main"]);
+
+    let error = rebase_pr_branch(&host, &rebase_input(&input, &prepared))
+        .expect_err("genuine wrong branch remains rejected");
+    let message = error.to_string();
+    assert!(
+        message
+            .contains("prepared branch 'orbit/test-batch' is not checked out (found 'agent-main')"),
+        "{message}"
+    );
+    assert!(!message.contains("rebase remains stopped"), "{message}");
 }
 
 #[test]
