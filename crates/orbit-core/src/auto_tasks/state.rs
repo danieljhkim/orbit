@@ -2,7 +2,7 @@
 //! bookkeeping, host-local and workspace-scoped.
 //!
 //! Cursors live in `<orbit_dir>/state/auto-tasks.json` — workspace-local,
-//! gitignored runtime state, the same class as the planning-duel scoreboard.
+//! gitignored runtime state.
 //! The git-versioned definition YAML is never rewritten by a scheduler fire,
 //! so the store stays churn-free and a definition edit never races the
 //! scheduler. Updates take an exclusive file lock and re-read under the lock,

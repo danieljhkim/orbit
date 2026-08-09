@@ -29,7 +29,6 @@ pub mod artifact_ids;
 pub mod audit;
 pub mod audit_event;
 pub mod auto_task;
-pub mod duel;
 pub mod error;
 pub mod event;
 pub mod execution_profile;
@@ -88,12 +87,6 @@ pub use audit_event::{AuditEvent, AuditEventStatus, AuditStats, audit_execution_
 pub use auto_task::{
     AUTO_TASK_SCHEMA_VERSION, AUTO_TASK_TAG_PREFIX, AutoTaskDefinition, AutoTaskSchedule,
     AutoTaskTemplate, DedupePolicy, auto_task_tag, is_valid_auto_task_name, parse_auto_task_yaml,
-};
-pub use duel::{
-    Ambiguity, ArbiterVerdict, Cost, Decision, DuelRun, EfficiencyMetrics, ImplementerStats,
-    Outcome, PerCommentVerdict, PlannerSlot, PlanningDuelRun, PlanningEfficiency, PlanningOutcome,
-    PlanningRoleAssignment, PlanningRoles, ReviewerStats, RoleAssignment, RoleSlot, Roles, Scores,
-    Severity, TaskClass, TaskScope, ValidIssuesBySeverity, Verdict,
 };
 pub use error::{
     ArtifactOrigin, ArtifactOriginMode, DependencyNotDelivered, NotFoundKind, OrbitError,

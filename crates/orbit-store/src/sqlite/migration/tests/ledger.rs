@@ -614,7 +614,6 @@ fn migrated_legacy_db_carries_every_invocation_insert_column() {
             activity_id: "implement_one".to_string(),
             agent: "claude".to_string(),
             model: Some("claude-opus-4-7".to_string()),
-            slot: None,
             task_ids: vec!["ORB-10367".to_string()],
             trace: InvocationTrace {
                 usage: TokenUsage {

@@ -125,7 +125,6 @@ fn diagnostics_metrics_values_adapt_invocation_records() {
         activity_id: "implement_one".to_string(),
         agent: "codex".to_string(),
         model: Some(TEST_CODEX_MODEL.to_string()),
-        slot: None,
         duration_ms: 1234,
         input_tokens: 100,
         cache_read_tokens: 0,

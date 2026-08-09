@@ -3,7 +3,7 @@ summary: "Auditability — Design"
 type: design
 title: "Auditability — Design"
 owner: codex
-last_updated: 2026-08-02
+last_updated: 2026-08-09
 last_validated: 2026-08-02
 status: Draft
 feature: auditability
@@ -128,7 +128,7 @@ After [ORB-10579], each price row also declares whether its input count is exclu
 
 After [ORB-10581] / [ADR-0310], `GET /api/metrics/orchestrators?since=&until=` reports managed-execution accounting from one unbounded, half-open invocation-fact read captured at an `as_of` timestamp. Each invocation's distinct linked task ids resolve against canonical tasks and enter exactly one conservative bucket with precedence `missing task > unattributed task > one named orchestrator > shared named orchestrators`; duplicate links and multiple tasks owned by the same orchestrator do not multiply cost. Buckets retain all five token splits and separate provider, derived, and same-population comparable cost sums, counts, and delta. Missing provider values and unpriced/invalid derived values remain explicit counts, so partial sums are never presented as reconciled totals. Direct Codex/Claude orchestration sessions that do not emit managed invocation rows remain outside this endpoint.
 
-After [ORB-10582], the canonical dashboard scoreboard embeds that runtime projection as a top-level, independently versioned `orchestration` section (scoreboard schema v7, orchestration schema v1). It obtains the same selected bounded window from the runtime rather than reusing all-time token snapshots; its `until` is exclusive and is no later than the recorded `as_of`. This panel is deliberately outside executor-agent/model rankings: named orchestrator, shared ownership, unattributed ownership, and missing-task buckets describe canonical task ownership, not the identity of the execution agent. It labels provider-reported totals, derived estimates, same-population comparable totals and delta, and unavailable populations separately. Provider and derived partial sums are never displayed as reconciled unless the explicit comparable count says they share the same invocation population. The scope remains managed execution only; direct interactive Codex or Claude orchestration-session overhead is not included.
+After [ORB-10582], the canonical dashboard scoreboard embeds that runtime projection as a top-level, independently versioned `orchestration` section (scoreboard schema v8, orchestration schema v1). It obtains the same selected bounded window from the runtime rather than reusing all-time token snapshots; its `until` is exclusive and is no later than the recorded `as_of`. This panel is deliberately outside executor-agent/model rankings: named orchestrator, shared ownership, unattributed ownership, and missing-task buckets describe canonical task ownership, not the identity of the execution agent. It labels provider-reported totals, derived estimates, same-population comparable totals and delta, and unavailable populations separately. Provider and derived partial sums are never displayed as reconciled unless the explicit comparable count says they share the same invocation population. The scope remains managed execution only; direct interactive Codex or Claude orchestration-session overhead is not included.
 
 The workspace-local `model-price-audit` auto-task ([ORB-10583]) is the evidence
 collection and reconciliation guard around this table. Once weekly, it

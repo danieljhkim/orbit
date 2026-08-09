@@ -6,7 +6,7 @@
 //! *indefinitely*: if a holder hangs — as opposed to crashing, since the OS
 //! releases advisory locks on process death — every other agent stalls forever
 //! with no signal about who holds the lock or why. Under concurrent
-//! multi-agent use (planning duels, parallel worktrees, unattended
+//! multi-agent use (parallel worktrees, unattended
 //! ship-sweep) that silent stall is a whole-workspace availability risk.
 //!
 //! This module bounds the wait with a configurable deadline, records holder

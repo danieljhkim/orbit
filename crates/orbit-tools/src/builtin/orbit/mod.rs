@@ -1,7 +1,6 @@
 pub mod adr;
 pub mod auto_task;
 pub mod docs;
-pub mod duel;
 pub mod friction;
 pub mod learning;
 pub mod operation;
@@ -119,8 +118,6 @@ pub fn register(registry: &mut ToolRegistry) {
         task::update::OrbitTaskUpdateTool,
         agent_operator(McpToolPlacement::Hub),
     );
-    registry.register(duel::plan_add::OrbitDuelPlanAddTool);
-    registry.register(duel::plan_winner::OrbitDuelPlanWinnerTool);
     registry.register_mcp(
         learning::add::OrbitLearningAddTool,
         agent_operator(McpToolPlacement::Composite),

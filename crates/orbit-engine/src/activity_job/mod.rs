@@ -20,8 +20,8 @@ mod tests;
 pub use agent_loop_driver::{drive_agent_loop, reset_replay_transport};
 pub use audit_writer::V2AuditWriter;
 pub use dispatcher::{
-    DispatchError, DispatchOutcome, ResolvedCliExecutor, ResolvedSandbox, V2AgentDispatchOverride,
-    V2DispatchInput, V2RuntimeHost, dispatch_error_to_orbit, dispatch_v2_activity,
+    DispatchError, DispatchOutcome, ResolvedCliExecutor, ResolvedSandbox, V2DispatchInput,
+    V2RuntimeHost, dispatch_error_to_orbit, dispatch_v2_activity,
 };
 pub use job_executor::{
     JobOutcome, execute_job, execute_job_with_resume, resolve_job_catalog_refs_for_execution,

@@ -26,9 +26,7 @@ use orbit_agent::loop_engine::{
 use orbit_agent::providers::anthropic::AnthropicMessagesTransport;
 use orbit_common::model_defaults::ANTHROPIC_HTTP_DEFAULT_MODEL;
 use orbit_common::types::activity_job::AgentLoopSpec;
-use orbit_common::types::{
-    LearningInjectionCaps, LearningReminder, RoleSlot, prepend_reminder_block,
-};
+use orbit_common::types::{LearningInjectionCaps, LearningReminder, prepend_reminder_block};
 use orbit_tools::ToolContext;
 use serde_json::Value;
 
@@ -60,7 +58,6 @@ pub fn drive_agent_loop(
     );
     tool_ctx.agent_name = Some(provider.to_string());
     tool_ctx.model_name = Some(model);
-    tool_ctx.role_slot = role_slot_from_input(input);
     drive_inner(
         spec,
         api_key,
@@ -99,7 +96,6 @@ pub fn drive_agent_loop_with_session(
     );
     tool_ctx.agent_name = Some(provider.to_string());
     tool_ctx.model_name = Some(model);
-    tool_ctx.role_slot = role_slot_from_input(input);
     drive_inner(
         spec,
         api_key,
@@ -110,15 +106,6 @@ pub fn drive_agent_loop_with_session(
         tool_ctx,
         Some(host),
     )
-}
-
-fn role_slot_from_input(input: &Value) -> Option<RoleSlot> {
-    input
-        .get("planning_duel_slot")
-        .or_else(|| input.get("role_slot"))
-        .or_else(|| input.get("slot"))
-        .and_then(Value::as_str)
-        .and_then(|value| value.parse().ok())
 }
 
 #[allow(clippy::too_many_arguments)]

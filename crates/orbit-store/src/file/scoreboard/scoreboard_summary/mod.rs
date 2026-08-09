@@ -4,14 +4,13 @@ use std::path::Path;
 
 use chrono::{DateTime, Duration, Utc};
 use orbit_common::types::{
-    Adr, AdrStatus, JobRun, JobRunState, Learning, OrbitError, PlannerSlot, Task, TaskStatus,
+    Adr, AdrStatus, JobRun, JobRunState, Learning, OrbitError, Task, TaskStatus,
     all_agent_families, infer_agent_family_from_model, normalize_attribution_label,
     normalize_optional_attribution_label,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use super::planning_duel_scoreboard;
 use crate::friction_store::StoredFrictionRecord;
 use crate::{AuditToolCallCountsByRole, AuditToolCallCountsBySurfaceAndRole, AuditTopToolCall};
 use orbit_common::utility::fs::atomic_write_text_volatile as write_atomic;
@@ -19,18 +18,18 @@ use orbit_common::utility::fs::atomic_write_text_volatile as write_atomic;
 const SUMMARY_FILENAME: &str = "summary.json";
 // v2 adds `task_review.threads`; v3 adds tasks_created/tasks_planned,
 // per-(role, surface) tool call counts, top-level workflows_run, and a
-// recent_7d window block. v4 adds per-agent knowledge counters and a
-// planning-duel head-to-head matrix. v5 adds per-agent `friction.reported`
+// recent_7d window block. v4 added per-agent knowledge counters. v5 adds per-agent `friction.reported`
 // (from append-only `.orbit/frictions/` records, matching `orbit.friction.stats`).
 // v6 ([ORB-00337]) adds top-level `window` + `window_since` fields and the
 // `ScoreboardInputs.window` plumbing — snapshot-sourced per-agent fields
-// (`tokens`, `pr`, `duels`, `task_review.threads`) zero out under non-`All`
+// (`tokens`, `pr`, `task_review.threads`) zero out under non-`All`
 // windows because we lack a timestamped snapshot log to filter against.
 // v7 adds the separately-versioned `orchestration` projection. Its v2 token
 // extension normalizes provider input semantics and retains model attribution
 // without folding it into execution-agent/model scoreboard rows.
-// Older readers ignore unknown fields.
-const CURRENT_SCHEMA_VERSION: u32 = 7;
+// v8 removes retired competition projections. Older readers ignore
+// unknown fields and maintained consumers treat absent fields as empty.
+const CURRENT_SCHEMA_VERSION: u32 = 8;
 pub const ORCHESTRATION_SCHEMA_VERSION: u32 = 2;
 const RECENT_WINDOW_DAYS: i64 = 7;
 
@@ -43,7 +42,7 @@ type FamilyScoreboard = BTreeMap<String, BTreeMap<String, u64>>;
 /// String forms (used in the dashboard query param and the serialized
 /// `ScoreboardSummary.window` field): `1h`, `24h`, `7d`, `30d`, `all`.
 ///
-/// Snapshot-sourced fields (`tokens`, `pr`, `duels`, `task_review.threads`)
+/// Snapshot-sourced fields (`tokens`, `pr`, `task_review.threads`)
 /// have no per-event timestamp, so they zero out under any non-`All` window;
 /// see the v6 schema comment. Per-(role) audit aggregates are filtered at
 /// query time by the caller (the runtime in `orbit-core`).
@@ -117,13 +116,6 @@ pub struct TokenSummary {
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
-pub struct DuelSummary {
-    pub wins: u64,
-    pub losses: u64,
-    pub participated: u64,
-}
-
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct PrSummary {
     pub review_comments: u64,
     pub merged_clean: u64,
@@ -155,7 +147,6 @@ pub struct AgentSummary {
     #[serde(default)]
     pub tasks_planned: u64,
     pub tokens: TokenSummary,
-    pub duels: DuelSummary,
     pub pr: PrSummary,
     #[serde(default)]
     pub knowledge: KnowledgeSummary,
@@ -201,11 +192,6 @@ pub struct RecentSummary {
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub tool_calls_by_surface: BTreeMap<String, u64>,
     pub workflows_run: u64,
-}
-
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
-pub struct PlanningDuelSummary {
-    pub head_to_head: planning_duel_scoreboard::HeadToHeadMatrix,
 }
 
 /// Conservative ownership class for managed invocation accounting.
@@ -310,9 +296,6 @@ pub struct ScoreboardSummary {
     /// its absence.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub recent_7d: Option<RecentSummary>,
-    /// Planning-duel reports that are not naturally per-agent columns.
-    #[serde(default)]
-    pub planning_duels: PlanningDuelSummary,
     /// Managed-execution accounting by task orchestrator, deliberately kept
     /// outside executor-agent rankings. v7+.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -453,8 +436,7 @@ pub fn generate_summary_with_inputs(
     let since: Option<DateTime<Utc>> = inputs.window.duration().map(|d| now_for_window - d);
     let windowed = since.is_some();
 
-    // Snapshot reads (pr.json, task_review.json, tokens.json,
-    // planning_duels.json) have no per-event timestamp, so they only run
+    // Snapshot reads (pr.json, task_review.json, tokens.json) have no per-event timestamp, so they only run
     // for the lifetime (`All`) window. Under a windowed view they zero
     // out — the frontend renders 0 as `—` via emptyScoreboardNode().
     // TODO(phase-3+): timestamped snapshot logs would unblock real
@@ -505,53 +487,6 @@ pub fn generate_summary_with_inputs(
 
     overlay_audit_tool_calls(&mut agents, audit_tool_calls);
     overlay_audit_tool_calls_by_surface(&mut agents, inputs.audit_tool_calls_by_surface);
-
-    // Planning-duel rows are the "who actually ran?" scoreboard projection:
-    // metrics are recorded from invocation family + slot, while the stored
-    // roles identify the selected family for each slot. Skipped under
-    // windowed views — see the snapshot-zeroing comment above.
-    let planning_duel_runs = if windowed {
-        Vec::new()
-    } else {
-        planning_duel_scoreboard::load_runs(scoreboard_dir)?
-    };
-    for run in &planning_duel_runs {
-        let planner_a = agents
-            .entry(run.roles.planner_a.family.to_string())
-            .or_default();
-        planner_a.duels.participated = planner_a.duels.participated.saturating_add(1);
-        let planner_b = agents
-            .entry(run.roles.planner_b.family.to_string())
-            .or_default();
-        planner_b.duels.participated = planner_b.duels.participated.saturating_add(1);
-        let arbiter = agents
-            .entry(run.roles.arbiter.family.to_string())
-            .or_default();
-        arbiter.duels.participated = arbiter.duels.participated.saturating_add(1);
-
-        match run.outcome.winner {
-            PlannerSlot::PlannerA => {
-                let planner_a = agents
-                    .entry(run.roles.planner_a.family.to_string())
-                    .or_default();
-                planner_a.duels.wins = planner_a.duels.wins.saturating_add(1);
-                let planner_b = agents
-                    .entry(run.roles.planner_b.family.to_string())
-                    .or_default();
-                planner_b.duels.losses = planner_b.duels.losses.saturating_add(1);
-            }
-            PlannerSlot::PlannerB => {
-                let planner_b = agents
-                    .entry(run.roles.planner_b.family.to_string())
-                    .or_default();
-                planner_b.duels.wins = planner_b.duels.wins.saturating_add(1);
-                let planner_a = agents
-                    .entry(run.roles.planner_a.family.to_string())
-                    .or_default();
-                planner_a.duels.losses = planner_a.duels.losses.saturating_add(1);
-            }
-        }
-    }
 
     overlay_knowledge_counters(&mut agents, inputs, since);
     overlay_friction_reported(&mut agents, inputs.frictions, since);
@@ -610,10 +545,6 @@ pub fn generate_summary_with_inputs(
     let recent_7d = inputs
         .now
         .map(|now| build_recent_summary(now, tasks, inputs));
-    let planning_duels = PlanningDuelSummary {
-        head_to_head: planning_duel_scoreboard::aggregate_head_to_head(&planning_duel_runs),
-    };
-
     Ok(ScoreboardSummary {
         schema_version: CURRENT_SCHEMA_VERSION,
         generated_at: Utc::now().to_rfc3339(),
@@ -621,7 +552,6 @@ pub fn generate_summary_with_inputs(
         workflows_run,
         top_tools,
         recent_7d,
-        planning_duels,
         orchestration: inputs.orchestration.clone(),
         window: inputs.window.as_str().to_string(),
         window_since: since.map(|t| t.to_rfc3339()),

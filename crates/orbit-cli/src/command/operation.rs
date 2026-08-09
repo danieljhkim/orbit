@@ -313,12 +313,6 @@ impl Commands {
                         Some("triage"),
                         RuntimeNeed::Required,
                     ),
-                    RunSubcommand::DuelPlan(args) => (
-                        "duel-plan",
-                        Some("task"),
-                        Some(args.task_id.as_str()),
-                        RuntimeNeed::Required,
-                    ),
                     RunSubcommand::History(args) => (
                         "history",
                         Some("job_run"),

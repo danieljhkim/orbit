@@ -1,6 +1,6 @@
 use super::super::ConfigSnapshot;
 use super::super::runtime::*;
-use orbit_common::types::{Crew, CrewRoleAssignment, OrbitError, all_agent_families};
+use orbit_common::types::{Crew, CrewRoleAssignment, OrbitError};
 use std::collections::BTreeMap;
 use std::path::Path;
 use tempfile::tempdir;
@@ -61,18 +61,6 @@ fn load_config(body: &str) -> Result<RuntimeConfig, OrbitError> {
     RuntimeConfig::load_layered(global.path(), workspace.path())
 }
 
-fn assert_invalid_duel_config(body: &str, substrings: &[&str]) {
-    let error = load_config(body).expect_err("invalid duel config must fail");
-    let message = error.to_string();
-    assert!(matches!(error, OrbitError::InvalidInput(_)), "{message}");
-    for substring in substrings {
-        assert!(
-            message.contains(substring),
-            "expected {message:?} to contain {substring:?}"
-        );
-    }
-}
-
 #[test]
 fn crew_description_and_tags_normalize_without_loss() {
     let config = load_config(
@@ -95,114 +83,28 @@ tags = [" review ", "", "hard", "review"]
 }
 
 #[test]
-fn duel_config_loads_candidates_and_models() {
+fn retired_duel_config_written_by_orbit_init_loads_and_is_ignored() {
     let config = load_config(
         r#"
+[workflow]
+base_branch = "agent-main"
+
 [duel]
-candidates = [" Codex ", "CLAUDE", "gemini"]
+candidates = ["claude", "codex", "gemini"]
 
 [duel.models]
-" Codex " = " gpt-5.5 "
-CLAUDE = " opus-4.7 "
+claude = "opus"
+codex = "gpt-5.6-sol"
+gemini = "pro"
 "#,
     )
-    .expect("config loads");
+    .expect("retired init-era duel config must load");
 
-    let mut expected_models = BTreeMap::new();
-    expected_models.insert("claude".to_string(), "opus-4.7".to_string());
-    expected_models.insert(
-        "codex".to_string(),
-        orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string(),
-    );
-    assert_eq!(
-        config.duel,
-        DuelConfig {
-            candidates: vec![
-                "codex".to_string(),
-                "claude".to_string(),
-                "gemini".to_string()
-            ],
-            models: expected_models,
-        }
-    );
-}
-
-#[test]
-fn duel_config_defaults_to_all_families_without_section() {
-    let config = load_config("[scoring]\nenabled = true\n").expect("config loads");
-
-    assert_eq!(
-        config.duel.candidates,
-        all_agent_families()
-            .iter()
-            .map(|family| (*family).to_string())
-            .collect::<Vec<_>>()
-    );
-    assert!(config.duel.models.is_empty());
-}
-
-#[test]
-fn duel_config_rejects_empty_candidates() {
-    assert_invalid_duel_config(
-        "[duel]\ncandidates = []\n",
-        &["candidates", "at least 3", "codex, claude, gemini, grok"],
-    );
-}
-
-#[test]
-fn duel_config_rejects_fewer_than_three_distinct_candidates() {
-    assert_invalid_duel_config(
-        "[duel]\ncandidates = [\"codex\", \"claude\"]\n",
-        &["3 distinct", "codex, claude", "codex, claude, gemini, grok"],
-    );
-}
-
-#[test]
-fn duel_config_rejects_duplicate_candidates_after_normalization() {
-    assert_invalid_duel_config(
-        "[duel]\ncandidates = [\"codex\", \" Codex \", \"claude\"]\n",
-        &["duplicate", "codex", "codex, claude, gemini, grok"],
-    );
-}
-
-#[test]
-fn duel_config_rejects_unknown_candidate() {
-    assert_invalid_duel_config(
-        "[duel]\ncandidates = [\"codex\", \"claude\", \"notabot\"]\n",
-        &["notabot", "valid candidates", "codex, claude, gemini, grok"],
-    );
-}
-
-#[test]
-fn duel_config_rejects_model_key_outside_resolved_candidates() {
-    assert_invalid_duel_config(
-        r#"
-[duel]
-candidates = ["codex", "claude", "gemini"]
-
-[duel.models]
-grok = "grok-4"
-"#,
-        &[
-            "grok",
-            "resolved [duel].candidates",
-            "codex, claude, gemini",
-        ],
-    );
-}
-
-#[test]
-fn duel_config_rejects_empty_model_value() {
-    assert_invalid_duel_config(
-        r#"
-[duel]
-candidates = ["codex", "claude", "gemini"]
-
-[duel.models]
-codex = "   "
-"#,
-        &["duel.models", "codex", "   "],
-    );
+    assert_eq!(config.workflow_base_branch(), "agent-main");
+    assert!(config.snapshot.value_for("duel.candidates").is_none());
+    assert!(config.snapshot.value_for("duel.models").is_none());
+    assert!(RETIRED_DUEL_CONFIG_WARNING.contains("[duel]"));
+    assert!(RETIRED_DUEL_CONFIG_WARNING.contains("[duel.models]"));
 }
 
 #[test]

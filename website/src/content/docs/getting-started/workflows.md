@@ -1,13 +1,13 @@
 ---
 title: Default Workflows
-description: "Built-in workflows under orbit run: ship and duel-plan."
+description: "Built-in workflows under orbit run."
 sidebar:
   order: 4
 ---
 
-Orbit ships two default workflows under `orbit run`. Each wraps a seeded job pipeline under `crates/orbit-core/assets/jobs/`; the same pipelines are runnable directly via `orbit run job <name>`.
+Orbit ships a default workflow under `orbit run`. It wraps a seeded job pipeline under `crates/orbit-core/assets/jobs/`; the same pipeline is runnable directly via `orbit run job <name>`.
 
-Both workflows default `--base` to `[workflow].base_branch` from
+The workflow defaults `--base` to `[workflow].base_branch` from
 `config.toml`, or `main` when it is unset. Pass `--base <branch>` to target a
 different branch.
 
@@ -23,20 +23,6 @@ orbit run ship "$TASK_ID" --base main
 ```
 
 Underlying job: `task_auto_pipeline`, which fans into `task_gate_pipeline` and then routes to `task_pr_pipeline` or `task_local_pipeline` from `--mode`.
-
-## `orbit run duel-plan`
-
-Submit a planning duel for a single task: two planner agents draft proposals independently, an arbiter picks the winner, and the winning plan lands on the task. The command returns a run ID immediately by default; pass `--wait` when you want the terminal to block until the duel finishes and report the terminal wait status.
-
-```bash
-orbit run duel-plan "$TASK_ID"
-orbit run duel-plan "$TASK_ID" --base main --json
-orbit run duel-plan "$TASK_ID" --wait
-```
-
-Default text output includes `Workflow`, `Job ID`, `Run ID`, `State`, and an `Inspect:` command. JSON output returns the submitted dispatch result with `workflow`, `job_id`, `run_id`, `state`, and `attempt` fields.
-
-Underlying job: `job_duel_plan_pipeline`. Outcomes are recorded on the planning-duel scoreboard.
 
 ## Direct Job Execution
 
@@ -54,7 +40,6 @@ Every workflow run is durable. Inspect with:
 
 ```bash
 orbit run history -j task_auto_pipeline
-orbit run history -j job_duel_plan_pipeline
 orbit run show <RUN_ID>
 orbit run logs <RUN_ID>
 ```

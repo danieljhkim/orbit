@@ -130,7 +130,6 @@ impl MetricsInvocationsQuery {
             task_id: optional_query_string(self.task_id),
             agent: optional_query_string(self.agent),
             model: optional_query_string(self.model),
-            slot: None,
             tool_name: optional_query_string(self.tool_name),
             limit: self.limit.unwrap_or(INVOCATIONS_DEFAULT_LIMIT),
         })

@@ -1,14 +1,14 @@
 ---
 type: context
 summary: Orbit Configuration
-last_validated: 2026-08-01
+last_validated: 2026-08-09
 ---
 
 # Orbit Configuration
 
-Reference for Orbit's runtime config — the `config.toml` consumed by `orbit run ship`, `duel-plan`, and the activity-job dispatcher. The defaults shipped with the binary live in [`crates/orbit-core/assets/config/default-config.toml`](../crates/orbit-core/assets/config/default-config.toml).
+Reference for Orbit's runtime config — the `config.toml` consumed by `orbit run ship` and the activity-job dispatcher. The defaults shipped with the binary live in [`crates/orbit-core/assets/config/default-config.toml`](../crates/orbit-core/assets/config/default-config.toml).
 
-This doc focuses on the user-facing knobs: `[workflow]`, `[crews.*]`, and `[duel]`. Other sections are summarized at the end.
+This doc focuses on the user-facing knobs: `[workflow]` and `[crews.*]`. Other sections are summarized at the end.
 
 ## Where config lives
 
@@ -21,7 +21,7 @@ Two paths are consulted, in order:
 
 Ordinary settings inherit per key: workspace values override global values, global values fill omissions, and built-in defaults fill remaining gaps.
 
-Tables layer down to individual settings, while scalar and array values replace the matching global value. The map-valued `duel.models` setting is replaced as a unit when present. Named crews are the deliberate deep-layering exception: they layer by crew name and field, so this is a complete workspace override when the global file already defines `sol`:
+Tables layer down to individual settings, while scalar and array values replace the matching global value. Named crews layer by crew name and field, so this is a complete workspace override when the global file already defines `sol`:
 
 ```toml
 [crews.sol]
@@ -46,11 +46,11 @@ The workspace identity file `.orbit/config.yaml` is a separate artifact (it stor
 
 ```toml
 [workflow]
-base_branch = "main"        # default merge-base for ship / duel-plan
+base_branch = "main"        # default merge-base for ship
 default_crew = "sol"        # fallback crew when a task has no `crew` set
 ```
 
-- **`base_branch`** — the branch `orbit run ship` and `duel-plan` rebase against and target with PRs. Override per-invocation with `--base <branch>`. If your repo uses a two-branch pattern like this repo does (`main` = release, `agent-main` = dev integration), set `base_branch = "agent-main"`.
+- **`base_branch`** — the branch `orbit run ship` rebases against and targets with PRs. Override per-invocation with `--base <branch>`. If your repo uses a two-branch pattern like this repo does (`main` = release, `agent-main` = dev integration), set `base_branch = "agent-main"`.
 - **`default_crew`** — name of the crew under `[crews.<name>]` used for any task whose own `crew` field is unset. Must match a defined crew or config load fails. See [Per-task crew override](#per-task-crew-override) for how individual tasks select a different crew.
 
 ---
@@ -109,8 +109,8 @@ cannot be canonicalized to a concrete executable combination.
 > **Retired crew shape.** `planner`, `implementer`, and `reviewer` sub-tables
 > are no longer accepted in a crew entry. A workspace using that old shape must
 > rewrite every `[crews.<name>]` entry to set flat `model`, `provider`, and
-> `backend` fields before Orbit can load its configuration. Use the duel system
-> for cross-provider comparison.
+> `backend` fields before Orbit can load its configuration. Use separate
+> crew-bound runs when comparing providers.
 
 > **Note.** Earlier Orbit versions used `[agent.<role>]` tables. That schema was removed in [ORB-00058](../.orbit/) — config load now hard-errors if `[agent.*]` is present. Migrate to `[crews.<name>]` + `workflow.default_crew`.
 
@@ -212,28 +212,6 @@ The dropdown label `default: codex` in the dashboard means *the task has no `cre
 
 ---
 
-## `[duel]` — bake-off candidates for `duel-plan`
-
-`orbit run duel-plan` runs the planning step across multiple agent families in parallel and scores the results. `[duel]` controls which families participate.
-
-```toml
-[duel]
-candidates = ["codex", "claude", "gemini", "grok"]
-
-[duel.models]
-codex  = "gpt-5.6-terra"
-claude = "opus"
-gemini = "pro"
-grok   = "grok-build"
-```
-
-- **`candidates`** — at least 3 distinct entries drawn from the valid family list (`codex`, `claude`, `gemini`, `grok`). Duplicates and unknown families are rejected at load.
-- **`[duel.models]`** — optional per-family model override. Keys must be a subset of `candidates`. Values must be non-empty. When omitted, the duel executor uses a built-in model-pair default for that family.
-
-Use `[duel]` to constrain which CLIs Orbit will spawn — e.g. drop `grok` from `candidates` if Grok Build isn't authenticated on this machine.
-
----
-
 ## Other sections (brief)
 
 | Section | Purpose |
@@ -251,14 +229,12 @@ Use `[duel]` to constrain which CLIs Orbit will spawn — e.g. drop `grok` from 
 
 Config is parsed at startup; invalid entries fail loud rather than silently falling back. Common failure modes:
 
-- `[duel] candidates must contain at least 3 entries` — duel requires a non-trivial bake-off.
-- `[duel.models] contains key '<x>' that is not in resolved [duel].candidates` — model override for an unlisted family.
 - `[workflow].default_crew = '<x>' is not defined under [crews]` — name a crew that exists.
 - `config schema changed in ORB-00058; remove [agent.<role>] tables` — migrate to crews.
 - `execution.codex.sandbox has invalid value` — must be `read-only`, `workspace-write`, or `danger-full-access`.
 - `tasks.id_start N exceeds maximum task id 99999` — the allocator start must fit the `ORB-00000` id space.
 - `tasks.id_start N would lower the allocator below its current position M` — the counter only moves forward (raised only via `orbit workspace init --task-id-start`; the config key is a silent forward-only floor).
 
-The runtime parser intentionally accepts sections owned by other readers of the shared file, such as `[docs]`. Consequently, retired keys with no runtime reader can remain syntactically accepted but have no effect. In particular, `execution.env.inherit`, `task.approval.delegate_approval`, and `task.approval.required_for_agent` are inert and should be removed; environment inheritance is fixed off, while agent approval is enforced by the capability/policy surfaces rather than these old flags.
+The runtime parser intentionally accepts sections owned by other readers of the shared file, such as `[docs]`. Consequently, retired keys with no runtime reader can remain syntactically accepted but have no effect. Existing configs containing `[duel]` and `[duel.models]` still load during the compatibility window and emit a warning naming both retired tables; remove them. The keys `execution.env.inherit`, `task.approval.delegate_approval`, and `task.approval.required_for_agent` are also inert and should be removed; environment inheritance is fixed off, while agent approval is enforced by the capability/policy surfaces rather than these old flags.
 
 When in doubt, start with a minimal workspace file containing only genuine overrides. The annotated default ([`crates/orbit-core/assets/config/default-config.toml`](../crates/orbit-core/assets/config/default-config.toml)) is a reference for available settings, not a template that must be copied wholesale.

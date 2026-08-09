@@ -3,7 +3,7 @@ summary: "Activity / Job — Design"
 type: design
 title: "Activity / Job — Design"
 owner: codex
-last_updated: 2026-08-08
+last_updated: 2026-08-09
 last_validated: 2026-07-26
 status: Draft
 feature: activity-job
@@ -378,13 +378,13 @@ The executor exposes outputs as `{{ steps.<id>.output.* }}`. Initial context fol
 
 #### Agent-step state handoff via `orbit.state.*`
 
-Agents running inside an activity step pass durable data to later steps through `orbit.state.*`, not through the step's response payload. Treat direct-agent stdout as an audit/diagnostic stream — downstream steps must read durable data from task artifacts, `orbit.state.*`, job-run state, or purpose-built tools (e.g. `orbit.duel.plan.add` / `orbit.duel.plan.winner`), not by parsing agent process output. The contract:
+Agents running inside an activity step pass durable data to later steps through `orbit.state.*`, not through the step's response payload. Treat direct-agent stdout as an audit/diagnostic stream — downstream steps must read durable data from task artifacts, `orbit.state.*`, job-run state, or purpose-built tools, not by parsing agent process output. The contract:
 
 - `orbit.state.get` reads the persisted pipeline snapshot.
 - `orbit.state.set` writes this step's output for the engine to merge after the step finishes.
 - Once needed fields are written to `orbit.state`, the activity itself usually has no structured response-payload requirement.
 - `orbit.task.update` stays the right tool for task artifacts (`execution_summary`, `pr_status`, comments, lifecycle state). That is task persistence, not pipeline-state handoff.
-- `orbit.state.*` is only callable when the activity allowlist includes those tools. Currently only [step_failure_recovery](../../../crates/orbit-core/assets/activities/step_failure_recovery.yaml) grants them; other activities thread data through `{{ steps.<id>.output.* }}` or purpose-built tools (e.g. `orbit.duel.plan.winner`).
+- `orbit.state.*` is only callable when the activity allowlist includes those tools. Currently only [step_failure_recovery](../../../crates/orbit-core/assets/activities/step_failure_recovery.yaml) grants them; other activities thread data through `{{ steps.<id>.output.* }}` or purpose-built tools.
 
 ### 8.2 `when` and `retry`
 
@@ -428,7 +428,7 @@ The body runs before `break_when`, so steps can populate fields the break expres
 
 ### 8.6 Persisted state for v2 job runs
 
-Persisted pipeline runs (`orbit run ship`, `duel-plan`, `orbit.pipeline.invoke` + `orbit.pipeline.wait`) go through `pipeline_run.rs`. Direct v2 runs (`orbit job run <job-id-or-yaml>`) also create durable `JobRun` bundles after [T20260423-2004-4] under `state/job-runs/<job_id>/<run_id>/`, so `orbit run history -j <job_id>` and `orbit run show <run_id>` can inspect the returned ID. Workflow-specific `orbit run <workflow> list/show` aliases were removed in [T20260425-2010], and duplicate job-level aliases in [T20260426-0742].
+Persisted pipeline runs (`orbit run ship`, `orbit.pipeline.invoke` + `orbit.pipeline.wait`) go through `pipeline_run.rs`. Direct v2 runs (`orbit job run <job-id-or-yaml>`) also create durable `JobRun` bundles after [T20260423-2004-4] under `state/job-runs/<job_id>/<run_id>/`, so `orbit run history -j <job_id>` and `orbit run show <run_id>` can inspect the returned ID. Workflow-specific `orbit run <workflow> list/show` aliases were removed in [T20260425-2010], and duplicate job-level aliases in [T20260426-0742].
 
 Before [T20260423-0445], early v2 failures could leave `steps: []` and no surfaced `error_message`. The current contract is:
 
@@ -485,15 +485,12 @@ The remote-mode refusal remains part of `git_merge`: a caller that requests remo
 
 ### 8.10 Workflow task admission
 
-After [T20260428-8], task-starting workflows own explicit admission instead of relying on generic task updates. `worktree_setup` and `run_planning_duel` accept `proposed`, `backlog`, `rejected`, and `archived` tasks into `in-progress`; existing `in-progress` tasks are idempotent retry inputs.
+After [T20260428-8], task-starting workflows own explicit admission instead of relying on generic task updates. `worktree_setup` accepts `proposed`, `backlog`, `rejected`, and `archived` tasks into `in-progress`; existing `in-progress` tasks are idempotent retry inputs.
 
 This path stays separate from `orbit.task.update` and generic deterministic metadata stamping. Direct task updates keep the non-empty-plan guard, and workflow admission records system-actor lifecycle history.
 
 After [ORB-10464] / [ADR-0290], status is only half of readiness. `worktree_setup` also verifies that every dependency the task declares `done` has actually been delivered into the base it pins — the check runs after `base_sha` is resolved and before the worktree, the branch, or the `in-progress` transition exist, so a refusal leaves nothing behind. Delivery is decided by the `[ORB-NNNNN]` marker every Orbit commit message carries, since squash and rebase merges rewrite the sha but preserve the message: a dependency is refused only when the repository holds marked commits for it (`git log --all`, remote-tracking refs included) and none is reachable from `base_sha`. A dependency with no marked commit anywhere is not refused. The refusal is the typed `OrbitError::DependencyNotDelivered`, naming the task, the dependency, the base ref and sha, and the commits found elsewhere; `input.dependency_delivery: 'ignore'` disables the gate for work delivered under a different commit message. Nothing in the check reads GitHub, so PR-backed and local-only dependencies verify identically.
 
-Planning-duel writeback now reports `task_status: "in-progress"` instead of `status_unchanged`; the plan artifact still lands through `planning_duel_resolved`.
-
-After [T20260509-9], `writeback_planning_duel_task` also extracts a "Context Files" section from the normalized winning plan and replaces `task.context_files` with the canonicalized selectors when extraction succeeds. Section recognition is strict (`##` or `###` heading whose trimmed text is exactly `context files` or `context_files`, optional trailing `:`); unindented `- ` / `* ` bullets contribute one entry each, and each entry is canonicalized via `orbit_common::utility::selector::canonical_selector`. Sections that are absent or recognized but yield zero canonical entries leave `task.context_files` untouched; entries that fail canonicalization are dropped with an `OrbitEvent::PlanningDuelContextFileSkipped` event for observability. Plumbing is a single optional field on `TaskAutomationUpdate` (`context_files: Option<Vec<String>>`); `None` leaves the field untouched, matching the `TaskDocumentUpdateParams.context_files` semantics already documented in `orbit-store`. See [ADR-0010](./4_decisions.md#adr-048--auto-populate-taskcontext_files-from-the-winning-duel-plan).
 
 ### 8.11 Task PR handoff summaries
 
@@ -571,7 +568,7 @@ This feature spans a migration, so the retained surfaces are explicit.
 | v2 `agent_loop` CLI path | Kept | Implemented by the retained `AgentRuntime` trait and `providers/*_cli.rs` after [T20260419-0104]. |
 | `TargetRef` authoring form | Kept at authoring/load time only | Human-friendly YAML surface; resolved away before execution since [T20260418-2019]. |
 | v1 `crate::job_runner` | Kept, condition grammar only | The older sequential/DAG runtime was removed in [ORB-10390]; the module now holds only `condition::evaluate_bool_expr`, consumed by the v2 executor's `when` and `break_when` evaluation (`job_executor/step.rs`, `job_executor/loop_block.rs`). |
-| v1 executor stack (`ActivityExecutor`, `ActivityExecutorRegistry`, `direct_agent` / `external` / `cli_command` executors, v1 `ExecutionContext`, v1 `Activity`) | Removed | Deleted in [ORB-10395] once the planning duel moved to v2 dispatch in [ORB-10393]. v2 dispatch consults no executor registry; executor defs are read only for provider CLI/sandbox resolution. |
+| v1 executor stack (`ActivityExecutor`, `ActivityExecutorRegistry`, `direct_agent` / `external` / `cli_command` executors, v1 `ExecutionContext`, v1 `Activity`) | Removed | Deleted in [ORB-10395]. v2 dispatch consults no executor registry; executor defs are read only for provider CLI/sandbox resolution. |
 | External Executor Protocol v1 (`executor_type: external`) | Removed | Never a supported surface; retired with the v1 stack in [ORB-10395]. `ExecutorType::External` still parses so pre-existing defs load, but nothing spawns them — see `docs/design/executors/4_decisions.md` §ADR-0196. |
 | Legacy `run_parallel_task_pipeline` | Removed | The legacy parallel-batch executor was removed as unused in [ORB-10332]; the live pipelines still dispatch and join children through `orbit.pipeline.invoke` / `orbit.pipeline.wait`. |
 | Seeded reference activities and jobs | Kept | They act as runnable contracts and examples, and were moved into init seeding in [T20260419-2347]. |
@@ -582,7 +579,7 @@ Seeded assets are part of the design. Today they include:
 
 - small reference activities such as `agent_loop_reference` and `agent_loop_cli_reference`
 - control-plane jobs such as `task_gate_pipeline`
-- higher-level dispatch workflows such as `task_auto_pipeline` and `job_duel_plan_pipeline`
+- higher-level dispatch workflows such as `task_auto_pipeline`
 
 The gate/auto assets from [T20260419-0622-3] and [T20260419-0623] exercise real v2 constructs:
 
@@ -653,7 +650,6 @@ Read-only history does not need the same dependencies as live execution. [T20260
 - **[T20260421-0542-2]** — Add pre-gate lock-overlap exclusion attribution to `list_backlog_tasks`.
 - **[T20260423-0114]** — Expose the `backend: cli` executor-args gap during a local task ship run.
 - **[T20260423-0445]** — Merge object-valued job defaults over explicit run input and persist synthetic failed job steps for early v2 pipeline failures.
-- **[T20260423-0447]** — Restore usable `orbit run duel` read-only surfaces after duel workflow retirement.
 - **[T20260423-2004-4]** — Persist direct v2 `orbit job run` executions into durable job-run records and state.
 - **[T20260425-0204]** — Make v2 job catalog discovery honor workspace-over-global `MergeByKey` precedence.
 - **[T20260425-2010]** — Refactor `orbit run` task workflow commands and remove workflow-specific history browsers.

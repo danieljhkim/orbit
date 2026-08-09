@@ -11,10 +11,7 @@ pub struct Workflow {
     pub supports_base: bool,
     pub supports_pr_number: bool,
     pub requires_pr_number: bool,
-    /// Upper bound on explicit task-selection cardinality. `None` means unbounded (the
-    /// historical default). Set to `Some(1)` for single-task workflows like
-    /// `duel-plan` that must reject multi-task input with a loud, workflow-
-    /// specific error rather than silently taking the first entry.
+    /// Upper bound on explicit task-selection cardinality. `None` means unbounded.
     pub max_tasks: Option<u32>,
 }
 
@@ -51,17 +48,6 @@ pub const WORKFLOWS: &[Workflow] = &[
         supports_pr_number: false,
         requires_pr_number: false,
         max_tasks: None,
-    },
-    Workflow {
-        alias: "duel-plan",
-        job_id: "job_duel_plan_pipeline",
-        description: "Single-task planning duel: two planners and one arbiter, scored",
-        supports_tasks: true,
-        supports_parallelism: false,
-        supports_base: true,
-        supports_pr_number: false,
-        requires_pr_number: false,
-        max_tasks: Some(1),
     },
 ];
 

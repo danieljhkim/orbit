@@ -1,6 +1,5 @@
 #![allow(missing_docs)]
 
-mod duel;
 mod format;
 mod job;
 mod ship;
@@ -149,31 +148,6 @@ fn parses_ship_local_as_deprecated_top_level_subcommand() {
             assert_eq!(args.base.as_deref(), Some("main"));
         }
         _ => panic!("expected ship-local"),
-    }
-}
-
-#[test]
-fn parses_duel_plan_as_top_level_subcommand() {
-    let command = parse_run(&["orbit", "run", "duel-plan", "T1", "-b", "main"]);
-    match command.command {
-        RunSubcommand::DuelPlan(args) => {
-            assert_eq!(args.task_id, "T1");
-            assert_eq!(args.base.as_deref(), Some("main"));
-            assert!(!args.wait);
-        }
-        _ => panic!("expected duel-plan"),
-    }
-}
-
-#[test]
-fn parses_duel_plan_wait_flag() {
-    let command = parse_run(&["orbit", "run", "duel-plan", "T1", "--wait"]);
-    match command.command {
-        RunSubcommand::DuelPlan(args) => {
-            assert_eq!(args.task_id, "T1");
-            assert!(args.wait);
-        }
-        _ => panic!("expected duel-plan"),
     }
 }
 
@@ -451,20 +425,6 @@ spec:
     let resolved = super::steps::resolve_run_step(&runtime, &run, "nap").expect("resolve step");
     assert_eq!(resolved.target_id, "nap");
     assert_eq!(resolved.target_type, "activity");
-}
-
-#[test]
-fn rejects_removed_duel_history_forms() {
-    for args in [
-        &["orbit", "run", "duel", "list"][..],
-        &["orbit", "run", "duel", "show"][..],
-    ] {
-        assert_cli_rejects(
-            args,
-            ErrorKind::InvalidSubcommand,
-            "unrecognized subcommand 'duel'",
-        );
-    }
 }
 
 fn test_audit_event(

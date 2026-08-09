@@ -34,15 +34,6 @@ impl DeterministicActionHost for OrbitRuntime {
         self.configured_agent_model_pair(agent_cli)
     }
 
-    fn duel_candidate_families(&self) -> Vec<String> {
-        self.duel_config().candidates.clone()
-    }
-
-    fn duel_orchestrator_model(&self, family: &str) -> Option<String> {
-        let family = family.trim().to_ascii_lowercase();
-        self.duel_config().models.get(&family).cloned()
-    }
-
     fn canonical_model_name(&self, agent_cli: &str, model: Option<&str>) -> Option<String> {
         let _ = agent_cli;
         model

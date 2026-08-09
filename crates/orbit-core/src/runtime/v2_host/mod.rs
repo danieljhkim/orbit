@@ -231,7 +231,6 @@ impl V2RuntimeHost for OrbitRuntime {
                 activity_id: activity_id.to_string(),
                 agent: agent.unwrap_or_else(|| provider.to_ascii_lowercase()),
                 model,
-                slot: role_slot_from_input(input),
                 task_ids: task_context::associated_task_ids(input),
                 trace: trace.clone(),
             })
@@ -417,13 +416,4 @@ impl V2RuntimeHost for OrbitRuntime {
             ))),
         }
     }
-}
-
-fn role_slot_from_input(input: &Value) -> Option<RoleSlot> {
-    input
-        .get("planning_duel_slot")
-        .or_else(|| input.get("role_slot"))
-        .or_else(|| input.get("slot"))
-        .and_then(Value::as_str)
-        .and_then(|value| value.parse().ok())
 }

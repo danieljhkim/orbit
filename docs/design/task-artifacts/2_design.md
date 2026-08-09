@@ -3,7 +3,7 @@ summary: "Task Artifacts — Design"
 type: design
 title: "Task Artifacts — Design"
 owner: codex
-last_updated: 2026-08-02
+last_updated: 2026-08-09
 status: Draft
 feature: task-artifacts
 doc_role: design
@@ -129,8 +129,8 @@ Artifacts support text and binary files. The public `TaskArtifact` DTO carries `
 ```yaml
 schema_version: 1
 files:
-  - path: planning-duel/winner.json
-    blob: files/planning-duel/winner.json
+  - path: reports/result.json
+    blob: files/reports/result.json
     media_type: application/json
     sha256: "<64 lowercase hex chars>"
     created_by: codex:gpt-5.5

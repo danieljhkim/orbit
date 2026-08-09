@@ -6,7 +6,7 @@
 // - `?window=1h` round-trips into the serialized payload + populates
 //   `window_since`
 // - unknown values produce HTTP 400 (not a 500)
-// - schema_version is the post-bump v7 value with its separately-versioned
+// - schema_version is the post-retirement v8 value with its separately-versioned
 //   managed-execution orchestration section
 
 use std::sync::Arc;
@@ -38,13 +38,13 @@ async fn get_scoreboard(runtime: OrbitRuntime, query: Option<&str>) -> axum::res
 }
 
 #[tokio::test]
-async fn scoreboard_default_returns_lifetime_window_and_v7_schema() {
+async fn scoreboard_default_returns_lifetime_window_and_v8_schema() {
     let runtime = OrbitRuntime::in_memory().expect("build runtime");
     let response = get_scoreboard(runtime, None).await;
 
     assert_eq!(response.status(), StatusCode::OK);
     let body = body_json(response).await;
-    assert_eq!(body["schema_version"].as_u64(), Some(7));
+    assert_eq!(body["schema_version"].as_u64(), Some(8));
     assert_eq!(body["window"].as_str(), Some("all"));
     assert!(
         body["window_since"].is_null(),
@@ -82,7 +82,7 @@ async fn scoreboard_query_window_1h_populates_window_and_since() {
 
     assert_eq!(response.status(), StatusCode::OK);
     let body = body_json(response).await;
-    assert_eq!(body["schema_version"].as_u64(), Some(7));
+    assert_eq!(body["schema_version"].as_u64(), Some(8));
     assert_eq!(body["window"].as_str(), Some("1h"));
     assert!(body["orchestration"]["previous_normalized_tokens"].is_object());
     let since = body["window_since"]

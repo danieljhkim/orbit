@@ -25,7 +25,7 @@ const DEFAULT_BASE: &str = "main";
 /// `job_run_id` and `workspace_path` on every task in scope, and move them to
 /// `in_progress`.
 ///
-/// Generic automation — not tied to duel or any specific workflow. Any
+/// Generic automation — not tied to any specific workflow. Any
 /// pipeline can reuse this by passing a `branch_prefix`.
 pub(in crate::executor::automation) fn setup_worktree<
     H: DeterministicActionHost + TaskHost + ?Sized,

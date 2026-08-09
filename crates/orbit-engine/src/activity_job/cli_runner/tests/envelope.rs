@@ -191,7 +191,6 @@ fn claude_cache_creation_ttl_split_ingests_at_the_one_hour_rate() {
             activity_id: "implement_one".to_string(),
             agent: "claude".to_string(),
             model: Some("claude-opus-4-8[1m]".to_string()),
-            slot: None,
             task_ids: vec!["ORB-10353".to_string()],
             trace,
         })

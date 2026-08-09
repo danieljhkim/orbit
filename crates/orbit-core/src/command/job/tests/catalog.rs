@@ -1,11 +1,11 @@
-use super::super::catalog::{JobCatalogFilter, seed_default_jobs};
+use super::super::catalog::JobCatalogFilter;
 
 use std::path::{Path, PathBuf};
 
 use chrono::Utc;
 use orbit_common::types::activity_job::{V2ActivityCatalog, resolve_job_target_refs};
 use orbit_common::types::{
-    ActivityV2Spec, JobKind, JobRunState, JobV2, JobV2Step, JobV2StepBody, PipelineState,
+    ActivityV2Spec, JobRunState, JobV2, JobV2Step, JobV2StepBody, PipelineState,
     load_activity_asset, load_job_asset,
 };
 use serde_json::{Value, json};
@@ -19,10 +19,6 @@ const DEFAULT_JOB_FILES: &[(&str, &str)] = &[
     (
         "auto_task_scheduler_pipeline",
         include_str!("../../../../assets/jobs/auto_task_scheduler_pipeline.yaml"),
-    ),
-    (
-        "job_duel_plan_pipeline",
-        include_str!("../../../../assets/jobs/job_duel_plan_pipeline.yaml"),
     ),
     (
         "task_auto_pipeline",
@@ -253,19 +249,6 @@ fn assert_step_condition_tokens_are_paths(step: &orbit_common::types::JobV2Step)
         }
         JobV2StepBody::TargetRef(_) | JobV2StepBody::Target(_) => {}
     }
-}
-
-#[test]
-fn seeded_jobs_include_planning_duel_pipeline() {
-    let (_root, runtime, global_root, _workspace_root) = test_runtime();
-    seed_default_jobs(&global_root.join("resources/jobs"), true).expect("seed default jobs");
-
-    let entry = runtime
-        .show_job_catalog_entry("job_duel_plan_pipeline")
-        .expect("planning duel job is seeded");
-    assert_eq!(entry.spec.kind, JobKind::Workflow);
-    assert_eq!(entry.spec.steps.len(), 1);
-    assert_eq!(entry.spec.steps[0].id, "run_planning_duel");
 }
 
 #[test]
@@ -1269,7 +1252,6 @@ fn task_shipment_jobs_resolve_default_recovery_activity() {
 #[test]
 fn orchestration_jobs_do_not_enable_generic_recovery() {
     for job_name in [
-        "job_duel_plan_pipeline",
         "task_auto_pipeline",
         "task_gate_pipeline",
         "task_triage_pipeline",

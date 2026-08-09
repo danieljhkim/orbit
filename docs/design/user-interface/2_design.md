@@ -3,7 +3,7 @@ summary: "User Interface — Design"
 type: design
 title: "User Interface — Design"
 owner: gemini
-last_updated: 2026-08-01
+last_updated: 2026-08-09
 status: Draft
 feature: user-interface
 doc_role: design
@@ -16,7 +16,7 @@ This document describes the current Orbit UI implementation: the local dashboard
 
 ## 1. Dense Layout
 
-The dashboard favors wide, dense tables and panels over narrative screens. Tight spacing, small radii, and expandable sunken detail rows preserve hierarchy without hiding root lists. The scoreboard groups per-agent metrics into Delivery, Review, Knowledge, Operations, Planning Duels, Duel Matrix, and Attribution Cleanup sections so task attribution, review work, tool reliability, knowledge artifacts, and duel outcomes are scanned separately. Compact pair cells stay local to the sections where they add context: `tool fail/all` is failed over total tool calls, and `duel w/all` is wins over decided planner duels [T20260428-15] [ORB-00144] [ADR-0166].
+The dashboard favors wide, dense tables and panels over narrative screens. Tight spacing, small radii, and expandable sunken detail rows preserve hierarchy without hiding root lists. The scoreboard groups per-agent metrics into Delivery, Review, Knowledge, Operations, and Attribution Cleanup sections so task attribution, review work, tool reliability, and knowledge artifacts are scanned separately. Compact pair cells stay local to the sections where they add context: `tool fail/all` is failed over total tool calls [T20260428-15] [ORB-00144] [ADR-0166].
 
 ## 2. Layered Palette
 
@@ -70,7 +70,7 @@ Accessibility still needs a real WCAG pass; responsive behavior remains optimize
 - [T20260508-14] added Run Detail agent-log previews and Diagnostics > Errors.
 - [ORB-00060] collapsed Diagnostics > Friction into Recent Runs diagnostics columns.
 - [ORB-00061] added the Knowledge tab and Learnings curation surface.
-- [ORB-00144] grouped scoreboard metrics and added knowledge counters plus duel matrix data.
+- [ORB-00144] grouped scoreboard metrics and added knowledge counters.
 - [ORB-10444] retired a deprecated tab, folded Scoreboard under Diagnostics, pinned the Knowledge detail pane, and added task ship + comments.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

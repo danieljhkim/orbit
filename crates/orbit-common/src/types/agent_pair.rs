@@ -88,10 +88,7 @@ pub fn resolve_crew(name: &str, registry: &BTreeMap<String, Crew>) -> Result<Cre
 
 /// The full set of agent CLI families Orbit knows how to orchestrate.
 ///
-/// This is the single source of truth for the candidate set used by
-/// cross-agent workflows (e.g. the `duel` evaluation harness), so adding
-/// a new family here automatically includes it in future permutations
-/// without touching any other module.
+/// This is the single source of truth for the supported agent families.
 ///
 /// The return type is a fixed-size array rather than a `Vec` so the
 /// cardinality is enforced at compile time: adding a family requires

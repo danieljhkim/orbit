@@ -1,7 +1,7 @@
 ---
 title: External Executor Protocol v1 (Retired)
 owner: claude
-last_updated: 2026-07-26
+last_updated: 2026-08-09
 last_validated: 2026-07-27
 status: Retired
 feature: executors
@@ -164,8 +164,7 @@ canonicalize a strong/weak agent model pair for audit attribution.
 (`run_subprocess_executor`): identical command/args/env produce a byte-identical
 `ExecRequest`. They differ in identity and intent — `external` is a documented,
 versioned contract for non-agent executors and omits agent-family `model_pair`
-semantics, whereas `direct_agent` remains the agent-family path (and is currently
-exercised by the planning-duel flow).
+semantics, whereas `direct_agent` remains the agent-family path.
 
 ## Versioning
 

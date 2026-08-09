@@ -233,7 +233,6 @@ fn scenario_f_deterministic_activities_dispatch() -> Result<(), Box<dyn std::err
         }),
         audit: writer,
         run_id: "name-resolution-revert",
-        agent_override: None,
         host: Some(&host),
     })
     .expect_err("retired action must be rejected");

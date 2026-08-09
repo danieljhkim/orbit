@@ -152,7 +152,6 @@ fn seed_invocation(runtime: &OrbitRuntime, seed: SeedInvocation<'_>) {
             activity_id: seed.activity_id.to_string(),
             agent: seed.agent.to_string(),
             model: seed.model.map(ToOwned::to_owned),
-            slot: None,
             task_ids: seed
                 .task_ids
                 .iter()
@@ -370,7 +369,6 @@ async fn metrics_invocation_ingestion_preserves_worker_runs_and_aggregates() {
             activity_id: "worker.invoke".to_string(),
             agent: "codex".to_string(),
             model: Some(MODEL.to_string()),
-            slot: None,
             task_ids: vec![WORKER_TASK_ID.to_string(), SECONDARY_TASK_ID.to_string()],
             trace: InvocationTrace {
                 usage: TokenUsage {
@@ -391,7 +389,6 @@ async fn metrics_invocation_ingestion_preserves_worker_runs_and_aggregates() {
             activity_id: "worker.invoke".to_string(),
             agent: "codex".to_string(),
             model: Some(MODEL.to_string()),
-            slot: None,
             task_ids: vec![WORKER_TASK_ID.to_string()],
             trace: InvocationTrace {
                 usage: TokenUsage {

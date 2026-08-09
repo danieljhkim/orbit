@@ -142,45 +142,11 @@ const OPERATIONS_SCOREBOARD_COLUMNS = [
   { key: "friction.reported", label: "frict r", num: true },
 ];
 
-const PLANNING_SCOREBOARD_COLUMNS = [
-  { key: "agent", label: "agent", num: false },
-  { key: "duels.wins", label: "wins", num: true },
-  { key: "duels.losses", label: "losses", num: true },
-  {
-    key: "planner_runs",
-    label: "as planner",
-    num: true,
-    compute: (agent) => (agent?.duels?.wins ?? 0) + (agent?.duels?.losses ?? 0),
-  },
-  {
-    key: "arbiter_runs",
-    label: "as arbiter",
-    num: true,
-    compute: (agent) =>
-      Math.max(
-        0,
-        (agent?.duels?.participated ?? 0) -
-          ((agent?.duels?.wins ?? 0) + (agent?.duels?.losses ?? 0)),
-      ),
-  },
-  {
-    key: "duels",
-    label: "duel w/all",
-    num: true,
-    format: "pair",
-    left: "duels.wins",
-    rightCompute: (agent) =>
-      (agent?.duels?.wins ?? 0) + (agent?.duels?.losses ?? 0),
-    title: "wins / decided duels (wins + losses)",
-  },
-];
-
 const ALL_SCOREBOARD_SECTIONS = [
   { title: "Delivery", badge: "tasks created · planned · completed", columns: DELIVERY_SCOREBOARD_COLUMNS },
   { title: "Review", badge: "review threads · PR comments", columns: PR_REVIEW_COLUMNS },
   { title: "Knowledge", badge: "learnings · ADRs · votes", columns: KNOWLEDGE_SCOREBOARD_COLUMNS },
   { title: "Operations", badge: "tool calls · failures · friction", columns: OPERATIONS_SCOREBOARD_COLUMNS },
-  { title: "Planning Duels", badge: "wins · losses · roles", columns: PLANNING_SCOREBOARD_COLUMNS },
 ];
 
 function readPath(obj, path) {
@@ -201,8 +167,6 @@ function renderScoreboard(summary) {
   const narrativeHost = $("scoreboard-narrative");
   const agentStrip = $("scoreboard-agent-strip");
   const meta = $("scoreboard-meta");
-  const duelHost = $("scoreboard-duel-matrix-host");
-  const duelCount = $("scoreboard-duel-count");
   const insightsHost = $("scoreboard-insights");
   const insightsCount = $("scoreboard-insights-count");
   const orchestrationHost = $("scoreboard-orchestration");
@@ -220,8 +184,6 @@ function renderScoreboard(summary) {
     if (narrativeHost) syncNodes(narrativeHost, []);
     if (agentStrip) syncNodes(agentStrip, []);
     if (meta) meta.textContent = "-";
-    if (duelHost) syncNodes(duelHost, []);
-    if (duelCount) duelCount.textContent = "—";
     if (insightsHost) syncNodes(insightsHost, []);
     if (insightsCount) insightsCount.textContent = "—";
     if (orchestrationHost) syncNodes(orchestrationHost, [emptyOrchestrationNode()]);
@@ -248,17 +210,6 @@ function renderScoreboard(summary) {
   if (narrativeHost) {
     const narrative = renderScoreboardNarrative(summary);
     syncNodes(narrativeHost, narrative ? [narrative] : []);
-  }
-
-  // Duel matrix re-skin (CSS grid + per-cell w/l bar).
-  if (duelHost) {
-    const grid = renderDuelMatrixGrid(summary);
-    syncNodes(duelHost, [grid]);
-  }
-  if (duelCount) {
-    const families = summary?.planning_duels?.head_to_head?.families
-      || CANONICAL_SCOREBOARD_FAMILIES;
-    duelCount.textContent = `${families.length}×${families.length}`;
   }
 
   // Insights — rule-driven narrative cards. Panel collapses when no rule fires.
@@ -464,7 +415,6 @@ function applyAgentTheme(node, name) {
 
 function agentActivityTotal(agent) {
   const knowledge = agent?.knowledge || {};
-  const duels = agent?.duels || {};
   return (
     asScoreboardNumber(agent?.tasks_created) +
     asScoreboardNumber(agent?.tasks_planned) +
@@ -476,8 +426,7 @@ function agentActivityTotal(agent) {
     asScoreboardNumber(knowledge.adrs_proposed_open) +
     asScoreboardNumber(agent?.tool_calls) +
     asScoreboardNumber(agent?.failed_tool_calls) +
-    asScoreboardNumber(agent?.friction?.reported) +
-    asScoreboardNumber(duels.participated)
+    asScoreboardNumber(agent?.friction?.reported)
   );
 }
 
@@ -731,75 +680,6 @@ function sectionDividerRow(title, badge, columnCount) {
   return tr;
 }
 
-// Re-skinned duel matrix: CSS grid, per-cell <w>–<l> score plus a horizontal
-// two-segment bar whose widths are proportional to wins/losses. Diagonal cells
-// are dimmed with an em-dash. Data source unchanged:
-// `summary.planning_duels.head_to_head.cells[row][col]`.
-function renderDuelMatrixGrid(summary) {
-  const matrix = summary?.planning_duels?.head_to_head || {};
-  const families = Array.isArray(matrix.families) && matrix.families.length
-    ? matrix.families
-    : CANONICAL_SCOREBOARD_FAMILIES;
-  const cells = matrix.cells || {};
-
-  const grid = el("div", { class: "scoreboard-duel-matrix" });
-  grid.appendChild(el("span", { class: "dm-corner" }));
-  for (const opponent of families) {
-    const label = applyAgentTheme(el("span", { class: "dm-col-h" }, [
-      document.createTextNode("vs "),
-      el("span", { class: "nm", text: opponent }),
-    ]), opponent);
-    grid.appendChild(label);
-  }
-
-  for (const family of families) {
-    const rowHeader = applyAgentTheme(el("span", {
-      class: "dm-row-h",
-      title: `${family} — click to filter audit by role`,
-    }, [el("span", { class: "nm", text: family })]), family);
-    rowHeader.addEventListener("click", () => navigateToRole(family));
-    grid.appendChild(rowHeader);
-
-    const row = cells[family] || {};
-    for (const opponent of families) {
-      if (family === opponent) {
-        const diag = el("div", { class: "dm-cell diag" }, [
-          el("span", { class: "dim", text: "—" }),
-        ]);
-        grid.appendChild(diag);
-        continue;
-      }
-      const cell = row[opponent] || {};
-      const wins = asScoreboardNumber(cell.wins);
-      const losses = asScoreboardNumber(cell.losses);
-      const runs = asScoreboardNumber(cell.runs);
-      const total = wins + losses;
-      const wPct = total > 0 ? (wins / total) * 100 : 0;
-      const lPct = total > 0 ? (losses / total) * 100 : 0;
-
-      const score = el("span", { class: "dm-score" }, [
-        wins === 0
-          ? el("span", { class: "dim", text: "0" })
-          : el("span", { class: "w", text: String(wins) }),
-        el("span", { class: "sep", text: "–" }),
-        losses === 0
-          ? el("span", { class: "dim", text: "0" })
-          : el("span", { class: "l", text: String(losses) }),
-      ]);
-      const bar = el("div", { class: "dm-bar" }, [
-        el("i", { class: "w", style: { width: `${wPct}%` } }),
-        el("i", { class: "l", style: { width: `${lPct}%` } }),
-      ]);
-      const cellNode = el("div", {
-        class: `dm-cell${runs === 0 ? " dm-empty" : ""}`,
-        title: `${family} vs ${opponent}: ${wins} wins / ${losses} losses (${runs} runs)`,
-      }, [score, bar]);
-      grid.appendChild(cellNode);
-    }
-  }
-  return grid;
-}
-
 // ===== Phase 1 additions: narrative + insights panel (rule-driven).
 // Heuristics are intentionally simple so they can be audited at a glance and
 // safely skip when the cycle is too small.
@@ -848,7 +728,6 @@ function renderScoreboardNarrative(summary) {
   pushSegment("creation", bestBy(rows, (a) => asScoreboardNumber(a.tasks_created)));
   pushSegment("planning", bestBy(rows, (a) => asScoreboardNumber(a.tasks_planned)));
   pushSegment("completion", bestBy(rows, (a) => asScoreboardNumber(a.tasks_completed)));
-  pushSegment("duel wins", bestBy(rows, (a) => asScoreboardNumber(a?.duels?.wins)));
 
   if (segments.length === 0) return null;
 
@@ -918,28 +797,6 @@ function insightWatch(rows) {
   };
 }
 
-// COLD — an agent with `duels.wins == 0 && duels.losses >= 3`. Calls out
-// persistent zero-win streaks while ignoring small-sample 0-1 records.
-function insightCold(rows) {
-  for (const [name, agent] of rows) {
-    const wins = asScoreboardNumber(agent?.duels?.wins);
-    const losses = asScoreboardNumber(agent?.duels?.losses);
-    if (wins === 0 && losses >= 3) {
-      return {
-        tone: "loss",
-        headline: "cold",
-        body: [
-          insightAgentPill(name),
-          ` is `,
-          el("b", { text: `0–${losses}` }),
-          ` in planning duels this window — never won as planner.`,
-        ],
-      };
-    }
-  }
-  return null;
-}
-
 // SURPRISE — highest `tasks_completed / max(tasks_created, 1)` ratio among
 // agents with `tasks_completed >= 5`. Surfaces "closers" — agents finishing
 // far more than they author.
@@ -978,7 +835,7 @@ function insightSurprise(rows) {
 }
 
 // COVERAGE — checks that all four canonical families have at least one
-// activity signal (created, planned, completed, duel-participated, or any
+// activity signal (created, planned, completed, or any
 // tool calls). Names the idle families when not.
 function insightCoverage(rows) {
   const idle = rows
@@ -987,7 +844,6 @@ function insightCoverage(rows) {
         asScoreboardNumber(agent.tasks_created) +
         asScoreboardNumber(agent.tasks_planned) +
         asScoreboardNumber(agent.tasks_completed) +
-        asScoreboardNumber(agent?.duels?.participated) +
         asScoreboardNumber(agent.tool_calls);
       return signal === 0;
     })
@@ -1024,7 +880,7 @@ function insightCoverage(rows) {
  */
 function renderInsightsPanel(summary) {
   const rows = canonicalAgentsList(summary);
-  const rules = [insightLeader, insightWatch, insightCold, insightSurprise, insightCoverage];
+  const rules = [insightLeader, insightWatch, insightSurprise, insightCoverage];
   const cards = rules
     .map((rule) => rule(rows))
     .filter((card) => card !== null);
@@ -1048,4 +904,4 @@ function renderInsightsPanel(summary) {
   return section;
 }
 
-export { renderScoreboard, renderScoreboardNarrative, renderInsightsPanel, renderDuelMatrixGrid };
+export { renderScoreboard, renderScoreboardNarrative, renderInsightsPanel };

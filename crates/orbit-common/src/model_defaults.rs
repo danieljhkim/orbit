@@ -77,7 +77,7 @@ pub const GROK_DEFAULT_MODEL: &str = "grok-build";
 /// hit the Anthropic Messages API directly, which rejects bare aliases.
 pub const ANTHROPIC_EXAMPLE_MODEL: &str = "claude-haiku-4-5-20251001";
 
-/// Provider → default model used to seed prompt/duel defaults.
+/// Provider → default model used to seed prompt defaults.
 ///
 /// Mirrors the historical `agent_detect::default_model_for` map; `claude` now
 /// resolves to the unversioned [`CLAUDE_DEFAULT_STRONG`] alias. codex/gemini/

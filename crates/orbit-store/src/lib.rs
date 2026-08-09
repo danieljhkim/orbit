@@ -68,26 +68,12 @@ pub mod pr_scoreboard {
 
 pub mod scoreboard_summary {
     pub use crate::file::scoreboard::scoreboard_summary::{
-        AgentSummary, DuelSummary, FrictionSummary, KnowledgeSummary, NormalizedTokenSummary,
+        AgentSummary, FrictionSummary, KnowledgeSummary, NormalizedTokenSummary,
         ORCHESTRATION_SCHEMA_VERSION, OrchestrationBucketKind, OrchestrationBucketSummary,
-        OrchestrationModelSummary, OrchestrationSummary, PlanningDuelSummary, PrSummary,
-        RecentSummary, ScoreboardInputs, ScoreboardSummary, ScoreboardWindow, TokenSummary,
-        TopToolCall, WorkflowRunCount, generate_summary, generate_summary_with_audit_tool_calls,
+        OrchestrationModelSummary, OrchestrationSummary, PrSummary, RecentSummary,
+        ScoreboardInputs, ScoreboardSummary, ScoreboardWindow, TokenSummary, TopToolCall,
+        WorkflowRunCount, generate_summary, generate_summary_with_audit_tool_calls,
         generate_summary_with_inputs, summary_path, write_summary,
-    };
-}
-
-pub mod duel_scoreboard {
-    pub use crate::file::scoreboard::duel_scoreboard::{
-        AggregateFilter, AggregateRow, Aggregates, ReviewerTally, RoleAxis, SegmentBy, aggregate,
-        append_run, derive_task_scope, known_agent_families, load_runs, tally_reviewer_stats,
-    };
-}
-
-pub mod planning_duel_scoreboard {
-    pub use crate::file::scoreboard::planning_duel_scoreboard::{
-        AggregateFilter, AggregateRow, Aggregates, HeadToHeadCell, HeadToHeadMatrix, RoleAxis,
-        aggregate, aggregate_head_to_head, append_run, load_runs,
     };
 }
 

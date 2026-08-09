@@ -4,7 +4,6 @@ use orbit_core::OrbitRuntime;
 use crate::command::{CommandOut, Execute};
 
 use super::cancel::RunCancelArgs;
-use super::duel;
 use super::events::RunEventsArgs;
 use super::history::RunHistoryArgs;
 use super::job::JobRunArgs;
@@ -20,7 +19,6 @@ Workflow entrypoints:
   orbit run ship [task_id ...]
   orbit run ship-sweep [--dry-run] [--json]
   orbit run triage [task_id ...]
-  orbit run duel-plan <task_id>
   orbit run job <job_id> [--input key=value] [--json] [--debug]
 
 Run history:
@@ -37,7 +35,7 @@ Maintenance:
 
 #[derive(Args)]
 #[command(
-    about = "Run a job workflow (supports run ship / duel-plan / job)",
+    about = "Run a job workflow (supports run ship / job)",
     arg_required_else_help = true,
     subcommand_required = true,
     override_usage = "orbit run <COMMAND>",
@@ -51,7 +49,6 @@ Workflows:
   ship        Ship backlog or explicitly selected tasks through the gated task pipeline
   ship-sweep  Dispatch ship runs in every registered workspace with ready backlog tasks
   triage      Triage tasks blocked by failed runs; re-backlog environmental failures
-  duel-plan   Run a planning duel for one task
   job         Run an arbitrary job by ID
 
 Audits:
@@ -91,9 +88,6 @@ pub enum RunSubcommand {
     ShipSweep(sweep::ShipSweepCommand),
     /// Triage tasks blocked by failed runs; re-backlog environmental failures
     Triage(triage::TriageCommand),
-    /// Run a planning duel for one task
-    #[command(name = "duel-plan")]
-    DuelPlan(duel::DuelPlanCommand),
     /// Show recent job runs, optionally filtered to one job
     History(RunHistoryArgs),
     /// Show structured state and step summary for a job run
@@ -119,7 +113,6 @@ impl Execute for RunSubcommand {
             // registry-driven sweep never uses the cwd-derived runtime.
             RunSubcommand::ShipSweep(command) => command.execute_without_runtime(),
             RunSubcommand::Triage(command) => command.execute(runtime),
-            RunSubcommand::DuelPlan(command) => command.execute(runtime),
             RunSubcommand::History(command) => command.execute(runtime),
             RunSubcommand::Show(command) => command.execute(runtime),
             RunSubcommand::Logs(command) => command.execute(runtime),

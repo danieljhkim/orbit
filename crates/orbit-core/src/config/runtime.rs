@@ -6,7 +6,7 @@ use orbit_common::model_defaults::{
     CLAUDE_DEFAULT_STRONG, CLAUDE_DEFAULT_WEAK, CLAUDE_FABLE_MODEL, CODEX_LUNA_MODEL,
     CODEX_SOL_MODEL, CODEX_TERRA_MODEL, GEMINI_CREW_MODEL, GROK_DEFAULT_MODEL,
 };
-use orbit_common::types::{Crew, CrewRoleAssignment, OrbitError, all_agent_families};
+use orbit_common::types::{Crew, CrewRoleAssignment, OrbitError};
 use orbit_common::utility::redaction::redact_home_dir;
 use orbit_engine::PrConfig;
 
@@ -92,7 +92,7 @@ pub(crate) struct RuntimeConfig {
     /// `None` means "not configured"; the resolver falls through to the hard-
     /// coded `cli` default.
     pub(crate) v2_backend: Option<String>,
-    /// Default base branch for ship/duel-plan workflows. Sourced
+    /// Default base branch for ship workflows. Sourced
     /// from `[workflow] base_branch` in `config.toml`; defaults to `"main"`
     /// when no key is set.
     pub(crate) workflow_base_branch: String,
@@ -106,29 +106,10 @@ pub(crate) struct RuntimeConfig {
     /// Named provider-model assignments from `[crews.<name>]`.
     pub(crate) crews: BTreeMap<String, Crew>,
     pub(crate) default_crew: Option<String>,
-    pub(crate) duel: DuelConfig,
     /// Optional floor for the local task-id allocator (`[tasks] id_start`).
     /// Applied forward-only on runtime build so machines can hold disjoint id
     /// ranges. `None` leaves the allocator untouched.
     pub(crate) tasks_id_start: Option<u32>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct DuelConfig {
-    pub(crate) candidates: Vec<String>,
-    pub(crate) models: BTreeMap<String, String>,
-}
-
-impl Default for DuelConfig {
-    fn default() -> Self {
-        Self {
-            candidates: all_agent_families()
-                .iter()
-                .map(|family| (*family).to_string())
-                .collect(),
-            models: BTreeMap::new(),
-        }
-    }
 }
 
 impl Default for RuntimeConfig {
@@ -154,10 +135,6 @@ impl RuntimeConfig {
             routines_source: snapshot.routines_role.as_deref() == Some("source"),
             crews: default_crews(),
             default_crew: snapshot.workflow_default_crew.clone(),
-            duel: DuelConfig {
-                candidates: snapshot.duel_candidates.clone(),
-                models: snapshot.duel_models.clone(),
-            },
             tasks_id_start: snapshot.tasks_id_start,
             snapshot,
         }
@@ -226,6 +203,9 @@ impl RuntimeConfig {
         {
             warn_deprecated_task_id_pattern(config_path);
         }
+        if parsed.duel.is_some() {
+            warn_retired_duel_config(config_path);
+        }
 
         Ok(Self {
             execution_env: ExecutionEnvPolicy::from_snapshot(&snapshot),
@@ -241,10 +221,6 @@ impl RuntimeConfig {
             routines_source: snapshot.routines_role.as_deref() == Some("source"),
             crews,
             default_crew: snapshot.workflow_default_crew.clone(),
-            duel: DuelConfig {
-                candidates: snapshot.duel_candidates.clone(),
-                models: snapshot.duel_models.clone(),
-            },
             tasks_id_start: snapshot.tasks_id_start,
             snapshot,
         })
@@ -274,10 +250,6 @@ impl RuntimeConfig {
 
     pub(crate) fn pr_config(&self) -> &PrConfig {
         &self.pr
-    }
-
-    pub(crate) fn duel_config(&self) -> &DuelConfig {
-        &self.duel
     }
 }
 
@@ -338,9 +310,9 @@ fn load_layered_runtime(
     if let Some(workspace_document) = &workspace {
         merge_tables(&mut merged, &workspace_document.value);
 
-        // Registry table values (currently duel.models) are one config key,
-        // so a workspace value replaces the global table rather than merging
-        // its members. Dynamically named crews are intentionally excluded:
+        // Registry table values are one config key, so a workspace value
+        // replaces the global table rather than merging its members.
+        // Dynamically named crews are intentionally excluded:
         // their fields layer recursively so one crew field can be overridden.
         for descriptor in super::registry::CONFIG_KEY_REGISTRY {
             if let Some(value) = value_at_path(&workspace_document.value, descriptor.key) {
@@ -710,6 +682,17 @@ fn warn_deprecated_task_id_pattern(config_path: &Path) {
     tracing::warn!(
         config = %path,
         "knowledge.task_id_pattern is deprecated and ignored",
+    );
+}
+
+pub(super) const RETIRED_DUEL_CONFIG_WARNING: &str =
+    "[duel] and [duel.models] are retired and ignored; remove both keys from config.toml";
+
+fn warn_retired_duel_config(config_path: &Path) {
+    let path = redact_home_dir(&config_path.display().to_string());
+    tracing::warn!(
+        config = %path,
+        RETIRED_DUEL_CONFIG_WARNING,
     );
 }
 

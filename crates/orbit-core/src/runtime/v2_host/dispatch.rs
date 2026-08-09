@@ -62,7 +62,6 @@ pub(super) const REGISTERED_DETERMINISTIC_ACTIONS: &[&str] = &[
     "resolve_workspace_ship_input",
     "revert_on_red",
     "run_auto_task_scheduler",
-    "run_planning_duel",
     "sleep",
     "summarize_epic",
     "update_task",
@@ -135,8 +134,8 @@ pub(super) fn run_deterministic(
         // ORB-10385 fixes. Keep this list in sync with
         // `REGISTERED_DETERMINISTIC_ACTIONS`.
         "git_commit" | "git_merge" | "git_push" | "git_rebase" | "pr_failure_handoff"
-        | "pr_open" | "pr_prepare" | "pr_promote" | "run_planning_duel" | "update_task"
-        | "worktree_gc" | "worktree_setup" => {
+        | "pr_open" | "pr_prepare" | "pr_promote" | "update_task" | "worktree_gc"
+        | "worktree_setup" => {
             let state_context = StateExecutionContext {
                 run_id: input
                     .get("run_id")

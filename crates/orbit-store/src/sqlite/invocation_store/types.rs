@@ -1,7 +1,7 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
-use orbit_common::types::{InvocationTrace, RoleSlot};
+use orbit_common::types::InvocationTrace;
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 pub struct InvocationQuery {
@@ -12,7 +12,6 @@ pub struct InvocationQuery {
     pub task_id: Option<String>,
     pub agent: Option<String>,
     pub model: Option<String>,
-    pub slot: Option<RoleSlot>,
     pub tool_name: Option<String>,
     pub limit: usize,
 }
@@ -23,7 +22,6 @@ pub struct InvocationInsertParams {
     pub activity_id: String,
     pub agent: String,
     pub model: Option<String>,
-    pub slot: Option<RoleSlot>,
     pub task_ids: Vec<String>,
     pub trace: InvocationTrace,
 }
@@ -44,7 +42,6 @@ pub struct InvocationRecord {
     pub activity_id: String,
     pub agent: String,
     pub model: Option<String>,
-    pub slot: Option<RoleSlot>,
     pub duration_ms: u64,
     pub input_tokens: u64,
     pub cache_read_tokens: u64,

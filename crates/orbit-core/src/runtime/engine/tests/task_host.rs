@@ -94,7 +94,6 @@ fn run_update_task_v2_activity(runtime: &OrbitRuntime, run_id: &str, input: Valu
         input,
         audit,
         run_id,
-        agent_override: None,
         host: Some(runtime),
     })
     .expect("dispatch update_task activity")

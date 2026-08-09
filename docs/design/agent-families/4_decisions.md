@@ -50,7 +50,7 @@ See full ADR-0151 for context, alternatives considered, and cost analysis.
 
 ## ADR-0155 — Scope duel-plan candidate and model overrides to `[duel]`
 
-**Status:** Accepted · 2026-05 · [ORB-00072] · legacy_id: `agent-families/ADR-0153`
+**Status:** Accepted · proposed supersession by ADR-0332 pending approval · 2026-05 · [ORB-00072] · [ORB-10627] · legacy_id: `agent-families/ADR-0153`
 
 **Context.** Duel-plan previously walked the full `all_agent_families()` registry and used the same model-pair resolution chain as non-duel callers. That made local CLI availability load-bearing for every supported family and made reproducible planning-duel scoreboards depend on executor YAML state.
 
@@ -118,6 +118,7 @@ Narrative lives in the ADR store — retrieve it with `orbit tool run orbit.adr.
 - Cost: workspaces using the retired role-table schema must rewrite their crew entries before config can load; cross-provider review must use duel machinery or a future explicit mechanism.
 
 - **ADR-0330 — Retire crew role slots and role-based model resolution** — Proposed.
+- **ADR-0332 — Remove the planning duel and retain compatibility-only residue** — Proposed; supersedes ADR-0010 and ADR-0155 after approval. [ORB-10627]
 
 ## Task References
 
@@ -127,5 +128,6 @@ Narrative lives in the ADR store — retrieve it with `orbit tool run orbit.adr.
 - ORB-00080: Collapse agent identity to family; isolate model strings to invocation surface.
 - ORB-10130: Flatten each crew to one provider-model assignment.
 - ORB-10620: Reject legacy crew role sub-tables at config load.
+- ORB-10627: Remove the planning duel and its parallel model-selection path.
 
 Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.
