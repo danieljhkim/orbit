@@ -26,6 +26,20 @@ spec:
         type: string
       base_ref:
         type: string
+      base_sha:
+        type: string
+      base_sync:
+        type: string
+        enum: [remote, local]
+      landing_branch:
+        type: string
+        description: >
+          The branch this work must ultimately land on; see pr_open. Promotion
+          re-asks the question because a resume can enter the pipeline here,
+          with a PR opened before its base landed.
+      base_obsolescence:
+        type: string
+        enum: [enforce, ignore]
       pr_number:
         type: string
       pr_url:

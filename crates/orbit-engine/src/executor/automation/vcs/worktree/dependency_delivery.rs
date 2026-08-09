@@ -24,7 +24,7 @@ use serde_json::Value;
 
 use crate::context::TaskReadHost;
 
-use super::super::git::git_output;
+use super::super::delivery_marker::commits_matching;
 
 /// How many delivery commits to name per undelivered dependency. Enough to
 /// identify the branch to land; the message stays readable.
@@ -149,7 +149,9 @@ pub(in crate::executor::automation) fn ensure_dependencies_delivered_into_base<
 /// The delivery marker is the task id in the commit subject — every Orbit
 /// commit message carries `[ORB-…]` (see `vcs::commit::message`), and the
 /// marker survives merge, squash, and rebase, so the check is "is *a message
-/// match* reachable from the base", not "is a particular sha reachable".
+/// match* reachable from the base", not "is a particular sha reachable". The
+/// matching rule itself lives in `vcs::delivery_marker`, shared with the
+/// base-obsolescence gate.
 ///
 /// No evidence anywhere means no refusal: a dependency completed without a
 /// commit in this repository (docs handled elsewhere, a side-effect-only task,
@@ -171,22 +173,6 @@ fn undelivered_commits(
         &[&format!("--max-count={MAX_EVIDENCE_COMMITS}"), "--all"],
     )?;
     Ok((!elsewhere.is_empty()).then_some(elsewhere))
-}
-
-fn commits_matching(
-    repo_root: &Path,
-    marker: &str,
-    scope: &[&str],
-) -> Result<Vec<String>, OrbitError> {
-    let grep = format!("--grep={marker}");
-    let mut args = vec!["log", "--no-color", "--format=%H", "--fixed-strings", &grep];
-    args.extend_from_slice(scope);
-    Ok(git_output(repo_root, &args)?
-        .lines()
-        .map(str::trim)
-        .filter(|line| !line.is_empty())
-        .map(ToOwned::to_owned)
-        .collect())
 }
 
 fn undelivered_detail(base_ref: &str, undelivered: &[UndeliveredDependency]) -> String {

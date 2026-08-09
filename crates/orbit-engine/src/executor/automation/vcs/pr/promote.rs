@@ -4,7 +4,11 @@ use serde_json::{Value, json};
 use crate::context::{DeterministicActionHost, TaskAutomationUpdate, TaskHost};
 
 use super::super::super::input::{input_string_field, required_input_string};
-use super::super::handoff::{FailedHandoffPhase, load_handoff_context, record_failed_handoff};
+use super::super::base_obsolescence::ensure_base_can_still_land;
+use super::super::freshness::commit_sha;
+use super::super::handoff::{
+    FailedHandoffPhase, HandoffContext, load_handoff_context, record_failed_handoff,
+};
 use super::attribution::pr_review_attribution;
 
 pub(in crate::executor::automation) fn pr_promote<
@@ -33,6 +37,21 @@ pub(in crate::executor::automation) fn pr_promote<
     } else {
         Some(required_input_string(input, "pr_number")?.to_string())
     };
+
+    // ORB-10644: a resume can enter the pipeline here, with a PR opened before
+    // its base went obsolete. Promotion is where this run first calls the work
+    // delivered, so it re-asks the question rather than trusting the earlier
+    // step's success.
+    if !no_diff_expected && let Err(error) = ensure_promotable_base(input, &context) {
+        record_failed_handoff(
+            host,
+            &context,
+            input,
+            FailedHandoffPhase::ObsoleteBase,
+            &error,
+        )?;
+        return Err(error);
+    }
 
     let mut performed_task_ids = Vec::new();
     let mut reused_task_ids = Vec::new();
@@ -77,4 +96,30 @@ pub(in crate::executor::automation) fn pr_promote<
         "pr_url": input_string_field(input, "pr_url"),
         "no_diff_expected": no_diff_expected,
     }))
+}
+
+/// Re-run the base-obsolescence gate for a promotion.
+///
+/// The promote step is handed the base *name* and the moving `base_ref`, not
+/// the run's pinned checkpoint, so the base commit is resolved from whichever
+/// the caller supplied. A caller that names no base (the no-diff promotion, and
+/// the direct-promotion tests) has no delivery target to check.
+fn ensure_promotable_base(input: &Value, context: &HandoffContext) -> Result<(), OrbitError> {
+    let Some(base) = input_string_field(input, "base") else {
+        return Ok(());
+    };
+    let base_sha = match input_string_field(input, "base_sha") {
+        Some(base_sha) => base_sha,
+        None => {
+            let base_ref = input_string_field(input, "base_ref").unwrap_or_else(|| base.clone());
+            commit_sha(&context.workspace_path, &base_ref)?
+        }
+    };
+    ensure_base_can_still_land(
+        &context.workspace_path,
+        "pr_promote",
+        &base,
+        &base_sha,
+        input,
+    )
 }

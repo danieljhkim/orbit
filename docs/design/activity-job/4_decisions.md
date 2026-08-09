@@ -837,8 +837,17 @@ Narrative lives in the ADR store — retrieve it with `orbit tool run orbit.adr.
 
 ---
 
+## ADR-0336 — Delivery fails closed against a base branch that can no longer carry work to the landing branch
+
+**Status:** Proposed · 2026-08 · [ORB-10644]
+
+Narrative lives in the ADR store — retrieve it with `orbit tool run orbit.adr.show --input '{"id":"ADR-0336"}'`.
+
+---
+
 ## Task References
 
+- **[ORB-10644]** — Refuse to open or promote a PR against a base branch that is gone from `origin` or has already landed on the declared landing branch ([ADR-0336], extending [ADR-0290]'s marker rule to the base itself).
 - **[ORB-10593]** — Fail dispatch immediately when a `blocked_by` target is archived, rejected, or dangling, naming the blocker ([ADR-0319]).
 - **[ORB-10544]** — Move the ship in-flight duplicate-dispatch guard into `submit_ship_run` so HTTP and MCP are thin projections of one typed conflict ([ADR-0303], correcting the surface-local check from [ADR-0257]).
 - **[ORB-10631]** — Route interactive `orbit run ship` through `submit_ship_run` as well, completing the shared submission boundary for CLI, dashboard, MCP, and routine dispatch ([ADR-0303]).

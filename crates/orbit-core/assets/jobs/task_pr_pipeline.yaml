@@ -28,6 +28,12 @@ spec:
     task_ids: []
     base_branch: main
     base_sync: remote
+    # ORB-10644: the branch this work must ultimately land on. Empty means the
+    # base *is* the landing branch — the ordinary, non-stacked case, where the
+    # obsolescence gate only checks that the base still exists on `origin`. A
+    # dispatcher stacking onto an intermediate branch sets this to the real
+    # landing branch so delivery fails closed once that branch has landed.
+    landing_branch: ""
     title: null
     body: null
 
@@ -121,6 +127,8 @@ spec:
         base: "{{ steps.sync_base.output.base }}"
         base_ref: "{{ steps.sync_base.output.base_ref }}"
         base_sha: "{{ steps.sync_base.output.base_sha }}"
+        base_sync: "{{ input.base_sync }}"
+        landing_branch: "{{ input.landing_branch }}"
         head: "{{ steps.sync_base.output.head }}"
         body: "{{ input.body }}"
         title: "{{ input.title }}"
@@ -136,6 +144,9 @@ spec:
         head: "{{ steps.sync_base.output.head }}"
         base: "{{ steps.sync_base.output.base }}"
         base_ref: "{{ steps.sync_base.output.base_ref }}"
+        base_sha: "{{ steps.sync_base.output.base_sha }}"
+        base_sync: "{{ input.base_sync }}"
+        landing_branch: "{{ input.landing_branch }}"
         pr_number: "{{ steps.pr_open.output.pr_number }}"
         pr_url: "{{ steps.pr_open.output.pr_url }}"
 
