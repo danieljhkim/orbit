@@ -61,6 +61,12 @@ impl Tool for OrbitTaskUpdateTool {
                 required: false,
             },
             ToolParam {
+                name: "priority".to_string(),
+                description: "New dispatch priority (low, medium, high, or critical)".to_string(),
+                param_type: "string".to_string(),
+                required: false,
+            },
+            ToolParam {
                 name: "complexity".to_string(),
                 description: "Optional task complexity level (low, medium, or hard)".to_string(),
                 param_type: "string".to_string(),

@@ -71,6 +71,11 @@ pub struct TaskUpdateParams {
     pub execution_summary: Option<String>,
     pub comment: Option<String>,
     pub status: Option<TaskStatus>,
+    /// Replacement dispatch priority. `None` leaves the task's priority
+    /// untouched; the record layer has always been able to persist it
+    /// (ORB-10648 wired it through so a caller-supplied `priority` is applied
+    /// rather than discarded).
+    pub priority: Option<TaskPriority>,
     pub complexity: Option<TaskComplexity>,
     pub task_type: Option<TaskType>,
     pub source_task_id: Option<Option<String>>,
@@ -99,6 +104,7 @@ impl TaskUpdateParams {
             || self.plan.is_some()
             || self.execution_summary.is_some()
             || self.status.is_some()
+            || self.priority.is_some()
             || self.complexity.is_some()
             || self.task_type.is_some()
             || self.source_task_id.is_some()
@@ -129,6 +135,7 @@ impl From<TaskUpdateParams> for TaskRecordUpdateParams {
             plan: p.plan,
             execution_summary: p.execution_summary,
             status: p.status,
+            priority: p.priority,
             complexity: p.complexity,
             task_type: p.task_type,
             source_task_id: p.source_task_id,
