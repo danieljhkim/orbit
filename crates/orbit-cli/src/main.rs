@@ -1,4 +1,4 @@
-// ORB-00004: legacy CLI binary surfaces still need a focused documentation pass.
+// Legacy CLI binary surfaces still need a focused documentation pass.
 #![allow(missing_docs)]
 // The CLI binary prints genuine user-facing command output.
 #![allow(clippy::print_stderr, clippy::print_stdout)]

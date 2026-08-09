@@ -4,7 +4,8 @@
 //! learnings are authored by the orchestrator or by a human. Until this module
 //! the rule lived entirely in orchestrator-side prompt text, and three
 //! different executors violated it in a single day's queue (friction
-//! F2026-07-102: L-0108, L-0109, L-0082). Because the learning store feeds
+//! F2026-07-102: separate executor-authored entries and an update to L-0082).
+//! Because the learning store feeds
 //! scope injection and curation sweeps, every unreviewed executor-authored
 //! entry costs real re-anchoring work downstream. Prompt text is not an
 //! enforcement layer; this module is.

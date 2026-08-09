@@ -96,14 +96,14 @@ fn agent_task_context_json(task: &Task, input: &Value, fallback_repo_root: &Path
 /// backlog. Neither admits an `execution_summary`, so an implement invocation
 /// dispatched against one of these can never persist what it produces.
 ///
-/// [ORB-10499]: an implement invocation is not guaranteed to be the only actor
+/// An implement invocation is not guaranteed to be the only actor
 /// on its task. The executor re-dispatches a failed `agent_implement` step once
 /// after its `recovery_activity` succeeds, and a task can be promoted through
 /// the review/approve surface while an attempt is still running. Naming the
 /// condition in the envelope lets an invocation that has nothing left to do
 /// exit up front, instead of discovering it at its final persist call. See
-/// [ADR-0295]; the envelope is a dispatch-time snapshot, so `agent_implement`
-/// also re-checks status mid-run.
+/// The envelope is a dispatch-time snapshot, so `agent_implement` also
+/// re-checks status mid-run.
 fn refuses_implementer_writes(status: TaskStatus) -> bool {
     matches!(status, TaskStatus::Done | TaskStatus::Archived)
 }

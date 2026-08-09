@@ -151,8 +151,8 @@ impl SpawnError {
 /// Resolve a provider launcher without relying solely on the parent process's
 /// ambient `PATH`.
 ///
-/// ADR-0259: every CLI-backed provider enters through this resolver so service,
-/// routine, dashboard, and interactive dispatches use the same lookup policy.
+/// Every CLI-backed provider enters through this resolver so service, routine,
+/// dashboard, and interactive dispatches use the same lookup policy.
 pub(crate) fn resolve_provider_launcher(
     provider: &str,
     program: &str,

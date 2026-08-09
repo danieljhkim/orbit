@@ -24,7 +24,7 @@ removes their implementation while that proposal remains pending.
 
 Historical note ([ORB-10458]): the entries listed below were authored with local IDs that had no record in the ADR store. They were allocated through `orbit.adr.add`, their narratives migrated into the store verbatim, and their headings rewritten to the allocated global ID. The original local IDs survive as `legacy_ids`, so prior citations still resolve via `orbit tool run orbit.adr.show --input '{"legacy_id":"<feature>/ADR-NNN"}'`. Backfilled here: `activity-job/ADR-0252` → ADR-0282, `activity-job/ADR-052` → ADR-0281.
 
-Historical note ([ORB-10479]): the entries listed below already held a global ADR allocation, but their store bodies were lost when the worktrees that authored them were reaped (see [F2026-07-163]). The narratives were restored into the store at their existing IDs — no ID was reallocated — and their headings reduced to pointer form. Restored here: [ADR-0194], [ADR-0225], [ADR-0259].
+Historical note ([ORB-10479]): the entries listed below already held a global ADR allocation, but their store bodies were lost when the worktrees that authored them were reaped (see [F2026-07-163]). The narratives were restored into the store at their existing IDs — no ID was reallocated. ADR-0259 is summarized in this document; ADR-0194 and ADR-0225 remain historical pointers.
 
 ---
 
@@ -761,7 +761,20 @@ Recognition is the entire change: no safety gate moved. Non-terminal run, `--old
 
 **Status:** Accepted · 2026-07 · [ORB-10456]
 
-Narrative lives in the ADR store — retrieve it with `orbit tool run orbit.adr.show --input '{"id":"ADR-0259"}'`.
+**Context.** Dashboard shipment and routine sweeps could inherit different
+`PATH` values even though every CLI-backed provider invocation converges on
+the same engine spawn boundary. Per-entry-point `PATH` fixes would leave that
+shared failure mode intact.
+
+**Decision.** Resolve bare provider launcher names at the shared CLI spawn
+boundary. Preserve explicitly pathed commands; search the process `PATH`
+first, then portable user-local directories derived from `HOME`. A missing
+launcher remains a permanent failure and reports the provider and every
+searched path.
+
+**Consequences.** Dashboard, routine, CLI ship, and direct job dispatch use
+one lookup policy. Explicit paths and `PATH` precedence remain authoritative,
+while common user-local installations work from scrubbed service environments.
 
 ---
 
@@ -804,11 +817,27 @@ Narrative lives in the ADR store — retrieve it with `orbit tool run orbit.adr.
 
 ---
 
-## ADR-0295 — Re-dispatched implement attempts self-cancel on a write-gated task
+## Re-dispatched implement attempts self-cancel on a write-gated task
 
-**Status:** Proposed · 2026-07 · [ORB-10499]
+**Decision summary · 2026-07 · [ORB-10499]**
 
-Narrative lives in the ADR store — retrieve it with `orbit tool run orbit.adr.show --input '{"id":"ADR-0295"}'`.
+**Context.** A post-recovery implement attempt is deliberately re-dispatched
+after a failed attempt. While it runs, another actor can promote the task to a
+status that refuses the implementer's final write, so the dispatch-time task
+snapshot cannot establish that work remains writable.
+
+**Decision.** Keep the bounded re-dispatch, but include `status` and
+`terminal` in the task envelope. The implement instruction stops before costly
+work for a terminal task, re-reads durable task status before edits and
+validation, and treats a write refusal as a stop rather than retrying around
+it.
+
+**Consequences.** The executor retains recovery for failures that leave work
+unfinished, while agents avoid producing unpersistable late work. The
+completion signal stays advisory; durable task state remains the write gate.
+
+---
+
 ## ADR-0294 — Preserve failed worktree state before cleanup and admit only proven task commits
 
 **Status:** Superseded by [ADR-0299] · 2026-07 · [ORB-10519]
@@ -856,7 +885,7 @@ Narrative lives in the ADR store — retrieve it with `orbit tool run orbit.adr.
 - **[ORB-10544]** — Move the ship in-flight duplicate-dispatch guard into `submit_ship_run` so HTTP and MCP are thin projections of one typed conflict ([ADR-0303], correcting the surface-local check from [ADR-0257]).
 
 - **[ORB-10519]** — Restore one workflow-owned shipment commit, reject every provider-side HEAD change, and preserve dirty-work recovery plus process-scoped attribution ([ADR-0299], superseding [ADR-0294] and [ADR-0249]).
-- **[ORB-10499]** — Confirm the duplicate implement invocation as the executor's bounded post-recovery attempt, and let the re-dispatched attempt exit on a write-gated task ([ADR-0295], resolving [F2026-07-174]).
+- **[ORB-10499]** — Confirm the duplicate implement invocation as the executor's bounded post-recovery attempt, and let the re-dispatched attempt exit on a write-gated task (resolving [F2026-07-174]).
 - **[ORB-10468]** — Introduce run-keyed dirty integrity recovery plus the now-superseded provider-commit admission policy ([ADR-0294], superseded by [ADR-0299]).
 - **[ORB-10471]** — Scope the worktree boundary guard's primary dirt check to paths the run touched, so unrelated primary dirt no longer defeats a benign fast-forward ([ADR-0292]).
 - **[ORB-10470]** — Make resume submit a detached run that starts at the failed checkpoint, and reconcile blocked/re-stamped tasks against the run's retry lineage ([ADR-0289]).

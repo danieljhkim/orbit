@@ -269,7 +269,7 @@ Alternatives considered:
 
 **Status:** Accepted · 2026-07 · [ORB-10364]
 
-**Context.** Policy since 2026-07-18: task executors file *frictions*; project learnings are authored by the orchestrator or by Daniel. The rule lived entirely in orchestrator-side prompt text and nothing on the box enforced it. Three different executors violated it in a single day's queue (friction F2026-07-102): L-0108 from a sol executor, L-0109 plus an update to L-0082 from an opus executor. The content was not the problem — the *surface* was. Because the learning store feeds scope injection and curation sweeps, unreviewed executor-authored entries accumulate as a side effect of ordinary task runs, and curation work ([ORB-10349] / [ORB-10362]) then spends real effort re-anchoring and narrowing exactly those entries. Three consecutive failures is evidence that prompt text is the wrong enforcement layer.
+**Context.** Policy since 2026-07-18: task executors file *frictions*; project learnings are authored by the orchestrator or by Daniel. The rule lived entirely in orchestrator-side prompt text and nothing on the box enforced it. Three different executors violated it in a single day's queue (friction F2026-07-102): a sol executor created one entry, and an opus executor created another while updating L-0082. The content was not the problem — the *surface* was. Because the learning store feeds scope injection and curation sweeps, unreviewed executor-authored entries accumulate as a side effect of ordinary task runs, and curation work ([ORB-10349] / [ORB-10362]) then spends real effort re-anchoring and narrowing exactly those entries. Three consecutive failures is evidence that prompt text is the wrong enforcement layer.
 
 Alternatives considered:
 
