@@ -147,7 +147,7 @@ Rejected alternative: reuse `PATCH /api/tasks/:id` with a `comment` field for co
 - Ship failures surface the server's error text instead of silently no-opping.
 - Cost: the ship endpoint now scans a bounded window of recent runs before submitting, and a task with a genuinely stuck non-terminal run must have that run cancelled before it can be re-shipped.
 
-**Amendment ([ORB-10544], [ADR-0303]).** "Covers every surface" was true of the intent, not of the placement: the check lived inside the endpoint, so the MCP `orbit.workflow.ship` tool bypassed it. It now lives in the shared ship submission path and every submission surface inherits it. The endpoint's response is unchanged — it projects the shared typed conflict as the same `409 ship_run_in_flight` body.
+**Amendment ([ORB-10544], [ORB-10631], [ADR-0303]).** "Covers every surface" was true of the intent, not of the placement: the check lived inside the endpoint, so the MCP `orbit.workflow.ship` tool bypassed it. It now lives in the shared ship submission path and every submission surface inherits it; [ORB-10631] also moved interactive `orbit run ship` onto that path. The endpoint's response is unchanged — it projects the shared typed conflict as the same `409 ship_run_in_flight` body.
 
 ## ADR-PENDING — Pipeline reliability from durable run state, with roles discovered from the job catalog
 
