@@ -52,17 +52,25 @@ def violations(content: str) -> list[str]:
     return found
 
 
-def failures_under(label: str, root: Path) -> list[str]:
+def failures_under(label: str, root: Path) -> tuple[list[str], list[str]]:
     failures: list[str] = []
+    skipped: list[str] = []
     for path in sorted(candidate for candidate in root.rglob("*") if candidate.is_file()):
         relative = path.relative_to(root)
-        for violation in violations(path.read_text(encoding="utf-8")):
+        try:
+            content = path.read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            skipped.append(f"{label}/{relative}: skipped non-UTF-8 file")
+            continue
+        for violation in violations(content):
             failures.append(f"{label}/{relative}: {violation}")
-    return failures
+    return failures, skipped
 
 
-def check_assets(root: Path) -> list[str]:
-    return failures_under("skills", root / "skills") + failures_under("activities", root / "activities")
+def check_assets(root: Path) -> tuple[list[str], list[str]]:
+    skill_failures, skill_skipped = failures_under("skills", root / "skills")
+    activity_failures, activity_skipped = failures_under("activities", root / "activities")
+    return skill_failures + activity_failures, skill_skipped + activity_skipped
 
 
 def verify_fixture_reporting() -> None:
@@ -72,14 +80,22 @@ def verify_fixture_reporting() -> None:
         fixture = assets / "skills" / "fixture.md"
         fixture.parent.mkdir()
         fixture.write_text("See ORB-10530 before handoff.\n", encoding="utf-8")
+        binary_fixture = assets / "skills" / "binary.dat"
+        binary_fixture.write_bytes(b"\xff\xfe")
         (assets / "activities").mkdir()
 
         expected = "skills/fixture.md: workspace-local artifact id `ORB-10530`"
-        failures = check_assets(assets)
+        expected_skip = "skills/binary.dat: skipped non-UTF-8 file"
+        failures, skipped = check_assets(assets)
         if failures != [expected]:
             raise RuntimeError(
                 "temporary fixture did not report its relative path and violation: "
                 f"expected {expected!r}, got {failures!r}"
+            )
+        if skipped != [expected_skip]:
+            raise RuntimeError(
+                "temporary binary fixture was not visibly skipped: "
+                f"expected {expected_skip!r}, got {skipped!r}"
             )
 
 
@@ -96,10 +112,13 @@ def main() -> int:
 
     try:
         verify_fixture_reporting()
-        failures = check_assets(assets)
+        failures, skipped = check_assets(assets)
     except (OSError, RuntimeError) as error:
         print(f"embedded-asset-portability: {error}", file=sys.stderr)
         return 2
+
+    for skipped_file in skipped:
+        print(f"embedded-asset-portability: {skipped_file}", file=sys.stderr)
 
     if failures:
         print(
