@@ -1,17 +1,17 @@
 ---
 title: Orbit MCP Bridge — Design
 owner: codex
-last_updated: 2026-08-01
+last_updated: 2026-08-09
 last_validated: 2026-08-02
 status: Accepted
 feature: mcp-bridge
 doc_role: design
 type: design
-summary: Target design for a local Orbit MCP broker with one SSH hub link, hub-only coordination, owner-bound knowledge, checkout-local indexes, role-aware search, capability sets, provenance, and Bridge parity retirement.
+summary: Target design for a local Orbit MCP broker with one SSH hub link, hub-only coordination, owner-bound knowledge, checkout-local indexes, role-aware search, capability sets, provenance, an owned tunnel for checkoutless clients, and Bridge parity retirement.
 tags: [mcp, remote-access, host-registry, bridge, ssh, routing]
 paths: ["crates/orbit-remote/**", "crates/orbit-mcp/**", "crates/orbit-core/**", "crates/orbit-tools/**", "crates/orbit-store/**", "crates/orbit-common/**"]
 related_features: [mcp-bridge, host-registry, mcp-session-context, remote-access, orbit-search, project-learnings]
-related_artifacts: [ORB-00424, ORB-10257, ORB-10262, ORB-10267, ORB-10268, ORB-10269, ORB-10271, ORB-10272, ORB-10276, ORB-10302, ORB-10319, ORB-10330, ORB-10332, ORB-10534, ORB-10540, ORB-10544, ADR-0181, ADR-0199, ADR-0200, ADR-0201, ADR-0226, ADR-0227, ADR-0228, ADR-0229, ADR-0230, ADR-0231, ADR-0232, ADR-0235, ADR-0240, ADR-0303]
+related_artifacts: [ORB-00424, ORB-10257, ORB-10262, ORB-10267, ORB-10268, ORB-10269, ORB-10271, ORB-10272, ORB-10276, ORB-10302, ORB-10319, ORB-10330, ORB-10332, ORB-10534, ORB-10540, ORB-10544, ORB-10690, ADR-0181, ADR-0199, ADR-0200, ADR-0201, ADR-0226, ADR-0227, ADR-0228, ADR-0229, ADR-0230, ADR-0231, ADR-0232, ADR-0235, ADR-0240, ADR-0303, ADR-0348, ADR-0350, ADR-0351]
 ---
 
 # Orbit MCP Bridge — Design
@@ -429,7 +429,9 @@ ssh dk1 orbit mcp serve --hub --capabilities operator
 and relays MCP frames over stdin/stdout. Orbit performs the handshake, verifies the
 contract revision, and sends stable workspace/caller context. SSH owns
 authentication, encryption, host verification, keys, and remote OS authorization.
-Orbit opens no listening port and invents no bearer token.
+The hub link opens no listening port and invents no credential of its own. §5.3
+defines the one listener Orbit does open; it is loopback-bound and reached through
+the same SSH posture, so the delegation above is unchanged ([ADR-0350]).
 
 One hub link is cached per effective capability with a bounded idle lifetime. A
 later call may reconnect after failure, but an interrupted mutation is never
@@ -450,6 +452,158 @@ rechecks the current registered host name and active status, so retirement
 invalidates an already-open peer on its next call. Complete responses carry only a
 sanitized snapshot; partial responses name the last committed stage, and only a
 definitive complete response may refresh the spoke cache [ORB-10271].
+
+### 5.3 Owned tunnel and the checkoutless client
+
+§5.1 and §5.2 describe how a **spoke** reaches the hub. A spoke has a checkout, so
+its graph, docs, and search must resolve against the branch its agent is working
+on, and placement (§4) exists to guarantee that.
+
+A second client class does not fit that shape. A **checkoutless client** is an MCP
+client with no local checkout that participates in this design — an off-box
+orchestrator whose clone, if it has one, is a read mirror, and whose every
+workspace lives on the remote machine. It is not a spoke: it owns no workspace,
+registers no host, and holds no local-derived state. Placement routing therefore
+protects nothing for it and only makes the canonical surface unreachable, which is
+what forces the re-declared parity layer §10 retires.
+
+For this client, **reachability is the scarce resource, not tool schemas**. An
+orchestrator that cannot execute on the machine routes trivial reads through full
+worker runs — disproportionate to the work, and slow enough to distort how often
+such checks happen at all.
+
+#### The tunnel is the primitive
+
+Orbit establishes or reuses an SSH tunnel to a **loopback-bound listener** on the
+remote machine ([ADR-0350]):
+
+```text
+# on the remote machine
+orbit mcp serve --listen 127.0.0.1:<port> [--capabilities agent|operator|runner]
+
+# on the client machine — what the MCP client registers
+orbit mcp serve --mode remote <ssh-alias>
+```
+
+```mermaid
+flowchart LR
+    Client["MCP client (no checkout)"] -->|"stdio MCP"| Proxy["orbit mcp serve --mode remote"]
+    Proxy -->|"owned SSH tunnel"| Listener["remote orbit mcp serve --listen 127.0.0.1"]
+    Listener --> Registry["canonical tool registry"]
+    Listener --> Cli["orbit CLI on the remote machine"]
+```
+
+The tunnel is a reusable primitive rather than an implementation detail of one
+consumer: anything needing the remote machine rides it instead of opening a second
+mechanism. Its properties:
+
+- **The listener binds loopback only**, refusing any other host exactly as
+  `orbit web serve` does ([ADR-0201], [ORB-00360]). SSH owns authentication,
+  encryption, and host verification. Orbit adds no credential, ACL, or session of
+  its own — the same delegation §5.2 makes, applied to a tunnel rather than a
+  spawned process. The guarantee now rests on the bind guard rather than on the
+  absence of a listener, which makes that guard security-critical.
+- **Capability is chosen by whoever starts the listener**, never by the client.
+  Filtering and audit run on the remote through the paths that already implement
+  them (§8, §9).
+- Tunnel management reuses the existing SSH-tunnel mechanism rather than adding a
+  second one ([remote-access/2_design.md §3](../remote-access/2_design.md)). That
+  mechanism always starts a remote process today; serving a long-lived listener
+  requires it to attach to one already running and start one only when nothing
+  answers.
+
+#### Calls resolve remotely, and only for this client class
+
+Every placement class resolves on the remote, which is correct precisely because
+the client holds no local-derived state. This narrows [ADR-0228] to clients that
+do hold such state; it does not supersede it, and spoke routing is unchanged.
+
+**The mode refuses to start where a local checkout exists.** Without that guard a
+spoke could register it and receive another machine's branch state as its own,
+surfacing as wrong answers rather than as an error. The guard is the load-bearing
+half of the decision, not a convenience.
+
+Nothing re-declares a schema or reshapes a response: both ends are the same build,
+so the drift §1 attributes to Bridge is structurally absent rather than tested
+for.
+
+#### The surface: enumerate, invoke, command
+
+The tunnel carries three operations with different authority ([ADR-0351]):
+
+| Operation | Input | Requires |
+|-----------|-------|----------|
+| Enumerate | — | capability filter |
+| Invoke by name | tool name, input, workspace | capability, placement, claim as the tool demands |
+| Command | argv, working directory | operator **and** the workspace claim |
+
+**Enumerate** returns the registry entries visible to this caller with their
+descriptions and input schemas. Discoverability is preserved without advertising
+one definition per tool.
+
+**Invoke by name** dispatches through the governed chokepoint. Authorization
+happens at invocation rather than by omission from an advertised list, and the
+audit record carries the inner tool name, workspace, and capability — so
+provenance is unchanged from the advertised surface. This is the point of
+splitting invoke from command: routine work keeps per-tool attribution, and only
+genuinely arbitrary execution degrades to an argv.
+
+**Command** takes an argv array and an explicit working directory, never a shell
+string, so quoting and operator-precedence bugs are structurally impossible rather
+than merely discouraged. It requires operator capability *and* the workspace claim
+([host-registry/2_design.md §3.2](../host-registry/2_design.md)), and is withheld
+from managed runs, which could otherwise bypass the self-dispatch guard (§8.2) by
+invoking the CLI.
+
+A client without the claim receives enumerate and invoke, never command. That
+restriction is deliberately **not** an allowlist over argv: a filtered command
+surface leaks through `bash -c`, `env`, `xargs`, `make`, interpreter `-c` flags,
+and version-control hooks. The boundary is which operations exist for that caller,
+not which binaries it may name.
+
+The honest cost is that a claim-holding client can reach any governed operation by
+invoking the CLI, so filtering above command is advisory for it. That is accepted
+because establishing the tunnel already presupposes SSH to the machine, and anyone
+with SSH can already run anything there. It is not accepted for the default
+surface, which is why the gating is part of the decision rather than a deployment
+choice.
+
+Note also that enumerate and invoke reproduce the protocol's own listing and call
+verbs inside a tool — a protocol within a protocol. That is justified only if
+collapsing per-tool policy surface into one authorization point is worth the
+indirection, and it should be argued on those terms rather than assumed.
+
+#### The advertised surface is retained pending measurement
+
+Orbit's per-tool definitions are **derived from the tool registry**, not
+hand-written: a tool is declared once with its schema and registered with a
+policy, and the advertised set is computed from those entries. The duplication
+this feature exists to remove was an external process re-declaring those schemas
+in another language, which the tunnel already eliminates. What the advertised
+surface actually costs is per-tool policy and placement metadata, the conformance
+test pinning the definition count, and the contract digest.
+
+That cost is modest and the surface is cheap to keep, so it stays for now. Skills
+point at the CLI, tool-call metrics (§9, `/metrics/tools`) record what is actually
+called, and the set is revisited from observed use. Removing it later is a small
+change; removing it now is the irreversible half of the decision and buys the
+least.
+
+The cost of leaving it open is that two paths reach the same operation through the
+measurement period, and the deferral only pays off if the metrics are read.
+
+#### What this is not
+
+The tunnelled listener is **not** a hub link and must not acquire hub-link
+responsibilities: no placement routing, no workspace-ownership resolution, no
+spoke registration, no `mcp.toml` entry. A checkoutless client does not
+participate in the star topology, so §1.1's invariants — one cross-machine
+destination, no spoke-to-spoke route — describe spokes specifically and are
+unaffected.
+
+`crates/orbit-mcp/src/tcp.rs` already implements the listener with one server
+instance per connection ([ORB-10690], [ADR-0348]). What this section adds is the
+CLI surface, the client-side mode, the checkout guard, and the command rider.
 
 ## 6. Artifact and Knowledge Semantics
 
@@ -984,6 +1138,27 @@ Required validation:
   operator broker can submit and observe runs, while the fixed checkoutless hub
   endpoint and spoke routing do not yet own the runtime service required to
   execute them. Those paths fail rather than selecting a checkout implicitly.
+- **Orbit now opens a listening port (§5.3).** The security property is preserved
+  by a loopback bind plus an SSH tunnel rather than by the absence of a listener,
+  so the bind guard is security-critical: a misconfiguration binding a routable
+  address turns the surface into unauthenticated remote control of the machine.
+- **Two cross-machine mechanisms coexist.** The SSH-stdio hub link and the owned
+  tunnel both reach a remote Orbit. Until one is retired, this is the duplication
+  the feature was created to remove, held deliberately rather than by oversight.
+- **Command execution makes capability filtering advisory for its holder.** A
+  client with command can invoke the CLI and reach any governed operation.
+  Requiring both operator capability and the workspace claim, and withholding it
+  from managed runs, bounds who that applies to; it does not change that it is
+  true. Audit granularity also degrades for those calls, since an argv is not a
+  tool name.
+- **Enumerate and invoke are a protocol inside a protocol (§5.3).** They rebuild
+  the listing and call verbs the transport already provides. The trade is one
+  authorization point instead of per-tool policy surface, and it is worth
+  restating that this is the actual argument — not that the advertised
+  definitions are expensive to maintain, which they are not.
+- **The surface over the tunnel is unsettled on purpose (§5.3).** That defers a
+  decision rather than making one, and the deferral only pays off if the tool-call
+  metrics are actually read. Left unread, it is simply a doubled surface.
 
 ## Task References
 

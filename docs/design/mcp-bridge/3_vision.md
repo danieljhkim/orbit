@@ -1,17 +1,17 @@
 ---
 title: Orbit MCP Bridge — Vision
 owner: codex
-last_updated: 2026-07-18
+last_updated: 2026-08-09
 last_validated: 2026-08-02
 status: Accepted
 feature: mcp-bridge
 doc_role: vision
 type: design
-summary: Open questions and prior art for a singular hub MCP link, owner-bound knowledge, explicit Git-replica reads, execution-profile projection, schema skew, and host identity assurance.
+summary: Open questions and prior art for a singular hub MCP link, owner-bound knowledge, explicit Git-replica reads, execution-profile projection, schema skew, host identity assurance, and what surface the owned tunnel should carry.
 tags: [mcp, remote-access, host-registry, bridge]
 paths: ["crates/orbit-remote/**", "crates/orbit-mcp/**", "crates/orbit-core/**", "crates/orbit-tools/**", "crates/orbit-store/**"]
 related_features: [mcp-bridge, host-registry, mcp-session-context, remote-access, orbit-search]
-related_artifacts: [ORB-00424, ORB-10319, ADR-0181, ADR-0199, ADR-0200, ADR-0201, ADR-0226, ADR-0227, ADR-0228, ADR-0229, ADR-0230, ADR-0231, ADR-0232, ADR-0240]
+related_artifacts: [ORB-00424, ORB-10319, ADR-0181, ADR-0199, ADR-0200, ADR-0201, ADR-0226, ADR-0227, ADR-0228, ADR-0229, ADR-0230, ADR-0231, ADR-0232, ADR-0240, ADR-0350, ADR-0351]
 ---
 
 # Orbit MCP Bridge — Vision
@@ -49,16 +49,28 @@ feature rather than add another horizontal broker crate ([ORB-10319]).
    local subsets carry separate schema hashes so graph-only local changes do not
    block coordination calls? Start coarse; split only after real mixed-version
    deployments create friction.
-6. **Transport beyond SSH.** Streamable HTTP would help environments without shell
-   access, but it adds Orbit-owned authentication, authorization, listener
-   hardening, and session management. Is there a deployment that justifies crossing
-   that boundary after SSH is observed?
+6. **Transport beyond SSH.** Narrowed by [ADR-0350]. The owned tunnel adds a
+   loopback listener while keeping SSH as the authenticator, so listener hardening
+   is a bind guard rather than an authentication system, and Orbit still owns no
+   credential. What remains open is the original case: genuinely shell-less
+   environments, where Streamable HTTP would require Orbit to own authentication
+   and session management outright. Is there such a deployment?
 7. **Distributing the coordination plane.** Host-registry currently says no. If the
    hub ever shards or replicates, the MCP bridge loses its one-target invariant and
    needs a new design rather than a configurable list of hidden authorities.
 8. **Knowledge sidecar on replicas.** Should an agent explicitly opt into stale but
    marked learning injection, or is disabling injection safer until owner-current
    state is available? This should follow evidence from replica use, not convenience.
+9. **Whether the advertised per-tool surface still earns its place.** [ADR-0351]
+   serves enumerate, invoke-by-name, and command over the tunnel while retaining
+   the advertised definitions, and leaves the question to measurement. Note the
+   argument is *not* that those definitions are expensive — they are derived from
+   the registry, not hand-written. It is whether per-tool policy and placement
+   metadata, the conformance count, and the contract digest are worth carrying
+   once one authorization point exists. If enumerate and invoke cover real use,
+   the follow-on question is whether Orbit should advertise tools at all rather
+   than ship a tunnel and a skill. Reach that deliberately rather than by drift —
+   and the deferral only pays off if the metrics are read.
 
 ## 2. Prior Work
 

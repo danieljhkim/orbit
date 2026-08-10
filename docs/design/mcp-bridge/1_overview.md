@@ -1,17 +1,17 @@
 ---
 title: Orbit MCP Bridge — Overview
 owner: codex
-last_updated: 2026-07-18
+last_updated: 2026-08-09
 last_validated: 2026-08-02
 status: Accepted
 feature: mcp-bridge
 doc_role: overview
 type: design
-summary: One canonical local Orbit MCP front door that routes coordination to a single hub, keeps owner-authored knowledge and derived indexes local, and removes Bridge's duplicated Orbit parity layer.
+summary: One canonical local Orbit MCP front door that routes coordination to a single hub, keeps owner-authored knowledge and derived indexes local, reaches checkoutless clients over an owned SSH tunnel, and removes Bridge's duplicated Orbit parity layer.
 tags: [mcp, remote-access, host-registry, bridge, multi-host]
 paths: ["crates/orbit-remote/**", "crates/orbit-mcp/**", "crates/orbit-core/**", "crates/orbit-tools/**", "crates/orbit-store/**", "crates/orbit-common/**"]
 related_features: [mcp-bridge, host-registry, mcp-session-context, remote-access, orbit-search]
-related_artifacts: [ORB-00424, ORB-10262, ORB-10268, ORB-10319, ADR-0181, ADR-0199, ADR-0200, ADR-0201, ADR-0226, ADR-0227, ADR-0228, ADR-0229, ADR-0230, ADR-0231, ADR-0232, ADR-0235, ADR-0240]
+related_artifacts: [ORB-00424, ORB-10262, ORB-10268, ORB-10319, ORB-10690, ADR-0181, ADR-0199, ADR-0200, ADR-0201, ADR-0226, ADR-0227, ADR-0228, ADR-0229, ADR-0230, ADR-0231, ADR-0232, ADR-0235, ADR-0240, ADR-0348, ADR-0350, ADR-0351]
 ---
 
 # Orbit MCP Bridge — Overview
@@ -29,6 +29,17 @@ hub-mode Orbit MCP process. It does not translate through the dashboard HTTP API
 synchronize stores, or discover per-workspace network routes. Bridge stops
 redeclaring Orbit tools and remains only for constellation capabilities Orbit does
 not own.
+
+That topology describes **spokes** — machines with a checkout to protect. A
+checkoutless client, such as an off-box orchestrator, holds no local-derived state
+and is not a spoke. It reaches Orbit through an owned SSH tunnel terminating at a
+loopback-bound listener, where calls resolve remotely with no placement routing
+([ADR-0350]). The tunnel carries three operations — enumerate the registry, invoke
+a tool by name, and run a command — the last requiring both operator capability
+and the workspace claim ([ADR-0351],
+[host-registry/2_design.md §3.2](../host-registry/2_design.md)). The existing
+advertised per-tool surface is retained pending measurement. See
+[2_design.md §5.3](./2_design.md).
 
 This feature and [host-registry](../host-registry/1_overview.md) are coupled.
 Host-registry declares the hub, workspace owner, local replica role, execution
@@ -90,6 +101,12 @@ network edge per spoke: spoke → hub.
   capability.
 - **Hub link** — the one trusted SSH-carried MCP connection from a spoke to the
   stable hub `machine_id`.
+- **Checkoutless client** — an MCP client with no local checkout: it owns no
+  workspace, registers no host, and holds no local-derived state. It is not a
+  spoke and does not participate in hub or owner routing.
+- **Owned tunnel** — an SSH tunnel Orbit establishes or reuses to a loopback-bound
+  listener on a remote machine. It is reusable infrastructure rather than one
+  consumer's implementation detail, and it is deliberately not a hub link.
 - **Explicit replica read** — an opt-in read from a pulled/reindexed Git knowledge
   replica. It is never presented as current and never selected automatically.
 - **Caller-host provenance** — originating host identity propagated to hub audit,

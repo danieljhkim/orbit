@@ -1,17 +1,17 @@
 ---
 title: Host Registry — Design
 owner: claude
-last_updated: 2026-07-20
+last_updated: 2026-08-09
 last_validated: 2026-07-27
 status: Accepted
 feature: host-registry
 doc_role: design
 type: design
-summary: Target mechanisms for host identity, the main-host registry, the coordination-plane/workspace-ownership split, pull-based execution placement, per-record data placement, and the routine ownership revision.
+summary: Target mechanisms for host identity, the main-host registry, the coordination-plane/workspace-ownership split, the workspace claim gating workflow dispatch, pull-based execution placement, per-record data placement, and the routine ownership revision.
 tags: [host-registry, multi-host, dispatch, routines, data-placement]
 paths: ["crates/orbit-remote/**", "crates/orbit-core/**", "crates/orbit-store/**", "crates/orbit-mcp/**", "crates/orbit-common/**"]
-related_features: [host-registry, mcp-bridge, routines, remote-access, mcp-session-context]
-related_artifacts: [ORB-00424, ORB-10247, ORB-10248, ORB-10249, ORB-10255, ORB-10257, ORB-10258, ORB-10267, ORB-10268, ORB-10269, ORB-10271, ORB-10272, ORB-10302, ORB-10319, ORB-10330, ORB-10332, ADR-0200, ADR-0205, ADR-0208, ADR-0226, ADR-0227, ADR-0228, ADR-0229, ADR-0230, ADR-0231, ADR-0232, ADR-0235, ADR-0240]
+related_features: [host-registry, mcp-bridge, routines, remote-access, mcp-session-context, resident-orchestrator]
+related_artifacts: [ORB-00424, ORB-10247, ORB-10248, ORB-10249, ORB-10255, ORB-10257, ORB-10258, ORB-10267, ORB-10268, ORB-10269, ORB-10271, ORB-10272, ORB-10302, ORB-10319, ORB-10330, ORB-10332, ADR-0200, ADR-0205, ADR-0208, ADR-0226, ADR-0227, ADR-0228, ADR-0229, ADR-0230, ADR-0231, ADR-0232, ADR-0235, ADR-0240, ADR-0352]
 ---
 
 # Host Registry — Design
@@ -401,6 +401,62 @@ into one logical record plus one checkout binding without changing task IDs,
 canonical bundle paths, payloads, relations, workspace associations, or allocator
 state; repeated open/reindex is idempotent.
 
+### 3.2 Workspace claim
+
+Ownership (§3) answers *which machine* holds the canonical checkout. It does not
+answer *which operator is driving the workspace right now*, and that question now
+has more than one possible answer: an off-box orchestrator over the owned tunnel
+([mcp-bridge/2_design.md §5.3](../mcp-bridge/2_design.md)), a local operator
+broker, and a session over SSH can all reach one workspace concurrently. Two
+operator sessions on the same machine are indistinguishable to the ownership
+model.
+
+The existing guards do not cover this. The duplicate-dispatch guard is keyed on
+task id and scans a bounded window of recent runs, so a stale non-terminal run
+outside that window is invisible — and auto/backlog-discovery submissions carry no
+task ids at all, so two discovery ship runs in one workspace both proceed. Task
+reservations (§5) are file-scoped and arbitrate between *workers*, not between
+orchestrators.
+
+A **workspace claim** is an exclusive, TTL-bounded hold taken by one operator
+([ADR-0352]). Its scope is deliberately narrow:
+
+- **It gates workflow dispatch only** — the governed `orbit.workflow.*` operations.
+  Filing tasks, reading, updating, searching, and authoring knowledge are
+  unaffected and stay concurrent. Several people working different features in one
+  workspace is the intended behaviour; only the decision of *what starts* is
+  serialized.
+- **Enforcement is at the shared run-submission path**, not at a protocol adapter,
+  so every surface inherits it — CLI, HTTP, MCP, and remote command execution
+  alike. This is the same placement that makes the duplicate-dispatch guard
+  surface-independent, and it is why a caller holding shell cannot route around
+  the claim: the CLI reaches the same chokepoint.
+- **Acquisition mints a claim token** returned to the holder and presented on
+  subsequent workflow calls. Machine and session identity are recorded for
+  diagnostics but are not load-bearing: MCP session identity is minted per
+  connection and does not survive a reconnect, so keying the claim on it would
+  orphan the workspace every time a client reconnects.
+- **Contention rejects**, carrying the current holder and the expiry instant.
+  Never a silent queue, never a silent steal.
+- **TTL-bounded with lazy expiry** evaluated on each check, plus an explicit,
+  audited force-release for a holder that has gone away.
+
+Claim scope is a **distinct dimension** from file reservations. Expressing it as a
+whole-workspace file selector would also block the worker reservations it is meant
+to leave alone, inverting the intent.
+
+The claim does not replace or weaken declared ownership. Ownership remains a
+declared machine binding that selects default execution and gates knowledge
+authoring; the claim is a runtime hold on dispatch authority. Collapsing the two
+would reintroduce exactly the split-brain [ADR-0200] rejected.
+
+> This revises the reasoning in
+> [resident-orchestrator/2_design.md §3](../resident-orchestrator/2_design.md),
+> which chose one-active-epic plus `overlap: forbid` plus a host pin specifically
+> to avoid a lease or assignee subsystem. Those constraints bound *automated*
+> routine fires; they do not arbitrate between interactive operator sessions,
+> which is the case that forced this decision.
+
 ## 4. Execution Placement
 
 Execution placement — which machine runs the agent — is per-task, orthogonal to
@@ -576,6 +632,19 @@ of that routine.** Consequences:
 
 ## 7. Concerns & Honest Limitations
 
+- **Three TTL-bounded exclusive holds now coexist.** File reservations (§5), run
+  leases (§4), and the workspace claim (§3.2) are all "a temporary exclusive hold
+  with an expiry", at three different granularities and with three different
+  holders. The distinction is real but not self-evident from the names, and
+  without deliberate vocabulary discipline they will be read as one mechanism.
+- **A dead claim holder blocks dispatch until its TTL elapses.** Force-release is
+  the necessary escape hatch and simultaneously the thing that weakens the
+  guarantee: a force-release that becomes habitual makes the claim advisory in
+  practice, which is the failure mode of every lock that ships with an override.
+- **The claim token is client-held state.** A holder that loses it must wait out
+  the TTL or force-release, despite being the legitimate holder. Binding the claim
+  to session identity instead would be worse — MCP session identity is minted per
+  connection, so every reconnect would orphan the workspace.
 - **A disconnected satellite cannot do task or friction work.** Coordination
   writes fail loudly offline. This is the intended trade — fail loudly rather than
   fork state — but it makes the main host's availability a hard dependency for all

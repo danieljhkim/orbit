@@ -1,7 +1,7 @@
 ---
 title: Host Registry — Decisions
 owner: claude
-last_updated: 2026-07-20
+last_updated: 2026-08-09
 last_validated: 2026-07-27
 status: Accepted
 feature: host-registry
@@ -11,7 +11,7 @@ summary: ADR log for the coupled Host Registry and MCP Bridge v1 contract and it
 tags: [host-registry, mcp-bridge, multi-host, placement]
 paths: ["crates/orbit-remote/**", "crates/orbit-core/**", "crates/orbit-store/**", "crates/orbit-mcp/**"]
 related_features: [host-registry, mcp-bridge]
-related_artifacts: [ORB-00424, ORB-10245, ORB-10248, ORB-10249, ORB-10255, ORB-10257, ORB-10267, ORB-10258, ORB-10268, ORB-10269, ORB-10271, ORB-10272, ORB-10276, ORB-10302, ORB-10319, ORB-10330, ORB-10332, ADR-0226, ADR-0227, ADR-0228, ADR-0229, ADR-0230, ADR-0231, ADR-0232, ADR-0235, ADR-0240]
+related_artifacts: [ORB-00424, ORB-10245, ORB-10248, ORB-10249, ORB-10255, ORB-10257, ORB-10267, ORB-10258, ORB-10268, ORB-10269, ORB-10271, ORB-10272, ORB-10276, ORB-10302, ORB-10319, ORB-10330, ORB-10332, ADR-0226, ADR-0227, ADR-0228, ADR-0229, ADR-0230, ADR-0231, ADR-0232, ADR-0235, ADR-0240, ADR-0352]
 ---
 
 # Host Registry — Decisions
@@ -240,6 +240,42 @@ crate.
 - Cost: `orbit-remote` is intentionally broad and requires internal module
   discipline; changes shared by unrelated features still belong in a neutral
   kernel and must not be absorbed merely for convenience.
+
+## ADR-0352 — Gate workflow dispatch on an exclusive TTL'd workspace claim
+
+**Status:** Proposed · 2026-08
+
+### Context
+
+Ownership binds a workspace to a machine, not to an operator, and several operator
+sessions can now reach one workspace concurrently. The duplicate-dispatch guard is
+keyed on task id over a bounded window, and discovery-mode submissions carry no
+task ids at all, so two of them in one workspace both proceed. File reservations
+arbitrate between workers, not between orchestrators.
+
+### Decision
+
+Take an exclusive, TTL-bounded workspace claim as a precondition for the governed
+workflow operations only, enforced at the shared run-submission path so every
+surface inherits it. Acquisition mints a holder-presented claim token; contention
+rejects with holder and expiry; force-release exists and is audited.
+
+### Consequences
+
+- Concurrent dispatch becomes impossible by construction, including on the
+  currently unguarded discovery path, while filing and inspecting work stay
+  concurrent so several people can work different features in one workspace.
+- Cost: a third TTL-bounded exclusive hold joins reservations and leases, at a
+  third granularity, with no self-evident distinction in the names.
+- Cost: a dead holder blocks dispatch until TTL; force-release is both the escape
+  hatch and the thing that makes the guarantee advisory if it becomes habitual.
+- Cost: the claim token is client-held state, and a holder that loses it must wait
+  or force.
+- Cost: contradicts [resident-orchestrator/2_design.md §3](../resident-orchestrator/2_design.md),
+  which avoided a lease subsystem deliberately; that reasoning is revised, not
+  silently overridden.
+
+Narrative lives in the ADR store — retrieve it with `orbit tool run orbit.adr.show --input '{"id":"ADR-0352"}'`.
 
 ## Task References
 

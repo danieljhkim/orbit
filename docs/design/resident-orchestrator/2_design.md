@@ -10,7 +10,7 @@ summary: CLI-backed pickup, checkpoint, decomposition, and shepherding contract 
 tags: [resident-orchestrator, epic, routines, cli]
 paths: [".orbit/resources/activities/**", ".orbit/resources/jobs/**", ".orbit/routines/**", "crates/orbit-core/assets/**"]
 related_features: [resident-orchestrator, activity-job, routines, agent-families, host-registry]
-related_artifacts: [ORB-10332]
+related_artifacts: [ORB-10332, ADR-0352]
 ---
 
 # Resident Orchestrator — Design
@@ -120,6 +120,13 @@ one host, and the selector always resumes active ownership before admitting new 
 constraints avoid a new lease or assignee subsystem. A concurrent manual lifecycle transition is
 resolved by the task store's existing status validation; the losing cycle refreshes instead of
 forcing state.
+
+> **Revised by [ADR-0352].** The three constraints above bound concurrent *automated* routine
+> fires; they do not arbitrate between interactive operator sessions, which can now reach one
+> workspace from several places at once. Workflow dispatch is additionally gated on an exclusive
+> workspace claim — see
+> [host-registry/2_design.md §3.2](../host-registry/2_design.md). The reasoning here stands for
+> what it covers; it is no longer the whole story.
 
 `overlap: forbid` prevents concurrent fires of this routine, not a manual invocation of the same
 activity. Status validation is the admission backstop: only one contender can transition the

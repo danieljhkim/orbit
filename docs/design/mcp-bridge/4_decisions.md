@@ -1,17 +1,17 @@
 ---
 title: Orbit MCP Bridge — Decisions
 owner: codex
-last_updated: 2026-07-20
+last_updated: 2026-08-09
 last_validated: 2026-08-02
 status: Accepted
 feature: mcp-bridge
 doc_role: decisions
 type: design
-summary: ADR log for the coupled MCP Bridge and Host Registry v1 contract and its evolving implementation boundary.
+summary: ADR log for the coupled MCP Bridge and Host Registry v1 contract, its evolving implementation boundary, and the owned tunnel for checkoutless clients.
 tags: [mcp, remote-access, host-registry, bridge]
 paths: ["crates/orbit-remote/**", "crates/orbit-mcp/**", "crates/orbit-core/**", "crates/orbit-tools/**", "crates/orbit-store/**"]
 related_features: [mcp-bridge, host-registry, mcp-session-context, remote-access]
-related_artifacts: [ORB-00424, ORB-10245, ORB-10262, ORB-10267, ORB-10268, ORB-10269, ORB-10271, ORB-10272, ORB-10276, ORB-10302, ORB-10319, ORB-10330, ORB-10332, ADR-0226, ADR-0227, ADR-0228, ADR-0229, ADR-0230, ADR-0231, ADR-0232, ADR-0235, ADR-0240]
+related_artifacts: [ORB-00424, ORB-10245, ORB-10262, ORB-10267, ORB-10268, ORB-10269, ORB-10271, ORB-10272, ORB-10276, ORB-10302, ORB-10319, ORB-10330, ORB-10332, ORB-10690, ADR-0226, ADR-0227, ADR-0228, ADR-0229, ADR-0230, ADR-0231, ADR-0232, ADR-0235, ADR-0240, ADR-0348, ADR-0350, ADR-0351]
 ---
 
 # Orbit MCP Bridge — Decisions
@@ -232,6 +232,87 @@ Remote database or a separate broker crate.
   broker/hub/link/registration behavior evolves inside the feature crate.
 - Cost: `orbit-remote` is intentionally broad and needs disciplined internal seams;
   genuinely cross-feature mechanisms must still be extracted into a neutral kernel.
+
+## ADR-0350 — Own the SSH tunnel as remote-access infrastructure, with a provisional surface over it
+
+**Status:** Proposed · 2026-08
+
+### Context
+
+The SSH-stdio hub link assumes a spoke: a machine with its own checkout, whose
+graph, docs, and search must resolve against the branch its agent is working on.
+An off-box orchestrator has no such checkout, so placement routing protects
+nothing for it and only makes the canonical surface unreachable — which is what
+forces the re-declared parity layer [ADR-0232] retires. Reachability, not tool
+schemas, is the scarce resource for that client.
+
+### Decision
+
+Treat the SSH tunnel as owned, reusable infrastructure terminating at a
+loopback-bound listener; calls resolve on the remote without placement routing,
+for checkoutless clients only. What surface the tunnel carries is decided
+separately by [ADR-0351].
+
+### Consequences
+
+- The canonical surface becomes reachable off-box without an external process
+  re-declaring it, and cross-boundary drift is impossible because both ends are
+  the same build.
+- Separating transport from surface means the tunnel is worth building even if
+  the surface question resolves unexpectedly; it is the part with no contingent
+  value.
+- Cost: Orbit now opens a listening port. The security property rests on a
+  loopback bind guard rather than on the absence of a listener, so a
+  misconfiguration binding a routable address is unauthenticated remote control.
+- Cost: two cross-machine mechanisms coexist until one is retired.
+- Cost: remote resolution is correct only for checkoutless clients; the
+  refusal-when-a-checkout-exists guard is load-bearing, and its absence presents
+  as wrong answers rather than as an error.
+
+Narrative lives in the ADR store — retrieve it with `orbit tool run orbit.adr.show --input '{"id":"ADR-0350"}'`.
+
+## ADR-0351 — Serve the remote surface as enumerate, invoke-by-name, and claim-gated command execution
+
+**Status:** Proposed · 2026-08
+
+### Context
+
+Reachability is scarce: an orchestrator that cannot execute on the machine routes
+trivial reads through full worker runs. Establishing the tunnel presupposes SSH,
+and anyone with SSH can already run anything there, so withholding command
+execution from such a caller protects nothing. But unrestricted command execution
+in the default surface would make capability filtering, the governed-operation
+check, and the workspace claim advisory for whoever holds it. Note that Orbit's
+advertised definitions are derived from the tool registry, not hand-maintained —
+the duplication this feature removes was an external process re-declaring them.
+
+### Decision
+
+Serve three operations over the tunnel: enumerate the registry entries visible to
+the caller with their schemas; invoke a tool by name through the governed
+chokepoint; and run a command as argv plus working directory, requiring operator
+capability and the workspace claim and withheld from managed runs. A client
+without the claim receives enumerate and invoke, never command — the boundary is
+which operations exist for that caller, not an allowlist over argv, which leaks.
+The existing advertised per-tool surface is retained pending tool-call metrics.
+
+### Consequences
+
+- The orchestrator stops dispatching a full worker run to answer questions a
+  single command answers, and every registry operation stays reachable without a
+  per-operation adapter.
+- Splitting invoke from command preserves per-tool audit attribution that a
+  command-only surface would have discarded.
+- Policy and placement metadata move from filtering an advertised list to
+  authorizing an invocation — enforcement rather than advertisement.
+- Cost: enumerate and invoke rebuild the protocol's own list/call verbs inside a
+  tool, justified only by collapsing per-tool policy into one authorization point.
+- Cost: for a claim-holding client, capability filtering above command is
+  advisory. Gating bounds who that applies to; it does not make it untrue.
+- Cost: audit granularity degrades for command calls specifically.
+- Cost: the surface stays doubled through the measurement period.
+
+Narrative lives in the ADR store — retrieve it with `orbit tool run orbit.adr.show --input '{"id":"ADR-0351"}'`.
 
 ## Task References
 
