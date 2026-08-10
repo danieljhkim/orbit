@@ -1,7 +1,7 @@
 ---
 title: Host Registry — Design
 owner: claude
-last_updated: 2026-08-09
+last_updated: 2026-08-10
 last_validated: 2026-07-27
 status: Accepted
 feature: host-registry
@@ -11,7 +11,7 @@ summary: Target mechanisms for host identity, the main-host registry, the coordi
 tags: [host-registry, multi-host, dispatch, routines, data-placement]
 paths: ["crates/orbit-remote/**", "crates/orbit-core/**", "crates/orbit-store/**", "crates/orbit-mcp/**", "crates/orbit-common/**"]
 related_features: [host-registry, mcp-bridge, routines, remote-access, mcp-session-context, resident-orchestrator]
-related_artifacts: [ORB-00424, ORB-10247, ORB-10248, ORB-10249, ORB-10255, ORB-10257, ORB-10258, ORB-10267, ORB-10268, ORB-10269, ORB-10271, ORB-10272, ORB-10302, ORB-10319, ORB-10330, ORB-10332, ADR-0200, ADR-0205, ADR-0208, ADR-0226, ADR-0227, ADR-0228, ADR-0229, ADR-0230, ADR-0231, ADR-0232, ADR-0235, ADR-0240, ADR-0352]
+related_artifacts: [ORB-00424, ORB-10247, ORB-10248, ORB-10249, ORB-10255, ORB-10257, ORB-10258, ORB-10267, ORB-10268, ORB-10269, ORB-10271, ORB-10272, ORB-10302, ORB-10319, ORB-10330, ORB-10332, ORB-10709, ADR-0200, ADR-0205, ADR-0208, ADR-0226, ADR-0227, ADR-0228, ADR-0229, ADR-0230, ADR-0231, ADR-0232, ADR-0235, ADR-0240, ADR-0352]
 ---
 
 # Host Registry — Design
@@ -444,6 +444,24 @@ A **workspace claim** is an exclusive, TTL-bounded hold taken by one operator
 Claim scope is a **distinct dimension** from file reservations. Expressing it as a
 whole-workspace file selector would also block the worker reservations it is meant
 to leave alone, inverting the intent.
+
+**An unclaimed workspace gates nothing** ([ORB-10709]). The claim arbitrates
+between operators who want one; it is not a precondition a dispatch must satisfy
+in an uncontended workspace. Concretely, as shipped:
+
+| State | `orbit.workflow.ship` / `run.resume` |
+| --- | --- |
+| Unclaimed | proceeds |
+| Claimed, caller presents the holder's token | proceeds |
+| Claimed, caller presents nothing or a stale token | refused with holder + expiry |
+
+The token is presented as `claim_token` on the tool, CLI, and HTTP surfaces, or
+through `ORBIT_WORKSPACE_CLAIM_TOKEN` for an operator shell. Acquire, release,
+force-release, and status are the `orbit.workspace.claim.*` tools, registered the
+same way as `orbit.task.locks.*` — operator-reachable, absent from the agent MCP
+surface. Storage reuses `task_reservations` under a `scope` discriminator; see
+[ADR-0352](4_decisions.md#adr-0352--gate-workflow-dispatch-on-an-exclusive-ttld-workspace-claim)
+for why, and for the rejected parallel-table alternative.
 
 The claim does not replace or weaken declared ownership. Ownership remains a
 declared machine binding that selects default execution and gates knowledge

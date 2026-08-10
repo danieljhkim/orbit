@@ -67,6 +67,27 @@ pub struct DependencyNotDelivered {
     pub detail: String,
 }
 
+/// Evidence behind [`OrbitError::WorkspaceClaimHeld`]: the refused operation,
+/// the incumbent holder, its claim id, and the instant the claim lapses.
+///
+/// The holder's token is deliberately absent. A refusal travels to the
+/// contender, and a contender that could read the token out of its own refusal
+/// would turn the claim into a formality.
+///
+/// Boxed into the error enum for the same reason as
+/// [`DependencyNotDelivered`]: four inline strings for one rare refusal would
+/// widen every `Result<_, OrbitError>` in the workspace.
+#[derive(Debug, Serialize)]
+pub struct WorkspaceClaimHeld {
+    /// The governed operation that was refused, e.g. `orbit.workflow.ship`.
+    pub operation: String,
+    /// The incumbent's actor label.
+    pub holder: String,
+    pub claim_id: String,
+    /// RFC 3339 instant at which the claim stops blocking on its own.
+    pub expires_at: String,
+}
+
 #[derive(Debug, Error, Serialize)]
 #[non_exhaustive]
 /// Keep this widely propagated error below its 128-byte size budget. Box the
@@ -173,6 +194,17 @@ pub enum OrbitError {
         "task {task_id} already has an in-flight run ({run_id}); wait for it to finish or cancel it"
     )]
     ShipRunInFlight { task_id: String, run_id: String },
+    /// A governed workflow operation was refused because another operator holds
+    /// the exclusive workspace claim [ADR-0352, ORB-10709]. Raised by the shared
+    /// run-submission path, so the refusal is identical on every surface, and
+    /// the payload names the incumbent and the expiry instant so a caller can
+    /// wait it out, ask the holder, or force-release rather than retry blindly.
+    /// Contention rejects: never a silent queue, never a silent steal.
+    #[error(
+        "workspace claim is held by {} until {} ({}); {} requires that claim's token — present it as `claim_token`, wait for the claim to expire, or force-release it",
+        .0.holder, .0.expires_at, .0.claim_id, .0.operation
+    )]
+    WorkspaceClaimHeld(Box<WorkspaceClaimHeld>),
     #[error("invalid job run state transition: {0}")]
     JobRunStateTransition(String),
     #[error("workspace error: {0}")]
@@ -261,6 +293,16 @@ impl OrbitError {
     pub fn ship_run_in_flight(&self) -> Option<(&str, &str)> {
         match self {
             Self::ShipRunInFlight { task_id, run_id } => Some((task_id, run_id)),
+            _ => None,
+        }
+    }
+
+    /// The refused operation, incumbent holder, claim id, and expiry of a
+    /// workspace-claim refusal, so projections (HTTP 409 body, MCP structured
+    /// error) can name them without re-parsing the message [ORB-10709].
+    pub fn workspace_claim_held(&self) -> Option<&WorkspaceClaimHeld> {
+        match self {
+            Self::WorkspaceClaimHeld(claim) => Some(claim),
             _ => None,
         }
     }

@@ -130,6 +130,9 @@ pub enum OrbitBuiltinAction {
     WorkflowRunResume,
     WorkflowRunShow,
     WorkflowShip,
+    WorkspaceClaimAcquire,
+    WorkspaceClaimRelease,
+    WorkspaceClaimShow,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]

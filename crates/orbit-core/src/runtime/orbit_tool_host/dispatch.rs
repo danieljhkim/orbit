@@ -91,6 +91,13 @@ pub(super) fn execute(
         OrbitBuiltinAction::WorkflowRunResume => {
             super::workflow_tools::resume(runtime, input, agent, model)
         }
+        OrbitBuiltinAction::WorkspaceClaimAcquire => {
+            crate::runtime::workspace_claim::acquire(runtime, input, agent, model)
+        }
+        OrbitBuiltinAction::WorkspaceClaimRelease => {
+            crate::runtime::workspace_claim::release(runtime, input, agent, model)
+        }
+        OrbitBuiltinAction::WorkspaceClaimShow => crate::runtime::workspace_claim::show(runtime),
     }?;
     super::artifact_redaction::finish_tool_response(
         runtime,

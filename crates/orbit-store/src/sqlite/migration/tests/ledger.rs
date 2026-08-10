@@ -212,6 +212,10 @@ fn legacy_db_adopts_versioned_ledger() {
                 "migration.v0012".to_string(),
                 "friction_records_sqlite".to_string()
             ),
+            (
+                "migration.v0013".to_string(),
+                "workspace_claim_scope".to_string()
+            ),
         ]
     );
 }
@@ -223,7 +227,7 @@ fn refuses_db_from_a_newer_binary() {
 
     conn.execute(
         "INSERT INTO schema_meta(key, value, updated_at)
-         VALUES ('migration.v0013', 'from-the-future', '2099-01-01T00:00:00Z')",
+         VALUES ('migration.v0014', 'from-the-future', '2099-01-01T00:00:00Z')",
         [],
     )
     .expect("record future migration");
@@ -303,7 +307,7 @@ fn store_reopens_database_at_shipped_schema_v4_and_applies_through_latest() {
     );
     assert_eq!(
         applied.last().map(|migration| migration.name.as_str()),
-        Some("friction_records_sqlite")
+        Some("workspace_claim_scope")
     );
     let connection = store.connection();
     let conn = connection.lock().expect("connection");

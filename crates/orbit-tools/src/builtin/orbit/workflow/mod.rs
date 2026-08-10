@@ -62,6 +62,15 @@ impl Tool for OrbitWorkflowShipTool {
                 param_type: "string".to_string(),
                 required: false,
             },
+            ToolParam {
+                name: "claim_token".to_string(),
+                description:
+                    "Token for this workspace's exclusive claim (ADR-0352), required when another \
+                     operator holds one. Falls back to `ORBIT_WORKSPACE_CLAIM_TOKEN`."
+                        .to_string(),
+                param_type: "string".to_string(),
+                required: false,
+            },
         ];
         parameters.extend(super::model_identity_params());
         ToolSchema {
@@ -140,7 +149,18 @@ impl Tool for OrbitWorkflowRunResumeTool {
             name: "orbit.workflow.run.resume".to_string(),
             description: "Resume a terminal resumable workflow run as a new linked run."
                 .to_string(),
-            parameters: vec![run_id_param()],
+            parameters: vec![
+                run_id_param(),
+            ToolParam {
+                name: "claim_token".to_string(),
+                description:
+                    "Token for this workspace's exclusive claim (ADR-0352), required when another \
+                     operator holds one. Falls back to `ORBIT_WORKSPACE_CLAIM_TOKEN`."
+                        .to_string(),
+                param_type: "string".to_string(),
+                required: false,
+            },
+            ],
             builtin: true,
         }
     }

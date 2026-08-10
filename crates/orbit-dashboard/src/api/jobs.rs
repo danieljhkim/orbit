@@ -84,6 +84,14 @@ pub(super) async fn list_job_runs(Ws(runtime): Ws, Query(q): Query<JobRunListQue
     }
 }
 
+/// [ORB-10709] Optional body carrying the workspace claim token, for a resume
+/// submitted while another operator holds the claim.
+#[derive(Debug, Default, serde::Deserialize)]
+pub(super) struct ResumeBody {
+    #[serde(default)]
+    claim_token: Option<String>,
+}
+
 /// Submit a resume of a terminal resumable run as a new linked run.
 ///
 /// Resume re-runs the first non-successful step and every subsequent step; it
@@ -93,12 +101,17 @@ pub(super) async fn list_job_runs(Ws(runtime): Ws, Query(q): Query<JobRunListQue
 /// resumed run is persisted and its detached worker is spawned, so the resumed
 /// pipeline never runs on a request thread. Callers poll `/job-runs/:id` for
 /// progress and can cancel the returned run id while it executes.
-pub(super) async fn resume_job_run_action(Ws(runtime): Ws, Path(id): Path<String>) -> Response {
+pub(super) async fn resume_job_run_action(
+    Ws(runtime): Ws,
+    Path(id): Path<String>,
+    body: Option<Json<ResumeBody>>,
+) -> Response {
     let id = match validate_id(&id) {
         Ok(id) => id,
         Err(message) => return bad_request(message),
     };
-    match runtime.submit_resume_run(id, Some("dashboard")) {
+    let Json(body) = body.unwrap_or_default();
+    match runtime.submit_resume_run(id, Some("dashboard"), body.claim_token.as_deref()) {
         Ok(invoke) => Json(json!({
             "workflow": "resume",
             "job_id": invoke.job_name,

@@ -50,6 +50,10 @@ pub struct ShipCommand {
     /// Output as JSON.
     #[arg(long)]
     pub json: bool,
+    /// Token for this workspace's exclusive claim, when another operator holds
+    /// one. Falls back to `ORBIT_WORKSPACE_CLAIM_TOKEN`.
+    #[arg(long)]
+    pub claim_token: Option<String>,
 }
 
 impl Execute for ShipCommand {
@@ -59,7 +63,13 @@ impl Execute for ShipCommand {
         ensure_workflow_exists(SHIP_WORKFLOW)?;
         // Ship is the one workflow whose submission carries task-level
         // admission checks, so it must not use the generic CLI dispatcher.
-        let invoke = runtime.submit_ship_run(mode, self.base.as_deref(), &self.task_ids, None)?;
+        let invoke = runtime.submit_ship_run(
+            mode,
+            self.base.as_deref(),
+            &self.task_ids,
+            None,
+            self.claim_token.as_deref(),
+        )?;
         let run = WorkflowDispatchResult {
             workflow_alias: SHIP_WORKFLOW,
             job_id: invoke.job_name,

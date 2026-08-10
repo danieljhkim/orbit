@@ -35,7 +35,14 @@ pub(super) fn ship(
     };
     let base = optional_string(&input, "base")?;
     let actor = actor(runtime, agent.as_deref(), model.as_deref());
-    let invoke = runtime.submit_ship_run(mode, base.as_deref(), &task_ids, Some(&actor))?;
+    let claim_token = optional_string(&input, "claim_token")?;
+    let invoke = runtime.submit_ship_run(
+        mode,
+        base.as_deref(),
+        &task_ids,
+        Some(&actor),
+        claim_token.as_deref(),
+    )?;
     Ok(json!({
         "workflow": "ship",
         "job_id": invoke.job_name,
@@ -86,7 +93,8 @@ pub(super) fn resume(
 ) -> Result<Value, OrbitError> {
     let id = orbit_common::types::required_string(&input, &["id"], "id")?;
     let actor = actor(runtime, agent.as_deref(), model.as_deref());
-    let invoke = runtime.submit_resume_run(&id, Some(&actor))?;
+    let claim_token = optional_string(&input, "claim_token")?;
+    let invoke = runtime.submit_resume_run(&id, Some(&actor), claim_token.as_deref())?;
     Ok(json!({
         "workflow": "resume",
         "job_id": invoke.job_name,

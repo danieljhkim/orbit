@@ -75,13 +75,23 @@ impl OrbitRuntime {
     /// cannot contend for one worktree and task reservation no matter which
     /// surface submitted them. Auto mode has no task ids to key on and is
     /// unaffected.
+    ///
+    /// [ORB-10709] The workspace claim is checked first, for the case the
+    /// duplicate-dispatch guard structurally cannot cover: it is keyed on task
+    /// id over a bounded window of recent runs, so a stale non-terminal run
+    /// outside that window is invisible to it, and a discovery-mode submission
+    /// carries no task ids at all. The claim check is keyed on neither, so both
+    /// gaps close. `claim_token` is the holder's minted token; `None` falls back
+    /// to [`CLAIM_TOKEN_ENV`](crate::runtime::workspace_claim::CLAIM_TOKEN_ENV).
     pub fn submit_ship_run(
         &self,
         mode: crate::command::workflow::ShipMode,
         base_branch: Option<&str>,
         task_ids: &[String],
         actor: Option<&str>,
+        claim_token: Option<&str>,
     ) -> Result<PipelineInvokeResult, OrbitError> {
+        self.require_workspace_claim("orbit.workflow.ship", claim_token)?;
         let workflow =
             crate::command::workflow::find_workflow(crate::command::workflow::SHIP_WORKFLOW_ALIAS)
                 .ok_or_else(|| OrbitError::InvalidInput("unknown workflow 'ship'".to_string()))?;
@@ -148,11 +158,18 @@ impl OrbitRuntime {
     /// thread, so run list / status / cancel stay answerable for its whole
     /// duration (F2026-07-122 defect 3) and the run is cancellable by pid like
     /// any other submitted run.
+    ///
+    /// [ORB-10709] Resuming creates another managed run, so it is a governed
+    /// workflow operation and takes the same workspace-claim gate as
+    /// [`Self::submit_ship_run`] — checked here, on the shared path, rather than
+    /// in the adapters.
     pub fn submit_resume_run(
         &self,
         source_run_id: &str,
         actor: Option<&str>,
+        claim_token: Option<&str>,
     ) -> Result<PipelineInvokeResult, OrbitError> {
+        self.require_workspace_claim("orbit.workflow.run.resume", claim_token)?;
         let plan = self.plan_job_run_resume(source_run_id)?;
         self.submit_persisted_pipeline_run(
             &plan.source.job_id,

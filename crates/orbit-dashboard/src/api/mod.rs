@@ -268,6 +268,13 @@ pub(super) fn map_runtime_error(e: orbit_core::OrbitError) -> Response {
         error @ orbit_core::OrbitError::ShipRunInFlight { .. } => {
             ship_run_in_flight_conflict(error)
         }
+        // [ORB-10709] Another operator holds this workspace's claim. A 409 for
+        // the same reason a duplicate dispatch is one: the request is
+        // well-formed, and the caller can retry once the claim lapses or is
+        // released.
+        error @ orbit_core::OrbitError::WorkspaceClaimHeld(_) => {
+            workspace_claim_held_conflict(error)
+        }
         other => server_error(other),
     }
 }
@@ -291,6 +298,23 @@ fn ship_run_in_flight_conflict(error: orbit_core::OrbitError) -> Response {
         })),
     )
         .into_response()
+}
+
+/// [ORB-10709] Another operator holds this workspace's claim. A 409 for the
+/// same reason a duplicate dispatch is one: the request is well-formed, and the
+/// caller can retry once the claim lapses or is released. The body names the
+/// holder and the expiry — never the holder's token.
+fn workspace_claim_held_conflict(error: orbit_core::OrbitError) -> Response {
+    let claim = error.workspace_claim_held();
+    let body = json!({
+        "error": error.to_string(),
+        "code": "workspace_claim_held",
+        "operation": claim.map(|claim| claim.operation.as_str()),
+        "holder": claim.map(|claim| claim.holder.as_str()),
+        "claim_id": claim.map(|claim| claim.claim_id.as_str()),
+        "expires_at": claim.map(|claim| claim.expires_at.as_str()),
+    });
+    (StatusCode::CONFLICT, Json(body)).into_response()
 }
 
 fn artifact_conflict(error: orbit_core::OrbitError, code: &'static str) -> Response {

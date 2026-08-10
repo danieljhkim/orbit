@@ -35,6 +35,10 @@ pub(super) struct ShipBody {
     /// Base branch override; defaults to the workspace's `[workflow] base_branch`.
     #[serde(default)]
     base: Option<String>,
+    /// [ORB-10709] Token for this workspace's exclusive claim, when another
+    /// operator holds one.
+    #[serde(default)]
+    claim_token: Option<String>,
 }
 
 /// Submit a `ship` workflow run (`POST /workflows/ship?workspace=<id>`).
@@ -71,6 +75,7 @@ pub(super) async fn ship_workflow_action(
         body.base.as_deref(),
         &body.task_ids,
         Some("dashboard"),
+        body.claim_token.as_deref(),
     ) {
         Ok(invoke) => Json(json!({
             "workflow": "ship",

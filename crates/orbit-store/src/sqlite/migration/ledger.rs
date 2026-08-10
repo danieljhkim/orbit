@@ -100,12 +100,20 @@ pub(crate) const MIGRATIONS: &[Migration] = &[
         name: "friction_records_sqlite",
         apply: super::apply_friction_records_schema,
     },
+    // ORB-10709 / ADR-0352: `task_reservations` gains the coordination
+    // dimension that separates worker file reservations from the exclusive
+    // workspace claim, plus the claim's bearer token.
+    Migration {
+        version: 13,
+        name: "workspace_claim_scope",
+        apply: super::apply_workspace_claim_scope,
+    },
 ];
 
 /// Highest schema version this binary knows how to produce. Public for
 /// the future `orbit migrate` surface (P3.4), alongside
 /// [`AppliedMigration`] and the `Store` version accessors.
-pub const SUPPORTED_SCHEMA_VERSION: u32 = 12;
+pub const SUPPORTED_SCHEMA_VERSION: u32 = 13;
 
 const LEDGER_KEY_PREFIX: &str = "migration.v";
 

@@ -1,7 +1,7 @@
 ---
 title: Host Registry — Decisions
 owner: claude
-last_updated: 2026-08-09
+last_updated: 2026-08-10
 last_validated: 2026-07-27
 status: Accepted
 feature: host-registry
@@ -11,7 +11,7 @@ summary: ADR log for the coupled Host Registry and MCP Bridge v1 contract and it
 tags: [host-registry, mcp-bridge, multi-host, placement]
 paths: ["crates/orbit-remote/**", "crates/orbit-core/**", "crates/orbit-store/**", "crates/orbit-mcp/**"]
 related_features: [host-registry, mcp-bridge]
-related_artifacts: [ORB-00424, ORB-10245, ORB-10248, ORB-10249, ORB-10255, ORB-10257, ORB-10267, ORB-10258, ORB-10268, ORB-10269, ORB-10271, ORB-10272, ORB-10276, ORB-10302, ORB-10319, ORB-10330, ORB-10332, ADR-0226, ADR-0227, ADR-0228, ADR-0229, ADR-0230, ADR-0231, ADR-0232, ADR-0235, ADR-0240, ADR-0352]
+related_artifacts: [ORB-00424, ORB-10245, ORB-10248, ORB-10249, ORB-10255, ORB-10257, ORB-10267, ORB-10258, ORB-10268, ORB-10269, ORB-10271, ORB-10272, ORB-10276, ORB-10302, ORB-10319, ORB-10330, ORB-10332, ORB-10709, ADR-0226, ADR-0227, ADR-0228, ADR-0229, ADR-0230, ADR-0231, ADR-0232, ADR-0235, ADR-0240, ADR-0352]
 ---
 
 # Host Registry — Decisions
@@ -243,7 +243,7 @@ crate.
 
 ## ADR-0352 — Gate workflow dispatch on an exclusive TTL'd workspace claim
 
-**Status:** Proposed · 2026-08
+**Status:** Accepted · 2026-08 · [ORB-10709]
 
 ### Context
 
@@ -275,12 +275,35 @@ rejects with holder and expiry; force-release exists and is audited.
   which avoided a lease subsystem deliberately; that reasoning is revised, not
   silently overridden.
 
+Shipped in [ORB-10709]. Three implementation choices the decision above left
+open, recorded here because each is load-bearing:
+
+- **The claim reuses the `task_reservations` table**, separated from worker file
+  reservations by a `scope` discriminator rather than by a parallel table. That
+  inherits the atomic `IMMEDIATE`-transaction acquisition, TTL, lazy expiry,
+  audit, and release escape hatch already built there. The rejected alternative
+  was a dedicated `workspace_claims` table: honest about the "distinct
+  dimension", but ~250 lines duplicating machinery this feature exists to reuse.
+  The scope discriminator is a required argument of the shared SQL predicate, so
+  the compiler asks every query site which dimension it reads; claim rows also
+  carry an empty file list, so a forgotten filter still cannot produce a path
+  conflict.
+- **An unclaimed workspace gates nothing.** The claim arbitrates *between*
+  operators who want one; it is not a mandatory ceremony before every dispatch.
+  Requiring one unconditionally would break every existing unattended dispatch
+  and make "naming the current holder" in a refusal meaningless.
+- **`orbit run ship-sweep` stands down rather than failing** when it meets a held
+  claim: the unattended sweep has no token and does not force, so a claimed
+  workspace is reported as skipped, not as a sweep error.
+
 Narrative lives in the ADR store — retrieve it with `orbit tool run orbit.adr.show --input '{"id":"ADR-0352"}'`.
 
 ## Task References
 
 - [ORB-00424] — completed design proposal for canonical Orbit MCP and Bridge parity retirement.
 - [ORB-10245] — accepted the coupled contract and recorded this ADR set.
+- [ORB-10709] — shipped the exclusive TTL'd workspace claim and gated workflow
+  dispatch on it at the shared run-submission path (ADR-0352).
 - [ORB-10248] — implemented the versioned logical-workspace/local-checkout split.
 - [ORB-10249] — implemented path-free task coordination and global task-relation/readiness lookup.
 - [ORB-10255] — implemented ADR-0227's append-only SQLite host/alias core with

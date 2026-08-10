@@ -205,6 +205,34 @@ pub trait TaskReservationStoreBackend: Send + Sync {
         &self,
         params: TaskReservationOwnedConflictsParams,
     ) -> Result<TaskReservationOwnedConflictsResult, OrbitError>;
+
+    /// Take the exclusive workspace claim [ADR-0352, ORB-10709], or report the
+    /// incumbent that refused it.
+    fn acquire_workspace_claim(
+        &self,
+        params: WorkspaceClaimAcquireParams,
+    ) -> Result<WorkspaceClaimAcquireResult, OrbitError>;
+
+    /// Release the claim with its token, or force-release it.
+    fn release_workspace_claim(
+        &self,
+        params: WorkspaceClaimReleaseParams,
+    ) -> Result<WorkspaceClaimReleaseResult, OrbitError>;
+
+    /// The active claim after lazy expiry, or `None` when unclaimed.
+    fn show_workspace_claim(
+        &self,
+        workspace_orbit_dir: &str,
+        workspace_id: Option<&str>,
+    ) -> Result<WorkspaceClaimStatusResult, OrbitError>;
+
+    /// Whether a presented token satisfies the active claim. The comparison
+    /// stays inside the store so a refusal never has to carry the incumbent's
+    /// token back out.
+    fn check_workspace_claim(
+        &self,
+        params: WorkspaceClaimCheckParams,
+    ) -> Result<WorkspaceClaimCheckResult, OrbitError>;
 }
 
 pub trait JobRunStoreBackend: Send + Sync {

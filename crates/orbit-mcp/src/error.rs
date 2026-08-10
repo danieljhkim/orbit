@@ -76,6 +76,7 @@ fn error_code(err: &OrbitError) -> &str {
         | OrbitError::AdrInvalidTransition(_) => "invalid_transition",
         OrbitError::DependencyNotDelivered { .. } => "dependency_not_delivered",
         OrbitError::ShipRunInFlight { .. } => "ship_run_in_flight",
+        OrbitError::WorkspaceClaimHeld(_) => "workspace_claim_held",
         OrbitError::RemoteArtifactUnavailable { .. } => "remote_artifact_unavailable",
         OrbitError::ArtifactNotLocal { .. } => "artifact_not_local",
         OrbitError::AgentProtocolViolation(_) => "agent_protocol_violation",

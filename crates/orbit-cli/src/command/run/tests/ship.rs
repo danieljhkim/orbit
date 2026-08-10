@@ -10,6 +10,7 @@ fn ship_args(task_ids: &[&str], mode: ShipMode, base: Option<&str>) -> ShipComma
         mode: Some(mode),
         base: base.map(str::to_string),
         json: false,
+        claim_token: None,
     }
 }
 
