@@ -553,6 +553,51 @@ fn record_task_lock_audit_event(
     status: AuditEventStatus,
     payload: Value,
 ) -> Result<(), OrbitError> {
+    record_coordination_audit_event(
+        runtime,
+        CoordinationAuditEvent {
+            command,
+            tool_name,
+            target_type: "task_reservation",
+            target_id,
+            task_id,
+            status,
+            payload,
+        },
+    )
+}
+
+/// One coordination-hold audit event, before it is widened into the full
+/// `AuditEventInsertParams`.
+///
+/// [ORB-10709] `target_type` is carried here rather than fixed as a constant
+/// because the workspace claim is a second coordination dimension over the same
+/// table and must be distinguishable in the trail — a force-release has to be
+/// legible as a claim event, not as a reservation event.
+pub(crate) struct CoordinationAuditEvent<'a> {
+    pub(crate) command: &'a str,
+    pub(crate) tool_name: &'a str,
+    pub(crate) target_type: &'a str,
+    pub(crate) target_id: Option<&'a str>,
+    pub(crate) task_id: Option<&'a str>,
+    pub(crate) status: AuditEventStatus,
+    pub(crate) payload: Value,
+}
+
+/// Record one coordination-hold event (file reservation or workspace claim).
+pub(crate) fn record_coordination_audit_event(
+    runtime: &OrbitRuntime,
+    event: CoordinationAuditEvent<'_>,
+) -> Result<(), OrbitError> {
+    let CoordinationAuditEvent {
+        command,
+        tool_name,
+        target_type,
+        target_id,
+        task_id,
+        status,
+        payload,
+    } = event;
     let execution_id_prefix = format!("audit-{}", command.replace('.', "-"));
     let job_run_id = owner_run_id_from_payload(&payload)
         .or_else(|| std::env::var("ORBIT_RUN_ID").ok().filter(|s| !s.is_empty()));
@@ -561,7 +606,7 @@ fn record_task_lock_audit_event(
         command: command.to_string(),
         subcommand: None,
         tool_name: Some(tool_name.to_string()),
-        target_type: Some("task_reservation".to_string()),
+        target_type: Some(target_type.to_string()),
         target_id: target_id.map(ToOwned::to_owned),
         role: "admin".to_string(),
         status,

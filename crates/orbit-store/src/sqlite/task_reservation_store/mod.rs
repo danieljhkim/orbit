@@ -12,8 +12,10 @@ use crate::{
     TaskReservationOwnedConflictsResult, TaskReservationReleaseByOwnerParams,
     TaskReservationReleaseByOwnerResult, TaskReservationReleaseParams,
     TaskReservationReleaseReason, TaskReservationReleaseResult, TaskReservationReserveParams,
-    TaskReservationReserveResult,
+    TaskReservationReserveResult, TaskReservationScope,
 };
+
+mod workspace_claim;
 
 impl Store {
     /// Inspect active reservations through a pooled read connection. Unlike
@@ -34,7 +36,7 @@ impl Store {
                    AND expires_at > ?3
                  ORDER BY created_at ASC, reservation_id ASC",
                 select_reservation_columns(),
-                reservation_scope_clause(),
+                reservation_scope_clause(TaskReservationScope::Files),
             );
             let mut stmt = conn
                 .prepare(&sql)
@@ -64,8 +66,13 @@ impl Store {
     ) -> Result<TaskReservationListResult, OrbitError> {
         self.with_transaction_behavior(TransactionBehavior::Immediate, |tx| {
             let now = crate::now_string();
-            let expired_reservations =
-                expire_reservations(tx, workspace_orbit_dir, workspace_id, &now)?;
+            let expired_reservations = expire_reservations_in_scope(
+                tx,
+                workspace_orbit_dir,
+                workspace_id,
+                &now,
+                TaskReservationScope::Files,
+            )?;
             let sql = format!(
                 "SELECT {}
                  FROM task_reservations
@@ -74,7 +81,7 @@ impl Store {
                    AND expires_at > ?3
                  ORDER BY created_at ASC, reservation_id ASC",
                 select_reservation_columns(),
-                reservation_scope_clause(),
+                reservation_scope_clause(TaskReservationScope::Files),
             );
             let mut stmt = tx
                 .tx
@@ -108,11 +115,12 @@ impl Store {
     ) -> Result<TaskReservationCheckResult, OrbitError> {
         self.with_transaction_behavior(TransactionBehavior::Immediate, |tx| {
             let now = crate::now_string();
-            let expired_reservations = expire_reservations(
+            let expired_reservations = expire_reservations_in_scope(
                 tx,
                 &params.workspace_orbit_dir,
                 params.workspace_id.as_deref(),
                 &now,
+                TaskReservationScope::Files,
             )?;
             let conflicts = find_reservation_conflicts(
                 tx,
@@ -134,11 +142,12 @@ impl Store {
     ) -> Result<TaskReservationReserveResult, OrbitError> {
         self.with_transaction_behavior(TransactionBehavior::Immediate, |tx| {
             let now = crate::now_string();
-            let expired_reservations = expire_reservations(
+            let expired_reservations = expire_reservations_in_scope(
                 tx,
                 &params.workspace_orbit_dir,
                 params.workspace_id.as_deref(),
                 &now,
+                TaskReservationScope::Files,
             )?;
             let conflicts = find_reservation_conflicts(
                 tx,
@@ -186,8 +195,9 @@ impl Store {
                         owner_run_id,
                         owner_metadata_json,
                         release_reason,
-                        release_metadata_json
-                    ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, NULL, ?9, ?10, NULL, NULL)",
+                        release_metadata_json,
+                        scope
+                    ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, NULL, ?9, ?10, NULL, NULL, 'files')",
                     params![
                         reservation_id,
                         params.workspace_orbit_dir,
@@ -220,11 +230,12 @@ impl Store {
     ) -> Result<TaskReservationReleaseResult, OrbitError> {
         self.with_transaction_behavior(TransactionBehavior::Immediate, |tx| {
             let now = crate::now_string();
-            let mut expired_reservations = expire_reservations(
+            let mut expired_reservations = expire_reservations_in_scope(
                 tx,
                 &params.workspace_orbit_dir,
                 params.workspace_id.as_deref(),
                 &now,
+                TaskReservationScope::Files,
             )?;
             let existing = load_reservation_row(
                 tx,
@@ -260,7 +271,7 @@ impl Store {
                  WHERE {}
                    AND reservation_id = ?3
                    AND released_at IS NULL",
-                reservation_scope_clause(),
+                reservation_scope_clause(TaskReservationScope::Files),
             );
             let affected = tx
                 .tx
@@ -309,11 +320,12 @@ impl Store {
     ) -> Result<TaskReservationReleaseByOwnerResult, OrbitError> {
         self.with_transaction_behavior(TransactionBehavior::Immediate, |tx| {
             let now = crate::now_string();
-            let expired_reservations = expire_reservations(
+            let expired_reservations = expire_reservations_in_scope(
                 tx,
                 &params.workspace_orbit_dir,
                 params.workspace_id.as_deref(),
                 &now,
+                TaskReservationScope::Files,
             )?;
             let existing = load_active_reservations_by_owner(
                 tx,
@@ -337,7 +349,7 @@ impl Store {
                  WHERE {}
                    AND owner_run_id = ?3
                    AND released_at IS NULL",
-                reservation_scope_clause(),
+                reservation_scope_clause(TaskReservationScope::Files),
             );
             tx.tx
                 .execute(
@@ -376,11 +388,12 @@ impl Store {
     ) -> Result<TaskReservationOwnedConflictsResult, OrbitError> {
         self.with_transaction_behavior(TransactionBehavior::Immediate, |tx| {
             let now = crate::now_string();
-            let expired_reservations = expire_reservations(
+            let expired_reservations = expire_reservations_in_scope(
                 tx,
                 &params.workspace_orbit_dir,
                 params.workspace_id.as_deref(),
                 &now,
+                TaskReservationScope::Files,
             )?;
             let reservations = find_owned_reservation_conflicts(
                 tx,
@@ -398,11 +411,18 @@ impl Store {
     }
 }
 
-fn expire_reservations(
+/// Mark every TTL-expired row in `scope` released, returning what was expired.
+///
+/// [ORB-10709] Expiry is per-dimension so a file-reservation call never reports
+/// an expired workspace claim as one of *its* expirations: the two dimensions
+/// have separate audit vocabularies, and a caller emits events for whatever
+/// this returns.
+pub(super) fn expire_reservations_in_scope(
     tx: &mut crate::StoreTx<'_>,
     workspace_orbit_dir: &str,
     workspace_id: Option<&str>,
     now: &str,
+    scope: TaskReservationScope,
 ) -> Result<Vec<ExpiredTaskReservation>, OrbitError> {
     let sql = format!(
         "SELECT reservation_id, expires_at
@@ -411,7 +431,7 @@ fn expire_reservations(
            AND released_at IS NULL
            AND expires_at <= ?3
          ORDER BY expires_at ASC, reservation_id ASC",
-        reservation_scope_clause(),
+        reservation_scope_clause(scope),
     );
     let mut stmt = tx
         .tx
@@ -437,7 +457,7 @@ fn expire_reservations(
              WHERE {}
                AND released_at IS NULL
                AND expires_at <= ?3",
-            reservation_scope_clause(),
+            reservation_scope_clause(scope),
         );
         tx.tx
             .execute(
@@ -474,7 +494,7 @@ fn find_reservation_conflicts(
            AND released_at IS NULL
            AND expires_at > ?3
          ORDER BY created_at ASC, reservation_id ASC",
-        reservation_scope_clause(),
+        reservation_scope_clause(TaskReservationScope::Files),
     );
     let mut stmt = tx
         .tx
@@ -513,15 +533,27 @@ fn find_reservation_conflicts(
     Ok(conflicts)
 }
 
-fn reservation_scope_clause() -> &'static str {
-    // Parameter contract for every caller: ?1 is workspace_id, ?2 is
-    // workspace_orbit_dir. V2 callers see workspace-bound rows plus legacy
-    // NULL-workspace rows for the same orbit dir; legacy callers see all rows
-    // scoped to that orbit dir.
-    "(
+/// The workspace predicate, narrowed to one coordination dimension.
+///
+/// Parameter contract for every caller: ?1 is workspace_id, ?2 is
+/// workspace_orbit_dir. V2 callers see workspace-bound rows plus legacy
+/// NULL-workspace rows for the same orbit dir; legacy callers see all rows
+/// scoped to that orbit dir.
+///
+/// [ORB-10709] `scope` is a required argument rather than a default so every
+/// query site has to state which dimension it reads. File reservations and
+/// workspace claims share this table and must never see each other's rows; a
+/// forgotten filter would let a claim block the worker reservations it exists
+/// to leave alone, so the compiler asks the question at each call site.
+pub(super) fn reservation_scope_clause(scope: TaskReservationScope) -> String {
+    // `as_str()` is a closed set of 'static literals, never caller input.
+    format!(
+        "(
         (?1 IS NOT NULL AND (workspace_id = ?1 OR (workspace_id IS NULL AND workspace_orbit_dir = ?2)))
         OR (?1 IS NULL AND workspace_orbit_dir = ?2)
-    )"
+    ) AND scope = '{}'",
+        scope.as_str()
+    )
 }
 
 #[derive(Debug, Clone)]
@@ -608,7 +640,7 @@ fn load_reservation_row(
          WHERE {}
            AND reservation_id = ?3",
         select_reservation_columns(),
-        reservation_scope_clause(),
+        reservation_scope_clause(TaskReservationScope::Files),
     );
     tx.tx
         .query_row(
@@ -634,7 +666,7 @@ fn load_active_reservations_by_owner(
            AND released_at IS NULL
          ORDER BY created_at ASC, reservation_id ASC",
         select_reservation_columns(),
-        reservation_scope_clause(),
+        reservation_scope_clause(TaskReservationScope::Files),
     );
     let mut stmt = tx
         .tx
@@ -672,7 +704,7 @@ fn find_owned_reservation_conflicts(
            AND owner_run_id IS NOT NULL
          ORDER BY created_at ASC, reservation_id ASC",
         select_reservation_columns(),
-        reservation_scope_clause(),
+        reservation_scope_clause(TaskReservationScope::Files),
     );
     let mut stmt = tx
         .tx

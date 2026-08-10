@@ -16,6 +16,10 @@ const INACTIVE_TOOL_NAMES: &[&str] = &[
     "orbit.task.locks",
     "orbit.task.locks.release",
     "orbit.task.locks.reserve",
+    // ORB-10709: workspace claim, a coordination hold like the task locks.
+    "orbit.workspace.claim.acquire",
+    "orbit.workspace.claim.release",
+    "orbit.workspace.claim.show",
     "orbit.semantic.index",
     "orbit.semantic.install",
     "orbit.semantic.stats",

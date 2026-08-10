@@ -10,6 +10,7 @@ pub mod semantic;
 pub mod state;
 pub mod task;
 pub mod workflow;
+pub mod workspace_claim;
 
 use orbit_common::types::{
     McpToolPlacement, McpToolPolicy, OrbitError, ToolParam, normalize_agent_family_for_model,
@@ -100,6 +101,12 @@ pub fn register(registry: &mut ToolRegistry) {
     registry.register_inactive(task::locks::OrbitTaskLocksTool);
     registry.register_inactive(task::locks_reserve::OrbitTaskLocksReserveTool);
     registry.register_inactive(task::locks_release::OrbitTaskLocksReleaseTool);
+    // ORB-10709: the workspace claim is a coordination hold like the task
+    // locks above, and is registered the same way — operator-reachable through
+    // `orbit tool run`, absent from the agent MCP surface.
+    registry.register_inactive(workspace_claim::OrbitWorkspaceClaimAcquireTool);
+    registry.register_inactive(workspace_claim::OrbitWorkspaceClaimReleaseTool);
+    registry.register_inactive(workspace_claim::OrbitWorkspaceClaimShowTool);
     registry.register_mcp(
         task::start::OrbitTaskStartTool,
         agent_operator(McpToolPlacement::Hub),

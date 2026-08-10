@@ -28,6 +28,7 @@ mod task_reservation_cleanup;
 pub use task_reservation_cleanup::StaleTaskReservation;
 pub(crate) mod tool_exec;
 mod v2_host;
+pub mod workspace_claim;
 
 #[cfg(test)]
 mod tests;

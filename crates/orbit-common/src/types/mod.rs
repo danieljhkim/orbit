@@ -91,6 +91,7 @@ pub use auto_task::{
 };
 pub use error::{
     ArtifactOrigin, ArtifactOriginMode, DependencyNotDelivered, NotFoundKind, OrbitError,
+    WorkspaceClaimHeld,
 };
 pub use event::OrbitEvent;
 pub use execution_profile::{

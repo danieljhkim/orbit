@@ -247,10 +247,12 @@ fn long_lived_worker_reopens_and_applies_compatible_pending_schema() {
         let connection = store.connection();
         let conn = connection.lock().expect("store connection");
         // Rewind past the newest ledger entry as well: the recorded version is
-        // the highest key present, so leaving v0012 behind would report the
-        // store as current and apply nothing.
+        // the highest key present, so leaving a later key behind would report
+        // the store as current and apply nothing. Every entry from v0011 up is
+        // therefore dropped, not a fixed list that a new migration would
+        // silently outrun.
         conn.execute(
-            "DELETE FROM schema_meta WHERE key IN ('migration.v0011', 'migration.v0012')",
+            "DELETE FROM schema_meta WHERE key LIKE 'migration.v%' AND key >= 'migration.v0011'",
             [],
         )
         .expect("rewind routine migration ledger");
@@ -382,6 +384,7 @@ fn ship_submission_refuses_a_task_already_carried_by_a_non_terminal_run() {
             Some("main"),
             std::slice::from_ref(&selected_task_id),
             Some("test"),
+            None,
         )
         .expect_err("a task with a run in flight must not dispatch a second run");
 
@@ -435,7 +438,7 @@ fn ship_submission_guard_is_scoped_to_the_selected_tasks() {
         ("auto discovery", Vec::new()),
     ] {
         let error = runtime
-            .submit_ship_run(ShipMode::Local, Some("main"), &task_ids, Some("test"))
+            .submit_ship_run(ShipMode::Local, Some("main"), &task_ids, Some("test"), None)
             .expect_err("no job asset is deployed in this fixture");
         assert!(
             !matches!(error, OrbitError::ShipRunInFlight { .. }),
@@ -462,6 +465,7 @@ fn ship_submission_refuses_a_missing_explicit_task_before_persisting_a_run() {
             Some("main"),
             std::slice::from_ref(&missing_id),
             Some("test"),
+            None,
         )
         .expect_err("a missing explicit task must be rejected before dispatch");
 
@@ -493,6 +497,7 @@ fn ship_submission_mixed_explicit_selection_identifies_the_missing_task() {
             Some("main"),
             &[existing_id, missing_id.clone()],
             Some("test"),
+            None,
         )
         .expect_err("mixed selections must refuse their missing task before dispatch");
 

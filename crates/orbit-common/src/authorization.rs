@@ -171,6 +171,12 @@ pub const GOVERNED_OPERATIONS: &[GovernedOperation] = &[
         rationale: "releasing another run's reservation can let two runs edit the same files",
     },
     GovernedOperation {
+        id: "orbit.workspace.claim.release",
+        surface: OperationSurface::Tool,
+        allowed: &[McpCapability::Operator],
+        rationale: "force-releasing a workspace claim displaces the operator currently driving dispatch",
+    },
+    GovernedOperation {
         id: "orbit.learning.prune",
         surface: OperationSurface::Tool,
         allowed: &[McpCapability::Operator],

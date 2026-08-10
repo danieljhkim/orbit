@@ -414,7 +414,7 @@ fn resume_submission_rejects_a_non_terminal_run_before_persisting_anything() {
         .expect("insert pending run");
 
     let error = runtime
-        .submit_resume_run(&run.run_id, Some("test"))
+        .submit_resume_run(&run.run_id, Some("test"), None)
         .expect_err("a pending run is not resumable");
     assert!(
         error
@@ -469,7 +469,7 @@ fn resume_refuses_an_interrupted_run_whose_worker_is_still_alive() {
         .expect("condemn run to interrupted");
 
     let error = runtime
-        .submit_resume_run(&run.run_id, Some("test"))
+        .submit_resume_run(&run.run_id, Some("test"), None)
         .expect_err("resume must refuse a source whose worker is still alive");
     assert!(
         error.to_string().contains("is still alive"),

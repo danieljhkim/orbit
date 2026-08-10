@@ -1760,6 +1760,12 @@
         "name": "id",
         "param_type": "string",
         "required": true
+      },
+      {
+        "description": "Token for this workspace's exclusive claim (ADR-0352), required when another operator holds one. Falls back to `ORBIT_WORKSPACE_CLAIM_TOKEN`.",
+        "name": "claim_token",
+        "param_type": "string",
+        "required": false
       }
     ],
     "status": "active"
@@ -1802,6 +1808,12 @@
       {
         "description": "Optional base branch override.",
         "name": "base",
+        "param_type": "string",
+        "required": false
+      },
+      {
+        "description": "Token for this workspace's exclusive claim (ADR-0352), required when another operator holds one. Falls back to `ORBIT_WORKSPACE_CLAIM_TOKEN`.",
+        "name": "claim_token",
         "param_type": "string",
         "required": false
       },
