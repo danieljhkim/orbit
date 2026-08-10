@@ -13,6 +13,7 @@ pub mod redaction;
 pub mod selector;
 #[cfg(feature = "sqlite")]
 pub mod sqlite;
+pub mod ssh_tunnel;
 
 #[cfg(test)]
 mod tests;

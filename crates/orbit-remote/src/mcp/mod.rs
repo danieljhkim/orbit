@@ -8,6 +8,7 @@ mod hub;
 mod hub_client;
 mod hub_link;
 mod learning;
+mod proxy;
 mod registration;
 mod schema;
 mod transport;
@@ -36,6 +37,7 @@ use self::schema::RemoteInputSchemaResolver;
 use self::transport::{PrivateHubRequestHandler, RemoteCallContextResolver};
 
 pub use self::host::{canonical_mcp_tool_definitions, safe_mcp_tool_names};
+pub use self::proxy::{DEFAULT_REMOTE_MCP_PORT, RemoteProxyArgs, serve_mcp_remote_proxy};
 pub use self::registration::register_local_spoke;
 
 /// Serve the local broker or fixed coordination hub over MCP stdio.

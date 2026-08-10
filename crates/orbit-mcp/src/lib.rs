@@ -26,6 +26,7 @@
 mod adapter;
 mod client;
 mod error;
+mod relay;
 mod session;
 mod tcp;
 
@@ -44,6 +45,7 @@ pub use adapter::OrbitToolServer;
 pub use client::{
     McpClientInitialization, McpClientRequestError, McpToolResponse, RawOrbitMcpClient,
 };
+pub use relay::{relay, relay_stdio};
 pub use session::McpSessionFactory;
 pub use tcp::{McpTcpServer, serve_tcp_with_context_and_composition};
 

@@ -16,7 +16,9 @@ orbit-common = { path = "../orbit-common" }
 rmcp = { version = "1.5", default-features = false, features = ["client", "server", "transport-io"] }
 serde.workspace = true
 serde_json.workspace = true
-tokio.workspace = true
+# `io-std` supplies the stdio half of the client-side relay (`relay_stdio`)
+# and `io-util` the split/copy primitives it pumps bytes with [ORB-10710].
+tokio = { workspace = true, features = ["io-std", "io-util"] }
 tracing.workspace = true
 
 [dev-dependencies]
