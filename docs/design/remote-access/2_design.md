@@ -1,16 +1,16 @@
 ---
 title: "Remote Access — Design"
 owner: claude
-last_updated: 2026-07-26
+last_updated: 2026-08-10
 status: Accepted
 feature: remote-access
 doc_role: design
 type: design
-summary: "The two shipped surfaces — global multi-workspace serve (the only mode since ORB-10029) and SSH-tunnel connect — their state model, the dashboard task-list endpoint contract, and how they compose."
+summary: "The two shipped surfaces — global multi-workspace serve (the only mode since ORB-10029) and SSH-tunnel connect (attach-if-already-running since ORB-10708) — their state model, the dashboard task-list endpoint contract, and how they compose."
 tags: [remote-access]
 paths: ["crates/orbit-dashboard/**", "crates/orbit-remote/src/runtime.rs", "crates/orbit-remote/src/workspace_registry.rs", "crates/orbit-cli/src/command/web.rs", "crates/orbit-cli/src/command/operation.rs"]
 related_features: [remote-access, user-interface, host-registry]
-related_artifacts: [ORB-00029, ORB-00030, ORB-00360, ORB-10029, ORB-10200, ORB-10294, ORB-10310, ORB-10319, ORB-10400, ADR-0200, ADR-0201, ADR-0234]
+related_artifacts: [ORB-00029, ORB-00030, ORB-00360, ORB-10029, ORB-10200, ORB-10294, ORB-10310, ORB-10319, ORB-10400, ORB-10708, ADR-0200, ADR-0201, ADR-0234, ADR-0353]
 ---
 
 # Remote Access — Design
@@ -86,10 +86,10 @@ Consumers accept either shape (`items` when present, else the array) — the `/a
 [`connect`](../../../crates/orbit-dashboard/src/connect.rs) automates the manual `ssh -L 7878:localhost:7878 <host> "orbit web serve --no-open"` dance and nothing more. Given `orbit web connect <ssh-host>`:
 
 1. **Local port.** `select_local_port` prefers the conventional `7878`, falling back to an OS-assigned ephemeral port if it is busy; an explicit `--port` is honored or fails loudly.
-2. **Remote command.** `remote_serve_command` builds `orbit web serve --no-open --port <remote_port> [--global] [--root <p>]`. `--no-open` is always present (the remote must never open a browser); `--root` is shell-quoted; `--global` is forwarded when set — a no-op against a post-[ORB-10029] remote binary (global is always on), kept so `connect` still works against an older remote that still gates on the flag.
-3. **Tunnel.** `build_ssh_args` produces `ssh -tt -o ExitOnForwardFailure=yes -L <local>:localhost:<remote> <host> <remote-command>`. `-tt` forces a pty so the remote serve receives SIGHUP when the tunnel drops; `ExitOnForwardFailure=yes` fails fast rather than running the remote with no working forward; stdin is null so Ctrl-C reaches *us*.
-4. **Readiness.** `wait_until_ready` polls `GET /healthz` over the forwarded port until it answers `200`, the `ssh` child exits early (classified into an actionable error — `127` = orbit not on remote PATH, `255` = ssh connect failure), or a 30s timeout elapses.
-5. **Teardown.** `SshTunnel` is an RAII owner of the `ssh` child; on Ctrl-C / SIGTERM / remote exit, `Drop` sends SIGTERM then SIGKILL after a grace period. Closing `ssh` drops the connection, SIGHUP reaps the remote serve — no orphan.
+2. **Attach probe ([ORB-10708], [ADR-0353]).** Before spawning anything, `probe_attach` opens a bare forward with no remote command (`build_probe_ssh_args`: `ssh -N -o ExitOnForwardFailure=yes -L <local>:localhost:<remote> <host>`) and polls `GET /healthz` over it (`poll_until_ready`) for `ATTACH_PROBE_TIMEOUT` (5s). If something already answers `200` — another session's tunnel, or a long-lived remote listener — that bare forward *is* the session's tunnel from here on: no remote command is ever sent, so the pre-existing remote process is never touched by this invocation, on connect or on later disconnect. If nothing answers before the probe timeout, the probe forward is torn down and `connect` falls through to spawn mode (steps 3–4) unchanged. An early `ssh` exit during the probe (bad host, auth failure) is not swallowed — it is classified and surfaced immediately, the same as in spawn mode.
+3. **Remote command (spawn mode only).** `remote_serve_command` builds `orbit web serve --no-open --port <remote_port> [--global] [--root <p>]`. `--no-open` is always present (the remote must never open a browser); `--root` is shell-quoted; `--global` is forwarded when set — a no-op against a post-[ORB-10029] remote binary (global is always on), kept so `connect` still works against an older remote that still gates on the flag.
+4. **Tunnel (spawn mode only).** `build_ssh_args` produces `ssh -tt -o ExitOnForwardFailure=yes -L <local>:localhost:<remote> <host> <remote-command>`. `-tt` forces a pty so the remote serve receives SIGHUP when the tunnel drops; `ExitOnForwardFailure=yes` fails fast rather than running the remote with no working forward; stdin is null so Ctrl-C reaches *us*. `wait_until_ready` (built on the same `poll_until_ready` the attach probe uses) polls `/healthz` until it answers `200`, the `ssh` child exits early (classified into an actionable error — `127` = orbit not on remote PATH, `255` = ssh connect failure), or the full 30s `READINESS_TIMEOUT` elapses.
+5. **Teardown.** `SshTunnel` is an RAII owner of whichever `ssh` child this invocation is holding (the attach probe's bare forward, or the spawn-mode tunnel); on Ctrl-C / SIGTERM / remote exit, `Drop` sends SIGTERM then SIGKILL after a grace period. In spawn mode, closing `ssh` drops the connection and SIGHUP reaps the remote serve — no orphan. In attach mode there is no remote command tied to the session, so closing `ssh` only closes the forward — the pre-existing remote process it attached to keeps running.
 
 ## 4. CLI dispatch from anywhere
 
@@ -108,6 +108,8 @@ Neither surface touches the loopback-only bind guard from [ORB-00360]: `check_bi
 - **Aggregate reopens stores per request.** `GET /api/tasks/all` opens each workspace's store on every call — there is no cross-workspace caching of task lists yet.
 - **Unauthenticated on the wire it does reach.** On the loopback interface (local, or the forwarded port), the API is unauthenticated by design; anyone with local access or a foothold on the forwarded port has full dashboard access. The mitigation is the bind guard + SSH, not in-app auth.
 - **Port selection is racy (TOCTOU).** `select_local_port` probes then hands the port to `ssh`; another process can claim it in between. Acceptable for a developer convenience — `ssh -L` fails loudly if so.
+- **The attach-vs-spawn decision is racy too ([ADR-0353]).** Two `connect` invocations starting within the same `ATTACH_PROBE_TIMEOUT` window can both see nothing answering and both fall back to spawning; the second spawn simply fails to bind the remote port and surfaces via the existing exit-code classification. Not eliminated — accepted for a developer convenience command, same posture as the port-selection race above.
+- **Every connect pays a probe round trip.** `probe_attach` runs before any spawn decision, so even the common "nothing running yet" case waits up to `ATTACH_PROBE_TIMEOUT` (5s) before falling through to the original spawn-and-wait flow.
 
 ---
 
@@ -122,5 +124,6 @@ Neither surface touches the loopback-only bind guard from [ORB-00360]: `check_bi
 - [ORB-10310] — Made every task-listing surface status-neutral and bounded by `DEFAULT_TASK_LIST_LIMIT`.
 - [ORB-10319] — Moved logical-workspace catalog and registered-checkout runtime construction into `orbit-remote`; dashboard behavior is unchanged.
 - [ORB-10400] — Gave `GET /api/tasks` server-side status/tag/type filters applied before the limit, plus the `{ items, total, limit, truncated }` page envelope (§2.2). Prerequisite for Bridge's `orbit_task_list` (ws_bridge ORB-10398), which could previously only filter an already-truncated array client-side.
+- [ORB-10708] — Made `orbit web connect` probe for and attach to an already-running remote dashboard instead of always spawning one (§3 step 2). See [ADR-0353](./4_decisions.md).
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.
