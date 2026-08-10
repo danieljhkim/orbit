@@ -1,10 +1,10 @@
 schema_version: 2
 id: ADR-0351
-title: Serve the remote surface as enumerate, invoke-by-name, and claim-gated command execution
+title: Expose remote command execution as a claim-gated tool, retaining the advertised surface
 status: proposed
 owner: human
 created_at: 2026-08-10T01:02:27.338020950Z
-last_updated: 2026-08-10T01:54:36.586881416Z
+last_updated: 2026-08-10T02:49:53.224966544Z
 related_features: []
 related_tasks: []
 tags:
