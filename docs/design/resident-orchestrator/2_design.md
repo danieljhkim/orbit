@@ -6,8 +6,8 @@ status: Draft
 feature: resident-orchestrator
 doc_role: design
 type: design
-summary: CLI-backed pickup, checkpoint, decomposition, and shepherding contract for workspace-resident orchestrators.
-tags: [resident-orchestrator, epic, routines, cli]
+summary: Bounded, resumable CLI cycles for workspace-resident orchestration, durable decision gates, decomposition, and shepherding.
+tags: [resident-orchestrator, epic, routines, cli, decision-gates]
 paths: [".orbit/resources/activities/**", ".orbit/resources/jobs/**", ".orbit/routines/**", "crates/orbit-core/assets/**"]
 related_features: [resident-orchestrator, activity-job, routines, agent-families, host-registry]
 related_artifacts: [ORB-10332, ADR-0352]
@@ -16,9 +16,15 @@ related_artifacts: [ORB-10332, ADR-0352]
 # Resident Orchestrator — Design
 
 This document specifies the proposed resident-orchestrator contract. It covers how a high-level
-assignment is addressed, selected, resumed, decomposed, dispatched, and closed using Orbit's CLI
-backend and durable task state. It does not change leaf implementation pipelines or introduce a
-general distributed workflow engine.
+assignment is addressed, selected, resumed, clarified, decomposed, dispatched, and closed using
+Orbit's CLI backend, a resumable provider conversation, and durable task state. It does not change
+leaf implementation pipelines or introduce a general distributed workflow engine.
+
+The v1 hierarchy is human → front-door supervisor → workspace resident orchestrator → leaf
+executor. The resident minimizes the supervisor's workspace-local surface area, but it is not the
+product owner: product scope, material tradeoffs, and merge authority stay at the supervisor or
+human layer. V1 uses bounded headless CLI processes. It deliberately excludes managed PTYs,
+terminal attachment, and live mid-turn steering.
 
 ## 1. Addressing Work Through the Workspace
 
@@ -87,6 +93,12 @@ memory service.
 Using a normal activity asset is intentional. It reuses the existing CLI executor and lets every
 workspace version its own resident binding without adding an identity registry or another server.
 
+The resident activity also supports an opaque provider conversation reference. The first cycle
+starts a new conversation and records its reference; later cycles resume it when the workspace,
+provider, model, and resident identity still match. Conversation continuity reduces repeated
+orientation cost and preserves the semantic thread across decisions, but it grants no authority
+and is never the source of truth for task or workflow state.
+
 The first Constellation canary is `ws_orbit`: Hohmann is bound explicitly to Codex Sol and loads
 its versioned memory layer before each cycle. Adopting this design changes Hohmann from a leaf that
 returns review/merge/closure to the front door into a codebase-bounded orchestrator that owns those
@@ -98,12 +110,22 @@ any independent oversight required by live policy.
 A new `resident_epic_cycle` job performs one bounded ownership cycle:
 
 1. **Select.** A deterministic `select_resident_epic` activity searches the source workspace.
-2. **Invoke.** When a task is selected, the job invokes `activity:resident_orchestrator` with the
-   workspace identity, parent task snapshot, known child summaries, and relevant run pointers.
-3. **Record.** The CLI agent performs task and workflow operations through Orbit's managed tool
-   surface; those writes are the checkpoint.
-4. **Exit.** The job ends after the resident reports the cycle outcome. It does not sleep while a
-   child workflow is running and does not retain a provider session for the next fire.
+2. **Rehydrate.** The job loads the latest durable epic state and any compatible provider
+   conversation reference. An unresolved decision request without an answer returns a successful
+   no-op before provider invocation.
+3. **Invoke.** The job starts one headless CLI process. It either creates a provider conversation or
+   resumes the compatible conversation with the fresh parent snapshot, child summaries, relevant
+   run pointers, and any newly recorded decision answer.
+4. **Record.** The CLI agent performs task and workflow operations through Orbit's managed tool
+   surface. The provider adapter captures the conversation reference from the provider stream, and
+   the job writes a concise checkpoint containing that reference and the cycle outcome.
+5. **Exit.** The job ends. It does not sleep while a child workflow or human decision is pending,
+   and no provider process remains running between fires.
+
+The retained object is a resumable conversation reference, not a resident process. If that
+reference is missing, expired, incompatible, or cannot be resumed, the job starts a new provider
+conversation from durable Orbit state and records the replacement. Loss of provider conversation
+history may increase reorientation cost, but it must not change the safe next action.
 
 Selection order is deterministic:
 
@@ -135,25 +157,34 @@ active epic are made dispatch-safe by the authoritative task/run lookup in Secti
 
 ## 4. Resident Cycle Contract
 
-The resident is an orchestrator within one workspace, not a leaf implementer and not a global
-supervisor. During each cycle it must:
+The resident is an orchestrator within one workspace, not a leaf implementer, global supervisor,
+or product owner. During each cycle it must:
 
 1. load the parent task, its plan, acceptance criteria, children, dependencies, review threads,
    artifacts, and active workflow runs;
-2. author or refine the parent plan before starting an unplanned proposal;
-3. start the parent when it accepts ownership;
-4. create independently shippable child tasks with `parent_id`, strong acceptance criteria,
+2. before decomposition, make the objective, constraints, non-goals, acceptance evidence, and
+   material unresolved assumptions explicit in the parent plan;
+3. ask for a decision rather than committing substantial work when competing interpretations
+   would produce materially different outcomes or require new authority;
+4. start the parent when it accepts ownership;
+5. create independently shippable child tasks with `parent_id`, strong acceptance criteria,
    precise `context_files`, dependencies, priority, complexity, and crew;
-5. dispatch only explicit ready child IDs through the workspace's normal shipment workflow;
-6. query the authoritative run-list projection by each ready child task ID before dispatching;
+6. dispatch only explicit ready child IDs through the workspace's normal shipment workflow;
+7. query the authoritative run-list projection by each ready child task ID before dispatching;
    observe any non-terminal matching run instead of submitting another shipment;
-7. treat waiting for human review/merge approval as an explicit gate: record the pending PR and
+8. treat waiting for human review/merge approval as an explicit gate: record the pending PR and
    required approver evidence, then exit until that evidence exists;
-8. resolve failures, review findings, merge conflicts, and stale branches within its workspace;
-9. verify landed commits and child lifecycle state rather than trusting agent prose or a PR merge
+9. resolve failures, review findings, merge conflicts, and stale branches within its workspace;
+10. verify landed commits and child lifecycle state rather than trusting agent prose or a PR merge
    button; and
-10. complete the parent only after every required child is terminal and the parent-level acceptance
+11. complete the parent only after every required child is terminal and the parent-level acceptance
     criteria have been verified as an integrated outcome.
+
+The resident may decide reversible, workspace-local execution details already implied by the epic.
+It must surface decisions that change product scope, acceptance criteria, architecture boundaries,
+external behavior, material cost, security posture, or delivery authority. The front-door
+supervisor may answer within authority explicitly delegated to it; otherwise it routes the request
+to the human. The resident never treats silence as expanded authority.
 
 Shipment submission takes explicit child task IDs. Before a Run becomes dispatchable, the shipment
 path must persist those IDs on the Run in the same transaction as Run creation; the run-list
@@ -172,7 +203,7 @@ edit or dispatch into them. A cross-workspace dependency becomes a separate epic
 destination workspace, related from the source task with explicit workspace and task pointers.
 The front-door orchestrator remains the authority for cross-workspace priority and product scope.
 
-## 5. Durable Checkpoints and Resumption
+## 5. Durable Checkpoints, Decisions, and Resumption
 
 No correctness may depend on CLI conversation history. The recovery state is the Orbit graph:
 
@@ -185,7 +216,65 @@ No correctness may depend on CLI conversation history. The recovery state is the
 
 The resident writes a concise cycle checkpoint to the parent before exiting. At minimum it records
 what changed, which children or runs remain active, the next safe action, and any blocker requiring
-new authority. Checkpoints are pointers, not copied logs.
+new authority. It also records the opaque provider conversation reference and the provider, model,
+workspace, and resident identity to which that reference is bound. Checkpoints are pointers, not
+copied logs.
+
+### 5.1 Progressive clarification
+
+Upfront planning and mid-execution questions are complementary. Before dispatching the first child,
+the resident resolves ambiguity that can be discovered cheaply from the epic, repository, existing
+ADRs, and supervisor context. Later it asks when new evidence creates a consequential fork.
+
+The escalation heuristic is:
+
+```text
+ask when P(wrong branch | current evidence) × remaining rework cost
+         > question cost + expected delay cost
+```
+
+This is a judgment aid, not a mechanically calculated policy. Low-cost reversible choices remain
+with the resident. The point is to prevent long epics from accumulating expensive work behind an
+unstated assumption while avoiding human involvement in routine execution details.
+
+### 5.2 V1 decision exchange
+
+V1 represents checkpoints and the exchange as structured parent-task comments rather than
+introducing a new message store. Each machine-readable comment body is one JSON object with
+`schema_version: 1` and one of three `kind` values: `resident_cycle_checkpoint`,
+`resident_decision_request`, or `resident_decision_answer`. Ordinary prose comments remain valid
+and are ignored by the resident-state parser. At most one unresolved decision request may exist
+for an epic. A request records:
+
+- a stable request ID and epic ID;
+- the exact question and why it blocks safe progress now;
+- the viable options and material tradeoffs;
+- the resident's recommendation, when it has one;
+- the smallest safe work that may continue without the answer;
+- the current checkpoint and provider conversation reference; and
+- the authority required to answer.
+
+The resident writes the request, records a `waiting_decision` cycle outcome, and exits. The parent
+remains `in-progress`; `blocked` is reserved for an external dependency or authority gap that
+cannot be resolved through this bounded exchange. While the request is unanswered, the selector
+returns a successful no-op without paying for another provider invocation.
+
+The supervisor or human answers through Orbit with a `resident_decision_answer` comment that names
+the request ID, the chosen direction, the answering authority, and any changed constraints or
+acceptance criteria. Only a matching answer from sufficient authority resolves the request;
+duplicate or mismatched answers remain visible but do not create a second decision. The next
+routine fire supplies the resolved answer and fresh Orbit state to the resumed provider
+conversation. V1 does not inject messages into a running turn and does not keep a process alive
+while waiting.
+
+For the Codex canary, a new cycle resumes the saved session through the non-interactive CLI resume
+surface documented in the
+[Codex CLI command reference](https://developers.openai.com/codex/cli/reference). That command
+shape is a provider adapter detail rather than an Orbit task invariant. A resume failure falls back
+to a new conversation after recording the failure; the unanswered or answered decision remains
+durable in Orbit either way.
+
+### 5.3 Crash and restart behavior
 
 Crash behavior follows from where the failure occurs:
 
@@ -196,9 +285,12 @@ Crash behavior follows from where the failure occurs:
 | After parent start | Parent remains `in-progress` | Resume it before new work |
 | After child creation | Children remain attached | Continue decomposition/dispatch |
 | After workflow submit, before resident checkpoint | Run already contains the child task ID and appears in the task-indexed run-list projection | Observe the matching run; do not redispatch |
+| After decision request, before answer | Parent has one unresolved request | Return a no-op without provider invocation |
+| After decision answer, before resume | Parent has a matched answer | Resume the compatible conversation with the answer and fresh state |
+| Provider conversation cannot be resumed | Orbit graph and decision records remain intact | Start a new conversation and continue from the durable checkpoint |
 | While waiting for agent review or CI evidence | Parent remains active with the pending gate recorded | Recheck only the required gate |
 | While waiting for human review/merge approval | Parent remains active with the PR and required approval evidence recorded | Recheck human approval/merge evidence; do not redispatch or complete |
-| Genuine product-authority blocker | Parent moves to `blocked` with exact question | Stop automatic retries |
+| Unresolvable product-authority blocker | Parent moves to `blocked` with exact missing authority | Stop automatic retries |
 
 ## 6. Routine Contract
 
@@ -219,6 +311,11 @@ policy:
 The routine is only a clock and admission boundary. It must not discover or ship ordinary backlog
 tasks. An `epic` root was deliberately placed in this workspace by an upstream orchestrator or
 human, so pickup is explicit delegation rather than blind auto-dispatch.
+
+The routine is also the v1 wake mechanism for answered questions. No event bus or live channel is
+required: an unanswered decision is filtered before provider invocation, while a matching answer
+makes the next cycle runnable. The polling interval therefore bounds response latency without
+creating idle model cost.
 
 Routine definitions remain disabled by default when seeded. Enabling a resident is a versioned
 workspace decision, and the activity must resolve to a valid CLI provider/model on the pinned host
@@ -261,17 +358,18 @@ path:
 | Former HTTP epic path | Resident CLI path |
 |----------------|-------------------|
 | Required pre-existing children | Owns decomposition and child creation |
-| Used `backend: http` and a retained `session:` loop | Uses bounded `backend: cli` cycles |
-| Kept progress partly in provider conversation state | Derives progress from durable Orbit state |
+| Used `backend: http` and a retained `session:` loop | Uses bounded `backend: cli` processes with an optional resumable provider conversation |
+| Kept progress partly in provider conversation state | Keeps correctness in Orbit; conversation continuity only reduces reorientation cost |
 | Dispatched child gates | Shepherds dispatch, review, merge, and closure |
 | Treated `review` as shipped/terminal | Requires verified task and integration completion |
 
 Because [ORB-10332] already removed the legacy epic-pipeline assets, the resident path can be built
 greenfield without the earlier planned disjoint-selector migration:
 
-1. ship the resident selector, CLI activity contract, cycle job, and disabled routine;
-2. canary one workspace and verify crash/resume, duplicate-dispatch prevention, review repair, and
-   final parent closure; and
+1. ship the resident selector, resumable CLI activity contract, decision exchange, cycle job, and
+   disabled routine;
+2. canary one workspace and verify question/answer resumption, lost-session recovery,
+   duplicate-dispatch prevention, review repair, and final parent closure; and
 3. enable the routine per workspace as the resident capability proves out.
 
 Historical run records for the removed pipeline remain readable after that catalog retirement.
@@ -288,25 +386,38 @@ It may exercise routine lifecycle operations needed to shepherd already-authoriz
 must block and surface a precise question when completion needs new product authority or a material
 scope expansion.
 
+Conversation references are opaque continuity pointers, not credentials or authorization grants.
+Every resumed cycle starts under Orbit's current run identity, sandbox, workspace claim, provider
+binding, and repository instructions. Decision answers retain their recorded human or supervisor
+provenance. Resuming an old conversation must never restore superseded permissions or bypass a
+newer durable task constraint.
+
 ## 10. Concerns & Honest Limitations
 
 - **Workspace ownership is singular in v1.** Multiple resident orchestrators in one workspace need
   an explicit routing or lease design; tags alone are not enough.
-- **Polling adds latency.** A five-minute cadence is simple and robust but delays pickup and
-  resumption. Event triggers remain outside routines v1.
-- **CLI cycles rehydrate context.** Durable state prevents correctness loss, but each invocation
-  pays the cost of reading identity, task state, and repository context again.
+- **Polling adds latency.** A five-minute cadence is simple and robust but delays pickup, answered
+  decisions, and resumption. Event triggers remain outside routines v1.
+- **Conversation continuity is best effort.** A provider may expire, reject, or become unable to
+  resume a session. Durable state prevents correctness loss, but a replacement conversation pays
+  the full reorientation cost.
+- **Every cycle still refreshes authority and facts.** Resuming a conversation does not eliminate
+  the cost of rereading current task, run, review, and repository state.
+- **There is no live intervention in v1.** A human cannot steer an in-flight turn. Urgent control
+  uses the existing run cancellation boundary; ordinary guidance is applied on the next cycle.
 - **Cross-workspace epics are not one graph.** Each workspace owns its own task tree; the front door
   must relate and observe multiple parent tasks when one product outcome spans codebases.
 - **Provider harness trust is real.** CLI activities do not receive the HTTP backend's builtin tool
   allowlist enforcement. Host sandboxing and provider policy remain part of the security boundary.
 - **A resident can still make poor decomposition choices.** Deterministic selection and durable
-  state make those choices inspectable and recoverable; they do not eliminate judgment risk.
-- **Legacy removal needs migration evidence.** Deleting the HTTP epic assets before all routine,
-  job, and live-run references are checked would turn a design cleanup into an operational break.
+  state, explicit assumptions, and decision gates make those choices inspectable and recoverable;
+  they do not eliminate judgment risk.
+- **Structured comments are intentionally narrow.** One pending decision per epic keeps v1 simple,
+  but it is not a general mailbox, chat system, or multi-party negotiation log.
 
 ## Task References
 
-- None yet — implementation tasks will be allocated after this Draft is accepted.
+- **[ORB-10332]** — Removed the unused HTTP epic pipeline assets that this design supersedes.
+- Further implementation tasks will be allocated after this Draft is accepted.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.
