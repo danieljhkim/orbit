@@ -10,6 +10,7 @@ mod hub_link;
 mod knowledge_allocation;
 mod learning;
 mod schema;
+mod serve;
 mod support;
 mod transport;
 

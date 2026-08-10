@@ -16,6 +16,7 @@ mod transport;
 mod tests;
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::net::SocketAddr;
 use std::sync::Arc;
 
 use orbit_common::types::{McpCapability, ToolSessionContext};
@@ -45,11 +46,92 @@ pub fn serve_mcp_stdio(
     hub: bool,
     requested_capability: Option<McpCapability>,
 ) -> Result<(), OrbitError> {
+    let (host, trusted_context, composition) = build_mcp_session(hub, requested_capability)?;
+    let tokio_runtime = build_tokio_runtime()?;
+    tokio_runtime.block_on(orbit_mcp::serve_stdio_with_context_and_composition(
+        host,
+        trusted_context,
+        composition,
+    ))
+}
+
+/// Serve the local broker or fixed coordination hub over MCP-over-TCP.
+///
+/// The endpoint carries no authentication of its own (see
+/// [`orbit_mcp::McpTcpServer`]); ADR-0350 authenticates it by requiring an SSH
+/// tunnel to reach it rather than by anything Orbit adds. That posture only
+/// holds if the listener itself refuses a routable bind, so the loopback
+/// check runs before the socket opens — the same guard
+/// `orbit-dashboard::check_bindable_host` applies, reused here rather than
+/// re-derived because both guards protect an unauthenticated listener the
+/// same way.
+pub fn serve_mcp_tcp(
+    addr: SocketAddr,
+    hub: bool,
+    requested_capability: Option<McpCapability>,
+) -> Result<(), OrbitError> {
+    check_bindable_mcp_host(addr)?;
+    let (host, trusted_context, composition) = build_mcp_session(hub, requested_capability)?;
+    let tokio_runtime = build_tokio_runtime()?;
+    tokio_runtime.block_on(orbit_mcp::serve_tcp_with_context_and_composition(
+        addr,
+        host,
+        trusted_context,
+        composition,
+    ))
+}
+
+/// Reject binding the MCP TCP listener to anything other than a loopback
+/// address, before the socket is opened.
+///
+/// SECURITY: the listener carries no authentication of its own. A non-loopback
+/// bind would turn it into unauthenticated remote control of the machine, so
+/// this refuses eagerly rather than documenting the risk. For remote access,
+/// bind loopback and reach it through an authenticated tunnel (e.g. `ssh -L`),
+/// which is exactly the posture ADR-0350 commits to.
+fn check_bindable_mcp_host(addr: SocketAddr) -> Result<(), OrbitError> {
+    if addr.ip().is_loopback() {
+        return Ok(());
+    }
+    Err(OrbitError::InvalidInput(format!(
+        "refusing to bind the MCP TCP listener to non-loopback address {addr}: the listener is \
+         unauthenticated and relies on an SSH tunnel for access control (ADR-0350). Bind a \
+         loopback address (127.0.0.1 or ::1) and use an authenticated tunnel/reverse proxy \
+         (e.g. `ssh -L {port}:localhost:{port} <host>`) for remote access.",
+        port = addr.port()
+    )))
+}
+
+/// Resolve the effective capability for a session that did not request one.
+///
+/// A deployment that says nothing must not become an operator: [`McpCapability::Agent`]
+/// is the capability nothing else grants on its own (see
+/// `orbit_common::authorization`'s governed-operation table, which never lists
+/// `Agent` alone), so it is the floor every unspecified session gets — for
+/// both stdio and TCP.
+fn least_privileged_mcp_capability(requested: Option<McpCapability>) -> McpCapability {
+    requested.unwrap_or(McpCapability::Agent)
+}
+
+fn build_tokio_runtime() -> Result<tokio::runtime::Runtime, OrbitError> {
+    tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .map_err(|error| OrbitError::Execution(format!("tokio runtime: {error}")))
+}
+
+/// Build the trusted host, session template, and server composition shared by
+/// every MCP transport. The effective capability is resolved here so stdio
+/// and TCP agree on the same least-privileged default.
+fn build_mcp_session(
+    hub: bool,
+    requested_capability: Option<McpCapability>,
+) -> Result<(Arc<dyn McpHost>, ToolSessionContext, McpServerComposition), OrbitError> {
     let global_root = resolve_global_root()?;
     // Parse the trusted file, when present, before constructing either server
     // host. Workspace/cwd config never participates in this load.
     let trusted_config = load_trusted_mcp_config(&global_root)?;
-    let capability = requested_capability.unwrap_or(McpCapability::Agent);
+    let capability = least_privileged_mcp_capability(requested_capability);
     let (host, mut trusted_context, composition): (
         Arc<dyn McpHost>,
         ToolSessionContext,
@@ -109,15 +191,7 @@ pub fn serve_mcp_stdio(
     };
     trusted_context.effective_capabilities = BTreeSet::from([capability]);
 
-    let tokio_runtime = tokio::runtime::Builder::new_multi_thread()
-        .enable_all()
-        .build()
-        .map_err(|error| OrbitError::Execution(format!("tokio runtime: {error}")))?;
-    tokio_runtime.block_on(orbit_mcp::serve_stdio_with_context_and_composition(
-        host,
-        trusted_context,
-        composition,
-    ))
+    Ok((host, trusted_context, composition))
 }
 
 fn broker_server_composition(host: Arc<BrokerMcpHost>) -> McpServerComposition {

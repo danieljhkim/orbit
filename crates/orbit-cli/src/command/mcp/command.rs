@@ -1,3 +1,4 @@
+use std::net::SocketAddr;
 use std::path::Path;
 
 use clap::{Args, Subcommand};
@@ -58,6 +59,13 @@ pub struct ServeArgs {
     /// Exact non-hierarchical capability for this broker or hub session.
     #[arg(long, value_name = "CAPABILITY")]
     pub capabilities: Option<McpCapability>,
+    /// Serve over TCP at this loopback address instead of stdio. A
+    /// non-loopback address is refused before the socket is opened, since the
+    /// listener carries no authentication of its own; reach it through an
+    /// authenticated SSH tunnel (ADR-0350). Stdio remains the default when
+    /// this is omitted.
+    #[arg(long, value_name = "ADDR")]
+    pub listen: Option<SocketAddr>,
 }
 
 impl ServeArgs {
@@ -68,9 +76,10 @@ impl ServeArgs {
                     .to_string(),
             ));
         }
-        {
-            orbit_remote::serve_mcp_stdio(self.hub, self.capabilities)?;
-            Ok(CommandOutput::Silent)
+        match self.listen {
+            Some(addr) => orbit_remote::serve_mcp_tcp(addr, self.hub, self.capabilities)?,
+            None => orbit_remote::serve_mcp_stdio(self.hub, self.capabilities)?,
         }
+        Ok(CommandOutput::Silent)
     }
 }
