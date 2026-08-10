@@ -1,5 +1,6 @@
 pub mod adr;
 pub mod auto_task;
+pub mod command;
 pub mod docs;
 pub mod friction;
 pub mod learning;
@@ -107,6 +108,13 @@ pub fn register(registry: &mut ToolRegistry) {
     registry.register_inactive(workspace_claim::OrbitWorkspaceClaimAcquireTool);
     registry.register_inactive(workspace_claim::OrbitWorkspaceClaimReleaseTool);
     registry.register_inactive(workspace_claim::OrbitWorkspaceClaimShowTool);
+    // ORB-10711 [ADR-0351]: the one operation the owned tunnel adds beyond the
+    // existing read/write surface. Operator-only and claim-gated so a
+    // claim-holding operator can reach it, exactly like `orbit.workflow.ship`.
+    registry.register_mcp(
+        command::OrbitCommandExecTool,
+        McpToolPolicy::operator_only(McpToolPlacement::LocalDerived),
+    );
     registry.register_mcp(
         task::start::OrbitTaskStartTool,
         agent_operator(McpToolPlacement::Hub),

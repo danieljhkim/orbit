@@ -89,6 +89,7 @@ pub enum OrbitBuiltinAction {
     AutoTaskShow,
     AutoTaskUpdate,
     AutoTaskToggle,
+    CommandExec,
     DocsList,
     DocsShow,
     DocsAdd,

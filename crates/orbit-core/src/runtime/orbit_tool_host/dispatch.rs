@@ -30,6 +30,7 @@ pub(super) fn execute(
         OrbitBuiltinAction::AutoTaskShow => super::auto_task_tools::show(runtime, input),
         OrbitBuiltinAction::AutoTaskUpdate => super::auto_task_tools::update(runtime, input),
         OrbitBuiltinAction::AutoTaskToggle => super::auto_task_tools::toggle(runtime, input),
+        OrbitBuiltinAction::CommandExec => super::command_tools::exec(runtime, input, agent, model),
         OrbitBuiltinAction::DocsList => super::docs_tools::list(runtime, input),
         OrbitBuiltinAction::DocsShow => super::docs_tools::show(runtime, input),
         OrbitBuiltinAction::DocsAdd => super::docs_tools::add(runtime, input),

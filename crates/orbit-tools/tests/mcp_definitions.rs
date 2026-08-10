@@ -29,11 +29,30 @@ impl Tool for TestTool {
 fn canonical_builtin_definitions_are_workspace_independent() {
     let definitions =
         canonical_builtin_mcp_tool_definitions().expect("builtin MCP definitions are valid");
-    assert_eq!(definitions.len(), 30);
+    assert_eq!(definitions.len(), 31);
     assert!(
         definitions
             .iter()
             .all(|definition| definition.schema.builtin)
+    );
+}
+
+#[test]
+fn command_exec_is_local_derived_and_operator_only() {
+    let definitions =
+        canonical_builtin_mcp_tool_definitions().expect("builtin MCP definitions are valid");
+
+    let definition = definitions
+        .iter()
+        .find(|definition| definition.schema.name == "orbit.command.exec")
+        .expect("missing orbit.command.exec definition");
+    assert_eq!(
+        definition.policy.placement(),
+        McpToolPlacement::LocalDerived
+    );
+    assert_eq!(
+        definition.policy.allowed_capabilities(),
+        &std::collections::BTreeSet::from([orbit_common::types::McpCapability::Operator])
     );
 }
 
