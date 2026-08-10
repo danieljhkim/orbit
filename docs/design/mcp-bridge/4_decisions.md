@@ -271,7 +271,7 @@ separately by [ADR-0351].
 
 Narrative lives in the ADR store — retrieve it with `orbit tool run orbit.adr.show --input '{"id":"ADR-0350"}'`.
 
-## ADR-0351 — Serve the remote surface as enumerate, invoke-by-name, and claim-gated command execution
+## ADR-0351 — Expose remote command execution as a claim-gated tool, retaining the advertised surface
 
 **Status:** Proposed · 2026-08
 
@@ -288,29 +288,28 @@ the duplication this feature removes was an external process re-declaring them.
 
 ### Decision
 
-Serve three operations over the tunnel: enumerate the registry entries visible to
-the caller with their schemas; invoke a tool by name through the governed
-chokepoint; and run a command as argv plus working directory, requiring operator
-capability and the workspace claim and withheld from managed runs. A client
-without the claim receives enumerate and invoke, never command — the boundary is
-which operations exist for that caller, not an allowlist over argv, which leaks.
-The existing advertised per-tool surface is retained pending tool-call metrics.
+Add one operation: run a command as argv plus an explicit working directory, never
+a shell string. It requires operator capability and the workspace claim, and is
+withheld from managed runs. A client without the claim does not receive it — the
+boundary is whether the operation exists for that caller, not an allowlist over
+argv, which leaks. The advertised per-tool surface is unchanged; replacing it with
+generic enumerate and invoke-by-name is left open in
+[3_vision.md](./3_vision.md).
 
 ### Consequences
 
 - The orchestrator stops dispatching a full worker run to answer questions a
-  single command answers, and every registry operation stays reachable without a
-  per-operation adapter.
-- Splitting invoke from command preserves per-tool audit attribution that a
-  command-only surface would have discarded.
-- Policy and placement metadata move from filtering an advertised list to
-  authorizing an invocation — enforcement rather than advertisement.
-- Cost: enumerate and invoke rebuild the protocol's own list/call verbs inside a
-  tool, justified only by collapsing per-tool policy into one authorization point.
+  single command answers, and new CLI capability is reachable as soon as it ships.
+- Per-tool audit attribution survives for everything except command itself, the
+  narrowest possible degradation of provenance.
 - Cost: for a claim-holding client, capability filtering above command is
   advisory. Gating bounds who that applies to; it does not make it untrue.
 - Cost: audit granularity degrades for command calls specifically.
-- Cost: the surface stays doubled through the measurement period.
+- Cost: two paths now reach the same operations — the advertised tool, and the CLI
+  through command.
+- Cost: resolving that duplication needs caller-scoped evidence no endpoint
+  produces today, so retention is deferral rather than measurement.
+  Reversibility rests on the definitions being generated from the registry.
 
 Narrative lives in the ADR store — retrieve it with `orbit tool run orbit.adr.show --input '{"id":"ADR-0351"}'`.
 

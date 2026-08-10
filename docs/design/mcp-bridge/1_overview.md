@@ -34,12 +34,10 @@ That topology describes **spokes** — machines with a checkout to protect. A
 checkoutless client, such as an off-box orchestrator, holds no local-derived state
 and is not a spoke. It reaches Orbit through an owned SSH tunnel terminating at a
 loopback-bound listener, where calls resolve remotely with no placement routing
-([ADR-0350]). The tunnel carries three operations — enumerate the registry, invoke
-a tool by name, and run a command — the last requiring both operator capability
-and the workspace claim ([ADR-0351],
-[host-registry/2_design.md §3.2](../host-registry/2_design.md)). The existing
-advertised per-tool surface is retained pending measurement. See
-[2_design.md §5.3](./2_design.md).
+([ADR-0350]). The tunnel adds one operation — running a command — requiring both
+operator capability and the workspace claim ([ADR-0351],
+[host-registry/2_design.md §3.2](../host-registry/2_design.md)). The advertised
+per-tool surface is unchanged. See [2_design.md §5.3](./2_design.md).
 
 This feature and [host-registry](../host-registry/1_overview.md) are coupled.
 Host-registry declares the hub, workspace owner, local replica role, execution

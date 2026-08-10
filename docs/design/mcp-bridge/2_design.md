@@ -527,39 +527,22 @@ Nothing re-declares a schema or reshapes a response: both ends are the same buil
 so the drift §1 attributes to Bridge is structurally absent rather than tested
 for.
 
-#### The surface: enumerate, invoke, command
+#### Command execution rides the tunnel
 
-The tunnel carries three operations with different authority ([ADR-0351]):
+The tunnel adds exactly one operation to the surface ([ADR-0351]). **Command**
+takes an argv array and an explicit working directory — never a shell string, so
+quoting and operator-precedence bugs are structurally impossible rather than
+merely discouraged.
 
-| Operation | Input | Requires |
-|-----------|-------|----------|
-| Enumerate | — | capability filter |
-| Invoke by name | tool name, input, workspace | capability, placement, claim as the tool demands |
-| Command | argv, working directory | operator **and** the workspace claim |
-
-**Enumerate** returns the registry entries visible to this caller with their
-descriptions and input schemas. Discoverability is preserved without advertising
-one definition per tool.
-
-**Invoke by name** dispatches through the governed chokepoint. Authorization
-happens at invocation rather than by omission from an advertised list, and the
-audit record carries the inner tool name, workspace, and capability — so
-provenance is unchanged from the advertised surface. This is the point of
-splitting invoke from command: routine work keeps per-tool attribution, and only
-genuinely arbitrary execution degrades to an argv.
-
-**Command** takes an argv array and an explicit working directory, never a shell
-string, so quoting and operator-precedence bugs are structurally impossible rather
-than merely discouraged. It requires operator capability *and* the workspace claim
+It requires operator capability *and* the workspace claim
 ([host-registry/2_design.md §3.2](../host-registry/2_design.md)), and is withheld
 from managed runs, which could otherwise bypass the self-dispatch guard (§8.2) by
-invoking the CLI.
+invoking the CLI. A client without the claim does not receive it at all.
 
-A client without the claim receives enumerate and invoke, never command. That
-restriction is deliberately **not** an allowlist over argv: a filtered command
-surface leaks through `bash -c`, `env`, `xargs`, `make`, interpreter `-c` flags,
-and version-control hooks. The boundary is which operations exist for that caller,
-not which binaries it may name.
+That restriction is deliberately **not** an allowlist over argv: a filtered
+command surface leaks through `bash -c`, `env`, `xargs`, `make`, interpreter `-c`
+flags, and version-control hooks. The boundary is whether the operation exists for
+that caller, not which binaries it may name.
 
 The honest cost is that a claim-holding client can reach any governed operation by
 invoking the CLI, so filtering above command is advisory for it. That is accepted
@@ -568,12 +551,7 @@ with SSH can already run anything there. It is not accepted for the default
 surface, which is why the gating is part of the decision rather than a deployment
 choice.
 
-Note also that enumerate and invoke reproduce the protocol's own listing and call
-verbs inside a tool — a protocol within a protocol. That is justified only if
-collapsing per-tool policy surface into one authorization point is worth the
-indirection, and it should be argued on those terms rather than assumed.
-
-#### The advertised surface is retained pending measurement
+#### The advertised surface is unchanged
 
 Orbit's per-tool definitions are **derived from the tool registry**, not
 hand-written: a tool is declared once with its schema and registered with a
@@ -581,16 +559,27 @@ policy, and the advertised set is computed from those entries. The duplication
 this feature exists to remove was an external process re-declaring those schemas
 in another language, which the tunnel already eliminates. What the advertised
 surface actually costs is per-tool policy and placement metadata, the conformance
-test pinning the definition count, and the contract digest.
+test pinning the definition count, the contract digest, and the context those
+definitions occupy in every client request.
 
-That cost is modest and the surface is cheap to keep, so it stays for now. Skills
-point at the CLI, tool-call metrics (§9, `/metrics/tools`) record what is actually
-called, and the set is revisited from observed use. Removing it later is a small
-change; removing it now is the irreversible half of the decision and buys the
-least.
+That cost is modest, so the surface stays as it is. Clients keep native tool
+selection, call-time argument validation, and per-tool audit attribution; only
+command itself degrades provenance to an argv. Replacing the advertised
+definitions with generic enumerate and invoke-by-name operations is left open in
+[3_vision.md §1](./3_vision.md), not decided here.
 
-The cost of leaving it open is that two paths reach the same operation through the
-measurement period, and the deferral only pays off if the metrics are read.
+Two consequences follow and are accepted deliberately. Two paths now reach the
+same operations — the advertised tool, and the CLI through command. And deciding
+later whether the advertised surface earns its place needs evidence no current
+endpoint produces: `/metrics/tools` is an ungrouped invocation count with no
+caller dimension, so the usable cut is over audit events with job-run and
+activity-bearing rows excluded, or engine and worker traffic swamps the
+orchestrator's. Until that cut exists, retention is deferral rather than
+measurement.
+
+What makes this reversible is not the measurement but the generation: the
+definitions come from the registry, so removing them later is a revert, not a
+rebuild.
 
 #### What this is not
 
@@ -1151,14 +1140,14 @@ Required validation:
   from managed runs, bounds who that applies to; it does not change that it is
   true. Audit granularity also degrades for those calls, since an argv is not a
   tool name.
-- **Enumerate and invoke are a protocol inside a protocol (§5.3).** They rebuild
-  the listing and call verbs the transport already provides. The trade is one
-  authorization point instead of per-tool policy surface, and it is worth
-  restating that this is the actual argument — not that the advertised
-  definitions are expensive to maintain, which they are not.
-- **The surface over the tunnel is unsettled on purpose (§5.3).** That defers a
-  decision rather than making one, and the deferral only pays off if the tool-call
-  metrics are actually read. Left unread, it is simply a doubled surface.
+- **Two paths reach the same operations (§5.3).** The advertised tool, and the CLI
+  through command. This is accepted deliberately, but it is duplication of the
+  kind this feature exists to remove, and it should be resolved rather than
+  normalised.
+- **The evidence needed to resolve it does not exist yet (§5.3).** No endpoint
+  produces a caller-scoped view of tool use, so retaining the advertised surface
+  is deferral rather than measurement. Reversibility rests on the definitions
+  being generated, not on data anyone is currently collecting.
 
 ## Task References
 

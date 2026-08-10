@@ -61,16 +61,28 @@ feature rather than add another horizontal broker crate ([ORB-10319]).
 8. **Knowledge sidecar on replicas.** Should an agent explicitly opt into stale but
    marked learning injection, or is disabling injection safer until owner-current
    state is available? This should follow evidence from replica use, not convenience.
-9. **Whether the advertised per-tool surface still earns its place.** [ADR-0351]
-   serves enumerate, invoke-by-name, and command over the tunnel while retaining
-   the advertised definitions, and leaves the question to measurement. Note the
-   argument is *not* that those definitions are expensive — they are derived from
-   the registry, not hand-written. It is whether per-tool policy and placement
-   metadata, the conformance count, and the contract digest are worth carrying
-   once one authorization point exists. If enumerate and invoke cover real use,
-   the follow-on question is whether Orbit should advertise tools at all rather
-   than ship a tunnel and a skill. Reach that deliberately rather than by drift —
-   and the deferral only pays off if the metrics are read.
+9. **Whether the advertised per-tool surface should become generic dispatch.**
+   [ADR-0351] adds command and changes nothing else, leaving this open. The
+   replacement shape would be two operations — enumerate the registry entries
+   visible to a caller with their schemas, and invoke one by name — collapsing
+   per-tool policy into a single authorization point. Note the argument is *not*
+   that the definitions are expensive to maintain; they are generated from the
+   registry. It is whether policy and placement metadata, the conformance count,
+   the contract digest, and the per-request context cost of carrying every schema
+   are worth it once one authorization point exists.
+
+   Two things must be settled before it could land. It rebuilds the transport's
+   own list and call verbs inside a tool, which needs arguing on its merits rather
+   than assuming. And capability filtering currently happens twice — at
+   advertisement and at call — so a generic invoke inherits the whole burden:
+   tools registered inactive or active-without-policy (`orbit.adr.list`,
+   `orbit.task.delete`, the pipeline primitives) are unreachable over MCP today
+   *only* because they never appear in the advertised set. Generic invoke must
+   deny them explicitly, or the replacement quietly grants an agent
+   `orbit.task.delete` while nothing appears to have changed.
+
+   Deciding it needs evidence no endpoint currently produces — see the audit-event
+   cut described in [2_design.md §5.3](./2_design.md).
 
 ## 2. Prior Work
 
