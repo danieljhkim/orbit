@@ -9,3 +9,4 @@ mod redaction;
 mod selector;
 #[cfg(feature = "sqlite")]
 mod sqlite;
+mod ssh_tunnel;

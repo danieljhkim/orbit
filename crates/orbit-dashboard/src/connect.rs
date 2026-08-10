@@ -8,36 +8,35 @@
 //!
 //! `connect` automates exactly that workflow and nothing more: it delegates
 //! authentication to SSH, keeps the loopback bind guard intact, and adds no new
-//! attack surface. It first opens a bare port forward (no remote command) and
-//! probes `/healthz` through it — if a dashboard is already listening on the
-//! remote port (another user's tunnel, or a long-lived remote listener), it
-//! attaches to that instead of spawning a second one. Only when nothing
-//! answers does it fall back to running `orbit web serve` on the remote over a
-//! fresh `ssh` invocation that also forwards the local port. Either way it
-//! waits for the remote server to answer `/healthz`, opens a browser, and — on
-//! Ctrl-C — tears down only the `ssh` process this invocation started: a
-//! spawned remote `orbit web serve` is never orphaned, and an attached,
-//! pre-existing one is never touched.
+//! attack surface. The attach-or-spawn tunnel itself lives in
+//! [`orbit_common::utility::ssh_tunnel`] — the one mechanism every Orbit
+//! loopback listener is reached through ([ORB-10710]) — so this module holds
+//! only what is specific to the dashboard: the `/healthz` readiness probe, the
+//! remote `orbit web serve` command line, the browser, and the shutdown wait.
+//!
+//! Either way it waits for the remote server to answer `/healthz`, opens a
+//! browser, and — on Ctrl-C — tears down only the `ssh` process this invocation
+//! started: a spawned remote `orbit web serve` is never orphaned, and an
+//! attached, pre-existing one is never touched.
 //!
 //! Unlike [`crate::serve`], this command reads no local `.orbit/` state: the
 //! workspace lives on the remote, so it needs no [`orbit_core::OrbitRuntime`].
 
 use std::io::{BufRead, BufReader, Write};
-use std::net::{Ipv4Addr, SocketAddr, TcpListener, TcpStream};
-use std::process::{Child, Command, ExitStatus, Stdio};
-use std::time::{Duration, Instant};
+use std::net::{Ipv4Addr, SocketAddr, TcpStream};
+use std::time::Duration;
 
 use clap::Args;
+use orbit_common::utility::ssh_tunnel::{self, TunnelOrigin, TunnelSpec};
 use orbit_core::OrbitError;
 
 use crate::{DEFAULT_DASHBOARD_PORT, open_browser};
 
+use orbit_common::utility::ssh_tunnel::SshTunnel;
+
 /// How long to wait for the remote dashboard to answer `/healthz` before
 /// giving up. Generous because it covers SSH connect + remote process spawn.
 const READINESS_TIMEOUT: Duration = Duration::from_secs(30);
-
-/// Delay between readiness probes.
-const POLL_INTERVAL: Duration = Duration::from_millis(250);
 
 /// Per-probe TCP connect/read/write timeout for the `/healthz` check.
 const PROBE_TIMEOUT: Duration = Duration::from_millis(500);
@@ -48,10 +47,6 @@ const PROBE_TIMEOUT: Duration = Duration::from_millis(500);
 /// to cover `ssh` handshake plus a couple of probe round trips, not a remote
 /// process boot (that is what [`READINESS_TIMEOUT`] is for).
 const ATTACH_PROBE_TIMEOUT: Duration = Duration::from_secs(5);
-
-/// Grace period between SIGTERM and SIGKILL when tearing the tunnel down.
-#[cfg(unix)]
-const TEARDOWN_GRACE: Duration = Duration::from_secs(2);
 
 /// Arguments for `orbit web connect`.
 #[derive(Args, Clone)]
@@ -93,27 +88,21 @@ pub fn connect(args: ConnectArgs) -> Result<(), OrbitError> {
     let local_port = select_local_port(args.port)?;
 
     // From here on, every exit path (error, panic, normal) tears the tunnel
-    // down via `SshTunnel`'s `Drop` — whichever branch below produced it.
-    let (mut tunnel, attached) = match probe_attach(&args, local_port)? {
-        Some(tunnel) => (tunnel, true),
-        None => {
-            // Force a pty (`-tt`) so that when we kill the local `ssh`, the
-            // remote `orbit web serve` receives SIGHUP and exits — no orphan.
-            let child = spawn_ssh(&build_ssh_args(&args, local_port))?;
-            let mut tunnel = SshTunnel::new(child);
-            wait_until_ready(&mut tunnel, local_port)?;
-            (tunnel, false)
-        }
-    };
+    // down via `SshTunnel`'s `Drop`.
+    let (mut tunnel, origin) =
+        ssh_tunnel::establish(&tunnel_spec(&args, local_port), || healthz_ok(local_port))?;
 
     let url = format!("http://localhost:{local_port}");
 
     #[allow(clippy::print_stdout)]
     {
-        if attached {
-            println!("Attached to already-running remote dashboard: {url}  (Ctrl-C to disconnect)");
-        } else {
-            println!("Dashboard tunnel ready: {url}  (Ctrl-C to disconnect)");
+        match origin {
+            TunnelOrigin::Attached => println!(
+                "Attached to already-running remote dashboard: {url}  (Ctrl-C to disconnect)"
+            ),
+            TunnelOrigin::Spawned => {
+                println!("Dashboard tunnel ready: {url}  (Ctrl-C to disconnect)")
+            }
         }
     }
 
@@ -125,121 +114,31 @@ pub fn connect(args: ConnectArgs) -> Result<(), OrbitError> {
     Ok(())
 }
 
-/// Spawn `ssh` with the given argument vector. `stdin` is null so Ctrl-C is
-/// delivered to *us* (the foreground process) rather than being forwarded
-/// down a pty to the remote.
-fn spawn_ssh(ssh_args: &[String]) -> Result<Child, OrbitError> {
-    Command::new("ssh")
-        .args(ssh_args)
-        .stdin(Stdio::null())
-        .spawn()
-        .map_err(|e| OrbitError::Io(format!("failed to launch ssh: {e}")))
-}
-
-/// Probe for an already-running remote dashboard on `cfg.remote_port` by
-/// opening a bare port forward (`ssh -N`, no remote command) and polling
-/// `/healthz` through it. A tunnel can come up healthy while nothing is
-/// listening behind it, so readiness is decided by the `/healthz` probe, not
-/// by `ssh`'s own exit code (that still surfaces separately — see
-/// [`classify_ssh_exit`] — when `ssh` itself fails, e.g. a bad host).
-///
-/// Returns the still-live probe tunnel on success — it becomes the session's
-/// tunnel — or `None` after tearing the probe down, so the caller falls back
-/// to spawning a fresh remote server. Because a bare `-N` forward never
-/// invokes anything remotely, tearing it down on disconnect cannot orphan or
-/// kill a pre-existing remote process; it only closes the forward.
-fn probe_attach(cfg: &ConnectArgs, local_port: u16) -> Result<Option<SshTunnel>, OrbitError> {
-    let child = spawn_ssh(&build_probe_ssh_args(cfg, local_port))?;
-    let mut tunnel = SshTunnel::new(child);
-
-    if poll_until_ready(&mut tunnel, local_port, ATTACH_PROBE_TIMEOUT)? {
-        Ok(Some(tunnel))
-    } else {
-        tunnel.shutdown();
-        Ok(None)
-    }
-}
-
 // Visibility note: the pure helpers below are `pub(crate)` so the sibling
 // `tests/connect.rs` module can exercise them directly (the crate's test-layout
 // convention). None are part of the crate's public API.
 
-/// Choose the local port to bind the tunnel to.
-///
-/// - An explicit `--port` is honored or fails with a clear error if busy.
-/// - Otherwise prefer the conventional [`DEFAULT_DASHBOARD_PORT`], falling back
-///   to an OS-assigned ephemeral port when it is taken.
-///
-/// Note: this is inherently racy (TOCTOU) — the probed port can be claimed by
-/// another process before `ssh` binds it. That is acceptable for a developer
-/// convenience command; if it happens, `ssh -L` fails loudly on startup.
-pub(crate) fn select_local_port(preferred: Option<u16>) -> Result<u16, OrbitError> {
-    match preferred {
-        Some(port) => {
-            probe_bindable(port).map_err(|e| {
-                OrbitError::InvalidInput(format!(
-                    "requested local port {port} is not available: {e}"
-                ))
-            })?;
-            Ok(port)
-        }
-        None => {
-            if probe_bindable(DEFAULT_DASHBOARD_PORT).is_ok() {
-                Ok(DEFAULT_DASHBOARD_PORT)
-            } else {
-                ephemeral_port()
-            }
-        }
+/// Describe this dashboard tunnel to the shared mechanism: which forward to
+/// open, what to run remotely when nothing already answers, and how long to
+/// wait for each of those two cases.
+pub(crate) fn tunnel_spec(cfg: &ConnectArgs, local_port: u16) -> TunnelSpec {
+    TunnelSpec {
+        ssh_host: cfg.ssh_host.clone(),
+        local_port,
+        remote_port: cfg.remote_port,
+        remote_command: remote_serve_command(cfg),
+        remote_description: "orbit web serve".to_string(),
+        readiness_target: format!("the remote dashboard at http://localhost:{local_port}/healthz"),
+        attach_timeout: ATTACH_PROBE_TIMEOUT,
+        ready_timeout: READINESS_TIMEOUT,
     }
 }
 
-/// Return `Ok` if a loopback TCP listener can bind `port` (immediately released).
-pub(crate) fn probe_bindable(port: u16) -> std::io::Result<()> {
-    TcpListener::bind((Ipv4Addr::LOCALHOST, port)).map(|_| ())
-}
-
-/// Ask the OS for a free ephemeral loopback port.
-pub(crate) fn ephemeral_port() -> Result<u16, OrbitError> {
-    let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
-        .map_err(|e| OrbitError::Io(format!("could not reserve a local port: {e}")))?;
-    listener
-        .local_addr()
-        .map(|addr| addr.port())
-        .map_err(|e| OrbitError::Io(format!("could not read reserved local port: {e}")))
-}
-
-/// Build the argument vector passed to `ssh` (everything after the program).
-///
-/// Pure and deterministic so it can be unit-tested without spawning anything.
-pub(crate) fn build_ssh_args(cfg: &ConnectArgs, local_port: u16) -> Vec<String> {
-    vec![
-        // Force pty allocation even though our stdin is null, so the remote
-        // command dies (SIGHUP) when the tunnel drops.
-        "-tt".to_string(),
-        // Fail fast if the local port cannot be forwarded rather than silently
-        // running the remote command with no working tunnel.
-        "-o".to_string(),
-        "ExitOnForwardFailure=yes".to_string(),
-        "-L".to_string(),
-        format!("{local_port}:localhost:{}", cfg.remote_port),
-        cfg.ssh_host.clone(),
-        remote_serve_command(cfg),
-    ]
-}
-
-/// Build the argument vector for a bare probe forward: the same `-L` port
-/// forward as [`build_ssh_args`] but with no remote command at all (`-N`), so
-/// nothing is invoked on the far side. Used to test whether a remote
-/// dashboard is already listening before deciding whether to spawn one.
-pub(crate) fn build_probe_ssh_args(cfg: &ConnectArgs, local_port: u16) -> Vec<String> {
-    vec![
-        "-N".to_string(),
-        "-o".to_string(),
-        "ExitOnForwardFailure=yes".to_string(),
-        "-L".to_string(),
-        format!("{local_port}:localhost:{}", cfg.remote_port),
-        cfg.ssh_host.clone(),
-    ]
+/// Choose the local port to bind the tunnel to: an explicit `--port` is honored
+/// or fails with a clear error if busy, otherwise the conventional
+/// [`DEFAULT_DASHBOARD_PORT`] when free and an ephemeral port when it is not.
+pub(crate) fn select_local_port(preferred: Option<u16>) -> Result<u16, OrbitError> {
+    ssh_tunnel::select_local_port(preferred, DEFAULT_DASHBOARD_PORT)
 }
 
 /// The remote shell command line:
@@ -255,54 +154,9 @@ pub(crate) fn remote_serve_command(cfg: &ConnectArgs) -> String {
     }
     if let Some(root) = &cfg.root {
         cmd.push_str(" --root ");
-        cmd.push_str(&shell_quote(root));
+        cmd.push_str(&ssh_tunnel::shell_quote(root));
     }
     cmd
-}
-
-/// POSIX single-quote a value for safe interpolation into the remote command.
-pub(crate) fn shell_quote(value: &str) -> String {
-    // Wrap in single quotes; a literal `'` becomes `'\''`.
-    format!("'{}'", value.replace('\'', "'\\''"))
-}
-
-/// Poll `/healthz` until the remote dashboard answers, or fail if `ssh` exits
-/// first (misconfigured host, `orbit` not on PATH, …) or [`READINESS_TIMEOUT`]
-/// elapses.
-fn wait_until_ready(tunnel: &mut SshTunnel, local_port: u16) -> Result<(), OrbitError> {
-    if poll_until_ready(tunnel, local_port, READINESS_TIMEOUT)? {
-        Ok(())
-    } else {
-        Err(OrbitError::Execution(format!(
-            "timed out after {}s waiting for the remote dashboard at \
-             http://localhost:{local_port}/healthz to become ready",
-            READINESS_TIMEOUT.as_secs()
-        )))
-    }
-}
-
-/// Poll `/healthz` through `tunnel`'s forward until it answers or `timeout`
-/// elapses. Returns `Ok(true)` on a ready response, `Ok(false)` on a plain
-/// timeout (the forward is still up; nothing has answered yet), or `Err` if
-/// `ssh` exited before either happened.
-pub(crate) fn poll_until_ready(
-    tunnel: &mut SshTunnel,
-    local_port: u16,
-    timeout: Duration,
-) -> Result<bool, OrbitError> {
-    let deadline = Instant::now() + timeout;
-    loop {
-        if let Some(status) = tunnel.try_wait()? {
-            return Err(classify_ssh_exit(status));
-        }
-        if healthz_ok(local_port) {
-            return Ok(true);
-        }
-        if Instant::now() >= deadline {
-            return Ok(false);
-        }
-        std::thread::sleep(POLL_INTERVAL);
-    }
 }
 
 /// Best-effort `GET /healthz` over the forwarded local port. Returns `true`
@@ -328,32 +182,6 @@ fn healthz_ok(local_port: u16) -> bool {
     status_line.starts_with("HTTP/1.") && status_line.contains(" 200 ")
 }
 
-/// Map an early `ssh` exit to an actionable error.
-pub(crate) fn classify_ssh_exit(status: ExitStatus) -> OrbitError {
-    match status.code() {
-        // The remote shell returns 127 when it cannot find the command.
-        Some(127) => OrbitError::Execution(
-            "`orbit` was not found on the remote host's PATH (ssh exited 127). \
-             Ensure orbit is installed and on PATH for non-interactive SSH \
-             sessions (e.g. add it to ~/.profile / ~/.bashrc on the remote)."
-                .to_string(),
-        ),
-        // ssh's own failure code (bad host, auth, network).
-        Some(255) => OrbitError::Execution(
-            "ssh could not connect (exit 255). Check the host, your SSH \
-             config/keys, and network reachability."
-                .to_string(),
-        ),
-        Some(code) => OrbitError::Execution(format!(
-            "remote `orbit web serve` exited with status {code} before the \
-             dashboard became ready"
-        )),
-        None => OrbitError::Execution(
-            "ssh was terminated by a signal before the dashboard became ready".to_string(),
-        ),
-    }
-}
-
 /// Block until Ctrl-C / SIGTERM, or until the `ssh` child exits on its own
 /// (e.g. the remote server dies). Teardown then happens via `SshTunnel::Drop`.
 ///
@@ -368,7 +196,7 @@ fn wait_for_shutdown(tunnel: &mut SshTunnel) {
         .build()
     else {
         while !matches!(tunnel.try_wait(), Ok(Some(_))) {
-            std::thread::sleep(POLL_INTERVAL);
+            std::thread::sleep(ssh_tunnel::POLL_INTERVAL);
         }
         return;
     };
@@ -393,7 +221,7 @@ fn wait_for_shutdown(tunnel: &mut SshTunnel) {
         // dropped, …) so we do not hang forever.
         let child_exit = async {
             while !matches!(tunnel.try_wait(), Ok(Some(_))) {
-                tokio::time::sleep(POLL_INTERVAL).await;
+                tokio::time::sleep(ssh_tunnel::POLL_INTERVAL).await;
             }
         };
 
@@ -403,79 +231,4 @@ fn wait_for_shutdown(tunnel: &mut SshTunnel) {
             _ = child_exit => {}
         }
     });
-}
-
-/// RAII owner of the `ssh` child that guarantees teardown of the tunnel on
-/// drop. When this invocation spawned the remote `orbit web serve` (`-tt`
-/// plus a remote command), closing `ssh` also delivers SIGHUP to the remote
-/// pty and stops that process. When it only attached via a bare `-N` forward,
-/// there is no remote command tied to this session, so teardown just closes
-/// the forward and leaves any pre-existing remote process running.
-pub(crate) struct SshTunnel {
-    child: Option<Child>,
-}
-
-impl SshTunnel {
-    pub(crate) fn new(child: Child) -> Self {
-        Self { child: Some(child) }
-    }
-
-    /// Non-blocking check for the child's exit status.
-    pub(crate) fn try_wait(&mut self) -> Result<Option<ExitStatus>, OrbitError> {
-        match &mut self.child {
-            Some(child) => child
-                .try_wait()
-                .map_err(|e| OrbitError::Io(format!("waiting on ssh: {e}"))),
-            None => Ok(None),
-        }
-    }
-
-    /// Terminate the `ssh` child if it is still running. Idempotent.
-    pub(crate) fn shutdown(&mut self) {
-        let Some(mut child) = self.child.take() else {
-            return;
-        };
-        if let Ok(Some(_)) = child.try_wait() {
-            return; // already gone
-        }
-        terminate_child(&mut child);
-    }
-}
-
-impl Drop for SshTunnel {
-    fn drop(&mut self) {
-        self.shutdown();
-    }
-}
-
-/// Ask the child to exit gracefully (SIGTERM), then force it (SIGKILL) if it
-/// does not within [`TEARDOWN_GRACE`]. Closing `ssh` drops the connection,
-/// which delivers SIGHUP to the remote pty session and stops the remote serve.
-#[cfg(unix)]
-pub(crate) fn terminate_child(child: &mut Child) {
-    let pid = child.id() as libc::pid_t;
-    // SAFETY: `pid` is our own direct child; signalling it is well-defined.
-    unsafe {
-        libc::kill(pid, libc::SIGTERM);
-    }
-    let deadline = Instant::now() + TEARDOWN_GRACE;
-    loop {
-        match child.try_wait() {
-            Ok(Some(_)) => return,
-            Ok(None) => {}
-            Err(_) => break,
-        }
-        if Instant::now() >= deadline {
-            break;
-        }
-        std::thread::sleep(Duration::from_millis(50));
-    }
-    let _ = child.kill();
-    let _ = child.wait();
-}
-
-#[cfg(not(unix))]
-pub(crate) fn terminate_child(child: &mut Child) {
-    let _ = child.kill();
-    let _ = child.wait();
 }

@@ -9,6 +9,7 @@ mod hub_client;
 mod hub_link;
 mod knowledge_allocation;
 mod learning;
+mod proxy;
 mod schema;
 mod serve;
 mod support;

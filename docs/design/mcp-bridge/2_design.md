@@ -1,7 +1,7 @@
 ---
 title: Orbit MCP Bridge — Design
 owner: codex
-last_updated: 2026-08-09
+last_updated: 2026-08-10
 last_validated: 2026-08-02
 status: Accepted
 feature: mcp-bridge
@@ -11,7 +11,7 @@ summary: Target design for a local Orbit MCP broker with one SSH hub link, hub-o
 tags: [mcp, remote-access, host-registry, bridge, ssh, routing]
 paths: ["crates/orbit-remote/**", "crates/orbit-mcp/**", "crates/orbit-core/**", "crates/orbit-tools/**", "crates/orbit-store/**", "crates/orbit-common/**"]
 related_features: [mcp-bridge, host-registry, mcp-session-context, remote-access, orbit-search, project-learnings]
-related_artifacts: [ORB-00424, ORB-10257, ORB-10262, ORB-10267, ORB-10268, ORB-10269, ORB-10271, ORB-10272, ORB-10276, ORB-10302, ORB-10319, ORB-10330, ORB-10332, ORB-10534, ORB-10540, ORB-10544, ORB-10690, ADR-0181, ADR-0199, ADR-0200, ADR-0201, ADR-0226, ADR-0227, ADR-0228, ADR-0229, ADR-0230, ADR-0231, ADR-0232, ADR-0235, ADR-0240, ADR-0303, ADR-0348, ADR-0350, ADR-0351]
+related_artifacts: [ORB-00424, ORB-10257, ORB-10262, ORB-10267, ORB-10268, ORB-10269, ORB-10271, ORB-10272, ORB-10276, ORB-10302, ORB-10319, ORB-10330, ORB-10332, ORB-10534, ORB-10540, ORB-10544, ORB-10690, ORB-10710, ADR-0181, ADR-0199, ADR-0200, ADR-0201, ADR-0226, ADR-0227, ADR-0228, ADR-0229, ADR-0230, ADR-0231, ADR-0232, ADR-0235, ADR-0240, ADR-0303, ADR-0348, ADR-0350, ADR-0351, ADR-0354]
 ---
 
 # Orbit MCP Bridge — Design
@@ -508,9 +508,14 @@ mechanism. Its properties:
   them (§8, §9).
 - Tunnel management reuses the existing SSH-tunnel mechanism rather than adding a
   second one ([remote-access/2_design.md §3](../remote-access/2_design.md)). That
-  mechanism always starts a remote process today; serving a long-lived listener
+  mechanism always started a remote process; serving a long-lived listener
   requires it to attach to one already running and start one only when nothing
-  answers.
+  answers, which [ORB-10708] added. [ORB-10710] made the reuse structural by
+  moving the mechanism itself to `orbit-common::utility::ssh_tunnel`
+  ([ADR-0354]) — `orbit-dashboard` already depends on `orbit-remote`, so the
+  proxy could not otherwise call into the only implementation. Each consumer
+  supplies its own readiness probe and remote command; nothing else is
+  duplicated.
 
 #### Calls resolve remotely, and only for this client class
 
@@ -591,8 +596,31 @@ destination, no spoke-to-spoke route — describe spokes specifically and are
 unaffected.
 
 `crates/orbit-mcp/src/tcp.rs` already implements the listener with one server
-instance per connection ([ORB-10690], [ADR-0348]). What this section adds is the
-CLI surface, the client-side mode, the checkout guard, and the command rider.
+instance per connection ([ORB-10690], [ADR-0348]). [ORB-10710] adds the CLI
+surface, the client-side mode, and the checkout guard; the command rider
+([ADR-0351]) remains outstanding.
+
+#### How the client-side mode is built
+
+`orbit mcp serve --mode remote <ssh-alias>` is a **byte relay**, and that is the
+whole implementation:
+
+- `orbit-remote::mcp::proxy` refuses on a machine holding a checkout, establishes
+  or attaches to one tunnel, and opens **one** TCP connection through it for the
+  whole stdio session. Nothing is re-established per call.
+- `orbit-mcp::relay` pumps bytes between that connection and stdio. It parses no
+  frames and knows nothing about tools, so a response is byte-identical to the
+  same call made against the listener directly — the drift §1 attributes to
+  Bridge is absent by construction rather than by test.
+- Two signals decide the guard: a registered checkout whose `repo_root` still
+  exists, and a non-global workspace `.orbit/` found by walking up from the
+  working directory. A registry row pointing at a deleted tree is stale, not
+  evidence; refusing on it would strand a genuinely checkoutless client.
+- **No `McpTransport` variant is added.** The listener already stamps the session
+  it serves as trusted-local, and relaying does not change whose session it is.
+  Existing checks compare that discriminant by equality rather than
+  exhaustively, so a new variant would compile cleanly while failing every one
+  of them silently.
 
 ## 6. Artifact and Knowledge Semantics
 

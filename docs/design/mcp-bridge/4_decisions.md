@@ -1,7 +1,7 @@
 ---
 title: Orbit MCP Bridge — Decisions
 owner: codex
-last_updated: 2026-08-09
+last_updated: 2026-08-10
 last_validated: 2026-08-02
 status: Accepted
 feature: mcp-bridge
@@ -11,7 +11,7 @@ summary: ADR log for the coupled MCP Bridge and Host Registry v1 contract, its e
 tags: [mcp, remote-access, host-registry, bridge]
 paths: ["crates/orbit-remote/**", "crates/orbit-mcp/**", "crates/orbit-core/**", "crates/orbit-tools/**", "crates/orbit-store/**"]
 related_features: [mcp-bridge, host-registry, mcp-session-context, remote-access]
-related_artifacts: [ORB-00424, ORB-10245, ORB-10262, ORB-10267, ORB-10268, ORB-10269, ORB-10271, ORB-10272, ORB-10276, ORB-10302, ORB-10319, ORB-10330, ORB-10332, ORB-10690, ADR-0226, ADR-0227, ADR-0228, ADR-0229, ADR-0230, ADR-0231, ADR-0232, ADR-0235, ADR-0240, ADR-0348, ADR-0350, ADR-0351]
+related_artifacts: [ORB-00424, ORB-10245, ORB-10708, ORB-10710, ORB-10262, ORB-10267, ORB-10268, ORB-10269, ORB-10271, ORB-10272, ORB-10276, ORB-10302, ORB-10319, ORB-10330, ORB-10332, ORB-10690, ADR-0226, ADR-0227, ADR-0228, ADR-0229, ADR-0230, ADR-0231, ADR-0232, ADR-0235, ADR-0240, ADR-0348, ADR-0350, ADR-0351, ADR-0354]
 ---
 
 # Orbit MCP Bridge — Decisions
@@ -235,7 +235,7 @@ Remote database or a separate broker crate.
 
 ## ADR-0350 — Own the SSH tunnel as remote-access infrastructure, with a provisional surface over it
 
-**Status:** Proposed · 2026-08
+**Status:** Accepted · 2026-08 · [ORB-10690], [ORB-10710]
 
 ### Context
 
@@ -270,6 +270,41 @@ separately by [ADR-0351].
   as wrong answers rather than as an error.
 
 Narrative lives in the ADR store — retrieve it with `orbit tool run orbit.adr.show --input '{"id":"ADR-0350"}'`.
+
+## ADR-0354 — Own the SSH local-forward tunnel once, at the leaf, shared by every loopback listener
+
+**Status:** Accepted · 2026-08 · [ORB-10710]
+
+### Context
+
+[ADR-0350] commits to the tunnel as reusable infrastructure, but the only
+attach-or-spawn implementation lived in `orbit-dashboard::connect` ([ORB-10708]).
+`orbit-dashboard` depends on `orbit-remote`, so the new proxy could not call into
+it, and duplicating ~150 lines across the two crates exceeds the duplication
+threshold.
+
+### Decision
+
+Move the mechanism to `orbit-common::utility::ssh_tunnel` — RAII child and
+teardown, port selection, forward arguments, `shell_quote`, `ssh` exit
+classification, readiness polling, and the attach-first `establish` sequence.
+Each consumer supplies only its own readiness probe, remote command line, and
+timeouts through a `TunnelSpec`. Both crates already depend on `orbit-common`, so
+no new dependency edge is added.
+
+### Consequences
+
+- "One mechanism" becomes structural rather than aspirational; attach-first
+  semantics are inherited by the proxy instead of reimplemented.
+- Generic behavior is tested once; each consumer's tests shrink to what it owns.
+- Cost: `orbit-common` is a stable-tier leaf and now spawns processes.
+- Cost: operator-facing timeout and `ssh`-exit strings are now composed from a
+  shared template plus a caller-supplied description, so exact wording shifted.
+- Rejected: duplicate-and-file-a-follow-up (contradicts [ADR-0350] at the exact
+  moment consolidation is still cheap); a dedicated `orbit-tunnel` crate (buys
+  isolation nothing needs today).
+
+Narrative lives in the ADR store — retrieve it with `orbit tool run orbit.adr.show --input '{"id":"ADR-0354"}'`.
 
 ## ADR-0351 — Expose remote command execution as a claim-gated tool, retaining the advertised surface
 
