@@ -1,0 +1,24 @@
+schema_version: 2
+id: ADR-0347
+title: Serve MCP over a network transport from the long-running server process
+status: proposed
+owner: human
+created_at: 2026-08-09T22:10:49.216799882Z
+last_updated: 2026-08-09T22:11:50.145689029Z
+related_features: []
+related_tasks:
+- ORB-10690
+- ORB-10691
+tags:
+- mcp
+- transport
+- capability
+- architecture
+paths:
+- crates/orbit-mcp
+- crates/orbit-remote
+- crates/orbit-dashboard
+supersedes: []
+legacy_ids: []
+validation_warnings: []
+legacy_validation: none
