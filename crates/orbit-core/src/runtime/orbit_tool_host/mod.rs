@@ -1,6 +1,7 @@
 mod adr_tools;
 mod artifact_redaction;
 mod auto_task_tools;
+mod command_tools;
 mod dispatch;
 mod docs_tools;
 pub(crate) mod friction_tools;

@@ -153,6 +153,12 @@ pub const GOVERNED_OPERATIONS: &[GovernedOperation] = &[
         rationale: "resuming a workflow creates another managed run",
     },
     GovernedOperation {
+        id: "orbit.command.exec",
+        surface: OperationSurface::Tool,
+        allowed: &[McpCapability::Operator],
+        rationale: "command execution reaches the machine's shell surface through an explicit argv, not a filtered allowlist",
+    },
+    GovernedOperation {
         id: "orbit.task.delete",
         surface: OperationSurface::Tool,
         allowed: &[McpCapability::Operator],

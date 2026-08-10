@@ -83,6 +83,7 @@ tools:
   orbit.auto_task.show: { placement: owner, scope: workspace-required, allowed_capabilities: [agent, operator] }
   orbit.auto_task.update: { placement: owner, scope: workspace-required, allowed_capabilities: [agent, operator] }
   orbit.auto_task.toggle: { placement: owner, scope: workspace-required, allowed_capabilities: [agent, operator] }
+  orbit.command.exec: { placement: local-derived, scope: workspace-required, allowed_capabilities: [operator] }
 
 hub_schema_digest:
   domain_tag: orbit.mcp.hub-schema.v1
