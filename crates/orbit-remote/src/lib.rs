@@ -51,6 +51,7 @@ pub use host_registry::{HostRegistryService, WorkspaceLink, require_local_hub_id
 pub use knowledge::{HubKnowledgeSequenceService, scan_registered_knowledge_inventories};
 pub use mcp::{
     canonical_mcp_tool_definitions, register_local_spoke, safe_mcp_tool_names, serve_mcp_stdio,
+    serve_mcp_tcp,
 };
 pub use persistence::RemoteStore;
 pub use profile::build_execution_profile_v1;
