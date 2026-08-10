@@ -6,8 +6,8 @@ status: Draft
 feature: resident-orchestrator
 doc_role: overview
 type: design
-summary: Workspace-addressed epic delegation to a specialized CLI orchestrator that decomposes and shepherds work without a resident server.
-tags: [resident-orchestrator, epic, routines, cli]
+summary: Workspace-addressed epic delegation to a resumable CLI orchestrator that decomposes, clarifies, and shepherds work without a resident server.
+tags: [resident-orchestrator, epic, routines, cli, decision-gates]
 paths: [".orbit/resources/activities/**", ".orbit/resources/jobs/**", ".orbit/routines/**", "crates/orbit-core/assets/**"]
 related_features: [resident-orchestrator, activity-job, routines, agent-families]
 related_artifacts: []
@@ -20,7 +20,8 @@ its address, a root task tagged `epic` is its durable work order, and a workspac
 wakes a bounded `backend: cli` ownership cycle. The resident decomposes the epic into normal child
 tasks, ships explicit child task IDs through the existing delivery workflows, and shepherds the
 whole tree to a verified terminal state. No per-agent server, inbox pump, or retained HTTP agent
-session is required.
+session is required. Bounded CLI processes may resume an opaque provider conversation between
+cycles, while Orbit remains the durable source of truth.
 
 ## 1. Motivation
 
@@ -62,7 +63,13 @@ Different workspaces can use different resident agents without a new invocation 
 
 **Ownership cycle.** One bounded resident invocation. It resumes an active epic before selecting a
 new one, advances as much of its task tree as current state permits, persists every decision in
-Orbit, and exits. A later routine fire resumes from durable state rather than conversation memory.
+Orbit, records a compatible provider conversation reference, and exits. A later routine fire may
+resume that conversation for continuity, but must reconstruct the safe action from durable state.
+
+**Decision gate.** A structured question recorded on the parent epic when consequential ambiguity
+or missing authority makes further work disproportionately risky. The resident exits while the
+question is pending; the next bounded cycle resumes with the matched supervisor or human answer.
+V1 has no live mid-turn steering or managed interactive terminal.
 
 **Child task.** A normal task created with `parent_id` pointing to the epic. Child tasks use the
 ordinary lifecycle, dependency, crew, validation, review, and PR machinery; the `epic` tag does not
@@ -79,6 +86,8 @@ conflict/finding resolution, merge verification, child closure, and finally pare
 | Resident CLI identity | workspace `.orbit/resources/activities/resident_orchestrator.yaml` | Not allocated |
 | Epic selection and resume | proposed deterministic `select_resident_epic` activity | Not allocated |
 | Bounded ownership cycle | proposed `resident_epic_cycle` job | Not allocated |
+| Conversation continuity | proposed CLI session capture and resume adapter | Not allocated |
+| Supervisor/human decision path | structured parent-task request and answer comments | Not allocated |
 | Scheduled pickup | workspace `.orbit/routines/resident_epic.yaml` | Not allocated |
 | Child delivery | existing `task_gate_pipeline` / explicit-ID shipment workflows | Existing mechanism |
 | HTTP epic retirement | former `task_epic_pipeline` and `epic_orchestrator` assets (removed in [ORB-10332]) | [ORB-10332] |
