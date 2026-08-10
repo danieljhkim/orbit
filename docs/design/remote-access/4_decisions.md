@@ -1,7 +1,7 @@
 ---
 title: "Remote Access — Decisions"
 owner: claude
-last_updated: 2026-07-18
+last_updated: 2026-08-10
 status: Accepted
 feature: remote-access
 doc_role: decisions
@@ -10,7 +10,7 @@ summary: "ADR log: why live viewing supersedes a git-sync registry, why remote a
 tags: [remote-access]
 paths: ["crates/orbit-dashboard/**", "crates/orbit-remote/src/runtime.rs", "crates/orbit-remote/src/workspace_registry.rs"]
 related_features: [remote-access, host-registry]
-related_artifacts: [ADR-0200, ADR-0201, ADR-0234, ORB-00029, ORB-00030, ORB-00360, ORB-10294, ORB-10319]
+related_artifacts: [ADR-0200, ADR-0201, ADR-0234, ADR-0353, ORB-00029, ORB-00030, ORB-00360, ORB-10294, ORB-10319, ORB-10708]
 ---
 
 # Remote Access — Decisions
@@ -69,6 +69,22 @@ The workspace-keyed-state machinery (the `Ws` extractor vs. path-prefixed routes
 
 ---
 
+## ADR-0353 — `orbit web connect` attaches to an already-running remote dashboard instead of always spawning one
+
+**Status:** Accepted · 2026-08 · [ORB-10708]
+
+**Context.** `connect` always appended `orbit web serve` as the trailing remote command on its `ssh -tt` tunnel, assuming nothing was already listening on `remote_port`. A second connect against a remote that already had a dashboard running — another engineer's still-attached tunnel, or a long-lived remote listener meant to be reused — had no way to share it: the remote command it carried simply failed to bind.
+
+**Decision.** Extend the existing readiness probing (`healthz_ok` / the readiness poll loop) rather than add a parallel mechanism. `connect` first opens a bare `-N` port forward with no remote command and polls `/healthz` through it with a short probe timeout; if something answers, that forward becomes the session's tunnel and no remote command is ever sent (attach mode). Only if nothing answers does it fall back to the original flow: a fresh `ssh -tt` session that also carries `orbit web serve`, with the existing full-length readiness wait (spawn mode). Teardown (`SshTunnel::Drop`) is unchanged in shape either way; it just has nothing remote to reap when no remote command was ever sent.
+
+**Consequences.**
+- A remote dashboard can now be shared by concurrent `connect` sessions; only the first one spawns it.
+- Disconnecting from an attached session never touches the process it didn't start.
+- Cost: every `connect` now pays a probe round trip (up to the probe timeout) before it can fall back to spawning, in the common case where nothing is listening yet.
+- Cost: the attach-vs-spawn decision stays racy (TOCTOU) — two invocations starting within the same probe window can both miss and both attempt to spawn; the second spawn fails to bind and surfaces via the existing ssh-exit-code classification. See [ORB-10708] and the store record for the full narrative.
+
+---
+
 ## Task References
 
 - [ORB-00029] — Added `orbit web connect <ssh-host>` and forwarded `--global` to the remote serve.
@@ -77,5 +93,6 @@ The workspace-keyed-state machinery (the `Ws` extractor vs. path-prefixed routes
 - [ORB-10029] — Made global mode the default and only mode for `orbit web serve` (single mode is no longer reachable from the CLI); `--global` is now a deprecated no-op kept for `connect` passthrough compatibility. Does not change either ADR above — the security posture and viewing-not-sync boundary are unaffected — but evolves the `web serve --global` behavior both describe.
 - [ORB-10294] — Live per-request registry refresh for `orbit web serve` ([ADR-0234]): native workspace add/remove/rebind without a restart.
 - [ORB-10319] — Moved the dashboard's catalog/runtime dependencies into `orbit-remote`; this is an implementation-ownership change, not a new remote-access decision.
+- [ORB-10708] — Made `orbit web connect` probe for and attach to an already-running remote dashboard instead of always spawning one ([ADR-0353]).
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.
