@@ -26,9 +26,8 @@ const INACTIVE_TOOL_NAMES: &[&str] = &[
     "orbit.learning.sync",
     "orbit.learning.list",
     "orbit.friction.stats",
-    // ORB-00289: admin/destructive ops — CLI path retains them, agent
-    // MCP surface does not expose them.
-    "orbit.adr.list",
+    // Admin/destructive ops — CLI path retains them, agent MCP surface does
+    // not expose them.
     "orbit.semantic.uninstall",
     "orbit.task.delete",
     "orbit.task.lint",
@@ -64,6 +63,11 @@ fn unused_tools_are_not_registered_in_public_surface() {
             "removed tool still registered: {removed}"
         );
     }
+
+    assert!(
+        names.iter().all(|name| !name.starts_with("orbit.adr.")),
+        "retired orbit.adr tool family still registered"
+    );
 
     let removed_prefix = "orbit.semantic.";
     for removed in ["related", "search"] {

@@ -2,16 +2,14 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use super::contracts::{
-    AdrStoreBackend, AuditEventStoreBackend, ExecutorDefStoreBackend, JobRunStoreBackend,
-    LearningStoreBackend, PolicyDefStoreBackend, TaskArtifactStoreBackend,
-    TaskDocumentStoreBackend, TaskHistoryStoreBackend, TaskReservationStoreBackend,
-    TaskStoreBackend, ToolStoreBackend,
+    AuditEventStoreBackend, ExecutorDefStoreBackend, JobRunStoreBackend, LearningStoreBackend,
+    PolicyDefStoreBackend, TaskArtifactStoreBackend, TaskDocumentStoreBackend,
+    TaskHistoryStoreBackend, TaskReservationStoreBackend, TaskStoreBackend, ToolStoreBackend,
 };
 use super::layered_policy_def::LayeredPolicyDefStore;
 use super::sqlite_backends::{
     SqliteAuditEventStoreBackend, SqliteTaskReservationStoreBackend, SqliteToolStoreBackend,
 };
-use crate::file::adr_store::AdrFileStore;
 use crate::file::executor_def_store::ExecutorDefFileStore;
 use crate::file::learning_store::LearningFileStore;
 use crate::file::policy_def_store::PolicyDefFileStore;
@@ -70,22 +68,6 @@ pub fn workspace_job_run_store(
     workspace_id: impl Into<String>,
 ) -> Arc<dyn JobRunStoreBackend> {
     Arc::new(SqliteJobRunStore::new(store, workspace_id))
-}
-
-/// Constructs the workspace-scoped ADR store backed by `adr_dir` on disk and
-/// indexed in the shared SQLite `store`. The returned `Arc<dyn AdrStoreBackend>`
-/// is the trait-object surface consumed by `orbit-tools::orbit.adr.*` once
-/// T20260511-2 wires it through `orbit-core`.
-pub fn workspace_adr_backends(
-    adr_dir: PathBuf,
-    store: Store,
-    id_allocator: IdAllocator,
-) -> Arc<dyn AdrStoreBackend> {
-    Arc::new(AdrFileStore::new_with_index_and_allocator(
-        adr_dir,
-        store,
-        id_allocator,
-    ))
 }
 
 /// Constructs the workspace-scoped project-learnings store backed by

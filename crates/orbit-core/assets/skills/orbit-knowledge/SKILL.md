@@ -1,6 +1,6 @@
 ---
 name: orbit-knowledge
-description: Author, update, supersede, prune, and audit Orbit's two durable-decision primitives — project learnings (scope-injected guardrails) and ADRs. Use before adding or renaming a `## ADR-` heading by hand, since IDs are allocated globally.
+description: Author, update, supersede, prune, and audit Orbit's durable knowledge primitives — project learnings (scope-injected guardrails) and feature-local ADR entries in design docs.
 ---
 
 # Orbit Knowledge
@@ -9,17 +9,13 @@ Two sibling primitives, one lifecycle discipline.
 
 **Learnings** are push-injected: when an agent touches a file, dir, or workflow matching a learning's `scope`, it lands in that agent's prompt automatically. This skill is the pull side — author, find, replace, archive.
 
-**ADRs** record a decision that had a real alternative, constrains future work, and is costly to reverse. Stricter lifecycle, globally allocated IDs.
-
-Both surfaces (MCP `orbit_learning_*` / `orbit_adr_*`, CLI `orbit tool run orbit.learning.*` / `orbit.adr.*`) take identical JSON and need `model`. Prefer `--body-file` / `--input-file` over inline JSON so multi-line markdown survives shell quoting.
+**ADRs** record a decision that had a real alternative, constrains future work, and is costly to reverse. They are ordinary git-reviewed entries in the repository's designated decision docs.
 
 ## Rules for both
 
-- **Never hand-edit `.orbit/learnings/<id>/learning.yaml` or `.orbit/adrs/<status>/<id>/{adr.yaml,body.md}`.** Writes go through the tools so the envelope cache, supersede pointers, and audit events stay consistent.
-- **Never invent an ID.** `add` allocates globally; cite the returned ID verbatim.
+- **Never hand-edit `.orbit/learnings/<id>/learning.yaml`.** Learning writes go through the tools so the envelope cache, supersede pointers, and audit events stay consistent.
 - **Search before adding.** Two overlapping-scope records inject twice and contradict each other.
-- **Update replaces, it does not merge** — re-pass unchanged fields (`scope`/`evidence` for learnings, the full body for ADRs) or you silently wipe them. Use `supersede` when the guidance or decision *materially changes*: it writes both pointers atomically and drops the old record from default search. `update` is rejected on an already-superseded record; supersede again instead. There is no comment or vote surface — corrections go through `update`/`supersede`, provenance through `evidence`.
-- **Let delivery stage new artifact files** — they ship in the same commit as the change that motivated them. A proposed ADR bundle is written to the run worktree's own `.orbit/adrs/proposed/`, which a workspace gitignore normally keeps local-only until publication, so the commit step force-stages it for you. Don't hand-stage it from inside a run: a linked worktree's git metadata is bound read-only there and taking the index lock fails. If the bundle still can't be staged, delivery refuses and names it — stage it host-side from an unsandboxed checkout and re-run. Never invent an id or drop the draft to get past a refusal. Sibling worktrees see remote stubs until those body files are locally readable.
+- **Learning updates replace, they do not merge** — re-pass unchanged `scope` and `evidence` or you silently wipe them. Use `supersede` when the guidance materially changes.
 - **Citation-at-anchor.** When a record encodes a convention enforced at a specific code site, drop a one-line citation there (`// L-NNNN: <rationale>`). **Never** put such a citation in a shipped instruction or prompt asset — skill files, prompt templates, bundled plugin assets, anything served to other workspaces — because workspace-local IDs are dangling references there. At those surfaces the push-injected learning, or an ADR's `## Consequences` sentence, is the delivery mechanism.
 
 ## Learnings
@@ -43,28 +39,29 @@ Exit: the learning lives in `orbit.learning.*`, has a directive summary, at leas
 
 ## ADRs
 
-| Tool | MCP | CLI |
-|------|-----|-----|
-| Add / show / update / supersede | `orbit_adr_add/show/update/supersede({...})` | `orbit tool run orbit.adr.add --input-file adr.json` · `.show --input '{"id":"<id>"}'` · `.update --input-file update.json` · `.supersede --input '{"old_id":"...","new_id":"..."}'` |
+ADRs live in the repository's designated decision docs. Search them through the ordinary docs corpus (`orbit search "<concept>" --kind doc`) and inspect the complete entry in the matching file. There is no `.orbit/adrs/` store, `orbit.adr.*` tool family, or `adr` search kind.
 
-Listing is deliberately not on the agent MCP surface — discover with `orbit search --kind adr`. (`orbit tool run orbit.adr.list` remains for CLI admin.)
-
-**If your repo keeps ADR headings inside a docs file and you're about to add or rename a `## ADR-` heading: stop and run `orbit.adr.add` first**, then use the allocated global ID as the heading verbatim. Picking the next sequential local number — or one that merely looks global — produces an orphan decision invisible to `orbit search --kind adr`, `orbit.adr.show`, and legacy-ID resolution. Backfill an existing local-numbered ADR through `orbit.adr.add` with `legacy_ids` set. Where that file lives follows the target repo's own instructions and configured docs roots, not a fixed convention.
+IDs are repo-local and append-only. Before adding an entry, search all designated decision-doc headings, choose the next unused `ADR-NNNN`, and never renumber an existing heading. Put a reversal in a new entry and update the older entry's status/supersession metadata in the same change.
 
 **Propose an ADR only when both hold:** a real alternative was on the table, *and* the choice is meaningfully costly to reverse. "Surprising without context" is a strong signal but not a third requirement — lock-in can be real without being surprising (a Postgres or monorepo pick), so weigh it as a tiebreaker. Qualifying shapes: a deliberate deviation from the obvious path; a constraint invisible in the code itself; a non-obvious rejected alternative worth recording; a technology choice with real lock-in. Everything else belongs in a design doc, a spec, or an existing ADR's instance table.
 
-**Workflow.** Inspect nearby decisions first (`orbit search "<concept>" --kind adr`, `orbit.adr.show`, legacy-ID lookup). New decision → `add`; body or metadata correction → `update`; reversal of an accepted ADR → create the replacement, accept it with a related task, then `supersede`. `related_features` are feature/area names, `tags` free-form cross-artifact labels, `paths` repo-relative globs the decision constrains. `related_tasks` may be empty for a speculative *proposed* ADR — don't invent a task to satisfy one — but **acceptance requires a real related task**, added in the same `update` call.
+**Workflow.** Inspect nearby decision docs first. New decision → append the complete entry to the owning feature's file; correction → edit that entry; reversal → append the replacement and mark the older entry superseded. Update the design doc's `Last updated` field in the same PR.
 
-The body needs exactly `## Context`, `## Decision`, `## Consequences`, with at least one consequences bullet starting `Cost:` — the validator rejects new ADRs without it.
+Each entry uses the following skeleton and preserves at least one `Cost:` line:
 
 ```markdown
-## Context
+## ADR-NNNN — Title
+**Status:** Proposed | Accepted | Superseded
+**Date:** YYYY-MM-DD
+**Related tasks:** ORB-NNNNN
+
+### Context
 <1-3 sentences: what forced a decision, what alternatives were real>
-## Decision
+### Decision
 <1-3 sentences: what was chosen>
-## Consequences
+### Consequences
 - <observable/operational consequence>
 - Cost: <explicit tradeoff future readers need to know>
 ```
 
-Exit: the ADR lives in `orbit.adr.*`, has a valid body, names relevant features, preserves meaningful legacy aliases, and reads back via `.show`. A code-anchored ADR ships its citation in the same PR.
+Exit: the complete ADR entry lives in the owning feature's decision doc, has status/date/task metadata and a `Cost:` line, and is discoverable with `orbit search --kind doc`. A code-anchored ADR ships its citation in the same PR.

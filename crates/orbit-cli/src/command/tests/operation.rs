@@ -103,28 +103,6 @@ fn json_error_preferences_are_derived_from_operations() {
         operation_for(&["orbit", "docs", "list"]).json_error_preference,
         None
     );
-    assert_eq!(
-        operation_for(&["orbit", "adr", "show", "ADR-0259", "--json"]).json_error_preference,
-        Some(true)
-    );
-}
-
-#[test]
-fn adr_reconcile_operation_carries_target_and_json_preference() {
-    let operation = operation_for(&[
-        "orbit",
-        "adr",
-        "reconcile",
-        "ADR-0184",
-        "--source-worktree",
-        "/tmp/source",
-        "--json",
-    ]);
-    let meta = operation.audit_meta.expect("ADR reconcile audit metadata");
-    assert_eq!(meta.command, "adr");
-    assert_eq!(meta.subcommand.as_deref(), Some("reconcile"));
-    assert_eq!(meta.target_id.as_deref(), Some("ADR-0184"));
-    assert_eq!(operation.json_error_preference, Some(true));
 }
 
 #[test]
@@ -147,11 +125,4 @@ fn audit_command_is_the_only_operation_without_audit_metadata() {
     assert_eq!(meta.command, "task");
     assert_eq!(meta.subcommand.as_deref(), Some("show"));
     assert_eq!(meta.target_id.as_deref(), Some("ORB-10200"));
-
-    let adr_meta = operation_for(&["orbit", "adr", "show", "ADR-0259"])
-        .audit_meta
-        .expect("ADR show is audited");
-    assert_eq!(adr_meta.command, "adr");
-    assert_eq!(adr_meta.subcommand.as_deref(), Some("show"));
-    assert_eq!(adr_meta.target_id.as_deref(), Some("ADR-0259"));
 }

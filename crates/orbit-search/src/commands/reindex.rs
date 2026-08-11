@@ -2,7 +2,6 @@ use orbit_common::types::{OrbitError, Task};
 use serde::{Deserialize, Serialize};
 use std::str::FromStr;
 
-use crate::commands::adr_index::AdrIndexResult;
 use crate::commands::doc_index::DocIndexResult;
 use crate::commands::learning_index::LearningIndexResult;
 use crate::commands::parse_model;
@@ -15,7 +14,6 @@ pub enum IndexKind {
     #[default]
     Tasks,
     Docs,
-    Adrs,
     Learnings,
     All,
 }
@@ -27,11 +25,10 @@ impl FromStr for IndexKind {
         match raw {
             "tasks" => Ok(Self::Tasks),
             "docs" => Ok(Self::Docs),
-            "adrs" => Ok(Self::Adrs),
             "learnings" => Ok(Self::Learnings),
             "all" => Ok(Self::All),
             value => Err(OrbitError::InvalidInput(format!(
-                "unsupported semantic index kind `{value}`; supported values: tasks, docs, adrs, learnings, all"
+                "unsupported semantic index kind `{value}`; supported values: tasks, docs, learnings, all"
             ))),
         }
     }
@@ -70,12 +67,6 @@ pub enum SemanticIndexResult {
         indexed_sources: usize,
         stale_sources: Vec<String>,
     },
-    Adrs {
-        model_id: String,
-        report: UpsertReport,
-        indexed_sources: usize,
-        stale_sources: Vec<String>,
-    },
     Learnings {
         model_id: String,
         report: UpsertReport,
@@ -85,7 +76,6 @@ pub enum SemanticIndexResult {
     All {
         tasks: TaskIndexResult,
         docs: DocIndexResult,
-        adrs: AdrIndexResult,
         learnings: LearningIndexResult,
     },
 }
@@ -102,17 +92,6 @@ impl From<TaskIndexResult> for SemanticIndexResult {
 impl From<DocIndexResult> for SemanticIndexResult {
     fn from(result: DocIndexResult) -> Self {
         Self::Docs {
-            model_id: result.model_id,
-            report: result.report,
-            indexed_sources: result.indexed_sources,
-            stale_sources: result.stale_sources,
-        }
-    }
-}
-
-impl From<AdrIndexResult> for SemanticIndexResult {
-    fn from(result: AdrIndexResult) -> Self {
-        Self::Adrs {
             model_id: result.model_id,
             report: result.report,
             indexed_sources: result.indexed_sources,

@@ -378,7 +378,6 @@ fn learning_store_for_worktree(
         shared_orbit.join("state/.id_alloc.lock"),
         shared_orbit.to_path_buf(),
         worktree_root.to_path_buf(),
-        shared_orbit.join("adrs"),
         shared_orbit.join("learnings"),
     ))
     .expect("allocator");

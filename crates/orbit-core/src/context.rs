@@ -6,10 +6,9 @@ use orbit_engine::PrConfig;
 use orbit_policy::PolicyEngine;
 use orbit_search::{EmbedWorker, VectorStore};
 use orbit_store::{
-    AdrStoreBackend, AuditEventStoreBackend, ExecutorDefStoreBackend, JobRunStoreBackend,
-    LearningStoreBackend, PolicyDefStoreBackend, TaskArtifactStoreBackend,
-    TaskDocumentStoreBackend, TaskHistoryStoreBackend, TaskReservationStoreBackend,
-    TaskStoreBackend, ToolStoreBackend,
+    AuditEventStoreBackend, ExecutorDefStoreBackend, JobRunStoreBackend, LearningStoreBackend,
+    PolicyDefStoreBackend, TaskArtifactStoreBackend, TaskDocumentStoreBackend,
+    TaskHistoryStoreBackend, TaskReservationStoreBackend, TaskStoreBackend, ToolStoreBackend,
 };
 use orbit_tools::ToolRegistry;
 
@@ -98,7 +97,6 @@ pub(crate) struct OrbitStores {
     pub(crate) task_document: Arc<dyn TaskDocumentStoreBackend>,
     pub(crate) task_history: Arc<dyn TaskHistoryStoreBackend>,
     pub(crate) task_artifact: Arc<dyn TaskArtifactStoreBackend>,
-    pub(crate) adr: Arc<dyn AdrStoreBackend>,
     pub(crate) learning: Arc<dyn LearningStoreBackend>,
     pub(crate) semantic_vector: Arc<VectorStore>,
     pub(crate) semantic_worker: Arc<EmbedWorker>,
@@ -117,7 +115,6 @@ impl OrbitStores {
         task_document: Arc<dyn TaskDocumentStoreBackend>,
         task_history: Arc<dyn TaskHistoryStoreBackend>,
         task_artifact: Arc<dyn TaskArtifactStoreBackend>,
-        adr: Arc<dyn AdrStoreBackend>,
         learning: Arc<dyn LearningStoreBackend>,
         semantic_vector: Arc<VectorStore>,
         semantic_worker: Arc<EmbedWorker>,
@@ -133,7 +130,6 @@ impl OrbitStores {
             task_document,
             task_history,
             task_artifact,
-            adr,
             learning,
             semantic_vector,
             semantic_worker,
@@ -160,10 +156,6 @@ impl OrbitStores {
 
     pub(crate) fn task_artifacts(&self) -> &dyn TaskArtifactStoreBackend {
         self.task_artifact.as_ref()
-    }
-
-    pub(crate) fn adrs(&self) -> &dyn AdrStoreBackend {
-        self.adr.as_ref()
     }
 
     pub(crate) fn learnings(&self) -> &dyn LearningStoreBackend {

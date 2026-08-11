@@ -1756,7 +1756,7 @@ async fn task_bodies_reject_the_retired_agent_attribution_key() {
 
 /// ORB-10648: `model` was forwarded by callers, deserialized by neither task
 /// body, and still reported as applied — an affirmative false "applied". It is
-/// now the write's provenance (as on `POST /api/adrs` and `POST /api/frictions`),
+/// now the write's provenance (as on `POST /api/frictions`),
 /// so the report is true: the comment this update appends is authored by the
 /// supplied model rather than by the ambient identity.
 #[tokio::test]

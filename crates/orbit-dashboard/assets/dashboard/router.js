@@ -34,7 +34,7 @@ const DIAG_FULL_WIDTH_MAINS = {
   reliability: "diagnostics-reliability-main",
 };
 const RUN_DETAIL_SUBTABS = ["steps", "events"];
-const KNOWLEDGE_SUBTABS = ["learnings", "adrs", "frictions"];
+const KNOWLEDGE_SUBTABS = ["learnings", "frictions"];
 
 function parseHashRoute(raw) {
   const trimmed = String(raw || "").replace(/^#/, "");
@@ -138,7 +138,6 @@ function setKnowledgeSubtabImpl(ctx, name) {
   for (const btn of document.querySelectorAll("#knowledge-subtabs .subtab")) {
     btn.classList.toggle("active", btn.dataset.subtab === name);
   }
-  const isAdrs = name === "adrs";
   const isFrictions = name === "frictions";
   const isLearnings = name === "learnings";
   const toggle = (id, show) => {
@@ -149,10 +148,6 @@ function setKnowledgeSubtabImpl(ctx, name) {
   toggle("learning-search", isLearnings);
   toggle("learnings-body", isLearnings);
   toggle("learning-detail-panel", isLearnings);
-  toggle("adr-stats", isAdrs);
-  toggle("adr-search", isAdrs);
-  toggle("adrs-body", isAdrs);
-  toggle("adr-detail-panel", isAdrs);
   toggle("friction-stats", isFrictions);
   toggle("friction-search", isFrictions);
   toggle("frictions-body", isFrictions);

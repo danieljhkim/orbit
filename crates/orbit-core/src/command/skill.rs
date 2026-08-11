@@ -516,7 +516,7 @@ mod tests {
                 }
                 // ADR-<digit...> (decision-record ids). ADR ids are allocated
                 // per workspace, so a concrete one resolves to a different
-                // decision — or to nothing — in a consumer's `.orbit/adrs/`.
+                // decision — or to nothing — in a consumer's design docs.
                 // The ADR-NNNN placeholder has a non-digit after the dash and
                 // is skipped.
                 if starts(i, b"ADR-") && is_digit(i + 4) {
@@ -685,16 +685,16 @@ mod tests {
 
         // Allows genuine public Orbit runtime paths and placeholder IDs.
         for good in [
-            "artifacts live under `.orbit/adrs/{accepted,proposed}/`",
+            "decisions live under `docs/design/<feature>/4_decisions.md`",
             "scheduler state in `~/.orbit/orbit.db` is host-local",
             "evidence under `.orbit/state/job-runs/`",
             "dependencies: [\"ORB-NNNN\", ...] require ORB-NNNNN targets",
             "drop a `// L-NNNN: <rationale>` citation",
-            "record the choice as ADR-NNNN once `orbit.adr.add` allocates it",
+            "record the choice as a repo-local ADR-NNNN heading",
             "learnings are curated by the workspace's orchestrator or owner",
             "recommended layout: `docs/design/<feature>/`",
             "resolve `context_files` selectors, then `fs.read` a `<task-id>`",
-            "run `orbit search --kind adr`",
+            "run `orbit search --kind doc`",
         ] {
             assert!(
                 portability_violations(good).is_empty(),

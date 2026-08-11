@@ -82,17 +82,9 @@ fn is_git_repo_root(path: &Path) -> bool {
 /// The Orbit-managed `.gitignore` block written by `orbit workspace init`.
 ///
 /// Blanket-ignores `.orbit/*`, then re-includes the artifact partitions that
-/// travel with the repo. Every ADR lifecycle partition is published decision
-/// history — proposed drafts included, so the decision under review is visible
-/// in the PR that motivates it (ORB-10669, amending ADR-0302). Only the
-/// rebuildable SQLite index and the lock files are carved back out:
-/// `.orbit/adrs/index.sqlite*` and `.orbit/**/*.lock`. Order matters: those
-/// exclusions must follow the `!.orbit/adrs/` re-include, or git tracks them
-/// anyway.
+/// travel with the repo. Lock files remain excluded.
 const ORBIT_GITIGNORE_BLOCK: &[&str] = &[
     ".orbit/*",
-    "!.orbit/adrs/",
-    ".orbit/adrs/index.sqlite*",
     "!.orbit/learnings/",
     "!.orbit/auto_tasks/",
     "!.orbit/resources/",
@@ -102,14 +94,12 @@ const ORBIT_GITIGNORE_BLOCK: &[&str] = &[
 ];
 
 /// Lines earlier managed blocks wrote that the current policy retires.
-///
-/// These must be stripped on re-init rather than merely left alone: git applies
-/// the *last* matching pattern, but `!.orbit/adrs/` re-includes only the `adrs`
-/// directory itself, so a lingering `.orbit/adrs/proposed/` above the appended
-/// block would still be the last pattern matching that subdirectory and would
-/// keep the partition ignored. Retiring them here is what makes re-init
-/// converge on the current policy instead of preserving the old one.
-const RETIRED_ORBIT_BLOCK_LINES: &[&str] = &[".orbit/adrs/proposed/", ".orbit/adrs/superseded/"];
+const RETIRED_ORBIT_BLOCK_LINES: &[&str] = &[
+    "!.orbit/adrs/",
+    ".orbit/adrs/index.sqlite*",
+    ".orbit/adrs/proposed/",
+    ".orbit/adrs/superseded/",
+];
 
 /// Legacy bare `.orbit` ignore lines written by earlier `orbit workspace init`
 /// versions. A bare `.orbit` ignores the whole directory, so no `!`-negation

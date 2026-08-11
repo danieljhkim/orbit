@@ -1,6 +1,4 @@
 #![allow(missing_docs)]
-mod adr_index;
-mod adr_search;
 mod doc_index;
 mod doc_search;
 mod install;

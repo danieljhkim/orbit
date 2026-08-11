@@ -1,12 +1,12 @@
 use std::collections::BTreeMap;
 
-use orbit_search::{AdrSemanticHit, DocSemanticHit, LearningSemanticHit};
+use orbit_search::{DocSemanticHit, LearningSemanticHit};
 
 use super::convert::doc_result_to_global;
 use super::types::GlobalSearchHit;
 use super::{
-    ADR_HYBRID_FALLBACK_NOTE, DOC_HYBRID_FALLBACK_NOTE, DOC_SEARCH_MIN_CANDIDATES,
-    DOC_SEARCH_OVERFETCH, LEARNING_HYBRID_FALLBACK_NOTE, TASK_HYBRID_FALLBACK_NOTE,
+    DOC_HYBRID_FALLBACK_NOTE, DOC_SEARCH_MIN_CANDIDATES, DOC_SEARCH_OVERFETCH,
+    LEARNING_HYBRID_FALLBACK_NOTE, TASK_HYBRID_FALLBACK_NOTE,
 };
 
 pub(super) fn doc_search_candidate_limit(limit: usize) -> usize {
@@ -31,24 +31,14 @@ pub(super) struct LearningHybridCandidate {
     pub(super) semantic: Option<LearningSemanticHit>,
 }
 
-#[derive(Debug, Clone)]
-pub(super) struct AdrHybridCandidate {
-    pub(super) hit: GlobalSearchHit,
-    pub(super) lexical_score: Option<f32>,
-    pub(super) semantic_score: Option<f32>,
-    pub(super) semantic: Option<AdrSemanticHit>,
-}
-
-pub(super) fn lexical_doc_hits_with_adrs(
+pub(super) fn lexical_doc_hits(
     lexical_docs: BTreeMap<String, orbit_search::DocSearchResult>,
-    lexical_adrs: BTreeMap<String, AdrHybridCandidate>,
     limit: usize,
 ) -> Vec<GlobalSearchHit> {
     let mut out = lexical_docs
         .into_values()
         .map(|result| doc_result_to_global(result.clone(), "lexical", Some(result.score as f32)))
         .collect::<Vec<_>>();
-    out.extend(blend_adr_lexical_fallback(lexical_adrs, limit));
     out.truncate(limit);
     out
 }
@@ -133,65 +123,6 @@ pub(super) fn blend_learning_hybrid_candidates(
     out
 }
 
-pub(super) fn blend_adr_hybrid_candidates(
-    candidates: Vec<AdrHybridCandidate>,
-    semantic_weight: f32,
-) -> Vec<GlobalSearchHit> {
-    let lexical_scores = normalized_doc_scores(candidates.iter().filter_map(|candidate| {
-        candidate
-            .hit
-            .id
-            .as_ref()
-            .zip(candidate.lexical_score)
-            .map(|(id, score)| (id.clone(), score))
-    }));
-    let semantic_scores = normalized_doc_scores(candidates.iter().filter_map(|candidate| {
-        candidate
-            .hit
-            .id
-            .as_ref()
-            .zip(candidate.semantic_score)
-            .map(|(id, score)| (id.clone(), score))
-    }));
-    let lexical_weight = 1.0 - semantic_weight;
-    let mut out = candidates
-        .into_iter()
-        .map(|mut candidate| {
-            let id = candidate.hit.id.as_deref().unwrap_or_default();
-            let lexical = lexical_scores.get(id).copied().unwrap_or(0.0);
-            let semantic = semantic_scores.get(id).copied().unwrap_or(0.0);
-            let score = semantic_weight.mul_add(semantic, lexical_weight * lexical);
-            candidate.hit.score = Some(score);
-            if let Some(semantic_hit) = candidate.semantic {
-                candidate.hit.best_field = Some(semantic_hit.best_field);
-                candidate.hit.snippet = Some(semantic_hit.snippet);
-            }
-            candidate.hit
-        })
-        .collect::<Vec<_>>();
-    out.sort_by(compare_global_hits_by_score);
-    out
-}
-
-pub(super) fn blend_adr_lexical_fallback(
-    lexical_adrs: BTreeMap<String, AdrHybridCandidate>,
-    limit: usize,
-) -> Vec<GlobalSearchHit> {
-    let mut out = lexical_adrs
-        .into_values()
-        .map(|mut candidate| {
-            candidate.hit.source = "lexical".to_string();
-            if let Some(score) = candidate.lexical_score {
-                candidate.hit.score = Some(score);
-            }
-            candidate.hit
-        })
-        .collect::<Vec<_>>();
-    out.sort_by(compare_global_hits_by_score);
-    out.truncate(limit);
-    out
-}
-
 fn normalized_doc_scores(scores: impl IntoIterator<Item = (String, f32)>) -> BTreeMap<String, f32> {
     let raw = scores.into_iter().collect::<Vec<_>>();
     if raw.len() < 2 {
@@ -245,19 +176,6 @@ pub(super) fn warn_doc_hybrid_fallback(notes: &mut Vec<String>, reason: &str) {
         notes,
         "doc hybrid vector",
         &format!("{DOC_HYBRID_FALLBACK_NOTE}: {reason}"),
-    );
-}
-
-pub(super) fn warn_adr_hybrid_fallback(notes: &mut Vec<String>, reason: &str) {
-    orbit_common::tracing::warn!(
-        target: "orbit.search.adrs",
-        reason,
-        "falling back to lexical ADR search"
-    );
-    push_skip_note(
-        notes,
-        "ADR hybrid vector",
-        &format!("{ADR_HYBRID_FALLBACK_NOTE}: {reason}"),
     );
 }
 

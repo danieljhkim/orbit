@@ -83,7 +83,7 @@ impl Tool for OrbitSearchTool {
         ToolSchema {
             name: "orbit.search".to_string(),
             description:
-                "Search tasks, docs, learnings, and ADRs. Hybrid vector ranking applies to indexed tasks, docs, and learnings."
+                "Search tasks, docs, and learnings. ADR entries are retrieved through the docs corpus; hybrid vector ranking applies to indexed tasks, docs, and learnings."
                     .to_string(),
             parameters,
             builtin: true,

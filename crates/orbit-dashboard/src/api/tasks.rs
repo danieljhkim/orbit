@@ -105,7 +105,7 @@ pub(super) struct CreateTaskBody {
     #[serde(default)]
     orchestrator: Option<String>,
     /// Caller-supplied provenance, forwarded as the write's model identity the
-    /// same way `POST /api/adrs` and `POST /api/frictions` take it. Before
+    /// same way `POST /api/frictions` takes it. Before
     /// ORB-10648 this key was undeclared, so serde dropped it and the task was
     /// attributed to the ambient identity while the caller was told `model` had
     /// been applied.

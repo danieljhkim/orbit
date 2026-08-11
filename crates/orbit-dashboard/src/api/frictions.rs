@@ -98,7 +98,7 @@ pub(super) struct FrictionsQuery {
 /// are optional. Field parsing and validation stay in the shared runtime add
 /// path so the wire shape and defaults match the native MCP tool exactly.
 /// `model` falls back to the human actor label via [`run_friction_tool`] when
-/// the caller omits it, matching the ADR routes. `orbit.friction.add` rejects
+/// the caller omits it. `orbit.friction.add` rejects
 /// a separate `agent` field (attribution was consolidated to `model`-only),
 /// so this body does not accept one.
 #[derive(Deserialize, Default)]

@@ -48,75 +48,9 @@ pub(super) fn doc_result_to_global(
         summary: Some(result.record.summary),
         status: Some(result.record.doc_type),
         best_field: None,
-        snippet: None,
+        snippet: result.snippet,
         score,
         score_breakdown: None,
         matched_by: Some(result.matched_by),
-    }
-}
-
-pub(super) fn adr_result_to_global(
-    result: orbit_search::AdrSearchResult,
-    source: &str,
-) -> GlobalSearchHit {
-    GlobalSearchHit {
-        kind: "adr".to_string(),
-        source: source.to_string(),
-        id: Some(result.id),
-        path: Some(result.path.to_string_lossy().into_owned()),
-        title: Some(result.title),
-        summary: None,
-        status: Some(result.status.to_string()),
-        best_field: None,
-        snippet: None,
-        score: Some(result.score as f32),
-        score_breakdown: None,
-        matched_by: Some(result.matched_by),
-    }
-}
-
-pub(super) fn adr_to_global_hit(
-    adr: orbit_common::types::Adr,
-    matched_by: Option<Vec<String>>,
-) -> GlobalSearchHit {
-    adr_to_global_hit_with_source(adr, "lexical", matched_by)
-}
-
-pub(super) fn adr_to_global_hit_with_source(
-    adr: orbit_common::types::Adr,
-    source: &str,
-    matched_by: Option<Vec<String>>,
-) -> GlobalSearchHit {
-    let path = std::path::PathBuf::from(".orbit")
-        .join("adrs")
-        .join(adr.status.cli_name())
-        .join(&adr.id)
-        .join("body.md");
-    GlobalSearchHit {
-        kind: "adr".to_string(),
-        source: source.to_string(),
-        id: Some(adr.id),
-        path: Some(path.to_string_lossy().into_owned()),
-        title: Some(adr.title),
-        summary: None,
-        status: Some(adr.status.to_string()),
-        best_field: None,
-        snippet: None,
-        score: None,
-        score_breakdown: None,
-        matched_by,
-    }
-}
-
-pub(super) fn filter_matched_by(tag_filter: &[String], path: Option<&str>) -> Option<Vec<String>> {
-    let mut matched = Vec::new();
-    matched.extend(tag_filter.iter().map(|tag| format!("tag:{tag}")));
-    if let Some(path) = path {
-        matched.push(format!("path:{path}"));
-    }
-    if matched.is_empty() {
-        None
-    } else {
-        Some(matched)
     }
 }

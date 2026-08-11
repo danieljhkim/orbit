@@ -684,8 +684,7 @@ const EXPECTED_INACTIVE_TOOL_NAMES: &[&str] = &[
     "orbit.learning.sync",
     "orbit.learning.list",
     "orbit.friction.stats",
-    // ORB-00289: trimmed admin/destructive tools — CLI path retains them.
-    "orbit.adr.list",
+    // Trimmed admin/destructive tools — CLI path retains them.
     "orbit.semantic.uninstall",
     "orbit.task.delete",
     "orbit.task.lint",
@@ -696,7 +695,7 @@ const EXPECTED_INACTIVE_TOOL_NAMES: &[&str] = &[
 ];
 
 // ORB-00289 + agent-surface narrowing: admin/destructive and triage tools
-// (`orbit.adr.list`, `orbit.semantic.uninstall`, `orbit.task.delete`,
+// (`orbit.semantic.uninstall`, `orbit.task.delete`,
 // `orbit.task.lint`, `orbit.task.reject`, `orbit.learning.prune`,
 // `orbit.friction.resolve`) deliberately omitted — retained on
 // the CLI / `runtime.run_tool` path only.
@@ -709,10 +708,6 @@ const REQUIRED_AGENT_FACING_TOOL_NAMES: &[&str] = &[
     "orbit.task.update",
     "orbit.task.list",
     "orbit.task.start",
-    "orbit.adr.add",
-    "orbit.adr.show",
-    "orbit.adr.supersede",
-    "orbit.adr.update",
     "orbit.learning.add",
     "orbit.learning.show",
     "orbit.learning.update",
@@ -727,7 +722,6 @@ fn is_runtime_mcp_category_tool(name: &str) -> bool {
     name == "orbit.search"
         || name.starts_with("orbit.task.")
         || name.starts_with("orbit.friction.")
-        || name.starts_with("orbit.adr.")
         || name.starts_with("orbit.semantic.")
         || name.starts_with("orbit.docs.")
         || name.starts_with("orbit.learning.")
@@ -740,7 +734,7 @@ fn is_remote_owned_non_runtime_tool(name: &str) -> bool {
 #[test]
 fn inactive_tools_are_not_in_the_mcp_safe_surface() {
     let safe_names: BTreeSet<String> = safe_mcp_tool_names().into_iter().collect();
-    assert_eq!(EXPECTED_INACTIVE_TOOL_NAMES.len(), 21);
+    assert_eq!(EXPECTED_INACTIVE_TOOL_NAMES.len(), 20);
 
     for name in EXPECTED_INACTIVE_TOOL_NAMES {
         assert!(

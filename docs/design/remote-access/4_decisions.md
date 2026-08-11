@@ -1,7 +1,7 @@
 ---
 title: "Remote Access — Decisions"
 owner: claude
-last_updated: 2026-08-10
+last_updated: 2026-08-11
 status: Accepted
 feature: remote-access
 doc_role: decisions
@@ -21,69 +21,88 @@ The workspace-keyed-state machinery (the `Ws` extractor vs. path-prefixed routes
 
 ---
 
-## ADR-0200 — Live remote/multi-workspace viewing supersedes the git-sync task registry
+## ADR-0200 — Live remote/multi-workspace dashboard viewing supersedes the git-sync task registry
 
-**Status:** Accepted · 2026-07 · [ORB-00029], [ORB-00030]
+**Status:** Accepted · 2026-07-02 05:01:07.910915Z · [ORB-00029], [ORB-00030], [ORB-00360]
+**Owner:** claude
+**Created:** 2026-07-02 05:00:39.490085Z
+**Last updated:** 2026-07-02 05:01:07.910915+00:00
+**Related features:** `remote-access`
+**Tags:** `remote-access`, `dashboard`
 
-**Context.** Orbit ships per-engineer, which leaves a coordination gap: engineer A's tasks are invisible to engineer B, and your own tasks on another machine are invisible from your laptop. The archived [task-sync](../_archive/task-sync/1_overview.md) design proposed closing it with a durable git-orphan-branch task registry plus operation-aware replay — a shared, offline-capable, *writable* store, deliberately deferred because doing it correctly is meaningful engineering. Meanwhile two smaller features shipped that answer the *viewing* half of the gap with none of that machinery: `orbit web serve --global` ([ORB-00030]) and `orbit web connect <ssh-host> [--global]` ([ORB-00029]).
+Context. Orbit ships per-engineer (POSITIONING): each operator runs Orbit locally, with locks and audit DB on their own machine. That leaves a visible coordination gap — engineer A creates ORB-00042 on their laptop and engineer B has no way to see it short of asking or finding the PR. The task-sync design (now archived under docs/design/_archive/task-sync/) proposed closing that gap with a durable git-orphan-branch task registry (refs/heads/orbit/tasks) plus operation-aware replay for conflict resolution — a shared, offline-capable, WRITABLE store. It was deliberately deferred: doing it correctly requires an operation-aware-replay subsystem and a structured-conflict UX that are meaningful engineering, and a half-built version produces the wrong mental model.
 
-**Decision.** Treat live remote/multi-workspace dashboard viewing as Orbit's answer to the cross-machine task-visibility gap, superseding the git-sync task registry. The `task-sync` folder is archived (Superseded); this `remote-access` folder documents the shipped feature. We do not build the orphan-branch registry, operation-aware replay, or registry-scoped ID allocation. The gap is addressed by viewing what already exists on each machine, not by synchronizing a shared writable store.
+Meanwhile two smaller features shipped that answer the *viewing* half of the same gap with none of that machinery: `orbit web serve --global` (ORB-00030) serves one loopback dashboard over every workspace in ~/.orbit/workspaces.json, and `orbit web connect <ssh-host> [--global]` (ORB-00029) tunnels that loopback dashboard from a remote machine over SSH. Together they let an operator see tasks across every workspace on a machine, and across machines, live.
 
-**Consequences.**
-- One coherent, shipped story — `web serve --global` for all local workspaces, `web connect` for a remote machine, `web connect --global` for every workspace on a remote — with no server, no sync branch, and no new auth.
-- The per-engineer deployment doctrine is preserved unchanged: nothing is written across machines; each machine stays the source of truth for its own tasks.
-- The archived task-sync record is retained, so the rejected git-sync mechanism and the reasons it was dropped stay inspectable.
-- Cost: viewing is **not** sync — it needs the target machine online and SSH-reachable, shows one machine's state at a time (the aggregate is per-machine, not cross-machine), and offers no offline, writable, or merge path. A team that genuinely needs a shared writable task registry is not served by this and would have to revisit a shared-host or sync design.
+Decision. Treat live remote/multi-workspace dashboard viewing as Orbit's answer to the cross-machine task-visibility gap, superseding the git-sync task registry design. The `task-sync` design folder is archived (status Superseded), and a new `remote-access` design folder documents the shipped viewing feature. We do NOT build the git-orphan-branch registry, operation-aware replay, or ORB-00000 allocation-against-registry described there. The gap is addressed by viewing what already exists on each machine rather than by synchronizing a shared writable store.
 
----
+Consequences.
+- One coherent, shipped story: `web serve --global` for all local workspaces, `web connect` for a remote machine, `web connect --global` for every workspace on a remote machine. No server, no new auth, no sync branch.
+- The per-engineer deployment doctrine is preserved unchanged: nothing is written across machines; each machine remains the source of truth for its own tasks.
+- The archived task-sync record is retained so the rejected git-sync mechanism (and why it was dropped) stays inspectable.
+- Cost: viewing is NOT sync. It requires the target machine to be online and SSH-reachable, shows one machine's state at a time (the aggregate is per-machine, not cross-machine), and offers no offline, writable, or merge story. A team that genuinely needs a shared writable task registry is not served by this and would need to revisit a shared-host or sync design later.
 
-## ADR-0201 — Remote access is an SSH tunnel over a loopback-only bind, never a network bind with auth
+## ADR-0201 — Remote dashboard access is an SSH tunnel over a loopback-only bind, never a network bind with auth
 
-**Status:** Accepted · 2026-07 · [ORB-00029], [ORB-00360]
+**Status:** Accepted · 2026-07-02 05:01:07.972485Z · [ORB-00029], [ORB-00030], [ORB-00360]
+**Owner:** claude
+**Created:** 2026-07-02 05:00:59.151663Z
+**Last updated:** 2026-07-02 05:01:07.972485Z
+**Related features:** `remote-access`
+**Tags:** `remote-access`, `dashboard`
 
-**Context.** The dashboard exposes an unauthenticated JSON API and mutating task actions. Making it reachable from another machine has two broad shapes: (a) bind it to a routable interface and add an auth/authorization layer (tokens, sessions, reverse proxy with auth), or (b) keep it loopback-only and reach it through a transport the operator already trusts. Option (a) makes Orbit own a network-facing auth surface — credential storage, rotation, sessions — on a tool that is unauthenticated by default.
+Context. The dashboard exposes an unauthenticated JSON API and mutating task actions. To make it reachable from another machine there are two broad options: (a) bind it to a routable interface and add an authentication/authorization layer (tokens, sessions, reverse proxy with auth), or (b) keep the server loopback-only and reach it through an authenticated transport the operator already trusts. Option (a) means Orbit owns a network-facing auth surface — credential storage, rotation, session handling, and the blast radius of getting any of it wrong on an unauthenticated-by-default tool.
 
-**Decision.** Remote access is option (b). The dashboard always binds loopback only ([ORB-00360]'s `check_bindable_host` refuses any non-loopback host), and `orbit web connect` reaches a remote dashboard by running `orbit web serve --no-open` on the remote over SSH and forwarding a local port through the same connection. Authentication, authorization, and transport encryption are delegated entirely to SSH. Orbit adds no token, no ACL, no session. `--global` and `--root` are forwarded to scope the tunnel, but the security posture is identical either way; the tunnel and remote serve are reaped on Ctrl-C via pty SIGHUP.
+Decision. Remote access is option (b): the dashboard always binds loopback only (ORB-00360's check_bindable_host refuses any non-loopback host), and `orbit web connect <ssh-host>` reaches a remote dashboard by running `orbit web serve --no-open` on the remote over SSH and forwarding a local port through the same SSH connection. Authentication, authorization, and transport encryption are delegated entirely to SSH — whatever keys/config the operator already uses. Orbit adds no token, no ACL, no session. `--global` and `--root` are forwarded to the remote serve so the tunnel can scope to one workspace or span all of them, but the security posture is identical either way. The tunnel is torn down (and the remote serve reaped via pty SIGHUP) on Ctrl-C.
 
-**Consequences.**
-- Zero new network attack surface: the only listeners are loopback on both ends; the wire is SSH.
-- The auth story is the team's existing SSH posture — nothing to provision, rotate, or leak on Orbit's side.
-- Consistent with the auth stance the archived task-sync design also reached (piggyback on existing infra rather than build Orbit-specific auth).
-- Cost: remote viewing requires SSH reachability and `orbit` on the remote's non-interactive PATH; there is no browser-only or tokened-URL access, and an operator who cannot SSH to a box cannot see its dashboard. SSH auth failures surface as ssh's own errors, which Orbit does not paper over.
-
----
+Consequences.
+- Zero new network attack surface: the only listener is loopback on both ends; the wire is SSH.
+- The auth story is the team's existing SSH posture — no separate credential to provision, rotate, or leak.
+- Symmetry with the git-sync auth stance that the archived task-sync design also reached (piggyback on existing infra rather than build Orbit-specific auth), so the conclusion is consistent across both designs.
+- Cost: remote viewing requires SSH reachability and `orbit` on the remote's non-interactive PATH; there is no browser-only or tokened-URL access path, and an operator who cannot SSH to the box cannot see its dashboard. Short-lived/again-prompting SSH auth surfaces as ssh's own errors, which Orbit does not paper over.
 
 ## ADR-0234 — orbit-web reloads the workspace registry per request rather than watching or snapshotting once
 
-**Status:** Accepted · 2026-07 · [ORB-10294]
+**Status:** Accepted · 2026-07-18 10:41:51.968238Z · [ORB-10294]
+**Owner:** claude
+**Created:** 2026-07-18 10:41:43.490899Z
+**Last updated:** 2026-07-18 11:40:12.626030Z
+**Related features:** `remote-access`
+**Tags:** `remote-access`, `dashboard`, `workspace-registry`
+**Paths:** `crates/orbit-dashboard/**`
 
-**Context.** `orbit web serve` snapshotted `~/.orbit/workspaces.json` once in `build_state` and cached each workspace runtime indefinitely. A native `orbit workspace init/remove` (or a re-pointed checkout binding) succeeded on disk but stayed invisible to the web/Bridge surface until the server was restarted — a papercut that forced a restart during Build Week cleanup and contradicts the server's contract of routing the *current* registered workspace set. Three shapes were on the table: (a) keep the startup snapshot and accept restarts; (b) run a filesystem watcher daemon that reloads on `workspaces.json` change; (c) reload the registry on demand at each request boundary.
+### Context
+orbit-web previously snapshotted ~/.orbit/workspaces.json once at startup and cached runtimes indefinitely, so native workspace init/remove and binding changes required a server restart. A watcher would add a resident process and synchronization surface that the loopback request path does not need.
 
-**Decision.** Option (c). A registry-backed `DashboardState` keeps a `RegistrySource` and reloads the authoritative registry via `refresh()` at each request boundary (the `Ws` extractor for all routed handlers, plus `/api/workspaces`, `/api/tasks/all`, and detailed `/healthz`). `refresh()` reloads into a fresh `Snapshot`, swaps the whole `Arc<Snapshot>` atomically under a mutex, and — serialized by a dedicated refresh lock — evicts only the runtimes whose workspace was removed, went inactive, or was rebound; runtimes are (re)built lazily in `runtime_for`, never under the registry/cache lock. A malformed or partially-written registry read retains the last valid in-memory snapshot and emits a credential-safe diagnostic (registry path + Orbit's own error, never the file body). Stale-path entries are reported inactive, never auto-deleted. The watcher daemon (b) was rejected as more moving parts (a background task, inotify/kqueue portability, debounce, its own failure modes) than a loopback dashboard reached per request needs; the request/refresh path reuses the existing choke points and carries no daemon.
+### Decision
+A registry-backed DashboardState reloads the authoritative workspace registry at each request boundary used by the Ws extractor, /api/workspaces, /api/tasks/all, and detailed /healthz. Refresh builds a complete new snapshot, swaps it atomically, and evicts only runtimes for workspaces that were removed, became inactive, or changed binding. A malformed or partial refresh retains the last valid snapshot and emits a credential-safe diagnostic; stale-path entries are reported inactive and are never auto-deleted.
+
+### Consequences
+- Native registry mutations become visible without restarting orbit-web.
+- Concurrent requests observe either the previous complete snapshot or the next complete snapshot, never a partially rebuilt registry.
+- Malformed refreshes remain serviceable from the last known-good snapshot and require operator correction of the registry file.
+- Cost: each request boundary re-reads and parses the small registry file, and mutations are eventually consistent with requests already in flight rather than transactionally synchronized with them.
+
+## ADR-0353 — orbit web connect attaches to an already-running remote dashboard instead of always spawning one
+
+**Status:** Accepted · 2026-08-10 03:04:50.454508Z · [ORB-10708]
+**Owner:** claude
+**Created:** 2026-08-10 03:04:45.548594Z
+**Last updated:** 2026-08-10 03:04:50.454508Z
+**Related features:** `remote-access`
+**Tags:** `remote-access`, `ssh`
+**Paths:** `crates/orbit-dashboard/src/connect.rs`
+
+**Context.** Every `orbit web connect` invocation unconditionally appended `orbit web serve` as the trailing remote command on its `ssh -tt` tunnel, on the assumption that nothing was already listening on `remote_port`. When a remote dashboard was already up — another engineer's still-attached tunnel, or a long-lived remote listener meant to be reused — the second invocation's remote command simply failed to bind, so a second connect either errored out or left a dead remote process behind. There was no attach path: ownership of "the tunnel" and ownership of "the remote process" were not distinguished, so nothing could safely share an already-running server.
+
+**Decision.** Extend the existing readiness probing rather than add a parallel mechanism. `connect` first opens a bare port forward with no remote command (`ssh -N -L <local>:localhost:<remote> <host>`, via `build_probe_ssh_args`) and polls the existing `/healthz` readiness loop (`poll_until_ready`, refactored out of `wait_until_ready`) against it with a short `ATTACH_PROBE_TIMEOUT` (5s). A tunnel can come up healthy while nothing is listening behind it, so readiness is decided by the `/healthz` response, never by `ssh`'s own exit code. If something answers within the probe window, that bare forward becomes the session's `SshTunnel` outright (attach mode) and no remote command is ever sent. If nothing answers before the probe timeout, the probe forward is torn down and `connect` falls back to the original flow unchanged: a fresh `ssh -tt` session carrying `orbit web serve` as the trailing remote command, read with the existing 30s `READINESS_TIMEOUT`. Teardown classification is untouched: `SshTunnel`'s Drop-based SIGTERM/SIGKILL of the local `ssh` process is identical in both modes — in attach mode no remote command is tied to the session, so closing the forward cannot orphan or kill anyone else's process; in spawn mode the existing pty/SIGHUP path still reaps exactly the process this invocation started.
 
 **Consequences.**
-- Native add/remove/rebind and post-startup path disappearance are reflected without a restart, and one broken workspace never strands the rest — eviction is per-binding and the aggregate views skip unopenable workspaces.
-- Operator recovery is "fix the checkout and issue any request": a re-pointed or restored path re-activates on the next refresh, with no manual cache flush or restart. A malformed registry is self-healing — the last good set keeps serving until the file parses again.
-- Startup keeps its original strictness: `from_registry`'s initial load is eager, so a malformed registry *at boot* is still fatal; only *refreshes* fall back to keep-last-valid.
-- Cost: every request boundary re-reads and re-parses `workspaces.json` (cheap for a loopback dashboard, but not free), and refresh is eventually-consistent rather than strongly serialized against in-flight requests — two concurrent refreshes race to publish, and a runtime evicted by a stale race is simply rebuilt on the next request. This is acceptable precisely because the binding recheck in `runtime_for` makes a stale cache entry unservable regardless of eviction timing.
-
----
-
-## ADR-0353 — `orbit web connect` attaches to an already-running remote dashboard instead of always spawning one
-
-**Status:** Accepted · 2026-08 · [ORB-10708]
-
-**Context.** `connect` always appended `orbit web serve` as the trailing remote command on its `ssh -tt` tunnel, assuming nothing was already listening on `remote_port`. A second connect against a remote that already had a dashboard running — another engineer's still-attached tunnel, or a long-lived remote listener meant to be reused — had no way to share it: the remote command it carried simply failed to bind.
-
-**Decision.** Extend the existing readiness probing (`healthz_ok` / the readiness poll loop) rather than add a parallel mechanism. `connect` first opens a bare `-N` port forward with no remote command and polls `/healthz` through it with a short probe timeout; if something answers, that forward becomes the session's tunnel and no remote command is ever sent (attach mode). Only if nothing answers does it fall back to the original flow: a fresh `ssh -tt` session that also carries `orbit web serve`, with the existing full-length readiness wait (spawn mode). Teardown (`SshTunnel::Drop`) is unchanged in shape either way; it just has nothing remote to reap when no remote command was ever sent.
-
-**Consequences.**
-- A remote dashboard can now be shared by concurrent `connect` sessions; only the first one spawns it.
-- Disconnecting from an attached session never touches the process it didn't start.
-- Cost: every `connect` now pays a probe round trip (up to the probe timeout) before it can fall back to spawning, in the common case where nothing is listening yet.
-- Cost: the attach-vs-spawn decision stays racy (TOCTOU) — two invocations starting within the same probe window can both miss and both attempt to spawn; the second spawn fails to bind and surfaces via the existing ssh-exit-code classification. See [ORB-10708] and the store record for the full narrative.
-
----
+- Two engineers (or a developer session plus a long-lived remote listener) can now share one remote dashboard: the second `connect` attaches instead of failing to bind a second remote server.
+- Disconnecting from an attached session never touches the pre-existing remote process, since that session never started one.
+- A spawned remote process still cannot be orphaned on any exit path (error, panic, Ctrl-C) — unchanged from the prior Drop-based teardown, now exercised from either match arm in `connect`.
+- Cost: every `connect` invocation now pays a probe round trip before it can spawn — up to `ATTACH_PROBE_TIMEOUT` (5s) of added latency in the common case where nothing is listening yet, before the existing spawn-and-wait flow even starts.
+- Cost: the attach-vs-spawn decision is still racy (TOCTOU), consistent with the existing local-port-selection racy note in this same file — two `connect` invocations starting within the same ~5s probe window can both see nothing answering and both fall back to spawning; the second spawn then simply fails to bind the remote port, surfaced via the existing ssh-exit-code classification. Not eliminated by this change; accepted for a developer-facing convenience command.
 
 ## Task References
 

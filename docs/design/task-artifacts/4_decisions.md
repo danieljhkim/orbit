@@ -3,7 +3,7 @@ summary: "Task Artifacts — Decisions"
 type: design
 title: "Task Artifacts — Decisions"
 owner: codex
-last_updated: 2026-08-09
+last_updated: 2026-08-11
 status: Draft
 feature: task-artifacts
 doc_role: decisions
@@ -22,98 +22,447 @@ Historical note ([ORB-10458]): the entries listed below were authored with local
 
 ## ADR-0261 — Authority-scoped `ORB-00000` task IDs
 
-**Status:** Accepted · 2026-05 · Phase 1 v2 domain contracts (`c1f72a32`); Phase 2 home registry allocator (`1ae83804`); legacy gate removed (`e9582eba`) · legacy_id: `task-artifacts/ADR-001`
+**Status:** Accepted · 2026-07-26 21:50:10.629307Z · [ORB-10458]
+**Owner:** claude
+**Created:** 2026-07-26 21:50:05.105654Z
+**Last updated:** 2026-07-26 21:50:10.629307+00:00
+**Related features:** `task-artifacts`
+**Legacy IDs:** `task-artifacts/ADR-001`
+**Tags:** `task-artifacts`, `task-ids`
 
-Narrative lives in the ADR store — retrieve it with `orbit tool run orbit.adr.show --input '{"id":"ADR-0261"}'`.
+### Context
 
----
+The current `T<YYYYMMDD>-<N>` format is allocated by scanning one workspace's task directories. That shape is useful as a local search key but fails the moment tasks need to be referenced across local workspaces, through an explicit registry, hosted Team, or durable design docs without explaining which machine allocated them.
+
+### Decision
+
+Adopt `ORB-00000` as the canonical v2 task ID format: `ORB-` plus a five-digit decimal suffix allocated by an explicit authority. The ID is unique inside that authority, not across unrelated local registries. V2 task bundles do not preserve old `T...` identifiers as aliases.
+
+### Consequences
+
+- Task IDs become meaningful inside the scope of the configured allocator instead of implicitly workspace-local.
+- Local-only Orbit uses one allocator across all local workspaces, so one machine does not mint the same ID for two repositories.
+- Two unrelated local registries may both allocate the same bare ID; cross-registry references must carry registry, workspace, hosted tenant, or external-reference context.
+- Implementations must stop validating only `T<YYYYMMDD>-<N>` and must add numeric `ORB-\d{5}` validation.
+- Existing local tasks need a cutover command, but the result is a clean v2 task store rather than a dual-ID store.
+- Cost: task creation now depends on an allocator outside the task directory scan. Sync and hosted modes need shared allocation before a task can be published.
+
+## Provenance
+
+Migrated verbatim from the local heading `task-artifacts/ADR-001` in `docs/design/task-artifacts/4_decisions.md` by [ORB-10458]. Original status line: Accepted · 2026-05 · Phase 1 v2 domain contracts (`c1f72a32`); Phase 2 home registry allocator (`1ae83804`); legacy gate removed (`e9582eba`).
 
 ## ADR-0262 — Envelope YAML plus Markdown sidecars for prose
 
-**Status:** Accepted · 2026-05 · Phase 3 v2 bundle primitives (`c14fa640`); Phase 4 document update hardening (`06847332`) · legacy_id: `task-artifacts/ADR-002`
+**Status:** Accepted · 2026-07-26 21:51:21.827670Z · [ORB-10458]
+**Owner:** claude
+**Created:** 2026-07-26 21:51:21.580074Z
+**Last updated:** 2026-07-26 21:51:21.827670Z
+**Related features:** `task-artifacts`
+**Legacy IDs:** `task-artifacts/ADR-002`
+**Tags:** `task-artifacts`
 
-Narrative lives in the ADR store — retrieve it with `orbit tool run orbit.adr.show --input '{"id":"ADR-0262"}'`.
+### Context
 
----
+`task.yaml` currently stores metadata, long prose, acceptance criteria, comments, history, and review threads together. This makes simple tasks easy to inspect, but it turns every content edit or append into a YAML rewrite and makes Markdown-hostile fields harder for humans and agents to author.
+
+### Decision
+
+Keep `task.yaml` as a small structured envelope and move prose into Markdown sidecars: `description.md`, `acceptance.md`, `plan.md`, and `execution-summary.md`. Public APIs may expose logical string/list fields, but storage treats the files as source of truth.
+
+### Consequences
+
+
+- Prose gets native Markdown editing, diffs, and rendering.
+- YAML becomes smaller, easier to validate, and easier to merge.
+- CLI/tool reads should treat sidecars as first-class documents rather than maintaining embedded-YAML compatibility.
+- Cost: one task now spans more files. Simple scripts that read only `task.yaml` must switch to the bundle API.
+
+## Provenance
+
+Migrated verbatim from the local heading `task-artifacts/ADR-002` in `docs/design/task-artifacts/4_decisions.md` by [ORB-10458]. Original status line: Accepted · 2026-05 · Phase 3 v2 bundle primitives (`c14fa640`); Phase 4 document update hardening (`06847332`)
 
 ## ADR-0263 — Status-neutral task directories
 
-**Status:** Accepted · 2026-05 · Phase 3 v2 runtime backend (`3be9bd5f`, `c14fa640`); Phase 6 legacy gate removed (`e9582eba`) · legacy_id: `task-artifacts/ADR-003`
+**Status:** Accepted · 2026-07-26 21:51:22.340713Z · [ORB-10458]
+**Owner:** claude
+**Created:** 2026-07-26 21:51:22.083822Z
+**Last updated:** 2026-07-26 21:51:22.340713Z
+**Related features:** `task-artifacts`
+**Legacy IDs:** `task-artifacts/ADR-003`
+**Tags:** `task-artifacts`
 
-Narrative lives in the ADR store — retrieve it with `orbit tool run orbit.adr.show --input '{"id":"ADR-0263"}'`.
+### Context
 
----
+Current lifecycle state is encoded in the directory path, so moving `backlog -> in-progress -> review` physically moves the task bundle. That is readable in a local file browser, but it makes lifecycle transitions conflict-prone under sync and forces lookup to scan every status directory.
+
+### Decision
+
+Store canonical task bundles under `~/.orbit/tasks/workspaces/<workspace-id>/<task-id>/`, project them into `.orbit/tasks/<task-id>` with symlinks, and make `status` an envelope field. Status-specific and terminal-month views are generated by CLI, dashboard, and indexes rather than by directory layout.
+
+### Consequences
+
+
+- Lifecycle transitions become envelope updates plus append-only events, not directory moves.
+- Lookup by ID becomes direct and cheap.
+- Sync no longer has to reconcile duplicate status paths for one task ID.
+- The initial layout avoids partition directories until a real corpus needs filesystem fanout.
+- `.orbit/tasks/` can be deleted and rebuilt from `.orbit/config.yaml` plus the local task registry.
+- Cost: humans lose the natural `ls .orbit/tasks/review` view unless Orbit provides generated views or commands. Terminal-state date partitioning also moves from filesystem layout to indexes or retention policy.
+
+## Provenance
+
+Migrated verbatim from the local heading `task-artifacts/ADR-003` in `docs/design/task-artifacts/4_decisions.md` by [ORB-10458]. Original status line: Accepted · 2026-05 · Phase 3 v2 runtime backend (`3be9bd5f`, `c14fa640`); Phase 6 legacy gate removed (`e9582eba`)
 
 ## ADR-0264 — Append-heavy task data leaves `task.yaml`
 
-**Status:** Accepted · 2026-05 · Phase 3 v2 bundle primitives (`c14fa640`); Phase 4 hardening of append/tail-repair (`06847332`) · legacy_id: `task-artifacts/ADR-004`
+**Status:** Accepted · 2026-07-26 21:51:22.837719Z · [ORB-10458]
+**Owner:** claude
+**Created:** 2026-07-26 21:51:22.599130Z
+**Last updated:** 2026-07-26 21:51:22.837719Z
+**Related features:** `task-artifacts`
+**Legacy IDs:** `task-artifacts/ADR-004`
+**Tags:** `task-artifacts`
 
-Narrative lives in the ADR store — retrieve it with `orbit tool run orbit.adr.show --input '{"id":"ADR-0264"}'`.
+### Context
 
----
+Comments, history entries, and review messages are append-heavy. Keeping them as arrays in `task.yaml` causes whole-file rewrites and bad merge behavior for the exact fields most likely to be touched by parallel agents.
+
+### Decision
+
+Store lifecycle/history events in `events.jsonl`, task comments in `comments.jsonl`, and review threads under `review-threads/`. Each append gets a stable event/comment/message ID, a row `schema_version`, actor and timestamp metadata, and a defined append/tail-repair contract.
+
+### Consequences
+
+
+- Concurrent append operations can merge by ID rather than by YAML text position.
+- Audit readers can stream events without parsing the envelope.
+- Review prose can be stored as Markdown while thread metadata stays structured.
+- Cost: reads that need the complete task now load several files. Event-log corruption handling and partial-write recovery become part of the store contract.
+
+## Provenance
+
+Migrated verbatim from the local heading `task-artifacts/ADR-004` in `docs/design/task-artifacts/4_decisions.md` by [ORB-10458]. Original status line: Accepted · 2026-05 · Phase 3 v2 bundle primitives (`c14fa640`); Phase 4 hardening of append/tail-repair (`06847332`)
 
 ## ADR-0265 — Typed relations over scattered link fields
 
-**Status:** Accepted · 2026-05 · Phase 6 relations and job-run wiring (working tree) · legacy_id: `task-artifacts/ADR-005`
+**Status:** Accepted · 2026-07-26 21:51:23.345527Z · [ORB-10458]
+**Owner:** claude
+**Created:** 2026-07-26 21:51:23.097237Z
+**Last updated:** 2026-07-26 21:51:23.345527Z
+**Related features:** `task-artifacts`
+**Legacy IDs:** `task-artifacts/ADR-005`
+**Tags:** `task-artifacts`
 
-Narrative lives in the ADR store — retrieve it with `orbit tool run orbit.adr.show --input '{"id":"ADR-0265"}'`.
+### Context
 
----
+Task links currently appear as `parent_id`, `dependencies`, `source_task_id`, and external references, while execution fan-out currently uses `batch_id` for job-run membership. The first three are task-to-task relationships; `batch_id` is really a foreign reference to an execution/job run and should be named `job_run_id`.
+
+### Decision
+
+Use a directed `relations` array with explicit relation types for task-to-task links, and store `job_run_id` as a separate optional envelope attribute. The v2 envelope stores one typed relation surface and does not retain `parent_id`, `dependencies`, `source_task_id`, or `batch_id` as compatibility fields.
+
+Relation types are source-implied: `child_of`, `blocked_by`, `spawned_from`, `regression_from`, `supersedes`, and `related_to`. This means a task that depends on another task carries `blocked_by -> dependency`, and a subtask carries `child_of -> parent`. Writers reject self-edges, duplicates, and cycles for hierarchy/blocking relation families; generated indexes materialize relation and inverse lookup rows.
+
+### Consequences
+
+
+- Consumers can traverse relationships by meaning instead of hardcoded field names.
+- Future relation types can be added without widening the top-level envelope.
+- Task lineage can share vocabulary with the task artifact rather than deriving every edge from prose.
+- Common create flows write only the new task bundle; they do not need a fan-out update to the parent or dependency task.
+- Job-run filtering is explicit and indexed through `job_run_id`, not smuggled into task relations.
+- Cost: relation validation becomes stricter and more complex. Existing callers that set old link fields must be updated to write the typed relation surface.
+
+## Provenance
+
+Migrated verbatim from the local heading `task-artifacts/ADR-005` in `docs/design/task-artifacts/4_decisions.md` by [ORB-10458]. Original status line: Accepted · 2026-05 · Phase 6 relations and job-run wiring (working tree)
 
 ## ADR-0266 — Artifact manifest with binary-capable files
 
-**Status:** Accepted · 2026-05 · Phase 6 public artifact DTO surgery (working tree) · legacy_id: `task-artifacts/ADR-006`
+**Status:** Accepted · 2026-07-26 21:51:23.842344Z · [ORB-10458]
+**Owner:** claude
+**Created:** 2026-07-26 21:51:23.591002Z
+**Last updated:** 2026-07-26 21:51:23.842344Z
+**Related features:** `task-artifacts`
+**Legacy IDs:** `task-artifacts/ADR-006`
+**Tags:** `task-artifacts`
 
-Narrative lives in the ADR store — retrieve it with `orbit tool run orbit.adr.show --input '{"id":"ADR-0266"}'`.
+### Context
 
----
+Current task artifacts are `path + UTF-8 content`. That is enough for planning duel Markdown or JSON, but it excludes screenshots, binary logs, trace bundles, and generated media. It also lacks checksums and media-type metadata.
+
+### Decision
+
+Store artifacts under `artifacts/files/` and track them with `artifacts/manifest.yaml`. Each manifest entry records logical path, blob path, media type, checksum, size, and attribution. Public `TaskArtifact` values carry raw bytes plus media type so writers and readers do not reintroduce UTF-8-only assumptions above the manifest layer.
+
+### Consequences
+
+
+- Tasks can carry screenshots, binary traces, and structured generated outputs without abusing text fields.
+- Artifact integrity can be checked independently of the task envelope.
+- CLI display can choose text rendering, summaries, or file paths based on media type.
+- Cost: artifact write/read code becomes more complex, and storage now needs size limits, redaction checks, and checksum validation.
+
+## Provenance
+
+Migrated verbatim from the local heading `task-artifacts/ADR-006` in `docs/design/task-artifacts/4_decisions.md` by [ORB-10458]. Original status line: Accepted · 2026-05 · Phase 6 public artifact DTO surgery (working tree)
 
 ## ADR-0267 — Home task store with workspace symlink projection
 
-**Status:** Accepted · 2026-05 · Phase 2 home registry foundation (`1ae83804`); Phase 3 v2 runtime backend and symlink projection (`3be9bd5f`, `c14fa640`) · legacy_id: `task-artifacts/ADR-007`
+**Status:** Accepted · 2026-07-26 21:51:24.377578Z · [ORB-10458]
+**Owner:** claude
+**Created:** 2026-07-26 21:51:24.110260Z
+**Last updated:** 2026-07-26 21:51:24.377578Z
+**Related features:** `task-artifacts`
+**Legacy IDs:** `task-artifacts/ADR-007`
+**Tags:** `task-artifacts`
 
-Narrative lives in the ADR store — retrieve it with `orbit tool run orbit.adr.show --input '{"id":"ADR-0267"}'`.
+### Context
 
----
+Task bundles need to be close to the workspace so agents can inspect and update them with project context, but keeping the canonical copy inside every checkout makes gitignored task data fragile. `~/.orbit` already needs to allocate IDs and remember workspace bindings, so it can own canonical local task storage while the checkout exposes a projection.
+
+### Decision
+
+Treat `~/.orbit/tasks/workspaces/<workspace-id>/<task-id>/` as the canonical local bundle and `.orbit/tasks/<task-id>` as a symlink projection. Store `workspace_id` in `.orbit/config.yaml` and mandatory allocator, workspace-binding, local execution overlay, status, relation, tag, and lock/index metadata under `~/.orbit/tasks/index.sqlite`.
+
+### Consequences
+
+
+- Task artifacts remain addressable next to the code without making the checkout the canonical store.
+- Allocation and workspace resolution are durable without making every content write a dual-write operation.
+- Deleting `.orbit/tasks/` only removes projection links; Orbit can rebuild them from `.orbit/config.yaml` and `index.sqlite`.
+- Sync and hosted modes can replace or augment allocation without changing the workspace bundle shape.
+- Cost: `.orbit/config.yaml` becomes load-bearing for binding. If it is lost, Orbit must rebind by path/repo fingerprints or prompt the user; symlink-restricted filesystems need a degraded projection fallback.
+
+## Provenance
+
+Migrated verbatim from the local heading `task-artifacts/ADR-007` in `docs/design/task-artifacts/4_decisions.md` by [ORB-10458]. Original status line: Accepted · 2026-05 · Phase 2 home registry foundation (`1ae83804`); Phase 3 v2 runtime backend and symlink projection (`3be9bd5f`, `c14fa640`)
 
 ## ADR-0268 — Forward-only YAML migration framework in `orbit-common`
 
-**Status:** Accepted · 2026-05 · Forward-only YAML migration framework (`01928e76`) · legacy_id: `task-artifacts/ADR-008`
+**Status:** Accepted · 2026-07-26 21:51:24.856601Z · [ORB-10458]
+**Owner:** claude
+**Created:** 2026-07-26 21:51:24.605930Z
+**Last updated:** 2026-07-26 21:51:24.856601Z
+**Related features:** `task-artifacts`
+**Legacy IDs:** `task-artifacts/ADR-008`
+**Tags:** `task-artifacts`
 
-Narrative lives in the ADR store — retrieve it with `orbit tool run orbit.adr.show --input '{"id":"ADR-0268"}'`.
+### Context
 
----
+Task-bundle YAML has bumped `schema_version` several times during the v2 rewrite and will keep evolving. Today the read path *rejects* anything that is not exactly `TASK_ARTIFACT_SCHEMA_VERSION`, so any future bump is a hard break — no way to roll forward an older bundle on disk without an ad-hoc one-off script per change. Other artifacts (review threads, artifact manifest, workspace config) carry the same `schema_version` shape and will inherit the same problem.
+
+### Decision
+
+Add `orbit_common::migration` — a tiny framework keyed on `serde_yaml::Value` — and require artifact-owning code to register a `Plan` per lineage. Three opinionated calls baked in:
+
+1. **Untyped (`Value → Value`) steps**, not typed `Vn → Vn+1` transforms. Frequent schema bumps make the typed approach pay the cost of keeping every historical struct alive forever; the untyped chain lets a step be deleted once the version it migrated from is no longer in the wild. Final correctness is enforced by the existing `serde_yaml::from_value::<T>` call after the chain — a broken step fails to deserialize.
+2. **Read-time only**, never auto-writes the migrated value back to disk. Auto-writing on read changes mtimes, surprises users, and risks corrupting bundles on a buggy step. Explicit batch on-disk upgrade is out of scope; if it ever becomes needed it lives in a CLI command that calls the same plan.
+3. **No rollback.** Most steps are non-reversibly lossy (dropped fields, NOT NULL additions). Forward-fix migrations (write a new step that corrects course) are the documented recovery path.
+
+Each `Plan` is monotonically versioned within a single lineage. Cross-lineage rewrites (e.g. the legacy `T...` task → v2 ORB bundle import) are explicitly out of scope and remain one-shot importers.
+
+### Consequences
+
+
+- The read path in `v2_bundle::read_bundle_at` goes through `task_migrations::envelope_plan().migrate(...)` before deserializing into `TaskEnvelopeV2`. Today the chain is empty; the next schema bump adds one `add_step(prev, fn)` call.
+- A new `OrbitError::Migration(String)` variant carries chain failures distinctly from `OrbitError::Store` so callers (and logs) can tell schema drift apart from IO/parse errors.
+- Other artifacts adopt the framework when their owners are ready; nothing is forced. Review-thread metadata and artifact manifest still go through `read_yaml_file` until they need a step.
+- Cost: a single `Value` round-trip per envelope read (parse-to-`Value`, then `from_value::<T>`) replaces a direct `from_str::<T>`. Negligible for envelope-sized YAML; benchmark before extending to large lineages.
+- Cost: the framework lives in `orbit-common`, the most-depended-on crate. The surface is small (`Plan`, `Step`, `read_schema_version`) and depends only on `serde_yaml` and `OrbitError`, both already in `orbit-common`.
+
+## Provenance
+
+Migrated verbatim from the local heading `task-artifacts/ADR-008` in `docs/design/task-artifacts/4_decisions.md` by [ORB-10458]. Original status line: Accepted · 2026-05 · Forward-only YAML migration framework (`01928e76`)
 
 ## ADR-0269 — Cross-artifact provenance uses `produces` and `resolves`
 
-**Status:** Accepted · 2026-05 · ORB-00093 · legacy_id: `task-artifacts/ADR-009`
+**Status:** Accepted · 2026-07-26 21:51:25.324614Z · [ORB-10458]
+**Owner:** claude
+**Created:** 2026-07-26 21:51:25.089397Z
+**Last updated:** 2026-07-26 21:51:25.324614Z
+**Related features:** `task-artifacts`
+**Legacy IDs:** `task-artifacts/ADR-009`
+**Tags:** `task-artifacts`
 
-Narrative lives in the ADR store — retrieve it with `orbit tool run orbit.adr.show --input '{"id":"ADR-0269"}'`.
+### Context
 
----
+Task records already carry a typed `relations` array, but every relation type was task-only. Non-task artifact provenance was split across one-way back-pointers: `FrictionRecord.during_task`, ADR `related_tasks`, and learning evidence. That fragmentation made "what did task T touch?" artifact-specific, and made friction closure manual even when a task explicitly fixed the friction.
+
+### Decision
+
+Add two cross-artifact relation types to the task envelope: `produces` for artifacts created during execution and `resolves` for artifacts closed or superseded by the task. These two relation types accept task, friction, learning, and ADR ID shapes (`ORB-`, `FYYYY-MM-NNN`, `L-NNNN`, `ADR-NNNN+`). Existing relation types remain task-only. Friction auto-close is the only v1 side effect: when a task moves from Review to Done, `resolves -> F...` transitions the friction to `resolved` and records `resolved_by_task`.
+
+### Consequences
+
+
+- Agents get one typed provenance surface for task-created and task-closed artifacts without migrating historical ADR, learning, or friction fields.
+- Frictions can close automatically as part of approval while dangling friction references stay audit-visible instead of blocking task completion.
+- Learning citation work can depend on explicit `produces -> L...` edges rather than regex-scanning task prose.
+- Cost: the relation validator now has a cross-artifact branch and a task-only branch, so tests must protect legacy relation strictness.
+- Cost: `task_bundle_relations.target_task_id` now stores non-task IDs for `produces` / `resolves`; task-target inverse lookups must continue validating callers that expect task IDs.
+
+## Provenance
+
+Migrated verbatim from the local heading `task-artifacts/ADR-009` in `docs/design/task-artifacts/4_decisions.md` by [ORB-10458]. Original status line: Accepted · 2026-05 · ORB-00093
 
 ## ADR-0182 — Review-thread hook active task binding
 
-**Status:** Accepted · 2026-05 · [ORB-00273]
+**Status:** Accepted · 2026-05-23 04:58:51.423546Z · [ORB-00273]
+**Owner:** codex
+**Created:** 2026-05-23 04:58:47.481921Z
+**Last updated:** 2026-05-23 04:58:51.423546Z
+**Related features:** `task-artifacts`, `project-learnings`
+**Tags:** `hooks`, `review-threads`, `async-steering`
+**Paths:** `crates/orbit-core/src/command/review_thread_hook.rs`, `crates/orbit-core/src/command/learning_hook.rs`, `crates/orbit-engine/src/context.rs`, `crates/orbit-engine/src/activity_job/cli_runner/orchestrator.rs`
 
-**Context.** Review-thread reminders need a cheap way to know which task owns the current agent turn. Inferring from cwd or scanning task files would make every PreToolUse call depend on filesystem heuristics, while the engine already knows the executing task when it seeds `ORBIT_TASK_ID`.
+### Context
+Review-thread reminders need a cheap way to know which task owns the current agent turn. Inferring from cwd or scanning task files would make every PreToolUse call depend on filesystem heuristics, while the engine already knows the executing task when it seeds ORBIT_TASK_ID.
 
-**Decision.** The hook treats `ORBIT_ACTIVE_TASK_ID` as the explicit active-task binding, with `ORBIT_TASK_ID` as a compatibility fallback for existing execution paths. Orbit execution code seeds both values when the activity input contains a task id, and hook state is still scoped by the existing session id plus parent-pid state-file key.
+### Decision
+The hook treats ORBIT_ACTIVE_TASK_ID as the explicit active-task binding, with ORBIT_TASK_ID as a compatibility fallback for existing execution paths. Orbit execution code seeds both values when the activity input contains a task id, and hook state is still scoped by the existing session id plus parent-pid state-file key.
 
-**Consequences.**
+### Consequences
 - Review-thread surfacing remains a local task-store read and does not perform network I/O or cwd inference.
-- Existing `ORBIT_TASK_ID`-spawned executions keep working while newer shims can depend on the clearer `ORBIT_ACTIVE_TASK_ID` name.
+- Existing ORBIT_TASK_ID-spawned executions keep working while newer shims can depend on the clearer ORBIT_ACTIVE_TASK_ID name.
 - Cost: Orbit now has two task-id environment names during a compatibility window, so documentation and tests must keep their precedence explicit.
-
----
 
 ## ADR-0340 — History notes elide only what another record retains in full
 
-**Status:** Accepted · 2026-08 · [ORB-10343]
+**Status:** Accepted · 2026-08-09 06:46:32.133618Z · [ORB-10343]
+**Owner:** claude
+**Created:** 2026-08-09 06:46:23.724806Z
+**Last updated:** 2026-08-09 06:46:32.133618Z
+**Related features:** `task-artifacts`
+**Tags:** `history`, `task-artifacts`, `signal`, `context-budget`
+**Paths:** `crates/orbit-engine/src/context/outcome.rs`, `docs/design/task-artifacts/specs/task-bundle-v2.md`, `scripts/check-history-note-size.sh`, `scripts/measure-history-signal.py`
 
-Narrative lives in the ADR store — retrieve it with `orbit tool run orbit.adr.show --input '{"id":"ADR-0340"}'`.
+### Context
 
----
+Task history was suspected of diluting downstream readers with machine-generated
+bulk, but "history" was ambiguous across three candidate surfaces — orbit history
+events, agent run transcripts, and task comments — and a mitigation aimed at the
+wrong one would add a truncation path to maintain while leaving the real bulk in
+place. So the surfaces were measured first, with a committed re-runnable method
+(`scripts/measure-history-signal.py`).
+
+Over 845 task bundles in the orbit workspace on 2026-08-09:
+
+- `events.jsonl`: n=5,208 entries, 1,027,732 B. mean 197, p50 160, p95 213,
+  **max 85,005**. Boilerplate (JSON envelope) ratio 0.755.
+- `comments.jsonl`: n=1,581, 1,069,757 B. mean 677, p50 461, p95 1,662,
+  max 26,723. Boilerplate ratio 0.158.
+
+Every history entry above 2 KB was the same event type: `workflow_run_failed`.
+Nine entries carried 170,993 B — **16.6% of all history bytes in 0.17% of
+entries** — and all nine blob-shaped notes in the corpus were exactly those. The
+cause is `workflow_failure_note` inlining a run's whole `error_message`; a
+worktree-integrity failure serializes its entire `dirty_paths` list into that
+field, which is how one ORB-10332 note reached 85 KB. The offender is in this
+workspace, so no reroute applies. Comments are a fat middle (52 entries over
+2 KB, but only 8 blob-shaped in 1,581) — human and agent prose, not machine
+bulk, and not a truncation problem.
+
+The decisive fact for the fix: `job_run_steps.error_message` persists the whole
+message for the life of the run record. The 80,939-byte text behind that
+ORB-10332 note is still there today. The history note was carrying a *duplicate*
+of an already-durable value.
+
+### Decision
+
+Elide an oversized `error_message` from the `workflow_run_failed` history note,
+keeping a leading excerpt and naming the retrieval command — `orbit run show
+<run_id> --json`, field `.run.steps[].error_message` — **inside the note
+itself**, so a reader who hits the elision does not have to know where run
+records live.
+
+The general rule this instantiates, now normative in
+`docs/design/task-artifacts/specs/task-bundle-v2.md` §Events: a history note may
+elide content only where another record retains it in full. Discarding a value
+that exists nowhere else stays forbidden — `events.jsonl` is append-only and a
+lossy write cannot be undone when someone later needs the detail.
+
+The threshold is `MAX_NOTE_ERROR_BYTES = 1000`, declared exactly once in
+`orbit-engine`'s `context::outcome`. It comes from the real distribution of 497
+recorded step errors (p50 183 B, p95 676 B, p99 14,720 B, max 80,939 B): the p95
+message stays inline verbatim and only 18 of 497 (3.6%) elide.
+
+Two guards, because the failure mode is silent. `scripts/check-history-note-size.sh`
+(wired into `make ci-fast` and `make ci`) fails on a second threshold
+declaration, a second `workflow_run_failed` note producer, or an elision that
+drops its retrieval pointer. `crates/orbit-engine/src/context/tests/outcome.rs`
+pins the runtime bound, the verbatim pass-through below the cap, and UTF-8-safe
+slicing of arbitrary subprocess bytes.
+
+## Alternatives rejected
+
+- **Spill the payload to the content-addressed blob store
+  (`orbit-common::utility::blob_store`) and reference it by hash.** This is the
+  shape the task anticipated, and it was rejected once measurement showed the
+  full text is already durable in `job_run_steps`. Adding a blob write would
+  create a second copy of an existing record, a second retention lifetime to
+  reason about, and a retrieval path a reader has to be taught — for no
+  recoverability the run record does not already give.
+- **Cap every history note at the store write boundary.** One place, but it
+  would truncate notes whose content is *not* recoverable elsewhere, converting
+  a general dilution problem into a general data-loss problem.
+- **Leave it and filter on read.** Every reader would need the filter, and the
+  bytes stay in an append-only file forever.
+
+### Consequences
+
+- The real ORB-10332 note goes from 81,031 B to 1,221 B (98.5%); its `events.jsonl`
+  row from 85,020 B to 1,466 B. Applied to the nine measured entries, ~16% of all
+  task history bytes in the workspace stop being written.
+- Agent task context shrinks with it: `v2_host/task_context.rs` injects the most
+  recent `workflow_run_failed` note into the implementer's context verbatim, so
+  the 81 KB blob was being paid for again on every dispatch against a
+  previously-failed task.
+- The retained excerpt still names the failure and the branch, which was the one
+  fact a reader was paying multiple KB to learn.
+- Cost: diagnosing an elided failure now needs a second command against the run
+  record. The command is printed in the note, but a reader working from an
+  exported or copied history string, without the run store to hand, has less
+  than before.
+- Cost: a third guard script in the CI chain, and a threshold whose value is only
+  justified against one workspace's distribution. Re-run
+  `scripts/measure-history-signal.py` before changing it.
+- Not addressed, and deliberately: history's 0.755 boilerplate ratio (776 KB of
+  1,028 KB is JSON envelope — ids, timestamps, statuses). That is structural to
+  the append-only row format, not low-signal content, and reducing it would be a
+  bundle-format change rather than a writer change.
+
+## ADR-0310 — Attribute managed execution cost to an explicit task orchestrator
+
+**Status:** Accepted · 2026-08-02 03:59:02.085384Z · [ORB-10579], [ORB-10580], [ORB-10581], [ORB-10582]
+**Owner:** codex
+**Created:** 2026-08-02 03:56:22.221018Z
+**Last updated:** 2026-08-02 03:59:02.085384Z
+**Related features:** `task-artifacts`, `auditability`
+**Tags:** `telemetry`, `orchestration`, `cost-attribution`, `tasks`
+**Paths:** `crates/orbit-common/src/types/**`, `crates/orbit-core/src/command/task/**`, `crates/orbit-core/src/runtime/**`, `crates/orbit-store/src/**`, `crates/orbit-tools/src/**`, `crates/orbit-cli/src/**`, `crates/orbit-dashboard/src/**`, `crates/orbit-dashboard/assets/**`, `docs/design/task-artifacts/**`
+
+### Context
+
+Orbit records the crew that executes a task and the token and cost facts for managed agent invocations, but it does not record which orchestration crew is accountable for selecting, sequencing, and shepherding that task. Inferring orchestration ownership from `created_by`, `implemented_by`, execution `crew`, or a job actor conflates different responsibilities and prevents meaningful orchestration performance comparisons. Existing invocation-to-task linkage is many-to-many, so summing per-task metrics would also double-count shared invocations. Direct interactive Codex or Claude session cost is not present in the managed invocation ledger and is intentionally outside this first increment.
+
+### Decision
+
+Add an optional task field named `orchestrator` containing an exact registered crew alias such as `sol`, `terra`, `opus`, or `sonnet`. It is distinct from the execution `crew`, provider family, model id, and session id. Authors set it explicitly; Orbit does not infer or backfill it for legacy or system-generated tasks. Explicit writes are validated against the same registered crew namespace used by execution crews, while reads tolerate historical aliases that are no longer configured.
+
+The field may be assigned or corrected while a task is `proposed` or `backlog`, and becomes immutable when execution starts. This preserves stable historical attribution without introducing temporal handoff reconstruction in v1. The field is optional in task bundle schema version 1; old bundles deserialize to `None`, and the forward-compatibility limitation for older binaries is documented.
+
+Managed execution metrics are computed from distinct invocation records, never by summing per-task aggregates. Each invocation is classified exactly once: `missing` when any linked task cannot be resolved; `unattributed` when it has no linked task or any resolved task lacks an orchestrator; a named orchestrator when all linked tasks resolve to the same orchestrator; or `shared` when all resolve but name multiple orchestrators. The aggregate exposes all token splits and separate provider-cost, derived-cost, comparable-cost, and unknown-cost populations under an exclusive `as_of` cutoff. Its reconciliation invariant is that bucket invocation counts and accounting facts equal the distinct source invocation population for the requested window.
+
+The dashboard exposes orchestration metrics as a separate dimension from executor-agent metrics. Direct interactive orchestration-session cost remains a future, separate telemetry lane and is not allocated across tasks in v1. Existing ADR-0245 remains the authority for query-time price derivation.
+
+### Consequences
+
+- Orbit can compare managed execution spend and outcomes by accountable orchestration crew without conflating that crew with the executor.
+- Legacy, unowned, partially attributable, cross-orchestrator, and missing-task invocations remain visible rather than being guessed into a named bucket.
+- Task ownership is deliberately frozen once work starts; a future design is required for mid-execution orchestration handoffs.
+- Direct Codex and Claude orchestration-session overhead is excluded from the initial metric and must be instrumented independently later.
+- Cost: task creation and update surfaces, bundle persistence, validation, invocation accounting, API, dashboard, fixtures, and compatibility documentation all require coordinated changes.
 
 ## Task References
 
