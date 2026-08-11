@@ -43,7 +43,7 @@ impl Default for ClockSettings {
 impl ClockSettings {
     pub fn validate(self) -> Result<Self, OrbitError> {
         if !(MIN_CLOCK_CADENCE_SECONDS..=MAX_CLOCK_CADENCE_SECONDS).contains(&self.cadence_seconds)
-            || self.cadence_seconds % 60 != 0
+            || !self.cadence_seconds.is_multiple_of(60)
         {
             return Err(OrbitError::InvalidInput(format!(
                 "clock cadence_seconds must be a whole minute from {MIN_CLOCK_CADENCE_SECONDS} to {MAX_CLOCK_CADENCE_SECONDS} (got {})",
@@ -90,15 +90,51 @@ pub fn set_clock_cadence(
     global_root: &Path,
     cadence_seconds: u64,
 ) -> Result<ClockInstallReport, OrbitError> {
+    let orbit_bin = std::env::current_exe()
+        .map_err(|error| OrbitError::Io(format!("resolve current orbit executable: {error}")))?
+        .to_string_lossy()
+        .to_string();
+    set_clock_cadence_with(
+        global_root,
+        cadence_seconds,
+        &orbit_bin,
+        ClockPlatform::current(),
+        &NativeClockCommandRunner,
+        &home_dir()?,
+    )
+}
+
+pub(super) fn set_clock_cadence_with(
+    global_root: &Path,
+    cadence_seconds: u64,
+    orbit_bin: &str,
+    platform: ClockPlatform,
+    runner: &dyn ClockCommandRunner,
+    home: &Path,
+) -> Result<ClockInstallReport, OrbitError> {
     let previous = load_clock_settings(global_root)?;
     save_clock_settings(global_root, ClockSettings { cadence_seconds })?;
-    match install_clock(global_root) {
+    match install_clock_with(
+        global_root,
+        orbit_bin,
+        ClockSettings { cadence_seconds },
+        platform,
+        runner,
+        home,
+    ) {
         Ok(report) if report.activated => Ok(report),
         Ok(report) => {
             save_clock_settings(global_root, previous)?;
+            let rollback =
+                install_clock_with(global_root, orbit_bin, previous, platform, runner, home)?;
             Err(OrbitError::Execution(format!(
-                "clock update was not activated; restored the previous configured cadence; recovery: {}",
-                report.manual_steps.join("; ")
+                "clock update was not activated; restored the previous configured cadence and {} the previous unit; recovery: {}",
+                if rollback.activated {
+                    "reactivated"
+                } else {
+                    "could not reactivate"
+                },
+                report.manual_steps.join("; "),
             )))
         }
         Err(error) => {
@@ -114,6 +150,60 @@ pub struct ClockStatus {
     pub effective_cadence_seconds: Option<u64>,
     pub enabled: bool,
     pub platform: &'static str,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum ClockPlatform {
+    Launchd,
+    Systemd,
+}
+
+impl ClockPlatform {
+    fn current() -> Self {
+        if cfg!(target_os = "macos") {
+            Self::Launchd
+        } else {
+            Self::Systemd
+        }
+    }
+
+    fn name(self) -> &'static str {
+        match self {
+            Self::Launchd => "launchd",
+            Self::Systemd => "systemd",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct ManagerCommand {
+    program: &'static str,
+    args: Vec<String>,
+}
+
+impl ManagerCommand {
+    pub(super) fn display(&self) -> String {
+        std::iter::once(self.program.to_string())
+            .chain(self.args.iter().cloned())
+            .collect::<Vec<_>>()
+            .join(" ")
+    }
+}
+
+pub(super) trait ClockCommandRunner {
+    fn run(&self, command: &ManagerCommand) -> Result<bool, OrbitError>;
+}
+
+struct NativeClockCommandRunner;
+
+impl ClockCommandRunner for NativeClockCommandRunner {
+    fn run(&self, command: &ManagerCommand) -> Result<bool, OrbitError> {
+        Command::new(command.program)
+            .args(&command.args)
+            .output()
+            .map(|output| output.status.success())
+            .map_err(|error| OrbitError::Execution(format!("run {}: {error}", command.display())))
+    }
 }
 
 /// Path launchd redirects `orbit sweep` stdout/stderr to on macOS, and the
@@ -148,10 +238,27 @@ pub fn install_clock(global_root: &Path) -> Result<ClockInstallReport, OrbitErro
     let orbit_bin = orbit_bin.to_string_lossy().to_string();
 
     let settings = load_clock_settings(global_root)?;
-    if cfg!(target_os = "macos") {
-        install_launchd(global_root, &orbit_bin, settings)
-    } else {
-        install_systemd(&orbit_bin, settings)
+    install_clock_with(
+        global_root,
+        &orbit_bin,
+        settings,
+        ClockPlatform::current(),
+        &NativeClockCommandRunner,
+        &home_dir()?,
+    )
+}
+
+pub(super) fn install_clock_with(
+    global_root: &Path,
+    orbit_bin: &str,
+    settings: ClockSettings,
+    platform: ClockPlatform,
+    runner: &dyn ClockCommandRunner,
+    home: &Path,
+) -> Result<ClockInstallReport, OrbitError> {
+    match platform {
+        ClockPlatform::Launchd => install_launchd(global_root, orbit_bin, settings, runner, home),
+        ClockPlatform::Systemd => install_systemd(orbit_bin, settings, runner, home),
     }
 }
 
@@ -159,8 +266,9 @@ fn install_launchd(
     global_root: &Path,
     orbit_bin: &str,
     settings: ClockSettings,
+    runner: &dyn ClockCommandRunner,
+    home: &Path,
 ) -> Result<ClockInstallReport, OrbitError> {
-    let home = home_dir()?;
     let log_path = sweep_log_path(global_root);
     if let Some(parent) = log_path.parent() {
         fs::create_dir_all(parent).map_err(|error| OrbitError::Io(error.to_string()))?;
@@ -183,14 +291,16 @@ fn install_launchd(
     // `launchctl load` is deprecated but still the most portable activation;
     // a stale agent is unloaded first so re-installs pick up the new binary
     // path.
-    let _ = Command::new("launchctl")
-        .args(["unload", &plist_path.to_string_lossy()])
-        .output();
-    let activated = Command::new("launchctl")
-        .args(["load", &plist_path.to_string_lossy()])
-        .output()
-        .map(|output| output.status.success())
-        .unwrap_or(false);
+    let unload = ManagerCommand {
+        program: "launchctl",
+        args: vec!["unload".into(), plist_path.display().to_string()],
+    };
+    let _ = runner.run(&unload);
+    let load = ManagerCommand {
+        program: "launchctl",
+        args: vec!["load".into(), plist_path.display().to_string()],
+    };
+    let activated = runner.run(&load).unwrap_or(false);
 
     let manual_steps = if activated {
         Vec::new()
@@ -207,8 +317,9 @@ fn install_launchd(
 fn install_systemd(
     orbit_bin: &str,
     settings: ClockSettings,
+    runner: &dyn ClockCommandRunner,
+    home: &Path,
 ) -> Result<ClockInstallReport, OrbitError> {
-    let home = home_dir()?;
     let unit_dir = home.join(".config/systemd/user");
     fs::create_dir_all(&unit_dir).map_err(|error| OrbitError::Io(error.to_string()))?;
 
@@ -228,22 +339,13 @@ fn install_systemd(
         ))
     })?;
 
-    let reloaded = Command::new("systemctl")
-        .args(["--user", "daemon-reload"])
-        .output()
-        .map(|output| output.status.success())
-        .unwrap_or(false);
-    let activated = reloaded
-        && Command::new("systemctl")
-            .args([
-                "--user",
-                "enable",
-                "--now",
-                &format!("{SYSTEMD_UNIT}.timer"),
-            ])
-            .output()
-            .map(|output| output.status.success())
-            .unwrap_or(false);
+    let reload = ManagerCommand {
+        program: "systemctl",
+        args: vec!["--user".into(), "daemon-reload".into()],
+    };
+    let enable = systemd_enable_command();
+    let reloaded = runner.run(&reload).unwrap_or(false);
+    let activated = reloaded && runner.run(&enable).unwrap_or(false);
 
     let manual_steps = if activated {
         Vec::new()
@@ -269,104 +371,143 @@ pub(super) fn render_systemd_timer(settings: ClockSettings) -> String {
     SYSTEMD_TIMER_TEMPLATE.replace("{{CADENCE_SECONDS}}", &settings.cadence_seconds.to_string())
 }
 
-/// Enable or pause the native per-user clock. This does not touch the routine
-/// store, so manual `orbit sweep` and per-routine pause state remain available.
-pub fn set_clock_enabled(global_root: &Path, enabled: bool) -> Result<ClockStatus, OrbitError> {
-    let settings = load_clock_settings(global_root)?;
-    let (program, args, recovery): (&str, Vec<String>, String) = if cfg!(target_os = "macos") {
-        let home = home_dir()?;
-        let plist = home
-            .join("Library/LaunchAgents")
-            .join(format!("{LAUNCHD_LABEL}.plist"));
-        if enabled {
-            (
-                "launchctl",
-                vec!["load".into(), plist.display().to_string()],
-                format!("launchctl load {}", plist.display()),
-            )
-        } else {
-            (
-                "launchctl",
-                vec!["unload".into(), plist.display().to_string()],
-                format!("launchctl unload {}", plist.display()),
-            )
-        }
-    } else if enabled {
-        (
-            "systemctl",
-            vec![
+fn systemd_enable_command() -> ManagerCommand {
+    ManagerCommand {
+        program: "systemctl",
+        args: vec![
+            "--user".into(),
+            "enable".into(),
+            "--now".into(),
+            format!("{SYSTEMD_UNIT}.timer"),
+        ],
+    }
+}
+
+fn manager_status_command(platform: ClockPlatform) -> ManagerCommand {
+    match platform {
+        ClockPlatform::Launchd => ManagerCommand {
+            program: "launchctl",
+            args: vec!["list".into(), LAUNCHD_LABEL.into()],
+        },
+        ClockPlatform::Systemd => ManagerCommand {
+            program: "systemctl",
+            args: vec![
                 "--user".into(),
-                "enable".into(),
-                "--now".into(),
+                "is-enabled".into(),
                 format!("{SYSTEMD_UNIT}.timer"),
             ],
-            format!("systemctl --user enable --now {SYSTEMD_UNIT}.timer"),
-        )
-    } else {
-        (
-            "systemctl",
-            vec![
+        },
+    }
+}
+
+fn manager_set_enabled_command(
+    platform: ClockPlatform,
+    enabled: bool,
+    home: &Path,
+) -> ManagerCommand {
+    match (platform, enabled) {
+        (ClockPlatform::Launchd, true) => ManagerCommand {
+            program: "launchctl",
+            args: vec![
+                "load".into(),
+                home.join("Library/LaunchAgents")
+                    .join(format!("{LAUNCHD_LABEL}.plist"))
+                    .display()
+                    .to_string(),
+            ],
+        },
+        (ClockPlatform::Launchd, false) => ManagerCommand {
+            program: "launchctl",
+            args: vec![
+                "unload".into(),
+                home.join("Library/LaunchAgents")
+                    .join(format!("{LAUNCHD_LABEL}.plist"))
+                    .display()
+                    .to_string(),
+            ],
+        },
+        (ClockPlatform::Systemd, true) => systemd_enable_command(),
+        (ClockPlatform::Systemd, false) => ManagerCommand {
+            program: "systemctl",
+            args: vec![
                 "--user".into(),
                 "disable".into(),
                 "--now".into(),
                 format!("{SYSTEMD_UNIT}.timer"),
             ],
-            format!("systemctl --user disable --now {SYSTEMD_UNIT}.timer"),
-        )
-    };
-    let output = Command::new(program)
-        .args(&args)
-        .output()
-        .map_err(|error| {
-            OrbitError::Execution(format!("run {program}: {error}; recovery: {recovery}"))
-        })?;
-    if !output.status.success() {
+        },
+    }
+}
+
+/// Enable or pause the native per-user clock. This does not touch the routine
+/// store, so manual `orbit sweep` and per-routine pause state remain available.
+pub fn set_clock_enabled(global_root: &Path, enabled: bool) -> Result<ClockStatus, OrbitError> {
+    set_clock_enabled_with(
+        global_root,
+        enabled,
+        ClockPlatform::current(),
+        &NativeClockCommandRunner,
+        &home_dir()?,
+    )
+}
+
+pub(super) fn set_clock_enabled_with(
+    global_root: &Path,
+    enabled: bool,
+    platform: ClockPlatform,
+    runner: &dyn ClockCommandRunner,
+    home: &Path,
+) -> Result<ClockStatus, OrbitError> {
+    let settings = load_clock_settings(global_root)?;
+    let current = runner
+        .run(&manager_status_command(platform))
+        .unwrap_or(false);
+    if current == enabled {
+        return Ok(clock_status_from(settings, enabled, platform));
+    }
+    let command = manager_set_enabled_command(platform, enabled, home);
+    let succeeded = runner.run(&command)?;
+    if !succeeded {
         return Err(OrbitError::Execution(format!(
-            "{program} {} failed; recovery: {recovery}",
-            args.join(" ")
+            "{} failed; recovery: {}",
+            command.display(),
+            command.display()
         )));
     }
-    Ok(ClockStatus {
-        configured_cadence_seconds: settings.cadence_seconds,
-        effective_cadence_seconds: Some(settings.cadence_seconds),
-        enabled,
-        platform: if cfg!(target_os = "macos") {
-            "launchd"
-        } else {
-            "systemd"
-        },
-    })
+    Ok(clock_status_from(settings, enabled, platform))
 }
 
 pub fn clock_status(global_root: &Path) -> Result<ClockStatus, OrbitError> {
+    clock_status_with(
+        global_root,
+        ClockPlatform::current(),
+        &NativeClockCommandRunner,
+    )
+}
+
+pub(super) fn clock_status_with(
+    global_root: &Path,
+    platform: ClockPlatform,
+    runner: &dyn ClockCommandRunner,
+) -> Result<ClockStatus, OrbitError> {
     let settings = load_clock_settings(global_root)?;
-    let (program, args) = if cfg!(target_os = "macos") {
-        ("launchctl", vec!["list".into(), LAUNCHD_LABEL.into()])
-    } else {
-        (
-            "systemctl",
-            vec![
-                "--user".into(),
-                "is-enabled".into(),
-                format!("{SYSTEMD_UNIT}.timer"),
-            ],
-        )
-    };
-    let enabled = Command::new(program)
-        .args(&args)
-        .output()
-        .map(|output| output.status.success())
+    let enabled = runner
+        .run(&manager_status_command(platform))
         .unwrap_or(false);
-    Ok(ClockStatus {
+    Ok(clock_status_from(settings, enabled, platform))
+}
+
+fn clock_status_from(
+    settings: ClockSettings,
+    enabled: bool,
+    platform: ClockPlatform,
+) -> ClockStatus {
+    ClockStatus {
         configured_cadence_seconds: settings.cadence_seconds,
         effective_cadence_seconds: enabled.then_some(settings.cadence_seconds),
         enabled,
-        platform: if cfg!(target_os = "macos") {
-            "launchd"
-        } else {
-            "systemd"
-        },
-    })
+        platform: platform.name(),
+    }
 }
 
 fn home_dir() -> Result<PathBuf, OrbitError> {
