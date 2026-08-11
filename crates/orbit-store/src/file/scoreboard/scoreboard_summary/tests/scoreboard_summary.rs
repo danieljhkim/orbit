@@ -219,24 +219,11 @@ fn summary_counts_knowledge_artifacts_by_author_family() {
         test_learning("L-0016", Some(TEST_CLAUDE_MODEL)),
         test_learning("L-0003", None),
     ];
-    let now = Utc::now();
-    let adrs = vec![
-        test_adr("ADR-0001", "codex", AdrStatus::Accepted, Some(now)),
-        test_adr("ADR-0002", TEST_CODEX_MODEL, AdrStatus::Proposed, None),
-        test_adr(
-            "ADR-0003",
-            TEST_CLAUDE_MODEL,
-            AdrStatus::Superseded,
-            Some(now),
-        ),
-    ];
-
     let summary = generate_summary_with_inputs(
         temp.path(),
         &[],
         &ScoreboardInputs {
             learnings: &learnings,
-            adrs: &adrs,
             ..ScoreboardInputs::default()
         },
     )
@@ -244,15 +231,9 @@ fn summary_counts_knowledge_artifacts_by_author_family() {
 
     let codex = summary.agents.get("codex").expect("codex summary");
     assert_eq!(codex.knowledge.learnings_created, 1);
-    assert_eq!(codex.knowledge.adrs_created, 2);
-    assert_eq!(codex.knowledge.adrs_accepted, 1);
-    assert_eq!(codex.knowledge.adrs_proposed_open, 1);
 
     let claude = summary.agents.get("claude").expect("claude summary");
     assert_eq!(claude.knowledge.learnings_created, 1);
-    assert_eq!(claude.knowledge.adrs_created, 1);
-    assert_eq!(claude.knowledge.adrs_accepted, 1);
-    assert_eq!(claude.knowledge.adrs_proposed_open, 0);
 }
 
 #[test]
@@ -532,27 +513,6 @@ fn test_learning(id: &str, created_by: Option<&str>) -> Learning {
         updated_at: Utc::now(),
         created_by: created_by.map(str::to_string),
         priority: None,
-    }
-}
-
-fn test_adr(id: &str, owner: &str, status: AdrStatus, accepted_at: Option<DateTime<Utc>>) -> Adr {
-    Adr {
-        id: id.to_string(),
-        title: id.to_string(),
-        status,
-        owner: owner.to_string(),
-        created_at: Utc::now(),
-        accepted_at,
-        last_updated: Utc::now(),
-        related_features: Vec::new(),
-        related_tasks: Vec::new(),
-        tags: Vec::new(),
-        paths: Vec::new(),
-        supersedes: Vec::new(),
-        superseded_by: None,
-        legacy_ids: Vec::new(),
-        validation_warnings: Vec::new(),
-        legacy_validation: Default::default(),
     }
 }
 

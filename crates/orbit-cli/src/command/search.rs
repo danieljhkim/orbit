@@ -5,7 +5,7 @@ use crate::command::{CommandOut, Execute, Payload};
 
 #[derive(Args)]
 #[command(
-    about = "Search tasks, docs, learnings, and ADRs",
+    about = "Search tasks, docs, and learnings",
     subcommand_precedence_over_arg = true,
     after_help = "Forms:\n  orbit search <query>\n  orbit search similar <id>\n  orbit search path <path>"
 )]
@@ -18,7 +18,7 @@ pub struct SearchCommand {
     pub command: Option<SearchSubcommand>,
 
     // ADR-0179: free-text search keeps the hybrid ranker; neighbor/path modes are separate forms.
-    /// Use hybrid lexical + cosine ranking for indexed task, doc, learning, or ADR fields.
+    /// Use hybrid lexical + cosine ranking for indexed task, doc, or learning fields.
     #[arg(long)]
     pub hybrid: bool,
     /// Restrict results to one corpus kind.
@@ -28,15 +28,14 @@ pub struct SearchCommand {
     /// round-robin per kind to ensure fair representation).
     #[arg(long, default_value_t = 10, global = true)]
     pub limit: usize,
-    /// Filter by tag (AND semantics). Applies to task, doc, learning, and ADR.
+    /// Filter by tag (AND semantics). Applies to task, doc, and learning.
     #[arg(long = "tag", action = ArgAction::Append, value_delimiter = ',', global = true)]
     pub tags: Vec<String>,
     /// Include normally-hidden statuses for the queried kind. Task adds
-    /// done/rejected/archived; ADR adds superseded; learning adds
-    /// superseded; doc is a no-op.
+    /// done/rejected/archived; learning adds superseded; doc is a no-op.
     #[arg(long, global = true)]
     pub all: bool,
-    /// Explicit per-kind status override, e.g. task:open,doc:active,adr:proposed.
+    /// Explicit per-kind status override, e.g. task:open,doc:active.
     #[arg(long, value_delimiter = ',', global = true)]
     pub status: Vec<String>,
     /// Output as JSON.
@@ -69,7 +68,6 @@ pub enum SearchKindArg {
     Task,
     Doc,
     Learning,
-    Adr,
     All,
 }
 
@@ -79,7 +77,6 @@ impl std::fmt::Display for SearchKindArg {
             Self::Task => "task",
             Self::Doc => "doc",
             Self::Learning => "learning",
-            Self::Adr => "adr",
             Self::All => "all",
         })
     }
@@ -91,7 +88,6 @@ impl From<SearchKindArg> for GlobalSearchKind {
             SearchKindArg::Task => Self::Task,
             SearchKindArg::Doc => Self::Doc,
             SearchKindArg::Learning => Self::Learning,
-            SearchKindArg::Adr => Self::Adr,
             SearchKindArg::All => Self::All,
         }
     }

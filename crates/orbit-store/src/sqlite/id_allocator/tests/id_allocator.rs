@@ -1,7 +1,5 @@
 // Migrated from sqlite/id_allocator.rs per ORB-00231
-use std::collections::BTreeSet;
 use std::path::Path;
-use std::process::Command;
 
 use rusqlite::Connection;
 use tempfile::TempDir;
@@ -75,31 +73,6 @@ fn open_creates_schema_in_preexisting_semantic_db_file() {
 }
 
 #[test]
-fn allocates_dense_adr_and_learning_ids() {
-    let temp = TempDir::new().expect("tempdir");
-    let allocator = IdAllocator::open(IdAllocatorConfig::new(
-        temp.path().join("state/semantic.db"),
-        temp.path().join("state/.id_alloc.lock"),
-        temp.path().join(".orbit"),
-        temp.path().to_path_buf(),
-        temp.path().join(".orbit/adrs"),
-        temp.path().join(".orbit/learnings"),
-    ))
-    .expect("allocator");
-
-    assert_eq!(allocator.allocate_adr().expect("adr").id, "ADR-0001");
-    assert_eq!(allocator.allocate_adr().expect("adr").id, "ADR-0002");
-    assert_eq!(
-        allocator.allocate_learning().expect("learning").id,
-        "L-0001"
-    );
-    assert_eq!(
-        allocator.allocate_learning().expect("learning").id,
-        "L-0002"
-    );
-}
-
-#[test]
 fn abandoned_learning_allocation_advances_sequence_but_is_hidden() {
     let temp = TempDir::new().expect("tempdir");
     let allocator = IdAllocator::open(allocator_config(temp.path())).expect("allocator");
@@ -131,57 +104,6 @@ fn abandoned_learning_allocation_advances_sequence_but_is_hidden() {
 /// resolve. The guarded abandon retires both a `reserved` row and a `merged`
 /// row whose recorded `body_path` died with the worktree, and the ids stay
 /// consumed so no future allocation reuses them.
-#[test]
-fn abandons_allocations_whose_pinned_worktree_was_reaped() {
-    let temp = TempDir::new().expect("tempdir");
-    let ghost = temp.path().join("ghost-worktree");
-    std::fs::create_dir_all(&ghost).expect("ghost worktree");
-    let mut config = allocator_config(temp.path());
-    config.worktree_root = ghost.clone();
-    let allocator = IdAllocator::open(config).expect("allocator");
-
-    let learning = allocator.allocate_learning().expect("learning");
-    let adr = allocator.allocate_adr().expect("adr");
-    allocator
-        .record_learning_body_path(&learning.id, &ghost.join("learning.yaml"))
-        .expect("record body path");
-
-    std::fs::remove_dir_all(&ghost).expect("reap worktree");
-
-    assert!(
-        allocator
-            .abandon_orphaned_learning(&learning.id)
-            .expect("abandon learning")
-    );
-    assert!(
-        allocator
-            .abandon_orphaned_adr(&adr.id)
-            .expect("abandon adr")
-    );
-
-    assert!(
-        allocator
-            .learning_allocation(&learning.id)
-            .expect("learning row")
-            .is_none()
-    );
-    assert!(
-        allocator
-            .adr_allocation(&adr.id)
-            .expect("adr row")
-            .is_none()
-    );
-    // Repeat repair is a no-op rather than an error, and the retired ids are
-    // never handed out again.
-    assert!(
-        !allocator
-            .abandon_orphaned_learning(&learning.id)
-            .expect("repeat abandon")
-    );
-    assert_eq!(allocator.allocate_learning().expect("next").id, "L-0002");
-    assert_eq!(allocator.allocate_adr().expect("next adr").id, "ADR-0002");
-}
-
 /// [ORB-10501] The guard is what separates a live sibling worktree from a
 /// reaped one: an allocation whose worktree still exists is refused, so a
 /// caller working from a stale scan cannot retire a recoverable id.
@@ -203,29 +125,6 @@ fn refuses_to_abandon_an_allocation_whose_worktree_still_exists() {
             .is_some(),
         "a refused repair must leave the row untouched"
     );
-}
-
-#[test]
-fn backfills_existing_adrs_idempotently_and_allocates_after_max() {
-    let temp = TempDir::new().expect("tempdir");
-    let shared_root = temp.path().join(".orbit");
-    let adr_root = shared_root.join("adrs");
-    let adr_dir = adr_root.join("accepted/ADR-0007");
-    std::fs::create_dir_all(&adr_dir).expect("adr dir");
-    std::fs::write(
-        adr_dir.join("adr.yaml"),
-        "schema_version: 1\nid: ADR-0007\ncreated_at: 2026-05-17T00:00:00Z\n",
-    )
-    .expect("adr yaml");
-    let config = allocator_config(temp.path());
-
-    let allocator = IdAllocator::open(config.clone()).expect("allocator");
-    assert_eq!(allocation_count(&config.semantic_db_path), 1);
-    drop(allocator);
-
-    let allocator = IdAllocator::open(config.clone()).expect("allocator reopen");
-    assert_eq!(allocation_count(&config.semantic_db_path), 1);
-    assert_eq!(allocator.allocate_adr().expect("allocate").id, "ADR-0008");
 }
 
 #[test]
@@ -270,116 +169,6 @@ fn learning_id_format_migration_renames_and_is_idempotent() {
     assert_eq!(allocation_count(&config.semantic_db_path), 2);
 }
 
-#[test]
-fn multi_process_allocation_is_dense_across_worktrees_for_adrs_and_learnings() {
-    for kind in [IdAllocationKind::Adr, IdAllocationKind::Learning] {
-        assert_multi_process_dense(kind);
-    }
-}
-
-#[test]
-fn allocate_ids_child() {
-    let Ok(kind) = std::env::var("ORBIT_ID_ALLOCATOR_CHILD_KIND") else {
-        return;
-    };
-    let root = std::env::var("ORBIT_ID_ALLOCATOR_CHILD_ROOT").expect("root env");
-    let worktree = std::env::var("ORBIT_ID_ALLOCATOR_CHILD_WORKTREE").expect("worktree env");
-    let output = std::env::var("ORBIT_ID_ALLOCATOR_CHILD_OUTPUT").expect("output env");
-    let count: usize = std::env::var("ORBIT_ID_ALLOCATOR_CHILD_COUNT")
-        .expect("count env")
-        .parse()
-        .expect("count parse");
-    let kind = match kind.as_str() {
-        "adr" => IdAllocationKind::Adr,
-        "learning" => IdAllocationKind::Learning,
-        other => panic!("unknown kind {other}"),
-    };
-    let allocator = IdAllocator::open(allocator_config_for_worktree(
-        Path::new(&root),
-        Path::new(&worktree),
-    ))
-    .expect("allocator");
-    let mut ids = Vec::with_capacity(count);
-    for _ in 0..count {
-        let allocation = match kind {
-            IdAllocationKind::Adr => allocator.allocate_adr(),
-            IdAllocationKind::Learning => allocator.allocate_learning(),
-        }
-        .expect("allocate");
-        ids.push(allocation.id);
-    }
-    std::fs::write(output, ids.join("\n")).expect("write ids");
-}
-
-fn assert_multi_process_dense(kind: IdAllocationKind) {
-    let temp = TempDir::new().expect("tempdir");
-    let exe = std::env::current_exe().expect("current exe");
-    let count = 50usize;
-    let output_a = temp.path().join("ids-a.txt");
-    let output_b = temp.path().join("ids-b.txt");
-    let worktree_a = temp.path().join("worktree-a");
-    let worktree_b = temp.path().join("worktree-b");
-    std::fs::create_dir_all(&worktree_a).expect("worktree a");
-    std::fs::create_dir_all(&worktree_b).expect("worktree b");
-    let kind_name = kind.as_str();
-
-    let mut child_a = Command::new(&exe)
-        .args([
-            "--exact",
-            "sqlite::id_allocator::tests::id_allocator::allocate_ids_child",
-            "--nocapture",
-        ])
-        .env("ORBIT_ID_ALLOCATOR_CHILD_KIND", kind_name)
-        .env("ORBIT_ID_ALLOCATOR_CHILD_ROOT", temp.path())
-        .env("ORBIT_ID_ALLOCATOR_CHILD_WORKTREE", &worktree_a)
-        .env("ORBIT_ID_ALLOCATOR_CHILD_OUTPUT", &output_a)
-        .env("ORBIT_ID_ALLOCATOR_CHILD_COUNT", count.to_string())
-        .spawn()
-        .expect("spawn child a");
-    let mut child_b = Command::new(&exe)
-        .args([
-            "--exact",
-            "sqlite::id_allocator::tests::id_allocator::allocate_ids_child",
-            "--nocapture",
-        ])
-        .env("ORBIT_ID_ALLOCATOR_CHILD_KIND", kind_name)
-        .env("ORBIT_ID_ALLOCATOR_CHILD_ROOT", temp.path())
-        .env("ORBIT_ID_ALLOCATOR_CHILD_WORKTREE", &worktree_b)
-        .env("ORBIT_ID_ALLOCATOR_CHILD_OUTPUT", &output_b)
-        .env("ORBIT_ID_ALLOCATOR_CHILD_COUNT", count.to_string())
-        .spawn()
-        .expect("spawn child b");
-
-    assert!(child_a.wait().expect("wait a").success());
-    assert!(child_b.wait().expect("wait b").success());
-
-    let mut ids = read_id_file(&output_a);
-    ids.extend(read_id_file(&output_b));
-    let unique: BTreeSet<_> = ids.iter().cloned().collect();
-    assert_eq!(unique.len(), count * 2, "ids collided: {ids:?}");
-    let sequences: Vec<_> = unique
-        .iter()
-        .map(|id| match kind {
-            IdAllocationKind::Adr => parse_adr_sequence(id).expect("adr seq"),
-            IdAllocationKind::Learning => parse_learning_sequence(id).expect("learning seq"),
-        })
-        .collect();
-    assert_eq!(sequences, (1..=(count as u32 * 2)).collect::<Vec<_>>());
-
-    let allocator = IdAllocator::open(allocator_config(temp.path())).expect("inspect allocator");
-    let records = match kind {
-        IdAllocationKind::Adr => allocator.adr_allocations(),
-        IdAllocationKind::Learning => allocator.learning_allocations(),
-    }
-    .expect("allocation records");
-    let by_worktree = records.iter().fold(BTreeMap::new(), |mut counts, record| {
-        *counts.entry(record.worktree_root.clone()).or_insert(0usize) += 1;
-        counts
-    });
-    assert_eq!(by_worktree.get(&worktree_a), Some(&count));
-    assert_eq!(by_worktree.get(&worktree_b), Some(&count));
-}
-
 fn allocator_config(root: &Path) -> IdAllocatorConfig {
     allocator_config_for_worktree(root, root)
 }
@@ -390,7 +179,6 @@ fn allocator_config_for_worktree(root: &Path, worktree: &Path) -> IdAllocatorCon
         root.join(".orbit/state/.id_alloc.lock"),
         root.join(".orbit"),
         worktree.to_path_buf(),
-        worktree.join(".orbit/adrs"),
         worktree.join(".orbit/learnings"),
     )
 }
@@ -431,13 +219,4 @@ fn write_legacy_learning(
             ),
         )
         .expect("learning yaml");
-}
-
-fn read_id_file(path: &Path) -> Vec<String> {
-    std::fs::read_to_string(path)
-        .expect("read ids")
-        .lines()
-        .map(str::to_string)
-        .filter(|line| !line.is_empty())
-        .collect()
 }

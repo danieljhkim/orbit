@@ -154,7 +154,7 @@ pub(crate) fn seed_default_activities(
 mod tests {
     use std::collections::BTreeMap;
 
-    use orbit_common::types::activity_job::{OnDenial, tool_allowed, validate_tool_allowlist};
+    use orbit_common::types::activity_job::{OnDenial, tool_allowed};
     use orbit_common::types::{ActivityV2Spec, load_activity_asset};
     use orbit_engine::{inject_system_crew_input, resolve_crew_settings};
     use serde_json::json;
@@ -338,29 +338,6 @@ backend = "cli"
         assert!(instruction.contains("resolves beneath the workspace root"));
         assert!(instruction.contains("`rg --files <directory>`"));
         assert!(!instruction.contains("is a directory"));
-    }
-
-    #[test]
-    fn agent_implement_grants_allocate_then_update_adr() {
-        let (_, yaml) = DEFAULT_ACTIVITY_FILES
-            .iter()
-            .find(|(name, _)| *name == "agent_implement")
-            .expect("agent implement activity is seeded");
-        let asset = load_activity_asset(yaml).expect("parse agent implement activity");
-        match asset.spec.spec {
-            ActivityV2Spec::AgentLoop(spec) => {
-                for tool in ["orbit.adr.add", "orbit.adr.update"] {
-                    assert!(
-                        spec.tools.iter().any(|granted| granted == tool),
-                        "implementers must be able to {tool} ADR artifacts"
-                    );
-                    assert!(tool_allowed(tool, &spec.tools));
-                }
-                validate_tool_allowlist(&spec.tools)
-                    .expect("agent implement allowlist must remain valid");
-            }
-            other => panic!("expected agent_loop activity, got {other:?}"),
-        }
     }
 
     #[test]

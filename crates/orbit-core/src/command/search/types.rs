@@ -12,7 +12,6 @@ pub enum GlobalSearchKind {
     Task,
     Doc,
     Learning,
-    Adr,
     #[default]
     All,
 }
@@ -23,7 +22,6 @@ impl GlobalSearchKind {
             Self::Task => "task",
             Self::Doc => "doc",
             Self::Learning => "learning",
-            Self::Adr => "adr",
             Self::All => "all",
         }
     }
@@ -39,10 +37,6 @@ impl GlobalSearchKind {
     pub(super) fn includes_learnings(self) -> bool {
         matches!(self, Self::Learning | Self::All)
     }
-
-    pub(super) fn includes_adrs(self) -> bool {
-        matches!(self, Self::Adr | Self::All)
-    }
 }
 
 impl FromStr for GlobalSearchKind {
@@ -53,10 +47,9 @@ impl FromStr for GlobalSearchKind {
             "task" => Ok(Self::Task),
             "doc" => Ok(Self::Doc),
             "learning" => Ok(Self::Learning),
-            "adr" => Ok(Self::Adr),
             "all" => Ok(Self::All),
             other => Err(format!(
-                "invalid search kind `{other}`; expected one of: task, doc, learning, adr, all"
+                "invalid search kind `{other}`; expected one of: task, doc, learning, all"
             )),
         }
     }
@@ -79,7 +72,7 @@ pub struct GlobalSearchParams {
     pub kind: GlobalSearchKind,
     pub limit: usize,
     /// AND-filter by tag. Repeat for multi-tag AND semantics. Applies to
-    /// task, doc, learning, ADR (and `all`).
+    /// task, doc, learning (and `all`).
     pub tags: Vec<String>,
     /// Include normally-hidden statuses for the queried kind(s). Mutually
     /// overridden by `status`.
@@ -88,8 +81,8 @@ pub struct GlobalSearchParams {
     /// takes precedence over the `all` widener.
     pub status: Vec<String>,
     /// Cross-kind applicability filter. Task: selector-mapping against
-    /// `context_files`. Learning and ADR: glob-containment against
-    /// applicability path globs. Doc: out of scope (returns empty).
+    /// `context_files`. Learning: glob-containment against applicability path
+    /// globs. Doc: out of scope (returns empty).
     pub path: Option<String>,
 }
 

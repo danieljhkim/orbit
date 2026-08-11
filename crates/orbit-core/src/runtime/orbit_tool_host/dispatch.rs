@@ -17,14 +17,14 @@ pub(super) fn execute(
     let agent_for_audit = agent.clone();
     let model_for_audit = model.clone();
     let mut response = match action {
-        OrbitBuiltinAction::AdrAdd => super::adr_tools::add(runtime, input, agent, model),
-        OrbitBuiltinAction::AdrShow => super::adr_tools::show(runtime, input),
-        OrbitBuiltinAction::AdrList => super::adr_tools::list(runtime, input),
-        OrbitBuiltinAction::AdrRestore => super::adr_tools::restore(runtime, input, agent, model),
-        OrbitBuiltinAction::AdrUpdate => super::adr_tools::update(runtime, input, agent, model),
-        OrbitBuiltinAction::AdrSupersede => {
-            super::adr_tools::supersede(runtime, input, agent, model)
-        }
+        OrbitBuiltinAction::AdrAdd
+        | OrbitBuiltinAction::AdrShow
+        | OrbitBuiltinAction::AdrList
+        | OrbitBuiltinAction::AdrRestore
+        | OrbitBuiltinAction::AdrUpdate
+        | OrbitBuiltinAction::AdrSupersede => Err(OrbitError::InvalidInput(
+            "ADR lifecycle tools have been retired; edit docs/design/**/4_decisions.md".to_string(),
+        )),
         OrbitBuiltinAction::AutoTaskAdd => super::auto_task_tools::add(runtime, input),
         OrbitBuiltinAction::AutoTaskList => super::auto_task_tools::list(runtime, input),
         OrbitBuiltinAction::AutoTaskShow => super::auto_task_tools::show(runtime, input),

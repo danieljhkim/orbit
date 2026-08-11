@@ -1,5 +1,4 @@
 pub mod activity;
-pub mod adr;
 pub mod audit;
 pub mod auto_task;
 pub mod config;
@@ -92,12 +91,11 @@ Operate:
   gc          Inspect and explicitly reap Orbit-managed garbage
   task        Create, update, and manage tasks
   docs        Search and manage the indexed docs corpus
-  adr         Author, inspect, and advance Architecture Decision Records
   friction    Report, list, and triage friction records
   learning    Create, search, and curate project learnings
 
 Observe:
-  search      Search tasks, docs, learnings, and ADRs
+  search      Search tasks, docs, and learnings
   audit       Query the audit event log
   log         Tail the unified Orbit log feed
   doctor      Diagnose workspace health (config, database, disk, indexes)
@@ -146,7 +144,6 @@ pub enum Commands {
     Gc(gc::GcCommand),
     Task(Box<task::TaskCommand>),
     Docs(docs::DocsCommand),
-    Adr(adr::AdrCommand),
     Friction(friction::FrictionCommand),
     Learning(learning::LearningCommand),
 

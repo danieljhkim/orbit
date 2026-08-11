@@ -380,208 +380,6 @@
   {
     "active": true,
     "builtin": true,
-    "description": "Create a Proposed Architecture Decision Record. Returns the assigned global ID and the full record JSON.",
-    "enabled": true,
-    "name": "orbit.adr.add",
-    "parameters": [
-      {
-        "description": "ADR title (short noun phrase).",
-        "name": "title",
-        "param_type": "string",
-        "required": true
-      },
-      {
-        "description": "ADR body as markdown. Must include Context / Decision / Consequences sections per the ADR template; at least one consequences bullet must be a labeled `Cost:` line.",
-        "name": "body",
-        "param_type": "string",
-        "required": true
-      },
-      {
-        "description": "Agent identity that owns the ADR (e.g. `claude`, `codex`). Defaults to the calling actor.",
-        "name": "owner",
-        "param_type": "string",
-        "required": false
-      },
-      {
-        "description": "Feature folder names this decision touches. Accepts a string or array of strings.",
-        "name": "related_features",
-        "param_type": "string_list",
-        "required": false
-      },
-      {
-        "description": "Orbit task IDs that proposed or shipped the decision. May be empty at creation per ADR-008. Accepts a string or array of strings.",
-        "name": "related_tasks",
-        "param_type": "string_list",
-        "required": false
-      },
-      {
-        "description": "Free-form ADR labels. Defaults to an empty list when omitted.",
-        "name": "tags",
-        "param_type": "string_list",
-        "required": false
-      },
-      {
-        "description": "Repo-relative glob patterns for code or docs areas constrained by this ADR. Defaults to an empty list when omitted.",
-        "name": "paths",
-        "param_type": "string_list",
-        "required": false
-      },
-      {
-        "description": "Preferred provenance field. Pass the canonical agent family (codex, claude, gemini, or grok); full model strings are accepted and auto-normalized.",
-        "name": "model",
-        "param_type": "string",
-        "required": false
-      }
-    ],
-    "status": "active"
-  },
-  {
-    "active": true,
-    "builtin": true,
-    "description": "Fetch a single ADR by global ID or legacy ID alias. Returns the full record JSON including envelope fields and body.",
-    "enabled": true,
-    "name": "orbit.adr.show",
-    "parameters": [
-      {
-        "description": "Canonical ADR ID (e.g. `ADR-0042`).",
-        "name": "id",
-        "param_type": "string",
-        "required": false
-      },
-      {
-        "description": "Legacy ID alias (e.g. `activity-job/ADR-039`). Either `id` or `legacy_id` must be provided; specifying both is an error.",
-        "name": "legacy_id",
-        "param_type": "string",
-        "required": false
-      }
-    ],
-    "status": "active"
-  },
-  {
-    "active": true,
-    "builtin": true,
-    "description": "Write the bidirectional supersession edge: `old.status = superseded`, `old.superseded_by = new`, and `new.supersedes` gains `old`.",
-    "enabled": true,
-    "name": "orbit.adr.supersede",
-    "parameters": [
-      {
-        "description": "ADR being superseded.",
-        "name": "old_id",
-        "param_type": "string",
-        "required": true
-      },
-      {
-        "description": "Replacement ADR. Must already be in the `accepted` state, or the call returns an invalid_transition error and writes nothing.",
-        "name": "new_id",
-        "param_type": "string",
-        "required": true
-      },
-      {
-        "description": "Preferred provenance field. Pass the canonical agent family (codex, claude, gemini, or grok); full model strings are accepted and auto-normalized.",
-        "name": "model",
-        "param_type": "string",
-        "required": false
-      }
-    ],
-    "status": "active"
-  },
-  {
-    "active": true,
-    "builtin": true,
-    "description": "Partial update of an ADR's mutable fields and/or status. Status transitions follow the ADR lifecycle rules.",
-    "enabled": true,
-    "name": "orbit.adr.update",
-    "parameters": [
-      {
-        "description": "Canonical ADR ID to update.",
-        "name": "id",
-        "param_type": "string",
-        "required": true
-      },
-      {
-        "description": "New title.",
-        "name": "title",
-        "param_type": "string",
-        "required": false
-      },
-      {
-        "description": "New owner.",
-        "name": "owner",
-        "param_type": "string",
-        "required": false
-      },
-      {
-        "description": "Replacement body markdown.",
-        "name": "body",
-        "param_type": "string",
-        "required": false
-      },
-      {
-        "description": "New status. `proposed -> accepted` requires non-empty `related_tasks` on the resulting record. `accepted -> proposed` is rejected. Direct writes to `superseded` are rejected — use orbit.adr.supersede.",
-        "name": "status",
-        "param_type": "string",
-        "required": false
-      },
-      {
-        "description": "Replacement related_features list.",
-        "name": "related_features",
-        "param_type": "string_list",
-        "required": false
-      },
-      {
-        "description": "Replacement related_tasks list. Required (non-empty) when transitioning proposed -> accepted unless the existing record already has tasks.",
-        "name": "related_tasks",
-        "param_type": "string_list",
-        "required": false
-      },
-      {
-        "description": "Replacement free-form ADR labels. Empty list clears existing tags; absence leaves them unchanged.",
-        "name": "tags",
-        "param_type": "string_list",
-        "required": false
-      },
-      {
-        "description": "Replacement repo-relative applicability globs. Empty list clears existing paths; absence leaves them unchanged.",
-        "name": "paths",
-        "param_type": "string_list",
-        "required": false
-      },
-      {
-        "description": "Replacement supersedes list.",
-        "name": "supersedes",
-        "param_type": "string_list",
-        "required": false
-      },
-      {
-        "description": "Replacement legacy_ids list (supports rollup aliasing).",
-        "name": "legacy_ids",
-        "param_type": "string_list",
-        "required": false
-      },
-      {
-        "description": "Replacement validation_warnings list.",
-        "name": "validation_warnings",
-        "param_type": "string_list",
-        "required": false
-      },
-      {
-        "description": "Set legacy_validation to `none` or `warned`.",
-        "name": "legacy_validation",
-        "param_type": "string",
-        "required": false
-      },
-      {
-        "description": "Preferred provenance field. Pass the canonical agent family (codex, claude, gemini, or grok); full model strings are accepted and auto-normalized.",
-        "name": "model",
-        "param_type": "string",
-        "required": false
-      }
-    ],
-    "status": "active"
-  },
-  {
-    "active": true,
-    "builtin": true,
     "description": "Create a recurring auto-task definition. The generic scheduler mints a task from its template on each due slot.",
     "enabled": true,
     "name": "orbit.auto_task.add",
@@ -691,6 +489,40 @@
       {
         "description": "New dedupe policy: `skip_if_open` or `always`.",
         "name": "dedupe",
+        "param_type": "string",
+        "required": false
+      }
+    ],
+    "status": "active"
+  },
+  {
+    "active": true,
+    "builtin": true,
+    "description": "Execute a command as an explicit argv array in an explicit working directory and return its stdout, stderr, and exit status. Requires operator capability and the workspace claim; withheld from managed runs.",
+    "enabled": true,
+    "name": "orbit.command.exec",
+    "parameters": [
+      {
+        "description": "The command as a JSON array of argv strings, program first (e.g. [\"git\", \"status\"]). Never a shell string: no shell interprets this input, so quoting and operator-precedence bugs cannot occur.",
+        "name": "argv",
+        "param_type": "string_list",
+        "required": true
+      },
+      {
+        "description": "Explicit working directory the command runs in.",
+        "name": "working_directory",
+        "param_type": "string",
+        "required": true
+      },
+      {
+        "description": "Token for this workspace's exclusive claim (ADR-0352), required when another operator holds one. Falls back to `ORBIT_WORKSPACE_CLAIM_TOKEN`.",
+        "name": "claim_token",
+        "param_type": "string",
+        "required": false
+      },
+      {
+        "description": "Preferred provenance field. Pass the canonical agent family (codex, claude, gemini, or grok); full model strings are accepted and auto-normalized.",
+        "name": "model",
         "param_type": "string",
         "required": false
       }
@@ -1095,7 +927,7 @@
   {
     "active": true,
     "builtin": true,
-    "description": "Search tasks, docs, learnings, and ADRs. Hybrid vector ranking applies to indexed tasks, docs, and learnings.",
+    "description": "Search tasks, docs, and learnings. ADR entries are retrieved through the docs corpus; hybrid vector ranking applies to indexed tasks, docs, and learnings.",
     "enabled": true,
     "name": "orbit.search",
     "parameters": [

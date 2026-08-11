@@ -5,7 +5,6 @@
 
 #![allow(missing_docs)]
 
-mod adrs;
 mod docs;
 mod learning;
 mod queries;

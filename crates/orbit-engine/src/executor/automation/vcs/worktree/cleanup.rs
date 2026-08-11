@@ -61,6 +61,11 @@ fn ensure_knowledge_bodies_recoverable(
     let mut blocked = Vec::new();
 
     for allocation in allocations {
+        if allocation.kind == IdAllocationKind::Adr {
+            // ADR allocations are historical rows from the retired store and
+            // no longer participate in worktree body-loss protection.
+            continue;
+        }
         if canonical_path(&allocation.worktree_root).as_deref() != Some(removed_root.as_path()) {
             continue;
         }
@@ -101,7 +106,7 @@ fn ensure_knowledge_bodies_recoverable(
         return Ok(());
     }
     Err(OrbitError::Execution(format!(
-        "refusing to remove worktree '{}': it contains the only readable body for these knowledge allocations: {}. Reconcile each body into another registered worktree (normally the canonical checkout), verify it there with `orbit learning show <id>` or `orbit adr show <id>`, then retry cleanup",
+        "refusing to remove worktree '{}': it contains the only readable body for these learning allocations: {}. Reconcile each body into another registered worktree (normally the canonical checkout), verify it there with `orbit learning show <id>`, then retry cleanup",
         workspace_path.display(),
         blocked.join(", ")
     )))
@@ -148,38 +153,7 @@ fn allocation_body_candidates(
                 .join(&allocation.id)
                 .join("learning.yaml"),
         ]),
-        IdAllocationKind::Adr => {
-            let adr_root = root.join(".orbit/adrs");
-            let mut candidates = vec![adr_root.join(&allocation.id).join("body.md")];
-            let entries = match fs::read_dir(&adr_root) {
-                Ok(entries) => entries,
-                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                    return Ok(candidates);
-                }
-                Err(error) => {
-                    return Err(OrbitError::Execution(format!(
-                        "failed to inspect ADR bodies under '{}': {error}",
-                        adr_root.display()
-                    )));
-                }
-            };
-            for entry in entries {
-                let entry = entry.map_err(|error| {
-                    OrbitError::Execution(format!(
-                        "failed to inspect an ADR state under '{}': {error}",
-                        adr_root.display()
-                    ))
-                })?;
-                if entry
-                    .file_type()
-                    .map_err(|error| OrbitError::Execution(error.to_string()))?
-                    .is_dir()
-                {
-                    candidates.push(entry.path().join(&allocation.id).join("body.md"));
-                }
-            }
-            Ok(candidates)
-        }
+        IdAllocationKind::Adr => Ok(Vec::new()),
     }
 }
 

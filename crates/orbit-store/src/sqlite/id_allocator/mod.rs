@@ -137,7 +137,6 @@ pub struct IdAllocatorConfig {
     pub lock_path: PathBuf,
     pub shared_root: PathBuf,
     pub worktree_root: PathBuf,
-    pub adr_root: PathBuf,
     pub learning_root: PathBuf,
 }
 
@@ -151,7 +150,6 @@ struct IdAllocatorInner {
     lock_path: PathBuf,
     shared_root: PathBuf,
     worktree_root: PathBuf,
-    adr_root: PathBuf,
     learning_root: PathBuf,
 }
 
@@ -185,7 +183,6 @@ impl IdAllocatorConfig {
         lock_path: PathBuf,
         shared_root: PathBuf,
         worktree_root: PathBuf,
-        adr_root: PathBuf,
         learning_root: PathBuf,
     ) -> Self {
         Self {
@@ -193,7 +190,6 @@ impl IdAllocatorConfig {
             lock_path,
             shared_root,
             worktree_root,
-            adr_root,
             learning_root,
         }
     }
@@ -215,7 +211,6 @@ impl IdAllocator {
                 lock_path: config.lock_path,
                 shared_root: absolutize(config.shared_root),
                 worktree_root: absolutize(config.worktree_root),
-                adr_root: config.adr_root,
                 learning_root: config.learning_root,
             }),
         };
@@ -224,30 +219,18 @@ impl IdAllocator {
     }
 
     #[cfg(test)]
-    pub(crate) fn for_test_roots(adr_root: PathBuf, learning_root: PathBuf) -> Self {
-        let base = if learning_root.starts_with(&adr_root) {
-            adr_root.clone()
-        } else if adr_root.starts_with(&learning_root) {
-            learning_root.clone()
-        } else {
-            adr_root.clone()
-        };
+    pub(crate) fn for_test_root(learning_root: PathBuf) -> Self {
+        let base = learning_root.clone();
         let state_dir = base.join(".id-allocator-test-state");
         Self::open(IdAllocatorConfig::new(
             state_dir.join("semantic.db"),
             state_dir.join(".id_alloc.lock"),
             base.clone(),
             base,
-            adr_root,
             learning_root,
         ))
         .expect("test id allocator")
     }
-
-    pub fn allocate_adr(&self) -> Result<IdAllocation, OrbitError> {
-        self.allocate(IdAllocationKind::Adr)
-    }
-
     pub fn worktree_root(&self) -> &Path {
         &self.inner.worktree_root
     }
@@ -255,131 +238,21 @@ impl IdAllocator {
     pub fn allocate_learning(&self) -> Result<IdAllocation, OrbitError> {
         self.allocate(IdAllocationKind::Learning)
     }
-
-    pub fn record_adr_body_path(&self, id: &str, body_path: &Path) -> Result<(), OrbitError> {
-        self.record_body_path(IdAllocationKind::Adr, id, body_path)
-    }
-
     pub fn record_learning_body_path(&self, id: &str, body_path: &Path) -> Result<(), OrbitError> {
         self.record_body_path(IdAllocationKind::Learning, id, body_path)
     }
-
-    /// [ORB-10538] Repoint an existing ADR allocation to a restored body, but
-    /// only if every allocation field still matches the caller's snapshot.
-    ///
-    /// The compare-and-set makes an exact-id restore fail closed when another
-    /// process finalizes, abandons, or otherwise changes the allocation after
-    /// the store proved its recorded artifact unreadable. It never inserts an
-    /// allocation and therefore cannot adopt an unallocated id.
-    pub fn restore_adr_body_path_if_unchanged(
-        &self,
-        expected: &IdAllocationRecord,
-        body_path: &Path,
-    ) -> Result<bool, OrbitError> {
-        if expected.kind != IdAllocationKind::Adr {
-            return Err(OrbitError::InvalidInput(format!(
-                "cannot restore ADR allocation {} from a {} snapshot",
-                expected.id,
-                expected.kind.as_str(),
-            )));
-        }
-        self.restore_body_path_if_unchanged(expected, body_path)
-    }
-
     pub fn abandon_learning(&self, id: &str) -> Result<(), OrbitError> {
         self.abandon(IdAllocationKind::Learning, id)
     }
-
-    /// [ORB-00413] Abandon a reserved-but-unfinalized ADR allocation so a
-    /// partial ADR create does not leak a half-visible ID.
-    pub fn abandon_adr(&self, id: &str) -> Result<(), OrbitError> {
-        self.abandon(IdAllocationKind::Adr, id)
-    }
-
     /// [ORB-10501] Abandon a learning allocation whose pinned worktree is gone.
     /// See [`Self::abandon_orphaned`] for the guard and how this differs from
     /// [`Self::abandon_learning`].
     pub fn abandon_orphaned_learning(&self, id: &str) -> Result<bool, OrbitError> {
         self.abandon_orphaned(IdAllocationKind::Learning, id)
     }
-
-    /// [ORB-10501] Abandon an ADR allocation whose pinned worktree is gone.
-    /// See [`Self::abandon_orphaned`].
-    pub fn abandon_orphaned_adr(&self, id: &str) -> Result<bool, OrbitError> {
-        self.abandon_orphaned(IdAllocationKind::Adr, id)
-    }
-
-    pub fn adr_allocation(&self, id: &str) -> Result<Option<IdAllocationRecord>, OrbitError> {
-        self.allocation(IdAllocationKind::Adr, id)
-    }
-
-    /// Run a filesystem mutation while the ADR allocation is pinned to an
-    /// exact caller-observed snapshot. [ORB-10545]
-    ///
-    /// Reconciliation copies an existing bundle without changing allocation
-    /// ownership or lifecycle metadata. Holding the shared allocator lock
-    /// across the final rename prevents a concurrent allocation repair from
-    /// invalidating the source identity between validation and publication.
-    pub fn with_unchanged_adr_allocation<T>(
-        &self,
-        expected: &IdAllocationRecord,
-        operation: impl FnOnce() -> Result<T, OrbitError>,
-    ) -> Result<T, OrbitError> {
-        let _lock = self.acquire_lock()?;
-        let current = self.allocation(IdAllocationKind::Adr, &expected.id)?;
-        if current.as_ref() != Some(expected) {
-            return Err(OrbitError::InvalidInput(format!(
-                "cannot reconcile ADR {}: its allocation changed concurrently; inspect orbit adr show before retrying",
-                expected.id
-            )));
-        }
-        operation()
-    }
-
-    /// [ORB-10479] Allocation lookup for the exact-id ADR repair path, which
-    /// must also see rows [`Self::abandon_orphaned_adr`] marked `abandoned`
-    /// after their pinned worktree was reaped — the exact population the
-    /// repair exists for.
-    ///
-    /// This is safe precisely because an abandoned row still owns its id
-    /// forever: [`Self::max_sequence`] counts abandoned rows, so the id is
-    /// never handed out again and restoring into it cannot collide with a
-    /// different record. Ordinary reads keep using [`Self::adr_allocation`],
-    /// which hides abandoned rows.
-    pub fn adr_allocation_for_restore(
-        &self,
-        id: &str,
-    ) -> Result<Option<IdAllocationRecord>, OrbitError> {
-        let conn = self.lock_conn()?;
-        let mut stmt = conn
-            .prepare(
-                "SELECT kind, id, allocated_at, worktree_root, branch, status, body_path
-                 FROM id_allocations
-                 WHERE kind = ?1 AND id = ?2",
-            )
-            .map_err(|error| OrbitError::Store(error.to_string()))?;
-        let mut rows = stmt
-            .query_map(
-                params![IdAllocationKind::Adr.as_str(), id],
-                allocation_record_from_row,
-            )
-            .map_err(|error| OrbitError::Store(error.to_string()))?;
-        match rows.next() {
-            Some(row) => row
-                .map(Some)
-                .map_err(|error| OrbitError::Store(error.to_string())),
-            None => Ok(None),
-        }
-    }
-
     pub fn learning_allocation(&self, id: &str) -> Result<Option<IdAllocationRecord>, OrbitError> {
         self.allocation(IdAllocationKind::Learning, id)
     }
-
-    pub fn adr_allocations(&self) -> Result<Vec<IdAllocationRecord>, OrbitError> {
-        self.allocations(IdAllocationKind::Adr)
-    }
-
     pub fn learning_allocations(&self) -> Result<Vec<IdAllocationRecord>, OrbitError> {
         self.allocations(IdAllocationKind::Learning)
     }
@@ -430,51 +303,9 @@ impl IdAllocator {
         let tx = conn
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(|error| OrbitError::Store(error.to_string()))?;
-        self.backfill_adrs(&tx)?;
         self.backfill_canonical_learnings(&tx)?;
         tx.commit()
             .map_err(|error| OrbitError::Store(error.to_string()))?;
-        Ok(())
-    }
-
-    fn backfill_adrs(&self, tx: &Transaction<'_>) -> Result<(), OrbitError> {
-        for state in ["proposed", "accepted", "superseded", "deleted"] {
-            let dir = self.inner.adr_root.join(state);
-            if !dir.is_dir() {
-                continue;
-            }
-            for child in child_dirs(&dir)? {
-                let Some(id) = child.file_name().and_then(|name| name.to_str()) else {
-                    continue;
-                };
-                if parse_adr_sequence(id).is_none() || !child.join("adr.yaml").is_file() {
-                    continue;
-                }
-                let allocated_at =
-                    yaml_epoch(&child.join("adr.yaml")).unwrap_or_else(|_| now_epoch());
-                let body_path = relative_to(&child.join("body.md"), &self.inner.shared_root);
-                insert_allocation(
-                    tx,
-                    IdAllocationKind::Adr,
-                    id,
-                    allocated_at,
-                    &self.inner.shared_root,
-                    None,
-                    STATUS_MERGED,
-                    Some(&body_path),
-                    true,
-                )?;
-                update_body_metadata_if_missing(
-                    tx,
-                    IdAllocationKind::Adr,
-                    id,
-                    &self.inner.shared_root,
-                    None,
-                    &body_path,
-                    STATUS_MERGED,
-                )?;
-            }
-        }
         Ok(())
     }
 
@@ -640,61 +471,6 @@ impl IdAllocator {
         tx.commit()
             .map_err(|error| OrbitError::Store(error.to_string()))?;
         Ok(())
-    }
-
-    fn restore_body_path_if_unchanged(
-        &self,
-        expected: &IdAllocationRecord,
-        body_path: &Path,
-    ) -> Result<bool, OrbitError> {
-        let relative_body_path = relative_to(body_path, &self.inner.worktree_root);
-        let branch = best_effort_branch(&self.inner.worktree_root);
-        let _lock = self.acquire_lock()?;
-        let mut conn = self.lock_conn()?;
-        let tx = conn
-            .transaction_with_behavior(TransactionBehavior::Immediate)
-            .map_err(|error| OrbitError::Store(error.to_string()))?;
-        // [ORB-10479] `status` moves to `merged` as part of the same
-        // compare-and-set: the restore just wrote a readable body into this
-        // worktree, so an allocation abandoned by `abandon_orphaned` is live
-        // again and must stop being hidden from `adr_allocation`. The WHERE
-        // clause still pins the pre-restore snapshot, so a concurrent change
-        // to any field — `status` included — loses the race as before.
-        let updated = tx
-            .execute(
-                "UPDATE id_allocations
-                 SET worktree_root = ?8, branch = ?9, body_path = ?10, status = ?11
-                 WHERE kind = ?1
-                   AND id = ?2
-                   AND allocated_at = ?3
-                   AND worktree_root = ?4
-                   AND branch IS ?5
-                   AND status = ?6
-                   AND body_path IS ?7",
-                params![
-                    expected.kind.as_str(),
-                    expected.id,
-                    expected.allocated_at,
-                    expected.worktree_root.to_string_lossy(),
-                    expected.branch,
-                    expected.status,
-                    expected
-                        .body_path
-                        .as_ref()
-                        .map(|path| path.to_string_lossy()),
-                    self.inner.worktree_root.to_string_lossy(),
-                    branch,
-                    relative_body_path.to_string_lossy(),
-                    STATUS_MERGED,
-                ],
-            )
-            .map_err(|error| OrbitError::Store(error.to_string()))?;
-        if updated == 0 {
-            return Ok(false);
-        }
-        tx.commit()
-            .map_err(|error| OrbitError::Store(error.to_string()))?;
-        Ok(true)
     }
 
     fn abandon(&self, kind: IdAllocationKind, id: &str) -> Result<(), OrbitError> {

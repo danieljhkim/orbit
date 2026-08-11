@@ -1,6 +1,6 @@
 ---
 name: orbit-search
-description: Search tasks, docs, learnings, and ADRs through the unified `orbit search` surface. Also covers the `orbit semantic` embedding companion and the human-authored docs corpus.
+description: Search tasks, docs, and learnings through the unified `orbit search` surface. Also covers the `orbit semantic` embedding companion and the human-authored docs corpus.
 ---
 
 # Orbit Search
@@ -17,11 +17,11 @@ orbit search "agent loop deadlock" --hybrid --kind task --limit 5 # lexical + co
 orbit search similar "<task-id>" --limit 5                        # MCP: {"semantic":"<task-id>"}
 ```
 
-**Applicability (`search path`)** resolves differently per corpus: tasks match by selector containment over `context_files`; learnings and ADRs match by glob containment over their stored path scopes; docs are content-indexed and never match by path.
+**Applicability (`search path`)** resolves differently per corpus: tasks match by selector containment over `context_files`; learnings match by glob containment over stored path scopes; docs are content-indexed and never match by path.
 
-**`--status` takes `kind:value` tokens** (`--status task:open,doc:active,adr:proposed`). Bare tokens are rejected because statuses collide across corpora.
+**`--status` takes `kind:value` tokens** (`--status task:open,doc:active`). Bare tokens are rejected because statuses collide across corpora.
 
-**Index coverage:** lexical covers tasks, docs, learnings, and ADRs. Vector search covers task fields, plus docs/learnings/ADRs once `orbit semantic index --kind <kind>` has run. Missing vectors under `--hybrid` fall back to lexical with a note rather than failing — and if the companion isn't installed at all, fall back to lexical and continue. Never run `orbit semantic install` without operator consent.
+**Index coverage:** lexical covers tasks, docs, and learnings. Vector search covers task fields, plus docs/learnings once `orbit semantic index --kind <kind>` has run. Missing vectors under `--hybrid` fall back to lexical with a note rather than failing — and if the companion isn't installed at all, fall back to lexical and continue. Never run `orbit semantic install` without operator consent.
 
 **Where it earns its keep:** a `--hybrid --kind task` dedup check before creating a task; `semantic: "<task-id>"` after `orbit.task.show` to surface prior decisions the author never linked; and "where did we decide X" as `--kind all`. For a brand-new task, use `--hybrid` on title and description — it may not have embeddings yet. For exact identifiers, paths, and error strings, plain lexical is cheaper and more predictable than semantic.
 
@@ -35,4 +35,4 @@ Results carry `mode`, `kind`, `notes`, and `results[]` with some of `id`/`path`/
 
 **A learning vs. a doc:** a learning is a load-bearing rule with a known failure mode — scope-glob push-injected, updatable, supersedable, managed through `orbit.learning.*`. A doc is explanatory context — PR-reviewed, retrieved on demand, no supersede flow. Link a doc to the rule it explains with `related_artifacts: [L-NNNN]`. Authoring either one is `orbit-knowledge`, not this skill.
 
-**ADRs** live at `.orbit/adrs/{accepted,proposed,superseded}/<adr-id>/` and are owned by `orbit-knowledge`. The docs walker never enters `.orbit/`, but `--kind all|adr` federates ADR metadata alongside doc hits; `--all` includes superseded ADRs for archaeology.
+**ADRs** are complete entries in the repository's designated decision docs. They are indexed as ordinary docs; use `--kind doc` and search by ID, title, or body text. The retired `--kind adr` is rejected.

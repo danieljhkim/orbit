@@ -492,31 +492,6 @@ impl Commands {
                     runtime_dispatch!(Docs),
                 )
             }
-            Commands::Adr(command) => {
-                use super::adr::AdrSubcommand;
-                let (subcommand, target_id, json) = match &command.command {
-                    // `add` allocates its ID inside the tool, so there is no
-                    // target to name until the response comes back.
-                    AdrSubcommand::Add(args) => ("add", None, args.json),
-                    AdrSubcommand::List(args) => ("list", None, args.json),
-                    AdrSubcommand::Show(args) => ("show", Some(args.id.as_str()), args.json),
-                    AdrSubcommand::Update(args) => ("update", Some(args.id.as_str()), args.json),
-                    AdrSubcommand::Supersede(args) => {
-                        ("supersede", Some(args.id.as_str()), args.json)
-                    }
-                    AdrSubcommand::Restore(args) => ("restore", Some(args.id.as_str()), args.json),
-                    AdrSubcommand::Reconcile(args) => {
-                        ("reconcile", Some(args.id.as_str()), args.json)
-                    }
-                };
-                CommandOperation::new(
-                    RuntimeNeed::Required,
-                    Some(admin_meta("adr", Some(subcommand), Some("adr"), target_id)),
-                    json.then_some(true),
-                    false,
-                    runtime_dispatch!(Adr),
-                )
-            }
             // ADR-0209 bearing 1 [ORB-10358]: friction is registry-driven, so
             // this arm reads the invocation instead of matching verb by verb.
             // A new friction verb needs no edit here.

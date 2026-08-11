@@ -19,7 +19,6 @@ use serde::Deserialize;
 use serde_json::json;
 use url::Url;
 
-mod adrs;
 mod audit;
 mod crews;
 mod denials;
@@ -252,13 +251,6 @@ pub(super) fn map_runtime_error(e: orbit_core::OrbitError) -> Response {
             kind: orbit_core::NotFoundKind::Learning,
             id,
         } => not_found(format!("learning not found: {id}")),
-        orbit_core::OrbitError::NotFound {
-            kind: orbit_core::NotFoundKind::Adr,
-            id,
-        } => not_found(format!("ADR not found: {id}")),
-        orbit_core::OrbitError::AdrInvalidTransition(message) => {
-            bad_request(format!("Invalid ADR status transition: {message}"))
-        }
         error @ orbit_core::OrbitError::RemoteArtifactUnavailable { .. } => {
             artifact_conflict(error, "remote_artifact_unavailable")
         }
@@ -407,13 +399,6 @@ pub(super) fn router() -> Router<crate::state::DashboardState> {
             "/learnings/:id/supersede",
             post(learnings::supersede_learning_action),
         )
-        .route("/adrs", get(adrs::list_adrs).post(adrs::create_adr_action))
-        .route(
-            "/adrs/:id",
-            get(adrs::get_adr).patch(adrs::update_adr_action),
-        )
-        .route("/adrs/:id/accept", post(adrs::accept_adr_action))
-        .route("/adrs/:id/supersede", post(adrs::supersede_adr_action))
         .route(
             "/frictions",
             get(frictions::list_frictions).post(frictions::create_friction_action),

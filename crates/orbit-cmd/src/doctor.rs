@@ -689,14 +689,13 @@ pub(crate) fn disk_space_check(path: &Path) -> WorkspaceDoctorResult {
 }
 
 /// Lock files in the directories the file-backed stores lock in:
-/// `state/` (ID allocator), `tasks/` (v2 bundle locks), `learnings/`,
-/// and `adrs/.locks/`. Non-recursive on purpose — the lock layouts are flat.
+/// `state/` (ID allocator), `tasks/` (v2 bundle locks), and `learnings/`.
+/// Non-recursive on purpose — the lock layouts are flat.
 pub(crate) fn collect_lock_files(paths: &WorkspacePaths) -> Vec<PathBuf> {
     let dirs = [
         paths.state_dir.clone(),
         paths.tasks_dir.clone(),
         paths.learnings_dir.clone(),
-        paths.adrs_dir.join(".locks"),
     ];
     let mut lock_files = Vec::new();
     for dir in dirs {

@@ -1,7 +1,7 @@
 ---
 title: Orbit MCP Bridge — Decisions
 owner: claude
-last_updated: 2026-08-10
+last_updated: 2026-08-11
 last_validated: 2026-08-02
 status: Draft
 feature: mcp-bridge
@@ -307,257 +307,206 @@ Remote database or a separate broker crate.
 
 ## ADR-0350 — Own the SSH tunnel as remote-access infrastructure, with a provisional surface over it
 
-**Status:** Accepted · 2026-08 · [ORB-10690] implemented the loopback listener with one server instance per connection; [ORB-10710] added the CLI surface, the client-side `--mode remote`, and the checkout guard.
+**Status:** Accepted · 2026-08-10 05:07:27.051840Z · [ORB-10690], [ORB-10710]
+**Owner:** human
+**Created:** 2026-08-10 00:53:52.796785Z
+**Last updated:** 2026-08-10 05:07:27.051840+00:00
+**Tags:** `mcp`, `transport`, `remote-access`, `bridge`
+**Paths:** `crates/orbit-mcp/src/tcp.rs`, `crates/orbit-remote/src/mcp/**`, `crates/orbit-cli/src/command/mcp/**`, `crates/orbit-dashboard/src/connect.rs`
 
 ### Context
 
-Orbit's canonical MCP surface reaches a remote machine one way today: a spoke
-broker spawns `ssh <alias> orbit mcp serve --hub` and relays frames over that
-process's stdio. The stated posture is that Orbit opens no listening port and
-invents no credential of its own.
+Orbit's canonical MCP surface reaches a remote machine one way today: a spoke broker spawns `ssh <alias> orbit mcp serve --hub` and relays frames over that process's stdio. The stated posture is that Orbit opens no listening port and invents no credential of its own.
 
-That path assumes the client is a spoke — a machine with its own checkout, whose
-graph, docs, and search must resolve against the branch its agent is working on.
-Placement classes (`hub`, `owner`, `local-derived`, `composite`) exist to preserve
-exactly that.
+That path assumes the client is a spoke — a machine with its own checkout, whose graph, docs, and search must resolve against the branch its agent is working on. Placement classes (`hub`, `owner`, `local-derived`, `composite`) exist to preserve exactly that.
 
-A second client class does not fit the assumption. An off-box orchestrator has no
-meaningful local checkout: its clone, if any, is a read mirror, and every workspace
-it acts on lives on the remote. There is no local-derived state to protect, so
-placement routing guards nothing for it and only makes the canonical surface
-unreachable. The observed consequence is the parity layer this feature already
-decided to retire — an external process that re-declares Orbit's tools in another
-language against the dashboard HTTP API, discards Orbit's capability model, and
-drifts on every schema change. That duplication is across a process boundary;
-Orbit's own advertised definitions are derived from its tool registry, not
-hand-copied, and are not the problem being solved here.
+A second client class does not fit the assumption. An off-box orchestrator has no meaningful local checkout: its clone, if any, is a read mirror, and every workspace it acts on lives on the remote. There is no local-derived state to protect, so placement routing guards nothing for it and only makes the canonical surface unreachable. The observed consequence is the parity layer this feature already decided to retire — an external process that re-declares Orbit's tools in another language against the dashboard HTTP API, discards Orbit's capability model, and drifts on every schema change. That duplication is across a process boundary; Orbit's own advertised definitions are derived from its tool registry, not hand-copied, and are not the problem being solved here.
 
-Reachability is the scarce thing. An orchestrator that cannot reach the machine
-currently launders trivial reads through full worker runs.
+Reachability is the scarce thing. An orchestrator that cannot reach the machine currently launders trivial reads through full worker runs.
 
 ### Decision
 
-Treat the SSH tunnel as owned infrastructure, and decide separately what it
-carries.
+Treat the SSH tunnel as owned infrastructure, and decide separately what it carries.
 
-- Orbit establishes or reuses an SSH tunnel to a **loopback-bound** listener on the
-  remote machine. The listener refuses any non-loopback bind, exactly as the
-  dashboard does. SSH owns authentication, encryption, and host verification; Orbit
-  adds no credential, ACL, or session of its own. This is the same delegation the
-  hub link already makes, applied to a tunnel rather than a spawned process.
-- The tunnel is a reusable primitive, not an implementation detail of one consumer.
-  Anything that needs to reach the remote machine rides it rather than opening a
-  second mechanism.
-- Calls carried over the tunnel resolve **on the remote**, without placement
-  routing. That is correct precisely because the client holds no local-derived
-  state, and it is why the mode must refuse to start where a local checkout exists
-  rather than silently answering from another machine's branch.
-- Placement routing is unchanged for spokes. This narrows the placement broker's
-  scope to clients that hold local-derived state; it does not supersede that
-  decision.
-- **What surface the tunnel carries is decided separately, by [ADR-0351].** This
-  record commits only to the transport and its trust posture. Forwarding the
-  existing advertised per-tool surface is one thing the tunnel may carry, not the
-  reason it exists.
+- Orbit establishes or reuses an SSH tunnel to a **loopback-bound** listener on the remote machine. The listener refuses any non-loopback bind, exactly as the dashboard does. SSH owns authentication, encryption, and host verification; Orbit adds no credential, ACL, or session of its own. This is the same delegation the hub link already makes, applied to a tunnel rather than a spawned process.
+- The tunnel is a reusable primitive, not an implementation detail of one consumer. Anything that needs to reach the remote machine rides it rather than opening a second mechanism.
+- Calls carried over the tunnel resolve **on the remote**, without placement routing. That is correct precisely because the client holds no local-derived state, and it is why the mode must refuse to start where a local checkout exists rather than silently answering from another machine's branch.
+- Placement routing is unchanged for spokes. This narrows the placement broker's scope to clients that hold local-derived state; it does not supersede that decision.
+- **What surface the tunnel carries is decided separately, by [ADR-0351].** This record commits only to the transport and its trust posture. Forwarding the existing advertised per-tool surface is one thing the tunnel may carry, not the reason it exists.
 
 ### Consequences
 
-- The canonical surface becomes reachable off-box without an external process
-  re-declaring it, so schema drift across the process boundary stops being
-  possible: both ends are the same build.
-- Capability filtering and audit apply to remote callers through the paths that
-  already implement them, rather than needing equivalents rebuilt on a second
-  surface.
-- Separating the transport decision from the surface decision means the tunnel is
-  worth building even if the surface question resolves differently than expected.
-  It is the part of this work with no contingent value.
-- **Cost:** Orbit now opens a listening port, contradicting a previously absolute
-  posture. Loopback binding plus a tunnel preserves the security property, but that
-  guarantee now rests on a bind guard rather than on the absence of a listener —
-  and a misconfiguration binding a routable address turns the surface into
-  unauthenticated remote control of the machine.
-- **Cost:** a second cross-machine mechanism exists beside the SSH-stdio hub link.
-  Until one is retired, two paths reach a remote Orbit, which is the duplication
-  this feature was created to remove. The tunnelled listener is deliberately not a
-  hub link and must not acquire hub-link responsibilities: no placement routing, no
-  workspace-ownership resolution, no spoke registration.
-- **Cost:** remote resolution is correct only for the client class this is defined
-  for. The refusal-when-a-checkout-exists guard is load-bearing; without it the mode
-  returns another machine's branch state as though it were local, which presents as
-  wrong answers rather than as an error.
-- The star topology's "one cross-machine destination" invariant now describes spokes
-  specifically. A checkoutless client is not a spoke and does not participate in hub
-  or owner routing.
-
-**Amended by [ADR-0355] and [ADR-0358], not superseded.** The transport decision and
-its trust posture stand exactly as written. What changed underneath is the framing:
-with the singular hub gone, the owned tunnel is the *primary* cross-machine route
-rather than an exception carved out of a star topology. Three consequences follow.
-The final bullet above is void — there is no star topology and no spoke class, so
-"one cross-machine destination" is now simply "at most one destination per call,
-and it is the workspace's owner." The second cost resolves: the SSH-stdio hub link
-is retired, so only one cross-machine mechanism remains. And "not a hub link" is
-better read as "a transport, not an authority" — ownership preflight is a property
-of the machine that serves a call, never of the pipe that carried it.
+- The canonical surface becomes reachable off-box without an external process re-declaring it, so schema drift across the process boundary stops being possible: both ends are the same build.
+- Capability filtering and audit apply to remote callers through the paths that already implement them, rather than needing equivalents rebuilt on a second surface.
+- Separating the transport decision from the surface decision means the tunnel is worth building even if the surface question resolves differently than expected. It is the part of this work with no contingent value.
+- **Cost:** Orbit now opens a listening port, contradicting a previously absolute posture. Loopback binding plus a tunnel preserves the security property, but that guarantee now rests on a bind guard rather than on the absence of a listener — and a misconfiguration binding a routable address turns the surface into unauthenticated remote control of the machine.
+- **Cost:** a second cross-machine mechanism exists beside the SSH-stdio hub link. Until one is retired, two paths reach a remote Orbit, which is the duplication this feature was created to remove. The tunnelled listener is deliberately not a hub link and must not acquire hub-link responsibilities: no placement routing, no workspace-ownership resolution, no spoke registration.
+- **Cost:** remote resolution is correct only for the client class this is defined for. The refusal-when-a-checkout-exists guard is load-bearing; without it the mode returns another machine's branch state as though it were local, which presents as wrong answers rather than as an error.
+- The star topology's "one cross-machine destination" invariant now describes spokes specifically. A checkoutless client is not a spoke and does not participate in hub or owner routing.
 
 ## ADR-0351 — Expose remote command execution as a claim-gated tool, retaining the advertised surface
 
-**Status:** Proposed · 2026-08 · a committed heading in this file, not a record in a store; `Proposed` holds only while the implementing task is in flight and on its branch ([CONVENTIONS.md §4c](../CONVENTIONS.md#4c-format-and-numbering)).
+**Status:** Proposed · 2026-08-10 02:49:53.224966Z
+**Owner:** human
+**Created:** 2026-08-10 01:02:27.338020Z
+**Last updated:** 2026-08-10 02:49:53.224966Z
+**Tags:** `mcp`, `remote-access`, `capability`, `bridge`
+**Paths:** `crates/orbit-tools/src/builtin/orbit/**`, `crates/orbit-remote/src/mcp/**`, `crates/orbit-common/src/authorization.rs`
 
 ### Context
 
-With the tunnel owned as infrastructure, an off-box orchestrator can reach the
-remote machine. The question is what it should be able to do there.
+With the tunnel owned as infrastructure, an off-box orchestrator can reach the remote machine. The question is what it should be able to do there.
 
-A correction first, because an earlier draft of this record overstated the problem.
-Orbit's MCP tool definitions are **not** hand-maintained duplicates of the CLI. They
-are derived from the tool registry — a tool is written once in Rust with its schema,
-registered with a policy, and the advertised surface is computed from those entries.
-The duplication this feature was created to remove was an external process
-re-declaring those schemas in another language across a process boundary, and the
-owned tunnel already eliminates it. What the advertised surface actually costs is
-per-tool policy and placement metadata, the conformance test pinning the definition
-count, the contract digest, and the context those definitions occupy in every client
-request. Real, but modest.
+A correction first, because an earlier draft of this record overstated the problem. Orbit's MCP tool definitions are **not** hand-maintained duplicates of the CLI. They are derived from the tool registry — a tool is written once in Rust with its schema, registered with a policy, and the advertised surface is computed from those entries. The duplication this feature was created to remove was an external process re-declaring those schemas in another language across a process boundary, and the owned tunnel already eliminates it. What the advertised surface actually costs is per-tool policy and placement metadata, the conformance test pinning the definition count, the contract digest, and the context those definitions occupy in every client request. Real, but modest.
 
-What is genuinely scarce is reachability. An orchestrator that cannot execute on the
-machine routes trivial reads through full worker runs — disproportionate to the
-work, and slow enough to distort how often such checks happen at all.
+What is genuinely scarce is reachability. An orchestrator that cannot execute on the machine routes trivial reads through full worker runs — disproportionate to the work, and slow enough to distort how often such checks happen at all.
 
-There is also a boundary to respect. A client that can run arbitrary commands can
-invoke the CLI, and the CLI reaches every operation the capability model governs,
-including workflow dispatch. Unrestricted command execution in the default surface
-would make capability filtering, the governed-operation check, and the workspace
-claim advisory for whoever holds it. Against that: establishing the tunnel already
-presupposes SSH to the machine, and anyone with SSH can already run anything there.
+There is also a boundary to respect. A client that can run arbitrary commands can invoke the CLI, and the CLI reaches every operation the capability model governs, including workflow dispatch. Unrestricted command execution in the default surface would make capability filtering, the governed-operation check, and the workspace claim advisory for whoever holds it. Against that: establishing the tunnel already presupposes SSH to the machine, and anyone with SSH can already run anything there.
 
 ### Decision
 
 Add command execution, and change nothing else about the surface.
 
-- **Command** takes an argv array and an explicit working directory. Never a shell
-  string, so quoting and operator-precedence bugs are structurally impossible rather
-  than merely discouraged.
-- It requires **operator capability and the workspace claim**, and is withheld from
-  managed runs, which could otherwise bypass the self-dispatch guard through the
-  CLI.
-- A client without the claim does not receive command at all. The restriction is
-  **not** an allowlist over argv: a filtered command surface leaks through
-  `bash -c`, `env`, `xargs`, `make`, interpreter `-c` flags, and version-control
-  hooks, so the boundary is whether the operation exists for that caller, not which
-  binaries it may name.
-- **The advertised per-tool surface is unchanged.** Clients keep native tool
-  selection, call-time argument validation, and per-tool audit attribution. Routine
-  work continues to be attributed by tool name; only genuinely arbitrary execution
-  degrades to an argv.
+- **Command** takes an argv array and an explicit working directory. Never a shell string, so quoting and operator-precedence bugs are structurally impossible rather than merely discouraged.
+- It requires **operator capability and the workspace claim**, and is withheld from managed runs, which could otherwise bypass the self-dispatch guard through the CLI.
+- A client without the claim does not receive command at all. The restriction is **not** an allowlist over argv: a filtered command surface leaks through `bash -c`, `env`, `xargs`, `make`, interpreter `-c` flags, and version-control hooks, so the boundary is whether the operation exists for that caller, not which binaries it may name.
+- **The advertised per-tool surface is unchanged.** Clients keep native tool selection, call-time argument validation, and per-tool audit attribution. Routine work continues to be attributed by tool name; only genuinely arbitrary execution degrades to an argv.
 
-Replacing the advertised surface with generic enumerate and invoke-by-name
-operations is deliberately **not** decided here. It remains open, and the cost of
-keeping it open is one additional path to the same operations.
+Replacing the advertised surface with generic enumerate and invoke-by-name operations is deliberately **not** decided here. It remains open, and the cost of keeping it open is one additional path to the same operations.
 
 ### Consequences
 
-- The orchestrator stops dispatching a full worker run to answer questions a single
-  command answers, and new CLI capability is reachable the moment it ships rather
-  than after a schema is mirrored.
-- Per-tool audit attribution is preserved for everything except command itself,
-  which is the narrowest possible degradation of provenance.
-- Nothing is foreclosed. The advertised definitions are generated from the registry,
-  so removing them later is a revert rather than a rebuild — that, not a
-  measurement, is what makes this reversible.
-- **Cost:** for a claim-holding client, capability filtering above command is
-  advisory — it can invoke the CLI and reach any governed operation. Requiring both
-  operator capability and the claim, and withholding it from managed runs, bounds
-  who that applies to; it does not make it untrue.
-- **Cost:** audit granularity degrades for command calls specifically. An argv is
-  not a tool name, and workspace correlation becomes conventional rather than
-  structural.
-- **Cost:** two paths now reach the same operations — the advertised tool and the
-  CLI through command. That duplication is accepted deliberately rather than by
-  oversight.
-- **Cost:** deciding later whether the advertised surface earns its place requires
-  evidence that no current endpoint produces. `/metrics/tools` is an ungrouped
-  invocation count with no caller dimension; the usable cut is over audit events,
-  excluding rows carrying a job-run or activity id so that engine and worker traffic
-  does not swamp the orchestrator's. Until someone builds that cut, retaining the
-  surface is deferral, not measurement, and this record should not pretend
-  otherwise.
-
-**Unaffected by the v1 ownership model.** The workspace claim this decision gates on
-is [ADR-0352], which is retained and orthogonal to ownership: ownership binds a
-workspace to a machine, the claim binds dispatch authority to an operator session.
+- The orchestrator stops dispatching a full worker run to answer questions a single command answers, and new CLI capability is reachable the moment it ships rather than after a schema is mirrored.
+- Per-tool audit attribution is preserved for everything except command itself, which is the narrowest possible degradation of provenance.
+- Nothing is foreclosed. The advertised definitions are generated from the registry, so removing them later is a revert rather than a rebuild — that, not a measurement, is what makes this reversible.
+- **Cost:** for a claim-holding client, capability filtering above command is advisory — it can invoke the CLI and reach any governed operation. Requiring both operator capability and the claim, and withholding it from managed runs, bounds who that applies to; it does not make it untrue.
+- **Cost:** audit granularity degrades for command calls specifically. An argv is not a tool name, and workspace correlation becomes conventional rather than structural.
+- **Cost:** two paths now reach the same operations — the advertised tool and the CLI through command. That duplication is accepted deliberately rather than by oversight.
+- **Cost:** deciding later whether the advertised surface earns its place requires evidence that no current endpoint produces. `/metrics/tools` is an ungrouped invocation count with no caller dimension; the usable cut is over audit events, excluding rows carrying a job-run or activity id so that engine and worker traffic does not swamp the orchestrator's. Until someone builds that cut, retaining the surface is deferral, not measurement, and this record should not pretend otherwise.
 
 ## ADR-0354 — Own the SSH local-forward tunnel once, at the leaf, shared by every loopback listener
 
-**Status:** Accepted · 2026-08 · [ORB-10710] moved the mechanism to `orbit-common` and made both surfaces consume it.
+**Status:** Accepted · 2026-08-10 05:07:27.341396Z · [ORB-10710]
+**Owner:** claude
+**Created:** 2026-08-10 05:07:22.238224Z
+**Last updated:** 2026-08-10 05:07:27.341396Z
+**Related features:** `mcp-bridge`, `remote-access`
+**Tags:** `mcp`, `transport`, `remote-access`, `architecture`
+**Paths:** `crates/orbit-common/src/utility/ssh_tunnel.rs`, `crates/orbit-dashboard/src/connect.rs`, `crates/orbit-remote/src/mcp/proxy.rs`
 
 ### Context
 
 [ADR-0350] commits to the SSH tunnel as *reusable infrastructure*: "anything that
-needs to reach the remote machine rides it rather than opening a second mechanism."
-At the point [ORB-10710] added the second consumer, that reuse was not structurally
-possible.
+needs to reach the remote machine rides it rather than opening a second
+mechanism." At the point [ORB-10710] added the second consumer, that reuse was not
+structurally possible.
 
-The only attach-or-spawn tunnel in the tree lived in `orbit-dashboard::connect`
-([ORB-10708]): pick a local port, open a bare `ssh -N` forward, probe through it,
-attach if something already answers, otherwise run a second `ssh` that both forwards
-and starts the remote process, and tear down on drop only what this invocation
-started. Roughly 150 lines, and every line of it is exactly what `orbit mcp serve
---mode remote` needs.
+The only attach-or-spawn tunnel in the tree lived in
+`orbit-dashboard::connect` ([ORB-10708]): pick a local port, open a bare `ssh -N`
+forward, probe through it, attach if something already answers, otherwise run a
+second `ssh` that both forwards and starts the remote process, and tear down on
+drop only what this invocation started. Roughly 150 lines, and every line of it
+is exactly what `orbit mcp serve --mode remote` needs.
 
 `orbit-dashboard` already depends on `orbit-remote`. The proxy lives in
-`orbit-remote`, so it cannot call into the dashboard: that edge runs the wrong way,
-and reversing it would invert the layering for a process-spawning helper.
+`orbit-remote`, so it cannot call into the dashboard: that edge runs the wrong
+way, and reversing it would invert the layering for a process-spawning helper.
 
 ### Decision
 
 Move the mechanism to `orbit-common::utility::ssh_tunnel` and make both surfaces
-consume it. The module owns the `SshTunnel` RAII child, teardown, port selection,
-forward-argument construction, `shell_quote`, `ssh` exit classification, readiness
-polling, and the attach-first `establish` sequence.
+consume it. The module owns the `SshTunnel` RAII child, teardown, port
+selection, forward-argument construction, `shell_quote`, `ssh` exit
+classification, readiness polling, and the attach-first `establish` sequence.
 
 Each consumer keeps only what is genuinely its own: the dashboard keeps its
 `/healthz` probe, its remote `orbit web serve` command line, and its browser and
-shutdown behavior; the proxy keeps its TCP readiness probe, its `orbit mcp serve
---listen` command line, and its checkout guard. A `TunnelSpec` carries the caller's
-remote command and its two timeouts, so the shared module never composes what runs
-on the far side.
+shutdown behavior; the proxy keeps its TCP readiness probe, its
+`orbit mcp serve --listen` command line, and its checkout guard. A `TunnelSpec`
+carries the caller's remote command and its two timeouts, so the shared module
+never composes what runs on the far side.
 
 The module is deliberately synchronous and `std`-only. A tunnel is a process
 lifetime, not a future; consumers own their own runtime, or have none.
 
 The leaf is the placement, not `orbit-exec` (whose process primitives are about
 sandboxed command execution under an `FsProfile`) and not a new crate. Both
-consumers already depend on `orbit-common`, so this adds **no new dependency edge**.
+consumers already depend on `orbit-common`, so this adds **no new dependency
+edge**.
 
 ### Consequences
 
 - The "one mechanism" property in [ADR-0350] is now structural rather than
   aspirational: a third loopback listener reaching for a tunnel finds one
-  implementation, and a fix to teardown or attach semantics lands for every consumer
-  at once.
-- Attach-first behavior — the part that makes a long-lived remote listener usable at
-  all — is inherited by the proxy rather than reimplemented, so the two surfaces
-  cannot drift on whether disconnecting kills a pre-existing remote process.
-- Generic behavior is tested once, in `orbit-common`; each consumer's tests shrink
-  to the part it actually owns.
-- **Cost:** `orbit-common` is a `stable`-tier leaf and now spawns processes. That is
-  a genuine widening of what "shared utility" means there, justified only because
-  the alternative placements are worse: duplicating ~150 lines across two crates
-  exceeds the duplication threshold, and an `orbit-remote -> orbit-dashboard` edge
-  inverts the layering.
-- **Cost:** the dashboard's timeout and `ssh`-exit messages are now composed from a
-  shared template plus a caller-supplied description, so their exact wording changed
-  slightly. Operator-facing strings are no longer owned end-to-end by the command
-  that emits them.
-- **Rejected:** duplicating the helpers into `orbit-remote` and filing a follow-up
-  consolidation task. It is the cheaper edit and the standard escape hatch for
-  cross-crate duplication, but it contradicts [ADR-0350]'s explicit "rather than
-  opening a second mechanism" the moment the second consumer exists — the exact
-  point at which consolidating is still cheap.
-- **Rejected:** a dedicated `orbit-tunnel` crate. Correct if a third consumer with
-  different transport needs appears; today it buys isolation nothing currently needs
-  at the cost of a crate in the graph.
+  implementation, and a fix to teardown or attach semantics lands for every
+  consumer at once.
+- Attach-first behavior — the part that makes a long-lived remote listener
+  usable at all — is inherited by the proxy rather than reimplemented, so the
+  two surfaces cannot drift on whether disconnecting kills a pre-existing
+  remote process.
+- Generic behavior is tested once, in `orbit-common`; each consumer's tests
+  shrink to the part it actually owns.
+- **Cost:** `orbit-common` is a `stable`-tier leaf and now spawns processes.
+  That is a genuine widening of what "shared utility" means there, justified
+  only because the alternative placements are worse: duplicating ~150 lines
+  across two crates exceeds the duplication threshold, and an
+  `orbit-remote -> orbit-dashboard` edge inverts the layering.
+- **Cost:** the dashboard's timeout and `ssh`-exit messages are now composed
+  from a shared template plus a caller-supplied description, so their exact
+  wording changed slightly. Operator-facing strings are no longer owned
+  end-to-end by the command that emits them.
+- **Rejected:** duplicating the helpers into `orbit-remote` and filing a
+  follow-up consolidation task. It is the cheaper edit and the standard escape
+  hatch for cross-crate duplication, but it contradicts [ADR-0350]'s explicit
+  "rather than opening a second mechanism" the moment the second consumer
+  exists — the exact point at which consolidating is still cheap.
+- **Rejected:** a dedicated `orbit-tunnel` crate. Correct if a third consumer
+  with different transport needs appears; today it buys isolation nothing
+  currently needs at the cost of a crate in the graph.
+
+## ADR-0347 — Serve MCP over a network transport from the long-running server process
+
+**Status:** Proposed · 2026-08-09 22:11:50.145689Z · [ORB-10690], [ORB-10691]
+**Owner:** human
+**Created:** 2026-08-09 22:10:49.216799Z
+**Last updated:** 2026-08-09 22:11:50.145689Z
+**Tags:** `mcp`, `transport`, `capability`, `architecture`
+**Paths:** `crates/orbit-mcp`, `crates/orbit-remote`, `crates/orbit-dashboard`
+
+### Context
+
+Orbit's MCP protocol handling is already transport-agnostic — the server handler performs no IO, and stdio is bound in a single function. But stdio is the only binding, so a client that is not a local child process cannot reach the MCP surface at all.
+
+Remote consumers therefore enter through the dashboard HTTP API instead. That API invokes runtime services directly, below both enforcement layers: MCP capability filtering and the governed-operation role check. Two consequences follow.
+
+First, operator-classified operations are simultaneously unreachable by their intended caller and unenforced on the path actually in use. The capability model is expressible but not load-bearing.
+
+Second, every remote consumer must re-implement orbit's response semantics — structured-content shaping, record projection, workspace resolution, error-text mapping, strict argument handling — in its own language against a hand-maintained schema fixture. That reimplementation has required a follow-up change for roughly every orbit MCP schema change, and has twice diverged behaviourally in ways a schema diff could not detect. The existing initialize-time contract digest already solves this class of problem for native clients, by hard-failing mismatched builds.
+
+### Decision
+
+Add a network MCP transport alongside stdio, and host it on the existing long-running server process.
+
+- One server instance is constructed per client session. Session state that today lives on the shared server struct and is mutated at initialize must not be shared across concurrent clients.
+- The endpoint stamps trusted-local session context and selects capability at serve time. Capability does not default to the most privileged value.
+- Hub/spoke remote-session semantics are out of scope: no new transport discriminant, no client-asserted caller identity.
+- Network authentication is the deployment's concern, not orbit's. Orbit keeps its loopback-only bind.
+
+Alternatives considered and rejected:
+
+- **A standalone MCP daemon.** Adds a second long-lived unit, a second bind/TLS story, and a second place workspace-registry refresh must happen, for no isolation benefit. The existing server already refreshes registry state per request boundary and already ships graceful shutdown and streaming.
+- **Extending hub/spoke over the network transport.** Hub trust derives from process provenance: the peer exists only because the caller was authenticated before the process was spawned. A shared network credential cannot bind an asserted caller identity, and at least one tool privilege is gated on the transport discriminant alone. Existing checks compare that discriminant by equality rather than exhaustively, so a new variant would compile cleanly while behaving wrong.
+- **Keeping the external proxy and adding a capability gate to the HTTP API.** Builds a second enforcement layer to compensate for a second access path, and leaves the semantic reimplementation and its drift in place.
+
+### Consequences
+
+- The capability model applies to remote callers for the first time. Operator-classified operations become reachable by their intended client without widening the ungated path.
+- Schema drift between orbit and natively-served remote clients becomes structurally impossible: contract negotiation at initialize hard-fails mismatched builds.
+- The reimplemented proxy layer becomes deletable rather than portable. Its recurring per-release maintenance disappears with it.
+- **Cost:** per-session construction is a correctness precondition, not an optimisation. Shipping the transport without it silently cross-contaminates workspace selection between concurrent clients — a failure that presents as wrong data rather than as an error.
+- **Cost:** version lockstep becomes load-bearing. A server older than its client fails negotiation outright rather than degrading, so server deployment and client upgrade must be coordinated from this point on.
+- **Cost:** the server process gains a second protocol surface, and its availability now matters to work dispatch rather than only to the UI. Its failure modes are correspondingly more expensive.
+- The ungated HTTP API remains a bypass. This decision reduces what depends on it; it does not close it. That remains separately owned.
 
 ## Task References
 

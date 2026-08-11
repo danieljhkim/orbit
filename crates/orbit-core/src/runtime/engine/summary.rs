@@ -1,9 +1,9 @@
 use chrono::{Duration, Utc};
 use orbit_common::types::OrbitError;
+use orbit_store::JobRunQuery;
 use orbit_store::scoreboard_summary::{
     ORCHESTRATION_SCHEMA_VERSION, OrchestrationSummary, ScoreboardInputs, ScoreboardWindow,
 };
-use orbit_store::{AdrListFilter, JobRunQuery};
 
 use crate::OrbitRuntime;
 
@@ -51,10 +51,6 @@ impl OrbitRuntime {
             .jobs()
             .list_job_runs_filtered(&JobRunQuery::default())?;
         let learnings = self.list_learnings(None)?;
-        let adrs = self
-            .stores()
-            .adrs()
-            .list_adrs_filtered(AdrListFilter::default())?;
         // Same cutoff `generate_summary_with_inputs` derives internally, applied
         // in SQL so the scoreboard never materializes the friction corpus
         // (ORB-10680).
@@ -71,7 +67,6 @@ impl OrbitRuntime {
                 job_runs: &job_runs,
                 top_tool_calls: &top_tool_calls,
                 learnings: &learnings,
-                adrs: &adrs,
                 friction_reported: &friction_reported,
                 now: Some(now),
                 window,

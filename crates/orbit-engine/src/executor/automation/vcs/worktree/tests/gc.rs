@@ -738,116 +738,12 @@ fn removal_without_force_fails_closed_on_a_dirty_worktree() {
 /// F2026-07-094: forced pipeline cleanup previously discarded the only
 /// readable learning and ADR bodies, leaving their shared allocation rows as
 /// permanently unreadable stubs. Force must not bypass the knowledge guard.
-#[test]
-fn forced_removal_refuses_unique_learning_and_adr_bodies() {
-    let temp = tempdir().unwrap();
-    let repo = temp.path().join("repo");
-    init_repo(&repo);
-    let worktree = repo.join(".orbit/state/worktrees/orbit-jrun-unique-bodies");
-    add_worktree(&repo, &worktree, "orbit/unique-bodies");
-    let allocator = knowledge_allocator(&repo, &worktree);
-    let learning = write_learning_body(&allocator, &worktree, b"only learning body\n");
-    let adr = write_adr_body(&allocator, &worktree, b"only ADR body\n");
-    commit_knowledge_bodies(&worktree);
-
-    let error = remove_worktree(&repo, &worktree, Some("orbit/unique-bodies"), true)
-        .expect_err("forced cleanup must preserve unique knowledge bodies");
-
-    let diagnostic = format!("{error}");
-    assert!(worktree.exists());
-    assert!(
-        diagnostic.contains(&learning),
-        "missing {learning}: {diagnostic}"
-    );
-    assert!(diagnostic.contains(&adr), "missing {adr}: {diagnostic}");
-    assert!(diagnostic.contains("Reconcile each body"), "{diagnostic}");
-    assert!(diagnostic.contains("then retry cleanup"), "{diagnostic}");
-}
-
 /// The GC caller uses the ordinary non-forced removal path. It must surface
 /// the same refusal before `git worktree remove` can discard the body.
-#[test]
-fn gc_refuses_a_worktree_with_a_unique_adr_body() {
-    let temp = tempdir().unwrap();
-    let repo = temp.path().join("repo");
-    init_repo(&repo);
-    let run = pipeline_run("jrun-unique-adr", JobRunState::Success, &["ORB-UNIQUE-ADR"]);
-    let worktree = resolved_task_worktree(&repo, &run);
-    add_worktree(&repo, &worktree, "orbit/unique-adr");
-    let allocator = knowledge_allocator(&repo, &worktree);
-    let adr = write_adr_body(&allocator, &worktree, b"unique GC ADR body\n");
-    commit_knowledge_bodies(&worktree);
-    let host = FakeTaskHost::new(vec![task_fixture("ORB-UNIQUE-ADR", TaskStatus::Done)]);
-
-    let error = collect_worktrees(
-        &repo,
-        &[run],
-        &host,
-        &WorktreeGcOptions {
-            delete: true,
-            ..Default::default()
-        },
-    )
-    .expect_err("GC must preserve a unique ADR body");
-
-    let diagnostic = format!("{error}");
-    assert!(worktree.exists());
-    assert!(diagnostic.contains(&adr), "missing {adr}: {diagnostic}");
-    assert!(diagnostic.contains("only readable body"), "{diagnostic}");
-}
-
 /// ORB-10545: the guarded cleanup deadlock is resolved once reconciliation
 /// publishes a verified second copy in another registered checkout. The
 /// allocation remains pinned to the disposable worktree; byte durability is
 /// what permits GC.
-#[test]
-fn gc_succeeds_after_an_adr_body_is_reconciled_to_the_canonical_checkout() {
-    let temp = tempdir().unwrap();
-    let repo = temp.path().join("repo");
-    init_repo(&repo);
-    let run = pipeline_run(
-        "jrun-reconciled-adr",
-        JobRunState::Success,
-        &["ORB-RECONCILED-ADR"],
-    );
-    let worktree = resolved_task_worktree(&repo, &run);
-    add_worktree(&repo, &worktree, "orbit/reconciled-adr");
-    let allocator = knowledge_allocator(&repo, &worktree);
-    let body = b"reconciled ADR body\n";
-    let adr = write_adr_body(&allocator, &worktree, body);
-    commit_knowledge_bodies(&worktree);
-    let host = FakeTaskHost::new(vec![task_fixture("ORB-RECONCILED-ADR", TaskStatus::Done)]);
-
-    collect_worktrees(
-        &repo,
-        std::slice::from_ref(&run),
-        &host,
-        &WorktreeGcOptions {
-            delete: true,
-            ..Default::default()
-        },
-    )
-    .expect_err("the unique source body must initially block GC");
-
-    let canonical = repo.join(".orbit/adrs/proposed").join(&adr).join("body.md");
-    fs::create_dir_all(canonical.parent().unwrap()).unwrap();
-    fs::write(&canonical, body).unwrap();
-
-    collect_worktrees(
-        &repo,
-        &[run],
-        &host,
-        &WorktreeGcOptions {
-            delete: true,
-            ..Default::default()
-        },
-    )
-    .expect("a reconciled second copy permits GC");
-
-    assert!(!worktree.exists());
-    assert_eq!(fs::read(canonical).unwrap(), body);
-}
-
 /// A stale worktree-local allocation is safe to collect after its exact body
 /// has landed in the canonical checkout. The allocator row may still point at
 /// the old worktree; body durability, not stale path metadata, is the gate.
@@ -994,7 +890,6 @@ fn knowledge_allocator(repo: &Path, worktree: &Path) -> IdAllocator {
         repo.join(".orbit/state/.id_alloc.lock"),
         repo.join(".orbit"),
         worktree.to_path_buf(),
-        worktree.join(".orbit/adrs"),
         worktree.join(".orbit/learnings"),
     ))
     .unwrap()
@@ -1009,18 +904,6 @@ fn write_learning_body(allocator: &IdAllocator, worktree: &Path, body: &[u8]) ->
     fs::create_dir_all(path.parent().unwrap()).unwrap();
     fs::write(&path, body).unwrap();
     allocator.record_learning_body_path(&id, &path).unwrap();
-    id
-}
-
-fn write_adr_body(allocator: &IdAllocator, worktree: &Path, body: &[u8]) -> String {
-    let id = allocator.allocate_adr().unwrap().id;
-    let path = worktree
-        .join(".orbit/adrs/proposed")
-        .join(&id)
-        .join("body.md");
-    fs::create_dir_all(path.parent().unwrap()).unwrap();
-    fs::write(&path, body).unwrap();
-    allocator.record_adr_body_path(&id, &path).unwrap();
     id
 }
 

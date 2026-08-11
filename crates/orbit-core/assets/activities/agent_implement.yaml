@@ -113,8 +113,6 @@ spec:
         include `diff` only when cheap and accurate.
   tools:
     - orbit.task.*
-    - orbit.adr.add
-    - orbit.adr.update
     - orbit.friction.*
     - orbit.search
     - orbit.learning.show

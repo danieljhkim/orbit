@@ -260,7 +260,7 @@ fn dashboard_guards_per_workspace_panels_in_aggregate_view() {
 fn dashboard_guards_remaining_panels_in_aggregate_view() {
     // ORB-00040: follow-up to ORB-00039. In the aggregate "All workspaces" view
     // the Audit tab (/api/audit, /api/diagnostics/denials), the Knowledge tab
-    // (/api/learnings, /api/adrs, /api/frictions) and the scoreboard window
+    // (/api/learnings, /api/frictions) and the scoreboard window
     // selector (/api/scoreboard?window=...) still fired per-workspace endpoints
     // that 400 and flipped conn-status to red. The isAggregateView() guard is
     // extended to all of them, sharing one predicate from common.js. Asserted
@@ -307,7 +307,7 @@ fn dashboard_guards_remaining_panels_in_aggregate_view() {
 
     // Knowledge tab: each subtab's fetch is guarded at the chokepoint, so the
     // auto-refresh, tab-activation and search-box entry points are all covered.
-    for body in ["learnings-body", "adrs-body", "frictions-body"] {
+    for body in ["learnings-body", "frictions-body"] {
         assert!(
             app.contains(&format!(r#"renderPanelPlaceholder("{body}")"#)),
             "knowledge {body} must show a placeholder in aggregate mode"
@@ -328,7 +328,7 @@ fn dashboard_guards_remaining_panels_in_aggregate_view() {
     // The guards read the live predicate before fetching (not a stale captured
     // flag), so switching to "All workspaces" after a concrete selection is safe.
     assert!(
-        app.matches("if (isAggregateView())").count() >= 3,
+        app.matches("if (isAggregateView())").count() >= 2,
         "each knowledge fetch must guard on the live aggregate predicate"
     );
     assert!(
@@ -345,8 +345,8 @@ fn dashboard_guards_diagnostics_and_detail_panels_in_aggregate_view() {
     // /errors, /friction and /implement_one all take the `Ws` extractor and 400
     // without a concrete workspace), so in aggregate mode the whole tab branch
     // of activeRefreshJobs is skipped and placeholders render instead. (2) The
-    // knowledge detail panels (learning-detail / adr-detail / friction-detail)
-    // previously kept stale content with live supersede/accept/resolve/patch
+    // knowledge detail panels (learning-detail / friction-detail) previously
+    // kept stale content with live supersede/resolve/patch
     // buttons after switching to "All workspaces"; they now show the shared
     // placeholder too. Asserted against the embedded asset sources (the
     // dashboard has no JS test runner).
@@ -441,7 +441,7 @@ fn dashboard_guards_diagnostics_and_detail_panels_in_aggregate_view() {
         app.contains("renderPanelPlaceholder(`${prefix}-detail`)"),
         "the helper must target the <prefix>-detail panels"
     );
-    for prefix in ["learning", "adr", "friction"] {
+    for prefix in ["learning", "friction"] {
         assert!(
             app.contains(&format!(r#"renderKnowledgeDetailPlaceholder("{prefix}")"#)),
             "the {prefix} list guard must also clear the stale {prefix}-detail panel"
@@ -770,19 +770,17 @@ fn dashboard_knowledge_detail_pane_is_sticky_and_internally_scrollable() {
     let css = include_str!("../../assets/dashboard/dashboard.css");
 
     let sticky_at = css
-        .find(
-            "#learning-detail-panel,\n      #adr-detail-panel,\n      #friction-detail-panel {\n        position: sticky;",
-        )
+        .find("#learning-detail-panel,\n      #friction-detail-panel {\n        position: sticky;")
         .expect("the knowledge detail panels must be sticky");
     assert!(
         css[sticky_at..].starts_with(
-            "#learning-detail-panel,\n      #adr-detail-panel,\n      #friction-detail-panel {\n        position: sticky;\n        top: 170px;\n        align-self: start;\n        max-height: calc(100vh - 194px);",
+            "#learning-detail-panel,\n      #friction-detail-panel {\n        position: sticky;\n        top: 170px;\n        align-self: start;\n        max-height: calc(100vh - 194px);",
         ),
         "the pane must pin below the chrome and stay inside the viewport"
     );
     assert!(
         css.contains(
-            "#learning-detail-panel > .body,\n      #adr-detail-panel > .body,\n      #friction-detail-panel > .body {\n        overflow-y: auto;",
+            "#learning-detail-panel > .body,\n      #friction-detail-panel > .body {\n        overflow-y: auto;",
         ),
         "detail content taller than the pane must scroll inside it, not be clipped"
     );

@@ -922,12 +922,14 @@ fn workspace_init_under_home_with_global_orbit_creates_repo_orbit() {
     result.expect("workspace init");
     assert!(workspace.join(".orbit").join("state").is_dir());
     assert!(workspace.join(".orbit").join("knowledge").is_dir());
+    assert!(!workspace.join(".orbit").join("adrs").exists());
     assert!(!home.path().join(".orbit").join("state").exists());
     assert!(!home.path().join(".orbit").join("knowledge").exists());
     assert_eq!(
         std::fs::read_to_string(workspace.join(".gitignore")).expect("read .gitignore"),
         orbit_gitignore_block()
     );
+    assert!(!orbit_gitignore_block().contains(".orbit/adrs"));
 }
 
 #[test]
@@ -1009,14 +1011,9 @@ fn workspace_init_replaces_legacy_bare_orbit_gitignore_line_with_managed_block()
 }
 
 #[test]
-fn workspace_init_retires_older_managed_block_lines_for_published_adr_partitions() {
-    // ORB-10669 published the proposed partition (amending ADR-0302, which had
-    // already published superseded). A checkout carrying the older block still
-    // has those two ignore lines; because `!.orbit/adrs/` re-includes only the
-    // `adrs` directory itself, a surviving `.orbit/adrs/proposed/` would remain
-    // the last pattern matching that subdirectory and would keep the partition
-    // ignored even with the new block appended below it. Re-init must retire
-    // them.
+fn workspace_init_retires_adr_store_gitignore_lines() {
+    // Workspaces initialized before ORB-10726 may carry ADR partition rules.
+    // Re-init must remove every retired line.
     let workspace = tempdir().expect("workspace tempdir");
     let home = tempdir().expect("home tempdir");
     std::fs::create_dir_all(workspace.path().join(".git")).expect("create .git");
@@ -1069,10 +1066,15 @@ fn workspace_init_retires_older_managed_block_lines_for_published_adr_partitions
     let converged =
         std::fs::read_to_string(workspace.path().join(".gitignore")).expect("read .gitignore");
     assert_eq!(converged, expected, "re-init must converge on one block");
-    for retired in [".orbit/adrs/proposed/", ".orbit/adrs/superseded/"] {
+    for retired in [
+        "!.orbit/adrs/",
+        ".orbit/adrs/index.sqlite*",
+        ".orbit/adrs/proposed/",
+        ".orbit/adrs/superseded/",
+    ] {
         assert!(
             !converged.lines().any(|line| line.trim() == retired),
-            "published partition `{retired}` must not be ignored"
+            "retired ADR store line `{retired}` must be absent"
         );
     }
     assert_eq!(

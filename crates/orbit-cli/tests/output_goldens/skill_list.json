@@ -6,19 +6,19 @@
     "path": "<HOME>/.orbit/skills/orbit"
   },
   {
-    "content_hash": "bcdae5ba3240e3cb44fc9389030af1114a3f25755a54b0e769f895b9ae0614fb",
+    "content_hash": "82e3893b5dcbf804477c7d001f70e71787fadee73648a9e4a4cad90338ce4680",
     "id": "orbit-knowledge",
     "meta": null,
     "path": "<HOME>/.orbit/skills/orbit-knowledge"
   },
   {
-    "content_hash": "1798743682c18be8833915f8294389c3d082207fc2899b87e0ce022eafad9941",
+    "content_hash": "f1fe6842707937dbeca4ebf96a21e6e25ff80b9d58dc8707d127700f5b117bd3",
     "id": "orbit-search",
     "meta": null,
     "path": "<HOME>/.orbit/skills/orbit-search"
   },
   {
-    "content_hash": "8e2a4d01c8f156db928cac77778292b2bfb811acbe9569a171cb286bf0afaf12",
+    "content_hash": "b5c235c5d57e584ca32d987bf3d2049674a517a210c18e65f1b89a50afa53068",
     "id": "orbit-task",
     "meta": null,
     "path": "<HOME>/.orbit/skills/orbit-task"

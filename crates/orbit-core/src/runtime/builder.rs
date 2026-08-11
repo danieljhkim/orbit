@@ -11,8 +11,8 @@ use orbit_store::{
     AuditEventInsertParams, IdAllocator, IdAllocatorConfig, LearningIdMigrationReport, Store,
     audit_event_store_sqlite, global_executor_def_store, global_policy_def_store,
     layered_policy_def_store, task_reservation_store_sqlite, tool_store_sqlite,
-    workspace_adr_backends, workspace_job_run_store, workspace_learning_backend,
-    workspace_policy_def_store, workspace_task_backends,
+    workspace_job_run_store, workspace_learning_backend, workspace_policy_def_store,
+    workspace_task_backends,
 };
 
 use orbit_common::types::{
@@ -86,16 +86,13 @@ pub(crate) fn build_context_from_roots(
         paths.state_dir.join(".id_alloc.lock"),
         paths.orbit_dir.clone(),
         worktree_root_from_local_root(local_root),
-        persistence.adr_dir.clone(),
         persistence.learning_dir.clone(),
     ))?;
     let learning_id_migration = id_allocator.migrate_learning_ids()?;
     if !learning_id_migration.is_empty() {
         record_learning_id_migration_audit(&store, &paths, &learning_id_migration)?;
     }
-    let local_adr_dir = paths.local_dir.join("adrs");
     let local_learning_dir = paths.local_dir.join("learnings");
-    let adr_store = workspace_adr_backends(local_adr_dir, store.clone(), id_allocator.clone());
     // Scope the shared learning envelope index to this workspace's stable
     // registered id (the same id used for job runs / v2 audit), so a
     // multi-workspace sweep over the host-global database can't read, truncate,
@@ -159,7 +156,6 @@ pub(crate) fn build_context_from_roots(
             task_backends.document,
             task_backends.history,
             task_backends.artifact,
-            adr_store,
             learning_store,
             semantic_vector_store,
             semantic_worker,
