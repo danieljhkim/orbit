@@ -143,6 +143,160 @@ fn broker_checkoutless_task_call_uses_stable_id_and_one_trusted_audit() {
 }
 
 #[test]
+fn broker_merged_search_tags_duplicate_ids_with_their_workspace() {
+    use std::process::Command;
+
+    use chrono::Utc;
+    use orbit_common::types::{
+        LearningScope, Workspace, WorkspaceCheckout, WorkspaceRegistry, WorkspaceStatus,
+    };
+    use orbit_store::LearningCreateParams;
+    use orbit_store::sqlite::task_registry::{WorkspaceConfig, write_workspace_config};
+
+    let root = tempfile::tempdir().expect("test root");
+    let global_root = root.path().join("global");
+    std::fs::create_dir_all(&global_root).expect("global root");
+    let mut workspaces = Vec::new();
+    let mut checkouts = Vec::new();
+    let mut learning_ids = Vec::new();
+
+    for id in ["alpha", "beta"] {
+        let repo_root = root.path().join(id);
+        let initialized = Command::new("git")
+            .args(["init", "--quiet"])
+            .current_dir(root.path())
+            .arg(&repo_root)
+            .status()
+            .expect("initialize workspace repository");
+        assert!(initialized.success(), "git init failed for {id}");
+        let orbit_dir = repo_root.join(".orbit");
+        std::fs::create_dir_all(&orbit_dir).expect("orbit directory");
+        write_workspace_config(
+            &orbit_dir,
+            &WorkspaceConfig {
+                schema_version: 1,
+                workspace_id: format!("ws_{id}"),
+            },
+        )
+        .expect("workspace config");
+        let workspace = Workspace {
+            id: id.to_string(),
+            name: id.to_string(),
+            owner_machine_id: None,
+            git_remote: None,
+            ship_mode: None,
+            base_branch: "agent-main".to_string(),
+            status: WorkspaceStatus::Active,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        };
+        let checkout = WorkspaceCheckout::owner(id.to_string(), repo_root, orbit_dir);
+        let runtime = crate::runtime::RemoteRuntimeFactory::open_registered_checkout(
+            &global_root,
+            &workspace,
+            &checkout,
+        )
+        .expect("workspace runtime");
+        let learning = runtime
+            .create_learning(LearningCreateParams {
+                summary: "shared merged search needle".to_string(),
+                scope: LearningScope::default(),
+                body: "same learning ID in each workspace".to_string(),
+                evidence: Vec::new(),
+                created_by: Some("codex".to_string()),
+                priority: None,
+            })
+            .expect("seed learning");
+        learning_ids.push(learning.id);
+        workspaces.push(workspace);
+        checkouts.push(checkout);
+    }
+    assert_eq!(
+        learning_ids[0], learning_ids[1],
+        "fixture must duplicate the learning ID"
+    );
+    crate::workspace_registry::save_registry_to(
+        &WorkspaceRegistry {
+            workspaces,
+            checkouts,
+            ..Default::default()
+        },
+        &crate::workspace_registry::registry_path_for(&global_root),
+    )
+    .expect("workspace registry");
+
+    let host = BrokerMcpHost::new(global_root);
+    let merged = host
+        .call_tool(
+            "orbit.search",
+            json!({ "query": "shared merged search needle", "all": true }),
+            ToolSessionContext::trusted_local(
+                None,
+                Some("hm_local".to_string()),
+                Some("local".to_string()),
+            ),
+        )
+        .expect("merged search");
+    let rows = merged["results"].as_array().expect("merged rows");
+    let matching = rows
+        .iter()
+        .filter(|row| row["id"].as_str() == Some(learning_ids[0].as_str()))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        matching.len(),
+        2,
+        "both duplicate learning IDs must be returned"
+    );
+    let result_workspaces = matching
+        .iter()
+        .map(|row| row["workspace"].as_str().expect("workspace field"))
+        .collect::<BTreeSet<_>>();
+    assert_eq!(result_workspaces, BTreeSet::from(["alpha", "beta"]));
+    assert!(
+        rows.iter().all(|row| row["workspace"].is_string()),
+        "every merged result row must identify its owning workspace: {merged}"
+    );
+    for workspace in ["alpha", "beta"] {
+        let shown = host
+            .call_tool(
+                "orbit.learning.show",
+                json!({ "id": learning_ids[0], "workspace": workspace }),
+                ToolSessionContext::trusted_local(
+                    None,
+                    Some("hm_local".to_string()),
+                    Some("local".to_string()),
+                ),
+            )
+            .expect("merged row remains addressable through its workspace");
+        assert_eq!(shown["id"], learning_ids[0]);
+    }
+
+    let scoped = host
+        .call_tool(
+            "orbit.search",
+            json!({
+                "query": "shared merged search needle",
+                "all": true,
+                "workspace": "alpha"
+            }),
+            ToolSessionContext::trusted_local(
+                None,
+                Some("hm_local".to_string()),
+                Some("local".to_string()),
+            ),
+        )
+        .expect("workspace-scoped search");
+    assert!(
+        scoped["results"]
+            .as_array()
+            .expect("scoped rows")
+            .iter()
+            .all(|row| row.get("workspace").is_none()),
+        "workspace-scoped search shape must stay unchanged: {scoped}"
+    );
+}
+
+#[test]
 fn broker_with_context_requires_local_checkout_before_dispatch() {
     use chrono::Utc;
     use orbit_common::types::{Workspace, WorkspaceRegistry, WorkspaceStatus};

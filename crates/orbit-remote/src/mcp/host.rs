@@ -30,7 +30,7 @@ use orbit_core::{
 };
 use orbit_mcp::McpHost;
 use serde::Deserialize;
-use serde_json::Value;
+use serde_json::{Value, json};
 
 use crate::runtime::RemoteRuntimeFactory;
 use crate::{HostIdentityState, HostMode, inspect_host_identity};
@@ -609,6 +609,58 @@ impl BrokerMcpHost {
         }
     }
 
+    /// Merge an unscoped `orbit.search` request over every active local
+    /// workspace. A merged row carries the logical workspace selector needed
+    /// to feed its otherwise workspace-local ID back into a follow-up call.
+    fn merged_search(&self, input: Value) -> Result<Value, OrbitError> {
+        let registry_path = crate::workspace_registry::registry_path_for(&self.global_root);
+        let registry = crate::workspace_registry::load_registry_from(&registry_path)?;
+        let mut results = Vec::new();
+        let mut notes = Vec::new();
+        let mut mode = None;
+        let mut kind = None;
+
+        for (workspace, checkout) in crate::workspace_registry::local_workspaces(&registry) {
+            if workspace.status != WorkspaceStatus::Active {
+                continue;
+            }
+            let binding = self.resolve_exact_checkout(&checkout.repo_root)?;
+            let runtime = self.runtime_for(&binding)?;
+            let response = runtime.run_tool("orbit.search", input.clone())?;
+            let response = response.as_object().ok_or_else(|| {
+                OrbitError::Execution(
+                    "serialize merged search response: expected object".to_string(),
+                )
+            })?;
+            mode.get_or_insert_with(|| response.get("mode").cloned().unwrap_or(Value::Null));
+            kind.get_or_insert_with(|| response.get("kind").cloned().unwrap_or(Value::Null));
+
+            if let Some(workspace_notes) = response.get("notes").and_then(Value::as_array) {
+                notes.extend(workspace_notes.iter().cloned());
+            }
+            if let Some(rows) = response.get("results").and_then(Value::as_array) {
+                for row in rows {
+                    let mut row = row.clone();
+                    let object = row.as_object_mut().ok_or_else(|| {
+                        OrbitError::Execution(
+                            "serialize merged search response: result row is not an object"
+                                .to_string(),
+                        )
+                    })?;
+                    object.insert("workspace".to_string(), Value::String(workspace.id.clone()));
+                    results.push(row);
+                }
+            }
+        }
+
+        Ok(json!({
+            "mode": mode.unwrap_or_else(|| Value::String("lexical".to_string())),
+            "kind": kind.unwrap_or_else(|| input.get("kind").cloned().unwrap_or_else(|| Value::String("all".to_string()))),
+            "results": results,
+            "notes": notes,
+        }))
+    }
+
     fn resolved_call(
         &self,
         name: &str,
@@ -627,6 +679,19 @@ impl BrokerMcpHost {
                 return self.remote_hub_call(name, input, context, None);
             }
             let result = self.global_call(name);
+            self.record_coordination_outcome(name, &context, &result);
+            return result;
+        }
+
+        // `all: true` without a workspace selector is the broker's explicit
+        // cross-workspace search mode. Supplying a workspace (directly or in
+        // session metadata) retains the established per-workspace meaning of
+        // `all` and its unchanged response shape.
+        if name == "orbit.search"
+            && input.get("all").and_then(Value::as_bool) == Some(true)
+            && Self::selector(&input, &context).is_none()
+        {
+            let result = self.merged_search(input);
             self.record_coordination_outcome(name, &context, &result);
             return result;
         }
