@@ -1,3 +1,4 @@
+mod clock;
 mod command;
 mod init;
 mod list;

@@ -397,6 +397,7 @@ impl Commands {
                     RoutineSubcommand::Show(_) => "show",
                     RoutineSubcommand::Pause(_) => "pause",
                     RoutineSubcommand::Resume(_) => "resume",
+                    RoutineSubcommand::Clock(_) => "clock",
                     RoutineSubcommand::Init(_) => "init",
                 };
                 CommandOperation::new(

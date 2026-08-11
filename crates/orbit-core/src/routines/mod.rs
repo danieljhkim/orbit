@@ -21,7 +21,10 @@ pub mod status;
 pub mod sweep;
 pub mod validation;
 
-pub use clock::{ClockInstallReport, install_clock};
+pub use clock::{
+    ClockInstallReport, ClockSettings, ClockStatus, DEFAULT_CLOCK_CADENCE_SECONDS, clock_status,
+    install_clock, load_clock_settings, save_clock_settings, set_clock_cadence, set_clock_enabled,
+};
 pub use due::{DueDecision, due_decision, parse_cron};
 pub use loader::{
     DiscoveredWorkspaces, LoadedRoutine, RoutineCollection, RoutineLoadError, RoutineOrigin,
