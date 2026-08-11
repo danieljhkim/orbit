@@ -1,3 +1,10 @@
+---
+type: design
+summary: "Spec: Filesystem Profile Resolution"
+tags: ["policy-sandbox"]
+last_validated: 2026-08-11
+---
+
 # Spec: Filesystem Profile Resolution
 
 `PolicyDef::effective_profile` and `PolicyDef::check_path` are the load-bearing functions for every filesystem allow/deny decision in Orbit. This spec names the invariants those functions must preserve and the failure modes callers must handle.

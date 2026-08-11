@@ -8,13 +8,12 @@ status: Draft
 feature: policy-sandbox
 doc_role: decisions
 tags: ["policy-sandbox"]
+last_validated: 2026-08-11
 ---
 
 # Policy & Sandboxing — Decisions
 
-This is the append-only ADR log for Policy & Sandboxing. Entries are ordered by ADR number. New entries follow the template in [../CONVENTIONS.md](../CONVENTIONS.md) and cite the task that made the decision real.
-
-Global ADR pointers are retrieved with `orbit tool run orbit.adr.show --input '{"id":"ADR-NNNN"}'`; the artifact store is authoritative for their full Context, Decision, and Consequences.
+This file is the authoritative record for the feature's decision bodies. Historical references to global ADR artifacts remain only as provenance; new entries follow the template in [../CONVENTIONS.md](../CONVENTIONS.md) and cite the task that made the decision real.
 
 ---
 
