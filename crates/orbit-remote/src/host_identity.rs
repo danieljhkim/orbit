@@ -1,11 +1,11 @@
-//! Host identity for this Orbit machine [ORB-10247].
+//! Host identity for this Orbit machine [ORB-10247, ORB-10721].
 //!
 //! `~/.orbit/host.toml` carries the one genuinely host-local datum: a versioned
 //! [`HostIdentity`] with a stable, generated `machine_id`, an operator-chosen
-//! `host_id` display name, and an operating `mode`. First-time creation lives in
-//! global `orbit init` (implemented by `orbit-core`); a legacy file that carried
-//! only `host_id` (the routines-v1 scheduling pin) is migrated in place, once,
-//! preserving its `host_id` and generating a `machine_id`.
+//! `host_id` display name, and an immutable task namespace. First-time creation
+//! lives in global `orbit init` (implemented by `orbit-core`); legacy identities
+//! are migrated in place once, preserving their existing machine identity and
+//! seeding the historical `ORB` task namespace.
 //!
 //! Loading is strict: after migration an absent, malformed, incomplete, blank,
 //! or future-schema file is a hard error with an actionable message — there is
@@ -25,11 +25,14 @@ pub const HOST_TOML_FILE: &str = "host.toml";
 
 /// Current on-disk schema version for [`HostIdentity`]. A file whose
 /// `schema_version` exceeds this fails closed (see [`inspect_host_identity`]).
-pub const HOST_IDENTITY_SCHEMA_VERSION: u32 = 1;
+pub const HOST_IDENTITY_SCHEMA_VERSION: u32 = 2;
 
 const MACHINE_ID_PREFIX: &str = "hm_";
+const LEGACY_TASK_PREFIX: &str = "ORB";
+const RESERVED_TASK_PREFIXES: [&str; 4] = ["ORB", "ADR", "L", "F"];
 
-/// Operating mode of this Orbit host.
+/// Legacy operating mode retained temporarily for callers being replaced by
+/// the per-workspace ownership model. It is not part of schema-v2 host.toml.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HostMode {
     /// Self-contained host (the standalone default; no registry/hub role).
@@ -41,7 +44,7 @@ pub enum HostMode {
 }
 
 impl HostMode {
-    /// The persisted string form (matches the `mode` values in `host.toml`).
+    /// The legacy string form used by compatibility callers.
     pub fn as_str(self) -> &'static str {
         match self {
             HostMode::Standalone => "standalone",
@@ -50,7 +53,7 @@ impl HostMode {
         }
     }
 
-    /// Parse an external (CLI / file) mode string, failing closed on anything
+    /// Parse a legacy external mode string, failing closed on anything
     /// outside the fixed vocabulary.
     pub fn parse(value: &str) -> Result<Self, OrbitError> {
         match value.trim() {
@@ -81,7 +84,12 @@ pub struct HostIdentity {
     /// Operator-chosen, renameable display name; matched against routine
     /// `hosts:` pins.
     pub host_id: String,
-    /// Host operating mode.
+    /// Immutable namespace for task ids minted by this machine.
+    pub task_prefix: String,
+    /// Transitional compatibility for callers removed by the ownership-model
+    /// follow-up. Schema v2 does not persist a machine-level mode; identities
+    /// loaded from disk therefore use `Standalone` until those callers are
+    /// replaced with per-workspace ownership checks.
     pub mode: HostMode,
 }
 
@@ -92,20 +100,45 @@ impl HostIdentity {
     /// a quote, backslash, or control character cannot corrupt the file.
     fn to_toml(&self) -> String {
         format!(
-            "# Machine identity for this Orbit host [ORB-10247]. Created by\n\
+            "# Machine identity for this Orbit host [ORB-10721]. Created by\n\
              # `orbit init`; `machine_id` is generated once and never edited.\n\
              # `host_id` is the operator-chosen display name matched against\n\
-             # routine `hosts:` pins.\n\
+             # routine `hosts:` pins; `task_prefix` is chosen once.\n\
              schema_version = {}\n\
              machine_id = \"{}\"\n\
              host_id = \"{}\"\n\
-             mode = \"{}\"\n",
+             task_prefix = \"{}\"\n",
             self.schema_version,
             toml_escape_basic(&self.machine_id),
             toml_escape_basic(&self.host_id),
-            self.mode.as_str(),
+            toml_escape_basic(&self.task_prefix),
         )
     }
+}
+
+/// Validate an operator's fresh task-prefix choice.
+///
+/// Persisted migration prefix `ORB` is intentionally accepted by the strict
+/// loader, but cannot be selected for a new machine.
+pub fn validate_new_task_prefix(value: &str) -> Result<String, OrbitError> {
+    if RESERVED_TASK_PREFIXES.contains(&value) {
+        return Err(OrbitError::InvalidInput(format!(
+            "task prefix '{value}' is reserved; choose 2-5 uppercase ASCII letters other than ORB, ADR, L, or F"
+        )));
+    }
+    if !(2..=5).contains(&value.len()) || !value.bytes().all(|byte| byte.is_ascii_uppercase()) {
+        return Err(OrbitError::InvalidInput(
+            "task prefix must be 2-5 uppercase ASCII letters".to_string(),
+        ));
+    }
+    Ok(value.to_string())
+}
+
+fn validate_stored_task_prefix(value: &str) -> Result<String, OrbitError> {
+    if value == LEGACY_TASK_PREFIX {
+        return Ok(value.to_string());
+    }
+    validate_new_task_prefix(value)
 }
 
 /// Escape a value for embedding inside a TOML basic (double-quoted) string,
@@ -137,10 +170,13 @@ fn toml_escape_basic(value: &str) -> String {
 pub enum HostIdentityState {
     /// A complete, current-schema identity.
     Present(HostIdentity),
-    /// A legacy pre-migration file carrying only `host_id`.
+    /// A legacy pre-migration identity (host-id-only or schema v1).
     Legacy {
         /// The preserved, non-blank legacy `host_id`.
         host_id: String,
+        /// A schema-v1 machine id, preserved when present. The oldest
+        /// host-id-only format has none and receives one during migration.
+        machine_id: Option<String>,
     },
     /// No `host.toml` exists yet.
     Absent,
@@ -151,7 +187,7 @@ impl HostIdentityState {
     pub fn host_id(&self) -> Option<&str> {
         match self {
             HostIdentityState::Present(identity) => Some(&identity.host_id),
-            HostIdentityState::Legacy { host_id } => Some(host_id),
+            HostIdentityState::Legacy { host_id, .. } => Some(host_id),
             HostIdentityState::Absent => None,
         }
     }
@@ -162,7 +198,7 @@ impl HostIdentityState {
 pub enum HostIdentityOutcome {
     /// A fresh identity was created from operator input.
     Created(HostIdentity),
-    /// A legacy `host_id`-only file was migrated to the current schema.
+    /// A legacy identity was migrated to the current schema.
     Migrated(HostIdentity),
     /// A complete current-schema identity already existed; nothing was written.
     Unchanged(HostIdentity),
@@ -184,8 +220,8 @@ impl HostIdentityOutcome {
 pub struct NewHostIdentity {
     /// Operator-chosen display name.
     pub host_id: String,
-    /// Operating mode.
-    pub mode: HostMode,
+    /// Operator-chosen task namespace.
+    pub task_prefix: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -193,7 +229,9 @@ struct RawHostToml {
     schema_version: Option<u32>,
     machine_id: Option<String>,
     host_id: Option<String>,
-    mode: Option<String>,
+    task_prefix: Option<String>,
+    #[serde(rename = "mode")]
+    _mode: Option<String>,
 }
 
 fn host_toml_path(global_root: &Path) -> PathBuf {
@@ -227,17 +265,44 @@ pub fn inspect_host_identity(global_root: &Path) -> Result<HostIdentityState, Or
     })?;
 
     match parsed.schema_version {
-        None => {
-            // Legacy files carried only `host_id`. A present, non-blank
-            // `host_id` migrates; anything else is unusable.
-            match non_blank(&parsed.host_id) {
-                Some(host_id) => Ok(HostIdentityState::Legacy { host_id }),
-                None => Err(OrbitError::InvalidInput(format!(
-                    "host identity '{}' is incomplete: no schema_version and no host_id; \
-                     run `orbit init` to create one",
-                    path.display()
-                ))),
+        None => match non_blank(&parsed.host_id) {
+            Some(host_id) => {
+                let machine_id =
+                    validated_optional_machine_id(&path, parsed.machine_id.as_deref())?;
+                Ok(HostIdentityState::Legacy {
+                    host_id,
+                    machine_id,
+                })
             }
+            None => Err(OrbitError::InvalidInput(format!(
+                "host identity '{}' is incomplete: no schema_version and no host_id; \
+                 run `orbit init` to create one",
+                path.display()
+            ))),
+        },
+        Some(1) => {
+            let machine_id = parsed.machine_id.as_deref().ok_or_else(|| {
+                OrbitError::InvalidInput(format!(
+                    "host identity '{}' is incomplete: missing or blank machine_id",
+                    path.display()
+                ))
+            })?;
+            validate_machine_id(machine_id).map_err(|error| {
+                OrbitError::InvalidInput(format!(
+                    "host identity '{}' has invalid machine_id: {error}",
+                    path.display()
+                ))
+            })?;
+            let host_id = non_blank(&parsed.host_id).ok_or_else(|| {
+                OrbitError::InvalidInput(format!(
+                    "host identity '{}' is incomplete: missing or blank host_id",
+                    path.display()
+                ))
+            })?;
+            Ok(HostIdentityState::Legacy {
+                host_id,
+                machine_id: Some(machine_id.to_string()),
+            })
         }
         Some(version) if version == HOST_IDENTITY_SCHEMA_VERSION => {
             let machine_id = parsed.machine_id.as_deref().ok_or_else(|| {
@@ -258,18 +323,24 @@ pub fn inspect_host_identity(global_root: &Path) -> Result<HostIdentityState, Or
                     path.display()
                 ))
             })?;
-            let mode = non_blank(&parsed.mode).ok_or_else(|| {
+            let task_prefix = parsed.task_prefix.as_deref().ok_or_else(|| {
                 OrbitError::InvalidInput(format!(
-                    "host identity '{}' is incomplete: missing or blank mode",
+                    "host identity '{}' is incomplete: missing or blank task_prefix",
                     path.display()
                 ))
             })?;
-            let mode = HostMode::parse(&mode)?;
+            let task_prefix = validate_stored_task_prefix(task_prefix).map_err(|error| {
+                OrbitError::InvalidInput(format!(
+                    "host identity '{}' has invalid task_prefix: {error}",
+                    path.display()
+                ))
+            })?;
             Ok(HostIdentityState::Present(HostIdentity {
                 schema_version: version,
                 machine_id: machine_id.to_string(),
                 host_id,
-                mode,
+                task_prefix,
+                mode: HostMode::Standalone,
             }))
         }
         Some(version) if version > HOST_IDENTITY_SCHEMA_VERSION => {
@@ -285,6 +356,22 @@ pub fn inspect_host_identity(global_root: &Path) -> Result<HostIdentityState, Or
             path.display()
         ))),
     }
+}
+
+fn validated_optional_machine_id(
+    path: &Path,
+    machine_id: Option<&str>,
+) -> Result<Option<String>, OrbitError> {
+    let Some(machine_id) = machine_id else {
+        return Ok(None);
+    };
+    validate_machine_id(machine_id).map_err(|error| {
+        OrbitError::InvalidInput(format!(
+            "host identity '{}' has invalid machine_id: {error}",
+            path.display()
+        ))
+    })?;
+    Ok(Some(machine_id.to_string()))
 }
 
 /// Strictly load a complete, current-schema identity. Absent and legacy files
@@ -307,8 +394,8 @@ pub fn load_host_identity(global_root: &Path) -> Result<HostIdentity, OrbitError
 
 /// Ensure a complete, current-schema identity exists, creating or migrating as
 /// needed and returning what happened. `new` supplies the operator's host name
-/// and mode and is invoked **only** when the identity is absent, so callers can
-/// defer prompting until a fresh create is actually required.
+/// and task prefix and is invoked **only** when the identity is absent, so
+/// callers can defer prompting until a fresh create is actually required.
 ///
 /// Idempotent: a present identity is returned `Unchanged` with no write. A
 /// malformed or future-schema file is never overwritten — the error propagates.
@@ -318,31 +405,42 @@ pub fn ensure_host_identity(
 ) -> Result<HostIdentityOutcome, OrbitError> {
     match inspect_host_identity(global_root)? {
         HostIdentityState::Present(identity) => Ok(HostIdentityOutcome::Unchanged(identity)),
-        HostIdentityState::Legacy { host_id } => {
-            // Migrate atomically: preserve host_id, generate machine_id, default
-            // to standalone. Rollback leaves the last valid file readable.
+        HostIdentityState::Legacy {
+            host_id,
+            machine_id,
+        } => {
+            // Migrate atomically: preserve an existing schema-v1 machine id,
+            // generate one only for the oldest host-id-only format, and retain
+            // the historical ORB namespace. Rollback leaves the last valid
+            // file readable.
             let identity = HostIdentity {
                 schema_version: HOST_IDENTITY_SCHEMA_VERSION,
-                machine_id: generate_machine_id(),
+                machine_id: machine_id.unwrap_or_else(generate_machine_id),
                 host_id,
+                task_prefix: LEGACY_TASK_PREFIX.to_string(),
                 mode: HostMode::Standalone,
             };
             write_host_identity(global_root, &identity)?;
             Ok(HostIdentityOutcome::Migrated(identity))
         }
         HostIdentityState::Absent => {
-            let NewHostIdentity { host_id, mode } = new()?;
+            let NewHostIdentity {
+                host_id,
+                task_prefix,
+            } = new()?;
             let host_id = host_id.trim().to_string();
             if host_id.is_empty() {
                 return Err(OrbitError::InvalidInput(
                     "host name must not be empty".to_string(),
                 ));
             }
+            let task_prefix = validate_new_task_prefix(&task_prefix)?;
             let identity = HostIdentity {
                 schema_version: HOST_IDENTITY_SCHEMA_VERSION,
                 machine_id: generate_machine_id(),
                 host_id,
-                mode,
+                task_prefix,
+                mode: HostMode::Standalone,
             };
             write_host_identity(global_root, &identity)?;
             Ok(HostIdentityOutcome::Created(identity))
@@ -381,7 +479,7 @@ fn stage_host_identity_toml(identity: &HostIdentity) -> Result<String, OrbitErro
     let round_trips = parsed.schema_version == Some(identity.schema_version)
         && non_blank(&parsed.machine_id).as_deref() == Some(identity.machine_id.as_str())
         && non_blank(&parsed.host_id).as_deref() == Some(identity.host_id.as_str())
-        && non_blank(&parsed.mode).as_deref() == Some(identity.mode.as_str());
+        && non_blank(&parsed.task_prefix).as_deref() == Some(identity.task_prefix.as_str());
     if !round_trips {
         return Err(OrbitError::InvalidInput(
             "staged host identity render does not round-trip to the intended identity; \
@@ -393,9 +491,9 @@ fn stage_host_identity_toml(identity: &HostIdentity) -> Result<String, OrbitErro
 }
 
 /// Rename the current machine's local `host.toml` in place, preserving
-/// `machine_id` and `mode`. The identity must already be `Present`; a legacy or
-/// absent file is a hard error (there is no local identity to rename). The new
-/// render is staged and reparsed before the atomic write, so quotes,
+/// `machine_id` and `task_prefix`. The identity must already be `Present`; a
+/// legacy or absent file is a hard error (there is no local identity to rename).
+/// The new render is staged and reparsed before the atomic write, so quotes,
 /// backslashes, and control characters either round-trip safely or fail before
 /// mutation and the last valid file is preserved. Renaming another machine must
 /// never call this — it only ever touches the local file.
@@ -427,6 +525,7 @@ where
         schema_version: current.schema_version,
         machine_id: current.machine_id.clone(),
         host_id: new_host_id.to_string(),
+        task_prefix: current.task_prefix.clone(),
         mode: current.mode,
     };
     let staged = stage_host_identity_toml(&candidate)?;

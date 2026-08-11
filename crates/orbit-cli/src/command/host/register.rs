@@ -61,6 +61,7 @@ impl Execute for HostRegisterArgs {
                     schema_version: HOST_IDENTITY_SCHEMA_VERSION,
                     machine_id,
                     host_id,
+                    task_prefix: "ORB".to_string(),
                     // Mode is not persisted in the hub record; a declared remote
                     // host carries no local operating mode here.
                     mode: HostMode::Standalone,

@@ -461,6 +461,7 @@ fn hub_mcp_serve_is_checkoutless_frame_pure_and_audits_trusted_identity() {
                 schema_version: orbit_remote::HOST_IDENTITY_SCHEMA_VERSION,
                 machine_id: "hm_spoke".to_string(),
                 host_id: "spoke".to_string(),
+                task_prefix: "ORB".to_string(),
                 mode: orbit_remote::HostMode::Spoke,
             },
             BTreeSet::new(),

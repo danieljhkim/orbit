@@ -54,6 +54,7 @@ fn setup_hub(root: &Path) {
                 schema_version: HOST_IDENTITY_SCHEMA_VERSION,
                 machine_id: "hm_spoke".to_string(),
                 host_id: "spoke".to_string(),
+                task_prefix: "ORB".to_string(),
                 mode: HostMode::Spoke,
             },
             BTreeSet::new(),
