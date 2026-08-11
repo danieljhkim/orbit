@@ -105,23 +105,23 @@ fn mcp_exposure_matches_the_shipped_conformance_contract() {
     // docs/design/mcp-bridge/references/conformance-v1.yaml
     assert_eq!(
         FrictionVerb::Add.spec().mcp,
-        McpExposure::AgentOperator(McpToolPlacement::Hub)
+        McpExposure::AgentOperator(McpToolPlacement::Owner)
     );
     assert_eq!(
         FrictionVerb::Tags.spec().mcp,
-        McpExposure::AgentOperator(McpToolPlacement::Hub)
+        McpExposure::AgentOperator(McpToolPlacement::Owner)
     );
     assert_eq!(
         FrictionVerb::List.spec().mcp,
-        McpExposure::OperatorOnly(McpToolPlacement::Hub)
+        McpExposure::OperatorOnly(McpToolPlacement::Owner)
     );
     assert_eq!(
         FrictionVerb::Show.spec().mcp,
-        McpExposure::OperatorOnly(McpToolPlacement::Hub)
+        McpExposure::OperatorOnly(McpToolPlacement::Owner)
     );
     assert_eq!(
         FrictionVerb::Update.spec().mcp,
-        McpExposure::OperatorOnly(McpToolPlacement::Hub)
+        McpExposure::OperatorOnly(McpToolPlacement::Owner)
     );
     assert_eq!(FrictionVerb::Stats.spec().mcp, McpExposure::Inactive);
     assert_eq!(FrictionVerb::Resolve.spec().mcp, McpExposure::Inactive);

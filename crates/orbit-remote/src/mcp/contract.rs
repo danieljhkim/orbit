@@ -1,4 +1,5 @@
-//! Frozen private contract negotiated by spoke and hub before tool dispatch.
+//! Frozen contract negotiated by a client and a workspace owner before tool
+//! dispatch [ORB-10727].
 
 use orbit_common::types::{
     McpCapability, McpToolDefinition, McpToolPlacement, OrbitError, mcp_advertised_tool_name,
@@ -10,54 +11,61 @@ use sha2::{Digest, Sha256};
 
 use super::schema::remote_input_schema;
 
-/// Revision 3 was advanced by the strict connector-private hub knowledge-ID
-/// allocator, withdrawn with the global knowledge allocator ([ADR-0357],
-/// [ORB-10725]); v1 negotiates no private knowledge-allocation method. The
-/// revision itself is history and is never rolled back — reusing 3 for a
-/// different contract would let a peer built against the allocator seam
-/// negotiate successfully with a hub that no longer has it.
-pub const MCP_CONTRACT_REVISION: u32 = 3;
-/// Revision 2 adds the operator-only workflow execution family [ORB-10534].
-pub const CANONICAL_MCP_REGISTRY_REVISION: u32 = 2;
-pub const HUB_SCHEMA_DOMAIN: &str = "orbit.mcp.hub-schema.v1";
-pub const HUB_CONTRACT_INSTRUCTIONS_PREFIX: &str = "orbit-hub-contract-v1:";
+/// Revision numbers are append-only and are never rolled back: reusing a
+/// revision for a different contract would let a peer built against the older
+/// seam negotiate successfully with an endpoint that no longer has it.
+///
+/// Revisions 2 and 3 were advanced by the two connector-private methods
+/// (`orbit/private/register-spoke/v1` and `orbit/private/allocate-knowledge-id/v1`).
+/// Both are withdrawn ([ADR-0357], [ADR-0358]) and v1 negotiates no private
+/// connector method at all. Revision 4 covers that removal together with the
+/// owner-placement recomposition ([ADR-0355], [ORB-10727]).
+pub const MCP_CONTRACT_REVISION: u32 = 4;
+/// Revision 2 added the operator-only workflow execution family [ORB-10534].
+/// Revision 3 is the v1 tool matrix: `hub` placement collapsed into `owner`,
+/// `orbit.workspace.list` moved to `local-derived`, and the `orbit.adr.*`,
+/// `orbit.run.*`, and `orbit.host.list` families were withdrawn [ORB-10727].
+pub const CANONICAL_MCP_REGISTRY_REVISION: u32 = 3;
+pub const OWNER_SCHEMA_DOMAIN: &str = "orbit.mcp.owner-schema.v1";
+pub const OWNER_CONTRACT_INSTRUCTIONS_PREFIX: &str = "orbit-owner-contract-v1:";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct HubServerContractV1 {
+pub struct OwnerServerContractV1 {
     pub contract_revision: u32,
     pub canonical_registry_revision: u32,
-    pub hub_machine_id: String,
+    pub owner_machine_id: String,
     pub effective_capability: McpCapability,
-    pub hub_schema_digest: String,
+    pub owner_schema_digest: String,
 }
 
-impl HubServerContractV1 {
+impl OwnerServerContractV1 {
     pub fn instructions(&self) -> Result<String, OrbitError> {
         let json = serde_json::to_string(self)
-            .map_err(|error| OrbitError::Execution(format!("serialize hub contract: {error}")))?;
-        Ok(format!("{HUB_CONTRACT_INSTRUCTIONS_PREFIX}{json}"))
+            .map_err(|error| OrbitError::Execution(format!("serialize owner contract: {error}")))?;
+        Ok(format!("{OWNER_CONTRACT_INSTRUCTIONS_PREFIX}{json}"))
     }
 
     pub fn parse_instructions(instructions: Option<&str>) -> Result<Self, OrbitError> {
         let instructions = instructions.ok_or_else(|| {
-            OrbitError::HubNegotiation("hub initialize omitted its private contract".to_string())
+            OrbitError::OwnerNegotiation("owner initialize omitted its contract".to_string())
         })?;
         let payload = instructions
-            .strip_prefix(HUB_CONTRACT_INSTRUCTIONS_PREFIX)
+            .strip_prefix(OWNER_CONTRACT_INSTRUCTIONS_PREFIX)
             .ok_or_else(|| {
-                OrbitError::HubNegotiation(
-                    "hub initialize instructions are not the frozen Orbit hub contract".to_string(),
+                OrbitError::OwnerNegotiation(
+                    "owner initialize instructions are not the frozen Orbit owner contract"
+                        .to_string(),
                 )
             })?;
         serde_json::from_str(payload).map_err(|error| {
-            OrbitError::HubNegotiation(format!("invalid hub initialize contract: {error}"))
+            OrbitError::OwnerNegotiation(format!("invalid owner initialize contract: {error}"))
         })
     }
 }
 
 /// Domain-separated canonical compact JSON used by both sides of negotiation.
-pub fn canonical_hub_schema_bytes(
+pub fn canonical_owner_schema_bytes(
     definitions: &[McpToolDefinition],
     capability: McpCapability,
 ) -> Result<Vec<u8>, OrbitError> {
@@ -66,7 +74,7 @@ pub fn canonical_hub_schema_bytes(
     let mut tools = definitions
         .iter()
         .filter(|definition| {
-            definition.policy.placement() == McpToolPlacement::Hub
+            definition.policy.placement() == McpToolPlacement::Owner
                 && definition
                     .policy
                     .allowed_capabilities()
@@ -94,19 +102,19 @@ pub fn canonical_hub_schema_bytes(
     });
     let canonical = canonicalize_json(value);
     let compact = serde_json::to_vec(&canonical)
-        .map_err(|error| OrbitError::Execution(format!("serialize hub schema: {error}")))?;
-    let mut bytes = Vec::with_capacity(HUB_SCHEMA_DOMAIN.len() + 1 + compact.len());
-    bytes.extend_from_slice(HUB_SCHEMA_DOMAIN.as_bytes());
+        .map_err(|error| OrbitError::Execution(format!("serialize owner schema: {error}")))?;
+    let mut bytes = Vec::with_capacity(OWNER_SCHEMA_DOMAIN.len() + 1 + compact.len());
+    bytes.extend_from_slice(OWNER_SCHEMA_DOMAIN.as_bytes());
     bytes.push(0);
     bytes.extend_from_slice(&compact);
     Ok(bytes)
 }
 
-pub fn hub_schema_digest(
+pub fn owner_schema_digest(
     definitions: &[McpToolDefinition],
     capability: McpCapability,
 ) -> Result<String, OrbitError> {
-    let bytes = canonical_hub_schema_bytes(definitions, capability)?;
+    let bytes = canonical_owner_schema_bytes(definitions, capability)?;
     Ok(format!("{:x}", Sha256::digest(bytes)))
 }
 

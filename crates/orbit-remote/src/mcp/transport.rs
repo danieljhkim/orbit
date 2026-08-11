@@ -1,18 +1,16 @@
-//! Connector-private MCP context and request composition.
+//! Connector-owned MCP call context for the owner endpoint.
+//!
+//! ORB-10727 [ADR-0358]: v1 negotiates no connector-private method. The
+//! `orbit/private/register-spoke/v1` handler that used to live here is
+//! withdrawn with the registration protocol — a client opens an owner route and
+//! calls. What remains is the resolver that keeps connector-owned remote
+//! identity separate from server-owned grants.
 
-use std::sync::Arc;
-
-use orbit_common::types::{
-    McpTransport, OrbitError, SPOKE_REGISTRATION_METHOD_V1, SpokeRegistrationRequestV1,
-    SpokeRegistrationResultV1, ToolSessionContext,
-};
-use orbit_mcp::{
-    McpCallContextResolver, McpCustomRequestError, McpCustomRequestHandler, McpRequestKind,
-};
+use orbit_common::types::{McpTransport, OrbitError, ToolSessionContext};
+use orbit_mcp::{McpCallContextResolver, McpRequestKind};
 use serde_json::{Map, Value};
 
-use super::hub::HubMcpHost;
-use super::hub_client::REMOTE_SESSION_META_KEY;
+use super::owner_client::REMOTE_SESSION_META_KEY;
 
 /// Resolves connector-owned remote identity while retaining server-owned grants.
 pub(super) struct RemoteCallContextResolver;
@@ -21,21 +19,17 @@ impl McpCallContextResolver for RemoteCallContextResolver {
     fn resolve(
         &self,
         trusted_context: &ToolSessionContext,
-        request: &McpRequestKind,
+        _request: &McpRequestKind,
         transport_metadata: &Map<String, Value>,
     ) -> Result<ToolSessionContext, OrbitError> {
         let Some(remote) = remote_session_context_from_metadata(transport_metadata)? else {
-            let message = match request {
-                McpRequestKind::Custom { method } if method == SPOKE_REGISTRATION_METHOD_V1 => {
-                    "private spoke registration requires connector-owned remote session metadata"
-                }
-                _ => "hub tool calls require connector-owned remote session metadata",
-            };
-            return Err(OrbitError::InvalidInput(message.to_string()));
+            return Err(OrbitError::InvalidInput(
+                "owner tool calls require connector-owned remote session metadata".to_string(),
+            ));
         };
         if remote.transport != Some(McpTransport::SshMcp) {
             return Err(OrbitError::InvalidInput(
-                "hub remote session metadata must declare ssh-mcp transport".to_string(),
+                "owner remote session metadata must declare ssh-mcp transport".to_string(),
             ));
         }
         if remote.caller_machine_id.is_none()
@@ -44,97 +38,19 @@ impl McpCallContextResolver for RemoteCallContextResolver {
             || remote.mcp_call_id.is_none()
         {
             return Err(OrbitError::InvalidInput(
-                "hub remote session metadata requires caller identity and call correlation"
+                "owner remote session metadata requires caller identity and call correlation"
                     .to_string(),
             ));
         }
         if remote.process_machine_id.is_some() || remote.process_host_id.is_some() {
             return Err(OrbitError::InvalidInput(
-                "hub remote session metadata may not claim process identity".to_string(),
+                "owner remote session metadata may not claim process identity".to_string(),
             ));
         }
         let mut remote = remote;
         remote.effective_capabilities = trusted_context.effective_capabilities.clone();
-        remote.leased_run = None;
         Ok(remote)
     }
-}
-
-/// Typed custom handler for connector-private hub methods.
-pub(super) struct PrivateHubRequestHandler {
-    host: Arc<HubMcpHost>,
-}
-
-impl PrivateHubRequestHandler {
-    pub(super) fn new(host: Arc<HubMcpHost>) -> Self {
-        Self { host }
-    }
-}
-
-impl McpCustomRequestHandler for PrivateHubRequestHandler {
-    fn recognizes(&self, method: &str) -> bool {
-        matches!(method, SPOKE_REGISTRATION_METHOD_V1)
-    }
-
-    fn worker_label(&self) -> &'static str {
-        "private hub request"
-    }
-
-    fn call(
-        &self,
-        method: &str,
-        params: Option<Value>,
-        session_context: ToolSessionContext,
-    ) -> Result<Value, McpCustomRequestError> {
-        match method {
-            SPOKE_REGISTRATION_METHOD_V1 => self.call_registration(params, session_context),
-            _ => Err(McpCustomRequestError::MethodNotFound),
-        }
-    }
-}
-
-impl PrivateHubRequestHandler {
-    fn call_registration(
-        &self,
-        params: Option<Value>,
-        session_context: ToolSessionContext,
-    ) -> Result<Value, McpCustomRequestError> {
-        let params = params.ok_or_else(|| {
-            McpCustomRequestError::invalid_params("private spoke registration requires parameters")
-        })?;
-        let registration: SpokeRegistrationRequestV1 =
-            serde_json::from_value(params).map_err(|error| {
-                McpCustomRequestError::invalid_params(format!(
-                    "invalid private spoke registration payload: {error}"
-                ))
-            })?;
-        if let Err(error) = registration.validate() {
-            return serialize_registration_result(SpokeRegistrationResultV1::rejected(&error));
-        }
-        let result = match self
-            .host
-            .private_register_spoke(registration, session_context)
-        {
-            Ok(result) => result,
-            Err(error) => SpokeRegistrationResultV1::rejected(&error),
-        };
-        result.validate().map_err(|error| {
-            McpCustomRequestError::internal(format!(
-                "invalid private spoke registration result: {error}"
-            ))
-        })?;
-        serialize_registration_result(result)
-    }
-}
-
-fn serialize_registration_result(
-    result: SpokeRegistrationResultV1,
-) -> Result<Value, McpCustomRequestError> {
-    serde_json::to_value(result).map_err(|error| {
-        McpCustomRequestError::internal(format!(
-            "serialize private spoke registration result: {error}"
-        ))
-    })
 }
 
 fn remote_session_context_from_metadata(
@@ -149,6 +65,6 @@ fn remote_session_context_from_metadata(
     serde_json::from_value(value.clone())
         .map(Some)
         .map_err(|error| {
-            OrbitError::InvalidInput(format!("invalid hub remote session metadata: {error}"))
+            OrbitError::InvalidInput(format!("invalid owner remote session metadata: {error}"))
         })
 }

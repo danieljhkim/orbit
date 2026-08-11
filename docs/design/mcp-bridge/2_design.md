@@ -11,7 +11,7 @@ summary: Target design for a local Orbit MCP broker with an SSH owner route, own
 tags: [mcp, remote-access, host-registry, bridge, ssh, routing]
 paths: ["crates/orbit-remote/**", "crates/orbit-mcp/**", "crates/orbit-core/**", "crates/orbit-tools/**", "crates/orbit-store/**", "crates/orbit-common/**"]
 related_features: [mcp-bridge, host-registry, mcp-session-context, remote-access, orbit-search, project-learnings]
-related_artifacts: [ORB-00424, ORB-10257, ORB-10262, ORB-10267, ORB-10268, ORB-10269, ORB-10271, ORB-10272, ORB-10276, ORB-10302, ORB-10319, ORB-10330, ORB-10332, ORB-10534, ORB-10540, ORB-10544, ORB-10690, ORB-10710, ORB-10725, ADR-0181, ADR-0199, ADR-0200, ADR-0201, ADR-0226, ADR-0227, ADR-0228, ADR-0229, ADR-0230, ADR-0231, ADR-0232, ADR-0235, ADR-0240, ADR-0303, ADR-0348, ADR-0350, ADR-0351, ADR-0354, ADR-0355, ADR-0356, ADR-0357, ADR-0358]
+related_artifacts: [ORB-00424, ORB-10257, ORB-10262, ORB-10267, ORB-10268, ORB-10269, ORB-10271, ORB-10272, ORB-10276, ORB-10302, ORB-10319, ORB-10330, ORB-10332, ORB-10534, ORB-10540, ORB-10544, ORB-10690, ORB-10710, ORB-10725, ORB-10727, ADR-0181, ADR-0199, ADR-0200, ADR-0201, ADR-0226, ADR-0227, ADR-0228, ADR-0229, ADR-0230, ADR-0231, ADR-0232, ADR-0235, ADR-0240, ADR-0303, ADR-0348, ADR-0350, ADR-0351, ADR-0354, ADR-0355, ADR-0356, ADR-0357, ADR-0358]
 ---
 
 # Orbit MCP Bridge — Design
@@ -163,8 +163,16 @@ machines only through Git replication in v1.
 The remote process is explicit and non-recursive:
 
 ```text
-orbit mcp serve [--capabilities agent|operator]
+orbit mcp serve --owner [--capabilities agent|operator]
 ```
+
+`--owner` selects which server the process presents; it asserts no machine-level
+role and does not consult `host.toml` mode. Orbit constructs this invocation
+itself for the far side of an owner route ([§5.2](#52-ssh-carried-stdio-mcp)) — a
+client config never names it. A single process cannot present both the
+client-facing broker and the checkoutless owner endpoint at once, so the selector
+is what the withdrawn `--hub` flag becomes rather than something v1 removes
+outright ([ORB-10727]).
 
 The owner-machine endpoint:
 
@@ -179,20 +187,42 @@ shell text.
 
 [ORB-10268] implemented this endpoint under the `--hub` spelling. Startup verified
 that the opened global store was stamped with the exact local `machine_id` before
-stdio began; listing and every call repeated that authority check. The endpoint
+stdio began; listing and every call repeated that authority check. Store-stamp
+verification survives with one relaxation: ORB-10268 *required* a stamp and told the
+operator to register the hub first, but registration is withdrawn ([ADR-0358]) and
+ownership now comes from `workspaces.json`, so an unstamped store has nothing to
+contradict and is admitted. A stamp naming a different machine is still refused as
+a shadow coordination store. The endpoint
 filtered the canonical registry by exactly one placement class and one scalar
 capability, composed graph recognition without a local graph implementation,
 accepted only stable logical workspace IDs, and invoked the checkout-independent
 coordination executor without constructing `OrbitRuntime` or opening any connector.
 Every `tools/call` had to carry connector-owned remote session metadata; omission
 or an incomplete identity failed before host preflight. All of that survives; the
-endpoint is being re-specified as the **owner** endpoint with `owner` placement,
-and the `--hub` flag and its machine-level mode requirement are withdrawn.
+endpoint is re-specified as the **owner** endpoint with `owner` placement, and the
+`--hub` flag and its machine-level mode requirement are withdrawn ([ORB-10727]).
+Two guards it carried are relaxed with the protocols that justified them: the
+caller no longer has to be an actively registered spoke, because there is no
+registry to be registered in, and an unstamped store no longer refuses to serve,
+because there is no registration step to stamp it. What is added is the ownership
+refusal — a workspace this machine does not own is refused by name, so a client
+that reached the wrong owner is told which machine to open a route to rather than
+being relayed there.
 
 ### 2.3 Owner-local short circuit
 
 When this machine owns the workspace, coordination calls dispatch directly through
 the checkout-independent coordination executor keyed by stable `workspace_id`.
+
+Placement and executor are separate questions, and the withdrawn `hub` class used
+to conflate them: it meant both "the hub machine" and "the checkoutless
+coordination store." Collapsing `hub` into `owner` splits them apart ([ORB-10727]).
+Placement answers *which machine*; the coordination surface — `orbit.task.*` and
+`orbit.friction.*`, exactly what the coordination executor implements — answers
+*which executor on it*. `orbit.learning.*` and `orbit.auto_task.*` are equally
+owner-placed but read checkout-derived state, so an owner-local call to one of them
+runs through the owner's validated checkout runtime instead, and is refused when
+that checkout is absent.
 That executor opens only global task/friction coordination stores: it does not
 construct `OrbitRuntime`, `WorkspacePaths`, a checkout, owner stores, or local
 model/scoreboard configuration. The broker does not SSH to itself or add a
@@ -410,9 +440,23 @@ machine-global Orbit root; v1 restates that as zero or more `[[owner]]` entries 
 the same file. The rest of the frozen boundary is unchanged: the whole document and
 every entry reject unknown fields; transport is exactly `ssh`; aliases are
 argument-safe OpenSSH host aliases; the allowed list is non-empty and duplicate-free
-and typed as `agent|operator`. Repository, cwd, and environment decoys cannot
-override this file. A client missing the route, requesting a capability outside the
-exact set, or pointing at itself fails before any transport is opened.
+and typed as `agent|operator`. `runner` is no longer a valid member ([ADR-0358]).
+Two entries naming the same `machine_id` are rejected, since a target reached two
+ways has no single capability ceiling. Repository, cwd, and environment decoys
+cannot override this file. A client missing the route, requesting a capability
+outside the exact set, or pointing at itself fails before any transport is opened.
+
+**A legacy `[hub]` table fails closed** with a migration message naming the file and
+the replacement form; it is never auto-migrated ([ORB-10727]). The two tables do not
+mean the same thing: `[hub]` named a machine-level coordination host, while
+`[[owner]]` names the machine that owns a particular workspace. The machine in a
+`[hub]` entry need not own any of the reading machine's workspaces, so rewriting one
+into the other could silently point coordination calls at a non-owner — the exact
+failure the ownership model exists to prevent. Rewriting the table is a one-line
+human edit; inferring the routing target is not something the loader may do. The
+rejected alternative was auto-migration for a seamless upgrade; the cost of failing
+closed is that an existing multi-host deployment does not start until its operator
+edits the file, which is the intended prompt.
 
 The route target is the owner machine, so moving ownership between machines changes
 which entry a client uses. Routes are per machine, not per workspace: a machine
@@ -424,7 +468,7 @@ once.
 The client broker starts a fixed command equivalent to:
 
 ```text
-ssh <owner-alias> orbit mcp serve --capabilities operator
+ssh <owner-alias> orbit mcp serve --owner --capabilities operator
 ```
 
 and relays MCP frames over stdin/stdout. Orbit performs the handshake, verifies the
@@ -1106,11 +1150,13 @@ Required validation:
   checkoutless fixed-capability hub endpoint. The trust document and the endpoint
   survive as the client's per-route policy and the owner endpoint; the `--hub`
   spelling and the machine-level mode requirement are superseded by the v1
-  ownership model.
+  ownership model, and the singular `[hub]` table is replaced by zero or more
+  `[[owner]]` entries ([ORB-10727]).
 - [ORB-10269] — implemented the fixed SSH argv connector, contract/digest
   negotiation, bounded per-capability peers, trusted remote metadata, and
   pre-/post-handoff no-replay classification. The transport survives; its single
-  fixed hub target becomes a per-owner route.
+  fixed hub target becomes a per-owner route, keyed by the target owner
+  `machine_id` and carrying that route's own capability ceiling ([ORB-10727]).
 - [ORB-10271] — implemented private staged spoke registration, contract revision 2,
   current active-caller enforcement, definitive-success cache refresh, path-free
   task artifact/friction coordination, and the two-root RMCP canary. Superseded by

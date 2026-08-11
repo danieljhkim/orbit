@@ -149,7 +149,7 @@ fn definition_with_scope(
         parameters,
         builtin: true,
     };
-    let policy = McpToolPolicy::agent_and_operator(McpToolPlacement::Hub).with_scope(scope);
+    let policy = McpToolPolicy::agent_and_operator(McpToolPlacement::Owner).with_scope(scope);
     McpToolDefinition::new(schema, policy).expect("test definition policy is valid")
 }
 
@@ -280,7 +280,6 @@ fn initialize_meta_extracts_orbit_workspace_session_context() {
     assert!(session_context.effective_capabilities.is_empty());
     assert_eq!(session_context.origin_session_id, None);
     assert_eq!(session_context.mcp_call_id, None);
-    assert_eq!(session_context.leased_run, None);
 }
 
 #[test]

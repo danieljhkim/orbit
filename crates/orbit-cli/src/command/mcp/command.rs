@@ -4,7 +4,7 @@ use std::path::Path;
 use clap::{Args, Subcommand, ValueEnum};
 use orbit_common::types::McpCapability;
 use orbit_core::{OrbitError, OrbitRuntime};
-use orbit_remote::{DEFAULT_REMOTE_MCP_PORT, RemoteProxyArgs};
+use orbit_remote::{DEFAULT_REMOTE_MCP_PORT, McpServerRole, RemoteProxyArgs};
 
 use crate::command::{CommandOut, CommandOutput, Execute};
 
@@ -62,10 +62,17 @@ pub enum ServeMode {
 #[derive(Args)]
 #[command(about = "Serve the Orbit tool registry over Model Context Protocol")]
 pub struct ServeArgs {
-    /// Serve only checkoutless coordination tools as the fixed local hub.
+    /// Serve the checkoutless owner endpoint for the workspaces this machine
+    /// owns, instead of the client-facing local broker.
+    ///
+    /// ORB-10727 [ADR-0355]: this replaces `--hub`. It selects which server
+    /// this process presents; it no longer asserts a machine-level coordination
+    /// role, and `host.toml` mode is not consulted. Orbit constructs this
+    /// invocation itself for the far side of an owner route — it is not
+    /// something a client config should name.
     #[arg(long)]
-    pub hub: bool,
-    /// Exact non-hierarchical capability for this broker or hub session. With
+    pub owner: bool,
+    /// Exact non-hierarchical capability for this broker or owner session. With
     /// `--mode remote` this is the capability the remote listener is started
     /// with, and only when this invocation is the one that starts it.
     #[arg(long, value_name = "CAPABILITY")]
@@ -84,7 +91,7 @@ pub struct ServeArgs {
         long,
         value_name = "MODE",
         requires = "ssh_host",
-        conflicts_with = "hub"
+        conflicts_with = "owner"
     )]
     pub mode: Option<ServeMode>,
     /// SSH destination for `--mode remote` — anything `ssh` accepts (`host`,
@@ -108,6 +115,11 @@ impl ServeArgs {
                     .to_string(),
             ));
         }
+        let role = if self.owner {
+            McpServerRole::Owner
+        } else {
+            McpServerRole::Broker
+        };
         match (self.mode, self.listen) {
             (Some(ServeMode::Remote), _) => {
                 // Clap enforces the pairing; this keeps the invariant local
@@ -126,8 +138,8 @@ impl ServeArgs {
                     capability: self.capabilities,
                 })?
             }
-            (None, Some(addr)) => orbit_remote::serve_mcp_tcp(addr, self.hub, self.capabilities)?,
-            (None, None) => orbit_remote::serve_mcp_stdio(self.hub, self.capabilities)?,
+            (None, Some(addr)) => orbit_remote::serve_mcp_tcp(addr, role, self.capabilities)?,
+            (None, None) => orbit_remote::serve_mcp_stdio(role, self.capabilities)?,
         }
         Ok(CommandOutput::Silent)
     }

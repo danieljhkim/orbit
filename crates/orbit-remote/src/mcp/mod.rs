@@ -1,15 +1,14 @@
-//! Remote MCP broker, coordination hub, and spoke-link composition.
+//! Remote MCP broker, owner endpoint, and owner-route composition.
 
 mod config;
 mod contract;
 mod discovery;
 mod host;
-mod hub;
-mod hub_client;
-mod hub_link;
 mod learning;
+mod owner;
+mod owner_client;
+mod owner_link;
 mod proxy;
-mod registration;
 mod schema;
 mod transport;
 
@@ -25,30 +24,44 @@ use orbit_core::OrbitError;
 use orbit_core::runtime::resolve_global_root;
 use orbit_mcp::{McpHost, McpResultDecorator, McpServerComposition, McpServerMetadata};
 
-use crate::{HostIdentityState, HostMode, inspect_host_identity};
+use crate::{HostIdentityState, inspect_host_identity};
 
-use self::config::load_trusted_mcp_config;
-use self::contract::hub_schema_digest;
-use self::host::BrokerMcpHost;
-use self::hub::HubMcpHost;
-use self::hub_link::HubLinkPool;
+use self::config::{TrustedMcpConfig, load_trusted_mcp_config};
+use self::contract::owner_schema_digest;
+use self::host::{BrokerMcpHost, OwnerRoute, OwnerRouteTable};
 use self::learning::{LearningSidecarDecorator, LearningSidecarHost};
+use self::owner::OwnerMcpHost;
+use self::owner_link::OwnerLinkPool;
 use self::schema::RemoteInputSchemaResolver;
-use self::transport::{PrivateHubRequestHandler, RemoteCallContextResolver};
+use self::transport::RemoteCallContextResolver;
 
 pub use self::host::{canonical_mcp_tool_definitions, safe_mcp_tool_names};
 pub use self::proxy::{DEFAULT_REMOTE_MCP_PORT, RemoteProxyArgs, serve_mcp_remote_proxy};
-pub use self::registration::register_local_spoke;
 
-/// Serve the local broker or fixed coordination hub over MCP stdio.
+/// Which server this invocation presents.
+///
+/// ORB-10727 [ADR-0355]: this is no longer a client-supplied `--hub` flag. The
+/// same `orbit mcp serve` command starts a local broker for an interactive
+/// client and the owner endpoint when a remote client reaches this machine over
+/// the fixed SSH command, so the role travels with the transport, not with
+/// machine-level configuration.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum McpServerRole {
+    /// Client-facing local broker: resolves placement and routes to owners.
+    Broker,
+    /// Checkoutless owner endpoint for the workspaces this machine owns.
+    Owner,
+}
+
+/// Serve the local broker or the owner endpoint over MCP stdio.
 ///
 /// This is intentionally independent of Clap so alternate front ends can
 /// construct the same trusted host, route, and session boundary.
 pub fn serve_mcp_stdio(
-    hub: bool,
+    role: McpServerRole,
     requested_capability: Option<McpCapability>,
 ) -> Result<(), OrbitError> {
-    let (host, trusted_context, composition) = build_mcp_session(hub, requested_capability)?;
+    let (host, trusted_context, composition) = build_mcp_session(role, requested_capability)?;
     let tokio_runtime = build_tokio_runtime()?;
     tokio_runtime.block_on(orbit_mcp::serve_stdio_with_context_and_composition(
         host,
@@ -57,7 +70,7 @@ pub fn serve_mcp_stdio(
     ))
 }
 
-/// Serve the local broker or fixed coordination hub over MCP-over-TCP.
+/// Serve the local broker or the owner endpoint over MCP-over-TCP.
 ///
 /// The endpoint carries no authentication of its own (see
 /// [`orbit_mcp::McpTcpServer`]); ADR-0350 authenticates it by requiring an SSH
@@ -69,11 +82,11 @@ pub fn serve_mcp_stdio(
 /// same way.
 pub fn serve_mcp_tcp(
     addr: SocketAddr,
-    hub: bool,
+    role: McpServerRole,
     requested_capability: Option<McpCapability>,
 ) -> Result<(), OrbitError> {
     check_bindable_mcp_host(addr)?;
-    let (host, trusted_context, composition) = build_mcp_session(hub, requested_capability)?;
+    let (host, trusted_context, composition) = build_mcp_session(role, requested_capability)?;
     let tokio_runtime = build_tokio_runtime()?;
     tokio_runtime.block_on(orbit_mcp::serve_tcp_with_context_and_composition(
         addr,
@@ -111,8 +124,19 @@ fn check_bindable_mcp_host(addr: SocketAddr) -> Result<(), OrbitError> {
 /// `orbit_common::authorization`'s governed-operation table, which never lists
 /// `Agent` alone), so it is the floor every unspecified session gets — for
 /// both stdio and TCP.
-fn least_privileged_mcp_capability(requested: Option<McpCapability>) -> McpCapability {
-    requested.unwrap_or(McpCapability::Agent)
+fn least_privileged_mcp_capability(
+    requested: Option<McpCapability>,
+) -> Result<McpCapability, OrbitError> {
+    let capability = requested.unwrap_or(McpCapability::Agent);
+    // ADR-0358 withdrew `runner` from the bridge: no tool policy allows it, so
+    // such a session would advertise an empty surface. Refuse it by name rather
+    // than serving nothing.
+    if !capability.is_bridge_v1() {
+        return Err(OrbitError::InvalidInput(format!(
+            "MCP capability '{capability}' is withdrawn from the v1 bridge (ADR-0358); request agent or operator"
+        )));
+    }
+    Ok(capability)
 }
 
 fn build_tokio_runtime() -> Result<tokio::runtime::Runtime, OrbitError> {
@@ -126,74 +150,89 @@ fn build_tokio_runtime() -> Result<tokio::runtime::Runtime, OrbitError> {
 /// every MCP transport. The effective capability is resolved here so stdio
 /// and TCP agree on the same least-privileged default.
 fn build_mcp_session(
-    hub: bool,
+    role: McpServerRole,
     requested_capability: Option<McpCapability>,
 ) -> Result<(Arc<dyn McpHost>, ToolSessionContext, McpServerComposition), OrbitError> {
     let global_root = resolve_global_root()?;
     // Parse the trusted file, when present, before constructing either server
     // host. Workspace/cwd config never participates in this load.
     let trusted_config = load_trusted_mcp_config(&global_root)?;
-    let capability = least_privileged_mcp_capability(requested_capability);
+    let capability = least_privileged_mcp_capability(requested_capability)?;
     let (host, mut trusted_context, composition): (
         Arc<dyn McpHost>,
         ToolSessionContext,
         McpServerComposition,
-    ) = if hub {
-        let hub = Arc::new(HubMcpHost::new(global_root.clone(), capability)?);
-        let identity = hub.identity();
-        let context = ToolSessionContext::trusted_local(
-            None,
-            Some(identity.machine_id.clone()),
-            Some(identity.host_id.clone()),
-        );
-        let composition = hub_server_composition(Arc::clone(&hub));
-        (hub, context, composition)
-    } else {
-        let (host, machine_id, host_id): (Arc<BrokerMcpHost>, Option<String>, Option<String>) =
-            match inspect_host_identity(&global_root)? {
+    ) = match role {
+        McpServerRole::Owner => {
+            let owner = Arc::new(OwnerMcpHost::new(global_root.clone(), capability)?);
+            let identity = owner.identity();
+            let context = ToolSessionContext::trusted_local(
+                None,
+                Some(identity.machine_id.clone()),
+                Some(identity.host_id.clone()),
+            );
+            let composition = owner_server_composition(Arc::clone(&owner));
+            (owner, context, composition)
+        }
+        McpServerRole::Broker => {
+            let (machine_id, host_id) = match inspect_host_identity(&global_root)? {
                 HostIdentityState::Present(identity) => {
-                    if identity.mode == HostMode::Spoke {
-                        let (route, _) = trusted_config.spoke_route(&identity, Some(capability))?;
-                        let definitions = canonical_mcp_tool_definitions()
-                            .map_err(|error| OrbitError::InvalidInput(error.to_string()))?;
-                        let mut schema_digests = BTreeMap::new();
-                        for allowed in &route.allowed_capabilities {
-                            schema_digests
-                                .insert(*allowed, hub_schema_digest(&definitions, *allowed)?);
-                        }
-                        let pool = HubLinkPool::ssh(
-                            route.host.clone(),
-                            route.machine_id.clone(),
-                            schema_digests,
-                        )?;
-                        (
-                            Arc::new(BrokerMcpHost::new_with_hub_link(global_root.clone(), pool)),
-                            Some(identity.machine_id),
-                            Some(identity.host_id),
-                        )
-                    } else {
-                        (
-                            Arc::new(BrokerMcpHost::new(global_root.clone())),
-                            Some(identity.machine_id),
-                            Some(identity.host_id),
-                        )
-                    }
+                    (Some(identity.machine_id), Some(identity.host_id))
                 }
-                HostIdentityState::Legacy { .. } | HostIdentityState::Absent => (
-                    Arc::new(BrokerMcpHost::new(global_root.clone())),
-                    None,
-                    None,
-                ),
+                HostIdentityState::Legacy { .. } | HostIdentityState::Absent => (None, None),
             };
-        (
-            Arc::clone(&host) as Arc<dyn McpHost>,
-            ToolSessionContext::trusted_local(None, machine_id, host_id),
-            broker_server_composition(host),
-        )
+            let routes = owner_route_table(&trusted_config, machine_id.as_deref())?;
+            let host = Arc::new(BrokerMcpHost::new_with_owner_routes(
+                global_root.clone(),
+                routes,
+            ));
+            (
+                Arc::clone(&host) as Arc<dyn McpHost>,
+                ToolSessionContext::trusted_local(None, machine_id, host_id),
+                broker_server_composition(host),
+            )
+        }
     };
     trusted_context.effective_capabilities = BTreeSet::from([capability]);
 
     Ok((host, trusted_context, composition))
+}
+
+/// Open one bounded link pool per configured owner machine.
+///
+/// Routes are per machine, not per workspace: a machine holding replica
+/// checkouts of workspaces owned by several others names each owner once. A
+/// route pointing at this machine is a configuration error, not a loopback —
+/// an owned workspace short-circuits locally and never opens a link.
+fn owner_route_table(
+    trusted_config: &TrustedMcpConfig,
+    local_machine_id: Option<&str>,
+) -> Result<OwnerRouteTable, OrbitError> {
+    let definitions = canonical_mcp_tool_definitions()
+        .map_err(|error| OrbitError::InvalidInput(error.to_string()))?;
+    let mut table = BTreeMap::new();
+    for route in trusted_config.routes() {
+        if local_machine_id == Some(route.machine_id.as_str()) {
+            return Err(OrbitError::InvalidInput(format!(
+                "trusted MCP config names an [[owner]] route to this machine ('{}'); a machine reaches its own workspaces in process",
+                route.machine_id
+            )));
+        }
+        let mut schema_digests = BTreeMap::new();
+        for allowed in &route.allowed_capabilities {
+            schema_digests.insert(*allowed, owner_schema_digest(&definitions, *allowed)?);
+        }
+        let pool =
+            OwnerLinkPool::ssh(route.host.clone(), route.machine_id.clone(), schema_digests)?;
+        table.insert(
+            route.machine_id.clone(),
+            OwnerRoute {
+                allowed_capabilities: route.allowed_capabilities.clone(),
+                pool: Arc::new(pool),
+            },
+        );
+    }
+    Ok(table)
 }
 
 fn broker_server_composition(host: Arc<BrokerMcpHost>) -> McpServerComposition {
@@ -205,7 +244,7 @@ fn broker_server_composition(host: Arc<BrokerMcpHost>) -> McpServerComposition {
         .with_input_schema_resolver(Arc::new(RemoteInputSchemaResolver))
 }
 
-fn hub_server_composition(host: Arc<HubMcpHost>) -> McpServerComposition {
+fn owner_server_composition(host: Arc<OwnerMcpHost>) -> McpServerComposition {
     let learning_host: Arc<dyn LearningSidecarHost> = host.clone();
     let learning: Arc<dyn McpResultDecorator> =
         Arc::new(LearningSidecarDecorator::from_env(learning_host));
@@ -213,6 +252,5 @@ fn hub_server_composition(host: Arc<HubMcpHost>) -> McpServerComposition {
         .with_result_decorator(learning)
         .with_call_context_resolver(Arc::new(RemoteCallContextResolver))
         .with_input_schema_resolver(Arc::new(RemoteInputSchemaResolver))
-        .with_custom_request_handler(Arc::new(PrivateHubRequestHandler::new(Arc::clone(&host))))
-        .with_metadata(McpServerMetadata::default().with_instructions(host.private_instructions()))
+        .with_metadata(McpServerMetadata::default().with_instructions(host.contract_instructions()))
 }

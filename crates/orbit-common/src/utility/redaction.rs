@@ -144,8 +144,12 @@ pub fn redact_sensitive_env_error(error: OrbitError) -> OrbitError {
         OrbitError::UnsupportedAgentProvider(m) => {
             OrbitError::UnsupportedAgentProvider(redact_sensitive_env_text(&m))
         }
-        OrbitError::HubUnavailable(m) => OrbitError::HubUnavailable(redact_sensitive_env_text(&m)),
-        OrbitError::HubNegotiation(m) => OrbitError::HubNegotiation(redact_sensitive_env_text(&m)),
+        OrbitError::OwnerUnavailable(m) => {
+            OrbitError::OwnerUnavailable(redact_sensitive_env_text(&m))
+        }
+        OrbitError::OwnerNegotiation(m) => {
+            OrbitError::OwnerNegotiation(redact_sensitive_env_text(&m))
+        }
         OrbitError::OutcomeUnknown {
             mcp_call_id,
             message,
@@ -266,8 +270,8 @@ pub fn redact_all_error(error: OrbitError) -> OrbitError {
         OrbitError::UnsupportedAgentProvider(m) => {
             OrbitError::UnsupportedAgentProvider(redact_all(&m))
         }
-        OrbitError::HubUnavailable(m) => OrbitError::HubUnavailable(redact_all(&m)),
-        OrbitError::HubNegotiation(m) => OrbitError::HubNegotiation(redact_all(&m)),
+        OrbitError::OwnerUnavailable(m) => OrbitError::OwnerUnavailable(redact_all(&m)),
+        OrbitError::OwnerNegotiation(m) => OrbitError::OwnerNegotiation(redact_all(&m)),
         OrbitError::OutcomeUnknown {
             mcp_call_id,
             message,

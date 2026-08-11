@@ -35,7 +35,7 @@ fn non_loopback_addresses_are_refused_by_the_pure_guard() {
 #[test]
 fn an_unspecified_capability_resolves_to_the_least_privileged_default() {
     assert_eq!(
-        least_privileged_mcp_capability(None),
+        least_privileged_mcp_capability(None).expect("agent floor"),
         McpCapability::Agent,
         "a deployment that says nothing must not become an operator"
     );
@@ -44,11 +44,29 @@ fn an_unspecified_capability_resolves_to_the_least_privileged_default() {
 #[test]
 fn an_explicit_capability_request_is_never_widened() {
     assert_eq!(
-        least_privileged_mcp_capability(Some(McpCapability::Operator)),
+        least_privileged_mcp_capability(Some(McpCapability::Operator)).expect("operator"),
         McpCapability::Operator
     );
     assert_eq!(
-        least_privileged_mcp_capability(Some(McpCapability::Runner)),
-        McpCapability::Runner
+        least_privileged_mcp_capability(Some(McpCapability::Agent)).expect("agent"),
+        McpCapability::Agent
+    );
+}
+
+/// ORB-10727 [ADR-0358]: `runner` is withdrawn from the bridge. No canonical
+/// tool policy admits it, so such a session would advertise an empty surface —
+/// refuse it by name instead of silently serving nothing.
+#[test]
+fn a_withdrawn_capability_request_is_refused_by_name() {
+    let error = least_privileged_mcp_capability(Some(McpCapability::Runner))
+        .expect_err("runner is not a v1 bridge capability");
+    let message = error.to_string();
+    assert!(
+        message.contains("runner"),
+        "names the capability: {message}"
+    );
+    assert!(
+        message.contains("agent or operator"),
+        "names the alternatives: {message}"
     );
 }

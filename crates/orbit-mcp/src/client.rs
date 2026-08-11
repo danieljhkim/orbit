@@ -323,7 +323,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn raw_client_round_trips_generic_composition_without_hub_contract() {
+    async fn raw_client_round_trips_generic_composition_without_owner_contract() {
         let definition = McpToolDefinition::new(
             ToolSchema {
                 name: "demo.generic".to_string(),
@@ -331,7 +331,7 @@ mod tests {
                 parameters: Vec::new(),
                 builtin: false,
             },
-            McpToolPolicy::agent_and_operator(McpToolPlacement::Hub),
+            McpToolPolicy::agent_and_operator(McpToolPlacement::Owner),
         )
         .expect("definition");
         let host: Arc<dyn McpHost> = Arc::new(GenericHost {

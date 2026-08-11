@@ -28,19 +28,15 @@ impl Execute for HostRegisterArgs {
     fn execute(self, runtime: &OrbitRuntime) -> CommandOut {
         let labels: BTreeSet<String> = self.labels.into_iter().collect();
         let local_identity = load_host_identity(&runtime.global_root())?;
+        // ORB-10727 [ADR-0358]: remote spoke registration is withdrawn with the
+        // fleet registration protocol. v1 has no registration step at all — a
+        // client opens an owner route in `mcp.toml` and calls — so there is
+        // nothing for this machine to register itself with.
         if local_identity.mode == HostMode::Spoke {
-            if self.machine_id.is_some() || self.host_id.is_some() {
-                return Err(OrbitError::InvalidInput(
-                    "spoke registration reads machine_id and host_id only from validated host.toml; --machine-id/--host-id overrides are forbidden"
-                        .to_string(),
-                ));
-            }
-            let record = orbit_remote::register_local_spoke(runtime, &local_identity, labels)?;
-            println!(
-                "registered spoke '{}' (machine_id {}) with the verified hub and refreshed the local registry cache",
-                record.host_id, record.machine_id
-            );
-            return Ok(CommandOutput::Silent);
+            return Err(OrbitError::InvalidInput(format!(
+                "machine '{}' ({}) is in spoke mode, and remote spoke registration is withdrawn (ADR-0358): v1 has no registration handshake. Declare an [[owner]] route in machine-global mcp.toml for each machine that owns a workspace you need to reach.",
+                local_identity.host_id, local_identity.machine_id
+            )));
         }
 
         // Direct coordination-store administration remains hub-local.
