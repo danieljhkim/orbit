@@ -143,6 +143,84 @@ fn broker_checkoutless_task_call_uses_stable_id_and_one_trusted_audit() {
 }
 
 #[test]
+fn broker_replica_refuses_registered_coordination_writes_and_hides_task_reads() {
+    use chrono::Utc;
+    use orbit_common::types::{Workspace, WorkspaceCheckout, WorkspaceRegistry, WorkspaceStatus};
+
+    let root = tempfile::tempdir().expect("global root");
+    crate::ensure_host_identity(root.path(), || {
+        Ok(crate::NewHostIdentity {
+            host_id: "replica".to_string(),
+            task_prefix: "RP".to_string(),
+        })
+    })
+    .expect("host identity");
+    let workspace = Workspace {
+        id: "ws_replica".to_string(),
+        name: "Replica".to_string(),
+        owner_machine_id: Some("hm_owner".to_string()),
+        git_remote: None,
+        ship_mode: None,
+        base_branch: "agent-main".to_string(),
+        status: WorkspaceStatus::Active,
+        created_at: Utc::now(),
+        updated_at: Utc::now(),
+    };
+    crate::workspace_registry::save_registry_to(
+        &WorkspaceRegistry {
+            workspaces: vec![workspace.clone()],
+            checkouts: vec![WorkspaceCheckout {
+                workspace_id: workspace.id.clone(),
+                repo_root: root.path().join("checkout"),
+                orbit_dir: root.path().join("checkout/.orbit"),
+                role: Some(orbit_common::types::WorkspaceCheckoutRole::Replica),
+                owner_machine_id: Some("hm_owner".to_string()),
+                path_overrides: Vec::new(),
+            }],
+            ..Default::default()
+        },
+        &crate::workspace_registry::registry_path_for(root.path()),
+    )
+    .expect("replica registry");
+    let host = BrokerMcpHost::new(root.path().to_path_buf());
+    let context = ToolSessionContext::trusted_local(
+        Some(workspace.id.clone()),
+        Some("hm_replica".to_string()),
+        Some("replica".to_string()),
+    );
+
+    for definition in canonical_mcp_tool_definitions().expect("registered tools") {
+        let name = definition.schema.name;
+        if !super::host::is_coordination_record_write(&name) {
+            continue;
+        }
+        let mut call_context = context.clone();
+        call_context.effective_capabilities = BTreeSet::from([*definition
+            .policy
+            .allowed_capabilities()
+            .first()
+            .expect("coordination writer capability")]);
+        let error = host
+            .call_tool(
+                &name,
+                json!({"workspace": workspace.id, "model": "codex"}),
+                call_context,
+            )
+            .expect_err("every registered coordination mutation must be refused");
+        assert!(error.to_string().contains("hm_owner"), "{name}: {error}");
+    }
+
+    let listed = host
+        .call_tool(
+            "orbit.task.list",
+            json!({"workspace": workspace.id}),
+            context,
+        )
+        .expect("replica coordination read is empty");
+    assert_eq!(listed, json!([]));
+}
+
+#[test]
 fn broker_merged_search_tags_duplicate_ids_with_their_workspace() {
     use std::process::Command;
 

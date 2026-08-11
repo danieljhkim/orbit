@@ -1,6 +1,6 @@
 use chrono::Utc;
 use orbit_common::types::{
-    NotFoundKind, OrbitError, Workspace, WorkspaceCheckout, WorkspaceStatus,
+    NotFoundKind, OrbitError, Workspace, WorkspaceCheckout, WorkspaceCheckoutRole, WorkspaceStatus,
 };
 use orbit_store::sqlite::task_registry::{WorkspaceConfig, write_workspace_config};
 use serde_json::json;
@@ -83,4 +83,47 @@ fn registered_checkout_opens_a_bound_runtime() {
             ..
         })
     ));
+}
+
+#[test]
+fn replica_runtime_refuses_task_writes_and_hides_coordination_reads() {
+    let root = tempfile::tempdir().expect("root");
+    let global = root.path().join("global");
+    let repo = root.path().join("replica");
+    let orbit_dir = repo.join(".orbit");
+    std::fs::create_dir_all(&global).expect("global");
+    std::fs::create_dir_all(&orbit_dir).expect("orbit directory");
+    write_workspace_config(
+        &orbit_dir,
+        &WorkspaceConfig {
+            schema_version: 1,
+            workspace_id: "ws_runtime".to_string(),
+        },
+    )
+    .expect("workspace config");
+    let workspace = workspace("logical-replica", "local");
+    let checkout = WorkspaceCheckout {
+        workspace_id: workspace.id.clone(),
+        repo_root: repo,
+        orbit_dir,
+        role: Some(WorkspaceCheckoutRole::Replica),
+        owner_machine_id: Some("hm_owner".to_string()),
+        path_overrides: Vec::new(),
+    };
+    let runtime = RemoteRuntimeFactory::open_registered_checkout(&global, &workspace, &checkout)
+        .expect("replica runtime");
+
+    let error = runtime
+        .add_task(orbit_core::command::task::TaskAddParams {
+            title: "must not fork".to_string(),
+            ..Default::default()
+        })
+        .expect_err("replica task write must fail closed");
+    assert!(error.to_string().contains("hm_owner"), "{error}");
+    assert!(
+        runtime
+            .list_tasks()
+            .expect("empty replica task list")
+            .is_empty()
+    );
 }

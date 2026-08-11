@@ -12,7 +12,7 @@ use orbit_common::utility::fs::atomic_write_text;
 use serde::Deserialize;
 use serde_json::Value;
 
-use crate::host_identity::{HostIdentityState, HostMode, inspect_host_identity};
+use crate::host_identity::{HostIdentityState, inspect_host_identity};
 
 /// Returns the global Orbit directory: `~/.orbit/`.
 pub fn global_orbit_dir() -> Result<PathBuf, OrbitError> {
@@ -381,7 +381,6 @@ pub fn validate_workspaces(registry: &mut WorkspaceRegistry) {
 
 #[derive(Debug, Clone)]
 struct RegistryHostContext {
-    mode: HostMode,
     machine_id: Option<String>,
 }
 
@@ -394,14 +393,12 @@ fn registry_host_context(path: &Path) -> Result<RegistryHostContext, OrbitError>
     })?;
     match inspect_host_identity(global_root)? {
         HostIdentityState::Present(identity) => Ok(RegistryHostContext {
-            mode: identity.mode,
             machine_id: Some(identity.machine_id),
         }),
         // Pre-host-identity installations are the legacy standalone case.
-        HostIdentityState::Legacy { .. } | HostIdentityState::Absent => Ok(RegistryHostContext {
-            mode: HostMode::Standalone,
-            machine_id: None,
-        }),
+        HostIdentityState::Legacy { .. } | HostIdentityState::Absent => {
+            Ok(RegistryHostContext { machine_id: None })
+        }
     }
 }
 
@@ -523,13 +520,13 @@ fn validate_registry(
         }
 
         if checkout.role.is_none() {
-            if context.mode == HostMode::Standalone {
+            if context.machine_id.is_none() {
                 checkout.role = Some(WorkspaceCheckoutRole::Owner);
                 changed = true;
             } else {
                 return Err(invalid_registry(format!(
-                    "workspace '{}' is missing a local checkout role in {} mode",
-                    checkout.workspace_id, context.mode
+                    "workspace '{}' is missing a local checkout role; run `orbit workspace role` to declare owner or replica",
+                    checkout.workspace_id
                 )));
             }
         }
@@ -550,30 +547,24 @@ fn validate_registry(
                                 checkout.workspace_id
                             )));
                         }
-                        None if context.mode == HostMode::Standalone => {
+                        None if context.machine_id.is_none() => {
                             workspace.owner_machine_id = Some(machine_id.to_string());
                             changed = true;
                         }
                         None => {
                             return Err(invalid_registry(format!(
-                                "workspace '{}' declares local owner role but has no declared \
-                                 owner_machine_id in {} mode",
-                                checkout.workspace_id, context.mode
+                                "workspace '{}' declares local owner role but has no declared owner_machine_id",
+                                checkout.workspace_id
                             )));
                         }
                         Some(_) => {}
                     }
-                } else if context.mode != HostMode::Standalone {
-                    return Err(invalid_registry(format!(
-                        "workspace '{}' cannot validate owner role without a local machine_id",
-                        checkout.workspace_id
-                    )));
                 }
             }
             Some(WorkspaceCheckoutRole::Replica) => {
-                if context.mode == HostMode::Standalone {
+                if context.machine_id.is_none() {
                     return Err(invalid_registry(format!(
-                        "workspace '{}' cannot use replica role in standalone mode",
+                        "workspace '{}' cannot validate replica role without a local machine_id",
                         checkout.workspace_id
                     )));
                 }
@@ -616,12 +607,12 @@ fn validate_registry(
         checkout.path_overrides.dedup();
         changed |= checkout.path_overrides.len() != before;
     }
-    if context.mode != HostMode::Standalone {
+    if context.machine_id.is_some() {
         for workspace in &registry.workspaces {
             if workspace.owner_machine_id.is_none() {
                 return Err(invalid_registry(format!(
-                    "workspace '{}' is missing owner_machine_id in {} mode",
-                    workspace.id, context.mode
+                    "workspace '{}' is missing owner_machine_id",
+                    workspace.id
                 )));
             }
         }
@@ -696,10 +687,12 @@ fn migrate_legacy_registry(
             workspace_id: workspace_id.clone(),
             repo_root: legacy_workspace.root,
             orbit_dir: legacy_workspace.orbit_dir,
-            // Only standalone mode has a compatibility rule for legacy
-            // checkouts that predate explicit roles. Multi-host modes must
-            // fail closed instead of inferring ownership from a local path.
-            role: (context.mode == HostMode::Standalone).then_some(WorkspaceCheckoutRole::Owner),
+            // Only installations without a host identity may use the legacy
+            // owner default. Identity-bearing machines must declare a role.
+            role: context
+                .machine_id
+                .is_none()
+                .then_some(WorkspaceCheckoutRole::Owner),
             owner_machine_id: None,
             path_overrides: overrides_by_workspace
                 .remove(&workspace_id)

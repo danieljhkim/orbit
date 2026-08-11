@@ -30,6 +30,7 @@ impl OrbitRuntime {
         agent: Option<String>,
         model: Option<String>,
     ) -> Result<Task, OrbitError> {
+        self.ensure_coordination_task_write_permitted()?;
         self.update_task_with_status_note_and_identity(id, params, None, agent, model)
     }
 

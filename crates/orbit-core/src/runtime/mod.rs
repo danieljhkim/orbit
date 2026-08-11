@@ -69,6 +69,10 @@ pub(crate) use task_records::TaskRecordUpdateParams;
 pub struct OrbitRuntime {
     context: OrbitContext,
     workspace_binding: Option<Arc<WorkspaceRuntimeBinding>>,
+    /// A higher-level registry may mark this local checkout as a replica. Core
+    /// stays registry-neutral; it only carries the refusal supplied by that
+    /// owner so every task-record writer shares one fail-closed gate.
+    coordination_write_owner: Option<Arc<str>>,
     pub event_log: event_bus::EventLog,
     /// Outcome of the [ORB-10012] workspace-layout pre-flight that ran when
     /// this runtime opened (empty `applied` when the layout was already
@@ -253,6 +257,7 @@ impl OrbitRuntime {
         let runtime = Self {
             context,
             workspace_binding: binding.map(Arc::new),
+            coordination_write_owner: None,
             event_log: event_bus::EventLog::default(),
             layout_report: Arc::new(layout_report),
             _temp_dir: None,
@@ -278,6 +283,7 @@ impl OrbitRuntime {
         Ok(Self {
             context,
             workspace_binding: None,
+            coordination_write_owner: None,
             event_log: event_bus::EventLog::default(),
             layout_report: Arc::new(orbit_store::layout::LayoutUpgradeReport::default()),
             _temp_dir: Some(Arc::new(temp_dir)),
@@ -293,6 +299,26 @@ impl OrbitRuntime {
     pub fn with_actor(mut self, actor: ActorIdentity) -> Self {
         self.context.set_actor(actor);
         self
+    }
+
+    /// Attach the declared remote owner for a replica checkout. This is set by
+    /// the registry-owning composition layer, never inferred by Core.
+    pub fn with_coordination_write_owner(mut self, owner_machine_id: Option<String>) -> Self {
+        self.coordination_write_owner = owner_machine_id.map(Arc::from);
+        self
+    }
+
+    pub(crate) fn ensure_coordination_task_write_permitted(&self) -> Result<(), OrbitError> {
+        let Some(owner_machine_id) = self.coordination_write_owner.as_deref() else {
+            return Ok(());
+        };
+        Err(OrbitError::InvalidInput(format!(
+            "coordination writes are refused in this replica checkout; workspace is owned by machine '{owner_machine_id}'"
+        )))
+    }
+
+    pub(crate) fn coordination_task_reads_visible(&self) -> bool {
+        self.coordination_write_owner.is_none()
     }
 
     /// Returns in-process events recorded during this session only. Not persisted across process
