@@ -567,6 +567,30 @@ impl BrokerMcpHost {
             .unwrap_or_else(|| workspace_id.to_string())
     }
 
+    /// Return the declared owner only when this machine's binding is explicitly
+    /// a replica. This reads the machine-local registry; it never infers an
+    /// owner from the process, path, or transport.
+    fn replica_owner_machine_id(
+        &self,
+        workspace_id: &str,
+        binding: Option<&ExactCheckoutBinding>,
+    ) -> Option<String> {
+        if let Some(binding) = binding
+            && binding.role == WorkspaceCheckoutRole::Replica
+        {
+            return binding.owner_machine_id.clone();
+        }
+        let registry_path = crate::workspace_registry::registry_path_for(&self.global_root);
+        let registry = crate::workspace_registry::load_registry_from(&registry_path).ok()?;
+        let checkout = registry
+            .checkouts
+            .iter()
+            .find(|checkout| checkout.workspace_id == workspace_id)?;
+        (checkout.role == Some(WorkspaceCheckoutRole::Replica))
+            .then(|| checkout.owner_machine_id.clone())
+            .flatten()
+    }
+
     fn legacy_friction_root(
         &self,
         workspace_id: &str,
@@ -749,6 +773,22 @@ impl BrokerMcpHost {
             self.record_preflight_denial(name, &input, &context, &error);
             return Err(error);
         }
+        if let Some(owner_machine_id) =
+            self.replica_owner_machine_id(&workspace_id, binding.as_ref())
+        {
+            if is_coordination_record_write(name) {
+                let error = OrbitError::InvalidInput(format!(
+                    "coordination write '{name}' is refused in this replica checkout; workspace is owned by machine '{owner_machine_id}'"
+                ));
+                self.record_preflight_denial(name, &input, &context, &error);
+                return Err(error);
+            }
+            if is_coordination_record_read(name) {
+                let result = Ok(Value::Array(Vec::new()));
+                self.record_coordination_outcome(name, &context, &result);
+                return result;
+            }
+        }
         if definition.policy.placement() == McpToolPlacement::Hub
             && !with_context
             && !local_workflow_execution
@@ -834,6 +874,27 @@ impl BrokerMcpHost {
             None => audited_mcp_call_with_session_context(&runtime, name, input, context),
         }
     }
+}
+
+/// The coordination-record mutators all pass the broker before either the
+/// checkout-local runtime or the checkoutless coordinator can open a store.
+/// Keep this explicit and test it against the registered MCP surface so a new
+/// mutator cannot silently create a replica-local fork.
+pub(super) fn is_coordination_record_write(name: &str) -> bool {
+    matches!(
+        name,
+        "orbit.task.add"
+            | "orbit.task.approve"
+            | "orbit.task.artifact.put"
+            | "orbit.task.start"
+            | "orbit.task.update"
+            | "orbit.friction.add"
+            | "orbit.friction.update"
+    )
+}
+
+fn is_coordination_record_read(name: &str) -> bool {
+    matches!(name, "orbit.task.list" | "orbit.friction.list")
 }
 
 impl McpHost for BrokerMcpHost {

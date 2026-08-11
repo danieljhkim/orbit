@@ -57,6 +57,9 @@ impl OrbitRuntime {
     }
 
     pub fn list_tasks(&self) -> Result<Vec<Task>, OrbitError> {
+        if !self.coordination_task_reads_visible() {
+            return Ok(Vec::new());
+        }
         self.stores().tasks().list_tasks()
     }
 
@@ -65,10 +68,16 @@ impl OrbitRuntime {
     pub fn task_status_index(
         &self,
     ) -> Result<BTreeMap<String, orbit_common::types::TaskStatus>, OrbitError> {
+        if !self.coordination_task_reads_visible() {
+            return Ok(BTreeMap::new());
+        }
         self.stores().tasks().task_status_index()
     }
 
     pub fn list_tasks_by_tags(&self, tags: &[String]) -> Result<Vec<Task>, OrbitError> {
+        if !self.coordination_task_reads_visible() {
+            return Ok(Vec::new());
+        }
         self.stores().tasks().list_tasks_by_tags(tags)
     }
 
@@ -112,6 +121,9 @@ impl OrbitRuntime {
         external_ref: Option<&ExternalRef>,
         has_external_ref_system: Option<&str>,
     ) -> Result<Vec<Task>, OrbitError> {
+        if !self.coordination_task_reads_visible() {
+            return Ok(Vec::new());
+        }
         self.stores().tasks().list_tasks_filtered(
             status,
             priority,
@@ -123,6 +135,9 @@ impl OrbitRuntime {
     }
 
     pub fn search_tasks(&self, query: &str) -> Result<Vec<Task>, OrbitError> {
+        if !self.coordination_task_reads_visible() {
+            return Ok(Vec::new());
+        }
         self.stores().tasks().search_tasks(query)
     }
 
@@ -131,6 +146,9 @@ impl OrbitRuntime {
         query: &str,
         tags: &[String],
     ) -> Result<Vec<Task>, OrbitError> {
+        if !self.coordination_task_reads_visible() {
+            return Ok(Vec::new());
+        }
         self.stores().tasks().search_tasks_filtered(query, tags)
     }
 }
