@@ -9,9 +9,10 @@ use orbit_core::runtime::{
     OrbitRuntimeRoots, ResolvedOrbitRoots, WorkspaceRootHint, WorkspaceRuntimeBinding,
 };
 use orbit_core::{OrbitRuntime, resolved_ship_mode};
+use orbit_store::sqlite::task_registry::{TaskRegistryStore, task_registry_path};
 use orbit_store::workspace_id_for_orbit_dir;
 
-use crate::workspace_registry;
+use crate::{HOST_TOML_FILE, load_host_identity, workspace_registry};
 
 /// Remote workspace metadata keeps the logical catalog ID distinct from the
 /// task/runtime ID stored in `.orbit/config.yaml`.
@@ -87,11 +88,13 @@ impl RemoteRuntimeFactory {
     ) -> Result<OrbitRuntime, OrbitError> {
         let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
         let roots = Self::resolve_roots_for_cwd(&cwd, root_override)?;
+        sync_task_prefix(&roots.global_root)?;
         let binding = binding_for_roots(&roots)?;
         OrbitRuntime::initialize_from_resolved_roots(roots, binding)
     }
 
     pub fn open_resolved_roots(roots: OrbitRuntimeRoots) -> Result<OrbitRuntime, OrbitError> {
+        sync_task_prefix(&roots.global_root)?;
         let binding = binding_for_roots(&roots)?;
         match binding {
             Some(binding) => OrbitRuntime::from_resolved_roots_with_binding(
@@ -113,6 +116,7 @@ impl RemoteRuntimeFactory {
         workspace: &Workspace,
         checkout: &WorkspaceCheckout,
     ) -> Result<OrbitRuntime, OrbitError> {
+        sync_task_prefix(global_root)?;
         let binding = workspace_runtime_binding(workspace, checkout)?;
         OrbitRuntime::from_roots_with_binding(global_root, &checkout.orbit_dir, binding)
     }
@@ -123,6 +127,7 @@ impl RemoteRuntimeFactory {
         local_root: &Path,
         binding: WorkspaceRuntimeBinding,
     ) -> Result<OrbitRuntime, OrbitError> {
+        sync_task_prefix(global_root)?;
         OrbitRuntime::from_resolved_roots_with_binding(
             global_root,
             shared_root,
@@ -130,6 +135,18 @@ impl RemoteRuntimeFactory {
             binding,
         )
     }
+}
+
+/// Project the host-owned task namespace into the neutral task allocator.
+/// Custom/legacy roots without host.toml retain the historical ORB default;
+/// once an identity exists, malformed or conflicting state fails closed.
+pub(crate) fn sync_task_prefix(global_root: &Path) -> Result<(), OrbitError> {
+    if !global_root.join(HOST_TOML_FILE).is_file() {
+        return Ok(());
+    }
+    let identity = load_host_identity(global_root)?;
+    let registry = TaskRegistryStore::open(&task_registry_path(global_root))?;
+    registry.set_task_prefix(&identity.task_prefix)
 }
 
 fn workspace_root_hint(cwd: &Path) -> Option<WorkspaceRootHint> {

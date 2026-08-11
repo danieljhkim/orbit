@@ -786,13 +786,15 @@ impl BrokerMcpHost {
             }
             let legacy_root = self.legacy_friction_root(&workspace_id, binding.as_ref());
             let task_partition_id = self.coordination_workspace_id(&workspace_id, binding.as_ref());
-            let result = HubCoordinationExecutor::new_with_task_partition(
-                &self.global_root,
-                workspace_id,
-                task_partition_id,
-                legacy_root,
-            )
-            .and_then(|executor| executor.execute_tool(name, input, context.clone()));
+            let result = crate::runtime::sync_task_prefix(&self.global_root).and_then(|()| {
+                HubCoordinationExecutor::new_with_task_partition(
+                    &self.global_root,
+                    workspace_id,
+                    task_partition_id,
+                    legacy_root,
+                )
+                .and_then(|executor| executor.execute_tool(name, input, context.clone()))
+            });
             self.record_coordination_outcome(name, &context, &result);
             return result;
         }

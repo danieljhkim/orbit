@@ -11,9 +11,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
-use orbit_common::types::{
-    Crew, CrewAssignment, ORB_TASK_ID_MAX, OrbitError, activity_job::Provider, resolve_crew,
-};
+use orbit_common::types::{Crew, CrewAssignment, OrbitError, activity_job::Provider, resolve_crew};
 use orbit_common::utility::log_rotation::LogRotationConfig;
 use orbit_common::utility::redaction::redact_home_dir;
 use serde::de::DeserializeOwned;
@@ -159,8 +157,8 @@ define_config_settings! {
     },
     tasks_id_start: Option<u32> => u32 {
         key: "tasks.id_start", value_type: "integer",
-        description: "Floor for the local task-id allocator on this machine (forward-only; lets machines hold disjoint id ranges). Capped by ORB_TASK_ID_MAX.",
-        resolve: |raw: Option<u32>| resolve_tasks_id_start(raw),
+        description: "Floor for the local task-id allocator on this machine (forward-only; lets machines hold disjoint id ranges).",
+        resolve: |raw: Option<u32>| Ok::<_, OrbitError>(raw),
     },
     workflow_auto_ship: bool => bool {
         key: "workflow.auto_ship", value_type: "bool",
@@ -315,16 +313,6 @@ fn resolve_optional_non_empty(
         }
     })
     .transpose()
-}
-
-fn resolve_tasks_id_start(raw: Option<u32>) -> Result<Option<u32>, OrbitError> {
-    if raw.is_some_and(|start| start > ORB_TASK_ID_MAX) {
-        return Err(OrbitError::InvalidInput(format!(
-            "tasks.id_start {} exceeds maximum task id {ORB_TASK_ID_MAX}",
-            raw.unwrap_or_default()
-        )));
-    }
-    Ok(raw)
 }
 
 pub(super) fn resolve_default_crew(

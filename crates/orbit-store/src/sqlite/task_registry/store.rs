@@ -5,10 +5,11 @@ use std::sync::{Arc, Mutex};
 
 use orbit_common::types::{
     NotFoundKind, ORB_TASK_ID_MAX, OrbitError, TaskEnvelopeV2, TaskRelation, TaskRelationEdge,
-    TaskRelationType, TaskStatus, format_orb_task_id, is_valid_orb_task_id, normalize_task_tags,
-    validate_orb_task_id, validate_task_relations_for_source,
+    TaskRelationType, TaskStatus, format_task_id, is_valid_orb_task_id, is_valid_task_id_prefix,
+    normalize_task_tags, parse_task_number, task_id_prefix, validate_orb_task_id,
+    validate_task_relations_for_source,
 };
-use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params, params_from_iter};
+use rusqlite::{Connection, TransactionBehavior, params, params_from_iter};
 
 use super::projection::create_projection_symlink;
 use super::queries::{
@@ -235,11 +236,11 @@ impl TaskRegistryStore {
             return Err(OrbitError::not_found(NotFoundKind::Workspace, workspace_id));
         }
 
-        let next: i64 = tx
+        let (next, task_prefix): (i64, String) = tx
             .query_row(
-                "SELECT next_number FROM allocator_state WHERE authority = 'local'",
+                "SELECT next_number, task_prefix FROM allocator_state WHERE authority = 'local'",
                 [],
-                |row| row.get(0),
+                |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .map_err(|e| OrbitError::Store(e.to_string()))?;
         if next > i64::from(ORB_TASK_ID_MAX) {
@@ -253,7 +254,82 @@ impl TaskRegistryStore {
         tx.commit().map_err(|e| OrbitError::Store(e.to_string()))?;
 
         let next = u32::try_from(next).map_err(|e| OrbitError::Store(e.to_string()))?;
-        format_orb_task_id(next)
+        format_task_id(&task_prefix, next)
+    }
+
+    /// Bind the allocator to the immutable prefix from this machine's host
+    /// identity. A pristine legacy-default row may adopt the configured prefix;
+    /// an allocator that has minted anything cannot be renamed.
+    pub fn set_task_prefix(&self, task_prefix: &str) -> Result<(), OrbitError> {
+        if !is_valid_task_id_prefix(task_prefix) {
+            return Err(OrbitError::InvalidInput(format!(
+                "task prefix '{task_prefix}' must be 2-5 uppercase ASCII letters and must not use a reserved artifact namespace"
+            )));
+        }
+        let mut conn = self
+            .conn
+            .lock()
+            .map_err(|e| OrbitError::Store(format!("mutex poisoned: {e}")))?;
+        let tx = conn
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(|e| OrbitError::Store(e.to_string()))?;
+        let (current, next): (String, i64) = tx
+            .query_row(
+                "SELECT task_prefix, next_number FROM allocator_state WHERE authority = 'local'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .map_err(|e| OrbitError::Store(e.to_string()))?;
+        if current == task_prefix {
+            tx.commit().map_err(|e| OrbitError::Store(e.to_string()))?;
+            return Ok(());
+        }
+        let task_count: i64 = tx
+            .query_row("SELECT COUNT(*) FROM task_bundle_bindings", [], |row| {
+                row.get(0)
+            })
+            .map_err(|e| OrbitError::Store(e.to_string()))?;
+        if current != "ORB" || next != 0 || task_count != 0 {
+            return Err(OrbitError::InvalidInput(format!(
+                "task prefix is immutable after allocation begins (registry uses '{current}', host identity requests '{task_prefix}')"
+            )));
+        }
+        tx.execute(
+            "UPDATE allocator_state SET task_prefix = ?1, updated_at = ?2 WHERE authority = 'local'",
+            params![task_prefix, now_string()],
+        )
+        .map_err(|e| OrbitError::Store(e.to_string()))?;
+        tx.commit().map_err(|e| OrbitError::Store(e.to_string()))
+    }
+
+    /// Prefixes recognized by the local registry: the active minting prefix
+    /// plus every prefix already present in registered task bundles.
+    pub fn known_task_prefixes(&self) -> Result<BTreeSet<String>, OrbitError> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| OrbitError::Store(format!("mutex poisoned: {e}")))?;
+        let active: String = conn
+            .query_row(
+                "SELECT task_prefix FROM allocator_state WHERE authority = 'local'",
+                [],
+                |row| row.get(0),
+            )
+            .map_err(|e| OrbitError::Store(e.to_string()))?;
+        let mut prefixes = BTreeSet::from([active]);
+        let mut statement = conn
+            .prepare("SELECT task_id FROM task_bundle_bindings")
+            .map_err(|e| OrbitError::Store(e.to_string()))?;
+        let ids = statement
+            .query_map([], |row| row.get::<_, String>(0))
+            .map_err(|e| OrbitError::Store(e.to_string()))?;
+        for id in ids {
+            let id = id.map_err(|e| OrbitError::Store(e.to_string()))?;
+            if let Some(prefix) = task_id_prefix(&id) {
+                prefixes.insert(prefix.to_string());
+            }
+        }
+        Ok(prefixes)
     }
 
     pub fn canonical_task_bundle_path(
@@ -987,30 +1063,28 @@ impl TaskRegistryStore {
             .conn
             .lock()
             .map_err(|e| OrbitError::Store(format!("mutex poisoned: {e}")))?;
-        let raw: Option<String> = conn
-            .query_row(
-                "SELECT task_id FROM task_bundle_bindings
-                 ORDER BY task_id DESC LIMIT 1",
-                [],
-                |row| row.get(0),
-            )
-            .optional()
+        let mut statement = conn
+            .prepare("SELECT task_id FROM task_bundle_bindings")
             .map_err(|e| OrbitError::Store(e.to_string()))?;
-        Ok(raw.as_deref().and_then(parse_orb_task_number))
+        let ids = statement
+            .query_map([], |row| row.get::<_, String>(0))
+            .map_err(|e| OrbitError::Store(e.to_string()))?;
+        let mut max = None;
+        for id in ids {
+            let id = id.map_err(|e| OrbitError::Store(e.to_string()))?;
+            if let Some(number) = parse_orb_task_number(&id) {
+                max = Some(max.map_or(number, |current: u32| current.max(number)));
+            }
+        }
+        Ok(max)
     }
 
     /// Seed the allocator so the next allocated id is `start`.
     ///
     /// Only ever moves the counter *forward*: if `start` is below the current
     /// `next_number` the call is refused, so two machines can be handed disjoint
-    /// id ranges without risk of silently rewinding a live counter. `start` must
-    /// not exceed [`ORB_TASK_ID_MAX`].
+    /// id ranges without risk of silently rewinding a live counter.
     pub fn seed_allocator_start(&self, start: u32) -> Result<AllocatorSeedOutcome, OrbitError> {
-        if start > ORB_TASK_ID_MAX {
-            return Err(OrbitError::InvalidInput(format!(
-                "tasks.id_start {start} exceeds maximum task id {ORB_TASK_ID_MAX}"
-            )));
-        }
         let mut conn = self
             .conn
             .lock()
@@ -1037,12 +1111,10 @@ impl TaskRegistryStore {
     }
 
     /// Ensure the allocator will not hand out any id `< min_next`. Never lowers
-    /// the counter. Values above the exhausted ceiling saturate at
-    /// `ORB_TASK_ID_MAX + 1`. Used after import/reindex to move `next_number`
-    /// past the highest landed id.
+    /// the counter. Used after import/reindex to move `next_number` past the
+    /// highest landed id.
     pub fn bump_allocator_to_at_least(&self, min_next: u32) -> Result<(), OrbitError> {
-        let ceiling = ORB_TASK_ID_MAX + 1;
-        let target = min_next.min(ceiling);
+        let target = min_next;
         let mut conn = self
             .conn
             .lock()
@@ -1165,10 +1237,7 @@ fn task_relation_edges(envelope: &TaskEnvelopeV2) -> Vec<TaskRelationEdge> {
         .collect()
 }
 
-/// Parse the numeric suffix of a canonical `ORB-00000` task id.
+/// Parse the numeric suffix of any canonical task id.
 pub(crate) fn parse_orb_task_number(task_id: &str) -> Option<u32> {
-    task_id
-        .strip_prefix("ORB-")
-        .filter(|suffix| suffix.len() == 5 && suffix.bytes().all(|b| b.is_ascii_digit()))
-        .and_then(|suffix| suffix.parse::<u32>().ok())
+    parse_task_number(task_id)
 }

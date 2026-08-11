@@ -481,7 +481,7 @@ mod tests {
     /// that would become dangling references in a consumer workspace. Placeholder
     /// forms (`ORB-NNNN`, `L-NNNN`, `ADR-NNNN`, `<task-id>`) use non-digit
     /// stand-ins and are intentionally *not* matched.
-    fn find_artifact_ids(content: &str) -> Vec<String> {
+    fn find_artifact_ids(content: &str, task_prefixes: &BTreeSet<String>) -> Vec<String> {
         let b = content.as_bytes();
         let n = b.len();
         let boundary = |i: usize| i == 0 || !b[i - 1].is_ascii_alphanumeric();
@@ -499,11 +499,20 @@ mod tests {
         let mut i = 0;
         while i < n {
             if boundary(i) {
-                // ORB-<digit...> (task ids). ORB-NNNN / ORB-NNNNN placeholders
-                // have a non-digit after the dash and are skipped.
-                if starts(i, b"ORB-") && is_digit(i + 4) {
-                    let d = digit_run(i + 4);
-                    out.push(String::from_utf8_lossy(&b[i..i + 4 + d]).into_owned());
+                // <registered-prefix>-<digit...> (task ids). Prefixes that only
+                // look task-shaped are deliberately ignored: accepting every
+                // uppercase token is too weak against ordinary prose.
+                for prefix in task_prefixes {
+                    let prefix_bytes = prefix.as_bytes();
+                    let dash = i + prefix_bytes.len();
+                    let digits = dash + 1;
+                    if starts(i, prefix_bytes) && dash < n && b[dash] == b'-' && is_digit(digits) {
+                        let d = digit_run(digits);
+                        let end = digits + d;
+                        if end == n || !b[end].is_ascii_alphanumeric() {
+                            out.push(String::from_utf8_lossy(&b[i..end]).into_owned());
+                        }
+                    }
                 }
                 // ADR-<digit...> (decision-record ids). ADR ids are allocated
                 // per workspace, so a concrete one resolves to a different
@@ -575,7 +584,10 @@ mod tests {
     const PRIVATE_PERSONAL_NAMES: &[&str] = &["Daniel"];
 
     /// Every reason `content` is not repository-agnostic. Empty == portable.
-    fn portability_violations(content: &str) -> Vec<String> {
+    fn portability_violations_with_task_prefixes(
+        content: &str,
+        task_prefixes: &BTreeSet<String>,
+    ) -> Vec<String> {
         let mut hits = Vec::new();
 
         // Unguarded Orbit source paths (crate tree only exists in a source clone).
@@ -618,11 +630,33 @@ mod tests {
         }
 
         // Workspace-local artifact IDs.
-        for id in find_artifact_ids(content) {
+        for id in find_artifact_ids(content, task_prefixes) {
             hits.push(format!("workspace-local artifact id `{id}`"));
         }
 
         hits
+    }
+
+    fn portability_violations(content: &str) -> Vec<String> {
+        portability_violations_with_task_prefixes(content, &BTreeSet::from(["ORB".to_string()]))
+    }
+
+    #[test]
+    fn task_id_scanner_matches_only_prefixes_known_to_the_local_registry() {
+        let root = tempfile::tempdir().expect("registry root");
+        let registry = orbit_store::sqlite::task_registry::TaskRegistryStore::open(
+            &orbit_store::sqlite::task_registry::task_registry_path(root.path()),
+        )
+        .expect("open task registry");
+        registry
+            .set_task_prefix("DE")
+            .expect("register task prefix");
+        let prefixes = registry.known_task_prefixes().expect("known task prefixes");
+
+        assert_eq!(
+            find_artifact_ids("known DE-100000 but unknown XY-12345", &prefixes),
+            vec!["DE-100000"]
+        );
     }
 
     #[test]
