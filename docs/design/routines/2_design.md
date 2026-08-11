@@ -1,7 +1,7 @@
 ---
 title: Routines — Design
 owner: claude
-last_updated: 2026-07-18
+last_updated: 2026-08-11
 status: Accepted
 feature: routines
 doc_role: design
@@ -10,7 +10,7 @@ summary: Proposed contract for routine definitions, sweep dispatch, host-local s
 tags: [routines, scheduler]
 paths: ["crates/orbit-cli/src/command/routine/**", "crates/orbit-core/src/routines/**", "crates/orbit-remote/src/routines.rs", "crates/orbit-store/src/sqlite/routine_store/**"]
 related_features: [routines, activity-job, host-registry]
-related_artifacts: [ORB-10001, ORB-10021, ORB-10207, ORB-10270, ORB-10319, ADR-0223]
+related_artifacts: [ORB-10001, ORB-10021, ORB-10207, ORB-10270, ORB-10319, ADR-0223, ADR-0355]
 ---
 
 # Routines — Design
@@ -19,6 +19,24 @@ This doc is the v1 contract as shipped in [ORB-10021]: the routine definition sc
 how definitions are discovered, what `orbit sweep` does on each invocation, where state
 lives, and how the OS clock drives it. Cross-host coordination, event triggers, and everything else deferred is
 in [3_vision.md](./3_vision.md). Decision rationale lives in [4_decisions.md](./4_decisions.md).
+
+## OS sweep clock controls
+
+There are two independent scheduling layers. The per-user OS clock wakes Orbit and
+invokes the stateless `orbit sweep` pass; each versioned routine's cron expression then
+decides whether that pass fires work. The OS clock is host-local infrastructure, not a
+routine definition. Its durable configuration is `~/.orbit/clock.toml`, defaults to a
+60-second cadence, and accepts only whole-minute values from 60 through 3600 seconds.
+
+`orbit routine clock status` reports both configured cadence and the native manager's
+effective enabled state. `orbit routine clock pause` disables only launchd/systemd
+scheduled invocations (surviving logout/reboot through the native per-user manager);
+it preserves routine cursors, fire history, and per-routine pauses, and a deliberate
+`orbit sweep` is still available. `enable` resumes with the configured cadence, while
+`set --cadence-seconds N` atomically rewrites the host setting and reloads the existing
+unit identity. On an activation failure Orbit reports the concrete native recovery
+command rather than claiming the clock is active. launchd and systemd user managers are
+the supported platforms; there is no resident Orbit daemon ([ADR-0355]).
 
 ---
 

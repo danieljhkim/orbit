@@ -6,6 +6,7 @@
 
 use clap::{Args, Subcommand};
 
+use super::clock::RoutineClockArgs;
 use super::init::RoutineInitArgs;
 use super::list::RoutineListArgs;
 use super::pause::RoutinePauseArgs;
@@ -45,6 +46,8 @@ pub enum RoutineSubcommand {
     Pause(RoutinePauseArgs),
     /// Clear a host-local pause
     Resume(RoutineResumeArgs),
+    /// Show, pause, enable, or configure the host OS sweep clock
+    Clock(RoutineClockArgs),
     /// Read this host's identity and optionally install the OS clock unit
     Init(RoutineInitArgs),
 }
@@ -56,6 +59,7 @@ impl RoutineSubcommand {
             Self::Show(args) => args.execute_without_runtime(),
             Self::Pause(args) => args.execute_without_runtime(),
             Self::Resume(args) => args.execute_without_runtime(),
+            Self::Clock(args) => args.execute_without_runtime(),
             Self::Init(args) => args.execute_without_runtime(),
         }
     }

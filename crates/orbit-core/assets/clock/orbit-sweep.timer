@@ -1,11 +1,11 @@
-# Minutely timer for `orbit sweep` [ORB-10021] / ADR-0204.
+# Configured timer for `orbit sweep` [ORB-10720] / ADR-0204.
 # Persistent=true covers host downtime at the OS layer; per-routine
 # `missed_run` policy decides whether a covered gap produces a make-up fire.
 [Unit]
-Description=Run orbit sweep every minute
+Description=Run orbit sweep every {{CADENCE_SECONDS}} seconds
 
 [Timer]
-OnCalendar=*:*:00
+OnUnitActiveSec={{CADENCE_SECONDS}}s
 Persistent=true
 AccuracySec=5s
 

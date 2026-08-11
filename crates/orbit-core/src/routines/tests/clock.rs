@@ -3,7 +3,7 @@ use std::path::Path;
 
 use tempfile::tempdir;
 
-use super::super::clock::render_systemd_service;
+use super::super::clock::{ClockSettings, render_systemd_service, render_systemd_timer};
 
 fn service_path(rendered: &str) -> &str {
     rendered
@@ -56,4 +56,40 @@ fn rendered_systemd_service_discovers_local_provider_launchers() {
     assert!(rendered.contains("Type=oneshot"));
     assert!(rendered.contains("KillMode=process"));
     assert!(rendered.contains("ExecStart=/opt/orbit/bin/orbit sweep"));
+}
+
+#[test]
+fn systemd_timer_renders_default_and_configured_cadence() {
+    assert!(render_systemd_timer(ClockSettings::default()).contains("OnUnitActiveSec=60s"));
+    assert!(
+        render_systemd_timer(ClockSettings {
+            cadence_seconds: 300
+        })
+        .contains("OnUnitActiveSec=300s")
+    );
+}
+
+#[test]
+fn clock_cadence_rejects_subminute_and_out_of_range_values() {
+    assert!(
+        ClockSettings {
+            cadence_seconds: 30
+        }
+        .validate()
+        .is_err()
+    );
+    assert!(
+        ClockSettings {
+            cadence_seconds: 90
+        }
+        .validate()
+        .is_err()
+    );
+    assert!(
+        ClockSettings {
+            cadence_seconds: 3_660
+        }
+        .validate()
+        .is_err()
+    );
 }
