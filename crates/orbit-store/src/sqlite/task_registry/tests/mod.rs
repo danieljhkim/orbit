@@ -139,6 +139,26 @@ fn allocator_returns_monotonic_orb_ids() {
 }
 
 #[test]
+fn allocator_uses_host_prefix_and_expands_past_five_digits() {
+    let temp = TempDir::new().expect("tempdir");
+    let store = store(&temp);
+    store.set_task_prefix("DE").expect("set host prefix");
+    store
+        .seed_allocator_start(99_999)
+        .expect("seed near width boundary");
+    let workspace = bind(&store, temp.path());
+
+    assert_eq!(
+        store.allocate_task_id(&workspace.workspace_id).expect("id"),
+        "DE-99999"
+    );
+    assert_eq!(
+        store.allocate_task_id(&workspace.workspace_id).expect("id"),
+        "DE-100000"
+    );
+}
+
+#[test]
 fn open_creates_registry_parent_and_workspaces_dir() {
     let temp = TempDir::new().expect("tempdir");
     let path = registry_path(&temp);
@@ -335,6 +355,12 @@ fn open_migrates_path_coupled_registry_once_without_changing_coordination_state(
     assert_eq!(statuses.get("ORB-00041"), Some(&TaskStatus::Done));
     assert_eq!(migrated.allocator_next_number().expect("allocator"), 42);
     assert_eq!(
+        migrated
+            .allocate_task_id("legacy-workspace-aaaaaa")
+            .expect("continue migrated allocator"),
+        "ORB-00042"
+    );
+    assert_eq!(
         fs::read_to_string(canonical_path.join("payload.sentinel")).expect("read payload"),
         "preserve-me"
     );
@@ -376,7 +402,7 @@ fn open_migrates_path_coupled_registry_once_without_changing_coordination_state(
             .expect("status projection"),
         statuses
     );
-    assert_eq!(reopened.allocator_next_number().expect("allocator"), 42);
+    assert_eq!(reopened.allocator_next_number().expect("allocator"), 43);
 }
 
 #[test]
@@ -1374,16 +1400,6 @@ fn seed_allocator_start_refuses_to_lower() {
         .expect_err("must refuse lowering");
     assert!(matches!(err, OrbitError::InvalidInput(_)));
     assert_eq!(store.allocator_next_number().expect("read"), 5_000);
-}
-
-#[test]
-fn seed_allocator_start_rejects_above_max() {
-    let temp = TempDir::new().expect("tempdir");
-    let store = store(&temp);
-    let err = store
-        .seed_allocator_start(ORB_TASK_ID_MAX + 1)
-        .expect_err("must reject above max");
-    assert!(matches!(err, OrbitError::InvalidInput(_)));
 }
 
 #[test]

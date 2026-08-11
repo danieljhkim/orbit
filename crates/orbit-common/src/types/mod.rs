@@ -173,8 +173,9 @@ pub use task_artifacts::{
     TASK_COMMENTS_FILE_NAME, TASK_DESCRIPTION_FILE_NAME, TASK_ENVELOPE_FILE_NAME,
     TASK_EVENTS_FILE_NAME, TASK_EXECUTION_SUMMARY_FILE_NAME, TASK_PLAN_FILE_NAME, TaskCommentRowV2,
     TaskEnvelopeV2, TaskEventRowV2, TaskRelation, TaskRelationEdge, TaskRelationType,
-    format_orb_task_id, is_valid_orb_task_id, validate_orb_task_id,
-    validate_relative_artifact_path, validate_task_relations_for_source,
+    format_orb_task_id, format_task_id, is_valid_orb_task_id, is_valid_task_id_prefix,
+    parse_task_number, task_id_prefix, validate_orb_task_id, validate_relative_artifact_path,
+    validate_task_relations_for_source,
 };
 pub use task_plan::{TaskPlan, TaskPlanCheckpoint, TaskPlanSuccessCriterion, parse_task_plan};
 pub use tool::{

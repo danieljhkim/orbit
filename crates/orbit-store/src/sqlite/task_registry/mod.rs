@@ -20,7 +20,7 @@ mod workspace_config;
 mod workspace_id;
 
 const CONFIG_SCHEMA_VERSION: u32 = 1;
-const REGISTRY_SCHEMA_VERSION: u32 = 4;
+const REGISTRY_SCHEMA_VERSION: u32 = 5;
 
 pub use store::TaskRegistryStore;
 pub(crate) use store::parse_orb_task_number;

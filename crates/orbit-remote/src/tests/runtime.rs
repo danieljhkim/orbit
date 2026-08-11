@@ -86,6 +86,47 @@ fn registered_checkout_opens_a_bound_runtime() {
 }
 
 #[test]
+fn registered_checkout_task_creation_uses_host_task_prefix() {
+    let root = tempfile::tempdir().expect("root");
+    let global = root.path().join("global");
+    let repo = root.path().join("repo");
+    let orbit_dir = repo.join(".orbit");
+    std::fs::create_dir_all(&global).expect("global");
+    std::fs::create_dir_all(&orbit_dir).expect("orbit dir");
+    std::fs::write(
+        global.join("host.toml"),
+        "schema_version = 2\nmachine_id = \"hm_runtime_test\"\nhost_id = \"runtime-test\"\ntask_prefix = \"DE\"\n",
+    )
+    .expect("host identity");
+    write_workspace_config(
+        &orbit_dir,
+        &WorkspaceConfig {
+            schema_version: 1,
+            workspace_id: "ws_prefixed_runtime".to_string(),
+        },
+    )
+    .expect("workspace config");
+    let workspace = workspace("logical-prefixed", "local");
+    let checkout = WorkspaceCheckout::owner(workspace.id.clone(), repo, orbit_dir);
+    let runtime = RemoteRuntimeFactory::open_registered_checkout(&global, &workspace, &checkout)
+        .expect("bound runtime");
+
+    let task = runtime
+        .execute_tool_command(
+            "orbit.task.add",
+            json!({
+                "title": "Prefix-aware task",
+                "description": "Mint through the normal task creation surface.",
+                "workspace": "."
+            }),
+            Some("codex".to_string()),
+            Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
+        )
+        .expect("task creation");
+    assert_eq!(task["id"], "DE-00000");
+}
+
+#[test]
 fn replica_runtime_refuses_task_writes_and_hides_coordination_reads() {
     let root = tempfile::tempdir().expect("root");
     let global = root.path().join("global");

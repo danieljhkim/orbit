@@ -6,11 +6,13 @@ use super::util::now_string;
 
 pub(super) fn apply_schema(conn: &Connection) -> Result<(), OrbitError> {
     migrate_path_coupled_workspace_bindings(conn)?;
+    migrate_allocator_state_v5(conn)?;
     conn.execute_batch(
         "
         CREATE TABLE IF NOT EXISTS allocator_state (
             authority TEXT PRIMARY KEY,
-            next_number INTEGER NOT NULL CHECK(next_number >= 0 AND next_number <= 100000),
+            next_number INTEGER NOT NULL CHECK(next_number >= 0),
+            task_prefix TEXT NOT NULL,
             updated_at TEXT NOT NULL
         );
 
@@ -116,14 +118,42 @@ pub(super) fn apply_schema(conn: &Connection) -> Result<(), OrbitError> {
     .map_err(|e| OrbitError::Store(e.to_string()))?;
 
     conn.execute(
-        "INSERT OR IGNORE INTO allocator_state(authority, next_number, updated_at)
-         VALUES ('local', 0, ?1)",
+        "INSERT OR IGNORE INTO allocator_state(authority, next_number, task_prefix, updated_at)
+         VALUES ('local', 0, 'ORB', ?1)",
         [now_string()],
     )
     .map_err(|e| OrbitError::Store(e.to_string()))?;
     conn.pragma_update(None, "user_version", i64::from(REGISTRY_SCHEMA_VERSION))
         .map_err(|e| OrbitError::Store(format!("failed to set registry user_version: {e}")))?;
     Ok(())
+}
+
+/// Schema v5 stores the machine's immutable minting prefix alongside its one
+/// monotonic allocator and removes the obsolete five-digit ceiling.
+fn migrate_allocator_state_v5(conn: &Connection) -> Result<(), OrbitError> {
+    if !table_has_column(conn, "allocator_state", "next_number")?
+        || table_has_column(conn, "allocator_state", "task_prefix")?
+    {
+        return Ok(());
+    }
+
+    conn.execute_batch(
+        "
+        BEGIN IMMEDIATE;
+        CREATE TABLE allocator_state_v5 (
+            authority TEXT PRIMARY KEY,
+            next_number INTEGER NOT NULL CHECK(next_number >= 0),
+            task_prefix TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+        INSERT INTO allocator_state_v5(authority, next_number, task_prefix, updated_at)
+        SELECT authority, next_number, 'ORB', updated_at FROM allocator_state;
+        DROP TABLE allocator_state;
+        ALTER TABLE allocator_state_v5 RENAME TO allocator_state;
+        COMMIT;
+        ",
+    )
+    .map_err(|error| OrbitError::Store(format!("migrate task allocator to v5: {error}")))
 }
 
 /// Schema v4 splits stable coordination identity from machine-local checkout

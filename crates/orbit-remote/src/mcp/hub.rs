@@ -37,6 +37,7 @@ pub(super) struct HubMcpHost {
 impl HubMcpHost {
     pub(super) fn new(global_root: PathBuf, capability: McpCapability) -> Result<Self, OrbitError> {
         let identity = load_host_identity(&global_root)?;
+        crate::runtime::sync_task_prefix(&global_root)?;
         if identity.mode != HostMode::Hub {
             return Err(OrbitError::InvalidInput(format!(
                 "orbit mcp serve --hub requires host.toml mode 'hub'; machine '{}' ({}) is '{}'",
