@@ -153,13 +153,14 @@ pub use spoke_registration::{
 };
 pub use task::{
     DEFAULT_TASK_LIST_LIMIT, DependencyDeadEnd, ExternalRef, GITHUB_PR_EXTERNAL_REF_SYSTEM,
-    NO_DIFF_EXPECTED_TAG, ResolvedTaskDependency, Task, TaskArtifact, TaskComment, TaskComplexity,
+    NO_DIFF_EXPECTED_TAG, ResolvedTaskDependency, ResolvedTaskRelation,
+    TASK_REFERENCE_NOT_VERIFIABLE_HERE, Task, TaskArtifact, TaskComment, TaskComplexity,
     TaskCreateStatus, TaskHistoryEntry, TaskPriority, TaskStatus, TaskType,
     UnsatisfiableTaskDependency, build_task_status_index, media_type_for_artifact_path,
     normalize_task_dependencies, normalize_task_tags, prune_missing_context_files,
-    push_external_ref_if_missing, resolve_task_dependencies, task_dependencies_ready,
-    task_matches_tags, unmet_task_dependencies, unsatisfiable_task_dependencies,
-    validate_task_dependencies,
+    push_external_ref_if_missing, resolve_task_dependencies, resolve_task_relations,
+    task_dependencies_ready, task_matches_tags, task_reference_is_not_verifiable_here,
+    unmet_task_dependencies, unsatisfiable_task_dependencies, validate_task_dependencies,
 };
 pub use task_artifacts::{
     ArtifactManifestFileV2, ArtifactManifestV2, ORB_TASK_ID_MAX, ORB_TASK_ID_PREFIX,

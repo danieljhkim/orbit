@@ -199,7 +199,7 @@ pub(crate) fn task_to_json(task: &Task, status_by_id: &BTreeMap<String, TaskStat
         "type": task.task_type.to_string(),
         "pr_status": task.pr_status,
         "external_refs": task.external_refs,
-        "relations": task.relations,
+        "relations": orbit_common::types::resolve_task_relations(task, status_by_id),
         "source_task_id": task.source_task_id(),
         "job_run_id": task.job_run_id,
         "crew": task.crew,
