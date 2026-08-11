@@ -7,7 +7,6 @@ mod discovery;
 mod e1;
 mod hub_client;
 mod hub_link;
-mod knowledge_allocation;
 mod learning;
 mod proxy;
 mod schema;
@@ -925,7 +924,6 @@ struct McpConformanceFixture {
 #[derive(Debug, Deserialize)]
 struct McpConformancePrivateConnector {
     spoke_registration: McpConformanceSpokeRegistration,
-    knowledge_allocation: McpConformanceKnowledgeAllocation,
 }
 
 #[derive(Debug, Deserialize)]
@@ -939,19 +937,6 @@ struct McpConformanceSpokeRegistration {
     ordinary_calls_require_active_registration: bool,
     only_path_bearing_fields: Vec<String>,
     cache_refresh: String,
-}
-
-#[derive(Debug, Deserialize)]
-struct McpConformanceKnowledgeAllocation {
-    method: String,
-    schema_version: u32,
-    advertised: bool,
-    ordinary_tools_call: bool,
-    allowed_capabilities: BTreeSet<McpCapability>,
-    active_caller_required: bool,
-    path_bearing_fields: Vec<String>,
-    automatic_replay: bool,
-    lookup_keys: BTreeSet<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -1065,34 +1050,6 @@ fn canonical_mcp_policy_conforms_to_frozen_v1_fixture() {
             .tools
             .contains_key(orbit_common::types::SPOKE_REGISTRATION_METHOD_V1),
         "private registration must never enter the canonical tool matrix"
-    );
-    let allocation = fixture.private_connector.knowledge_allocation;
-    assert_eq!(
-        allocation.method,
-        orbit_common::types::HUB_KNOWLEDGE_ALLOCATION_METHOD_V1
-    );
-    assert_eq!(
-        allocation.schema_version,
-        u32::from(orbit_common::types::HUB_KNOWLEDGE_ALLOCATION_SCHEMA_VERSION)
-    );
-    assert!(!allocation.advertised);
-    assert!(!allocation.ordinary_tools_call);
-    assert_eq!(
-        allocation.allowed_capabilities,
-        BTreeSet::from([McpCapability::Agent, McpCapability::Operator])
-    );
-    assert!(allocation.active_caller_required);
-    assert!(allocation.path_bearing_fields.is_empty());
-    assert!(!allocation.automatic_replay);
-    assert_eq!(
-        allocation.lookup_keys,
-        BTreeSet::from(["mcp_call_id".to_string(), "workspace-kind-id".to_string()])
-    );
-    assert!(
-        !fixture
-            .tools
-            .contains_key(orbit_common::types::HUB_KNOWLEDGE_ALLOCATION_METHOD_V1),
-        "private allocation must never enter the canonical tool matrix"
     );
     assert_eq!(
         fixture.hub_schema_digest.domain_tag,

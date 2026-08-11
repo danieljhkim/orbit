@@ -3,19 +3,19 @@ summary: "Worktree Artifacts - Design"
 type: design
 title: "Worktree Artifacts - Design"
 owner: codex
-last_updated: 2026-08-09
+last_updated: 2026-08-11
 status: Accepted
 feature: worktree-artifacts
 doc_role: design
 tags: ["worktree-artifacts"]
 paths: ["crates/orbit-remote/**", "crates/orbit-core/**", "crates/orbit-store/**", "crates/orbit-cli/**"]
 related_features: ["worktree-artifacts", "host-registry", "mcp-bridge"]
-related_artifacts: ["ORB-00199", "ORB-00200", "ORB-00201", "ORB-10272", "ORB-10297", "ORB-10330", "ORB-10545", "ORB-10668", "ORB-10669", "ADR-0177", "ADR-0229", "ADR-0302", "ADR-0339", "ADR-0342"]
+related_artifacts: ["ORB-00199", "ORB-00200", "ORB-00201", "ORB-10272", "ORB-10297", "ORB-10330", "ORB-10545", "ORB-10668", "ORB-10669", "ORB-10725", "ADR-0177", "ADR-0229", "ADR-0302", "ADR-0339", "ADR-0342", "ADR-0357"]
 ---
 
 # Worktree Artifacts - Design
 
-The current implementation treats ADR and learning bodies as branch-local files with globally allocated IDs. The shared root owns durable coordination state; the local root owns files that should be staged with the branch.
+The current implementation treats ADR and learning bodies as branch-local files with workspace-local IDs ([ADR-0357]). The shared root owns durable coordination state; the local root owns files that should be staged with the branch.
 
 ## 1. Runtime Roots
 
@@ -35,65 +35,34 @@ shared lock, then body writes update the row with:
 
 Backfilled shared-root artifacts receive `body_path` during allocator initialization so old ADRs and migrated learnings remain readable from any worktree.
 
-This remains the compatibility allocator and every current create path continues to
-use it during F1. [ORB-10272] does not redirect standalone or worktree creation.
+This is the only allocator, and every create path uses it. [ADR-0357] keys
+knowledge `(workspace_id, artifact_key)`, so an ID is unique within its workspace
+and makes no claim outside it; [ORB-10725] deleted the hub-global sequence that
+§2.1 and §2.2 once described.
 
-### 2.1 Hub-global sequence substrate
+### 2.1 The withdrawn hub-global sequence substrate
 
-Multi-host authority is separate from worktree federation. Remote feature migration
-v2 installs dormant, independent ADR and learning sequences in the hub's
-config-resolved `orbit.db`, together with per-workspace reconciliation state and an
-immutable `mcp_call_id` allocation ledger. Those rows are path-free; they neither
-replace `body_path` nor make the hub a reader of a spoke owner's worktree.
+[ORB-10272] added Remote feature migration v2: dormant hub-global ADR and learning
+sequences in the hub's config-resolved `orbit.db`, per-workspace reconciliation
+state, an immutable `mcp_call_id` allocation ledger, and a dormant/active authority
+marker. [ORB-10330] added the owner-side `finalize_preallocated` paths and the
+gated broker composition that paired one hub allocation with one owner-checkout
+finalization, correlated by `mcp_call_id`.
 
-Before hub authority can activate, every registered workspace's complete hub-local
-legacy inventory is validated: all valid lifecycle files and all legacy allocation
-rows in every status. Missing sources and cross-workspace duplicate IDs fail before
-any mutation. The final forward-only reseed and authority flip are one restart-safe
-transition. A late workspace stays knowledge-ineligible until the same complete
-local reconciliation succeeds. The hub never contacts an owner to repair a missing
-source.
+**Both are removed** ([ORB-10725], [ADR-0357]). Public issuance never activated, so
+no ID was ever drawn from the sequence and nothing had to be renumbered; what the
+substrate encoded was a superseded model, which is why it was deleted rather than
+parked alongside the registry tables that ADR-0358 keeps dormant for v2. Remote
+feature v2 keeps its ledger slot — feature-migration names are immutable, so a
+database that recorded it must still find it — but the slot is a no-op, and Remote
+feature v3 drops the tables `IF EXISTS` so a database that applied the original v2
+converges on the same shape as a fresh one.
 
-After activation, allocation advances one kind's sequence and commits its immutable
-correlation ledger plus canonical audit atomically. It still does not write the
-artifact body: the owner writes the branch-local bundle under `local_root`. A
-finalize failure therefore consumes a valid unused global ID. There is no
-reservation, release, reuse, or remote-finalize protocol.
-
-F1 leaves the substrate dormant and exposes no public allocation tool. F3 alone
-activates public issuance and cuts owner creation over; standalone hosts cannot
-enter hub authority.
-
-### 2.2 Preallocated owner finalizers
-
-[ORB-10330] adds the owner-side finalizer that consumes a hub allocation without
-becoming an allocation authority. Each owner file store gains a
-`finalize_preallocated(id, payload)` path beside its standalone create path: it
-takes the caller-supplied canonical id (chosen upstream by the §2.1 hub
-sequence), so it never calls the compatibility allocator, abandons, retries, or
-selects a second id. It preserves the existing validation, exclusive bundle
-creation, sidecar/index update, and local partial-write cleanup, and it installs
-a **non-authoritative** owner-local body-path projection in the standalone
-`id_allocations` table so ADR/learning list, show, and lifecycle resolve the
-finalized body. The projection is inserted directly for the given id; it never
-advances the local sequence and never claims canonical allocation authority.
-
-A pre-existing artifact at the supplied id fails the finalization
-deterministically and is never overwritten or adopted. A failure after the id is
-fixed removes only the local partial bundle and projection; it never rolls back
-or abandons the immutable hub allocation, which stays consumed as a valid gap.
-The finalizer takes no absolute path — it operates on the D3-selected
-checkout-bound owner store, so process cwd and remote paths cannot redirect it.
-
-The composite `orbit.learning.add` / `orbit.adr.add` broker path pairs one hub
-allocation with one owner finalization: for a local (hub-owned) workspace it
-allocates through §2.1 then finalizes in the selected owner checkout; a foreign
-spoke owner or a local replica is rejected by D3 owner preflight *before*
-allocation, so no avoidable gap is burned. Allocation and owner finalization
-correlate through the original trusted `mcp_call_id`, workspace id, kind, and
-allocated id. [ORB-10330] adds and tests these finalizers and the broker
-composition behind an inactive cutover gate; public creation stays on the
-compatibility path until F3 activates issuance and cuts the callers over.
+What is left is the shape §2 already described: one workspace-local allocator per
+workspace, reached only by the owning machine. `orbit.learning.add` and
+`orbit.adr.add` are single owner-local transactions — no reservation, no expiry, no
+orphaned ID, no finalize/pull race — and the [ORB-10364] authoring role gate sits on
+that one surface with nothing at stake on refusal.
 
 ## 3. Write Path
 
@@ -214,12 +183,13 @@ The `worktree_root` column preserves historical rows from earlier phases, so old
 - [ORB-10297] made ADR federation body-preserving and typed the read/mutation boundary.
 - [ORB-10272] added the dormant, path-free Remote-v2 hub sequence and reconciliation
   substrate while preserving the standalone shared-root allocator and owner-local
-  body/federation semantics; F3 owns activation and caller cutover.
+  body/federation semantics. Never activated; removed by [ORB-10725].
 - [ORB-10330] added the owner-side preallocated finalizers (`finalize_preallocated`
-  on the ADR and learning stores) and the gated broker composition: they consume a
-  hub allocation into the exact owner checkout via a non-authoritative body-path
-  projection, never allocate/abandon/retry, and reject replica/foreign-spoke owners
-  before allocation. Public creation stays on the compatibility path until F3.
+  on the ADR and learning stores) and the gated broker composition. Removed by
+  [ORB-10725]: with no allocation step there is no preallocated ID to finalize.
+- [ORB-10725] deleted both substrates under [ADR-0357], turned Remote feature v2
+  into a no-op slot, and added Remote feature v3 to drop its tables from databases
+  that had applied it.
 - [ORB-10545] added exact-bundle reconciliation and made superseded ADR bodies
   repository-published decision history under [ADR-0302].
 - [ORB-10669] published the remaining partitions (§6) under [ADR-0339], made the

@@ -10,9 +10,12 @@ use sha2::{Digest, Sha256};
 
 use super::schema::remote_input_schema;
 
-/// Revision 3 adds the strict connector-private hub knowledge-ID allocator.
-/// Bumping this fact prevents a newer client from negotiating successfully
-/// with a hub that has the same canonical tool schemas but no allocation seam.
+/// Revision 3 was advanced by the strict connector-private hub knowledge-ID
+/// allocator, withdrawn with the global knowledge allocator ([ADR-0357],
+/// [ORB-10725]); v1 negotiates no private knowledge-allocation method. The
+/// revision itself is history and is never rolled back — reusing 3 for a
+/// different contract would let a peer built against the allocator seam
+/// negotiate successfully with a hub that no longer has it.
 pub const MCP_CONTRACT_REVISION: u32 = 3;
 /// Revision 2 adds the operator-only workflow execution family [ORB-10534].
 pub const CANONICAL_MCP_REGISTRY_REVISION: u32 = 2;

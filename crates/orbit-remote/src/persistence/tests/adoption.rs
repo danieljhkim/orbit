@@ -4,27 +4,72 @@ use orbit_store::Store;
 use super::super::{REMOTE_SCHEMA_FEATURE, REMOTE_SCHEMA_MIGRATIONS, RemoteStore};
 
 #[test]
-fn remote_store_adopts_registry_and_installs_dormant_knowledge_schema_as_feature_v2() {
+fn remote_store_adopts_registry_and_leaves_no_knowledge_allocation_schema() {
     let store = RemoteStore::open_in_memory().expect("remote store");
     let status = store.schema_status().expect("remote schema status");
 
     assert_eq!(status.feature, REMOTE_SCHEMA_FEATURE);
-    assert_eq!(status.current_version, 2);
-    assert_eq!(status.applied.len(), 2);
+    assert_eq!(status.current_version, 3);
+    assert_eq!(status.applied.len(), 3);
     assert_eq!(status.applied[0].name, "adopt_global_v8_registry_schema");
+    // [ORB-10725] The v2 slot keeps its shipped name — the ledger validates
+    // names position by position — but no longer creates anything.
     assert_eq!(status.applied[1].name, "dormant_hub_knowledge_sequences");
+    assert_eq!(
+        status.applied[2].name,
+        "drop_dormant_hub_knowledge_sequences"
+    );
     assert!(status.pending.is_empty());
 
-    let allocator = store
-        .knowledge_allocator_state()
-        .expect("dormant allocator state");
+    for table in WITHDRAWN_KNOWLEDGE_TABLES {
+        assert!(
+            !remote_table_exists(&store, table),
+            "a fresh database must never carry the withdrawn table '{table}'"
+        );
+    }
+}
+
+/// [ORB-10725] A database that applied the original dormant-substrate v2 opens
+/// cleanly under the removal path: v3 drops what v2 built, and nothing about
+/// the recorded ledger prefix has to change.
+#[test]
+fn remote_store_drops_the_withdrawn_knowledge_schema_from_a_v2_database() {
+    let store = Store::open_in_memory().expect("store");
+    seed_legacy_dormant_knowledge_schema(&store);
+    for table in WITHDRAWN_KNOWLEDGE_TABLES {
+        assert!(
+            table_exists(&store, table),
+            "seeded table '{table}' missing"
+        );
+    }
+
+    let remote = RemoteStore::from_store(store.clone()).expect("open a v2 database");
+
+    let status = remote.schema_status().expect("remote schema status");
+    assert_eq!(status.current_version, 3);
     assert_eq!(
-        allocator.status,
-        super::super::HubKnowledgeAllocatorStatus::Dormant
+        status
+            .applied
+            .iter()
+            .map(|entry| entry.name.as_str())
+            .collect::<Vec<_>>(),
+        [
+            "adopt_global_v8_registry_schema",
+            "dormant_hub_knowledge_sequences",
+            "drop_dormant_hub_knowledge_sequences",
+        ]
     );
-    assert_eq!(allocator.activation_generation, 0);
-    assert_eq!(allocator.adr_next_sequence, 1);
-    assert_eq!(allocator.learning_next_sequence, 1);
+    for table in WITHDRAWN_KNOWLEDGE_TABLES {
+        assert!(
+            !table_exists(&store, table),
+            "the removal path left '{table}' behind"
+        );
+    }
+    // Idempotent: reopening the same database applies nothing further.
+    drop(RemoteStore::from_store(store.clone()).expect("reopen after removal"));
+    for table in WITHDRAWN_KNOWLEDGE_TABLES {
+        assert!(!table_exists(&store, table));
+    }
 }
 
 #[test]
@@ -78,7 +123,7 @@ fn remote_store_refuses_a_future_remote_feature_version() {
             tx.connection()
                 .execute(
                     "INSERT INTO feature_schema_meta(feature, version, name, applied_at)
-                     VALUES (?1, 3, 'future_remote_schema', '2026-07-19T00:00:00Z')",
+                     VALUES (?1, 4, 'future_remote_schema', '2026-07-19T00:00:00Z')",
                     [REMOTE_SCHEMA_FEATURE],
                 )
                 .map_err(|error| OrbitError::Store(error.to_string()))?;
@@ -228,6 +273,165 @@ fn assert_feature_v1_not_recorded(store: &Store) {
         .expect("failed adoption left feature ledger readable");
     assert_eq!(status.current_version, 0);
     assert!(status.applied.is_empty());
+}
+
+/// Every object the withdrawn [ORB-10272] substrate created, as named by the
+/// original Remote v2 migration.
+const WITHDRAWN_KNOWLEDGE_TABLES: &[&str] = &[
+    "hub_knowledge_allocator_state",
+    "hub_knowledge_sequences",
+    "hub_knowledge_ids",
+    "hub_knowledge_workspace_reconciliation",
+    "hub_knowledge_allocation_ledger",
+];
+
+/// Reproduce a database that applied the original Remote v2 migration: its
+/// tables on disk plus the ledger prefix recording v1 and v2 as applied. v1 is
+/// validation-only over the shipped global schema, so recording it without
+/// re-running it matches what a real v2 database looks like.
+fn seed_legacy_dormant_knowledge_schema(store: &Store) {
+    store
+        .with_transaction(|tx| {
+            let conn = tx.connection();
+            conn.execute_batch(
+                r#"
+                CREATE TABLE hub_knowledge_allocator_state (
+                    id                    INTEGER PRIMARY KEY CHECK (id = 0),
+                    status                TEXT NOT NULL CHECK (status IN ('dormant', 'active')),
+                    activation_generation INTEGER NOT NULL DEFAULT 0
+                                              CHECK (activation_generation >= 0),
+                    activated_at          TEXT,
+                    updated_at            TEXT NOT NULL
+                );
+
+                INSERT INTO hub_knowledge_allocator_state(
+                    id, status, activation_generation, activated_at, updated_at
+                ) VALUES (0, 'dormant', 0, NULL, '2026-07-19T00:00:00Z');
+
+                CREATE TABLE hub_knowledge_sequences (
+                    kind          TEXT PRIMARY KEY CHECK (kind IN ('adr', 'learning')),
+                    next_sequence INTEGER NOT NULL,
+                    updated_at    TEXT NOT NULL
+                );
+
+                INSERT INTO hub_knowledge_sequences(kind, next_sequence, updated_at) VALUES
+                    ('adr', 1, '2026-07-19T00:00:00Z'),
+                    ('learning', 1, '2026-07-19T00:00:00Z');
+
+                CREATE TABLE hub_knowledge_ids (
+                    kind          TEXT NOT NULL CHECK (kind IN ('adr', 'learning')),
+                    id            TEXT NOT NULL,
+                    workspace_id  TEXT NOT NULL,
+                    sequence      INTEGER NOT NULL,
+                    origin        TEXT NOT NULL CHECK (origin IN ('legacy', 'allocated')),
+                    evidence_json TEXT NOT NULL,
+                    recorded_at   TEXT NOT NULL,
+                    PRIMARY KEY(kind, id),
+                    UNIQUE(kind, sequence)
+                );
+
+                CREATE INDEX hub_knowledge_ids_workspace
+                    ON hub_knowledge_ids(workspace_id, kind, sequence);
+
+                CREATE TABLE hub_knowledge_workspace_reconciliation (
+                    workspace_id              TEXT PRIMARY KEY,
+                    source_digest             TEXT NOT NULL,
+                    source_count              INTEGER NOT NULL,
+                    adr_max                   INTEGER NOT NULL,
+                    learning_max              INTEGER NOT NULL,
+                    reconciliation_generation INTEGER NOT NULL,
+                    reconciled_at             TEXT NOT NULL
+                );
+
+                CREATE TABLE hub_knowledge_allocation_ledger (
+                    mcp_call_id           TEXT PRIMARY KEY,
+                    workspace_id          TEXT NOT NULL,
+                    kind                  TEXT NOT NULL CHECK (kind IN ('adr', 'learning')),
+                    id                    TEXT NOT NULL,
+                    sequence              INTEGER NOT NULL,
+                    request_identity_json TEXT NOT NULL,
+                    allocated_at          TEXT NOT NULL,
+                    FOREIGN KEY(kind, id) REFERENCES hub_knowledge_ids(kind, id)
+                        ON UPDATE RESTRICT ON DELETE RESTRICT
+                );
+
+                CREATE INDEX hub_knowledge_allocation_lookup
+                    ON hub_knowledge_allocation_ledger(workspace_id, kind, id);
+
+                CREATE TRIGGER hub_knowledge_allocation_ledger_immutable_update
+                BEFORE UPDATE ON hub_knowledge_allocation_ledger
+                BEGIN
+                    SELECT RAISE(ABORT, 'hub knowledge allocation ledger is immutable');
+                END;
+
+                CREATE TRIGGER hub_knowledge_allocation_ledger_immutable_delete
+                BEFORE DELETE ON hub_knowledge_allocation_ledger
+                BEGIN
+                    SELECT RAISE(ABORT, 'hub knowledge allocation ledger is immutable');
+                END;
+                "#,
+            )
+            .map_err(|error| OrbitError::Store(error.to_string()))?;
+            // A live allocation row: the drop must not depend on the substrate
+            // being empty, and the ledger's immutable-delete trigger must not
+            // block it.
+            conn.execute(
+                "INSERT INTO hub_knowledge_ids(
+                     kind, id, workspace_id, sequence, origin, evidence_json, recorded_at
+                 ) VALUES ('learning', 'L-0007', 'ws-000000', 7, 'legacy', '[]', '2026-07-19T00:00:00Z')",
+                [],
+            )
+            .map_err(|error| OrbitError::Store(error.to_string()))?;
+            conn.execute(
+                "INSERT INTO hub_knowledge_allocation_ledger(
+                     mcp_call_id, workspace_id, kind, id, sequence,
+                     request_identity_json, allocated_at
+                 ) VALUES ('call-1', 'ws-000000', 'learning', 'L-0007', 7, '{}', '2026-07-19T00:00:00Z')",
+                [],
+            )
+            .map_err(|error| OrbitError::Store(error.to_string()))?;
+            for (version, name) in [
+                (1, "adopt_global_v8_registry_schema"),
+                (2, "dormant_hub_knowledge_sequences"),
+            ] {
+                conn.execute(
+                    "INSERT INTO feature_schema_meta(feature, version, name, applied_at)
+                     VALUES (?1, ?2, ?3, '2026-07-19T00:00:00Z')",
+                    rusqlite::params![REMOTE_SCHEMA_FEATURE, version, name],
+                )
+                .map_err(|error| OrbitError::Store(error.to_string()))?;
+            }
+            Ok(())
+        })
+        .expect("seed a legacy Remote v2 database");
+}
+
+fn table_exists(store: &Store, table: &str) -> bool {
+    store
+        .with_read_connection(|conn| {
+            conn.query_row(
+                "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1)",
+                [table],
+                |row| row.get::<_, i64>(0),
+            )
+            .map_err(|error| OrbitError::Store(error.to_string()))
+        })
+        .expect("inspect sqlite_master")
+        != 0
+}
+
+fn remote_table_exists(store: &RemoteStore, table: &str) -> bool {
+    store
+        .read(|conn| {
+            conn.query_row(
+                "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1)",
+                [table],
+                |row| row.get::<_, i64>(0),
+            )
+            .map_err(|error| OrbitError::Store(error.to_string()))
+        })
+        .expect("inspect sqlite_master")
+        != 0
 }
 
 fn host_row_hex(store: &Store) -> String {

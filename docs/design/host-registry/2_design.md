@@ -1,7 +1,7 @@
 ---
 title: Host Registry — Design
 owner: claude
-last_updated: 2026-08-10
+last_updated: 2026-08-11
 last_validated: 2026-08-10
 status: Draft
 feature: host-registry
@@ -11,7 +11,7 @@ summary: Mechanisms for host identity and machine task prefix, per-workspace own
 tags: [host-registry, multi-host, ownership, routines, data-placement]
 paths: ["crates/orbit-remote/**", "crates/orbit-core/**", "crates/orbit-store/**", "crates/orbit-mcp/**", "crates/orbit-common/**"]
 related_features: [host-registry, mcp-bridge, routines, remote-access, mcp-session-context, resident-orchestrator]
-related_artifacts: [ORB-00424, ORB-10247, ORB-10248, ORB-10249, ORB-10255, ORB-10257, ORB-10258, ORB-10267, ORB-10268, ORB-10269, ORB-10271, ORB-10272, ORB-10302, ORB-10319, ORB-10330, ORB-10332, ORB-10709, ADR-0200, ADR-0205, ADR-0208, ADR-0226, ADR-0227, ADR-0228, ADR-0229, ADR-0230, ADR-0231, ADR-0232, ADR-0235, ADR-0240, ADR-0352, ADR-0355, ADR-0356, ADR-0357, ADR-0358]
+related_artifacts: [ORB-00424, ORB-10247, ORB-10248, ORB-10249, ORB-10255, ORB-10257, ORB-10258, ORB-10267, ORB-10268, ORB-10269, ORB-10271, ORB-10272, ORB-10302, ORB-10319, ORB-10330, ORB-10332, ORB-10709, ORB-10725, ADR-0200, ADR-0205, ADR-0208, ADR-0226, ADR-0227, ADR-0228, ADR-0229, ADR-0230, ADR-0231, ADR-0232, ADR-0235, ADR-0240, ADR-0352, ADR-0355, ADR-0356, ADR-0357, ADR-0358]
 ---
 
 # Host Registry — Design
@@ -244,6 +244,16 @@ IDs entirely in favour of `(workspace_id, artifact_key)`, so the substrate is no
 merely unused but contradictory. It was never activated — public creation stayed on
 the compatibility path — so removal drops schema that never issued an ID. Parking
 unused code is cheap; parking code that encodes a superseded model is not.
+
+Removal cannot simply delete the v2 registry entry. `Store::apply_feature_migrations`
+validates a database's recorded ledger against the shipped registry position by
+position and refuses a changed migration name or a version it does not know, so a
+database that recorded `dormant_hub_knowledge_sequences` at v2 must still find that
+name at v2. [ORB-10725] therefore keeps the slot and empties it — a fresh database
+never creates the tables — and adds v3 `drop_dormant_hub_knowledge_sequences`,
+which drops every object `IF EXISTS`. One migration serves both populations: it
+removes the substrate from a database that applied the original v2 and passes
+through a database that never had it, so the two converge on the same schema.
 
 **Boundary with `~/.orbit/mcp.toml`.** `mcp.toml` is the client's trust policy for
 the routes it will initiate. In v1 it may name **more than one** route, since a
@@ -799,5 +809,12 @@ of that routine.** Consequences:
 - [ORB-10332] — removed the `orbit.host.list` MCP discovery tool as unused; the
   `orbit host list` CLI command and the `orbit.workspace.list` / `orbit.crew.list`
   MCP discovery tools remain.
+- [ORB-10725] — deleted [ORB-10272]'s allocation substrate and [ORB-10330]'s
+  preallocated finalizers under [ADR-0357]: the hub sequence service, the
+  reconciliation projection, the immutable ledger, the authority marker, and the
+  `orbit/private/allocate-knowledge-id/v1` connector method are gone; Remote
+  feature v2 is an empty slot and v3 drops its tables. Learning and ADR IDs are
+  workspace-local, and the [ORB-10364] authoring gate is the single surface in
+  front of a one-transaction owner-local write.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

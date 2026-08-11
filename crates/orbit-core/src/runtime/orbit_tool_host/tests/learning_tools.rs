@@ -566,85 +566,31 @@ fn ids_from_array(value: &Value) -> Vec<String> {
         .collect()
 }
 
-// --- [ORB-10330] runtime preallocated finalizers -------------------------
-
-#[test]
-fn finalize_preallocated_learning_lands_supplied_id_and_lists() {
-    let (_guard, runtime, _repo) = test_runtime();
-    // A non-sequential id proves the runtime path never selects a local id.
-    let learning = runtime
-        .finalize_preallocated_learning(
-            "L-0055",
-            LearningCreateParams {
-                summary: "hub preallocated learning".to_string(),
-                scope: LearningScope::default(),
-                body: "body".to_string(),
-                evidence: Vec::new(),
-                created_by: Some("test".to_string()),
-                priority: None,
-            },
-        )
-        .expect("finalize preallocated learning");
-    assert_eq!(learning.id, "L-0055");
-
-    // Lifecycle read/list work through the owner-local projection.
-    let fetched = runtime.get_learning("L-0055").expect("get learning");
-    assert_eq!(fetched.summary, "hub preallocated learning");
-    let ids: Vec<String> = runtime
-        .list_learnings(Some(LearningStatus::Active))
-        .expect("list learnings")
-        .into_iter()
-        .map(|learning| learning.id)
-        .collect();
-    assert!(ids.contains(&"L-0055".to_string()));
-}
-
-#[test]
-fn finalize_preallocated_adr_lands_supplied_id() {
-    let (_guard, runtime, _repo) = test_runtime();
-    let adr = runtime
-        .finalize_preallocated_adr(
-            "ADR-0055",
-            orbit_store::AdrCreateParams {
-                title: "Hub preallocated ADR".to_string(),
-                owner: "test".to_string(),
-                related_features: Vec::new(),
-                related_tasks: Vec::new(),
-                tags: Vec::new(),
-                paths: Vec::new(),
-                body: "decision body".to_string(),
-            },
-        )
-        .expect("finalize preallocated ADR");
-    assert_eq!(adr.id, "ADR-0055");
-    assert_eq!(adr.status, orbit_common::types::AdrStatus::Proposed);
-}
-
 #[test]
 fn adr_restore_tool_restores_exact_id_and_show_reads_body_immediately() {
     let (_guard, runtime, repo) = test_runtime();
-    runtime
-        .finalize_preallocated_adr(
-            "ADR-0055",
-            orbit_store::AdrCreateParams {
-                title: "Lost ADR".to_string(),
-                owner: "test".to_string(),
-                related_features: Vec::new(),
-                related_tasks: vec!["ORB-10538".to_string()],
-                tags: vec!["repair".to_string()],
-                paths: vec!["crates/**".to_string()],
-                body: "lost body".to_string(),
-            },
-        )
+    let seeded = runtime
+        .stores()
+        .adrs()
+        .add_adr(orbit_store::AdrCreateParams {
+            title: "Lost ADR".to_string(),
+            owner: "test".to_string(),
+            related_features: Vec::new(),
+            related_tasks: vec!["ORB-10538".to_string()],
+            tags: vec!["repair".to_string()],
+            paths: vec!["crates/**".to_string()],
+            body: "lost body".to_string(),
+        })
         .expect("seed allocated ADR");
-    std::fs::remove_dir_all(repo.join(".orbit/adrs/proposed/ADR-0055"))
+    let seeded_id = seeded.id.clone();
+    std::fs::remove_dir_all(repo.join(format!(".orbit/adrs/proposed/{seeded_id}")))
         .expect("remove seeded bundle");
 
     let restored = runtime
         .run_tool(
             "orbit.adr.restore",
             json!({
-                "id": "ADR-0055",
+                "id": seeded_id,
                 "title": "Restored ADR",
                 "owner": "codex",
                 "related_tasks": ["ORB-10538"],
@@ -654,12 +600,12 @@ fn adr_restore_tool_restores_exact_id_and_show_reads_body_immediately() {
             }),
         )
         .expect("restore tool succeeds");
-    assert_eq!(restored["id"], "ADR-0055");
+    assert_eq!(restored["id"], seeded_id);
 
     let shown = runtime
-        .run_tool("orbit.adr.show", json!({ "id": "ADR-0055" }))
+        .run_tool("orbit.adr.show", json!({ "id": seeded_id }))
         .expect("show restored ADR");
-    assert_eq!(shown["id"], "ADR-0055");
+    assert_eq!(shown["id"], seeded_id);
     assert_eq!(shown["body"], "restored exact body");
     assert_eq!(shown["artifact_origin"]["mode"], "local");
 
@@ -667,7 +613,7 @@ fn adr_restore_tool_restores_exact_id_and_show_reads_body_immediately() {
         .run_tool(
             "orbit.adr.restore",
             json!({
-                "id": "ADR-0055",
+                "id": seeded_id,
                 "title": "Overwrite attempt",
                 "owner": "codex",
                 "body": "must not replace",
@@ -679,7 +625,7 @@ fn adr_restore_tool_restores_exact_id_and_show_reads_body_immediately() {
         "got {retry:?}"
     );
     let shown_after_retry = runtime
-        .run_tool("orbit.adr.show", json!({ "id": "ADR-0055" }))
+        .run_tool("orbit.adr.show", json!({ "id": seeded_id }))
         .expect("show after retry");
     assert_eq!(shown_after_retry["body"], "restored exact body");
 }

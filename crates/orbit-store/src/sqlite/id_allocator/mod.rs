@@ -264,19 +264,6 @@ impl IdAllocator {
         self.record_body_path(IdAllocationKind::Learning, id, body_path)
     }
 
-    /// [ORB-10330] Install a non-authoritative owner-local projection for a
-    /// hub-preallocated ADR id and its body path.
-    ///
-    /// Unlike [`Self::allocate_adr`], this never selects an id or advances the
-    /// local sequence: ORB-10272's hub sequence is the sole allocation
-    /// authority, and the id here is the already-allocated canonical value. The
-    /// projection exists only so local list/show/lifecycle resolve the
-    /// finalized body; it is inserted (never upserted), so a colliding id fails
-    /// loudly rather than adopting or overwriting an existing row.
-    pub fn project_preallocated_adr(&self, id: &str, body_path: &Path) -> Result<(), OrbitError> {
-        self.project_preallocated(IdAllocationKind::Adr, id, body_path)
-    }
-
     /// [ORB-10538] Repoint an existing ADR allocation to a restored body, but
     /// only if every allocation field still matches the caller's snapshot.
     ///
@@ -297,17 +284,6 @@ impl IdAllocator {
             )));
         }
         self.restore_body_path_if_unchanged(expected, body_path)
-    }
-
-    /// [ORB-10330] Install a non-authoritative owner-local projection for a
-    /// hub-preallocated learning id and its body path. See
-    /// [`Self::project_preallocated_adr`] for the invariants.
-    pub fn project_preallocated_learning(
-        &self,
-        id: &str,
-        body_path: &Path,
-    ) -> Result<(), OrbitError> {
-        self.project_preallocated(IdAllocationKind::Learning, id, body_path)
     }
 
     pub fn abandon_learning(&self, id: &str) -> Result<(), OrbitError> {
@@ -661,40 +637,6 @@ impl IdAllocator {
                 kind.as_str()
             )));
         }
-        tx.commit()
-            .map_err(|error| OrbitError::Store(error.to_string()))?;
-        Ok(())
-    }
-
-    /// [ORB-10330] Insert a merged body-path projection for a caller-supplied
-    /// (hub-preallocated) id. Deliberately does not compute `next_id`, so it
-    /// never advances the local sequence; the hub owns the sequence. A plain
-    /// `INSERT` means a pre-existing row for `id` fails the finalization instead
-    /// of being silently adopted.
-    fn project_preallocated(
-        &self,
-        kind: IdAllocationKind,
-        id: &str,
-        body_path: &Path,
-    ) -> Result<(), OrbitError> {
-        let relative_body_path = relative_to(body_path, &self.inner.worktree_root);
-        let branch = best_effort_branch(&self.inner.worktree_root);
-        let _lock = self.acquire_lock()?;
-        let mut conn = self.lock_conn()?;
-        let tx = conn
-            .transaction_with_behavior(TransactionBehavior::Immediate)
-            .map_err(|error| OrbitError::Store(error.to_string()))?;
-        insert_allocation(
-            &tx,
-            kind,
-            id,
-            Utc::now().timestamp(),
-            &self.inner.worktree_root,
-            branch,
-            STATUS_MERGED,
-            Some(&relative_body_path),
-            false,
-        )?;
         tx.commit()
             .map_err(|error| OrbitError::Store(error.to_string()))?;
         Ok(())

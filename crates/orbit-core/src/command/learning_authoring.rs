@@ -22,8 +22,14 @@
 //! [ORB-10469], in both their CLI and `orbit.learning.*` tool forms. Reads
 //! (`show`, `list`, `search`, `stats`) are untouched in every context, as are
 //! `sync`, `prune`'s own bulk sweep, and the store-level writers used by the
-//! dashboard's human-driven API, the multi-host owner-finalize path, and test
-//! fixtures.
+//! dashboard's human-driven API and test fixtures.
+//!
+//! **Nothing is at stake on refusal.** [ORB-10725] removed the multi-host
+//! preallocate-then-finalize path: learning IDs are allocated per workspace by
+//! the owning machine (ADR-0357), so `orbit.learning.add` is one owner-local
+//! transaction and this gate sits on the single authoring surface in front of
+//! it. A refusal cannot strand an already-issued ID, because no ID exists
+//! until the write itself.
 
 use orbit_common::types::OrbitError;
 

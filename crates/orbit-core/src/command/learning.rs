@@ -57,8 +57,13 @@ impl OrbitRuntime {
     /// Executor-context callers are refused and redirected to `friction add`;
     /// see [`crate::command::learning_authoring`] for the policy and the
     /// orchestrator opt-in. Non-authoring writers (the dashboard's
-    /// request-attributed API, the multi-host owner-finalize path, fixtures)
-    /// keep calling [`Self::create_learning`], which stays ungated.
+    /// request-attributed API, fixtures) keep calling
+    /// [`Self::create_learning`], which stays ungated.
+    ///
+    /// [ORB-10725] This is now the *only* authoring path: with learning IDs
+    /// allocated per workspace by the owning machine ([ADR-0357]) there is no
+    /// preallocate-then-finalize sequence behind it, so a refusal here costs
+    /// nothing — no hub round trip has happened and no ID has been consumed.
     pub fn author_learning(&self, params: LearningCreateParams) -> Result<Learning, OrbitError> {
         ensure_learning_write_allowed(LearningWriteAttempt::Add {
             summary: &params.summary,
@@ -119,43 +124,6 @@ impl OrbitRuntime {
         let learning = self.stores().learnings().create_learning(params)?;
         self.record_id_allocation_audit("learning", &learning.id)?;
         Ok(learning)
-    }
-
-    /// [ORB-10330] Finalize a hub-preallocated learning at the caller-supplied
-    /// canonical `id` in this checkout-bound runtime.
-    ///
-    /// The multi-host broker calls this once ORB-10272's hub sequence has
-    /// allocated the id: it never allocates, abandons, retries, or renumbers.
-    /// Unlike [`Self::create_learning`], no local id-allocation audit is written
-    /// here — the hub records the canonical allocation audit transactionally and
-    /// the broker writes the correlated owner-finalization audit with trusted
-    /// provenance.
-    ///
-    /// [ORB-10364] Deliberately ungated: by the time a caller reaches finalize
-    /// the global id is already consumed and cannot be released, so a refusal
-    /// here would burn an id. When public `orbit.learning.add` traverses the
-    /// broker, the caller-role gate belongs in the preflight *before*
-    /// `compose_preallocated_knowledge_add` allocates —
-    /// see [`crate::command::learning_authoring::ensure_learning_write_allowed`].
-    pub fn finalize_preallocated_learning(
-        &self,
-        id: &str,
-        params: LearningCreateParams,
-    ) -> Result<Learning, OrbitError> {
-        self.stores()
-            .learnings()
-            .finalize_preallocated_learning(id, params)
-    }
-
-    /// [ORB-10330] Finalize a hub-preallocated ADR at the caller-supplied
-    /// canonical `id` in this checkout-bound runtime. See
-    /// [`Self::finalize_preallocated_learning`] for the invariants.
-    pub fn finalize_preallocated_adr(
-        &self,
-        id: &str,
-        params: orbit_store::AdrCreateParams,
-    ) -> Result<orbit_common::types::Adr, OrbitError> {
-        self.stores().adrs().finalize_preallocated_adr(id, params)
     }
 
     pub fn get_learning(&self, id: &str) -> Result<Learning, OrbitError> {
