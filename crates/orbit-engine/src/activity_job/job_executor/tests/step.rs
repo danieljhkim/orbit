@@ -386,6 +386,62 @@ fn stalled_agent_step_fails_at_the_step_that_produced_it() {
     );
 }
 
+/// A valid failed envelope terminates the provider protocol, but it still
+/// represents a failed implementation outcome. It must audit the implementer
+/// as failed and stop before the delivery action can create a bad checkpoint.
+#[test]
+fn declared_failed_agent_step_is_audited_and_never_checkpointed() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let script = stalled_provider(
+        temp.path(),
+        "{\"schemaVersion\":1,\"status\":\"failed\",\"result\":{},\"error\":{\"code\":\"blocked\",\"message\":\"cannot proceed\"}}",
+    );
+    let host = ScriptedHost::new([("commit", vec![Action::Ok(json!({"committed": true}))])])
+        .with_cli_program(script.display().to_string());
+    let job = job_with_steps(vec![
+        agent_implement_shaped_step("implement_one", None),
+        target_step("git_commit", "commit"),
+    ]);
+    let writer = std::sync::Arc::new(test_writer("run-declared-failure"));
+
+    let outcome = execute_job(
+        &job,
+        json!({"task_id": "ORB-10733"}),
+        "run-declared-failure",
+        writer.clone(),
+        &host,
+    )
+    .expect("execute_job ok");
+
+    assert!(!outcome.success, "declared failure must fail implement_one");
+    let message = outcome.message.expect("terminal message");
+    assert!(message.contains("implement_one"), "{message}");
+    assert!(message.contains("failed"), "{message}");
+    assert_eq!(
+        host.call_count("commit"),
+        0,
+        "git_commit must not run after an explicit failed implementation"
+    );
+
+    let events = writer.events_snapshot().expect("audit");
+    assert!(
+        events.iter().any(|event| matches!(
+            &event.kind,
+            V2AuditEventKind::StepFinished { step_id, outcome, .. }
+                if step_id == "implement_one" && outcome == "failed"
+        )),
+        "implement_one must be audited as failed instead of checkpointed"
+    );
+    assert!(
+        !events.iter().any(|event| matches!(
+            &event.kind,
+            V2AuditEventKind::StepFinished { step_id, outcome, .. }
+                if step_id == "git_commit" && outcome == "succeeded"
+        )),
+        "git_commit must have no success checkpoint"
+    );
+}
+
 /// An agent step that *does* terminate properly still succeeds, so the gate
 /// costs nothing on the healthy path.
 #[test]

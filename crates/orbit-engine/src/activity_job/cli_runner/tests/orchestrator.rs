@@ -318,13 +318,51 @@ fn run_cli_backend_keeps_advisory_activity_successful_without_an_envelope() {
     );
 }
 
-/// The completion check is content-blind. An agent that declares
-/// `status: "failed"` ran its contract to the end, so it satisfies the protocol
-/// gate; whether that declared failure means anything is a question for durable
-/// state, not for this step's success. Guards the doctrine boundary: no
-/// activity decision may read an agent-loop response's content.
+/// The decorative opt-out suppresses both completion gates. A failed token is
+/// recorded for diagnostics but remains advisory when no contract consumes it.
 #[test]
-fn run_cli_backend_completion_check_accepts_a_declared_failure_envelope() {
+fn run_cli_backend_keeps_opted_out_declared_failure_advisory() {
+    let temp = tempdir().expect("tempdir");
+    let script = temp.path().join("claude");
+    write_executable(
+        &script,
+        "#!/bin/sh\ncat > /dev/null\nprintf '%s\\n' '{\"schemaVersion\":1,\"status\":\"failed\",\"result\":{},\"error\":{\"code\":\"decorative\",\"message\":\"ignored\"}}'\n",
+    );
+
+    let sink = Arc::new(RecordingSink::default());
+    let sink_for_writer: Arc<dyn AuditSink> = sink;
+    let audit = Arc::new(V2AuditWriter::new(
+        "job-advisory-declared-failure",
+        "claude:sonnet",
+        sink_for_writer,
+    ));
+    let host = TestHost::with_command(script.display().to_string());
+    let mut spec = test_agent_loop_spec_for("claude", Duration::from_secs(5));
+    spec.require_completion_envelope = false;
+
+    let outcome = run_cli_backend(
+        &host,
+        &spec,
+        "job-advisory-declared-failure",
+        audit,
+        &serde_json::json!({"prompt": "emit decorative status"}),
+        None,
+    )
+    .expect("run cli backend");
+
+    assert!(outcome.success);
+    assert!(outcome.message.is_none());
+    assert_eq!(outcome.output["response_envelope_status"], "failed");
+    assert_eq!(outcome.output["completion_envelope_required"], false);
+    assert_eq!(outcome.output["completion_envelope_satisfied"], true);
+}
+
+/// The completion frame remains content-blind, but an explicit failed status
+/// is the invocation's control-plane outcome. It must fail a required
+/// completion contract without making its `result` or `error` advisory prose
+/// authoritative.
+#[test]
+fn run_cli_backend_completion_gate_demotes_a_declared_failure_envelope() {
     let temp = tempdir().expect("tempdir");
     let script = temp.path().join("codex");
     write_executable(
@@ -352,10 +390,56 @@ fn run_cli_backend_completion_check_accepts_a_declared_failure_envelope() {
     )
     .expect("run cli backend");
 
-    assert!(outcome.success, "content must not decide step completion");
+    assert!(
+        !outcome.success,
+        "a declared failed status must not checkpoint a required completion"
+    );
     assert_eq!(outcome.output["completion_envelope_required"], true);
     assert_eq!(outcome.output["completion_envelope_satisfied"], true);
     assert!(outcome.output["completion_envelope_error"].is_null());
+    assert_eq!(outcome.output["response_envelope_status"], "failed");
+    let message = outcome.message.expect("declared failure message");
+    assert!(message.contains("declared envelope status"), "{message}");
+    assert!(message.contains("failed"), "{message}");
+}
+
+/// `timeout` is just as terminal as `failed` when the provider reports it in
+/// the completed Orbit envelope, even though the process itself exited 0.
+#[test]
+fn run_cli_backend_completion_gate_demotes_a_declared_timeout_envelope() {
+    let temp = tempdir().expect("tempdir");
+    let script = temp.path().join("codex");
+    write_executable(
+        &script,
+        "#!/bin/sh\ncat > /dev/null\nprintf '%s\\n' '{\"schemaVersion\":1,\"status\":\"timeout\",\"result\":{},\"error\":{\"code\":\"deadline\",\"message\":\"timed out\"}}'\n",
+    );
+
+    let sink = Arc::new(RecordingSink::default());
+    let sink_for_writer: Arc<dyn AuditSink> = sink;
+    let audit = Arc::new(V2AuditWriter::new(
+        "job-declared-timeout",
+        "codex:gpt-5.5",
+        sink_for_writer,
+    ));
+    let host = TestHost::with_command(script.display().to_string());
+    let spec = test_agent_loop_spec(Duration::from_secs(5));
+
+    let outcome = run_cli_backend(
+        &host,
+        &spec,
+        "job-declared-timeout",
+        audit,
+        &serde_json::json!({"task_id": "ORB-10733"}),
+        None,
+    )
+    .expect("run cli backend");
+
+    assert!(!outcome.success);
+    assert_eq!(outcome.output["completion_envelope_satisfied"], true);
+    assert_eq!(outcome.output["response_envelope_status"], "timeout");
+    let message = outcome.message.expect("declared timeout message");
+    assert!(message.contains("declared envelope status"), "{message}");
+    assert!(message.contains("timeout"), "{message}");
 }
 
 /// A provider that interleaves a wrapped tool's stdout with its own protocol

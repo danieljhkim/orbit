@@ -3,7 +3,7 @@ summary: "Activity / Job — Design"
 type: design
 title: "Activity / Job — Design"
 owner: codex
-last_updated: 2026-08-09
+last_updated: 2026-08-11
 last_validated: 2026-07-26
 status: Draft
 feature: activity-job
@@ -296,18 +296,20 @@ contract to the end is a different question, and nothing was asking it.
 
 | Flag | Question | Default | Reads |
 |---|---|---|---|
-| `require_completion_envelope` | Did the invocation finish? | `true` | envelope *frame* only |
+| `require_completion_envelope` | Did the invocation finish with an accepted outcome? | `true` | envelope frame, then status token |
 | `require_response_envelope` | Can downstream templates trust the fields? | `false` | full envelope incl. `result` |
 
-The completion check (`response_envelope_protocol_check` in `orbit-agent`) asks
-only whether stdout carried a well-formed Orbit response envelope: present,
+The frame check (`response_envelope_protocol_check` in `orbit-agent`) asks only
+whether stdout carried a well-formed Orbit response envelope: present,
 `schemaVersion: 1`, and one of the three protocol status tokens. It never reads
-`result` or `error`, and it does not care *which* status was declared — an agent
-that reports `status: "failed"` completed its contract exactly as much as one
-that reports success. **This keeps the doctrine intact**: agent-loop output stays
-advisory, and no job or activity decision reads its content. "Did the contract
-complete" is a property of the invocation, not a claim the agent makes about its
-work.
+`result` or `error`, so all three tokens prove protocol termination. After
+[ORB-10733], the CLI runner then gives the token its narrow control-plane meaning:
+under a required completion contract, `success` may checkpoint the step while
+explicit `failed` and `timeout` fail it at that step. The `result` and `error`
+payloads remain advisory and durable task, Git, review, and deterministic
+validation state remain authoritative. **This preserves the doctrine's actual
+boundary**: protocol termination and status outcome are control flow; agent prose
+and payload content are not evidence that can satisfy durable workflow guards.
 
 Every `backend: cli` invocation is prompted with the response-envelope contract
 (`render_prompt_with_embedded_envelope`), so exiting 0 without one is a protocol
@@ -322,9 +324,11 @@ the raw text for an embedded envelope. Failing a step that genuinely completed,
 over stdout tidiness, would be a worse defect than the one this check exists to
 catch.
 
-**Failure semantics.** A violation fails the step exactly as an opted-in envelope
+**Failure semantics.** A missing or malformed frame, or a completed frame that
+declares `failed` or `timeout`, fails the step exactly as an opted-in envelope
 failure does: `DispatchOutcome { success: false }` with a message naming the step
-and the violation. Concretely, for `implement_one` in `task_pr_pipeline`:
+and the protocol violation or declared status. Concretely, for `implement_one`
+in `task_pr_pipeline`:
 
 - **Not retried.** The step has no `retry:` block, and a repeat invocation of a
   stalled agent has no new information to work with.

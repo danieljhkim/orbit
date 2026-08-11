@@ -361,8 +361,8 @@ pub fn run_cli_backend(
     // by construction — `response_envelope_protocol_check` reads the envelope
     // frame and never `result`/`error`, so this asks only "did the invocation
     // run its contract to the end", never "do we believe what it said". An
-    // agent that declares `status: "failed"` passes; one that yielded mid-turn
-    // emitted no envelope and does not.
+    // agent that declares `status: "failed"` passes this frame check; one that
+    // yielded mid-turn emitted no envelope and does not.
     //
     // Only meaningful on an otherwise-clean exit: a timeout or nonzero exit
     // already fails the step with a more specific message.
@@ -372,12 +372,20 @@ pub fn run_cli_backend(
         .map(|error| completion_diagnostic(&error.to_string(), &redaction));
     let completion_protocol_violation =
         spec.require_completion_envelope && completion_envelope_error.is_some();
+    // [ORB-10733] Protocol termination and control-plane outcome are distinct:
+    // all recognized status tokens finish the frame, but a required completion
+    // contract cannot checkpoint an explicit failed/timeout outcome. Only the
+    // token controls this; the envelope's result/error payload stays advisory.
+    let completion_status_failure = spec.require_completion_envelope
+        && completion_envelope_error.is_none()
+        && matches!(envelope_status.as_deref(), Some("failed") | Some("timeout"));
     // Two orthogonal contracts. `require_completion_envelope` gates step
-    // completion (above); `require_response_envelope` additionally gates the
+    // completion and its status outcome (above); `require_response_envelope` additionally gates the
     // envelope's *content* for activities whose downstream templates consume it
     // (ADR-0224 / L-0087) — outside that opt-in, parsing stays advisory.
     let success = exit_success
         && !completion_protocol_violation
+        && !completion_status_failure
         && (!spec.require_response_envelope || response_envelope_valid);
     let trace = parse_cli_invocation_trace(
         stdout.protocol_bytes(),
@@ -397,11 +405,11 @@ pub fn run_cli_backend(
                 .clone()
                 .unwrap_or_else(|| format!("cli subprocess exited with code {:?}", exit_code)),
         )
-    } else if spec.require_response_envelope
+    } else if (spec.require_completion_envelope || spec.require_response_envelope)
         && matches!(envelope_status.as_deref(), Some("failed") | Some("timeout"))
     {
         Some(format!(
-            "cli subprocess reported envelope status={:?} despite exit 0",
+            "cli subprocess reported declared envelope status={:?} despite exit 0",
             envelope_status.as_deref().unwrap_or("unknown")
         ))
     } else if spec.require_response_envelope {
