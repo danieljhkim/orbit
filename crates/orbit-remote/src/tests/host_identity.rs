@@ -1,18 +1,19 @@
 use crate::host_identity::{
-    HOST_IDENTITY_SCHEMA_VERSION, HostIdentityOutcome, HostIdentityState, HostMode,
-    NewHostIdentity, ensure_host_identity, inspect_host_identity, load_host_identity,
-    rename_current_host_identity, rename_current_host_identity_with_writer,
+    HOST_IDENTITY_SCHEMA_VERSION, HostIdentityOutcome, HostIdentityState, NewHostIdentity,
+    ensure_host_identity, inspect_host_identity, load_host_identity, rename_current_host_identity,
+    rename_current_host_identity_with_writer, validate_new_task_prefix,
 };
 
 fn requested(
     name: &str,
-    mode: HostMode,
+    task_prefix: &str,
 ) -> impl FnOnce() -> Result<NewHostIdentity, orbit_common::types::OrbitError> {
     let name = name.to_string();
+    let task_prefix = task_prefix.to_string();
     move || {
         Ok(NewHostIdentity {
             host_id: name,
-            mode,
+            task_prefix,
         })
     }
 }
@@ -20,13 +21,12 @@ fn requested(
 #[test]
 fn create_persists_current_schema_identity() {
     let dir = tempfile::tempdir().expect("tempdir");
-    let outcome = ensure_host_identity(dir.path(), requested("dk-server-1", HostMode::Standalone))
-        .expect("create");
+    let outcome = ensure_host_identity(dir.path(), requested("dk-server-1", "DE")).expect("create");
     assert!(matches!(outcome, HostIdentityOutcome::Created(_)));
     let identity = outcome.identity();
     assert_eq!(identity.schema_version, HOST_IDENTITY_SCHEMA_VERSION);
     assert_eq!(identity.host_id, "dk-server-1");
-    assert_eq!(identity.mode, HostMode::Standalone);
+    assert_eq!(identity.task_prefix, "DE");
     assert!(identity.machine_id.starts_with("hm_"));
 
     let loaded = load_host_identity(dir.path()).expect("load");
@@ -36,8 +36,7 @@ fn create_persists_current_schema_identity() {
 #[test]
 fn repeated_init_is_unchanged_and_stable() {
     let dir = tempfile::tempdir().expect("tempdir");
-    let created =
-        ensure_host_identity(dir.path(), requested("dk-server-1", HostMode::Hub)).expect("create");
+    let created = ensure_host_identity(dir.path(), requested("dk-server-1", "DK")).expect("create");
     let first_machine_id = created.identity().machine_id.clone();
     let before = std::fs::read_to_string(dir.path().join("host.toml")).expect("read");
 
@@ -47,7 +46,7 @@ fn repeated_init_is_unchanged_and_stable() {
         .expect("repeat init");
     assert!(matches!(again, HostIdentityOutcome::Unchanged(_)));
     assert_eq!(again.identity().machine_id, first_machine_id);
-    assert_eq!(again.identity().mode, HostMode::Hub);
+    assert_eq!(again.identity().task_prefix, "DK");
     let after = std::fs::read_to_string(dir.path().join("host.toml")).expect("read");
     assert_eq!(before, after, "repeat init must not rewrite host.toml");
 }
@@ -68,7 +67,7 @@ fn legacy_host_id_only_file_migrates_idempotently() {
     let identity = migrated.identity();
     assert_eq!(identity.schema_version, HOST_IDENTITY_SCHEMA_VERSION);
     assert_eq!(identity.host_id, "dk-server-1");
-    assert_eq!(identity.mode, HostMode::Standalone);
+    assert_eq!(identity.task_prefix, "ORB");
     let machine_id = identity.machine_id.clone();
 
     // Second initialization preserves the generated machine_id and rewrites
@@ -79,6 +78,36 @@ fn legacy_host_id_only_file_migrates_idempotently() {
     assert_eq!(again.identity().machine_id, machine_id);
     let after = std::fs::read_to_string(dir.path().join("host.toml")).expect("read");
     assert_eq!(before, after);
+}
+
+#[test]
+fn schema_v1_identity_with_existing_sequence_migrates_preserving_machine_id() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    std::fs::create_dir_all(dir.path().join("tasks")).expect("create task state");
+    std::fs::write(dir.path().join("tasks/index.sqlite"), []).expect("seed task sequence");
+    std::fs::write(
+        dir.path().join("host.toml"),
+        "schema_version = 1\nmachine_id = \"hm_existing\"\nhost_id = \"dk-server-1\"\nmode = \"hub\"\n",
+    )
+    .expect("seed schema v1 identity");
+
+    let migrated =
+        ensure_host_identity(dir.path(), || panic!("migration must not prompt")).expect("migrate");
+    assert!(matches!(migrated, HostIdentityOutcome::Migrated(_)));
+    assert_eq!(migrated.identity().machine_id, "hm_existing");
+    assert_eq!(migrated.identity().task_prefix, "ORB");
+
+    let path = dir.path().join("host.toml");
+    let before = std::fs::read(&path).expect("read migrated identity");
+    let text = std::str::from_utf8(&before).expect("host identity UTF-8");
+    assert!(text.contains("schema_version = 2"), "{text}");
+    assert!(text.contains("task_prefix = \"ORB\""), "{text}");
+    assert!(!text.contains("mode ="), "{text}");
+
+    let repeated =
+        ensure_host_identity(dir.path(), || panic!("repeat must not prompt")).expect("repeat");
+    assert!(matches!(repeated, HostIdentityOutcome::Unchanged(_)));
+    assert_eq!(std::fs::read(path).expect("reread"), before);
 }
 
 #[test]
@@ -112,7 +141,7 @@ fn incomplete_current_schema_file_is_rejected() {
     let dir = tempfile::tempdir().expect("tempdir");
     std::fs::write(
         dir.path().join("host.toml"),
-        "schema_version = 1\nhost_id = \"dk-server-1\"\nmode = \"standalone\"\n",
+        "schema_version = 2\nhost_id = \"dk-server-1\"\ntask_prefix = \"DE\"\n",
     )
     .expect("write");
     let error = inspect_host_identity(dir.path()).expect_err("missing machine_id must fail");
@@ -124,7 +153,7 @@ fn transport_shaped_machine_id_is_rejected_without_rewriting_host_identity() {
     for machine_id in ["dk1", "user@dk1", "ssh:dk1", "hm_ssh:dk1", "/tmp/hub"] {
         let dir = tempfile::tempdir().expect("tempdir");
         let body = format!(
-            "schema_version = 1\nmachine_id = \"{machine_id}\"\nhost_id = \"hub\"\nmode = \"hub\"\n"
+            "schema_version = 2\nmachine_id = \"{machine_id}\"\nhost_id = \"hub\"\ntask_prefix = \"DE\"\n"
         );
         let path = dir.path().join("host.toml");
         std::fs::write(&path, &body).expect("write hostile identity");
@@ -144,7 +173,7 @@ fn blank_field_is_rejected() {
     let dir = tempfile::tempdir().expect("tempdir");
     std::fs::write(
         dir.path().join("host.toml"),
-        "schema_version = 1\nmachine_id = \"hm_1\"\nhost_id = \"  \"\nmode = \"standalone\"\n",
+        "schema_version = 2\nmachine_id = \"hm_1\"\nhost_id = \"  \"\ntask_prefix = \"DE\"\n",
     )
     .expect("write");
     inspect_host_identity(dir.path()).expect_err("blank host_id must fail closed");
@@ -153,7 +182,7 @@ fn blank_field_is_rejected() {
 #[test]
 fn future_schema_version_fails_closed_without_rewrite() {
     let dir = tempfile::tempdir().expect("tempdir");
-    let body = "schema_version = 2\nmachine_id = \"hm_future\"\nhost_id = \"dk-server-1\"\nmode = \"standalone\"\n";
+    let body = "schema_version = 3\nmachine_id = \"hm_future\"\nhost_id = \"dk-server-1\"\ntask_prefix = \"DE\"\n";
     std::fs::write(dir.path().join("host.toml"), body).expect("write");
     inspect_host_identity(dir.path()).expect_err("future schema must fail closed");
     // The file is left untouched (never rewritten by a read).
@@ -171,17 +200,20 @@ fn future_schema_version_fails_closed_without_rewrite() {
 }
 
 #[test]
-fn invalid_mode_is_rejected() {
-    assert!(HostMode::parse("standalone").is_ok());
-    assert!(HostMode::parse("hub").is_ok());
-    assert!(HostMode::parse("spoke").is_ok());
-    HostMode::parse("bogus").expect_err("invalid mode must fail");
+fn fresh_task_prefix_validation_rejects_reserved_and_malformed_values() {
+    for reserved in ["ORB", "ADR", "L", "F"] {
+        validate_new_task_prefix(reserved).expect_err("reserved prefix must fail");
+    }
+    for malformed in ["de", "D", "ABCDEF", " DE"] {
+        validate_new_task_prefix(malformed).expect_err("malformed prefix must fail");
+    }
+    assert_eq!(validate_new_task_prefix("DE").expect("valid prefix"), "DE");
 }
 
 #[test]
-fn rename_current_identity_preserves_machine_id_and_mode() {
+fn rename_current_identity_preserves_machine_id_and_task_prefix() {
     let dir = tempfile::tempdir().expect("tempdir");
-    let created = ensure_host_identity(dir.path(), requested("old-name", HostMode::Hub))
+    let created = ensure_host_identity(dir.path(), requested("old-name", "DE"))
         .expect("create")
         .identity()
         .clone();
@@ -189,7 +221,7 @@ fn rename_current_identity_preserves_machine_id_and_mode() {
     let renamed = rename_current_host_identity(dir.path(), "new-name").expect("rename");
     assert_eq!(renamed.host_id, "new-name");
     assert_eq!(renamed.machine_id, created.machine_id);
-    assert_eq!(renamed.mode, HostMode::Hub);
+    assert_eq!(renamed.task_prefix, "DE");
 
     // The on-disk file reflects the rename and remains a complete identity.
     match inspect_host_identity(dir.path()).expect("inspect") {
@@ -204,7 +236,7 @@ fn rename_current_identity_preserves_machine_id_and_mode() {
 #[test]
 fn rename_current_identity_round_trips_quotes_and_rejects_absent_file() {
     let dir = tempfile::tempdir().expect("tempdir");
-    ensure_host_identity(dir.path(), requested("start", HostMode::Standalone)).expect("create");
+    ensure_host_identity(dir.path(), requested("start", "DE")).expect("create");
 
     // A quote-bearing name must round-trip through the TOML staging rather than
     // corrupt the file.
@@ -223,7 +255,7 @@ fn rename_current_identity_round_trips_quotes_and_rejects_absent_file() {
 #[test]
 fn rename_current_identity_classifies_preserved_and_durability_uncertain_errors() {
     let dir = tempfile::tempdir().expect("tempdir");
-    ensure_host_identity(dir.path(), requested("old", HostMode::Hub)).expect("create");
+    ensure_host_identity(dir.path(), requested("old", "DE")).expect("create");
     let before = std::fs::read(dir.path().join("host.toml")).expect("read before");
 
     let preserved = rename_current_host_identity_with_writer(dir.path(), "new", |_, _| {

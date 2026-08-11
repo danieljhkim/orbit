@@ -347,7 +347,7 @@ fn broker_with_context_requires_local_checkout_before_dispatch() {
 
 #[test]
 fn broker_spoke_with_context_fails_closed_before_local_resolution() {
-    use crate::{HostMode, NewHostIdentity, ensure_host_identity};
+    use crate::{NewHostIdentity, ensure_host_identity};
     use chrono::Utc;
     use orbit_common::types::{Workspace, WorkspaceRegistry, WorkspaceStatus};
 
@@ -355,7 +355,7 @@ fn broker_spoke_with_context_fails_closed_before_local_resolution() {
     ensure_host_identity(root.path(), || {
         Ok(NewHostIdentity {
             host_id: "spoke".to_string(),
-            mode: HostMode::Spoke,
+            task_prefix: "SP".to_string(),
         })
     })
     .expect("spoke identity");
@@ -401,7 +401,7 @@ fn broker_spoke_with_context_fails_closed_before_local_resolution() {
 
 #[test]
 fn broker_spoke_hub_denial_writes_no_local_coordination_state() {
-    use crate::{HostMode, NewHostIdentity, ensure_host_identity};
+    use crate::{NewHostIdentity, ensure_host_identity};
     use chrono::Utc;
     use orbit_common::types::{Workspace, WorkspaceRegistry, WorkspaceStatus};
 
@@ -409,7 +409,7 @@ fn broker_spoke_hub_denial_writes_no_local_coordination_state() {
     ensure_host_identity(root.path(), || {
         Ok(NewHostIdentity {
             host_id: "spoke".to_string(),
-            mode: HostMode::Spoke,
+            task_prefix: "SP".to_string(),
         })
     })
     .expect("spoke identity");

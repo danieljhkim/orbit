@@ -3,7 +3,7 @@
 use axum::body::Body;
 use axum::http::{Method, Request, StatusCode};
 use orbit_core::{RoutineFireRecord, RoutineFireState};
-use orbit_remote::{HostMode, NewHostIdentity, ensure_host_identity};
+use orbit_remote::{NewHostIdentity, ensure_host_identity};
 use tower::ServiceExt;
 
 use super::super::router;
@@ -92,7 +92,7 @@ async fn routines_endpoint_returns_envelope_for_empty_host() {
     ensure_host_identity(temp.path(), || {
         Ok(NewHostIdentity {
             host_id: "dashboard-test".to_string(),
-            mode: HostMode::Standalone,
+            task_prefix: "DA".to_string(),
         })
     })
     .expect("seed host identity");

@@ -539,6 +539,7 @@ impl HubMcpHost {
             schema_version: HOST_IDENTITY_SCHEMA_VERSION,
             machine_id: request.identity.machine_id.clone(),
             host_id: request.identity.host_id.clone(),
+            task_prefix: "ORB".to_string(),
             mode: HostMode::Spoke,
         };
         let host = match service.register_identity(&spoke_identity, request.identity.labels) {

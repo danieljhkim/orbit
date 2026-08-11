@@ -30,6 +30,7 @@ fn configure_hub(root: &Path, machine_id: &str) {
                 schema_version: crate::HOST_IDENTITY_SCHEMA_VERSION,
                 machine_id: machine_id.to_string(),
                 host_id: "configured-hub".to_string(),
+                task_prefix: "ORB".to_string(),
                 mode: crate::HostMode::Hub,
             },
             BTreeSet::new(),

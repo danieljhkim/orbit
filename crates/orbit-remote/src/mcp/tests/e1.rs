@@ -231,6 +231,7 @@ fn spoke_route_requires_config_and_exact_non_hierarchical_membership() {
         schema_version: HOST_IDENTITY_SCHEMA_VERSION,
         machine_id: "hm_spoke".to_string(),
         host_id: "spoke".to_string(),
+        task_prefix: "ORB".to_string(),
         mode: HostMode::Spoke,
     };
     let missing = super::super::config::TrustedMcpConfig::default();
@@ -362,6 +363,7 @@ fn hub_crew_discovery_and_task_validation_read_the_owner_execution_profile() {
                 schema_version: HOST_IDENTITY_SCHEMA_VERSION,
                 machine_id: "hm_hub".to_string(),
                 host_id: "test-host".to_string(),
+                task_prefix: "ORB".to_string(),
                 mode: HostMode::Hub,
             },
             BTreeSet::new(),

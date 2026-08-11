@@ -45,7 +45,7 @@ pub use execution_profile_projection::{
 pub use host_identity::{
     HOST_IDENTITY_SCHEMA_VERSION, HOST_TOML_FILE, HostIdentity, HostIdentityOutcome,
     HostIdentityState, HostMode, NewHostIdentity, ensure_host_identity, inspect_host_identity,
-    load_host_identity, os_hostname, rename_current_host_identity,
+    load_host_identity, os_hostname, rename_current_host_identity, validate_new_task_prefix,
 };
 pub use host_registry::{HostRegistryService, WorkspaceLink, require_local_hub_identity};
 pub use knowledge::{HubKnowledgeSequenceService, scan_registered_knowledge_inventories};

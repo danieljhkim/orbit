@@ -8,7 +8,8 @@ use orbit_core::config::agent_prompt::{
 use orbit_core::{OrbitError, OrbitRuntime};
 use orbit_remote::workspace_registry::global_orbit_dir;
 use orbit_remote::{
-    HostIdentityOutcome, HostMode, NewHostIdentity, ensure_host_identity, os_hostname,
+    HostIdentityOutcome, NewHostIdentity, ensure_host_identity, os_hostname,
+    validate_new_task_prefix,
 };
 use std::collections::BTreeMap;
 use std::io::{self, Write};
@@ -35,10 +36,11 @@ pub struct InitCommand {
     #[arg(long)]
     pub host_name: Option<String>,
 
-    /// Host operating mode for this machine's identity: standalone | hub |
-    /// spoke. Defaults to standalone. Used only on first init.
-    #[arg(long, value_name = "MODE")]
-    pub host_mode: Option<String>,
+    /// Immutable task-id namespace for this machine (2-5 uppercase ASCII
+    /// letters). Required on first init; reserved artifact namespaces cannot
+    /// be chosen.
+    #[arg(long, value_name = "PREFIX")]
+    pub task_prefix: Option<String>,
 }
 
 impl Execute for InitCommand {
@@ -83,7 +85,7 @@ impl InitCommand {
             root_override,
             self.non_interactive,
             self.host_name,
-            self.host_mode,
+            self.task_prefix,
         )?;
         let paths = reported_init_paths(root_override);
         print_init_result(InitOutput {
@@ -104,44 +106,46 @@ impl InitCommand {
     }
 }
 
-/// Create or migrate this machine's host identity. Host name and mode are only
+/// Create or migrate this machine's host identity. Host name and task prefix are only
 /// consulted when the identity is absent (a fresh create); a present identity
 /// is preserved unchanged and a legacy file is migrated without prompting.
 fn ensure_host_identity_for_init(
     root_override: Option<&Path>,
     non_interactive: bool,
     host_name: Option<String>,
-    host_mode: Option<String>,
+    task_prefix: Option<String>,
 ) -> Result<(), OrbitError> {
     let global_root = match root_override {
         Some(root) => root.to_path_buf(),
         None => global_orbit_dir()?,
     };
-    // Validate an explicit mode up front so an invalid value fails closed even
-    // when the identity already exists.
-    let requested_mode = match host_mode.as_deref() {
-        Some(mode) => Some(HostMode::parse(mode)?),
-        None => None,
-    };
-
     let outcome = ensure_host_identity(&global_root, move || {
         let host_id = match host_name {
             Some(name) => name,
             None if non_interactive => {
                 return Err(OrbitError::InvalidInput(
-                    "host identity is absent; pass --host-name (and optionally --host-mode) \
+                    "host identity is absent; pass --host-name and --task-prefix \
                      to initialize a fresh host non-interactively"
                         .to_string(),
                 ));
             }
             None => prompt_host_name()?,
         };
-        let mode = match requested_mode {
-            Some(mode) => mode,
-            None if non_interactive => HostMode::Standalone,
-            None => prompt_host_mode()?,
+        let task_prefix = match task_prefix {
+            Some(prefix) => validate_new_task_prefix(&prefix)?,
+            None if non_interactive => {
+                return Err(OrbitError::InvalidInput(
+                    "host identity is absent; pass --task-prefix <PREFIX> (2-5 uppercase ASCII letters) \
+                     to initialize a fresh host non-interactively"
+                        .to_string(),
+                ));
+            }
+            None => prompt_task_prefix()?,
         };
-        Ok(NewHostIdentity { host_id, mode })
+        Ok(NewHostIdentity {
+            host_id,
+            task_prefix,
+        })
     })?;
 
     report_host_identity(&outcome);
@@ -156,8 +160,8 @@ fn report_host_identity(outcome: &HostIdentityOutcome) {
         HostIdentityOutcome::Unchanged(_) => "unchanged",
     };
     println!(
-        "host identity ({verb}): host_id=\"{}\", machine_id={}, mode={}",
-        identity.host_id, identity.machine_id, identity.mode
+        "host identity ({verb}): host_id=\"{}\", machine_id={}, task_prefix={}",
+        identity.host_id, identity.machine_id, identity.task_prefix
     );
 }
 
@@ -181,14 +185,11 @@ fn prompt_host_name() -> Result<String, OrbitError> {
     }
 }
 
-fn prompt_host_mode() -> Result<HostMode, OrbitError> {
+fn prompt_task_prefix() -> Result<String, OrbitError> {
     loop {
-        let answer = read_line("Host mode (standalone/hub/spoke) [standalone]: ")?;
-        if answer.is_empty() {
-            return Ok(HostMode::Standalone);
-        }
-        match HostMode::parse(&answer) {
-            Ok(mode) => return Ok(mode),
+        let answer = read_line("Task prefix (2-5 uppercase ASCII letters): ")?;
+        match validate_new_task_prefix(&answer) {
+            Ok(prefix) => return Ok(prefix),
             Err(error) => println!("{error}"),
         }
     }

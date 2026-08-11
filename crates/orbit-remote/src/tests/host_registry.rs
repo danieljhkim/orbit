@@ -16,6 +16,7 @@ fn identity(machine_id: &str, host_id: &str, mode: HostMode) -> HostIdentity {
         schema_version: HOST_IDENTITY_SCHEMA_VERSION,
         machine_id: machine_id.to_string(),
         host_id: host_id.to_string(),
+        task_prefix: "ORB".to_string(),
         mode,
     }
 }

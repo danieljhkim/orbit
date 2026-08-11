@@ -74,7 +74,7 @@ fn non_interactive_init_against_non_global_root_leaves_home_skill_links_untouche
             force: false,
             non_interactive: true,
             host_name: Some("validation-host".to_string()),
-            host_mode: None,
+            task_prefix: Some("VA".to_string()),
         }
         .execute_without_runtime(Some(&validation_root.path().join(".orbit")))
     });
@@ -85,7 +85,7 @@ fn non_interactive_init_against_non_global_root_leaves_home_skill_links_untouche
     let host_toml = validation_root.path().join(".orbit").join("host.toml");
     let host_contents = fs::read_to_string(&host_toml).expect("read host.toml");
     assert!(
-        host_contents.contains("schema_version = 1"),
+        host_contents.contains("schema_version = 2"),
         "{host_contents}"
     );
     assert!(
@@ -93,9 +93,10 @@ fn non_interactive_init_against_non_global_root_leaves_home_skill_links_untouche
         "{host_contents}"
     );
     assert!(
-        host_contents.contains("mode = \"standalone\""),
+        host_contents.contains("task_prefix = \"VA\""),
         "{host_contents}"
     );
+    assert!(!host_contents.contains("mode ="), "{host_contents}");
 
     assert_discovery_sentinel(&agents_link, &agents_target);
     assert_discovery_sentinel(&claude_link, &claude_target);
@@ -194,31 +195,33 @@ fn non_interactive_init_against_non_global_root_leaves_home_skill_links_untouche
 fn init_host(
     root: &Path,
     host_name: Option<&str>,
-    host_mode: Option<&str>,
+    task_prefix: Option<&str>,
 ) -> Result<(), orbit_core::OrbitError> {
     InitCommand {
         force: false,
         non_interactive: true,
         host_name: host_name.map(str::to_string),
-        host_mode: host_mode.map(str::to_string),
+        task_prefix: task_prefix.map(str::to_string),
     }
     .execute_without_runtime(Some(root))
     .map(|_| ())
 }
 
-/// Non-interactive `--host-name` + `--host-mode` create the identity exactly
+/// Non-interactive `--host-name` + `--task-prefix` create the identity exactly
 /// once, and a repeat init preserves the generated machine_id unchanged.
 #[test]
-fn non_interactive_host_name_and_mode_create_then_repeat_is_stable() {
+fn non_interactive_host_name_and_task_prefix_create_then_repeat_is_stable() {
     let home = tempdir().expect("home tempdir");
     let _env = EnvGuard::acquire().home(home.path());
     let root = home.path().join(".orbit");
 
-    init_host(&root, Some("dk-mac"), Some("hub")).expect("first init");
+    init_host(&root, Some("dk-mac"), Some("DE")).expect("first init");
     let host_toml = root.join("host.toml");
     let first = fs::read_to_string(&host_toml).expect("read host.toml");
     assert!(first.contains("host_id = \"dk-mac\""), "{first}");
-    assert!(first.contains("mode = \"hub\""), "{first}");
+    assert!(first.contains("schema_version = 2"), "{first}");
+    assert!(first.contains("task_prefix = \"DE\""), "{first}");
+    assert!(!first.contains("mode ="), "{first}");
     let machine_line = first
         .lines()
         .find(|line| line.starts_with("machine_id = "))
@@ -227,27 +230,44 @@ fn non_interactive_host_name_and_mode_create_then_repeat_is_stable() {
     assert!(machine_line.contains("hm_"), "{machine_line}");
 
     // Repeated init: no prompt, no rewrite, identical machine_id.
-    init_host(&root, Some("ignored-on-repeat"), Some("spoke")).expect("repeat init");
+    init_host(&root, Some("ignored-on-repeat"), Some("ZZ")).expect("repeat init");
     let second = fs::read_to_string(&host_toml).expect("re-read host.toml");
     assert_eq!(first, second, "repeat init must not rewrite host.toml");
 }
 
-/// A legacy `host_id`-only file migrates in place on init.
+/// A schema-v1 identity with an existing task sequence migrates in place on init.
 #[test]
 fn init_migrates_legacy_host_toml() {
     let home = tempdir().expect("home tempdir");
     let _env = EnvGuard::acquire().home(home.path());
     let root = home.path().join(".orbit");
     fs::create_dir_all(&root).expect("mkdir .orbit");
-    fs::write(root.join("host.toml"), "host_id = \"legacy-host\"\n").expect("seed legacy");
+    fs::create_dir_all(root.join("tasks")).expect("mkdir tasks");
+    fs::write(root.join("tasks/index.sqlite"), []).expect("seed task sequence");
+    fs::write(
+        root.join("host.toml"),
+        "schema_version = 1\nmachine_id = \"hm_existing\"\nhost_id = \"legacy-host\"\nmode = \"hub\"\n",
+    )
+    .expect("seed legacy");
 
     // No --host-name needed: migration preserves the legacy name.
     init_host(&root, None, None).expect("migrating init");
     let migrated = fs::read_to_string(root.join("host.toml")).expect("read migrated");
-    assert!(migrated.contains("schema_version = 1"), "{migrated}");
+    assert!(migrated.contains("schema_version = 2"), "{migrated}");
+    assert!(
+        migrated.contains("machine_id = \"hm_existing\""),
+        "{migrated}"
+    );
     assert!(migrated.contains("host_id = \"legacy-host\""), "{migrated}");
-    assert!(migrated.contains("mode = \"standalone\""), "{migrated}");
-    assert!(migrated.contains("machine_id = \"hm_"), "{migrated}");
+    assert!(migrated.contains("task_prefix = \"ORB\""), "{migrated}");
+    assert!(!migrated.contains("mode ="), "{migrated}");
+
+    let before = fs::read(root.join("host.toml")).expect("read migrated bytes");
+    init_host(&root, None, None).expect("repeat init");
+    assert_eq!(
+        fs::read(root.join("host.toml")).expect("reread migrated bytes"),
+        before
+    );
 }
 
 /// A fresh host initialized non-interactively without --host-name fails closed.
@@ -257,7 +277,7 @@ fn non_interactive_missing_host_name_fails_closed() {
     let _env = EnvGuard::acquire().home(home.path());
     let root = home.path().join(".orbit");
 
-    let error = init_host(&root, None, None).expect_err("missing host name must fail closed");
+    let error = init_host(&root, None, Some("DE")).expect_err("missing host name must fail closed");
     assert!(error.to_string().contains("--host-name"), "{error}");
     assert!(
         !root.join("host.toml").exists(),
@@ -265,15 +285,27 @@ fn non_interactive_missing_host_name_fails_closed() {
     );
 }
 
-/// An invalid `--host-mode` fails closed before any identity is written.
+/// A fresh non-interactive init requires an explicit task prefix.
 #[test]
-fn invalid_host_mode_fails_closed() {
+fn non_interactive_missing_task_prefix_fails_closed() {
     let home = tempdir().expect("home tempdir");
     let _env = EnvGuard::acquire().home(home.path());
     let root = home.path().join(".orbit");
 
-    let error =
-        init_host(&root, Some("dk-mac"), Some("bogus")).expect_err("invalid mode must fail");
-    assert!(error.to_string().contains("unknown host mode"), "{error}");
+    let error = init_host(&root, Some("dk-mac"), None).expect_err("missing prefix must fail");
+    assert!(error.to_string().contains("--task-prefix"), "{error}");
     assert!(!root.join("host.toml").exists());
+}
+
+/// Reserved and malformed fresh task-prefix choices fail before identity write.
+#[test]
+fn invalid_task_prefixes_fail_closed() {
+    for prefix in ["ORB", "ADR", "L", "F", "de", "D", "ABCDEF", " DE"] {
+        let home = tempdir().expect("home tempdir");
+        let _env = EnvGuard::acquire().home(home.path());
+        let root = home.path().join(".orbit");
+
+        init_host(&root, Some("dk-mac"), Some(prefix)).expect_err("invalid prefix must fail");
+        assert!(!root.join("host.toml").exists(), "prefix {prefix}");
+    }
 }
