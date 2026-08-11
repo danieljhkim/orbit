@@ -24,8 +24,6 @@
 pub mod execution_profile_projection;
 pub mod host_identity;
 pub mod host_registry;
-pub mod knowledge;
-pub mod knowledge_broker;
 pub mod mcp;
 pub mod persistence;
 pub mod profile;
@@ -48,7 +46,6 @@ pub use host_identity::{
     load_host_identity, os_hostname, rename_current_host_identity, validate_new_task_prefix,
 };
 pub use host_registry::{HostRegistryService, WorkspaceLink, require_local_hub_identity};
-pub use knowledge::{HubKnowledgeSequenceService, scan_registered_knowledge_inventories};
 pub use mcp::{
     DEFAULT_REMOTE_MCP_PORT, RemoteProxyArgs, canonical_mcp_tool_definitions, register_local_spoke,
     safe_mcp_tool_names, serve_mcp_remote_proxy, serve_mcp_stdio, serve_mcp_tcp,

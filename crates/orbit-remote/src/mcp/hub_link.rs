@@ -9,8 +9,8 @@ use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
 use orbit_common::types::{
-    HubKnowledgeAllocationRequestV1, HubKnowledgeAllocationV1, McpCapability, OrbitError,
-    SpokeRegistrationRequestV1, SpokeRegistrationResultV1, ToolSessionContext,
+    McpCapability, OrbitError, SpokeRegistrationRequestV1, SpokeRegistrationResultV1,
+    ToolSessionContext,
 };
 use orbit_common::utility::redaction::redact_sensitive_env_text;
 use serde_json::Value;
@@ -109,17 +109,6 @@ pub(super) trait HubPeer: Send {
         request: &'a SpokeRegistrationRequestV1,
         context: &'a ToolSessionContext,
     ) -> BoxFuture<'a, Result<SpokeRegistrationResultV1, OrbitError>>;
-    fn allocate_knowledge_id<'a>(
-        &'a mut self,
-        _request: &'a HubKnowledgeAllocationRequestV1,
-        _context: &'a ToolSessionContext,
-    ) -> BoxFuture<'a, Result<HubKnowledgeAllocationV1, OrbitError>> {
-        Box::pin(async {
-            Err(OrbitError::HubNegotiation(
-                "hub peer does not implement private knowledge allocation".to_string(),
-            ))
-        })
-    }
     fn close<'a>(&'a mut self) -> BoxFuture<'a, ()>;
 }
 
@@ -254,30 +243,6 @@ impl HubPeer for SshHubPeer {
         })
     }
 
-    fn allocate_knowledge_id<'a>(
-        &'a mut self,
-        request: &'a HubKnowledgeAllocationRequestV1,
-        context: &'a ToolSessionContext,
-    ) -> BoxFuture<'a, Result<HubKnowledgeAllocationV1, OrbitError>> {
-        Box::pin(async move {
-            if self
-                .child
-                .try_wait()
-                .map_err(|error| {
-                    OrbitError::HubUnavailable(format!("inspect SSH hub process: {error}"))
-                })?
-                .is_some()
-            {
-                return Err(OrbitError::HubUnavailable(
-                    "SSH hub process exited before allocation handoff".to_string(),
-                ));
-            }
-            self.client
-                .allocate_knowledge_id(request, context, self.request_timeout)
-                .await
-        })
-    }
-
     fn close<'a>(&'a mut self) -> BoxFuture<'a, ()> {
         Box::pin(async move {
             let _ = self.client.close(self.close_timeout).await;
@@ -308,20 +273,9 @@ pub(super) struct RegistrationRequest {
     response: mpsc::SyncSender<Result<SpokeRegistrationResultV1, OrbitError>>,
 }
 
-pub(super) struct KnowledgeAllocationRequest {
-    capability: McpCapability,
-    request: HubKnowledgeAllocationRequestV1,
-    context: ToolSessionContext,
-    response: mpsc::SyncSender<Result<HubKnowledgeAllocationV1, OrbitError>>,
-}
-
 pub(super) enum WorkerMessage {
     Call(CallRequest),
     Register(RegistrationRequest),
-    // Dormant until the F3 caller-path cutover; F1 freezes and tests the
-    // connector-private seam without routing ordinary agent tools through it.
-    #[allow(dead_code)]
-    Allocate(KnowledgeAllocationRequest),
     Shutdown,
 }
 
@@ -482,53 +436,6 @@ impl HubLinkPool {
                 message: format!("hub link worker disconnected after queue handoff: {error}"),
             })?
     }
-
-    #[allow(dead_code)]
-    pub(super) fn allocate_knowledge_id(
-        &self,
-        capability: McpCapability,
-        request: HubKnowledgeAllocationRequestV1,
-        context: ToolSessionContext,
-    ) -> Result<HubKnowledgeAllocationV1, OrbitError> {
-        request.validate()?;
-        validate_remote_call_context(&context, capability)?;
-        if context.workspace_id.as_deref() != Some(request.workspace_id.as_str()) {
-            return Err(OrbitError::InvalidInput(
-                "private hub knowledge allocation workspace must exactly match the trusted remote context"
-                    .to_string(),
-            ));
-        }
-        let mcp_call_id = context
-            .mcp_call_id
-            .clone()
-            .ok_or_else(|| OrbitError::InvalidInput("remote call ID is missing".to_string()))?;
-        let (response_tx, response_rx) = mpsc::sync_channel(1);
-        self.tx
-            .as_ref()
-            .ok_or_else(|| {
-                OrbitError::HubUnavailable("hub link pool is shutting down".to_string())
-            })?
-            .try_send(WorkerMessage::Allocate(KnowledgeAllocationRequest {
-                capability,
-                request,
-                context,
-                response: response_tx,
-            }))
-            .map_err(|error| match error {
-                mpsc::TrySendError::Full(_) => OrbitError::HubUnavailable(
-                    "hub link request queue is saturated before handoff".to_string(),
-                ),
-                mpsc::TrySendError::Disconnected(_) => OrbitError::HubUnavailable(
-                    "hub link worker is unavailable before handoff".to_string(),
-                ),
-            })?;
-        response_rx
-            .recv()
-            .map_err(|error| OrbitError::OutcomeUnknown {
-                mcp_call_id,
-                message: format!("hub link worker disconnected after queue handoff: {error}"),
-            })?
-    }
 }
 
 impl Drop for HubLinkPool {
@@ -590,10 +497,6 @@ fn run_worker(
             }
             WorkerMessage::Register(request) => {
                 let result = runtime.block_on(process_registration(&mut peers, &worker, &request));
-                let _ = request.response.send(result);
-            }
-            WorkerMessage::Allocate(request) => {
-                let result = runtime.block_on(process_allocation(&mut peers, &worker, &request));
                 let _ = request.response.send(result);
             }
         }
@@ -667,45 +570,6 @@ async fn process_registration(
             mcp_call_id: request.context.mcp_call_id.clone().unwrap_or_default(),
             message: format!(
                 "hub registration response exceeded the {} ms post-handoff deadline",
-                worker.limits.request.as_millis()
-            ),
-        }),
-    };
-    cached.last_used = worker.clock.now();
-    if matches!(
-        result,
-        Err(OrbitError::HubUnavailable(_)) | Err(OrbitError::OutcomeUnknown { .. })
-    ) && let Some(mut failed) = peers.remove(&request.capability)
-    {
-        failed.peer.close().await;
-    }
-    result
-}
-
-async fn process_allocation(
-    peers: &mut BTreeMap<McpCapability, CachedPeer>,
-    worker: &WorkerRuntime<'_>,
-    request: &KnowledgeAllocationRequest,
-) -> Result<HubKnowledgeAllocationV1, OrbitError> {
-    let now = worker.clock.now();
-    reap_idle(peers, now, worker.limits.idle).await;
-    ensure_peer(peers, worker, request.capability).await?;
-    let cached = peers
-        .get_mut(&request.capability)
-        .ok_or_else(|| OrbitError::HubUnavailable("hub peer disappeared".to_string()))?;
-    let result = match tokio::time::timeout(
-        worker.limits.request,
-        cached
-            .peer
-            .allocate_knowledge_id(&request.request, &request.context),
-    )
-    .await
-    {
-        Ok(result) => result,
-        Err(_) => Err(OrbitError::OutcomeUnknown {
-            mcp_call_id: request.context.mcp_call_id.clone().unwrap_or_default(),
-            message: format!(
-                "hub allocation response exceeded the {} ms post-handoff deadline",
                 worker.limits.request.as_millis()
             ),
         }),

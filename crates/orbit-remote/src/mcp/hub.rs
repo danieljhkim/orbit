@@ -4,9 +4,8 @@ use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
 use orbit_common::types::{
-    AuditEventStatus, HUB_KNOWLEDGE_ALLOCATION_METHOD_V1, HostRecord, HostStatus,
-    HubKnowledgeAllocationRequestV1, HubKnowledgeAllocationV1, McpCapability, McpToolDefinition,
-    McpToolPlacement, McpToolScope, McpTransport, RegistrySnapshotV1, SPOKE_REGISTRATION_METHOD_V1,
+    AuditEventStatus, HostRecord, HostStatus, McpCapability, McpToolDefinition, McpToolPlacement,
+    McpToolScope, McpTransport, RegistrySnapshotV1, SPOKE_REGISTRATION_METHOD_V1,
     SpokeRegistrationRequestV1, SpokeRegistrationResultV1, SpokeRegistrationStageV1,
     ToolSessionContext, WorkspaceStatus, mcp_advertised_tool_name,
 };
@@ -97,55 +96,6 @@ impl HubMcpHost {
         };
         self.record_outcome(SPOKE_REGISTRATION_METHOD_V1, &context, &audit_result);
         Ok(result)
-    }
-
-    pub(super) fn private_allocate_knowledge_id(
-        &self,
-        request: HubKnowledgeAllocationRequestV1,
-        session_context: ToolSessionContext,
-    ) -> Result<HubKnowledgeAllocationV1, OrbitError> {
-        let (identity, snapshot) = match self.verify_authority() {
-            Ok(authority) => authority,
-            Err(error) => {
-                let context = self.normalize_context(session_context, &self.identity);
-                self.record_denial(HUB_KNOWLEDGE_ALLOCATION_METHOD_V1, &context, &error);
-                return Err(error);
-            }
-        };
-        let context = self.normalize_context(session_context, &identity);
-        let result = (|| {
-            Self::require_active_remote_caller(&context, &snapshot)?;
-            if !matches!(
-                self.capability,
-                McpCapability::Agent | McpCapability::Operator
-            ) {
-                return Err(OrbitError::InvalidInput(
-                    "private hub knowledge allocation requires agent or operator capability"
-                        .to_string(),
-                ));
-            }
-            request.validate()?;
-            let workspace_id = self.resolve_workspace(&request.workspace_id)?;
-            if context.workspace_id.as_deref() != Some(workspace_id.as_str())
-                || context
-                    .workspace
-                    .as_deref()
-                    .is_some_and(|selector| selector != workspace_id)
-            {
-                return Err(OrbitError::InvalidInput(
-                    "private hub knowledge allocation workspace must exactly match the trusted session context"
-                        .to_string(),
-                ));
-            }
-            crate::HubKnowledgeSequenceService::at(&self.global_root)?.allocate(&request, &context)
-        })();
-        if let Err(error) = &result {
-            self.record_denial(HUB_KNOWLEDGE_ALLOCATION_METHOD_V1, &context, error);
-        }
-        // Successful allocation writes its canonical audit row inside the
-        // same SQLite transaction as sequence, occupancy, and ledger state.
-        // Deliberately do not call `record_outcome` here.
-        result
     }
 
     fn verify_authority(&self) -> Result<(HostIdentity, RegistrySnapshotV1), OrbitError> {

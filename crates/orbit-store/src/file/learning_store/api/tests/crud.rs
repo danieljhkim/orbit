@@ -768,137 +768,101 @@ fn concurrent_creation_yields_two_distinct_records() {
     assert_eq!(ids.len(), 2);
 }
 
-// [ORB-10330] Preallocated owner-finalizer tests: the id is chosen upstream by
-// the hub sequence, so the finalizer never allocates, abandons, retries, or
-// selects a second id after a collision.
+// [ORB-10725] Learning IDs are workspace-scoped, not global: `create_learning`
+// is one owner-local transaction against this workspace's own allocator and
+// index partition, with no cross-workspace sequence in the path (ADR-0357).
 
 #[test]
-fn finalize_preallocated_learning_writes_supplied_id_without_allocating() {
-    let (dir, store) = store_with_index();
-    // A non-sequential id: a local allocation would have produced L-0001.
-    let learning = store
-        .finalize_preallocated_learning("L-0043", create_params("hub-preallocated", vec![], vec![]))
-        .expect("finalize preallocated learning");
-    assert_eq!(learning.id, "L-0043");
-    assert_eq!(learning.status, LearningStatus::Active);
+fn same_learning_id_in_two_workspaces_coexists_and_is_independently_addressable() {
+    let index = Store::open_in_memory().expect("shared index");
+    let first_dir = tempdir().expect("first workspace");
+    let second_dir = tempdir().expect("second workspace");
+    // One shared host-global index, two registered workspaces — the multi-host
+    // shape after ADR-0357, where an `L-0001` exists in each.
+    let first = LearningFileStore::new_with_index_and_workspace(
+        first_dir.path().to_path_buf(),
+        index.clone(),
+        "ws-first",
+    );
+    let second = LearningFileStore::new_with_index_and_workspace(
+        second_dir.path().to_path_buf(),
+        index.clone(),
+        "ws-second",
+    );
 
-    // Body landed under the requested owner root.
-    assert!(dir.path().join("L-0043/learning.yaml").is_file());
+    let in_first = first
+        .create_learning(create_params("first workspace rule", vec![], vec![]))
+        .expect("create in the first workspace");
+    let in_second = second
+        .create_learning(create_params("second workspace rule", vec![], vec![]))
+        .expect("create in the second workspace");
 
-    // Exactly the supplied id is projected — no stray L-0001 from a hidden
-    // allocation.
-    let allocations = store
-        .id_allocator
-        .learning_allocations()
-        .expect("allocations");
-    assert_eq!(allocations.len(), 1, "no extra allocation was selected");
-    assert_eq!(allocations[0].id, "L-0043");
+    // Each workspace allocated from its own sequence, so the same ID is issued
+    // twice. A global allocator would have handed the second one L-0002.
+    assert_eq!(in_first.id, "L-0001");
+    assert_eq!(in_second.id, "L-0001");
+
+    // Both records exist and each resolves to its own workspace's body.
     assert_eq!(
-        allocations[0].body_path.as_deref(),
-        Some(std::path::Path::new("L-0043/learning.yaml"))
+        first
+            .get_learning("L-0001")
+            .expect("read first")
+            .expect("present")
+            .summary,
+        "first workspace rule"
     );
-
-    // Lifecycle read works through the projection.
-    let listed = store
-        .list_learnings(Some(LearningStatus::Active))
-        .expect("list");
     assert_eq!(
-        listed.iter().map(|l| l.id.clone()).collect::<Vec<_>>(),
-        vec!["L-0043".to_string()]
+        second
+            .get_learning("L-0001")
+            .expect("read second")
+            .expect("present")
+            .summary,
+        "second workspace rule"
     );
-}
+    assert!(first_dir.path().join("L-0001/learning.yaml").is_file());
+    assert!(second_dir.path().join("L-0001/learning.yaml").is_file());
 
-#[test]
-fn finalize_preallocated_learning_rejects_existing_artifact_without_adopting() {
-    let (dir, store) = store_with_index();
-    let original = store
-        .finalize_preallocated_learning("L-0007", create_params("original", vec![], vec![]))
-        .expect("seed original");
-    let original_bytes =
-        std::fs::read(dir.path().join("L-0007/learning.yaml")).expect("original yaml");
-
-    let err = store
-        .finalize_preallocated_learning("L-0007", create_params("intruder", vec![], vec![]))
-        .expect_err("collision must fail");
-    assert!(
-        matches!(err, orbit_common::types::OrbitError::InvalidInput(_)),
-        "got {err:?}"
-    );
-
-    // Original artifact + allocation stay inspectable and byte-identical.
+    // The shared index partitions by workspace: one row per workspace for the
+    // same ID, each carrying its own envelope.
+    let rows: Vec<(String, String)> = index
+        .with_read_connection(|conn| {
+            let mut statement = conn
+                .prepare(
+                    "SELECT workspace_id, summary FROM learnings_index
+                     WHERE id = 'L-0001' ORDER BY workspace_id",
+                )
+                .map_err(|error| orbit_common::types::OrbitError::Store(error.to_string()))?;
+            let rows = statement
+                .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+                .map_err(|error| orbit_common::types::OrbitError::Store(error.to_string()))?;
+            rows.collect::<Result<Vec<_>, _>>()
+                .map_err(|error| orbit_common::types::OrbitError::Store(error.to_string()))
+        })
+        .expect("read index rows");
     assert_eq!(
-        std::fs::read(dir.path().join("L-0007/learning.yaml")).expect("still there"),
-        original_bytes
-    );
-    let reread = store.get_learning("L-0007").expect("get").expect("exists");
-    assert_eq!(reread.summary, original.summary);
-    let allocations = store
-        .id_allocator
-        .learning_allocations()
-        .expect("allocations");
-    assert_eq!(allocations.len(), 1);
-    assert_eq!(allocations[0].id, "L-0007");
-}
-
-#[test]
-fn finalize_preallocated_learning_cleans_up_partial_body_on_projection_failure() {
-    let (dir, store) = store_with_index();
-    // Pre-seed a conflicting projection so the projection insert fails *after*
-    // the body is written; the partial body must be removed.
-    store
-        .id_allocator
-        .project_preallocated_learning("L-0099", std::path::Path::new("L-0099/learning.yaml"))
-        .expect("seed conflicting projection");
-
-    let err = store
-        .finalize_preallocated_learning("L-0099", create_params("doomed", vec![], vec![]))
-        .expect_err("projection conflict must fail");
-    assert!(
-        matches!(err, orbit_common::types::OrbitError::Store(_)),
-        "got {err:?}"
+        rows,
+        vec![
+            ("ws-first".to_string(), "first workspace rule".to_string()),
+            ("ws-second".to_string(), "second workspace rule".to_string()),
+        ]
     );
 
-    // No partial body/dir remains; the pre-existing projection is untouched.
-    assert!(!dir.path().join("L-0099").exists());
-    let allocations = store
-        .id_allocator
-        .learning_allocations()
-        .expect("allocations");
-    assert_eq!(allocations.len(), 1);
-    assert_eq!(allocations[0].id, "L-0099");
-}
-
-#[test]
-fn finalize_preallocated_learning_targets_only_the_selected_worktree() {
-    let shared = tempdir().expect("shared orbit");
-    let shared_orbit = shared.path().join("hub/.orbit");
-    std::fs::create_dir_all(&shared_orbit).expect("shared orbit dir");
-    let local = tempdir().expect("local worktree");
-    let sibling = tempdir().expect("sibling worktree");
-
-    let local_store = learning_store_for_worktree(&shared_orbit, local.path());
-    let sibling_store = learning_store_for_worktree(&shared_orbit, sibling.path());
-
-    let learning = local_store
-        .finalize_preallocated_learning("L-0100", create_params("owner local", vec![], vec![]))
-        .expect("finalize in local checkout");
-    assert_eq!(learning.id, "L-0100");
-
-    // Body materialized only under the local worktree learning root.
-    assert!(
-        local
-            .path()
-            .join(".orbit/learnings/L-0100/learning.yaml")
-            .is_file()
-    );
-    // The sibling checkout filesystem is untouched.
-    assert!(!sibling.path().join(".orbit/learnings/L-0100").exists());
-    // The shared allocator sees the row but the sibling store treats it as
-    // non-local (body under the local worktree, not the sibling).
-    assert!(
-        sibling_store
-            .get_learning("L-0100")
-            .expect("sibling get")
-            .is_none()
+    // Updating one workspace's record leaves the other untouched.
+    second
+        .update_learning(
+            "L-0001",
+            LearningUpdateParams {
+                summary: Some("second workspace rule, revised".to_string()),
+                ..Default::default()
+            },
+        )
+        .expect("update the second workspace");
+    assert_eq!(
+        first
+            .get_learning("L-0001")
+            .expect("reread first")
+            .expect("present")
+            .summary,
+        "first workspace rule"
     );
 }

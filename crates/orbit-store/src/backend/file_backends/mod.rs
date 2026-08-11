@@ -177,14 +177,6 @@ impl AdrStoreBackend for AdrFileStore {
         self.add_adr(params)
     }
 
-    fn finalize_preallocated_adr(
-        &self,
-        id: &str,
-        params: AdrCreateParams,
-    ) -> Result<Adr, OrbitError> {
-        self.finalize_preallocated_adr(id, params)
-    }
-
     fn restore_allocated_adr(&self, id: &str, params: AdrCreateParams) -> Result<Adr, OrbitError> {
         self.restore_allocated_adr(id, params)
     }
@@ -262,14 +254,6 @@ impl AdrStoreBackend for AdrFileStore {
 impl LearningStoreBackend for LearningFileStore {
     fn create_learning(&self, params: LearningCreateParams) -> Result<Learning, OrbitError> {
         self.create_learning(params)
-    }
-
-    fn finalize_preallocated_learning(
-        &self,
-        id: &str,
-        params: LearningCreateParams,
-    ) -> Result<Learning, OrbitError> {
-        self.finalize_preallocated_learning(id, params)
     }
 
     fn get_learning(&self, id: &str) -> Result<Option<Learning>, OrbitError> {

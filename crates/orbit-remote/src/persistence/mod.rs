@@ -13,14 +13,8 @@ use orbit_store::Store;
 use orbit_store::sqlite::migration::{FeatureMigration, FeatureSchemaStatus};
 use rusqlite::{Connection, OptionalExtension};
 
-mod knowledge;
 mod registry;
 mod snapshot;
-
-pub use knowledge::{
-    HubKnowledgeAllocatorState, HubKnowledgeAllocatorStatus, HubKnowledgeRequestIdentityV1,
-    KnowledgeWorkspaceInventory, LegacyKnowledgeId,
-};
 
 const REMOTE_SCHEMA_FEATURE: &str = "orbit-remote";
 const REMOTE_SCHEMA_MIGRATIONS: &[FeatureMigration] = &[
@@ -32,7 +26,12 @@ const REMOTE_SCHEMA_MIGRATIONS: &[FeatureMigration] = &[
     FeatureMigration::new(
         2,
         "dormant_hub_knowledge_sequences",
-        apply_dormant_hub_knowledge_sequences,
+        skip_withdrawn_hub_knowledge_sequences,
+    ),
+    FeatureMigration::new(
+        3,
+        "drop_dormant_hub_knowledge_sequences",
+        drop_dormant_hub_knowledge_sequences,
     ),
 ];
 
@@ -285,104 +284,45 @@ fn adopt_global_v8_registry_schema(conn: &Connection) -> Result<(), OrbitError> 
     Ok(())
 }
 
-/// Remote v2 installs the hub-global ADR/learning allocation substrate in a
-/// deliberately dormant state. Source discovery and activation are explicit
-/// service operations: merely opening the Remote facade never scans a
-/// checkout, advances a sequence, or changes an existing caller path.
-fn apply_dormant_hub_knowledge_sequences(conn: &Connection) -> Result<(), OrbitError> {
+/// Remote v2 once installed [ORB-10272]'s dormant hub-global ADR/learning
+/// allocation substrate. [ADR-0357] keys knowledge `(workspace_id,
+/// artifact_key)` and deletes that substrate rather than parking it, so a fresh
+/// database must never create those tables — this slot is now a no-op.
+///
+/// The slot itself cannot go away: [`Store::apply_feature_migrations`] validates
+/// the recorded ledger against this registry position by position and rejects a
+/// changed migration name, so a database that already recorded
+/// `dormant_hub_knowledge_sequences` at v2 must still find it here. v3
+/// ([`drop_dormant_hub_knowledge_sequences`]) is what converges those databases.
+fn skip_withdrawn_hub_knowledge_sequences(_conn: &Connection) -> Result<(), OrbitError> {
+    Ok(())
+}
+
+/// Remote v3 drops whatever the original v2 created [ORB-10725].
+///
+/// Every statement is `IF EXISTS`, which is what lets one migration serve both
+/// populations: a database that applied the original v2 loses the substrate
+/// here, and a database first opened after v2 became a no-op passes through
+/// unchanged. The child ledger is dropped before `hub_knowledge_ids` because
+/// `foreign_keys=ON` makes `DROP TABLE` perform an implicit delete that would
+/// otherwise violate the ledger's foreign key.
+fn drop_dormant_hub_knowledge_sequences(conn: &Connection) -> Result<(), OrbitError> {
     conn.execute_batch(
         r#"
-        CREATE TABLE hub_knowledge_allocator_state (
-            id                    INTEGER PRIMARY KEY CHECK (id = 0),
-            status                TEXT NOT NULL CHECK (status IN ('dormant', 'active')),
-            activation_generation INTEGER NOT NULL DEFAULT 0
-                                      CHECK (activation_generation >= 0),
-            activated_at          TEXT,
-            updated_at            TEXT NOT NULL,
-            CHECK (
-                (status = 'dormant' AND activated_at IS NULL)
-                OR (status = 'active' AND activated_at IS NOT NULL)
-            )
-        );
-
-        INSERT INTO hub_knowledge_allocator_state(
-            id, status, activation_generation, activated_at, updated_at
-        ) VALUES (0, 'dormant', 0, NULL, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'));
-
-        CREATE TABLE hub_knowledge_sequences (
-            kind          TEXT PRIMARY KEY CHECK (kind IN ('adr', 'learning')),
-            next_sequence INTEGER NOT NULL
-                          CHECK (next_sequence >= 1 AND next_sequence <= 4294967296),
-            updated_at    TEXT NOT NULL
-        );
-
-        INSERT INTO hub_knowledge_sequences(kind, next_sequence, updated_at) VALUES
-            ('adr', 1, strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
-            ('learning', 1, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'));
-
-        CREATE TABLE hub_knowledge_ids (
-            kind          TEXT NOT NULL CHECK (kind IN ('adr', 'learning')),
-            id            TEXT NOT NULL,
-            workspace_id  TEXT NOT NULL CHECK (length(workspace_id) > 0),
-            sequence      INTEGER NOT NULL CHECK (sequence >= 1 AND sequence <= 4294967295),
-            origin        TEXT NOT NULL CHECK (origin IN ('legacy', 'allocated')),
-            evidence_json TEXT NOT NULL
-                          CHECK (json_valid(evidence_json) AND json_type(evidence_json) = 'array'),
-            recorded_at   TEXT NOT NULL,
-            PRIMARY KEY(kind, id),
-            UNIQUE(kind, sequence),
-            UNIQUE(workspace_id, kind, id)
-        );
-
-        CREATE INDEX hub_knowledge_ids_workspace
-            ON hub_knowledge_ids(workspace_id, kind, sequence);
-
-        CREATE TABLE hub_knowledge_workspace_reconciliation (
-            workspace_id          TEXT PRIMARY KEY CHECK (length(workspace_id) > 0),
-            source_digest         TEXT NOT NULL CHECK (length(source_digest) > 0),
-            source_count          INTEGER NOT NULL CHECK (source_count >= 0),
-            adr_max               INTEGER NOT NULL CHECK (adr_max >= 0 AND adr_max <= 4294967295),
-            learning_max          INTEGER NOT NULL
-                                      CHECK (learning_max >= 0 AND learning_max <= 4294967295),
-            reconciliation_generation INTEGER NOT NULL
-                                      CHECK (reconciliation_generation >= 1),
-            reconciled_at         TEXT NOT NULL
-        );
-
-        CREATE TABLE hub_knowledge_allocation_ledger (
-            mcp_call_id          TEXT PRIMARY KEY CHECK (length(mcp_call_id) > 0),
-            workspace_id        TEXT NOT NULL CHECK (length(workspace_id) > 0),
-            kind                TEXT NOT NULL CHECK (kind IN ('adr', 'learning')),
-            id                  TEXT NOT NULL,
-            sequence            INTEGER NOT NULL CHECK (sequence >= 1 AND sequence <= 4294967295),
-            request_identity_json TEXT NOT NULL
-                                CHECK (json_valid(request_identity_json)
-                                       AND json_type(request_identity_json) = 'object'),
-            allocated_at        TEXT NOT NULL,
-            FOREIGN KEY(kind, id) REFERENCES hub_knowledge_ids(kind, id)
-                ON UPDATE RESTRICT ON DELETE RESTRICT,
-            UNIQUE(workspace_id, kind, id)
-        );
-
-        CREATE INDEX hub_knowledge_allocation_lookup
-            ON hub_knowledge_allocation_ledger(workspace_id, kind, id);
-
-        CREATE TRIGGER hub_knowledge_allocation_ledger_immutable_update
-        BEFORE UPDATE ON hub_knowledge_allocation_ledger
-        BEGIN
-            SELECT RAISE(ABORT, 'hub knowledge allocation ledger is immutable');
-        END;
-
-        CREATE TRIGGER hub_knowledge_allocation_ledger_immutable_delete
-        BEFORE DELETE ON hub_knowledge_allocation_ledger
-        BEGIN
-            SELECT RAISE(ABORT, 'hub knowledge allocation ledger is immutable');
-        END;
+        DROP TRIGGER IF EXISTS hub_knowledge_allocation_ledger_immutable_update;
+        DROP TRIGGER IF EXISTS hub_knowledge_allocation_ledger_immutable_delete;
+        DROP INDEX IF EXISTS hub_knowledge_allocation_lookup;
+        DROP TABLE IF EXISTS hub_knowledge_allocation_ledger;
+        DROP INDEX IF EXISTS hub_knowledge_ids_workspace;
+        DROP TABLE IF EXISTS hub_knowledge_ids;
+        DROP TABLE IF EXISTS hub_knowledge_workspace_reconciliation;
+        DROP TABLE IF EXISTS hub_knowledge_sequences;
+        DROP TABLE IF EXISTS hub_knowledge_allocator_state;
         "#,
     )
     .map_err(|error| {
         OrbitError::Migration(format!(
-            "apply orbit-remote dormant hub knowledge sequence schema: {error}"
+            "drop the withdrawn orbit-remote hub knowledge allocation schema: {error}"
         ))
     })?;
     Ok(())
