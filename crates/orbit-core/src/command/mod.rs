@@ -59,7 +59,7 @@ pub(crate) struct ManagedAssetReconciliation {
     pub warnings: Vec<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct ManagedAssetManifest {
     schema_version: u32,
@@ -163,6 +163,16 @@ pub(crate) fn reconcile_managed_assets<'a>(
                 next_assets.insert((*name).to_string(), previous_digest.clone());
                 continue;
             }
+
+            // The manifest records the last embedded content written for this
+            // asset. If it already matches the current embedded content, this
+            // bootstrap has nothing to refresh. Avoid touching the asset so a
+            // steady-state runtime can operate with global resources mounted
+            // read-only.
+            if previous_digest == Some(&rendered_digest) {
+                next_assets.insert((*name).to_string(), rendered_digest);
+                continue;
+            }
         }
 
         write_text_with_parent(&path, &rendered)?;
@@ -189,18 +199,20 @@ pub(crate) fn reconcile_managed_assets<'a>(
         asset_kind: asset_kind.to_string(),
         assets: next_assets,
     };
-    let mut encoded = serde_json::to_string_pretty(&manifest).map_err(|error| {
-        OrbitError::Store(format!(
-            "serialize managed {asset_kind} asset manifest: {error}"
-        ))
-    })?;
-    encoded.push('\n');
-    atomic_write_text(&manifest_path, &encoded).map_err(|error| {
-        OrbitError::Io(format!(
-            "write managed {asset_kind} asset manifest '{}': {error}",
-            manifest_path.display()
-        ))
-    })?;
+    if previous.as_ref() != Some(&manifest) {
+        let mut encoded = serde_json::to_string_pretty(&manifest).map_err(|error| {
+            OrbitError::Store(format!(
+                "serialize managed {asset_kind} asset manifest: {error}"
+            ))
+        })?;
+        encoded.push('\n');
+        atomic_write_text(&manifest_path, &encoded).map_err(|error| {
+            OrbitError::Io(format!(
+                "write managed {asset_kind} asset manifest '{}': {error}",
+                manifest_path.display()
+            ))
+        })?;
+    }
 
     for warning in &result.warnings {
         tracing::warn!(
