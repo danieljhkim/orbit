@@ -1,3 +1,10 @@
+---
+type: design
+summary: "Glossary: Policy & Sandboxing"
+tags: ["policy-sandbox"]
+last_validated: 2026-08-11
+---
+
 # Glossary: Policy & Sandboxing
 
 This glossary covers Orbit-specific policy and sandboxing terms only. Generic OS, regex, and security terms are excluded unless Orbit assigns them a specific meaning.

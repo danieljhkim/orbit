@@ -1,3 +1,10 @@
+---
+type: design
+summary: "Spec: Sandboxed Exec Contract"
+tags: ["policy-sandbox"]
+last_validated: 2026-08-11
+---
+
 # Spec: Sandboxed Exec Contract
 
 `orbit-exec::run_process` is the single primitive every shell-invoking tool spawns through. This spec names the supervision invariants and failure modes that contract must preserve.
