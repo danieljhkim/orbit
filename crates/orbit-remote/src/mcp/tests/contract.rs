@@ -4,7 +4,7 @@ use orbit_common::types::{
     McpCapability, McpToolDefinition, McpToolPlacement, McpToolPolicy, ToolParam, ToolSchema,
 };
 
-use super::super::contract::{canonical_hub_schema_bytes, hub_schema_digest};
+use super::super::contract::{canonical_owner_schema_bytes, owner_schema_digest};
 
 fn fixture_definitions() -> Vec<McpToolDefinition> {
     vec![
@@ -20,25 +20,25 @@ fn fixture_definitions() -> Vec<McpToolDefinition> {
                 }],
                 builtin: true,
             },
-            McpToolPolicy::agent_and_operator(McpToolPlacement::Hub),
+            McpToolPolicy::agent_and_operator(McpToolPlacement::Owner),
         )
         .expect("definition"),
     ]
 }
 
 #[test]
-fn frozen_hub_schema_golden_vector() {
-    let bytes = canonical_hub_schema_bytes(&fixture_definitions(), McpCapability::Agent)
+fn frozen_owner_schema_golden_vector() {
+    let bytes = canonical_owner_schema_bytes(&fixture_definitions(), McpCapability::Agent)
         .expect("canonical bytes");
     assert_eq!(
         String::from_utf8(bytes).expect("utf8"),
         concat!(
-            "orbit.mcp.hub-schema.v1\0",
-            r#"{"canonical_registry_revision":2,"capability":"agent","tools":[{"advertised_name":"orbit_task_show","canonical_name":"orbit.task.show","description":"Show one task","input_schema":{"additionalProperties":true,"properties":{"id":{"description":"Task ID","type":"string"}},"required":["id"],"type":"object"}}]}"#,
+            "orbit.mcp.owner-schema.v1\0",
+            r#"{"canonical_registry_revision":3,"capability":"agent","tools":[{"advertised_name":"orbit_task_show","canonical_name":"orbit.task.show","description":"Show one task","input_schema":{"additionalProperties":true,"properties":{"id":{"description":"Task ID","type":"string"}},"required":["id"],"type":"object"}}]}"#,
         )
     );
     assert_eq!(
-        hub_schema_digest(&fixture_definitions(), McpCapability::Agent).expect("digest"),
-        "8c5856e3838ac33eab4e66401d846b9cc6f262a23d30af964c843496c0fe4ee8"
+        owner_schema_digest(&fixture_definitions(), McpCapability::Agent).expect("digest"),
+        "416fc00d8b8eaa3d6dd44f3e28032c92796d6a4ea50e7055ad83404d7f2b599a"
     );
 }

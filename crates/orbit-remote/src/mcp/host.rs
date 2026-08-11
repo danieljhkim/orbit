@@ -8,7 +8,7 @@
 //! recorded explicitly before runtime dispatch. Either rejection path produces
 //! a failure-status row.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -16,9 +16,9 @@ use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use orbit_common::types::{
-    AuditEventStatus, McpToolDefinition, McpToolPlacement, McpToolPolicyError, McpToolScope,
-    McpTransport, ToolSessionContext, WorkspaceCheckoutRole, WorkspaceStatus, audit_execution_id,
-    validate_mcp_tool_definitions,
+    AuditEventStatus, McpCapability, McpToolDefinition, McpToolPlacement, McpToolPolicyError,
+    McpToolScope, McpTransport, ToolSessionContext, WorkspaceCheckoutRole, WorkspaceStatus,
+    audit_execution_id, validate_mcp_tool_definitions,
 };
 use orbit_core::command::tool::{
     ToolEntryPoint, audit_role_label_for_entry_point, trusted_mcp_audit_context,
@@ -33,9 +33,28 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 
 use crate::runtime::RemoteRuntimeFactory;
-use crate::{HostIdentityState, HostMode, inspect_host_identity};
+use crate::{HostIdentityState, inspect_host_identity};
 
-use super::hub_link::HubLinkPool;
+use super::owner_link::OwnerLinkPool;
+
+/// One configured route to an owner machine, with the exact capability set
+/// `mcp.toml` grants for it.
+///
+/// The ceiling travels with the route because it is per target: a session may
+/// legitimately hold `operator` while one owner grants only `agent`. Keeping
+/// the set here lets the broker say *why* a route is unusable instead of
+/// reporting it as absent.
+pub(super) struct OwnerRoute {
+    pub(super) allowed_capabilities: BTreeSet<McpCapability>,
+    pub(super) pool: Arc<OwnerLinkPool>,
+}
+
+/// Configured owner routes keyed by the owner `machine_id` they reach.
+///
+/// Routes are per machine, not per workspace (§5.1), so the broker looks up a
+/// workspace's declared owner and then finds that machine here. A missing entry
+/// is a refusal, never a fallback to local coordination state.
+pub(super) type OwnerRouteTable = BTreeMap<String, OwnerRoute>;
 
 pub fn canonical_mcp_tool_definitions() -> Result<Vec<McpToolDefinition>, McpToolPolicyError> {
     let mut definitions = orbit_tools::canonical_builtin_mcp_tool_definitions()?;
@@ -104,6 +123,17 @@ struct ExactCheckoutBinding {
     owner_machine_id: Option<String>,
 }
 
+/// Where a workspace's coordination state lives, relative to this machine.
+///
+/// This is deliberately two-valued: v1 has exactly one coordination writer per
+/// workspace and no third-machine relay, so a call either executes here or
+/// crosses exactly one configured route to the machine named here.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum OwnerResolution {
+    Local,
+    Remote(String),
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct WorkspaceIdentityDocument {
@@ -121,31 +151,35 @@ struct WorkspaceIdentityDocument {
 pub(super) struct BrokerMcpHost {
     global_root: PathBuf,
     runtimes: Mutex<BTreeMap<RuntimeCacheKey, OrbitRuntime>>,
-    hub_links: Option<Arc<HubLinkPool>>,
+    owner_routes: OwnerRouteTable,
 }
 
 impl BrokerMcpHost {
+    /// A broker with no configured owner routes: every workspace it serves must
+    /// be owned by this machine. Production always goes through
+    /// [`Self::new_with_owner_routes`], which passes the parsed `mcp.toml`.
+    #[cfg(test)]
     pub(super) fn new(global_root: PathBuf) -> Self {
+        Self::new_with_owner_routes(global_root, OwnerRouteTable::new())
+    }
+
+    pub(super) fn new_with_owner_routes(
+        global_root: PathBuf,
+        owner_routes: OwnerRouteTable,
+    ) -> Self {
         Self {
             global_root,
             runtimes: Mutex::new(BTreeMap::new()),
-            hub_links: None,
+            owner_routes,
         }
     }
 
-    pub(super) fn new_with_hub_link(global_root: PathBuf, hub_links: HubLinkPool) -> Self {
-        Self {
-            global_root,
-            runtimes: Mutex::new(BTreeMap::new()),
-            hub_links: Some(Arc::new(hub_links)),
-        }
-    }
-
-    fn is_spoke(&self) -> Result<bool, OrbitError> {
-        Ok(matches!(
-            inspect_host_identity(&self.global_root)?,
-            HostIdentityState::Present(identity) if identity.mode == HostMode::Spoke
-        ))
+    /// This machine's stable identity, when it has one.
+    fn local_machine_id(&self) -> Result<Option<String>, OrbitError> {
+        Ok(match inspect_host_identity(&self.global_root)? {
+            HostIdentityState::Present(identity) => Some(identity.machine_id),
+            HostIdentityState::Legacy { .. } | HostIdentityState::Absent => None,
+        })
     }
 
     fn scalar_capability(
@@ -153,7 +187,7 @@ impl BrokerMcpHost {
     ) -> Result<orbit_common::types::McpCapability, OrbitError> {
         if context.effective_capabilities.len() != 1 {
             return Err(OrbitError::InvalidInput(
-                "remote hub routing requires exactly one effective capability".to_string(),
+                "remote owner routing requires exactly one effective capability".to_string(),
             ));
         }
         context
@@ -162,22 +196,22 @@ impl BrokerMcpHost {
             .next()
             .copied()
             .ok_or_else(|| {
-                OrbitError::InvalidInput("remote hub routing requires a capability".to_string())
+                OrbitError::InvalidInput("remote owner routing requires a capability".to_string())
             })
     }
 
-    fn remote_hub_call(
+    fn remote_owner_call(
         &self,
         name: &str,
         input: Value,
         mut context: ToolSessionContext,
+        owner_machine_id: &str,
         workspace_id: Option<&str>,
     ) -> Result<Value, OrbitError> {
-        let pool = self.hub_links.as_ref().ok_or_else(|| {
-            OrbitError::HubUnavailable(
-                "this spoke has no initialized MCP hub link; local fallback is forbidden"
-                    .to_string(),
-            )
+        let route = self.owner_routes.get(owner_machine_id).ok_or_else(|| {
+            OrbitError::OwnerUnavailable(format!(
+                "no initialized MCP route to owner machine '{owner_machine_id}'; local fallback is forbidden"
+            ))
         })?;
         context = normalize_trusted_call_context(context);
         context.transport = Some(McpTransport::SshMcp);
@@ -186,7 +220,7 @@ impl BrokerMcpHost {
         context.workspace = workspace_id.map(ToOwned::to_owned);
         context.workspace_id = workspace_id.map(ToOwned::to_owned);
         let capability = Self::scalar_capability(&context)?;
-        pool.call(capability, name, input, context)
+        route.pool.call(capability, name, input, context)
     }
 
     fn definition(&self, name: &str) -> Result<McpToolDefinition, OrbitError> {
@@ -232,7 +266,7 @@ impl BrokerMcpHost {
     ) {
         let mut context = normalize_trusted_call_context(session_context.clone());
         if let Some((workspace_id, binding)) = Self::selector(input, &context)
-            .and_then(|selector| self.resolve_workspace(selector, true).ok())
+            .and_then(|selector| self.resolve_workspace(selector).ok())
         {
             context.workspace_id = Some(workspace_id);
             if let Some(binding) = binding {
@@ -271,10 +305,15 @@ impl BrokerMcpHost {
             })
     }
 
+    /// Resolve a selector to its logical workspace ID and, when this machine
+    /// holds one, its validated exact local checkout.
+    ///
+    /// The binding is always attached when it exists — placement preflight, not
+    /// this lookup, decides whether a call may proceed without one. A workspace
+    /// registered here with no local checkout resolves to `(id, None)`.
     fn resolve_workspace(
         &self,
         selector: &str,
-        require_local: bool,
     ) -> Result<(String, Option<ExactCheckoutBinding>), OrbitError> {
         let path = Path::new(selector);
         if path.is_absolute() {
@@ -316,16 +355,22 @@ impl BrokerMcpHost {
                 workspace.id
             )));
         }
-        if !require_local {
-            return Ok((workspace.id.clone(), None));
-        }
-        let checkout = registry
+        let Some(checkout) = registry
             .checkouts
             .iter()
             .find(|checkout| checkout.workspace_id == workspace.id)
-            .ok_or_else(|| self.local_checkout_unavailable(&workspace.id))?;
-        let binding = self.resolve_exact_checkout(&checkout.repo_root)?;
-        Ok((binding.logical_workspace_id.clone(), Some(binding)))
+        else {
+            return Ok((workspace.id.clone(), None));
+        };
+        // A registered checkout that no longer validates is indistinguishable
+        // here from having none: a checkoutless coordination call still
+        // succeeds, and a call that needs the checkout is refused by placement
+        // preflight with the same message. An explicit path selector still
+        // fails hard above, because the caller named that path.
+        match self.resolve_exact_checkout(&checkout.repo_root) {
+            Ok(binding) => Ok((binding.logical_workspace_id.clone(), Some(binding))),
+            Err(_) => Ok((workspace.id.clone(), None)),
+        }
     }
 
     fn local_checkout_unavailable(&self, workspace_id: &str) -> OrbitError {
@@ -440,52 +485,133 @@ impl BrokerMcpHost {
         })
     }
 
+    /// Where a workspace's coordination state lives, per the machine-local
+    /// workspace registry. `mcp.toml` never participates: it maps an owner
+    /// machine to a route, it cannot declare ownership.
+    fn resolve_owner(
+        &self,
+        workspace_id: &str,
+        binding: Option<&ExactCheckoutBinding>,
+    ) -> Result<OwnerResolution, OrbitError> {
+        let declared = match binding {
+            Some(binding) => binding.owner_machine_id.clone(),
+            None => {
+                let registry_path = crate::workspace_registry::registry_path_for(&self.global_root);
+                crate::workspace_registry::load_registry_from(&registry_path)?
+                    .workspaces
+                    .iter()
+                    .find(|workspace| workspace.id == workspace_id)
+                    .and_then(|workspace| workspace.owner_machine_id.clone())
+            }
+        };
+        let Some(declared) = declared else {
+            // A workspace with no declared owner predates the ownership model.
+            // The machine holding it is the only coordination writer it has.
+            return Ok(OwnerResolution::Local);
+        };
+        match self.local_machine_id()? {
+            // No stable identity means nothing can be owned elsewhere.
+            None => Ok(OwnerResolution::Local),
+            Some(local) if local == declared => Ok(OwnerResolution::Local),
+            Some(_) => Ok(OwnerResolution::Remote(declared)),
+        }
+    }
+
+    /// Refuse an owner-placed call for a workspace owned elsewhere, naming the
+    /// owning machine and the configured route if one exists (§4.2 rule 4).
+    fn remote_owner_refusal(
+        &self,
+        name: &str,
+        workspace_id: &str,
+        owner: &str,
+        capability: Option<McpCapability>,
+    ) -> OrbitError {
+        let route = match (self.owner_routes.get(owner), capability) {
+            (None, _) => {
+                format!("no [[owner]] route to '{owner}' is configured in machine-global mcp.toml")
+            }
+            (Some(route), Some(capability))
+                if !route.allowed_capabilities.contains(&capability) =>
+            {
+                format!(
+                    "the configured route to '{owner}' does not grant capability '{capability}'"
+                )
+            }
+            (Some(_), _) => {
+                format!("a route to '{owner}' is configured, but only task tools may cross it")
+            }
+        };
+        OrbitError::InvalidInput(format!(
+            "tool '{name}' is owner-placed and workspace '{workspace_id}' is owned by machine '{owner}': {route}. Orbit never relays this call through a third machine"
+        ))
+    }
+
+    /// Placement preflight (§4.2). `Owner` does not mean "find and contact any
+    /// owner": it resolves the owner from machine-local state, executes here
+    /// when that is this machine, dispatches over the one configured route for
+    /// the task surface, and otherwise refuses by name.
     fn preflight_placement(
         &self,
         placement: McpToolPlacement,
+        name: &str,
         workspace_id: &str,
+        owner: &OwnerResolution,
+        capability: McpCapability,
         binding: Option<&ExactCheckoutBinding>,
     ) -> Result<(), OrbitError> {
-        let identity = inspect_host_identity(&self.global_root)?;
-        let (mode, machine_id) = match identity {
-            HostIdentityState::Present(identity) => (identity.mode, Some(identity.machine_id)),
-            HostIdentityState::Legacy { .. } | HostIdentityState::Absent => {
-                (HostMode::Standalone, None)
-            }
-        };
         match placement {
-            McpToolPlacement::Hub if mode == HostMode::Spoke && self.hub_links.is_none() => {
-                Err(OrbitError::HubUnavailable(format!(
-                    "hub placement for workspace '{workspace_id}' is unavailable from this spoke: no MCP hub transport is configured"
-                )))
-            }
-            McpToolPlacement::Hub => Ok(()),
             McpToolPlacement::LocalDerived => binding
                 .map(|_| ())
                 .ok_or_else(|| self.local_checkout_unavailable(workspace_id)),
-            McpToolPlacement::Owner => {
-                let binding =
-                    binding.ok_or_else(|| self.local_checkout_unavailable(workspace_id))?;
-                if binding.role == WorkspaceCheckoutRole::Replica {
-                    return Err(OrbitError::InvalidInput(format!(
-                        "workspace '{workspace_id}' is a replica on this machine and may not author owner-placed mutations"
-                    )));
+            McpToolPlacement::Owner => match owner {
+                OwnerResolution::Local => {
+                    // A replica binding whose workspace record still names this
+                    // machine as owner is drifted registry state, not a route.
+                    // Refuse rather than author a replica-local fork.
+                    if binding.is_some_and(|binding| binding.role == WorkspaceCheckoutRole::Replica)
+                    {
+                        return Err(OrbitError::InvalidInput(format!(
+                            "workspace '{workspace_id}' is a replica on this machine and may not author owner-placed mutations"
+                        )));
+                    }
+                    // The coordination surface is checkoutless by construction
+                    // (§2.3): it opens only the global task/friction stores.
+                    // Every other owner-placed tool reads checkout-derived
+                    // state and needs the validated owner checkout.
+                    if served_by_coordination_executor(name) || binding.is_some() {
+                        Ok(())
+                    } else {
+                        Err(self.local_checkout_unavailable(workspace_id))
+                    }
                 }
-                if mode != HostMode::Standalone
-                    && binding.owner_machine_id.as_deref() != machine_id.as_deref()
-                {
-                    return Err(OrbitError::InvalidInput(format!(
-                        "workspace '{workspace_id}' is owned by another machine; current owner state is unavailable locally"
-                    )));
+                OwnerResolution::Remote(owner) => {
+                    let usable = crosses_owner_route(name)
+                        && self
+                            .owner_routes
+                            .get(owner)
+                            .is_some_and(|route| route.allowed_capabilities.contains(&capability));
+                    if !usable {
+                        return Err(self.remote_owner_refusal(
+                            name,
+                            workspace_id,
+                            owner,
+                            Some(capability),
+                        ));
+                    }
+                    Ok(())
                 }
-                Ok(())
-            }
+            },
             McpToolPlacement::Composite => {
                 let binding =
                     binding.ok_or_else(|| self.local_checkout_unavailable(workspace_id))?;
-                if mode == HostMode::Spoke || binding.role == WorkspaceCheckoutRole::Replica {
+                // A composite call fans out to an owner branch and a local
+                // branch. Both must resolve here: there is no owner proxy, and
+                // a replica must never be presented as current.
+                if !matches!(owner, OwnerResolution::Local)
+                    || binding.role == WorkspaceCheckoutRole::Replica
+                {
                     return Err(OrbitError::InvalidInput(format!(
-                        "composite placement for workspace '{workspace_id}' cannot collapse every declared route to one validated standalone or hub-owner checkout"
+                        "composite placement for workspace '{workspace_id}' requires a validated owner checkout on this machine; its owner branch cannot be proxied and a replica is not current"
                     )));
                 }
                 Ok(())
@@ -565,30 +691,6 @@ impl BrokerMcpHost {
             })
             .map(|identity| identity.workspace_id)
             .unwrap_or_else(|| workspace_id.to_string())
-    }
-
-    /// Return the declared owner only when this machine's binding is explicitly
-    /// a replica. This reads the machine-local registry; it never infers an
-    /// owner from the process, path, or transport.
-    fn replica_owner_machine_id(
-        &self,
-        workspace_id: &str,
-        binding: Option<&ExactCheckoutBinding>,
-    ) -> Option<String> {
-        if let Some(binding) = binding
-            && binding.role == WorkspaceCheckoutRole::Replica
-        {
-            return binding.owner_machine_id.clone();
-        }
-        let registry_path = crate::workspace_registry::registry_path_for(&self.global_root);
-        let registry = crate::workspace_registry::load_registry_from(&registry_path).ok()?;
-        let checkout = registry
-            .checkouts
-            .iter()
-            .find(|checkout| checkout.workspace_id == workspace_id)?;
-        (checkout.role == Some(WorkspaceCheckoutRole::Replica))
-            .then(|| checkout.owner_machine_id.clone())
-            .flatten()
     }
 
     fn legacy_friction_root(
@@ -698,10 +800,10 @@ impl BrokerMcpHost {
             self.record_preflight_denial(name, &input, &context, &error);
             return Err(error);
         }
+        // Registry-wide discovery is `local-derived` and `global`: it reads
+        // this machine's own registry and enumerates only the workspaces this
+        // machine owns, so it never selects a workspace and never routes.
         if definition.policy.scope() == McpToolScope::Global {
-            if self.is_spoke()? {
-                return self.remote_hub_call(name, input, context, None);
-            }
             let result = self.global_call(name);
             self.record_coordination_outcome(name, &context, &result);
             return result;
@@ -730,6 +832,26 @@ impl BrokerMcpHost {
                 return Err(error);
             }
         };
+        let placement = definition.policy.placement();
+
+        // Resolve the workspace without demanding a checkout first: whether one
+        // is required depends on where the workspace is owned.
+        let (workspace_id, binding) = match self.resolve_workspace(selector) {
+            Ok(resolved) => resolved,
+            Err(error) => {
+                self.record_preflight_denial(name, &input, &context, &error);
+                return Err(error);
+            }
+        };
+        let owner = match self.resolve_owner(&workspace_id, binding.as_ref()) {
+            Ok(owner) => owner,
+            Err(error) => {
+                self.record_preflight_denial(name, &input, &context, &error);
+                return Err(error);
+            }
+        };
+        let owner_is_local = matches!(owner, OwnerResolution::Local);
+
         let with_context = name == "orbit.task.show"
             && input
                 .get("with_context")
@@ -737,10 +859,7 @@ impl BrokerMcpHost {
                 .or_else(|| input.get("with-context"))
                 .and_then(Value::as_bool)
                 .unwrap_or(false);
-        if with_context
-            && definition.policy.placement() == McpToolPlacement::Hub
-            && self.is_spoke()?
-        {
+        if with_context && !owner_is_local {
             let error = OrbitError::InvalidInput(
                 "remote `orbit.task.show` cannot provide `with_context`; checkout-derived enrichment is local-only and local coordination fallback is forbidden"
                     .to_string(),
@@ -748,51 +867,45 @@ impl BrokerMcpHost {
             self.record_preflight_denial(name, &input, &context, &error);
             return Err(error);
         }
-        // Hub placement describes coordination ownership. In today's
-        // single-host deployment the workflow executor still needs the exact
-        // selected checkout, so an operator broker short-circuits these tools
-        // through its local runtime. Spokes continue routing them to the hub;
-        // multi-host execution remains deliberately deferred.
-        let local_workflow_execution = name.starts_with("orbit.workflow.") && !self.is_spoke()?;
-        let require_local = definition.policy.placement() != McpToolPlacement::Hub
-            || with_context
-            || local_workflow_execution;
-        let (workspace_id, binding) = match self.resolve_workspace(selector, require_local) {
-            Ok(resolved) => resolved,
+        // The workflow executor needs the exact selected checkout, so workflow
+        // tools are owner-placed *and* checkout-bound. Multi-host execution is
+        // deferred to v2 (ADR-0358), so a workspace owned elsewhere has no
+        // workflow surface here at all — owner preflight refuses it below.
+        let local_workflow_execution = name.starts_with("orbit.workflow.") && owner_is_local;
+
+        let capability = match Self::scalar_capability(&context) {
+            Ok(capability) => capability,
             Err(error) => {
                 self.record_preflight_denial(name, &input, &context, &error);
                 return Err(error);
             }
         };
-
         if let Err(error) = self.preflight_placement(
-            definition.policy.placement(),
+            placement,
+            name,
             &workspace_id,
+            &owner,
+            capability,
             binding.as_ref(),
         ) {
             self.record_preflight_denial(name, &input, &context, &error);
             return Err(error);
         }
-        if let Some(owner_machine_id) =
-            self.replica_owner_machine_id(&workspace_id, binding.as_ref())
-        {
-            if is_coordination_record_write(name) {
-                let error = OrbitError::InvalidInput(format!(
-                    "coordination write '{name}' is refused in this replica checkout; workspace is owned by machine '{owner_machine_id}'"
-                ));
-                self.record_preflight_denial(name, &input, &context, &error);
-                return Err(error);
-            }
-            if is_coordination_record_read(name) {
-                let result = Ok(Value::Array(Vec::new()));
-                self.record_coordination_outcome(name, &context, &result);
-                return result;
-            }
-        }
-        if definition.policy.placement() == McpToolPlacement::Hub
+
+        // An owner-placed call for a workspace this machine owns dispatches
+        // through the checkout-independent coordination executor: no SSH to
+        // self, no second MCP serialization boundary (§2.3). One owned
+        // elsewhere reached this point only because owner preflight admitted it
+        // to the configured route.
+        // `orbit.crew.list` is owner-placed but projection-backed rather than
+        // coordination-store-backed, so it is its own branch below.
+        let owner_dispatch = placement == McpToolPlacement::Owner
             && !with_context
             && !local_workflow_execution
-        {
+            && (!owner_is_local
+                || served_by_coordination_executor(name)
+                || name == "orbit.crew.list");
+        if owner_dispatch {
             context.workspace_id = Some(workspace_id.clone());
             context.workspace = Some(workspace_id.clone());
             if let Some(object) = input.as_object_mut()
@@ -800,7 +913,7 @@ impl BrokerMcpHost {
             {
                 object.insert("workspace".to_string(), Value::String(workspace_id.clone()));
             }
-            if self.is_spoke()? {
+            if let OwnerResolution::Remote(owner_machine_id) = &owner {
                 if name == "orbit.task.artifact.put" {
                     input = match orbit_core::prepare_remote_task_artifact_put(
                         input,
@@ -813,12 +926,17 @@ impl BrokerMcpHost {
                         }
                     };
                 }
-                return self.remote_hub_call(name, input, context, Some(&workspace_id));
+                return self.remote_owner_call(
+                    name,
+                    input,
+                    context,
+                    owner_machine_id,
+                    Some(&workspace_id),
+                );
             }
-            // Crew discovery is projection-backed and hub-local; it never opens
-            // the coordination task registry. Standalone task validation keeps
-            // its current local-runtime behavior, so crew validation is not
-            // applied on this non-spoke coordination path.
+            // Crew validation runs where the workspace is owned, so it reads
+            // this machine's local config directly (§8.1); it never opens the
+            // coordination task registry.
             if name == "orbit.crew.list" {
                 let result = self.crew_discovery(&workspace_id);
                 self.record_coordination_outcome(name, &context, &result);
@@ -880,23 +998,30 @@ impl BrokerMcpHost {
 
 /// The coordination-record mutators all pass the broker before either the
 /// checkout-local runtime or the checkoutless coordinator can open a store.
-/// Keep this explicit and test it against the registered MCP surface so a new
-/// mutator cannot silently create a replica-local fork.
-pub(super) fn is_coordination_record_write(name: &str) -> bool {
-    matches!(
-        name,
-        "orbit.task.add"
-            | "orbit.task.approve"
-            | "orbit.task.artifact.put"
-            | "orbit.task.start"
-            | "orbit.task.update"
-            | "orbit.friction.add"
-            | "orbit.friction.update"
-    )
+///
+/// ORB-10727: this is now the *route* predicate. A workspace owned elsewhere
+/// admits exactly the task surface over its configured owner route
+/// (§4.2 rule 3); every other owner-placed tool is refused by name. Keep it
+/// explicit and test it against the registered MCP surface so a new task verb
+/// cannot silently become unreachable — or a non-task tool silently start
+/// crossing a machine boundary.
+pub(super) fn crosses_owner_route(name: &str) -> bool {
+    name.starts_with("orbit.task.")
 }
 
-fn is_coordination_record_read(name: &str) -> bool {
-    matches!(name, "orbit.task.list" | "orbit.friction.list")
+/// Whether the checkout-independent coordination executor serves this tool.
+///
+/// Placement answers *which machine*; this answers *which executor on it*. The
+/// two used to be conflated, because the withdrawn `hub` placement meant both
+/// "the hub machine" and "the checkoutless coordination store". Collapsing
+/// `hub` into `owner` (ADR-0355) separates them: `orbit.learning.*` and
+/// `orbit.auto_task.*` are equally owner-placed but read checkout-derived
+/// state, so they run through the owner's validated checkout runtime instead.
+///
+/// This must stay in step with `HubCoordinationExecutor::execute`, which
+/// rejects any other action outright.
+fn served_by_coordination_executor(name: &str) -> bool {
+    name.starts_with("orbit.task.") || name.starts_with("orbit.friction.")
 }
 
 impl McpHost for BrokerMcpHost {
@@ -1037,7 +1162,7 @@ pub(super) fn mcp_preflight_failure_params(
 ) -> AuditEventInsertParams {
     let start = Instant::now();
     let role = audit_role_label_for_entry_point(&Value::Null, None, None, ToolEntryPoint::Mcp);
-    let (audit_context, correlation_error) = trusted_mcp_audit_context(session_context);
+    let audit_context = trusted_mcp_audit_context();
     let duration_ms = (start.elapsed().as_millis() as i64).max(1);
     let working_directory = std::env::current_dir()
         .map(|path| path.to_string_lossy().into_owned())
@@ -1058,9 +1183,7 @@ pub(super) fn mcp_preflight_failure_params(
         arguments_json: None,
         stdout_truncated: None,
         stderr_truncated: None,
-        error_message: Some(redact_sensitive_env_text(
-            &correlation_error.as_ref().unwrap_or(err).to_string(),
-        )),
+        error_message: Some(redact_sensitive_env_text(&err.to_string())),
         host: std::env::var("HOSTNAME").ok(),
         pid: std::process::id(),
         session_id: None,
@@ -1073,10 +1196,9 @@ pub(super) fn mcp_preflight_failure_params(
         effective_capabilities: session_context.effective_capabilities.clone(),
         origin_session_id: session_context.origin_session_id.clone(),
         mcp_call_id: session_context.mcp_call_id.clone(),
-        lease_id: session_context
-            .leased_run
-            .as_ref()
-            .map(|leased_run| leased_run.lease_id.clone()),
+        // ORB-10727 [ADR-0358]: run leases are deferred to v2; no v1 session
+        // carries one. The audit column stays for the v2 producer.
+        lease_id: None,
         task_id: audit_context.task_id,
         job_run_id: audit_context.job_run_id,
         activity_id: audit_context.activity_id,

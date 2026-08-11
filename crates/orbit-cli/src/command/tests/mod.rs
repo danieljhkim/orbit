@@ -112,19 +112,26 @@ fn cli_parses_mcp_serve() {
 }
 
 #[test]
-fn cli_parses_hub_mcp_serve_with_one_exact_capability() {
+fn cli_parses_owner_mcp_serve_with_one_exact_capability() {
+    // ORB-10727 [ADR-0355]: `--hub` is withdrawn; `--owner` selects which
+    // server this process presents and asserts no machine-level role.
+    assert_cli_rejects(
+        &["orbit", "mcp", "serve", "--hub"],
+        ErrorKind::UnknownArgument,
+        "--hub",
+    );
     let cli = Cli::parse_from([
         "orbit",
         "mcp",
         "serve",
-        "--hub",
+        "--owner",
         "--capabilities",
         "operator",
     ]);
     match cli.command {
         Commands::Mcp(command) => match command.command {
             McpSubcommand::Serve(args) => {
-                assert!(args.hub);
+                assert!(args.owner);
                 assert_eq!(args.capabilities, Some(McpCapability::Operator));
             }
             _ => panic!("expected mcp serve"),
@@ -139,7 +146,7 @@ fn cli_parses_broker_capability_and_rejects_unknown_values() {
     match cli.command {
         Commands::Mcp(command) => match command.command {
             McpSubcommand::Serve(args) => {
-                assert!(!args.hub);
+                assert!(!args.owner);
                 assert_eq!(args.capabilities, Some(McpCapability::Operator));
             }
             _ => panic!("expected mcp serve"),
@@ -147,7 +154,14 @@ fn cli_parses_broker_capability_and_rejects_unknown_values() {
         _ => panic!("expected top-level mcp command"),
     }
     assert_cli_rejects(
-        &["orbit", "mcp", "serve", "--hub", "--capabilities", "admin"],
+        &[
+            "orbit",
+            "mcp",
+            "serve",
+            "--owner",
+            "--capabilities",
+            "admin",
+        ],
         ErrorKind::ValueValidation,
         "admin",
     );

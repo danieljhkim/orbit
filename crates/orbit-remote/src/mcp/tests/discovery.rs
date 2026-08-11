@@ -23,15 +23,20 @@ fn remote_owns_the_exact_global_discovery_definitions() {
     );
     assert_eq!(
         definitions[0].schema.description,
-        "List workspaces with declared owner and sanitized execution-profile freshness \
-         (operator, hub placement)."
+        "List the workspaces this machine owns, with sanitized execution-profile freshness \
+         (operator, local-derived placement)."
     );
-    // The registry-wide tool stays operator-only and global; it does not
-    // treat capability as a hierarchy that the crew tool extends.
+    // ORB-10727: the registry-wide tool stays operator-only and global, and is
+    // now `local-derived` — it reads the machine-local registry, so it never
+    // routes. It still does not treat capability as a hierarchy the crew tool
+    // extends.
     for definition in &definitions[..1] {
         assert!(definition.schema.builtin);
         assert!(definition.schema.parameters.is_empty());
-        assert_eq!(definition.policy.placement(), McpToolPlacement::Hub);
+        assert_eq!(
+            definition.policy.placement(),
+            McpToolPlacement::LocalDerived
+        );
         assert_eq!(definition.policy.scope(), McpToolScope::Global);
         assert_eq!(
             definition.policy.allowed_capabilities(),
@@ -55,7 +60,7 @@ fn remote_owns_the_exact_global_discovery_definitions() {
     let crew = &definitions[1];
     assert_eq!(crew.schema.name, "orbit.crew.list");
     assert!(crew.schema.builtin);
-    assert_eq!(crew.policy.placement(), McpToolPlacement::Hub);
+    assert_eq!(crew.policy.placement(), McpToolPlacement::Owner);
     assert_eq!(crew.policy.scope(), McpToolScope::WorkspaceRequired);
     assert_eq!(
         crew.policy.allowed_capabilities(),

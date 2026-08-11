@@ -24,6 +24,16 @@ capabilities:
     - Every exposed tool has exactly one placement, one scope, and a non-empty allowed_capabilities set.
     - Placement and capability filtering are independent.
     - operator does not imply agent; agent does not imply operator.
+    - A withdrawn capability is rejected on a tool policy, on an mcp.toml route, and on a session request, so no surface can drift back to advertising it.
+  route_config:
+    file: ~/.orbit/mcp.toml
+    form: zero or more [[owner]] entries, each pinning one machine_id
+    transport: ssh
+    legacy_hub_table: >-
+      Fail closed with an actionable migration message; never auto-migrated. A [hub] entry named a
+      machine-level coordination host, while [[owner]] names the machine that owns a given
+      workspace. The hub target need not own any of the caller's workspaces, so rewriting one form
+      into the other could silently route coordination calls to a non-owner (ORB-10727).
 
 placements:
   allowed_values: [owner, local-derived, composite]
@@ -80,26 +90,46 @@ tools:
   orbit.auto_task.update: { placement: owner, scope: workspace-required, allowed_capabilities: [agent, operator] }
   orbit.auto_task.toggle: { placement: owner, scope: workspace-required, allowed_capabilities: [agent, operator] }
   orbit.command.exec: { placement: local-derived, scope: workspace-required, allowed_capabilities: [operator] }
+  # Still advertised pending the ADR-store migration; see planned_withdrawals.
+  orbit.adr.add: { placement: owner, scope: workspace-required, allowed_capabilities: [agent, operator] }
+  orbit.adr.show: { placement: owner, scope: workspace-required, allowed_capabilities: [agent, operator] }
+  orbit.adr.supersede: { placement: owner, scope: workspace-required, allowed_capabilities: [agent, operator] }
+  orbit.adr.update: { placement: owner, scope: workspace-required, allowed_capabilities: [agent, operator] }
 
+# Absent from the advertised set today. The conformance test asserts this
+# directly, so a family cannot quietly return.
 withdrawn_tools:
-  - names: [orbit.adr.add, orbit.adr.show, orbit.adr.update, orbit.adr.supersede, orbit.adr.list]
-    reason: The ADR store is retired in favour of git-committed entries in each feature's 4_decisions.md (CONVENTIONS.md section 4). ADRs are reached through the docs corpus, not a tool family.
   - names: [orbit.run.lease, orbit.run.report, orbit.run.presence]
     reason: Deferred to v2 with execution placement and run leases (ADR-0358).
   - names: [orbit.host.list]
     reason: Already removed as unused in ORB-10332; the fleet inventory behind it is deferred to v2 (ADR-0358), so it has nothing to enumerate.
 
+# Decided and scheduled, but not yet absent from the advertised set. These are
+# NOT asserted as withdrawn: doing so would make the contract describe a surface
+# the code still serves.
+planned_withdrawals:
+  - names: [orbit.adr.add, orbit.adr.show, orbit.adr.update, orbit.adr.supersede, orbit.adr.list]
+    reason: The ADR store is retired in favour of git-committed entries in each feature's 4_decisions.md (CONVENTIONS.md section 4).
+    blocked_on: >-
+      CONVENTIONS.md section 4b makes inlining the remaining pointer-only entries into each
+      feature's 4_decisions.md a prerequisite, and the orbit-knowledge skill still routes agents to
+      orbit.adr.add. ORB-10727 kept the family advertised rather than performing another feature's
+      cutover inside the bridge recomposition. orbit.adr.list and orbit.adr.restore are already
+      CLI-only.
+
 owner_schema_digest:
   domain_tag: orbit.mcp.owner-schema.v1
-  contract_revision: 3
-  canonical_registry_revision: 2
+  contract_revision: 4
+  canonical_registry_revision: 3
+  instructions_prefix: 'orbit-owner-contract-v1:'
   revision_notes:
-    - Revisions 2 and 3 were advanced by the two now-withdrawn private connector methods. Revision numbers are append-only, so the revision covering their removal and the owner-placement recomposition is assigned when that change lands; the values pinned here describe the last shipped contract.
-    - The golden vector below is a one-tool illustrative fixture and is unaffected by the tool-registry changes above; canonical_registry_revision advances when those removals land.
+    - Revisions 2 and 3 were advanced by the two now-withdrawn private connector methods. Revision numbers are append-only, so revision 4 is assigned to the recomposition that removes them and collapses hub placement into owner (ORB-10727). No revision is ever reused or rolled back.
+    - canonical_registry_revision 3 is the v1 tool matrix below - hub placement collapsed into owner, orbit.workspace.list moved to local-derived, and the orbit.adr.*, orbit.run.*, and orbit.host.list families withdrawn.
+    - The golden vector is a one-tool illustrative fixture. Its digest still changes with every recomposition, because the domain tag and canonical_registry_revision are both inputs.
   golden_vector:
     capability: agent
-    canonical_json: '{"canonical_registry_revision":2,"capability":"agent","tools":[{"advertised_name":"orbit_task_show","canonical_name":"orbit.task.show","description":"Show one task","input_schema":{"additionalProperties":true,"properties":{"id":{"description":"Task ID","type":"string"}},"required":["id"],"type":"object"}}]}'
-    expected_sha256: 8c5856e3838ac33eab4e66401d846b9cc6f262a23d30af964c843496c0fe4ee8
+    canonical_json: '{"canonical_registry_revision":3,"capability":"agent","tools":[{"advertised_name":"orbit_task_show","canonical_name":"orbit.task.show","description":"Show one task","input_schema":{"additionalProperties":true,"properties":{"id":{"description":"Task ID","type":"string"}},"required":["id"],"type":"object"}}]}'
+    expected_sha256: 416fc00d8b8eaa3d6dd44f3e28032c92796d6a4ea50e7055ad83404d7f2b599a
   inputs:
     - canonical schema name, description, and input schema for every owner-placed tool
     - canonical schema name, description, and input schema for every composite tool's owner step

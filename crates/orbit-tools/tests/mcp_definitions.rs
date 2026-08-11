@@ -71,7 +71,7 @@ fn workflow_family_is_hub_placed_and_operator_only() {
             .iter()
             .find(|definition| definition.schema.name == name)
             .unwrap_or_else(|| panic!("missing workflow definition {name}"));
-        assert_eq!(definition.policy.placement(), McpToolPlacement::Hub);
+        assert_eq!(definition.policy.placement(), McpToolPlacement::Owner);
         assert_eq!(
             definition.policy.allowed_capabilities(),
             &std::collections::BTreeSet::from([orbit_common::types::McpCapability::Operator])
@@ -107,7 +107,7 @@ fn missing_and_invalid_policy_fail_closed() {
     );
 
     let invalid = serde_json::from_value::<McpToolPolicy>(serde_json::json!({
-        "placement": "hub",
+        "placement": "owner",
         "allowed_capabilities": []
     }))
     .expect("deserialize invalid policy for validation coverage");
@@ -121,7 +121,7 @@ fn missing_and_invalid_policy_fail_closed() {
 
 #[test]
 fn duplicate_canonical_and_advertised_names_fail_closed() {
-    let policy = || McpToolPolicy::agent_and_operator(McpToolPlacement::Hub);
+    let policy = || McpToolPolicy::agent_and_operator(McpToolPlacement::Owner);
 
     let mut canonical = ToolRegistry::new();
     canonical.register_mcp(TestTool("demo.same"), policy());

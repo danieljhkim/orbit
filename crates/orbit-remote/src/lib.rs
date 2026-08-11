@@ -47,7 +47,7 @@ pub use host_identity::{
 };
 pub use host_registry::{HostRegistryService, WorkspaceLink, require_local_hub_identity};
 pub use mcp::{
-    DEFAULT_REMOTE_MCP_PORT, RemoteProxyArgs, canonical_mcp_tool_definitions, register_local_spoke,
+    DEFAULT_REMOTE_MCP_PORT, McpServerRole, RemoteProxyArgs, canonical_mcp_tool_definitions,
     safe_mcp_tool_names, serve_mcp_remote_proxy, serve_mcp_stdio, serve_mcp_tcp,
 };
 pub use persistence::RemoteStore;

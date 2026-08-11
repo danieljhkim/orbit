@@ -32,8 +32,6 @@ pub struct ToolSessionContext {
     pub origin_session_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mcp_call_id: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub leased_run: Option<McpLeasedRun>,
 }
 
 impl ToolSessionContext {
@@ -61,20 +59,12 @@ impl ToolSessionContext {
             effective_capabilities: BTreeSet::from([McpCapability::Agent]),
             origin_session_id: None,
             mcp_call_id: None,
-            leased_run: None,
         }
     }
 
     pub fn has_capability(&self, capability: McpCapability) -> bool {
         self.effective_capabilities.contains(&capability)
     }
-}
-
-/// Correlation supplied only by a trusted runner/broker seam.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct McpLeasedRun {
-    pub run_id: String,
-    pub lease_id: String,
 }
 
 /// Transport that delivered an MCP call to the executing process.
@@ -123,13 +113,34 @@ pub struct ToolSchema {
 }
 
 /// Where an MCP-exposed tool executes in the host-registry topology.
+///
+/// ADR-0355 collapsed the former `Hub` class into [`Self::Owner`]: every
+/// machine is its own coordination host for the workspaces it owns, so "the
+/// coordinating machine for this tool's workspace" is in-process for an owned
+/// workspace and there is no machine-level hub left to name.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[serde(rename_all = "kebab-case")]
 pub enum McpToolPlacement {
-    Hub,
     Owner,
     LocalDerived,
     Composite,
+}
+
+impl McpToolPlacement {
+    /// Stable contract spelling used in diagnostics and the conformance fixture.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Owner => "owner",
+            Self::LocalDerived => "local-derived",
+            Self::Composite => "composite",
+        }
+    }
+}
+
+impl Display for McpToolPlacement {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
 }
 
 /// Whether an MCP tool requires a logical workspace in its trusted session.
@@ -153,7 +164,27 @@ pub enum McpToolScope {
 pub enum McpCapability {
     Agent,
     Operator,
+    /// Not a v1 MCP bridge capability. ADR-0358 withdrew `runner` from the
+    /// bridge along with registration, presence, and leases, so no tool policy
+    /// allows it and no MCP session may hold it (see
+    /// [`McpCapability::BRIDGE_V1`]). It survives as the in-process grant a run
+    /// stamps onto its own dispatcher so the run can perform the destruction it
+    /// exists to perform (ORB-10453) — execution authorization, not a session
+    /// capability. Execution placement returns it to the bridge in v2.
     Runner,
+}
+
+impl McpCapability {
+    /// The capabilities an MCP bridge v1 session or route may carry.
+    ///
+    /// `operator` does not imply `agent` and `agent` does not imply `operator`;
+    /// this is a flat allowlist, not a hierarchy.
+    pub const BRIDGE_V1: &'static [Self] = &[Self::Agent, Self::Operator];
+
+    /// Whether this capability is part of the v1 MCP bridge surface.
+    pub fn is_bridge_v1(self) -> bool {
+        Self::BRIDGE_V1.contains(&self)
+    }
 }
 
 impl Display for McpCapability {
@@ -199,14 +230,13 @@ impl McpToolPolicy {
                 return Err(McpToolPolicyError::DuplicateCapability(capability));
             }
         }
-        if capabilities.is_empty() {
-            return Err(McpToolPolicyError::EmptyCapabilities);
-        }
-        Ok(Self {
+        let policy = Self {
             placement,
             allowed_capabilities: capabilities,
             scope: McpToolScope::WorkspaceRequired,
-        })
+        };
+        policy.validate()?;
+        Ok(policy)
     }
 
     pub fn placement(&self) -> McpToolPlacement {
@@ -230,10 +260,19 @@ impl McpToolPolicy {
 
     pub fn validate(&self) -> Result<(), McpToolPolicyError> {
         if self.allowed_capabilities.is_empty() {
-            Err(McpToolPolicyError::EmptyCapabilities)
-        } else {
-            Ok(())
+            return Err(McpToolPolicyError::EmptyCapabilities);
         }
+        // A withdrawn capability on a tool policy is unreachable rather than
+        // merely unused: no v1 session can hold it, so the tool would advertise
+        // to nobody. Reject it here so the registry cannot drift back.
+        if let Some(withdrawn) = self
+            .allowed_capabilities
+            .iter()
+            .find(|capability| !capability.is_bridge_v1())
+        {
+            return Err(McpToolPolicyError::WithdrawnCapability(*withdrawn));
+        }
+        Ok(())
     }
 
     /// Policy for the ordinary agent and trusted operator surfaces.
@@ -276,6 +315,10 @@ pub enum McpToolPolicyError {
     EmptyCapabilities,
     #[error("MCP tool policy repeats capability {0:?}")]
     DuplicateCapability(McpCapability),
+    #[error(
+        "MCP tool policy allows capability '{0}', which the v1 bridge withdrew (ADR-0358); only agent and operator remain"
+    )]
+    WithdrawnCapability(McpCapability),
     #[error("canonical MCP tool name must not be empty")]
     EmptyCanonicalName,
     #[error("duplicate canonical MCP tool name: {0}")]

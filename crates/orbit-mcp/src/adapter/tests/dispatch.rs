@@ -96,13 +96,16 @@ impl crate::McpHost for ExtensionPolicyHost {
 impl crate::McpHost for CapabilityHost {
     fn list_mcp_tool_definitions(&self) -> Result<Vec<McpToolDefinition>, OrbitError> {
         [
-            ("demo.agent", McpCapability::Agent),
-            ("demo.operator", McpCapability::Operator),
-            ("demo.runner", McpCapability::Runner),
+            ("demo.agent", vec![McpCapability::Agent]),
+            ("demo.operator", vec![McpCapability::Operator]),
+            (
+                "demo.both",
+                vec![McpCapability::Agent, McpCapability::Operator],
+            ),
         ]
         .into_iter()
-        .map(|(name, capability)| {
-            let policy = McpToolPolicy::new(McpToolPlacement::Hub, [capability])
+        .map(|(name, capabilities)| {
+            let policy = McpToolPolicy::new(McpToolPlacement::Owner, capabilities)
                 .map_err(|error| OrbitError::InvalidInput(error.to_string()))?;
             McpToolDefinition::new(tool_schema(name), policy)
                 .map_err(|error| OrbitError::InvalidInput(error.to_string()))
@@ -285,7 +288,7 @@ async fn d3_context_membership_filters_tool_list_and_call() {
         .collect::<Vec<_>>();
     assert!(agent_names.iter().any(|name| name == "demo.agent"));
     assert!(!agent_names.iter().any(|name| name == "demo.operator"));
-    assert!(!agent_names.iter().any(|name| name == "demo.runner"));
+    assert!(agent_names.iter().any(|name| name == "demo.both"));
 
     let called = agent_server
         .call_tool_request(CallToolRequestParams::new("demo_operator"))
@@ -311,11 +314,11 @@ async fn d3_context_membership_filters_tool_list_and_call() {
         .collect::<Vec<_>>();
     assert!(operator_names.iter().any(|name| name == "demo.operator"));
     assert!(!operator_names.iter().any(|name| name == "demo.agent"));
-    assert!(!operator_names.iter().any(|name| name == "demo.runner"));
+    assert!(operator_names.iter().any(|name| name == "demo.both"));
 }
 
 #[tokio::test]
-async fn managed_empty_capability_set_is_never_upgraded_and_runner_is_non_hierarchical() {
+async fn managed_empty_capability_set_is_never_upgraded_and_capabilities_are_non_hierarchical() {
     let empty =
         OrbitToolServer::new_with_context(Arc::new(CapabilityHost), ToolSessionContext::default());
     assert!(empty.visible_tool_schemas().expect("empty list").is_empty());
@@ -325,18 +328,20 @@ async fn managed_empty_capability_set_is_never_upgraded_and_runner_is_non_hierar
         .expect("empty capability denial is structured");
     assert_eq!(denied.is_error, Some(true));
 
-    let runner_context = ToolSessionContext {
-        effective_capabilities: [McpCapability::Runner].into_iter().collect(),
+    // `operator` never reaches an agent-only tool, so the shared `demo.both`
+    // entry is the only overlap between the two flat capability sets.
+    let operator_context = ToolSessionContext {
+        effective_capabilities: [McpCapability::Operator].into_iter().collect(),
         ..ToolSessionContext::default()
     };
-    let runner = OrbitToolServer::new_with_context(Arc::new(CapabilityHost), runner_context);
-    let names = runner
+    let operator = OrbitToolServer::new_with_context(Arc::new(CapabilityHost), operator_context);
+    let names = operator
         .visible_tool_schemas()
-        .expect("runner list")
+        .expect("operator list")
         .into_iter()
         .map(|schema| schema.name)
         .collect::<Vec<_>>();
-    assert_eq!(names, vec!["demo.runner"]);
+    assert_eq!(names, vec!["demo.operator", "demo.both"]);
 }
 
 #[tokio::test]

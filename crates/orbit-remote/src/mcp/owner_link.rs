@@ -1,4 +1,4 @@
-//! Bounded spoke-to-hub SSH MCP link pool [ORB-10269].
+//! Bounded client-to-owner SSH MCP link pool [ORB-10269, ORB-10727].
 
 use std::collections::BTreeMap;
 use std::future::Future;
@@ -8,16 +8,13 @@ use std::sync::{Arc, mpsc};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
-use orbit_common::types::{
-    McpCapability, OrbitError, SpokeRegistrationRequestV1, SpokeRegistrationResultV1,
-    ToolSessionContext,
-};
+use orbit_common::types::{McpCapability, OrbitError, ToolSessionContext};
 use orbit_common::utility::redaction::redact_sensitive_env_text;
 use serde_json::Value;
 use tokio::io::AsyncReadExt;
 use tokio::process::{Child, Command};
 
-use super::hub_client::{HubClientExpectation, OrbitMcpClient, validate_remote_call_context};
+use super::owner_client::{OrbitMcpClient, OwnerClientExpectation, validate_remote_call_context};
 
 const STDERR_LIMIT: u64 = 8 * 1024;
 
@@ -25,7 +22,7 @@ const STDERR_LIMIT: u64 = 8 * 1024;
 pub(super) type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 
 #[derive(Debug, Clone, Copy)]
-pub(super) struct HubLinkLimits {
+pub(super) struct OwnerLinkLimits {
     pub(super) queue_capacity: usize,
     pub(super) initialize: Duration,
     pub(super) request: Duration,
@@ -34,7 +31,7 @@ pub(super) struct HubLinkLimits {
     pub(super) close: Duration,
 }
 
-impl Default for HubLinkLimits {
+impl Default for OwnerLinkLimits {
     fn default() -> Self {
         Self {
             queue_capacity: 8,
@@ -47,7 +44,7 @@ impl Default for HubLinkLimits {
     }
 }
 
-pub(super) trait HubClock: Send + Sync + 'static {
+pub(super) trait OwnerClock: Send + Sync + 'static {
     fn now(&self) -> Duration;
 }
 
@@ -59,21 +56,21 @@ impl Default for MonotonicClock {
     }
 }
 
-impl HubClock for MonotonicClock {
+impl OwnerClock for MonotonicClock {
     fn now(&self) -> Duration {
         self.0.elapsed()
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) struct HubSpawnSpec {
+pub(super) struct OwnerSpawnSpec {
     pub(super) ssh_alias: String,
-    pub(super) hub_machine_id: String,
+    pub(super) owner_machine_id: String,
     pub(super) capability: McpCapability,
     pub(super) schema_digest: String,
 }
 
-impl HubSpawnSpec {
+impl OwnerSpawnSpec {
     pub(super) fn argv(&self) -> Vec<String> {
         vec![
             "ssh".to_string(),
@@ -81,22 +78,22 @@ impl HubSpawnSpec {
             "orbit".to_string(),
             "mcp".to_string(),
             "serve".to_string(),
-            "--hub".to_string(),
+            "--owner".to_string(),
             "--capabilities".to_string(),
             self.capability.to_string(),
         ]
     }
 
-    pub(super) fn expectation(&self) -> HubClientExpectation {
-        HubClientExpectation {
-            hub_machine_id: self.hub_machine_id.clone(),
+    pub(super) fn expectation(&self) -> OwnerClientExpectation {
+        OwnerClientExpectation {
+            owner_machine_id: self.owner_machine_id.clone(),
             effective_capability: self.capability,
-            hub_schema_digest: self.schema_digest.clone(),
+            owner_schema_digest: self.schema_digest.clone(),
         }
     }
 }
 
-pub(super) trait HubPeer: Send {
+pub(super) trait OwnerPeer: Send {
     fn is_closed(&self) -> bool;
     fn call<'a>(
         &'a mut self,
@@ -104,31 +101,26 @@ pub(super) trait HubPeer: Send {
         input: Value,
         context: &'a ToolSessionContext,
     ) -> BoxFuture<'a, Result<Value, OrbitError>>;
-    fn register_spoke<'a>(
-        &'a mut self,
-        request: &'a SpokeRegistrationRequestV1,
-        context: &'a ToolSessionContext,
-    ) -> BoxFuture<'a, Result<SpokeRegistrationResultV1, OrbitError>>;
     fn close<'a>(&'a mut self) -> BoxFuture<'a, ()>;
 }
 
-pub(super) trait HubPeerFactory: Send + Sync + 'static {
+pub(super) trait OwnerPeerFactory: Send + Sync + 'static {
     fn connect<'a>(
         &'a self,
-        spec: &'a HubSpawnSpec,
-        limits: HubLinkLimits,
-    ) -> BoxFuture<'a, Result<Box<dyn HubPeer>, OrbitError>>;
+        spec: &'a OwnerSpawnSpec,
+        limits: OwnerLinkLimits,
+    ) -> BoxFuture<'a, Result<Box<dyn OwnerPeer>, OrbitError>>;
 }
 
 #[derive(Default)]
-struct SshHubPeerFactory;
+struct SshOwnerPeerFactory;
 
-impl HubPeerFactory for SshHubPeerFactory {
+impl OwnerPeerFactory for SshOwnerPeerFactory {
     fn connect<'a>(
         &'a self,
-        spec: &'a HubSpawnSpec,
-        limits: HubLinkLimits,
-    ) -> BoxFuture<'a, Result<Box<dyn HubPeer>, OrbitError>> {
+        spec: &'a OwnerSpawnSpec,
+        limits: OwnerLinkLimits,
+    ) -> BoxFuture<'a, Result<Box<dyn OwnerPeer>, OrbitError>> {
         Box::pin(async move {
             let argv = spec.argv();
             let mut command = Command::new(&argv[0]);
@@ -139,19 +131,19 @@ impl HubPeerFactory for SshHubPeerFactory {
                 .stderr(Stdio::piped())
                 .kill_on_drop(true);
             let mut child = command.spawn().map_err(|error| {
-                OrbitError::HubUnavailable(format!(
-                    "failed to start fixed SSH hub command for alias '{}': {error}",
+                OrbitError::OwnerUnavailable(format!(
+                    "failed to start fixed SSH owner command for alias '{}': {error}",
                     spec.ssh_alias
                 ))
             })?;
             let write = child.stdin.take().ok_or_else(|| {
-                OrbitError::HubUnavailable("SSH hub process has no stdin".to_string())
+                OrbitError::OwnerUnavailable("SSH owner process has no stdin".to_string())
             })?;
             let read = child.stdout.take().ok_or_else(|| {
-                OrbitError::HubUnavailable("SSH hub process has no stdout".to_string())
+                OrbitError::OwnerUnavailable("SSH owner process has no stdout".to_string())
             })?;
             let stderr = child.stderr.take().ok_or_else(|| {
-                OrbitError::HubUnavailable("SSH hub process has no stderr".to_string())
+                OrbitError::OwnerUnavailable("SSH owner process has no stderr".to_string())
             })?;
             let stderr_task = tokio::spawn(async move {
                 let mut bytes = Vec::new();
@@ -170,18 +162,18 @@ impl HubPeerFactory for SshHubPeerFactory {
                         return Err(error);
                     }
                 };
-            Ok(Box::new(SshHubPeer {
+            Ok(Box::new(SshOwnerPeer {
                 client,
                 child,
                 stderr_task,
                 request_timeout: limits.request,
                 close_timeout: limits.close,
-            }) as Box<dyn HubPeer>)
+            }) as Box<dyn OwnerPeer>)
         })
     }
 }
 
-struct SshHubPeer {
+struct SshOwnerPeer {
     client: OrbitMcpClient,
     child: Child,
     stderr_task: tokio::task::JoinHandle<String>,
@@ -189,7 +181,7 @@ struct SshHubPeer {
     close_timeout: Duration,
 }
 
-impl HubPeer for SshHubPeer {
+impl OwnerPeer for SshOwnerPeer {
     fn is_closed(&self) -> bool {
         self.client.is_closed()
     }
@@ -205,40 +197,16 @@ impl HubPeer for SshHubPeer {
                 .child
                 .try_wait()
                 .map_err(|error| {
-                    OrbitError::HubUnavailable(format!("inspect SSH hub process: {error}"))
+                    OrbitError::OwnerUnavailable(format!("inspect SSH owner process: {error}"))
                 })?
                 .is_some()
             {
-                return Err(OrbitError::HubUnavailable(
-                    "SSH hub process exited before request handoff".to_string(),
+                return Err(OrbitError::OwnerUnavailable(
+                    "SSH owner process exited before request handoff".to_string(),
                 ));
             }
             self.client
                 .call_tool(name, input, context, self.request_timeout)
-                .await
-        })
-    }
-
-    fn register_spoke<'a>(
-        &'a mut self,
-        request: &'a SpokeRegistrationRequestV1,
-        context: &'a ToolSessionContext,
-    ) -> BoxFuture<'a, Result<SpokeRegistrationResultV1, OrbitError>> {
-        Box::pin(async move {
-            if self
-                .child
-                .try_wait()
-                .map_err(|error| {
-                    OrbitError::HubUnavailable(format!("inspect SSH hub process: {error}"))
-                })?
-                .is_some()
-            {
-                return Err(OrbitError::HubUnavailable(
-                    "SSH hub process exited before registration handoff".to_string(),
-                ));
-            }
-            self.client
-                .register_spoke(request, context, self.request_timeout)
                 .await
         })
     }
@@ -266,64 +234,56 @@ pub(super) struct CallRequest {
     pub(super) response: mpsc::SyncSender<Result<Value, OrbitError>>,
 }
 
-pub(super) struct RegistrationRequest {
-    capability: McpCapability,
-    registration: SpokeRegistrationRequestV1,
-    context: ToolSessionContext,
-    response: mpsc::SyncSender<Result<SpokeRegistrationResultV1, OrbitError>>,
-}
-
 pub(super) enum WorkerMessage {
     Call(CallRequest),
-    Register(RegistrationRequest),
     Shutdown,
 }
 
 struct CachedPeer {
-    peer: Box<dyn HubPeer>,
+    peer: Box<dyn OwnerPeer>,
     last_used: Duration,
 }
 
 /// Synchronous [`orbit_mcp::McpHost`] seam backed by one dedicated runtime
 /// thread and at most one live peer for each scalar capability.
-pub(super) struct HubLinkPool {
+pub(super) struct OwnerLinkPool {
     pub(super) tx: Option<mpsc::SyncSender<WorkerMessage>>,
     worker: Option<JoinHandle<()>>,
 }
 
-impl HubLinkPool {
+impl OwnerLinkPool {
     pub(super) fn ssh(
         ssh_alias: String,
-        hub_machine_id: String,
+        owner_machine_id: String,
         schema_digests: BTreeMap<McpCapability, String>,
     ) -> Result<Self, OrbitError> {
         Self::with_factory(
             ssh_alias,
-            hub_machine_id,
+            owner_machine_id,
             schema_digests,
-            Arc::new(SshHubPeerFactory),
-            HubLinkLimits::default(),
+            Arc::new(SshOwnerPeerFactory),
+            OwnerLinkLimits::default(),
             Arc::new(MonotonicClock::default()),
         )
     }
 
     pub(super) fn with_factory(
         ssh_alias: String,
-        hub_machine_id: String,
+        owner_machine_id: String,
         schema_digests: BTreeMap<McpCapability, String>,
-        factory: Arc<dyn HubPeerFactory>,
-        limits: HubLinkLimits,
-        clock: Arc<dyn HubClock>,
+        factory: Arc<dyn OwnerPeerFactory>,
+        limits: OwnerLinkLimits,
+        clock: Arc<dyn OwnerClock>,
     ) -> Result<Self, OrbitError> {
         let (tx, rx) = mpsc::sync_channel(limits.queue_capacity);
         let worker_clock = Arc::clone(&clock);
         let worker = std::thread::Builder::new()
-            .name("orbit-hub-link".to_string())
+            .name("orbit-owner-link".to_string())
             .spawn(move || {
                 run_worker(
                     rx,
                     ssh_alias,
-                    hub_machine_id,
+                    owner_machine_id,
                     schema_digests,
                     factory,
                     limits,
@@ -331,7 +291,7 @@ impl HubLinkPool {
                 );
             })
             .map_err(|error| {
-                OrbitError::HubUnavailable(format!("start hub link worker: {error}"))
+                OrbitError::OwnerUnavailable(format!("start owner link worker: {error}"))
             })?;
         Ok(Self {
             tx: Some(tx),
@@ -355,7 +315,7 @@ impl HubLinkPool {
         self.tx
             .as_ref()
             .ok_or_else(|| {
-                OrbitError::HubUnavailable("hub link pool is shutting down".to_string())
+                OrbitError::OwnerUnavailable("owner link pool is shutting down".to_string())
             })?
             .try_send(WorkerMessage::Call(CallRequest {
                 capability,
@@ -365,11 +325,11 @@ impl HubLinkPool {
                 response: response_tx,
             }))
             .map_err(|error| match error {
-                mpsc::TrySendError::Full(_) => OrbitError::HubUnavailable(
-                    "hub link request queue is saturated before handoff".to_string(),
+                mpsc::TrySendError::Full(_) => OrbitError::OwnerUnavailable(
+                    "owner link request queue is saturated before handoff".to_string(),
                 ),
-                mpsc::TrySendError::Disconnected(_) => OrbitError::HubUnavailable(
-                    "hub link worker is unavailable before handoff".to_string(),
+                mpsc::TrySendError::Disconnected(_) => OrbitError::OwnerUnavailable(
+                    "owner link worker is unavailable before handoff".to_string(),
                 ),
             })?;
         // Queue admission is the pre-handoff boundary. Once accepted, wait for
@@ -379,66 +339,12 @@ impl HubLinkPool {
             .recv()
             .map_err(|error| OrbitError::OutcomeUnknown {
                 mcp_call_id,
-                message: format!("hub link worker disconnected after queue handoff: {error}"),
-            })?
-    }
-
-    pub(super) fn register_spoke(
-        &self,
-        capability: McpCapability,
-        registration: SpokeRegistrationRequestV1,
-        context: ToolSessionContext,
-    ) -> Result<SpokeRegistrationResultV1, OrbitError> {
-        registration.validate()?;
-        validate_remote_call_context(&context, capability)?;
-        if context.workspace.is_some() || context.workspace_id.is_some() {
-            return Err(OrbitError::InvalidInput(
-                "private spoke registration is global and must not carry a workspace selector"
-                    .to_string(),
-            ));
-        }
-        if context.caller_machine_id.as_deref() != Some(&registration.identity.machine_id)
-            || context.caller_host_id.as_deref() != Some(&registration.identity.host_id)
-        {
-            return Err(OrbitError::InvalidInput(
-                "private registration identity must exactly match the trusted caller context"
-                    .to_string(),
-            ));
-        }
-        let mcp_call_id = context
-            .mcp_call_id
-            .clone()
-            .ok_or_else(|| OrbitError::InvalidInput("remote call ID is missing".to_string()))?;
-        let (response_tx, response_rx) = mpsc::sync_channel(1);
-        self.tx
-            .as_ref()
-            .ok_or_else(|| {
-                OrbitError::HubUnavailable("hub link pool is shutting down".to_string())
-            })?
-            .try_send(WorkerMessage::Register(RegistrationRequest {
-                capability,
-                registration,
-                context,
-                response: response_tx,
-            }))
-            .map_err(|error| match error {
-                mpsc::TrySendError::Full(_) => OrbitError::HubUnavailable(
-                    "hub link request queue is saturated before handoff".to_string(),
-                ),
-                mpsc::TrySendError::Disconnected(_) => OrbitError::HubUnavailable(
-                    "hub link worker is unavailable before handoff".to_string(),
-                ),
-            })?;
-        response_rx
-            .recv()
-            .map_err(|error| OrbitError::OutcomeUnknown {
-                mcp_call_id,
-                message: format!("hub link worker disconnected after queue handoff: {error}"),
+                message: format!("owner link worker disconnected after queue handoff: {error}"),
             })?
     }
 }
 
-impl Drop for HubLinkPool {
+impl Drop for OwnerLinkPool {
     fn drop(&mut self) {
         if let Some(tx) = self.tx.take() {
             let _ = tx.try_send(WorkerMessage::Shutdown);
@@ -455,11 +361,11 @@ impl Drop for HubLinkPool {
 fn run_worker(
     rx: mpsc::Receiver<WorkerMessage>,
     ssh_alias: String,
-    hub_machine_id: String,
+    owner_machine_id: String,
     schema_digests: BTreeMap<McpCapability, String>,
-    factory: Arc<dyn HubPeerFactory>,
-    limits: HubLinkLimits,
-    clock: Arc<dyn HubClock>,
+    factory: Arc<dyn OwnerPeerFactory>,
+    limits: OwnerLinkLimits,
+    clock: Arc<dyn OwnerClock>,
 ) {
     let Ok(runtime) = tokio::runtime::Builder::new_current_thread()
         .enable_all()
@@ -469,7 +375,7 @@ fn run_worker(
     };
     let worker = WorkerRuntime {
         ssh_alias: &ssh_alias,
-        hub_machine_id: &hub_machine_id,
+        owner_machine_id: &owner_machine_id,
         schema_digests: &schema_digests,
         factory: factory.as_ref(),
         limits,
@@ -495,10 +401,6 @@ fn run_worker(
                 let result = runtime.block_on(process_call(&mut peers, &worker, &request));
                 let _ = request.response.send(result);
             }
-            WorkerMessage::Register(request) => {
-                let result = runtime.block_on(process_registration(&mut peers, &worker, &request));
-                let _ = request.response.send(result);
-            }
         }
     }
     runtime.block_on(close_all(&mut peers));
@@ -506,11 +408,11 @@ fn run_worker(
 
 struct WorkerRuntime<'a> {
     ssh_alias: &'a str,
-    hub_machine_id: &'a str,
+    owner_machine_id: &'a str,
     schema_digests: &'a BTreeMap<McpCapability, String>,
-    factory: &'a dyn HubPeerFactory,
-    limits: HubLinkLimits,
-    clock: &'a dyn HubClock,
+    factory: &'a dyn OwnerPeerFactory,
+    limits: OwnerLinkLimits,
+    clock: &'a dyn OwnerClock,
 }
 
 async fn ensure_peer(
@@ -527,13 +429,13 @@ async fn ensure_peer(
     }
     if let std::collections::btree_map::Entry::Vacant(entry) = peers.entry(capability) {
         let schema_digest = worker.schema_digests.get(&capability).ok_or_else(|| {
-            OrbitError::HubNegotiation(format!(
+            OrbitError::OwnerNegotiation(format!(
                 "no local schema digest exists for capability '{capability}'"
             ))
         })?;
-        let spec = HubSpawnSpec {
+        let spec = OwnerSpawnSpec {
             ssh_alias: worker.ssh_alias.to_string(),
-            hub_machine_id: worker.hub_machine_id.to_string(),
+            owner_machine_id: worker.owner_machine_id.to_string(),
             capability,
             schema_digest: schema_digest.clone(),
         };
@@ -546,45 +448,6 @@ async fn ensure_peer(
     Ok(())
 }
 
-async fn process_registration(
-    peers: &mut BTreeMap<McpCapability, CachedPeer>,
-    worker: &WorkerRuntime<'_>,
-    request: &RegistrationRequest,
-) -> Result<SpokeRegistrationResultV1, OrbitError> {
-    let now = worker.clock.now();
-    reap_idle(peers, now, worker.limits.idle).await;
-    ensure_peer(peers, worker, request.capability).await?;
-    let cached = peers
-        .get_mut(&request.capability)
-        .ok_or_else(|| OrbitError::HubUnavailable("hub peer disappeared".to_string()))?;
-    let result = match tokio::time::timeout(
-        worker.limits.request,
-        cached
-            .peer
-            .register_spoke(&request.registration, &request.context),
-    )
-    .await
-    {
-        Ok(result) => result,
-        Err(_) => Err(OrbitError::OutcomeUnknown {
-            mcp_call_id: request.context.mcp_call_id.clone().unwrap_or_default(),
-            message: format!(
-                "hub registration response exceeded the {} ms post-handoff deadline",
-                worker.limits.request.as_millis()
-            ),
-        }),
-    };
-    cached.last_used = worker.clock.now();
-    if matches!(
-        result,
-        Err(OrbitError::HubUnavailable(_)) | Err(OrbitError::OutcomeUnknown { .. })
-    ) && let Some(mut failed) = peers.remove(&request.capability)
-    {
-        failed.peer.close().await;
-    }
-    result
-}
-
 async fn process_call(
     peers: &mut BTreeMap<McpCapability, CachedPeer>,
     worker: &WorkerRuntime<'_>,
@@ -595,7 +458,7 @@ async fn process_call(
     ensure_peer(peers, worker, request.capability).await?;
     let cached = peers
         .get_mut(&request.capability)
-        .ok_or_else(|| OrbitError::HubUnavailable("hub peer disappeared".to_string()))?;
+        .ok_or_else(|| OrbitError::OwnerUnavailable("owner peer disappeared".to_string()))?;
     let result = match tokio::time::timeout(
         worker.limits.request,
         cached
@@ -608,7 +471,7 @@ async fn process_call(
         Err(_) => Err(OrbitError::OutcomeUnknown {
             mcp_call_id: request.context.mcp_call_id.clone().unwrap_or_default(),
             message: format!(
-                "hub response exceeded the {} ms post-handoff deadline",
+                "owner response exceeded the {} ms post-handoff deadline",
                 worker.limits.request.as_millis()
             ),
         }),
@@ -616,7 +479,7 @@ async fn process_call(
     cached.last_used = worker.clock.now();
     if matches!(
         result,
-        Err(OrbitError::HubUnavailable(_)) | Err(OrbitError::OutcomeUnknown { .. })
+        Err(OrbitError::OwnerUnavailable(_)) | Err(OrbitError::OutcomeUnknown { .. })
     ) && let Some(mut failed) = peers.remove(&request.capability)
     {
         failed.peer.close().await;

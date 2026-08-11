@@ -49,7 +49,6 @@ pub mod role;
 pub mod routine;
 pub mod run_state;
 pub mod skill;
-pub mod spoke_registration;
 pub mod task;
 pub mod task_artifacts;
 pub mod task_plan;
@@ -146,11 +145,6 @@ pub use routine::{
 };
 pub use run_state::PipelineState;
 pub use skill::Skill;
-pub use spoke_registration::{
-    SPOKE_REGISTRATION_METHOD_V1, SPOKE_REGISTRATION_SCHEMA_VERSION,
-    SpokeExecutionProfilePublicationV1, SpokeRegistrationFailureV1, SpokeRegistrationRequestV1,
-    SpokeRegistrationResultV1, SpokeRegistrationStageV1,
-};
 pub use task::{
     DEFAULT_TASK_LIST_LIMIT, DependencyDeadEnd, ExternalRef, GITHUB_PR_EXTERNAL_REF_SYSTEM,
     NO_DIFF_EXPECTED_TAG, ResolvedTaskDependency, Task, TaskArtifact, TaskComment, TaskComplexity,
@@ -174,7 +168,7 @@ pub use task_artifacts::{
 };
 pub use task_plan::{TaskPlan, TaskPlanCheckpoint, TaskPlanSuccessCriterion, parse_task_plan};
 pub use tool::{
-    ExecutionResult, McpCapability, McpCapabilityPlacementMatrix, McpLeasedRun, McpToolDefinition,
+    ExecutionResult, McpCapability, McpCapabilityPlacementMatrix, McpToolDefinition,
     McpToolPlacement, McpToolPolicy, McpToolPolicyError, McpToolScope, McpTransport, StoredTool,
     ToolParam, ToolSchema, ToolSessionContext, mcp_advertised_tool_name,
     mcp_capability_placement_matrix, validate_mcp_tool_definitions,

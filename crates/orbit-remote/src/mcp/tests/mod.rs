@@ -5,9 +5,9 @@
 mod contract;
 mod discovery;
 mod e1;
-mod hub_client;
-mod hub_link;
 mod learning;
+mod owner_client;
+mod owner_link;
 mod proxy;
 mod schema;
 mod serve;
@@ -141,8 +141,13 @@ fn broker_checkoutless_task_call_uses_stable_id_and_one_trusted_audit() {
     assert_eq!(rows.4.as_deref(), Some("mcall-checkoutless-add"));
 }
 
+/// ORB-10727 [ADR-0355]: a replica checkout is exactly a workspace whose owner
+/// is another machine, so owner placement — not a separate replica special case
+/// — is what refuses it. With no configured route, every owner-placed tool is
+/// refused by name, reads included: a silent empty read would misreport the
+/// owner's state as "nothing here".
 #[test]
-fn broker_replica_refuses_registered_coordination_writes_and_hides_task_reads() {
+fn broker_refuses_every_owner_placed_tool_for_a_remotely_owned_workspace() {
     use chrono::Utc;
     use orbit_common::types::{Workspace, WorkspaceCheckout, WorkspaceRegistry, WorkspaceStatus};
 
@@ -188,35 +193,36 @@ fn broker_replica_refuses_registered_coordination_writes_and_hides_task_reads() 
         Some("replica".to_string()),
     );
 
+    let mut refused = 0;
     for definition in canonical_mcp_tool_definitions().expect("registered tools") {
-        let name = definition.schema.name;
-        if !super::host::is_coordination_record_write(&name) {
+        if definition.policy.placement() != McpToolPlacement::Owner
+            || definition.policy.scope() != McpToolScope::WorkspaceRequired
+        {
             continue;
         }
+        let name = definition.schema.name;
         let mut call_context = context.clone();
         call_context.effective_capabilities = BTreeSet::from([*definition
             .policy
             .allowed_capabilities()
             .first()
-            .expect("coordination writer capability")]);
+            .expect("owner-placed capability")]);
         let error = host
             .call_tool(
                 &name,
                 json!({"workspace": workspace.id, "model": "codex"}),
                 call_context,
             )
-            .expect_err("every registered coordination mutation must be refused");
-        assert!(error.to_string().contains("hm_owner"), "{name}: {error}");
+            .expect_err("every owner-placed tool must be refused without a route");
+        let message = error.to_string();
+        assert!(message.contains("hm_owner"), "{name}: {message}");
+        assert!(
+            message.contains("no [[owner]] route"),
+            "{name} must name the missing route: {message}"
+        );
+        refused += 1;
     }
-
-    let listed = host
-        .call_tool(
-            "orbit.task.list",
-            json!({"workspace": workspace.id}),
-            context,
-        )
-        .expect("replica coordination read is empty");
-    assert_eq!(listed, json!([]));
+    assert!(refused > 0, "the registry must contain owner-placed tools");
 }
 
 #[test]
@@ -477,7 +483,7 @@ fn broker_spoke_with_context_fails_closed_before_local_resolution() {
 }
 
 #[test]
-fn broker_spoke_hub_denial_writes_no_local_coordination_state() {
+fn broker_remote_owner_denial_writes_no_local_coordination_state() {
     use crate::{NewHostIdentity, ensure_host_identity};
     use chrono::Utc;
     use orbit_common::types::{Workspace, WorkspaceRegistry, WorkspaceStatus};
@@ -526,8 +532,10 @@ fn broker_spoke_hub_denial_writes_no_local_coordination_state() {
             }),
             context,
         )
-        .expect_err("spoke has no hub transport");
-    assert!(error.to_string().contains("no MCP hub transport"));
+        .expect_err("no configured route to the owner");
+    let message = error.to_string();
+    assert!(message.contains("hm_remote_owner"), "{message}");
+    assert!(message.contains("no [[owner]] route"), "{message}");
     assert!(!root.path().join("tasks").exists());
     assert!(!root.path().join("frictions").exists());
 }
@@ -915,32 +923,29 @@ fn runtime_mcp_host_lists_only_core_registry_backed_safe_tools() {
 #[derive(Debug, Deserialize)]
 struct McpConformanceFixture {
     capabilities: McpConformanceCapabilities,
+    placements: McpConformancePlacements,
     scopes: McpConformanceScopes,
     private_connector: McpConformancePrivateConnector,
-    hub_schema_digest: McpConformanceHubDigest,
+    owner_schema_digest: McpConformanceOwnerDigest,
     tools: BTreeMap<String, McpConformancePolicy>,
+    withdrawn_tools: Vec<McpConformanceWithdrawnTools>,
 }
 
 #[derive(Debug, Deserialize)]
 struct McpConformancePrivateConnector {
-    spoke_registration: McpConformanceSpokeRegistration,
+    /// Every connector-private method the v1 contract still negotiates. ADR-0357
+    /// and ADR-0358 withdrew both that ever existed, so this must stay empty.
+    active: Vec<String>,
+    withdrawn: Vec<McpConformanceWithdrawnMethod>,
 }
 
 #[derive(Debug, Deserialize)]
-struct McpConformanceSpokeRegistration {
+struct McpConformanceWithdrawnMethod {
     method: String,
-    schema_version: u32,
-    advertised: bool,
-    ordinary_tools_call: bool,
-    allowed_capabilities: BTreeSet<McpCapability>,
-    unknown_caller_only_operation: bool,
-    ordinary_calls_require_active_registration: bool,
-    only_path_bearing_fields: Vec<String>,
-    cache_refresh: String,
 }
 
 #[derive(Debug, Deserialize)]
-struct McpConformanceHubDigest {
+struct McpConformanceOwnerDigest {
     domain_tag: String,
     contract_revision: u32,
     canonical_registry_revision: u32,
@@ -957,11 +962,33 @@ struct McpConformanceGoldenVector {
 #[derive(Debug, Deserialize)]
 struct McpConformanceCapabilities {
     allowed_values: BTreeSet<McpCapability>,
+    withdrawn_values: Vec<McpConformanceWithdrawnCapability>,
+}
+
+#[derive(Debug, Deserialize)]
+struct McpConformanceWithdrawnCapability {
+    value: McpCapability,
 }
 
 #[derive(Debug, Deserialize)]
 struct McpConformanceScopes {
     allowed_values: BTreeSet<McpToolScope>,
+}
+
+#[derive(Debug, Deserialize)]
+struct McpConformancePlacements {
+    allowed_values: BTreeSet<McpToolPlacement>,
+    withdrawn_values: Vec<McpConformanceWithdrawnPlacement>,
+}
+
+#[derive(Debug, Deserialize)]
+struct McpConformanceWithdrawnPlacement {
+    value: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct McpConformanceWithdrawnTools {
+    names: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -975,31 +1002,38 @@ struct McpConformancePolicy {
 fn canonical_mcp_policy_conforms_to_frozen_v1_fixture() {
     assert!(
         serde_yaml::from_str::<McpConformancePolicy>(
-            "{ placement: hub, scope: workspace-required, allowed_capabilities: [unknown] }"
+            "{ placement: owner, scope: workspace-required, allowed_capabilities: [unknown] }"
         )
         .is_err(),
         "unknown capabilities must fail typed fixture parsing"
     );
     assert!(
         serde_yaml::from_str::<McpConformancePolicy>(
-            "{ placement: hub, scope: workspace-required }"
+            "{ placement: owner, scope: workspace-required }"
         )
         .is_err(),
         "missing capability policy must fail typed fixture parsing"
     );
     assert!(
         serde_yaml::from_str::<McpConformancePolicy>(
-            "{ placement: hub, scope: unknown, allowed_capabilities: [operator] }"
+            "{ placement: owner, scope: unknown, allowed_capabilities: [operator] }"
         )
         .is_err(),
         "unknown scopes must fail typed fixture parsing"
     );
     assert!(
         serde_yaml::from_str::<McpConformancePolicy>(
-            "{ placement: hub, allowed_capabilities: [operator] }"
+            "{ placement: owner, allowed_capabilities: [operator] }"
         )
         .is_err(),
         "missing scope metadata must fail typed fixture parsing"
+    );
+    assert!(
+        serde_yaml::from_str::<McpConformancePolicy>(
+            "{ placement: hub, scope: workspace-required, allowed_capabilities: [operator] }"
+        )
+        .is_err(),
+        "the withdrawn hub placement must no longer parse (ADR-0355)"
     );
 
     let fixture: McpConformanceFixture = serde_yaml::from_str(include_str!(concat!(
@@ -1009,58 +1043,85 @@ fn canonical_mcp_policy_conforms_to_frozen_v1_fixture() {
     .expect("frozen MCP conformance fixture must use known typed policy values");
     assert_eq!(
         fixture.capabilities.allowed_values,
+        BTreeSet::from([McpCapability::Agent, McpCapability::Operator]),
+        "the v1 bridge grants agent and operator only"
+    );
+    assert_eq!(
+        fixture
+            .capabilities
+            .withdrawn_values
+            .iter()
+            .map(|withdrawn| withdrawn.value)
+            .collect::<Vec<_>>(),
+        [McpCapability::Runner]
+    );
+    assert!(
+        fixture
+            .capabilities
+            .allowed_values
+            .iter()
+            .all(|capability| capability.is_bridge_v1()),
+        "the fixture and the type must agree on the v1 capability set"
+    );
+    assert_eq!(
+        fixture.placements.allowed_values,
         BTreeSet::from([
-            McpCapability::Agent,
-            McpCapability::Operator,
-            McpCapability::Runner,
+            McpToolPlacement::Owner,
+            McpToolPlacement::LocalDerived,
+            McpToolPlacement::Composite,
         ])
+    );
+    assert_eq!(
+        fixture
+            .placements
+            .withdrawn_values
+            .iter()
+            .map(|withdrawn| withdrawn.value.as_str())
+            .collect::<Vec<_>>(),
+        ["hub"]
     );
     assert_eq!(
         fixture.scopes.allowed_values,
         BTreeSet::from([McpToolScope::WorkspaceRequired, McpToolScope::Global])
     );
-    let registration = fixture.private_connector.spoke_registration;
-    assert_eq!(
-        registration.method,
-        orbit_common::types::SPOKE_REGISTRATION_METHOD_V1
+
+    // ADR-0357 and ADR-0358 withdrew both connector-private methods; v1
+    // negotiates none, and neither may reappear as a tool.
+    assert!(
+        fixture.private_connector.active.is_empty(),
+        "v1 negotiates no connector-private method: {:?}",
+        fixture.private_connector.active
     );
     assert_eq!(
-        registration.schema_version,
-        orbit_common::types::SPOKE_REGISTRATION_SCHEMA_VERSION
-    );
-    assert!(!registration.advertised);
-    assert!(!registration.ordinary_tools_call);
-    assert_eq!(
-        registration.allowed_capabilities,
+        fixture
+            .private_connector
+            .withdrawn
+            .iter()
+            .map(|entry| entry.method.as_str())
+            .collect::<BTreeSet<_>>(),
         BTreeSet::from([
-            McpCapability::Agent,
-            McpCapability::Operator,
-            McpCapability::Runner,
+            "orbit/private/register-spoke/v1",
+            "orbit/private/allocate-knowledge-id/v1",
         ])
     );
-    assert!(registration.unknown_caller_only_operation);
-    assert!(registration.ordinary_calls_require_active_registration);
-    assert_eq!(registration.only_path_bearing_fields, ["presence[].root"]);
+    for withdrawn in &fixture.private_connector.withdrawn {
+        assert!(
+            !fixture.tools.contains_key(&withdrawn.method),
+            "a withdrawn private method must never enter the canonical tool matrix: {}",
+            withdrawn.method
+        );
+    }
+
     assert_eq!(
-        registration.cache_refresh,
-        "definitive-complete-response-only"
-    );
-    assert!(
-        !fixture
-            .tools
-            .contains_key(orbit_common::types::SPOKE_REGISTRATION_METHOD_V1),
-        "private registration must never enter the canonical tool matrix"
-    );
-    assert_eq!(
-        fixture.hub_schema_digest.domain_tag,
-        super::contract::HUB_SCHEMA_DOMAIN
+        fixture.owner_schema_digest.domain_tag,
+        super::contract::OWNER_SCHEMA_DOMAIN
     );
     assert_eq!(
-        fixture.hub_schema_digest.contract_revision,
+        fixture.owner_schema_digest.contract_revision,
         super::contract::MCP_CONTRACT_REVISION
     );
     assert_eq!(
-        fixture.hub_schema_digest.canonical_registry_revision,
+        fixture.owner_schema_digest.canonical_registry_revision,
         super::contract::CANONICAL_MCP_REGISTRY_REVISION
     );
     let vector_definition = McpToolDefinition::new(
@@ -1075,14 +1136,14 @@ fn canonical_mcp_policy_conforms_to_frozen_v1_fixture() {
             }],
             builtin: true,
         },
-        McpToolPolicy::agent_and_operator(McpToolPlacement::Hub),
+        McpToolPolicy::agent_and_operator(McpToolPlacement::Owner),
     )
     .expect("golden definition");
-    let vector = &fixture.hub_schema_digest.golden_vector;
-    let mut expected_bytes = format!("{}\0", fixture.hub_schema_digest.domain_tag).into_bytes();
+    let vector = &fixture.owner_schema_digest.golden_vector;
+    let mut expected_bytes = format!("{}\0", fixture.owner_schema_digest.domain_tag).into_bytes();
     expected_bytes.extend_from_slice(vector.canonical_json.as_bytes());
     assert_eq!(
-        super::contract::canonical_hub_schema_bytes(
+        super::contract::canonical_owner_schema_bytes(
             std::slice::from_ref(&vector_definition),
             vector.capability
         )
@@ -1090,7 +1151,7 @@ fn canonical_mcp_policy_conforms_to_frozen_v1_fixture() {
         expected_bytes
     );
     assert_eq!(
-        super::contract::hub_schema_digest(&[vector_definition], vector.capability)
+        super::contract::owner_schema_digest(&[vector_definition], vector.capability)
             .expect("golden digest"),
         vector.expected_sha256
     );
@@ -1102,7 +1163,7 @@ fn canonical_mcp_policy_conforms_to_frozen_v1_fixture() {
         Err(McpToolPolicyError::DuplicateCanonicalName(_))
     ));
     let empty_policy =
-        serde_yaml::from_str::<McpToolPolicy>("{ placement: hub, allowed_capabilities: [] }")
+        serde_yaml::from_str::<McpToolPolicy>("{ placement: owner, allowed_capabilities: [] }")
             .expect("typed policy can deserialize an invalid empty set for validation coverage");
     let empty_definition = McpToolDefinition {
         schema: definitions[0].schema.clone(),
@@ -1135,6 +1196,17 @@ fn canonical_mcp_policy_conforms_to_frozen_v1_fixture() {
 
     let fixture_names: BTreeSet<String> = fixture.tools.keys().cloned().collect();
     assert_eq!(canonical_names, fixture_names);
+
+    // Withdrawn families must be absent from the advertised set, not merely
+    // absent from the fixture's positive matrix.
+    for entry in &fixture.withdrawn_tools {
+        for name in &entry.names {
+            assert!(
+                !canonical_names.contains(name),
+                "withdrawn tool is still advertised: {name}"
+            );
+        }
+    }
     for definition in &definitions {
         let expected = fixture
             .tools
@@ -1180,14 +1252,15 @@ fn canonical_mcp_policy_conforms_to_frozen_v1_fixture() {
         }
     }
 
-    let runner_only = McpToolPolicy::new(McpToolPlacement::Hub, [McpCapability::Runner])
-        .expect("runner-only is a valid non-empty capability set");
+    // ADR-0358: a withdrawn capability cannot be attached to a policy at all,
+    // so the registry cannot drift back to advertising an unreachable tool.
     assert_eq!(
-        runner_only.allowed_capabilities(),
-        &BTreeSet::from([McpCapability::Runner])
+        McpToolPolicy::new(McpToolPlacement::Owner, [McpCapability::Runner]),
+        Err(McpToolPolicyError::WithdrawnCapability(
+            McpCapability::Runner
+        ))
     );
-    assert_eq!(runner_only.scope(), McpToolScope::WorkspaceRequired);
-    let operator_only = McpToolPolicy::operator_only(McpToolPlacement::Hub);
+    let operator_only = McpToolPolicy::operator_only(McpToolPlacement::Owner);
     assert_eq!(
         operator_only.allowed_capabilities(),
         &BTreeSet::from([McpCapability::Operator])

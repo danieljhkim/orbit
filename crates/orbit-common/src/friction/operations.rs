@@ -146,7 +146,7 @@ const ADD: FrictionOperation = FrictionOperation {
         },
     ],
     rejects_agent_field: true,
-    mcp: McpExposure::AgentOperator(McpToolPlacement::Hub),
+    mcp: McpExposure::AgentOperator(McpToolPlacement::Owner),
     cli_json_flag: true,
     cli_render: CliRender::Record,
 };
@@ -179,7 +179,7 @@ const LIST: FrictionOperation = FrictionOperation {
     ],
     rejects_agent_field: false,
     // Non-destructive triage reads are canonical hub/operator operations.
-    mcp: McpExposure::OperatorOnly(McpToolPlacement::Hub),
+    mcp: McpExposure::OperatorOnly(McpToolPlacement::Owner),
     cli_json_flag: true,
     cli_render: CliRender::RecordTable,
 };
@@ -192,7 +192,7 @@ const SHOW: FrictionOperation = FrictionOperation {
     cli_about: "Show a single Orbit friction record",
     params: &[BARE_ID_PARAM],
     rejects_agent_field: false,
-    mcp: McpExposure::OperatorOnly(McpToolPlacement::Hub),
+    mcp: McpExposure::OperatorOnly(McpToolPlacement::Owner),
     cli_json_flag: true,
     cli_render: CliRender::Record,
 };
@@ -219,7 +219,7 @@ const TAGS: FrictionOperation = FrictionOperation {
     cli_about: "List configured friction taxonomy tags",
     params: &[],
     rejects_agent_field: false,
-    mcp: McpExposure::AgentOperator(McpToolPlacement::Hub),
+    mcp: McpExposure::AgentOperator(McpToolPlacement::Owner),
     cli_json_flag: true,
     cli_render: CliRender::TagList,
 };
@@ -270,7 +270,7 @@ const UPDATE: FrictionOperation = FrictionOperation {
         },
     ],
     rejects_agent_field: false,
-    mcp: McpExposure::OperatorOnly(McpToolPlacement::Hub),
+    mcp: McpExposure::OperatorOnly(McpToolPlacement::Owner),
     cli_json_flag: true,
     cli_render: CliRender::Record,
 };

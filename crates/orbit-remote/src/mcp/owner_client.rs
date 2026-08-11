@@ -1,43 +1,38 @@
-//! Remote-owned hub client policy over the generic injected-stream MCP client.
+//! Remote-owned owner-route client policy over the generic injected-stream MCP
+//! client.
 
 use std::time::Duration;
 
-use orbit_common::types::{
-    McpCapability, McpTransport, OrbitError, SPOKE_REGISTRATION_METHOD_V1,
-    SpokeRegistrationRequestV1, SpokeRegistrationResultV1, ToolSessionContext,
-};
+use orbit_common::types::{McpCapability, McpTransport, OrbitError, ToolSessionContext};
 use orbit_mcp::{McpClientRequestError, RawOrbitMcpClient};
 use serde_json::{Map, Value, json};
 use tokio::io::{AsyncRead, AsyncWrite};
 
 use super::contract::{
-    CANONICAL_MCP_REGISTRY_REVISION, HubServerContractV1, MCP_CONTRACT_REVISION,
+    CANONICAL_MCP_REGISTRY_REVISION, MCP_CONTRACT_REVISION, OwnerServerContractV1,
 };
-
-const JSON_RPC_METHOD_NOT_FOUND: i32 = -32601;
-const JSON_RPC_INVALID_PARAMS: i32 = -32602;
 
 pub(super) const REMOTE_SESSION_META_KEY: &str = "remote_session_context";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) struct HubClientExpectation {
-    pub(super) hub_machine_id: String,
+pub(super) struct OwnerClientExpectation {
+    pub(super) owner_machine_id: String,
     pub(super) effective_capability: McpCapability,
-    pub(super) hub_schema_digest: String,
+    pub(super) owner_schema_digest: String,
 }
 
 pub(super) struct OrbitMcpClient {
     raw: RawOrbitMcpClient,
-    contract: HubServerContractV1,
+    contract: OwnerServerContractV1,
 }
 
 impl OrbitMcpClient {
     /// Initialize over caller-owned IO and fail before any tool call when the
-    /// four frozen hub facts do not match.
+    /// four frozen owner facts do not match.
     pub(super) async fn connect<R, W>(
         read: R,
         write: W,
-        expectation: &HubClientExpectation,
+        expectation: &OwnerClientExpectation,
         initialize_timeout: Duration,
     ) -> Result<Self, OrbitError>
     where
@@ -46,9 +41,10 @@ impl OrbitMcpClient {
     {
         let raw = RawOrbitMcpClient::connect(read, write, initialize_timeout)
             .await
-            .map_err(|error| OrbitError::HubUnavailable(error.to_string()))?;
-        let contract =
-            HubServerContractV1::parse_instructions(raw.initialization().instructions.as_deref())?;
+            .map_err(|error| OrbitError::OwnerUnavailable(error.to_string()))?;
+        let contract = OwnerServerContractV1::parse_instructions(
+            raw.initialization().instructions.as_deref(),
+        )?;
         verify_contract(&contract, expectation)?;
         Ok(Self { raw, contract })
     }
@@ -87,16 +83,16 @@ impl OrbitMcpClient {
             .call_tool(name, arguments, meta, request_timeout)
             .await
             .map_err(|error| match error {
-                McpClientRequestError::PreHandoff { message } => OrbitError::HubUnavailable(
-                    format!("hub request was not handed to the initialized peer: {message}"),
+                McpClientRequestError::PreHandoff { message } => OrbitError::OwnerUnavailable(
+                    format!("owner request was not handed to the initialized peer: {message}"),
                 ),
                 McpClientRequestError::UnexpectedResponse { .. } => OrbitError::OutcomeUnknown {
                     mcp_call_id: mcp_call_id.clone(),
-                    message: "hub returned a non-tool result after request handoff".to_string(),
+                    message: "owner returned a non-tool result after request handoff".to_string(),
                 },
                 error => OrbitError::OutcomeUnknown {
                     mcp_call_id: mcp_call_id.clone(),
-                    message: format!("hub response failed after request handoff: {error}"),
+                    message: format!("owner response failed after request handoff: {error}"),
                 },
             })?;
         let structured = result.structured_content.unwrap_or(Value::Null);
@@ -109,7 +105,7 @@ impl OrbitMcpClient {
             let message = structured
                 .get("message")
                 .and_then(Value::as_str)
-                .unwrap_or("hub tool returned an error")
+                .unwrap_or("owner tool returned an error")
                 .to_string();
             return Err(OrbitError::RemoteTool {
                 code,
@@ -118,107 +114,6 @@ impl OrbitMcpClient {
             });
         }
         Ok(structured)
-    }
-
-    /// Execute the single connector-private registration request exactly once.
-    ///
-    /// The initialize contract has already been verified by [`Self::connect`].
-    /// A typed partial result is definitive; a transport/protocol loss after
-    /// handoff is outcome-unknown and is never replayed here.
-    pub(super) async fn register_spoke(
-        &self,
-        request: &SpokeRegistrationRequestV1,
-        context: &ToolSessionContext,
-        request_timeout: Duration,
-    ) -> Result<SpokeRegistrationResultV1, OrbitError> {
-        request.validate()?;
-        validate_remote_call_context(context, self.contract.effective_capability)?;
-        if context.workspace.is_some() || context.workspace_id.is_some() {
-            return Err(OrbitError::InvalidInput(
-                "private spoke registration is global and must not carry a workspace selector"
-                    .to_string(),
-            ));
-        }
-        let mcp_call_id = context
-            .mcp_call_id
-            .as_deref()
-            .ok_or_else(|| OrbitError::InvalidInput("remote MCP call requires mcp_call_id".into()))?
-            .to_string();
-        let params = serde_json::to_value(request).map_err(|error| {
-            OrbitError::InvalidInput(format!(
-                "serialize private spoke registration request: {error}"
-            ))
-        })?;
-        if !params.is_object() {
-            return Err(OrbitError::InvalidInput(
-                "private spoke registration request must serialize as a JSON object".to_string(),
-            ));
-        }
-        let mut meta = Map::new();
-        meta.insert(
-            "orbit".to_string(),
-            json!({ REMOTE_SESSION_META_KEY: context }),
-        );
-        let response = self
-            .raw
-            .custom_request(
-                SPOKE_REGISTRATION_METHOD_V1,
-                Some(params),
-                meta,
-                request_timeout,
-            )
-            .await
-            .map_err(|error| match error {
-                McpClientRequestError::PreHandoff { message } => {
-                    OrbitError::HubUnavailable(format!(
-                        "hub registration request was not handed to the initialized peer: {message}"
-                    ))
-                }
-                McpClientRequestError::Protocol { code, .. }
-                    if code == JSON_RPC_METHOD_NOT_FOUND =>
-                {
-                    OrbitError::HubNegotiation(format!(
-                        "verified hub does not implement {SPOKE_REGISTRATION_METHOD_V1}"
-                    ))
-                }
-                McpClientRequestError::Protocol {
-                    code,
-                    message,
-                    data,
-                } if code == JSON_RPC_INVALID_PARAMS => OrbitError::RemoteTool {
-                    code: "invalid_input".to_string(),
-                    message,
-                    payload: data.unwrap_or(Value::Null),
-                },
-                McpClientRequestError::UnexpectedResponse { .. } => OrbitError::OutcomeUnknown {
-                    mcp_call_id: mcp_call_id.clone(),
-                    message: "hub returned a non-registration result after request handoff"
-                        .to_string(),
-                },
-                error => OrbitError::OutcomeUnknown {
-                    mcp_call_id: mcp_call_id.clone(),
-                    message: format!(
-                        "hub registration response failed after request handoff: {error}"
-                    ),
-                },
-            })?;
-        let result = serde_json::from_value::<SpokeRegistrationResultV1>(response).map_err(
-            |error| OrbitError::OutcomeUnknown {
-                mcp_call_id: mcp_call_id.clone(),
-                message: format!(
-                    "hub returned a malformed registration result after request handoff: {error}"
-                ),
-            },
-        )?;
-        result
-            .validate()
-            .map_err(|error| OrbitError::OutcomeUnknown {
-                mcp_call_id,
-                message: format!(
-                    "hub returned an invalid registration result after request handoff: {error}"
-                ),
-            })?;
-        Ok(result)
     }
 
     pub(super) async fn close(&mut self, timeout: Duration) -> Result<(), OrbitError> {
@@ -230,16 +125,16 @@ impl OrbitMcpClient {
     }
 }
 
-/// Verify the frozen hub contract after transport initialization.
+/// Verify the frozen owner contract after transport initialization.
 pub(super) fn verify_contract(
-    actual: &HubServerContractV1,
-    expected: &HubClientExpectation,
+    actual: &OwnerServerContractV1,
+    expected: &OwnerClientExpectation,
 ) -> Result<(), OrbitError> {
     let mut mismatches = Vec::new();
-    if actual.hub_machine_id != expected.hub_machine_id {
+    if actual.owner_machine_id != expected.owner_machine_id {
         mismatches.push(format!(
-            "hub machine_id expected '{}' but received '{}'",
-            expected.hub_machine_id, actual.hub_machine_id
+            "owner machine_id expected '{}' but received '{}'",
+            expected.owner_machine_id, actual.owner_machine_id
         ));
     }
     if actual.contract_revision != MCP_CONTRACT_REVISION {
@@ -260,16 +155,16 @@ pub(super) fn verify_contract(
             expected.effective_capability, actual.effective_capability
         ));
     }
-    if actual.hub_schema_digest != expected.hub_schema_digest {
+    if actual.owner_schema_digest != expected.owner_schema_digest {
         mismatches.push(format!(
-            "hub schema digest expected '{}' but received '{}'",
-            expected.hub_schema_digest, actual.hub_schema_digest
+            "owner schema digest expected '{}' but received '{}'",
+            expected.owner_schema_digest, actual.owner_schema_digest
         ));
     }
     if mismatches.is_empty() {
         Ok(())
     } else {
-        Err(OrbitError::HubNegotiation(mismatches.join("; ")))
+        Err(OrbitError::OwnerNegotiation(mismatches.join("; ")))
     }
 }
 
@@ -306,7 +201,7 @@ pub(super) fn validate_remote_call_context(
     }
     if context.process_machine_id.is_some() || context.process_host_id.is_some() {
         return Err(OrbitError::InvalidInput(
-            "remote MCP context must not claim the hub process identity".to_string(),
+            "remote MCP context must not claim the owner process identity".to_string(),
         ));
     }
     if context.origin_session_id.is_none() || context.mcp_call_id.is_none() {

@@ -197,7 +197,7 @@ fn registration_reproduces_the_shipped_exposure_policy() {
         "stats and resolve stay off the MCP surface"
     );
     for definition in &definitions {
-        assert_eq!(definition.policy.placement(), McpToolPlacement::Hub);
+        assert_eq!(definition.policy.placement(), McpToolPlacement::Owner);
     }
 
     // Every verb stays reachable through the CLI / dashboard `run_tool` path,

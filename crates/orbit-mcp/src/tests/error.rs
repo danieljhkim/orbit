@@ -42,12 +42,12 @@ fn adr_artifact_errors_keep_stable_codes_and_safe_origin() {
 }
 
 #[test]
-fn hub_transport_errors_keep_stable_codes_and_call_identity() {
-    let unavailable = error_payload(&OrbitError::HubUnavailable("offline".to_string()));
-    assert_eq!(unavailable["code"], "hub_unavailable");
+fn owner_transport_errors_keep_stable_codes_and_call_identity() {
+    let unavailable = error_payload(&OrbitError::OwnerUnavailable("offline".to_string()));
+    assert_eq!(unavailable["code"], "owner_unavailable");
 
-    let negotiation = error_payload(&OrbitError::HubNegotiation("digest drift".to_string()));
-    assert_eq!(negotiation["code"], "hub_negotiation");
+    let negotiation = error_payload(&OrbitError::OwnerNegotiation("digest drift".to_string()));
+    assert_eq!(negotiation["code"], "owner_negotiation");
 
     let unknown = error_payload(&OrbitError::OutcomeUnknown {
         mcp_call_id: "mcall-exact".to_string(),

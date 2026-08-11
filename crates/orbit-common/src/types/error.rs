@@ -138,11 +138,11 @@ pub enum OrbitError {
     AgentProtocolViolation(String),
     #[error("unsupported agent provider: {0}")]
     UnsupportedAgentProvider(String),
-    #[error("hub unavailable: {0}")]
-    HubUnavailable(String),
-    #[error("hub negotiation failed: {0}")]
-    HubNegotiation(String),
-    #[error("hub call outcome unknown for {mcp_call_id}: {message}")]
+    #[error("owner unavailable: {0}")]
+    OwnerUnavailable(String),
+    #[error("owner negotiation failed: {0}")]
+    OwnerNegotiation(String),
+    #[error("owner call outcome unknown for {mcp_call_id}: {message}")]
     OutcomeUnknown {
         mcp_call_id: String,
         message: String,

@@ -231,15 +231,11 @@ impl OrbitRuntime {
         let working_directory = std::env::current_dir()
             .map(|path| path.to_string_lossy().into_owned())
             .unwrap_or_else(|_| ".".to_string());
-        let (audit_context, correlation_error) =
-            resolve_audit_context(&input, entry_point, session_context.as_ref());
+        let audit_context = resolve_audit_context(&input, entry_point, session_context.as_ref());
 
         // Keep the callback inside the audit boundary so setup, policy, and
         // implementation failures all produce a failure-status row.
-        let result = match correlation_error {
-            Some(error) => Err(error),
-            None => dispatch(input),
-        };
+        let result = dispatch(input);
         let duration_ms = (start.elapsed().as_millis() as i64).max(1);
 
         let (status, exit_code, error_message) = match &result {
@@ -315,10 +311,9 @@ impl OrbitRuntime {
             mcp_call_id: session_context
                 .as_ref()
                 .and_then(|context| context.mcp_call_id.clone()),
-            lease_id: session_context
-                .as_ref()
-                .and_then(|context| context.leased_run.as_ref())
-                .map(|leased_run| leased_run.lease_id.clone()),
+            // ORB-10727 [ADR-0358]: run leases are deferred to v2, so no v1
+            // session carries one. The audit column stays for the v2 producer.
+            lease_id: None,
             task_id: audit_context.task_id,
             job_run_id: audit_context.job_run_id,
             activity_id: audit_context.activity_id,
@@ -400,7 +395,7 @@ pub(super) fn resolve_audit_context(
     input: &Value,
     entry_point: ToolEntryPoint,
     session_context: Option<&ToolSessionContext>,
-) -> (AuditContext, Option<OrbitError>) {
+) -> AuditContext {
     fn input_str(input: &Value, key: &str) -> Option<String> {
         input
             .get(key)
@@ -417,33 +412,33 @@ pub(super) fn resolve_audit_context(
     }
 
     if entry_point == ToolEntryPoint::Mcp {
-        return trusted_mcp_audit_context(
-            session_context.unwrap_or(&ToolSessionContext::default()),
-        );
+        // The MCP entry point never reads model-authored tool JSON for
+        // correlation; `session_context` is retained in the signature because
+        // it is the trusted envelope the caller must hand over to reach it.
+        let _ = session_context;
+        return trusted_mcp_audit_context();
     }
 
-    (
-        AuditContext {
-            task_id: input_str(input, "task_id").or_else(|| env_str("ORBIT_TASK_ID")),
-            job_run_id: input_str(input, "job_run_id")
-                .or_else(|| input_str(input, "run_id"))
-                .or_else(|| env_str("ORBIT_RUN_ID")),
-            activity_id: input_str(input, "activity_id").or_else(|| env_str("ORBIT_ACTIVITY_ID")),
-            step_index: input
-                .get("step_index")
-                .and_then(Value::as_i64)
-                .or_else(|| env_str("ORBIT_STEP_INDEX").and_then(|s| s.parse().ok())),
-        },
-        None,
-    )
+    AuditContext {
+        task_id: input_str(input, "task_id").or_else(|| env_str("ORBIT_TASK_ID")),
+        job_run_id: input_str(input, "job_run_id")
+            .or_else(|| input_str(input, "run_id"))
+            .or_else(|| env_str("ORBIT_RUN_ID")),
+        activity_id: input_str(input, "activity_id").or_else(|| env_str("ORBIT_ACTIVITY_ID")),
+        step_index: input
+            .get("step_index")
+            .and_then(Value::as_i64)
+            .or_else(|| env_str("ORBIT_STEP_INDEX").and_then(|s| s.parse().ok())),
+    }
 }
 
-/// Resolve MCP audit correlation exclusively from an authenticated managed
-/// envelope and trusted broker context. Model-authored tool JSON is never an
-/// input to this function.
-pub fn trusted_mcp_audit_context(
-    session_context: &ToolSessionContext,
-) -> (AuditContext, Option<OrbitError>) {
+/// Resolve MCP audit correlation exclusively from the authenticated managed
+/// run envelope. Model-authored tool JSON is never an input to this function.
+///
+/// ORB-10727 [ADR-0358]: this previously also reconciled a trusted `leased_run`
+/// from the session context against the managed job run. Run leases are deferred
+/// to v2, so no v1 session carries one and the envelope is the only source.
+pub fn trusted_mcp_audit_context() -> AuditContext {
     fn env_str(name: &str) -> Option<String> {
         std::env::var(name)
             .ok()
@@ -451,7 +446,7 @@ pub fn trusted_mcp_audit_context(
             .filter(|value| !value.is_empty())
     }
 
-    let mut context = if managed_run_context() {
+    let context = if managed_run_context() {
         AuditContext {
             task_id: env_str("ORBIT_TASK_ID"),
             job_run_id: env_str("ORBIT_RUN_ID"),
@@ -462,23 +457,7 @@ pub fn trusted_mcp_audit_context(
         AuditContext::default()
     };
 
-    let Some(leased_run) = session_context.leased_run.as_ref() else {
-        return (context, None);
-    };
-    match context.job_run_id.as_deref() {
-        None => {
-            context.job_run_id = Some(leased_run.run_id.clone());
-            (context, None)
-        }
-        Some(job_run_id) if job_run_id == leased_run.run_id => (context, None),
-        Some(job_run_id) => {
-            let error = OrbitError::InvalidInput(format!(
-                "trusted leased run '{}' does not match managed job run '{job_run_id}'",
-                leased_run.run_id
-            ));
-            (context, Some(error))
-        }
-    }
+    context
 }
 
 pub(super) fn reservation_owner_from_env() -> Option<ReservationOwnerContext> {

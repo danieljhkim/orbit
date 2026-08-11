@@ -31,9 +31,16 @@ pub(super) struct OrbitIdentity {
 }
 
 pub fn register(registry: &mut ToolRegistry) {
+    // ORB-10727: the `orbit.adr.*` family is slated for withdrawal from MCP with
+    // the ADR store (CONVENTIONS.md §4b), but §4b makes inlining the remaining
+    // pointer-only entries into each feature's `4_decisions.md` a prerequisite,
+    // and the `orbit-knowledge` skill still routes agents here. It stays
+    // advertised until that migration lands; the bridge recomposition does not
+    // do a different feature's cutover. Placement follows the rest of the
+    // knowledge surface: owner-placed, since the store is the owner's.
     registry.register_mcp(
         adr::add::OrbitAdrAddTool,
-        agent_operator(McpToolPlacement::Composite),
+        agent_operator(McpToolPlacement::Owner),
     );
     // ORB-00289: agents query ADR metadata via `orbit search --kind adr`;
     // `orbit.adr.list` stays available on the CLI / dashboard `runtime.run_tool`
@@ -85,15 +92,15 @@ pub fn register(registry: &mut ToolRegistry) {
     friction::register(registry);
     registry.register_mcp(
         task::add::OrbitTaskAddTool,
-        agent_operator(McpToolPlacement::Hub),
+        agent_operator(McpToolPlacement::Owner),
     );
     registry.register_mcp(
         task::artifact_put::OrbitTaskArtifactPutTool,
-        agent_operator(McpToolPlacement::Hub),
+        agent_operator(McpToolPlacement::Owner),
     );
     registry.register_mcp(
         task::approve::OrbitTaskApproveTool,
-        agent_operator(McpToolPlacement::Hub),
+        agent_operator(McpToolPlacement::Owner),
     );
     // ORB-00289: destructive / admin-only — CLI subcommands still reach
     // them via `runtime.run_tool`; the agent MCP surface should not.
@@ -117,25 +124,28 @@ pub fn register(registry: &mut ToolRegistry) {
     );
     registry.register_mcp(
         task::start::OrbitTaskStartTool,
-        agent_operator(McpToolPlacement::Hub),
+        agent_operator(McpToolPlacement::Owner),
     );
     // Task rejection is a human/operator decision — CLI / dashboard only.
     registry.register_inactive(task::reject::OrbitTaskRejectTool);
     registry.register_mcp(
         task::show::OrbitTaskShowTool,
-        agent_operator(McpToolPlacement::Hub),
+        agent_operator(McpToolPlacement::Owner),
     );
     registry.register_mcp(
         task::list::OrbitTaskListTool,
-        agent_operator(McpToolPlacement::Hub),
+        agent_operator(McpToolPlacement::Owner),
     );
     registry.register_mcp(
         task::update::OrbitTaskUpdateTool,
-        agent_operator(McpToolPlacement::Hub),
+        agent_operator(McpToolPlacement::Owner),
     );
+    // ORB-10725 [ADR-0357]: knowledge is keyed (workspace_id, artifact_key) and
+    // written locally by the owner. With the global allocation step gone there
+    // is no second branch left to compose, so this is a single owner-local write.
     registry.register_mcp(
         learning::add::OrbitLearningAddTool,
-        agent_operator(McpToolPlacement::Composite),
+        agent_operator(McpToolPlacement::Owner),
     );
     registry.register_inactive(learning::list::OrbitLearningListTool);
     // ORB-00289: destructive cleanup — admin-only, CLI path retains it.
@@ -167,19 +177,19 @@ pub fn register(registry: &mut ToolRegistry) {
     );
     registry.register_mcp(
         workflow::OrbitWorkflowShipTool,
-        McpToolPolicy::operator_only(McpToolPlacement::Hub),
+        McpToolPolicy::operator_only(McpToolPlacement::Owner),
     );
     registry.register_mcp(
         workflow::OrbitWorkflowRunShowTool,
-        McpToolPolicy::operator_only(McpToolPlacement::Hub),
+        McpToolPolicy::operator_only(McpToolPlacement::Owner),
     );
     registry.register_mcp(
         workflow::OrbitWorkflowRunListTool,
-        McpToolPolicy::operator_only(McpToolPlacement::Hub),
+        McpToolPolicy::operator_only(McpToolPlacement::Owner),
     );
     registry.register_mcp(
         workflow::OrbitWorkflowRunResumeTool,
-        McpToolPolicy::operator_only(McpToolPlacement::Hub),
+        McpToolPolicy::operator_only(McpToolPlacement::Owner),
     );
     registry.register_inactive(semantic::install::OrbitSemanticInstallTool);
     // ORB-00289: destructive teardown of the local semantic index —

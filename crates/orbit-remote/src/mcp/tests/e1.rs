@@ -2,9 +2,7 @@ use std::collections::BTreeSet;
 
 use chrono::Utc;
 use orbit_common::types::{
-    AuditEventStatus, HostRegistration, McpCapability, McpToolPlacement, McpTransport,
-    SPOKE_REGISTRATION_METHOD_V1, SPOKE_REGISTRATION_SCHEMA_VERSION, SpokeRegistrationRequestV1,
-    SpokeRegistrationStageV1, ToolSessionContext, Workspace, WorkspacePresenceDeclaration,
+    AuditEventStatus, McpCapability, McpToolPlacement, McpTransport, ToolSessionContext, Workspace,
     WorkspaceRegistry, WorkspaceStatus,
 };
 use orbit_core::runtime::HubCoordinationExecutor;
@@ -13,14 +11,23 @@ use rusqlite::Connection;
 use serde_json::{Value, json};
 use tempfile::TempDir;
 
-use super::super::config::{HubTransport, load_trusted_mcp_config};
-use super::super::hub::HubMcpHost;
+use super::super::config::load_trusted_mcp_config;
+use super::super::owner::OwnerMcpHost;
 
-fn write_identity(root: &TempDir, mode: &str, machine_id: &str) {
+/// Write a complete, current-schema host identity.
+///
+/// ORB-10727: this used to write `schema_version = 1` with a `mode`. Schema 2
+/// has no machine-level mode to declare (ADR-0358), so the owner endpoint reads
+/// only the stable `machine_id`.
+fn write_identity(root: &TempDir, machine_id: &str) {
+    write_identity_at(root.path(), machine_id, "test-host");
+}
+
+fn write_identity_at(root: &std::path::Path, machine_id: &str, host_id: &str) {
     std::fs::write(
-        root.path().join("host.toml"),
+        root.join("host.toml"),
         format!(
-            "schema_version = 1\nmachine_id = \"{machine_id}\"\nhost_id = \"test-host\"\nmode = \"{mode}\"\n"
+            "schema_version = 2\nmachine_id = \"{machine_id}\"\nhost_id = \"{host_id}\"\ntask_prefix = \"ORB\"\n"
         ),
     )
     .expect("host identity");
@@ -51,7 +58,7 @@ fn add_checkoutless_workspace(root: &TempDir, workspace_id: &str) {
             workspaces: vec![Workspace {
                 id: workspace_id.to_string(),
                 name: "Checkoutless".to_string(),
-                owner_machine_id: Some("hm_hub".to_string()),
+                owner_machine_id: Some("hm_owner".to_string()),
                 git_remote: None,
                 ship_mode: None,
                 base_branch: "agent-main".to_string(),
@@ -71,7 +78,7 @@ fn add_checkoutless_workspace(root: &TempDir, workspace_id: &str) {
 fn context(capability: McpCapability, call_id: &str) -> ToolSessionContext {
     let mut context = ToolSessionContext::trusted_local(
         None,
-        Some("hm_hub".to_string()),
+        Some("hm_owner".to_string()),
         Some("test-host".to_string()),
     );
     context.effective_capabilities = BTreeSet::from([capability]);
@@ -81,7 +88,7 @@ fn context(capability: McpCapability, call_id: &str) -> ToolSessionContext {
 
 fn remote_context(capability: McpCapability, call_id: &str) -> ToolSessionContext {
     ToolSessionContext {
-        caller_machine_id: Some("hm_spoke".to_string()),
+        caller_machine_id: Some("hm_client".to_string()),
         caller_host_id: Some("spoke".to_string()),
         transport: Some(McpTransport::SshMcp),
         effective_capabilities: BTreeSet::from([capability]),
@@ -91,74 +98,157 @@ fn remote_context(capability: McpCapability, call_id: &str) -> ToolSessionContex
     }
 }
 
-fn spoke_registration(machine_id: &str, host_id: &str) -> SpokeRegistrationRequestV1 {
-    SpokeRegistrationRequestV1 {
-        schema_version: SPOKE_REGISTRATION_SCHEMA_VERSION,
-        identity: HostRegistration {
-            machine_id: machine_id.to_string(),
-            host_id: host_id.to_string(),
-            labels: BTreeSet::new(),
-        },
-        presence: Vec::new(),
-        profiles: Vec::new(),
-    }
-}
-
 fn valid_config() -> &'static str {
-    "[hub]\nmachine_id = \"hm_hub\"\ntransport = \"ssh\"\nhost = \"orbit-hub\"\nallowed_capabilities = [\"agent\", \"operator\", \"runner\"]\n"
+    "[[owner]]\nmachine_id = \"hm_owner\"\ntransport = \"ssh\"\nhost = \"orbit-owner\"\nallowed_capabilities = [\"agent\", \"operator\"]\n"
 }
 
 #[test]
-fn trusted_config_parses_one_singular_safe_hub() {
+fn trusted_config_parses_zero_or_more_safe_owner_routes() {
     let root = tempfile::tempdir().expect("global root");
+
+    // Zero routes is the valid default for a machine that owns what it uses.
+    assert!(
+        load_trusted_mcp_config(root.path())
+            .expect("absent config")
+            .routes()
+            .next()
+            .is_none()
+    );
+
     std::fs::write(root.path().join("mcp.toml"), valid_config()).expect("mcp config");
     let config = load_trusted_mcp_config(root.path()).expect("trusted config");
-    let hub = config.hub.expect("hub");
-    assert_eq!(hub.machine_id, "hm_hub");
-    assert_eq!(hub.transport, HubTransport::Ssh);
-    assert_eq!(hub.host, "orbit-hub");
+    let routes = config.routes().collect::<Vec<_>>();
+    assert_eq!(routes.len(), 1);
+    assert_eq!(routes[0].machine_id, "hm_owner");
+    assert_eq!(routes[0].host, "orbit-owner");
     assert_eq!(
-        hub.allowed_capabilities,
-        BTreeSet::from([
-            McpCapability::Agent,
-            McpCapability::Operator,
-            McpCapability::Runner,
-        ])
+        routes[0].allowed_capabilities,
+        BTreeSet::from([McpCapability::Agent, McpCapability::Operator])
+    );
+}
+
+/// Routes are per machine, not per workspace: a client holding replicas of
+/// workspaces owned by several machines names each owner once, and lookup is by
+/// the target `machine_id`.
+#[test]
+fn multiple_owner_entries_are_keyed_by_target_machine_id() {
+    let root = tempfile::tempdir().expect("global root");
+    std::fs::write(
+        root.path().join("mcp.toml"),
+        "[[owner]]\nmachine_id = \"hm_alpha\"\ntransport = \"ssh\"\nhost = \"alpha\"\nallowed_capabilities = [\"agent\"]\n\
+         \n\
+         [[owner]]\nmachine_id = \"hm_beta\"\ntransport = \"ssh\"\nhost = \"beta\"\nallowed_capabilities = [\"operator\"]\n",
+    )
+    .expect("mcp config");
+    let config = load_trusted_mcp_config(root.path()).expect("trusted config");
+
+    let alpha = config.owners.get("hm_alpha").expect("alpha route");
+    assert_eq!(alpha.host, "alpha");
+    assert_eq!(
+        alpha.allowed_capabilities,
+        BTreeSet::from([McpCapability::Agent])
+    );
+
+    let beta = config.owners.get("hm_beta").expect("beta route");
+    assert_eq!(beta.host, "beta");
+    assert_eq!(
+        beta.allowed_capabilities,
+        BTreeSet::from([McpCapability::Operator])
+    );
+    assert!(
+        !beta.allowed_capabilities.contains(&McpCapability::Agent),
+        "operator must not imply agent"
+    );
+
+    assert!(config.owners.get("hm_unlisted").is_none());
+    assert_eq!(
+        config
+            .routes()
+            .map(|route| route.machine_id.as_str())
+            .collect::<Vec<_>>(),
+        ["hm_alpha", "hm_beta"],
+        "routes enumerate in stable machine_id order"
+    );
+}
+
+/// ORB-10727 decision: a legacy singular `[hub]` table fails closed with a
+/// migration message rather than being auto-migrated. `[hub]` named a
+/// machine-level coordination host; `[[owner]]` names the machine that owns a
+/// workspace. The hub target need not own anything, so rewriting one into the
+/// other could silently route coordination calls to a non-owner.
+#[test]
+fn legacy_hub_table_fails_closed_with_an_actionable_migration_message() {
+    let root = tempfile::tempdir().expect("global root");
+    std::fs::write(
+        root.path().join("mcp.toml"),
+        "[hub]\nmachine_id = \"hm_owner\"\ntransport = \"ssh\"\nhost = \"orbit-owner\"\nallowed_capabilities = [\"agent\"]\n",
+    )
+    .expect("mcp config");
+
+    let error = load_trusted_mcp_config(root.path()).expect_err("legacy [hub] must fail closed");
+    let message = error.to_string();
+    assert!(
+        message.contains("[hub]"),
+        "names the withdrawn table: {message}"
+    );
+    assert!(
+        message.contains("[[owner]]"),
+        "names the replacement form: {message}"
+    );
+    assert!(
+        message.contains("not migrated for you"),
+        "states that nothing was guessed: {message}"
+    );
+    assert!(
+        message.contains(&root.path().join("mcp.toml").display().to_string()),
+        "names the file to edit: {message}"
     );
 }
 
 #[test]
 fn trusted_config_fails_closed_on_unknown_duplicate_empty_and_unsupported_values() {
     let cases = [
-        ("owner = \"elsewhere\"\n", "unknown field"),
-        ("[hubs.dk1]\nmachine_id = \"hm_hub\"\n", "unknown field"),
+        ("owner = \"elsewhere\"\n", "invalid type"),
+        ("[owners.dk1]\nmachine_id = \"hm_owner\"\n", "unknown field"),
         (
-            "[hub]\nmachine_id = \"hm_hub\"\ntransport = \"ssh\"\nhost = \"hub\"\nallowed_capabilities = [\"agent\"]\ncommand = \"orbit mcp serve --hub\"\n",
+            "[[owner]]\nmachine_id = \"hm_owner\"\ntransport = \"ssh\"\nhost = \"owner\"\nallowed_capabilities = [\"agent\"]\ncommand = \"orbit mcp serve --owner\"\n",
             "unknown field",
         ),
         (
-            "[hub]\nmachine_id = \"hm_hub\"\ntransport = \"http\"\nhost = \"hub\"\nallowed_capabilities = [\"agent\"]\n",
+            "[[owner]]\nmachine_id = \"hm_owner\"\ntransport = \"http\"\nhost = \"owner\"\nallowed_capabilities = [\"agent\"]\n",
             "unknown variant",
         ),
         (
-            "[hub]\nmachine_id = \"not-a-machine\"\ntransport = \"ssh\"\nhost = \"hub\"\nallowed_capabilities = [\"agent\"]\n",
-            "invalid hub machine_id",
+            "[[owner]]\nmachine_id = \"not-a-machine\"\ntransport = \"ssh\"\nhost = \"owner\"\nallowed_capabilities = [\"agent\"]\n",
+            "invalid owner machine_id",
         ),
         (
-            "[hub]\nmachine_id = \"hm_hub\"\ntransport = \"ssh\"\nhost = \"hub\"\nallowed_capabilities = []\n",
+            "[[owner]]\nmachine_id = \"hm_owner\"\ntransport = \"ssh\"\nhost = \"owner\"\nallowed_capabilities = []\n",
             "must not be empty",
         ),
         (
-            "[hub]\nmachine_id = \"hm_hub\"\ntransport = \"ssh\"\nhost = \"hub\"\nallowed_capabilities = [\"agent\", \"agent\"]\n",
-            "repeats hub capability",
+            "[[owner]]\nmachine_id = \"hm_owner\"\ntransport = \"ssh\"\nhost = \"owner\"\nallowed_capabilities = [\"agent\", \"agent\"]\n",
+            "repeats owner capability",
         ),
         (
-            "[hub]\nmachine_id = \"hm_hub\"\ntransport = \"ssh\"\nhost = \"hub\"\nallowed_capabilities = [\"admin\"]\n",
+            "[[owner]]\nmachine_id = \"hm_owner\"\ntransport = \"ssh\"\nhost = \"owner\"\nallowed_capabilities = [\"admin\"]\n",
             "unknown variant",
         ),
         (
-            "[hub]\nmachine_id = \"hm_hub\"\ntransport = \"ssh\"\nhost = \"hub\"\n",
+            // `runner` still parses as a capability, so this is a bridge policy
+            // refusal rather than a deserialization failure (ADR-0358).
+            "[[owner]]\nmachine_id = \"hm_owner\"\ntransport = \"ssh\"\nhost = \"owner\"\nallowed_capabilities = [\"runner\"]\n",
+            "the v1 bridge withdrew",
+        ),
+        (
+            "[[owner]]\nmachine_id = \"hm_owner\"\ntransport = \"ssh\"\nhost = \"owner\"\n",
             "missing field",
+        ),
+        (
+            "[[owner]]\nmachine_id = \"hm_owner\"\ntransport = \"ssh\"\nhost = \"a\"\nallowed_capabilities = [\"agent\"]\n\
+             \n\
+             [[owner]]\nmachine_id = \"hm_owner\"\ntransport = \"ssh\"\nhost = \"b\"\nallowed_capabilities = [\"agent\"]\n",
+            "more than one [[owner]] entry",
         ),
     ];
     for (body, expected) in cases {
@@ -176,24 +266,24 @@ fn trusted_config_fails_closed_on_unknown_duplicate_empty_and_unsupported_values
 fn trusted_config_rejects_every_alias_that_could_change_ssh_argv_or_command() {
     for alias in [
         "-oProxyCommand=touch-pwned",
-        "hub extra",
-        "user@hub",
-        "hub;command",
-        "hub|command",
-        "hub\ncommand",
-        "/tmp/hub",
-        "hub=target",
+        "owner extra",
+        "user@owner",
+        "owner;command",
+        "owner|command",
+        "owner\ncommand",
+        "/tmp/owner",
+        "owner=target",
         "*.internal",
     ] {
         let root = tempfile::tempdir().expect("global root");
         let encoded = toml::Value::String(alias.to_string()).to_string();
         let body = format!(
-            "[hub]\nmachine_id = \"hm_hub\"\ntransport = \"ssh\"\nhost = {encoded}\nallowed_capabilities = [\"agent\"]\n"
+            "[[owner]]\nmachine_id = \"hm_owner\"\ntransport = \"ssh\"\nhost = {encoded}\nallowed_capabilities = [\"agent\"]\n"
         );
         std::fs::write(root.path().join("mcp.toml"), body).expect("mcp config");
         let error = load_trusted_mcp_config(root.path()).expect_err("unsafe alias");
         assert!(
-            error.to_string().contains("invalid hub host alias"),
+            error.to_string().contains("invalid owner host alias"),
             "unexpected error for {alias:?}: {error}"
         );
     }
@@ -208,93 +298,73 @@ fn config_resolution_ignores_repo_and_other_root_decoys() {
     std::fs::write(root.path().join("mcp.toml"), valid_config()).expect("global config");
     std::fs::write(
         repo.path().join(".orbit/mcp.toml"),
-        "[hub]\nmachine_id = \"hm_repo\"\ntransport = \"ssh\"\nhost = \"repo\"\nallowed_capabilities = [\"runner\"]\n",
+        "[[owner]]\nmachine_id = \"hm_repo\"\ntransport = \"ssh\"\nhost = \"repo\"\nallowed_capabilities = [\"agent\"]\n",
     )
     .expect("repo decoy");
     std::fs::write(
         env_decoy.path().join("mcp.toml"),
-        "[hub]\nmachine_id = \"hm_env\"\ntransport = \"ssh\"\nhost = \"env\"\nallowed_capabilities = [\"operator\"]\n",
+        "[[owner]]\nmachine_id = \"hm_env\"\ntransport = \"ssh\"\nhost = \"env\"\nallowed_capabilities = [\"operator\"]\n",
     )
     .expect("env decoy");
 
     // The loader has no cwd or environment input: only the explicit machine
     // global root can influence the result.
     let config = load_trusted_mcp_config(root.path()).expect("global config");
-    assert_eq!(config.hub.expect("hub").machine_id, "hm_hub");
-}
-
-#[test]
-fn spoke_route_requires_config_and_exact_non_hierarchical_membership() {
-    use crate::{HOST_IDENTITY_SCHEMA_VERSION, HostIdentity, HostMode};
-
-    let identity = HostIdentity {
-        schema_version: HOST_IDENTITY_SCHEMA_VERSION,
-        machine_id: "hm_spoke".to_string(),
-        host_id: "spoke".to_string(),
-        task_prefix: "ORB".to_string(),
-        mode: HostMode::Spoke,
-    };
-    let missing = super::super::config::TrustedMcpConfig::default();
-    assert!(missing.spoke_route(&identity, None).is_err());
-
-    let root = tempfile::tempdir().expect("global root");
-    std::fs::write(
-        root.path().join("mcp.toml"),
-        "[hub]\nmachine_id = \"hm_hub\"\ntransport = \"ssh\"\nhost = \"hub\"\nallowed_capabilities = [\"operator\"]\n",
-    )
-    .expect("mcp config");
-    let config = load_trusted_mcp_config(root.path()).expect("config");
-    assert!(
-        config.spoke_route(&identity, None).is_err(),
-        "agent default"
-    );
-    assert!(
+    assert_eq!(
         config
-            .spoke_route(&identity, Some(McpCapability::Runner))
-            .is_err(),
-        "operator must not imply runner"
+            .routes()
+            .map(|route| route.machine_id.as_str())
+            .collect::<Vec<_>>(),
+        ["hm_owner"]
     );
-    let (_, effective) = config
-        .spoke_route(&identity, Some(McpCapability::Operator))
-        .expect("operator grant");
-    assert_eq!(effective, McpCapability::Operator);
 }
 
+/// ORB-10727 [ADR-0355]: the owner endpoint no longer requires `host.toml` mode
+/// `hub`, because schema 2 has no machine-level coordination role to declare,
+/// and no longer requires the store to be stamped, because the registration
+/// that stamped it is withdrawn (ADR-0358). What survives from ORB-10268: the
+/// startup machine identity must keep matching, and a store stamped by a
+/// *different* machine is still refused as a shadow store.
 #[test]
-fn hub_host_rejects_non_hub_modes_and_unstamped_or_shadow_stores() {
-    for mode in ["standalone", "spoke"] {
-        let root = tempfile::tempdir().expect("global root");
-        write_identity(&root, mode, "hm_hub");
-        let error = HubMcpHost::new(root.path().to_path_buf(), McpCapability::Agent)
-            .expect_err("invalid mode");
-        assert!(error.to_string().contains("requires host.toml mode 'hub'"));
-    }
-
-    let unstamped = tempfile::tempdir().expect("global root");
-    write_identity(&unstamped, "hub", "hm_hub");
-    initialize_store(&unstamped);
-    let error = HubMcpHost::new(unstamped.path().to_path_buf(), McpCapability::Agent)
-        .expect_err("unstamped store");
-    assert!(error.to_string().contains("no configured hub_machine_id"));
+fn owner_host_admits_an_unstamped_store_but_refuses_a_changed_identity_or_shadow_stamp() {
+    let root = tempfile::tempdir().expect("global root");
+    write_identity(&root, "hm_owner");
+    initialize_store(&root);
+    let host = OwnerMcpHost::new(root.path().to_path_buf(), McpCapability::Agent)
+        .expect("an unstamped store has nothing to contradict");
+    host.list_mcp_tool_definitions()
+        .expect("unstamped store serves");
 
     let shadow = tempfile::tempdir().expect("global root");
-    write_identity(&shadow, "hub", "hm_hub");
+    write_identity(&shadow, "hm_owner");
     stamp_store(&shadow, "hm_other");
-    let error = HubMcpHost::new(shadow.path().to_path_buf(), McpCapability::Agent)
-        .expect_err("shadow store");
-    assert!(error.to_string().contains("shadow coordination store"));
+    let error = OwnerMcpHost::new(shadow.path().to_path_buf(), McpCapability::Agent)
+        .expect_err("a store stamped by another machine is a shadow store");
+    assert!(
+        error.to_string().contains("shadow coordination store"),
+        "unexpected error: {error}"
+    );
+
+    write_identity(&root, "hm_replaced");
+    let error = host
+        .list_mcp_tool_definitions()
+        .expect_err("identity change must be refused");
+    assert!(
+        error.to_string().contains("owner MCP authority changed"),
+        "unexpected error: {error}"
+    );
 }
 
 #[test]
-fn hub_listing_uses_one_canonical_placement_and_capability_predicate() {
+fn owner_listing_uses_one_canonical_placement_and_capability_predicate() {
     let root = tempfile::tempdir().expect("global root");
-    write_identity(&root, "hub", "hm_hub");
-    stamp_store(&root, "hm_hub");
+    write_identity(&root, "hm_owner");
+    stamp_store(&root, "hm_owner");
 
-    let agent = HubMcpHost::new(root.path().to_path_buf(), McpCapability::Agent).expect("agent");
+    let agent = OwnerMcpHost::new(root.path().to_path_buf(), McpCapability::Agent).expect("agent");
     let agent_definitions = agent.list_mcp_tool_definitions().expect("agent tools");
     assert!(agent_definitions.iter().all(|definition| {
-        definition.policy.placement() == McpToolPlacement::Hub
+        definition.policy.placement() == McpToolPlacement::Owner
             && definition
                 .policy
                 .allowed_capabilities()
@@ -305,10 +375,16 @@ fn hub_listing_uses_one_canonical_placement_and_capability_predicate() {
         .map(|definition| definition.schema.name.as_str())
         .collect::<BTreeSet<_>>();
     assert!(agent_names.contains("orbit.task.add"));
+    // `orbit.workspace.list` is `local-derived`, so the owner endpoint does not
+    // advertise it at any capability: it answers from the caller's own registry.
     assert!(!agent_names.contains("orbit.workspace.list"));
     // Crew discovery is admitted for agent (unlike the operator-only registry
     // discovery tool), proving capability is by placement, not a hierarchy.
     assert!(agent_names.contains("orbit.crew.list"));
+    // `orbit.adr.*` is owner-placed like the rest of the knowledge surface. Its
+    // MCP withdrawal is scheduled with the ADR-store migration, not here (see
+    // the conformance fixture's planned_withdrawals).
+    assert!(agent_names.contains("orbit.adr.add"));
     assert!(
         !agent_names
             .iter()
@@ -316,32 +392,33 @@ fn hub_listing_uses_one_canonical_placement_and_capability_predicate() {
     );
 
     let operator =
-        HubMcpHost::new(root.path().to_path_buf(), McpCapability::Operator).expect("operator");
+        OwnerMcpHost::new(root.path().to_path_buf(), McpCapability::Operator).expect("operator");
     let operator_names = operator
         .list_mcp_tool_definitions()
         .expect("operator tools")
         .into_iter()
         .map(|definition| definition.schema.name)
         .collect::<BTreeSet<_>>();
-    assert!(operator_names.contains("orbit.workspace.list"));
+    assert!(
+        !operator_names.contains("orbit.workspace.list"),
+        "local-derived discovery is never owner-advertised"
+    );
     assert!(operator_names.contains("orbit.crew.list"));
     assert!(operator_names.contains("orbit.friction.list"));
     assert!(operator_names.contains("orbit.friction.show"));
     assert!(operator_names.contains("orbit.friction.update"));
     assert!(!agent_names.contains("orbit.friction.list"));
     assert!(!agent_names.contains("orbit.friction.show"));
-    assert!(
-        !operator_names.contains(SPOKE_REGISTRATION_METHOD_V1),
-        "private registration must never enter tools/list definitions"
-    );
-
-    let runner = HubMcpHost::new(root.path().to_path_buf(), McpCapability::Runner).expect("runner");
+    // ORB-10727 [ADR-0358]: `runner` is withdrawn from the bridge, so no
+    // canonical policy admits it and such a session would advertise nothing.
+    let runner =
+        OwnerMcpHost::new(root.path().to_path_buf(), McpCapability::Runner).expect("runner");
     assert!(
         runner
             .list_mcp_tool_definitions()
             .expect("runner tools")
             .is_empty(),
-        "D1 currently declares no runner-capability hub tools"
+        "no v1 tool policy admits the withdrawn runner capability"
     );
 }
 
@@ -353,7 +430,7 @@ fn hub_crew_discovery_and_task_validation_read_the_owner_execution_profile() {
     use crate::host_registry::HostRegistryService;
 
     let root = tempfile::tempdir().expect("global root");
-    write_identity(&root, "hub", "hm_hub");
+    write_identity(&root, "hm_owner");
     // Register + stamp the hub, bind the workspace owner, and publish an owner
     // execution profile through the same coordination store the hub reads.
     let service = HostRegistryService::new(crate::remote_store_at(root.path()).expect("store"));
@@ -361,7 +438,7 @@ fn hub_crew_discovery_and_task_validation_read_the_owner_execution_profile() {
         .register_hub_identity(
             &HostIdentity {
                 schema_version: HOST_IDENTITY_SCHEMA_VERSION,
-                machine_id: "hm_hub".to_string(),
+                machine_id: "hm_owner".to_string(),
                 host_id: "test-host".to_string(),
                 task_prefix: "ORB".to_string(),
                 mode: HostMode::Hub,
@@ -375,13 +452,13 @@ fn hub_crew_discovery_and_task_validation_read_the_owner_execution_profile() {
     )
     .expect("registry");
     service
-        .bind_workspace_owner(&registry, "ws_alpha", "hm_hub")
+        .bind_workspace_owner(&registry, "ws_alpha", "hm_owner")
         .expect("bind owner");
     let observed = Utc::now();
     let mut profile = ExecutionProfileV1 {
         schema_version: 1,
         workspace_id: "ws_alpha".to_string(),
-        owner_machine_id: "hm_hub".to_string(),
+        owner_machine_id: "hm_owner".to_string(),
         observed_at: observed,
         config_digest: String::new(),
         default_crew: "sol".to_string(),
@@ -401,10 +478,11 @@ fn hub_crew_discovery_and_task_validation_read_the_owner_execution_profile() {
     };
     profile.config_digest = profile.compute_config_digest().expect("config digest");
     service
-        .publish_execution_profile("hm_hub", 0, &profile)
+        .publish_execution_profile("hm_owner", 0, &profile)
         .expect("publish owner profile");
 
-    let host = HubMcpHost::new(root.path().to_path_buf(), McpCapability::Agent).expect("hub host");
+    let host =
+        OwnerMcpHost::new(root.path().to_path_buf(), McpCapability::Agent).expect("hub host");
     let workspace_context = |call_id: &str| {
         let mut context = context(McpCapability::Agent, call_id);
         context.workspace = Some("ws_alpha".to_string());
@@ -422,7 +500,7 @@ fn hub_crew_discovery_and_task_validation_read_the_owner_execution_profile() {
         )
         .expect("crew list");
     assert_eq!(crews["workspace_id"], "ws_alpha");
-    assert_eq!(crews["owner_machine_id"], "hm_hub");
+    assert_eq!(crews["owner_machine_id"], "hm_owner");
     assert_eq!(crews["profile"]["freshness"], "current");
     assert_eq!(crews["profile"]["generation"], 1);
     assert_eq!(crews["default_crew"], "sol");
@@ -558,156 +636,86 @@ fn hub_crew_discovery_and_task_validation_read_the_owner_execution_profile() {
     );
 }
 
+/// ORB-10727 [ADR-0358]: v1 has no registration handshake, so there is no
+/// "unknown caller may only register" gate and no private method to guess.
+/// SSH is the authenticator; the endpoint requires only that the connector
+/// hand over a complete caller identity, and it advertises no custom method.
 #[test]
-fn unknown_remote_caller_can_only_register_and_retirement_invalidates_open_peer() {
+fn owner_endpoint_negotiates_no_private_method_and_requires_only_caller_identity() {
     let root = tempfile::tempdir().expect("global root");
-    write_identity(&root, "hub", "hm_hub");
-    stamp_store(&root, "hm_hub");
+    write_identity(&root, "hm_owner");
+    stamp_store(&root, "hm_owner");
     let host =
-        HubMcpHost::new(root.path().to_path_buf(), McpCapability::Operator).expect("hub host");
+        OwnerMcpHost::new(root.path().to_path_buf(), McpCapability::Operator).expect("owner host");
 
-    let unknown = host
+    // An unregistered remote caller is admitted past the identity gate:
+    // registration is withdrawn, so it fails on workspace resolution instead.
+    let unregistered = host
         .call_tool(
-            "orbit.workspace.list",
-            json!({}),
-            remote_context(McpCapability::Operator, "mcall-before-register"),
+            "orbit.crew.list",
+            json!({"workspace": "ws_unknown"}),
+            remote_context(McpCapability::Operator, "mcall-unregistered"),
         )
-        .expect_err("unknown caller denied before discovery");
-    assert!(unknown.to_string().contains("not registered"));
-
-    let mismatch = host
-        .private_register_spoke(
-            spoke_registration("hm_other", "other"),
-            remote_context(McpCapability::Operator, "mcall-mismatch"),
-        )
-        .expect("typed result");
-    assert!(!mismatch.complete);
-    assert!(mismatch.last_committed_stage.is_none());
-
-    let registered = host
-        .private_register_spoke(
-            spoke_registration("hm_spoke", "spoke"),
-            remote_context(McpCapability::Operator, "mcall-register"),
-        )
-        .expect("typed result");
-    assert!(registered.complete);
-    assert_eq!(
-        registered
-            .snapshot
-            .as_ref()
-            .expect("snapshot")
-            .hosts
-            .iter()
-            .filter(|entry| entry.machine_id == "hm_spoke")
-            .count(),
-        1
-    );
-    let before_hidden_call =
-        crate::registry_snapshot_at(root.path()).expect("snapshot before guessed ordinary call");
-    let hidden = host
-        .call_tool(
-            SPOKE_REGISTRATION_METHOD_V1,
-            serde_json::to_value(spoke_registration("hm_spoke", "spoke"))
-                .expect("registration JSON"),
-            remote_context(McpCapability::Operator, "mcall-guessed-registration"),
-        )
-        .expect_err("ordinary tools/call cannot invoke the private method");
-    assert!(hidden.to_string().contains("not found"));
-    let after_hidden_call =
-        crate::registry_snapshot_at(root.path()).expect("snapshot after guessed ordinary call");
-    assert_eq!(
-        after_hidden_call.registry_revision, before_hidden_call.registry_revision,
-        "guessed private name created no registry mutation"
-    );
-    host.call_tool(
-        "orbit.workspace.list",
-        json!({}),
-        remote_context(McpCapability::Operator, "mcall-after-register"),
-    )
-    .expect("registered active caller admitted");
-
-    crate::host_registry_service_at(root.path())
-        .expect("service")
-        .retire("hm_spoke")
-        .expect("retire spoke");
-    let retired = host
-        .call_tool(
-            "orbit.workspace.list",
-            json!({}),
-            remote_context(McpCapability::Operator, "mcall-after-retire"),
-        )
-        .expect_err("retirement invalidates already-open peer");
-    assert!(retired.to_string().contains("retired"));
-}
-
-#[test]
-fn registration_reports_registry_commit_before_projection_failure_and_can_repair() {
-    let root = tempfile::tempdir().expect("global root");
-    write_identity(&root, "hub", "hm_hub");
-    stamp_store(&root, "hm_hub");
-    add_checkoutless_workspace(&root, "ws_checkoutless");
-    let host = HubMcpHost::new(root.path().to_path_buf(), McpCapability::Agent).expect("hub host");
-
-    let mut invalid = spoke_registration("hm_spoke", "spoke");
-    invalid.presence.push(WorkspacePresenceDeclaration {
-        workspace_id: "ws_unknown".to_string(),
-        root: root.path().join("spoke-checkout"),
-        last_verified: Utc::now(),
-    });
-    let partial = host
-        .private_register_spoke(
-            invalid,
-            remote_context(McpCapability::Agent, "mcall-register-partial"),
-        )
-        .expect("typed partial result");
-    assert!(!partial.complete);
-    assert_eq!(
-        partial.last_committed_stage,
-        Some(SpokeRegistrationStageV1::Registry)
-    );
-    assert_eq!(
-        partial.host.as_ref().map(|host| host.machine_id.as_str()),
-        Some("hm_spoke")
-    );
-    assert!(partial.snapshot.is_none());
-
-    let snapshot =
-        crate::registry_snapshot_at(root.path()).expect("registry after projection failure");
+        .expect_err("unknown workspace");
     assert!(
-        snapshot
-            .hosts
-            .iter()
-            .any(|host| host.machine_id == "hm_spoke"),
-        "the committed registration is not rolled back"
+        !unregistered.to_string().contains("not registered"),
+        "caller registration must not be a gate: {unregistered}"
     );
 
-    let mut repaired = spoke_registration("hm_spoke", "spoke");
-    repaired.presence.push(WorkspacePresenceDeclaration {
-        workspace_id: "ws_checkoutless".to_string(),
-        root: root.path().join("spoke-checkout"),
-        last_verified: Utc::now(),
-    });
-    let complete = host
-        .private_register_spoke(
-            repaired,
-            remote_context(McpCapability::Agent, "mcall-register-repair"),
-        )
-        .expect("typed complete result");
-    assert!(complete.complete);
-    assert_eq!(
-        complete.last_committed_stage,
-        Some(SpokeRegistrationStageV1::Snapshot)
+    // An incomplete SSH-carried identity is still refused before dispatch.
+    let mut anonymous = remote_context(McpCapability::Operator, "mcall-anonymous");
+    anonymous.caller_machine_id = None;
+    let denied = host
+        .call_tool("orbit.crew.list", json!({"workspace": "ws_any"}), anonymous)
+        .expect_err("SSH calls require an authenticated caller");
+    assert!(
+        denied
+            .to_string()
+            .contains("require authenticated caller machine_id"),
+        "unexpected error: {denied}"
     );
-    assert_eq!(complete.presence_workspace_ids, ["ws_checkoutless"]);
+
+    // No connector-private method survives, by any spelling.
+    let before = crate::registry_snapshot_at(root.path()).expect("snapshot before");
+    for method in [
+        "orbit/private/register-spoke/v1",
+        "orbit/private/allocate-knowledge-id/v1",
+    ] {
+        let missing = host
+            .call_tool(
+                method,
+                json!({}),
+                remote_context(McpCapability::Operator, "mcall-private"),
+            )
+            .expect_err("withdrawn private methods are not tools");
+        assert!(
+            missing.to_string().contains("not found"),
+            "{method}: {missing}"
+        );
+    }
+    let after = crate::registry_snapshot_at(root.path()).expect("snapshot after");
+    assert_eq!(
+        after.registry_revision, before.registry_revision,
+        "a guessed private name creates no registry mutation"
+    );
+
+    // The endpoint's advertised instructions carry the owner contract only.
+    let instructions = host.contract_instructions().to_string();
+    assert!(instructions.starts_with("orbit-owner-contract-v1:"));
+    assert!(
+        !instructions.contains("register-spoke"),
+        "no registration seam is advertised: {instructions}"
+    );
 }
 
 #[test]
 fn hub_checkoutless_dispatch_and_capability_denial_each_write_one_trusted_audit() {
     let root = tempfile::tempdir().expect("global root");
-    write_identity(&root, "hub", "hm_hub");
-    let database = stamp_store(&root, "hm_hub");
+    write_identity(&root, "hm_owner");
+    let database = stamp_store(&root, "hm_owner");
     add_checkoutless_workspace(&root, "ws_checkoutless");
-    let host = HubMcpHost::new(root.path().to_path_buf(), McpCapability::Agent).expect("hub host");
+    let host =
+        OwnerMcpHost::new(root.path().to_path_buf(), McpCapability::Agent).expect("hub host");
 
     let task = host
         .call_tool(
@@ -759,17 +767,18 @@ fn hub_checkoutless_dispatch_and_capability_denial_each_write_one_trusted_audit(
         assert_eq!(row.0, 1, "one audit for {call_id}");
         assert_eq!(row.1, expected_status.to_string());
         assert_eq!(row.2.as_deref(), Some(call_id));
-        assert_eq!(row.3.as_deref(), Some("hm_hub"));
+        assert_eq!(row.3.as_deref(), Some("hm_owner"));
     }
 }
 
 #[test]
 fn ssh_hub_call_never_defaults_a_missing_caller_to_the_hub_identity() {
     let root = tempfile::tempdir().expect("global root");
-    write_identity(&root, "hub", "hm_hub");
-    let database = stamp_store(&root, "hm_hub");
+    write_identity(&root, "hm_owner");
+    let database = stamp_store(&root, "hm_owner");
     add_checkoutless_workspace(&root, "ws_checkoutless");
-    let host = HubMcpHost::new(root.path().to_path_buf(), McpCapability::Agent).expect("hub host");
+    let host =
+        OwnerMcpHost::new(root.path().to_path_buf(), McpCapability::Agent).expect("hub host");
     let mut remote = context(McpCapability::Agent, "mcall-missing-caller");
     remote.transport = Some(McpTransport::SshMcp);
     remote.caller_machine_id = None;
@@ -804,17 +813,18 @@ fn ssh_hub_call_never_defaults_a_missing_caller_to_the_hub_identity() {
     assert_eq!(row.0, 1);
     assert_eq!(row.1, AuditEventStatus::Denied.to_string());
     assert_eq!(row.2, None, "remote caller must not be forged as the hub");
-    assert_eq!(row.3.as_deref(), Some("hm_hub"));
+    assert_eq!(row.3.as_deref(), Some("hm_owner"));
     assert_eq!(row.4.as_deref(), Some("ssh-mcp"));
 }
 
 #[test]
-fn hub_rechecks_store_stamp_before_listing_and_dispatch_without_task_mutation() {
+fn owner_rechecks_store_stamp_before_listing_and_dispatch_without_task_mutation() {
     let root = tempfile::tempdir().expect("global root");
-    write_identity(&root, "hub", "hm_hub");
-    let database = stamp_store(&root, "hm_hub");
+    write_identity(&root, "hm_owner");
+    let database = stamp_store(&root, "hm_owner");
     add_checkoutless_workspace(&root, "ws_checkoutless");
-    let host = HubMcpHost::new(root.path().to_path_buf(), McpCapability::Agent).expect("hub host");
+    let host =
+        OwnerMcpHost::new(root.path().to_path_buf(), McpCapability::Agent).expect("owner host");
 
     Connection::open(&database)
         .expect("store")

@@ -1,63 +1,77 @@
-//! Checkoutless, non-recursive MCP server host for the coordination hub [ORB-10268].
+//! Checkoutless, non-recursive MCP server host for a workspace owner
+//! [ORB-10268, ORB-10727].
+//!
+//! ORB-10268 built this endpoint under the `--hub` spelling, where one
+//! machine-level hub owned coordination for every workspace. ADR-0355 collapses
+//! that into ownership: every machine is its own coordination host for the
+//! workspaces it owns, so the endpoint is now started by the same plain
+//! `orbit mcp serve` a local broker uses and there is no machine-level mode to
+//! require.
+//!
+//! What survives from ORB-10268 unchanged: startup verifies the opened global
+//! store is stamped with the exact local `machine_id` before stdio begins, and
+//! listing and every call repeat that authority check; the endpoint filters the
+//! canonical registry by exactly one placement class and one scalar capability;
+//! it accepts only stable logical workspace IDs, never caller paths; it invokes
+//! the checkout-independent coordination executor without constructing
+//! `OrbitRuntime` or opening any connector; and it never opens another MCP/SSH
+//! connection.
+//!
+//! What is new: a workspace this machine does not own is refused by name, so a
+//! client cannot reach through one owner to another (§4.2 rule 5).
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
 use orbit_common::types::{
-    AuditEventStatus, HostRecord, HostStatus, McpCapability, McpToolDefinition, McpToolPlacement,
-    McpToolScope, McpTransport, RegistrySnapshotV1, SPOKE_REGISTRATION_METHOD_V1,
-    SpokeRegistrationRequestV1, SpokeRegistrationResultV1, SpokeRegistrationStageV1,
-    ToolSessionContext, WorkspaceStatus, mcp_advertised_tool_name,
+    AuditEventStatus, McpCapability, McpToolDefinition, McpToolPlacement, McpToolScope,
+    McpTransport, RegistrySnapshotV1, ToolSessionContext, WorkspaceStatus,
+    mcp_advertised_tool_name,
 };
 use orbit_core::runtime::HubCoordinationExecutor;
 use orbit_core::{NotFoundKind, OrbitError, redact_sensitive_env_text};
 use orbit_mcp::McpHost;
-use serde_json::{Value, json};
+use serde_json::Value;
 
-use crate::{HOST_IDENTITY_SCHEMA_VERSION, HostIdentity, HostMode, load_host_identity};
+use crate::{HostIdentity, load_host_identity};
 
 use super::contract::{
-    CANONICAL_MCP_REGISTRY_REVISION, HubServerContractV1, MCP_CONTRACT_REVISION, hub_schema_digest,
+    CANONICAL_MCP_REGISTRY_REVISION, MCP_CONTRACT_REVISION, OwnerServerContractV1,
+    owner_schema_digest,
 };
 use super::host::{
     canonical_mcp_tool_definitions, mcp_preflight_failure_params, normalize_trusted_call_context,
 };
 
-/// A fixed hub-only host. It owns no broker, runtime cache, connector, owner
-/// resolver, or transport factory.
+/// A fixed owner-endpoint host. It owns no broker, runtime cache, connector,
+/// owner resolver, or transport factory.
 #[derive(Debug)]
-pub(super) struct HubMcpHost {
+pub(super) struct OwnerMcpHost {
     global_root: PathBuf,
     identity: HostIdentity,
     capability: McpCapability,
-    private_instructions: String,
+    contract_instructions: String,
 }
 
-impl HubMcpHost {
+impl OwnerMcpHost {
     pub(super) fn new(global_root: PathBuf, capability: McpCapability) -> Result<Self, OrbitError> {
         let identity = load_host_identity(&global_root)?;
         crate::runtime::sync_task_prefix(&global_root)?;
-        if identity.mode != HostMode::Hub {
-            return Err(OrbitError::InvalidInput(format!(
-                "orbit mcp serve --hub requires host.toml mode 'hub'; machine '{}' ({}) is '{}'",
-                identity.host_id, identity.machine_id, identity.mode
-            )));
-        }
         let definitions = canonical_mcp_tool_definitions()
             .map_err(|error| OrbitError::InvalidInput(error.to_string()))?;
-        let contract = HubServerContractV1 {
+        let contract = OwnerServerContractV1 {
             contract_revision: MCP_CONTRACT_REVISION,
             canonical_registry_revision: CANONICAL_MCP_REGISTRY_REVISION,
-            hub_machine_id: identity.machine_id.clone(),
+            owner_machine_id: identity.machine_id.clone(),
             effective_capability: capability,
-            hub_schema_digest: hub_schema_digest(&definitions, capability)?,
+            owner_schema_digest: owner_schema_digest(&definitions, capability)?,
         };
-        let private_instructions = contract.instructions()?;
+        let contract_instructions = contract.instructions()?;
         let host = Self {
             global_root,
             identity,
             capability,
-            private_instructions,
+            contract_instructions,
         };
         // Fail before stdio is opened. Listing and every call repeat this
         // check so a long-lived server cannot outlive an authority change.
@@ -69,65 +83,46 @@ impl HubMcpHost {
         &self.identity
     }
 
-    pub(super) fn private_instructions(&self) -> &str {
-        &self.private_instructions
+    pub(super) fn contract_instructions(&self) -> &str {
+        &self.contract_instructions
     }
 
-    pub(super) fn private_register_spoke(
-        &self,
-        request: SpokeRegistrationRequestV1,
-        session_context: ToolSessionContext,
-    ) -> Result<SpokeRegistrationResultV1, OrbitError> {
-        let context = self.normalize_context(session_context, &self.identity);
-        let result = self.registration_result(request, context.clone());
-        let audit_result = if result.complete {
-            Ok(json!({
-                "complete": true,
-                "last_committed_stage": result.last_committed_stage,
-            }))
-        } else {
-            Err(OrbitError::Execution(
-                result
-                    .failure
-                    .as_ref()
-                    .map(|failure| failure.message.clone())
-                    .unwrap_or_else(|| "private spoke registration failed".to_string()),
-            ))
-        };
-        self.record_outcome(SPOKE_REGISTRATION_METHOD_V1, &context, &audit_result);
-        Ok(result)
-    }
-
+    /// Confirm the opened global store still belongs to this exact machine.
+    ///
+    /// Two independent checks, both repeated on every listing and call so a
+    /// long-lived server cannot outlive an authority change:
+    ///
+    /// 1. `host.toml` still names the `machine_id` this server started with.
+    /// 2. If the global coordination store carries a machine stamp, it is this
+    ///    machine's. Serving a store carried in from elsewhere would publish
+    ///    another machine's coordination state under this identity.
+    ///
+    /// ORB-10727 relaxes only the *absent* stamp. ORB-10268 required one and
+    /// told the operator to register the hub first; registration is withdrawn
+    /// (ADR-0358) and ownership now comes from `workspaces.json`, so an
+    /// unstamped store has nothing to contradict and is admitted. A stamp that
+    /// names a different machine is still refused.
     fn verify_authority(&self) -> Result<(HostIdentity, RegistrySnapshotV1), OrbitError> {
         let identity = load_host_identity(&self.global_root)?;
-        if identity.mode != HostMode::Hub {
-            return Err(OrbitError::InvalidInput(format!(
-                "hub MCP authority changed: machine '{}' ({}) is now mode '{}'",
-                identity.host_id, identity.machine_id, identity.mode
-            )));
-        }
         if identity.machine_id != self.identity.machine_id {
             return Err(OrbitError::InvalidInput(format!(
-                "hub MCP authority changed: startup machine_id '{}' no longer matches host.toml machine_id '{}'",
+                "owner MCP authority changed: startup machine_id '{}' no longer matches host.toml machine_id '{}'",
                 self.identity.machine_id, identity.machine_id
             )));
         }
         let snapshot = crate::registry_snapshot_at(&self.global_root)?;
         match snapshot.hub_machine_id.as_deref() {
-            Some(configured) if configured == identity.machine_id => Ok((identity, snapshot)),
-            Some(configured) => Err(OrbitError::InvalidInput(format!(
-                "refusing hub MCP through a shadow coordination store: local hub machine_id '{}' does not match configured hub_machine_id '{configured}'",
+            None => Ok((identity, snapshot)),
+            Some(stamped) if stamped == identity.machine_id => Ok((identity, snapshot)),
+            Some(stamped) => Err(OrbitError::InvalidInput(format!(
+                "refusing owner MCP through a shadow coordination store: local machine_id '{}' does not match the store's stamped machine_id '{stamped}'",
                 identity.machine_id
             ))),
-            None => Err(OrbitError::InvalidInput(
-                "the global coordination store has no configured hub_machine_id; register this hub before starting `orbit mcp serve --hub`"
-                    .to_string(),
-            )),
         }
     }
 
     fn admitted(&self, definition: &McpToolDefinition) -> bool {
-        definition.policy.placement() == McpToolPlacement::Hub
+        definition.policy.placement() == McpToolPlacement::Owner
             && definition
                 .policy
                 .allowed_capabilities()
@@ -165,54 +160,20 @@ impl HubMcpHost {
         context
     }
 
+    /// A remote call must carry the connector-owned caller identity.
+    ///
+    /// ORB-10727 [ADR-0358]: this used to additionally require the caller to be
+    /// an actively registered spoke in the fleet inventory. v1 has no
+    /// registration step — a client opens a route and calls — so SSH is the
+    /// authenticator and the identity is required only to be complete.
     fn require_authenticated_caller(context: &ToolSessionContext) -> Result<(), OrbitError> {
         if context.transport == Some(McpTransport::SshMcp)
             && (context.caller_machine_id.is_none() || context.caller_host_id.is_none())
         {
             return Err(OrbitError::InvalidInput(
-                "SSH-carried hub MCP calls require authenticated caller machine_id and host_id"
+                "SSH-carried owner MCP calls require authenticated caller machine_id and host_id"
                     .to_string(),
             ));
-        }
-        Ok(())
-    }
-
-    fn require_active_remote_caller(
-        context: &ToolSessionContext,
-        snapshot: &RegistrySnapshotV1,
-    ) -> Result<(), OrbitError> {
-        Self::require_authenticated_caller(context)?;
-        if context.transport != Some(McpTransport::SshMcp) {
-            return Ok(());
-        }
-        let (Some(machine_id), Some(host_id)) = (
-            context.caller_machine_id.as_deref(),
-            context.caller_host_id.as_deref(),
-        ) else {
-            return Err(OrbitError::InvalidInput(
-                "SSH-carried hub MCP calls require authenticated caller machine_id and host_id"
-                    .to_string(),
-            ));
-        };
-        let host = snapshot
-            .hosts
-            .iter()
-            .find(|host| host.machine_id == machine_id)
-            .ok_or_else(|| {
-                OrbitError::InvalidInput(format!(
-                    "remote caller machine_id '{machine_id}' is not registered; only the private spoke registration request is allowed"
-                ))
-            })?;
-        if host.status != HostStatus::Active {
-            return Err(OrbitError::InvalidInput(format!(
-                "remote caller machine_id '{machine_id}' is retired"
-            )));
-        }
-        if host.host_id != host_id {
-            return Err(OrbitError::InvalidInput(format!(
-                "remote caller host_id '{host_id}' does not match registered host_id '{}' for machine_id '{machine_id}'",
-                host.host_id
-            )));
         }
         Ok(())
     }
@@ -239,14 +200,19 @@ impl HubMcpHost {
             })
     }
 
-    fn resolve_workspace(&self, selector: &str) -> Result<String, OrbitError> {
+    /// Resolve a stable logical workspace ID that this machine actually owns.
+    ///
+    /// Refusing a non-owned workspace by name is what keeps the topology a
+    /// star per workspace: a client that reached the wrong owner is told which
+    /// machine to open a route to rather than being silently relayed there.
+    fn resolve_owned_workspace(&self, selector: &str) -> Result<String, OrbitError> {
         if Path::new(selector).is_absolute()
             || selector.contains('/')
             || selector == "."
             || selector == ".."
         {
             return Err(OrbitError::InvalidInput(format!(
-                "hub MCP workspace selector '{selector}' must be a stable logical workspace ID, never a checkout path"
+                "owner MCP workspace selector '{selector}' must be a stable logical workspace ID, never a checkout path"
             )));
         }
         let registry_path = crate::workspace_registry::registry_path_for(&self.global_root);
@@ -257,7 +223,8 @@ impl HubMcpHost {
             .find(|workspace| workspace.id == selector)
             .ok_or_else(|| {
                 OrbitError::InvalidInput(format!(
-                    "unknown logical workspace ID '{selector}' on this hub"
+                    "unknown logical workspace ID '{selector}' on owner machine '{}'",
+                    self.identity.machine_id
                 ))
             })?;
         if workspace.status != WorkspaceStatus::Active {
@@ -266,7 +233,17 @@ impl HubMcpHost {
                 workspace.id
             )));
         }
-        Ok(workspace.id)
+        match workspace.owner_machine_id.as_deref() {
+            Some(owner) if owner == self.identity.machine_id => Ok(workspace.id),
+            Some(owner) => Err(OrbitError::InvalidInput(format!(
+                "workspace '{}' is owned by machine '{owner}', not this endpoint's machine '{}'; open a route to the owner instead",
+                workspace.id, self.identity.machine_id
+            ))),
+            None => Err(OrbitError::InvalidInput(format!(
+                "workspace '{}' declares no owner machine; the owner endpoint serves only owned workspaces",
+                workspace.id
+            ))),
+        }
     }
 
     fn global_call(name: &str, snapshot: RegistrySnapshotV1) -> Result<Value, OrbitError> {
@@ -276,7 +253,7 @@ impl HubMcpHost {
     fn record_denial(&self, name: &str, context: &ToolSessionContext, denial: &OrbitError) {
         let params = mcp_preflight_failure_params(name, context, denial);
         if let Err(error) = crate::record_global_audit_event_at(&self.global_root, &params) {
-            tracing::warn!(tool = name, error = %error, "failed to persist hub MCP denial audit");
+            tracing::warn!(tool = name, error = %error, "failed to persist owner MCP denial audit");
         }
     }
 
@@ -301,7 +278,7 @@ impl HubMcpHost {
             }
         }
         if let Err(error) = crate::record_global_audit_event_at(&self.global_root, &params) {
-            tracing::warn!(tool = name, error = %error, "failed to persist hub MCP outcome audit");
+            tracing::warn!(tool = name, error = %error, "failed to persist owner MCP outcome audit");
         }
     }
 
@@ -320,7 +297,7 @@ impl HubMcpHost {
             }
         };
         let mut context = self.normalize_context(context, &identity);
-        if let Err(error) = Self::require_active_remote_caller(&context, &snapshot) {
+        if let Err(error) = Self::require_authenticated_caller(&context) {
             self.record_denial(inbound, &context, &error);
             return Err(error);
         }
@@ -334,8 +311,8 @@ impl HubMcpHost {
         let name = definition.schema.name.as_str();
         if !self.admitted(&definition) {
             let error = OrbitError::InvalidInput(format!(
-                "hub MCP denied tool '{name}': placement is '{}' and allowed capabilities are [{}], while this fixed session is '{}'",
-                placement_label(definition.policy.placement()),
+                "owner MCP denied tool '{name}': placement is '{}' and allowed capabilities are [{}], while this fixed session is '{}'",
+                definition.policy.placement(),
                 definition
                     .policy
                     .allowed_capabilities()
@@ -357,7 +334,7 @@ impl HubMcpHost {
                 .unwrap_or(false)
         {
             let error = OrbitError::InvalidInput(
-                "hub MCP cannot add local-checkout context to orbit.task.show".to_string(),
+                "owner MCP cannot add local-checkout context to orbit.task.show".to_string(),
             );
             self.record_denial(name, &context, &error);
             return Err(error);
@@ -372,13 +349,13 @@ impl HubMcpHost {
             Some(selector) => selector,
             None => {
                 let error = OrbitError::InvalidInput(format!(
-                    "hub tool '{name}' requires a stable logical workspace ID"
+                    "owner tool '{name}' requires a stable logical workspace ID"
                 ));
                 self.record_denial(name, &context, &error);
                 return Err(error);
             }
         };
-        let workspace_id = match self.resolve_workspace(selector) {
+        let workspace_id = match self.resolve_owned_workspace(selector) {
             Ok(workspace_id) => workspace_id,
             Err(error) => {
                 self.record_denial(name, &context, &error);
@@ -392,16 +369,17 @@ impl HubMcpHost {
         {
             object.insert("workspace".to_string(), Value::String(workspace_id.clone()));
         }
-        // Crew discovery reads the stored owner execution-profile projection at
-        // the hub; it never opens the coordination task registry.
+        // Crew validation runs where the workspace is owned, so it reads this
+        // machine's own execution-profile state directly (§8.1). It never opens
+        // the coordination task registry.
         if name == "orbit.crew.list" {
             let result = self.crew_discovery(&workspace_id);
             self.record_outcome(name, &context, &result);
             return result;
         }
         // Explicit non-empty execution and orchestration crew aliases are
-        // validated against the owner profile before any allocation/mutation.
-        // Omitted or cleared values remain accepted without a profile.
+        // validated before any allocation/mutation. Omitted or cleared values
+        // remain accepted without a profile.
         for field in ["crew", "orchestrator"] {
             let Some(crew) = explicit_task_crew(name, &input, field) else {
                 continue;
@@ -424,7 +402,7 @@ impl HubMcpHost {
     }
 
     /// Project the sanitized crew-discovery response for `orbit.crew.list` from
-    /// C2's stored owner execution-profile projection.
+    /// this owner machine's local execution-profile state.
     fn crew_discovery(&self, workspace_id: &str) -> Result<Value, OrbitError> {
         let discovery = crate::ExecutionProfileProjection::at(&self.global_root)?
             .crew_discovery(workspace_id)?;
@@ -432,158 +410,17 @@ impl HubMcpHost {
             .map_err(|error| OrbitError::Execution(format!("serialize crew discovery: {error}")))
     }
 
-    /// Validate an explicit task crew against the workspace owner's current
-    /// execution profile. Never falls back to hub-local crews, the registry
-    /// cache, a stale replica, or a synchronous owner call.
+    /// Validate an explicit task crew against this owner machine's current
+    /// execution profile. Never falls back to the registry cache, a stale
+    /// replica, or a synchronous call to another machine.
     fn validate_task_crew(&self, workspace_id: &str, crew: &str) -> Result<String, OrbitError> {
         crate::ExecutionProfileProjection::at(&self.global_root)?
             .validate_task_crew(workspace_id, crew)
             .map(|validated| validated.resolved_crew.name)
     }
-
-    fn registration_result(
-        &self,
-        request: SpokeRegistrationRequestV1,
-        context: ToolSessionContext,
-    ) -> SpokeRegistrationResultV1 {
-        let (hub_identity, _) = match self.verify_authority() {
-            Ok(authority) => authority,
-            Err(error) => return SpokeRegistrationResultV1::rejected(&error),
-        };
-        let context = self.normalize_context(context, &hub_identity);
-        if let Err(error) = Self::require_authenticated_caller(&context) {
-            return SpokeRegistrationResultV1::rejected(&error);
-        }
-        if context.transport != Some(McpTransport::SshMcp) {
-            return SpokeRegistrationResultV1::rejected(&OrbitError::InvalidInput(
-                "private spoke registration requires ssh-mcp transport".to_string(),
-            ));
-        }
-        if context.workspace.is_some() || context.workspace_id.is_some() {
-            return SpokeRegistrationResultV1::rejected(&OrbitError::InvalidInput(
-                "private spoke registration is global and must not carry a workspace selector"
-                    .to_string(),
-            ));
-        }
-        if let Err(error) = request.validate() {
-            return SpokeRegistrationResultV1::rejected(&error);
-        }
-        let caller_machine_id = context.caller_machine_id.as_deref().unwrap_or_default();
-        let caller_host_id = context.caller_host_id.as_deref().unwrap_or_default();
-        if request.identity.machine_id != caller_machine_id
-            || request.identity.host_id != caller_host_id
-        {
-            return SpokeRegistrationResultV1::rejected(&OrbitError::InvalidInput(format!(
-                "private registration identity '{}/{}' does not match trusted session caller '{}/{}'",
-                request.identity.machine_id,
-                request.identity.host_id,
-                caller_machine_id,
-                caller_host_id
-            )));
-        }
-
-        let service = match crate::host_registry_service_at(&self.global_root) {
-            Ok(service) => service,
-            Err(error) => return SpokeRegistrationResultV1::rejected(&error),
-        };
-        let spoke_identity = HostIdentity {
-            schema_version: HOST_IDENTITY_SCHEMA_VERSION,
-            machine_id: request.identity.machine_id.clone(),
-            host_id: request.identity.host_id.clone(),
-            task_prefix: "ORB".to_string(),
-            mode: HostMode::Spoke,
-        };
-        let host = match service.register_identity(&spoke_identity, request.identity.labels) {
-            Ok(host) => host,
-            Err(error) => return SpokeRegistrationResultV1::rejected(&error),
-        };
-
-        let registry_path = crate::workspace_registry::registry_path_for(&self.global_root);
-        let registry = match crate::workspace_registry::load_registry_from(&registry_path) {
-            Ok(registry) => registry,
-            Err(error) => {
-                return registration_partial(
-                    SpokeRegistrationStageV1::Registry,
-                    host,
-                    Vec::new(),
-                    Vec::new(),
-                    error,
-                );
-            }
-        };
-        let presence = match service.publish_presence(
-            &registry,
-            &spoke_identity.machine_id,
-            &request.presence,
-        ) {
-            Ok(presence) => presence,
-            Err(error) => {
-                return registration_partial(
-                    SpokeRegistrationStageV1::Registry,
-                    host,
-                    Vec::new(),
-                    Vec::new(),
-                    error,
-                );
-            }
-        };
-        let presence_workspace_ids = presence
-            .into_iter()
-            .map(|presence| presence.workspace_id)
-            .collect::<Vec<_>>();
-
-        let mut profile_workspace_ids = Vec::new();
-        for publication in request.profiles {
-            match service.publish_execution_profile(
-                &spoke_identity.machine_id,
-                publication.expected_generation,
-                &publication.profile,
-            ) {
-                Ok(_) => profile_workspace_ids.push(publication.profile.workspace_id),
-                Err(error) => {
-                    let stage = if profile_workspace_ids.is_empty() {
-                        SpokeRegistrationStageV1::Presence
-                    } else {
-                        SpokeRegistrationStageV1::Profiles
-                    };
-                    return registration_partial(
-                        stage,
-                        host,
-                        presence_workspace_ids,
-                        profile_workspace_ids,
-                        error,
-                    );
-                }
-            }
-        }
-
-        let snapshot = match service.snapshot() {
-            Ok(snapshot) => snapshot,
-            Err(error) => {
-                let stage = if profile_workspace_ids.is_empty() {
-                    SpokeRegistrationStageV1::Presence
-                } else {
-                    SpokeRegistrationStageV1::Profiles
-                };
-                return registration_partial(
-                    stage,
-                    host,
-                    presence_workspace_ids,
-                    profile_workspace_ids,
-                    error,
-                );
-            }
-        };
-        SpokeRegistrationResultV1::completed(
-            host,
-            presence_workspace_ids,
-            profile_workspace_ids,
-            snapshot,
-        )
-    }
 }
 
-impl McpHost for HubMcpHost {
+impl McpHost for OwnerMcpHost {
     fn list_mcp_tool_definitions(&self) -> Result<Vec<McpToolDefinition>, OrbitError> {
         self.verify_authority()?;
         Ok(canonical_mcp_tool_definitions()
@@ -598,9 +435,9 @@ impl McpHost for HubMcpHost {
         _name: &str,
         session_context: &ToolSessionContext,
     ) -> Result<(), OrbitError> {
-        let (identity, snapshot) = self.verify_authority()?;
+        let (identity, _) = self.verify_authority()?;
         let context = self.normalize_context(session_context.clone(), &identity);
-        Self::require_active_remote_caller(&context, &snapshot)
+        Self::require_authenticated_caller(&context)
     }
 
     fn call_tool(
@@ -624,9 +461,7 @@ impl McpHost for HubMcpHost {
             .map(|(identity, _)| identity)
             .unwrap_or_else(|_| self.identity.clone());
         let context = self.normalize_context(session_context.clone(), &identity);
-        let denial = self
-            .verify_authority()
-            .and_then(|(_, snapshot)| Self::require_active_remote_caller(&context, &snapshot))
+        let denial = Self::require_authenticated_caller(&context)
             .err()
             .unwrap_or(denial);
         self.record_denial(name, &context, &denial);
@@ -634,24 +469,7 @@ impl McpHost for HubMcpHost {
     }
 }
 
-impl super::learning::LearningSidecarHost for HubMcpHost {}
-
-fn registration_partial(
-    stage: SpokeRegistrationStageV1,
-    host: HostRecord,
-    presence_workspace_ids: Vec<String>,
-    profile_workspace_ids: Vec<String>,
-    error: OrbitError,
-) -> SpokeRegistrationResultV1 {
-    SpokeRegistrationResultV1::failed(
-        Some(stage),
-        Some(host),
-        presence_workspace_ids,
-        profile_workspace_ids,
-        "projection_failed",
-        error.to_string(),
-    )
-}
+impl super::learning::LearningSidecarHost for OwnerMcpHost {}
 
 /// The explicit, non-empty named-crew field on a task add/update, or `None`
 /// for any other tool, an omitted field, or an explicit clearing value.
@@ -665,13 +483,4 @@ fn explicit_task_crew(name: &str, input: &Value, field: &str) -> Option<String> 
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(ToOwned::to_owned)
-}
-
-fn placement_label(placement: McpToolPlacement) -> &'static str {
-    match placement {
-        McpToolPlacement::Hub => "hub",
-        McpToolPlacement::Owner => "owner",
-        McpToolPlacement::LocalDerived => "local-derived",
-        McpToolPlacement::Composite => "composite",
-    }
 }
