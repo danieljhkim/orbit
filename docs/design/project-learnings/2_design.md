@@ -3,7 +3,7 @@ summary: "Project Learnings — Design"
 type: design
 title: "Project Learnings — Design"
 owner: claude
-last_updated: 2026-08-09
+last_updated: 2026-08-10
 status: Draft
 feature: project-learnings
 doc_role: design
@@ -123,7 +123,7 @@ Vote rows are source-of-truth sidecars, not SQLite projections in v1. `orbit lea
 
 ### 2.3 ID format
 
-`L-NNNN` — same shape as task IDs, different prefix. Allocated by `orbit.learning.add`, never invented by agents (same rule as task IDs).
+`L-NNNN` — allocated per workspace by `orbit.learning.add` on the owning machine, never invented by agents (same rule as task IDs). Unlike task IDs, which carry a machine-scoped prefix chosen at global init, learning IDs have no machine component: uniqueness is `(workspace_id, id)` and two workspaces may both hold an `L-0007`.
 
 ---
 
@@ -350,7 +350,7 @@ The sanctioned sequence is:
 
 1. Enumerate the approved IDs and lifecycle-status candidates, then grep the workspace for each ID. Rewrite every surviving reference comment so the code states the rationale without pointing to the retiring learning.
 2. Remove the complete `.orbit/learnings/<id>/` artifact directory. Do not edit `learning.yaml` in place.
-3. Run `orbit learning sync --json` to rebuild the workspace's `learnings_index` projection from the remaining artifacts. This removes the deleted record's index row; no checked-in manifest points to learning artifacts. The global allocator keeps its reservation so a deleted ID is never reused.
+3. Run `orbit learning sync --json` to rebuild the workspace's `learnings_index` projection from the remaining artifacts. This removes the deleted record's index row; no checked-in manifest points to learning artifacts. The workspace's own sequence keeps its high-water mark so a deleted ID is never reused.
 4. Re-run the ID grep and confirm the directory and index-backed listing no longer surface the record.
 
 This is distinct from `orbit learning archive` ([§7.2.1](#721-archival-retirement-without-a-replacement-orb-10469)): archival retains a superseded artifact, while approved physical retirement removes the artifact after its references have been made self-contained.
@@ -376,8 +376,8 @@ To surface both classes continuously without hard-coding thresholds, orbit ships
 
 **Stream B — comment-reference sweep** (added by [ORB-10348]):
 
-1. Grep the reachable constellation checkout for artifact-id patterns in comments — `L-\d{4}`, `ADR-\d{4}`, `ORB-\d{5}`, `F\d{4}-\d{2}-\d{3}`.
-2. Resolve each id against its registry (`orbit learning show`, `orbit adr show`, `orbit task show`, `orbit friction show`) and report references whose artifact is missing, rejected, superseded, or otherwise stale, with `file:line` evidence and the comment's claim versus the artifact's current state.
+1. Grep the reachable constellation checkout for artifact-id patterns in comments — `L-\d{4}`, `ADR-\d{4}`, `[A-Z]{2,5}-\d{5}` (task IDs now carry a machine-scoped prefix, so `ORB-` is no longer the only one), `F\d{4}-\d{2}-\d{3}`.
+2. Resolve each id against its source (`orbit learning show`, `orbit task show`, `orbit friction show`; for ADRs, the `## ADR-NNNN` heading in the owning feature's `4_decisions.md`) and report references whose artifact is missing, rejected, superseded, or otherwise stale, with `file:line` evidence and the comment's claim versus the artifact's current state. ADR anchors get this check for free once the §11 lint in [../CONVENTIONS.md](../CONVENTIONS.md#11-enforcement) exists.
 
 Both streams write into the task's `execution_summary` — a ranked list of candidates with concrete evidence — and that is the entire deliverable. The run **never** deprecates, deletes, supersedes, archives, or adds state to any learning, ADR, task, or friction record, and never edits a comment; curation stays human/orchestrator-owned and is applied afterwards through the existing `orbit learning update` / archival surface, or by hand for comment edits. It **fails open** per stream: an empty or missing rollup, a sweep with no matches, or otherwise missing/empty data reports "nothing stale" for that stream rather than erroring — a fresh workspace with no audit history, or a codebase with no reference comments yet, is a valid "nothing to deprecate" outcome, not a failure. Agent judgment replaces the fixed thresholds a bespoke staleness-scoring engine would have hard-coded — the deliberate choice ([ORB-10318]) not to build one, given the small corpus and the audit's finding that no learning is a proven chronic offender.
 

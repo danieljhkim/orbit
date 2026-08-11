@@ -3,7 +3,7 @@ summary: "Project Learnings — Vision"
 type: design
 title: "Project Learnings — Vision"
 owner: claude
-last_updated: 2026-08-09
+last_updated: 2026-08-10
 status: Draft
 feature: project-learnings
 doc_role: vision
@@ -78,6 +78,8 @@ Three options:
 - **Tag-driven promotion.** Mark a learning `cross_workspace: true`; a separate `~/.orbit/learnings/` is populated by promoted records. Operator opts in.
 
 The third is probably right; phase 1 ships option 1.
+
+Note that the per-machine coordination model raises the price of options 2 and 3. Learnings are now keyed `(workspace_id, artifact_key)` with no global tier anywhere in the system ([../host-registry/4_decisions.md](../host-registry/4_decisions.md) ADR-0357), so a `~/.orbit/learnings/` store would be reintroducing the cross-workspace namespace that was just removed — and on a multi-machine constellation it would need an owner and a merge story of its own. Either option now needs its own decision rather than arriving as later work.
 
 ### 1.5 Pull discovery quality
 

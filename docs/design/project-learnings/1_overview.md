@@ -3,7 +3,7 @@ summary: "Project Learnings — Overview"
 type: design
 title: "Project Learnings — Overview"
 owner: claude
-last_updated: 2026-08-09
+last_updated: 2026-08-10
 status: Draft
 feature: project-learnings
 doc_role: overview
@@ -40,7 +40,7 @@ The hard constraint that shapes the design: **the system must be discoverable ac
 
 A first-class Orbit resource, parallel to `task`. Each record carries:
 
-- `id` — `L-NNNN`, allocated like task IDs.
+- `id` — `L-NNNN`, allocated per workspace by the owning machine. Unique within `(workspace_id, id)`, not globally, and unlike task IDs it carries no machine prefix.
 - `scope` — what triggers the learning. Phase 1: path globs + tags. Phase 2 will layer semantic similarity on top ([4_decisions.md ADR-004](./4_decisions.md)).
 - `summary` — one-line rule of thumb displayed in a concise search result.
 - `body` — multi-line markdown: the rule, the reason, how to apply it.

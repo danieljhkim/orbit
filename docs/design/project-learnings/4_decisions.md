@@ -3,7 +3,7 @@ summary: "Project Learnings — Decisions"
 type: design
 title: "Project Learnings — Decisions"
 owner: claude
-last_updated: 2026-08-09
+last_updated: 2026-08-10
 status: Draft
 feature: project-learnings
 doc_role: decisions
@@ -12,13 +12,13 @@ tags: ["project-learnings"]
 
 # Project Learnings — Decisions
 
-ADR-style log of non-obvious project-learnings decisions. Each entry names the pressure, the choice, and the tradeoff. Entries are keyed by global ADR ID and ordered ascending. New entries are allocated via `orbit.adr.add` *before* the local heading is written — see [../CONVENTIONS.md §4](../CONVENTIONS.md) and the `orbit-knowledge` skill.
+ADR-style log of non-obvious project-learnings decisions. Each entry names the pressure, the choice, and the tradeoff. Entries are numbered per-repo, ordered ascending, and written directly in this file — there is no ADR store behind it. An entry is admitted only through one of the two doors in [../CONVENTIONS.md §4](../CONVENTIONS.md#4-adrs-strict): it explains a specific code site, or it states a standing rule that governs future decisions.
 
 Format for each entry: **Status · Date · Task(s) · legacy_id (if backfilled)**, then *Context → Decision → Consequences*. Every ADR names at least one cost.
 
-Historical note: entries below were originally numbered ADR-001 through ADR-006 within this folder. ADR-001 through ADR-005 were imported into the global store on 2026-05-11 (`ADR-0108`–`ADR-0112`) with `legacy_ids` set; ADR-006 was added directly to this file by [ORB-00095] without a global allocation and was backfilled as `ADR-0157` per [ORB-00098]. Each heading now carries the global ID; the original local IDs survive as `legacy_ids` so prior citations still resolve via `orbit.adr.list --legacy-id=project-learnings/ADR-NNN`.
+Historical note: entries below were originally numbered ADR-001 through ADR-006 within this folder. ADR-001 through ADR-005 were imported into the then-global store on 2026-05-11 (`ADR-0108`–`ADR-0112`) with `legacy_ids` set; ADR-006 was added directly to this file by [ORB-00095] without an allocation and was backfilled as `ADR-0157` per [ORB-00098]. Each heading carries the four-digit ID; the original local IDs survive as `legacy_ids` recorded in each heading below, which is now the only way prior citations resolve.
 
-Historical note ([ORB-10479]): the entries listed below already held a global ADR allocation, but their store bodies were lost when the worktrees that authored them were reaped (see [F2026-07-163]). The narratives were restored into the store at their existing IDs — no ID was reallocated — and their headings reduced to pointer form. Restored here: [ADR-0157].
+Historical note ([ORB-10479]): the entries listed below held an allocation, but their bodies were lost when the worktrees that authored them were reaped (see [F2026-07-163]). The narratives were restored at their existing IDs — no ID was reallocated — and their headings reduced to pointer form. Restored here: [ADR-0157]. Those pointers are now dead; the bodies are recoverable verbatim from `.orbit/adrs/*/ADR-NNNN/body.md`, which git tracks, and must be inlined into this file before the store is removed.
 
 ---
 
@@ -284,9 +284,9 @@ Alternatives considered:
 **Consequences.**
 - Enforcement moves from prompt text into code at the two surfaces an executor can actually reach. The two entry points share one gate, so CLI and MCP cannot drift.
 - Reads are untouched in every context: `show`, `list`, `search`, `stats`, and scope injection behave identically for human, executor, and opted-in orchestrator callers.
-- `sync`, `prune`, `archive`, the multi-host owner-finalize path, and test fixtures keep the ungated store-level methods, which now carry doc comments pointing at the `author_*` wrappers.
+- `sync`, `prune`, `archive`, and test fixtures keep the ungated store-level methods, which now carry doc comments pointing at the `author_*` wrappers. (The multi-host owner-finalize path was also on this list; it no longer exists — see below.)
 - The dashboard needed one explicit change: `PATCH /api/learnings/:id` delegated to the `orbit.learning.update` tool (to inherit the superseded-record rejection), which would have put a human's dashboard edit behind a gate keyed on the *server process's* environment. The tool handler is now split into shared payload parsing plus the gated write, and the route calls a new ungated `OrbitRuntime::update_learning_from_request`. `POST .../supersede` already called the ungated runtime method and is unchanged.
-- `finalize_preallocated_learning` stays ungated deliberately: by the time a caller reaches finalize the global id is already consumed and cannot be released, so a refusal there would burn an id. When [ORB-10274] (F3) routes public `orbit.learning.add` through the broker, the gate belongs in the preflight *before* `compose_preallocated_knowledge_add` allocates.
+- `finalize_preallocated_learning` stayed ungated deliberately, because by the time a caller reached finalize the hub-allocated global id was already consumed and a refusal there would burn it. **That reasoning is now void.** With learning IDs allocated per workspace by the owning machine ([../host-registry/4_decisions.md](../host-registry/4_decisions.md) ADR-0357), there is no preallocation step, no hub round-trip, and no ID to burn: `orbit.learning.add` writes locally under `(workspace_id, id)` in a single transaction, so the role gate sits on the one authoring surface with nothing at stake on refusal. The preallocated-finalize path and the [ORB-10274] (F3) broker cutover it anticipated are both withdrawn.
 - `crates/orbit-cli/tests/learning.rs`, `crates/orbit-cli/tests/docs.rs`, and the tool-host learning tests now declare their caller context explicitly instead of inheriting whatever the suite was launched with. This gate turns the [ORB-10350] ambient-leak hazard from a latent inconsistency into a hard failure, so any fixture that seeds a learning has to say which context it means.
 - Cost: the gate is applied at six call sites rather than one chokepoint, so a future authoring surface must remember to use the `author_*` wrappers — a tradeoff accepted to keep the dashboard's request-derived attribution working.
 

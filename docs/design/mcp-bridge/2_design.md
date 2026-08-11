@@ -1,20 +1,29 @@
 ---
 title: Orbit MCP Bridge — Design
-owner: codex
+owner: claude
 last_updated: 2026-08-10
 last_validated: 2026-08-02
-status: Accepted
+status: Draft
 feature: mcp-bridge
 doc_role: design
 type: design
-summary: Target design for a local Orbit MCP broker with one SSH hub link, hub-only coordination, owner-bound knowledge, checkout-local indexes, role-aware search, capability sets, provenance, an owned tunnel for checkoutless clients, and Bridge parity retirement.
+summary: Target design for a local Orbit MCP broker with an SSH owner route, owner-local coordination, workspace-scoped knowledge, checkout-local indexes, role-aware search, capability sets, provenance, an owned tunnel for checkoutless clients, and Bridge parity retirement.
 tags: [mcp, remote-access, host-registry, bridge, ssh, routing]
 paths: ["crates/orbit-remote/**", "crates/orbit-mcp/**", "crates/orbit-core/**", "crates/orbit-tools/**", "crates/orbit-store/**", "crates/orbit-common/**"]
 related_features: [mcp-bridge, host-registry, mcp-session-context, remote-access, orbit-search, project-learnings]
-related_artifacts: [ORB-00424, ORB-10257, ORB-10262, ORB-10267, ORB-10268, ORB-10269, ORB-10271, ORB-10272, ORB-10276, ORB-10302, ORB-10319, ORB-10330, ORB-10332, ORB-10534, ORB-10540, ORB-10544, ORB-10690, ORB-10710, ADR-0181, ADR-0199, ADR-0200, ADR-0201, ADR-0226, ADR-0227, ADR-0228, ADR-0229, ADR-0230, ADR-0231, ADR-0232, ADR-0235, ADR-0240, ADR-0303, ADR-0348, ADR-0350, ADR-0351, ADR-0354]
+related_artifacts: [ORB-00424, ORB-10257, ORB-10262, ORB-10267, ORB-10268, ORB-10269, ORB-10271, ORB-10272, ORB-10276, ORB-10302, ORB-10319, ORB-10330, ORB-10332, ORB-10534, ORB-10540, ORB-10544, ORB-10690, ORB-10710, ADR-0181, ADR-0199, ADR-0200, ADR-0201, ADR-0226, ADR-0227, ADR-0228, ADR-0229, ADR-0230, ADR-0231, ADR-0232, ADR-0235, ADR-0240, ADR-0303, ADR-0348, ADR-0350, ADR-0351, ADR-0354, ADR-0355, ADR-0356, ADR-0357, ADR-0358]
 ---
 
 # Orbit MCP Bridge — Design
+
+> **Status: Draft — structural rewrite in flight.** The singular-hub contract
+> ([ADR-0226], [ADR-0229], [ADR-0230]) is superseded by [ADR-0355]–[ADR-0358],
+> recorded in [../host-registry/4_decisions.md](../host-registry/4_decisions.md).
+> Every machine is its own coordination host for the workspaces it owns; the only
+> v1 cross-machine surface is task create/read against the owner machine. Sections
+> describing execution placement, run leases, the presence map, the `runner`
+> capability, and host registration are **deferred to v2** and are retained below
+> only as history.
 
 This document specifies the **target** design. The host-registry identity,
 workspace, registry core/projections, C3 discovery tools, and typed placement,
@@ -26,17 +35,18 @@ The local checkout-aware broker, exact-worktree runtime cache, and effective-
 capability filtering landed in [ORB-10262]. Strict machine-global trust
 configuration and the fixed checkoutless hub endpoint landed in [ORB-10268]. The
 bounded negotiated SSH connector landed in [ORB-10269], and private spoke
-registration plus the first end-to-end coordination slice landed in [ORB-10271].
-[ORB-10272] adds the dormant Remote-v2 hub sequence and connector-private
-allocation substrate for ADR/learning IDs; it deliberately does not cut the public
-knowledge-create paths over before F3.
+registration plus the first end-to-end coordination slice landed in [ORB-10271]
+(registration retired in the v1 ownership model). [ORB-10272] added a dormant
+Remote-v2 sequence and connector-private allocation substrate for ADR/learning
+IDs; that substrate is **abandoned**, not dormant — [ADR-0357] removes global
+knowledge IDs entirely, so it encodes a superseded model and is removed rather
+than parked.
 It replaces both
 Bridge's HTTP parity layer and the earlier
-per-workspace-authority draft with a local broker that has one remote destination:
-the coordination hub. It covers client→hub transport and local tool placement. The
-reverse direction — placing a run, leasing it from a spoke, and reporting its result
-— belongs to [host-registry/2_design.md §4](../host-registry/2_design.md) and is not
-reimplemented here.
+per-workspace-authority draft with a local broker whose only remote destination is
+a workspace's owner machine. It covers client→owner transport and local tool
+placement. Execution placement and leasing are deferred to v2 ([ADR-0358]); see
+[host-registry/2_design.md §4](../host-registry/2_design.md).
 
 ## 1. Coupled Contract with Host Registry
 
@@ -45,14 +55,12 @@ The two features have a strict ownership split:
 | Question | Owner |
 |----------|-------|
 | What is this machine's stable identity? | Host registry (`host.toml`) |
-| Which machine is the coordination hub? | Host registry (machine-level role/config) |
-| Which machine owns this workspace? | Host registry (hub binding + local owner/replica role) |
-| Which machines have a usable checkout? | Host registry (workspace presence map) |
-| Which machine should execute a run? | Host registry (owner default, task preference, lease) |
+| Which task-id prefix does this machine own? | Host registry (`host.toml`, chosen at global init) |
+| Which machine owns this workspace? | Host registry (`workspaces.json`, machine-local source of truth) |
 | Which placement executes an MCP tool? | MCP bridge (canonical placement metadata) |
-| How does a spoke reach the hub? | MCP bridge (`mcp.toml` trust + SSH-carried MCP) |
-| Which tools may this client or runner invoke? | MCP bridge (capability set) |
-| How are hub and local results composed? | MCP bridge (tool-specific composite implementation) |
+| How does a client reach an owner machine? | MCP bridge (`mcp.toml` trust + SSH-carried MCP) |
+| Which tools may this client invoke? | MCP bridge (capability set) |
+| How are owner and local results composed? | MCP bridge (tool-specific composite implementation) |
 
 ### 1.1 One vertical implementation boundary
 
@@ -64,7 +72,7 @@ orbit-cli / orbit-dashboard
   └── orbit-remote
         ├── registry identity, catalog, cache, profiles, routines
         ├── persistence over the shared orbit.db
-        └── MCP schema composition, broker, hub, link, registration
+        └── MCP schema composition, broker, owner link
               ├── orbit-core
               ├── orbit-store
               ├── orbit-tools
@@ -84,40 +92,38 @@ registry tables in place rather than creating `remote.db` ([ORB-10319], [ADR-024
 
 The topology is an invariant, not a routing algorithm:
 
-1. Every non-hub machine may initiate one kind of cross-machine connection: to the
-   hub.
-2. The hub never initiates a connection to a spoke.
-3. The hub never forwards or proxies a call to a workspace owner.
-4. A spoke never opens a route to another spoke, even when that spoke owns the
-   workspace.
+1. A client may open one kind of cross-machine connection: to a workspace's owner
+   machine.
+2. No machine initiates a connection to a client.
+3. No machine forwards or proxies a call on another machine's behalf.
+4. Coordination writes against a non-owned local checkout fail closed and name the
+   owner.
 5. `machine_id`, never renameable `host_id`, is the durable identity in bindings,
-   session context, leases, and audit.
+   session context, and audit.
 
 Bootstrap order:
 
-1. `orbit init` creates local host identity and records whether this machine is the
-   hub or a spoke. For a spoke, the operator also obtains the hub's stable
-   `machine_id` from hub initialization output or `host.toml` over a trusted
+1. `orbit init` creates local host identity and records this machine's task-id
+   prefix (`ORB-` on an existing install, e.g. `DE-` elsewhere), chosen once and
+   immutable thereafter ([ADR-0356]).
+2. Only if cross-machine task access is wanted, the operator or an Orbit bootstrap
+   helper writes `~/.orbit/mcp.toml` with an owner machine's SSH alias and expected
+   `machine_id`, obtained from that machine's `host.toml` over a trusted
    out-of-band channel.
-2. The operator or an Orbit bootstrap helper writes `~/.orbit/mcp.toml` with the
-   hub's SSH alias and expected `machine_id` before any registry mutation is
-   attempted.
-3. The spoke opens the SSH-carried MCP link and registers with the hub. The remote
-   process reports its hub `machine_id` during preflight; a mismatch fails before
-   registration.
-4. `orbit workspace init/link` records the workspace owner on the hub and mirrors
-   local role as `owner` or `replica`.
-5. `orbit mcp serve` can now route hub-class tools. Missing or inconsistent state
-   fails closed and never falls back to a spoke-local coordination store.
+3. `orbit workspace init/link` records ownership of this workspace in the
+   machine-local `workspaces.json`.
+4. `orbit mcp serve` can now route coordination tools. Missing ownership state
+   fails closed rather than writing coordination records for a workspace this
+   machine does not own.
 
 V1 does not silently trust the first Orbit process reached through an arbitrary SSH
 alias. OpenSSH host-key verification authenticates the SSH endpoint; the separately
-copied `machine_id` pins the intended Orbit hub. A future interactive TOFU flow may
-display and confirm the first-seen ID, but it is not the unattended default.
+copied `machine_id` pins the intended owner machine. A future interactive TOFU flow
+may display and confirm the first-seen ID, but it is not the unattended default.
 
-Workspace role and transport trust remain separate. A workspace entry stores
-`owner`/`replica` identity; it does not store an SSH target. `mcp.toml` grants a
-route to the hub only and cannot redefine ownership.
+Workspace ownership and transport trust remain separate. A `workspaces.json` entry
+records ownership; it does not store an SSH target. `mcp.toml` grants a transport
+route only and cannot redefine ownership.
 
 ## 2. Process Topology
 
@@ -142,54 +148,50 @@ flowchart LR
     Client["MCP client"] -->|"stdio MCP"| Broker["local orbit mcp serve"]
     Broker --> Router["placement router"]
     Router -->|"local-derived"| Derived["local graph and docs indexes"]
-    Router -->|"owner; when local"| Knowledge["local owner knowledge store"]
-    Router -->|"hub"| HubLink["single SSH MCP hub link"]
-    HubLink --> HubMcp["hub orbit mcp serve --hub"]
-    HubMcp --> Coordination["tasks, frictions, registry, runs, ID allocator"]
+    Router -->|"owner; when local"| Local["local coordination, knowledge, registry"]
+    Router -->|"owner; remote"| OwnerLink["SSH MCP owner link"]
+    OwnerLink --> OwnerMcp["owner-machine orbit mcp serve"]
+    OwnerMcp --> Coordination["tasks (create/read)"]
 ```
 
-There is deliberately no edge from `HubMcp` to a workspace owner. For a
-spoke-owned workspace, current knowledge remains on that owner and reaches other
+There is deliberately no edge between two non-owner machines. For a workspace
+owned elsewhere, current knowledge remains on that owner and reaches other
 machines only through Git replication in v1.
 
-### 2.2 Hub mode
+### 2.2 Owner-machine endpoint
 
 The remote process is explicit and non-recursive:
 
 ```text
-orbit mcp serve --hub [--capabilities agent|operator|runner]
+orbit mcp serve [--capabilities agent|operator]
 ```
 
-Hub mode:
+The owner-machine endpoint:
 
 - accepts registered workspace IDs, not caller filesystem paths;
-- executes hub-placement tools against the coordination plane;
-- allocates global learning/ADR IDs for every workspace;
-- may execute owner knowledge tools only when the hub itself owns that
-  workspace and has the canonical checkout;
-- returns `owner-current-state unavailable from hub` for a spoke-owned workspace;
+- executes coordination tools for the workspaces it owns;
+- refuses any other workspace with the owner named;
 - never opens another MCP/SSH connection; and
 - reserves stdout for MCP frames.
 
-The `--hub` spelling is the public conceptual shape; implementation may use an
-internal subcommand if that better preserves CLI compatibility. Orbit constructs
-the fixed remote command; `mcp.toml` cannot inject arbitrary shell text.
+Orbit constructs the fixed remote command; `mcp.toml` cannot inject arbitrary
+shell text.
 
-[ORB-10268] implements this public spelling directly. Startup requires local hub
-mode and verifies that the opened global store is stamped with the exact local
-`machine_id` before stdio begins; listing and every call repeat that authority
-check. The endpoint filters the canonical registry by exactly one `hub` placement
-and one scalar capability, composes graph recognition without a local graph implementation, accepts only
-stable logical workspace IDs, and invokes the checkout-independent coordination
-executor without constructing `OrbitRuntime` or opening any connector. Local calls
-may derive caller identity from the hub. Every `tools/call` accepted by the fixed
-hub endpoint must carry connector-owned remote session metadata; omission or an
-incomplete identity fails before host preflight rather than being attributed to the
-hub.
+[ORB-10268] implemented this endpoint under the `--hub` spelling. Startup verified
+that the opened global store was stamped with the exact local `machine_id` before
+stdio began; listing and every call repeated that authority check. The endpoint
+filtered the canonical registry by exactly one placement class and one scalar
+capability, composed graph recognition without a local graph implementation,
+accepted only stable logical workspace IDs, and invoked the checkout-independent
+coordination executor without constructing `OrbitRuntime` or opening any connector.
+Every `tools/call` had to carry connector-owned remote session metadata; omission
+or an incomplete identity failed before host preflight. All of that survives; the
+endpoint is being re-specified as the **owner** endpoint with `owner` placement,
+and the `--hub` flag and its machine-level mode requirement are withdrawn.
 
-### 2.3 Hub-local short circuit
+### 2.3 Owner-local short circuit
 
-When the current machine's role is hub, hub-class calls dispatch directly through
+When this machine owns the workspace, coordination calls dispatch directly through
 the checkout-independent coordination executor keyed by stable `workspace_id`.
 That executor opens only global task/friction coordination stores: it does not
 construct `OrbitRuntime`, `WorkspacePaths`, a checkout, owner stores, or local
@@ -207,10 +209,8 @@ For every workspace-scoped tool, the broker resolves:
 WorkspaceRoute {
   workspace_id,
   local_checkout_root?,
-  local_role: owner | replica | absent,
+  owned_locally: bool,
   owner_machine_id,
-  hub_machine_id,
-  local_is_hub,
 }
 ```
 
@@ -223,21 +223,22 @@ Workspace address precedence remains:
 Process cwd is not a fallback. A path selector is accepted only at the local edge:
 the broker validates the checkout's `.orbit/config.yaml` binding, preserves that
 exact root for local-derived and locally owned tools, and resolves its stable
-`workspace_id` for hub tools. The path may be an Orbit-managed worktree and need
-not equal the host registry's base presence-map root.
+`workspace_id` for coordination tools. The path may be an Orbit-managed worktree
+and need not equal the registered base checkout root.
 
 An ID-only selector resolves the machine's registered default checkout when local
-execution is required. Hub-only tools need no local checkout after the ID is known.
-Owner tools execute locally when `local_role=owner`, through the hub link when the
-hub is the declared owner, and otherwise report that no live route exists.
-Local-derived tools require a validated checkout. Missing/ambiguous local state
-fails with an instruction to announce a path rather than silently using the base
-checkout or another machine. Composite tools declare their local prerequisites as
-well: `orbit.search kind=doc|all` requires a local checkout even though some of its
-branches could execute on the hub (§7).
+execution is required. Coordination tools need no local checkout after the ID is
+known. Coordination tools execute locally when this machine owns the workspace.
+Task creation and reads may be sent to the owner machine's MCP; every other
+coordination write fails closed and names the owner. Local-derived tools require a
+validated checkout. Missing/ambiguous local state fails with an instruction to
+announce a path rather than silently using the base checkout or another machine.
+Composite tools declare their local prerequisites as well: `orbit.search
+kind=doc|all` requires a local checkout even though some of its branches could
+execute on the owner machine (§7).
 
-Only `workspace_id` crosses the hub link. Local absolute paths, replica paths, and
-worktree roots never do.
+Only `workspace_id` crosses the owner route. Local absolute paths, replica paths,
+and worktree roots never do.
 
 ### 3.2 Session metadata extension
 
@@ -254,11 +255,7 @@ worktree roots never do.
   "transport": "local",
   "effective_capabilities": ["agent"],
   "origin_session_id": "mcp-...",
-  "mcp_call_id": "mcall-...",
-  "leased_run": {
-    "run_id": "jrun-...",
-    "lease_id": "lease-..."
-  }
+  "mcp_call_id": "mcall-..."
 }
 ```
 
@@ -266,25 +263,24 @@ Only `workspace` comes from the external client's initialize metadata and remain
 untrusted address selector until local validation. The adapter/broker derives stable
 workspace and caller/process identity, transport, and the complete canonical sorted
 effective capability set, then generates the origin session and exactly one call ID
-per call before preflight. `leased_run` is optional and is injected by the runner
-when it launches an executor's local broker; it is not accepted from model-authored
-tool input. A nested hub call strips that field because the v1 SSH principal does
-not bind a spoke-supplied lease claim. Capability is always a
+per call before preflight. A run-lease field is reserved for v2 with execution
+placement ([ADR-0358]) and has no v1 producer. Capability is always a
 set authorized by membership; no scalar ceiling, ordinal, maximum, or selected
 authorizing member is valid.
 
 Standalone, un-enveloped stdio uses trusted `transport=local`, exactly `{agent}`,
 and audit role `unverified`. Caller JSON cannot supply trusted role, agent/model,
-workspace ID, identity, transport, capability, session/call/lease IDs, or
+workspace ID, identity, transport, capability, session/call IDs, or
 task/run/activity/step correlation. Ambient engine provenance is ignored unless the
 existing managed-run marker authenticates the envelope, at which point that managed
 identity wins. [ORB-10228]
 
 In the v1 same-user SSH model, caller `machine_id` is provenance rather than a
-separate authorization credential: SSH authenticates the OS user and the hub
-registry validates that the ID exists. A trusted spoke could spoof another
-registered ID by bypassing the Orbit connector. This is an explicit single-operator
-trust assumption (§12), not a multi-tenant security boundary.
+separate authorization credential: SSH authenticates the OS user, and with no fleet
+registry there is nothing that validates the claimed ID at all. A trusted client
+could supply another machine's ID by bypassing the Orbit connector. This is an
+explicit single-operator trust assumption (§12), not a multi-tenant security
+boundary.
 
 ## 4. Canonical Tool Placement
 
@@ -295,8 +291,7 @@ typed workspace-resolution scope:
 
 ```rust
 enum ToolPlacement {
-    Hub,
-    Owner,
+    Owner,        // runs on the machine that owns the workspace
     LocalDerived,
     Composite,
 }
@@ -318,39 +313,44 @@ Initial classification:
 
 | Tool/domain | Placement | Reason |
 |-------------|-----------|--------|
-| `orbit.task.*` | `hub` | Coordination lifecycle, task artifacts, and task IDs are hub-only |
-| `orbit.friction.*` | `hub` | Mutable triage lifecycle belongs to the coordination plane |
-| `orbit.host.*`, `orbit.workspace.*` | `hub` | Global inventory and ownership bindings live on the hub |
-| `orbit.crew.list`, task crew validation | `hub` | Dispatch consumes the owner-published execution profile (§8) |
-| `orbit.workflow.*`, run observation | `hub` | Canonical dispatch and run records live on the hub |
-| `orbit.run.lease/report/presence` | `hub` | Spoke pollers terminate at the hub queue |
+| `orbit.task.*` | `owner` | Task lifecycle and artifacts live on the owning machine; task IDs use that machine's prefix |
+| `orbit.friction.*` | `owner` | Workspace-scoped triage lifecycle on the owning machine |
+| `orbit.workspace.*` | `local-derived` | Ownership bindings live in the machine-local workspace registry, and enumeration returns only the workspaces this machine owns. This is the one `local-derived` entry whose backing state is machine-local rather than checkout-derived |
+| `orbit.crew.list`, task crew validation | `owner` | Reads the owner machine's local crew config (§8) |
+| `orbit.workflow.*`, run observation | `owner` | Single-host operator broker only in v1 |
 | `orbit.learning.show/update/supersede` | `owner` | Current content/lifecycle belongs to the workspace owner |
-| `orbit.adr.show/update/supersede` | `owner` | Current content/lifecycle belongs to the workspace owner |
-| `orbit.learning.add`, `orbit.adr.add` | `composite` | Hub allocates the ID; owner finalizes locally (§6) |
+| `orbit.learning.add` | `owner` | Allocates the workspace-scoped key and writes locally (§6) |
 | `orbit.auto_task.add/list/show/update/toggle` | `owner` | MCP CRUD manages the Git-versioned definition; it does not mint tasks |
 | Docs/semantic index operations if later exposed | `local-derived` | Rebuildable checkout-derived state |
-| `orbit.search` | `composite` | Hub task branch + local docs + role-aware knowledge branches (§7) |
+| `orbit.search` | `composite` | Owner task/learning branches + local docs (§7) |
+
+`orbit.host.*` fleet inventory and `orbit.run.lease/report/presence` have no v1
+referent and are withdrawn with registration and execution placement ([ADR-0358]).
+`orbit.adr.*` is withdrawn with the ADR store: ADRs are git-committed markdown in
+each feature's `4_decisions.md` ([CONVENTIONS.md §4](../CONVENTIONS.md)).
 
 Routine scheduler state stays local and CLI-only. The auto-task scheduler pass is
 composite in operation but is not an MCP tool-registry entry: it reads definitions
-and the host-local cursor from the selected machine's checkout, performs dedupe
-against hub task state, and creates due tasks on the hub. It must never mint into a
-spoke-local task store. Friction search is not a current `orbit.search` kind; if
-added, it is a hub branch.
+and the host-local cursor from the machine's checkout, dedupes against the owner
+machine's task state, and creates due tasks there. It must never mint tasks for a
+workspace this machine does not own. Friction search is not a current
+`orbit.search` kind; if added, it is an owner branch.
 
-### 4.2 Owner preflight permits only local or hub ownership
+### 4.2 Owner preflight
 
 `Owner` does not mean "find and contact any owner." It means:
 
-1. resolve the declared owner and local role;
-2. if the owner is local, require a validated owner checkout and execute locally;
-3. if the owner is the hub, dispatch through the one hub link;
-4. otherwise return a current-state-unavailable error naming the spoke owner; and
-5. never ask the hub to relay or proxy the call.
+1. resolve the owner from the machine-local `workspaces.json`;
+2. if the owner is this machine, require a validated owner checkout and execute
+   locally;
+3. if the owner is another machine and the call is task creation or a task read,
+   dispatch over the configured owner route;
+4. otherwise refuse, naming the owning `machine_id` and the configured route if one
+   exists; and
+5. never relay the call through a third machine.
 
-This preflight preserves the star topology. A non-owner who needs a new
-learning/ADR files a task on the hub for owner execution, matching host-registry's
-v1 rule.
+A non-owner who needs a new learning files a task on the owner machine, matching
+host-registry's v1 rule.
 
 ### 4.3 Contract ownership and version skew
 
@@ -359,34 +359,32 @@ discovery and graph definitions is the only production schema source. Bridge doe
 not vendor a snapshot, duplicate Pydantic arguments, or recreate errors. Neither
 the generic MCP kernel nor Core owns registry-aware placement/schema policy. The
 local broker advertises schemas from its installed Orbit binary and includes an MCP
-contract revision plus a digest for the hub-routed subset when opening the hub link.
+contract revision plus a digest for the owner-routed subset when opening the owner
+route.
 
-The hub binary may differ in release version only when the contract revision and
-hub-schema digest match. A mismatch fails hub routing before dispatch and names both
-versions/revisions. Local-derived and eligible owner tools may remain usable;
-there is no translation compatibility layer.
+The owner machine's binary may differ in release version only when the contract
+revision and owner-schema digest match. A mismatch fails owner routing before
+dispatch and names both versions/revisions. Local-derived and locally owned tools
+may remain usable; there is no translation compatibility layer.
 
-The connector-private registration method is a negotiated protocol input even
-though it is deliberately absent from the canonical tool registry. Adding
-`orbit/private/register-spoke/v1` therefore advanced the MCP contract revision to
-2; an E3 spoke refuses an E2-only hub before any registration mutation [ORB-10271].
-The F1 knowledge allocator follows the same connector-private rule: its typed
-request is absent from the canonical registry and `tools/list`, carries only stable
-workspace/kind/correlation identity, and advances the private connector contract to
-revision 3. A revision-2 peer therefore fails negotiation before allocation, and
-the method becomes reachable from public composite creation only when F3 activates
-and cuts over that path [ORB-10272].
+Both connector-private methods are withdrawn. `orbit/private/register-spoke/v1`
+goes with the registration protocol ([ADR-0358]) and
+`orbit/private/allocate-knowledge-id/v1` with the global knowledge allocator
+([ADR-0357]). The contract revision they advanced (to 2 and 3 respectively) is
+documented in the conformance pin as history; v1 negotiates no private connector
+method.
 
-## 5. Hub Transport and Trusted Configuration
+## 5. Owner-Machine Transport and Trusted Configuration
 
-### 5.1 `mcp.toml` describes one hub
+### 5.1 `mcp.toml` describes owner routes
 
-Trusted configuration is machine-local and names exactly one stable hub:
+Trusted configuration is machine-local and names zero or more stable owner
+machines:
 
 ```toml
-# ~/.orbit/mcp.toml on a spoke
+# ~/.orbit/mcp.toml
 
-[hub]
+[[owner]]
 machine_id = "hm_41a92e70"
 transport = "ssh"
 host = "dk1"                  # OpenSSH Host alias
@@ -395,77 +393,77 @@ allowed_capabilities = ["agent", "operator"]
 
 Rules:
 
-- `machine_id` must equal the hub identity recorded at machine initialization/
-  registration. `mcp.toml` cannot select a different coordination plane.
+- `machine_id` must equal the owner machine's identity as recorded in
+  `workspaces.json`. `mcp.toml` cannot redefine ownership.
 - `host` is an OpenSSH alias only. V1 accepts no arbitrary SSH command, remote
   shell fragment, extra environment, or per-repository override.
 - `allowed_capabilities` is a non-empty, non-hierarchical trust set. A client
   cannot request a capability absent from the set; allowing `operator` does not
-  grant `runner`, and allowing `runner` does not grant `agent` or `operator`.
-- Repository `.orbit/config.toml` cannot change the hub, SSH target, or capability.
-- Hub rename does not break the mapping because `machine_id` is stable.
-- On the hub machine, no `[hub]` transport entry is required; dispatch short-
-  circuits locally.
+  grant `agent`, and allowing `agent` does not grant `operator`.
+- Repository `.orbit/config.toml` cannot change a route, SSH target, or capability.
+- An owner rename does not break the mapping because `machine_id` is stable.
+- For workspaces this machine owns, no transport entry is required; dispatch
+  short-circuits locally.
 
-[ORB-10268] freezes the on-disk boundary as one optional `[hub]` table under the
-machine-global Orbit root. The whole document and table reject unknown fields;
-transport is exactly `ssh`; aliases are argument-safe OpenSSH host aliases; and the
-allowed list is non-empty, duplicate-free, and typed as `agent|operator|runner`.
-Repository, cwd, and environment decoys cannot override this file. A spoke missing
-the route, requesting a capability outside the exact set, or pointing at itself
-fails before any transport is opened.
+[ORB-10268] froze the on-disk boundary as one optional `[hub]` table under the
+machine-global Orbit root; v1 restates that as zero or more `[[owner]]` entries in
+the same file. The rest of the frozen boundary is unchanged: the whole document and
+every entry reject unknown fields; transport is exactly `ssh`; aliases are
+argument-safe OpenSSH host aliases; the allowed list is non-empty and duplicate-free
+and typed as `agent|operator`. Repository, cwd, and environment decoys cannot
+override this file. A client missing the route, requesting a capability outside the
+exact set, or pointing at itself fails before any transport is opened.
 
-There is no target per workspace and no owner target. Adding a workspace or moving
-ownership requires no MCP transport change.
+The route target is the owner machine, so moving ownership between machines changes
+which entry a client uses. Routes are per machine, not per workspace: a machine
+holding replica checkouts of workspaces owned by several others names each owner
+once.
 
 ### 5.2 SSH-carried stdio MCP
 
-The spoke broker starts a fixed command equivalent to:
+The client broker starts a fixed command equivalent to:
 
 ```text
-ssh dk1 orbit mcp serve --hub --capabilities operator
+ssh <owner-alias> orbit mcp serve --capabilities operator
 ```
 
 and relays MCP frames over stdin/stdout. Orbit performs the handshake, verifies the
 contract revision, and sends stable workspace/caller context. SSH owns
 authentication, encryption, host verification, keys, and remote OS authorization.
-The hub link opens no listening port and invents no credential of its own. §5.3
+The owner link opens no listening port and invents no credential of its own. §5.3
 defines the one listener Orbit does open; it is loopback-bound and reached through
 the same SSH posture, so the delegation above is unchanged ([ADR-0350]).
 
-One hub link is cached per effective capability with a bounded idle lifetime. A
-later call may reconnect after failure, but an interrupted mutation is never
-retried automatically (§9).
+One owner link is cached per target machine and effective capability with a bounded
+idle lifetime. A later call may reconnect after failure, but an interrupted mutation
+is never retried automatically (§9).
 
 The worker queue is bounded at admission. A full or disconnected queue is a
-pre-handoff `hub_unavailable`; once admitted, a call may wait behind an in-flight
+pre-handoff `owner_unavailable`; once admitted, a call may wait behind an in-flight
 request and then receives the result of the worker's bounded initialize/request/
 close operations. Queue residence has no separate expiry and the synchronous
 caller has no shorter deadline that could discard a definitive result.
 
-Bootstrap registration uses one already-negotiated peer and exactly one capability
-from local `allowed_capabilities`; it does not require or grant operator. The private
-`orbit/private/register-spoke/v1` request is not advertised and cannot be reached
-through ordinary `tools/call`. Until it succeeds, the hub rejects every ordinary
-remote request before definition lookup or domain mutation. Afterward, every call
-rechecks the current registered host name and active status, so retirement
-invalidates an already-open peer on its next call. Complete responses carry only a
-sanitized snapshot; partial responses name the last committed stage, and only a
-definitive complete response may refresh the spoke cache [ORB-10271].
+There is no bootstrap registration step. The private
+`orbit/private/register-spoke/v1` handshake, the active-registered-caller recheck on
+every ordinary call, and the retirement-invalidates-an-open-peer behaviour landed in
+[ORB-10271] and are withdrawn with the registration protocol ([ADR-0358]); a client
+opens a route and calls. The staged-result and definitive-success discipline from
+that task survives wherever a multi-stage remote operation remains.
 
 ### 5.3 Owned tunnel and the checkoutless client
 
-§5.1 and §5.2 describe how a **spoke** reaches the hub. A spoke has a checkout, so
-its graph, docs, and search must resolve against the branch its agent is working
-on, and placement (§4) exists to guarantee that.
+§5.1 and §5.2 describe how a client with a checkout reaches an owner machine. Such
+a client has graph, docs, and search that must resolve against the branch its agent
+is working on, and placement (§4) exists to guarantee that.
 
 A second client class does not fit that shape. A **checkoutless client** is an MCP
 client with no local checkout that participates in this design — an off-box
 orchestrator whose clone, if it has one, is a read mirror, and whose every
-workspace lives on the remote machine. It is not a spoke: it owns no workspace,
-registers no host, and holds no local-derived state. Placement routing therefore
-protects nothing for it and only makes the canonical surface unreachable, which is
-what forces the re-declared parity layer §10 retires.
+workspace lives on the remote machine. It owns no workspace and holds no
+local-derived state. Placement routing therefore protects nothing for it and only
+makes the canonical surface unreachable, which is what forces the re-declared
+parity layer §10 retires.
 
 For this client, **reachability is the scarce resource, not tool schemas**. An
 orchestrator that cannot execute on the machine routes trivial reads through full
@@ -479,7 +477,7 @@ remote machine ([ADR-0350]):
 
 ```text
 # on the remote machine
-orbit mcp serve --listen 127.0.0.1:<port> [--capabilities agent|operator|runner]
+orbit mcp serve --listen 127.0.0.1:<port> [--capabilities agent|operator]
 
 # on the client machine — what the MCP client registers
 orbit mcp serve --mode remote <ssh-alias>
@@ -520,13 +518,13 @@ mechanism. Its properties:
 #### Calls resolve remotely, and only for this client class
 
 Every placement class resolves on the remote, which is correct precisely because
-the client holds no local-derived state. This narrows [ADR-0228] to clients that
-do hold such state; it does not supersede it, and spoke routing is unchanged.
+the client holds no local-derived state. This narrows the placement rule to clients
+that hold local-derived state; owner-machine routing is defined in §4.2.
 
 **The mode refuses to start where a local checkout exists.** Without that guard a
-spoke could register it and receive another machine's branch state as its own,
-surfacing as wrong answers rather than as an error. The guard is the load-bearing
-half of the decision, not a convenience.
+machine with a checkout could register it and receive another machine's branch state
+as its own, surfacing as wrong answers rather than as an error. The guard is the
+load-bearing half of the decision, not a convenience.
 
 Nothing re-declares a schema or reshapes a response: both ends are the same build,
 so the drift §1 attributes to Bridge is structurally absent rather than tested
@@ -588,12 +586,13 @@ rebuild.
 
 #### What this is not
 
-The tunnelled listener is **not** a hub link and must not acquire hub-link
-responsibilities: no placement routing, no workspace-ownership resolution, no
-spoke registration, no `mcp.toml` entry. A checkoutless client does not
-participate in the star topology, so §1.1's invariants — one cross-machine
-destination, no spoke-to-spoke route — describe spokes specifically and are
-unaffected.
+The tunnelled listener carries no placement routing and resolves everything on the
+remote; it takes no `mcp.toml` entry and performs no workspace-ownership
+resolution. It is the same SSH posture §5.1 configures, applied to a tunnel rather
+than a spawned process — there is no separate star topology left to protect. What
+[ADR-0350] recorded as "deliberately not a hub link" now reads as: the tunnel is a
+transport, and §4.2's ownership preflight is a property of the machine that serves
+the call, not of the pipe that carried it.
 
 `crates/orbit-mcp/src/tcp.rs` already implements the listener with one server
 instance per connection ([ORB-10690], [ADR-0348]). [ORB-10710] adds the CLI
@@ -612,9 +611,9 @@ whole implementation:
   frames and knows nothing about tools, so a response is byte-identical to the
   same call made against the listener directly — the drift §1 attributes to
   Bridge is absent by construction rather than by test.
-- Two signals decide the guard: a registered checkout whose `repo_root` still
-  exists, and a non-global workspace `.orbit/` found by walking up from the
-  working directory. A registry row pointing at a deleted tree is stale, not
+- Two signals decide the guard: a checkout registered in `workspaces.json` whose
+  `repo_root` still exists, and a non-global workspace `.orbit/` found by walking
+  up from the working directory. A registry row pointing at a deleted tree is stale, not
   evidence; refusing on it would strand a genuinely checkoutless client.
 - **No `McpTransport` variant is added.** The listener already stamps the session
   it serves as trusted-local, and relaying does not change whose session it is.
@@ -628,25 +627,27 @@ whole implementation:
 
 | Artifact | Current write path | Current read path | Replica/derived path |
 |----------|--------------------|-------------------|----------------------|
-| Task, review thread, task artifact | Hub MCP (in-process on hub) | Hub MCP | None |
-| Friction | Hub MCP (in-process on hub) | Hub MCP | None |
-| Learning, ADR — owner machine | Hub ID allocation + owner finalize | Owner checkout | Git is downstream replication |
-| Learning, ADR — hub-owned workspace from a spoke | Hub MCP | Hub MCP | Optional local Git replica |
-| Learning, ADR — non-owner of a spoke-owned workspace | Unsupported | No live current route | Explicit Git replica after pull/reindex |
+| Task, review thread, task artifact | Owner MCP (in-process when locally owned) | Owner MCP | None |
+| Friction | Owner MCP (in-process when locally owned) | Owner MCP | None |
+| Learning — owner machine | Owner-local write, key `(workspace_id, learning_key)` | Owner checkout | Git is downstream replication |
+| Learning — non-owner checkout | Refused, owner named | No live current route | Explicit Git replica after pull/reindex |
 | Code graph | Local-derived | Local-derived | Local graph index |
 | Docs search | Local-derived | Local-derived | Local docs/semantic index |
 | Routine cursor/pause | Local CLI | Local CLI | Local scheduler store |
 
-This is the honest cross-machine read contract. Coordination artifacts are read
-through the hub. Current knowledge does **not** flow across owners in v1: the hub
-serves it only when the hub owns that workspace, and never proxies to a spoke owner.
-Every other machine reads a pulled Git replica explicitly or routes actionable work
-as a task to the owner. Graph/docs remain local.
+This is the honest cross-machine read contract. Coordination artifacts are read on
+the owner machine. Current knowledge does **not** flow across owners in v1: no
+machine proxies another owner's current knowledge. Every other machine reads a
+pulled Git replica explicitly or routes actionable work as a task to the owner.
+Graph/docs remain local. ADRs no longer appear in this table at all — they are
+git-committed markdown in each feature's `4_decisions.md` and travel by `git pull`
+like any other file ([ADR-0357], [CONVENTIONS.md §4](../CONVENTIONS.md)).
 
-Hub friction records are partitioned by the composite `(workspace_id,
-friction_id)` key in the host-global store after [ORB-10680] ([ADR-0345]), so
-the logical workspace ID alone scopes every hub read and write and identical
-IDs in two workspaces coexist. `<global_root>/frictions/workspaces/<workspace_id>`
+Friction records on the owning machine are partitioned by the composite
+`(workspace_id, friction_id)` key in the host-global store after [ORB-10680]
+([ADR-0345]), so the logical workspace ID alone scopes every read and write and
+identical IDs in two workspaces coexist. This is the precedent [ADR-0357]
+generalizes to learnings. `<global_root>/frictions/workspaces/<workspace_id>`
 remains the file tree that carries the tag taxonomy and, until the one-time
 import commits, the legacy records to import. Legacy checkout-local state is
 still copied to a staging tree and atomically published before a separate
@@ -659,131 +660,81 @@ SQLite is the sole live source and legacy files are read-only evidence.
 
 `orbit.task.artifact.put` completes capability, workspace, and placement
 preflight before opening the caller-local source. It reads at most the typed
-content limit on the spoke and sends a connector-private
+content limit on the calling machine and sends a connector-private
 `{path, media_type, content}` byte payload under the same canonical tool/audit name.
-The hub accepts that preloaded form only on authenticated `ssh-mcp`; caller-local
-paths never cross the coordination boundary. The public `orbit.task.update` schema
-does not accept inline artifacts, so this private form is reachable only through
-`orbit.task.artifact.put`. Hub friction responses likewise omit their private
-backing-file path [ORB-10271] — after [ORB-10680] that field is the legacy
-evidence pointer of an imported record, and `null` for anything written since,
-but it stays hub-private either way.
+The owner machine accepts that preloaded form only on authenticated `ssh-mcp`;
+caller-local paths never cross the coordination boundary. The public
+`orbit.task.update` schema does not accept inline artifacts, so this private form is
+reachable only through `orbit.task.artifact.put`. Friction responses likewise omit
+their private backing-file path [ORB-10271] — after [ORB-10680] that field is the
+legacy evidence pointer of an imported record, and `null` for anything written
+since, but it stays owner-private either way.
+
+**`orbit.task.artifact.put` is inside the v1 cross-machine task surface.** It is a
+task write, and the v1 rule admits task create, read, and update against a remote
+owner (§4.2); excluding artifact put would leave a task creatable off-owner but not
+completable. Every other coordination write — friction lifecycle, workflow
+dispatch, knowledge authoring — is refused off-owner.
 
 ### 6.2 Knowledge creation
 
-#### F1 dormant allocation substrate
+> **Withdrawn.** This section previously specified two mechanisms: an *F1 dormant
+> allocation substrate* ([ORB-10272] — hub-global monotonic ADR/learning sequences,
+> an immutable allocation ledger, pre-activation reconciliation, and a
+> dormant/active authority flip) and an *F3 composite creation target*
+> ([ORB-10330] — allocate-at-the-hub then finalize-in-the-owner-checkout, with ID
+> gaps as the accepted cost). Both are withdrawn: [ADR-0357] keys knowledge by
+> `(workspace_id, artifact_key)`, so there is no allocator to activate and no
+> composite to compose. Public issuance never activated, so no ID was ever issued
+> and nothing needs renumbering.
 
-[ORB-10272] installs Remote feature migration v2 in the hub's config-resolved
-`orbit.db`. It creates independent monotonic ADR and learning sequences, an
-immutable allocation ledger, per-workspace reconciliation state, and a dormant
-authority marker. Merely opening Remote applies the schema but never scans files,
-advances a sequence, or activates authority; standalone/worktree allocators and
-the existing creation paths continue unchanged.
+Learning keys are allocated per workspace by the owning machine; there is no
+cross-workspace sequence, no allocation ledger, and no ID gap. `orbit.learning.add`
+is an `owner` operation that writes atomically in the owner's exact checkout,
+reusing the existing local file/index atomicity and rollback boundary.
 
-Before activation, the hub validates every registered workspace's complete set of
-hub-local migration sources: all ADR/learning files in valid lifecycle states and
-all legacy allocation rows regardless of reserved, unfinalized, or abandoned
-status. A missing source fails precondition and names its workspace without
-contacting the owner. All cross-workspace `(kind, id)` collisions are collected and
-reported with their workspace/source evidence before any sequence, ledger,
-reconciliation, or audit mutation; no ID is renumbered. The final reseed and
-authority flip run under one hub lock and commit as one forward-only, restart-safe
-transition. A workspace registered afterward remains explicitly
-knowledge-ineligible until its complete local sources reconcile under the same
-lock. A standalone host cannot enter hub authority.
-
-Once active, one successful connector-private allocation transaction advances only
-the requested kind, appends the immutable request-identity ledger row, and writes
-one canonical hub audit with trusted caller/process provenance. `mcp_call_id` is
-unique; an exact replay returns the original result only when the full request
-identity matches, while a mismatch fails without advancing either sequence.
-Internal outcome probes can read by correlation or `(workspace, kind, id)`.
-Invalid workspace/kind/correlation, ineligible workspace, and overflow also leave
-both sequences unchanged. Requests and results contain no checkout or owner path.
-
-F1 exposes no public agent allocation tool, no reservation/finalize/release API,
-and no owner proxy. F3 alone activates public issuance and cuts the following
-composite create flow over to the hub sequence.
-
-#### F3 composite creation target
-
-[ORB-10330] implements and tests this composite shape behind an inactive cutover
-gate as unit F2: the owner file stores gain a `finalize_preallocated` path (hub
-id in, no local allocation/abandon/retry, non-authoritative body-path
-projection, deterministic collision failure), and the broker composition pairs
-one hub allocation with one owner finalization and rejects replica/foreign-spoke
-owners before allocation. F3 (ORB-10274) alone activates hub issuance and cuts
-the public `orbit.learning.add` / `orbit.adr.add` callers over to the flow below;
-until then they stay on the standalone compatibility path.
-
-`orbit.learning.add` and `orbit.adr.add` are composite owner operations:
-
-1. resolve the workspace owner;
-2. if the owner is local, request the next global ID from the hub, then finalize in
-   the exact local owner checkout;
-3. if the owner is the hub, send one hub call that allocates and finalizes in the
-   hub's owner checkout;
-4. if another spoke owns the workspace, reject before allocation; and
-5. correlate allocation/finalize audit with one `mcp_call_id`.
-
-Both successful paths reuse the existing local file/index atomicity and rollback
-boundary on the machine that owns the checkout.
-
-This is not a reservation protocol. The allocator advances once and returns an ID;
-there is no pending reservation row, lease, expiry, abandon, or remote finalize.
-Allocation and local finalization are seconds apart on the sole writer. If local
-finalization fails after allocation, the ID is consumed and the sequence has a gap.
-Gaps are valid and safer than inventing distributed commit.
-
-A non-owner add for a spoke-owned workspace fails before allocation and names the
-owner. The suggested recovery is a hub task placed on that owner, not an MCP route
-to it. A spoke working on a hub-owned workspace is not this case: its call executes
-on the hub because the hub is the owner.
-
-That rejection governs the agent-facing CLI/MCP mutation surface. It does not
+A learning add for a workspace this machine does not own is refused and names the
+owner; the recovery is a task filed on the owner machine, not an MCP route to it.
+That refusal governs the agent-facing CLI/MCP mutation surface only. It does not
 remove host-registry's explicit human manual-execution escape hatch: a human may
-allocate the global ID at the hub, author the narrative file on a branch, and let
-the repository gate arbitrate the PR. That path does not make the replica's Orbit
-store an author and is not exposed as non-owner `learning.add`/`adr.add`; see
-[host-registry/2_design.md §4–5](../host-registry/2_design.md).
+author the knowledge file on a branch in the owner's checkout and let the
+repository gate arbitrate the PR. That path does not make a replica's Orbit store
+an author; see [host-registry/2_design.md §4–5](../host-registry/2_design.md).
 
 ### 6.3 Knowledge lifecycle and sidecars
 
-Update/supersede/show execute on the owner. When the hub owns the workspace, a spoke
-can reach those same local operations through the hub link because hub and owner are
-the same machine. Otherwise the hub returns `current knowledge owned by <host-id>;
-no live route in v1`.
+Update/supersede/show execute on the owner machine. Elsewhere the call is refused
+with `current knowledge owned by <machine>; no live route in v1`.
 
 The automatic learning sidecar follows the same rule:
 
-- owner: query current local learnings;
-- spoke working on a hub-owned workspace: query current learnings through the hub;
-- non-owner of a spoke-owned workspace: disabled by default with an explicit
-  availability note; a future freshness-checked replica mode may opt in.
+- workspace owned locally: query current local learnings;
+- workspace owned elsewhere: disabled by default with an explicit availability
+  note; a future freshness-checked replica mode may opt in.
 
 It never injects a stale replica silently.
 
 ## 7. Role-Aware `orbit.search`
 
-`orbit.search` currently searches task, doc, ADR, and learning branches and merges
-them round-robin. The broker preserves in-kind ranking and total-limit fairness but
-routes branches by role:
+`orbit.search` searches task, doc, and learning branches and merges them
+round-robin. The `adr` kind is retired with the ADR store — ADRs are ordinary
+design-doc markdown and are found by the `doc` branch ([ADR-0357]). The broker
+preserves in-kind ranking and total-limit fairness but routes branches by
+ownership:
 
 | Search branch | Route |
 |---------------|-------|
-| Task or task semantic-neighbor | Hub |
+| Task or task semantic-neighbor | Owner machine |
 | Doc | Exact local checkout |
-| ADR/learning, caller is owner | Current owner index |
-| ADR/learning, hub owns workspace | Hub current index |
-| ADR/learning, caller is replica of spoke-owned workspace | No current route; explicit replica only |
+| Learning, workspace owned locally | Local current index |
+| Learning, workspace owned elsewhere | No current route; explicit replica only |
 
-Checkout requirements are also explicit. `kind=task` is hub-only and works from an
-ID-only operator session. `kind=adr|learning` can work without a local checkout only
-when the hub owns the workspace. `kind=doc` and `kind=all` require a validated local
-checkout; without one, the broker fails before dispatch and asks the caller to
-provide a path or choose a narrower hub/owner-readable kind. V1 has no implicit doc
-omission and never returns a partial `kind=all` result merely because the operator
-session has no checkout.
+Checkout requirements are also explicit. `kind=task` resolves on the owner machine
+and works from an ID-only operator session. `kind=learning` requires the owning
+machine. `kind=doc` and `kind=all` require a validated local checkout; without one,
+the broker fails before dispatch and asks the caller to provide a path or choose a
+narrower owner-readable kind. V1 has no implicit doc omission and never returns a
+partial `kind=all` result merely because the operator session has no checkout.
 
 Knowledge search adds an explicit input:
 
@@ -791,12 +742,12 @@ Knowledge search adds an explicit input:
 knowledge_read = current | replica | omit
 ```
 
-- `current` is the default. Explicit `kind=adr|learning` fails when the caller is
-  neither owner nor using a hub-owned workspace.
+- `current` is the default. Explicit `kind=learning` fails when this machine does
+  not own the workspace.
 - `replica` is opt-in and requires a local checkout plus a successful
   reindex-from-files. Results are marked `consistency=replica` with owner ID,
   indexed commit, and index timestamp.
-- `omit` is accepted only for `kind=all`; it excludes ADR/learning branches and
+- `omit` is accepted only for `kind=all`; it excludes the learning branch and
   records that exclusion in response metadata.
 
 For `kind=all`, the broker either has a current knowledge route, receives explicit
@@ -805,7 +756,7 @@ silently drops knowledge branches and presents the remainder as complete. When a
 requested branches resolve, the existing round-robin merge and total limit apply.
 
 Response routing metadata names the workspace ID, branch placement, machine IDs,
-and knowledge consistency. Absolute paths never cross the hub link.
+and knowledge consistency. Absolute paths never cross the owner route.
 
 ## 8. Capability Sets, Discovery, and Dispatch
 
@@ -814,84 +765,52 @@ Placement answers *where*; capability answers *whether*:
 | Capability | Intended holder | Surface |
 |------------|-----------------|---------|
 | `agent` (default) | Ordinary coding agent | Safe task/knowledge/search/graph/auto-task tools plus read-only crew discovery |
-| `operator` | Cowork orchestrator or trusted operator | `agent` plus workspace/host discovery, `workflow.ship`, and run observation |
-| `runner` | Registered spoke poller | Presence/profile refresh, lease, heartbeat, and report for that machine's runs only |
+| `operator` | Cowork orchestrator or trusted operator | `agent` plus workspace discovery, `workflow.ship`, and run observation |
 
-`operator` does not imply `runner`, and `runner` does not imply `agent`. Destructive
-administration remains CLI-only. The effective hub surface is the intersection of
-the requested set, local `mcp.toml` ceiling, and hub policy.
+A `runner` capability is deferred to v2 with execution placement ([ADR-0358]); it
+has no v1 referent because there is no registration, presence, or lease to hold.
 
-The poller and the executing agent use separate logical sessions. The daemon leases,
-heartbeats, and reports through a `runner`-capability session. After lease, the
-executor launches the ordinary local broker with an `agent`-capability session,
-bound in audit/session context to the leased `run_id` and `machine_id`; that session
-performs task status, review-thread, artifact, and eligible knowledge operations.
-The two sessions may reuse the same SSH host identity, but capability filtering and
-audit remain independent. A non-owner executor still cannot author knowledge for a
-spoke-owned workspace.
+`operator` does not imply `agent`, and `agent` does not imply `operator`.
+Destructive administration remains CLI-only. The effective surface is the
+intersection of the requested set, the local `mcp.toml` ceiling, and the owner
+machine's policy.
 
-Four independent routing choices remain separate:
+Three independent routing choices remain separate:
 
 | Concern | Source | Meaning |
 |---------|--------|---------|
 | Caller model | MCP write provenance (`model`) | Which agent family made the call |
-| MCP capability | Client request ∩ trust ceiling ∩ hub policy | Which tools the session may use |
-| Execution crew | Hub execution profile plus task `crew` | Which provider/model runs the task |
-| Execution host | Hub host registry plus task `host` | Which registered machine leases the run |
+| MCP capability | Client request ∩ trust ceiling ∩ owner policy | Which tools the session may use |
+| Execution crew | The owner machine's local crew config plus task `crew` | Which provider/model runs the task |
 
-### 8.1 Owner-published execution profile
+Execution host was a fourth row, selected from the hub host registry plus a per-task
+`host`. Both the selector and the registry are deferred to v2; a run executes on the
+workspace's owner.
 
-The hub must validate crew and dispatch without contacting the owner. Therefore the
-workspace owner publishes a small **execution profile** to the hub during register/
-poll and whenever relevant config changes. The landed C2 contract ([ORB-10257])
-freezes `ExecutionProfileV1` to `schema_version`, stable workspace/owner IDs, owner
-`observed_at`, `config_digest`, default crew, sorted normalized effective crew
-entries (name, canonical provider, model, concrete backend, description, tags), and
-ship mode/base branch plus `ship_closure_digest`. Hub-owned generation and
-`received_at` remain in the stored envelope rather than the payload.
+### 8.1 Crew validation reads the owner machine's local config
 
-The config digest covers only the canonical crew/mode/base semantics. The
-independent closure digest covers the versioned ship contract,
-execution-selected materialized task-auto/gate/PR/local jobs, and every reachable
-named or recovery activity after execution precedence, inlining, validation, and
-`backend:auto` resolution. Neither projection stores paths, raw assets, environment
-values, secrets, commands, or repository content.
+> **Withdrawn.** This section previously specified an *owner-published execution
+> profile*: the workspace owner pushed a frozen `ExecutionProfileV1` (config digest
+> and ship-closure digest, [ORB-10257]) to the hub during register/poll, and the hub
+> validated crew and dispatch from that projection without contacting the owner
+> ([ORB-10276]). Publication rode the registration/poll protocol and had a hub to
+> receive it; neither exists in v1 ([ADR-0358]).
 
-Publication is authenticated as the current owner and compare-and-set against the
-hub generation. An identical semantic payload refreshes observation/receipt
-freshness without advancing generation; a semantic change advances it atomically.
-The hub rejects stale generation, non-owner publication, stale/future/older owner
-observations, execution-affecting environment overrides, and unknown or ambiguous
-provider/backend resolution. Freshness is based on hub `received_at`, never the
-owner's clock.
+In v1 crew validation runs where the workspace is owned, so it reads that machine's
+local crew config directly and needs no projection, no generation counter, and no
+freshness gate. `orbit.crew.list`, task crew validation, and workflow preflight all
+resolve against the same local config.
 
-This is one-way spoke→hub coordination metadata, not repo content and not a live
-proxy. `orbit.crew.list`, task crew validation, and workflow preflight all read the
-same projection. Missing/stale owner profile fails dispatch with the owner named;
-the hub never asks the owner synchronously.
-
-- Implemented by [ORB-10276] (Unit H1): one `orbit-remote` execution-profile
-  projection service — an injected clock and one service-owned freshness TTL over
-  C2's stored owner projection — backs both `orbit.crew.list` discovery (sanitized
-  workspace/owner identity, the shared `RegistryProfileV1` freshness/generation
-  envelope, default crew, and the sorted name/provider/model/backend/description/tags
-  crew projection; missing and stale profiles stay inspectable but never
-  dispatch-eligible) and explicit task-crew validation. A non-empty `crew` on task
-  add/update requires the resolved owner's current profile and validates against its
-  effective crews before allocation/mutation; an omitted or cleared crew is accepted
-  without a profile. Standalone task validation and owner-local auto-task CRUD keep
-  their local-runtime crew registry. The returned `ValidatedCrewProfile` captures the
-  stored profile, resolved crew, generation, config digest, and ship-closure digest;
-  H3 later persists the immutable dispatch snapshot on run admission and I1 carries
-  and revalidates that lineage during leasing.
-
-The publication/ownership/presence/freshness service, profile construction, and
-registry persistence live in `orbit-remote`. Remote combines the workspace binding
-with Core's neutral execution-environment snapshot and ship-closure digest. Its
-`RemoteStore` owns snapshot SQL, row codecs, revision advancement, and the single-
-transaction sanitized query over Store's generic connection and transaction
-kernel. This one-way feature boundary prevents Core, Store, or MCP from depending
-back on remote registry/routing policy.
+Two pieces of [ORB-10257] survive the withdrawal and are worth keeping intact,
+because they are transport-independent: `config_digest` hashes domain-separated
+canonical compact JSON of the normalized crew/config and effective mode/base branch,
+and `ship_closure_digest` separately hashes the execution-selected, fully
+materialized four-job ship closure with its reachable named and recovery activities,
+resolved backends, and versioned static ship contract. Neither contains identities,
+clocks, paths, raw config/assets, or environment values. `orbit_remote::build_execution_profile_v1`
+still constructs them; only the publication half is withdrawn. See
+[host-registry/2_design.md §3](../host-registry/2_design.md) for the dormant
+projection tables.
 
 ### 8.2 Operator tools and placement
 
@@ -904,23 +823,23 @@ Bridge's high-level workflow tools move into Orbit:
 | `workflow_run_status` | `orbit.workflow.run.show` |
 | `workflow_run_list` | `orbit.workflow.run.list` |
 
-The `orbit.host.list` MCP discovery tool was removed in [ORB-10332]; its data — stable
-machine identity, labels, status, last-seen, and workspace presence — is still available
-through the dedicated human `orbit host list` CLI command. `orbit.workspace.list` returns
-owner and profile freshness without exposing spoke absolute paths. Its MCP-only schema,
-policy, and sanitized snapshot projection live in `orbit-remote`; the human `orbit host list`
-and `orbit workspace list` commands remain separate CLI surfaces.
+The `orbit.host.list` MCP discovery tool was removed in [ORB-10332], and the
+`orbit host list` CLI command it deferred to has nothing to enumerate without a
+fleet inventory ([ADR-0358]). `orbit.workspace.list` returns the workspaces this
+machine owns, from the machine-local registry, without exposing absolute paths. Its
+MCP-only schema, policy, and sanitized projection live in `orbit-remote`; the human
+`orbit workspace list` command remains a separate CLI surface.
 
-`orbit.workflow.ship` receives explicit task IDs. It resolves task `host` through
-the hub registry; unset defaults to workspace owner. It records immutable requested/
-actual placement from [host-registry/2_design.md §4](../host-registry/2_design.md).
-The hub then waits as a mailbox. A selected spoke leases its run; MCP bridge never
+`orbit.workflow.ship` receives explicit task IDs and executes on the owner machine's
+local runtime. Placement selection, immutable requested/actual placement, the
+mailbox posture, and leasing are deferred to v2
+([host-registry/2_design.md §4](../host-registry/2_design.md)); MCP bridge never
 pushes or relays execution.
 
 V1 is submit + observe. Cancellation and automatic backlog discovery are excluded.
 Generic pipeline invoke/wait tools are not compatibility targets for this surface.
 
-[ORB-10534] implements the single-host slice as four hub-class, operator-only
+[ORB-10534] implements the single-host slice as four owner-class, operator-only
 tools: `orbit.workflow.ship`, `orbit.workflow.run.show`,
 `orbit.workflow.run.list`, and `orbit.workflow.run.resume`. A deliberate local
 operator obtains that surface with `orbit mcp serve --capabilities operator`;
@@ -954,37 +873,35 @@ submission adapter inherits it by construction ([ADR-0303]). Auto
 (backlog-discovery) submission names no tasks and is not keyed by the guard. The
 equivalence test above consequently no longer depends on call ordering.
 
-The fixed checkoutless `--hub` endpoint cannot yet execute these checkout-backed
-workflow tools, and remote spoke-to-hub execution is therefore deferred. This is
-an explicit current limitation rather than a fallback to process cwd or a local
-spoke checkout; the single-host operator broker is the supported MCP execution
-path until hub-side run admission owns a checkout-independent execution service.
+The fixed checkoutless endpoint cannot yet execute these checkout-backed workflow
+tools, so remote workflow execution over the owner route is deferred. This is an
+explicit current limitation rather than a fallback to process cwd or another
+machine's checkout; the local operator broker is the supported MCP execution path
+until owner-side run admission owns a checkout-independent execution service.
 
 ## 9. Audit, Identity, and Uncertain Outcomes
 
-Hub-class calls record one canonical action audit on the hub with:
+Owner-routed calls record one canonical action audit on the owner machine with:
 
 - tool name and workspace ID;
-- process host (hub) and caller host (originating broker) machine IDs/names;
+- process host (owner machine) and caller host (originating broker) machine
+  IDs/names;
 - transport (`local` or `ssh-mcp`) and the complete effective capability set;
 - caller model provenance, origin session ID, and `mcp_call_id`; and
-- success/failure or preflight denial before the result crosses the hub link.
+- success/failure or preflight denial before the result crosses the owner route.
 
 The legacy audit `host`, `session_id`, and `job_run_id` retain their meanings.
 `origin_session_id` is additive, and every outcome for one call shares its one
-`mcp_call_id`. A trusted leased run fills empty `job_run_id` or must match it; only
-`lease_id` is added, never a duplicate run column.
+`mcp_call_id`.
 
-Local-derived and locally owned calls audit locally. Composite knowledge creation
-has two correlated events: hub ID allocation and owner finalize. The broker does
-not duplicate a successful hub domain audit; it records local transport/preflight
-failures separately.
+Local-derived and locally owned calls audit locally. Knowledge creation records one
+owner-local event. The broker does not duplicate a successful remote domain audit;
+it records local transport/preflight failures separately.
 
-If SSH drops after a hub mutation is dispatched, the outcome is unknown and the
-broker returns `mcp_call_id`; it never retries. The caller inspects hub state/audit.
-For knowledge creation, a confirmed ID followed by local failure consumes the ID.
-If allocation outcome itself is unknown, retry may consume another ID; gaps remain
-valid and no partial knowledge record exists.
+If SSH drops after a coordination mutation is dispatched, the outcome is unknown and
+the broker returns `mcp_call_id`; it never retries. The caller inspects the owner
+machine's state/audit. Knowledge writes are a single local transaction, so there is
+no partial record and no consumed ID to reason about.
 
 ## 10. The Bridge Boundary
 
@@ -993,8 +910,8 @@ Orbit:
 
 | Capability | Owner after migration |
 |------------|-----------------------|
-| Tasks, frictions, learnings, ADRs, Orbit search | Orbit MCP |
-| Host/workspace/crew discovery and workflow submit/observe | Orbit MCP |
+| Tasks, frictions, learnings, Orbit search | Orbit MCP |
+| Workspace/crew discovery and workflow submit/observe | Orbit MCP |
 | Sextant search and document retrieval | Bridge/Sextant |
 | Raw one-shot Worker invocation and non-pipeline run control | Bridge/Worker |
 | Repository synchronization | Bridge/Worker |
@@ -1011,7 +928,9 @@ Retired Bridge implementation:
 
 Clients register Orbit and Bridge side by side during migration. A later aggregator
 must proxy child MCP contracts generically; it must not restore hand-authored Orbit
-schemas.
+schemas. ADRs left the MCP surface entirely: they are git-committed markdown in each
+feature's `4_decisions.md` ([CONVENTIONS.md §4](../CONVENTIONS.md)) and are reached
+through the docs corpus, not a tool family.
 
 ## 11. Migration and Validation
 
@@ -1020,148 +939,143 @@ schemas.
 - Review this folder and host-registry together.
 - Mark `knowledgebase/polaris/design/orbit/orbit-mcp-bridge.md` superseded and point
   it to this repo-local design so the two contracts cannot drift.
-- Allocate repo-local ADRs only after both coupled designs are accepted.
+- Number the new ADRs per-repo in each feature's `4_decisions.md` only after both
+  coupled designs are accepted.
 - Decompose [ORB-00424] into ordered implementation tasks.
 
-### Phase 1 — hub/owner prerequisites
+### Phase 1 — identity and ownership prerequisites
 
-- Land stable host identity, one hub role, owner/replica workspace bindings,
-  presence maps, and owner-published execution profiles.
+- Land stable host identity, the machine task-id prefix, and `workspaces.json`
+  ownership bindings.
 - Extend MCP session/audit context with caller/process host identity.
-- Preserve current single-machine local behavior until a machine is explicitly
-  initialized into hub/spoke mode.
+- Single-machine behavior is the degenerate case of the same model — a machine that
+  owns everything it holds — so no mode switch exists to migrate through.
 
 ### Phase 2 — placement-aware local broker
 
-- Implemented by [ORB-10262]: consume canonical `hub`, `owner`, `local-derived`,
-  and `composite` metadata; preserve exact session checkout/worktree paths for
-  graph dispatch and runtime-cache identity; enforce owner/replica preflight
-  without spoke-to-spoke discovery; and filter `tools/list`/`tools/call` by the
-  non-hierarchical effective capability set. Hub task, artifact, review-thread,
+- Implemented by [ORB-10262]: consume canonical `owner`, `local-derived`, and
+  `composite` metadata; preserve exact session checkout/worktree paths for
+  graph dispatch and runtime-cache identity; enforce ownership preflight without
+  third-machine discovery; and filter `tools/list`/`tools/call` by the
+  non-hierarchical effective capability set. Task, artifact, review-thread,
   verdict, and friction calls use the stable-ID checkoutless coordination
   executor; `task.show(with_context=true)` remains explicitly local-derived and a
-  spoke fails closed instead of reading local coordination state.
+  non-owner fails closed instead of writing coordination state.
 
 - [ORB-10319] moved the broker, hub, link, trust, registration, and former
   graph/learning composition from CLI/MCP horizontal layers into `orbit-remote`.
   [ORB-10325] subsequently removed graph composition from Remote and MCP; the
   routing contract now applies only to registered tools.
 
-### Phase 3 — singular hub link
+### Phase 3 — owner route
 
-- Implemented by [ORB-10268, ORB-10269, ORB-10271]: add `[hub]` trusted config and
-  fixed SSH hub mode; negotiate contract revision/digest with bounded per-capability
-  reuse; add private staged spoke registration and definitive-success cache refresh;
-  propagate workspace/caller/call identity; enforce current active caller state;
-  and prove hub-only coordination plus no automatic mutation retry.
+- Implemented by [ORB-10268, ORB-10269]: add trusted route config and the fixed SSH
+  endpoint; negotiate contract revision/digest with bounded per-capability reuse;
+  propagate workspace/caller/call identity; and prove no automatic mutation retry.
+- [ORB-10271]'s private staged registration and active-caller enforcement are
+  withdrawn with the registration protocol ([ADR-0358]); its path-free coordination
+  frames and one-audit-per-call discipline survive.
 
 ### Phase 4 — knowledge and search split
 
-- [ORB-10272] installs the dormant Remote-v2 hub global-ID sequence, complete
-  reconciliation/activation service, replay-safe ledger, atomic audit, and private
-  path-free allocation request. It does not activate authority or cut over public
-  creation.
-- F3 activates the authority through the final forward-only reseed and cuts owner
-  learning/ADR creation over to hub allocation.
+- Move learning and friction to `(workspace_id, artifact_key)` and remove the
+  [ORB-10272] allocation substrate rather than parking it ([ADR-0357]).
+- Retire the ADR store in favour of git-committed entries in each feature's
+  `4_decisions.md`, which drops the `adr` search kind and the `orbit.adr.*` tool
+  family.
 - Add explicit replica knowledge reads plus reindex/freshness metadata.
 - Implement role-aware search and learning-sidecar availability behavior.
 
-### Phase 5 — operator and runner surfaces
+### Phase 5 — operator surface (placement deferred to v2)
 
-- Add host/workspace/crew discovery and high-level ship/run observation.
-- Add execution-profile publication and freshness enforcement.
-- Add runner lease/report and immutable requested/actual placement.
+- Add `orbit.workspace.list` over the machine-local registry, crew discovery from
+  the owner machine's local config, and high-level ship/run observation.
+- Execution-profile publication, runner lease/report, and immutable
+  requested/actual placement are **deferred to v2** ([ADR-0358]).
 
 ### Phase 6 — Bridge cutover
 
 - Register Orbit directly on every client while Bridge remains for non-Orbit tools.
-- Run conformance tests on hub and spoke brokers.
+- Run conformance tests on owner-machine and client brokers.
 - Remove Bridge parity after the compatibility window and client inventory complete.
 
 Required validation:
 
-1. Every spoke opens connections only to the configured hub; the hub never opens or
-   forwards a connection to an owner/spoke.
-2. No hub-class mutation executes in a spoke-local coordination store when hub
-   config, SSH, registry, or contract negotiation fails.
-3. Agent-surface owner mutations reject replicas of spoke-owned workspaces before
-   allocating an ID or writing a file; hub-owned workspaces route only to the hub
-   owner. The separate human ID-plus-PR path does not enable replica-store writes.
-4. Knowledge add allocates globally at the hub and finalizes in the owner's exact
-   checkout; finalize failure creates only an allowed ID gap.
-5. Activation validates every registered workspace's complete hub-local files and
-   legacy allocation rows before mutation; missing sources and every duplicate
-   conflict are reported, and late workspaces remain ineligible until reconciled.
-6. Concurrent/interleaved ADR and learning allocations are globally unique and
-   independently increasing; exact correlation replay is idempotent, while
-   mismatched replay, invalid input, and overflow do not advance either sequence.
-7. Allocation commits sequence, immutable ledger, and one canonical hub audit in
-   one transaction; requests/results and audit contain no checkout path.
-8. Current knowledge for a spoke-owned workspace is never served or proxied by the
-   hub.
-9. Graph/docs observe the exact session checkout/worktree, never a base or hub
+1. A client opens connections only to configured owner machines; no machine opens
+   or forwards a connection on another machine's behalf.
+2. No coordination mutation executes for a workspace this machine does not own,
+   including when route config, SSH, or contract negotiation fails.
+3. Coordination writes against a non-owned checkout are rejected and name the
+   owner. The separate human file-plus-PR path does not enable replica-store writes.
+4. Knowledge add writes atomically in the owner's exact checkout under
+   `(workspace_id, key)`.
+5. Current knowledge for a workspace owned elsewhere is never served or proxied.
+6. Graph/docs observe the exact session checkout/worktree, never a base or remote
    checkout.
-10. Search requires explicit replica/omit semantics when current knowledge is
+7. Search requires explicit replica/omit semantics when current knowledge is
    unavailable, rejects `kind=doc|all` without a local checkout, and preserves
    current round-robin ranking when branches resolve.
-11. Ordinary routing, session, coordination, response, cache, audit, and lease
-   frames carry stable IDs, never spoke absolute paths. Authenticated
-   registration/poll presence publication is the sole path-bearing exception and
-   stores the reporting root only in the hub-private host-keyed projection.
-12. Hub audits distinguish caller and process machine identity; composite knowledge
-   audit events correlate by `mcp_call_id`.
-13. `agent`, `operator`, and `runner` advertise/enforce the intended surfaces across
-    the capability × placement matrix; runner polling and leased-run agent work use
-    separate filtered and audited sessions.
-14. Crew/host discovery and task validation read the same fresh hub projections.
-15. Auto-task CRUD stays owner-placed while the scheduler pass reads local
-    definition/cursor state and dedupes/creates tasks only through the hub.
-16. Bridge passes its remaining suite without an Orbit schema snapshot or Orbit
-   HTTP dependency.
+8. Ordinary routing, session, coordination, response, cache, and audit frames carry
+   stable IDs, never absolute paths.
+9. Audits distinguish caller and process machine identity.
+10. `agent` and `operator` advertise/enforce the intended surfaces across the
+    capability × placement matrix.
+11. Crew validation reads the owner machine's local config.
+12. Auto-task CRUD stays owner-placed while the scheduler pass reads local
+    definition/cursor state and dedupes/creates tasks only on the owning machine.
+13. Bridge passes its remaining suite without an Orbit schema snapshot or Orbit
+    HTTP dependency.
 
 ## 12. Concerns & Honest Limitations
 
-- **The hub is a hard dependency for coordination.** A disconnected spoke can
-  query local graph/docs and an owner can read existing knowledge, but no task,
-  friction, workflow, lease, or new knowledge ID can progress.
-- **Each workspace owner is a second explicit dependency.** Owner downtime blocks
-  default execution and current knowledge authoring/reading for that workspace,
-  even though hub coordination remains available.
-- **Current knowledge does not flow across owners.** Non-owners of spoke-owned
-  workspaces have only explicit, possibly stale Git replicas. This is a deliberate
-  v1 limitation, not an MCP gap the hub is allowed to hide.
-- **One MCP surface contains a router.** Orbit owns hub connection lifecycle,
-  owner-role preflight, composite knowledge creation, role-aware search, and split
-  audit. The star topology bounds this to one remote destination.
+- **The owner machine is the dependency for coordination.** A machine can always
+  coordinate the workspaces it owns, offline and without asking anyone. What it
+  cannot do offline is any deliberate cross-machine call: tasks, frictions, and
+  knowledge for a workspace owned elsewhere are unreachable while that owner is
+  down. The blast radius is per workspace rather than fleet-wide, which is better
+  for containment and worse for predictability — several machines can now each take
+  part of the system offline, and which ones depends on a per-machine file.
+- **Current knowledge does not flow across owners.** A machine that does not own a
+  workspace has only explicit, possibly stale Git replicas. This is a deliberate
+  v1 limitation, not an MCP gap any machine is allowed to hide.
+- **One MCP surface contains a router.** Orbit owns owner-route connection
+  lifecycle, ownership preflight, role-aware search, and split audit. At most one
+  remote destination per call bounds this.
 - **The Remote feature crate is intentionally broad.** Registry persistence and MCP
   routing change together, so they share one vertical owner. Internal modules must
   still keep protocol, persistence, registry, and broker seams explicit; unrelated
   shared machinery belongs in the neutral kernels rather than accumulating in
   Remote.
-- **Global ID allocation can leave gaps.** A local finalize failure after hub
-  allocation consumes an ID. Gaps are the explicit cost of avoiding reservations
-  and distributed commit.
-- **Execution profiles can be stale.** Crew/dispatch validation depends on owner-
-  published projections. Freshness gates are necessary and can block dispatch even
-  when the owner is otherwise healthy.
-- **Version skew needs an explicit contract revision.** V1 fails hub routing rather
-  than translating incompatible schemas.
+- **Knowledge IDs are unique only within a workspace.** `L-0012` in one workspace
+  and `L-0012` in another are different records ([ADR-0357]), so any merged
+  cross-workspace result must carry the `workspace` field or the ID is not
+  addressable. Fixing that projection is a precondition of this model, not a
+  follow-up.
+- **Version skew needs an explicit contract revision.** V1 fails owner routing
+  rather than translating incompatible schemas.
 - **Caller host identity is not independently authenticated in the initial
-  same-user SSH posture.** Hostile/multi-user runners need per-host principal/key
-  binding before `runner` is a security boundary.
+  same-user SSH posture** — and with no fleet registry there is nothing that even
+  validates a claimed `machine_id` exists. Mutually untrusted machines need
+  per-host principal/key binding before the `operator` capability is a security
+  boundary rather than a convention.
 - **Two client registrations remain.** Orbit and Bridge own different domains;
   cosmetic aggregation is not worth recreating duplicate Orbit contracts.
 - **Operator workflow execution is single-host today.** The deliberate local
-  operator broker can submit and observe runs, while the fixed checkoutless hub
-  endpoint and spoke routing do not yet own the runtime service required to
+  operator broker can submit and observe runs, while the fixed checkoutless owner
+  endpoint and owner routing do not yet own the runtime service required to
   execute them. Those paths fail rather than selecting a checkout implicitly.
 - **Orbit now opens a listening port (§5.3).** The security property is preserved
   by a loopback bind plus an SSH tunnel rather than by the absence of a listener,
   so the bind guard is security-critical: a misconfiguration binding a routable
   address turns the surface into unauthenticated remote control of the machine.
-- **Two cross-machine mechanisms coexist.** The SSH-stdio hub link and the owned
-  tunnel both reach a remote Orbit. Until one is retired, this is the duplication
-  the feature was created to remove, held deliberately rather than by oversight.
+- **One cross-machine mechanism remains.** The former SSH-stdio hub link is
+  retired; the owned SSH tunnel is the single way a client reaches a remote Orbit,
+  which resolves the duplication [ADR-0350] accepted as a cost.
+- **The revision strands shipped work.** [ORB-10268], [ORB-10269], [ORB-10271], and
+  [ORB-10272] implemented the superseded model carefully. Most of the registry side
+  is deferred rather than deleted; [ORB-10272]'s allocation substrate and
+  [ORB-10330]'s preallocated finalizers are deleted outright. That is the price of
+  correcting the model now rather than later, and it is a real one.
 - **Command execution makes capability filtering advisory for its holder.** A
   client with command can invoke the CLI and reach any governed operation.
   Requiring both operator capability and the workspace claim, and withholding it
@@ -1189,28 +1103,32 @@ Required validation:
   while preserving neutral acyclic Store, MCP, Core, Tools, and Common kernels
   ([ADR-0240]).
 - [ORB-10268] — implemented strict machine-global hub trust and the non-recursive,
-  checkoutless fixed-capability hub endpoint.
+  checkoutless fixed-capability hub endpoint. The trust document and the endpoint
+  survive as the client's per-route policy and the owner endpoint; the `--hub`
+  spelling and the machine-level mode requirement are superseded by the v1
+  ownership model.
 - [ORB-10269] — implemented the fixed SSH argv connector, contract/digest
   negotiation, bounded per-capability peers, trusted remote metadata, and
-  pre-/post-handoff no-replay classification.
+  pre-/post-handoff no-replay classification. The transport survives; its single
+  fixed hub target becomes a per-owner route.
 - [ORB-10271] — implemented private staged spoke registration, contract revision 2,
   current active-caller enforcement, definitive-success cache refresh, path-free
-  task artifact/friction coordination, and the two-root RMCP canary.
-- [ORB-10272] — adds the dormant Remote-v2 hub-global ADR/learning sequence service,
-  complete pre-mutation hub-local reconciliation, forward-only activation,
-  correlation-safe immutable ledger and atomic audit, plus contract revision 3's
-  private path-free request/result used by the two-workspace canary. Public
-  issuance/caller cutover remains F3, and standalone creation is unchanged.
-- [ORB-10330] — adds and tests the F2 owner preallocated finalizers
-  (`finalize_preallocated` on the ADR/learning stores; hub id in, no local
-  allocation/abandon/retry, non-authoritative body-path projection, deterministic
-  collision failure, local-only partial cleanup) and the gated broker composition
-  (one hub allocation, one exact-owner finalization, correlated by `mcp_call_id`;
-  replica/foreign-spoke rejected before allocation). Public issuance/caller cutover
-  remains F3, and standalone creation is unchanged.
+  task artifact/friction coordination, and the two-root RMCP canary. Superseded by
+  the v1 ownership model: registration and the active-caller guard are withdrawn
+  with the fleet registry ([ADR-0358]); the path-free frames and one-audit-per-call
+  discipline survive.
+- [ORB-10272] — added the dormant Remote-v2 hub-global ADR/learning sequence
+  service, pre-mutation reconciliation, forward-only activation, immutable ledger
+  and atomic audit, plus contract revision 3's private path-free request/result.
+  Superseded by the v1 ownership model; the allocation substrate is abandoned and
+  removed rather than parked ([ADR-0357]). It never activated, so no ID was issued.
+- [ORB-10330] — added and tested the F2 owner preallocated finalizers and the gated
+  hub-allocate/owner-finalize broker composition. Superseded with the allocator:
+  there is no preallocation path to finalize.
 - [ORB-10332] — removed the `orbit.host.list` MCP discovery tool as unused; the
-  `orbit host list` CLI command and the `orbit.workspace.list` / `orbit.crew.list`
-  MCP discovery tools remain.
+  `orbit.workspace.list` / `orbit.crew.list` MCP discovery tools remain. The
+  `orbit host list` CLI command it deferred to is itself withdrawn with the fleet
+  inventory ([ADR-0358]).
 - [ORB-10534] — registered the operator-only workflow family, added single-host
   operator broker capability selection, reused runtime ship/show/list/resume,
   and added the managed-run self-dispatch guard.
