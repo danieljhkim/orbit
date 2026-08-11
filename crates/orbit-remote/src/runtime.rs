@@ -90,13 +90,16 @@ impl RemoteRuntimeFactory {
         let roots = Self::resolve_roots_for_cwd(&cwd, root_override)?;
         sync_task_prefix(&roots.global_root)?;
         let binding = binding_for_roots(&roots)?;
+        let replica_owner = replica_owner_for_roots(&roots)?;
         OrbitRuntime::initialize_from_resolved_roots(roots, binding)
+            .map(|runtime| runtime.with_coordination_write_owner(replica_owner))
     }
 
     pub fn open_resolved_roots(roots: OrbitRuntimeRoots) -> Result<OrbitRuntime, OrbitError> {
         sync_task_prefix(&roots.global_root)?;
         let binding = binding_for_roots(&roots)?;
-        match binding {
+        let replica_owner = replica_owner_for_roots(&roots)?;
+        let runtime = match binding {
             Some(binding) => OrbitRuntime::from_resolved_roots_with_binding(
                 &roots.global_root,
                 &roots.shared_root,
@@ -108,7 +111,8 @@ impl RemoteRuntimeFactory {
                 &roots.shared_root,
                 &roots.local_root,
             ),
-        }
+        }?;
+        Ok(runtime.with_coordination_write_owner(replica_owner))
     }
 
     pub fn open_registered_checkout(
@@ -118,7 +122,9 @@ impl RemoteRuntimeFactory {
     ) -> Result<OrbitRuntime, OrbitError> {
         sync_task_prefix(global_root)?;
         let binding = workspace_runtime_binding(workspace, checkout)?;
-        OrbitRuntime::from_roots_with_binding(global_root, &checkout.orbit_dir, binding)
+        OrbitRuntime::from_roots_with_binding(global_root, &checkout.orbit_dir, binding).map(
+            |runtime| runtime.with_coordination_write_owner(replica_owner_for_checkout(checkout)),
+        )
     }
 
     pub fn open_resolved_checkout(
@@ -147,6 +153,26 @@ pub(crate) fn sync_task_prefix(global_root: &Path) -> Result<(), OrbitError> {
     let identity = load_host_identity(global_root)?;
     let registry = TaskRegistryStore::open(&task_registry_path(global_root))?;
     registry.set_task_prefix(&identity.task_prefix)
+}
+
+fn replica_owner_for_checkout(checkout: &WorkspaceCheckout) -> Option<String> {
+    (checkout.role == Some(WorkspaceCheckoutRole::Replica))
+        .then(|| checkout.owner_machine_id.clone())
+        .flatten()
+}
+
+fn replica_owner_for_roots(roots: &OrbitRuntimeRoots) -> Result<Option<String>, OrbitError> {
+    let registry_path = workspace_registry::registry_path_for(&roots.global_root);
+    let registry = workspace_registry::load_registry_from(&registry_path)?;
+    let shared =
+        std::fs::canonicalize(&roots.shared_root).unwrap_or_else(|_| roots.shared_root.clone());
+    Ok(registry.checkouts.iter().find_map(|checkout| {
+        let registered = std::fs::canonicalize(&checkout.orbit_dir)
+            .unwrap_or_else(|_| checkout.orbit_dir.clone());
+        (registered == shared)
+            .then(|| replica_owner_for_checkout(checkout))
+            .flatten()
+    }))
 }
 
 fn workspace_root_hint(cwd: &Path) -> Option<WorkspaceRootHint> {

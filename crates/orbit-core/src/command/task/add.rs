@@ -26,6 +26,7 @@ impl OrbitRuntime {
         agent: Option<String>,
         model: Option<String>,
     ) -> Result<Task, OrbitError> {
+        self.ensure_coordination_task_write_permitted()?;
         // [ORB-00417] Redact secrets at the single task-creation choke point
         // (shared by the dashboard POST, CLI `task add`, and the MCP task tool)
         // so a pasted key never lands in the task registry or the audit trail.

@@ -2,15 +2,15 @@ use tempfile::tempdir;
 
 use chrono::Utc;
 use orbit_common::types::{
-    OverlapPolicy, RoutineTarget, Workspace, WorkspaceCheckout, WorkspaceRegistry, WorkspaceStatus,
-    parse_routine_yaml,
+    OverlapPolicy, RoutineTarget, Workspace, WorkspaceCheckout, WorkspaceCheckoutRole,
+    WorkspaceRegistry, WorkspaceStatus, parse_routine_yaml,
 };
 use orbit_remote::workspace_registry;
 
 use crate::tests::env_isolation::EnvGuard;
 
 use super::super::init::{WorkspaceInitArgs, canonical_workspace_id};
-use super::super::list::format_workspace_list;
+use super::super::list::{format_workspace_list, workspace_list_json};
 use super::super::role::CliCheckoutRole;
 use super::super::show::format_workspace_show;
 use super::super::support::orbit_gitignore_block;
@@ -626,7 +626,7 @@ fn workspace_list_and_show_report_effective_ship_mode() {
         ..Default::default()
     };
 
-    let list = format_workspace_list(&registry);
+    let list = format_workspace_list(&registry, false);
     assert!(list.contains("SHIP MODE"), "{list}");
     assert!(list.contains("pr"), "{list}");
     let mut lines = list.lines();
@@ -639,6 +639,68 @@ fn workspace_list_and_show_report_effective_ship_mode() {
 
     let show = format_workspace_show(&workspace, &registry.checkouts[0]);
     assert!(show.contains("ship_mode:   pr"), "{show}");
+}
+
+#[test]
+fn workspace_list_hides_replicas_unless_all_and_marks_their_owner() {
+    let now = Utc::now();
+    let owner = Workspace {
+        id: "ws_owner".to_string(),
+        name: "owner".to_string(),
+        owner_machine_id: Some("hm_local".to_string()),
+        git_remote: None,
+        ship_mode: None,
+        base_branch: "agent-main".to_string(),
+        status: WorkspaceStatus::Active,
+        created_at: now,
+        updated_at: now,
+    };
+    let replica = Workspace {
+        id: "ws_replica".to_string(),
+        name: "replica".to_string(),
+        owner_machine_id: Some("hm_owner".to_string()),
+        git_remote: None,
+        ship_mode: None,
+        base_branch: "agent-main".to_string(),
+        status: WorkspaceStatus::Active,
+        created_at: now,
+        updated_at: now,
+    };
+    let registry = WorkspaceRegistry {
+        workspaces: vec![owner.clone(), replica.clone()],
+        checkouts: vec![
+            WorkspaceCheckout::owner(
+                owner.id.clone(),
+                "/work/owner".into(),
+                "/work/owner/.orbit".into(),
+            ),
+            WorkspaceCheckout {
+                workspace_id: replica.id.clone(),
+                repo_root: "/work/replica".into(),
+                orbit_dir: "/work/replica/.orbit".into(),
+                role: Some(WorkspaceCheckoutRole::Replica),
+                owner_machine_id: Some("hm_owner".to_string()),
+                path_overrides: Vec::new(),
+            },
+        ],
+        ..Default::default()
+    };
+
+    assert_eq!(
+        workspace_list_json(&registry, false)
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+    assert!(!format_workspace_list(&registry, false).contains("replica"));
+
+    let all = workspace_list_json(&registry, true);
+    assert_eq!(all.as_array().unwrap().len(), 2);
+    assert_eq!(all[1]["owner_machine_id"], "hm_owner");
+    let text = format_workspace_list(&registry, true);
+    assert!(text.contains("replica"));
+    assert!(text.contains("hm_owner"));
 }
 
 #[test]

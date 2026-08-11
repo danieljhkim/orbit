@@ -46,6 +46,7 @@ impl OrbitRuntime {
         agent: Option<String>,
         model: Option<String>,
     ) -> Result<Task, OrbitError> {
+        self.ensure_coordination_task_write_permitted()?;
         let (canonical_agent, canonical_model) =
             self.try_canonical_agent_model_identity(agent.as_deref(), model.as_deref())?;
         let task = self.get_task(id)?;
@@ -242,6 +243,7 @@ impl OrbitRuntime {
         id: &str,
         options: StartTaskOptions,
     ) -> Result<Task, OrbitError> {
+        self.ensure_coordination_task_write_permitted()?;
         let StartTaskOptions {
             note,
             comment,
@@ -415,6 +417,7 @@ impl OrbitRuntime {
         id: &str,
         workflow: &str,
     ) -> Result<Task, OrbitError> {
+        self.ensure_coordination_task_write_permitted()?;
         let workflow = workflow.trim();
         let workflow = if workflow.is_empty() {
             "workflow"
@@ -494,6 +497,7 @@ impl OrbitRuntime {
         source_run_id: &str,
         resumed_run_id: &str,
     ) -> Result<Option<Task>, OrbitError> {
+        self.ensure_coordination_task_write_permitted()?;
         let task = self.get_task(id)?;
         let readmit = task.status == TaskStatus::Blocked;
         let restamp = batch_run_id
@@ -554,6 +558,7 @@ impl OrbitRuntime {
         agent: Option<String>,
         model: Option<String>,
     ) -> Result<Task, OrbitError> {
+        self.ensure_coordination_task_write_permitted()?;
         let (canonical_agent, canonical_model) =
             self.try_canonical_agent_model_identity(agent.as_deref(), model.as_deref())?;
         let task = self.get_task(id)?;
@@ -662,6 +667,7 @@ impl OrbitRuntime {
     }
 
     pub fn archive_task(&self, id: &str) -> Result<(), OrbitError> {
+        self.ensure_coordination_task_write_permitted()?;
         let task = self.get_task(id)?;
 
         if task.status == TaskStatus::Archived {
@@ -686,6 +692,7 @@ impl OrbitRuntime {
     }
 
     pub fn delete_task(&self, id: &str) -> Result<(), OrbitError> {
+        self.ensure_coordination_task_write_permitted()?;
         self.with_mutation(|| {
             let deleted = self.stores().task_records().delete(id)?;
             if !deleted {
