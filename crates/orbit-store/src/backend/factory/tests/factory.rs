@@ -179,6 +179,22 @@ fn coordination_backends_create_and_schedule_across_checkoutless_workspaces() {
         allocator_before
     );
     assert_eq!(alpha.task.list_tasks().expect("alpha list after").len(), 1);
+
+    let mut foreign = task_params("Foreign dependency", TaskStatus::Backlog);
+    foreign.dependencies = vec!["DK-00042".into()];
+    foreign.relations.push(TaskRelation {
+        relation_type: TaskRelationType::RelatedTo,
+        target: "DK-00042".into(),
+    });
+    let foreign = alpha
+        .task
+        .create_task(foreign)
+        .expect("foreign-prefix references are stored unverified");
+    let statuses = alpha.task.task_status_index().expect("global statuses");
+    assert!(
+        task_dependencies_ready(&foreign, &statuses),
+        "foreign dependencies cannot gate on state this machine cannot see"
+    );
 }
 
 #[test]

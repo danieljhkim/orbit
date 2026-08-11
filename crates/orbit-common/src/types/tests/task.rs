@@ -236,7 +236,8 @@ updated_at: 2026-01-01T00:00:00Z
 
 mod dependency_satisfaction {
     use super::super::super::task::{
-        DependencyDeadEnd, Task, TaskStatus, unmet_task_dependencies,
+        DependencyDeadEnd, TASK_REFERENCE_NOT_VERIFIABLE_HERE, Task, TaskStatus,
+        resolve_task_dependencies, task_dependencies_ready, unmet_task_dependencies,
         unsatisfiable_task_dependencies,
     };
     use std::collections::BTreeMap;
@@ -364,6 +365,20 @@ relations:
         assert_eq!(unsatisfiable[0].dependency_id, "ORB-404");
         assert_eq!(unsatisfiable[0].status, "missing");
         assert_eq!(unsatisfiable[0].reason, DependencyDeadEnd::Missing);
+    }
+
+    #[test]
+    fn foreign_dependency_is_marked_ready_and_not_a_dead_end() {
+        let task = task_with_dependencies("ORB-2", &["DK-404"]);
+        let statuses = status_index(&[("ORB-2", TaskStatus::Backlog)]);
+
+        assert_eq!(
+            resolve_task_dependencies(&task, &statuses)[0].status,
+            TASK_REFERENCE_NOT_VERIFIABLE_HERE
+        );
+        assert!(task_dependencies_ready(&task, &statuses));
+        assert!(unmet_task_dependencies(&task, &statuses).is_empty());
+        assert!(unsatisfiable_task_dependencies(&task, &statuses).is_empty());
     }
 
     #[test]

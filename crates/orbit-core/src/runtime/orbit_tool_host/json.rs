@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 
 use orbit_common::types::{
     Learning, OrbitError, Task, TaskArtifact, TaskComment, TaskHistoryEntry, TaskStatus,
-    resolve_task_dependencies,
+    resolve_task_dependencies, resolve_task_relations,
 };
 use serde_json::{Map, Value, json};
 
@@ -65,7 +65,7 @@ pub(super) fn task_to_json(task: &Task, status_by_id: &BTreeMap<String, TaskStat
         "type": task.task_type.to_string(),
         "pr_status": task.pr_status,
         "external_refs": task.external_refs,
-        "relations": task.relations,
+        "relations": resolve_task_relations(task, status_by_id),
         "source_task_id": task.source_task_id(),
         "job_run_id": task.job_run_id,
         "crew": task.crew,

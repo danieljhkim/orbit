@@ -309,27 +309,7 @@ impl TaskRegistryStore {
             .conn
             .lock()
             .map_err(|e| OrbitError::Store(format!("mutex poisoned: {e}")))?;
-        let active: String = conn
-            .query_row(
-                "SELECT task_prefix FROM allocator_state WHERE authority = 'local'",
-                [],
-                |row| row.get(0),
-            )
-            .map_err(|e| OrbitError::Store(e.to_string()))?;
-        let mut prefixes = BTreeSet::from([active]);
-        let mut statement = conn
-            .prepare("SELECT task_id FROM task_bundle_bindings")
-            .map_err(|e| OrbitError::Store(e.to_string()))?;
-        let ids = statement
-            .query_map([], |row| row.get::<_, String>(0))
-            .map_err(|e| OrbitError::Store(e.to_string()))?;
-        for id in ids {
-            let id = id.map_err(|e| OrbitError::Store(e.to_string()))?;
-            if let Some(prefix) = task_id_prefix(&id) {
-                prefixes.insert(prefix.to_string());
-            }
-        }
-        Ok(prefixes)
+        known_task_prefixes(&conn)
     }
 
     pub fn canonical_task_bundle_path(
@@ -740,12 +720,20 @@ impl TaskRegistryStore {
             .map_err(|e| OrbitError::Store(e.to_string()))?;
 
         let mut dangling = Vec::new();
+        let known_prefixes = known_task_prefixes(&conn)?;
         for row in rows {
             let (workspace_id, source_task_id, relation_type, target_task_id) =
                 row.map_err(|e| OrbitError::Store(e.to_string()))?;
-            // The validator only rejects `ORB-` targets; non-`ORB-` targets
-            // (friction / learning / ADR) are allowed to dangle, so skip them.
+            // Non-task artifact targets and foreign-prefix task references are
+            // both allowed to remain unresolved here. Only a locally known
+            // prefix can be a dangling relation in this registry.
             if !is_valid_orb_task_id(&target_task_id) {
+                continue;
+            }
+            let Some(prefix) = task_id_prefix(&target_task_id) else {
+                continue;
+            };
+            if !known_prefixes.contains(prefix) {
                 continue;
             }
             dangling.push(DanglingRelationTarget {
@@ -1210,11 +1198,18 @@ fn validate_relation_targets_exist(
             source_workspace_id.to_string(),
         ));
     }
+    let known_prefixes = known_task_prefixes(conn)?;
     for relation in relations {
         if is_valid_orb_task_id(&relation.target)
             && source_task_id != Some(relation.target.as_str())
             && task_bundle_by_id(conn, &relation.target)?.is_none()
         {
+            let Some(prefix) = task_id_prefix(&relation.target) else {
+                continue;
+            };
+            if !known_prefixes.contains(prefix) {
+                continue;
+            }
             return Err(OrbitError::InvalidInput(format!(
                 "task relation target '{}' from workspace '{}' does not resolve in the coordination registry",
                 relation.target, source_workspace_id
@@ -1222,6 +1217,30 @@ fn validate_relation_targets_exist(
         }
     }
     Ok(())
+}
+
+fn known_task_prefixes(conn: &Connection) -> Result<BTreeSet<String>, OrbitError> {
+    let active: String = conn
+        .query_row(
+            "SELECT task_prefix FROM allocator_state WHERE authority = 'local'",
+            [],
+            |row| row.get(0),
+        )
+        .map_err(|e| OrbitError::Store(e.to_string()))?;
+    let mut prefixes = BTreeSet::from([active]);
+    let mut statement = conn
+        .prepare("SELECT task_id FROM task_bundle_bindings")
+        .map_err(|e| OrbitError::Store(e.to_string()))?;
+    let ids = statement
+        .query_map([], |row| row.get::<_, String>(0))
+        .map_err(|e| OrbitError::Store(e.to_string()))?;
+    for id in ids {
+        let id = id.map_err(|e| OrbitError::Store(e.to_string()))?;
+        if let Some(prefix) = task_id_prefix(&id) {
+            prefixes.insert(prefix.to_string());
+        }
+    }
+    Ok(prefixes)
 }
 
 fn task_relation_edges(envelope: &TaskEnvelopeV2) -> Vec<TaskRelationEdge> {

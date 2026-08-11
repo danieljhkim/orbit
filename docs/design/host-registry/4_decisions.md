@@ -11,7 +11,7 @@ summary: Decision record for host identity, per-machine coordination, prefix-par
 tags: [host-registry, mcp-bridge, multi-host, ownership]
 paths: ["crates/orbit-remote/**", "crates/orbit-core/**", "crates/orbit-store/**", "crates/orbit-mcp/**"]
 related_features: [host-registry, mcp-bridge]
-related_artifacts: [ORB-00424, ORB-10245, ORB-10248, ORB-10249, ORB-10255, ORB-10257, ORB-10267, ORB-10258, ORB-10268, ORB-10269, ORB-10271, ORB-10272, ORB-10276, ORB-10302, ORB-10319, ORB-10330, ORB-10332, ORB-10709, ORB-10723, ADR-0226, ADR-0227, ADR-0228, ADR-0229, ADR-0230, ADR-0231, ADR-0232, ADR-0235, ADR-0240, ADR-0352, ADR-0355, ADR-0356, ADR-0357, ADR-0358]
+related_artifacts: [ORB-00424, ORB-10245, ORB-10248, ORB-10249, ORB-10255, ORB-10257, ORB-10267, ORB-10258, ORB-10268, ORB-10269, ORB-10271, ORB-10272, ORB-10276, ORB-10302, ORB-10319, ORB-10330, ORB-10332, ORB-10709, ORB-10723, ORB-10728, ADR-0226, ADR-0227, ADR-0228, ADR-0229, ADR-0230, ADR-0231, ADR-0232, ADR-0235, ADR-0240, ADR-0352, ADR-0355, ADR-0356, ADR-0357, ADR-0358]
 ---
 
 # Host Registry — Decisions
@@ -410,9 +410,9 @@ rather than removed.
 
 ## ADR-0356 — Machine-scoped task-id prefix instead of a global allocator
 
-**Status:** Accepted · 2026-08 · [ORB-10723] implemented prefix- and width-agnostic parsing, host-prefix minting, and registry-constrained text scanning.
+**Status:** Accepted · 2026-08 · [ORB-10723] implemented prefix- and width-agnostic parsing, host-prefix minting, and registry-constrained text scanning; [ORB-10728] implemented foreign-prefix relation storage and local-only validation.
 **Scope:** task ID minting, ID parsing, cross-machine references
-**Code anchors:** `crates/orbit-common/src/types/task_artifacts.rs`, `crates/orbit-store/src/sqlite/task_registry/store.rs::parse_orb_task_number`, `crates/orbit-core/src/command/docs/artifact_ref.rs`
+**Code anchors:** `crates/orbit-common/src/types/task_artifacts.rs`, `crates/orbit-common/src/types/task.rs::task_reference_is_not_verifiable_here`, `crates/orbit-store/src/sqlite/task_registry/store.rs::parse_orb_task_number`, `crates/orbit-core/src/command/docs/artifact_ref.rs`
 
 ### Context
 
@@ -439,6 +439,9 @@ a human-scale choice, not a coordinated allocation. Reject `ORB`, `ADR`, `L`, an
   This is what makes deferring registration ([ADR-0358]) safe, so the two decisions
   hold each other up and neither should be adopted alone.
 - Moving a workspace between owners becomes a row copy rather than an ID rewrite.
+- An unresolved target under a locally known prefix remains invalid. An unresolved
+  foreign-prefix target is stored and rendered as `not verifiable here`; a foreign
+  dependency is non-gating because this machine cannot observe its lifecycle state.
 - Cost: prefix collisions are possible and silent. Nothing detects two machines
   choosing the same prefix until their records meet, and v1 adds no lint.
 - Cost: cross-machine chronology is destroyed. `ORB-10601` was visibly later than
@@ -546,6 +549,9 @@ would leave a silent, unrecoverable ID collision.
 - [ORB-10723] — implemented ADR-0356: task parsing accepts registered machine
   prefixes and wider numeric suffixes, while allocation retains one monotonic
   machine sequence and formats it with the immutable host prefix.
+- [ORB-10728] — stores unresolved foreign-prefix task relations with an explicit
+  `not verifiable here` projection, keeps locally prefixed misses as hard errors,
+  and treats foreign dependencies as non-gating for local readiness.
 - [ORB-10248] — implemented the versioned logical-workspace/local-checkout split.
 - [ORB-10249] — implemented path-free task coordination and global task-relation/readiness lookup.
 - [ORB-10255] — implemented ADR-0227's append-only SQLite host/alias core with

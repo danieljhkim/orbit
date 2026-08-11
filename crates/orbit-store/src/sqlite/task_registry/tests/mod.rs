@@ -622,6 +622,50 @@ fn checkoutless_workspaces_coordinate_cross_workspace_relations_without_paths() 
             .expect("relation after rejected update"),
         vec![target_id]
     );
+
+    let foreign_target = "DK-00042";
+    store
+        .validate_new_task_relation_targets(
+            &first.workspace_id,
+            &[TaskRelation {
+                relation_type: TaskRelationType::BlockedBy,
+                target: foreign_target.into(),
+            }],
+        )
+        .expect("foreign-prefix target cannot be verified locally");
+    store
+        .replace_task_index(
+            &first.workspace_id,
+            &envelope(
+                &source_id,
+                TaskStatus::Review,
+                Vec::new(),
+                vec![
+                    TaskRelation {
+                        relation_type: TaskRelationType::BlockedBy,
+                        target: foreign_target.into(),
+                    },
+                    TaskRelation {
+                        relation_type: TaskRelationType::RelatedTo,
+                        target: foreign_target.into(),
+                    },
+                ],
+            ),
+        )
+        .expect("index foreign-prefix relations");
+    assert_eq!(
+        store
+            .indexed_relation_targets(&first.workspace_id, &source_id, TaskRelationType::RelatedTo)
+            .expect("foreign relation target"),
+        vec![foreign_target.to_string()]
+    );
+    assert!(
+        store
+            .dangling_relation_targets(Some(&first.workspace_id))
+            .expect("audit foreign target")
+            .is_empty(),
+        "allowed foreign references are not locally dangling"
+    );
 }
 
 #[test]
