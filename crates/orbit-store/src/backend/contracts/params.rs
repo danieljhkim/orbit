@@ -1,37 +1,10 @@
 use chrono::{DateTime, Utc};
 use orbit_common::types::{
-    Adr, AdrStatus, ArtifactOrigin, ExternalRef, JobRunState, Learning, LegacyValidation, OrbitId,
-    TaskArtifact, TaskComment, TaskComplexity, TaskHistoryEntry, TaskPriority, TaskRelation,
-    TaskStatus, TaskType,
+    ExternalRef, JobRunState, Learning, OrbitId, TaskArtifact, TaskComment, TaskComplexity,
+    TaskHistoryEntry, TaskPriority, TaskRelation, TaskStatus, TaskType,
 };
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
-
-#[derive(Debug, Clone)]
-pub struct AdrCreateParams {
-    pub title: String,
-    pub owner: String,
-    pub related_features: Vec<String>,
-    pub related_tasks: Vec<String>,
-    pub tags: Vec<String>,
-    pub paths: Vec<String>,
-    pub body: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct AdrArtifact {
-    pub adr: Adr,
-    pub body: String,
-    pub artifact_origin: ArtifactOrigin,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum AdrArtifactResolution {
-    Local(AdrArtifact),
-    Federated(AdrArtifact),
-    RemoteArtifactUnavailable(ArtifactOrigin),
-    NotFound,
-}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RemoteArtifactStub {
@@ -44,48 +17,9 @@ pub struct RemoteArtifactStub {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum AdrListEntry {
-    Local(Adr),
-    Remote(RemoteArtifactStub),
-}
-
-#[derive(Debug, Clone, Copy, Default)]
-pub struct AdrListFilter<'a> {
-    pub status: Option<AdrStatus>,
-    pub owner: Option<&'a str>,
-    pub feature: Option<&'a str>,
-    pub task_id: Option<&'a str>,
-    pub legacy_id: Option<&'a str>,
-    pub tag: Option<&'a str>,
-    pub path: Option<&'a str>,
-    pub validation_warned: Option<bool>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LearningListEntry {
     Local(Learning),
     Remote(RemoteArtifactStub),
-}
-
-/// Parameters for a partial update to an existing ADR document.
-///
-/// Fields that are `None` are left unchanged. `superseded_by` follows the
-/// double-`Option` convention to distinguish "leave unchanged" (`None`) from
-/// "clear this field" (`Some(None)`).
-#[derive(Debug, Clone, Default)]
-pub struct AdrDocumentUpdateParams {
-    pub title: Option<String>,
-    pub owner: Option<String>,
-    pub body: Option<String>,
-    pub related_features: Option<Vec<String>>,
-    pub related_tasks: Option<Vec<String>>,
-    pub tags: Option<Vec<String>>,
-    pub paths: Option<Vec<String>>,
-    pub supersedes: Option<Vec<String>>,
-    pub superseded_by: Option<Option<String>>,
-    pub legacy_ids: Option<Vec<String>>,
-    pub validation_warnings: Option<Vec<String>>,
-    pub legacy_validation: Option<LegacyValidation>,
 }
 
 #[derive(Debug, Clone)]

@@ -3,7 +3,9 @@ use std::fmt::Write as _;
 
 use chrono::{DateTime, Utc};
 use orbit_common::types::{ArtifactManifestFileV2, TaskArtifact};
-use orbit_core::{OrbitError, OrbitRuntime, TaskStatus, resolve_task_dependencies};
+use orbit_core::{
+    OrbitError, OrbitRuntime, TaskStatus, resolve_task_dependencies, resolve_task_relations,
+};
 use serde_json::{Value, json};
 
 use crate::output::color::Domain;
@@ -52,7 +54,7 @@ pub(crate) fn task_to_json(
         "type": task.task_type.to_string(),
         "pr_status": task.pr_status,
         "external_refs": task.external_refs,
-        "relations": task.relations,
+        "relations": resolve_task_relations(task, status_by_id),
         "source_task_id": task.source_task_id(),
         "job_run_id": task.job_run_id,
         "crew": task.crew,

@@ -4,8 +4,8 @@ use std::path::Path;
 
 use chrono::{DateTime, Duration, Utc};
 use orbit_common::types::{
-    Adr, AdrStatus, JobRun, JobRunState, Learning, OrbitError, Task, TaskStatus,
-    all_agent_families, infer_agent_family_from_model, normalize_attribution_label,
+    JobRun, JobRunState, Learning, OrbitError, Task, TaskStatus, all_agent_families,
+    infer_agent_family_from_model, normalize_attribution_label,
     normalize_optional_attribution_label,
 };
 use serde::{Deserialize, Serialize};
@@ -125,9 +125,6 @@ pub struct PrSummary {
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct KnowledgeSummary {
     pub learnings_created: u64,
-    pub adrs_created: u64,
-    pub adrs_accepted: u64,
-    pub adrs_proposed_open: u64,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -355,8 +352,6 @@ pub struct ScoreboardInputs<'a> {
     pub top_tool_calls: &'a [AuditTopToolCall],
     /// Workspace learning records, used for knowledge-stewardship counters.
     pub learnings: &'a [Learning],
-    /// Workspace ADR records, used for knowledge-stewardship counters.
-    pub adrs: &'a [Adr],
     /// Friction counts per reporting model label, already windowed by the
     /// caller with the same cutoff this module derives from `now`/`window`.
     /// Populates per-family `friction.reported` counts (so the dashboard
@@ -385,7 +380,6 @@ impl<'a> Default for ScoreboardInputs<'a> {
         static EMPTY_JOB: [JobRun; 0] = [];
         static EMPTY_TOP: [AuditTopToolCall; 0] = [];
         static EMPTY_LEARNING: [Learning; 0] = [];
-        static EMPTY_ADR: [Adr; 0] = [];
         Self {
             audit_tool_calls: &EMPTY_AUDIT,
             audit_tool_calls_by_surface: &EMPTY_SURFACE,
@@ -393,7 +387,6 @@ impl<'a> Default for ScoreboardInputs<'a> {
             job_runs: &EMPTY_JOB,
             top_tool_calls: &EMPTY_TOP,
             learnings: &EMPTY_LEARNING,
-            adrs: &EMPTY_ADR,
             friction_reported: &[],
             now: None,
             window: ScoreboardWindow::All,
@@ -769,25 +762,6 @@ fn overlay_knowledge_counters(
         };
         let summary = agents.entry(family_key(&created_by)).or_default();
         summary.knowledge.learnings_created = summary.knowledge.learnings_created.saturating_add(1);
-    }
-
-    for adr in inputs.adrs {
-        if !in_window(Some(adr.created_at), since) {
-            continue;
-        }
-        let owner = normalize_attribution_label(&adr.owner, None);
-        if owner.is_empty() {
-            continue;
-        }
-        let summary = agents.entry(family_key(&owner)).or_default();
-        summary.knowledge.adrs_created = summary.knowledge.adrs_created.saturating_add(1);
-        if adr.status == AdrStatus::Accepted || adr.accepted_at.is_some() {
-            summary.knowledge.adrs_accepted = summary.knowledge.adrs_accepted.saturating_add(1);
-        }
-        if adr.status == AdrStatus::Proposed {
-            summary.knowledge.adrs_proposed_open =
-                summary.knowledge.adrs_proposed_open.saturating_add(1);
-        }
     }
 }
 

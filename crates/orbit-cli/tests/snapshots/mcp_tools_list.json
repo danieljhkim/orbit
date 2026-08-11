@@ -1,308 +1,5 @@
 [
   {
-    "description": "Create a Proposed Architecture Decision Record. Returns the assigned global ID and the full record JSON.",
-    "inputSchema": {
-      "additionalProperties": true,
-      "properties": {
-        "body": {
-          "description": "ADR body as markdown. Must include Context / Decision / Consequences sections per the ADR template; at least one consequences bullet must be a labeled `Cost:` line.",
-          "type": "string"
-        },
-        "model": {
-          "description": "Preferred provenance field. Pass the canonical agent family (codex, claude, gemini, or grok); full model strings are accepted and auto-normalized.",
-          "enum": [
-            "codex",
-            "claude",
-            "gemini",
-            "grok"
-          ],
-          "type": "string"
-        },
-        "owner": {
-          "description": "Agent identity that owns the ADR (e.g. `claude`, `codex`). Defaults to the calling actor.",
-          "type": "string"
-        },
-        "paths": {
-          "anyOf": [
-            {
-              "items": {
-                "type": "string"
-              },
-              "type": "array"
-            },
-            {
-              "type": "string"
-            }
-          ],
-          "description": "Repo-relative glob patterns for code or docs areas constrained by this ADR. Defaults to an empty list when omitted."
-        },
-        "related_features": {
-          "anyOf": [
-            {
-              "items": {
-                "type": "string"
-              },
-              "type": "array"
-            },
-            {
-              "type": "string"
-            }
-          ],
-          "description": "Feature folder names this decision touches. Accepts a string or array of strings."
-        },
-        "related_tasks": {
-          "anyOf": [
-            {
-              "items": {
-                "type": "string"
-              },
-              "type": "array"
-            },
-            {
-              "type": "string"
-            }
-          ],
-          "description": "Orbit task IDs that proposed or shipped the decision. May be empty at creation per ADR-008. Accepts a string or array of strings."
-        },
-        "tags": {
-          "anyOf": [
-            {
-              "items": {
-                "type": "string"
-              },
-              "type": "array"
-            },
-            {
-              "type": "string"
-            }
-          ],
-          "description": "Free-form ADR labels. Defaults to an empty list when omitted."
-        },
-        "title": {
-          "description": "ADR title (short noun phrase).",
-          "type": "string"
-        },
-        "workspace": {
-          "description": "Workspace selector for broker routing: a registered logical workspace ID or an absolute path to a local checkout (a linked Git worktree resolves to its registered checkout). Optional when the MCP session announced `_meta.orbit.workspace` at initialize; never inferred from process cwd.",
-          "type": "string"
-        }
-      },
-      "required": [
-        "title",
-        "body"
-      ],
-      "type": "object"
-    },
-    "name": "orbit_adr_add"
-  },
-  {
-    "description": "Fetch a single ADR by global ID or legacy ID alias. Returns the full record JSON including envelope fields and body.",
-    "inputSchema": {
-      "additionalProperties": true,
-      "properties": {
-        "id": {
-          "description": "Canonical ADR ID (e.g. `ADR-0042`).",
-          "type": "string"
-        },
-        "legacy_id": {
-          "description": "Legacy ID alias (e.g. `activity-job/ADR-039`). Either `id` or `legacy_id` must be provided; specifying both is an error.",
-          "type": "string"
-        },
-        "workspace": {
-          "description": "Workspace selector for broker routing: a registered logical workspace ID or an absolute path to a local checkout (a linked Git worktree resolves to its registered checkout). Optional when the MCP session announced `_meta.orbit.workspace` at initialize; never inferred from process cwd.",
-          "type": "string"
-        }
-      },
-      "type": "object"
-    },
-    "name": "orbit_adr_show"
-  },
-  {
-    "description": "Write the bidirectional supersession edge: `old.status = superseded`, `old.superseded_by = new`, and `new.supersedes` gains `old`.",
-    "inputSchema": {
-      "additionalProperties": true,
-      "properties": {
-        "model": {
-          "description": "Preferred provenance field. Pass the canonical agent family (codex, claude, gemini, or grok); full model strings are accepted and auto-normalized.",
-          "enum": [
-            "codex",
-            "claude",
-            "gemini",
-            "grok"
-          ],
-          "type": "string"
-        },
-        "new_id": {
-          "description": "Replacement ADR. Must already be in the `accepted` state, or the call returns an invalid_transition error and writes nothing.",
-          "type": "string"
-        },
-        "old_id": {
-          "description": "ADR being superseded.",
-          "type": "string"
-        },
-        "workspace": {
-          "description": "Workspace selector for broker routing: a registered logical workspace ID or an absolute path to a local checkout (a linked Git worktree resolves to its registered checkout). Optional when the MCP session announced `_meta.orbit.workspace` at initialize; never inferred from process cwd.",
-          "type": "string"
-        }
-      },
-      "required": [
-        "old_id",
-        "new_id"
-      ],
-      "type": "object"
-    },
-    "name": "orbit_adr_supersede"
-  },
-  {
-    "description": "Partial update of an ADR's mutable fields and/or status. Status transitions follow the ADR lifecycle rules.",
-    "inputSchema": {
-      "additionalProperties": true,
-      "properties": {
-        "body": {
-          "description": "Replacement body markdown.",
-          "type": "string"
-        },
-        "id": {
-          "description": "Canonical ADR ID to update.",
-          "type": "string"
-        },
-        "legacy_ids": {
-          "anyOf": [
-            {
-              "items": {
-                "type": "string"
-              },
-              "type": "array"
-            },
-            {
-              "type": "string"
-            }
-          ],
-          "description": "Replacement legacy_ids list (supports rollup aliasing)."
-        },
-        "legacy_validation": {
-          "description": "Set legacy_validation to `none` or `warned`.",
-          "type": "string"
-        },
-        "model": {
-          "description": "Preferred provenance field. Pass the canonical agent family (codex, claude, gemini, or grok); full model strings are accepted and auto-normalized.",
-          "enum": [
-            "codex",
-            "claude",
-            "gemini",
-            "grok"
-          ],
-          "type": "string"
-        },
-        "owner": {
-          "description": "New owner.",
-          "type": "string"
-        },
-        "paths": {
-          "anyOf": [
-            {
-              "items": {
-                "type": "string"
-              },
-              "type": "array"
-            },
-            {
-              "type": "string"
-            }
-          ],
-          "description": "Replacement repo-relative applicability globs. Empty list clears existing paths; absence leaves them unchanged."
-        },
-        "related_features": {
-          "anyOf": [
-            {
-              "items": {
-                "type": "string"
-              },
-              "type": "array"
-            },
-            {
-              "type": "string"
-            }
-          ],
-          "description": "Replacement related_features list."
-        },
-        "related_tasks": {
-          "anyOf": [
-            {
-              "items": {
-                "type": "string"
-              },
-              "type": "array"
-            },
-            {
-              "type": "string"
-            }
-          ],
-          "description": "Replacement related_tasks list. Required (non-empty) when transitioning proposed -> accepted unless the existing record already has tasks."
-        },
-        "status": {
-          "description": "New status. `proposed -> accepted` requires non-empty `related_tasks` on the resulting record. `accepted -> proposed` is rejected. Direct writes to `superseded` are rejected — use orbit.adr.supersede.",
-          "type": "string"
-        },
-        "supersedes": {
-          "anyOf": [
-            {
-              "items": {
-                "type": "string"
-              },
-              "type": "array"
-            },
-            {
-              "type": "string"
-            }
-          ],
-          "description": "Replacement supersedes list."
-        },
-        "tags": {
-          "anyOf": [
-            {
-              "items": {
-                "type": "string"
-              },
-              "type": "array"
-            },
-            {
-              "type": "string"
-            }
-          ],
-          "description": "Replacement free-form ADR labels. Empty list clears existing tags; absence leaves them unchanged."
-        },
-        "title": {
-          "description": "New title.",
-          "type": "string"
-        },
-        "validation_warnings": {
-          "anyOf": [
-            {
-              "items": {
-                "type": "string"
-              },
-              "type": "array"
-            },
-            {
-              "type": "string"
-            }
-          ],
-          "description": "Replacement validation_warnings list."
-        },
-        "workspace": {
-          "description": "Workspace selector for broker routing: a registered logical workspace ID or an absolute path to a local checkout (a linked Git worktree resolves to its registered checkout). Optional when the MCP session announced `_meta.orbit.workspace` at initialize; never inferred from process cwd.",
-          "type": "string"
-        }
-      },
-      "required": [
-        "id"
-      ],
-      "type": "object"
-    },
-    "name": "orbit_adr_update"
-  },
-  {
     "description": "Create a recurring auto-task definition. The generic scheduler mints a task from its template on each due slot.",
     "inputSchema": {
       "additionalProperties": true,
@@ -345,7 +42,7 @@
               "type": "array"
             }
           ],
-          "description": "Task template: `{ title, description?, acceptance_criteria?, task_type?, tags?, priority?, crew?, status? }`. Provider-neutral — no turn knobs. Required."
+          "description": "Task template: `{ title, description?, acceptance_criteria?, task_type?, tags?, priority?, crew?, status? }`. Provider-neutral \u2014 no turn knobs. Required."
         },
         "workspace": {
           "description": "Workspace selector for broker routing: a registered logical workspace ID or an absolute path to a local checkout (a linked Git worktree resolves to its registered checkout). Optional when the MCP session announced `_meta.orbit.workspace` at initialize; never inferred from process cwd.",
@@ -581,7 +278,7 @@
           "type": "string"
         },
         "priority": {
-          "description": "Optional priority (0–255). Used as the secondary ranking key in `search`; higher wins.",
+          "description": "Optional priority (0\u2013255). Used as the secondary ranking key in `search`; higher wins.",
           "type": "integer"
         },
         "scope": {
@@ -596,10 +293,10 @@
               "type": "array"
             }
           ],
-          "description": "Scope object: `{ paths?: string[], tags?: string[] }`. Matches are evaluated as `paths OR tags` per §3.3."
+          "description": "Scope object: `{ paths?: string[], tags?: string[] }`. Matches are evaluated as `paths OR tags` per \u00a73.3."
         },
         "summary": {
-          "description": "One-line headline (≤ 280 chars). Required.",
+          "description": "One-line headline (\u2264 280 chars). Required.",
           "type": "string"
         },
         "workspace": {
@@ -616,7 +313,7 @@
     "name": "orbit_learning_add"
   },
   {
-    "description": "Retire `id` without a replacement: flips status to `superseded` with `superseded_by: null`. Idempotent — archiving an already-superseded record is a no-op success. Use `orbit.learning.supersede` instead when a replacement learning exists.",
+    "description": "Retire `id` without a replacement: flips status to `superseded` with `superseded_by: null`. Idempotent \u2014 archiving an already-superseded record is a no-op success. Use `orbit.learning.supersede` instead when a replacement learning exists.",
     "inputSchema": {
       "additionalProperties": true,
       "properties": {
@@ -729,7 +426,7 @@
           "description": "Replace `scope` entirely: `{ paths?: string[], tags?: string[] }`."
         },
         "summary": {
-          "description": "Replace `summary` (≤ 280 chars).",
+          "description": "Replace `summary` (\u2264 280 chars).",
           "type": "string"
         },
         "workspace": {
@@ -745,7 +442,7 @@
     "name": "orbit_learning_update"
   },
   {
-    "description": "Search tasks, docs, learnings, and ADRs. Hybrid vector ranking applies to indexed tasks, docs, and learnings.",
+    "description": "Search tasks, docs, and learnings. ADR entries are retrieved through the docs corpus; hybrid vector ranking applies to indexed tasks, docs, and learnings.",
     "inputSchema": {
       "additionalProperties": true,
       "properties": {

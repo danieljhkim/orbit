@@ -109,9 +109,6 @@ const PR_REVIEW_COLUMNS = [
 const KNOWLEDGE_SCOREBOARD_COLUMNS = [
   { key: "agent", label: "agent", num: false },
   { key: "knowledge.learnings_created", label: "learnings", num: true },
-  { key: "knowledge.adrs_created", label: "adrs", num: true },
-  { key: "knowledge.adrs_accepted", label: "accepted", num: true },
-  { key: "knowledge.adrs_proposed_open", label: "proposed", num: true },
 ];
 
 const OPERATIONS_SCOREBOARD_COLUMNS = [
@@ -145,7 +142,7 @@ const OPERATIONS_SCOREBOARD_COLUMNS = [
 const ALL_SCOREBOARD_SECTIONS = [
   { title: "Delivery", badge: "tasks created · planned · completed", columns: DELIVERY_SCOREBOARD_COLUMNS },
   { title: "Review", badge: "review threads · PR comments", columns: PR_REVIEW_COLUMNS },
-  { title: "Knowledge", badge: "learnings · ADRs · votes", columns: KNOWLEDGE_SCOREBOARD_COLUMNS },
+  { title: "Knowledge", badge: "learnings · votes", columns: KNOWLEDGE_SCOREBOARD_COLUMNS },
   { title: "Operations", badge: "tool calls · failures · friction", columns: OPERATIONS_SCOREBOARD_COLUMNS },
 ];
 
@@ -421,9 +418,6 @@ function agentActivityTotal(agent) {
     asScoreboardNumber(agent?.tasks_completed) +
     asScoreboardNumber(agent?.pr?.review_comments) +
     asScoreboardNumber(knowledge.learnings_created) +
-    asScoreboardNumber(knowledge.adrs_created) +
-    asScoreboardNumber(knowledge.adrs_accepted) +
-    asScoreboardNumber(knowledge.adrs_proposed_open) +
     asScoreboardNumber(agent?.tool_calls) +
     asScoreboardNumber(agent?.failed_tool_calls) +
     asScoreboardNumber(agent?.friction?.reported)
@@ -432,12 +426,7 @@ function agentActivityTotal(agent) {
 
 function knowledgeScore(agent) {
   const knowledge = agent?.knowledge || {};
-  return (
-    asScoreboardNumber(knowledge.learnings_created) +
-    asScoreboardNumber(knowledge.adrs_created) +
-    asScoreboardNumber(knowledge.adrs_accepted) +
-    asScoreboardNumber(knowledge.adrs_proposed_open)
-  );
+  return asScoreboardNumber(knowledge.learnings_created);
 }
 
 function agentRoleLabel(agent, rows) {

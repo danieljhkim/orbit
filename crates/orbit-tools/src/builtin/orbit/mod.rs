@@ -1,4 +1,3 @@
-pub mod adr;
 pub mod auto_task;
 pub mod command;
 pub mod docs;
@@ -31,36 +30,6 @@ pub(super) struct OrbitIdentity {
 }
 
 pub fn register(registry: &mut ToolRegistry) {
-    // ORB-10727: the `orbit.adr.*` family is slated for withdrawal from MCP with
-    // the ADR store (CONVENTIONS.md §4b), but §4b makes inlining the remaining
-    // pointer-only entries into each feature's `4_decisions.md` a prerequisite,
-    // and the `orbit-knowledge` skill still routes agents here. It stays
-    // advertised until that migration lands; the bridge recomposition does not
-    // do a different feature's cutover. Placement follows the rest of the
-    // knowledge surface: owner-placed, since the store is the owner's.
-    registry.register_mcp(
-        adr::add::OrbitAdrAddTool,
-        agent_operator(McpToolPlacement::Owner),
-    );
-    // ORB-00289: agents query ADR metadata via `orbit search --kind adr`;
-    // `orbit.adr.list` stays available on the CLI / dashboard `runtime.run_tool`
-    // path for admin workflows.
-    registry.register_inactive(adr::list::OrbitAdrListTool);
-    // Exact-id restore is an operator repair surface. Keep it available to
-    // `orbit tool run` without advertising it to ordinary agent sessions.
-    registry.register_inactive(adr::restore::OrbitAdrRestoreTool);
-    registry.register_mcp(
-        adr::show::OrbitAdrShowTool,
-        agent_operator(McpToolPlacement::Owner),
-    );
-    registry.register_mcp(
-        adr::supersede::OrbitAdrSupersedeTool,
-        agent_operator(McpToolPlacement::Owner),
-    );
-    registry.register_mcp(
-        adr::update::OrbitAdrUpdateTool,
-        agent_operator(McpToolPlacement::Owner),
-    );
     // Auto-task definitions [ORB-10149]: agents can define/retune/disable
     // recurring chores. `list` stays CLI/admin only (mirrors learning::list).
     registry.register_mcp(

@@ -46,7 +46,7 @@ pub(crate) struct LearningFileStore {
 impl LearningFileStore {
     #[cfg(test)]
     pub(crate) fn new(root: PathBuf) -> Self {
-        let id_allocator = IdAllocator::for_test_roots(root.join(".adrs"), root.clone());
+        let id_allocator = IdAllocator::for_test_root(root.clone());
         Self {
             root,
             index: None,
@@ -58,7 +58,7 @@ impl LearningFileStore {
 
     #[cfg(test)]
     pub(crate) fn new_with_index(root: PathBuf, index: Store) -> Self {
-        let id_allocator = IdAllocator::for_test_roots(root.join(".adrs"), root.clone());
+        let id_allocator = IdAllocator::for_test_root(root.clone());
         Self::new_with_index_and_allocator(root, index, id_allocator, TEST_WORKSPACE_ID.to_string())
     }
 
@@ -70,7 +70,7 @@ impl LearningFileStore {
         index: Store,
         workspace_id: impl Into<String>,
     ) -> Self {
-        let id_allocator = IdAllocator::for_test_roots(root.join(".adrs"), root.clone());
+        let id_allocator = IdAllocator::for_test_root(root.clone());
         Self::new_with_index_and_allocator(root, index, id_allocator, workspace_id.into())
     }
 

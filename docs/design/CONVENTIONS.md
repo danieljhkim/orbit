@@ -95,7 +95,7 @@ Everything else — organizational choices, crate boundaries, the obvious next i
 
 Measured over the 210 accepted-and-superseded records the store held: 39% were cited from code, 55% only from other design docs, and 24% from nowhere at all. The split was qualitatively clean — code-cited entries described runtime behaviour contracts; doc-only entries described how the tree was arranged. Against that, the store cost ten CLI subcommands, an MCP write surface whose supersede path silently half-worked, a `proposed/` partition that the workspace-init gitignore template hid inside run worktrees — requiring a host-side staging handoff just to ship a draft — a dashboard API, a search index redundant with the docs corpus, and a dormant hub-global sequence allocator. Two systems of record for one decision, and the expensive one was not the one being read.
 
-Migration is mechanical rather than a rescue: `.gitignore` un-ignores `.orbit/adrs/`, so all 229 bodies are already tracked at `.orbit/adrs/{accepted,proposed,superseded}/ADR-NNNN/body.md` and move into their feature's `4_decisions.md` verbatim. Roughly 54 entries across 18 feature folders currently exist only as `orbit.adr.show` pointer lines and must be inlined before the store goes.
+Migration was mechanical rather than a rescue: all 231 tracked store bodies moved verbatim into their feature's `4_decisions.md` before the store and its tool surface were retired by [ORB-10726].
 
 Retiring it keeps every decision and drops the bookkeeping. Door 2 was added after the first draft of this rule made code-citation the sole test, which would have discarded the project's standing preferences along with the noise.
 
@@ -142,7 +142,7 @@ Rules:
 
 Copy [`_templates/specs/_mechanism.md`](./_templates/specs/_mechanism.md): a one-paragraph contract statement, a **Why This Exists** section, mechanism-specific sections, and an optional **Agent Signature**.
 
-A spec is **prescriptive**. It names invariants ("writes do not fall back"), failure modes ("detached HEAD errors"), and migration paths. It is *not* a design-rationale doc — rationale lives in the ADR store and is indexed by `4_decisions.md`.
+A spec is **prescriptive**. It names invariants ("writes do not fall back"), failure modes ("detached HEAD errors"), and migration paths. It is *not* a design-rationale doc — rationale lives in feature `4_decisions.md` entries.
 
 ---
 

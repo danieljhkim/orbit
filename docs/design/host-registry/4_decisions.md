@@ -11,7 +11,7 @@ summary: Decision record for host identity, per-machine coordination, prefix-par
 tags: [host-registry, mcp-bridge, multi-host, ownership]
 paths: ["crates/orbit-remote/**", "crates/orbit-core/**", "crates/orbit-store/**", "crates/orbit-mcp/**"]
 related_features: [host-registry, mcp-bridge]
-related_artifacts: [ORB-00424, ORB-10245, ORB-10248, ORB-10249, ORB-10255, ORB-10257, ORB-10267, ORB-10258, ORB-10268, ORB-10269, ORB-10271, ORB-10272, ORB-10276, ORB-10302, ORB-10319, ORB-10330, ORB-10332, ORB-10709, ORB-10723, ADR-0226, ADR-0227, ADR-0228, ADR-0229, ADR-0230, ADR-0231, ADR-0232, ADR-0235, ADR-0240, ADR-0352, ADR-0355, ADR-0356, ADR-0357, ADR-0358]
+related_artifacts: [ORB-00424, ORB-10245, ORB-10248, ORB-10249, ORB-10255, ORB-10257, ORB-10267, ORB-10258, ORB-10268, ORB-10269, ORB-10271, ORB-10272, ORB-10276, ORB-10302, ORB-10319, ORB-10330, ORB-10332, ORB-10709, ORB-10723, ORB-10728, ADR-0226, ADR-0227, ADR-0228, ADR-0229, ADR-0230, ADR-0231, ADR-0232, ADR-0235, ADR-0240, ADR-0352, ADR-0355, ADR-0356, ADR-0357, ADR-0358]
 ---
 
 # Host Registry — Decisions
@@ -31,334 +31,242 @@ unaffected, as is ADR-0352.
 
 ## ADR-0226 — Singular coordination hub, workspace owner, and per-run placement
 
-**Status:** Superseded by [ADR-0355] · 2026-08 · originally accepted 2026-07 — [ORB-10245] accepted the coupled v1 contract; [ORB-10248] implemented the workspace boundary; [ORB-10249] applied it to task coordination.
+**Status:** Accepted · 2026-07-17 07:03:25.976551Z · [ORB-10245]
+**Owner:** codex
+**Created:** 2026-07-17 07:02:53.852664Z
+**Last updated:** 2026-07-17 07:03:25.976551+00:00
+**Related features:** `host-registry`, `mcp-bridge`
+**Tags:** `coordination`, `ownership`, `placement`, `v1`
+**Paths:** `docs/design/host-registry/**`, `docs/design/mcp-bridge/**`
 
 ### Context
-
-Cross-machine work needs a coordination authority, a knowledge author, and an
-execution destination; making them one authority would scatter task state or make
-ownership implicit.
-
+Cross-machine work needs a coordination authority, a knowledge author, and an execution destination; treating them as the same authority would scatter task state or make ownership implicit.
 ### Decision
-
-Use exactly one coordination hub for every workspace, declare one workspace owner,
-and select execution placement per run with the owner as the default. Persist the
-logical workspace/owner separately from machine-local checkout bindings.
-
+Use exactly one coordination hub for every workspace, declare one workspace owner, and select execution placement per run with the owner as the default.
 ### Consequences
-
 - Coordination writes remain hub-routed while knowledge authorship remains owner-bound.
-- Logical workspace lookup never requires or fabricates a checkout path; local path lookup consults checkout bindings only.
-- Task coordination, global relation resolution, and dependency readiness use logical workspace IDs and never require either workspace checkout.
 - Cost: hub downtime stalls coordination for every workspace, and disconnected machines cannot write coordination records.
-
-**Superseded because the cost line understated the problem.** Routing every
-workspace through one hub was not only an availability dependency — it was
-mandatory. A machine-level `mode` meant a laptop could not keep a purely local
-project local while still getting unique task IDs, because uniqueness was a
-property of the hub's single allocator. [ADR-0355] and [ADR-0356] separate those
-two things. The workspace/checkout split this ADR introduced ([ORB-10248],
-[ORB-10249]) survives unchanged and turned out to be the right substrate.
 
 ## ADR-0227 — Stable machine identity, registry, and out-of-band hub pin
 
-**Status:** Accepted · 2026-07 · [ORB-10245] froze the host identity boundary; [ORB-10255] implemented the durable registry core; [ORB-10267] added operator administration (register/list/rename/retire), current-machine `host.toml` rename coordination, and the hub-global `registry_revision`; [ORB-10268] enforced the machine-global trust and exact hub/store pin at the MCP boundary; [ORB-10271] implemented private spoke self-registration from validated `host.toml`, staged projection results, and definitive-success cache refresh.
+**Status:** Accepted · 2026-07-17 07:03:26.175980Z · [ORB-10245], [ORB-10255]
+**Owner:** codex
+**Created:** 2026-07-17 07:03:20.499802Z
+**Last updated:** 2026-07-18 07:04:05.364678Z
+**Related features:** `host-registry`, `mcp-bridge`
+**Tags:** `identity`, `registry`, `transport-trust`, `v1`
+**Paths:** `docs/design/host-registry/**`, `docs/design/mcp-bridge/**`
 
 ### Context
-
-Hostname-derived strings and per-workspace transport targets can silently redirect a
-machine or elevate repository configuration.
-
+Hostname-derived strings and per-workspace transport targets can silently redirect a machine or elevate repository configuration.
 ### Decision
-
-Give each machine an immutable generated `machine_id`, keep the registry at the hub,
-and pin the one hub `machine_id` out of band in machine-local `mcp.toml`.
-
+Assign every machine an immutable generated machine_id, keep the registry at the hub, and pin the one hub machine_id out of band in machine-local mcp.toml.
 ### Consequences
-
-- Names resolve at binding time and persisted records retain stable identity.
-- Current and historical names remain reserved across active and retired lifecycle
-  states; explicit rename appends a permanent alias and registration cannot rename
-  or reactivate.
-- Cost: bootstrap transfers hub identity out of band, and registry/trust drift needs explicit diagnosis.
-
-**Partially retained.** The `machine_id` contract, the names-resolve-at-binding
-rule, and the out-of-band pinning of a route target all survive verbatim; v1 only
-generalizes "the one hub" to "each route." The *registry* half — the hub-side
-inventory, name reservation across the fleet, and tombstone aliases — is deferred
-with [ADR-0358], which means v1 has no cross-machine name reservation at all.
+- Names resolve once at binding time and persisted records retain the stable identity.
+- Cost: bootstrap transfers the hub identity out of band and registry/trust drift requires explicit diagnosis.
 
 ## ADR-0228 — Local placement broker with capability-set filtering
 
-**Status:** Accepted · 2026-07 · [ORB-10245] froze tool routing and authorization; [ORB-10267] added the `orbit.host.list` and `orbit.workspace.list` canonical discovery tools (hub placement, operator capability, workspace-unscoped) reading one sanitized path-free registry snapshot; [ORB-10268] implemented the fixed checkoutless hub endpoint and exact scalar-capability surface; [ORB-10271] enforced current registered/active caller identity before every ordinary remote call and exposed path-free operator friction list/show; [ORB-10319] colocates MCP-only discovery schema and execution in Remote while retaining dedicated human CLI commands; [ORB-10276] added the workspace-scoped, `{agent, operator}` `orbit.crew.list` (never `runner`) beside the two operator-only global registry tools, reading the owner execution-profile projection through one service that also backs explicit task-crew validation; [ORB-10332] removed the `orbit.host.list` MCP discovery tool as unused (the `orbit host list` CLI command and the `orbit.workspace.list` / `orbit.crew.list` MCP tools remain).
+**Status:** Accepted · 2026-07-17 07:03:26.373231Z · [ORB-10245]
+**Owner:** codex
+**Created:** 2026-07-17 07:03:20.635772Z
+**Last updated:** 2026-07-17 07:03:26.373231Z
+**Related features:** `mcp-bridge`, `host-registry`
+**Tags:** `broker`, `placement`, `capabilities`, `v1`
+**Paths:** `docs/design/mcp-bridge/**`
 
 ### Context
-
-One remote MCP target must preserve local graph and documentation behavior without
-equating where a tool runs with who may invoke it.
-
+A single remote MCP target must preserve local graph/doc behavior and must not equate tool placement with caller privilege.
 ### Decision
-
-Use a local placement broker. Every exposed canonical tool has exactly one of
-`hub`, `owner`, `local-derived`, or `composite` placement and an independently
-filtered non-empty capability set.
-
+Make the client-facing MCP process a local placement broker whose canonical tools declare hub, owner, local-derived, or composite placement and whose effective capability set is independently filtered.
 ### Consequences
-
-- Conformance records placement and allowed capabilities for every exposed tool.
-- Cost: the broker owns route preflight, composite audit, and capability-by-placement coverage.
-
-**Amended by [ADR-0355] and [ADR-0358].** The broker and its four placement classes
-survive; `hub` is reinterpreted from "the one main host" to "the coordinating
-machine for this tool's workspace," which for an owned workspace is in-process. The
-`runner` capability set is withdrawn with execution placement, and the
-`orbit.workspace.list` / `orbit.crew.list` discovery tools now read local registry
-data rather than a fleet snapshot.
+- Tool schemas have one placement and a non-empty allowed capability set.
+- Cost: the broker owns route preflight, composite auditing, and capability-by-placement conformance coverage.
 
 ## ADR-0229 — Owner-authored knowledge with hub-global IDs and explicit replicas
 
-**Status:** Superseded by [ADR-0357] · 2026-08 · originally accepted 2026-07 — [ORB-10245] fixed the one-writer knowledge rule; [ORB-10272] implemented its dormant hub-global sequence, validated reconciliation, and immutable allocation-ledger substrate without activating public issuance; [ORB-10330] added the owner-side preallocated finalizers and the gated broker composition (hub allocation → exact-owner finalization) while keeping public creation on the compatibility path until F3.
+**Status:** Accepted · 2026-07-17 07:03:26.566162Z · [ORB-10245]
+**Owner:** codex
+**Created:** 2026-07-17 07:03:20.765693Z
+**Last updated:** 2026-07-17 07:03:26.566162Z
+**Related features:** `host-registry`, `mcp-bridge`
+**Tags:** `knowledge`, `ownership`, `replicas`, `ids`, `v1`
+**Paths:** `docs/design/host-registry/**`, `docs/design/mcp-bridge/**`
 
 ### Context
-
-Knowledge needs global IDs without making a hub checkout or a stale replica a second
-author.
-
+Knowledge needs globally allocated identifiers without making a hub checkout or a stale replica a second author.
 ### Decision
-
-The hub allocates global IDs, the declared owner authors current knowledge, and Git
-replicas are opt-in reads marked as replicas. The hub never proxies to a spoke owner.
-Hub activation first reconciles every registered workspace's complete hub-local
-legacy file/allocation inventory; missing sources and cross-workspace duplicate IDs
-fail before mutation. A later workspace stays knowledge-ineligible until the same
-reconciliation succeeds under the allocator lock.
-
+The hub allocates global IDs, the declared owner authors current knowledge, and Git replicas are opt-in reads marked as replicas; the hub never proxies to a spoke owner.
 ### Consequences
-
-- A non-owner agent routes actionable work as a task to the owner.
-- Exact `mcp_call_id` replay is idempotent only for the same full request identity;
-  sequence advance, immutable ledger append, and canonical hub audit commit atomically.
-- Standalone/worktree allocation remains the compatibility path until F3 performs
-  the explicit activation and caller cutover.
-- Cost: finalize failure consumes a valid unused ID, and current spoke-owned knowledge is unavailable off-owner.
-
-**Superseded because the global ID was never needed.** All of the machinery above —
-reconciliation, the allocation ledger, the dormant/active marker, the
-allocate-then-finalize composition — exists to make one number unique across
-machines. [ADR-0357] observes that knowledge records are already addressed within a
-workspace and keys them `(workspace_id, artifact_key)`, at which point the entire
-protocol evaporates: no reservation, no expiry, no orphaned ID, no finalize/pull
-race. F3 never ran, so no ID was ever issued from the hub sequence and nothing needs
-renumbering. The one-writer-per-workspace rule this ADR established survives intact.
+- A non-owner agent files work for the owner rather than writing through a new route.
+- Cost: finalize failures consume valid-but-unused IDs and current spoke-owned knowledge is unavailable off-owner.
 
 ## ADR-0230 — Pull-based leases with immutable placement and explicit recovery
 
-**Status:** Superseded by [ADR-0358] · 2026-08 · originally accepted 2026-07 — [ORB-10245] fixed runner delivery semantics.
+**Status:** Accepted · 2026-07-17 07:03:26.764043Z · [ORB-10245]
+**Owner:** codex
+**Created:** 2026-07-17 07:03:20.898467Z
+**Last updated:** 2026-07-17 07:03:26.764043Z
+**Related features:** `host-registry`, `mcp-bridge`
+**Tags:** `leases`, `placement`, `recovery`, `runner`, `v1`
+**Paths:** `docs/design/host-registry/**`, `docs/design/mcp-bridge/**`
 
 ### Context
-
-A hub-push executor model needs outbound spoke routes and obscures the placement
-selected and leased for a run.
-
+A hub-push executor model would require outbound spoke routing and makes retries obscure the placement actually selected and leased.
 ### Decision
-
-Spokes poll the hub for placed runs. Requested and actual placement are immutable;
-pre-start loss permits redelivery, while post-start uncertainty is
-`recovery_required` and needs explicit recovery.
-
+Spokes poll the hub for placed runs; requested and actual placement are immutable, pre-start loss returns a run for redelivery, and post-start uncertainty requires explicit recovery.
 ### Consequences
-
 - The hub is a mailbox and never opens a route to a spoke.
-- Cost: pickup latency follows poll cadence and an interrupted started run is not silently reassigned.
-
-**Superseded by withdrawal, not by a better protocol.** The lease design is sound
-and [ADR-0358] does not replace it with anything — v1 simply has no case for
-running a task anywhere but the machine that owns its workspace. The mailbox
-posture and the immutable requested/actual snapshot are the parts to reread if
-placement returns ([3_vision.md §1 Q3](./3_vision.md)).
+- Cost: pickup latency follows poll cadence and an interrupted started run requires operator/shepherd recovery rather than silent reassignment.
 
 ## ADR-0231 — Committed-routine ownership with host-local cursors
 
-**Status:** Accepted · 2026-07 · [ORB-10245] fixed routine execution ownership;
-[ORB-10270] supplied the registry/cache validation and reassignment evidence.
+**Status:** Accepted · 2026-07-17 07:03:26.898178Z · [ORB-10245], [ORB-10258], [ORB-10270]
+**Owner:** codex
+**Created:** 2026-07-17 07:03:21.036752Z
+**Last updated:** 2026-07-18 23:03:06.740466Z
+**Related features:** `host-registry`
+**Tags:** `routines`, `ownership`, `cursor`, `v1`
+**Paths:** `docs/design/host-registry/**`, `docs/design/routines/**`
 
 ### Context
-
-Git-committed routines converge to many checkouts, while scheduler cursor and pause
-state must remain local to the executing host.
-
+Git-committed routines converge to many checkouts, while scheduler cursors and pauses must remain locally meaningful.
 ### Decision
-
-A committed routine is owned by its registry-validated host pin; unpinned committed
-routines fail closed, and each host retains its own cursor and pause state.
-
+A committed routine is owned by its registry-validated host pin; unpinned committed routines fail closed, and each host retains its own cursor and pause state.
 ### Consequences
-
-- Reassignment is a reviewed pin change rather than a git-status inference.
-- Cost: handoff starts with no migrated cursor and existing committed routines need explicit pins.
-
-**Amended by [ADR-0358], not superseded.** The ownership rule and host-local cursors
-are unchanged. What weakens is *validation*: with no fleet registry, a pin resolves
-against local `host.toml` and locally-known owner names only, so an unrecognized
-name cannot be distinguished from a typo and there is no `last_seen` to notice a
-quiet owner. The own-host case — the one that decides whether anything fires — stays
-decidable offline, which was always the load-bearing half.
+- Reassigning a routine is a reviewed pin change rather than a git-status inference.
+- Cost: handoff starts with no migrated cursor and existing committed routines need explicit pins before enforcement.
 
 ## ADR-0232 — Retire Bridge’s Orbit-shaped contract
 
-**Status:** Accepted · 2026-07 · [ORB-10245] set the cutover boundary.
+**Status:** Accepted · 2026-07-17 07:03:27.035875Z · [ORB-10245]
+**Owner:** codex
+**Created:** 2026-07-17 07:03:21.165568Z
+**Last updated:** 2026-07-17 07:03:27.035875Z
+**Related features:** `mcp-bridge`
+**Tags:** `bridge`, `contract`, `retirement`, `v1`
+**Paths:** `docs/design/mcp-bridge/**`
 
 ### Context
-
-Bridge parity duplicates Orbit schemas, errors, and workflow declarations even
-though Orbit is the canonical domain owner.
-
+Bridge parity duplicated Orbit schemas, errors, and workflow declarations despite Orbit being the canonical domain owner.
 ### Decision
-
-Retire Bridge’s Orbit-shaped contract after Orbit MCP reaches parity; Bridge remains
-for its non-Orbit constellation domains.
-
+Retire Bridge’s Orbit-shaped contract after Orbit MCP reaches parity; Bridge remains only for its non-Orbit constellation domains.
 ### Consequences
-
 - Clients register Orbit and Bridge side by side during migration.
-- Cost: cutover temporarily maintains two registrations and requires deletion of a compatibility layer.
+- Cost: cutover temporarily maintains two client registrations and requires deleting a compatibility layer rather than extending it.
 
 ## ADR-0235 — Make orbit-registry the singular host/workspace registry domain crate
 
-**Status:** Accepted · 2026-07 · [ORB-10302] established the crate boundary.
+**Status:** Accepted · 2026-07-18 18:58:42.207312Z · [ORB-10302]
+**Owner:** codex
+**Created:** 2026-07-18 18:58:37.266035Z
+**Last updated:** 2026-07-18 18:58:42.207312Z
+**Related features:** `host-registry`, `mcp-bridge`
+**Tags:** `crate-boundary`, `host-registry`, `singular-hub`
+**Paths:** `crates/orbit-registry/**`, `crates/orbit-core/src/host_registry.rs`, `crates/orbit-core/src/routines/host.rs`, `crates/orbit-core/src/workspace_registry.rs`, `crates/orbit-core/src/registry_cache.rs`, `crates/orbit-store/**`
 
 ### Context
 
-C3 left identity, workspace-catalog, cache, and registry-service behavior in
-`orbit-core`, while `orbit-registry` exposed an unused opaque-byte replication and
-merge model that contradicted the singular-hub contract.
+C3 left strict host identity, the logical workspace catalog, the satellite cache, and the store-backed registry service in orbit-core while the existing orbit-registry crate exposed an unused opaque-byte replication and merge model. The real alternatives were to keep that domain in orbit-core, retain a generic replication substrate alongside it, or establish a dedicated one-way registry domain boundary.
 
 ### Decision
 
-Repurpose `orbit-registry` as the machine/workspace registry domain. It owns host
-identity, local catalog/checkouts/roles, cache semantics, and the store-backed
-service. Keep runtime profile/ship construction in `orbit-core`, persistence in
-`orbit-store`, shared DTOs in `orbit-common`, and reject any
-`orbit-store -> orbit-registry` edge.
+Repurpose orbit-registry as the machine/workspace registry domain crate. It owns host identity, local workspace catalog/checkouts/roles, registry-cache semantics, and the store-backed HostRegistryService; orbit-core depends on it and temporarily re-exports compatibility surfaces. orbit-store remains the only owner of SQL, migrations, revision advancement, and transactional snapshot queries, and it must never depend on orbit-registry. The opaque replicated Registry/Replica/merge/transport model is retired because v1 has one singular coordination hub and no replicated registry writers.
 
 ### Consequences
 
-- The dependency direction is `orbit-core -> orbit-registry -> orbit-store -> orbit-common`, with the existing direct `orbit-core -> orbit-store` edge retained.
-- Temporary `orbit-core` compatibility re-exports avoid an atomic caller rewrite without retaining duplicate implementations.
-- Cost: `orbit-registry` is no longer a consumer-agnostic leaf and now compiles the store layer; reversing the boundary requires another domain move or a cycle-prone abstraction.
+- The intended dependency direction is orbit-core -> orbit-registry -> orbit-store -> orbit-common, with orbit-core also retaining its direct orbit-store edge.
+- Runtime execution-profile construction, catalog validation, and ship-closure hashing stay in orbit-core; shared DTOs stay in orbit-common.
+- Compatibility re-exports let current callers migrate imports incrementally without preserving a second domain implementation.
+- Cost: orbit-registry is no longer a consumer-agnostic leaf and now compiles the store layer; reversing this boundary would require moving the domain again or introducing a cycle-prone abstraction.
 
-**Replacement:** [ADR-0240] superseded this horizontal boundary when [ORB-10319]
-landed. ADR-0235 remains the accepted historical decision that explains the
-intermediate architecture.
+## ADR-0240 — Consolidate remote host and MCP behavior in the vertical orbit-remote crate
 
-## ADR-0240 — Consolidate remote coordination in one vertical feature crate
-
-**Status:** Accepted · 2026-07 · [ORB-10319] implemented the boundary.
+**Status:** Accepted · 2026-07-19 07:19:02.142649Z · [ORB-10319]
+**Owner:** codex
+**Created:** 2026-07-19 03:09:37.970409Z
+**Last updated:** 2026-07-19 07:19:02.142649Z
+**Related features:** `host-registry`, `mcp-bridge`
+**Supersedes:** `ADR-0235`
+**Tags:** `architecture`, `crate-boundary`, `orbit-remote`, `vertical-feature`, `plugin-style`, `dependency-direction`
+**Paths:** `crates/orbit-remote/**`, `crates/orbit-cli/src/command/mcp/**`, `crates/orbit-core/**`, `crates/orbit-store/**`, `crates/orbit-tools/**`, `crates/orbit-mcp/**`, `crates/orbit-common/**`, `crates/orbit-dashboard/**`, `ARCHITECTURE.md`, `scripts/check-dependency-direction.sh`, `docs/design/host-registry/**`, `docs/design/mcp-bridge/**`
 
 ### Context
 
-The registry-only extraction in ADR-0235 still made one remote feature cross CLI,
-Core, Registry, Store, MCP, and Tools whenever persistence, contract composition,
-and routing changed together. A separate broker crate would add another
-horizontal layer while leaving that coordination cost in place.
+The coupled Host Registry and MCP Bridge implementation now spans registry identity/catalog/cache in `orbit-registry`, active registry SQL in `orbit-store`, registry-aware runtime and tool dispatch in `orbit-core`, canonical remote tools in `orbit-tools`, remote protocol hooks in `orbit-mcp`, and broker/hub/link/registration composition in `orbit-cli`. The previously proposed answer was an additional horizontal `orbit-mcp-broker` crate above those layers. That would remove code from the CLI but preserve the seven-crate change tax for every later remote feature.
+
+The real alternatives are: keep the horizontal layers and add the broker crate; absorb all RMCP infrastructure into the feature; or create one vertical remote feature crate while retaining small generic infrastructure kernels. The first preserves the coupling problem, while the second makes reusable RMCP transport inseparable from Orbit's host-registry policy.
 
 ### Decision
 
-Rename and widen `orbit-registry` into `orbit-remote`, a vertical feature crate that
-owns host/workspace registry behavior, its SQLite statements and feature schema,
-profiles and caches, MCP contract composition, the local broker, hub authority and
-link, and registration. Keep `orbit-store` and `orbit-mcp` as neutral kernels,
-shared DTOs in `orbit-common`, generic builtin definitions in `orbit-tools`, and the
-transport-independent coordination executor in `orbit-core`. Reuse the same
-config-resolved `orbit.db`; do not introduce a Remote database or a separate broker
-crate.
+Rename and expand `orbit-registry` into one internal vertical feature crate, `orbit-remote`. It owns host identity, workspace roles/catalog/cache, registry services, active registry SQL and namespaced feature migrations, trusted hub configuration, broker/hub/link/registration composition, remote tool definitions and handlers, remote-specific MCP contracts and client behavior, and local graph/learning MCP composition.
+
+The dependency direction is `orbit-cli|orbit-dashboard -> orbit-remote -> {orbit-core, orbit-store, orbit-tools, orbit-mcp, orbit-graph, orbit-graph-extract, orbit-common}`. Core, Store, Tools, MCP, and Graph do not depend back on Remote. Core exposes registry-free runtime bindings, execution-environment snapshots, routine-placement projections, and the transport-independent checkoutless `HubCoordinationExecutor`; Remote calls that executor from its hub/broker orchestration without injecting remote tools into Core. Store exposes generic pooled-read, transaction, and namespaced feature-migration capabilities. Tools retains its generic builtin registry, while Remote composes those definitions with feature-owned discovery and graph definitions. MCP retains only reusable RMCP framing, schema/name translation, stdio transport, raw client primitives, and generic extension/composition hooks.
+
+Keep the existing config-resolved global `orbit.db`. Shipped global migrations v5, v6, and v8 remain immutable compatibility shims and v7 remains Store-owned audit schema. Global v9 introduces only the generic feature-schema ledger; `orbit-remote` feature migration v1 validates and adopts the existing registry tables without copying, renaming, or rewriting data. All future remote schema changes advance the Remote feature ledger rather than editing Store's domain migration list.
+
+This decision supersedes ADR-0235's narrower `orbit-registry -> orbit-store` domain boundary and replaces the unimplemented `orbit-mcp-broker` proposal.
 
 ### Consequences
 
-- Remote behavior and persistence evolve behind one crate API without reverse
-  dependencies from Core, Store, MCP, Tools, or Common.
-- Remote v1 adopts the existing global v5/v6/v8 registry tables in place through
-  Store's namespaced feature-migration ledger, preserving every row.
-- Remote v2 adds the dormant hub-global knowledge sequence and reconciliation
-  tables in the same database [ORB-10272]; the feature can evolve that transaction
-  without moving knowledge policy into Store.
-- CLI and dashboard remain thin consumers; generic MCP framing and raw client code
-  no longer know registry, graph, learning, hub, or placement policy.
-- Cost: `orbit-remote` is intentionally broad and requires internal module
-  discipline; changes shared by unrelated features still belong in a neutral
-  kernel and must not be absorbed merely for convenience.
+- Later registry, knowledge-routing, placement, runner, and hub-link work has one owning feature crate; shared crates change only when a genuinely generic contract or infrastructure seam changes.
+- `orbit-cli` and `orbit-dashboard` become consumers of a stable Remote facade instead of composition owners, and `orbit-core` no longer imports registry types or services.
+- Registry persistence keeps its existing database, table names, transaction boundaries, and data while active SQL and behavior tests move beside the domain.
+- `orbit-mcp` remains reusable and acyclic; graph, learning, hub contract, registration, and routing policy are composed by Remote.
+- Historical migrations cannot be deleted after ownership moves; Store permanently retains the frozen bootstrap shims required to open old and fresh databases.
+- Cost: this is a larger atomic refactor than a broker-only move. It requires neutral Core factories/providers, one generic Store migration seam, MCP composition hooks, and coordinated test relocation before the crate rename can compile without a dependency cycle.
 
 ## ADR-0352 — Gate workflow dispatch on an exclusive TTL'd workspace claim
 
-**Status:** Accepted · 2026-08 · [ORB-10709]
+**Status:** Accepted · 2026-08-10 03:19:10.679145Z · [ORB-10709]
+**Owner:** human
+**Created:** 2026-08-10 01:29:41.181497Z
+**Last updated:** 2026-08-10 03:19:10.679145Z
+**Related features:** `host-registry`
+**Tags:** `host-registry`, `workflow`, `capability`, `coordination`
+**Paths:** `crates/orbit-core/src/command/job/pipeline.rs`, `crates/orbit-core/src/runtime/workspace_claim.rs`, `crates/orbit-common/src/authorization.rs`, `crates/orbit-store/src/sqlite/**`, `crates/orbit-core/src/runtime/task_locks.rs`
 
 ### Context
 
-Ownership binds a workspace to a machine, not to an operator, and several operator
-sessions can now reach one workspace concurrently. The duplicate-dispatch guard is
-keyed on task id over a bounded window, and discovery-mode submissions carry no
-task ids at all, so two of them in one workspace both proceed. File reservations
-arbitrate between workers, not between orchestrators.
+Workspace ownership is a declared binding to a machine, never a runtime claim, and the design states the reasoning plainly: coordination has one writer by construction, and two owners for one workspace is split-brain. That held while one operator drove a workspace.
+
+It no longer holds. Several operator sessions can now reach the same workspace concurrently — an off-box orchestrator over the owned tunnel, a local operator broker, a session over SSH — and nothing arbitrates between them. Ownership answers *which machine*, not *which operator*, and two operator sessions on one machine are indistinguishable to the existing model.
+
+The guards that exist do not cover this. The duplicate-dispatch guard is per task id and scans a bounded window of recent runs, so a stale non-terminal run outside the window is invisible. Worse, auto and backlog-discovery submissions carry no task ids at all and are unguarded entirely: two discovery ship runs in one workspace both proceed. Task reservations are file-scoped, advisory, and enforced only at gate-pipeline admission — they arbitrate between workers, not between orchestrators.
+
+The contention is specific. Reading, searching, filing tasks, and authoring knowledge are safe concurrently, and several people working different features in one workspace is the desired behaviour. What cannot be concurrent is *dispatch*: triage, ship, and resume decide what work starts and against which base, and two orchestrators making those decisions independently produce duplicated runs and racing branch state.
 
 ### Decision
 
-Take an exclusive, TTL-bounded workspace claim as a precondition for the governed
-workflow operations only, enforced at the shared run-submission path so every
-surface inherits it. Acquisition mints a holder-presented claim token; contention
-rejects with holder and expiry; force-release exists and is audited.
+Introduce an exclusive, TTL'd **workspace claim** held by one operator, and make it a precondition for workflow dispatch only.
+
+- The claim gates exactly the governed workflow operations. Every other operation — task create, read, update, search, knowledge, friction — is unaffected and remains concurrent.
+- Enforcement lives at the shared run-submission path, not at a protocol adapter, so every surface inherits it: CLI, HTTP, MCP, and remote command execution alike. A caller holding shell cannot route around it, because the CLI reaches the same chokepoint.
+- Acquisition mints a **claim token** returned to the holder and presented on subsequent workflow calls. Machine and session identity are recorded for diagnostics but are not load-bearing, because session identity is minted per connection and does not survive a reconnect.
+- Contention is a rejection carrying the current holder and the expiry instant, never a silent queue or a silent steal.
+- The claim is TTL-bounded with lazy expiry evaluated on each check, and an explicit force-release exists and is audited.
+- Claim scope is a distinct dimension from file reservations. It must not be expressed as a whole-workspace file selector, which would also block the worker reservations it is meant to leave alone.
+
+## As implemented (ORB-10709)
+
+Three choices the decision above left open, each load-bearing:
+
+- **The claim reuses the `task_reservations` table**, separated from worker file reservations by a `scope` discriminator (`files` / `workspace_claim`, schema migration v13) rather than by a parallel table. That inherits the atomic `IMMEDIATE`-transaction acquisition, TTL, lazy expiry, audit, and release escape hatch already built there. *Rejected alternative:* a dedicated `workspace_claims` table — honest about the "distinct dimension", but roughly 250 lines duplicating the machinery this decision exists to reuse. The scope discriminator is a required argument of the shared SQL predicate, so the compiler asks every query site which dimension it reads; claim rows additionally carry an empty file list, so even a forgotten filter cannot produce a path conflict.
+- **An unclaimed workspace gates nothing.** The claim arbitrates *between* operators who want one; it is not a mandatory ceremony before every dispatch. Requiring one unconditionally would break every existing unattended dispatch and would make "the refusal names the current holder" meaningless. Refusal happens only when an active claim exists and the caller presents no token or a stale one.
+- **`orbit run ship-sweep` stands down rather than failing** when it meets a held claim: the unattended sweep carries no token and does not force, so a claimed workspace is reported as skipped with the holder, not as a sweep error.
+
+Surfaces: `claim_token` on the `orbit.workflow.ship` / `orbit.workflow.run.resume` tools, `orbit run ship --claim-token`, the dashboard ship and resume bodies, and `ORBIT_WORKSPACE_CLAIM_TOKEN` for an operator shell. Acquire / release / force-release / status are the `orbit.workspace.claim.*` tools, registered inactive alongside `orbit.task.locks.*` — operator-reachable through `orbit tool run`, absent from the agent MCP surface. `orbit.workspace.claim.release` is a governed operation requiring `Operator`, because force-release displaces whoever is driving dispatch.
 
 ### Consequences
 
-- Concurrent dispatch becomes impossible by construction, including on the
-  currently unguarded discovery path, while filing and inspecting work stay
-  concurrent so several people can work different features in one workspace.
-- Cost: a third TTL-bounded exclusive hold joins reservations and leases, at a
-  third granularity, with no self-evident distinction in the names.
-- Cost: a dead holder blocks dispatch until TTL; force-release is both the escape
-  hatch and the thing that makes the guarantee advisory if it becomes habitual.
-- Cost: the claim token is client-held state, and a holder that loses it must wait
-  or force.
-- Cost: contradicts [resident-orchestrator/2_design.md §3](../resident-orchestrator/2_design.md),
-  which avoided a lease subsystem deliberately; that reasoning is revised, not
-  silently overridden.
-
-**As implemented ([ORB-10709]).** Three choices the decision above left open,
-recorded here because each is load-bearing:
-
-- **The claim reuses the `task_reservations` table**, separated from worker file
-  reservations by a `scope` discriminator (`files` / `workspace_claim`, schema
-  migration v13) rather than by a parallel table. That inherits the atomic
-  `IMMEDIATE`-transaction acquisition, TTL, lazy expiry, audit, and release
-  escape hatch already built there. *Rejected alternative:* a dedicated
-  `workspace_claims` table — honest about the "distinct dimension", but roughly
-  250 lines duplicating the machinery this decision exists to reuse. The scope
-  discriminator is a required argument of the shared SQL predicate, so the
-  compiler asks every query site which dimension it reads; claim rows
-  additionally carry an empty file list, so even a forgotten filter cannot
-  produce a path conflict.
-- **An unclaimed workspace gates nothing.** The claim arbitrates *between*
-  operators who want one; it is not a mandatory ceremony before every dispatch.
-  Requiring one unconditionally would break every existing unattended dispatch
-  and make "naming the current holder" in a refusal meaningless. Refusal happens
-  only when an active claim exists and the caller presents no token or a stale
-  one.
-- **`orbit run ship-sweep` stands down rather than failing** when it meets a held
-  claim: the unattended sweep has no token and does not force, so a claimed
-  workspace is reported as skipped with the holder, not as a sweep error.
-
-Surfaces: `claim_token` on the `orbit.workflow.ship` / `orbit.workflow.run.resume`
-tools, `orbit run ship --claim-token`, the dashboard ship and resume bodies, and
-`ORBIT_WORKSPACE_CLAIM_TOKEN` for an operator shell. Acquire / release /
-force-release / status are the `orbit.workspace.claim.*` tools, registered
-inactive alongside `orbit.task.locks.*` — operator-reachable through `orbit tool
-run`, absent from the agent MCP surface. `orbit.workspace.claim.release` is a
-governed operation requiring `Operator`, because force-release displaces whoever
-is driving dispatch.
-
-**Unaffected by the v1 revision.** The claim answers "which operator is driving
-this workspace right now"; ownership answers "which machine holds it." [ADR-0355]
-changes the second and leaves the first intact — collapsing them would reintroduce
-exactly the split-brain [ADR-0200] rejected.
+- Concurrent dispatch by independent orchestrators becomes impossible rather than merely discouraged, and the unguarded discovery-mode submission path is covered by construction rather than by a second bespoke check.
+- Multi-operator use of one workspace becomes coherent: filing and inspecting work stays open, so several people can work different features while exactly one drives execution.
+- **Cost:** a third exclusivity concept joins declared ownership and run leases. Orbit will hold reservations, leases, and claims — all TTL-bounded exclusive holds at different granularities. Without deliberate vocabulary discipline these will be confused for one another.
+- **Cost:** a dead holder blocks dispatch until the TTL elapses. Force-release is the necessary escape hatch and also the thing that weakens the guarantee, since a habitual force-release makes the claim advisory in practice.
+- **Cost:** the claim token is state the holder must keep. A client that loses it must wait out the TTL or force, even though it is the legitimate holder.
+- **Cost:** two coordination dimensions now share one table. The discriminator is compiler-enforced at every query site and claim rows carry no files, but a future reader of `task_reservations` must still learn that the table holds two things.
+- **Cost:** this contradicts the resident-orchestrator design, which chose one-active-epic plus non-overlapping routine fires plus a host pin specifically to avoid introducing a lease or assignee subsystem. That decision is revised, not left standing in contradiction.
+- Declared ownership stays what it is. The claim answers "which operator is driving this workspace right now", not "which machine holds the canonical checkout", and the two must not be collapsed.
 
 ## ADR-0355 — Every machine is its own coordination host
 
@@ -410,9 +318,9 @@ rather than removed.
 
 ## ADR-0356 — Machine-scoped task-id prefix instead of a global allocator
 
-**Status:** Accepted · 2026-08 · [ORB-10723] implemented prefix- and width-agnostic parsing, host-prefix minting, and registry-constrained text scanning.
+**Status:** Accepted · 2026-08 · [ORB-10723] implemented prefix- and width-agnostic parsing, host-prefix minting, and registry-constrained text scanning; [ORB-10728] implemented foreign-prefix relation storage and local-only validation.
 **Scope:** task ID minting, ID parsing, cross-machine references
-**Code anchors:** `crates/orbit-common/src/types/task_artifacts.rs`, `crates/orbit-store/src/sqlite/task_registry/store.rs::parse_orb_task_number`, `crates/orbit-core/src/command/docs/artifact_ref.rs`
+**Code anchors:** `crates/orbit-common/src/types/task_artifacts.rs`, `crates/orbit-common/src/types/task.rs::task_reference_is_not_verifiable_here`, `crates/orbit-store/src/sqlite/task_registry/store.rs::parse_orb_task_number`, `crates/orbit-core/src/command/docs/artifact_ref.rs`
 
 ### Context
 
@@ -439,6 +347,9 @@ a human-scale choice, not a coordinated allocation. Reject `ORB`, `ADR`, `L`, an
   This is what makes deferring registration ([ADR-0358]) safe, so the two decisions
   hold each other up and neither should be adopted alone.
 - Moving a workspace between owners becomes a row copy rather than an ID rewrite.
+- An unresolved target under a locally known prefix remains invalid. An unresolved
+  foreign-prefix target is stored and rendered as `not verifiable here`; a foreign
+  dependency is non-gating because this machine cannot observe its lifecycle state.
 - Cost: prefix collisions are possible and silent. Nothing detects two machines
   choosing the same prefix until their records meet, and v1 adds no lint.
 - Cost: cross-machine chronology is destroyed. `ORB-10601` was visibly later than
@@ -537,6 +448,33 @@ would leave a silent, unrecoverable ID collision.
   becomes dormant. "Deferred" is a promise that costs maintenance and may never be
   collected.
 
+## ADR-0243 — Drop the autonomous spoke runner track in favor of orchestrator-driven dispatch
+
+**Status:** Proposed · 2026-07-19 21:59:19.974550Z · [ORB-10281], [ORB-10282], [ORB-10283], [ORB-10284], [ORB-10246], [ORB-10269]
+**Owner:** human
+**Created:** 2026-07-19 21:59:19.974550Z
+**Last updated:** 2026-07-19 21:59:19.974550Z
+**Tags:** `host-registry`, `mcp-bridge`, `runner`, `execution-placement`
+
+### Context
+
+The I/J wave of the ORB-10246 multi-host plan (ORB-10281 hub run leases, ORB-10282 one-shot spoke runner journal and leased executor, ORB-10283 durable report recovery and fault injection, ORB-10284 minute-clock integration) was designed for unattended pull-based execution: a spoke machine polls the hub, leases runs, survives crashes via a durable local journal, and reports back with strict ack-before-spawn ordering — all with nobody watching.
+
+Since 2026-07-12 the operating model is deliberately the opposite: dispatch is orchestrator-driven with no scheduled ship-sweep. The orchestrator triages, dispatches explicit task ids via workflow_ship, and shepherds every run to done (ship-shepherd / run-rescue). The orchestration layer is already the durability and recovery authority; a spoke-side lease journal would duplicate that one layer down. Additionally, all execution today happens on the machine hosting the hub (worker via bridge, or direct SSH sessions), so no second machine needs to lease work. The lease/journal/poll machinery (I2/I3) is among the hardest, most stateful code in the plan, and none of the four tasks has started.
+
+### Decision
+
+Cancel the runner-lease track: ORB-10281, ORB-10282, ORB-10283, and ORB-10284. Do not build autonomous spoke polling, run leases, runner-only MCP tools, the spoke runner journal, or runner/routine clock composition.
+
+If a second execution machine materializes, reach it with supervised push-style invocation (agent_invoke over the existing SSH-carried MCP link from ORB-10269, which lands independently and is retained), accepting that a crashed remote run is re-dispatched by the shepherd rather than resumed from a local journal.
+
+### Consequences
+
+- The multi-host plan under ORB-10246 shrinks to the landed registry/broker/knowledge waves; remaining H/G units should be re-audited for dependencies they assumed on I/J (placement-aware submission ORB-10280 in particular) before promotion.
+- Unattended crash-resumable execution on remote spokes is forgone; recovery for any future remote execution is re-dispatch by the orchestrator, which can duplicate side effects of a partially completed run — acceptable because runs land through PR-gated review or are otherwise idempotent at the task level.
+- Cost: if a genuinely unattended multi-machine fleet is ever needed, this track must be re-scoped and re-planned; the cancelled task specs remain in the store as the starting point, but design context will have aged.
+- Roll-forward: this decision reverses cheaply — no code was built, no schema shipped, and ORB-10269's transport remains available for either push or pull designs.
+
 ## Task References
 
 - [ORB-00424] — completed design proposal for canonical Orbit MCP and Bridge parity retirement.
@@ -546,6 +484,9 @@ would leave a silent, unrecoverable ID collision.
 - [ORB-10723] — implemented ADR-0356: task parsing accepts registered machine
   prefixes and wider numeric suffixes, while allocation retains one monotonic
   machine sequence and formats it with the immutable host prefix.
+- [ORB-10728] — stores unresolved foreign-prefix task relations with an explicit
+  `not verifiable here` projection, keeps locally prefixed misses as hard errors,
+  and treats foreign dependencies as non-gating for local readiness.
 - [ORB-10248] — implemented the versioned logical-workspace/local-checkout split.
 - [ORB-10249] — implemented path-free task coordination and global task-relation/readiness lookup.
 - [ORB-10255] — implemented ADR-0227's append-only SQLite host/alias core with

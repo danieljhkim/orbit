@@ -53,7 +53,6 @@ const STATUS_UPDATE_TARGETS = STATUS_ORDER
 const JOB_RUN_LIMIT = positiveIntParam("runs", 25);
 const DIAG_LIMIT = positiveIntParam("diag", 50);
 const LEARNING_LIMIT = positiveIntParam("learnings", 100);
-const ADR_LIMIT = positiveIntParam("adrs", 100);
 const FRICTION_LIMIT = positiveIntParam("frictions", 100);
 
 const FRICTION_STATUSES = ["open", "triaged", "resolved"];
@@ -68,7 +67,6 @@ let lastTasks = [];
 let lastRuns = [];
 let lastDiagnostics = { metrics: [], errors: [], implement_one: [] };
 let lastLearningPayload = { stats: {}, items: [] };
-let lastAdrPayload = { stats: {}, items: [] };
 let lastFrictionPayload = { stats: {}, tags: [], items: [] };
 let activeTab = "tasks";
 let activeDiagSubtab = "runs";
@@ -76,8 +74,6 @@ let activeKnowledgeSubtab = "learnings";
 let isRefreshing = false;
 let activeLearningId = null;
 let learningSearchQuery = "";
-let activeAdrId = null;
-let adrSearchQuery = "";
 let activeFrictionId = null;
 let frictionSearchQuery = "";
 
@@ -680,7 +676,7 @@ function renderFrictionDetail(friction) {
       ])),
       detailGroup("triage", controls),
       detailGroup("tags", knowledgeTagWrap(frictionTagNodes(friction.tags))),
-      friction.during_task ? detailGroup("during task", buildAdrValueList([friction.during_task], { taskLinks: true })) : null,
+      friction.during_task ? detailGroup("during task", buildKnowledgeValueList([friction.during_task], { taskLinks: true })) : null,
     ].filter(Boolean)),
   ]);
 
@@ -796,86 +792,8 @@ async function resolveFriction(friction, btn, detail) {
   }
 }
 
-function adrList(adr, field) {
-  return Array.isArray(adr && adr[field]) ? adr[field] : [];
-}
-
-function adrPrimaryFeature(adr) {
-  const features = adrList(adr, "related_features");
-  if (features.length === 0) return "-";
-  if (features.length === 1) return features[0];
-  return `${features[0]} +${features.length - 1}`;
-}
-
-function renderAdrStats(stats = {}) {
-  $("adr-proposed-value").textContent = formatBigInt(stats.proposed || 0);
-  $("adr-accepted-value").textContent = formatBigInt(stats.accepted || 0);
-  $("adr-superseded-value").textContent = formatBigInt(stats.superseded || 0);
-}
-
-function renderAdrs(payload) {
-  const body = $("adrs-body");
-  if (!body) return;
-  const items = Array.isArray(payload && payload.items) ? payload.items : [];
-  const stats = (payload && payload.stats) || {};
-  renderAdrStats(stats);
-  $("knowledge-count").textContent = `${items.length}/${stats.total || items.length}`;
-
-  if (items.length > 0 && !items.some((item) => item.id === activeAdrId)) {
-    activeAdrId = items[0].id;
-  }
-  if (items.length === 0) activeAdrId = null;
-
-  if (items.length === 0) {
-    syncNodes(body, [el("div", { class: "empty-state" }, [
-      el("div", { class: "icon", text: "✧" }),
-      el("div", { class: "text", text: "No ADRs match the current filter." }),
-    ])]);
-    renderAdrDetail(null);
-    return;
-  }
-
-  const frag = document.createDocumentFragment();
-
-  for (const adr of items) {
-    const feature = adrPrimaryFeature(adr);
-    const accepted = adr.accepted_at ? fmtTimestamp(adr.accepted_at) : "-";
-    const row = el("div", { class: "knowledge-row adr-row", title: adr.title || adr.id }, [
-      el("div", { class: "top" }, [
-        el("span", { class: "id", text: adr.id, title: adr.id }),
-        el("span", { class: "spacer" }),
-        el("span", { class: "when", text: adr.accepted_at ? accepted : fmtTimestamp(adr.last_updated || adr.created_at), title: fmtAbsTime(adr.accepted_at || adr.last_updated || adr.created_at) }),
-      ]),
-      el("div", { class: "title", text: adr.title || adr.id }),
-      el("div", { class: "summary", text: truncate(adr.body || "", 180) }),
-      el("div", { class: "meta" }, [
-        knowledgeStatusPill(adr.status || "proposed"),
-        el("span", { class: "dot", text: "·" }),
-        knowledgeTagWrap(adrList(adr, "related_features").slice(0, 4).map((value) => el("span", { class: "knowledge-tag feature", text: value, title: value })).concat(
-          adrList(adr, "related_features").length === 0 ? [el("span", { class: "knowledge-tag dim", text: feature })] : [],
-        )),
-        ...(adr.owner ? [
-          el("span", { class: "dot", text: "·" }),
-          el("span", { text: `owner ${adr.owner}` }),
-        ] : []),
-      ]),
-    ]);
-    row.dataset.key = `adr-${adr.id}`;
-    row.dataset.hash = `${adr.id}-${adr.status}-${adr.accepted_at || ""}-${adr.superseded_by || ""}-${activeAdrId === adr.id}`;
-    if (activeAdrId === adr.id) row.classList.add("active");
-    row.addEventListener("click", () => {
-      activeAdrId = adr.id;
-      renderAdrs(lastAdrPayload);
-    });
-    frag.appendChild(row);
-  }
-
-  syncNodes(body, Array.from(frag.children));
-  renderAdrDetail(items.find((item) => item.id === activeAdrId) || items[0]);
-}
-
-function buildAdrValueList(values, opts = {}) {
-  const wrap = el("div", { class: "adr-detail-list" });
+function buildKnowledgeValueList(values, opts = {}) {
+  const wrap = el("div", { class: "knowledge-detail-list" });
   if (!values || values.length === 0) {
     wrap.appendChild(el("span", { class: "knowledge-tag dim", text: "-" }));
     return wrap;
@@ -912,128 +830,6 @@ function openTaskFromKnowledge(taskId) {
   }).catch(() => copyTaskIdWithNotice(taskId, taskContext()));
 }
 
-function renderAdrDetail(adr) {
-  const detail = $("adr-detail");
-  if (!detail) return;
-  const count = $("adr-detail-count");
-  if (!adr) {
-    if (count) count.textContent = "-";
-    syncNodes(detail, [el("div", { class: "empty-state" }, [
-      el("div", { class: "icon", text: "✧" }),
-      el("div", { class: "text", text: "No ADR selected." }),
-    ])]);
-    return;
-  }
-  if (count) count.textContent = adr.status || "proposed";
-
-  const actions = el("div", { class: "actions" });
-  if (adr.status === "proposed") {
-    const accept = el("button", {
-      class: "knowledge-btn primary",
-      text: "accept",
-      title: `Accept ${adr.id}`,
-    });
-    accept.type = "button";
-    accept.addEventListener("click", () => acceptAdr(adr, accept, detail));
-    actions.appendChild(accept);
-  }
-  if (adr.status === "accepted") {
-    const supersede = el("button", {
-      class: "knowledge-btn primary",
-      text: "supersede",
-      title: `Supersede ${adr.id}`,
-    });
-    supersede.type = "button";
-    supersede.addEventListener("click", () => {
-      const by = window.prompt(`Replacement ADR ID for ${adr.id}`);
-      if (!by || !by.trim()) return;
-      supersedeAdr(adr, by.trim(), supersede, detail);
-    });
-    actions.appendChild(supersede);
-  }
-
-  const supersession = [
-    ...adrList(adr, "supersedes").map((id) => `supersedes ${id}`),
-    ...(adr.superseded_by ? [`superseded_by ${adr.superseded_by}`] : []),
-  ];
-  const body = el("div", { class: "knowledge-detail-body" }, [
-    el("div", { class: "knowledge-body" }, [
-      markdownPanel(adr.body || adr.title, "adr-detail-body"),
-    ]),
-    el("aside", { class: "knowledge-side" }, [
-      detailGroup("metadata", detailMetaRows([
-        ["id", adr.id],
-        ["status", adr.status || "proposed"],
-        ["owner", adr.owner],
-        ["created", fmtAbsTime(adr.created_at)],
-        ["accepted", fmtAbsTime(adr.accepted_at)],
-        ["updated", fmtAbsTime(adr.last_updated)],
-      ])),
-      detailGroup("related features", buildAdrValueList(adrList(adr, "related_features"))),
-      detailGroup("related tasks", buildAdrValueList(adrList(adr, "related_tasks"), { taskLinks: true })),
-      detailGroup("supersession", buildAdrValueList(supersession)),
-    ]),
-  ]);
-
-  syncNodes(detail, [
-    el("div", { class: "knowledge-detail-head" }, [
-      el("div", { class: "crumb" }, [
-        el("span", { class: "id", text: adr.id }),
-        el("span", { text: "·" }),
-        el("span", { text: "architecture decision" }),
-        el("span", { text: "·" }),
-        el("span", { text: adr.status || "proposed" }),
-      ]),
-      el("h2", { text: adr.title || adr.id }),
-      el("div", { class: "sub" }, [
-        knowledgeStatusPill(adr.status || "proposed"),
-        adr.owner ? el("span", { text: `owner ${adr.owner}` }) : null,
-        el("span", { class: "dot", text: "·" }),
-        el("span", { text: `updated ${fmtTimestamp(adr.last_updated || adr.created_at)}` }),
-      ]),
-      actions,
-    ]),
-    body,
-  ]);
-}
-
-async function acceptAdr(adr, btn, detail) {
-  await runAdrAction(
-    adr,
-    btn,
-    detail,
-    () => postJson(`/api/adrs/${encodeURIComponent(adr.id)}/accept`),
-    "accept failed",
-  );
-}
-
-async function supersedeAdr(adr, by, btn, detail) {
-  await runAdrAction(
-    adr,
-    btn,
-    detail,
-    () => postJson(`/api/adrs/${encodeURIComponent(adr.id)}/supersede`, { by }),
-    "supersede failed",
-  );
-}
-
-async function runAdrAction(adr, btn, detail, action, fallbackMessage) {
-  const oldText = btn.textContent;
-  btn.disabled = true;
-  btn.innerHTML = `<span class="spinner"></span>wait`;
-  for (const node of detail.querySelectorAll(".action-error")) node.remove();
-  try {
-    await action();
-    activeAdrId = adr.id;
-    await fetchAndRenderAdrs();
-  } catch (e) {
-    detail.prepend(el("div", { class: "action-error", text: e.message || fallbackMessage }));
-  } finally {
-    btn.disabled = false;
-    btn.textContent = oldText;
-  }
-}
-
 function wireLearningSearch() {
   const input = $("learning-search");
   if (!input) return;
@@ -1043,19 +839,6 @@ function wireLearningSearch() {
     if (debounce) clearTimeout(debounce);
     debounce = setTimeout(() => {
       if (activeTab === "knowledge") fetchAndRenderLearnings().catch(console.error);
-    }, 200);
-  });
-}
-
-function wireAdrSearch() {
-  const input = $("adr-search");
-  if (!input) return;
-  let debounce = null;
-  input.addEventListener("input", (e) => {
-    adrSearchQuery = e.target.value.trim();
-    if (debounce) clearTimeout(debounce);
-    debounce = setTimeout(() => {
-      if (activeTab === "knowledge") fetchAndRenderAdrs().catch(console.error);
     }, 200);
   });
 }
@@ -1195,8 +978,7 @@ function renderDiagnosticsPlaceholders() {
   if (diagCount) diagCount.textContent = "—";
 }
 
-// ORB-00044: the knowledge detail panels (learning-detail / adr-detail /
-// friction-detail) hold live action buttons (supersede, accept, resolve, and
+// ORB-00044: the knowledge detail panels (learning-detail / friction-detail) hold live action buttons (supersede, accept, resolve, and
 // the friction status/tag controls) that POST/PATCH per-workspace endpoints.
 // Left stale in aggregate mode, a click would fire without ?workspace= — 400 in
 // pure-global mode, or a silent write to the default workspace inside a
@@ -1350,9 +1132,7 @@ function activeRefreshJobs() {
   }
 
   if (activeTab === "knowledge") {
-    if (activeKnowledgeSubtab === "adrs") {
-      jobs.push(fetchAndRenderAdrs());
-    } else if (activeKnowledgeSubtab === "frictions") {
+    if (activeKnowledgeSubtab === "frictions") {
       jobs.push(fetchAndRenderFrictions());
     } else {
       jobs.push(fetchAndRenderLearnings());
@@ -1516,23 +1296,6 @@ function fetchAndRenderLearnings() {
   });
 }
 
-function fetchAndRenderAdrs() {
-  // ORB-00040: /api/adrs is per-workspace; skip it in aggregate mode.
-  // ORB-00044: also replace the stale detail panel (live accept/supersede).
-  if (isAggregateView()) {
-    renderPanelPlaceholder("adrs-body");
-    renderKnowledgeDetailPlaceholder("adr");
-    return Promise.resolve();
-  }
-  const sp = new URLSearchParams();
-  sp.set("limit", String(ADR_LIMIT));
-  if (adrSearchQuery) sp.set("q", adrSearchQuery);
-  return fetchJson(`/api/adrs?${sp.toString()}`).then((payload) => {
-    lastAdrPayload = payload || { stats: {}, items: [] };
-    renderAdrs(lastAdrPayload);
-  });
-}
-
 function fetchAndRenderFrictions() {
   // ORB-00040: /api/frictions and /api/frictions/stats are per-workspace; skip
   // both in aggregate mode.
@@ -1649,7 +1412,6 @@ const tasksContext = taskContext();
 buildChips(tasksContext);
 wireSearch(tasksContext);
 wireLearningSearch();
-wireAdrSearch();
 wireFrictionSearch();
 wireGlobalTaskResolver();
 buildAuditChips(auditContext());

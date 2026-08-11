@@ -85,7 +85,7 @@ pub use orbit_common::types::{
     LearningStatus, ProjectionFreshness, SanitizedExecutionProfile, SanitizedWorkspacePresence,
     StoredExecutionProfile, Task, TaskComplexity, TaskCreateStatus, TaskPriority, TaskStatus,
     TaskType, WorkspaceOwnership, WorkspacePresenceDeclaration, resolve_task_dependencies,
-    task_dependencies_ready,
+    resolve_task_relations, task_dependencies_ready,
 };
 pub use orbit_common::types::{MissedRunPolicy, NotFoundKind, OrbitError, OverlapPolicy};
 pub use orbit_common::utility::redaction::redact_sensitive_env_text;

@@ -64,7 +64,7 @@ pub struct TaskIndexFilter {
     pub tags: Vec<String>,
 }
 
-/// A relation edge whose target is a valid `ORB-` task id that does not
+/// A relation edge whose target uses a locally known task prefix but does not
 /// resolve to any registered task bundle in the coordination registry — the
 /// exact condition
 /// [`validate_relation_targets_exist`](crate::sqlite::task_registry::TaskRegistryStore)
@@ -73,9 +73,9 @@ pub struct TaskIndexFilter {
 /// scan (see ORB-10305).
 ///
 /// `relation_type` carries the canonical snake_case name as stored in the
-/// registry (`related_to`, `blocked_by`, …); non-`ORB-` targets (friction /
-/// learning / ADR ids that `produces`/`resolves` edges legitimately allow to
-/// dangle) are never reported here.
+/// registry (`related_to`, `blocked_by`, …); non-task artifact targets and
+/// foreign-prefix task references that legitimately remain unresolved are
+/// never reported here.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DanglingRelationTarget {
     pub workspace_id: String,

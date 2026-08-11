@@ -21,9 +21,11 @@ fn search_result_doc_json_shape_matches_legacy_flat_record() {
             paths: Vec::new(),
             related_features: Vec::new(),
             related_artifacts: vec!["ORB-00160".to_string()],
+            body: String::new(),
         },
         score: 84,
         matched_by: vec!["summary".to_string()],
+        snippet: None,
     });
 
     let actual = serde_json::to_value(&result).expect("serialize search result");

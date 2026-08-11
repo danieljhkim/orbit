@@ -18,7 +18,7 @@ use super::{
     docs::DocsSubcommand,
     hook::HookSubcommand,
     mcp::McpSubcommand,
-    search::{SearchKindArg, SearchSubcommand},
+    search::SearchSubcommand,
     semantic::{SemanticIndexKindArg, SemanticSubcommand},
     web::WebSubcommand,
 };
@@ -297,7 +297,7 @@ fn cli_semantic_index_defaults_kind_to_tasks() {
 
 #[test]
 fn cli_semantic_index_rejects_singular_kinds_at_clap_layer() {
-    for kind in ["adr", "learning"] {
+    for kind in ["adr", "adrs", "learning"] {
         let error = match Cli::try_parse_from(["orbit", "semantic", "index", "--kind", kind]) {
             Ok(_) => panic!("singular kinds should be rejected"),
             Err(error) => error,
@@ -306,23 +306,8 @@ fn cli_semantic_index_rejects_singular_kinds_at_clap_layer() {
         assert!(message.contains("possible values"), "{message}");
         assert!(message.contains("tasks"), "{message}");
         assert!(message.contains("docs"), "{message}");
-        assert!(message.contains("adrs"), "{message}");
         assert!(message.contains("learnings"), "{message}");
         assert!(message.contains("all"), "{message}");
-    }
-}
-
-#[test]
-fn cli_semantic_index_parses_adrs_kind() {
-    let cli = Cli::parse_from(["orbit", "semantic", "index", "--kind", "adrs"]);
-    match cli.command {
-        Commands::Semantic(command) => match command.command {
-            SemanticSubcommand::Index(args) => {
-                assert_eq!(args.kind, SemanticIndexKindArg::Adrs);
-            }
-            _ => panic!("expected semantic index"),
-        },
-        _ => panic!("expected top-level semantic command"),
     }
 }
 
@@ -349,7 +334,7 @@ fn cli_semantic_index_help_explains_kind_principle() {
     let help = error.to_string();
     assert!(
         help.contains(
-            "--kind selects corpus: tasks (default), docs (same as `orbit docs index`), adrs, learnings, all (rebuilds all indexed corpora)."
+            "--kind selects corpus: tasks (default), docs (same as `orbit docs index`), learnings, all (rebuilds all indexed corpora)."
         ),
         "{help}"
     );
@@ -443,16 +428,12 @@ fn cli_parses_top_level_search_path_lookup() {
 }
 
 #[test]
-fn cli_parses_top_level_search_tag_filter() {
-    let cli = Cli::parse_from(["orbit", "search", "perf", "--tag", "perf", "--kind", "adr"]);
-    match cli.command {
-        Commands::Search(args) => {
-            assert_eq!(args.query.as_deref(), Some("perf"));
-            assert_eq!(args.tags, vec!["perf"]);
-            assert_eq!(args.kind, SearchKindArg::Adr);
-        }
-        _ => panic!("expected top-level search command"),
-    }
+fn cli_rejects_retired_adr_search_kind() {
+    assert_cli_rejects(
+        &["orbit", "search", "perf", "--kind", "adr"],
+        ErrorKind::InvalidValue,
+        "invalid value 'adr'",
+    );
 }
 
 #[test]

@@ -2,8 +2,8 @@ use std::collections::{BTreeMap, VecDeque};
 
 use orbit_common::types::{LearningStatus, OrbitError};
 use orbit_search::{
-    AdrSemanticHit, AdrSemanticSearchParams, DocSemanticHit, DocSemanticSearchParams,
-    LearningSemanticHit, LearningSemanticSearchParams, SemanticRelatedParams, SemanticSearchParams,
+    DocSemanticHit, DocSemanticSearchParams, LearningSemanticHit, LearningSemanticSearchParams,
+    SemanticRelatedParams, SemanticSearchParams,
 };
 use orbit_store::LearningSearchParams;
 
@@ -24,28 +24,21 @@ pub use types::{
     GlobalSearchHit, GlobalSearchKind, GlobalSearchMode, GlobalSearchParams, GlobalSearchResponse,
 };
 
-use self::convert::{
-    adr_result_to_global, adr_to_global_hit, adr_to_global_hit_with_source, doc_result_to_global,
-    filter_matched_by, lexical_task_hit, semantic_hit_to_global,
-};
+use self::convert::{doc_result_to_global, lexical_task_hit, semantic_hit_to_global};
 use self::filters::{
-    SearchStatusFilters, adr_has_all_tags, adr_result_has_all_tags, doc_has_all_tags,
-    learning_has_all_tags, resolve_adr_statuses, resolve_learning_statuses, resolve_task_statuses,
-    task_has_all_tags,
+    SearchStatusFilters, doc_has_all_tags, learning_has_all_tags, resolve_learning_statuses,
+    resolve_task_statuses, task_has_all_tags,
 };
 use self::hybrid::{
-    AdrHybridCandidate, DocHybridCandidate, LearningHybridCandidate, blend_adr_hybrid_candidates,
-    blend_adr_lexical_fallback, blend_doc_hybrid_candidates, blend_learning_hybrid_candidates,
-    compare_global_hits_by_score, doc_search_candidate_limit, lexical_doc_hits_with_adrs,
-    push_skip_note, warn_adr_hybrid_fallback, warn_doc_hybrid_fallback,
-    warn_learning_hybrid_fallback,
+    DocHybridCandidate, LearningHybridCandidate, blend_doc_hybrid_candidates,
+    blend_learning_hybrid_candidates, compare_global_hits_by_score, doc_search_candidate_limit,
+    lexical_doc_hits, push_skip_note, warn_doc_hybrid_fallback, warn_learning_hybrid_fallback,
 };
 use self::path_match::learning_scope_contains_path;
 
 const DEFAULT_LIMIT: usize = 10;
 const DOC_SEARCH_OVERFETCH: usize = 4;
 const DOC_HYBRID_FALLBACK_NOTE: &str = "falling back to lexical doc search";
-const ADR_HYBRID_FALLBACK_NOTE: &str = "falling back to lexical ADR search";
 const LEARNING_HYBRID_FALLBACK_NOTE: &str = "falling back to lexical learning search";
 const TASK_HYBRID_FALLBACK_NOTE: &str = "falling back to lexical task search";
 const DOC_SEARCH_MIN_CANDIDATES: usize = DEFAULT_LIMIT * DOC_SEARCH_OVERFETCH;
@@ -54,9 +47,6 @@ const DOC_SEARCH_MIN_CANDIDATES: usize = DEFAULT_LIMIT * DOC_SEARCH_OVERFETCH;
 thread_local! {
     static DOC_SEMANTIC_SEARCH_OVERRIDE:
         std::cell::RefCell<Option<Result<Vec<DocSemanticHit>, String>>> =
-        const { std::cell::RefCell::new(None) };
-    static ADR_SEMANTIC_SEARCH_OVERRIDE:
-        std::cell::RefCell<Option<Result<Vec<AdrSemanticHit>, String>>> =
         const { std::cell::RefCell::new(None) };
     static LEARNING_SEMANTIC_SEARCH_OVERRIDE:
         std::cell::RefCell<Option<Result<Vec<LearningSemanticHit>, String>>> =
@@ -166,17 +156,6 @@ impl OrbitRuntime {
                     &mut notes,
                 )?);
             }
-        }
-
-        if params.kind.includes_adrs() {
-            branches.push(self.adr_branch(
-                &params,
-                &status_filters,
-                query_owned.as_deref(),
-                &tag_filter,
-                limit,
-                &mut notes,
-            )?);
         }
 
         if params.kind.includes_learnings() {
@@ -368,20 +347,19 @@ impl OrbitRuntime {
 
         let mut out = Vec::new();
         for result in docs {
-            if let SearchResult::Doc(result) = result {
-                if !tag_filter.is_empty() {
-                    let record_tags = &result.record.tags;
-                    if !tag_filter.iter().all(|tag| {
-                        record_tags
-                            .iter()
-                            .any(|candidate| candidate.eq_ignore_ascii_case(tag))
-                    }) {
-                        continue;
-                    }
+            let SearchResult::Doc(result) = result;
+            if !tag_filter.is_empty() {
+                let record_tags = &result.record.tags;
+                if !tag_filter.iter().all(|tag| {
+                    record_tags
+                        .iter()
+                        .any(|candidate| candidate.eq_ignore_ascii_case(tag))
+                }) {
+                    continue;
                 }
-                let score = result.score as f32;
-                out.push(doc_result_to_global(result, "lexical", Some(score)));
             }
+            let score = result.score as f32;
+            out.push(doc_result_to_global(result, "lexical", Some(score)));
         }
         out.truncate(limit);
         Ok(out)
@@ -396,8 +374,6 @@ impl OrbitRuntime {
     ) -> Result<Vec<GlobalSearchHit>, OrbitError> {
         let docs_limit = doc_search_candidate_limit(scope.limit);
         let mut lexical_docs = BTreeMap::<String, orbit_search::DocSearchResult>::new();
-        let mut lexical_adrs = BTreeMap::<String, AdrHybridCandidate>::new();
-        let adr_statuses = resolve_adr_statuses(scope.params, scope.status_filters);
         for result in lexical_results {
             match result {
                 SearchResult::Doc(result) => {
@@ -414,44 +390,18 @@ impl OrbitRuntime {
                     }
                     lexical_docs.insert(result.record.path.clone(), result);
                 }
-                SearchResult::Adr(result) => {
-                    if !adr_statuses.contains(&result.status) {
-                        continue;
-                    }
-                    if scope.tag_filter.is_empty()
-                        || adr_result_has_all_tags(&result, scope.tag_filter)
-                    {
-                        lexical_adrs.insert(
-                            result.id.clone(),
-                            AdrHybridCandidate {
-                                hit: adr_result_to_global(result.clone(), "hybrid"),
-                                lexical_score: Some(result.score as f32),
-                                semantic_score: None,
-                                semantic: None,
-                            },
-                        );
-                    }
-                }
             }
         }
 
         let semantic = match self.doc_semantic_hits(query, docs_limit) {
             Ok(result) if result.is_empty() => {
                 warn_doc_hybrid_fallback(notes, "no doc embeddings found");
-                return Ok(lexical_doc_hits_with_adrs(
-                    lexical_docs,
-                    lexical_adrs,
-                    scope.limit,
-                ));
+                return Ok(lexical_doc_hits(lexical_docs, scope.limit));
             }
             Ok(result) => result,
             Err(error) => {
                 warn_doc_hybrid_fallback(notes, &error.to_string());
-                return Ok(lexical_doc_hits_with_adrs(
-                    lexical_docs,
-                    lexical_adrs,
-                    scope.limit,
-                ));
+                return Ok(lexical_doc_hits(lexical_docs, scope.limit));
             }
         };
 
@@ -508,9 +458,6 @@ impl OrbitRuntime {
 
         let weight = self.docs_search_config()?.semantic_weight;
         let mut ranked = blend_doc_hybrid_candidates(candidates.into_values().collect(), weight);
-        let mut adr_ranked =
-            self.hybrid_adr_hits_from_candidates(query, lexical_adrs, scope, notes)?;
-        ranked.append(&mut adr_ranked);
         ranked.sort_by(compare_global_hits_by_score);
         ranked.truncate(scope.limit);
         Ok(ranked)
@@ -529,204 +476,6 @@ impl OrbitRuntime {
         Ok(orbit_search::doc_semantic_search(
             &self.stores().semantic_vector,
             DocSemanticSearchParams {
-                query: query.to_string(),
-                limit,
-                model: None,
-            },
-        )?
-        .results)
-    }
-
-    fn adr_branch(
-        &self,
-        params: &GlobalSearchParams,
-        status_filters: &SearchStatusFilters,
-        query: Option<&str>,
-        tag_filter: &[String],
-        limit: usize,
-        notes: &mut Vec<String>,
-    ) -> Result<Vec<GlobalSearchHit>, OrbitError> {
-        let lexical = self.adr_lexical_hits(params, status_filters, query, tag_filter, limit)?;
-        if !params.hybrid {
-            return Ok(lexical);
-        }
-        let Some(query) = query else {
-            return Ok(lexical);
-        };
-
-        self.hybrid_adr_hits(
-            query,
-            lexical,
-            HybridSearchScope {
-                params,
-                status_filters,
-                tag_filter,
-                limit,
-            },
-            notes,
-        )
-    }
-
-    fn adr_lexical_hits(
-        &self,
-        params: &GlobalSearchParams,
-        status_filters: &SearchStatusFilters,
-        query: Option<&str>,
-        tag_filter: &[String],
-        limit: usize,
-    ) -> Result<Vec<GlobalSearchHit>, OrbitError> {
-        let statuses = resolve_adr_statuses(params, status_filters);
-        let path = params.path.as_deref();
-
-        let Some(query) = query else {
-            let mut out = Vec::new();
-            for adr in self.stores().adrs().list_adrs()? {
-                if !statuses.contains(&adr.status) {
-                    continue;
-                }
-                if !tag_filter.is_empty() && !adr_has_all_tags(&adr, tag_filter) {
-                    continue;
-                }
-                if let Some(path) = path
-                    && !orbit_search::adr_paths_contain_path(&adr.paths, path)?
-                {
-                    continue;
-                }
-                out.push(adr_to_global_hit(adr, filter_matched_by(tag_filter, path)));
-            }
-            out.truncate(limit);
-            return Ok(out);
-        };
-
-        let docs_limit = doc_search_candidate_limit(limit);
-        // Pass `true` so the underlying lexical pass admits superseded ADRs;
-        // we apply the status filter ourselves below.
-        let docs = self.search_docs(query, Some(docs_limit), true)?;
-        let mut out = Vec::new();
-        for result in docs {
-            if let SearchResult::Adr(result) = result {
-                if !statuses.contains(&result.status) {
-                    continue;
-                }
-                if !tag_filter.is_empty() && !adr_result_has_all_tags(&result, tag_filter) {
-                    continue;
-                }
-                if let Some(path) = path
-                    && !orbit_search::adr_paths_contain_path(&result.paths, path)?
-                {
-                    continue;
-                }
-                out.push(adr_result_to_global(result, "lexical"));
-            }
-        }
-        out.truncate(limit);
-        Ok(out)
-    }
-
-    fn hybrid_adr_hits(
-        &self,
-        query: &str,
-        lexical: Vec<GlobalSearchHit>,
-        scope: HybridSearchScope<'_>,
-        notes: &mut Vec<String>,
-    ) -> Result<Vec<GlobalSearchHit>, OrbitError> {
-        let lexical_count = lexical.len();
-        let mut lexical_adrs = BTreeMap::<String, AdrHybridCandidate>::new();
-        for (idx, hit) in lexical.into_iter().enumerate() {
-            let Some(id) = hit.id.clone() else {
-                continue;
-            };
-            let lexical_score = hit.score.or(Some((lexical_count - idx) as f32));
-            lexical_adrs.insert(
-                id,
-                AdrHybridCandidate {
-                    hit: GlobalSearchHit {
-                        source: "hybrid".to_string(),
-                        ..hit
-                    },
-                    lexical_score,
-                    semantic_score: None,
-                    semantic: None,
-                },
-            );
-        }
-
-        self.hybrid_adr_hits_from_candidates(query, lexical_adrs, scope, notes)
-    }
-
-    fn hybrid_adr_hits_from_candidates(
-        &self,
-        query: &str,
-        lexical_adrs: BTreeMap<String, AdrHybridCandidate>,
-        scope: HybridSearchScope<'_>,
-        notes: &mut Vec<String>,
-    ) -> Result<Vec<GlobalSearchHit>, OrbitError> {
-        let adr_limit = doc_search_candidate_limit(scope.limit);
-        let semantic = match self.adr_semantic_hits(query, adr_limit) {
-            Ok(result) if result.is_empty() => {
-                warn_adr_hybrid_fallback(notes, "no ADR embeddings found");
-                return Ok(blend_adr_lexical_fallback(lexical_adrs, scope.limit));
-            }
-            Ok(result) => result,
-            Err(error) => {
-                warn_adr_hybrid_fallback(notes, &error.to_string());
-                return Ok(blend_adr_lexical_fallback(lexical_adrs, scope.limit));
-            }
-        };
-
-        let statuses = resolve_adr_statuses(scope.params, scope.status_filters);
-        let path = scope.params.path.as_deref();
-        let mut candidates = lexical_adrs;
-        for hit in semantic {
-            let adr = match self.stores().adrs().get_adr(&hit.source_id) {
-                Ok(Some(adr)) => adr,
-                Ok(None) | Err(_) => continue,
-            };
-            if !statuses.contains(&adr.status) {
-                continue;
-            }
-            if !scope.tag_filter.is_empty() && !adr_has_all_tags(&adr, scope.tag_filter) {
-                continue;
-            }
-            if let Some(path) = path
-                && !orbit_search::adr_paths_contain_path(&adr.paths, path)?
-            {
-                continue;
-            }
-
-            candidates
-                .entry(hit.source_id.clone())
-                .and_modify(|candidate| {
-                    candidate.semantic_score = Some(hit.score);
-                    candidate.semantic = Some(hit.clone());
-                })
-                .or_insert_with(|| AdrHybridCandidate {
-                    hit: adr_to_global_hit_with_source(adr, "hybrid", None),
-                    lexical_score: None,
-                    semantic_score: Some(hit.score),
-                    semantic: Some(hit),
-                });
-        }
-
-        let weight = self.adr_search_config()?.semantic_weight;
-        let mut ranked = blend_adr_hybrid_candidates(candidates.into_values().collect(), weight);
-        ranked.truncate(scope.limit);
-        Ok(ranked)
-    }
-
-    fn adr_semantic_hits(
-        &self,
-        query: &str,
-        limit: usize,
-    ) -> Result<Vec<AdrSemanticHit>, OrbitError> {
-        #[cfg(test)]
-        if let Some(result) = ADR_SEMANTIC_SEARCH_OVERRIDE.with(|cell| cell.borrow().clone()) {
-            return result.map_err(OrbitError::Execution);
-        }
-
-        Ok(orbit_search::adr_semantic_search(
-            &self.stores().semantic_vector,
-            AdrSemanticSearchParams {
                 query: query.to_string(),
                 limit,
                 model: None,

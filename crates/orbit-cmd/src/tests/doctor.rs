@@ -288,14 +288,13 @@ fn interrupted_layout_upgrade_is_reported_stale() {
 
 #[cfg(unix)]
 #[test]
-fn stale_task_learning_and_adr_lock_files_are_removed() {
+fn stale_task_and_learning_lock_files_are_removed() {
     let temp = tempfile::tempdir().expect("tempdir");
     let runtime = workspace_runtime(&temp);
     let paths = runtime.paths();
     let stale_locks = [
         paths.tasks_dir.join(".ORB-00001.lock"),
         paths.learnings_dir.join(".L-0001.lock"),
-        paths.adrs_dir.join(".locks").join("adr-0001.lock"),
     ];
 
     let dead_pid = reaped_child_pid();
@@ -520,7 +519,6 @@ fn seed_learning_allocation_in(runtime: &OrbitRuntime, worktree: &Path, reap: bo
         paths.state_dir.join(".id_alloc.lock"),
         paths.orbit_dir.clone(),
         worktree.to_path_buf(),
-        paths.adrs_dir.clone(),
         paths.learnings_dir.clone(),
     ))
     .expect("open allocator");
@@ -630,7 +628,6 @@ fn collect_lock_files_scans_the_store_lock_locations() {
         paths.state_dir.join(".id_alloc.lock"),
         paths.tasks_dir.join(".ORB-00001.lock"),
         paths.learnings_dir.join(".L-0001.lock"),
-        paths.adrs_dir.join(".locks").join("adr-0001.lock"),
     ];
     for path in &expected {
         fs::create_dir_all(path.parent().expect("parent")).expect("create dir");

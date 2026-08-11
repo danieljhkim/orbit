@@ -3,7 +3,7 @@ summary: "User Interface — Decisions"
 type: design
 title: "User Interface — Decisions"
 owner: gemini
-last_updated: 2026-08-09
+last_updated: 2026-08-11
 status: Draft
 feature: user-interface
 doc_role: decisions
@@ -25,129 +25,241 @@ Proposed until its separate lifecycle approval.
 
 ## ADR-0283 — Canon Refined Aesthetic
 
-**Status:** Proposed · 2026-04 · [T20260427-29] · legacy_id: `user-interface/ADR-001`
+**Status:** Accepted · 2026-07-26 21:51:43.494533Z · [T20260427-29], [ORB-10458]
+**Owner:** claude
+**Created:** 2026-07-26 21:51:43.159838Z
+**Last updated:** 2026-07-26 21:51:43.494533+00:00
+**Related features:** `user-interface`
+**Legacy IDs:** `user-interface/ADR-001`
+**Tags:** `user-interface`
 
-Narrative lives in the ADR store — retrieve it with `orbit tool run orbit.adr.show --input '{"id":"ADR-0283"}'`.
+### Context
 
-## ADR-002 — Unified Denial Sources for Policy Dashboard
+The dashboard and project website need one visual identity. The prior Trading Terminal direction was dense but too rigid for hierarchical data, review threads, and mixed telemetry.
 
-**Status:** Accepted · 2026-04 · [T20260428-13]
+### Decision
 
-**Context.** The Denials 24h tile counted SQLite audit rows and v2 loop denials, but the Policy tab originally scanned only v2 loop JSONL files. Direct CLI denials could increment the tile while the detail table appeared empty.
+Adopt Canon Refined: layered dark surfaces, `Inter` plus `JetBrains Mono`, soft semantic colors, compact spacing, and subtle radii.
 
-**Decision.** Aggregate v2 denial envelopes and SQLite `status = denied` audit events in the policy-denials endpoint. SQLite filesystem denials without an activity fsProfile use `workspace-boundary`.
+### Consequences
 
-**Consequences.**
+
+- The UI keeps a serious pro-tool signal while allowing standard web affordances when they improve operator clarity.
+- Cost: The design system must be maintained so Canon Refined does not drift into generic dark SaaS styling.
+
+## Provenance
+
+Migrated verbatim from the local heading `user-interface/ADR-001` in `docs/design/user-interface/4_decisions.md` by [ORB-10458]. Original status line: Proposed · 2026-04 · [T20260427-29]
+
+## ADR-0140 — Unified Denial Sources for Policy Dashboard
+
+**Status:** Accepted · 2026-05-11 02:06:39.445775Z · [T20260428-13]
+**Owner:** legacy:user-interface
+**Created:** 2026-05-11 02:06:39.444756Z
+**Last updated:** 2026-05-11 02:06:39.445775Z
+**Related features:** `user-interface`
+**Legacy IDs:** `user-interface/ADR-002`
+
+### Context
+The Denials 24h tile counted SQLite audit rows and v2 loop denials, but the Policy tab originally scanned only v2 loop JSONL files. Direct CLI denials could increment the tile while the detail table appeared empty.
+
+### Decision
+Aggregate v2 denial envelopes and SQLite `status = denied` audit events in the policy-denials endpoint. SQLite filesystem denials without an activity fsProfile use `workspace-boundary`.
+
+### Consequences
 - Audit > Policy is a faithful drill-down for Denials 24h, including direct `orbit tool run` policy denials.
 - Cost: The endpoint carries a translation layer because SQLite audit rows lack typed denial fields like `profile` and `path`.
 
-## ADR-003 — Compact Scoreboard Ratio Columns
+## ADR-0141 — Compact Scoreboard Ratio Columns
 
-**Status:** Accepted · 2026-04 · [T20260428-15]
+**Status:** Accepted · 2026-05-11 02:06:39.447535Z · [T20260428-15]
+**Owner:** legacy:user-interface
+**Created:** 2026-05-11 02:06:39.446581Z
+**Last updated:** 2026-05-11 02:06:39.447535Z
+**Related features:** `user-interface`
+**Legacy IDs:** `user-interface/ADR-003`
 
-**Context.** The scoreboard had separate columns for output tokens, tool calls, duel wins/losses, and friction triage. After failed tool calls became first-class, the split counters made reliability harder to scan.
+### Context
+The scoreboard had separate columns for output tokens, tool calls, duel wins/losses, and friction triage. After failed tool calls became first-class, the split counters made reliability harder to scan.
 
-**Decision.** Render companion metrics as compact pairs: `tokens` is `total/output`, `tool fail/all` is failed over all tool calls, and `duel w/all` is wins over participated duels. Keep only friction reports in the primary table.
+### Decision
+Render companion metrics as compact pairs: `tokens` is `total/output`, `tool fail/all` is failed over all tool calls, and `duel w/all` is wins over participated duels. Keep only friction reports in the primary table.
 
-**Consequences.**
+### Consequences
 - The table presents reliability and participation context in fewer columns, while `0/N` tool failures stays meaningful.
 - Cost: Friction accepted/rejected counts and raw duel losses require summary JSON or a future detail view.
 
-## ADR-004 — Bounded Live Log Tail
+## ADR-0142 — Bounded Live Log Tail
 
-**Status:** Accepted · 2026-04 · [T20260430-29]
+**Status:** Accepted · 2026-05-11 02:06:39.449202Z · [T20260430-29]
+**Owner:** legacy:user-interface
+**Created:** 2026-05-11 02:06:39.448364Z
+**Last updated:** 2026-05-11 02:06:39.449202Z
+**Related features:** `user-interface`
+**Legacy IDs:** `user-interface/ADR-004`
 
-**Context.** The Tasks view keeps `orbit.log` visible beside the task list, but the log panel could grow taller than short viewports and push footer controls below the screen.
+### Context
+The Tasks view keeps `orbit.log` visible beside the task list, but the log panel could grow taller than short viewports and push footer controls below the screen.
 
-**Decision.** Keep the Tasks view in a two-column layout and size `#log-panel` to the available viewport. The log row stream owns overflow scrolling, while filters, buffered-count, and follow-tail controls remain inside the bounded panel.
+### Decision
+Keep the Tasks view in a two-column layout and size `#log-panel` to the available viewport. The log row stream owns overflow scrolling, while filters, buffered-count, and follow-tail controls remain inside the bounded panel.
 
-**Consequences.**
+### Consequences
 - Operators get one clear scroll target for raw log rows while live-tail controls stay visible during short-screen monitoring.
 - Cost: The Tasks view trades narrow-screen stacking for denser columns so the live log remains in the first viewport.
 
-- **ADR-0166 — Grouped Scoreboard Sections** — Accepted.
+## Task References
+
+- [T20260427-29] introduced the Canon Refined UI direction.
+- [T20260428-13] unified policy-denial sources for the dashboard.
+- [T20260428-15] compacted scoreboard ratio columns.
+- [T20260430-24] tightened this ADR log without changing decisions.
+- [T20260430-29] bounded the live `orbit.log` tail panel.
+
+> Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.
+
+## ADR-0166 — Grouped Scoreboard Sections
+
+**Status:** Accepted · 2026-05-18 02:58:43.428001Z · [ORB-00144]
+**Owner:** codex
+**Created:** 2026-05-18 02:58:37.817224Z
+**Last updated:** 2026-05-18 02:58:43.428001Z
+**Related features:** `user-interface`
+
+### Context
+The scoreboard started as one compact per-agent table. Adding knowledge-artifact counters and planning-duel matrix data made the flat table mix delivery attribution, review work, operations, knowledge stewardship, and duel outcomes in one scan path. Alternatives were to keep widening the table, add column groups inside the same table, or split the view into focused sections.
+
+### Decision
+Render the dashboard scoreboard as focused sections: Delivery, Review, Knowledge, Operations, Planning Duels, a family-vs-family Duel Matrix, and Attribution Cleanup for non-canonical rows. Keep compact pair cells where they still help local interpretation, but do not treat the whole scoreboard as one primary flat leaderboard.
+
+### Consequences
+- Operators can inspect one contribution dimension at a time without conflating task creation, planning, implementation, review, tool usage, and knowledge artifacts.
+- Non-canonical attribution rows stay visible but no longer compete with canonical agent families in primary sections.
+- No single Rust code anchor; this is enforced by dashboard rendering and design review, and workspace-local ADR comments should not be embedded in shipped dashboard assets.
+- Cost: Cross-section comparison now requires scanning multiple tables instead of one row, and future metrics must choose an explicit section before being added.
+
+## Task References
+
+- [T20260427-29] introduced the Canon Refined UI direction.
+- [T20260428-13] unified policy-denial sources for the dashboard.
+- [T20260428-15] compacted scoreboard ratio columns.
+- [T20260430-24] tightened this ADR log without changing decisions.
+- [T20260430-29] bounded the live `orbit.log` tail panel.
+
+> Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.
 
 ## ADR-0167 — Extract Dashboard + JSON API to orbit-dashboard Crate
 
-**Status:** Accepted · 2026-05 · [ORB-00146]
+**Status:** Accepted · 2026-05-18 06:55:55.249402Z · [ORB-00146]
+**Owner:** codex
+**Created:** 2026-05-18 06:51:04.813737Z
+**Last updated:** 2026-05-18 06:55:55.249402Z
+**Related features:** `user-interface`
 
-**Context.** The Orbit web dashboard (HTML/JS + read-only axum JSON API, ~6300 LOC across web/mod.rs and 14 api/* files plus embedded assets) lived inside `orbit-cli`. The only orbit-cli coupling was the `Execute` trait; everything else was external (axum, clap, ...) or `orbit_core::{OrbitRuntime, OrbitError}`. This was the exact shape already used by the sibling `orbit-mcp` internal crate. Keeping it inside CLI forced every CLI edit to rebuild the heavy axum tree and mixed test targets.
+### Context
+The Orbit web dashboard lived inside orbit-cli even though its HTML, JavaScript, read-only axum API handlers, and embedded assets formed a distinct internal surface. The only local coupling was the CLI Execute trait; keeping the dashboard in orbit-cli forced unrelated CLI edits to rebuild the heavier web tree and mixed dashboard tests into the CLI target.
 
-**Decision.** Extract to a new `crates/orbit-dashboard/` internal crate (stability = "internal", `[lints] workspace = true`, direct axum/clap/chrono/... + `orbit-core` dep). The crate owns `ServeArgs`, the `pub fn serve(runtime, args)` entrypoint, all api handlers, the three dashboard assets, router construction, shutdown, and browser-opener. `orbit-cli` retains a ≤60-line delegator (`command/web.rs`) that only re-exports the clap `WebSubcommand::Serve(orbit_dashboard::ServeArgs)` and calls `orbit_dashboard::serve`. `audit_middleware` continues to match on the CLI-local `WebSubcommand` (no behavior change to audit names).
+### Decision
+Extract the dashboard assets, ServeArgs, JSON API handlers, router construction, browser opener, and serve(runtime, args) entrypoint into the internal orbit-dashboard crate. Keep orbit-cli as a thin delegator that wires the clap subcommand to orbit_dashboard::serve.
 
-Rejected alternative: moving the `Execute` trait (or a shared command-execution abstraction) into `orbit-common` so the dashboard crate could implement it directly. Rejected because `Execute` is a CLI-dispatch detail (clap subcommand wiring, runtime injection), not a domain primitive; polluting `orbit-common` would have been the wrong layering.
-
-**Consequences.**
-- `orbit-cli` no longer has a direct `axum` dependency; incremental `cargo check -p orbit-cli` skips the entire dashboard subtree when only command code changes.
-- Dashboard assets live next to the Rust that serves them (`assets/dashboard/` inside the crate); `include_str!` paths are now relative and simple.
-- The 14 `*_tests.rs` files now compile as part of a dedicated `orbit-dashboard` test target.
-- One more workspace member; the existing CI glob in `.github/workflows/ci.yml` picks it up with no per-crate edits.
-- Minor duplication of time-parsing, a handful of JSON projection helpers, and a web-only log tail renderer (to avoid a reverse dependency on orbit-cli or colored output). Future centralization of projections can be a follow-up.
-- Wire behavior is identical: same routes, same response bodies, same content-types, default port 7878, `--no-open`, `/healthz` body, startup banner, graceful shutdown.
-- Cost: one additional crate in the workspace graph and one more place developers look for dashboard code; the projection helpers are now duplicated until a later task extracts a shared `orbit-core` or `orbit-common` projection layer.
+### Consequences
+- orbit-cli no longer carries the direct axum dashboard dependency for command-only edits.
+- Dashboard assets live beside the Rust server that embeds them, and dashboard tests compile under a dedicated crate.
+- No single Rust code anchor; this is a crate-boundary decision enforced through architecture review.
+- Cost: one more workspace crate and temporary duplication of a few projection helpers until a later shared projection layer exists.
 
 ## ADR-0168 — Unified Leaderboard Matrix Scoreboard
 
-**Status:** Accepted · 2026-05 · [ORB-00154]
+**Status:** Accepted · 2026-05-18 06:56:13.678774Z · [ORB-00154]
+**Owner:** codex
+**Created:** 2026-05-18 06:56:07.675442Z
+**Last updated:** 2026-05-18 06:56:13.678774Z
+**Related features:** `user-interface`
 
-**Context.** The Scoreboard view had grown into six stacked tables that repeated the canonical agents, repeated headers, rendered sparse zeros, and left relative performance as bare integers. Operators needed one glanceable view of which agent leads each metric without scanning 24 repeated rows.
+### Context
+[ORB-00154] found that the dashboard Scoreboard fragmented the four canonical agents across six stacked tables, repeated headers, sparse zero glyphs, and bare integers. Real alternatives included keeping grouped tables, switching to an agent-major wide table, using per-agent cards, or reducing the view to a pure heatmap.
 
-**Decision.** Render canonical metrics as one metric-major Unified Leaderboard Matrix: metric rows grouped by Delivery, Review, Knowledge, Operations, and Planning Duels, with `codex`, `claude`, `gemini`, and `grok` as fixed columns. Non-zero metric cells include inline bars scaled within the row, tied leaders get an explicit `▲` badge, zero values render as an em dash, the Duel Matrix remains compact below, and Attribution Cleanup renders only when non-canonical agents have non-zero signal.
+### Decision
+Render canonical scoreboard metrics as one metric-major Unified Leaderboard Matrix: metric rows grouped by Delivery, Review, Knowledge, Operations, and Planning Duels, with codex, claude, gemini, and grok as fixed columns. Non-zero metric cells carry inline bars scaled within the metric row, tied leaders get an explicit leader badge, zero values render as an em dash instead of a visible zero glyph, the Duel Matrix remains compact below, and Attribution Cleanup renders only when non-canonical agents have non-zero signal.
 
-Rejected alternative: agent-major flat wide table. Rejected because roughly twenty metric columns would force horizontal scrolling at the canonical dashboard viewport.
-
-Rejected alternative: per-agent card grid. Rejected because cards preserve the need to scan separate blocks to answer which agent leads a specific metric.
-
-Rejected alternative: pure heatmap matrix. Rejected because color alone hides precise values needed for operator judgment.
-
-**Consequences.**
-- The public scoreboard emphasizes per-metric leaders through visual encoding instead of repeated table chrome.
-- The canonical four-agent set remains the primary comparison surface, while attribution cleanup stays conditional and secondary.
-- No single Rust code anchor; this is enforced by dashboard rendering and design review, and workspace-local ADR comments should not be embedded in shipped dashboard assets.
-- Cost: The denser matrix needs careful row-height discipline when new metrics are added.
+### Consequences
+- Operators can identify the leading agent per metric by bar length and leader badge without comparing digit strings across repeated tables.
+- The canonical agent set remains the primary row population while non-canonical attribution stays conditional.
+- Rejected alternative: agent-major flat wide table; at roughly twenty metric columns it would require horizontal scrolling at the canonical dashboard viewport.
+- Rejected alternative: per-agent card grid; it preserves the need to scan separate blocks to answer which agent leads a specific metric.
+- Rejected alternative: pure heatmap matrix; color alone hides precise values needed for operator judgment.
+- No single Rust code anchor; this UI convention is enforced in dashboard rendering and design review, and workspace-local ADR comments are not embedded in shipped dashboard assets.
+- Cost: the matrix is denser and needs careful row-height discipline when new metrics are added.
 
 ## ADR-0284 — Global, Multi-Workspace Dashboard
 
-**Status:** Accepted · 2026-07 · [ORB-00030] · legacy_id: `user-interface/ADR-00030`
+**Status:** Accepted · 2026-07-26 21:51:44.038593Z · [ORB-00030], [ORB-10458]
+**Owner:** claude
+**Created:** 2026-07-26 21:51:43.773541Z
+**Last updated:** 2026-07-26 21:51:44.038593Z
+**Related features:** `user-interface`
+**Legacy IDs:** `user-interface/ADR-00030`
+**Tags:** `user-interface`
 
-Narrative lives in the ADR store — retrieve it with `orbit tool run orbit.adr.show --input '{"id":"ADR-0284"}'`.
+### Context
 
-## ADR-0256 — Top-Level Nav Is the Operator's Four Tabs
+`orbit web serve` was coupled to a single workspace: the CLI eagerly initialized one `OrbitRuntime` (failing outside a workspace) and handed it to the dashboard as `Arc<OrbitRuntime>` axum state, so 46 of 48 handlers took `State(runtime): State<Arc<OrbitRuntime>>`. Operators wanted one dashboard over every workspace on the machine, launchable from any directory. `~/.orbit/workspaces.json` already enumerates workspaces and the SQLite stores already scope by workspace, so the missing piece was serving many runtimes from one process without rewriting every handler.
 
-**Status:** Accepted · 2026-07 · [ORB-10444]
+### Decision
 
-**Context.** Top-level nav is the dashboard's scarcest surface, and two of its six entries were not earning a slot: a deprecated review-threads tab that no longer had a backing view, and Scoreboard, a diagnostics-shaped read-only telemetry view sitting beside the operator's actual workflow tabs. Both pushed triage → dispatch → annotate down the visual hierarchy.
+Introduce `DashboardState` — a workspace-keyed, lazily-built runtime map — as the axum state, and a `Ws` extractor that selects the request's runtime from a `?workspace=<id>` query parameter (falling back to a configured default). Handlers change only their signature line (`State(runtime): State<Arc<OrbitRuntime>>` → `Ws(runtime): Ws`); bodies are untouched. `DashboardState::single` preserves the pre-existing single-workspace behavior (and every handler test). `orbit web serve` dispatches through a new `serve_from_env` before the CLI's eager runtime init, so it works from anywhere: inside a workspace without `--global` it stays single-mode; with `--global` or outside any workspace it enumerates the registry, skipping stale-path entries rather than failing. Two aggregate endpoints (`GET /api/workspaces`, `GET /api/tasks/all`) plus a header workspace selector and an "All workspaces" task view expose the machine-wide surface.
 
-**Decision.** The top-level nav is exactly Tasks, Audit, Diagnostics, Knowledge (plus the hash-only `run-detail` route). The deprecated tab is removed outright — nav entry, `TABS` route, pane markup, refresh branch, and CSS — rather than hidden, so no dead asset ships and no route resolves to a missing pane. Scoreboard becomes a Diagnostics subtab routed as `#diagnostics/scoreboard`; its markup moves verbatim into the diagnostics pane so every id `scoreboard.js` renders into (and therefore the `/api/scoreboard` contract and its tests) is untouched. Because the scoreboard needs full width, its subtab swaps the diagnostics two-column layout for a full-width `<main>` while leaving the subtab nav reachable.
+Rejected alternative: workspace-prefixed route paths (`/api/:workspace/tasks`). Rejected because it would rewrite all 48 route registrations and every frontend fetch path, versus a single query-param choke point in `common.js` and one-line handler signature swaps.
 
-Rejected alternative: keep the nav entry and hide it behind a feature flag. Rejected because a hidden tab still ships its assets, its route, and its refresh branch — the cost the removal was meant to recover.
+### Consequences
 
-Rejected alternative: promote the subtab nav out of the diagnostics panel header so the scoreboard could replace the whole pane. Rejected as a larger structural change to a shared layout for no operator-visible gain.
 
-**Consequences.**
-- The nav reads as the operator's workflow; telemetry lives one level down under Diagnostics.
-- Existing `#scoreboard` bookmarks no longer resolve and fall back to Tasks; the view is reachable at `#diagnostics/scoreboard`.
-- Cost: the diagnostics pane now owns two `<main>` elements and a visibility toggle keyed on the active subtab.
+- One loopback dashboard can cover every workspace; per-workspace views drill down via the selector while Tasks offers a cross-workspace aggregate.
+- The loopback-only bind guard (ORB-00360) is unchanged — global mode broadens data exposure only on the same machine, still with no network binding and no auth added.
+- Runtimes are built on first access and cached, so an unopenable or stale workspace degrades to being skipped instead of failing startup.
+- Cost: handlers that need a concrete workspace now depend on the `Ws` extractor's selection rules; the aggregate task endpoint reopens each workspace's store per request (no cross-workspace caching of task lists yet).
 
-## ADR-0257 — One-Click Ship and Human-Attributed Comments on Tasks
+## Provenance
 
-**Status:** Accepted · 2026-07 · [ORB-10444]
+Migrated verbatim from the local heading `user-interface/ADR-00030` in `docs/design/user-interface/4_decisions.md` by [ORB-10458]. Original status line: Accepted · 2026-07 · [ORB-00030]
 
-**Context.** The Tasks tab was read-only for the operator's two most common actions. Dispatching a backlog task meant leaving for the CLI or an MCP client, and there was no way to leave a note on a task at all. Both are writes against live state, so the question was how much configuration to expose and whose identity to record.
+## ADR-0256 — Top-Level Dashboard Nav Is the Operator's Four Tabs
 
-**Decision.** Ship is one click with no configuration UI: the dashboard posts `{ task_ids: [id] }` to `POST /api/workflows/ship` and nothing else. The crew comes from the task's own record (the pipeline already resolves it) and the mode from the selected workspace's registry binding — so the endpoint's omitted-`mode` default changes from the hard-coded `pr` to that binding's ship mode, falling back to `pr` only when a runtime has no binding. Duplicate dispatch is refused server-side: an explicit task selection whose id is already carried by a non-terminal run is a `409 ship_run_in_flight` naming that run, and the UI additionally holds a per-task guard for the double-click window. Comments post to a new `POST /api/tasks/:id/comments`, which writes through `TaskUpdateParams::comment` into the task's existing review-thread structure — no new field on the task record — and forces a human author: an absent, agent-family, or model-constant author collapses to the `human` label rather than the server process's ambient identity.
+**Status:** Accepted · 2026-07-26 19:14:18.916582Z · [ORB-10444]
+**Owner:** claude
+**Created:** 2026-07-26 19:13:56.191425Z
+**Last updated:** 2026-07-26 19:14:18.916582Z
+**Related features:** `user-interface`
 
-Rejected alternative: a UI-only idempotency guard. Rejected because the guard is then lost across a reload and untestable without a JS runner, which the dashboard does not have; the server-side check is deterministic and covers every surface.
+### Context
+Top-level nav is the dashboard's scarcest surface, and two of its six entries were not earning a slot: a deprecated review-threads tab with no backing view, and Scoreboard, a diagnostics-shaped read-only telemetry view sitting beside the operator workflow tabs.
 
-Rejected alternative: reuse `PATCH /api/tasks/:id` with a `comment` field for comments. Rejected because that path derives its actor from the runtime's ambient identity, which is exactly the model-constant attribution this decision exists to prevent.
+### Decision
+The top-level nav is exactly Tasks, Audit, Diagnostics, Knowledge (plus the hash-only run-detail route). The deprecated tab is removed outright rather than hidden. Scoreboard becomes a Diagnostics subtab routed as #diagnostics/scoreboard, with its markup moved verbatim so the /api/scoreboard contract is untouched.
 
-**Consequences.**
-- Triage, dispatch, and annotation all complete inside the dashboard; no context switch for routine operation.
+### Consequences
+- The nav reads as the operator workflow; telemetry lives one level down.
+- Existing #scoreboard bookmarks fall back to Tasks.
+- Cost: the diagnostics pane owns two main elements and a visibility toggle keyed on the active subtab.
+
+## ADR-0257 — One-Click Task Ship and Human-Attributed Dashboard Comments
+
+**Status:** Accepted · 2026-07-26 19:14:19.126579Z · [ORB-10444]
+**Owner:** claude
+**Created:** 2026-07-26 19:14:03.927135Z
+**Last updated:** 2026-07-26 19:14:19.126579Z
+**Related features:** `user-interface`
+
+### Context
+The dashboard Tasks tab was read-only for the operator two most common actions: dispatching a backlog task and leaving a note on one. Both are writes against live state, so the question was how much configuration to expose and whose identity to record.
+
+### Decision
+Ship is one click with no configuration UI: the dashboard posts only the task id. The crew comes from the task record and the mode from the workspace registry binding, so the ship endpoint omitted-mode default changes from a hard-coded pr to that binding ship mode. Duplicate dispatch is refused server-side with 409 ship_run_in_flight when the task already has a non-terminal run. Comments post to POST /api/tasks/:id/comments, writing into the task existing review-thread structure and forcing a human author.
+
+### Consequences
+- Triage, dispatch and annotation complete inside the dashboard.
 - A dashboard comment is always attributable to a person, even when the server runs inside a managed Orbit run.
-- Ship failures surface the server's error text instead of silently no-opping.
-- Cost: the ship endpoint now scans a bounded window of recent runs before submitting, and a task with a genuinely stuck non-terminal run must have that run cancelled before it can be re-shipped.
-
-**Amendment ([ORB-10544], [ORB-10631], [ADR-0303]).** "Covers every surface" was true of the intent, not of the placement: the check lived inside the endpoint, so the MCP `orbit.workflow.ship` tool bypassed it. It now lives in the shared ship submission path and every submission surface inherits it; [ORB-10631] also moved interactive `orbit run ship` onto that path. The endpoint's response is unchanged — it projects the shared typed conflict as the same `409 ship_run_in_flight` body.
+- Cost: the ship endpoint scans a bounded window of recent runs before submitting, and a stuck non-terminal run must be cancelled before its task can be re-shipped.
 
 ## ADR-PENDING — Pipeline reliability from durable run state, with roles discovered from the job catalog
 

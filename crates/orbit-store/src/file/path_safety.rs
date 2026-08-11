@@ -1,18 +1,6 @@
-use std::fs;
-use std::path::{Component, Path, PathBuf};
+use std::path::{Component, Path};
 
 use orbit_common::types::OrbitError;
-
-pub(crate) fn read_child_dirs(dir: &Path) -> Result<Vec<PathBuf>, OrbitError> {
-    let mut child_dirs = fs::read_dir(dir)
-        .map_err(|e| OrbitError::Io(e.to_string()))?
-        .filter_map(Result::ok)
-        .map(|entry| entry.path())
-        .filter(|path| path.is_dir())
-        .collect::<Vec<_>>();
-    child_dirs.sort();
-    Ok(child_dirs)
-}
 
 pub(crate) fn validate_path_stem(stem: &str, kind: &str) -> Result<(), OrbitError> {
     if is_safe_path_stem(stem) {

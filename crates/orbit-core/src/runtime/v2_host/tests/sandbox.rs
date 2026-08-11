@@ -123,25 +123,6 @@ fn resolve_executor_sandbox_marks_only_specific_orbit_worktree_managed() {
             .iter()
             .any(|entry| entry == &format!("{}/**", canonical_worktree.display()))
     );
-    for allowed in [".orbit/adrs/proposed", ".orbit/adrs/.locks"] {
-        let directory = canonical_worktree.join(allowed);
-        let exact = directory.display().to_string();
-        let rule = format!("{exact}/**");
-        assert!(
-            managed.fs_profile.modify.iter().any(|entry| entry == &rule),
-            "managed worktree must narrowly re-allow {allowed}"
-        );
-        assert!(
-            !managed
-                .fs_profile
-                .modify
-                .iter()
-                .any(|entry| entry == &exact),
-            "managed ADR directory must not be emitted as an exact file grant"
-        );
-        assert!(directory.is_dir(), "managed ADR root must be a directory");
-    }
-
     let prepared = prepare_linux_bwrap_write_grants(&managed.fs_profile, &worktree)
         .expect("prepare resolved managed-worktree grants");
     assert!(
@@ -222,8 +203,6 @@ fn resolve_executor_sandbox_orders_versioned_orbit_exceptions_after_default_deny
         format!("{}/state/**", orbit.display()),
         format!("{}/tasks/**", orbit.display()),
         format!("{}/learnings/**", orbit.display()),
-        format!("{}/adrs/accepted/**", orbit.display()),
-        format!("{}/adrs/superseded/**", orbit.display()),
         format!("{}/future-store/**", orbit.display()),
     ] {
         assert!(
@@ -231,53 +210,6 @@ fn resolve_executor_sandbox_orders_versioned_orbit_exceptions_after_default_deny
             "worktree store must not be re-allowed by policy: {protected} in {modify:?}"
         );
     }
-    for allowed in ["adrs/proposed", "adrs/.locks"] {
-        assert!(
-            modify
-                .iter()
-                .any(|rule| rule == &format!("{}/**", orbit.join(allowed).display())),
-            "the active worktree Proposed ADR surface must be allowed: {modify:?}"
-        );
-        assert!(
-            !modify
-                .iter()
-                .any(|rule| rule == &orbit.join(allowed).display().to_string()),
-            "the active worktree Proposed ADR surface must not use an exact file grant: {modify:?}"
-        );
-    }
-    assert!(
-        !modify
-            .iter()
-            .any(|rule| rule == &orbit.join("adrs").display().to_string()),
-        "the ADR parent must remain read-only: {modify:?}"
-    );
-}
-
-#[cfg(target_os = "linux")]
-#[test]
-fn resolve_executor_sandbox_rejects_symlinked_managed_worktree_adr_root() {
-    use std::os::unix::fs::symlink;
-
-    let (root, runtime, _repo_root) = runtime_with_workspace_layout();
-    seed_executor(
-        &runtime,
-        "claude",
-        Some(orbit_common::types::ExecutorSandboxKind::LinuxBwrap),
-    );
-    let worktree = runtime
-        .paths()
-        .orbit_dir
-        .join("state/worktrees/orbit-jrun-symlinked-adrs");
-    let adrs = worktree.join(".orbit/adrs");
-    let outside = root.path().join("outside-proposals");
-    std::fs::create_dir_all(&adrs).expect("ADR parent");
-    std::fs::create_dir(&outside).expect("outside proposals");
-    symlink(&outside, adrs.join("proposed")).expect("symlink proposed root");
-
-    let error = runtime
-        .resolve_executor_sandbox("claude", None, Some(&worktree))
-        .expect_err("symlinked Proposed root must fail closed");
-    assert!(error.to_string().contains("must be a real directory"));
 }
 
 #[cfg(target_os = "macos")]
@@ -431,12 +363,8 @@ fn resolve_executor_sandbox_appends_gemini_orbit_runtime_roots_without_home_real
         !modify.iter().any(|entry| entry == &workspace_orbit),
         "gemini sandbox must not re-allow the whole workspace .orbit root: {modify:?}"
     );
-    // Registered-but-not-activity-exposed write stores are intentionally
-    // outside this child-runtime inventory. If agent_implement,
-    // step_failure_recovery, or dispatch_agent exposes ADR or graph write
-    // tools, revisit this allowlist alongside those surfaces.
+    // Registered-but-not-activity-exposed stores remain outside this child-runtime inventory.
     for excluded in [
-        format!("{workspace_orbit}/adrs/**"),
         format!("{workspace_orbit}/knowledge/**"),
         format!("{workspace_orbit}/state/knowledge/**"),
     ] {

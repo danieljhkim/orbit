@@ -305,7 +305,6 @@
           <header><span>Knowledge</span><span class="count" id="knowledge-count">-</span></header>
           <nav class="subtabs" id="knowledge-subtabs">
             <button class="subtab" data-subtab="learnings" type="button">Learnings</button>
-            <button class="subtab" data-subtab="adrs" type="button">ADRs</button>
             <button class="subtab" data-subtab="frictions" type="button">Frictions</button>
           </nav>
           <div class="learning-stats" id="learning-stats">
@@ -323,23 +322,6 @@
               <span class="label">Last Indexed</span>
               <span class="value" id="learning-last-indexed-value">-</span>
               <span class="glyph">IDX</span>
-            </div>
-          </div>
-          <div class="adr-stats" id="adr-stats" style="display: none;">
-            <div class="tile">
-              <span class="label">Proposed</span>
-              <span class="value" id="adr-proposed-value">-</span>
-              <span class="glyph">PRP</span>
-            </div>
-            <div class="tile">
-              <span class="label">Accepted</span>
-              <span class="value" id="adr-accepted-value">-</span>
-              <span class="glyph">ACC</span>
-            </div>
-            <div class="tile">
-              <span class="label">Superseded</span>
-              <span class="value" id="adr-superseded-value">-</span>
-              <span class="glyph">SUP</span>
             </div>
           </div>
           <div class="friction-stats" id="friction-stats" style="display: none;">
@@ -361,17 +343,9 @@
           </div>
           <div class="controls">
             <input type="search" id="learning-search" placeholder="Search learnings..." autocomplete="off" spellcheck="false" />
-            <input type="search" id="adr-search" placeholder="Search ADRs..." autocomplete="off" spellcheck="false" style="display: none;" />
             <input type="search" id="friction-search" placeholder="Search frictions..." autocomplete="off" spellcheck="false" style="display: none;" />
           </div>
           <div class="body scoreboard-table-wrap" id="learnings-body">
-            <div class="skeleton-state">
-              <div class="skeleton skeleton-row"></div>
-              <div class="skeleton skeleton-row" style="width: 80%"></div>
-              <div class="skeleton skeleton-row" style="width: 70%"></div>
-            </div>
-          </div>
-          <div class="body scoreboard-table-wrap" id="adrs-body" style="display: none;">
             <div class="skeleton-state">
               <div class="skeleton skeleton-row"></div>
               <div class="skeleton skeleton-row" style="width: 80%"></div>
@@ -392,15 +366,6 @@
             <div class="empty-state">
               <div class="icon">✧</div>
               <div class="text">No learning selected.</div>
-            </div>
-          </div>
-        </section>
-        <section class="panel" id="adr-detail-panel" style="display: none;">
-          <header><span>ADR Detail</span><span class="count" id="adr-detail-count">-</span></header>
-          <div class="body" id="adr-detail">
-            <div class="empty-state">
-              <div class="icon">✧</div>
-              <div class="text">No ADR selected.</div>
             </div>
           </div>
         </section>

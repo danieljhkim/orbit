@@ -4,7 +4,6 @@
 
 mod test_support;
 
-mod adrs;
 mod audit;
 mod denials;
 mod diagnostics;

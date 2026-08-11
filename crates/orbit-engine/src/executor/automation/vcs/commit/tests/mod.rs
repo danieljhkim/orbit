@@ -1,6 +1,5 @@
 #![allow(missing_docs)]
 
-mod adr_handoff;
 mod author;
 mod base_checkpoint;
 mod delivery_gate;

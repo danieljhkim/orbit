@@ -1,13 +1,12 @@
 use chrono::{DateTime, Utc};
 use orbit_common::types::{
-    Adr, AdrStatus, ArtifactManifestFileV2, AuditEvent, Crew, ExecutorDef, ExternalRef, JobRun,
-    JobRunState, KnowledgeRunMetrics, Learning, LearningEvidence, LearningScope, OrbitError,
-    OrbitId, PipelineState, PolicyDef, StoredTool, Task, TaskArtifact, TaskComment,
-    TaskHistoryEntry, TaskPriority, TaskStatus, normalize_task_tags, task_matches_tags,
+    ArtifactManifestFileV2, AuditEvent, Crew, ExecutorDef, ExternalRef, JobRun, JobRunState,
+    KnowledgeRunMetrics, Learning, LearningEvidence, LearningScope, OrbitError, OrbitId,
+    PipelineState, PolicyDef, StoredTool, Task, TaskArtifact, TaskComment, TaskHistoryEntry,
+    TaskPriority, TaskStatus, normalize_task_tags, task_matches_tags,
 };
 use serde_json::Value;
 use std::collections::BTreeMap;
-use std::path::Path;
 
 use super::params::*;
 
@@ -57,60 +56,6 @@ pub trait TaskStoreBackend: Send + Sync {
         Ok(tasks)
     }
     fn delete_task(&self, id: &str) -> Result<bool, OrbitError>;
-}
-
-pub trait AdrStoreBackend: Send + Sync {
-    fn add_adr(&self, params: AdrCreateParams) -> Result<Adr, OrbitError>;
-
-    /// [ORB-10538] Restore an ADR at an existing allocation whose local and
-    /// canonical artifacts are unreadable. Never allocates or overwrites.
-    fn restore_allocated_adr(&self, id: &str, params: AdrCreateParams) -> Result<Adr, OrbitError>;
-
-    /// [ORB-10545] Copy a complete bundle from a registered sibling worktree
-    /// into the current checkout without reallocating or changing lifecycle
-    /// metadata.
-    fn reconcile_federated_adr(&self, id: &str, source_worktree: &Path) -> Result<Adr, OrbitError>;
-    fn get_adr(&self, id: &str) -> Result<Option<Adr>, OrbitError>;
-    fn resolve_adr_artifact(&self, id: &str) -> Result<AdrArtifactResolution, OrbitError>;
-    fn list_adrs(&self) -> Result<Vec<Adr>, OrbitError>;
-    fn list_adrs_filtered(&self, filter: AdrListFilter<'_>) -> Result<Vec<Adr>, OrbitError>;
-    fn list_adr_entries_filtered(
-        &self,
-        filter: AdrListFilter<'_>,
-        include_remote: bool,
-    ) -> Result<Vec<AdrListEntry>, OrbitError>;
-    fn get_adr_remote_stub(&self, id: &str) -> Result<Option<RemoteArtifactStub>, OrbitError>;
-
-    /// [ORB-10501] Allocations pinned to a worktree that no longer exists and
-    /// whose bundle is not readable anywhere locally — permanently orphaned
-    /// index rows, reported by `orbit doctor`.
-    fn list_orphaned_adr_allocations(&self) -> Result<Vec<IdAllocationRecord>, OrbitError>;
-
-    /// [ORB-10501] Abandon one orphaned allocation row. `false` when the id
-    /// has no live allocation; an error when it is still recoverable.
-    fn abandon_orphaned_adr_allocation(&self, id: &str) -> Result<bool, OrbitError>;
-
-    fn update_adr_status(&self, id: &str, new_status: AdrStatus) -> Result<(), OrbitError>;
-    fn update_adr_document(
-        &self,
-        id: &str,
-        fields: &AdrDocumentUpdateParams,
-    ) -> Result<(), OrbitError>;
-    fn delete_adr(&self, id: &str) -> Result<bool, OrbitError>;
-    fn rebuild_index(&self) -> Result<(), OrbitError>;
-
-    /// Writes the bidirectional supersession edge between two ADRs.
-    ///
-    /// On success: `old.status = Superseded`, `old.superseded_by = Some(new)`,
-    /// `new.supersedes` contains `old`. The implementation acquires per-ADR
-    /// locks for the duration so concurrent writers serialize.
-    ///
-    /// **Atomicity caveat:** the filesystem writes that update both ADR
-    /// documents are sequential, not transactional. A crash between writes
-    /// leaves the filesystem source-of-truth in a recoverable state — both ADR
-    /// bundles survive, and `rebuild_index` reconstructs the SQLite index from
-    /// disk.
-    fn supersede_adr(&self, old_id: &str, new_id: &str) -> Result<(), OrbitError>;
 }
 
 pub trait TaskDocumentStoreBackend: Send + Sync {

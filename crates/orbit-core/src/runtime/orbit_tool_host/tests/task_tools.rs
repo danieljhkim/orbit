@@ -666,6 +666,66 @@ fn task_show_tool_includes_empty_tags_array() {
 }
 
 #[test]
+fn foreign_task_references_are_marked_and_do_not_block_readiness() {
+    let (_root, runtime, _repo_root) = test_runtime();
+    let foreign_id = "DK-00042";
+    let created = runtime
+        .execute_tool_command(
+            "orbit.task.add",
+            json!({
+                "title": "Coordinate with a foreign task",
+                "description": "The target is owned by another machine.",
+                "workspace": ".",
+                "relations": [
+                    {"type": "blocked_by", "target": foreign_id},
+                    {"type": "related_to", "target": foreign_id}
+                ],
+            }),
+            Some("codex".to_string()),
+            Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
+        )
+        .expect("foreign-prefix task references are accepted");
+    let task_id = created["id"].as_str().expect("created task id");
+
+    let shown = runtime
+        .execute_tool_command(
+            "orbit.task.show",
+            json!({"id": task_id}),
+            Some("codex".to_string()),
+            Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
+        )
+        .expect("show foreign-prefix task");
+    assert_eq!(
+        shown["resolved_dependencies"],
+        json!(["DK-00042 [not verifiable here]"])
+    );
+    let related_to = shown["relations"]
+        .as_array()
+        .expect("relations array")
+        .iter()
+        .find(|relation| relation["type"] == "related_to")
+        .expect("related_to relation");
+    assert_eq!(related_to["verification"], json!("not verifiable here"));
+
+    let ready = runtime
+        .execute_tool_command(
+            "orbit.task.list",
+            json!({"ready": true}),
+            Some("codex".to_string()),
+            Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
+        )
+        .expect("list ready tasks");
+    assert!(
+        ready
+            .as_array()
+            .expect("ready task array")
+            .iter()
+            .any(|task| task["id"] == task_id),
+        "foreign dependencies do not gate readiness"
+    );
+}
+
+#[test]
 fn task_show_tool_with_context_includes_related_docs() {
     let (_root, runtime, repo_root) = test_runtime();
     fs::create_dir_all(repo_root.join("docs")).expect("docs dir");

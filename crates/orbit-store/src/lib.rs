@@ -96,12 +96,10 @@ pub mod learning_layout {
 use chrono::{DateTime, Utc};
 
 pub use backend::{
-    ActiveTaskReservation, AdrArtifact, AdrArtifactResolution, AdrCreateParams,
-    AdrDocumentUpdateParams, AdrListEntry, AdrListFilter, AdrStoreBackend, AuditEventStoreBackend,
-    ExecutorDefStoreBackend, ExpiredTaskReservation, JobRunQuery, JobRunStepParams,
-    JobRunStoreBackend, LearningCreateParams, LearningListEntry, LearningSearchParams,
-    LearningSearchResult, LearningStoreBackend, LearningUpdateParams, PolicyDefStoreBackend,
-    ReleasedTaskReservation, RemoteArtifactStub, TaskArtifactStoreBackend,
+    ActiveTaskReservation, AuditEventStoreBackend, ExecutorDefStoreBackend, ExpiredTaskReservation,
+    JobRunQuery, JobRunStepParams, JobRunStoreBackend, LearningCreateParams, LearningListEntry,
+    LearningSearchParams, LearningSearchResult, LearningStoreBackend, LearningUpdateParams,
+    PolicyDefStoreBackend, ReleasedTaskReservation, RemoteArtifactStub, TaskArtifactStoreBackend,
     TaskArtifactUpdateParams, TaskCreateParams, TaskDocumentStoreBackend, TaskDocumentUpdateParams,
     TaskHistoryStoreBackend, TaskHistoryUpdateParams, TaskLockConflict, TaskLockHolder,
     TaskReservationCheckParams, TaskReservationCheckResult, TaskReservationListResult,
@@ -115,8 +113,8 @@ pub use backend::{
     WorkspaceClaimStatusResult, WorkspaceTaskBackends, audit_event_store_sqlite,
     coordination_task_backends, global_executor_def_store, global_policy_def_store,
     layered_policy_def_store, task_reservation_store_sqlite, tool_store_sqlite,
-    workspace_adr_backends, workspace_job_run_store, workspace_learning_backend,
-    workspace_policy_def_store, workspace_task_backends,
+    workspace_job_run_store, workspace_learning_backend, workspace_policy_def_store,
+    workspace_task_backends,
 };
 pub use file_lock::{LockHolderInfo, read_lock_holder};
 pub use json_schema::{validate_instance_against_schema, validate_schema_document};
