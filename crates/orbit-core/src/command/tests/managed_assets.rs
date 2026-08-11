@@ -4,8 +4,15 @@ use serde_json::Value;
 use sha2::{Digest, Sha256};
 use tempfile::tempdir;
 
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
+
 use super::super::MANAGED_ASSET_MANIFEST_FILE;
+#[cfg(unix)]
+use super::super::activity::seed_default_activities;
 use super::super::init::{InitOptions, InitResult, init_workspace_at_root};
+#[cfg(unix)]
+use super::super::job::seed_default_jobs;
 use crate::OrbitRuntime;
 use crate::command::job::JobCatalogFilter;
 use crate::config::agent_detect::DetectedAgents;
@@ -105,6 +112,69 @@ spec:
   max_active_runs: 1
 {steps}"#
     )
+}
+
+#[cfg(unix)]
+fn make_read_only(path: &Path) {
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o555))
+        .expect("make managed asset directory read-only");
+}
+
+#[cfg(unix)]
+fn make_writable(path: &Path) {
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755))
+        .expect("restore managed asset directory permissions");
+}
+
+#[cfg(unix)]
+#[test]
+fn steady_state_reconcile_skips_asset_and_manifest_writes() {
+    let root = tempdir().expect("create tempdir");
+    let global_root = root.path().join("global");
+    init_global(&global_root);
+
+    let activities_dir = global_root.join("resources/activities");
+    let jobs_dir = global_root.join("resources/jobs");
+    make_read_only(&activities_dir);
+    make_read_only(&jobs_dir);
+
+    let activities = seed_default_activities(&activities_dir, true);
+    let jobs = seed_default_jobs(&jobs_dir, true);
+
+    make_writable(&activities_dir);
+    make_writable(&jobs_dir);
+
+    let activities = activities.expect("unchanged activities do not require write access");
+    let jobs = jobs.expect("unchanged jobs do not require write access");
+
+    assert_eq!(activities.refreshed, 0);
+    assert_eq!(activities.retired, 0);
+    assert!(activities.warnings.is_empty());
+    assert_eq!(jobs.refreshed, 0);
+    assert_eq!(jobs.retired, 0);
+    assert!(jobs.warnings.is_empty());
+}
+
+#[cfg(unix)]
+#[test]
+fn runtime_bootstrap_reads_seeded_global_assets_without_write_access() {
+    let root = tempdir().expect("create tempdir");
+    let global_root = root.path().join("global");
+    let workspace_root = root.path().join("repo/.orbit");
+    init_global(&global_root);
+
+    let activities_dir = global_root.join("resources/activities");
+    let jobs_dir = global_root.join("resources/jobs");
+    make_read_only(&activities_dir);
+    make_read_only(&jobs_dir);
+
+    let result = OrbitRuntime::from_roots(&global_root, &workspace_root)
+        .and_then(|runtime| runtime.list_job_catalog_with_last_run(true, JobCatalogFilter::All));
+
+    make_writable(&activities_dir);
+    make_writable(&jobs_dir);
+
+    result.expect("ordinary read-only runtime operation succeeds");
 }
 
 #[test]
