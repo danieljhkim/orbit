@@ -164,17 +164,12 @@ fn denial_names_the_capability_the_rationale_and_the_escape_hatch() {
 #[test]
 fn ungoverned_operations_have_no_registry_entry_to_enforce() {
     // The registry is opt-in: an operation absent from it is not gated. This
-    // pins the in-run git path, which must stay reachable from an agent.
-    for tool in [
-        "git.push",
-        "git.commit",
-        "github.pr.merge",
-        "fs.delete",
-        "proc.spawn",
-    ] {
+    // pins retained public operations without granting any retired VCS/PR
+    // operation through authorization.
+    for tool in ["git.commit", "fs.delete", "proc.spawn"] {
         assert!(
             governed_tool(tool).is_none(),
-            "'{tool}' is sanctioned in-run destruction and must stay ungoverned"
+            "'{tool}' remains outside the governed-operation registry"
         );
     }
 }

@@ -79,3 +79,23 @@ fn merge_batch_pr_actorless_task_falls_back_to_system() {
         .expect("task automation update");
     assert_eq!(update.model, None);
 }
+
+#[test]
+fn merge_batch_pr_propagates_private_vcs_failure_before_task_updates() {
+    let workspace = pr_workspace();
+    let host = PrOpenTestHost::new(
+        vec![review_batch_task("T-MERGE-FAILURE", Some("codex"), None)],
+        workspace.repo.clone(),
+    );
+    host.fail_vcs(PR_MERGE_OPERATION, "gh: simulated merge failure");
+
+    let error = merge_batch_pr(&host, &merge_batch_pr_input(&workspace.repo))
+        .expect_err("private merge failure must propagate");
+
+    assert!(error.to_string().contains("simulated merge failure"));
+    assert!(host.automation_updates().is_empty());
+    assert_eq!(
+        host.get_task("T-MERGE-FAILURE").expect("task").status,
+        TaskStatus::Review
+    );
+}

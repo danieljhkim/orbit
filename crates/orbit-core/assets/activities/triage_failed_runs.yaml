@@ -152,7 +152,6 @@ spec:
     - orbit.task.update
     - orbit.friction.add
     - orbit.search
-    - orbit.state.get
     - fs.read
     - fs.delete
     - proc.spawn

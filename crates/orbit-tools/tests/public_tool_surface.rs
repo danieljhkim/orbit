@@ -5,7 +5,22 @@
 use std::collections::BTreeSet;
 
 use orbit_common::types::RETIRED_TASK_ADD_INPUT_FIELDS;
-use orbit_tools::ToolRegistry;
+use orbit_tools::{ToolContext, ToolRegistry};
+
+const RETIRED_AGENT_TOOL_NAMES: &[&str] = &[
+    "git.push",
+    "github.pr.comment",
+    "github.pr.comment.reply",
+    "github.pr.comments",
+    "github.pr.create",
+    "github.pr.list",
+    "github.pr.merge",
+    "github.pr.review",
+    "github.pr.review.comment",
+    "github.pr.view",
+    "orbit.state.get",
+    "orbit.state.set",
+];
 
 const INACTIVE_TOOL_NAMES: &[&str] = &[
     "orbit.docs.index",
@@ -64,6 +79,13 @@ fn unused_tools_are_not_registered_in_public_surface() {
         );
     }
 
+    for removed in RETIRED_AGENT_TOOL_NAMES {
+        assert!(
+            !names.contains(*removed),
+            "retired agent tool still registered: {removed}"
+        );
+    }
+
     assert!(
         names.iter().all(|name| !name.starts_with("orbit.adr.")),
         "retired orbit.adr tool family still registered"
@@ -83,6 +105,31 @@ fn unused_tools_are_not_registered_in_public_surface() {
         !names.contains(removed_docs_reindex.as_str()),
         "removed docs reindex tool still registered"
     );
+}
+
+#[test]
+fn retired_agent_tools_are_absent_from_every_registry_surface_and_dispatch() {
+    let mut registry = ToolRegistry::new();
+    registry.register_builtins();
+    let all_names = registry
+        .all_schemas()
+        .into_iter()
+        .map(|schema| schema.name)
+        .collect::<BTreeSet<_>>();
+
+    for retired in RETIRED_AGENT_TOOL_NAMES {
+        assert!(
+            !all_names.contains(*retired),
+            "retired agent tool remains inspectable: {retired}"
+        );
+        let error = registry
+            .execute(retired, &ToolContext::default(), serde_json::json!({}))
+            .expect_err("retired agent tool dispatch must fail");
+        assert!(
+            error.to_string().contains(retired),
+            "dispatch error must name retired tool {retired}: {error}"
+        );
+    }
 }
 
 #[test]
@@ -109,16 +156,6 @@ fn workflow_critical_tools_remain_registered() {
     for retained in [
         "fs.read",
         "fs.delete",
-        "git.push",
-        "github.pr.comment",
-        "github.pr.comment.reply",
-        "github.pr.comments",
-        "github.pr.create",
-        "github.pr.list",
-        "github.pr.merge",
-        "github.pr.review",
-        "github.pr.review.comment",
-        "github.pr.view",
         "orbit.pipeline.invoke",
         "orbit.pipeline.wait",
         "orbit.search",

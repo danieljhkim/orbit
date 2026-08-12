@@ -3,7 +3,7 @@ summary: "Activity / Job — Design"
 type: design
 title: "Activity / Job — Design"
 owner: codex
-last_updated: 2026-08-11
+last_updated: 2026-08-12
 last_validated: 2026-07-26
 status: Draft
 feature: activity-job
@@ -180,7 +180,7 @@ After [ORB-10380] / [ADR-0251], the base a run was created at is a pinned commit
 
 The provider boundary now admits only worktree-file changes from an implementation provider. Any assigned HEAD or branch movement is a typed `worktree_content_conflict` regardless of commit count, message trailers, or changed paths; Orbit does not try to prove that provider history belongs to the task. `git_commit` stages the task worktree diff, creates exactly one workflow-owned commit, and returns that SHA. It never enumerates or adopts commits above the pinned base, parses `Agent-*` trailers, or validates a commit against `context_files`.
 
-`pr_prepare` is the pre-rewrite authority boundary. It records the exact head SHA, base SHA, and observed remote task-branch SHA before `git_rebase` may rewrite history. `git_push` classifies the remote ref as missing, current, fast-forwardable, remote-ahead, or diverged. Missing and fast-forwardable refs use normal push; current refs are reused; remote-ahead refs fail closed. Divergence may use force-with-lease only when the persisted preparation SHA still exactly matches the observed remote SHA and `git_rebase` reports a performed or recovery-reused rewrite. The underlying tool emits a branch-scoped `--force-with-lease=refs/heads/<branch>:<expected-sha>`, so a concurrent remote update rejects the push instead of overwriting it. This is [ADR-0225].
+`pr_prepare` is the pre-rewrite authority boundary. It records the exact head SHA, base SHA, and observed remote task-branch SHA before `git_rebase` may rewrite history. `git_push` classifies the remote ref as missing, current, fast-forwardable, remote-ahead, or diverged. Missing and fast-forwardable refs use normal push; current refs are reused; remote-ahead refs fail closed. Divergence may use force-with-lease only when the persisted preparation SHA still exactly matches the observed remote SHA and `git_rebase` reports a performed or recovery-reused rewrite. The engine-private VCS operation emits a branch-scoped `--force-with-lease=refs/heads/<branch>:<expected-sha>`, so a concurrent remote update rejects the push instead of overwriting it. This is [ADR-0225].
 
 After [ORB-10363], `JobV2.failure_activity` is a terminal, best-effort hook distinct from retry recovery. It receives the merged job input, all completed pipeline checkpoints, the failing step/action, and the structured error; it runs once and never replaces the original failure. `task_pr_pipeline` binds this hook to `pr_failure_handoff` ([ADR-0246]). That deterministic action aborts an active conflicting rebase back to the prepared branch, commits any remaining dirty candidate without passing through the normal success-only promotion gate, performs the existing non-overwriting push classification, and opens or reuses a blocked PR. A conflict PR body names the original and target base SHAs plus the conflicting paths, and the task moves to `blocked` with `pr_conflict_blocked` rather than `review`.
 
@@ -194,7 +194,7 @@ Before any dirty integrity failure leaves the boundary, Orbit writes content-bea
 
 After [ORB-10471] / [ADR-0292], whether primary working-content counts against that fast-forward is decided by interference with the run, not by byte-identity of the whole primary dirty state. The guard derives `primary_dirt_paths` — the paths whose index entry, index-to-worktree patch, worktree presence, or untracked blob identity actually moved — deliberately excluding the HEAD-relative `staged_patch_sha256`, which a fast-forward alone rewrites for every already-dirty path. `conflicting_paths` is that dirt intersected with `run_changed_paths`, so a merged sibling PR touching a file the run also touched stays base movement rather than a conflict. A fast-forward is accepted only when it is a proven same-branch ancestor advance *and* that intersection is empty; the ignored dirt is named in the acceptance log as `ignored_primary_paths` and in every drift diagnostic as `primary_dirt_paths`. This closes friction F2026-07-139, where one unrelated untracked primary file turned a benign base advance into `primary_checkout_drift` after valid implementation.
 
-PR creation is restartable within its own checkpoint. `pr_open` first looks up the open PR by head branch; only the explicit no-PR result permits `github.pr.create`. If creation succeeds but PR view or local step-output persistence fails, the retry finds that same external PR and returns it as reused. `pr_promote` then idempotently applies the GitHub PR external ref and the per-task implementation attribution before moving tasks to `review`.
+PR creation is restartable within its own checkpoint. `pr_open` first looks up the open PR by head branch; only the explicit no-PR result permits the engine-private PR-create operation. If creation succeeds but PR metadata refresh or local step-output persistence fails, the retry finds that same external PR and returns it as reused. Push, PR lookup/create/view, and merge execute through this private VCS boundary rather than the public tool registry, so ordinary agents cannot discover, authorize, or dispatch shipment operations. `pr_promote` then idempotently applies the GitHub PR external ref and the per-task implementation attribution before moving tasks to `review`. This boundary was made private in [ORB-10738].
 
 The seeded `list_backlog_tasks` deterministic activity starts `task_auto_pipeline`. Automatic mode admits tasks by `status: backlog`. It emits `task_count`, `task_ids`, `tasks`, singleton `bundles`, and an `excluded` array for admitted backlog tasks filtered because their context files overlap `in-progress` or `review` locks. `excluded` covers only lock overlap; status-based admission and `max_tasks` truncation stay silent, and explicit `task_ids` mode omits it. This attribution contract was added in [T20260421-0542-2].
 
@@ -402,15 +402,9 @@ The executor exposes outputs as `{{ steps.<id>.output.* }}`. Initial context fol
 
 `fan_out` workers see `{{ item }}` / `{{ input.item }}`. Loop bodies see `{{ input.iteration }}`.
 
-#### Agent-step state handoff via `orbit.state.*`
+#### Durable agent-step state
 
-Agents running inside an activity step pass durable data to later steps through `orbit.state.*`, not through the step's response payload. Treat direct-agent stdout as an audit/diagnostic stream — downstream steps must read durable data from task artifacts, `orbit.state.*`, job-run state, or purpose-built tools, not by parsing agent process output. The contract:
-
-- `orbit.state.get` reads the persisted pipeline snapshot.
-- `orbit.state.set` writes this step's output for the engine to merge after the step finishes.
-- Once needed fields are written to `orbit.state`, the activity itself usually has no structured response-payload requirement.
-- `orbit.task.update` stays the right tool for task artifacts (`execution_summary`, `pr_status`, comments, lifecycle state). That is task persistence, not pipeline-state handoff.
-- `orbit.state.*` is only callable when the activity allowlist includes those tools. Currently only [step_failure_recovery](../../../crates/orbit-core/assets/activities/step_failure_recovery.yaml) grants them; other activities thread data through `{{ steps.<id>.output.* }}` or purpose-built tools.
+Direct agent responses are advisory audit/diagnostic data. Workflows gate on durable records: task fields and artifacts written through the task surface, deterministic action checkpoints persisted by the executor, or purpose-built durable operations. No generic agent-callable pipeline-state read/write tools are registered. `orbit.task.update` remains the task persistence boundary for `execution_summary`, comments, and lifecycle fields; deterministic step output is persisted by the engine rather than trusted from an agent response. The generic state-tool surface was removed in [ORB-10738].
 
 ### 8.2 `when` and `retry`
 

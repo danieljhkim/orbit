@@ -18,7 +18,7 @@ fn v2_denial_filter_matches_audit_event_denial_variants() {
             matched_rule: "deny".to_string(),
         },
         V2AuditEventKind::ToolDenied {
-            tool_name: "github.pr.merge".to_string(),
+            tool_name: "orbit.task.delete".to_string(),
             reason: "not allowed".to_string(),
         },
         V2AuditEventKind::StepDenied {
@@ -68,7 +68,7 @@ fn denials_payload_combines_v2_and_sqlite_denials() {
             "run_id": "run-v2-denials",
             "agent_identity": "codex / gpt-5",
             "body_kind": "tool_denied",
-            "tool_name": "github.pr.merge"
+            "tool_name": "orbit.task.delete"
         }),
         now,
     );
@@ -132,7 +132,11 @@ fn denials_payload_combines_v2_and_sqlite_denials() {
     assert_eq!(payload["total"], 4);
     assert!(payload["by_target"].to_string().contains("/usr/bin/false"));
     assert!(payload["by_target"].to_string().contains("./secret.txt"));
-    assert!(payload["by_target"].to_string().contains("github.pr.merge"));
+    assert!(
+        payload["by_target"]
+            .to_string()
+            .contains("orbit.task.delete")
+    );
     assert!(payload["by_target"].to_string().contains("implement"));
 
     let fs_payload = denials_payload(&rows, Some("fs"), Some(since));

@@ -1,5 +1,4 @@
 pub mod commit;
-pub mod push;
 pub mod stage_paths;
 
 use std::collections::HashSet;
@@ -10,9 +9,7 @@ use serde_json::Value;
 
 use crate::{ToolContext, ToolRegistry};
 
-pub fn register(registry: &mut ToolRegistry) {
-    registry.register(push::GitPushTool);
-}
+pub fn register(_registry: &mut ToolRegistry) {}
 
 fn require_repo_root(input: &Value) -> Result<PathBuf, OrbitError> {
     let raw = input

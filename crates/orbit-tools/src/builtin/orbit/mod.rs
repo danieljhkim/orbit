@@ -7,7 +7,6 @@ pub mod operation;
 pub mod pipeline;
 pub mod search;
 pub mod semantic;
-pub mod state;
 pub mod task;
 pub mod workflow;
 pub mod workspace_claim;
@@ -166,8 +165,6 @@ pub fn register(registry: &mut ToolRegistry) {
     registry.register_inactive(semantic::uninstall::OrbitSemanticUninstallTool);
     registry.register_inactive(semantic::stats::OrbitSemanticStatsTool);
     registry.register_inactive(semantic::index::OrbitSemanticIndexTool);
-    registry.register(state::get::OrbitStateGetTool);
-    registry.register(state::set::OrbitStateSetTool);
 }
 
 fn agent_operator(placement: McpToolPlacement) -> McpToolPolicy {

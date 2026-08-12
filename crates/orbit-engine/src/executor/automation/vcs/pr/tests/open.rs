@@ -27,7 +27,7 @@ fn pr_open_rejects_missing_execution_summary_before_external_calls() {
             .to_string()
             .contains("meaningful persisted execution_summary")
     );
-    assert!(host.tool_calls().is_empty());
+    assert!(host.vcs_calls().is_empty());
 }
 
 #[test]
@@ -46,7 +46,7 @@ fn pr_open_fails_loudly_on_zero_commit_branch() {
         .expect_err("zero-commit branch must not open a PR");
 
     assert!(error.to_string().contains("must be ahead"));
-    assert!(host.tool_calls().is_empty());
+    assert!(host.vcs_calls().is_empty());
     assert_eq!(
         host.get_task("T20260513-16").expect("task").status,
         TaskStatus::InProgress
@@ -86,7 +86,7 @@ fn no_diff_expected_bundle_promotes_without_pr_metadata() {
     let task = host.get_task("T20260712-1").expect("task");
     assert_eq!(task.status, TaskStatus::Review);
     assert!(task.external_refs.is_empty());
-    assert!(host.tool_calls().is_empty());
+    assert!(host.vcs_calls().is_empty());
 }
 
 #[test]
@@ -117,17 +117,17 @@ fn pr_open_creates_body_without_promoting_until_explicit_phase() {
     assert!(body.contains(first_summary));
     assert!(body.contains("Second completed task"));
     assert!(body.contains(second_summary));
-    let calls = host.tool_calls();
+    let calls = host.vcs_calls();
     let lookup = calls
         .iter()
-        .find(|call| call.name == "github.pr.list")
+        .find(|call| call.operation == PR_LIST_OPERATION)
         .expect("PR lookup must use the branch-aware list tool");
     assert_eq!(lookup.input["head"], json!("orbit/test-batch"));
     assert_eq!(lookup.input["state"], json!("open"));
     assert!(
         calls
             .iter()
-            .filter(|call| call.name == "github.pr.view")
+            .filter(|call| call.operation == PR_VIEW_OPERATION)
             .all(|call| call.input["pr"] != json!("orbit/test-batch")),
         "PR view only accepts numeric PR numbers or GitHub PR URLs"
     );
@@ -172,9 +172,9 @@ fn pr_open_reuses_existing_branch_pr_without_create() {
     assert_eq!(result["decision"], json!("reused"));
     assert_eq!(result["pr_reused"], json!(true));
     assert_eq!(
-        host.tool_calls()
+        host.vcs_calls()
             .iter()
-            .filter(|call| call.name == "github.pr.create")
+            .filter(|call| call.operation == PR_CREATE_OPERATION)
             .count(),
         0
     );
@@ -191,7 +191,7 @@ fn pr_open_retry_after_create_then_view_failure_discovers_same_pr() {
         )],
         workspace.repo.clone(),
     );
-    host.queue_tool_error("github.pr.view", "temporary local PR view failure");
+    host.queue_vcs_error(PR_VIEW_OPERATION, "temporary local PR view failure");
     let input = pr_open_input(&workspace.repo, vec!["T20260716-2"]);
 
     let error = pr_open(&host, &input).expect_err("post-create view failure");
@@ -201,9 +201,9 @@ fn pr_open_retry_after_create_then_view_failure_discovers_same_pr() {
             .contains("temporary local PR view failure")
     );
     assert_eq!(
-        host.tool_calls()
+        host.vcs_calls()
             .iter()
-            .filter(|call| call.name == "github.pr.create")
+            .filter(|call| call.operation == PR_CREATE_OPERATION)
             .count(),
         1
     );
@@ -212,19 +212,107 @@ fn pr_open_retry_after_create_then_view_failure_discovers_same_pr() {
     assert_eq!(retried["decision"], json!("reused"));
     assert_eq!(retried["pr_number"], json!("42"));
     assert!(
-        host.tool_calls()
+        host.vcs_calls()
             .iter()
-            .filter(|call| call.name == "github.pr.view")
+            .filter(|call| call.operation == PR_VIEW_OPERATION)
             .all(|call| call.input["pr"] != json!("orbit/test-batch")),
         "retry must discover by head branch and view only a numeric PR number or URL"
     );
     assert_eq!(
-        host.tool_calls()
+        host.vcs_calls()
             .iter()
-            .filter(|call| call.name == "github.pr.create")
+            .filter(|call| call.operation == PR_CREATE_OPERATION)
             .count(),
         1,
         "retry must not create a duplicate PR"
+    );
+}
+
+#[test]
+fn pr_open_rejects_multiple_open_prs_for_the_same_head() {
+    let workspace = pr_workspace();
+    let host = PrOpenTestHost::new(
+        vec![batch_task(
+            "ORB-MULTIPLE-PRS",
+            "Reject ambiguous PR lookup",
+            "Outcome: success\nChanges:\n- Ready.",
+        )],
+        workspace.repo.clone(),
+    );
+    host.queue_vcs_result(
+        PR_LIST_OPERATION,
+        json!({
+            "pull_requests": [
+                {"number": 41, "headRefName": "orbit/test-batch"},
+                {"number": 42, "headRefName": "orbit/test-batch"}
+            ]
+        }),
+    );
+
+    let error = pr_open(
+        &host,
+        &pr_open_input(&workspace.repo, vec!["ORB-MULTIPLE-PRS"]),
+    )
+    .expect_err("ambiguous PR lookup must fail closed");
+
+    assert!(error.to_string().contains("multiple open pull requests"));
+    assert!(
+        host.vcs_calls()
+            .iter()
+            .all(|call| call.operation != PR_CREATE_OPERATION),
+        "ambiguous lookup must not create another PR"
+    );
+}
+
+#[test]
+fn pr_open_rejects_missing_lookup_metadata() {
+    let workspace = pr_workspace();
+    let host = PrOpenTestHost::new(
+        vec![batch_task(
+            "ORB-MISSING-PR-METADATA",
+            "Reject incomplete PR metadata",
+            "Outcome: success\nChanges:\n- Ready.",
+        )],
+        workspace.repo.clone(),
+    );
+    host.queue_vcs_result(
+        PR_LIST_OPERATION,
+        json!({"pull_requests": [{"number": 42}]}),
+    );
+
+    let error = pr_open(
+        &host,
+        &pr_open_input(&workspace.repo, vec!["ORB-MISSING-PR-METADATA"]),
+    )
+    .expect_err("missing lookup metadata must fail closed");
+
+    assert!(error.to_string().contains("without headRefName"));
+}
+
+#[test]
+fn pr_open_propagates_private_lookup_failure() {
+    let workspace = pr_workspace();
+    let host = PrOpenTestHost::new(
+        vec![batch_task(
+            "ORB-LOOKUP-FAILURE",
+            "Propagate PR lookup failure",
+            "Outcome: success\nChanges:\n- Ready.",
+        )],
+        workspace.repo.clone(),
+    );
+    host.fail_vcs(PR_LIST_OPERATION, "gh: lookup unavailable");
+
+    let error = pr_open(
+        &host,
+        &pr_open_input(&workspace.repo, vec!["ORB-LOOKUP-FAILURE"]),
+    )
+    .expect_err("lookup failure must propagate");
+
+    assert!(error.to_string().contains("lookup unavailable"));
+    assert!(
+        host.comments_for("ORB-LOOKUP-FAILURE")[0]
+            .message
+            .contains("[phase=automation.vcs.pr.lookup]")
     );
 }
 
@@ -239,7 +327,7 @@ fn pr_open_records_phase_specific_failed_handoff_comment() {
         )],
         workspace.repo.clone(),
     );
-    host.fail_tool("github.pr.create", "gh: HTTP 502 from api.github.com");
+    host.fail_vcs(PR_CREATE_OPERATION, "gh: HTTP 502 from api.github.com");
 
     let error = pr_open(&host, &pr_open_input(&workspace.repo, vec!["T20260521-2A"]))
         .expect_err("create failure propagates");
@@ -247,7 +335,11 @@ fn pr_open_records_phase_specific_failed_handoff_comment() {
     let comments = host.comments_for("T20260521-2A");
     assert_eq!(comments.len(), 1);
     assert!(comments[0].message.contains("[run=batch-1]"));
-    assert!(comments[0].message.contains("[phase=github.pr.create]"));
+    assert!(
+        comments[0]
+            .message
+            .contains("[phase=automation.vcs.pr.create]")
+    );
     assert!(
         comments[0]
             .message
@@ -321,9 +413,9 @@ fn resume_refuses_to_open_or_promote_once_the_stacked_base_has_landed() {
         "the diagnostic must name a recovery path: {message}"
     );
     assert_eq!(
-        host.tool_calls()
+        host.vcs_calls()
             .iter()
-            .filter(|call| call.name == "github.pr.create")
+            .filter(|call| call.operation == PR_CREATE_OPERATION)
             .count(),
         1,
         "the resumed attempt must not reach GitHub at all"

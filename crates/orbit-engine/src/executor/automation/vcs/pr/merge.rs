@@ -1,8 +1,7 @@
 use std::path::Path;
 
-use orbit_common::types::{ExternalRef, OrbitError, Role, Task, TaskStatus};
+use orbit_common::types::{ExternalRef, OrbitError, Task, TaskStatus};
 use orbit_store::pr_scoreboard;
-use orbit_tools::ToolContext;
 use serde_json::{Value, json};
 
 use crate::context::{RuntimeHost, TaskAutomationUpdate};
@@ -12,6 +11,7 @@ use super::super::super::input::{
 };
 use super::super::freshness::ensure_branch_fresh_against_base;
 use super::super::git::{base_sync_mode_from_input, git_command_success, git_output};
+use super::super::operations;
 use super::attribution::ship_done_attribution;
 
 pub(in crate::executor::automation) fn git_merge<H: RuntimeHost + Sync + ?Sized>(
@@ -95,25 +95,13 @@ pub(super) fn merge_batch_pr<H: RuntimeHost + ?Sized>(
 
     ensure_branch_fresh_against_base(&workspace_path, &head, &base, base_sync_mode)?;
 
-    let tool_context = ToolContext {
-        cwd: Some(workspace_path.to_string_lossy().to_string()),
-        allowed_tools: vec![],
-        ..Default::default()
-    };
-    host.run_tool_with_context_and_role(
-        "github.pr.merge",
+    host.run_private_vcs_operation(
+        operations::PR_MERGE,
         json!({
             "pr": pr_number,
             "strategy": "squash",
-            // Do not pass --delete-branch to `gh pr merge` because the local
-            // branch is still attached to the shared worktree and `gh` would
-            // fail trying to delete it.  We delete the remote branch separately
-            // below, tolerating errors (the repo may auto-delete branches after
-            // merge).
-            "delete_branch": false,
+            "workspace_path": workspace_path,
         }),
-        Role::Admin,
-        tool_context,
     )?;
 
     // Best-effort remote branch cleanup.  Some repos have GitHub's
