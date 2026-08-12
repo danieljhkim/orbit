@@ -90,11 +90,6 @@ tools:
   orbit.auto_task.update: { placement: owner, scope: workspace-required, allowed_capabilities: [agent, operator] }
   orbit.auto_task.toggle: { placement: owner, scope: workspace-required, allowed_capabilities: [agent, operator] }
   orbit.command.exec: { placement: local-derived, scope: workspace-required, allowed_capabilities: [operator] }
-  # Still advertised pending the ADR-store migration; see planned_withdrawals.
-  orbit.adr.add: { placement: owner, scope: workspace-required, allowed_capabilities: [agent, operator] }
-  orbit.adr.show: { placement: owner, scope: workspace-required, allowed_capabilities: [agent, operator] }
-  orbit.adr.supersede: { placement: owner, scope: workspace-required, allowed_capabilities: [agent, operator] }
-  orbit.adr.update: { placement: owner, scope: workspace-required, allowed_capabilities: [agent, operator] }
 
 # Absent from the advertised set today. The conformance test asserts this
 # directly, so a family cannot quietly return.
@@ -103,19 +98,13 @@ withdrawn_tools:
     reason: Deferred to v2 with execution placement and run leases (ADR-0358).
   - names: [orbit.host.list]
     reason: Already removed as unused in ORB-10332; the fleet inventory behind it is deferred to v2 (ADR-0358), so it has nothing to enumerate.
-
-# Decided and scheduled, but not yet absent from the advertised set. These are
-# NOT asserted as withdrawn: doing so would make the contract describe a surface
-# the code still serves.
-planned_withdrawals:
   - names: [orbit.adr.add, orbit.adr.show, orbit.adr.update, orbit.adr.supersede, orbit.adr.list]
-    reason: The ADR store is retired in favour of git-committed entries in each feature's 4_decisions.md (CONVENTIONS.md section 4).
-    blocked_on: >-
-      CONVENTIONS.md section 4b makes inlining the remaining pointer-only entries into each
-      feature's 4_decisions.md a prerequisite, and the orbit-knowledge skill still routes agents to
-      orbit.adr.add. ORB-10727 kept the family advertised rather than performing another feature's
-      cutover inside the bridge recomposition. orbit.adr.list and orbit.adr.restore are already
-      CLI-only.
+    reason: >-
+      The ADR store is retired in favour of git-committed entries in each feature's 4_decisions.md
+      (CONVENTIONS.md section 4). ORB-10726 performed the cutover; ORB-10727 was authored against
+      the pre-cutover surface and still carried the family here as a planned withdrawal, so this
+      entry closes that gap without advancing a revision — canonical_registry_revision 3 already
+      described a matrix without it.
 
 owner_schema_digest:
   domain_tag: orbit.mcp.owner-schema.v1

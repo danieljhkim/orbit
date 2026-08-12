@@ -235,7 +235,9 @@ pub(super) struct CallRequest {
 }
 
 pub(super) enum WorkerMessage {
-    Call(CallRequest),
+    /// Boxed so a queued call does not widen every `Shutdown` slot in the
+    /// bounded channel to the size of a full request.
+    Call(Box<CallRequest>),
     Shutdown,
 }
 
@@ -317,13 +319,13 @@ impl OwnerLinkPool {
             .ok_or_else(|| {
                 OrbitError::OwnerUnavailable("owner link pool is shutting down".to_string())
             })?
-            .try_send(WorkerMessage::Call(CallRequest {
+            .try_send(WorkerMessage::Call(Box::new(CallRequest {
                 capability,
                 name: name.to_string(),
                 input,
                 context,
                 response: response_tx,
-            }))
+            })))
             .map_err(|error| match error {
                 mpsc::TrySendError::Full(_) => OrbitError::OwnerUnavailable(
                     "owner link request queue is saturated before handoff".to_string(),

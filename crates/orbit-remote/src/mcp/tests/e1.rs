@@ -160,7 +160,7 @@ fn multiple_owner_entries_are_keyed_by_target_machine_id() {
         "operator must not imply agent"
     );
 
-    assert!(config.owners.get("hm_unlisted").is_none());
+    assert!(!config.owners.contains_key("hm_unlisted"));
     assert_eq!(
         config
             .routes()
@@ -381,10 +381,14 @@ fn owner_listing_uses_one_canonical_placement_and_capability_predicate() {
     // Crew discovery is admitted for agent (unlike the operator-only registry
     // discovery tool), proving capability is by placement, not a hierarchy.
     assert!(agent_names.contains("orbit.crew.list"));
-    // `orbit.adr.*` is owner-placed like the rest of the knowledge surface. Its
-    // MCP withdrawal is scheduled with the ADR-store migration, not here (see
-    // the conformance fixture's planned_withdrawals).
-    assert!(agent_names.contains("orbit.adr.add"));
+    // `orbit.adr.*` left the advertised surface with the ADR store (ORB-10726):
+    // ADRs are git-committed entries in each feature's `4_decisions.md`, so the
+    // owner endpoint has no ADR tool to place.
+    assert!(
+        !agent_names
+            .iter()
+            .any(|name| name.starts_with("orbit.adr."))
+    );
     assert!(
         !agent_names
             .iter()

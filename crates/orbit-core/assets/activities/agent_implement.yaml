@@ -126,4 +126,4 @@ spec:
     - rg
     - orbit
   on_denial: terminate
-  wall_clock_timeout_seconds: 5400
+  wall_clock_timeout_seconds: 10800

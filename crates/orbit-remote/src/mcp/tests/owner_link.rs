@@ -406,13 +406,13 @@ fn silent_peer_times_out_and_bounded_queue_saturates_before_handoff() {
     pool.tx
         .as_ref()
         .expect("pool sender")
-        .try_send(WorkerMessage::Call(CallRequest {
+        .try_send(WorkerMessage::Call(Box::new(CallRequest {
             capability: McpCapability::Agent,
             name: "orbit.task.show".to_string(),
             input: json!({}),
             context: context(McpCapability::Agent, "mcall-queued"),
             response: queued_tx,
-        }))
+        })))
         .expect("one bounded queue slot");
     clock.advance(Duration::from_secs(3));
     let saturated = pool
