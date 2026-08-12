@@ -54,7 +54,7 @@ provider = "gemini"
 
 [crews.grok]
 backend = "cli"
-model = "grok-build"
+model = "grok-4.5"
 provider = "grok"
 
 [crews.qa]
