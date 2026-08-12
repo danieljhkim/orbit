@@ -60,7 +60,7 @@ fn installed_grok_cli_backend_smoke_captures_stdout_artifact() {
         orbit_store::Store::open_in_memory().expect("audit store"),
         "ws_test",
         "grok-installed-smoke",
-        "grok:grok-build".to_string(),
+        "grok:grok-4.5".to_string(),
         None,
     )
     .expect("build audit writer");
@@ -68,7 +68,7 @@ fn installed_grok_cli_backend_smoke_captures_stdout_artifact() {
         instruction: "Return the requested Orbit response envelope.".to_string(),
         tools: Vec::new(),
         on_denial: OnDenial::Terminate,
-        model: Some("grok-build".to_string()),
+        model: Some("grok-4.5".to_string()),
         max_iterations: 1,
         backend: Backend::Cli,
         provider: Provider::Grok,
@@ -118,5 +118,5 @@ fn installed_grok_cli_backend_smoke_captures_stdout_artifact() {
         .as_ref()
         .expect("well-formed grok stdout should parse invocation trace");
     assert_eq!(invocation.provider, "grok");
-    assert_eq!(invocation.model.as_deref(), Some("grok-build"));
+    assert_eq!(invocation.model.as_deref(), Some("grok-4.5"));
 }
