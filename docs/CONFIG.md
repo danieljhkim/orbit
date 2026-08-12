@@ -63,7 +63,7 @@ A **crew** is one provider-model-backend assignment. Activities do not carry a m
 
 | Field | Purpose | Values |
 |---|---|---|
-| `model` | Model identifier passed to the provider CLI | Provider-specific (e.g. `opus`, `sonnet`, `gpt-5.6-sol`, `pro`, `grok-build`) |
+| `model` | Model identifier passed to the provider CLI | Provider-specific (e.g. `opus`, `sonnet`, `gpt-5.6-sol`, `pro`, `grok-4.5`) |
 | `provider` | Agent family | `claude`, `codex`, `gemini`, `grok` (the CLI-executable families; see [Provider identity and resolution](#provider-identity-and-resolution) for the full canonical set) |
 | `backend` | How Orbit dispatches the agent | `cli` (today the only supported value for crew dispatch) |
 | `description` | Optional human-facing crew summary | Any non-empty string after trimming |
@@ -79,6 +79,17 @@ backend = "cli"
 description = "Systems implementation"
 tags = ["implementation", "review"]
 ```
+
+Example — the standard Grok crew:
+
+```toml
+[crews.grok]
+model = "grok-4.5"
+provider = "grok"
+backend = "cli"
+```
+
+The current Grok Build CLI lists `grok-4.5` as its default from `grok models`, so Orbit uses that live menu id. The older `grok-build` string is not retained as a default or alias.
 
 Fresh `orbit init` configuration advertises only detected provider CLIs. Claude seeds `opus`, `sonnet`, and `fable`; Codex seeds `sol`, `terra`, and `luna`; Gemini seeds `gemini`; and Grok seeds `grok`. When Codex or Claude is available, `qa` uses Terra or Sonnet respectively. Every generated entry uses the CLI backend. If no supported provider CLI is detected, init leaves both the crew registry and `workflow.default_crew` unset instead of writing an unusable provider.
 

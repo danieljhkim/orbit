@@ -137,7 +137,7 @@ fn non_interactive_init_against_non_global_root_leaves_home_skill_links_untouche
         ("terra", "codex", "gpt-5.6-terra"),
         ("luna", "codex", "gpt-5.6-luna"),
         ("gemini", "gemini", "pro"),
-        ("grok", "grok", "grok-build"),
+        ("grok", "grok", "grok-4.5"),
         ("qa", "", ""),
     ];
     if let Some(crews) = crews {
