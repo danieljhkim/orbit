@@ -38,6 +38,10 @@ pub(crate) const DEFAULT_ROUTINE_FILES: &[(&str, &str)] = &[
         include_str!("../../assets/routines/task_triage.yaml"),
     ),
     (
+        "task_pilot",
+        include_str!("../../assets/routines/task_pilot.yaml"),
+    ),
+    (
         "ship_sweep",
         include_str!("../../assets/routines/ship_sweep.yaml"),
     ),
@@ -136,6 +140,7 @@ mod tests {
         for (stem, target) in [
             ("auto_task_scheduler", "auto_task_scheduler_pipeline"),
             ("task_triage", "task_triage_pipeline"),
+            ("task_pilot", "task_pilot_pipeline"),
             ("ship_sweep", "workspace_ship_pipeline"),
             ("worktree_gc", "worktree_gc_pipeline"),
         ] {
@@ -159,6 +164,21 @@ mod tests {
         let triage = parse_routine_yaml(&triage).expect("triage routine parses");
         assert_eq!(triage.trigger.cron, "15 * * * *");
         parse_cron(&triage.trigger.cron).expect("seeded cron parses");
+
+        // Task-pilot may run up to ten five-task partitions in two waves,
+        // each agent bounded to 30 minutes. Its 90-minute timeout covers
+        // that maximum automatic batch plus deterministic preparation/apply.
+        let pilot = std::fs::read_to_string(routines_dir.join("task_pilot.yaml"))
+            .expect("read task-pilot routine");
+        let pilot = parse_routine_yaml(&pilot).expect("task-pilot routine parses");
+        assert_eq!(pilot.trigger.cron, "45 */4 * * *");
+        assert_eq!(
+            pilot.trigger.missed_run,
+            orbit_common::types::MissedRunPolicy::Skip
+        );
+        assert_eq!(pilot.policy.timeout_minutes, 90);
+        assert_eq!(pilot.policy.overlap, OverlapPolicy::Forbid);
+        parse_cron(&pilot.trigger.cron).expect("task-pilot cron parses");
 
         let ship = std::fs::read_to_string(routines_dir.join("ship_sweep.yaml"))
             .expect("read ship routine");
@@ -204,6 +224,47 @@ mod tests {
             RoutineTarget::Job("worktree_gc_pipeline".to_string())
         );
         assert!(!definition.enabled);
+    }
+
+    #[test]
+    fn plain_reinit_adds_a_new_missing_default_without_rewriting_existing_files() {
+        let root = tempdir().expect("create tempdir");
+        let routines_dir = root.path().join("routines");
+        seed_default_routines(&routines_dir, "host-a", Some("workspace"), false)
+            .expect("first seed");
+
+        let existing = routines_dir.join("task_triage.yaml");
+        let original = std::fs::read(&existing).expect("read existing routine bytes");
+        let missing = routines_dir.join("task_pilot.yaml");
+        std::fs::remove_file(&missing).expect("remove newly introduced routine");
+
+        let seeded = seed_default_routines(&routines_dir, "host-b", Some("workspace"), false)
+            .expect("plain re-init");
+        assert_eq!(seeded, 1, "only the missing default is created");
+        assert_eq!(
+            std::fs::read(&existing).expect("read existing routine bytes"),
+            original,
+            "plain re-init must preserve existing routines byte-for-byte"
+        );
+
+        let pilot = parse_routine_yaml(
+            &std::fs::read_to_string(&missing).expect("read newly seeded task-pilot routine"),
+        )
+        .expect("newly seeded task-pilot routine parses");
+        assert_eq!(pilot.hosts, vec!["host-b".to_string()]);
+        assert!(!pilot.enabled);
+    }
+
+    #[test]
+    fn dogfood_task_pilot_routine_matches_the_rendered_default_template() {
+        let rendered = include_str!("../../assets/routines/task_pilot.yaml")
+            .replace(ROUTINE_NAME_PLACEHOLDER, "task-pilot-orbit")
+            .replace(HOST_ID_PLACEHOLDER, "dk-server-1");
+        assert_eq!(
+            rendered,
+            include_str!("../../../../.orbit/routines/task_pilot.yaml"),
+            "dogfood task-pilot routine must stay aligned with the seeded template"
+        );
     }
 
     #[test]

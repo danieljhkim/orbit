@@ -1,7 +1,7 @@
 ---
 title: Routines — Overview
 owner: claude
-last_updated: 2026-07-18
+last_updated: 2026-08-12
 status: Accepted
 feature: routines
 doc_role: overview
@@ -10,7 +10,7 @@ summary: Durable, git-versioned scheduler primitive that fires catalog jobs/acti
 tags: [routines, scheduler]
 paths: ["crates/orbit-cli/src/command/routine/**", "crates/orbit-core/src/routines/**", "crates/orbit-remote/src/routines.rs", "crates/orbit-store/src/sqlite/routine_store/**"]
 related_features: [routines, activity-job, host-registry]
-related_artifacts: [ORB-10001, ORB-10021, ORB-10207, ORB-10270, ORB-10319, ADR-0223]
+related_artifacts: [ORB-10001, ORB-10021, ORB-10207, ORB-10270, ORB-10319, ORB-10739, ADR-0223]
 ---
 
 # Routines — Overview
@@ -30,11 +30,12 @@ is host-local and never synced. [2_design.md](./2_design.md) is the v1 contract;
 > registry-neutral scheduler, validation, and dispatch kernels. [ORB-10319]
 
 `orbit workspace init` creates the complete default set (`auto_task_scheduler`,
-`task_triage`, and `ship_sweep`) under `.orbit/routines/`. Every default is
-`enabled: false`: scheduled execution is an explicit, versioned opt-in made by changing
-the reviewed definition to `enabled: true`. Re-init creates newly introduced missing
-defaults but never rewrites existing routine files; those files belong to the workspace
-after seeding. A destructive force initialization recreates templates from defaults.
+`task_triage`, `task_pilot`, `ship_sweep`, and `worktree_gc`) under
+`.orbit/routines/`. Every default is `enabled: false`: scheduled execution is an explicit,
+versioned opt-in made by changing the reviewed definition to `enabled: true`. Re-init
+creates newly introduced missing defaults but never rewrites existing routine files; those
+files belong to the workspace after seeding. A destructive force initialization recreates
+templates from defaults. [ORB-10739]
 
 ---
 
@@ -112,6 +113,8 @@ fragmentation this feature exists to end.
   observation and starts at the next natural slot without backfill.
 - [ORB-10319] — moved Remote-specific identity, registry/cache, and workspace-runtime
   composition out of Core without changing scheduler behavior.
+- [ORB-10739] — added the disabled `task_pilot` default routine; its zero-input target
+  leaves eligibility and bounded partitioning to `prepare_task_pilot`.
 - [ORB-00374] — removed the `shell` activity variant and `run_shell` dispatch (fail-closed);
   routines inherit this constraint.
 

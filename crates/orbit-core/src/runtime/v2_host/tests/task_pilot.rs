@@ -92,11 +92,18 @@ fn automatic_discovery_filters_status_context_and_no_diff_tags_then_partitions()
     let active = seed_task(&runtime, "active", TaskStatus::InProgress, &[], &[]);
     let review = seed_task(&runtime, "review", TaskStatus::Review, &[], &[]);
     let terminal = seed_task(&runtime, "terminal", TaskStatus::Done, &[], &[]);
-    let no_diff = seed_task(
+    let no_diff_needed = seed_task(
         &runtime,
-        "no-diff",
+        "no-diff-needed",
         TaskStatus::Backlog,
         &["no-diff-needed"],
+        &[],
+    );
+    let no_diff_expected = seed_task(
+        &runtime,
+        "no-diff-expected",
+        TaskStatus::Proposed,
+        &["no-diff-expected"],
         &[],
     );
     let scoped = seed_task(
@@ -141,11 +148,13 @@ fn automatic_discovery_filters_status_context_and_no_diff_tags_then_partitions()
             entry["task_id"] == task.id && entry["reason"] == "status_not_eligible"
         }));
     }
-    assert!(
-        excluded
-            .iter()
-            .any(|entry| { entry["task_id"] == no_diff.id && entry["reason"] == "no_diff_task" })
-    );
+    for task in [no_diff_needed, no_diff_expected] {
+        assert!(
+            excluded
+                .iter()
+                .any(|entry| { entry["task_id"] == task.id && entry["reason"] == "no_diff_task" })
+        );
+    }
     assert!(excluded.iter().any(|entry| {
         entry["task_id"] == scoped.id && entry["reason"] == "context_files_not_empty"
     }));

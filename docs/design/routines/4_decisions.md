@@ -1,7 +1,7 @@
 ---
 title: Routines — Decisions
 owner: claude
-last_updated: 2026-08-11
+last_updated: 2026-08-12
 status: Accepted
 feature: routines
 doc_role: decisions
@@ -10,7 +10,7 @@ summary: ADR log for the routines scheduler, including default seeding and works
 tags: [routines, scheduler]
 paths: ["crates/orbit-core/src/routines/**", "crates/orbit-remote/src/routines.rs"]
 related_features: [routines, activity-job, host-registry]
-related_artifacts: [ORB-10001, ORB-10021, ORB-10207, ORB-10270, ORB-10319, ADR-0223]
+related_artifacts: [ORB-10001, ORB-10021, ORB-10207, ORB-10270, ORB-10319, ORB-10739, ADR-0223]
 ---
 
 # Routines — Decisions
@@ -149,16 +149,16 @@ Routine YAML definitions live in routine-source workspaces and converge via git 
 **Status:** Accepted · 2026-07-11 21:51:20.761360Z · [ORB-10129], [ORB-10207]
 **Owner:** claude
 **Created:** 2026-07-11 21:51:13.196368Z
-**Last updated:** 2026-07-15 22:19:13.397683Z
+**Last updated:** 2026-08-12
 **Related features:** `routines`
-**Tags:** `routines`, `default-assets`, `triage`, `ship-sweep`
+**Tags:** `routines`, `default-assets`, `triage`, `task-pilot`, `ship-sweep`
 **Paths:** `crates/orbit-core/assets/routines/**`, `crates/orbit-core/src/command/routine.rs`, `crates/orbit-core/src/command/init.rs`
 
 ### Context
 ORB-10129 ships the triage pipeline as a default, but routines have no global directory: discovery reads `.orbit/routines/*.yaml` from `[routines] role = "source"` workspaces, v1 requires explicit host pinning (no "any host"), and routine names must be unique across all sources on a host — so a static shipped YAML cannot work. The real alternatives were leaving defaults workspace-authored from scratch or adding a global routines directory (a discovery-model change ADR-0205 deliberately avoided).
 
 ### Decision
-`orbit init` (workspace branch) seeds `DEFAULT_ROUTINE_FILES` templates into `.orbit/routines/`, resolving `__ORBIT_HOST_ID__` via `resolve_host_id` and `__ORBIT_ROUTINE_NAME__` from a workspace-directory slug, validating each rendered document fail-closed before writing. Every default is disabled. Plain re-init creates missing defaults while preserving existing definitions byte-for-byte; destructive `--force` recreates templates. A routine fires only after the workspace is a routine source and its versioned `enabled` field is set true.
+`orbit init` (workspace branch) seeds `DEFAULT_ROUTINE_FILES` templates into `.orbit/routines/`, resolving `__ORBIT_HOST_ID__` via `resolve_host_id` and `__ORBIT_ROUTINE_NAME__` from a workspace-directory slug, validating each rendered document fail-closed before writing. Every default is disabled. The complete set is `auto_task_scheduler`, `task_triage`, `task_pilot`, `ship_sweep`, and `worktree_gc`. Plain re-init creates missing defaults while preserving existing definitions byte-for-byte; destructive `--force` recreates templates. A routine fires only after the workspace is a routine source and its versioned `enabled` field is set true. [ORB-10739]
 
 ### Consequences
 - Fresh workspaces get reviewable routine definitions without silently granting scheduled execution.
