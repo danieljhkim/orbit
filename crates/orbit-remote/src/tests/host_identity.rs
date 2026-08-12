@@ -149,6 +149,23 @@ fn incomplete_current_schema_file_is_rejected() {
 }
 
 #[test]
+fn schema_v2_identity_is_accepted_as_the_current_on_disk_format() {
+    assert_eq!(HOST_IDENTITY_SCHEMA_VERSION, 2);
+    let dir = tempfile::tempdir().expect("tempdir");
+    std::fs::write(
+        dir.path().join("host.toml"),
+        "schema_version = 2\nmachine_id = \"hm_current\"\nhost_id = \"dk-server-1\"\ntask_prefix = \"DE\"\n",
+    )
+    .expect("write schema-v2 identity");
+
+    let identity = load_host_identity(dir.path()).expect("schema v2 must load");
+    assert_eq!(identity.schema_version, 2);
+    assert_eq!(identity.machine_id, "hm_current");
+    assert_eq!(identity.host_id, "dk-server-1");
+    assert_eq!(identity.task_prefix, "DE");
+}
+
+#[test]
 fn transport_shaped_machine_id_is_rejected_without_rewriting_host_identity() {
     for machine_id in ["dk1", "user@dk1", "ssh:dk1", "hm_ssh:dk1", "/tmp/hub"] {
         let dir = tempfile::tempdir().expect("tempdir");
@@ -184,7 +201,13 @@ fn future_schema_version_fails_closed_without_rewrite() {
     let dir = tempfile::tempdir().expect("tempdir");
     let body = "schema_version = 3\nmachine_id = \"hm_future\"\nhost_id = \"dk-server-1\"\ntask_prefix = \"DE\"\n";
     std::fs::write(dir.path().join("host.toml"), body).expect("write");
-    inspect_host_identity(dir.path()).expect_err("future schema must fail closed");
+    let error = inspect_host_identity(dir.path())
+        .expect_err("future schema must fail closed")
+        .to_string();
+    assert!(error.contains("unsupported schema_version 3"), "{error}");
+    assert!(error.contains("supports up to 2"), "{error}");
+    assert!(error.contains("Upgrade Orbit"), "{error}");
+    assert!(error.contains("file is left unchanged"), "{error}");
     // The file is left untouched (never rewritten by a read).
     assert_eq!(
         std::fs::read_to_string(dir.path().join("host.toml")).expect("read"),

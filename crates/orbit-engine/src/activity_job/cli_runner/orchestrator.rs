@@ -29,7 +29,8 @@ use super::envelope::{
     task_id_from_input,
 };
 use super::spawn::{
-    linux_bwrap_failed_write_diagnostic, prepare_sandbox_for_dispatch, resolve_provider_launcher,
+    linux_bwrap_failed_write_diagnostic, orbit_tool_env, prepare_sandbox_for_dispatch,
+    resolve_provider_launcher,
 };
 use super::supervisor::{
     DEFAULT_WALL_CLOCK_TIMEOUT_SECONDS, SpawnTraceContext, SpawnWithTimeoutRequest,
@@ -213,7 +214,7 @@ pub fn run_cli_backend(
     // ADR-0182: external CLI agents get the same active-task hook binding as
     // direct-agent executions. The AGENT_* fields preserve ORB-10342's
     // commit-telemetry contract and omit unknown model/task values.
-    let child_env = provenance_env(ProvenanceEnv {
+    let mut child_env = provenance_env(ProvenanceEnv {
         orbit_run_id: Some(run_id),
         orbit_managed_run_context: true,
         orbit_agent_name: tool_ctx.agent_name.as_deref(),
@@ -225,6 +226,9 @@ pub fn run_cli_backend(
         agent_model: model.as_deref(),
         agent_task_id: task_id,
     });
+    child_env.extend(
+        orbit_tool_env().map_err(|error| DispatchError::CliInvocationPermanent(error.message))?,
+    );
     // [ORB-10496] Record the provider child's PID the moment it exists. Emitted
     // through the same writer, so it is persisted (and therefore readable by
     // `orbit run show` / the run-status API) while the invocation is still

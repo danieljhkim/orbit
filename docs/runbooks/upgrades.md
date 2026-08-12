@@ -84,5 +84,20 @@ After reviewing the dry run:
 4. Run `orbit doctor` and require all relevant checks to pass.
 5. Restart any independently managed dashboard process after swapping the binary.
 
+Agent subprocesses inherit an `ORBIT_BIN` pinned to the Orbit executable that dispatched
+them, and that executable's directory is placed first on their `PATH`. An operator-set
+`ORBIT_BIN` takes precedence. After replacing `~/.orbit/bin/orbit`, restart long-lived Orbit
+services and pipeline workers so newly dispatched agents inherit the replacement build. Verify
+both the explicit path and the ordinary command resolve the same tool-capable binary:
+
+```sh
+~/.orbit/bin/orbit tool run orbit.task.show --input '{"id":"<real-task-id>","model":"codex"}'
+command -v orbit
+orbit tool run orbit.task.show --input '{"id":"<real-task-id>","model":"codex"}'
+```
+
+If `~/.orbit/host.toml` uses a schema newer than an installed binary supports, upgrade and
+restart that binary. Never edit `schema_version` downward to bypass the guard.
+
 See [Check Orbit health](./health-checks.md) for `orbit doctor` and dashboard-readiness
 semantics. If verification fails, stop writers and restore the backups before further recovery.
