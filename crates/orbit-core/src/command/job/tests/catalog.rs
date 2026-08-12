@@ -301,8 +301,12 @@ fn task_pilot_pipeline_defaults_to_luna_and_bounded_all_join_partitions() {
     assert_eq!(apply_input["prepared"], "{{ steps.prepare.output }}");
     assert_eq!(apply_input["results"], "{{ steps.pilot_results.output }}");
     assert!(
-        yaml.contains("Invoked-only"),
-        "task pilot must remain an explicitly invoked workflow"
+        yaml.contains("Schedulable task-pilot pipeline"),
+        "task pilot must document scheduled zero-input support"
+    );
+    assert!(
+        !yaml.contains("Invoked-only"),
+        "task pilot is no longer restricted to explicit invocation"
     );
 
     let mut resolved = load_job_asset(yaml).expect("task pilot pipeline parses for resolution");
