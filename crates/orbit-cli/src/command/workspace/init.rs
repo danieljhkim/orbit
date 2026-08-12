@@ -12,7 +12,7 @@ use orbit_core::OrbitError;
 use orbit_core::command::init::{InitOptions, init_workspace_at_root};
 use orbit_remote::runtime::RemoteRuntimeFactory;
 use orbit_remote::workspace_registry;
-use orbit_remote::{HostIdentityState, HostMode, inspect_host_identity};
+use orbit_remote::{HostIdentityState, inspect_host_identity};
 use serde::{Deserialize, Serialize};
 
 use super::role::CliCheckoutRole;
@@ -139,17 +139,12 @@ impl WorkspaceInitArgs {
         if let Some(mode) = self.ship_mode.as_deref() {
             orbit_core::ShipMode::parse(mode)?;
         }
-        let (local_machine_id, local_host_id, local_mode) =
-            match inspect_host_identity(global_root)? {
-                HostIdentityState::Present(identity) => (
-                    Some(identity.machine_id),
-                    Some(identity.host_id),
-                    identity.mode,
-                ),
-                HostIdentityState::Legacy { .. } | HostIdentityState::Absent => {
-                    (None, None, HostMode::Standalone)
-                }
-            };
+        let (local_machine_id, local_host_id) = match inspect_host_identity(global_root)? {
+            HostIdentityState::Present(identity) => {
+                (Some(identity.machine_id), Some(identity.host_id))
+            }
+            HostIdentityState::Legacy { .. } | HostIdentityState::Absent => (None, None),
+        };
         let explicit_role = self.role.map(WorkspaceCheckoutRole::from);
         match (explicit_role, self.owner.as_deref()) {
             (None, Some(_)) => {
@@ -168,11 +163,6 @@ impl WorkspaceInitArgs {
                 ));
             }
             (Some(WorkspaceCheckoutRole::Replica), Some(owner)) => {
-                if local_mode == HostMode::Standalone {
-                    return Err(OrbitError::InvalidInput(
-                        "--role replica is unavailable in standalone mode".to_string(),
-                    ));
-                }
                 validate_machine_id(owner)?;
                 if local_machine_id.as_deref() == Some(owner) {
                     return Err(OrbitError::InvalidInput(format!(
@@ -245,7 +235,7 @@ impl WorkspaceInitArgs {
             InitOptions {
                 refresh_defaults: true,
                 global_root_override: Some(global_root.to_path_buf()),
-                routine_host_id: local_host_id,
+                routine_host_id: local_host_id.clone(),
                 ..Default::default()
             },
         )?;
@@ -300,13 +290,39 @@ impl WorkspaceInitArgs {
         // replica declaration supplies its stable owner in this same in-memory
         // mutation, so no transient local-owner binding is ever persisted.
         if checkout_added || explicit_role.is_some() {
+            let assigned_role = explicit_role.unwrap_or(WorkspaceCheckoutRole::Owner);
             workspace_registry::assign_checkout_role(
                 &mut registry,
                 &id,
-                explicit_role.unwrap_or(WorkspaceCheckoutRole::Owner),
+                assigned_role,
                 self.owner.as_deref(),
                 local_machine_id.as_deref(),
             )?;
+            match assigned_role {
+                WorkspaceCheckoutRole::Owner => {
+                    if let (Some(machine_id), Some(host_id)) =
+                        (local_machine_id.as_deref(), local_host_id.as_deref())
+                    {
+                        workspace_registry::rename_local_owner_host_id(
+                            &mut registry,
+                            machine_id,
+                            host_id,
+                        )?;
+                    }
+                }
+                WorkspaceCheckoutRole::Replica => {
+                    // v1 has no fleet lookup from stable machine id to display
+                    // name. Until the local record is enriched with a human
+                    // name, the explicit owner id is itself recognizable to
+                    // routine-pin diagnostics as a known-elsewhere owner.
+                    if let Some(owner) = self.owner.as_deref() {
+                        registry
+                            .owner_host_ids
+                            .entry(owner.to_string())
+                            .or_insert_with(|| owner.to_string());
+                    }
+                }
+            }
         }
         workspace_registry::save_registry_to(&registry, registry_path)?;
         if !reconciling_existing {

@@ -24,7 +24,6 @@ use super::loader::{
 #[cfg(test)]
 use super::validation::RoutineHostIdentity;
 use super::validation::{
-    DEFAULT_QUIET_HOST_AFTER_SECONDS, DEFAULT_REGISTRY_CACHE_MAX_AGE_SECONDS,
     RoutineHostIdentityView, RoutinePinValidation, RoutinePlacementProjection,
     RoutinePlacementProvider, RoutineRegistryStatus, RoutineRegistryView, validate_routine_pins,
 };
@@ -195,10 +194,7 @@ pub fn run_sweep_at_with_providers(
     let RoutinePlacementProjection {
         local_host,
         registry: registry_view,
-    } = placement_provider.load_routine_placement(
-        now_utc,
-        Duration::seconds(DEFAULT_REGISTRY_CACHE_MAX_AGE_SECONDS),
-    )?;
+    } = placement_provider.load_routine_placement()?;
     let registry = registry_view.status();
 
     // One runtime per active workspace; discovery and dispatch share them.
@@ -257,7 +253,9 @@ pub(crate) fn run_sweep_core(
     run_sweep_core_with_registry(
         store,
         &identity,
-        &RoutineRegistryView::Standalone,
+        &RoutineRegistryView {
+            owner_host_ids: Default::default(),
+        },
         collection,
         dispatch,
         options,
@@ -286,8 +284,6 @@ pub(crate) fn run_sweep_core_with_registry(
                     routine.origin,
                     &routine.definition.hosts,
                     registry_view,
-                    now_utc,
-                    Duration::seconds(DEFAULT_QUIET_HOST_AFTER_SECONDS),
                 ),
             )
         })

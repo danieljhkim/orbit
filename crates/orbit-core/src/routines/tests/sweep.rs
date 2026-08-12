@@ -613,11 +613,7 @@ fn dry_run_records_no_state() {
 struct MustNotLoad;
 
 impl RoutinePlacementProvider for MustNotLoad {
-    fn load_routine_placement(
-        &self,
-        _now: DateTime<Utc>,
-        _cache_max_age: Duration,
-    ) -> Result<RoutinePlacementProjection, OrbitError> {
+    fn load_routine_placement(&self) -> Result<RoutinePlacementProjection, OrbitError> {
         panic!("placement provider ran before the busy sweep lock returned")
     }
 }

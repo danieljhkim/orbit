@@ -642,8 +642,10 @@ impl BrokerMcpHost {
     }
 
     fn global_call(&self, name: &str) -> Result<Value, OrbitError> {
-        let snapshot = crate::registry_snapshot_at(&self.global_root)?;
-        super::discovery::execute_discovery_tool(name, snapshot)
+        let identity = crate::load_host_identity(&self.global_root)?;
+        let registry_path = crate::workspace_registry::registry_path_for(&self.global_root);
+        let registry = crate::workspace_registry::load_registry_from(&registry_path)?;
+        super::discovery::execute_discovery_tool(name, &registry, &identity.machine_id)
     }
 
     /// Project the sanitized crew-discovery response for `orbit.crew.list` from

@@ -1,5 +1,4 @@
 use std::collections::BTreeSet;
-use std::fs;
 
 use chrono::{TimeZone, Utc};
 use orbit_common::types::{
@@ -7,7 +6,7 @@ use orbit_common::types::{
 };
 
 use crate::host_identity::{HOST_IDENTITY_SCHEMA_VERSION, HostIdentity, HostMode};
-use crate::host_registry::{HostRegistryService, require_local_hub_identity};
+use crate::host_registry::HostRegistryService;
 use crate::persistence::RemoteStore;
 
 fn identity(machine_id: &str, host_id: &str, mode: HostMode) -> HostIdentity {
@@ -18,22 +17,6 @@ fn identity(machine_id: &str, host_id: &str, mode: HostMode) -> HostIdentity {
         task_prefix: "ORB".to_string(),
         mode,
     }
-}
-
-#[test]
-fn hub_administration_preflight_rejects_spoke_local_execution() {
-    let root = tempfile::tempdir().expect("tempdir");
-    fs::write(
-        root.path().join("host.toml"),
-        "schema_version = 1\nmachine_id = \"hm_spoke\"\nhost_id = \"spoke\"\nmode = \"spoke\"\n",
-    )
-    .expect("write host identity");
-
-    let error = require_local_hub_identity(root.path())
-        .expect_err("spoke-local administration must fail")
-        .to_string();
-    assert!(error.contains("hub-local"), "unexpected: {error}");
-    assert!(error.contains("spoke"), "unexpected: {error}");
 }
 
 #[test]
@@ -131,6 +114,7 @@ fn workspace(id: &str, owner_machine_id: Option<&str>) -> Workspace {
 fn workspace_registry(workspaces: Vec<Workspace>) -> WorkspaceRegistry {
     WorkspaceRegistry {
         schema_version: 1,
+        owner_host_ids: Default::default(),
         workspaces,
         checkouts: Vec::new(),
     }

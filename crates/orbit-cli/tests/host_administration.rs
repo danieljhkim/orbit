@@ -1,14 +1,11 @@
 #![allow(missing_docs)]
-// Tests use unwrap/expect to keep fixture setup readable.
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
 use assert_cmd::cargo::cargo_bin_cmd;
 use predicates::prelude::*;
-use rusqlite::Connection;
 use tempfile::tempdir;
 
-#[test]
-fn spoke_routes_only_self_registration_and_rejects_direct_administration() {
+fn initialized_workspace() -> (tempfile::TempDir, std::path::PathBuf, std::path::PathBuf) {
     let temp = tempdir().expect("tempdir");
     let home = temp.path().join("home");
     let work = temp.path().join("work");
@@ -24,9 +21,9 @@ fn spoke_routes_only_self_registration_and_rejects_direct_administration() {
             "init",
             "--non-interactive",
             "--host-name",
-            "spoke",
-            "--host-mode",
-            "spoke",
+            "local",
+            "--task-prefix",
+            "DE",
         ])
         .assert()
         .success();
@@ -35,72 +32,26 @@ fn spoke_routes_only_self_registration_and_rejects_direct_administration() {
         .env("HOME", &home)
         .env("USERPROFILE", &home)
         .env_remove("ORBIT_ROOT")
-        .args([
-            "workspace",
-            "init",
-            "--name",
-            "spoke-workspace",
-            "--role",
-            "replica",
-            "--owner",
-            "hm_owner",
-        ])
+        .args(["workspace", "init", "--name", "local-workspace"])
         .assert()
         .success();
+    (temp, home, work)
+}
 
-    cargo_bin_cmd!("orbit")
-        .current_dir(&work)
-        .env("HOME", &home)
-        .env("USERPROFILE", &home)
-        .env_remove("ORBIT_ROOT")
-        .args([
-            "host",
-            "register",
-            "--machine-id",
-            "hm_remote",
-            "--host-id",
-            "remote",
-        ])
-        .assert()
-        .failure()
-        .stderr(predicate::str::contains(
-            "reads machine_id and host_id only from validated host.toml",
-        ));
+#[test]
+fn fleet_administration_and_inventory_are_absent_from_cli_and_tool_registry() {
+    let (_temp, home, work) = initialized_workspace();
 
-    cargo_bin_cmd!("orbit")
-        .current_dir(&work)
-        .env("HOME", &home)
-        .env("USERPROFILE", &home)
-        .env_remove("ORBIT_ROOT")
-        .args(["host", "register"])
-        .assert()
-        .failure()
-        .stderr(predicate::str::contains("mcp.toml"));
-
-    let mutation_commands = [
-        vec!["host", "rename", "missing-host", "new-name"],
-        vec!["host", "retire", "missing-host", "--confirm"],
-        vec![
-            "workspace",
-            "link",
-            "missing-workspace",
-            "--owner",
-            "missing-host",
-        ],
-    ];
-    for args in mutation_commands {
+    for subcommand in ["register", "list", "retire"] {
         cargo_bin_cmd!("orbit")
             .current_dir(&work)
             .env("HOME", &home)
             .env("USERPROFILE", &home)
             .env_remove("ORBIT_ROOT")
-            .args(args)
+            .args(["host", subcommand])
             .assert()
             .failure()
-            .stderr(predicate::str::contains("hub-local in v1"))
-            .stderr(predicate::str::contains("configured as mode 'spoke'"))
-            .stderr(predicate::str::contains("unknown host").not())
-            .stderr(predicate::str::contains("unknown workspace").not());
+            .stderr(predicate::str::contains("unrecognized subcommand"));
     }
 
     cargo_bin_cmd!("orbit")
@@ -108,220 +59,62 @@ fn spoke_routes_only_self_registration_and_rejects_direct_administration() {
         .env("HOME", &home)
         .env("USERPROFILE", &home)
         .env_remove("ORBIT_ROOT")
-        .args(["host", "list"])
+        .args(["workspace", "link"])
         .assert()
         .failure()
-        .stderr(predicate::str::contains("hub-local in v1"))
-        .stdout(predicate::str::contains("no hosts registered").not());
-}
-
-#[test]
-fn explicit_local_machine_registration_uses_atomic_hub_bootstrap() {
-    let temp = tempdir().expect("tempdir");
-    let home = temp.path().join("home");
-    let work = temp.path().join("work");
-    std::fs::create_dir_all(&home).expect("create home");
-    std::fs::create_dir_all(&work).expect("create work");
+        .stderr(predicate::str::contains("unrecognized subcommand"));
 
     cargo_bin_cmd!("orbit")
         .current_dir(&work)
         .env("HOME", &home)
         .env("USERPROFILE", &home)
         .env_remove("ORBIT_ROOT")
-        .args([
-            "init",
-            "--non-interactive",
-            "--host-name",
-            "hub",
-            "--host-mode",
-            "hub",
-        ])
-        .assert()
-        .success();
-    cargo_bin_cmd!("orbit")
-        .current_dir(&work)
-        .env("HOME", &home)
-        .env("USERPROFILE", &home)
-        .env_remove("ORBIT_ROOT")
-        .args(["workspace", "init", "--name", "hub-workspace"])
-        .assert()
-        .success();
-
-    let host_toml =
-        std::fs::read_to_string(home.join(".orbit/host.toml")).expect("read host identity");
-    let host: toml::Value = toml::from_str(&host_toml).expect("parse host identity");
-    let machine_id = host["machine_id"].as_str().expect("machine id");
-
-    cargo_bin_cmd!("orbit")
-        .current_dir(&work)
-        .env("HOME", &home)
-        .env("USERPROFILE", &home)
-        .env_remove("ORBIT_ROOT")
-        .args([
-            "host",
-            "register",
-            "--machine-id",
-            machine_id,
-            "--host-id",
-            "hub",
-        ])
-        .assert()
-        .success();
-
-    cargo_bin_cmd!("orbit")
-        .current_dir(&work)
-        .env("HOME", &home)
-        .env("USERPROFILE", &home)
-        .env_remove("ORBIT_ROOT")
-        .args(["host", "list"])
+        .args(["tool", "list", "--json"])
         .assert()
         .success()
-        .stdout(predicate::str::contains(machine_id))
-        .stdout(predicate::str::contains("yes"));
-
-    cargo_bin_cmd!("orbit")
-        .current_dir(&work)
-        .env("HOME", &home)
-        .env("USERPROFILE", &home)
-        .env_remove("ORBIT_ROOT")
-        .args([
-            "host",
-            "register",
-            "--machine-id",
-            machine_id,
-            "--host-id",
-            "shadow-name",
-        ])
-        .assert()
-        .failure()
-        .stderr(predicate::str::contains(
-            "explicit declaration for this hub machine_id",
-        ));
+        .stdout(predicate::str::contains("orbit.host.").not())
+        .stdout(predicate::str::contains("register-spoke").not());
 }
 
 #[test]
-fn rejected_current_host_rename_preserves_local_identity_and_registry_revision() {
-    let temp = tempdir().expect("tempdir");
-    let home = temp.path().join("home");
-    let work = temp.path().join("work");
-    std::fs::create_dir_all(&home).expect("create home");
-    std::fs::create_dir_all(&work).expect("create work");
-
-    cargo_bin_cmd!("orbit")
-        .current_dir(&work)
-        .env("HOME", &home)
-        .env("USERPROFILE", &home)
-        .env_remove("ORBIT_ROOT")
-        .args([
-            "init",
-            "--non-interactive",
-            "--host-name",
-            "hub",
-            "--host-mode",
-            "hub",
-        ])
-        .assert()
-        .success();
-    cargo_bin_cmd!("orbit")
-        .current_dir(&work)
-        .env("HOME", &home)
-        .env("USERPROFILE", &home)
-        .env_remove("ORBIT_ROOT")
-        .args(["workspace", "init", "--name", "hub-workspace"])
-        .assert()
-        .success();
-    cargo_bin_cmd!("orbit")
-        .current_dir(&work)
-        .env("HOME", &home)
-        .env("USERPROFILE", &home)
-        .env_remove("ORBIT_ROOT")
-        .args(["host", "register"])
-        .assert()
-        .success();
-    cargo_bin_cmd!("orbit")
-        .current_dir(&work)
-        .env("HOME", &home)
-        .env("USERPROFILE", &home)
-        .env_remove("ORBIT_ROOT")
-        .args([
-            "host",
-            "register",
-            "--machine-id",
-            "hm_remote",
-            "--host-id",
-            "remote",
-        ])
-        .assert()
-        .success();
-
+fn rename_updates_host_and_local_owner_names_without_changing_stable_identity() {
+    let (_temp, home, work) = initialized_workspace();
     let identity_path = home.join(".orbit/host.toml");
-    let before_identity = std::fs::read(&identity_path).expect("read host.toml");
-    let before_host: toml::Value =
-        toml::from_str(std::str::from_utf8(&before_identity).expect("host.toml must be UTF-8"))
-            .expect("parse original host.toml");
-    let machine_id = before_host["machine_id"]
+    let registry_path = home.join(".orbit/workspaces.json");
+    let before: toml::Value =
+        toml::from_str(&std::fs::read_to_string(&identity_path).expect("read host identity"))
+            .expect("parse host identity");
+    let machine_id = before["machine_id"]
         .as_str()
-        .expect("original machine_id")
+        .expect("machine id")
         .to_string();
-    let db_path = home.join(".orbit/orbit.db");
-    let revision = || {
-        Connection::open(&db_path)
-            .expect("open store")
-            .query_row(
-                "SELECT registry_revision FROM hub_registry_metadata WHERE id = 0",
-                [],
-                |row| row.get::<_, i64>(0),
-            )
-            .expect("read revision")
-    };
-    let before_revision = revision();
-
-    for (new_name, expected_error) in [
-        ("path\\name", "logical registry identifier"),
-        ("remote", "already reserved"),
-    ] {
-        cargo_bin_cmd!("orbit")
-            .current_dir(&work)
-            .env("HOME", &home)
-            .env("USERPROFILE", &home)
-            .env_remove("ORBIT_ROOT")
-            .args(["host", "rename", "hub", new_name])
-            .assert()
-            .failure()
-            .stderr(predicate::str::contains(expected_error));
-        assert_eq!(
-            std::fs::read(&identity_path).expect("reread host.toml"),
-            before_identity,
-            "rejected name {new_name:?} changed host.toml"
-        );
-        assert_eq!(
-            revision(),
-            before_revision,
-            "rejected name {new_name:?} advanced the registry revision"
-        );
-    }
+    assert_eq!(before["task_prefix"].as_str(), Some("DE"));
 
     cargo_bin_cmd!("orbit")
         .current_dir(&work)
         .env("HOME", &home)
         .env("USERPROFILE", &home)
         .env_remove("ORBIT_ROOT")
-        .args(["host", "rename", "hub", "hub-renamed"])
+        .args(["host", "rename", "local", "renamed"])
         .assert()
         .success()
-        .stdout(predicate::str::contains(
-            "local host.toml and the hub registry now agree",
-        ));
-    let after_host: toml::Value =
-        toml::from_str(&std::fs::read_to_string(&identity_path).expect("read renamed host.toml"))
-            .expect("parse renamed host.toml");
-    assert_eq!(after_host["machine_id"].as_str(), Some(machine_id.as_str()));
-    assert_eq!(after_host["host_id"].as_str(), Some("hub-renamed"));
-    assert_eq!(after_host["mode"].as_str(), Some("hub"));
+        .stdout(predicate::str::contains("1 local workspace owner record"));
+
+    let after: toml::Value =
+        toml::from_str(&std::fs::read_to_string(&identity_path).expect("read renamed identity"))
+            .expect("parse renamed identity");
+    assert_eq!(after["machine_id"].as_str(), Some(machine_id.as_str()));
+    assert_eq!(after["host_id"].as_str(), Some("renamed"));
+    assert_eq!(after["task_prefix"].as_str(), Some("DE"));
+
+    let registry: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(&registry_path).expect("read workspace registry"),
+    )
+    .expect("parse workspace registry");
+    assert_eq!(registry["owner_host_ids"][&machine_id], "renamed");
     assert_eq!(
-        revision(),
-        before_revision + 1,
-        "successful coordinated rename must advance the snapshot once"
+        registry["workspaces"][0]["owner_machine_id"], machine_id,
+        "rename must not change stable owner binding"
     );
 
     cargo_bin_cmd!("orbit")
@@ -329,37 +122,10 @@ fn rejected_current_host_rename_preserves_local_identity_and_registry_revision()
         .env("HOME", &home)
         .env("USERPROFILE", &home)
         .env_remove("ORBIT_ROOT")
-        .args(["host", "list"])
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("hub-renamed"))
-        .stdout(predicate::str::contains("remote"));
-
-    cargo_bin_cmd!("orbit")
-        .current_dir(&work)
-        .env("HOME", &home)
-        .env("USERPROFILE", &home)
-        .env_remove("ORBIT_ROOT")
-        .args(["host", "retire", "remote"])
+        .args(["host", "rename", "local", "again"])
         .assert()
         .failure()
-        .stderr(predicate::str::contains("--confirm"));
-    cargo_bin_cmd!("orbit")
-        .current_dir(&work)
-        .env("HOME", &home)
-        .env("USERPROFILE", &home)
-        .env_remove("ORBIT_ROOT")
-        .args(["host", "retire", "remote", "--confirm"])
-        .assert()
-        .success();
-    cargo_bin_cmd!("orbit")
-        .current_dir(&work)
-        .env("HOME", &home)
-        .env("USERPROFILE", &home)
-        .env_remove("ORBIT_ROOT")
-        .args(["host", "list"])
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("remote"))
-        .stdout(predicate::str::contains("retired"));
+        .stderr(predicate::str::contains(
+            "current host.toml names 'renamed'",
+        ));
 }

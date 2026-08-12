@@ -323,10 +323,10 @@ fn config_resolution_ignores_repo_and_other_root_decoys() {
 /// `hub`, because schema 2 has no machine-level coordination role to declare,
 /// and no longer requires the store to be stamped, because the registration
 /// that stamped it is withdrawn (ADR-0358). What survives from ORB-10268: the
-/// startup machine identity must keep matching, and a store stamped by a
-/// *different* machine is still refused as a shadow store.
+/// startup machine identity must keep matching. Fleet registry stamps are
+/// dormant and therefore cannot admit or reject a v1 endpoint.
 #[test]
-fn owner_host_admits_an_unstamped_store_but_refuses_a_changed_identity_or_shadow_stamp() {
+fn owner_host_authority_uses_host_toml_without_reading_fleet_stamp() {
     let root = tempfile::tempdir().expect("global root");
     write_identity(&root, "hm_owner");
     initialize_store(&root);
@@ -338,12 +338,11 @@ fn owner_host_admits_an_unstamped_store_but_refuses_a_changed_identity_or_shadow
     let shadow = tempfile::tempdir().expect("global root");
     write_identity(&shadow, "hm_owner");
     stamp_store(&shadow, "hm_other");
-    let error = OwnerMcpHost::new(shadow.path().to_path_buf(), McpCapability::Agent)
-        .expect_err("a store stamped by another machine is a shadow store");
-    assert!(
-        error.to_string().contains("shadow coordination store"),
-        "unexpected error: {error}"
-    );
+    let shadow_host = OwnerMcpHost::new(shadow.path().to_path_buf(), McpCapability::Agent)
+        .expect("dormant fleet stamp is ignored");
+    shadow_host
+        .list_mcp_tool_definitions()
+        .expect("listing remains local-identity based");
 
     write_identity(&root, "hm_replaced");
     let error = host
@@ -797,7 +796,7 @@ fn ssh_hub_call_never_defaults_a_missing_caller_to_the_hub_identity() {
 }
 
 #[test]
-fn owner_rechecks_store_stamp_before_listing_and_dispatch_without_task_mutation() {
+fn owner_ignores_dormant_store_stamp_before_listing_and_dispatch() {
     let root = tempfile::tempdir().expect("global root");
     write_identity(&root, "hm_owner");
     let database = stamp_store(&root, "hm_owner");
@@ -812,23 +811,27 @@ fn owner_rechecks_store_stamp_before_listing_and_dispatch_without_task_mutation(
             [],
         )
         .expect("drift stamp");
-    assert!(host.list_mcp_tool_definitions().is_err());
-    let error = host
+    host.list_mcp_tool_definitions()
+        .expect("dormant fleet stamp does not gate tool listing");
+    let created = host
         .call_tool(
             "orbit.task.add",
             json!({
                 "workspace": "ws_checkoutless",
-                "title": "Must not exist",
-                "description": "authority drift",
+                "title": "Local authority survives dormant stamp drift",
+                "description": "fleet metadata is not a v1 authority source",
                 "model": "codex"
             }),
             context(McpCapability::Agent, "mcall-shadow-denied"),
         )
-        .expect_err("shadow store denied");
-    assert!(error.to_string().contains("shadow coordination store"));
+        .expect("dormant fleet stamp does not gate local task dispatch");
+    assert_eq!(
+        created["title"],
+        "Local authority survives dormant stamp drift"
+    );
 
     let registry = orbit_store_query_task_count(root.path(), "ws_checkoutless");
-    assert_eq!(registry, 0, "authority denial created no task");
+    assert_eq!(registry, 1, "local dispatch persisted exactly one task");
 }
 
 fn orbit_store_query_task_count(root: &std::path::Path, workspace_id: &str) -> i64 {

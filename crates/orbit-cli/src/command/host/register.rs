@@ -1,3 +1,6 @@
+//! Dormant v2 fleet-registration command implementation (ADR-0358).
+//! Not linked into the v1 CLI; see `docs/design/host-registry/2_design.md` §2.1.
+
 use std::collections::BTreeSet;
 
 use clap::Args;

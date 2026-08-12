@@ -1,75 +1,77 @@
-use chrono::{Duration, TimeZone, Utc};
-use orbit_common::types::{
-    REGISTRY_SNAPSHOT_SCHEMA_VERSION, RegistrySnapshotV1, Workspace, WorkspaceCheckout,
-    WorkspaceRegistry, WorkspaceStatus,
-};
-use orbit_core::routines::{RoutineRegistryCacheView, RoutineRegistryView};
+use chrono::Utc;
+use orbit_common::types::{Workspace, WorkspaceCheckout, WorkspaceRegistry, WorkspaceStatus};
+use orbit_core::routines::RoutineRegistryView;
 use orbit_store::sqlite::task_registry::{WorkspaceConfig, write_workspace_config};
 
-use crate::RegistryCacheService;
 use crate::host_identity::load_host_identity;
 use crate::routines::{discover_registered_workspaces, load_routine_placement_at};
 use crate::workspace_registry;
 
-fn write_spoke_identity(root: &std::path::Path) {
+fn write_identity(root: &std::path::Path) {
     std::fs::create_dir_all(root).expect("global root");
     std::fs::write(
         root.join("host.toml"),
-        "schema_version = 1\nmachine_id = \"hm_spoke\"\nhost_id = \"spoke\"\nmode = \"spoke\"\n",
+        "schema_version = 2\nmachine_id = \"hm_local\"\nhost_id = \"local\"\ntask_prefix = \"ORB\"\n",
     )
     .expect("host identity");
 }
 
-fn empty_snapshot() -> RegistrySnapshotV1 {
-    RegistrySnapshotV1 {
-        schema_version: REGISTRY_SNAPSHOT_SCHEMA_VERSION,
-        hub_machine_id: Some("hm_hub".to_string()),
-        registry_revision: 1,
-        hosts: Vec::new(),
-        workspaces: Vec::new(),
-    }
-}
-
 #[test]
-fn spoke_cache_projection_preserves_strict_freshness_boundary() {
+fn routine_placement_uses_local_owner_names_without_fleet_state() {
     let root = tempfile::tempdir().expect("root");
-    write_spoke_identity(root.path());
-    let now = Utc
-        .with_ymd_and_hms(2026, 7, 18, 12, 10, 0)
-        .single()
-        .expect("timestamp");
-    RegistryCacheService::new(root.path())
-        .refresh(empty_snapshot(), now)
-        .expect("cache");
+    write_identity(root.path());
+    let now = Utc::now();
+    let registry = WorkspaceRegistry {
+        owner_host_ids: [
+            ("hm_local".to_string(), "local".to_string()),
+            ("hm_remote".to_string(), "remote".to_string()),
+        ]
+        .into_iter()
+        .collect(),
+        workspaces: vec![
+            Workspace {
+                id: "ws_local".to_string(),
+                name: "local-workspace".to_string(),
+                owner_machine_id: Some("hm_local".to_string()),
+                git_remote: None,
+                ship_mode: None,
+                base_branch: "main".to_string(),
+                status: WorkspaceStatus::Active,
+                created_at: now,
+                updated_at: now,
+            },
+            Workspace {
+                id: "ws_remote".to_string(),
+                name: "remote-workspace".to_string(),
+                owner_machine_id: Some("hm_remote".to_string()),
+                git_remote: None,
+                ship_mode: None,
+                base_branch: "main".to_string(),
+                status: WorkspaceStatus::Active,
+                created_at: now,
+                updated_at: now,
+            },
+        ],
+        ..WorkspaceRegistry::default()
+    };
+    workspace_registry::save_registry_to(
+        &registry,
+        &workspace_registry::registry_path_for(root.path()),
+    )
+    .expect("local registry");
+    // A malformed dormant cache is a canary: the v1 placement path must not
+    // even attempt to parse it.
+    std::fs::write(root.path().join("registry-cache.json"), "not-json").expect("cache canary");
     let identity = load_host_identity(root.path()).expect("identity");
 
-    let exact = load_routine_placement_at(
-        root.path(),
-        &identity,
-        now + Duration::minutes(5),
-        Duration::minutes(5),
-    )
-    .expect("exact boundary");
-    assert!(matches!(
-        exact.registry,
-        RoutineRegistryView::Spoke {
-            cache: RoutineRegistryCacheView::Current { .. }
+    let placement = load_routine_placement_at(root.path(), &identity).expect("placement");
+    assert_eq!(placement.local_host.host_id, "local");
+    assert_eq!(
+        placement.registry,
+        RoutineRegistryView {
+            owner_host_ids: ["remote".to_string()].into_iter().collect()
         }
-    ));
-
-    let stale = load_routine_placement_at(
-        root.path(),
-        &identity,
-        now + Duration::minutes(5) + Duration::seconds(1),
-        Duration::minutes(5),
-    )
-    .expect("stale boundary");
-    assert!(matches!(
-        stale.registry,
-        RoutineRegistryView::Spoke {
-            cache: RoutineRegistryCacheView::Stale { .. }
-        }
-    ));
+    );
 }
 
 #[test]
@@ -82,7 +84,7 @@ fn workspace_discovery_builds_bound_runtimes() {
     std::fs::create_dir_all(&orbit_dir).expect("orbit");
     std::fs::write(
         global.join("host.toml"),
-        "schema_version = 1\nmachine_id = \"hm_local\"\nhost_id = \"local\"\nmode = \"standalone\"\n",
+        "schema_version = 2\nmachine_id = \"hm_local\"\nhost_id = \"local\"\ntask_prefix = \"ORB\"\n",
     )
     .expect("host identity");
     write_workspace_config(
@@ -96,7 +98,7 @@ fn workspace_discovery_builds_bound_runtimes() {
     let workspace = Workspace {
         id: "logical-abc123".to_string(),
         name: "orbit".to_string(),
-        owner_machine_id: None,
+        owner_machine_id: Some("hm_local".to_string()),
         git_remote: None,
         ship_mode: Some("pr".to_string()),
         base_branch: "agent-main".to_string(),

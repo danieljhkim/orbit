@@ -1,19 +1,20 @@
-//! Registry-aware routine composition over Core's scheduler kernels.
+//! Local-only routine placement composition over Core's scheduler kernels.
+//!
+//! ADR-0358 makes the fleet registry and satellite cache dormant in v1. Pin
+//! placement is built exclusively from `host.toml` and `workspaces.json`.
 
 use std::path::Path;
 
-use chrono::{DateTime, Duration, Utc};
+use chrono::Utc;
 use orbit_common::types::{OrbitError, WorkspaceStatus};
 use orbit_core::routines::{
     DiscoveredWorkspaces, RoutineHostIdentity, RoutineLoadError, RoutinePlacementProjection,
-    RoutinePlacementProvider, RoutineRegistryCacheView, RoutineRegistryView, RoutineStatusReport,
-    RoutineWorkspaceProvider, SweepOptions, SweepOutcome,
+    RoutinePlacementProvider, RoutineRegistryView, RoutineStatusReport, RoutineWorkspaceProvider,
+    SweepOptions, SweepOutcome,
 };
 
-use crate::host_identity::{HostIdentity, HostMode, load_host_identity};
-use crate::registry_cache::{RegistryCacheService, RegistryCacheState};
+use crate::host_identity::{HostIdentity, load_host_identity};
 use crate::runtime::RemoteRuntimeFactory;
-use crate::service::host_registry_service_at;
 use crate::workspace_registry;
 
 struct RemoteRoutineEnvironment {
@@ -38,35 +39,21 @@ impl RemoteRoutineEnvironment {
 }
 
 impl RoutinePlacementProvider for RemoteRoutineEnvironment {
-    fn load_routine_placement(
-        &self,
-        now: DateTime<Utc>,
-        cache_max_age: Duration,
-    ) -> Result<RoutinePlacementProjection, OrbitError> {
-        load_routine_placement_at(&self.global_root, &self.identity, now, cache_max_age)
+    fn load_routine_placement(&self) -> Result<RoutinePlacementProjection, OrbitError> {
+        load_routine_placement_at(&self.global_root, &self.identity)
     }
 }
 
-/// Build the local routine placement view from the registered host identity.
-/// This is the shared production seam for the provider implementation and
-/// callers that need an explicit clock.
+/// Build the v1 routine placement view from local files only.
 pub(crate) fn load_routine_placement_at(
     global_root: &Path,
     identity: &HostIdentity,
-    now: DateTime<Utc>,
-    cache_max_age: Duration,
 ) -> Result<RoutinePlacementProjection, OrbitError> {
-    let registry = match identity.mode {
-        HostMode::Standalone => RoutineRegistryView::Standalone,
-        HostMode::Hub => RoutineRegistryView::Hub {
-            snapshot: host_registry_service_at(global_root)?.snapshot()?,
-        },
-        HostMode::Spoke => RoutineRegistryView::Spoke {
-            cache: project_registry_cache(
-                RegistryCacheService::new(global_root).load(now, cache_max_age)?,
-            ),
-        },
-    };
+    let workspace_registry = workspace_registry::load_registry_from(
+        &workspace_registry::registry_path_for(global_root),
+    )?;
+    let registry =
+        RoutineRegistryView::from_workspace_registry(&workspace_registry, &identity.machine_id);
     Ok(RoutinePlacementProjection {
         local_host: RoutineHostIdentity {
             machine_id: identity.machine_id.clone(),
@@ -140,22 +127,4 @@ pub fn run_sweep_at(global_root: &Path, options: SweepOptions) -> Result<SweepOu
         &environment,
         &environment,
     )
-}
-
-fn project_registry_cache(cache: RegistryCacheState) -> RoutineRegistryCacheView {
-    match cache {
-        RegistryCacheState::Current { cache, age_seconds } => RoutineRegistryCacheView::Current {
-            snapshot: Box::new(cache.snapshot),
-            age_seconds,
-        },
-        RegistryCacheState::Stale { cache, age_seconds } => RoutineRegistryCacheView::Stale {
-            snapshot: Box::new(cache.snapshot),
-            age_seconds,
-        },
-        RegistryCacheState::Missing => RoutineRegistryCacheView::Missing,
-        RegistryCacheState::Malformed { reason } => RoutineRegistryCacheView::Malformed { reason },
-        RegistryCacheState::UnsupportedFuture { schema_version } => {
-            RoutineRegistryCacheView::UnsupportedFuture { schema_version }
-        }
-    }
 }

@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::fmt;
 use std::path::PathBuf;
 use std::str::FromStr;
@@ -132,6 +133,11 @@ impl WorkspaceCheckout {
 #[serde(deny_unknown_fields)]
 pub struct WorkspaceRegistry {
     pub schema_version: u32,
+    /// Human host names known through this machine's local workspace records,
+    /// keyed by stable owner machine id. This is not a fleet inventory: an
+    /// entry exists only for an owner named by a local workspace record.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub owner_host_ids: BTreeMap<String, String>,
     #[serde(default)]
     pub workspaces: Vec<Workspace>,
     #[serde(default)]
@@ -142,6 +148,7 @@ impl Default for WorkspaceRegistry {
     fn default() -> Self {
         Self {
             schema_version: WORKSPACE_REGISTRY_SCHEMA_VERSION,
+            owner_host_ids: BTreeMap::new(),
             workspaces: Vec::new(),
             checkouts: Vec::new(),
         }

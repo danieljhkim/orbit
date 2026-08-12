@@ -4,7 +4,6 @@ use orbit_core::OrbitRuntime;
 use crate::command::{CommandOut, Execute};
 
 use super::init::WorkspaceInitArgs;
-use super::link::WorkspaceLinkArgs;
 use super::list::WorkspaceListArgs;
 use super::remove::WorkspaceRemoveArgs;
 use super::role::WorkspaceRoleArgs;
@@ -26,8 +25,6 @@ pub enum WorkspaceSubcommand {
     List(WorkspaceListArgs),
     /// Show the current workspace
     Show(WorkspaceShowArgs),
-    /// Bind a workspace's singular owner by human host name (hub-side)
-    Link(WorkspaceLinkArgs),
     /// Validate or reassert this checkout's declared local role
     Role(WorkspaceRoleArgs),
     /// Remove a workspace from the registry (does not delete .orbit)
@@ -45,7 +42,6 @@ impl Execute for WorkspaceCommand {
             }
             WorkspaceSubcommand::List(args) => args.execute(runtime),
             WorkspaceSubcommand::Show(args) => args.execute(runtime),
-            WorkspaceSubcommand::Link(args) => args.execute(runtime),
             WorkspaceSubcommand::Role(args) => args.execute(runtime),
             WorkspaceSubcommand::Remove(args) => args.execute(runtime),
             WorkspaceSubcommand::Teardown(args) => args.execute(runtime),

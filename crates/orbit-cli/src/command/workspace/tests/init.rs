@@ -474,57 +474,57 @@ fn forced_workspace_reconciliation_preserves_registry_and_identity_on_validation
 
 #[test]
 fn multi_host_workspace_init_persists_an_explicit_local_owner() {
-    for mode in ["hub", "spoke"] {
-        let workspace = tempdir().expect("workspace tempdir");
-        let home = tempdir().expect("home tempdir");
-        let global = home.path().join(".orbit");
-        std::fs::create_dir_all(&global).expect("create global orbit");
-        std::fs::write(
-            global.join("host.toml"),
-            format!(
-                "schema_version = 1\nmachine_id = \"hm_local\"\nhost_id = \"local\"\nmode = \"{mode}\"\n"
-            ),
-        )
-        .expect("write host identity");
-
-        let _env = EnvGuard::acquire().home(home.path()).cwd(workspace.path());
-        WorkspaceInitArgs {
-            name: Some(format!("{mode}-owner")),
-            base_branch: Some("agent-main".to_string()),
-            ship_mode: Some("pr".to_string()),
-            role: None,
-            owner: None,
-            task_id_start: None,
-            mcp: false,
-            inject_agent_rules: false,
-            refresh_defaults: false,
-            force: false,
-        }
-        .execute_without_runtime(None)
-        .expect("explicit multi-host workspace init");
-
-        let registry = workspace_registry::load_registry_from(&global.join("workspaces.json"))
-            .expect("reload multi-host registry");
-        assert_eq!(
-            registry.workspaces[0].owner_machine_id.as_deref(),
-            Some("hm_local")
-        );
-        assert_eq!(
-            registry.checkouts[0].role,
-            Some(orbit_common::types::WorkspaceCheckoutRole::Owner)
-        );
-    }
-}
-
-#[test]
-fn spoke_workspace_init_can_atomically_declare_a_remote_owner_replica() {
     let workspace = tempdir().expect("workspace tempdir");
     let home = tempdir().expect("home tempdir");
     let global = home.path().join(".orbit");
     std::fs::create_dir_all(&global).expect("create global orbit");
     std::fs::write(
         global.join("host.toml"),
-        "schema_version = 1\nmachine_id = \"hm_spoke\"\nhost_id = \"spoke\"\nmode = \"spoke\"\n",
+        "schema_version = 2\nmachine_id = \"hm_local\"\nhost_id = \"local\"\ntask_prefix = \"ORB\"\n",
+    )
+    .expect("write host identity");
+
+    let _env = EnvGuard::acquire().home(home.path()).cwd(workspace.path());
+    WorkspaceInitArgs {
+        name: Some("local-owner".to_string()),
+        base_branch: Some("agent-main".to_string()),
+        ship_mode: Some("pr".to_string()),
+        role: None,
+        owner: None,
+        task_id_start: None,
+        mcp: false,
+        inject_agent_rules: false,
+        refresh_defaults: false,
+        force: false,
+    }
+    .execute_without_runtime(None)
+    .expect("explicit owner workspace init");
+
+    let registry = workspace_registry::load_registry_from(&global.join("workspaces.json"))
+        .expect("reload owner registry");
+    assert_eq!(
+        registry.workspaces[0].owner_machine_id.as_deref(),
+        Some("hm_local")
+    );
+    assert_eq!(
+        registry.owner_host_ids.get("hm_local").map(String::as_str),
+        Some("local")
+    );
+    assert_eq!(
+        registry.checkouts[0].role,
+        Some(orbit_common::types::WorkspaceCheckoutRole::Owner)
+    );
+}
+
+#[test]
+fn workspace_init_can_atomically_declare_a_remote_owner_replica() {
+    let workspace = tempdir().expect("workspace tempdir");
+    let home = tempdir().expect("home tempdir");
+    let global = home.path().join(".orbit");
+    std::fs::create_dir_all(&global).expect("create global orbit");
+    std::fs::write(
+        global.join("host.toml"),
+        "schema_version = 2\nmachine_id = \"hm_local\"\nhost_id = \"local\"\ntask_prefix = \"ORB\"\n",
     )
     .expect("write host identity");
 
@@ -558,24 +558,22 @@ fn spoke_workspace_init_can_atomically_declare_a_remote_owner_replica() {
         registry.checkouts[0].owner_machine_id.as_deref(),
         Some("hm_owner")
     );
+    assert_eq!(
+        registry.owner_host_ids.get("hm_owner").map(String::as_str),
+        Some("hm_owner")
+    );
 }
 
 #[test]
 fn invalid_replica_init_fails_before_workspace_artifacts_or_registry_mutation() {
-    for (mode, rejected_owner, expected) in [
-        ("spoke", "hm_spoke", "local machine"),
-        ("spoke", "ssh:hub", "machine_id"),
-        ("standalone", "hm_owner", "standalone mode"),
-    ] {
+    for (rejected_owner, expected) in [("hm_local", "local machine"), ("ssh:hub", "machine_id")] {
         let workspace = tempdir().expect("workspace tempdir");
         let home = tempdir().expect("home tempdir");
         let global = home.path().join(".orbit");
         std::fs::create_dir_all(&global).expect("create global orbit");
         std::fs::write(
             global.join("host.toml"),
-            format!(
-                "schema_version = 1\nmachine_id = \"hm_spoke\"\nhost_id = \"spoke\"\nmode = \"{mode}\"\n"
-            ),
+            "schema_version = 2\nmachine_id = \"hm_local\"\nhost_id = \"local\"\ntask_prefix = \"ORB\"\n",
         )
         .expect("write host identity");
 

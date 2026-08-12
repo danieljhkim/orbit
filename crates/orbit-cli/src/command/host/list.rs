@@ -1,3 +1,6 @@
+//! Dormant v2 fleet-list command implementation (ADR-0358).
+//! Not linked into the v1 CLI; see `docs/design/host-registry/2_design.md` §2.1.
+
 use clap::Args;
 use orbit_core::OrbitRuntime;
 use orbit_remote::{host_registry_service_at, require_local_hub_identity};

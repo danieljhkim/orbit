@@ -6,7 +6,8 @@ use std::path::{Path, PathBuf};
 use chrono::{DateTime, Utc};
 use orbit_common::types::{
     NotFoundKind, OrbitError, WORKSPACE_REGISTRY_SCHEMA_VERSION, Workspace, WorkspaceCheckout,
-    WorkspaceCheckoutRole, WorkspaceRegistry, WorkspaceStatus, validate_machine_id,
+    WorkspaceCheckoutRole, WorkspaceRegistry, WorkspaceStatus, validate_host_id,
+    validate_machine_id,
 };
 use orbit_common::utility::fs::atomic_write_text;
 use serde::Deserialize;
@@ -257,6 +258,14 @@ pub fn remove_workspace(
     registry
         .checkouts
         .retain(|checkout| checkout.workspace_id != removed.id);
+    if let Some(owner) = removed.owner_machine_id.as_deref()
+        && !registry
+            .workspaces
+            .iter()
+            .any(|workspace| workspace.owner_machine_id.as_deref() == Some(owner))
+    {
+        registry.owner_host_ids.remove(owner);
+    }
     Ok(removed)
 }
 
@@ -382,6 +391,7 @@ pub fn validate_workspaces(registry: &mut WorkspaceRegistry) {
 #[derive(Debug, Clone)]
 struct RegistryHostContext {
     machine_id: Option<String>,
+    host_id: Option<String>,
 }
 
 fn registry_host_context(path: &Path) -> Result<RegistryHostContext, OrbitError> {
@@ -394,11 +404,13 @@ fn registry_host_context(path: &Path) -> Result<RegistryHostContext, OrbitError>
     match inspect_host_identity(global_root)? {
         HostIdentityState::Present(identity) => Ok(RegistryHostContext {
             machine_id: Some(identity.machine_id),
+            host_id: Some(identity.host_id),
         }),
         // Pre-host-identity installations are the legacy standalone case.
-        HostIdentityState::Legacy { .. } | HostIdentityState::Absent => {
-            Ok(RegistryHostContext { machine_id: None })
-        }
+        HostIdentityState::Legacy { .. } | HostIdentityState::Absent => Ok(RegistryHostContext {
+            machine_id: None,
+            host_id: None,
+        }),
     }
 }
 
@@ -498,6 +510,37 @@ fn validate_registry(
                 ))
             })?;
         }
+    }
+
+    let owner_machine_ids = registry
+        .workspaces
+        .iter()
+        .filter_map(|workspace| workspace.owner_machine_id.as_deref())
+        .collect::<HashSet<_>>();
+    for (machine_id, host_id) in &registry.owner_host_ids {
+        validate_machine_id(machine_id).map_err(|error| {
+            invalid_registry(format!("invalid owner host-name machine_id: {error}"))
+        })?;
+        validate_host_id(host_id).map_err(|error| {
+            invalid_registry(format!(
+                "owner machine '{machine_id}' has invalid host_id: {error}"
+            ))
+        })?;
+        if !owner_machine_ids.contains(machine_id.as_str()) {
+            return Err(invalid_registry(format!(
+                "owner host name for machine '{machine_id}' has no local workspace record"
+            )));
+        }
+    }
+    if let (Some(machine_id), Some(host_id)) =
+        (context.machine_id.as_deref(), context.host_id.as_deref())
+        && owner_machine_ids.contains(machine_id)
+        && registry.owner_host_ids.get(machine_id).map(String::as_str) != Some(host_id)
+    {
+        registry
+            .owner_host_ids
+            .insert(machine_id.to_string(), host_id.to_string());
+        changed = true;
     }
 
     let mut checkout_ids = HashSet::new();
@@ -706,6 +749,29 @@ fn write_registry(registry: &WorkspaceRegistry, path: &Path) -> Result<(), Orbit
     let content = serde_json::to_string_pretty(registry)
         .map_err(|e| OrbitError::WorkspaceError(format!("failed to serialize registry: {e}")))?;
     atomic_write_text(path, &content).map_err(Into::into)
+}
+
+/// Update the local display name attached to workspace records owned by
+/// `machine_id`. Returns the number of logical workspace records affected.
+/// Stable owner machine ids and task prefixes are deliberately untouched.
+pub fn rename_local_owner_host_id(
+    registry: &mut WorkspaceRegistry,
+    machine_id: &str,
+    new_host_id: &str,
+) -> Result<usize, OrbitError> {
+    validate_machine_id(machine_id)?;
+    validate_host_id(new_host_id)?;
+    let affected = registry
+        .workspaces
+        .iter()
+        .filter(|workspace| workspace.owner_machine_id.as_deref() == Some(machine_id))
+        .count();
+    if affected > 0 {
+        registry
+            .owner_host_ids
+            .insert(machine_id.to_string(), new_host_id.to_string());
+    }
+    Ok(affected)
 }
 
 fn invalid_registry(message: String) -> OrbitError {

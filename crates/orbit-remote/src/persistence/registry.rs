@@ -1,5 +1,9 @@
 //! Durable host-registry core for the coordination hub [ORB-10255].
 //!
+//! Dormant v2 persistence: the v1 model never calls these table operations
+//! (ADR-0358; `docs/design/host-registry/2_design.md` §2.1). The implementation
+//! stays intact so alias tombstones and retirement semantics are preserved.
+//!
 //! The registry keys machines by immutable `machine_id`, keeps every current
 //! and historical human `host_id` reserved forever, and records retirement
 //! without deleting identity. Registration, rename, and retirement use

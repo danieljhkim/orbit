@@ -12,6 +12,9 @@ fn registry_serialization_keeps_paths_out_of_logical_workspaces() {
         .single()
         .expect("fixed timestamp");
     let registry = WorkspaceRegistry {
+        owner_host_ids: [("hm_owner".to_string(), "owner".to_string())]
+            .into_iter()
+            .collect(),
         workspaces: vec![Workspace {
             id: "ws_orbit".to_string(),
             name: "orbit".to_string(),
@@ -36,6 +39,7 @@ fn registry_serialization_keeps_paths_out_of_logical_workspaces() {
 
     let value = serde_json::to_value(&registry).expect("serialize registry");
     assert_eq!(value["schema_version"], WORKSPACE_REGISTRY_SCHEMA_VERSION);
+    assert_eq!(value["owner_host_ids"]["hm_owner"], "owner");
     assert!(value["workspaces"][0].get("repo_root").is_none());
     assert!(value["workspaces"][0].get("orbit_dir").is_none());
     assert_eq!(value["checkouts"][0]["role"], "replica");

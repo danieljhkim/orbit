@@ -8,9 +8,7 @@
 //! `orbit mcp serve` a local broker uses and there is no machine-level mode to
 //! require.
 //!
-//! What survives from ORB-10268 unchanged: startup verifies the opened global
-//! store is stamped with the exact local `machine_id` before stdio begins, and
-//! listing and every call repeat that authority check; the endpoint filters the
+//! The endpoint re-reads local `host.toml` before listing and every call; it filters the
 //! canonical registry by exactly one placement class and one scalar capability;
 //! it accepts only stable logical workspace IDs, never caller paths; it invokes
 //! the checkout-independent coordination executor without constructing
@@ -25,8 +23,7 @@ use std::path::{Path, PathBuf};
 
 use orbit_common::types::{
     AuditEventStatus, McpCapability, McpToolDefinition, McpToolPlacement, McpToolScope,
-    McpTransport, RegistrySnapshotV1, ToolSessionContext, WorkspaceStatus,
-    mcp_advertised_tool_name,
+    McpTransport, ToolSessionContext, WorkspaceStatus, mcp_advertised_tool_name,
 };
 use orbit_core::runtime::HubCoordinationExecutor;
 use orbit_core::{NotFoundKind, OrbitError, redact_sensitive_env_text};
@@ -87,22 +84,9 @@ impl OwnerMcpHost {
         &self.contract_instructions
     }
 
-    /// Confirm the opened global store still belongs to this exact machine.
-    ///
-    /// Two independent checks, both repeated on every listing and call so a
-    /// long-lived server cannot outlive an authority change:
-    ///
-    /// 1. `host.toml` still names the `machine_id` this server started with.
-    /// 2. If the global coordination store carries a machine stamp, it is this
-    ///    machine's. Serving a store carried in from elsewhere would publish
-    ///    another machine's coordination state under this identity.
-    ///
-    /// ORB-10727 relaxes only the *absent* stamp. ORB-10268 required one and
-    /// told the operator to register the hub first; registration is withdrawn
-    /// (ADR-0358) and ownership now comes from `workspaces.json`, so an
-    /// unstamped store has nothing to contradict and is admitted. A stamp that
-    /// names a different machine is still refused.
-    fn verify_authority(&self) -> Result<(HostIdentity, RegistrySnapshotV1), OrbitError> {
+    /// Confirm `host.toml` still names the machine this server started with.
+    /// Fleet registry stamps are dormant in v1 and are never consulted.
+    fn verify_authority(&self) -> Result<HostIdentity, OrbitError> {
         let identity = load_host_identity(&self.global_root)?;
         if identity.machine_id != self.identity.machine_id {
             return Err(OrbitError::InvalidInput(format!(
@@ -110,15 +94,7 @@ impl OwnerMcpHost {
                 self.identity.machine_id, identity.machine_id
             )));
         }
-        let snapshot = crate::registry_snapshot_at(&self.global_root)?;
-        match snapshot.hub_machine_id.as_deref() {
-            None => Ok((identity, snapshot)),
-            Some(stamped) if stamped == identity.machine_id => Ok((identity, snapshot)),
-            Some(stamped) => Err(OrbitError::InvalidInput(format!(
-                "refusing owner MCP through a shadow coordination store: local machine_id '{}' does not match the store's stamped machine_id '{stamped}'",
-                identity.machine_id
-            ))),
-        }
+        Ok(identity)
     }
 
     fn admitted(&self, definition: &McpToolDefinition) -> bool {
@@ -246,10 +222,6 @@ impl OwnerMcpHost {
         }
     }
 
-    fn global_call(name: &str, snapshot: RegistrySnapshotV1) -> Result<Value, OrbitError> {
-        super::discovery::execute_discovery_tool(name, snapshot)
-    }
-
     fn record_denial(&self, name: &str, context: &ToolSessionContext, denial: &OrbitError) {
         let params = mcp_preflight_failure_params(name, context, denial);
         if let Err(error) = crate::record_global_audit_event_at(&self.global_root, &params) {
@@ -288,7 +260,7 @@ impl OwnerMcpHost {
         mut input: Value,
         context: ToolSessionContext,
     ) -> Result<Value, OrbitError> {
-        let (identity, snapshot) = match self.verify_authority() {
+        let identity = match self.verify_authority() {
             Ok(authority) => authority,
             Err(error) => {
                 let context = self.normalize_context(context, &self.identity);
@@ -340,7 +312,9 @@ impl OwnerMcpHost {
             return Err(error);
         }
         if definition.policy.scope() == McpToolScope::Global {
-            let result = Self::global_call(name, snapshot);
+            let result = Err(OrbitError::InvalidInput(format!(
+                "owner endpoint does not serve local-derived global tool '{name}'"
+            )));
             self.record_outcome(name, &context, &result);
             return result;
         }
@@ -433,7 +407,7 @@ impl McpHost for OwnerMcpHost {
         _name: &str,
         session_context: &ToolSessionContext,
     ) -> Result<(), OrbitError> {
-        let (identity, _) = self.verify_authority()?;
+        let identity = self.verify_authority()?;
         let context = self.normalize_context(session_context.clone(), &identity);
         Self::require_authenticated_caller(&context)
     }
@@ -456,7 +430,6 @@ impl McpHost for OwnerMcpHost {
     ) -> OrbitError {
         let identity = self
             .verify_authority()
-            .map(|(identity, _)| identity)
             .unwrap_or_else(|_| self.identity.clone());
         let context = self.normalize_context(session_context.clone(), &identity);
         let denial = Self::require_authenticated_caller(&context)

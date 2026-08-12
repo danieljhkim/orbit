@@ -1,5 +1,9 @@
 //! Typed domain service for the hub host registry [ORB-10255].
 //!
+//! Dormant v2 substrate: ADR-0358 makes this module unreachable from v1
+//! execution paths. It is retained verbatim for its tombstone-alias and
+//! retirement semantics; see `docs/design/host-registry/2_design.md` §2.1.
+//!
 //! This layer binds B1's stable local [`HostIdentity`] declaration to the
 //! durable hub-store API. It intentionally does not coordinate local
 //! `host.toml` renames, expose administration commands, or add transport;

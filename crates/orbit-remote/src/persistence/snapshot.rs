@@ -1,9 +1,12 @@
 //! Hub-global registry metadata and the single-transaction sanitized registry
 //! snapshot read [ORB-10267].
 //!
+//! Dormant v2 persistence: no v1 path invokes this snapshot read (ADR-0358;
+//! `docs/design/host-registry/2_design.md` §2.1).
+//!
 //! The snapshot is the one typed, path-free projection consumed by the
-//! `orbit.workspace.list` discovery tool, the `orbit host list` CLI, and by the
-//! satellite registry cache. It is read with the hub `machine_id` and the
+//! deferred fleet discovery/admin surfaces and satellite registry cache. It is
+//! read with the hub `machine_id` and the
 //! hub-global `registry_revision` inside one read transaction so a concurrent
 //! mutation can never tear identity, revision, and content apart.
 
