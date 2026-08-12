@@ -425,64 +425,37 @@ fn owner_listing_uses_one_canonical_placement_and_capability_predicate() {
     );
 }
 
+/// ORB-10729 [mcp-bridge §8.1]: crew discovery and explicit task-crew
+/// validation run where the workspace is owned, so they read this machine's own
+/// layered crew config. No execution-profile row is published here — the
+/// registration/poll protocol that carried publication is withdrawn
+/// ([ADR-0358]) — and the endpoint answers anyway.
 #[test]
-fn hub_crew_discovery_and_task_validation_read_the_owner_execution_profile() {
-    use orbit_common::types::{ExecutionProfileCrewV1, ExecutionProfileShipV1, ExecutionProfileV1};
-
-    use crate::host_identity::{HOST_IDENTITY_SCHEMA_VERSION, HostIdentity, HostMode};
-    use crate::host_registry::HostRegistryService;
-
+fn owner_crew_discovery_and_task_validation_read_the_owner_local_crew_config() {
     let root = tempfile::tempdir().expect("global root");
     write_identity(&root, "hm_owner");
-    // Register + stamp the hub, bind the workspace owner, and publish an owner
-    // execution profile through the same coordination store the hub reads.
-    let service = HostRegistryService::new(crate::remote_store_at(root.path()).expect("store"));
-    service
-        .register_hub_identity(
-            &HostIdentity {
-                schema_version: HOST_IDENTITY_SCHEMA_VERSION,
-                machine_id: "hm_owner".to_string(),
-                host_id: "test-host".to_string(),
-                task_prefix: "ORB".to_string(),
-                mode: HostMode::Hub,
-            },
-            BTreeSet::new(),
-        )
-        .expect("register hub");
-    add_checkoutless_workspace(&root, "ws_alpha");
-    let registry = crate::workspace_registry::load_registry_from(
-        &crate::workspace_registry::registry_path_for(root.path()),
+    std::fs::write(
+        root.path().join("config.toml"),
+        "[crews.sol]\nmodel = \"gpt-test\"\nprovider = \"codex\"\nbackend = \"cli\"\n\n[workflow]\ndefault_crew = \"sol\"\n",
     )
-    .expect("registry");
-    service
-        .bind_workspace_owner(&registry, "ws_alpha", "hm_owner")
-        .expect("bind owner");
-    let observed = Utc::now();
-    let mut profile = ExecutionProfileV1 {
-        schema_version: 1,
-        workspace_id: "ws_alpha".to_string(),
-        owner_machine_id: "hm_owner".to_string(),
-        observed_at: observed,
-        config_digest: String::new(),
-        default_crew: "sol".to_string(),
-        crews: vec![ExecutionProfileCrewV1 {
-            name: "sol".to_string(),
-            provider: "codex".to_string(),
-            model: "gpt-test".to_string(),
-            backend: "cli".to_string(),
-            description: None,
-            tags: Vec::new(),
-        }],
-        ship: ExecutionProfileShipV1 {
-            mode: "pr".to_string(),
-            base_branch: "agent-main".to_string(),
-            ship_closure_digest: "a".repeat(64),
-        },
-    };
-    profile.config_digest = profile.compute_config_digest().expect("config digest");
-    service
-        .publish_execution_profile("hm_owner", 0, &profile)
-        .expect("publish owner profile");
+    .expect("owner crew config");
+    add_checkoutless_workspace(&root, "ws_alpha");
+
+    // The dormant projection table exists and is empty: nothing published a
+    // profile, and crew validation must not need one.
+    let store_path = initialize_store(&root);
+    let profile_rows: i64 = Connection::open(&store_path)
+        .expect("global store")
+        .query_row(
+            "SELECT COUNT(*) FROM workspace_execution_profiles",
+            [],
+            |row| row.get(0),
+        )
+        .expect("profile row count");
+    assert_eq!(
+        profile_rows, 0,
+        "no v1 caller publishes an execution profile"
+    );
 
     let host =
         OwnerMcpHost::new(root.path().to_path_buf(), McpCapability::Agent).expect("hub host");
@@ -493,8 +466,8 @@ fn hub_crew_discovery_and_task_validation_read_the_owner_execution_profile() {
         context
     };
 
-    // Crew discovery resolves the session workspace and projects the owner
-    // profile, not the hub's unrelated local configuration.
+    // Crew discovery resolves the session workspace and projects this owner
+    // machine's configured crews.
     let crews = host
         .call_tool(
             "orbit.crew.list",
@@ -504,8 +477,10 @@ fn hub_crew_discovery_and_task_validation_read_the_owner_execution_profile() {
         .expect("crew list");
     assert_eq!(crews["workspace_id"], "ws_alpha");
     assert_eq!(crews["owner_machine_id"], "hm_owner");
-    assert_eq!(crews["profile"]["freshness"], "current");
-    assert_eq!(crews["profile"]["generation"], 1);
+    assert!(
+        crews.get("profile").is_none(),
+        "owner-local config carries no freshness/generation envelope: {crews}"
+    );
     assert_eq!(crews["default_crew"], "sol");
     assert_eq!(crews["crews"][0]["name"], "sol");
     assert_eq!(crews["crews"][0]["model"], "gpt-test");
@@ -518,7 +493,7 @@ fn hub_crew_discovery_and_task_validation_read_the_owner_execution_profile() {
     }
 
     // Valid padded execution/orchestration aliases are canonicalized from the
-    // owner profile before the coordination task lands.
+    // owner's configured crews before the coordination task lands.
     let created = host
         .call_tool(
             "orbit.task.add",
@@ -576,7 +551,7 @@ fn hub_crew_discovery_and_task_validation_read_the_owner_execution_profile() {
             }),
             workspace_context("mcall-task-update-clear-orchestrator"),
         )
-        .expect("clear does not require owner-profile validation");
+        .expect("clear does not require crew validation");
     assert_eq!(cleared["orchestrator"], Value::Null);
 
     // An unknown explicit crew is rejected before allocation.
@@ -821,7 +796,7 @@ fn ssh_hub_call_never_defaults_a_missing_caller_to_the_hub_identity() {
 }
 
 #[test]
-fn owner_rechecks_store_stamp_before_listing_and_dispatch_without_task_mutation() {
+fn owner_ignores_dormant_store_stamp_before_listing_and_dispatch() {
     let root = tempfile::tempdir().expect("global root");
     write_identity(&root, "hm_owner");
     let database = stamp_store(&root, "hm_owner");
@@ -836,23 +811,27 @@ fn owner_rechecks_store_stamp_before_listing_and_dispatch_without_task_mutation(
             [],
         )
         .expect("drift stamp");
-    assert!(host.list_mcp_tool_definitions().is_err());
-    let error = host
+    host.list_mcp_tool_definitions()
+        .expect("dormant fleet stamp does not gate tool listing");
+    let created = host
         .call_tool(
             "orbit.task.add",
             json!({
                 "workspace": "ws_checkoutless",
-                "title": "Must not exist",
-                "description": "authority drift",
+                "title": "Local authority survives dormant stamp drift",
+                "description": "fleet metadata is not a v1 authority source",
                 "model": "codex"
             }),
             context(McpCapability::Agent, "mcall-shadow-denied"),
         )
-        .expect_err("shadow store denied");
-    assert!(error.to_string().contains("shadow coordination store"));
+        .expect("dormant fleet stamp does not gate local task dispatch");
+    assert_eq!(
+        created["title"],
+        "Local authority survives dormant stamp drift"
+    );
 
     let registry = orbit_store_query_task_count(root.path(), "ws_checkoutless");
-    assert_eq!(registry, 0, "authority denial created no task");
+    assert_eq!(registry, 1, "local dispatch persisted exactly one task");
 }
 
 fn orbit_store_query_task_count(root: &std::path::Path, workspace_id: &str) -> i64 {

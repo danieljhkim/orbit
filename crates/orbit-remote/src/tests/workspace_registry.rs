@@ -35,11 +35,11 @@ fn logical_workspace(id: &str, owner_machine_id: Option<&str>) -> Workspace {
     }
 }
 
-fn write_host_identity(root: &Path, mode: &str, machine_id: &str) {
+fn write_host_identity(root: &Path, _legacy_mode: &str, machine_id: &str) {
     fs::write(
         root.join("host.toml"),
         format!(
-            "schema_version = 1\nmachine_id = \"{machine_id}\"\nhost_id = \"test-host\"\nmode = \"{mode}\"\n"
+            "schema_version = 2\nmachine_id = \"{machine_id}\"\nhost_id = \"test-host\"\ntask_prefix = \"ORB\"\n"
         ),
     )
     .expect("write host identity");
@@ -662,6 +662,7 @@ fn replica_role_rejects_transport_shaped_owner_before_any_mutation() {
             }]
         }),
     );
+    load_registry_from(&path).expect("canonicalize local owner display name");
     let original_bytes = fs::read(&path).expect("read original registry");
 
     for rejected in [

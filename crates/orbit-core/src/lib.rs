@@ -72,7 +72,9 @@ pub use command::search::{
 };
 pub use command::workflow::{ShipMode, build_ship_input, find_workflow, resolved_ship_mode};
 pub use context::ActorIdentity;
-pub use execution_environment::ExecutionEnvironmentSnapshot;
+pub use execution_environment::{
+    ExecutionEnvironmentSnapshot, LocalCrewEnvironment, local_crew_environment,
+};
 // Shared domain types (owned by orbit-common) that the CLI and dashboard
 // render or construct.
 pub use auto_tasks::{AutoTaskAddParams, AutoTaskUpdateParams};

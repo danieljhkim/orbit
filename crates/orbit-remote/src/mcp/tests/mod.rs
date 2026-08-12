@@ -1275,8 +1275,8 @@ mod audited_mcp_call_tests {
         ORBIT_SESSION_ID_ENV, run_pretooluse_input,
     };
     use orbit_common::types::{
-        AuditEventStatus, HostRegistration, LearningInjectionCaps, LearningInjectionState,
-        LearningReminder, LearningScope, McpCapability, McpTransport, ToolSessionContext,
+        AuditEventStatus, LearningInjectionCaps, LearningInjectionState, LearningReminder,
+        LearningScope, McpCapability, McpTransport, ToolSessionContext,
     };
     use orbit_core::LearningEvidence;
     use orbit_core::{LearningCreateParams, OrbitError, OrbitRuntime};
@@ -1391,7 +1391,10 @@ mod audited_mcp_call_tests {
     }
 
     #[test]
-    fn broker_executes_global_registry_discovery_without_session_workspace() {
+    fn broker_executes_local_registry_discovery_without_session_workspace() {
+        use chrono::Utc;
+        use orbit_common::types::{Workspace, WorkspaceRegistry, WorkspaceStatus};
+
         let _guard = EnvGuard::set(&[
             ("ORBIT_AGENT_NAME", None),
             ("ORBIT_AGENT_MODEL", None),
@@ -1403,6 +1406,30 @@ mod audited_mcp_call_tests {
         let workspace_root = root.path().join("workspace");
         std::fs::create_dir_all(&global_root).expect("global root");
         std::fs::create_dir_all(&workspace_root).expect("workspace root");
+        std::fs::write(
+            global_root.join("host.toml"),
+            "schema_version = 2\nmachine_id = \"hm_hub\"\nhost_id = \"hub\"\ntask_prefix = \"ORB\"\n",
+        )
+        .expect("host identity");
+        let now = Utc::now();
+        crate::workspace_registry::save_registry_to(
+            &WorkspaceRegistry {
+                workspaces: vec![Workspace {
+                    id: "ws_local".to_string(),
+                    name: "local".to_string(),
+                    owner_machine_id: Some("hm_hub".to_string()),
+                    git_remote: None,
+                    ship_mode: None,
+                    base_branch: "agent-main".to_string(),
+                    status: WorkspaceStatus::Active,
+                    created_at: now,
+                    updated_at: now,
+                }],
+                ..WorkspaceRegistry::default()
+            },
+            &crate::workspace_registry::registry_path_for(&global_root),
+        )
+        .expect("local workspace registry");
         let runtime = crate::runtime::RemoteRuntimeFactory::open_resolved_checkout(
             &global_root,
             &workspace_root,
@@ -1414,29 +1441,6 @@ mod audited_mcp_call_tests {
             },
         )
         .expect("build Remote-composed test runtime");
-        let store =
-            crate::RemoteStore::from_store(runtime.sqlite_store().expect("open real SQLite store"))
-                .expect("adopt Remote registry store");
-        store
-            .register_hub(&HostRegistration {
-                machine_id: "hm_hub".to_string(),
-                host_id: "hub".to_string(),
-                labels: BTreeSet::from(["coordination".to_string()]),
-            })
-            .expect("register hub");
-        store
-            .register_host(&HostRegistration {
-                machine_id: "hm_owner".to_string(),
-                host_id: "owner".to_string(),
-                labels: BTreeSet::from(["execution".to_string()]),
-            })
-            .expect("register owner");
-        store
-            .bind_workspace_owner("ws_checkoutless", "hm_owner")
-            .expect("bind workspace owner without a local checkout");
-        let expected_revision = store.registry_revision().expect("registry revision");
-        assert!(expected_revision > 0);
-
         let host = BrokerMcpHost::new(global_root);
         let call = |tool_name: &str, call_id: &str| {
             let mut context = ToolSessionContext::trusted_local(
@@ -1445,7 +1449,7 @@ mod audited_mcp_call_tests {
                 Some("hub".to_string()),
             );
             context.effective_capabilities = BTreeSet::from([McpCapability::Operator]);
-            context.origin_session_id = Some("mcp-session-global-discovery".to_string());
+            context.origin_session_id = Some("mcp-session-local-discovery".to_string());
             context.mcp_call_id = Some(call_id.to_string());
             host.call_tool(tool_name, json!({}), context)
                 .expect("global registry discovery succeeds")
@@ -1453,8 +1457,9 @@ mod audited_mcp_call_tests {
 
         let workspaces = call("orbit.workspace.list", "mcall-workspace-list");
         for value in [&workspaces] {
-            assert_eq!(value["hub_machine_id"], "hm_hub");
-            assert_eq!(value["registry_revision"].as_u64(), Some(expected_revision));
+            assert_eq!(value["machine_id"], "hm_hub");
+            assert!(value.get("hub_machine_id").is_none());
+            assert!(value.get("registry_revision").is_none());
             let serialized = serde_json::to_string(value).expect("serialize result");
             for forbidden in ["repo_root", "orbit_dir", "path_overrides", "crews", "model"] {
                 assert!(
@@ -1465,9 +1470,8 @@ mod audited_mcp_call_tests {
         }
         let workspace_rows = workspaces["workspaces"].as_array().expect("workspace rows");
         assert_eq!(workspace_rows.len(), 1);
-        assert_eq!(workspace_rows[0]["workspace_id"], "ws_checkoutless");
-        assert_eq!(workspace_rows[0]["owner_machine_id"], "hm_owner");
-        assert_eq!(workspace_rows[0]["owner_host_id"], "owner");
+        assert_eq!(workspace_rows[0]["id"], "ws_local");
+        assert_eq!(workspace_rows[0]["owner_machine_id"], "hm_hub");
 
         {
             let (tool_name, call_id) = ("orbit.workspace.list", "mcall-workspace-list");

@@ -1,14 +1,12 @@
 use std::collections::BTreeSet;
-use std::fs;
 
-use chrono::{Duration, TimeZone, Utc};
+use chrono::{TimeZone, Utc};
 use orbit_common::types::{
-    ExecutionProfileCrewV1, ExecutionProfileShipV1, ExecutionProfileV1, HostNameResolution,
-    HostStatus, ProjectionFreshness, Workspace, WorkspaceRegistry, WorkspaceStatus,
+    HostNameResolution, HostStatus, Workspace, WorkspaceRegistry, WorkspaceStatus,
 };
 
 use crate::host_identity::{HOST_IDENTITY_SCHEMA_VERSION, HostIdentity, HostMode};
-use crate::host_registry::{HostRegistryService, require_local_hub_identity};
+use crate::host_registry::HostRegistryService;
 use crate::persistence::RemoteStore;
 
 fn identity(machine_id: &str, host_id: &str, mode: HostMode) -> HostIdentity {
@@ -19,22 +17,6 @@ fn identity(machine_id: &str, host_id: &str, mode: HostMode) -> HostIdentity {
         task_prefix: "ORB".to_string(),
         mode,
     }
-}
-
-#[test]
-fn hub_administration_preflight_rejects_spoke_local_execution() {
-    let root = tempfile::tempdir().expect("tempdir");
-    fs::write(
-        root.path().join("host.toml"),
-        "schema_version = 1\nmachine_id = \"hm_spoke\"\nhost_id = \"spoke\"\nmode = \"spoke\"\n",
-    )
-    .expect("write host identity");
-
-    let error = require_local_hub_identity(root.path())
-        .expect_err("spoke-local administration must fail")
-        .to_string();
-    assert!(error.contains("hub-local"), "unexpected: {error}");
-    assert!(error.contains("spoke"), "unexpected: {error}");
 }
 
 #[test]
@@ -138,38 +120,6 @@ fn workspace_registry(workspaces: Vec<Workspace>) -> WorkspaceRegistry {
     }
 }
 
-const PROFILE_WORKSPACE_ID: &str = "alpha-abc123";
-
-fn execution_profile(
-    workspace_id: &str,
-    owner_machine_id: &str,
-    observed_at: chrono::DateTime<Utc>,
-) -> ExecutionProfileV1 {
-    let mut profile = ExecutionProfileV1 {
-        schema_version: 1,
-        workspace_id: workspace_id.to_string(),
-        owner_machine_id: owner_machine_id.to_string(),
-        observed_at,
-        config_digest: String::new(),
-        default_crew: "sol".to_string(),
-        crews: vec![ExecutionProfileCrewV1 {
-            name: "sol".to_string(),
-            provider: "codex".to_string(),
-            model: "gpt-test".to_string(),
-            backend: "cli".to_string(),
-            description: Some("Systems implementation".to_string()),
-            tags: vec!["hard".to_string()],
-        }],
-        ship: ExecutionProfileShipV1 {
-            mode: "pr".to_string(),
-            base_branch: "agent-main".to_string(),
-            ship_closure_digest: "a".repeat(64),
-        },
-    };
-    profile.config_digest = profile.compute_config_digest().expect("config digest");
-    profile
-}
-
 #[test]
 fn service_requires_explicit_existing_workspace_and_consistent_local_owner_mirror() {
     let store = RemoteStore::open_in_memory().expect("store");
@@ -199,46 +149,6 @@ fn service_requires_explicit_existing_workspace_and_consistent_local_owner_mirro
         .bind_workspace_owner(&registry, "ws_alpha", "hm_hub")
         .expect("bind owner");
     assert_eq!(bound.owner_machine_id, "hm_hub");
-}
-
-#[test]
-fn service_profile_publication_uses_hub_receipt_for_freshness() {
-    let store = RemoteStore::open_in_memory().expect("store");
-    let service = HostRegistryService::new(store.clone());
-    service
-        .register_identity(
-            &identity("hm_owner", "owner", HostMode::Hub),
-            BTreeSet::new(),
-        )
-        .expect("host");
-    let registry = workspace_registry(vec![workspace(PROFILE_WORKSPACE_ID, Some("hm_owner"))]);
-    service
-        .bind_workspace_owner(&registry, PROFILE_WORKSPACE_ID, "hm_owner")
-        .expect("ownership");
-    let received_at = Utc
-        .with_ymd_and_hms(2026, 7, 18, 9, 0, 0)
-        .single()
-        .expect("timestamp");
-    let profile = execution_profile(PROFILE_WORKSPACE_ID, "hm_owner", received_at);
-    service
-        .publish_execution_profile_at("hm_owner", 0, &profile, received_at)
-        .expect("publish");
-    let current = store
-        .sanitized_execution_profile(
-            PROFILE_WORKSPACE_ID,
-            received_at + Duration::minutes(9),
-            Duration::minutes(10),
-        )
-        .expect("current");
-    assert_eq!(current.freshness, ProjectionFreshness::Current);
-    let stale = store
-        .sanitized_execution_profile(
-            PROFILE_WORKSPACE_ID,
-            received_at + Duration::minutes(11),
-            Duration::minutes(10),
-        )
-        .expect("stale");
-    assert_eq!(stale.freshness, ProjectionFreshness::Stale);
 }
 
 #[test]
