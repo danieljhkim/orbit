@@ -1,7 +1,7 @@
 ---
 title: Orbit MCP Bridge — Design
 owner: claude
-last_updated: 2026-08-11
+last_updated: 2026-08-12
 last_validated: 2026-08-02
 status: Draft
 feature: mcp-bridge
@@ -11,7 +11,7 @@ summary: Target design for a local Orbit MCP broker with an SSH owner route, own
 tags: [mcp, remote-access, host-registry, bridge, ssh, routing]
 paths: ["crates/orbit-remote/**", "crates/orbit-mcp/**", "crates/orbit-core/**", "crates/orbit-tools/**", "crates/orbit-store/**", "crates/orbit-common/**"]
 related_features: [mcp-bridge, host-registry, mcp-session-context, remote-access, orbit-search, project-learnings]
-related_artifacts: [ORB-00424, ORB-10257, ORB-10262, ORB-10267, ORB-10268, ORB-10269, ORB-10271, ORB-10272, ORB-10276, ORB-10302, ORB-10319, ORB-10330, ORB-10332, ORB-10534, ORB-10540, ORB-10544, ORB-10690, ORB-10710, ORB-10725, ORB-10727, ADR-0181, ADR-0199, ADR-0200, ADR-0201, ADR-0226, ADR-0227, ADR-0228, ADR-0229, ADR-0230, ADR-0231, ADR-0232, ADR-0235, ADR-0240, ADR-0303, ADR-0348, ADR-0350, ADR-0351, ADR-0354, ADR-0355, ADR-0356, ADR-0357, ADR-0358]
+related_artifacts: [ORB-00424, ORB-10257, ORB-10262, ORB-10267, ORB-10268, ORB-10269, ORB-10271, ORB-10272, ORB-10276, ORB-10302, ORB-10319, ORB-10330, ORB-10332, ORB-10534, ORB-10540, ORB-10544, ORB-10690, ORB-10710, ORB-10725, ORB-10727, ORB-10729, ADR-0181, ADR-0199, ADR-0200, ADR-0201, ADR-0226, ADR-0227, ADR-0228, ADR-0229, ADR-0230, ADR-0231, ADR-0232, ADR-0235, ADR-0240, ADR-0303, ADR-0348, ADR-0350, ADR-0351, ADR-0354, ADR-0355, ADR-0356, ADR-0357, ADR-0358]
 ---
 
 # Orbit MCP Bridge — Design
@@ -845,6 +845,22 @@ local crew config directly and needs no projection, no generation counter, and n
 freshness gate. `orbit.crew.list`, task crew validation, and workflow preflight all
 resolve against the same local config.
 
+[ORB-10729] implements that. `orbit_remote::OwnerLocalCrews` is the one service
+both `orbit.crew.list` and explicit task-crew validation read through, over
+`orbit_core::local_crew_environment` — the same layered `config.toml`
+(`<checkout>/.orbit/config.toml` over `<global_root>/config.toml`) and the same
+backend precedence a runtime applies, but without constructing one, because the
+owner endpoint is checkoutless (§2.3). A workspace with no local checkout reads
+the machine-global file alone. Workflow preflight needed no change: it already
+resolved crews through the owner's runtime config. The projection *service*
+([ORB-10276]'s consumption half, with its clock and TTL) is deleted rather than
+parked, and the sanitized `CrewDiscoveryV1` loses its freshness/generation
+envelope with it — a config the answering machine can read is current by
+construction, so there is nothing for a caller to gate on. The store-level
+profile tables stay dormant per
+[host-registry/2_design.md §3](../host-registry/2_design.md); what is withdrawn
+is every live reader and writer above them.
+
 Two pieces of [ORB-10257] survive the withdrawal and are worth keeping intact,
 because they are transport-independent: `config_digest` hashes domain-separated
 canonical compact JSON of the normalized crew/config and effective mode/base branch,
@@ -1188,5 +1204,11 @@ Required validation:
 - [ORB-10544] — moved the ship in-flight duplicate-dispatch guard into the shared
   submission path, so `orbit.workflow.ship` inherits it and returns the same
   typed conflict the dashboard maps to `409 ship_run_in_flight` ([ADR-0303]).
+- [ORB-10729] — pinned the v1 cross-machine surface to task coordination exactly:
+  task create/read/update plus `orbit.task.artifact.put` cross a configured owner
+  route, while friction lifecycle, workflow dispatch, and knowledge authoring are
+  refused off-owner naming the owning machine (§4.2, §6.1). It also moved crew
+  discovery and task-crew validation onto the owner machine's local crew config
+  and deleted the execution-profile projection service (§8.1).
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

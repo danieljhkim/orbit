@@ -7,7 +7,6 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use super::activity_job::{Backend, Provider};
-use super::registry_snapshot::RegistryProfileV1;
 use super::{Crew, OrbitError, validate_machine_id};
 
 pub const EXECUTION_PROFILE_SCHEMA_VERSION: u32 = 1;
@@ -279,41 +278,25 @@ pub struct SanitizedExecutionProfile {
 }
 
 /// Sanitized `orbit.crew.list` projection: stable workspace/owner identity, the
-/// shared [`RegistryProfileV1`] freshness/generation envelope (also used by
-/// `orbit.workspace.list`), the default crew, and the sorted effective crew
-/// entries.
+/// default crew, and the sorted effective crew entries.
 ///
 /// It deliberately carries no `config_digest`, ship closure, presence root,
 /// checkout path, raw profile payload, environment name/value, secret,
 /// credential, token, SSH material, command fragment, or repository content:
 /// only the allowlisted name/provider/model/backend/description/tags crew
-/// projection appears. A stale record still returns its crews, but they are
-/// bound to the stale `profile` envelope generation/freshness and never carry a
-/// dispatch-eligible marker.
+/// projection appears.
+///
+/// [ORB-10729] It also carries no freshness/generation envelope. Crew
+/// validation runs on the machine that owns the workspace and reads that
+/// machine's own config (mcp-bridge §8.1), so there is no published projection
+/// that could be stale and no generation to bind a dispatch to.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CrewDiscoveryV1 {
     pub schema_version: u32,
     pub workspace_id: String,
     pub owner_machine_id: Option<String>,
-    pub profile: RegistryProfileV1,
     pub default_crew: Option<String>,
     pub crews: Vec<ExecutionProfileCrewV1>,
-}
-
-/// One reusable, immutable typed validation result shared by crew discovery and
-/// explicit task-crew validation. It captures the exact owner profile lineage
-/// that a validated dispatch is bound to — stored profile, resolved crew,
-/// hub-owned generation, config digest, and ship-closure digest — without
-/// persisting any run lineage or leasing state (those belong to H3/I1).
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ValidatedCrewProfile {
-    pub workspace_id: String,
-    pub owner_machine_id: String,
-    pub generation: u64,
-    pub config_digest: String,
-    pub ship_closure_digest: String,
-    pub resolved_crew: ExecutionProfileCrewV1,
-    pub profile: ExecutionProfileV1,
 }
 
 fn validate_profile_crew(crew: &ExecutionProfileCrewV1) -> Result<(), OrbitError> {

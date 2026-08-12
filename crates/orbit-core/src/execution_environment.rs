@@ -10,13 +10,15 @@ use orbit_common::types::activity_job::{
     Backend, JobV2Step, JobV2StepBody, resolve_activity_backends, resolve_job_backends,
     validate_job_loop_session_backends,
 };
-use orbit_common::types::{ActivityV2, JobV2, OrbitError};
+use orbit_common::types::{ActivityV2, Crew, JobV2, OrbitError};
 use orbit_engine::{dispatch_error_to_orbit, resolve_job_catalog_refs_for_execution, validate_job};
 use serde::Serialize;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 
 use crate::OrbitRuntime;
+use crate::command::backend_resolver::resolve_backend_precedence;
+use crate::config::RuntimeConfig;
 use crate::runtime::engine::ConfiguredCrewRegistryProjection;
 
 const SHIP_CLOSURE_DIGEST_DOMAIN: &[u8] = b"orbit.ship-closure.v1\0";
@@ -43,6 +45,47 @@ pub struct ExecutionEnvironmentSnapshot {
     pub crews: ConfiguredCrewRegistryProjection,
     pub resolved_backend: Backend,
     pub ship_closure_digest: String,
+}
+
+/// The named-crew registry of one machine's layered configuration, read
+/// without opening an [`OrbitRuntime`], a store, or a connector.
+///
+/// [ORB-10729] v1 crew validation runs where the workspace is owned, so the
+/// owner reads its own config directly instead of consuming a published
+/// execution-profile projection (mcp-bridge §8.1). The checkoutless owner MCP
+/// endpoint must not construct a runtime, so the layering and backend
+/// precedence a runtime would apply are exposed here as a pure config read:
+/// both entry points therefore answer from the same file and the same
+/// precedence, and cannot drift.
+#[derive(Debug, Clone)]
+pub struct LocalCrewEnvironment {
+    pub default_crew: Option<String>,
+    pub crews: BTreeMap<String, Crew>,
+    pub resolved_backend: Backend,
+}
+
+/// Read the layered crew registry for a checkout whose `.orbit` directory is
+/// `orbit_dir`, exactly as [`RuntimeConfig`] layers it for a runtime.
+///
+/// Pass `global_root` itself as `orbit_dir` for a workspace with no local
+/// checkout: layering then reads only `<global_root>/config.toml`, which is the
+/// whole crew configuration such a workspace has.
+pub fn local_crew_environment(
+    global_root: &std::path::Path,
+    orbit_dir: &std::path::Path,
+) -> Result<LocalCrewEnvironment, OrbitError> {
+    let config = RuntimeConfig::load_layered(global_root, orbit_dir)?;
+    let resolved_backend = resolve_backend_precedence(
+        None,
+        std::env::var("ORBIT_BACKEND").ok().as_deref(),
+        config.v2_backend(),
+    )
+    .backend;
+    Ok(LocalCrewEnvironment {
+        default_crew: config.default_crew.clone(),
+        crews: config.crews.clone(),
+        resolved_backend,
+    })
 }
 
 impl OrbitRuntime {

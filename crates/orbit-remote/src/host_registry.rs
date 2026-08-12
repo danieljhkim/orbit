@@ -10,18 +10,18 @@ use std::path::Path;
 
 use chrono::{DateTime, Duration, Utc};
 use orbit_common::types::{
-    ExecutionProfileV1, HostAlias, HostNameResolution, HostRecord, HostRegistration,
-    HostWorkspacePresence, OrbitError, RegistrySnapshotV1, SanitizedExecutionProfile,
-    SanitizedWorkspacePresence, StoredExecutionProfile, Workspace, WorkspaceOwnership,
+    HostAlias, HostNameResolution, HostRecord, HostRegistration, HostWorkspacePresence, OrbitError,
+    RegistrySnapshotV1, SanitizedWorkspacePresence, Workspace, WorkspaceOwnership,
     WorkspacePresenceDeclaration, WorkspaceRegistry, WorkspaceStatus,
 };
 
 use crate::host_identity::{HostIdentity, HostMode, load_host_identity};
 use crate::persistence::RemoteStore;
 
+/// Freshness horizon the dormant registry snapshot still reports profile rows
+/// with. No v1 caller publishes a profile ([ADR-0358]); the snapshot keeps a
+/// single TTL so the dormant projection reads consistently.
 const PROFILE_FRESHNESS_TTL: Duration = Duration::minutes(10);
-const PROFILE_MAX_OBSERVATION_AGE: Duration = Duration::minutes(10);
-const PROFILE_MAX_FUTURE_SKEW: Duration = Duration::minutes(2);
 const PRESENCE_FRESHNESS_TTL: Duration = Duration::minutes(5);
 
 #[derive(Clone)]
@@ -266,46 +266,13 @@ impl HostRegistryService {
         )
     }
 
-    pub fn publish_execution_profile(
-        &self,
-        caller_machine_id: &str,
-        expected_generation: u64,
-        profile: &ExecutionProfileV1,
-    ) -> Result<StoredExecutionProfile, OrbitError> {
-        self.publish_execution_profile_at(
-            caller_machine_id,
-            expected_generation,
-            profile,
-            Utc::now(),
-        )
-    }
-
-    /// Publish with an explicit hub receipt time; the normal public method
-    /// delegates here using the current clock.
-    pub(crate) fn publish_execution_profile_at(
-        &self,
-        caller_machine_id: &str,
-        expected_generation: u64,
-        profile: &ExecutionProfileV1,
-        received_at: DateTime<Utc>,
-    ) -> Result<StoredExecutionProfile, OrbitError> {
-        self.store.publish_execution_profile(
-            caller_machine_id,
-            expected_generation,
-            profile,
-            received_at,
-            PROFILE_MAX_OBSERVATION_AGE,
-            PROFILE_MAX_FUTURE_SKEW,
-        )
-    }
-
-    pub fn execution_profile_status(
-        &self,
-        workspace_id: &str,
-    ) -> Result<SanitizedExecutionProfile, OrbitError> {
-        self.store
-            .sanitized_execution_profile(workspace_id, Utc::now(), PROFILE_FRESHNESS_TTL)
-    }
+    // ORB-10729 [ADR-0358]: the owner execution-profile *publication* surface
+    // is withdrawn with the registration/poll protocol that carried it. Crew
+    // validation now reads the owner machine's local config
+    // ([`crate::OwnerLocalCrews`], mcp-bridge §8.1), so no caller publishes or
+    // reads a projection through this service. The store-level tables and their
+    // freshness/generation rules stay dormant per host-registry §3 rather than
+    // being migrated away.
 }
 
 fn require_logical_workspace<'a>(

@@ -627,10 +627,14 @@ fn owner_rmcp_coordination_canary_routes_only_the_task_surface_and_preserves_pro
         assert_eq!(shown["artifacts"][0]["path"], "reports/result.txt");
     }
 
-    // Owner-placed but outside the task surface: refused by name, never relayed.
+    // Owner-placed but outside the task surface: refused by name, never
+    // relayed. ORB-10729 pins the three coordination writes the v1 boundary
+    // deliberately excludes — friction lifecycle, workflow dispatch, and
+    // knowledge authoring — alongside a friction read.
     for (name, capability) in [
         ("orbit.friction.add", McpCapability::Agent),
         ("orbit.friction.list", McpCapability::Operator),
+        ("orbit.workflow.ship", McpCapability::Operator),
         ("orbit.learning.add", McpCapability::Agent),
     ] {
         let refusal = broker

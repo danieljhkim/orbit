@@ -647,10 +647,14 @@ impl BrokerMcpHost {
     }
 
     /// Project the sanitized crew-discovery response for `orbit.crew.list` from
-    /// C2's stored owner execution-profile projection at this hub-local root.
+    /// this machine's own crew configuration.
+    ///
+    /// Only reached when the workspace is owned here (§8.1): a workspace owned
+    /// elsewhere has no crew surface on this broker, because `orbit.crew.list`
+    /// does not cross the owner route.
     fn crew_discovery(&self, workspace_id: &str) -> Result<Value, OrbitError> {
-        let discovery = crate::ExecutionProfileProjection::at(&self.global_root)?
-            .crew_discovery(workspace_id)?;
+        let discovery =
+            crate::OwnerLocalCrews::new(self.global_root.clone()).crew_discovery(workspace_id)?;
         serde_json::to_value(discovery)
             .map_err(|error| OrbitError::Execution(format!("serialize crew discovery: {error}")))
     }
@@ -897,7 +901,7 @@ impl BrokerMcpHost {
         // self, no second MCP serialization boundary (§2.3). One owned
         // elsewhere reached this point only because owner preflight admitted it
         // to the configured route.
-        // `orbit.crew.list` is owner-placed but projection-backed rather than
+        // `orbit.crew.list` is owner-placed but config-backed rather than
         // coordination-store-backed, so it is its own branch below.
         let owner_dispatch = placement == McpToolPlacement::Owner
             && !with_context
