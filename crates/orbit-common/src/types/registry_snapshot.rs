@@ -1,10 +1,14 @@
 //! Path-free, sanitized hub registry snapshot and satellite registry cache
 //! codec [ORB-10267].
 //!
+//! Dormant v2 DTOs: ADR-0358 leaves these codecs compiled for future fleet
+//! registration, but no v1 path constructs them from registry tables or reads
+//! them from a cache. See `docs/design/host-registry/2_design.md` §2.1.
+//!
 //! [`RegistrySnapshotV1`] is the single typed projection read from the hub
 //! coordination store in one transaction. It is the sole input to the
-//! `orbit.workspace.list` discovery tool, the `orbit host list` CLI, and the
-//! satellite [`RegistryCacheV1`] serialization. It deliberately carries no
+//! deferred fleet discovery/admin surfaces and satellite [`RegistryCacheV1`]
+//! serialization. It deliberately carries no
 //! presence root, checkout/worktree path, raw execution-profile payload,
 //! crew/model identity, secret, credential, SSH configuration, or repository
 //! content: every field below is an explicit allowlisted stable identity,

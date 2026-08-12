@@ -39,17 +39,12 @@ pub use sweep::{
     run_sweep_with_providers,
 };
 pub use validation::{
-    DEFAULT_QUIET_HOST_AFTER_SECONDS, DEFAULT_REGISTRY_CACHE_MAX_AGE_SECONDS,
     RoutineDiagnosticSeverity, RoutineHostIdentity, RoutineHostIdentityView, RoutinePinValidation,
-    RoutinePlacementProjection, RoutinePlacementProvider, RoutineRegistryCacheView,
-    RoutineRegistryStatus, RoutineRegistryView, RoutineValidationDiagnostic, validate_routine_pins,
+    RoutinePlacementProjection, RoutinePlacementProvider, RoutineRegistryStatus,
+    RoutineRegistryView, RoutineValidationDiagnostic, validate_routine_pins,
 };
 
-/// Open the one config-resolved machine-local scheduler/registry store.
-///
-/// Status, mutation, and sweep paths must share this resolver with the host
-/// registry. Opening `<global_root>/orbit.db` independently can make routine
-/// validation observe a different registry authority from the writer.
+/// Open the config-resolved machine-local scheduler store.
 fn open_routine_store(global_root: &Path) -> Result<Store, OrbitError> {
     let database = crate::config::resolved_audit_db_path(global_root, global_root)?;
     Store::open(&database)

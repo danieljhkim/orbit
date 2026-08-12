@@ -132,6 +132,7 @@ fn workspace(id: &str, owner_machine_id: Option<&str>) -> Workspace {
 fn workspace_registry(workspaces: Vec<Workspace>) -> WorkspaceRegistry {
     WorkspaceRegistry {
         schema_version: 1,
+        owner_host_ids: Default::default(),
         workspaces,
         checkouts: Vec::new(),
     }

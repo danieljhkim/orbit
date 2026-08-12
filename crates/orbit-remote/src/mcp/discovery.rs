@@ -1,8 +1,8 @@
-//! Remote-owned global registry discovery definitions and execution.
+//! Remote-owned machine-local discovery definitions and execution.
 
 use orbit_common::types::{
     McpToolDefinition, McpToolPlacement, McpToolPolicy, McpToolPolicyError, McpToolScope,
-    NotFoundKind, OrbitError, RegistrySnapshotV1, ToolParam, ToolSchema,
+    NotFoundKind, OrbitError, ToolParam, ToolSchema, WorkspaceRegistry, WorkspaceStatus,
     validate_mcp_tool_definitions,
 };
 use serde_json::{Value, json};
@@ -21,8 +21,8 @@ fn workspace_list_definition() -> Result<McpToolDefinition, McpToolPolicyError> 
     McpToolDefinition::new(
         ToolSchema {
             name: "orbit.workspace.list".to_string(),
-            description: "List the workspaces this machine owns, with sanitized \
-                          execution-profile freshness (operator, local-derived placement)."
+            description: "List the workspaces this machine owns from its local workspace registry \
+                          (operator, local-derived placement)."
                 .to_string(),
             parameters: Vec::new(),
             builtin: true,
@@ -60,18 +60,24 @@ fn crew_list_definition() -> Result<McpToolDefinition, McpToolPolicyError> {
 
 pub(super) fn execute_discovery_tool(
     name: &str,
-    snapshot: RegistrySnapshotV1,
+    registry: &WorkspaceRegistry,
+    local_machine_id: &str,
 ) -> Result<Value, OrbitError> {
     match name {
-        // `hub_machine_id` is the host-registry store's own column name for the
-        // machine that stamped it; on a machine's own registry that is this
-        // machine. Renaming it belongs to the host-registry recomposition
-        // (ADR-0358), not to the bridge, so the response key is left stable.
-        "orbit.workspace.list" => Ok(json!({
-            "hub_machine_id": snapshot.hub_machine_id,
-            "registry_revision": snapshot.registry_revision,
-            "workspaces": snapshot.workspaces,
-        })),
+        "orbit.workspace.list" => {
+            let workspaces = registry
+                .workspaces
+                .iter()
+                .filter(|workspace| {
+                    workspace.status == WorkspaceStatus::Active
+                        && workspace.owner_machine_id.as_deref() == Some(local_machine_id)
+                })
+                .collect::<Vec<_>>();
+            Ok(json!({
+                "machine_id": local_machine_id,
+                "workspaces": workspaces,
+            }))
+        }
         _ => Err(OrbitError::not_found(NotFoundKind::Tool, name.to_string())),
     }
 }

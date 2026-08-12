@@ -1,7 +1,7 @@
 ---
 title: Host Registry — Decisions
 owner: claude
-last_updated: 2026-08-11
+last_updated: 2026-08-12
 last_validated: 2026-08-11
 status: Draft
 feature: host-registry
@@ -11,7 +11,7 @@ summary: Decision record for host identity, per-machine coordination, prefix-par
 tags: [host-registry, mcp-bridge, multi-host, ownership]
 paths: ["crates/orbit-remote/**", "crates/orbit-core/**", "crates/orbit-store/**", "crates/orbit-mcp/**"]
 related_features: [host-registry, mcp-bridge]
-related_artifacts: [ORB-00424, ORB-10245, ORB-10248, ORB-10249, ORB-10255, ORB-10257, ORB-10267, ORB-10258, ORB-10268, ORB-10269, ORB-10271, ORB-10272, ORB-10276, ORB-10302, ORB-10319, ORB-10330, ORB-10332, ORB-10709, ORB-10723, ORB-10728, ADR-0226, ADR-0227, ADR-0228, ADR-0229, ADR-0230, ADR-0231, ADR-0232, ADR-0235, ADR-0240, ADR-0352, ADR-0355, ADR-0356, ADR-0357, ADR-0358]
+related_artifacts: [ORB-00424, ORB-10245, ORB-10248, ORB-10249, ORB-10255, ORB-10257, ORB-10267, ORB-10258, ORB-10268, ORB-10269, ORB-10271, ORB-10272, ORB-10276, ORB-10302, ORB-10319, ORB-10330, ORB-10332, ORB-10709, ORB-10723, ORB-10728, ORB-10730, ADR-0226, ADR-0227, ADR-0228, ADR-0229, ADR-0230, ADR-0231, ADR-0232, ADR-0235, ADR-0240, ADR-0352, ADR-0355, ADR-0356, ADR-0357, ADR-0358]
 ---
 
 # Host Registry — Decisions
@@ -401,7 +401,7 @@ addressable.
 
 ## ADR-0358 — Defer fleet registration and execution placement to v2
 
-**Status:** Accepted · 2026-08 · supersedes [ADR-0230]; defers parts of [ADR-0227], [ADR-0228]; amends [ADR-0231]
+**Status:** Accepted · 2026-08 · [ORB-10730] implemented the dormant fleet boundary and local routine-pin validation; supersedes [ADR-0230]; defers parts of [ADR-0227], [ADR-0228]; amends [ADR-0231]
 **Scope:** multi-machine scope boundary; what v1 refuses to build
 
 ### Context
@@ -487,6 +487,10 @@ If a second execution machine materializes, reach it with supervised push-style 
 - [ORB-10728] — stores unresolved foreign-prefix task relations with an explicit
   `not verifiable here` projection, keeps locally prefixed misses as hard errors,
   and treats foreign dependencies as non-gating for local readiness.
+- [ORB-10730] — withdrew fleet host administration and workspace linking from
+  the v1 command graph, removed registry/cache reads from v1 discovery and
+  routines, and retained the underlying aliases, retirement, projections,
+  cache codecs, and tables as explicitly documented dormant v2 modules.
 - [ORB-10248] — implemented the versioned logical-workspace/local-checkout split.
 - [ORB-10249] — implemented path-free task coordination and global task-relation/readiness lookup.
 - [ORB-10255] — implemented ADR-0227's append-only SQLite host/alias core with

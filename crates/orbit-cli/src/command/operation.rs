@@ -199,7 +199,6 @@ impl Commands {
                     WorkspaceSubcommand::Init(_) => ("init", RuntimeNeed::Forbidden, false),
                     WorkspaceSubcommand::List(_) => ("list", RuntimeNeed::Required, false),
                     WorkspaceSubcommand::Show(_) => ("show", RuntimeNeed::Required, false),
-                    WorkspaceSubcommand::Link(_) => ("link", RuntimeNeed::Required, false),
                     WorkspaceSubcommand::Role(_) => ("role", RuntimeNeed::Required, false),
                     WorkspaceSubcommand::Remove(_) => ("remove", RuntimeNeed::Required, true),
                     WorkspaceSubcommand::Teardown(args) => {
@@ -223,10 +222,7 @@ impl Commands {
             Commands::Host(command) => {
                 use super::host::HostSubcommand;
                 let subcommand = match &command.command {
-                    HostSubcommand::Register(_) => "register",
-                    HostSubcommand::List(_) => "list",
                     HostSubcommand::Rename(_) => "rename",
-                    HostSubcommand::Retire(_) => "retire",
                 };
                 CommandOperation::new(
                     RuntimeNeed::Required,

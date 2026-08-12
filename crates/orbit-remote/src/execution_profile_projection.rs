@@ -1,6 +1,10 @@
 //! Hub-side projection-backed crew discovery and explicit task-crew validation
 //! [ORB-10276].
 //!
+//! Fleet-carried publication and CAS are retained for a possible v2 registry
+//! (ADR-0358; see `docs/design/host-registry/2_design.md` §2.1). The separate
+//! owner-local crew consumer cutover is tracked by ORB-10729.
+//!
 //! This is the single reusable service that both `orbit.crew.list` discovery
 //! and explicit task-crew validation read through. It consumes C2's stored
 //! owner execution-profile projection (never hub-local crews, the satellite

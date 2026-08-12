@@ -1,8 +1,9 @@
 use std::collections::BTreeSet;
 
+use chrono::Utc;
 use orbit_common::types::{
-    McpCapability, McpToolPlacement, McpToolScope, NotFoundKind, OrbitError,
-    REGISTRY_SNAPSHOT_SCHEMA_VERSION, RegistrySnapshotV1,
+    McpCapability, McpToolPlacement, McpToolScope, NotFoundKind, OrbitError, Workspace,
+    WorkspaceRegistry, WorkspaceStatus,
 };
 use serde_json::json;
 
@@ -23,7 +24,7 @@ fn remote_owns_the_exact_global_discovery_definitions() {
     );
     assert_eq!(
         definitions[0].schema.description,
-        "List the workspaces this machine owns, with sanitized execution-profile freshness \
+        "List the workspaces this machine owns from its local workspace registry \
          (operator, local-derived placement)."
     );
     // ORB-10727: the registry-wide tool stays operator-only and global, and is
@@ -86,26 +87,34 @@ fn remote_owns_the_exact_global_discovery_definitions() {
 }
 
 #[test]
-fn discovery_handlers_project_only_the_requested_snapshot_partition() {
-    let snapshot = RegistrySnapshotV1 {
-        schema_version: REGISTRY_SNAPSHOT_SCHEMA_VERSION,
-        hub_machine_id: Some("hm_hub".to_string()),
-        registry_revision: 7,
-        hosts: Vec::new(),
-        workspaces: Vec::new(),
+fn discovery_handlers_project_only_locally_owned_workspaces() {
+    let now = Utc::now();
+    let workspace = |id: &str, owner: &str| Workspace {
+        id: id.to_string(),
+        name: id.to_string(),
+        owner_machine_id: Some(owner.to_string()),
+        git_remote: None,
+        ship_mode: None,
+        base_branch: "main".to_string(),
+        status: WorkspaceStatus::Active,
+        created_at: now,
+        updated_at: now,
+    };
+    let registry = WorkspaceRegistry {
+        workspaces: vec![
+            workspace("ws_local", "hm_local"),
+            workspace("ws_remote", "hm_remote"),
+        ],
+        ..WorkspaceRegistry::default()
     };
 
-    assert_eq!(
-        execute_discovery_tool("orbit.workspace.list", snapshot.clone())
-            .expect("workspace projection"),
-        json!({
-            "hub_machine_id": "hm_hub",
-            "registry_revision": 7,
-            "workspaces": [],
-        })
-    );
+    let listed = execute_discovery_tool("orbit.workspace.list", &registry, "hm_local")
+        .expect("workspace projection");
+    assert_eq!(listed["machine_id"], "hm_local");
+    assert_eq!(listed["workspaces"].as_array().expect("rows").len(), 1);
+    assert_eq!(listed["workspaces"][0]["id"], "ws_local");
     assert!(matches!(
-        execute_discovery_tool("orbit.host.future", snapshot),
+        execute_discovery_tool("orbit.host.future", &registry, "hm_local"),
         Err(OrbitError::NotFound {
             kind: NotFoundKind::Tool,
             ..

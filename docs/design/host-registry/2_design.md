@@ -1,7 +1,7 @@
 ---
 title: Host Registry — Design
 owner: claude
-last_updated: 2026-08-11
+last_updated: 2026-08-12
 last_validated: 2026-08-10
 status: Draft
 feature: host-registry
@@ -11,7 +11,7 @@ summary: Mechanisms for host identity and machine task prefix, per-workspace own
 tags: [host-registry, multi-host, ownership, routines, data-placement]
 paths: ["crates/orbit-remote/**", "crates/orbit-core/**", "crates/orbit-store/**", "crates/orbit-mcp/**", "crates/orbit-common/**"]
 related_features: [host-registry, mcp-bridge, routines, remote-access, mcp-session-context, resident-orchestrator]
-related_artifacts: [ORB-00424, ORB-10247, ORB-10248, ORB-10249, ORB-10255, ORB-10257, ORB-10258, ORB-10267, ORB-10268, ORB-10269, ORB-10271, ORB-10272, ORB-10302, ORB-10319, ORB-10330, ORB-10332, ORB-10709, ORB-10725, ADR-0200, ADR-0205, ADR-0208, ADR-0226, ADR-0227, ADR-0228, ADR-0229, ADR-0230, ADR-0231, ADR-0232, ADR-0235, ADR-0240, ADR-0352, ADR-0355, ADR-0356, ADR-0357, ADR-0358]
+related_artifacts: [ORB-00424, ORB-10247, ORB-10248, ORB-10249, ORB-10255, ORB-10257, ORB-10258, ORB-10267, ORB-10268, ORB-10269, ORB-10271, ORB-10272, ORB-10302, ORB-10319, ORB-10330, ORB-10332, ORB-10709, ORB-10725, ORB-10730, ADR-0200, ADR-0205, ADR-0208, ADR-0226, ADR-0227, ADR-0228, ADR-0229, ADR-0230, ADR-0231, ADR-0232, ADR-0235, ADR-0240, ADR-0352, ADR-0355, ADR-0356, ADR-0357, ADR-0358]
 ---
 
 # Host Registry — Design
@@ -816,5 +816,9 @@ of that routine.** Consequences:
   feature v2 is an empty slot and v3 drops its tables. Learning and ADR IDs are
   workspace-local, and the [ORB-10364] authoring gate is the single surface in
   front of a one-transaction owner-local write.
+- [ORB-10730] — made the ADR-0358 fleet boundary executable: v1 links only the
+  local `host rename` command, serves workspace discovery from `workspaces.json`,
+  ignores registry stamps and caches, and validates routine pins as own-host,
+  belongs-elsewhere, or unresolvable from local owner names only.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

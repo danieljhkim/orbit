@@ -323,10 +323,10 @@ fn config_resolution_ignores_repo_and_other_root_decoys() {
 /// `hub`, because schema 2 has no machine-level coordination role to declare,
 /// and no longer requires the store to be stamped, because the registration
 /// that stamped it is withdrawn (ADR-0358). What survives from ORB-10268: the
-/// startup machine identity must keep matching, and a store stamped by a
-/// *different* machine is still refused as a shadow store.
+/// startup machine identity must keep matching. Fleet registry stamps are
+/// dormant and therefore cannot admit or reject a v1 endpoint.
 #[test]
-fn owner_host_admits_an_unstamped_store_but_refuses_a_changed_identity_or_shadow_stamp() {
+fn owner_host_authority_uses_host_toml_without_reading_fleet_stamp() {
     let root = tempfile::tempdir().expect("global root");
     write_identity(&root, "hm_owner");
     initialize_store(&root);
@@ -338,12 +338,11 @@ fn owner_host_admits_an_unstamped_store_but_refuses_a_changed_identity_or_shadow
     let shadow = tempfile::tempdir().expect("global root");
     write_identity(&shadow, "hm_owner");
     stamp_store(&shadow, "hm_other");
-    let error = OwnerMcpHost::new(shadow.path().to_path_buf(), McpCapability::Agent)
-        .expect_err("a store stamped by another machine is a shadow store");
-    assert!(
-        error.to_string().contains("shadow coordination store"),
-        "unexpected error: {error}"
-    );
+    let shadow_host = OwnerMcpHost::new(shadow.path().to_path_buf(), McpCapability::Agent)
+        .expect("dormant fleet stamp is ignored");
+    shadow_host
+        .list_mcp_tool_definitions()
+        .expect("listing remains local-identity based");
 
     write_identity(&root, "hm_replaced");
     let error = host

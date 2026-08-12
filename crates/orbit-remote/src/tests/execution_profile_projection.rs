@@ -95,6 +95,7 @@ fn two_workspace_store() -> RemoteStore {
     }
     let registry = WorkspaceRegistry {
         schema_version: 1,
+        owner_host_ids: Default::default(),
         workspaces: vec![
             workspace("ws_alpha", "hm_owner_a"),
             workspace("ws_beta", "hm_owner_b"),

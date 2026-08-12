@@ -1,9 +1,12 @@
 //! Atomic satellite registry cache [ORB-10267].
 //!
+//! Dormant v2 substrate: no v1 path reads or refreshes this cache (ADR-0358;
+//! `docs/design/host-registry/2_design.md` §2.1).
+//!
 //! A machine-local, versioned cache of one sanitized hub [`RegistrySnapshotV1`]
 //! plus the local receipt time at which this machine accepted it. It is
-//! **validation data only**: routine-pin and other validation reads may degrade
-//! to warning-only when it is absent or stale, but ownership enforcement,
+//! **v2 validation data only**: future validation reads may degrade to
+//! warning-only when it is absent or stale, but ownership enforcement,
 //! coordination-write routing, and knowledge-authoring enforcement must never
 //! read it.
 //!

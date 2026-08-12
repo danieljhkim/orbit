@@ -5,16 +5,15 @@
 
 use std::path::Path;
 
-use chrono::{DateTime, Duration, Local, Utc};
+use chrono::{DateTime, Local, Utc};
 use orbit_common::types::OrbitError;
 use orbit_store::RoutineFireRecord;
 
 use super::due::{parse_cron, truncate_to_minute};
 use super::loader::{LoadedRoutine, RoutineLoadError, RoutineWorkspaceProvider, collect_routines};
 use super::validation::{
-    DEFAULT_QUIET_HOST_AFTER_SECONDS, DEFAULT_REGISTRY_CACHE_MAX_AGE_SECONDS, RoutinePinValidation,
-    RoutinePlacementProjection, RoutinePlacementProvider, RoutineRegistryStatus,
-    validate_routine_pins,
+    RoutinePinValidation, RoutinePlacementProjection, RoutinePlacementProvider,
+    RoutineRegistryStatus, validate_routine_pins,
 };
 
 /// Full effective state of one routine on this host.
@@ -69,10 +68,7 @@ pub fn routine_statuses_with_providers(
     let RoutinePlacementProjection {
         local_host,
         registry: registry_view,
-    } = placement_provider.load_routine_placement(
-        now_utc,
-        Duration::seconds(DEFAULT_REGISTRY_CACHE_MAX_AGE_SECONDS),
-    )?;
+    } = placement_provider.load_routine_placement()?;
     let registry = registry_view.status();
 
     let discovered = workspace_provider.discover_workspaces(global_root)?;
@@ -99,8 +95,6 @@ pub fn routine_statuses_with_providers(
             routine.origin,
             &routine.definition.hosts,
             &registry_view,
-            now_utc,
-            Duration::seconds(DEFAULT_QUIET_HOST_AFTER_SECONDS),
         );
         let pinned_to_host = validation.eligible;
         statuses.push(RoutineStatus {

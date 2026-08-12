@@ -11,7 +11,8 @@ use tempfile::tempdir;
 
 use crate::workspace_registry::{
     assign_checkout_role, find_checkout_by_path, find_workspace, find_workspace_by_path,
-    load_registry_from, load_registry_from_with_writer, save_registry_to,
+    load_registry_from, load_registry_from_with_writer, rename_local_owner_host_id,
+    save_registry_to,
 };
 
 fn timestamp() -> chrono::DateTime<Utc> {
@@ -42,6 +43,16 @@ fn write_host_identity(root: &Path, mode: &str, machine_id: &str) {
         ),
     )
     .expect("write host identity");
+}
+
+fn write_current_host_identity(root: &Path, machine_id: &str) {
+    fs::write(
+        root.join("host.toml"),
+        format!(
+            "schema_version = 2\nmachine_id = \"{machine_id}\"\nhost_id = \"test-host\"\ntask_prefix = \"ORB\"\n"
+        ),
+    )
+    .expect("write current host identity");
 }
 
 fn write_json(path: &Path, value: &Value) -> Vec<u8> {
@@ -554,7 +565,7 @@ fn assign_checkout_role_is_idempotent_and_rejects_owner_of_another_machine_byte_
 #[test]
 fn explicit_owner_role_stamps_the_validated_local_machine_before_save() {
     let root = tempdir().expect("tempdir");
-    write_host_identity(root.path(), "hub", "hm_local");
+    write_current_host_identity(root.path(), "hm_local");
     let path = root.path().join("workspaces.json");
     let mut registry = WorkspaceRegistry {
         workspaces: vec![logical_workspace("ws_orbit", None)],
@@ -589,6 +600,48 @@ fn explicit_owner_role_stamps_the_validated_local_machine_before_save() {
         Some("hm_local")
     );
     assert_eq!(loaded.checkouts[0].role, Some(WorkspaceCheckoutRole::Owner));
+    assert_eq!(
+        loaded.owner_host_ids.get("hm_local").map(String::as_str),
+        Some("test-host")
+    );
+}
+
+#[test]
+fn local_owner_rename_changes_only_the_display_name_projection() {
+    let mut registry = WorkspaceRegistry {
+        owner_host_ids: [
+            ("hm_local".to_string(), "old".to_string()),
+            ("hm_remote".to_string(), "remote".to_string()),
+        ]
+        .into_iter()
+        .collect(),
+        workspaces: vec![
+            logical_workspace("ws_one", Some("hm_local")),
+            logical_workspace("ws_two", Some("hm_local")),
+            logical_workspace("ws_remote", Some("hm_remote")),
+        ],
+        ..WorkspaceRegistry::default()
+    };
+    let stable_owners = registry
+        .workspaces
+        .iter()
+        .map(|workspace| workspace.owner_machine_id.clone())
+        .collect::<Vec<_>>();
+
+    assert_eq!(
+        rename_local_owner_host_id(&mut registry, "hm_local", "new").expect("rename"),
+        2
+    );
+    assert_eq!(registry.owner_host_ids["hm_local"], "new");
+    assert_eq!(registry.owner_host_ids["hm_remote"], "remote");
+    assert_eq!(
+        registry
+            .workspaces
+            .iter()
+            .map(|workspace| workspace.owner_machine_id.clone())
+            .collect::<Vec<_>>(),
+        stable_owners
+    );
 }
 
 #[test]
