@@ -96,7 +96,7 @@ pub use execution_profile::{
     CREW_DISCOVERY_SCHEMA_VERSION, CrewDiscoveryV1, EXECUTION_CONFIG_DIGEST_DOMAIN,
     EXECUTION_PROFILE_SCHEMA_VERSION, ExecutionProfileCrewV1, ExecutionProfileShipV1,
     ExecutionProfileV1, HostWorkspacePresence, ProjectionFreshness, SanitizedExecutionProfile,
-    SanitizedWorkspacePresence, StoredExecutionProfile, ValidatedCrewProfile, WorkspaceOwnership,
+    SanitizedWorkspacePresence, StoredExecutionProfile, WorkspaceOwnership,
     WorkspacePresenceDeclaration,
 };
 pub use executor_def::{

@@ -370,8 +370,8 @@ impl OwnerMcpHost {
             object.insert("workspace".to_string(), Value::String(workspace_id.clone()));
         }
         // Crew validation runs where the workspace is owned, so it reads this
-        // machine's own execution-profile state directly (§8.1). It never opens
-        // the coordination task registry.
+        // machine's own crew configuration directly (§8.1). It never opens the
+        // coordination task registry.
         if name == "orbit.crew.list" {
             let result = self.crew_discovery(&workspace_id);
             self.record_outcome(name, &context, &result);
@@ -402,21 +402,19 @@ impl OwnerMcpHost {
     }
 
     /// Project the sanitized crew-discovery response for `orbit.crew.list` from
-    /// this owner machine's local execution-profile state.
+    /// this owner machine's local crew configuration.
     fn crew_discovery(&self, workspace_id: &str) -> Result<Value, OrbitError> {
-        let discovery = crate::ExecutionProfileProjection::at(&self.global_root)?
-            .crew_discovery(workspace_id)?;
+        let discovery =
+            crate::OwnerLocalCrews::new(self.global_root.clone()).crew_discovery(workspace_id)?;
         serde_json::to_value(discovery)
             .map_err(|error| OrbitError::Execution(format!("serialize crew discovery: {error}")))
     }
 
-    /// Validate an explicit task crew against this owner machine's current
-    /// execution profile. Never falls back to the registry cache, a stale
-    /// replica, or a synchronous call to another machine.
+    /// Validate an explicit task crew against this owner machine's local crew
+    /// configuration. Never falls back to the registry cache, a stale replica,
+    /// or a synchronous call to another machine.
     fn validate_task_crew(&self, workspace_id: &str, crew: &str) -> Result<String, OrbitError> {
-        crate::ExecutionProfileProjection::at(&self.global_root)?
-            .validate_task_crew(workspace_id, crew)
-            .map(|validated| validated.resolved_crew.name)
+        crate::OwnerLocalCrews::new(self.global_root.clone()).validate_task_crew(workspace_id, crew)
     }
 }
 

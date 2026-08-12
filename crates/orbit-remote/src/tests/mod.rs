@@ -1,6 +1,6 @@
 #![allow(missing_docs)]
 
-mod execution_profile_projection;
+mod crew_config;
 mod host_identity;
 mod host_registry;
 mod profile;
