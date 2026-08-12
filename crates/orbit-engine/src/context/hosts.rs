@@ -291,6 +291,18 @@ pub trait RuntimeHost: Send + Sync {
             "run_tool_with_context_and_role",
         ))
     }
+    /// Execute an engine-private VCS/PR operation for deterministic shipment.
+    ///
+    /// Unlike `run_tool_with_context_and_role`, this boundary never consults
+    /// the public Tool registry, public authorization, or an activity
+    /// allowlist. Tests override it with an in-memory fake.
+    fn run_private_vcs_operation(
+        &self,
+        operation: &str,
+        input: Value,
+    ) -> Result<Value, OrbitError> {
+        crate::executor::automation::vcs::run_private_operation(operation, &input)
+    }
     fn v2_runtime_host(&self) -> Result<&dyn RuntimeHost, OrbitError> {
         Err(OrbitError::Execution(
             "v2 runtime host is not available on this host".to_string(),

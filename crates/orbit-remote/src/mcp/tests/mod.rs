@@ -858,7 +858,25 @@ fn safe_surface_separates_remote_owned_and_runtime_tools() {
         assert!(!is_mcp_tool_exposed(name));
     }
 
-    assert!(!is_mcp_tool_exposed("orbit.state.get"));
+    for retired in [
+        "git.push",
+        "github.pr.comment",
+        "github.pr.comment.reply",
+        "github.pr.comments",
+        "github.pr.create",
+        "github.pr.list",
+        "github.pr.merge",
+        "github.pr.review",
+        "github.pr.review.comment",
+        "github.pr.view",
+        "orbit.state.get",
+        "orbit.state.set",
+    ] {
+        assert!(!names.contains(retired));
+        assert!(!safe_names.contains(retired));
+        assert!(!is_mcp_tool_exposed(retired));
+    }
+
     assert!(!is_mcp_tool_exposed("demo.hello"));
 }
 
@@ -1321,20 +1339,20 @@ mod audited_mcp_call_tests {
         let runtime = OrbitRuntime::in_memory().expect("build test runtime");
         // The runtime is the source of truth for the audit store; the
         // wrapper writes to the same backing store the MCP host shares.
-        let result = audited_mcp_call(&runtime, "orbit.state.get", json!({}));
+        let result = audited_mcp_call(&runtime, "demo.unknown", json!({}));
         assert!(
             result.is_err(),
             "preflight rejects unknown / unexposed tool"
         );
 
         let events = runtime
-            .list_audit_events(None, Some("orbit.state.get".to_string()), None, None, 16)
+            .list_audit_events(None, Some("demo.unknown".to_string()), None, None, 16)
             .expect("list audit events");
         assert_eq!(events.len(), 1, "preflight failure produced one audit row");
         let row = &events[0];
         assert_eq!(row.command, "tool");
         assert_eq!(row.subcommand.as_deref(), Some("run-mcp"));
-        assert_eq!(row.tool_name.as_deref(), Some("orbit.state.get"));
+        assert_eq!(row.tool_name.as_deref(), Some("demo.unknown"));
         assert_eq!(row.status, AuditEventStatus::Denied);
         assert_eq!(row.role, "unverified");
         assert_eq!(row.transport, Some(McpTransport::Local));

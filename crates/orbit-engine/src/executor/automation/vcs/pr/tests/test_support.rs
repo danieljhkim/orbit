@@ -7,37 +7,42 @@ use std::sync::Mutex;
 use chrono::Utc;
 use orbit_common::test_fixtures::TEST_CODEX_MODEL;
 use orbit_common::types::{
-    ExternalRef, NotFoundKind, OrbitError, OrbitEvent, Role, Task, TaskArtifact, TaskComment,
+    ExternalRef, NotFoundKind, OrbitError, OrbitEvent, Task, TaskArtifact, TaskComment,
     TaskPriority, TaskStatus, TaskType, push_external_ref_if_missing,
 };
-use orbit_tools::ToolContext;
 use serde_json::{Value, json};
 use tempfile::{TempDir, tempdir};
 
 use crate::context::{PrConfig, RuntimeHost, TaskActivityUpdate, TaskAutomationUpdate};
 
 use super::super::super::freshness::BranchFreshness;
+use super::super::super::operations;
 
 /// The intermediate branch of the stacked fixtures (ORB-10644).
 pub const STACKED_BASE_BRANCH: &str = "orbit/ORB-10643";
+pub const PUSH_OPERATION: &str = operations::PUSH;
+pub const PR_LIST_OPERATION: &str = operations::PR_LIST;
+pub const PR_CREATE_OPERATION: &str = operations::PR_CREATE;
+pub const PR_VIEW_OPERATION: &str = operations::PR_VIEW;
+pub const PR_MERGE_OPERATION: &str = operations::PR_MERGE;
 
 #[derive(Clone, Debug)]
-pub struct ToolCall {
-    pub name: String,
+pub struct VcsCall {
+    pub operation: String,
     pub input: Value,
 }
 
 pub struct PrOpenTestHost {
     tasks: Mutex<Vec<Task>>,
     comments: Mutex<HashMap<String, Vec<TaskComment>>>,
-    tool_calls: Mutex<Vec<ToolCall>>,
+    vcs_calls: Mutex<Vec<VcsCall>>,
     automation_updates: Mutex<Vec<(String, TaskAutomationUpdate)>>,
     activity_implementer: Option<(String, String)>,
     repo_root: PathBuf,
     data_root: PathBuf,
     scoreboard_dir: PathBuf,
-    tool_errors: Mutex<HashMap<String, String>>,
-    queued_tool_results: Mutex<HashMap<String, VecDeque<Result<Value, String>>>>,
+    vcs_errors: Mutex<HashMap<String, String>>,
+    queued_vcs_results: Mutex<HashMap<String, VecDeque<Result<Value, String>>>>,
     pr_exists: Mutex<bool>,
 }
 
@@ -48,14 +53,14 @@ impl PrOpenTestHost {
         Self {
             tasks: Mutex::new(tasks),
             comments: Mutex::new(HashMap::new()),
-            tool_calls: Mutex::new(Vec::new()),
+            vcs_calls: Mutex::new(Vec::new()),
             automation_updates: Mutex::new(Vec::new()),
             activity_implementer: None,
             repo_root,
             data_root,
             scoreboard_dir,
-            tool_errors: Mutex::new(HashMap::new()),
-            queued_tool_results: Mutex::new(HashMap::new()),
+            vcs_errors: Mutex::new(HashMap::new()),
+            queued_vcs_results: Mutex::new(HashMap::new()),
             pr_exists: Mutex::new(false),
         }
     }
@@ -65,20 +70,29 @@ impl PrOpenTestHost {
         self
     }
 
-    pub fn fail_tool(&self, name: &str, message: &str) {
-        self.tool_errors
+    pub fn fail_vcs(&self, operation: &str, message: &str) {
+        self.vcs_errors
             .lock()
-            .expect("tool errors lock")
-            .insert(name.to_string(), message.to_string());
+            .expect("VCS errors lock")
+            .insert(operation.to_string(), message.to_string());
     }
 
-    pub fn queue_tool_error(&self, name: &str, message: &str) {
-        self.queued_tool_results
+    pub fn queue_vcs_error(&self, operation: &str, message: &str) {
+        self.queued_vcs_results
             .lock()
-            .expect("queued tool results lock")
-            .entry(name.to_string())
+            .expect("queued VCS results lock")
+            .entry(operation.to_string())
             .or_default()
             .push_back(Err(message.to_string()));
+    }
+
+    pub fn queue_vcs_result(&self, operation: &str, result: Value) {
+        self.queued_vcs_results
+            .lock()
+            .expect("queued VCS results lock")
+            .entry(operation.to_string())
+            .or_default()
+            .push_back(Ok(result));
     }
 
     pub fn with_existing_pr(self) -> Self {
@@ -95,21 +109,21 @@ impl PrOpenTestHost {
             .unwrap_or_default()
     }
 
-    pub fn tool_calls(&self) -> Vec<ToolCall> {
-        self.tool_calls.lock().expect("tool calls lock").clone()
+    pub fn vcs_calls(&self) -> Vec<VcsCall> {
+        self.vcs_calls.lock().expect("VCS calls lock").clone()
     }
 
     pub fn pr_create_body(&self) -> String {
-        self.tool_calls()
+        self.vcs_calls()
             .into_iter()
-            .find(|call| call.name == "github.pr.create")
+            .find(|call| call.operation == operations::PR_CREATE)
             .and_then(|call| {
                 call.input
                     .get("body")
                     .and_then(Value::as_str)
                     .map(ToOwned::to_owned)
             })
-            .expect("github.pr.create body")
+            .expect("private PR create body")
     }
 
     pub fn automation_updates(&self) -> Vec<(String, TaskAutomationUpdate)> {
@@ -284,46 +298,44 @@ impl RuntimeHost for PrOpenTestHost {
             .unwrap_or((None, None)))
     }
 
-    fn run_tool_with_context_and_role(
+    fn run_private_vcs_operation(
         &self,
-        name: &str,
+        operation: &str,
         input: Value,
-        _role: Role,
-        _tool_context: ToolContext,
     ) -> Result<Value, OrbitError> {
-        self.tool_calls
+        self.vcs_calls
             .lock()
-            .expect("tool calls lock")
-            .push(ToolCall {
-                name: name.to_string(),
+            .expect("VCS calls lock")
+            .push(VcsCall {
+                operation: operation.to_string(),
                 input: input.clone(),
             });
 
         if let Some(message) = self
-            .tool_errors
+            .vcs_errors
             .lock()
-            .expect("tool errors lock")
-            .get(name)
+            .expect("VCS errors lock")
+            .get(operation)
             .cloned()
         {
             return Err(OrbitError::Execution(message));
         }
         if let Some(result) = self
-            .queued_tool_results
+            .queued_vcs_results
             .lock()
-            .expect("queued tool results lock")
-            .get_mut(name)
+            .expect("queued VCS results lock")
+            .get_mut(operation)
             .and_then(VecDeque::pop_front)
         {
             return result.map_err(OrbitError::Execution);
         }
 
-        match name {
-            "git.push" => Ok(json!({})),
-            "github.pr.merge" => Ok(json!({})),
-            "github.pr.list" => {
+        match operation {
+            operations::PUSH => Ok(json!({})),
+            operations::PR_MERGE => Ok(json!({})),
+            operations::PR_LIST => {
                 let head = input.get("head").and_then(Value::as_str).ok_or_else(|| {
-                    OrbitError::InvalidInput("github.pr.list requires a head branch".to_string())
+                    OrbitError::InvalidInput("private PR list requires a head branch".to_string())
                 })?;
                 let pull_requests = if *self.pr_exists.lock().expect("pr exists lock") {
                     json!([{
@@ -335,15 +347,15 @@ impl RuntimeHost for PrOpenTestHost {
                 };
                 Ok(json!({ "pull_requests": pull_requests }))
             }
-            "github.pr.create" => {
+            operations::PR_CREATE => {
                 *self.pr_exists.lock().expect("pr exists lock") = true;
                 Ok(json!({
                     "url": "https://github.example/orbit/orbit/pull/42"
                 }))
             }
-            "github.pr.view" => {
+            operations::PR_VIEW => {
                 let selector = input.get("pr").and_then(Value::as_str).ok_or_else(|| {
-                    OrbitError::InvalidInput("github.pr.view requires a PR selector".to_string())
+                    OrbitError::InvalidInput("private PR view requires a PR selector".to_string())
                 })?;
                 let valid_selector = selector.chars().all(|character| character.is_ascii_digit())
                     || (selector.contains("://") && selector.contains("/pull/"));
@@ -363,7 +375,9 @@ impl RuntimeHost for PrOpenTestHost {
                     Err(OrbitError::Execution("no pull request found".to_string()))
                 }
             }
-            other => Err(OrbitError::not_found(NotFoundKind::Tool, other.to_string())),
+            other => Err(OrbitError::InvalidInput(format!(
+                "unknown private automation VCS operation '{other}'"
+            ))),
         }
     }
 

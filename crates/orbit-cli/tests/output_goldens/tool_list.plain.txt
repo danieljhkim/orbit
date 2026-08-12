@@ -1,15 +1,5 @@
 fs.delete	path:string	Delete a file from disk
 fs.read	path:string	Read a UTF-8 text file from disk
-git.push	repo_root:string, branch:string	Push a local branch to a remote
-github.pr.comment	pr:string, body:string	Post a comment on a pull request
-github.pr.comment.reply	repo:string, pr:string, comment_id:string, body:string	Reply to a pull request review comment thread
-github.pr.comments	pr:string	List both general pull request comments and inline review comments
-github.pr.create	title:string, base:string, head:string	Create a pull request
-github.pr.list	-	List pull requests, optionally filtered by label, head branch, and state
-github.pr.merge	pr:string	Merge a pull request
-github.pr.review	repo:string, pr:string, action:string	Approve or request changes on a pull request review
-github.pr.review.comment	repo:string, pr:string, path:string, line:number, body:string	Post an inline review comment on a specific file and line of a pull request
-github.pr.view	pr:string	Retrieve full metadata for a pull request
 orbit.auto_task.add	name:string, schedule:object, template:object	Create a recurring auto-task definition. The generic scheduler mints a task from its template on each due slot.
 orbit.auto_task.show	name:string	Show a single auto-task definition by name.
 orbit.auto_task.toggle	name:string, enabled:boolean	Enable or disable an auto-task definition without deleting it.
@@ -28,8 +18,6 @@ orbit.learning.update	id:string	Partial update of a learning. Rejects updates on
 orbit.pipeline.invoke	job_name:string, input:object	Submit a durable pipeline run and return immediately with its run ID.
 orbit.pipeline.wait	run_ids:string|string[]	Block until the supplied pipeline runs reach terminal state or timeout.
 orbit.search	-	Search tasks, docs, and learnings. ADR entries are retrieved through the docs corpus; hybrid vector ranking applies to indexed tasks, docs, and learnings.
-orbit.state.get	-	Read persisted pipeline state for an active run
-orbit.state.set	-	Write persisted step output for an active run
 orbit.task.add	title:string, description:string	Create an Orbit task and return the created task JSON
 orbit.task.approve	id:string	Approve an Orbit task and return the updated task JSON
 orbit.task.artifact.put	id:string, source_path:string	Store a source file under a task's artifacts directory
