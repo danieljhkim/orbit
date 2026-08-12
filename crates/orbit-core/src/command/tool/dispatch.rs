@@ -446,7 +446,7 @@ pub fn trusted_mcp_audit_context() -> AuditContext {
             .filter(|value| !value.is_empty())
     }
 
-    let context = if managed_run_context() {
+    if managed_run_context() {
         AuditContext {
             task_id: env_str("ORBIT_TASK_ID"),
             job_run_id: env_str("ORBIT_RUN_ID"),
@@ -455,9 +455,7 @@ pub fn trusted_mcp_audit_context() -> AuditContext {
         }
     } else {
         AuditContext::default()
-    };
-
-    context
+    }
 }
 
 pub(super) fn reservation_owner_from_env() -> Option<ReservationOwnerContext> {
