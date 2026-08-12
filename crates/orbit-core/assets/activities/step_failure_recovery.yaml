@@ -195,7 +195,6 @@ spec:
   tools:
     - orbit.task.*
     - orbit.friction.*
-    - orbit.state.*
     - fs.read
     - fs.delete
     - proc.spawn
