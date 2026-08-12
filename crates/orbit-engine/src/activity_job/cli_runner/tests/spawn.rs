@@ -8,7 +8,7 @@ use tempfile::tempdir;
 
 use super::super::super::dispatcher::ResolvedSandbox;
 use super::super::spawn::{
-    SpawnError, SpawnedChild, prepare_linux_sandbox_for_dispatch_with_probe,
+    SpawnError, SpawnedChild, orbit_tool_env_with, prepare_linux_sandbox_for_dispatch_with_probe,
     resolve_provider_launcher_with, spawn_bare, spawn_macos_sandboxed_with,
 };
 use super::test_support::{sandbox_for_test, sh_args};
@@ -234,6 +234,65 @@ fn missing_provider_launcher_error_names_provider_and_searched_locations() {
             error.message
         );
     }
+}
+
+#[test]
+fn agent_tool_environment_prefers_dispatching_orbit_over_stale_path_entry() {
+    let inherited = std::env::join_paths(["/home/test/.cargo/bin", "/usr/bin"])
+        .expect("construct inherited PATH");
+    let env = orbit_tool_env_with(
+        None,
+        std::path::Path::new("/home/test/.orbit/bin/orbit"),
+        Some(&inherited),
+    )
+    .expect("pin dispatching Orbit");
+
+    assert_eq!(
+        env[0],
+        (
+            "ORBIT_BIN".to_string(),
+            "/home/test/.orbit/bin/orbit".to_string()
+        )
+    );
+    let pinned = env
+        .iter()
+        .find(|(name, _)| name == "PATH")
+        .map(|(_, value)| value)
+        .expect("PATH override");
+    assert_eq!(
+        std::env::split_paths(std::ffi::OsStr::new(pinned)).collect::<Vec<_>>(),
+        vec![
+            std::path::PathBuf::from("/home/test/.orbit/bin"),
+            std::path::PathBuf::from("/home/test/.cargo/bin"),
+            std::path::PathBuf::from("/usr/bin"),
+        ]
+    );
+}
+
+#[test]
+fn configured_orbit_bin_wins_and_its_path_entry_is_deduplicated() {
+    let inherited = std::env::join_paths(["/home/test/.cargo/bin", "/opt/orbit/bin", "/usr/bin"])
+        .expect("construct inherited PATH");
+    let env = orbit_tool_env_with(
+        Some(std::ffi::OsStr::new("/opt/orbit/bin/orbit")),
+        std::path::Path::new("/home/test/.orbit/bin/orbit"),
+        Some(&inherited),
+    )
+    .expect("pin configured Orbit");
+
+    assert_eq!(
+        env[0],
+        ("ORBIT_BIN".to_string(), "/opt/orbit/bin/orbit".to_string())
+    );
+    let pinned = &env[1].1;
+    assert_eq!(
+        std::env::split_paths(std::ffi::OsStr::new(pinned)).collect::<Vec<_>>(),
+        vec![
+            std::path::PathBuf::from("/opt/orbit/bin"),
+            std::path::PathBuf::from("/home/test/.cargo/bin"),
+            std::path::PathBuf::from("/usr/bin"),
+        ]
+    );
 }
 
 #[test]

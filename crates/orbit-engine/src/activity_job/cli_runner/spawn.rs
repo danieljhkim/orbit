@@ -15,6 +15,8 @@ use tempfile::NamedTempFile;
 
 use super::super::dispatcher::ResolvedSandbox;
 
+const ORBIT_BIN_ENV: &str = "ORBIT_BIN";
+
 /// Typed spawn failure with a retryability classification (ORB-10006).
 ///
 /// `permanent: true` marks failures that retrying cannot fix — the step
@@ -161,6 +163,73 @@ pub(crate) fn resolve_provider_launcher(
     let path = std::env::var_os("PATH");
     let home = std::env::var_os("HOME").map(PathBuf::from);
     resolve_provider_launcher_with(provider, program, path.as_deref(), home.as_deref(), cwd)
+}
+
+/// Pin tools invoked by an agent to the Orbit build that dispatched it.
+///
+/// Long-lived services may retain a `PATH` whose first `orbit` is an older
+/// Cargo install even after the operator deploys `~/.orbit/bin/orbit`. Export
+/// the selected binary for hook scripts and put its directory first for bare
+/// `orbit tool ...` invocations inside the provider (including Bubblewrap).
+pub(crate) fn orbit_tool_env() -> Result<Vec<(String, String)>, SpawnError> {
+    let current_exe = std::env::current_exe().map_err(|error| {
+        SpawnError::permanent(format!(
+            "resolve dispatching Orbit executable for agent tool environment: {error}"
+        ))
+    })?;
+    let configured = std::env::var_os(ORBIT_BIN_ENV);
+    let inherited_path = std::env::var_os("PATH");
+    orbit_tool_env_with(
+        configured.as_deref(),
+        &current_exe,
+        inherited_path.as_deref(),
+    )
+}
+
+// pub(crate) widened for sibling tests under the repository's enforced test layout.
+pub(crate) fn orbit_tool_env_with(
+    configured: Option<&OsStr>,
+    current_exe: &Path,
+    inherited_path: Option<&OsStr>,
+) -> Result<Vec<(String, String)>, SpawnError> {
+    let selected = configured
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+        .unwrap_or_else(|| current_exe.to_path_buf());
+    let selected_text = selected.to_string_lossy().into_owned();
+
+    let Some(bin_dir) = selected
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+    else {
+        return Ok(vec![(ORBIT_BIN_ENV.to_string(), selected_text)]);
+    };
+
+    let mut path_entries = vec![bin_dir.to_path_buf()];
+    if let Some(inherited_path) = inherited_path {
+        path_entries.extend(
+            std::env::split_paths(inherited_path).filter(|entry| entry.as_path() != bin_dir),
+        );
+    }
+    let pinned_path = std::env::join_paths(path_entries)
+        .map_err(|error| {
+            SpawnError::permanent(format!(
+                "construct agent PATH pinned to `{}`: {error}",
+                selected.display()
+            ))
+        })?
+        .into_string()
+        .map_err(|_| {
+            SpawnError::permanent(format!(
+                "agent PATH pinned to `{}` is not valid Unicode",
+                selected.display()
+            ))
+        })?;
+
+    Ok(vec![
+        (ORBIT_BIN_ENV.to_string(), selected_text),
+        ("PATH".to_string(), pinned_path),
+    ])
 }
 
 // pub(crate) widened for sibling tests under the repository's enforced test layout.
