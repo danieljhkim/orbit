@@ -40,7 +40,7 @@ fn built_in_crews_use_standard_model_specific_names() {
         ("terra", "codex", "gpt-5.6-terra"),
         ("luna", "codex", "gpt-5.6-luna"),
         ("gemini", "gemini", "pro"),
-        ("grok", "grok", "grok-build"),
+        ("grok", "grok", "grok-4.5"),
     ] {
         let assignment = &crews.get(name).expect("built-in crew").assignment;
         assert_eq!(assignment.provider, provider);
