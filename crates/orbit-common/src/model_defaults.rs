@@ -69,7 +69,7 @@ pub const GEMINI_PAIR_STRONG: &str = "gemini-3.1-pro";
 pub const GEMINI_PAIR_WEAK: &str = "gemini-3-flash";
 
 /// Default Grok Build model (the canonical model listed by `grok models`).
-pub const GROK_DEFAULT_MODEL: &str = "grok-4.5";
+pub const GROK_DEFAULT_MODEL: &str = "grok-4.6";
 
 /// Cheap Claude model used by the orbit-agent HTTP examples.
 ///

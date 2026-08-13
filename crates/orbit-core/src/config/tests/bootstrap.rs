@@ -82,7 +82,7 @@ fn grok_only_seeds_grok_without_qa() {
     let parsed = parsed_config(&contents);
 
     assert_eq!(crew_names(&parsed), vec!["grok"]);
-    assert_crew(&parsed, "grok", "grok", "grok-4.5");
+    assert_crew(&parsed, "grok", "grok", "grok-4.6");
     assert_default_crew(&parsed, Some("grok"));
 }
 
@@ -130,7 +130,7 @@ fn multi_provider_seed_includes_each_available_family_and_excludes_unavailable()
     assert_crew(&parsed, "sol", "codex", "gpt-5.6-sol");
     assert_crew(&parsed, "terra", "codex", "gpt-5.6-terra");
     assert_crew(&parsed, "luna", "codex", "gpt-5.6-luna");
-    assert_crew(&parsed, "grok", "grok", "grok-4.5");
+    assert_crew(&parsed, "grok", "grok", "grok-4.6");
     assert_crew(&parsed, "qa", "codex", "gpt-5.6-terra");
     for crew in crews(&parsed).values() {
         assert_eq!(
