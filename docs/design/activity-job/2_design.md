@@ -3,7 +3,7 @@ summary: "Activity / Job — Design"
 type: design
 title: "Activity / Job — Design"
 owner: codex
-last_updated: 2026-08-12
+last_updated: 2026-08-13
 last_validated: 2026-07-26
 status: Draft
 feature: activity-job
@@ -364,6 +364,70 @@ refused.
 absence must stop the pipeline, so the empty opt-out list is pinned by a test
 and any future exception requires a deliberate edit with a stated reason.
 
+### 7.6b Structured output is the Claude prevention layer
+
+§7.6a is a *detector*, and by [ORB-10746] it was the only thing standing behind
+a machine protocol that was otherwise enforced by asking a model nicely.
+`jrun-20260812-0312-9` is the bill for that: a QA sweep on [ORB-10734] ran 89
+turns over ~11.5 minutes for $3.17, finished its work, persisted a meaningful
+`execution_summary` — and then answered in prose. `stop_reason: end_turn`,
+`terminal_reason: completed`, `subtype: success`, empty stderr, exit 0, and no
+envelope. The guard correctly refused to checkpoint it, and the task blocked.
+Detection was working; prevention did not exist.
+
+The installed Claude CLI exposes `--json-schema`, so the frame can be a
+constraint rather than a request. `crates/orbit-agent/src/types/response/protocol_schema.rs`
+is the single protocol definition: the Rust parser and the schema handed to the
+provider are generated from the same constants, so they cannot disagree about
+what `schemaVersion: 1` or the status token set means.
+`ClaudeCliTransport::args` emits the flag per request rather than adding it to
+the two `claude.yaml` copies — the packaged asset and the installed workspace
+resource are edited independently, and a per-request flag has no second copy to
+drift from. The prompt contract
+(`render_prompt_with_embedded_envelope`) stays as human-readable guidance; it is
+no longer the enforcement mechanism.
+
+**What the schema cannot say.** The status/error correlation — `failed`
+requiring a non-empty `error.code` — is absent from the schema and stays in
+`parse_json_envelope`'s Rust checks. This is a constraint, not a preference:
+expressing it needs a conditional subschema, and Anthropic's structured-output
+subset rejects those outright with `input_schema does not support oneOf, allOf,
+or anyOf at the top level`. The rejection surfaces mid-run rather than at argv
+parse, so getting it wrong is expensive. `error` is therefore declared untyped
+(null on success, object on failure) and the Rust correlation checks remain
+load-bearing rather than redundant.
+
+**Two capability failures, two places.** A CLI that *lacks* `--json-schema`
+fails at argument parsing, before any agent work and any cost; the evidence is
+`error: unknown option '--json-schema'` on stderr. A CLI that *rejects* the
+schema fails mid-run, after the request reaches the API; the evidence is in the
+response wrapper (exit 1, `is_error: true`, `structured_output: null`, and a
+prose `result` of `API Error: 400 tools.0.custom.input_schema: ...`). Note that
+`subtype` still reads `"success"` in that second shape, so no classification
+logic may key on it. `provider_invocation_diagnostic` reports each specifically;
+neither falls back to an unconstrained invocation.
+
+**What structured output does not fix.** It removes the prose cause of an
+exit-0 ending without an envelope, not the category. A turn-limit ending still
+exits 0 with `is_error: true`, `subtype: "error_max_turns"`,
+`terminal_reason: "max_turns"`, and both `result` and `structured_output` null.
+Those endings now map to a synthesized `failed` envelope naming the provider's
+own reason, instead of collapsing into the generic [ORB-10449] missing-envelope
+text after a full-cost run.
+
+**The backstops stay provider-neutral and fail-closed.** Every addition here can
+only improve a failure *message*; none can change a failure *decision*. Success
+is never synthesized from exit code, `is_error`, `subtype`, `terminal_reason`,
+persisted `execution_summary`, no-diff tags, task state, worktree state, or
+provider prose — a pinned test enumerates the wrapper-signal matrix and asserts
+no combination yields anything but `failed`. §7.6a's frame check and the
+[ORB-10733] status handling remain authoritative for every provider, including
+those with no structured-output mechanism at all; Codex, Gemini, Grok, and mock
+fixtures parse unchanged. Extraction now reads the wrapper's top-level
+`structured_output` object ahead of the `result` string, because Claude emits
+the validated envelope in both places and `result` is null on several terminal
+paths where `structured_output` is not.
+
 After [T20260426-2313], stdout/stderr readers emit line-level `tracing::info!` events while the child runs, carrying `provider`, `stream`, `job_run_id`, `task_id`, and `line`. After [T20260508-8], those events also carry `cwd` when the CLI subprocess has a resolved cwd. After [T20260426-2349], the default tracing subscriber redacts formatted output. The readers still retain original bytes for the existing audit/blob path, so run logs follow blob refs rather than the live feed.
 
 Executor args are prepended before provider runtime args. For seeded Codex, the subprocess starts as `codex exec --json ...`, not the interactive TUI. [T20260423-0114] exposed the earlier command-only boundary.
@@ -654,6 +718,7 @@ Read-only history does not need the same dependencies as live execution. [T20260
 
 ## Task References
 
+- **[ORB-10746]** — Enforce the Orbit response envelope through Claude CLI structured output (`--json-schema`), read `structured_output` as the authoritative extraction source, and map abnormal exit-0 endings to a specific failed-envelope diagnostic (see [§7.6b](#76b-structured-output-is-the-claude-prevention-layer)).
 - **[ORB-10606]** — Supply the complete reviewer worktree pair and distinguish review startup failure from a reviewer rejection at the parent and task-history boundaries ([ADR-0328]).
 - **[ORB-10519]** — Restore one workflow-owned shipment commit, reject every provider-side HEAD change, and preserve dirty-work recovery plus process-scoped attribution ([ADR-0299], superseding [ADR-0294] and [ADR-0249]).
 - **[ORB-10468]** — Introduce run-keyed dirty integrity recovery plus the now-superseded provider-commit admission policy ([ADR-0294], superseded by [ADR-0299]).

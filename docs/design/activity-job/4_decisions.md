@@ -3,7 +3,7 @@ summary: "Activity / Job — Decisions"
 type: design
 title: "Activity / Job — Decisions"
 owner: codex
-last_updated: 2026-08-11
+last_updated: 2026-08-13
 last_validated: 2026-07-26
 status: Draft
 feature: activity-job
@@ -1746,6 +1746,7 @@ Persist a per-resource-kind managed manifest containing the SHA-256 digest last 
 - **[ORB-10363]** — Rebase task candidates after concurrent base advances and publish blocked PRs instead of stranding failed work.
 - **[ORB-10332]** — Remove the unused Groundhog activity kind and the epic/parallel pipeline layer (`task_epic_pipeline`, `epic_orchestrator`, `pipeline_wait`, legacy parallel-batch executor).
 - **[ORB-10449]** — Split step-completion protocol from response content so a stalled agent-loop step fails where it happened ([ADR-0258], amending [ADR-0224]; see [§7.6a of `2_design.md`](./2_design.md)).
+- **[ORB-10746]** — Add the prevention layer behind [ADR-0258]'s detector: Claude CLI invocations are constrained by a canonical response-envelope JSON Schema via `--json-schema`, generated from one protocol definition. The status/error correlation stays in Rust because Anthropic's structured-output subset rejects top-level conditional subschemas — a constraint, not a choice — and the completion/status checks remain provider-neutral fail-closed backstops that no wrapper signal can turn into a success. Narrative in [§7.6b of `2_design.md`](./2_design.md); no new ADR was allocated, since this decides nothing ADR-0258 left open.
 - **[ORB-10464]** — Refuse workflow admission when a done dependency's work is not in the base the worktree would be cut from ([ADR-0290], resolving [F2026-07-038]).
 - **[ORB-10604]** — Split remote worktree construction from local merge reconciliation so post-merge failures do not cascade through a shipment session.
 

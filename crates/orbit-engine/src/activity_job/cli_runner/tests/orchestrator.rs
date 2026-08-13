@@ -3214,3 +3214,223 @@ fn run_cli_backend_redacts_token_shaped_argv_in_audit() {
         "argv should carry a redaction placeholder: {joined}"
     );
 }
+
+/// [ORB-10746] The `error_max_turns` ending: exit 0, `is_error: true`, no
+/// envelope in either `result` or `structured_output`. Structured output stops
+/// a model from *answering in prose*; it cannot stop a run from hitting its
+/// turn limit. The step must still fail — and must now say why, instead of
+/// leaving an operator to explain a full-cost run from the generic message.
+#[test]
+fn run_cli_backend_names_the_terminal_reason_on_an_exit_zero_error_ending() {
+    let temp = tempdir().expect("tempdir");
+    let script = temp.path().join("claude");
+    let stdout = serde_json::json!({
+        "is_error": true,
+        "subtype": "error_max_turns",
+        "terminal_reason": "max_turns",
+        "num_turns": 200,
+        "total_cost_usd": 4.17,
+        "result": Option::<String>::None,
+        "structured_output": Option::<String>::None
+    })
+    .to_string();
+    write_executable(
+        &script,
+        &format!("#!/bin/sh\ncat > /dev/null\nprintf '%s\\n' '{stdout}'\n"),
+    );
+
+    let sink = Arc::new(RecordingSink::default());
+    let sink_for_writer: Arc<dyn AuditSink> = sink;
+    let audit = Arc::new(V2AuditWriter::new(
+        "job-max-turns",
+        "claude:sonnet",
+        sink_for_writer,
+    ));
+    let host = TestHost::with_command(script.display().to_string());
+    let spec = test_agent_loop_spec_for("claude", Duration::from_secs(5));
+
+    let outcome = run_cli_backend(
+        &host,
+        &spec,
+        "job-max-turns",
+        audit,
+        &serde_json::json!({"task_id": "ORB-10746"}),
+        None,
+    )
+    .expect("run cli backend");
+
+    // The decision is unchanged from ORB-10449; only the message improves.
+    assert!(!outcome.success, "a turn-limit ending must not checkpoint");
+    assert_eq!(outcome.output["exit_code"], 0);
+    assert_eq!(outcome.output["completion_envelope_satisfied"], false);
+    let message = outcome.message.expect("terminal ending message");
+    assert!(message.contains("agent step did not complete"), "{message}");
+    assert!(message.contains("error_max_turns"), "{message}");
+    assert!(message.contains("max_turns"), "{message}");
+}
+
+/// A claude build without `--json-schema` rejects it at argument parsing, so
+/// the run fails before any agent work — and before any cost. The whole point
+/// of failing this early is lost if the operator only sees an exit code.
+#[test]
+fn run_cli_backend_reports_a_missing_json_schema_flag_as_a_capability_failure() {
+    let temp = tempdir().expect("tempdir");
+    let script = temp.path().join("claude");
+    write_executable(
+        &script,
+        "#!/bin/sh\ncat > /dev/null\n\
+         printf '%s\\n' \"error: unknown option '--json-schema'\" >&2\nexit 1\n",
+    );
+
+    let sink = Arc::new(RecordingSink::default());
+    let sink_for_writer: Arc<dyn AuditSink> = sink;
+    let audit = Arc::new(V2AuditWriter::new(
+        "job-missing-flag",
+        "claude:sonnet",
+        sink_for_writer,
+    ));
+    let host = TestHost::with_command(script.display().to_string());
+    let spec = test_agent_loop_spec_for("claude", Duration::from_secs(5));
+
+    let outcome = run_cli_backend(
+        &host,
+        &spec,
+        "job-missing-flag",
+        audit,
+        &serde_json::json!({"task_id": "ORB-10746"}),
+        None,
+    )
+    .expect("run cli backend");
+
+    assert!(!outcome.success);
+    let message = outcome.message.expect("capability message");
+    assert!(
+        message.contains("does not support --json-schema"),
+        "{message}"
+    );
+    assert!(message.contains("no agent work ran"), "{message}");
+}
+
+/// The other half of the capability story: a CLI that accepts the flag but
+/// whose API rejects the schema fails mid-run, with the evidence in the
+/// response wrapper rather than on stderr. `subtype` still reads `"success"`
+/// in this shape, so nothing may key on it.
+#[test]
+fn run_cli_backend_reports_a_rejected_schema_from_the_response_wrapper() {
+    let temp = tempdir().expect("tempdir");
+    let script = temp.path().join("claude");
+    let stdout = serde_json::json!({
+        "is_error": true,
+        "subtype": "success",
+        "structured_output": Option::<String>::None,
+        "result": "API Error: 400 tools.0.custom.input_schema: input_schema does not support \
+                   oneOf, allOf, or anyOf at the top level"
+    })
+    .to_string();
+    let stdout_file = temp.path().join("stdout.json");
+    fs::write(&stdout_file, &stdout).expect("write rejection fixture");
+    write_executable(
+        &script,
+        &format!(
+            "#!/bin/sh\ncat > /dev/null\ncat '{}'\nexit 1\n",
+            stdout_file.display()
+        ),
+    );
+
+    let sink = Arc::new(RecordingSink::default());
+    let sink_for_writer: Arc<dyn AuditSink> = sink;
+    let audit = Arc::new(V2AuditWriter::new(
+        "job-rejected-schema",
+        "claude:sonnet",
+        sink_for_writer,
+    ));
+    let host = TestHost::with_command(script.display().to_string());
+    let spec = test_agent_loop_spec_for("claude", Duration::from_secs(5));
+
+    let outcome = run_cli_backend(
+        &host,
+        &spec,
+        "job-rejected-schema",
+        audit,
+        &serde_json::json!({"task_id": "ORB-10746"}),
+        None,
+    )
+    .expect("run cli backend");
+
+    assert!(!outcome.success);
+    let message = outcome.message.expect("schema rejection message");
+    assert!(
+        message.contains("rejected Orbit's response-envelope schema"),
+        "{message}"
+    );
+    assert!(message.contains("input_schema"), "{message}");
+}
+
+/// [ORB-10746] The prevented shape, end to end: a tool-using run that would
+/// once have ended in prose now terminates with the schema-validated envelope
+/// in `structured_output`, and the step checkpoints. Verified against Claude
+/// Code 2.1.220, whose reply carried `stop_reason: "tool_use"` — the exact
+/// condition under which ORB-10734 produced prose.
+#[test]
+fn run_cli_backend_accepts_a_structured_output_envelope_from_a_tool_using_run() {
+    let temp = tempdir().expect("tempdir");
+    let script = temp.path().join("claude");
+    let stdout = serde_json::json!({
+        "is_error": false,
+        "stop_reason": "tool_use",
+        "num_turns": 20,
+        "session_id": "44a7dbc8-333e-4852-aaf5-b61d8f4db174",
+        "total_cost_usd": 0.2455644,
+        "usage": {
+            "input_tokens": 154,
+            "cache_creation_input_tokens": 19922,
+            "cache_read_input_tokens": 714235,
+            "output_tokens": 3372
+        },
+        "terminal_reason": "completed",
+        "subtype": "success",
+        // Claude emits the validated envelope in both places; the object is
+        // the authoritative one.
+        "result": "{\"schemaVersion\":1,\"status\":\"success\",\"result\":{\"summary\":\"done\"},\"error\":null}",
+        "structured_output": {
+            "schemaVersion": 1,
+            "status": "success",
+            "result": {"summary": "done"},
+            "error": null
+        }
+    })
+    .to_string();
+    let stdout_file = temp.path().join("stdout.json");
+    fs::write(&stdout_file, &stdout).expect("write structured-output fixture");
+    write_executable(
+        &script,
+        &format!(
+            "#!/bin/sh\ncat > /dev/null\ncat '{}'\n",
+            stdout_file.display()
+        ),
+    );
+
+    let sink = Arc::new(RecordingSink::default());
+    let sink_for_writer: Arc<dyn AuditSink> = sink;
+    let audit = Arc::new(V2AuditWriter::new(
+        "job-structured-output",
+        "claude:sonnet",
+        sink_for_writer,
+    ));
+    let host = TestHost::with_command(script.display().to_string());
+    let spec = test_agent_loop_spec_for("claude", Duration::from_secs(5));
+
+    let outcome = run_cli_backend(
+        &host,
+        &spec,
+        "job-structured-output",
+        audit,
+        &serde_json::json!({"task_id": "ORB-10734"}),
+        None,
+    )
+    .expect("run cli backend");
+
+    assert!(outcome.success, "{:?}", outcome.message);
+    assert_eq!(outcome.output["completion_envelope_satisfied"], true);
+    assert_eq!(outcome.output["response_envelope_status"], "success");
+}
