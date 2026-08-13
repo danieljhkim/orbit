@@ -107,7 +107,7 @@ spec:
     5. Run the friction checkpoint. Use `orbit.friction.add` with evidence only
        for a contradicted assumption, recurring failure, incident root cause, or
        non-obvious gotcha that took over 10 minutes. Do not call curated,
-       executor-gated `orbit.learning.add`, `update`, or `supersede`.
+       executor-gated `update`, or `supersede`.
     6. Return through the provider-supplied Orbit response contract with status
        `success`. Set `result.verdict` to `approve` only with no blockers,
        otherwise `request_changes`; set `result.reviewed_head_sha` to the exact
@@ -118,7 +118,6 @@ spec:
     - orbit.task.update
     - orbit.friction.add
     - orbit.search
-    - orbit.learning.show
     - fs.read
     - proc.spawn
   proc_allowed_programs:
