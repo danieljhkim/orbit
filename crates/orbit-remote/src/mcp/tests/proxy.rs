@@ -9,8 +9,8 @@ use orbit_common::types::{
 };
 
 use super::super::proxy::{
-    DEFAULT_REMOTE_MCP_PORT, RemoteProxyArgs, local_checkout_evidence, remote_listen_command,
-    tunnel_spec,
+    DEFAULT_REMOTE_MCP_PORT, RemoteProxyArgs, local_checkout_evidence, owned_checkout_refusal,
+    remote_listen_command, tunnel_spec,
 };
 
 fn args(ssh_host: &str, capability: Option<McpCapability>) -> RemoteProxyArgs {
@@ -45,6 +45,19 @@ fn checkout(id: &str, repo_root: PathBuf) -> WorkspaceCheckout {
         owner_machine_id: None,
         path_overrides: Vec::new(),
     }
+}
+
+/// Lay down what a `git clone` of a repository that versions its Orbit
+/// workspace delivers: an `.orbit/` directory holding the committed partitions
+/// and `config.toml`, and nothing machine-local. This is the read mirror
+/// [ADR-0360] admits — the shape is identical to a working checkout's, which is
+/// exactly why the filesystem cannot be the discriminator.
+fn read_mirror(root: &Path) {
+    let orbit_dir = root.join(".orbit");
+    for partition in ["learnings", "auto_tasks", "resources", "routines"] {
+        std::fs::create_dir_all(orbit_dir.join(partition)).expect("mirror partition");
+    }
+    std::fs::write(orbit_dir.join("config.toml"), "[workflow]\n").expect("mirror config");
 }
 
 // ── the checkout guard ────────────────────────────────────────────────────
@@ -110,15 +123,83 @@ fn a_checkoutless_catalog_entry_alone_is_not_evidence() {
 }
 
 #[test]
-fn an_unregistered_workspace_under_the_cwd_refuses() {
-    // Second signal: a checkout that was never registered is still a checkout.
-    let discovered = Path::new("/srv/project/.orbit");
-    let evidence = local_checkout_evidence(&WorkspaceRegistry::default(), Some(discovered))
-        .expect("a discovered workspace must refuse");
+fn a_read_mirror_clone_is_admitted() {
+    // The client class this mode exists for [ORB-10761]. A repository that
+    // versions its `.orbit/` delivers the whole directory through `git clone`,
+    // so an unregistered one describes a read mirror, not ownership. Refusing
+    // on it would lock every mirror-carrying orchestrator out of the mode.
+    let mirror = tempfile::tempdir().expect("mirror root");
+    read_mirror(mirror.path());
+
+    let evidence = local_checkout_evidence(&WorkspaceRegistry::default(), Some(mirror.path()));
     assert!(
-        evidence.contains("/srv/project/.orbit"),
-        "the refusal must name what it discovered: {evidence}"
+        evidence.is_none(),
+        "a tracked `.orbit/` this machine's registry does not bind is not ownership: {evidence:?}"
     );
+}
+
+#[test]
+fn the_same_shape_refuses_once_the_registry_binds_it() {
+    // The other direction, over an identical filesystem: what changes the
+    // verdict is the machine-local registry entry, nothing on disk.
+    let repo = tempfile::tempdir().expect("repo root");
+    read_mirror(repo.path());
+    let registry = WorkspaceRegistry {
+        workspaces: vec![workspace("ws_owned")],
+        checkouts: vec![checkout("ws_owned", repo.path().to_path_buf())],
+        ..Default::default()
+    };
+
+    let evidence = local_checkout_evidence(&registry, Some(repo.path()))
+        .expect("an owned checkout must refuse");
+    assert!(
+        evidence.contains("ws_owned"),
+        "the refusal must name the owning workspace: {evidence}"
+    );
+    assert!(
+        evidence.contains(&repo.path().display().to_string()),
+        "the refusal must name where it is checked out: {evidence}"
+    );
+}
+
+#[test]
+fn an_override_path_binding_the_cwd_is_ownership() {
+    // A checkout can claim a directory outside its `repo_root` through an
+    // explicit override; standing in one is still standing in a workspace this
+    // machine coordinates.
+    let elsewhere = tempfile::tempdir().expect("override root");
+    let mut bound = checkout("ws_override", Path::new("/nonexistent/repo").to_path_buf());
+    bound.path_overrides = vec![elsewhere.path().to_path_buf()];
+    let registry = WorkspaceRegistry {
+        workspaces: vec![workspace("ws_override")],
+        checkouts: vec![bound],
+        ..Default::default()
+    };
+
+    let evidence = local_checkout_evidence(&registry, Some(elsewhere.path()))
+        .expect("a registered override path must refuse");
+    assert!(
+        evidence.contains("ws_override"),
+        "the refusal must name the owning workspace: {evidence}"
+    );
+    assert!(
+        evidence.contains(&elsewhere.path().display().to_string()),
+        "the refusal must name the registered path that claims the cwd, not an absent \
+         repository root: {evidence}"
+    );
+}
+
+#[test]
+fn the_refusal_names_the_evidence_and_the_local_broker() {
+    // An operator who hits this needs both halves: what disqualified the
+    // machine, and the surface to register in its place.
+    let refusal =
+        owned_checkout_refusal("my-box", "workspace 'ws_owned' is checked out at /srv/ws")
+            .to_string();
+    assert!(refusal.contains("ws_owned"), "{refusal}");
+    assert!(refusal.contains("/srv/ws"), "{refusal}");
+    assert!(refusal.contains("`orbit mcp serve`"), "{refusal}");
+    assert!(refusal.contains("my-box"), "{refusal}");
 }
 
 // ── the remote listener command ───────────────────────────────────────────

@@ -11,7 +11,7 @@ summary: Target design for a local Orbit MCP broker with an SSH owner route, own
 tags: [mcp, remote-access, host-registry, bridge, ssh, routing]
 paths: ["crates/orbit-remote/**", "crates/orbit-mcp/**", "crates/orbit-core/**", "crates/orbit-tools/**", "crates/orbit-store/**", "crates/orbit-common/**"]
 related_features: [mcp-bridge, host-registry, mcp-session-context, remote-access, orbit-search]
-related_artifacts: [ORB-00424, ORB-10257, ORB-10262, ORB-10267, ORB-10268, ORB-10269, ORB-10271, ORB-10272, ORB-10276, ORB-10302, ORB-10319, ORB-10330, ORB-10332, ORB-10534, ORB-10540, ORB-10544, ORB-10690, ORB-10710, ORB-10725, ORB-10727, ORB-10729, ADR-0181, ADR-0199, ADR-0200, ADR-0201, ADR-0226, ADR-0227, ADR-0228, ADR-0229, ADR-0230, ADR-0231, ADR-0232, ADR-0235, ADR-0240, ADR-0303, ADR-0348, ADR-0350, ADR-0351, ADR-0354, ADR-0355, ADR-0356, ADR-0357, ADR-0358]
+related_artifacts: [ORB-00424, ORB-10257, ORB-10262, ORB-10267, ORB-10268, ORB-10269, ORB-10271, ORB-10272, ORB-10276, ORB-10302, ORB-10319, ORB-10330, ORB-10332, ORB-10534, ORB-10540, ORB-10544, ORB-10690, ORB-10710, ORB-10725, ORB-10727, ORB-10729, ORB-10761, ADR-0181, ADR-0199, ADR-0200, ADR-0201, ADR-0226, ADR-0227, ADR-0228, ADR-0229, ADR-0230, ADR-0231, ADR-0232, ADR-0235, ADR-0240, ADR-0303, ADR-0348, ADR-0350, ADR-0351, ADR-0354, ADR-0355, ADR-0356, ADR-0357, ADR-0358, ADR-0360]
 ---
 
 # Orbit MCP Bridge — Design
@@ -507,12 +507,16 @@ a client has graph, docs, and search that must resolve against the branch its ag
 is working on, and placement (§4) exists to guarantee that.
 
 A second client class does not fit that shape. A **checkoutless client** is an MCP
-client with no local checkout that participates in this design — an off-box
-orchestrator whose clone, if it has one, is a read mirror, and whose every
-workspace lives on the remote machine. It owns no workspace and holds no
-local-derived state. Placement routing therefore protects nothing for it and only
-makes the canonical surface unreachable, which is what forces the re-declared
-parity layer §10 retires.
+client that owns no workspace this machine coordinates — an off-box orchestrator
+whose clone, if it has one, is a read mirror, and whose every workspace lives on
+the remote machine. "Owns no workspace" is a statement about this machine's
+workspace registry, not about the filesystem: a mirror carries a full `.orbit/`
+directory, because a repository that versions its Orbit workspace commits
+`config.toml` and the `learnings/`, `auto_tasks/`, `resources/`, and `routines/`
+partitions, and `git clone` delivers all of it. Holding that directory is
+therefore not holding local-derived state. Placement routing protects nothing for
+such a client and only makes the canonical surface unreachable, which is what
+forces the re-declared parity layer §10 retires.
 
 For this client, **reachability is the scarce resource, not tool schemas**. An
 orchestrator that cannot execute on the machine routes trivial reads through full
@@ -570,10 +574,23 @@ Every placement class resolves on the remote, which is correct precisely because
 the client holds no local-derived state. This narrows the placement rule to clients
 that hold local-derived state; owner-machine routing is defined in §4.2.
 
-**The mode refuses to start where a local checkout exists.** Without that guard a
-machine with a checkout could register it and receive another machine's branch state
-as its own, surfacing as wrong answers rather than as an error. The guard is the
-load-bearing half of the decision, not a convenience.
+**The mode refuses to start on a machine that owns a checkout.** Without that guard
+a machine with a checkout could register it and receive another machine's branch
+state as its own, surfacing as wrong answers rather than as an error. The guard is
+the load-bearing half of the decision, not a convenience.
+
+Ownership is read from this machine's workspace registry alone ([ADR-0360]): a
+checkout binding the working directory — including through an explicit path
+override — or any registered checkout whose repository root still exists. A stale
+registry row pointing at a deleted tree is history, not a checkout. An `.orbit/`
+directory the registry does not bind is **not** evidence and is not consulted,
+because it is exactly what a read mirror carries; the same rule the local broker
+already applies, since a session binds only to a registered checkout (§4.2) and an
+unregistered directory yields no local-derived state to protect. The refusal names
+the owning workspace, its path, and `orbit mcp serve` as the surface to register
+instead. The residual gap is a machine that develops in a checkout it never
+registered: it is admitted, and the mode will answer from the remote's branch state
+while a local tree sits under it.
 
 Nothing re-declares a schema or reshapes a response: both ends are the same build,
 so the drift §1 attributes to Bridge is structurally absent rather than tested
@@ -1215,5 +1232,9 @@ Required validation:
   refused off-owner naming the owning machine (§4.2, §6.1). It also moved crew
   discovery and task-crew validation onto the owner machine's local crew config
   and deleted the execution-profile projection service (§8.1).
+- [ORB-10761] — reconciled §5.3's checkoutless-client definition with the guard
+  that enforces it: ownership now comes from this machine's workspace registry
+  alone, so a read-mirror clone carrying a tracked `.orbit/` directory starts the
+  proxy while a registered on-disk checkout is still refused ([ADR-0360]).
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.
