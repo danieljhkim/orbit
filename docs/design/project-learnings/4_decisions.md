@@ -4,6 +4,7 @@ type: design
 title: "Project Learnings — Decisions"
 owner: claude
 last_updated: 2026-08-11
+last_validated: 2026-08-13
 status: Draft
 feature: project-learnings
 doc_role: decisions

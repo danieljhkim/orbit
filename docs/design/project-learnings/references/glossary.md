@@ -1,3 +1,9 @@
+---
+type: glossary
+summary: "Glossary: Project Learnings"
+last_validated: 2026-08-13
+---
+
 # Glossary: Project Learnings
 
 Project-specific vocabulary used in [1_overview.md](../1_overview.md), [2_design.md](../2_design.md), [3_vision.md](../3_vision.md), and [4_decisions.md](../4_decisions.md). Standard industry terms (glob, YAML, SQLite, MCP) are excluded unless this feature gives them a specific meaning.
