@@ -7,8 +7,8 @@ mod args {
 
     #[test]
     fn grok_args_pass_model_with_long_flag() {
-        let transport = GrokCliTransport::new(Some("grok-4.5".to_string()));
+        let transport = GrokCliTransport::new(Some("grok-4.6".to_string()));
 
-        assert_eq!(transport.args(), vec!["--model", "grok-4.5"]);
+        assert_eq!(transport.args(), vec!["--model", "grok-4.6"]);
     }
 }
