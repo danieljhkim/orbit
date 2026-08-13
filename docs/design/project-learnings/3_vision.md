@@ -4,6 +4,7 @@ type: design
 title: "Project Learnings — Vision"
 owner: claude
 last_updated: 2026-08-10
+last_validated: 2026-08-13
 status: Draft
 feature: project-learnings
 doc_role: vision
@@ -33,29 +34,29 @@ symbol resolver. Reasons the field remains inactive:
 
 **Cost of deferring:** every refactor that moves files requires manual `orbit learning prune` or `update` calls. At low learning volume that's tolerable; at higher volume it becomes drag.
 
-### 1.2 Semantic-similarity ranking (deferred to phase 2)
+### 1.2 Semantic-similarity ranking and remaining gaps
 
-Phase 1 ranks matched learnings by `updated_at` desc, with optional manual `priority` tagging ([2_design.md §8.3](./2_design.md)). This is wrong in predictable ways:
+The indexed lexical path ranks matched learnings by priority and recency, while opt-in hybrid search can add semantic similarity after learnings are indexed ([2_design.md §8.3](./2_design.md)). The remaining gaps are predictable:
 
 - An old, important learning loses to a recent, marginal one.
-- A query that's semantically related to a learning but doesn't match its path globs gets nothing.
-- Multiple matched learnings with the same path scope all rank by date, with no signal about which is most relevant to the *current* edit.
+- A query that's semantically related to a learning gets no semantic result unless the learning vector index has been built.
+- Lexical and semantic candidates can still differ in quality for the *current* query, especially when the local companion or vectors are unavailable.
 
-[docs/design/orbit-search/](../orbit-search/) builds the infrastructure that resolves all three: per-field embeddings, brute-force cosine, RRF fusion. Phase 2 of project-learnings layers on top of that:
+[docs/design/orbit-search/](../orbit-search/) provides per-field embeddings, cosine retrieval, and hybrid fusion. The current learning search path uses that infrastructure:
 
 - Each learning's `summary` and `body` are embedded under the same `embeddings` table orbit-search uses (`source_kind = "learning"`).
-- Search-time ranking unions path-glob matches with cosine matches against the query and selected path context, fused via RRF.
-- Manual `priority` becomes a soft signal in fusion, not a hard tier.
+- Search-time ranking combines lexical candidates with cosine matches against the query, then applies the requested path and tag filters.
+- Manual `priority` orders the lexical store results; hybrid ranking blends normalized lexical and semantic scores.
 
-The phase-2 design lands as its own task once orbit-search reaches Accepted. The schema reservation in phase 1 is a `scope.semantic_seed` field — short text describing what the learning is "about" — that becomes the embedding source for phase 2.
+The remaining follow-up is symbol-aware scope. `scope.semantic_seed` remains a forward-compatible field, while current learning embeddings use the summary, body sections, and tags.
 
-**Cost of deferring:** the phase-1 ranking is a placeholder. Users will likely hit the recency-blindness failure mode before phase 2 ships, and the documented mitigation is "use `--limit 5` and let humans curate."
+**Cost of the remaining gap:** semantic retrieval requires an explicit local index and companion, while symbol-aware scope would add resolver and lifecycle complexity. Lexical search remains the fallback when semantic retrieval is unavailable.
 
 ### 1.3 Authoring incentives and lag
 
 The whole system depends on someone writing the learnings. Phase 1 ships:
 
-- An `orbit-learnings` skill that walks an agent through authoring at task close.
+- The bundled `orbit-knowledge` skill for learning authoring and curation, alongside `orbit-search` for retrieval.
 - A CLI/MCP surface for direct invocation.
 - A hand-curation expectation: humans write learnings during PR review or after incidents.
 
@@ -176,12 +177,12 @@ indexer.
 ### 4.1 Orbit-internal
 
 - [docs/design/CONVENTIONS.md](../CONVENTIONS.md) — folder layout, frontmatter, ADR template.
-- [docs/design/orbit-search/](../orbit-search/) — phase 2 dependency for semantic-similarity ranking.
+- [docs/design/orbit-search/](../orbit-search/) — local semantic-index and hybrid-ranking implementation used by learning search.
 - [docs/design/_archive/knowledge-graph/](../_archive/knowledge-graph/) —
   historical context for the retired symbol-aware proposal.
 - [docs/design/_archive/task-sync/](../_archive/task-sync/1_overview.md) — relevant for whether learnings should sync across machines (decision: yes, via the same checked-in path tasks use). Archived; superseded by [remote-access](../remote-access/1_overview.md).
 - [CLAUDE.md](../../../CLAUDE.md) — friction-reports section is the closest existing precedent for agent-authored project artifacts.
-- `orbit-create-task` skill (`~/.claude/skills/orbit-create-task/`) — the authoring shape `orbit-learnings` will mirror.
+- `orbit-knowledge` skill — the bundled authoring shape for durable project learnings.
 
 ### 4.2 External
 

@@ -4,6 +4,7 @@ type: design
 title: "Project Learnings — Overview"
 owner: claude
 last_updated: 2026-08-10
+last_validated: 2026-08-13
 status: Draft
 feature: project-learnings
 doc_role: overview
@@ -14,7 +15,7 @@ tags: ["project-learnings"]
 
 Project learnings is a system for preserving and surfacing non-obvious project knowledge — gotchas, root causes from incidents, validated approaches, hard-won workflow insights — so agents can retrieve and apply them when they are relevant. Delivery combines push and pull: engine pre-prompt injection and an MCP sidecar decorator push scope-matched learnings into every agent run automatically (source locations: [4_decisions.md ADR-0108 amendment](./4_decisions.md)), and agents can also pull with `orbit search` and open the full record with `orbit learning show`. Point-of-use reference comments make the relevant artifact discoverable in the code as a lighter-weight locator alongside both.
 
-Phase 1 ships the native primitive (`learning` resource type alongside `task`), the pull surface, and the reference-comment convention. Phase 2, deferred until [docs/design/orbit-search/](../orbit-search/) reaches Accepted, layers semantic-similarity ranking on top of the path-glob scoping that phase 1 uses.
+Phase 1 ships the native primitive (`learning` resource type alongside `task`), the pull surface, and the reference-comment convention. The unified search surface now also supports opt-in semantic-similarity ranking for indexed learnings; symbol-aware scope remains future work.
 
 This document is the entry point. [2_design.md](./2_design.md) specifies the storage schema, pull-delivery mechanism, lifecycle, and surface; [3_vision.md](./3_vision.md) names open questions and prior art; [4_decisions.md](./4_decisions.md) is the ADR log.
 
@@ -41,7 +42,7 @@ The hard constraint that shapes the design: **the system must be discoverable ac
 A first-class Orbit resource, parallel to `task`. Each record carries:
 
 - `id` — `L-NNNN`, allocated per workspace by the owning machine. Unique within `(workspace_id, id)`, not globally, and unlike task IDs it carries no machine prefix.
-- `scope` — what triggers the learning. Phase 1: path globs + tags. Phase 2 will layer semantic similarity on top ([4_decisions.md ADR-004](./4_decisions.md)).
+- `scope` — what triggers the learning: path globs + tags. The unified search surface can add opt-in semantic similarity after learnings are indexed; symbol-aware scope remains future work.
 - `summary` — one-line rule of thumb displayed in a concise search result.
 - `body` — multi-line markdown: the rule, the reason, how to apply it.
 - `evidence` — commit SHAs, task IDs, or external refs that produced the learning.
@@ -50,7 +51,7 @@ A first-class Orbit resource, parallel to `task`. Each record carries:
 - `supersedes` — back-reference when a newer learning replaces an older one.
 - `created_by`, `created_at`, `updated_at` — provenance.
 
-Records persist as YAML on disk under `.orbit/learnings/<id>/learning.yaml`, with sidecars such as `votes.jsonl` living beside the YAML. Workspace-scoped per the Scoping Rules table in [CLAUDE.md](../../../CLAUDE.md), and checked into git so learnings travel with the repo ([4_decisions.md ADR-003](./4_decisions.md)).
+Records persist as YAML on disk under `.orbit/learnings/<id>/learning.yaml`, with no per-learning sidecar in the common layout. Workspace-scoped per the Scoping Rules table in [CLAUDE.md](../../../CLAUDE.md), and checked into git so learnings travel with the repo ([4_decisions.md ADR-003](./4_decisions.md)).
 
 ### 2.2 Pull-based discovery and reference comments
 
@@ -68,11 +69,11 @@ is human-or-agent-driven; the system does not auto-delete.
 
 | Phase | Scope axis | Ranking | Discovery |
 |-------|-----------|---------|-----------|
-| **Phase 1** | path globs + tags | manual priority + recency | `orbit search` / `orbit learning show` + reference comments |
-| **Phase 2** | path globs + tags | + semantic similarity (orbit-search) | improved pull ranking |
+| **Current** | path globs + tags | lexical priority + recency, or optional lexical/semantic hybrid | `orbit search` / `orbit learning show` + reference comments |
+| **Future** | path globs + tags + symbol IDs | improved symbol-aware retrieval | symbol-aware scope |
 
-Phase 2 is gated on [docs/design/orbit-search/](../orbit-search/) reaching
-Accepted because the relevance-ranking layer wants real semantic similarity.
+Symbol-aware scope remains gated on a future design because the current learning
+index has no live symbol resolver.
 
 ---
 

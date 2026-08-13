@@ -4,6 +4,7 @@ type: design
 title: "Project Learnings — Design"
 owner: claude
 last_updated: 2026-08-10
+last_validated: 2026-08-13
 status: Draft
 feature: project-learnings
 doc_role: design
@@ -12,9 +13,9 @@ tags: ["project-learnings"]
 
 # Project Learnings — Design
 
-This document specifies phase-1 project-learnings: the placement of learning storage in `orbit-store`, the schema of a learning record plus sidecars, the phase-1 scope-matching algorithm (path globs + tags), pull-based discovery through search and show, the reference-comment convention, the curation lifecycle, and the concerns the design deliberately leaves to follow-ups.
+This document specifies project-learnings: the placement of learning storage in `orbit-store`, the schema of a learning record, path-glob and tag scope matching, pull-based discovery through search and show, optional hybrid semantic ranking, the reference-comment convention, the curation lifecycle, and the concerns the design deliberately leaves to follow-ups.
 
-Phase 2 (semantic ranking, symbol-aware scope) is out of scope for this document and is captured in [3_vision.md §1.2](./3_vision.md). The schema in [§2](#2-learning-record-schema) is forward-compatible with phase 2.
+Symbol-aware scope remains out of scope and is captured in [3_vision.md §1.1](./3_vision.md). The schema in [§2](#2-learning-record-schema) remains forward-compatible with it; semantic ranking is available through opt-in hybrid search.
 
 ---
 
@@ -28,10 +29,10 @@ orbit-store/
 │   ├── task_store/        # existing
 │   └── learning_store/    # new — YAML + index, mirrors task_store
 └── sqlite/
-    └── learnings.rs       # new — index for fast scope-glob lookups
+    └── learning_index.rs  # index for fast scope-glob lookups
 ```
 
-`orbit-tools` gains a `learning::` submodule that exposes `orbit.learning.add | list | search | show | update | supersede | upvote` as MCP tools. `orbit-cli` exposes the corresponding `orbit learning <subcommand>` shell surface.
+`orbit-tools` exposes the active learning tools `orbit.learning.add | show | update | supersede | archive`; the registered `list`, `prune`, and `sync` tools are inactive on the agent-facing surface and remain available through the CLI for operator workflows. `orbit-cli` exposes the corresponding `orbit learning <subcommand>` shell surface.
 
 `orbit.search` and `orbit.learning.show` are the delivery surface. Search returns candidate records without expanding their bodies; `show` returns the authoritative body and records a passive `learning_shown` usage event. Code and workflow boundaries can point to a relevant record with a concise reference comment, keeping the rationale close to use without copying durable content into the source.
 
@@ -43,7 +44,7 @@ No cross-crate dependencies that violate the architecture diagram in [CLAUDE.md]
 
 ### 2.1 On-disk format
 
-Each learning owns a directory under `.orbit/learnings/<id>/`, mirroring the task bundle layout. The source-of-truth YAML lives at `.orbit/learnings/<id>/learning.yaml`; per-learning sidecars such as `votes.jsonl` live beside it without polluting the root:
+Each learning owns a directory under `.orbit/learnings/<id>/`, mirroring the task bundle layout. The source-of-truth YAML lives at `.orbit/learnings/<id>/learning.yaml`; the common layout has no per-learning sidecar:
 
 ```yaml
 id: L-0001
@@ -119,7 +120,7 @@ Query path: filter to the runtime's own `workspace_id` and `status = 'active'`, 
 
 The YAML files are the source of truth. The index is rebuildable from them via `orbit learning sync`.
 
-Vote rows are source-of-truth sidecars, not SQLite projections in v1. `orbit learning sync` still walks every per-learning `votes.jsonl` and fails on invalid JSONL, so cache rebuilds do not silently ignore corrupted vote files.
+The SQLite index is a projection, not the source of truth. `orbit learning sync` rebuilds it from the YAML records.
 
 ### 2.3 ID format
 
@@ -186,8 +187,8 @@ orbit learning show <id>                  # loads the full body; emits a learnin
 orbit learning update <id> [--summary ...] [--body-file ...] [--scope ...]
 orbit learning supersede <id> --with <new-id>
 orbit learning archive <id>               # retire a single learning without a replacement [ORB-10469]
-orbit learning upvote --id <id> --model <agent-family> --task <task-id>
 orbit learning sync                       # reconcile SQLite index from YAML
+orbit learning migrate-layout [--confirm]  # migrate legacy flat YAML files
 orbit learning prune [--stale-only]       # report or delete stale learnings
 orbit learning stats [--since 30d]        # per-learning injected/shown usage rollup (see §5.5)
 
@@ -196,7 +197,7 @@ orbit search <text> --kind learning [--tag T] [--all] [--status learning:active]
 orbit search path <path> --kind learning [--tag T] [--all] [--status learning:active]
 ```
 
-`add`, `update`, and `supersede` write the YAML and update the index atomically. `upvote` appends to the learning's `votes.jsonl` sidecar and is idempotent for `(learning_id, voter_model, task_id)`. `orbit learning list --path/--tag` and `orbit search --kind learning` are the indexed read paths used for pull discovery.
+`add`, `update`, `supersede`, and `archive` write the YAML and update the index atomically. `orbit learning list --path/--tag` and `orbit search --kind learning` are the indexed read paths used for pull discovery; `orbit search --hybrid --kind learning` can add semantic ranking after the learning vector index is built.
 
 **Authoring is role-gated ([ADR-0250], [ORB-10364]; extended to `archive` by [ORB-10469]).** `add`, `update`, `supersede`, and `archive` — and only those four — refuse callers running in an agent-executor context, returning a `policy denied` error that names `orbit friction add` as the correct channel and echoes the attempted content so the observation is not lost. The role comes from the `ORBIT_AGENT_NAME` / `ORBIT_AGENT_MODEL` identity pair the audit middleware already reads: present ⇒ agent, absent ⇒ human. An orchestrator that dispatches curation work *as* an agent opts in deliberately with `ORBIT_LEARNING_AUTHOR=1`. Every read surface, plus `sync`, `prune`, and `stats`, is unaffected in every context.
 
@@ -205,15 +206,13 @@ orbit search path <path> --kind learning [--tag T] [--all] [--status learning:ac
 | Tool | Inputs | Outputs |
 |------|--------|---------|
 | `orbit.learning.add` | `summary`, `scope`, `body?`, `evidence?` | `{ id, created_at }` |
-| `orbit.learning.list` | `status?`, `tag?`, `path?` (glob-containment) | `{ learnings: [...] }` |
 | `orbit.search` (`kind: "learning"`) | `query?`, `tag?`, `path?`, `limit?`, `all?`, `status?` | ranked list with `kind: "learning"` hits |
-| `orbit.learning.show` | `id` | full record plus vote summary |
+| `orbit.learning.show` | `id` | full record |
 | `orbit.learning.update` | `id`, fields | updated record |
 | `orbit.learning.supersede` | `id`, `with` | both records updated |
 | `orbit.learning.archive` | `id` | retired record; idempotent on an already-superseded `id` ([ORB-10469]) |
-| `orbit.learning.upvote` | `id`, `model`, `task?` | vote summary |
 
-`orbit.learning.list` and `orbit.search` are the primary discovery paths; both must stay sub-10ms at expected scale. The standalone per-domain learning-search MCP tool (phase-1 surface) was retired by [ORB-00202] in favor of `orbit.search` with `kind: "learning"`.
+The CLI `orbit learning list` and unified `orbit.search` are the primary discovery paths; the sidecar uses the registered list operation for path applicability. Both indexed paths must stay sub-10ms at expected scale. The standalone per-domain learning-search MCP tool was retired by [ORB-00202] in favor of `orbit.search` with `kind: "learning"`.
 
 `orbit.learning.add`, `orbit.learning.update`, `orbit.learning.supersede`, and `orbit.learning.archive` carry the same [ADR-0250] caller-role gate as their CLI counterparts — the check lives on the shared `OrbitRuntime::author_learning*` surface, so the two entry points cannot drift. A refused tool call returns `{"code": "policy_denied", "error": ...}` and writes nothing.
 
@@ -235,31 +234,9 @@ orbit search path <path> --kind learning [--tag T] [--all] [--status learning:ac
 
 `matched_by` is exposed deliberately: agents can see which scope axis triggered the match, which feeds back into both human curation (is the path glob right?) and future ranking work.
 
-### 5.4 Re-validation votes
+### 5.4 Re-validation and correction
 
-When an agent finds an existing learning that covers a duplicate concern, it records a re-validation signal instead of authoring a competing record:
-
-```jsonc
-{
-  "learning_id": "L-0001",
-  "voter_model": "claude",
-  "voted_at": "2026-05-17T12:00:00Z",
-  "task_id": "ORB-00095"
-}
-```
-
-Rows append to `.orbit/learnings/<id>/votes.jsonl` using `O_APPEND`; each learning has its own file and lock, so cross-learning contention is zero. V1 rejects free-floating votes without `task_id` to keep the signal anchored to a concrete work context. Duplicate rows with the same `(learning_id, voter_model, task_id)` are treated as one vote, preserving the earliest timestamp for that key.
-
-`orbit.learning.show` reports derived vote fields: `vote_count` and `last_voted_at`. `orbit.learning.list` and `orbit.search` (with `kind: "learning"`) keep their envelope output shape unchanged.
-
-Search ranking remains scope-filtered first. Within the matched set, rows sort by:
-
-1. decay-weighted vote score, default half-life 180 days;
-2. manual `priority`;
-3. `updated_at` desc;
-4. `id` asc.
-
-`ORBIT_LEARNING_VOTE_HALF_LIFE_DAYS=0` disables decay and uses raw vote count. Vote files are scanned at query time in v1; a SQLite vote-summary mirror is a follow-up only if measured matched-set sizes make the per-file scan visible.
+The former task-anchored vote and comment sidecars were removed by ADR-0210. Agents retrieve a candidate with `orbit learning show`, and corrections go through `orbit learning update` or `orbit learning supersede` with structured evidence; executor observations belong in `orbit friction add`.
 
 ### 5.5 Usage instrumentation and feedback
 
@@ -276,11 +253,11 @@ Two audit event kinds in the host-global `~/.orbit/orbit.db` describe historical
 
 ## 6. Pull Surface
 
-### 6.1 `orbit-learnings` skill
+### 6.1 Knowledge and search skills
 
-A skill at `.claude/skills/orbit-learnings/` (and the equivalent location for other agent vendors) exists for the active-query path. Trigger phrases include "what should I know about", "are there learnings for", "is there context I'm missing on". The skill body documents how to call `orbit.search` (with `kind: "learning"`) and how to interpret results.
+The bundled `orbit-search` skill documents the active-query path, including `orbit.search` with `kind: "learning"` and `--hybrid` retrieval. The bundled `orbit-knowledge` skill covers learning authoring and curation. Trigger phrases include "what should I know about", "are there learnings for", and "is there context I'm missing on".
 
-The skill is the primary delivery path for agents that need guidance at task start or while reviewing an unfamiliar area. A nearby reference comment supplies the same pointer at a specific code or workflow boundary.
+These skills support agents that need guidance at task start or while reviewing an unfamiliar area. A nearby reference comment supplies the same pointer at a specific code or workflow boundary.
 
 ### 6.2 Direct tool use
 
@@ -304,7 +281,7 @@ The dashboard is a pull and curation surface. It lets operators scan stale or du
 
 Learnings are authored by:
 
-- Agents at the end of a task — when an agent recognizes "this is the kind of correction that will keep happening." The `orbit-learnings` skill covers the `orbit.learning.add` flow.
+- Agents at the end of a task — when an agent recognizes "this is the kind of correction that will keep happening." The `orbit-knowledge` skill covers the `orbit.learning.add` flow.
 - Humans during code review or after incidents — same surface, manual invocation.
 
 The bar for authoring: the knowledge must be **non-obvious** (otherwise it lives in code), **not-feature-scoped** (otherwise it's an ADR), and **load-bearing across more than one task** (otherwise it's a comment in a single PR).
@@ -357,11 +334,11 @@ This is distinct from `orbit learning archive` ([§7.2.1](#721-archival-retireme
 
 ### 7.4 Conflict resolution
 
-Two agents (or two humans) may author overlapping learnings concurrently. Phase 1 does not auto-merge; the curation answer is "humans review and supersede one with the other when the duplication surfaces." `orbit learning list --tag <tag>` is the manual surface for spotting duplicates. Phase 2's semantic-similarity ranking can surface near-duplicates during search.
+Two agents (or two humans) may author overlapping learnings concurrently. The system does not auto-merge; the curation answer is "humans review and supersede one with the other when the duplication surfaces." `orbit learning list --tag <tag>` is the manual surface for spotting duplicates. Hybrid search can also surface semantically related records when the learning index is available.
 
 ### 7.5 Re-validation without re-authoring
 
-When a duplicate concern is already covered by an active learning, the agent should upvote the existing record instead of creating a near-duplicate. The vote says "this learning is still load-bearing in a new task context" and improves search ranking without changing the learning body or `updated_at`.
+When a duplicate concern is already covered by an active learning, the agent should reference the existing record rather than create a near-duplicate. If the guidance is wrong or materially changed, use `orbit learning update` or `orbit learning supersede` with evidence; there is no vote or comment sidecar.
 
 ### 7.6 Recurring deprecation review (auto-task)
 
@@ -389,7 +366,7 @@ The definition is ordinary workspace data (`no-diff-expected` + `artifact-deprec
 
 ### 8.1 Authoring discipline is the bottleneck
 
-The system can be perfect at storing learnings and still fail if no one writes or discovers them. The `orbit-learnings` skill, reference comments, and the agent-self-authoring flow are the primary remediations, but none is automatic. If authoring lags, the store stays sparse.
+The system can be perfect at storing learnings and still fail if no one writes or discovers them. The `orbit-knowledge` and `orbit-search` skills, reference comments, and the agent-self-authoring flow are the primary remediations, but none is automatic. If authoring lags, the store stays sparse.
 
 This is acknowledged, not fixed. Phase 2's auto-extraction from review threads or postmortems may help; phase 1 ships with manual authoring and accepts the discipline cost.
 
@@ -401,11 +378,9 @@ The mitigation is operational: when a refactor moves files, run
 `orbit learning prune --stale-only` and update or supersede affected records as
 part of the refactor task.
 
-### 8.3 Vote ranking still depends on agent discipline
+### 8.3 Hybrid ranking depends on optional indexing
 
-Phase 1 ranks matched learnings by decayed upvotes before falling back to manual priority and recency. This is better than recency-only ranking, but it depends on agents recording votes only when they have genuinely evaluated a duplicate concern. Over-eager upvoting would make the signal noisy. The v1 mitigations are task-anchored idempotency and time decay, not a full abuse-prevention system.
-
-Phase 2's semantic-similarity ranking from orbit-search may complement or replace parts of this formula; vote score is a load-bearing signal, not the whole relevance model.
+The indexed lexical path ranks learnings by priority, recency, and stable ID. Opt-in hybrid search adds semantic similarity after `orbit semantic index --kind learnings`; it depends on the local companion and available vectors, and falls back to lexical results when semantic retrieval is unavailable.
 
 ### 8.4 Pull delivery requires a useful locator
 
