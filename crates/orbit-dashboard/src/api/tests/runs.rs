@@ -8,11 +8,13 @@ use axum::body::Body;
 use axum::http::{Method, Request, StatusCode, header};
 use axum::response::Response;
 use chrono::Utc;
+use orbit_common::types::{Workspace, WorkspaceCheckout, WorkspaceStatus};
 use orbit_common::utility::blob_store::BlobStore;
 use orbit_core::command::job::JobRunListParams;
 use orbit_core::command::task::TaskAddParams;
 use orbit_core::runtime::WorkspaceRuntimeBinding;
-use orbit_core::{JobRunState, OrbitRuntime, ShipMode, V2AuditEventInsertParams};
+use orbit_core::{JobRunState, OrbitRuntime, ShipMode, TaskStatus, V2AuditEventInsertParams};
+use orbit_remote::runtime::RemoteRuntimeFactory;
 use serde_json::{Value, json};
 use tower::ServiceExt;
 
@@ -1241,18 +1243,59 @@ async fn mcp_ship_tool_and_http_ship_endpoint_produce_equivalent_runs() {
     let tmp = tempfile::tempdir().expect("tempdir");
     let global_root = tmp.path().join("global");
     std::fs::create_dir_all(&global_root).expect("create global root");
+    std::fs::write(
+        global_root.join("host.toml"),
+        "schema_version = 2\nmachine_id = \"hm_ship_parity\"\nhost_id = \"ship-parity\"\ntask_prefix = \"TST\"\n",
+    )
+    .expect("write fixture host identity");
     write_replay_job_under(&global_root, "task_auto_pipeline");
     let (orbit_dir, repo_root) = seed_ship_workspace(tmp.path(), "alpha");
-    let runtime = OrbitRuntime::from_roots_with_binding(
-        &global_root,
-        &orbit_dir,
-        WorkspaceRuntimeBinding {
-            workspace_id: "ws_alpha".to_string(),
-            repo_root,
-            ship_mode: ShipMode::Local,
-        },
-    )
-    .expect("build bound runtime");
+    let workspace = Workspace {
+        id: "alpha".to_string(),
+        name: "alpha".to_string(),
+        owner_machine_id: Some("hm_ship_parity".to_string()),
+        git_remote: None,
+        ship_mode: Some("local".to_string()),
+        base_branch: "main".to_string(),
+        status: WorkspaceStatus::Active,
+        created_at: Utc::now(),
+        updated_at: Utc::now(),
+    };
+    let checkout = WorkspaceCheckout::owner(workspace.id.clone(), repo_root, orbit_dir);
+    let runtime =
+        RemoteRuntimeFactory::open_registered_checkout(&global_root, &workspace, &checkout)
+            .expect("build bound runtime");
+
+    // Ship validates every explicit task id before creating a run. Seed those
+    // records through the same workspace-bound runtime that both front doors
+    // receive, rather than relying on synthetic ids that exist in no store.
+    let allocator_seed = runtime
+        .add_task(TaskAddParams {
+            title: "ship parity allocator seed".to_string(),
+            description: "Reserves the first synthetic task id.".to_string(),
+            status: Some(TaskStatus::Backlog),
+            ..TaskAddParams::default()
+        })
+        .expect("seed task allocator");
+    assert_eq!(allocator_seed.id, "TST-00000");
+    for task_id in TOOL_TASK_IDS.into_iter().chain(HTTP_TASK_IDS) {
+        let task = runtime
+            .add_task(TaskAddParams {
+                title: format!("ship parity fixture {task_id}"),
+                description: "Task selected by one ship parity front door.".to_string(),
+                status: Some(TaskStatus::Backlog),
+                ..TaskAddParams::default()
+            })
+            .expect("seed selected ship task");
+        assert_eq!(task.id, task_id);
+        assert_eq!(
+            runtime
+                .get_task(task_id)
+                .expect("seeded task is visible")
+                .id,
+            task_id
+        );
+    }
 
     // Scoped to the synchronous tool call: the guard holds a process-wide lock,
     // which must not span an `.await`.
