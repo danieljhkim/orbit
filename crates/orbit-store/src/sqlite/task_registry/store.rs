@@ -678,7 +678,7 @@ impl TaskRegistryStore {
     /// rebuild trips over them.
     ///
     /// Mirrors the validator's resolution semantics: only `ORB-` targets can be
-    /// unresolved; friction / learning / ADR targets that `produces`/`resolves`
+    /// unresolved; friction / ADR targets that `produces`/`resolves`
     /// edges legitimately allow to dangle are excluded.
     pub fn dangling_relation_targets(
         &self,

@@ -7,7 +7,6 @@ pub(crate) mod friction_tools;
 mod host;
 mod input;
 mod json;
-mod learning_tools;
 mod pipeline_tools;
 mod search_tools;
 mod semantic_tools;
@@ -23,4 +22,3 @@ pub(crate) mod test_support;
 
 pub use host::HubCoordinationExecutor;
 pub(crate) use host::build_orbit_tool_host;
-pub(crate) use learning_tools::update_without_role_gate as update_learning_without_role_gate;

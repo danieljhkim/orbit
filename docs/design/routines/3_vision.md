@@ -89,7 +89,7 @@ and an ADR, not by drifting in.
 ## 3. What May Be Distinctive
 
 - **Git-versioned, PR-reviewed schedules over a knowledge-integrated runtime.** Fires are
-  ordinary Orbit runs with audit envelopes, linkable to tasks and learnings — the scheduler
+  ordinary Orbit runs with audit envelopes, linkable to tasks — the scheduler
   and the knowledge system share one substrate.
 - **Agent-invoking targets.** A routine can fire an `agent_loop` activity: scheduled agent
   work (nightly triage, periodic research) with the same policy and audit surface as any

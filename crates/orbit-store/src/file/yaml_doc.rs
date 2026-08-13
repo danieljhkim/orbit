@@ -1,19 +1,7 @@
-use std::fs;
 use std::path::Path;
 
 use orbit_common::types::OrbitError;
 use orbit_common::utility::fs::atomic_write_text_volatile as write_atomic;
-
-pub(crate) fn read_yaml_with<T: serde::de::DeserializeOwned, F>(
-    path: &Path,
-    invalid: F,
-) -> Result<T, OrbitError>
-where
-    F: FnOnce(&Path, serde_yaml::Error) -> OrbitError,
-{
-    let raw = fs::read_to_string(path).map_err(|e| OrbitError::Io(e.to_string()))?;
-    parse_yaml_with(&raw, path, invalid)
-}
 
 pub(crate) fn parse_yaml_with<T: serde::de::DeserializeOwned, F>(
     raw: &str,

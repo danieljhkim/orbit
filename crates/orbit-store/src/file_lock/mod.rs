@@ -1,7 +1,7 @@
 //! Bounded, diagnostic advisory file locking shared by the SQLite ID allocator
-//! and the file-backed learning/ADR stores. [ORB-00412]
+//! and file-backed stores. [ORB-00412]
 //!
-//! ID allocation and learning/ADR record mutation serialize through `fs2`
+//! Record mutation serializes through `fs2`
 //! advisory (`flock(2)`) locks. A bare [`fs2::FileExt::lock_exclusive`] blocks
 //! *indefinitely*: if a holder hangs — as opposed to crashing, since the OS
 //! releases advisory locks on process death — every other agent stalls forever

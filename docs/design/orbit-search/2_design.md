@@ -3,7 +3,7 @@ summary: "Semantic Search — Design"
 type: design
 title: "Semantic Search — Design"
 owner: claude
-last_updated: 2026-07-26
+last_updated: 2026-08-13
 last_validated: 2026-08-09
 status: Accepted
 feature: orbit-search
@@ -33,7 +33,7 @@ orbit-common → orbit-search → orbit-core → orbit-cli
 
 `orbit-search::vector` owns the `embeddings` table schema, write/upsert/delete API, and the brute-force cosine helper implementation. It opens the workspace-local SQLite database directly and treats the embedder as injected — tests pass a `NoopEmbedder` that returns deterministic vectors so unit tests never need the companion to be installed.
 
-The vector SQLite store is workspace-local at `.orbit/state/semantic.db`, not in the global `~/.orbit/orbit.db` audit/tool database. This preserves the workspace scoping rule: task, doc, learning, and ADR embeddings and FTS rows do not leak across workspaces.
+The vector SQLite store is workspace-local at `.orbit/state/semantic.db`, not in the global `~/.orbit/orbit.db` audit/tool database. This preserves the workspace scoping rule: task and doc embeddings and FTS rows do not leak across workspaces. ADRs participate through the docs corpus.
 
 `orbit-tools` exposes `orbit.search` as the MCP query tool, and `orbit-cli` exposes `orbit search` for queries plus `orbit semantic` for companion lifecycle (`install`, `uninstall`, `stats`, `index`). These surfaces are thin shells over the shared search runtime.
 
@@ -132,7 +132,7 @@ A new SQLite table in the existing per-workspace store:
 
 ```sql
 CREATE TABLE embeddings (
-    source_kind TEXT NOT NULL,         -- "task", "doc", "learning", or "adr"
+    source_kind TEXT NOT NULL,         -- "task" or "doc"
     source_id   TEXT NOT NULL,         -- task ID or corpus-specific source ID
     field       TEXT NOT NULL,         -- "purpose", "plan", "comment_3", "review_1_msg_2", ...
     chunk_idx   INTEGER NOT NULL,      -- 0 for unchunked; >0 for splits of long fields
@@ -252,10 +252,10 @@ Either retriever alone has a failure mode the other doesn't. RRF resolves both a
 ```
 orbit semantic install   [--model bge-small | minilm-l6 | nomic-v1.5] [--force]
 orbit semantic uninstall [--model MODEL] [--all]
-orbit search <query> [--hybrid] [--kind task|doc|learning|adr|all] [--limit N]
+orbit search <query> [--hybrid] [--kind task|doc|all] [--limit N]
 orbit search similar <task-id> [--limit N]
-orbit search path <path> [--kind task|doc|learning|adr|all] [--limit N]
-orbit semantic index     [--force] [--model MODEL] [--kind tasks|docs|adrs|learnings|all]
+orbit search path <path> [--kind task|doc|all] [--limit N]
+orbit semantic index     [--force] [--model MODEL] [--kind tasks|docs|all]
 orbit docs index         [--force] [--model MODEL]
 orbit semantic stats
 ```
@@ -264,7 +264,7 @@ orbit semantic stats
 
 `uninstall` removes the companion binary and (by default) the currently active model. `--model M` removes only model M. `--all` removes the companion plus every installed model.
 
-`orbit search` defaults to lexical matching across tasks, docs, learnings, and ADRs. `--hybrid` blends lexical scoring with cosine over the selected corpus; `orbit search similar <task-id>` embeds the target task and runs cosine-neighbor lookup against other tasks; `orbit search path <path>` performs applicability lookup over path-scoped artifacts. `orbit semantic index` rebuilds the selected corpus (`tasks` by default, or `docs`, `adrs`, `learnings`, `all` via `--kind`); `orbit docs index` is the docs-specific alias and sweeps stale doc paths. `--force` ignores `content_hash` and re-embeds everything. `stats` reports row counts, model distribution, stale-row count, and companion-install status.
+`orbit search` defaults to lexical matching across tasks and docs; ADR content participates through indexed design docs. `--hybrid` blends lexical scoring with cosine over the selected corpus; `orbit search similar <task-id>` embeds the target task and runs cosine-neighbor lookup against other tasks; `orbit search path <path>` performs applicability lookup over path-scoped artifacts. `orbit semantic index` rebuilds the selected corpus (`tasks` by default, or `docs` and `all` via `--kind`); `orbit docs index` is the docs-specific alias and sweeps stale doc paths. `--force` ignores `content_hash` and re-embeds everything. `stats` reports row counts, model distribution, stale-row count, and companion-install status. The retired `learning` kind is rejected.
 
 If the companion is not installed, task-hybrid search, `orbit search similar <task-id>`, `orbit semantic index`, and `orbit docs index` exit non-zero with: `"Semantic search not enabled. Run \`orbit semantic install\` to download the inference companion."` Doc-hybrid search is softer: it emits a warning/note and falls back to lexical doc results.
 

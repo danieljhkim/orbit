@@ -2,8 +2,6 @@
 
 use std::path::{Path, PathBuf};
 
-use serde_json::Value;
-
 use crate::OrbitRuntime;
 use orbit_common::types::JobRunState;
 
@@ -22,65 +20,6 @@ fn test_runtime() -> (tempfile::TempDir, OrbitRuntime, PathBuf, PathBuf) {
     let runtime =
         OrbitRuntime::from_roots(&global_root, &workspace_root).expect("build test runtime");
     (root, runtime, global_root, workspace_root)
-}
-
-#[test]
-fn runtime_init_migrates_legacy_learning_ids_and_records_audit_once() {
-    let root = tempdir().expect("create tempdir");
-    let global_root = root.path().join("global");
-    let repo_root = root.path().join("repo");
-    let workspace_root = repo_root.join(".orbit");
-    let legacy_dir = workspace_root.join("learnings/L20260517-1");
-    std::fs::create_dir_all(&global_root).expect("create global root");
-    std::fs::create_dir_all(&legacy_dir).expect("create legacy learning dir");
-    std::fs::write(
-        legacy_dir.join("learning.yaml"),
-        "schema_version: 1\nid: L20260517-1\nstatus: active\nscope:\n  paths: []\n  tags: []\nsummary: Legacy learning\nbody: ''\nevidence: []\ncreated_at: 2026-05-17T00:00:00Z\nupdated_at: 2026-05-17T00:00:00Z\n",
-    )
-    .expect("legacy learning yaml");
-
-    let runtime = OrbitRuntime::from_roots(&global_root, &workspace_root)
-        .expect("build runtime with migration");
-
-    assert!(
-        workspace_root
-            .join("learnings/L-0001/learning.yaml")
-            .is_file()
-    );
-    assert!(!workspace_root.join("learnings/L20260517-1").exists());
-    let events = runtime
-        .list_audit_events_with_kind(
-            None,
-            None,
-            Some("LearningIdFormatMigration".to_string()),
-            None,
-            None,
-            10,
-        )
-        .expect("migration audit events");
-    assert_eq!(events.len(), 1);
-    let payload: Value =
-        serde_json::from_str(events[0].arguments_json.as_deref().expect("arguments json"))
-            .expect("migration payload");
-    assert_eq!(payload["kind"].as_str(), Some("LearningIdFormatMigration"));
-    assert_eq!(
-        payload["rename_map"]["L20260517-1"].as_str(),
-        Some("L-0001")
-    );
-
-    let runtime = OrbitRuntime::from_roots(&global_root, &workspace_root)
-        .expect("rebuild runtime with no-op migration");
-    let events = runtime
-        .list_audit_events_with_kind(
-            None,
-            None,
-            Some("LearningIdFormatMigration".to_string()),
-            None,
-            None,
-            10,
-        )
-        .expect("migration audit events");
-    assert_eq!(events.len(), 1);
 }
 
 #[test]

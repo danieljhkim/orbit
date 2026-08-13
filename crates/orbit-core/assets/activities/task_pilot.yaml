@@ -118,7 +118,6 @@ spec:
     - orbit.task.show
     - orbit.task.list
     - orbit.search
-    - orbit.learning.show
     - fs.read
     - proc.spawn
   proc_allowed_programs:

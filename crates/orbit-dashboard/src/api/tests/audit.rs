@@ -8,9 +8,7 @@ use std::sync::Arc;
 use axum::body::Body;
 use axum::http::{Method, Request, StatusCode};
 use orbit_common::types::{McpCapability, McpTransport};
-use orbit_core::{
-    AuditEventInsertParams, AuditEventStatus, LearningCreateParams, LearningScope, OrbitRuntime,
-};
+use orbit_core::{AuditEventInsertParams, AuditEventStatus, OrbitRuntime};
 use serde_json::Value;
 use tower::ServiceExt;
 
@@ -102,7 +100,7 @@ async fn audit_lists_seeded_events_newest_first_with_projected_fields() {
     seed_audit_event(
         &runtime,
         "exec-2",
-        "orbit.learning.add",
+        "orbit.task.add",
         AuditEventStatus::Failure,
         "editor",
         Some("boom"),
@@ -117,7 +115,7 @@ async fn audit_lists_seeded_events_newest_first_with_projected_fields() {
     // SQLite lists `ORDER BY id DESC`: the most recently inserted event first.
     assert_eq!(execution_ids(rows), vec!["exec-2", "exec-1"]);
     let newest = &rows[0];
-    assert_eq!(newest["tool_name"], "orbit.learning.add");
+    assert_eq!(newest["tool_name"], "orbit.task.add");
     assert_eq!(newest["status"], "failure");
     assert_eq!(newest["role"], "editor");
     assert_eq!(newest["error_message"], "boom");
@@ -166,38 +164,6 @@ async fn audit_filters_all_trusted_mcp_provenance_fields() {
     let body = body_json(response).await;
     let rows = body.as_array().expect("trusted provenance filtered rows");
     assert_eq!(execution_ids(rows), vec!["exec-trusted"]);
-}
-
-/// Runtime writes are audited end-to-end: creating a learning through the
-/// runtime surfaces its id-allocation event on `/audit` without any direct
-/// event seeding. (Task-add does not emit an audit event; learning/ADR
-/// creation does, via `record_id_allocation_audit`.)
-#[tokio::test]
-async fn audit_captures_learning_create_through_the_runtime() {
-    let runtime = OrbitRuntime::in_memory().expect("build runtime");
-    let learning = runtime
-        .create_learning(LearningCreateParams {
-            summary: "Audited learning".to_string(),
-            scope: LearningScope::default(),
-            body: "Learning whose creation must appear in the audit log.".to_string(),
-            evidence: Vec::new(),
-            created_by: Some("claude".to_string()),
-            priority: None,
-        })
-        .expect("create learning");
-
-    let response = request_audit(runtime, "/audit").await;
-
-    assert_eq!(response.status(), StatusCode::OK);
-    let body = body_json(response).await;
-    let rows = body.as_array().expect("audit array");
-    let allocation = rows
-        .iter()
-        .find(|row| row["target_type"] == "id_allocation")
-        .expect("id allocation audit event");
-    assert_eq!(allocation["tool_name"], "orbit.learning.add");
-    assert_eq!(allocation["target_id"], Value::String(learning.id));
-    assert_eq!(allocation["status"], "success");
 }
 
 #[tokio::test]

@@ -74,12 +74,12 @@ pub mod pr_scoreboard {
 
 pub mod scoreboard_summary {
     pub use crate::file::scoreboard::scoreboard_summary::{
-        AgentSummary, FrictionSummary, KnowledgeSummary, NormalizedTokenSummary,
-        ORCHESTRATION_SCHEMA_VERSION, OrchestrationBucketKind, OrchestrationBucketSummary,
-        OrchestrationModelSummary, OrchestrationSummary, PrSummary, RecentSummary,
-        ScoreboardInputs, ScoreboardSummary, ScoreboardWindow, TokenSummary, TopToolCall,
-        WorkflowRunCount, generate_summary, generate_summary_with_audit_tool_calls,
-        generate_summary_with_inputs, summary_path, write_summary,
+        AgentSummary, FrictionSummary, NormalizedTokenSummary, ORCHESTRATION_SCHEMA_VERSION,
+        OrchestrationBucketKind, OrchestrationBucketSummary, OrchestrationModelSummary,
+        OrchestrationSummary, PrSummary, RecentSummary, ScoreboardInputs, ScoreboardSummary,
+        ScoreboardWindow, TokenSummary, TopToolCall, WorkflowRunCount, generate_summary,
+        generate_summary_with_audit_tool_calls, generate_summary_with_inputs, summary_path,
+        write_summary,
     };
 }
 
@@ -87,48 +87,34 @@ pub mod token_scoreboard {
     pub use crate::file::scoreboard::token_scoreboard::write_token_scoreboard;
 }
 
-pub mod learning_layout {
-    pub use crate::file::learning_store::migration::{
-        LearningLayoutMigrationReport, inspect_learning_layout, migrate_learning_layout,
-    };
-}
-
 use chrono::{DateTime, Utc};
 
 pub use backend::{
     ActiveTaskReservation, AuditEventStoreBackend, ExecutorDefStoreBackend, ExpiredTaskReservation,
-    JobRunQuery, JobRunStepParams, JobRunStoreBackend, LearningCreateParams, LearningListEntry,
-    LearningSearchParams, LearningSearchResult, LearningStoreBackend, LearningUpdateParams,
-    PolicyDefStoreBackend, ReleasedTaskReservation, RemoteArtifactStub, TaskArtifactStoreBackend,
-    TaskArtifactUpdateParams, TaskCreateParams, TaskDocumentStoreBackend, TaskDocumentUpdateParams,
-    TaskHistoryStoreBackend, TaskHistoryUpdateParams, TaskLockConflict, TaskLockHolder,
-    TaskReservationCheckParams, TaskReservationCheckResult, TaskReservationListResult,
-    TaskReservationOwnedConflictsParams, TaskReservationOwnedConflictsResult,
-    TaskReservationReleaseByOwnerParams, TaskReservationReleaseByOwnerResult,
-    TaskReservationReleaseParams, TaskReservationReleaseReason, TaskReservationReleaseResult,
-    TaskReservationReserveParams, TaskReservationReserveResult, TaskReservationScope,
-    TaskReservationStoreBackend, TaskStoreBackend, ToolStoreBackend, WorkspaceClaimAcquireParams,
-    WorkspaceClaimAcquireResult, WorkspaceClaimCheckParams, WorkspaceClaimCheckResult,
-    WorkspaceClaimHolder, WorkspaceClaimReleaseParams, WorkspaceClaimReleaseResult,
-    WorkspaceClaimStatusResult, WorkspaceTaskBackends, audit_event_store_sqlite,
-    coordination_task_backends, global_executor_def_store, global_policy_def_store,
-    layered_policy_def_store, task_reservation_store_sqlite, tool_store_sqlite,
-    workspace_job_run_store, workspace_learning_backend, workspace_policy_def_store,
-    workspace_task_backends,
+    JobRunQuery, JobRunStepParams, JobRunStoreBackend, PolicyDefStoreBackend,
+    ReleasedTaskReservation, TaskArtifactStoreBackend, TaskArtifactUpdateParams, TaskCreateParams,
+    TaskDocumentStoreBackend, TaskDocumentUpdateParams, TaskHistoryStoreBackend,
+    TaskHistoryUpdateParams, TaskLockConflict, TaskLockHolder, TaskReservationCheckParams,
+    TaskReservationCheckResult, TaskReservationListResult, TaskReservationOwnedConflictsParams,
+    TaskReservationOwnedConflictsResult, TaskReservationReleaseByOwnerParams,
+    TaskReservationReleaseByOwnerResult, TaskReservationReleaseParams,
+    TaskReservationReleaseReason, TaskReservationReleaseResult, TaskReservationReserveParams,
+    TaskReservationReserveResult, TaskReservationScope, TaskReservationStoreBackend,
+    TaskStoreBackend, ToolStoreBackend, WorkspaceClaimAcquireParams, WorkspaceClaimAcquireResult,
+    WorkspaceClaimCheckParams, WorkspaceClaimCheckResult, WorkspaceClaimHolder,
+    WorkspaceClaimReleaseParams, WorkspaceClaimReleaseResult, WorkspaceClaimStatusResult,
+    WorkspaceTaskBackends, audit_event_store_sqlite, coordination_task_backends,
+    global_executor_def_store, global_policy_def_store, layered_policy_def_store,
+    task_reservation_store_sqlite, tool_store_sqlite, workspace_job_run_store,
+    workspace_policy_def_store, workspace_task_backends,
 };
 pub use file_lock::{LockHolderInfo, read_lock_holder};
 pub use json_schema::{validate_instance_against_schema, validate_schema_document};
 pub use sqlite::audit_event_store::{
     AuditEventFilter, AuditEventInsertParams, AuditRoleAggregate, AuditToolAggregate,
     AuditToolCallCountsByRole, AuditToolCallCountsBySurfaceAndRole, AuditTopToolCall,
-    LEARNING_INJECTED_TARGET_TYPE, LEARNING_SHOWN_TARGET_TYPE, LearningUsageStat,
 };
 pub use sqlite::connection::{Store, StoreTx};
-pub use sqlite::id_allocator::{
-    IdAllocation, IdAllocationKind, IdAllocationRecord, IdAllocator, IdAllocatorConfig,
-    LearningIdMigrationReport, LearningIdRename, ensure_id_allocation_schema,
-    with_active_id_allocations,
-};
 pub use sqlite::invocation_store::{
     ActivityInvocationMetrics, AgentInvocationMetrics, InvocationAccountingFact,
     InvocationAccountingQuery, InvocationInsertParams, InvocationQuery, InvocationRecord,

@@ -7,7 +7,7 @@ use orbit_common::utility::fs::write_text_with_parent;
 use crate::OrbitRuntime;
 use crate::skill_catalog::{LoadedSkill, SkillCatalogDoctorStatus};
 
-const DEFAULT_SKILL_FILES: [(&str, &str); 6] = [
+const DEFAULT_SKILL_FILES: [(&str, &str); 5] = [
     ("orbit", include_str!("../../assets/skills/orbit/SKILL.md")),
     (
         "orbit-task",
@@ -24,10 +24,6 @@ const DEFAULT_SKILL_FILES: [(&str, &str); 6] = [
     (
         "orbit-search",
         include_str!("../../assets/skills/orbit-search/SKILL.md"),
-    ),
-    (
-        "orbit-knowledge",
-        include_str!("../../assets/skills/orbit-knowledge/SKILL.md"),
     ),
 ];
 
@@ -85,7 +81,7 @@ pub struct SkillDoctorResult {
     pub message: String,
 }
 
-pub(crate) fn default_skill_ids() -> [&'static str; 6] {
+pub(crate) fn default_skill_ids() -> [&'static str; 5] {
     DEFAULT_SKILL_FILES.map(|(id, _)| id)
 }
 
@@ -185,7 +181,7 @@ mod tests {
     //! Plus a portability regression (`embedded_assets_are_repository_agnostic`)
     //! guarding the shipped skill *and* activity trees against leaking
     //! Orbit-source paths, private Constellation names, maintainers' personal
-    //! names, workspace-local artifact IDs (task/friction/learning/ADR), and
+    //! names, workspace-local artifact IDs (task/friction/ADR), and
     //! fixed consumer design-doc filenames into public consumer workspaces.
 
     use super::*;
@@ -477,7 +473,7 @@ mod tests {
     // paths (`.orbit/...`, `~/.orbit/...`) and placeholder IDs (`ORB-NNNN`,
     // `L-NNNN`, `<task-id>`).
 
-    /// Concrete workspace-local artifact IDs (task/friction/learning/decision)
+    /// Concrete workspace-local artifact IDs (task/friction/decision)
     /// that would become dangling references in a consumer workspace. Placeholder
     /// forms (`ORB-NNNN`, `L-NNNN`, `ADR-NNNN`, `<task-id>`) use non-digit
     /// stand-ins and are intentionally *not* matched.
@@ -522,13 +518,6 @@ mod tests {
                 if starts(i, b"ADR-") && is_digit(i + 4) {
                     let d = digit_run(i + 4);
                     out.push(String::from_utf8_lossy(&b[i..i + 4 + d]).into_owned());
-                }
-                // L-<3+ digits> (learning ids). L-NNNN placeholder is skipped.
-                if starts(i, b"L-") {
-                    let d = digit_run(i + 2);
-                    if d >= 3 {
-                        out.push(String::from_utf8_lossy(&b[i..i + 2 + d]).into_owned());
-                    }
                 }
                 // F<yyyy>-<mm>-<nnn> (friction ids). F<YYYY>-<MM>-<NNN> is skipped.
                 if b[i] == b'F'
@@ -669,9 +658,7 @@ mod tests {
             "part of the Constellation",
             r#"{"model": "codex"}"#,
             "migrated by ORB-00200",
-            "see learning L-0065",
             "the runtime gate (ADR-0250) refuses the call",
-            "learnings are authored by the orchestrator or by Daniel",
             "silently drops it (F2026-05-024)",
             "--evidence task:T20260514-3",
             "docs/design/<feature>/4_decisions.md",
@@ -685,13 +672,11 @@ mod tests {
 
         // Allows genuine public Orbit runtime paths and placeholder IDs.
         for good in [
-            "decisions live under `docs/design/<feature>/4_decisions.md`",
+            "decisions live under the feature's reviewed design folder",
             "scheduler state in `~/.orbit/orbit.db` is host-local",
             "evidence under `.orbit/state/job-runs/`",
             "dependencies: [\"ORB-NNNN\", ...] require ORB-NNNNN targets",
-            "drop a `// L-NNNN: <rationale>` citation",
             "record the choice as a repo-local ADR-NNNN heading",
-            "learnings are curated by the workspace's orchestrator or owner",
             "recommended layout: `docs/design/<feature>/`",
             "resolve `context_files` selectors, then `fs.read` a `<task-id>`",
             "run `orbit search --kind doc`",

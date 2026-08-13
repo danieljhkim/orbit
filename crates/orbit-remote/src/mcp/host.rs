@@ -1020,9 +1020,8 @@ pub(super) fn crosses_owner_route(name: &str) -> bool {
 /// Placement answers *which machine*; this answers *which executor on it*. The
 /// two used to be conflated, because the withdrawn `hub` placement meant both
 /// "the hub machine" and "the checkoutless coordination store". Collapsing
-/// `hub` into `owner` (ADR-0355) separates them: `orbit.learning.*` and
-/// `orbit.auto_task.*` are equally owner-placed but read checkout-derived
-/// state, so they run through the owner's validated checkout runtime instead.
+/// `hub` into `owner` (ADR-0355) separates machine placement from executor
+/// ownership for checkout-derived state.
 ///
 /// This must stay in step with `HubCoordinationExecutor::execute`, which
 /// rejects any other action outright.
@@ -1070,8 +1069,6 @@ impl McpHost for BrokerMcpHost {
         self.resolved_call(name, input, session_context, Some(dispatch))
     }
 }
-
-impl super::learning::LearningSidecarHost for BrokerMcpHost {}
 
 fn git_path(start: &Path, argument: &str) -> Result<PathBuf, OrbitError> {
     let output = Command::new("git")

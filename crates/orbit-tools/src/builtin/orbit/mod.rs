@@ -2,7 +2,6 @@ pub mod auto_task;
 pub mod command;
 pub mod docs;
 pub mod friction;
-pub mod learning;
 pub mod operation;
 pub mod pipeline;
 pub mod search;
@@ -30,7 +29,7 @@ pub(super) struct OrbitIdentity {
 
 pub fn register(registry: &mut ToolRegistry) {
     // Auto-task definitions [ORB-10149]: agents can define/retune/disable
-    // recurring chores. `list` stays CLI/admin only (mirrors learning::list).
+    // recurring chores. `list` stays CLI/admin only.
     registry.register_mcp(
         auto_task::add::OrbitAutoTaskAddTool,
         agent_operator(McpToolPlacement::Owner),
@@ -106,35 +105,6 @@ pub fn register(registry: &mut ToolRegistry) {
     );
     registry.register_mcp(
         task::update::OrbitTaskUpdateTool,
-        agent_operator(McpToolPlacement::Owner),
-    );
-    // ORB-10725 [ADR-0357]: knowledge is keyed (workspace_id, artifact_key) and
-    // written locally by the owner. With the global allocation step gone there
-    // is no second branch left to compose, so this is a single owner-local write.
-    registry.register_mcp(
-        learning::add::OrbitLearningAddTool,
-        agent_operator(McpToolPlacement::Owner),
-    );
-    registry.register_inactive(learning::list::OrbitLearningListTool);
-    // ORB-00289: destructive cleanup — admin-only, CLI path retains it.
-    registry.register_inactive(learning::prune::OrbitLearningPruneTool);
-    registry.register_inactive(learning::sync::OrbitLearningSyncTool);
-    registry.register_mcp(
-        learning::show::OrbitLearningShowTool,
-        agent_operator(McpToolPlacement::Owner),
-    );
-    registry.register_mcp(
-        learning::supersede::OrbitLearningSupersedeTool,
-        agent_operator(McpToolPlacement::Owner),
-    );
-    // ORB-10469: named single-learning retirement without a replacement,
-    // gated the same as add/update/supersede (ADR-0250).
-    registry.register_mcp(
-        learning::archive::OrbitLearningArchiveTool,
-        agent_operator(McpToolPlacement::Owner),
-    );
-    registry.register_mcp(
-        learning::update::OrbitLearningUpdateTool,
         agent_operator(McpToolPlacement::Owner),
     );
     registry.register(pipeline::invoke::OrbitPipelineInvokeTool);

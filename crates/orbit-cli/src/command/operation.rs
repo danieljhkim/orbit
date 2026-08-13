@@ -506,38 +506,6 @@ impl Commands {
                     runtime_dispatch!(Friction),
                 )
             }
-            Commands::Learning(command) => {
-                use super::learning::LearningSubcommand;
-                let (subcommand, runtime_need, governed) = match &command.command {
-                    LearningSubcommand::Add(_) => ("add", RuntimeNeed::Required, false),
-                    LearningSubcommand::List(_) => ("list", RuntimeNeed::Required, false),
-                    LearningSubcommand::Show(_) => ("show", RuntimeNeed::Required, false),
-                    LearningSubcommand::Stats(_) => ("stats", RuntimeNeed::Required, false),
-                    LearningSubcommand::Update(_) => ("update", RuntimeNeed::Required, false),
-                    LearningSubcommand::Supersede(_) => ("supersede", RuntimeNeed::Required, false),
-                    LearningSubcommand::Archive(_) => ("archive", RuntimeNeed::Required, false),
-                    LearningSubcommand::Sync(_) => ("sync", RuntimeNeed::Required, false),
-                    LearningSubcommand::MigrateLayout(_) => {
-                        ("migrate-layout", RuntimeNeed::Forbidden, false)
-                    }
-                    LearningSubcommand::Prune(args) => {
-                        ("prune", RuntimeNeed::Required, args.confirm)
-                    }
-                };
-                CommandOperation::new(
-                    runtime_need,
-                    Some(admin_meta(
-                        "learning",
-                        Some(subcommand),
-                        Some("learning"),
-                        None,
-                    )),
-                    None,
-                    false,
-                    dispatch_learning,
-                )
-                .governed_when(governed, "learning", subcommand)
-            }
             Commands::Audit(command) => {
                 use super::audit::AuditSubcommand;
                 // `audit` emits no command-level audit row (it would audit
@@ -785,23 +753,6 @@ impl Commands {
                     dispatch_mcp,
                 )
             }
-            Commands::Hook(command) => {
-                use super::hook::HookSubcommand;
-                let (subcommand, suppress_errors) = match &command.command {
-                    HookSubcommand::Install(_) => ("install", false),
-                    HookSubcommand::Pretooluse(_) => ("pretooluse", true),
-                    HookSubcommand::Uninstall(_) => ("uninstall", false),
-                };
-                let mut meta = admin_meta("hook", Some(subcommand), Some("hook"), None);
-                meta.role = "hook".to_string();
-                CommandOperation::new(
-                    RuntimeNeed::Required,
-                    Some(meta),
-                    None,
-                    suppress_errors,
-                    runtime_dispatch!(Hook),
-                )
-            }
             Commands::Web(command) => {
                 use super::web::WebSubcommand;
                 let subcommand = match &command.command {
@@ -907,17 +858,6 @@ fn dispatch_migrate(command: Commands, context: DispatchContext<'_>) -> CommandO
         }
         Commands::Migrate(command) => command.execute(context.runtime()?),
         _ => dispatch_mismatch("Migrate"),
-    }
-}
-
-fn dispatch_learning(command: Commands, context: DispatchContext<'_>) -> CommandOut {
-    use super::learning::{LearningCommand, LearningSubcommand};
-    match command {
-        Commands::Learning(LearningCommand {
-            command: LearningSubcommand::MigrateLayout(args),
-        }) => args.execute_without_runtime(context.root_override),
-        Commands::Learning(command) => command.execute(context.runtime()?),
-        _ => dispatch_mismatch("Learning"),
     }
 }
 

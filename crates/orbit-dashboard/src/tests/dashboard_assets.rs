@@ -260,7 +260,7 @@ fn dashboard_guards_per_workspace_panels_in_aggregate_view() {
 fn dashboard_guards_remaining_panels_in_aggregate_view() {
     // ORB-00040: follow-up to ORB-00039. In the aggregate "All workspaces" view
     // the Audit tab (/api/audit, /api/diagnostics/denials), the Knowledge tab
-    // (/api/learnings, /api/frictions) and the scoreboard window
+    // (/api/frictions) and the scoreboard window
     // selector (/api/scoreboard?window=...) still fired per-workspace endpoints
     // that 400 and flipped conn-status to red. The isAggregateView() guard is
     // extended to all of them, sharing one predicate from common.js. Asserted
@@ -305,14 +305,12 @@ fn dashboard_guards_remaining_panels_in_aggregate_view() {
         "audit policy subtab must show a placeholder in aggregate mode"
     );
 
-    // Knowledge tab: each subtab's fetch is guarded at the chokepoint, so the
+    // Knowledge tab: the friction fetch is guarded at the chokepoint, so the
     // auto-refresh, tab-activation and search-box entry points are all covered.
-    for body in ["learnings-body", "frictions-body"] {
-        assert!(
-            app.contains(&format!(r#"renderPanelPlaceholder("{body}")"#)),
-            "knowledge {body} must show a placeholder in aggregate mode"
-        );
-    }
+    assert!(
+        app.contains(r#"renderPanelPlaceholder("frictions-body")"#),
+        "knowledge frictions must show a placeholder in aggregate mode"
+    );
 
     // Scoreboard: the tab body shows a placeholder, and the user-initiated window
     // re-fetch is a no-op in aggregate mode (not just the auto-refresh boot fetch).
@@ -328,8 +326,8 @@ fn dashboard_guards_remaining_panels_in_aggregate_view() {
     // The guards read the live predicate before fetching (not a stale captured
     // flag), so switching to "All workspaces" after a concrete selection is safe.
     assert!(
-        app.matches("if (isAggregateView())").count() >= 2,
-        "each knowledge fetch must guard on the live aggregate predicate"
+        app.matches("if (isAggregateView())").count() >= 1,
+        "the remaining knowledge fetch must guard on the live aggregate predicate"
     );
     assert!(
         audit.matches("if (isAggregateView())").count() >= 2,
@@ -345,8 +343,7 @@ fn dashboard_guards_diagnostics_and_detail_panels_in_aggregate_view() {
     // /errors, /friction and /implement_one all take the `Ws` extractor and 400
     // without a concrete workspace), so in aggregate mode the whole tab branch
     // of activeRefreshJobs is skipped and placeholders render instead. (2) The
-    // knowledge detail panels (learning-detail / friction-detail) previously
-    // kept stale content with live supersede/resolve/patch
+    // friction detail panel previously kept stale content with live resolve/patch
     // buttons after switching to "All workspaces"; they now show the shared
     // placeholder too. Asserted against the embedded asset sources (the
     // dashboard has no JS test runner).
@@ -441,12 +438,10 @@ fn dashboard_guards_diagnostics_and_detail_panels_in_aggregate_view() {
         app.contains("renderPanelPlaceholder(`${prefix}-detail`)"),
         "the helper must target the <prefix>-detail panels"
     );
-    for prefix in ["learning", "friction"] {
-        assert!(
-            app.contains(&format!(r#"renderKnowledgeDetailPlaceholder("{prefix}")"#)),
-            "the {prefix} list guard must also clear the stale {prefix}-detail panel"
-        );
-    }
+    assert!(
+        app.contains(r#"renderKnowledgeDetailPlaceholder("friction")"#),
+        "the friction list guard must also clear the stale detail panel"
+    );
 }
 
 #[test]
@@ -761,7 +756,7 @@ fn dashboard_managed_execution_cost_panel_has_responsive_presentation_hooks() {
     );
 }
 
-/// ORB-10444: the Knowledge artifact list is long enough to scroll the detail
+/// ORB-10444: the friction list is long enough to scroll the detail
 /// pane out of view mid-read. The pane is pinned below the fixed chrome and
 /// bounded to the remaining viewport so its body scrolls internally rather than
 /// being clipped when the detail is taller than the screen.
@@ -770,18 +765,16 @@ fn dashboard_knowledge_detail_pane_is_sticky_and_internally_scrollable() {
     let css = include_str!("../../assets/dashboard/dashboard.css");
 
     let sticky_at = css
-        .find("#learning-detail-panel,\n      #friction-detail-panel {\n        position: sticky;")
-        .expect("the knowledge detail panels must be sticky");
+        .find("#friction-detail-panel {\n        position: sticky;")
+        .expect("the friction detail panel must be sticky");
     assert!(
         css[sticky_at..].starts_with(
-            "#learning-detail-panel,\n      #friction-detail-panel {\n        position: sticky;\n        top: 170px;\n        align-self: start;\n        max-height: calc(100vh - 194px);",
+            "#friction-detail-panel {\n        position: sticky;\n        top: 170px;\n        align-self: start;\n        max-height: calc(100vh - 194px);",
         ),
         "the pane must pin below the chrome and stay inside the viewport"
     );
     assert!(
-        css.contains(
-            "#learning-detail-panel > .body,\n      #friction-detail-panel > .body {\n        overflow-y: auto;",
-        ),
+        css.contains("#friction-detail-panel > .body {\n        overflow-y: auto;",),
         "detail content taller than the pane must scroll inside it, not be clipped"
     );
     assert!(

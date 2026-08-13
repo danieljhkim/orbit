@@ -15,6 +15,11 @@ last_validated: 2026-08-09
 
 # Orbit Docs — Overview
 
+> **Historical comparison:** learning-specific comparisons in this document
+> describe the retired native subsystem. [ORB-10736] / [ADR-0359] remove that
+> resource and its tool, storage, and delivery contracts; those passages are
+> non-normative.
+
 Orbit Docs is the human-authored knowledge corpus for an Orbit workspace. It indexes the Markdown a team writes for itself — design narratives, reusable code patterns, runbooks, glossaries — and exposes CLI/admin verbs under `orbit docs` plus agent retrieval through the unified `orbit.search` MCP tool. It deliberately does not own a tool-managed copy of the corpus: docs remain PR-reviewed files under configurable `[docs].roots` entries.
 
 The system is **pull-first**: agents call `orbit search --kind doc` (or `--kind all` for federated doc+ADR) or `orbit docs show` when they need context. Task-time related-doc injection is available through `task show --with-context`; PreToolUse hook surfaces remain downstream work ([ORB-00166], [ORB-00167]).

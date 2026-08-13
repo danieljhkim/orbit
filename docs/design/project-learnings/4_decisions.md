@@ -3,15 +3,17 @@ summary: "Project Learnings — Decisions"
 type: design
 title: "Project Learnings — Decisions"
 owner: claude
-last_updated: 2026-08-11
+last_updated: 2026-08-13
 last_validated: 2026-08-13
-status: Draft
+status: Superseded
 feature: project-learnings
 doc_role: decisions
 tags: ["project-learnings"]
 ---
 
-# Project Learnings — Decisions
+# Project Learnings — Retired Decisions
+
+> Retired by [ADR-0359](#adr-0359--remove-the-native-project-learning-subsystem). The entries before ADR-0359 are historical records only; they do not describe an available Orbit resource, tool, route, index, delivery mechanism, dashboard surface, or authoring workflow.
 
 ADR-style log of non-obvious project-learnings decisions. Each entry names the pressure, the choice, and the tradeoff. Entries are numbered per-repo, ordered ascending, and written directly in this file — there is no ADR store behind it. An entry is admitted only through one of the two doors in [../CONVENTIONS.md §4](../CONVENTIONS.md#4-adrs-strict): it explains a specific code site, or it states a standing rule that governs future decisions.
 
@@ -25,7 +27,7 @@ Historical note ([ORB-10479]): the entries listed below held an allocation, but 
 
 ## ADR-0108 — Push-based discovery via context injection, not pull-only via search
 
-**Status:** Accepted · 2026-05-17 06:07:29.099624Z · [T20260510-11]
+**Status:** Superseded by ADR-0359 · 2026-08-13 · [T20260510-11], [ORB-10736]
 **Owner:** legacy:project-learnings
 **Created:** 2026-05-11 02:06:39.412237Z
 **Last updated:** 2026-05-17 06:07:29.099624+00:00
@@ -56,7 +58,7 @@ Phase 1 ships push-at-the-moment-of-action across three layers: engine pre-promp
 
 ## ADR-0109 — Native Orbit primitive (`learning` resource) over a flat markdown directory
 
-**Status:** Accepted · 2026-05-17 06:07:29.184762Z · [T20260510-11]
+**Status:** Superseded by ADR-0359 · 2026-08-13 · [T20260510-11], [ORB-10736]
 **Owner:** legacy:project-learnings
 **Created:** 2026-05-11 02:06:39.413043Z
 **Last updated:** 2026-05-17 06:07:29.184762Z
@@ -87,7 +89,7 @@ Phase 1 implements `learning` as a first-class Orbit resource: YAML records unde
 
 ## ADR-0110 — Workspace-scoped, checked into git (not workspace-private state)
 
-**Status:** Accepted · 2026-05-17 06:07:29.267069Z · [T20260510-11]
+**Status:** Superseded by ADR-0359 · 2026-08-13 · [T20260510-11], [ORB-10736]
 **Owner:** legacy:project-learnings
 **Created:** 2026-05-11 02:06:39.413866Z
 **Last updated:** 2026-05-17 06:07:29.267069Z
@@ -118,7 +120,7 @@ Phase 1 stores learnings at `.orbit/learnings/<id>.yaml`, scoped `WorkspaceOnly`
 
 ## ADR-0111 — Phase-1 scope = path globs + tags, ranked by recency; semantic and symbol-aware deferred
 
-**Status:** Accepted · 2026-05-17 06:07:29.352690Z · [T20260510-11]
+**Status:** Superseded by ADR-0359 · 2026-08-13 · [T20260510-11], [ORB-10736]
 **Owner:** legacy:project-learnings
 **Created:** 2026-05-11 02:06:39.414658Z
 **Last updated:** 2026-05-17 06:07:29.352690Z
@@ -158,7 +160,7 @@ Phase 2 ([3_vision.md §1.1](./3_vision.md), [§1.2](./3_vision.md)) layers symb
 
 ## ADR-0112 — Three-layer push pipeline (engine pre-prompt + MCP sidecar + Claude Code hook), not single-layer
 
-**Status:** Accepted · 2026-05-17 06:07:29.436411Z · [T20260510-11]
+**Status:** Superseded by ADR-0359 · 2026-08-13 · [T20260510-11], [ORB-10736]
 **Owner:** legacy:project-learnings
 **Created:** 2026-05-11 02:06:39.415495Z
 **Last updated:** 2026-05-17 06:07:29.436411Z
@@ -226,7 +228,7 @@ Votes are derived from per-learning JSONL on read. `orbit learning sync` validat
 
 ## ADR-0210 — Remove vote and comment surfaces from the learning subsystem
 
-**Status:** Accepted · 2026-07-06 02:53:29.056012Z · [ORB-10046]
+**Status:** Superseded by ADR-0359 · 2026-08-13 · [ORB-10046], [ORB-10736]
 **Owner:** claude
 **Created:** 2026-07-06 02:53:08.190251Z
 **Last updated:** 2026-07-06 02:53:32.276321Z
@@ -275,7 +277,7 @@ Rejected because (a) usage is zero-to-one after months of availability, so we wo
 
 ## ADR-0212 — Workspace-scope the learning envelope index in the shared host-global database
 
-**Status:** Accepted · 2026-07-11 19:02:46.651263Z · [ORB-10113]
+**Status:** Superseded by ADR-0359 · 2026-08-13 · [ORB-10113], [ORB-10736]
 **Owner:** claude
 **Created:** 2026-07-11 19:02:35.674744Z
 **Last updated:** 2026-07-11 19:02:46.651263Z
@@ -291,7 +293,7 @@ Rejected because (a) usage is zero-to-one after months of availability, so we wo
 
 ## ADR-0242 — Teaser learning injection + show-as-usage-signal (replaces rejected ack design)
 
-**Status:** Accepted · 2026-07-19 21:16:34.909096Z · [ORB-10316]
+**Status:** Superseded by ADR-0359 · 2026-08-13 · [ORB-10316], [ORB-10736]
 **Owner:** claude
 **Created:** 2026-07-19 21:16:29.039388Z
 **Last updated:** 2026-07-19 21:16:34.909096Z
@@ -338,7 +340,7 @@ Alternatives considered:
 
 ## ADR-0248 — Keep `orbit hook install` opt-in; remove `--hooks` from `workspace init`
 
-**Status:** Accepted · 2026-07-25 05:44:03.377312Z · [ORB-10366], [ORB-10346]
+**Status:** Superseded by ADR-0359 · 2026-08-13 · [ORB-10366], [ORB-10346], [ORB-10736]
 **Owner:** claude
 **Created:** 2026-07-25 05:43:58.112051Z
 **Last updated:** 2026-07-25 05:44:03.377312Z
@@ -371,7 +373,7 @@ The distinction that matters is *automatic* vs. *deliberate*. ADR-0108/ADR-0112'
 
 ## ADR-0250 — Gate learning authoring surfaces on caller role derived from the agent-identity env
 
-**Status:** Accepted · 2026-07-25 16:33:41.557198Z · [ORB-10364], [ORB-10469]
+**Status:** Superseded by ADR-0359 · 2026-08-13 · [ORB-10364], [ORB-10469], [ORB-10736]
 **Owner:** claude
 **Created:** 2026-07-25 16:33:32.668297Z
 **Last updated:** 2026-07-27 00:08:29.813656Z
@@ -410,3 +412,27 @@ Alternatives considered:
 - [ORB-10452] — Made the legacy learning-layout migration report-only by default and require the standard `--confirm` apply flag (ADR-0110 amendment).
 
 Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.
+
+## ADR-0359 — Remove the native project-learning subsystem
+
+**Status:** Accepted · 2026-08-13 · [ORB-10736]
+**Owner:** codex
+**Related features:** `project-learnings`, `search`, `dashboard`, `mcp-bridge`
+**Supersedes:** `ADR-0108`, `ADR-0109`, `ADR-0110`, `ADR-0111`, `ADR-0112`, `ADR-0210`, `ADR-0212`, `ADR-0242`, `ADR-0248`, `ADR-0250`
+**Tags:** `project-learnings`, `deprecation`, `cleanup`
+
+### Context
+
+The native resource was justified primarily by automatic scope-matched delivery. In practice that signal did not justify a separate model, file store, SQLite projections, lifecycle API, CLI/MCP/HTTP surface, search corpus, hook and session state, dashboard, metrics, and scheduled curation machinery. Keeping a read-only compatibility resource or translating records into another artifact would preserve most of the maintenance burden and create a new long-term contract.
+
+### Decision
+
+Remove the native project-learning subsystem and every executable or advertised surface that depends on it. Existing files under `.orbit/learnings/**` remain byte-for-byte inert historical data: they are not read, indexed, injected, migrated, rewritten, or copied elsewhere. Preserve the shipped SQLite migration ledger and append a forward migration that drops the retired tables and learning vector rows for both upgraded and freshly initialized databases. Unified search continues for tasks, docs, ADRs, and frictions; the retired kind is rejected.
+
+### Consequences
+
+- Orbit has no native learning model, store, lifecycle, delivery path, tool, route, dashboard surface, metric, hook installer, or scheduled curation task.
+- Existing historical files remain available only to repository archaeology and confer no compatibility promise.
+- The narrower product surface reduces schema, conformance, security, and cross-layer maintenance cost.
+- Cost: automatic delivery of scoped project rules is gone. Teams that need durable guidance must use ordinary reviewed documentation or existing repository instructions, without a native replacement resource or content migration.
+- Rejected alternative: retaining a read-only compatibility layer. It would continue advertising a resource whose lifecycle and delivery semantics no longer exist.

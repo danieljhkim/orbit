@@ -1,7 +1,7 @@
 //! The global `--format` argument's surface.
 //!
 //! One declaration ([`crate::format_arg`]) reaches every command that does not
-//! own a `--format` of its own, and the two that do are left alone.
+//! own a `--format` of its own, and the one that does is left alone.
 
 use clap::{ArgMatches, Command, CommandFactory, FromArgMatches};
 
@@ -12,7 +12,7 @@ use crate::{FORMAT_ARG_ID, install_format_arg, requested_format};
 /// Commands that declared `--format` before the global one existed, with
 /// their own value types. Adding to this list is a decision, not an accident:
 /// a command here does not accept the global flag.
-const COMMANDS_OWNING_FORMAT: &[&str] = &["orbit audit export", "orbit hook pretooluse"];
+const COMMANDS_OWNING_FORMAT: &[&str] = &["orbit audit export"];
 
 /// Our argument's value name, which distinguishes it from a command's own
 /// `--format` when walking the tree.
@@ -109,7 +109,7 @@ fn a_global_format_does_not_corrupt_a_command_owning_format() {
 }
 
 #[test]
-fn every_command_declares_exactly_one_format_and_only_two_own_theirs() {
+fn every_command_declares_exactly_one_format_and_only_the_listed_commands_own_theirs() {
     let mut owners = Vec::new();
     walk(&parser(), "orbit", &mut owners);
     owners.sort();

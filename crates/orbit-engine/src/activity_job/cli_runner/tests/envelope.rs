@@ -61,14 +61,8 @@ fn cli_agent_envelope_carries_input_run_id_and_task_context() {
         "workspace_path": "/tmp/orbit-worktree"
     });
 
-    let raw = cli_agent_envelope_json(
-        &spec,
-        "jrun-context",
-        &input,
-        host.task_context.as_ref(),
-        None,
-    )
-    .expect("build cli agent envelope");
+    let raw = cli_agent_envelope_json(&spec, "jrun-context", &input, host.task_context.as_ref())
+        .expect("build cli agent envelope");
     let envelope: Value = serde_json::from_slice(&raw).expect("parse envelope json");
 
     assert_eq!(envelope["schemaVersion"], 1);

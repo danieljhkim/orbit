@@ -40,15 +40,12 @@ mod tests;
 
 pub use commands::{
     CompanionStatus, DocIndexParams, DocIndexResult, DocSemanticHit, DocSemanticSearchParams,
-    DocSemanticSearchResult, IndexKind, LearningIndexParams, LearningIndexResult,
-    LearningSemanticHit, LearningSemanticSearchParams, LearningSemanticSearchResult,
-    ScoreBreakdown, SemanticHit, SemanticIndexParams, SemanticIndexResult, SemanticInstallParams,
-    SemanticInstallResult, SemanticReindexParams, SemanticReindexResult, SemanticRelatedParams,
-    SemanticRelatedResult, SemanticSearchParams, SemanticSearchResult, SemanticStatsResult,
-    SemanticUninstallParams, SemanticUninstallResult, TaskIndexResult, doc_index,
-    doc_semantic_search, learning_index, learning_semantic_search, semantic_index,
-    semantic_install, semantic_reindex, semantic_related, semantic_search, semantic_stats,
-    semantic_uninstall,
+    DocSemanticSearchResult, IndexKind, ScoreBreakdown, SemanticHit, SemanticIndexParams,
+    SemanticIndexResult, SemanticInstallParams, SemanticInstallResult, SemanticReindexParams,
+    SemanticReindexResult, SemanticRelatedParams, SemanticRelatedResult, SemanticSearchParams,
+    SemanticSearchResult, SemanticStatsResult, SemanticUninstallParams, SemanticUninstallResult,
+    TaskIndexResult, doc_index, doc_semantic_search, semantic_index, semantic_install,
+    semantic_reindex, semantic_related, semantic_search, semantic_stats, semantic_uninstall,
 };
 pub use companion::{
     CompanionPaths, INSTALL_REMEDIATION, locate_companion, platform_companion_filename, platform_id,
@@ -61,6 +58,6 @@ pub use noop::NoopEmbedder;
 pub use rpc::{RpcError, RpcRequest, RpcResponse, RpcResult, rpc_error_to_orbit};
 pub use subprocess::SubprocessEmbedder;
 pub use vector::{
-    DocEmbeddingSource, EmbedWorker, LearningEmbeddingSource, SOURCE_KIND_DOC,
-    SOURCE_KIND_LEARNING, SOURCE_KIND_TASK, SemanticStats, UpsertReport, VectorStore,
+    DocEmbeddingSource, EmbedWorker, SOURCE_KIND_DOC, SOURCE_KIND_TASK, SemanticStats,
+    UpsertReport, VectorStore,
 };

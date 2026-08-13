@@ -1,7 +1,7 @@
 ---
 title: Orbit MCP Bridge — Vision
 owner: claude
-last_updated: 2026-08-10
+last_updated: 2026-08-13
 last_validated: 2026-08-02
 status: Draft
 feature: mcp-bridge
@@ -15,6 +15,11 @@ related_artifacts: [ORB-00424, ORB-10319, ADR-0181, ADR-0199, ADR-0200, ADR-0201
 ---
 
 # Orbit MCP Bridge — Vision
+
+> **Learning-subsystem retirement.** [ORB-10736] / [ADR-0359] remove the native
+> project-learning resource. Learning-specific questions below are retained only
+> as retired historical context and do not describe a current or planned MCP
+> capability.
 
 > **Status: Draft — structural rewrite in flight.** The singular-hub contract
 > ([ADR-0226], [ADR-0229], [ADR-0230]) is superseded by [ADR-0355]–[ADR-0358],

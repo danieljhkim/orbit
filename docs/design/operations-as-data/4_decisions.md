@@ -1,7 +1,7 @@
 ---
 title: Operations as Data — Decisions
 owner: claude
-last_updated: 2026-08-11
+last_updated: 2026-08-13
 last_validated: 2026-08-09
 status: Accepted
 feature: operations-as-data
@@ -15,6 +15,10 @@ related_artifacts: [ORB-10358, ADR-0209, ADR-0253, ADR-0254, ADR-0255]
 ---
 
 # Operations as Data — Decisions
+
+> **Retired learning clauses:** [ORB-10736] / [ADR-0359] removed the native
+> project-learning CLI and tool operations. Learning-specific examples in
+> earlier entries are retained as historical context only.
 
 Ordered pointer index for operations-as-data ADRs. The store owns each title,
 status, and authoritative narrative; print a body with `orbit tool run

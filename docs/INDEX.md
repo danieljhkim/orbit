@@ -61,7 +61,7 @@ a conservative title/status fallback.
 | [Orbit Docs Plugin](./design/orbit-docs-plugin/1_scope.md) | Scope: extract docs + search into a plugin-style feature crate | Draft | — |
 | [Semantic Search](./design/orbit-search/1_overview.md) | Semantic search is a local, offline-first retrieval layer over Orbit's task artifacts (phase 1) and, eventually, the knowledge-graph corpus (phase 2). | Draft | claude |
 | [Policy & Sandboxing](./design/policy-sandbox/1_overview.md) | Policy & Sandboxing is Orbit's safety surface for filesystem access and process execution. | Draft | claude |
-| [Project Learnings](./design/project-learnings/1_overview.md) | Project learnings is a system for preserving and surfacing non-obvious project knowledge — gotchas, root causes from incidents, validated approaches, hard-won workflow insights — so agents can retrieve and apply them when they are relevant. | Draft | claude |
+| [Project Learnings](./design/project-learnings/4_decisions.md) | Project Learnings — Decisions | Superseded | claude |
 | [Remote Access](./design/remote-access/1_overview.md) | How an operator views Orbit across every local workspace and across machines, with no shared server and no new auth. | Accepted | claude |
 | [Resident Orchestrator](./design/resident-orchestrator/1_overview.md) | Workspace-addressed epic delegation to a resumable CLI orchestrator that decomposes, clarifies, and shepherds work without a resident server. | Draft | codex |
 | [Routines](./design/routines/1_overview.md) | Durable, git-versioned scheduler primitive that fires catalog jobs/activities on cron triggers, per host, with local state. | Accepted | claude |

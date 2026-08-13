@@ -16,7 +16,6 @@ use orbit_common::types::McpCapability;
 use super::{
     Cli, Commands,
     docs::DocsSubcommand,
-    hook::HookSubcommand,
     mcp::McpSubcommand,
     search::SearchSubcommand,
     semantic::{SemanticIndexKindArg, SemanticSubcommand},
@@ -49,7 +48,6 @@ fn cli_parses_doctor_stale_lock_cleanup() {
             assert!(command.remove_graph);
             assert!(command.json);
             // [ORB-10501] Repairs are opt-in: an unflagged run only diagnoses.
-            assert!(!command.fix_orphaned_allocations);
         }
         _ => panic!("expected top-level doctor command"),
     }
@@ -62,7 +60,6 @@ fn cli_parses_doctor_stale_task_lock_repair_without_blanket_fix() {
         Commands::Doctor(command) => {
             assert!(command.fix_stale_task_locks);
             assert!(!command.fix_stale_locks);
-            assert!(!command.fix_orphaned_allocations);
         }
         _ => panic!("expected top-level doctor command"),
     }
@@ -72,19 +69,6 @@ fn cli_parses_doctor_stale_task_lock_repair_without_blanket_fix() {
         ErrorKind::UnknownArgument,
         "unexpected argument '--fix'",
     );
-}
-
-/// [ORB-10501] The guarded repair for allocations pinned to a reaped worktree.
-#[test]
-fn cli_parses_doctor_orphaned_allocation_repair() {
-    let cli = Cli::parse_from(["orbit", "doctor", "--fix-orphaned-allocations"]);
-    match cli.command {
-        Commands::Doctor(command) => {
-            assert!(command.fix_orphaned_allocations);
-            assert!(!command.fix_stale_locks);
-        }
-        _ => panic!("expected top-level doctor command"),
-    }
 }
 
 #[test]
@@ -210,39 +194,6 @@ fn cli_parses_web_connect() {
 }
 
 #[test]
-fn cli_parses_hook_pretooluse() {
-    let cli = Cli::parse_from(["orbit", "hook", "pretooluse", "--format", "codex"]);
-    match cli.command {
-        Commands::Hook(command) => match command.command {
-            HookSubcommand::Pretooluse(_) => {}
-            _ => panic!("expected hook pretooluse"),
-        },
-        _ => panic!("expected top-level hook command"),
-    }
-}
-
-#[test]
-fn cli_parses_hook_install_and_uninstall() {
-    let cli = Cli::parse_from(["orbit", "hook", "install"]);
-    match cli.command {
-        Commands::Hook(command) => match command.command {
-            HookSubcommand::Install(_) => {}
-            _ => panic!("expected hook install"),
-        },
-        _ => panic!("expected top-level hook command"),
-    }
-
-    let cli = Cli::parse_from(["orbit", "hook", "uninstall"]);
-    match cli.command {
-        Commands::Hook(command) => match command.command {
-            HookSubcommand::Uninstall(_) => {}
-            _ => panic!("expected hook uninstall"),
-        },
-        _ => panic!("expected top-level hook command"),
-    }
-}
-
-#[test]
 fn cli_parses_semantic_install_force() {
     let cli = Cli::parse_from(["orbit", "semantic", "install", "--force"]);
     match cli.command {
@@ -306,22 +257,7 @@ fn cli_semantic_index_rejects_singular_kinds_at_clap_layer() {
         assert!(message.contains("possible values"), "{message}");
         assert!(message.contains("tasks"), "{message}");
         assert!(message.contains("docs"), "{message}");
-        assert!(message.contains("learnings"), "{message}");
         assert!(message.contains("all"), "{message}");
-    }
-}
-
-#[test]
-fn cli_semantic_index_parses_learnings_kind() {
-    let cli = Cli::parse_from(["orbit", "semantic", "index", "--kind", "learnings"]);
-    match cli.command {
-        Commands::Semantic(command) => match command.command {
-            SemanticSubcommand::Index(args) => {
-                assert_eq!(args.kind, SemanticIndexKindArg::Learnings);
-            }
-            _ => panic!("expected semantic index"),
-        },
-        _ => panic!("expected top-level semantic command"),
     }
 }
 
@@ -334,7 +270,7 @@ fn cli_semantic_index_help_explains_kind_principle() {
     let help = error.to_string();
     assert!(
         help.contains(
-            "--kind selects corpus: tasks (default), docs (same as `orbit docs index`), learnings, all (rebuilds all indexed corpora)."
+            "--kind selects corpus: tasks (default), docs (same as `orbit docs index`), all (rebuilds all indexed corpora)."
         ),
         "{help}"
     );
@@ -367,9 +303,9 @@ fn cli_rejects_docs_reindex() {
 #[test]
 fn cli_rejects_learning_reindex() {
     assert_cli_rejects(
-        &["orbit", "learning", "reindex"],
+        &["orbit", "learning"],
         ErrorKind::InvalidSubcommand,
-        "unrecognized subcommand 'reindex'",
+        "unrecognized subcommand 'learning'",
     );
 }
 

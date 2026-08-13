@@ -66,7 +66,6 @@ pub use orbit_tools::prepare_remote_task_artifact_put;
 
 // Command-layer types the CLI names in its clap surfaces.
 pub use command::docs::{DocType, TaskRelatedDoc};
-pub use command::learning::{inspect_learning_layout_at, migrate_learning_layout_at};
 pub use command::search::{
     GlobalSearchHit, GlobalSearchKind, GlobalSearchParams, task_selectors_contain_path,
 };
@@ -80,25 +79,19 @@ pub use execution_environment::{
 pub use auto_tasks::{AutoTaskAddParams, AutoTaskUpdateParams};
 pub use orbit_common::types::{
     AuditEvent, AuditEventStatus, AuditStats, AutoTaskDefinition, AutoTaskSchedule,
-    AutoTaskTemplate, DEFAULT_TASK_LIST_LIMIT, DedupePolicy, EvidenceKind, ExecutionProfileCrewV1,
+    AutoTaskTemplate, DEFAULT_TASK_LIST_LIMIT, DedupePolicy, ExecutionProfileCrewV1,
     ExecutionProfileShipV1, ExecutionProfileV1, ExecutorDef, ExternalRef, HostAlias,
     HostNameResolution, HostRecord, HostRegistration, HostStatus, HostWorkspacePresence, JobRun,
-    JobRunState, JobRunStep, JobTargetType, Learning, LearningEvidence, LearningScope,
-    LearningStatus, ProjectionFreshness, SanitizedExecutionProfile, SanitizedWorkspacePresence,
-    StoredExecutionProfile, Task, TaskComplexity, TaskCreateStatus, TaskPriority, TaskStatus,
-    TaskType, WorkspaceOwnership, WorkspacePresenceDeclaration, resolve_task_dependencies,
-    resolve_task_relations, task_dependencies_ready,
+    JobRunState, JobRunStep, JobTargetType, ProjectionFreshness, SanitizedExecutionProfile,
+    SanitizedWorkspacePresence, StoredExecutionProfile, Task, TaskComplexity, TaskCreateStatus,
+    TaskPriority, TaskStatus, TaskType, WorkspaceOwnership, WorkspacePresenceDeclaration,
+    resolve_task_dependencies, resolve_task_relations, task_dependencies_ready,
 };
 pub use orbit_common::types::{MissedRunPolicy, NotFoundKind, OrbitError, OverlapPolicy};
 pub use orbit_common::utility::redaction::redact_sensitive_env_text;
-pub use orbit_store::learning_layout::LearningLayoutMigrationReport;
 pub use orbit_store::{
     AuditEventFilter, AuditEventInsertParams, AuditToolAggregate, V2AuditEventFilter,
     V2AuditEventInsertParams,
-};
-pub use orbit_store::{
-    LearningCreateParams, LearningListEntry, LearningSearchParams, LearningUpdateParams,
-    LearningUsageStat,
 };
 // Routine fire records surfaced by the dashboard's routine-health JSON API.
 pub use orbit_store::{RoutineFireRecord, RoutineFireState};

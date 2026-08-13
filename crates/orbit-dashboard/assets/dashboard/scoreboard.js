@@ -106,11 +106,6 @@ const PR_REVIEW_COLUMNS = [
   { key: "pr.review_comments", label: "pr rev", num: true },
 ];
 
-const KNOWLEDGE_SCOREBOARD_COLUMNS = [
-  { key: "agent", label: "agent", num: false },
-  { key: "knowledge.learnings_created", label: "learnings", num: true },
-];
-
 const OPERATIONS_SCOREBOARD_COLUMNS = [
   { key: "agent", label: "agent", num: false },
   {
@@ -142,7 +137,6 @@ const OPERATIONS_SCOREBOARD_COLUMNS = [
 const ALL_SCOREBOARD_SECTIONS = [
   { title: "Delivery", badge: "tasks created · planned · completed", columns: DELIVERY_SCOREBOARD_COLUMNS },
   { title: "Review", badge: "review threads · PR comments", columns: PR_REVIEW_COLUMNS },
-  { title: "Knowledge", badge: "learnings · votes", columns: KNOWLEDGE_SCOREBOARD_COLUMNS },
   { title: "Operations", badge: "tool calls · failures · friction", columns: OPERATIONS_SCOREBOARD_COLUMNS },
 ];
 
@@ -411,22 +405,15 @@ function applyAgentTheme(node, name) {
 }
 
 function agentActivityTotal(agent) {
-  const knowledge = agent?.knowledge || {};
   return (
     asScoreboardNumber(agent?.tasks_created) +
     asScoreboardNumber(agent?.tasks_planned) +
     asScoreboardNumber(agent?.tasks_completed) +
     asScoreboardNumber(agent?.pr?.review_comments) +
-    asScoreboardNumber(knowledge.learnings_created) +
     asScoreboardNumber(agent?.tool_calls) +
     asScoreboardNumber(agent?.failed_tool_calls) +
     asScoreboardNumber(agent?.friction?.reported)
   );
-}
-
-function knowledgeScore(agent) {
-  const knowledge = agent?.knowledge || {};
-  return asScoreboardNumber(knowledge.learnings_created);
 }
 
 function agentRoleLabel(agent, rows) {
@@ -440,7 +427,6 @@ function agentRoleLabel(agent, rows) {
   leaderIf("author", (a) => a?.tasks_created);
   leaderIf("planner", (a) => a?.tasks_planned);
   leaderIf("closer", (a) => a?.tasks_completed);
-  leaderIf("knowledge", knowledgeScore);
   leaderIf("ops", (a) => a?.tool_calls);
   if (labels.length === 0) return "active";
   return labels.slice(0, 2).join(" / ");

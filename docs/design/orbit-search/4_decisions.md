@@ -3,7 +3,7 @@ summary: "Semantic Search — Decisions"
 type: design
 title: "Semantic Search — Decisions"
 owner: claude
-last_updated: 2026-08-11
+last_updated: 2026-08-13
 last_validated: 2026-08-09
 status: Accepted
 feature: orbit-search
@@ -12,6 +12,10 @@ tags: ["orbit-search"]
 ---
 
 # Semantic Search — Decisions
+
+> **Retired learning clauses:** [ORB-10736] / [ADR-0359] removed the native
+> project-learning corpus. Learning-specific statements in earlier entries are
+> historical records only and do not describe a supported search kind or index.
 
 ADR-style log of non-obvious orbit-search decisions. Each entry names the pressure, the choice, and the tradeoff. Entries are append-only and keyed by number; superseded entries are marked, not deleted.
 

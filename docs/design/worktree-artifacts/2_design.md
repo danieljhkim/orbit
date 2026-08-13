@@ -13,7 +13,11 @@ related_features: ["worktree-artifacts", "host-registry", "mcp-bridge"]
 related_artifacts: ["ORB-00199", "ORB-00200", "ORB-00201", "ORB-10272", "ORB-10297", "ORB-10330", "ORB-10545", "ORB-10668", "ORB-10669", "ORB-10725", "ADR-0177", "ADR-0229", "ADR-0302", "ADR-0339", "ADR-0342", "ADR-0357"]
 ---
 
-# Worktree Artifacts - Design
+# Worktree Artifacts — Design
+
+> Learning-specific storage and federation references below are retired history.
+> [ORB-10736] / [ADR-0359] remove the native learning subsystem and leave its
+> existing repository files inert.
 
 The current implementation treats ADR and learning bodies as branch-local files with workspace-local IDs ([ADR-0357]). The shared root owns durable coordination state; the local root owns files that should be staged with the branch.
 

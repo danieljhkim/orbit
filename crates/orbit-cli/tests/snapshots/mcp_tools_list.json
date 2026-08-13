@@ -42,7 +42,7 @@
               "type": "array"
             }
           ],
-          "description": "Task template: `{ title, description?, acceptance_criteria?, task_type?, tags?, priority?, crew?, status? }`. Provider-neutral \u2014 no turn knobs. Required."
+          "description": "Task template: `{ title, description?, acceptance_criteria?, task_type?, tags?, priority?, crew?, status? }`. Provider-neutral — no turn knobs. Required."
         },
         "workspace": {
           "description": "Workspace selector for broker routing: a registered logical workspace ID or an absolute path to a local checkout (a linked Git worktree resolves to its registered checkout). Optional when the MCP session announced `_meta.orbit.workspace` at initialize; never inferred from process cwd.",
@@ -163,7 +163,7 @@
     "name": "orbit_auto_task_update"
   },
   {
-    "description": "List a workspace owner's published execution-profile crews with sanitized profile state, generation, and freshness (agent/operator, hub placement).",
+    "description": "List a workspace owner's execution-profile crews with sanitized profile state, generation, and freshness (agent/operator, owner placement).",
     "inputSchema": {
       "additionalProperties": true,
       "properties": {
@@ -245,217 +245,20 @@
     "name": "orbit_friction_tags"
   },
   {
-    "description": "Create an active project learning. Returns `{ id, created_at }` plus the full record.",
-    "inputSchema": {
-      "additionalProperties": true,
-      "properties": {
-        "body": {
-          "description": "Long-form prose (markdown).",
-          "type": "string"
-        },
-        "evidence": {
-          "anyOf": [
-            {
-              "items": {
-                "type": "object"
-              },
-              "type": "array"
-            },
-            {
-              "type": "string"
-            }
-          ],
-          "description": "Array of `{ kind: \"task\"|\"commit\"|\"external\", ref: string }` entries. Optional."
-        },
-        "model": {
-          "description": "Preferred provenance field. Pass the canonical agent family (codex, claude, gemini, or grok); full model strings are accepted and auto-normalized.",
-          "enum": [
-            "codex",
-            "claude",
-            "gemini",
-            "grok"
-          ],
-          "type": "string"
-        },
-        "priority": {
-          "description": "Optional priority (0\u2013255). Used as the secondary ranking key in `search`; higher wins.",
-          "type": "integer"
-        },
-        "scope": {
-          "anyOf": [
-            {
-              "type": "object"
-            },
-            {
-              "items": {
-                "type": "object"
-              },
-              "type": "array"
-            }
-          ],
-          "description": "Scope object: `{ paths?: string[], tags?: string[] }`. Matches are evaluated as `paths OR tags` per \u00a73.3."
-        },
-        "summary": {
-          "description": "One-line headline (\u2264 280 chars). Required.",
-          "type": "string"
-        },
-        "workspace": {
-          "description": "Workspace selector for broker routing: a registered logical workspace ID or an absolute path to a local checkout (a linked Git worktree resolves to its registered checkout). Optional when the MCP session announced `_meta.orbit.workspace` at initialize; never inferred from process cwd.",
-          "type": "string"
-        }
-      },
-      "required": [
-        "summary",
-        "scope"
-      ],
-      "type": "object"
-    },
-    "name": "orbit_learning_add"
-  },
-  {
-    "description": "Retire `id` without a replacement: flips status to `superseded` with `superseded_by: null`. Idempotent \u2014 archiving an already-superseded record is a no-op success. Use `orbit.learning.supersede` instead when a replacement learning exists.",
-    "inputSchema": {
-      "additionalProperties": true,
-      "properties": {
-        "id": {
-          "description": "learning ID",
-          "type": "string"
-        },
-        "workspace": {
-          "description": "Workspace selector for broker routing: a registered logical workspace ID or an absolute path to a local checkout (a linked Git worktree resolves to its registered checkout). Optional when the MCP session announced `_meta.orbit.workspace` at initialize; never inferred from process cwd.",
-          "type": "string"
-        }
-      },
-      "required": [
-        "id"
-      ],
-      "type": "object"
-    },
-    "name": "orbit_learning_archive"
-  },
-  {
-    "description": "Fetch a single learning by ID as JSON. Returns the full record including body and evidence.",
-    "inputSchema": {
-      "additionalProperties": true,
-      "properties": {
-        "id": {
-          "description": "learning ID",
-          "type": "string"
-        },
-        "workspace": {
-          "description": "Workspace selector for broker routing: a registered logical workspace ID or an absolute path to a local checkout (a linked Git worktree resolves to its registered checkout). Optional when the MCP session announced `_meta.orbit.workspace` at initialize; never inferred from process cwd.",
-          "type": "string"
-        }
-      },
-      "required": [
-        "id"
-      ],
-      "type": "object"
-    },
-    "name": "orbit_learning_show"
-  },
-  {
-    "description": "Mark `id` as superseded by `with`. Writes both pointers atomically and excludes the old record from default search.",
-    "inputSchema": {
-      "additionalProperties": true,
-      "properties": {
-        "id": {
-          "description": "ID of the learning being superseded.",
-          "type": "string"
-        },
-        "with": {
-          "description": "ID of the replacement learning. Must differ from `id`. Both records must exist.",
-          "type": "string"
-        },
-        "workspace": {
-          "description": "Workspace selector for broker routing: a registered logical workspace ID or an absolute path to a local checkout (a linked Git worktree resolves to its registered checkout). Optional when the MCP session announced `_meta.orbit.workspace` at initialize; never inferred from process cwd.",
-          "type": "string"
-        }
-      },
-      "required": [
-        "id",
-        "with"
-      ],
-      "type": "object"
-    },
-    "name": "orbit_learning_supersede"
-  },
-  {
-    "description": "Partial update of a learning. Rejects updates on superseded records (use `orbit.learning.supersede` instead).",
-    "inputSchema": {
-      "additionalProperties": true,
-      "properties": {
-        "body": {
-          "description": "Replace `body`.",
-          "type": "string"
-        },
-        "evidence": {
-          "anyOf": [
-            {
-              "items": {
-                "type": "object"
-              },
-              "type": "array"
-            },
-            {
-              "type": "string"
-            }
-          ],
-          "description": "Replace `evidence` array."
-        },
-        "id": {
-          "description": "Learning ID to update.",
-          "type": "string"
-        },
-        "priority": {
-          "description": "Replace `priority`. Pass an integer to set, `null` to clear, or omit to leave unchanged.",
-          "type": "integer"
-        },
-        "scope": {
-          "anyOf": [
-            {
-              "type": "object"
-            },
-            {
-              "items": {
-                "type": "object"
-              },
-              "type": "array"
-            }
-          ],
-          "description": "Replace `scope` entirely: `{ paths?: string[], tags?: string[] }`."
-        },
-        "summary": {
-          "description": "Replace `summary` (\u2264 280 chars).",
-          "type": "string"
-        },
-        "workspace": {
-          "description": "Workspace selector for broker routing: a registered logical workspace ID or an absolute path to a local checkout (a linked Git worktree resolves to its registered checkout). Optional when the MCP session announced `_meta.orbit.workspace` at initialize; never inferred from process cwd.",
-          "type": "string"
-        }
-      },
-      "required": [
-        "id"
-      ],
-      "type": "object"
-    },
-    "name": "orbit_learning_update"
-  },
-  {
-    "description": "Search tasks, docs, and learnings. ADR entries are retrieved through the docs corpus; hybrid vector ranking applies to indexed tasks, docs, and learnings.",
+    "description": "Search tasks, docs, ADRs, and frictions. ADR entries are retrieved through the docs corpus; hybrid vector ranking applies to indexed tasks and docs.",
     "inputSchema": {
       "additionalProperties": true,
       "properties": {
         "all": {
-          "description": "Include normally-hidden statuses for the queried kind. Task adds done/rejected/archived; ADR adds superseded; learning adds superseded; doc is a no-op.",
+          "description": "Include normally-hidden statuses for the queried kind. Task adds done/rejected/archived; friction adds triaged/resolved; doc is a no-op.",
           "type": "boolean"
         },
         "hybrid": {
-          "description": "Opt into hybrid lexical + cosine ranking for indexed task, doc, and learning vectors; ADRs remain lexical.",
+          "description": "Opt into hybrid lexical + cosine ranking for indexed task and doc vectors; frictions remain lexical.",
           "type": "boolean"
         },
         "kind": {
-          "description": "Corpus kind: task, doc, learning, adr, or all. Default: all.",
+          "description": "Corpus kind: task, doc, adr, friction, or all. Default: all.",
           "type": "string"
         },
         "limit": {
@@ -473,7 +276,7 @@
           "type": "string"
         },
         "path": {
-          "description": "Filter to artifacts applicable to this filesystem path. Task: selector containment. Learning and ADR: glob-containment over applicability globs. Doc out of scope (returns empty).",
+          "description": "Filter to artifacts applicable to this filesystem path. Task uses selector containment; docs and frictions are skipped.",
           "type": "string"
         },
         "query": {
@@ -496,7 +299,7 @@
               "type": "string"
             }
           ],
-          "description": "Explicit per-kind status override using kind:value tokens, such as task:open,doc:active,adr:proposed. Overrides `all` for the named kind."
+          "description": "Explicit per-kind status override using kind:value tokens, such as task:open,doc:active,friction:open. Overrides `all` for the named kind."
         },
         "tag": {
           "anyOf": [
@@ -510,7 +313,7 @@
               "type": "string"
             }
           ],
-          "description": "AND-filter by tag. Repeat or pass an array. Applies to task, doc, learning, and ADR."
+          "description": "AND-filter by tag. Repeat or pass an array. Applies to task, doc, friction, and ADR."
         },
         "workspace": {
           "description": "Workspace selector for broker routing: a registered logical workspace ID or an absolute path to a local checkout (a linked Git worktree resolves to its registered checkout). Optional when the MCP session announced `_meta.orbit.workspace` at initialize; never inferred from process cwd.",

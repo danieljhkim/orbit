@@ -62,8 +62,7 @@ spec:
     1. Call `orbit.task.show` and read its title, description, acceptance
        criteria, plan, tags, relations, status, and exact current
        `context_files`. Use `orbit.search` for the task ID and relevant design
-       terms; inspect accepted ADRs with `orbit.adr.show` when a result points
-       to one.
+       terms; inspect linked decision docs when a result points to one.
     2. With `proc.spawn` run only read-only `git`/`rg` commands. Verify the
        workspace Git top-level, inspect `base_branch`, and determine every real
        file, directory, or symbol the stated change would modify or delete.
@@ -118,9 +117,7 @@ spec:
   tools:
     - orbit.task.show
     - orbit.task.list
-    - orbit.adr.show
     - orbit.search
-    - orbit.learning.show
     - fs.read
     - proc.spawn
   proc_allowed_programs:

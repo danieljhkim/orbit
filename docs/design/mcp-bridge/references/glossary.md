@@ -1,7 +1,7 @@
 ---
 type: glossary
 summary: "Glossary — Orbit MCP Bridge"
-last_validated: 2026-08-10
+last_validated: 2026-08-13
 ---
 
 # Glossary — Orbit MCP Bridge
@@ -12,6 +12,8 @@ The singular-hub vocabulary this glossary previously carried — hub link, hub m
 hub route, spoke, run lease, and the `runner` capability — is retired with
 [ADR-0226]/[ADR-0229]/[ADR-0230]; see
 [../../host-registry/4_decisions.md](../../host-registry/4_decisions.md).
+Learning-specific vocabulary is likewise retired by [ORB-10736] / [ADR-0359]
+and remains below only as historical terminology, not as a current contract.
 
 | Term | Meaning |
 |------|---------|

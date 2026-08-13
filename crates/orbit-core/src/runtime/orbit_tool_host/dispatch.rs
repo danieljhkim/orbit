@@ -41,20 +41,6 @@ pub(super) fn execute(
         OrbitBuiltinAction::Friction(verb) => {
             super::friction_tools::dispatch(runtime, verb, input, model)
         }
-        OrbitBuiltinAction::LearningAdd => super::learning_tools::add(runtime, input, agent, model),
-        OrbitBuiltinAction::LearningArchive => {
-            super::learning_tools::archive(runtime, input, agent, model)
-        }
-        OrbitBuiltinAction::LearningList => super::learning_tools::list(runtime, input),
-        OrbitBuiltinAction::LearningPrune => super::learning_tools::prune(runtime, input),
-        OrbitBuiltinAction::LearningSync => super::learning_tools::sync(runtime, input),
-        OrbitBuiltinAction::LearningShow => super::learning_tools::show(runtime, input),
-        OrbitBuiltinAction::LearningSupersede => {
-            super::learning_tools::supersede(runtime, input, agent, model)
-        }
-        OrbitBuiltinAction::LearningUpdate => {
-            super::learning_tools::update(runtime, input, agent, model)
-        }
         OrbitBuiltinAction::PipelineInvoke => {
             super::pipeline_tools::invoke(runtime, input, agent, model)
         }

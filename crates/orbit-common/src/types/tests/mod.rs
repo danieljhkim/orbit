@@ -9,7 +9,6 @@ mod executor_def;
 mod friction;
 mod host;
 mod job;
-mod learning;
 mod pricing;
 mod resource;
 mod routine;

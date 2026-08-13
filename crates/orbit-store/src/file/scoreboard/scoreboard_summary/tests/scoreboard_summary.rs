@@ -212,31 +212,6 @@ fn summary_counts_tasks_created_and_planned_across_all_statuses() {
 }
 
 #[test]
-fn summary_counts_knowledge_artifacts_by_author_family() {
-    let temp = tempfile::tempdir().expect("create tempdir");
-    let learnings = vec![
-        test_learning("L-0015", Some(TEST_CODEX_MODEL)),
-        test_learning("L-0016", Some(TEST_CLAUDE_MODEL)),
-        test_learning("L-0003", None),
-    ];
-    let summary = generate_summary_with_inputs(
-        temp.path(),
-        &[],
-        &ScoreboardInputs {
-            learnings: &learnings,
-            ..ScoreboardInputs::default()
-        },
-    )
-    .expect("generate summary");
-
-    let codex = summary.agents.get("codex").expect("codex summary");
-    assert_eq!(codex.knowledge.learnings_created, 1);
-
-    let claude = summary.agents.get("claude").expect("claude summary");
-    assert_eq!(claude.knowledge.learnings_created, 1);
-}
-
-#[test]
 fn summary_overlays_per_surface_tool_call_counts() {
     let temp = tempfile::tempdir().expect("create tempdir");
 
@@ -494,25 +469,6 @@ fn test_task_no_attrib(id: &str, status: TaskStatus) -> orbit_common::types::Tas
         orchestrator: None,
         created_at: Utc::now(),
         updated_at: Utc::now(),
-    }
-}
-
-fn test_learning(id: &str, created_by: Option<&str>) -> Learning {
-    use orbit_common::types::{LearningScope, LearningStatus};
-    Learning {
-        id: id.to_string(),
-        status: LearningStatus::Active,
-        scope: LearningScope::default(),
-        summary: id.to_string(),
-        body: String::new(),
-        evidence: Vec::new(),
-        supersedes: None,
-        superseded_by: None,
-        legacy_ids: Vec::new(),
-        created_at: Utc::now(),
-        updated_at: Utc::now(),
-        created_by: created_by.map(str::to_string),
-        priority: None,
     }
 }
 

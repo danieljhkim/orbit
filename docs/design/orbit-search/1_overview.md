@@ -3,7 +3,7 @@ summary: "Semantic Search — Overview"
 type: design
 title: "Semantic Search — Overview"
 owner: claude
-last_updated: 2026-05-20
+last_updated: 2026-08-13
 last_validated: 2026-08-09
 status: Draft
 feature: orbit-search
@@ -43,7 +43,7 @@ Users opt into semantic search by running `orbit semantic install [--model bge-s
 
 ### 2.2 Vector store
 
-A new SQLite table `embeddings` is stored in the workspace-local semantic database alongside the `corpus_fts` virtual table. Each row holds `(source_kind, source_id, field, chunk_idx, content_hash, model_id, dim, embedding BLOB)`. `source_kind` currently distinguishes task, doc, learning, and ADR rows; `field` distinguishes per-source fields and chunks.
+A new SQLite table `embeddings` is stored in the workspace-local semantic database alongside the `corpus_fts` virtual table. Each row holds `(source_kind, source_id, field, chunk_idx, content_hash, model_id, dim, embedding BLOB)`. `source_kind` currently distinguishes task and doc rows; ADRs are indexed through the docs corpus. The forward migration in [ORB-10736] removes rows from the retired native learning corpus.
 
 The implementation uses **brute-force cosine similarity** in Rust over the BLOBs. At the current corpus scale (low thousands of artifacts × a small number of fields per source = tens of thousands of vectors at 384d), brute force is sub-millisecond per query and adds zero new dependencies. The on-disk format remains forward-compatible with `sqlite-vec` should future local corpus growth push past brute-force scaling limits ([4_decisions.md ADR-002](./4_decisions.md)).
 
@@ -59,7 +59,7 @@ A task is indexed as multiple rows, one per field: `purpose`, `summary`, `plan`,
 
 ### 2.5 Phase boundary
 
-The shipped index covers tasks plus explicitly indexed docs, learnings, and ADRs. The old graph-corpus proposal was retired by ADR-0291 / ORB-10491; no current implementation or roadmap depends on `source_kind = symbol` rows.
+The shipped index covers tasks plus explicitly indexed docs, including ADR design records. The old graph-corpus proposal was retired by ADR-0291 / ORB-10491; no current implementation or roadmap depends on `source_kind = symbol` rows.
 
 ---
 

@@ -1,7 +1,7 @@
 ---
 title: Orbit MCP Bridge — Design
 owner: claude
-last_updated: 2026-08-12
+last_updated: 2026-08-13
 last_validated: 2026-08-02
 status: Draft
 feature: mcp-bridge
@@ -10,11 +10,16 @@ type: design
 summary: Target design for a local Orbit MCP broker with an SSH owner route, owner-local coordination, workspace-scoped knowledge, checkout-local indexes, role-aware search, capability sets, provenance, an owned tunnel for checkoutless clients, and Bridge parity retirement.
 tags: [mcp, remote-access, host-registry, bridge, ssh, routing]
 paths: ["crates/orbit-remote/**", "crates/orbit-mcp/**", "crates/orbit-core/**", "crates/orbit-tools/**", "crates/orbit-store/**", "crates/orbit-common/**"]
-related_features: [mcp-bridge, host-registry, mcp-session-context, remote-access, orbit-search, project-learnings]
+related_features: [mcp-bridge, host-registry, mcp-session-context, remote-access, orbit-search]
 related_artifacts: [ORB-00424, ORB-10257, ORB-10262, ORB-10267, ORB-10268, ORB-10269, ORB-10271, ORB-10272, ORB-10276, ORB-10302, ORB-10319, ORB-10330, ORB-10332, ORB-10534, ORB-10540, ORB-10544, ORB-10690, ORB-10710, ORB-10725, ORB-10727, ORB-10729, ADR-0181, ADR-0199, ADR-0200, ADR-0201, ADR-0226, ADR-0227, ADR-0228, ADR-0229, ADR-0230, ADR-0231, ADR-0232, ADR-0235, ADR-0240, ADR-0303, ADR-0348, ADR-0350, ADR-0351, ADR-0354, ADR-0355, ADR-0356, ADR-0357, ADR-0358]
 ---
 
 # Orbit MCP Bridge — Design
+
+> **Learning-subsystem retirement.** [ORB-10736] / [ADR-0359] remove the native
+> project-learning resource. Every learning-specific route, sidecar, placement,
+> allocation, search branch, and payload described below is retained only as
+> retired historical context and is not part of the current MCP contract.
 
 > **Status: Draft — structural rewrite in flight.** The singular-hub contract
 > ([ADR-0226], [ADR-0229], [ADR-0230]) is superseded by [ADR-0355]–[ADR-0358],

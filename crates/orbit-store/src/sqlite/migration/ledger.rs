@@ -108,12 +108,19 @@ pub(crate) const MIGRATIONS: &[Migration] = &[
         name: "workspace_claim_scope",
         apply: super::apply_workspace_claim_scope,
     },
+    // ORB-10736: keep the shipped learning migrations above intact, then
+    // retire their projections explicitly for both upgraded and fresh stores.
+    Migration {
+        version: 14,
+        name: "remove_native_learning_subsystem",
+        apply: super::apply_remove_native_learning_subsystem,
+    },
 ];
 
 /// Highest schema version this binary knows how to produce. Public for
 /// the future `orbit migrate` surface (P3.4), alongside
 /// [`AppliedMigration`] and the `Store` version accessors.
-pub const SUPPORTED_SCHEMA_VERSION: u32 = 13;
+pub const SUPPORTED_SCHEMA_VERSION: u32 = 14;
 
 const LEDGER_KEY_PREFIX: &str = "migration.v";
 

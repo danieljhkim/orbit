@@ -48,7 +48,6 @@ fi
 "$repo_root/scripts/check-terminal-state-guard.sh"
 "$repo_root/scripts/check-history-note-size.sh"
 "$repo_root/scripts/check-stability.sh"
-"$repo_root/scripts/check-learning-layout.sh"
 "$repo_root/scripts/check-artifact-redaction-guardrail.sh"
 "$repo_root/scripts/check-changelog-style.sh"
 "$repo_root/scripts/check-error-translation.sh"

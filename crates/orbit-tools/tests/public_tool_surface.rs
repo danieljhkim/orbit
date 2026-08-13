@@ -38,15 +38,12 @@ const INACTIVE_TOOL_NAMES: &[&str] = &[
     "orbit.semantic.index",
     "orbit.semantic.install",
     "orbit.semantic.stats",
-    "orbit.learning.sync",
-    "orbit.learning.list",
     "orbit.friction.stats",
     // Admin/destructive ops — CLI path retains them, agent MCP surface does
     // not expose them.
     "orbit.semantic.uninstall",
     "orbit.task.delete",
     "orbit.task.lint",
-    "orbit.learning.prune",
 ];
 
 #[test]

@@ -304,27 +304,9 @@
         <section class="panel" id="knowledge-panel">
           <header><span>Knowledge</span><span class="count" id="knowledge-count">-</span></header>
           <nav class="subtabs" id="knowledge-subtabs">
-            <button class="subtab" data-subtab="learnings" type="button">Learnings</button>
-            <button class="subtab" data-subtab="frictions" type="button">Frictions</button>
+            <button class="subtab active" data-subtab="frictions" type="button">Frictions</button>
           </nav>
-          <div class="learning-stats" id="learning-stats">
-            <div class="tile">
-              <span class="label">Total</span>
-              <span class="value" id="learning-total-value">-</span>
-              <span class="glyph">LRN</span>
-            </div>
-            <div class="tile">
-              <span class="label">Superseded</span>
-              <span class="value" id="learning-superseded-value">-</span>
-              <span class="glyph">SUP</span>
-            </div>
-            <div class="tile">
-              <span class="label">Last Indexed</span>
-              <span class="value" id="learning-last-indexed-value">-</span>
-              <span class="glyph">IDX</span>
-            </div>
-          </div>
-          <div class="friction-stats" id="friction-stats" style="display: none;">
+          <div class="friction-stats" id="friction-stats">
             <div class="tile">
               <span class="label">Open</span>
               <span class="value" id="friction-open-value">-</span>
@@ -342,17 +324,9 @@
             </div>
           </div>
           <div class="controls">
-            <input type="search" id="learning-search" placeholder="Search learnings..." autocomplete="off" spellcheck="false" />
-            <input type="search" id="friction-search" placeholder="Search frictions..." autocomplete="off" spellcheck="false" style="display: none;" />
+            <input type="search" id="friction-search" placeholder="Search frictions..." autocomplete="off" spellcheck="false" />
           </div>
-          <div class="body scoreboard-table-wrap" id="learnings-body">
-            <div class="skeleton-state">
-              <div class="skeleton skeleton-row"></div>
-              <div class="skeleton skeleton-row" style="width: 80%"></div>
-              <div class="skeleton skeleton-row" style="width: 70%"></div>
-            </div>
-          </div>
-          <div class="body scoreboard-table-wrap" id="frictions-body" style="display: none;">
+          <div class="body scoreboard-table-wrap" id="frictions-body">
             <div class="skeleton-state">
               <div class="skeleton skeleton-row"></div>
               <div class="skeleton skeleton-row" style="width: 80%"></div>
@@ -360,16 +334,7 @@
             </div>
           </div>
         </section>
-        <section class="panel" id="learning-detail-panel">
-          <header><span>Learning Detail</span><span class="count" id="learning-detail-count">-</span></header>
-          <div class="body" id="learning-detail">
-            <div class="empty-state">
-              <div class="icon">✧</div>
-              <div class="text">No learning selected.</div>
-            </div>
-          </div>
-        </section>
-        <section class="panel" id="friction-detail-panel" style="display: none;">
+        <section class="panel" id="friction-detail-panel">
           <header><span>Friction Detail</span><span class="count" id="friction-detail-count">-</span></header>
           <div class="body" id="friction-detail">
             <div class="empty-state">

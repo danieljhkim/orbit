@@ -138,13 +138,6 @@ impl AuditEventStoreBackend for SqliteAuditEventStoreBackend {
         self.store.get_audit_event_aggregates_by_role(since)
     }
 
-    fn get_learning_usage_stats(
-        &self,
-        since: Option<&DateTime<Utc>>,
-    ) -> Result<Vec<crate::LearningUsageStat>, OrbitError> {
-        self.store.get_learning_usage_stats(since)
-    }
-
     fn prune_audit_events(&self, older_than: &DateTime<Utc>) -> Result<usize, OrbitError> {
         self.store.prune_audit_events(older_than)
     }

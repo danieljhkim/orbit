@@ -355,152 +355,6 @@
   {
     "active": true,
     "builtin": true,
-    "description": "Create an active project learning. Returns `{ id, created_at }` plus the full record.",
-    "enabled": true,
-    "name": "orbit.learning.add",
-    "parameters": [
-      {
-        "description": "One-line headline (≤ 280 chars). Required.",
-        "name": "summary",
-        "param_type": "string",
-        "required": true
-      },
-      {
-        "description": "Scope object: `{ paths?: string[], tags?: string[] }`. Matches are evaluated as `paths OR tags` per §3.3.",
-        "name": "scope",
-        "param_type": "object",
-        "required": true
-      },
-      {
-        "description": "Long-form prose (markdown).",
-        "name": "body",
-        "param_type": "string",
-        "required": false
-      },
-      {
-        "description": "Array of `{ kind: \"task\"|\"commit\"|\"external\", ref: string }` entries. Optional.",
-        "name": "evidence",
-        "param_type": "object_list",
-        "required": false
-      },
-      {
-        "description": "Optional priority (0–255). Used as the secondary ranking key in `search`; higher wins.",
-        "name": "priority",
-        "param_type": "integer",
-        "required": false
-      },
-      {
-        "description": "Preferred provenance field. Pass the canonical agent family (codex, claude, gemini, or grok); full model strings are accepted and auto-normalized.",
-        "name": "model",
-        "param_type": "string",
-        "required": false
-      }
-    ],
-    "status": "active"
-  },
-  {
-    "active": true,
-    "builtin": true,
-    "description": "Retire `id` without a replacement: flips status to `superseded` with `superseded_by: null`. Idempotent — archiving an already-superseded record is a no-op success. Use `orbit.learning.supersede` instead when a replacement learning exists.",
-    "enabled": true,
-    "name": "orbit.learning.archive",
-    "parameters": [
-      {
-        "description": "learning ID",
-        "name": "id",
-        "param_type": "string",
-        "required": true
-      }
-    ],
-    "status": "active"
-  },
-  {
-    "active": true,
-    "builtin": true,
-    "description": "Fetch a single learning by ID as JSON. Returns the full record including body and evidence.",
-    "enabled": true,
-    "name": "orbit.learning.show",
-    "parameters": [
-      {
-        "description": "learning ID",
-        "name": "id",
-        "param_type": "string",
-        "required": true
-      }
-    ],
-    "status": "active"
-  },
-  {
-    "active": true,
-    "builtin": true,
-    "description": "Mark `id` as superseded by `with`. Writes both pointers atomically and excludes the old record from default search.",
-    "enabled": true,
-    "name": "orbit.learning.supersede",
-    "parameters": [
-      {
-        "description": "ID of the learning being superseded.",
-        "name": "id",
-        "param_type": "string",
-        "required": true
-      },
-      {
-        "description": "ID of the replacement learning. Must differ from `id`. Both records must exist.",
-        "name": "with",
-        "param_type": "string",
-        "required": true
-      }
-    ],
-    "status": "active"
-  },
-  {
-    "active": true,
-    "builtin": true,
-    "description": "Partial update of a learning. Rejects updates on superseded records (use `orbit.learning.supersede` instead).",
-    "enabled": true,
-    "name": "orbit.learning.update",
-    "parameters": [
-      {
-        "description": "Learning ID to update.",
-        "name": "id",
-        "param_type": "string",
-        "required": true
-      },
-      {
-        "description": "Replace `summary` (≤ 280 chars).",
-        "name": "summary",
-        "param_type": "string",
-        "required": false
-      },
-      {
-        "description": "Replace `scope` entirely: `{ paths?: string[], tags?: string[] }`.",
-        "name": "scope",
-        "param_type": "object",
-        "required": false
-      },
-      {
-        "description": "Replace `body`.",
-        "name": "body",
-        "param_type": "string",
-        "required": false
-      },
-      {
-        "description": "Replace `evidence` array.",
-        "name": "evidence",
-        "param_type": "object_list",
-        "required": false
-      },
-      {
-        "description": "Replace `priority`. Pass an integer to set, `null` to clear, or omit to leave unchanged.",
-        "name": "priority",
-        "param_type": "integer",
-        "required": false
-      }
-    ],
-    "status": "active"
-  },
-  {
-    "active": true,
-    "builtin": true,
     "description": "Submit a durable pipeline run and return immediately with its run ID.",
     "enabled": true,
     "name": "orbit.pipeline.invoke",
@@ -581,7 +435,7 @@
   {
     "active": true,
     "builtin": true,
-    "description": "Search tasks, docs, and learnings. ADR entries are retrieved through the docs corpus; hybrid vector ranking applies to indexed tasks, docs, and learnings.",
+    "description": "Search tasks, docs, ADRs, and frictions. ADR entries are retrieved through the docs corpus; hybrid vector ranking applies to indexed tasks and docs.",
     "enabled": true,
     "name": "orbit.search",
     "parameters": [
@@ -592,7 +446,7 @@
         "required": false
       },
       {
-        "description": "Opt into hybrid lexical + cosine ranking for indexed task, doc, and learning vectors; ADRs remain lexical.",
+        "description": "Opt into hybrid lexical + cosine ranking for indexed task and doc vectors; frictions remain lexical.",
         "name": "hybrid",
         "param_type": "boolean",
         "required": false
@@ -604,7 +458,7 @@
         "required": false
       },
       {
-        "description": "Corpus kind: task, doc, learning, adr, or all. Default: all.",
+        "description": "Corpus kind: task, doc, adr, friction, or all. Default: all.",
         "name": "kind",
         "param_type": "string",
         "required": false
@@ -616,25 +470,25 @@
         "required": false
       },
       {
-        "description": "AND-filter by tag. Repeat or pass an array. Applies to task, doc, learning, and ADR.",
+        "description": "AND-filter by tag. Repeat or pass an array. Applies to task, doc, friction, and ADR.",
         "name": "tag",
         "param_type": "string_list",
         "required": false
       },
       {
-        "description": "Include normally-hidden statuses for the queried kind. Task adds done/rejected/archived; ADR adds superseded; learning adds superseded; doc is a no-op.",
+        "description": "Include normally-hidden statuses for the queried kind. Task adds done/rejected/archived; friction adds triaged/resolved; doc is a no-op.",
         "name": "all",
         "param_type": "boolean",
         "required": false
       },
       {
-        "description": "Explicit per-kind status override using kind:value tokens, such as task:open,doc:active,adr:proposed. Overrides `all` for the named kind.",
+        "description": "Explicit per-kind status override using kind:value tokens, such as task:open,doc:active,friction:open. Overrides `all` for the named kind.",
         "name": "status",
         "param_type": "string_list",
         "required": false
       },
       {
-        "description": "Filter to artifacts applicable to this filesystem path. Task: selector containment. Learning and ADR: glob-containment over applicability globs. Doc out of scope (returns empty).",
+        "description": "Filter to artifacts applicable to this filesystem path. Task uses selector containment; docs and frictions are skipped.",
         "name": "path",
         "param_type": "string",
         "required": false

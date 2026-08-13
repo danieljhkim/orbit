@@ -61,7 +61,6 @@ fn error_code(err: &OrbitError) -> &str {
             | NotFoundKind::Activity
             | NotFoundKind::Adr
             | NotFoundKind::DesignFeature
-            | NotFoundKind::Learning
             | NotFoundKind::AgentSession
             | NotFoundKind::Workspace => "not_found",
         },

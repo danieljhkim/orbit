@@ -4,7 +4,7 @@ use std::path::Path;
 
 use chrono::{DateTime, Duration, Utc};
 use orbit_common::types::{
-    JobRun, JobRunState, Learning, OrbitError, Task, TaskStatus, all_agent_families,
+    JobRun, JobRunState, OrbitError, Task, TaskStatus, all_agent_families,
     infer_agent_family_from_model, normalize_attribution_label,
     normalize_optional_attribution_label,
 };
@@ -18,7 +18,7 @@ use orbit_common::utility::fs::atomic_write_text_volatile as write_atomic;
 const SUMMARY_FILENAME: &str = "summary.json";
 // v2 adds `task_review.threads`; v3 adds tasks_created/tasks_planned,
 // per-(role, surface) tool call counts, top-level workflows_run, and a
-// recent_7d window block. v4 added per-agent knowledge counters. v5 adds per-agent `friction.reported`
+// recent_7d window block. v5 adds per-agent `friction.reported`
 // (from append-only `.orbit/frictions/` records, matching `orbit.friction.stats`).
 // v6 ([ORB-00337]) adds top-level `window` + `window_since` fields and the
 // `ScoreboardInputs.window` plumbing — snapshot-sourced per-agent fields
@@ -123,11 +123,6 @@ pub struct PrSummary {
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
-pub struct KnowledgeSummary {
-    pub learnings_created: u64,
-}
-
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct FrictionSummary {
     /// Number of append-only friction records reported by this agent family.
     /// Sourced from `.orbit/frictions/` (via the same aggregation as
@@ -145,8 +140,6 @@ pub struct AgentSummary {
     pub tasks_planned: u64,
     pub tokens: TokenSummary,
     pub pr: PrSummary,
-    #[serde(default)]
-    pub knowledge: KnowledgeSummary,
     #[serde(default)]
     pub friction: FrictionSummary,
     pub tool_calls: u64,
@@ -350,8 +343,6 @@ pub struct ScoreboardInputs<'a> {
     /// Top (role, tool_name) pairs across the audit log, sorted desc by
     /// count. Drives the "most-called tools" leaderboard.
     pub top_tool_calls: &'a [AuditTopToolCall],
-    /// Workspace learning records, used for knowledge-stewardship counters.
-    pub learnings: &'a [Learning],
     /// Friction counts per reporting model label, already windowed by the
     /// caller with the same cutoff this module derives from `now`/`window`.
     /// Populates per-family `friction.reported` counts (so the dashboard
@@ -379,14 +370,12 @@ impl<'a> Default for ScoreboardInputs<'a> {
         static EMPTY_SURFACE: [AuditToolCallCountsBySurfaceAndRole; 0] = [];
         static EMPTY_JOB: [JobRun; 0] = [];
         static EMPTY_TOP: [AuditTopToolCall; 0] = [];
-        static EMPTY_LEARNING: [Learning; 0] = [];
         Self {
             audit_tool_calls: &EMPTY_AUDIT,
             audit_tool_calls_by_surface: &EMPTY_SURFACE,
             audit_tool_calls_by_surface_recent: &EMPTY_SURFACE,
             job_runs: &EMPTY_JOB,
             top_tool_calls: &EMPTY_TOP,
-            learnings: &EMPTY_LEARNING,
             friction_reported: &[],
             now: None,
             window: ScoreboardWindow::All,
@@ -485,7 +474,6 @@ pub fn generate_summary_with_inputs(
     overlay_audit_tool_calls(&mut agents, audit_tool_calls);
     overlay_audit_tool_calls_by_surface(&mut agents, inputs.audit_tool_calls_by_surface);
 
-    overlay_knowledge_counters(&mut agents, inputs, since);
     overlay_friction_reported(&mut agents, inputs.friction_reported);
 
     for task in tasks {
@@ -740,28 +728,6 @@ fn overlay_audit_tool_calls(
         // Total competes with token scoreboard data; failures only exist in audit rows.
         summary.tool_calls = summary.tool_calls.max(total);
         summary.failed_tool_calls = summary.failed_tool_calls.saturating_add(failed);
-    }
-}
-
-fn overlay_knowledge_counters(
-    agents: &mut BTreeMap<String, AgentSummary>,
-    inputs: &ScoreboardInputs<'_>,
-    since: Option<DateTime<Utc>>,
-) {
-    for learning in inputs.learnings {
-        if !in_window(Some(learning.created_at), since) {
-            continue;
-        }
-        let Some(created_by) = learning
-            .created_by
-            .as_deref()
-            .map(|raw| normalize_attribution_label(raw, None))
-            .filter(|value| !value.is_empty())
-        else {
-            continue;
-        };
-        let summary = agents.entry(family_key(&created_by)).or_default();
-        summary.knowledge.learnings_created = summary.knowledge.learnings_created.saturating_add(1);
     }
 }
 

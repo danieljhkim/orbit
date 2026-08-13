@@ -12,8 +12,7 @@ use serde_json::{Value, json};
 
 use super::super::OrbitToolServer;
 use super::super::test_support::{
-    LearningPersistenceHost, SessionContextHost, param, param_with_type, request_with_args,
-    tool_schema,
+    SessionContextHost, param, param_with_type, request_with_args, tool_schema,
 };
 
 #[test]
@@ -462,132 +461,6 @@ fn property_for_unknown_emits_tracing_warn_at_target() {
         logs.contains(token),
         "offending token named in event: {logs}"
     );
-}
-
-#[test]
-fn learning_add_schema_advertises_object_list_shape_for_evidence() {
-    let params = vec![
-        param_with_type("summary", "string"),
-        param_with_type("scope", "object"),
-        param_with_type("evidence", "object_list"),
-        param_with_type("model", "string"),
-    ];
-    let schema = build_input_schema("orbit.learning.add", &params);
-    let properties = schema
-        .get("properties")
-        .and_then(Value::as_object)
-        .expect("properties");
-    let ev = properties
-        .get("evidence")
-        .and_then(Value::as_object)
-        .expect("evidence property");
-    assert!(
-        ev.get("anyOf").is_some(),
-        "evidence must use anyOf (array-of-object | string), got: {ev:?}"
-    );
-    // must not be the old silent string
-    assert_ne!(
-        ev.get("type").and_then(Value::as_str),
-        Some("string"),
-        "evidence must not degrade to plain string"
-    );
-}
-
-#[tokio::test]
-async fn orbit_learning_add_via_mcp_adapter_accepts_evidence_array() {
-    let host = Arc::new(LearningPersistenceHost::new());
-    let server = OrbitToolServer::new(host);
-
-    let evidence = json!([{ "kind": "task", "ref": "T-test" }]);
-    let req = request_with_args(
-        "orbit.learning.add",
-        json!({
-            "summary": "MCP evidence array test",
-            "scope": { "tags": ["mcp-test"] },
-            "evidence": evidence,
-            "model": "grok"
-        }),
-    );
-    let res = server
-        .call_tool_request(req)
-        .await
-        .expect("MCP call to learning.add succeeds");
-    let body = res.structured_content.expect("structured response");
-    let id = body.get("id").and_then(Value::as_str).expect("created id");
-
-    // re-fetch via show (exercises round-trip)
-    let show_req = request_with_args("orbit.learning.show", json!({ "id": id }));
-    let show_res = server
-        .call_tool_request(show_req)
-        .await
-        .expect("show after add");
-    let shown = show_res.structured_content.expect("shown record");
-    let got_ev = shown
-        .get("evidence")
-        .and_then(Value::as_array)
-        .expect("evidence persisted as array");
-    assert_eq!(got_ev.len(), 1, "one evidence entry");
-    assert_eq!(got_ev[0]["kind"], "task");
-    assert_eq!(got_ev[0]["ref"], "T-test");
-    // response shape has the fields show would return
-    assert!(shown.get("id").is_some());
-    assert!(shown.get("created_at").is_some() || shown.get("updated_at").is_some());
-}
-
-#[tokio::test]
-async fn orbit_learning_update_via_mcp_adapter_accepts_evidence_array_live_repro() {
-    let host = Arc::new(LearningPersistenceHost::new());
-    let server = OrbitToolServer::new(host);
-
-    // seed via add
-    let seed = request_with_args(
-        "orbit.learning.add",
-        json!({
-            "summary": "for update repro",
-            "scope": { "tags": ["repro"] },
-            "model": "claude"
-        }),
-    );
-    let seed_res = server.call_tool_request(seed).await.expect("seed add");
-    let seed_id = seed_res
-        .structured_content
-        .expect("seed body")
-        .get("id")
-        .and_then(Value::as_str)
-        .expect("seed id")
-        .to_string();
-
-    // Now the live reproduction: update evidence via MCP.
-    let new_evidence = json!([{ "kind": "task", "ref": "ORB-00022" }]);
-    let upd_req = request_with_args(
-        "orbit.learning.update",
-        json!({
-            "id": seed_id,
-            "model": "claude",
-            "evidence": new_evidence
-        }),
-    );
-    let upd_res = server
-        .call_tool_request(upd_req)
-        .await
-        .expect("update via MCP must succeed (was failing before fix)");
-    let _updated = upd_res.structured_content.expect("update response");
-
-    // verify by show
-    let show_req = request_with_args("orbit.learning.show", json!({ "id": seed_id }));
-    let shown = server
-        .call_tool_request(show_req)
-        .await
-        .expect("show after update")
-        .structured_content
-        .expect("shown");
-    let ev = shown
-        .get("evidence")
-        .and_then(Value::as_array)
-        .expect("evidence after update is array");
-    assert_eq!(ev.len(), 1);
-    assert_eq!(ev[0]["ref"], "ORB-00022");
-    assert_eq!(ev[0]["kind"], "task");
 }
 
 /// ORB-00234/ORB-00255: MCP schema for orbit_task_add advertises the trimmed

@@ -16,7 +16,6 @@ fn runtime_free_command_set_is_derived_from_operations() {
         &["orbit", "mcp", "serve"],
         &["orbit", "migrate"],
         &["orbit", "migrate", "--dry-run"],
-        &["orbit", "learning", "migrate-layout"],
         &["orbit", "run", "ship-sweep", "--dry-run"],
         &["orbit", "sweep", "--dry-run"],
         &["orbit", "routine", "list"],
@@ -35,7 +34,6 @@ fn runtime_free_command_set_is_derived_from_operations() {
     let runtime_required: &[&[&str]] = &[
         &["orbit", "workspace", "list"],
         &["orbit", "migrate", "--confirm"],
-        &["orbit", "learning", "list"],
         &["orbit", "run", "history"],
         &["orbit", "task", "list"],
     ];
@@ -103,13 +101,6 @@ fn json_error_preferences_are_derived_from_operations() {
         operation_for(&["orbit", "docs", "list"]).json_error_preference,
         None
     );
-}
-
-#[test]
-fn only_pretooluse_suppresses_runtime_and_command_errors() {
-    assert!(operation_for(&["orbit", "hook", "pretooluse", "--format", "codex"]).suppress_errors);
-    assert!(!operation_for(&["orbit", "hook", "install"]).suppress_errors);
-    assert!(!operation_for(&["orbit", "task", "list"]).suppress_errors);
 }
 
 #[test]

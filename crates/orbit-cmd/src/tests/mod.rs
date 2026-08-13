@@ -3,6 +3,4 @@
 //! orbit-core in [ORB-10016].
 
 mod doctor;
-mod hook_install;
-mod learning_hook;
 mod migrate;

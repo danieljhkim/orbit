@@ -4,10 +4,9 @@
 use orbit_agent::AgentConfig;
 use orbit_common::types::activity_job::{Backend, Provider};
 use orbit_common::types::{
-    ActivityV2, AgentModelPair, ExternalRef, InvocationTrace, JobRun, JobRunState,
-    LearningInjectionCaps, LearningInjectionState, LearningReminder, OrbitError, OrbitEvent,
-    PipelineState, Role, Task, TaskArtifact, TaskComment, TaskHistoryEntry, TaskPriority,
-    TaskStatus,
+    ActivityV2, AgentModelPair, ExternalRef, InvocationTrace, JobRun, JobRunState, OrbitError,
+    OrbitEvent, PipelineState, Role, Task, TaskArtifact, TaskComment, TaskHistoryEntry,
+    TaskPriority, TaskStatus,
 };
 use orbit_exec::EnvironmentMode;
 use orbit_store::JobRunStepParams;
@@ -444,25 +443,6 @@ pub trait RuntimeHost: Send + Sync {
     /// without leaking store or task-query details into orbit-engine.
     fn task_context_for_agent_input(&self, _input: &Value) -> Result<Option<Value>, DispatchError> {
         Ok(None)
-    }
-
-    /// Return project-learning reminders relevant to the task represented by
-    /// `input`. Implementors that do not own task storage can ignore this; the
-    /// engine preserves the original prompt when the returned set is empty.
-    fn learning_reminders_for_task(
-        &self,
-        _input: &Value,
-        _caps: LearningInjectionCaps,
-    ) -> Result<Vec<LearningReminder>, DispatchError> {
-        Ok(Vec::new())
-    }
-
-    fn persist_session_learning_state(
-        &self,
-        _session_id: &str,
-        _state: &LearningInjectionState,
-    ) -> Result<(), DispatchError> {
-        Ok(())
     }
 
     /// Persist a durable checkpoint after a completed top-level job step

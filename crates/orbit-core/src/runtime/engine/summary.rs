@@ -50,7 +50,6 @@ impl OrbitRuntime {
             .stores()
             .jobs()
             .list_job_runs_filtered(&JobRunQuery::default())?;
-        let learnings = self.list_learnings(None)?;
         // Same cutoff `generate_summary_with_inputs` derives internally, applied
         // in SQL so the scoreboard never materializes the friction corpus
         // (ORB-10680).
@@ -66,7 +65,6 @@ impl OrbitRuntime {
                 audit_tool_calls_by_surface_recent: &audit_tool_calls_by_surface_recent,
                 job_runs: &job_runs,
                 top_tool_calls: &top_tool_calls,
-                learnings: &learnings,
                 friction_reported: &friction_reported,
                 now: Some(now),
                 window,

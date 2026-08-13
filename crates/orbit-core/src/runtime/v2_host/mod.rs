@@ -10,7 +10,6 @@
 pub(super) mod backlog_exclusion;
 pub(super) mod cli_executor;
 pub(super) mod dispatch;
-pub(super) mod learning_reminders;
 pub(super) mod pipeline_actions;
 pub(super) mod sandbox;
 pub(super) mod task_context;

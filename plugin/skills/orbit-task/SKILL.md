@@ -65,7 +65,7 @@ If implementation surfaces a file outside the original `context_files`, append i
 
 In a linked pipeline worktree, never use positional `git stash` / `git stash pop`: refs and the stash list are repository-global, so a positional pop can restore another session's work. Record the worktree's initial `git rev-parse HEAD` and compare against that explicit baseline with `git diff <baseline-sha> -- <paths>`.
 
-**Step 5 — Summarize and hand off.** Persist `execution_summary` via `orbit.task.update` first. Then consider friction: if the task surfaced a contradicted assumption, a recurring failure mode, a non-obvious gotcha, or an incident root cause, file it (see [references/friction.md](references/friction.md)). Do not reach for `orbit.learning.add` here — the authoring gate refuses learnings from executor context, so the call is wasted rather than a judgment call. Then:
+**Step 5 — Summarize and hand off.** Persist `execution_summary` via `orbit.task.update` first. Then consider friction: if the task surfaced a contradicted assumption, a recurring failure mode, a non-obvious gotcha, or an incident root cause, file it (see [references/friction.md](references/friction.md)). Then:
 
 - **Under an activity envelope** (e.g. `agent_implement`): persist the summary only. The pipeline owns the `review` transition after commit/merge/PR steps succeed.
 - **Direct execution** (no envelope): persist the summary *and* move to `review` via `orbit.task.update`.

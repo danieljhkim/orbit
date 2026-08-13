@@ -547,7 +547,6 @@ fn kernel_enforces_versioned_orbit_exceptions_and_protected_stores_when_availabl
         "resources",
         "state",
         "tasks",
-        "learnings",
         "adrs",
         "frictions",
         "future-store",
@@ -560,7 +559,6 @@ fn kernel_enforces_versioned_orbit_exceptions_and_protected_stores_when_availabl
         "config.lock",
         "state/run.json",
         "tasks/task.yaml",
-        "learnings/learning.yaml",
         "adrs/adr.yaml",
         "frictions/friction.md",
         "future-store/record.json",
@@ -602,7 +600,6 @@ fn kernel_enforces_versioned_orbit_exceptions_and_protected_stores_when_availabl
     let denied = [
         orbit.join("state/run.json"),
         orbit.join("tasks/task.yaml"),
-        orbit.join("learnings/learning.yaml"),
         orbit.join("adrs/adr.yaml"),
         orbit.join("frictions/friction.md"),
         orbit.join("orbit.db"),

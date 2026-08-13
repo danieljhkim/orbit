@@ -2234,7 +2234,6 @@ version = "0.10.0"
 dependencies = [
  "chrono",
  "hostname",
- "orbit-cmd",
  "orbit-common",
  "orbit-core",
  "orbit-mcp",

@@ -3,7 +3,7 @@ summary: "Semantic Search — Vision"
 type: design
 title: "Semantic Search — Vision"
 owner: claude
-last_updated: 2026-05-21
+last_updated: 2026-08-13
 last_validated: 2026-08-09
 status: Draft
 feature: orbit-search
@@ -142,7 +142,7 @@ Every published "hybrid retrieval" production system above runs as a service. Or
 
 ### 3.2 One vector store for multiple local corpora
 
-The schema's `source_kind` discriminator is not future-proofing for its own sake; it lets tasks, docs, learnings, and ADRs share one workspace-local vector store while retaining corpus-specific indexing and filters. The brute-force implementation stays appropriate for the current corpus size, and the `sqlite-vec` upgrade path remains available if future local corpora make that necessary. Most orbit-search-on-tasks projects assume tasks are the whole story; this one explicitly does not.
+The schema's `source_kind` discriminator is not future-proofing for its own sake; it lets tasks and docs share one workspace-local vector store while retaining corpus-specific indexing and filters. ADRs participate as design docs. The brute-force implementation stays appropriate for the current corpus size, and the `sqlite-vec` upgrade path remains available if future local corpora make that necessary. Most orbit-search-on-tasks projects assume tasks are the whole story; this one explicitly does not.
 
 ### 3.3 Failure-mode honesty in the score breakdown
 

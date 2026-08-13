@@ -4,7 +4,6 @@ mod config;
 mod contract;
 mod discovery;
 mod host;
-mod learning;
 mod owner;
 mod owner_client;
 mod owner_link;
@@ -22,14 +21,13 @@ use std::sync::Arc;
 use orbit_common::types::{McpCapability, ToolSessionContext};
 use orbit_core::OrbitError;
 use orbit_core::runtime::resolve_global_root;
-use orbit_mcp::{McpHost, McpResultDecorator, McpServerComposition, McpServerMetadata};
+use orbit_mcp::{McpHost, McpServerComposition, McpServerMetadata};
 
 use crate::{HostIdentityState, inspect_host_identity};
 
 use self::config::{TrustedMcpConfig, load_trusted_mcp_config};
 use self::contract::owner_schema_digest;
 use self::host::{BrokerMcpHost, OwnerRoute, OwnerRouteTable};
-use self::learning::{LearningSidecarDecorator, LearningSidecarHost};
 use self::owner::OwnerMcpHost;
 use self::owner_link::OwnerLinkPool;
 use self::schema::RemoteInputSchemaResolver;
@@ -235,21 +233,12 @@ fn owner_route_table(
     Ok(table)
 }
 
-fn broker_server_composition(host: Arc<BrokerMcpHost>) -> McpServerComposition {
-    let learning_host: Arc<dyn LearningSidecarHost> = host;
-    let learning: Arc<dyn McpResultDecorator> =
-        Arc::new(LearningSidecarDecorator::from_env(learning_host));
-    McpServerComposition::new()
-        .with_result_decorator(learning)
-        .with_input_schema_resolver(Arc::new(RemoteInputSchemaResolver))
+fn broker_server_composition(_host: Arc<BrokerMcpHost>) -> McpServerComposition {
+    McpServerComposition::new().with_input_schema_resolver(Arc::new(RemoteInputSchemaResolver))
 }
 
 fn owner_server_composition(host: Arc<OwnerMcpHost>) -> McpServerComposition {
-    let learning_host: Arc<dyn LearningSidecarHost> = host.clone();
-    let learning: Arc<dyn McpResultDecorator> =
-        Arc::new(LearningSidecarDecorator::from_env(learning_host));
     McpServerComposition::new()
-        .with_result_decorator(learning)
         .with_call_context_resolver(Arc::new(RemoteCallContextResolver))
         .with_input_schema_resolver(Arc::new(RemoteInputSchemaResolver))
         .with_metadata(McpServerMetadata::default().with_instructions(host.contract_instructions()))

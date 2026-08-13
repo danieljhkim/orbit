@@ -3,7 +3,7 @@ summary: "User Interface — Design"
 type: design
 title: "User Interface — Design"
 owner: gemini
-last_updated: 2026-08-09
+last_updated: 2026-08-13
 status: Draft
 feature: user-interface
 doc_role: design
@@ -40,7 +40,7 @@ Diagnostics has an Errors sub-tab after [T20260508-14]. It renders recent backen
 
 Diagnostics no longer has a Friction sub-tab after [ORB-00060]. The Friction name is reserved for append-only `.orbit/frictions/` artifacts, while audit-derived negative run signals stay visible in Recent Runs. Recent Runs joins `/api/job-runs` with `/api/diagnostics/friction` client-side by run id (`run_id`/`job_run`) and keeps the table sortable across `denials`, `tool fails`, and `duration`; the duration cell can carry the long-run flag when the diagnostics source supplies one. This preserves column continuity with the existing compact dashboard telemetry direction from [T20260428-15].
 
-Knowledge is now a top-level dashboard tab after [ORB-00061]. Its first sub-tab, Learnings, mirrors the dense task-list pattern: a left scan table backed by `/api/learnings`, a right detail panel backed by the same learning JSON shape as CLI/MCP output, and compact stats tiles for `total`, `superseded`, and `last indexed`. Supersession stays an explicit local action (`POST /api/learnings/:id/supersede`) guarded by the localhost-origin middleware, so curation can happen without leaving the dashboard.
+Knowledge is a top-level dashboard tab for friction triage. The retired native learning panels, routes, metrics, and mutations were removed by [ORB-10736].
 
 Knowledge detail panels stay pinned while the artifact list scrolls after [ORB-10444]. The list grows well past a viewport, and scrolling it used to carry the pane the operator was reading out of view. The detail panel is sticky below the fixed chrome (header, tabs, health strip) and bounded to the remaining viewport height, so detail content taller than the screen scrolls inside the pane rather than being clipped. The single-column breakpoint unpins it, where the pane already stacks below the list.
 
@@ -69,7 +69,7 @@ Accessibility still needs a real WCAG pass; responsive behavior remains optimize
 - [T20260430-29] bounded the live `orbit.log` panel to the viewport.
 - [T20260508-14] added Run Detail agent-log previews and Diagnostics > Errors.
 - [ORB-00060] collapsed Diagnostics > Friction into Recent Runs diagnostics columns.
-- [ORB-00061] added the Knowledge tab and Learnings curation surface.
+- [ORB-10736] removed the native learning curation surface while preserving friction triage.
 - [ORB-00144] grouped scoreboard metrics and added knowledge counters.
 - [ORB-10444] retired a deprecated tab, folded Scoreboard under Diagnostics, pinned the Knowledge detail pane, and added task ship + comments.
 

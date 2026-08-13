@@ -52,7 +52,6 @@ const STATUS_UPDATE_TARGETS = STATUS_ORDER
 
 const JOB_RUN_LIMIT = positiveIntParam("runs", 25);
 const DIAG_LIMIT = positiveIntParam("diag", 50);
-const LEARNING_LIMIT = positiveIntParam("learnings", 100);
 const FRICTION_LIMIT = positiveIntParam("frictions", 100);
 
 const FRICTION_STATUSES = ["open", "triaged", "resolved"];
@@ -66,14 +65,11 @@ let activeStatuses = new Set(
 let lastTasks = [];
 let lastRuns = [];
 let lastDiagnostics = { metrics: [], errors: [], implement_one: [] };
-let lastLearningPayload = { stats: {}, items: [] };
 let lastFrictionPayload = { stats: {}, tags: [], items: [] };
 let activeTab = "tasks";
 let activeDiagSubtab = "runs";
-let activeKnowledgeSubtab = "learnings";
+let activeKnowledgeSubtab = "frictions";
 let isRefreshing = false;
-let activeLearningId = null;
-let learningSearchQuery = "";
 let activeFrictionId = null;
 let frictionSearchQuery = "";
 
@@ -328,28 +324,6 @@ function fmtDuration(ms) {
   return `${Math.floor(ms / 60000)}m${Math.floor((ms % 60000) / 1000)}s`;
 }
 
-function evidenceCount(learning) {
-  return Array.isArray(learning && learning.evidence) ? learning.evidence.length : 0;
-}
-
-function learningScopeNodes(learning) {
-  const scope = (learning && learning.scope) || {};
-  const paths = Array.isArray(scope.paths) ? scope.paths : [];
-  const tags = Array.isArray(scope.tags) ? scope.tags : [];
-  const chips = [];
-  for (const tag of tags.slice(0, 3)) {
-    chips.push(el("span", { class: "knowledge-tag", text: `#${tag}`, title: tag }));
-  }
-  for (const path of paths.slice(0, Math.max(0, 4 - chips.length))) {
-    chips.push(el("span", { class: "knowledge-tag path", text: truncate(path, 28), title: path }));
-  }
-  if (paths.length + tags.length > chips.length) {
-    chips.push(el("span", { class: "knowledge-tag dim", text: `+${paths.length + tags.length - chips.length}` }));
-  }
-  if (chips.length === 0) chips.push(el("span", { class: "knowledge-tag", text: "global" }));
-  return chips;
-}
-
 function knowledgeStatusPill(status) {
   const value = status || "active";
   return el("span", { class: `knowledge-pill ${value}`, text: value });
@@ -360,16 +334,6 @@ function knowledgeTagWrap(nodes) {
   return el("span", { class: "knowledge-tags" }, values.length > 0
     ? values
     : [el("span", { class: "knowledge-tag dim", text: "-" })]);
-}
-
-function evidenceMeter(count) {
-  const total = Math.max(0, Number(count) || 0);
-  const dots = [];
-  for (let i = 0; i < 5; i += 1) {
-    dots.push(el("i", { class: i < Math.min(total, 5) ? "on" : "" }));
-  }
-  dots.push(el("span", { class: "lbl", text: `${total} ev` }));
-  return el("span", { class: "knowledge-evidence", title: `${total} evidence references` }, dots);
 }
 
 function detailMetaRows(entries) {
@@ -401,164 +365,6 @@ function markdownPanel(body, fallbackClass) {
     view.textContent = text || "No body.";
   }
   return view;
-}
-
-function renderLearningStats(stats = {}) {
-  $("learning-total-value").textContent = formatBigInt(stats.total || 0);
-  $("learning-superseded-value").textContent = formatBigInt(stats.superseded || 0);
-  $("learning-last-indexed-value").textContent = stats.last_indexed
-    ? fmtTimestamp(stats.last_indexed)
-    : "-";
-}
-
-function renderLearnings(payload) {
-  const body = $("learnings-body");
-  if (!body) return;
-  const items = Array.isArray(payload && payload.items) ? payload.items : [];
-  const stats = (payload && payload.stats) || {};
-  renderLearningStats(stats);
-  $("knowledge-count").textContent = `${items.length}/${stats.total || items.length}`;
-
-  if (items.length > 0 && !items.some((item) => item.id === activeLearningId)) {
-    activeLearningId = items[0].id;
-  }
-  if (items.length === 0) activeLearningId = null;
-
-  if (items.length === 0) {
-    syncNodes(body, [el("div", { class: "empty-state" }, [
-      el("div", { class: "icon", text: "✧" }),
-      el("div", { class: "text", text: "No learnings match the current filter." }),
-    ])]);
-    renderLearningDetail(null);
-    return;
-  }
-
-  const frag = document.createDocumentFragment();
-
-  for (const learning of items) {
-    const evidence = evidenceCount(learning);
-    const row = el("div", { class: "knowledge-row learning-row", title: learning.summary || learning.id }, [
-      el("div", { class: "top" }, [
-        el("span", { class: "id", text: learning.id, title: learning.id }),
-        el("span", { class: "spacer" }),
-        el("span", { class: "when", text: fmtTimestamp(learning.updated_at), title: fmtAbsTime(learning.updated_at) }),
-      ]),
-      el("div", { class: "title", text: learning.summary || learning.id }),
-      el("div", { class: "summary", text: truncate(learning.body || learning.summary || "", 180) }),
-      el("div", { class: "meta" }, [
-        knowledgeStatusPill(learning.status || "active"),
-        el("span", { class: "dot", text: "·" }),
-        knowledgeTagWrap(learningScopeNodes(learning)),
-        el("span", { class: "dot", text: "·" }),
-        evidenceMeter(evidence),
-      ]),
-    ]);
-    row.dataset.key = `learning-${learning.id}`;
-    row.dataset.hash = `${learning.id}-${learning.status}-${learning.updated_at}-${evidence}-${activeLearningId === learning.id}`;
-    if (activeLearningId === learning.id) row.classList.add("active");
-    row.addEventListener("click", () => {
-      activeLearningId = learning.id;
-      renderLearnings(lastLearningPayload);
-    });
-    frag.appendChild(row);
-  }
-
-  syncNodes(body, Array.from(frag.children));
-  renderLearningDetail(items.find((item) => item.id === activeLearningId) || items[0]);
-}
-
-function renderLearningDetail(learning) {
-  const detail = $("learning-detail");
-  if (!detail) return;
-  const count = $("learning-detail-count");
-  if (!learning) {
-    if (count) count.textContent = "-";
-    syncNodes(detail, [el("div", { class: "empty-state" }, [
-      el("div", { class: "icon", text: "✧" }),
-      el("div", { class: "text", text: "No learning selected." }),
-    ])]);
-    return;
-  }
-  if (count) count.textContent = learning.status || "active";
-
-  const actions = el("div", { class: "actions" });
-  const supersede = el("button", {
-    class: "knowledge-btn primary",
-    text: "supersede",
-    title: `Supersede ${learning.id}`,
-  });
-  supersede.type = "button";
-  supersede.disabled = learning.status === "superseded";
-  supersede.addEventListener("click", () => {
-    const by = window.prompt(`Replacement learning ID for ${learning.id}`);
-    if (!by || !by.trim()) return;
-    supersedeLearning(learning, by.trim(), supersede, detail);
-  });
-  actions.appendChild(supersede);
-
-  const evidence = evidenceCount(learning);
-  const body = el("div", { class: "knowledge-detail-body" }, [
-    el("div", { class: "knowledge-body" }, [
-      markdownPanel(learning.body || learning.summary, "learning-detail-body"),
-      el("div", { class: "evidence-line" }, [
-        el("span", { class: "lbl", text: "evidence" }),
-        el("span", { text: `${evidence} references` }),
-      ]),
-    ]),
-    el("aside", { class: "knowledge-side" }, [
-      detailGroup("metadata", detailMetaRows([
-        ["id", learning.id],
-        ["status", learning.status || "active"],
-        ["evidence", `${evidence} refs`],
-        ["created", fmtAbsTime(learning.created_at)],
-        ["updated", fmtAbsTime(learning.updated_at)],
-        ["created_by", learning.created_by],
-      ])),
-      detailGroup("scope", knowledgeTagWrap(learningScopeNodes(learning))),
-      detailGroup("supersession", knowledgeTagWrap([
-        ...(Array.isArray(learning.supersedes) ? learning.supersedes.map((id) => el("span", { class: "knowledge-tag", text: `supersedes ${id}` })) : []),
-        ...(learning.superseded_by ? [el("span", { class: "knowledge-tag", text: `superseded_by ${learning.superseded_by}` })] : []),
-      ])),
-    ]),
-  ]);
-
-  syncNodes(detail, [
-    el("div", { class: "knowledge-detail-head" }, [
-      el("div", { class: "crumb" }, [
-        el("span", { class: "id", text: learning.id }),
-        el("span", { text: "·" }),
-        el("span", { text: "learning" }),
-        el("span", { text: "·" }),
-        el("span", { text: learning.status || "active" }),
-      ]),
-      el("h2", { text: learning.summary || learning.id }),
-      el("div", { class: "sub" }, [
-        knowledgeStatusPill(learning.status || "active"),
-        el("span", { text: `${evidence} evidence refs` }),
-        el("span", { class: "dot", text: "·" }),
-        el("span", { text: `updated ${fmtTimestamp(learning.updated_at)}` }),
-      ]),
-      actions,
-    ]),
-    body,
-  ]);
-}
-
-async function supersedeLearning(learning, by, btn, detail) {
-  const oldText = btn.textContent;
-  btn.disabled = true;
-  btn.innerHTML = `<span class="spinner"></span>wait`;
-  for (const node of detail.querySelectorAll(".action-error")) node.remove();
-  try {
-    await postJson(`/api/learnings/${encodeURIComponent(learning.id)}/supersede`, { by });
-    activeLearningId = learning.id;
-    await fetchAndRenderLearnings();
-  } catch (e) {
-    detail.prepend(el("div", { class: "action-error", text: e.message || "supersede failed" }));
-  } finally {
-    btn.disabled = false;
-    btn.textContent = oldText;
-  }
 }
 
 function frictionTagNodes(tags = []) {
@@ -830,19 +636,6 @@ function openTaskFromKnowledge(taskId) {
   }).catch(() => copyTaskIdWithNotice(taskId, taskContext()));
 }
 
-function wireLearningSearch() {
-  const input = $("learning-search");
-  if (!input) return;
-  let debounce = null;
-  input.addEventListener("input", (e) => {
-    learningSearchQuery = e.target.value.trim();
-    if (debounce) clearTimeout(debounce);
-    debounce = setTimeout(() => {
-      if (activeTab === "knowledge") fetchAndRenderLearnings().catch(console.error);
-    }, 200);
-  });
-}
-
 function wireFrictionSearch() {
   const input = $("friction-search");
   if (!input) return;
@@ -978,8 +771,8 @@ function renderDiagnosticsPlaceholders() {
   if (diagCount) diagCount.textContent = "—";
 }
 
-// ORB-00044: the knowledge detail panels (learning-detail / friction-detail) hold live action buttons (supersede, accept, resolve, and
-// the friction status/tag controls) that POST/PATCH per-workspace endpoints.
+// ORB-00044: the friction detail panel holds live action buttons and status/tag
+// controls that POST/PATCH per-workspace endpoints.
 // Left stale in aggregate mode, a click would fire without ?workspace= — 400 in
 // pure-global mode, or a silent write to the default workspace inside a
 // --global workspace — so the stale detail is replaced by the same placeholder
@@ -1132,11 +925,7 @@ function activeRefreshJobs() {
   }
 
   if (activeTab === "knowledge") {
-    if (activeKnowledgeSubtab === "frictions") {
-      jobs.push(fetchAndRenderFrictions());
-    } else {
-      jobs.push(fetchAndRenderLearnings());
-    }
+    jobs.push(fetchAndRenderFrictions());
     return jobs;
   }
 
@@ -1277,25 +1066,6 @@ function fetchAndRenderSummary() {
   });
 }
 
-function fetchAndRenderLearnings() {
-  // ORB-00040: /api/learnings is per-workspace and 400s without a concrete
-  // workspace. Guard at the fetch chokepoint so every entry point (auto-refresh,
-  // tab activation, and the search box) shows the placeholder instead of firing.
-  // ORB-00044: also replace the stale detail panel (live supersede button).
-  if (isAggregateView()) {
-    renderPanelPlaceholder("learnings-body");
-    renderKnowledgeDetailPlaceholder("learning");
-    return Promise.resolve();
-  }
-  const sp = new URLSearchParams();
-  sp.set("limit", String(LEARNING_LIMIT));
-  if (learningSearchQuery) sp.set("q", learningSearchQuery);
-  return fetchJson(`/api/learnings?${sp.toString()}`).then((payload) => {
-    lastLearningPayload = payload || { stats: {}, items: [] };
-    renderLearnings(lastLearningPayload);
-  });
-}
-
 function fetchAndRenderFrictions() {
   // ORB-00040: /api/frictions and /api/frictions/stats are per-workspace; skip
   // both in aggregate mode.
@@ -1411,7 +1181,6 @@ async function refreshDashboard() {
 const tasksContext = taskContext();
 buildChips(tasksContext);
 wireSearch(tasksContext);
-wireLearningSearch();
 wireFrictionSearch();
 wireGlobalTaskResolver();
 buildAuditChips(auditContext());

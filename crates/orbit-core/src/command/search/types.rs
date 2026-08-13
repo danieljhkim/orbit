@@ -11,7 +11,7 @@ use super::DEFAULT_LIMIT;
 pub enum GlobalSearchKind {
     Task,
     Doc,
-    Learning,
+    Friction,
     #[default]
     All,
 }
@@ -21,7 +21,7 @@ impl GlobalSearchKind {
         match self {
             Self::Task => "task",
             Self::Doc => "doc",
-            Self::Learning => "learning",
+            Self::Friction => "friction",
             Self::All => "all",
         }
     }
@@ -34,8 +34,8 @@ impl GlobalSearchKind {
         matches!(self, Self::Doc | Self::All)
     }
 
-    pub(super) fn includes_learnings(self) -> bool {
-        matches!(self, Self::Learning | Self::All)
+    pub(super) fn includes_frictions(self) -> bool {
+        matches!(self, Self::Friction | Self::All)
     }
 }
 
@@ -46,10 +46,10 @@ impl FromStr for GlobalSearchKind {
         match raw.trim().to_ascii_lowercase().as_str() {
             "task" => Ok(Self::Task),
             "doc" => Ok(Self::Doc),
-            "learning" => Ok(Self::Learning),
+            "friction" => Ok(Self::Friction),
             "all" => Ok(Self::All),
             other => Err(format!(
-                "invalid search kind `{other}`; expected one of: task, doc, learning, all"
+                "invalid search kind `{other}`; expected one of: task, doc, friction, all"
             )),
         }
     }
@@ -72,7 +72,7 @@ pub struct GlobalSearchParams {
     pub kind: GlobalSearchKind,
     pub limit: usize,
     /// AND-filter by tag. Repeat for multi-tag AND semantics. Applies to
-    /// task, doc, learning (and `all`).
+    /// task, doc, and friction (and `all`).
     pub tags: Vec<String>,
     /// Include normally-hidden statuses for the queried kind(s). Mutually
     /// overridden by `status`.
@@ -81,8 +81,7 @@ pub struct GlobalSearchParams {
     /// takes precedence over the `all` widener.
     pub status: Vec<String>,
     /// Cross-kind applicability filter. Task: selector-mapping against
-    /// `context_files`. Learning: glob-containment against applicability path
-    /// globs. Doc: out of scope (returns empty).
+    /// `context_files`. Doc: out of scope (returns empty).
     pub path: Option<String>,
 }
 
