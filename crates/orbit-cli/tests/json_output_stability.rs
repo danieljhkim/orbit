@@ -112,19 +112,14 @@ fn json_flag_output_is_untouched_by_the_global_format_machinery() {
 fn empty_list_json_is_exactly_an_empty_array() {
     let fixture = fixture();
 
-    for command in [
-        ["task", "list"].as_slice(),
-        ["adr", "list"].as_slice(),
-        ["learning", "list"].as_slice(),
-    ] {
-        let mut args = command.to_vec();
-        args.push("--json");
+    let command = ["task", "list"];
+    let mut args = command.to_vec();
+    args.push("--json");
 
-        assert_eq!(
-            run(&fixture.home, &fixture.work, &args, &[]),
-            b"[]\n",
-            "`orbit {} --json` must emit a bare empty array",
-            command.join(" ")
-        );
-    }
+    assert_eq!(
+        run(&fixture.home, &fixture.work, &args, &[]),
+        b"[]\n",
+        "`orbit {} --json` must emit a bare empty array",
+        command.join(" ")
+    );
 }

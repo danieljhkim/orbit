@@ -1153,6 +1153,25 @@ fn apply_workspace_claim_scope(conn: &Connection) -> Result<(), OrbitError> {
     Ok(())
 }
 
+/// v14 `remove_native_learning_subsystem` (ORB-10736): remove every SQLite
+/// projection owned by the retired native learning resource. Existing files
+/// under `.orbit/learnings/` are deliberately outside the database migration
+/// and remain untouched as inert historical data.
+fn apply_remove_native_learning_subsystem(conn: &Connection) -> Result<(), OrbitError> {
+    if table_exists(conn, "embeddings")? && table_has_column(conn, "embeddings", "source_kind")? {
+        conn.execute("DELETE FROM embeddings WHERE source_kind = 'learning'", [])
+            .map_err(|error| OrbitError::Store(error.to_string()))?;
+    }
+    conn.execute_batch(
+        r#"
+            DROP TABLE IF EXISTS learnings_index;
+            DROP TABLE IF EXISTS session_learning_state;
+            DROP TABLE IF EXISTS id_allocations;
+        "#,
+    )
+    .map_err(|error| OrbitError::Store(error.to_string()))
+}
+
 fn ensure_task_reservations_schema(conn: &Connection) -> Result<(), OrbitError> {
     conn.execute_batch(
         r#"

@@ -3,7 +3,7 @@ summary: "MCP Session Context — Decisions"
 type: design
 title: "MCP Session Context — Decisions"
 owner: codex
-last_updated: 2026-08-11
+last_updated: 2026-08-13
 last_validated: 2026-08-08
 status: Accepted
 feature: mcp-session-context
@@ -15,6 +15,10 @@ related_artifacts: ["ORB-00256", "ORB-00406", "ORB-10228", "ORB-10262", "ORB-103
 ---
 
 # MCP Session Context — Decisions
+
+> **Retired learning clauses:** [ORB-10736] / [ADR-0359] removed the native
+> project-learning resource. Learning-specific examples in earlier entries are
+> historical context only and are not part of the current MCP surface.
 
 ADR log for MCP session context. Format follows [docs/design/CONVENTIONS.md §4](../CONVENTIONS.md): each entry is `Context · Decision · Consequences`, every entry names at least one Cost, and numbers are append-only.
 

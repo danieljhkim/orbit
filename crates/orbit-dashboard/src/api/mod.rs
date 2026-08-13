@@ -25,7 +25,6 @@ mod denials;
 mod diagnostics;
 mod frictions;
 mod jobs;
-mod learnings;
 mod log;
 mod metrics;
 mod reliability;
@@ -247,10 +246,6 @@ pub(super) fn map_runtime_error(e: orbit_core::OrbitError) -> Response {
             kind: orbit_core::NotFoundKind::JobRun,
             id,
         } => not_found(format!("run not found: {id}")),
-        orbit_core::OrbitError::NotFound {
-            kind: orbit_core::NotFoundKind::Learning,
-            id,
-        } => not_found(format!("learning not found: {id}")),
         error @ orbit_core::OrbitError::RemoteArtifactUnavailable { .. } => {
             artifact_conflict(error, "remote_artifact_unavailable")
         }
@@ -390,15 +385,6 @@ pub(super) fn router() -> Router<crate::state::DashboardState> {
         .route("/tasks/:id/approve", post(tasks::approve_task_action))
         .route("/tasks/:id/reject", post(tasks::reject_task_action))
         .route("/tasks/:id/archive", post(tasks::archive_task_action))
-        .route("/learnings", get(learnings::list_learnings))
-        .route(
-            "/learnings/:id",
-            get(learnings::get_learning).patch(learnings::update_learning_action),
-        )
-        .route(
-            "/learnings/:id/supersede",
-            post(learnings::supersede_learning_action),
-        )
         .route(
             "/frictions",
             get(frictions::list_frictions).post(frictions::create_friction_action),

@@ -158,27 +158,6 @@ struct ActionPolicy {
     nested_arrays: &'static [NestedArrayPolicy],
 }
 
-const LEARNING_NESTED: &[NestedArrayPolicy] = &[
-    NestedArrayPolicy {
-        array_key: "scope",
-        field_key: "tags",
-        field_alias: None,
-        mode: TextMode::Free,
-    },
-    NestedArrayPolicy {
-        array_key: "scope",
-        field_key: "paths",
-        field_alias: None,
-        mode: TextMode::PathOnly,
-    },
-    NestedArrayPolicy {
-        array_key: "evidence",
-        field_key: "ref",
-        field_alias: Some("reference"),
-        mode: TextMode::Free,
-    },
-];
-
 const TASK_ADD_NESTED: &[NestedArrayPolicy] = &[
     NestedArrayPolicy {
         array_key: "external_refs",
@@ -211,15 +190,6 @@ fn policy_for_action(action: OrbitBuiltinAction) -> Option<ActionPolicy> {
             path_arrays: &[],
             nested_arrays: &[],
         }),
-        OrbitBuiltinAction::LearningAdd | OrbitBuiltinAction::LearningUpdate => {
-            Some(ActionPolicy {
-                free_text_fields: &["summary", "body"],
-                free_text_arrays: &[],
-                path_fields: &[],
-                path_arrays: &[],
-                nested_arrays: LEARNING_NESTED,
-            })
-        }
         OrbitBuiltinAction::TaskAdd => Some(ActionPolicy {
             free_text_fields: &["title", "description", "plan", "comment"],
             free_text_arrays: &["acceptance_criteria"],
@@ -261,9 +231,7 @@ fn policy_for_action(action: OrbitBuiltinAction) -> Option<ActionPolicy> {
             path_arrays: &[],
             nested_arrays: &[],
         }),
-        OrbitBuiltinAction::AdrSupersede
-        | OrbitBuiltinAction::LearningSupersede
-        | OrbitBuiltinAction::LearningArchive => Some(ActionPolicy {
+        OrbitBuiltinAction::AdrSupersede => Some(ActionPolicy {
             free_text_fields: &[],
             free_text_arrays: &[],
             path_fields: &[],
@@ -281,10 +249,6 @@ fn is_covered_mutating_action(action: OrbitBuiltinAction) -> bool {
             | OrbitBuiltinAction::AdrRestore
             | OrbitBuiltinAction::AdrUpdate
             | OrbitBuiltinAction::AdrSupersede
-            | OrbitBuiltinAction::LearningAdd
-            | OrbitBuiltinAction::LearningUpdate
-            | OrbitBuiltinAction::LearningSupersede
-            | OrbitBuiltinAction::LearningArchive
             | OrbitBuiltinAction::TaskAdd
             | OrbitBuiltinAction::TaskUpdate
             | OrbitBuiltinAction::TaskReject
@@ -550,14 +514,6 @@ fn artifact_target(
             artifact_id: response_string(response, "id")?,
             task_id: None,
         }),
-        OrbitBuiltinAction::LearningAdd
-        | OrbitBuiltinAction::LearningUpdate
-        | OrbitBuiltinAction::LearningSupersede
-        | OrbitBuiltinAction::LearningArchive => Ok(ArtifactTarget {
-            artifact_type: "learning",
-            artifact_id: learning_response_id(action, response)?,
-            task_id: None,
-        }),
         OrbitBuiltinAction::TaskAdd
         | OrbitBuiltinAction::TaskUpdate
         | OrbitBuiltinAction::TaskReject => {
@@ -581,19 +537,6 @@ fn artifact_target(
     }
 }
 
-fn learning_response_id(action: OrbitBuiltinAction, response: &Value) -> Result<&str, OrbitError> {
-    if action == OrbitBuiltinAction::LearningSupersede {
-        return response
-            .get("old")
-            .and_then(|value| value.get("id"))
-            .and_then(Value::as_str)
-            .ok_or_else(|| {
-                OrbitError::Execution("learning supersede response missing old.id".to_string())
-            });
-    }
-    response_string(response, "id")
-}
-
 fn response_string<'a>(response: &'a Value, field: &str) -> Result<&'a str, OrbitError> {
     response.get(field).and_then(Value::as_str).ok_or_else(|| {
         OrbitError::Execution(format!("redaction audit response missing string `{field}`"))
@@ -606,10 +549,6 @@ fn tool_name(action: OrbitBuiltinAction) -> &'static str {
         OrbitBuiltinAction::AdrRestore => "orbit.adr.restore",
         OrbitBuiltinAction::AdrUpdate => "orbit.adr.update",
         OrbitBuiltinAction::AdrSupersede => "orbit.adr.supersede",
-        OrbitBuiltinAction::LearningAdd => "orbit.learning.add",
-        OrbitBuiltinAction::LearningUpdate => "orbit.learning.update",
-        OrbitBuiltinAction::LearningSupersede => "orbit.learning.supersede",
-        OrbitBuiltinAction::LearningArchive => "orbit.learning.archive",
         OrbitBuiltinAction::TaskAdd => "orbit.task.add",
         OrbitBuiltinAction::TaskUpdate => "orbit.task.update",
         OrbitBuiltinAction::TaskReject => "orbit.task.reject",
@@ -626,23 +565,6 @@ mod tests {
     use std::sync::{Mutex, MutexGuard, OnceLock};
 
     use crate::runtime::orbit_tool_host::test_support::test_runtime;
-
-    /// Declare a human caller context for a test that dispatches a learning
-    /// *write* tool.
-    ///
-    /// [ORB-10364] gates `orbit.learning.add`/`update`/`supersede` on the
-    /// `ORBIT_AGENT_*` pair, which a child of a managed Orbit run inherits (the
-    /// ORB-10350 hazard). These tests assert redaction behaviour, not the role
-    /// gate, so they state the context they need instead of inheriting whatever
-    /// the suite was launched with.
-    fn human_context_env() -> orbit_common::test_env::ScopedEnv {
-        orbit_common::test_env::unset(
-            orbit_common::test_env::AGENT_IDENTITY_ENV
-                .iter()
-                .copied()
-                .chain(std::iter::once("ORBIT_LEARNING_AUTHOR")),
-        )
-    }
 
     struct EnvVarGuard {
         _lock: MutexGuard<'static, ()>,
@@ -723,13 +645,6 @@ mod tests {
                 }),
             ),
             (
-                OrbitBuiltinAction::LearningAdd,
-                json!({
-                    "summary": "ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZabcd123456",
-                    "body": "Body",
-                }),
-            ),
-            (
                 OrbitBuiltinAction::TaskAdd,
                 json!({
                     "title": "xoxb-0123456789",
@@ -753,31 +668,6 @@ mod tests {
                 "{action:?}: {err:?}"
             );
         }
-    }
-
-    #[test]
-    fn learning_policy_treats_tags_as_text_and_paths_as_paths() {
-        let home = std::env::var("HOME").expect("HOME for redaction test");
-        let input = json!({
-            "summary": "summary",
-            "scope": {
-                "tags": ["token ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZabcd123456"],
-                "paths": [format!("{home}/repo/**/*.rs"), "[ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZabcd123456]/**/*.rs"],
-            },
-            "evidence": [{"kind": "task", "ref": "see xoxb-0123456789"}],
-        });
-
-        let (sanitized, report) =
-            sanitize_tool_input(OrbitBuiltinAction::LearningAdd, input).expect("sanitize");
-
-        assert!(report.redactions_applied());
-        assert_eq!(sanitized["scope"]["tags"][0], "token [REDACTED_SECRET]");
-        assert_eq!(sanitized["scope"]["paths"][0], "~/repo/**/*.rs");
-        assert_eq!(
-            sanitized["scope"]["paths"][1],
-            "[ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZabcd123456]/**/*.rs"
-        );
-        assert_eq!(sanitized["evidence"][0]["ref"], "see [REDACTED_SECRET]");
     }
 
     #[test]
@@ -888,49 +778,6 @@ mod tests {
     }
 
     #[test]
-    fn adr_and_learning_dispatch_redact_live_github_token_in_persisted_fields() {
-        let token = "orbit-adr-learning-secret-value";
-        // Acquired before `EnvVarGuard` so the two locks are always taken in
-        // the same order.
-        let _identity = human_context_env();
-        let _env = EnvVarGuard::set("GITHUB_TOKEN", token);
-        let (_root, runtime, _repo_root) = test_runtime();
-
-        let adr = runtime
-            .execute_tool_command(
-                "orbit.adr.add",
-                json!({
-                    "title": format!("decision {token}"),
-                    "body": format!("## Context\n{token}"),
-                }),
-                Some("codex".to_string()),
-                Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
-            )
-            .expect("adr add succeeds");
-        assert_eq!(adr["redactions_applied"], true);
-        assert_eq!(adr["title"], "decision [REDACTED_ENV]");
-
-        let learning = runtime
-            .execute_tool_command(
-                "orbit.learning.add",
-                json!({
-                    "summary": format!("summary {token}"),
-                    "body": format!("body {token}"),
-                    "scope": { "tags": [format!("tag {token}")] },
-                    "evidence": [{ "kind": "task", "ref": format!("ref {token}") }],
-                }),
-                Some("codex".to_string()),
-                Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
-            )
-            .expect("learning add succeeds");
-        assert_eq!(learning["redactions_applied"], true);
-        assert_eq!(learning["summary"], "summary [REDACTED_ENV]");
-        assert_eq!(learning["body"], "body [REDACTED_ENV]");
-        assert_eq!(learning["scope"]["tags"][0], "tag [redacted_env]");
-        assert_eq!(learning["evidence"][0]["ref"], "ref [REDACTED_ENV]");
-    }
-
-    #[test]
     fn dispatch_marks_false_and_emits_no_audit_when_input_is_already_sanitized() {
         let (_root, runtime, _repo_root) = test_runtime();
         let created = runtime
@@ -974,7 +821,6 @@ mod tests {
 
     #[test]
     fn dispatch_adds_false_response_flags_for_each_covered_family() {
-        let _identity = human_context_env();
         let (_root, runtime, _repo_root) = test_runtime();
 
         let task = runtime
@@ -990,33 +836,6 @@ mod tests {
             )
             .expect("task add succeeds");
         assert_eq!(task["redactions_applied"], false);
-
-        let adr = runtime
-            .execute_tool_command(
-                "orbit.adr.add",
-                json!({
-                    "title": "Decision",
-                    "body": "## Context\nBody",
-                }),
-                Some("codex".to_string()),
-                Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
-            )
-            .expect("adr add succeeds");
-        assert_eq!(adr["redactions_applied"], false);
-
-        let learning = runtime
-            .execute_tool_command(
-                "orbit.learning.add",
-                json!({
-                    "summary": "Always test the seam",
-                    "body": "Body",
-                    "scope": { "paths": ["crates/**"], "tags": ["testing"] },
-                }),
-                Some("codex".to_string()),
-                Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
-            )
-            .expect("learning add succeeds");
-        assert_eq!(learning["redactions_applied"], false);
 
         let friction = runtime
             .execute_tool_command(

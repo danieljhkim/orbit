@@ -1,11 +1,10 @@
 use std::collections::{BTreeMap, VecDeque};
 
-use orbit_common::types::{LearningStatus, OrbitError};
+use orbit_common::types::OrbitError;
 use orbit_search::{
-    DocSemanticHit, DocSemanticSearchParams, LearningSemanticHit, LearningSemanticSearchParams,
-    SemanticRelatedParams, SemanticSearchParams,
+    DocSemanticHit, DocSemanticSearchParams, SemanticRelatedParams, SemanticSearchParams,
 };
-use orbit_store::LearningSearchParams;
+use orbit_store::friction_store::FrictionListFilter;
 
 use crate::OrbitRuntime;
 use crate::command::docs::SearchResult;
@@ -26,20 +25,16 @@ pub use types::{
 
 use self::convert::{doc_result_to_global, lexical_task_hit, semantic_hit_to_global};
 use self::filters::{
-    SearchStatusFilters, doc_has_all_tags, learning_has_all_tags, resolve_learning_statuses,
-    resolve_task_statuses, task_has_all_tags,
+    SearchStatusFilters, doc_has_all_tags, resolve_task_statuses, task_has_all_tags,
 };
 use self::hybrid::{
-    DocHybridCandidate, LearningHybridCandidate, blend_doc_hybrid_candidates,
-    blend_learning_hybrid_candidates, compare_global_hits_by_score, doc_search_candidate_limit,
-    lexical_doc_hits, push_skip_note, warn_doc_hybrid_fallback, warn_learning_hybrid_fallback,
+    DocHybridCandidate, blend_doc_hybrid_candidates, compare_global_hits_by_score,
+    doc_search_candidate_limit, lexical_doc_hits, push_skip_note, warn_doc_hybrid_fallback,
 };
-use self::path_match::learning_scope_contains_path;
 
 const DEFAULT_LIMIT: usize = 10;
 const DOC_SEARCH_OVERFETCH: usize = 4;
 const DOC_HYBRID_FALLBACK_NOTE: &str = "falling back to lexical doc search";
-const LEARNING_HYBRID_FALLBACK_NOTE: &str = "falling back to lexical learning search";
 const TASK_HYBRID_FALLBACK_NOTE: &str = "falling back to lexical task search";
 const DOC_SEARCH_MIN_CANDIDATES: usize = DEFAULT_LIMIT * DOC_SEARCH_OVERFETCH;
 
@@ -48,9 +43,6 @@ thread_local! {
     static DOC_SEMANTIC_SEARCH_OVERRIDE:
         std::cell::RefCell<Option<Result<Vec<DocSemanticHit>, String>>> =
         const { std::cell::RefCell::new(None) };
-    static LEARNING_SEMANTIC_SEARCH_OVERRIDE:
-        std::cell::RefCell<Option<Result<Vec<LearningSemanticHit>, String>>> =
-        const { std::cell::RefCell::new(None) };
     static TASK_SEMANTIC_SEARCH_OVERRIDE:
         std::cell::RefCell<Option<Result<Vec<orbit_search::SemanticHit>, String>>> =
         const { std::cell::RefCell::new(None) };
@@ -58,8 +50,6 @@ thread_local! {
 
 #[derive(Debug, Clone, Copy)]
 struct HybridSearchScope<'a> {
-    params: &'a GlobalSearchParams,
-    status_filters: &'a SearchStatusFilters,
     tag_filter: &'a [String],
     limit: usize,
 }
@@ -158,15 +148,22 @@ impl OrbitRuntime {
             }
         }
 
-        if params.kind.includes_learnings() {
-            branches.push(self.learning_branch(
-                &params,
-                &status_filters,
-                query_owned.as_deref(),
-                &tag_filter,
-                limit,
-                &mut notes,
-            )?);
+        if params.kind.includes_frictions() {
+            if has_path {
+                push_skip_note(
+                    &mut notes,
+                    "friction",
+                    "--path is set; frictions are not path-filtered",
+                );
+            } else {
+                branches.push(self.friction_branch(
+                    &params,
+                    &status_filters,
+                    query_owned.as_deref(),
+                    &tag_filter,
+                    limit,
+                )?);
+            }
         }
 
         let results = merge_round_robin(branches, limit);
@@ -254,6 +251,62 @@ impl OrbitRuntime {
         Ok(out)
     }
 
+    fn friction_branch(
+        &self,
+        params: &GlobalSearchParams,
+        status_filters: &SearchStatusFilters,
+        query: Option<&str>,
+        tag_filter: &[String],
+        limit: usize,
+    ) -> Result<Vec<GlobalSearchHit>, OrbitError> {
+        let status = status_filters
+            .friction
+            .or((!params.all).then_some(orbit_common::types::FrictionStatus::Open));
+        let records = crate::runtime::orbit_tool_host::friction_tools::store_for(self)?.list(
+            &FrictionListFilter {
+                status,
+                q: query.map(str::to_string),
+                limit: None,
+                ..FrictionListFilter::default()
+            },
+        )?;
+
+        Ok(records
+            .into_iter()
+            .filter(|stored| {
+                tag_filter.iter().all(|needle| {
+                    stored
+                        .record
+                        .tags
+                        .iter()
+                        .any(|candidate| candidate.eq_ignore_ascii_case(needle))
+                })
+            })
+            .take(limit)
+            .map(|stored| {
+                let record = stored.record;
+                GlobalSearchHit {
+                    kind: "friction".to_string(),
+                    source: "lexical".to_string(),
+                    id: Some(record.id.clone()),
+                    path: None,
+                    title: Some(orbit_common::friction::effective_title(
+                        record.title.as_deref(),
+                        &record.body,
+                        &record.id,
+                    )),
+                    summary: None,
+                    status: Some(record.status.as_str().to_string()),
+                    best_field: None,
+                    snippet: Some(record.body),
+                    score: None,
+                    score_breakdown: None,
+                    matched_by: None,
+                }
+            })
+            .collect())
+    }
+
     fn lexical_task_candidates(
         &self,
         query: &str,
@@ -335,12 +388,7 @@ impl OrbitRuntime {
             return self.hybrid_doc_hits(
                 query,
                 docs,
-                HybridSearchScope {
-                    params,
-                    status_filters,
-                    tag_filter,
-                    limit,
-                },
+                HybridSearchScope { tag_filter, limit },
                 notes,
             );
         }
@@ -476,246 +524,6 @@ impl OrbitRuntime {
         Ok(orbit_search::doc_semantic_search(
             &self.stores().semantic_vector,
             DocSemanticSearchParams {
-                query: query.to_string(),
-                limit,
-                model: None,
-            },
-        )?
-        .results)
-    }
-
-    fn learning_branch(
-        &self,
-        params: &GlobalSearchParams,
-        status_filters: &SearchStatusFilters,
-        query: Option<&str>,
-        tag_filter: &[String],
-        limit: usize,
-        notes: &mut Vec<String>,
-    ) -> Result<Vec<GlobalSearchHit>, OrbitError> {
-        let lexical =
-            self.learning_lexical_hits(params, status_filters, query, tag_filter, limit)?;
-        if !params.hybrid {
-            return Ok(lexical);
-        }
-        let Some(query) = query else {
-            return Ok(lexical);
-        };
-
-        self.hybrid_learning_hits(
-            query,
-            lexical,
-            HybridSearchScope {
-                params,
-                status_filters,
-                tag_filter,
-                limit,
-            },
-            notes,
-        )
-    }
-
-    fn learning_lexical_hits(
-        &self,
-        params: &GlobalSearchParams,
-        status_filters: &SearchStatusFilters,
-        query: Option<&str>,
-        tag_filter: &[String],
-        limit: usize,
-    ) -> Result<Vec<GlobalSearchHit>, OrbitError> {
-        let statuses = resolve_learning_statuses(params, status_filters);
-        let active_only = statuses == vec![LearningStatus::Active];
-
-        // Fast path: when the status set is exactly `[Active]` and we have a
-        // query *or* path *or* a single tag, route through the indexed
-        // `search_learnings` for speed.
-        let single_tag = match tag_filter {
-            [tag] => Some(tag.clone()),
-            _ => None,
-        };
-        if active_only && (query.is_some() || params.path.is_some() || single_tag.is_some()) {
-            let learnings = self.search_learnings(LearningSearchParams {
-                path: params.path.clone(),
-                tag: single_tag,
-                query: query.map(str::to_string),
-                limit: Some(limit.saturating_mul(2).max(limit)),
-            })?;
-            let mut out = Vec::new();
-            for result in learnings {
-                // Multi-tag AND filter on top of the index pass.
-                if tag_filter.len() > 1 && !learning_has_all_tags(&result.learning, tag_filter) {
-                    continue;
-                }
-                out.push(GlobalSearchHit {
-                    kind: "learning".to_string(),
-                    source: "lexical".to_string(),
-                    id: Some(result.learning.id),
-                    path: None,
-                    title: None,
-                    summary: Some(result.learning.summary),
-                    status: Some(result.learning.status.as_str().to_string()),
-                    best_field: None,
-                    snippet: None,
-                    score: None,
-                    score_breakdown: None,
-                    matched_by: Some(result.matched_by),
-                });
-            }
-            out.truncate(limit);
-            return Ok(out);
-        }
-
-        // Slow path: enumerate learnings honoring the requested status set,
-        // then filter in-memory. Used when `--all`/`--status` widens beyond
-        // the active set or when a multi-tag AND is requested.
-        let mut out = Vec::new();
-        for status in &statuses {
-            let learnings = self.list_learnings(Some(*status))?;
-            for learning in learnings {
-                if let Some(query) = query
-                    && !learning
-                        .summary
-                        .to_lowercase()
-                        .contains(&query.to_lowercase())
-                {
-                    continue;
-                }
-                if !tag_filter.is_empty() && !learning_has_all_tags(&learning, tag_filter) {
-                    continue;
-                }
-                if let Some(path) = params.path.as_deref()
-                    && !learning_scope_contains_path(&learning, path)?
-                {
-                    continue;
-                }
-                out.push(GlobalSearchHit {
-                    kind: "learning".to_string(),
-                    source: "lexical".to_string(),
-                    id: Some(learning.id),
-                    path: None,
-                    title: None,
-                    summary: Some(learning.summary),
-                    status: Some(learning.status.as_str().to_string()),
-                    best_field: None,
-                    snippet: None,
-                    score: None,
-                    score_breakdown: None,
-                    matched_by: None,
-                });
-            }
-        }
-        out.truncate(limit);
-        Ok(out)
-    }
-
-    fn hybrid_learning_hits(
-        &self,
-        query: &str,
-        lexical: Vec<GlobalSearchHit>,
-        scope: HybridSearchScope<'_>,
-        notes: &mut Vec<String>,
-    ) -> Result<Vec<GlobalSearchHit>, OrbitError> {
-        let learning_limit = doc_search_candidate_limit(scope.limit);
-        let lexical_fallback = lexical.clone();
-        let mut lexical_learnings = BTreeMap::<String, LearningHybridCandidate>::new();
-        let lexical_count = lexical.len();
-        for (idx, hit) in lexical.into_iter().enumerate() {
-            let Some(id) = hit.id.clone() else {
-                continue;
-            };
-            lexical_learnings.insert(
-                id,
-                LearningHybridCandidate {
-                    hit: GlobalSearchHit {
-                        source: "hybrid".to_string(),
-                        ..hit
-                    },
-                    lexical_score: Some((lexical_count - idx) as f32),
-                    semantic_score: None,
-                    semantic: None,
-                },
-            );
-        }
-
-        let semantic = match self.learning_semantic_hits(query, learning_limit) {
-            Ok(result) if result.is_empty() => {
-                warn_learning_hybrid_fallback(notes, "no learning embeddings found");
-                return Ok(lexical_fallback);
-            }
-            Ok(result) => result,
-            Err(error) => {
-                warn_learning_hybrid_fallback(notes, &error.to_string());
-                return Ok(lexical_fallback);
-            }
-        };
-
-        let statuses = resolve_learning_statuses(scope.params, scope.status_filters);
-        let path = scope.params.path.as_deref();
-        let mut candidates = lexical_learnings;
-        for hit in semantic {
-            let learning = match self.get_learning(&hit.source_id) {
-                Ok(learning) => learning,
-                Err(_) => continue,
-            };
-            if !statuses.contains(&learning.status) {
-                continue;
-            }
-            if !scope.tag_filter.is_empty() && !learning_has_all_tags(&learning, scope.tag_filter) {
-                continue;
-            }
-            if let Some(path) = path
-                && !learning_scope_contains_path(&learning, path)?
-            {
-                continue;
-            }
-
-            candidates
-                .entry(hit.source_id.clone())
-                .and_modify(|candidate| {
-                    candidate.semantic_score = Some(hit.score);
-                    candidate.semantic = Some(hit.clone());
-                })
-                .or_insert_with(|| LearningHybridCandidate {
-                    hit: GlobalSearchHit {
-                        kind: "learning".to_string(),
-                        source: "hybrid".to_string(),
-                        id: Some(learning.id),
-                        path: None,
-                        title: None,
-                        summary: Some(learning.summary),
-                        status: Some(learning.status.as_str().to_string()),
-                        best_field: None,
-                        snippet: None,
-                        score: None,
-                        score_breakdown: None,
-                        matched_by: None,
-                    },
-                    lexical_score: None,
-                    semantic_score: Some(hit.score),
-                    semantic: Some(hit),
-                });
-        }
-
-        let weight = self.learning_search_config()?.semantic_weight;
-        let mut ranked =
-            blend_learning_hybrid_candidates(candidates.into_values().collect(), weight);
-        ranked.truncate(scope.limit);
-        Ok(ranked)
-    }
-
-    fn learning_semantic_hits(
-        &self,
-        query: &str,
-        limit: usize,
-    ) -> Result<Vec<LearningSemanticHit>, OrbitError> {
-        #[cfg(test)]
-        if let Some(result) = LEARNING_SEMANTIC_SEARCH_OVERRIDE.with(|cell| cell.borrow().clone()) {
-            return result.map_err(OrbitError::Execution);
-        }
-
-        Ok(orbit_search::learning_semantic_search(
-            &self.stores().semantic_vector,
-            LearningSemanticSearchParams {
                 query: query.to_string(),
                 limit,
                 model: None,

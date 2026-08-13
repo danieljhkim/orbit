@@ -27,7 +27,7 @@ Only *flexible* columns are ever truncated — fixed columns render whole or are
 | `orbit docs list` | `PATH`, `SUMMARY`, `TAGS`, `RELATED` | `orbit docs show <path>` |
 | `orbit skill list` | `SUMMARY` | `orbit skill show <id>` |
 | `orbit friction list` | `TAGS`, `TITLE` | `orbit friction show <id>` |
-| `orbit search` | `ID/PATH`, `TITLE/SUMMARY` | per hit kind: `orbit task show`, `orbit docs show`, `orbit learning show`, `orbit adr show` |
+| `orbit search` | `ID/PATH`, `TITLE/SUMMARY` | per hit kind: `orbit task show`, `orbit docs show` |
 
 ## Gaps
 

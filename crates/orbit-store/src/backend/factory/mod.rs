@@ -2,21 +2,20 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use super::contracts::{
-    AuditEventStoreBackend, ExecutorDefStoreBackend, JobRunStoreBackend, LearningStoreBackend,
-    PolicyDefStoreBackend, TaskArtifactStoreBackend, TaskDocumentStoreBackend,
-    TaskHistoryStoreBackend, TaskReservationStoreBackend, TaskStoreBackend, ToolStoreBackend,
+    AuditEventStoreBackend, ExecutorDefStoreBackend, JobRunStoreBackend, PolicyDefStoreBackend,
+    TaskArtifactStoreBackend, TaskDocumentStoreBackend, TaskHistoryStoreBackend,
+    TaskReservationStoreBackend, TaskStoreBackend, ToolStoreBackend,
 };
 use super::layered_policy_def::LayeredPolicyDefStore;
 use super::sqlite_backends::{
     SqliteAuditEventStoreBackend, SqliteTaskReservationStoreBackend, SqliteToolStoreBackend,
 };
+use crate::Store;
 use crate::file::executor_def_store::ExecutorDefFileStore;
-use crate::file::learning_store::LearningFileStore;
 use crate::file::policy_def_store::PolicyDefFileStore;
 use crate::file::task_store::TaskV2Store;
 use crate::sqlite::job_run_store::SqliteJobRunStore;
 use crate::sqlite::task_registry::TaskRegistryStore;
-use crate::{IdAllocator, Store};
 
 pub struct WorkspaceTaskBackends {
     pub task: Arc<dyn TaskStoreBackend>,
@@ -68,25 +67,6 @@ pub fn workspace_job_run_store(
     workspace_id: impl Into<String>,
 ) -> Arc<dyn JobRunStoreBackend> {
     Arc::new(SqliteJobRunStore::new(store, workspace_id))
-}
-
-/// Constructs the workspace-scoped project-learnings store backed by
-/// `learning_dir` on disk and indexed in the shared SQLite `store`. The
-/// returned `Arc<dyn LearningStoreBackend>` is the trait-object surface that
-/// `orbit-tools::orbit.learning.*` consumes in C2.
-pub fn workspace_learning_backend(
-    learning_dir: PathBuf,
-    store: Store,
-    id_allocator: IdAllocator,
-    workspace_id: String,
-) -> Result<Arc<dyn LearningStoreBackend>, orbit_common::types::OrbitError> {
-    LearningFileStore::reject_legacy_flat_layout(&learning_dir)?;
-    Ok(Arc::new(LearningFileStore::new_with_index_and_allocator(
-        learning_dir,
-        store,
-        id_allocator,
-        workspace_id,
-    )))
 }
 
 pub fn global_executor_def_store(root: PathBuf) -> Arc<dyn ExecutorDefStoreBackend> {

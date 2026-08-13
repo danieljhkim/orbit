@@ -10,6 +10,9 @@ last_validated: 2026-08-09
 Status: draft (uncommitted) — scoping for the docs+search pluginization pilot.
 Extraction precedent: ORB-10016 (ADR-0203).
 
+Learning-specific comparisons below are retained only as historical scoping
+context. [ORB-10736] / [ADR-0359] remove the native learning resource.
+
 ## Goal
 
 Move the docs + search feature out of orbit-core into a library plus embedded

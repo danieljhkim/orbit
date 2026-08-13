@@ -226,10 +226,8 @@ fn append_orbit_child_runtime_write_roots(
         format!("{global}/orbit.db*"),
         format!("{global}/tasks/**"),
         format!("{workspace}/tasks/**"),
-        format!("{workspace}/learnings/**"),
         format!("{workspace}/frictions/**"),
         format!("{workspace}/state/audit/**"),
-        format!("{workspace}/state/.id_alloc.lock"),
         format!("{workspace}/state/logs/**"),
         format!("{workspace}/state/semantic.db*"),
     ] {
@@ -281,7 +279,6 @@ fn append_linux_runtime_write_roots(
 
     for directory in [
         workspace.join("tasks"),
-        workspace.join("learnings"),
         workspace.join("frictions"),
         workspace.join("state/audit"),
         workspace.join("state/logs"),
@@ -291,7 +288,6 @@ fn append_linux_runtime_write_roots(
         append_unique_modify_root(resolved, directory.display().to_string());
     }
     for file in [
-        workspace.join("state/.id_alloc.lock"),
         workspace.join("state/semantic.db"),
         workspace.join("state/semantic.db-wal"),
         workspace.join("state/semantic.db-shm"),

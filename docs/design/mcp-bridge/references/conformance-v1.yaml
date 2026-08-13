@@ -80,11 +80,6 @@ tools:
   orbit.workflow.run.list: { placement: owner, scope: workspace-required, allowed_capabilities: [operator] }
   orbit.workflow.run.resume: { placement: owner, scope: workspace-required, allowed_capabilities: [operator] }
   orbit.search: { placement: composite, scope: workspace-required, allowed_capabilities: [agent, operator] }
-  orbit.learning.add: { placement: owner, scope: workspace-required, allowed_capabilities: [agent, operator] }
-  orbit.learning.show: { placement: owner, scope: workspace-required, allowed_capabilities: [agent, operator] }
-  orbit.learning.update: { placement: owner, scope: workspace-required, allowed_capabilities: [agent, operator] }
-  orbit.learning.supersede: { placement: owner, scope: workspace-required, allowed_capabilities: [agent, operator] }
-  orbit.learning.archive: { placement: owner, scope: workspace-required, allowed_capabilities: [agent, operator] }
   orbit.auto_task.add: { placement: owner, scope: workspace-required, allowed_capabilities: [agent, operator] }
   orbit.auto_task.show: { placement: owner, scope: workspace-required, allowed_capabilities: [agent, operator] }
   orbit.auto_task.update: { placement: owner, scope: workspace-required, allowed_capabilities: [agent, operator] }
@@ -105,20 +100,19 @@ withdrawn_tools:
       the pre-cutover surface and still carried the family here as a planned withdrawal, so this
       entry closes that gap without advancing a revision — canonical_registry_revision 3 already
       described a matrix without it.
-
 owner_schema_digest:
   domain_tag: orbit.mcp.owner-schema.v1
   contract_revision: 4
-  canonical_registry_revision: 3
+  canonical_registry_revision: 4
   instructions_prefix: 'orbit-owner-contract-v1:'
   revision_notes:
     - Revisions 2 and 3 were advanced by the two now-withdrawn private connector methods. Revision numbers are append-only, so revision 4 is assigned to the recomposition that removes them and collapses hub placement into owner (ORB-10727). No revision is ever reused or rolled back.
-    - canonical_registry_revision 3 is the v1 tool matrix below - hub placement collapsed into owner, orbit.workspace.list moved to local-derived, and the orbit.adr.*, orbit.run.*, and orbit.host.list families withdrawn.
+    - canonical_registry_revision 4 removes the native project-learning family from the v1 tool matrix (ORB-10736).
     - The golden vector is a one-tool illustrative fixture. Its digest still changes with every recomposition, because the domain tag and canonical_registry_revision are both inputs.
   golden_vector:
     capability: agent
-    canonical_json: '{"canonical_registry_revision":3,"capability":"agent","tools":[{"advertised_name":"orbit_task_show","canonical_name":"orbit.task.show","description":"Show one task","input_schema":{"additionalProperties":true,"properties":{"id":{"description":"Task ID","type":"string"}},"required":["id"],"type":"object"}}]}'
-    expected_sha256: 416fc00d8b8eaa3d6dd44f3e28032c92796d6a4ea50e7055ad83404d7f2b599a
+    canonical_json: '{"canonical_registry_revision":4,"capability":"agent","tools":[{"advertised_name":"orbit_task_show","canonical_name":"orbit.task.show","description":"Show one task","input_schema":{"additionalProperties":true,"properties":{"id":{"description":"Task ID","type":"string"}},"required":["id"],"type":"object"}}]}'
+    expected_sha256: 98927f4893ada0e004f5b16bd5485ce6232075d9eca0a76a4aa9aebcc272ae25
   inputs:
     - canonical schema name, description, and input schema for every owner-placed tool
     - canonical schema name, description, and input schema for every composite tool's owner step
@@ -156,6 +150,5 @@ routing_expectations:
     rejects: [remote_execution, missing_validated_checkout]
     note: orbit.workspace.list is the one local-derived entry backed by machine-local registry state rather than checkout-derived state, and it enumerates only owned workspaces.
   composite:
-    search: owner tasks and learnings plus local docs
+    search: owner tasks plus local docs, ADRs, and frictions
     rejects: [owner_proxy, implicit_replica_as_current]
-    note: knowledge creation is no longer composite; with no allocation step orbit.learning.add is a single owner-local write.

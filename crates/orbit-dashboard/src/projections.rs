@@ -8,8 +8,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use orbit_common::types::{ArtifactManifestFileV2, JobV2Step, JobV2StepBody, PipelineState};
 use orbit_core::command::job::JobCatalogEntry;
 use orbit_core::{
-    AuditEvent, EvidenceKind, JobRun, Learning, OrbitError, OrbitRuntime, ResolvedCrewProjection,
-    Task, TaskStatus, resolve_task_dependencies,
+    AuditEvent, JobRun, OrbitError, OrbitRuntime, ResolvedCrewProjection, Task, TaskStatus,
+    resolve_task_dependencies,
 };
 use serde_json::{Value, json};
 
@@ -345,40 +345,5 @@ fn task_lock_status_rank(status: TaskStatus) -> u8 {
         TaskStatus::InProgress => 0,
         TaskStatus::Review => 1,
         _ => 2,
-    }
-}
-
-pub(crate) fn learning_to_json(learning: &Learning) -> Value {
-    json!({
-        "id": learning.id,
-        "status": learning.status.as_str(),
-        "scope": {
-            "paths": learning.scope.paths,
-            "tags": learning.scope.tags,
-            "symbols": learning.scope.symbols,
-            "semantic_seed": learning.scope.semantic_seed,
-        },
-        "summary": learning.summary,
-        "body": learning.body,
-        "evidence": learning
-            .evidence
-            .iter()
-            .map(|e| json!({"kind": evidence_kind_str(e.kind), "ref": e.reference}))
-            .collect::<Vec<_>>(),
-        "supersedes": learning.supersedes,
-        "superseded_by": learning.superseded_by,
-        "legacy_ids": learning.legacy_ids,
-        "created_at": learning.created_at.to_rfc3339(),
-        "updated_at": learning.updated_at.to_rfc3339(),
-        "created_by": learning.created_by,
-        "priority": learning.priority,
-    })
-}
-
-fn evidence_kind_str(kind: EvidenceKind) -> &'static str {
-    match kind {
-        EvidenceKind::Task => "task",
-        EvidenceKind::Commit => "commit",
-        EvidenceKind::External => "external",
     }
 }

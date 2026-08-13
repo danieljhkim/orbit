@@ -25,7 +25,8 @@ pub const MCP_CONTRACT_REVISION: u32 = 4;
 /// Revision 3 is the v1 tool matrix: `hub` placement collapsed into `owner`,
 /// `orbit.workspace.list` moved to `local-derived`, and the `orbit.adr.*`,
 /// `orbit.run.*`, and `orbit.host.list` families were withdrawn [ORB-10727].
-pub const CANONICAL_MCP_REGISTRY_REVISION: u32 = 3;
+/// Revision 4 removes the native project-learning tool family [ORB-10736].
+pub const CANONICAL_MCP_REGISTRY_REVISION: u32 = 4;
 pub const OWNER_SCHEMA_DOMAIN: &str = "orbit.mcp.owner-schema.v1";
 pub const OWNER_CONTRACT_INSTRUCTIONS_PREFIX: &str = "orbit-owner-contract-v1:";
 

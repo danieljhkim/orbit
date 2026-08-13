@@ -1,20 +1,16 @@
 use std::collections::BTreeMap;
 
 use orbit_common::types::{
-    ArtifactManifestFileV2, ExecutorDef, ExternalRef, Learning, LearningStatus, OrbitError,
-    PolicyDef, Task, TaskArtifact, TaskComment, TaskHistoryEntry, TaskPriority, TaskStatus,
+    ArtifactManifestFileV2, ExecutorDef, ExternalRef, OrbitError, PolicyDef, Task, TaskArtifact,
+    TaskComment, TaskHistoryEntry, TaskPriority, TaskStatus,
 };
 
 use super::contracts::{
-    ExecutorDefStoreBackend, LearningCreateParams, LearningListEntry, LearningSearchParams,
-    LearningSearchResult, LearningStoreBackend, LearningUpdateParams, PolicyDefStoreBackend,
-    RemoteArtifactStub, TaskArtifactStoreBackend, TaskArtifactUpdateParams, TaskCreateParams,
-    TaskDocumentStoreBackend, TaskDocumentUpdateParams, TaskHistoryStoreBackend,
-    TaskHistoryUpdateParams, TaskStoreBackend,
+    ExecutorDefStoreBackend, PolicyDefStoreBackend, TaskArtifactStoreBackend,
+    TaskArtifactUpdateParams, TaskCreateParams, TaskDocumentStoreBackend, TaskDocumentUpdateParams,
+    TaskHistoryStoreBackend, TaskHistoryUpdateParams, TaskStoreBackend,
 };
-use crate::IdAllocationRecord;
 use crate::file::executor_def_store::ExecutorDefFileStore;
-use crate::file::learning_store::LearningFileStore;
 use crate::file::policy_def_store::PolicyDefFileStore;
 use crate::file::task_store::TaskV2Store;
 use crate::scope::{ScopeStrategy, ScopedStore, resolve};
@@ -166,93 +162,6 @@ impl PolicyDefStoreBackend for PolicyDefFileStore {
 
     fn upsert_policy_def(&self, def: &PolicyDef) -> Result<(), OrbitError> {
         self.upsert_policy_def(def)
-    }
-}
-
-impl LearningStoreBackend for LearningFileStore {
-    fn create_learning(&self, params: LearningCreateParams) -> Result<Learning, OrbitError> {
-        self.create_learning(params)
-    }
-
-    fn get_learning(&self, id: &str) -> Result<Option<Learning>, OrbitError> {
-        // Learnings use the WorkspaceOnly strategy per `CLAUDE.md` Scoping
-        // Rules and ADR-003.
-        resolve::<Learning, _>(self, id)
-    }
-
-    fn get_learning_federated(&self, id: &str) -> Result<Option<Learning>, OrbitError> {
-        LearningFileStore::get_learning_federated(self, id)
-    }
-
-    fn list_learnings(&self, status: Option<LearningStatus>) -> Result<Vec<Learning>, OrbitError> {
-        self.list_learnings(status)
-    }
-
-    fn list_learning_entries(
-        &self,
-        status: Option<LearningStatus>,
-        include_remote: bool,
-    ) -> Result<Vec<LearningListEntry>, OrbitError> {
-        LearningFileStore::list_learning_entries(self, status, include_remote)
-    }
-
-    fn get_learning_remote_stub(&self, id: &str) -> Result<Option<RemoteArtifactStub>, OrbitError> {
-        LearningFileStore::get_learning_remote_stub(self, id)
-    }
-
-    fn list_orphaned_learning_allocations(&self) -> Result<Vec<IdAllocationRecord>, OrbitError> {
-        LearningFileStore::list_orphaned_learning_allocations(self)
-    }
-
-    fn abandon_orphaned_learning_allocation(&self, id: &str) -> Result<bool, OrbitError> {
-        LearningFileStore::abandon_orphaned_learning_allocation(self, id)
-    }
-
-    fn search_learnings(
-        &self,
-        params: LearningSearchParams,
-    ) -> Result<Vec<LearningSearchResult>, OrbitError> {
-        self.search_learnings(params)
-    }
-
-    fn update_learning(
-        &self,
-        id: &str,
-        params: LearningUpdateParams,
-    ) -> Result<Learning, OrbitError> {
-        self.update_learning(id, params)
-    }
-
-    fn supersede_learning(&self, old_id: &str, new_id: &str) -> Result<(), OrbitError> {
-        self.supersede_learning(old_id, new_id)
-    }
-
-    fn archive_learning(&self, id: &str) -> Result<bool, OrbitError> {
-        self.archive_learning(id)
-    }
-
-    fn delete_learning(&self, id: &str) -> Result<bool, OrbitError> {
-        self.delete_learning(id)
-    }
-
-    fn sync_learnings(&self) -> Result<(), OrbitError> {
-        self.sync_learnings()
-    }
-}
-
-impl ScopedStore<Learning> for LearningFileStore {
-    type Err = OrbitError;
-
-    fn strategy(&self) -> ScopeStrategy {
-        ScopeStrategy::WorkspaceOnly
-    }
-
-    fn get_workspace(&self, key: &str) -> Result<Option<Learning>, OrbitError> {
-        self.get_learning(key)
-    }
-
-    fn get_global(&self, _key: &str) -> Result<Option<Learning>, OrbitError> {
-        Ok(None)
     }
 }
 

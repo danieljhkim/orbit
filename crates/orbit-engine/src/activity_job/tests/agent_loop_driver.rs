@@ -5,7 +5,6 @@ use std::sync::Arc;
 use orbit_agent::loop_engine::audit::{AuditSink, NullSink};
 use orbit_agent::loop_engine::transport::MessageRole;
 use orbit_common::types::activity_job::{AgentLoopSpec, Backend, OnDenial, Provider};
-use orbit_common::types::{LearningInjectionCaps, LearningReminder};
 use tempfile::NamedTempFile;
 
 use super::super::agent_loop_driver::*;
@@ -78,57 +77,6 @@ impl RuntimeHost for ReplayHost {
         Err(DispatchError::CliInvocationFailed(
             "replay host: no CLI mapping".to_string(),
         ))
-    }
-
-    fn tool_context_for_activity(
-        &self,
-        _run_id: Option<&str>,
-        _fs_profile: Option<&str>,
-        _fs_audit: Option<Arc<dyn orbit_tools::FsAuditLogger>>,
-        _proc_allowed_programs: Option<&[String]>,
-    ) -> ToolContext {
-        ToolContext::default()
-    }
-}
-
-struct LearningReplayHost {
-    reminders: Vec<LearningReminder>,
-}
-
-impl RuntimeHost for LearningReplayHost {
-    fn run_deterministic(
-        &self,
-        _action: &str,
-        _config: &Value,
-        _input: &Value,
-        _tool_context: ToolContext,
-    ) -> Result<Value, DispatchError> {
-        Err(DispatchError::DeterministicActionNotRegistered(
-            "learning replay host: not used".to_string(),
-        ))
-    }
-
-    fn api_key_for(&self, _provider: &str) -> Result<String, DispatchError> {
-        Err(DispatchError::AgentLoopFailed(
-            "learning replay host: no credentials".to_string(),
-        ))
-    }
-
-    fn resolve_cli_executor(
-        &self,
-        _provider: &str,
-    ) -> Result<super::super::dispatcher::ResolvedCliExecutor, DispatchError> {
-        Err(DispatchError::CliInvocationFailed(
-            "learning replay host: no CLI mapping".to_string(),
-        ))
-    }
-
-    fn learning_reminders_for_task(
-        &self,
-        _input: &Value,
-        caps: LearningInjectionCaps,
-    ) -> Result<Vec<LearningReminder>, DispatchError> {
-        Ok(self.reminders.iter().take(caps.per_call).cloned().collect())
     }
 
     fn tool_context_for_activity(
@@ -269,100 +217,4 @@ fn replay_denial_continue_runs_until_normal_stop() {
         vec!["fs.delete".to_string()]
     );
     assert!(outcome.trace[1].policy_denials.is_empty());
-}
-
-#[test]
-fn l1_learning_reminder_prepends_prompt_for_matching_task() {
-    let _lock = REPLAY_TEST_ENV_LOCK.lock().expect("replay env lock");
-    let fixture = replay_done_fixture();
-    let _guard = ReplayEnvGuard::set_fixture(fixture.path());
-    let host = LearningReplayHost {
-        reminders: vec![LearningReminder {
-            id: "L-0001".to_string(),
-            summary: "Remember to validate the output.".to_string(),
-            tags: Vec::new(),
-        }],
-    };
-    let mut session = Session::new("replay", "test-model", "test", None);
-
-    drive_agent_loop_with_session(
-        &replay_spec(OnDenial::Terminate),
-        None,
-        "run-learning-positive",
-        audit_writer("run-learning-positive"),
-        &mut session,
-        &serde_json::json!({"prompt": "baseline prompt"}),
-        &host,
-        None,
-    )
-    .expect("replay should finish");
-
-    assert_eq!(
-        first_user_text(&session),
-        "<system-reminder>\n\
-Project learnings relevant to this task:\n\n\
-- [L-0001] Remember to validate the output.\n\n\
-Read full body via `orbit.learning.show <id>` if needed.\n\
-</system-reminder>\n\n\
-baseline prompt"
-    );
-}
-
-#[test]
-fn l1_learning_reminder_leaves_prompt_unchanged_without_matches() {
-    let _lock = REPLAY_TEST_ENV_LOCK.lock().expect("replay env lock");
-    let fixture = replay_done_fixture();
-    let _guard = ReplayEnvGuard::set_fixture(fixture.path());
-    let host = LearningReplayHost {
-        reminders: Vec::new(),
-    };
-    let mut session = Session::new("replay", "test-model", "test", None);
-
-    drive_agent_loop_with_session(
-        &replay_spec(OnDenial::Terminate),
-        None,
-        "run-learning-negative",
-        audit_writer("run-learning-negative"),
-        &mut session,
-        &serde_json::json!({"prompt": "baseline prompt"}),
-        &host,
-        None,
-    )
-    .expect("replay should finish");
-
-    assert_eq!(first_user_text(&session), "baseline prompt");
-}
-
-#[test]
-fn l1_learning_reminder_applies_default_per_call_cap() {
-    let _lock = REPLAY_TEST_ENV_LOCK.lock().expect("replay env lock");
-    let fixture = replay_done_fixture();
-    let _guard = ReplayEnvGuard::set_fixture(fixture.path());
-    let host = LearningReplayHost {
-        reminders: (0..7)
-            .map(|idx| LearningReminder {
-                id: format!("L-{idx:04}"),
-                summary: format!("Learning {idx}"),
-                tags: Vec::new(),
-            })
-            .collect(),
-    };
-    let mut session = Session::new("replay", "test-model", "test", None);
-
-    drive_agent_loop_with_session(
-        &replay_spec(OnDenial::Terminate),
-        None,
-        "run-learning-cap",
-        audit_writer("run-learning-cap"),
-        &mut session,
-        &serde_json::json!({"prompt": "baseline prompt"}),
-        &host,
-        None,
-    )
-    .expect("replay should finish");
-
-    let text = first_user_text(&session);
-    assert!(text.contains("[L-0004] Learning 4"));
-    assert!(!text.contains("L-0005"));
-    assert_eq!(session.learning_injection_state().count, 5);
 }

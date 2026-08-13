@@ -22,8 +22,6 @@ pub mod activity_v2;
 pub mod agent_rules;
 pub mod diagnostics;
 pub mod doctor;
-pub mod hook_install;
-pub mod learning_hook;
 pub mod migrate;
 
 #[cfg(test)]
@@ -32,7 +30,6 @@ mod tests;
 pub use activity_v2::{ActivityV2Commands, V2ActivityRunResult};
 pub use diagnostics::DiagnosticsCommands;
 pub use doctor::{DoctorCommands, WorkspaceDoctorResult, WorkspaceDoctorStatus};
-pub use learning_hook::LearningHookCommands;
 pub use migrate::{MigrateCommands, MigrateStatus, migrate_dry_run_at};
 
 /// One-stop import for every runtime extension trait this crate defines.
@@ -40,6 +37,5 @@ pub mod prelude {
     pub use crate::activity_v2::ActivityV2Commands;
     pub use crate::diagnostics::DiagnosticsCommands;
     pub use crate::doctor::DoctorCommands;
-    pub use crate::learning_hook::LearningHookCommands;
     pub use crate::migrate::MigrateCommands;
 }

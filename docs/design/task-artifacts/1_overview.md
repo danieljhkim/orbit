@@ -95,7 +95,7 @@ Lifecycle changes, comments, review messages, and automation updates are natural
 
 ### 2.6 Typed relations
 
-Typed links live in a single directed `relations` array on the envelope. Task-to-task relation types remain source-implied (`child_of`, `blocked_by`, `spawned_from`, `regression_from`, `supersedes`, and `related_to`) and task-only. Cross-artifact provenance uses `produces` and `resolves`, whose targets may be task, friction, learning, or ADR IDs. The bundle stores one directed edge per relationship. Consumers reason about relation meaning rather than inferring it from legacy field names.
+Typed links live in a single directed `relations` array on the envelope. Task-to-task relation types remain source-implied (`child_of`, `blocked_by`, `spawned_from`, `regression_from`, `supersedes`, and `related_to`) and task-only. Cross-artifact provenance uses `produces` and `resolves`, whose targets may be task, friction, or ADR IDs. The bundle stores one directed edge per relationship. Consumers reason about relation meaning rather than inferring it from legacy field names.
 
 ### 2.7 Local task store and projection
 

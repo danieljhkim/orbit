@@ -440,8 +440,6 @@ impl McpHost for OwnerMcpHost {
     }
 }
 
-impl super::learning::LearningSidecarHost for OwnerMcpHost {}
-
 /// The explicit, non-empty named-crew field on a task add/update, or `None`
 /// for any other tool, an omitted field, or an explicit clearing value.
 fn explicit_task_crew(name: &str, input: &Value, field: &str) -> Option<String> {

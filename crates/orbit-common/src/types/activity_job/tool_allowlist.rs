@@ -12,7 +12,6 @@ use super::activity_v2::{ActivityV2, ActivityV2Spec};
 /// set grows deliberately and every reviewer sees the full scope.
 pub const V2_TOOL_WILDCARD_ROOTS: &[&str] = &[
     "orbit.friction.",
-    "orbit.learning.",
     "orbit.task.",
     "orbit.state.",
     "orbit.semantic.",

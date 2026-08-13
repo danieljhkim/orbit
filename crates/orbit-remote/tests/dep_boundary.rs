@@ -61,10 +61,9 @@ fn command_layer_dependency_is_test_only_for_the_cross_layer_canary() {
         .cloned()
         .collect::<Vec<_>>();
 
-    assert_eq!(
-        orbit_deps,
-        vec!["orbit-cmd".to_string()],
-        "orbit-cmd is permitted only as the explicit cross-layer learning-state canary"
+    assert!(
+        orbit_deps.is_empty(),
+        "unexpected Orbit dev-dependencies: {orbit_deps:?}"
     );
 }
 

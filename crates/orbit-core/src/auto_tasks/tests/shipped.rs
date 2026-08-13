@@ -67,43 +67,6 @@ fn repository_definitions_all_parse() {
     );
 }
 
-/// Keep the existing report-only definition's special invariants covered.
-#[test]
-fn artifact_deprecation_review_is_report_only() {
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../..")
-        .join(".orbit/auto_tasks/artifact-deprecation-review.yaml");
-    let yaml = std::fs::read_to_string(&path)
-        .unwrap_or_else(|error| panic!("read {}: {error}", path.display()));
-    let definition = parse_auto_task_yaml(&yaml).expect("parse artifact-deprecation-review");
-
-    assert_eq!(definition.name, "artifact-deprecation-review");
-    assert!(definition.enabled, "definition must ship enabled");
-    assert!(matches!(definition.schedule, AutoTaskSchedule::Cron { .. }));
-    assert!(
-        definition
-            .template
-            .tags
-            .iter()
-            .any(|tag| tag == "no-diff-expected")
-    );
-    assert!(
-        definition
-            .template
-            .tags
-            .iter()
-            .any(|tag| tag == "artifact-deprecation")
-    );
-    let body = definition.template.description.to_lowercase();
-    assert!(body.contains("report-only") || body.contains("report only"));
-    for required in ["execution_summary", "learning stats", "fail open"] {
-        assert!(
-            body.contains(required),
-            "template should reference '{required}'"
-        );
-    }
-}
-
 #[test]
 fn model_price_audit_is_weekly_report_only_and_routes_to_terra() {
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))

@@ -4,9 +4,6 @@ use std::path::Path;
 use chrono::Utc;
 use orbit_common::types::activity_job::V2AuditEvent;
 use orbit_common::types::{JobRun, JobRunStep, OrbitError, PipelineState};
-use orbit_common::utility::learning_session::{
-    LEARNING_SESSION_STATE_FILE_NAME, read_learning_session_state,
-};
 use serde::Deserialize;
 
 use crate::sqlite::v2_audit_store::V2AuditEventInsertParams;
@@ -21,7 +18,6 @@ pub struct ImportReport {
     pub job_runs_skipped: usize,
     pub job_run_steps_inserted: usize,
     pub job_run_steps_skipped: usize,
-    pub session_learning_state_inserted: usize,
 }
 
 impl ImportReport {
@@ -73,7 +69,6 @@ pub fn import_legacy_v2_state(
         &mut report,
     )?;
     import_job_runs(store, workspace_id, orbit_root, &mut report)?;
-    import_session_learning_state(store, workspace_id, orbit_root, &mut report)?;
 
     store.set_schema_meta_value(&marker_key, &Utc::now().to_rfc3339())?;
     Ok(report)
@@ -361,36 +356,6 @@ fn read_steps(run_path: &Path, report: &mut ImportReport) -> Result<Vec<JobRunSt
     Ok(steps)
 }
 
-fn import_session_learning_state(
-    store: &Store,
-    workspace_id: &str,
-    orbit_root: &Path,
-    report: &mut ImportReport,
-) -> Result<(), OrbitError> {
-    let sessions_root = orbit_root.join("state").join("sessions");
-    let entries = match fs::read_dir(&sessions_root) {
-        Ok(entries) => entries,
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(()),
-        Err(err) => return Err(OrbitError::Io(err.to_string())),
-    };
-    for entry in entries.filter_map(Result::ok) {
-        let path = entry.path();
-        if !path.is_dir() {
-            continue;
-        }
-        let Some(session_id) = path.file_name().and_then(|value| value.to_str()) else {
-            continue;
-        };
-        let state_path = path.join(LEARNING_SESSION_STATE_FILE_NAME);
-        let Some(state) = read_learning_session_state(&state_path)? else {
-            continue;
-        };
-        store.upsert_session_learning_state(workspace_id, session_id, &state)?;
-        report.session_learning_state_inserted += 1;
-    }
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use chrono::Utc;
@@ -448,20 +413,11 @@ mod tests {
                 .expect("serialize"),
         )
         .expect("write run");
-        let session_dir = orbit.join("state/sessions/session-1");
-        fs::create_dir_all(&session_dir).expect("session dir");
-        fs::write(
-            session_dir.join("learnings.json"),
-            "{\"emitted_ids\":[],\"count\":0}\n",
-        )
-        .expect("write learning state");
-
         let store = Store::open_in_memory().expect("store");
         let first = import_legacy_v2_state(&store, &orbit, "ws_a").expect("first");
         assert!(!first.skipped);
         assert_eq!(first.audit_events_inserted, 1);
         assert_eq!(first.job_runs_inserted, 1);
-        assert_eq!(first.session_learning_state_inserted, 1);
 
         let second = import_legacy_v2_state(&store, &orbit, "ws_a").expect("second");
         assert!(second.skipped);
@@ -552,22 +508,5 @@ mod tests {
             .expect("read valid run")
             .expect("valid run inserted");
         assert_eq!(loaded.job_id, "job-a");
-    }
-
-    #[test]
-    fn import_skips_session_dirs_without_learning_state_file() {
-        let temp = TempDir::new().expect("tempdir");
-        let orbit = temp.path().join(".orbit");
-        fs::create_dir_all(orbit.join("state/sessions/session-empty")).expect("session dir");
-
-        let store = Store::open_in_memory().expect("store");
-        let report = import_legacy_v2_state(&store, &orbit, "ws_a").expect("import");
-        assert_eq!(report.session_learning_state_inserted, 0);
-        assert_eq!(
-            store
-                .get_session_learning_state("ws_a", "session-empty")
-                .expect("session state read"),
-            None
-        );
     }
 }

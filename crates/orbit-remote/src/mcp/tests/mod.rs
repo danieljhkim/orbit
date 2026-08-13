@@ -5,24 +5,22 @@
 mod contract;
 mod discovery;
 mod e1;
-mod learning;
 mod owner_client;
 mod owner_link;
 mod proxy;
 mod schema;
 mod serve;
-mod support;
 mod transport;
 
 use std::collections::{BTreeMap, BTreeSet};
 
 use orbit_common::types::{
-    LearningInjectionState, McpCapability, McpToolDefinition, McpToolPlacement, McpToolPolicy,
-    McpToolPolicyError, McpToolScope, ToolSessionContext, mcp_advertised_tool_name,
-    mcp_capability_placement_matrix, validate_mcp_tool_definitions,
+    McpCapability, McpToolDefinition, McpToolPlacement, McpToolPolicy, McpToolPolicyError,
+    McpToolScope, ToolSessionContext, mcp_advertised_tool_name, mcp_capability_placement_matrix,
+    validate_mcp_tool_definitions,
 };
 use orbit_core::command::tool::ToolEntryPoint;
-use orbit_core::{LearningSearchParams, OrbitError, OrbitRuntime};
+use orbit_core::{OrbitError, OrbitRuntime};
 use orbit_mcp::McpHost;
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -223,160 +221,6 @@ fn broker_refuses_every_owner_placed_tool_for_a_remotely_owned_workspace() {
         refused += 1;
     }
     assert!(refused > 0, "the registry must contain owner-placed tools");
-}
-
-#[test]
-fn broker_merged_search_tags_duplicate_ids_with_their_workspace() {
-    use std::process::Command;
-
-    use chrono::Utc;
-    use orbit_common::types::{
-        LearningScope, Workspace, WorkspaceCheckout, WorkspaceRegistry, WorkspaceStatus,
-    };
-    use orbit_store::LearningCreateParams;
-    use orbit_store::sqlite::task_registry::{WorkspaceConfig, write_workspace_config};
-
-    let root = tempfile::tempdir().expect("test root");
-    let global_root = root.path().join("global");
-    std::fs::create_dir_all(&global_root).expect("global root");
-    let mut workspaces = Vec::new();
-    let mut checkouts = Vec::new();
-    let mut learning_ids = Vec::new();
-
-    for id in ["alpha", "beta"] {
-        let repo_root = root.path().join(id);
-        let initialized = Command::new("git")
-            .args(["init", "--quiet"])
-            .current_dir(root.path())
-            .arg(&repo_root)
-            .status()
-            .expect("initialize workspace repository");
-        assert!(initialized.success(), "git init failed for {id}");
-        let orbit_dir = repo_root.join(".orbit");
-        std::fs::create_dir_all(&orbit_dir).expect("orbit directory");
-        write_workspace_config(
-            &orbit_dir,
-            &WorkspaceConfig {
-                schema_version: 1,
-                workspace_id: format!("ws_{id}"),
-            },
-        )
-        .expect("workspace config");
-        let workspace = Workspace {
-            id: id.to_string(),
-            name: id.to_string(),
-            owner_machine_id: None,
-            git_remote: None,
-            ship_mode: None,
-            base_branch: "agent-main".to_string(),
-            status: WorkspaceStatus::Active,
-            created_at: Utc::now(),
-            updated_at: Utc::now(),
-        };
-        let checkout = WorkspaceCheckout::owner(id.to_string(), repo_root, orbit_dir);
-        let runtime = crate::runtime::RemoteRuntimeFactory::open_registered_checkout(
-            &global_root,
-            &workspace,
-            &checkout,
-        )
-        .expect("workspace runtime");
-        let learning = runtime
-            .create_learning(LearningCreateParams {
-                summary: "shared merged search needle".to_string(),
-                scope: LearningScope::default(),
-                body: "same learning ID in each workspace".to_string(),
-                evidence: Vec::new(),
-                created_by: Some("codex".to_string()),
-                priority: None,
-            })
-            .expect("seed learning");
-        learning_ids.push(learning.id);
-        workspaces.push(workspace);
-        checkouts.push(checkout);
-    }
-    assert_eq!(
-        learning_ids[0], learning_ids[1],
-        "fixture must duplicate the learning ID"
-    );
-    crate::workspace_registry::save_registry_to(
-        &WorkspaceRegistry {
-            workspaces,
-            checkouts,
-            ..Default::default()
-        },
-        &crate::workspace_registry::registry_path_for(&global_root),
-    )
-    .expect("workspace registry");
-
-    let host = BrokerMcpHost::new(global_root);
-    let merged = host
-        .call_tool(
-            "orbit.search",
-            json!({ "query": "shared merged search needle", "all": true }),
-            ToolSessionContext::trusted_local(
-                None,
-                Some("hm_local".to_string()),
-                Some("local".to_string()),
-            ),
-        )
-        .expect("merged search");
-    let rows = merged["results"].as_array().expect("merged rows");
-    let matching = rows
-        .iter()
-        .filter(|row| row["id"].as_str() == Some(learning_ids[0].as_str()))
-        .collect::<Vec<_>>();
-    assert_eq!(
-        matching.len(),
-        2,
-        "both duplicate learning IDs must be returned"
-    );
-    let result_workspaces = matching
-        .iter()
-        .map(|row| row["workspace"].as_str().expect("workspace field"))
-        .collect::<BTreeSet<_>>();
-    assert_eq!(result_workspaces, BTreeSet::from(["alpha", "beta"]));
-    assert!(
-        rows.iter().all(|row| row["workspace"].is_string()),
-        "every merged result row must identify its owning workspace: {merged}"
-    );
-    for workspace in ["alpha", "beta"] {
-        let shown = host
-            .call_tool(
-                "orbit.learning.show",
-                json!({ "id": learning_ids[0], "workspace": workspace }),
-                ToolSessionContext::trusted_local(
-                    None,
-                    Some("hm_local".to_string()),
-                    Some("local".to_string()),
-                ),
-            )
-            .expect("merged row remains addressable through its workspace");
-        assert_eq!(shown["id"], learning_ids[0]);
-    }
-
-    let scoped = host
-        .call_tool(
-            "orbit.search",
-            json!({
-                "query": "shared merged search needle",
-                "all": true,
-                "workspace": "alpha"
-            }),
-            ToolSessionContext::trusted_local(
-                None,
-                Some("hm_local".to_string()),
-                Some("local".to_string()),
-            ),
-        )
-        .expect("workspace-scoped search");
-    assert!(
-        scoped["results"]
-            .as_array()
-            .expect("scoped rows")
-            .iter()
-            .all(|row| row.get("workspace").is_none()),
-        "workspace-scoped search shape must stay unchanged: {scoped}"
-    );
 }
 
 #[test]
@@ -634,49 +478,6 @@ impl McpHost for RuntimeMcpHost {
     }
 }
 
-impl super::learning::LearningSidecarHost for RuntimeMcpHost {
-    fn learning_candidates_for_path(
-        &self,
-        path: &str,
-        _session_context: ToolSessionContext,
-    ) -> Result<Value, OrbitError> {
-        let rows = self.runtime.search_learnings(LearningSearchParams {
-            path: Some(path.to_string()),
-            tag: None,
-            query: None,
-            limit: None,
-        })?;
-        Ok(Value::Array(
-            rows.into_iter()
-                .map(|row| {
-                    json!({
-                        "id": row.learning.id,
-                        "summary": row.learning.summary,
-                        "priority": row.learning.priority,
-                        "updated_at": row.learning.updated_at.to_rfc3339(),
-                    })
-                })
-                .collect(),
-        ))
-    }
-
-    fn get_session_learning_state(
-        &self,
-        session_id: &str,
-    ) -> Result<Option<LearningInjectionState>, OrbitError> {
-        self.runtime.get_session_learning_state(session_id)
-    }
-
-    fn upsert_session_learning_state(
-        &self,
-        session_id: &str,
-        state: &LearningInjectionState,
-    ) -> Result<(), OrbitError> {
-        self.runtime
-            .upsert_session_learning_state(session_id, state)
-    }
-}
-
 const EXPECTED_INACTIVE_TOOL_NAMES: &[&str] = &[
     "orbit.docs.index",
     "orbit.docs.migrate",
@@ -689,14 +490,11 @@ const EXPECTED_INACTIVE_TOOL_NAMES: &[&str] = &[
     "orbit.semantic.index",
     "orbit.semantic.install",
     "orbit.semantic.stats",
-    "orbit.learning.sync",
-    "orbit.learning.list",
     "orbit.friction.stats",
     // Trimmed admin/destructive tools — CLI path retains them.
     "orbit.semantic.uninstall",
     "orbit.task.delete",
     "orbit.task.lint",
-    "orbit.learning.prune",
     // Agent-surface narrowing: human-decision tools — CLI-only.
     "orbit.task.reject",
     "orbit.friction.resolve",
@@ -704,7 +502,7 @@ const EXPECTED_INACTIVE_TOOL_NAMES: &[&str] = &[
 
 // ORB-00289 + agent-surface narrowing: admin/destructive and triage tools
 // (`orbit.semantic.uninstall`, `orbit.task.delete`,
-// `orbit.task.lint`, `orbit.task.reject`, `orbit.learning.prune`,
+// `orbit.task.lint`, `orbit.task.reject`,
 // `orbit.friction.resolve`) deliberately omitted — retained on
 // the CLI / `runtime.run_tool` path only.
 const REQUIRED_AGENT_FACING_TOOL_NAMES: &[&str] = &[
@@ -716,9 +514,6 @@ const REQUIRED_AGENT_FACING_TOOL_NAMES: &[&str] = &[
     "orbit.task.update",
     "orbit.task.list",
     "orbit.task.start",
-    "orbit.learning.add",
-    "orbit.learning.show",
-    "orbit.learning.update",
     "orbit.friction.add",
     "orbit.friction.list",
     "orbit.friction.show",
@@ -732,7 +527,6 @@ fn is_runtime_mcp_category_tool(name: &str) -> bool {
         || name.starts_with("orbit.friction.")
         || name.starts_with("orbit.semantic.")
         || name.starts_with("orbit.docs.")
-        || name.starts_with("orbit.learning.")
 }
 
 fn is_remote_owned_non_runtime_tool(name: &str) -> bool {
@@ -742,7 +536,7 @@ fn is_remote_owned_non_runtime_tool(name: &str) -> bool {
 #[test]
 fn inactive_tools_are_not_in_the_mcp_safe_surface() {
     let safe_names: BTreeSet<String> = safe_mcp_tool_names().into_iter().collect();
-    assert_eq!(EXPECTED_INACTIVE_TOOL_NAMES.len(), 20);
+    assert_eq!(EXPECTED_INACTIVE_TOOL_NAMES.len(), 17);
 
     for name in EXPECTED_INACTIVE_TOOL_NAMES {
         assert!(
@@ -1284,25 +1078,14 @@ fn canonical_mcp_policy_conforms_to_frozen_v1_fixture() {
 }
 
 mod audited_mcp_call_tests {
-    use std::collections::BTreeSet;
-    use std::sync::{Mutex, MutexGuard, OnceLock};
-    use std::time::Instant;
-
-    use orbit_cmd::learning_hook::{
-        HookOutputFormat, ORBIT_LEARNING_PER_CALL_CAP_ENV, ORBIT_LEARNING_SESSION_CAP_ENV,
-        ORBIT_SESSION_ID_ENV, run_pretooluse_input,
-    };
-    use orbit_common::types::{
-        AuditEventStatus, LearningInjectionCaps, LearningInjectionState, LearningReminder,
-        LearningScope, McpCapability, McpTransport, ToolSessionContext,
-    };
-    use orbit_core::LearningEvidence;
-    use orbit_core::{LearningCreateParams, OrbitError, OrbitRuntime};
+    use orbit_common::types::{AuditEventStatus, McpCapability, McpTransport, ToolSessionContext};
+    use orbit_core::{OrbitError, OrbitRuntime};
     use orbit_mcp::McpHost;
     use serde_json::json;
+    use std::collections::BTreeSet;
+    use std::sync::{Mutex, MutexGuard, OnceLock};
 
     use super::super::host::{BrokerMcpHost, audited_mcp_call_with_session_context};
-    use super::super::learning::LearningSidecarHost;
     use super::RuntimeMcpHost;
 
     fn audited_mcp_call(
@@ -1624,8 +1407,7 @@ mod audited_mcp_call_tests {
 
     #[test]
     fn orbit_search_is_exposed_to_mcp_dispatch() {
-        // ORB-00202: `orbit.learning.search` was deleted; the unified
-        // `orbit.search` surface is exposed instead.
+        // The unified `orbit.search` surface is exposed.
         let runtime = OrbitRuntime::in_memory().expect("build test runtime");
         let value = audited_mcp_call(&runtime, "orbit.search", json!({ "query": "anything" }))
             .expect("orbit.search dispatch ok");
@@ -1636,111 +1418,14 @@ mod audited_mcp_call_tests {
     }
 
     #[test]
-    fn runtime_mcp_host_and_cli_hook_share_session_learning_state() {
-        let runtime = OrbitRuntime::in_memory().expect("build test runtime");
-        let learning = runtime
-            .create_learning(LearningCreateParams {
-                summary: "Use the shared state table.".to_string(),
-                scope: LearningScope {
-                    paths: vec!["crates/orbit-core/src/lib.rs".to_string()],
-                    ..Default::default()
-                },
-                body: String::new(),
-                evidence: Vec::<LearningEvidence>::new(),
-                created_by: Some("codex".to_string()),
-                priority: Some(7),
-            })
-            .expect("create learning");
-        let host = RuntimeMcpHost {
-            runtime: runtime.clone(),
-        };
-        let candidates = host
-            .learning_candidates_for_path("crates/orbit-core/src/lib.rs", Default::default())
-            .expect("mcp learning candidates");
-        let candidates = candidates
-            .as_array()
-            .expect("candidate array")
-            .iter()
-            .map(|item| LearningReminder {
-                id: item
-                    .get("id")
-                    .and_then(serde_json::Value::as_str)
-                    .expect("candidate id")
-                    .to_string(),
-                summary: item
-                    .get("summary")
-                    .and_then(serde_json::Value::as_str)
-                    .expect("candidate summary")
-                    .to_string(),
-                tags: Vec::new(),
-            })
-            .collect::<Vec<_>>();
-        assert_eq!(
-            candidates
-                .iter()
-                .map(|item| item.id.as_str())
-                .collect::<Vec<_>>(),
-            [learning.id.as_str()]
-        );
-
-        let caps = LearningInjectionCaps {
-            per_call: 5,
-            per_session_hard: 20,
-        };
-        let mut mcp_state = LearningInjectionState::default();
-        let admitted = mcp_state.admit_reminders(&candidates, caps);
-        assert_eq!(
-            admitted
-                .iter()
-                .map(|item| item.id.as_str())
-                .collect::<Vec<_>>(),
-            [learning.id.as_str()]
-        );
-        host.upsert_session_learning_state("session-shared", &mcp_state)
-            .expect("mcp writes shared session state");
-
-        let _guard = EnvGuard::set(&[
-            (ORBIT_SESSION_ID_ENV, Some("session-shared")),
-            (ORBIT_LEARNING_PER_CALL_CAP_ENV, Some("5")),
-            (ORBIT_LEARNING_SESSION_CAP_ENV, Some("20")),
-            ("ORBIT_ACTIVE_TASK_ID", None),
-            ("ORBIT_TASK_ID", None),
-        ]);
-        let stdin = json!({
-            "tool_name": "mcp__orbit__fs_read",
-            "tool_input": {
-                "path": "crates/orbit-core/src/lib.rs"
-            }
-        })
-        .to_string();
-        let output =
-            run_pretooluse_input(&runtime, &stdin, HookOutputFormat::Codex, Instant::now())
-                .expect("cli hook succeeds");
-        assert_eq!(output, None);
-
-        let persisted = runtime
-            .get_session_learning_state("session-shared")
-            .expect("read shared session state")
-            .expect("session state exists");
-        assert_eq!(persisted.count, 1);
-        assert!(persisted.emitted_ids.contains(&learning.id));
-    }
-
-    #[test]
     fn inactive_tool_is_rejected_over_mcp_dispatch() {
         let runtime = OrbitRuntime::in_memory().expect("build test runtime");
-        let error = audited_mcp_call(&runtime, "orbit.learning.list", json!({ "model": "codex" }))
+        let error = audited_mcp_call(&runtime, "orbit.task.reject", json!({ "model": "codex" }))
             .expect_err("inactive tool is not callable over MCP");
         assert!(error.to_string().contains("tool"));
 
         let events = runtime
-            .list_audit_events(
-                None,
-                Some("orbit.learning.list".to_string()),
-                None,
-                None,
-                16,
-            )
+            .list_audit_events(None, Some("orbit.task.reject".to_string()), None, None, 16)
             .expect("list audit events");
         assert_eq!(events.len(), 1, "preflight failure produced one audit row");
         assert_eq!(events[0].subcommand.as_deref(), Some("run-mcp"));

@@ -7,11 +7,9 @@ pub mod doctor;
 pub mod executor;
 pub mod friction;
 pub mod gc;
-pub mod hook;
 pub mod host;
 pub mod init;
 pub mod job;
-pub mod learning;
 pub mod locks;
 pub mod log;
 pub mod mcp;
@@ -92,10 +90,9 @@ Operate:
   task        Create, update, and manage tasks
   docs        Search and manage the indexed docs corpus
   friction    Report, list, and triage friction records
-  learning    Create, search, and curate project learnings
 
 Observe:
-  search      Search tasks, docs, and learnings
+  search      Search tasks, docs, ADRs, and frictions
   audit       Query the audit event log
   log         Tail the unified Orbit log feed
   doctor      Diagnose workspace health (config, database, disk, indexes)
@@ -114,7 +111,6 @@ Scheduler:
 
 Services:
   mcp         Register MCP client integrations and run the MCP server
-  hook        Run Orbit-owned editor hooks
   web         Run the Orbit dashboard
 
 Options:
@@ -145,7 +141,6 @@ pub enum Commands {
     Task(Box<task::TaskCommand>),
     Docs(docs::DocsCommand),
     Friction(friction::FrictionCommand),
-    Learning(learning::LearningCommand),
 
     // ── Observe ──
     Search(search::SearchCommand),
@@ -168,7 +163,6 @@ pub enum Commands {
 
     // ── Services ──
     Mcp(mcp::McpCommand),
-    Hook(hook::HookCommand),
     Web(web::WebCommand),
 
     // ── hidden compatibility commands ──

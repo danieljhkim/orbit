@@ -85,7 +85,6 @@ fn is_git_repo_root(path: &Path) -> bool {
 /// travel with the repo. Lock files remain excluded.
 const ORBIT_GITIGNORE_BLOCK: &[&str] = &[
     ".orbit/*",
-    "!.orbit/learnings/",
     "!.orbit/auto_tasks/",
     "!.orbit/resources/",
     "!.orbit/routines/",

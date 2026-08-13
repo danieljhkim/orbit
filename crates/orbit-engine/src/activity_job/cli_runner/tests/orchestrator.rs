@@ -2122,8 +2122,8 @@ fn dirty_to_clean_primary_fast_forward_is_accepted() {
     // `dirty_paths` moves from non-empty to empty even though no interference
     // occurred (HEAD proven to have advanced, `conflicting_paths` empty).
     let fixture = linked_worktree_fixture();
-    let dirty_record = ".orbit/learnings/L-0009/learning.yaml";
-    write_primary_file(&fixture, dirty_record, "id: L-0009\n");
+    let dirty_record = ".orbit/auto_tasks/nightly.yaml";
+    write_primary_file(&fixture, dirty_record, "name: nightly\n");
 
     let guard = boundary_guard(&fixture, "ORB-DIRTY-TO-CLEAN-FF", "run-dirty-to-clean-ff");
 
@@ -2191,10 +2191,10 @@ fn primary_dirt_intersecting_the_run_defeats_a_fast_forward() {
 #[test]
 fn stationary_primary_record_store_dirt_disjoint_from_the_run_is_accepted() {
     let fixture = linked_worktree_fixture();
-    let tracked_record = ".orbit/learnings/L-0001/learning.yaml";
-    write_primary_file(&fixture, tracked_record, "id: L-0001\n");
+    let tracked_record = ".orbit/auto_tasks/nightly.yaml";
+    write_primary_file(&fixture, tracked_record, "name: nightly\n");
     git_ok(&fixture.primary, &["add", "--", tracked_record]);
-    git_ok(&fixture.primary, &["commit", "-m", "track a learning"]);
+    git_ok(&fixture.primary, &["commit", "-m", "track an auto-task"]);
 
     let guard = boundary_guard(&fixture, "ORB-STATIONARY-DIRT", "run-stationary-dirt");
 
@@ -2203,7 +2203,7 @@ fn stationary_primary_record_store_dirt_disjoint_from_the_run_is_accepted() {
     // already-tracked record and drops an untracked sibling, all disjoint from
     // the run, while the primary HEAD and branch never move.
     let head_before = git_bytes(&fixture.primary, &["rev-parse", "HEAD"]);
-    write_primary_file(&fixture, tracked_record, "id: L-0001\ntags: []\n");
+    write_primary_file(&fixture, tracked_record, "name: nightly\nenabled: true\n");
     let untracked_record = write_primary_file(
         &fixture,
         ".orbit/frictions/F-0002/friction.yaml",
@@ -2239,11 +2239,7 @@ fn stationary_primary_source_edit_stays_fail_closed_even_when_disjoint() {
     fs::write(fixture.assigned.join("candidate.txt"), "candidate\n").expect("write run candidate");
     // Disjoint from the run, but outside Orbit's record store: this is the
     // ORB-10134 escape shape, and no path-disjointness argument may excuse it.
-    write_primary_file(
-        &fixture,
-        ".orbit/learnings/L-0003/learning.yaml",
-        "id: L-0003\n",
-    );
+    write_primary_file(&fixture, ".orbit/routines/nightly.yaml", "name: nightly\n");
     write_primary_file(&fixture, "src/escaped.rs", "fn escaped() {}\n");
 
     let error = guard

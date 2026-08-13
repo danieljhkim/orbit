@@ -2,14 +2,15 @@ use std::collections::BTreeSet;
 
 use chrono::Utc;
 use orbit_common::types::{
-    AuditEventStatus, JobRunState, McpCapability, OrbitError, Role, ToolSessionContext,
+    AuditEventStatus, JobRunState, McpCapability, OrbitError, Role, TaskStatus, ToolSessionContext,
 };
 use orbit_tools::ToolContext;
 use serde_json::{Value, json};
 
 use super::super::build_orbit_tool_host;
 use super::super::test_support::{
-    managed_tool_env_guard, run_tool_as_operator, test_runtime, unmanaged_tool_env_guard,
+    create_task, managed_tool_env_guard, run_tool_as_operator, test_runtime,
+    unmanaged_tool_env_guard,
 };
 use crate::OrbitRuntime;
 
@@ -71,8 +72,30 @@ fn seed_failed_run(runtime: &OrbitRuntime) -> String {
     run.run_id
 }
 
-fn ship_input() -> Value {
-    json!({"task_ids": SHIP_TASK_IDS, "mode": "pr"})
+fn ship_input(task_ids: &[String]) -> Value {
+    json!({"task_ids": task_ids, "mode": "pr"})
+}
+
+fn synthetic_ship_task_ids() -> Vec<String> {
+    SHIP_TASK_IDS.iter().map(|id| (*id).to_string()).collect()
+}
+
+fn seed_ship_tasks(runtime: &OrbitRuntime, repo_root: &std::path::Path) -> Vec<String> {
+    SHIP_TASK_IDS
+        .iter()
+        .map(|title| {
+            create_task(
+                runtime,
+                repo_root,
+                title,
+                "synthetic workflow admission fixture",
+                TaskStatus::Backlog,
+                &[],
+            )
+            .id
+            .to_string()
+        })
+        .collect()
 }
 
 fn capability_denial(result: Result<Value, OrbitError>) -> String {
@@ -116,7 +139,7 @@ fn managed_run_environment_denies_ship_and_resume_end_to_end() {
     let ship = capability_denial(run_tool_as_operator(
         &runtime,
         "orbit.workflow.ship",
-        ship_input(),
+        ship_input(&synthetic_ship_task_ids()),
     ));
     assert!(ship.contains("managed runs cannot dispatch"), "{ship}");
 
@@ -148,9 +171,10 @@ fn managed_run_environment_denies_ship_and_resume_end_to_end() {
 #[test]
 fn unmanaged_environment_admits_operator_ship_and_resume() {
     let _env = unmanaged_tool_env_guard();
-    let (_root, runtime, _repo_root) = test_runtime();
+    let (_root, runtime, repo_root) = test_runtime();
     write_ship_job_asset(&runtime);
     let source_run_id = seed_failed_run(&runtime);
+    let task_ids = seed_ship_tasks(&runtime, &repo_root);
 
     // The mirror of the denial test's scope assertion: with no envelope there is
     // no run scope, which is what leaves the guard inert.
@@ -161,7 +185,7 @@ fn unmanaged_environment_admits_operator_ship_and_resume() {
         None,
     );
 
-    let shipped = run_tool_as_operator(&runtime, "orbit.workflow.ship", ship_input())
+    let shipped = run_tool_as_operator(&runtime, "orbit.workflow.ship", ship_input(&task_ids))
         .expect("unmanaged operator ship is admitted");
     assert_eq!(shipped["workflow"], json!("ship"));
     assert_eq!(shipped["job_id"], json!(SHIP_JOB));
@@ -183,7 +207,7 @@ fn unmanaged_environment_admits_operator_ship_and_resume() {
     assert_eq!(stored.job_id, SHIP_JOB);
     assert_eq!(
         stored.input.expect("ship input")["task_ids"],
-        json!(SHIP_TASK_IDS)
+        json!(task_ids)
     );
     assert_eq!(
         runtime
@@ -204,8 +228,9 @@ fn unmanaged_environment_admits_operator_ship_and_resume() {
 #[test]
 fn ship_tool_inherits_the_shared_in_flight_guard() {
     let _env = unmanaged_tool_env_guard();
-    let (_root, runtime, _repo_root) = test_runtime();
+    let (_root, runtime, repo_root) = test_runtime();
     write_ship_job_asset(&runtime);
+    let task_ids = seed_ship_tasks(&runtime, &repo_root);
     let in_flight = runtime
         .stores()
         .jobs()
@@ -213,18 +238,18 @@ fn ship_tool_inherits_the_shared_in_flight_guard() {
             SHIP_JOB,
             1,
             Utc::now(),
-            Some(json!({"mode": "pr", "task_ids": [SHIP_TASK_IDS[0]]})),
+            Some(json!({"mode": "pr", "task_ids": [task_ids[0]]})),
             None,
         )
         .expect("insert in-flight run");
 
-    let error = run_tool_as_operator(&runtime, "orbit.workflow.ship", ship_input())
+    let error = run_tool_as_operator(&runtime, "orbit.workflow.ship", ship_input(&task_ids))
         .expect_err("the tool must refuse a task already carried by a non-terminal run");
 
     let OrbitError::ShipRunInFlight { task_id, run_id } = &error else {
         panic!("expected ShipRunInFlight, got {error:?}");
     };
-    assert_eq!(task_id, SHIP_TASK_IDS[0]);
+    assert_eq!(task_id, &task_ids[0]);
     assert_eq!(run_id, &in_flight.run_id);
 
     let runs = runtime

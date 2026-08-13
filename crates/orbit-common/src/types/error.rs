@@ -26,7 +26,6 @@ pub enum NotFoundKind {
     Activity,
     Adr,
     DesignFeature,
-    Learning,
     AgentSession,
     Workspace,
 }
@@ -42,7 +41,6 @@ impl std::fmt::Display for NotFoundKind {
             Self::Activity => "activity",
             Self::Adr => "ADR",
             Self::DesignFeature => "design feature",
-            Self::Learning => "learning",
             Self::AgentSession => "agent session",
             Self::Workspace => "workspace",
         };

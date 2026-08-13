@@ -4,9 +4,8 @@ use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
 use orbit_common::types::{
-    ActivityV2, AgentModelPair, ExternalRef, InvocationTrace, JobRun, JobRunState,
-    LearningInjectionCaps, LearningInjectionState, LearningReminder, NotFoundKind, OrbitError,
-    OrbitEvent, Role, Task, TaskComment, TaskHistoryEntry, TaskPriority, TaskStatus,
+    ActivityV2, AgentModelPair, ExternalRef, InvocationTrace, JobRun, JobRunState, NotFoundKind,
+    OrbitError, OrbitEvent, Role, Task, TaskComment, TaskHistoryEntry, TaskPriority, TaskStatus,
     UNRESTRICTED_FS_PROFILE, push_external_ref_if_missing,
 };
 use orbit_engine::{
@@ -27,7 +26,7 @@ use crate::command::task::{
 };
 use crate::runtime::TaskRecordUpdateParams as StoreTaskUpdateParams;
 use crate::runtime::build_orbit_tool_host;
-use crate::runtime::v2_host::{cli_executor, dispatch, learning_reminders, sandbox, task_context};
+use crate::runtime::v2_host::{cli_executor, dispatch, sandbox, task_context};
 
 impl RuntimeHost for OrbitRuntime {
     fn insert_job_run(
@@ -460,32 +459,6 @@ impl RuntimeHost for OrbitRuntime {
 
     fn task_context_for_agent_input(&self, input: &Value) -> Result<Option<Value>, DispatchError> {
         task_context::task_context_for_agent_input(self, input)
-    }
-
-    fn learning_reminders_for_task(
-        &self,
-        input: &Value,
-        caps: LearningInjectionCaps,
-    ) -> Result<Vec<LearningReminder>, DispatchError> {
-        learning_reminders::learning_reminders_for_task(self, input, caps)
-    }
-
-    fn persist_session_learning_state(
-        &self,
-        session_id: &str,
-        state: &LearningInjectionState,
-    ) -> Result<(), DispatchError> {
-        let store = Store::open(&self.context.persistence().audit_db).map_err(|error| {
-            DispatchError::JobExecution(format!("open session learning store: {error}"))
-        })?;
-        let workspace_id = self.workspace_id().map_err(|error| {
-            DispatchError::JobExecution(format!("resolve workspace id: {error}"))
-        })?;
-        store
-            .upsert_session_learning_state(&workspace_id, session_id, state)
-            .map_err(|error| {
-                DispatchError::JobExecution(format!("persist session learning state: {error}"))
-            })
     }
 
     /// [ORB-10002] Persist a per-step checkpoint into the run's

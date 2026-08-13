@@ -13,8 +13,7 @@
 //! This crate owns strict machine identity, the path-free logical workspace
 //! catalog plus machine-local checkout roles, the atomic satellite cache, the
 //! host/workspace registry service, registry persistence, and remote MCP
-//! contract/broker/hub/link/registration composition. It also owns the
-//! feature-specific graph and learning extensions and global discovery tools.
+//! contract/broker/hub/link/registration composition and global discovery tools.
 //! Shared DTOs remain in `orbit-common`; generic MCP framing remains in
 //! `orbit-mcp`; generic workspace-scoped builtin definitions remain in
 //! `orbit-tools`; registry migrations, revision advancement, and transactional

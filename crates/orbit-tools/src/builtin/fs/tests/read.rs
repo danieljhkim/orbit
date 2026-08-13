@@ -107,7 +107,6 @@ fn default_policy_allows_only_versioned_orbit_modify_surface() {
     for path in [
         ".orbit/state/job-runs/run.json",
         ".orbit/tasks/ORB-00001/task.yaml",
-        ".orbit/learnings/L-0001/learning.yaml",
         ".orbit/adrs/accepted/ADR-0001/adr.yaml",
         ".orbit/frictions/2026-08/F001.md",
         ".orbit/orbit.db",

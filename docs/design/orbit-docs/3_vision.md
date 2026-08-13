@@ -15,6 +15,11 @@ last_validated: 2026-08-09
 
 # Orbit Docs — Vision
 
+> **Historical comparison:** learning-specific comparisons in this document
+> describe the retired native subsystem. [ORB-10736] / [ADR-0359] remove that
+> resource and its tool, storage, and delivery contracts; those passages are
+> non-normative.
+
 The v1 from [ORB-00163] is the corpus and the retrieval primitive; [ORB-00206] adds doc embeddings and opt-in hybrid ranking. Task-time related-doc injection is shipped; PreToolUse hook integration and the ADR-folding question remain future work. This document names the open questions, the planned follow-up work, the prior art that shaped the design, and the dimensions on which orbit-docs differs from sibling tools.
 
 ---

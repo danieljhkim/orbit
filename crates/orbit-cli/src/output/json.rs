@@ -65,7 +65,6 @@ fn error_code(error: &OrbitError) -> &str {
             // allocated-but-unreadable bodies are `remote_artifact_unavailable`.
             NotFoundKind::Adr => "not_found",
             NotFoundKind::DesignFeature => "design_feature_not_found",
-            NotFoundKind::Learning => "learning_not_found",
             NotFoundKind::AgentSession => "agent_session_not_found",
             NotFoundKind::Workspace => "workspace_not_found",
         },

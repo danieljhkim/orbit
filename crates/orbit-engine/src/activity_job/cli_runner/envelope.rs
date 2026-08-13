@@ -10,7 +10,6 @@ pub(super) fn cli_agent_envelope_json(
     run_id: &str,
     input: &Value,
     task_ctx: Option<&Value>,
-    prompt_override: Option<&str>,
 ) -> Result<Vec<u8>, DispatchError> {
     let mut envelope = serde_json::Map::new();
     envelope.insert("schemaVersion".to_string(), Value::from(1));
@@ -20,10 +19,7 @@ pub(super) fn cli_agent_envelope_json(
     );
     envelope.insert(
         "prompt".to_string(),
-        Value::String(match prompt_override {
-            Some(prompt) => prompt.to_string(),
-            None => user_prompt_from_input(input)?,
-        }),
+        Value::String(user_prompt_from_input(input)?),
     );
     envelope.insert("input".to_string(), input.clone());
     envelope.insert("run_id".to_string(), Value::String(run_id.to_string()));

@@ -26,7 +26,6 @@ use orbit_agent::loop_engine::{
 use orbit_agent::providers::anthropic::AnthropicMessagesTransport;
 use orbit_common::model_defaults::ANTHROPIC_HTTP_DEFAULT_MODEL;
 use orbit_common::types::activity_job::AgentLoopSpec;
-use orbit_common::types::{LearningInjectionCaps, LearningReminder, prepend_reminder_block};
 use orbit_tools::ToolContext;
 use serde_json::Value;
 
@@ -59,16 +58,7 @@ pub fn drive_agent_loop(
     );
     tool_ctx.agent_name = Some(provider.to_string());
     tool_ctx.model_name = Some(model);
-    drive_inner(
-        spec,
-        api_key,
-        run_id,
-        audit,
-        &mut session,
-        input,
-        tool_ctx,
-        Some(host),
-    )
+    drive_inner(spec, api_key, run_id, audit, &mut session, input, tool_ctx)
 }
 
 /// Drive a v2 agent_loop activity reusing an existing `Session`.
@@ -97,16 +87,7 @@ pub fn drive_agent_loop_with_session(
     );
     tool_ctx.agent_name = Some(provider.to_string());
     tool_ctx.model_name = Some(model);
-    drive_inner(
-        spec,
-        api_key,
-        run_id,
-        audit,
-        session,
-        input,
-        tool_ctx,
-        Some(host),
-    )
+    drive_inner(spec, api_key, run_id, audit, session, input, tool_ctx)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -118,12 +99,9 @@ fn drive_inner(
     session: &mut Session,
     input: &Value,
     tool_ctx: ToolContext,
-    host: Option<&dyn RuntimeHost>,
 ) -> Result<LoopOutcome, DispatchError> {
     let model = resolve_model(spec);
     let user_prompt = user_prompt_from_input(input)?;
-    let user_prompt =
-        maybe_prepend_learning_reminders(user_prompt, host, input, session, &tool_ctx)?;
 
     if replay_active() {
         // Reuse the same ReplayTransport across calls so the cursor advances
@@ -163,43 +141,6 @@ fn drive_inner(
             tool_ctx,
         )
     }
-}
-
-fn maybe_prepend_learning_reminders(
-    user_prompt: String,
-    host: Option<&dyn RuntimeHost>,
-    input: &Value,
-    session: &mut Session,
-    tool_ctx: &ToolContext,
-) -> Result<String, DispatchError> {
-    let Some(host) = host else {
-        return Ok(user_prompt);
-    };
-    let caps = LearningInjectionCaps::from_env();
-    let reminders = host.learning_reminders_for_task(input, caps)?;
-    if reminders.is_empty() {
-        return Ok(user_prompt);
-    }
-    let admitted = session
-        .learning_injection_state_mut()
-        .admit_reminders(&reminders, caps);
-    if admitted.is_empty() {
-        return Ok(user_prompt);
-    }
-    persist_session_learning_state(host, tool_ctx, session, &admitted)?;
-    Ok(prepend_reminder_block(&user_prompt, &admitted))
-}
-
-fn persist_session_learning_state(
-    host: &dyn RuntimeHost,
-    tool_ctx: &ToolContext,
-    session: &Session,
-    _admitted: &[LearningReminder],
-) -> Result<(), DispatchError> {
-    let Some(_workspace_root) = tool_ctx.workspace_root.as_deref() else {
-        return Ok(());
-    };
-    host.persist_session_learning_state(session.id(), session.learning_injection_state())
 }
 
 fn user_prompt_from_input(input: &Value) -> Result<String, DispatchError> {

@@ -363,7 +363,7 @@ fn skill_list() -> Table {
         "orbit-search",
         "e3f03c1208",
         "3",
-        "Search tasks, docs, and learnings through the unified orbit search query surface",
+        "Search tasks, docs, ADRs, and frictions through the unified orbit search query surface",
     ]);
     table.add_row(vec![
         "orbit-task",

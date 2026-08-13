@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::types::{
     ExternalRef, OrbitError, OrbitId, TaskComplexity, TaskPriority, TaskStatus, TaskType,
-    is_valid_adr_id, is_valid_friction_id, is_valid_learning_id,
+    is_valid_adr_id, is_valid_friction_id,
 };
 
 pub const TASK_ARTIFACT_SCHEMA_VERSION: u32 = 1;
@@ -222,13 +222,12 @@ fn validate_target_for(relation_type: TaskRelationType, target: &str) -> Result<
         TaskRelationType::Produces | TaskRelationType::Resolves => {
             if is_valid_orb_task_id(target)
                 || is_valid_friction_id(target)
-                || is_valid_learning_id(target)
                 || is_valid_adr_id(target)
             {
                 return Ok(());
             }
             Err(OrbitError::InvalidInput(format!(
-                "relation target '{target}' must be an ORB-/F-/L-/ADR- id"
+                "relation target '{target}' must be an ORB-/F-/ADR- id"
             )))
         }
         TaskRelationType::BlockedBy

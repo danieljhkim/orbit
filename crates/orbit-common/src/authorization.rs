@@ -183,12 +183,6 @@ pub const GOVERNED_OPERATIONS: &[GovernedOperation] = &[
         rationale: "force-releasing a workspace claim displaces the operator currently driving dispatch",
     },
     GovernedOperation {
-        id: "orbit.learning.prune",
-        surface: OperationSurface::Tool,
-        allowed: &[McpCapability::Operator],
-        rationale: "pruning archives curated learnings in bulk",
-    },
-    GovernedOperation {
         id: "orbit.semantic.uninstall",
         surface: OperationSurface::Tool,
         allowed: &[McpCapability::Operator],
@@ -211,12 +205,6 @@ pub const GOVERNED_OPERATIONS: &[GovernedOperation] = &[
         surface: OperationSurface::CliCommand,
         allowed: &[McpCapability::Operator],
         rationale: "pruning permanently deletes audit history",
-    },
-    GovernedOperation {
-        id: "learning prune",
-        surface: OperationSurface::CliCommand,
-        allowed: &[McpCapability::Operator],
-        rationale: "pruning archives curated learnings in bulk",
     },
     GovernedOperation {
         id: "semantic uninstall",

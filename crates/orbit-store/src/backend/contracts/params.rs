@@ -1,27 +1,9 @@
 use chrono::{DateTime, Utc};
 use orbit_common::types::{
-    ExternalRef, JobRunState, Learning, OrbitId, TaskArtifact, TaskComment, TaskComplexity,
-    TaskHistoryEntry, TaskPriority, TaskRelation, TaskStatus, TaskType,
+    ExternalRef, JobRunState, OrbitId, TaskArtifact, TaskComment, TaskComplexity, TaskHistoryEntry,
+    TaskPriority, TaskRelation, TaskStatus, TaskType,
 };
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct RemoteArtifactStub {
-    pub id: String,
-    pub kind: String,
-    pub status: String,
-    pub worktree_root: PathBuf,
-    pub branch: Option<String>,
-    pub body_path: Option<PathBuf>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum LearningListEntry {
-    Local(Learning),
-    Remote(RemoteArtifactStub),
-}
-
 #[derive(Debug, Clone)]
 pub struct TaskCreateParams {
     pub actor: String,

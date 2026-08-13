@@ -34,11 +34,11 @@ fn frozen_owner_schema_golden_vector() {
         String::from_utf8(bytes).expect("utf8"),
         concat!(
             "orbit.mcp.owner-schema.v1\0",
-            r#"{"canonical_registry_revision":3,"capability":"agent","tools":[{"advertised_name":"orbit_task_show","canonical_name":"orbit.task.show","description":"Show one task","input_schema":{"additionalProperties":true,"properties":{"id":{"description":"Task ID","type":"string"}},"required":["id"],"type":"object"}}]}"#,
+            r#"{"canonical_registry_revision":4,"capability":"agent","tools":[{"advertised_name":"orbit_task_show","canonical_name":"orbit.task.show","description":"Show one task","input_schema":{"additionalProperties":true,"properties":{"id":{"description":"Task ID","type":"string"}},"required":["id"],"type":"object"}}]}"#,
         )
     );
     assert_eq!(
         owner_schema_digest(&fixture_definitions(), McpCapability::Agent).expect("digest"),
-        "416fc00d8b8eaa3d6dd44f3e28032c92796d6a4ea50e7055ad83404d7f2b599a"
+        "98927f4893ada0e004f5b16bd5485ce6232075d9eca0a76a4aa9aebcc272ae25"
     );
 }

@@ -3,13 +3,11 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use chrono::Utc;
 use orbit_agent::{
     Agent, AgentConfig, AgentOperation, AgentRequest, peek_response_status,
     provider_invocation_diagnostic, response_envelope_protocol_check,
 };
 use orbit_common::types::activity_job::{AgentLoopSpec, V2AuditEventKind};
-use orbit_common::types::{LearningInjectionCaps, LearningInjectionState, prepend_reminder_block};
 use orbit_common::utility::process_identity::process_start_identity_token;
 use orbit_common::utility::redaction::{PatternRedactor, redact_sensitive_env_text};
 use serde_json::Value;
@@ -100,14 +98,7 @@ pub fn run_cli_backend(
         .map_err(|error| DispatchError::CliInvocationPermanent(error.message))?;
     let sandbox = prepared_sandbox.effective;
 
-    let learning_context = cli_learning_context(host, input, tool_ctx.workspace_root.as_deref())?;
-    let envelope_json = cli_agent_envelope_json(
-        spec,
-        run_id,
-        input,
-        task_ctx.as_ref(),
-        learning_context.prompt.as_deref(),
-    )?;
+    let envelope_json = cli_agent_envelope_json(spec, run_id, input, task_ctx.as_ref())?;
 
     let mut provider_config = host.provider_cli_config(&provider);
 
@@ -219,7 +210,7 @@ pub fn run_cli_backend(
         orbit_managed_run_context: true,
         orbit_agent_name: tool_ctx.agent_name.as_deref(),
         orbit_agent_model: tool_ctx.model_name.as_deref(),
-        orbit_session_id: learning_context.session_id.as_deref(),
+        orbit_session_id: None,
         orbit_task_id: task_id,
         orbit_active_task: true,
         agent_run_id: Some(run_id),
@@ -578,48 +569,6 @@ fn bounded_diagnostic(error: &str, redactor: &PatternRedactor) -> String {
         ""
     };
     format!("{bounded}{suffix}")
-}
-
-struct CliLearningContext {
-    prompt: Option<String>,
-    session_id: Option<String>,
-}
-
-fn cli_learning_context(
-    host: &dyn RuntimeHost,
-    input: &Value,
-    workspace_root: Option<&std::path::Path>,
-) -> Result<CliLearningContext, DispatchError> {
-    let caps = LearningInjectionCaps::from_env();
-    let reminders = host.learning_reminders_for_task(input, caps)?;
-    if reminders.is_empty() {
-        return Ok(CliLearningContext {
-            prompt: None,
-            session_id: None,
-        });
-    }
-
-    let mut state = LearningInjectionState::new();
-    let admitted = state.admit_reminders(&reminders, caps);
-    if admitted.is_empty() {
-        return Ok(CliLearningContext {
-            prompt: None,
-            session_id: None,
-        });
-    }
-    let base_prompt = super::envelope::user_prompt_from_input(input)?;
-    let prompt = prepend_reminder_block(&base_prompt, &admitted);
-    let session_id = format!("S{:x}-cli", Utc::now().timestamp_micros());
-    if workspace_root.is_some() {
-        host.persist_session_learning_state(&session_id, &state)
-            .map_err(|err| {
-                DispatchError::CliInvocationFailed(format!("persist learning state: {err}"))
-            })?;
-    }
-    Ok(CliLearningContext {
-        prompt: Some(prompt),
-        session_id: Some(session_id),
-    })
 }
 
 struct StdoutTextPreview {

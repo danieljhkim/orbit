@@ -34,7 +34,7 @@ const DIAG_FULL_WIDTH_MAINS = {
   reliability: "diagnostics-reliability-main",
 };
 const RUN_DETAIL_SUBTABS = ["steps", "events"];
-const KNOWLEDGE_SUBTABS = ["learnings", "frictions"];
+const KNOWLEDGE_SUBTABS = ["frictions"];
 
 function parseHashRoute(raw) {
   const trimmed = String(raw || "").replace(/^#/, "");
@@ -133,25 +133,19 @@ function setDiagSubtabImpl(ctx, name) {
 }
 
 function setKnowledgeSubtabImpl(ctx, name) {
-  if (!KNOWLEDGE_SUBTABS.includes(name)) name = "learnings";
+  if (!KNOWLEDGE_SUBTABS.includes(name)) name = "frictions";
   ctx.setKnowledgeSubtab(name);
   for (const btn of document.querySelectorAll("#knowledge-subtabs .subtab")) {
     btn.classList.toggle("active", btn.dataset.subtab === name);
   }
-  const isFrictions = name === "frictions";
-  const isLearnings = name === "learnings";
   const toggle = (id, show) => {
     const node = $(id);
     if (node) node.style.display = show ? "" : "none";
   };
-  toggle("learning-stats", isLearnings);
-  toggle("learning-search", isLearnings);
-  toggle("learnings-body", isLearnings);
-  toggle("learning-detail-panel", isLearnings);
-  toggle("friction-stats", isFrictions);
-  toggle("friction-search", isFrictions);
-  toggle("frictions-body", isFrictions);
-  toggle("friction-detail-panel", isFrictions);
+  toggle("friction-stats", true);
+  toggle("friction-search", true);
+  toggle("frictions-body", true);
+  toggle("friction-detail-panel", true);
 }
 
 function setActiveTabImpl(ctx, raw, opts = {}) {
@@ -228,7 +222,7 @@ function setActiveTabImpl(ctx, raw, opts = {}) {
   } else if (top === "knowledge") {
     const sub = KNOWLEDGE_SUBTABS.includes(segments[1]) ? segments[1] : ctx.getKnowledgeSubtab();
     setKnowledgeSubtabImpl(ctx, sub);
-    hash = sub === "learnings" ? "#knowledge/learnings" : `#knowledge/${sub}`;
+    hash = `#knowledge/${sub}`;
   } else {
     hash = `#${top}`;
   }

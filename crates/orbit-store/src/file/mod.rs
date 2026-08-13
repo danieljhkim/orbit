@@ -8,7 +8,6 @@
 
 pub(crate) mod executor_def_store;
 pub(crate) mod friction_store;
-pub(crate) mod learning_store;
 pub(crate) mod path_safety;
 pub(crate) mod policy_def_store;
 pub(crate) mod scoreboard;

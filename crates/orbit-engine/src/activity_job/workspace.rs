@@ -837,8 +837,8 @@ impl WorktreeBoundaryGuard {
     }
 }
 
-/// Orbit's own record store inside a checkout. Tasks, ADRs, learnings,
-/// frictions, and routines under this prefix are rewritten continuously by the
+/// Orbit's own record store inside a checkout. Tasks, frictions, auto-tasks,
+/// and routines under this prefix are rewritten continuously by the
 /// engine that drives the pipeline and by out-of-run curation passes; they are
 /// never part of a run's code candidate, so the primary's copy moving under a
 /// stationary HEAD carries no data-loss signal.
@@ -851,8 +851,7 @@ const ORBIT_RECORD_STORE_PREFIX: &str = ".orbit/";
 /// advanced; it rejects `before.head == after.head` on its first clause, which
 /// left a stationary primary with *any* unrelated dirt delta reported as
 /// `primary_checkout_drift` (F2026-07-166: an out-of-run curation pass
-/// re-serializing tracked `.orbit/learnings/*/learning.yaml` files killed a
-/// complete, validated implementation).
+/// rewriting tracked Orbit records killed a complete, validated implementation).
 ///
 /// Unlike a fast-forward, a stationary HEAD offers no positive proof that Git
 /// itself produced the delta, so acceptance is deliberately narrower than

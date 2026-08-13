@@ -47,7 +47,7 @@ impl McpWorkspace {
         Self::init_with_mode(Some("hub"))
     }
 
-    fn init_with_mode(host_mode: Option<&str>) -> Self {
+    fn init_with_mode(_host_mode: Option<&str>) -> Self {
         let temp = tempdir().expect("tempdir");
         let home = temp.path().join("home");
         let work = temp.path().join("work");
@@ -61,15 +61,14 @@ impl McpWorkspace {
             .expect("initialize Git checkout");
         assert!(output.status.success(), "git init failed: {output:?}");
 
-        let mut init_args = vec![
+        let init_args = vec![
             "init",
             "--non-interactive",
             "--host-name",
             "mcp-roundtrip-host",
+            "--task-prefix",
+            "TST",
         ];
-        if let Some(mode) = host_mode {
-            init_args.extend(["--host-mode", mode]);
-        }
         let output = Self::orbit_command(&work, &home)
             .args(init_args)
             .output()
@@ -92,22 +91,6 @@ impl McpWorkspace {
             String::from_utf8_lossy(&output.stdout),
             String::from_utf8_lossy(&output.stderr)
         );
-
-        if host_mode == Some("hub") {
-            // Register the hub after the logical workspace identity exists;
-            // host registration must not seed a conflicting bootstrap ID in
-            // the checkout before `workspace init` owns that file.
-            let output = Self::orbit_command(&work, &home)
-                .args(["host", "register"])
-                .output()
-                .expect("register hub identity");
-            assert!(
-                output.status.success(),
-                "hub registration failed\nstdout:\n{}\nstderr:\n{}",
-                String::from_utf8_lossy(&output.stdout),
-                String::from_utf8_lossy(&output.stderr)
-            );
-        }
 
         Self {
             _temp: temp,
@@ -343,7 +326,6 @@ fn mcp_serve_tools_list_matches_production_snapshot() {
     for hidden in [
         "orbit_task_delete",
         "orbit_task_lint",
-        "orbit_learning_prune",
         "orbit_workflow_ship",
         "orbit_workflow_run_show",
         "orbit_workflow_run_list",
@@ -461,7 +443,7 @@ fn hub_mcp_serve_is_checkoutless_frame_pure_and_audits_trusted_identity() {
                 schema_version: orbit_remote::HOST_IDENTITY_SCHEMA_VERSION,
                 machine_id: "hm_spoke".to_string(),
                 host_id: "spoke".to_string(),
-                task_prefix: "ORB".to_string(),
+                task_prefix: "TST".to_string(),
                 mode: orbit_remote::HostMode::Spoke,
             },
             BTreeSet::new(),
@@ -470,7 +452,7 @@ fn hub_mcp_serve_is_checkoutless_frame_pure_and_audits_trusted_identity() {
     let scratch = workspace.home.join("hub-scratch");
     std::fs::create_dir_all(&scratch).expect("create hub launch dir");
     let child = McpWorkspace::orbit_command(&scratch, &workspace.home)
-        .args(["mcp", "serve", "--hub", "--capabilities", "agent"])
+        .args(["mcp", "serve", "--owner", "--capabilities", "agent"])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -490,7 +472,7 @@ fn hub_mcp_serve_is_checkoutless_frame_pure_and_audits_trusted_identity() {
     assert!(
         initialized["result"]["instructions"]
             .as_str()
-            .is_some_and(|instructions| instructions.starts_with("orbit-hub-contract-v1:"))
+            .is_some_and(|instructions| instructions.starts_with("orbit-owner-contract-v1:"))
     );
     client.notify("notifications/initialized");
 
@@ -666,83 +648,6 @@ fn mcp_serve_round_trips_records_against_a_temp_workspace() {
             .as_str()
             .is_some_and(|message| message.contains("capability denied"))
     );
-
-    // Learning create → show → lexical federated search (no embedding
-    // companion installed, so `orbit.search` must serve the lexical path).
-    let learning = client.call_tool_ok(
-        "orbit_learning_add",
-        json!({ "summary": "mcp-roundtrip-learning literal marker" }),
-    );
-    let learning_id = learning["id"].as_str().expect("learning id").to_string();
-
-    let learning_shown = client.call_tool_ok("orbit_learning_show", json!({ "id": learning_id }));
-    assert_eq!(
-        learning_shown["summary"], "mcp-roundtrip-learning literal marker",
-        "learning must round-trip"
-    );
-
-    let search = client.call_tool_ok(
-        "orbit_search",
-        json!({ "query": "mcp-roundtrip-learning", "kind": "learning" }),
-    );
-    assert_eq!(search["mode"], "lexical");
-    let hits = search["results"].as_array().expect("search results");
-    assert!(
-        hits.iter()
-            .any(|hit| hit["id"] == json!(learning_id) && hit["source"] == json!("lexical")),
-        "lexical search must find the learning: {hits:?}"
-    );
-
-    // ORB-10469: named single-learning archive (retire without a replacement).
-    // Success: archives an active learning.
-    let archived = client.call_tool_ok("orbit_learning_archive", json!({ "id": learning_id }));
-    assert_eq!(archived["status"], "superseded");
-    assert!(archived["superseded_by"].is_null());
-
-    // Idempotence: archiving an already-superseded record is a no-op success.
-    let archived_again =
-        client.call_tool_ok("orbit_learning_archive", json!({ "id": learning_id }));
-    assert_eq!(archived_again["status"], "superseded");
-
-    // Missing id: fails rather than silently succeeding.
-    client.call_tool_err("orbit_learning_archive", json!({ "id": "L-9999999" }));
-
-    // Already-superseded-with-a-replacement record: archive is a no-op that
-    // preserves the existing `superseded_by`, it does not clobber it to null.
-    let other = client.call_tool_ok(
-        "orbit_learning_add",
-        json!({ "summary": "mcp-roundtrip-archive-other literal marker" }),
-    );
-    let other_id = other["id"].as_str().expect("id").to_string();
-    let replacement = client.call_tool_ok(
-        "orbit_learning_add",
-        json!({ "summary": "mcp-roundtrip-archive-replacement literal marker" }),
-    );
-    let replacement_id = replacement["id"].as_str().expect("id").to_string();
-    client.call_tool_ok(
-        "orbit_learning_supersede",
-        json!({ "id": other_id, "with": replacement_id.clone() }),
-    );
-    let archived_after_supersede =
-        client.call_tool_ok("orbit_learning_archive", json!({ "id": other_id }));
-    assert_eq!(archived_after_supersede["status"], "superseded");
-    assert_eq!(archived_after_supersede["superseded_by"], replacement_id);
-
-    // ADR create → show.
-    let adr = client.call_tool_ok(
-        "orbit_adr_add",
-        json!({
-            "title": "MCP round-trip ADR",
-            "body": "## Context\nMCP integration test.\n\n## Decision\nRound-trip an ADR over stdio.\n\n## Consequences\n- Guarded by integration tests.\n",
-            "tags": ["mcp-roundtrip"],
-        }),
-    );
-    let adr_id = adr["id"].as_str().expect("adr id").to_string();
-    assert_eq!(adr["status"], "proposed");
-
-    let adr_shown = client.call_tool_ok("orbit_adr_show", json!({ "id": adr_id }));
-    assert_eq!(adr_shown["title"], "MCP round-trip ADR");
-    assert_eq!(adr_shown["tags"], json!(["mcp-roundtrip"]));
 }
 
 #[test]

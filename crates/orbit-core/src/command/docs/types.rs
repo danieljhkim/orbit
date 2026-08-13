@@ -72,7 +72,6 @@ impl<'de> Deserialize<'de> for DocType {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ArtifactRef {
     Task(String),
-    Learning(String),
     Friction(String),
     Adr(String),
 }
@@ -80,10 +79,7 @@ pub enum ArtifactRef {
 impl ArtifactRef {
     pub fn as_str(&self) -> &str {
         match self {
-            Self::Task(value)
-            | Self::Learning(value)
-            | Self::Friction(value)
-            | Self::Adr(value) => value,
+            Self::Task(value) | Self::Friction(value) | Self::Adr(value) => value,
         }
     }
 }

@@ -1,6 +1,3 @@
-use orbit_common::types::OrbitError;
-use orbit_common::utility::glob::compile_glob_regex;
-
 /// Test whether any of a task's `context_files` selectors apply to `query_path`.
 ///
 /// Selectors take three forms: `file:<path>`, `dir:<path>`, and
@@ -59,19 +56,4 @@ fn is_within(inner: &str, outer: &str) -> bool {
         return rest.starts_with('/');
     }
     false
-}
-
-pub(super) fn learning_scope_contains_path(
-    learning: &orbit_common::types::Learning,
-    query_path: &str,
-) -> Result<bool, OrbitError> {
-    let normalized = orbit_common::utility::glob::normalize_glob_path(query_path)?;
-    for rule in &learning.scope.paths {
-        if let Ok(regex) = compile_glob_regex(rule)
-            && regex.is_match(&normalized)
-        {
-            return Ok(true);
-        }
-    }
-    Ok(false)
 }

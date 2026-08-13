@@ -8,8 +8,6 @@
 mod doc_index;
 mod doc_search;
 mod install;
-mod learning_index;
-mod learning_search;
 mod reindex;
 mod related;
 mod search;
@@ -19,10 +17,6 @@ mod uninstall;
 pub use doc_index::{DocIndexParams, DocIndexResult};
 pub use doc_search::{DocSemanticHit, DocSemanticSearchParams, DocSemanticSearchResult};
 pub use install::{SemanticInstallParams, SemanticInstallResult};
-pub use learning_index::{LearningIndexParams, LearningIndexResult};
-pub use learning_search::{
-    LearningSemanticHit, LearningSemanticSearchParams, LearningSemanticSearchResult,
-};
 pub use reindex::{
     IndexKind, SemanticIndexParams, SemanticIndexResult, SemanticReindexParams,
     SemanticReindexResult, TaskIndexResult,
@@ -36,7 +30,7 @@ use std::fs;
 
 use orbit_common::types::{OrbitError, Task};
 
-use crate::vector::{DocEmbeddingSource, LearningEmbeddingSource, VectorStore};
+use crate::vector::{DocEmbeddingSource, VectorStore};
 use crate::{CompanionPaths, ModelSpec, default_model};
 
 pub(crate) const DEFAULT_RELEASE_BASE_URL: &str =
@@ -111,14 +105,6 @@ pub fn doc_index(
     doc_index::run(vector_store, docs, params)
 }
 
-pub fn learning_index(
-    vector_store: &VectorStore,
-    learnings: &[LearningEmbeddingSource],
-    params: LearningIndexParams,
-) -> Result<LearningIndexResult, OrbitError> {
-    learning_index::run(vector_store, learnings, params)
-}
-
 pub fn semantic_stats(
     vector_store: &VectorStore,
     task_ids: &[String],
@@ -138,13 +124,6 @@ pub fn doc_semantic_search(
     params: DocSemanticSearchParams,
 ) -> Result<DocSemanticSearchResult, OrbitError> {
     doc_search::run(vector_store, params)
-}
-
-pub fn learning_semantic_search(
-    vector_store: &VectorStore,
-    params: LearningSemanticSearchParams,
-) -> Result<LearningSemanticSearchResult, OrbitError> {
-    learning_search::run(vector_store, params)
 }
 
 pub fn semantic_related(

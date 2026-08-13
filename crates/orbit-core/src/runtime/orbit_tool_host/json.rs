@@ -1,44 +1,13 @@
 use std::collections::BTreeMap;
 
 use orbit_common::types::{
-    Learning, OrbitError, Task, TaskArtifact, TaskComment, TaskHistoryEntry, TaskStatus,
+    OrbitError, Task, TaskArtifact, TaskComment, TaskHistoryEntry, TaskStatus,
     resolve_task_dependencies, resolve_task_relations,
 };
 use serde_json::{Map, Value, json};
 
 use crate::OrbitRuntime;
 use crate::command::task::TaskLintReport;
-
-pub(super) fn learning_to_json(learning: &Learning) -> Value {
-    json!({
-        "id": learning.id,
-        "status": learning.status.as_str(),
-        "scope": {
-            "paths": learning.scope.paths,
-            "tags": learning.scope.tags,
-            "symbols": learning.scope.symbols,
-            "semantic_seed": learning.scope.semantic_seed,
-        },
-        "summary": learning.summary,
-        "body": learning.body,
-        "evidence": learning
-            .evidence
-            .iter()
-            .map(|e| json!({"kind": e.kind.to_string(), "ref": e.reference}))
-            .collect::<Vec<_>>(),
-        "supersedes": learning.supersedes,
-        "superseded_by": learning.superseded_by,
-        "legacy_ids": learning.legacy_ids,
-        "created_at": learning.created_at.to_rfc3339(),
-        "updated_at": learning.updated_at.to_rfc3339(),
-        "created_by": learning.created_by,
-        "priority": learning.priority,
-    })
-}
-
-pub(super) fn learning_show_to_json(learning: &Learning) -> Value {
-    learning_to_json(learning)
-}
 
 pub(super) fn task_to_json(task: &Task, status_by_id: &BTreeMap<String, TaskStatus>) -> Value {
     json!({

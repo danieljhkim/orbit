@@ -89,22 +89,13 @@ impl Execute for WorkspaceTeardownArgs {
             }
         }
 
-        // 3. Remove repo-local hook integrations while preserving user-authored hook entries
-        let hook_providers = orbit_cmd::hook_install::uninstall_for_workspace(repo_root)?;
-        if !hook_providers.is_empty() {
-            removed.push(format!(
-                "removed hook integrations for {}",
-                hook_providers.join(", ")
-            ));
-        }
-
-        // 4. Delete .orbit/ directory
+        // 3. Delete .orbit/ directory
         if orbit_dir.is_dir() {
             std::fs::remove_dir_all(&orbit_dir).map_err(|e| OrbitError::Io(e.to_string()))?;
             removed.push(format!("deleted {}", orbit_dir.display()));
         }
 
-        // 5. Print summary
+        // 4. Print summary
         println!("teardown complete:");
         for item in &removed {
             println!("  - {item}");

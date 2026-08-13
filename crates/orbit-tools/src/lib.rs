@@ -98,14 +98,6 @@ pub enum OrbitBuiltinAction {
     /// ADR-0209 bearing 1 [ORB-10358]: friction verbs are registry data, so one
     /// action variant carries the verb instead of one variant per verb.
     Friction(FrictionVerb),
-    LearningAdd,
-    LearningArchive,
-    LearningList,
-    LearningPrune,
-    LearningShow,
-    LearningSupersede,
-    LearningSync,
-    LearningUpdate,
     PipelineInvoke,
     PipelineWait,
     Search,

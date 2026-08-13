@@ -1,12 +1,12 @@
 use std::collections::BTreeMap;
 
-use orbit_search::{DocSemanticHit, LearningSemanticHit};
+use orbit_search::DocSemanticHit;
 
 use super::convert::doc_result_to_global;
 use super::types::GlobalSearchHit;
 use super::{
     DOC_HYBRID_FALLBACK_NOTE, DOC_SEARCH_MIN_CANDIDATES, DOC_SEARCH_OVERFETCH,
-    LEARNING_HYBRID_FALLBACK_NOTE, TASK_HYBRID_FALLBACK_NOTE,
+    TASK_HYBRID_FALLBACK_NOTE,
 };
 
 pub(super) fn doc_search_candidate_limit(limit: usize) -> usize {
@@ -21,14 +21,6 @@ pub(super) struct DocHybridCandidate {
     pub(super) lexical_score: Option<f32>,
     pub(super) semantic_score: Option<f32>,
     pub(super) semantic: Option<DocSemanticHit>,
-}
-
-#[derive(Debug, Clone)]
-pub(super) struct LearningHybridCandidate {
-    pub(super) hit: GlobalSearchHit,
-    pub(super) lexical_score: Option<f32>,
-    pub(super) semantic_score: Option<f32>,
-    pub(super) semantic: Option<LearningSemanticHit>,
 }
 
 pub(super) fn lexical_doc_hits(
@@ -70,46 +62,6 @@ pub(super) fn blend_doc_hybrid_candidates(
             let path = candidate.hit.path.as_deref().unwrap_or_default();
             let lexical = lexical_scores.get(path).copied().unwrap_or(0.0);
             let semantic = semantic_scores.get(path).copied().unwrap_or(0.0);
-            let score = semantic_weight.mul_add(semantic, lexical_weight * lexical);
-            candidate.hit.score = Some(score);
-            if let Some(semantic_hit) = candidate.semantic {
-                candidate.hit.best_field = Some(semantic_hit.best_field);
-                candidate.hit.snippet = Some(semantic_hit.snippet);
-            }
-            candidate.hit
-        })
-        .collect::<Vec<_>>();
-    out.sort_by(compare_global_hits_by_score);
-    out
-}
-
-pub(super) fn blend_learning_hybrid_candidates(
-    candidates: Vec<LearningHybridCandidate>,
-    semantic_weight: f32,
-) -> Vec<GlobalSearchHit> {
-    let lexical_scores = normalized_doc_scores(candidates.iter().filter_map(|candidate| {
-        candidate
-            .hit
-            .id
-            .as_ref()
-            .zip(candidate.lexical_score)
-            .map(|(id, score)| (id.clone(), score))
-    }));
-    let semantic_scores = normalized_doc_scores(candidates.iter().filter_map(|candidate| {
-        candidate
-            .hit
-            .id
-            .as_ref()
-            .zip(candidate.semantic_score)
-            .map(|(id, score)| (id.clone(), score))
-    }));
-    let lexical_weight = 1.0 - semantic_weight;
-    let mut out = candidates
-        .into_iter()
-        .map(|mut candidate| {
-            let id = candidate.hit.id.as_deref().unwrap_or_default();
-            let lexical = lexical_scores.get(id).copied().unwrap_or(0.0);
-            let semantic = semantic_scores.get(id).copied().unwrap_or(0.0);
             let score = semantic_weight.mul_add(semantic, lexical_weight * lexical);
             candidate.hit.score = Some(score);
             if let Some(semantic_hit) = candidate.semantic {
@@ -176,19 +128,6 @@ pub(super) fn warn_doc_hybrid_fallback(notes: &mut Vec<String>, reason: &str) {
         notes,
         "doc hybrid vector",
         &format!("{DOC_HYBRID_FALLBACK_NOTE}: {reason}"),
-    );
-}
-
-pub(super) fn warn_learning_hybrid_fallback(notes: &mut Vec<String>, reason: &str) {
-    orbit_common::tracing::warn!(
-        target: "orbit.search.learnings",
-        reason,
-        "falling back to lexical learning search"
-    );
-    push_skip_note(
-        notes,
-        "learning hybrid vector",
-        &format!("{LEARNING_HYBRID_FALLBACK_NOTE}: {reason}"),
     );
 }
 

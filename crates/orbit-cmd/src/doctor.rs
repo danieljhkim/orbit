@@ -8,9 +8,7 @@
 //! reservations whose owner or terminal task association is conclusively
 //! inactive, task
 //! relation/dependency targets that no longer resolve in the registry
-//! (grandfathered relations that block index rebuilds — ORB-10305), and
-//! learning/ADR id allocations pinned to a worktree that has since been
-//! reaped (ORB-10501).
+//! (grandfathered relations that block index rebuilds — ORB-10305).
 //!
 //! Every check degrades rather than errors: subsystems that are absent in a
 //! fresh workspace report [`WorkspaceDoctorStatus::Skipped`], and probe
@@ -115,11 +113,6 @@ pub trait DoctorCommands {
     /// workspace locations. Missing locations are a successful no-op.
     fn remove_retired_graph_state(&self) -> Result<usize, OrbitError>;
 
-    /// [ORB-10501] Abandon every learning/ADR allocation whose pinned worktree
-    /// is gone and whose body is unreadable, returning how many rows were
-    /// retired. Each row is re-verified by the owning store before its write.
-    fn clear_orphaned_id_allocations(&self) -> Result<usize, OrbitError>;
-
     /// Cheap store write probe for health endpoints: open the store and
     /// acquire + roll back the write lock without mutating anything.
     fn health_check_store_writable(&self) -> Result<String, OrbitError>;
@@ -136,7 +129,6 @@ impl DoctorCommands for OrbitRuntime {
             doctor_check_job_runs(self),
             doctor_check_task_reservations(self),
             doctor_check_task_relations(self),
-            doctor_check_id_allocations(self),
         ])
     }
 
@@ -166,10 +158,6 @@ impl DoctorCommands for OrbitRuntime {
             }
         }
         Ok(removed)
-    }
-
-    fn clear_orphaned_id_allocations(&self) -> Result<usize, OrbitError> {
-        Ok(self.abandon_orphaned_id_allocations()?.len())
     }
 
     fn health_check_store_writable(&self) -> Result<String, OrbitError> {
@@ -252,7 +240,7 @@ fn doctor_check_disk_space(runtime: &OrbitRuntime) -> WorkspaceDoctorResult {
     disk_space_check(&root)
 }
 
-/// Semantic (docs/tasks/learnings) embedding index staleness, using the
+/// Semantic (docs/tasks) embedding index staleness, using the
 /// stale-row signal the vector store already tracks.
 fn doctor_check_semantic_index(runtime: &OrbitRuntime) -> WorkspaceDoctorResult {
     match runtime.semantic_stats() {
@@ -593,65 +581,6 @@ fn doctor_check_task_relations(runtime: &OrbitRuntime) -> WorkspaceDoctorResult 
     }
 }
 
-/// How many orphaned allocations the doctor message names before summarizing
-/// the rest. A workspace can accumulate dozens; the row stays readable while
-/// still reporting the true total.
-const ORPHANED_ALLOCATION_DETAIL_LIMIT: usize = 10;
-
-/// Learning/ADR id allocations pinned to a worktree that no longer exists and
-/// whose body is unreadable anywhere locally (ORB-10501). These rows can never
-/// resolve again — the body died with its worktree — so they are permanent
-/// dead weight in `learning list --include-remote` and the ADR list until they
-/// are retired.
-fn doctor_check_id_allocations(runtime: &OrbitRuntime) -> WorkspaceDoctorResult {
-    let orphaned = match runtime.list_orphaned_id_allocations() {
-        Ok(orphaned) => orphaned,
-        Err(error) => {
-            return check(
-                "id-allocations",
-                WorkspaceDoctorStatus::Warning,
-                format!("cannot inspect id allocations: {error}"),
-            );
-        }
-    };
-    if orphaned.is_empty() {
-        return check(
-            "id-allocations",
-            WorkspaceDoctorStatus::Ok,
-            "no learning/ADR allocations pinned to a missing worktree".to_string(),
-        );
-    }
-    let mut detail = orphaned
-        .iter()
-        .take(ORPHANED_ALLOCATION_DETAIL_LIMIT)
-        .map(|record| {
-            format!(
-                "{} ({}, worktree {})",
-                record.id,
-                record.status,
-                record.worktree_root.display()
-            )
-        })
-        .collect::<Vec<_>>()
-        .join("; ");
-    if let Some(remaining) = orphaned.len().checked_sub(ORPHANED_ALLOCATION_DETAIL_LIMIT)
-        && remaining > 0
-    {
-        detail.push_str(&format!("; and {remaining} more"));
-    }
-    actionable_check(
-        "id-allocations",
-        WorkspaceDoctorStatus::Warning,
-        format!(
-            "{} learning/ADR allocation(s) pinned to a worktree that no longer exists, with no \
-             readable body — unrecoverable; clear with `orbit doctor \
-             --fix-orphaned-allocations`: {detail}",
-            orphaned.len()
-        ),
-        "Run `orbit doctor --fix-orphaned-allocations` after confirming the named worktrees are gone.".to_string(),
-    )
-}
-
 /// Free/total space thresholds for the volume containing `path`.
 pub(crate) fn disk_space_check(path: &Path) -> WorkspaceDoctorResult {
     let (available, total) = match (fs2::available_space(path), fs2::total_space(path)) {
@@ -689,14 +618,10 @@ pub(crate) fn disk_space_check(path: &Path) -> WorkspaceDoctorResult {
 }
 
 /// Lock files in the directories the file-backed stores lock in:
-/// `state/` (ID allocator), `tasks/` (v2 bundle locks), and `learnings/`.
+/// `state/` and `tasks/` (v2 bundle locks).
 /// Non-recursive on purpose — the lock layouts are flat.
 pub(crate) fn collect_lock_files(paths: &WorkspacePaths) -> Vec<PathBuf> {
-    let dirs = [
-        paths.state_dir.clone(),
-        paths.tasks_dir.clone(),
-        paths.learnings_dir.clone(),
-    ];
+    let dirs = [paths.state_dir.clone(), paths.tasks_dir.clone()];
     let mut lock_files = Vec::new();
     for dir in dirs {
         let Ok(entries) = std::fs::read_dir(&dir) else {

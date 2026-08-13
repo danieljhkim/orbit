@@ -202,7 +202,6 @@ fn resolve_executor_sandbox_orders_versioned_orbit_exceptions_after_default_deny
     for protected in [
         format!("{}/state/**", orbit.display()),
         format!("{}/tasks/**", orbit.display()),
-        format!("{}/learnings/**", orbit.display()),
         format!("{}/future-store/**", orbit.display()),
     ] {
         assert!(
@@ -337,10 +336,8 @@ fn resolve_executor_sandbox_appends_gemini_orbit_runtime_roots_without_home_real
         format!("{global}/orbit.db*"),
         format!("{global}/tasks/**"),
         format!("{workspace_orbit}/tasks/**"),
-        format!("{workspace_orbit}/learnings/**"),
         format!("{workspace_orbit}/frictions/**"),
         format!("{workspace_orbit}/state/audit/**"),
-        format!("{workspace_orbit}/state/.id_alloc.lock"),
         format!("{workspace_orbit}/state/logs/**"),
         format!("{workspace_orbit}/state/semantic.db*"),
     ];

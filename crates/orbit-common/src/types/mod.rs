@@ -38,7 +38,6 @@ pub mod host;
 pub mod id;
 pub mod invocation;
 pub mod job;
-pub mod learning;
 pub mod metrics;
 pub mod policy_decision;
 pub mod policy_def;
@@ -78,9 +77,7 @@ pub use agent_pair::{
     AgentModelPair, Crew, CrewAssignment, agent_family_from_cli, all_agent_families,
     infer_agent_family_from_model, normalize_agent_family_for_model, resolve_crew,
 };
-pub use artifact_ids::{
-    is_valid_adr_id, is_valid_friction_id, is_valid_learning_id, validate_friction_id,
-};
+pub use artifact_ids::{is_valid_adr_id, is_valid_friction_id, validate_friction_id};
 pub use audit::Audit;
 pub use audit_event::{AuditEvent, AuditEventStatus, AuditStats, audit_execution_id};
 pub use auto_task::{
@@ -114,12 +111,6 @@ pub use job::{
     AgentCommitRequest, AgentResponseEnvelope, AgentRunError, Job, JobRun, JobRunState, JobRunStep,
     JobScheduleState, JobStep, JobTargetType, KnowledgeRunMetrics, RunEvent, StepCondition,
     default_job_max_active_runs, default_max_iterations, default_retry_backoff_seconds,
-};
-pub use learning::{
-    DEFAULT_LEARNING_REMINDER_PER_CALL_CAP, DEFAULT_LEARNING_REMINDER_SESSION_CAP, EvidenceKind,
-    Learning, LearningEvidence, LearningInjectionCaps, LearningInjectionState, LearningReminder,
-    LearningScope, LearningStatus, normalize_learning_paths, normalize_learning_tags,
-    prepend_reminder_block, render_reminder_block,
 };
 pub use metrics::MetricsEntry;
 pub use policy_decision::PolicyDecision;

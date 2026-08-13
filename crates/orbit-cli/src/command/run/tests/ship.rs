@@ -1,5 +1,6 @@
 use crate::command::Execute;
-use orbit_core::{OrbitError, OrbitRuntime};
+use orbit_core::command::task::TaskAddParams;
+use orbit_core::{OrbitError, OrbitRuntime, TaskStatus};
 use serde_json::json;
 
 use super::super::ship::*;
@@ -185,7 +186,16 @@ spec:
 fn interactive_ship_inherits_the_shared_in_flight_guard() {
     let runtime = OrbitRuntime::in_memory().expect("build runtime");
     write_ship_job_asset(&runtime);
-    ship_args(&["TST-00001"], ShipMode::Local, Some("main"))
+    let task = runtime
+        .add_task(TaskAddParams {
+            title: "CLI ship admission fixture".to_string(),
+            description: "Synthetic task for the shared in-flight guard".to_string(),
+            status: Some(TaskStatus::Backlog),
+            ..TaskAddParams::default()
+        })
+        .expect("create task fixture");
+    let task_id = task.id.to_string();
+    ship_args(&[&task_id], ShipMode::Local, Some("main"))
         .execute(&runtime)
         .expect("first interactive ship dispatch");
     let first_run = runtime
@@ -199,7 +209,7 @@ fn interactive_ship_inherits_the_shared_in_flight_guard() {
         Some(json!({
             "mode": "local",
             "base_branch": "main",
-            "task_ids": ["TST-00001"],
+            "task_ids": [task_id],
         }))
     );
     let audits = runtime
@@ -210,14 +220,14 @@ fn interactive_ship_inherits_the_shared_in_flight_guard() {
             && audit.target_id.as_deref() == Some(first_run.run_id.as_str())
     }));
 
-    let error = ship_args(&["TST-00001"], ShipMode::Local, Some("main"))
+    let error = ship_args(&[&task_id], ShipMode::Local, Some("main"))
         .execute(&runtime)
         .expect_err("an interactive ship must refuse a task already in flight");
 
     let OrbitError::ShipRunInFlight { task_id, run_id } = &error else {
         panic!("expected ShipRunInFlight, got {error:?}");
     };
-    assert_eq!(task_id, "TST-00001");
+    assert_eq!(task_id, &task.id.to_string());
     assert!(run_id.starts_with("jrun-"), "unexpected run id: {run_id}");
 
     let runs = runtime

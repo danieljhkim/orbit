@@ -1,7 +1,7 @@
 ---
 title: Auto-tasks — Overview
 owner: claude
-last_updated: 2026-08-01
+last_updated: 2026-08-13
 last_validated: 2026-07-27
 status: Accepted
 feature: auto-tasks
@@ -36,7 +36,7 @@ becomes just the first definition.
 
 - **Definition** — a `.orbit/auto_tasks/<name>.yaml` record; `name` is identity.
   Modeled on the file-backed routine convention (directory scan, fail-closed
-  parse, `deny_unknown_fields`), not the SQLite-indexed learning/ADR convention.
+  parse, `deny_unknown_fields`), not the SQLite-indexed artifact convention.
 - **Schedule (cadence)** — a 5-field `cron` or an `every_minutes` interval, in
   the definition's `schedule` field. Catch-up always collapses: a downtime gap
   mints one make-up task, not one per slot. Cadence is per-definition data, not
@@ -83,12 +83,6 @@ becomes just the first definition.
 ## Definitions shipped in this repo
 
 - `qa-sweep` — hands-on validation of recent changes (ORB-10148).
-- `artifact-deprecation-review` — report-only weekly review that lists stale
-  learning candidates (usage rollups + anchor health) and stale artifact-id
-  comment references (`L-`/`ADR-`/`ORB-`/`F` ids swept from source comments
-  and resolved against their registries) via `execution_summary`; never
-  mutates learnings, ADRs, tasks, friction records, or comments (ORB-10318,
-  ORB-10348, [project-learnings §7.6](../project-learnings/2_design.md#76-recurring-deprecation-review-auto-task)).
 - `friction-curation` — disabled-by-default daily evidence-first pass that deduplicates open
   friction records, re-verifies survivors against current behavior, resolves
   records that no longer reproduce, and files non-duplicate fix tasks for
@@ -102,8 +96,6 @@ becomes just the first definition.
 
 - ORB-10149 — Auto-task primitive.
 - ORB-10148 — qa-sweep V1 (first definition; depends on this).
-- ORB-10318 — learning-deprecation-review definition (report-only stale-learning review; superseded by ORB-10348).
-- ORB-10348 — Generalized the definition into artifact-deprecation-review, adding the comment-reference sweep.
 - ORB-10439 — `orbit auto-task mint <name>`, the on-demand manual mint.
 - ORB-10440 — Daily friction-curation definition.
 - ORB-10514 — Disabled CI-failure remediation definition.

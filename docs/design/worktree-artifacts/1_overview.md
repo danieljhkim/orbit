@@ -13,7 +13,11 @@ related_features: ["worktree-artifacts"]
 related_artifacts: ["ORB-00199", "ORB-00200", "ORB-00201", "ORB-10501", "ORB-10535", "ADR-0177", "ADR-0296"]
 ---
 
-# Worktree Artifacts - Overview
+# Worktree Artifacts — Overview
+
+> Learning-specific storage and federation references below are retired history.
+> [ORB-10736] / [ADR-0359] remove the native learning subsystem and leave its
+> existing repository files inert.
 
 Worktree artifacts let ADR and learning body files travel with the branch that created them while preserving one shared ID authority for the whole repository. Tasks, audit, scoreboards, and allocator state stay in the shared `.orbit/`; ADR and learning bodies live in the current worktree's `.orbit/`.
 

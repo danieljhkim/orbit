@@ -58,5 +58,4 @@ Use `blocked` when execution cannot safely continue. Provenance follows the surf
 - `orbit-task`: create, execute, and review tasks through the lifecycle; file self-reported tooling and skill-guidance friction.
 - `orbit-task-pilot`: read-only preflight over a bounded partition of existing tasks — proposes `context_files`, crew, blockers, and duplicates without mutating or dispatching anything.
 - `orbit-workflow`: jobs, activities, routines, `orbit sweep`, and `orbit run`; diagnosing failed, stuck, or cancelled runs.
-- `orbit-search`: find tasks, docs, learnings, and ADRs by topic; docs-corpus admin.
-- `orbit-knowledge`: author, update, and supersede learnings and ADRs.
+- `orbit-search`: find tasks, docs, ADRs, and frictions by topic; docs-corpus admin.

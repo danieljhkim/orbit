@@ -10,10 +10,10 @@ Registration-light: Orbit walks the configured `[docs].roots` on demand and inde
 ---
 type: design | pattern | context | glossary | runbook
 summary: One-line hook for agent retrieval
-tags: [hook, learning, audit]
+tags: [hooks, audit]
 paths: ["src/**"]
 related_features: [hook-rewrite]
-related_artifacts: ["<task-id>", "<adr-id>", "<learning-id>"]
+related_artifacts: ["<task-id>", "<adr-id>"]
 ---
 ```
 
@@ -39,6 +39,6 @@ Agents retrieve through `orbit.search`; these are human and admin workflows.
 |---------|------|
 | Install / remove | `orbit semantic install [--model M] [--force]` / `orbit semantic uninstall [--model M] [--all]` |
 | Status | `orbit semantic stats` |
-| Rebuild embeddings | `orbit semantic index --kind tasks\|docs\|learnings\|adrs\|all [--model M] [--force]` |
+| Rebuild embeddings | `orbit semantic index --kind tasks\|docs\|all [--model M] [--force]` |
 
 Supported on macOS arm64 and Linux x86_64/aarch64 with glibc ≥ 2.38. There is no x86_64-apple-darwin asset. Don't install without operator consent.

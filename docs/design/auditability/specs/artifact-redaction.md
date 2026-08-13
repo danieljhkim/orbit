@@ -17,17 +17,15 @@ This is the author-facing inventory for the shipped artifact-write redactor. Red
 |------|----------------------------------------------|-------------------------------|------|
 | `orbit.adr.add` / `orbit.adr.update` | `title`, `body` | - | status, owner, related ids/features/tasks, legacy ids |
 | `orbit.adr.supersede` | - | - | `old_id`, `new_id` |
-| `orbit.learning.add` / `orbit.learning.update` | `summary`, `body`, `scope.tags[]`, `evidence[].ref` | `scope.paths[]` | status, ids, priority, model fields |
-| `orbit.learning.supersede` | - | - | `old_id`, `new_id` |
 | `orbit.task.add` | `title`, `description`, `plan`, `acceptance_criteria[]`, `comment` | `context_files[]`, `context`, `external_refs[].url` | workspace, ids, enums, dependency/relation targets, crew, tags |
 | `orbit.task.update` | `title`, `description`, `plan`, `execution_summary`, `acceptance_criteria[]`, `comment` | `context_files[]`, `context` | provenance/status/identity fields, tags, raw artifacts |
 | `orbit.task.reject` | `note`, `comment` | - | `id` |
 | `orbit.friction.add` | `body` | - | `model`, `during_task`, tags |
 | `orbit.friction.update` | `body` | - | `id`, status, tags |
 
-Task and friction tags are taxonomy fields and pass through verbatim. Learning `scope.tags[]` are matching metadata and are treated as free text.
+Task and friction tags are taxonomy fields and pass through verbatim.
 
-The table establishes the knowledge-primitive boundary: ADRs, learnings, tasks, and frictions are covered on their listed add/update operations. Registered docs are ordinary repository files rather than an Orbit mutation primitive, so doc edits do not pass through this write sanitizer.
+The table establishes the artifact boundary: ADRs, tasks, and frictions are covered on their listed add/update operations. Registered docs are ordinary repository files rather than an Orbit mutation primitive, so doc edits do not pass through this write sanitizer.
 
 ## Pattern Set
 

@@ -122,7 +122,6 @@ fn an_agent_is_denied_out_of_scope_destruction() {
     for id in [
         "orbit.task.delete",
         "orbit.task.reject",
-        "orbit.learning.prune",
         "orbit.semantic.uninstall",
     ] {
         assert!(

@@ -159,7 +159,7 @@ use scheduler dry-run inspection before the weekly slot. The generated task's
 observed models, checked sources, and effective periods when the table is
 accurate.
 
-- **Definitions are not full-text indexed.** Unlike learnings/ADRs, auto-task
+- **Definitions are not full-text indexed.** Unlike indexed docs, auto-task
   YAML is not in a SQLite/search index; discovery is a directory scan. Acceptable
   at the expected cardinality (a handful of chores per workspace).
 - **Workspace-scoped.** The scheduler processes the definitions of the workspace

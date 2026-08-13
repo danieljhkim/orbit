@@ -346,11 +346,7 @@ async fn managed_empty_capability_set_is_never_upgraded_and_capabilities_are_non
 
 #[tokio::test]
 async fn call_tool_wraps_affected_array_results_for_strict_mcp_clients() {
-    let affected_tools = [
-        "orbit.task.list",
-        "orbit.friction.list",
-        "orbit.learning.list",
-    ];
+    let affected_tools = ["orbit.task.list", "orbit.friction.list"];
     let host = Arc::new(EchoArrayHost {
         schemas: affected_tools
             .iter()

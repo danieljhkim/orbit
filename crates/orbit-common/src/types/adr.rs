@@ -233,7 +233,7 @@ pub fn legacy_id_for(feature: &str, local_number: u32) -> String {
 
 /// Lowercase + trim + dedupe ADR tag strings.
 ///
-/// ADR tags share the task/learning free-form label semantics, while
+/// ADR tags share the task free-form label semantics, while
 /// `related_features` remains the constrained structural feature reference.
 pub fn normalize_adr_tags(raw_tags: Vec<String>) -> Vec<String> {
     let mut normalized = Vec::with_capacity(raw_tags.len());

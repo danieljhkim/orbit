@@ -25,7 +25,7 @@ fn workspace_reinit_requires_force_and_force_reconciles_matching_registration() 
     // (which creates `.orbit/routines/`); `orbit init` owns its creation.
     std::fs::write(
         global.join("host.toml"),
-        "schema_version = 1\nmachine_id = \"hm_reinit\"\nhost_id = \"reinit-host\"\nmode = \"standalone\"\n",
+        "schema_version = 2\nmachine_id = \"hm_reinit\"\nhost_id = \"reinit-host\"\ntask_prefix = \"ORB\"\n",
     )
     .expect("write host identity");
 
@@ -709,7 +709,7 @@ fn workspace_init_seeds_disabled_routines_and_reinit_preserves_authored_files() 
     std::fs::create_dir_all(&global).expect("create global orbit");
     std::fs::write(
         global.join("host.toml"),
-        "schema_version = 1\nmachine_id = \"hm_inithost\"\nhost_id = \"init-host\"\nmode = \"standalone\"\n",
+        "schema_version = 2\nmachine_id = \"hm_inithost\"\nhost_id = \"init-host\"\ntask_prefix = \"ORB\"\n",
     )
     .expect("write host identity");
 
@@ -964,7 +964,7 @@ fn workspace_init_appends_orbit_to_existing_gitignore() {
 #[test]
 fn workspace_init_replaces_legacy_bare_orbit_gitignore_line_with_managed_block() {
     // A bare `.orbit` line (written by earlier init versions) ignores the whole
-    // directory, so the ADR / learning re-includes can never apply. Init must
+    // directory, so artifact re-includes can never apply. Init must
     // replace the legacy line with the managed block, not merely append.
     let workspace = tempdir().expect("workspace tempdir");
     let home = tempdir().expect("home tempdir");
@@ -1022,7 +1022,6 @@ fn workspace_init_retires_adr_store_gitignore_lines() {
         ".orbit/adrs/index.sqlite*\n",
         ".orbit/adrs/proposed/\n",
         ".orbit/adrs/superseded/\n",
-        "!.orbit/learnings/\n",
         "!.orbit/auto_tasks/\n",
         "!.orbit/resources/\n",
         "!.orbit/routines/\n",

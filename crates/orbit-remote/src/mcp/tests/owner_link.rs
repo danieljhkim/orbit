@@ -630,12 +630,11 @@ fn owner_rmcp_coordination_canary_routes_only_the_task_surface_and_preserves_pro
     // Owner-placed but outside the task surface: refused by name, never
     // relayed. ORB-10729 pins the three coordination writes the v1 boundary
     // deliberately excludes — friction lifecycle, workflow dispatch, and
-    // knowledge authoring — alongside a friction read.
+    // alongside a friction read.
     for (name, capability) in [
         ("orbit.friction.add", McpCapability::Agent),
         ("orbit.friction.list", McpCapability::Operator),
         ("orbit.workflow.ship", McpCapability::Operator),
-        ("orbit.learning.add", McpCapability::Agent),
     ] {
         let refusal = broker
             .call_tool(
