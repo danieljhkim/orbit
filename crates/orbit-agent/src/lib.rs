@@ -61,3 +61,7 @@ pub use types::{AgentInvocationSpec, AgentOperation, AgentRequest, AgentResponse
 pub use types::{
     is_timeout, parse_and_validate_response, peek_response_status, response_envelope_protocol_check,
 };
+pub use types::{
+    provider_invocation_diagnostic, response_envelope_json_schema,
+    response_envelope_json_schema_arg,
+};

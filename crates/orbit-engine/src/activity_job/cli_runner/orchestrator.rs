@@ -6,7 +6,7 @@ use std::time::Duration;
 use chrono::Utc;
 use orbit_agent::{
     Agent, AgentConfig, AgentOperation, AgentRequest, peek_response_status,
-    response_envelope_protocol_check,
+    provider_invocation_diagnostic, response_envelope_protocol_check,
 };
 use orbit_common::types::activity_job::{AgentLoopSpec, V2AuditEventKind};
 use orbit_common::types::{LearningInjectionCaps, LearningInjectionState, prepend_reminder_block};
@@ -407,6 +407,17 @@ pub fn run_cli_backend(
         Some(
             sandbox_write_diagnostic
                 .clone()
+                // [ORB-10746] A bare exit code cannot distinguish "this CLI
+                // has no --json-schema" from "the provider rejected Orbit's
+                // schema" from any other nonzero exit, and the first two are
+                // configuration faults an operator can act on immediately.
+                .or_else(|| {
+                    provider_invocation_diagnostic(
+                        stdout_text.as_ref(),
+                        String::from_utf8_lossy(stderr.protocol_bytes()).as_ref(),
+                    )
+                    .map(|diagnostic| bounded_diagnostic(&diagnostic, &redaction))
+                })
                 .unwrap_or_else(|| format!("cli subprocess exited with code {:?}", exit_code)),
         )
     } else if (spec.require_completion_envelope || spec.require_response_envelope)

@@ -1,4 +1,5 @@
 use crate::providers::common::render_prompt_with_embedded_envelope;
+use crate::types::response_envelope_json_schema_arg;
 
 fn claude_cli_model_arg(model: &str) -> String {
     let trimmed = model.trim();
@@ -24,6 +25,20 @@ impl ClaudeCliTransport {
     // only adds per-request toggles.
     pub(crate) fn args(&self, verbose: bool) -> Vec<String> {
         let mut args = Vec::new();
+
+        // [ORB-10746] Structured output is what actually enforces the Orbit
+        // response envelope; the prompt contract is guidance the model may
+        // ignore, and in `jrun-20260812-0312-9` did.
+        //
+        // Emitted here rather than added to the two `claude.yaml` copies on
+        // purpose: the schema is generated from one protocol definition, so a
+        // per-request flag cannot drift between the packaged asset and the
+        // installed workspace resource the way two hand-edited arg lists can.
+        // A CLI without the flag rejects it at argv parse, before any agent
+        // work runs — the failure Orbit wants, and the reason there is no
+        // unconstrained fallback.
+        args.push("--json-schema".to_string());
+        args.push(response_envelope_json_schema_arg());
 
         if verbose {
             args.push("--verbose".to_string());
