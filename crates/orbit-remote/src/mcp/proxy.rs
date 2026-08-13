@@ -10,7 +10,8 @@
 //! Orbit's other cross-machine MCP path is the spoke→hub link, which exists
 //! because a spoke *has* a checkout: its graph, docs, and search must resolve
 //! against the branch its agent is working on, and placement routing guarantees
-//! that. A **checkoutless client** — an off-box orchestrator whose every
+//! that. A **checkoutless client** — an off-box orchestrator that owns no
+//! workspace, whose clone (if it keeps one) is a read mirror, and whose every
 //! workspace lives on the remote machine — does not fit that shape. Placement
 //! routing protects nothing for it and only makes the canonical surface
 //! unreachable.
@@ -28,12 +29,12 @@
 //! compile cleanly while quietly failing every one of them.
 
 use std::net::{Ipv4Addr, SocketAddr, TcpStream};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::time::Duration;
 
 use orbit_common::types::{McpCapability, OrbitError, WorkspaceRegistry};
 use orbit_common::utility::ssh_tunnel::{self, TunnelOrigin, TunnelSpec};
-use orbit_core::runtime::{is_global_orbit_root, resolve_global_root};
+use orbit_core::runtime::resolve_global_root;
 
 /// Loopback port the remote `orbit mcp serve --listen` is expected on when the
 /// operator does not name one. Adjacent to the dashboard's 7878 so the two
@@ -70,7 +71,7 @@ pub struct RemoteProxyArgs {
 
 /// Serve a checkoutless client by relaying its stdio to a remote listener.
 ///
-/// Refuses on a machine that has its own Orbit checkout, establishes or
+/// Refuses on a machine that owns an Orbit checkout, establishes or
 /// attaches to one tunnel, opens one connection through it, and relays until
 /// the session ends. The tunnel is torn down on every exit path by
 /// [`ssh_tunnel::SshTunnel`]'s `Drop`.
@@ -180,7 +181,7 @@ fn listener_answers(local_port: u16, timeout: Duration) -> bool {
     }
 }
 
-/// Refuse to run the proxy on a machine that has its own Orbit checkout.
+/// Refuse to run the proxy on a machine that owns an Orbit checkout.
 ///
 /// This guard is load-bearing rather than a convenience. Without it a spoke
 /// could register the mode and receive another machine's branch state as its
@@ -192,62 +193,77 @@ fn ensure_checkoutless_client(ssh_host: &str) -> Result<(), OrbitError> {
             let path = crate::workspace_registry::registry_path_for(&global_root);
             crate::workspace_registry::load_registry_from(&path)?
         }
-        // No global root means no registry to consult; the cwd walk below is
-        // still meaningful, so this is not fatal on its own.
+        // No global root means no registry to consult, and the registry is the
+        // only thing this guard reads: a machine with nowhere to record a
+        // checkout binding owns none.
         Err(_) => WorkspaceRegistry::default(),
     };
     let cwd = std::env::current_dir().ok();
-    let discovered = cwd.as_deref().and_then(find_workspace_orbit_dir);
 
-    match local_checkout_evidence(&registry, discovered.as_deref()) {
+    match local_checkout_evidence(&registry, cwd.as_deref()) {
         None => Ok(()),
-        Some(evidence) => Err(OrbitError::InvalidInput(format!(
-            "refusing to start `orbit mcp serve --mode remote {ssh_host}`: this machine has a \
-             local Orbit checkout ({evidence}). The remote mode resolves every workspace on \
-             '{ssh_host}', so a machine with its own checkout would receive that machine's \
-             branch state as its own — wrong answers rather than an error (ADR-0350). Register \
-             the ordinary local broker (`orbit mcp serve`) here instead, and use the remote mode \
-             only from a client with no checkout."
-        ))),
+        Some(evidence) => Err(owned_checkout_refusal(ssh_host, &evidence)),
     }
 }
 
-/// Describe the first evidence that this machine holds a checkout, or `None`
-/// when it holds none.
+/// The refusal an owning machine gets: what was found, why it disqualifies the
+/// mode, and the surface to register instead.
+pub(super) fn owned_checkout_refusal(ssh_host: &str, evidence: &str) -> OrbitError {
+    OrbitError::InvalidInput(format!(
+        "refusing to start `orbit mcp serve --mode remote {ssh_host}`: this machine owns a local \
+         Orbit checkout ({evidence}). The remote mode resolves every workspace on '{ssh_host}', \
+         so a machine with its own checkout would receive that machine's branch state as its own \
+         — wrong answers rather than an error (ADR-0350). Register the ordinary local broker \
+         (`orbit mcp serve`) here instead, and use the remote mode only from a client that owns \
+         no checkout."
+    ))
+}
+
+/// Describe the first evidence that this machine *owns* a checkout, or `None`
+/// when it owns none.
 ///
-/// Two independent signals, because either alone can miss: a registered
-/// checkout that still exists on disk, and a workspace `.orbit/` reachable by
-/// walking up from the working directory (a checkout that was never
-/// registered). A registry entry whose `repo_root` is gone is stale rather than
-/// evidence — refusing on it would strand a client over a checkout that no
-/// longer exists.
+/// Two ordered signals, both registry-sourced: a checkout binding the directory
+/// we are standing in — which includes an explicit `path_overrides` entry whose
+/// `repo_root` may live elsewhere — and, failing that, any registered checkout
+/// still present on disk. A registry entry whose `repo_root` is gone is stale
+/// rather than evidence: refusing on it would strand a client over a checkout
+/// that no longer exists.
+// ADR-0360 — ownership, not filesystem shape, is the discriminator, which is
+// why a `.orbit/` directory sitting above `cwd` is not consulted at all. That
+// directory is deliberately committed in repos that version their Orbit
+// workspace, so it arrives with `git clone` and describes a read mirror just as
+// well as a working tree. This machine's workspace registry is the only
+// machine-local record of what it coordinates, and it is what the local broker
+// itself demands — `McpHost::resolve_exact_checkout` binds a session only to a
+// registered checkout — so an unregistered `.orbit/` leaves no local-derived
+// state for this guard to protect.
 pub(super) fn local_checkout_evidence(
     registry: &WorkspaceRegistry,
-    discovered_orbit_dir: Option<&Path>,
+    cwd: Option<&Path>,
 ) -> Option<String> {
-    if let Some((workspace, checkout)) = crate::workspace_registry::local_workspaces(registry)
-        .find(|(_, checkout)| checkout.repo_root.exists())
+    if let Some(cwd) = cwd
+        && let Some(checkout) = crate::workspace_registry::find_checkout_by_path(registry, cwd)
     {
+        // Name the registered path that actually claims `cwd`, which is the
+        // repository root unless an override binds a directory outside it.
+        let bound = std::iter::once(&checkout.repo_root)
+            .chain(&checkout.path_overrides)
+            .filter(|candidate| cwd.starts_with(candidate))
+            .max_by_key(|candidate| candidate.as_os_str().len())
+            .unwrap_or(&checkout.repo_root);
         return Some(format!(
-            "workspace '{}' is checked out at {}",
-            workspace.id,
-            checkout.repo_root.display()
+            "workspace '{}' is registered at {}, which contains the working directory",
+            checkout.workspace_id,
+            bound.display()
         ));
     }
-    discovered_orbit_dir.map(|orbit_dir| format!("a workspace exists at {}", orbit_dir.display()))
-}
-
-/// Walk up from `start` for the first workspace `.orbit/` directory, ignoring
-/// the global `$HOME/.orbit` — which is machine state every host has, checkout
-/// or not, and would otherwise refuse every client.
-fn find_workspace_orbit_dir(start: &Path) -> Option<PathBuf> {
-    let mut current = Some(start);
-    while let Some(directory) = current {
-        let candidate = directory.join(".orbit");
-        if candidate.is_dir() && !is_global_orbit_root(&candidate) {
-            return Some(candidate);
-        }
-        current = directory.parent();
-    }
-    None
+    crate::workspace_registry::local_workspaces(registry)
+        .find(|(_, checkout)| checkout.repo_root.exists())
+        .map(|(workspace, checkout)| {
+            format!(
+                "workspace '{}' is checked out at {}",
+                workspace.id,
+                checkout.repo_root.display()
+            )
+        })
 }

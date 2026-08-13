@@ -1,17 +1,17 @@
 ---
 title: Orbit MCP Bridge — Decisions
 owner: claude
-last_updated: 2026-08-11
+last_updated: 2026-08-13
 last_validated: 2026-08-02
 status: Draft
 feature: mcp-bridge
 doc_role: decisions
 type: design
-summary: ADR log for mcp-bridge, including the retired singular-hub contract and its v1 ownership-model replacement, the evolving implementation boundary, and the owned tunnel for checkoutless clients.
+summary: ADR log for mcp-bridge, including the retired singular-hub contract and its v1 ownership-model replacement, the evolving implementation boundary, the owned tunnel for checkoutless clients, and the registry-ownership rule that admits a read-mirror clone.
 tags: [mcp, remote-access, host-registry, bridge]
 paths: ["crates/orbit-remote/**", "crates/orbit-mcp/**", "crates/orbit-core/**", "crates/orbit-tools/**", "crates/orbit-store/**"]
 related_features: [mcp-bridge, host-registry, mcp-session-context, remote-access]
-related_artifacts: [ORB-00424, ORB-10245, ORB-10708, ORB-10710, ORB-10262, ORB-10267, ORB-10268, ORB-10269, ORB-10271, ORB-10272, ORB-10276, ORB-10302, ORB-10319, ORB-10330, ORB-10332, ORB-10690, ADR-0226, ADR-0227, ADR-0228, ADR-0229, ADR-0230, ADR-0231, ADR-0232, ADR-0235, ADR-0240, ADR-0348, ADR-0350, ADR-0351, ADR-0352, ADR-0354, ADR-0355, ADR-0356, ADR-0357, ADR-0358]
+related_artifacts: [ORB-00424, ORB-10245, ORB-10708, ORB-10710, ORB-10262, ORB-10267, ORB-10268, ORB-10269, ORB-10271, ORB-10272, ORB-10276, ORB-10302, ORB-10319, ORB-10330, ORB-10332, ORB-10690, ORB-10761, ADR-0226, ADR-0227, ADR-0228, ADR-0229, ADR-0230, ADR-0231, ADR-0232, ADR-0235, ADR-0240, ADR-0348, ADR-0350, ADR-0351, ADR-0352, ADR-0354, ADR-0355, ADR-0356, ADR-0357, ADR-0358, ADR-0360]
 ---
 
 # Orbit MCP Bridge — Decisions
@@ -508,6 +508,86 @@ Alternatives considered and rejected:
 - **Cost:** the server process gains a second protocol surface, and its availability now matters to work dispatch rather than only to the UI. Its failure modes are correspondingly more expensive.
 - The ungated HTTP API remains a bypass. This decision reduces what depends on it; it does not close it. That remains separately owned.
 
+## ADR-0360 — Workspace-registry ownership, not an `.orbit/` directory, disqualifies a checkoutless client
+
+**Status:** Accepted · 2026-08 · [ORB-10761]
+**Code anchors:** `crates/orbit-remote/src/mcp/proxy.rs::local_checkout_evidence`
+
+### Context
+
+[ADR-0350] makes the refuse-when-a-checkout-exists guard the load-bearing half
+of the remote proxy: without it a machine that coordinates its own workspaces
+could register the mode and receive another machine's branch state as its own,
+surfacing as wrong answers rather than as an error.
+
+The first implementation read two signals — a registered checkout still present
+on disk, and any `.orbit/` directory found by walking up from the working
+directory. The second signal cannot do the job asked of it. Orbit treats a
+directory as an initialized workspace when it contains `config.toml`
+(`orbit-core/src/runtime/resolve.rs::is_initialized_orbit_root`), and a
+repository that versions its Orbit workspace commits exactly that file
+alongside `learnings/`, `auto_tasks/`, `resources/`, and `routines/`. Those
+paths arrive through `git clone`: this repository tracks 567 files under
+`.orbit/`, and the constellation repository — the one the blocked clients mirror
+— tracks 54.
+
+So the walk fires on the read mirror [2_design.md §5.3](./2_design.md) explicitly admits —
+"an off-box orchestrator whose clone, if it has one, **is a read mirror**" — and
+the clients Phase 6 exists to cut over are precisely the ones carrying that
+mirror. The filesystem shape of a working checkout and of a mirror are
+identical, because the shape is what git delivers.
+
+### Decision
+
+This machine's workspace registry (`~/.orbit/workspaces.json`) is the sole
+authority for the guard. Evidence is a checkout binding the working directory —
+including through an explicit `path_overrides` entry — or, failing that, any
+registered checkout whose `repo_root` still exists. An `.orbit/` directory that
+the registry does not bind is not evidence and is no longer consulted; the
+cwd walk is deleted rather than reordered.
+
+Ownership is the right discriminator because it is what the rest of the system
+already means by "has a checkout". `McpHost::resolve_exact_checkout` binds a
+session only to a registered checkout and refuses anything else with *register
+or repair the checkout binding*, so an unregistered `.orbit/` produces no
+local-derived state — nothing the guard protects exists for it. A machine that
+genuinely coordinates or develops in a workspace has run `orbit workspace init`
+and carries the binding; that machine is still refused, and the refusal still
+names both the owning workspace and `orbit mcp serve` as the alternative.
+
+### Consequences
+
+- A client whose only checkout evidence is a tracked `.orbit/` directory starts
+  the proxy, which unblocks the Phase 6 cutover for the orchestrators that hold
+  a constellation mirror.
+- The guard's verdict is now decided by machine-local state that a clone cannot
+  carry, so it no longer depends on how a repository chooses to gitignore
+  `.orbit/`.
+- The refusal message gains a "which contains the working directory" clause when
+  the operator is standing inside an owned checkout, which is the case an
+  operator is most likely to hit and previously the least specific.
+- **Cost:** a machine that develops in an Orbit checkout it never registered is
+  now admitted. Orbit's own CLI would resolve that tree by cwd walk, so the
+  operator can hold a local workspace the guard no longer sees. The mode will
+  answer from the remote's branch state while a local tree sits under them —
+  the exact confusion the guard exists to prevent, narrowed to a machine that
+  declined to register.
+- **Rejected: keep the cwd walk but require the discovered `.orbit/` to belong
+  to a workspace the registry owns.** It states the rule in the place a reader
+  looks for it, but it decides nothing the first branch has not already decided:
+  a registered checkout containing the cwd exists on disk by construction. Two
+  branches computing one verdict is worse than one.
+- **Rejected: an explicit operator opt-out flag.** It moves a security-relevant
+  judgement to whoever is currently blocked by it, and the flag would be pasted
+  into every client registration that ever hit the refusal — including the
+  machines the guard is for.
+- **Rejected: discriminate on machine-local runtime state inside the discovered
+  `.orbit/`** (`state/`, `tasks/`, the abandoned workspace-local `orbit.db`).
+  It keeps a second signal that catches the unregistered-but-active checkout the
+  cost above concedes, but it keys the guard on a directory-name inventory that
+  drifts with layout, and it reads a mirror as owned the moment anyone runs one
+  Orbit command inside it.
+
 ## Task References
 
 - [ORB-00424] — completed design proposal for canonical Orbit MCP and Bridge parity retirement.
@@ -580,6 +660,10 @@ Alternatives considered and rejected:
   validation reads the owner machine's local config instead ([ADR-0358]). The two
   digests and `build_execution_profile_v1` survive as transport-independent
   construction.
+- [ORB-10761] — narrowed the checkoutless-client guard to registry ownership
+  ([ADR-0360]), so a client whose only evidence is a tracked `.orbit/` directory
+  starts the proxy while a machine with a registered on-disk checkout is still
+  refused.
 - [ORB-10332] — removed the `orbit.host.list` MCP discovery tool as unused; the
   `orbit.workspace.list` / `orbit.crew.list` MCP discovery tools remain. The
   `orbit host list` CLI command it deferred to is itself withdrawn with the fleet
