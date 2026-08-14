@@ -11,7 +11,7 @@ doc_role: decisions
 tags: ["mcp-session-context", "mcp", "workspace"]
 paths: ["crates/orbit-mcp/**", "crates/orbit-remote/src/mcp/**", "crates/orbit-tools/**", "crates/orbit-core/src/command/tool/**", "crates/orbit-cli/src/**"]
 related_features: ["mcp-session-context", "task-artifacts"]
-related_artifacts: ["ORB-00256", "ORB-00406", "ORB-10228", "ORB-10262", "ORB-10319", "ORB-10448", "ORB-10690", "ORB-10758", "ORB-10769", "ADR-0181", "ADR-0199", "ADR-0149", "ADR-0348", "ADR-0361"]
+related_artifacts: ["ORB-00256", "ORB-00406", "ORB-10228", "ORB-10262", "ORB-10319", "ORB-10448", "ORB-10690", "ORB-10758", "ORB-10769", "ORB-10787", "ADR-0181", "ADR-0199", "ADR-0149", "ADR-0348", "ADR-0361"]
 ---
 
 # MCP Session Context — Decisions
@@ -170,5 +170,6 @@ Resolution order is unchanged: explicit per-call / `--workspace` selector, then 
 - [ORB-10448] made both ADRs reachable from a managed worktree activity: the `workspace` selector is now advertised on every workspace-scoped tool, and hub-placement coordination reads address the checkout-identity partition. Neither changes ADR-0181 or ADR-0199 semantics; see [2_design.md §3a–3b](./2_design.md). The advertised-selector contract is a breaking `tools/list` schema change (RELEASING.md) and may warrant its own allocated ADR — this task's activity was not granted `orbit.adr.add`, so no global ID was allocated.
 - [ORB-10758] unified the workspace selector grammar across the CLI `--workspace` flag and MCP workspace-scoped tools ([ADR-0361]).
 - [ORB-10769] bound CLI `orbit tool run` to the same fail-closed workspace selector above the tools.
+- [ORB-10787] extended [ADR-0361]'s grammar to the owner MCP endpoint, which previously accepted logical IDs alone, so a checkoutless client that cannot pre-translate a selector can name a workspace the same way everywhere; the broker forwards a selector its own registry cannot resolve instead of refusing it ([../mcp-bridge/2_design.md §3.1](../mcp-bridge/2_design.md#31-route-resolution-preserves-identity-and-checkout)).
 
 Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

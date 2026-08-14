@@ -1,7 +1,7 @@
 ---
 title: Orbit MCP Bridge — Decisions
 owner: claude
-last_updated: 2026-08-13
+last_updated: 2026-08-14
 last_validated: 2026-08-02
 status: Draft
 feature: mcp-bridge
@@ -11,7 +11,7 @@ summary: ADR log for mcp-bridge, including the retired singular-hub contract and
 tags: [mcp, remote-access, host-registry, bridge]
 paths: ["crates/orbit-remote/**", "crates/orbit-mcp/**", "crates/orbit-core/**", "crates/orbit-tools/**", "crates/orbit-store/**"]
 related_features: [mcp-bridge, host-registry, mcp-session-context, remote-access]
-related_artifacts: [ORB-00424, ORB-10245, ORB-10708, ORB-10710, ORB-10262, ORB-10267, ORB-10268, ORB-10269, ORB-10271, ORB-10272, ORB-10276, ORB-10302, ORB-10319, ORB-10330, ORB-10332, ORB-10690, ORB-10761, ADR-0226, ADR-0227, ADR-0228, ADR-0229, ADR-0230, ADR-0231, ADR-0232, ADR-0235, ADR-0240, ADR-0348, ADR-0350, ADR-0351, ADR-0352, ADR-0354, ADR-0355, ADR-0356, ADR-0357, ADR-0358, ADR-0360]
+related_artifacts: [ORB-00424, ORB-10245, ORB-10708, ORB-10710, ORB-10262, ORB-10267, ORB-10268, ORB-10269, ORB-10271, ORB-10272, ORB-10276, ORB-10302, ORB-10319, ORB-10330, ORB-10332, ORB-10690, ORB-10761, ORB-10787, ADR-0226, ADR-0227, ADR-0228, ADR-0229, ADR-0230, ADR-0231, ADR-0232, ADR-0235, ADR-0240, ADR-0348, ADR-0350, ADR-0351, ADR-0352, ADR-0354, ADR-0355, ADR-0356, ADR-0357, ADR-0358, ADR-0360]
 ---
 
 # Orbit MCP Bridge — Decisions
@@ -664,6 +664,19 @@ names both the owning workspace and `orbit mcp serve` as the alternative.
   ([ADR-0360]), so a client whose only evidence is a tracked `.orbit/` directory
   starts the proxy while a machine with a registered on-disk checkout is still
   refused.
+- [ORB-10787] — made the client-side registry lookup non-authoritative for a
+  workspace owned elsewhere ([2_design.md §3.1](./2_design.md#31-route-resolution-preserves-identity-and-checkout)).
+  A broker classifies each selector refusal: grammar, ambiguity, inactive
+  workspace, and a broken local registry stay local, while "this machine has no
+  record of it" is forwarded verbatim over the single qualifying owner route for
+  the owner to validate. The owner endpoint therefore accepts [ADR-0361]'s full
+  selector grammar against its own registry rather than logical IDs alone, and
+  the selector crosses as tool input rather than as session provenance. A broker
+  with no `[[owner]]` route is unchanged. This is a behaviour change to a
+  documented invariant and warrants its own allocated ADR; the executing
+  activity was not granted `orbit.adr.add`, so the decision is recorded here and
+  in the design doc without a global ID (same treatment as [ORB-10448] in
+  [../mcp-session-context/4_decisions.md](../mcp-session-context/4_decisions.md)).
 - [ORB-10332] — removed the `orbit.host.list` MCP discovery tool as unused; the
   `orbit.workspace.list` / `orbit.crew.list` MCP discovery tools remain. The
   `orbit host list` CLI command it deferred to is itself withdrawn with the fleet

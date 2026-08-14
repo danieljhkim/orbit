@@ -141,6 +141,47 @@ struct WorkspaceIdentityDocument {
     workspace_id: String,
 }
 
+/// Why a workspace selector did not resolve on this machine, and whether an
+/// owner machine could still answer for it.
+///
+/// ORB-10787: the local registry is authoritative only for what this machine
+/// coordinates. A checkoutless client's registry is legitimately empty, so
+/// "this machine has no record of that selector" is not evidence the selector
+/// is wrong — it is evidence this machine cannot be the one to judge it. That
+/// distinction is carried as a flag rather than re-derived from the message,
+/// because only [`Self::deferrable`] refusals may cross an owner route.
+struct SelectorRefusal {
+    error: OrbitError,
+    deferrable: bool,
+}
+
+impl SelectorRefusal {
+    /// A refusal about the selector itself, or about locally-known state:
+    /// relative-path grammar, an ambiguous registered name, an inactive
+    /// workspace, an unreadable registry. No owner can overturn it.
+    fn local(error: OrbitError) -> Self {
+        Self {
+            error,
+            deferrable: false,
+        }
+    }
+
+    /// A refusal that only says *this machine* has no usable record of the
+    /// selector. The owner machine holds the registry that answers.
+    fn unresolved_here(error: OrbitError) -> Self {
+        Self {
+            error,
+            deferrable: true,
+        }
+    }
+}
+
+impl From<SelectorRefusal> for OrbitError {
+    fn from(refusal: SelectorRefusal) -> Self {
+        refusal.error
+    }
+}
+
 /// Checkout-independent local MCP broker.
 ///
 /// Listing is sourced exclusively from the canonical schema-plus-policy
@@ -314,23 +355,34 @@ impl BrokerMcpHost {
     /// The binding is always attached when it exists — placement preflight, not
     /// this lookup, decides whether a call may proceed without one. A workspace
     /// registered here with no local checkout resolves to `(id, None)`.
+    ///
+    /// A failure is classified (ORB-10787): a grammar or locally-known-state
+    /// refusal is final, while "this machine's registry has no usable record of
+    /// it" leaves the selector open for an owner machine to judge.
     fn resolve_workspace(
         &self,
         selector: &str,
-    ) -> Result<(String, Option<ExactCheckoutBinding>), OrbitError> {
+    ) -> Result<(String, Option<ExactCheckoutBinding>), SelectorRefusal> {
         let path = Path::new(selector);
         if path.is_absolute() {
-            let binding = self.resolve_exact_checkout(path)?;
-            return Ok((binding.logical_workspace_id.clone(), Some(binding)));
+            // A path this registry already binds is local business: a checkout
+            // that no longer validates needs repair here, and its message says
+            // how. Any other path is one this machine simply does not hold.
+            return match self.resolve_exact_checkout(path) {
+                Ok(binding) => Ok((binding.logical_workspace_id.clone(), Some(binding))),
+                Err(error) if self.registry_claims_path(path) => Err(SelectorRefusal::local(error)),
+                Err(error) => Err(SelectorRefusal::unresolved_here(error)),
+            };
         }
         if selector.contains('/') || selector == "." || selector == ".." {
-            return Err(OrbitError::InvalidInput(format!(
+            return Err(SelectorRefusal::local(OrbitError::InvalidInput(format!(
                 "workspace path selector '{selector}' must be absolute; the MCP broker never resolves paths from process cwd"
-            )));
+            ))));
         }
 
         let registry_path = crate::workspace_registry::registry_path_for(&self.global_root);
-        let registry = crate::workspace_registry::load_registry_from(&registry_path)?;
+        let registry = crate::workspace_registry::load_registry_from(&registry_path)
+            .map_err(SelectorRefusal::local)?;
         // ADR-0361: registered name and logical id share one fail-closed lookup.
         let workspace =
             match crate::workspace_registry::resolve_logical_workspace(&registry, selector) {
@@ -338,7 +390,10 @@ impl BrokerMcpHost {
                 Err(error)
                     if crate::workspace_registry::is_ambiguous_workspace_selector(&error) =>
                 {
-                    return Err(error);
+                    // Two local records answer to this selector. Sending it
+                    // elsewhere would resolve a third meaning; make the operator
+                    // disambiguate instead.
+                    return Err(SelectorRefusal::local(error));
                 }
                 Err(_) => None,
             };
@@ -349,18 +404,25 @@ impl BrokerMcpHost {
                     continue;
                 };
                 if identity.workspace_id == selector {
-                    let binding = self.resolve_exact_checkout(&checkout.repo_root)?;
+                    // The selector matched a checkout registered here, so a
+                    // validation failure is this machine's to repair.
+                    let binding = self
+                        .resolve_exact_checkout(&checkout.repo_root)
+                        .map_err(SelectorRefusal::local)?;
                     return Ok((binding.logical_workspace_id.clone(), Some(binding)));
                 }
             }
         }
-        let workspace = workspace
-            .ok_or_else(|| crate::workspace_registry::unknown_workspace_selector(selector))?;
+        let workspace = workspace.ok_or_else(|| {
+            SelectorRefusal::unresolved_here(crate::workspace_registry::unknown_workspace_selector(
+                selector,
+            ))
+        })?;
         if workspace.status != WorkspaceStatus::Active {
-            return Err(OrbitError::InvalidInput(format!(
+            return Err(SelectorRefusal::local(OrbitError::InvalidInput(format!(
                 "logical workspace ID '{}' is not active",
                 workspace.id
-            )));
+            ))));
         }
         let Some(checkout) = registry
             .checkouts
@@ -378,6 +440,81 @@ impl BrokerMcpHost {
             Ok(binding) => Ok((binding.logical_workspace_id.clone(), Some(binding))),
             Err(_) => Ok((workspace.id.clone(), None)),
         }
+    }
+
+    /// Whether this machine's registry already binds `path` to one of its own
+    /// checkouts, by the same longest-prefix rule the CLI uses.
+    fn registry_claims_path(&self, path: &Path) -> bool {
+        let registry_path = crate::workspace_registry::registry_path_for(&self.global_root);
+        crate::workspace_registry::load_registry_from(&registry_path).is_ok_and(|registry| {
+            crate::workspace_registry::find_checkout_by_path(&registry, path).is_some()
+        })
+    }
+
+    /// The one owner route that may validate a selector this machine could not
+    /// resolve, or `None` when this session has no such route and the local
+    /// refusal stands.
+    ///
+    /// ORB-10787: a broker with no `[[owner]]` route is a purely local server —
+    /// there is no other party to defer to, so it keeps its fail-closed
+    /// behaviour unchanged. With routes configured, only the task surface may
+    /// cross one (`crosses_owner_route`), so nothing else defers either.
+    ///
+    /// The route must be unambiguous. Ownership normally comes from the local
+    /// registry, and an unresolved selector is exactly the case where that
+    /// answer is missing, so a second qualifying route would make Orbit *guess*
+    /// which machine the caller meant — and a task write to the wrong owner is
+    /// not recoverable by retrying. Refuse by name instead.
+    fn owner_route_for_unresolved_selector(
+        &self,
+        name: &str,
+        selector: &str,
+        placement: McpToolPlacement,
+        context: &ToolSessionContext,
+    ) -> Result<Option<String>, OrbitError> {
+        if self.owner_routes.is_empty()
+            || placement != McpToolPlacement::Owner
+            || !crosses_owner_route(name)
+        {
+            return Ok(None);
+        }
+        // A session without a scalar capability is refused for that reason a few
+        // lines later; do not convert it into a routing failure here.
+        let Ok(capability) = Self::scalar_capability(context) else {
+            return Ok(None);
+        };
+        let mut candidates = self
+            .owner_routes
+            .iter()
+            .filter(|(_, route)| route.allowed_capabilities.contains(&capability))
+            .map(|(machine_id, _)| machine_id.as_str());
+        let Some(first) = candidates.next() else {
+            return Ok(None);
+        };
+        let rest = candidates.collect::<Vec<_>>();
+        if rest.is_empty() {
+            return Ok(Some(first.to_string()));
+        }
+        let mut machines = vec![first];
+        machines.extend(rest);
+        Err(OrbitError::InvalidInput(format!(
+            "workspace selector '{selector}' is not registered on this machine and this session has \
+             routes to more than one owner machine ({}), so Orbit cannot tell which one owns it. \
+             Register the workspace locally with its owner machine, or use a session configured \
+             with a single owner route",
+            machines.join(", ")
+        )))
+    }
+
+    /// Rewrite an input frame that cannot cross a machine boundary as-is.
+    ///
+    /// Only `orbit.task.artifact.put` qualifies: its `source_path` names a file
+    /// on the caller's disk, so the caller-side frame carries the bytes instead.
+    fn prepared_owner_route_input(name: &str, input: Value) -> Result<Value, OrbitError> {
+        if name != "orbit.task.artifact.put" {
+            return Ok(input);
+        }
+        orbit_core::prepare_remote_task_artifact_put(input, std::env::current_dir().ok().as_deref())
     }
 
     fn local_checkout_unavailable(&self, workspace_id: &str) -> OrbitError {
@@ -836,7 +973,7 @@ impl BrokerMcpHost {
         }
 
         let selector = match Self::selector(&input, &context) {
-            Some(selector) => selector,
+            Some(selector) => selector.to_string(),
             None => {
                 let error = OrbitError::InvalidInput(format!(
                     "tool '{name}' requires a workspace selector; pass a non-empty `workspace` argument or initialize with `_meta.orbit.workspace`"
@@ -846,12 +983,77 @@ impl BrokerMcpHost {
             }
         };
         let placement = definition.policy.placement();
+        let with_context = name == "orbit.task.show"
+            && input
+                .get("with_context")
+                .or_else(|| input.get("withContext"))
+                .or_else(|| input.get("with-context"))
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
 
         // Resolve the workspace without demanding a checkout first: whether one
         // is required depends on where the workspace is owned.
-        let (workspace_id, binding) = match self.resolve_workspace(selector) {
+        let (workspace_id, binding) = match self.resolve_workspace(&selector) {
             Ok(resolved) => resolved,
-            Err(error) => {
+            Err(refusal) => {
+                // ORB-10787: this machine's registry is not authoritative for a
+                // workspace it does not coordinate. When the selector names
+                // nothing here and exactly one owner route can carry the call,
+                // forward the caller's selector verbatim and let the owner —
+                // which holds the registry that answers — validate it. Its
+                // rejection reaches the caller unchanged.
+                if refusal.deferrable && !with_context {
+                    match self
+                        .owner_route_for_unresolved_selector(name, &selector, placement, &context)
+                    {
+                        Ok(Some(owner_machine_id)) => {
+                            tracing::info!(
+                                tool = name,
+                                owner_machine_id = owner_machine_id.as_str(),
+                                local_refusal = %refusal.error,
+                                "forwarding an unresolved workspace selector to its owner machine"
+                            );
+                            let mut input = match Self::prepared_owner_route_input(name, input) {
+                                Ok(input) => input,
+                                Err(error) => {
+                                    self.record_preflight_denial(
+                                        name,
+                                        &Value::Null,
+                                        &context,
+                                        &error,
+                                    );
+                                    return Err(error);
+                                }
+                            };
+                            // The selector crosses as ordinary tool input, which
+                            // the owner validates, and never as session
+                            // provenance: those fields carry *validated*
+                            // workspace identity, and this machine has none to
+                            // offer. A selector announced only in session
+                            // metadata is made explicit here so the owner sees
+                            // what the caller named.
+                            if let Some(object) = input.as_object_mut() {
+                                object.insert(
+                                    "workspace".to_string(),
+                                    Value::String(selector.clone()),
+                                );
+                            }
+                            return self.remote_owner_call(
+                                name,
+                                input,
+                                context,
+                                &owner_machine_id,
+                                None,
+                            );
+                        }
+                        Ok(None) => {}
+                        Err(error) => {
+                            self.record_preflight_denial(name, &input, &context, &error);
+                            return Err(error);
+                        }
+                    }
+                }
+                let error = OrbitError::from(refusal);
                 self.record_preflight_denial(name, &input, &context, &error);
                 return Err(error);
             }
@@ -865,13 +1067,6 @@ impl BrokerMcpHost {
         };
         let owner_is_local = matches!(owner, OwnerResolution::Local);
 
-        let with_context = name == "orbit.task.show"
-            && input
-                .get("with_context")
-                .or_else(|| input.get("withContext"))
-                .or_else(|| input.get("with-context"))
-                .and_then(Value::as_bool)
-                .unwrap_or(false);
         if with_context && !owner_is_local {
             let error = OrbitError::InvalidInput(
                 "remote `orbit.task.show` cannot provide `with_context`; checkout-derived enrichment is local-only and local coordination fallback is forbidden"
@@ -927,18 +1122,13 @@ impl BrokerMcpHost {
                 object.insert("workspace".to_string(), Value::String(workspace_id.clone()));
             }
             if let OwnerResolution::Remote(owner_machine_id) = &owner {
-                if name == "orbit.task.artifact.put" {
-                    input = match orbit_core::prepare_remote_task_artifact_put(
-                        input,
-                        std::env::current_dir().ok().as_deref(),
-                    ) {
-                        Ok(prepared) => prepared,
-                        Err(error) => {
-                            self.record_preflight_denial(name, &Value::Null, &context, &error);
-                            return Err(error);
-                        }
-                    };
-                }
+                input = match Self::prepared_owner_route_input(name, input) {
+                    Ok(prepared) => prepared,
+                    Err(error) => {
+                        self.record_preflight_denial(name, &Value::Null, &context, &error);
+                        return Err(error);
+                    }
+                };
                 return self.remote_owner_call(
                     name,
                     input,

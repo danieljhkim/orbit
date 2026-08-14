@@ -10,7 +10,8 @@
 //!
 //! The endpoint re-reads local `host.toml` before listing and every call; it filters the
 //! canonical registry by exactly one placement class and one scalar capability;
-//! it accepts only stable logical workspace IDs, never caller paths; it invokes
+//! it resolves the caller's selector against its own registry and never against
+//! the filesystem ([ORB-10787]); it invokes
 //! the checkout-independent coordination executor without constructing
 //! `OrbitRuntime` or opening any connector; and it never opens another MCP/SSH
 //! connection.
@@ -176,33 +177,53 @@ impl OwnerMcpHost {
             })
     }
 
-    /// Resolve a stable logical workspace ID that this machine actually owns.
+    /// Resolve a workspace this machine actually owns from the caller's
+    /// selector.
     ///
     /// Refusing a non-owned workspace by name is what keeps the topology a
     /// star per workspace: a client that reached the wrong owner is told which
     /// machine to open a route to rather than being silently relayed there.
+    ///
+    /// ORB-10787: the selector grammar is [ADR-0361]'s — registered name,
+    /// logical ID, or absolute checkout path — because a checkoutless client
+    /// has no registry with which to pre-translate one form into another, and
+    /// this endpoint is the only party that can. Every form resolves against
+    /// *this machine's* registry: the endpoint stays checkoutless, consults no
+    /// filesystem, and never treats a caller path as a directory to open. A
+    /// path that names no registered checkout here is refused like any other
+    /// unknown selector.
     fn resolve_owned_workspace(&self, selector: &str) -> Result<String, OrbitError> {
-        if Path::new(selector).is_absolute()
-            || selector.contains('/')
-            || selector == "."
-            || selector == ".."
-        {
+        let path = Path::new(selector);
+        if !path.is_absolute() && (selector.contains('/') || selector == "." || selector == "..") {
             return Err(OrbitError::InvalidInput(format!(
-                "owner MCP workspace selector '{selector}' must be a stable logical workspace ID, never a checkout path"
+                "owner MCP workspace selector '{selector}' must be a registered workspace name, a stable logical workspace ID, or an absolute checkout path on the owner machine"
             )));
         }
         let registry_path = crate::workspace_registry::registry_path_for(&self.global_root);
         let registry = crate::workspace_registry::load_registry_from(&registry_path)?;
-        let workspace = registry
-            .workspaces
-            .into_iter()
-            .find(|workspace| workspace.id == selector)
-            .ok_or_else(|| {
-                OrbitError::InvalidInput(format!(
-                    "unknown logical workspace ID '{selector}' on owner machine '{}'",
-                    self.identity.machine_id
-                ))
-            })?;
+        let workspace = if path.is_absolute() {
+            crate::workspace_registry::find_workspace_by_path(&registry, path)
+                .cloned()
+                .ok_or_else(|| {
+                    OrbitError::InvalidInput(format!(
+                        "checkout path '{selector}' names no registered workspace on owner machine '{}'",
+                        self.identity.machine_id
+                    ))
+                })?
+        } else {
+            crate::workspace_registry::resolve_logical_workspace(&registry, selector)
+                .map_err(|error| {
+                    if crate::workspace_registry::is_ambiguous_workspace_selector(&error) {
+                        error
+                    } else {
+                        OrbitError::InvalidInput(format!(
+                            "unknown workspace selector '{selector}' on owner machine '{}'",
+                            self.identity.machine_id
+                        ))
+                    }
+                })?
+                .clone()
+        };
         if workspace.status != WorkspaceStatus::Active {
             return Err(OrbitError::InvalidInput(format!(
                 "logical workspace ID '{}' is not active",
