@@ -1,46 +1,102 @@
 ---
 title: Resident Orchestrator — Decisions
-owner: codex
-last_updated: 2026-07-20
-status: Draft
+owner: grok
+last_updated: 2026-08-14
+last_validated: 2026-08-14
+status: Accepted
 feature: resident-orchestrator
 doc_role: decisions
 type: design
-summary: ADR log for workspace-addressed epic delegation and CLI-backed resident orchestration.
-tags: [resident-orchestrator, epic, routines, cli]
-paths: [".orbit/resources/activities/**", ".orbit/resources/jobs/**", ".orbit/routines/**"]
-related_features: [resident-orchestrator, activity-job, routines]
-related_artifacts: [ORB-10332]
+summary: ADR log for the drain job and the rule that the supervisor clock is not an Orbit primitive.
+tags: [resident-orchestrator, epic, jobs]
+paths: [".orbit/resources/jobs/**", "crates/orbit-core/assets/jobs/**"]
+related_features: [resident-orchestrator, activity-job]
+related_artifacts: [ORB-10332, ORB-10775, ORB-10776, ADR-0361, ADR-0362, ADR-0363]
 ---
 
 # Resident Orchestrator — Decisions
 
-ADR log for Resident Orchestrator. Entries are append-only and ordered by ascending global ID.
-Allocate every `ADR-NNNN` through `orbit.adr.add` before adding its heading. The store remains the
-source of truth for status, owner, related features, and related tasks.
+Decision record for resident-orchestrator. This file is the authoritative body.
 
-This folder is still Draft and has no allocated ADR. The candidate choices described in
-[2_design.md](./2_design.md)—workspace-addressed `epic` tasks, bounded CLI ownership cycles, and
-replacement rather than conversion of the HTTP epic pipeline—remain proposals until the design is
-accepted and implementation tasks are allocated. The HTTP epic pipeline this design supersedes was
-itself removed as unused in [ORB-10332].
+## ADR-0361 — Epic tag is a supervisor delegation signal, not the job predicate
 
-## Candidate Decision: Epic Marker and Legacy Coexistence
+**Status:** Accepted · 2026-08 · [ORB-10776]
+**Scope:** how a body of work is marked for a supervisor; not `epic_pipeline` admission
 
-**Proposal.** Resident orchestration selects root tasks by the `epic` tag rather than changing or
-depending on `TaskType`. The former `task_epic_pipeline` identified epics by `TaskType::Feature`;
-[ORB-10332] removed that pipeline, so the `epic` tag is now the sole epic selector.
+### Context
 
-**Coexistence rule (obsolete).** The original proposal kept the two paths disjoint by workspace
-capability during a staged retirement. With the legacy pipeline removed in [ORB-10332], there is no
-second claimant to exclude, so this rule no longer applies.
+The removed `task_epic_pipeline` treated `TaskType::Feature` as an epic. A later draft made
+the `epic` tag the *job's* pickup selector. The v1 job instead wakes on
+`proposed`/`backlog`/`blocked` plus failed/timeout runs, or it would miss ordinary chores
+and failed pipelines that are not tagged.
 
-**Why this proposal.** A tag is an explicit delegation signal that does not overload the broad
-`feature` type. This remains a candidate decision, not an allocated ADR.
+### Decision
+
+`epic` on a root task means "a supervisor owns this outcome." Catalog code must not require
+the tag to drain work. Adding a second pickup key (`type: feature`, assignee, folder) for
+the *job* is out of contract unless this ADR is superseded.
+
+### Consequences
+
+- Supervisors can still create `epic` roots and children as they do today (ORB-10775).
+- Cost: a workspace with leftover `backlog` chores will wake the drain job even when no
+  epic exists; isolation is a workspace-layout problem, not a tag filter.
+
+## ADR-0362 — The supervisor clock is not an Orbit primitive
+
+**Status:** Accepted · 2026-08 · [ORB-10776]
+**Scope:** routines, activities, and jobs that would schedule or select work for `epic_pipeline`
+
+### Context
+
+The first draft specified `resident_orchestrator`, `select_resident_epic`, a JSON comment
+protocol, conversation resume, and a seeded `resident-epic-orbit` routine. That rebuilds
+an orchestrator inside Orbit next to Cowork / Grok / a knowledgebase cron that already
+speak MCP.
+
+### Decision
+
+Orbit v1 ships only `scan_unresolved_work`, `epic_orchestrator`, and `epic_pipeline`.
+Do not add an Orbit routine, selector activity, session-resume requirement, or
+comment-typed mailbox for this feature. The fire clock lives in a knowledgebase (or
+front-door) process that calls `orbit run job epic_pipeline`.
+
+### Consequences
+
+- A future "make it a routine" PR needs to supersede this ADR, not sneak a YAML into
+  `.orbit/routines/`.
+- Cost: no first-class resident health in `orbit routine list`; operators debug the
+  external cron and the job-run log instead.
+
+## ADR-0363 — Session log is the orchestrator's memory, not a CLI session
+
+**Status:** Accepted · 2026-08 · [ORB-10776]
+**Scope:** how `epic_orchestrator` remembers work across invokes; scan wake reasons
+
+### Context
+
+Each drain fire is a new CLI process. Conversation resume is out of v1. The orchestrator
+still needs to leave itself status, notes, and "check this later," and to see new notes
+on the next fire. Task comments are a human thread. A standing `backlog` log task would
+wake the scan forever. A file in the knowledgebase cron repo is the wrong workspace.
+
+### Decision
+
+Give the workspace an append-only `orbit.session_log` with kinds `status`, `note`, and
+`check_later`. Unresolved `check_later` entries are a `scan_unresolved_work` wake reason.
+`status`/`note` are not. Resolve is the only mutation besides append. The orchestrator
+does not edit repository files; code changes are child tasks it creates and ships.
+
+### Consequences
+
+- Next fire starts with `session_log.list` + the task/run scan, not a provider session id.
+- Cost: another noun and three tools. Reminders the orchestrator forgets to `resolve`
+  will keep waking the drain until someone does.
 
 ## Task References
 
-- **[ORB-10332]** — Remove the unused HTTP epic pipeline (`task_epic_pipeline`, `epic_orchestrator`).
-- Further implementation tasks will be allocated after this Draft is accepted.
+- **[ORB-10332]** — Remove the unused HTTP epic pipeline.
+- **[ORB-10775]** — v1 implementation epic.
+- **[ORB-10776]** — Record this split.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.
