@@ -6,11 +6,11 @@ status: Accepted
 feature: resident-orchestrator
 doc_role: overview
 type: design
-summary: V1 is one catalog job — scan unresolved work, then run a long-lived orchestrator with full Orbit MCP until the scan is empty. The clock that fires it lives outside Orbit.
+summary: V1 is a drain job — scan unresolved work, then an orchestrator that only creates/ships tasks and writes a session log until the scan is empty. It does not edit code. The fire clock lives outside Orbit.
 tags: [resident-orchestrator, epic, jobs, mcp]
 paths: [".orbit/resources/jobs/**", "crates/orbit-core/assets/jobs/**", "crates/orbit-core/assets/activities/**"]
 related_features: [resident-orchestrator, activity-job]
-related_artifacts: [ORB-10775, ORB-10776, ORB-10779, ADR-0361, ADR-0362]
+related_artifacts: [ORB-10775, ORB-10776, ORB-10779, ADR-0361, ADR-0362, ADR-0363]
 ---
 
 # Resident Orchestrator — Overview
@@ -19,9 +19,10 @@ V1 is one Orbit job, `epic_pipeline`.
 
 A **deterministic scan** looks at the workspace for (1) tasks in `proposed`, `backlog`, or
 `blocked`, or (2) failed job-runs. If the scan is empty, the job succeeds as a no-op. If
-anything is present, the job invokes a **long-running orchestrator activity** with the full
-Orbit MCP tool surface. That agent works the set until a later scan is empty. The job loops
-scan → orchestrate until drain or a bounded iteration/time ceiling.
+anything is present, the job invokes a **long-running orchestrator activity**. That agent
+**does not edit the repository**. It creates and ships tasks, inspects runs, and writes a
+workspace **session log** (notes, check-later items, status). The job loops scan →
+orchestrate until a later scan is empty or a bounded ceiling.
 
 The **clock** that fires this job is not an Orbit routine. A cron (or a human, or a front-door
 session) on a separate knowledgebase checkout, with Orbit MCP wired in, calls
@@ -51,11 +52,16 @@ when to start one.
 **Scan.** Deterministic activity `scan_unresolved_work`. Read-only. Returns the set (ids +
 counts). Empty set is a successful no-op input to the job.
 
-**Orchestrator activity.** `epic_orchestrator`: one `backend: cli` agent_loop with the
-full Orbit tool catalog (task, workflow/run, search — not a leaf implementer allowlist).
-Its mandate is to shrink the scan set: triage `proposed`, unblock or re-dispatch
-`blocked`, ship or decompose `backlog`, resume or otherwise close failed/timeout runs.
-It must not merge PRs that policy reserves for Daniel.
+**Orchestrator activity.** `epic_orchestrator`: one `backend: cli` agent_loop. It
+**does not change code**. Allowlist is Orbit task + workflow/run + search +
+`orbit.session_log.*` — no git write, no worktree edit, no `agent_implement`. It
+shrinks the scan set by creating tasks, shipping explicit ids, and resuming or
+cancelling failed runs. It must not merge PRs reserved for Daniel.
+
+**Session log.** Workspace-scoped append-only notebook (`orbit.session_log`). Entry
+kinds: `status`, `note`, `check_later`. Unresolved `check_later` rows are a scan
+wake reason, so "look at this next time" actually wakes the next fire. This is the
+memory between invokes; conversation resume stays out of v1.
 
 **Epic job.** `epic_pipeline`: loop { scan; break if empty; invoke orchestrator } until
 empty, iteration cap, or wall clock. A leftover scan after the cap fails the job
@@ -74,6 +80,7 @@ routine in v1.
 | This split | this folder | [ORB-10776] |
 | Epic tag = supervisor delegation signal | ADR-0361 | [ORB-10776] |
 | Clock and supervisor stay outside Orbit | ADR-0362 | [ORB-10776] |
+| `orbit.session_log` (notes / check-later / status) | workspace session-log store + tools | [ORB-10784] |
 | `scan_unresolved_work` + `epic_orchestrator` + `epic_pipeline` | catalog | [ORB-10779] |
 | Child delivery while draining | existing `task_gate_pipeline` / `task_pr_pipeline` | Existing |
 | HTTP epic retirement | removed assets | [ORB-10332] |
@@ -84,5 +91,6 @@ routine in v1.
 - **[ORB-10775]** — Epic: drain job in Orbit; supervisor clock stays external.
 - **[ORB-10776]** — Accept this contract; ADR-0361 and ADR-0362.
 - **[ORB-10779]** — Ship the scan, the orchestrator activity, and `epic_pipeline`.
+- **[ORB-10784]** — `orbit.session_log` (status / note / check_later).
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

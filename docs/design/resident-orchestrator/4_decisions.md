@@ -11,7 +11,7 @@ summary: ADR log for the drain job and the rule that the supervisor clock is not
 tags: [resident-orchestrator, epic, jobs]
 paths: [".orbit/resources/jobs/**", "crates/orbit-core/assets/jobs/**"]
 related_features: [resident-orchestrator, activity-job]
-related_artifacts: [ORB-10332, ORB-10775, ORB-10776, ADR-0361, ADR-0362]
+related_artifacts: [ORB-10332, ORB-10775, ORB-10776, ADR-0361, ADR-0362, ADR-0363]
 ---
 
 # Resident Orchestrator — Decisions
@@ -67,6 +67,31 @@ front-door) process that calls `orbit run job epic_pipeline`.
   `.orbit/routines/`.
 - Cost: no first-class resident health in `orbit routine list`; operators debug the
   external cron and the job-run log instead.
+
+## ADR-0363 — Session log is the orchestrator's memory, not a CLI session
+
+**Status:** Accepted · 2026-08 · [ORB-10776]
+**Scope:** how `epic_orchestrator` remembers work across invokes; scan wake reasons
+
+### Context
+
+Each drain fire is a new CLI process. Conversation resume is out of v1. The orchestrator
+still needs to leave itself status, notes, and "check this later," and to see new notes
+on the next fire. Task comments are a human thread. A standing `backlog` log task would
+wake the scan forever. A file in the knowledgebase cron repo is the wrong workspace.
+
+### Decision
+
+Give the workspace an append-only `orbit.session_log` with kinds `status`, `note`, and
+`check_later`. Unresolved `check_later` entries are a `scan_unresolved_work` wake reason.
+`status`/`note` are not. Resolve is the only mutation besides append. The orchestrator
+does not edit repository files; code changes are child tasks it creates and ships.
+
+### Consequences
+
+- Next fire starts with `session_log.list` + the task/run scan, not a provider session id.
+- Cost: another noun and three tools. Reminders the orchestrator forgets to `resolve`
+  will keep waking the drain until someone does.
 
 ## Task References
 

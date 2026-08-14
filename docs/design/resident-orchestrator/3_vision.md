@@ -26,8 +26,8 @@ out of [ORB-10775].
 2. **Should the scan be epic-scoped?** A `parent_id` / `epic` tag filter would let one
    workspace hold several bodies of work. That needs a selector policy the first draft
    tried to invent inside Orbit; keep it in the supervisor until the drain job is real.
-3. **Conversation resume?** Useful once drains are long and frequent. Not a correctness
-   dependency; fail-open to a fresh invoke.
+3. **Conversation resume?** Session log is v1 memory. Resume is still allowed later as
+   a fail-open optimization, never as the notebook.
 4. **Event-driven wake?** A task-created or run-failed hook would cut cron latency. Routines
    v1 have no event trigger; do not add one for this feature.
 5. **Multiple orchestrator identities per workspace?** Requires a routing key. Tags alone
