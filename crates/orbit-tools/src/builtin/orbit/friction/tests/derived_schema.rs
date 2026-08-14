@@ -161,7 +161,7 @@ fn update_schema_keeps_its_spelled_out_id_description() {
     assert_eq!(params, vec!["id", "status", "tags", "body", "title"]);
     assert_eq!(
         schema.parameters[0].description,
-        "Friction record id, e.g. F2026-05-001"
+        "Friction record ID, e.g. FYYYY-MM-NNN"
     );
 }
 
