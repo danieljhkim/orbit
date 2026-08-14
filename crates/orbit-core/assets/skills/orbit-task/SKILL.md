@@ -49,6 +49,23 @@ Description template:
 
 Exit: the task exists with a strong description, clear acceptance criteria, and — when filled — `context_files` naming only real modification targets.
 
+### Preparing selectors under traffic
+
+An empty `context_files` list is valid while a task is being authored. When an
+orchestrator needs selectors prepared before reservation or conflict checks,
+use the existing task-pilot job rather than filling the list inline:
+
+```bash
+orbit job show task_pilot_pipeline
+orbit run job task_pilot_pipeline
+```
+
+The zero-input mode discovers only proposed/backlog tasks with empty
+`context_files`; pass explicit `task_ids` to audit exactly named tasks. Its
+apply step persists only validated selectors, reducing file-collision risk. An
+enabled workspace routine may already run the zero-input job, but an extra run
+is appropriate when ship traffic is high.
+
 ## 2. Execute
 
 Carry a task from intent to verified implementation with explicit lifecycle tracking.

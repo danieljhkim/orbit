@@ -24,6 +24,29 @@ orbit run history --json
 orbit run show <run_id> --json
 ```
 
+### Task-pilot pipeline
+
+When an orchestrator needs task selectors prepared before ship traffic, inspect
+the job with `orbit job show task_pilot_pipeline`, then invoke it with:
+
+```bash
+orbit run job task_pilot_pipeline
+```
+
+With no input, the job discovers only `proposed`/`backlog` tasks in the
+invoking workspace whose `context_files` is empty. To audit specific tasks,
+pass their IDs explicitly; this mode audits exactly those tasks, including
+tasks that already have selectors:
+
+```bash
+orbit run job task_pilot_pipeline --input task_ids=ORB-12345,ORB-12346
+```
+
+Use this job before reservation or conflict checks when ship traffic is high.
+Do not fill `context_files` inline: the job's apply step writes only validated
+selectors, reducing file-collision risk. An enabled workspace routine may
+already run the zero-input job on a schedule; invoke an extra run when needed.
+
 ## Routines & scheduling
 
 1. **Host identity** — `orbit routine init --host-id <id>` (defaults to hostname); add `--install-clock` to install the per-user OS clock unit that runs `orbit sweep` every minute.

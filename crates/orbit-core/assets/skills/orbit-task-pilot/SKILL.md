@@ -27,6 +27,18 @@ Never expand the partition beyond the supplied IDs, except to cite a concrete de
 
 Task-pilot is an operational role, not a crew, actor identity, or scheduler.
 
+## Orchestrator handoff
+
+The Luna worker described here is read-only. It must not update tasks or invoke
+the pipeline. When ship traffic is high, the orchestrator should run
+`orbit job show task_pilot_pipeline` and then `orbit run job task_pilot_pipeline`
+so the apply step can persist validated selectors and reduce file-collision
+risk. Do not fill `context_files` inline under traffic. The zero-input job mode
+discovers eligible proposed/backlog tasks with empty selectors; explicit
+`task_ids` audits exactly the named tasks. An enabled workspace routine may
+already run the zero-input job on a schedule, but orchestrators can invoke an
+extra run before reservation or conflict checks.
+
 ## Result
 
 Return one partition object with the exact `partition_index` and `task_ids`, one assessment per supplied ID, and a short summary. Each assessment carries:
