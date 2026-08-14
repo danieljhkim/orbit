@@ -37,6 +37,8 @@ Don't modify `CHANGELOG.md` during task execution — it is compiled at release 
 
 ## Rust Practices
 
+- Concrete internal task, ADR, learning, and friction IDs are allowed in ordinary source comments, but never expose them in user-facing errors, CLI help/output, generated files, or advertised MCP/tool text; note that Clap renders `///` comments on commands and arguments as public help.
+
 Lint-enforced rules (full set in `[workspace.lints]`; key implications below):
 
 - **No `unwrap()` / `expect()` at crate boundaries.** Propagate `OrbitError`; use `expect("<invariant>")` only when the invariant is local and documented. See [`docs/design-patterns/error_translation.md`](docs/design-patterns/error_translation.md).

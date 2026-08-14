@@ -87,8 +87,9 @@ pub struct ServeArgs {
     #[arg(long)]
     pub no_open: bool,
 
+    // ORB-10029: source provenance for the global-only dashboard mode.
     /// Deprecated, no-op: `orbit web serve` always serves every registered
-    /// workspace now (global mode is the only mode; see ORB-10029). Kept so
+    /// workspace now (global mode is the only mode). Kept so
     /// the flag keeps parsing for existing scripts, and because `orbit web
     /// connect` unconditionally forwards it to the remote `orbit web serve`
     /// — removing it would break tunnels against an old/new binary mix.

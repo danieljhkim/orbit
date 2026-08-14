@@ -41,10 +41,9 @@ impl Tool for OrbitCommandExecTool {
             },
             ToolParam {
                 name: "claim_token".to_string(),
-                description:
-                    "Token for this workspace's exclusive claim (ADR-0352), required when \
+                description: "Token for this workspace's exclusive claim, required when \
                      another operator holds one. Falls back to `ORBIT_WORKSPACE_CLAIM_TOKEN`."
-                        .to_string(),
+                    .to_string(),
                 param_type: "string".to_string(),
                 required: false,
             },

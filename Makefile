@@ -122,6 +122,7 @@ ci-fast:
 	./scripts/check-history-note-size.sh
 	./scripts/check-stability.sh
 	./scripts/check-artifact-redaction-guardrail.sh
+	./scripts/check-public-artifact-ids.py
 	./scripts/check-changelog-style.sh
 	./scripts/check-error-translation.sh
 	./scripts/check-orphan-modules.sh

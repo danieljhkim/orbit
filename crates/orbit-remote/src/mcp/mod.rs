@@ -108,7 +108,7 @@ fn check_bindable_mcp_host(addr: SocketAddr) -> Result<(), OrbitError> {
     }
     Err(OrbitError::InvalidInput(format!(
         "refusing to bind the MCP TCP listener to non-loopback address {addr}: the listener is \
-         unauthenticated and relies on an SSH tunnel for access control (ADR-0350). Bind a \
+         unauthenticated and relies on an SSH tunnel for access control. Bind a \
          loopback address (127.0.0.1 or ::1) and use an authenticated tunnel/reverse proxy \
          (e.g. `ssh -L {port}:localhost:{port} <host>`) for remote access.",
         port = addr.port()
@@ -131,7 +131,7 @@ fn least_privileged_mcp_capability(
     // than serving nothing.
     if !capability.is_bridge_v1() {
         return Err(OrbitError::InvalidInput(format!(
-            "MCP capability '{capability}' is withdrawn from the v1 bridge (ADR-0358); request agent or operator"
+            "MCP capability '{capability}' is not supported by the bridge; request agent or operator"
         )));
     }
     Ok(capability)

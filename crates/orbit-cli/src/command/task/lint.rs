@@ -22,7 +22,7 @@ const SWEEP_ACTIVE_STATUSES: &[TaskStatus] = &[
 
 #[derive(Args)]
 #[command(
-    after_help = "Examples:\n  orbit task lint ORB-00042            # findings for one task\n  orbit task lint ORB-00042 --fix      # drop stale context_files entries, then report\n  orbit task lint                      # sweep active tasks for stale context_files (dry run)\n  orbit task lint --fix                # apply the sweep\n  orbit task lint --fix --status review"
+    after_help = "Examples:\n  orbit task lint <TASK_ID>            # findings for one task\n  orbit task lint <TASK_ID> --fix      # drop stale context_files entries, then report\n  orbit task lint                      # sweep active tasks for stale context_files (dry run)\n  orbit task lint --fix                # apply the sweep\n  orbit task lint --fix --status review"
 )]
 pub struct TaskLintArgs {
     /// Task ID. Omit to sweep all active tasks for stale `context_files` entries.

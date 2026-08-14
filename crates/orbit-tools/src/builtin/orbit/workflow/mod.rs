@@ -64,10 +64,9 @@ impl Tool for OrbitWorkflowShipTool {
             },
             ToolParam {
                 name: "claim_token".to_string(),
-                description:
-                    "Token for this workspace's exclusive claim (ADR-0352), required when another \
+                description: "Token for this workspace's exclusive claim, required when another \
                      operator holds one. Falls back to `ORBIT_WORKSPACE_CLAIM_TOKEN`."
-                        .to_string(),
+                    .to_string(),
                 param_type: "string".to_string(),
                 required: false,
             },
@@ -151,15 +150,15 @@ impl Tool for OrbitWorkflowRunResumeTool {
                 .to_string(),
             parameters: vec![
                 run_id_param(),
-            ToolParam {
-                name: "claim_token".to_string(),
-                description:
-                    "Token for this workspace's exclusive claim (ADR-0352), required when another \
+                ToolParam {
+                    name: "claim_token".to_string(),
+                    description:
+                        "Token for this workspace's exclusive claim, required when another \
                      operator holds one. Falls back to `ORBIT_WORKSPACE_CLAIM_TOKEN`."
-                        .to_string(),
-                param_type: "string".to_string(),
-                required: false,
-            },
+                            .to_string(),
+                    param_type: "string".to_string(),
+                    required: false,
+                },
             ],
             builtin: true,
         }

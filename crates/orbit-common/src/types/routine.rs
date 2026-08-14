@@ -124,9 +124,10 @@ impl RoutineTarget {
                 name.trim()
             ));
         }
+        // ADR-0194: source provenance for rejecting inline routine commands.
         Err(format!(
             "target '{value}' must be a catalog reference of the form 'job:<name>'; \
-             inline commands are not supported (ADR-0194)"
+             inline commands are not supported"
         ))
     }
 }

@@ -315,8 +315,9 @@ pub enum McpToolPolicyError {
     EmptyCapabilities,
     #[error("MCP tool policy repeats capability {0:?}")]
     DuplicateCapability(McpCapability),
+    // ADR-0358: source provenance for the narrowed bridge capabilities.
     #[error(
-        "MCP tool policy allows capability '{0}', which the v1 bridge withdrew (ADR-0358); only agent and operator remain"
+        "MCP tool policy allows capability '{0}', which the bridge does not support; only agent and operator remain"
     )]
     WithdrawnCapability(McpCapability),
     #[error("canonical MCP tool name must not be empty")]

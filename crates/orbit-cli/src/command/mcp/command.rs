@@ -62,10 +62,11 @@ pub enum ServeMode {
 #[derive(Args)]
 #[command(about = "Serve the Orbit tool registry over Model Context Protocol")]
 pub struct ServeArgs {
+    // ORB-10727 / ADR-0355: source provenance for the owner-endpoint rename.
     /// Serve the checkoutless owner endpoint for the workspaces this machine
     /// owns, instead of the client-facing local broker.
     ///
-    /// ORB-10727 [ADR-0355]: this replaces `--hub`. It selects which server
+    /// This replaces the withdrawn `--hub` spelling. It selects which server
     /// this process presents; it no longer asserts a machine-level coordination
     /// role, and `host.toml` mode is not consulted. Orbit constructs this
     /// invocation itself for the far side of an owner route — it is not
@@ -77,16 +78,17 @@ pub struct ServeArgs {
     /// with, and only when this invocation is the one that starts it.
     #[arg(long, value_name = "CAPABILITY")]
     pub capabilities: Option<McpCapability>,
+    // ADR-0350: source provenance for the loopback-only listener and remote proxy.
     /// Serve over TCP at this loopback address instead of stdio. A
     /// non-loopback address is refused before the socket is opened, since the
     /// listener carries no authentication of its own; reach it through an
-    /// authenticated SSH tunnel (ADR-0350). Stdio remains the default when
+    /// authenticated SSH tunnel. Stdio remains the default when
     /// this is omitted.
     #[arg(long, value_name = "ADDR", conflicts_with = "mode")]
     pub listen: Option<SocketAddr>,
     /// Run as a client-side proxy to a remote Orbit instead of serving this
     /// machine. Requires an SSH destination, and refuses to start where a
-    /// local checkout exists (ADR-0350).
+    /// local checkout exists.
     #[arg(
         long,
         value_name = "MODE",
