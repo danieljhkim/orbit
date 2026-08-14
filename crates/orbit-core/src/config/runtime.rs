@@ -599,6 +599,7 @@ fn reject_stale_agent_tables(
     raw: Option<&BTreeMap<String, toml::Value>>,
 ) -> Result<(), OrbitError> {
     if raw.is_some() {
+        // ORB-00058: source provenance for retiring the old agent-role schema.
         return Err(OrbitError::InvalidInput(
             "config schema no longer supports [agent.<role>] tables; migrate to [crews.<name>] with [workflow].default_crew".to_string(),
         ));

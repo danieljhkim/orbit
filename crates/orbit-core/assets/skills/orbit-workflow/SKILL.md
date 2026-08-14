@@ -1,6 +1,6 @@
 ---
 name: orbit-workflow
-description: Orbit's execution layer — jobs, activities, routines, `orbit sweep`, and `orbit run` — plus diagnosing a failed, stuck, or cancelled run. Triggers on running or inspecting a job or pipeline, scheduling routines, or a `jrun-*` id.
+description: Orbit's execution layer — jobs, activities, routines, `orbit sweep`, and `orbit run` — plus task-pilot preflight and diagnosing a failed, stuck, or cancelled run. Triggers on task-pilot, running or inspecting a job or pipeline, scheduling routines, or a `jrun-*` id.
 ---
 
 # Orbit Workflow
@@ -39,7 +39,7 @@ pass their IDs explicitly; this mode audits exactly those tasks, including
 tasks that already have selectors:
 
 ```bash
-orbit run job task_pilot_pipeline --input task_ids=ORB-12345,ORB-12346
+orbit run job task_pilot_pipeline --input task_ids=<TASK_ID>,<TASK_ID>
 ```
 
 Use this job before reservation or conflict checks when ship traffic is high.

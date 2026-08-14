@@ -62,6 +62,7 @@ pub enum ServeMode {
 #[derive(Args)]
 #[command(about = "Serve the Orbit tool registry over Model Context Protocol")]
 pub struct ServeArgs {
+    // ORB-10727 / ADR-0355: source provenance for the owner-endpoint rename.
     /// Serve the checkoutless owner endpoint for the workspaces this machine
     /// owns, instead of the client-facing local broker.
     ///
@@ -77,6 +78,7 @@ pub struct ServeArgs {
     /// with, and only when this invocation is the one that starts it.
     #[arg(long, value_name = "CAPABILITY")]
     pub capabilities: Option<McpCapability>,
+    // ADR-0350: source provenance for the loopback-only listener and remote proxy.
     /// Serve over TCP at this loopback address instead of stdio. A
     /// non-loopback address is refused before the socket is opened, since the
     /// listener carries no authentication of its own; reach it through an

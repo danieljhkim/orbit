@@ -7,15 +7,11 @@ use orbit_common::utility::fs::write_text_with_parent;
 use crate::OrbitRuntime;
 use crate::skill_catalog::{LoadedSkill, SkillCatalogDoctorStatus};
 
-const DEFAULT_SKILL_FILES: [(&str, &str); 5] = [
+const DEFAULT_SKILL_FILES: [(&str, &str); 4] = [
     ("orbit", include_str!("../../assets/skills/orbit/SKILL.md")),
     (
         "orbit-task",
         include_str!("../../assets/skills/orbit-task/SKILL.md"),
-    ),
-    (
-        "orbit-task-pilot",
-        include_str!("../../assets/skills/orbit-task-pilot/SKILL.md"),
     ),
     (
         "orbit-workflow",
@@ -81,7 +77,7 @@ pub struct SkillDoctorResult {
     pub message: String,
 }
 
-pub(crate) fn default_skill_ids() -> [&'static str; 5] {
+pub(crate) fn default_skill_ids() -> [&'static str; 4] {
     DEFAULT_SKILL_FILES.map(|(id, _)| id)
 }
 
@@ -765,7 +761,7 @@ mod tests {
              repository-agnostic ({} leak(s)) — generalize, remove, or guard as explicitly \
              source-only/client-specific guidance. State a policy by the role that holds it and \
              the mechanism that enforces it, never by a person's name or a workspace-local \
-             artifact id:\n{}",
+             artifact id (ORB-10208):\n{}",
             failures.len(),
             failures.join("\n"),
         );

@@ -121,6 +121,7 @@ impl TrustedOwnerRoute {
         let mut allowed_capabilities = BTreeSet::new();
         for capability in raw.allowed_capabilities {
             if !capability.is_bridge_v1() {
+                // ADR-0358: source provenance for the narrowed bridge capabilities.
                 return Err(OrbitError::InvalidInput(format!(
                     "trusted MCP config '{}' grants owner capability '{capability}', which the bridge does not support; use agent and/or operator",
                     path.display()
@@ -150,6 +151,7 @@ impl TrustedOwnerRoute {
 /// coordination calls to a non-owner. Rewriting the file is a one-line human
 /// edit; guessing the routing target is not something the loader may do.
 fn legacy_hub_table_error(path: &Path) -> OrbitError {
+    // ADR-0355: source provenance for replacing the machine-level hub.
     OrbitError::InvalidInput(format!(
         "trusted MCP config '{}' still declares the withdrawn singular [hub] table. \
          Per-owner routes replace the machine-level hub, and a hub target is \

@@ -53,6 +53,8 @@ def main() -> int:
             if "tests" in path.parts:
                 continue
             for line_number, line in production_lines(path):
+                # Internal provenance belongs in ordinary source comments, which
+                # are intentionally outside this shipped-string guard.
                 code = line.split("//", maxsplit=1)[0]
                 if '"' not in code:
                     continue
@@ -62,7 +64,11 @@ def main() -> int:
                     )
 
     if violations:
-        print("Public CLI/tool strings must use placeholders, not workspace-local artifact IDs:", file=sys.stderr)
+        print(
+            "Public CLI/tool strings must use placeholders, not workspace-local artifact IDs; "
+            "keep implementation provenance in ordinary source comments:",
+            file=sys.stderr,
+        )
         print("\n".join(violations), file=sys.stderr)
         return 1
     return 0

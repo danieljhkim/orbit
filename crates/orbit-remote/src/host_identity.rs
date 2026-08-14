@@ -99,6 +99,7 @@ impl HostIdentity {
     /// Operator-influenced string values are escaped for a TOML basic string so
     /// a quote, backslash, or control character cannot corrupt the file.
     fn to_toml(&self) -> String {
+        // ORB-10721: source provenance for the generated host identity format.
         format!(
             "# Machine identity for this Orbit host. Created by\n\
              # `orbit init`; `machine_id` is generated once and never edited.\n\
