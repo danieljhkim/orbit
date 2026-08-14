@@ -6,6 +6,7 @@ pub mod operation;
 pub mod pipeline;
 pub mod search;
 pub mod semantic;
+pub mod session_log;
 pub mod task;
 pub mod workflow;
 pub mod workspace_claim;
@@ -112,6 +113,18 @@ pub fn register(registry: &mut ToolRegistry) {
     registry.register_mcp(
         search::OrbitSearchTool,
         agent_operator(McpToolPlacement::Composite),
+    );
+    registry.register_mcp(
+        session_log::OrbitSessionLogAppendTool,
+        agent_operator(McpToolPlacement::Owner),
+    );
+    registry.register_mcp(
+        session_log::OrbitSessionLogListTool,
+        agent_operator(McpToolPlacement::Owner),
+    );
+    registry.register_mcp(
+        session_log::OrbitSessionLogResolveTool,
+        agent_operator(McpToolPlacement::Owner),
     );
     registry.register_mcp(
         workflow::OrbitWorkflowShipTool,

@@ -7,5 +7,6 @@ mod runtime;
 mod task_block_on_run_failure;
 mod task_locks;
 mod task_reservation_cleanup;
+mod session_log;
 mod tool_exec;
 mod workspace_claim;
