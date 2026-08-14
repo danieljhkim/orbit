@@ -1,0 +1,40 @@
+# Workspace drain [ORB-10779].
+#
+# Loop a deterministic unresolved-work scan and a no-code-change
+# orchestrator until the scan is empty. First-scan empty is a successful
+# no-op (zero orchestrator invokes). A leftover scan after
+# `max_iterations` fails closed via `fail_if_nonempty`.
+#
+# The fire clock is external (ADR-0362). Do not seed a routine.
+
+schemaVersion: 2
+kind: Job
+metadata:
+  name: epic_pipeline
+spec:
+  state: enabled
+  kind: workflow
+  max_active_runs: 1
+
+  steps:
+    - id: drain
+      loop:
+        max_iterations: 8
+        break_when: "{{ steps.scan.output.empty }} == true"
+        steps:
+          - id: scan
+            target: activity:scan_unresolved_work
+            default_input: {}
+
+          - id: orchestrate
+            when: "{{ steps.scan.output.empty }} == false"
+            target: activity:epic_orchestrator
+            timeout_seconds: 7200
+            default_input:
+              scan: "{{ steps.scan.output }}"
+              system_crew: true
+
+    - id: require_empty
+      target: activity:scan_unresolved_work
+      default_input:
+        fail_if_nonempty: true

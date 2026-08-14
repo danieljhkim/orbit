@@ -16,7 +16,7 @@ use crate::runtime::task_locks::{
     requested_task_files, task_lock_conflicts, workspace_orbit_dir, workspace_task_reservation_id,
 };
 
-use super::{backlog_exclusion, pipeline_actions, task_pilot, triage};
+use super::{backlog_exclusion, pipeline_actions, scan_unresolved, task_pilot, triage};
 
 /// Whether `action` is dispatchable by this runtime — the capability probe
 /// behind `RuntimeHost::has_deterministic_action` [ORB-10385].
@@ -211,6 +211,13 @@ pub(crate) fn run_deterministic(
         // re-backlog budget is exhausted take the gave-up path here.
         CoreDeterministicAction::ListTriageCandidates => {
             triage::list_triage_candidates(runtime, action, input)
+        }
+        // Workspace drain scan [ORB-10779 / ADR-0363]: proposed/backlog/blocked
+        // tasks, failed/timeout job-runs, and unresolved check_later notes.
+        // Read-only; empty is success. Optional `fail_if_nonempty` is the
+        // post-loop fail-closed guard for `epic_pipeline`.
+        CoreDeterministicAction::ScanUnresolvedWork => {
+            scan_unresolved::scan_unresolved_work(runtime, action, input)
         }
         // Apply the triage agent's per-task verdicts under deterministic
         // bounds: candidates-only, `environmental`-only re-backlog, durable

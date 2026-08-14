@@ -12,6 +12,7 @@ pub(super) mod cli_executor;
 pub(super) mod dispatch;
 pub(super) mod pipeline_actions;
 pub(super) mod sandbox;
+pub(super) mod scan_unresolved;
 pub(super) mod task_context;
 pub(super) mod task_pilot;
 #[cfg(test)]

@@ -3,6 +3,7 @@ mod cli_executor;
 mod dispatch;
 mod pipeline_actions;
 mod sandbox;
+mod scan_unresolved;
 mod task_context;
 mod task_pilot;
 mod triage;

@@ -10,7 +10,7 @@ summary: epic_pipeline loops a deterministic unresolved-work scan and a no-code-
 tags: [resident-orchestrator, epic, jobs, session-log]
 paths: [".orbit/resources/jobs/**", "crates/orbit-core/assets/jobs/**", "crates/orbit-core/assets/activities/**"]
 related_features: [resident-orchestrator, activity-job]
-related_artifacts: [ORB-10332, ORB-10775, ORB-10776, ORB-10779, ADR-0361, ADR-0362, ADR-0363]
+related_artifacts: [ORB-10332, ORB-10775, ORB-10776, ORB-10779, ADR-0361, ADR-0362, ADR-0363, ADR-0364]
 ---
 
 # Resident Orchestrator — Design
@@ -26,7 +26,8 @@ routine, conversation resume, or a comment-typed decision protocol.
 It includes:
 
 - every task with status `proposed`, `backlog`, or `blocked`;
-- every job-run whose state is `failed` or `timeout`;
+- every job-run whose state is `failed` or `timeout`, except runs of
+  `epic_pipeline` itself (ADR-0364);
 - every unresolved session-log entry with `kind: check_later` (ADR-0363).
 
 It excludes:
@@ -37,8 +38,9 @@ It excludes:
 - runs still `pending` / `running` / `retrying`.
 
 Output is a structured object: `task_ids`, `run_ids`, `check_later_ids`, counts, and a
-boolean `empty`. No task, run, or log row is mutated. An empty scan is success, not an
-error.
+boolean `empty`. Optional input `fail_if_nonempty` fails the step when the set is still
+non-empty so the job can fail closed after its iteration cap. No task, run, or log row
+is mutated. An empty scan is success, not an error.
 
 The scan is the only admission function. The job does not select by `epic` tag, assignee,
 or priority. Those filters belong to the external supervisor if it wants them (it can

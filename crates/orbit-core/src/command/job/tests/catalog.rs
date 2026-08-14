@@ -21,6 +21,10 @@ const DEFAULT_JOB_FILES: &[(&str, &str)] = &[
         include_str!("../../../../assets/jobs/auto_task_scheduler_pipeline.yaml"),
     ),
     (
+        "epic_pipeline",
+        include_str!("../../../../assets/jobs/epic_pipeline.yaml"),
+    ),
+    (
         "task_auto_pipeline",
         include_str!("../../../../assets/jobs/task_auto_pipeline.yaml"),
     ),
@@ -944,6 +948,7 @@ fn task_shipment_jobs_resolve_default_recovery_activity() {
 #[test]
 fn orchestration_jobs_do_not_enable_generic_recovery() {
     for job_name in [
+        "epic_pipeline",
         "task_auto_pipeline",
         "task_gate_pipeline",
         "task_triage_pipeline",
@@ -961,6 +966,57 @@ fn orchestration_jobs_do_not_enable_generic_recovery() {
             "default job {job_name} should not generically recover child orchestration"
         );
     }
+}
+
+#[test]
+fn epic_pipeline_loops_scan_then_fail_closes_on_leftover_work() {
+    let yaml = DEFAULT_JOB_FILES
+        .iter()
+        .find_map(|(name, yaml)| (*name == "epic_pipeline").then_some(*yaml))
+        .expect("epic pipeline exists");
+    assert_eq!(
+        yaml,
+        include_str!("../../../../../../.orbit/resources/jobs/epic_pipeline.yaml"),
+        "shipped and workspace epic_pipeline resources must remain byte-identical"
+    );
+    assert!(!yaml.contains("routines/"));
+    assert!(!yaml.contains("session:"));
+    let asset = load_job_asset(yaml).expect("epic pipeline parses");
+    assert_eq!(asset.spec.max_active_runs, 1);
+    assert_eq!(asset.spec.steps.len(), 2);
+
+    let JobV2StepBody::Loop { loop_ } = &asset.spec.steps[0].body else {
+        panic!("epic pipeline must loop the drain");
+    };
+    assert_eq!(loop_.max_iterations, 8);
+    assert_eq!(
+        loop_.break_when.as_deref(),
+        Some("{{ steps.scan.output.empty }} == true")
+    );
+    assert_eq!(loop_.steps.len(), 2);
+    let JobV2StepBody::TargetRef(scan) = &loop_.steps[0].body else {
+        panic!("first loop body must scan");
+    };
+    assert_eq!(scan.target, "activity:scan_unresolved_work");
+    let JobV2StepBody::TargetRef(orchestrate) = &loop_.steps[1].body else {
+        panic!("second loop body must invoke the orchestrator");
+    };
+    assert_eq!(orchestrate.target, "activity:epic_orchestrator");
+    assert_eq!(
+        loop_.steps[1].when.as_deref(),
+        Some("{{ steps.scan.output.empty }} == false")
+    );
+    assert_eq!(orchestrate.timeout_seconds, 7200);
+
+    let JobV2StepBody::TargetRef(require_empty) = &asset.spec.steps[1].body else {
+        panic!("post-loop step must re-scan fail-closed");
+    };
+    assert_eq!(require_empty.target, "activity:scan_unresolved_work");
+    let require_input = require_empty
+        .default_input
+        .as_ref()
+        .expect("require_empty input");
+    assert_eq!(require_input["fail_if_nonempty"], json!(true));
 }
 
 fn collect_agent_loop_step_ids<'a>(

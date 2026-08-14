@@ -11,7 +11,7 @@ summary: ADR log for the drain job and the rule that the supervisor clock is not
 tags: [resident-orchestrator, epic, jobs]
 paths: [".orbit/resources/jobs/**", "crates/orbit-core/assets/jobs/**"]
 related_features: [resident-orchestrator, activity-job]
-related_artifacts: [ORB-10332, ORB-10775, ORB-10776, ADR-0361, ADR-0362, ADR-0363]
+related_artifacts: [ORB-10332, ORB-10775, ORB-10776, ORB-10779, ADR-0361, ADR-0362, ADR-0363, ADR-0364]
 ---
 
 # Resident Orchestrator — Decisions
@@ -93,10 +93,37 @@ does not edit repository files; code changes are child tasks it creates and ship
 - Cost: another noun and three tools. Reminders the orchestrator forgets to `resolve`
   will keep waking the drain until someone does.
 
+## ADR-0364 — Drain scan excludes `epic_pipeline` runs
+
+**Status:** Accepted · 2026-08 · [ORB-10779]
+**Code anchors:** `crates/orbit-core/src/runtime/v2_host/scan_unresolved.rs::scan_unresolved_work`
+
+### Context
+
+A leftover scan after `max_iterations` fails `epic_pipeline` closed. The next
+external fire must see the leftover *tasks* and *child* failed/timeout runs, not
+the drain job's own failed row. Including `epic_pipeline` itself would make every
+ceiling failure a permanent wake reason and invite the orchestrator to resume
+the drain from inside the drain.
+
+### Decision
+
+`scan_unresolved_work` omits job-runs whose `job_id` is `epic_pipeline`. Child
+pipeline failures remain wake reasons. The supervisor clock starts a *new*
+`epic_pipeline` run; it does not resume the previous drain via the scan set.
+
+### Consequences
+
+- A fail-closed drain can fire again on the next cron tick without first
+  cancelling or resolving its own previous run.
+- Cost: an operator cannot use the scan to discover a wedged `epic_pipeline`
+  run; they use `orbit run history` / `orbit.workflow.run.list` instead.
+
 ## Task References
 
 - **[ORB-10332]** — Remove the unused HTTP epic pipeline.
 - **[ORB-10775]** — v1 implementation epic.
 - **[ORB-10776]** — Record this split.
+- **[ORB-10779]** — Ship the scan, the orchestrator, and `epic_pipeline`.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

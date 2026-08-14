@@ -27,6 +27,10 @@ pub(crate) const DEFAULT_ACTIVITY_FILES: &[(&str, &str)] = &[
         include_str!("../../assets/activities/apply_task_pilot_results.yaml"),
     ),
     (
+        "epic_orchestrator",
+        include_str!("../../assets/activities/epic_orchestrator.yaml"),
+    ),
+    (
         "gate_starvation_fail",
         include_str!("../../assets/activities/gate_starvation_fail.yaml"),
     ),
@@ -61,6 +65,10 @@ pub(crate) const DEFAULT_ACTIVITY_FILES: &[(&str, &str)] = &[
     (
         "list_triage_candidates",
         include_str!("../../assets/activities/list_triage_candidates.yaml"),
+    ),
+    (
+        "scan_unresolved_work",
+        include_str!("../../assets/activities/scan_unresolved_work.yaml"),
     ),
     (
         "pr_open",
@@ -198,6 +206,7 @@ backend = "cli"
 
         let expected = BTreeMap::from([
             ("agent_implement", ("codex", "gpt-5.6-sol".to_string())),
+            ("epic_orchestrator", ("codex", "gpt-5.6-terra".to_string())),
             (
                 "step_failure_recovery",
                 ("codex", "gpt-5.6-terra".to_string()),
@@ -215,7 +224,7 @@ backend = "cli"
             };
             let activity_input = match *name {
                 "task_pilot" => json!({ "crew": "luna" }),
-                "step_failure_recovery" | "triage_failed_runs" => {
+                "epic_orchestrator" | "step_failure_recovery" | "triage_failed_runs" => {
                     inject_system_crew_input(&runtime, &json!({ "system_crew": true }))
                         .expect("inject configured system crew")
                 }
@@ -250,6 +259,7 @@ backend = "cli"
             ("pr_promote", "pr_promote"),
             ("release_locks", "release_locks"),
             ("list_triage_candidates", "list_triage_candidates"),
+            ("scan_unresolved_work", "scan_unresolved_work"),
             ("apply_triage_dispositions", "apply_triage_dispositions"),
             ("worktree_gc", "worktree_gc"),
         ] {
@@ -558,6 +568,47 @@ backend = "cli"
                 );
             }
             other => panic!("expected agent_loop activity, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn epic_orchestrator_is_cli_with_orbit_catalog_not_leaf_allowlist() {
+        let (_, yaml) = DEFAULT_ACTIVITY_FILES
+            .iter()
+            .find(|(name, _)| *name == "epic_orchestrator")
+            .expect("epic orchestrator activity is seeded");
+        assert_eq!(
+            *yaml,
+            include_str!("../../../../.orbit/resources/activities/epic_orchestrator.yaml"),
+            "shipped and workspace epic_orchestrator activities must remain byte-identical"
+        );
+        let asset = load_activity_asset(yaml).expect("parse epic orchestrator");
+        match asset.spec.spec {
+            ActivityV2Spec::AgentLoop(spec) => {
+                assert_eq!(
+                    spec.backend,
+                    orbit_common::types::activity_job::Backend::Cli
+                );
+                assert_eq!(spec.wall_clock_timeout_seconds, 7200);
+                assert_eq!(spec.on_denial, OnDenial::Terminate);
+                assert!(tool_allowed("orbit.task.add", &spec.tools));
+                assert!(tool_allowed("orbit.session_log.append", &spec.tools));
+                assert!(tool_allowed("orbit.search", &spec.tools));
+                assert!(tool_allowed("orbit.workflow.ship", &spec.tools));
+                assert!(tool_allowed("orbit.workflow.run.resume", &spec.tools));
+                assert!(tool_allowed("orbit.pipeline.invoke", &spec.tools));
+                for denied in ["fs.write", "fs.patch", "fs.delete", "fs.read", "proc.spawn"] {
+                    assert!(
+                        !tool_allowed(denied, &spec.tools),
+                        "orchestrator must not inherit the leaf implementer allowlist: {denied}"
+                    );
+                }
+                assert!(spec.instruction.contains("shrink the scan set"));
+                assert!(spec.instruction.contains("human merge authority"));
+                assert!(!spec.instruction.contains("session resume"));
+                assert!(spec.proc_allowed_programs.is_none());
+            }
+            other => panic!("expected agent_loop epic_orchestrator, got {other:?}"),
         }
     }
 }

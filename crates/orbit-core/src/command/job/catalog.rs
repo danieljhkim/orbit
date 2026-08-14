@@ -24,6 +24,10 @@ const DEFAULT_JOB_FILES: &[(&str, &str)] = &[
         include_str!("../../../assets/jobs/auto_task_scheduler_pipeline.yaml"),
     ),
     (
+        "epic_pipeline",
+        include_str!("../../../assets/jobs/epic_pipeline.yaml"),
+    ),
+    (
         "task_auto_pipeline",
         include_str!("../../../assets/jobs/task_auto_pipeline.yaml"),
     ),
