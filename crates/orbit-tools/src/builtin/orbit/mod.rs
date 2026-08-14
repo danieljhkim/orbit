@@ -309,10 +309,9 @@ pub(super) fn resolve_workspace_argument(
             Ok(workspace)
         }
         (None, None) => Err(OrbitError::InvalidInput(
-            "missing `workspace`; it must be a filesystem path to an existing directory inside \
-             the repository (e.g. the repository root), never a logical workspace id such as a \
-             bridge `ws_*` id — provide that path explicitly or initialize the MCP session with \
-             `_meta.orbit.workspace` set to the same path"
+            "missing `workspace`; pass a registered workspace name, a logical workspace ID \
+             (`ws_*`), or an absolute local checkout path, or initialize the MCP session with \
+             `_meta.orbit.workspace`"
                 .to_string(),
         )),
     }

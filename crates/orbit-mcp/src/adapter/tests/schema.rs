@@ -187,6 +187,14 @@ fn workspace_scoped_tool_advertises_the_broker_workspace_selector() {
         .and_then(Value::as_str)
         .expect("selector carries routing guidance");
     assert!(
+        description.contains("registered workspace name"),
+        "selector must document the registered-name form: {description}"
+    );
+    assert!(
+        description.contains("ws_*"),
+        "selector must document logical ws_* ids: {description}"
+    );
+    assert!(
         description.contains("absolute path to a local checkout"),
         "selector must document the checkout-path form: {description}"
     );

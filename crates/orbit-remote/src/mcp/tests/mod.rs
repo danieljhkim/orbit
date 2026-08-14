@@ -11,6 +11,7 @@ mod proxy;
 mod schema;
 mod serve;
 mod transport;
+mod workspace_selector;
 
 use std::collections::{BTreeMap, BTreeSet};
 

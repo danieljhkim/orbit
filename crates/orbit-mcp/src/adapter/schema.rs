@@ -15,10 +15,10 @@ pub(super) fn schema_to_tool(schema: ToolSchema, input_schema: JsonObject) -> To
 /// Canonical name of the broker's workspace-routing argument.
 pub(crate) const WORKSPACE_SELECTOR_PARAM: &str = "workspace";
 
-const WORKSPACE_SELECTOR_DESCRIPTION: &str = "Workspace selector for broker routing: a registered logical workspace ID or an absolute \
-     path to a local checkout (a linked Git worktree resolves to its registered checkout). \
-     Optional when the MCP session announced `_meta.orbit.workspace` at initialize; never \
-     inferred from process cwd.";
+const WORKSPACE_SELECTOR_DESCRIPTION: &str = "Workspace selector for broker routing: a registered workspace name, a logical workspace \
+     ID (`ws_*`), or an absolute path to a local checkout (a linked Git worktree resolves to \
+     its registered checkout). Optional when the MCP session announced `_meta.orbit.workspace` \
+     at initialize; never inferred from process cwd.";
 
 /// Advertise the workspace selector on every workspace-scoped tool.
 ///

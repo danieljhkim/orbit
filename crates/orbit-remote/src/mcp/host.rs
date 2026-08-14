@@ -308,6 +308,9 @@ impl BrokerMcpHost {
     /// Resolve a selector to its logical workspace ID and, when this machine
     /// holds one, its validated exact local checkout.
     ///
+    /// ADR-0361: name, logical id, and absolute checkout path are the shared
+    /// grammar with CLI `--workspace`. Relative paths still fail closed.
+    ///
     /// The binding is always attached when it exists — placement preflight, not
     /// this lookup, decides whether a call may proceed without one. A workspace
     /// registered here with no local checkout resolves to `(id, None)`.
@@ -328,10 +331,17 @@ impl BrokerMcpHost {
 
         let registry_path = crate::workspace_registry::registry_path_for(&self.global_root);
         let registry = crate::workspace_registry::load_registry_from(&registry_path)?;
-        let workspace = registry
-            .workspaces
-            .iter()
-            .find(|workspace| workspace.id == selector);
+        // ADR-0361: registered name and logical id share one fail-closed lookup.
+        let workspace =
+            match crate::workspace_registry::resolve_logical_workspace(&registry, selector) {
+                Ok(workspace) => Some(workspace),
+                Err(error)
+                    if crate::workspace_registry::is_ambiguous_workspace_selector(&error) =>
+                {
+                    return Err(error);
+                }
+                Err(_) => None,
+            };
         if workspace.is_none() {
             for checkout in &registry.checkouts {
                 let identity_path = checkout.orbit_dir.join("config.yaml");
@@ -344,11 +354,8 @@ impl BrokerMcpHost {
                 }
             }
         }
-        let workspace = workspace.ok_or_else(|| {
-                OrbitError::InvalidInput(format!(
-                    "unknown logical workspace ID '{selector}'; pass a registered workspace ID or an absolute local checkout path"
-                ))
-            })?;
+        let workspace = workspace
+            .ok_or_else(|| crate::workspace_registry::unknown_workspace_selector(selector))?;
         if workspace.status != WorkspaceStatus::Active {
             return Err(OrbitError::InvalidInput(format!(
                 "logical workspace ID '{}' is not active",

@@ -323,6 +323,17 @@ fn cli_tool_run_lists_the_named_workspace_not_the_cwd_runtime() {
         task_ids(&by_path).contains(&fixture.beta_task_id),
         "absolute checkout path must return beta tasks: {by_path}"
     );
+
+    let by_id = execute_cli_tool(
+        &fixture.alpha,
+        "orbit.task.list",
+        json!({ "workspace": "ws_beta", "limit": 10 }),
+    )
+    .expect("list should rebind to the logical id");
+    assert!(
+        task_ids(&by_id).contains(&fixture.beta_task_id),
+        "logical workspace id must return beta tasks: {by_id}"
+    );
 }
 
 #[test]
@@ -390,6 +401,35 @@ fn cli_tool_run_write_rebounds_to_the_named_workspace() {
         task_ids(&beta_list).contains(&created_id),
         "named-workspace write must be visible on the target workspace: {beta_list}"
     );
+}
+
+#[test]
+fn initialize_with_workspace_selector_binds_the_named_checkout() {
+    let fixture = dual_workspace_fixture();
+    let global = fixture.alpha.global_root();
+    let runtime = RemoteRuntimeFactory::initialize_with_overrides(Some(&global), Some("beta"))
+        .expect("selector should bind beta");
+    let listed = runtime
+        .execute_tool_command(
+            "orbit.task.list",
+            json!({ "limit": 10 }),
+            Some("codex".to_string()),
+            Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
+        )
+        .expect("list beta");
+    assert!(
+        task_ids(&listed).contains(&fixture.beta_task_id),
+        "initialize --workspace beta must open the beta checkout: {listed}"
+    );
+
+    let unknown = match RemoteRuntimeFactory::initialize_with_overrides(
+        Some(&global),
+        Some("no-such-workspace"),
+    ) {
+        Ok(_) => panic!("unknown selector must fail closed"),
+        Err(error) => error,
+    };
+    unsupported_workspace_message(unknown, "no-such-workspace");
 }
 
 fn task_ids(value: &Value) -> Vec<String> {

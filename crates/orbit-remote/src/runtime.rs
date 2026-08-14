@@ -88,13 +88,45 @@ impl RemoteRuntimeFactory {
     pub fn initialize_with_root_override(
         root_override: Option<&Path>,
     ) -> Result<OrbitRuntime, OrbitError> {
-        let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-        let roots = Self::resolve_roots_for_cwd(&cwd, root_override)?;
-        sync_task_prefix(&roots.global_root)?;
-        let binding = binding_for_roots(&roots)?;
-        let replica_owner = replica_owner_for_roots(&roots)?;
-        OrbitRuntime::initialize_from_resolved_roots(roots, binding)
-            .map(|runtime| runtime.with_coordination_write_owner(replica_owner))
+        Self::initialize_with_overrides(root_override, None)
+    }
+
+    /// Bootstrap a CLI runtime from `--root` and/or `--workspace`.
+    ///
+    /// ADR-0361: `--workspace` is the workspace selector (name, `ws_*` id, or
+    /// absolute checkout path). `--root` stays a data-directory override and
+    /// is never overloaded as a selector. Omitting `--workspace` keeps today's
+    /// cwd walk.
+    pub fn initialize_with_overrides(
+        root_override: Option<&Path>,
+        workspace_selector: Option<&str>,
+    ) -> Result<OrbitRuntime, OrbitError> {
+        let selector = workspace_selector
+            .map(str::trim)
+            .filter(|value| !value.is_empty());
+        let Some(selector) = selector else {
+            let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+            let roots = Self::resolve_roots_for_cwd(&cwd, root_override)?;
+            sync_task_prefix(&roots.global_root)?;
+            let binding = binding_for_roots(&roots)?;
+            let replica_owner = replica_owner_for_roots(&roots)?;
+            return OrbitRuntime::initialize_from_resolved_roots(roots, binding)
+                .map(|runtime| runtime.with_coordination_write_owner(replica_owner));
+        };
+
+        let global_root = match root_override {
+            Some(root) => root.to_path_buf(),
+            None => workspace_registry::global_orbit_dir()?,
+        };
+        sync_task_prefix(&global_root)?;
+        let registry = workspace_registry::load_registry_from(
+            &workspace_registry::registry_path_for(&global_root),
+        )?;
+        let (workspace, checkout) = resolve_cli_workspace_binding(&registry, selector)?;
+        if workspace.status != WorkspaceStatus::Active {
+            return Err(unsupported_cli_workspace(selector));
+        }
+        Self::open_registered_checkout(&global_root, workspace, checkout)
     }
 
     pub fn open_resolved_roots(roots: OrbitRuntimeRoots) -> Result<OrbitRuntime, OrbitError> {
@@ -216,12 +248,9 @@ fn resolve_cli_workspace_target<'a>(
     selector: &str,
 ) -> Result<CliWorkspaceTarget<'a>, OrbitError> {
     if selector_looks_like_path(selector) {
-        return resolve_cli_workspace_path(registry, runtime, selector);
+        return resolve_cli_workspace_path(registry, Some(runtime), selector);
     }
-    let checkout = workspace_registry::find_checkout(registry, selector)
-        .ok_or_else(|| unsupported_cli_workspace(selector))?;
-    let workspace = workspace_registry::find_workspace(registry, &checkout.workspace_id)
-        .ok_or_else(|| unsupported_cli_workspace(selector))?;
+    let (workspace, checkout) = resolve_named_cli_checkout(registry, selector)?;
     Ok(CliWorkspaceTarget::Checkout {
         workspace,
         checkout,
@@ -229,9 +258,45 @@ fn resolve_cli_workspace_target<'a>(
     })
 }
 
+fn resolve_cli_workspace_binding<'a>(
+    registry: &'a WorkspaceRegistry,
+    selector: &str,
+) -> Result<(&'a Workspace, &'a WorkspaceCheckout), OrbitError> {
+    match if selector_looks_like_path(selector) {
+        resolve_cli_workspace_path(registry, None, selector)?
+    } else {
+        let (workspace, checkout) = resolve_named_cli_checkout(registry, selector)?;
+        CliWorkspaceTarget::Checkout {
+            workspace,
+            checkout,
+            rewrite_to_repo_root: true,
+        }
+    } {
+        CliWorkspaceTarget::Checkout {
+            workspace,
+            checkout,
+            ..
+        } => Ok((workspace, checkout)),
+        CliWorkspaceTarget::CurrentRuntime => Err(unsupported_cli_workspace(selector)),
+    }
+}
+
+fn resolve_named_cli_checkout<'a>(
+    registry: &'a WorkspaceRegistry,
+    selector: &str,
+) -> Result<(&'a Workspace, &'a WorkspaceCheckout), OrbitError> {
+    let workspace = workspace_registry::resolve_logical_workspace(registry, selector)?;
+    let checkout = registry
+        .checkouts
+        .iter()
+        .find(|checkout| checkout.workspace_id == workspace.id)
+        .ok_or_else(|| unsupported_cli_workspace(selector))?;
+    Ok((workspace, checkout))
+}
+
 fn resolve_cli_workspace_path<'a>(
     registry: &'a WorkspaceRegistry,
-    runtime: &OrbitRuntime,
+    runtime: Option<&OrbitRuntime>,
     selector: &str,
 ) -> Result<CliWorkspaceTarget<'a>, OrbitError> {
     let raw = Path::new(selector);
@@ -248,7 +313,9 @@ fn resolve_cli_workspace_path<'a>(
     if !canonical.is_dir() {
         return Err(unsupported_cli_workspace(selector));
     }
-    if let Some(checkout) = find_checkout_for_canonical_path(registry, &canonical) {
+    if let Some(checkout) = find_checkout_for_canonical_path(registry, &canonical)
+        .or_else(|| find_checkout_for_git_common_dir(registry, &canonical))
+    {
         let workspace = workspace_registry::find_workspace(registry, &checkout.workspace_id)
             .ok_or_else(|| unsupported_cli_workspace(selector))?;
         return Ok(CliWorkspaceTarget::Checkout {
@@ -257,7 +324,9 @@ fn resolve_cli_workspace_path<'a>(
             rewrite_to_repo_root: false,
         });
     }
-    if path_is_inside(&runtime.paths().repo_root, &canonical) {
+    if let Some(runtime) = runtime
+        && path_is_inside(&runtime.paths().repo_root, &canonical)
+    {
         return Ok(CliWorkspaceTarget::CurrentRuntime);
     }
     Err(unsupported_cli_workspace(selector))
@@ -275,6 +344,36 @@ fn find_checkout_for_canonical_path<'a>(
                 .iter()
                 .any(|override_path| canonical_path(override_path) == canonical)
     })
+}
+
+fn find_checkout_for_git_common_dir<'a>(
+    registry: &'a WorkspaceRegistry,
+    selected: &Path,
+) -> Option<&'a WorkspaceCheckout> {
+    let selected_common = git_common_dir(selected)?;
+    let mut matches = registry.checkouts.iter().filter(|checkout| {
+        git_common_dir(&checkout.repo_root).is_some_and(|common| common == selected_common)
+    });
+    let first = matches.next()?;
+    matches.next().is_none().then_some(first)
+}
+
+fn git_common_dir(path: &Path) -> Option<PathBuf> {
+    let output = std::process::Command::new("git")
+        .arg("-C")
+        .arg(path)
+        .args(["rev-parse", "--path-format=absolute", "--git-common-dir"])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let raw = String::from_utf8(output.stdout).ok()?;
+    let trimmed = raw.lines().next()?.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    Some(canonical_path(Path::new(trimmed)))
 }
 
 fn same_cli_checkout(runtime: &OrbitRuntime, checkout: &WorkspaceCheckout) -> bool {
@@ -313,7 +412,7 @@ fn set_input_workspace(input: &mut Value, repo_root: &Path) -> Result<(), OrbitE
 
 fn unsupported_cli_workspace(selector: &str) -> OrbitError {
     OrbitError::InvalidInput(format!(
-        "unsupported workspace '{selector}'; pass a registered workspace name or ID, or a path to a registered local checkout"
+        "unknown workspace selector '{selector}'; pass a registered workspace name, a logical workspace ID, or an absolute local checkout path"
     ))
 }
 
