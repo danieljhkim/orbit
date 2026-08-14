@@ -6,104 +6,83 @@ status: Accepted
 feature: resident-orchestrator
 doc_role: overview
 type: design
-summary: Workspace-addressed epic delegation to a resumable CLI orchestrator that decomposes, clarifies, and shepherds work without a resident server.
-tags: [resident-orchestrator, epic, routines, cli, decision-gates]
-paths: [".orbit/resources/activities/**", ".orbit/resources/jobs/**", ".orbit/routines/**", "crates/orbit-core/assets/**"]
-related_features: [resident-orchestrator, activity-job, routines, agent-families]
-related_artifacts: [ORB-10775, ORB-10776, ORB-10777, ORB-10778, ORB-10779, ORB-10780, ORB-10781, ORB-10782, ADR-0361]
+summary: V1 is one catalog job — scan unresolved work, then run a long-lived orchestrator with full Orbit MCP until the scan is empty. The clock that fires it lives outside Orbit.
+tags: [resident-orchestrator, epic, jobs, mcp]
+paths: [".orbit/resources/jobs/**", "crates/orbit-core/assets/jobs/**", "crates/orbit-core/assets/activities/**"]
+related_features: [resident-orchestrator, activity-job]
+related_artifacts: [ORB-10775, ORB-10776, ORB-10779, ADR-0361, ADR-0362]
 ---
 
 # Resident Orchestrator — Overview
 
-A **resident orchestrator** is a specialized agent bound to one Orbit workspace. The workspace is
-its address, a root task tagged `epic` is its durable work order, and a workspace-local routine
-wakes a bounded `backend: cli` ownership cycle. The resident decomposes the epic into normal child
-tasks, ships explicit child task IDs through the existing delivery workflows, and shepherds the
-whole tree to a verified terminal state. No per-agent server, inbox pump, or retained HTTP agent
-session is required. Bounded CLI processes may resume an opaque provider conversation between
-cycles, while Orbit remains the durable source of truth.
+V1 is one Orbit job, `epic_pipeline`.
+
+A **deterministic scan** looks at the workspace for (1) tasks in `proposed`, `backlog`, or
+`blocked`, or (2) failed job-runs. If the scan is empty, the job succeeds as a no-op. If
+anything is present, the job invokes a **long-running orchestrator activity** with the full
+Orbit MCP tool surface. That agent works the set until a later scan is empty. The job loops
+scan → orchestrate until drain or a bounded iteration/time ceiling.
+
+The **clock** that fires this job is not an Orbit routine. A cron (or a human, or a front-door
+session) on a separate knowledgebase checkout, with Orbit MCP wired in, calls
+`orbit run job epic_pipeline`. Selection, decomposition, and "should we run now?" live there.
+
+This supersedes the unused HTTP `task_epic_pipeline` ([ORB-10332]) and the first draft's
+in-Orbit resident (session resume, JSON comment protocol, `select_resident_epic`, seeded
+routine). Those are not v1.
 
 ## 1. Motivation
 
-The constellation currently has two useful but insufficient levels of delegation:
+Leaf pipelines ship one task. A front-door orchestrator can already speak MCP. What Orbit
+lacked is a single, callable "there is unfinished work — stay on it until it is gone"
+primitive. Putting the supervisor *inside* Orbit (a 2-hour CLI resident, session resume,
+decision-comment protocol, workspace routine) duplicates the orchestrators we already run.
 
-1. A front-door orchestrator can make cross-workspace decisions.
-2. A one-shot runner can execute one scoped leaf mandate.
-
-What is missing is durable, codebase-local ownership between those levels. A single front door
-cannot retain deep context for several codebases while also following every task, workflow run,
-review, merge conflict, and acceptance criterion to completion. Repeated generic runner calls do
-not solve that problem: the front door remains the shepherd and must reconstruct the codebase's
-state on every turn.
-
-Orbit already provides the durable pieces needed for a smaller solution: workspace routing,
-tagged tasks, parent/child task relationships, dependencies, CLI agent activities, jobs, routines,
-and explicit-ID shipment workflows. The missing mechanism is a convention and a thin pickup cycle
-that hand ownership of a high-level task to the workspace's specialized orchestrator.
-
-The former `task_epic_pipeline` was not that mechanism. It assumed child tasks already existed,
-used an HTTP agent loop with retained session state, and treated `review` as the end of automated
-shipment. Orbit v1 supports CLI agent invocation; the resident must also own decomposition and the
-post-review delivery loop. This design supersedes the HTTP epic path, which was removed as unused
-in [ORB-10332], rather than porting it.
+The useful Orbit piece is the drain loop. The useful outside piece is the cron that decides
+when to start one.
 
 ## 2. Core Concepts
 
-**Resident workspace.** One Orbit workspace is the durable address for one specialized
-orchestrator. For example, an Orbit systems agent receives work in the Orbit codebase workspace;
-no separate agent queue is required.
+**Unresolved work.** A workspace-local set: every task whose status is `proposed`,
+`backlog`, or `blocked`, plus every job-run in `failed` or `timeout`. `in-progress` and
+`review` are live or waiting on a human; the scan does not treat them as wake reasons.
+`cancelled` runs are intentional and are not wake reasons.
 
-**Epic assignment.** A root task with no `parent_id` and the tag `epic`. Creating that task in a
-workspace is the act of delegation. Its description and acceptance criteria define the outcome;
-the resident authors the execution plan after pickup.
+**Scan.** Deterministic activity `scan_unresolved_work`. Read-only. Returns the set (ids +
+counts). Empty set is a successful no-op input to the job.
 
-**Resident activity.** A workspace-local `agent_loop` activity using `backend: cli`. It explicitly
-binds the provider, model, and identity-loading instruction for that workspace's resident agent.
-Different workspaces can use different resident agents without a new invocation service.
+**Orchestrator activity.** `epic_orchestrator`: one `backend: cli` agent_loop with the
+full Orbit tool catalog (task, workflow/run, search — not a leaf implementer allowlist).
+Its mandate is to shrink the scan set: triage `proposed`, unblock or re-dispatch
+`blocked`, ship or decompose `backlog`, resume or otherwise close failed/timeout runs.
+It must not merge PRs that policy reserves for Daniel.
 
-**Ownership cycle.** One bounded resident invocation. It resumes an active epic before selecting a
-new one, advances as much of its task tree as current state permits, persists every decision in
-Orbit, records a compatible provider conversation reference, and exits. A later routine fire may
-resume that conversation for continuity, but must reconstruct the safe action from durable state.
+**Epic job.** `epic_pipeline`: loop { scan; break if empty; invoke orchestrator } until
+empty, iteration cap, or wall clock. A leftover scan after the cap fails the job
+fail-closed; success is never inferred from agent prose.
 
-**Decision gate.** A structured question recorded on the parent epic when consequential ambiguity
-or missing authority makes further work disproportionately risky. The resident exits while the
-question is pending; the next bounded cycle resumes with the matched supervisor or human answer.
-V1 has no live mid-turn steering or managed interactive terminal.
+**External clock.** Cron / knowledgebase supervisor / front door. Not a seeded Orbit
+routine in v1.
 
-**Child task.** A normal task created with `parent_id` pointing to the epic. Child tasks use the
-ordinary lifecycle, dependency, crew, validation, review, and PR machinery; the `epic` tag does not
-create a second execution model.
-
-**Shepherding.** The resident's responsibility for the entire workspace-local delivery loop:
-decomposition, explicit dispatch, run observation, failure recovery,
-conflict/finding resolution, merge verification, child closure, and finally parent closure.
+**Epic tag.** Still the supervisor's delegation convention for a root body of work
+(ADR-0361). The job predicate is status + failed runs, not the tag.
 
 ## 3. At a Glance
 
-| Concern | File | Task |
-|---------|------|------|
-| Design acceptance and Grok feature-lead | this folder | [ORB-10776] |
-| Epic selection and resume | proposed deterministic `select_resident_epic` activity | [ORB-10777] |
-| Supervisor/human decision path | structured parent-task request and answer comments | [ORB-10778] |
-| Resident CLI identity | workspace `.orbit/resources/activities/resident_orchestrator.yaml` | [ORB-10779] |
-| Bounded ownership cycle | proposed `resident_epic_cycle` job | [ORB-10779] |
-| Conversation continuity | Grok CLI session capture and resume adapter | [ORB-10780] |
-| Scheduled pickup | workspace `.orbit/routines/resident-epic-orbit` (disabled until canary) | [ORB-10781] |
-| `ws_orbit` grok canary | activity binding + routine enable after dry-run | [ORB-10782] |
-| Child delivery | existing `task_gate_pipeline` / explicit-ID shipment workflows | Existing mechanism |
-| HTTP epic retirement | former `task_epic_pipeline` and `epic_orchestrator` assets (removed in [ORB-10332]) | [ORB-10332] |
+| Concern | Where | Task |
+|---------|-------|------|
+| This split | this folder | [ORB-10776] |
+| Epic tag = supervisor delegation signal | ADR-0361 | [ORB-10776] |
+| Clock and supervisor stay outside Orbit | ADR-0362 | [ORB-10776] |
+| `scan_unresolved_work` + `epic_orchestrator` + `epic_pipeline` | catalog | [ORB-10779] |
+| Child delivery while draining | existing `task_gate_pipeline` / `task_pr_pipeline` | Existing |
+| HTTP epic retirement | removed assets | [ORB-10332] |
 
 ## Task References
 
-- **[ORB-10332]** — Remove the unused HTTP epic pipeline assets (`task_epic_pipeline`, `epic_orchestrator`) this design supersedes.
-- **[ORB-10775]** — Epic: resident orchestrator v1 (workspace-addressed CLI epic cycles).
-- **[ORB-10776]** — Accept this folder and claim `owner: grok`.
-- **[ORB-10777]** — Deterministic `select_resident_epic`.
-- **[ORB-10778]** — Checkpoint and decision comment protocol.
-- **[ORB-10779]** — `resident_orchestrator` activity and `resident_epic_cycle` job.
-- **[ORB-10780]** — Grok CLI conversation capture/resume.
-- **[ORB-10781]** — Disabled `resident-epic-orbit` routine.
-- **[ORB-10782]** — `ws_orbit` grok canary.
+- **[ORB-10332]** — Remove the unused HTTP epic pipeline.
+- **[ORB-10775]** — Epic: drain job in Orbit; supervisor clock stays external.
+- **[ORB-10776]** — Accept this contract; ADR-0361 and ADR-0362.
+- **[ORB-10779]** — Ship the scan, the orchestrator activity, and `epic_pipeline`.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

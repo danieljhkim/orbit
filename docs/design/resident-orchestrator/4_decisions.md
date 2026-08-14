@@ -7,55 +7,71 @@ status: Accepted
 feature: resident-orchestrator
 doc_role: decisions
 type: design
-summary: ADR log for workspace-addressed epic delegation and CLI-backed resident orchestration.
-tags: [resident-orchestrator, epic, routines, cli]
-paths: [".orbit/resources/activities/**", ".orbit/resources/jobs/**", ".orbit/routines/**"]
-related_features: [resident-orchestrator, activity-job, routines]
-related_artifacts: [ORB-10332, ORB-10775, ORB-10776, ADR-0361]
+summary: ADR log for the drain job and the rule that the supervisor clock is not an Orbit primitive.
+tags: [resident-orchestrator, epic, jobs]
+paths: [".orbit/resources/jobs/**", "crates/orbit-core/assets/jobs/**"]
+related_features: [resident-orchestrator, activity-job]
+related_artifacts: [ORB-10332, ORB-10775, ORB-10776, ADR-0361, ADR-0362]
 ---
 
 # Resident Orchestrator — Decisions
 
-Decision record for resident-orchestrator, in ascending number order. This file is the
-authoritative body — there is no ADR store behind it. Numbering is repo-local:
-take the next unused number with `grep -rho 'ADR-[0-9]\{4\}' docs/ | sort -u | tail -1`.
+Decision record for resident-orchestrator. This file is the authoritative body.
 
-An entry is admitted through exactly one of two doors: it explains a specific
-code site that would otherwise look wrong (Door 1, carries `code_anchors:`), or
-it states a standing rule that decides future tradeoffs (Door 2, carries
-`scope:`). Everything else is design prose and belongs in `2_design.md`. See
-[CONVENTIONS.md §4](../CONVENTIONS.md#4-adrs-strict).
-
-## ADR-0361 — Epic tag is the sole resident pickup selector
+## ADR-0361 — Epic tag is a supervisor delegation signal, not the job predicate
 
 **Status:** Accepted · 2026-08 · [ORB-10776]
-**Scope:** resident epic selection and pickup (`select_resident_epic` and any successor)
+**Scope:** how a body of work is marked for a supervisor; not `epic_pipeline` admission
 
 ### Context
 
-The former `task_epic_pipeline` treated a root `TaskType::Feature` as an epic. That pipeline
-was removed as unused in [ORB-10332]. A resident still needs an explicit delegation signal
-that does not overload the broad `feature` type, and that future pickup code will not
-reintroduce a second selector "just this once."
+The removed `task_epic_pipeline` treated `TaskType::Feature` as an epic. A later draft made
+the `epic` tag the *job's* pickup selector. The v1 job instead wakes on
+`proposed`/`backlog`/`blocked` plus failed/timeout runs, or it would miss ordinary chores
+and failed pipelines that are not tagged.
 
 ### Decision
 
-Resident orchestration selects only root tasks tagged `epic`. The tag is a pickup
-boundary, not a new task type and not a change to `TaskType`. Child work is recognized
-by `parent_id`. `proposed` epics are never selected in v1.
+`epic` on a root task means "a supervisor owns this outcome." Catalog code must not require
+the tag to drain work. Adding a second pickup key (`type: feature`, assignee, folder) for
+the *job* is out of contract unless this ADR is superseded.
 
 ### Consequences
 
-- Creating a root `epic` in a workspace is the act of delegation.
-- A later impulse to key pickup on `type: feature`, assignee, or folder path is out of
-  contract unless this ADR is superseded.
-- Cost: an untagged large feature is invisible to the resident even if a human thinks of
-  it as an epic; pickup cannot be inferred from type or title.
+- Supervisors can still create `epic` roots and children as they do today (ORB-10775).
+- Cost: a workspace with leftover `backlog` chores will wake the drain job even when no
+  epic exists; isolation is a workspace-layout problem, not a tag filter.
+
+## ADR-0362 — The supervisor clock is not an Orbit primitive
+
+**Status:** Accepted · 2026-08 · [ORB-10776]
+**Scope:** routines, activities, and jobs that would schedule or select work for `epic_pipeline`
+
+### Context
+
+The first draft specified `resident_orchestrator`, `select_resident_epic`, a JSON comment
+protocol, conversation resume, and a seeded `resident-epic-orbit` routine. That rebuilds
+an orchestrator inside Orbit next to Cowork / Grok / a knowledgebase cron that already
+speak MCP.
+
+### Decision
+
+Orbit v1 ships only `scan_unresolved_work`, `epic_orchestrator`, and `epic_pipeline`.
+Do not add an Orbit routine, selector activity, session-resume requirement, or
+comment-typed mailbox for this feature. The fire clock lives in a knowledgebase (or
+front-door) process that calls `orbit run job epic_pipeline`.
+
+### Consequences
+
+- A future "make it a routine" PR needs to supersede this ADR, not sneak a YAML into
+  `.orbit/routines/`.
+- Cost: no first-class resident health in `orbit routine list`; operators debug the
+  external cron and the job-run log instead.
 
 ## Task References
 
-- **[ORB-10332]** — Remove the unused HTTP epic pipeline (`task_epic_pipeline`, `epic_orchestrator`).
+- **[ORB-10332]** — Remove the unused HTTP epic pipeline.
 - **[ORB-10775]** — v1 implementation epic.
-- **[ORB-10776]** — Accept this folder and record ADR-0361.
+- **[ORB-10776]** — Record this split.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.
