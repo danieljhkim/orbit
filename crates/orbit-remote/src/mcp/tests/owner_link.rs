@@ -6,8 +6,8 @@ use std::time::Duration;
 
 use chrono::Utc;
 use orbit_common::types::{
-    AuditEventStatus, McpCapability, OrbitError, ToolSessionContext, Workspace, WorkspaceRegistry,
-    WorkspaceStatus,
+    AuditEventStatus, McpCapability, OrbitError, ToolSessionContext, Workspace, WorkspaceCheckout,
+    WorkspaceRegistry, WorkspaceStatus,
 };
 use orbit_mcp::{McpHost, OrbitToolServer};
 use rmcp::ServiceExt;
@@ -438,6 +438,209 @@ fn silent_peer_times_out_and_bounded_queue_saturates_before_handoff() {
     );
 }
 
+/// ORB-10787: a client that coordinates nothing still drives the task surface.
+///
+/// The client's `workspaces.json` is `{"workspaces": [], "checkouts": []}`, so
+/// no selector form can resolve against it. Every explicit selector — logical
+/// ID, registered name, and absolute checkout path — crosses the one configured
+/// owner route verbatim and is validated by the owner's registry, and the
+/// owner's rejection of an unknown selector reaches the caller unchanged.
+#[test]
+fn empty_client_registry_forwards_every_selector_form_to_the_owner() {
+    let owner = tempfile::tempdir().expect("owner root");
+    let client = tempfile::tempdir().expect("client root");
+    let owner_checkout = tempfile::tempdir().expect("owner checkout");
+    write_canary_identity(owner.path(), "hm_owner", "owner");
+    write_canary_identity(client.path(), "hm_client", "client");
+
+    let mut workspace = canary_workspace();
+    workspace.name = "canary".to_string();
+    save_canary_registry(
+        owner.path(),
+        &WorkspaceRegistry {
+            workspaces: vec![workspace],
+            checkouts: vec![WorkspaceCheckout::owner(
+                "ws_canary".to_string(),
+                owner_checkout.path().to_path_buf(),
+                owner_checkout.path().join(".orbit"),
+            )],
+            ..WorkspaceRegistry::default()
+        },
+    );
+    save_canary_registry(client.path(), &WorkspaceRegistry::default());
+    orbit_core::runtime::HubCoordinationExecutor::register_workspace(
+        owner.path(),
+        "ws_canary",
+        "canary",
+    )
+    .expect("owner coordination workspace");
+
+    let factory = Arc::new(RmcpOwnerFactory::new(owner.path().to_path_buf()));
+    let broker = BrokerMcpHost::new_with_owner_routes(
+        client.path().to_path_buf(),
+        BTreeMap::from([(
+            "hm_owner".to_string(),
+            OwnerRoute {
+                allowed_capabilities: BTreeSet::from([McpCapability::Agent]),
+                pool: Arc::new(canary_pool(
+                    Arc::clone(&factory) as Arc<dyn OwnerPeerFactory>,
+                    "hm_owner",
+                )),
+            },
+        )]),
+    );
+
+    let selectors = [
+        ("mcall-empty-id", "ws_canary".to_string()),
+        ("mcall-empty-name", "canary".to_string()),
+        (
+            "mcall-empty-path",
+            owner_checkout.path().to_string_lossy().into_owned(),
+        ),
+    ];
+    for (call_id, selector) in &selectors {
+        let created = broker
+            .call_tool(
+                "orbit.task.add",
+                json!({
+                    "workspace": selector,
+                    "title": format!("Created via {selector}"),
+                    "description": "The client registry knows nothing about this workspace",
+                    "model": "codex"
+                }),
+                canary_context(McpCapability::Agent, call_id),
+            )
+            .unwrap_or_else(|error| panic!("selector '{selector}' must reach the owner: {error}"));
+        assert_eq!(created["title"], format!("Created via {selector}"));
+    }
+
+    let listed = broker
+        .call_tool(
+            "orbit.task.list",
+            json!({"workspace": "ws_canary", "limit": 10}),
+            canary_context(McpCapability::Agent, "mcall-empty-list"),
+        )
+        .expect("task list through the owner route");
+    assert_eq!(
+        listed["items"].as_array().expect("task items").len(),
+        selectors.len(),
+        "every forwarded selector resolved to the same owner-side workspace: {listed}"
+    );
+
+    // The owner, not the client, judges an unknown selector — and its refusal
+    // is what the caller sees.
+    let unknown = broker
+        .call_tool(
+            "orbit.task.list",
+            json!({"workspace": "no-such-ws", "limit": 1}),
+            canary_context(McpCapability::Agent, "mcall-empty-unknown"),
+        )
+        .expect_err("the owner rejects a selector it does not know");
+    let unknown_message = unknown.to_string();
+    assert!(
+        unknown_message.contains("on owner machine 'hm_owner'"),
+        "the owner's own rejection must reach the caller: {unknown_message}"
+    );
+
+    // Every selector form, including the path, crossed the route unchanged.
+    let wire_calls = factory.wire_calls.lock().expect("wire calls");
+    let forwarded = wire_calls
+        .iter()
+        .filter_map(|(_, input, _)| {
+            input
+                .get("workspace")
+                .and_then(Value::as_str)
+                .map(ToOwned::to_owned)
+        })
+        .collect::<Vec<_>>();
+    for (_, selector) in &selectors {
+        assert!(
+            forwarded.contains(selector),
+            "selector '{selector}' must cross verbatim: {forwarded:?}"
+        );
+    }
+}
+
+/// The same empty registry, without any owner route, is an ordinary local
+/// server: there is no other party to defer to, so it still fails closed.
+#[test]
+fn empty_client_registry_without_a_route_still_fails_closed() {
+    let client = tempfile::tempdir().expect("client root");
+    write_canary_identity(client.path(), "hm_client", "client");
+    save_canary_registry(client.path(), &WorkspaceRegistry::default());
+    let broker = BrokerMcpHost::new(client.path().to_path_buf());
+
+    let refused = broker
+        .call_tool(
+            "orbit.task.list",
+            json!({"workspace": "ws_canary", "limit": 1}),
+            canary_context(McpCapability::Agent, "mcall-local-only"),
+        )
+        .expect_err("a local-only broker keeps validating against its own registry");
+    assert!(
+        refused.to_string().contains("ws_canary"),
+        "the local refusal names the rejected selector: {refused}"
+    );
+}
+
+/// With two usable routes, ownership is a guess — and a task write to the wrong
+/// owner cannot be undone by retrying. Refuse, naming both candidates.
+#[test]
+fn unresolved_selector_with_two_owner_routes_is_refused_before_any_call() {
+    let client = tempfile::tempdir().expect("client root");
+    write_canary_identity(client.path(), "hm_client", "client");
+    save_canary_registry(client.path(), &WorkspaceRegistry::default());
+
+    let factories = ["hm_owner", "hm_second"].map(|machine_id| {
+        let factory = Arc::new(FakeFactory::default());
+        let pool = OwnerLinkPool::with_factory(
+            "unused-hermetic-alias".to_string(),
+            machine_id.to_string(),
+            BTreeMap::from([(McpCapability::Agent, "agent-digest".to_string())]),
+            Arc::clone(&factory) as Arc<dyn OwnerPeerFactory>,
+            OwnerLinkLimits::default(),
+            Arc::new(MonotonicClock::default()),
+        )
+        .expect("owner link pool");
+        (
+            machine_id.to_string(),
+            factory,
+            OwnerRoute {
+                allowed_capabilities: BTreeSet::from([McpCapability::Agent]),
+                pool: Arc::new(pool),
+            },
+        )
+    });
+    let connect_logs = factories
+        .iter()
+        .map(|(_, factory, _)| Arc::clone(&factory.connects))
+        .collect::<Vec<_>>();
+    let broker = BrokerMcpHost::new_with_owner_routes(
+        client.path().to_path_buf(),
+        factories
+            .into_iter()
+            .map(|(machine_id, _, route)| (machine_id, route))
+            .collect(),
+    );
+
+    let refused = broker
+        .call_tool(
+            "orbit.task.list",
+            json!({"workspace": "ws_canary", "limit": 1}),
+            canary_context(McpCapability::Agent, "mcall-ambiguous-owner"),
+        )
+        .expect_err("Orbit must not guess which owner holds the workspace");
+    let message = refused.to_string();
+    assert!(message.contains("hm_owner"), "{message}");
+    assert!(message.contains("hm_second"), "{message}");
+    for connects in &connect_logs {
+        assert!(
+            connects.lock().expect("connects").is_empty(),
+            "no route may be opened while ownership is ambiguous"
+        );
+    }
+}
+
 fn write_canary_identity(root: &Path, machine_id: &str, host_id: &str) {
     std::fs::write(
         root.join("host.toml"),
@@ -460,6 +663,29 @@ fn canary_workspace() -> Workspace {
         created_at: Utc::now(),
         updated_at: Utc::now(),
     }
+}
+
+/// A link pool whose negotiated schema digests are the real ones, so the
+/// duplex owner endpoint accepts the handshake.
+fn canary_pool(factory: Arc<dyn OwnerPeerFactory>, owner_machine_id: &str) -> OwnerLinkPool {
+    let definitions = canonical_mcp_tool_definitions().expect("canonical definitions");
+    let digests = [McpCapability::Agent, McpCapability::Operator]
+        .into_iter()
+        .map(|capability| {
+            super::super::contract::owner_schema_digest(&definitions, capability)
+                .map(|digest| (capability, digest))
+        })
+        .collect::<Result<BTreeMap<_, _>, _>>()
+        .expect("owner schema digests");
+    OwnerLinkPool::with_factory(
+        "unused-hermetic-alias".to_string(),
+        owner_machine_id.to_string(),
+        digests,
+        factory,
+        OwnerLinkLimits::default(),
+        Arc::new(MonotonicClock::default()),
+    )
+    .expect("owner link pool")
 }
 
 fn save_canary_registry(root: &Path, registry: &WorkspaceRegistry) {

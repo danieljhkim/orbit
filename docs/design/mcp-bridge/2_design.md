@@ -1,7 +1,7 @@
 ---
 title: Orbit MCP Bridge — Design
 owner: claude
-last_updated: 2026-08-13
+last_updated: 2026-08-14
 last_validated: 2026-08-02
 status: Draft
 feature: mcp-bridge
@@ -11,7 +11,7 @@ summary: Target design for a local Orbit MCP broker with an SSH owner route, own
 tags: [mcp, remote-access, host-registry, bridge, ssh, routing]
 paths: ["crates/orbit-remote/**", "crates/orbit-mcp/**", "crates/orbit-core/**", "crates/orbit-tools/**", "crates/orbit-store/**", "crates/orbit-common/**"]
 related_features: [mcp-bridge, host-registry, mcp-session-context, remote-access, orbit-search]
-related_artifacts: [ORB-00424, ORB-10257, ORB-10262, ORB-10267, ORB-10268, ORB-10269, ORB-10271, ORB-10272, ORB-10276, ORB-10302, ORB-10319, ORB-10330, ORB-10332, ORB-10534, ORB-10540, ORB-10544, ORB-10690, ORB-10710, ORB-10725, ORB-10727, ORB-10729, ORB-10761, ADR-0181, ADR-0199, ADR-0200, ADR-0201, ADR-0226, ADR-0227, ADR-0228, ADR-0229, ADR-0230, ADR-0231, ADR-0232, ADR-0235, ADR-0240, ADR-0303, ADR-0348, ADR-0350, ADR-0351, ADR-0354, ADR-0355, ADR-0356, ADR-0357, ADR-0358, ADR-0360]
+related_artifacts: [ORB-00424, ORB-10257, ORB-10262, ORB-10267, ORB-10268, ORB-10269, ORB-10271, ORB-10272, ORB-10276, ORB-10302, ORB-10319, ORB-10330, ORB-10332, ORB-10534, ORB-10540, ORB-10544, ORB-10690, ORB-10710, ORB-10725, ORB-10727, ORB-10729, ORB-10761, ORB-10787, ADR-0181, ADR-0199, ADR-0200, ADR-0201, ADR-0226, ADR-0227, ADR-0228, ADR-0229, ADR-0230, ADR-0231, ADR-0232, ADR-0235, ADR-0240, ADR-0303, ADR-0348, ADR-0350, ADR-0351, ADR-0354, ADR-0355, ADR-0356, ADR-0357, ADR-0358, ADR-0360]
 ---
 
 # Orbit MCP Bridge — Design
@@ -181,7 +181,9 @@ outright ([ORB-10727]).
 
 The owner-machine endpoint:
 
-- accepts registered workspace IDs, not caller filesystem paths;
+- resolves the caller's selector — registered name, logical ID, or absolute
+  checkout path — against **its own** registry, never against the filesystem
+  ([§3.1](#31-route-resolution-preserves-identity-and-checkout), [ORB-10787]);
 - executes coordination tools for the workspaces it owns;
 - refuses any other workspace with the owner named;
 - never opens another MCP/SSH connection; and
@@ -272,8 +274,49 @@ Composite tools declare their local prerequisites as well: `orbit.search
 kind=doc|all` requires a local checkout even though some of its branches could
 execute on the owner machine (§7).
 
-Only `workspace_id` crosses the owner route. Local absolute paths, replica paths,
-and worktree roots never do.
+Only a validated `workspace_id` crosses the owner route **as session
+provenance**. Local absolute paths, replica paths, and worktree roots are never
+presented as identity: those fields say "Orbit resolved this", and audit reads
+them as such.
+
+#### Deferred selector validation ([ORB-10787])
+
+The lookup above is authoritative only for what this machine coordinates. A
+checkoutless client's `workspaces.json` is legitimately empty, so *every*
+selector fails there — and a client-side registry miss can only produce false
+negatives for a workspace owned elsewhere. The refusal is therefore classified
+at the point it is raised:
+
+| Refusal | Meaning | Deferrable |
+| --- | --- | --- |
+| relative path, `.`, `..` | grammar; no registry can make it valid | no |
+| ambiguous registered name | two local records answer to it | no |
+| inactive workspace | locally known, deliberately not serving | no |
+| unreadable local registry | this machine is broken | no |
+| unknown name/ID, or a path this registry does not bind | this machine has no record of it | **yes** |
+
+A path the local registry *does* bind stays local even when it fails to
+validate: that is a checkout to repair here, and its message says how.
+
+A deferrable refusal is forwarded when *all* of the following hold: the session
+has at least one `[[owner]]` route (a broker with none is a purely local server
+and keeps failing closed, unchanged), the tool is on the task surface that may
+cross a route ([§4.2](#42-owner-preflight) rule 3), and exactly one configured
+route grants the session's capability. Two usable routes make ownership a guess,
+and a task write to the wrong owner is not undone by retrying, so that case is
+refused by name.
+
+The forwarded selector travels as ordinary **tool input**, which the owner
+validates against its own registry, and the session workspace fields stay empty:
+the client has no validated identity to offer and must not manufacture one. The
+owner's acceptance or rejection is what the caller sees — so an operator who
+mistypes a workspace is told so by the machine that would know.
+
+Cost: a path is machine-scoped, so a client naming a path that exists only on
+the client resolves nothing and is refused by the owner rather than locally. The
+refusal is one round trip slower and names the owner machine instead of the
+client, which is the honest answer — the client was never the authority — but it
+is a longer path to the same "unknown workspace" conclusion.
 
 ### 3.2 Session metadata extension
 
