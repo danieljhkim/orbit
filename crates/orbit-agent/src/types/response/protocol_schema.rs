@@ -43,10 +43,11 @@ pub const RESPONSE_ENVELOPE_STATUSES: [&str; 3] = ["success", "failed", "timeout
 /// schema subset, not a choice about where validation belongs — and it is why
 /// the Rust checks remain load-bearing rather than redundant.
 ///
-/// `error` is declared without a `type` on purpose: the contract admits
-/// `null` on success and an object on failure, and an untyped property is the
-/// widest thing the subset accepts without a conditional. `durationMs` is
-/// omitted entirely and rides through on unconstrained additional properties.
+/// `error` is typed as an object and omitted on success. The subset cannot
+/// express "object on failure, absent on success" without a top-level
+/// conditional, so this is the tightest type the provider will accept.
+/// `durationMs` is omitted entirely and rides through on unconstrained
+/// additional properties.
 pub fn response_envelope_json_schema() -> Value {
     json!({
         "type": "object",
@@ -69,9 +70,22 @@ pub fn response_envelope_json_schema() -> Value {
                      whose output is purely durable side effects.",
             },
             "error": {
+                "type": "object",
                 "description":
-                    "null when status is \"success\"; an object with non-empty \"code\" and \
-                     \"message\" when status is \"failed\" or \"timeout\".",
+                    "Present only when status is \"failed\" or \"timeout\". Object with \
+                     non-empty \"code\" and \"message\". Omit this field when status is \
+                     \"success\".",
+                "properties": {
+                    "code": {
+                        "type": "string",
+                        "description": "Stable machine-readable error code.",
+                    },
+                    "message": {
+                        "type": "string",
+                        "description": "Human-readable error message.",
+                    },
+                },
+                "required": ["code", "message"],
             },
         },
         "required": ["schemaVersion", "status", "result"],

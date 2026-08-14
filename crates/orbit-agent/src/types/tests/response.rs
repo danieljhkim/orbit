@@ -645,6 +645,94 @@ mod structured_output {
         .to_string()
     }
 
+    /// Live `jrun-20260813-0451-3` shape: Claude's constrained decoder emitted
+    /// the JSON *string* `"null"` for `error` in both `structured_output` and
+    /// the embedded `result` string. Wrapper signals are a normal completion
+    /// (`is_error=false`, `subtype=success`, `terminal_reason=completed`,
+    /// `stop_reason=tool_use`). On agent-main this missed the envelope; after
+    /// [ORB-10770] it must parse as success and keep the inner `result`.
+    fn claude_json_schema_wrapper_error_string_null() -> String {
+        let inner = serde_json::json!({
+            "schemaVersion": 1,
+            "status": "success",
+            "result": {
+                "task_id": "ORB-10761",
+                "summary": "narrowed the checkoutless-client guard"
+            },
+            "error": "null"
+        });
+        serde_json::json!({
+            "is_error": false,
+            "stop_reason": "tool_use",
+            "terminal_reason": "completed",
+            "subtype": "success",
+            "result": inner.to_string(),
+            "structured_output": {
+                "schemaVersion": 1,
+                "status": "success",
+                "result": {
+                    "task_id": "ORB-10761",
+                    "summary": "narrowed the checkoutless-client guard"
+                },
+                "error": "null"
+            }
+        })
+        .to_string()
+    }
+
+    #[test]
+    fn claude_json_schema_wrapper_with_error_string_null_parses_as_success() {
+        let stdout = claude_json_schema_wrapper_error_string_null();
+        let (envelope, status, _) = parse_and_validate_response(&exec(&stdout, "", Some(0), true))
+            .expect("live jrun-20260813-0451-3 wrapper with error string \"null\" is an envelope");
+
+        assert_eq!(status, AgentResponseStatus::Success);
+        assert_eq!(envelope.status, "success");
+        assert!(envelope.error.is_none(), "string \"null\" is absent error");
+        let result = envelope.result.expect("inner result object is kept");
+        assert_eq!(result["task_id"], "ORB-10761");
+        assert_eq!(result["summary"], "narrowed the checkoutless-client guard");
+        response_envelope_protocol_check(&stdout)
+            .expect("string-null error still satisfies the frame");
+    }
+
+    /// Fail-closed: a `failed` envelope without a real error object is a
+    /// protocol violation, whether `error` is missing, JSON null, or the
+    /// string `"null"`. The [ORB-10770] coerce must not turn these into
+    /// success or synthesize a checkpointable failed envelope.
+    #[test]
+    fn failed_status_with_absent_error_tokens_is_a_protocol_violation() {
+        let mut envelopes = vec![serde_json::json!({
+            "schemaVersion": 1,
+            "status": "failed",
+            "result": {}
+        })];
+        for error in [serde_json::Value::Null, serde_json::json!("null")] {
+            envelopes.push(serde_json::json!({
+                "schemaVersion": 1,
+                "status": "failed",
+                "result": {},
+                "error": error
+            }));
+        }
+
+        for envelope in envelopes {
+            let stdout = envelope.to_string();
+            let error = parse_and_validate_response(&exec(&stdout, "", Some(1), false))
+                .expect_err("failed without an error object is a protocol violation");
+            assert!(
+                error
+                    .to_string()
+                    .contains("failed status requires error object"),
+                "envelope={envelope} error={error}"
+            );
+            assert!(
+                synthesize_response(&exec(&stdout, "", Some(1), false)).is_none(),
+                "must not synthesize a checkpointable failed envelope: {envelope}"
+            );
+        }
+    }
+
     #[test]
     fn claude_json_schema_wrapper_parses_and_keeps_its_trace_fields() {
         let stdout = claude_json_schema_wrapper();

@@ -3,7 +3,7 @@ summary: "Activity / Job — Design"
 type: design
 title: "Activity / Job — Design"
 owner: codex
-last_updated: 2026-08-13
+last_updated: 2026-08-14
 last_validated: 2026-07-26
 status: Draft
 feature: activity-job
@@ -393,9 +393,20 @@ requiring a non-empty `error.code` — is absent from the schema and stays in
 expressing it needs a conditional subschema, and Anthropic's structured-output
 subset rejects those outright with `input_schema does not support oneOf, allOf,
 or anyOf at the top level`. The rejection surfaces mid-run rather than at argv
-parse, so getting it wrong is expensive. `error` is therefore declared untyped
-(null on success, object on failure) and the Rust correlation checks remain
-load-bearing rather than redundant.
+parse, so getting it wrong is expensive. After [ORB-10770], `error` is typed
+as an object (`code` + `message`) and omitted on success — Serde's
+`#[serde(default)]` already treats a missing field as `None`. The schema
+still cannot express "require the object on `failed`, omit it on
+`success`", so the Rust correlation checks remain load-bearing rather than
+redundant.
+
+The earlier untyped property plus a description that said "null when status
+is success" made Claude's constrained decoder emit the JSON *string*
+`"null"` (`jrun-20260813-0451-3`). The parser accepts that token — and the
+empty string — as absent `error`, the same as JSON `null` or a missing
+field. A `status=failed` envelope with missing, JSON-null, or
+string-`"null"` `error` is still a protocol violation (`failed status
+requires error object`), not a synthesized success.
 
 **Two capability failures, two places.** A CLI that *lacks* `--json-schema`
 fails at argument parsing, before any agent work and any cost; the evidence is
@@ -718,6 +729,7 @@ Read-only history does not need the same dependencies as live execution. [T20260
 
 ## Task References
 
+- **[ORB-10770]** — Type the protocol schema's `error` as an object omitted on success, and accept the JSON string `"null"` as absent `error` so a completed Claude structured-output wrapper still counts as an envelope (see [§7.6b](#76b-structured-output-is-the-claude-prevention-layer)).
 - **[ORB-10746]** — Enforce the Orbit response envelope through Claude CLI structured output (`--json-schema`), read `structured_output` as the authoritative extraction source, and map abnormal exit-0 endings to a specific failed-envelope diagnostic (see [§7.6b](#76b-structured-output-is-the-claude-prevention-layer)).
 - **[ORB-10606]** — Supply the complete reviewer worktree pair and distinguish review startup failure from a reviewer rejection at the parent and task-history boundaries ([ADR-0328]).
 - **[ORB-10519]** — Restore one workflow-owned shipment commit, reject every provider-side HEAD change, and preserve dirty-work recovery plus process-scoped attribution ([ADR-0299], superseding [ADR-0294] and [ADR-0249]).

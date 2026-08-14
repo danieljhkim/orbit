@@ -382,5 +382,24 @@ fn deserialize_envelope(value: &Value) -> Option<AgentResponseEnvelope> {
     if !object.contains_key("schemaVersion") || !object.contains_key("status") {
         return None;
     }
-    serde_json::from_value(value.clone()).ok()
+    // [ORB-10770] Claude's constrained decoder, given an untyped `error` and a
+    // description that said "null when status is success", emits the JSON
+    // *string* `"null"` (`jrun-20260813-0451-3`). `Option<AgentRunError>`
+    // cannot accept a string, so the finder used to miss a completed
+    // envelope. Treat `"null"` / `""` as absent; JSON null is already `None`
+    // via `#[serde(default)]`. This only makes a recognizable frame parse —
+    // it does not infer success from wrapper signals.
+    match object.get("error") {
+        Some(Value::String(token)) if is_absent_error_string(token) => {
+            let mut object = object.clone();
+            object.remove("error");
+            serde_json::from_value(Value::Object(object)).ok()
+        }
+        _ => serde_json::from_value(value.clone()).ok(),
+    }
+}
+
+fn is_absent_error_string(token: &str) -> bool {
+    let trimmed = token.trim();
+    trimmed.is_empty() || trimmed == "null"
 }

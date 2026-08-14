@@ -44,6 +44,11 @@ fn transport_constrains_every_invocation_with_the_protocol_schema() {
         serde_json::json!(["success", "failed", "timeout"])
     );
     assert_eq!(schema["properties"]["result"]["type"], "object");
+    assert_eq!(schema["properties"]["error"]["type"], "object");
+    assert_eq!(
+        schema["properties"]["error"]["required"],
+        serde_json::json!(["code", "message"])
+    );
     assert_eq!(
         schema["required"],
         serde_json::json!(["schemaVersion", "status", "result"])
@@ -77,10 +82,9 @@ fn protocol_schema_leaves_the_status_error_correlation_to_the_rust_parser() {
     let args = ClaudeCliTransport::new(None).args(false);
     let schema = schema_arg(&args);
 
-    assert!(
-        schema["properties"]["error"].get("type").is_none(),
-        "error is untyped on purpose: it is null on success and an object on failure, \
-         and expressing that needs a conditional the provider subset rejects"
+    assert_eq!(
+        schema["properties"]["error"]["type"], "object",
+        "error is an object when present; omit it on success rather than emitting null"
     );
     assert!(
         !schema["required"]
