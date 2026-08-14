@@ -3,15 +3,15 @@ summary: "MCP Session Context — Decisions"
 type: design
 title: "MCP Session Context — Decisions"
 owner: codex
-last_updated: 2026-08-13
+last_updated: 2026-08-14
 last_validated: 2026-08-08
 status: Accepted
 feature: mcp-session-context
 doc_role: decisions
 tags: ["mcp-session-context", "mcp", "workspace"]
-paths: ["crates/orbit-mcp/**", "crates/orbit-remote/src/mcp/**", "crates/orbit-tools/**", "crates/orbit-core/src/command/tool/**"]
+paths: ["crates/orbit-mcp/**", "crates/orbit-remote/src/mcp/**", "crates/orbit-tools/**", "crates/orbit-core/src/command/tool/**", "crates/orbit-cli/src/**"]
 related_features: ["mcp-session-context", "task-artifacts"]
-related_artifacts: ["ORB-00256", "ORB-00406", "ORB-10228", "ORB-10262", "ORB-10319", "ORB-10448", "ORB-10690", "ADR-0181", "ADR-0199", "ADR-0149", "ADR-0348"]
+related_artifacts: ["ORB-00256", "ORB-00406", "ORB-10228", "ORB-10262", "ORB-10319", "ORB-10448", "ORB-10690", "ORB-10758", "ORB-10769", "ADR-0181", "ADR-0199", "ADR-0149", "ADR-0348", "ADR-0361"]
 ---
 
 # MCP Session Context — Decisions
@@ -132,6 +132,33 @@ Mount a stateful Streamable HTTP MCP service at `/mcp` on the dashboard Axum lis
 - Reverse proxies remain responsible for authentication and may buffer otherwise-correct origin streaming; deployment-path streaming needs separate verification.
 - Cost: the dashboard process now owns MCP availability, so dashboard restarts interrupt MCP sessions and shutdown wiring must coordinate both transports.
 
+## ADR-0361 — One workspace selector grammar on CLI and MCP
+
+**Status:** Accepted · 2026-08 · [ORB-10758]
+**Code anchors:** `crates/orbit-remote/src/workspace_registry.rs::resolve_logical_workspace`, `crates/orbit-remote/src/runtime.rs::initialize_with_overrides`, `crates/orbit-remote/src/mcp/host.rs::resolve_workspace`, `crates/orbit-cli/src/command/mod.rs::Cli`
+
+### Context
+
+MCP `resolve_workspace` already accepted a logical workspace ID or an absolute checkout path and never inherited process cwd ([ADR-0149], [ADR-0181], [ADR-0199]). The CLI had no equivalent: `orbit --help` exposed only `--root` (a data-directory override), and `orbit.task.add --workspace` rejected `ws_*` ids while the MCP schema advertised them. Two grammars for one concept meant guidance that was correct on one surface was wrong on the other.
+
+### Decision
+
+Every workspace-routing surface accepts the same three selector forms: a registered workspace name (`orbit`), a logical ID (`ws_orbit`), or an absolute checkout path (a linked Git worktree resolves to its registered checkout). Ambiguous or unknown selectors fail closed and name the rejected value.
+
+Resolution order is unchanged: explicit per-call / `--workspace` selector, then MCP initialize `_meta.orbit.workspace`, then CLI cwd discovery. MCP never falls back to process cwd. `--root` stays a data-directory override; the new top-level `orbit --workspace <selector>` is the CLI selector and is not clap-global so it does not collide with `task add --workspace` (a repository-relative task path). A routed audit event records the resolved `workspace_id`, not only the raw selector.
+
+### Rejected alternatives
+
+- *MCP cwd fallback.* Already rejected by [ADR-0149] / [ADR-0181]: a worktree cwd can bind a different `workspace_id` than the caller named.
+- *Overloading `--root` as a workspace selector.* `--root` is the data-directory escape hatch and already pins the global registry root; making it also mean "this checkout" would collapse two independent overrides.
+- *A stateful `switch_workspace` MCP tool.* Mutating session context mid-connection is how TCP sessions already go wrong ([ADR-0348]); per-call `workspace` and CLI `--workspace` are the dynamic path.
+
+### Consequences
+
+- Agents can name a workspace the same way on `orbit --workspace` and on every workspace-scoped MCP tool.
+- `orbit.task.add`'s advertised `workspace` parameter matches the grammar the broker actually accepts.
+- Cost: name collisions across registered workspaces become hard errors instead of first-match; operators with duplicate names must disambiguate by id or path.
+
 ## Task References
 
 - [ORB-00256] implemented MCP ambient workspace session context.
@@ -141,5 +168,7 @@ Mount a stateful Streamable HTTP MCP service at `/mcp` on the dashboard Axum lis
 - [ORB-10262] accepted and implemented ADR-0199 through the exact-checkout local broker.
 - [ORB-10319] consolidated the broker/session implementation in `orbit-remote`; it does not change ADR-0181 or ADR-0199 semantics.
 - [ORB-10448] made both ADRs reachable from a managed worktree activity: the `workspace` selector is now advertised on every workspace-scoped tool, and hub-placement coordination reads address the checkout-identity partition. Neither changes ADR-0181 or ADR-0199 semantics; see [2_design.md §3a–3b](./2_design.md). The advertised-selector contract is a breaking `tools/list` schema change (RELEASING.md) and may warrant its own allocated ADR — this task's activity was not granted `orbit.adr.add`, so no global ID was allocated.
+- [ORB-10758] unified the workspace selector grammar across the CLI `--workspace` flag and MCP workspace-scoped tools ([ADR-0361]).
+- [ORB-10769] bound CLI `orbit tool run` to the same fail-closed workspace selector above the tools.
 
 Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

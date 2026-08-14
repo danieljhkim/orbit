@@ -105,7 +105,10 @@ impl Drop for AuditGuard<'_> {
             host: std::env::var("HOSTNAME").ok(),
             pid: std::process::id(),
             session_id: None,
-            workspace_id: None,
+            workspace_id: self
+                .runtime
+                .workspace_runtime_binding()
+                .map(|binding| binding.workspace_id.clone()),
             caller_machine_id: None,
             caller_host_id: None,
             process_machine_id: None,

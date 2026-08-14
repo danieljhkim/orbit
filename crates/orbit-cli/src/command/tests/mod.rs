@@ -33,6 +33,49 @@ fn assert_cli_rejects(args: &[&str], kind: ErrorKind, expected: &str) {
 }
 
 #[test]
+fn cli_help_advertises_workspace_selector_distinct_from_root() {
+    let help = match Cli::try_parse_from(["orbit", "--help"]) {
+        Ok(_) => panic!("--help exits before parsing"),
+        Err(error) => error.to_string(),
+    };
+    assert!(
+        help.contains("--workspace <SELECTOR>"),
+        "orbit --help must show a global --workspace selector: {help}"
+    );
+    assert!(
+        help.contains("--root <ROOT>"),
+        "orbit --help must keep --root as a data-dir override: {help}"
+    );
+    assert!(
+        help.contains("logical ID") || help.contains("ws_*"),
+        "orbit --help must describe the shared selector grammar: {help}"
+    );
+    assert!(
+        !help.contains("--root <SELECTOR>"),
+        "--root must not become a workspace selector: {help}"
+    );
+}
+
+#[test]
+fn cli_parses_top_level_workspace_selector_before_subcommand() {
+    let cli = Cli::parse_from([
+        "orbit",
+        "--workspace",
+        "orbit",
+        "task",
+        "list",
+        "--limit",
+        "1",
+    ]);
+    assert_eq!(cli.workspace.as_deref(), Some("orbit"));
+    assert!(cli.root.is_none());
+    match cli.command {
+        Commands::Task(_) => {}
+        _ => panic!("expected task command"),
+    }
+}
+
+#[test]
 fn cli_parses_doctor_stale_lock_cleanup() {
     let cli = Cli::parse_from([
         "orbit",

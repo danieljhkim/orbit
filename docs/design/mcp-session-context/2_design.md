@@ -11,7 +11,7 @@ doc_role: design
 tags: ["mcp-session-context", "mcp", "workspace"]
 paths: ["crates/orbit-mcp/**", "crates/orbit-remote/src/mcp/**", "crates/orbit-tools/**", "crates/orbit-core/src/command/tool/**"]
 related_features: ["mcp-session-context", "task-artifacts"]
-related_artifacts: ["ORB-00256", "ORB-10228", "ORB-10262", "ORB-10319", "ORB-10448", "ORB-10690", "ORB-10769", "ADR-0181", "ADR-0199", "ADR-0149", "ADR-0348"]
+related_artifacts: ["ORB-00256", "ORB-10228", "ORB-10262", "ORB-10319", "ORB-10448", "ORB-10690", "ORB-10758", "ORB-10769", "ADR-0181", "ADR-0199", "ADR-0149", "ADR-0348", "ADR-0361"]
 ---
 
 # MCP Session Context — Design
@@ -66,6 +66,14 @@ in `crates/orbit-remote/src/runtime.rs` reads a non-empty input `workspace` *abo
 and either rebinds the cwd-bootstrapped `OrbitRuntime` to that registered checkout or fails
 closed naming the selector. It never continues against cwd on a typo. MCP resolution order is
 unchanged and still never falls back to process cwd. [ORB-10769]
+
+### 3c. One selector grammar
+
+CLI `--workspace` and MCP workspace-scoped tools accept the same three forms: a registered
+workspace name, a logical `ws_*` id, or an absolute checkout path. A linked worktree path
+resolves to its registered checkout. Ambiguous names fail closed. `--root` is not a selector;
+it remains a data-directory override. There is no stateful `switch_workspace` MCP tool —
+per-call `workspace` and `--workspace` are the override. [ADR-0361], [ORB-10758]
 
 ### 3a. The selector is advertised, not implied
 
@@ -124,5 +132,6 @@ The external channel carries a workspace address, not a trusted workspace ID. Th
 - [ORB-10448] advertised the workspace selector on every workspace-scoped tool and routed hub-placement coordination reads by checkout identity, making the [ADR-0181] "clients that cannot send initialize metadata pass `workspace` explicitly" path reachable from a managed worktree activity.
 - [ORB-10690] added the TCP transport and moved session construction behind `McpSessionFactory` so concurrent clients cannot observe or overwrite each other's session context ([ADR-0348]).
 - [ORB-10769] bound CLI `orbit tool run` to the same fail-closed workspace selector above the tools; MCP resolution order is unchanged.
+- [ORB-10758] added `orbit --workspace` and made MCP accept the same name / `ws_*` id / absolute-path grammar ([ADR-0361]).
 
 Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

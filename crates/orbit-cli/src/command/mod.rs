@@ -121,6 +121,12 @@ pub struct Cli {
     #[arg(long, global = true)]
     pub root: Option<PathBuf>,
 
+    /// Select a workspace by registered name, logical ID (`ws_*`), or absolute
+    /// checkout path. Distinct from `--root`, which overrides the Orbit data
+    /// directory.
+    #[arg(long, value_name = "SELECTOR")]
+    pub workspace: Option<String>,
+
     #[command(subcommand)]
     pub command: Commands,
 }

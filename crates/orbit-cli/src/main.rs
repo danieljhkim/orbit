@@ -24,7 +24,8 @@
 //!
 //! # Key responsibilities
 //! - Parse the top-level CLI surface and route subcommands to their handlers
-//! - Bootstrap the runtime, including optional `--root` overrides for worktrees
+//! - Bootstrap the runtime, including optional `--root` data-dir overrides and
+//!   `--workspace` selectors (registered name, logical id, or checkout path)
 //! - Emit machine-readable JSON or human-readable table output
 //! - Wrap command execution in audit logging so human and agent actions are recorded
 //!
@@ -179,6 +180,7 @@ fn main() {
         "resolved output sink"
     );
     let root_override = cli.root.clone();
+    let workspace_selector = cli.workspace.clone();
     let actor = ActorIdentity::from_env();
     let CommandOperation {
         runtime_need,
@@ -205,18 +207,20 @@ fn main() {
         return;
     }
 
-    let runtime =
-        match RemoteRuntimeFactory::initialize_with_root_override(root_override.as_deref()) {
-            Ok(runtime) => runtime,
-            Err(err) => {
-                if suppress_errors {
-                    return;
-                }
-                print_error(&err, &sink, json_error_preference);
-                std::process::exit(1);
+    let runtime = match RemoteRuntimeFactory::initialize_with_overrides(
+        root_override.as_deref(),
+        workspace_selector.as_deref(),
+    ) {
+        Ok(runtime) => runtime,
+        Err(err) => {
+            if suppress_errors {
+                return;
             }
+            print_error(&err, &sink, json_error_preference);
+            std::process::exit(1);
         }
-        .with_actor(actor);
+    }
+    .with_actor(actor);
 
     let context = DispatchContext::with_runtime(&runtime, root_override.as_deref());
     // ORB-10453: the CLI's single authorization chokepoint. Every command

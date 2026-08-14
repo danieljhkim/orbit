@@ -280,6 +280,43 @@ pub fn find_workspace<'a>(
         .find(|w| w.id == id_or_name || w.name == id_or_name)
 }
 
+/// Resolve a logical selector (registered name or `ws_*` id) to exactly one workspace.
+///
+/// ADR-0361: the same fail-closed name/id grammar is used by the CLI
+/// `--workspace` flag and MCP `resolve_workspace`. First-match is not
+/// enough — two workspaces sharing a name must not silently pick one.
+pub fn resolve_logical_workspace<'a>(
+    registry: &'a WorkspaceRegistry,
+    selector: &str,
+) -> Result<&'a Workspace, OrbitError> {
+    let matches: Vec<&Workspace> = registry
+        .workspaces
+        .iter()
+        .filter(|workspace| workspace.id == selector || workspace.name == selector)
+        .collect();
+    match matches.as_slice() {
+        [workspace] => Ok(workspace),
+        [] => Err(unknown_workspace_selector(selector)),
+        _ => Err(ambiguous_workspace_selector(selector)),
+    }
+}
+
+pub(crate) fn unknown_workspace_selector(selector: &str) -> OrbitError {
+    OrbitError::InvalidInput(format!(
+        "unknown workspace selector '{selector}'; pass a registered workspace name, a logical workspace ID, or an absolute local checkout path"
+    ))
+}
+
+pub(crate) fn ambiguous_workspace_selector(selector: &str) -> OrbitError {
+    OrbitError::InvalidInput(format!(
+        "ambiguous workspace selector '{selector}'; it matches more than one registered workspace"
+    ))
+}
+
+pub(crate) fn is_ambiguous_workspace_selector(error: &OrbitError) -> bool {
+    matches!(error, OrbitError::InvalidInput(message) if message.starts_with("ambiguous workspace selector "))
+}
+
 /// Finds the local checkout for a workspace ID or name.
 pub fn find_checkout<'a>(
     registry: &'a WorkspaceRegistry,

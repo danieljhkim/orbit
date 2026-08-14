@@ -12,7 +12,7 @@ use tempfile::tempdir;
 use crate::workspace_registry::{
     assign_checkout_role, find_checkout_by_path, find_workspace, find_workspace_by_path,
     load_registry_from, load_registry_from_with_writer, rename_local_owner_host_id,
-    save_registry_to,
+    resolve_logical_workspace, save_registry_to,
 };
 
 fn timestamp() -> chrono::DateTime<Utc> {
@@ -364,6 +364,54 @@ fn identity_lookup_is_path_independent_and_path_lookup_is_checkout_only() {
         Some("ws_inner")
     );
     assert!(find_workspace_by_path(&registry, Path::new("/remote/ws_remote")).is_none());
+}
+
+#[test]
+fn resolve_logical_workspace_accepts_name_or_id_and_fails_closed() {
+    let mut registry = WorkspaceRegistry {
+        workspaces: vec![
+            logical_workspace("ws_orbit", Some("hm_owner")),
+            logical_workspace("ws_other", Some("hm_owner")),
+        ],
+        ..Default::default()
+    };
+    registry.workspaces[0].name = "orbit".to_string();
+    registry.workspaces[1].name = "other".to_string();
+
+    assert_eq!(
+        resolve_logical_workspace(&registry, "orbit")
+            .expect("name")
+            .id,
+        "ws_orbit"
+    );
+    assert_eq!(
+        resolve_logical_workspace(&registry, "ws_orbit")
+            .expect("id")
+            .id,
+        "ws_orbit"
+    );
+
+    let unknown = resolve_logical_workspace(&registry, "missing").expect_err("unknown");
+    match unknown {
+        OrbitError::InvalidInput(message) => {
+            assert!(message.contains("missing"), "{message}");
+            assert!(message.contains("unknown workspace selector"), "{message}");
+        }
+        other => panic!("expected InvalidInput, got {other}"),
+    }
+
+    registry.workspaces[1].name = "orbit".to_string();
+    let ambiguous = resolve_logical_workspace(&registry, "orbit").expect_err("ambiguous");
+    match ambiguous {
+        OrbitError::InvalidInput(message) => {
+            assert!(message.contains("orbit"), "{message}");
+            assert!(
+                message.contains("ambiguous workspace selector"),
+                "{message}"
+            );
+        }
+        other => panic!("expected InvalidInput, got {other}"),
+    }
 }
 
 #[test]
