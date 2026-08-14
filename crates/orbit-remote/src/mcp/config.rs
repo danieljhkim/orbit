@@ -122,7 +122,7 @@ impl TrustedOwnerRoute {
         for capability in raw.allowed_capabilities {
             if !capability.is_bridge_v1() {
                 return Err(OrbitError::InvalidInput(format!(
-                    "trusted MCP config '{}' grants owner capability '{capability}', which the v1 bridge withdrew (ADR-0358); use agent and/or operator",
+                    "trusted MCP config '{}' grants owner capability '{capability}', which the bridge does not support; use agent and/or operator",
                     path.display()
                 )));
             }
@@ -152,7 +152,7 @@ impl TrustedOwnerRoute {
 fn legacy_hub_table_error(path: &Path) -> OrbitError {
     OrbitError::InvalidInput(format!(
         "trusted MCP config '{}' still declares the withdrawn singular [hub] table. \
-         ADR-0355 replaced the machine-level hub with per-owner routes, and a hub target is \
+         Per-owner routes replace the machine-level hub, and a hub target is \
          not automatically the owner of any workspace, so this is not migrated for you. \
          Replace the table with one [[owner]] entry per owner machine, keeping the same \
          fields:\n\n\

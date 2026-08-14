@@ -37,7 +37,7 @@ impl Execute for HostRegisterArgs {
         // nothing for this machine to register itself with.
         if local_identity.mode == HostMode::Spoke {
             return Err(OrbitError::InvalidInput(format!(
-                "machine '{}' ({}) is in spoke mode, and remote spoke registration is withdrawn (ADR-0358): v1 has no registration handshake. Declare an [[owner]] route in machine-global mcp.toml for each machine that owns a workspace you need to reach.",
+                "machine '{}' ({}) is in spoke mode, and remote spoke registration is withdrawn: v1 has no registration handshake. Declare an [[owner]] route in machine-global mcp.toml for each machine that owns a workspace you need to reach.",
                 local_identity.host_id, local_identity.machine_id
             )));
         }

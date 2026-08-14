@@ -238,7 +238,7 @@ fn trusted_config_fails_closed_on_unknown_duplicate_empty_and_unsupported_values
             // `runner` still parses as a capability, so this is a bridge policy
             // refusal rather than a deserialization failure (ADR-0358).
             "[[owner]]\nmachine_id = \"hm_owner\"\ntransport = \"ssh\"\nhost = \"owner\"\nallowed_capabilities = [\"runner\"]\n",
-            "the v1 bridge withdrew",
+            "bridge does not support",
         ),
         (
             "[[owner]]\nmachine_id = \"hm_owner\"\ntransport = \"ssh\"\nhost = \"owner\"\n",

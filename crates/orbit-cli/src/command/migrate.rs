@@ -6,7 +6,7 @@ use serde_json::json;
 
 use crate::command::{Block, CommandOut, Execute, Payload};
 
-/// `orbit migrate` — versioned `.orbit/` upgrade surface [ORB-10012].
+/// `orbit migrate` — versioned `.orbit/` upgrade surface.
 ///
 /// Both migration ledgers auto-apply on workspace open (the SQLite schema
 /// ledger inside `Store::open`, the workspace-layout registry in the runtime

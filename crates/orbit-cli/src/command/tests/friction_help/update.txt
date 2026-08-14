@@ -3,7 +3,7 @@ Update triage metadata for an Orbit friction record
 Usage: orbit friction update [OPTIONS] <ID>
 
 Arguments:
-  <ID>  Friction record id, e.g. F2026-05-001
+  <ID>  Friction record ID, e.g. FYYYY-MM-NNN
 
 Options:
       --root <ROOT>      Override the Orbit root directory (highest precedence)

@@ -299,7 +299,7 @@ pub fn friction_operation(name: &str) -> Option<&'static FrictionOperation> {
     find_by_name(FRICTION_OPERATIONS, name)
 }
 
-const FRICTION_ID_HELP: Description = Description::Static("Friction record id, e.g. F2026-05-001");
+const FRICTION_ID_HELP: Description = Description::Static("Friction record ID, e.g. FYYYY-MM-NNN");
 const BODY_HELP: Description =
     Description::Static("Markdown body describing what happened and why it caused friction");
 // The MCP descriptions carry the authoring guidance an agent needs at call

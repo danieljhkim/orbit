@@ -765,7 +765,7 @@ mod tests {
              repository-agnostic ({} leak(s)) — generalize, remove, or guard as explicitly \
              source-only/client-specific guidance. State a policy by the role that holds it and \
              the mechanism that enforces it, never by a person's name or a workspace-local \
-             artifact id (ORB-10208):\n{}",
+             artifact id:\n{}",
             failures.len(),
             failures.join("\n"),
         );

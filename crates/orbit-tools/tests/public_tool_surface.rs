@@ -416,3 +416,42 @@ fn registered_tool_names() -> BTreeSet<String> {
         .map(|schema| schema.name)
         .collect()
 }
+
+#[test]
+fn advertised_tool_text_uses_only_placeholder_artifact_ids() {
+    let mut registry = ToolRegistry::new();
+    registry.register_builtins();
+
+    for schema in registry.all_schemas() {
+        for text in std::iter::once(schema.description.as_str()).chain(
+            schema
+                .parameters
+                .iter()
+                .map(|parameter| parameter.description.as_str()),
+        ) {
+            for prefix in ["ORB-", "ADR-", "L-"] {
+                assert!(
+                    !text.match_indices(prefix).any(|(index, _)| {
+                        text.as_bytes()
+                            .get(index + prefix.len())
+                            .is_some_and(u8::is_ascii_digit)
+                    }),
+                    "tool {} advertises a concrete workspace-local artifact ID: {text}",
+                    schema.name
+                );
+            }
+            assert!(
+                !text.as_bytes().windows(12).any(|window| {
+                    window[0] == b'F'
+                        && window[1..5].iter().all(u8::is_ascii_digit)
+                        && window[5] == b'-'
+                        && window[6..8].iter().all(u8::is_ascii_digit)
+                        && window[8] == b'-'
+                        && window[9..12].iter().all(u8::is_ascii_digit)
+                }),
+                "tool {} advertises a concrete workspace-local friction ID: {text}",
+                schema.name
+            );
+        }
+    }
+}

@@ -213,7 +213,7 @@ pub(super) fn owned_checkout_refusal(ssh_host: &str, evidence: &str) -> OrbitErr
         "refusing to start `orbit mcp serve --mode remote {ssh_host}`: this machine owns a local \
          Orbit checkout ({evidence}). The remote mode resolves every workspace on '{ssh_host}', \
          so a machine with its own checkout would receive that machine's branch state as its own \
-         — wrong answers rather than an error (ADR-0350). Register the ordinary local broker \
+         — wrong answers rather than an error. Register the ordinary local broker \
          (`orbit mcp serve`) here instead, and use the remote mode only from a client that owns \
          no checkout."
     ))

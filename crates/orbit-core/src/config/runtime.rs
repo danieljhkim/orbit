@@ -600,7 +600,7 @@ fn reject_stale_agent_tables(
 ) -> Result<(), OrbitError> {
     if raw.is_some() {
         return Err(OrbitError::InvalidInput(
-            "config schema changed in ORB-00058; remove [agent.<role>] tables and migrate to [crews.<name>] with [workflow].default_crew".to_string(),
+            "config schema no longer supports [agent.<role>] tables; migrate to [crews.<name>] with [workflow].default_crew".to_string(),
         ));
     }
     Ok(())

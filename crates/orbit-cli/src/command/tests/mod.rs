@@ -9,7 +9,7 @@ mod operation;
 mod operation_args;
 mod sweep;
 
-use clap::{Parser, error::ErrorKind};
+use clap::{Command, CommandFactory, Parser, error::ErrorKind};
 
 use orbit_common::types::McpCapability;
 
@@ -30,6 +30,43 @@ fn assert_cli_rejects(args: &[&str], kind: ErrorKind, expected: &str) {
     assert_eq!(error.kind(), kind, "{error}");
     let message = error.to_string();
     assert!(message.contains(expected), "{message}");
+}
+
+fn contains_concrete_artifact_id(text: &str) -> bool {
+    let bytes = text.as_bytes();
+    let has_digits_after = |prefix: &[u8]| {
+        bytes.windows(prefix.len() + 1).any(|window| {
+            window[..prefix.len()] == *prefix && window[prefix.len()].is_ascii_digit()
+        })
+    };
+    has_digits_after(b"ORB-")
+        || has_digits_after(b"ADR-")
+        || has_digits_after(b"L-")
+        || bytes.windows(12).any(|window| {
+            window[0] == b'F'
+                && window[1..5].iter().all(u8::is_ascii_digit)
+                && window[5] == b'-'
+                && window[6..8].iter().all(u8::is_ascii_digit)
+                && window[8] == b'-'
+                && window[9..12].iter().all(u8::is_ascii_digit)
+        })
+}
+
+fn assert_help_tree_has_no_concrete_artifact_ids(command: &Command) {
+    let help = command.clone().render_long_help().to_string();
+    assert!(
+        !contains_concrete_artifact_id(&help),
+        "help for `{}` contains a concrete workspace-local artifact ID:\n{help}",
+        command.get_name()
+    );
+    for subcommand in command.get_subcommands() {
+        assert_help_tree_has_no_concrete_artifact_ids(subcommand);
+    }
+}
+
+#[test]
+fn recursive_cli_help_uses_only_placeholder_artifact_ids() {
+    assert_help_tree_has_no_concrete_artifact_ids(&Cli::command());
 }
 
 #[test]

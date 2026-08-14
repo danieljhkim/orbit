@@ -3,7 +3,7 @@ Show a single Orbit friction record
 Usage: orbit friction show [OPTIONS] <ID>
 
 Arguments:
-  <ID>  Friction record id, e.g. F2026-05-001
+  <ID>  Friction record ID, e.g. FYYYY-MM-NNN
 
 Options:
       --json         Output as JSON
