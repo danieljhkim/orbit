@@ -1,11 +1,15 @@
+use std::path::{Path, PathBuf};
+
 use chrono::Utc;
 use orbit_common::types::{
     NotFoundKind, OrbitError, Workspace, WorkspaceCheckout, WorkspaceCheckoutRole, WorkspaceStatus,
 };
+use orbit_core::OrbitRuntime;
 use orbit_store::sqlite::task_registry::{WorkspaceConfig, write_workspace_config};
-use serde_json::json;
+use serde_json::{Value, json};
 
 use crate::runtime::{RemoteRuntimeFactory, resolved_workspace_binding, workspace_runtime_binding};
+use crate::workspace_registry::{registry_path_for, save_registry_to};
 
 fn workspace(id: &str, ship_mode: &str) -> Workspace {
     Workspace {
@@ -167,4 +171,237 @@ fn replica_runtime_refuses_task_writes_and_hides_coordination_reads() {
             .expect("empty replica task list")
             .is_empty()
     );
+}
+
+struct DualWorkspaceFixture {
+    _root: tempfile::TempDir,
+    alpha: OrbitRuntime,
+    beta_repo: PathBuf,
+    beta_task_id: String,
+}
+
+fn execute_cli_tool(
+    runtime: &OrbitRuntime,
+    name: &str,
+    mut input: Value,
+) -> Result<Value, OrbitError> {
+    let bound = RemoteRuntimeFactory::bind_cli_tool_workspace(runtime, &mut input)?;
+    bound.as_ref().unwrap_or(runtime).execute_tool_command(
+        name,
+        input,
+        Some("codex".to_string()),
+        Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
+    )
+}
+
+fn dual_workspace_fixture() -> DualWorkspaceFixture {
+    use orbit_common::types::WorkspaceRegistry;
+
+    let root = tempfile::tempdir().expect("root");
+    let global = root.path().join("global");
+    std::fs::create_dir_all(&global).expect("global");
+    std::fs::write(
+        global.join("host.toml"),
+        "schema_version = 2\nmachine_id = \"hm_cli_bind\"\nhost_id = \"cli-bind\"\ntask_prefix = \"ORB\"\n",
+    )
+    .expect("host identity");
+
+    let (ws_alpha, checkout_alpha) =
+        registered_workspace(root.path(), "ws_alpha", "alpha", "hm_cli_bind");
+    let (ws_beta, checkout_beta) =
+        registered_workspace(root.path(), "ws_beta", "beta", "hm_cli_bind");
+    save_registry_to(
+        &WorkspaceRegistry {
+            workspaces: vec![ws_alpha.clone(), ws_beta.clone()],
+            checkouts: vec![checkout_alpha.clone(), checkout_beta.clone()],
+            ..Default::default()
+        },
+        &registry_path_for(&global),
+    )
+    .expect("workspace registry");
+
+    let alpha = RemoteRuntimeFactory::open_registered_checkout(&global, &ws_alpha, &checkout_alpha)
+        .expect("alpha runtime");
+    let beta = RemoteRuntimeFactory::open_registered_checkout(&global, &ws_beta, &checkout_beta)
+        .expect("beta runtime");
+    let created = beta
+        .execute_tool_command(
+            "orbit.task.add",
+            json!({
+                "title": "Beta-only task",
+                "description": "Lives in the beta workspace.",
+                "workspace": checkout_beta.repo_root
+            }),
+            Some("codex".to_string()),
+            Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
+        )
+        .expect("seed beta task");
+    DualWorkspaceFixture {
+        _root: root,
+        alpha,
+        beta_repo: checkout_beta.repo_root,
+        beta_task_id: created["id"].as_str().expect("created task id").to_string(),
+    }
+}
+
+fn registered_workspace(
+    root: &Path,
+    id: &str,
+    name: &str,
+    owner_machine_id: &str,
+) -> (Workspace, WorkspaceCheckout) {
+    let repo = root.join(name);
+    let orbit_dir = repo.join(".orbit");
+    std::fs::create_dir_all(&orbit_dir).expect("orbit dir");
+    write_workspace_config(
+        &orbit_dir,
+        &WorkspaceConfig {
+            schema_version: 1,
+            workspace_id: id.to_string(),
+        },
+    )
+    .expect("workspace config");
+    let workspace = Workspace {
+        id: id.to_string(),
+        name: name.to_string(),
+        owner_machine_id: Some(owner_machine_id.to_string()),
+        git_remote: None,
+        ship_mode: Some("local".to_string()),
+        base_branch: "agent-main".to_string(),
+        status: WorkspaceStatus::Active,
+        created_at: Utc::now(),
+        updated_at: Utc::now(),
+    };
+    let checkout = WorkspaceCheckout::owner(id.to_string(), repo, orbit_dir);
+    (workspace, checkout)
+}
+
+fn unsupported_workspace_message(error: OrbitError, selector: &str) -> String {
+    match error {
+        OrbitError::InvalidInput(message) => {
+            assert!(
+                message.contains(selector),
+                "error must name the rejected workspace '{selector}': {message}"
+            );
+            message
+        }
+        other => panic!("expected InvalidInput, got {other}"),
+    }
+}
+
+#[test]
+fn cli_tool_run_lists_the_named_workspace_not_the_cwd_runtime() {
+    let fixture = dual_workspace_fixture();
+    let cwd_list = execute_cli_tool(&fixture.alpha, "orbit.task.list", json!({ "limit": 10 }))
+        .expect("list without workspace stays on alpha");
+    assert!(
+        !task_ids(&cwd_list).contains(&fixture.beta_task_id),
+        "cwd-bound list must not silently return the other workspace: {cwd_list}"
+    );
+
+    let named = execute_cli_tool(
+        &fixture.alpha,
+        "orbit.task.list",
+        json!({ "workspace": "beta", "limit": 10 }),
+    )
+    .expect("list should rebind to the named workspace");
+    assert!(
+        task_ids(&named).contains(&fixture.beta_task_id),
+        "named workspace list must return beta tasks: {named}"
+    );
+
+    let by_path = execute_cli_tool(
+        &fixture.alpha,
+        "orbit.task.list",
+        json!({
+            "workspace": fixture.beta_repo,
+            "limit": 10
+        }),
+    )
+    .expect("list should rebind to the checkout path");
+    assert!(
+        task_ids(&by_path).contains(&fixture.beta_task_id),
+        "absolute checkout path must return beta tasks: {by_path}"
+    );
+}
+
+#[test]
+fn cli_tool_run_fails_closed_on_unresolvable_workspace_for_read_and_write() {
+    let fixture = dual_workspace_fixture();
+    const BOGUS: &str = "bogus-nonexistent-xyz";
+
+    let list_error = execute_cli_tool(
+        &fixture.alpha,
+        "orbit.task.list",
+        json!({ "workspace": BOGUS, "limit": 2 }),
+    )
+    .expect_err("unresolvable workspace must not list the cwd workspace");
+    unsupported_workspace_message(list_error, BOGUS);
+
+    let add_error = execute_cli_tool(
+        &fixture.alpha,
+        "orbit.task.add",
+        json!({
+            "title": "must not land in cwd",
+            "description": "unresolvable workspace must fail closed",
+            "workspace": BOGUS
+        }),
+    )
+    .expect_err("unresolvable workspace must not create a cwd task");
+    unsupported_workspace_message(add_error, BOGUS);
+
+    let after = execute_cli_tool(&fixture.alpha, "orbit.task.list", json!({ "limit": 10 }))
+        .expect("cwd list after failed add");
+    assert!(
+        task_ids(&after).is_empty(),
+        "failed write must not create a task in the cwd workspace: {after}"
+    );
+}
+
+#[test]
+fn cli_tool_run_write_rebounds_to_the_named_workspace() {
+    let fixture = dual_workspace_fixture();
+    let created = execute_cli_tool(
+        &fixture.alpha,
+        "orbit.task.add",
+        json!({
+            "title": "Filed onto beta by name",
+            "description": "CLI workspace selector must rebind writes.",
+            "workspace": "beta"
+        }),
+    )
+    .expect("add should rebind to the named workspace");
+    let created_id = created["id"].as_str().expect("created id").to_string();
+
+    let alpha_list = execute_cli_tool(&fixture.alpha, "orbit.task.list", json!({ "limit": 10 }))
+        .expect("alpha list");
+    assert!(
+        !task_ids(&alpha_list).contains(&created_id),
+        "named-workspace write must not land in the cwd workspace: {alpha_list}"
+    );
+
+    let beta_list = execute_cli_tool(
+        &fixture.alpha,
+        "orbit.task.list",
+        json!({ "workspace": "beta", "limit": 10 }),
+    )
+    .expect("beta list");
+    assert!(
+        task_ids(&beta_list).contains(&created_id),
+        "named-workspace write must be visible on the target workspace: {beta_list}"
+    );
+}
+
+fn task_ids(value: &Value) -> Vec<String> {
+    let Some(items) = value.as_array() else {
+        return Vec::new();
+    };
+    items
+        .iter()
+        .filter_map(|task| {
+            task.get("id")
+                .and_then(Value::as_str)
+                .map(ToOwned::to_owned)
+        })
+        .collect()
 }

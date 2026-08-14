@@ -1,5 +1,6 @@
 use clap::{Args, ValueEnum};
 use orbit_core::{OrbitError, OrbitRuntime};
+use orbit_remote::runtime::RemoteRuntimeFactory;
 use serde_json::{Map, Value};
 
 use crate::command::{CommandOut, CommandOutput, Execute, Payload};
@@ -49,7 +50,7 @@ pub struct ToolRunArgs {
 
 impl Execute for ToolRunArgs {
     fn execute(self, runtime: &OrbitRuntime) -> CommandOut {
-        let input: Value = if let Some(path) = &self.input_file {
+        let mut input: Value = if let Some(path) = &self.input_file {
             let raw = std::fs::read_to_string(path).map_err(|e| {
                 OrbitError::InvalidInput(format!("cannot read input file '{path}': {e}"))
             })?;
@@ -62,6 +63,11 @@ impl Execute for ToolRunArgs {
                 None => Value::Object(Default::default()),
             }
         };
+
+        // ORB-10769: resolve `workspace` once above the tools, then bind or
+        // fail closed. MCP `McpHost::resolve_workspace` is a separate seam.
+        let bound = RemoteRuntimeFactory::bind_cli_tool_workspace(runtime, &mut input)?;
+        let runtime = bound.as_ref().unwrap_or(runtime);
 
         if self.dry_run {
             let result = runtime.run_tool_dry_run(&self.name, &input)?;
