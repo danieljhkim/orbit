@@ -103,13 +103,14 @@ Surface the breaking-change candidate list before drafting the final section. Sh
 
 ### 4. Bump versions
 
-Four files change every release:
+Five files change every release:
 
 | File | Field |
 |------|-------|
 | `Cargo.toml` | `[workspace.package].version` |
 | `Cargo.lock` | refresh via `cargo update --workspace` (no third-party drift) |
 | `plugin/.claude-plugin/plugin.json` | `version` |
+| `plugin/.codex-plugin/plugin.json` | `version` |
 | `plugin/npm/package.json` | `version` |
 
 The other `0.X.Y` matches in the repo (install-script doc comments, the website task pages, the Node engine pin in `website/package-lock.json`) are intentional — leave them.
@@ -133,10 +134,11 @@ context_files:
   - file:Cargo.toml
   - file:Cargo.lock
   - file:plugin/.claude-plugin/plugin.json
+  - file:plugin/.codex-plugin/plugin.json
   - file:plugin/npm/package.json
 ```
 
-Acceptance criteria: each of the four file bumps reports the new version, the CHANGELOG section is in place with the agreed structure, and every confirmed breaking change appears under Breaking Changes.
+Acceptance criteria: each of the five version-bearing file bumps reports the new version, the CHANGELOG section is in place with the agreed structure, and every confirmed breaking change appears under Breaking Changes.
 
 ### 7. Human approval
 
