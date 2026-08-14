@@ -20,6 +20,7 @@ mod test_support;
 #[cfg(test)]
 mod tests;
 pub(super) mod triage;
+pub(super) mod workspace_auto;
 
 #[cfg(test)]
 use crate::OrbitRuntime;

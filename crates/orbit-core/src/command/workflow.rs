@@ -9,6 +9,10 @@ pub struct Workflow {
 
 pub const WORKFLOWS: &[Workflow] = &[
     Workflow {
+        alias: "auto",
+        job_id: "workspace_auto_pipeline",
+    },
+    Workflow {
         alias: "ship",
         job_id: "task_auto_pipeline",
     },
@@ -24,6 +28,7 @@ pub fn find_workflow(name: &str) -> Option<&'static Workflow> {
 
 /// Canonical alias of the gated ship workflow (`task_auto_pipeline`).
 pub const SHIP_WORKFLOW_ALIAS: &str = "ship";
+pub const AUTO_WORKFLOW_ALIAS: &str = "auto";
 
 /// Pipeline mode for the `ship` workflow: open a PR or apply locally.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -130,6 +135,13 @@ mod tests {
         assert!(find_workflow("ship-auto").is_none());
         assert!(find_workflow("ship-local").is_none());
         assert!(find_workflow("review-pr").is_none());
+    }
+
+    #[test]
+    fn auto_workflow_routes_to_workspace_sequencer() {
+        let workflow = find_workflow("auto").expect("auto workflow");
+
+        assert_eq!(workflow.job_id, "workspace_auto_pipeline");
     }
 
     #[test]

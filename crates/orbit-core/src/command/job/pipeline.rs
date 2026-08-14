@@ -101,12 +101,30 @@ impl OrbitRuntime {
         // pipeline record. Auto mode intentionally carries no task ids: the
         // worker discovers eligible backlog tasks after it starts.
         for task_id in task_ids {
-            self.get_task(task_id)?;
+            let task = self.get_task(task_id)?;
+            if task.tags.iter().any(|tag| tag == "epic") {
+                return Err(OrbitError::InvalidInput(format!(
+                    "task '{task_id}' is an epic root and cannot be shipped as a leaf; use `orbit run auto` or `orbit run job epic_pipeline`"
+                )));
+            }
         }
         if let Some(conflict) = self.in_flight_ship_run_for_tasks(task_ids)? {
             return Err(conflict);
         }
         self.submit_pipeline_run(workflow.job_id, input, None, actor)
+    }
+
+    /// Submit one workspace logistics tick (`workspace_auto_pipeline`).
+    pub fn submit_workspace_auto_run(
+        &self,
+        actor: Option<&str>,
+        claim_token: Option<&str>,
+    ) -> Result<PipelineInvokeResult, OrbitError> {
+        self.require_workspace_claim("orbit.workflow.auto", claim_token)?;
+        let workflow =
+            crate::command::workflow::find_workflow(crate::command::workflow::AUTO_WORKFLOW_ALIAS)
+                .ok_or_else(|| OrbitError::InvalidInput("unknown workflow 'auto'".to_string()))?;
+        self.submit_pipeline_run(workflow.job_id, json!({}), None, actor)
     }
 
     /// The duplicate-dispatch refusal for the newest non-terminal run already

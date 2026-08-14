@@ -467,3 +467,59 @@ fn list_backlog_tasks_omits_excluded_for_explicit_task_ids() {
     assert_eq!(output["task_ids"], json!([backlog.id]));
     assert!(output.get("excluded").is_none());
 }
+
+#[test]
+fn list_backlog_tasks_excludes_epic_roots_and_descendants_with_reasons() {
+    let (_root, runtime, _repo_root) = runtime_with_workspace_layout();
+    let loose_one = seed_list_backlog_task(
+        &runtime,
+        "Loose one",
+        TaskStatus::Backlog,
+        TaskPriority::High,
+        TaskType::Chore,
+        None,
+        vec![],
+    );
+    let loose_two = seed_list_backlog_task(
+        &runtime,
+        "Loose two",
+        TaskStatus::Backlog,
+        TaskPriority::Medium,
+        TaskType::Chore,
+        None,
+        vec![],
+    );
+    let epic = runtime
+        .add_task(TaskAddParams {
+            title: "Epic root".to_string(),
+            description: "Epic fixture".to_string(),
+            acceptance_criteria: vec!["Supervised".to_string()],
+            tags: vec!["epic".to_string()],
+            plan: "Delegate children".to_string(),
+            status: Some(TaskStatus::Backlog),
+            ..Default::default()
+        })
+        .expect("seed epic root");
+    let children = (0..3)
+        .map(|index| {
+            seed_list_backlog_task(
+                &runtime,
+                &format!("Epic child {index}"),
+                TaskStatus::Backlog,
+                TaskPriority::Medium,
+                TaskType::Chore,
+                Some(epic.id.clone()),
+                vec![],
+            )
+        })
+        .collect::<Vec<_>>();
+
+    let output = list_backlog_tasks(&runtime, json!({}));
+    assert_eq!(output_task_ids(&output), vec![loose_one.id, loose_two.id]);
+    assert_eq!(excluded_entry(&output, &epic.id)["reason"], "epic_root");
+    assert_eq!(excluded_entry(&output, &epic.id)["conflicts"], json!([]));
+    for child in children {
+        assert_eq!(excluded_entry(&output, &child.id)["reason"], "epic_child");
+        assert_eq!(excluded_entry(&output, &child.id)["conflicts"], json!([]));
+    }
+}

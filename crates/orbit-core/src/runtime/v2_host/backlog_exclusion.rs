@@ -23,7 +23,15 @@ struct BacklogTaskExclusion {
 #[serde(rename_all = "snake_case")]
 enum BacklogTaskExclusionReason {
     ContextLockConflict,
+    EpicChild,
+    EpicRoot,
     GroupMemberConflict,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum EpicFamilyMembership {
+    Child,
+    Root,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize)]
@@ -129,18 +137,22 @@ pub(super) fn list_backlog_tasks(
                 task.status == TaskStatus::Backlog && task_dependencies_ready(task, &status_by_id)
             })
             .collect();
-        backlog.sort_by(|a, b| {
-            let rank = |p: orbit_common::types::TaskPriority| match p {
-                orbit_common::types::TaskPriority::Critical => 0,
-                orbit_common::types::TaskPriority::High => 1,
-                orbit_common::types::TaskPriority::Medium => 2,
-                orbit_common::types::TaskPriority::Low => 3,
-            };
-            rank(a.priority)
-                .cmp(&rank(b.priority))
-                .then(a.created_at.cmp(&b.created_at))
-        });
+        sort_tasks_by_priority_age(&mut backlog);
         let mut excluded = Vec::new();
+        backlog.retain(|task| {
+            let Some(membership) = epic_family_membership(task, &task_lookup) else {
+                return true;
+            };
+            excluded.push(BacklogTaskExclusion {
+                id: task.id.clone(),
+                reason: match membership {
+                    EpicFamilyMembership::Root => BacklogTaskExclusionReason::EpicRoot,
+                    EpicFamilyMembership::Child => BacklogTaskExclusionReason::EpicChild,
+                },
+                conflicts: Vec::new(),
+            });
+            false
+        });
         if !lock_holders.is_empty() {
             let direct_conflicts: BTreeMap<String, Vec<BacklogTaskConflict>> = backlog
                 .iter()
@@ -182,10 +194,10 @@ pub(super) fn list_backlog_tasks(
                         kept.push(task);
                     }
                 }
-                excluded.sort_by(|a, b| a.id.cmp(&b.id));
                 backlog = kept;
             }
         }
+        excluded.sort_by(|a, b| a.id.cmp(&b.id));
         (backlog, Some(excluded))
     } else {
         let tasks = explicit_task_ids
@@ -236,6 +248,45 @@ pub(super) fn list_backlog_tasks(
         );
     }
     Ok(Value::Object(payload))
+}
+
+pub(super) fn sort_tasks_by_priority_age(tasks: &mut [Task]) {
+    let rank = |priority: orbit_common::types::TaskPriority| match priority {
+        orbit_common::types::TaskPriority::Critical => 0,
+        orbit_common::types::TaskPriority::High => 1,
+        orbit_common::types::TaskPriority::Medium => 2,
+        orbit_common::types::TaskPriority::Low => 3,
+    };
+    tasks.sort_by(|left, right| {
+        rank(left.priority)
+            .cmp(&rank(right.priority))
+            .then(left.created_at.cmp(&right.created_at))
+    });
+}
+
+pub(super) fn epic_family_membership(
+    task: &Task,
+    task_lookup: &BTreeMap<String, Task>,
+) -> Option<EpicFamilyMembership> {
+    if task.tags.iter().any(|tag| tag == "epic") {
+        return Some(EpicFamilyMembership::Root);
+    }
+
+    let mut visited = vec![task.id.clone()];
+    let mut next_parent_id = task.parent_id().map(ToOwned::to_owned);
+    for _ in 0..MAX_TASK_PARENT_CHAIN_DEPTH {
+        let parent_id = next_parent_id?;
+        if visited.iter().any(|task_id| task_id == &parent_id) {
+            return None;
+        }
+        let parent = task_lookup.get(&parent_id)?;
+        if parent.tags.iter().any(|tag| tag == "epic") {
+            return Some(EpicFamilyMembership::Child);
+        }
+        visited.push(parent.id.clone());
+        next_parent_id = parent.parent_id().map(ToOwned::to_owned);
+    }
+    None
 }
 
 fn task_root_id(task: &Task, task_lookup: &BTreeMap<String, Task>) -> String {

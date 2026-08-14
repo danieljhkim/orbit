@@ -19,6 +19,7 @@ macro_rules! deterministic_action_catalog {
             core {
                 ApplyTriageDispositions => "apply_triage_dispositions",
                 ApplyTaskPilotResults => "apply_task_pilot_results",
+                ClassifyWorkspaceAutoTasks => "classify_workspace_auto_tasks",
                 ContextConflictCheck => "context_conflict_check",
                 GateStarvationFail => "gate_starvation_fail",
                 InvokeAndWait => "invoke_and_wait",

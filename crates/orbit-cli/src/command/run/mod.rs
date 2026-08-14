@@ -1,3 +1,4 @@
+pub mod auto;
 mod cancel;
 mod command;
 mod events;

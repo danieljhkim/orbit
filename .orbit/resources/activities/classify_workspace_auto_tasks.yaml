@@ -1,0 +1,36 @@
+schemaVersion: 2
+kind: Activity
+metadata:
+  name: classify_workspace_auto_tasks
+spec:
+  type: deterministic
+  description: >
+    Classify one workspace logistics tick. An in-progress epic root holds the
+    tick, including late-arriving loose work. Otherwise eligible loose backlog
+    leaves win and are returned in list_backlog priority/age order, then the
+    first eligible backlog epic root is selected. Epic children are never
+    selected.
+  input_schema_json:
+    type: object
+    properties:
+      max_tasks:
+        type: number
+        minimum: 1
+        maximum: 500
+  output_schema_json:
+    type: object
+    required: [decision, loose_task_ids, epic_task_id]
+    properties:
+      decision:
+        type: string
+        enum: [ship, hold, epic, empty]
+      loose_task_ids:
+        type: array
+        items:
+          type: string
+      epic_task_id:
+        oneOf:
+          - type: string
+          - type: "null"
+  action: classify_workspace_auto_tasks
+  config: {}

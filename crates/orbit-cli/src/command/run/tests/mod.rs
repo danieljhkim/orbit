@@ -114,6 +114,18 @@ fn parses_ship_auto_mode_defaults() {
 }
 
 #[test]
+fn parses_workspace_auto_defaults() {
+    let command = parse_run(&["orbit", "run", "auto"]);
+    match command.command {
+        RunSubcommand::Auto(args) => {
+            assert!(!args.json);
+            assert!(args.claim_token.is_none());
+        }
+        _ => panic!("expected auto"),
+    }
+}
+
+#[test]
 fn parses_explicit_ship_defaults() {
     let command = parse_run(&["orbit", "run", "ship", "T1", "T2"]);
     match command.command {

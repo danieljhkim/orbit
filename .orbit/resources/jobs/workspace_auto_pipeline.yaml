@@ -1,0 +1,58 @@
+# Workspace logistics sequencer [ORB-10788 / ADR-0365].
+#
+# One tick drains eligible loose leaves first, holds while an epic root is
+# active, otherwise starts exactly one backlog epic root. Hold and empty are
+# successful no-ops. The external clock owns repeated ticks.
+
+schemaVersion: 2
+kind: Job
+metadata:
+  name: workspace_auto_pipeline
+spec:
+  state: enabled
+  kind: workflow
+  max_active_runs: 1
+  default_input:
+    max_tasks: 50
+
+  steps:
+    - id: resolve_ship_input
+      target: activity:resolve_workspace_ship_input
+      default_input: {}
+
+    - id: classify
+      target: activity:classify_workspace_auto_tasks
+      default_input:
+        max_tasks: "{{ input.max_tasks }}"
+
+    - id: ship_leaves
+      when: "{{ steps.classify.output.decision }} == ship"
+      target: activity:invoke_and_wait
+      default_input:
+        job_name: task_auto_pipeline
+        run_input:
+          task_ids: "{{ steps.classify.output.loose_task_ids }}"
+          mode: "{{ steps.resolve_ship_input.output.mode }}"
+          base_branch: "{{ steps.resolve_ship_input.output.base_branch }}"
+
+    - id: require_leaf_success
+      when: "{{ steps.classify.output.decision }} == ship"
+      target: activity:pipeline_success_guard
+      default_input:
+        context: workspace auto leaf ship
+        result: "{{ steps.ship_leaves.output }}"
+
+    - id: run_epic
+      when: "{{ steps.classify.output.decision }} == epic"
+      target: activity:invoke_and_wait
+      default_input:
+        job_name: epic_pipeline
+        run_input:
+          epic_task_id: "{{ steps.classify.output.epic_task_id }}"
+
+    - id: require_epic_success
+      when: "{{ steps.classify.output.decision }} == epic"
+      target: activity:pipeline_success_guard
+      default_input:
+        context: workspace auto epic run
+        result: "{{ steps.run_epic.output }}"

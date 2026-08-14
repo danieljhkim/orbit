@@ -137,7 +137,7 @@ fn ship_rejects_removed_auto_positional_form() {
     let err = build_plan(&ship_args(&["auto"], ShipMode::Pr, None), "agent-main")
         .expect_err("legacy auto form should fail");
     assert!(
-        err.to_string().contains("orbit run ship"),
+        err.to_string().contains("orbit run auto"),
         "unexpected error: {err}"
     );
 }

@@ -3,6 +3,7 @@ use orbit_core::OrbitRuntime;
 
 use crate::command::{CommandOut, Execute};
 
+use super::auto;
 use super::cancel::RunCancelArgs;
 use super::events::RunEventsArgs;
 use super::history::RunHistoryArgs;
@@ -16,6 +17,7 @@ use super::triage;
 
 const RUN_AFTER_HELP: &str = "\
 Workflow entrypoints:
+  orbit run auto
   orbit run ship [task_id ...]
   orbit run ship-sweep [--dry-run] [--json]
   orbit run triage [task_id ...]
@@ -46,6 +48,7 @@ Maintenance:
 {usage-heading} {usage}
 
 Workflows:
+  auto        Run one workspace logistics tick (loose leaves, then one epic)
   ship        Ship backlog or explicitly selected tasks through the gated task pipeline
   ship-sweep  Dispatch ship runs in every registered workspace with ready backlog tasks
   triage      Triage tasks blocked by failed runs; re-backlog environmental failures
@@ -78,6 +81,8 @@ impl Execute for RunCommand {
 
 #[derive(Subcommand)]
 pub enum RunSubcommand {
+    /// Run one workspace logistics tick (loose leaves, then one epic)
+    Auto(auto::AutoCommand),
     /// Ship backlog or explicitly selected tasks through the gated task pipeline
     Ship(ship::ShipCommand),
     /// Deprecated alias for `orbit run ship --mode local`
@@ -107,6 +112,7 @@ pub enum RunSubcommand {
 impl Execute for RunSubcommand {
     fn execute(self, runtime: &OrbitRuntime) -> CommandOut {
         match self {
+            RunSubcommand::Auto(command) => command.execute(runtime),
             RunSubcommand::Ship(command) => command.execute(runtime),
             RunSubcommand::ShipLocal(command) => command.execute(runtime),
             // Normally dispatched before runtime init (see main.rs); the
