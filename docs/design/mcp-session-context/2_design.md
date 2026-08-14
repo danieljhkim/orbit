@@ -3,7 +3,7 @@ summary: "MCP Session Context — Design"
 type: design
 title: "MCP Session Context — Design"
 owner: codex
-last_updated: 2026-08-09
+last_updated: 2026-08-14
 last_validated: 2026-08-08
 status: Accepted
 feature: mcp-session-context
@@ -11,7 +11,7 @@ doc_role: design
 tags: ["mcp-session-context", "mcp", "workspace"]
 paths: ["crates/orbit-mcp/**", "crates/orbit-remote/src/mcp/**", "crates/orbit-tools/**", "crates/orbit-core/src/command/tool/**"]
 related_features: ["mcp-session-context", "task-artifacts"]
-related_artifacts: ["ORB-00256", "ORB-10228", "ORB-10262", "ORB-10319", "ORB-10448", "ORB-10690", "ADR-0181", "ADR-0199", "ADR-0149", "ADR-0348"]
+related_artifacts: ["ORB-00256", "ORB-10228", "ORB-10262", "ORB-10319", "ORB-10448", "ORB-10690", "ORB-10769", "ADR-0181", "ADR-0199", "ADR-0149", "ADR-0348"]
 ---
 
 # MCP Session Context — Design
@@ -60,6 +60,12 @@ Before that tool-level fallback, `crates/orbit-remote/src/mcp/host.rs` resolves 
 selector to a logical workspace and, when placement requires it, an exact checkout. That
 Remote preflight owns routing and authorization; it does not replace the builtin's
 explicit-over-session input contract. [ORB-10262], [ORB-10319]
+
+The CLI `orbit tool run` path is a separate seam. `RemoteRuntimeFactory::bind_cli_tool_workspace`
+in `crates/orbit-remote/src/runtime.rs` reads a non-empty input `workspace` *above* the tools
+and either rebinds the cwd-bootstrapped `OrbitRuntime` to that registered checkout or fails
+closed naming the selector. It never continues against cwd on a typo. MCP resolution order is
+unchanged and still never falls back to process cwd. [ORB-10769]
 
 ### 3a. The selector is advertised, not implied
 
@@ -117,5 +123,6 @@ The external channel carries a workspace address, not a trusted workspace ID. Th
 - [ORB-10319] moved broker/session resolution and MCP composition into the vertical `orbit-remote` feature crate while leaving runtime audit/dispatch in Core.
 - [ORB-10448] advertised the workspace selector on every workspace-scoped tool and routed hub-placement coordination reads by checkout identity, making the [ADR-0181] "clients that cannot send initialize metadata pass `workspace` explicitly" path reachable from a managed worktree activity.
 - [ORB-10690] added the TCP transport and moved session construction behind `McpSessionFactory` so concurrent clients cannot observe or overwrite each other's session context ([ADR-0348]).
+- [ORB-10769] bound CLI `orbit tool run` to the same fail-closed workspace selector above the tools; MCP resolution order is unchanged.
 
 Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

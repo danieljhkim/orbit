@@ -275,6 +275,8 @@ pub(super) fn resolve_workspace_argument(
     tool_name: &str,
 ) -> Result<String, OrbitError> {
     // MCP workspace defaults come from explicit session context, never process cwd.
+    // ORB-10769: CLI `orbit tool run` binds the runtime in
+    // `RemoteRuntimeFactory::bind_cli_tool_workspace`. Do not add per-tool callers.
     let explicit = optional_string_alias(input, &["workspace"])?;
     let session = ctx
         .session_context
