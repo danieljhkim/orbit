@@ -6,18 +6,19 @@ status: Accepted
 feature: resident-orchestrator
 doc_role: design
 type: design
-summary: epic_pipeline loops a deterministic unresolved-work scan and a no-code-change orchestrator (create/ship/log) until the scan is empty. Session log is the memory between fires.
+summary: epic_pipeline drains one epic; workspace_auto_pipeline is a one-tick sequencer that ships loose leaves first then starts exactly one epic. Session log is the memory between drain fires.
 tags: [resident-orchestrator, epic, jobs, session-log]
 paths: [".orbit/resources/jobs/**", "crates/orbit-core/assets/jobs/**", "crates/orbit-core/assets/activities/**"]
 related_features: [resident-orchestrator, activity-job]
-related_artifacts: [ORB-10332, ORB-10775, ORB-10776, ORB-10779, ADR-0361, ADR-0362, ADR-0363, ADR-0364]
+related_artifacts: [ORB-10332, ORB-10775, ORB-10776, ORB-10779, ORB-10788, ADR-0361, ADR-0362, ADR-0363, ADR-0364, ADR-0365]
 ---
 
 # Resident Orchestrator — Design
 
-This is the v1 contract. It specifies the scan, the orchestrator activity, the job loop,
-and what Orbit deliberately does not own. It does not add a resident server, an Orbit
-routine, conversation resume, or a comment-typed decision protocol.
+This is the v1 contract. It specifies the scan, the orchestrator activity, the drain
+loop, the workspace sequencer, and what Orbit deliberately does not own. It does not
+add a resident server, an Orbit routine, conversation resume, or a comment-typed
+decision protocol.
 
 ## 1. Unresolved-work scan
 
@@ -42,9 +43,10 @@ boolean `empty`. Optional input `fail_if_nonempty` fails the step when the set i
 non-empty so the job can fail closed after its iteration cap. No task, run, or log row
 is mutated. An empty scan is success, not an error.
 
-The scan is the only admission function. The job does not select by `epic` tag, assignee,
-or priority. Those filters belong to the external supervisor if it wants them (it can
-decline to fire the job).
+The scan is the only admission function **for `epic_pipeline`**. That job does not select
+by `epic` tag, assignee, or priority (ADR-0361). Leaf-ship and the workspace sequencer
+*do* use the tag — as an exclusion / ownership key, not as the drain predicate
+(ADR-0365).
 
 ## 2. Orchestrator activity
 
@@ -126,19 +128,65 @@ cron repo (wrong workspace).
 
 Do not rewrite history. Append or resolve; never edit a body in place.
 
-## 5. External clock (not an Orbit routine)
+## 5. Workspace sequencer (`workspace_auto_pipeline`)
+
+`orbit run ship` is a leaf implementer. Mixing "start an epic orchestrator" into
+`task_auto_pipeline` would change that job's success definition, child graph, and
+concurrency. The logistics tick is a **separate** job (ADR-0365).
+
+`workspace_auto_pipeline` (`max_active_runs: 1`) runs one classify → act tick:
+
+```text
+if any loose leaf is in backlog (no epic ancestor):
+    invoke task_auto_pipeline with those ids
+else if an epic root is in-progress:
+    succeed as a hold (no second epic, no late-arriving loose work)
+else if one or more epic roots are in backlog:
+    pick one (same priority/age order as list_backlog)
+    invoke_and_wait epic_pipeline
+else:
+    succeed empty
+```
+
+A task is in the **epic family** when it carries `tag: epic` or any ancestor does.
+Walk `parent_id` the same way `list_backlog_tasks` already walks it for lock grouping.
+
+| Surface | Epic root | Child of that root | Loose leaf |
+|---|---|---|---|
+| `orbit run ship` (auto / empty ids) | skip (`epic_root`) | skip (`epic_child`) | ship |
+| `orbit run ship <id>` / `workflow_ship` | refuse before worktree setup | ship | ship |
+| `scan_unresolved_work` / `epic_pipeline` | include (close-me reminder) | include | include |
+| `orbit run auto` | start at most one, after leaves | never auto-ship | drain first |
+
+Worked example: 2 loose tasks, 1 epic root, 3 epic children, all `backlog`. First
+`orbit run auto` ships the 2 loose tasks. Next tick (no loose work, no in-progress
+epic) starts `epic_pipeline` on that one root. The orchestrator creates and
+explicitly ships children. While the root is `in-progress`, further auto ticks hold.
+
+`orbit run ship` with no ids still submits `task_auto_pipeline`. After this change
+that auto path simply never admits the epic family. `orbit run auto` is the verb
+that starts an epic.
+
+Do not fold this heuristic into `list_backlog` beyond the exclusion reasons. Do not
+scope `scan_unresolved_work` to one epic in this change.
+
+## 6. External clock (not an Orbit routine)
 
 v1 does not seed `resident-epic-orbit` or any other routine. A knowledgebase checkout
 (or the front-door orchestrator) fires:
 
 ```text
+orbit run auto
+# or, to drain without the leaf-first sequencer:
 orbit run job epic_pipeline
 ```
 
 via MCP or CLI, on a cron it owns. That process may also create `epic`-tagged roots,
-author children, and answer humans. None of that is a catalog asset in this repo.
+author children, and answer humans. None of that is a seeded routine. Retargeting
+`workspace_ship_pipeline` at the sequencer is allowed so an existing unattended
+sweep picks up the heuristic; that is still not a new routine definition.
 
-## 6. Authority and completion
+## 7. Authority and completion
 
 Daniel's merge authority is unchanged. `review` is not a wake reason: a task waiting on
 human merge must not keep the drain loop alive by itself. If the only leftovers are
@@ -151,11 +199,16 @@ resume, recast the task, or leave a precise block reason and — if it cannot pr
 exit so the next scan still sees the item and the job fails at the ceiling rather than
 lying.
 
-## 7. Concerns & Honest Limitations
+## 8. Concerns & Honest Limitations
 
 - **Workspace-wide drain.** One `blocked` chore anywhere wakes the orchestrator for the
   whole workspace. Supervisors that want isolation should use separate workspaces or
   keep unrelated work out of `proposed`/`backlog`/`blocked`.
+- **Two dispatchers on one workspace.** `orbit run ship` (after exclusion) and
+  `epic_pipeline` no longer share the epic family. They still share **untagged**
+  backlog if someone fires both. Prefer `orbit run auto` as the single auto entry.
+- **In-progress epic holds all auto-ship.** Late-arriving loose chores wait. That is
+  the v1 heuristic; refine later rather than adding a priority override now.
 - **`proposed` is in the scan.** That is a deliberate reversal of the first draft (which
   refused proposed pickup). The orchestrator may triage; it still must not invent
   approval policy.
@@ -174,5 +227,6 @@ lying.
 - **[ORB-10776]** — This contract and ADRs.
 - **[ORB-10779]** — Scan, orchestrator activity, `epic_pipeline`.
 - **[ORB-10784]** — `orbit.session_log`.
+- **[ORB-10788]** — Sequencer, leaf-ship exclusion, `orbit run auto`.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.
