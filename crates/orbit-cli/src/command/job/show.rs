@@ -3,7 +3,7 @@ use orbit_core::OrbitRuntime;
 
 use crate::command::{CommandOut, Execute, Payload};
 
-use super::support::{job_catalog_to_json_with_last_run, print_v2_step};
+use super::support::{job_catalog_to_json_with_last_run, write_v2_step};
 
 #[derive(Args)]
 pub struct JobShowArgs {
@@ -43,7 +43,7 @@ impl Execute for JobShowArgs {
         let _ = writeln!(out, "{} {}", bold("Steps:"), job.spec.steps.len());
         for (i, step) in job.spec.steps.iter().enumerate() {
             let _ = writeln!(out, "  {}:", bold(&format!("Step {}", i + 1)));
-            print_v2_step(step, 4);
+            write_v2_step(step, 4, &mut out);
         }
         Ok(Payload::detail(doc, out).into())
     }

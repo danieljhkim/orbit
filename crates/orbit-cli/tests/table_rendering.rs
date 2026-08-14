@@ -57,6 +57,28 @@ fn task_list_renders_one_line_per_task() {
     assert_both_forms(&workspace, &["task", "list"], 3, "orbit task list");
 }
 
+#[test]
+fn job_show_json_contains_no_human_step_rows() {
+    let workspace = TestWorkspace::new();
+
+    let json = workspace.run(
+        &["job", "show", "epic_pipeline", "--format", "json"],
+        "job show JSON",
+    );
+    let document: Value = serde_json::from_slice(&json.stdout).expect("job show JSON");
+    assert!(document.is_object(), "job show returned {document}");
+    assert!(
+        !String::from_utf8_lossy(&json.stdout).contains("ID:"),
+        "JSON output contained human step rows: {}",
+        String::from_utf8_lossy(&json.stdout)
+    );
+
+    let human = workspace.run(&["job", "show", "epic_pipeline"], "job show human output");
+    let human_stdout = String::from_utf8_lossy(&human.stdout);
+    assert!(human_stdout.contains("Steps:"), "{human_stdout}");
+    assert!(human_stdout.contains("ID:"), "{human_stdout}");
+}
+
 /// ORB-10571: the same property, for the other two commands covered by
 /// `tests/output_goldens.rs`'s golden-file coverage. Both are seeded by
 /// `orbit workspace init` itself (a default policy, a default skill
