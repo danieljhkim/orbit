@@ -162,6 +162,8 @@ fn every_fleet_model_string_is_priced() {
         "gpt-5.6-luna",
         "gemini-3.5-flash",
         "grok-build",
+        "grok-4.5",
+        "grok-4.6",
     ];
     // A nonzero split so a zero-rate row would still yield Some (we assert
     // coverage, not a specific figure).
@@ -170,9 +172,10 @@ fn every_fleet_model_string_is_priced() {
         output: 1_000,
         ..TokenUsage::default()
     };
-    // 2026-07-24 (not 07-19): must be on/after claude-opus-5's effective_from
-    // so its row is in range too, while still covering every other row below.
-    let at = dt("2026-07-24T00:00:00Z");
+    // 2026-08-13 (not 07-24): must be on/after grok-4.6's effective_from so
+    // its row is in range too, while still covering every other open-ended
+    // row (claude-opus-5 from 07-24, grok-4.5 from 08-12).
+    let at = dt("2026-08-13T00:00:00Z");
     for model in FLEET_MODELS {
         assert!(
             derive_cost_usd(model, at, &usage).is_some(),
@@ -333,6 +336,54 @@ fn malformed_openai_one_hour_writes_are_not_priced_as_free() {
     let cost = derive_cost_usd("gpt-5.6-sol", dt("2026-07-30T00:00:00Z"), &usage)
         .expect("nonzero fallback rate prices malformed 1h data");
     assert!((cost - 5.125).abs() < 1e-12, "cost was {cost}");
+}
+
+#[test]
+fn ground_truth_grok_4_6_uses_official_short_context_rates() {
+    // Official short-context rates retrieved 2026-08-14T03:45:16Z from
+    // https://docs.x.ai/developers/models/grok-4.6 and
+    // https://docs.x.ai/developers/pricing: $2.00 input / $0.50 cached /
+    // $6.00 output per 1M. 1M of each split → 2.0 + 0.5 + 6.0 = 8.5.
+    let usage = TokenUsage {
+        input: 1_000_000,
+        cache_read: 1_000_000,
+        cache_create: 0,
+        cache_create_1h: 0,
+        output: 1_000_000,
+    };
+    let cost = derive_cost_usd("grok-4.6", dt("2026-08-14T00:00:00Z"), &usage)
+        .expect("grok-4.6 is priced in the shipped table");
+    assert!((cost - 8.5).abs() < f64::EPSILON, "cost was {cost}");
+}
+
+#[test]
+fn grok_4_5_uses_official_short_context_rates() {
+    // Official short-context rates retrieved 2026-08-14T03:45:16Z from
+    // https://docs.x.ai/developers/models/grok-4.5 and
+    // https://docs.x.ai/developers/pricing: $2.00 input / $0.30 cached /
+    // $6.00 output per 1M. 1M of each split → 2.0 + 0.3 + 6.0 = 8.3.
+    let usage = TokenUsage {
+        input: 1_000_000,
+        cache_read: 1_000_000,
+        cache_create: 0,
+        cache_create_1h: 0,
+        output: 1_000_000,
+    };
+    let cost = derive_cost_usd("grok-4.5", dt("2026-08-14T00:00:00Z"), &usage)
+        .expect("grok-4.5 is priced in the shipped table");
+    assert!((cost - 8.3).abs() < f64::EPSILON, "cost was {cost}");
+}
+
+#[test]
+fn grok_malformed_one_hour_writes_are_not_priced_as_free() {
+    let usage = TokenUsage {
+        input: 1_000_000,
+        cache_create_1h: 100_000,
+        ..TokenUsage::default()
+    };
+    let cost = derive_cost_usd("grok-4.6", dt("2026-08-14T00:00:00Z"), &usage)
+        .expect("nonzero fallback rate prices malformed 1h data");
+    assert!((cost - 2.2).abs() < 1e-12, "cost was {cost}");
 }
 
 #[test]

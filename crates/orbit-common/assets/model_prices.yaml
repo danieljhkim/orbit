@@ -194,8 +194,10 @@ prices:
     output_per_million_usd: 9.0
 
   # ── xAI / Grok (crew: grok) ──────────────────────────────────────────────
-  # grok-build is the string the crew config carries; xAI's coding/build model
-  # (grok-build-0.1) is 1.00/2.00 with a 75%-off cached input rate.
+  # grok-build is the historical coding/build string still present in older
+  # fixtures. Leave this shipped row open-ended; do not rewrite its rates
+  # in place. Official docs now list `grok-build-0.1` (a different key) at
+  # $1.00 / $0.20 cached / $2.00 — that is not this row.
   - model: "grok-build"
     effective_from: "2026-07-17T00:00:00Z"
     effective_until: null
@@ -204,3 +206,32 @@ prices:
     cache_create_per_million_usd: 1.0
     cache_create_1h_per_million_usd: 1.0
     output_per_million_usd: 2.0
+
+  # Live Grok lane strings. Retrieved 2026-08-14T03:45:16Z from
+  # https://docs.x.ai/developers/models/grok-4.6,
+  # https://docs.x.ai/developers/models/grok-4.5, and
+  # https://docs.x.ai/developers/pricing. Standard short-context (<200k
+  # prompt) rates only. Official docs also publish a ≥200k long-context
+  # tier and a 2x Priority Processing premium; those are not distinct
+  # `InvocationRecord.model` keys, so they are not separate rows.
+  # xAI has no 1h-TTL cache-create tier; cache_create / cache_create_1h
+  # equal the input rate so a malformed nonzero 1h count is not free.
+  # effective_from is the first Orbit live-default date for each string
+  # (ORB-10741 grok-4.5 on 2026-08-12; ORB-10756 grok-4.6 on 2026-08-13).
+  - model: "grok-4.5"
+    effective_from: "2026-08-12T00:00:00Z"
+    effective_until: null
+    input_per_million_usd: 2.0
+    cache_read_per_million_usd: 0.3
+    cache_create_per_million_usd: 2.0
+    cache_create_1h_per_million_usd: 2.0
+    output_per_million_usd: 6.0
+
+  - model: "grok-4.6"
+    effective_from: "2026-08-13T00:00:00Z"
+    effective_until: null
+    input_per_million_usd: 2.0
+    cache_read_per_million_usd: 0.5
+    cache_create_per_million_usd: 2.0
+    cache_create_1h_per_million_usd: 2.0
+    output_per_million_usd: 6.0
