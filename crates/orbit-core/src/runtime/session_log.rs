@@ -315,9 +315,11 @@ mod tests {
 
         let resolved = resolve(&orbit_dir, "SL-0002").expect("resolve");
         assert!(resolved.resolved_at.is_some());
-        assert!(list(&orbit_dir, None, true, None)
-            .expect("after resolve")
-            .is_empty());
+        assert!(
+            list(&orbit_dir, None, true, None)
+                .expect("after resolve")
+                .is_empty()
+        );
 
         let err = resolve(&orbit_dir, "SL-0001").expect_err("status cannot resolve");
         assert!(err.to_string().contains("check_later"));

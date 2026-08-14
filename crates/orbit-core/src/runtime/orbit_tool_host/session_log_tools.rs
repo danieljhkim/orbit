@@ -1,10 +1,10 @@
 use orbit_common::types::OrbitError;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
+use crate::OrbitRuntime;
 use crate::runtime::session_log::{
     append, list, parse_id_list, parse_kind, parse_optional_kind, parse_since, resolve,
 };
-use crate::OrbitRuntime;
 
 pub(super) fn append_entry(runtime: &OrbitRuntime, input: Value) -> Result<Value, OrbitError> {
     let kind = parse_kind(&input)?;

@@ -33,6 +33,7 @@ macro_rules! deterministic_action_catalog {
                 ResolveWorkspaceShipInput => "resolve_workspace_ship_input",
                 RevertOnRed => "revert_on_red",
                 RunAutoTaskScheduler => "run_auto_task_scheduler",
+                ScanUnresolvedWork => "scan_unresolved_work",
                 Sleep => "sleep",
                 ValidateBundles => "validate_bundles",
             }
