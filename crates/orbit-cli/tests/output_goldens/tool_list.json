@@ -505,6 +505,84 @@
   {
     "active": true,
     "builtin": true,
+    "description": "Append a workspace session-log entry (status, note, or check_later). Bodies are immutable; check_later rows wake the drain scan until resolved.",
+    "enabled": true,
+    "name": "orbit.session_log.append",
+    "parameters": [
+      {
+        "description": "Entry kind: status, note, or check_later.",
+        "name": "kind",
+        "param_type": "string",
+        "required": true
+      },
+      {
+        "description": "Markdown body. Required, non-empty.",
+        "name": "body",
+        "param_type": "string",
+        "required": true
+      },
+      {
+        "description": "Optional task ids this note refers to.",
+        "name": "related_task_ids",
+        "param_type": "string_list",
+        "required": false
+      },
+      {
+        "description": "Optional job-run ids this note refers to.",
+        "name": "related_run_ids",
+        "param_type": "string_list",
+        "required": false
+      }
+    ],
+    "status": "active"
+  },
+  {
+    "active": true,
+    "builtin": true,
+    "description": "List workspace session-log entries. Filter by kind, unresolved check_later rows, or entries at/after `since` (RFC3339).",
+    "enabled": true,
+    "name": "orbit.session_log.list",
+    "parameters": [
+      {
+        "description": "Optional kind filter: status, note, or check_later.",
+        "name": "kind",
+        "param_type": "string",
+        "required": false
+      },
+      {
+        "description": "When true, return only unresolved check_later entries.",
+        "name": "unresolved_only",
+        "param_type": "boolean",
+        "required": false
+      },
+      {
+        "description": "Optional RFC3339 lower bound on entry timestamps.",
+        "name": "since",
+        "param_type": "string",
+        "required": false
+      }
+    ],
+    "status": "active"
+  },
+  {
+    "active": true,
+    "builtin": true,
+    "description": "Mark a check_later session-log entry resolved. Other kinds cannot be resolved; bodies are never edited.",
+    "enabled": true,
+    "name": "orbit.session_log.resolve",
+    "parameters": [
+      {
+        "description": "Session-log id (SL-NNNN).",
+        "name": "id",
+        "param_type": "string",
+        "required": true
+      }
+    ],
+    "status": "active"
+  },
+  {
+    "active": true,
+    "builtin": true,
     "description": "Create an Orbit task and return the created task JSON",
     "enabled": true,
     "name": "orbit.task.add",
@@ -522,7 +600,7 @@
         "required": true
       },
       {
-        "description": "Filesystem path to an existing directory inside the target repository (e.g. the repository root). This is a repository path, never a logical/bridge workspace id (such as a `ws_*` id). Falls back to the MCP session's `_meta.orbit.workspace` when omitted.",
+        "description": "Workspace selector: a registered workspace name, a logical workspace ID (`ws_*`), or an absolute path to a local checkout (a linked Git worktree resolves to its registered checkout). Falls back to the MCP session's `_meta.orbit.workspace` when omitted; never inferred from process cwd.",
         "name": "workspace",
         "param_type": "string",
         "required": false
