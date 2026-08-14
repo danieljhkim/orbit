@@ -10,6 +10,7 @@ mod json;
 mod pipeline_tools;
 mod search_tools;
 mod semantic_tools;
+mod session_log_tools;
 mod state_tools;
 mod task_tools;
 mod workflow_tools;

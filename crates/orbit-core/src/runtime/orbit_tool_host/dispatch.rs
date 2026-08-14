@@ -48,6 +48,15 @@ pub(super) fn execute(
             super::pipeline_tools::wait(runtime, input, agent, model)
         }
         OrbitBuiltinAction::Search => super::search_tools::search(runtime, input),
+        OrbitBuiltinAction::SessionLogAppend => {
+            super::session_log_tools::append_entry(runtime, input)
+        }
+        OrbitBuiltinAction::SessionLogList => {
+            super::session_log_tools::list_entries(runtime, input)
+        }
+        OrbitBuiltinAction::SessionLogResolve => {
+            super::session_log_tools::resolve_entry(runtime, input)
+        }
         OrbitBuiltinAction::SemanticIndex => super::semantic_tools::index(runtime, input),
         OrbitBuiltinAction::SemanticInstall => super::semantic_tools::install(runtime, input),
         OrbitBuiltinAction::SemanticStats => super::semantic_tools::stats(runtime),

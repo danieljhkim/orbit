@@ -19,6 +19,7 @@ pub mod engine;
 pub mod event_bus;
 pub mod mutation;
 pub(crate) mod orbit_tool_host;
+pub(crate) mod session_log;
 mod resolve;
 pub mod run_audit;
 pub(crate) mod run_input;
