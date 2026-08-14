@@ -3,7 +3,6 @@
 use std::sync::Arc;
 
 use orbit_agent::loop_engine::audit::{AuditSink, NullSink};
-use orbit_agent::loop_engine::transport::MessageRole;
 use orbit_common::types::activity_job::{AgentLoopSpec, Backend, OnDenial, Provider};
 use tempfile::NamedTempFile;
 
@@ -17,8 +16,6 @@ use orbit_tools::ToolContext;
 use serde_json::Value;
 
 use crate::RuntimeHost;
-use orbit_agent::loop_engine::{ContentBlock, Session};
-
 struct ReplayEnvGuard {
     fixture_prior: Option<String>,
 }
@@ -119,24 +116,6 @@ fn write_fixture(value: Value) -> NamedTempFile {
     )
     .expect("write fixture");
     file
-}
-
-fn replay_done_fixture() -> NamedTempFile {
-    write_fixture(serde_json::json!({
-        "turns": [{
-            "content": [{ "kind": "text", "text": "done" }],
-            "stop_reason": "end_turn"
-        }]
-    }))
-}
-
-fn first_user_text(session: &Session) -> &str {
-    let message = session.history().first().expect("first message");
-    assert_eq!(message.role, MessageRole::User);
-    match message.content.first().expect("first content") {
-        ContentBlock::Text { text } => text,
-        _ => panic!("expected text content"),
-    }
 }
 
 #[test]

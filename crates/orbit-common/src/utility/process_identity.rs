@@ -401,12 +401,14 @@ fn darwin_process_state(pid: u32) -> Option<(bool, libc::pid_t)> {
     let mut info = MaybeUninit::<libc::proc_bsdinfo>::uninit();
     let expected = i32::try_from(size_of::<libc::proc_bsdinfo>()).ok()?;
     // Safety: `info` points to `expected` writable bytes and is initialized
-    // only when libproc reports that it filled the complete structure.
+    // only when libproc reports that it filled the complete structure. The
+    // non-zero argument asks XNU's proc_info path to include zombie records;
+    // without it, proc_pidinfo returns no record once the process is zombified.
     let written = unsafe {
         libc::proc_pidinfo(
             pid as libc::pid_t,
             libc::PROC_PIDTBSDINFO,
-            0,
+            1,
             info.as_mut_ptr().cast(),
             expected,
         )
