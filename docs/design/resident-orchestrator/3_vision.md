@@ -1,8 +1,8 @@
 ---
 title: Resident Orchestrator — Vision
-owner: codex
-last_updated: 2026-07-18
-status: Draft
+owner: grok
+last_updated: 2026-08-14
+status: Accepted
 feature: resident-orchestrator
 doc_role: vision
 type: design
@@ -10,7 +10,7 @@ summary: Forward-looking questions for multi-resident routing, event-driven wake
 tags: [resident-orchestrator, epic, routines, cli]
 paths: [".orbit/resources/activities/**", ".orbit/resources/jobs/**", ".orbit/routines/**"]
 related_features: [resident-orchestrator, routines, host-registry, mcp-bridge]
-related_artifacts: []
+related_artifacts: [ORB-10775, ADR-0361]
 ---
 
 # Resident Orchestrator — Vision
@@ -90,6 +90,6 @@ losing the meaning or current state of the assignment.
 
 ## Task References
 
-- None yet — implementation tasks will be allocated after this Draft is accepted.
+- **[ORB-10775]** — v1 implementation epic. Items in §1 stay out of that epic.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

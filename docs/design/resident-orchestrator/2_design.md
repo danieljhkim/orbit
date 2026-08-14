@@ -1,8 +1,8 @@
 ---
 title: Resident Orchestrator — Design
-owner: codex
-last_updated: 2026-08-09
-status: Draft
+owner: grok
+last_updated: 2026-08-14
+status: Accepted
 feature: resident-orchestrator
 doc_role: design
 type: design
@@ -10,12 +10,12 @@ summary: Bounded, resumable CLI cycles for workspace-resident orchestration, dur
 tags: [resident-orchestrator, epic, routines, cli, decision-gates]
 paths: [".orbit/resources/activities/**", ".orbit/resources/jobs/**", ".orbit/routines/**", "crates/orbit-core/assets/**"]
 related_features: [resident-orchestrator, activity-job, routines, agent-families, host-registry]
-related_artifacts: [ORB-10332, ADR-0352]
+related_artifacts: [ORB-10332, ORB-10775, ORB-10776, ADR-0352, ADR-0361]
 ---
 
 # Resident Orchestrator — Design
 
-This document specifies the proposed resident-orchestrator contract. It covers how a high-level
+This document specifies the accepted resident-orchestrator contract. It covers how a high-level
 assignment is addressed, selected, resumed, clarified, decomposed, dispatched, and closed using
 Orbit's CLI backend, a resumable provider conversation, and durable task state. It does not change
 leaf implementation pipelines or introduce a general distributed workflow engine.
@@ -99,11 +99,12 @@ provider, model, and resident identity still match. Conversation continuity redu
 orientation cost and preserves the semantic thread across decisions, but it grants no authority
 and is never the source of truth for task or workflow state.
 
-The first Constellation canary is `ws_orbit`: Hohmann is bound explicitly to Codex Sol and loads
-its versioned memory layer before each cycle. Adopting this design changes Hohmann from a leaf that
-returns review/merge/closure to the front door into a codebase-bounded orchestrator that owns those
-steps inside `ws_orbit`. The front door still owns cross-workspace routing, product priority, and
-any independent oversight required by live policy.
+The first Constellation canary is `ws_orbit`, bound explicitly to crew `grok` (Grok Build /
+the workspace Grok default model) [ORB-10782]. The resident loads its versioned memory layer
+before each cycle and owns decomposition, shipment, review-wait, and closure inside `ws_orbit`.
+The front door still owns cross-workspace routing, product priority, and any independent
+oversight required by live policy. The earlier Hohmann / Codex Sol binding was an illustrative
+example and is not the canary.
 
 ## 3. The Resident Epic Cycle
 
@@ -267,12 +268,12 @@ routine fire supplies the resolved answer and fresh Orbit state to the resumed p
 conversation. V1 does not inject messages into a running turn and does not keep a process alive
 while waiting.
 
-For the Codex canary, a new cycle resumes the saved session through the non-interactive CLI resume
-surface documented in the
-[Codex CLI command reference](https://developers.openai.com/codex/cli/reference). That command
-shape is a provider adapter detail rather than an Orbit task invariant. A resume failure falls back
-to a new conversation after recording the failure; the unanswered or answered decision remains
-durable in Orbit either way.
+For the Grok canary, a new cycle resumes the saved session through the Grok Build CLI's
+non-interactive resume surface [ORB-10780]. Other providers (for example Codex's
+[CLI resume](https://developers.openai.com/codex/cli/reference)) keep their own argv; that
+shape is a provider adapter detail rather than an Orbit task invariant. A resume failure falls
+back to a new conversation after recording the failure; the unanswered or answered decision
+remains durable in Orbit either way.
 
 ### 5.3 Crash and restart behavior
 
@@ -418,6 +419,7 @@ newer durable task constraint.
 ## Task References
 
 - **[ORB-10332]** — Removed the unused HTTP epic pipeline assets that this design supersedes.
-- Further implementation tasks will be allocated after this Draft is accepted.
+- **[ORB-10775]** — Implementation epic (children ORB-10776–ORB-10782).
+- **[ADR-0361]** — The `epic` tag is the sole resident pickup selector.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

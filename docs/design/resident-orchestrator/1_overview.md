@@ -1,8 +1,8 @@
 ---
 title: Resident Orchestrator — Overview
-owner: codex
-last_updated: 2026-08-09
-status: Draft
+owner: grok
+last_updated: 2026-08-14
+status: Accepted
 feature: resident-orchestrator
 doc_role: overview
 type: design
@@ -10,7 +10,7 @@ summary: Workspace-addressed epic delegation to a resumable CLI orchestrator tha
 tags: [resident-orchestrator, epic, routines, cli, decision-gates]
 paths: [".orbit/resources/activities/**", ".orbit/resources/jobs/**", ".orbit/routines/**", "crates/orbit-core/assets/**"]
 related_features: [resident-orchestrator, activity-job, routines, agent-families]
-related_artifacts: []
+related_artifacts: [ORB-10775, ORB-10776, ORB-10777, ORB-10778, ORB-10779, ORB-10780, ORB-10781, ORB-10782, ADR-0361]
 ---
 
 # Resident Orchestrator — Overview
@@ -83,18 +83,27 @@ conflict/finding resolution, merge verification, child closure, and finally pare
 
 | Concern | File | Task |
 |---------|------|------|
-| Resident CLI identity | workspace `.orbit/resources/activities/resident_orchestrator.yaml` | Not allocated |
-| Epic selection and resume | proposed deterministic `select_resident_epic` activity | Not allocated |
-| Bounded ownership cycle | proposed `resident_epic_cycle` job | Not allocated |
-| Conversation continuity | proposed CLI session capture and resume adapter | Not allocated |
-| Supervisor/human decision path | structured parent-task request and answer comments | Not allocated |
-| Scheduled pickup | workspace `.orbit/routines/resident_epic.yaml` | Not allocated |
+| Design acceptance and Grok feature-lead | this folder | [ORB-10776] |
+| Epic selection and resume | proposed deterministic `select_resident_epic` activity | [ORB-10777] |
+| Supervisor/human decision path | structured parent-task request and answer comments | [ORB-10778] |
+| Resident CLI identity | workspace `.orbit/resources/activities/resident_orchestrator.yaml` | [ORB-10779] |
+| Bounded ownership cycle | proposed `resident_epic_cycle` job | [ORB-10779] |
+| Conversation continuity | Grok CLI session capture and resume adapter | [ORB-10780] |
+| Scheduled pickup | workspace `.orbit/routines/resident-epic-orbit` (disabled until canary) | [ORB-10781] |
+| `ws_orbit` grok canary | activity binding + routine enable after dry-run | [ORB-10782] |
 | Child delivery | existing `task_gate_pipeline` / explicit-ID shipment workflows | Existing mechanism |
 | HTTP epic retirement | former `task_epic_pipeline` and `epic_orchestrator` assets (removed in [ORB-10332]) | [ORB-10332] |
 
 ## Task References
 
 - **[ORB-10332]** — Remove the unused HTTP epic pipeline assets (`task_epic_pipeline`, `epic_orchestrator`) this design supersedes.
-- Further implementation tasks will be allocated after this Draft is accepted.
+- **[ORB-10775]** — Epic: resident orchestrator v1 (workspace-addressed CLI epic cycles).
+- **[ORB-10776]** — Accept this folder and claim `owner: grok`.
+- **[ORB-10777]** — Deterministic `select_resident_epic`.
+- **[ORB-10778]** — Checkpoint and decision comment protocol.
+- **[ORB-10779]** — `resident_orchestrator` activity and `resident_epic_cycle` job.
+- **[ORB-10780]** — Grok CLI conversation capture/resume.
+- **[ORB-10781]** — Disabled `resident-epic-orbit` routine.
+- **[ORB-10782]** — `ws_orbit` grok canary.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

@@ -1,8 +1,9 @@
 ---
 title: Resident Orchestrator — Decisions
-owner: codex
-last_updated: 2026-07-20
-status: Draft
+owner: grok
+last_updated: 2026-08-14
+last_validated: 2026-08-14
+status: Accepted
 feature: resident-orchestrator
 doc_role: decisions
 type: design
@@ -10,37 +11,51 @@ summary: ADR log for workspace-addressed epic delegation and CLI-backed resident
 tags: [resident-orchestrator, epic, routines, cli]
 paths: [".orbit/resources/activities/**", ".orbit/resources/jobs/**", ".orbit/routines/**"]
 related_features: [resident-orchestrator, activity-job, routines]
-related_artifacts: [ORB-10332]
+related_artifacts: [ORB-10332, ORB-10775, ORB-10776, ADR-0361]
 ---
 
 # Resident Orchestrator — Decisions
 
-ADR log for Resident Orchestrator. Entries are append-only and ordered by ascending global ID.
-Allocate every `ADR-NNNN` through `orbit.adr.add` before adding its heading. The store remains the
-source of truth for status, owner, related features, and related tasks.
+Decision record for resident-orchestrator, in ascending number order. This file is the
+authoritative body — there is no ADR store behind it. Numbering is repo-local:
+take the next unused number with `grep -rho 'ADR-[0-9]\{4\}' docs/ | sort -u | tail -1`.
 
-This folder is still Draft and has no allocated ADR. The candidate choices described in
-[2_design.md](./2_design.md)—workspace-addressed `epic` tasks, bounded CLI ownership cycles, and
-replacement rather than conversion of the HTTP epic pipeline—remain proposals until the design is
-accepted and implementation tasks are allocated. The HTTP epic pipeline this design supersedes was
-itself removed as unused in [ORB-10332].
+An entry is admitted through exactly one of two doors: it explains a specific
+code site that would otherwise look wrong (Door 1, carries `code_anchors:`), or
+it states a standing rule that decides future tradeoffs (Door 2, carries
+`scope:`). Everything else is design prose and belongs in `2_design.md`. See
+[CONVENTIONS.md §4](../CONVENTIONS.md#4-adrs-strict).
 
-## Candidate Decision: Epic Marker and Legacy Coexistence
+## ADR-0361 — Epic tag is the sole resident pickup selector
 
-**Proposal.** Resident orchestration selects root tasks by the `epic` tag rather than changing or
-depending on `TaskType`. The former `task_epic_pipeline` identified epics by `TaskType::Feature`;
-[ORB-10332] removed that pipeline, so the `epic` tag is now the sole epic selector.
+**Status:** Accepted · 2026-08 · [ORB-10776]
+**Scope:** resident epic selection and pickup (`select_resident_epic` and any successor)
 
-**Coexistence rule (obsolete).** The original proposal kept the two paths disjoint by workspace
-capability during a staged retirement. With the legacy pipeline removed in [ORB-10332], there is no
-second claimant to exclude, so this rule no longer applies.
+### Context
 
-**Why this proposal.** A tag is an explicit delegation signal that does not overload the broad
-`feature` type. This remains a candidate decision, not an allocated ADR.
+The former `task_epic_pipeline` treated a root `TaskType::Feature` as an epic. That pipeline
+was removed as unused in [ORB-10332]. A resident still needs an explicit delegation signal
+that does not overload the broad `feature` type, and that future pickup code will not
+reintroduce a second selector "just this once."
+
+### Decision
+
+Resident orchestration selects only root tasks tagged `epic`. The tag is a pickup
+boundary, not a new task type and not a change to `TaskType`. Child work is recognized
+by `parent_id`. `proposed` epics are never selected in v1.
+
+### Consequences
+
+- Creating a root `epic` in a workspace is the act of delegation.
+- A later impulse to key pickup on `type: feature`, assignee, or folder path is out of
+  contract unless this ADR is superseded.
+- Cost: an untagged large feature is invisible to the resident even if a human thinks of
+  it as an epic; pickup cannot be inferred from type or title.
 
 ## Task References
 
 - **[ORB-10332]** — Remove the unused HTTP epic pipeline (`task_epic_pipeline`, `epic_orchestrator`).
-- Further implementation tasks will be allocated after this Draft is accepted.
+- **[ORB-10775]** — v1 implementation epic.
+- **[ORB-10776]** — Accept this folder and record ADR-0361.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.
