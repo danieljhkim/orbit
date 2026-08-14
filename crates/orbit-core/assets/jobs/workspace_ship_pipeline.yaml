@@ -1,11 +1,8 @@
-# Workspace-local ship wrapper.
+# Workspace-local unattended wrapper.
 #
-# The routine supplies no input. The first deterministic step resolves the
-# active runtime's ship mode and configured base branch; the second invokes
-# and waits for the existing task_auto_pipeline with no explicit task IDs.
-# Waiting keeps this wrapper active for the full shipment, so the routine's
-# `overlap: forbid` covers the child run. Empty backlog is the child's existing
-# clean no-op path.
+# Existing sweeps retain this stable job name while delegating one tick to the
+# workspace sequencer. Waiting keeps this wrapper active for the full child
+# run, so the routine's `overlap: forbid` covers leaf or epic dispatch.
 schemaVersion: 2
 kind: Job
 metadata:
@@ -15,18 +12,14 @@ spec:
   kind: workflow
   max_active_runs: 1
   steps:
-    - id: resolve_ship_input
-      target: activity:resolve_workspace_ship_input
-      default_input: {}
-
-    - id: ship
+    - id: auto
       target: activity:invoke_and_wait
       default_input:
-        job_name: task_auto_pipeline
-        run_input: "{{ steps.resolve_ship_input.output }}"
+        job_name: workspace_auto_pipeline
+        run_input: {}
 
-    - id: require_ship_success
+    - id: require_auto_success
       target: activity:pipeline_success_guard
       default_input:
-        context: workspace ship pipeline
-        result: "{{ steps.ship.output }}"
+        context: workspace auto pipeline
+        result: "{{ steps.auto.output }}"

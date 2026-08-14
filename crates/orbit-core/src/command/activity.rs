@@ -27,6 +27,10 @@ pub(crate) const DEFAULT_ACTIVITY_FILES: &[(&str, &str)] = &[
         include_str!("../../assets/activities/apply_task_pilot_results.yaml"),
     ),
     (
+        "classify_workspace_auto_tasks",
+        include_str!("../../assets/activities/classify_workspace_auto_tasks.yaml"),
+    ),
+    (
         "epic_orchestrator",
         include_str!("../../assets/activities/epic_orchestrator.yaml"),
     ),

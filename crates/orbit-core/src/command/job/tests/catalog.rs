@@ -53,6 +53,10 @@ const DEFAULT_JOB_FILES: &[(&str, &str)] = &[
         include_str!("../../../../assets/jobs/workspace_ship_pipeline.yaml"),
     ),
     (
+        "workspace_auto_pipeline",
+        include_str!("../../../../assets/jobs/workspace_auto_pipeline.yaml"),
+    ),
+    (
         "worktree_gc_pipeline",
         include_str!("../../../../assets/jobs/worktree_gc_pipeline.yaml"),
     ),
@@ -787,38 +791,27 @@ fn triage_pipeline_is_single_flight_and_gates_on_candidates() {
 }
 
 #[test]
-fn workspace_ship_pipeline_resolves_then_waits_for_normal_auto_ship() {
+fn workspace_ship_pipeline_waits_for_workspace_auto_sequencer() {
     let yaml = DEFAULT_JOB_FILES
         .iter()
         .find_map(|(name, yaml)| (*name == "workspace_ship_pipeline").then_some(*yaml))
         .expect("workspace ship pipeline default exists");
     let asset = load_job_asset(yaml).expect("parse workspace ship pipeline");
     assert_eq!(asset.spec.max_active_runs, 1);
-    assert_eq!(asset.spec.steps.len(), 3);
-    assert_eq!(asset.spec.steps[0].id, "resolve_ship_input");
-    assert_eq!(asset.spec.steps[1].id, "ship");
-    assert_eq!(asset.spec.steps[2].id, "require_ship_success");
+    assert_eq!(asset.spec.steps.len(), 2);
+    assert_eq!(asset.spec.steps[0].id, "auto");
+    assert_eq!(asset.spec.steps[1].id, "require_auto_success");
 
     match &asset.spec.steps[0].body {
         JobV2StepBody::TargetRef(target) => {
-            assert_eq!(target.target, "activity:resolve_workspace_ship_input");
-        }
-        other => panic!("expected resolver target ref, got {other:?}"),
-    }
-    match &asset.spec.steps[1].body {
-        JobV2StepBody::TargetRef(target) => {
             assert_eq!(target.target, "activity:invoke_and_wait");
             let input = target.default_input.as_ref().expect("ship input");
-            assert_eq!(input["job_name"], "task_auto_pipeline");
-            assert_eq!(
-                input["run_input"],
-                Value::String("{{ steps.resolve_ship_input.output }}".to_string())
-            );
-            assert!(input.get("task_ids").is_none());
+            assert_eq!(input["job_name"], "workspace_auto_pipeline");
+            assert_eq!(input["run_input"], json!({}));
         }
         other => panic!("expected invoke-and-wait target ref, got {other:?}"),
     }
-    match &asset.spec.steps[2].body {
+    match &asset.spec.steps[1].body {
         JobV2StepBody::TargetRef(target) => {
             assert_eq!(target.target, "activity:pipeline_success_guard");
         }
@@ -827,6 +820,57 @@ fn workspace_ship_pipeline_resolves_then_waits_for_normal_auto_ship() {
     assert!(!yaml.contains("auto_ship"));
     assert!(!yaml.contains("ship-sweep"));
     assert!(!yaml.contains("type: shell"));
+}
+
+#[test]
+fn workspace_auto_pipeline_is_single_flight_and_conditionally_dispatches() {
+    let yaml = DEFAULT_JOB_FILES
+        .iter()
+        .find_map(|(name, yaml)| (*name == "workspace_auto_pipeline").then_some(*yaml))
+        .expect("workspace auto pipeline exists");
+    assert_eq!(
+        yaml,
+        include_str!("../../../../../../.orbit/resources/jobs/workspace_auto_pipeline.yaml"),
+        "shipped and workspace workspace_auto_pipeline resources must remain byte-identical"
+    );
+    let asset = load_job_asset(yaml).expect("workspace auto pipeline parses");
+    assert_eq!(asset.spec.max_active_runs, 1);
+    assert_eq!(asset.spec.steps[0].id, "resolve_ship_input");
+    assert_eq!(asset.spec.steps[1].id, "classify");
+    let JobV2StepBody::TargetRef(classify) = &asset.spec.steps[1].body else {
+        panic!("classify step must use the deterministic activity");
+    };
+    assert_eq!(classify.target, "activity:classify_workspace_auto_tasks");
+
+    let ship = &asset.spec.steps[2];
+    assert_eq!(ship.id, "ship_leaves");
+    assert_eq!(
+        ship.when.as_deref(),
+        Some("{{ steps.classify.output.decision }} == ship")
+    );
+    let JobV2StepBody::TargetRef(ship_target) = &ship.body else {
+        panic!("ship step must invoke and wait");
+    };
+    assert_eq!(ship_target.target, "activity:invoke_and_wait");
+    assert_eq!(
+        ship_target.default_input.as_ref().expect("ship input")["job_name"],
+        "task_auto_pipeline"
+    );
+
+    let epic = &asset.spec.steps[4];
+    assert_eq!(epic.id, "run_epic");
+    assert_eq!(
+        epic.when.as_deref(),
+        Some("{{ steps.classify.output.decision }} == epic")
+    );
+    let JobV2StepBody::TargetRef(epic_target) = &epic.body else {
+        panic!("epic step must invoke and wait");
+    };
+    assert_eq!(epic_target.target, "activity:invoke_and_wait");
+    assert_eq!(
+        epic_target.default_input.as_ref().expect("epic input")["job_name"],
+        "epic_pipeline"
+    );
 }
 
 #[test]
@@ -953,6 +997,7 @@ fn orchestration_jobs_do_not_enable_generic_recovery() {
         "task_gate_pipeline",
         "task_triage_pipeline",
         "workspace_ship_pipeline",
+        "workspace_auto_pipeline",
     ] {
         let yaml = DEFAULT_JOB_FILES
             .iter()

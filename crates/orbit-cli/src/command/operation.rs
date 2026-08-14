@@ -285,6 +285,12 @@ impl Commands {
             Commands::Run(command) => {
                 use super::run::RunSubcommand;
                 let (subcommand, target_type, target_id, runtime_need) = match &command.command {
+                    RunSubcommand::Auto(_) => (
+                        "auto",
+                        Some("workflow"),
+                        Some("auto"),
+                        RuntimeNeed::Required,
+                    ),
                     RunSubcommand::Ship(_) => (
                         "ship",
                         Some("workflow"),

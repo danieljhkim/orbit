@@ -16,7 +16,9 @@ use crate::runtime::task_locks::{
     requested_task_files, task_lock_conflicts, workspace_orbit_dir, workspace_task_reservation_id,
 };
 
-use super::{backlog_exclusion, pipeline_actions, scan_unresolved, task_pilot, triage};
+use super::{
+    backlog_exclusion, pipeline_actions, scan_unresolved, task_pilot, triage, workspace_auto,
+};
 
 /// Whether `action` is dispatchable by this runtime — the capability probe
 /// behind `RuntimeHost::has_deterministic_action` [ORB-10385].
@@ -189,6 +191,12 @@ pub(crate) fn run_deterministic(
                     message: error.to_string(),
                 }
             })
+        }
+        // One workspace logistics tick [ORB-10788 / ADR-0365]: ship eligible
+        // loose leaves first, hold while an epic root is active, otherwise
+        // select one ordered backlog epic root for the supervisor pipeline.
+        CoreDeterministicAction::ClassifyWorkspaceAutoTasks => {
+            workspace_auto::classify_workspace_auto_tasks(runtime, action, input)
         }
         // ADR-0223: scheduled shipment resolves only the active runtime's
         // canonical ship input; cross-workspace enumeration stays in the

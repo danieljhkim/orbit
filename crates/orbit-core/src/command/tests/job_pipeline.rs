@@ -486,6 +486,59 @@ fn ship_submission_refuses_a_missing_explicit_task_before_persisting_a_run() {
 }
 
 #[test]
+fn ship_submission_refuses_an_epic_root_but_allows_its_child() {
+    let (_root, runtime) = test_runtime();
+    let epic = runtime
+        .add_task(TaskAddParams {
+            title: "Epic root".to_string(),
+            description: "Supervisor-owned fixture".to_string(),
+            tags: vec!["epic".to_string()],
+            ..Default::default()
+        })
+        .expect("create epic root");
+    let child = runtime
+        .add_task(TaskAddParams {
+            parent_id: Some(epic.id.clone()),
+            title: "Epic child".to_string(),
+            description: "Leaf fixture".to_string(),
+            ..Default::default()
+        })
+        .expect("create epic child");
+
+    let error = runtime
+        .submit_ship_run(
+            ShipMode::Local,
+            Some("main"),
+            std::slice::from_ref(&epic.id),
+            Some("test"),
+            None,
+        )
+        .expect_err("epic root must be refused before dispatch");
+    assert!(matches!(error, OrbitError::InvalidInput(message) if message.contains("epic root")));
+    assert!(
+        runtime
+            .list_job_runs(JobRunListParams::default())
+            .expect("list job runs")
+            .is_empty(),
+        "root refusal must happen before pipeline persistence"
+    );
+
+    let child_error = runtime
+        .submit_ship_run(
+            ShipMode::Local,
+            Some("main"),
+            std::slice::from_ref(&child.id),
+            Some("test"),
+            None,
+        )
+        .expect_err("fixture intentionally has no deployed job asset");
+    assert!(
+        matches!(child_error, OrbitError::NotFound { .. }),
+        "epic child must pass leaf admission and reach job lookup: {child_error:?}"
+    );
+}
+
+#[test]
 fn ship_submission_mixed_explicit_selection_identifies_the_missing_task() {
     let (_root, runtime) = test_runtime();
     let existing_id = add_backlog_task(&runtime);

@@ -182,7 +182,7 @@ fn legacy_ship_form(value: &str) -> Option<&'static str> {
         }
         "pr" => Some("`orbit run ship pr` was replaced by `orbit run ship --mode pr <TASK_ID>`"),
         "auto" | "ship-auto" => Some(
-            "`orbit run ship auto` was replaced by `orbit run ship` (auto mode runs when no task ids are supplied)",
+            "`orbit run ship auto` was replaced by `orbit run auto`; `orbit run ship` remains leaf-only auto shipment when no task ids are supplied",
         ),
         "list" | "show" => Some(
             "`orbit run ship list/show` was removed; use `orbit run history -j <JOB_ID>` and `orbit run show <RUN_ID>` for run inspection",
