@@ -63,7 +63,8 @@ template:
     type `chore`, and the candidate version and evidence in its description.
     Carry the release runbook context selectors
     `file:CHANGELOG.md`, `file:Cargo.toml`, `file:Cargo.lock`,
-    `file:plugin/.claude-plugin/plugin.json`, and
+    `file:plugin/.claude-plugin/plugin.json`,
+    `file:plugin/.codex-plugin/plugin.json`, and
     `file:plugin/npm/package.json` onto that canonical task.
     If one exists, update only that canonical task with the fresh candidate,
     survey evidence, and breaking-change candidates. Preserve the human review
@@ -72,7 +73,7 @@ template:
     `execution_summary`.
 
     The canonical task must instruct its executor to follow `RELEASING.md`,
-    including the release checklist and the four versioned release files. The
+    including the release checklist and all five versioned release files. The
     handoff stops after surveying, candidate semver analysis, and creating or
     updating that one task. It must not commit, tag, push, publish, promote or
     merge branches, bump versions, edit `CHANGELOG.md`, or ask for or record
@@ -101,6 +102,7 @@ template:
   - A blocked or no-release pass changes no repository or release state and completes with evidence in execution_summary.
   - An eligible pass records the latest reachable v* tag, commit survey, candidate semver bump, and breaking-change candidates with exact evidence.
   - An eligible pass creates or updates exactly one canonical Prepare v<X.Y.Z> release task carrying the release tag and reports its task ID.
+  - The canonical release task carries `file:plugin/.codex-plugin/plugin.json` alongside the other four version-bearing file selectors.
   - The canonical task stops before commits, tags, pushes, publishing, branch promotion, version bumps, CHANGELOG edits, or human confirmation of breaking-change classification, and points to RELEASING.md.
   - Repeated passes do not duplicate the open probe or the canonical release-preparation task.
   task_type: chore
