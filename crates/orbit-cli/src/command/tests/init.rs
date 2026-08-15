@@ -136,7 +136,7 @@ fn non_interactive_init_against_non_global_root_leaves_home_skill_links_untouche
         ("sol", "codex", "gpt-5.6-sol"),
         ("terra", "codex", "gpt-5.6-terra"),
         ("luna", "codex", "gpt-5.6-luna"),
-        ("gemini", "gemini", "pro"),
+        ("gemini", "gemini", "gemini-3.7-flash"),
         ("grok", "grok", "grok-4.6"),
         ("qa", "", ""),
     ];

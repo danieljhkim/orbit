@@ -57,16 +57,16 @@ pub const CODEX_DEFAULT_MODEL: &str = CODEX_TERRA_MODEL;
 pub const CODEX_DEFAULT_WEAK: &str = "gpt-5.4-mini";
 
 /// Default gemini model for the provider-default map.
-pub const GEMINI_DEFAULT_MODEL: &str = "gemini-3-pro";
+pub const GEMINI_DEFAULT_MODEL: &str = "gemini-3.7-flash";
 
-/// Default gemini model seeded into crew roles (the `pro` CLI alias).
-pub const GEMINI_CREW_MODEL: &str = "pro";
+/// Default gemini model seeded into crew roles.
+pub const GEMINI_CREW_MODEL: &str = "gemini-3.7-flash";
 
 /// Default gemini "strong" model used by the executor model pair.
 pub const GEMINI_PAIR_STRONG: &str = "gemini-3.1-pro";
 
 /// Default gemini "weak" model used by the executor model pair.
-pub const GEMINI_PAIR_WEAK: &str = "gemini-3-flash";
+pub const GEMINI_PAIR_WEAK: &str = "gemini-3.7-flash";
 
 /// Default Grok Build model (the canonical model listed by `grok models`).
 pub const GROK_DEFAULT_MODEL: &str = "grok-4.6";

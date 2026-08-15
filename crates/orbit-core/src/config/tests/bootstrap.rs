@@ -71,7 +71,7 @@ fn gemini_only_seeds_gemini_without_qa() {
     let parsed = parsed_config(&contents);
 
     assert_eq!(crew_names(&parsed), vec!["gemini"]);
-    assert_crew(&parsed, "gemini", "gemini", "pro");
+    assert_crew(&parsed, "gemini", "gemini", "gemini-3.7-flash");
     assert_default_crew(&parsed, Some("gemini"));
 }
 
