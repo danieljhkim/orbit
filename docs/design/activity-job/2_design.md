@@ -172,12 +172,20 @@ across kinds (§4 above): skills merge workspace-over-global while activities
 keep shipped defaults authoritative. Provenance of the file Orbit wrote is the
 same question for every kind.
 
+Activity *fault* detection is the exception: it walks every production catalog
+directory (env override, global managed tree, workspace `.orbit/resources/activities/`)
+and applies the same `load_activity_asset` + tool-allowlist validation catalog
+construction uses, so a workspace file that fails `orbit activity list` or job
+dispatch cannot be reported healthy. Retired `spec.backend: http|auto` findings
+name `orbit doctor --fix-retired-activity-backends`, which deletes only that
+key from schemaVersion 2 agent-loop activities.
+
 `orbit doctor --fix-stale-artifacts` retires only deprecated artifacts whose
 digest still proves Orbit wrote them, preserving locally modified ones under
 `.retired-managed/` rather than deleting them. Faulty and user-authored files
-are reported and never touched. A workspace-authored fault is a `Warning`; only
-an unloadable *shipped default* is an `Error`, which keeps the `orbit doctor`
-exit code stable for existing cron and CI callers.
+are reported and never touched by that flag. A workspace-authored fault is a
+`Warning`; only an unloadable *shipped default* is an `Error`, which keeps the
+`orbit doctor` exit code stable for existing cron and CI callers.
 
 Direct single-activity runtime helpers:
 

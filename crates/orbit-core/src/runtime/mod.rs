@@ -512,6 +512,16 @@ impl OrbitRuntime {
             .collect()
     }
 
+    /// Production activity-catalog directories in load order. Doctor reuses
+    /// this list so a workspace file that fails catalog construction cannot
+    /// be reported healthy.
+    pub(crate) fn v2_activity_catalog_paths(&self) -> Vec<PathBuf> {
+        self.v2_activity_catalog_dirs()
+            .into_iter()
+            .map(|dir| dir.path().to_path_buf())
+            .collect()
+    }
+
     fn v2_activity_catalog_dirs(&self) -> Vec<CatalogDirectory<V2ActivityCatalogDirKind>> {
         let mut dirs = CatalogDirectoryList::default();
 

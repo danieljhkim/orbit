@@ -630,3 +630,64 @@ fn retired_graph_cleanup_unlinks_boundaries_without_following_them() {
     assert!(fs::symlink_metadata(local_graph).is_err());
     assert!(fs::symlink_metadata(shared_graph).is_err());
 }
+
+#[test]
+fn workspace_retired_backend_warns_artifacts_activities_with_repair_command() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let runtime = workspace_runtime(&temp);
+    let activities = temp
+        .path()
+        .join("repo")
+        .join(".orbit")
+        .join("resources")
+        .join("activities");
+    fs::create_dir_all(&activities).expect("create workspace activities");
+    let path = activities.join("epic_orchestrator.yaml");
+    fs::write(
+        &path,
+        "schemaVersion: 2\nkind: Activity\nmetadata:\n  name: epic_orchestrator\nspec:\n  type: agent_loop\n  description: fixture\n  instruction: do the work\n  backend: http\n",
+    )
+    .expect("write retired backend activity");
+
+    let results = runtime.doctor_workspace().expect("doctor");
+    let row = status_of(&results, "artifacts-activities");
+    assert_eq!(row.status, WorkspaceDoctorStatus::Warning, "{row:?}");
+    assert!(
+        row.message.contains("epic_orchestrator.yaml"),
+        "{}",
+        row.message
+    );
+    assert!(
+        row.message.contains("spec.backend: http"),
+        "{}",
+        row.message
+    );
+    assert!(
+        row.message.contains("schemaVersion 2 parse failed"),
+        "{}",
+        row.message
+    );
+    assert_eq!(
+        row.remediation.as_deref(),
+        Some("Run `orbit doctor --fix-retired-activity-backends`.")
+    );
+
+    let repaired = runtime
+        .repair_retired_activity_backends()
+        .expect("repair retired backends");
+    assert_eq!(repaired.repaired, vec![path.clone()]);
+    assert!(repaired.skipped.is_empty(), "{repaired:?}");
+    assert!(
+        !fs::read_to_string(&path)
+            .expect("read repaired activity")
+            .contains("backend:"),
+        "repair must remove only the backend key"
+    );
+
+    let after = runtime.doctor_workspace().expect("doctor after repair");
+    assert_eq!(
+        status_of(&after, "artifacts-activities").status,
+        WorkspaceDoctorStatus::Ok,
+        "{after:?}"
+    );
+}

@@ -410,10 +410,7 @@ fn extract_denied_for_path(message: &str) -> Option<String> {
     let prefix = &message[..marker_idx];
     // Historical policy messages used `fs.<op> denied for \`...\``. Match any
     // `fs.*` prefix so stored traces from retired builtins still parse.
-    let last_token = prefix.rsplit_once('.').map(|(head, op)| (head, op));
-    let Some((head, op)) = last_token else {
-        return None;
-    };
+    let (head, op) = prefix.rsplit_once('.')?;
     if !head.ends_with("fs") || op.is_empty() {
         return None;
     }

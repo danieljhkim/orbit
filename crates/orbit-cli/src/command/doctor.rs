@@ -29,6 +29,10 @@ pub struct DoctorCommand {
     /// Retire deprecated skills, jobs, activities, auto-tasks, and routines that Orbit itself wrote. Locally modified ones are preserved, not deleted.
     #[arg(long)]
     pub fix_stale_artifacts: bool,
+
+    /// Remove known retired `spec.backend` values (`http`, `auto`) from schemaVersion 2 agent-loop activities. Unknown backends and unrelated parse failures are left untouched.
+    #[arg(long)]
+    pub fix_retired_activity_backends: bool,
 }
 
 impl Execute for DoctorCommand {
@@ -55,6 +59,22 @@ impl Execute for DoctorCommand {
             let removed = runtime.remove_stale_definition_artifacts()?;
             if !self.json {
                 println!("Retired {removed} deprecated definition artifact(s).");
+            }
+        }
+        if self.fix_retired_activity_backends {
+            let report = runtime.repair_retired_activity_backends()?;
+            if !self.json {
+                println!(
+                    "Removed retired spec.backend from {} activity file(s).",
+                    report.repaired.len()
+                );
+                for skipped in &report.skipped {
+                    println!(
+                        "Left untouched {}: {}",
+                        skipped.path.display(),
+                        skipped.reason
+                    );
+                }
             }
         }
         let results = runtime.doctor_workspace()?;

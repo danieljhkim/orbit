@@ -504,6 +504,7 @@ fn sha256_hex(content: &[u8]) -> String {
 }
 
 pub(crate) mod activity;
+pub(crate) mod activity_catalog_health;
 pub mod artifact_health;
 pub mod audit_event;
 pub(crate) mod docs;

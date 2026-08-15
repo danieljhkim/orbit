@@ -138,7 +138,8 @@ pub use audit_envelope::{
 };
 pub use catalog::{
     ACTIVITY_REF_PREFIX, CatalogDirectory, CatalogDirectoryList, CatalogError, ResolveError,
-    V2ActivityCatalog, V2JobCatalog, catalog_error_to_orbit, resolve_job_target_refs,
+    V2ActivityCatalog, V2JobCatalog, catalog_error_to_orbit, load_activity_catalog_asset,
+    resolve_job_target_refs, validate_catalog_activity_tools,
 };
 pub use job_v2::{
     BackoffStrategy, FanInSpec, FanOutBlock, JobKind, JobV2, JobV2Step, JobV2StepBody, JoinMode,
