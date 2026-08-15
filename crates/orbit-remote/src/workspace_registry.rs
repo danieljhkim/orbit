@@ -17,7 +17,16 @@ use crate::host_identity::{HostIdentityState, inspect_host_identity};
 
 /// Returns the global Orbit directory: `~/.orbit/`.
 pub fn global_orbit_dir() -> Result<PathBuf, OrbitError> {
-    orbit_core::runtime::resolve_global_root()
+    let home = std::env::var("HOME")
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .or_else(|| {
+            std::env::var("USERPROFILE")
+                .ok()
+                .filter(|value| !value.trim().is_empty())
+        })
+        .ok_or_else(|| OrbitError::WorkspaceError("cannot determine home directory".to_string()))?;
+    Ok(PathBuf::from(home).join(".orbit"))
 }
 
 /// Returns the path to the global workspace registry file.
@@ -311,10 +320,6 @@ pub(crate) fn ambiguous_workspace_selector(selector: &str) -> OrbitError {
     OrbitError::InvalidInput(format!(
         "ambiguous workspace selector '{selector}'; it matches more than one registered workspace"
     ))
-}
-
-pub(crate) fn is_ambiguous_workspace_selector(error: &OrbitError) -> bool {
-    matches!(error, OrbitError::InvalidInput(message) if message.starts_with("ambiguous workspace selector "))
 }
 
 /// Finds the local checkout for a workspace ID or name.

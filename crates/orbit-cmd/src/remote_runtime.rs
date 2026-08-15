@@ -1,20 +1,19 @@
-//! Registry-aware composition over Core's neutral runtime seams.
+//! Application composition over Remote's registry and Core's runtime seams.
 
 use std::path::{Path, PathBuf};
 
 use orbit_common::types::{
-    OrbitError, Workspace, WorkspaceCheckout, WorkspaceCheckoutRole, WorkspaceRegistry,
-    WorkspaceStatus,
+    HOST_TOML_FILE, OrbitError, Workspace, WorkspaceCheckout, WorkspaceCheckoutRole,
+    WorkspaceRegistry, WorkspaceStatus,
 };
+use orbit_core::OrbitRuntime;
 use orbit_core::runtime::{
     OrbitRuntimeRoots, ResolvedOrbitRoots, WorkspaceRootHint, WorkspaceRuntimeBinding,
 };
-use orbit_core::{OrbitRuntime, resolved_ship_mode};
 use orbit_store::sqlite::task_registry::{TaskRegistryStore, task_registry_path};
-use orbit_store::workspace_id_for_orbit_dir;
 use serde_json::Value;
 
-use crate::{HOST_TOML_FILE, load_host_identity, workspace_registry};
+use orbit_remote::{load_host_identity, workspace_registry};
 
 /// Remote workspace metadata keeps the logical catalog ID distinct from the
 /// task/runtime ID stored in `.orbit/config.yaml`.
@@ -26,6 +25,13 @@ pub struct ResolvedWorkspaceBinding {
     pub owner_machine_id: Option<String>,
 }
 
+/// One server-local workspace selected from the registry, before Core opens a
+/// runtime for it.
+pub struct ResolvedWorkspaceSelection {
+    pub workspace: Workspace,
+    pub checkout: WorkspaceCheckout,
+}
+
 /// Build Core's authoritative runtime binding for a registered checkout.
 /// The runtime ID deliberately comes from config.yaml rather than the logical
 /// registry record because legacy installations may validly differ (L-0098).
@@ -33,11 +39,7 @@ pub fn workspace_runtime_binding(
     workspace: &Workspace,
     checkout: &WorkspaceCheckout,
 ) -> Result<WorkspaceRuntimeBinding, OrbitError> {
-    Ok(WorkspaceRuntimeBinding {
-        workspace_id: workspace_id_for_orbit_dir(&checkout.orbit_dir)?,
-        repo_root: checkout.repo_root.clone(),
-        ship_mode: resolved_ship_mode(workspace),
-    })
+    orbit_core::runtime::workspace_runtime_binding(workspace, checkout)
 }
 
 pub fn resolved_workspace_binding(
@@ -93,10 +95,9 @@ impl RemoteRuntimeFactory {
 
     /// Bootstrap a CLI runtime from `--root` and/or `--workspace`.
     ///
-    /// ADR-0361: `--workspace` is the workspace selector (name, `ws_*` id, or
-    /// absolute checkout path). `--root` stays a data-directory override and
-    /// is never overloaded as a selector. Omitting `--workspace` keeps today's
-    /// cwd walk.
+    /// `--workspace` is the workspace selector (name, `ws_*` id, or absolute
+    /// checkout path). `--root` stays a data-directory override and is never
+    /// overloaded as a selector. Omitting `--workspace` keeps the cwd walk.
     pub fn initialize_with_overrides(
         root_override: Option<&Path>,
         workspace_selector: Option<&str>,
@@ -118,15 +119,30 @@ impl RemoteRuntimeFactory {
             Some(root) => root.to_path_buf(),
             None => workspace_registry::global_orbit_dir()?,
         };
-        sync_task_prefix(&global_root)?;
+        let selected = Self::resolve_workspace_selector(&global_root, selector)?;
+        Self::open_registered_checkout(&global_root, &selected.workspace, &selected.checkout)
+    }
+
+    /// Resolve a workspace selector against this machine's registry.
+    ///
+    /// This is the shared server/CLI bootstrap seam. It performs correctness
+    /// checks needed to construct a runtime, but makes no transport,
+    /// authorization, or cross-machine routing decision.
+    pub fn resolve_workspace_selector(
+        global_root: &Path,
+        selector: &str,
+    ) -> Result<ResolvedWorkspaceSelection, OrbitError> {
         let registry = workspace_registry::load_registry_from(
-            &workspace_registry::registry_path_for(&global_root),
+            &workspace_registry::registry_path_for(global_root),
         )?;
         let (workspace, checkout) = resolve_cli_workspace_binding(&registry, selector)?;
         if workspace.status != WorkspaceStatus::Active {
             return Err(unsupported_cli_workspace(selector));
         }
-        Self::open_registered_checkout(&global_root, workspace, checkout)
+        Ok(ResolvedWorkspaceSelection {
+            workspace: workspace.clone(),
+            checkout: checkout.clone(),
+        })
     }
 
     pub fn open_resolved_roots(roots: OrbitRuntimeRoots) -> Result<OrbitRuntime, OrbitError> {
@@ -178,11 +194,10 @@ impl RemoteRuntimeFactory {
 
     /// Bind a CLI `orbit tool run` invocation to the workspace named in `input`.
     ///
-    /// ORB-10769: this is the single CLI-path resolver above the tools. A
-    /// non-empty `workspace` either rebinds the runtime to that registered
-    /// checkout or fails closed naming the selector. MCP resolution
-    /// (`McpHost::resolve_workspace`) is a separate seam and still never
-    /// falls back to process cwd.
+    /// This is the single local CLI resolver above the tools. A non-empty
+    /// `workspace` either rebinds the runtime to that registered checkout or
+    /// fails closed naming the selector. MCP resolves selectors independently
+    /// on the accepting server and never falls back to process cwd.
     pub fn bind_cli_tool_workspace(
         runtime: &OrbitRuntime,
         input: &mut Value,
@@ -214,6 +229,12 @@ impl RemoteRuntimeFactory {
             }
         }
     }
+}
+
+/// Project the server host's task namespace before Core opens a selected
+/// workspace runtime.
+pub fn sync_runtime_task_prefix(global_root: &Path) -> Result<(), OrbitError> {
+    sync_task_prefix(global_root)
 }
 
 enum CliWorkspaceTarget<'a> {

@@ -2,10 +2,11 @@ use std::collections::BTreeSet;
 
 use chrono::{TimeZone, Utc};
 use orbit_common::types::{
-    HostNameResolution, HostStatus, Workspace, WorkspaceRegistry, WorkspaceStatus,
+    HOST_IDENTITY_SCHEMA_VERSION, HostNameResolution, HostStatus, Workspace, WorkspaceRegistry,
+    WorkspaceStatus,
 };
 
-use crate::host_identity::{HOST_IDENTITY_SCHEMA_VERSION, HostIdentity, HostMode};
+use crate::host_identity::{HostIdentity, HostMode};
 use crate::host_registry::HostRegistryService;
 use crate::persistence::RemoteStore;
 

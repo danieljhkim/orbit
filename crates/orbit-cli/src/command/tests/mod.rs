@@ -11,8 +11,6 @@ mod sweep;
 
 use clap::{Command, CommandFactory, Parser, error::ErrorKind};
 
-use orbit_common::types::McpCapability;
-
 use super::{
     Cli, Commands,
     docs::DocsSubcommand,
@@ -176,58 +174,21 @@ fn cli_parses_mcp_serve() {
 }
 
 #[test]
-fn cli_parses_owner_mcp_serve_with_one_exact_capability() {
-    // ORB-10727 [ADR-0355]: `--hub` is withdrawn; `--owner` selects which
-    // server this process presents and asserts no machine-level role.
+fn cli_rejects_removed_mcp_role_and_capability_flags() {
     assert_cli_rejects(
         &["orbit", "mcp", "serve", "--hub"],
         ErrorKind::UnknownArgument,
         "--hub",
     );
-    let cli = Cli::parse_from([
-        "orbit",
-        "mcp",
-        "serve",
-        "--owner",
-        "--capabilities",
-        "operator",
-    ]);
-    match cli.command {
-        Commands::Mcp(command) => match command.command {
-            McpSubcommand::Serve(args) => {
-                assert!(args.owner);
-                assert_eq!(args.capabilities, Some(McpCapability::Operator));
-            }
-            _ => panic!("expected mcp serve"),
-        },
-        _ => panic!("expected top-level mcp command"),
-    }
-}
-
-#[test]
-fn cli_parses_broker_capability_and_rejects_unknown_values() {
-    let cli = Cli::parse_from(["orbit", "mcp", "serve", "--capabilities", "operator"]);
-    match cli.command {
-        Commands::Mcp(command) => match command.command {
-            McpSubcommand::Serve(args) => {
-                assert!(!args.owner);
-                assert_eq!(args.capabilities, Some(McpCapability::Operator));
-            }
-            _ => panic!("expected mcp serve"),
-        },
-        _ => panic!("expected top-level mcp command"),
-    }
     assert_cli_rejects(
-        &[
-            "orbit",
-            "mcp",
-            "serve",
-            "--owner",
-            "--capabilities",
-            "admin",
-        ],
-        ErrorKind::ValueValidation,
-        "admin",
+        &["orbit", "mcp", "serve", "--owner"],
+        ErrorKind::UnknownArgument,
+        "--owner",
+    );
+    assert_cli_rejects(
+        &["orbit", "mcp", "serve", "--capabilities", "operator"],
+        ErrorKind::UnknownArgument,
+        "--capabilities",
     );
 }
 

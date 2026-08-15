@@ -38,8 +38,8 @@ mod output;
 mod parse;
 
 use clap::{Arg, ArgMatches, Command, CommandFactory, FromArgMatches};
+use orbit_cmd::remote_runtime::RemoteRuntimeFactory;
 use orbit_core::ActorIdentity;
-use orbit_remote::runtime::RemoteRuntimeFactory;
 
 #[cfg(test)]
 use crate::command::init::InitCommand;

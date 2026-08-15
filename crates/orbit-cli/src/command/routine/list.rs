@@ -1,6 +1,6 @@
 use clap::Args;
 use comfy_table::Cell;
-use orbit_remote::routines::routine_statuses;
+use orbit_cmd::remote_routines::routine_statuses;
 use orbit_remote::workspace_registry;
 use serde_json::json;
 

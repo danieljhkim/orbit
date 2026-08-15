@@ -3,7 +3,7 @@
 
 use clap::Args;
 use orbit_core::OrbitRuntime;
-use orbit_remote::{host_registry_service_at, require_local_hub_identity};
+use orbit_remote::{host_registry_service, require_local_hub_identity};
 
 use crate::command::{CommandOut, CommandOutput, Execute, require_confirmation};
 
@@ -23,7 +23,7 @@ impl Execute for HostRetireArgs {
     fn execute(self, runtime: &OrbitRuntime) -> CommandOut {
         require_confirmation(self.confirm, "host retirement")?;
         let local_hub = require_local_hub_identity(&runtime.global_root())?;
-        let service = host_registry_service_at(&runtime.global_root())?;
+        let service = host_registry_service(runtime.sqlite_store()?)?;
         service.require_configured_local_hub(&local_hub)?;
         let machine_id = resolve_machine_id(&service, &self.name)?;
         // The singular configured hub cannot retire itself in v1; the guard

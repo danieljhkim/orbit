@@ -3,7 +3,10 @@ use std::collections::BTreeSet;
 use chrono::{TimeZone, Utc};
 use serde_json::json;
 
-use crate::types::{HostAlias, HostNameResolution, HostRecord, HostStatus, validate_machine_id};
+use crate::types::{
+    HostAlias, HostNameResolution, HostRecord, HostStatus, validate_machine_id,
+    validate_new_task_prefix,
+};
 
 fn host() -> HostRecord {
     let timestamp = Utc
@@ -106,4 +109,15 @@ fn machine_id_validation_keeps_transport_targets_out_of_the_identity_namespace()
             .to_string();
         assert!(error.contains("machine_id"), "unexpected: {error}");
     }
+}
+
+#[test]
+fn fresh_task_prefix_validation_rejects_reserved_and_malformed_values() {
+    for reserved in ["ORB", "ADR", "L", "F"] {
+        validate_new_task_prefix(reserved).expect_err("reserved prefix must fail");
+    }
+    for malformed in ["de", "D", "ABCDEF", " DE"] {
+        validate_new_task_prefix(malformed).expect_err("malformed prefix must fail");
+    }
+    assert_eq!(validate_new_task_prefix("DE").expect("valid prefix"), "DE");
 }

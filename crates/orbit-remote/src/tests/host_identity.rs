@@ -1,7 +1,9 @@
+use orbit_common::types::HOST_IDENTITY_SCHEMA_VERSION;
+
 use crate::host_identity::{
-    HOST_IDENTITY_SCHEMA_VERSION, HostIdentityOutcome, HostIdentityState, NewHostIdentity,
-    ensure_host_identity, inspect_host_identity, load_host_identity, rename_current_host_identity,
-    rename_current_host_identity_with_writer, validate_new_task_prefix,
+    HostIdentityOutcome, HostIdentityState, NewHostIdentity, ensure_host_identity,
+    inspect_host_identity, load_host_identity, rename_current_host_identity,
+    rename_current_host_identity_with_writer,
 };
 
 fn requested(
@@ -220,17 +222,6 @@ fn future_schema_version_fails_closed_without_rewrite() {
         std::fs::read_to_string(dir.path().join("host.toml")).expect("read"),
         body
     );
-}
-
-#[test]
-fn fresh_task_prefix_validation_rejects_reserved_and_malformed_values() {
-    for reserved in ["ORB", "ADR", "L", "F"] {
-        validate_new_task_prefix(reserved).expect_err("reserved prefix must fail");
-    }
-    for malformed in ["de", "D", "ABCDEF", " DE"] {
-        validate_new_task_prefix(malformed).expect_err("malformed prefix must fail");
-    }
-    assert_eq!(validate_new_task_prefix("DE").expect("valid prefix"), "DE");
 }
 
 #[test]

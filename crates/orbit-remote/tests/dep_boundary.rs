@@ -10,9 +10,8 @@ const MANIFEST: &str = include_str!("../Cargo.toml");
 
 #[test]
 fn vertical_feature_depends_only_on_approved_runtime_layers() {
-    // ADR-0240: Remote composes neutral Core kernels, Store persistence, and
-    // the generic MCP/tool kernels. ADR-0291 superseded ADR-0241 and retired
-    // graph navigation; no lower layer depends back on this feature crate.
+    // Remote owns machine-local registry state and the thin SSH proxy. Runtime
+    // composition belongs above it, so no Core dependency is allowed here.
     let manifest = parse_manifest();
     let mut dependency_names = BTreeSet::new();
 
@@ -32,12 +31,10 @@ fn vertical_feature_depends_only_on_approved_runtime_layers() {
         orbit_deps,
         vec![
             "orbit-common".to_string(),
-            "orbit-core".to_string(),
-            "orbit-mcp".to_string(),
             "orbit-store".to_string(),
             "orbit-tools".to_string(),
         ],
-        "orbit-remote may compose only the approved runtime layers in this cut"
+        "orbit-remote may depend only on its data, protocol, and persistence layers"
     );
 
     for forbidden in ["orbit-cmd", "orbit-policy", "orbit-exec"] {

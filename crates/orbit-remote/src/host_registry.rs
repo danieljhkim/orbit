@@ -270,13 +270,9 @@ impl HostRegistryService {
         )
     }
 
-    // ORB-10729 [ADR-0358]: the owner execution-profile *publication* surface
-    // is withdrawn with the registration/poll protocol that carried it. Crew
-    // validation now reads the owner machine's local config
-    // ([`crate::OwnerLocalCrews`], mcp-bridge §8.1), so no caller publishes or
-    // reads a projection through this service. The store-level tables and their
-    // freshness/generation rules stay dormant per host-registry §3 rather than
-    // being migrated away.
+    // The owner execution-profile publication surface is dormant. MCP crew
+    // discovery reads the selected workspace's local config on the accepting
+    // machine, so this service neither publishes nor reads that projection.
 }
 
 fn require_logical_workspace<'a>(

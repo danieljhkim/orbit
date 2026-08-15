@@ -3,7 +3,7 @@
 //! `~/.orbit/host.toml` carries the one genuinely host-local datum: a versioned
 //! [`HostIdentity`] with a stable, generated `machine_id`, an operator-chosen
 //! `host_id` display name, and an immutable task namespace. First-time creation
-//! lives in global `orbit init` (implemented by `orbit-core`); legacy identities
+//! lives in the global `orbit init` flow; legacy identities
 //! are migrated in place once, preserving their existing machine identity and
 //! seeding the historical `ORB` task namespace.
 //!
@@ -16,20 +16,12 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use orbit_common::types::{OrbitError, validate_machine_id};
+use orbit_common::types::{
+    HOST_IDENTITY_SCHEMA_VERSION, HOST_TOML_FILE, LEGACY_TASK_PREFIX, MACHINE_ID_PREFIX,
+    OrbitError, validate_machine_id, validate_new_task_prefix, validate_stored_task_prefix,
+};
 use orbit_common::utility::fs::atomic_write_text;
 use serde::Deserialize;
-
-/// File under the global Orbit root carrying the host identity.
-pub const HOST_TOML_FILE: &str = "host.toml";
-
-/// Current on-disk schema version for [`HostIdentity`]. A file whose
-/// `schema_version` exceeds this fails closed (see [`inspect_host_identity`]).
-pub const HOST_IDENTITY_SCHEMA_VERSION: u32 = 2;
-
-const MACHINE_ID_PREFIX: &str = "hm_";
-const LEGACY_TASK_PREFIX: &str = "ORB";
-const RESERVED_TASK_PREFIXES: [&str; 4] = ["ORB", "ADR", "L", "F"];
 
 /// Legacy operating mode retained temporarily for callers being replaced by
 /// the per-workspace ownership model. It is not part of schema-v2 host.toml.
@@ -115,31 +107,6 @@ impl HostIdentity {
             toml_escape_basic(&self.task_prefix),
         )
     }
-}
-
-/// Validate an operator's fresh task-prefix choice.
-///
-/// Persisted migration prefix `ORB` is intentionally accepted by the strict
-/// loader, but cannot be selected for a new machine.
-pub fn validate_new_task_prefix(value: &str) -> Result<String, OrbitError> {
-    if RESERVED_TASK_PREFIXES.contains(&value) {
-        return Err(OrbitError::InvalidInput(format!(
-            "task prefix '{value}' is reserved; choose 2-5 uppercase ASCII letters other than ORB, ADR, L, or F"
-        )));
-    }
-    if !(2..=5).contains(&value.len()) || !value.bytes().all(|byte| byte.is_ascii_uppercase()) {
-        return Err(OrbitError::InvalidInput(
-            "task prefix must be 2-5 uppercase ASCII letters".to_string(),
-        ));
-    }
-    Ok(value.to_string())
-}
-
-fn validate_stored_task_prefix(value: &str) -> Result<String, OrbitError> {
-    if value == LEGACY_TASK_PREFIX {
-        return Ok(value.to_string());
-    }
-    validate_new_task_prefix(value)
 }
 
 /// Escape a value for embedding inside a TOML basic (double-quoted) string,

@@ -1,7 +1,6 @@
 //! Local-only routine placement composition over Core's scheduler kernels.
 //!
-//! ADR-0358 makes the fleet registry and satellite cache dormant in v1. Pin
-//! placement is built exclusively from `host.toml` and `workspaces.json`.
+//! Pin placement is built exclusively from `host.toml` and `workspaces.json`.
 
 use std::path::Path;
 
@@ -13,9 +12,10 @@ use orbit_core::routines::{
     SweepOptions, SweepOutcome,
 };
 
-use crate::host_identity::{HostIdentity, load_host_identity};
-use crate::runtime::RemoteRuntimeFactory;
-use crate::workspace_registry;
+use orbit_remote::host_identity::{HostIdentity, load_host_identity};
+use orbit_remote::workspace_registry;
+
+use crate::remote_runtime::RemoteRuntimeFactory;
 
 struct RemoteRoutineEnvironment {
     global_root: std::path::PathBuf,

@@ -53,6 +53,7 @@ pub mod task_artifacts;
 pub mod task_plan;
 pub mod tool;
 pub mod tool_input;
+pub mod tool_schema;
 pub mod workspace;
 
 pub use activity_job::{
@@ -101,9 +102,10 @@ pub use executor_def::{
 };
 pub use friction::{FrictionEntry, FrictionFrontmatter, FrictionRecord, FrictionStatus};
 pub use host::{
-    HostAlias, HostNameResolution, HostRecord, HostRegistration, HostStatus,
-    REGISTRY_IDENTIFIER_MAX_BYTES, validate_host_id, validate_machine_id,
-    validate_registry_identifier,
+    HOST_IDENTITY_SCHEMA_VERSION, HOST_TOML_FILE, HostAlias, HostNameResolution, HostRecord,
+    HostRegistration, HostStatus, LEGACY_TASK_PREFIX, MACHINE_ID_PREFIX,
+    REGISTRY_IDENTIFIER_MAX_BYTES, validate_host_id, validate_machine_id, validate_new_task_prefix,
+    validate_registry_identifier, validate_stored_task_prefix,
 };
 pub use id::OrbitId;
 pub use invocation::{InvocationTrace, TokenUsage, ToolCallTrace};
@@ -169,6 +171,9 @@ pub use tool_input::{
     RETIRED_TASK_ADD_INPUT_FIELDS, optional_csv_or_string_list_alias, optional_raw_string,
     optional_string, optional_string_alias, optional_string_list_alias, optional_u32_alias,
     required_string, split_csv, strip_retired_task_add_input_fields,
+};
+pub use tool_schema::{
+    tool_input_schema, tool_input_schema_for, tool_parameter_enum_values, tool_parameter_schema,
 };
 pub use workspace::{
     WORKSPACE_REGISTRY_SCHEMA_VERSION, Workspace, WorkspaceCheckout, WorkspaceCheckoutRole,

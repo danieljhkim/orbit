@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
 use orbit_common::types::{
-    McpCapability, McpToolDefinition, McpToolPlacement, McpToolPolicy, McpToolScope, McpTransport,
-    ToolParam, ToolSchema, ToolSessionContext,
+    McpToolDefinition, McpToolPlacement, McpToolPolicy, McpToolScope, McpTransport, ToolParam,
+    ToolSchema, ToolSessionContext,
 };
 use rmcp::model::{ClientCapabilities, Implementation, InitializeRequestParams, Meta};
 
@@ -16,25 +16,25 @@ use super::super::test_support::{
 };
 
 #[test]
-fn generic_task_schema_is_structural_and_owns_no_domain_enums() {
+fn task_schema_uses_common_domain_enums() {
     let schema = build_input_schema("orbit.task.add", &[param("type"), param("status")]);
     let properties = schema
         .get("properties")
         .and_then(Value::as_object)
         .expect("properties");
 
-    assert!(properties["type"].get("enum").is_none());
-    assert!(properties["status"].get("enum").is_none());
+    assert!(properties["type"]["enum"].as_array().is_some());
+    assert!(properties["status"]["enum"].as_array().is_some());
 }
 
 #[test]
-fn generic_task_update_schema_is_structural() {
+fn task_update_schema_uses_common_status_enum() {
     let schema = build_input_schema("orbit.task.update", &[param("status")]);
     let properties = schema
         .get("properties")
         .and_then(Value::as_object)
         .expect("properties");
-    assert!(properties["status"].get("enum").is_none());
+    assert!(properties["status"]["enum"].as_array().is_some());
 }
 
 #[test]
@@ -132,7 +132,7 @@ fn required_string_list_param_is_advertised_as_string_or_array() {
     );
 }
 
-// --- ORB-10448 / F2026-07-099: the broker's workspace selector must be
+// The authoritative server's workspace selector must be
 // advertised on every workspace-scoped tool. A managed executor speaks through
 // a general-purpose MCP client that cannot inject initialize `_meta`, so the
 // call argument is its only routing surface.
@@ -165,7 +165,7 @@ fn advertised_properties(definition: &McpToolDefinition) -> serde_json::Map<Stri
 }
 
 #[test]
-fn workspace_scoped_tool_advertises_the_broker_workspace_selector() {
+fn workspace_scoped_tool_advertises_the_authoritative_server_selector() {
     let definition = definition_with_scope(
         "orbit.task.show",
         vec![param("id")],
@@ -195,12 +195,8 @@ fn workspace_scoped_tool_advertises_the_broker_workspace_selector() {
         "selector must document logical ws_* ids: {description}"
     );
     assert!(
-        description.contains("absolute path to a local checkout"),
-        "selector must document the checkout-path form: {description}"
-    );
-    assert!(
-        description.contains("worktree"),
-        "selector must state that a linked worktree resolves: {description}"
+        description.contains("absolute path registered on that server"),
+        "selector must document the server-side path form: {description}"
     );
 }
 
@@ -266,9 +262,9 @@ fn initialize_meta_extracts_orbit_workspace_session_context() {
             "caller_machine_id": "spoofed-caller",
             "process_machine_id": "spoofed-process",
             "transport": "ssh-mcp",
-            "effective_capabilities": ["operator", "runner"],
             "origin_session_id": "spoofed-session",
             "mcp_call_id": "spoofed-call",
+            "trace_id": "spoofed-trace",
             "leased_run": {"run_id": "spoofed-run", "lease_id": "spoofed-lease"},
             "role": "admin",
             "model": "spoofed-model",
@@ -284,9 +280,9 @@ fn initialize_meta_extracts_orbit_workspace_session_context() {
     assert_eq!(session_context.caller_machine_id, None);
     assert_eq!(session_context.process_machine_id, None);
     assert_eq!(session_context.transport, None);
-    assert!(session_context.effective_capabilities.is_empty());
     assert_eq!(session_context.origin_session_id, None);
     assert_eq!(session_context.mcp_call_id, None);
+    assert_eq!(session_context.trace_id, None);
 }
 
 #[test]
@@ -338,6 +334,7 @@ async fn mcp_session_context_reaches_tool_calls_without_workspace_input() {
     );
     trusted_context.workspace = Some("/repo/main".to_string());
     trusted_context.origin_session_id = Some("mcp-session-shared".to_string());
+    trusted_context.mcp_call_id = Some("legacy-call".to_string());
     server.replace_session_context(trusted_context);
 
     let explicit = server
@@ -364,17 +361,15 @@ async fn mcp_session_context_reaches_tool_calls_without_workspace_input() {
     assert_eq!(calls[0].2.workspace_id.as_deref(), Some("ws_orbit"));
     assert_eq!(calls[0].2.transport, Some(McpTransport::Local));
     assert_eq!(
-        calls[0].2.effective_capabilities,
-        [McpCapability::Agent].into_iter().collect()
-    );
-    assert_eq!(
         calls[0].2.origin_session_id.as_deref(),
         Some("mcp-session-shared")
     );
     assert_eq!(calls[1].2.origin_session_id, calls[0].2.origin_session_id);
-    assert!(calls[0].2.mcp_call_id.is_some());
-    assert!(calls[1].2.mcp_call_id.is_some());
-    assert_ne!(calls[0].2.mcp_call_id, calls[1].2.mcp_call_id);
+    assert_eq!(calls[0].2.mcp_call_id.as_deref(), Some("legacy-call"));
+    assert_eq!(calls[1].2.mcp_call_id.as_deref(), Some("legacy-call"));
+    assert!(calls[0].2.trace_id.is_some());
+    assert!(calls[1].2.trace_id.is_some());
+    assert_ne!(calls[0].2.trace_id, calls[1].2.trace_id);
 }
 
 // --- ORB-00102 tests: object_list schema + loud fallback + e2e via MCP adapter ---
@@ -464,7 +459,10 @@ fn property_for_unknown_emits_tracing_warn_at_target() {
         logs.contains("unknown ToolParam type degrading to string"),
         "warning message present: {logs}"
     );
-    assert!(logs.contains("orbit.mcp.adapter"), "target present: {logs}");
+    assert!(
+        logs.contains("orbit.common.tool_schema"),
+        "target present: {logs}"
+    );
     assert!(
         logs.contains(token),
         "offending token named in event: {logs}"
@@ -475,7 +473,7 @@ fn property_for_unknown_emits_tracing_warn_at_target() {
 /// create-task fields with correct enums (verifiable via debug surfaces or this
 /// direct build).
 #[test]
-fn task_add_structural_schema_exposes_trimmed_fields_without_domain_enums() {
+fn task_add_schema_exposes_trimmed_fields_with_common_domain_enums() {
     // Use representative params that the real add schema includes (the
     // build_input_schema only cares about the ones passed for enum injection).
     let params = vec![
@@ -517,8 +515,8 @@ fn task_add_structural_schema_exposes_trimmed_fields_without_domain_enums() {
         ]
     );
 
-    assert!(properties["complexity"].get("enum").is_none());
-    assert!(properties["model"].get("enum").is_none());
+    assert!(properties["complexity"]["enum"].as_array().is_some());
+    assert!(properties["model"]["enum"].as_array().is_some());
 
     for removed in [
         "plan",

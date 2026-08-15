@@ -38,13 +38,11 @@ use axum::extract::FromRequestParts;
 use axum::http::StatusCode;
 use axum::http::request::Parts;
 use axum::response::{IntoResponse, Json, Response};
+use orbit_cmd::remote_runtime::{RemoteRuntimeFactory, workspace_runtime_binding};
 use orbit_common::types::WorkspaceStatus;
 use orbit_core::runtime::WorkspaceRuntimeBinding;
 use orbit_core::{OrbitError, OrbitRuntime, ShipMode};
-use orbit_remote::{
-    runtime::{RemoteRuntimeFactory, workspace_runtime_binding},
-    workspace_registry,
-};
+use orbit_remote::workspace_registry;
 use serde_json::json;
 
 /// Synthetic workspace id used by [`DashboardState::single`].

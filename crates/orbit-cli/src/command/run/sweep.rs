@@ -7,9 +7,9 @@
 use std::path::Path;
 
 use clap::Args;
+use orbit_cmd::remote_runtime::RemoteRuntimeFactory;
 use orbit_common::types::{Workspace, WorkspaceCheckout, WorkspaceStatus};
 use orbit_core::{JobRunState, OrbitError, TaskStatus, task_dependencies_ready};
-use orbit_remote::runtime::RemoteRuntimeFactory;
 use orbit_remote::workspace_registry;
 use serde_json::{Value, json};
 

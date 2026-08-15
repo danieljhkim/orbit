@@ -3,7 +3,7 @@
 
 use clap::Args;
 use orbit_core::OrbitRuntime;
-use orbit_remote::{host_registry_service_at, require_local_hub_identity};
+use orbit_remote::{host_registry_service, require_local_hub_identity};
 use serde_json::{Value, json};
 
 use crate::output::table::{Column, Table};
@@ -17,7 +17,7 @@ pub struct HostListArgs {}
 impl Execute for HostListArgs {
     fn execute(self, runtime: &OrbitRuntime) -> CommandOut {
         let local_hub = require_local_hub_identity(&runtime.global_root())?;
-        let service = host_registry_service_at(&runtime.global_root())?;
+        let service = host_registry_service(runtime.sqlite_store()?)?;
         service.require_configured_local_hub(&local_hub)?;
         let snapshot = service.snapshot()?;
         let hub_machine_id = snapshot.hub_machine_id.as_deref();

@@ -1,8 +1,8 @@
 use crate::command::{CommandOut, Payload};
 use clap::Args;
+use orbit_cmd::remote_routines::routine_statuses;
 use orbit_core::OrbitError;
 use orbit_core::routines::recent_fires;
-use orbit_remote::routines::routine_statuses;
 use orbit_remote::workspace_registry;
 use serde_json::json;
 

@@ -45,7 +45,7 @@
           "description": "Task template: `{ title, description?, acceptance_criteria?, task_type?, tags?, priority?, crew?, status? }`. Provider-neutral — no turn knobs. Required."
         },
         "workspace": {
-          "description": "Workspace selector for broker routing: a registered workspace name, a logical workspace ID (`ws_*`), or an absolute path to a local checkout (a linked Git worktree resolves to its registered checkout). Optional when the MCP session announced `_meta.orbit.workspace` at initialize; never inferred from process cwd.",
+          "description": "Workspace selector for the authoritative server: a registered workspace name, a logical workspace ID (`ws_*`), or an absolute path registered on that server. Optional when the MCP session announced `_meta.orbit.workspace` at initialize; never inferred from the server process cwd.",
           "type": "string"
         }
       },
@@ -68,7 +68,7 @@
           "type": "string"
         },
         "workspace": {
-          "description": "Workspace selector for broker routing: a registered workspace name, a logical workspace ID (`ws_*`), or an absolute path to a local checkout (a linked Git worktree resolves to its registered checkout). Optional when the MCP session announced `_meta.orbit.workspace` at initialize; never inferred from process cwd.",
+          "description": "Workspace selector for the authoritative server: a registered workspace name, a logical workspace ID (`ws_*`), or an absolute path registered on that server. Optional when the MCP session announced `_meta.orbit.workspace` at initialize; never inferred from the server process cwd.",
           "type": "string"
         }
       },
@@ -93,7 +93,7 @@
           "type": "string"
         },
         "workspace": {
-          "description": "Workspace selector for broker routing: a registered workspace name, a logical workspace ID (`ws_*`), or an absolute path to a local checkout (a linked Git worktree resolves to its registered checkout). Optional when the MCP session announced `_meta.orbit.workspace` at initialize; never inferred from process cwd.",
+          "description": "Workspace selector for the authoritative server: a registered workspace name, a logical workspace ID (`ws_*`), or an absolute path registered on that server. Optional when the MCP session announced `_meta.orbit.workspace` at initialize; never inferred from the server process cwd.",
           "type": "string"
         }
       },
@@ -151,7 +151,7 @@
           "description": "Replacement task template object."
         },
         "workspace": {
-          "description": "Workspace selector for broker routing: a registered workspace name, a logical workspace ID (`ws_*`), or an absolute path to a local checkout (a linked Git worktree resolves to its registered checkout). Optional when the MCP session announced `_meta.orbit.workspace` at initialize; never inferred from process cwd.",
+          "description": "Workspace selector for the authoritative server: a registered workspace name, a logical workspace ID (`ws_*`), or an absolute path registered on that server. Optional when the MCP session announced `_meta.orbit.workspace` at initialize; never inferred from the server process cwd.",
           "type": "string"
         }
       },
@@ -161,6 +161,56 @@
       "type": "object"
     },
     "name": "orbit_auto_task_update"
+  },
+  {
+    "description": "Execute a command as an explicit argv array in an explicit working directory and return its stdout, stderr, and exit status. Requires operator capability and the workspace claim; withheld from managed runs.",
+    "inputSchema": {
+      "additionalProperties": true,
+      "properties": {
+        "argv": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "description": "The command as a JSON array of argv strings, program first (e.g. [\"git\", \"status\"]). Never a shell string: no shell interprets this input, so quoting and operator-precedence bugs cannot occur."
+        },
+        "claim_token": {
+          "description": "Token for this workspace's exclusive claim, required when another operator holds one. Falls back to `ORBIT_WORKSPACE_CLAIM_TOKEN`.",
+          "type": "string"
+        },
+        "model": {
+          "description": "Preferred provenance field. Pass the canonical agent family (codex, claude, gemini, or grok); full model strings are accepted and auto-normalized.",
+          "enum": [
+            "codex",
+            "claude",
+            "gemini",
+            "grok"
+          ],
+          "type": "string"
+        },
+        "working_directory": {
+          "description": "Explicit working directory the command runs in.",
+          "type": "string"
+        },
+        "workspace": {
+          "description": "Workspace selector for the authoritative server: a registered workspace name, a logical workspace ID (`ws_*`), or an absolute path registered on that server. Optional when the MCP session announced `_meta.orbit.workspace` at initialize; never inferred from the server process cwd.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "argv",
+        "working_directory"
+      ],
+      "type": "object"
+    },
+    "name": "orbit_command_exec"
   },
   {
     "description": "List a workspace owner's execution-profile crews with sanitized profile state, generation, and freshness (agent/operator, owner placement).",
@@ -218,7 +268,7 @@
           "type": "string"
         },
         "workspace": {
-          "description": "Workspace selector for broker routing: a registered workspace name, a logical workspace ID (`ws_*`), or an absolute path to a local checkout (a linked Git worktree resolves to its registered checkout). Optional when the MCP session announced `_meta.orbit.workspace` at initialize; never inferred from process cwd.",
+          "description": "Workspace selector for the authoritative server: a registered workspace name, a logical workspace ID (`ws_*`), or an absolute path registered on that server. Optional when the MCP session announced `_meta.orbit.workspace` at initialize; never inferred from the server process cwd.",
           "type": "string"
         }
       },
@@ -231,18 +281,142 @@
     "name": "orbit_friction_add"
   },
   {
+    "description": "List Orbit friction records from .orbit/frictions/",
+    "inputSchema": {
+      "additionalProperties": true,
+      "properties": {
+        "from": {
+          "description": "Optional RFC3339 lower bound for created_at",
+          "type": "string"
+        },
+        "limit": {
+          "description": "Optional maximum number of records to return",
+          "type": "integer"
+        },
+        "model": {
+          "description": "Optional model filter",
+          "enum": [
+            "codex",
+            "claude",
+            "gemini",
+            "grok"
+          ],
+          "type": "string"
+        },
+        "month": {
+          "description": "Optional YYYY-MM month filter for reported records",
+          "type": "string"
+        },
+        "offset": {
+          "description": "Optional number of records to skip",
+          "type": "integer"
+        },
+        "q": {
+          "description": "Optional case-insensitive query over id, model, tags, status, task, and body",
+          "type": "string"
+        },
+        "status": {
+          "description": "Optional status filter: open, triaged, or resolved",
+          "type": "string"
+        },
+        "tag": {
+          "description": "Optional tag filter",
+          "type": "string"
+        },
+        "to": {
+          "description": "Optional RFC3339 upper bound for created_at",
+          "type": "string"
+        },
+        "workspace": {
+          "description": "Workspace selector for the authoritative server: a registered workspace name, a logical workspace ID (`ws_*`), or an absolute path registered on that server. Optional when the MCP session announced `_meta.orbit.workspace` at initialize; never inferred from the server process cwd.",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "name": "orbit_friction_list"
+  },
+  {
+    "description": "Fetch a single Orbit friction record by id",
+    "inputSchema": {
+      "additionalProperties": true,
+      "properties": {
+        "id": {
+          "description": "friction ID",
+          "type": "string"
+        },
+        "workspace": {
+          "description": "Workspace selector for the authoritative server: a registered workspace name, a logical workspace ID (`ws_*`), or an absolute path registered on that server. Optional when the MCP session announced `_meta.orbit.workspace` at initialize; never inferred from the server process cwd.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    },
+    "name": "orbit_friction_show"
+  },
+  {
     "description": "List configured friction taxonomy tags",
     "inputSchema": {
       "additionalProperties": true,
       "properties": {
         "workspace": {
-          "description": "Workspace selector for broker routing: a registered workspace name, a logical workspace ID (`ws_*`), or an absolute path to a local checkout (a linked Git worktree resolves to its registered checkout). Optional when the MCP session announced `_meta.orbit.workspace` at initialize; never inferred from process cwd.",
+          "description": "Workspace selector for the authoritative server: a registered workspace name, a logical workspace ID (`ws_*`), or an absolute path registered on that server. Optional when the MCP session announced `_meta.orbit.workspace` at initialize; never inferred from the server process cwd.",
           "type": "string"
         }
       },
       "type": "object"
     },
     "name": "orbit_friction_tags"
+  },
+  {
+    "description": "Update triage metadata for an Orbit friction record",
+    "inputSchema": {
+      "additionalProperties": true,
+      "properties": {
+        "body": {
+          "description": "Optional replacement markdown body",
+          "type": "string"
+        },
+        "id": {
+          "description": "Friction record ID, e.g. FYYYY-MM-NNN",
+          "type": "string"
+        },
+        "status": {
+          "description": "Optional status: open, triaged, or resolved",
+          "type": "string"
+        },
+        "tags": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "description": "Optional replacement taxonomy tags as a string or array; valid tags: build | docs | lifecycle | naming | other | policy | skill-guidance | tooling"
+        },
+        "title": {
+          "description": "Optional replacement one-line title, at most 120 characters; an empty string restores derivation from the body",
+          "type": "string"
+        },
+        "workspace": {
+          "description": "Workspace selector for the authoritative server: a registered workspace name, a logical workspace ID (`ws_*`), or an absolute path registered on that server. Optional when the MCP session announced `_meta.orbit.workspace` at initialize; never inferred from the server process cwd.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    },
+    "name": "orbit_friction_update"
   },
   {
     "description": "Search tasks, docs, ADRs, and frictions. ADR entries are retrieved through the docs corpus; hybrid vector ranking applies to indexed tasks and docs.",
@@ -316,7 +490,7 @@
           "description": "AND-filter by tag. Repeat or pass an array. Applies to task, doc, friction, and ADR."
         },
         "workspace": {
-          "description": "Workspace selector for broker routing: a registered workspace name, a logical workspace ID (`ws_*`), or an absolute path to a local checkout (a linked Git worktree resolves to its registered checkout). Optional when the MCP session announced `_meta.orbit.workspace` at initialize; never inferred from process cwd.",
+          "description": "Workspace selector for the authoritative server: a registered workspace name, a logical workspace ID (`ws_*`), or an absolute path registered on that server. Optional when the MCP session announced `_meta.orbit.workspace` at initialize; never inferred from the server process cwd.",
           "type": "string"
         }
       },
@@ -366,7 +540,7 @@
           "description": "Optional task ids this note refers to."
         },
         "workspace": {
-          "description": "Workspace selector for broker routing: a registered workspace name, a logical workspace ID (`ws_*`), or an absolute path to a local checkout (a linked Git worktree resolves to its registered checkout). Optional when the MCP session announced `_meta.orbit.workspace` at initialize; never inferred from process cwd.",
+          "description": "Workspace selector for the authoritative server: a registered workspace name, a logical workspace ID (`ws_*`), or an absolute path registered on that server. Optional when the MCP session announced `_meta.orbit.workspace` at initialize; never inferred from the server process cwd.",
           "type": "string"
         }
       },
@@ -396,7 +570,7 @@
           "type": "boolean"
         },
         "workspace": {
-          "description": "Workspace selector for broker routing: a registered workspace name, a logical workspace ID (`ws_*`), or an absolute path to a local checkout (a linked Git worktree resolves to its registered checkout). Optional when the MCP session announced `_meta.orbit.workspace` at initialize; never inferred from process cwd.",
+          "description": "Workspace selector for the authoritative server: a registered workspace name, a logical workspace ID (`ws_*`), or an absolute path registered on that server. Optional when the MCP session announced `_meta.orbit.workspace` at initialize; never inferred from the server process cwd.",
           "type": "string"
         }
       },
@@ -414,7 +588,7 @@
           "type": "string"
         },
         "workspace": {
-          "description": "Workspace selector for broker routing: a registered workspace name, a logical workspace ID (`ws_*`), or an absolute path to a local checkout (a linked Git worktree resolves to its registered checkout). Optional when the MCP session announced `_meta.orbit.workspace` at initialize; never inferred from process cwd.",
+          "description": "Workspace selector for the authoritative server: a registered workspace name, a logical workspace ID (`ws_*`), or an absolute path registered on that server. Optional when the MCP session announced `_meta.orbit.workspace` at initialize; never inferred from the server process cwd.",
           "type": "string"
         }
       },
@@ -570,7 +744,7 @@
           "type": "string"
         },
         "workspace": {
-          "description": "Workspace selector for broker routing: a registered workspace name, a logical workspace ID (`ws_*`), or an absolute path to a local checkout (a linked Git worktree resolves to its registered checkout). Optional when the MCP session announced `_meta.orbit.workspace` at initialize; never inferred from process cwd.",
+          "description": "Workspace selector for the authoritative server: a registered workspace name, a logical workspace ID (`ws_*`), or an absolute path registered on that server. Optional when the MCP session announced `_meta.orbit.workspace` at initialize; never inferred from the server process cwd.",
           "type": "string"
         }
       },
@@ -609,7 +783,7 @@
           "type": "string"
         },
         "workspace": {
-          "description": "Workspace selector for broker routing: a registered workspace name, a logical workspace ID (`ws_*`), or an absolute path to a local checkout (a linked Git worktree resolves to its registered checkout). Optional when the MCP session announced `_meta.orbit.workspace` at initialize; never inferred from process cwd.",
+          "description": "Workspace selector for the authoritative server: a registered workspace name, a logical workspace ID (`ws_*`), or an absolute path registered on that server. Optional when the MCP session announced `_meta.orbit.workspace` at initialize; never inferred from the server process cwd.",
           "type": "string"
         }
       },
@@ -693,7 +867,7 @@
           "type": "string"
         },
         "workspace": {
-          "description": "Workspace selector for broker routing: a registered workspace name, a logical workspace ID (`ws_*`), or an absolute path to a local checkout (a linked Git worktree resolves to its registered checkout). Optional when the MCP session announced `_meta.orbit.workspace` at initialize; never inferred from process cwd.",
+          "description": "Workspace selector for the authoritative server: a registered workspace name, a logical workspace ID (`ws_*`), or an absolute path registered on that server. Optional when the MCP session announced `_meta.orbit.workspace` at initialize; never inferred from the server process cwd.",
           "type": "string"
         }
       },
@@ -751,7 +925,7 @@
           "type": "boolean"
         },
         "workspace": {
-          "description": "Workspace selector for broker routing: a registered workspace name, a logical workspace ID (`ws_*`), or an absolute path to a local checkout (a linked Git worktree resolves to its registered checkout). Optional when the MCP session announced `_meta.orbit.workspace` at initialize; never inferred from process cwd.",
+          "description": "Workspace selector for the authoritative server: a registered workspace name, a logical workspace ID (`ws_*`), or an absolute path registered on that server. Optional when the MCP session announced `_meta.orbit.workspace` at initialize; never inferred from the server process cwd.",
           "type": "string"
         }
       },
@@ -794,7 +968,7 @@
           "type": "string"
         },
         "workspace": {
-          "description": "Workspace selector for broker routing: a registered workspace name, a logical workspace ID (`ws_*`), or an absolute path to a local checkout (a linked Git worktree resolves to its registered checkout). Optional when the MCP session announced `_meta.orbit.workspace` at initialize; never inferred from process cwd.",
+          "description": "Workspace selector for the authoritative server: a registered workspace name, a logical workspace ID (`ws_*`), or an absolute path registered on that server. Optional when the MCP session announced `_meta.orbit.workspace` at initialize; never inferred from the server process cwd.",
           "type": "string"
         }
       },
@@ -969,7 +1143,7 @@
           "type": "string"
         },
         "workspace": {
-          "description": "Workspace selector for broker routing: a registered workspace name, a logical workspace ID (`ws_*`), or an absolute path to a local checkout (a linked Git worktree resolves to its registered checkout). Optional when the MCP session announced `_meta.orbit.workspace` at initialize; never inferred from process cwd.",
+          "description": "Workspace selector for the authoritative server: a registered workspace name, a logical workspace ID (`ws_*`), or an absolute path registered on that server. Optional when the MCP session announced `_meta.orbit.workspace` at initialize; never inferred from the server process cwd.",
           "type": "string"
         }
       },
@@ -979,5 +1153,143 @@
       "type": "object"
     },
     "name": "orbit_task_update"
+  },
+  {
+    "description": "List durable workflow runs newest-first with optional bounded filters.",
+    "inputSchema": {
+      "additionalProperties": true,
+      "properties": {
+        "job_id": {
+          "description": "Optional job ID filter.",
+          "type": "string"
+        },
+        "limit": {
+          "description": "Maximum runs to return (default 25, maximum 200).",
+          "type": "integer"
+        },
+        "since": {
+          "description": "Optional RFC 3339 lower bound for run creation time.",
+          "type": "string"
+        },
+        "state": {
+          "description": "Optional concrete run-state filter, or `terminal`.",
+          "type": "string"
+        },
+        "workspace": {
+          "description": "Workspace selector for the authoritative server: a registered workspace name, a logical workspace ID (`ws_*`), or an absolute path registered on that server. Optional when the MCP session announced `_meta.orbit.workspace` at initialize; never inferred from the server process cwd.",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "name": "orbit_workflow_run_list"
+  },
+  {
+    "description": "Resume a terminal resumable workflow run as a new linked run.",
+    "inputSchema": {
+      "additionalProperties": true,
+      "properties": {
+        "claim_token": {
+          "description": "Token for this workspace's exclusive claim, required when another operator holds one. Falls back to `ORBIT_WORKSPACE_CLAIM_TOKEN`.",
+          "type": "string"
+        },
+        "id": {
+          "description": "Job run ID.",
+          "type": "string"
+        },
+        "workspace": {
+          "description": "Workspace selector for the authoritative server: a registered workspace name, a logical workspace ID (`ws_*`), or an absolute path registered on that server. Optional when the MCP session announced `_meta.orbit.workspace` at initialize; never inferred from the server process cwd.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    },
+    "name": "orbit_workflow_run_resume"
+  },
+  {
+    "description": "Fetch one durable workflow run by ID.",
+    "inputSchema": {
+      "additionalProperties": true,
+      "properties": {
+        "id": {
+          "description": "Job run ID.",
+          "type": "string"
+        },
+        "workspace": {
+          "description": "Workspace selector for the authoritative server: a registered workspace name, a logical workspace ID (`ws_*`), or an absolute path registered on that server. Optional when the MCP session announced `_meta.orbit.workspace` at initialize; never inferred from the server process cwd.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    },
+    "name": "orbit_workflow_run_show"
+  },
+  {
+    "description": "Submit an explicit set of tasks to the ship workflow and return its durable run ID.",
+    "inputSchema": {
+      "additionalProperties": true,
+      "properties": {
+        "base": {
+          "description": "Optional base branch override.",
+          "type": "string"
+        },
+        "claim_token": {
+          "description": "Token for this workspace's exclusive claim, required when another operator holds one. Falls back to `ORBIT_WORKSPACE_CLAIM_TOKEN`.",
+          "type": "string"
+        },
+        "mode": {
+          "description": "Optional ship mode (`pr` or `local`); defaults to workspace configuration.",
+          "type": "string"
+        },
+        "model": {
+          "description": "Preferred provenance field. Pass the canonical agent family (codex, claude, gemini, or grok); full model strings are accepted and auto-normalized.",
+          "enum": [
+            "codex",
+            "claude",
+            "gemini",
+            "grok"
+          ],
+          "type": "string"
+        },
+        "task_ids": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "description": "Explicit task IDs to ship; at least one is required."
+        },
+        "workspace": {
+          "description": "Workspace selector for the authoritative server: a registered workspace name, a logical workspace ID (`ws_*`), or an absolute path registered on that server. Optional when the MCP session announced `_meta.orbit.workspace` at initialize; never inferred from the server process cwd.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "task_ids"
+      ],
+      "type": "object"
+    },
+    "name": "orbit_workflow_ship"
+  },
+  {
+    "description": "List the workspaces this machine owns from its local workspace registry (operator, local-derived placement).",
+    "inputSchema": {
+      "additionalProperties": true,
+      "properties": {},
+      "type": "object"
+    },
+    "name": "orbit_workspace_list"
   }
 ]

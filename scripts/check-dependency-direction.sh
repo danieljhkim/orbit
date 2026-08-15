@@ -11,10 +11,9 @@ allowed_internal_deps() {
       echo ""
       ;;
     orbit-remote)
-      # ADR-0240: vertical Remote feature composes neutral Core kernels over
-      # Store persistence and generic MCP/tool definitions; none of those
-      # lower layers may depend back on Remote.
-      echo "orbit-common orbit-core orbit-mcp orbit-store orbit-tools"
+      # Runtime and protocol composition belong above Remote; this crate owns
+      # only its machine-local domain, thin SSH proxy, and persistence facade.
+      echo "orbit-common orbit-store orbit-tools"
       ;;
     orbit-policy | orbit-exec | orbit-store)
       echo "orbit-common"
@@ -40,9 +39,9 @@ allowed_internal_deps() {
       echo "orbit-common orbit-search orbit-engine orbit-exec orbit-policy orbit-store orbit-tools"
       ;;
     orbit-cmd)
-      # ORB-10016: CLI-facing command layer extracted from orbit-core.
-      # Depends on orbit-core (runtime/context) — never the other way around.
-      echo "orbit-common orbit-core orbit-engine orbit-store"
+      # The shared application composition layer joins Core runtime kernels to
+      # Remote's machine-local registry for CLI and dashboard consumers.
+      echo "orbit-common orbit-core orbit-engine orbit-remote orbit-store"
       ;;
     orbit-mcp)
       echo "orbit-common"
@@ -51,7 +50,9 @@ allowed_internal_deps() {
       echo "orbit-common orbit-cmd orbit-core orbit-remote"
       ;;
     orbit-cli)
-      echo "orbit-common orbit-cmd orbit-core orbit-remote orbit-dashboard"
+      # The executable assembles the generic MCP stdio kernel with Remote's
+      # machine-local support and Core's authoritative runtime dispatcher.
+      echo "orbit-common orbit-cmd orbit-core orbit-mcp orbit-remote orbit-dashboard"
       ;;
     *)
       return 1

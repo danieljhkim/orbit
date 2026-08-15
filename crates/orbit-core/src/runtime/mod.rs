@@ -40,13 +40,15 @@ use std::sync::Arc;
 
 use chrono::Utc;
 use orbit_common::types::activity_job::{CatalogDirectory, CatalogDirectoryList};
-use orbit_common::types::{Audit, OrbitError, OrbitEvent, WorkspacePaths};
+use orbit_common::types::{
+    Audit, OrbitError, OrbitEvent, Workspace, WorkspaceCheckout, WorkspacePaths,
+};
 use orbit_store::{Store, V2AuditEventFilter, V2AuditEventRow, workspace_id_for_orbit_dir};
 use serde_json::Value;
 
 use crate::command::activity::DEFAULT_ACTIVITY_FILES;
 use crate::command::init::ensure_orbit_root_initialized;
-use crate::command::workflow::ShipMode;
+use crate::command::workflow::{ShipMode, resolved_ship_mode};
 use crate::context::ActorIdentity;
 use crate::context::OrbitContext;
 use crate::context::OrbitStores;
@@ -100,6 +102,18 @@ pub struct WorkspaceRuntimeBinding {
     pub workspace_id: String,
     pub repo_root: PathBuf,
     pub ship_mode: ShipMode,
+}
+
+/// Build the neutral Core binding for one registered local checkout.
+pub fn workspace_runtime_binding(
+    workspace: &Workspace,
+    checkout: &WorkspaceCheckout,
+) -> Result<WorkspaceRuntimeBinding, OrbitError> {
+    Ok(WorkspaceRuntimeBinding {
+        workspace_id: workspace_id_for_orbit_dir(&checkout.orbit_dir)?,
+        repo_root: checkout.repo_root.clone(),
+        ship_mode: resolved_ship_mode(workspace),
+    })
 }
 
 impl OrbitRuntimeRoots {

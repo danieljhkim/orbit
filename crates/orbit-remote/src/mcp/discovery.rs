@@ -58,7 +58,7 @@ fn crew_list_definition() -> Result<McpToolDefinition, McpToolPolicyError> {
     )
 }
 
-pub(super) fn execute_discovery_tool(
+pub fn execute_discovery_tool(
     name: &str,
     registry: &WorkspaceRegistry,
     local_machine_id: &str,

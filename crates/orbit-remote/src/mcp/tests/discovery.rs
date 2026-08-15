@@ -3,13 +3,12 @@ use std::collections::BTreeSet;
 use chrono::Utc;
 use orbit_common::types::{
     McpCapability, McpToolPlacement, McpToolScope, NotFoundKind, OrbitError, Workspace,
-    WorkspaceRegistry, WorkspaceStatus,
+    WorkspaceRegistry, WorkspaceStatus, tool_input_schema,
 };
 use serde_json::json;
 
 use super::super::discovery::{discovery_tool_definitions, execute_discovery_tool};
-use super::super::host::canonical_mcp_tool_definitions;
-use super::super::schema::remote_input_schema;
+use super::super::surface::canonical_mcp_tool_definitions;
 
 #[test]
 fn remote_owns_the_exact_global_discovery_definitions() {
@@ -44,7 +43,7 @@ fn remote_owns_the_exact_global_discovery_definitions() {
             &BTreeSet::from([McpCapability::Operator])
         );
         assert_eq!(
-            remote_input_schema(definition).expect("discovery wire schema"),
+            tool_input_schema(&definition.schema),
             json!({
                 "type": "object",
                 "properties": {},
