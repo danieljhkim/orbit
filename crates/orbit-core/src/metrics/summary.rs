@@ -51,6 +51,7 @@ pub fn aggregate(runs: &[JobRun]) -> KnowledgeStatsSummary {
         .iter()
         .filter_map(|m| m.compression_ratio)
         .collect::<Vec<_>>();
+    // Historical only: new runs no longer populate this gauge (ORB-10828).
     let double_read_values = metrics
         .iter()
         .filter_map(|m| m.double_read_rate)

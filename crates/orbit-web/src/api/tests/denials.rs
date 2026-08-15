@@ -93,10 +93,10 @@ fn denials_payload_combines_v2_and_sqlite_denials() {
         .record_audit_event(&orbit_core::AuditEventInsertParams {
             execution_id: "exec-sqlite-fs".to_string(),
             command: "tool".to_string(),
-            subcommand: Some("fs.read".to_string()),
-            tool_name: Some("fs.read".to_string()),
+            subcommand: Some("fs.write".to_string()),
+            tool_name: Some("fs.write".to_string()),
             target_type: Some("tool".to_string()),
-            target_id: Some("fs.read".to_string()),
+            target_id: Some("fs.write".to_string()),
             role: "codex".to_string(),
             status: AuditEventStatus::Denied,
             exit_code: 1,

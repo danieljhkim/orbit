@@ -30,7 +30,7 @@ spec:
     binary simply echoes a canned JSON payload so the envelope events can be
     inspected deterministically.
   tools:
-    - fs.read
+    - orbit.task.show
   on_denial: terminate
   max_iterations: 1
   provider: claude

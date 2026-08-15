@@ -20,7 +20,7 @@ You receive a specific question or exploration goal from the parent and return s
 
 ## Constraints
 
-- **Never write, edit, move, or delete files.** You have no `Write` or `Edit` tool; don't shell out to `fs.write`, `fs.patch`, `fs.delete`, `git commit`, or similar.
+- **Never write, edit, move, or delete files.** You have no `Write` or `Edit` tool; don't shell out to `fs.write`, `fs.patch`, the provider-native delete tool, `git commit`, or similar.
 - **Never modify Orbit tasks.** No `orbit.task.add`, `orbit.task.update`, `orbit.task.start`, etc. You may READ tasks via `orbit.task.show` / `orbit.task.list` if the parent asked you to gather task context.
 - **Never run long or destructive processes.** `proc.spawn` of `cargo build`, `cargo test`, etc. is out of scope — ask the parent to run verification itself.
 

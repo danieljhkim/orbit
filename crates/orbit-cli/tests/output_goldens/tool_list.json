@@ -2,38 +2,6 @@
   {
     "active": true,
     "builtin": true,
-    "description": "Delete a file from disk",
-    "enabled": true,
-    "name": "fs.delete",
-    "parameters": [
-      {
-        "description": "Path to the file to delete",
-        "name": "path",
-        "param_type": "string",
-        "required": true
-      }
-    ],
-    "status": "active"
-  },
-  {
-    "active": true,
-    "builtin": true,
-    "description": "Read a UTF-8 text file from disk",
-    "enabled": true,
-    "name": "fs.read",
-    "parameters": [
-      {
-        "description": "Path to the file to read",
-        "name": "path",
-        "param_type": "string",
-        "required": true
-      }
-    ],
-    "status": "active"
-  },
-  {
-    "active": true,
-    "builtin": true,
     "description": "List every auto-task definition in this workspace.",
     "enabled": true,
     "name": "orbit.auto_task.list",

@@ -35,7 +35,6 @@ spec:
     findings you were given — out-of-scope changes are noise that stretches
     the loop.
   tools:
-    - fs.read
     - proc.spawn
   proc_allowed_programs:
     - git

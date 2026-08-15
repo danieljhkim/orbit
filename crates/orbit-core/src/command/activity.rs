@@ -355,9 +355,9 @@ backend = "cli"
             .join(" ")
             .to_lowercase();
 
-        assert!(instruction.contains("each `file:` target with `fs.read`"));
+        assert!(instruction.contains("each `file:` target with the provider-native file-read tool"));
         assert!(instruction.contains("each `dir:` selector"));
-        assert!(instruction.contains("do not call `fs.read` on the directory"));
+        assert!(instruction.contains("do not call the file-read tool on the directory"));
         assert!(instruction.contains("resolves beneath the workspace root"));
         assert!(instruction.contains("`rg --files <directory>`"));
         assert!(!instruction.contains("is a directory"));
@@ -453,7 +453,7 @@ backend = "cli"
                 assert!(!spec.tools.iter().any(|tool| {
                     matches!(
                         tool.as_str(),
-                        "fs.write" | "fs.patch" | "fs.delete" | "orbit.pipeline.invoke"
+                        "fs.write" | "fs.patch" | "orbit.pipeline.invoke"
                     )
                 }));
                 assert!(
@@ -527,8 +527,7 @@ backend = "cli"
                     "orbit.task.show",
                     "orbit.task.update",
                     "orbit.friction.add",
-                    "fs.read",
-                    "fs.delete",
+                    "proc.spawn",
                 ] {
                     assert!(
                         tool_allowed(allowed, &spec.tools),
@@ -620,8 +619,6 @@ backend = "cli"
                 assert!(tool_allowed("orbit.task.update", &spec.tools));
                 assert!(tool_allowed("orbit.session_log.append", &spec.tools));
                 assert!(tool_allowed("orbit.search", &spec.tools));
-                assert!(tool_allowed("fs.read", &spec.tools));
-                assert!(tool_allowed("fs.delete", &spec.tools));
                 assert!(tool_allowed("proc.spawn", &spec.tools));
                 for denied in [
                     "orbit.workflow.ship",

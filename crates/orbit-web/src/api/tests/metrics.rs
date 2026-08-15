@@ -108,7 +108,7 @@ fn seed_metrics_runtime() -> OrbitRuntime {
             cache_create_tokens: 5,
             output_tokens: 20,
             task_ids: &[TASK_ID],
-            tool_calls: &[("fs.read", 321), ("orbit.task.show", 123)],
+            tool_calls: &[("orbit.task.update", 321), ("orbit.task.show", 123)],
         },
     );
     seed_invocation(
@@ -299,7 +299,7 @@ async fn metrics_invocations_accepts_full_filter_set() {
     let since = (record.ts - Duration::minutes(1)).to_rfc3339_opts(SecondsFormat::Millis, true);
     let until = (record.ts + Duration::minutes(1)).to_rfc3339_opts(SecondsFormat::Millis, true);
     let uri = format!(
-        "/metrics/invocations?since={since}&until={until}&job_run_id={RUN_ID}&activity_id=implement_one&task_id={TASK_ID}&agent=codex&model=gpt-5.5&tool_name=fs.read&limit=1"
+        "/metrics/invocations?since={since}&until={until}&job_run_id={RUN_ID}&activity_id=implement_one&task_id={TASK_ID}&agent=codex&model=gpt-5.5&tool_name=orbit.task.update&limit=1"
     );
 
     let response = request_metrics(runtime, &uri).await;
@@ -313,7 +313,7 @@ async fn metrics_invocations_accepts_full_filter_set() {
     assert_eq!(rows[0]["agent"], "codex");
     assert_eq!(rows[0]["model"], TEST_CODEX_MODEL);
     assert_eq!(rows[0]["task_ids"][0], TASK_ID);
-    assert_eq!(rows[0]["tool_calls"][0]["tool_name"], "fs.read");
+    assert_eq!(rows[0]["tool_calls"][0]["tool_name"], "orbit.task.update");
 }
 
 #[tokio::test]

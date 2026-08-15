@@ -1,5 +1,3 @@
-fs.delete	path:string	Delete a file from disk
-fs.read	path:string	Read a UTF-8 text file from disk
 orbit.auto_task.list	-	List every auto-task definition in this workspace.
 orbit.auto_task.mint	name:string	Mint one task now from an auto-task definition. Unconditional: the schedule, dedupe policy, and enabled flag are ignored, and the scheduler's own cursor is left untouched.
 orbit.command.exec	argv:string|string[], working_directory:string	Execute a command as an explicit argv array in an explicit working directory and return its stdout, stderr, and exit status. Requires operator capability and the workspace claim; withheld from managed runs.

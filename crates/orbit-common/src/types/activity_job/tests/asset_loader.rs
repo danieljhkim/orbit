@@ -49,7 +49,7 @@ fn load_activity_asset_rejects_empty_tool_name() {
 #[test]
 fn activity_role_error_names_asset_and_crew_replacement() {
     let yaml =
-        agent_loop_activity_yaml("legacy_activity", "    - fs.read\n") + "  role: implementer\n";
+        agent_loop_activity_yaml("legacy_activity", "    - orbit.task.show\n") + "  role: implementer\n";
     let error = load_activity_asset(&yaml).expect_err("retired role must fail");
     let message = error.to_string();
     assert!(message.contains("activity `legacy_activity`"), "{message}");

@@ -66,7 +66,7 @@ spec:
     2. With `proc.spawn` run only read-only `git`/`rg` commands. Verify the
        workspace Git top-level, inspect `base_branch`, and determine every real
        file, directory, or symbol the stated change would modify or delete.
-       Use `fs.read` to inspect candidate targets. Do not edit repository files.
+       Use the provider-native file-read tool to inspect candidate targets. Do not edit repository files.
     3. Propose `context_files_after` as exact canonical selectors using only
        `file:`, `dir:`, or `symbol:`. Every anchor must already exist inside
        `workspace_path`; omit read-for-context files. Preserve the exact current
@@ -118,7 +118,6 @@ spec:
     - orbit.task.show
     - orbit.task.list
     - orbit.search
-    - fs.read
     - proc.spawn
   proc_allowed_programs:
     - git

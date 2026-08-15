@@ -24,7 +24,7 @@ fn log_snapshot_filters_target_level_and_since() {
                 "timestamp": "2026-04-27T01:00:01Z",
                 "level": "INFO",
                 "target": "orbit.policy.deny",
-                "fields": {"tool": "fs.read", "path": "/tmp/a"}
+                "fields": {"tool": "proc.spawn", "path": "/tmp/a"}
             })
             .to_string(),
             json!({

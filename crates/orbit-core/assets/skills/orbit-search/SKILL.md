@@ -5,7 +5,7 @@ description: Search tasks, docs, ADRs, and frictions through the unified `orbit 
 
 # Orbit Search
 
-`orbit search` finds project context by topic, literal phrase, or related task ID. It is corpus retrieval, not structural traversal — for callers, refs, implementors, or symbol selectors, read files with `fs.read` or use `rg`.
+`orbit search` finds project context by topic, literal phrase, or related task ID. It is corpus retrieval, not structural traversal — for callers, refs, implementors, or symbol selectors, read files with the provider-native file-read tool or use `rg`.
 
 The query surface is `orbit.search` (MCP `orbit_search({...})`, CLI `orbit tool run orbit.search --input '{...}'`). Include `model` for provenance. The *lifecycle* surface — `orbit semantic install|uninstall|stats|index` — manages the embedding companion and is not a way to query anything.
 

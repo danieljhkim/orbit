@@ -168,9 +168,9 @@ fn persist_test_trace(runtime: &OrbitRuntime, run_id: &str, trace: &InvocationTr
 
 #[test]
 fn persist_invocation_trace_no_longer_measures_removed_pack_tool() {
-    // ORB-00391: orbit.graph.pack was removed with orbit-knowledge (v1). A trace
-    // whose only payload tool is the former pack tool records no knowledge metrics,
-    // because merge_invocation_trace now measures fs.read exclusively.
+    // ORB-00391 / ORB-10828: retired measured builtins no longer produce
+    // knowledge metrics. A trace whose only payload tool is a former measured
+    // tool records none.
     let (_root, runtime, _repo_root) = runtime_with_workspace_layout();
     let run_id = seed_running_job_run(&runtime, "knowledge_pack_job");
     let trace = trace_with_tool_calls(
@@ -199,28 +199,24 @@ fn persist_invocation_trace_no_longer_measures_removed_pack_tool() {
 }
 
 #[test]
-fn persist_invocation_trace_records_fs_read_double_read_metrics() {
-    // ORB-00391: with the pack baseline gone, every fs.read is "double read"
-    // relative to itself, so double_read_rate is 1.0 for an fs.read-only run.
+fn persist_invocation_trace_does_not_record_retired_read_token_metrics() {
+    // ORB-10828: read-token gauges are historical only. A fresh trace must not
+    // invent knowledge metrics from a leftover measured-tool name.
     let (_root, runtime, _repo_root) = runtime_with_workspace_layout();
 
     let fallback_run_id = seed_running_job_run(&runtime, "knowledge_fallback_job");
-    let fallback_trace = trace_with_tool_calls(50, vec![byte_count_tool_call(1, "fs.read", 120)]);
+    let fallback_trace =
+        trace_with_tool_calls(50, vec![byte_count_tool_call(1, "orbit.task.show", 120)]);
 
     persist_test_trace(&runtime, &fallback_run_id, &fallback_trace);
 
     let fallback_run = runtime
         .show_job_run(&fallback_run_id)
         .expect("show fallback job run");
-    let metrics = fallback_run
-        .knowledge_metrics
-        .expect("fallback metrics recorded");
-    assert!(!metrics.knowledge_pack_used);
-    assert_eq!(metrics.raw_read_token_baseline, 30);
-    assert_eq!(metrics.knowledge_pack_tokens, None);
-    assert_eq!(metrics.actual_fs_read_tokens_during_run, 30);
-    assert_eq!(metrics.double_read_rate, Some(1.0));
-    assert_eq!(metrics.total_llm_input_tokens, 50);
+    assert!(
+        fallback_run.knowledge_metrics.is_none(),
+        "new traces must not populate retired read-token gauges"
+    );
 }
 
 #[test]

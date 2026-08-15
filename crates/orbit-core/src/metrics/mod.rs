@@ -6,9 +6,10 @@
 //! the pure computation over invocation traces ([`merge_invocation_trace`])
 //! and the cross-run aggregation rendered by the dashboard ([`aggregate`]).
 //!
-//! The v1 `orbit.graph.pack` compression path was dropped with the tool
-//! (ORB-00388); only `fs.read` token accounting remains, which reproduces the
-//! behavior the prior implementation produced for pack-less runs.
+//! The v1 pack-compression path was dropped with the tool (ORB-00388).
+//! ORB-10828 retired the last builtin that fed read-token counters, so ingest
+//! no longer creates knowledge metrics from new traces. Dashboard aggregation
+//! still reads historical `double_read_rate` values from persisted job runs.
 
 mod ingest;
 pub mod reliability;

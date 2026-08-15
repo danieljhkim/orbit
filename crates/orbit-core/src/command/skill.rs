@@ -678,7 +678,7 @@ mod tests {
             "dependencies: [\"ORB-NNNN\", ...] require ORB-NNNNN targets",
             "record the choice as a repo-local ADR-NNNN heading",
             "recommended layout: `docs/design/<feature>/`",
-            "resolve `context_files` selectors, then `fs.read` a `<task-id>`",
+            "resolve `context_files` selectors, then read a `<task-id>`",
             "run `orbit search --kind doc`",
         ] {
             assert!(
