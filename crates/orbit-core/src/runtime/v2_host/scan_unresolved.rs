@@ -1,8 +1,10 @@
-//! Deterministic unresolved-work scan for `epic_pipeline` [ORB-10779].
+//! Deterministic unresolved-work scan [ORB-10779 / ORB-10818].
 //!
-//! Read-only. Wakes on `proposed` / `backlog` / `blocked` tasks, `failed` /
-//! `timeout` job-runs (except the drain job itself), and unresolved
-//! `check_later` session-log entries. Empty is success, not an error.
+//! Read-only workspace drain predicate. Wakes on `proposed` / `backlog` /
+//! `blocked` tasks, `failed` / `timeout` job-runs (except `epic_pipeline`
+//! itself), and unresolved `check_later` session-log entries. Empty is
+//! success, not an error. This is no longer `epic_pipeline`'s completion
+//! gate — that job uses `list_epic_descendants`.
 
 use orbit_common::types::{JobRunState, TaskStatus};
 use orbit_engine::DispatchError;

@@ -332,11 +332,26 @@ pub(super) fn list_epic_descendants(
         }
     }
 
+    let empty = ordered.is_empty();
+    let fail_if_nonempty = input
+        .get("fail_if_nonempty")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    if fail_if_nonempty && !empty {
+        return Err(DispatchError::DeterministicActionFailed {
+            action: action.to_string(),
+            message: format!(
+                "epic descendants remain after drain: tasks=[{}]",
+                ordered.join(", ")
+            ),
+        });
+    }
+
     Ok(json!({
         "epic_task_id": epic_task_id,
         "task_count": ordered.len(),
         "task_ids": ordered,
-        "empty": ordered.is_empty(),
+        "empty": empty,
     }))
 }
 

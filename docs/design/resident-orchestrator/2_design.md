@@ -25,7 +25,7 @@ related_artifacts: [ORB-10332, ORB-10775, ORB-10776, ORB-10779, ORB-10788, ORB-1
 > |---|---|
 > | [§1 Epic worktree and sequential child drain](#1-epic-worktree-and-sequential-child-drain) | **live** ([ORB-10816]) |
 > | [§2 Epic agent](#2-epic-agent-epic_orchestrator) | planned ([ORB-10817]) — the shipped activity is still the v1 dispatcher |
-> | [§3 `epic_pipeline` job](#3-epic_pipeline-job) | partly live — §1's phases ship; the agent step, completion gate, and delivery are [ORB-10818] |
+> | [§3 `epic_pipeline` job](#3-epic_pipeline-job) | **live** ([ORB-10818]) — assemble, epic-scoped gate, and inlined delivery |
 > | [§4 Workspace drain](#4-workspace-drain-workspace_auto_pipeline) | **live** ([ORB-10819]) |
 > | [§5](#5-unresolved-work-scan)–[§8](#8-authority-and-completion) | live |
 
@@ -100,9 +100,8 @@ Conversation resume across fires stays out of scope. Each invoke starts fresh fr
 
 ## 3. `epic_pipeline` job
 
-> **Partly live.** The shipped job runs `resolve_ship_input` → `worktree` → `descendants` → the
-> `drain` loop of §1, then stops. The agent step, the completion gate, and delivery are [ORB-10818];
-> until they land, an epic run assembles the branch but does not ship it.
+> **Live** since [ORB-10818]. The shipped job assembles descendants into the epic worktree (§1),
+> invokes the finisher, fails closed on leftover descendants, and delivers the epic branch.
 
 ```text
 worktree = worktree_setup(epic root, run_id: epic-<id>, branch_prefix: epic)

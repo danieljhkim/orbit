@@ -6,8 +6,8 @@ use std::sync::{Arc, Mutex};
 
 use chrono::Utc;
 use orbit_common::types::{
-    AuditEventStatus, ExecutorDef, ExecutorType, JobRunState, JobV2StepBody, TaskPriority,
-    TaskStatus, TaskType,
+    ActivityV2Spec, AuditEventStatus, ExecutorDef, ExecutorType, JobRunState, JobV2Step,
+    JobV2StepBody, TaskPriority, TaskStatus, TaskType,
 };
 use orbit_engine::{
     DispatchError, JobOutcome, ResolvedCliExecutor, RuntimeHost, V2AuditWriter,
@@ -652,6 +652,9 @@ struct ScriptedEpicHost<'a> {
     descendant_ids: Mutex<Vec<String>>,
     finish_authored_child: Option<String>,
     commit_on_finish: bool,
+    land_children: bool,
+    no_diff: bool,
+    ship_mode: &'static str,
     calls: Mutex<Vec<(String, Value)>>,
 }
 
@@ -662,6 +665,9 @@ impl<'a> ScriptedEpicHost<'a> {
             descendant_ids: Mutex::new(descendant_ids),
             finish_authored_child: None,
             commit_on_finish: false,
+            land_children: true,
+            no_diff: false,
+            ship_mode: "pr",
             calls: Mutex::new(Vec::new()),
         }
     }
@@ -673,6 +679,21 @@ impl<'a> ScriptedEpicHost<'a> {
 
     fn commit_on_finish(mut self) -> Self {
         self.commit_on_finish = true;
+        self
+    }
+
+    fn local_mode(mut self) -> Self {
+        self.ship_mode = "local";
+        self
+    }
+
+    fn no_diff(mut self) -> Self {
+        self.no_diff = true;
+        self
+    }
+
+    fn never_land_children(mut self) -> Self {
+        self.land_children = false;
         self
     }
 
@@ -699,13 +720,14 @@ impl RuntimeHost for ScriptedEpicHost<'_> {
         input: &Value,
         tool_context: ToolContext,
     ) -> Result<Value, DispatchError> {
+        let recorded = action.strip_prefix("scripted_").unwrap_or(action);
         self.calls
             .lock()
             .expect("call log")
-            .push((action.to_string(), input.clone()));
-        match action {
+            .push((recorded.to_string(), input.clone()));
+        match recorded {
             "resolve_workspace_ship_input" => Ok(json!({
-                "mode": "pr",
+                "mode": self.ship_mode,
                 "base_branch": "agent-main",
             })),
             "worktree_setup" => Ok(json!({
@@ -718,6 +740,20 @@ impl RuntimeHost for ScriptedEpicHost<'_> {
             })),
             "list_epic_descendants" => {
                 let descendant_ids = self.current_descendants();
+                let empty = descendant_ids.is_empty();
+                let fail_if_nonempty = input
+                    .get("fail_if_nonempty")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false);
+                if fail_if_nonempty && !empty {
+                    return Err(DispatchError::DeterministicActionFailed {
+                        action: action.to_string(),
+                        message: format!(
+                            "epic descendants remain after drain: tasks=[{}]",
+                            descendant_ids.join(", ")
+                        ),
+                    });
+                }
                 Ok(json!({
                     "epic_task_id": input
                         .get("epic_task_id")
@@ -725,14 +761,15 @@ impl RuntimeHost for ScriptedEpicHost<'_> {
                         .unwrap_or("ORB-EPIC"),
                     "task_count": descendant_ids.len(),
                     "task_ids": descendant_ids,
-                    "empty": descendant_ids.is_empty(),
+                    "empty": empty,
                 }))
             }
             "invoke_and_wait" => {
-                if let Some(task_ids) = input
-                    .get("run_input")
-                    .and_then(|value| value.get("task_ids"))
-                    .and_then(Value::as_array)
+                if self.land_children
+                    && let Some(task_ids) = input
+                        .get("run_input")
+                        .and_then(|value| value.get("task_ids"))
+                        .and_then(Value::as_array)
                 {
                     self.descendant_ids
                         .lock()
@@ -774,6 +811,71 @@ impl RuntimeHost for ScriptedEpicHost<'_> {
                 }
                 Ok(json!({ "summary": "finished" }))
             }
+            "git_commit" => Ok(json!({
+                "phase": "commit",
+                "decision": if self.no_diff {
+                    "skipped_no_diff_expected"
+                } else {
+                    "already_committed"
+                },
+                "committed": false,
+                "skipped_no_diff_expected": self.no_diff,
+            })),
+            "pr_prepare" => Ok(json!({
+                "phase": "prepare",
+                "decision": "already_fresh",
+                "head": "epic/ORB-EPIC",
+                "head_sha": "2222222222222222222222222222222222222222",
+                "base": "agent-main",
+                "base_ref": "origin/agent-main",
+                "base_sha": "1111111111111111111111111111111111111111",
+                "remote_sha": Value::Null,
+                "commits_behind": 0,
+                "commits_ahead": 1,
+                "sync_required": false,
+            })),
+            "git_rebase" => Ok(json!({
+                "phase": "rebase",
+                "decision": "skipped_current",
+                "head": "epic/ORB-EPIC",
+                "head_sha": "2222222222222222222222222222222222222222",
+                "head_sha_before": "2222222222222222222222222222222222222222",
+                "base": "agent-main",
+                "base_ref": "origin/agent-main",
+                "base_sha": "1111111111111111111111111111111111111111",
+                "remote_sha_before": Value::Null,
+                "rewritten": false,
+            })),
+            "git_push" => Ok(json!({
+                "phase": "push",
+                "decision": "performed",
+                "branch": "epic/ORB-EPIC",
+                "local_sha": "2222222222222222222222222222222222222222",
+                "force_with_lease": false,
+            })),
+            "pr_open" => Ok(json!({
+                "phase": "open",
+                "decision": "created",
+                "pr_created": true,
+                "pr_reused": false,
+                "pr_number": "42",
+                "pr_url": "https://example.test/pr/42",
+            })),
+            "pr_promote" => Ok(json!({
+                "phase": "promote",
+                "decision": "performed",
+                "performed_task_ids": ["ORB-EPIC"],
+                "reused_task_ids": [],
+            })),
+            "git_merge" => Ok(json!({
+                "base": "agent-main",
+                "workspace_path": self.runtime.paths().repo_root,
+                "workspace_branch": "epic/ORB-EPIC",
+            })),
+            "update_task" => Ok(json!({
+                "task_id": input.get("task_id"),
+                "status": input.get("status"),
+            })),
             "pipeline_success_guard" => <OrbitRuntime as RuntimeHost>::run_deterministic(
                 self.runtime,
                 action,
@@ -1138,6 +1240,173 @@ fn epic_pipeline_reenters_drain_when_finisher_authors_a_child() {
     assert_eq!(invokes[1]["run_input"]["task_ids"], json!(["ORB-AUTHORED"]));
     assert_eq!(host.inputs_for("test_epic_finish").len(), 2);
     assert!(host.current_descendants().is_empty());
+}
+
+fn retarget_engine_actions_for_scripted_host(job: &mut orbit_common::types::activity_job::JobV2) {
+    fn walk(step: &mut JobV2Step) {
+        match &mut step.body {
+            JobV2StepBody::Target(target) => {
+                if let ActivityV2Spec::Deterministic(spec) = &mut target.spec {
+                    match spec.action.as_str() {
+                        "worktree_setup" | "git_commit" | "git_rebase" | "git_push"
+                        | "git_merge" | "pr_prepare" | "pr_open" | "pr_promote" | "update_task" => {
+                            spec.action = format!("scripted_{}", spec.action);
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            JobV2StepBody::Loop { loop_ } => {
+                for child in &mut loop_.steps {
+                    walk(child);
+                }
+            }
+            JobV2StepBody::Parallel { parallel } => {
+                for child in &mut parallel.branches {
+                    walk(child);
+                }
+            }
+            JobV2StepBody::FanOut { fan_out, .. } => walk(&mut fan_out.worker),
+            JobV2StepBody::TargetRef(_) => {}
+        }
+    }
+    for step in &mut job.steps {
+        walk(step);
+    }
+}
+
+fn try_execute_full_epic_job(
+    runtime: &OrbitRuntime,
+    repo_root: &Path,
+    host: &dyn RuntimeHost,
+    input: Value,
+    run_id: &str,
+) -> Result<JobOutcome, DispatchError> {
+    let mut job = resolved_job(runtime, "epic_pipeline");
+    retarget_engine_actions_for_scripted_host(&mut job);
+    try_execute_epic_job(runtime, repo_root, host, job, input, run_id)
+}
+
+#[test]
+fn epic_pipeline_pr_mode_delivers_one_pr_against_the_workspace_base() {
+    let (_root, runtime, repo_root, global_root) = test_runtime();
+    seed_default_catalogs(&global_root);
+    stub_epic_finisher(&global_root);
+    let host = ScriptedEpicHost::new(&runtime, vec!["ORB-CHILD-1".to_string()]);
+
+    let outcome = try_execute_full_epic_job(
+        &runtime,
+        &repo_root,
+        &host,
+        json!({ "epic_task_id": "ORB-EPIC" }),
+        "jrun-scripted-epic-pr",
+    )
+    .expect("execute epic pr delivery");
+
+    assert!(outcome.success);
+    assert_eq!(host.inputs_for("worktree_setup").len(), 1);
+    assert_eq!(host.inputs_for("pr_open").len(), 1);
+    assert_eq!(host.inputs_for("pr_promote").len(), 1);
+    assert!(host.inputs_for("git_merge").is_empty());
+    let prepare = &host.inputs_for("pr_prepare")[0];
+    assert_eq!(prepare["base"], "agent-main");
+    assert_eq!(
+        prepare["workspace_path"],
+        runtime.paths().repo_root.display().to_string()
+    );
+    assert_eq!(prepare["completed_task_ids"], json!(["ORB-EPIC"]));
+    assert!(
+        host.inputs_for("invoke_and_wait")
+            .iter()
+            .all(|input| input["job_name"] != "task_pr_pipeline"),
+        "delivery must not invoke task_pr_pipeline"
+    );
+    assert!(host.inputs_for("update_task").is_empty());
+}
+
+#[test]
+fn epic_pipeline_local_mode_merges_once_into_the_workspace_base() {
+    let (_root, runtime, repo_root, global_root) = test_runtime();
+    seed_default_catalogs(&global_root);
+    stub_epic_finisher(&global_root);
+    let host = ScriptedEpicHost::new(&runtime, vec!["ORB-CHILD-1".to_string()]).local_mode();
+
+    let outcome = try_execute_full_epic_job(
+        &runtime,
+        &repo_root,
+        &host,
+        json!({ "epic_task_id": "ORB-EPIC" }),
+        "jrun-scripted-epic-local",
+    )
+    .expect("execute epic local delivery");
+
+    assert!(outcome.success);
+    assert_eq!(host.inputs_for("worktree_setup").len(), 1);
+    assert!(host.inputs_for("pr_open").is_empty());
+    assert!(host.inputs_for("pr_promote").is_empty());
+    assert_eq!(host.inputs_for("git_merge").len(), 1);
+    let merge = &host.inputs_for("git_merge")[0];
+    assert_eq!(merge["base"], "agent-main");
+    assert_eq!(
+        merge["workspace_path"],
+        runtime.paths().repo_root.display().to_string()
+    );
+    let updates = host.inputs_for("update_task");
+    assert_eq!(updates.len(), 1);
+    assert_eq!(updates[0]["task_id"], "ORB-EPIC");
+    assert_eq!(updates[0]["status"], "done");
+}
+
+#[test]
+fn epic_pipeline_no_diff_skips_empty_pr_and_promotes_the_root() {
+    let (_root, runtime, repo_root, global_root) = test_runtime();
+    seed_default_catalogs(&global_root);
+    stub_epic_finisher(&global_root);
+    let host = ScriptedEpicHost::new(&runtime, Vec::new()).no_diff();
+
+    let outcome = try_execute_full_epic_job(
+        &runtime,
+        &repo_root,
+        &host,
+        json!({ "epic_task_id": "ORB-EPIC" }),
+        "jrun-scripted-epic-no-diff",
+    )
+    .expect("execute no-diff epic");
+
+    assert!(outcome.success);
+    assert!(host.inputs_for("pr_prepare").is_empty());
+    assert!(host.inputs_for("pr_open").is_empty());
+    assert!(host.inputs_for("git_push").is_empty());
+    let updates = host.inputs_for("update_task");
+    assert_eq!(updates.len(), 1);
+    assert_eq!(updates[0]["task_id"], "ORB-EPIC");
+    assert_eq!(updates[0]["status"], "review");
+}
+
+#[test]
+fn epic_pipeline_fails_closed_when_descendants_remain_and_names_them() {
+    let (_root, runtime, repo_root, global_root) = test_runtime();
+    seed_default_catalogs(&global_root);
+    stub_epic_finisher(&global_root);
+    let host = ScriptedEpicHost::new(&runtime, vec!["ORB-LEFT".to_string()]).never_land_children();
+
+    let err = try_execute_full_epic_job(
+        &runtime,
+        &repo_root,
+        &host,
+        json!({ "epic_task_id": "ORB-EPIC" }),
+        "jrun-scripted-epic-leftover",
+    )
+    .expect_err("leftover descendants must fail closed");
+
+    let message = err.to_string();
+    assert!(message.contains("ORB-LEFT"), "{message}");
+    assert!(
+        message.contains("epic descendants remain after drain"),
+        "{message}"
+    );
+    assert!(host.inputs_for("pr_open").is_empty());
+    assert!(host.inputs_for("git_merge").is_empty());
 }
 
 #[cfg(unix)]

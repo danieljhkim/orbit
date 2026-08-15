@@ -203,20 +203,31 @@ pub(super) fn commit_batch_changes<H: RuntimeHost + ?Sized>(
     // failing it. Read the tag before any gate so the carve-out is reachable
     // from every failure branch below, not just the empty-stage one (ORB-10380).
     let no_diff_expected = task.tags.iter().any(|tag| tag == NO_DIFF_EXPECTED_TAG);
+    let allow_empty = input
+        .get("allow_empty")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let allow_moved_head = input
+        .get("allow_moved_head")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
 
-    let base_sha = match validate_pinned_head(&workspace_path, input)? {
-        PinnedHead::Matched(base_sha) => Some(base_sha),
-        PinnedHead::Unpinned => None,
+    let (base_sha, head_moved) = match validate_pinned_head(&workspace_path, input)? {
+        PinnedHead::Matched(base_sha) => (Some(base_sha), false),
+        PinnedHead::Unpinned => (None, false),
         PinnedHead::Changed { base_sha, head_sha } => {
             if no_diff_expected {
                 return Ok(skipped_no_diff_expected_result(&task.id));
             }
-            return Err(changed_head_error(
-                &task.id,
-                &workspace_path,
-                &base_sha,
-                &head_sha,
-            ));
+            if !allow_moved_head {
+                return Err(changed_head_error(
+                    &task.id,
+                    &workspace_path,
+                    &base_sha,
+                    &head_sha,
+                ));
+            }
+            (Some(base_sha), true)
         }
     };
 
@@ -234,7 +245,12 @@ pub(super) fn commit_batch_changes<H: RuntimeHost + ?Sized>(
         // `git add --all` staged nothing here, so the index already matches
         // HEAD and the former `git reset HEAD` was both pointless and a
         // mutation performed while erroring.
-        if no_diff_expected {
+        if head_moved {
+            // Child pipelines already advanced HEAD. There is a diff to
+            // deliver; it just is not sitting uncommitted.
+            return Ok(already_committed_result(&task.id, base_sha.as_deref()));
+        }
+        if no_diff_expected || allow_empty {
             return Ok(skipped_no_diff_expected_result(&task.id));
         }
         return Err(empty_stage_error(
@@ -357,6 +373,20 @@ fn skipped_no_diff_expected_result(task_id: &str) -> Value {
         "skipped_no_diff_expected": true,
         "task_id": task_id,
     })
+}
+
+fn already_committed_result(task_id: &str, base_sha: Option<&str>) -> Value {
+    let mut result = json!({
+        "phase": "commit",
+        "decision": "already_committed",
+        "committed": false,
+        "skipped_no_diff_expected": false,
+        "task_id": task_id,
+    });
+    if let Some(base_sha) = base_sha {
+        result["base_sha"] = json!(base_sha);
+    }
+    result
 }
 
 /// The worktree carries no committable work. Reports only what was observed —
