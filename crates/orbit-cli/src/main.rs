@@ -272,6 +272,14 @@ fn finish_command(
     suppress_errors: bool,
     json_error_preference: Option<bool>,
 ) {
+    let exit_code = result
+        .as_ref()
+        .ok()
+        .and_then(|output| match output {
+            command::CommandOutput::Payload(payload) => Some(payload.exit_code()),
+            command::CommandOutput::Silent => None,
+        })
+        .unwrap_or(0);
     let rendered = result.and_then(|output| output::render::emit(output, sink));
     if let Err(err) = rendered {
         if suppress_errors {
@@ -279,6 +287,9 @@ fn finish_command(
         }
         print_error(&err, sink, json_error_preference);
         std::process::exit(1);
+    }
+    if exit_code != 0 {
+        std::process::exit(exit_code);
     }
 }
 
