@@ -33,15 +33,11 @@ fn canonical_builtin_definitions_preserve_the_exact_workspace_surface() {
             .map(|definition| definition.schema.name.as_str())
             .collect::<Vec<_>>(),
         [
-            "orbit.auto_task.add",
-            "orbit.auto_task.show",
-            "orbit.auto_task.toggle",
-            "orbit.auto_task.update",
+            "orbit.auto_task.list",
+            "orbit.auto_task.mint",
             "orbit.command.exec",
             "orbit.friction.add",
             "orbit.friction.list",
-            "orbit.friction.show",
-            "orbit.friction.tags",
             "orbit.friction.update",
             "orbit.search",
             "orbit.session_log.append",

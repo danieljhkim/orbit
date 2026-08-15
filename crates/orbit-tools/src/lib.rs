@@ -86,6 +86,7 @@ pub enum OrbitBuiltinAction {
     AdrSupersede,
     AutoTaskAdd,
     AutoTaskList,
+    AutoTaskMint,
     AutoTaskShow,
     AutoTaskUpdate,
     AutoTaskToggle,

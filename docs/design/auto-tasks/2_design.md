@@ -81,7 +81,7 @@ minutely). Because it is a routine, its fires flow to `GET /api/routines`.
 ## 5. CRUD surfaces
 
 `crud.rs` is the single choke point behind both the CLI (`orbit auto-task
-add/list/show/update/toggle`) and the MCP tools (`orbit.auto_task.*`). Add
+add/list/show/update/toggle`) and the registry tools (`orbit.auto_task.*`). Add
 rejects duplicate names; update patches present fields; toggle flips `enabled`
 (disabling is preserved, never a delete). Both surfaces validate the schedule
 (cron parse / interval > 0) and crew at write time, so a bad definition is never
@@ -145,9 +145,14 @@ scheduler pass and defers that fire, exactly as an open fired instance does. The
 cursor does not advance, so the deferred occurrence fires once when the queue
 drains. This is the behavior the hand-copy workaround could not provide.
 
-`mint` is CLI-only. Per the mcp-bridge design (`docs/design/mcp-bridge/2_design.md`,
-auto_task placement row) the auto_task MCP tools manage the Git-versioned
-definition and do not mint tasks; no MCP tool was added.
+Advertisement follows who does the work [ORB-10798]. Authoring a Git-versioned
+definition (`add`, `show`, `update`, `toggle`) is human/admin work: those tools
+are `register_inactive`, reachable through their `orbit auto-task` subcommands
+but absent from MCP `tools/list`. Reading the definitions (`list`) and minting
+one on demand (`orbit.auto_task.mint`) are what an executing agent needs, so
+both are registered at `McpToolScope::WorkspaceRequired`. The MCP tool is a thin
+adapter over the same `auto_task_mint`, so the mint stays unconditional and
+cursor-neutral on every surface.
 
 ## 6. Concerns & Honest Limitations
 

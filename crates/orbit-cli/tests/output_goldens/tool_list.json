@@ -34,117 +34,24 @@
   {
     "active": true,
     "builtin": true,
-    "description": "Create a recurring auto-task definition. The generic scheduler mints a task from its template on each due slot.",
+    "description": "List every auto-task definition in this workspace.",
     "enabled": true,
-    "name": "orbit.auto_task.add",
-    "parameters": [
-      {
-        "description": "Unique definition name (lowercase alphanumeric, `-`/`_`, starts alphanumeric). Required.",
-        "name": "name",
-        "param_type": "string",
-        "required": true
-      },
-      {
-        "description": "Human description of the recurring chore.",
-        "name": "description",
-        "param_type": "string",
-        "required": false
-      },
-      {
-        "description": "Schedule object: exactly one of `{ cron: string }` (5-field cron) or `{ every_minutes: number }`. Required.",
-        "name": "schedule",
-        "param_type": "object",
-        "required": true
-      },
-      {
-        "description": "Task template: `{ title, description?, acceptance_criteria?, task_type?, tags?, priority?, crew?, status? }`. Provider-neutral — no turn knobs. Required.",
-        "name": "template",
-        "param_type": "object",
-        "required": true
-      },
-      {
-        "description": "Dedupe policy: `skip_if_open` (default) or `always`.",
-        "name": "dedupe",
-        "param_type": "string",
-        "required": false
-      }
-    ],
+    "name": "orbit.auto_task.list",
+    "parameters": [],
     "status": "active"
   },
   {
     "active": true,
     "builtin": true,
-    "description": "Show a single auto-task definition by name.",
+    "description": "Mint one task now from an auto-task definition. Unconditional: the schedule, dedupe policy, and enabled flag are ignored, and the scheduler's own cursor is left untouched.",
     "enabled": true,
-    "name": "orbit.auto_task.show",
+    "name": "orbit.auto_task.mint",
     "parameters": [
       {
         "description": "Definition name. Required.",
         "name": "name",
         "param_type": "string",
         "required": true
-      }
-    ],
-    "status": "active"
-  },
-  {
-    "active": true,
-    "builtin": true,
-    "description": "Enable or disable an auto-task definition without deleting it.",
-    "enabled": true,
-    "name": "orbit.auto_task.toggle",
-    "parameters": [
-      {
-        "description": "Definition name. Required.",
-        "name": "name",
-        "param_type": "string",
-        "required": true
-      },
-      {
-        "description": "Whether to enable (`true`) or disable (`false`) the definition. Disabling is the kill-switch, not a delete. Required.",
-        "name": "enabled",
-        "param_type": "boolean",
-        "required": true
-      }
-    ],
-    "status": "active"
-  },
-  {
-    "active": true,
-    "builtin": true,
-    "description": "Update an existing auto-task definition (present fields only).",
-    "enabled": true,
-    "name": "orbit.auto_task.update",
-    "parameters": [
-      {
-        "description": "Definition name. Required.",
-        "name": "name",
-        "param_type": "string",
-        "required": true
-      },
-      {
-        "description": "New description.",
-        "name": "description",
-        "param_type": "string",
-        "required": false
-      },
-      {
-        "description": "New schedule object: `{ cron: string }` or `{ every_minutes: number }`.",
-        "name": "schedule",
-        "param_type": "object",
-        "required": false
-      },
-      {
-        "description": "Replacement task template object.",
-        "name": "template",
-        "param_type": "object",
-        "required": false
-      },
-      {
-        "description": "New dedupe policy: `skip_if_open` or `always`.",
-        "name": "dedupe",
-        "param_type": "string",
-        "required": false
       }
     ],
     "status": "active"
@@ -285,31 +192,6 @@
         "required": false
       }
     ],
-    "status": "active"
-  },
-  {
-    "active": true,
-    "builtin": true,
-    "description": "Fetch a single Orbit friction record by id",
-    "enabled": true,
-    "name": "orbit.friction.show",
-    "parameters": [
-      {
-        "description": "friction ID",
-        "name": "id",
-        "param_type": "string",
-        "required": true
-      }
-    ],
-    "status": "active"
-  },
-  {
-    "active": true,
-    "builtin": true,
-    "description": "List configured friction taxonomy tags",
-    "enabled": true,
-    "name": "orbit.friction.tags",
-    "parameters": [],
     "status": "active"
   },
   {

@@ -190,11 +190,9 @@ fn registration_reproduces_the_shipped_mcp_surface() {
         vec![
             "orbit.friction.add",
             "orbit.friction.list",
-            "orbit.friction.show",
-            "orbit.friction.tags",
             "orbit.friction.update",
         ],
-        "stats and resolve stay off the MCP surface"
+        "show, tags, stats, and resolve stay off the MCP surface"
     );
     for definition in &definitions {
         assert_eq!(definition.scope, McpToolScope::WorkspaceRequired);

@@ -1,65 +1,20 @@
 [
   {
-    "description": "Create a recurring auto-task definition. The generic scheduler mints a task from its template on each due slot.",
+    "description": "List every auto-task definition in this workspace.",
     "inputSchema": {
       "additionalProperties": true,
       "properties": {
-        "dedupe": {
-          "description": "Dedupe policy: `skip_if_open` (default) or `always`.",
-          "type": "string"
-        },
-        "description": {
-          "description": "Human description of the recurring chore.",
-          "type": "string"
-        },
-        "name": {
-          "description": "Unique definition name (lowercase alphanumeric, `-`/`_`, starts alphanumeric). Required.",
-          "type": "string"
-        },
-        "schedule": {
-          "anyOf": [
-            {
-              "type": "object"
-            },
-            {
-              "items": {
-                "type": "object"
-              },
-              "type": "array"
-            }
-          ],
-          "description": "Schedule object: exactly one of `{ cron: string }` (5-field cron) or `{ every_minutes: number }`. Required."
-        },
-        "template": {
-          "anyOf": [
-            {
-              "type": "object"
-            },
-            {
-              "items": {
-                "type": "object"
-              },
-              "type": "array"
-            }
-          ],
-          "description": "Task template: `{ title, description?, acceptance_criteria?, task_type?, tags?, priority?, crew?, status? }`. Provider-neutral — no turn knobs. Required."
-        },
         "workspace": {
           "description": "Workspace selector for the authoritative server: a registered workspace name, a logical workspace ID (`ws_*`), or an absolute path registered on that server. Optional when the MCP session announced `_meta.orbit.workspace` at initialize; never inferred from the server process cwd.",
           "type": "string"
         }
       },
-      "required": [
-        "name",
-        "schedule",
-        "template"
-      ],
       "type": "object"
     },
-    "name": "orbit_auto_task_add"
+    "name": "orbit_auto_task_list"
   },
   {
-    "description": "Show a single auto-task definition by name.",
+    "description": "Mint one task now from an auto-task definition. Unconditional: the schedule, dedupe policy, and enabled flag are ignored, and the scheduler's own cursor is left untouched.",
     "inputSchema": {
       "additionalProperties": true,
       "properties": {
@@ -77,90 +32,7 @@
       ],
       "type": "object"
     },
-    "name": "orbit_auto_task_show"
-  },
-  {
-    "description": "Enable or disable an auto-task definition without deleting it.",
-    "inputSchema": {
-      "additionalProperties": true,
-      "properties": {
-        "enabled": {
-          "description": "Whether to enable (`true`) or disable (`false`) the definition. Disabling is the kill-switch, not a delete. Required.",
-          "type": "boolean"
-        },
-        "name": {
-          "description": "Definition name. Required.",
-          "type": "string"
-        },
-        "workspace": {
-          "description": "Workspace selector for the authoritative server: a registered workspace name, a logical workspace ID (`ws_*`), or an absolute path registered on that server. Optional when the MCP session announced `_meta.orbit.workspace` at initialize; never inferred from the server process cwd.",
-          "type": "string"
-        }
-      },
-      "required": [
-        "name",
-        "enabled"
-      ],
-      "type": "object"
-    },
-    "name": "orbit_auto_task_toggle"
-  },
-  {
-    "description": "Update an existing auto-task definition (present fields only).",
-    "inputSchema": {
-      "additionalProperties": true,
-      "properties": {
-        "dedupe": {
-          "description": "New dedupe policy: `skip_if_open` or `always`.",
-          "type": "string"
-        },
-        "description": {
-          "description": "New description.",
-          "type": "string"
-        },
-        "name": {
-          "description": "Definition name. Required.",
-          "type": "string"
-        },
-        "schedule": {
-          "anyOf": [
-            {
-              "type": "object"
-            },
-            {
-              "items": {
-                "type": "object"
-              },
-              "type": "array"
-            }
-          ],
-          "description": "New schedule object: `{ cron: string }` or `{ every_minutes: number }`."
-        },
-        "template": {
-          "anyOf": [
-            {
-              "type": "object"
-            },
-            {
-              "items": {
-                "type": "object"
-              },
-              "type": "array"
-            }
-          ],
-          "description": "Replacement task template object."
-        },
-        "workspace": {
-          "description": "Workspace selector for the authoritative server: a registered workspace name, a logical workspace ID (`ws_*`), or an absolute path registered on that server. Optional when the MCP session announced `_meta.orbit.workspace` at initialize; never inferred from the server process cwd.",
-          "type": "string"
-        }
-      },
-      "required": [
-        "name"
-      ],
-      "type": "object"
-    },
-    "name": "orbit_auto_task_update"
+    "name": "orbit_auto_task_mint"
   },
   {
     "description": "Execute a command as an explicit argv array in an explicit working directory and return its stdout, stderr, and exit status. Requires operator capability and the workspace claim; withheld from managed runs.",
@@ -335,41 +207,6 @@
       "type": "object"
     },
     "name": "orbit_friction_list"
-  },
-  {
-    "description": "Fetch a single Orbit friction record by id",
-    "inputSchema": {
-      "additionalProperties": true,
-      "properties": {
-        "id": {
-          "description": "friction ID",
-          "type": "string"
-        },
-        "workspace": {
-          "description": "Workspace selector for the authoritative server: a registered workspace name, a logical workspace ID (`ws_*`), or an absolute path registered on that server. Optional when the MCP session announced `_meta.orbit.workspace` at initialize; never inferred from the server process cwd.",
-          "type": "string"
-        }
-      },
-      "required": [
-        "id"
-      ],
-      "type": "object"
-    },
-    "name": "orbit_friction_show"
-  },
-  {
-    "description": "List configured friction taxonomy tags",
-    "inputSchema": {
-      "additionalProperties": true,
-      "properties": {
-        "workspace": {
-          "description": "Workspace selector for the authoritative server: a registered workspace name, a logical workspace ID (`ws_*`), or an absolute path registered on that server. Optional when the MCP session announced `_meta.orbit.workspace` at initialize; never inferred from the server process cwd.",
-          "type": "string"
-        }
-      },
-      "type": "object"
-    },
-    "name": "orbit_friction_tags"
   },
   {
     "description": "Update triage metadata for an Orbit friction record",

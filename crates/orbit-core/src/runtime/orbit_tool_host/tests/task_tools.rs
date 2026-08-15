@@ -245,13 +245,11 @@ fn friction_add_writes_markdown_record_and_validates_tags() {
     assert!(id.starts_with('F'), "{id}");
     assert_eq!(output["model"], json!("codex"));
 
+    // ORB-10798: `show` is inactive on the agent tool surface, so it is read
+    // back through the CLI / dashboard `run_tool` path, as `orbit friction
+    // show` does.
     let shown = runtime
-        .execute_tool_command(
-            "orbit.friction.show",
-            json!({ "id": id }),
-            Some("codex".to_string()),
-            Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
-        )
+        .run_tool("orbit.friction.show", json!({ "id": id }))
         .expect("friction show succeeds");
     assert_eq!(shown["id"], json!(id));
     assert_eq!(shown["status"], json!("open"));
