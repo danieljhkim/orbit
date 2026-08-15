@@ -32,9 +32,14 @@ pub(super) fn run_fan_out(
                 failed: 0,
             },
         );
+        let collected_value = Value::Array(Vec::new());
+        if let Some(collect_key) = &fan_in.collect {
+            record_pipeline(ctx, collect_key, collected_value.clone());
+        }
+        record_pipeline(ctx, &step.id, collected_value.clone());
         return Ok(StepOutcome {
             success: true,
-            output: Value::Array(Vec::new()),
+            output: collected_value,
             message: None,
         });
     }
