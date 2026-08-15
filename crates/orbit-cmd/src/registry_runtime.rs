@@ -27,6 +27,7 @@ pub struct ResolvedWorkspaceBinding {
 
 /// One server-local workspace selected from the registry, before Core opens a
 /// runtime for it.
+#[derive(Debug, Clone)]
 pub struct ResolvedWorkspaceSelection {
     pub workspace: Workspace,
     pub checkout: WorkspaceCheckout,
@@ -115,10 +116,7 @@ impl RegisteredRuntimeFactory {
                 .map(|runtime| runtime.with_coordination_write_owner(replica_owner));
         };
 
-        let global_root = match root_override {
-            Some(root) => root.to_path_buf(),
-            None => workspace_registry::global_orbit_dir()?,
-        };
+        let global_root = global_root_for(root_override)?;
         let selected = Self::resolve_workspace_selector(&global_root, selector)?;
         Self::open_registered_checkout(&global_root, &selected.workspace, &selected.checkout)
     }
@@ -228,6 +226,16 @@ impl RegisteredRuntimeFactory {
                 Self::open_registered_checkout(&global_root, workspace, checkout).map(Some)
             }
         }
+    }
+}
+
+/// The host data directory a registry lookup reads: the `--root` override when
+/// one was passed, and `~/.orbit` otherwise. Never derived from cwd, so a
+/// registry-first command works from any directory.
+pub(crate) fn global_root_for(root_override: Option<&Path>) -> Result<PathBuf, OrbitError> {
+    match root_override {
+        Some(root) => Ok(root.to_path_buf()),
+        None => workspace_registry::global_orbit_dir(),
     }
 }
 

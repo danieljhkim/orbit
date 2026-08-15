@@ -126,7 +126,7 @@ RegisteredRuntimeFactory also carries replica ownership into Core's coordination
 
 ### CLI
 
-The main CLI opens ordinary runtimes through RegisteredRuntimeFactory using cwd, --root and optional --workspace. Workspace init, role, list, show, remove and teardown call orbit-registry directly for catalog operations. The only active host command is local rename.
+The main CLI opens ordinary runtimes through RegisteredRuntimeFactory using cwd, --root and optional --workspace. `task show` is the one exception: without --workspace it opens the checkout the coordination task registry names as the task ID's owner, so it works from a foreign checkout and from a directory that is no workspace at all, and it reports the owning workspace name and logical ID. With --workspace it is the ordinary registered bootstrap, and the selector filters. Workspace init, role, list, show, remove and teardown call orbit-registry directly for catalog operations. The only active host command is local rename.
 
 There is no active v1 CLI surface for fleet host registration, enumeration or retirement, and no workspace owner-link command.
 

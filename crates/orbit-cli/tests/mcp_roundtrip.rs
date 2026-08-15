@@ -488,8 +488,18 @@ fn mcp_serve_lists_the_canonical_surface_outside_any_checkout() {
         .collect::<Vec<_>>();
     assert!(names.contains(&"orbit_task_show"));
 
+    // `task show` needs no selector — it follows the ID — so a server outside
+    // any checkout reports the ID as unknown rather than as unaddressable.
     let missing = client.call_tool_err("orbit_task_show", json!({ "id": "ORB-00001" }));
-    assert!(missing["message"].as_str().is_some_and(|message| {
+    assert!(
+        missing["message"]
+            .as_str()
+            .is_some_and(|message| message.contains("ORB-00001")),
+        "an unregistered id must be reported as not found: {missing}"
+    );
+    // Every other workspace-scoped tool still requires one.
+    let unscoped = client.call_tool_err("orbit_task_list", json!({}));
+    assert!(unscoped["message"].as_str().is_some_and(|message| {
         message.contains("requires a workspace selector")
             && message.contains("MCP initialize metadata")
     }));
@@ -1111,6 +1121,79 @@ fn worktree_backed_activity_routes_task_and_search_by_advertised_workspace_argum
     let shown: Value = serde_json::from_slice(&output.stdout).expect("parse CLI task show");
     assert_eq!(shown["id"], json!(task_id));
     assert_eq!(shown["execution_summary"], "Routed from a linked worktree");
+}
+
+/// ORB-10797: the constellation-orchestrator shape.
+///
+/// An agent sits in one workspace's MCP session and holds a task ID from
+/// another. The session's announced workspace is ambient, like cwd, so a
+/// `{id}`-only `orbit.task.show` follows the ID to its owner; an explicit
+/// per-call `workspace` stays a filter and 404s.
+#[test]
+fn mcp_task_show_follows_the_global_id_and_explicit_workspace_stays_a_filter() {
+    let workspace = McpWorkspace::init();
+
+    let elsewhere = workspace.home.join("elsewhere");
+    std::fs::create_dir_all(&elsewhere).expect("create the second checkout");
+    let output = Command::new("git")
+        .args(["init", "--quiet"])
+        .current_dir(&elsewhere)
+        .output()
+        .expect("initialize the second Git checkout");
+    assert!(output.status.success(), "git init failed: {output:?}");
+    let output = McpWorkspace::orbit_command(&elsewhere, &workspace.home)
+        .args(["workspace", "init", "--name", "mcp-elsewhere"])
+        .output()
+        .expect("register the second workspace");
+    assert!(
+        output.status.success(),
+        "second workspace init failed\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let add_input = json!({
+        "title": "Owned by the other workspace",
+        "description": "Addressed by ID from a session bound elsewhere",
+        "workspace": elsewhere.to_str().expect("utf8 checkout path"),
+        "model": "codex",
+    })
+    .to_string();
+    let output = McpWorkspace::orbit_command(&elsewhere, &workspace.home)
+        .args(["tool", "run", "orbit.task.add", "--input", &add_input])
+        .output()
+        .expect("author a task in the second workspace");
+    assert!(
+        output.status.success(),
+        "task add failed\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let created: Value = serde_json::from_slice(&output.stdout).expect("parse created task");
+    let task_id = created["id"].as_str().expect("task id").to_string();
+
+    // The session announces the *first* workspace at initialize.
+    let mut client = workspace.serve();
+
+    let shown = client.call_tool_ok("orbit_task_show", json!({ "id": task_id }));
+    assert_eq!(
+        shown["id"],
+        json!(task_id),
+        "an id-only show must follow the id past the session workspace: {shown}"
+    );
+    assert_eq!(shown["title"], "Owned by the other workspace");
+
+    let session_workspace = workspace.work.to_str().expect("utf8 session workspace");
+    let missed = client.call_tool_err(
+        "orbit_task_show",
+        json!({ "id": task_id, "workspace": session_workspace }),
+    );
+    assert!(
+        missed["message"]
+            .as_str()
+            .is_some_and(|message| message.contains(&task_id)),
+        "an explicit workspace must filter rather than follow the id: {missed}"
+    );
 }
 
 /// Commit the checkout and attach a linked worktree, mirroring how the engine

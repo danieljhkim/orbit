@@ -26,10 +26,20 @@ pub struct CommandMeta {
     pub job_run_id: Option<String>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RuntimeNeed {
     Required,
     Forbidden,
+    /// Bind the workspace that owns this task ID rather than the one the cwd
+    /// or `--workspace` walk would pick [ORB-10797].
+    ///
+    /// Task IDs are a machine-global primary key, so `task show` is the one
+    /// verb whose target is addressable without knowing its workspace. A
+    /// `--workspace` selector still wins and still filters: the bootstrap
+    /// binds that workspace, and a task owned elsewhere is simply not found.
+    TaskOwner {
+        task_id: String,
+    },
 }
 
 pub struct DispatchContext<'a> {
@@ -452,8 +462,17 @@ impl Commands {
                     ),
                     TaskSubcommand::Reindex(_) => ("reindex", None, None),
                 };
+                let runtime_need = match &command.command {
+                    TaskSubcommand::Show(args) => RuntimeNeed::TaskOwner {
+                        task_id: args.id.clone(),
+                    },
+                    // Every other task verb keeps cwd (or `--workspace`) as its
+                    // binding: only a read addressed by a globally unique ID can
+                    // be routed from the ID alone.
+                    _ => RuntimeNeed::Required,
+                };
                 CommandOperation::new(
-                    RuntimeNeed::Required,
+                    runtime_need,
                     Some(admin_meta("task", Some(subcommand), target_type, target_id)),
                     None,
                     false,

@@ -191,26 +191,34 @@ fn main() {
         governed,
     } = cli.command.operation().attribute_to(&actor);
 
-    if matches!(runtime_need, RuntimeNeed::Forbidden) {
-        // A runtime-forbidden command has no store to authorize or audit
-        // against. None is governed; `Commands::operation` is exhaustive, so a
-        // future one that is would have to resolve this first.
-        debug_assert!(
-            governed.is_none(),
-            "a governed operation must be able to reach the authorization chokepoint"
-        );
-        let result = dispatch(
-            cli.command,
-            DispatchContext::without_runtime(root_override.as_deref()),
-        );
-        finish_command(result, &sink, suppress_errors, json_error_preference);
-        return;
-    }
+    let bootstrapped = match &runtime_need {
+        RuntimeNeed::Forbidden => {
+            // A runtime-forbidden command has no store to authorize or audit
+            // against. None is governed; `Commands::operation` is exhaustive, so
+            // a future one that is would have to resolve this first.
+            debug_assert!(
+                governed.is_none(),
+                "a governed operation must be able to reach the authorization chokepoint"
+            );
+            let result = dispatch(
+                cli.command,
+                DispatchContext::without_runtime(root_override.as_deref()),
+            );
+            finish_command(result, &sink, suppress_errors, json_error_preference);
+            return;
+        }
+        RuntimeNeed::Required => RegisteredRuntimeFactory::initialize_with_overrides(
+            root_override.as_deref(),
+            workspace_selector.as_deref(),
+        ),
+        RuntimeNeed::TaskOwner { task_id } => orbit_cmd::task_owner::initialize_for_task_show(
+            root_override.as_deref(),
+            workspace_selector.as_deref(),
+            task_id,
+        ),
+    };
 
-    let runtime = match RegisteredRuntimeFactory::initialize_with_overrides(
-        root_override.as_deref(),
-        workspace_selector.as_deref(),
-    ) {
+    let runtime = match bootstrapped {
         Ok(runtime) => runtime,
         Err(err) => {
             if suppress_errors {

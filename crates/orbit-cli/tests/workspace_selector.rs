@@ -170,6 +170,102 @@ fn global_workspace_flag_fails_closed_on_unknown_selector() {
     );
 }
 
+/// `task show` is the one verb whose target is a machine-global primary key, so
+/// omitting `--workspace` follows the ID instead of the cwd [ORB-10797].
+#[test]
+fn task_show_follows_the_global_task_id_and_explicit_workspace_stays_a_filter() {
+    let temp = tempdir().expect("tempdir");
+    let home = temp.path().join("home");
+    let orbit_repo = temp.path().join("orbit");
+    let other_repo = temp.path().join("other");
+    let elsewhere = temp.path().join("elsewhere");
+    fs::create_dir_all(&home).expect("home");
+    fs::create_dir_all(&elsewhere).expect("elsewhere");
+
+    init_git_repo(&orbit_repo);
+    init_git_repo(&other_repo);
+
+    run_orbit(
+        &orbit_repo,
+        &home,
+        &[
+            "init",
+            "--non-interactive",
+            "--host-name",
+            "selector-host",
+            "--task-prefix",
+            "SEL",
+        ],
+    )
+    .success();
+    run_orbit(
+        &orbit_repo,
+        &home,
+        &["workspace", "init", "--name", "orbit"],
+    )
+    .success();
+    run_orbit(
+        &other_repo,
+        &home,
+        &["workspace", "init", "--name", "other"],
+    )
+    .success();
+
+    let created = run_orbit_json(
+        &orbit_repo,
+        &home,
+        &[
+            "task",
+            "add",
+            "--title",
+            "Globally addressable task",
+            "--description",
+            "Reachable by ID from anywhere",
+            "--json",
+        ],
+    );
+    let task_id = created["id"].as_str().expect("created id").to_string();
+
+    // A foreign checkout, and a directory that is no workspace at all.
+    for cwd in [&other_repo, &elsewhere] {
+        let shown = run_orbit_json(cwd, &home, &["task", "show", &task_id, "--json"]);
+        assert_eq!(
+            shown["id"],
+            Value::String(task_id.clone()),
+            "task show from {} must follow the id: {shown}",
+            cwd.display()
+        );
+        assert_eq!(shown["workspace"]["name"], "orbit");
+        assert_eq!(shown["workspace"]["id"], "ws_orbit");
+    }
+
+    let human = run_orbit(&elsewhere, &home, &["task", "show", &task_id]).success();
+    let stdout = String::from_utf8_lossy(&human.get_output().stdout).into_owned();
+    assert!(
+        stdout.contains("Workspace: orbit (ws_orbit)"),
+        "human output must name the owning workspace: {stdout}"
+    );
+
+    // An explicit selector is a filter: the task is not in `other`, so the read
+    // fails closed rather than falling back to the owner.
+    let missed = run_orbit(
+        &elsewhere,
+        &home,
+        &["--workspace", "other", "task", "show", &task_id],
+    )
+    .failure();
+    let missed_stdout = String::from_utf8_lossy(&missed.get_output().stdout);
+    assert!(
+        !missed_stdout.contains("Globally addressable task"),
+        "a foreign task must not be printed under `--workspace other`: {missed_stdout}"
+    );
+    let missed_stderr = String::from_utf8_lossy(&missed.get_output().stderr);
+    assert!(
+        missed_stderr.contains(&task_id),
+        "the miss must name the task it looked for: {missed_stderr}"
+    );
+}
+
 fn task_ids(value: &Value) -> Vec<String> {
     let items = value
         .as_array()
