@@ -120,7 +120,13 @@ target: "sh -c 'rm -rf /'"
 "#,
     )
     .expect_err("inline command target must fail");
-    assert!(error.to_string().contains("ADR-0194"), "{error}");
+    let message = error.to_string();
+    assert!(message.contains("catalog reference"), "{message}");
+    assert!(message.contains("job:<name>"), "{message}");
+    assert!(
+        message.contains("inline commands are not supported"),
+        "{message}"
+    );
 }
 
 #[test]
