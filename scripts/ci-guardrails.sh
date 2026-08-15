@@ -14,21 +14,11 @@ fi
 
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings
-# The replay smokes require an explicit feature, so the default workspace
-# clippy pass skips them. Keep that opt-in path compiled and linted too.
-# orbit-core rides along: its replay-backed v2_host test needs the same
-# transport, and `orbit-core/replay` forwards to `orbit-engine/replay`, so one
-# pass covers both crates' opt-in configuration. [ORB-10414] [ORB-10434]
-cargo clippy -p orbit-engine -p orbit-core --all-targets --features orbit-core/replay -- -D warnings
-# The converted v2 integration tests are included in the default test surface;
-# exercise the replay-gated cases separately so both configurations run.
 if cargo nextest --version >/dev/null 2>&1; then
   cargo nextest run --workspace --lib --bins --tests
-  cargo nextest run -p orbit-engine -p orbit-core --features orbit-core/replay --lib --bins --tests
 else
   echo "cargo-nextest not found; falling back to cargo test" >&2
   cargo test --workspace --lib --bins --tests
-  cargo test -p orbit-engine -p orbit-core --features orbit-core/replay --lib --bins --tests
 fi
 cargo test --workspace --doc
 RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --workspace

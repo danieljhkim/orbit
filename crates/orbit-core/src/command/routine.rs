@@ -312,15 +312,36 @@ mod tests {
         assert_eq!(rehosted.refreshed, DEFAULT_ROUTINE_FILES.len());
     }
 
+    /// Rewrite the top-level `enabled:` line to a fixed marker so a workspace's
+    /// own opt-in decision does not read as template drift.
+    fn ignoring_enabled(routine: &str) -> String {
+        routine
+            .lines()
+            .map(|line| {
+                if line.starts_with("enabled:") {
+                    "enabled: <workspace decision>"
+                } else {
+                    line
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    /// This workspace's own routine may differ from the template in exactly one
+    /// field. The asset documents flipping `enabled` as "an explicit, versioned
+    /// workspace decision", so comparing it too would fail the moment a
+    /// workspace does the thing the template invites. Everything else — cadence,
+    /// host pin, target, policy, the rationale comments — must stay aligned.
     #[test]
     fn dogfood_task_pilot_routine_matches_the_rendered_default_template() {
         let rendered = include_str!("../../assets/routines/task_pilot.yaml")
             .replace(ROUTINE_NAME_PLACEHOLDER, "task-pilot-orbit")
             .replace(HOST_ID_PLACEHOLDER, "dk-server-1");
         assert_eq!(
-            rendered,
-            include_str!("../../../../.orbit/routines/task_pilot.yaml"),
-            "dogfood task-pilot routine must stay aligned with the seeded template"
+            ignoring_enabled(&rendered),
+            ignoring_enabled(include_str!("../../../../.orbit/routines/task_pilot.yaml")),
+            "dogfood task-pilot routine must stay aligned with the seeded template outside `enabled`"
         );
     }
 

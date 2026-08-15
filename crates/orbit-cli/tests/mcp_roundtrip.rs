@@ -39,6 +39,30 @@ struct McpWorkspace {
     work: PathBuf,
 }
 
+/// Write an executable no-op named `name` into `bin`, standing in for an agent
+/// CLI during detection. Nothing in these tests dispatches an agent, so the
+/// stub only has to exist and be executable.
+fn plant_agent_cli_stub(bin: &Path, name: &str) {
+    std::fs::create_dir_all(bin).expect("create stub CLI directory");
+    let stub = bin.join(name);
+    std::fs::write(&stub, "#!/bin/sh\nexit 0\n").expect("write stub agent CLI");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&stub, std::fs::Permissions::from_mode(0o755))
+            .expect("mark the stub agent CLI executable");
+    }
+}
+
+/// `PATH` with the fixture's stub directory first, so agent detection sees the
+/// stubs regardless of what the host has installed.
+fn stub_first_path(bin: &Path) -> std::ffi::OsString {
+    let inherited = std::env::var_os("PATH").unwrap_or_default();
+    let mut entries = vec![bin.to_path_buf()];
+    entries.extend(std::env::split_paths(&inherited));
+    std::env::join_paths(entries).expect("join PATH entries")
+}
+
 impl McpWorkspace {
     fn init() -> Self {
         let temp = tempdir().expect("tempdir");
@@ -46,6 +70,13 @@ impl McpWorkspace {
         let work = temp.path().join("work");
         std::fs::create_dir_all(&home).expect("create home");
         std::fs::create_dir_all(&work).expect("create work");
+
+        // `orbit init` freezes crew seeding to the agent CLIs it finds on
+        // `PATH` (ADR-0193), so the fixture plants a stub `codex` before it
+        // runs. Without one, a host with no agent CLI installed — every CI
+        // runner — seeds an empty `[crews]` table, and any task naming a crew
+        // is rejected with `crew '<name>' is not defined in [crews.*]`.
+        plant_agent_cli_stub(&Self::stub_bin_dir(&home), "codex");
 
         let output = Command::new("git")
             .args(["init", "--quiet"])
@@ -92,10 +123,17 @@ impl McpWorkspace {
         }
     }
 
+    /// Directory holding the fixture's stub agent CLIs, derived from `home` so
+    /// every `orbit` invocation resolves the same one.
+    fn stub_bin_dir(home: &Path) -> PathBuf {
+        home.join("stub-bin")
+    }
+
     fn orbit_command(work: &Path, home: &Path) -> Command {
         let mut command = Command::new(env!("CARGO_BIN_EXE_orbit"));
         command
             .current_dir(work)
+            .env("PATH", stub_first_path(&Self::stub_bin_dir(home)))
             .env("HOME", home)
             .env("USERPROFILE", home)
             .env_remove("ORBIT_ROOT")
