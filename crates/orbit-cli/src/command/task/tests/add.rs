@@ -20,9 +20,9 @@ fn task_add_parses_repeat_and_comma_delimited_lists() {
         "--type",
         "bug",
         "--acceptance-criteria",
-        "first,second",
+        "first",
         "--acceptance-criteria",
-        "third",
+        "second",
         "--tag",
         "cli,surface",
         "--tag",
@@ -44,7 +44,7 @@ fn task_add_parses_repeat_and_comma_delimited_lists() {
         panic!("expected task add command");
     };
 
-    assert_eq!(args.acceptance_criteria, ["first", "second", "third"]);
+    assert_eq!(args.acceptance_criteria, ["first", "second"]);
     assert_eq!(args.tags, ["cli", "surface", "test"]);
     assert_eq!(args.dependencies, ["ORB-00001", "ORB-00002", "ORB-00003"]);
     assert_eq!(args.context, ["file:one.rs", "file:two.rs", "dir:three"]);
@@ -52,6 +52,33 @@ fn task_add_parses_repeat_and_comma_delimited_lists() {
     assert_eq!(args.plan, "Plain plan");
     assert_eq!(args.priority, orbit_core::TaskPriority::High);
     assert_eq!(args.task_type, Some(orbit_core::TaskType::Bug));
+}
+
+#[test]
+fn task_add_acceptance_criteria_does_not_split_on_commas() {
+    let cli = Cli::parse_from([
+        "orbit",
+        "task",
+        "add",
+        "--title",
+        "Comma criteria",
+        "--acceptance-criteria",
+        "given X, then Y",
+        "--acceptance-criteria",
+        "given A, then B",
+    ]);
+
+    let Commands::Task(task) = cli.command else {
+        panic!("expected task command");
+    };
+    let TaskSubcommand::Add(args) = task.command else {
+        panic!("expected task add command");
+    };
+
+    assert_eq!(
+        args.acceptance_criteria,
+        ["given X, then Y", "given A, then B"]
+    );
 }
 
 #[test]

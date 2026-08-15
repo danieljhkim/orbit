@@ -33,6 +33,33 @@ fn task_update_accepts_context_files_alias() {
 }
 
 #[test]
+fn task_update_acceptance_criteria_does_not_split_on_commas() {
+    let cli = Cli::try_parse_from([
+        "orbit",
+        "task",
+        "update",
+        "ORB-00001",
+        "--acceptance-criteria",
+        "given X, then Y",
+        "--acceptance-criteria",
+        "given A, then B",
+    ])
+    .expect("parse task update acceptance criteria");
+
+    let Commands::Task(task) = cli.command else {
+        panic!("expected task command");
+    };
+    let TaskSubcommand::Update(args) = task.command else {
+        panic!("expected task update command");
+    };
+
+    assert_eq!(
+        args.acceptance_criteria,
+        ["given X, then Y", "given A, then B"]
+    );
+}
+
+#[test]
 fn task_update_complexity_uses_add_spellings() {
     for complexity in ["low", "medium", "hard"] {
         let cli = Cli::try_parse_from([

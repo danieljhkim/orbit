@@ -19,8 +19,8 @@ pub struct TaskAddArgs {
     /// Task description
     #[arg(long, default_value = "")]
     pub description: String,
-    /// Acceptance criteria. Repeat or comma-separate for multiple criteria.
-    #[arg(long = "acceptance-criteria", action = ArgAction::Append, value_delimiter = ',')]
+    /// Acceptance criteria. Repeat the flag for multiple criteria.
+    #[arg(long = "acceptance-criteria", action = ArgAction::Append)]
     pub acceptance_criteria: Vec<String>,
     /// Dependency task IDs. Repeat or comma-separate for multiple dependencies.
     #[arg(long, alias = "dependency", action = ArgAction::Append, value_delimiter = ',')]
