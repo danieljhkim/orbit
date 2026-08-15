@@ -40,7 +40,7 @@ pub struct ShipCommand {
     pub task_ids: Vec<String>,
     /// Pipeline mode for selected or auto-discovered task bundles. When omitted,
     /// the mode is resolved from the current workspace's registry entry
-    /// (explicit `ship_mode`, else defaults to `local`).
+    /// (explicit `ship_mode`, else defaults to `pr`).
     #[arg(short = 'm', long, value_enum)]
     pub mode: Option<ShipMode>,
     /// Base branch for shipment. Defaults to
@@ -94,9 +94,8 @@ impl Execute for ShipCommand {
 ///
 /// An explicit `--mode` wins. Otherwise the mode is resolved from the current
 /// workspace's registry entry (matched by `orbit_dir`): explicit `ship_mode`,
-/// else the `local` default. If the current workspace isn't found in the
-/// registry, fall back to `local` (the safe default — a repo without an explicit
-/// `pr` mode should never attempt a PR that could fail structurally).
+/// else the `pr` default. If the current workspace isn't found in the registry,
+/// fall back to `pr` so omitted configuration still uses reviewable delivery.
 fn resolve_ship_mode(
     args: &ShipCommand,
     runtime: &OrbitRuntime,
@@ -114,7 +113,7 @@ fn resolve_ship_mode(
             orbit_registry::workspace_registry::find_workspace(&registry, &checkout.workspace_id)
         })
         .map(orbit_core::resolved_ship_mode)
-        .unwrap_or(orbit_core::ShipMode::Local);
+        .unwrap_or(orbit_core::ShipMode::Pr);
     Ok(mode)
 }
 

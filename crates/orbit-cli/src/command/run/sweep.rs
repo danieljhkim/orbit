@@ -29,7 +29,7 @@ use crate::command::{CommandOut, CommandOutput};
 pub struct ShipSweepCommand {
     /// Override the pipeline mode for every dispatched ship run. When omitted,
     /// each workspace's mode is resolved from its registry entry
-    /// (explicit `ship_mode`, else defaults to `local`).
+    /// (explicit `ship_mode`, else defaults to `pr`).
     #[arg(short = 'm', long, value_enum)]
     pub mode: Option<ShipMode>,
     /// Report what would be dispatched without submitting any run.
@@ -167,9 +167,8 @@ fn sweep_workspace(
     }
     // An explicit `--mode` override wins for every workspace; otherwise resolve
     // per-workspace from its registry entry (explicit `ship_mode`, else the
-    // `local` default). This keeps direct-commit workspaces on the `local`
-    // pipeline instead of failing `pr_open` — only workspaces that carry an
-    // explicit `ship_mode = "pr"` ship via PR.
+    // `pr` default). Workspaces that deliberately ship in-place must carry an
+    // explicit `ship_mode = "local"`.
     let mode = mode_override.unwrap_or_else(|| orbit_core::resolved_ship_mode(ws));
     sweep_active_workspace(global_root, ws, checkout, mode, dry_run).unwrap_or_else(|error| {
         SweepReport {

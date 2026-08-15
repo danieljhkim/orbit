@@ -48,8 +48,8 @@ pub struct Workspace {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub git_remote: Option<String>,
     /// Explicit ship-pipeline mode for this workspace: `"pr"` or `"local"`.
-    /// When unset, the effective mode is derived from `git_remote`
-    /// (see `orbit_core::resolved_ship_mode`). Stored on the registry entry
+    /// When unset, the effective mode is `"pr"` (see
+    /// `orbit_core::resolved_ship_mode`). Stored on the registry entry
     /// rather than `config.toml` because per-workspace `[workflow]` config
     /// is stripped by task-mutation commands.
     #[serde(default, skip_serializing_if = "Option::is_none")]
