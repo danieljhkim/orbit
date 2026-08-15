@@ -3,8 +3,8 @@ summary: "Policy & Sandboxing — Overview"
 type: design
 title: "Policy & Sandboxing — Overview"
 owner: claude
-last_updated: 2026-08-02
-last_validated: 2026-08-09
+last_updated: 2026-08-15
+last_validated: 2026-08-15
 status: Draft
 feature: policy-sandbox
 doc_role: overview
@@ -13,9 +13,9 @@ tags: ["policy-sandbox"]
 
 # Policy & Sandboxing — Overview
 
-> **Sandbox backend status.** Shipped CLI-agent executors select `macos-sandbox-exec` on macOS and `linux-bwrap` on Linux; `local-shell` remains bare. Linux Bubblewrap provides fail-closed kernel write confinement after a capability probe, while read-policy parity stays delegated. Windows has no OS wrapper. HTTP-tool `fs.*` enforcement and process supervision continue to apply on every platform. [ORB-10552] [Use Bubblewrap for shipped Linux CLI write confinement](./4_decisions.md#use-bubblewrap-for-shipped-linux-cli-write-confinement)
+> **Sandbox backend status.** Shipped CLI-agent executors select `macos-sandbox-exec` on macOS and `linux-bwrap` on Linux; `local-shell` remains bare. Linux Bubblewrap provides fail-closed kernel write confinement after a capability probe, while read-policy parity stays delegated. Windows has no OS wrapper. Process supervision continues to apply on every platform. The former in-process `fs.*` builtins were retired ([ORB-10828], [ORB-10833]). [ORB-10552] [Use Bubblewrap for shipped Linux CLI write confinement](./4_decisions.md#use-bubblewrap-for-shipped-linux-cli-write-confinement)
 
-Policy & Sandboxing is Orbit's safety surface for filesystem access and process execution. It combines v2 `PolicyDef` profiles, global `denyRead` / `denyModify` rules, HTTP-tool fs enforcement, optional macOS `sandbox-exec` wrapping for CLI agents, and `orbit-exec` process supervision. [2_design.md](./2_design.md) documents what ships today; [3_vision.md](./3_vision.md) names the gaps to a fuller isolation contract.
+Policy & Sandboxing is Orbit's safety surface for filesystem access and process execution. It combines v2 `PolicyDef` profiles, global `denyRead` / `denyModify` rules, optional macOS `sandbox-exec` wrapping for CLI agents, Linux Bubblewrap write confinement, and `orbit-exec` process supervision. [2_design.md](./2_design.md) documents what ships today; [3_vision.md](./3_vision.md) names the gaps to a fuller isolation contract.
 
 ---
 
@@ -27,7 +27,7 @@ Orbit runs agents against user repositories, so the safety boundary is a product
 2. **Profiles are activity-scoped.** A job can mix profiles by activity; evaluation happens per call, not by mutating a process-global mode.
 3. **Deny rules are global.** `denyRead` and `denyModify` are injected into every resolved profile. A host policy may name a strictly nested `denyModify` exception, but the selected profile must already authorize it and workspace policy cannot expand the host exception surface.
 4. **Execution has two layers.** `orbit-exec` always supervises child processes; CLI-agent writes are OS-confined where the configured executor uses macOS `sandbox-exec` or Linux Bubblewrap.
-5. **Denials are evidence.** HTTP fs denials emit through `FsAuditLogger` into `V2AuditEvent` filesystem entries; [auditability](../auditability/) owns durable storage.
+5. **Denials are evidence.** CLI sandbox denials and remaining in-process tool denials (for example `proc.spawn`) still feed audit channels; [auditability](../auditability/) owns durable storage. Historical `FsCallEvent` rows from retired `fs.*` builtins remain parseable.
 
 ---
 
@@ -51,7 +51,7 @@ Linux provider launch materializes a missing write-grant anchor before spawning,
 
 ### 2.4 Enforcement depends on backend
 
-HTTP activities enforce policy in the `orbit-tools` `fs.*` builtins before any read or modify. Denials return `OrbitError::PolicyDenied` and emit audit events. CLI activities do not call those builtins; they rely on harness delegation plus the configured executor sandbox: `sandbox-exec` on macOS and Bubblewrap write confinement on Linux for shipped agent executors.
+Shipped agent activities run on the CLI path only. They do not call in-process `fs.*` builtins — that family was retired in [ORB-10828] and [ORB-10833]. Filesystem writes are constrained by harness delegation plus the configured executor sandbox: `sandbox-exec` on macOS and Bubblewrap write confinement on Linux. `FsCallEvent` / `FsAuditLogger` types remain on `ToolContext` for historical traces and a possible future harness, but nothing registered emits them.
 
 When the default policy denies workspace `.orbit/**`, the v2 host re-allows only the narrow child Orbit runtime stores needed by currently activity-exposed write tools. It does not blanket-allow workspace `.orbit`; newly exposed Orbit write tools must add their store roots intentionally.
 
@@ -71,7 +71,7 @@ When the default policy denies workspace `.orbit/**`, the v2 host re-allows only
 | Profile resolution + deny injection | `crates/orbit-common/src/types/policy_def.rs` (`effective_profile`, `check_path`) | [T20260416-0728] |
 | Versioned `.orbit` modify boundary and missing-anchor preparation | shipped `default.yaml`, profile resolution, `cli_runner::spawn`, OS sandbox compilers | [ORB-10560], [ORB-10573], [ORB-10602] |
 | Implicit `unrestricted` materialization | `crates/orbit-core/src/runtime/v2_host/mod.rs` (`tool_context_for_activity`) | [T20260419-0503] |
-| Tool-layer fs enforcement | `crates/orbit-tools/src/builtin/fs/mod.rs` (`enforce_fs_policy`, `emit_fs_event`) | [T20260419-0503] |
+| Retired tool-layer fs enforcement | Removed with the `fs.*` builtins ([ORB-10828], [ORB-10833]); `FsAuditLogger` types remain in `crates/orbit-tools/src/lib.rs` | [ORB-10833] |
 | Activity `fsProfile:` binding | `crates/orbit-engine/src/activity_job/{dispatcher,job_executor,agent_loop_driver}.rs` | [T20260419-0503] |
 | Exec spawn primitive | `crates/orbit-exec/src/{lib,runner,process,sandbox}.rs` | [T20260417-0550] |
 | Linux CLI write confinement | `crates/orbit-exec/src/linux_sandbox.rs` | [ORB-10552] |

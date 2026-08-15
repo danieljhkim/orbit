@@ -11,7 +11,7 @@
 //! Builtin tool registry providing the standard Orbit toolset for agents and jobs.
 //!
 //! Implements and registers all built-in tools that agents can invoke during
-//! activity execution: filesystem, git, GitHub, Orbit CLI, process, time, and
+//! activity execution: git, GitHub, Orbit CLI, process, time, and
 //! network tools. External (user-defined) tools are also supported via the registry.
 //!
 //! # Role
@@ -29,9 +29,9 @@
 //!
 //! # Registry contents
 //! The builtin registry wires together the standard Orbit tool families:
-//! filesystem mutation, git and GitHub helpers, Orbit task/job commands,
-//! process spawning, network fetches, and time utilities. Each tool executes
-//! inside a [`ToolContext`] that carries workspace boundaries, agent metadata,
+//! git and GitHub helpers, Orbit task/job commands, process spawning,
+//! network fetches, and time utilities. Each tool executes inside a
+//! [`ToolContext`] that carries workspace boundaries, agent metadata,
 //! process allowlists, and the narrow Orbit host surface used by Orbit builtins.
 //!
 //! # Dependency direction
@@ -186,10 +186,8 @@ pub struct ToolContext {
     pub session_context: orbit_common::types::ToolSessionContext,
     /// If non-empty, only tools in this list may be called. Empty means unrestricted.
     pub allowed_tools: Vec<String>,
-    /// When set, fs tools enforce that all paths resolve inside this directory.
-    /// Symlink escapes are blocked because paths are canonicalized before the check.
-    /// If `None`, fs tools deny all access (fail-closed). The runtime pipeline
-    /// auto-populates this from the data root's parent directory.
+    /// Workspace root used by tools that enforce path containment.
+    /// The runtime pipeline auto-populates this from the data root's parent directory.
     pub workspace_root: Option<PathBuf>,
     /// Normalized agent name (e.g. `"claude"`). When set, GitHub tools auto-append
     /// an attribution footer to PR bodies and review comments.
@@ -208,9 +206,11 @@ pub struct ToolContext {
     pub proc_spawn_activity_scoped: bool,
     /// Filesystem policy engine used by Orbit-managed agent runtimes.
     pub policy_engine: Option<Arc<PolicyEngine>>,
-    /// Active activity fsProfile name. `None` bypasses fsProfile checks.
+    /// Active activity fsProfile name. Used by the CLI sandbox compiler and
+    /// retained for historical `FsCallEvent` plumbing. `None` bypasses profile checks.
     pub fs_profile: Option<String>,
-    /// Optional audit hook for emitting per-fs-call envelope events.
+    /// Optional audit hook for historical / future-harness `FsCallEvent` emission.
+    /// No shipped builtin currently emits these events.
     pub fs_audit: Option<Arc<dyn FsAuditLogger>>,
     /// Trusted runtime-owned reservation metadata. Tool inputs cannot set this;
     /// only Orbit dispatch context or Orbit-managed CLI environments can.
