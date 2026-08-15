@@ -190,7 +190,9 @@ const SHOW: FrictionOperation = FrictionOperation {
     cli_about: "Show a single Orbit friction record",
     params: &[BARE_ID_PARAM],
     rejects_agent_field: false,
-    mcp_scope: Some(McpToolScope::WorkspaceRequired),
+    // `list` already returns the record bodies an agent needs; fetching one by
+    // id is a human/dashboard follow-up and stays on the CLI surface.
+    mcp_scope: None,
     cli_json_flag: true,
     cli_render: CliRender::Record,
 };
@@ -217,7 +219,9 @@ const TAGS: FrictionOperation = FrictionOperation {
     cli_about: "List configured friction taxonomy tags",
     params: &[],
     rejects_agent_field: false,
-    mcp_scope: Some(McpToolScope::WorkspaceRequired),
+    // The taxonomy is already spelled out in the `add`/`update` tag parameter
+    // descriptions, so a separate advertised lookup earns nothing.
+    mcp_scope: None,
     cli_json_flag: true,
     cli_render: CliRender::TagList,
 };

@@ -37,6 +37,15 @@ pub(super) fn list(runtime: &OrbitRuntime, _input: Value) -> Result<Value, Orbit
     Ok(Value::Array(array))
 }
 
+/// Mint one task from a definition on demand [ORB-10798]. The adapter only
+/// reads the name; `OrbitRuntime::auto_task_mint` owns the unconditional,
+/// cursor-neutral behavior the CLI subcommand already relies on.
+pub(super) fn mint(runtime: &OrbitRuntime, input: Value) -> Result<Value, OrbitError> {
+    let name = required_str(&input, "name")?;
+    let task = runtime.auto_task_mint(&name)?;
+    super::json::serialize_task(runtime, &task)
+}
+
 pub(super) fn show(runtime: &OrbitRuntime, input: Value) -> Result<Value, OrbitError> {
     let name = required_str(&input, "name")?;
     let definition = runtime

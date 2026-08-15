@@ -27,6 +27,7 @@ pub(super) fn execute(
         )),
         OrbitBuiltinAction::AutoTaskAdd => super::auto_task_tools::add(runtime, input),
         OrbitBuiltinAction::AutoTaskList => super::auto_task_tools::list(runtime, input),
+        OrbitBuiltinAction::AutoTaskMint => super::auto_task_tools::mint(runtime, input),
         OrbitBuiltinAction::AutoTaskShow => super::auto_task_tools::show(runtime, input),
         OrbitBuiltinAction::AutoTaskUpdate => super::auto_task_tools::update(runtime, input),
         OrbitBuiltinAction::AutoTaskToggle => super::auto_task_tools::toggle(runtime, input),

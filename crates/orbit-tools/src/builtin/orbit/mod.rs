@@ -29,24 +29,21 @@ pub(super) struct OrbitIdentity {
 }
 
 pub fn register(registry: &mut ToolRegistry) {
-    // Auto-task mutation is MCP-visible; `list` stays on non-MCP surfaces.
+    // Auto-task definitions are authored by humans through the CLI; the MCP
+    // surface carries only what an executing agent needs — reading the
+    // definitions and minting one on demand.
+    registry.register_inactive(auto_task::add::OrbitAutoTaskAddTool);
     registry.register_mcp(
-        auto_task::add::OrbitAutoTaskAddTool,
-        McpToolScope::WorkspaceRequired,
-    );
-    registry.register_inactive(auto_task::list::OrbitAutoTaskListTool);
-    registry.register_mcp(
-        auto_task::show::OrbitAutoTaskShowTool,
-        McpToolScope::WorkspaceRequired,
-    );
-    registry.register_mcp(
-        auto_task::update::OrbitAutoTaskUpdateTool,
+        auto_task::list::OrbitAutoTaskListTool,
         McpToolScope::WorkspaceRequired,
     );
     registry.register_mcp(
-        auto_task::toggle::OrbitAutoTaskToggleTool,
+        auto_task::mint::OrbitAutoTaskMintTool,
         McpToolScope::WorkspaceRequired,
     );
+    registry.register_inactive(auto_task::show::OrbitAutoTaskShowTool);
+    registry.register_inactive(auto_task::update::OrbitAutoTaskUpdateTool);
+    registry.register_inactive(auto_task::toggle::OrbitAutoTaskToggleTool);
     registry.register_inactive(docs::OrbitDocsListTool);
     registry.register_inactive(docs::OrbitDocsShowTool);
     registry.register_inactive(docs::OrbitDocsAddTool);

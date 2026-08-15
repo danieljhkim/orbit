@@ -75,7 +75,7 @@ becomes just the first definition.
 | Host-local cursor | `crates/orbit-core/src/auto_tasks/state.rs` | ORB-10149 |
 | Scheduler pass | `crates/orbit-core/src/auto_tasks/scheduler.rs` | ORB-10149 |
 | CRUD (CLI + MCP shared) | `crates/orbit-core/src/auto_tasks/crud.rs` | ORB-10149 |
-| Manual mint (`mint`, CLI-only) | `crates/orbit-core/src/auto_tasks/crud.rs` | ORB-10439 |
+| Manual mint (`mint`, CLI + MCP) | `crates/orbit-core/src/auto_tasks/crud.rs` | ORB-10439, ORB-10798 |
 | Deterministic action | `crates/orbit-core/src/runtime/v2_host/dispatch.rs` | ORB-10149 |
 | Seeded assets | `crates/orbit-core/assets/{activities,jobs,routines}/…` | ORB-10149 |
 | Default auto-task catalog | `crates/orbit-core/assets/auto_tasks/…` | ORB-10549, ORB-10550 |

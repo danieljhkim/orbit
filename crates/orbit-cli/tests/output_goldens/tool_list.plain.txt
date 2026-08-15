@@ -1,14 +1,10 @@
 fs.delete	path:string	Delete a file from disk
 fs.read	path:string	Read a UTF-8 text file from disk
-orbit.auto_task.add	name:string, schedule:object, template:object	Create a recurring auto-task definition. The generic scheduler mints a task from its template on each due slot.
-orbit.auto_task.show	name:string	Show a single auto-task definition by name.
-orbit.auto_task.toggle	name:string, enabled:boolean	Enable or disable an auto-task definition without deleting it.
-orbit.auto_task.update	name:string	Update an existing auto-task definition (present fields only).
+orbit.auto_task.list	-	List every auto-task definition in this workspace.
+orbit.auto_task.mint	name:string	Mint one task now from an auto-task definition. Unconditional: the schedule, dedupe policy, and enabled flag are ignored, and the scheduler's own cursor is left untouched.
 orbit.command.exec	argv:string|string[], working_directory:string	Execute a command as an explicit argv array in an explicit working directory and return its stdout, stderr, and exit status. Requires operator capability and the workspace claim; withheld from managed runs.
 orbit.friction.add	body:string, model:string	Append an Orbit friction report under .orbit/frictions/
 orbit.friction.list	-	List Orbit friction records from .orbit/frictions/
-orbit.friction.show	id:string	Fetch a single Orbit friction record by id
-orbit.friction.tags	-	List configured friction taxonomy tags
 orbit.friction.update	id:string	Update triage metadata for an Orbit friction record
 orbit.pipeline.invoke	job_name:string, input:object	Submit a durable pipeline run and return immediately with its run ID.
 orbit.pipeline.wait	run_ids:string|string[]	Block until the supplied pipeline runs reach terminal state or timeout.

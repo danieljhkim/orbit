@@ -9,6 +9,13 @@ use predicates::prelude::*;
 use tempfile::tempdir;
 
 const INACTIVE_TOOL_NAMES: &[&str] = &[
+    // ORB-10798: auto-task authoring is human/admin work on the CLI surface.
+    "orbit.auto_task.add",
+    "orbit.auto_task.show",
+    "orbit.auto_task.toggle",
+    "orbit.auto_task.update",
+    "orbit.friction.show",
+    "orbit.friction.tags",
     "orbit.docs.index",
     "orbit.docs.migrate",
     "orbit.docs.add",
@@ -138,6 +145,11 @@ fn tool_list_json_all_includes_parameter_schema_for_inactive_tools() {
         .clone();
 
     let tools: Vec<serde_json::Value> = serde_json::from_slice(&output).expect("tool list JSON");
+    let mint = tools
+        .iter()
+        .find(|tool| tool["name"] == "orbit.auto_task.mint")
+        .expect("mint tool");
+    assert_eq!(mint["status"], "active");
     let reserve = tools
         .iter()
         .find(|tool| tool["name"] == "orbit.task.locks.reserve")

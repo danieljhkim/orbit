@@ -23,6 +23,12 @@ const RETIRED_AGENT_TOOL_NAMES: &[&str] = &[
 ];
 
 const INACTIVE_TOOL_NAMES: &[&str] = &[
+    // ORB-10798: auto-task definitions are authored by humans; the agent
+    // surface keeps only `list` and `mint`.
+    "orbit.auto_task.add",
+    "orbit.auto_task.show",
+    "orbit.auto_task.toggle",
+    "orbit.auto_task.update",
     "orbit.docs.index",
     "orbit.docs.migrate",
     "orbit.docs.add",
@@ -246,8 +252,6 @@ fn friction_surface_supports_artifact_triage() {
     for retained in [
         "orbit.friction.add",
         "orbit.friction.list",
-        "orbit.friction.show",
-        "orbit.friction.tags",
         "orbit.friction.update",
     ] {
         assert!(
@@ -263,8 +267,14 @@ fn friction_surface_supports_artifact_triage() {
         );
     }
 
-    // Destructive resolution and aggregate stats remain CLI / dashboard only.
-    for cli_only in ["orbit.friction.resolve", "orbit.friction.stats"] {
+    // Single-record reads `list` already covers, the tag taxonomy, destructive
+    // resolution, and aggregate stats remain CLI / dashboard only [ORB-10798].
+    for cli_only in [
+        "orbit.friction.show",
+        "orbit.friction.tags",
+        "orbit.friction.resolve",
+        "orbit.friction.stats",
+    ] {
         assert!(
             !active.contains(cli_only),
             "{cli_only} must stay hidden from the default registry surface"
@@ -274,6 +284,34 @@ fn friction_surface_supports_artifact_triage() {
             "{cli_only} must remain reachable via `runtime.run_tool`"
         );
     }
+}
+
+#[test]
+fn auto_task_surface_exposes_only_list_and_mint() {
+    let mut registry = ToolRegistry::new();
+    registry.register_builtins();
+    let active: BTreeSet<String> = registry
+        .schemas()
+        .into_iter()
+        .map(|schema| schema.name)
+        .collect();
+
+    let auto_task: BTreeSet<&str> = active
+        .iter()
+        .map(String::as_str)
+        .filter(|name| name.starts_with("orbit.auto_task."))
+        .collect();
+    assert_eq!(
+        auto_task,
+        BTreeSet::from(["orbit.auto_task.list", "orbit.auto_task.mint"])
+    );
+
+    let mint = registry
+        .get_schema("orbit.auto_task.mint")
+        .expect("orbit.auto_task.mint schema");
+    assert_eq!(mint.parameters.len(), 1);
+    assert_eq!(mint.parameters[0].name, "name");
+    assert!(mint.parameters[0].required);
 }
 
 #[test]
