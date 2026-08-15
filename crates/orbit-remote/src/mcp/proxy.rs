@@ -8,9 +8,9 @@
 use std::path::Path;
 use std::process::{Command, Stdio};
 
-use crate::{HostIdentityState, inspect_host_identity};
 use orbit_common::types::OrbitError;
 use orbit_common::utility::ssh_tunnel::shell_quote;
+use orbit_registry::{HostIdentityState, inspect_host_identity};
 
 /// Audit-only identity used when this machine has no persisted Orbit identity.
 pub(super) const LOCAL_CALLER_MACHINE_ID_FALLBACK: &str = "host/local";
@@ -100,6 +100,6 @@ pub(super) fn caller_machine_id_at(global_root: Option<&Path>) -> String {
 }
 
 fn local_caller_machine_id() -> String {
-    let global_root = crate::workspace_registry::global_orbit_dir().ok();
+    let global_root = orbit_common::utility::path::global_orbit_dir().ok();
     caller_machine_id_at(global_root.as_deref())
 }

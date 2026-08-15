@@ -1,7 +1,7 @@
 use clap::Args;
 use orbit_common::types::WorkspaceRegistry;
 use orbit_core::OrbitRuntime;
-use orbit_remote::workspace_registry;
+use orbit_registry::workspace_registry;
 use serde_json::{Value, json};
 
 use crate::command::{CommandOut, Execute, Payload};

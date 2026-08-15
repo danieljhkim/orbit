@@ -10,7 +10,7 @@ use orbit_common::types::{
     RegistryProfileV1, RegistrySnapshotV1, RegistryWorkspaceV1, WorkspacePresenceDeclaration,
 };
 
-use crate::persistence::RemoteStore;
+use crate::persistence::RegistryStore;
 use crate::registry_cache::{RegistryCacheOutcome, RegistryCacheService, RegistryCacheState};
 
 fn snapshot(revision: u64, hub: Option<&str>) -> RegistrySnapshotV1 {
@@ -477,7 +477,7 @@ fn populated_store_snapshot_round_trips_cache_without_private_markers() {
     const TAG_MARKER: &str = "AWS_SECRET_ACCESS_KEY_MARKER";
     const BRANCH_MARKER: &str = "/private/worktree/BRANCH_MARKER";
 
-    let store = RemoteStore::open_in_memory().expect("store");
+    let store = RegistryStore::open_in_memory().expect("store");
     let hub = HostRegistration {
         machine_id: "hm_hub".to_string(),
         host_id: "hub-old".to_string(),

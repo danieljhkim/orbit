@@ -42,7 +42,7 @@ impl MigrateCommand {
                     .to_string(),
             ));
         };
-        let global_root = orbit_remote::workspace_registry::global_orbit_dir()?;
+        let global_root = orbit_registry::workspace_registry::global_orbit_dir()?;
         let status = migrate_dry_run_at(&global_root, &resolved.shared_root)?;
 
         // `--dry-run` exits nonzero when there is anything pending, and a

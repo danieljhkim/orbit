@@ -1,6 +1,6 @@
 use clap::Args;
 use orbit_core::{OrbitError, OrbitRuntime};
-use orbit_remote::workspace_registry;
+use orbit_registry::workspace_registry;
 
 use crate::command::{CommandOut, CommandOutput, Execute};
 

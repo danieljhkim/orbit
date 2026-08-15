@@ -1,4 +1,4 @@
-//! Remote feature persistence over Orbit's shared SQLite connection.
+//! Registry persistence over Orbit's shared SQLite connection.
 //!
 //! `orbit-store` owns connection lifecycle and the generic feature-migration
 //! ledger. This module owns the registry schema contract, every registry SQL
@@ -16,8 +16,8 @@ use rusqlite::{Connection, OptionalExtension};
 mod registry;
 mod snapshot;
 
-const REMOTE_SCHEMA_FEATURE: &str = "orbit-remote";
-const REMOTE_SCHEMA_MIGRATIONS: &[FeatureMigration] = &[
+const REGISTRY_SCHEMA_FEATURE: &str = "orbit-remote";
+const REGISTRY_SCHEMA_MIGRATIONS: &[FeatureMigration] = &[
     FeatureMigration::new(
         1,
         "adopt_global_v8_registry_schema",
@@ -35,41 +35,42 @@ const REMOTE_SCHEMA_MIGRATIONS: &[FeatureMigration] = &[
     ),
 ];
 
-/// Persistence facade for Orbit's remote coordination domain.
+/// Persistence facade for Orbit's host and workspace registry domain.
 ///
 /// Opening this facade first opens the configured Store database, then adopts
 /// and validates the registry tables shipped by Store-global migrations
-/// v5/v6/v8 into the independent `orbit-remote` feature schema. Future remote
-/// schema changes append to [`REMOTE_SCHEMA_MIGRATIONS`] instead of the Store
+/// v5/v6/v8 into the feature schema recorded under the legacy `orbit-remote`
+/// ledger key. The key remains stable for on-disk compatibility; future registry
+/// schema changes append to [`REGISTRY_SCHEMA_MIGRATIONS`] instead of the Store
 /// global migration registry.
 #[derive(Clone)]
-pub struct RemoteStore {
+pub struct RegistryStore {
     store: Store,
 }
 
-impl RemoteStore {
-    /// Open exactly `database_path` and bring the Remote feature schema current.
+impl RegistryStore {
+    /// Open exactly `database_path` and bring the registry feature schema current.
     pub fn open(database_path: &Path) -> Result<Self, OrbitError> {
         Self::from_store(Store::open(database_path)?)
     }
 
-    /// Open an isolated in-memory database and bring the Remote schema current.
+    /// Open an isolated in-memory database and bring the registry schema current.
     pub fn open_in_memory() -> Result<Self, OrbitError> {
         Self::from_store(Store::open_in_memory()?)
     }
 
-    /// Adopt an already-open Store connection into the Remote persistence
+    /// Adopt an already-open Store connection into the registry persistence
     /// facade. This is primarily useful when a process shares one Store handle
     /// across feature facades; adoption remains validated and fallible.
     pub fn from_store(store: Store) -> Result<Self, OrbitError> {
-        store.apply_feature_migrations(REMOTE_SCHEMA_FEATURE, REMOTE_SCHEMA_MIGRATIONS)?;
+        store.apply_feature_migrations(REGISTRY_SCHEMA_FEATURE, REGISTRY_SCHEMA_MIGRATIONS)?;
         Ok(Self { store })
     }
 
-    /// Return the validated Remote feature-schema status.
+    /// Return the validated registry feature-schema status.
     pub fn schema_status(&self) -> Result<FeatureSchemaStatus, OrbitError> {
         self.store
-            .feature_schema_status(REMOTE_SCHEMA_FEATURE, REMOTE_SCHEMA_MIGRATIONS)
+            .feature_schema_status(REGISTRY_SCHEMA_FEATURE, REGISTRY_SCHEMA_MIGRATIONS)
     }
 
     fn read<T, F>(&self, operation: F) -> Result<T, OrbitError>
@@ -272,22 +273,21 @@ fn adopt_global_v8_registry_schema(conn: &Connection) -> Result<(), OrbitError> 
         )
         .map_err(|error| {
             OrbitError::Migration(format!(
-                "cannot adopt orbit-remote schema: read hub registry singleton: {error}"
+                "cannot adopt registry schema under legacy orbit-remote key: read hub registry singleton: {error}"
             ))
         })?;
     if singleton_rows != 1 {
         return Err(OrbitError::Migration(format!(
-            "cannot adopt orbit-remote schema: expected exactly one hub_registry_metadata row with id 0, found {singleton_rows}"
+            "cannot adopt registry schema under legacy orbit-remote key: expected exactly one hub_registry_metadata row with id 0, found {singleton_rows}"
         )));
     }
 
     Ok(())
 }
 
-/// Remote v2 once installed [ORB-10272]'s dormant hub-global ADR/learning
-/// allocation substrate. [ADR-0357] keys knowledge `(workspace_id,
-/// artifact_key)` and deletes that substrate rather than parking it, so a fresh
-/// database must never create those tables — this slot is now a no-op.
+/// Feature v2 once installed a dormant hub-global knowledge-allocation
+/// substrate. That substrate was withdrawn rather than parked, so a fresh
+/// database must never create those tables; this compatibility slot is a no-op.
 ///
 /// The slot itself cannot go away: [`Store::apply_feature_migrations`] validates
 /// the recorded ledger against this registry position by position and rejects a
@@ -298,7 +298,7 @@ fn skip_withdrawn_hub_knowledge_sequences(_conn: &Connection) -> Result<(), Orbi
     Ok(())
 }
 
-/// Remote v3 drops whatever the original v2 created [ORB-10725].
+/// Feature v3 drops whatever the original v2 created.
 ///
 /// Every statement is `IF EXISTS`, which is what lets one migration serve both
 /// populations: a database that applied the original v2 loses the substrate
@@ -519,7 +519,9 @@ fn canonical_sql(sql: &str) -> String {
 }
 
 fn adoption_error(detail: String) -> OrbitError {
-    OrbitError::Migration(format!("cannot adopt orbit-remote schema: {detail}"))
+    OrbitError::Migration(format!(
+        "cannot adopt registry schema under legacy orbit-remote key: {detail}"
+    ))
 }
 
 fn parse_timestamp(raw: &str) -> rusqlite::Result<DateTime<Utc>> {

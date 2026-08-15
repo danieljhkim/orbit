@@ -11,9 +11,12 @@ allowed_internal_deps() {
       echo ""
       ;;
     orbit-remote)
-      # Runtime and protocol composition belong above Remote; this crate owns
-      # only its machine-local domain, thin SSH proxy, and persistence facade.
-      echo "orbit-common orbit-store orbit-tools"
+      # Remote is only the thin MCP proxy/discovery adapter.
+      echo "orbit-common orbit-registry orbit-tools"
+      ;;
+    orbit-registry)
+      # Registry owns machine/workspace state over the generic Store kernel.
+      echo "orbit-common orbit-store"
       ;;
     orbit-policy | orbit-exec | orbit-store)
       echo "orbit-common"
@@ -40,19 +43,19 @@ allowed_internal_deps() {
       ;;
     orbit-cmd)
       # The shared application composition layer joins Core runtime kernels to
-      # Remote's machine-local registry for CLI and dashboard consumers.
-      echo "orbit-common orbit-core orbit-engine orbit-remote orbit-store"
+      # machine-local Registry state for CLI and dashboard consumers.
+      echo "orbit-common orbit-core orbit-engine orbit-registry orbit-store"
       ;;
     orbit-mcp)
       echo "orbit-common"
       ;;
     orbit-dashboard)
-      echo "orbit-common orbit-cmd orbit-core orbit-remote"
+      echo "orbit-common orbit-cmd orbit-core orbit-registry"
       ;;
     orbit-cli)
       # The executable assembles the generic MCP stdio kernel with Remote's
       # machine-local support and Core's authoritative runtime dispatcher.
-      echo "orbit-common orbit-cmd orbit-core orbit-mcp orbit-remote orbit-dashboard"
+      echo "orbit-common orbit-cmd orbit-core orbit-mcp orbit-registry orbit-remote orbit-dashboard"
       ;;
     *)
       return 1

@@ -8,7 +8,7 @@ use orbit_core::OrbitRuntime;
 use orbit_store::sqlite::task_registry::{WorkspaceConfig, write_workspace_config};
 use serde_json::{Value, json};
 
-use orbit_remote::workspace_registry::{registry_path_for, save_registry_to};
+use orbit_registry::workspace_registry::{registry_path_for, save_registry_to};
 
 use crate::remote_runtime::{
     RemoteRuntimeFactory, resolved_workspace_binding, workspace_runtime_binding,

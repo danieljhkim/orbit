@@ -4,10 +4,9 @@
 use std::collections::BTreeSet;
 
 use clap::Args;
-use orbit_common::types::HOST_IDENTITY_SCHEMA_VERSION;
 use orbit_core::{OrbitError, OrbitRuntime};
-use orbit_remote::{HostIdentity, HostMode, load_host_identity};
-use orbit_remote::{host_registry_service, require_local_hub_identity};
+use orbit_registry::{HOST_IDENTITY_SCHEMA_VERSION, HostIdentity, HostMode, load_host_identity};
+use orbit_registry::{host_registry_service, require_local_hub_identity};
 
 use crate::command::{CommandOut, CommandOutput, Execute};
 

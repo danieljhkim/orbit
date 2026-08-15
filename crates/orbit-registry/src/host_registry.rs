@@ -1,8 +1,7 @@
 //! Typed domain service for the hub host registry [ORB-10255].
 //!
-//! Dormant v2 substrate: ADR-0358 makes this module unreachable from v1
-//! execution paths. It is retained verbatim for its tombstone-alias and
-//! retirement semantics; see `docs/design/host-registry/2_design.md` §2.1.
+//! Dormant v2 substrate, currently unreachable from v1 execution paths. It is
+//! retained for its tombstone-alias and retirement semantics.
 //!
 //! This layer binds B1's stable local [`HostIdentity`] declaration to the
 //! durable hub-store API. It intentionally does not coordinate local
@@ -20,17 +19,17 @@ use orbit_common::types::{
 };
 
 use crate::host_identity::{HostIdentity, HostMode, load_host_identity};
-use crate::persistence::RemoteStore;
+use crate::persistence::RegistryStore;
 
 /// Freshness horizon the dormant registry snapshot still reports profile rows
-/// with. No v1 caller publishes a profile ([ADR-0358]); the snapshot keeps a
+/// with. No v1 caller publishes a profile; the snapshot keeps a
 /// single TTL so the dormant projection reads consistently.
 const PROFILE_FRESHNESS_TTL: Duration = Duration::minutes(10);
 const PRESENCE_FRESHNESS_TTL: Duration = Duration::minutes(5);
 
 #[derive(Clone)]
 pub struct HostRegistryService {
-    store: RemoteStore,
+    store: RegistryStore,
 }
 
 /// Result of a hub-side workspace owner link: the recorded singular ownership
@@ -59,7 +58,7 @@ pub fn require_local_hub_identity(global_root: &Path) -> Result<HostIdentity, Or
 }
 
 impl HostRegistryService {
-    pub fn new(store: RemoteStore) -> Self {
+    pub fn new(store: RegistryStore) -> Self {
         Self { store }
     }
 

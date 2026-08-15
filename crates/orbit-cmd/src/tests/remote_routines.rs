@@ -3,8 +3,8 @@ use orbit_common::types::{Workspace, WorkspaceCheckout, WorkspaceRegistry, Works
 use orbit_core::routines::RoutineRegistryView;
 use orbit_store::sqlite::task_registry::{WorkspaceConfig, write_workspace_config};
 
-use orbit_remote::host_identity::load_host_identity;
-use orbit_remote::workspace_registry;
+use orbit_registry::host_identity::load_host_identity;
+use orbit_registry::workspace_registry;
 
 use crate::remote_routines::{discover_registered_workspaces, load_routine_placement_at};
 

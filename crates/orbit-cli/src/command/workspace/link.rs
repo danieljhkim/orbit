@@ -1,7 +1,7 @@
 use clap::Args;
 use orbit_core::{OrbitError, OrbitRuntime};
-use orbit_remote::workspace_registry;
-use orbit_remote::{host_registry_service, require_local_hub_identity};
+use orbit_registry::workspace_registry;
+use orbit_registry::{host_registry_service, require_local_hub_identity};
 
 use crate::command::{CommandOut, CommandOutput, Execute};
 

@@ -1,8 +1,7 @@
 //! Hub-global registry metadata and the single-transaction sanitized registry
 //! snapshot read [ORB-10267].
 //!
-//! Dormant v2 persistence: no v1 path invokes this snapshot read (ADR-0358;
-//! `docs/design/host-registry/2_design.md` §2.1).
+//! Dormant v2 persistence: no v1 path invokes this snapshot read.
 //!
 //! The snapshot is the one typed, path-free projection consumed by the
 //! deferred fleet discovery/admin surfaces and satellite registry cache. It is
@@ -20,9 +19,9 @@ use orbit_common::types::{
 };
 use rusqlite::{Connection, OptionalExtension};
 
-use super::RemoteStore;
+use super::RegistryStore;
 
-impl RemoteStore {
+impl RegistryStore {
     /// The configured hub `machine_id`, or `None` when the hub identity has not
     /// been stamped yet.
     pub fn hub_machine_id(&self) -> Result<Option<String>, OrbitError> {

@@ -9,79 +9,8 @@ use orbit_common::types::{
     WorkspaceCheckoutRole, WorkspaceRegistry, WorkspaceStatus, validate_host_id,
     validate_machine_id,
 };
-use orbit_common::utility::fs::atomic_write_text;
 use serde::Deserialize;
 use serde_json::Value;
-
-use crate::host_identity::{HostIdentityState, inspect_host_identity};
-
-/// Returns the global Orbit directory: `~/.orbit/`.
-pub fn global_orbit_dir() -> Result<PathBuf, OrbitError> {
-    let home = std::env::var("HOME")
-        .ok()
-        .filter(|value| !value.trim().is_empty())
-        .or_else(|| {
-            std::env::var("USERPROFILE")
-                .ok()
-                .filter(|value| !value.trim().is_empty())
-        })
-        .ok_or_else(|| OrbitError::WorkspaceError("cannot determine home directory".to_string()))?;
-    Ok(PathBuf::from(home).join(".orbit"))
-}
-
-/// Returns the path to the global workspace registry file.
-pub fn registry_path() -> Result<PathBuf, OrbitError> {
-    Ok(registry_path_for(&global_orbit_dir()?))
-}
-
-/// Returns the workspace registry path for an already-resolved Orbit root.
-pub fn registry_path_for(global_root: &Path) -> PathBuf {
-    global_root.join("workspaces.json")
-}
-
-/// Loads the workspace registry from `~/.orbit/workspaces.json`.
-/// Returns an empty registry if the file does not exist.
-pub fn load_registry() -> Result<WorkspaceRegistry, OrbitError> {
-    load_registry_from(&registry_path()?)
-}
-
-/// Loads the workspace registry from a specific path (for testing).
-pub fn load_registry_from(path: &Path) -> Result<WorkspaceRegistry, OrbitError> {
-    load_registry_from_with_writer(path, |registry, destination| {
-        write_registry(registry, destination)
-    })
-}
-
-/// Load and migrate a registry using the supplied persistence operation.
-/// [`load_registry_from`] delegates here with the atomic production writer.
-pub(crate) fn load_registry_from_with_writer(
-    path: &Path,
-    writer: impl FnOnce(&WorkspaceRegistry, &Path) -> Result<(), OrbitError>,
-) -> Result<WorkspaceRegistry, OrbitError> {
-    if !path.exists() {
-        return Ok(WorkspaceRegistry::default());
-    }
-    let content = std::fs::read_to_string(path).map_err(|e| OrbitError::Io(e.to_string()))?;
-    let context = registry_host_context(path)?;
-    let (registry, migrated) = parse_registry(&content, &context)?;
-    if migrated {
-        writer(&registry, path)?;
-    }
-    Ok(registry)
-}
-
-/// Saves the workspace registry atomically.
-pub fn save_registry(registry: &WorkspaceRegistry) -> Result<(), OrbitError> {
-    save_registry_to(registry, &registry_path()?)
-}
-
-/// Saves the workspace registry to a specific path (for testing).
-pub fn save_registry_to(registry: &WorkspaceRegistry, path: &Path) -> Result<(), OrbitError> {
-    let context = registry_host_context(path)?;
-    let mut canonical = registry.clone();
-    validate_registry(&mut canonical, &context)?;
-    write_registry(&canonical, path)
-}
 
 /// Registers a new workspace. Errors if a workspace with the same id or name already exists.
 pub fn register_workspace(
@@ -150,7 +79,7 @@ pub fn register_checkout(
 /// both the checkout binding and the logical workspace record so the stable
 /// owner identity stays consistent. The optional local identity exists only
 /// for pre-host-identity standalone compatibility. This mutates the in-memory
-/// registry only; the caller persists via [`save_registry_to`], which validates a clone and
+/// registry only; the caller persists via [`super::save_registry_to`], which validates a clone and
 /// therefore leaves the previous file byte-valid on any contradiction. Owner
 /// and replica declarations are never inferred from paths, workspace names,
 /// presence, hostnames, or Git remotes.
@@ -291,8 +220,8 @@ pub fn find_workspace<'a>(
 
 /// Resolve a logical selector (registered name or `ws_*` id) to exactly one workspace.
 ///
-/// ADR-0361: the same fail-closed name/id grammar is used by the CLI
-/// `--workspace` flag and MCP `resolve_workspace`. First-match is not
+/// The same fail-closed name/id grammar is used by the CLI `--workspace` flag
+/// and MCP `resolve_workspace`. First-match is not
 /// enough — two workspaces sharing a name must not silently pick one.
 pub fn resolve_logical_workspace<'a>(
     registry: &'a WorkspaceRegistry,
@@ -430,41 +359,23 @@ pub fn validate_workspaces(registry: &mut WorkspaceRegistry) {
     }
 }
 
-#[derive(Debug, Clone)]
-struct RegistryHostContext {
-    machine_id: Option<String>,
-    host_id: Option<String>,
+/// Machine identity facts used while validating a local registry file.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct WorkspaceRegistryHostContext {
+    pub machine_id: Option<String>,
+    pub host_id: Option<String>,
 }
 
-fn registry_host_context(path: &Path) -> Result<RegistryHostContext, OrbitError> {
-    let global_root = path.parent().ok_or_else(|| {
-        OrbitError::WorkspaceError(format!(
-            "registry path '{}' has no parent directory",
-            path.display()
-        ))
-    })?;
-    match inspect_host_identity(global_root)? {
-        HostIdentityState::Present(identity) => Ok(RegistryHostContext {
-            machine_id: Some(identity.machine_id),
-            host_id: Some(identity.host_id),
-        }),
-        // Pre-host-identity installations are the legacy standalone case.
-        HostIdentityState::Legacy { .. } | HostIdentityState::Absent => Ok(RegistryHostContext {
-            machine_id: None,
-            host_id: None,
-        }),
-    }
-}
-
-fn parse_registry(
+/// Parse, migrate, and validate one workspace registry JSON document.
+pub fn parse_workspace_registry(
     content: &str,
-    context: &RegistryHostContext,
+    context: &WorkspaceRegistryHostContext,
 ) -> Result<(WorkspaceRegistry, bool), OrbitError> {
     let value: Value = serde_json::from_str(content)
         .map_err(|error| invalid_registry(format!("malformed JSON: {error}")))?;
     let Some(version_value) = value.get("schema_version") else {
         let mut migrated = migrate_legacy_registry(value, context)?;
-        validate_registry(&mut migrated, context)?;
+        validate_workspace_registry(&mut migrated, context)?;
         return Ok((migrated, true));
     };
     let version = version_value.as_u64().ok_or_else(|| {
@@ -484,7 +395,7 @@ fn parse_registry(
     validate_role_tokens(&value)?;
     let mut registry: WorkspaceRegistry =
         serde_json::from_value(value).map_err(|error| invalid_registry(error.to_string()))?;
-    let changed = validate_registry(&mut registry, context)?;
+    let changed = validate_workspace_registry(&mut registry, context)?;
     Ok((registry, changed))
 }
 
@@ -517,9 +428,10 @@ fn validate_role_tokens(value: &Value) -> Result<(), OrbitError> {
     Ok(())
 }
 
-fn validate_registry(
+/// Validate and canonicalize an in-memory workspace registry.
+pub fn validate_workspace_registry(
     registry: &mut WorkspaceRegistry,
-    context: &RegistryHostContext,
+    context: &WorkspaceRegistryHostContext,
 ) -> Result<bool, OrbitError> {
     if registry.schema_version != WORKSPACE_REGISTRY_SCHEMA_VERSION {
         return Err(invalid_registry(format!(
@@ -735,7 +647,7 @@ struct LegacyWorkspace {
 
 fn migrate_legacy_registry(
     value: Value,
-    context: &RegistryHostContext,
+    context: &WorkspaceRegistryHostContext,
 ) -> Result<WorkspaceRegistry, OrbitError> {
     let legacy: LegacyWorkspaceRegistry = serde_json::from_value(value)
         .map_err(|error| invalid_registry(format!("invalid legacy registry: {error}")))?;
@@ -785,12 +697,6 @@ fn migrate_legacy_registry(
         });
     }
     Ok(registry)
-}
-
-fn write_registry(registry: &WorkspaceRegistry, path: &Path) -> Result<(), OrbitError> {
-    let content = serde_json::to_string_pretty(registry)
-        .map_err(|e| OrbitError::WorkspaceError(format!("failed to serialize registry: {e}")))?;
-    atomic_write_text(path, &content).map_err(Into::into)
 }
 
 /// Update the local display name attached to workspace records owned by

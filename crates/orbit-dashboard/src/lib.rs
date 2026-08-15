@@ -35,7 +35,7 @@ use axum::routing::get;
 use clap::Args;
 use orbit_common::types::{WorkspaceRegistry, WorkspaceStatus};
 use orbit_core::{OrbitError, OrbitRuntime};
-use orbit_remote::workspace_registry;
+use orbit_registry::workspace_registry;
 
 const INDEX_HTML: &str = include_str!("../assets/dashboard/index.html");
 const DASHBOARD_CSS: &str = include_str!("../assets/dashboard/dashboard.css");

@@ -102,10 +102,9 @@ pub use executor_def::{
 };
 pub use friction::{FrictionEntry, FrictionFrontmatter, FrictionRecord, FrictionStatus};
 pub use host::{
-    HOST_IDENTITY_SCHEMA_VERSION, HOST_TOML_FILE, HostAlias, HostNameResolution, HostRecord,
-    HostRegistration, HostStatus, LEGACY_TASK_PREFIX, MACHINE_ID_PREFIX,
-    REGISTRY_IDENTIFIER_MAX_BYTES, validate_host_id, validate_machine_id, validate_new_task_prefix,
-    validate_registry_identifier, validate_stored_task_prefix,
+    HostAlias, HostNameResolution, HostRecord, HostRegistration, HostStatus, MACHINE_ID_PREFIX,
+    REGISTRY_IDENTIFIER_MAX_BYTES, validate_host_id, validate_machine_id,
+    validate_registry_identifier,
 };
 pub use id::OrbitId;
 pub use invocation::{InvocationTrace, TokenUsage, ToolCallTrace};

@@ -4,6 +4,7 @@ members = [
   "crates/orbit-cli",
   "crates/orbit-cmd",
   "crates/orbit-common",
+  "crates/orbit-registry",
   "crates/orbit-search",
   "crates/orbit-remote",
   "crates/orbit-core",

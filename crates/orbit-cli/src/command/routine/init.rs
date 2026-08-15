@@ -1,8 +1,8 @@
 use crate::command::{CommandOut, CommandOutput};
 use clap::Args;
 use orbit_core::routines::install_clock;
-use orbit_remote::load_host_identity;
-use orbit_remote::workspace_registry;
+use orbit_registry::load_host_identity;
+use orbit_registry::workspace_registry;
 
 #[derive(Args)]
 #[command(

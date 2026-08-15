@@ -1,5 +1,4 @@
 use clap::Args;
-use orbit_common::types::validate_new_task_prefix;
 use orbit_core::command::init::{InitOptions, init_global};
 use orbit_core::config::RawCrewAssignment;
 use orbit_core::config::agent_detect::{DetectedAgents, RealAgentEnvProbe, detect};
@@ -7,8 +6,11 @@ use orbit_core::config::agent_prompt::{
     StdinPrompter, collect_crew_setting, collect_qa_crew_setting,
 };
 use orbit_core::{OrbitError, OrbitRuntime};
-use orbit_remote::workspace_registry::global_orbit_dir;
-use orbit_remote::{HostIdentityOutcome, NewHostIdentity, ensure_host_identity, os_hostname};
+use orbit_registry::workspace_registry::global_orbit_dir;
+use orbit_registry::{
+    HostIdentityOutcome, NewHostIdentity, ensure_host_identity, os_hostname,
+    validate_new_task_prefix,
+};
 use std::collections::BTreeMap;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};

@@ -1,7 +1,7 @@
 use crate::command::{CommandOut, CommandOutput};
 use clap::Args;
 use orbit_core::routines::pause_routine;
-use orbit_remote::workspace_registry;
+use orbit_registry::workspace_registry;
 
 #[derive(Args)]
 pub struct RoutinePauseArgs {

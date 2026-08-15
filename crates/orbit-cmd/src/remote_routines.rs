@@ -12,8 +12,8 @@ use orbit_core::routines::{
     SweepOptions, SweepOutcome,
 };
 
-use orbit_remote::host_identity::{HostIdentity, load_host_identity};
-use orbit_remote::workspace_registry;
+use orbit_registry::host_identity::{HostIdentity, load_host_identity};
+use orbit_registry::workspace_registry;
 
 use crate::remote_runtime::RemoteRuntimeFactory;
 

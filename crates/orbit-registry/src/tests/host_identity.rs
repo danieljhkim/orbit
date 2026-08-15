@@ -1,10 +1,24 @@
-use orbit_common::types::HOST_IDENTITY_SCHEMA_VERSION;
+use crate::HOST_IDENTITY_SCHEMA_VERSION;
 
 use crate::host_identity::{
     HostIdentityOutcome, HostIdentityState, NewHostIdentity, ensure_host_identity,
     inspect_host_identity, load_host_identity, rename_current_host_identity,
     rename_current_host_identity_with_writer,
 };
+
+#[test]
+fn fresh_task_prefix_validation_rejects_reserved_and_malformed_values() {
+    for reserved in ["ORB", "ADR", "L", "F"] {
+        crate::validate_new_task_prefix(reserved).expect_err("reserved prefix must fail");
+    }
+    for malformed in ["de", "D", "ABCDEF", " DE"] {
+        crate::validate_new_task_prefix(malformed).expect_err("malformed prefix must fail");
+    }
+    assert_eq!(
+        crate::validate_new_task_prefix("DE").expect("valid prefix"),
+        "DE"
+    );
+}
 
 fn requested(
     name: &str,

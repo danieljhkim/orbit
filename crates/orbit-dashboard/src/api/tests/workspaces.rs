@@ -556,7 +556,7 @@ fn write_registry_with_ship_modes(global_root: &Path, workspaces: &[(&str, &Path
             repo_root.join(".orbit"),
         ));
     }
-    orbit_remote::workspace_registry::save_registry_to(
+    orbit_registry::workspace_registry::save_registry_to(
         &registry,
         &global_root.join("workspaces.json"),
     )

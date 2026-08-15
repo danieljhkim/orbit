@@ -2,7 +2,7 @@ use clap::{Args, ValueEnum};
 use orbit_cmd::remote_runtime::RemoteRuntimeFactory;
 use orbit_common::types::{McpTransport, ToolSessionContext, audit_execution_id};
 use orbit_core::{OrbitError, OrbitRuntime};
-use orbit_remote::{HostIdentityState, inspect_host_identity};
+use orbit_registry::{HostIdentityState, inspect_host_identity};
 use serde_json::{Map, Value};
 
 use crate::command::{CommandOut, CommandOutput, Execute, Payload};

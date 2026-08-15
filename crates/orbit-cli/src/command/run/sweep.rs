@@ -10,7 +10,7 @@ use clap::Args;
 use orbit_cmd::remote_runtime::RemoteRuntimeFactory;
 use orbit_common::types::{Workspace, WorkspaceCheckout, WorkspaceStatus};
 use orbit_core::{JobRunState, OrbitError, TaskStatus, task_dependencies_ready};
-use orbit_remote::workspace_registry;
+use orbit_registry::workspace_registry;
 use serde_json::{Value, json};
 
 use super::ship::ShipMode;

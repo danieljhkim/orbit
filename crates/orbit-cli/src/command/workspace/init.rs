@@ -11,8 +11,8 @@ use orbit_common::types::{
 use orbit_common::utility::fs::atomic_write_text;
 use orbit_core::OrbitError;
 use orbit_core::command::init::{InitOptions, init_workspace_at_root};
-use orbit_remote::workspace_registry;
-use orbit_remote::{HostIdentityState, inspect_host_identity};
+use orbit_registry::workspace_registry;
+use orbit_registry::{HostIdentityState, inspect_host_identity};
 use serde::{Deserialize, Serialize};
 
 use super::role::CliCheckoutRole;

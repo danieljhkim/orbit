@@ -9,9 +9,9 @@ use toml::Value;
 const MANIFEST: &str = include_str!("../Cargo.toml");
 
 #[test]
-fn vertical_feature_depends_only_on_approved_runtime_layers() {
-    // Remote owns machine-local registry state and the thin SSH proxy. Runtime
-    // composition belongs above it, so no Core dependency is allowed here.
+fn thin_remote_adapter_depends_only_on_approved_leaf_features() {
+    // Runtime composition belongs above Remote, so no Core or Store dependency
+    // is allowed here.
     let manifest = parse_manifest();
     let mut dependency_names = BTreeSet::new();
 
@@ -31,10 +31,10 @@ fn vertical_feature_depends_only_on_approved_runtime_layers() {
         orbit_deps,
         vec![
             "orbit-common".to_string(),
-            "orbit-store".to_string(),
+            "orbit-registry".to_string(),
             "orbit-tools".to_string(),
         ],
-        "orbit-remote may depend only on its data, protocol, and persistence layers"
+        "orbit-remote may depend only on its DTO, registry, and tool-definition layers"
     );
 
     for forbidden in ["orbit-cmd", "orbit-policy", "orbit-exec"] {

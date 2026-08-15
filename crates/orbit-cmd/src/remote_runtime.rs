@@ -3,8 +3,8 @@
 use std::path::{Path, PathBuf};
 
 use orbit_common::types::{
-    HOST_TOML_FILE, OrbitError, Workspace, WorkspaceCheckout, WorkspaceCheckoutRole,
-    WorkspaceRegistry, WorkspaceStatus,
+    OrbitError, Workspace, WorkspaceCheckout, WorkspaceCheckoutRole, WorkspaceRegistry,
+    WorkspaceStatus,
 };
 use orbit_core::OrbitRuntime;
 use orbit_core::runtime::{
@@ -13,7 +13,7 @@ use orbit_core::runtime::{
 use orbit_store::sqlite::task_registry::{TaskRegistryStore, task_registry_path};
 use serde_json::Value;
 
-use orbit_remote::{load_host_identity, workspace_registry};
+use orbit_registry::{HOST_TOML_FILE, load_host_identity, workspace_registry};
 
 /// Remote workspace metadata keeps the logical catalog ID distinct from the
 /// task/runtime ID stored in `.orbit/config.yaml`.

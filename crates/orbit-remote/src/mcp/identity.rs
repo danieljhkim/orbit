@@ -4,7 +4,7 @@ use std::path::Path;
 
 use orbit_common::types::{McpTransport, OrbitError, ToolSessionContext};
 
-use crate::{HostIdentityState, inspect_host_identity, os_hostname};
+use orbit_registry::{HostIdentityState, inspect_host_identity, os_hostname};
 
 const LOCAL_MACHINE_FALLBACK: &str = "host/local";
 const LOCAL_HOST_FALLBACK: &str = "local";

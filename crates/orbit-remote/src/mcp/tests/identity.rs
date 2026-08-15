@@ -15,8 +15,8 @@ fn absent_host_identity_uses_explicit_local_fallbacks() {
 #[test]
 fn present_host_identity_is_server_derived() {
     let root = tempfile::tempdir().expect("global root");
-    let outcome = crate::ensure_host_identity(root.path(), || {
-        Ok(crate::NewHostIdentity {
+    let outcome = orbit_registry::ensure_host_identity(root.path(), || {
+        Ok(orbit_registry::NewHostIdentity {
             host_id: "server-host".to_string(),
             task_prefix: "SV".to_string(),
         })

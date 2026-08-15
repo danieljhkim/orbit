@@ -60,8 +60,8 @@ fn remote_command_quotes_the_audit_identity_for_the_remote_shell() {
 #[test]
 fn persisted_machine_identity_is_forwarded() {
     let root = tempfile::tempdir().expect("global root");
-    let outcome = crate::ensure_host_identity(root.path(), || {
-        Ok(crate::NewHostIdentity {
+    let outcome = orbit_registry::ensure_host_identity(root.path(), || {
+        Ok(orbit_registry::NewHostIdentity {
             host_id: "client".to_string(),
             task_prefix: "CL".to_string(),
         })

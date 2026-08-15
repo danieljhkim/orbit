@@ -9,19 +9,48 @@
 //!
 //! Loading is strict: after migration an absent, malformed, incomplete, blank,
 //! or future-schema file is a hard error with an actionable message — there is
-//! no silent fallback to the OS hostname (ADR-0227). Routine `hosts:` pinning,
+//! no silent fallback to the OS hostname. Routine `hosts:` pinning,
 //! the sweep, and status all resolve through [`HostIdentity::host_id`].
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use orbit_common::types::{
-    HOST_IDENTITY_SCHEMA_VERSION, HOST_TOML_FILE, LEGACY_TASK_PREFIX, MACHINE_ID_PREFIX,
-    OrbitError, validate_machine_id, validate_new_task_prefix, validate_stored_task_prefix,
-};
+use orbit_common::types::{MACHINE_ID_PREFIX, OrbitError, validate_machine_id};
 use orbit_common::utility::fs::atomic_write_text;
 use serde::Deserialize;
+
+/// File under the global Orbit root carrying the host identity.
+pub const HOST_TOML_FILE: &str = "host.toml";
+/// Current on-disk host identity schema version.
+pub const HOST_IDENTITY_SCHEMA_VERSION: u32 = 2;
+const LEGACY_TASK_PREFIX: &str = "ORB";
+const RESERVED_TASK_PREFIXES: [&str; 4] = ["ORB", "ADR", "L", "F"];
+
+/// Validate an operator's fresh task-prefix choice.
+///
+/// The persisted migration prefix `ORB` remains valid for existing machines,
+/// but cannot be selected for a new identity.
+pub fn validate_new_task_prefix(value: &str) -> Result<String, OrbitError> {
+    if RESERVED_TASK_PREFIXES.contains(&value) {
+        return Err(OrbitError::InvalidInput(format!(
+            "task prefix '{value}' is reserved; choose 2-5 uppercase ASCII letters other than ORB, ADR, L, or F"
+        )));
+    }
+    if !(2..=5).contains(&value.len()) || !value.bytes().all(|byte| byte.is_ascii_uppercase()) {
+        return Err(OrbitError::InvalidInput(
+            "task prefix must be 2-5 uppercase ASCII letters".to_string(),
+        ));
+    }
+    Ok(value.to_string())
+}
+
+fn validate_stored_task_prefix(value: &str) -> Result<String, OrbitError> {
+    if value == LEGACY_TASK_PREFIX {
+        return Ok(value.to_string());
+    }
+    validate_new_task_prefix(value)
+}
 
 /// Legacy operating mode retained temporarily for callers being replaced by
 /// the per-workspace ownership model. It is not part of schema-v2 host.toml.

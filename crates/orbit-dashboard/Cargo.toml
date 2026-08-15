@@ -20,7 +20,7 @@ libc.workspace = true
 orbit-cmd = { path = "../orbit-cmd" }
 orbit-common = { path = "../orbit-common" }
 orbit-core = { path = "../orbit-core" }
-orbit-remote = { path = "../orbit-remote" }
+orbit-registry = { path = "../orbit-registry" }
 serde.workspace = true
 serde_json.workspace = true
 tokio.workspace = true

@@ -2,13 +2,13 @@ use std::collections::BTreeSet;
 
 use chrono::{TimeZone, Utc};
 use orbit_common::types::{
-    HOST_IDENTITY_SCHEMA_VERSION, HostNameResolution, HostStatus, Workspace, WorkspaceRegistry,
-    WorkspaceStatus,
+    HostNameResolution, HostStatus, Workspace, WorkspaceRegistry, WorkspaceStatus,
 };
 
+use crate::HOST_IDENTITY_SCHEMA_VERSION;
 use crate::host_identity::{HostIdentity, HostMode};
 use crate::host_registry::HostRegistryService;
-use crate::persistence::RemoteStore;
+use crate::persistence::RegistryStore;
 
 fn identity(machine_id: &str, host_id: &str, mode: HostMode) -> HostIdentity {
     HostIdentity {
@@ -22,7 +22,7 @@ fn identity(machine_id: &str, host_id: &str, mode: HostMode) -> HostIdentity {
 
 #[test]
 fn hub_administration_preflight_rejects_unstamped_and_shadow_stores() {
-    let service = HostRegistryService::new(RemoteStore::open_in_memory().expect("store"));
+    let service = HostRegistryService::new(RegistryStore::open_in_memory().expect("store"));
     let local = identity("hm_local", "local", HostMode::Hub);
     let unconfigured = service
         .require_configured_local_hub(&local)
@@ -53,7 +53,7 @@ fn hub_administration_preflight_rejects_unstamped_and_shadow_stores() {
 
 #[test]
 fn service_registers_stable_identity_and_preserves_typed_lifecycle_results() {
-    let service = HostRegistryService::new(RemoteStore::open_in_memory().expect("store"));
+    let service = HostRegistryService::new(RegistryStore::open_in_memory().expect("store"));
     let hub = identity("hm_hub", "hub", HostMode::Hub);
     let spoke = identity("hm_spoke", "spoke", HostMode::Spoke);
 
@@ -123,7 +123,7 @@ fn workspace_registry(workspaces: Vec<Workspace>) -> WorkspaceRegistry {
 
 #[test]
 fn service_requires_explicit_existing_workspace_and_consistent_local_owner_mirror() {
-    let store = RemoteStore::open_in_memory().expect("store");
+    let store = RegistryStore::open_in_memory().expect("store");
     let service = HostRegistryService::new(store);
     service
         .register_hub_identity(&identity("hm_hub", "hub", HostMode::Hub), BTreeSet::new())
@@ -154,7 +154,7 @@ fn service_requires_explicit_existing_workspace_and_consistent_local_owner_mirro
 
 #[test]
 fn link_workspace_owner_binds_active_warns_on_alias_and_rejects_bad_resolutions() {
-    let store = RemoteStore::open_in_memory().expect("store");
+    let store = RegistryStore::open_in_memory().expect("store");
     let service = HostRegistryService::new(store);
     service
         .register_identity(
@@ -209,7 +209,7 @@ fn link_workspace_owner_binds_active_warns_on_alias_and_rejects_bad_resolutions(
 
 #[test]
 fn retire_guarding_hub_rejects_self_retirement_before_mutation() {
-    let store = RemoteStore::open_in_memory().expect("store");
+    let store = RegistryStore::open_in_memory().expect("store");
     let service = HostRegistryService::new(store);
     service
         .register_hub_identity(&identity("hm_hub", "hub", HostMode::Hub), BTreeSet::new())

@@ -3,7 +3,7 @@
 use axum::body::Body;
 use axum::http::{Method, Request, StatusCode};
 use orbit_core::{RoutineFireRecord, RoutineFireState};
-use orbit_remote::{NewHostIdentity, ensure_host_identity};
+use orbit_registry::{NewHostIdentity, ensure_host_identity};
 use tower::ServiceExt;
 
 use super::super::router;

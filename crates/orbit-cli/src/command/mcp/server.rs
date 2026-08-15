@@ -77,8 +77,9 @@ impl ServerMcpHost {
     }
 
     fn list_workspaces(&self) -> Result<Value, OrbitError> {
-        let registry_path = orbit_remote::workspace_registry::registry_path_for(&self.global_root);
-        let registry = orbit_remote::workspace_registry::load_registry_from(&registry_path)?;
+        let registry_path =
+            orbit_registry::workspace_registry::registry_path_for(&self.global_root);
+        let registry = orbit_registry::workspace_registry::load_registry_from(&registry_path)?;
         orbit_remote::execute_discovery_tool(
             "orbit.workspace.list",
             &registry,

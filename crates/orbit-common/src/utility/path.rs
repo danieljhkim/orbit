@@ -1,4 +1,22 @@
+use std::path::PathBuf;
+
+use crate::types::OrbitError;
+
 use super::selector::overlaps;
+
+/// Return the machine-global Orbit directory at `~/.orbit`.
+pub fn global_orbit_dir() -> Result<PathBuf, OrbitError> {
+    let home = std::env::var("HOME")
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .or_else(|| {
+            std::env::var("USERPROFILE")
+                .ok()
+                .filter(|value| !value.trim().is_empty())
+        })
+        .ok_or_else(|| OrbitError::WorkspaceError("cannot determine home directory".to_string()))?;
+    Ok(PathBuf::from(home).join(".orbit"))
+}
 
 /// Returns true when two task context scopes overlap on the same filesystem
 /// anchor or on an ancestor/descendant boundary.

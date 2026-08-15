@@ -2115,6 +2115,7 @@ dependencies = [
  "orbit-core",
  "orbit-dashboard",
  "orbit-mcp",
+ "orbit-registry",
  "orbit-remote",
  "predicates",
  "regex",
@@ -2140,7 +2141,7 @@ dependencies = [
  "orbit-common",
  "orbit-core",
  "orbit-engine",
- "orbit-remote",
+ "orbit-registry",
  "orbit-store",
  "serde",
  "serde_json",
@@ -2213,7 +2214,7 @@ dependencies = [
  "orbit-cmd",
  "orbit-common",
  "orbit-core",
- "orbit-remote",
+ "orbit-registry",
  "serde",
  "serde_json",
  "serde_yaml",
@@ -2282,16 +2283,28 @@ dependencies = [
 ]
 
 [[package]]
-name = "orbit-remote"
+name = "orbit-registry"
 version = "0.10.0"
 dependencies = [
  "chrono",
  "hostname",
  "orbit-common",
  "orbit-store",
- "orbit-tools",
  "rusqlite",
  "serde",
+ "serde_json",
+ "tempfile",
+ "toml",
+]
+
+[[package]]
+name = "orbit-remote"
+version = "0.10.0"
+dependencies = [
+ "chrono",
+ "orbit-common",
+ "orbit-registry",
+ "orbit-tools",
  "serde_json",
  "tempfile",
  "toml",

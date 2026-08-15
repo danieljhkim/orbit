@@ -1,14 +1,14 @@
 use orbit_common::types::OrbitError;
 use orbit_store::Store;
 
-use super::super::{REMOTE_SCHEMA_FEATURE, REMOTE_SCHEMA_MIGRATIONS, RemoteStore};
+use super::super::{REGISTRY_SCHEMA_FEATURE, REGISTRY_SCHEMA_MIGRATIONS, RegistryStore};
 
 #[test]
-fn remote_store_adopts_registry_and_leaves_no_knowledge_allocation_schema() {
-    let store = RemoteStore::open_in_memory().expect("remote store");
-    let status = store.schema_status().expect("remote schema status");
+fn registry_store_adopts_registry_and_leaves_no_knowledge_allocation_schema() {
+    let store = RegistryStore::open_in_memory().expect("registry store");
+    let status = store.schema_status().expect("registry schema status");
 
-    assert_eq!(status.feature, REMOTE_SCHEMA_FEATURE);
+    assert_eq!(status.feature, REGISTRY_SCHEMA_FEATURE);
     assert_eq!(status.current_version, 3);
     assert_eq!(status.applied.len(), 3);
     assert_eq!(status.applied[0].name, "adopt_global_v8_registry_schema");
@@ -33,7 +33,7 @@ fn remote_store_adopts_registry_and_leaves_no_knowledge_allocation_schema() {
 /// cleanly under the removal path: v3 drops what v2 built, and nothing about
 /// the recorded ledger prefix has to change.
 #[test]
-fn remote_store_drops_the_withdrawn_knowledge_schema_from_a_v2_database() {
+fn registry_store_drops_the_withdrawn_knowledge_schema_from_a_v2_database() {
     let store = Store::open_in_memory().expect("store");
     seed_legacy_dormant_knowledge_schema(&store);
     for table in WITHDRAWN_KNOWLEDGE_TABLES {
@@ -43,9 +43,11 @@ fn remote_store_drops_the_withdrawn_knowledge_schema_from_a_v2_database() {
         );
     }
 
-    let remote = RemoteStore::from_store(store.clone()).expect("open a v2 database");
+    let registry_store = RegistryStore::from_store(store.clone()).expect("open a v2 database");
 
-    let status = remote.schema_status().expect("remote schema status");
+    let status = registry_store
+        .schema_status()
+        .expect("registry schema status");
     assert_eq!(status.current_version, 3);
     assert_eq!(
         status
@@ -66,7 +68,7 @@ fn remote_store_drops_the_withdrawn_knowledge_schema_from_a_v2_database() {
         );
     }
     // Idempotent: reopening the same database applies nothing further.
-    drop(RemoteStore::from_store(store.clone()).expect("reopen after removal"));
+    drop(RegistryStore::from_store(store.clone()).expect("reopen after removal"));
     for table in WITHDRAWN_KNOWLEDGE_TABLES {
         assert!(!table_exists(&store, table));
     }
@@ -96,7 +98,7 @@ fn adoption_does_not_rewrite_existing_registry_row_bytes() {
         .expect("seed shipped registry row");
     let before = host_row_hex(&store);
 
-    let _remote = RemoteStore::from_store(store.clone()).expect("adopt registry schema");
+    let _remote = RegistryStore::from_store(store.clone()).expect("adopt registry schema");
 
     assert_eq!(host_row_hex(&store), before);
 }
@@ -106,33 +108,33 @@ fn adoption_preserves_registry_schema_definitions_and_reopens_idempotently() {
     let store = Store::open_in_memory().expect("store");
     let before = registry_schema_definitions(&store);
 
-    drop(RemoteStore::from_store(store.clone()).expect("first adoption"));
+    drop(RegistryStore::from_store(store.clone()).expect("first adoption"));
     let after_first = registry_schema_definitions(&store);
-    drop(RemoteStore::from_store(store.clone()).expect("idempotent reopen"));
+    drop(RegistryStore::from_store(store.clone()).expect("idempotent reopen"));
 
     assert_eq!(after_first, before);
     assert_eq!(registry_schema_definitions(&store), before);
 }
 
 #[test]
-fn remote_store_refuses_a_future_remote_feature_version() {
+fn registry_store_refuses_a_future_legacy_feature_version() {
     let store = Store::open_in_memory().expect("store");
-    drop(RemoteStore::from_store(store.clone()).expect("adopt current feature schema"));
+    drop(RegistryStore::from_store(store.clone()).expect("adopt current feature schema"));
     store
         .with_transaction(|tx| {
             tx.connection()
                 .execute(
                     "INSERT INTO feature_schema_meta(feature, version, name, applied_at)
                      VALUES (?1, 4, 'future_remote_schema', '2026-07-19T00:00:00Z')",
-                    [REMOTE_SCHEMA_FEATURE],
+                    [REGISTRY_SCHEMA_FEATURE],
                 )
                 .map_err(|error| OrbitError::Store(error.to_string()))?;
             Ok(())
         })
-        .expect("seed future Remote feature version");
+        .expect("seed future registry feature version");
 
-    let error = match RemoteStore::from_store(store) {
-        Ok(_) => panic!("older Remote binary must reject a future feature version"),
+    let error = match RegistryStore::from_store(store) {
+        Ok(_) => panic!("older RegistryStore must reject a future feature version"),
         Err(error) => error.to_string(),
     };
     assert!(error.contains("newer"), "{error}");
@@ -150,7 +152,7 @@ fn adoption_fails_closed_without_recording_v1_when_shipped_schema_is_damaged() {
         })
         .expect("damage shipped schema fixture");
 
-    let error = match RemoteStore::from_store(store.clone()) {
+    let error = match RegistryStore::from_store(store.clone()) {
         Ok(_) => panic!("adoption must reject a missing shipped trigger"),
         Err(error) => error.to_string(),
     };
@@ -158,7 +160,7 @@ fn adoption_fails_closed_without_recording_v1_when_shipped_schema_is_damaged() {
     assert!(error.contains("missing"), "{error}");
 
     let status = store
-        .feature_schema_status(REMOTE_SCHEMA_FEATURE, REMOTE_SCHEMA_MIGRATIONS)
+        .feature_schema_status(REGISTRY_SCHEMA_FEATURE, REGISTRY_SCHEMA_MIGRATIONS)
         .expect("failed adoption left feature ledger readable");
     assert_eq!(status.current_version, 0);
     assert!(status.applied.is_empty());
@@ -190,7 +192,7 @@ fn adoption_rejects_changed_foreign_key_delete_behavior() {
         })
         .expect("replace presence table with wrong delete behavior");
 
-    let error = match RemoteStore::from_store(store.clone()) {
+    let error = match RegistryStore::from_store(store.clone()) {
         Ok(_) => panic!("adoption must reject changed foreign-key behavior"),
         Err(error) => error.to_string(),
     };
@@ -224,7 +226,7 @@ fn adoption_rejects_missing_table_constraint_with_matching_columns() {
         })
         .expect("replace presence table without root constraint");
 
-    let error = match RemoteStore::from_store(store.clone()) {
+    let error = match RegistryStore::from_store(store.clone()) {
         Ok(_) => panic!("adoption must reject changed table constraints"),
         Err(error) => error.to_string(),
     };
@@ -234,12 +236,12 @@ fn adoption_rejects_missing_table_constraint_with_matching_columns() {
 }
 
 #[test]
-fn configured_database_path_is_preserved_across_remote_store_reopen() {
+fn configured_database_path_is_preserved_across_registry_store_reopen() {
     let directory = tempfile::tempdir().expect("tempdir");
-    let configured = directory.path().join("configured-remote.db");
+    let configured = directory.path().join("configured-registry.db");
     let unrelated = directory.path().join("unrelated.db");
 
-    let store = RemoteStore::open(&configured).expect("configured remote store");
+    let store = RegistryStore::open(&configured).expect("configured registry store");
     store
         .register_host(&orbit_common::types::HostRegistration {
             machine_id: "hm_configured".to_string(),
@@ -250,7 +252,7 @@ fn configured_database_path_is_preserved_across_remote_store_reopen() {
     drop(store);
 
     assert!(configured.is_file());
-    let reopened = RemoteStore::open(&configured).expect("reopen configured database");
+    let reopened = RegistryStore::open(&configured).expect("reopen configured database");
     assert!(
         reopened
             .get_host("hm_configured")
@@ -258,7 +260,7 @@ fn configured_database_path_is_preserved_across_remote_store_reopen() {
             .is_some()
     );
 
-    let other = RemoteStore::open(&unrelated).expect("open unrelated database");
+    let other = RegistryStore::open(&unrelated).expect("open unrelated database");
     assert!(
         other
             .get_host("hm_configured")
@@ -269,14 +271,14 @@ fn configured_database_path_is_preserved_across_remote_store_reopen() {
 
 fn assert_feature_v1_not_recorded(store: &Store) {
     let status = store
-        .feature_schema_status(REMOTE_SCHEMA_FEATURE, REMOTE_SCHEMA_MIGRATIONS)
+        .feature_schema_status(REGISTRY_SCHEMA_FEATURE, REGISTRY_SCHEMA_MIGRATIONS)
         .expect("failed adoption left feature ledger readable");
     assert_eq!(status.current_version, 0);
     assert!(status.applied.is_empty());
 }
 
 /// Every object the withdrawn [ORB-10272] substrate created, as named by the
-/// original Remote v2 migration.
+/// original legacy feature-v2 migration.
 const WITHDRAWN_KNOWLEDGE_TABLES: &[&str] = &[
     "hub_knowledge_allocator_state",
     "hub_knowledge_sequences",
@@ -285,7 +287,7 @@ const WITHDRAWN_KNOWLEDGE_TABLES: &[&str] = &[
     "hub_knowledge_allocation_ledger",
 ];
 
-/// Reproduce a database that applied the original Remote v2 migration: its
+/// Reproduce a database that applied the original legacy feature-v2 migration: its
 /// tables on disk plus the ledger prefix recording v1 and v2 as applied. v1 is
 /// validation-only over the shipped global schema, so recording it without
 /// re-running it matches what a real v2 database looks like.
@@ -397,13 +399,13 @@ fn seed_legacy_dormant_knowledge_schema(store: &Store) {
                 conn.execute(
                     "INSERT INTO feature_schema_meta(feature, version, name, applied_at)
                      VALUES (?1, ?2, ?3, '2026-07-19T00:00:00Z')",
-                    rusqlite::params![REMOTE_SCHEMA_FEATURE, version, name],
+                    rusqlite::params![REGISTRY_SCHEMA_FEATURE, version, name],
                 )
                 .map_err(|error| OrbitError::Store(error.to_string()))?;
             }
             Ok(())
         })
-        .expect("seed a legacy Remote v2 database");
+        .expect("seed a legacy feature-v2 database");
 }
 
 fn table_exists(store: &Store, table: &str) -> bool {
@@ -420,7 +422,7 @@ fn table_exists(store: &Store, table: &str) -> bool {
         != 0
 }
 
-fn remote_table_exists(store: &RemoteStore, table: &str) -> bool {
+fn remote_table_exists(store: &RegistryStore, table: &str) -> bool {
     store
         .read(|conn| {
             conn.query_row(
