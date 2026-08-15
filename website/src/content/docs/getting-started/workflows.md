@@ -32,7 +32,13 @@ For schemaVersion 2 jobs without a workflow alias, invoke them directly:
 orbit job list
 orbit run job task_auto_pipeline
 orbit run job task_auto_pipeline --input mode=local
+orbit run job task_auto_pipeline --wait
 ```
+
+A job run is submitted to a detached worker: the command prints the run ID and
+returns as soon as the run is durable, without claiming its eventual outcome.
+Pass `--wait` to block on the submitted run instead — it exits nonzero unless
+the run succeeded.
 
 ## Inspecting Runs
 

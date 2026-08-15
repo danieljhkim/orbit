@@ -230,8 +230,6 @@ pub(crate) struct OrbitRuntimeSettings {
     actor: ActorIdentity,
     scoring_enabled: bool,
     pr_config: PrConfig,
-    /// Persisted default for the v2 `agent_loop` execution backend (§3.1).
-    v2_backend: Option<String>,
     /// Default base branch for ship workflows
     /// (`[workflow] base_branch` in `config.toml`, default `"main"`).
     workflow_base_branch: String,
@@ -253,7 +251,6 @@ impl OrbitRuntimeSettings {
         actor: ActorIdentity,
         scoring_enabled: bool,
         pr_config: PrConfig,
-        v2_backend: Option<String>,
         workflow_base_branch: String,
         workflow_auto_ship: bool,
         routines_source: bool,
@@ -266,7 +263,6 @@ impl OrbitRuntimeSettings {
             actor,
             scoring_enabled,
             pr_config,
-            v2_backend,
             workflow_base_branch,
             workflow_auto_ship,
             routines_source,
@@ -278,10 +274,6 @@ impl OrbitRuntimeSettings {
 
     pub(crate) fn pr_config(&self) -> &PrConfig {
         &self.pr_config
-    }
-
-    pub(crate) fn v2_backend(&self) -> Option<&str> {
-        self.v2_backend.as_deref()
     }
 
     pub(crate) fn workflow_base_branch(&self) -> &str {

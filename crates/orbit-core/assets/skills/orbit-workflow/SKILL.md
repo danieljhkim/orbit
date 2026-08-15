@@ -19,6 +19,7 @@ description: Orbit's execution layer — jobs, activities, routines, `orbit swee
 orbit job list                                  # catalog
 orbit job show <job_id>
 orbit run job <job_id> --input key=value --json  # or: orbit job run <job_id> --input key=value
+orbit run job <job_id> --wait                    # block until terminal; nonzero exit unless it succeeded
 orbit run ship                                   # ship backlog/selected tasks through the gated pipeline
 orbit run history --json
 orbit run show <run_id> --json
@@ -32,6 +33,11 @@ the job with `orbit job show task_pilot_pipeline`, then invoke it with:
 ```bash
 orbit run job task_pilot_pipeline
 ```
+
+The run is submitted to a detached worker and the command returns as soon as
+the run is durable — it prints the run id and the inspection commands, and does
+not claim the eventual outcome. Add `--wait` to block on the submitted run and
+exit nonzero unless it succeeded.
 
 With no input, the job discovers only `proposed`/`backlog` tasks in the
 invoking workspace whose `context_files` is empty. To audit specific tasks,

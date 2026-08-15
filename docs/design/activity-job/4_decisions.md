@@ -32,13 +32,15 @@ historical reasoning.
 Activity/job correctness depends on making authoring conveniences disappear before execution. The old log carried separate ADRs for schema retirement, backend resolution, target refs, defaults, catalog precedence, seeded assets, and workflow admission, but all enforce the same boundary: YAML is human-authored input, while execution sees normalized, validated runtime state.
 
 ### Decision
-Treat `schemaVersion: 2` as the only activity/job asset family, load seeded and workspace catalogs with explicit layer precedence, resolve authoring sugar (`target: activity:<name>`, `backend: auto`, object-valued defaults, and workflow admission) before dispatch, and keep seeded activities/jobs as executable reference contracts for that normalized surface. Direct task-workflow admission remains a workflow-specific normalization path rather than a generic task-update rule.
+Treat `schemaVersion: 2` as the only activity/job asset family, load seeded and workspace catalogs with explicit layer precedence, resolve authoring sugar (`target: activity:<name>`, object-valued defaults, and workflow admission) before dispatch, and keep seeded activities/jobs as executable reference contracts for that normalized surface.
+
+**Amended by [ORB-10801].** `backend: auto` is no longer resolved — agent backend selection was retired. The load-time normalization pass now *rejects* the retired declarations (`backend: http | auto`, any `session:` binding) instead of concretizing them, so nothing is silently reinterpreted. See [specs/backend-resolution.md](./specs/backend-resolution.md). Direct task-workflow admission remains a workflow-specific normalization path rather than a generic task-update rule.
 
 Folded instances:
 
 | ADR | Instance folded into this rollup |
 |-----|----------------------------------|
-| [Resolve `backend: auto` once, before dispatch](#resolve-backend-auto-once-before-dispatch) | `backend: auto` resolves once before dispatch. |
+| [Resolve `backend: auto` once, before dispatch](#resolve-backend-auto-once-before-dispatch) | Retired by [ORB-10801]: agent backend selection no longer exists. |
 | [`target: activity:<name>` is authoring sugar, not an execution primitive](#target-activityname-is-authoring-sugar-not-an-execution-primitive) | `target: activity:<name>` is authoring sugar resolved before execution. |
 | [Seed reference activities and jobs as load-bearing runtime contracts](#seed-reference-activities-and-jobs-as-load-bearing-runtime-contracts) | Seeded activities and jobs are load-bearing runtime contracts. |
 | [Merge object-valued job defaults with caller input, and surface early pipeline failures as synthetic job steps](#merge-object-valued-job-defaults-with-caller-input-and-surface-early-pipeline-failures-as-synthetic-job-steps) | Object-valued job defaults shallow-merge with caller input, and early failures get synthetic job steps. |
@@ -68,14 +70,14 @@ Folded instances:
 The agent-loop path is where activity/job can most easily leak provider implementation details, mutable sessions, or role configuration across crate boundaries. The split ADRs all defended the same shape: shared types live low, orbit-core hosts primitive services, the engine dispatches concrete activity specs, and provider/backends remain explicit choices.
 
 ### Decision
-Keep activity/job types in `orbit-common`, keep orbit-core free of `orbit-agent` transport types, and route `backend: cli` through retained provider runtimes behind a host-resolved executor contract. Scope stateful agent features narrowly: loop `session:` is HTTP-only, Groundhog is its own activity kind, role config from `[agent.<role>]` overrides inline settings field-by-field, task-aware CLI envelopes carry durable run context, and provider static-arg fixups run before sandbox dispatch.
+Keep activity/job types in `orbit-common`, keep orbit-core free of `orbit-agent` transport types, and route agent dispatch through retained provider CLI runtimes behind a host-resolved executor contract. Scope stateful agent features narrowly: Groundhog is its own activity kind, role config from `[agent.<role>]` overrides inline settings field-by-field, task-aware CLI envelopes carry durable run context, and provider static-arg fixups run before sandbox dispatch.
 
 Folded instances:
 
 | ADR | Instance folded into this rollup |
 |-----|----------------------------------|
-| [Cross-iteration `session:` binding is a loop-scoped HTTP-only feature](#cross-iteration-session-binding-is-a-loop-scoped-http-only-feature) | Cross-iteration `session:` binding is loop-scoped and HTTP-only. |
-| [Keep the retained CLI runtimes as the implementation of `backend: cli`](#keep-the-retained-cli-runtimes-as-the-implementation-of-backend-cli) | Retained CLI runtimes implement `backend: cli`. |
+| [Cross-iteration `session:` binding is a loop-scoped HTTP-only feature](#cross-iteration-session-binding-is-a-loop-scoped-http-only-feature) | Retired by [ORB-10801]: the HTTP agent loop is gone, so any `session:` binding is refused at load. |
+| [Keep the retained CLI runtimes as the implementation of `backend: cli`](#keep-the-retained-cli-runtimes-as-the-implementation-of-backend-cli) | Retained CLI runtimes are the agent implementation. |
 | [Groundhog is a sibling activity kind, not an `agent_loop` mode bit](#groundhog-is-a-sibling-activity-kind-not-an-agentloop-mode-bit) | Groundhog is a sibling activity kind, not an `agent_loop` mode bit. |
 | [CLI backend resolves executor args, not just provider commands](#cli-backend-resolves-executor-args-not-just-provider-commands) | CLI backend resolves executor args, not just provider commands. |
 | [Codex CLI dynamic flags stay in provider runtime config](#codex-cli-dynamic-flags-stay-in-provider-runtime-config) | Codex CLI dynamic flags stay in provider runtime config. |
@@ -87,7 +89,7 @@ Folded instances:
 
 ### Consequences
 - Parsing, validation, dispatch, and CLI display share one Rust type family without making orbit-core depend on provider transport objects.
-- CLI and HTTP agent-loop paths remain intentionally different where their capabilities differ, especially around sessions and tool enforcement.
+- Agent dispatch has one path after [ORB-10801]; tool enforcement stays delegated to the provider harness.
 - First-run and per-role agent choices live in user config while YAML stays reusable across workspaces.
 - Costs retained from folded entries:
 - Cost: `orbit-common` now owns a wider slice of runtime vocabulary and has to stay disciplined about not accreting behavior.

@@ -3,9 +3,7 @@
 // expect/assert for fixture setup and end-to-end validation.
 #![allow(clippy::expect_used)]
 
-use orbit_common::types::activity_job::{
-    ActivityV2Spec, AgentLoopSpec, Backend, OnDenial, Provider,
-};
+use orbit_common::types::activity_job::{ActivityV2Spec, AgentLoopSpec, OnDenial, Provider};
 use orbit_common::types::{EXECUTOR_RESOURCE_SCHEMA_VERSION, ExecutorDef, ExecutorResource};
 use orbit_core::OrbitRuntime;
 use orbit_engine::{V2AuditWriter, V2DispatchInput, dispatch_v2_activity};
@@ -70,7 +68,7 @@ fn installed_grok_cli_backend_smoke_captures_stdout_artifact() {
         on_denial: OnDenial::Terminate,
         model: Some("grok-4.6".to_string()),
         max_iterations: 1,
-        backend: Backend::Cli,
+        backend: None,
         provider: Provider::Grok,
         wall_clock_timeout_seconds: 120,
         require_response_envelope: true,

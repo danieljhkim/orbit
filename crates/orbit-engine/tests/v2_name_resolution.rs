@@ -31,9 +31,9 @@ use std::sync::Arc;
 
 use orbit_common::types::JobScheduleState;
 use orbit_common::types::activity_job::{
-    ActivityV2, ActivityV2Spec, Backend, JobKind, JobV2, JobV2Step, JobV2StepBody, LoopBlock,
-    Provider, ResolveError, TargetRef, V2ActivityCatalog, load_job_asset, resolve_job_backends,
-    resolve_job_target_refs, validate_job_loop_session_backends,
+    ActivityV2, ActivityV2Spec, JobKind, JobV2, JobV2Step, JobV2StepBody, LoopBlock, Provider,
+    ResolveError, TargetRef, V2ActivityCatalog, load_job_asset, resolve_job_target_refs,
+    validate_job_retired_sessions,
 };
 use orbit_engine::{
     DispatchError, ResolvedCliExecutor, RuntimeHost, V2AuditWriter, V2DispatchInput,
@@ -47,7 +47,7 @@ fn name_resolution_regressions() -> Result<(), Box<dyn std::error::Error>> {
     scenario_b_target_ref_resolves()?;
     scenario_c_unknown_ref_is_structural_error()?;
     scenario_d_pipeline_yaml_partial_resolution()?;
-    scenario_e_backend_rejection_runs_after_resolution()?;
+    scenario_e_retired_session_rejection_runs_after_resolution()?;
     scenario_f_deterministic_activities_dispatch()?;
 
     Ok(())
@@ -67,20 +67,14 @@ fn scenario_a_catalog_loads_new_activities() -> Result<(), Box<dyn std::error::E
             catalog.names().collect::<Vec<_>>()
         );
     }
-    // Pinning: cross-iteration assessment must be backend: http.
     let assessor = catalog.get("agent_assess_diff").expect("present");
     let ActivityV2Spec::AgentLoop(spec) = &assessor.spec else {
         panic!("agent_assess_diff should be agent_loop");
     };
-    assert_eq!(spec.backend, Backend::Http, "assessor must pin http");
     assert_eq!(spec.provider, Provider::Claude);
 
-    // Fixer is auto — no `session:` binding in the activity itself.
     let fixer = catalog.get("agent_apply_fixes").expect("present");
-    let ActivityV2Spec::AgentLoop(fixer_spec) = &fixer.spec else {
-        panic!("agent_apply_fixes should be agent_loop");
-    };
-    assert_eq!(fixer_spec.backend, Backend::Auto);
+    assert!(matches!(&fixer.spec, ActivityV2Spec::AgentLoop(_)));
 
     let revert = catalog.get("revert_on_red").expect("present");
     assert!(matches!(&revert.spec, ActivityV2Spec::Deterministic(_)));
@@ -110,12 +104,9 @@ fn scenario_b_target_ref_resolves() -> Result<(), Box<dyn std::error::Error>> {
             job.steps[0].body
         );
     };
-    let ActivityV2Spec::AgentLoop(spec) = &t.spec else {
-        panic!("expected agent_loop spec");
-    };
-    assert_eq!(spec.backend, Backend::Http);
+    assert!(matches!(&t.spec, ActivityV2Spec::AgentLoop(_)));
     assert_eq!(t.session.as_deref(), Some("assessor"));
-    println!("    resolved ref → inline Target with session=assessor");
+    println!("    resolved ref → inline Target carrying its session binding");
     Ok(())
 }
 
@@ -181,34 +172,17 @@ fn scenario_d_pipeline_yaml_partial_resolution() -> Result<(), Box<dyn std::erro
     Ok(())
 }
 
-fn scenario_e_backend_rejection_runs_after_resolution() -> Result<(), Box<dyn std::error::Error>> {
-    println!("  E) §3.2 rejection operates on resolved specs — assessor session survives");
+fn scenario_e_retired_session_rejection_runs_after_resolution()
+-> Result<(), Box<dyn std::error::Error>> {
+    println!("  E) retired-session rejection operates on resolved specs");
     let catalog = load_reference_catalog()?;
     let mut job = pipeline_with_assessor_loop();
     resolve_job_target_refs(&mut job, &catalog)?;
-    // After resolution, the assessor step has Backend::Http pinned (from
-    // the asset file), so backend auto-resolution + §3.2 validator pass.
-    resolve_job_backends(&mut job, Backend::Http);
-    validate_job_loop_session_backends(&job, "synthetic")?;
-    println!("    loop+session+http assessor accepted by validator");
-
-    // Flipping the assessor activity to cli in-catalog triggers the §3.2
-    // rejection once resolution inlines the spec.
-    let mut cli_catalog = V2ActivityCatalog::new();
-    let mut assessor_cli = catalog.get("agent_assess_diff").expect("present").clone();
-    if let ActivityV2Spec::AgentLoop(spec) = &mut assessor_cli.spec {
-        spec.backend = Backend::Cli;
-    }
-    cli_catalog.insert("agent_assess_diff", assessor_cli);
-    let mut job = pipeline_with_assessor_loop();
-    resolve_job_target_refs(&mut job, &cli_catalog)?;
-    resolve_job_backends(&mut job, Backend::Cli);
-    let err =
-        validate_job_loop_session_backends(&job, "synthetic").expect_err("expected §3.2 rejection");
-    println!(
-        "    flipping assessor backend → cli triggers rejection: {}",
-        err
-    );
+    // [ORB-10801] The `session:` binding survives ref resolution, so the
+    // load-time validator sees it and refuses the job rather than running a
+    // loop whose cross-iteration semantics no longer exist.
+    let err = validate_job_retired_sessions(&job, "synthetic").expect_err("expected rejection");
+    println!("    resolved assessor session rejected: {err}");
     Ok(())
 }
 
@@ -277,12 +251,6 @@ impl RuntimeHost for PipelineHost {
     ) -> Result<Value, DispatchError> {
         Err(DispatchError::DeterministicActionNotRegistered(
             action.to_string(),
-        ))
-    }
-
-    fn api_key_for(&self, _provider: &str) -> Result<String, DispatchError> {
-        Err(DispatchError::AgentLoopFailed(
-            "PipelineHost has no credentials".into(),
         ))
     }
 

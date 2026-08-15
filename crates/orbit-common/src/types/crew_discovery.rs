@@ -2,12 +2,15 @@
 
 use serde::{Deserialize, Serialize};
 
-use super::activity_job::{Backend, Provider};
+use super::activity_job::Provider;
 use super::{Crew, OrbitError};
 
 /// Schema version of the [`CrewDiscoveryV1`] projection returned by
 /// `orbit.crew.list`.
-pub const CREW_DISCOVERY_SCHEMA_VERSION: u32 = 1;
+///
+/// Bumped to 2 in ORB-10801, when the entry lost its `backend` field along
+/// with the agent execution backend selector it projected.
+pub const CREW_DISCOVERY_SCHEMA_VERSION: u32 = 2;
 
 /// One effective crew entry exposed by [`CrewDiscoveryV1`].
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -16,48 +19,24 @@ pub struct CrewDiscoveryEntryV1 {
     pub name: String,
     pub provider: String,
     pub model: String,
-    pub backend: String,
     pub description: Option<String>,
     pub tags: Vec<String>,
 }
 
 impl CrewDiscoveryEntryV1 {
-    pub fn from_crew(crew: &Crew, auto_backend: Backend) -> Result<Self, OrbitError> {
+    pub fn from_crew(crew: &Crew) -> Result<Self, OrbitError> {
         let name = required_trimmed("crew name", &crew.name)?;
         let provider = Provider::parse(&crew.assignment.provider).map_err(|error| {
             OrbitError::InvalidInput(format!("crew '{name}' has invalid provider: {error}"))
         })?;
         let model = required_trimmed("crew model", &crew.assignment.model)?;
-        let configured_backend = Backend::parse(&crew.assignment.backend).ok_or_else(|| {
-            OrbitError::InvalidInput(format!(
-                "crew '{name}' has unknown backend '{}'",
-                crew.assignment.backend
-            ))
-        })?;
-        let backend = match configured_backend {
-            Backend::Auto => auto_backend,
-            concrete => concrete,
-        };
-        if backend == Backend::Auto {
+        // Every crew dispatches through the CLI agent path [ORB-10801], so a
+        // provider without a CLI runtime cannot be executed by any crew.
+        if !provider.has_cli_runtime() {
             return Err(OrbitError::InvalidInput(format!(
-                "crew '{name}' did not resolve backend:auto to a concrete backend"
+                "crew '{name}' selects provider '{}' without a CLI runtime",
+                provider.as_str()
             )));
-        }
-        match backend {
-            Backend::Http if !provider.has_http_transport() => {
-                return Err(OrbitError::InvalidInput(format!(
-                    "crew '{name}' selects provider '{}' without an HTTP transport",
-                    provider.as_str()
-                )));
-            }
-            Backend::Cli if !provider.has_cli_runtime() => {
-                return Err(OrbitError::InvalidInput(format!(
-                    "crew '{name}' selects provider '{}' without a CLI runtime",
-                    provider.as_str()
-                )));
-            }
-            Backend::Http | Backend::Cli => {}
-            Backend::Auto => unreachable!("auto rejected above"),
         }
 
         let description = crew
@@ -80,7 +59,6 @@ impl CrewDiscoveryEntryV1 {
             name,
             provider: provider.as_str().to_string(),
             model,
-            backend: backend.as_str().to_string(),
             description,
             tags,
         })

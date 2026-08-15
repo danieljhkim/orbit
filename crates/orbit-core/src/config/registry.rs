@@ -130,11 +130,6 @@ define_config_settings! {
         description: "Opt-in for the routine scheduler; the only supported value is 'source' (marks this workspace as a routine source for `orbit sweep`).",
         resolve: |raw: Option<String>| resolve_optional_choice(raw, "routines.role", &["source"]),
     },
-    runtime_backend: Option<String> => String {
-        key: "runtime.backend", value_type: "string",
-        description: "Default v2 agent_loop execution backend: one of http, cli, auto.",
-        resolve: |raw: Option<String>| resolve_optional_choice(raw, "[runtime] backend", &["http", "cli", "auto"]),
-    },
     runtime_log_max_file_mb: u64 => u64 {
         key: "runtime.log_max_file_mb", value_type: "integer",
         description: "Roll the active JSONL log once it grows past this many MiB (must be >= 1 and <= runtime.log_max_total_mb).",
@@ -220,7 +215,6 @@ fn default_admission_crews() -> BTreeMap<String, Crew> {
             assignment: CrewAssignment {
                 model: String::new(),
                 provider: "claude".to_string(),
-                backend: String::new(),
             },
             description: None,
             tags: Vec::new(),

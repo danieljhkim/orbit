@@ -430,7 +430,7 @@ spec:
     )
     .expect("write job yaml");
     let result = runtime
-        .run_job_v2_from_yaml(&yaml_path, json!({ "seconds": 0 }), None)
+        .run_job_v2_from_yaml(&yaml_path, json!({ "seconds": 0 }))
         .expect("run job");
     let run = runtime.show_job_run(&result.run_id).expect("show run");
 

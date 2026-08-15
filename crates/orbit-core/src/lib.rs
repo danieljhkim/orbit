@@ -64,6 +64,7 @@ pub use orbit_tools::prepare_remote_task_artifact_put;
 
 // Command-layer types the CLI names in its clap surfaces.
 pub use command::docs::{DocType, TaskRelatedDoc};
+pub use command::job::{PipelineInvokeResult, PipelineWaitEntry};
 pub use command::search::{
     GlobalSearchHit, GlobalSearchKind, GlobalSearchParams, task_selectors_contain_path,
 };

@@ -4,7 +4,6 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 use chrono::Utc;
-use orbit_common::types::activity_job::Backend;
 use orbit_common::types::{
     AuditEventStatus, ExecutorDef, ExecutorType, JobRunState, TaskPriority, TaskStatus, TaskType,
 };
@@ -225,10 +224,6 @@ impl RuntimeHost for FailureHandoffHost<'_> {
         <OrbitRuntime as RuntimeHost>::has_deterministic_action(self.runtime, action)
     }
 
-    fn api_key_for(&self, provider: &str) -> Result<String, DispatchError> {
-        <OrbitRuntime as RuntimeHost>::api_key_for(self.runtime, provider)
-    }
-
     fn resolve_cli_executor(&self, provider: &str) -> Result<ResolvedCliExecutor, DispatchError> {
         <OrbitRuntime as RuntimeHost>::resolve_cli_executor(self.runtime, provider)
     }
@@ -345,10 +340,6 @@ impl RuntimeHost for ReserveThenStatusHost<'_> {
         Ok(output)
     }
 
-    fn api_key_for(&self, provider: &str) -> Result<String, DispatchError> {
-        <OrbitRuntime as RuntimeHost>::api_key_for(self.runtime, provider)
-    }
-
     fn resolve_cli_executor(&self, provider: &str) -> Result<ResolvedCliExecutor, DispatchError> {
         <OrbitRuntime as RuntimeHost>::resolve_cli_executor(self.runtime, provider)
     }
@@ -431,10 +422,6 @@ impl RuntimeHost for ScriptedGateHost<'_> {
                 other.to_string(),
             )),
         }
-    }
-
-    fn api_key_for(&self, provider: &str) -> Result<String, DispatchError> {
-        <OrbitRuntime as RuntimeHost>::api_key_for(self.runtime, provider)
     }
 
     fn resolve_cli_executor(&self, provider: &str) -> Result<ResolvedCliExecutor, DispatchError> {
@@ -746,7 +733,7 @@ fn direct_yaml_run_persists_history_and_run_state() {
     write_job(&yaml_path, "qa_sleep", "sleep");
 
     let result = runtime
-        .run_job_v2_from_yaml(&yaml_path, json!({ "seconds": 0 }), None)
+        .run_job_v2_from_yaml(&yaml_path, json!({ "seconds": 0 }))
         .expect("direct job run succeeds");
 
     let run = runtime.show_job_run(&result.run_id).expect("stored run");
@@ -793,7 +780,7 @@ fn direct_catalog_run_is_visible_in_history() {
         .show_job_catalog_entry("qa_catalog_sleep")
         .expect("catalog entry");
     let result = runtime
-        .run_job_v2_from_yaml(&catalog.path, json!({ "seconds": 0 }), None)
+        .run_job_v2_from_yaml(&catalog.path, json!({ "seconds": 0 }))
         .expect("catalog job run succeeds");
 
     let history = runtime
@@ -822,7 +809,7 @@ fn replay_job_run_records_lineage_and_preserves_source_bundle() {
         .expect("catalog entry");
     let input = json!({ "seconds": 0, "marker": "source-input" });
     let source_result = runtime
-        .run_job_v2_from_yaml(&catalog.path, input.clone(), None)
+        .run_job_v2_from_yaml(&catalog.path, input.clone())
         .expect("source run succeeds");
     let source_run = runtime
         .show_job_run(&source_result.run_id)
@@ -916,7 +903,6 @@ fn v2_cli_agent_loop_persists_invocation_metrics() {
                 "task_id": task.id.clone(),
                 "crew": "sol"
             }),
-            None,
         )
         .expect("cli metrics job succeeds");
 
@@ -1000,7 +986,7 @@ fn v2_claude_fable_alias_persists_provider_reported_model_and_cost() {
         "fable",
     );
     let result = runtime
-        .run_job_v2_from_yaml(&yaml_path, json!({"prompt": "collect metrics"}), None)
+        .run_job_v2_from_yaml(&yaml_path, json!({"prompt": "collect metrics"}))
         .expect("Claude fable metrics job succeeds");
 
     let records = runtime
@@ -1093,7 +1079,6 @@ system_crew = "sonnet"
                 "max_tasks": 20,
                 "max_rebacklogs": 2,
             }),
-            Some(Backend::Cli),
         )
         .expect("task triage pipeline succeeds");
 
@@ -1380,7 +1365,7 @@ fn resume_rejects_successful_runs() {
     let yaml_path = repo_root.join("qa_resume_guard.yaml");
     write_job(&yaml_path, "qa_resume_guard", "sleep");
     let result = runtime
-        .run_job_v2_from_yaml(&yaml_path, json!({"seconds": 0}), None)
+        .run_job_v2_from_yaml(&yaml_path, json!({"seconds": 0}))
         .expect("run succeeds");
 
     let error = runtime
@@ -1406,7 +1391,7 @@ fn failing_direct_run_records_failure_state() {
     write_job(&yaml_path, "qa_failing", "missing_action");
 
     let err = runtime
-        .run_job_v2_from_yaml(&yaml_path, json!({}), None)
+        .run_job_v2_from_yaml(&yaml_path, json!({}))
         .expect_err("direct job run should fail");
     assert!(
         err.to_string().contains("missing_action") && err.to_string().contains("not registered"),

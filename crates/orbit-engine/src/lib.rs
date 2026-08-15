@@ -41,9 +41,9 @@ mod tests;
 pub use activity_job::{
     DispatchError, DispatchOutcome, EnforcedAuditSink, JobOutcome, ResolvedAgentSettings,
     ResolvedCliExecutor, ResolvedSandbox, V2AuditWriter, V2DispatchInput, V2SqliteSink,
-    dispatch_error_to_orbit, dispatch_v2_activity, drive_agent_loop, execute_job_with_resume,
-    inject_system_crew_input, reset_replay_transport, resolve_crew_settings,
-    resolve_job_catalog_refs_for_execution, validate_job, validate_job_deterministic_actions,
+    dispatch_error_to_orbit, dispatch_v2_activity, execute_job_with_resume,
+    inject_system_crew_input, resolve_crew_settings, resolve_job_catalog_refs_for_execution,
+    validate_job, validate_job_deterministic_actions,
 };
 pub use context::{
     AGENT_INVOCATION_FAILED, AGENT_TIMEOUT, ActivityInvocationResult, CrewConfig, PrConfig,

@@ -663,26 +663,4 @@ impl RuntimeHost for OrbitRuntime {
             ),
         ))
     }
-
-    fn api_key_for(&self, provider: &str) -> Result<String, DispatchError> {
-        match provider {
-            "anthropic" => {
-                let key = std::env::var("ANTHROPIC_API_KEY").map_err(|_| {
-                    DispatchError::AgentLoopFailed(
-                        "ANTHROPIC_API_KEY not set — export it before running a v2 agent_loop activity"
-                            .to_string(),
-                    )
-                })?;
-                if key.is_empty() {
-                    return Err(DispatchError::AgentLoopFailed(
-                        "ANTHROPIC_API_KEY is empty".to_string(),
-                    ));
-                }
-                Ok(key)
-            }
-            other => Err(DispatchError::AgentLoopFailed(format!(
-                "unsupported provider: {other}"
-            ))),
-        }
-    }
 }

@@ -75,7 +75,6 @@ fn crew_discovery_projects_the_open_runtime_configuration() {
             .collect::<Vec<_>>(),
         ["beta", "gamma", "primary"]
     );
-    assert!(discovery.crews.iter().all(|crew| crew.backend == "cli"));
 }
 
 fn add_task_with_crew(runtime: &OrbitRuntime, crew: &str) -> String {

@@ -4,7 +4,7 @@ summary: Diagnose, cancel, resume, or replay pending and running Orbit job runs.
 tags: [operations, jobs, runs, recovery, debugging]
 paths: ["crates/orbit-core/src/command/job/**", "crates/orbit-cli/src/command/run/**", "crates/orbit-core/src/runtime/run_audit.rs"]
 related_features: [activity-job, auditability]
-related_artifacts: [ORB-10070, ORB-10496]
+related_artifacts: [ORB-10070, ORB-10496, ORB-10801]
 ---
 
 # Recover Stuck Job Runs
@@ -60,6 +60,22 @@ Liveness is probed when you ask, against the local process table, so it is only 
 the host that ran the child; a historical run inspected elsewhere reports `exited`. Use
 `orbit run show --json` for the full records (`pid`, `pid_start_time`, `step_id`, `finished`),
 or `orbit run events <run_id> --type cli.invocation.process` for the raw audit events.
+
+## A submitted run outlives its command
+
+`orbit run job <job_id>` / `orbit job run <job_id>` submit the run to a detached worker
+and return as soon as it is durable [ORB-10801]. A zero exit means validation,
+persistence, and worker startup succeeded — it says nothing about the run's eventual
+outcome, which is why every submission prints the run id and the inspection commands
+above. Add `--wait` to block on the run instead; that mode exits nonzero for a `failed`,
+`timeout`, `cancelled`, or `interrupted` terminal state and prints the diagnostic.
+
+A submission that reports `queued` is durable but has not started: the job is already at
+its `max_active_runs` limit and its worker is polling for a slot.
+
+If the submission itself fails (unknown job, invalid asset, worker that could not spawn),
+no run is left behind in a startable state — the persisted run is terminalized as
+`interrupted` with a startup diagnostic and worker-log path.
 
 ## Interpret run states
 

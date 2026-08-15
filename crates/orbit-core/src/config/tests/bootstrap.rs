@@ -11,7 +11,6 @@ fn sample_crew_settings() -> BTreeMap<String, RawCrewAssignment> {
         "custom".to_string(),
         RawCrewAssignment {
             provider: Some("codex".into()),
-            backend: Some("cli".into()),
             model: Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.into()),
         },
     )])
@@ -133,10 +132,8 @@ fn multi_provider_seed_includes_each_available_family_and_excludes_unavailable()
     assert_crew(&parsed, "grok", "grok", "grok-4.6");
     assert_crew(&parsed, "qa", "codex", "gpt-5.6-terra");
     for crew in crews(&parsed).values() {
-        assert_eq!(
-            crew.get("backend").and_then(toml::Value::as_str),
-            Some("cli")
-        );
+        // [ORB-10801] Seeded crews no longer carry the retired backend key.
+        assert!(crew.get("backend").is_none());
         assert_ne!(
             crew.get("provider").and_then(toml::Value::as_str),
             Some("gemini")
@@ -257,10 +254,7 @@ fn assert_crew(parsed: &toml::Value, name: &str, provider: &str, model: &str) {
         Some(provider)
     );
     assert_eq!(crew.get("model").and_then(toml::Value::as_str), Some(model));
-    assert_eq!(
-        crew.get("backend").and_then(toml::Value::as_str),
-        Some("cli")
-    );
+    assert!(crew.get("backend").is_none());
 }
 
 fn assert_default_crew(parsed: &toml::Value, expected: Option<&str>) {
@@ -314,7 +308,7 @@ fn seed_with_crew_settings_writes_custom_crew() {
         custom.get("provider").and_then(|v| v.as_str()),
         Some("codex")
     );
-    assert_eq!(custom.get("backend").and_then(|v| v.as_str()), Some("cli"));
+    assert!(custom.get("backend").is_none());
     assert_eq!(
         custom.get("model").and_then(|v| v.as_str()),
         Some(orbit_common::test_fixtures::TEST_CODEX_MODEL)

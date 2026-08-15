@@ -53,7 +53,7 @@ persistence kernel. Registry owns local machine/workspace files, MCP owns protoc
 direct SSH transport, and Web owns its HTTP surface and SSH tunnel lifecycle.
 Layering constrains dependency direction while each feature keeps one clear owner.
 `orbit-core` does **not** depend on `orbit-agent`; the bridge is `orbit-engine`'s
-`backend: cli` subprocess runner.
+CLI agent subprocess runner.
 
 ## Boundaries
 

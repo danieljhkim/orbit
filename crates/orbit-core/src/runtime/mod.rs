@@ -418,12 +418,6 @@ impl OrbitRuntime {
         self.context.settings().pr_config()
     }
 
-    /// Configured default for the v2 `agent_loop` execution backend (§3.1
-    /// precedence step 3). Returns `None` when not set.
-    pub fn v2_backend_config(&self) -> Option<&str> {
-        self.context.settings().v2_backend()
-    }
-
     /// Default base branch for ship workflows. Sourced
     /// from `[workflow] base_branch` in the active `config.toml`; defaults
     /// to `"main"` when no key is present.

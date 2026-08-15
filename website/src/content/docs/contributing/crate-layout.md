@@ -14,7 +14,7 @@ sidebar:
 | `orbit-core` | Neutral runtime bootstrap, config layering, default asset seeding, and runtime-integrated command modules. Surfaces `OrbitRuntime` to `orbit-cmd`, `orbit-cli`, and `orbit-web`. |
 | `orbit-registry` | Local machine identity and logical workspace catalog validation with atomic file persistence. |
 | `orbit-web` | HTTP API, embedded dashboard UI, dashboard mutations, and SSH web connection over Core and Registry. |
-| `orbit-engine` | Activity and job execution, template rendering, retry logic. Owns the `backend: cli` subprocess runner, which references `orbit-agent::{Agent, AgentConfig}` directly. |
+| `orbit-engine` | Activity and job execution, template rendering, retry logic. Owns the CLI agent subprocess runner, which references `orbit-agent::{Agent, AgentConfig}` directly. |
 | `orbit-agent` | Per-provider `AgentRuntime` implementations under `providers/<name>/<name>_runtime.rs` (claude, codex, gemini, gemini_http, grok, openai_compat, anthropic, ollama, mock_agent). Hosts HTTP `LoopTransport` primitives. |
 | `orbit-tools` | Generic tool registry plus workspace-scoped builtins, filesystem tools, and policy-aware exec tools. |
 | `orbit-policy` | Filesystem-scoping policy engine. Owns `FsProfile` resolution and `denyRead` / `denyModify` evaluation. |
@@ -58,5 +58,5 @@ violate this direction. Layering constrains dependency direction, not feature
 ownership: focused feature crates own their domain data and transport behavior
 while reusing neutral kernels. Lower layers stay reusable and never depend back
 on the feature. In particular,
-`orbit-core` must not depend on `orbit-agent` (the `backend: cli` subprocess runner
+`orbit-core` must not depend on `orbit-agent` (the CLI agent subprocess runner
 in `orbit-engine` is the bridge) and must never depend on `orbit-cmd`.

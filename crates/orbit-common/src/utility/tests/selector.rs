@@ -239,16 +239,17 @@ mod parse {
         let outside_file = outside.path().join("outside.rs");
         std::fs::write(&outside_file, "fn outside() {}\n").unwrap();
 
-        assert!(canonical_selector_in_workspace(
-            &format!("symbol:{}#run:function", outside_file.display()),
-            workspace.path()
-        )
-        .is_err());
-        assert!(canonical_selector_in_workspace(
-            "symbol:../outside.rs#run:function",
-            workspace.path()
-        )
-        .is_err());
+        assert!(
+            canonical_selector_in_workspace(
+                &format!("symbol:{}#run:function", outside_file.display()),
+                workspace.path()
+            )
+            .is_err()
+        );
+        assert!(
+            canonical_selector_in_workspace("symbol:../outside.rs#run:function", workspace.path())
+                .is_err()
+        );
         assert!(!exists_in_workspace(
             &format!("symbol:{}#run:function", outside_file.display()),
             workspace.path()
@@ -393,7 +394,7 @@ mod parse {
 }
 
 mod translation {
-    use super::super::super::selector::{selector_error_to_orbit, SelectorParseError};
+    use super::super::super::selector::{SelectorParseError, selector_error_to_orbit};
     use crate::types::OrbitError;
 
     #[test]

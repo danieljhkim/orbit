@@ -1,17 +1,17 @@
-use std::path::PathBuf;
+use orbit_common::types::PipelineState;
+use orbit_core::{JobRun, OrbitError, OrbitRuntime, PipelineInvokeResult, PipelineWaitEntry};
+use serde_json::{Value, json};
 
 use clap::Args;
-use orbit_common::types::JobKind;
-use orbit_common::types::PipelineState;
-use orbit_core::command::job::JobCatalogEntry;
-use orbit_core::{JobRun, OrbitError, OrbitRuntime};
-use serde_json::{Value, json};
 
 use crate::command::{CommandOut, CommandOutput, Execute, Payload};
 
+/// Terminal wait statuses that mean the submitted run did not succeed.
+const FAILED_WAIT_STATUSES: [&str; 4] = ["failed", "timeout", "cancelled", "interrupted"];
+
 #[derive(Args)]
 #[command(
-    after_help = "Examples:\n  orbit run job task_auto_pipeline\n  orbit run job task_auto_pipeline --input mode=local\n  orbit run job crates/orbit-core/assets/jobs/task_pipeline.yaml --input task_id=T123\n"
+    after_help = "Examples:\n  orbit run job task_auto_pipeline\n  orbit run job task_auto_pipeline --input mode=local\n  orbit run job crates/orbit-core/assets/jobs/task_pipeline.yaml --input task_id=T123\n  orbit run job task_pilot_pipeline --wait\n\nThe run is submitted to a detached worker and the command returns as soon as it is durable.\nInspect it with `orbit run history -j <JOB_ID>` and `orbit run show <RUN_ID>`."
 )]
 pub struct JobRunArgs {
     /// Job ID from the catalog, or a direct path to a schemaVersion 2 job YAML.
@@ -20,102 +20,144 @@ pub struct JobRunArgs {
     /// Example: --input task_id=T123 --input base=main
     #[arg(long)]
     pub input: Vec<String>,
-    /// Explicit execution backend override for `agent_loop` steps (§3.1).
-    /// Precedence: this flag > `ORBIT_BACKEND` > `[runtime] backend` > `cli`.
-    /// Accepted values: `http`, `cli`, `auto`.
+    /// Block until the submitted run reaches a terminal state, and exit
+    /// nonzero unless it succeeded.
     #[arg(long)]
-    pub backend: Option<String>,
+    pub wait: bool,
     #[arg(long)]
     pub json: bool,
-    /// Stream agent stderr to the terminal and tee stdout live for debugging.
-    #[arg(long)]
-    pub debug: bool,
 }
 
 impl Execute for JobRunArgs {
     fn execute(self, runtime: &OrbitRuntime) -> CommandOut {
         let input = build_job_run_input(&self.input)?;
-        let backend_flag =
-            orbit_core::command::backend_resolver::parse_backend_flag(self.backend.as_deref())
-                .map_err(OrbitError::InvalidInput)?;
-        let direct_path = PathBuf::from(&self.job_id);
-        if direct_path.exists() {
-            if self.debug {
-                return Err(OrbitError::InvalidInput(
-                    "`orbit job run --debug` is not supported for schemaVersion 2 jobs; use the audit output instead.".to_string(),
-                ));
-            }
-            let result = runtime.run_job_v2_from_yaml(&direct_path, input, backend_flag)?;
-            let backend_str = result.resolved_backend.as_str();
-            if self.json {
-                return Ok(Payload::document(json!({
-                    "run_id": result.run_id,
-                    "job_name": result.job_name,
-                    "resolved_backend": backend_str,
-                    "success": result.success,
-                    "message": result.message,
-                    "pipeline": result.pipeline,
-                    "events_emitted": result.events_emitted,
-                }))
-                .into());
-            }
-            println!(
-                "run_id={};job={};backend={};success={};events={}",
-                result.run_id, result.job_name, backend_str, result.success, result.events_emitted,
-            );
-            if let Some(msg) = &result.message {
-                println!("message: {msg}");
-            }
-            println!(
-                "pipeline: {}",
-                serde_json::to_string_pretty(&result.pipeline).unwrap_or_default()
-            );
-            return Ok(CommandOutput::Silent);
+        // Submission failure — an unknown job, an invalid asset, a worker that
+        // could not start — is this command's own failure and surfaces as an
+        // error. Everything the submitted run does afterwards is reported by
+        // `--wait`, so the two outcomes never share an exit path.
+        let invoke = runtime.submit_job_run(&self.job_id, input, None)?;
+        if !self.wait {
+            return render_submission(&invoke, self.json);
         }
 
-        let job = runtime.show_job_catalog_entry(&self.job_id)?;
-        if self.debug {
-            return Err(OrbitError::InvalidInput(
-                "`orbit job run --debug` is not supported for schemaVersion 2 jobs; use the audit output instead.".to_string(),
-            ));
-        }
-        if job.kind() == JobKind::Subroutine {
-            return Err(OrbitError::InvalidInput(build_subroutine_run_error(&job)));
-        }
-        let result = runtime.run_job_v2_from_yaml(&job.path, input, backend_flag)?;
-        let backend_str = result.resolved_backend.as_str();
-        if self.json {
-            Ok(Payload::document(json!({
-                "run_id": result.run_id,
-                "job_id": job.job_id.clone(),
-                "kind": job.kind().to_string(),
-                "resolved_backend": backend_str,
-                "success": result.success,
-                "message": result.message,
-                "pipeline": result.pipeline,
-                "events_emitted": result.events_emitted,
-            }))
-            .into())
-        } else {
-            println!(
-                "run_id={};job_id={};kind={};backend={};success={};events={}",
-                result.run_id,
-                job.job_id.as_str(),
-                job.kind(),
-                backend_str,
-                result.success,
-                result.events_emitted,
-            );
-            if let Some(msg) = &result.message {
-                println!("message: {msg}");
-            }
-            println!(
-                "pipeline: {}",
-                serde_json::to_string_pretty(&result.pipeline).unwrap_or_default()
-            );
-            Ok(CommandOutput::Silent)
+        let timeout_seconds = OrbitRuntime::normalize_pipeline_wait_timeout(None)?;
+        let poll_interval_seconds = OrbitRuntime::normalize_pipeline_wait_poll_interval(None);
+        let wait = runtime.wait_pipeline_runs(
+            std::slice::from_ref(&invoke.run_id),
+            timeout_seconds,
+            poll_interval_seconds,
+            None,
+        )?;
+        let entry = wait
+            .results
+            .into_iter()
+            .find(|entry| entry.run_id == invoke.run_id)
+            .ok_or_else(|| {
+                OrbitError::Execution(format!(
+                    "wait returned no result for run '{}'",
+                    invoke.run_id
+                ))
+            })?;
+        render_wait(&invoke, &entry, self.json)
+    }
+}
+
+pub(super) fn render_submission(invoke: &PipelineInvokeResult, json_output: bool) -> CommandOut {
+    let state = submission_state(invoke);
+    if json_output {
+        return Ok(Payload::document(json!({
+            "job_id": invoke.job_name,
+            "run_id": invoke.run_id,
+            "state": state,
+            "queued": invoke.queued,
+            "submitted_at": invoke.submitted_at,
+            "waited": false,
+        }))
+        .into());
+    }
+    for line in submission_lines(invoke, state) {
+        println!("{line}");
+    }
+    Ok(CommandOutput::Silent)
+}
+
+/// Render a completed `--wait`, then fail the command for a non-success
+/// terminal state so a caller can branch on the exit status alone.
+pub(super) fn render_wait(
+    invoke: &PipelineInvokeResult,
+    entry: &PipelineWaitEntry,
+    json_output: bool,
+) -> CommandOut {
+    if json_output {
+        crate::output::json::print_pretty(&json!({
+            "job_id": invoke.job_name,
+            "run_id": invoke.run_id,
+            "state": entry.status,
+            "queued": invoke.queued,
+            "submitted_at": invoke.submitted_at,
+            "waited": true,
+            "finished_at": entry.finished_at,
+            "error": entry.error,
+            "pipeline": entry.pipeline,
+        }))?;
+    } else {
+        for line in wait_lines(invoke, entry) {
+            println!("{line}");
         }
     }
+
+    if FAILED_WAIT_STATUSES.contains(&entry.status.as_str()) {
+        let detail = entry
+            .error
+            .as_deref()
+            .map(|error| format!(": {}", single_line(error)))
+            .unwrap_or_default();
+        return Err(OrbitError::Execution(format!(
+            "job run '{}' finished in state '{}'{detail}",
+            invoke.run_id, entry.status
+        )));
+    }
+    Ok(CommandOutput::Silent)
+}
+
+pub(super) fn submission_state(invoke: &PipelineInvokeResult) -> &'static str {
+    if invoke.queued { "queued" } else { "submitted" }
+}
+
+pub(super) fn submission_lines(invoke: &PipelineInvokeResult, state: &str) -> Vec<String> {
+    vec![
+        format!("Job: {}", invoke.job_name),
+        format!("Run ID: {}", invoke.run_id),
+        format!("State: {state}"),
+        inspect_line(invoke),
+    ]
+}
+
+pub(super) fn wait_lines(invoke: &PipelineInvokeResult, entry: &PipelineWaitEntry) -> Vec<String> {
+    let mut lines = vec![
+        format!("Job: {}", invoke.job_name),
+        format!("Run ID: {}", invoke.run_id),
+        format!("State: {}", entry.status),
+    ];
+    if let Some(finished_at) = &entry.finished_at {
+        lines.push(format!("Finished: {finished_at}"));
+    }
+    if let Some(error) = &entry.error {
+        lines.push(format!("Error: {}", single_line(error)));
+    }
+    lines.push(inspect_line(invoke));
+    lines
+}
+
+fn inspect_line(invoke: &PipelineInvokeResult) -> String {
+    format!(
+        "Inspect: orbit run history -j {} | orbit run show {}",
+        invoke.job_name, invoke.run_id
+    )
+}
+
+fn single_line(value: &str) -> String {
+    value.replace(['\n', '\r'], " ")
 }
 
 #[derive(Args)]
@@ -132,13 +174,11 @@ impl Execute for JobReplayArgs {
     fn execute(self, runtime: &OrbitRuntime) -> CommandOut {
         let source_run_id = self.run_id;
         let result = runtime.replay_job_run(&source_run_id)?;
-        let backend_str = result.resolved_backend.as_str();
         if self.json {
             return Ok(Payload::document(json!({
                 "run_id": result.run_id,
                 "source_run_id": source_run_id,
                 "job_name": result.job_name,
-                "resolved_backend": backend_str,
                 "success": result.success,
                 "message": result.message,
                 "pipeline": result.pipeline,
@@ -147,13 +187,8 @@ impl Execute for JobReplayArgs {
             .into());
         }
         println!(
-            "run_id={};replayed_from={};job={};backend={};success={};events={}",
-            result.run_id,
-            source_run_id,
-            result.job_name,
-            backend_str,
-            result.success,
-            result.events_emitted,
+            "run_id={};replayed_from={};job={};success={};events={}",
+            result.run_id, source_run_id, result.job_name, result.success, result.events_emitted,
         );
         if let Some(msg) = &result.message {
             println!("message: {msg}");
@@ -182,13 +217,11 @@ impl Execute for JobResumeArgs {
     fn execute(self, runtime: &OrbitRuntime) -> CommandOut {
         let source_run_id = self.run_id;
         let result = runtime.resume_job_run(&source_run_id)?;
-        let backend_str = result.resolved_backend.as_str();
         if self.json {
             return Ok(Payload::document(json!({
                 "run_id": result.run_id,
                 "resumed_from": source_run_id,
                 "job_name": result.job_name,
-                "resolved_backend": backend_str,
                 "success": result.success,
                 "message": result.message,
                 "pipeline": result.pipeline,
@@ -197,13 +230,8 @@ impl Execute for JobResumeArgs {
             .into());
         }
         println!(
-            "run_id={};resumed_from={};job={};backend={};success={};events={}",
-            result.run_id,
-            source_run_id,
-            result.job_name,
-            backend_str,
-            result.success,
-            result.events_emitted,
+            "run_id={};resumed_from={};job={};success={};events={}",
+            result.run_id, source_run_id, result.job_name, result.success, result.events_emitted,
         );
         if let Some(msg) = &result.message {
             println!("message: {msg}");
@@ -270,14 +298,6 @@ pub(crate) fn job_run_to_json_with_state(run: &JobRun, state: Option<&PipelineSt
         })).collect::<Vec<_>>(),
         "created_at": run.created_at.to_rfc3339(),
     })
-}
-
-fn build_subroutine_run_error(job: &JobCatalogEntry) -> String {
-    format!(
-        "job '{}' declares `kind: subroutine` and cannot be run directly (asset: {}).",
-        job.job_id.as_str(),
-        job.path.display()
-    )
 }
 
 #[derive(Args)]

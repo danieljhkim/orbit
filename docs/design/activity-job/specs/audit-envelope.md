@@ -82,7 +82,7 @@ The v2 writer also keeps an in-memory snapshot for smoke assertions and CLI summ
 ## Migration Notes
 
 - The envelope is additive. It does not retire or rewrite the existing loop-level audit sink.
-- CLI backend events are first-class envelope events, so CLI runs remain visible even when no HTTP transcript exists.
+- CLI agent events are first-class envelope events, so every agent run is visible in the envelope stream.
 - File-backed runtime traces moved from `.orbit/audit/` to `.orbit/state/audit/` in [T20260426-0519]. Existing `.orbit/audit/` files are legacy local artifacts rather than the current write target.
 
 ## Agent Signature

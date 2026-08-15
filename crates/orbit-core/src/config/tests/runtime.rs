@@ -13,7 +13,6 @@ fn single_family_crew(name: &str) -> Crew {
     let assignment = CrewAssignment {
         model: format!("{name}-model"),
         provider: name.to_string(),
-        backend: "cli".to_string(),
     };
     Crew {
         name: name.to_string(),
@@ -45,7 +44,6 @@ fn built_in_crews_use_standard_model_specific_names() {
         let assignment = &crews.get(name).expect("built-in crew").assignment;
         assert_eq!(assignment.provider, provider);
         assert_eq!(assignment.model, model);
-        assert_eq!(assignment.backend, "cli");
     }
     assert!(!crews.contains_key("claude"));
     assert!(!crews.contains_key("codex"));
@@ -116,9 +114,7 @@ fn deprecated_task_id_pattern_loads_valid_regex_from_workspace_config() {
         "[knowledge]\ntask_id_pattern = \"[A-Z]+-\\\\d+\"\n",
     );
 
-    let config =
-        RuntimeConfig::load_layered(global.path(), workspace.path()).expect("config loads");
-    assert!(config.v2_backend().is_none());
+    RuntimeConfig::load_layered(global.path(), workspace.path()).expect("config loads");
 }
 
 #[test]
@@ -152,7 +148,6 @@ fn deprecated_task_id_pattern_absent_when_section_absent() {
 
     let config =
         RuntimeConfig::load_layered(global.path(), workspace.path()).expect("config loads");
-    assert!(config.v2_backend().is_none());
     assert_eq!(config.pr_config().task_url_template.as_deref(), None);
 }
 
@@ -185,31 +180,59 @@ fn pr_task_url_template_loads_from_workspace_config() {
     );
 }
 
+/// [ORB-10801] `[runtime] backend` selected the retired agent-loop execution
+/// backend. `cli` named the surviving path, so it stays accepted and inert.
 #[test]
-fn runtime_backend_loads_auto_from_workspace_config() {
+fn retired_runtime_backend_cli_is_accepted_and_ignored() {
     let global = tempdir().expect("global tempdir");
     let workspace = tempdir().expect("workspace tempdir");
-    write_config(workspace.path(), "[runtime]\nbackend = \"auto\"\n");
+    write_config(workspace.path(), "[runtime]\nbackend = \"cli\"\n");
 
-    let config =
-        RuntimeConfig::load_layered(global.path(), workspace.path()).expect("config loads");
-
-    assert_eq!(config.v2_backend(), Some("auto"));
+    RuntimeConfig::load_layered(global.path(), workspace.path())
+        .expect("`backend = \"cli\"` must keep loading");
 }
 
+/// [ORB-10801] `ORBIT_BACKEND` was tier 2 of the same retired chain, and gets
+/// the same treatment: `cli` is inert, the removed values fail closed.
 #[test]
-fn runtime_backend_rejects_invalid_value() {
-    let global = tempdir().expect("global tempdir");
-    let workspace = tempdir().expect("workspace tempdir");
-    write_config(workspace.path(), "[runtime]\nbackend = \"clii\"\n");
+fn retired_backend_env_override_is_inert_for_cli_and_fails_closed_otherwise() {
+    let empty = toml::Value::Table(toml::map::Map::new());
 
-    let error = RuntimeConfig::load_layered(global.path(), workspace.path())
-        .expect_err("invalid backend must fail config load");
-    let message = error.to_string();
+    for accepted in [None, Some(""), Some("cli")] {
+        super::super::runtime::retired_backend_override_check(&empty, accepted)
+            .unwrap_or_else(|error| panic!("{accepted:?} must be accepted: {error}"));
+    }
 
-    assert!(message.contains("[runtime] backend"));
-    assert!(message.contains("clii"));
-    assert!(message.contains("http, cli, auto"));
+    for removed in ["http", "auto"] {
+        let error = super::super::runtime::retired_backend_override_check(&empty, Some(removed))
+            .expect_err("a removed ORBIT_BACKEND value must fail closed");
+        let message = error.to_string();
+        assert!(message.contains("ORBIT_BACKEND"), "message: {message}");
+        assert!(message.contains(removed), "message: {message}");
+        assert!(message.contains("CLI agent path"), "message: {message}");
+    }
+}
+
+/// [ORB-10801] The removed values fail closed rather than being reinterpreted
+/// as CLI agent execution behind the operator's back.
+#[test]
+fn retired_runtime_backend_http_fails_closed_with_migration() {
+    for removed in ["http", "auto", "clii"] {
+        let global = tempdir().expect("global tempdir");
+        let workspace = tempdir().expect("workspace tempdir");
+        write_config(
+            workspace.path(),
+            &format!("[runtime]\nbackend = \"{removed}\"\n"),
+        );
+
+        let error = RuntimeConfig::load_layered(global.path(), workspace.path())
+            .expect_err("retired backend value must fail config load");
+        let message = error.to_string();
+
+        assert!(message.contains("[runtime]"), "message: {message}");
+        assert!(message.contains(removed), "message: {message}");
+        assert!(message.contains("CLI agent path"), "message: {message}");
+    }
 }
 
 #[test]
@@ -364,6 +387,44 @@ fn workflow_default_crew_uses_environment_then_claude_system_default() {
     assert!(error.to_string().contains("CONSTELLATION_DEFAULT_PROVIDER"));
 }
 
+/// [ORB-10801] `[crews.<name>] backend` pinned the same retired selector. A
+/// crew that still declares `cli` keeps loading; the removed values are
+/// refused rather than re-pointed at the CLI agent silently.
+#[test]
+fn retired_crew_backend_is_inert_for_cli_and_fails_closed_otherwise() {
+    load_config(
+        r#"
+[crews.legacy]
+model = "gpt-test"
+provider = "codex"
+backend = "cli"
+
+[workflow]
+default_crew = "legacy"
+"#,
+    )
+    .expect("`backend = \"cli\"` must keep loading");
+
+    for removed in ["http", "auto"] {
+        let error = load_config(&format!(
+            r#"
+[crews.legacy]
+model = "gpt-test"
+provider = "codex"
+backend = "{removed}"
+
+[workflow]
+default_crew = "legacy"
+"#
+        ))
+        .expect_err("a removed crew backend must fail config load");
+        let message = error.to_string();
+        assert!(message.contains("[crews.legacy]"), "message: {message}");
+        assert!(message.contains(removed), "message: {message}");
+        assert!(message.contains("CLI agent path"), "message: {message}");
+    }
+}
+
 #[test]
 fn flat_crews_with_incomplete_assignment_fail_load() {
     let global = tempdir().expect("global tempdir");
@@ -372,7 +433,6 @@ fn flat_crews_with_incomplete_assignment_fail_load() {
         workspace.path(),
         r#"
 [crews.codex]
-model = "gpt-5.5"
 provider = "codex"
 "#,
     );
@@ -382,7 +442,7 @@ provider = "codex"
 
     assert!(matches!(error, OrbitError::InvalidInput(_)));
     assert!(error.to_string().contains("[crews.codex]"));
-    assert!(error.to_string().contains("backend"));
+    assert!(error.to_string().contains("model"));
 }
 
 #[test]
@@ -406,7 +466,6 @@ default_crew = "legacy"
         "planner/implementer/reviewer",
         "model",
         "provider",
-        "backend",
     ] {
         assert!(
             message.contains(expected),
@@ -434,7 +493,6 @@ implementer = { model = "gpt-test", provider = "codex", backend = "cli" }
         "planner/implementer/reviewer",
         "model",
         "provider",
-        "backend",
     ] {
         assert!(
             message.contains(expected),
@@ -496,7 +554,6 @@ fn workspace_single_key_inherits_other_global_keys_then_built_in_defaults() {
     assert!(config.workflow_auto_ship());
     assert_eq!(config.workflow_base_branch(), "global-branch");
     assert!(!config.scoring_enabled);
-    assert_eq!(config.v2_backend(), None);
 }
 
 #[test]
@@ -564,7 +621,6 @@ model = "workspace-model"
     let build = config.crews.get("build").expect("overridden crew remains");
     assert_eq!(build.assignment.model, "workspace-model");
     assert_eq!(build.assignment.provider, "codex");
-    assert_eq!(build.assignment.backend, "cli");
     assert_eq!(
         config
             .crews
@@ -670,10 +726,6 @@ model = "workspace-model"
         values["crews.build.provider"].source.kind(),
         ConfigValueSourceKind::Global
     );
-    assert_eq!(
-        values["crews.build.backend"].source.kind(),
-        ConfigValueSourceKind::Global
-    );
     let workspace_config_path = workspace.path().join("config.toml");
     assert_eq!(
         values["scoring.enabled"].source.path(),
@@ -684,12 +736,10 @@ model = "workspace-model"
         values["crews.build.model"].source.path(),
         Some(workspace_config_path.as_path())
     );
-    for key in ["crews.build.provider", "crews.build.backend"] {
-        assert_eq!(
-            values[key].source.path(),
-            Some(global_config_path.as_path())
-        );
-    }
+    assert_eq!(
+        values["crews.build.provider"].source.path(),
+        Some(global_config_path.as_path())
+    );
 }
 
 #[test]

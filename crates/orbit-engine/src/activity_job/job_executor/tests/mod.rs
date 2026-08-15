@@ -317,12 +317,6 @@ impl RuntimeHost for ScriptedHost {
         !self.unregistered.iter().any(|name| name == action)
     }
 
-    fn api_key_for(&self, _provider: &str) -> Result<String, DispatchError> {
-        Err(DispatchError::AgentLoopFailed(
-            "scripted host: no credentials".into(),
-        ))
-    }
-
     fn resolve_cli_executor(
         &self,
         _provider: &str,

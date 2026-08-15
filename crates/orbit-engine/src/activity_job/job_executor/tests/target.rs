@@ -3,7 +3,7 @@
 use super::*;
 
 use orbit_common::test_fixtures::TEST_CLAUDE_MODEL;
-use orbit_common::types::activity_job::{AgentLoopSpec, Backend, OnDenial, Provider};
+use orbit_common::types::activity_job::{AgentLoopSpec, OnDenial, Provider};
 use std::sync::Mutex;
 
 use crate::CrewConfig;
@@ -41,12 +41,6 @@ impl RuntimeHost for CrewHost {
     ) -> Result<Value, DispatchError> {
         Err(DispatchError::DeterministicActionNotRegistered(
             "crew host: not used".into(),
-        ))
-    }
-
-    fn api_key_for(&self, _provider: &str) -> Result<String, DispatchError> {
-        Err(DispatchError::AgentLoopFailed(
-            "crew host: no credentials".into(),
         ))
     }
 
@@ -96,7 +90,7 @@ fn inline_agent_loop_spec() -> AgentLoopSpec {
         on_denial: OnDenial::Terminate,
         model: Some(TEST_CLAUDE_MODEL.to_string()),
         max_iterations: 1,
-        backend: Backend::Cli,
+        backend: None,
         provider: Provider::Claude,
         wall_clock_timeout_seconds: 30,
         require_response_envelope: false,
@@ -123,7 +117,6 @@ fn exec_ctx<'a>(host: &'a dyn RuntimeHost) -> ExecCtx<'a> {
         host,
         input: json!({ "crew": "run-default" }),
         pipeline: std::sync::Arc::new(std::sync::Mutex::new(HashMap::new())),
-        sessions: std::sync::Arc::new(std::sync::Mutex::new(HashMap::new())),
         recovery_activity: None,
         failure_activity: None,
         item: None,
@@ -135,7 +128,6 @@ fn config(provider: Provider, model: &str) -> CrewConfig {
     CrewConfig {
         provider: Some(provider),
         model: Some(model.to_string()),
-        backend: Some(Backend::Cli),
     }
 }
 
@@ -213,12 +205,6 @@ impl RuntimeHost for FailingTelemetryHost {
     ) -> Result<Value, DispatchError> {
         Err(DispatchError::DeterministicActionNotRegistered(
             "failing telemetry host: not used".into(),
-        ))
-    }
-
-    fn api_key_for(&self, _provider: &str) -> Result<String, DispatchError> {
-        Err(DispatchError::AgentLoopFailed(
-            "failing telemetry host: no credentials".into(),
         ))
     }
 

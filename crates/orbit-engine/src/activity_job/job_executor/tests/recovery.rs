@@ -3,7 +3,7 @@
 use super::*;
 
 use orbit_common::test_fixtures::TEST_GEMINI_MODEL;
-use orbit_common::types::activity_job::{AgentLoopSpec, Backend, OnDenial, Provider};
+use orbit_common::types::activity_job::{AgentLoopSpec, OnDenial, Provider};
 
 use crate::CrewConfig;
 
@@ -212,14 +212,9 @@ fn recovery_agent_loop_uses_run_crew_config() {
     let host = RecoveryHost::empty().with_recovery_config(CrewConfig {
         provider: Some(Provider::Gemini),
         model: Some(TEST_GEMINI_MODEL.to_string()),
-        backend: Some(Backend::Cli),
     });
     let ctx = recovery_exec_ctx(&host);
-    let recovery = agent_loop_recovery_activity(recovery_agent_loop_spec(
-        Provider::Claude,
-        Backend::Http,
-        None,
-    ));
+    let recovery = agent_loop_recovery_activity(recovery_agent_loop_spec(Provider::Claude, None));
 
     let overridden = crew_overridden_recovery_spec(&recovery, &ctx, &json!({}))
         .expect("generic recovery crew resolution should succeed")
@@ -230,7 +225,6 @@ fn recovery_agent_loop_uses_run_crew_config() {
     };
     assert_eq!(spec.provider, Provider::Gemini);
     assert_eq!(spec.model.as_deref(), Some(TEST_GEMINI_MODEL));
-    assert_eq!(spec.backend, Backend::Cli);
 }
 
 #[test]
@@ -242,12 +236,10 @@ fn step_failure_recovery_uses_the_lane_middleweight_config() {
         let host = RecoveryHost::empty().with_recovery_config(CrewConfig {
             provider: Some(provider),
             model: Some(model.to_string()),
-            backend: Some(Backend::Cli),
         });
         let ctx = recovery_exec_ctx(&host);
         let recovery = step_failure_recovery_agent_loop_activity(recovery_agent_loop_spec(
             Provider::Gemini,
-            Backend::Http,
             Some("inline-model"),
         ));
 
@@ -263,7 +255,6 @@ fn step_failure_recovery_uses_the_lane_middleweight_config() {
         };
         assert_eq!(spec.provider, provider);
         assert_eq!(spec.model.as_deref(), Some(model));
-        assert_eq!(spec.backend, Backend::Cli);
     }
 }
 
@@ -273,7 +264,6 @@ fn step_failure_recovery_requires_a_middleweight_config() {
     let ctx = recovery_exec_ctx(&host);
     let recovery = step_failure_recovery_agent_loop_activity(recovery_agent_loop_spec(
         Provider::Codex,
-        Backend::Cli,
         Some("gpt-5.6-sol"),
     ));
 
@@ -677,18 +667,14 @@ fn step_failure_recovery_agent_loop_activity(spec: AgentLoopSpec) -> ResolvedRec
     }
 }
 
-fn recovery_agent_loop_spec(
-    provider: Provider,
-    backend: Backend,
-    model: Option<&str>,
-) -> AgentLoopSpec {
+fn recovery_agent_loop_spec(provider: Provider, model: Option<&str>) -> AgentLoopSpec {
     AgentLoopSpec {
         instruction: "recover carefully".to_string(),
         tools: Vec::new(),
         on_denial: OnDenial::Terminate,
         model: model.map(str::to_string),
         max_iterations: 1,
-        backend,
+        backend: None,
         provider,
         wall_clock_timeout_seconds: 30,
         require_response_envelope: false,
@@ -704,7 +690,6 @@ fn recovery_exec_ctx<'a>(host: &'a dyn RuntimeHost) -> ExecCtx<'a> {
         host,
         input: json!({}),
         pipeline: std::sync::Arc::new(std::sync::Mutex::new(HashMap::new())),
-        sessions: std::sync::Arc::new(std::sync::Mutex::new(HashMap::new())),
         recovery_activity: None,
         failure_activity: None,
         item: None,
@@ -839,12 +824,6 @@ impl RuntimeHost for RecoveryHost {
             .get_mut(action)
             .and_then(VecDeque::pop_front)
             .unwrap_or_else(|| Ok(json!({"action": action})))
-    }
-
-    fn api_key_for(&self, _provider: &str) -> Result<String, DispatchError> {
-        Err(DispatchError::AgentLoopFailed(
-            "test host: no credentials".into(),
-        ))
     }
 
     fn resolve_cli_executor(

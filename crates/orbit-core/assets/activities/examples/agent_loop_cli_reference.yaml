@@ -5,7 +5,7 @@ metadata:
 spec:
   type: agent_loop
   description: >
-    Reference for the `backend: cli` dispatch path. This
+    Reference for the CLI agent dispatch path. This
     activity is executed through `orbit-agent`'s retained `claude_cli.rs`
     runtime (or a substitutable CLI in smoke runs) with Orbit emitting §7.6
     `cli.invocation.*` envelope events and the §6
@@ -25,7 +25,7 @@ spec:
       provider:
         type: string
   instruction: |
-    v2 CLI backend reference. The real `claude` CLI would read the embedded
+    v2 CLI agent reference. The real `claude` CLI would read the embedded
     envelope from stdin and reply with a plan; in smokes the substitute
     binary simply echoes a canned JSON payload so the envelope events can be
     inspected deterministically.
@@ -33,6 +33,5 @@ spec:
     - fs.read
   on_denial: terminate
   max_iterations: 1
-  backend: cli
   provider: claude
   wall_clock_timeout_seconds: 30

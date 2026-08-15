@@ -9,6 +9,3 @@ mod task_pilot;
 mod triage;
 mod v2_host;
 mod workspace_auto;
-// Replay-transport-backed cases; default-off per [ORB-10414]. [ORB-10434]
-#[cfg(feature = "replay")]
-mod v2_host_replay;

@@ -69,10 +69,6 @@ impl RuntimeHost for CheckpointHost {
             .run_deterministic(action, config, input, tool_context)
     }
 
-    fn api_key_for(&self, provider: &str) -> Result<String, DispatchError> {
-        self.inner.api_key_for(provider)
-    }
-
     fn resolve_cli_executor(
         &self,
         provider: &str,

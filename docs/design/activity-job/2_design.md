@@ -13,7 +13,7 @@ tags: ["activity-job"]
 
 # Activity / Job — Design
 
-This document describes the shipped Activity / Job substrate across `orbit-common`, `orbit-engine`, `orbit-core`, and `orbit-cli`: asset shape, normalization, dispatch boundaries, backend semantics, DAG execution, audit, and retained legacy edges. See [1_overview.md](./1_overview.md) for purpose and [3_vision.md](./3_vision.md) for open questions.
+This document describes the shipped Activity / Job substrate across `orbit-common`, `orbit-engine`, `orbit-core`, and `orbit-cli`: asset shape, normalization, dispatch boundaries, DAG execution, audit, and retained legacy edges. See [1_overview.md](./1_overview.md) for purpose and [3_vision.md](./3_vision.md) for open questions.
 
 ---
 
@@ -49,8 +49,7 @@ The common `agent_loop` fields are:
 - `tools`
 - `on_denial`
 - optional `model`
-- `max_iterations`
-- `backend`
+- `max_iterations` (inert; see §5)
 - `provider`
 - `wall_clock_timeout_seconds`
 - `require_response_envelope` (default `false`; opt in only when downstream
@@ -177,8 +176,7 @@ Direct single-activity runtime helpers:
 
 1. Read YAML from disk.
 2. Parse via `load_activity_asset(...)`.
-3. Resolve `backend: auto` to a concrete backend.
-4. Build audit sinks and run id with `system` as the v2 envelope `agent_identity`.
+3. Build audit sinks and run id with `system` as the v2 envelope `agent_identity`.
 5. Dispatch the concrete `ActivityV2Spec`.
 
 Job runs:
@@ -187,12 +185,11 @@ Job runs:
 2. Parse via `load_job_asset(...)`.
 3. Build the activity catalog from seeded/workspace activity directories.
 4. Resolve every `target: activity:<name>` into a concrete `TargetStep` and resolve any job-level or step-level `recovery_activity` into a cached activity spec.
-5. Resolve every `backend: auto` in the now-concrete step tree.
-6. Reject loop-body `session:` bindings that resolve to `backend: cli`.
-7. Build audit sinks and run id with `system` as the v2 envelope `agent_identity`.
-8. Execute the normalized `JobV2`.
+5. Reject retired declarations: any `session:` binding on a step.
+6. Build audit sinks and run id with `system` as the v2 envelope `agent_identity`.
+7. Execute the normalized `JobV2`.
 
-The target-ref pass was added in [T20260418-2019], backend resolution and `run-v2` entrypoints in [T20260418-2143], and CLI backend plus HTTP-only loop/session rejection in [T20260419-0104].
+The target-ref pass was added in [T20260418-2019] and `run-v2` entrypoints in [T20260418-2143]. Backend selection and the HTTP agent loop were retired in [ORB-10801].
 
 The public CLI now executes activity assets through jobs rather than exposing a standalone `orbit activity run` subcommand. `orbit activity` is an inspection/catalog surface; `orbit job run` and workflow aliases under `orbit run` are the public execution surfaces after [T20260426-0047].
 
@@ -240,20 +237,22 @@ Reserve conflict checking also performs bounded, opportunistic stale-owned-reser
 
 ---
 
-## 5. Backend Resolution and Constraint Rules
+## 5. Retired Agent Backend Selection
 
-`Backend::Auto` is never supposed to reach dispatch. orbit-core resolves it once per run using the precedence chain implemented in `backend_resolver.rs`:
+Orbit dispatches every `agent_loop` through the CLI agent path. The
+`backend: http | cli | auto` selector, its precedence chain
+(`--backend` → `ORBIT_BACKEND` → `[runtime] backend` → `cli`), the per-crew
+`backend` field, and the engine-driven HTTP agent loop were removed in
+[ORB-10801].
 
-1. `--backend=<value>`
-2. `ORBIT_BACKEND`
-3. `[runtime] backend = "<value>"` in config
-4. hard-coded fallback `http`
+Retired declarations are recognized rather than ignored, so nothing is silently
+reinterpreted: `backend: cli` parses and is inert, `backend: http` / `auto` are
+refused, and any `session:` binding is refused because cross-iteration
+conversation history was an HTTP-loop capability with no CLI equivalent.
+`AgentLoopSpec::max_iterations` is likewise inert — it bounded only that loop.
 
-If any intermediate tier says `auto`, the resolver folds it to the hard-coded fallback so dispatch only sees `http` or `cli`. That rule arrived with `run-v2` in [T20260418-2143] and was hardened for CLI in [T20260419-0104].
-
-The second rule is the HTTP-only feature constraint. Today that means loop-body cross-iteration `session:` binding: `validate_job_loop_session_backends(...)` rejects a `loop:` step with `session:` when it resolves to `backend: cli`.
-
-The third rule is no silent provider fallback. `backend: http` against an unwired provider fails as `UnwiredHttpTransport` rather than launching a CLI runtime; providers and backends are separate schema choices.
+`openai_compat` has no CLI runtime, so selecting it fails structurally rather
+than falling back to another provider.
 
 The prescriptive contract for this area lives in [specs/backend-resolution.md](./specs/backend-resolution.md).
 
@@ -266,7 +265,6 @@ Activity / Job is where orbit-core hands work to orbit-engine without depending 
 After [ORB-10633] / [Job execution crosses one RuntimeHost boundary](./4_decisions.md#job-execution-crosses-one-runtimehost-boundary), `RuntimeHost` is the single capability boundary and `OrbitRuntime` has one implementation. It presents run/task persistence, environment resolution, provider dispatch, audit/checkpoint hooks, and core-owned deterministic actions in one declaration; no parallel host-trait family remains.
 
 - run a core-owned deterministic action by name
-- source an API key for a provider
 - resolve a provider's CLI executor command plus static args
 - build `ToolContext` for an activity, including policy, filesystem audit hooks, and trusted reservation-owner context from the active run id
 - persist invocation traces for completed agent-loop work
@@ -275,35 +273,23 @@ The boundary remains primitive — strings, `Value`, and `ToolContext`, not `orb
 
 `dispatch_v2_activity(...)` is the central per-activity entry. It emits `ActivityStarted` / `ActivityFinished` envelope events, then delegates by spec kind:
 
-- `agent_loop` → HTTP or CLI path
+- `agent_loop` → the CLI agent path
 - `deterministic` → parse the shared typed action once; core-owned actions cross `RuntimeHost`, while engine-owned actions enter their engine implementation directly
 
 For example, `git_commit` now follows dispatcher → `execute_engine_action` → the engine's commit implementation, whose runtime needs cross `RuntimeHost` once. It no longer follows dispatcher → core registry → engine forwarding → the former second host family. Task workflow-admission policy likewise has one owner in orbit-core: the read-only gate and mutating admission share the same status predicate, and worktree setup makes one mutating admission call per task.
 
 ---
 
-## 7. Agent Loop Backend Paths
+## 7. Agent Loop Dispatch
 
-### 7.1 HTTP path
+`agent_loop` has one execution path [ORB-10801]. Orbit does not enforce tool
+allowlists on it: the declared tool set is recorded as an advisory
+(`tool_allowlist.harness_delegated`) and enforcement is delegated to the
+provider harness.
 
-The HTTP path is driven by `agent_loop_driver.rs`. It:
+### 7.1 CLI agent path
 
-- creates or reuses a `Session`
-- constructs a `ToolContext`
-- chooses a transport
-- runs `orbit-agent`'s `AgentLoop`
-
-This path is narrower than the schema: `Provider::has_http_transport()` currently returns true only for `claude`, so non-replay uses `AnthropicMessagesTransport`. Default builds ignore `ORBIT_V2_REPLAY` and `ORBIT_V2_REPLAY_FIXTURE`; scripted replay is enabled for explicit smoke and fixture use only when orbit-engine's `replay` cargo feature is selected ([ORB-10414]).
-
-Because the feature is default-off, **any crate with a replay-fixture-backed test must opt in itself** — a test that merely sets `ORBIT_V2_REPLAY_FIXTURE` silently falls through to the live Anthropic transport and fails on a credential-free runner. orbit-core does this via its own `replay` feature, which forwards to `orbit-engine/replay` and gates `runtime/v2_host/tests/v2_host_replay.rs`. `scripts/ci-guardrails.sh` lints and runs the opt-in configuration for orbit-engine and orbit-core in one extra pass (`--features orbit-core/replay`), so both the default and replay configurations stay covered ([ORB-10434]).
-
-The allowlist is enforced in the loop engine on this path. A denied tool becomes a structural `DispatchError::ToolDenied` so the job retry wrapper can classify it as non-retryable.
-
-After [T20260426-0526], completed HTTP loop outcomes become `InvocationTrace` records under the job run ID and step ID, including loop-body `session:` steps.
-
-### 7.2 CLI path
-
-The CLI path is driven by `cli_runner.rs`, added in [T20260419-0104]. The flow is:
+The path is driven by `cli_runner.rs`, added in [T20260419-0104]. The flow is:
 
 1. Ask the host for the concrete CLI executor: command plus static executor args.
 2. Build an `Agent` from `orbit-agent`.
@@ -343,11 +329,9 @@ validation state remain authoritative. **This preserves the doctrine's actual
 boundary**: protocol termination and status outcome are control flow; agent prose
 and payload content are not evidence that can satisfy durable workflow guards.
 
-Every `backend: cli` invocation is prompted with the response-envelope contract
+Every agent invocation is prompted with the response-envelope contract
 (`render_prompt_with_embedded_envelope`), so exiting 0 without one is a protocol
-violation, not a stylistic choice. The check applies only under `backend: cli`;
-`backend: http` is driven by the engine's own loop, which has its own
-termination accounting.
+violation, not a stylistic choice.
 
 Deliberate asymmetry: the completion check is *more* permissive than the content
 parser about stream shape. When the document stream will not parse — a wrapped
@@ -491,11 +475,9 @@ none depends solely on the environment inherited by its entry process. A
 missing launcher remains a permanent failure, but the diagnostic names the
 provider and every path Orbit searched.
 
-After [T20260430-15], the CLI stdin envelope carries rendered activity input and durable `run_id` beside instruction, prompt, tools, and model. When input identifies one task, orbit-core embeds a canonical task snapshot with `input.workspace_path` / `input.repo_root` taking precedence over stored paths. After [T20260508-8], `backend: cli` also uses a shared workspace resolver for subprocess cwd: `input.workspace_path`, then `task.workspace_path`, then best-effort `ToolContext.workspace_root`. Declared input/task paths must already be directories; stale worktrees fail as `CliInvocationFailed` before `CliInvocationStarted` is emitted. After [T20260505-10], Orbit-managed CLI subprocesses receive `ORBIT_RUN_ID` plus an Orbit-managed run-context marker; `orbit tool run` requires both before it populates `ToolContext` reservation ownership. Direct manual CLI tool calls, including calls with only `ORBIT_RUN_ID`, remain unowned.
+After [T20260430-15], the CLI stdin envelope carries rendered activity input and durable `run_id` beside instruction, prompt, tools, and model. When input identifies one task, orbit-core embeds a canonical task snapshot with `input.workspace_path` / `input.repo_root` taking precedence over stored paths. After [T20260508-8], agent dispatch also uses a shared workspace resolver for subprocess cwd: `input.workspace_path`, then `task.workspace_path`, then best-effort `ToolContext.workspace_root`. Declared input/task paths must already be directories; stale worktrees fail as `CliInvocationFailed` before `CliInvocationStarted` is emitted. After [T20260505-10], Orbit-managed CLI subprocesses receive `ORBIT_RUN_ID` plus an Orbit-managed run-context marker; `orbit tool run` requires both before it populates `ToolContext` reservation ownership. Direct manual CLI tool calls, including calls with only `ORBIT_RUN_ID`, remain unowned.
 
-The older `AgentRuntime` trait and `providers/*_cli.rs` files are not deprecated leftovers; they are the shipped `backend: cli` implementation.
-
-Just as important, Orbit does not enforce tool allowlists on this path today. It records the declared tool set as an advisory and delegates enforcement to the provider harness. This is a real semantic gap between `backend: http` and `backend: cli`.
+The older `AgentRuntime` trait and `providers/*_cli.rs` files are not deprecated leftovers; they are the shipped CLI agent implementation.
 
 ---
 
@@ -523,7 +505,7 @@ The retry wrapper re-runs the whole step body up to `max_attempts`, with exponen
 
 - tool denial
 - unknown deterministic action
-- host-required / backend-resolution structural errors
+- host-required structural errors
 - job validation errors
 
 That rule comes straight from `DispatchError::is_non_retryable()`.
@@ -555,12 +537,14 @@ The body runs before `break_when`, so steps can populate fields the break expres
 
 ### 8.6 Persisted state for v2 job runs
 
-Persisted pipeline runs (`orbit run ship`, `orbit.pipeline.invoke` + `orbit.pipeline.wait`) go through `pipeline_run.rs`. Direct v2 runs (`orbit job run <job-id-or-yaml>`) also create durable `JobRun` bundles after [T20260423-2004-4] under `state/job-runs/<job_id>/<run_id>/`, so `orbit run history -j <job_id>` and `orbit run show <run_id>` can inspect the returned ID. Workflow-specific `orbit run <workflow> list/show` aliases were removed in [T20260425-2010], and duplicate job-level aliases in [T20260426-0742].
+Every job run is a persisted pipeline run. `orbit run ship`, `orbit.pipeline.invoke` + `orbit.pipeline.wait`, and — after [ORB-10801] — `orbit run job` / `orbit job run` all submit through the same path in `pipeline.rs`: the run is persisted, a detached worker is spawned, and the caller returns. `orbit run history -j <job_id>` and `orbit run show <run_id>` inspect the returned ID. `--wait` blocks on the submitted run and maps a non-success terminal state onto a nonzero exit.
+
+A direct YAML path names an unmanaged file, so its exact validated definition is snapshotted to `state/job-runs/<run_id>.job.yaml` before submission returns; the worker prefers that snapshot over catalog resolution, and an edit or deletion of the source afterwards cannot change the submitted run. Catalog ids keep name resolution as their contract ([Job catalog discovery honors layer precedence](./4_decisions.md)). Workflow-specific `orbit run <workflow> list/show` aliases were removed in [T20260425-2010], and duplicate job-level aliases in [T20260426-0742].
 
 Before [T20260423-0445], early v2 failures could leave `steps: []` and no surfaced `error_message`. The current contract is:
 
 - if a persisted v2 pipeline fails and no recorded step already carries error detail, the pipeline worker writes a synthetic failed `JobRunStep`
-- if a direct v2 run succeeds, the direct-run wrapper writes a synthetic successful `JobRunStep` containing the final pipeline snapshot
+- if a foreground run (`orbit job replay` / `orbit job resume`) succeeds, its wrapper writes a synthetic successful `JobRunStep` containing the final pipeline snapshot
 - that synthetic step uses `target_type: job` and `target_id: <job_id>`
 - the step's `error_message` carries the concrete executor error (or a fallback `success=false` summary for message-carrying non-success results)
 
@@ -590,7 +574,7 @@ The dashboard metrics endpoints read knowledge usage from job-run state (`/api/m
 
 V2 jobs persist invocation traces explicitly after [T20260426-0526]. `DispatchOutcome` carries optional trace data; the executor attaches run and step IDs; orbit-core stores canonical agent/model names plus task IDs from rendered input and refreshes the token scoreboard.
 
-For `backend: cli`, the trace comes from the provider's structured stdout using the same parser that validates Orbit response envelopes. For the HTTP loop path, the trace is derived from `LoopOutcome` usage and tool-call names.
+The trace comes from the provider's structured stdout, using the same parser that validates Orbit response envelopes.
 
 ### 8.8 Run trace inspection
 
@@ -727,11 +711,11 @@ That seeded corpus is Activity / Job's executable reference documentation.
 
 ### 11.1 Provider typing is broader than provider wiring
 
-The `Provider` enum names `claude`, `codex`, `gemini`, `ollama`, and `openai_compat`, but HTTP transport currently wires only `claude`. The schema is broader than the runtime.
+The `Provider` enum names `claude`, `codex`, `gemini`, `grok`, `ollama`, and `openai_compat`, but `openai_compat` has no CLI runtime and therefore cannot be executed. The schema is broader than the runtime.
 
-### 11.2 Tool enforcement differs materially by backend
+### 11.2 Tool allowlists are advisory at dispatch
 
-HTTP agent loops enforce the tool allowlist inside Orbit. CLI agent loops emit an advisory event and rely on the provider harness.
+Agent loops emit an advisory event and rely on the provider harness to enforce the declared `tools:` list.
 
 ### 11.3 Some structural controls are still literals
 

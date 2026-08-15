@@ -16,7 +16,7 @@ use orbit_common::test_fixtures::TEST_CODEX_MODEL;
 use crate::context::CrewConfig;
 use orbit_agent::loop_engine::audit::{AuditSink, LoopAuditEvent};
 use orbit_common::types::ExecutorSandboxKind;
-use orbit_common::types::activity_job::{AgentLoopSpec, Backend, OnDenial, Provider};
+use orbit_common::types::activity_job::{AgentLoopSpec, OnDenial, Provider};
 use orbit_common::utility::logging::RedactingFields;
 #[cfg(target_os = "macos")]
 use orbit_exec::sandbox_exec_path;
@@ -267,10 +267,6 @@ impl RuntimeHost for TestHost {
         unreachable!("not used by cli runner tests")
     }
 
-    fn api_key_for(&self, _provider: &str) -> Result<String, DispatchError> {
-        Ok(String::new())
-    }
-
     fn resolve_cli_executor(&self, _provider: &str) -> Result<ResolvedCliExecutor, DispatchError> {
         Ok(ResolvedCliExecutor {
             command: self.command.clone(),
@@ -306,7 +302,6 @@ impl RuntimeHost for TestHost {
         Ok(Some(CrewConfig {
             provider: Some(Provider::Codex),
             model: Some(TEST_CODEX_MODEL.to_string()),
-            backend: None,
         }))
     }
 
@@ -333,7 +328,7 @@ pub(in crate::activity_job::cli_runner) fn test_agent_loop_spec(
         on_denial: OnDenial::Terminate,
         model: None,
         max_iterations: 1,
-        backend: Backend::Cli,
+        backend: None,
         provider: Provider::Codex,
         wall_clock_timeout_seconds: timeout.as_secs(),
         require_response_envelope: false,
@@ -359,7 +354,7 @@ pub(in crate::activity_job::cli_runner) fn test_agent_loop_spec_for(
         on_denial: OnDenial::Terminate,
         model: None,
         max_iterations: 1,
-        backend: Backend::Cli,
+        backend: None,
         provider,
         wall_clock_timeout_seconds: timeout.as_secs(),
         require_response_envelope: false,

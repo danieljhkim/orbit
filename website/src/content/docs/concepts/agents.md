@@ -7,18 +7,15 @@ sidebar:
 
 ## Runtime Paths
 
-Orbit defaults to spawning official provider CLIs as supervised subprocesses
-under an `FsProfile` and policy guardrails. The agent CLI is responsible for
-talking to its provider. Orbit also supports its programmatic HTTP loop for
-providers that have an HTTP transport.
+Orbit spawns official provider CLIs as supervised subprocesses under an
+`FsProfile` and policy guardrails. The agent CLI is responsible for talking to
+its provider.
 
-| Backend | Role |
-|---------|------|
-| `cli`   | Default, subprocess-backed provider CLIs. |
-| `http`  | Programmatic provider communication through the loop transport. |
-| `auto`  | Resolves once to a concrete backend before dispatch. |
-
-`backend: auto` resolves before dispatch and folds to the configured default. Downstream execution always sees a concrete backend.
+This is the only agent execution path. The `backend: http | cli | auto`
+selector was retired: an activity, job, or config that still declares
+`backend: cli` keeps working and the value is ignored, while `http` and `auto`
+are rejected with a migration message rather than being remapped onto the CLI
+agent.
 
 ## Providers
 
@@ -33,7 +30,7 @@ Canonical provider values are:
 
 CLI execution is available for `claude`, `codex`, `gemini`, and `grok`.
 Transport support is provider-specific; selecting an unsupported
-provider/backend combination fails instead of silently switching providers.
+provider fails instead of silently switching providers.
 
 ## Tool Allowlists
 
@@ -48,7 +45,7 @@ spec:
 ```
 
 `on_denial` controls whether a denied tool call terminates the loop or returns a
-structured error for the agent to handle. Under the CLI backend, tool allowlist
+structured error for the agent to handle. Under agent dispatch, tool allowlist
 enforcement is delegated to the harness and recorded in the audit trail.
 
 ## Platform Support

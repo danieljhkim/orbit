@@ -3,7 +3,7 @@
 
 use std::io::{self, BufRead, Write};
 
-use super::agent_detect::{DetectedAgents, default_backend, default_model_for, default_provider};
+use super::agent_detect::{DetectedAgents, default_model_for, default_provider};
 use super::raw::RawCrewAssignment;
 
 pub trait Prompter {
@@ -69,7 +69,6 @@ pub fn collect_crew_setting(
         if let Some(option) = selected.and_then(|index| options.get(index)) {
             return Ok(RawCrewAssignment {
                 provider: Some(option.provider.to_string()),
-                backend: Some(option.backend.to_string()),
                 model: collect_model_override(option.model, prompter)?,
             });
         }
@@ -91,14 +90,12 @@ pub fn collect_qa_crew_setting(
     if detected.codex_cli {
         options.push(RawCrewAssignment {
             provider: Some("codex".to_string()),
-            backend: Some("cli".to_string()),
             model: Some(orbit_common::model_defaults::CODEX_DEFAULT_MODEL.to_string()),
         });
     }
     if detected.claude_cli {
         options.push(RawCrewAssignment {
             provider: Some("claude".to_string()),
-            backend: Some("cli".to_string()),
             model: Some(orbit_common::model_defaults::CLAUDE_DEFAULT_WEAK.to_string()),
         });
     }
@@ -126,7 +123,6 @@ fn recommended_crew_setting(detected: &DetectedAgents) -> RawCrewAssignment {
     let provider = default_provider(detected);
     RawCrewAssignment {
         provider: Some(provider.to_string()),
-        backend: Some(default_backend(provider, detected).to_string()),
         model: default_model_for(provider).map(str::to_string),
     }
 }
@@ -140,16 +136,10 @@ fn collect_custom_crew(
         prompter.prompt(&format!("Provider [{provider_default}]: "))?,
         provider_default,
     );
-    let backend_default = default_backend(&provider, detected);
-    let backend = take_or_default(
-        prompter.prompt(&format!("Backend (cli/http) [{backend_default}]: "))?,
-        backend_default,
-    );
     let model_default = default_model_for(&provider).unwrap_or("");
     let model = collect_model_override(model_default, prompter)?;
     Ok(RawCrewAssignment {
         provider: Some(provider),
-        backend: Some(backend),
         model,
     })
 }
@@ -190,46 +180,40 @@ fn yes_by_default(input: &str) -> bool {
 struct AgentOption {
     label: &'static str,
     provider: &'static str,
-    backend: &'static str,
     model: &'static str,
 }
 
 fn agent_options(detected: &DetectedAgents) -> Vec<AgentOption> {
     let mut options = Vec::new();
-    for (enabled, label, provider, backend) in [
-        (detected.claude_cli, "Claude CLI", "claude", "cli"),
-        (detected.codex_cli, "Codex CLI", "codex", "cli"),
-        (detected.gemini_cli, "Gemini CLI", "gemini", "cli"),
-        (detected.grok_cli, "Grok CLI", "grok", "cli"),
-        (detected.ollama_cli, "Ollama CLI", "ollama", "cli"),
-        (detected.anthropic_api_key, "Claude API", "claude", "http"),
-        (detected.openai_api_key, "Codex API", "codex", "http"),
-        (detected.gemini_api_key, "Gemini API", "gemini", "http"),
+    for (enabled, label, provider) in [
+        (detected.claude_cli, "Claude CLI", "claude"),
+        (detected.codex_cli, "Codex CLI", "codex"),
+        (detected.gemini_cli, "Gemini CLI", "gemini"),
+        (detected.grok_cli, "Grok CLI", "grok"),
+        (detected.ollama_cli, "Ollama CLI", "ollama"),
     ] {
         if enabled {
-            options.push(agent_option(label, provider, backend));
+            options.push(agent_option(label, provider));
         }
     }
 
     let provider = default_provider(detected);
-    let backend = default_backend(provider, detected);
     if let Some(index) = options
         .iter()
-        .position(|option| option.provider == provider && option.backend == backend)
+        .position(|option| option.provider == provider)
     {
         let option = options.remove(index);
         options.insert(0, option);
     } else {
-        options.insert(0, agent_option("Recommended agent", provider, backend));
+        options.insert(0, agent_option("Recommended agent", provider));
     }
     options
 }
 
-fn agent_option(label: &'static str, provider: &'static str, backend: &'static str) -> AgentOption {
+fn agent_option(label: &'static str, provider: &'static str) -> AgentOption {
     AgentOption {
         label,
         provider,
-        backend,
         model: default_model_for(provider).unwrap_or(""),
     }
 }
@@ -250,9 +234,6 @@ fn detection_lines(detected: &DetectedAgents) -> String {
         ("Gemini CLI", detected.gemini_cli),
         ("Grok CLI", detected.grok_cli),
         ("Ollama CLI", detected.ollama_cli),
-        ("ANTHROPIC_API_KEY", detected.anthropic_api_key),
-        ("OPENAI_API_KEY", detected.openai_api_key),
-        ("GEMINI_API_KEY", detected.gemini_api_key),
     ]
     .into_iter()
     .map(|(label, found)| {
@@ -281,20 +262,13 @@ fn format_agent_options(options: &[AgentOption]) -> String {
 }
 
 fn agent_display_name(config: &RawCrewAssignment) -> String {
-    let provider = config.provider.as_deref().unwrap_or("custom");
-    let backend = config.backend.as_deref().unwrap_or("custom");
-    match (provider, backend) {
-        ("claude", "cli") => "Claude CLI".to_string(),
-        ("claude", "http") => "Claude API".to_string(),
-        ("codex", "cli") => "Codex CLI".to_string(),
-        ("codex", "http") => "Codex API".to_string(),
-        ("gemini", "cli") => "Gemini CLI".to_string(),
-        ("gemini", "http") => "Gemini API".to_string(),
-        ("grok", "cli") => "Grok CLI".to_string(),
-        ("grok", "http") => "Grok API".to_string(),
-        ("ollama", "cli") => "Ollama CLI".to_string(),
-        ("ollama", "http") => "Ollama API".to_string(),
-        _ => format!("{provider} ({backend})"),
+    match config.provider.as_deref().unwrap_or("custom") {
+        "claude" => "Claude CLI".to_string(),
+        "codex" => "Codex CLI".to_string(),
+        "gemini" => "Gemini CLI".to_string(),
+        "grok" => "Grok CLI".to_string(),
+        "ollama" => "Ollama CLI".to_string(),
+        provider => format!("{provider} (CLI)"),
     }
 }
 
