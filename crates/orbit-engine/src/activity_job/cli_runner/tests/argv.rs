@@ -79,7 +79,7 @@ fn task_pilot_reviewer_profile_starts_direct_linux_invocation_with_env_denies() 
     assert!(!agent.tools.iter().any(|tool| {
         matches!(
             tool.as_str(),
-            "fs.write" | "fs.patch" | "fs.delete" | "orbit.task.update" | "orbit.task.*"
+            "fs.write" | "fs.patch" | "orbit.task.update" | "orbit.task.*"
         )
     }));
 

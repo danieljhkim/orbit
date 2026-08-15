@@ -195,8 +195,6 @@ spec:
   tools:
     - orbit.task.*
     - orbit.friction.*
-    - fs.read
-    - fs.delete
     - proc.spawn
   proc_allowed_programs:
     - git

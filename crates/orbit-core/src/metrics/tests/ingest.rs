@@ -3,7 +3,7 @@ use orbit_common::types::{InvocationTrace, KnowledgeRunMetrics, TokenUsage, Tool
 use super::super::merge_invocation_trace;
 
 #[test]
-fn merge_invocation_trace_records_fs_read_metrics() {
+fn merge_invocation_trace_without_existing_returns_none() {
     let trace = InvocationTrace {
         usage: TokenUsage {
             input: 100,
@@ -14,7 +14,7 @@ fn merge_invocation_trace_records_fs_read_metrics() {
         },
         tool_calls: vec![ToolCallTrace {
             seq: 0,
-            tool_name: "fs.read".to_string(),
+            tool_name: "orbit.task.show".to_string(),
             result_bytes: 160,
             result_payload: None,
         }],
@@ -23,46 +23,37 @@ fn merge_invocation_trace_records_fs_read_metrics() {
         provider_cost_usd: None,
     };
 
-    let metrics = merge_invocation_trace(None, &trace).expect("fs.read metrics");
-
-    // `raw_read_token_baseline == actual_fs_read_tokens` for pack-less runs, so
-    // the double-read rate is 1.0; pack-specific fields stay at their defaults
-    // now that `orbit.graph.pack` is decommissioned.
-    assert_eq!(
-        metrics,
-        KnowledgeRunMetrics {
-            raw_read_token_baseline: 40,
-            knowledge_pack_tokens: None,
-            compression_ratio: None,
-            actual_fs_read_tokens_during_run: 40,
-            double_read_rate: Some(1.0),
-            knowledge_pack_used: false,
-            knowledge_pack_unresolved_count: 0,
-            total_llm_input_tokens: 125,
-        }
-    );
+    assert!(merge_invocation_trace(None, &trace).is_none());
 }
 
 #[test]
-fn merge_invocation_trace_without_measured_tool_or_existing_returns_none() {
+fn merge_invocation_trace_accumulates_llm_tokens_on_existing_metrics() {
+    let existing = KnowledgeRunMetrics {
+        raw_read_token_baseline: 40,
+        knowledge_pack_tokens: None,
+        compression_ratio: None,
+        actual_fs_read_tokens_during_run: 40,
+        double_read_rate: Some(1.0),
+        knowledge_pack_used: false,
+        knowledge_pack_unresolved_count: 0,
+        total_llm_input_tokens: 125,
+    };
     let trace = InvocationTrace {
         usage: TokenUsage {
-            input: 100,
+            input: 10,
             cache_read: 0,
             cache_create: 0,
             cache_create_1h: 0,
-            output: 10,
+            output: 4,
         },
-        tool_calls: vec![ToolCallTrace {
-            seq: 0,
-            tool_name: "orbit.task.show".to_string(),
-            result_bytes: 80,
-            result_payload: None,
-        }],
+        tool_calls: Vec::new(),
         duration_ms: 5,
         provider_model: None,
         provider_cost_usd: None,
     };
 
-    assert!(merge_invocation_trace(None, &trace).is_none());
+    let metrics = merge_invocation_trace(Some(&existing), &trace).expect("existing metrics");
+    assert_eq!(metrics.total_llm_input_tokens, 135);
+    assert_eq!(metrics.actual_fs_read_tokens_during_run, 40);
+    assert_eq!(metrics.double_read_rate, Some(1.0));
 }

@@ -192,7 +192,7 @@ Six runnable examples under `crates/orbit-agent/examples/`:
 | `openai_compat` | hosted: yes; local localhost path: no | Hosted OpenAI 1-turn prompt, or clean skip when `OPENAI_BASE_URL` points at an unreachable localhost-compatible endpoint |
 | `google_gemini` | yes (skips cleanly) | Single-turn prompt, usage + terminate reason printed using Gemini `generateContent` API |
 | `session_continuation` | yes (skips cleanly) | 3 consecutive `send()` calls; asserts history replayed + `cache_read_input_tokens > 0` on turn 2+ |
-| `tool_allowlist` | yes (skips cleanly) | Allowlist `["fs.read"]` + prompt pressuring `fs.delete`; asserts `PolicyDenied` error and target file absent |
+| `tool_allowlist` | yes (skips cleanly) | Allowlist `["orbit.task.show"]` + prompt pressuring `orbit.task.delete`; asserts `PolicyDenied` error |
 | `guardrails_smoke` | no | All three guardrails trip via an in-process scripted transport; verifies distinct error variants |
 | `redaction_smoke` | no | Writes a payload containing `Bearer secret-xyz` and asserts the stored blob does not contain `secret-xyz` |
 

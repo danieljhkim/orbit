@@ -36,7 +36,6 @@ spec:
     `changes_requested` with findings and a non-zero `blocking_count`. Carry
     previously raised findings forward in the loop input so it converges.
   tools:
-    - fs.read
     - orbit.audit.*
   on_denial: terminate
   max_iterations: 1

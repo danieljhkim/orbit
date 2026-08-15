@@ -25,7 +25,7 @@ Registered tools are reachable two ways, with identical JSON arguments:
 `orbit tool list` (CLI) or `tools/list` (MCP) is the authoritative surface; never guess a tool name. Two gaps worth knowing up front:
 
 - **CLI-only:** `orbit semantic`, `orbit.state.*`, and the routine/sweep/job commands — they need direct process access.
-- **No query surface at all:** code structure (callers, refs, symbols, implementors). Inspect files with `fs.read`, or `rg` with shell access. Task-to-commit lookup is `git log --grep '[T<task-id>]'`, not a graph query.
+- **No query surface at all:** code structure (callers, refs, symbols, implementors). Inspect files with the provider-native file-read tool, or `rg` with shell access. Task-to-commit lookup is `git log --grep '[T<task-id>]'`, not a graph query.
 
 Some CLI flags have no MCP counterpart because they are already the MCP default: `orbit tool run orbit.task.show --full` is plain `orbit_task_show({"id": "<id>"})`. Pass `field` or `fields` to project instead — valid values are `comments`, `plan`, `execution_summary`, `description`, `acceptance_criteria`, `history`, `context_files`, `artifacts`. `orbit.task.list` also accepts `path`, returning tasks whose `context_files` selectors cover that path.
 

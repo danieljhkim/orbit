@@ -370,7 +370,7 @@ fn repo_root() -> PathBuf {
 fn cli_agent_loop_spec(provider: Option<Provider>) -> AgentLoopSpec {
     AgentLoopSpec {
         instruction: "cli smoke".to_string(),
-        tools: vec!["fs.read".to_string(), "fs.delete".to_string()],
+        tools: vec!["orbit.task.show".to_string(), "proc.spawn".to_string()],
         on_denial: OnDenial::Terminate,
         model: Some(orbit_common::model_defaults::CLAUDE_DEFAULT_STRONG.to_string()),
         max_iterations: 1,

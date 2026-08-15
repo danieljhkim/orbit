@@ -105,7 +105,7 @@ mod run {
                 (
                     vec![ContentBlock::ToolUse {
                         id: "denied-1".to_string(),
-                        name: "fs.delete".to_string(),
+                        name: "orbit.task.delete".to_string(),
                         input: json!({ "path": "/tmp/blocked.txt" }),
                     }],
                     StopReason::ToolUse,
@@ -128,7 +128,7 @@ mod run {
                 let payload: Value =
                     serde_json::from_str(content).expect("denial tool result is json");
                 assert_eq!(payload["error"]["code"], "tool_denied");
-                assert_eq!(payload["tool_name"], "fs.delete");
+                assert_eq!(payload["tool_name"], "orbit.task.delete");
                 assert_eq!(payload["tool_use_id"], "denied-1");
 
                 (
@@ -224,7 +224,7 @@ mod run {
     fn continue_on_denial_returns_structured_tool_result_error() {
         let mut session = Session::new("test", "test-model", "", None);
         let cfg = AgentLoopConfig::new_for_run("run-test")
-            .with_advertised_tools(vec!["fs.delete".to_string()])
+            .with_advertised_tools(vec!["orbit.task.delete".to_string()])
             .with_on_denial(OnDenial::Continue)
             .with_max_iterations(3);
         let mut registry = ToolRegistry::new();
@@ -248,7 +248,7 @@ mod run {
         assert_eq!(outcome.trace.len(), 2);
         assert_eq!(
             outcome.trace[0].policy_denials,
-            vec!["fs.delete".to_string()]
+            vec!["orbit.task.delete".to_string()]
         );
     }
 }

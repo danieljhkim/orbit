@@ -5,7 +5,7 @@ description: Search tasks, docs, ADRs, and frictions through the unified `orbit 
 
 # Orbit Search
 
-`orbit search` finds project context by topic, literal phrase, or related task ID. It is corpus retrieval, not structural traversal — for callers, refs, implementors, or symbol selectors, read files with `fs.read` or use `rg`.
+`orbit search` finds project context by topic, literal phrase, or related task ID. It is corpus retrieval, not structural traversal — for callers, refs, implementors, or symbol selectors, read files with the provider-native file-read tool or use `rg`.
 
 The query surface is `orbit.search` (MCP `orbit_search({...})`, CLI `orbit tool run orbit.search --input '{...}'`). Include `model` for provenance. The *lifecycle* surface — `orbit semantic install|uninstall|stats|index` — manages the embedding companion and is not a way to query anything.
 
@@ -19,7 +19,7 @@ orbit search similar "<task-id>" --limit 5                        # MCP: {"seman
 
 **Applicability (`search path`)** resolves differently per corpus: tasks match by selector containment over `context_files`; ADRs match by glob containment over their decision scopes; docs are content-indexed and never match by path.
 
-**`--status` takes `kind:value` tokens** (`--status task:open,doc:active,adr:proposed`). Bare tokens are rejected because statuses collide across corpora.
+**`--status` takes `kind:value` tokens** (`--status task:open,doc:active`). Bare tokens are rejected because statuses collide across corpora.
 
 **Index coverage:** lexical covers tasks, docs, ADRs, and frictions. Vector search covers task fields and docs once `orbit semantic index --kind <kind>` has run. Missing vectors under `--hybrid` fall back to lexical with a note rather than failing — and if the companion isn't installed at all, fall back to lexical and continue. Never run `orbit semantic install` without operator consent.
 
@@ -33,4 +33,4 @@ Results carry `mode`, `kind`, `notes`, and `results[]` with some of `id`/`path`/
 
 **Docs** are PR-reviewed Markdown under configured `[docs].roots` (default `docs/`) — designs, patterns, domain notes, glossaries, runbooks. Orbit walks the roots on demand and indexes anything with valid frontmatter. Authoring a doc, registering a root, or migrating legacy files: [references/docs-corpus.md](references/docs-corpus.md).
 
-**ADRs** live at `.orbit/adrs/{accepted,proposed,superseded}/<adr-id>/` and are owned by `orbit-knowledge`. The docs walker never enters `.orbit/`, but `--kind all|adr` federates ADR metadata alongside doc hits; `--all` includes superseded ADRs for archaeology.
+**ADRs** are complete entries in the repository's designated decision docs. They are indexed as ordinary docs; use `--kind doc` and search by ID, title, or body text. The retired `--kind adr` is rejected.

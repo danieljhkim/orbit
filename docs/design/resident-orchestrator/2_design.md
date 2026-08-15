@@ -78,7 +78,7 @@ An epic with **no** children is normal and skips this phase entirely.
 worktree**, after the children have merged ([The epic agent works in the worktree instead of dispatching](./4_decisions.md#the-epic-agent-works-in-the-worktree-instead-of-dispatching), [ORB-10817]).
 
 - **Tools:** worktree-scoped writes and process execution on the same footing as `agent_implement`
-  (`fs.read`, `fs.delete`, `proc.spawn` over the repo's allowed programs), plus `orbit.task.*`,
+  (provider-native file-read/delete tools, `proc.spawn` over the repo's allowed programs), plus `orbit.task.*`,
   `orbit.search`, and `orbit.session_log.*`.
 - **Mandate:** validate the merged result of the children, resolve integration gaps, finish what
   the children did not cover, and bring the epic to the state its acceptance criteria describe.

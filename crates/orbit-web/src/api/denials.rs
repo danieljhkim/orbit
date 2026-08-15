@@ -408,10 +408,13 @@ fn extract_denied_for_path(message: &str) -> Option<String> {
     let marker = " denied for `";
     let marker_idx = message.find(marker)?;
     let prefix = &message[..marker_idx];
-    if !prefix.ends_with("fs.read")
-        && !prefix.ends_with("fs.modify")
-        && !prefix.ends_with("fs.delete")
-    {
+    // Historical policy messages used `fs.<op> denied for \`...\``. Match any
+    // `fs.*` prefix so stored traces from retired builtins still parse.
+    let last_token = prefix.rsplit_once('.').map(|(head, op)| (head, op));
+    let Some((head, op)) = last_token else {
+        return None;
+    };
+    if !head.ends_with("fs") || op.is_empty() {
         return None;
     }
     let rest = &message[marker_idx + marker.len()..];

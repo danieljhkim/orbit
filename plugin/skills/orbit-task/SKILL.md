@@ -70,13 +70,13 @@ is appropriate when ship traffic is high.
 
 Carry a task from intent to verified implementation with explicit lifecycle tracking.
 
-**Step 1 — Load.** `orbit.task.show`, then extract `description`/`acceptance_criteria` (the required outcome), `plan` (author one if blank or placeholder), `context_files`, and `status`. Read each `file:` target with `fs.read`. For a `dir:` selector, do not call `fs.read` on the directory: after verifying it resolves beneath the workspace root, use `rg --files <directory>` to list it, then use `fs.read` only for its key files. Then `orbit.search` with `semantic: "<task-id>"`, `limit: 5` to surface prior related decisions — non-blocking, skip it if nothing is relevant. No ID yet? Clarify intent with the human, then use Create above.
+**Step 1 — Load.** `orbit.task.show`, then extract `description`/`acceptance_criteria` (the required outcome), `plan` (author one if blank or placeholder), `context_files`, and `status`. Read each `file:` target with the provider-native file-read tool. For a `dir:` selector, do not call the file-read tool on the directory: after verifying it resolves beneath the workspace root, use `rg --files <directory>` to list it, then use the provider-native file-read tool only for its key files. Then `orbit.search` with `semantic: "<task-id>"`, `limit: 5` to surface prior related decisions — non-blocking, skip it if nothing is relevant. No ID yet? Clarify intent with the human, then use Create above.
 
 **Step 2 — Plan.** `orbit.task.update` with a concrete markdown `plan` — target files, validation commands, risks — if one doesn't exist.
 
 **Step 3 — Start.** `orbit.task.start` with a `note`. Moves `backlog`/`proposed` → `in-progress` and records approval. Starting from `proposed` still requires a real plan.
 
-**Step 4 — Implement and validate.** Follow the plan, inspecting files with `fs.read`. Verify transitive impact with `rg` or by reading callers directly. Run the repo-approved verification commands, honoring repo instructions if tests are forbidden.
+**Step 4 — Implement and validate.** Follow the plan, inspecting files with the provider-native file-read tool. Verify transitive impact with `rg` or by reading callers directly. Run the repo-approved verification commands, honoring repo instructions if tests are forbidden.
 
 If implementation surfaces a file outside the original `context_files`, append its canonical selector via `orbit.task.update` as soon as you discover it — don't wait until handoff. Reservation itself is the system's job, not yours: there is no worker-callable lock tool, and none should be reached for. Keeping `context_files` current is how a worker excludes others from files it owns, since conflict detection reads live from in-flight tasks, not only from reservation records. One caveat: an added entry only binds reservations requested *after* the update — it does not retroactively revoke a reservation a concurrent run already holds.
 

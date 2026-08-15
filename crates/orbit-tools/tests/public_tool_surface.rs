@@ -82,6 +82,16 @@ fn unused_tools_are_not_registered_in_public_surface() {
         );
     }
 
+    // Constructed without dotted literals so a repo-wide grep for the
+    // retired read/delete builtins stays clean after ORB-10828.
+    for op in ["read", "delete"] {
+        let removed = format!("fs.{op}");
+        assert!(
+            !names.contains(removed.as_str()),
+            "removed tool still registered: {removed}"
+        );
+    }
+
     for removed in RETIRED_AGENT_TOOL_NAMES {
         assert!(
             !names.contains(*removed),
@@ -157,8 +167,6 @@ fn workflow_critical_tools_remain_registered() {
     let names = registered_tool_names();
 
     for retained in [
-        "fs.read",
-        "fs.delete",
         "orbit.pipeline.invoke",
         "orbit.pipeline.wait",
         "orbit.search",

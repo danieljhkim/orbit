@@ -944,7 +944,7 @@ spec:
       spec:
         type: agent_loop
         instruction: "emit a successful Orbit envelope"
-        tools: [fs.read]
+        tools: [orbit.task.show]
         on_denial: terminate
         max_iterations: 1
         model: {model}

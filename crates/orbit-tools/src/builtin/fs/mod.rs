@@ -1,11 +1,9 @@
 pub mod copy;
 pub mod create;
-pub mod delete;
 pub mod ls;
 pub mod mkdir;
 pub mod move_file;
 pub mod patch;
-pub mod read;
 pub mod write;
 
 use std::path::{Path, PathBuf};
@@ -23,9 +21,10 @@ pub(crate) struct FsPolicyAllowance {
     pub(crate) matched_rule: String,
 }
 
-pub fn register(registry: &mut ToolRegistry) {
-    registry.register(read::FsReadTool);
-    registry.register(delete::FsDeleteTool);
+pub fn register(_registry: &mut ToolRegistry) {
+    // ORB-10828 retired the last registered fs builtins (read/delete). The
+    // remaining implementations stay unregistered; they have no live executor
+    // on the CLI path. A follow-up retires or re-homes that family.
 }
 
 #[cfg(test)]
