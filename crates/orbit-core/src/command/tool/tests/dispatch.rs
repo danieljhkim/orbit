@@ -114,6 +114,25 @@ fn dispatch_records_failure_audit_when_tool_handler_errors() {
 }
 
 #[test]
+fn mcp_v1_defers_capability_authorization_inside_core() {
+    let _g = env_guard();
+    let runtime = fresh_runtime();
+    let result = runtime.execute_tool_command_dispatch_with_session_context(
+        "orbit.task.delete",
+        json!({ "id": "ORB-NOT-THERE" }),
+        None,
+        None,
+        ToolEntryPoint::Mcp,
+        ToolSessionContext::default(),
+    );
+
+    assert!(
+        !matches!(result, Err(OrbitError::CapabilityDenied(_))),
+        "MCP v1 reaches domain validation without a capability decision"
+    );
+}
+
+#[test]
 fn dispatch_records_failure_audit_when_identity_setup_rejects_pair() {
     let _g = env_guard();
     let runtime = fresh_runtime();
@@ -493,6 +512,8 @@ fn mcp_dispatch_persists_only_trusted_provenance_columns() {
     );
     context.origin_session_id = Some("mcp-session-1".to_string());
     context.mcp_call_id = Some("mcall-1".to_string());
+    context.trace_id = Some("trace-1".to_string());
+    context.caller_ip = Some("192.0.2.10".to_string());
 
     runtime
         .execute_tool_command_dispatch_with_session_context(
@@ -532,6 +553,8 @@ fn mcp_dispatch_persists_only_trusted_provenance_columns() {
     );
     assert_eq!(row.origin_session_id.as_deref(), Some("mcp-session-1"));
     assert_eq!(row.mcp_call_id.as_deref(), Some("mcall-1"));
+    assert_eq!(row.trace_id.as_deref(), Some("trace-1"));
+    assert_eq!(row.caller_ip.as_deref(), Some("192.0.2.10"));
     assert_eq!(row.task_id, None);
     // Both correlations came from the withdrawn run lease; a spoofed
     // `job_run_id`/`lease_id` in model-authored tool JSON still reaches neither.

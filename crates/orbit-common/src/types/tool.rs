@@ -14,16 +14,28 @@ pub struct ToolSessionContext {
     /// Stable logical workspace identity after trusted local resolution.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub workspace_id: Option<String>,
+    /// Stable machine label claimed by the caller for audit correlation. It
+    /// is self-declared metadata, not an authenticated principal.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub caller_machine_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub caller_host_id: Option<String>,
+    /// Stable identity of the process host, derived by the accepting server.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub process_machine_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub process_host_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub transport: Option<McpTransport>,
+    /// Per-invocation correlation ID created by the accepting process. This is
+    /// independent of the legacy MCP session/call identifiers below so local
+    /// and remote entry points share one trace field.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub trace_id: Option<String>,
+    /// Best-effort caller network address observed by the accepting process.
+    /// It is audit metadata only and is never an authenticated identity.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub caller_ip: Option<String>,
     /// Complete effective session grants. This is a set, never a scalar
     /// ceiling; callers authorize by membership.
     #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
@@ -56,6 +68,8 @@ impl ToolSessionContext {
             process_machine_id: machine_id,
             process_host_id: host_id,
             transport: Some(McpTransport::Local),
+            trace_id: None,
+            caller_ip: None,
             effective_capabilities: BTreeSet::from([McpCapability::Agent]),
             origin_session_id: None,
             mcp_call_id: None,

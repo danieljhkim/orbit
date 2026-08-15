@@ -17,6 +17,7 @@ use crate::redact_sensitive_env_text;
 use crate::runtime::run_input::{
     managed_run_context_from_env, managed_run_context_run_id_from_env,
 };
+use crate::runtime::tool_exec::CapabilityEnforcement;
 
 #[cfg(test)]
 pub(super) use crate::runtime::run_input::ORBIT_MANAGED_RUN_CONTEXT_ENV;
@@ -97,6 +98,28 @@ impl OrbitRuntime {
         .map(|outcome| outcome.value)
     }
 
+    /// Execute a local CLI tool call with a caller-supplied invocation
+    /// envelope. The CLI owns machine identity discovery; Core owns dispatch
+    /// and persists the resulting audit context.
+    pub fn execute_tool_command_with_session_context(
+        &self,
+        name: &str,
+        input: Value,
+        agent_override: Option<String>,
+        model_override: Option<String>,
+        session_context: ToolSessionContext,
+    ) -> Result<Value, OrbitError> {
+        self.execute_tool_command_dispatch_with_session_context(
+            name,
+            input,
+            agent_override,
+            model_override,
+            ToolEntryPoint::Cli,
+            session_context,
+        )
+        .map(|outcome| outcome.value)
+    }
+
     /// Execute a tool by name and return both the value and whether the
     /// runtime persisted an audit row. Callers that need to suppress a
     /// duplicate higher-level audit emission read `audit_recorded` (also
@@ -170,7 +193,17 @@ impl OrbitRuntime {
                     reservation_owner: reservation_owner_from_env(),
                     ..Default::default()
                 };
-                self.run_tool_with_context_and_role(name, input, Role::Admin, tool_context)
+                let capability_enforcement = match entry_point {
+                    ToolEntryPoint::Cli => CapabilityEnforcement::Enforce,
+                    ToolEntryPoint::Mcp => CapabilityEnforcement::DeferredForMcpV1,
+                };
+                self.run_tool_with_context_and_role_and_capability(
+                    name,
+                    input,
+                    Role::Admin,
+                    tool_context,
+                    capability_enforcement,
+                )
             },
         )
     }
@@ -320,7 +353,15 @@ impl OrbitRuntime {
             step_index: audit_context.step_index,
         };
 
-        let audit_write = self.record_audit_event(&params);
+        let trace_id = session_context
+            .as_ref()
+            .and_then(|context| context.trace_id.as_deref());
+        let caller_ip = session_context
+            .as_ref()
+            .and_then(|context| context.caller_ip.as_deref());
+        let audit_write = self.sqlite_store().and_then(|store| {
+            store.insert_audit_event_record_with_invocation(&params, trace_id, caller_ip)
+        });
 
         // Claim the row for the runtime the moment it persists, so the CLI
         // `AuditGuard` suppresses its own duplicate emission. This is

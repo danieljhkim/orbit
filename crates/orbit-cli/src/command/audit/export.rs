@@ -104,6 +104,8 @@ fn export_csv(path: &str, events: &[AuditEvent]) -> Result<(), OrbitError> {
             "effective_capabilities",
             "origin_session_id",
             "mcp_call_id",
+            "trace_id",
+            "caller_ip",
             "lease_id",
             "task_id",
             "job_run_id",
@@ -152,6 +154,8 @@ fn export_csv(path: &str, events: &[AuditEvent]) -> Result<(), OrbitError> {
                     .join("|"),
                 event.origin_session_id.clone().unwrap_or_default(),
                 event.mcp_call_id.clone().unwrap_or_default(),
+                event.trace_id.clone().unwrap_or_default(),
+                event.caller_ip.clone().unwrap_or_default(),
                 event.lease_id.clone().unwrap_or_default(),
                 event.task_id.clone().unwrap_or_default(),
                 event.job_run_id.clone().unwrap_or_default(),
@@ -186,7 +190,7 @@ mod tests {
         let header = csv.lines().next().expect("CSV header");
         assert!(header.contains("host,pid,session_id,workspace_id,caller_machine_id"));
         assert!(header.contains("process_host_id,transport,effective_capabilities"));
-        assert!(header.contains("origin_session_id,mcp_call_id,lease_id"));
+        assert!(header.contains("origin_session_id,mcp_call_id,trace_id,caller_ip,lease_id"));
         assert!(header.ends_with("task_id,job_run_id,activity_id,step_index"));
     }
 }

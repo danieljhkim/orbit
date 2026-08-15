@@ -1172,6 +1172,27 @@ fn apply_remove_native_learning_subsystem(conn: &Connection) -> Result<(), Orbit
     .map_err(|error| OrbitError::Store(error.to_string()))
 }
 
+/// Add transport-neutral invocation correlation to command-audit rows.
+/// Existing rows and non-invocation producers remain NULL-compatible.
+fn apply_invocation_audit_context(conn: &Connection) -> Result<(), OrbitError> {
+    // A ledger may outlive an incomplete pre-ledger schema (for example, an
+    // invocation-only fixture). Re-establish the canonical audit table and
+    // its existing provenance projection before extending it.
+    ensure_audit_events_schema(conn)?;
+    apply_trusted_mcp_audit_provenance(conn)?;
+
+    add_column_if_missing(conn, "ALTER TABLE audit_events ADD COLUMN trace_id TEXT")?;
+    add_column_if_missing(conn, "ALTER TABLE audit_events ADD COLUMN caller_ip TEXT")?;
+
+    conn.execute_batch(
+        r#"
+            CREATE INDEX IF NOT EXISTS idx_audit_events_trace_id
+            ON audit_events(trace_id);
+        "#,
+    )
+    .map_err(|error| OrbitError::Store(error.to_string()))
+}
+
 fn ensure_task_reservations_schema(conn: &Connection) -> Result<(), OrbitError> {
     conn.execute_batch(
         r#"
