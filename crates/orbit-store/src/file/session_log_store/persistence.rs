@@ -1,7 +1,11 @@
 //! Locked JSONL persistence for [`super::SessionLogStore`].
+//!
+//! Every read and mutation holds `.session-log.jsonl.lock`. While that lock is
+//! held, a malformed unterminated final row is truncated so a torn append cannot
+//! wedge later list/resolve/append. Newline-terminated corrupt rows still fail.
 
 use std::fs::{self, OpenOptions};
-use std::io::{BufRead, BufReader, Write};
+use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use chrono::Utc;
@@ -144,25 +148,115 @@ fn read_entries(path: &Path) -> Result<Vec<SessionLogEntry>, OrbitError> {
     if !path.exists() {
         return Ok(Vec::new());
     }
-    let file = fs::File::open(path)
+    let raw = fs::read(path)
         .map_err(|error| OrbitError::Io(format!("read {}: {error}", path.display())))?;
+    let scan = scan_entries(path, &raw)?;
+    persist_scan_repair(path, raw.len(), &scan)?;
+    Ok(scan.entries)
+}
+
+struct SessionLogScan {
+    entries: Vec<SessionLogEntry>,
+    truncate_at: usize,
+    missing_newline: bool,
+}
+
+fn scan_entries(path: &Path, raw: &[u8]) -> Result<SessionLogScan, OrbitError> {
     let mut entries = Vec::new();
-    for (line_number, line) in BufReader::new(file).lines().enumerate() {
-        let line =
-            line.map_err(|error| OrbitError::Io(format!("read {}: {error}", path.display())))?;
-        if line.trim().is_empty() {
-            continue;
+    let mut last_good = 0usize;
+    let mut offset = 0usize;
+    for (line_number, chunk) in raw.split_inclusive(|byte| *byte == b'\n').enumerate() {
+        let next_offset = offset + chunk.len();
+        let terminated = chunk.ends_with(b"\n");
+        let line_bytes = trim_jsonl_terminator(chunk);
+        if line_bytes.iter().all(u8::is_ascii_whitespace) {
+            if terminated {
+                last_good = next_offset;
+                offset = next_offset;
+                continue;
+            }
+            return Ok(recovered_scan(entries, last_good));
         }
-        let entry = serde_json::from_str(&line).map_err(|error| {
-            OrbitError::Execution(format!(
-                "parse {} line {}: {error}",
-                path.display(),
-                line_number + 1
-            ))
-        })?;
-        entries.push(entry);
+
+        let line = match std::str::from_utf8(line_bytes) {
+            Ok(line) => line,
+            Err(_) if !terminated => return Ok(recovered_scan(entries, last_good)),
+            Err(error) => return Err(parse_error(path, line_number + 1, error)),
+        };
+
+        match serde_json::from_str::<SessionLogEntry>(line) {
+            Ok(entry) => {
+                entries.push(entry);
+                last_good = next_offset;
+                offset = next_offset;
+            }
+            Err(_) if !terminated => return Ok(recovered_scan(entries, last_good)),
+            Err(error) => return Err(parse_error(path, line_number + 1, error)),
+        }
     }
-    Ok(entries)
+
+    Ok(SessionLogScan {
+        entries,
+        truncate_at: last_good,
+        missing_newline: !raw.is_empty() && !raw.ends_with(b"\n"),
+    })
+}
+
+fn recovered_scan(entries: Vec<SessionLogEntry>, truncate_at: usize) -> SessionLogScan {
+    SessionLogScan {
+        entries,
+        truncate_at,
+        missing_newline: false,
+    }
+}
+
+fn trim_jsonl_terminator(chunk: &[u8]) -> &[u8] {
+    let without_lf = chunk.strip_suffix(b"\n").unwrap_or(chunk);
+    without_lf.strip_suffix(b"\r").unwrap_or(without_lf)
+}
+
+fn parse_error(path: &Path, line_number: usize, error: impl std::fmt::Display) -> OrbitError {
+    OrbitError::Execution(format!(
+        "parse {} line {}: {error}",
+        path.display(),
+        line_number
+    ))
+}
+
+fn persist_scan_repair(
+    path: &Path,
+    raw_len: usize,
+    scan: &SessionLogScan,
+) -> Result<(), OrbitError> {
+    if scan.truncate_at < raw_len {
+        truncate_log(path, scan.truncate_at)
+    } else if scan.missing_newline {
+        append_trailing_newline(path)
+    } else {
+        Ok(())
+    }
+}
+
+fn truncate_log(path: &Path, truncate_at: usize) -> Result<(), OrbitError> {
+    let file = OpenOptions::new()
+        .write(true)
+        .open(path)
+        .map_err(|error| OrbitError::Io(format!("open {}: {error}", path.display())))?;
+    file.set_len(truncate_at as u64)
+        .map_err(|error| OrbitError::Io(format!("truncate {}: {error}", path.display())))?;
+    file.sync_all()
+        .map_err(|error| OrbitError::Io(format!("sync {}: {error}", path.display())))
+}
+
+fn append_trailing_newline(path: &Path) -> Result<(), OrbitError> {
+    let mut file = OpenOptions::new()
+        .append(true)
+        .open(path)
+        .map_err(|error| OrbitError::Io(format!("open {}: {error}", path.display())))?;
+    file.write_all(b"\n")
+        .map_err(|error| OrbitError::Io(format!("append {}: {error}", path.display())))?;
+    file.sync_data()
+        .map_err(|error| OrbitError::Io(format!("sync {}: {error}", path.display())))
 }
 
 fn replace_entries(path: &Path, entries: &[SessionLogEntry]) -> Result<(), OrbitError> {
