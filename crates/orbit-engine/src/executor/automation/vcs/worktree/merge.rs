@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use orbit_common::types::OrbitError;
 use serde_json::{Value, json};
@@ -37,12 +37,13 @@ pub(in crate::executor::automation) fn merge_batch_worktree_into_base<H: Runtime
         ));
     }
 
-    ensure_clean_checkout(&repo_root, "base branch checkout")?;
-
     let base = input_string_field(input, "base").unwrap_or_else(|| DEFAULT_BASE.to_string());
     let base_sync_mode = base_sync_mode_from_input(input)?;
+    let base_checkout = checkout_holding_branch(&repo_root, &base)?.unwrap_or(repo_root.clone());
+    ensure_clean_checkout(&base_checkout, "base branch checkout")?;
     merge_with_rebase_retry(
         &repo_root,
+        &base_checkout,
         &workspace_path,
         &base,
         &workspace_branch,
@@ -79,6 +80,7 @@ fn checkout_base_branch(
 
 fn merge_with_rebase_retry(
     repo_root: &Path,
+    base_checkout: &Path,
     workspace_path: &Path,
     base: &str,
     workspace_branch: &str,
@@ -86,8 +88,22 @@ fn merge_with_rebase_retry(
 ) -> Result<(), OrbitError> {
     for attempt in 0..=MAX_REBASE_RETRY_ATTEMPTS {
         let start_point = resolve_worktree_start_point(repo_root, base, base_sync_mode)?;
-        checkout_base_branch(repo_root, base, &start_point, base_sync_mode)?;
-        if git_command_success(repo_root, &["merge", "--ff-only", workspace_branch])? {
+        if base_checkout == repo_root {
+            checkout_base_branch(repo_root, base, &start_point, base_sync_mode)?;
+        } else {
+            let checked_out = git_output(base_checkout, &["rev-parse", "--abbrev-ref", "HEAD"])?;
+            if checked_out.trim() != base {
+                return Err(OrbitError::Execution(format!(
+                    "linked base worktree '{}' moved from branch '{base}' to '{}'",
+                    base_checkout.display(),
+                    checked_out.trim()
+                )));
+            }
+            if base_sync_mode == BaseSyncMode::Remote {
+                fast_forward_local_base_to_remote(base_checkout, base, &start_point)?;
+            }
+        }
+        if git_command_success(base_checkout, &["merge", "--ff-only", workspace_branch])? {
             return Ok(());
         }
         if attempt == MAX_REBASE_RETRY_ATTEMPTS {
@@ -106,6 +122,28 @@ fn merge_with_rebase_retry(
     }
 
     Ok(())
+}
+
+/// Locate the linked worktree that already has `base` checked out. Git refuses
+/// to check the same branch out in the primary checkout, so stacked local
+/// pipelines must merge directly in the owning worktree (the epic worktree in
+/// particular).
+fn checkout_holding_branch(repo_root: &Path, base: &str) -> Result<Option<PathBuf>, OrbitError> {
+    let listing = git_output(repo_root, &["worktree", "list", "--porcelain"])?;
+    let expected_branch = format!("refs/heads/{base}");
+    let mut current_path = None;
+    for line in listing.lines().chain(std::iter::once("")) {
+        if let Some(path) = line.strip_prefix("worktree ") {
+            current_path = Some(PathBuf::from(path));
+        } else if let Some(branch) = line.strip_prefix("branch ")
+            && branch == expected_branch
+        {
+            return Ok(current_path);
+        } else if line.is_empty() {
+            current_path = None;
+        }
+    }
+    Ok(None)
 }
 
 fn fast_forward_local_base_to_remote(

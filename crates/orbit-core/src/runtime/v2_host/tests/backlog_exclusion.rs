@@ -324,6 +324,58 @@ fn list_backlog_tasks_reports_direct_context_lock_conflicts() {
 }
 
 #[test]
+fn active_epic_excludes_only_loose_tasks_overlapping_descendant_union() {
+    let (_root, runtime, repo_root) = runtime_with_workspace_layout();
+    write_workspace_file(&repo_root, "crates/epic/src/lib.rs");
+    write_workspace_file(&repo_root, "crates/loose/src/lib.rs");
+    let epic = runtime
+        .add_task(TaskAddParams {
+            title: "Active epic".to_string(),
+            description: "Epic fixture".to_string(),
+            acceptance_criteria: vec!["Assembled".to_string()],
+            tags: vec!["epic".to_string()],
+            plan: "Drain children".to_string(),
+            status: Some(TaskStatus::InProgress),
+            ..Default::default()
+        })
+        .expect("seed active epic");
+    seed_list_backlog_task(
+        &runtime,
+        "Epic child",
+        TaskStatus::Backlog,
+        TaskPriority::High,
+        TaskType::Chore,
+        Some(epic.id.clone()),
+        vec!["file:crates/epic/src/lib.rs"],
+    );
+    let overlapping = seed_list_backlog_task(
+        &runtime,
+        "Overlapping loose leaf",
+        TaskStatus::Backlog,
+        TaskPriority::High,
+        TaskType::Chore,
+        None,
+        vec!["file:crates/epic/src/lib.rs"],
+    );
+    let unrelated = seed_list_backlog_task(
+        &runtime,
+        "Unrelated loose leaf",
+        TaskStatus::Backlog,
+        TaskPriority::Medium,
+        TaskType::Chore,
+        None,
+        vec!["file:crates/loose/src/lib.rs"],
+    );
+
+    let output = list_backlog_tasks(&runtime, json!({}));
+
+    assert_eq!(output_task_ids(&output), vec![unrelated.id]);
+    let excluded = excluded_entry(&output, &overlapping.id);
+    assert_eq!(excluded["reason"], "context_lock_conflict");
+    assert_eq!(excluded["conflicts"][0]["locking_task_id"], epic.id);
+}
+
+#[test]
 fn list_backlog_tasks_reports_group_member_conflicts_with_trigger_conflicts() {
     let (_root, runtime, repo_root) = runtime_with_workspace_layout();
     write_workspace_file(&repo_root, "docs/parent.md");

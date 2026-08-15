@@ -383,6 +383,11 @@ fn local_task_pipeline_commits_before_merge_and_reconciles_with_local_base() {
         .iter()
         .find_map(|(name, yaml)| (*name == "task_local_pipeline").then_some(*yaml))
         .expect("task local pipeline default exists");
+    assert_eq!(
+        yaml,
+        include_str!("../../../../../../.orbit/resources/jobs/task_local_pipeline.yaml"),
+        "shipped and workspace task_local_pipeline resources must remain byte-identical"
+    );
     let asset = load_job_asset(yaml).expect("parse task local pipeline");
     let root_step_ids = asset
         .spec
@@ -417,6 +422,27 @@ fn local_task_pipeline_commits_before_merge_and_reconciles_with_local_base() {
     assert_eq!(
         merge_input["base_sync"], "local",
         "an unpublished earlier merge must be a valid base for the next local merge"
+    );
+
+    assert_eq!(
+        asset.spec.default_input.as_ref().unwrap()["terminal_status"],
+        "review"
+    );
+    let mark_review = asset
+        .spec
+        .steps
+        .iter()
+        .find(|step| step.id == "mark_review")
+        .expect("task local pipeline has terminal task update loop");
+    let JobV2StepBody::Loop { loop_ } = &mark_review.body else {
+        panic!("task local terminal update must be a loop");
+    };
+    let JobV2StepBody::TargetRef(update) = &loop_.steps[0].body else {
+        panic!("task local terminal update must reference update_task");
+    };
+    assert_eq!(
+        update.default_input.as_ref().unwrap()["status"],
+        "{{ input.terminal_status }}"
     );
 }
 
@@ -562,6 +588,11 @@ fn gate_pipeline_releases_reservation_before_child_success_guard() {
         .iter()
         .find_map(|(name, yaml)| (*name == "task_gate_pipeline").then_some(*yaml))
         .expect("task gate pipeline default exists");
+    assert_eq!(
+        yaml,
+        include_str!("../../../../../../.orbit/resources/jobs/task_gate_pipeline.yaml"),
+        "shipped and workspace task_gate_pipeline resources must remain byte-identical"
+    );
     let asset = load_job_asset(yaml).expect("parse task gate pipeline");
     let root_step_ids = asset
         .spec
@@ -1014,7 +1045,7 @@ fn orchestration_jobs_do_not_enable_generic_recovery() {
 }
 
 #[test]
-fn epic_pipeline_loops_scan_then_fail_closes_on_leftover_work() {
+fn epic_pipeline_opens_one_stable_worktree_and_drains_children_serially() {
     let yaml = DEFAULT_JOB_FILES
         .iter()
         .find_map(|(name, yaml)| (*name == "epic_pipeline").then_some(*yaml))
@@ -1024,44 +1055,52 @@ fn epic_pipeline_loops_scan_then_fail_closes_on_leftover_work() {
         include_str!("../../../../../../.orbit/resources/jobs/epic_pipeline.yaml"),
         "shipped and workspace epic_pipeline resources must remain byte-identical"
     );
-    assert!(!yaml.contains("routines/"));
-    assert!(!yaml.contains("session:"));
     let asset = load_job_asset(yaml).expect("epic pipeline parses");
     assert_eq!(asset.spec.max_active_runs, 1);
-    assert_eq!(asset.spec.steps.len(), 2);
+    assert_eq!(asset.spec.steps.len(), 4);
 
-    let JobV2StepBody::Loop { loop_ } = &asset.spec.steps[0].body else {
-        panic!("epic pipeline must loop the drain");
+    let JobV2StepBody::TargetRef(worktree) = &asset.spec.steps[1].body else {
+        panic!("epic pipeline must set up its worktree before draining children");
     };
-    assert_eq!(loop_.max_iterations, 8);
+    assert_eq!(worktree.target, "activity:worktree_setup");
+    let worktree_input = worktree.default_input.as_ref().expect("worktree input");
+    assert_eq!(worktree_input["run_id"], "epic-{{ input.epic_task_id }}");
+    assert_eq!(worktree_input["branch_prefix"], "epic");
+    assert_eq!(worktree_input["base_sync"], "remote");
+
+    let JobV2StepBody::Target(descendants) = &asset.spec.steps[2].body else {
+        panic!("epic pipeline must list descendants deterministically");
+    };
+    let ActivityV2Spec::Deterministic(descendants) = &descendants.spec else {
+        panic!("epic descendant listing must be deterministic");
+    };
+    assert_eq!(descendants.action, "list_epic_descendants");
+
+    let JobV2StepBody::Loop { loop_ } = &asset.spec.steps[3].body else {
+        panic!("epic pipeline must drain descendants through a sequential loop");
+    };
     assert_eq!(
-        loop_.break_when.as_deref(),
-        Some("{{ steps.scan.output.empty }} == true")
+        loop_.items.as_deref(),
+        Some("{{ steps.descendants.output.task_ids }}")
     );
+    assert_eq!(loop_.max_iterations, 256);
     assert_eq!(loop_.steps.len(), 2);
-    let JobV2StepBody::TargetRef(scan) = &loop_.steps[0].body else {
-        panic!("first loop body must scan");
+    let JobV2StepBody::TargetRef(land_child) = &loop_.steps[0].body else {
+        panic!("first loop body must invoke one child pipeline");
     };
-    assert_eq!(scan.target, "activity:scan_unresolved_work");
-    let JobV2StepBody::TargetRef(orchestrate) = &loop_.steps[1].body else {
-        panic!("second loop body must invoke the orchestrator");
-    };
-    assert_eq!(orchestrate.target, "activity:epic_orchestrator");
+    assert_eq!(land_child.target, "activity:invoke_and_wait");
+    let child_input = &land_child.default_input.as_ref().expect("child input")["run_input"];
     assert_eq!(
-        loop_.steps[1].when.as_deref(),
-        Some("{{ steps.scan.output.empty }} == false")
+        child_input["base_branch"],
+        "{{ steps.worktree.output.head_ref }}"
     );
-    assert_eq!(orchestrate.timeout_seconds, 7200);
-
-    let JobV2StepBody::TargetRef(require_empty) = &asset.spec.steps[1].body else {
-        panic!("post-loop step must re-scan fail-closed");
-    };
-    assert_eq!(require_empty.target, "activity:scan_unresolved_work");
-    let require_input = require_empty
-        .default_input
-        .as_ref()
-        .expect("require_empty input");
-    assert_eq!(require_input["fail_if_nonempty"], json!(true));
+    assert_eq!(child_input["base_sync"], "local");
+    assert_eq!(child_input["auto_push"], false);
+    assert_eq!(child_input["terminal_status"], "done");
+    assert_eq!(
+        child_input["landing_branch"],
+        "{{ steps.resolve_ship_input.output.base_branch }}"
+    );
 }
 
 fn collect_agent_loop_step_ids<'a>(

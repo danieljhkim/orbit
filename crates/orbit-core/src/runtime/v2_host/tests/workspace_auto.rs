@@ -20,6 +20,115 @@ fn classify(runtime: &OrbitRuntime) -> Value {
         .expect("classify workspace auto tasks")
 }
 
+fn list_epic_descendants(runtime: &OrbitRuntime, epic_task_id: &str) -> Value {
+    runtime
+        .run_deterministic(
+            "list_epic_descendants",
+            &json!({}),
+            &json!({ "epic_task_id": epic_task_id }),
+            ToolContext::default(),
+        )
+        .expect("list epic descendants")
+}
+
+#[test]
+fn epic_descendants_are_dependency_then_priority_ordered_and_terminal_tasks_are_skipped() {
+    let (_root, runtime, _repo_root) = runtime_with_workspace_layout();
+    let epic = runtime
+        .add_task(TaskAddParams {
+            title: "Epic root".to_string(),
+            description: "Epic fixture".to_string(),
+            acceptance_criteria: vec!["Supervised".to_string()],
+            tags: vec!["epic".to_string()],
+            plan: "Delegate children".to_string(),
+            status: Some(TaskStatus::InProgress),
+            ..Default::default()
+        })
+        .expect("seed epic root");
+    let foundation = runtime
+        .add_task(TaskAddParams {
+            parent_id: Some(epic.id.clone()),
+            title: "Foundation".to_string(),
+            description: "Foundation fixture".to_string(),
+            acceptance_criteria: vec!["Done".to_string()],
+            plan: "Implement".to_string(),
+            priority: TaskPriority::Low,
+            status: Some(TaskStatus::Backlog),
+            ..Default::default()
+        })
+        .expect("seed foundation");
+    let dependent = runtime
+        .add_task(TaskAddParams {
+            parent_id: Some(epic.id.clone()),
+            title: "Dependent".to_string(),
+            description: "Dependent fixture".to_string(),
+            acceptance_criteria: vec!["Done".to_string()],
+            dependencies: vec![foundation.id.clone()],
+            plan: "Implement".to_string(),
+            priority: TaskPriority::High,
+            status: Some(TaskStatus::Backlog),
+            ..Default::default()
+        })
+        .expect("seed dependent");
+    let independent = runtime
+        .add_task(TaskAddParams {
+            parent_id: Some(epic.id.clone()),
+            title: "Independent".to_string(),
+            description: "Independent fixture".to_string(),
+            acceptance_criteria: vec!["Done".to_string()],
+            plan: "Implement".to_string(),
+            priority: TaskPriority::Critical,
+            status: Some(TaskStatus::Backlog),
+            ..Default::default()
+        })
+        .expect("seed independent");
+    let done = runtime
+        .add_task(TaskAddParams {
+            parent_id: Some(epic.id.clone()),
+            title: "Already done".to_string(),
+            description: "Done fixture".to_string(),
+            acceptance_criteria: vec!["Done".to_string()],
+            plan: "Implemented".to_string(),
+            status: Some(TaskStatus::Done),
+            ..Default::default()
+        })
+        .expect("seed done child");
+
+    let output = list_epic_descendants(&runtime, &epic.id);
+    assert_eq!(
+        output["task_ids"],
+        json!([independent.id, foundation.id, dependent.id])
+    );
+    assert_eq!(output["task_count"], 3);
+    assert!(
+        !output["task_ids"]
+            .as_array()
+            .expect("task ids")
+            .contains(&json!(done.id))
+    );
+}
+
+#[test]
+fn epic_with_no_descendants_has_an_empty_drain() {
+    let (_root, runtime, _repo_root) = runtime_with_workspace_layout();
+    let epic = runtime
+        .add_task(TaskAddParams {
+            title: "Empty epic".to_string(),
+            description: "Epic fixture".to_string(),
+            acceptance_criteria: vec!["No children".to_string()],
+            tags: vec!["epic".to_string()],
+            plan: "No-op".to_string(),
+            status: Some(TaskStatus::InProgress),
+            ..Default::default()
+        })
+        .expect("seed empty epic");
+
+    let output = list_epic_descendants(&runtime, &epic.id);
+    assert_eq!(output["task_ids"], json!([]));
+    assert_eq!(output["task_count"], 0);
+    assert_eq!(output["empty"], true);
+}
+
 #[test]
 fn two_loose_tasks_win_before_one_epic_and_three_children() {
     let (_root, runtime, _repo_root) = runtime_with_workspace_layout();

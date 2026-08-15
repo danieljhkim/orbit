@@ -4,7 +4,7 @@
 # - `implement_bundle` runs one task at a time in the shared worktree.
 # - If `implement_one` fails, pending changes remain in the shared worktree for inspection.
 # - If all implementations succeed, `commit` snapshots the bundle branch before merge.
-# - Tasks move to `review` only after the full bundle commits and merges cleanly.
+# - Tasks move to `terminal_status` only after the full bundle commits and merges cleanly.
 #
 schemaVersion: 2
 kind: Job
@@ -19,6 +19,8 @@ spec:
     auto_push: false
     base_branch: main
     base_sync: remote
+    landing_branch: ""
+    terminal_status: review
   
   steps:
     - id: worktree
@@ -79,7 +81,7 @@ spec:
             target: activity:update_task
             default_input:
               task_id: "{{ item }}"
-              status: review
+              status: "{{ input.terminal_status }}"
 
     - id: push
       when: "{{ input.auto_push }} == true"

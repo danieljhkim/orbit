@@ -24,6 +24,7 @@ macro_rules! deterministic_action_catalog {
                 GateStarvationFail => "gate_starvation_fail",
                 InvokeAndWait => "invoke_and_wait",
                 ListBacklogTasks => "list_backlog_tasks",
+                ListEpicDescendants => "list_epic_descendants",
                 ListTriageCandidates => "list_triage_candidates",
                 OrbitToolCall => "orbit_tool_call",
                 PipelineSuccessGuard => "pipeline_success_guard",

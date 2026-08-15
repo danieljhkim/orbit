@@ -4,6 +4,7 @@ use serde_json::{Value, json};
 use tempfile::TempDir;
 
 use crate::OrbitRuntime;
+use crate::command::task::TaskAddParams;
 
 use super::super::locks::{
     TaskLockReservationScope, parse_task_lock_reservation_scope, requested_task_files,
@@ -138,6 +139,67 @@ fn requested_task_files_prune_missing_context_entries() {
     let requested =
         requested_task_files(&runtime, &[task.id]).expect("collect requested task files");
     assert_eq!(requested, vec!["file:docs/design/groundhog.md".to_string()]);
+}
+
+#[test]
+fn active_epic_root_holds_union_of_descendant_context_files() {
+    let _env = unmanaged_tool_env_guard();
+    let (_root, runtime, repo_root) = test_runtime();
+    for path in ["src/root.rs", "src/one.rs", "src/two.rs"] {
+        let full_path = repo_root.join(path);
+        std::fs::create_dir_all(full_path.parent().expect("fixture parent"))
+            .expect("create fixture directory");
+        std::fs::write(full_path, "fixture\n").expect("write fixture");
+    }
+    let epic = runtime
+        .add_task(TaskAddParams {
+            title: "Epic root".to_string(),
+            description: "Epic fixture".to_string(),
+            acceptance_criteria: vec!["assembled".to_string()],
+            tags: vec!["epic".to_string()],
+            plan: "drain children".to_string(),
+            context_files: vec!["file:src/root.rs".to_string()],
+            status: Some(TaskStatus::InProgress),
+            ..Default::default()
+        })
+        .expect("create epic");
+    for (title, path) in [("one", "src/one.rs"), ("two", "src/two.rs")] {
+        runtime
+            .add_task(TaskAddParams {
+                parent_id: Some(epic.id.clone()),
+                title: title.to_string(),
+                description: "Child fixture".to_string(),
+                acceptance_criteria: vec!["done".to_string()],
+                plan: "implement".to_string(),
+                context_files: vec![format!("file:{path}")],
+                status: Some(TaskStatus::Backlog),
+                ..Default::default()
+            })
+            .expect("create epic child");
+    }
+
+    assert_eq!(
+        requested_task_files(&runtime, std::slice::from_ref(&epic.id))
+            .expect("collect epic lock surface"),
+        vec![
+            "file:src/one.rs".to_string(),
+            "file:src/root.rs".to_string(),
+            "file:src/two.rs".to_string(),
+        ]
+    );
+    let locks = runtime
+        .run_tool("orbit.task.locks", json!({}))
+        .expect("list task locks");
+    let epic_lock = locks["by_task"]
+        .as_array()
+        .expect("task locks")
+        .iter()
+        .find(|entry| entry["id"] == epic.id)
+        .expect("epic lock entry");
+    assert_eq!(
+        epic_lock["context_files"],
+        json!(["file:src/one.rs", "file:src/root.rs", "file:src/two.rs"])
+    );
 }
 
 #[test]
