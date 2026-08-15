@@ -8,8 +8,8 @@ use orbit_common::types::{
     FrictionStatus, NotFoundKind, OrbitError, Task, TaskComment, TaskPriority, TaskStatus,
     TaskType, ToolSessionContext, is_valid_friction_id, normalize_optional_attribution_label,
     normalize_task_dependencies, normalize_task_tags, optional_csv_or_string_list_alias,
-    optional_raw_string, optional_string, optional_string_alias, required_string,
-    resolve_task_dependencies, task_dependencies_ready, task_matches_tags,
+    optional_raw_string, optional_string, optional_string_alias, optional_string_list_alias,
+    required_string, resolve_task_dependencies, task_dependencies_ready, task_matches_tags,
     validate_task_dependencies,
 };
 use orbit_common::utility::redaction::redact_all;
@@ -218,7 +218,7 @@ impl HubCoordinationExecutor {
             .unwrap_or(TaskType::Feature);
         let title = redact_all(&required_string(&input, &["title"], "title")?);
         let description = redact_all(&required_string(&input, &["description"], "description")?);
-        let acceptance_criteria = optional_csv_or_string_list_alias(
+        let acceptance_criteria = optional_string_list_alias(
             &input,
             &[
                 "acceptance_criteria",
@@ -409,7 +409,7 @@ impl HubCoordinationExecutor {
                 actor: actor.clone(),
                 title: optional_string(&input, "title")?.map(|value| redact_all(&value)),
                 description,
-                acceptance_criteria: optional_csv_or_string_list_alias(
+                acceptance_criteria: optional_string_list_alias(
                     &input,
                     &[
                         "acceptance_criteria",

@@ -846,6 +846,60 @@ fn task_add_tool_recovers_mcp_encoded_acceptance_and_context_arrays() {
 }
 
 #[test]
+fn task_add_tool_preserves_commas_in_acceptance_criteria_array() {
+    let (_root, runtime, _repo_root) = test_runtime();
+
+    let output = runtime
+        .execute_tool_command(
+            "orbit.task.add",
+            json!({
+                "title": "Comma-safe criteria",
+                "description": "Exercise explicit acceptance criteria arrays.",
+                "workspace": ".",
+                "acceptance_criteria": [
+                    "first criterion, with a comma",
+                    "second criterion"
+                ],
+            }),
+            Some("codex".to_string()),
+            Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
+        )
+        .expect("task add tool succeeds");
+
+    assert_eq!(
+        output.get("acceptance_criteria"),
+        Some(&json!([
+            "first criterion, with a comma",
+            "second criterion"
+        ]))
+    );
+}
+
+#[test]
+fn task_add_tool_keeps_scalar_acceptance_criteria_as_one_value() {
+    let (_root, runtime, _repo_root) = test_runtime();
+
+    let output = runtime
+        .execute_tool_command(
+            "orbit.task.add",
+            json!({
+                "title": "Scalar criterion",
+                "description": "Exercise scalar acceptance criteria input.",
+                "workspace": ".",
+                "acceptance_criteria": "one criterion, with a comma",
+            }),
+            Some("codex".to_string()),
+            Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
+        )
+        .expect("task add tool succeeds");
+
+    assert_eq!(
+        output.get("acceptance_criteria"),
+        Some(&json!(["one criterion, with a comma"]))
+    );
+}
+
+#[test]
 fn task_add_tool_infers_agent_from_model_only_input() {
     let _env =
         orbit_common::test_env::unset(orbit_common::test_env::AGENT_IDENTITY_ENV.iter().copied());
@@ -1748,6 +1802,72 @@ fn task_update_tool_recovers_mcp_encoded_acceptance_array() {
     assert_eq!(
         output.get("acceptance_criteria"),
         Some(&json!(["Criterion A", "Criterion B"]))
+    );
+}
+
+#[test]
+fn task_update_tool_preserves_commas_in_acceptance_criteria_array() {
+    let (_root, runtime, repo_root) = test_runtime();
+    let task = create_task(
+        &runtime,
+        &repo_root,
+        "Update comma-safe criteria",
+        "Exercise explicit acceptance criteria replacement.",
+        TaskStatus::Backlog,
+        &[],
+    );
+
+    let output = runtime
+        .execute_tool_command(
+            "orbit.task.update",
+            json!({
+                "id": task.id,
+                "acceptance_criteria": [
+                    "updated criterion, with a comma",
+                    "another updated criterion"
+                ],
+            }),
+            Some("codex".to_string()),
+            Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
+        )
+        .expect("task update tool succeeds");
+
+    assert_eq!(
+        output.get("acceptance_criteria"),
+        Some(&json!([
+            "updated criterion, with a comma",
+            "another updated criterion"
+        ]))
+    );
+}
+
+#[test]
+fn task_update_tool_keeps_scalar_acceptance_criteria_as_one_value() {
+    let (_root, runtime, repo_root) = test_runtime();
+    let task = create_task(
+        &runtime,
+        &repo_root,
+        "Update scalar criterion",
+        "Exercise scalar acceptance criteria replacement.",
+        TaskStatus::Backlog,
+        &[],
+    );
+
+    let output = runtime
+        .execute_tool_command(
+            "orbit.task.update",
+            json!({
+                "id": task.id,
+                "acceptance_criteria": "updated criterion, with a comma",
+            }),
+            Some("codex".to_string()),
+            Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
+        )
+        .expect("task update tool succeeds");
+
+    assert_eq!(
+        output.get("acceptance_criteria"),
+        Some(&json!(["updated criterion, with a comma"]))
     );
 }
 

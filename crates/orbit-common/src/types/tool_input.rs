@@ -175,14 +175,20 @@ pub fn optional_csv_or_string_list_alias(
     input: &Value,
     keys: &[&str],
 ) -> Result<Option<Vec<String>>, OrbitError> {
-    optional_string_list_alias(input, keys).map(|values| {
-        values.map(|items| {
-            items
+    for key in keys {
+        let Some(value) = input.get(*key) else {
+            continue;
+        };
+        let values = optional_string_list_alias(input, &[*key])?;
+        return Ok(values.map(|items| match value {
+            Value::String(raw) if decode_json_string_array(raw.trim()).is_none() => items
                 .into_iter()
                 .flat_map(|item| split_csv(&item))
-                .collect::<Vec<_>>()
-        })
-    })
+                .collect(),
+            _ => items,
+        }));
+    }
+    Ok(None)
 }
 
 pub fn split_csv(raw: &str) -> Vec<String> {
