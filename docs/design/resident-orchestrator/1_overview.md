@@ -15,10 +15,13 @@ related_artifacts: [ORB-10332, ORB-10775, ORB-10776, ORB-10779, ORB-10788, ORB-1
 
 # Resident Orchestrator — Overview
 
-> **Status: Draft.** This folder specifies the v2 contract ([ORB-10815]). The v1 sequencer it
-> replaces is still what ships: one auto tick takes one action, and an in-progress epic holds all
-> auto-ship. Each child task flips its own section's claims to live behavior in the PR that
-> implements it. [§9](./2_design.md#9-what-v1-did-and-why-it-changed) records what v1 did.
+> **Status: Draft, landing incrementally.** This folder specifies the v2 contract ([ORB-10815]).
+> The epic worktree and the sequential child drain are **live** ([ORB-10816]); the epic agent,
+> epic-scoped completion with inlined delivery, and the drain window are **not yet built**. Until
+> they are, one auto tick still takes one action and `decision: hold` still freezes auto-ship
+> behind an in-progress epic. Each child task flips its own section's claims to live behavior in
+> the PR that implements it — see the status column in [§3](#3-at-a-glance).
+> [§10](./2_design.md#10-what-v1-did-and-why-it-changed) records what v1 did.
 
 V1 is two Orbit jobs, not one command. V2 keeps that split and changes what each job *is*.
 
@@ -80,8 +83,10 @@ note. It is no longer `epic_pipeline`'s completion gate; it serves the workspace
 flushing the backlog. Absent or zero means one tick. The deadline stops *starting* new work; in-flight
 children finish on their own.
 
-**Conflict admission.** An in-progress epic holds one reservation over the union of its descendants'
-`context_files`. Loose leaves are admitted by the ordinary overlap check. There is no `hold`.
+**Conflict admission.** An `epic`-tagged root holds one reservation over the union of its
+descendants' `context_files` — live since [ORB-10816] via `lock_context_files_for_task`. Loose
+leaves are then admitted by the ordinary overlap check. Deleting `decision: hold` so that check is
+the *only* gate is [ORB-10819]; until then `hold` still short-circuits it.
 
 **Session log.** Workspace-scoped append-only notebook (`orbit.session_log`), kinds `status`,
 `note`, `check_later`. Unresolved `check_later` rows are a scan wake reason. This is the memory
@@ -95,19 +100,20 @@ and explicit ship of the root is refused.
 
 ## 3. At a Glance
 
-| Concern | Where | Task |
-|---------|-------|------|
-| This split | this folder | [ORB-10776] |
-| Epic tag = supervisor delegation signal | [Epic tag is a supervisor delegation signal, not the job predicate](./4_decisions.md#epic-tag-is-a-supervisor-delegation-signal-not-the-job-predicate) | [ORB-10776] |
-| Clock and supervisor stay outside Orbit | [The supervisor clock is not an Orbit primitive](./4_decisions.md#the-supervisor-clock-is-not-an-orbit-primitive) | [ORB-10776] |
-| `orbit.session_log` (notes / check-later / status) | workspace session-log store + tools | [ORB-10784] |
-| `scan_unresolved_work` + `epic_pipeline` v1 | catalog | [ORB-10779] |
-| Epic owns one worktree; children land sequentially | [An epic owns one worktree and one branch](./4_decisions.md#an-epic-owns-one-worktree-and-one-branch) | [ORB-10816] |
-| Epic agent edits the tree instead of dispatching | [The epic agent works in the worktree instead of dispatching](./4_decisions.md#the-epic-agent-works-in-the-worktree-instead-of-dispatching) | [ORB-10817] |
-| Epic-scoped completion + inlined delivery | [Epic completion is epic-scoped](./4_decisions.md#epic-completion-is-epic-scoped-not-workspace-scoped) | [ORB-10818] |
-| Drain window, no `hold`, detached epic dispatch | [Auto drains for a window instead of taking one action](./4_decisions.md#auto-drains-for-a-window-instead-of-taking-one-action) | [ORB-10819] |
-| Child delivery inside an epic | `task_local_pipeline` onto the epic branch | [ORB-10816] |
-| HTTP epic retirement | removed assets | [ORB-10332] |
+| Concern | Where | Task | Status |
+|---------|-------|------|--------|
+| This split | this folder | [ORB-10776] | live |
+| Epic tag = supervisor delegation signal | [Epic tag is a supervisor delegation signal, not the job predicate](./4_decisions.md#epic-tag-is-a-supervisor-delegation-signal-not-the-job-predicate) | [ORB-10776] | live |
+| Clock and supervisor stay outside Orbit | [The supervisor clock is not an Orbit primitive](./4_decisions.md#the-supervisor-clock-is-not-an-orbit-primitive) | [ORB-10776] | live |
+| `orbit.session_log` (notes / check-later / status) | workspace session-log store + tools | [ORB-10784] | live |
+| `scan_unresolved_work` + `epic_pipeline` v1 | catalog | [ORB-10779] | live |
+| Epic owns one worktree; children land sequentially | [An epic owns one worktree and one branch](./4_decisions.md#an-epic-owns-one-worktree-and-one-branch) | [ORB-10816] | live |
+| Epic reservation over the descendant context union | `lock_context_files_for_task` | [ORB-10816] | live |
+| Epic agent edits the tree instead of dispatching | [The epic agent works in the worktree instead of dispatching](./4_decisions.md#the-epic-agent-works-in-the-worktree-instead-of-dispatching) | [ORB-10817] | planned |
+| Epic-scoped completion + inlined delivery | [Epic completion is epic-scoped](./4_decisions.md#epic-completion-is-epic-scoped-not-workspace-scoped) | [ORB-10818] | planned |
+| Drain window, no `hold`, detached epic dispatch | [Auto drains for a window instead of taking one action](./4_decisions.md#auto-drains-for-a-window-instead-of-taking-one-action) | [ORB-10819] | planned |
+| Child delivery inside an epic | `task_local_pipeline` onto the epic branch | [ORB-10816] | live |
+| HTTP epic retirement | removed assets | [ORB-10332] | live |
 
 ## Task References
 

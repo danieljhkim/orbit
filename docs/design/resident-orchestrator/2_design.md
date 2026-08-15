@@ -15,22 +15,35 @@ related_artifacts: [ORB-10332, ORB-10775, ORB-10776, ORB-10779, ORB-10788, ORB-1
 
 # Resident Orchestrator — Design
 
-> **Status: Draft.** This is the v2 contract ([ORB-10815]); v1 is what currently ships. [§10](#10-what-v1-did-and-why-it-changed)
-> records the v1 shape and why each piece changed. It still does not add a resident server, an
-> Orbit routine, conversation resume, or a comment-typed decision protocol.
+> **Status: Draft, landing incrementally.** This is the v2 contract ([ORB-10815]).
+> [§10](#10-what-v1-did-and-why-it-changed) records the v1 shape and why each piece changed. It
+> still does not add a resident server, an Orbit routine, conversation resume, or a comment-typed
+> decision protocol.
+>
+> | Section | State |
+> |---|---|
+> | [§1 Epic worktree and sequential child drain](#1-epic-worktree-and-sequential-child-drain) | **live** ([ORB-10816]) |
+> | [§2 Epic agent](#2-epic-agent-epic_orchestrator) | planned ([ORB-10817]) — the shipped activity is still the v1 dispatcher |
+> | [§3 `epic_pipeline` job](#3-epic_pipeline-job) | partly live — §1's phases ship; the agent step, completion gate, and delivery are [ORB-10818] |
+> | [§4 Workspace drain](#4-workspace-drain-workspace_auto_pipeline) | planned ([ORB-10819]) — the epic reservation is live, but `decision: hold` and the one-action tick still ship |
+> | [§5](#5-unresolved-work-scan)–[§8](#8-authority-and-completion) | live |
 
 ## 1. Epic worktree and sequential child drain
+
+> **Live** since [ORB-10816].
 
 An epic is one body of work, so it produces one branch that a human reviews once ([An epic owns one worktree and one branch](./4_decisions.md#an-epic-owns-one-worktree-and-one-branch), [ORB-10816]).
 
 `epic_pipeline` opens a **stable** worktree for the epic root through `worktree_setup`, passing an
-explicit `run_id: epic-<ORB-id>` and `branch_prefix: epic`. `WorktreeIdentity` already derives the
+explicit `run_id: epic-<ORB-id>` and `branch_prefix: epic`. `WorktreeIdentity` derives the
 directory from those two inputs, so the same epic resolves to the same worktree and branch across
 runs and reattaches rather than forking a second one. The root moves to `in-progress` and stays
 there for the life of the run, which is also what keeps `worktree_gc` from reclaiming the directory.
 
-Non-terminal descendants are drained **one at a time**, in dependency then priority/age order,
-each through `task_local_pipeline`:
+The `list_epic_descendants` deterministic action returns the root's non-terminal descendants in
+dependency then priority/age order. The job's `drain` loop lands them **one at a time**, each
+through an `invoke_and_wait` on `task_local_pipeline` followed by a `pipeline_success_guard` so a
+failed child stops the drain instead of silently skipping:
 
 | Input | Value | Why |
 |---|---|---|
@@ -38,9 +51,12 @@ each through `task_local_pipeline`:
 | `base_sync` | `local` | the epic branch has no remote counterpart |
 | `auto_push` | `false` | only delivery publishes |
 | `landing_branch` | the real workspace base | ORB-10644 obsolescence gate fails closed once the epic lands |
+| `terminal_status` | `done` | the child is finished when it merges into the epic branch |
 
-A child reaches **`done`** on merge into the epic branch, not `review`. The epic root is the single
-review artifact; N children in `review` for one epic is the fragmentation this design removes.
+A child reaches **`done`** on merge into the epic branch, not `review`. `task_local_pipeline`
+defaults `terminal_status` to `review`, so only an epic drain opts into `done`; the epic root is
+then the single review artifact, and N children in `review` for one epic is the fragmentation this
+design removes.
 
 Sequential is a requirement, not a simplification. `merge_with_rebase_retry` lands a child branch
 with `git merge --ff-only` plus at most two rebases against the moved base. Sequential children
@@ -52,6 +68,10 @@ already provide.
 An epic with **no** children is normal and skips this phase entirely.
 
 ## 2. Epic agent (`epic_orchestrator`)
+
+> **Planned** ([ORB-10817]). The shipped `epic_orchestrator` is still the v1 no-code-change
+> workspace-drain dispatcher: its description forbids editing the repository, and `epic_pipeline`
+> does not invoke it. Everything below is the target contract.
 
 `epic_orchestrator` is an `agent_loop` / `backend: cli` activity that runs **inside the epic
 worktree**, after the children have merged ([The epic agent works in the worktree instead of dispatching](./4_decisions.md#the-epic-agent-works-in-the-worktree-instead-of-dispatching), [ORB-10817]).
@@ -78,6 +98,10 @@ Conversation resume across fires stays out of scope. Each invoke starts fresh fr
 `orbit.session_log.list`.
 
 ## 3. `epic_pipeline` job
+
+> **Partly live.** The shipped job runs `resolve_ship_input` → `worktree` → `descendants` → the
+> `drain` loop of §1, then stops. The agent step, the completion gate, and delivery are [ORB-10818];
+> until they land, an epic run assembles the branch but does not ship it.
 
 ```text
 worktree = worktree_setup(epic root, run_id: epic-<id>, branch_prefix: epic)
@@ -107,6 +131,11 @@ epic root -> review (pr) | done (local)
 
 ## 4. Workspace drain (`workspace_auto_pipeline`)
 
+> **Planned** ([ORB-10819]). `classify_workspace_auto_tasks` still returns the four-way
+> `ship`/`hold`/`epic`/`empty` decision and still short-circuits to `hold` whenever an epic root is
+> `in-progress`; there is no window. The epic reservation this section depends on is already live
+> (see below).
+
 `orbit run ship` is a leaf implementer. The logistics verb is a separate job; that split from v1
 stands. What changes is that a tick becomes a **window** ([Auto drains for a window instead of taking one action](./4_decisions.md#auto-drains-for-a-window-instead-of-taking-one-action), [ORB-10819]).
 
@@ -132,11 +161,14 @@ loop
 - An expired window with nothing left is a plain success. Fail-closed lives at the epic gate (§3),
   not here.
 
-**Conflict admission replaces `hold`.** An in-progress epic holds one reservation covering the
-union of its descendants' `context_files`. Loose leaves are then admitted or excluded by machinery
-that already exists — `active_task_lock_holders` / `task_overlap_conflicts` at discovery, and
-`reserve_locks` atomically at the gate. The four-way `ship`/`hold`/`epic`/`empty` decision collapses
-to an admissible set.
+**Conflict admission replaces `hold`.** An `epic`-tagged root holds one reservation covering the
+union of its descendants' `context_files`. That union is **live** since [ORB-10816]:
+`lock_context_files_for_task` walks `parent_id` to collect every descendant's declared files when
+the task carries `tag: epic`, and both `active_task_lock_holders` and `task_overlap_conflicts` read
+through it. So loose leaves are already admitted or excluded by machinery that exists —
+`task_overlap_conflicts` at discovery, `reserve_locks` atomically at the gate. What [ORB-10819]
+still owes is deleting the short-circuit above it, collapsing the four-way
+`ship`/`hold`/`epic`/`empty` decision to an admissible set.
 
 A task is in the **epic family** when it carries `tag: epic` or any ancestor does. Walk `parent_id`
 the same way `list_backlog_tasks` already walks it for lock grouping.
@@ -264,7 +296,8 @@ the job fails at the ceiling rather than lying.
 
 ## 10. What v1 did and why it changed
 
-Recorded so a reader of the shipped code can tell the two apart until [ORB-10815] lands.
+Recorded so a reader of the shipped code can tell the two apart while [ORB-10815] lands child by
+child. The banner table at the top says which rows below are already true of the shipped code.
 
 | v1 | v2 | Why |
 |---|---|---|
