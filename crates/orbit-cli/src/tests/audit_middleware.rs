@@ -2,7 +2,7 @@ use clap::Parser;
 use orbit_common::types::AuditEvent;
 use serde_json::{Value, json};
 
-use crate::command::Cli;
+use crate::command::{Cli, Payload};
 
 use super::super::audit_middleware::*;
 use orbit_common::test_env::{self, AGENT_IDENTITY_ENV};
@@ -52,6 +52,25 @@ fn audit_event_for_actor(actor: ActorIdentity) -> AuditEvent {
         .into_iter()
         .next()
         .expect("single audit event")
+}
+
+#[test]
+fn nonzero_payload_exit_is_audited_as_failure() {
+    let runtime = OrbitRuntime::in_memory().expect("build in-memory runtime");
+    {
+        let mut guard = AuditGuard::new(&runtime, meta_for(&["orbit", "doctor"]));
+        let result = Ok(Payload::document(json!({"status": "error"}))
+            .with_exit_code(1)
+            .into());
+        guard.mark_result(&result);
+    }
+
+    let events = runtime
+        .list_audit_events(None, None, Some(AuditEventStatus::Failure), None, 8)
+        .expect("list audit events");
+    assert_eq!(events.len(), 1);
+    assert_eq!(events[0].command, "doctor");
+    assert_eq!(events[0].exit_code, 1);
 }
 
 #[test]

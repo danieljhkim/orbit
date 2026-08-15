@@ -76,6 +76,16 @@ impl From<Payload> for CommandOutput {
     }
 }
 
+impl CommandOutput {
+    /// The process exit code to use after this output has been rendered.
+    pub(crate) fn exit_code(&self) -> i32 {
+        match self {
+            Self::Silent => 0,
+            Self::Payload(payload) => payload.exit_code(),
+        }
+    }
+}
+
 /// A document and its human rendering.
 pub struct Payload {
     /// The `json`-mode document: an array for a list, an object for a detail
