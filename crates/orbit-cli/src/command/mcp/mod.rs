@@ -3,9 +3,11 @@
 //! `orbit mcp init/remove` manages local client integration for Claude Code,
 //! Codex, Gemini, and Grok. `orbit mcp serve` serves the Orbit tool surface over
 //! MCP so external clients can discover and invoke Orbit operations with typed
-//! JSON schemas.
+//! JSON schemas, and `orbit mcp listen` serves that same surface on a TCP
+//! socket for deployments that need one.
 
 mod command;
+mod listen;
 mod server;
 mod setup;
 

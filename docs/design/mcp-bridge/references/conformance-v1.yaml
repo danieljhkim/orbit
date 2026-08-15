@@ -23,9 +23,13 @@ transport:
     mechanism: direct ssh stdio
     argv_shape: "ssh -T -- <ssh-host> orbit mcp serve --remote-caller-machine-id <audit-label>"
     implementation: crates/orbit-mcp/src/remote/proxy.rs
+  socket:
+    mechanism: tcp listener, one independent session per accepted connection
+    argv_shape: "orbit mcp listen [ADDR] [--allow-non-loopback]"
+    implementation: crates/orbit-mcp/src/listener.rs
+    default_bind: loopback; a non-loopback bind is refused unless requested explicitly
+    policy: transport only — no capability, placement, owner-routing, or checkout layer
   forbidden:
-    - mcp tcp listener
-    - local port forwarding
     - shared broker process
     - client-side frame parsing or rewriting
     - third-machine relay
@@ -37,7 +41,7 @@ authority:
     - performs domain and sandbox validation through Core
     - records every tools/call through one Core audit boundary
   caller:
-    - selects an SSH destination
+    - selects an SSH destination or a listener address
     - forwards MCP bytes unchanged
     - may supply only audit metadata, never an authorization principal
   forbidden_client_preflight:
@@ -67,10 +71,10 @@ tool_definitions:
 audit_context:
   trace_id: generated once per MCP call
   caller_machine_id: opaque audit-only label; local fallback is host/local
-  caller_ip: best-effort first field of SSH_CONNECTION for SSH sessions
+  caller_ip: best-effort first field of SSH_CONNECTION for SSH sessions, or the accepted peer address for listener sessions
   process_machine_id: derived from the accepting machine registry
   process_host_id: derived from the accepting machine registry
-  transport: local or ssh-mcp
+  transport: local or ssh-mcp; a listener session is local and is distinguished by caller_ip
 
 workspace_selection:
   accepted_sources:
@@ -97,6 +101,8 @@ validation:
   protocol_roundtrip: crates/orbit-mcp/tests/mcp_wire_roundtrip.rs
   production_roundtrip: crates/orbit-cli/tests/mcp_roundtrip.rs
   remote_proxy: crates/orbit-mcp/src/remote/tests/proxy.rs
+  listener_bind_policy: crates/orbit-mcp/src/tests/listener.rs
+  listener_roundtrip: crates/orbit-mcp/tests/mcp_wire_roundtrip.rs
   server_identity: crates/orbit-mcp/src/remote/tests/identity.rs
   discovery: crates/orbit-mcp/src/remote/tests/discovery.rs
   unknown_call_audit: crates/orbit-cli/tests/mcp_roundtrip.rs

@@ -53,5 +53,6 @@ sidebar:
 | Command | Purpose |
 |---------|---------|
 | `orbit mcp init` / `orbit mcp remove` | Register or unregister MCP client integration for Claude Code, Codex, Gemini, and Grok Build. |
-| `orbit mcp serve` | Serve the safe default MCP tool surface. |
+| `orbit mcp serve` | Serve the MCP tool surface over stdio. |
+| `orbit mcp listen` | Serve the same MCP tool surface on a TCP socket, bound to loopback unless `--allow-non-loopback` is passed. |
 | `orbit web serve` | Serve the Orbit dashboard. |

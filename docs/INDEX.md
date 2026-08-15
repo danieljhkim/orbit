@@ -53,7 +53,7 @@ a conservative title/status fallback.
 | [Auto-tasks](./design/auto-tasks/1_overview.md) | Dynamically-defined recurring task templates minted by one generic scheduler routine — periodic work as data, not code. | Accepted | claude |
 | [Executors](./design/executors/4_decisions.md) | Decision log for executor registration and the (now retired) External Executor Protocol. | Draft | claude |
 | [Host Registry](./design/host-registry/1_overview.md) | The live host-registry feature is a machine-local identity and workspace catalog. | Accepted | codex |
-| [Orbit MCP](./design/mcp-bridge/1_overview.md) | One authoritative Orbit MCP server, reached either by local stdio or a byte-transparent direct SSH stdio proxy. | Draft | codex |
+| [Orbit MCP](./design/mcp-bridge/1_overview.md) | One authoritative Orbit MCP server, reached by local stdio, a byte-transparent direct SSH stdio proxy, or a loopback-default TCP listener. | Draft | codex |
 | [MCP Session Context](./design/mcp-session-context/1_overview.md) | ToolSessionContext is Orbit's transport-to-Core invocation envelope. | Accepted | codex |
 | [Operations as Data](./design/operations-as-data/1_overview.md) | Declaring each verb of a noun once as data so CLI, MCP, dashboard, and runtime handlers are derived adapters instead of four hand-copied layers. | Accepted | claude |
 | [Orbit Core](./design/orbit-core/1_overview.md) | Crate boundary and public-surface contract of orbit-core after the ORB-10016 orbit-cmd extraction. | Accepted | claude |

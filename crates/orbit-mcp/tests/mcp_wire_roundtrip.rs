@@ -2,16 +2,18 @@
 #![allow(missing_docs)]
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
+use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 
 use orbit_common::types::{
     McpToolDefinition, McpToolScope, OrbitError, ToolParam, ToolSchema, ToolSessionContext,
 };
-use orbit_mcp::{McpHost, OrbitToolServer};
+use orbit_mcp::{ListenerExposure, McpHost, McpListener, OrbitToolServer};
 use rmcp::ServiceExt;
 use rmcp::model::{CallToolRequestParams, ClientInfo, Meta};
 use serde_json::{Map, Value, json};
 use tokio::io::duplex;
+use tokio::net::TcpStream;
 
 struct EchoHost {
     contexts: Mutex<Vec<ToolSessionContext>>,
@@ -165,6 +167,109 @@ async fn generic_kernel_round_trips_initialize_list_call_and_error() {
     assert!(contexts[0].trace_id.is_some());
 
     server_task.abort();
+}
+
+/// The listener transport end to end: bind loopback, complete an
+/// initialize/list/call round trip over a real socket, and prove the accepted
+/// peer's IP reached the host's audit context — then take the listener down and
+/// show the socket is gone.
+#[tokio::test]
+async fn loopback_listener_round_trips_a_session_and_records_the_peer_ip() {
+    let host = Arc::new(EchoHost {
+        contexts: Mutex::new(Vec::new()),
+    });
+    let listener = McpListener::bind(
+        "127.0.0.1:0"
+            .parse::<SocketAddr>()
+            .expect("loopback address"),
+        ListenerExposure::LoopbackOnly,
+        host.clone() as Arc<dyn McpHost>,
+        ToolSessionContext::trusted_local(None, None, None),
+    )
+    .await
+    .expect("bind loopback listener");
+    let addr = listener.local_addr().expect("bound address");
+    assert_ne!(addr.port(), 0, "the kernel-assigned port must be readable");
+    let accepting = tokio::spawn(listener.serve());
+
+    let stream = TcpStream::connect(addr).await.expect("connect over TCP");
+    let (client_read, client_write) = tokio::io::split(stream);
+    let mut client_info = ClientInfo::default();
+    client_info.meta = Some(Meta(
+        json!({ "orbit": { "workspace": "/tmp/listener-workspace" } })
+            .as_object()
+            .expect("initialize metadata")
+            .clone(),
+    ));
+    let client = client_info
+        .serve((client_read, client_write))
+        .await
+        .expect("initialize over the listener");
+    assert_eq!(
+        client
+            .peer_info()
+            .expect("initialize result")
+            .server_info
+            .name,
+        "orbit-mcp"
+    );
+
+    let listed = client
+        .peer()
+        .list_tools(Default::default())
+        .await
+        .expect("tools/list");
+    assert!(
+        listed
+            .tools
+            .iter()
+            .any(|tool| tool.name.as_ref() == "demo_echo"),
+        "listener serves the same surface as stdio: {:?}",
+        listed.tools
+    );
+
+    let result = client
+        .peer()
+        .call_tool(call("demo_echo", json!({ "value": "over-tcp" })))
+        .await
+        .expect("tools/call");
+    assert_eq!(result.is_error, Some(false));
+    assert_eq!(
+        result.structured_content,
+        Some(json!({
+            "tool": "demo.echo",
+            "echo": "over-tcp",
+            "workspace": "/tmp/listener-workspace",
+        }))
+    );
+
+    {
+        let contexts = host.contexts.lock().expect("contexts");
+        assert_eq!(contexts.len(), 1, "one host call per tools/call");
+        assert_eq!(
+            contexts[0].caller_ip.as_deref(),
+            Some("127.0.0.1"),
+            "the accepted peer's IP must reach the audit context"
+        );
+        assert!(
+            contexts[0].origin_session_id.is_some(),
+            "each session mints its own origin id"
+        );
+        assert!(contexts[0].trace_id.is_some());
+    }
+
+    client.cancel().await.expect("close the MCP session");
+    accepting.abort();
+    assert!(
+        accepting
+            .await
+            .expect_err("the accept loop is cancelled, never resolved")
+            .is_cancelled()
+    );
+    assert!(
+        TcpStream::connect(addr).await.is_err(),
+        "the listening socket must be closed once the accept task is gone"
+    );
 }
 
 fn call(name: &str, args: Value) -> CallToolRequestParams {

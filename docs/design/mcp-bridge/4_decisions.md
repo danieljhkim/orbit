@@ -38,9 +38,28 @@ already provides SSH.
 `orbit mcp serve`. The child inherits stdin, stdout, and stderr. The proxy does not
 parse frames or retry calls.
 
-**Consequences.** There is no MCP listener, port-forward tunnel, shared broker, or
+**Consequences.** The remote path needs no port-forward tunnel, shared broker, or
 third-machine relay. SSH owns transport security and shell access; Orbit owns MCP
 framing only at the accepting process.
+
+## A socket deployment gets its own command, not a mode of `serve`
+
+**Context.** Some deployments need the server on a socket — typically a
+server-side Orbit reached through an SSH tunnel — but overloading the stdio
+server with a transport flag hid which server a given invocation was.
+
+**Decision.** `orbit mcp listen` is a separate command that serves the same host
+over TCP; `orbit mcp serve` stays stdio-only. The listener binds loopback unless
+`--allow-non-loopback` is passed, applies that policy before opening the socket,
+and serves each accepted connection as an independent session carrying the peer's
+IP as audit metadata.
+
+**Consequences.** A transport is chosen by naming it. The listener adds no
+capability filter, placement rule, owner routing, or checkout authority; a socket
+call reaches the same host and the same single Core dispatch and audit boundary a
+stdio call does. Because the socket authenticates no client, restricting who can
+reach it stays a deployment responsibility, and the default bind is the one that
+cannot be reached off-box.
 
 ## Every tool call crosses Core once
 

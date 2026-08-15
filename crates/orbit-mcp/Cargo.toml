@@ -17,7 +17,7 @@ orbit-registry = { path = "../orbit-registry" }
 orbit-tools = { path = "../orbit-tools" }
 rmcp = { version = "1.5", default-features = false, features = ["server", "transport-io"] }
 serde_json.workspace = true
-tokio = { workspace = true, features = ["io-std", "rt"] }
+tokio = { workspace = true, features = ["io-std", "net", "rt"] }
 tracing.workspace = true
 
 [dev-dependencies]

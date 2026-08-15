@@ -36,6 +36,21 @@ Use `orbit tool list` to inspect the current local registry. MCP exposure is a
 capability-filtered subset of that registry. The retired graph tools are not
 exposed.
 
+## Listen on a socket
+
+Deployments that need the server on a port — a server-side Orbit reached through
+an SSH tunnel, for example — use the listener instead:
+
+```bash
+orbit mcp listen              # binds 127.0.0.1:7879
+orbit mcp listen 127.0.0.1:9000
+```
+
+It serves the same tool surface as `orbit mcp serve`, one independent session per
+connection. The socket authenticates no client, so it binds loopback; a wider bind
+requires `--allow-non-loopback` and a network path you have restricted by other
+means.
+
 ## Remove
 
 ```bash

@@ -13,11 +13,12 @@
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
 use std::collections::BTreeSet;
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufRead, BufReader, Read, Write};
+use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
-use std::process::{Child, ChildStdin, Command, Stdio};
+use std::process::{Child, Command, Stdio};
 use std::sync::mpsc::{Receiver, channel};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use rusqlite::Connection;
 use serde_json::{Value, json};
@@ -128,7 +129,28 @@ impl McpWorkspace {
             .spawn()
             .expect("spawn orbit mcp serve");
         let mut client = McpClient::new(child);
+        self.initialize(&mut client);
+        client
+    }
 
+    /// Spawn `orbit mcp listen` on `addr` and run the same handshake over the
+    /// socket it accepts.
+    fn listen(&self, addr: SocketAddr) -> McpClient {
+        let child = Self::orbit_command(&self.work, &self.home)
+            .args(["mcp", "listen", &addr.to_string()])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("spawn orbit mcp listen");
+        let mut client = McpClient::over_tcp(child, connect_when_listening(addr));
+        self.initialize(&mut client);
+        client
+    }
+
+    /// The MCP initialize handshake, announcing this workspace via
+    /// `_meta.orbit.workspace`.
+    fn initialize(&self, client: &mut McpClient) {
         let workspace = self.work.to_str().expect("utf8 workspace path");
         let response = client.request(
             "initialize",
@@ -147,18 +169,45 @@ impl McpWorkspace {
             "tools capability missing: {result}"
         );
         client.notify("notifications/initialized");
-        client
+    }
+}
+
+/// Reserve a loopback port by binding it and letting it go again. This is the
+/// practical way to hand a spawned process an unused port: the listener cannot
+/// report its own bound port back to the test.
+fn free_loopback_addr() -> SocketAddr {
+    let probe = TcpListener::bind("127.0.0.1:0").expect("probe a free loopback port");
+    probe.local_addr().expect("probe address")
+}
+
+/// Connect once the spawned server has bound, or fail loudly on the timeout the
+/// rest of this suite uses.
+fn connect_when_listening(addr: SocketAddr) -> TcpStream {
+    let deadline = Instant::now() + RESPONSE_TIMEOUT;
+    loop {
+        match TcpStream::connect(addr) {
+            Ok(stream) => return stream,
+            Err(error) => {
+                assert!(
+                    Instant::now() < deadline,
+                    "listener never accepted on {addr}: {error}"
+                );
+                std::thread::sleep(Duration::from_millis(25));
+            }
+        }
     }
 }
 
 // ---------------------------------------------------------------------------
-// Minimal JSON-RPC stdio client. Responses may arrive out of order (the
-// server fans tool calls into blocking workers), so match strictly by id.
+// Minimal JSON-RPC client over the server's newline-delimited byte stream —
+// the child's stdio, or a socket when the server is a listener. Responses may
+// arrive out of order (the server fans tool calls into blocking workers), so
+// match strictly by id.
 // ---------------------------------------------------------------------------
 
 struct McpClient {
     child: Child,
-    stdin: ChildStdin,
+    writer: Box<dyn Write + Send>,
     lines: Receiver<String>,
     next_id: i64,
 }
@@ -167,9 +216,24 @@ impl McpClient {
     fn new(mut child: Child) -> Self {
         let stdin = child.stdin.take().expect("child stdin");
         let stdout = child.stdout.take().expect("child stdout");
+        Self::over_streams(child, Box::new(stdin), Box::new(stdout))
+    }
+
+    /// A session against `orbit mcp listen`, where the same protocol runs over
+    /// an accepted socket instead of the child's stdio.
+    fn over_tcp(child: Child, stream: TcpStream) -> Self {
+        let reader = stream.try_clone().expect("clone the MCP socket for reads");
+        Self::over_streams(child, Box::new(stream), Box::new(reader))
+    }
+
+    fn over_streams(
+        child: Child,
+        writer: Box<dyn Write + Send>,
+        reader: Box<dyn Read + Send>,
+    ) -> Self {
         let (sender, lines) = channel();
         std::thread::spawn(move || {
-            for line in BufReader::new(stdout).lines() {
+            for line in BufReader::new(reader).lines() {
                 let Ok(line) = line else { break };
                 if sender.send(line).is_err() {
                     break;
@@ -178,7 +242,7 @@ impl McpClient {
         });
         Self {
             child,
-            stdin,
+            writer,
             lines,
             next_id: 0,
         }
@@ -187,10 +251,10 @@ impl McpClient {
     fn send(&mut self, message: &Value) {
         let mut line = serde_json::to_string(message).expect("serialize message");
         line.push('\n');
-        self.stdin
+        self.writer
             .write_all(line.as_bytes())
-            .expect("write to server stdin");
-        self.stdin.flush().expect("flush server stdin");
+            .expect("write to the server");
+        self.writer.flush().expect("flush the server stream");
     }
 
     fn notify(&mut self, method: &str) {
@@ -559,6 +623,86 @@ fn ssh_marked_mcp_server_audits_caller_and_server_identity_separately() {
             .is_some_and(|id| id.starts_with("trace-"))
     );
     assert_eq!(workspace_audit.7.as_deref(), Some("192.0.2.8"));
+}
+
+/// The TCP listener through the production binary: same tool surface, same
+/// single Core dispatch and audit boundary, plus the accepted peer's IP.
+#[test]
+fn mcp_listen_round_trips_over_a_loopback_socket_and_audits_the_peer_ip() {
+    let workspace = McpWorkspace::init();
+    let addr = free_loopback_addr();
+    let mut client = workspace.listen(addr);
+
+    let listed = client.request("tools/list", Value::Null);
+    let names = listed["result"]["tools"]
+        .as_array()
+        .expect("tools array")
+        .iter()
+        .filter_map(|tool| tool["name"].as_str())
+        .collect::<BTreeSet<_>>();
+    assert!(
+        names.contains("orbit_task_add"),
+        "listener serves the same surface as stdio: {names:?}"
+    );
+
+    let created = client.call_tool_ok(
+        "orbit_task_add",
+        json!({
+            "title": "Listener round trip",
+            "description": "Created over the MCP TCP listener",
+            "model": "codex",
+        }),
+    );
+    assert_eq!(created["title"], "Listener round trip");
+    let task_id = created["id"].as_str().expect("task id").to_string();
+    assert_eq!(
+        client.call_tool_ok("orbit_task_show", json!({ "id": task_id }))["title"],
+        "Listener round trip"
+    );
+
+    // Dropping the client kills the server, which closes the listening socket.
+    drop(client);
+    assert!(
+        TcpStream::connect(addr).is_err(),
+        "the listening socket must be gone once the server exits"
+    );
+
+    let connection =
+        Connection::open(workspace.home.join(".orbit/orbit.db")).expect("open server audit store");
+    let audit = connection
+        .query_row(
+            "SELECT COUNT(*), status, transport, caller_ip, trace_id
+             FROM audit_events WHERE tool_name = 'orbit.task.add'",
+            [],
+            |row| {
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, Option<String>>(2)?,
+                    row.get::<_, Option<String>>(3)?,
+                    row.get::<_, Option<String>>(4)?,
+                ))
+            },
+        )
+        .expect("listener task audit");
+    assert_eq!(audit.0, 1, "one audit row per accepted call");
+    assert_eq!(audit.1, "success");
+    assert_eq!(
+        audit.2.as_deref(),
+        Some("local"),
+        "a listener session is served by the same local process as stdio"
+    );
+    assert_eq!(
+        audit.3.as_deref(),
+        Some("127.0.0.1"),
+        "the accepted peer's IP is persisted through the audit context"
+    );
+    assert!(
+        audit
+            .4
+            .as_deref()
+            .is_some_and(|id| id.starts_with("trace-"))
+    );
 }
 
 #[test]
