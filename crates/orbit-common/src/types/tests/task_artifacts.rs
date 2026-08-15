@@ -247,8 +247,9 @@ mod relations {
 
     #[test]
     fn produces_and_resolves_accept_cross_artifact_targets() {
+        // Supported target families: task (ORB-), friction (FYYYY-MM-NNN), ADR (ADR-NNNN).
         for relation_type in [TaskRelationType::Produces, TaskRelationType::Resolves] {
-            for target in ["ORB-00002", "F2026-05-007", "L-0001", "ADR-0001"] {
+            for target in ["ORB-00002", "F2026-05-007", "ADR-0001"] {
                 let relations = vec![TaskRelation {
                     relation_type,
                     target: target.to_string(),
@@ -256,6 +257,24 @@ mod relations {
                 assert!(
                     validate_task_relations_for_source("ORB-00001", &relations, &[]).is_ok(),
                     "{relation_type:?} should accept {target}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn produces_and_resolves_reject_unsupported_targets() {
+        // "L-0001" is a retired learning-subsystem id; it must not be treated
+        // as an active relation contract even though it once was.
+        for relation_type in [TaskRelationType::Produces, TaskRelationType::Resolves] {
+            for target in ["L-0001", "not-an-id"] {
+                let relations = vec![TaskRelation {
+                    relation_type,
+                    target: target.to_string(),
+                }];
+                assert!(
+                    validate_task_relations_for_source("ORB-00001", &relations, &[]).is_err(),
+                    "{relation_type:?} should reject {target}"
                 );
             }
         }
