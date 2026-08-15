@@ -63,7 +63,7 @@ A **crew** is one provider-model assignment. Activities do not carry a model-sel
 
 | Field | Purpose | Values |
 |---|---|---|
-| `model` | Model identifier passed to the provider CLI | Provider-specific (e.g. `opus`, `sonnet`, `gpt-5.6-sol`, `pro`, `grok-4.6`) |
+| `model` | Model identifier passed to the provider CLI | Provider-specific (e.g. `opus`, `sonnet`, `gpt-5.6-sol`, `gemini-3.7-flash`, `grok-4.6`) |
 | `provider` | Agent family | `claude`, `codex`, `gemini`, `grok` (the CLI-executable families; see [Provider identity and resolution](#provider-identity-and-resolution) for the full canonical set) |
 | `description` | Optional human-facing crew summary | Any non-empty string after trimming |
 | `tags` | Optional discovery labels | Array of strings; normalized, sorted, and deduplicated |
