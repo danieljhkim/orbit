@@ -5,6 +5,8 @@
 use std::fs;
 use std::path::Path;
 use std::process::Command as StdCommand;
+use std::thread;
+use std::time::{Duration, Instant};
 
 use assert_cmd::Command as AssertCommand;
 use assert_cmd::cargo::cargo_bin_cmd;
@@ -78,6 +80,87 @@ fn config_show_reports_shared_and_local_roots_for_git_worktrees_and_overrides() 
     assert!(
         !linked_orbit.exists(),
         "resolution should not materialize a linked-worktree .orbit directory"
+    );
+}
+
+/// [ORB-10821] `orbit --root <custom> run job` must execute in that custom
+/// store. Before the fix the parent persisted the run under `--root` and
+/// reported `submitted`, then the detached worker rediscovered `$HOME/.orbit`
+/// and exited with `job run not found`, leaving the run pending forever.
+#[test]
+fn run_job_with_explicit_root_completes_instead_of_staying_pending() {
+    let temp = tempdir().expect("tempdir");
+    let home = temp.path().join("home");
+    let repo = temp.path().join("repo");
+    let custom_root = temp.path().join("custom-orbit");
+    fs::create_dir_all(&home).expect("create home");
+    fs::create_dir_all(&repo).expect("create repo");
+    init_git_repo(&repo);
+
+    run_orbit_success(
+        &repo,
+        &home,
+        &[
+            "--root",
+            custom_root.to_str().expect("utf8 custom root"),
+            "workspace",
+            "init",
+        ],
+        None,
+    );
+
+    let job_path = repo.join("root-override-smoke.yaml");
+    fs::write(
+        &job_path,
+        r#"schemaVersion: 2
+kind: Job
+metadata:
+  name: root_override_smoke
+spec:
+  state: enabled
+  kind: workflow
+  steps:
+    - id: nap
+      default_input:
+        seconds: 0
+      spec:
+        type: deterministic
+        action: sleep
+        config: {}
+"#,
+    )
+    .expect("write smoke job");
+
+    let custom_root_arg = custom_root.to_string_lossy().into_owned();
+    let job_path_arg = job_path.to_string_lossy().into_owned();
+    let submitted = run_orbit_json(
+        &repo,
+        &home,
+        &[
+            "--root",
+            &custom_root_arg,
+            "run",
+            "job",
+            &job_path_arg,
+            "--json",
+        ],
+        None,
+    );
+    let run_id = submitted["run_id"]
+        .as_str()
+        .unwrap_or_else(|| panic!("expected run_id in {submitted}"))
+        .to_string();
+    assert_eq!(submitted["state"].as_str(), Some("submitted"));
+
+    let shown = wait_for_run_terminal_state(&repo, &home, &custom_root_arg, &run_id);
+    let state = shown["run"]["state"].as_str().unwrap_or("missing");
+    let worker_log = custom_root
+        .join("state/logs")
+        .join(format!("{run_id}.worker.log"));
+    let worker_log_text = fs::read_to_string(&worker_log).unwrap_or_default();
+    assert_eq!(
+        state, "success",
+        "run {run_id} must complete under --root {custom_root_arg}; last show={shown}; worker log:\n{worker_log_text}"
     );
 }
 
@@ -168,6 +251,29 @@ fn assert_root_fields(value: &Value, shared_root: &Path, local_root: &Path) {
         value.get("selected_root").is_none(),
         "legacy `selected_root` alias must be removed from `config show --json` output (use `shared_root`)"
     );
+}
+
+fn wait_for_run_terminal_state(cwd: &Path, home: &Path, custom_root: &str, run_id: &str) -> Value {
+    let deadline = Instant::now() + Duration::from_secs(15);
+    loop {
+        let last = run_orbit_json(
+            cwd,
+            home,
+            &["--root", custom_root, "run", "show", run_id, "--json"],
+            None,
+        );
+        if last["run"]["state"]
+            .as_str()
+            .is_some_and(|state| state != "pending" && state != "running")
+        {
+            return last;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "run {run_id} stayed non-terminal under --root {custom_root}; last show={last}"
+        );
+        thread::sleep(Duration::from_millis(50));
+    }
 }
 
 fn string_field<'a>(value: &'a Value, field: &str) -> &'a str {

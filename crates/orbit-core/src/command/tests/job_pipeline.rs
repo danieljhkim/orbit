@@ -1,11 +1,11 @@
 use std::ffi::OsStr;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::thread;
 use std::time::{Duration, Instant};
 
 use chrono::Utc;
-use orbit_common::types::{AuditEventStatus, JobRunState, OrbitError};
+use orbit_common::types::{AuditEventStatus, JobRunState, OrbitError, WorkspacePaths};
 use orbit_store::sqlite::migration::SUPPORTED_SCHEMA_VERSION;
 use tempfile::TempDir;
 
@@ -13,7 +13,7 @@ use crate::OrbitRuntime;
 use crate::command::job::JobRunListParams;
 use crate::command::job::pipeline::{
     configure_pipeline_worker_command, configure_pipeline_worker_stdio, pipeline_worker_log_path,
-    resolve_pipeline_worker_executable,
+    pipeline_worker_root_override, resolve_pipeline_worker_executable,
 };
 use crate::command::task::TaskAddParams;
 use crate::command::workflow::ShipMode;
@@ -45,7 +45,7 @@ fn pipeline_worker_command_discovers_registered_workspace_from_cwd() {
     let workspace = Path::new("/registered/workspace");
     let mut command = Command::new("orbit");
 
-    configure_pipeline_worker_command(&mut command, workspace, "jrun-child");
+    configure_pipeline_worker_command(&mut command, workspace, "jrun-child", None);
 
     assert_eq!(
         command.get_args().collect::<Vec<_>>(),
@@ -54,9 +54,54 @@ fn pipeline_worker_command_discovers_registered_workspace_from_cwd() {
             OsStr::new("run-pipeline-worker"),
             OsStr::new("jrun-child"),
         ],
-        "an explicit --root pins the worker to the wrong global store"
+        "an unpinned parent must not pass --root; that pins both roots and disconnects the worker from the global store"
     );
     assert_eq!(command.get_current_dir(), Some(workspace));
+}
+
+#[test]
+fn pipeline_worker_command_forwards_explicit_root_to_the_detached_worker() {
+    let workspace = Path::new("/registered/workspace");
+    let pinned_root = Path::new("/tmp/custom-orbit");
+    let mut command = Command::new("orbit");
+
+    configure_pipeline_worker_command(&mut command, workspace, "jrun-child", Some(pinned_root));
+
+    assert_eq!(
+        command.get_args().collect::<Vec<_>>(),
+        vec![
+            OsStr::new("--root"),
+            OsStr::new("/tmp/custom-orbit"),
+            OsStr::new("job"),
+            OsStr::new("run-pipeline-worker"),
+            OsStr::new("jrun-child"),
+        ],
+        "a parent constructed with --root must forward that same global store to the worker"
+    );
+    assert_eq!(command.get_current_dir(), Some(workspace));
+}
+
+#[test]
+fn pipeline_worker_root_override_is_none_in_the_default_split_root_layout() {
+    let paths = WorkspacePaths::new(
+        PathBuf::from("/repo"),
+        PathBuf::from("/repo/.orbit"),
+        PathBuf::from("/home/user/.orbit"),
+    );
+    assert_eq!(pipeline_worker_root_override(&paths), None);
+}
+
+#[test]
+fn pipeline_worker_root_override_forwards_a_pinned_global_store() {
+    let paths = WorkspacePaths::new(
+        PathBuf::from("/repo"),
+        PathBuf::from("/tmp/custom-orbit"),
+        PathBuf::from("/tmp/custom-orbit"),
+    );
+    assert_eq!(
+        pipeline_worker_root_override(&paths),
+        Some(Path::new("/tmp/custom-orbit"))
+    );
 }
 
 #[cfg(unix)]
