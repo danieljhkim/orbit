@@ -1,65 +1,77 @@
+use std::borrow::Cow;
 use std::path::Path;
 
 use orbit_common::types::OrbitError;
 
-use orbit_common::utility::fs::write_text_with_parent;
-
 use crate::OrbitRuntime;
 use crate::skill_catalog::{LoadedSkill, SkillCatalogDoctorStatus};
 
-const DEFAULT_SKILL_FILES: [(&str, &str); 4] = [
-    ("orbit", include_str!("../../assets/skills/orbit/SKILL.md")),
+use super::{ManagedAssetLayout, ManagedAssetReconciliation, reconcile_managed_assets};
+
+/// Every shipped skill file, keyed by its path relative to the skills root.
+///
+/// Skills are directory trees rather than single documents, so their managed
+/// manifest keys on the relative path ([`ManagedAssetLayout::RelativePath`])
+/// instead of a bare definition name. Keep each skill's `SKILL.md` adjacent to
+/// its reference files: the ordering here is what a reader uses to see a
+/// skill's full shipped surface at a glance.
+pub(crate) const DEFAULT_SKILL_FILES: [(&str, &str); 11] = [
     (
-        "orbit-task",
+        "orbit/SKILL.md",
+        include_str!("../../assets/skills/orbit/SKILL.md"),
+    ),
+    (
+        "orbit/references/guide.md",
+        include_str!("../../assets/skills/orbit/references/guide.md"),
+    ),
+    (
+        "orbit-task/SKILL.md",
         include_str!("../../assets/skills/orbit-task/SKILL.md"),
     ),
     (
-        "orbit-workflow",
-        include_str!("../../assets/skills/orbit-workflow/SKILL.md"),
-    ),
-    (
-        "orbit-search",
-        include_str!("../../assets/skills/orbit-search/SKILL.md"),
-    ),
-];
-
-const DEFAULT_SKILL_RESOURCE_FILES: [(&str, &str, &str); 7] = [
-    (
-        "orbit-task",
-        "references/review.md",
+        "orbit-task/references/review.md",
         include_str!("../../assets/skills/orbit-task/references/review.md"),
     ),
     (
-        "orbit-task",
-        "references/friction.md",
+        "orbit-task/references/friction.md",
         include_str!("../../assets/skills/orbit-task/references/friction.md"),
     ),
     (
-        "orbit-search",
-        "references/docs-corpus.md",
-        include_str!("../../assets/skills/orbit-search/references/docs-corpus.md"),
+        "orbit-workflow/SKILL.md",
+        include_str!("../../assets/skills/orbit-workflow/SKILL.md"),
     ),
     (
-        "orbit-workflow",
-        "references/debug-job-failure.md",
+        "orbit-workflow/references/debug-job-failure.md",
         include_str!("../../assets/skills/orbit-workflow/references/debug-job-failure.md"),
     ),
     (
-        "orbit-workflow",
-        "references/common_failures.md",
+        "orbit-workflow/references/common_failures.md",
         include_str!("../../assets/skills/orbit-workflow/references/common_failures.md"),
     ),
     (
-        "orbit-workflow",
-        "references/operational-logs.md",
+        "orbit-workflow/references/operational-logs.md",
         include_str!("../../assets/skills/orbit-workflow/references/operational-logs.md"),
     ),
     (
-        "orbit",
-        "references/guide.md",
-        include_str!("../../assets/skills/orbit/references/guide.md"),
+        "orbit-search/SKILL.md",
+        include_str!("../../assets/skills/orbit-search/SKILL.md"),
+    ),
+    (
+        "orbit-search/references/docs-corpus.md",
+        include_str!("../../assets/skills/orbit-search/references/docs-corpus.md"),
     ),
 ];
+
+/// The `SKILL.md` entry point of every shipped skill, as `(id, content)`.
+/// A skill id is the first path component of its managed asset paths.
+pub(crate) fn default_skill_files() -> Vec<(&'static str, &'static str)> {
+    DEFAULT_SKILL_FILES
+        .iter()
+        .filter_map(|(relative, content)| {
+            relative.strip_suffix("/SKILL.md").map(|id| (id, *content))
+        })
+        .collect()
+}
 
 use crate::paths::ORBIT_ROOT_TOKEN;
 
@@ -77,47 +89,39 @@ pub struct SkillDoctorResult {
     pub message: String,
 }
 
-pub(crate) fn default_skill_ids() -> [&'static str; 4] {
-    DEFAULT_SKILL_FILES.map(|(id, _)| id)
+pub(crate) fn default_skill_ids() -> Vec<&'static str> {
+    default_skill_files()
+        .into_iter()
+        .map(|(id, _)| id)
+        .collect()
 }
 
+/// Materialize the shipped skill trees under `skills_root`, recording the
+/// digest Orbit wrote for each file so a skill (or a single reference file)
+/// dropped from a later release can be retired by content provenance.
+///
+/// The digest covers the *rendered* document: `ORBIT_ROOT_TOKEN` resolves to
+/// the absolute root before the write, so an unchanged release re-seeds as a
+/// no-op on the same root.
+// ADR-0366: skills are managed by relative path, so a single reference
+// file can be retired independently of its SKILL.md.
 pub(crate) fn seed_default_skills(
     skills_root: &Path,
     orbit_root: &Path,
     overwrite: bool,
-) -> Result<usize, OrbitError> {
-    let mut count = 0usize;
-    for (id, content) in DEFAULT_SKILL_FILES {
-        let path = skills_root.join(id).join("SKILL.md");
-        if !overwrite && path.exists() {
-            continue;
-        }
-        let rendered = inject_skill_template_tokens(content, orbit_root);
-        write_text_with_parent(&path, &rendered)?;
-        seed_default_skill_resources(&skills_root.join(id), id, orbit_root, overwrite)?;
-        count += 1;
-    }
-    Ok(count)
-}
-
-fn seed_default_skill_resources(
-    skill_dir: &Path,
-    skill_id: &str,
-    orbit_root: &Path,
-    overwrite: bool,
-) -> Result<(), OrbitError> {
-    for (resource_skill_id, relative_path, content) in DEFAULT_SKILL_RESOURCE_FILES {
-        if resource_skill_id != skill_id {
-            continue;
-        }
-        let path = skill_dir.join(relative_path);
-        if !overwrite && path.exists() {
-            continue;
-        }
-        let rendered = inject_skill_template_tokens(content, orbit_root);
-        write_text_with_parent(&path, &rendered)?;
-    }
-    Ok(())
+) -> Result<ManagedAssetReconciliation, OrbitError> {
+    reconcile_managed_assets(
+        skills_root,
+        "skill",
+        ManagedAssetLayout::RelativePath,
+        &DEFAULT_SKILL_FILES,
+        overwrite,
+        |_, content| {
+            Ok(Cow::Owned(inject_skill_template_tokens(
+                content, orbit_root,
+            )))
+        },
+    )
 }
 
 pub(crate) fn is_default_skill_file_for_root(
@@ -125,8 +129,8 @@ pub(crate) fn is_default_skill_file_for_root(
     path: &Path,
     orbit_root: &Path,
 ) -> Result<bool, OrbitError> {
-    let Some((_, content)) = DEFAULT_SKILL_FILES
-        .iter()
+    let Some((_, content)) = default_skill_files()
+        .into_iter()
         .find(|(default_id, _)| *default_id == skill_id)
     else {
         return Ok(false);
@@ -138,7 +142,7 @@ pub(crate) fn is_default_skill_file_for_root(
     Ok(existing == inject_skill_template_tokens(content, orbit_root))
 }
 
-fn inject_skill_template_tokens(raw: &str, orbit_root: &Path) -> String {
+pub(crate) fn inject_skill_template_tokens(raw: &str, orbit_root: &Path) -> String {
     let orbit_root_value = orbit_root.to_string_lossy();
     raw.replace(ORBIT_ROOT_TOKEN, orbit_root_value.as_ref())
 }

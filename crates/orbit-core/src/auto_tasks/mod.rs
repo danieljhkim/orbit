@@ -23,7 +23,7 @@ use std::path::Path;
 
 use orbit_common::types::{OrbitError, parse_auto_task_yaml};
 
-use crate::command::seed_embedded_assets;
+use crate::command::{ManagedAssetLayout, ManagedAssetReconciliation, reconcile_managed_assets};
 
 pub mod crud;
 pub mod loader;
@@ -60,10 +60,19 @@ pub(crate) const DEFAULT_AUTO_TASK_FILES: &[(&str, &str)] = &[
 /// Seed missing default auto-task definitions without changing an existing
 /// workspace-authored definition. Each asset is parsed before it is written so
 /// a release cannot install an unloadable default.
-pub(crate) fn seed_default_auto_tasks(orbit_dir: &Path) -> Result<usize, OrbitError> {
+///
+/// Seeding is manifest-aware: the digest Orbit wrote for each default is
+/// recorded so a definition dropped from a later release can be retired by
+/// content provenance instead of lingering in every existing workspace.
+// ADR-0366: auto-tasks joined the ADR-0346 managed-asset mechanism.
+pub(crate) fn seed_default_auto_tasks(
+    orbit_dir: &Path,
+) -> Result<ManagedAssetReconciliation, OrbitError> {
     let auto_tasks_dir = auto_tasks_dir(orbit_dir);
-    seed_embedded_assets(
+    reconcile_managed_assets(
         &auto_tasks_dir,
+        "auto_task",
+        ManagedAssetLayout::YamlStem,
         DEFAULT_AUTO_TASK_FILES,
         false,
         |name, content| {

@@ -46,7 +46,9 @@ fn healthy_fresh_workspace_has_no_failures() {
     let runtime = OrbitRuntime::in_memory().expect("build runtime");
     let results = runtime.doctor_workspace().expect("doctor");
 
-    assert_eq!(results.len(), 8, "one row per check: {results:?}");
+    // Eight infrastructure checks plus one definition-artifact row per kind
+    // (skills, jobs, activities, auto-tasks, routines).
+    assert_eq!(results.len(), 13, "one row per check: {results:?}");
     assert!(
         results
             .iter()

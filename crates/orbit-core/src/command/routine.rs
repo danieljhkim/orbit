@@ -21,7 +21,7 @@ use std::path::Path;
 
 use orbit_common::types::{OrbitError, parse_routine_yaml};
 
-use super::seed_embedded_assets;
+use super::{ManagedAssetLayout, ManagedAssetReconciliation, reconcile_managed_assets};
 
 /// Shippable default routine assets, seeded under
 /// `<workspace>/.orbit/routines/<file>.yaml` on `orbit init`. Every entry
@@ -59,23 +59,33 @@ const ROUTINE_NAME_PLACEHOLDER: &str = "__ORBIT_ROUTINE_NAME__";
 /// job seeding convention: when `overwrite` is false (plain re-init),
 /// existing files are preserved. Destructive initialization may set
 /// `overwrite`, though `--force` normally recreates the whole root first.
+///
+/// Seeding is manifest-aware: the recorded digest is taken over the *rendered*
+/// document — after host-id and routine-name substitution — because that is
+/// what actually lands on disk. A default dropped from a later release is
+/// therefore retired by content provenance, and a re-seed of unchanged
+/// embedded content is a no-op rather than a rewrite.
 // ADR-0215: default routines are seeded per workspace with host and name
 // resolved at seed time — routines have no global directory and v1 requires
 // explicit host pinning and host-unique names.
+// ADR-0366: the recorded digest covers the rendered document, so a
+// placeholder-substituting asset still gets honest provenance.
 pub(crate) fn seed_default_routines(
     routines_dir: &Path,
     host_id: &str,
     workspace_slug: Option<&str>,
     overwrite: bool,
-) -> Result<usize, OrbitError> {
+) -> Result<ManagedAssetReconciliation, OrbitError> {
     let host_id = host_id.trim();
     if host_id.is_empty() {
         return Err(OrbitError::InvalidInput(
             "cannot seed default routines without a host id".to_string(),
         ));
     }
-    seed_embedded_assets(
+    reconcile_managed_assets(
         routines_dir,
+        "routine",
+        ManagedAssetLayout::YamlStem,
         DEFAULT_ROUTINE_FILES,
         overwrite,
         |file_stem, template| {
@@ -135,7 +145,7 @@ mod tests {
         let routines_dir = root.path().join(".orbit/routines");
         let seeded = seed_default_routines(&routines_dir, "test-host", Some("My Repo!"), true)
             .expect("seed default routines");
-        assert_eq!(seeded, DEFAULT_ROUTINE_FILES.len());
+        assert_eq!(seeded.refreshed, DEFAULT_ROUTINE_FILES.len());
 
         for (stem, target) in [
             ("auto_task_scheduler", "auto_task_scheduler_pipeline"),
@@ -207,7 +217,7 @@ mod tests {
         std::fs::write(&path, "user edited").expect("simulate user edit");
 
         let seeded = seed_default_routines(&routines_dir, "host-a", None, false).expect("re-seed");
-        assert_eq!(seeded, 0);
+        assert_eq!(seeded.refreshed, 0);
         assert_eq!(
             std::fs::read_to_string(&path).expect("read"),
             "user edited",
@@ -240,7 +250,7 @@ mod tests {
 
         let seeded = seed_default_routines(&routines_dir, "host-b", Some("workspace"), false)
             .expect("plain re-init");
-        assert_eq!(seeded, 1, "only the missing default is created");
+        assert_eq!(seeded.refreshed, 1, "only the missing default is created");
         assert_eq!(
             std::fs::read(&existing).expect("read existing routine bytes"),
             original,
@@ -253,6 +263,53 @@ mod tests {
         .expect("newly seeded task-pilot routine parses");
         assert_eq!(pilot.hosts, vec!["host-b".to_string()]);
         assert!(!pilot.enabled);
+    }
+
+    /// The recorded digest covers the *rendered* document, so re-seeding
+    /// unchanged embedded content against the same host and workspace must not
+    /// rewrite a single file — even under `overwrite`. A steady-state
+    /// bootstrap can then run against a read-only routines directory.
+    #[test]
+    fn reseeding_unchanged_rendered_content_is_a_no_op_not_a_rewrite() {
+        let root = tempdir().expect("create tempdir");
+        let routines_dir = root.path().join("routines");
+        seed_default_routines(&routines_dir, "host-a", Some("workspace"), true)
+            .expect("first seed");
+
+        let before: Vec<(std::path::PathBuf, std::time::SystemTime)> = DEFAULT_ROUTINE_FILES
+            .iter()
+            .map(|(stem, _)| {
+                let path = routines_dir.join(format!("{stem}.yaml"));
+                let modified = std::fs::metadata(&path)
+                    .and_then(|metadata| metadata.modified())
+                    .expect("read seeded routine mtime");
+                (path, modified)
+            })
+            .collect();
+
+        let reseeded = seed_default_routines(&routines_dir, "host-a", Some("workspace"), true)
+            .expect("re-seed unchanged rendered content");
+        assert_eq!(reseeded.refreshed, 0, "unchanged routines must not rewrite");
+        assert_eq!(reseeded.retired, 0);
+        assert!(reseeded.warnings.is_empty());
+
+        for (path, modified) in before {
+            let current = std::fs::metadata(&path)
+                .and_then(|metadata| metadata.modified())
+                .expect("read routine mtime after re-seed");
+            assert_eq!(
+                current,
+                modified,
+                "re-seed rewrote `{}` despite identical rendered content",
+                path.display()
+            );
+        }
+
+        // A different host renders different content, so the digest changes
+        // and an overwriting seed does refresh every file.
+        let rehosted = seed_default_routines(&routines_dir, "host-b", Some("workspace"), true)
+            .expect("re-seed with a new host id");
+        assert_eq!(rehosted.refreshed, DEFAULT_ROUTINE_FILES.len());
     }
 
     #[test]

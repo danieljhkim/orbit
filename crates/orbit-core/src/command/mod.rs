@@ -25,30 +25,6 @@ use sha2::{Digest, Sha256};
 /// [ORB-10016] and stamps the same identity.
 pub const SYSTEM_AUDIT_IDENTITY: &str = "system";
 
-/// Seed every `(name, content)` pair in `files` as `<dir>/<name>.yaml`,
-/// skipping entries that already exist unless `overwrite` is set. `render`
-/// maps each embedded asset's raw content to what actually gets written —
-/// activity and job seeding pass content through unchanged; routine seeding
-/// uses it for placeholder substitution and fail-closed validation.
-pub(crate) fn seed_embedded_assets<'a>(
-    dir: &Path,
-    files: &'a [(&'a str, &'a str)],
-    overwrite: bool,
-    mut render: impl FnMut(&'a str, &'a str) -> Result<Cow<'a, str>, OrbitError>,
-) -> Result<usize, OrbitError> {
-    let mut count = 0usize;
-    for (name, content) in files {
-        let path = dir.join(format!("{name}.yaml"));
-        if !overwrite && path.exists() {
-            continue;
-        }
-        let rendered = render(name, content)?;
-        write_text_with_parent(&path, &rendered)?;
-        count += 1;
-    }
-    Ok(count)
-}
-
 const MANAGED_ASSET_MANIFEST_FILE: &str = ".orbit-managed-assets.json";
 const MANAGED_ASSET_MANIFEST_SCHEMA_VERSION: u32 = 1;
 
@@ -57,6 +33,33 @@ pub(crate) struct ManagedAssetReconciliation {
     pub refreshed: usize,
     pub retired: usize,
     pub warnings: Vec<String>,
+}
+
+/// How a manifest key maps to the file it manages, relative to the managed
+/// directory.
+///
+/// Four of the five artifact kinds are flat single-document catalogs whose
+/// manifest key is the definition name ([`ManagedAssetLayout::YamlStem`]).
+/// Skills are directory trees — one `SKILL.md` plus optional reference files
+/// per skill id — so their manifest keys are the relative paths themselves
+/// ([`ManagedAssetLayout::RelativePath`]).
+// ADR-0366 extends ADR-0346's provenance mechanism to tree-shaped assets.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ManagedAssetLayout {
+    /// `<name>.yaml` — activities, jobs, auto-tasks, routines.
+    YamlStem,
+    /// `<name>` verbatim, a `/`-separated relative path — skills.
+    RelativePath,
+}
+
+impl ManagedAssetLayout {
+    /// Resolve one manifest key to its path relative to the managed directory.
+    fn relative_path(self, name: &str) -> PathBuf {
+        match self {
+            Self::YamlStem => PathBuf::from(format!("{name}.yaml")),
+            Self::RelativePath => PathBuf::from(name),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -81,17 +84,18 @@ struct ManagedAssetManifest {
 pub(crate) fn reconcile_managed_assets<'a>(
     dir: &Path,
     asset_kind: &str,
+    layout: ManagedAssetLayout,
     files: &'a [(&'a str, &'a str)],
     overwrite: bool,
     mut render: impl FnMut(&'a str, &'a str) -> Result<Cow<'a, str>, OrbitError>,
 ) -> Result<ManagedAssetReconciliation, OrbitError> {
-    validate_managed_asset_name(asset_kind, "asset kind")?;
+    validate_managed_asset_name(asset_kind, ManagedAssetLayout::YamlStem, "asset kind")?;
     for (name, _) in files {
-        validate_managed_asset_name(name, "embedded asset")?;
+        validate_managed_asset_name(name, layout, "embedded asset")?;
     }
 
     let manifest_path = dir.join(MANAGED_ASSET_MANIFEST_FILE);
-    let previous = load_managed_asset_manifest(&manifest_path, asset_kind)?;
+    let previous = load_managed_asset_manifest(&manifest_path, asset_kind, layout)?;
     let current_names: BTreeSet<&str> = files.iter().map(|(name, _)| *name).collect();
     let mut result = ManagedAssetReconciliation::default();
 
@@ -100,7 +104,7 @@ pub(crate) fn reconcile_managed_assets<'a>(
             if current_names.contains(name.as_str()) {
                 continue;
             }
-            let path = dir.join(format!("{name}.yaml"));
+            let path = dir.join(layout.relative_path(name));
             if !path.exists() {
                 continue;
             }
@@ -118,7 +122,8 @@ pub(crate) fn reconcile_managed_assets<'a>(
                     ))
                 })?;
             } else {
-                let preserved = preserve_modified_retired_asset(dir, asset_kind, name, &path)?;
+                let preserved =
+                    preserve_modified_retired_asset(dir, asset_kind, layout, name, &path)?;
                 result.warnings.push(format!(
                     "retired managed {asset_kind} `{name}` was locally modified; Orbit removed it from the active catalog and preserved it at '{}'. Review that file, then migrate it under a new user-authored name or delete it",
                     preserved.display()
@@ -130,7 +135,7 @@ pub(crate) fn reconcile_managed_assets<'a>(
 
     let mut next_assets = BTreeMap::new();
     for (name, embedded) in files {
-        let path = dir.join(format!("{name}.yaml"));
+        let path = dir.join(layout.relative_path(name));
         let rendered = render(name, embedded)?;
         let rendered_digest = sha256_hex(rendered.as_bytes());
 
@@ -180,7 +185,11 @@ pub(crate) fn reconcile_managed_assets<'a>(
         result.refreshed += 1;
     }
 
-    if previous.is_none() {
+    // The legacy sweep only makes sense for the flat YAML catalogs: a skill
+    // tree's untracked files are ordinary reference material inside an
+    // otherwise-managed directory, not stray definitions the loader would pick
+    // up.
+    if previous.is_none() && layout == ManagedAssetLayout::YamlStem {
         let ambiguous = ambiguous_legacy_yaml_files(dir, &next_assets)?;
         if !ambiguous.is_empty() {
             result.warnings.push(format!(
@@ -200,18 +209,7 @@ pub(crate) fn reconcile_managed_assets<'a>(
         assets: next_assets,
     };
     if previous.as_ref() != Some(&manifest) {
-        let mut encoded = serde_json::to_string_pretty(&manifest).map_err(|error| {
-            OrbitError::Store(format!(
-                "serialize managed {asset_kind} asset manifest: {error}"
-            ))
-        })?;
-        encoded.push('\n');
-        atomic_write_text(&manifest_path, &encoded).map_err(|error| {
-            OrbitError::Io(format!(
-                "write managed {asset_kind} asset manifest '{}': {error}",
-                manifest_path.display()
-            ))
-        })?;
+        write_managed_asset_manifest(&manifest_path, &manifest)?;
     }
 
     for warning in &result.warnings {
@@ -226,9 +224,31 @@ pub(crate) fn reconcile_managed_assets<'a>(
     Ok(result)
 }
 
+/// Persist one managed-asset manifest. Callers compare against the previous
+/// manifest first so a steady-state bootstrap performs no write at all.
+fn write_managed_asset_manifest(
+    manifest_path: &Path,
+    manifest: &ManagedAssetManifest,
+) -> Result<(), OrbitError> {
+    let asset_kind = &manifest.asset_kind;
+    let mut encoded = serde_json::to_string_pretty(manifest).map_err(|error| {
+        OrbitError::Store(format!(
+            "serialize managed {asset_kind} asset manifest: {error}"
+        ))
+    })?;
+    encoded.push('\n');
+    atomic_write_text(manifest_path, &encoded).map_err(|error| {
+        OrbitError::Io(format!(
+            "write managed {asset_kind} asset manifest '{}': {error}",
+            manifest_path.display()
+        ))
+    })
+}
+
 fn load_managed_asset_manifest(
     path: &Path,
     expected_kind: &str,
+    layout: ManagedAssetLayout,
 ) -> Result<Option<ManagedAssetManifest>, OrbitError> {
     if !path.exists() {
         return Ok(None);
@@ -261,19 +281,48 @@ fn load_managed_asset_manifest(
         )));
     }
     for name in manifest.assets.keys() {
-        validate_managed_asset_name(name, "manifest asset")?;
+        validate_managed_asset_name(name, layout, "manifest asset")?;
     }
     Ok(Some(manifest))
 }
 
-fn validate_managed_asset_name(name: &str, source: &str) -> Result<(), OrbitError> {
-    if name.is_empty()
-        || !name
-            .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_' || byte == b'-')
-    {
+/// Reject any manifest key that would not stay inside the managed directory.
+///
+/// A stem is a single path component of the safe charset. A relative path is a
+/// `/`-separated sequence of such components: no absolute prefix, no `.`/`..`
+/// component, and a restricted charset per component, so a manifest can never
+/// steer a write or a removal outside the directory it manages.
+fn validate_managed_asset_name(
+    name: &str,
+    layout: ManagedAssetLayout,
+    source: &str,
+) -> Result<(), OrbitError> {
+    let component_ok = |component: &str| {
+        !component.is_empty()
+            && component != "."
+            && component != ".."
+            && component.bytes().all(|byte| {
+                byte.is_ascii_alphanumeric() || byte == b'_' || byte == b'-' || byte == b'.'
+            })
+    };
+    let valid = match layout {
+        // A stem is one component and never carries an extension separator.
+        ManagedAssetLayout::YamlStem => {
+            !name.is_empty()
+                && name
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_' || byte == b'-')
+        }
+        ManagedAssetLayout::RelativePath => {
+            !name.is_empty()
+                && !name.starts_with('/')
+                && !name.contains('\\')
+                && name.split('/').all(component_ok)
+        }
+    };
+    if !valid {
         return Err(OrbitError::InvalidInput(format!(
-            "{source} name `{name}` is not a safe managed asset file stem"
+            "{source} name `{name}` is not a safe managed asset path"
         )));
     }
     Ok(())
@@ -282,40 +331,61 @@ fn validate_managed_asset_name(name: &str, source: &str) -> Result<(), OrbitErro
 fn preserve_modified_retired_asset(
     active_dir: &Path,
     asset_kind: &str,
+    layout: ManagedAssetLayout,
     name: &str,
     source: &Path,
 ) -> Result<PathBuf, OrbitError> {
-    let backup_dir = active_dir
+    let backup_root = active_dir
         .parent()
         .unwrap_or(active_dir)
         .join(".retired-managed")
         .join(managed_asset_kind_directory(asset_kind));
-    fs::create_dir_all(&backup_dir).map_err(|error| {
-        OrbitError::Io(format!(
-            "create retired managed asset backup '{}': {error}",
-            backup_dir.display()
-        ))
-    })?;
+    let relative = layout.relative_path(name);
 
     let mut suffix = 0usize;
     loop {
-        let file_name = if suffix == 0 {
-            format!("{name}.yaml")
+        // Disambiguate on the file stem so a preserved `SKILL.md` keeps its
+        // extension and stays readable in place.
+        let destination = if suffix == 0 {
+            backup_root.join(&relative)
         } else {
-            format!("{name}.{suffix}.yaml")
+            let file_name = relative
+                .file_name()
+                .and_then(|name| name.to_str())
+                .ok_or_else(|| {
+                    OrbitError::InvalidInput(format!(
+                        "retired managed {asset_kind} `{name}` has no file name to preserve"
+                    ))
+                })?;
+            let (stem, extension) = file_name
+                .rsplit_once('.')
+                .map_or((file_name, String::new()), |(stem, extension)| {
+                    (stem, format!(".{extension}"))
+                });
+            backup_root
+                .join(&relative)
+                .with_file_name(format!("{stem}.{suffix}{extension}"))
         };
-        let destination = backup_dir.join(file_name);
-        if !destination.exists() {
-            fs::rename(source, &destination).map_err(|error| {
+        if destination.exists() {
+            suffix += 1;
+            continue;
+        }
+        if let Some(parent) = destination.parent() {
+            fs::create_dir_all(parent).map_err(|error| {
                 OrbitError::Io(format!(
-                    "preserve modified retired {asset_kind} '{}' as '{}': {error}",
-                    source.display(),
-                    destination.display()
+                    "create retired managed asset backup '{}': {error}",
+                    parent.display()
                 ))
             })?;
-            return Ok(destination);
         }
-        suffix += 1;
+        fs::rename(source, &destination).map_err(|error| {
+            OrbitError::Io(format!(
+                "preserve modified retired {asset_kind} '{}' as '{}': {error}",
+                source.display(),
+                destination.display()
+            ))
+        })?;
+        return Ok(destination);
     }
 }
 
@@ -363,6 +433,7 @@ fn sha256_hex(content: &[u8]) -> String {
 }
 
 pub(crate) mod activity;
+pub mod artifact_health;
 pub mod audit_event;
 pub mod backend_resolver;
 pub(crate) mod docs;
