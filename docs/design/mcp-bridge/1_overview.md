@@ -11,17 +11,17 @@ summary: One canonical local Orbit MCP front door that routes coordination to th
 tags: [mcp, remote-access, host-registry, bridge, multi-host]
 paths: ["crates/orbit-remote/**", "crates/orbit-mcp/**", "crates/orbit-core/**", "crates/orbit-tools/**", "crates/orbit-store/**", "crates/orbit-common/**"]
 related_features: [mcp-bridge, host-registry, mcp-session-context, remote-access, orbit-search]
-related_artifacts: [ORB-00424, ORB-10262, ORB-10268, ORB-10319, ORB-10690, ORB-10711, ORB-10736, ORB-10767, ORB-10768, ADR-0181, ADR-0199, ADR-0200, ADR-0201, ADR-0226, ADR-0227, ADR-0228, ADR-0229, ADR-0230, ADR-0231, ADR-0232, ADR-0235, ADR-0240, ADR-0348, ADR-0350, ADR-0351, ADR-0355, ADR-0356, ADR-0357, ADR-0358, ADR-0359]
+related_artifacts: [ORB-00424, ORB-10262, ORB-10268, ORB-10319, ORB-10690, ORB-10711, ORB-10736, ORB-10767, ORB-10768]
 ---
 
 # Orbit MCP Bridge — Overview
 
-> **Learning-subsystem retirement.** [ORB-10736] / [ADR-0359] removed the native
+> **Learning-subsystem retirement.** [ORB-10736] / [Remove the native project-learning subsystem](../project-learnings/4_decisions.md#remove-the-native-project-learning-subsystem) removed the native
 > project-learning resource. Learning-specific behavior survives only in the
 > superseded decision history; it is not part of the current MCP contract.
 
 > **Status: Draft — structural rewrite landed.** The singular-hub contract
-> ([ADR-0226], [ADR-0229], [ADR-0230]) is superseded by [ADR-0355]–[ADR-0358],
+> ([Singular coordination hub, workspace owner, and per-run placement](./4_decisions.md#singular-coordination-hub-workspace-owner-and-per-run-placement), [Owner-authored knowledge with hub-global IDs and explicit replicas](./4_decisions.md#owner-authored-knowledge-with-hub-global-ids-and-explicit-replicas), [Pull-based leases with immutable placement and explicit recovery](./4_decisions.md#pull-based-leases-with-immutable-placement-and-explicit-recovery)) is superseded by [Every machine is its own coordination host](../host-registry/4_decisions.md#every-machine-is-its-own-coordination-host)–[Defer fleet registration and execution placement to v2](../host-registry/4_decisions.md#defer-fleet-registration-and-execution-placement-to-v2),
 > recorded in [../host-registry/4_decisions.md](../host-registry/4_decisions.md).
 > Every machine is now its own coordination host for the workspaces it owns.
 > Sections describing execution placement, run leases, the presence map, and host
@@ -46,8 +46,8 @@ That shape describes machines with a checkout to protect. A checkoutless client,
 such as an off-box orchestrator, holds no local-derived state and does not
 participate in owner routing. It reaches Orbit through an owned SSH tunnel
 terminating at a loopback-bound listener, where calls resolve remotely with no
-placement routing ([ADR-0350]). The tunnel adds one operation — running a command
-— requiring both operator capability and the workspace claim ([ADR-0351],
+placement routing ([Own the SSH tunnel as remote-access infrastructure, with a provisional surface over it](./4_decisions.md#own-the-ssh-tunnel-as-remote-access-infrastructure-with-a-provisional-surface-over-it)). The tunnel adds one operation — running a command
+— requiring both operator capability and the workspace claim ([Expose remote command execution as a claim-gated tool, retaining the advertised surface](./4_decisions.md#expose-remote-command-execution-as-a-claim-gated-tool-retaining-the-advertised-surface),
 [host-registry/2_design.md §3.2](../host-registry/2_design.md)). The advertised
 per-tool surface is unchanged. See [2_design.md §5.3](./2_design.md).
 
@@ -62,7 +62,7 @@ route. `orbit-mcp` is the neutral RMCP framing/raw-client
 kernel; `orbit-store` is the neutral SQLite/feature-migration kernel; `orbit-core`
 retains transport-independent execution. This vertical boundary replaces the
 earlier registry-only extraction without creating either a separate broker crate
-or a second database ([ORB-10319], [ADR-0240]).
+or a second database ([ORB-10319], [Consolidate remote coordination in one vertical feature crate](./4_decisions.md#consolidate-remote-coordination-in-one-vertical-feature-crate)).
 
 ## 1. Motivation
 
@@ -82,7 +82,7 @@ explicitly says otherwise:
 2. **Derived state is checkout-local.** Docs indexes, semantic companions, and
    routine scheduler state describe a particular local checkout.
 3. **Execution placement is out of scope in v1** (deferred to v2 with run leases
-   and the `runner` capability, [ADR-0358]). MCP bridge opens no machine-to-machine
+   and the `runner` capability, [Defer fleet registration and execution placement to v2](../host-registry/4_decisions.md#defer-fleet-registration-and-execution-placement-to-v2)). MCP bridge opens no machine-to-machine
    run-placement channel.
 
 The required shape is one Orbit-owned contract with explicit placement and at most
@@ -151,9 +151,9 @@ Detailed topology, artifact semantics, routing, configuration, and migration are
   transport survives; its single fixed hub target does not.
 - [ORB-10319] — consolidates registry persistence and the MCP bridge implementation
   in vertical `orbit-remote`, leaving MCP, Store, Core, Tools, and Common as neutral
-  acyclic dependencies ([ADR-0240]). Unaffected by this revision.
+  acyclic dependencies ([Consolidate remote coordination in one vertical feature crate](./4_decisions.md#consolidate-remote-coordination-in-one-vertical-feature-crate)). Unaffected by this revision.
 - [ORB-10736] — removed the native learning subsystem and its MCP/search/sidecar
-  contract ([ADR-0359]).
+  contract ([Remove the native project-learning subsystem](../project-learnings/4_decisions.md#remove-the-native-project-learning-subsystem)).
 - [ORB-10767] — dropped Bridge's worker invocation family and descoped `repo_sync`
   rather than replacing them.
 - [ORB-10768] — retired Bridge entirely after its on-box clients registered Orbit

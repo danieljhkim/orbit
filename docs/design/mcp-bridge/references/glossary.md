@@ -11,9 +11,9 @@ Vocabulary specific to the ownership-aware, placement-aware Orbit MCP feature.
 Standard MCP, SSH, workspace, task, and graph terms are excluded unless narrowed.
 The singular-hub vocabulary this glossary previously carried — hub link, hub mode,
 hub route, spoke, run lease, and the `runner` capability — is retired with
-[ADR-0226]/[ADR-0229]/[ADR-0230]; see
+[Singular coordination hub, workspace owner, and per-run placement](../4_decisions.md#singular-coordination-hub-workspace-owner-and-per-run-placement)/[Owner-authored knowledge with hub-global IDs and explicit replicas](../4_decisions.md#owner-authored-knowledge-with-hub-global-ids-and-explicit-replicas)/[Pull-based leases with immutable placement and explicit recovery](../4_decisions.md#pull-based-leases-with-immutable-placement-and-explicit-recovery); see
 [../../host-registry/4_decisions.md](../../host-registry/4_decisions.md).
-Learning-specific vocabulary is likewise retired by [ORB-10736] / [ADR-0359]
+Learning-specific vocabulary is likewise retired by [ORB-10736] / [Remove the native project-learning subsystem](../../project-learnings/4_decisions.md#remove-the-native-project-learning-subsystem)
 and remains below only as historical terminology, not as a current contract.
 
 | Term | Meaning |
@@ -23,7 +23,7 @@ and remains below only as historical terminology, not as a current contract.
 | Local-derived route | Tool execution against rebuildable state derived from the exact current checkout/worktree, such as graph or docs indexes. See [2_design.md §4](../2_design.md). |
 | Local MCP broker | The `orbit mcp serve` process registered with the client; preserves local checkout, resolves ownership, and dispatches canonical tools by placement. See [2_design.md §2.1](../2_design.md). |
 | MCP call ID | Broker-generated correlation ID propagated to remote/local audit and returned for uncertain transport outcomes. See [2_design.md §9](../2_design.md). |
-| Owned tunnel | An SSH tunnel Orbit establishes or reuses to a loopback-bound listener on a remote machine; shared infrastructure rather than one consumer's detail, and the only cross-machine mechanism in v1. See [2_design.md §5.3](../2_design.md), [4_decisions.md ADR-0350](../4_decisions.md). |
+| Owned tunnel | An SSH tunnel Orbit establishes or reuses to a loopback-bound listener on a remote machine; shared infrastructure rather than one consumer's detail, and the only cross-machine mechanism in v1. See [2_design.md §5.3](../2_design.md), [Own the SSH tunnel as remote-access infrastructure, with a provisional surface over it](../4_decisions.md#own-the-ssh-tunnel-as-remote-access-infrastructure-with-a-provisional-surface-over-it). |
 | Owner link | An SSH-carried MCP connection from a local broker to an owner machine's stable `machine_id`, used in v1 only for the advertised `orbit.task.*` family. See [2_design.md §5](../2_design.md). |
 | Owner machine | Per workspace, the single machine declared in the machine-local `workspaces.json` as holding the canonical checkout and coordinating that workspace's records. See [host-registry/2_design.md §3](../../host-registry/2_design.md). |
 | Owner-machine endpoint | The non-recursive MCP server mode that executes coordination tools for the workspaces its machine owns and refuses every other workspace with the owner named. See [2_design.md §2.2](../2_design.md). |

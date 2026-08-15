@@ -11,7 +11,7 @@ summary: Dynamically-defined recurring task templates minted by one generic sche
 tags: [auto-tasks]
 paths: ["crates/orbit-core/src/auto_tasks/**"]
 related_features: [auto-tasks]
-related_artifacts: [ORB-10149, ORB-10318, ORB-10348, ORB-10439, ORB-10446, ORB-10514, ORB-10549, ADR-0218, ADR-0217]
+related_artifacts: [ORB-10149, ORB-10318, ORB-10348, ORB-10439, ORB-10446, ORB-10514, ORB-10549]
 ---
 
 # Auto-tasks — Overview
@@ -100,7 +100,7 @@ becomes just the first definition.
 - ORB-10440 — Daily friction-curation definition.
 - ORB-10514 — Disabled CI-failure remediation definition.
 - ORB-10549 — Embedded the portable, disabled friction-curation default and
-  workspace materialization contract; ADR-0218 should be updated through the
+  workspace materialization contract; [Auto-task primitive: file-backed recurring task templates + one generic scheduler routine](./4_decisions.md#auto-task-primitive-file-backed-recurring-task-templates-one-generic-scheduler-routine) should be updated through the
   Orbit ADR surface after this task lands.
 - ORB-10550 — Added the disabled qa-sweep default and standardized agent-facing
   friction tool invocations on the registered `orbit tool run` surface.

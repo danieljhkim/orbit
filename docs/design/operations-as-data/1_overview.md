@@ -11,7 +11,7 @@ summary: Declaring each verb of a noun once as data so CLI, MCP, dashboard, and 
 tags: [operations-as-data, architecture, adr-0209]
 paths: ["crates/orbit-common/src/operation.rs", "crates/orbit-common/src/friction/**", "crates/orbit-tools/src/builtin/orbit/operation.rs", "crates/orbit-cli/src/command/operation_args.rs"]
 related_features: [operations-as-data, orbit-core]
-related_artifacts: [ORB-10358, ADR-0209]
+related_artifacts: [ORB-10358]
 ---
 
 # Operations as Data — Overview
@@ -23,7 +23,7 @@ field-to-JSON mapping — so a noun with seven verbs was written out four times 
 drifted four ways. **Operations as data** replaces that with one declaration per
 verb: a `const` spec listing the wire name, the parameters, how each parameter
 binds to the command line, whether MCP advertises it, and how the CLI renders the
-result. Every surface then derives its wiring from that spec. This is ADR-0209
+result. Every surface then derives its wiring from that spec. This is [North-star architecture bearing: operations as data behind an operation registry](../orbit-core/4_decisions.md#north-star-architecture-bearing-operations-as-data-behind-an-operation-registry)
 bearing 1, piloted end to end on the **friction** noun in [ORB-10358].
 
 ## 1. Motivation
@@ -71,7 +71,7 @@ exactly why it accumulated.
 
 ## Task References
 
-- [ORB-10358] — piloted ADR-0209 bearing 1 on the friction noun: built the
+- [ORB-10358] — piloted [North-star architecture bearing: operations as data behind an operation registry](../orbit-core/4_decisions.md#north-star-architecture-bearing-operations-as-data-behind-an-operation-registry) bearing 1 on the friction noun: built the
   operations-as-data kernel, the friction registry, and the derived CLI, MCP,
   dashboard, and runtime adapters.
 

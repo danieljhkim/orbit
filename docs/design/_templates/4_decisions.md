@@ -11,27 +11,18 @@ summary: <one-line hook for agent retrieval — non-empty, single line>
 tags: [<feature-slug>]
 paths: ["crates/<crate>/**"]
 related_features: [<feature-slug>]
-related_artifacts: [ADR-NNNN]
+related_artifacts: [ORB-NNNNN]
 ---
 
 # <Feature> — Decisions
 
-Decision record for <feature>, in ascending number order. This file is the
-authoritative body — there is no ADR store behind it. Numbering is repo-local:
-take the next unused number with `grep -rho 'ADR-[0-9]\{4\}' docs/ | sort -u | tail -1`.
+Record non-obvious decisions here by title. Task references carry provenance; superseded decisions remain in place so their original reasoning stays legible. See [CONVENTIONS.md §4](../CONVENTIONS.md#4-decisions) for the admission rule and required `Cost:` line.
 
-An entry is admitted through exactly one of two doors: it explains a specific
-code site that would otherwise look wrong (Door 1, carries `code_anchors:`), or
-it states a standing rule that decides future tradeoffs (Door 2, carries
-`scope:`). Everything else is design prose and belongs in `2_design.md`. See
-[CONVENTIONS.md §4](../CONVENTIONS.md#4-adrs-strict) for the full rules,
-including the mandatory `Cost:` line, supersession, and rollups.
+<!-- Copy ONE of the two blocks below for each new decision. Delete this comment in real docs. -->
 
-<!-- Copy ONE of the two blocks below for each new ADR. Delete this comment in real docs. -->
+## <short title, noun phrase>
 
-## ADR-NNNN — <short title, noun phrase>
-
-**Status:** Accepted · YYYY-MM · [ORB-NNNNN]
+**Recorded:** YYYY-MM · [ORB-NNNNN]
 **Code anchors:** `crates/<crate>/src/<file>.rs::<symbol>`
 
 ### Context
@@ -47,10 +38,9 @@ including the mandatory `Cost:` line, supersession, and rollups.
 - <What is now true.>
 - Cost: <what this gives up — something a reader could not infer from the decision itself.>
 
-## ADR-NNNN — <short title, noun phrase>
+## <short title, noun phrase>
 
-**Status:** Accepted · YYYY-MM · [ORB-NNNNN]
-**Scope:** <the areas this rule governs>
+**Recorded:** YYYY-MM · [ORB-NNNNN]
 
 ### Context
 

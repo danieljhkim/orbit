@@ -31,7 +31,7 @@ The cost of deferring: phase-1 ships with a default chosen on published benchmar
 
 ### 1.2 Airgapped install path
 
-The companion-binary architecture ([4_decisions.md ADR-005](./4_decisions.md)) makes airgapped install harder than a bundled design would have been: operators need to obtain *both* the platform-appropriate `orbit-search-companion` binary *and* the chosen model files, neither of which is in the main `orbit` release. Options:
+The companion-binary architecture ([Companion binary installed on demand, rather than bundled in `orbit`](./4_decisions.md#companion-binary-installed-on-demand-rather-than-bundled-in-orbit)) makes airgapped install harder than a bundled design would have been: operators need to obtain *both* the platform-appropriate `orbit-search-companion` binary *and* the chosen model files, neither of which is in the main `orbit` release. Options:
 
 - **Documented manual placement.** Operator runs `orbit semantic install` on a connected machine, then copies `~/.orbit/embed/` (companion binary + models) onto the airgapped target. Requires documenting the exact file layout. Phase-1 default.
 - **`orbit semantic install --from <path>`.** Operator points the install command at a pre-staged tarball of companion + models. Removes the need to document the directory layout. Probably the right phase-2 ergonomic improvement.
@@ -41,7 +41,7 @@ Phase 1 ships option 1 (manual placement with docs); options 2 and 3 are clean f
 
 ### 1.3 Historical graph corpus scaling question
 
-Retired by ADR-0291 / ORB-10491. This question is preserved as history; no
+Retired by [Retire and delete Orbit's code-graph subsystem](../_archive/orbit-graph/4_decisions.md#retire-and-delete-orbits-code-graph-subsystem) / ORB-10491. This question is preserved as history; no
 current Orbit search roadmap depends on a code graph.
 
 A medium repository's graph holds tens of thousands to hundreds of thousands of symbols. Embedding each at 384d puts the corpus past the comfortable brute-force ceiling. Three candidate paths:
@@ -78,7 +78,7 @@ Phase 1 indexes each review-thread message as a separate row. The alternative �
 
 ### 1.7 Historical phase-2 graph corpus proposal
 
-Retired by ADR-0291 / ORB-10491. The bullets below describe the removed design
+Retired by [Retire and delete Orbit's code-graph subsystem](../_archive/orbit-graph/4_decisions.md#retire-and-delete-orbits-code-graph-subsystem) / ORB-10491. The bullets below describe the removed design
 and are not a live implementation plan.
 
 Phase 2 extends the embeddings table to graph leaves — code symbols and design-doc sections, with ADRs joining once a fresh ADR-vector indexing design exists. The phase-2 design is sketched in [2_design.md §9](./2_design.md#9-phase-2-graph-corpus-designed-deferred). Highlights:

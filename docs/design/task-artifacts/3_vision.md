@@ -3,7 +3,7 @@ summary: "Task Artifacts — Vision"
 type: design
 title: "Task Artifacts — Vision"
 owner: codex
-last_updated: 2026-05-11
+last_updated: 2026-08-15
 status: Draft
 feature: task-artifacts
 doc_role: vision
@@ -80,9 +80,9 @@ The v2 design uses symlinks for `.orbit/tasks/<task-id>` so workspace-relative p
 
 The existing `orbit-store::file::task_store` implementation is the baseline. It proves that directory-per-task bundles are inspectable, easy to back up, and easy for agents to reason about. Its main weakness is that it overuses `task.yaml` as both metadata envelope and append log.
 
-### 2.2 Orbit ADR artifacts
+### 2.2 Retired decision artifacts
 
-The ADR artifact store under [.orbit/adrs/](../../../.orbit/adrs/) uses the same envelope-plus-Markdown pattern this design recommends. ADRs also use globally unique monotonic IDs (`ADR-NNNN`). That is the closest internal precedent for `ORB-00000`, though task artifacts deliberately avoid old task ID aliases.
+The retired decision artifact store used the same envelope-plus-Markdown pattern this design recommends. Its separate monotonic IDs and lifecycle were removed after tasks proved to be the durable tracking primitive; only the storage-shape precedent remains relevant to task artifacts.
 
 ### 2.3 Orbit task sync
 

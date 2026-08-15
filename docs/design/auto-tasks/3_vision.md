@@ -62,8 +62,8 @@ task's provenance tag, and observability is the existing task + routine surfaces
 
 ### Orbit-internal
 - `docs/design/routines/` — scheduler substrate.
-- ADR-0218 — the auto-task primitive decision.
-- ADR-0217 — provider-neutral run budgets (no turn caps).
+- [Auto-task primitive: file-backed recurring task templates + one generic scheduler routine](./4_decisions.md#auto-task-primitive-file-backed-recurring-task-templates-one-generic-scheduler-routine) — the auto-task primitive decision.
+- [Run budgets are provider-neutral: wall-clock timeouts, never turn caps](./4_decisions.md#run-budgets-are-provider-neutral-wall-clock-timeouts-never-turn-caps) — provider-neutral run budgets (no turn caps).
 
 ### External
 - POSIX cron; systemd timer `Persistent=` (catch-up analogue).

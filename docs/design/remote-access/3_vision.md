@@ -10,7 +10,7 @@ summary: "Open questions for remote viewing, the prior art it draws on, and wher
 tags: [remote-access]
 paths: ["crates/orbit-dashboard/**", "crates/orbit-remote/src/runtime.rs", "crates/orbit-remote/src/workspace_registry.rs"]
 related_features: [remote-access, user-interface, host-registry]
-related_artifacts: [ORB-00029, ORB-00030, ORB-10319, ADR-0200]
+related_artifacts: [ORB-00029, ORB-00030, ORB-10319]
 ---
 
 # Remote Access — Vision
@@ -21,8 +21,8 @@ This document is forward-looking: the questions remote access leaves open, the p
 
 ## 1. Open Questions
 
-1. **Cross-machine aggregation.** The "All workspaces" view aggregates workspaces on *one* machine. Should there be a view that fans a single browser session out across several `connect` tunnels to show many machines at once? That reintroduces multi-host coordination — the thing [ADR-0200](./4_decisions.md) chose to avoid — so the bar is high.
-2. **Does the writable-sync boundary ever get revisited?** [ADR-0200](./4_decisions.md) bets that *viewing* absorbs most of the demand the archived [task-sync](../_archive/task-sync/1_overview.md) design targeted. If real teams repeatedly hit "I can see Bob's task but can't claim or edit it," the durable-registry question reopens. Uptake of `connect` is itself the demand signal to watch.
+1. **Cross-machine aggregation.** The "All workspaces" view aggregates workspaces on *one* machine. Should there be a view that fans a single browser session out across several `connect` tunnels to show many machines at once? That reintroduces multi-host coordination — the thing [Live remote/multi-workspace dashboard viewing supersedes the git-sync task registry](./4_decisions.md#live-remotemulti-workspace-dashboard-viewing-supersedes-the-git-sync-task-registry) chose to avoid — so the bar is high.
+2. **Does the writable-sync boundary ever get revisited?** [Live remote/multi-workspace dashboard viewing supersedes the git-sync task registry](./4_decisions.md#live-remotemulti-workspace-dashboard-viewing-supersedes-the-git-sync-task-registry) bets that *viewing* absorbs most of the demand the archived [task-sync](../_archive/task-sync/1_overview.md) design targeted. If real teams repeatedly hit "I can see Bob's task but can't claim or edit it," the durable-registry question reopens. Uptake of `connect` is itself the demand signal to watch.
 3. **Aggregate performance.** `GET /api/tasks/all` reopens every workspace store per request. At what workspace count does that need a cache or an incremental index, and what invalidates it?
 4. **Persistent / multiplexed tunnels.** `connect` is one foreground tunnel torn down on Ctrl-C. Is there value in a backgrounded or auto-reconnecting tunnel, or a single tunnel multiplexing several remote workspaces on distinct ports? Only if the foreground model proves too thin in practice.
 5. **Write actions over the tunnel.** The dashboard exposes some task actions. Over a `connect` tunnel those mutate the *remote* workspace. Should remote-viewed dashboards default to read-only, or is "you have SSH, so you have write" the right posture? Currently the latter, implicitly.
@@ -38,7 +38,7 @@ Binding a sensitive service to loopback and reaching it over SSH port-forwarding
 
 ### 2.2 Multi-tenant one-process dashboards
 
-Serving many logical tenants (here, workspaces) from one process behind a selector is standard; the design choice that mattered was *how* requests pick their tenant. Path-prefixed routes (`/api/:workspace/...`) are the common shape; remote access instead used a query-param + extractor choke point to avoid rewriting 48 routes and every fetch — see [user-interface ADR-00030](../user-interface/4_decisions.md).
+Serving many logical tenants (here, workspaces) from one process behind a selector is standard; the design choice that mattered was *how* requests pick their tenant. Path-prefixed routes (`/api/:workspace/...`) are the common shape; remote access instead used a query-param + extractor choke point to avoid rewriting 48 routes and every fetch — see [Global, Multi-Workspace Dashboard](../user-interface/4_decisions.md#global-multi-workspace-dashboard).
 
 ### 2.3 The rejected sibling: git-native task sync
 
@@ -48,7 +48,7 @@ The archived [task-sync](../_archive/task-sync/1_overview.md) design (git orphan
 
 ## 3. What May Be Distinctive
 
-Little here is novel in isolation — loopback+SSH and tenant selectors are both standard. What is arguably distinctive is the *framing decision*: treating "let me see the team's tasks" as a viewing problem solvable with existing dashboards and existing SSH, and explicitly declining to build a synchronization substrate for it. Most tools in this space reach for a server or a sync protocol; remote access reaches for a port-forward and a workspace registry, and writes down ([ADR-0200](./4_decisions.md)) exactly what that costs.
+Little here is novel in isolation — loopback+SSH and tenant selectors are both standard. What is arguably distinctive is the *framing decision*: treating "let me see the team's tasks" as a viewing problem solvable with existing dashboards and existing SSH, and explicitly declining to build a synchronization substrate for it. Most tools in this space reach for a server or a sync protocol; remote access reaches for a port-forward and a workspace registry, and writes down ([Live remote/multi-workspace dashboard viewing supersedes the git-sync task registry](./4_decisions.md#live-remotemulti-workspace-dashboard-viewing-supersedes-the-git-sync-task-registry)) exactly what that costs.
 
 ---
 
@@ -57,7 +57,7 @@ Little here is novel in isolation — loopback+SSH and tenant selectors are both
 **Orbit-internal**
 
 - [2_design.md](./2_design.md) — the shipped surfaces.
-- [docs/design/user-interface/4_decisions.md](../user-interface/4_decisions.md) — ADR-00030, the workspace-keyed-state machinery decision.
+- [Global, Multi-Workspace Dashboard](../user-interface/4_decisions.md#global-multi-workspace-dashboard) — the workspace-keyed-state machinery decision.
 - [docs/design/_archive/task-sync/](../_archive/task-sync/1_overview.md) — the superseded git-sync alternative.
 - [docs/POSITIONING.md](../../POSITIONING.md) — the per-engineer doctrine that motivates a no-server design.
 

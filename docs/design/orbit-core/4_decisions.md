@@ -7,55 +7,42 @@ status: Accepted
 feature: orbit-core
 doc_role: decisions
 type: design
-summary: ADR log for orbit-core crate-boundary decisions, starting with the ORB-10016 orbit-cmd extraction.
+summary: Decision log for orbit-core crate-boundary decisions, starting with the ORB-10016 orbit-cmd extraction.
 tags: [orbit-core, orbit-cmd, architecture, north-star]
 paths: ["crates/orbit-core/**", "crates/orbit-cmd/**"]
 related_features: [orbit-core]
-related_artifacts: [ADR-0203, ADR-0209, ADR-0302, ORB-10026, ORB-10545]
+related_artifacts: [ORB-10026, ORB-10545]
 ---
 
 # Orbit Core — Decisions
 
-ADR log for orbit-core's crate boundary. Entries are append-only and ordered
-by ascending global ID. **Allocate the global `ADR-NNNN` via `orbit.adr.add`
-before writing the heading** — never hand-author a four-digit number. The
-store owns ID, status, owner, and links; this file is the long-form narrative
-keyed on that same ID. See
-[CONVENTIONS.md §4](../CONVENTIONS.md#4-adr-template-strict) for the full
-rules.
+This document preserves the feature's non-obvious decisions and their reasoning.
 
-## ADR-0203 — Extract the CLI-facing command layer into orbit-cmd
+---
 
-**Status:** Accepted · 2026-07-04 10:17:48.375334Z · [ORB-10016]
-**Owner:** human
-**Created:** 2026-07-04 10:16:33.297284Z
-**Last updated:** 2026-07-04 10:17:48.375334+00:00
-**Related features:** `orbit-core`
+## Extract the CLI-facing command layer into orbit-cmd
+
+**Recorded:** 2026-07-04 10:17:48.375334Z · [ORB-10016]
 
 Split the CLI-facing command layer out of the orbit-core god-crate into a new internal crate orbit-cmd that depends on orbit-core (never the reverse). Moved groups (doctor, migrate, diagnostics, task templates, agent-rules, hook install, learning/review-thread PreToolUse hook, direct v2 activity runner) expose OrbitRuntime methods as *Commands extension traits. Runtime-entangled command groups (task, learning, docs, search, semantic, job, tool, audit, pipeline, init/seeding, workflow, skill, activity, policy, executor, backend-resolver, task-migration, review-thread-hook) remain in orbit-core because the runtime tool hosts / engine hosts / bootstrap invoke them. orbit-core root re-exports trimmed to the consumer-justified set. Long-form narrative in docs/design/orbit-core/4_decisions.md.
 
-## ADR-0209 — North-star architecture bearing: operations as data behind an operation registry
+## North-star architecture bearing: operations as data behind an operation registry
 
-**Status:** Accepted · 2026-07-14 21:04:22.153730Z · [ORB-10026], [ORB-10200], [ORB-10358]
-**Owner:** claude
-**Created:** 2026-07-04 23:09:14.562930Z
-**Last updated:** 2026-07-26 00:52:04.870330Z
-**Related features:** `orbit-core`, `orbit-search`, `activity-job`, `operations-as-data`
-**Tags:** `north-star`, `architecture`, `operation-registry`
+**Recorded:** 2026-07-14 21:04:22.153730Z · [ORB-10026], [ORB-10200], [ORB-10358]
 
 ### Context
-Orbit's four consumer surfaces — the CLI (`orbit-cli`), MCP (`orbit-mcp`), the web dashboard (`orbit-dashboard`), and the in-runtime agent tool hosts — are four hand-wired adapter layers over the same underlying operations, so every new operation is plumbed by hand up to four times. The same shape keeps constraining refactors: inherent `impl OrbitRuntime` methods plus the orphan rule forced the ORB-10016 / ADR-0203 orbit-cmd extraction to leave the runtime-entangled command groups behind in orbit-core as documented residuals, and the same wall shelved the docs+search pluginization (docs/design/orbit-docs-plugin/1_scope.md — pending commit). Repeated point refactors treat symptoms; the missing piece is a recorded long-term bearing that future refactors steer by. Real alternatives existed: keep the status quo and continue paying per-surface wiring, or mandate a big-bang plugin/microkernel rewrite.
+Orbit's four consumer surfaces — the CLI (`orbit-cli`), MCP (`orbit-mcp`), the web dashboard (`orbit-dashboard`), and the in-runtime agent tool hosts — are four hand-wired adapter layers over the same underlying operations, so every new operation is plumbed by hand up to four times. The same shape keeps constraining refactors: inherent `impl OrbitRuntime` methods plus the orphan rule forced the ORB-10016 / [Extract the CLI-facing command layer into orbit-cmd](#extract-the-cli-facing-command-layer-into-orbit-cmd) orbit-cmd extraction to leave the runtime-entangled command groups behind in orbit-core as documented residuals, and the same wall shelved the docs+search pluginization (docs/design/orbit-docs-plugin/1_scope.md — pending commit). Repeated point refactors treat symptoms; the missing piece is a recorded long-term bearing that future refactors steer by. Real alternatives existed: keep the status quo and continue paying per-surface wiring, or mandate a big-bang plugin/microkernel rewrite.
 
 ### Decision
 Record five bearings as orbit's north star. This is an **incremental bearing, not a rewrite mandate**: no code changes are required by this ADR, and existing code is not wrong for predating it.
 
-1. **Operations as data, not inherent methods.** Every orbit operation is eventually defined as a serializable request/response pair with a handler registered in an operation table. The four consumer surfaces become derived adapters over that registry instead of four hand-wired layers, and the recurring inherent-impl/orphan-rule constraint (ADR-0203 residuals; the shelved docs+search pluginization) dissolves because handlers are registry entries, not inherent methods on `OrbitRuntime`.
+1. **Operations as data, not inherent methods.** Every orbit operation is eventually defined as a serializable request/response pair with a handler registered in an operation table. The four consumer surfaces become derived adapters over that registry instead of four hand-wired layers, and the recurring inherent-impl/orphan-rule constraint ([Extract the CLI-facing command layer into orbit-cmd](#extract-the-cli-facing-command-layer-into-orbit-cmd) residuals; the shelved docs+search pluginization) dissolves because handlers are registry entries, not inherent methods on `OrbitRuntime`.
 2. **Knowledge/execution split.** Orbit is two products — a knowledge store (tasks, learnings, ADRs, docs) and an execution engine (activities, jobs, agent providers) — glued by one runtime. Bearing: two systems sharing only a kernel (IDs, errors, audit), mirroring the constellation split (polaris = knowledge, worker = execution).
 3. **Events over side-effects.** The task-mutation → semantic-index coupling becomes a transactional SQLite outbox consumed by the indexer, replacing the lossy in-process `EmbedWorker` enqueue (best-effort batches, drops on queue-full, debug-level failure logging).
 4. **One retrieval trait, two backends.** orbit-search (workspace-local) and sextant (constellation-wide) become deployment choices behind one retrieval interface, dissolving the two-stack question.
-5. **Crates follow build boundaries, not taxonomy.** Crate splits are justified by compile-graph and dependency-direction needs, not by conceptual category. Explicitly kept as-is under this bearing: the ADR-005 companion-subprocess packaging pattern (docs/design/orbit-search/4_decisions.md ADR-005, global ADR-0117), the YAML+SQLite layered store in orbit-store, and the stability-tier markers (ARCHITECTURE.md §Stability tiers).
+5. **Crates follow build boundaries, not taxonomy.** Crate splits are justified by compile-graph and dependency-direction needs, not by conceptual category. Explicitly kept as-is under this bearing: the [Companion binary installed on demand, rather than bundled in `orbit`](../orbit-search/4_decisions.md#companion-binary-installed-on-demand-rather-than-bundled-in-orbit-1) packaging pattern, the YAML+SQLite layered store in orbit-store, and the stability-tier markers (ARCHITECTURE.md §Stability tiers).
 
-**Adoption model.** Incremental and opportunistic: when a new surface is added or an existing command group is touched for other reasons, move that slice to request/response + registry then. Future ADRs should cite this bearing when steering by it, or supersede it if the bearing itself changes.
+**Adoption model.** Incremental and opportunistic: when a new surface is added or an existing command group is touched for other reasons, move that slice to request/response + registry then. Future decisions should cite this bearing when steering by it, or supersede it if the bearing itself changes.
 
 **Alternatives rejected.** (a) *Status quo as the implicit bearing*: keeps charging up to 4× adapter wiring per operation and guarantees the next boundary refactor hits the same inherent-impl/orphan-rule wall with no recorded direction — the cost that motivated this ADR. (b) *Big-bang registry rewrite*: months of churn across every surface with no incremental payoff and high regression risk in a codebase that ships continuously; rejected in favor of the touch-it-move-it model.
 
@@ -130,14 +117,9 @@ the friction diff as the worked example: `docs/design/operations-as-data/`.
   value name, declaration-order display). Any future noun migration must freeze
   its pre-migration help output as fixtures before starting, as this one did.
 
-## ADR-0301 — Exact-id ADR restore is an operator CLI surface that repairs abandoned allocations
+## Exact-id ADR restore is an operator CLI surface that repairs abandoned allocations
 
-**Status:** Accepted · 2026-08-01 19:25:22.376783Z · [ORB-10479], [ORB-10538]
-**Owner:** claude
-**Created:** 2026-08-01 19:25:17.701782Z
-**Last updated:** 2026-08-01 19:25:22.376783Z
-**Related features:** `orbit-core`
-**Tags:** `adr`, `tooling`, `id-allocation`, `repair`
+**Recorded:** 2026-08-01 19:25:22.376783Z · [ORB-10479], [ORB-10538]
 **Paths:** `crates/orbit-cli/src/command/adr.rs`, `crates/orbit-store/src/file/adr_store/**`, `crates/orbit-store/src/sqlite/id_allocator/**`, `crates/orbit-tools/src/builtin/orbit/adr/**`
 
 ### Context
@@ -146,9 +128,9 @@ the friction diff as the worked example: `docs/design/operations-as-data/`.
 
 First, the tool was registered with `register_inactive` and a comment stating it stayed "available to `orbit tool run`". It did not: `orbit tool run` dispatches through `execute_tool_command_dispatch_*`, which gates on `ensure_tool_agent_facing`, and that rejects every inactive tool. With no CLI subcommand either, the tool had no reachable caller at all.
 
-Second, `restore_allocated_adr` resolved the allocation through `adr_allocation`, whose SQL excludes `status = 'abandoned'` rows. But [ORB-10501]'s `abandon_orphaned` marks an allocation abandoned precisely when its pinned worktree is reaped — the dominant cause of the body loss in [F2026-07-163]. Four of the 18 (ADR-0157, ADR-0211, ADR-0225, ADR-0259) were in that state and were unrepairable by the tool built to repair them.
+Second, `restore_allocated_adr` resolved the allocation through `adr_allocation`, whose SQL excludes `status = 'abandoned'` rows. But [ORB-10501]'s `abandon_orphaned` marks an allocation abandoned precisely when its pinned worktree is reaped — the dominant cause of the body loss in [F2026-07-163]. Four of the 18 ([Rank matched learnings by task-anchored decay-weighted upvotes](../project-learnings/4_decisions.md#rank-matched-learnings-by-task-anchored-decay-weighted-upvotes), [Default Claude to opus/sonnet CLI aliases; centralize model defaults in orbit-common::model_defaults](../agent-families/4_decisions.md#default-claude-to-opussonnet-cli-aliases-centralize-model-defaults-in-orbit-commonmodeldefaults), [PR handoff recovery follows job checkpoints and exact remote leases](../activity-job/4_decisions.md#pr-handoff-recovery-follows-job-checkpoints-and-exact-remote-leases), [Provider launchers resolve at the shared CLI spawn boundary](../activity-job/4_decisions.md#provider-launchers-resolve-at-the-shared-cli-spawn-boundary)) were in that state and were unrepairable by the tool built to repair them.
 
-The alternatives for the second gap were to leave abandoned rows unrepairable and re-allocate fresh IDs for them (rejected by [ORB-10458]: `orbit.adr.show` has no ID-to-legacy fallback at citation sites, so every inline `[ADR-0157]` reference would stay broken), or to hand-edit `.orbit/`, which the repo agent guide forbids.
+The alternatives for the second gap were to leave abandoned rows unrepairable and re-allocate fresh IDs for them (rejected by [ORB-10458]: the retired lookup had no ID-to-legacy fallback at citation sites, so every inline reference would stay broken), or to hand-edit `.orbit/`, which the repo agent guide forbids.
 
 ### Decision
 
@@ -166,14 +148,9 @@ Exact-id ADR restore is an operator surface reached through `orbit adr restore`,
 - Cost: `restore_body_path_if_unchanged` now writes `status` as well as location, so it is no longer a pure relocation primitive. Any future caller that wants to move an allocation's body path *without* asserting the record is merged needs a separate function rather than reusing this one — the ADR-only `kind` guard is what keeps that blast radius small today.
 - Cost: restore remains reachable only from a local CLI. Agent sessions and the MCP surface still cannot repair a lost body, so the repair depends on an operator noticing the loss; [F2026-07-163] stays open for the detection half of the problem.
 
-## ADR-0302 — Publish superseded ADR bodies as durable decision history
+## Publish superseded ADR bodies as durable decision history
 
-**Status:** Accepted · 2026-08-01 20:52:31.864062Z · [ORB-10545]
-**Owner:** codex
-**Created:** 2026-08-01 20:52:07.820052Z
-**Last updated:** 2026-08-01 20:52:31.864062Z
-**Related features:** `worktree-artifacts`, `orbit-core`
-**Tags:** `adr`, `durability`, `worktree-gc`, `reconciliation`
+**Recorded:** 2026-08-01 20:52:31.864062Z · [ORB-10545]
 **Paths:** `.gitignore`, `.orbit/adrs/superseded/**`, `crates/orbit-store/**`, `crates/orbit-cli/**`, `crates/orbit-engine/**`
 
 ### Context
@@ -191,9 +168,9 @@ Superseded ADR bundles are published decision history and travel with the reposi
 ## Task References
 
 - [ORB-10016] — extracted `orbit-cmd` from orbit-core, converted moved command groups to extension traits, and trimmed root re-exports.
-- [ORB-10026] — authored the ADR-0209 north-star operation-registry architecture bearing.
-- [ORB-10479] — restored the 18 design-doc ADRs whose allocation survived their body, and made the [ORB-10538] repair surface reachable and abandoned-allocation aware ([ADR-0301]).
+- [ORB-10026] — authored the [North-star architecture bearing: operations as data behind an operation registry](#north-star-architecture-bearing-operations-as-data-behind-an-operation-registry) north-star operation-registry architecture bearing.
+- [ORB-10479] — restored the 18 design-doc ADRs whose allocation survived their body, and made the [ORB-10538] repair surface reachable and abandoned-allocation aware ([Exact-id ADR restore is an operator CLI surface that repairs abandoned allocations](#exact-id-adr-restore-is-an-operator-cli-surface-that-repairs-abandoned-allocations)).
 - [ORB-10545] — made superseded ADR bodies repository-published history and
-  added allocation-pinned federated reconciliation ([ADR-0302]).
+  added allocation-pinned federated reconciliation ([Publish superseded ADR bodies as durable decision history](#publish-superseded-adr-bodies-as-durable-decision-history)).
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

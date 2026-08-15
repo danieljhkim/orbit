@@ -11,7 +11,7 @@ doc_role: overview
 tags: ["mcp-session-context", "mcp", "workspace"]
 paths: ["crates/orbit-mcp/**", "crates/orbit-remote/src/mcp/**", "crates/orbit-tools/**", "crates/orbit-core/src/command/tool/**"]
 related_features: ["mcp-session-context", "task-artifacts"]
-related_artifacts: ["ORB-00256", "ORB-10228", "ORB-10319", "ADR-0181", "ADR-0149"]
+related_artifacts: ["ORB-00256", "ORB-10228", "ORB-10319"]
 ---
 
 # MCP Session Context — Overview
@@ -38,7 +38,7 @@ Before [ORB-00256], every MCP call to `orbit.task.add` had to pass `workspace`. 
 
 **Workspace resolution** is the tool-level rule: explicit `workspace` input wins, then session context, then a clear `missing workspace` error. Process cwd is not part of the chain.
 
-**Binding invariant** remains owned by [ADR-0149]. The durable task binding key is still `.orbit/config.yaml`'s `workspace_id`; session context changes only how MCP calls name the intended workspace path.
+**Binding invariant.** Surviving documentation from the lost task-artifact decision records `.orbit/config.yaml`'s `workspace_id` as the durable binding key; session context changes only how MCP calls name the intended workspace path.
 
 ## 3. At a Glance
 

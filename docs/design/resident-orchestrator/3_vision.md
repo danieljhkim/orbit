@@ -10,7 +10,7 @@ summary: After the drain job and workspace sequencer exist, later work may add a
 tags: [resident-orchestrator, epic, jobs]
 paths: [".orbit/resources/jobs/**"]
 related_features: [resident-orchestrator, routines]
-related_artifacts: [ORB-10775, ORB-10788, ADR-0362, ADR-0365]
+related_artifacts: [ORB-10775, ORB-10788]
 ---
 
 # Resident Orchestrator — Vision

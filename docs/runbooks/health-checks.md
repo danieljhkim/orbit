@@ -4,7 +4,7 @@ summary: Check Orbit workspace, database, dashboard, log-sink, job-run, and rout
 tags: [operations, health, doctor, dashboard, routines]
 paths: ["crates/orbit-cmd/src/doctor.rs", "crates/orbit-core/src/command/job/run/reconcile.rs"]
 related_features: [orbit-core, activity-job, routines]
-related_artifacts: [ORB-10005, ORB-10070, ORB-10473, ORB-10501, ORB-10558, ADR-0291, ADR-0296]
+related_artifacts: [ORB-10005, ORB-10070, ORB-10473, ORB-10501, ORB-10558]
 ---
 
 # Check Orbit Health
@@ -85,14 +85,14 @@ explicit and safety-scoped.
 
 An `id-allocations` warning means an id was allocated inside a worktree that has since been
 reaped, before its body was merged: the body is unrecoverable and the row would otherwise stay
-in `orbit learning list --include-remote` (and the ADR list) forever. Confirm the named
+in the legacy allocation ledger forever. Confirm the named
 worktrees really are gone — a volume that is merely unmounted reads the same way — then retire
 the rows with `orbit doctor --fix-orphaned-allocations`. The repair re-verifies every row
 before writing, refuses any that became readable again, and flips the row to `abandoned`
-instead of deleting it, so the retired ids are never reissued (ADR-0296, ORB-10501). Without
+instead of deleting it, so the retired ids are never reissued ([Detect and retire id allocations pinned to a reaped worktree](../design/worktree-artifacts/4_decisions.md#detect-and-retire-id-allocations-pinned-to-a-reaped-worktree), ORB-10501). Without
 the flag, `orbit doctor` only reports.
 
-Graph is retired under ADR-0291 and is not inspected by ordinary health checks. To remove
+Graph is retired under [Retire and delete Orbit's code-graph subsystem](../design/_archive/orbit-graph/4_decisions.md#retire-and-delete-orbits-code-graph-subsystem) and is not inspected by ordinary health checks. To remove
 leftover state explicitly, run `orbit doctor --remove-graph`. This deletes only the current
 worktree's `.orbit/graph` and the shared workspace's `.orbit/knowledge/graph`; it is
 idempotent when either is absent. Combine it with `--json` for a single JSON result with no

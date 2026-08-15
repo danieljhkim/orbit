@@ -11,7 +11,7 @@ summary: Deferred v2 work (workspace registration, prefix arbitration, execution
 tags: [host-registry, multi-host, ownership]
 paths: ["crates/orbit-remote/**", "crates/orbit-core/**", "crates/orbit-store/**", "crates/orbit-mcp/**"]
 related_features: [host-registry, mcp-bridge, routines, remote-access]
-related_artifacts: [ORB-00424, ORB-10319, ADR-0226, ADR-0227, ADR-0228, ADR-0229, ADR-0230, ADR-0231, ADR-0232, ADR-0240, ADR-0355, ADR-0356, ADR-0357, ADR-0358]
+related_artifacts: [ORB-00424, ORB-10319]
 ---
 
 # Host Registry — Vision
@@ -23,7 +23,7 @@ and no fleet inventory at all. Most of what follows is work that was *built and
 then deferred* rather than work never attempted — see
 [2_design.md §2.1](./2_design.md) for what is dormant in the tree.
 
-These questions assume the vertical boundary from [ORB-10319] / [ADR-0240]:
+These questions assume the vertical boundary from [ORB-10319] / [Consolidate remote host and MCP behavior in the vertical orbit-remote crate](./4_decisions.md#consolidate-remote-host-and-mcp-behavior-in-the-vertical-orbit-remote-crate):
 `orbit-remote` owns the feature from persistence through MCP composition, while
 Store and MCP remain neutral infrastructure. A future transport or availability
 design should extend that feature boundary rather than redistribute its policy
@@ -46,7 +46,7 @@ across kernels.
    across the routes in `mcp.toml`, or a warning when a merged search returns two
    records whose IDs collide. Worth doing before registration, since it is a fraction
    of the work and catches the failure v1 leaves silent.
-3. **Execution placement.** Withdrawn in v1 ([ADR-0358]), with the design intact in
+3. **Execution placement.** Withdrawn in v1 ([Defer fleet registration and execution placement to v2](./4_decisions.md#defer-fleet-registration-and-execution-placement-to-v2)), with the design intact in
    git history: pull-based leases, immutable requested/actual placement snapshots,
    a `runner` capability, and the presence map that validated a target host
    advertises a checkout. Revive it when there is a real case for running a task
@@ -111,14 +111,14 @@ time rather than prevented.
 
 ### Orbit-internal
 
-- [remote-access/4_decisions.md](../remote-access/4_decisions.md) — [ADR-0200]
+- [remote-access/4_decisions.md](../remote-access/4_decisions.md) — [Live remote/multi-workspace dashboard viewing supersedes the git-sync task registry](../remote-access/4_decisions.md#live-remotemulti-workspace-dashboard-viewing-supersedes-the-git-sync-task-registry)
   rejected the git-orphan-branch task registry in favor of read-only viewing;
-  [ADR-0201] fixed the SSH-only, no-network-bind posture this design inherits.
+  [Remote dashboard access is an SSH tunnel over a loopback-only bind, never a network bind with auth](../remote-access/4_decisions.md#remote-dashboard-access-is-an-ssh-tunnel-over-a-loopback-only-bind-never-a-network-bind-with-auth) fixed the SSH-only, no-network-bind posture this design inherits.
 - `docs/design/_archive/task-sync/` — the fullest prior exploration of
   cross-machine task state; its failure modes (ID collision, merge semantics) are
   why tasks are MCP-only here rather than synced.
 - [routines/2_design.md](../routines/2_design.md) — explicit host pinning,
-  host-local scheduler state ([ADR-0208]), and the load-time name-collision error.
+  host-local scheduler state ([Routine definitions are git-shared; scheduler state is host-local and never synced](../routines/4_decisions.md#routine-definitions-are-git-shared-scheduler-state-is-host-local-and-never-synced)), and the load-time name-collision error.
 - [mcp-bridge/2_design.md](../mcp-bridge/2_design.md) ([ORB-00424]) — the
   placement-aware local broker, client→owner transport, capability sets, and audit
   context; this feature supplies stable identity and ownership bindings.

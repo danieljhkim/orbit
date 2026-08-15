@@ -30,7 +30,7 @@ The on-branch `workspaces/<workspace-id>/<task-id>/` path maps to the local cano
 
 Files explicitly NOT on the registry:
 
-- `.orbit/state/scoreboard/*.json` — scoreboards (out of scope, see [4_decisions.md ADR-003](../4_decisions.md))
+- `.orbit/state/scoreboard/*.json` — scoreboards (out of scope, see [Sync scope is task bundles + companion files + artifacts](../4_decisions.md#sync-scope-is-task-bundles-companion-files-artifacts))
 - `.locks/**` — file locks (out of scope, per-machine ephemeral)
 - `.orbit/runs/**` — job runs (out of scope, separate design)
 - `.orbit/knowledge/**` — knowledge graph (out of scope, separate design)

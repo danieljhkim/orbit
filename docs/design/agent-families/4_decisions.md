@@ -13,20 +13,13 @@ tags: ["agent-families"]
 
 # Agent Families — Decisions
 
-ADR entries are append-only and ordered ascending by global ID. New entries are allocated via `orbit.adr.add` *before* the local heading is written — see [../CONVENTIONS.md §4](../CONVENTIONS.md) and the `orbit-knowledge` skill. The local heading uses the allocated global ID verbatim.
+This document preserves the feature's non-obvious decisions and their reasoning.
 
-Historical note: prior to 2026-05-17, ADR-0154 / ADR-0155 / ADR-0156 in this file were authored with locally-invented IDs (`ADR-0152` / `ADR-0153` / `ADR-0154`) that did not match the global store. They were re-allocated through `orbit.adr.add` per [ORB-00098]; the original local IDs survive as `legacy_ids` so prior citations still resolve.
+---
 
-Historical note ([ORB-10479]): the entries listed below already held a global ADR allocation, but their store bodies were lost when the worktrees that authored them were reaped (see [F2026-07-163]). The narratives were restored into the store at their existing IDs — no ID was reallocated — and their headings reduced to pointer form. Restored here: [ADR-0211].
+## Add Grok (xAI) as a fourth peer agent family
 
-## ADR-0151 — Add Grok (xAI) as a fourth peer agent family
-
-**Status:** Accepted · 2026-05-16 19:07:25.023260Z · [ORB-00042], [ORB-00043], [ORB-00044], [ORB-00045], [ORB-00046], [ORB-00049], [ORB-00050], [ORB-00052]
-**Owner:** grok
-**Created:** 2026-05-16 02:20:08.898995Z
-**Last updated:** 2026-05-17 05:48:49.725208+00:00
-**Related features:** `agent-families`, `activity-job`, `policy-sandbox`
-**Legacy IDs:** `agent-families/ADR-0151`
+**Recorded:** 2026-05-16 19:07:25.023260Z · [ORB-00042], [ORB-00043], [ORB-00044], [ORB-00045], [ORB-00046], [ORB-00049], [ORB-00050], [ORB-00052]
 
 ### Context
 
@@ -54,9 +47,10 @@ This means:
 - The fixed-size array contract in `all_agent_families()` will now be 4; every call site that assumed "exactly three" must be audited.
 - Cost: We accept a permanent increase in the number of agent families we must maintain (executors, sandbox rules, MCP providers, model-pair defaults, docs). Future families will be cheaper to add, but each still carries non-trivial integration cost in sandboxing and client configuration.
 
-## ADR-0154 — Replace `[agent.<role>]` tables with named `[crews.*]` registry
+## Replace `[agent.<role>]` tables with named `[crews.*]` registry
 
-**Status:** Superseded by [ADR-0213](#adr-0213--flatten-crews-to-one-provider-model-assignment) · 2026-07-11 · [ORB-00058] · legacy_id: `agent-families/ADR-0152`
+**Superseded by:** [Flatten crews to one provider-model assignment](#flatten-crews-to-one-provider-model-assignment)
+**Recorded:** 2026-07-11 · [ORB-00058] · legacy_id: `agent-families/[Replace `[agent.<role>]` tables with named `[crews.*]` registry](#replace-agentrole-tables-with-named-crews-registry)`
 
 **Context.** Workspace config previously selected planner, implementer, and reviewer models with three top-level `[agent.<role>]` tables, while task execution had no durable way to request a different lineup. Layering a new registry beside the old role tables would have forced Orbit to validate and explain two schemas for the same decision.
 
@@ -65,18 +59,13 @@ This means:
 **Consequences.**
 - "Crew" was chosen over "profile" because profiles sound user-scoped, and over "pair" because the lineup contains planner, implementer, and reviewer.
 - Run records persist the resolved crew plus the three role model strings so audit trails survive later config edits.
-- The v2 `agent_loop` dispatch path reads role models from the crew registry (`crates/orbit-core/src/runtime/engine/environment_host.rs`). Scoreboard and friction projections use family identity after ADR-0156; exact model strings remain visible through resolved crew/run configuration.
+- The v2 `agent_loop` dispatch path reads role models from the crew registry (`crates/orbit-core/src/runtime/engine/environment_host.rs`). Scoreboard and friction projections use family identity after [Collapse agent identity to family and move model strings to configuration](#collapse-agent-identity-to-family-and-move-model-strings-to-configuration); exact model strings remain visible through resolved crew/run configuration.
 - Deferred: duel-plan participant configuration, per-role task overrides, and planner-vs-executor workflow split.
 - Cost: old workspaces with only `[agent.planner]`, `[agent.implementer]`, and `[agent.reviewer]` must migrate before config load succeeds.
 
-## ADR-0155 — Scope duel-plan candidate and model overrides to `[duel]`
+## Scope duel-plan candidate and model overrides to `[duel]`
 
-**Status:** Accepted · 2026-05-17 05:48:49.830825Z · [ORB-00072]
-**Owner:** claude
-**Created:** 2026-05-17 05:48:33.288901Z
-**Last updated:** 2026-05-17 05:48:49.830825Z
-**Related features:** `agent-families`
-**Legacy IDs:** `agent-families/ADR-0153`
+**Recorded:** 2026-05-17 05:48:49.830825Z · [ORB-00072]
 
 ### Context
 
@@ -93,14 +82,9 @@ Add a workspace `[duel]` section with `candidates` as a normalized subset of `al
 - The crew registry remains separate from duel participant selection. Reusing `[crews.*]` for duels was rejected because duels need a family pool, not a fixed planner/implementer/reviewer lineup.
 - Cost: duel-plan reproducibility now depends on a third configuration surface (`[duel]`) in addition to crew registry and executor overrides. Operators triaging a duel run must consult all three to explain a given family/model selection.
 
-## ADR-0156 — Collapse agent identity to family and move model strings to configuration
+## Collapse agent identity to family and move model strings to configuration
 
-**Status:** Accepted · 2026-05-17 05:48:49.885727Z · [ORB-00080]
-**Owner:** claude
-**Created:** 2026-05-17 05:48:33.336522Z
-**Last updated:** 2026-05-17 05:48:49.885727Z
-**Related features:** `agent-families`
-**Legacy IDs:** `agent-families/ADR-0154`
+**Recorded:** 2026-05-17 05:48:49.885727Z · [ORB-00080]
 
 ### Context
 
@@ -119,9 +103,9 @@ Family is identity, model is configuration, and slot is role. Orbit identity sur
 - ORB-00079 and ORB-00071 are superseded by this structural identity change.
 - Cost: model granularity is lost from identity comparisons. Two different Gemini model versions (e.g. `pro` vs `flash`) collapse to the same `gemini` identity in scoreboards; distinguishing them requires drilling into resolved-crew run records or `[duel.models]` configuration.
 
-## ADR-0167 — Favor claude (opus) for planner role on planning duels and design-shaped plans
+## Favor claude (opus) for planner role on planning duels and design-shaped plans
 
-**Status:** Proposed · 2026-05-18 · cites AO-002 · (acceptance pending a related task — see [CONVENTIONS.md §4](../CONVENTIONS.md#4-adr-template-strict))
+**Recorded:** 2026-05-18 · cites AO-002 · (acceptance pending a related task — see [CONVENTIONS.md §4](../CONVENTIONS.md#4-decisions))
 
 **Context.** AO-002 ("Instruction surface shapes plan output, not tool selection") closed on 2026-05-18 after four experiments spanning four Gemini-as-planner implementation/audit duels and one 4-model cross-read on an identical UX-design task. Three observations recurred across the thread:
 
@@ -141,14 +125,9 @@ AO-002 scope: planning-duel plan quality on the Orbit codebase, single window in
 - Re-evaluation triggers: (1) a new Gemini-family release with a stable model alias; (2) the missing AO-002 experimental cell (post-rubric Gemini run on `gemini-3.1-pro-preview` against an implementation-shaped task) producing a counter-finding; (3) a non-Orbit codebase producing a different ranking; (4) a same-task within-model-version repeat that flips the outcome. Any of these reopens AO-002 or spawns a follow-up observation that this ADR must be reconciled against.
 - Cost: surrendering planning diversity. Defaulting to one family forfeits the safety net of cross-family disagreement, concentrates dependency on a single provider, and risks anchoring on claude's distinctive design patterns (e.g. the metric-major preference observed in ORB-00154) as if they were universally correct. The duel mechanism partially mitigates this when explicitly invoked: a duel still gathers multiple plans before selecting one.
 
-## ADR-0211 — Default Claude to opus/sonnet CLI aliases; centralize model defaults in orbit-common::model_defaults
+## Default Claude to opus/sonnet CLI aliases; centralize model defaults in orbit-common::model_defaults
 
-**Status:** Accepted · 2026-08-01 19:17:27.707459Z · [ORB-10051], [ORB-10479]
-**Owner:** grok
-**Created:** 2026-08-01 19:17:26.096473Z
-**Last updated:** 2026-08-01 19:17:27.707459Z
-**Related features:** `agent-families`
-**Tags:** `agent-families`
+**Recorded:** 2026-08-01 19:17:27.707459Z · [ORB-10051], [ORB-10479]
 
 **Context.** Default model names were hardcoded as version-pinned string literals scattered across ~7 production sites, and the pins had drifted out of sync: the default Claude model appeared as `claude-opus-4-7` (`agent_detect`, seeded crews, `claude.yaml` strong), `claude-sonnet-4-6` (`claude.yaml` weak), and `claude-sonnet-4-5` (`exec_ctx::DEFAULT_MODEL_FOR_SESSION`, `agent_loop_driver::DEFAULT_ANTHROPIC_MODEL`) depending on the code path. The Claude CLI accepts the unversioned `opus`/`sonnet` aliases, which never drift.
 
@@ -161,15 +140,10 @@ AO-002 scope: planning-duel plan quality on the Orbit codebase, single window in
 - Scoreboard attribution matches model strings exactly, so historical review/duel artifacts recorded as `claude-opus-4-7` stop matching the new `opus` pair; only new runs match. A family-equality fallback was considered and left as a possible follow-up.
 - Cost: default model names now live in two layers (Rust `model_defaults` const for code paths, literal alias duplicated into the executor/config assets); a future model bump must touch both the const and the YAML asset, and the asset↔const guard test is what keeps them honest.
 
-## ADR-0213 — Flatten crews to one provider-model assignment
+## Flatten crews to one provider-model assignment
 
-**Status:** Accepted · 2026-07-11 19:53:22.638085Z · [ORB-10130]
-**Owner:** codex
-**Created:** 2026-07-11 19:53:13.189441Z
-**Last updated:** 2026-07-11 19:53:30.172700Z
-**Related features:** `agent-families`
-**Supersedes:** `ADR-0154`
-**Tags:** `crew`, `config`, `runtime`
+**Recorded:** 2026-07-11 19:53:22.638085Z · [ORB-10130]
+**Supersedes:** [Replace \[agent.<role>\] tables with named \[crews.*\] registry](#replace-agentrole-tables-with-named-crews-registry)
 **Paths:** `crates/orbit-common/src/types/agent_pair.rs`, `crates/orbit-core/src/config/**`, `crates/orbit-core/src/runtime/**`, `crates/orbit-store/src/**`, `crates/orbit-dashboard/src/**`, `docs/CONFIG.md`
 
 ### Context
@@ -184,14 +158,9 @@ A crew is one provider-model-backend assignment. Every activity role resolves to
 - Existing homogeneous legacy crew configuration continues to load without behavior changes.
 - Cost: Deliberately heterogeneous legacy crews collapse to their implementer assignment and require a warning-guided config rewrite; cross-provider review must use duel machinery or a future explicit mechanism.
 
-## ADR-0193 — Freeze Agent Detection at Init Seeding
+## Freeze Agent Detection at Init Seeding
 
-**Status:** Accepted · 2026-05-30 20:17:29.805438Z · [ORB-00347]
-**Owner:** codex
-**Created:** 2026-05-30 20:17:27.417750Z
-**Last updated:** 2026-05-30 20:17:29.805438Z
-**Related features:** `agent-families`
-**Tags:** `config`, `agent-detection`, `init`
+**Recorded:** 2026-05-30 20:17:29.805438Z · [ORB-00347]
 **Paths:** `crates/orbit-core/src/config/**`, `crates/orbit-core/src/command/init.rs`, `crates/orbit-cli/src/command/init.rs`, `crates/orbit-core/assets/config/default-config.toml`
 
 ### Context
@@ -205,21 +174,16 @@ Agent availability is detected once during init using `DetectedAgents`, rendered
 - Runtime behavior is deterministic for a given config file, including hot config loads.
 - Cost: A user who installs or removes agent CLIs after init must edit or regenerate config instead of getting automatic runtime drift.
 
-## ADR-0330 — Retire crew role slots and role-based model resolution
+## Retire crew role slots and role-based model resolution
 
-**Status:** Accepted · 2026-08-09 06:33:12.872319Z · [ORB-10620], [ORB-10621], [ORB-10622]
-**Owner:** claude
-**Created:** 2026-08-09 00:27:13.339701Z
-**Last updated:** 2026-08-09 06:33:12.872319Z
-**Related features:** `agent-families`
-**Tags:** `crew`, `config`, `runtime`, `activity`
+**Recorded:** 2026-08-09 06:33:12.872319Z · [ORB-10620], [ORB-10621], [ORB-10622]
 **Paths:** `crates/orbit-common/src/types/agent_pair.rs`, `crates/orbit-common/src/types/activity_job/activity_v2.rs`, `crates/orbit-common/src/types/activity_job/job_v2.rs`, `crates/orbit-core/src/config/**`, `crates/orbit-core/src/runtime/**`, `crates/orbit-engine/src/activity_job/**`, `crates/orbit-core/assets/activities/**`, `docs/CONFIG.md`
 
 ### Context
 
-ADR-0213 flattened a crew to one provider-model-backend assignment but kept two compatibility surfaces: legacy `planner`/`implementer`/`reviewer` sub-tables accepted at config load, and an `AgentRole` label carried on activities and job steps. Both are now inert. A legacy crew must supply all three sub-tables, and load keeps the implementer assignment while discarding the other two behind a warn-level log when they diverge; role-based resolution returns the run's single crew assignment for every role, so an activity declaring `role: reviewer` runs on the run's resolved crew. Three routing mechanisms are documented; only an explicit `crew` input actually selects a different model, and a declared role currently pre-empts it. The alternative was to keep the shims indefinitely, at the cost of a schema that advertises selection it does not perform.
+[Flatten crews to one provider-model assignment](#flatten-crews-to-one-provider-model-assignment) flattened a crew to one provider-model-backend assignment but kept two compatibility surfaces: legacy `planner`/`implementer`/`reviewer` sub-tables accepted at config load, and an `AgentRole` label carried on activities and job steps. Both are now inert. A legacy crew must supply all three sub-tables, and load keeps the implementer assignment while discarding the other two behind a warn-level log when they diverge; role-based resolution returns the run's single crew assignment for every role, so an activity declaring `role: reviewer` runs on the run's resolved crew. Three routing mechanisms are documented; only an explicit `crew` input actually selects a different model, and a declared role currently pre-empts it. The alternative was to keep the shims indefinitely, at the cost of a schema that advertises selection it does not perform.
 
-This amends two clauses of ADR-0213: that legacy three-role config is accepted by choosing implementer with a warning, and that role labels remain as descriptive resolution inputs. ADR-0213's core decision — one assignment per crew — stands and is completed here.
+This amends two clauses of [Flatten crews to one provider-model assignment](#flatten-crews-to-one-provider-model-assignment): that legacy three-role config is accepted by choosing implementer with a warning, and that role labels remain as descriptive resolution inputs. [Flatten crews to one provider-model assignment](#flatten-crews-to-one-provider-model-assignment)'s core decision — one assignment per crew — stands and is completed here.
 
 ### Decision
 
@@ -231,7 +195,7 @@ Crew configuration accepts flat `provider`/`model`/`backend` only; the legacy ro
 - A heterogeneous legacy crew now fails loudly at load instead of losing its planner and reviewer assignments behind a log line.
 - System activities that need a model distinct from the run's crew must name a configured crew through an input, making that choice visible in config rather than in engine code.
 - Cost: breaking config change. Any workspace carrying the three-role shape fails to load until rewritten, and shipped activity assets carrying `role:` must be reseeded in the same release.
-- Cost: the planning duel still overrides provider and model at dispatch time through its own override path, so a duel activity's asset alone does not tell you which model ran it. That carve-out, inherited from ADR-0213, is unchanged here.
+- Cost: the planning duel still overrides provider and model at dispatch time through its own override path, so a duel activity's asset alone does not tell you which model ran it. That carve-out, inherited from [Flatten crews to one provider-model assignment](#flatten-crews-to-one-provider-model-assignment), is unchanged here.
 
 ## Task References
 

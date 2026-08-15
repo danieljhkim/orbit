@@ -11,17 +11,17 @@ summary: Open questions and prior art for the owner-machine MCP route, schema sk
 tags: [mcp, remote-access, host-registry, bridge]
 paths: ["crates/orbit-remote/**", "crates/orbit-mcp/**", "crates/orbit-core/**", "crates/orbit-tools/**", "crates/orbit-store/**"]
 related_features: [mcp-bridge, host-registry, mcp-session-context, remote-access, orbit-search]
-related_artifacts: [ORB-00424, ORB-10319, ORB-10736, ORB-10767, ORB-10768, ADR-0181, ADR-0199, ADR-0200, ADR-0201, ADR-0226, ADR-0227, ADR-0228, ADR-0229, ADR-0230, ADR-0231, ADR-0232, ADR-0240, ADR-0350, ADR-0351, ADR-0355, ADR-0356, ADR-0357, ADR-0358, ADR-0359]
+related_artifacts: [ORB-00424, ORB-10319, ORB-10736, ORB-10767, ORB-10768]
 ---
 
 # Orbit MCP Bridge — Vision
 
-> **Learning-subsystem retirement.** [ORB-10736] / [ADR-0359] removed the native
+> **Learning-subsystem retirement.** [ORB-10736] / [Remove the native project-learning subsystem](../project-learnings/4_decisions.md#remove-the-native-project-learning-subsystem) removed the native
 > project-learning resource. Its authoring, replica, sidecar, and search questions
 > are closed by removal rather than carried as future MCP work.
 
 > **Status: Draft — structural rewrite landed.** The singular-hub contract
-> ([ADR-0226], [ADR-0229], [ADR-0230]) is superseded by [ADR-0355]–[ADR-0358],
+> ([Singular coordination hub, workspace owner, and per-run placement](./4_decisions.md#singular-coordination-hub-workspace-owner-and-per-run-placement), [Owner-authored knowledge with hub-global IDs and explicit replicas](./4_decisions.md#owner-authored-knowledge-with-hub-global-ids-and-explicit-replicas), [Pull-based leases with immutable placement and explicit recovery](./4_decisions.md#pull-based-leases-with-immutable-placement-and-explicit-recovery)) is superseded by [Every machine is its own coordination host](../host-registry/4_decisions.md#every-machine-is-its-own-coordination-host)–[Defer fleet registration and execution placement to v2](../host-registry/4_decisions.md#defer-fleet-registration-and-execution-placement-to-v2),
 > recorded in [../host-registry/4_decisions.md](../host-registry/4_decisions.md).
 > Questions and prior art below that concern execution placement, run leases, and
 > host registration are **deferred to v2**.
@@ -31,14 +31,14 @@ operator, per-machine coordination for the workspaces each machine owns, a small
 host fleet, SSH transport, one declared owner per workspace, and no offline
 coordination writes for workspaces this machine does not own. Speculation below
 should not leak into implementation without demonstrated need. It also assumes
-[ADR-0240]'s vertical `orbit-remote` owner over neutral MCP, Store, Core, Tools,
+[Consolidate remote coordination in one vertical feature crate](./4_decisions.md#consolidate-remote-coordination-in-one-vertical-feature-crate)'s vertical `orbit-remote` owner over neutral MCP, Store, Core, Tools,
 and Common kernels; new remote behavior should normally extend that feature rather
 than add another horizontal broker crate ([ORB-10319]).
 
 ## 1. Open Questions
 
 1. **Owner execution-profile freshness (v2).** Deferred with execution placement
-   ([ADR-0358]). If cross-machine dispatch returns, crew validation would again need
+   ([Defer fleet registration and execution placement to v2](../host-registry/4_decisions.md#defer-fleet-registration-and-execution-placement-to-v2)). If cross-machine dispatch returns, crew validation would again need
    a one-way owner→coordinator projection, and the questions are unchanged: is
    poll-time publication enough, or should config changes trigger an immediate
    publish? What fields belong in the profile without turning it into a copy of
@@ -53,21 +53,21 @@ than add another horizontal broker crate ([ORB-10319]).
    owner-routed and local subsets carry separate schema hashes so graph-only local
    changes do not block coordination calls? Start coarse; split only after real
    mixed-version deployments create friction.
-4. **Transport beyond SSH.** Narrowed by [ADR-0350]. The owned tunnel adds a
+4. **Transport beyond SSH.** Narrowed by [Own the SSH tunnel as remote-access infrastructure, with a provisional surface over it](./4_decisions.md#own-the-ssh-tunnel-as-remote-access-infrastructure-with-a-provisional-surface-over-it). The owned tunnel adds a
    loopback listener while keeping SSH as the authenticator, so listener hardening
    is a bind guard rather than an authentication system, and Orbit still owns no
    credential. What remains open is the original case: genuinely shell-less
    environments, where Streamable HTTP would require Orbit to own authentication
    and session management outright. Is there such a deployment?
 5. **Distributing the coordination plane — resolved.** The plane is now per-machine
-   by construction ([ADR-0355]); there is no single target left to shard. What
+   by construction ([Every machine is its own coordination host](../host-registry/4_decisions.md#every-machine-is-its-own-coordination-host)); there is no single target left to shard. What
    replaces the question is narrower: v1 exposes only the advertised task family across
    machines, so what, if anything, should cross next — friction triage or workflow
    observation — and does any of it justify a machine
    answering for a workspace it does not own? That is a v2 question and should be
    answered per record type, not as a topology change.
 6. **Whether the advertised per-tool surface should become generic dispatch.**
-   [ADR-0351] adds command and changes nothing else, leaving this open. The
+   [Expose remote command execution as a claim-gated tool, retaining the advertised surface](./4_decisions.md#expose-remote-command-execution-as-a-claim-gated-tool-retaining-the-advertised-surface) adds command and changes nothing else, leaving this open. The
    replacement shape would be two operations — enumerate the registry entries
    visible to a caller with their schemas, and invoke one by name — collapsing
    per-tool policy into a single authorization point. Note the argument is *not*
@@ -97,8 +97,8 @@ The generic MCP adapter separates protocol framing from an injected `McpHost`,
 sanitizes advertised names, resolves structural schemas, and threads
 `ToolSessionContext` into dispatch. `orbit-remote` composes generic builtin schemas
 with Remote-owned discovery definitions and supplies coordination and broker
-behavior. [ADR-0181] established deliberate
-workspace context instead of cwd fallback; [ADR-0199] proposed per-call runtime
+behavior. [MCP ambient workspace session context](../mcp-session-context/4_decisions.md#mcp-ambient-workspace-session-context) established deliberate
+workspace context instead of cwd fallback; [Workspace_path-addressable MCP host tools with surface-scoped containment](../mcp-session-context/4_decisions.md#workspacepath-addressable-mcp-host-tools-with-surface-scoped-containment) proposed per-call runtime
 resolution. The local broker extends those neutral seams rather than starting a
 second implementation.
 
@@ -109,7 +109,7 @@ identity, the machine-scoped task-id prefix, and declared per-workspace ownershi
 in the machine-local registry. The MCP bridge consumes those facts and never
 becomes a scheduler or owner proxy. The fleet inventory, presence map,
 requested/actual placement, and pull-based run leases that earlier drafts consumed
-are deferred to v2 ([ADR-0358]).
+are deferred to v2 ([Defer fleet registration and execution placement to v2](../host-registry/4_decisions.md#defer-fleet-registration-and-execution-placement-to-v2)).
 
 ### Remote access
 
@@ -142,7 +142,7 @@ and is not planned by this design.
 
 - CI runner systems separate a central queue from machines that poll and execute.
   That is the shape a returning placement design would borrow — pull direction with
-  orchestrator-selected placement — and it has no v1 consumer ([ADR-0358]).
+  orchestrator-selected placement — and it has no v1 consumer ([Defer fleet registration and execution placement to v2](../host-registry/4_decisions.md#defer-fleet-registration-and-execution-placement-to-v2)).
 
 ## 3. What May Be Distinctive
 
@@ -178,9 +178,9 @@ a universal read proxy.
 - [ORB-00424] — umbrella proposal for canonical Orbit MCP and Bridge parity
   retirement.
 - [ORB-10319] — consolidates registry persistence and MCP routing in the vertical
-  `orbit-remote` feature boundary assumed here ([ADR-0240]).
+  `orbit-remote` feature boundary assumed here ([Consolidate remote coordination in one vertical feature crate](./4_decisions.md#consolidate-remote-coordination-in-one-vertical-feature-crate)).
 - [ORB-10736] — closed the learning authoring/replica/search questions by removing
-  the native resource ([ADR-0359]).
+  the native resource ([Remove the native project-learning subsystem](../project-learnings/4_decisions.md#remove-the-native-project-learning-subsystem)).
 - [ORB-10767] — deliberately dropped Bridge's worker invocation family and
   descoped `repo_sync`.
 - [ORB-10768] — retired Bridge entirely after direct local Orbit registration.

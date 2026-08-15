@@ -11,7 +11,7 @@ summary: "House style for orbit-cli terminal output — machine-readable first, 
 tags: [terminal-interface]
 paths: ["crates/orbit-cli/src/output/**", "crates/orbit-cli/src/command/**"]
 related_features: [terminal-interface, user-interface]
-related_artifacts: [ADR-0306, ADR-0307, ADR-0308]
+related_artifacts: []
 ---
 
 # Terminal Interface — Overview
@@ -28,10 +28,10 @@ None of these is severe alone. Together they mean output correctness is a proper
 
 ## 2. Core Concepts
 
-- **Payload** — the structured record a command produces. The contract; both renderings derive from it [ADR-0306].
+- **Payload** — the structured record a command produces. The contract; both renderings derive from it [Terminal Output Is a Rendering of a Structured Payload](./4_decisions.md#terminal-output-is-a-rendering-of-a-structured-payload).
 - **Renderer** — the layer that projects a payload into bytes. The only code that knows about terminals, width, or ANSI.
 - **Output mode** — `auto` | `table` | `json` | `ndjson`. Resolved centrally from flags and TTY state, never per command.
-- **Role** — a semantic color token (`ok`, `warn`, `error`, `active`, `muted`, `neutral`). Commands tag values with roles; only the renderer maps roles to color [ADR-0308].
+- **Role** — a semantic color token (`ok`, `warn`, `error`, `active`, `muted`, `neutral`). Commands tag values with roles; only the renderer maps roles to color [One Semantic Color Vocabulary, Gated at the Sink](./4_decisions.md#one-semantic-color-vocabulary-gated-at-the-sink).
 - **Sink** — the resolved stdout target plus its capabilities (is it a TTY, how wide, may it carry ANSI). Every environment question is answered here once.
 
 ## 3. At a Glance
@@ -43,9 +43,9 @@ None of these is severe alone. Together they mean output correctness is a proper
 | Structured output and error payloads | [crates/orbit-cli/src/output/json.rs](../../../crates/orbit-cli/src/output/json.rs) | [ORB-10356] |
 | Hand-padded audit line output | [crates/orbit-cli/src/command/audit/support.rs](../../../crates/orbit-cli/src/command/audit/support.rs) | [ORB-10228] |
 | Per-command rendering (current, non-conforming) | [crates/orbit-cli/src/command/](../../../crates/orbit-cli/src/command/) | [ORB-00279] |
-| Target table contract | [./specs/table-rendering.md](./specs/table-rendering.md) | [ADR-0307] |
-| Target color contract | [./specs/color-and-styling.md](./specs/color-and-styling.md) | [ADR-0308] |
-| Target mode-resolution contract | [./specs/output-modes.md](./specs/output-modes.md) | [ADR-0306] |
+| Target table contract | [./specs/table-rendering.md](./specs/table-rendering.md) | [Borderless Tables With Truncate-to-Width Rows](./4_decisions.md#borderless-tables-with-truncate-to-width-rows) |
+| Target color contract | [./specs/color-and-styling.md](./specs/color-and-styling.md) | [One Semantic Color Vocabulary, Gated at the Sink](./4_decisions.md#one-semantic-color-vocabulary-gated-at-the-sink) |
+| Target mode-resolution contract | [./specs/output-modes.md](./specs/output-modes.md) | [Terminal Output Is a Rendering of a Structured Payload](./4_decisions.md#terminal-output-is-a-rendering-of-a-structured-payload) |
 
 ## Task References
 

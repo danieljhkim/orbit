@@ -10,7 +10,7 @@ doc_role: vision
 tags: ["worktree-artifacts"]
 paths: ["crates/orbit-core/**", "crates/orbit-store/**", "crates/orbit-cli/**"]
 related_features: ["worktree-artifacts"]
-related_artifacts: ["ORB-00199", "ORB-00200", "ORB-00201", "ADR-0177"]
+related_artifacts: ["ORB-00199", "ORB-00200", "ORB-00201"]
 ---
 
 # Worktree Artifacts - Vision

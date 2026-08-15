@@ -7,23 +7,17 @@ status: Draft
 feature: executors
 doc_role: decisions
 type: design
-summary: ADR log for executor registration and the (now retired) External Executor Protocol.
+summary: Decision log for executor registration and the (now retired) External Executor Protocol.
 tags: [executors]
 paths: ["crates/orbit-common/src/types/executor_def.rs"]
 related_features: [executors]
-related_artifacts: [ORB-00384, ORB-00400, ORB-10395, ADR-0196]
+related_artifacts: [ORB-00384, ORB-00400, ORB-10395]
 ---
 
 # Executors — Decisions
 
-This is the append-only ADR log for the `executors` feature. Entries are ordered
-by ascending global ADR number. Each entry is the long-form narrative keyed on a
-global ID allocated through `orbit.adr.add`; the ADR store is the source of truth
-for status, owner, `related_features`, and `related_tasks`. Resolve any global ID
-with `orbit tool run orbit.adr.show --input '{"id":"ADR-0196"}'`.
-
 Layout note: as of [ORB-00400], this folder is intentionally decisions+specs-only.
-[ADR-0196] and [specs/external-executor-protocol.md](./specs/external-executor-protocol.md)
+[External Executor Protocol for dynamic out-of-process executor registration (retired)](#external-executor-protocol-for-dynamic-out-of-process-executor-registration-retired) and [specs/external-executor-protocol.md](./specs/external-executor-protocol.md)
 are the load-bearing docs for the shipped External Executor Protocol; placeholder
 `1_overview.md`, `2_design.md`, and `3_vision.md` docs would imply a broader
 executor feature narrative that this work has not established. Add numbered docs
@@ -32,14 +26,9 @@ this exception in the same PR.
 
 ---
 
-## ADR-0196 — External Executor Protocol for dynamic out-of-process executor registration (retired)
+## External Executor Protocol for dynamic out-of-process executor registration (retired)
 
-**Status:** Accepted · 2026-06-14 00:40:41.791069Z · [ORB-00384], [ORB-10395]
-**Owner:** claude
-**Created:** 2026-06-14 00:06:53.604172Z
-**Last updated:** 2026-07-26 03:43:10.577297+00:00
-**Related features:** `executors`
-**Tags:** `executors`, `extensibility`, `retired`
+**Recorded:** 2026-06-14 00:40:41.791069Z · [ORB-00384], [ORB-10395]
 **Paths:** `crates/orbit-common/src/types/executor_def.rs`, `docs/design/executors/**`
 
 > **RETIRED 2026-07-26 — [ORB-10395].** The External Executor Protocol is not a supported Orbit surface. Retiring the v1 executor stack removed everything this decision stood up: `ExternalExecutor`, the shared `direct_agent` subprocess transport, `ActivityExecutorRegistry`, the `ActivityExecutor` trait, the v1 `ExecutionContext`, the `external.example.yaml` template, and the conformance fixture. v2 dispatch (`orbit-engine::activity_job`) is the only execution path and consults no executor registry, so an `executor_type: external` def is now inert — it deserializes and stores, but nothing spawns it. `ExecutorType::External` survives in the wire enum only so pre-existing defs keep parsing; dropping the variant is a separate release decision, tracked alongside the same call for `ExecutorType::AgentCli`. The Consequences below are history, not live obligations — in particular the wire protocol is **no longer** a backward-compatibility obligation. Any future out-of-process extension point must be decided afresh against the v2 dispatch path.
@@ -55,21 +44,17 @@ this exception in the same PR.
 - Executors needing a non-subprocess transport (in-process SDK, gRPC, internal queue) are NOT served by Tier 1 and must wait for Tier 2.
 - Cost: a documented wire protocol is a long-lived backward-compatibility obligation — every future executor capability must be expressible as an additive, versioned envelope field, and a conformance harness must be maintained so adopters do not silently depend on undocumented behavior.
 
-## ADR-0252 — Retire the External Executor Protocol v1
+## Retire the External Executor Protocol v1
 
-**Status:** Proposed · 2026-07-25 22:59:08.214884Z · [ORB-10395]
-**Owner:** human
-**Created:** 2026-07-25 22:59:08.214884Z
-**Last updated:** 2026-07-25 22:59:08.214884Z
-**Tags:** `v1-phaseout`, `executors`, `cleanup`
+**Recorded:** 2026-07-25 22:59:08.214884Z · [ORB-10395]
 
 ### Context
 
-The v1 runtime-host phase-out (knowledgebase/polaris/design/orbit-cleanup/phaseoutv1.md, Stage 3) deletes the v1 executor stack once planning duel is ported to v2 (ORB-10393). `ExternalExecutor` implements the External Executor Protocol v1 — a documented public extension point (docs/design/executors/specs/external-executor-protocol.md, ADR-0196, assets/executors/external.example.yaml) — and shares the `direct_agent` subprocess transport slated for deletion. The phase-out design flagged an open question: if external executors remain a supported surface, the transport must be rehomed rather than deleted.
+The v1 runtime-host phase-out (knowledgebase/polaris/design/orbit-cleanup/phaseoutv1.md, Stage 3) deletes the v1 executor stack once planning duel is ported to v2 (ORB-10393). `ExternalExecutor` implements the External Executor Protocol v1 — a documented public extension point (docs/design/executors/specs/external-executor-protocol.md, [External Executor Protocol for dynamic out-of-process executor registration (retired)](#external-executor-protocol-for-dynamic-out-of-process-executor-registration-retired), assets/executors/external.example.yaml) — and shares the `direct_agent` subprocess transport slated for deletion. The phase-out design flagged an open question: if external executors remain a supported surface, the transport must be rehomed rather than deleted.
 
 ### Decision
 
-Daniel decided on 2026-07-25: the External Executor Protocol is not a supported surface and is retired. `ExternalExecutor` and the shared `direct_agent` transport are deleted with the rest of the v1 executor stack in Stage 3 (ORB-10395); nothing is rehomed. The protocol spec doc and example asset are marked retired/removed in the same change, and ADR-0196 is superseded by this record.
+Daniel decided on 2026-07-25: the External Executor Protocol is not a supported surface and is retired. `ExternalExecutor` and the shared `direct_agent` transport are deleted with the rest of the v1 executor stack in Stage 3 (ORB-10395); nothing is rehomed. The protocol spec doc and example asset are marked retired/removed in the same change, and [External Executor Protocol for dynamic out-of-process executor registration (retired)](#external-executor-protocol-for-dynamic-out-of-process-executor-registration-retired) is superseded by this record.
 
 ### Consequences
 

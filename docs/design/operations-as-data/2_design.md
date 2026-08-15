@@ -11,7 +11,7 @@ summary: How the operation spec kernel, the split spec/handler table, and the MC
 tags: [operations-as-data, architecture, adr-0209]
 paths: ["crates/orbit-common/src/operation.rs", "crates/orbit-common/src/friction/**", "crates/orbit-tools/src/builtin/orbit/operation.rs", "crates/orbit-cli/src/command/operation_args.rs"]
 related_features: [operations-as-data, orbit-core]
-related_artifacts: [ORB-10358, ADR-0209]
+related_artifacts: [ORB-10358]
 ---
 
 # Operations as Data — Design
@@ -56,7 +56,7 @@ const-constructible, so a whole registry stays a `const` item.
 
 ## 2. The split table
 
-ADR-0209 bearing 1 describes "a serializable request/response pair with a handler
+[North-star architecture bearing: operations as data behind an operation registry](../orbit-core/4_decisions.md#north-star-architecture-bearing-operations-as-data-behind-an-operation-registry) bearing 1 describes "a serializable request/response pair with a handler
 registered in an operation table." One literal table is not reachable: handlers
 need `&OrbitRuntime`, which lives far above `orbit-common`. Co-locating them
 would either drag the runtime into the leaf crate or push the specs up above the
@@ -165,14 +165,14 @@ The step-by-step procedure is [references/cookbook.md](references/cookbook.md).
   system enforces that a future clap upgrade keeps them aligned. The frozen
   `friction_help/*.txt` fixtures are the actual guard, and every future noun
   migration must capture its own before starting.
-- **Only one noun is migrated.** Two idioms coexist, exactly as ADR-0209
+- **Only one noun is migrated.** Two idioms coexist, exactly as [North-star architecture bearing: operations as data behind an operation registry](../orbit-core/4_decisions.md#north-star-architecture-bearing-operations-as-data-behind-an-operation-registry)
   predicted. Readers of `orbit-tools`/`orbit-cli` will meet both shapes until the
   ratchet finishes the job, and there is no deadline by design.
 - **Verb-level parameter validation is still the handler's job.** The spec
   declares types and requiredness; cross-field rules (`update` needs at least one
   of `status`/`tags`/`body`) live in the handler and are not visible to any
   surface.
-- **There are no per-verb Rust request/response structs.** ADR-0209 bearing 1
+- **There are no per-verb Rust request/response structs.** [North-star architecture bearing: operations as data behind an operation registry](../orbit-core/4_decisions.md#north-star-architecture-bearing-operations-as-data-behind-an-operation-registry) bearing 1
   says "a serializable request/response pair"; what shipped is a serializable
   *declaration* of the request (`params`) with `serde_json::Value` still on the
   wire. Deriving `Deserialize` request structs was rejected during the pilot for
@@ -187,7 +187,7 @@ The step-by-step procedure is [references/cookbook.md](references/cookbook.md).
 
 ## Task References
 
-- [ORB-10358] — piloted ADR-0209 bearing 1 on the friction noun and built the
+- [ORB-10358] — piloted [North-star architecture bearing: operations as data behind an operation registry](../orbit-core/4_decisions.md#north-star-architecture-bearing-operations-as-data-behind-an-operation-registry) bearing 1 on the friction noun and built the
   kernel plus the MCP, CLI, dashboard, and runtime adapters.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

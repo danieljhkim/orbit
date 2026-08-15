@@ -39,7 +39,7 @@ An `ActivityV2` carries shared metadata plus one runtime spec:
 - `agent_loop`
 - `deterministic`
 
-The shared shape shipped in [T20260418-2010]. The `shell` type was removed as a fail-closed security fix in [ORB-00374]; see [ADR-0194](./4_decisions.md). The `groundhog` activity kind was later removed as unused in [ORB-10332].
+The shared shape shipped in [T20260418-2010]. The `shell` type was removed as a fail-closed security fix in [ORB-00374]; see [The v2 shell activity surface is removed, not sandboxed](./4_decisions.md#the-v2-shell-activity-surface-is-removed-not-sandboxed). The `groundhog` activity kind was later removed as unused in [ORB-10332].
 
 ### 2.2 Jobs are the orchestration grammar
 

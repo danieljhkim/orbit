@@ -8,10 +8,10 @@ last_validated: 2026-08-09
 # Scope: extract docs + search into a plugin-style feature crate
 
 Status: draft (uncommitted) — scoping for the docs+search pluginization pilot.
-Extraction precedent: ORB-10016 (ADR-0203).
+Extraction precedent: ORB-10016 ([Extract the CLI-facing command layer into orbit-cmd](../orbit-core/4_decisions.md#extract-the-cli-facing-command-layer-into-orbit-cmd)).
 
 Learning-specific comparisons below are retained only as historical scoping
-context. [ORB-10736] / [ADR-0359] remove the native learning resource.
+context. [ORB-10736] / [Remove the native project-learning subsystem](../project-learnings/4_decisions.md#remove-the-native-project-learning-subsystem) remove the native learning resource.
 
 ## Goal
 
@@ -22,7 +22,7 @@ command-layer pair:
   doc/ADR lexical search-source builders, doc/ADR embedding-source builders, doc/ADR index +
   search orchestration. Depends on `orbit-common`, `orbit-search`, `orbit-store` (Adr types) only.
 - **`orbit-docs-cli`** (thin clap `Command` enum + `run(ctx)`): embedded by orbit-cli under
-  `orbit docs` / `orbit search` / `orbit semantic`, ADR-0199 style. Depends only on `orbit-docs`.
+  `orbit docs` / `orbit search` / `orbit semantic`, [Workspace_path-addressable MCP host tools with surface-scoped containment](../mcp-session-context/4_decisions.md#workspacepath-addressable-mcp-host-tools-with-surface-scoped-containment) style. Depends only on `orbit-docs`.
 
 orbit-core becomes a *consumer* of `orbit-docs` (same directional shape as today's
 `orbit-core -> orbit-search` edge). orbit-core's tool hosts keep working by calling into the

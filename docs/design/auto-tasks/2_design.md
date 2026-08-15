@@ -11,7 +11,7 @@ summary: Current implementation of the auto-task record, due-math, host-local cu
 tags: [auto-tasks]
 paths: ["crates/orbit-core/src/auto_tasks/**"]
 related_features: [auto-tasks]
-related_artifacts: [ORB-10149, ORB-10439, ORB-10441, ORB-10446, ORB-10472, ORB-10583, ADR-0218, ADR-0217, ADR-0286, ORB-10800, ADR-0366]
+related_artifacts: [ORB-10149, ORB-10439, ORB-10441, ORB-10446, ORB-10472, ORB-10583, ORB-10800]
 ---
 
 # Auto-tasks — Design
@@ -29,7 +29,7 @@ documented under `docs/design/routines/`.
 `updated_by/at`). `schedule` is an untagged enum — `{ cron: "…" }` or
 `{ every_minutes: N }`. `template` carries `title`, `description`,
 `acceptance_criteria`, `task_type`, `tags`, `priority`, `crew`, and `status`
-(default `backlog`). Per ADR-0217 there are **no turn-based knobs**; `deny_unknown_fields`
+(default `backlog`). Per [Run budgets are provider-neutral: wall-clock timeouts, never turn caps](./4_decisions.md#run-budgets-are-provider-neutral-wall-clock-timeouts-never-turn-caps) there are **no turn-based knobs**; `deny_unknown_fields`
 makes a stray `max_turns`/`turns` a hard parse error.
 
 Definitions live as `.orbit/auto_tasks/<name>.yaml` in the active checkout.
@@ -39,7 +39,7 @@ rejects any file whose stem ≠ its `name`, so the on-disk identity and the
 runtime, definition discovery and CRUD use `WorkspacePaths::local_dir`;
 host-local cursor state continues to use the shared root. This split makes
 definition edits ordinary branch content instead of transient tracked dirt in
-the registered primary checkout (ADR-0286).
+the registered primary checkout ([Route tracked auto-task definitions through the active worktree](./4_decisions.md#route-tracked-auto-task-definitions-through-the-active-worktree)).
 
 ## 2. Due computation and catch-up collapse
 
@@ -99,7 +99,7 @@ happens to touch it.
 
 ### 5a. Managed seeding
 
-Default definitions are seeded manifest-aware after [ORB-10800] / [ADR-0366]:
+Default definitions are seeded manifest-aware after [ORB-10800] / [All five definition-artifact kinds carry managed provenance, and doctor reports it](../activity-job/4_decisions.md#all-five-definition-artifact-kinds-carry-managed-provenance-and-doctor-reports-it):
 `.orbit/auto_tasks/` carries a `.orbit-managed-assets.json` recording the digest
 Orbit wrote for each shipped default, so a default dropped from a later release
 can be retired by content provenance instead of remaining loadable forever.

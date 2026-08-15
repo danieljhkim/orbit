@@ -6,32 +6,22 @@ status: Accepted
 feature: routines
 doc_role: decisions
 type: design
-summary: ADR log for the routines scheduler, including default seeding and workspace-local shipment.
+summary: Decision log for the routines scheduler, including default seeding and workspace-local shipment.
 tags: [routines, scheduler]
 paths: ["crates/orbit-core/src/routines/**", "crates/orbit-remote/src/routines.rs"]
 related_features: [routines, activity-job, host-registry]
-related_artifacts: [ORB-10001, ORB-10021, ORB-10207, ORB-10270, ORB-10319, ORB-10739, ADR-0223]
+related_artifacts: [ORB-10001, ORB-10021, ORB-10207, ORB-10270, ORB-10319, ORB-10739]
 ---
 
 # Routines — Decisions
 
-This is the append-only ADR log for the `routines` feature. Entries are ordered by
-ascending global ADR number, each keyed on an ID allocated through `orbit.adr.add`; the
-ADR store is the source of truth for status, owner, `related_features`, and `related_tasks`.
-
-The five candidate decisions recorded by [ORB-10001] were allocated as ADR-0204..ADR-0208
-when the v1 implementation task ([ORB-10021]) was cut, and accepted when it shipped.
+[ORB-10001] recorded five candidate scheduler decisions; [ORB-10021] implemented them for v1. Their titles and recorded task provenance below now carry that history directly.
 
 ---
 
-## ADR-0204 — The OS owns the clock: stateless orbit sweep under launchd/systemd, no resident daemon
+## The OS owns the clock: stateless orbit sweep under launchd/systemd, no resident daemon
 
-**Status:** Accepted · 2026-07-04 21:14:40.327750Z · [ORB-10021]
-**Owner:** claude
-**Created:** 2026-07-04 20:45:39.976734Z
-**Last updated:** 2026-07-04 21:14:40.327750+00:00
-**Related features:** `routines`
-**Tags:** `routines`, `scheduler`
+**Recorded:** 2026-07-04 21:14:40.327750Z · [ORB-10021]
 **Paths:** `docs/design/routines/**`, `crates/orbit-core/src/routines/**`
 
 ### Context
@@ -48,14 +38,9 @@ launchd (`StartInterval` 60s) and a systemd timer (`OnCalendar=*:*:00`, `Persist
 - launchd wake behavior and `Persistent=true` pair with `missed_run: catch_up_once` to cover laptop sleep and host downtime.
 - Cost: minute granularity is a hard floor and event triggers are structurally impossible in v1; correct behavior depends on two platform-specific unit files that must be kept in parity and tested on both platforms.
 
-## ADR-0205 — Routine discovery via the workspace registry and a versioned [routines] role=source config key
+## Routine discovery via the workspace registry and a versioned [routines] role=source config key
 
-**Status:** Accepted · 2026-07-04 21:14:40.332406Z · [ORB-10021]
-**Owner:** claude
-**Created:** 2026-07-04 20:45:39.980175Z
-**Last updated:** 2026-07-04 21:14:40.332406Z
-**Related features:** `routines`
-**Tags:** `routines`, `scheduler`
+**Recorded:** 2026-07-04 21:14:40.332406Z · [ORB-10021]
 **Paths:** `docs/design/routines/**`, `crates/orbit-core/src/routines/**`
 
 ### Context
@@ -72,19 +57,14 @@ Sweep enumerates `~/.orbit/workspaces.json` and collects `.orbit/routines/*.yaml
 - `orbit routine list` names each routine's source workspace, so provenance stays unambiguous with multiple sources.
 - Cost: any registered workspace's config can make it a routine source — the review boundary widens from one blessed repo to every registered workspace's `config.toml`, and sweep correctness now depends on registry hygiene (stale registered paths must be skipped loudly, not silently).
 
-## ADR-0206 — Routine targets are catalog references only — no inline command payloads
+## Routine targets are catalog references only — no inline command payloads
 
-**Status:** Accepted · 2026-07-04 21:14:40.329169Z · [ORB-10021]
-**Owner:** claude
-**Created:** 2026-07-04 20:45:39.982204Z
-**Last updated:** 2026-07-04 21:21:16.626359Z
-**Related features:** `routines`
-**Tags:** `routines`, `scheduler`
+**Recorded:** 2026-07-04 21:14:40.329169Z · [ORB-10021]
 **Paths:** `docs/design/routines/**`, `crates/orbit-core/src/routines/**`
 
 ### Context
 
-The original sketch allowed a `run: {type: shell, command: ...}` payload for small chores. ADR-0194 removed the `shell` activity variant and `run_shell` dispatch fail-closed; reintroducing arbitrary-command payloads through the scheduler would reopen that surface on a timer, unattended.
+The original sketch allowed a `run: {type: shell, command: ...}` payload for small chores. [The v2 shell activity surface is removed, not sandboxed](../activity-job/4_decisions.md#the-v2-shell-activity-surface-is-removed-not-sandboxed) removed the `shell` activity variant and `run_shell` dispatch fail-closed; reintroducing arbitrary-command payloads through the scheduler would reopen that surface on a timer, unattended.
 
 ### Decision
 
@@ -92,18 +72,13 @@ The original sketch allowed a `run: {type: shell, command: ...}` payload for sma
 
 ### Consequences
 
-- Scheduled execution inherits existing activity/job policy, audit envelopes, and the fail-closed posture of ADR-0194; the scheduler adds a trigger source, not a new execution surface.
+- Scheduled execution inherits existing activity/job policy, audit envelopes, and the fail-closed posture of [The v2 shell activity surface is removed, not sandboxed](../activity-job/4_decisions.md#the-v2-shell-activity-surface-is-removed-not-sandboxed); the scheduler adds a trigger source, not a new execution surface.
 - Load-time validation makes a broken reference visible on the next sweep instead of at fire time.
 - Cost: every new chore requires authoring a catalog asset (higher friction than a one-line command), and scheduler capability is permanently coupled to catalog capability — including the job-shaped dispatch constraint that keeps `activity:` targets out of v1.
 
-## ADR-0207 — Routines pin hosts explicitly; no cross-host coordination in v1
+## Routines pin hosts explicitly; no cross-host coordination in v1
 
-**Status:** Accepted · 2026-07-04 21:14:40.332307Z · [ORB-10021]
-**Owner:** claude
-**Created:** 2026-07-04 20:45:39.984982Z
-**Last updated:** 2026-07-04 21:14:40.332307Z
-**Related features:** `routines`
-**Tags:** `routines`, `scheduler`
+**Recorded:** 2026-07-04 21:14:40.332307Z · [ORB-10021]
 **Paths:** `docs/design/routines/**`, `crates/orbit-core/src/routines/**`
 
 ### Context
@@ -120,14 +95,9 @@ Each routine carries a `hosts:` list matched against the host-local `host_id`; t
 - The semantics are trivially predictable from the YAML alone.
 - Cost: no routine survives its pinned host being down, and adding leases later introduces a second, coordinated mode whose semantics diverge from everything shipped in v1.
 
-## ADR-0208 — Routine definitions are git-shared; scheduler state is host-local and never synced
+## Routine definitions are git-shared; scheduler state is host-local and never synced
 
-**Status:** Accepted · 2026-07-04 21:14:40.331256Z · [ORB-10021]
-**Owner:** claude
-**Created:** 2026-07-04 20:45:39.988226Z
-**Last updated:** 2026-07-04 21:14:40.331256Z
-**Related features:** `routines`
-**Tags:** `routines`, `scheduler`
+**Recorded:** 2026-07-04 21:14:40.331256Z · [ORB-10021]
 **Paths:** `docs/design/routines/**`, `crates/orbit-core/src/routines/**`
 
 ### Context
@@ -144,18 +114,13 @@ Routine YAML definitions live in routine-source workspaces and converge via git 
 - State stays consistent with the run history it references, which is also host-local.
 - Cost: cross-host observability requires asking each host — there is no single pane of glass, and a definition edit is only as fresh on the other host as its last `git pull`.
 
-## ADR-0215 — Default routines seed per-workspace at init with host and name resolved at seed time
+## Default routines seed per-workspace at init with host and name resolved at seed time
 
-**Status:** Accepted · 2026-07-11 21:51:20.761360Z · [ORB-10129], [ORB-10207]
-**Owner:** claude
-**Created:** 2026-07-11 21:51:13.196368Z
-**Last updated:** 2026-08-12
-**Related features:** `routines`
-**Tags:** `routines`, `default-assets`, `triage`, `task-pilot`, `ship-sweep`
+**Recorded:** 2026-07-11 21:51:20.761360Z · [ORB-10129], [ORB-10207]
 **Paths:** `crates/orbit-core/assets/routines/**`, `crates/orbit-core/src/command/routine.rs`, `crates/orbit-core/src/command/init.rs`
 
 ### Context
-ORB-10129 ships the triage pipeline as a default, but routines have no global directory: discovery reads `.orbit/routines/*.yaml` from `[routines] role = "source"` workspaces, v1 requires explicit host pinning (no "any host"), and routine names must be unique across all sources on a host — so a static shipped YAML cannot work. The real alternatives were leaving defaults workspace-authored from scratch or adding a global routines directory (a discovery-model change ADR-0205 deliberately avoided).
+ORB-10129 ships the triage pipeline as a default, but routines have no global directory: discovery reads `.orbit/routines/*.yaml` from `[routines] role = "source"` workspaces, v1 requires explicit host pinning (no "any host"), and routine names must be unique across all sources on a host — so a static shipped YAML cannot work. The real alternatives were leaving defaults workspace-authored from scratch or adding a global routines directory (a discovery-model change [Routine discovery through workspace registry](#routine-discovery-via-the-workspace-registry-and-a-versioned-routines-rolesource-config-key) deliberately avoided).
 
 ### Decision
 `orbit init` (workspace branch) seeds `DEFAULT_ROUTINE_FILES` templates into `.orbit/routines/`, resolving `__ORBIT_HOST_ID__` via `resolve_host_id` and `__ORBIT_ROUTINE_NAME__` from a workspace-directory slug, validating each rendered document fail-closed before writing. Every default is disabled. The complete set is `auto_task_scheduler`, `task_triage`, `task_pilot`, `ship_sweep`, and `worktree_gc`. Plain re-init creates missing defaults while preserving existing definitions byte-for-byte; destructive `--force` recreates templates. A routine fires only after the workspace is a routine source and its versioned `enabled` field is set true. [ORB-10739]
@@ -166,14 +131,9 @@ ORB-10129 ships the triage pipeline as a default, but routines have no global di
 - The seeded file pins the initializing host; sharing the repo to another host needs a hand edit of `hosts:` or recreation during destructive initialization.
 - Cost: `orbit init` output depends on the machine it runs on (host id, directory name), and routine template improvements do not overwrite existing workspace-authored files.
 
-## ADR-0223 — Delegate workspace ship routines through a synchronous wrapper job
+## Delegate workspace ship routines through a synchronous wrapper job
 
-**Status:** Accepted · 2026-07-15 22:19:13.834542Z · [ORB-10207]
-**Owner:** codex
-**Created:** 2026-07-15 22:14:11.893535Z
-**Last updated:** 2026-07-15 22:19:13.834542Z
-**Related features:** `routines`, `activity-job`
-**Tags:** `routines`, `ship-sweep`
+**Recorded:** 2026-07-15 22:19:13.834542Z · [ORB-10207]
 **Paths:** `crates/orbit-core/assets/routines/**`, `crates/orbit-core/assets/jobs/**`, `crates/orbit-core/src/runtime/v2_host/**`
 
 ### Context
@@ -188,14 +148,9 @@ Seed a workspace-local ship-sweep routine targeting a shipped wrapper job. The w
 - The legacy global ship-sweep remains compatible during burn-in but is not used by routines.
 - Cost: the catalog gains a small wrapper job and deterministic resolver activity whose input contract must stay aligned with the canonical ship workflow.
 
-## ADR-0355 — Host-local sweep clock configuration
+## Host-local sweep clock configuration
 
-**Status:** Accepted · 2026-08-11 03:29:01.559340Z · [ORB-10720]
-**Owner:** codex
-**Created:** 2026-08-11 03:19:18.858604Z
-**Last updated:** 2026-08-11 03:29:01.559340Z
-**Related features:** `routines`
-**Tags:** `routines`, `clock`, `scheduler`
+**Recorded:** 2026-08-11 03:29:01.559340Z · [ORB-10720]
 **Paths:** `crates/orbit-core/src/routines/**`, `crates/orbit-cli/src/command/routine/**`, `docs/design/routines/**`
 
 ### Context
@@ -211,10 +166,10 @@ Store the supported whole-minute cadence in host-local `~/.orbit/clock.toml` and
 ## Task References
 
 - [ORB-10001] — authored this design-doc folder (proposal).
-- [ORB-10021] — implemented routines v1; allocated and accepted ADR-0204..ADR-0208.
-- [ORB-10129] — shipped the default triage routine; allocated and accepted ADR-0215.
-- [ORB-10207] — seeded disabled defaults and allocated/accepted ADR-0223 for workspace ship.
-- [ORB-10270] — completed ADR-0231's runtime enforcement: committed pins resolve through
+- [ORB-10021] — implemented routines v1; allocated and accepted [The OS owns the clock: stateless orbit sweep under launchd/systemd, no resident daemon](#the-os-owns-the-clock-stateless-orbit-sweep-under-launchdsystemd-no-resident-daemon)..[Routine definitions are git-shared; scheduler state is host-local and never synced](#routine-definitions-are-git-shared-scheduler-state-is-host-local-and-never-synced).
+- [ORB-10129] — shipped the default triage routine; allocated and accepted [Default routines seed per-workspace at init with host and name resolved at seed time](#default-routines-seed-per-workspace-at-init-with-host-and-name-resolved-at-seed-time).
+- [ORB-10207] — seeded disabled defaults and allocated/accepted [Delegate workspace ship routines through a synchronous wrapper job](#delegate-workspace-ship-routines-through-a-synchronous-wrapper-job) for workspace ship.
+- [ORB-10270] — completed [Committed-routine ownership with host-local cursors](../host-registry/4_decisions.md#committed-routine-ownership-with-host-local-cursors)'s runtime enforcement: committed pins resolve through
   current registry or classified spoke-cache data before scheduler mutation, diagnostics
   remain explicit under degradation, and reassignment starts with a fresh baseline.
 - [ORB-10319] — moved the Remote-specific providers that source identity, registry/cache,

@@ -3,23 +3,28 @@ summary: "Worktree Artifacts - Overview"
 type: design
 title: "Worktree Artifacts - Overview"
 owner: codex
-last_updated: 2026-08-01
+last_updated: 2026-08-15
 status: Accepted
 feature: worktree-artifacts
 doc_role: overview
 tags: ["worktree-artifacts"]
 paths: ["crates/orbit-core/**", "crates/orbit-store/**", "crates/orbit-engine/**", "crates/orbit-cli/**"]
 related_features: ["worktree-artifacts"]
-related_artifacts: ["ORB-00199", "ORB-00200", "ORB-00201", "ORB-10501", "ORB-10535", "ADR-0177", "ADR-0296"]
+related_artifacts: ["ORB-00199", "ORB-00200", "ORB-00201", "ORB-10501", "ORB-10535"]
 ---
 
 # Worktree Artifacts — Overview
 
 > Learning-specific storage and federation references below are retired history.
-> [ORB-10736] / [ADR-0359] remove the native learning subsystem and leave its
+> [ORB-10736] / [Remove the native project-learning subsystem](../project-learnings/4_decisions.md#remove-the-native-project-learning-subsystem) remove the native learning subsystem and leave its
 > existing repository files inert.
 
-Worktree artifacts let ADR and learning body files travel with the branch that created them while preserving one shared ID authority for the whole repository. Tasks, audit, scoreboards, and allocator state stay in the shared `.orbit/`; ADR and learning bodies live in the current worktree's `.orbit/`.
+> Decision-store storage, federation, allocation, and repair references below are
+> also retired history. [ORB-10726] retired the tool surface and moved reasoning
+> into feature decision docs; [ORB-10805] removed the redundant tracked store and
+> its IDs.
+
+Historically, worktree artifacts let decision and learning body files travel with the branch that created them while preserving one shared ID authority for the repository. Tasks, audit, scoreboards, and allocator state stayed in the shared `.orbit/`; the now-retired body files lived in the current worktree's `.orbit/`.
 
 ## 1. Motivation
 
@@ -53,7 +58,7 @@ The three-task sequence split this apart:
 | CLI/tool remote listing | `crates/orbit-core/src/runtime/orbit_tool_host/` and `crates/orbit-cli/src/command/learning/` | [ORB-00201] |
 | Orphaned-allocation detection and repair | `crates/orbit-core/src/command/id_allocation.rs`, `crates/orbit-cmd/src/doctor.rs` | [ORB-10501] |
 | Pre-removal unique-body guard | `crates/orbit-engine/src/executor/automation/vcs/worktree/cleanup.rs` | [ORB-10535] |
-| Decision log | `docs/design/worktree-artifacts/4_decisions.md` | [ADR-0177], [ADR-0296] |
+| Decision log | `docs/design/worktree-artifacts/4_decisions.md` | [Worktree-local ADR and learning bodies with shared ID allocation](./4_decisions.md#worktree-local-adr-and-learning-bodies-with-shared-id-allocation), [Detect and retire id allocations pinned to a reaped worktree](./4_decisions.md#detect-and-retire-id-allocations-pinned-to-a-reaped-worktree) |
 
 ## Task References
 

@@ -22,7 +22,7 @@ This document specifies the semantic-search implementation: the `orbit-search` c
 The `orbit-search` crate contains the library and the optional companion binary target:
 
 - **`orbit-search`** — small client and storage library. Owns the `Embedder` trait, the JSON-RPC request/response types, `SubprocessEmbedder`, vector storage, and the install/index/query commands. Its default feature does not enable fastembed-rs, so the main `orbit` binary remains slim.
-- **`orbit-search-companion`** — optional binary target behind the `companion` feature. It depends on fastembed-rs for ONNX inference and is distributed separately per platform. **Not built into `orbit`**; users opt in by running `orbit semantic install`. Per [4_decisions.md ADR-005](./4_decisions.md).
+- **`orbit-search-companion`** — optional binary target behind the `companion` feature. It depends on fastembed-rs for ONNX inference and is distributed separately per platform. **Not built into `orbit`**; users opt in by running `orbit semantic install`. Per [Companion binary installed on demand, rather than bundled in `orbit`](./4_decisions.md#companion-binary-installed-on-demand-rather-than-bundled-in-orbit).
 
 Updated dependency graph:
 
@@ -120,7 +120,7 @@ If none resolve, the embedder returns `OrbitError::CompanionNotInstalled` with a
 
 ### 2.6 Alternative backends
 
-The trait + RPC protocol make alternative companions viable without changing storage or retrieval. A future Candle-based companion could speak the same protocol and ship as a separate downloadable. None ship today; the protocol exists to keep that door open. The full backend comparison is in [4_decisions.md ADR-001](./4_decisions.md); the packaging decision is in [4_decisions.md ADR-005](./4_decisions.md).
+The trait + RPC protocol make alternative companions viable without changing storage or retrieval. A future Candle-based companion could speak the same protocol and ship as a separate downloadable. None ship today; the protocol exists to keep that door open. The full backend comparison is in [fastembed-rs ONNX backend over Candle, llama.cpp, or external ollama](./4_decisions.md#fastembed-rs-onnx-backend-over-candle-llamacpp-or-external-ollama); the packaging decision is in [Companion binary installed on demand, rather than bundled in `orbit`](./4_decisions.md#companion-binary-installed-on-demand-rather-than-bundled-in-orbit).
 
 ---
 
@@ -160,7 +160,7 @@ The composite primary key includes `model_id` so embeddings under multiple model
 4. return top-k (source_id, field, score)
 ```
 
-At 30k vectors × 384d, the full scan is ~50ms in pure Rust on a modern laptop and dominated by the SQLite read, not the dot product. The implementation uses `f32` slabs and SIMD-friendly contiguous buffers; it does not need an HNSW index at phase-1 scale. The forward path to HNSW (via `sqlite-vec`) is preserved by the schema — `embedding BLOB` is the same shape `sqlite-vec` expects ([4_decisions.md ADR-002](./4_decisions.md)).
+At 30k vectors × 384d, the full scan is ~50ms in pure Rust on a modern laptop and dominated by the SQLite read, not the dot product. The implementation uses `f32` slabs and SIMD-friendly contiguous buffers; it does not need an HNSW index at phase-1 scale. The forward path to HNSW (via `sqlite-vec`) is preserved by the schema — `embedding BLOB` is the same shape `sqlite-vec` expects ([Brute-force cosine over SQLite BLOBs; `sqlite-vec` reserved as phase-2 upgrade](./4_decisions.md#brute-force-cosine-over-sqlite-blobs-sqlite-vec-reserved-as-phase-2-upgrade)).
 
 ### 3.3 Write path
 
@@ -190,7 +190,7 @@ A task bundle has structured fields with different retrieval value. The design i
 | `comment_<idx>` | `task.yaml.comments[idx].body` | One row per comment; preserves authorship |
 | `review_<thread>_msg_<idx>` | review_threads | Decision context lives here |
 
-A single match in a comment surfaces the parent task; the result formatter rolls field-level hits up to task-level results, with the highest-scoring field shown as a snippet ([4_decisions.md ADR-003](./4_decisions.md)).
+A single match in a comment surfaces the parent task; the result formatter rolls field-level hits up to task-level results, with the highest-scoring field shown as a snippet ([Per-field embeddings with chunked overflow, not whole-bundle concatenation](./4_decisions.md#per-field-embeddings-with-chunked-overflow-not-whole-bundle-concatenation)).
 
 ### 4.2 Chunking long fields
 
@@ -241,7 +241,7 @@ Three queries that motivate the choice:
 - **"T20260421-0528"** — lexical wins; semantic returns near-random because the literal token has no semantic neighborhood.
 - **"file: orbit-store/src/file/task_store/layout.rs"** — lexical wins; literal path tokens dominate.
 
-Either retriever alone has a failure mode the other doesn't. RRF resolves both at the cost of one extra SQL query per search ([4_decisions.md ADR-004](./4_decisions.md)).
+Either retriever alone has a failure mode the other doesn't. RRF resolves both at the cost of one extra SQL query per search ([Hybrid retrieval (FTS5 BM25 + cosine, fused via RRF) from day one](./4_decisions.md#hybrid-retrieval-fts5-bm25-cosine-fused-via-rrf-from-day-one)).
 
 ---
 
@@ -318,7 +318,7 @@ The score breakdown is deliberately exposed: agents can use it to decide whether
 
 ### 8.1 Two-step install and first-run download
 
-Users who want semantic search must run two commands instead of one: install `orbit`, then run `orbit semantic install [--model X]` to download the companion (~50MB) and the chosen model (~23–140MB). The install command is the friction; the per-model download afterward is the same content cost a bundled design would have charged on first search. For users behind corporate proxies or in airgapped environments the friction multiplies — see [3_vision.md §1.2](./3_vision.md). The cost is explicit in [4_decisions.md ADR-005](./4_decisions.md); the mitigation is a clear `CompanionNotInstalled` error with the exact remediation command.
+Users who want semantic search must run two commands instead of one: install `orbit`, then run `orbit semantic install [--model X]` to download the companion (~50MB) and the chosen model (~23–140MB). The install command is the friction; the per-model download afterward is the same content cost a bundled design would have charged on first search. For users behind corporate proxies or in airgapped environments the friction multiplies — see [3_vision.md §1.2](./3_vision.md). The cost is explicit in [Companion binary installed on demand, rather than bundled in `orbit`](./4_decisions.md#companion-binary-installed-on-demand-rather-than-bundled-in-orbit); the mitigation is a clear `CompanionNotInstalled` error with the exact remediation command.
 
 ### 8.2 Subprocess overhead
 
@@ -330,7 +330,7 @@ The companion lives in a separate process and inference happens via stdio JSON-R
 
 ### 8.4 Brute-force scaling ceiling
 
-Cosine over a full table scan stays sub-100ms at ~100K vectors. Phase-2 graph integration will push past that; the schema's forward compatibility with `sqlite-vec` is the planned upgrade path, but `sqlite-vec` is itself a loadable extension that may not be available in every distribution. The decision to revisit storage at phase 2 is in [4_decisions.md ADR-002](./4_decisions.md).
+Cosine over a full table scan stays sub-100ms at ~100K vectors. Phase-2 graph integration will push past that; the schema's forward compatibility with `sqlite-vec` is the planned upgrade path, but `sqlite-vec` is itself a loadable extension that may not be available in every distribution. The decision to revisit storage at phase 2 is in [Brute-force cosine over SQLite BLOBs; `sqlite-vec` reserved as phase-2 upgrade](./4_decisions.md#brute-force-cosine-over-sqlite-blobs-sqlite-vec-reserved-as-phase-2-upgrade).
 
 ### 8.5 Multilingual content
 
@@ -344,7 +344,7 @@ All embeddings stay local. Task content never leaves the workspace. This is stru
 
 ## 9. Historical Phase-2 Graph Corpus Proposal (Retired)
 
-**Status: Retired by ADR-0291 / ORB-10491.** Orbit's code-graph subsystem was
+**Status: Retired by [Retire and delete Orbit's code-graph subsystem](../_archive/orbit-graph/4_decisions.md#retire-and-delete-orbits-code-graph-subsystem) / ORB-10491.** Orbit's code-graph subsystem was
 deleted, so this section is retained only as design history and is not an
 implementation plan. Any future code-corpus work requires a new design that
 does not assume the removed graph types, indexer, or synchronization stream.
@@ -385,7 +385,7 @@ Per-leaf field tuning beyond this sketch is left for the implementing task; the 
 
 ### 9.4 Indexer placement: `orbit-embed::graph_indexer`
 
-A new module under `orbit-embed`, consistent with [ADR-0276](./4_decisions.md#adr-0276--semantic-search-ownership-relocated-to-orbit-embed)'s "semantic ownership lives in `orbit-embed`" rule. The indexer consumes a leaf-diff stream from graph synchronization after each *clean* rebuild, batches `EmbedJob`s through the same channel pattern the task path uses ([§7.1](#71-on-mutation-indexing)), and writes to the existing `VectorStore`.
+A new module under `orbit-embed`, consistent with [Semantic-search ownership relocated to `orbit-embed`](./4_decisions.md#semantic-search-ownership-relocated-to-orbit-embed)'s "semantic ownership lives in `orbit-embed`" rule. The indexer consumes a leaf-diff stream from graph synchronization after each *clean* rebuild, batches `EmbedJob`s through the same channel pattern the task path uses ([§7.1](#71-on-mutation-indexing)), and writes to the existing `VectorStore`.
 
 Async by design: graph rebuild commits first, embedding lags behind in a background worker. The graph implementation does not gain a dependency on `orbit-embed` — the indexer pulls the diff via a graph synchronization API. The exact diff-stream contract (push channel vs. pull-after-rebuild, `LeafDiff` shape) is deferred to the implementing task; both shapes are viable.
 
@@ -413,8 +413,8 @@ Three loops at increasing scope:
 This section deliberately does not commit to:
 
 - **Symbol → ADR back-link as a precomputed edge.** Falls out of a future vector-ranked ADR search path once ADRs are vector-indexed. Precomputing top-k matches per symbol is a phase-3 optimization, not a v1 requirement.
-- **Code-aware embedding model.** CodeBERT, voyage-code, and similar outperform general-text models on code retrieval but are larger and weaker on English. v1 ships with the BGE-small default ([ADR-0270](./4_decisions.md#adr-0270--fastembed-rs-onnx-backend-over-candle-llamacpp-or-external-ollama)) and revisits if recall on code queries underperforms.
-- **HNSW upgrade.** The graph corpus may cross the brute-force ceiling. Schema is already forward-compatible with `sqlite-vec` per [ADR-0271](./4_decisions.md#adr-0271--brute-force-cosine-over-sqlite-blobs-sqlite-vec-reserved-as-phase-2-upgrade); the decision to switch is a separate ADR at the point of operational evidence — see [3_vision.md §1.3](./3_vision.md).
+- **Code-aware embedding model.** CodeBERT, voyage-code, and similar outperform general-text models on code retrieval but are larger and weaker on English. v1 ships with the BGE-small default ([fastembed-rs ONNX backend over Candle, llama.cpp, or external ollama](./4_decisions.md#fastembed-rs-onnx-backend-over-candle-llamacpp-or-external-ollama)) and revisits if recall on code queries underperforms.
+- **HNSW upgrade.** The graph corpus may cross the brute-force ceiling. Schema is already forward-compatible with `sqlite-vec` per [Brute-force cosine over SQLite BLOBs; `sqlite-vec` reserved as phase-2 upgrade](./4_decisions.md#brute-force-cosine-over-sqlite-blobs-sqlite-vec-reserved-as-phase-2-upgrade); the decision to switch is a separate ADR at the point of operational evidence — see [3_vision.md §1.3](./3_vision.md).
 - **Free-floating file-scope comments.** Comments not attached to any leaf's source span (e.g. section dividers between two `fn`s) are not embedded. The project convention is "default to no comments" so this gap is small and low-signal.
 - **Multi-workspace ADR scoping.** ADRs would flow in through the ADR store; cross-workspace ADR scoping remains a separate design question.
 

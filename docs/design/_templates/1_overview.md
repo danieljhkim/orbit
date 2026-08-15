@@ -11,7 +11,7 @@ summary: <one-line hook for agent retrieval — non-empty, single line>
 tags: [<feature-slug>]
 paths: ["crates/<crate>/**"]
 related_features: [<feature-slug>]
-related_artifacts: [ORB-NNNNN, ADR-NNNN]
+related_artifacts: [ORB-NNNNN]
 ---
 
 # <Feature> — Overview

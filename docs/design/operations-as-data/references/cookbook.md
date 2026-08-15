@@ -11,7 +11,7 @@ summary: Step-by-step procedure for migrating a noun to the operation registry, 
 tags: [operations-as-data, architecture, adr-0209, cookbook]
 paths: ["crates/orbit-common/src/friction/**", "crates/orbit-cli/src/command/operation_args.rs"]
 related_features: [operations-as-data]
-related_artifacts: [ORB-10358, ADR-0209]
+related_artifacts: [ORB-10358]
 ---
 
 # Operations as Data — Migration Cookbook
@@ -172,7 +172,7 @@ description.
 
 ### Step 10. Record the outcome
 
-Append a pilot/migration note to ADR-0209 via `orbit tool run orbit.adr.update`
+Append a pilot/migration note directly to [North-star architecture bearing: operations as data behind an operation registry](../../orbit-core/4_decisions.md#north-star-architecture-bearing-operations-as-data-behind-an-operation-registry), citing the task that supplied the evidence.
 (never hand-edit `.orbit/`), and add the noun to this feature's docs. If the
 migration surfaced a cost the ADR does not already name, name it.
 

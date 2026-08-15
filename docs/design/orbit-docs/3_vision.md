@@ -9,14 +9,14 @@ type: design
 summary: "Orbit Docs — open questions, the remaining roadmap (injection, ADR folding), and prior work in the agent-knowledge-base space."
 tags: [orbit-docs]
 related_features: [orbit-docs]
-related_artifacts: [ORB-00164, ORB-00165, ORB-00166, ORB-00167, ORB-00168, ORB-00169, ORB-00206, ADR-0180]
+related_artifacts: [ORB-00164, ORB-00165, ORB-00166, ORB-00167, ORB-00168, ORB-00169, ORB-00206]
 last_validated: 2026-08-09
 ---
 
 # Orbit Docs — Vision
 
 > **Historical comparison:** learning-specific comparisons in this document
-> describe the retired native subsystem. [ORB-10736] / [ADR-0359] remove that
+> describe the retired native subsystem. [ORB-10736] / [Remove the native project-learning subsystem](../project-learnings/4_decisions.md#remove-the-native-project-learning-subsystem) remove that
 > resource and its tool, storage, and delivery contracts; those passages are
 > non-normative.
 
@@ -92,7 +92,7 @@ The boundary (rule-with-failure-mode vs. explanatory-context) is the load-bearin
 
 ### 2.2 Orbit ADRs
 
-[.orbit/adrs/](../../../.orbit/adrs/) is the ADR artifact store. ADRs share with docs the "PR-reviewed Markdown" property but differ on lifecycle: ADRs have `proposed → accepted → superseded` and are tool-managed via `orbit.adr.add`. The locating principle ([ADR-0170]) puts them under `.orbit/adrs/`. Whether to fold them into orbit-docs is [ORB-00169].
+[.orbit/adrs/](../../../.orbit/adrs/) is the ADR artifact store. ADRs share with docs the "PR-reviewed Markdown" property but differ on lifecycle: ADRs have `proposed → accepted → superseded` and are tool-managed via `orbit.adr.add`. The locating principle ([`.orbit/` for tool-managed artifacts; `docs/` for human-authored content](./4_decisions.md#orbit-for-tool-managed-artifacts-docs-for-human-authored-content)) puts them under `.orbit/adrs/`. Whether to fold them into orbit-docs is [ORB-00169].
 
 ### 2.3 Semantic search
 
@@ -113,7 +113,7 @@ The dimensions where Orbit Docs differs:
 
 - **Author surface.** docs.rs/devdocs are read-only outputs of an upstream tool. Orbit Docs is author-edited Markdown checked into the repo.
 - **Scope.** docs.rs/devdocs aggregate a known set of language/framework docs. Orbit Docs is unbounded — whatever the team writes.
-- **Cross-corpus links.** docs.rs/devdocs link only to themselves. Orbit Docs links to tasks, learnings, ADRs, and friction reports via [ADR-0171].
+- **Cross-corpus links.** docs.rs/devdocs link only to themselves. Orbit Docs links to tasks, learnings, and friction reports via [ID-prefix dispatch for orbit-docs `related_artifacts`](./4_decisions.md#id-prefix-dispatch-for-orbit-docs-relatedartifacts), while decisions use ordinary title-based Markdown links.
 
 ### 2.6 External: Diátaxis framework
 
@@ -133,7 +133,7 @@ This bias shows up in small places — `paths` as a glob list rather than a sing
 
 ### 3.2 Storage-agnostic, lifecycle-free
 
-Most indexed-corpus tools own the storage shape (a database, a folder layout, an allocation scheme). Orbit-docs owns *one line of TOML* (`[docs].roots`) and nothing else on disk. Authors keep ownership of layout, files, and convention. The locking principle from [ADR-0170] makes this an enforceable boundary: tool-managed artifacts go under `.orbit/`, human-authored content goes under `docs/`, and `orbit-docs` is the convention layer between the two.
+Most indexed-corpus tools own the storage shape (a database, a folder layout, an allocation scheme). Orbit-docs owns *one line of TOML* (`[docs].roots`) and nothing else on disk. Authors keep ownership of layout, files, and convention. The locking principle from [`.orbit/` for tool-managed artifacts; `docs/` for human-authored content](./4_decisions.md#orbit-for-tool-managed-artifacts-docs-for-human-authored-content) makes this an enforceable boundary: tool-managed artifacts go under `.orbit/`, human-authored content goes under `docs/`, and `orbit-docs` is the convention layer between the two.
 
 The cost is that orbit-docs cannot enforce things the storage-owner could enforce (frontmatter freshness, supersede chains, etc.). That's the v1 bet — that authors prefer un-enforced freedom over tool-enforced rigor for explanatory content.
 

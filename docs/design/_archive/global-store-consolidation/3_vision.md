@@ -10,7 +10,7 @@ summary: Future follow-ups for global SQLite runtime-state consolidation.
 tags: [global-store-consolidation, storage, sqlite]
 paths: ["crates/orbit-store/**", "crates/orbit-core/**"]
 related_features: [global-store-consolidation]
-related_artifacts: [ORB-00276, ADR-0183]
+related_artifacts: [ORB-00276]
 ---
 
 # Global Store Consolidation — Vision
@@ -39,7 +39,7 @@ The design deliberately keeps file-backed blobs and human-edited friction report
 
 ## 4. References
 
-- ADR-0183 — accepted consolidation decision.
+- [Consolidate v2 audit, job-run, and session-learning state into the global SQLite store](./4_decisions.md#consolidate-v2-audit-job-run-and-session-learning-state-into-the-global-sqlite-store) — accepted consolidation decision.
 - ORB-00276 — implementation task.
 
 ## Task References

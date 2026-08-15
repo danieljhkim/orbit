@@ -11,7 +11,7 @@ doc_role: vision
 tags: ["mcp-session-context", "mcp", "workspace"]
 paths: ["crates/orbit-mcp/**", "crates/orbit-remote/src/mcp/**", "crates/orbit-tools/**", "crates/orbit-core/src/command/tool/**"]
 related_features: ["mcp-session-context", "task-artifacts"]
-related_artifacts: ["ORB-00256", "ORB-10228", "ORB-10319", "ADR-0181", "ADR-0149"]
+related_artifacts: ["ORB-00256", "ORB-10228", "ORB-10319"]
 ---
 
 # MCP Session Context — Vision
@@ -30,7 +30,9 @@ Session context should stay small and deliberate: fields belong here only when t
 
 ### Task Artifacts
 
-[ADR-0149] established that `.orbit/config.yaml` stores the load-bearing `workspace_id` binding and that defaulting task writes from cwd can silently route to the wrong workspace.
+Surviving references to a decision whose original body was lost to worktree reaping record that `.orbit/config.yaml` stores the load-bearing `workspace_id` binding and that defaulting task writes from cwd can silently route to the wrong workspace. This document preserves only that already-recorded claim; it does not reconstruct the missing rationale.
+
+The same incident temporarily orphaned the bodies now preserved as [MCP ambient workspace session context](./4_decisions.md#mcp-ambient-workspace-session-context), [The v2 shell activity surface is removed, not sandboxed](../activity-job/4_decisions.md#the-v2-shell-activity-surface-is-removed-not-sandboxed), [Default Claude to opus/sonnet CLI aliases; centralize model defaults in orbit-common::model_defaults](../agent-families/4_decisions.md#default-claude-to-opussonnet-cli-aliases-centralize-model-defaults-in-orbit-commonmodeldefaults), and [PR handoff recovery follows job checkpoints and exact remote leases](../activity-job/4_decisions.md#pr-handoff-recovery-follows-job-checkpoints-and-exact-remote-leases).
 
 ### MCP Schema Trimming
 
@@ -44,8 +46,8 @@ Orbit treats session context as a safety mechanism rather than a convenience cac
 
 ## 4. References
 
-- [ADR-0149] records the task-artifact workspace binding invariant.
-- [ADR-0181] records the MCP ambient workspace session context decision.
+- The lost task-artifact decision is not reconstructed here; only its surviving workspace-binding claim is retained above.
+- [MCP ambient workspace session context](./4_decisions.md#mcp-ambient-workspace-session-context) records the MCP ambient workspace session context decision.
 - [ORB-00256] implemented the first session context field.
 - [ORB-10228] established the trusted context and audit boundary.
 - [ORB-00255] motivated the schema trimming pressure that made a safe default useful.

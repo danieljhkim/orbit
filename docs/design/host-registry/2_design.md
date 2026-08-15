@@ -11,7 +11,7 @@ summary: Mechanisms for host identity and machine task prefix, per-workspace own
 tags: [host-registry, multi-host, ownership, routines, data-placement]
 paths: ["crates/orbit-remote/**", "crates/orbit-core/**", "crates/orbit-store/**", "crates/orbit-mcp/**", "crates/orbit-common/**"]
 related_features: [host-registry, mcp-bridge, routines, remote-access, mcp-session-context, resident-orchestrator]
-related_artifacts: [ORB-00424, ORB-10247, ORB-10248, ORB-10249, ORB-10255, ORB-10257, ORB-10258, ORB-10267, ORB-10268, ORB-10269, ORB-10271, ORB-10272, ORB-10302, ORB-10319, ORB-10330, ORB-10332, ORB-10709, ORB-10725, ORB-10730, ADR-0200, ADR-0205, ADR-0208, ADR-0226, ADR-0227, ADR-0228, ADR-0229, ADR-0230, ADR-0231, ADR-0232, ADR-0235, ADR-0240, ADR-0352, ADR-0355, ADR-0356, ADR-0357, ADR-0358]
+related_artifacts: [ORB-00424, ORB-10247, ORB-10248, ORB-10249, ORB-10255, ORB-10257, ORB-10258, ORB-10267, ORB-10268, ORB-10269, ORB-10271, ORB-10272, ORB-10302, ORB-10319, ORB-10330, ORB-10332, ORB-10709, ORB-10725, ORB-10730]
 ---
 
 # Host Registry — Design
@@ -26,7 +26,7 @@ transport belongs to the [MCP bridge](../mcp-bridge/2_design.md) ([ORB-00424]);
 deferred work is in [3_vision.md](./3_vision.md).
 
 > **Status: Draft — structural rewrite in flight.** This revision supersedes the
-> singular-hub model ([ADR-0226], [ADR-0229], [ADR-0230]). Substantial machinery
+> singular-hub model ([Singular coordination hub, workspace owner, and per-run placement](./4_decisions.md#singular-coordination-hub-workspace-owner-and-per-run-placement), [Owner-authored knowledge with hub-global IDs and explicit replicas](./4_decisions.md#owner-authored-knowledge-with-hub-global-ids-and-explicit-replicas), [Pull-based leases with immutable placement and explicit recovery](./4_decisions.md#pull-based-leases-with-immutable-placement-and-explicit-recovery)). Substantial machinery
 > for that model has already shipped: the hub-side `hosts`/`host_aliases` tables
 > and operator administration [ORB-10255, ORB-10267], the strict hub trust
 > document and checkoutless endpoint [ORB-10268], bounded spoke link and private
@@ -34,11 +34,11 @@ deferred work is in [3_vision.md](./3_vision.md).
 > ADR/learning sequence substrate [ORB-10272]. Sections below mark each piece
 > **survives**, **deferred to v2** (built, dormant, retained), or **retire**
 > (built, contradictory, to be removed). The vertical `orbit-remote` boundary
-> [ORB-10319] / [ADR-0240] is unaffected throughout.
+> [ORB-10319] / [Consolidate remote host and MCP behavior in the vertical orbit-remote crate](./4_decisions.md#consolidate-remote-host-and-mcp-behavior-in-the-vertical-orbit-remote-crate) is unaffected throughout.
 
 ## 1. Host Identity (`host.toml`)
 
-`~/.orbit/host.toml` remains the one genuinely host-local datum ([ADR-0205]), widened
+`~/.orbit/host.toml` remains the one genuinely host-local datum ([Routine discovery through workspace registry](../routines/4_decisions.md#routine-discovery-via-the-workspace-registry-and-a-versioned-routines-rolesource-config-key)), widened
 from a scheduling pin to a versioned machine identity ([ORB-10247]):
 
 ```toml
@@ -49,12 +49,12 @@ host_id        = "dk-mac"        # human name
 task_prefix    = "DE"            # namespace for every task id this machine mints
 ```
 
-There is no `mode` field ([ADR-0355]). A machine's role is not a declaration; it is
+There is no `mode` field ([Every machine is its own coordination host](./4_decisions.md#every-machine-is-its-own-coordination-host)). A machine's role is not a declaration; it is
 derived per workspace from the local registry (§2). A machine that owns every
 workspace it holds is what earlier drafts called `standalone`, and it needs no
 configuration to say so.
 
-**`task_prefix` is the one genuinely new field** ([ADR-0356]). Every task this
+**`task_prefix` is the one genuinely new field** ([Machine-scoped task-id prefix instead of a global allocator](./4_decisions.md#machine-scoped-task-id-prefix-instead-of-a-global-allocator)). Every task this
 machine mints is `<task_prefix>-NNNNN` against this machine's own monotonic
 sequence. Uniqueness across machines follows from the prefixes differing — a
 human-scale, once-per-machine choice, not a coordinated allocation. Rules:
@@ -62,9 +62,10 @@ human-scale, once-per-machine choice, not a coordinated allocation. Rules:
 - **Chosen at global init, immutable after.** Task IDs leak into commit messages,
   branch names, and committed knowledge records; a prefix change would strand all
   of them. Changing it is a migration, not a setting.
-- **Validated against the reserved namespaces.** `ORB`, `ADR`, `L`, and `F` are
-  refused: they are live artifact-reference namespaces, and a workspace minting
-  `ADR-00001` tasks would break `related_artifacts` parsing (see
+- **Validated against the reserved namespaces.** `ORB`, the legacy `ADR` prefix,
+  `L`, and `F` are refused: they are current or historical artifact-reference
+  namespaces, and minting tasks with the legacy decision prefix would break
+  `related_artifacts` parsing (see
   `crates/orbit-core/src/command/docs/artifact_ref.rs`). Also refused: anything
   that is not 2–5 uppercase ASCII letters.
 - **Existing installs keep `ORB`.** The v1→v2 identity migration writes
@@ -124,13 +125,13 @@ if this machine has recorded it as some workspace's owner.
 The current implementation lives in `orbit_remote::host_identity`; CLI and routine
 callers import the owning feature crate directly. [ORB-10302] first extracted this
 domain into `orbit-registry`; [ORB-10319] renamed and widened that crate without
-changing the identity contract ([ADR-0235], [ADR-0240]).
+changing the identity contract ([Make orbit-registry the singular host/workspace registry domain crate](./4_decisions.md#make-orbit-registry-the-singular-hostworkspace-registry-domain-crate), [Consolidate remote host and MCP behavior in the vertical orbit-remote crate](./4_decisions.md#consolidate-remote-host-and-mcp-behavior-in-the-vertical-orbit-remote-crate)).
 
 ## 2. The Local Workspace Registry
 
 **v1 has no fleet inventory.** Each machine's `workspaces.json` is the source of
 truth for what that machine owns, and no machine holds a catalog of the others
-([ADR-0355], [ADR-0358]). This is the smallest thing that supports the actual
+([Every machine is its own coordination host](./4_decisions.md#every-machine-is-its-own-coordination-host), [Defer fleet registration and execution placement to v2](./4_decisions.md#defer-fleet-registration-and-execution-placement-to-v2)). This is the smallest thing that supports the actual
 requirement — keep some projects local, keep task IDs unique — and it is what makes
 the whole model shippable without a registration protocol.
 
@@ -234,12 +235,12 @@ ledger entry. `orbit-store` supplies only generic SQLite connection, transaction
 and namespaced feature-migration machinery; it does not import Remote. Remote v1
 adopts the immutable global v5/v6/v8 registry tables in place and refuses an unknown
 future Remote schema instead of copying rows or creating a second database
-([ORB-10319], [ADR-0240]).
+([ORB-10319], [Consolidate remote host and MCP behavior in the vertical orbit-remote crate](./4_decisions.md#consolidate-remote-host-and-mcp-behavior-in-the-vertical-orbit-remote-crate)).
 
 **Remote feature migration v2 — retire.** [ORB-10272] added dormant hub-global
 `adr` and `learning` sequences, a reconciliation projection, an immutable
 allocation ledger, and a dormant/active authority marker. Unlike the registry
-tables, these do not survive as deferred work: [ADR-0357] removes global knowledge
+tables, these do not survive as deferred work: [Workspace-scoped knowledge keys, no global knowledge IDs](./4_decisions.md#workspace-scoped-knowledge-keys-no-global-knowledge-ids) removes global knowledge
 IDs entirely in favour of `(workspace_id, artifact_key)`, so the substrate is not
 merely unused but contradictory. It was never activated — public creation stayed on
 the compatibility path — so removal drops schema that never issued an ID. Parking
@@ -274,7 +275,7 @@ and artifacts live in the store of the machine that owns it. Every machine is
 therefore a coordination host — for its own workspaces and no others. There is no
 fleet-wide coordination target, no machine-level role, and no configuration
 required to keep a project local: a workspace nobody else owns simply coordinates
-where it already is ([ADR-0355]).
+where it already is ([Every machine is its own coordination host](./4_decisions.md#every-machine-is-its-own-coordination-host)).
 
 The invariant that matters is preserved exactly: **one coordination writer per
 workspace.** The superseded model achieved that by making one writer for
@@ -412,7 +413,7 @@ MCP owns only protocol mechanics. Core's checkout-independent
 `HubCoordinationExecutor` stays transport-neutral and is invoked by Remote's hub and
 broker rather than importing Remote. These acyclic seams let a remote change evolve
 inside one crate without turning the neutral kernels into feature modules
-([ORB-10319], [ADR-0240]).
+([ORB-10319], [Consolidate remote host and MCP behavior in the vertical orbit-remote crate](./4_decisions.md#consolidate-remote-host-and-mcp-behavior-in-the-vertical-orbit-remote-crate)).
 
 **Enforcement collapses to one rule, and it is entirely local.** The superseded
 model needed two — a machine-level rule for coordination records and a
@@ -439,7 +440,7 @@ implementation in `orbit_remote::registry_cache` and the shared `RegistryCacheV1
 
 Ownership is never selected per-task: coordination has one writer by construction,
 and two owners for one workspace is the split-brain the system already rejected
-([ADR-0200]).
+([Live remote/multi-workspace dashboard viewing supersedes the git-sync task registry](../remote-access/4_decisions.md#live-remotemulti-workspace-dashboard-viewing-supersedes-the-git-sync-task-registry)).
 
 **Concrete task coordination schema ([ORB-10249]).** The task registry's
 `workspace_bindings` table is a path-free logical record: `workspace_id`, slug,
@@ -498,7 +499,7 @@ reservations (§5) are file-scoped and arbitrate between *workers*, not between
 orchestrators.
 
 A **workspace claim** is an exclusive, TTL-bounded hold taken by one operator
-([ADR-0352]). Its scope is deliberately narrow:
+([Gate workflow dispatch on an exclusive TTL'd workspace claim](./4_decisions.md#gate-workflow-dispatch-on-an-exclusive-ttld-workspace-claim)). Its scope is deliberately narrow:
 
 - **It gates workflow dispatch only** — the governed `orbit.workflow.*` operations.
   Filing tasks, reading, updating, searching, and authoring knowledge are
@@ -539,13 +540,13 @@ through `ORBIT_WORKSPACE_CLAIM_TOKEN` for an operator shell. Acquire, release,
 force-release, and status are the `orbit.workspace.claim.*` tools, registered the
 same way as `orbit.task.locks.*` — operator-reachable, absent from the agent MCP
 surface. Storage reuses `task_reservations` under a `scope` discriminator; see
-[ADR-0352](4_decisions.md#adr-0352--gate-workflow-dispatch-on-an-exclusive-ttld-workspace-claim)
+[Gate workflow dispatch on an exclusive TTL'd workspace claim](./4_decisions.md#gate-workflow-dispatch-on-an-exclusive-ttld-workspace-claim)
 for why, and for the rejected parallel-table alternative.
 
 The claim does not replace or weaken declared ownership. Ownership remains a
 declared machine binding that selects default execution and gates knowledge
 authoring; the claim is a runtime hold on dispatch authority. Collapsing the two
-would reintroduce exactly the split-brain [ADR-0200] rejected.
+would reintroduce exactly the split-brain [Live remote/multi-workspace dashboard viewing supersedes the git-sync task registry](../remote-access/4_decisions.md#live-remotemulti-workspace-dashboard-viewing-supersedes-the-git-sync-task-registry) rejected.
 
 > This revises the reasoning in
 > [resident-orchestrator/2_design.md §3](../resident-orchestrator/2_design.md),
@@ -557,7 +558,7 @@ would reintroduce exactly the split-brain [ADR-0200] rejected.
 ## 4. Cross-Machine Access
 
 **Execution runs where the workspace is owned. There is no placement in v1**
-([ADR-0358]). A run for a workspace executes on that workspace's owner, in-process,
+([Defer fleet registration and execution placement to v2](./4_decisions.md#defer-fleet-registration-and-execution-placement-to-v2)). A run for a workspace executes on that workspace's owner, in-process,
 exactly as a single-machine install does today. No `host` selector, no `placed`
 state, no run queue, no leases, no runner poll, no `runner` capability. The entire
 hub→satellite half of the earlier design is withdrawn.
@@ -607,9 +608,9 @@ Per-record placement rules, chosen to dissolve sync rather than implement it:
 | Frictions | Owner-only, keyed `(workspace_id, friction_key)` | Same as tasks | Coordination lifecycle (raise → triage → resolve), same shape as tasks |
 | Learnings, ADRs | Owner-only, into the owner's checkout, keyed `(workspace_id, artifact_key)` | Owner: local. Elsewhere: git after `pull` + reindex | One writer per workspace; git carries the record outward with no live transaction path and no allocator |
 | Code graph, docs index | Local | Local | Derived from the local checkout, per-branch, rebuildable — works in a non-owned checkout |
-| Routine scheduler state | Local | Local | Host-local by design ([ADR-0208]); cursors and pauses never sync |
+| Routine scheduler state | Local | Local | Host-local by design ([Routine definitions are git-shared; scheduler state is host-local and never synced](../routines/4_decisions.md#routine-definitions-are-git-shared-scheduler-state-is-host-local-and-never-synced)); cursors and pauses never sync |
 
-**There is no global ID allocator for any record type** ([ADR-0357]). Tasks are
+**There is no global ID allocator for any record type** ([Workspace-scoped knowledge keys, no global knowledge IDs](./4_decisions.md#workspace-scoped-knowledge-keys-no-global-knowledge-ids)). Tasks are
 unique by machine prefix (§1); frictions, learnings, and ADRs are unique by
 `(workspace_id, artifact_key)` and make no claim to be unique outside their
 workspace. This mostly ratifies what was already true — friction and run IDs have
@@ -629,16 +630,17 @@ Notes:
   allocation call there is no reservation, no expiry, no orphaned ID, and no
   finalize/pull race: the two-step allocate-then-finalize sequence that the
   superseded design worked hard to keep atomic simply does not occur.
-- **Cross-workspace ID collisions are expected and must be disambiguated at the
-  read surface.** `ADR-0234` in one workspace and `ADR-0234` in another are
-  different records. Any merged, cross-workspace search result **must** carry the
-  `workspace` field; a bare ID from such a result is not addressable. This is the
+- **Cross-workspace decision titles are not identities.** A decision titled
+  "orbit-web reloads the workspace registry per request" in one workspace and a
+  same-titled decision in another are different records. Any merged,
+  cross-workspace search result **must** carry the `workspace` field; a bare title
+  from such a result is not addressable. This is the
   existing friction-ID footgun — an ID taken from a merged search and fed to a
   workspace-scoped write hits the wrong record or none — generalized to more record
   types, so fixing the projection is a precondition of this change, not a follow-up.
-- **ADR references are repo-local and never cited across repos**; see
-  [CONVENTIONS.md §4c](../CONVENTIONS.md#4c-format-and-numbering). The ADR store
-  itself is retired in favour of git-committed entries in each feature's
+- **Decision references are repo-local and never cited across repos**; see
+  [CONVENTIONS.md §4c](../CONVENTIONS.md#4c-format-and-links). Decision reasoning
+  lives in git-committed entries in each feature's
   `4_decisions.md`, which removes the last consumer of hub-allocated knowledge IDs.
 - **Non-owner knowledge authoring stays unsupported** — for agents. A machine that
   doesn't own the workspace doesn't author its learnings or ADRs through the CLI or
@@ -696,7 +698,7 @@ of that routine.** Consequences:
    that was always the load-bearing half.
 4. **`role = "source"` becomes a discovery hint, not a trust boundary.** The pin is
    the guard, and it is reviewable in git like everything else.
-5. **Reassignment semantics.** Scheduler cursors are host-local ([ADR-0208]) and do
+5. **Reassignment semantics.** Scheduler cursors are host-local ([Routine definitions are git-shared; scheduler state is host-local and never synced](../routines/4_decisions.md#routine-definitions-are-git-shared-scheduler-state-is-host-local-and-never-synced)) and do
    not migrate. Editing a pin in git moves the routine to a host with no cursor
    history: the new host's first sweep records a baseline and schedules from now —
    no backfill, and `catch_up_once` applies within a host's own history only.
@@ -789,11 +791,11 @@ of that routine.** Consequences:
 - [ORB-10302] — repurposed `orbit-registry` as the host/workspace domain crate,
   moved its domain tests with the implementations, retained runtime profile/ship
   hashing in `orbit-core`, and preserved store ownership of persistence
-  ([ADR-0235]).
+  ([Make orbit-registry the singular host/workspace registry domain crate](./4_decisions.md#make-orbit-registry-the-singular-hostworkspace-registry-domain-crate)).
 - [ORB-10319] — widens and renames that extraction to the vertical `orbit-remote`
   feature: registry persistence, profile/cache/routine composition, MCP contract,
   broker, hub, link, and registration share one crate, while Store, MCP, Core,
-  Tools, and Common remain neutral acyclic dependencies ([ADR-0240]).
+  Tools, and Common remain neutral acyclic dependencies ([Consolidate remote host and MCP behavior in the vertical orbit-remote crate](./4_decisions.md#consolidate-remote-host-and-mcp-behavior-in-the-vertical-orbit-remote-crate)).
 - [ORB-10269] — implemented the fixed SSH command, contract/digest negotiation,
   one bounded peer per scalar capability, trusted remote metadata, and the
   pre-handoff `hub_unavailable` / post-handoff `outcome_unknown` no-replay split.
@@ -810,13 +812,13 @@ of that routine.** Consequences:
   `orbit host list` CLI command and the `orbit.workspace.list` / `orbit.crew.list`
   MCP discovery tools remain.
 - [ORB-10725] — deleted [ORB-10272]'s allocation substrate and [ORB-10330]'s
-  preallocated finalizers under [ADR-0357]: the hub sequence service, the
+  preallocated finalizers under [Workspace-scoped knowledge keys, no global knowledge IDs](./4_decisions.md#workspace-scoped-knowledge-keys-no-global-knowledge-ids): the hub sequence service, the
   reconciliation projection, the immutable ledger, the authority marker, and the
   `orbit/private/allocate-knowledge-id/v1` connector method are gone; Remote
   feature v2 is an empty slot and v3 drops its tables. Learning and ADR IDs are
   workspace-local, and the [ORB-10364] authoring gate is the single surface in
   front of a one-transaction owner-local write.
-- [ORB-10730] — made the ADR-0358 fleet boundary executable: v1 links only the
+- [ORB-10730] — made the [Defer fleet registration and execution placement to v2](./4_decisions.md#defer-fleet-registration-and-execution-placement-to-v2) fleet boundary executable: v1 links only the
   local `host rename` command, serves workspace discovery from `workspaces.json`,
   ignores registry stamps and caches, and validates routine pins as own-host,
   belongs-elsewhere, or unresolvable from local owner names only.
