@@ -7,44 +7,34 @@ status: Accepted
 feature: operations-as-data
 doc_role: decisions
 type: design
-summary: ADR log for the operations-as-data registry — the split spec/handler table, what stayed hand-written, and the touch-it-move-it ratchet.
+summary: Decision log for the operations-as-data registry — the split spec/handler table, what stayed hand-written, and the touch-it-move-it ratchet.
 tags: [operations-as-data, architecture, adr-0209]
 paths: ["crates/orbit-common/src/operation.rs", "crates/orbit-common/src/friction/**"]
 related_features: [operations-as-data]
-related_artifacts: [ORB-10358, ADR-0209, ADR-0253, ADR-0254, ADR-0255]
+related_artifacts: [ORB-10358]
 ---
 
 # Operations as Data — Decisions
 
-> **Retired learning clauses:** [ORB-10736] / [ADR-0359] removed the native
+> **Retired learning clauses:** [ORB-10736] / [Remove the native project-learning subsystem](../project-learnings/4_decisions.md#remove-the-native-project-learning-subsystem) removed the native
 > project-learning CLI and tool operations. Learning-specific examples in
 > earlier entries are retained as historical context only.
 
-Ordered pointer index for operations-as-data ADRs. The store owns each title,
-status, and authoritative narrative; print a body with `orbit tool run
-orbit.adr.show --input '{"id":"ADR-NNNN"}'`. See [CONVENTIONS.md §4](../CONVENTIONS.md#4-adr-template-strict)
-for the rules.
-
-The parent bearing is **ADR-0209** (north-star: operations as data behind an
+The parent bearing is **[North-star architecture bearing: operations as data behind an operation registry](../orbit-core/4_decisions.md#north-star-architecture-bearing-operations-as-data-behind-an-operation-registry)** (north-star: operations as data behind an
 operation registry), whose stored body now carries the friction pilot outcome and
 the ratchet.
 
-- **ADR-0253 — Split spec/handler table joined by a typed verb enum** — Accepted.
-- **ADR-0254 — Renderers and HTTP routes stay hand-written** — Accepted.
-- **ADR-0255 — Freeze the pre-migration surface as fixtures before migrating** — Accepted.
+- **[Split spec/handler table joined by a typed verb enum](#split-spechandler-table-joined-by-a-typed-verb-enum) — Split spec/handler table joined by a typed verb enum** — Accepted.
+- **[Renderers and HTTP routes stay hand-written](#renderers-and-http-routes-stay-hand-written) — Renderers and HTTP routes stay hand-written** — Accepted.
+- **[Freeze the pre-migration surface as fixtures before migrating](#freeze-the-pre-migration-surface-as-fixtures-before-migrating) — Freeze the pre-migration surface as fixtures before migrating** — Accepted.
 
-## ADR-0253 — Split spec/handler table joined by a typed verb enum
+## Split spec/handler table joined by a typed verb enum
 
-**Status:** Accepted · 2026-07-26 00:55:47.755882Z · [ORB-10358]
-**Owner:** claude
-**Created:** 2026-07-26 00:55:37.563417Z
-**Last updated:** 2026-07-26 00:55:47.755882+00:00
-**Related features:** `operations-as-data`
-**Tags:** `operations-as-data`, `architecture`, `adr-0209`
+**Recorded:** 2026-07-26 00:55:47.755882Z · [ORB-10358]
 **Paths:** `crates/orbit-common/src/operation.rs`, `crates/orbit-common/src/friction/**`
 
 ### Context
- ADR-0209 bearing 1 describes one operation table holding both the
+ [North-star architecture bearing: operations as data behind an operation registry](../orbit-core/4_decisions.md#north-star-architecture-bearing-operations-as-data-behind-an-operation-registry) bearing 1 describes one operation table holding both the
 serializable definition and its handler. Orbit's layering makes that
 unreachable: every surface (`orbit-tools`, `orbit-cli`, `orbit-dashboard`) must
 read the definition, so it has to live at or below `orbit-common`; handlers need
@@ -70,21 +60,16 @@ verb that is declared but not implemented fails to compile.
 - Adding a verb breaks the build in exactly two known places, which is a usable
   to-do list rather than a silent gap.
 - Future noun migrations should adopt this shape rather than re-attempting
-  co-location; ADR-0209's stored body records the correction.
-- If ADR-0209 bearing 2 (knowledge/execution split) moves knowledge handlers
+  co-location; [North-star architecture bearing: operations as data behind an operation registry](../orbit-core/4_decisions.md#north-star-architecture-bearing-operations-as-data-behind-an-operation-registry)'s stored body records the correction.
+- If [North-star architecture bearing: operations as data behind an operation registry](../orbit-core/4_decisions.md#north-star-architecture-bearing-operations-as-data-behind-an-operation-registry) bearing 2 (knowledge/execution split) moves knowledge handlers
   below the surfaces, the halves could merge and this ADR would be superseded.
 - Cost: "the operation table" is now two files in two crates, so a reader
   looking for an operation's behavior must follow the verb enum to find the
   handler — the definition alone does not tell you what happens.
 
-## ADR-0254 — Renderers and HTTP routes stay hand-written
+## Renderers and HTTP routes stay hand-written
 
-**Status:** Accepted · 2026-07-26 00:55:47.967899Z · [ORB-10358]
-**Owner:** claude
-**Created:** 2026-07-26 00:55:37.797226Z
-**Last updated:** 2026-07-26 00:55:47.967899Z
-**Related features:** `operations-as-data`
-**Tags:** `operations-as-data`, `architecture`, `adr-0209`
+**Recorded:** 2026-07-26 00:55:47.967899Z · [ORB-10358]
 **Paths:** `crates/orbit-common/src/operation.rs`, `crates/orbit-common/src/friction/**`
 
 ### Context
@@ -117,14 +102,9 @@ tool names and parameter names from the registry.
   verb and forget the route entirely; nothing fails, the verb is simply absent
   from the web UI, and no test catches it.
 
-## ADR-0255 — Freeze the pre-migration surface as fixtures before migrating
+## Freeze the pre-migration surface as fixtures before migrating
 
-**Status:** Accepted · 2026-07-26 00:55:48.187121Z · [ORB-10358]
-**Owner:** claude
-**Created:** 2026-07-26 00:55:38.009856Z
-**Last updated:** 2026-07-26 00:55:48.187121Z
-**Related features:** `operations-as-data`
-**Tags:** `operations-as-data`, `architecture`, `adr-0209`
+**Recorded:** 2026-07-26 00:55:48.187121Z · [ORB-10358]
 **Paths:** `crates/orbit-common/src/operation.rs`, `crates/orbit-common/src/friction/**`
 
 ### Context
@@ -159,13 +139,9 @@ same role for MCP, where an empty `git diff` is the proof.
   re-blessing files whose diff is mostly noise — and the fixture must be
   distinguished from a genuine regression by a human reading the PR.
 
-## ADR-0260 — Capability chokepoint for destructive operations outside MCP
+## Capability chokepoint for destructive operations outside MCP
 
-**Status:** Accepted · 2026-07-26 21:49:30.348935Z · [ORB-10453]
-**Owner:** claude
-**Created:** 2026-07-26 21:35:37.651977Z
-**Last updated:** 2026-07-26 21:51:33.078323Z
-**Tags:** `cli`, `mcp`, `capabilities`, `privilege-model`, `safety`
+**Recorded:** 2026-07-26 21:49:30.348935Z · [ORB-10453]
 **Paths:** `crates/orbit-common/src/authorization.rs`, `crates/orbit-core/src/runtime/authorization.rs`, `crates/orbit-core/src/runtime/tool_exec.rs`, `crates/orbit-cli/src/main.rs`, `crates/orbit-cli/src/command/operation.rs`
 
 ### Context
@@ -182,7 +158,7 @@ This is an **accident guard, not a security boundary**. Agents on a development 
 
 1. **Extend the existing capability model; do not add a second one.** `McpCapability` is the vocabulary for every surface. MCP becomes one consumer of the model rather than its owner.
 
-2. **Declare governed operations once, as data.** `orbit_common::authorization::GOVERNED_OPERATIONS` is a const registry of `{ id, surface, allowed: &[McpCapability], rationale }`. Call sites name an operation, never a capability; the requirement is resolved from the registry. It lives in the leaf crate for the same reason the operations-as-data registry does (ADR-0209 bearing 1): every consumer surface must read it without a new dependency edge.
+2. **Declare governed operations once, as data.** `orbit_common::authorization::GOVERNED_OPERATIONS` is a const registry of `{ id, surface, allowed: &[McpCapability], rationale }`. Call sites name an operation, never a capability; the requirement is resolved from the registry. It lives in the leaf crate for the same reason the operations-as-data registry does ([North-star architecture bearing: operations as data behind an operation registry](../orbit-core/4_decisions.md#north-star-architecture-bearing-operations-as-data-behind-an-operation-registry) bearing 1): every consumer surface must read it without a new dependency edge.
 
 3. **One decision function, one chokepoint per surface.** `authorization::authorize` is the only place the rule is evaluated. It is reached from exactly two enforcement points, each of which its whole surface must traverse: `OrbitRuntime::run_tool_with_context_and_role` for every tool call (CLI `tool run`, the CLI admin bypass, MCP `tools/call`, the dashboard, the v2 deterministic dispatcher, agent loops), and the `Commands::operation` dispatch in `orbit-cli`'s `main` for CLI commands that destroy without a tool. Neither reimplements any part of the rule.
 
@@ -213,7 +189,7 @@ This is an **accident guard, not a security boundary**. Agents on a development 
 
 ## Task References
 
-- [ORB-10358] — piloted ADR-0209 bearing 1 on the friction noun; produced the
+- [ORB-10358] — piloted [North-star architecture bearing: operations as data behind an operation registry](../orbit-core/4_decisions.md#north-star-architecture-bearing-operations-as-data-behind-an-operation-registry) bearing 1 on the friction noun; produced the
   split table, the derived adapters, and the frozen-surface method.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

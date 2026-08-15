@@ -11,7 +11,7 @@ doc_role: design
 tags: ["mcp-session-context", "mcp", "workspace"]
 paths: ["crates/orbit-mcp/**", "crates/orbit-remote/src/mcp/**", "crates/orbit-tools/**", "crates/orbit-core/src/command/tool/**"]
 related_features: ["mcp-session-context", "task-artifacts"]
-related_artifacts: ["ORB-00256", "ORB-10228", "ORB-10262", "ORB-10319", "ORB-10448", "ORB-10690", "ORB-10758", "ORB-10769", "ADR-0181", "ADR-0199", "ADR-0149", "ADR-0348", "ADR-0361"]
+related_artifacts: ["ORB-00256", "ORB-10228", "ORB-10262", "ORB-10319", "ORB-10448", "ORB-10690", "ORB-10758", "ORB-10769"]
 ---
 
 # MCP Session Context — Design
@@ -40,7 +40,7 @@ Clients announce workspace with:
 
 `OrbitToolServer` stores a `ToolSessionContext` in an `RwLock` for the lifetime of one session. Each `tools/call` snapshots that context, generates exactly one unique `mcp_call_id` before name/exposure preflight, and passes the same snapshot through registry-backed dispatch.
 
-That state is per session, not per process. A stdio server serves exactly one client for its lifetime, so the two coincide there; a listener does not. `McpSessionFactory::build_session` therefore constructs one `OrbitToolServer` per session, and `McpTcpServer` hands each accepted connection its own. Sharing one server across connections would let the last client to `initialize` overwrite every other client's workspace selector and return another workspace's data as a success. [ADR-0348], [ORB-10690]
+That state is per session, not per process. A stdio server serves exactly one client for its lifetime, so the two coincide there; a listener does not. `McpSessionFactory::build_session` therefore constructs one `OrbitToolServer` per session, and `McpTcpServer` hands each accepted connection its own. Sharing one server across connections would let the last client to `initialize` overwrite every other client's workspace selector and return another workspace's data as a success. [Serve MCP over TCP with one server instance per session](./4_decisions.md#serve-mcp-over-tcp-with-one-server-instance-per-session), [ORB-10690]
 
 The Remote-owned `BrokerMcpHost` resolves and validates the logical workspace plus any exact local checkout before constructing or selecting an `OrbitRuntime`, then forwards the trusted context into `OrbitRuntime::execute_tool_command_dispatch_with_session_context`, which places it on `ToolContext` and audit. Unknown/unexposed denial and runtime success/failure retain the same per-call context. `orbit-cli` only delegates `mcp serve` into this composition. Graph commands have no MCP or CLI surface as of ORB-10357.
 
@@ -73,7 +73,7 @@ CLI `--workspace` and MCP workspace-scoped tools accept the same three forms: a 
 workspace name, a logical `ws_*` id, or an absolute checkout path. A linked worktree path
 resolves to its registered checkout. Ambiguous names fail closed. `--root` is not a selector;
 it remains a data-directory override. There is no stateful `switch_workspace` MCP tool —
-per-call `workspace` and `--workspace` are the override. [ADR-0361], [ORB-10758]
+per-call `workspace` and `--workspace` are the override. [One workspace selector grammar on CLI and MCP](./4_decisions.md#one-workspace-selector-grammar-on-cli-and-mcp), [ORB-10758]
 
 ### 3a. The selector is advertised, not implied
 
@@ -83,7 +83,7 @@ caller inject `initialize.params._meta`, so a managed executor speaking through 
 injects an optional `workspace` string property into the advertised input schema of every
 `McpToolScope::WorkspaceRequired` definition, and
 `OrbitToolServer::input_schema_for` applies it to host-resolved and extension-owned schemas
-alike. A tool that declares its own `workspace` parameter — `orbit.task.add` ([ADR-0149]),
+alike. A tool that declares its own `workspace` parameter — `orbit.task.add`, whose surviving task-artifact documentation records the workspace-binding rule —
 `orbit.crew.list` — keeps its own description. Global-scoped tools get nothing.
 
 Advertising at the adapter rather than in each tool's `ToolSchema` keeps the requirement
@@ -129,9 +129,9 @@ The external channel carries a workspace address, not a trusted workspace ID. Th
 - [ORB-10228] implemented trusted provenance, anti-spoofing, capability-set propagation and audit, call correlation, and audit migration v7.
 - [ORB-10262] implemented exact-checkout workspace resolution, placement preflight, capability enforcement, and runtime caching by exact binding.
 - [ORB-10319] moved broker/session resolution and MCP composition into the vertical `orbit-remote` feature crate while leaving runtime audit/dispatch in Core.
-- [ORB-10448] advertised the workspace selector on every workspace-scoped tool and routed hub-placement coordination reads by checkout identity, making the [ADR-0181] "clients that cannot send initialize metadata pass `workspace` explicitly" path reachable from a managed worktree activity.
-- [ORB-10690] added the TCP transport and moved session construction behind `McpSessionFactory` so concurrent clients cannot observe or overwrite each other's session context ([ADR-0348]).
+- [ORB-10448] advertised the workspace selector on every workspace-scoped tool and routed hub-placement coordination reads by checkout identity, making the [MCP ambient workspace session context](./4_decisions.md#mcp-ambient-workspace-session-context) "clients that cannot send initialize metadata pass `workspace` explicitly" path reachable from a managed worktree activity.
+- [ORB-10690] added the TCP transport and moved session construction behind `McpSessionFactory` so concurrent clients cannot observe or overwrite each other's session context ([Serve MCP over TCP with one server instance per session](./4_decisions.md#serve-mcp-over-tcp-with-one-server-instance-per-session)).
 - [ORB-10769] bound CLI `orbit tool run` to the same fail-closed workspace selector above the tools; MCP resolution order is unchanged.
-- [ORB-10758] added `orbit --workspace` and made MCP accept the same name / `ws_*` id / absolute-path grammar ([ADR-0361]).
+- [ORB-10758] added `orbit --workspace` and made MCP accept the same name / `ws_*` id / absolute-path grammar ([One workspace selector grammar on CLI and MCP](./4_decisions.md#one-workspace-selector-grammar-on-cli-and-mcp)).
 
 Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

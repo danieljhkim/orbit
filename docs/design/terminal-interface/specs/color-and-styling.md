@@ -10,7 +10,7 @@ Color in `orbit` output is a semantic role attached to a value's meaning, mapped
 
 ## Why This Exists
 
-`crates/orbit-cli/src/output/color.rs` defines the same status vocabulary twice — once returning `comfy_table::Cell`, once returning `colored`-styled `String` — because the styling backend is chosen by the call site's rendering shape rather than by what the value means. Every status change costs two edits, the copies have already drifted, and the two backends disagree about whether `NO_COLOR` applies. Rationale in [ADR-0308].
+`crates/orbit-cli/src/output/color.rs` defines the same status vocabulary twice — once returning `comfy_table::Cell`, once returning `colored`-styled `String` — because the styling backend is chosen by the call site's rendering shape rather than by what the value means. Every status change costs two edits, the copies have already drifted, and the two backends disagree about whether `NO_COLOR` applies. Rationale in [One Semantic Color Vocabulary, Gated at the Sink](../4_decisions.md#one-semantic-color-vocabulary-gated-at-the-sink).
 
 ## 1. The Role Vocabulary
 

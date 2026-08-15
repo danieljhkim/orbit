@@ -10,7 +10,7 @@ summary: "Orbit Docs — frontmatter schema, walker, doc embeddings index, hybri
 tags: [orbit-docs]
 paths: ["crates/orbit-core/src/command/docs/**", "crates/orbit-core/src/runtime/orbit_tool_host/docs_tools.rs", "crates/orbit-tools/src/builtin/orbit/docs.rs", "crates/orbit-remote/src/mcp/host.rs", "crates/orbit-cli/src/command/docs.rs"]
 related_features: [orbit-docs]
-related_artifacts: [ORB-00163, ORB-00206, ORB-10319, ADR-0169, ADR-0170, ADR-0171, ADR-0180]
+related_artifacts: [ORB-00163, ORB-00206, ORB-10319]
 last_validated: 2026-08-09
 ---
 
@@ -24,7 +24,7 @@ The design lives in [crates/orbit-core/src/command/docs/](../../../crates/orbit-
 
 ## 1. Frontmatter Schema
 
-The schema is locked at six fields. Two are required; four are optional. See [ADR-0169] for why the schema is closed.
+The schema is locked at six fields. Two are required; four are optional. See [Locked orbit-docs frontmatter schema](./4_decisions.md#locked-orbit-docs-frontmatter-schema) for why the schema is closed.
 
 ```yaml
 ---
@@ -33,7 +33,7 @@ summary: One-line hook for agent retrieval                # required
 tags: [hook, learning, audit]                             # optional
 paths: ["crates/orbit-cli/**"]                            # optional
 related_features: [hook-rewrite]                          # optional
-related_artifacts: [ORB-00160, ADR-0168, L-0003]     # optional
+related_artifacts: [ORB-00160, L-0003]                  # optional
 ---
 ```
 
@@ -67,7 +67,7 @@ Free-form string list. The join key for task-time scoping ([ORB-00166]): when an
 
 ### 1.6 `related_artifacts` (optional)
 
-String list with ID-prefix dispatch (see [ADR-0171]):
+String list with ID-prefix dispatch (see [ID-prefix dispatch for orbit-docs `related_artifacts`](./4_decisions.md#id-prefix-dispatch-for-orbit-docs-relatedartifacts)):
 
 | Prefix shape | Resolves to |
 |--------------|-------------|
@@ -149,12 +149,12 @@ Each entry in `[docs].roots` is treated as either a literal path or a wildcard p
 
 ### 4.2 The `.orbit/` exclusion (load-bearing)
 
-Two layers of defense, enforced by [ADR-0170]:
+Two layers of defense, enforced by [`.orbit/` for tool-managed artifacts; `docs/` for human-authored content](./4_decisions.md#orbit-for-tool-managed-artifacts-docs-for-human-authored-content):
 
 1. **Per-root precheck.** Before descending into a configured root, `path_is_or_contains_dot_orbit` rejects it if any path component is `.orbit`. This catches `docs/.orbit/...` and any misconfigured root pointing at or under `.orbit/`.
 2. **Per-file recheck.** Inside `maybe_push_doc`, the same check runs again on every Markdown file. Catches the case where a configured root is *above* `.orbit/` (e.g. someone sets `roots = ["."]` to index everything) and the recursion descended past the per-root check.
 
-A unit test (`walker_skips_dot_orbit_even_when_root_points_above_it`) pins the contract: a tempdir with `.orbit/adrs/ADR-0001/body.md` under a configured root must produce zero records starting with `.orbit/`.
+A unit test (`walker_skips_dot_orbit_even_when_root_points_above_it`) pins the contract: a tempdir with `.orbit/adrs/<retired-id>/body.md` under a configured root must produce zero records starting with `.orbit/`.
 
 ### 4.3 Other skips
 

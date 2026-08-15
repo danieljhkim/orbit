@@ -21,7 +21,7 @@ capabilities:
   allowed_values: [agent, operator]
   withdrawn_values:
     - value: runner
-      reason: Deferred to v2 with execution placement, run leases, and the runner poll (ADR-0358). No v1 referent.
+      reason: Deferred to v2 with execution placement, run leases, and the runner poll (Defer fleet registration and execution placement to v2). No v1 referent.
   set_rules:
     - Every exposed tool has exactly one placement, one scope, and a non-empty allowed_capabilities set.
     - Placement and capability filtering are independent.
@@ -41,7 +41,7 @@ placements:
   allowed_values: [owner, local-derived, composite]
   withdrawn_values:
     - value: hub
-      reason: Collapsed into owner by ADR-0355. Every machine is its own coordination host for the workspaces it owns, so "the coordinating machine for this tool's workspace" is in-process for an owned workspace.
+      reason: Collapsed into owner by Every machine is its own coordination host. Every machine is its own coordination host for the workspaces it owns, so "the coordinating machine for this tool's workspace" is in-process for an owned workspace.
   rules:
     - owner resolves to the machine declared as the workspace's owner in that machine's local workspaces.json.
     - An owner call for a workspace this machine does not own is refused, naming the owner; advertised orbit.task.* operations may instead be dispatched over a configured owner route.
@@ -56,10 +56,10 @@ private_connector:
   active: []
   withdrawn:
     - method: orbit/private/register-spoke/v1
-      reason: Withdrawn with the fleet registration protocol (ADR-0358). v1 has no registration step; a client opens a route and calls.
+      reason: Withdrawn with the fleet registration protocol (Defer fleet registration and execution placement to v2). v1 has no registration step; a client opens a route and calls.
       advanced_contract_revision_to: 2
     - method: orbit/private/allocate-knowledge-id/v1
-      reason: Withdrawn with the global knowledge allocator (ADR-0357), before ORB-10736 removed the native learning resource entirely.
+      reason: Withdrawn with the global knowledge allocator (Workspace-scoped knowledge keys, no global knowledge IDs), before ORB-10736 removed the native learning resource entirely.
       advanced_contract_revision_to: 3
 
 tools:
@@ -95,9 +95,9 @@ tools:
 # directly, so a family cannot quietly return.
 withdrawn_tools:
   - names: [orbit.run.lease, orbit.run.report, orbit.run.presence]
-    reason: Deferred to v2 with execution placement and run leases (ADR-0358).
+    reason: Deferred to v2 with execution placement and run leases (Defer fleet registration and execution placement to v2).
   - names: [orbit.host.list]
-    reason: Already removed as unused in ORB-10332; the fleet inventory behind it is deferred to v2 (ADR-0358), so it has nothing to enumerate.
+    reason: Already removed as unused in ORB-10332; the fleet inventory behind it is deferred to v2 (Defer fleet registration and execution placement to v2), so it has nothing to enumerate.
   - names: [orbit.adr.add, orbit.adr.show, orbit.adr.update, orbit.adr.supersede, orbit.adr.list]
     reason: >-
       The ADR store is retired in favour of git-committed entries in each feature's 4_decisions.md
@@ -131,12 +131,12 @@ owner_schema_digest:
 run_protocol:
   status: deferred-to-v2
   reason: >-
-    ADR-0358 withdraws execution placement, the run queue, pull-based leases, the
+    Defer fleet registration and execution placement to v2 withdraws execution placement, the run queue, pull-based leases, the
     presence map, and the runner capability. A run executes on the machine that
     owns its workspace, in-process. The placed/leased/execution_started/
     recovery_required state machine and its immutable requested-vs-actual placement
     snapshot are the parts to reread if placement returns; see
-    host-registry/4_decisions.md ADR-0230.
+    host-registry/4_decisions.md Pull-based leases with immutable placement and explicit recovery.
 
 routing_expectations:
   topology:

@@ -7,27 +7,22 @@ status: Accepted
 feature: auto-tasks
 doc_role: decisions
 type: design
-summary: ADR log for the auto-task primitive.
+summary: Decision log for the auto-task primitive.
 tags: [auto-tasks]
 paths: ["crates/orbit-core/src/auto_tasks/**"]
 related_features: [auto-tasks]
-related_artifacts: [ADR-0218, ADR-0219, ADR-0286]
+related_artifacts: []
 ---
 
 # Auto-tasks — Decisions
 
-ADR log for auto-tasks. Entries are append-only and ordered by ascending global
-ID. The store (`orbit.adr.show ADR-0218`) owns ID, status, owner, and links;
-this file is the long-form narrative keyed on that same ID.
+This document preserves the feature's non-obvious decisions and their reasoning.
 
-## ADR-0218 — Auto-task primitive: file-backed recurring task templates + one generic scheduler routine
+---
 
-**Status:** Accepted · 2026-07-12 02:58:04.684957Z · [ORB-10149], [ORB-10148]
-**Owner:** claude
-**Created:** 2026-07-12 02:56:17.374214Z
-**Last updated:** 2026-07-12 03:33:35.171204+00:00
-**Related features:** `auto-tasks`
-**Tags:** `auto-tasks`, `routines`, `scheduler`
+## Auto-task primitive: file-backed recurring task templates + one generic scheduler routine
+
+**Recorded:** 2026-07-12 02:58:04.684957Z · [ORB-10149], [ORB-10148]
 **Paths:** `crates/orbit-core/src/auto_tasks/**`
 
 ### Context
@@ -36,7 +31,7 @@ Every periodic need in Orbit was previously bespoke code, and each future recurr
 
 ### Decision
 
-Introduce auto-tasks as git-versioned YAML definitions under `.orbit/auto_tasks/<name>.yaml`, with cron/interval schedules, host-local cursors, task templates, dedupe, and provenance. One generic deterministic scheduler activity wrapped in a job and fired by the seeded routine processes every definition. Definitions parse fail-closed, catch-up collapses, and CRUD is available through CLI and MCP. Templates remain provider-neutral per ADR-0217.
+Introduce auto-tasks as git-versioned YAML definitions under `.orbit/auto_tasks/<name>.yaml`, with cron/interval schedules, host-local cursors, task templates, dedupe, and provenance. One generic deterministic scheduler activity wrapped in a job and fired by the seeded routine processes every definition. Definitions parse fail-closed, catch-up collapses, and CRUD is available through CLI and MCP. Templates remain provider-neutral per [Run budgets are provider-neutral: wall-clock timeouts, never turn caps](#run-budgets-are-provider-neutral-wall-clock-timeouts-never-turn-caps).
 
 ### Consequences
 
@@ -45,14 +40,9 @@ Introduce auto-tasks as git-versioned YAML definitions under `.orbit/auto_tasks/
 - Host-local cursor state avoids churn in git-versioned definitions.
 - Cost: a second file-backed record convention exists alongside the SQLite-indexed knowledge records, and auto-task definitions are not full-text indexed.
 
-## ADR-0219 — No-diff-expected tasks bypass repository change gates
+## No-diff-expected tasks bypass repository change gates
 
-**Status:** Accepted · 2026-07-12 03:33:35.554901Z · [ORB-10148]
-**Owner:** codex
-**Created:** 2026-07-12 03:33:04.628975Z
-**Last updated:** 2026-07-12 03:33:35.554901Z
-**Related features:** `activity-job`, `auto-tasks`
-**Tags:** `workflows`, `qa-sweep`, `task-lifecycle`
+**Recorded:** 2026-07-12 03:33:35.554901Z · [ORB-10148]
 **Paths:** `crates/orbit-engine/src/executor/automation/vcs/**`, `crates/orbit-common/src/types/task.rs`, `.orbit/auto_tasks/**`
 
 ### Context
@@ -70,14 +60,9 @@ Some normal workflow tasks produce durable side effects through Orbit rather tha
 - The checked-in QA auto-task template carries the exemption explicitly, keeping the exception visible in data.
 - Cost: a mistagged task can reach review without repository changes, so definition authors and reviewers must treat this tag as a privileged workflow exemption.
 
-## ADR-0286 — Route tracked auto-task definitions through the active worktree
+## Route tracked auto-task definitions through the active worktree
 
-**Status:** Accepted · 2026-08-08 19:11:08.591438Z · [ORB-10472]
-**Owner:** codex
-**Created:** 2026-07-26 22:27:38.501404Z
-**Last updated:** 2026-08-08 19:11:08.591438Z
-**Related features:** `auto-tasks`, `activity-job`
-**Tags:** `auto-tasks`, `worktree-integrity`
+**Recorded:** 2026-08-08 19:11:08.591438Z · [ORB-10472]
 **Paths:** `crates/orbit-core/src/auto_tasks/**`, `crates/orbit-engine/src/activity_job/workspace.rs`
 
 ### Context
@@ -91,14 +76,9 @@ Read and replace tracked auto-task definitions through the runtime local root. K
 - Primary-checkout operator commands retain existing behavior because local and shared roots are identical there.
 - Cost: callers in linked worktrees see that checkout version of definition YAML while scheduler cursor state remains shared, so definition and cursor roots must remain deliberately separate.
 
-## ADR-0217 — Run budgets are provider-neutral: wall-clock timeouts, never turn caps
+## Run budgets are provider-neutral: wall-clock timeouts, never turn caps
 
-**Status:** Accepted · 2026-07-12 03:33:34.766432Z · [ORB-10146], [ORB-10148]
-**Owner:** claude
-**Created:** 2026-07-12 01:43:31.738971Z
-**Last updated:** 2026-07-12 03:33:34.766432Z
-**Related features:** `auto-tasks`, `activity-job`
-**Tags:** `budgets`, `provider-neutral`, `crews`, `workflows`
+**Recorded:** 2026-07-12 03:33:34.766432Z · [ORB-10146], [ORB-10148]
 **Paths:** `crates/orbit-core/assets/**`, `crates/orbit-common/src/types/auto_task.rs`, `.orbit/auto_tasks/**`
 
 ### Context

@@ -10,7 +10,7 @@ summary: epic_pipeline drains one epic; workspace_auto_pipeline is a one-tick se
 tags: [resident-orchestrator, epic, jobs, session-log]
 paths: [".orbit/resources/jobs/**", "crates/orbit-core/assets/jobs/**", "crates/orbit-core/assets/activities/**"]
 related_features: [resident-orchestrator, activity-job]
-related_artifacts: [ORB-10332, ORB-10775, ORB-10776, ORB-10779, ORB-10788, ADR-0361, ADR-0362, ADR-0363, ADR-0364, ADR-0365]
+related_artifacts: [ORB-10332, ORB-10775, ORB-10776, ORB-10779, ORB-10788]
 ---
 
 # Resident Orchestrator — Design
@@ -28,8 +28,8 @@ It includes:
 
 - every task with status `proposed`, `backlog`, or `blocked`;
 - every job-run whose state is `failed` or `timeout`, except runs of
-  `epic_pipeline` itself (ADR-0364);
-- every unresolved session-log entry with `kind: check_later` (ADR-0363).
+  `epic_pipeline` itself ([Drain scan excludes `epic_pipeline` runs](./4_decisions.md#drain-scan-excludes-epicpipeline-runs));
+- every unresolved session-log entry with `kind: check_later` ([Session log is the orchestrator's memory, not a CLI session](./4_decisions.md#session-log-is-the-orchestrators-memory-not-a-cli-session)).
 
 It excludes:
 
@@ -44,9 +44,9 @@ non-empty so the job can fail closed after its iteration cap. No task, run, or l
 is mutated. An empty scan is success, not an error.
 
 The scan is the only admission function **for `epic_pipeline`**. That job does not select
-by `epic` tag, assignee, or priority (ADR-0361). Leaf-ship and the workspace sequencer
+by `epic` tag, assignee, or priority ([Epic tag is a supervisor delegation signal, not the job predicate](./4_decisions.md#epic-tag-is-a-supervisor-delegation-signal-not-the-job-predicate)). Leaf-ship and the workspace sequencer
 *do* use the tag — as an exclusion / ownership key, not as the drain predicate
-(ADR-0365).
+([Workspace auto is a sequencer, not a leaf ship](./4_decisions.md#workspace-auto-is-a-sequencer-not-a-leaf-ship)).
 
 ## 2. Orchestrator activity
 
@@ -132,7 +132,7 @@ Do not rewrite history. Append or resolve; never edit a body in place.
 
 `orbit run ship` is a leaf implementer. Mixing "start an epic orchestrator" into
 `task_auto_pipeline` would change that job's success definition, child graph, and
-concurrency. The logistics tick is a **separate** job (ADR-0365).
+concurrency. The logistics tick is a **separate** job ([Workspace auto is a sequencer, not a leaf ship](./4_decisions.md#workspace-auto-is-a-sequencer-not-a-leaf-ship)).
 
 `workspace_auto_pipeline` (`max_active_runs: 1`) runs one classify → act tick:
 

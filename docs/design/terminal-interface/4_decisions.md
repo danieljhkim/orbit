@@ -7,32 +7,22 @@ status: Accepted
 feature: terminal-interface
 doc_role: decisions
 type: design
-summary: "Ordered ADR pointer index for orbit's terminal output surface."
+summary: "Decision record for Orbit's terminal output surface."
 tags: [terminal-interface]
 paths: ["crates/orbit-cli/src/output/**"]
 related_features: [terminal-interface]
-related_artifacts: [ADR-0306, ADR-0307, ADR-0308, ADR-0314]
+related_artifacts: []
 ---
 
 # Terminal Interface — Decisions
 
-Ordered pointer index for terminal-interface's ADRs. **Allocate the global `ADR-NNNN` via `orbit.adr.add` before adding the pointer** — never hand-author a four-digit number. The store owns the title, status, body, owner, and links; retrieve an ADR's authoritative narrative with `orbit tool run orbit.adr.show --input '{"id":"ADR-NNNN"}'`. See [CONVENTIONS.md §4](../CONVENTIONS.md#4-adr-template-strict) for the full rules (when a decision earns an ADR, the mandatory Cost line, rollups).
+[Terminal Output Is a Rendering of a Structured Payload](#terminal-output-is-a-rendering-of-a-structured-payload), [Borderless Tables With Truncate-to-Width Rows](#borderless-tables-with-truncate-to-width-rows), and [One Semantic Color Vocabulary, Gated at the Sink](#one-semantic-color-vocabulary-gated-at-the-sink) were recorded on 2026-08-02, ahead of the implementation work that makes the code conform. That ordering is deliberate — the specs in [./specs/](./specs/) are the reviewed contract, and [2_design.md](./2_design.md) records per-mechanism where the code still diverges from it. A divergence noted there is scheduled work, not an unmade decision.
 
-ADR-0306, ADR-0307, and ADR-0308 were accepted on 2026-08-02, ahead of the implementation work that makes the code conform. That ordering is deliberate — the specs in [./specs/](./specs/) are the reviewed contract, and [2_design.md](./2_design.md) records per-mechanism where the code still diverges from it. A divergence noted there is scheduled work, not an unmade decision. ADR-0314 is the inverse case: the implementation ([ORB-10570]) landed first, and the ADR was filed after, once the store was writable again.
+[The Output Sink Is a Process Global, Not a Renderer Parameter](#the-output-sink-is-a-process-global-not-a-renderer-parameter) is the inverse case: [ORB-10570] implemented it first, then [ORB-10586] changed the premise by threading the sink through `Execute::execute`. The earlier reasoning stays below with its supersession explained in prose; [2_design.md](./2_design.md) §9 records the current shape.
 
-- **ADR-0306 — Terminal Output Is a Rendering of a Structured Payload** — Accepted. Commands produce payloads; a central renderer resolves mode (`auto|table|json|ndjson`) from flags and TTY state. Generalizes the error payload shape established by [ORB-10356]. Implemented by [./specs/output-modes.md](./specs/output-modes.md).
-- **ADR-0307 — Borderless Tables With Truncate-to-Width Rows** — Accepted. Drops the box preset; a row is exactly one line, truncated with `…` and backed by a detail command. Reverses the wrapping arrangement introduced by [T20260411-0335]. Implemented by [./specs/table-rendering.md](./specs/table-rendering.md).
-- **ADR-0308 — One Semantic Color Vocabulary, Gated at the Sink** — Accepted. A closed role set replaces the two duplicated palettes; `NO_COLOR`, `--color`, and TTY state are resolved once. Consolidates the vocabulary [T20260427-43] extended in two places at once. Implemented by [./specs/color-and-styling.md](./specs/color-and-styling.md).
-- **ADR-0314 — The Output Sink Is a Process Global, Not a Renderer Parameter** — **Superseded** by [ORB-10586], which performed the 154-impl signature change ADR-0314 deferred. Its rejected alternative ("thread the sink through `Execute::execute`") became the accepted one once commands returned payloads: `main` passes the sink to the single renderer, and `sink::install`/`sink::active` are deleted. The supersession is a change of premise, not of judgment — ADR-0314 was correct while `Execute::execute` had no renderer argument. The superseding ADR is allocated by the orchestrator; its body is drafted in [ORB-10586]'s execution summary. See [2_design.md](./2_design.md) §9.
+## Terminal Output Is a Rendering of a Structured Payload
 
-## ADR-0306 — Terminal Output Is a Rendering of a Structured Payload
-
-**Status:** Accepted · 2026-08-02 02:33:46.102495Z · [T20260411-0335], [ORB-10228], [ORB-10356]
-**Owner:** claude
-**Created:** 2026-08-02 01:49:08.345142Z
-**Last updated:** 2026-08-02 02:33:46.102495+00:00
-**Related features:** `terminal-interface`
-**Tags:** `cli`, `terminal-interface`, `output`
+**Recorded:** 2026-08-02 02:33:46.102495Z · [T20260411-0335], [ORB-10228], [ORB-10356]
 **Paths:** `crates/orbit-cli/src/output/`, `crates/orbit-cli/src/command/`
 
 ### Context
@@ -69,14 +59,9 @@ Rejected alternative: make `--format json` the default and have humans opt into 
 - Cost: output becomes environment-dependent. A command run in CI (no TTY) prints differently than the same command run in a terminal, so any test or runbook that asserts on stdout must pin `--format` explicitly or it will pass locally and fail in CI.
 - Cost: moving the JSON error payload from stdout to stderr is a breaking change for any existing script that parses errors off stdout, and there is no output snapshot suite that would catch the regression — `crates/orbit-cli/src/snapshots/` holds one file, covering audit event JSON shape only.
 
-## ADR-0307 — Borderless Tables With Truncate-to-Width Rows
+## Borderless Tables With Truncate-to-Width Rows
 
-**Status:** Accepted · 2026-08-02 02:33:47.634255Z · [T20260411-0335]
-**Owner:** claude
-**Created:** 2026-08-02 01:49:38.885312Z
-**Last updated:** 2026-08-02 02:33:47.634255Z
-**Related features:** `terminal-interface`
-**Tags:** `cli`, `terminal-interface`, `output`
+**Recorded:** 2026-08-02 02:33:47.634255Z · [T20260411-0335]
 **Paths:** `crates/orbit-cli/src/output/table.rs`
 
 ### Context
@@ -108,14 +93,9 @@ Rejected alternative: an `--wide` flag that restores wrapping for full values. R
 - Cost: information leaves the list view. A long description is now only fully visible via the detail command or `--format json`, so a list becomes a navigation surface rather than a complete one, and every list command must have a detail counterpart that currently may not exist.
 - Cost: the rendering depends on terminal width, so the same command truncates differently in an 80-column and a 200-column terminal. Any comparison of two captured outputs must fix `COLUMNS` or use `--format json`.
 
-## ADR-0308 — One Semantic Color Vocabulary, Gated at the Sink
+## One Semantic Color Vocabulary, Gated at the Sink
 
-**Status:** Accepted · 2026-08-02 02:33:49.306446Z · [T20260427-43], [ORB-10202]
-**Owner:** claude
-**Created:** 2026-08-02 01:50:00.632846Z
-**Last updated:** 2026-08-02 02:33:49.306446Z
-**Related features:** `terminal-interface`
-**Tags:** `cli`, `terminal-interface`, `output`, `accessibility`
+**Recorded:** 2026-08-02 02:33:49.306446Z · [T20260427-43], [ORB-10202]
 **Paths:** `crates/orbit-cli/src/output/color.rs`
 
 ### Context
@@ -148,23 +128,18 @@ Rejected alternative: drop `colored` and route all line output through `comfy-ta
 - Cost: a status whose role is not obvious now forces a judgment at definition time (`review` is neither `ok` nor `warn`), and mapping it to `neutral` loses a distinction the current code encodes as magenta. The vocabulary is deliberately smaller than what exists.
 - Cost: the role indirection means reading the source no longer tells you what color a value prints; that requires reading the resolver too.
 
-## ADR-0314 — The Output Sink Is a Process Global, Not a Renderer Parameter
+## The Output Sink Is a Process Global, Not a Renderer Parameter
 
-**Status:** Accepted · 2026-08-02 04:39:37.628708Z · [ORB-10570], [ORB-10585]
-**Owner:** claude
-**Created:** 2026-08-02 04:39:31.587401Z
-**Last updated:** 2026-08-02 04:39:37.628708Z
-**Related features:** `terminal-interface`
-**Tags:** `cli`, `terminal-interface`, `output`
+**Recorded:** 2026-08-02 04:39:37.628708Z · [ORB-10570], [ORB-10585]
 **Paths:** `crates/orbit-cli/src/output/sink.rs`, `crates/orbit-cli/src/output/table.rs`, `crates/orbit-cli/src/output/color.rs`
 
 ### Context
 
-[ADR-0306] resolves the output sink once per invocation and requires every renderer to read it rather than re-derive terminal state. [ADR-0308] adds that color emission must be decided in exactly one place. Both presuppose that a renderer can *reach* the sink.
+[Terminal Output Is a Rendering of a Structured Payload](#terminal-output-is-a-rendering-of-a-structured-payload) resolves the output sink once per invocation and requires every renderer to read it rather than re-derive terminal state. [One Semantic Color Vocabulary, Gated at the Sink](#one-semantic-color-vocabulary-gated-at-the-sink) adds that color emission must be decided in exactly one place. Both presuppose that a renderer can *reach* the sink.
 
 It cannot, by parameter. Rendering in `orbit-cli` happens inside `Execute::execute(self, &OrbitRuntime) -> Result<(), OrbitError>`, which takes no renderer argument, across 154 `impl Execute` blocks and 98 command modules that call `println!` or `Table::print()` directly. `output/table.rs::Table::print` and `output/color.rs` are free functions those bodies call; neither has a call-site-provided sink to consult.
 
-[ADR-0306]'s migration step 3 changes that signature so commands return payloads, and is explicitly the expensive step. [ORB-10570]'s scope — gate color and width at the sink — is independent of it and was sequenced before it precisely so that `NO_COLOR=1` stops emitting escape sequences without waiting on a 154-impl refactor.
+[Terminal Output Is a Rendering of a Structured Payload](#terminal-output-is-a-rendering-of-a-structured-payload)'s migration step 3 changes that signature so commands return payloads, and is explicitly the expensive step. [ORB-10570]'s scope — gate color and width at the sink — is independent of it and was sequenced before it precisely so that `NO_COLOR=1` stops emitting escape sequences without waiting on a 154-impl refactor.
 
 So the sink has to be reachable from a free function called by a body that was not given one.
 
@@ -177,9 +152,9 @@ So the sink has to be reachable from a free function called by a body that was n
 - `main` also calls `sink.apply_color_policy()`, which overrides the `colored` crate's own process-global env detection. `comfy_table` has no equivalent global, so `output::table` passes the same answer per render via `enforce_styling` / `force_no_tty`.
 - Tests never call `OutputSink::from_process`. They build a sink with `OutputSink::resolve` and pass its answers to `Table::render(width, styled)` directly. The one test that flips the `colored` global serializes on a mutex and restores detection on drop.
 
-Rejected alternative: **thread the sink through `Execute::execute`.** This is the correct end state and is what [ADR-0306] step 3 does. Rejected *for now* because it is the same 154-impl signature change that step 3 already owns; doing it here would either duplicate that churn or merge two independently reviewable changes, and would delay the `NO_COLOR` fix behind it. When step 3 lands, `active()` becomes removable in favor of the threaded value, and this ADR should be superseded rather than extended.
+Rejected alternative: **thread the sink through `Execute::execute`.** This is the correct end state and is what [Terminal Output Is a Rendering of a Structured Payload](#terminal-output-is-a-rendering-of-a-structured-payload) step 3 does. Rejected *for now* because it is the same 154-impl signature change that step 3 already owns; doing it here would either duplicate that churn or merge two independently reviewable changes, and would delay the `NO_COLOR` fix behind it. When step 3 lands, `active()` becomes removable in favor of the threaded value, and this ADR should be superseded rather than extended.
 
-Rejected alternative: **have each renderer call `OutputSink::from_process()` itself.** Cheap and needs no global, but it re-derives terminal state per render — exactly the drift [ADR-0306] exists to remove — and would re-issue a `TIOCGWINSZ` ioctl per table. It also defeats `scripts/check-terminal-state-guard.sh`, whose whole premise is that one file queries the environment.
+Rejected alternative: **have each renderer call `OutputSink::from_process()` itself.** Cheap and needs no global, but it re-derives terminal state per render — exactly the drift [Terminal Output Is a Rendering of a Structured Payload](#terminal-output-is-a-rendering-of-a-structured-payload) exists to remove — and would re-issue a `TIOCGWINSZ` ioctl per table. It also defeats `scripts/check-terminal-state-guard.sh`, whose whole premise is that one file queries the environment.
 
 Rejected alternative: **a thread-local rather than a `OnceLock`.** Correct for concurrent in-process consumers, but `orbit-cli` renders from one thread and a thread-local would silently answer "piped" on any worker thread that rendered, which is a harder bug to see than the limitation below.
 
@@ -188,16 +163,16 @@ Rejected alternative: **a thread-local rather than a `OnceLock`.** Correct for c
 - `Table::print`, `output::color`, and `command/log/tail.rs` all read one answer, so the two styling backends can no longer disagree about `NO_COLOR`. That is the property [ORB-10570] exists to establish, and it is testable without a running `main`.
 - The guard script's allowlist shrinks to the sink and its tests; `command/log/tail.rs` is no longer a grandfathered exception.
 - Cost: a renderer's behavior depends on whether `main` ran. A unit test gets the piped default, which is the safe answer but not the interactive one, so a test that means to exercise the terminal path must build a sink explicitly and pass it — `Table::render(width, styled)` exists for exactly that, and `Table::print()` is the only function that reads the global.
-- Cost: two sinks cannot be active concurrently in one process. An embedded or in-process invocation that wanted to render for a different destination would have to wait for the threaded sink of [ADR-0306] step 3. No such consumer exists today.
+- Cost: two sinks cannot be active concurrently in one process. An embedded or in-process invocation that wanted to render for a different destination would have to wait for the threaded sink of [Terminal Output Is a Rendering of a Structured Payload](#terminal-output-is-a-rendering-of-a-structured-payload) step 3. No such consumer exists today.
 - Cost: `apply_color_policy` mutates the `colored` crate's process-global override, so any test that asserts on styled output must serialize against it. One mutex in `output/tests/gating.rs` carries that today; a second such test suite would have to share it rather than add its own.
 
 ## Task References
 
-- [T20260411-0335] — introduced the table arrangement [ADR-0307] reverses.
-- [T20260427-43] — extended the duplicated color vocabulary [ADR-0308] consolidates.
-- [ORB-10356] — made `OrbitError` `#[non_exhaustive]`, establishing the error payload shape [ADR-0306] generalizes.
-- [ORB-10570] — wired the sink into color and width, the implementation [ADR-0314] documents.
-- [ORB-10585] — filed [ADR-0314], which [ORB-10570] could not allocate.
-- [ORB-10586] — converted every command body to return a payload and gave the renderer sole ownership of stdout ([ADR-0306] steps 2–4), superseding [ADR-0314].
+- [T20260411-0335] — introduced the table arrangement [Borderless Tables With Truncate-to-Width Rows](#borderless-tables-with-truncate-to-width-rows) reverses.
+- [T20260427-43] — extended the duplicated color vocabulary [One Semantic Color Vocabulary, Gated at the Sink](#one-semantic-color-vocabulary-gated-at-the-sink) consolidates.
+- [ORB-10356] — made `OrbitError` `#[non_exhaustive]`, establishing the error payload shape [Terminal Output Is a Rendering of a Structured Payload](#terminal-output-is-a-rendering-of-a-structured-payload) generalizes.
+- [ORB-10570] — wired the sink into color and width, the implementation [The Output Sink Is a Process Global, Not a Renderer Parameter](#the-output-sink-is-a-process-global-not-a-renderer-parameter) documents.
+- [ORB-10585] — filed [The Output Sink Is a Process Global, Not a Renderer Parameter](#the-output-sink-is-a-process-global-not-a-renderer-parameter), which [ORB-10570] could not allocate.
+- [ORB-10586] — converted every command body to return a payload and gave the renderer sole ownership of stdout ([Terminal Output Is a Rendering of a Structured Payload](#terminal-output-is-a-rendering-of-a-structured-payload) steps 2–4), superseding [The Output Sink Is a Process Global, Not a Renderer Parameter](#the-output-sink-is-a-process-global-not-a-renderer-parameter).
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

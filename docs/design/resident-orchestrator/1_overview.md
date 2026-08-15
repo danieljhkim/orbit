@@ -10,7 +10,7 @@ summary: V1 is a drain job plus a workspace sequencer — epic_pipeline drains o
 tags: [resident-orchestrator, epic, jobs, mcp]
 paths: [".orbit/resources/jobs/**", "crates/orbit-core/assets/jobs/**", "crates/orbit-core/assets/activities/**"]
 related_features: [resident-orchestrator, activity-job]
-related_artifacts: [ORB-10775, ORB-10776, ORB-10779, ORB-10788, ADR-0361, ADR-0362, ADR-0363, ADR-0364, ADR-0365]
+related_artifacts: [ORB-10775, ORB-10776, ORB-10779, ORB-10788]
 ---
 
 # Resident Orchestrator — Overview
@@ -24,7 +24,7 @@ orchestrator activity**. That agent **does not edit the repository**. It creates
 tasks, inspects runs, and writes a workspace **session log**. The job loops scan →
 orchestrate until a later scan is empty or a bounded ceiling.
 
-`workspace_auto_pipeline` is the sequencer ([ORB-10788], ADR-0365). One tick drains
+`workspace_auto_pipeline` is the sequencer ([ORB-10788], [Workspace auto is a sequencer, not a leaf ship](./4_decisions.md#workspace-auto-is-a-sequencer-not-a-leaf-ship)). One tick drains
 **loose leaves** through existing ship, then — only when none remain — starts **exactly
 one** `epic_pipeline`. An in-progress epic holds other auto-ship. `orbit run ship` stays
 the leaf implementer; `orbit run auto` is the logistics verb.
@@ -75,8 +75,8 @@ fail-closed; success is never inferred from agent prose.
 **External clock.** Cron / knowledgebase supervisor / front door. Not a seeded Orbit
 routine in v1.
 
-**Epic tag.** Supervisor delegation for a root body of work (ADR-0361). It is **not**
-`epic_pipeline`'s pickup key. It **is** the leaf-ship exclusion key (ADR-0365): auto
+**Epic tag.** Supervisor delegation for a root body of work ([Epic tag is a supervisor delegation signal, not the job predicate](./4_decisions.md#epic-tag-is-a-supervisor-delegation-signal-not-the-job-predicate)). It is **not**
+`epic_pipeline`'s pickup key. It **is** the leaf-ship exclusion key ([Workspace auto is a sequencer, not a leaf ship](./4_decisions.md#workspace-auto-is-a-sequencer-not-a-leaf-ship)): auto
 `list_backlog` skips the root and its descendants; explicit ship of the root is refused.
 
 **Workspace auto.** `workspace_auto_pipeline` / `orbit run auto`: one logistics tick.
@@ -88,11 +88,11 @@ implementer and not a seeded routine.
 | Concern | Where | Task |
 |---------|-------|------|
 | This split | this folder | [ORB-10776] |
-| Epic tag = supervisor delegation signal | ADR-0361 | [ORB-10776] |
-| Clock and supervisor stay outside Orbit | ADR-0362 | [ORB-10776] |
+| Epic tag = supervisor delegation signal | [Epic tag is a supervisor delegation signal, not the job predicate](./4_decisions.md#epic-tag-is-a-supervisor-delegation-signal-not-the-job-predicate) | [ORB-10776] |
+| Clock and supervisor stay outside Orbit | [The supervisor clock is not an Orbit primitive](./4_decisions.md#the-supervisor-clock-is-not-an-orbit-primitive) | [ORB-10776] |
 | `orbit.session_log` (notes / check-later / status) | workspace session-log store + tools | [ORB-10784] |
 | `scan_unresolved_work` + `epic_orchestrator` + `epic_pipeline` | catalog | [ORB-10779] |
-| Sequencer is not leaf ship | ADR-0365 | [ORB-10788] |
+| Sequencer is not leaf ship | [Workspace auto is a sequencer, not a leaf ship](./4_decisions.md#workspace-auto-is-a-sequencer-not-a-leaf-ship) | [ORB-10788] |
 | `workspace_auto_pipeline` + `orbit run auto` | catalog + CLI | [ORB-10788] |
 | Child delivery while draining | existing `task_gate_pipeline` / `task_pr_pipeline` | Existing |
 | HTTP epic retirement | removed assets | [ORB-10332] |
@@ -101,7 +101,7 @@ implementer and not a seeded routine.
 
 - **[ORB-10332]** — Remove the unused HTTP epic pipeline.
 - **[ORB-10775]** — Epic: drain job in Orbit; supervisor clock stays external.
-- **[ORB-10776]** — Accept this contract; ADR-0361 and ADR-0362.
+- **[ORB-10776]** — Accept this contract; [Epic tag is a supervisor delegation signal, not the job predicate](./4_decisions.md#epic-tag-is-a-supervisor-delegation-signal-not-the-job-predicate) and [The supervisor clock is not an Orbit primitive](./4_decisions.md#the-supervisor-clock-is-not-an-orbit-primitive).
 - **[ORB-10779]** — Ship the scan, the orchestrator activity, and `epic_pipeline`.
 - **[ORB-10784]** — `orbit.session_log` (status / note / check_later).
 - **[ORB-10788]** — Sequencer job, leaf-ship exclusion, `orbit run auto`.

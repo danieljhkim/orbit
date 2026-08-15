@@ -13,7 +13,7 @@ tags: ["policy-sandbox"]
 
 # Policy & Sandboxing — Overview
 
-> **Sandbox backend status.** Shipped CLI-agent executors select `macos-sandbox-exec` on macOS and `linux-bwrap` on Linux; `local-shell` remains bare. Linux Bubblewrap provides fail-closed kernel write confinement after a capability probe, while read-policy parity stays delegated. Windows has no OS wrapper. HTTP-tool `fs.*` enforcement and process supervision continue to apply on every platform. [ORB-10552] [ADR-0304]
+> **Sandbox backend status.** Shipped CLI-agent executors select `macos-sandbox-exec` on macOS and `linux-bwrap` on Linux; `local-shell` remains bare. Linux Bubblewrap provides fail-closed kernel write confinement after a capability probe, while read-policy parity stays delegated. Windows has no OS wrapper. HTTP-tool `fs.*` enforcement and process supervision continue to apply on every platform. [ORB-10552] [Use Bubblewrap for shipped Linux CLI write confinement](./4_decisions.md#use-bubblewrap-for-shipped-linux-cli-write-confinement)
 
 Policy & Sandboxing is Orbit's safety surface for filesystem access and process execution. It combines v2 `PolicyDef` profiles, global `denyRead` / `denyModify` rules, HTTP-tool fs enforcement, optional macOS `sandbox-exec` wrapping for CLI agents, and `orbit-exec` process supervision. [2_design.md](./2_design.md) documents what ships today; [3_vision.md](./3_vision.md) names the gaps to a fuller isolation contract.
 

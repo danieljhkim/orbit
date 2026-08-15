@@ -10,12 +10,12 @@ summary: Consolidates high-cardinality v2 runtime state into the global SQLite s
 tags: [global-store-consolidation, storage, sqlite]
 paths: ["crates/orbit-store/**", "crates/orbit-core/**", "crates/orbit-engine/**"]
 related_features: [global-store-consolidation]
-related_artifacts: [ORB-00276, ADR-0183]
+related_artifacts: [ORB-00276]
 ---
 
 # Global Store Consolidation — Overview
 
-> **Archived (2026-06) — completed feature, historical record.** The consolidation described here shipped under [ORB-00276]: v2 audit, job-run, and session-learning state now live in the global SQLite store (`crates/orbit-store/src/sqlite/`). This folder was moved out of the active design set during a docs-cleanup pass; it is retained as the design record behind **ADR-0183** (still allocated in the store). No further design work is tracked here.
+> **Archived (2026-06) — completed feature, historical record.** The consolidation described here shipped under [ORB-00276]: v2 audit, job-run, and session-learning state now live in the global SQLite store (`crates/orbit-store/src/sqlite/`). This folder was moved out of the active design set during a docs-cleanup pass; it is retained as the design record behind **[Consolidate v2 audit, job-run, and session-learning state into the global SQLite store](./4_decisions.md#consolidate-v2-audit-job-run-and-session-learning-state-into-the-global-sqlite-store)** (still allocated in the store). No further design work is tracked here.
 
 High-cardinality, machine-only runtime stores now use the existing global SQLite database instead of JSON-per-record workspace files.
 

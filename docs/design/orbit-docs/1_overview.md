@@ -9,14 +9,14 @@ type: design
 summary: "Orbit Docs — what the human-authored docs corpus is, why it exists alongside learnings and ADRs, and how agents retrieve from it."
 tags: [orbit-docs]
 related_features: [orbit-docs]
-related_artifacts: [ORB-00163, ORB-00206, ORB-10319, ADR-0169, ADR-0170, ADR-0171, ADR-0180]
+related_artifacts: [ORB-00163, ORB-00206, ORB-10319]
 last_validated: 2026-08-09
 ---
 
 # Orbit Docs — Overview
 
 > **Historical comparison:** learning-specific comparisons in this document
-> describe the retired native subsystem. [ORB-10736] / [ADR-0359] remove that
+> describe the retired native subsystem. [ORB-10736] / [Remove the native project-learning subsystem](../project-learnings/4_decisions.md#remove-the-native-project-learning-subsystem) remove that
 > resource and its tool, storage, and delivery contracts; those passages are
 > non-normative.
 
@@ -24,7 +24,7 @@ Orbit Docs is the human-authored knowledge corpus for an Orbit workspace. It ind
 
 The system is **pull-first**: agents call `orbit search --kind doc` (or `--kind all` for federated doc+ADR) or `orbit docs show` when they need context. Task-time related-doc injection is available through `task show --with-context`; PreToolUse hook surfaces remain downstream work ([ORB-00166], [ORB-00167]).
 
-Phase 1 ships the corpus, the locked frontmatter schema, the six-verb surface, the `orbit-docs` skill, doc-corpus embeddings via `orbit docs index`, and a one-shot migrator that backfills legacy `docs/design/<feature>/` and `docs/design-patterns/` files. [2_design.md](./2_design.md) specifies the schema, walker, surface, tolerant indexer, and hybrid search path; [3_vision.md](./3_vision.md) names open questions and the remaining roadmap (hook integration, ADR folding); [4_decisions.md](./4_decisions.md) is the ADR log.
+Phase 1 ships the corpus, the locked frontmatter schema, the six-verb surface, the `orbit-docs` skill, doc-corpus embeddings via `orbit docs index`, and a one-shot migrator that backfills legacy `docs/design/<feature>/` and `docs/design-patterns/` files. [2_design.md](./2_design.md) specifies the schema, walker, surface, tolerant indexer, and hybrid search path; [3_vision.md](./3_vision.md) names open questions and the remaining roadmap; [4_decisions.md](./4_decisions.md) is the decision log.
 
 ---
 
@@ -59,9 +59,9 @@ Six fields, two required, four optional:
 | `tags` | no | string list | Free-form labels; used by `orbit docs list --tag`. |
 | `paths` | no | glob string list | File-scope patterns this doc applies to (e.g. `crates/orbit-cli/**`). Used by task-context matching and planned hook-time injection. |
 | `related_features` | no | string list | Feature slugs this doc covers; join key with normalized task tags used as feature selectors. |
-| `related_artifacts` | no | string list | Cross-references to other Orbit artifacts via [ADR-0171] ID-prefix dispatch. |
+| `related_artifacts` | no | string list | Cross-references to other Orbit artifacts via [ID-prefix dispatch for orbit-docs `related_artifacts`](./4_decisions.md#id-prefix-dispatch-for-orbit-docs-relatedartifacts) ID-prefix dispatch. |
 
-Schema rationale and the closed-by-default choice: [ADR-0169]. Why ID-prefix dispatch over object-shape references: [ADR-0171].
+Schema rationale and the closed-by-default choice: [Locked orbit-docs frontmatter schema](./4_decisions.md#locked-orbit-docs-frontmatter-schema). Why ID-prefix dispatch over object-shape references: [ID-prefix dispatch for orbit-docs `related_artifacts`](./4_decisions.md#id-prefix-dispatch-for-orbit-docs-relatedartifacts).
 
 ### 2.3 Tolerant indexer
 
@@ -88,7 +88,7 @@ The five domain tool definitions (`orbit.docs.list`, `show`, `add`, `index`, and
 
 ### 2.5 The `.orbit/` exclusion
 
-The walker explicitly skips any path under `.orbit/`, even if a configured root accidentally points above it. ADRs at `.orbit/adrs/{accepted,proposed,superseded}/ADR-NNNN/` are owned by `orbit-adr` and have their own `orbit.adr.*` surface — they are *not* indexed by orbit-docs in v1. Whether orbit-docs eventually absorbs them is the [ORB-00169] design question. The locating principle behind this boundary: [ADR-0170].
+The walker explicitly skips any path under `.orbit/`, even if a configured root accidentally points above it. Decision narratives now live in each feature's `4_decisions.md` and are indexed like other human-authored docs; the retired store and its separate query surface no longer sit behind the exclusion. The locating principle behind this boundary remains [`.orbit/` for tool-managed artifacts; `docs/` for human-authored content](./4_decisions.md#orbit-for-tool-managed-artifacts-docs-for-human-authored-content).
 
 ### 2.6 Learning vs. doc
 

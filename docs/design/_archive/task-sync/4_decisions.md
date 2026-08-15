@@ -12,17 +12,15 @@ tags: ["task-sync"]
 
 # Task Sync — Decisions
 
-> **Superseded (ORB-00029, ORB-00030, 2026-07).** These ADRs were local-only (never allocated in the global ADR store) and describe an unbuilt design. The superseding decisions live in the global store as ADR-0200 (viewing supersedes a git-sync registry) and ADR-0201 (SSH-tunnel transport), mirrored in [`docs/design/remote-access/4_decisions.md`](../../remote-access/4_decisions.md).
+Decision log of non-obvious task-sync decisions. Each entry names the pressure, the choice, and the tradeoff. Entries stay in historical order; title-based supersession links preserve changes in direction without deleting the earlier reasoning.
 
-ADR-style log of non-obvious task-sync decisions. Each entry names the pressure, the choice, and the tradeoff. Entries are append-only and keyed by number; superseded entries are marked, not deleted.
-
-Format for each entry: **Status · Date · Task(s)**, then *Context → Decision → Consequences*. Every ADR names at least one cost. ADRs in this file carry status `Proposed` until the sync implementation lands; they flip to `Accepted` with the implementing task ID at that point.
+Format for each entry: **Recorded date and task provenance**, then *Context → Decision → Consequences*. Every decision names at least one cost. These entries describe an unbuilt design; the recorded task references preserve that provenance without maintaining a separate decision lifecycle.
 
 ---
 
-## ADR-001 — Orphan branch as registry mechanism
+## Orphan branch as registry mechanism
 
-**Status:** Proposed · 2026-05 · [T20260505-12]
+**Recorded:** 2026-05 · [T20260505-12]
 
 **Context.** Three plausible designs for "where does the team's task state live?" exist: a coordinator daemon (shared-host), per-host ID suffixes that paper over allocation collisions without a shared store, and a git-based registry. Orbit commits to per-engineer deployment ([README](../../../README.md), [POSITIONING](../../POSITIONING.md)), which rules out a coordinator daemon for the local product shape. Per-host suffixes would preserve uniqueness but complicate the `ORB-00000` commit-message search convention, audit events, and downstream tooling. Knowledge-graph task attribution was removed in [T20260506-11] and is no longer a current consumer. A git-based orphan-branch registry preserves the current ID format and uses infrastructure the team already has.
 
@@ -36,11 +34,11 @@ Format for each entry: **Status · Date · Task(s)**, then *Context → Decision
 
 ---
 
-## ADR-002 — Operation-aware replay over text-merge or event sourcing
+## Operation-aware replay over text-merge or event sourcing
 
-**Status:** Proposed · 2026-05 · [T20260505-12]
+**Recorded:** 2026-05 · [T20260505-12]
 
-**Superseded by:** [T20260506-11] for any premise that Orbit `task_id` must be globally resolvable outside a future sync registry.
+**Superseded by:** [T20260506-11] for any premise that Orbit task_id must be globally resolvable outside a future sync registry.
 
 **Context.** Standard git text merge fails for task bundles in three concrete ways: status-transition divergence (two lifecycle operations can both be syntactically valid but semantically incompatible), append-stream races (comments/history/reviews are JSONL streams that should replay as rows, not line-level merges), and same-field edits (humans can't usefully resolve YAML or Markdown baseline conflicts without operation context). Four mechanisms were evaluated against four scenarios in [2_design.md §3.1](./2_design.md): ADD-only sync, operation-aware replay, event sourcing, and no sync. ADD-only ships fast but leaves the partial-coverage mental model that updates don't sync — the operations users care about most. Event sourcing handles every scenario but requires building an event materializer and abandoning bundle-snapshot-as-canonical. No sync defers the entire coordination problem.
 
@@ -54,9 +52,9 @@ Format for each entry: **Status · Date · Task(s)**, then *Context → Decision
 
 ---
 
-## ADR-003 — Sync scope is task bundles + companion files + artifacts
+## Sync scope is task bundles + companion files + artifacts
 
-**Status:** Proposed · 2026-05 · [T20260505-12]
+**Recorded:** 2026-05 · [T20260505-12]
 
 **Context.** Once sync exists, the natural pull is to expand it: the audit DB, scoreboards, job runs, knowledge graph, and SQLite reservation locks all have multi-machine coordination value. Each, however, has different consistency, retention, and merge requirements that don't fit the task-bundle model. Audit is `GlobalOnly` and append-tamper-evident. Scoreboards use counter semantics that don't merge. Locks are TTL-based ephemeral. Job runs are large blob-bearing artifacts. Knowledge graph is content-addressed and branch-scoped.
 
@@ -69,11 +67,10 @@ Format for each entry: **Status · Date · Task(s)**, then *Context → Decision
 
 ---
 
-## ADR-004 — `ORB-00000` allocation against fetched registry
+## `ORB-00000` allocation against fetched registry
 
-**Status:** Proposed · 2026-05 · [T20260505-12]
+**Recorded:** 2026-05 · [T20260505-12]
 
-**Updated by:** task-artifacts ADR-001 for the `ORB-00000` format and allocation-authority semantics.
 
 **Context.** The `ORB-00000` task ID format is allocated by an explicit local authority under `~/.orbit/tasks/index.sqlite`. The prefix looks global, but the ID is only unique inside its allocation authority until sync or hosted modes provide a shared authority. Two unsynced machines can still mint the same bare ID. A sync registry must therefore make allocation authority explicit instead of pretending local counters are globally meaningful.
 
@@ -86,9 +83,9 @@ Format for each entry: **Status · Date · Task(s)**, then *Context → Decision
 
 ---
 
-## ADR-005 — Auth piggybacks on git remote credential helper
+## Auth piggybacks on git remote credential helper
 
-**Status:** Proposed · 2026-05 · [T20260505-12]
+**Recorded:** 2026-05 · [T20260505-12]
 
 **Context.** Task sync needs to fetch and push to a git remote on every mutation. The team already has an authenticated relationship with that remote (SSH keys, HTTPS tokens, SSO-wrapped credentials, SSH agent, etc.). Building a separate auth surface for Orbit would duplicate that machinery and create a separate credential-rotation problem.
 
@@ -101,9 +98,9 @@ Format for each entry: **Status · Date · Task(s)**, then *Context → Decision
 
 ---
 
-## ADR-006 — `git2` (libgit2) over shelling to `git`
+## `git2` (libgit2) over shelling to `git`
 
-**Status:** Proposed · 2026-05 · [T20260505-12]
+**Recorded:** 2026-05 · [T20260505-12]
 
 **Context.** The sync coordinator needs in-process control over fetch, commit, and push: typed errors, programmatic auth callbacks, and the ability to retry without subprocess overhead. Two viable options: the `git2` crate (libgit2 bindings) or shelling to the system `git` binary. Shelling is simpler to reason about — you get exactly what `git` does — but error handling is brittle (stdout parsing) and auth integration with credential helpers requires reimplementing git's helper protocol.
 
@@ -116,11 +113,11 @@ Format for each entry: **Status · Date · Task(s)**, then *Context → Decision
 
 ---
 
-## ADR-007 — Sync remains future work; local Orbit is per-engineer
+## Sync remains future work; local Orbit is per-engineer
 
-**Status:** Proposed · 2026-05 · [T20260505-12]
+**Recorded:** 2026-05 · [T20260505-12]
 
-**Context.** Initial discussion of task sync framed it as a small, opt-in feature that fits the existing per-engineer doctrine. Subsequent analysis (specifically the conflict-resolution scenarios in [2_design.md §3.1](./2_design.md)) revealed that doing sync correctly requires the operation-aware-replay subsystem in ADR-002, which is meaningful engineering. A half-built sync — for example, ADD-only with no update propagation — produces the wrong mental model: "I can see Bob's task exists but never see him work on it." That's worse for adoption than no sync.
+**Context.** Initial discussion of task sync framed it as a small, opt-in feature that fits the existing per-engineer doctrine. Subsequent analysis (specifically the conflict-resolution scenarios in [2_design.md §3.1](./2_design.md)) revealed that doing sync correctly requires the operation-aware-replay subsystem in [Operation-aware replay over text-merge or event sourcing](#operation-aware-replay-over-text-merge-or-event-sourcing), which is meaningful engineering. A half-built sync — for example, ADD-only with no update propagation — produces the wrong mental model: "I can see Bob's task exists but never see him work on it." That's worse for adoption than no sync.
 
 **Decision.** Orbit ships per-engineer with no task sync. The default config is `[task.sync] enabled = false` and the sync code path is absent. This design exists as a docs artifact only. A future sync release ships as an opt-in feature once the operation-aware-replay subsystem and the structured-conflict UX are real.
 
@@ -132,9 +129,9 @@ Format for each entry: **Status · Date · Task(s)**, then *Context → Decision
 
 ---
 
-## ADR-008 — Deletion writes a tombstone, not a hard removal
+## Deletion writes a tombstone, not a hard removal
 
-**Status:** Proposed · 2026-05 · [T20260505-12]
+**Recorded:** 2026-05 · [T20260505-12]
 
 **Context.** `task.delete` could either remove the task directory from the orphan branch or leave it and add a marker indicating deletion. Hard removal is intuitive but creates a footgun: engineer A deletes `ORB-00042`; meanwhile engineer B (offline) made an edit to it; engineer B comes online and pushes; the task reappears as a "new" task with the same ID at the time of B's edit. Tombstones prevent this resurrection by recording the deletion as an explicit operation that subsequent operations honor.
 

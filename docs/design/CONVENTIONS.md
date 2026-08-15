@@ -1,8 +1,8 @@
 ---
 title: Design Doc Conventions
 owner: daniel
-last_updated: 2026-08-10
-last_validated: 2026-08-10
+last_updated: 2026-08-15
+last_validated: 2026-08-15
 status: Accepted
 ---
 
@@ -21,7 +21,7 @@ docs/design/<feature>/
 ├── 1_overview.md       recommended — what and why
 ├── 2_design.md         recommended — current implementation
 ├── 3_vision.md         recommended — forward-looking
-├── 4_decisions.md      recommended — ADR entries (the record, not a pointer index)
+├── 4_decisions.md      recommended — titled decisions and their reasoning
 ├── specs/              recommended folder; may be empty initially
 │   └── <mechanism>.md  one mechanism per file
 └── references/         recommended folder; may be empty initially
@@ -54,7 +54,7 @@ Every numbered design doc starts with the YAML frontmatter carried by the [`_tem
 - `feature` is the folder slug (e.g. `host-registry`, `knowledge-graph`). Lets tooling group docs by feature without parsing paths.
 - `doc_role` is one of `overview`, `design`, `vision`, `decisions` — corresponds 1:1 with the filename prefix `1_`/`2_`/`3_`/`4_`.
 
-The template frontmatter also carries the orbit-docs retrieval fields (`type`, `summary`, `tags`, `paths`, `related_features`, `related_artifacts`) so the doc is indexable on day one. `type` and `summary` are required by the strict parser. `summary` must be a non-empty single line. `related_artifacts` accepts `ORB-NNNNN`, `L-NNNN`, `FYYYY-MM-NNN`, and `ADR-NNNN` strings. The tolerant indexer infers these fields for legacy design docs and pattern docs, but new docs should write them explicitly. ADR bodies live in their feature's `4_decisions.md` and are indexed with every other design doc (§4) — the docs indexer still does not index `.orbit/`, which no longer holds anything authoritative.
+The template frontmatter also carries the orbit-docs retrieval fields (`type`, `summary`, `tags`, `paths`, `related_features`, `related_artifacts`) so the doc is indexable on day one. `type` and `summary` are required by the strict parser. `summary` must be a non-empty single line. `related_artifacts` accepts task, learning, and friction references (`ORB-NNNNN`, `L-NNNN`, and `FYYYY-MM-NNN`). Decisions are addressed by their titles and links, not artifact IDs, so they do not belong in `related_artifacts`. The tolerant indexer infers these fields for legacy design docs and pattern docs, but new docs should write them explicitly.
 
 ---
 
@@ -65,7 +65,7 @@ The template frontmatter also carries the orbit-docs retrieval fields (`type`, `
 | **1_overview.md** | Elevator paragraph · §1 Motivation · §2 Core Concepts · §3 At a Glance (table: concern → file → task) · Task References |
 | **2_design.md** | Scope paragraph · mechanism sections (variable count, numbered) · §N Concerns & Honest Limitations (mandatory last section) · Task References |
 | **3_vision.md** | Scope paragraph · §1 Open Questions (numbered) · §2 Prior Work (subsections by category) · §3 What May Be Distinctive · §4 References (Orbit-internal + External) · Task References |
-| **4_decisions.md** | Scope explainer · ADR entries in ascending number order, each with Status · Context · Decision · Consequences (incl. `Cost:`) |
+| **4_decisions.md** | Scope explainer · titled entries, each with Recorded provenance · Context · Decision · Consequences (incl. `Cost:`) |
 
 Every numbered doc ends with a **Task References** section listing only the task IDs cited in that doc, plus the line:
 
@@ -73,13 +73,13 @@ Every numbered doc ends with a **Task References** section listing only the task
 
 ---
 
-## 4. ADRs (strict)
+## 4. Decisions
 
-**`4_decisions.md` is the record.** An ADR is a section in its feature's `4_decisions.md` — git-committed markdown, reviewed in the same PR as the code it describes, indexed by the ordinary docs corpus. There is no ADR store, no allocator, no lifecycle tool, and no `.orbit/adrs/` partition; that surface was retired for the reasons in §4b. `4_decisions.md` is no longer a pointer index into a second system of record.
+**`4_decisions.md` keeps the reasoning.** A decision is a titled section in its feature's `4_decisions.md`, reviewed in the same change as the code it describes and indexed with the ordinary docs corpus. Orbit tasks carry identity, lifecycle, ownership, and delivery provenance; the decision section carries only the reasoning that should outlive the task.
 
-### 4a. What earns an ADR
+### 4a. What earns a decision entry
 
-An ADR is admitted through exactly one of two doors. Most decisions go through neither.
+A decision entry is admitted through exactly one of two doors. Most implementation choices go through neither.
 
 **Door 1 — it explains surprising code.** A future reader will hit a specific site, think *this looks wrong*, and be right to think so until they know the decision. The test is concrete: name the file, ideally the function.
 
@@ -89,38 +89,37 @@ Door 2 has one discipline, and the convention collapses without it: **the entry 
 
 Whichever door, the entry must still name a **real alternative** (a different choice was on the table and would have produced a materially different design) and a **non-trivial cost** (something a reader could not infer from the decision itself). No cost line means the decision wasn't real.
 
-Everything else — organizational choices, crate boundaries, the obvious next instance of an existing pattern — is design prose. Put it in `2_design.md`, or cite the task ID on an existing ADR's Status line.
+Everything else — organizational choices, crate boundaries, the obvious next instance of an existing pattern — is design prose. Put it in `2_design.md`, or cite the task on the existing decision's `Recorded` line.
 
-### 4b. Why the store was retired
+### 4b. Why IDs and lifecycle records were retired
 
 Measured over the 210 accepted-and-superseded records the store held: 39% were cited from code, 55% only from other design docs, and 24% from nowhere at all. The split was qualitatively clean — code-cited entries described runtime behaviour contracts; doc-only entries described how the tree was arranged. Against that, the store cost ten CLI subcommands, an MCP write surface whose supersede path silently half-worked, a `proposed/` partition that the workspace-init gitignore template hid inside run worktrees — requiring a host-side staging handoff just to ship a draft — a dashboard API, a search index redundant with the docs corpus, and a dormant hub-global sequence allocator. Two systems of record for one decision, and the expensive one was not the one being read.
 
-Migration was mechanical rather than a rescue: all 231 tracked store bodies moved verbatim into their feature's `4_decisions.md` before the store and its tool surface were retired by [ORB-10726].
+Migration was mechanical rather than a rescue: the tracked bodies moved verbatim into their feature's `4_decisions.md` before the duplicate store and tool surface were retired by [ORB-10726]. Orbit tasks already supply allocation-safe IDs, lifecycle state, ownership, and review handoff, so assigning a second identity to the reasoning added no durable capability.
 
-Retiring it keeps every decision and drops the bookkeeping. Door 2 was added after the first draft of this rule made code-citation the sole test, which would have discarded the project's standing preferences along with the noise.
+Dropping decision IDs keeps every title and narrative while removing the remaining allocation and cross-link bureaucracy. Door 2 was added after the first draft of this rule made code-citation the sole test, which would have discarded the project's standing preferences along with the noise.
 
-### 4c. Format and numbering
+### 4c. Format and links
 
-Copy the entry skeleton from [`_templates/4_decisions.md`](./_templates/4_decisions.md). Each entry is a `## ADR-NNNN — <title>` heading followed by **Status**, **Context**, **Decision**, and **Consequences**, the last carrying at least one `Cost:` line.
+Copy the entry skeleton from [`_templates/4_decisions.md`](./_templates/4_decisions.md). Each entry is a unique `## <title>` heading followed by **Recorded**, **Context**, **Decision**, and **Consequences**, the last carrying at least one `Cost:` line.
 
-- **Numbering is repo-local.** Take the next unused four-digit number in this repo — `grep -rho 'ADR-[0-9]\{4\}' docs/ | sort -u | tail -1`. Numbers are append-only and never reused.
-- **Never cite an ADR across repos.** `ADR-0234` means one thing in this repo and something else in another. Cross-repo references name the repo and the decision in prose.
-- **Door 1 entries carry `code_anchors:`** — a list of paths, ideally `path::symbol` — and each anchored site carries a `// ADR-NNNN` comment pointing back. Both directions or neither: an ADR nobody can stumble into from the code cannot do the job it was admitted for, and a comment pointing at nothing is worse than no comment.
-- **Door 2 entries carry `scope:`** instead — the areas the rule governs. These are the entries worth surfacing to an agent up front, since their whole value is being consulted before a decision rather than after a surprise.
-- **Supersession is a status line**, not a lifecycle operation: `**Status:** Superseded by ADR-NNNN · <date>`. The superseded entry stays where it is with its body intact, so the reason the old architecture existed is not rewritten after the fact. A stale `// ADR-NNNN` anchor pointing at a superseded decision is actively misleading — see the lint in §11.
-- **`Proposed` is allowed** only while the relevant task is in flight, and only in the feature branch. Nothing merges to the default branch still marked `Proposed`.
-- **Legacy 3-digit headings** (`## ADR-NNN`) predate four-digit numbering and are grandfathered as-is. Renumbering them would break existing citations for no gain.
+- **Titles are the address.** Make the title specific and unique within the file. Link directly to its generated Markdown anchor: `[Decision title](./4_decisions.md#decision-title)`.
+- **Cross-repository references use prose.** Name the repository and decision title; a relative anchor cannot cross repository boundaries honestly.
+- **Door 1 entries carry `**Code anchors:**` or `**Paths:**`.** Prefer `path::symbol` when a stable symbol exists. The code site may link back to the decisions file in ordinary prose, but it does not carry a second decision identifier.
+- **Door 2 entries state their reach in the Decision prose.** Do not add lifecycle or scope metadata solely to classify the entry.
+- **Supersession is a title link:** `**Superseded by:** [New title](#new-title)`. The old entry and body stay in place so the reason the earlier architecture existed is not rewritten after the fact.
+- **Provenance is task-backed.** `**Recorded:** <date> · [ORB-NNNNN]` preserves when and why the reasoning entered the project. It is historical context, not a second lifecycle.
 
-### 4d. Agents do not mint ADRs
+### 4d. Tasks carry the tracking job
 
-An executing agent files a friction or raises the question in its run summary; it never adds an ADR entry. Authoring is deliberate and human-or-orchestrator driven. This is the rule that keeps the corpus small — the retired store's noise came overwhelmingly from decisions minted mid-run, when the author had the least context about whether the choice was novel.
+An executing agent adds or updates a decision entry only when the task and the admission test above require it. The task remains the searchable allocation key and lifecycle record. If a choice does not clear the admission test, capture it in the design prose or execution summary instead of creating a durable decision section.
 
-### 4e. Rollup ADRs
+### 4e. Rollup decisions
 
-When a cluster of accepted ADRs all instantiate the same underlying decision (e.g. "added language X to the tree-sitter extractor set"), fold the cluster into a single rollup entry:
+When a cluster of entries all instantiate the same underlying decision (e.g. "added language X to the tree-sitter extractor set"), fold the cluster into a single rollup entry:
 
-- The rollup either reuses the parent's number with an expanded body and a per-instance table, or claims a new number that lists the cluster.
-- Each folded entry keeps its heading and gets `**Status:** Superseded by ADR-NNNN (folded)`.
+- Expand the parent body with a per-instance table, or add a newly titled rollup that lists the cluster.
+- Each folded entry keeps its heading and gets a title-based `**Superseded by:**` link.
 - The rollup must preserve every Cost line from the folded entries that doesn't duplicate a cost already named.
 - Compaction is normal maintenance, not emergency cleanup. Fold when the third instance lands, not the tenth.
 
@@ -166,7 +165,7 @@ There is no `Deprecated` status at the doc level. If the feature is retired, arc
 ## 9. Task ID Citation Format
 
 - Inline: plain bracketed text `[ORB-00042]`.
-- In ADRs: on the status line after the date.
+- In decisions: on the `Recorded` line after the date.
 - Never cite a task without naming what that task did — `([ORB-00042])` alone is opaque; always give a verb phrase.
 
 ---
@@ -179,7 +178,7 @@ There is no `Deprecated` status at the doc level. If the feature is retired, arc
 | `roadmap.md` | Belongs in Orbit task system |
 | `changelog.md` | Covered by git history + task IDs |
 | `tutorial.md` | Belongs at top-level project README |
-| Task-artifact mirrors in `references/` | ADRs should absorb the "why"; rot risk otherwise |
+| Task-artifact mirrors in `references/` | Decision entries or design prose should absorb the "why"; rot risk otherwise |
 | Top-level doc outside the numbered four | If it's important, it belongs inside one of them |
 
 ---
@@ -191,12 +190,12 @@ These are recommendations, not mechanically enforced by `orbit-design` (retired)
 Five mechanical checks worth adding later (as optional lints, never blocking):
 
 1. Lint: every numbered doc has required frontmatter + Task References section.
-2. Lint: every ADR has a Cost line.
-3. Lint: every ADR is admitted through exactly one door — it carries `code_anchors:` or `scope:`, not both and not neither (§4c).
-4. Lint: every path in a `code_anchors:` list exists and carries a matching `// ADR-NNNN` comment, and every `// ADR-NNNN` in the tree resolves to an entry. This is the check that keeps Door 1 honest in both directions.
-5. Lint: no code cites a superseded ADR. A stale anchor is worse than no anchor, and this is the one failure mode retiring the lifecycle tooling makes more likely rather than less.
+2. Lint: every decision has a Cost line.
+3. Lint: every decision is admitted through exactly one door and carries concrete code/path anchors when it uses Door 1.
+4. Lint: every path in a `Code anchors` or `Paths` line exists.
+5. Lint: every title-based decision link resolves, including supersession links.
 
-Check 4 also gives a maintenance signal worth acting on: a Door 1 entry with zero live citations has stopped explaining anything and is a demotion candidate.
+Check 4 also gives a maintenance signal worth acting on: a Door 1 entry whose paths no longer exist has stopped explaining live code and is a demotion candidate.
 
 Until those exist: cross-review and author judgment are the quality mechanism. When one agent reviews the other's docs, the reviewer treats this doc as a checklist and gives feedback on deviations; the author decides whether the deviation is justified for that folder.
 
@@ -234,4 +233,4 @@ Retired features stay listed with their `_archive/` path as a historical record.
 | User Interface | [docs/design/user-interface/](./user-interface/) | gemini |
 | Worktree Artifacts | [docs/design/worktree-artifacts/](./worktree-artifacts/) | codex |
 
-Ownership means: the lead is accountable for keeping the folder's docs in sync with implementation, for flipping ADR status when tasks ship, and for responding to cross-review comments. Ownership does not preclude other agents from editing — it names who's on the hook when things drift.
+Ownership means: the lead is accountable for keeping the folder's docs in sync with implementation, for recording task provenance when decisions change, and for responding to cross-review comments. Ownership does not preclude other agents from editing — it names who's on the hook when things drift.

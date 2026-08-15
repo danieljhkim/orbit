@@ -4,7 +4,7 @@ summary: Authoring and maintenance conventions for Orbit operational runbooks.
 tags: [docs, operations, runbooks]
 paths: ["docs/runbooks/**"]
 related_features: [orbit-docs]
-related_artifacts: [ADR-0169]
+related_artifacts: []
 ---
 
 # Runbook Conventions
@@ -37,7 +37,7 @@ enablement, and machine-specific sync topology belong in a private operations kn
 
 Every runbook uses Orbit Docs' locked frontmatter schema. `type` and `summary` are required;
 the other four fields are optional. Do not add fields such as `title`, `owner`, `status`, or
-`last_updated` without first changing the locked schema described by [ADR-0169].
+`last_updated` without first changing the locked schema described by [Locked orbit-docs frontmatter schema](../design/orbit-docs/4_decisions.md#locked-orbit-docs-frontmatter-schema).
 
 ```yaml
 ---

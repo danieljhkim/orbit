@@ -11,7 +11,7 @@ summary: Crate boundary and public-surface contract of orbit-core after the ORB-
 tags: [orbit-core, orbit-cmd, architecture]
 paths: ["crates/orbit-core/**", "crates/orbit-cmd/**"]
 related_features: [orbit-core]
-related_artifacts: [ORB-10016, ADR-0203]
+related_artifacts: [ORB-10016]
 ---
 
 # Orbit Core — Overview

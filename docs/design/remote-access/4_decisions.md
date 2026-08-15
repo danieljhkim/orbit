@@ -6,29 +6,22 @@ status: Accepted
 feature: remote-access
 doc_role: decisions
 type: design
-summary: "ADR log: why live viewing supersedes a git-sync registry, why remote access is SSH-over-loopback rather than a network bind with auth, and why orbit-web reloads the registry per request rather than watching it."
+summary: "Decision log: why live viewing supersedes a git-sync registry, why remote access is SSH-over-loopback rather than a network bind with auth, and why orbit-web reloads the registry per request rather than watching it."
 tags: [remote-access]
 paths: ["crates/orbit-dashboard/**", "crates/orbit-remote/src/runtime.rs", "crates/orbit-remote/src/workspace_registry.rs"]
 related_features: [remote-access, host-registry]
-related_artifacts: [ADR-0200, ADR-0201, ADR-0234, ADR-0353, ORB-00029, ORB-00030, ORB-00360, ORB-10294, ORB-10319, ORB-10708]
+related_artifacts: [ORB-00029, ORB-00030, ORB-00360, ORB-10294, ORB-10319, ORB-10708]
 ---
 
 # Remote Access — Decisions
 
-ADR log for remote access. Entries are append-only and ordered by ascending global ID. IDs were allocated via `orbit.adr.add`; the store owns ID, status, owner, and links, and this file is the long-form narrative keyed on the same ID. See [CONVENTIONS.md §4](../CONVENTIONS.md#4-adr-template-strict) for the full rules.
-
-The workspace-keyed-state machinery (the `Ws` extractor vs. path-prefixed routes) is decided in [user-interface ADR-00030](../user-interface/4_decisions.md) and not restated here.
+The workspace-keyed-state machinery (the `Ws` extractor vs. path-prefixed routes) is decided in [Global, Multi-Workspace Dashboard](../user-interface/4_decisions.md#global-multi-workspace-dashboard) and not restated here.
 
 ---
 
-## ADR-0200 — Live remote/multi-workspace dashboard viewing supersedes the git-sync task registry
+## Live remote/multi-workspace dashboard viewing supersedes the git-sync task registry
 
-**Status:** Accepted · 2026-07-02 05:01:07.910915Z · [ORB-00029], [ORB-00030], [ORB-00360]
-**Owner:** claude
-**Created:** 2026-07-02 05:00:39.490085Z
-**Last updated:** 2026-07-02 05:01:07.910915+00:00
-**Related features:** `remote-access`
-**Tags:** `remote-access`, `dashboard`
+**Recorded:** 2026-07-02 05:01:07.910915Z · [ORB-00029], [ORB-00030], [ORB-00360]
 
 Context. Orbit ships per-engineer (POSITIONING): each operator runs Orbit locally, with locks and audit DB on their own machine. That leaves a visible coordination gap — engineer A creates ORB-00042 on their laptop and engineer B has no way to see it short of asking or finding the PR. The task-sync design (now archived under docs/design/_archive/task-sync/) proposed closing that gap with a durable git-orphan-branch task registry (refs/heads/orbit/tasks) plus operation-aware replay for conflict resolution — a shared, offline-capable, WRITABLE store. It was deliberately deferred: doing it correctly requires an operation-aware-replay subsystem and a structured-conflict UX that are meaningful engineering, and a half-built version produces the wrong mental model.
 
@@ -42,14 +35,9 @@ Consequences.
 - The archived task-sync record is retained so the rejected git-sync mechanism (and why it was dropped) stays inspectable.
 - Cost: viewing is NOT sync. It requires the target machine to be online and SSH-reachable, shows one machine's state at a time (the aggregate is per-machine, not cross-machine), and offers no offline, writable, or merge story. A team that genuinely needs a shared writable task registry is not served by this and would need to revisit a shared-host or sync design later.
 
-## ADR-0201 — Remote dashboard access is an SSH tunnel over a loopback-only bind, never a network bind with auth
+## Remote dashboard access is an SSH tunnel over a loopback-only bind, never a network bind with auth
 
-**Status:** Accepted · 2026-07-02 05:01:07.972485Z · [ORB-00029], [ORB-00030], [ORB-00360]
-**Owner:** claude
-**Created:** 2026-07-02 05:00:59.151663Z
-**Last updated:** 2026-07-02 05:01:07.972485Z
-**Related features:** `remote-access`
-**Tags:** `remote-access`, `dashboard`
+**Recorded:** 2026-07-02 05:01:07.972485Z · [ORB-00029], [ORB-00030], [ORB-00360]
 
 Context. The dashboard exposes an unauthenticated JSON API and mutating task actions. To make it reachable from another machine there are two broad options: (a) bind it to a routable interface and add an authentication/authorization layer (tokens, sessions, reverse proxy with auth), or (b) keep the server loopback-only and reach it through an authenticated transport the operator already trusts. Option (a) means Orbit owns a network-facing auth surface — credential storage, rotation, session handling, and the blast radius of getting any of it wrong on an unauthenticated-by-default tool.
 
@@ -61,14 +49,9 @@ Consequences.
 - Symmetry with the git-sync auth stance that the archived task-sync design also reached (piggyback on existing infra rather than build Orbit-specific auth), so the conclusion is consistent across both designs.
 - Cost: remote viewing requires SSH reachability and `orbit` on the remote's non-interactive PATH; there is no browser-only or tokened-URL access path, and an operator who cannot SSH to the box cannot see its dashboard. Short-lived/again-prompting SSH auth surfaces as ssh's own errors, which Orbit does not paper over.
 
-## ADR-0234 — orbit-web reloads the workspace registry per request rather than watching or snapshotting once
+## orbit-web reloads the workspace registry per request rather than watching or snapshotting once
 
-**Status:** Accepted · 2026-07-18 10:41:51.968238Z · [ORB-10294]
-**Owner:** claude
-**Created:** 2026-07-18 10:41:43.490899Z
-**Last updated:** 2026-07-18 11:40:12.626030Z
-**Related features:** `remote-access`
-**Tags:** `remote-access`, `dashboard`, `workspace-registry`
+**Recorded:** 2026-07-18 10:41:51.968238Z · [ORB-10294]
 **Paths:** `crates/orbit-dashboard/**`
 
 ### Context
@@ -83,14 +66,9 @@ A registry-backed DashboardState reloads the authoritative workspace registry at
 - Malformed refreshes remain serviceable from the last known-good snapshot and require operator correction of the registry file.
 - Cost: each request boundary re-reads and parses the small registry file, and mutations are eventually consistent with requests already in flight rather than transactionally synchronized with them.
 
-## ADR-0353 — orbit web connect attaches to an already-running remote dashboard instead of always spawning one
+## orbit web connect attaches to an already-running remote dashboard instead of always spawning one
 
-**Status:** Accepted · 2026-08-10 03:04:50.454508Z · [ORB-10708]
-**Owner:** claude
-**Created:** 2026-08-10 03:04:45.548594Z
-**Last updated:** 2026-08-10 03:04:50.454508Z
-**Related features:** `remote-access`
-**Tags:** `remote-access`, `ssh`
+**Recorded:** 2026-08-10 03:04:50.454508Z · [ORB-10708]
 **Paths:** `crates/orbit-dashboard/src/connect.rs`
 
 **Context.** Every `orbit web connect` invocation unconditionally appended `orbit web serve` as the trailing remote command on its `ssh -tt` tunnel, on the assumption that nothing was already listening on `remote_port`. When a remote dashboard was already up — another engineer's still-attached tunnel, or a long-lived remote listener meant to be reused — the second invocation's remote command simply failed to bind, so a second connect either errored out or left a dead remote process behind. There was no attach path: ownership of "the tunnel" and ownership of "the remote process" were not distinguished, so nothing could safely share an already-running server.
@@ -110,8 +88,8 @@ A registry-backed DashboardState reloads the authoritative workspace registry at
 - [ORB-00030] — Global multi-workspace dashboard, workspace-keyed state, aggregate endpoints.
 - [ORB-00360] — Loopback-only bind guard and stored-XSS fix.
 - [ORB-10029] — Made global mode the default and only mode for `orbit web serve` (single mode is no longer reachable from the CLI); `--global` is now a deprecated no-op kept for `connect` passthrough compatibility. Does not change either ADR above — the security posture and viewing-not-sync boundary are unaffected — but evolves the `web serve --global` behavior both describe.
-- [ORB-10294] — Live per-request registry refresh for `orbit web serve` ([ADR-0234]): native workspace add/remove/rebind without a restart.
+- [ORB-10294] — Live per-request registry refresh for `orbit web serve` ([orbit-web reloads the workspace registry per request rather than watching or snapshotting once](#orbit-web-reloads-the-workspace-registry-per-request-rather-than-watching-or-snapshotting-once)): native workspace add/remove/rebind without a restart.
 - [ORB-10319] — Moved the dashboard's catalog/runtime dependencies into `orbit-remote`; this is an implementation-ownership change, not a new remote-access decision.
-- [ORB-10708] — Made `orbit web connect` probe for and attach to an already-running remote dashboard instead of always spawning one ([ADR-0353]).
+- [ORB-10708] — Made `orbit web connect` probe for and attach to an already-running remote dashboard instead of always spawning one ([orbit web connect attaches to an already-running remote dashboard instead of always spawning one](#orbit-web-connect-attaches-to-an-already-running-remote-dashboard-instead-of-always-spawning-one)).
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

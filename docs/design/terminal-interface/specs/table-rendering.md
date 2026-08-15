@@ -10,7 +10,7 @@ A list rendered by `orbit` is a header row followed by one line per record. Bord
 
 ## Why This Exists
 
-Before [ORB-10567], `build_table` paired `UTF8_BORDERS_ONLY` with `ContentArrangement::DynamicFullWidth`, which wraps overflowing cells. A wrapped row occupies a variable number of lines, which breaks every line-oriented tool an operator would reach for and forces a horizontal rule to act as the row separator. The border is not decoration to be argued about on taste; it is compensation for the wrapping. Removing the wrapping is what makes removing the border safe. Rationale in [ADR-0307].
+Before [ORB-10567], `build_table` paired `UTF8_BORDERS_ONLY` with `ContentArrangement::DynamicFullWidth`, which wraps overflowing cells. A wrapped row occupies a variable number of lines, which breaks every line-oriented tool an operator would reach for and forces a horizontal rule to act as the row separator. The border is not decoration to be argued about on taste; it is compensation for the wrapping. Removing the wrapping is what makes removing the border safe. Rationale in [Borderless Tables With Truncate-to-Width Rows](../4_decisions.md#borderless-tables-with-truncate-to-width-rows).
 
 ## 1. Structure
 
@@ -65,11 +65,11 @@ The path from current behavior:
 
 1. ~~Change the preset in `crates/orbit-cli/src/output/table.rs` to a borderless one and switch `ContentArrangement` off full-width wrapping.~~ Done [ORB-10567].
 2. ~~Make `add_single_line_row` the only exported row constructor; convert the 19 call sites that use `Table::add_row` directly.~~ Done [ORB-10567] — `output::table::Table` wraps `comfy_table`, and its `add_row` is the only constructor reachable from a command module.
-3. Move width computation behind the sink (see [./output-modes.md](./output-modes.md) §1) so it is not resolved from a terminal that may not exist. **Open**, depends on [ADR-0306]. `sink_width` currently reads `COLUMNS`, falls back to the terminal query, and returns no width for a non-terminal sink — the policy of §2 consumes whatever it returns, so only the source moves.
+3. Move width computation behind the sink (see [./output-modes.md](./output-modes.md) §1) so it is not resolved from a terminal that may not exist. **Open**, depends on [Terminal Output Is a Rendering of a Structured Payload](../4_decisions.md#terminal-output-is-a-rendering-of-a-structured-payload). `sink_width` currently reads `COLUMNS`, falls back to the terminal query, and returns no width for a non-terminal sink — the policy of §2 consumes whatever it returns, so only the source moves.
 4. Convert `print_audit_event_line` and the other hand-padded `println!` sites to the table path. **Open** — `orbit audit list` still pads with format-string literals, and the count/summary lines that neighbor a table (`orbit doctor`, `orbit routine list`, `orbit semantic stats`, `orbit migrate status`) still print to stdout rather than stderr.
 5. ~~Add per-column *fixed*/*flexible* and alignment metadata at each call site.~~ Done [ORB-10567] for the 21 table call sites, via `Column::fixed` / `Column::number` / `Column::path` / `Column::filtered`.
 
-Step 3 depends on [ADR-0306]. Step 4 is per-command and may proceed incrementally.
+Step 3 depends on [Terminal Output Is a Rendering of a Structured Payload](../4_decisions.md#terminal-output-is-a-rendering-of-a-structured-payload). Step 4 is per-command and may proceed incrementally.
 
 The header is still rendered in the piped form, contrary to §1: suppressing it requires the mode resolution of [./output-modes.md](./output-modes.md) §2, which has not landed. Truncation is already disabled for a non-terminal sink, so the piped form carries whole values today.
 

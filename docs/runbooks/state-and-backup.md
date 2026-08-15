@@ -4,7 +4,7 @@ summary: Locate Orbit state and perform WAL-safe backups, restores, and task mig
 tags: [operations, backup, restore, state, sqlite]
 paths: ["crates/orbit-common/src/types/workspace.rs", "crates/orbit-core/src/config/**", "crates/orbit-store/**"]
 related_features: [orbit-core, remote-access]
-related_artifacts: [ORB-10014, ORB-10294, ORB-10473, ADR-0291]
+related_artifacts: [ORB-10014, ORB-10294, ORB-10473]
 ---
 
 # Inventory and Protect Orbit State
@@ -68,9 +68,9 @@ precedence). Path layout is defined in
 > diagnostic (the registry path plus the parse error, never the file contents) until the file
 > parses again. A malformed registry present *at server startup* is still fatal — fix the file
 > before launching. See [remote-access design §2.1](../design/remote-access/2_design.md) and
-> [ADR-0234](../design/remote-access/4_decisions.md).
+> [orbit-web reloads the workspace registry per request rather than watching or snapshotting once](../design/remote-access/4_decisions.md#orbit-web-reloads-the-workspace-registry-per-request-rather-than-watching-or-snapshotting-once).
 
-> **Managed activity/job refresh (ORB-10684 / ADR-0346).** `orbit init` records
+> **Managed activity/job refresh (ORB-10684 / [Track bundled activity and job ownership by content digest before retirement](../design/activity-job/4_decisions.md#track-bundled-activity-and-job-ownership-by-content-digest-before-retirement)).** `orbit init` records
 > the digest it wrote for each bundled activity and job in the resource
 > directory's `.orbit-managed-assets.json`. A later refresh deletes a retired
 > file only when it still matches that digest. Locally modified retired files
@@ -82,7 +82,7 @@ precedence). Path layout is defined in
 
 ### Retired graph state and task selectors
 
-ADR-0291 retired graph as an Orbit capability. Task `symbol:<path>#<symbol>:<kind>` context
+[Retire and delete Orbit's code-graph subsystem](../design/_archive/orbit-graph/4_decisions.md#retire-and-delete-orbits-code-graph-subsystem) retired graph as an Orbit capability. Task `symbol:<path>#<symbol>:<kind>` context
 selectors now use only `<path>` as a canonical workspace-contained file anchor; the symbol and
 kind are opaque descriptive metadata. No health, task, or dashboard path probes graph state or
 resolves symbols through it.
@@ -94,13 +94,12 @@ locations and is safe to repeat. Ordinary `orbit doctor` is read-only with respe
 ### Git-committed versus local state
 
 `orbit workspace init` appends a single `.orbit` line to the repo's `.gitignore`; by
-default the whole directory stays local. Repos that want project memory (ADRs, learnings)
-in git use a selective pattern instead, keeping DBs, locks, and runtime state out:
+default the whole directory stays local. Repos that want committed resource definitions
+and friction evidence use a selective pattern instead, keeping DBs, locks, and runtime state out:
 
 ```gitignore
 .orbit/*
 !.orbit/config.yaml
-!.orbit/adrs/
 !.orbit/learnings/
 !.orbit/knowledge/
 !.orbit/frictions/

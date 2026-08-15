@@ -10,16 +10,16 @@ doc_role: design
 tags: ["orbit-graph"]
 paths: ["crates/orbit-graph/**"]
 related_features: [knowledge-graph]
-related_artifacts: [ORB-00391, ORB-00396, ORB-10011, ORB-10225, ORB-10319, ORB-10325, ADR-0241, ORB-10357]
+related_artifacts: [ORB-00391, ORB-00396, ORB-10011, ORB-10225, ORB-10319, ORB-10325, ORB-10357]
 ---
 
 # Orbit Graph — Design
 
 This document specifies the design of `orbit-graph` at the architectural level: crate layout, storage layout, extraction model, sync semantics, query surface, and concurrency model. It is paired with the prescriptive working spec at [`GRAPH_SPEC.md`](./specs/GRAPH_SPEC.md), which carries the full schema, performance budget, migration plan, and equivalence rules. When the two diverge, the working spec wins until this design doc is updated to absorb the change.
 
-The companion ADR log is in [4_decisions.md](./4_decisions.md); forward-looking work (write surface, embeddings, cross-language refs) lives in [3_vision.md](./3_vision.md).
+The companion decision log is in [4_decisions.md](./4_decisions.md); forward-looking work (write surface, embeddings, cross-language refs) lives in [3_vision.md](./3_vision.md).
 
-> **Status (ORB-10357, 2026-07-25):** the three-crate layout and the `orbit graph` CLI surface described below are historical. `orbit-graph-extract` and `orbit-graph-cli` are now modules inside `orbit-graph` (`extract`, `cli`); the `orbit graph` subcommand no longer exists on `orbit-cli`, and `orbit-graph` has zero workspace dependents. See [1_overview.md](./1_overview.md) and the amended ADR-0285 (formerly the locally-invented `ADR-0199`) in [4_decisions.md](./4_decisions.md#adr-0285--reintroduce-orbit-graph-as-a-thin-wrapper-over-orbit-graph-cli). The crate-boundary and CLI sections below are kept for historical rationale, not as a description of the current surface.
+> **Status (ORB-10357, 2026-07-25):** the three-crate layout and the `orbit graph` CLI surface described below are historical. `orbit-graph-extract` and `orbit-graph-cli` are now modules inside `orbit-graph` (`extract`, `cli`); the `orbit graph` subcommand no longer exists on `orbit-cli`, and `orbit-graph` has zero workspace dependents. See [1_overview.md](./1_overview.md) and the amended [Reintroduce `orbit graph` as a thin wrapper over orbit-graph-cli](./4_decisions.md#reintroduce-orbit-graph-as-a-thin-wrapper-over-orbit-graph-cli). The crate-boundary and CLI sections below are kept for historical rationale, not as a description of the current surface.
 
 ---
 
@@ -177,7 +177,7 @@ The CLI default is `Manual`: callers refresh explicitly with `orbit graph sync`.
 
 The freshness contract for any watcher-backed library consumer is eventual: after a same-process file edit, a read may return the old graph until the watcher observes the event and the debounced sync finishes. Callers that need a hard read-after-write barrier call `Graph::sync`; CLI callers use `orbit graph sync` before querying. Repeated reads with no intervening file event do not run the scanner.
 
-The previous hardcoded "10ms stat budget, 500ms cache window" heuristic was an implicit contract baked into the library that didn't scale past ~5000 files. Moving the decision to `open` makes it explicit, testable, and per-entry-point. [ADR-0195](./4_decisions.md) records the watcher-backed read-path decision.
+The previous hardcoded "10ms stat budget, 500ms cache window" heuristic was an implicit contract baked into the library that didn't scale past ~5000 files. Moving the decision to `open` makes it explicit, testable, and per-entry-point. [Watcher-backed graph reads](./4_decisions.md#watcher-backed-graph-reads) records the watcher-backed read-path decision.
 
 ## 6. Query Surface
 
@@ -200,7 +200,7 @@ Bounded outputs: `impact` and `trace` both cap at 200 visited nodes regardless o
 
 `refs` unions queries against the `refs` table (calls/type/use/trait_bound) and the `relations` table (impl/extends/implements). CLI `--kind impl` is a routing alias to `relations`. The ten-command surface absorbs `orbit-knowledge`'s navigation use cases while keeping `overview`, `implementors`, and outbound module-level `deps` explicit.
 
-The command names exist only beneath `orbit graph`. They are not registered as `orbit.graph.*`, advertised by an MCP host, or accepted by activity/job tool allowlists. Agents with shell access use the same CLI as humans; shell-less planning roles use `orbit.search` and `fs.read`, and defer transitive verification to implementation or review. [ORB-10325, ADR-0241]
+The command names exist only beneath `orbit graph`. They are not registered as `orbit.graph.*`, advertised by an MCP host, or accepted by activity/job tool allowlists. Agents with shell access use the same CLI as humans; shell-less planning roles use `orbit.search` and `fs.read`, and defer transitive verification to implementation or review. [orbit-graph is CLI-surface only; separate MCP deferred until a shell-less consumer exists](./4_decisions.md#orbit-graph-is-cli-surface-only-separate-mcp-deferred-until-a-shell-less-consumer-exists)
 
 The `Selector` grammar is preserved verbatim from `orbit-knowledge` — every form used in existing skills (`symbol:<file>#<name>:<kind>`, `file:<path>`, `module:<qualified>`, `command:<name>`) must continue to parse identically. A pre-Step-1 audit of `.claude/skills/` captures the full grammar surface as the canonical reference.
 
@@ -244,7 +244,7 @@ No async on the public surface. SQLite and tree-sitter are both sync. If the MCP
 
 ## Task References
 
-- [ORB-00377] introduced watcher-backed background sync for long-lived graph handles and documented the freshness contract in ADR-0195.
+- [ORB-00377] introduced watcher-backed background sync for long-lived graph handles and documented the freshness contract in [Watcher-backed graph reads](./4_decisions.md#watcher-backed-graph-reads).
 - [ORB-10225] routed the former in-process graph MCP surface through the explicit allowlist and shared runtime audit boundary.
 - [ORB-10319] consolidated the former agent graph extension in `orbit-remote`.
 - [ORB-10325] removed graph from MCP, Remote, and activity/job tool allowlists while preserving `orbit graph` CLI behavior.

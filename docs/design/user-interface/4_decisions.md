@@ -12,26 +12,11 @@ tags: ["user-interface"]
 
 # User Interface — Decisions
 
-This index records UI ADRs in ascending order. Store-backed entries list their
-global ID, title, and status; print their authoritative bodies with `orbit tool
-run orbit.adr.show --input '{"id":"ADR-NNNN"}'`. Legacy entries below remain
-unchanged until their narratives are separately verified in the ADR store.
+[Remove the planning duel and retain compatibility-only residue](../activity-job/4_decisions.md#remove-the-planning-duel-and-retain-compatibility-only-residue) records the proposal to remove the retired planning competition and its scoreboard projections. [ORB-10627] removes those UI surfaces; the proposal remains here as historical reasoning.
 
-Historical note ([ORB-10458]): the entries listed below were authored with local IDs that had no record in the ADR store. They were allocated through `orbit.adr.add`, their narratives migrated into the store verbatim, and their headings rewritten to the allocated global ID. The original local IDs survive as `legacy_ids`, so prior citations still resolve via `orbit tool run orbit.adr.show --input '{"legacy_id":"<feature>/ADR-NNN"}'`. Backfilled here: `user-interface/ADR-00030` → ADR-0284, `user-interface/ADR-001` → ADR-0283.
+## Canon Refined Aesthetic
 
-ADR-0332 proposes removal of the retired planning competition and its
-scoreboard projections. [ORB-10627] removes those UI surfaces; the ADR remains
-Proposed until its separate lifecycle approval.
-
-## ADR-0283 — Canon Refined Aesthetic
-
-**Status:** Accepted · 2026-07-26 21:51:43.494533Z · [T20260427-29], [ORB-10458]
-**Owner:** claude
-**Created:** 2026-07-26 21:51:43.159838Z
-**Last updated:** 2026-07-26 21:51:43.494533+00:00
-**Related features:** `user-interface`
-**Legacy IDs:** `user-interface/ADR-001`
-**Tags:** `user-interface`
+**Recorded:** 2026-07-26 21:51:43.494533Z · [T20260427-29], [ORB-10458]
 
 ### Context
 
@@ -47,18 +32,10 @@ Adopt Canon Refined: layered dark surfaces, `Inter` plus `JetBrains Mono`, soft 
 - The UI keeps a serious pro-tool signal while allowing standard web affordances when they improve operator clarity.
 - Cost: The design system must be maintained so Canon Refined does not drift into generic dark SaaS styling.
 
-## Provenance
 
-Migrated verbatim from the local heading `user-interface/ADR-001` in `docs/design/user-interface/4_decisions.md` by [ORB-10458]. Original status line: Proposed · 2026-04 · [T20260427-29]
+## Unified Denial Sources for Policy Dashboard
 
-## ADR-0140 — Unified Denial Sources for Policy Dashboard
-
-**Status:** Accepted · 2026-05-11 02:06:39.445775Z · [T20260428-13]
-**Owner:** legacy:user-interface
-**Created:** 2026-05-11 02:06:39.444756Z
-**Last updated:** 2026-05-11 02:06:39.445775Z
-**Related features:** `user-interface`
-**Legacy IDs:** `user-interface/ADR-002`
+**Recorded:** 2026-05-11 02:06:39.445775Z · [T20260428-13]
 
 ### Context
 The Denials 24h tile counted SQLite audit rows and v2 loop denials, but the Policy tab originally scanned only v2 loop JSONL files. Direct CLI denials could increment the tile while the detail table appeared empty.
@@ -70,14 +47,9 @@ Aggregate v2 denial envelopes and SQLite `status = denied` audit events in the p
 - Audit > Policy is a faithful drill-down for Denials 24h, including direct `orbit tool run` policy denials.
 - Cost: The endpoint carries a translation layer because SQLite audit rows lack typed denial fields like `profile` and `path`.
 
-## ADR-0141 — Compact Scoreboard Ratio Columns
+## Compact Scoreboard Ratio Columns
 
-**Status:** Accepted · 2026-05-11 02:06:39.447535Z · [T20260428-15]
-**Owner:** legacy:user-interface
-**Created:** 2026-05-11 02:06:39.446581Z
-**Last updated:** 2026-05-11 02:06:39.447535Z
-**Related features:** `user-interface`
-**Legacy IDs:** `user-interface/ADR-003`
+**Recorded:** 2026-05-11 02:06:39.447535Z · [T20260428-15]
 
 ### Context
 The scoreboard had separate columns for output tokens, tool calls, duel wins/losses, and friction triage. After failed tool calls became first-class, the split counters made reliability harder to scan.
@@ -89,14 +61,9 @@ Render companion metrics as compact pairs: `tokens` is `total/output`, `tool fai
 - The table presents reliability and participation context in fewer columns, while `0/N` tool failures stays meaningful.
 - Cost: Friction accepted/rejected counts and raw duel losses require summary JSON or a future detail view.
 
-## ADR-0142 — Bounded Live Log Tail
+## Bounded Live Log Tail
 
-**Status:** Accepted · 2026-05-11 02:06:39.449202Z · [T20260430-29]
-**Owner:** legacy:user-interface
-**Created:** 2026-05-11 02:06:39.448364Z
-**Last updated:** 2026-05-11 02:06:39.449202Z
-**Related features:** `user-interface`
-**Legacy IDs:** `user-interface/ADR-004`
+**Recorded:** 2026-05-11 02:06:39.449202Z · [T20260430-29]
 
 ### Context
 The Tasks view keeps `orbit.log` visible beside the task list, but the log panel could grow taller than short viewports and push footer controls below the screen.
@@ -113,18 +80,14 @@ Keep the Tasks view in a two-column layout and size `#log-panel` to the availabl
 - [T20260427-29] introduced the Canon Refined UI direction.
 - [T20260428-13] unified policy-denial sources for the dashboard.
 - [T20260428-15] compacted scoreboard ratio columns.
-- [T20260430-24] tightened this ADR log without changing decisions.
+- [T20260430-24] tightened this decision log without changing decisions.
 - [T20260430-29] bounded the live `orbit.log` tail panel.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.
 
-## ADR-0166 — Grouped Scoreboard Sections
+## Grouped Scoreboard Sections
 
-**Status:** Accepted · 2026-05-18 02:58:43.428001Z · [ORB-00144]
-**Owner:** codex
-**Created:** 2026-05-18 02:58:37.817224Z
-**Last updated:** 2026-05-18 02:58:43.428001Z
-**Related features:** `user-interface`
+**Recorded:** 2026-05-18 02:58:43.428001Z · [ORB-00144]
 
 ### Context
 The scoreboard started as one compact per-agent table. Adding knowledge-artifact counters and planning-duel matrix data made the flat table mix delivery attribution, review work, operations, knowledge stewardship, and duel outcomes in one scan path. Alternatives were to keep widening the table, add column groups inside the same table, or split the view into focused sections.
@@ -143,18 +106,14 @@ Render the dashboard scoreboard as focused sections: Delivery, Review, Knowledge
 - [T20260427-29] introduced the Canon Refined UI direction.
 - [T20260428-13] unified policy-denial sources for the dashboard.
 - [T20260428-15] compacted scoreboard ratio columns.
-- [T20260430-24] tightened this ADR log without changing decisions.
+- [T20260430-24] tightened this decision log without changing decisions.
 - [T20260430-29] bounded the live `orbit.log` tail panel.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.
 
-## ADR-0167 — Extract Dashboard + JSON API to orbit-dashboard Crate
+## Extract Dashboard + JSON API to orbit-dashboard Crate
 
-**Status:** Accepted · 2026-05-18 06:55:55.249402Z · [ORB-00146]
-**Owner:** codex
-**Created:** 2026-05-18 06:51:04.813737Z
-**Last updated:** 2026-05-18 06:55:55.249402Z
-**Related features:** `user-interface`
+**Recorded:** 2026-05-18 06:55:55.249402Z · [ORB-00146]
 
 ### Context
 The Orbit web dashboard lived inside orbit-cli even though its HTML, JavaScript, read-only axum API handlers, and embedded assets formed a distinct internal surface. The only local coupling was the CLI Execute trait; keeping the dashboard in orbit-cli forced unrelated CLI edits to rebuild the heavier web tree and mixed dashboard tests into the CLI target.
@@ -168,13 +127,9 @@ Extract the dashboard assets, ServeArgs, JSON API handlers, router construction,
 - No single Rust code anchor; this is a crate-boundary decision enforced through architecture review.
 - Cost: one more workspace crate and temporary duplication of a few projection helpers until a later shared projection layer exists.
 
-## ADR-0168 — Unified Leaderboard Matrix Scoreboard
+## Unified Leaderboard Matrix Scoreboard
 
-**Status:** Accepted · 2026-05-18 06:56:13.678774Z · [ORB-00154]
-**Owner:** codex
-**Created:** 2026-05-18 06:56:07.675442Z
-**Last updated:** 2026-05-18 06:56:13.678774Z
-**Related features:** `user-interface`
+**Recorded:** 2026-05-18 06:56:13.678774Z · [ORB-00154]
 
 ### Context
 [ORB-00154] found that the dashboard Scoreboard fragmented the four canonical agents across six stacked tables, repeated headers, sparse zero glyphs, and bare integers. Real alternatives included keeping grouped tables, switching to an agent-major wide table, using per-agent cards, or reducing the view to a pure heatmap.
@@ -191,15 +146,9 @@ Render canonical scoreboard metrics as one metric-major Unified Leaderboard Matr
 - No single Rust code anchor; this UI convention is enforced in dashboard rendering and design review, and workspace-local ADR comments are not embedded in shipped dashboard assets.
 - Cost: the matrix is denser and needs careful row-height discipline when new metrics are added.
 
-## ADR-0284 — Global, Multi-Workspace Dashboard
+## Global, Multi-Workspace Dashboard
 
-**Status:** Accepted · 2026-07-26 21:51:44.038593Z · [ORB-00030], [ORB-10458]
-**Owner:** claude
-**Created:** 2026-07-26 21:51:43.773541Z
-**Last updated:** 2026-07-26 21:51:44.038593Z
-**Related features:** `user-interface`
-**Legacy IDs:** `user-interface/ADR-00030`
-**Tags:** `user-interface`
+**Recorded:** 2026-07-26 21:51:44.038593Z · [ORB-00030], [ORB-10458]
 
 ### Context
 
@@ -219,17 +168,10 @@ Rejected alternative: workspace-prefixed route paths (`/api/:workspace/tasks`). 
 - Runtimes are built on first access and cached, so an unopenable or stale workspace degrades to being skipped instead of failing startup.
 - Cost: handlers that need a concrete workspace now depend on the `Ws` extractor's selection rules; the aggregate task endpoint reopens each workspace's store per request (no cross-workspace caching of task lists yet).
 
-## Provenance
 
-Migrated verbatim from the local heading `user-interface/ADR-00030` in `docs/design/user-interface/4_decisions.md` by [ORB-10458]. Original status line: Accepted · 2026-07 · [ORB-00030]
+## Top-Level Dashboard Nav Is the Operator's Four Tabs
 
-## ADR-0256 — Top-Level Dashboard Nav Is the Operator's Four Tabs
-
-**Status:** Accepted · 2026-07-26 19:14:18.916582Z · [ORB-10444]
-**Owner:** claude
-**Created:** 2026-07-26 19:13:56.191425Z
-**Last updated:** 2026-07-26 19:14:18.916582Z
-**Related features:** `user-interface`
+**Recorded:** 2026-07-26 19:14:18.916582Z · [ORB-10444]
 
 ### Context
 Top-level nav is the dashboard's scarcest surface, and two of its six entries were not earning a slot: a deprecated review-threads tab with no backing view, and Scoreboard, a diagnostics-shaped read-only telemetry view sitting beside the operator workflow tabs.
@@ -242,13 +184,9 @@ The top-level nav is exactly Tasks, Audit, Diagnostics, Knowledge (plus the hash
 - Existing #scoreboard bookmarks fall back to Tasks.
 - Cost: the diagnostics pane owns two main elements and a visibility toggle keyed on the active subtab.
 
-## ADR-0257 — One-Click Task Ship and Human-Attributed Dashboard Comments
+## One-Click Task Ship and Human-Attributed Dashboard Comments
 
-**Status:** Accepted · 2026-07-26 19:14:19.126579Z · [ORB-10444]
-**Owner:** claude
-**Created:** 2026-07-26 19:14:03.927135Z
-**Last updated:** 2026-07-26 19:14:19.126579Z
-**Related features:** `user-interface`
+**Recorded:** 2026-07-26 19:14:19.126579Z · [ORB-10444]
 
 ### Context
 The dashboard Tasks tab was read-only for the operator two most common actions: dispatching a backlog task and leaving a note on one. Both are writes against live state, so the question was how much configuration to expose and whose identity to record.
@@ -261,15 +199,9 @@ Ship is one click with no configuration UI: the dashboard posts only the task id
 - A dashboard comment is always attributable to a person, even when the server runs inside a managed Orbit run.
 - Cost: the ship endpoint scans a bounded window of recent runs before submitting, and a stuck non-terminal run must be cancelled before its task can be re-shipped.
 
-## ADR-PENDING — Pipeline reliability from durable run state, with roles discovered from the job catalog
+## Pipeline reliability from durable run state, with roles discovered from the job catalog
 
-**Status:** Proposed · 2026-08 · [ORB-10588]
-
-> **Global ID not yet allocated.** `orbit.adr.add` was refused during
-> implementation — the executing worktree mounts `.orbit/` read-only, so no
-> record could be written to the ADR store. Allocate the global ID with
-> `orbit tool run orbit.adr.add` from a writable checkout and replace this
-> heading, per the [ORB-10458] convention that narratives live in the store.
+**Recorded:** 2026-08 · [ORB-10588]
 
 **Context.** The dashboard surfaced no measure of pipeline reliability. How often job runs fail, and how often the recovery path fires, were answerable only by opening SQLite by hand. A read-only analysis over a 30-day window found the recovery activity to be the second most common activity in the store — roughly one recovery invocation per 3.6 implementation attempts — a large continuous cost nobody had chosen to accept because nobody could see it. Three constraints shaped the design. The worker run store and orbit's `invocations` table disagree by an order of magnitude on tokens per run and some runs carry no cost figure at all, so any rate built on token or cost fields would display a confidently wrong number. The dashboard seeds every workspace, so no caller-specific workspace name, id prefix, crew name, or hardcoded activity-id list may appear in it. And a rate without a denominator and a stated time range is not actionable.
 
@@ -299,11 +231,11 @@ Rejected alternative: count `cancelled` as a failure, or round small-`n` rates i
 - The per-run fact read is capped at 200,000 rows and reports `truncated` when the cap binds; the UI warns rather than presenting a partial window as complete.
 - This adds the instrument; it does not assert the readings are stable. The standing measurement hold on efficiency baselines drawn from the current window is unaffected.
 
-## ADR-0334 — All-or-Nothing Rejection of Unsupported Task Body Fields
+## All-or-Nothing Rejection of Unsupported Task Body Fields
 
-**Status:** Proposed · 2026-08 · [ORB-10648]
+**Recorded:** 2026-08 · [ORB-10648]
 
-Narrative lives in the ADR store — retrieve it with `orbit tool run orbit.adr.show --input '{"id":"ADR-0334"}'`.
+The summary below and [ORB-10648] are the complete surviving record; no separate narrative body survives.
 
 Summary: `POST /api/tasks` and `PATCH /api/tasks/:id` no longer discard keys they
 do not declare. Unknown keys are captured with `#[serde(flatten)]` and refused
@@ -316,7 +248,7 @@ end, `model` becomes declared provenance, and `agent` is a trap field pointing a
 - [T20260427-29] introduced the Canon Refined UI direction.
 - [T20260428-13] unified policy-denial sources for the dashboard.
 - [T20260428-15] compacted scoreboard ratio columns.
-- [T20260430-24] tightened this ADR log without changing decisions.
+- [T20260430-24] tightened this decision log without changing decisions.
 - [T20260430-29] bounded the live `orbit.log` tail panel.
 - [ORB-00144] grouped scoreboard metrics and added knowledge counters plus duel matrix data.
 - [ORB-00146] extracted the dashboard and JSON API into the new `orbit-dashboard` internal crate (this document).

@@ -13,26 +13,16 @@ tags: ["project-learnings"]
 
 # Project Learnings — Retired Decisions
 
-> Retired by [ADR-0359](#adr-0359--remove-the-native-project-learning-subsystem). The entries before ADR-0359 are historical records only; they do not describe an available Orbit resource, tool, route, index, delivery mechanism, dashboard surface, or authoring workflow.
+> Retired by [Remove the native project-learning subsystem](#remove-the-native-project-learning-subsystem). The entries before [Remove the native project-learning subsystem](#remove-the-native-project-learning-subsystem) are historical records only; they do not describe an available Orbit resource, tool, route, index, delivery mechanism, dashboard surface, or authoring workflow.
 
-ADR-style log of non-obvious project-learnings decisions. Each entry names the pressure, the choice, and the tradeoff. Entries are numbered per-repo, ordered ascending, and written directly in this file — there is no ADR store behind it. An entry is admitted only through one of the two doors in [../CONVENTIONS.md §4](../CONVENTIONS.md#4-adrs-strict): it explains a specific code site, or it states a standing rule that governs future decisions.
-
-Format for each entry: **Status · Date · Task(s) · legacy_id (if backfilled)**, then *Context → Decision → Consequences*. Every ADR names at least one cost.
-
-Historical note: entries below were originally numbered ADR-001 through ADR-006 within this folder. ADR-001 through ADR-005 were imported into the then-global store on 2026-05-11 (`ADR-0108`–`ADR-0112`) with `legacy_ids` set; ADR-006 was added directly to this file by [ORB-00095] without an allocation and was backfilled as `ADR-0157` per [ORB-00098]. Each heading carries the four-digit ID; the original local IDs survive as `legacy_ids` recorded in each heading below, which is now the only way prior citations resolve.
-
-Historical note ([ORB-10479]): the entries listed below held an allocation, but their bodies were lost when the worktrees that authored them were reaped (see [F2026-07-163]). The narratives were restored at their existing IDs — no ID was reallocated — and their headings reduced to pointer form. Restored here: [ADR-0157]. Those pointers are now dead; the bodies are recoverable verbatim from `.orbit/adrs/*/ADR-NNNN/body.md`, which git tracks, and must be inlined into this file before the store is removed.
+Format for each entry: **Recorded date and task provenance**, then *Context → Decision → Consequences*. Every decision names at least one cost.
 
 ---
 
-## ADR-0108 — Push-based discovery via context injection, not pull-only via search
+## Push-based discovery via context injection, not pull-only via search
 
-**Status:** Superseded by ADR-0359 · 2026-08-13 · [T20260510-11], [ORB-10736]
-**Owner:** legacy:project-learnings
-**Created:** 2026-05-11 02:06:39.412237Z
-**Last updated:** 2026-05-17 06:07:29.099624+00:00
-**Related features:** `project-learnings`
-**Legacy IDs:** `project-learnings/ADR-001`
+**Superseded by:** [Remove the native project-learning subsystem](#remove-the-native-project-learning-subsystem)
+**Recorded:** 2026-08-13 · [T20260510-11], [ORB-10736]
 
 ### Context
 Three classes of discovery were on the table:
@@ -56,14 +46,10 @@ Phase 1 ships push-at-the-moment-of-action across three layers: engine pre-promp
 
 ---
 
-## ADR-0109 — Native Orbit primitive (`learning` resource) over a flat markdown directory
+## Native Orbit primitive (`learning` resource) over a flat markdown directory
 
-**Status:** Superseded by ADR-0359 · 2026-08-13 · [T20260510-11], [ORB-10736]
-**Owner:** legacy:project-learnings
-**Created:** 2026-05-11 02:06:39.413043Z
-**Last updated:** 2026-05-17 06:07:29.184762Z
-**Related features:** `project-learnings`
-**Legacy IDs:** `project-learnings/ADR-002`
+**Superseded by:** [Remove the native project-learning subsystem](#remove-the-native-project-learning-subsystem)
+**Recorded:** 2026-08-13 · [T20260510-11], [ORB-10736]
 
 ### Context
 Storage choice. Three plausible shapes:
@@ -87,14 +73,10 @@ Phase 1 implements `learning` as a first-class Orbit resource: YAML records unde
 
 ---
 
-## ADR-0110 — Workspace-scoped, checked into git (not workspace-private state)
+## Workspace-scoped, checked into git (not workspace-private state)
 
-**Status:** Superseded by ADR-0359 · 2026-08-13 · [T20260510-11], [ORB-10736]
-**Owner:** legacy:project-learnings
-**Created:** 2026-05-11 02:06:39.413866Z
-**Last updated:** 2026-05-17 06:07:29.267069Z
-**Related features:** `project-learnings`
-**Legacy IDs:** `project-learnings/ADR-003`
+**Superseded by:** [Remove the native project-learning subsystem](#remove-the-native-project-learning-subsystem)
+**Recorded:** 2026-08-13 · [T20260510-11], [ORB-10736]
 
 ### Context
 Where do learning records live on disk?
@@ -118,14 +100,10 @@ Phase 1 stores learnings at `.orbit/learnings/<id>.yaml`, scoped `WorkspaceOnly`
 
 ---
 
-## ADR-0111 — Phase-1 scope = path globs + tags, ranked by recency; semantic and symbol-aware deferred
+## Phase-1 scope = path globs + tags, ranked by recency; semantic and symbol-aware deferred
 
-**Status:** Superseded by ADR-0359 · 2026-08-13 · [T20260510-11], [ORB-10736]
-**Owner:** legacy:project-learnings
-**Created:** 2026-05-11 02:06:39.414658Z
-**Last updated:** 2026-05-17 06:07:29.352690Z
-**Related features:** `project-learnings`
-**Legacy IDs:** `project-learnings/ADR-004`
+**Superseded by:** [Remove the native project-learning subsystem](#remove-the-native-project-learning-subsystem)
+**Recorded:** 2026-08-13 · [T20260510-11], [ORB-10736]
 
 ### Context
 A learning's scope (when does it match?) and ranking (which match wins?) have multiple plausible designs:
@@ -158,14 +136,10 @@ Phase 2 ([3_vision.md §1.1](./3_vision.md), [§1.2](./3_vision.md)) layers symb
 
 ---
 
-## ADR-0112 — Three-layer push pipeline (engine pre-prompt + MCP sidecar + Claude Code hook), not single-layer
+## Three-layer push pipeline (engine pre-prompt + MCP sidecar + Claude Code hook), not single-layer
 
-**Status:** Superseded by ADR-0359 · 2026-08-13 · [T20260510-11], [ORB-10736]
-**Owner:** legacy:project-learnings
-**Created:** 2026-05-11 02:06:39.415495Z
-**Last updated:** 2026-05-17 06:07:29.436411Z
-**Related features:** `project-learnings`
-**Legacy IDs:** `project-learnings/ADR-005`
+**Superseded by:** [Remove the native project-learning subsystem](#remove-the-native-project-learning-subsystem)
+**Recorded:** 2026-08-13 · [T20260510-11], [ORB-10736]
 
 ### Context
 The push-injection layer ([2_design.md §4](./2_design.md)) has multiple natural placements, each with different coverage:
@@ -194,15 +168,10 @@ Phase 1 ships all three layers active simultaneously. Each layer consults a per-
 
 Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.
 
-## ADR-0157 — Rank matched learnings by task-anchored decay-weighted upvotes
+## Rank matched learnings by task-anchored decay-weighted upvotes
 
-**Status:** Superseded by ADR-0210 · 2026-08-01 19:18:13.490059Z · [ORB-00095], [ORB-10479]
-**Owner:** claude
-**Created:** 2026-08-01 19:18:10.716409Z
-**Last updated:** 2026-08-01 19:18:13.490059Z
-**Related features:** `project-learnings`
-**Legacy IDs:** `project-learnings/ADR-006`
-**Tags:** `project-learnings`
+**Superseded by:** [Remove vote and comment surfaces from the learning subsystem](#remove-vote-and-comment-surfaces-from-the-learning-subsystem)
+**Recorded:** 2026-08-01 19:18:13.490059Z · [ORB-00095], [ORB-10479]
 
 **Context.** Recency and manual priority do not capture whether a learning is still load-bearing. An older learning that agents keep relying on should outrank a newer marginal note, but `updated_at` only moves when the learning body changes. The natural re-validation moment is duplicate-check: an agent reads a candidate learning, decides it already covers the concern, and does not author a competing record.
 
@@ -226,15 +195,11 @@ Votes are derived from per-learning JSONL on read. `orbit learning sync` validat
 - Cost: vote spam is possible if agents upvote reflexively. Task anchoring, idempotency, and decay reduce but do not eliminate that risk.
 - Cost: search now opens one small votes file per matched learning. This is acceptable for the expected 1-20 row matched sets; a SQLite summary mirror is deferred until measurement shows a need.
 
-## ADR-0210 — Remove vote and comment surfaces from the learning subsystem
+## Remove vote and comment surfaces from the learning subsystem
 
-**Status:** Superseded by ADR-0359 · 2026-08-13 · [ORB-10046], [ORB-10736]
-**Owner:** claude
-**Created:** 2026-07-06 02:53:08.190251Z
-**Last updated:** 2026-07-06 02:53:32.276321Z
-**Related features:** `project-learnings`
-**Supersedes:** `ADR-0157`
-**Tags:** `learning`, `cleanup`, `mcp-surface`
+**Superseded by:** [Remove the native project-learning subsystem](#remove-the-native-project-learning-subsystem)
+**Recorded:** 2026-08-13 · [ORB-10046], [ORB-10736]
+**Supersedes:** [Rank matched learnings by task-anchored decay-weighted upvotes](#rank-matched-learnings-by-task-anchored-decay-weighted-upvotes)
 **Paths:** `crates/orbit-tools/src/builtin/orbit/learning/**`, `crates/orbit-store/src/file/learning_store/**`, `crates/orbit-cli/src/command/learning/**`, `crates/orbit-core/src/runtime/orbit_tool_host/learning_tools.rs`, `crates/orbit-common/src/types/learning.rs`
 
 ### Context
@@ -275,14 +240,10 @@ Remove the vote and comment surfaces from the learning subsystem entirely. Concr
 
 Rejected because (a) usage is zero-to-one after months of availability, so we would be defending a feature with no evidence of demand; (b) `update` on an existing learning already carries the author's `model` and bumps `updated_at`, subsuming any recency signal a vote would carry; (c) `evidence` on `add`/`update` carries provenance in structured form that comments cannot; (d) keeping comments preserves the free-text redaction burden that drove ~50 LOC in `artifact_redaction.rs` plus its tests; (e) the store cost — two extra JSONL sidecars per learning, ID allocators for `C<YYYYMMDD>-N` comment IDs, tombstone events, and reindex validators — is not justified by one comment across the corpus. If a lightweight annotation channel is genuinely useful later, it can be reintroduced with actual usage data behind it.
 
-## ADR-0212 — Workspace-scope the learning envelope index in the shared host-global database
+## Workspace-scope the learning envelope index in the shared host-global database
 
-**Status:** Superseded by ADR-0359 · 2026-08-13 · [ORB-10113], [ORB-10736]
-**Owner:** claude
-**Created:** 2026-07-11 19:02:35.674744Z
-**Last updated:** 2026-07-11 19:02:46.651263Z
-**Related features:** `project-learnings`
-**Tags:** `learnings`, `sqlite`, `multi-workspace`
+**Superseded by:** [Remove the native project-learning subsystem](#remove-the-native-project-learning-subsystem)
+**Recorded:** 2026-08-13 · [ORB-10113], [ORB-10736]
 **Paths:** `crates/orbit-store/src/sqlite/learning_index.rs`
 
 **Context.** The learning envelope index lives in the host-global `~/.orbit/orbit.db`, but `learnings_index` had no workspace discriminator and was keyed only by learning ID. Every workspace runtime pairs that shared table with its own workspace-local `.orbit/learnings/` YAML root, and `sync_learnings` truncated the entire table before reinserting one workspace's records. During the multi-workspace ship sweep on `dk1`, runtimes searched index rows written by other workspaces, emitting repeated `learning not found: L-0002` warnings during reminder hydration. Worse: several legacy workspaces hold different records under the same canonical ID (e.g. `L-0002`), so a foreign summary could be silently injected under a local ID.
@@ -291,19 +252,15 @@ Rejected because (a) usage is zero-to-one after months of availability, so we wo
 
 **Consequences.** Syncing workspace A can no longer read, truncate, or overwrite workspace B's rows; concurrent multi-workspace sweeps are safe. The reminder defensive local-body check still skips genuine same-workspace index ghosts. Existing envelope rows are discarded on upgrade and rebuilt from YAML on the next sync per workspace — the documented rollback also just reruns sync. Supersedes the "no shared store across workspaces" framing in design §5.3: the store is shared, but rows are workspace-partitioned.
 
-## ADR-0242 — Teaser learning injection + show-as-usage-signal (replaces rejected ack design)
+## Teaser learning injection + show-as-usage-signal (replaces rejected ack design)
 
-**Status:** Superseded by ADR-0359 · 2026-08-13 · [ORB-10316], [ORB-10736]
-**Owner:** claude
-**Created:** 2026-07-19 21:16:29.039388Z
-**Last updated:** 2026-07-19 21:16:34.909096Z
-**Related features:** `project-learnings`
-**Tags:** `learnings`, `hooks`, `observability`, `deprecation`
+**Superseded by:** [Remove the native project-learning subsystem](#remove-the-native-project-learning-subsystem)
+**Recorded:** 2026-08-13 · [ORB-10316], [ORB-10736]
 **Paths:** `crates/orbit-cmd/src/learning_hook.rs`, `crates/orbit-core/src/command/learning.rs`, `crates/orbit-store/src/sqlite/audit_event_store/mod.rs`, `crates/orbit-common/src/types/learning.rs`
 
 ### Context
 
-The 2026-07-18 relevancy audit (friction F2026-07-092) found the learning PreToolUse hook fired 2,374 times over two weeks with 13 injections (0.55%) and **zero usage signal**: nothing recorded whether an injected learning shaped the receiving agent's work, so nothing could drive deprecation of stale learnings. ADR-0210 removed the vote/comment feedback surfaces for lack of real usage, ending with an explicit reopening clause: a scoped feedback primitive can return "with real usage data behind it." The audit is that data.
+The 2026-07-18 relevancy audit (friction F2026-07-092) found the learning PreToolUse hook fired 2,374 times over two weeks with 13 injections (0.55%) and **zero usage signal**: nothing recorded whether an injected learning shaped the receiving agent's work, so nothing could drive deprecation of stale learnings. [Remove vote and comment surfaces from the learning subsystem](#remove-vote-and-comment-surfaces-from-the-learning-subsystem) removed the vote/comment feedback surfaces for lack of real usage, ending with an explicit reopening clause: a scoped feedback primitive can return "with real usage data behind it." The audit is that data.
 
 A first attempt (PR #657, closed unmerged) added an explicit `orbit learning ack` CLI/MCP surface with ignored-by-default semantics. Daniel rejected it: an ack is an active, gameable step the agent must remember to take, it costs a reminder-block footer line and a new MCP tool in the frozen conformance surface, and "unacked = ignored" biases every silent session toward deprecation regardless of whether the learning was actually useless.
 
@@ -338,18 +295,15 @@ Alternatives considered:
 - Signal quality depends on agents actually opening learnings they use, but `show` is far harder to game than an ack and costs the agent nothing extra to emit; the ratio is directional input for a human/automated sweep, not an automated gate.
 - Cost: one audit row per `show`, plus scope tags added to each teaser line. No change to the MCP conformance surface (no new tool), unlike the rejected ack design.
 
-## ADR-0248 — Keep `orbit hook install` opt-in; remove `--hooks` from `workspace init`
+## Keep `orbit hook install` opt-in; remove `--hooks` from `workspace init`
 
-**Status:** Superseded by ADR-0359 · 2026-08-13 · [ORB-10366], [ORB-10346], [ORB-10736]
-**Owner:** claude
-**Created:** 2026-07-25 05:43:58.112051Z
-**Last updated:** 2026-07-25 05:44:03.377312Z
-**Tags:** `cli`, `learnings`, `hooks`
+**Superseded by:** [Remove the native project-learning subsystem](#remove-the-native-project-learning-subsystem)
+**Recorded:** 2026-08-13 · [ORB-10366], [ORB-10346], [ORB-10736]
 **Paths:** `crates/orbit-cli/src/command/workspace/init.rs`, `crates/orbit-cli/src/command/hook/**`, `crates/orbit-cmd/src/hook_install.rs`
 
 ### Context
 
-[ORB-10346] removed the learning-reminder PreToolUse registrations this repo's own `.claude/settings.json` and `.codex/config.toml` carried, per the pull-discovery direction (ADR-0108/ADR-0112 supersession, ADR-0242 amendment). It deliberately left the writer mechanism itself untouched — `orbit workspace init --hooks` and `orbit hook install` both still silently wrote those registrations back for any repo that invoked them, and the tree still carried two now-inert tracked shim files (`.claude/hooks/orbit-learning-reminder`, `.codex/hooks/orbit-learning-reminder`) left over from before the retirement. [ORB-10366] closes that gap.
+[ORB-10346] removed the learning-reminder PreToolUse registrations this repo's own `.claude/settings.json` and `.codex/config.toml` carried, per the pull-discovery direction ([Push-based discovery via context injection, not pull-only via search](#push-based-discovery-via-context-injection-not-pull-only-via-search)/[Three-layer push pipeline (engine pre-prompt + MCP sidecar + Claude Code hook), not single-layer](#three-layer-push-pipeline-engine-pre-prompt-mcp-sidecar-claude-code-hook-not-single-layer) supersession, [Teaser learning injection + show-as-usage-signal (replaces rejected ack design)](#teaser-learning-injection-show-as-usage-signal-replaces-rejected-ack-design) amendment). It deliberately left the writer mechanism itself untouched — `orbit workspace init --hooks` and `orbit hook install` both still silently wrote those registrations back for any repo that invoked them, and the tree still carried two now-inert tracked shim files (`.claude/hooks/orbit-learning-reminder`, `.codex/hooks/orbit-learning-reminder`) left over from before the retirement. [ORB-10366] closes that gap.
 
 Two call sites write the registration via `orbit_cmd::hook_install::install_for_workspace`:
 
@@ -360,7 +314,7 @@ Two call sites write the registration via `orbit_cmd::hook_install::install_for_
 
 Remove the `--hooks` flag from `orbit workspace init` entirely (clap now rejects it as an unknown argument rather than silently ignoring it) and delete the two tracked inert shim files. Keep `orbit hook install` / `orbit hook uninstall` as an explicit, opt-in, human-invoked escape hatch — do not remove the command.
 
-The distinction that matters is *automatic* vs. *deliberate*. ADR-0108/ADR-0112's problem was learnings being pushed into agent context without anyone choosing that — the failure mode was "agents not knowing they should look," closed by pull discovery instead. An `--hooks` flag riding along on `workspace init` (a command run for unrelated reasons — bootstrapping a new checkout) reproduces exactly that: a side effect nobody asked for in the moment. `orbit hook install` has no such ambiguity — it is the only thing the command does, so running it is itself the deliberate choice, same category as a human explicitly opting back into the old delivery model for a specific reason (e.g. a non-Claude-Code agent runtime that has no other discovery path, or reproducing pre-retirement behavior for comparison). Removing it forecloses that choice for no safety gain, since `orbit hook uninstall` (needed regardless, to clean up pre-ORB-10366 registrations like this repo's own) is already the same shape of explicit command.
+The distinction that matters is *automatic* vs. *deliberate*. [Push-based discovery via context injection, not pull-only via search](#push-based-discovery-via-context-injection-not-pull-only-via-search)/[Three-layer push pipeline (engine pre-prompt + MCP sidecar + Claude Code hook), not single-layer](#three-layer-push-pipeline-engine-pre-prompt-mcp-sidecar-claude-code-hook-not-single-layer)'s problem was learnings being pushed into agent context without anyone choosing that — the failure mode was "agents not knowing they should look," closed by pull discovery instead. An `--hooks` flag riding along on `workspace init` (a command run for unrelated reasons — bootstrapping a new checkout) reproduces exactly that: a side effect nobody asked for in the moment. `orbit hook install` has no such ambiguity — it is the only thing the command does, so running it is itself the deliberate choice, same category as a human explicitly opting back into the old delivery model for a specific reason (e.g. a non-Claude-Code agent runtime that has no other discovery path, or reproducing pre-retirement behavior for comparison). Removing it forecloses that choice for no safety gain, since `orbit hook uninstall` (needed regardless, to clean up pre-ORB-10366 registrations like this repo's own) is already the same shape of explicit command.
 
 ### Consequences
 
@@ -371,14 +325,10 @@ The distinction that matters is *automatic* vs. *deliberate*. ADR-0108/ADR-0112'
 - Cost: `orbit hook install` remains capable of re-registering the retired delivery mechanism if a human runs it deliberately. This is accepted as the intended behavior of an opt-in escape hatch, not a gap — the alternative (removing the command) would require touching `orbit-cli`'s audit-metadata match, `operation.rs`'s exhaustive command arm, and the `--help` template for a command with a legitimate use case and no automatic trigger.
 - Cost: the two tracked inert shim files this repo carried are deleted rather than kept as reference examples; `orbit hook install` regenerates them byte-identically if ever re-run, so nothing is lost.
 
-## ADR-0250 — Gate learning authoring surfaces on caller role derived from the agent-identity env
+## Gate learning authoring surfaces on caller role derived from the agent-identity env
 
-**Status:** Superseded by ADR-0359 · 2026-08-13 · [ORB-10364], [ORB-10469], [ORB-10736]
-**Owner:** claude
-**Created:** 2026-07-25 16:33:32.668297Z
-**Last updated:** 2026-07-27 00:08:29.813656Z
-**Related features:** `project-learnings`
-**Tags:** `policy`, `knowledge`, `project-learnings`
+**Superseded by:** [Remove the native project-learning subsystem](#remove-the-native-project-learning-subsystem)
+**Recorded:** 2026-08-13 · [ORB-10364], [ORB-10469], [ORB-10736]
 
 **Context.** Policy since 2026-07-18: task executors file *frictions*; project learnings are authored by the orchestrator or by Daniel. The rule lived entirely in orchestrator-side prompt text and nothing on the box enforced it. Three different executors violated it in a single day's queue (friction F2026-07-102): L-0108 from a sol executor, L-0109 plus an update to L-0082 from an opus executor. The content was not the problem — the *surface* was. Because the learning store feeds scope injection and curation sweeps, unreviewed executor-authored entries accumulate as a side effect of ordinary task runs, and curation work (ORB-10349 / ORB-10362) then spends real effort re-anchoring and narrowing exactly those entries. Three consecutive failures is evidence that prompt text is the wrong enforcement layer.
 
@@ -404,22 +354,19 @@ Alternatives considered:
 ## Task References
 
 - [T20260510-11] — Design + build project-learnings system as native Orbit primitive. The task that produced this folder.
-- [ORB-10046] — Remove the vote and comment surfaces from the learning subsystem (ADR-0210 supersedes ADR-0157).
-- [ORB-10316] — Teaser injection + `learning_shown` usage signal + `orbit learning stats` rollup + payload-derived session dedup (ADR-0242).
+- [ORB-10046] — Remove the vote and comment surfaces from the learning subsystem ([Remove vote and comment surfaces from the learning subsystem](#remove-vote-and-comment-surfaces-from-the-learning-subsystem) supersedes [Rank matched learnings by task-anchored decay-weighted upvotes](#rank-matched-learnings-by-task-anchored-decay-weighted-upvotes)).
+- [ORB-10316] — Teaser injection + `learning_shown` usage signal + `orbit learning stats` rollup + payload-derived session dedup ([Teaser learning injection + show-as-usage-signal (replaces rejected ack design)](#teaser-learning-injection-show-as-usage-signal-replaces-rejected-ack-design)).
 - [ORB-10346] — Retired the Claude Code `PreToolUse` hook layer (one of three automatic-delivery layers) while retaining pull discovery, `learning_shown`, and historical usage stats. Engine pre-prompt injection and the MCP sidecar decorator remain active.
-- [ORB-10366] — Removed the `--hooks` flag from `orbit workspace init` and the tracked inert shims; kept `orbit hook install` as an opt-in escape hatch (ADR-0248).
-- [ORB-10364] — Gated the learning authoring surfaces on caller role and redirected executors to `friction add` (ADR-0250).
-- [ORB-10452] — Made the legacy learning-layout migration report-only by default and require the standard `--confirm` apply flag (ADR-0110 amendment).
+- [ORB-10366] — Removed the `--hooks` flag from `orbit workspace init` and the tracked inert shims; kept `orbit hook install` as an opt-in escape hatch ([Keep `orbit hook install` opt-in; remove `--hooks` from `workspace init`](#keep-orbit-hook-install-opt-in-remove---hooks-from-workspace-init)).
+- [ORB-10364] — Gated the learning authoring surfaces on caller role and redirected executors to `friction add` ([Gate learning authoring surfaces on caller role derived from the agent-identity env](#gate-learning-authoring-surfaces-on-caller-role-derived-from-the-agent-identity-env)).
+- [ORB-10452] — Made the legacy learning-layout migration report-only by default and require the standard `--confirm` apply flag ([Workspace-scoped, checked into git (not workspace-private state)](#workspace-scoped-checked-into-git-not-workspace-private-state) amendment).
 
 Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.
 
-## ADR-0359 — Remove the native project-learning subsystem
+## Remove the native project-learning subsystem
 
-**Status:** Accepted · 2026-08-13 · [ORB-10736]
-**Owner:** codex
-**Related features:** `project-learnings`, `search`, `dashboard`, `mcp-bridge`
-**Supersedes:** `ADR-0108`, `ADR-0109`, `ADR-0110`, `ADR-0111`, `ADR-0112`, `ADR-0210`, `ADR-0212`, `ADR-0242`, `ADR-0248`, `ADR-0250`
-**Tags:** `project-learnings`, `deprecation`, `cleanup`
+**Recorded:** 2026-08-13 · [ORB-10736]
+**Supersedes:** [Push-based discovery via context injection, not pull-only via search](#push-based-discovery-via-context-injection-not-pull-only-via-search), [Native Orbit primitive (learning resource) over a flat markdown directory](#native-orbit-primitive-learning-resource-over-a-flat-markdown-directory), [Workspace-scoped, checked into git (not workspace-private state)](#workspace-scoped-checked-into-git-not-workspace-private-state), [Phase-1 scope = path globs + tags, ranked by recency; semantic and symbol-aware deferred](#phase-1-scope-path-globs-tags-ranked-by-recency-semantic-and-symbol-aware-deferred), [Three-layer push pipeline (engine pre-prompt + MCP sidecar + Claude Code hook), not single-layer](#three-layer-push-pipeline-engine-pre-prompt-mcp-sidecar-claude-code-hook-not-single-layer), [Remove vote and comment surfaces from the learning subsystem](#remove-vote-and-comment-surfaces-from-the-learning-subsystem), [Workspace-scope the learning envelope index in the shared host-global database](#workspace-scope-the-learning-envelope-index-in-the-shared-host-global-database), [Teaser learning injection + show-as-usage-signal (replaces rejected ack design)](#teaser-learning-injection-show-as-usage-signal-replaces-rejected-ack-design), [Keep orbit hook install opt-in; remove --hooks from workspace init](#keep-orbit-hook-install-opt-in-remove---hooks-from-workspace-init), [Gate learning authoring surfaces on caller role derived from the agent-identity env](#gate-learning-authoring-surfaces-on-caller-role-derived-from-the-agent-identity-env)
 
 ### Context
 

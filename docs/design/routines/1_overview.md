@@ -10,7 +10,7 @@ summary: Durable, git-versioned scheduler primitive that fires catalog jobs/acti
 tags: [routines, scheduler]
 paths: ["crates/orbit-cli/src/command/routine/**", "crates/orbit-core/src/routines/**", "crates/orbit-remote/src/routines.rs", "crates/orbit-store/src/sqlite/routine_store/**"]
 related_features: [routines, activity-job, host-registry]
-related_artifacts: [ORB-10001, ORB-10021, ORB-10207, ORB-10270, ORB-10319, ORB-10739, ADR-0223]
+related_artifacts: [ORB-10001, ORB-10021, ORB-10207, ORB-10270, ORB-10319, ORB-10739]
 ---
 
 # Routines — Overview
@@ -25,7 +25,7 @@ is host-local and never synced. [2_design.md](./2_design.md) is the v1 contract;
 [3_vision.md](./3_vision.md) holds what is deliberately out of scope for v1.
 
 > **Status.** v1 shipped in [ORB-10021]; the At a Glance table lists the actual home of
-> each concern. Targets are `job:<name>` in v1 — see [ADR-0206] for why `activity:` is
+> each concern. Targets are `job:<name>` in v1 — see [Routine targets are catalog references only — no inline command payloads](./4_decisions.md#routine-targets-are-catalog-references-only-no-inline-command-payloads) for why `activity:` is
 > reserved. Registry/cache/identity composition now lives in `orbit-remote`; Core keeps the
 > registry-neutral scheduler, validation, and dispatch kernels. [ORB-10319]
 
@@ -70,8 +70,8 @@ fragmentation this feature exists to end.
   target, `hosts`, `enabled`, and policy. The durable unit of scheduling.
 - **Target** — what fires: a reference into the existing catalog. v1 dispatches
   `job:<name>`; `activity:<name>` is reserved (wrap the activity in a one-step job — see
-  [ADR-0206]). Routines carry no inline commands; the `shell` activity variant was
-  removed fail-closed in [ORB-00374] (see [ADR-0194]), and routines inherit that posture.
+  [Routine targets are catalog references only — no inline command payloads](./4_decisions.md#routine-targets-are-catalog-references-only-no-inline-command-payloads)). Routines carry no inline commands; the `shell` activity variant was
+  removed fail-closed in [ORB-00374] (see [The v2 shell activity surface is removed, not sandboxed](../activity-job/4_decisions.md#the-v2-shell-activity-surface-is-removed-not-sandboxed)), and routines inherit that posture.
 - **Sweep** — `orbit sweep`, the stateless due-check pass the OS clock invokes every minute.
   Loads definitions, filters for this host, fires due routines, records state, exits.
 - **Routine source** — a registered workspace whose config opts in with
@@ -99,7 +99,7 @@ fragmentation this feature exists to end.
 | `orbit routine` CLI (`list/show/pause/resume/init`) | `crates/orbit-cli/src/command/routine/` | [ORB-10021] |
 | launchd/systemd unit templates + installer | `crates/orbit-core/assets/clock/` + `src/routines/clock.rs` | [ORB-10021] |
 | `[routines] role = "source"` config key | `crates/orbit-core/src/config/{raw,runtime}.rs` | [ORB-10021] |
-| Disabled default routine seeding + workspace ship wrapper | `crates/orbit-core/assets/{routines,jobs}/` | [ORB-10207] / [ADR-0223] |
+| Disabled default routine seeding + workspace ship wrapper | `crates/orbit-core/assets/{routines,jobs}/` | [ORB-10207] / [Delegate workspace ship routines through a synchronous wrapper job](./4_decisions.md#delegate-workspace-ship-routines-through-a-synchronous-wrapper-job) |
 
 ---
 

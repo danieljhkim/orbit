@@ -11,7 +11,7 @@ summary: Every machine is its own coordination host for the workspaces it owns; 
 tags: [host-registry, multi-host, ownership, task-ids]
 paths: ["crates/orbit-remote/**", "crates/orbit-core/**", "crates/orbit-store/**", "crates/orbit-mcp/**", "crates/orbit-common/**"]
 related_features: [host-registry, mcp-bridge, routines, remote-access]
-related_artifacts: [ORB-00424, ORB-10248, ORB-10249, ORB-10268, ORB-10302, ORB-10319, ORB-10332, ADR-0226, ADR-0227, ADR-0228, ADR-0229, ADR-0230, ADR-0231, ADR-0232, ADR-0235, ADR-0240, ADR-0352, ADR-0355, ADR-0356, ADR-0357, ADR-0358]
+related_artifacts: [ORB-00424, ORB-10248, ORB-10249, ORB-10268, ORB-10302, ORB-10319, ORB-10332]
 ---
 
 # Host Registry — Overview
@@ -27,7 +27,7 @@ from partitioning the namespace by machine, not from routing every project throu
 one allocator.
 
 > **Status: Draft — structural rewrite in flight.** This revision replaces the
-> singular-hub model that [ADR-0226], [ADR-0229], and [ADR-0230] described and
+> singular-hub model that [Singular coordination hub, workspace owner, and per-run placement](./4_decisions.md#singular-coordination-hub-workspace-owner-and-per-run-placement), [Owner-authored knowledge with hub-global IDs and explicit replicas](./4_decisions.md#owner-authored-knowledge-with-hub-global-ids-and-explicit-replicas), and [Pull-based leases with immutable placement and explicit recovery](./4_decisions.md#pull-based-leases-with-immutable-placement-and-explicit-recovery) described and
 > that [ORB-10268], [ORB-10271], and [ORB-10272] partially implemented. Sections
 > marked **v2** are deliberately deferred, not designed. See
 > [4_decisions.md](./4_decisions.md) for what was superseded and why.
@@ -68,7 +68,7 @@ Three corrections follow:
    create and read tasks on a machine that isn't this one. That already works
    over the client→hub MCP route.
 
-The registry still does **not** introduce store synchronization ([ADR-0200], the
+The registry still does **not** introduce store synchronization ([Live remote/multi-workspace dashboard viewing supersedes the git-sync task registry](../remote-access/4_decisions.md#live-remotemulti-workspace-dashboard-viewing-supersedes-the-git-sync-task-registry), the
 archived `_archive/task-sync/` design). Partition without replication.
 
 ## 2. Core Concepts
@@ -77,10 +77,10 @@ archived `_archive/task-sync/` design). Partition without replication.
   stable generated `machine_id`, a renameable human `host_id`, and the machine's
   `task_prefix`. Names appear only in human-authored text and resolve at binding
   time; everything the system persists stores `machine_id`. Initialized by
-  `orbit init`. There is no `mode` field ([ADR-0355]).
+  `orbit init`. There is no `mode` field ([Every machine is its own coordination host](./4_decisions.md#every-machine-is-its-own-coordination-host)).
 - **Task prefix** — the machine-scoped namespace for every task ID that machine
   mints, chosen once at global init and immutable thereafter. Uniqueness across
-  machines is a human-scale choice, not a coordinated allocation ([ADR-0356]).
+  machines is a human-scale choice, not a coordinated allocation ([Machine-scoped task-id prefix instead of a global allocator](./4_decisions.md#machine-scoped-task-id-prefix-instead-of-a-global-allocator)).
 - **Coordination host** — per workspace, the machine whose store holds that
   workspace's tasks. Every machine is the coordination host for the workspaces it
   owns; the degenerate case, a machine that owns everything it has, is what used
@@ -94,13 +94,13 @@ archived `_archive/task-sync/` design). Partition without replication.
 - **Local checkout, non-owned** — a checkout of a workspace this machine does not
   own. It stays present in the local registry so path resolution and the
   local-derived tier keep working, but it is hidden from `orbit workspace list`
-  and refuses coordination writes, naming the owner in the error ([ADR-0355]).
+  and refuses coordination writes, naming the owner in the error ([Every machine is its own coordination host](./4_decisions.md#every-machine-is-its-own-coordination-host)).
 - **Local workspace registry** — `workspaces.json`, the v1 source of truth for
   which machine owns what. Self-asserted and unverified by design; a registration
   protocol that arbitrates competing claims is v2.
 - **Data placement tiers** — per record type: *owner-coordinated* (tasks),
   *workspace-scoped and git-carried* (learnings, ADRs, frictions — keyed
-  `(workspace_id, artifact_key)`, never globally allocated, [ADR-0357]), and
+  `(workspace_id, artifact_key)`, never globally allocated, [Workspace-scoped knowledge keys, no global knowledge IDs](./4_decisions.md#workspace-scoped-knowledge-keys-no-global-knowledge-ids)), and
   *local-derived* (code graph, docs index, routine scheduler state).
 - **Routine ownership rule** — the host pinned in a git-committed routine
   definition is the host in charge of that routine. Uncommitted
@@ -108,7 +108,7 @@ archived `_archive/task-sync/` design). Partition without replication.
 
 Deferred to **v2**, with no v1 substitute: host registration and the fleet
 inventory, the workspace presence map, execution placement, run leases, and the
-`runner` capability ([ADR-0358]).
+`runner` capability ([Defer fleet registration and execution placement to v2](./4_decisions.md#defer-fleet-registration-and-execution-placement-to-v2)).
 
 ## 3. At a Glance
 
@@ -140,7 +140,7 @@ questions in [3_vision.md](./3_vision.md).
   per-route policy; the singular-hub assumption around it does not.
 - [ORB-10302] — established `orbit-registry` as the host/workspace domain crate.
 - [ORB-10319] — replaced that horizontal boundary with the vertical
-  `orbit-remote` feature crate ([ADR-0240]). Unaffected by this revision.
+  `orbit-remote` feature crate ([Consolidate remote host and MCP behavior in the vertical orbit-remote crate](./4_decisions.md#consolidate-remote-host-and-mcp-behavior-in-the-vertical-orbit-remote-crate)). Unaffected by this revision.
 - [ORB-10332] — removed the `orbit.host.list` MCP discovery tool as unused.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

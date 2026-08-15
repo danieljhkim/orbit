@@ -24,7 +24,7 @@ This all changed during our benchmarking session on graph tools. The benchmarkin
 - `no-graph`: only `Read`, `Grep`, `Glob`
 
 Historical graph benchmark rounds v1 and v2 (removed with the graph subsystem
-under ADR-0291 / ORB-10491) exposed Codex to graph tools through shell execution
+under [Retire and delete Orbit's code-graph subsystem](./design/_archive/orbit-graph/4_decisions.md#retire-and-delete-orbits-code-graph-subsystem) / ORB-10491) exposed Codex to graph tools through shell execution
 and Claude through MCP. In both rounds, hybrid Codex never reached for the graph
 tools over 60 runs.
 
@@ -47,7 +47,9 @@ In short, v3 results suggest MCP tools win the matchup against a generic `exec_c
 
 ## 2. The May 2026 Artifact Loss Incident
 
-On 2026-05-11, hundreds of task artifacts were wiped out due to our reckless workspace cleanup. These artifacts are now gone for good, and can never be recovered. The only way to prevent this from happening again is to implement a backup and recovery system for task artifacts ADR-0149.
+On 2026-05-11, hundreds of task artifacts were wiped out due to our reckless workspace cleanup. These artifacts are now gone for good, and can never be recovered. The only way to prevent this from happening again is to implement a backup and recovery system for task artifacts.
+
+The original numbered decision cited for that proposal was among the bodies lost to worktree reaping. This lesson preserves only the proposal already recorded here; it does not reconstruct the missing rationale. The same incident temporarily orphaned the bodies now preserved as [MCP ambient workspace session context](design/mcp-session-context/4_decisions.md#mcp-ambient-workspace-session-context), [The v2 shell activity surface is removed, not sandboxed](design/activity-job/4_decisions.md#the-v2-shell-activity-surface-is-removed-not-sandboxed), [Default Claude to opus/sonnet CLI aliases; centralize model defaults in orbit-common::model_defaults](design/agent-families/4_decisions.md#default-claude-to-opussonnet-cli-aliases-centralize-model-defaults-in-orbit-commonmodeldefaults), and [PR handoff recovery follows job checkpoints and exact remote leases](design/activity-job/4_decisions.md#pr-handoff-recovery-follows-job-checkpoints-and-exact-remote-leases).
 
 This was catastrophic, but also gave us a chance to amend for the sins of our bad design decisions that have been plaguing us for a while now. [docs/design/task-artifacts/4_decisions](design/task-artifacts/4_decisions.md)
 

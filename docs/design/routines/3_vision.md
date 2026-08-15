@@ -10,7 +10,7 @@ summary: Open questions and prior art for the routines scheduler — leases, eve
 tags: [routines, scheduler]
 paths: ["crates/orbit-core/src/routines/**", "crates/orbit-remote/src/routines.rs"]
 related_features: [routines, activity-job, host-registry]
-related_artifacts: [ORB-10001, ORB-10021, ORB-10207, ORB-10270, ORB-10319, ADR-0223]
+related_artifacts: [ORB-10001, ORB-10021, ORB-10207, ORB-10270, ORB-10319]
 ---
 
 # Routines — Vision
@@ -24,7 +24,7 @@ and an ADR, not by drifting in.
 ## 1. Open Questions
 
 0. **First-class `activity:` targets.** v1 rejects `activity:<name>` at parse time because
-   run dispatch is job-shaped ([ADR-0206]); the wrapper-job idiom covers current needs. A
+   run dispatch is job-shaped ([Routine targets are catalog references only — no inline command payloads](./4_decisions.md#routine-targets-are-catalog-references-only-no-inline-command-payloads)); the wrapper-job idiom covers current needs. A
    standalone activity run entrypoint (or auto-wrapping) would let routines fire
    activities directly — worth doing only if the wrapper friction proves real.
 1. **Single-fire across hosts.** v1 pins routines to explicit hosts. A "exactly one of N"
@@ -53,7 +53,7 @@ and an ADR, not by drifting in.
 
 ### Graduated
 
-- **Workspace-local ship-sweep convergence ([ORB-10207], [ADR-0223]).** The default
+- **Workspace-local ship-sweep convergence ([ORB-10207], [Delegate workspace ship routines through a synchronous wrapper job](./4_decisions.md#delegate-workspace-ship-routines-through-a-synchronous-wrapper-job)).** The default
   `ship_sweep` routine delegates synchronously to the normal shipment pipeline for only
   its source workspace. It is seeded disabled and enabled through the versioned
   definition. The legacy global CLI entrypoint remains during burn-in; removing it is a
@@ -104,9 +104,9 @@ and an ADR, not by drifting in.
 Orbit-internal:
 - [../activity-job/1_overview.md](../activity-job/1_overview.md) — the execution substrate
   routines trigger into.
-- [../activity-job/4_decisions.md](../activity-job/4_decisions.md) — [ADR-0194], the
+- [../activity-job/4_decisions.md](../activity-job/4_decisions.md) — [The v2 shell activity surface is removed, not sandboxed](../activity-job/4_decisions.md#the-v2-shell-activity-surface-is-removed-not-sandboxed), the
   removed-shell posture routines inherit.
-- [../executors/4_decisions.md](../executors/4_decisions.md) — [ADR-0196], sandbox caveats
+- [../executors/4_decisions.md](../executors/4_decisions.md) — [External Executor Protocol for dynamic out-of-process executor registration (retired)](../executors/4_decisions.md#external-executor-protocol-for-dynamic-out-of-process-executor-registration-retired), sandbox caveats
   relevant to what scheduled targets may do.
 
 External:

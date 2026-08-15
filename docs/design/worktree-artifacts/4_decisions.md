@@ -10,20 +10,16 @@ doc_role: decisions
 tags: ["worktree-artifacts"]
 paths: ["crates/orbit-remote/**", "crates/orbit-core/**", "crates/orbit-store/**", "crates/orbit-engine/**", "crates/orbit-cli/**"]
 related_features: ["worktree-artifacts", "host-registry", "mcp-bridge"]
-related_artifacts: ["ORB-00199", "ORB-00200", "ORB-00201", "ORB-10272", "ORB-10297", "ORB-10330", "ORB-10501", "ORB-10535", "ORB-10545", "ORB-10668", "ORB-10669", "ORB-10725", "ADR-0177", "ADR-0229", "ADR-0296", "ADR-0302", "ADR-0339", "ADR-0342", "ADR-0357"]
+related_artifacts: ["ORB-00199", "ORB-00200", "ORB-00201", "ORB-10272", "ORB-10297", "ORB-10330", "ORB-10501", "ORB-10535", "ORB-10545", "ORB-10668", "ORB-10669", "ORB-10725"]
 ---
 
 # Worktree Artifacts - Decisions
 
-ADR-style log for worktree artifact storage. Entries use repo-local ADR IDs ([ADR-0357]); this file is the record.
+Decision log for worktree artifact storage. Entries are addressed by title; task references retain their implementation provenance.
 
-## ADR-0177 — Worktree-local ADR and learning bodies with shared ID allocation
+## Worktree-local ADR and learning bodies with shared ID allocation
 
-**Status:** Accepted · 2026-05-20 07:03:09.624062Z · [ORB-00201]
-**Owner:** codex
-**Created:** 2026-05-20 07:03:02.932764Z
-**Last updated:** 2026-05-20 07:03:09.624062+00:00
-**Related features:** `worktree-artifacts`
+**Recorded:** 2026-05-20 07:03:09.624062Z · [ORB-00201]
 
 ### Context
 Linked worktrees need ADR and learning bodies committed with the code branch that created them, but IDs must remain collision-free across all worktrees. ORB-00199 introduced shared/local root resolution and ORB-00200 introduced the shared SQLite allocator. The remaining choice is whether body files follow the allocator into shared_root or follow the editing branch into local_root.
@@ -37,21 +33,16 @@ Write ADR and learning body files under the current worktree local_root while ke
 - Readers get predictable defaults without failing on missing sibling-worktree files.
 - Cost: list/show paths now carry a federation boundary and must handle body_path metadata, remote stubs, and stale worktree paths.
 
-## ADR-0296 — Detect and retire id allocations pinned to a reaped worktree
+## Detect and retire id allocations pinned to a reaped worktree
 
-**Status:** Accepted · 2026-07-27 02:56:21.490547Z · [ORB-10501], [ORB-10535]
-**Owner:** claude
-**Created:** 2026-07-27 02:55:47.419331Z
-**Last updated:** 2026-08-01 18:07:56.530568Z
-**Related features:** `worktree-artifacts`
-**Tags:** `worktree-artifacts`, `lifecycle`, `doctor`, `data-loss`
+**Recorded:** 2026-07-27 02:56:21.490547Z · [ORB-10501], [ORB-10535]
 **Paths:** `crates/orbit-store/src/sqlite/id_allocator/**`, `crates/orbit-engine/src/executor/automation/vcs/worktree/cleanup.rs`, `crates/orbit-cmd/src/doctor.rs`, `crates/orbit-cli/src/command/doctor.rs`
 
 ### Context
 
-Learning and ADR ids come from one shared SQLite allocator and are pinned to the worktree that allocated them, with the body written into that worktree (ADR-0177). Lists model a body that is not readable here as a *remote stub*, which assumes the body still exists in some other checkout.
+Learning and ADR ids come from one shared SQLite allocator and are pinned to the worktree that allocated them, with the body written into that worktree ([Worktree-local ADR and learning bodies with shared ID allocation](#worktree-local-adr-and-learning-bodies-with-shared-id-allocation)). Lists model a body that is not readable here as a *remote stub*, which assumes the body still exists in some other checkout.
 
-That assumption has no steady state. When a job-run worktree is reaped before its body was finalized and merged, the allocation row outlives every path that could resolve it: the row stays visible as `reserved`/`merged` forever, the body is unrecoverable, and nothing detects or prunes it. F2026-07-161 measured 35 of 113 allocated learning ids in `ws_orbit` as unreadable remote stubs (17 `reserved`, 18 `merged`), several pinned to worktrees confirmed gone from disk; the same pattern hit ADR-0149, 0181, 0194, 0211, and 0225. `learning sync` cannot help — it reconciles only from locally readable YAML (F2026-07-094 b).
+That assumption has no steady state. When a job-run worktree is reaped before its body was finalized and merged, the allocation row outlives every path that could resolve it: the row stays visible as `reserved`/`merged` forever, the body is unrecoverable, and nothing detects or prunes it. F2026-07-161 measured 35 of 113 allocated learning ids in `ws_orbit` as unreadable remote stubs (17 `reserved`, 18 `merged`), several pinned to worktrees confirmed gone from disk. The same pattern hit the unrecoverable task-artifact workspace-binding decision and the bodies now preserved as [MCP ambient workspace session context](../mcp-session-context/4_decisions.md#mcp-ambient-workspace-session-context), [The v2 shell activity surface is removed, not sandboxed](../activity-job/4_decisions.md#the-v2-shell-activity-surface-is-removed-not-sandboxed), [Default Claude to opus/sonnet CLI aliases; centralize model defaults in orbit-common::model_defaults](../agent-families/4_decisions.md#default-claude-to-opussonnet-cli-aliases-centralize-model-defaults-in-orbit-commonmodeldefaults), and [PR handoff recovery follows job checkpoints and exact remote leases](../activity-job/4_decisions.md#pr-handoff-recovery-follows-job-checkpoints-and-exact-remote-leases). `learning sync` cannot help — it reconciles only from locally readable YAML (F2026-07-094 b).
 
 The allocator already had `abandon_learning`/`abandon_adr`, but they were reachable only from create-rollback and refuse any row that recorded a body path, which is exactly what a stranded `merged` row has.
 
@@ -72,34 +63,29 @@ Orphans that already exist are reported through the `id-allocations` `orbit doct
 - Deleting the row was rejected: it would let `max_sequence` reissue the id, and would destroy the only remaining record of where the body was written.
 - Repair is opt-in behind an explicit flag; the check itself only warns, and an ordinary `orbit doctor` run mutates nothing.
 - Cost: cleanup now takes the shared allocator lock across its preflight and destructive Git operation, so concurrent knowledge creation can briefly delay worktree collection.
-- Cost: the orphan test remains duplicated per artifact kind in the owning stores because ADR and learning bodies resolve differently; lifting artifact-layout knowledge into the allocator would violate the boundary ADR-0177 draws.
+- Cost: the orphan test remains duplicated per artifact kind in the owning stores because ADR and learning bodies resolve differently; lifting artifact-layout knowledge into the allocator would violate the boundary [Worktree-local ADR and learning bodies with shared ID allocation](#worktree-local-adr-and-learning-bodies-with-shared-id-allocation) draws.
 - Cost: `worktree_root.exists()` is a liveness heuristic — a worktree on an unmounted volume reads as reaped. The refuse-on-recoverable guard and the opt-in flag bound the blast radius to a status flip that never touches a body file.
 
-## ADR-0302 - Publish superseded ADR bodies as durable decision history
+## Publish superseded ADR bodies as durable decision history
 
-**Status:** Accepted - 2026-08 - [ORB-10545]
+**Recorded:** 2026-08 - [ORB-10545]
 
 Superseded ADR bundles, including their rejected alternatives and supersession
 metadata, travel with the repository. Proposed drafts remain local-only. A
 validated `orbit adr reconcile` operator path copies an existing complete
 federated bundle byte-for-byte into the current registered checkout without
-allocating a new ID or changing lifecycle/allocation metadata. Narrative and
-the explicit rejected alternatives live in the ADR store; retrieve them with
-`orbit tool run orbit.adr.show --input '{"id":"ADR-0302"}'`.
+allocating a new ID or changing lifecycle/allocation metadata. The full
+narrative and rejected alternatives are preserved in [Publish superseded ADR
+bodies as durable decision history](../orbit-core/4_decisions.md#publish-superseded-adr-bodies-as-durable-decision-history).
 
-## ADR-0339 — Publish every ADR lifecycle partition and resolve duplicates by explicit precedence
+## Publish every ADR lifecycle partition and resolve duplicates by explicit precedence
 
-**Status:** Proposed · 2026-08-09 06:44:59.988414Z · [ORB-10669]
-**Owner:** claude
-**Created:** 2026-08-09 06:44:59.988414Z
-**Last updated:** 2026-08-09 06:44:59.988414Z
-**Related features:** `worktree-artifacts`
-**Tags:** `adr`, `gitignore`, `publication`, `worktree-artifacts`
+**Recorded:** 2026-08-09 06:44:59.988414Z · [ORB-10669]
 **Paths:** `crates/orbit-cli/src/command/workspace/**`, `crates/orbit-store/src/file/adr_store/**`, `.gitignore`
 
 ### Context
 
-ADR-0302 (ORB-10545) published superseded ADR bundles but kept `proposed/`
+[Publish superseded ADR bodies as durable decision history](#publish-superseded-adr-bodies-as-durable-decision-history) (ORB-10545) published superseded ADR bundles but kept `proposed/`
 local-only, continuing ORB-10303. Two costs followed. The decision under review
 was invisible in the PR that motivated it, so a reviewer could not read the
 draft alongside the change. And every ADR authored inside a managed job-run
@@ -110,7 +96,7 @@ The ignore policy is generated, not hand-maintained. `ORBIT_GITIGNORE_BLOCK` in
 `crates/orbit-cli/src/command/workspace/support.rs` is the managed block that
 `orbit workspace init` writes and rewrites into every workspace, and it still
 ignored both `.orbit/adrs/proposed/` and `.orbit/adrs/superseded/` — the latter
-already contradicting ADR-0302. A hand-edited `.gitignore` was therefore
+already contradicting [Publish superseded ADR bodies as durable decision history](#publish-superseded-adr-bodies-as-durable-decision-history). A hand-edited `.gitignore` was therefore
 reverted on the next init or re-register.
 
 Tracking the proposed partition also makes a latent ambiguity reachable.
@@ -185,7 +171,7 @@ valid gap, not the orphaned-allocation condition ORB-10501 repairs.
 - A proposed ADR is reviewable in the PR that motivates it, and an ADR authored
   in a managed worktree lands on its own branch without an operator step.
 - The shipped block now matches the accepted publication policy for every
-  partition, including the `superseded/` line ADR-0302 had already invalidated.
+  partition, including the `superseded/` line [Publish superseded ADR bodies as durable decision history](#publish-superseded-adr-bodies-as-durable-decision-history) had already invalidated.
 - Re-init over a checkout carrying an older managed block converges on the
   current policy exactly once, with no stacked or duplicated block.
 - A merged stale draft can no longer mask an accepted record on read, in a
@@ -200,21 +186,16 @@ valid gap, not the orphaned-allocation condition ORB-10501 repairs.
   the working tree on merge, and clearing the warning means deleting the stale
   directory by hand.
 
-## ADR-0342 — orbit adr owns ADR authoring and lifecycle; reconcile stays the cross-checkout verb
+## orbit adr owns ADR authoring and lifecycle; reconcile stays the cross-checkout verb
 
-**Status:** Proposed · 2026-08-09 07:59:21.875343Z · [ORB-10668]
-**Owner:** claude
-**Created:** 2026-08-09 07:59:21.875343Z
-**Last updated:** 2026-08-09 07:59:21.875343Z
-**Related features:** `worktree-artifacts`
-**Tags:** `adr`, `cli`, `surface-parity`, `federation`
+**Recorded:** 2026-08-09 07:59:21.875343Z · [ORB-10668]
 **Paths:** `crates/orbit-cli/src/command/adr/**`
 
 ### Context
 
 `orbit adr` exposed only read/repair verbs (`list`, `show`, `restore`, `reconcile`). Authoring an ADR and moving one through its lifecycle existed only on the tool surface (`orbit tool run orbit.adr.add` / `orbit.adr.update`) and over MCP.
 
-The gap bit hardest exactly where those surfaces are unavailable. An ADR authored inside a job worktree is federated relative to the hub, so a bridge/MCP write against it is refused with `artifact_not_local` (409) and can only succeed from the owning worktree. That leaves the operator on-box, inside that worktree, at a shell — and `orbit adr update <id> --status accepted` did not exist. Encountered 2026-08-08 accepting ADR-0328 in `orbit-jrun-20260808-2029-5`.
+The gap bit hardest exactly where those surfaces are unavailable. An ADR authored inside a job worktree is federated relative to the hub, so a bridge/MCP write against it is refused with `artifact_not_local` (409) and can only succeed from the owning worktree. That leaves the operator on-box, inside that worktree, at a shell — and `orbit adr update <id> --status accepted` did not exist. Encountered 2026-08-08 accepting [Classify independent-review startup separately from reviewer rejection](../activity-job/4_decisions.md#classify-independent-review-startup-separately-from-reviewer-rejection) in `orbit-jrun-20260808-2029-5`.
 
 The open question ORB-10668 raised was whether `orbit adr reconcile` was already the intended answer, making this a discoverability defect rather than a missing verb.
 
@@ -244,13 +225,9 @@ It is a missing verb, and `reconcile` addresses a different case.
 - **Reimplement the lifecycle rules in the CLI for better clap ergonomics.** Rejected: it duplicates the `proposed -> accepted` and supersession rules across two surfaces that would then drift.
 - **Relax the federation guard so the hub can write a non-local ADR.** Rejected outright: the guard is the reason a federated bundle stays committable from exactly one checkout.
 
-## ADR-0293 — Stationary primary HEAD tolerates record-store dirt only
+## Stationary primary HEAD tolerates record-store dirt only
 
-**Status:** Accepted · 2026-07-27 01:18:25.906846Z · [ORB-10493], [ORB-10471]
-**Owner:** claude
-**Created:** 2026-07-27 01:18:17.059025Z
-**Last updated:** 2026-07-27 01:18:25.906846Z
-**Tags:** `worktree`, `integrity`, `pipeline`
+**Recorded:** 2026-07-27 01:18:25.906846Z · [ORB-10493], [ORB-10471]
 **Paths:** `crates/orbit-engine/src/activity_job/workspace.rs`
 
 ### Context
@@ -284,13 +261,9 @@ Acceptance is logged at `info` on `orbit.engine.cli_runner` with the ignored pat
 - **Cost:** clause 4 is a path-prefix heuristic, not a proof of authorship. A benign out-of-run pass that touches a primary file *outside* `.orbit/` still fails the guard, and a provider that escapes to write inside the primary's `.orbit/` is now tolerated. Both are chosen deliberately: the first errs fail-closed on the guard's own hazard, and the second is a records-not-code blast radius that the run's own record writes already produce. If either turns out to matter, the follow-up is authorship evidence (e.g. fingerprinting per-path mtime or an engine-owned write ledger), not a wider prefix list.
 - **Cost:** this narrows the literal fix ORB-10493 proposed ("compare only the dirt paths that intersect `run_changed_paths`"). Its first acceptance criterion is met for the friction's actual repro, which is a record-store delta, but not for an arbitrary disjoint tracked file. Rejected alternative: implement the criterion literally and rewrite the five escape tests — that trades an intermittent, recoverable failure for a silent data-loss regression, which is the wrong direction on this guard.
 
-## ADR-0326 — Derive the delivery execution summary from the change, not from the agent
+## Derive the delivery execution summary from the change, not from the agent
 
-**Status:** Proposed · 2026-08-08 19:39:31.685834Z · [ORB-10603]
-**Owner:** claude
-**Created:** 2026-08-08 19:39:31.685834Z
-**Last updated:** 2026-08-08 19:39:31.685834Z
-**Tags:** `pipeline`, `delivery`, `execution-summary`
+**Recorded:** 2026-08-08 19:39:31.685834Z · [ORB-10603]
 **Paths:** `crates/orbit-engine/src/executor/automation/vcs/commit/**`
 
 ### Context
@@ -326,38 +299,28 @@ The gate's contract is untouched. What changed is that its rejection is no longe
 - `Cost:` the parser is coupled to `git status --porcelain=v1 -z` record framing, including the rename/copy source field that follows its record.
 - `Cost:` a task tagged `no-diff-expected` with an empty summary still has nothing to derive from and still fails the gate, unchanged from before this decision.
 
-## ADR-0333 — Publish every ADR state partition, proposed drafts included
+## Publish every ADR state partition, proposed drafts included
 
-**Status:** Accepted · 2026-08-09 04:39:56.163296Z · [ORB-10669]
-**Owner:** claude
-**Created:** 2026-08-09 04:39:49.572302Z
-**Last updated:** 2026-08-09 04:39:56.163296Z
-**Related features:** `worktree-artifacts`, `orbit-core`
-**Supersedes:** `ADR-0302`
-**Tags:** `adr`, `durability`, `gitignore`, `publication`
+**Recorded:** 2026-08-09 04:39:56.163296Z · [ORB-10669]
+**Supersedes:** [Publish superseded ADR bodies as durable decision history](#publish-superseded-adr-bodies-as-durable-decision-history)
 **Paths:** `.gitignore`, `.orbit/adrs/**`, `crates/orbit-cli/src/command/workspace/support.rs`, `crates/orbit-store/src/file/adr_store/**`
 
 ### Context
-ADR-0302 published accepted, superseded and deleted bundles but kept proposed drafts local-only, reasoning that an unaccepted draft is not yet decision history. In practice the proposed partition is where every ADR authored inside a managed job worktree first lands, so the decision under review is invisible in the pull request that motivates it, review happens against a bundle only the box can read, and promotion requires an operator reconcile step. The real alternative was to keep drafts ignored and treat reconciliation as the publication path, accepting the review blind spot as the price of a history free of abandoned drafts.
+[Publish superseded ADR bodies as durable decision history](#publish-superseded-adr-bodies-as-durable-decision-history) published accepted, superseded and deleted bundles but kept proposed drafts local-only, reasoning that an unaccepted draft is not yet decision history. In practice the proposed partition is where every ADR authored inside a managed job worktree first lands, so the decision under review is invisible in the pull request that motivates it, review happens against a bundle only the box can read, and promotion requires an operator reconcile step. The real alternative was to keep drafts ignored and treat reconciliation as the publication path, accepting the review blind spot as the price of a history free of abandoned drafts.
 
 ### Decision
 All four ADR state partitions — proposed, accepted, superseded and deleted — are tracked and travel with the repository; only the rebuildable SQLite index and lock files stay ignored. The managed `.gitignore` block written by `orbit workspace init` is the single expression of that policy for every workspace, not a per-checkout edit. Because a tracked draft can be re-added by a merge after acceptance, ADR resolution must no longer let a stale `proposed/` bundle mask a more advanced state for the same ID.
 
 ### Consequences
 - A proposed ADR is reviewable in the change that introduces it, and promotion to accepted is an ordinary tracked rename rather than an on-box operator step.
-- Reconciliation from ADR-0302 remains the mechanism for adopting a federated bundle into another checkout, but publication no longer depends on it.
+- Reconciliation from [Publish superseded ADR bodies as durable decision history](#publish-superseded-adr-bodies-as-durable-decision-history) remains the mechanism for adopting a federated bundle into another checkout, but publication no longer depends on it.
 - Duplicate-ID resolution becomes load-bearing rather than unreachable: resolution currently returns the first match scanning proposed-first, so lifecycle precedence must be made explicit or a duplicate must be surfaced as an error.
 - Drafts written inside managed job worktrees become tracked files in the run's branch, so abandoned and rejected runs can leave proposed bundles behind and need a defined disposition.
 - Cost: the repository accumulates decisions that were never accepted, including drafts from failed runs, and readers must treat `proposed/` as a slush pile rather than as decisions the project stands behind.
 
-## ADR-0338 — Force-stage run-allocated proposed ADR bundles at delivery
+## Force-stage run-allocated proposed ADR bundles at delivery
 
-**Status:** Proposed · 2026-08-09 06:43:36.172167Z · [ORB-10653]
-**Owner:** claude
-**Created:** 2026-08-09 06:43:36.172167Z
-**Last updated:** 2026-08-09 06:43:36.172167Z
-**Related features:** `worktree-artifacts`, `delivery`
-**Tags:** `vcs`, `adr-lifecycle`, `delivery`
+**Recorded:** 2026-08-09 06:43:36.172167Z · [ORB-10653]
 **Paths:** `crates/orbit-engine/src/executor/automation/vcs/commit/**`
 
 ### Context
@@ -390,13 +353,13 @@ The unsandboxed commit step force-stages exactly the ignored `proposed/*/{adr.ya
 - [ORB-10535] added the shared pre-removal guard that prevents cleanup from
   creating that orphaned state when the target still holds the unique body.
 - [ORB-10545] added federated ADR reconciliation, published superseded bodies,
-  and resolved the guarded-cleanup deadlock under [ADR-0302].
+  and resolved the guarded-cleanup deadlock under [Publish superseded ADR bodies as durable decision history](#publish-superseded-adr-bodies-as-durable-decision-history).
 - [ORB-10669] published the remaining ADR partitions, made the shipped
   `.gitignore` block retire its own superseded lines so re-init converges, and
   replaced first-hit-wins resolution with the explicit lifecycle precedence
-  under [ADR-0339].
+  under [Publish every ADR lifecycle partition and resolve duplicates by explicit precedence](#publish-every-adr-lifecycle-partition-and-resolve-duplicates-by-explicit-precedence).
 - [ORB-10668] added the `orbit adr add` / `update` / `supersede` CLI verbs so the
   owning worktree can complete the lifecycle without `orbit tool run`, under
-  [ADR-0342].
+  [orbit adr owns ADR authoring and lifecycle; reconcile stays the cross-checkout verb](#orbit-adr-owns-adr-authoring-and-lifecycle-reconcile-stays-the-cross-checkout-verb).
 
 Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

@@ -10,7 +10,7 @@ Every `orbit` command produces a structured payload and hands it to a renderer. 
 
 ## Why This Exists
 
-Structured output is currently a per-command opt-in on 86 of 150 argument structs, hand-written alongside the human rendering in the same function, and the two drift. Nothing detects whether stdout is a terminal, so a pipe receives box-drawing characters and ANSI escapes. Both follow from rendering decisions living in command bodies. Rationale in [ADR-0306].
+Structured output is currently a per-command opt-in on 86 of 150 argument structs, hand-written alongside the human rendering in the same function, and the two drift. Nothing detects whether stdout is a terminal, so a pipe receives box-drawing characters and ANSI escapes. Both follow from rendering decisions living in command bodies. Rationale in [Terminal Output Is a Rendering of a Structured Payload](../4_decisions.md#terminal-output-is-a-rendering-of-a-structured-payload).
 
 ## 1. The Sink
 
@@ -37,7 +37,7 @@ Precedence, first match wins:
 
 `auto` resolves to `table` when `is_tty`, and to the **plain** form otherwise. Plain is `table` with the header suppressed, borders and ANSI absent, truncation disabled, and single-tab field separators — the form `cut -f` expects. Plain is a rendering of `table`, not a fourth mode a command can request.
 
-`--format` is a global argument declared once on the root command, not redeclared per subcommand. The existing per-command `--json` booleans remain accepted and hidden from help; they are not removed [ADR-0306].
+`--format` is a global argument declared once on the root command, not redeclared per subcommand. The existing per-command `--json` booleans remain accepted and hidden from help; they are not removed [Terminal Output Is a Rendering of a Structured Payload](../4_decisions.md#terminal-output-is-a-rendering-of-a-structured-payload).
 
 ## 3. Mode Contracts
 
@@ -91,4 +91,4 @@ Steps 2–4 shipped together in [ORB-10586] and change three things for existing
 - An explicit **`--format` now outranks `--json`** (rungs 1 and 2). While `--format` was inert, `orbit task list --json --format table` emitted JSON; it emits a table now.
 - A **failing `--json` command reports its error as JSON on stderr**, because `--json` resolves the mode and §5 makes json-mode errors machine-readable. stdout is unaffected and still carries nothing on failure.
 
-One deliberate deviation from §3, recorded here because it is a deviation: `--json` pretty-prints in every sink, while `--format json` pretty-prints only for a terminal. Every branch `--json` replaced called `print_pretty` unconditionally, and byte-identity for those invocations is an [ADR-0306] requirement, so the legacy rung keeps the bytes it had.
+One deliberate deviation from §3, recorded here because it is a deviation: `--json` pretty-prints in every sink, while `--format json` pretty-prints only for a terminal. Every branch `--json` replaced called `print_pretty` unconditionally, and byte-identity for those invocations is an [Terminal Output Is a Rendering of a Structured Payload](../4_decisions.md#terminal-output-is-a-rendering-of-a-structured-payload) requirement, so the legacy rung keeps the bytes it had.

@@ -11,7 +11,7 @@ summary: "Open questions for orbit's terminal surface — TUI vs. composable CLI
 tags: [terminal-interface]
 paths: ["crates/orbit-cli/src/output/**"]
 related_features: [terminal-interface, user-interface, resident-orchestrator]
-related_artifacts: [ADR-0306, ADR-0307]
+related_artifacts: []
 ---
 
 # Terminal Interface — Vision
@@ -22,7 +22,7 @@ This document scopes questions the current specs deliberately do not answer: whe
 
 1. **Composable CLI or TUI?** Table rendering has so far been pushed toward adapting to the terminal rather than toward owning it — [T20260411-0335] made tables reflow for narrow screens rather than introducing a view that controls the screen. `orbit run status` polled in a loop is a worse `k9s`. But a TUI is a second surface with its own state, keybindings, and failure modes, and it cannot be piped. Is the right answer a genuinely live subcommand (`orbit watch`) that owns the alternate screen, leaving every other command line-oriented — or does an interactive layer belong in the dashboard, which already exists?
 
-2. **Is an agent a third audience?** [ADR-0306] resolves output for a human and for a script. An agent reading `orbit task list` through a shell tool is neither: it wants the density of the table (tokens are the budget) but the unambiguity of JSON, and it fails differently — silently misparsing rather than erroring. A fourth mode is the obvious move and probably the wrong one. Does `ndjson` already cover this, or is the real answer that agents should use the MCP surface and never the CLI?
+2. **Is an agent a third audience?** [Terminal Output Is a Rendering of a Structured Payload](./4_decisions.md#terminal-output-is-a-rendering-of-a-structured-payload) resolves output for a human and for a script. An agent reading `orbit task list` through a shell tool is neither: it wants the density of the table (tokens are the budget) but the unambiguity of JSON, and it fails differently — silently misparsing rather than erroring. A fourth mode is the obvious move and probably the wrong one. Does `ndjson` already cover this, or is the real answer that agents should use the MCP surface and never the CLI?
 
 3. **Progress under concurrency.** Orbit dispatches waves of concurrent runs. A single spinner misrepresents that, and N spinners fight over the cursor. What does honest progress look like for work that is parallel, long-lived, and mostly happening on another machine — and does any of it survive `--format json`?
 
@@ -44,7 +44,7 @@ This document scopes questions the current specs deliberately do not answer: whe
 - **`lazygit`:** a TUI over a CLI whose commands remain fully usable standalone — the shape question 1 is really asking about.
 
 ### Structured-Output Systems
-- **PowerShell:** objects through the pipeline, rendered only at the end. [ADR-0306] is a weaker version of the same idea, constrained to a Unix pipe carrying bytes.
+- **PowerShell:** objects through the pipeline, rendered only at the end. [Terminal Output Is a Rendering of a Structured Payload](./4_decisions.md#terminal-output-is-a-rendering-of-a-structured-payload) is a weaker version of the same idea, constrained to a Unix pipe carrying bytes.
 - **`nushell`:** structured data as the native currency, with rendering as a terminal concern. Useful mainly as evidence that the payload-first split is not exotic.
 
 ## 3. What May Be Distinctive

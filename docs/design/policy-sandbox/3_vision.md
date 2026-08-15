@@ -121,7 +121,7 @@ Bubblewrap is the pragmatic first backend because it is an unprivileged policy-c
 not a policy by itself. Orbit remains responsible for the exact mount and namespace arguments.
 The trusted-path rule, `--new-session`, namespace selection, and explicit read-policy limitation
 are therefore part of the security contract rather than incidental implementation details.
-[ORB-10552] implements this boundary; [ADR-0304] records the choice and its deferred read-policy cost.
+[ORB-10552] implements this boundary; [Use Bubblewrap for shipped Linux CLI write confinement](./4_decisions.md#use-bubblewrap-for-shipped-linux-cli-write-confinement) records the choice and its deferred read-policy cost.
 
 ---
 

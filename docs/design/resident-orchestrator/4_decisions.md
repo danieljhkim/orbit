@@ -7,21 +7,22 @@ status: Accepted
 feature: resident-orchestrator
 doc_role: decisions
 type: design
-summary: ADR log for the drain job, the external clock, and the split between leaf ship and workspace auto.
+summary: Decision log for the drain job, the external clock, and the split between leaf ship and workspace auto.
 tags: [resident-orchestrator, epic, jobs]
 paths: [".orbit/resources/jobs/**", "crates/orbit-core/assets/jobs/**"]
 related_features: [resident-orchestrator, activity-job]
-related_artifacts: [ORB-10332, ORB-10775, ORB-10776, ORB-10779, ORB-10788, ADR-0361, ADR-0362, ADR-0363, ADR-0364, ADR-0365]
+related_artifacts: [ORB-10332, ORB-10775, ORB-10776, ORB-10779, ORB-10788]
 ---
 
 # Resident Orchestrator — Decisions
 
-Decision record for resident-orchestrator. This file is the authoritative body.
+This document preserves the feature's non-obvious decisions and their reasoning.
 
-## ADR-0361 — Epic tag is a supervisor delegation signal, not the job predicate
+---
 
-**Status:** Accepted · 2026-08 · [ORB-10776]
-**Scope:** how a body of work is marked for a supervisor; not `epic_pipeline` admission
+## Epic tag is a supervisor delegation signal, not the job predicate
+
+**Recorded:** 2026-08 · [ORB-10776]
 
 ### Context
 
@@ -41,13 +42,12 @@ the *job* is out of contract unless this ADR is superseded.
 - Supervisors can still create `epic` roots and children as they do today (ORB-10775).
 - Cost: a workspace with leftover `backlog` chores will wake the drain job even when no
   epic exists; isolation is a workspace-layout problem, not a tag filter.
-- Leaf-ship exclusion uses the same tag (ADR-0365). That does not change this ADR's
+- Leaf-ship exclusion uses the same tag ([Workspace auto is a sequencer, not a leaf ship](#workspace-auto-is-a-sequencer-not-a-leaf-ship)). That does not change this ADR's
   rule: `epic_pipeline` still must not require the tag to drain.
 
-## ADR-0362 — The supervisor clock is not an Orbit primitive
+## The supervisor clock is not an Orbit primitive
 
-**Status:** Accepted · 2026-08 · [ORB-10776]
-**Scope:** routines, activities, and jobs that would schedule or select work for `epic_pipeline`
+**Recorded:** 2026-08 · [ORB-10776]
 
 ### Context
 
@@ -70,10 +70,9 @@ front-door) process that calls `orbit run job epic_pipeline`.
 - Cost: no first-class resident health in `orbit routine list`; operators debug the
   external cron and the job-run log instead.
 
-## ADR-0363 — Session log is the orchestrator's memory, not a CLI session
+## Session log is the orchestrator's memory, not a CLI session
 
-**Status:** Accepted · 2026-08 · [ORB-10776]
-**Scope:** how `epic_orchestrator` remembers work across invokes; scan wake reasons
+**Recorded:** 2026-08 · [ORB-10776]
 
 ### Context
 
@@ -95,9 +94,9 @@ does not edit repository files; code changes are child tasks it creates and ship
 - Cost: another noun and three tools. Reminders the orchestrator forgets to `resolve`
   will keep waking the drain until someone does.
 
-## ADR-0364 — Drain scan excludes `epic_pipeline` runs
+## Drain scan excludes `epic_pipeline` runs
 
-**Status:** Accepted · 2026-08 · [ORB-10779]
+**Recorded:** 2026-08 · [ORB-10779]
 **Code anchors:** `crates/orbit-core/src/runtime/v2_host/scan_unresolved.rs::scan_unresolved_work`
 
 ### Context
@@ -121,10 +120,9 @@ pipeline failures remain wake reasons. The supervisor clock starts a *new*
 - Cost: an operator cannot use the scan to discover a wedged `epic_pipeline`
   run; they use `orbit run history` / `orbit.workflow.run.list` instead.
 
-## ADR-0365 — Workspace auto is a sequencer, not a leaf ship
+## Workspace auto is a sequencer, not a leaf ship
 
-**Status:** Accepted · 2026-08 · [ORB-10788]
-**Scope:** `orbit run ship` / `task_auto_pipeline` admission; `workspace_auto_pipeline`;
+**Recorded:** 2026-08 · [ORB-10788]
 `orbit run auto`
 
 ### Context
@@ -144,7 +142,7 @@ of an epic root is refused before worktree setup; explicit ship of an epic child
 stays allowed (the orchestrator path). Logistics live in a new job,
 `workspace_auto_pipeline`, invoked as `orbit run auto`: drain loose leaves first;
 if an epic root is `in-progress`, hold; else start exactly one backlog epic via
-`epic_pipeline`. Do not seed a routine (ADR-0362 still holds). Do not scope
+`epic_pipeline`. Do not seed a routine ([The supervisor clock is not an Orbit primitive](#the-supervisor-clock-is-not-an-orbit-primitive) still holds). Do not scope
 `scan_unresolved_work` to one epic in this change.
 
 ### Consequences

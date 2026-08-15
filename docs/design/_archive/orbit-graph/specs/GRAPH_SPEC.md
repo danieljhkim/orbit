@@ -14,7 +14,7 @@ The current `orbit-knowledge` crate (~24k LOC) is a cache pretending to be a ver
 
 1. **Two storage paths must agree.** Content-addressed JSON objects under `objects/<hh>/<hash>.json` *and* a SQLite sidecar. They drift; agents see stale or contradictory results.
 2. **Unshipped mutation layer.** ~1.5k LOC of `working_graph/` exists but isn't exposed publicly, because the lock protocol cannot coordinate independent worktrees.
-3. **Locks that don't lock the right thing.** Same-branch worktrees still race (acknowledged in ADR-002's cost line).
+3. **Locks that don't lock the right thing.** Same-branch worktrees still race (acknowledged in [Branch-scoped refs over a single shared ref](../../knowledge-graph/4_decisions.md#branch-scoped-refs-over-a-single-shared-ref)'s cost line).
 4. **Full re-extraction on any file change.** No incremental refresh.
 5. **Mixed concerns.** Query, mutation, durable storage, ref management, pack rendering, and task lineage all live in one crate.
 
@@ -33,7 +33,7 @@ Git is the source of truth. The graph is reproducible from `(commit_sha, dirty_f
 - **Fresh.** Incremental refresh under 50ms p95 per file change.
 - **Concurrent-safe by construction.** Two worktrees on the same branch cannot corrupt each other.
 - **Honest.** Edge confidence is part of the schema, not a footnote.
-- **Small.** ≤10 query/sync commands on the agent-facing surface (`sync`, `search`, `show`, `refs`, `callees`, `impact`, `trace`, `overview`, `implementors`, `deps`); admin commands (`version`, `db-path`, `clean`) are separate and not counted. The budget grew from 7 to 10 in ORB-00389 to restore the `overview`/`implementors`/`deps` navigation queries required for `orbit-knowledge` parity (an ADR-0192 pre-cutover gate); see §9.7 for why these are dedicated commands rather than `refs` filters. Total crate footprint ≤10k LOC.
+- **Small.** ≤10 query/sync commands on the agent-facing surface (`sync`, `search`, `show`, `refs`, `callees`, `impact`, `trace`, `overview`, `implementors`, `deps`); admin commands (`version`, `db-path`, `clean`) are separate and not counted. The budget grew from 7 to 10 in ORB-00389 to restore the `overview`/`implementors`/`deps` navigation queries required for `orbit-knowledge` parity (an [Roll back orbit-graph tool cutover to orbit-knowledge](../4_decisions.md#roll-back-orbit-graph-tool-cutover-to-orbit-knowledge) pre-cutover gate); see §9.7 for why these are dedicated commands rather than `refs` filters. Total crate footprint ≤10k LOC.
 
 ## 4. Non-goals
 
@@ -138,7 +138,7 @@ One SQLite file per `(worktree, branch-or-detached-commit, extractor_version)`. 
 
 `<branch>` in the filename is sanitized — `/` is replaced by `_` so that `feat/foo` produces `feat_foo.42.db`, not a `feat/` subdirectory. The raw branch name is preserved in `meta.branch` for traceability.
 
-Detached HEAD uses `detached-<short-sha>.<extractor_version>.db` while preserving `meta.branch = "HEAD"` and the full commit in `meta.commit_sha`; see ADR-0190. This avoids different detached commits churning one `HEAD.<version>.db` cache. The stale-DB sweep removes detached DBs whose commits are no longer reachable from any local ref, excluding the active DB family.
+Detached HEAD uses `detached-<short-sha>.<extractor_version>.db` while preserving `meta.branch = "HEAD"` and the full commit in `meta.commit_sha`; see [Use per-commit DB files for detached HEAD](../4_decisions.md#use-per-commit-db-files-for-detached-head). This avoids different detached commits churning one `HEAD.<version>.db` cache. The stale-DB sweep removes detached DBs whose commits are no longer reachable from any local ref, excluding the active DB family.
 
 **Worktree-scoped, not workspace-scoped.** Each git worktree gets its own DB. Disk cost is ~10MB per worktree for orbit-sized repos — negligible. Same-branch worktree contention is solved by not sharing state.
 
@@ -377,7 +377,7 @@ Defaults by entry point:
 | MCP server | `Watch { debounce: 250ms }` |
 | `orbit graph watch` | `Manual` (watcher fires sync directly) |
 
-The previous "10ms stat budget at 5000 files" heuristic is gone — it didn't scale and was an implicit contract baked into the library. Moving the policy out makes the decision explicit and testable. [ADR-0195](../4_decisions.md) records the read-path freshness contract.
+The previous "10ms stat budget at 5000 files" heuristic is gone — it didn't scale and was an implicit contract baked into the library. Moving the policy out makes the decision explicit and testable. [Watcher-backed graph reads](../4_decisions.md#watcher-backed-graph-reads) records the read-path freshness contract.
 
 ### 8.4 Dirty files (uncommitted)
 
@@ -401,7 +401,7 @@ orbit graph implementors <trait-selector>
 orbit graph deps <file:… | dir:…>
 ```
 
-These ten commands exist only on the `orbit graph` CLI surface. MCP hosts do not advertise or recognize `orbit.graph.*`, and activity/job tool allowlists reject those names. Agent runtimes with shell access invoke the CLI directly. [ORB-10325, ADR-0241]
+These ten commands exist only on the `orbit graph` CLI surface. MCP hosts do not advertise or recognize `orbit.graph.*`, and activity/job tool allowlists reject those names. Agent runtimes with shell access invoke the CLI directly. [orbit-graph is CLI-surface only; separate MCP deferred until a shell-less consumer exists](../4_decisions.md#orbit-graph-is-cli-surface-only-separate-mcp-deferred-until-a-shell-less-consumer-exists)
 
 ### 9.1 `search`
 
@@ -481,7 +481,7 @@ This is the "structural feature expansion" capability — concrete, bounded, no 
 
 ### 9.7 `overview`, `implementors`, `deps` (orbit-knowledge parity)
 
-Restored in ORB-00389 to close the ADR-0192 pre-cutover gate "replacements exist for heavily used surfaces." Each maps onto the existing schema; none requires new tables.
+Restored in ORB-00389 to close the [Roll back orbit-graph tool cutover to orbit-knowledge](../4_decisions.md#roll-back-orbit-graph-tool-cutover-to-orbit-knowledge) pre-cutover gate "replacements exist for heavily used surfaces." Each maps onto the existing schema; none requires new tables.
 
 ```bash
 orbit graph overview [dir:… | file:…] [--format summary|full]
@@ -547,9 +547,9 @@ Agents that need stronger guarantees should fall back to `rg` and read source. T
 **Measurement contract.**
 
 - **Hardware.** Numbers above are for the CI runner profile (`ubuntu-24.04`, 4-core, 16GB). Local dev measurements are advisory and not gated.
-- **Baseline source.** A committed baseline file (formerly `bench/baselines.json`, removed with the benchmark scaffolding — see ADR-0197) anchors the regression gate: the run is compared against the committed baseline, **not** the previous merged run — otherwise the gate ratchets up to whatever the last commit happened to measure and the budget silently erodes. The baseline is recommitted when this gate is wired.
+- **Baseline source.** A committed baseline file (formerly `bench/baselines.json`, removed with the benchmark scaffolding — see [Remove the orbit-graph equivalence and benchmark harness](../4_decisions.md#remove-the-orbit-graph-equivalence-and-benchmark-harness)) anchors the regression gate: the run is compared against the committed baseline, **not** the previous merged run — otherwise the gate ratchets up to whatever the last commit happened to measure and the budget silently erodes. The baseline is recommitted when this gate is wired.
 - **Updating the baseline** requires a PR with the `bench-baseline-bump` label and a one-line justification in the PR body. Routine perf wins → bump down; routine drift → no bump, fix the regression instead.
-- **Wire `graph_bench.rs`** (already exists) to CI; results are written to `target/bench/` artifacts and diffed against the recommitted baseline (the prior `bench/baselines.json` was removed — see ADR-0197). Gate fires when any row is >20% slower than baseline.
+- **Wire `graph_bench.rs`** (already exists) to CI; results are written to `target/bench/` artifacts and diffed against the recommitted baseline (the prior `bench/baselines.json` was removed — see [Remove the orbit-graph equivalence and benchmark harness](../4_decisions.md#remove-the-orbit-graph-equivalence-and-benchmark-harness)). Gate fires when any row is >20% slower than baseline.
 
 ## 13. Public Rust API
 
@@ -615,7 +615,7 @@ No async on the public surface. SQLite + tree-sitter are both sync. If the MCP s
 ## 14. What we keep from the current crate
 
 - All tree-sitter extractors (`extract/*.rs`). Move them into `orbit-graph-extract`, adjust output to `ExtractedFile`.
-- `Selector` grammar and parser. Agents and skills know the syntax. **Every form currently used in `~/.claude/` skills and `.claude/skills/` must continue to parse identically** — this is a hard contract, not a best-effort. A pre-Step-1 audit captured the full grammar surface in `crates/orbit-graph-extract/src/selector.rs` as the canonical reference; ORB-10011 (ADR-0202) consolidated that implementation into `crates/orbit-common/src/utility/selector.rs`, which is now the canonical parser (`orbit-graph-extract` re-exports it unchanged). Any divergence is a release blocker for Step 3.
+- `Selector` grammar and parser. Agents and skills know the syntax. **Every form currently used in `~/.claude/` skills and `.claude/skills/` must continue to parse identically** — this is a hard contract, not a best-effort. A pre-Step-1 audit captured the full grammar surface in `crates/orbit-graph-extract/src/selector.rs` as the canonical reference; ORB-10011 ([Consolidate the Selector parser into orbit-common](../4_decisions.md#consolidate-the-selector-parser-into-orbit-common)) consolidated that implementation into `crates/orbit-common/src/utility/selector.rs`, which is now the canonical parser (`orbit-graph-extract` re-exports it unchanged). Any divergence is a release blocker for Step 3.
 - The `graph_bench.rs` harness.
 - `.orbitignore` defaults from `lib.rs`.
 - Signature-matching approach for cross-file refs.
@@ -636,7 +636,7 @@ Estimated landing: ~24k → ~10k LOC. More capability (string / command / config
 
 ## 16. Migration plan
 
-> **Status — completed (ORB-00391, 2026-06; surface amended by ORB-10325, 2026-07).** The migration is done: `orbit-graph` (v2) is the sole graph implementation and the `orbit-knowledge` (v1) crate has been removed. The v1 builtins, initial CLI, init-time graph build, and v1 metrics pipeline were decommissioned (the knowledge-stats computation moved to `orbit_core::metrics`). ADR-0199 / [ORB-00396] later reintroduced `orbit graph` as a thin human/script wrapper over `orbit-graph-cli`; ORB-10325 and ADR-0241 made that CLI the sole external graph surface and removed `orbit.graph.*` from MCP. Step 4's automated effectiveness/equivalence harness was never rebuilt after ADR-0197 removed it; the accepted measurement bar for the final cutover was **manual QA plus a v1-vs-v2 spot-check**, not the harness described below. See ADR-0192 (superseded by ADR-0198). The four-step plan below is retained as the historical design record.
+> **Status — completed (ORB-00391, 2026-06; surface amended by ORB-10325, 2026-07).** The migration is done: `orbit-graph` (v2) is the sole graph implementation and the `orbit-knowledge` (v1) crate has been removed. The v1 builtins, initial CLI, init-time graph build, and v1 metrics pipeline were decommissioned (the knowledge-stats computation moved to `orbit_core::metrics`). [Reintroduce `orbit graph` as a thin wrapper over orbit-graph-cli](../4_decisions.md#reintroduce-orbit-graph-as-a-thin-wrapper-over-orbit-graph-cli) / [ORB-00396] later reintroduced `orbit graph` as a thin human/script wrapper over `orbit-graph-cli`; ORB-10325 and [orbit-graph is CLI-surface only; separate MCP deferred until a shell-less consumer exists](../4_decisions.md#orbit-graph-is-cli-surface-only-separate-mcp-deferred-until-a-shell-less-consumer-exists) made that CLI the sole external graph surface and removed `orbit.graph.*` from MCP. Step 4's automated effectiveness/equivalence harness was never rebuilt after [Remove the orbit-graph equivalence and benchmark harness](../4_decisions.md#remove-the-orbit-graph-equivalence-and-benchmark-harness) removed it; the accepted measurement bar for the final cutover was **manual QA plus a v1-vs-v2 spot-check**, not the harness described below. See [Roll back orbit-graph tool cutover to orbit-knowledge](../4_decisions.md#roll-back-orbit-graph-tool-cutover-to-orbit-knowledge) (superseded by [Cut over to orbit-graph (v2) and decommission orbit-knowledge](../4_decisions.md#cut-over-to-orbit-graph-v2-and-decommission-orbit-knowledge)). The four-step plan below is retained as the historical design record.
 
 A four-step Orbit epic. Each step is one or more tasks; each task is independently shippable.
 
@@ -646,7 +646,7 @@ Create `orbit-graph-extract`. Move language modules from `orbit-knowledge::extra
 **Step 2 — Land `orbit-graph` behind a feature flag.**
 New crate, full schema, full query surface. MCP tools accept `ORBIT_GRAPH_BACKEND=v2` env var to switch. Old crate remains default. Dual-run for one release cycle; compare outputs in CI.
 
-**Equivalence relation.** When a v2 cutover is active, both backends must agree on the relation below — enforced in CI by dual-running them against a frozen corpus of ~30 representative selectors (rust, ts, python, go) and failing on any diff outside the documented tolerances. The in-tree harness that did this (`tools/graph-equiv` + the `bench/` baselines) was removed while the cutover is paused (see ADR-0197) and is reintroduced fresh when a cutover is rescheduled. The relation it must satisfy:
+**Equivalence relation.** When a v2 cutover is active, both backends must agree on the relation below — enforced in CI by dual-running them against a frozen corpus of ~30 representative selectors (rust, ts, python, go) and failing on any diff outside the documented tolerances. The in-tree harness that did this (`tools/graph-equiv` + the `bench/` baselines) was removed while the cutover is paused (see [Remove the orbit-graph equivalence and benchmark harness](../4_decisions.md#remove-the-orbit-graph-equivalence-and-benchmark-harness)) and is reintroduced fresh when a cutover is rescheduled. The relation it must satisfy:
 
 | Query | v1 vs v2 must agree on |
 |---|---|

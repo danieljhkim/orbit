@@ -25,7 +25,7 @@ In scope for task sync:
 - Task YAML bundles (`task.yaml`).
 - Companion files: `description.md`, `acceptance.md`, `plan.md`, `execution-summary.md`, `events.jsonl`, `comments.jsonl`, and `review-threads/**`.
 - Task artifacts under `<task-id>/artifacts/**`.
-- ID allocation against the registry's view of state, using the authority-scoped `ORB-00000` format defined by task-artifacts ADR-001.
+- ID allocation against the registry's view of state, using the authority-scoped `ORB-00000` format defined by task-artifacts [Orphan branch as registry mechanism](./4_decisions.md#orphan-branch-as-registry-mechanism).
 
 Out of scope (with rationale in [§7](#7-concerns--honest-limitations)):
 
@@ -44,7 +44,7 @@ The registry lives at `refs/heads/orbit/tasks`. User-facing branch name: `orbit/
 - `git log orbit/tasks` and `git diff main..orbit/tasks` work without ceremony.
 - Users who don't care about it never have to look at it; users who do care can inspect it with the same tools they use for code branches.
 
-The alternative (`refs/orbit/tasks` — outside `refs/heads/`) was considered and rejected. It hides the ref from `git branch -a` (a small UX win) but breaks every host-side branch-protection feature, requires custom fetchspecs, and fights every code-review tool. The tradeoff is documented in [4_decisions.md ADR-001](./4_decisions.md).
+The alternative (`refs/orbit/tasks` — outside `refs/heads/`) was considered and rejected. It hides the ref from `git branch -a` (a small UX win) but breaks every host-side branch-protection feature, requires custom fetchspecs, and fights every code-review tool. The tradeoff is documented in [Orphan branch as registry mechanism](./4_decisions.md#orphan-branch-as-registry-mechanism).
 
 ### 2.2 Orphan history
 
@@ -99,7 +99,7 @@ parent: <parent-commit>
 
 Where `<verb>` is one of `add`, `update`, `transition`, `comment`, `archive`, `delete`, and `<op-kind>` is the structured operation name (see [§3.2](#32-operation-aware-replay-the-recommended-mechanism)). The `actor` and `host` lines satisfy the auditability non-negotiable: every change to a task is attributable to a concrete execution identity on a concrete machine without reintroducing durable `agent`/`model` task fields.
 
-Commits are signed with the operator's git config (same identity as code commits). Auth piggybacks on whatever credential helper the operator uses for `git push origin main` — see [4_decisions.md ADR-005](./4_decisions.md).
+Commits are signed with the operator's git config (same identity as code commits). Auth piggybacks on whatever credential helper the operator uses for `git push origin main` — see [Auth piggybacks on git remote credential helper](./4_decisions.md#auth-piggybacks-on-git-remote-credential-helper).
 
 ---
 
@@ -210,7 +210,7 @@ The recommendation is the `git2` crate (libgit2 bindings). Reasons:
 - Authentication callbacks integrate with the system credential helper without parsing `git` output.
 - Errors are typed; subprocess error parsing is brittle.
 
-The cost is acknowledged: `git2` has a steeper learning curve, occasional ABI churn, and a larger binary footprint. See [4_decisions.md ADR-006](./4_decisions.md).
+The cost is acknowledged: `git2` has a steeper learning curve, occasional ABI churn, and a larger binary footprint. See [`git2` (libgit2) over shelling to `git`](./4_decisions.md#git2-libgit2-over-shelling-to-git).
 
 ---
 

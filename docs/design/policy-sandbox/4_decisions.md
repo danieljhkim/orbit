@@ -13,18 +13,13 @@ last_validated: 2026-08-11
 
 # Policy & Sandboxing — Decisions
 
-This file is the authoritative record for the feature's decision bodies. Historical references to global ADR artifacts remain only as provenance; new entries follow the template in [../CONVENTIONS.md](../CONVENTIONS.md) and cite the task that made the decision real.
+This file preserves the feature's decision reasoning. New entries follow the template in [../CONVENTIONS.md](../CONVENTIONS.md) and cite the task that made the decision real.
 
 ---
 
-## ADR-0093 — Dedicated policy & sandboxing design ownership
+## Dedicated policy & sandboxing design ownership
 
-**Status:** Accepted · 2026-05-11 02:06:39.393746Z · [T20260426-0622]
-**Owner:** legacy:policy-sandbox
-**Created:** 2026-05-11 02:06:39.392919Z
-**Last updated:** 2026-05-11 02:06:39.393746+00:00
-**Related features:** `policy-sandbox`
-**Legacy IDs:** `policy-sandbox/ADR-001`
+**Recorded:** 2026-05-11 02:06:39.393746Z · [T20260426-0622]
 
 ### Context
 Policy and sandboxing semantics were spread across `orbit-policy`, `orbit-exec`, the `PolicyDef` schema in `orbit-common`, the activity dispatcher, and the v2 host. There was no canonical place to record invariants, the `unrestricted` fallback, or the supervision contract.
@@ -33,17 +28,12 @@ Policy and sandboxing semantics were spread across `orbit-policy`, `orbit-exec`,
 Create `docs/design/policy-sandbox/` as the canonical design folder, with claude as owner. Auditability owns the recording of denials; this folder owns the *semantics* of allow/deny and the *contract* for how spawned processes are supervised.
 
 ### Consequences
-- Policy and sandboxing decisions now have one ADR log, one glossary, and a feature-owned spec to cite.
+- Policy and sandboxing decisions now have one decision log, one glossary, and a feature-owned spec to cite.
 - Cost: this folder cross-links into auditability and activity-job, so when those folders change their cross-references must be kept in sync rather than this folder absorbing them.
 
-## ADR-0094 — Policy schema is v2-only with named profiles plus global denies
+## Policy schema is v2-only with named profiles plus global denies
 
-**Status:** Accepted · 2026-05-11 02:06:39.394869Z · [T20260416-0728]
-**Owner:** legacy:policy-sandbox
-**Created:** 2026-05-11 02:06:39.394176Z
-**Last updated:** 2026-05-11 02:06:39.394869Z
-**Related features:** `policy-sandbox`
-**Legacy IDs:** `policy-sandbox/ADR-002`
+**Recorded:** 2026-05-11 02:06:39.394869Z · [T20260416-0728]
 
 ### Context
 An earlier policy schema (v1) used a different shape for allow/deny rules. Supporting both shapes in the runtime caused interpretation drift between the loader, the merger, and the evaluator.
@@ -55,14 +45,9 @@ Reject `schemaVersion: 1` at load time with an explicit migration message. v2 de
 - Schema parsing has one supported branch, and profile authoring is uniformly `{ read, modify }` with global denies.
 - Cost: existing v1 policy files require a manual migration; there is no automatic upgrader.
 
-## ADR-0095 — Implicit `unrestricted` profile materializes when an activity omits `fsProfile:`
+## Implicit `unrestricted` profile materializes when an activity omits `fsProfile:`
 
-**Status:** Accepted · 2026-05-11 02:06:39.396202Z · [T20260419-0503]
-**Owner:** legacy:policy-sandbox
-**Created:** 2026-05-11 02:06:39.395310Z
-**Last updated:** 2026-05-11 02:06:39.396202Z
-**Related features:** `policy-sandbox`
-**Legacy IDs:** `policy-sandbox/ADR-003`
+**Recorded:** 2026-05-11 02:06:39.396202Z · [T20260419-0503]
 
 ### Context
 Activities can omit `fsProfile:`. A naive design would either reject the activity at load or run it without policy enforcement. Both are wrong: rejection breaks the common case, and unguarded execution means audit blindness.
@@ -74,14 +59,9 @@ When an activity omits `fsProfile:`, the v2 host substitutes the constant `UNRES
 - "Unrestricted" remains auditable and narrowed by global denies, while policy authors can shadow it with a real profile.
 - Cost: the word "unrestricted" carries different meaning depending on whether the policy defines a profile of that name, which is a learnable but real source of confusion.
 
-## ADR-0096 — Deny rules inject as negated profile rules with last-match-wins evaluation
+## Deny rules inject as negated profile rules with last-match-wins evaluation
 
-**Status:** Accepted · 2026-05-11 02:06:39.397360Z · [T20260416-0728]
-**Owner:** legacy:policy-sandbox
-**Created:** 2026-05-11 02:06:39.396685Z
-**Last updated:** 2026-05-11 02:06:39.397360Z
-**Related features:** `policy-sandbox`
-**Legacy IDs:** `policy-sandbox/ADR-004`
+**Recorded:** 2026-05-11 02:06:39.397360Z · [T20260416-0728]
 
 ### Context
 A separate "deny pass" before profile evaluation is the obvious shape, but it makes precedence ambiguous when a profile rule and a deny rule both match. Multiple Orbit features (workspace overrides, profile narrowing, denyModify-also-implies-denyRead-for-modify validation) need a single evaluation order.
@@ -93,14 +73,9 @@ A separate "deny pass" before profile evaluation is the obvious shape, but it ma
 - Profile rules and deny rules are evaluated in one deterministic pass; appended denies win over earlier positive matches.
 - Cost: a profile author cannot re-allow a globally denied path by ordering, which is the intended safety property but surprises authors who expect a simple allowlist with overrides.
 
-## ADR-0097 — Modify rules must be covered by a read rule in the same profile
+## Modify rules must be covered by a read rule in the same profile
 
-**Status:** Accepted · 2026-05-11 02:06:39.398601Z · [T20260416-0728]
-**Owner:** legacy:policy-sandbox
-**Created:** 2026-05-11 02:06:39.397882Z
-**Last updated:** 2026-05-11 02:06:39.398601Z
-**Related features:** `policy-sandbox`
-**Legacy IDs:** `policy-sandbox/ADR-005`
+**Recorded:** 2026-05-11 02:06:39.398601Z · [T20260416-0728]
 
 ### Context
 A profile that grants `modify: ["./build/**"]` without granting `read: ["./build/**"]` is technically valid but produces a confusing operational story: a tool may be allowed to write a file it cannot read, breaking the standard read-modify-write pattern.
@@ -112,14 +87,9 @@ A profile that grants `modify: ["./build/**"]` without granting `read: ["./build
 - Modify rules require corresponding read coverage, so read-modify-write audit stories stay consistent.
 - Cost: profile authors who *only* want to allow append-style writes cannot express that without granting a read rule. There is no "write-only" profile shape today.
 
-## ADR-0098 — Tool layer is the policy enforcement point for HTTP-backed activities
+## Tool layer is the policy enforcement point for HTTP-backed activities
 
-**Status:** Accepted · 2026-05-11 02:06:39.399820Z · [T20260419-0503]
-**Owner:** legacy:policy-sandbox
-**Created:** 2026-05-11 02:06:39.399093Z
-**Last updated:** 2026-05-11 02:06:39.399820Z
-**Related features:** `policy-sandbox`
-**Legacy IDs:** `policy-sandbox/ADR-006`
+**Recorded:** 2026-05-11 02:06:39.399820Z · [T20260419-0503]
 
 ### Context
 Policy enforcement could plausibly live at the syscall layer, the fs trait layer, the tool layer, or the activity layer. Each placement has different trust and coverage tradeoffs.
@@ -131,14 +101,9 @@ Enforcement lives in `orbit-tools::builtin::fs::enforce_fs_policy`. Every fs bui
 - HTTP-backed fs decisions have one auditable helper, but tool authors must route work through it.
 - Cost: CLI-backed activities still bypass this helper, and HTTP tools that skip it are also unguarded. Current macOS executors can narrow CLI filesystem writes with `sandbox-exec`, but closing the general gap likely requires a `PolicyAwareFs` trait, broader OS sandboxes, or both.
 
-## ADR-0099 — Children spawn as process-group leaders so orphan subprocesses are reapable
+## Children spawn as process-group leaders so orphan subprocesses are reapable
 
-**Status:** Accepted · 2026-05-11 02:06:39.400978Z · [T20260417-0558-4], [T20260328-221810]
-**Owner:** legacy:policy-sandbox
-**Created:** 2026-05-11 02:06:39.400275Z
-**Last updated:** 2026-05-11 02:06:39.400978Z
-**Related features:** `policy-sandbox`
-**Legacy IDs:** `policy-sandbox/ADR-007`
+**Recorded:** 2026-05-11 02:06:39.400978Z · [T20260417-0558-4], [T20260328-221810]
 
 ### Context
 Naive subprocess code on Unix leaves orphan grandchildren holding open pipe write ends, which causes the parent's `wait_with_output` to hang when the orphan never exits. Earlier versions of orbit-exec hit this exact failure when an agent's tool spawned long-lived helpers.
@@ -150,14 +115,9 @@ On Unix, every spawned child calls `command.process_group(0)` so the child becom
 - Orphan subprocesses are reaped, and signal handling can target the whole tree with one syscall.
 - Cost: tools that intentionally fork detached helpers (e.g., long-running daemons) cannot do so under orbit-exec without explicitly creating their own process group inside the child.
 
-## ADR-0100 — SIGTERM with 5-second grace, then SIGKILL for the whole group
+## SIGTERM with 5-second grace, then SIGKILL for the whole group
 
-**Status:** Accepted · 2026-05-11 02:06:39.402116Z · [T20260417-0558-4]
-**Owner:** legacy:policy-sandbox
-**Created:** 2026-05-11 02:06:39.401427Z
-**Last updated:** 2026-05-11 02:06:39.402116Z
-**Related features:** `policy-sandbox`
-**Legacy IDs:** `policy-sandbox/ADR-008`
+**Recorded:** 2026-05-11 02:06:39.402116Z · [T20260417-0558-4]
 
 ### Context
 A timed-out or interrupted child needs a chance to flush state before being killed, but the supervisor cannot wait indefinitely. The escalation policy needs a single, predictable shape.
@@ -169,14 +129,9 @@ A timed-out or interrupted child needs a chance to flush state before being kill
 - Termination is deterministic, and annotated stderr distinguishes timeout, signal, and clean-exit paths.
 - Cost: the 5-second constant is global. Activities that need a longer drain (database flush, large I/O cleanup) cannot extend it without code changes.
 
-## ADR-0101 — Signal handler installation is process-global and serialized
+## Signal handler installation is process-global and serialized
 
-**Status:** Accepted · 2026-05-11 02:06:39.403286Z · [T20260417-0558-5]
-**Owner:** legacy:policy-sandbox
-**Created:** 2026-05-11 02:06:39.402566Z
-**Last updated:** 2026-05-11 02:06:39.403286Z
-**Related features:** `policy-sandbox`
-**Legacy IDs:** `policy-sandbox/ADR-009`
+**Recorded:** 2026-05-11 02:06:39.403286Z · [T20260417-0558-5]
 
 ### Context
 Installing parent-side SIGINT/SIGTERM handlers is a process-global operation. Two concurrent `run_process` calls cannot install independent handlers without races, and a panicking call must restore the prior handler so the orbit process itself remains interruptible.
@@ -188,14 +143,9 @@ Installing parent-side SIGINT/SIGTERM handlers is a process-global operation. Tw
 - Concurrent `run_process` calls serialize handler install/drop, and panics still restore prior handlers via Drop.
 - Cost: contention on the global mutex limits exec parallelism in a single process. Named as an open question in [3_vision.md §1.11](./3_vision.md#1-open-questions).
 
-## ADR-0102 — `NoSandbox` is the default `Sandbox` impl; real isolation is deferred
+## `NoSandbox` is the default `Sandbox` impl; real isolation is deferred
 
-**Status:** Accepted · 2026-05-11 02:06:39.404695Z · [T20260417-0550]
-**Owner:** legacy:policy-sandbox
-**Created:** 2026-05-11 02:06:39.403755Z
-**Last updated:** 2026-05-11 02:06:39.404695Z
-**Related features:** `policy-sandbox`
-**Legacy IDs:** `policy-sandbox/ADR-010`
+**Recorded:** 2026-05-11 02:06:39.404695Z · [T20260417-0550]
 
 ### Context
 The `Sandbox` trait is the seam where kernel-level or container-level isolation would attach to `orbit-exec`. The trait shipped with the supervision rework, but no real impl is registered.
@@ -207,17 +157,12 @@ Ship `NoSandbox` as the default and only implementation. Defer kernel-level isol
 - The trait surface is stable for future isolation, while today's generic runner stays explicit about relying on tool-layer policy.
 - Cost: a tool that performs fs work without `enforce_fs_policy` (or a future non-builtin tool) has no exec-level isolation backstop. This is the structural reason §1.1 of [3_vision.md](./3_vision.md) lists real sandboxing as the top open question.
 
-## ADR-0103 — `sandbox-exec` wraps cli-backend agent invocations on macOS
+## `sandbox-exec` wraps cli-backend agent invocations on macOS
 
-**Status:** Accepted · 2026-05-11 02:06:39.406378Z · [T20260427-51]
-**Owner:** legacy:policy-sandbox
-**Created:** 2026-05-11 02:06:39.405395Z
-**Last updated:** 2026-05-11 02:06:39.406378Z
-**Related features:** `policy-sandbox`
-**Legacy IDs:** `policy-sandbox/ADR-011`
+**Recorded:** 2026-05-11 02:06:39.406378Z · [T20260427-51]
 
 ### Context
-ADR-006 left CLI backends outside Orbit's tool-layer enforcement: the harness emits `tool_allowlist.harness_delegated`, but Claude/Codex/Gemini built-in tools run with the orbit process's filesystem rights. Provider-native sandboxes were inconsistent (`codex --sandbox`, `gemini -s`, no Claude equivalent), leaving `fsProfile` unenforced for some CLI runs.
+[Tool layer is the policy enforcement point for HTTP-backed activities](#tool-layer-is-the-policy-enforcement-point-for-http-backed-activities) left CLI backends outside Orbit's tool-layer enforcement: the harness emits `tool_allowlist.harness_delegated`, but Claude/Codex/Gemini built-in tools run with the orbit process's filesystem rights. Provider-native sandboxes were inconsistent (`codex --sandbox`, `gemini -s`, no Claude equivalent), leaving `fsProfile` unenforced for some CLI runs.
 
 ### Decision
 Add `orbit-exec::macos_sandbox` as the declarative seam: compile a `ResolvedFsProfile` to SBPL and wrap Claude, Codex, and Gemini invocations with `sandbox-exec -f <profile>` when executor YAML declares `spec.sandbox: macos-sandbox-exec`. When Orbit owns the outer sandbox, neutralize provider-native sandbox flags so there is one filesystem authority. Resolve descriptors in `V2RuntimeHost::resolve_executor_sandbox` and compile SBPL in orbit-engine near the spawn site.
@@ -227,14 +172,9 @@ Add `orbit-exec::macos_sandbox` as the declarative seam: compile a `ResolvedFsPr
 - `allow_fallback` can degrade gracefully, but the safe default is fail-closed; Linux, Docker, network restriction, and activity-level overrides stay out of scope for v1.
 - Cost: SBPL writes are static text; complex `denyRead` / `denyModify` rule combinations don't always translate cleanly. Simple subtree denials use `subpath`; non-subpath deny globs use SBPL `regex` to avoid over-denying the containing directory. Activities that need precise allow-side glob semantics under sandbox should declare profiles with explicit subpath roots.
 
-## ADR-0104 — Codex state and side roots are narrow sandbox write allowances
+## Codex state and side roots are narrow sandbox write allowances
 
-**Status:** Accepted · 2026-05-11 02:06:39.407865Z · [T20260428-10]
-**Owner:** legacy:policy-sandbox
-**Created:** 2026-05-11 02:06:39.407048Z
-**Last updated:** 2026-05-11 02:06:39.407865Z
-**Related features:** `policy-sandbox`
-**Legacy IDs:** `policy-sandbox/ADR-012`
+**Recorded:** 2026-05-11 02:06:39.407865Z · [T20260428-10]
 
 ### Context
 Codex-backed `agent_implement` reached startup under `sandbox-exec` but failed with `Operation not permitted`: the profile allowed worktree, temp/cache, and `$HOME/.orbit` writes but not Codex state. After that, workflow state still failed because policy denied workspace `.orbit/**` after Orbit passed the same root via Codex `--add-dir`, and `**/*.env` over-denied when compiled as a containing-directory `subpath`.
@@ -247,17 +187,12 @@ Keep `sandbox-exec` authoritative and add narrow Codex allowances: `$CODEX_HOME`
 - `CODEX_HOME` relocates state, and inherited Orbit subprocesses can persist workflow state through the same side roots Codex receives.
 - Cost: the Codex state directory and provider side roots are trusted writable state outside ordinary project-content policy, similar to the existing `$HOME/.orbit` allowance for inherited Orbit subprocesses.
 
-## ADR-0105 — Per-provider state-dir allowances are emitted unconditionally for every supported CLI
+## Per-provider state-dir allowances are emitted unconditionally for every supported CLI
 
-**Status:** Accepted · 2026-05-11 02:06:39.409178Z · [T20260428-14]
-**Owner:** legacy:policy-sandbox
-**Created:** 2026-05-11 02:06:39.408413Z
-**Last updated:** 2026-05-11 02:06:39.409178Z
-**Related features:** `policy-sandbox`
-**Legacy IDs:** `policy-sandbox/ADR-013`
+**Recorded:** 2026-05-11 02:06:39.409178Z · [T20260428-14]
 
 ### Context
-ADR-012 unblocked Codex state writes, but Claude writes startup state under `$HOME/.claude` or `$CLAUDE_CONFIG_DIR`, and Gemini writes under `$HOME/.gemini`. SBPL compilation receives `ResolvedFsProfile` plus host env, not the active provider, so provider-conditional allow clauses would require new plumbing.
+[Codex state and side roots are narrow sandbox write allowances](#codex-state-and-side-roots-are-narrow-sandbox-write-allowances) unblocked Codex state writes, but Claude writes startup state under `$HOME/.claude` or `$CLAUDE_CONFIG_DIR`, and Gemini writes under `$HOME/.gemini`. SBPL compilation receives `ResolvedFsProfile` plus host env, not the active provider, so provider-conditional allow clauses would require new plumbing.
 
 ### Decision
 Emit state-dir allows for all supported CLI providers on every macOS sandbox profile: `$CODEX_HOME` / `$HOME/.codex`, `$CLAUDE_CONFIG_DIR` / `$HOME/.claude`, and `$HOME/.gemini`. Keep `append_provider_side_write_roots` Codex-only because Claude and Gemini have no `--add-dir` equivalent; document that a future provider with such a surface should generalize the branch.
@@ -267,17 +202,12 @@ Emit state-dir allows for all supported CLI providers on every macOS sandbox pro
 - Emitting all three narrow state-dir allowances avoids provider plumbing; Codex side roots remain a separate branch until another provider ships an equivalent surface.
 - Cost: every macOS sandbox profile carries three state-dir allow clauses regardless of which provider runs. If a future provider's state dir overlaps with another sensitive root, this design needs revisiting.
 
-## ADR-0106 — Claude state surface includes `$HOME/.claude.json` siblings, not just `$HOME/.claude/`
+## Claude state surface includes `$HOME/.claude.json` siblings, not just `$HOME/.claude/`
 
-**Status:** Accepted · 2026-05-11 02:06:39.410317Z · [T20260508-13]
-**Owner:** legacy:policy-sandbox
-**Created:** 2026-05-11 02:06:39.409610Z
-**Last updated:** 2026-05-11 02:06:39.410317Z
-**Related features:** `policy-sandbox`
-**Legacy IDs:** `policy-sandbox/ADR-014`
+**Recorded:** 2026-05-11 02:06:39.410317Z · [T20260508-13]
 
 ### Context
-ADR-013 modeled Claude's state surface as the `$HOME/.claude/` directory (or `$CLAUDE_CONFIG_DIR` when set) and emitted a single `(allow file-write* (subpath ...))` clause per provider state dir. In practice, Claude Code persists its main settings to `$HOME/.claude.json` — a sibling *file* at the home root, with `.lock` and atomic-write `.tmp.<pid>.<ms_ts>` companions. SBPL `subpath` only matches the named directory and everything strictly below, so `.claude.json` (a sibling, not a child) was denied at the kernel. Symptom: every Claude invocation under `macos-sandbox-exec` lost the ability to update its state, and tool calls that wait on the state-file lock hung silently. Codex/Gemini were unaffected because all of their state lives under their state directories.
+[Per-provider state-dir allowances are emitted unconditionally for every supported CLI](#per-provider-state-dir-allowances-are-emitted-unconditionally-for-every-supported-cli) modeled Claude's state surface as the `$HOME/.claude/` directory (or `$CLAUDE_CONFIG_DIR` when set) and emitted a single `(allow file-write* (subpath ...))` clause per provider state dir. In practice, Claude Code persists its main settings to `$HOME/.claude.json` — a sibling *file* at the home root, with `.lock` and atomic-write `.tmp.<pid>.<ms_ts>` companions. SBPL `subpath` only matches the named directory and everything strictly below, so `.claude.json` (a sibling, not a child) was denied at the kernel. Symptom: every Claude invocation under `macos-sandbox-exec` lost the ability to update its state, and tool calls that wait on the state-file lock hung silently. Codex/Gemini were unaffected because all of their state lives under their state directories.
 
 The override case is clean: when `CLAUDE_CONFIG_DIR` is set, Claude writes `<override>/.claude.json` and its siblings inside the override directory, already covered by the existing `(subpath "$CLAUDE_CONFIG_DIR")` clause.
 
@@ -293,17 +223,12 @@ Use `literal` for the canonical and lock files (predictable names) and `regex` f
 ### Consequences
 - Claude under `macos-sandbox-exec` can persist settings and acquire its lockfile; tool calls that depend on a freshly-updated state file no longer hang.
 - The `CLAUDE_CONFIG_DIR` branch is unchanged — the existing subpath clause already covers the JSON file inside the override.
-- Cost: three additional clauses on every macOS sandbox profile when `HOME` resolves and `CLAUDE_CONFIG_DIR` is unset. Symmetric to the ADR-013 trade-off; provider plumbing is avoided.
-- This ADR amends ADR-013 rather than replacing it: the per-provider state-dir clauses still emit unconditionally; the new clauses are scoped to the HOME-fallback branch only.
+- Cost: three additional clauses on every macOS sandbox profile when `HOME` resolves and `CLAUDE_CONFIG_DIR` is unset. Symmetric to the [Per-provider state-dir allowances are emitted unconditionally for every supported CLI](#per-provider-state-dir-allowances-are-emitted-unconditionally-for-every-supported-cli) trade-off; provider plumbing is avoided.
+- This ADR amends [Per-provider state-dir allowances are emitted unconditionally for every supported CLI](#per-provider-state-dir-allowances-are-emitted-unconditionally-for-every-supported-cli) rather than replacing it: the per-provider state-dir clauses still emit unconditionally; the new clauses are scoped to the HOME-fallback branch only.
 
-## ADR-0107 — macOS sandbox wrapper resolves from trusted absolute locations
+## macOS sandbox wrapper resolves from trusted absolute locations
 
-**Status:** Accepted · 2026-05-11 02:06:39.411675Z · [T20260509-30]
-**Owner:** legacy:policy-sandbox
-**Created:** 2026-05-11 02:06:39.410913Z
-**Last updated:** 2026-05-11 02:06:39.411675Z
-**Related features:** `policy-sandbox`
-**Legacy IDs:** `policy-sandbox/ADR-015`
+**Recorded:** 2026-05-11 02:06:39.411675Z · [T20260509-30]
 
 ### Context
 The macOS CLI wrapper previously spawned `sandbox-exec` by bare name and checked availability by walking `PATH`. A writable or config-influenced `PATH` could point Orbit at an attacker-controlled wrapper while Orbit still believed kernel sandbox enforcement was active.
@@ -335,14 +260,9 @@ Resolve the wrapper only from trusted absolute locations, currently `/usr/bin/sa
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.
 
-## ADR-0304 — Use Bubblewrap for shipped Linux CLI write confinement
+## Use Bubblewrap for shipped Linux CLI write confinement
 
-**Status:** Accepted · 2026-08-01 23:26:11.357573Z · [ORB-10552]
-**Owner:** codex
-**Created:** 2026-08-01 23:17:39.413194Z
-**Last updated:** 2026-08-01 23:26:11.357573Z
-**Related features:** `policy-sandbox`
-**Tags:** `sandboxing`, `linux`, `bubblewrap`, `cli-backend`
+**Recorded:** 2026-08-01 23:26:11.357573Z · [ORB-10552]
 **Paths:** `crates/orbit-exec/src/linux_sandbox.rs`, `crates/orbit-engine/src/activity_job/cli_runner/**/*.rs`, `crates/orbit-core/src/runtime/v2_host/sandbox.rs`
 
 ### Context
@@ -357,14 +277,9 @@ Shipped Linux agent executors use the concrete `linux-bwrap` backend. Orbit reso
 - Provider-native sandbox flags are neutralized only after the outer wrapper passes its capability probe, so bare fallback retains the provider boundary.
 - Cost: Bubblewrap availability depends on `/usr/bin/bwrap` plus host user-namespace policy, and write confinement deliberately leaves the broad host read surface and provider network access delegated for a later decision.
 
-## ADR-0325 — Sandbox availability is a host precondition, not a runtime fallback
+## Sandbox availability is a host precondition, not a runtime fallback
 
-**Status:** Proposed · 2026-08-08 19:13:44.348233Z
-**Owner:** claude
-**Created:** 2026-08-08 19:13:44.348233Z
-**Last updated:** 2026-08-08 19:13:44.348233Z
-**Related features:** `policy-sandbox`, `activity-job`
-**Tags:** `sandbox`, `executor`, `host-policy`
+**Recorded:** 2026-08-08 19:13:44.348233Z
 **Paths:** `crates/orbit-exec/src/linux_sandbox.rs`, `crates/orbit-engine/src/activity_job/cli_runner/spawn.rs`, `crates/orbit-core/assets/executors/**`, `docs/runbooks/**`
 
 ### Context
@@ -398,14 +313,9 @@ Making a host capable of running the sandbox is an operator responsibility, and 
 - Cost: an operator whose host cannot be reconfigured — a managed or hardened environment where unprivileged user namespaces are unavailable and cannot be enabled — has no supported path except opting individual executors out of sandboxing entirely. This decision deliberately refuses the middle ground of automatic degradation, which means that operator carries a coarser, more explicit risk than a fallback would have given them.
 - Cost: the per-dispatch probe executes the sandbox helper on every dispatch. That is a real cost paid on every run to catch a condition that changes rarely, accepted because a stale cached answer is worse than the probe.
 
-## ADR-0327 — Derive Linux sandbox write-grant anchors from the effective profile at each spawn
+## Derive Linux sandbox write-grant anchors from the effective profile at each spawn
 
-**Status:** Proposed · 2026-08-09 03:42:52.076176Z · [ORB-10602]
-**Owner:** claude
-**Created:** 2026-08-09 03:42:52.076176Z
-**Last updated:** 2026-08-09 03:42:52.076176Z
-**Related features:** `policy-sandbox`, `activity-job`
-**Tags:** `sandbox`, `executor`, `worktree`, `grants`
+**Recorded:** 2026-08-09 03:42:52.076176Z · [ORB-10602]
 **Paths:** `crates/orbit-exec/src/linux_sandbox.rs`, `crates/orbit-engine/src/activity_job/cli_runner/spawn.rs`
 
 ### Context
@@ -444,14 +354,9 @@ Creation is confined to the managed worktree: every component that root owns is 
 - Cost: anchor shape for an absent exact rule is inferred, not declared. Spelling a directory grant as `<path>/**` remains the way to state it unambiguously.
 - Read-only git metadata for linked worktrees is unchanged and still out of scope.
 
-## ADR-0329 — Derive Linux sandbox write-grant anchors from the effective profile at each spawn
+## Derive Linux sandbox write-grant anchors from the effective profile at each spawn
 
-**Status:** Proposed · 2026-08-08 20:36:47.656731Z · [ORB-10602], [ORB-10607]
-**Owner:** codex
-**Created:** 2026-08-08 20:36:47.656731Z
-**Last updated:** 2026-08-08 20:36:47.656731Z
-**Related features:** `policy-sandbox`
-**Tags:** `linux`, `bubblewrap`, `policy`, `sandbox`
+**Recorded:** 2026-08-08 20:36:47.656731Z · [ORB-10602], [ORB-10607]
 **Paths:** `crates/orbit-exec/src/linux_sandbox.rs`, `crates/orbit-engine/src/activity_job/cli_runner/**/*.rs`, `docs/design/policy-sandbox/**`
 
 ### Context
@@ -501,7 +406,7 @@ Derive Linux write-grant candidates at every provider spawn from the same ordere
 - **[ORB-10552]** — Implement fail-closed Linux Bubblewrap write confinement and preserve the explicit read-policy limitation.
 - **[ORB-10560]** — Amend global deny resolution with profile-intersected host modify exceptions for versioned `.orbit` configuration.
 - **[ORB-10573]** — Amend Linux delivery with trusted, two-gate preparation of missing versioned-config mount anchors.
-- **[ORB-10602]** — Derive write-grant anchors from the effective profile at each spawn; remove the hardcoded target inventory and the context-file materialization gate. [ADR-0329]
-- **[ORB-10607]** — Enforce final-policy materialization, canonical/symlink containment, rule-derived anchor types, and production failed-write attribution. [ADR-0329]
+- **[ORB-10602]** — Derive write-grant anchors from the effective profile at each spawn; remove the hardcoded target inventory and the context-file materialization gate. [Derive Linux sandbox write-grant anchors from the effective profile at each spawn](#derive-linux-sandbox-write-grant-anchors-from-the-effective-profile-at-each-spawn-1)
+- **[ORB-10607]** — Enforce final-policy materialization, canonical/symlink containment, rule-derived anchor types, and production failed-write attribution. [Derive Linux sandbox write-grant anchors from the effective profile at each spawn](#derive-linux-sandbox-write-grant-anchors-from-the-effective-profile-at-each-spawn-1)
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

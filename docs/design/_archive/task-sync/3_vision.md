@@ -95,7 +95,7 @@ Several projects use git itself as a coordination substrate for non-code data:
 
 - **`gh-pages`.** The original orphan-branch pattern. Documents are stored on a separate orphan branch in the same repo, deployed via `git push`. The pattern is operationally well-understood, but `gh-pages` is read-only on push (no concurrent-writer story) — task sync's contribution is the operation-aware replay layer.
 - **`git-notes`.** Annotates commits with metadata in a parallel ref namespace. Designed for CI metadata and code review. Conflict semantics are similar to ours (refs/notes are pushable, fetchable, and subject to non-fast-forward rejection), but git-notes assumes additive use; concurrent edits to the same note text fail to merge.
-- **`git-bug`.** A bug tracker that uses git refs as the storage. Closer in spirit to task sync than anything else. Uses an event-log model under separate refs (`refs/bugs/`). The design considered this approach explicitly and rejected event sourcing for the first sync release — see [4_decisions.md ADR-002](./4_decisions.md). git-bug is the strongest precedent that "tasks on git refs" is a coherent model.
+- **`git-bug`.** A bug tracker that uses git refs as the storage. Closer in spirit to task sync than anything else. Uses an event-log model under separate refs (`refs/bugs/`). The design considered this approach explicitly and rejected event sourcing for the first sync release — see [Operation-aware replay over text-merge or event sourcing](./4_decisions.md#operation-aware-replay-over-text-merge-or-event-sourcing). git-bug is the strongest precedent that "tasks on git refs" is a coherent model.
 - **`jj op log`.** The Jujutsu version-control system maintains an operations log as a parallel ref. Operations are first-class and replayable. Architecturally similar to event sourcing but at the VCS layer. Inspirational for the operation-aware replay model in [2_design.md §3.2](./2_design.md).
 - **`pijul`.** Patch-based VCS that side-steps the merge problem at a fundamental level. Out of scope for emulation but cited as an example of "git's three-way merge is not the only option."
 
@@ -153,7 +153,7 @@ Task sync inherits the team's existing git auth posture. Whatever the team uses 
 - **Jujutsu (jj) operations log** — `https://github.com/martinvonz/jj`. Operation-as-first-class-citizen at the VCS layer.
 - **Pijul** — `https://pijul.org`. Patch-theoretic VCS as a counterpoint to git's three-way merge.
 - **Martin Kleppmann, *Designing Data-Intensive Applications*** — chapters on event sourcing, CQRS, and conflict-free replication. The conceptual frame for [2_design.md §3](./2_design.md).
-- **Atlassian Bitbucket "Server Refs" docs** — branch-protection conventions for non-`refs/heads/` namespaces; consulted when evaluating the `refs/orbit/tasks` alternative rejected in [4_decisions.md ADR-001](./4_decisions.md).
+- **Atlassian Bitbucket "Server Refs" docs** — branch-protection conventions for non-`refs/heads/` namespaces; consulted when evaluating the `refs/orbit/tasks` alternative rejected in [Orphan branch as registry mechanism](./4_decisions.md#orphan-branch-as-registry-mechanism).
 
 ---
 

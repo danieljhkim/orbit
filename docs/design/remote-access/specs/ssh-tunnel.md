@@ -1,6 +1,6 @@
 # Spec: SSH-Tunnel Connect
 
-`orbit web connect <ssh-host>` establishes a foreground SSH tunnel to a remote machine's loopback dashboard, attaching to an already-running remote dashboard when one answers and spawning one only when nothing does ([ORB-10708], [ADR-0353]). It guarantees the local endpoint answers `/healthz` before returning control, and guarantees a remote `orbit web serve` process this invocation spawned is reaped when the tunnel ends — while an attached, pre-existing remote process is never touched. It adds no authentication of its own.
+`orbit web connect <ssh-host>` establishes a foreground SSH tunnel to a remote machine's loopback dashboard, attaching to an already-running remote dashboard when one answers and spawning one only when nothing does ([ORB-10708], [orbit web connect attaches to an already-running remote dashboard instead of always spawning one](../4_decisions.md#orbit-web-connect-attaches-to-an-already-running-remote-dashboard-instead-of-always-spawning-one)). It guarantees the local endpoint answers `/healthz` before returning control, and guarantees a remote `orbit web serve` process this invocation spawned is reaped when the tunnel ends — while an attached, pre-existing remote process is never touched. It adds no authentication of its own.
 
 ## Why This Exists
 
@@ -8,7 +8,7 @@ The dashboard binds loopback-only ([ORB-00360]) because it is unauthenticated. V
 
 ## Where It Lives
 
-The mechanism is [`orbit_common::utility::ssh_tunnel`](../../../../crates/orbit-common/src/utility/ssh_tunnel.rs) ([ORB-10710], [ADR-0354]): RAII child and teardown, port selection, forward arguments, `shell_quote`, `ssh` exit classification, readiness polling, and the attach-first `establish` sequence. Consumers supply a `TunnelSpec` (remote command, description, timeouts) and a readiness closure. `orbit web connect` and `orbit mcp serve --mode remote` are the two consumers; the invariants below bind both, with `/healthz` standing in for whatever readiness the consumer probes.
+The mechanism is [`orbit_common::utility::ssh_tunnel`](../../../../crates/orbit-common/src/utility/ssh_tunnel.rs) ([ORB-10710], [Own the SSH local-forward tunnel once, at the leaf, shared by every loopback listener](../../mcp-bridge/4_decisions.md#own-the-ssh-local-forward-tunnel-once-at-the-leaf-shared-by-every-loopback-listener)): RAII child and teardown, port selection, forward arguments, `shell_quote`, `ssh` exit classification, readiness polling, and the attach-first `establish` sequence. Consumers supply a `TunnelSpec` (remote command, description, timeouts) and a readiness closure. `orbit web connect` and `orbit mcp serve --mode remote` are the two consumers; the invariants below bind both, with `/healthz` standing in for whatever readiness the consumer probes.
 
 ## Invariants
 

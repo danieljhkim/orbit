@@ -10,14 +10,14 @@ summary: "How an operator views Orbit across every local workspace and across ma
 tags: [remote-access]
 paths: ["crates/orbit-dashboard/**", "crates/orbit-remote/src/runtime.rs", "crates/orbit-remote/src/workspace_registry.rs", "crates/orbit-cli/src/command/web.rs", "crates/orbit-cli/src/command/operation.rs"]
 related_features: [remote-access, user-interface, host-registry]
-related_artifacts: [ORB-00029, ORB-00030, ORB-00360, ORB-10029, ORB-10200, ORB-10310, ORB-10319, ORB-10400, ORB-10708, ADR-0200, ADR-0201, ADR-0353]
+related_artifacts: [ORB-00029, ORB-00030, ORB-00360, ORB-10029, ORB-10200, ORB-10310, ORB-10319, ORB-10400, ORB-10708]
 ---
 
 # Remote Access — Overview
 
-Remote access is how one operator sees Orbit beyond a single workspace and a single machine — every workspace registered on a box at once (`orbit web serve`, the only mode since [ORB-10029]), and a box's loopback dashboard from another machine over an SSH tunnel (`orbit web connect <ssh-host>`). It is the shipped answer to the cross-machine task-visibility gap, and it is deliberately a *viewer*, not a shared store: nothing is synchronized, merged, or written across machines. It supersedes the archived git-orphan-branch [`task-sync`](../_archive/task-sync/1_overview.md) design (see [4_decisions.md ADR-0200](./4_decisions.md)).
+Remote access is how one operator sees Orbit beyond a single workspace and a single machine — every workspace registered on a box at once (`orbit web serve`, the only mode since [ORB-10029]), and a box's loopback dashboard from another machine over an SSH tunnel (`orbit web connect <ssh-host>`). It is the shipped answer to the cross-machine task-visibility gap, and it is deliberately a *viewer*, not a shared store: nothing is synchronized, merged, or written across machines. It supersedes the archived git-orphan-branch [`task-sync`](../_archive/task-sync/1_overview.md) design (see [Live remote/multi-workspace dashboard viewing supersedes the git-sync task registry](./4_decisions.md#live-remotemulti-workspace-dashboard-viewing-supersedes-the-git-sync-task-registry)).
 
-This document is the entry point. [2_design.md](./2_design.md) specifies the two surfaces and how they compose; [3_vision.md](./3_vision.md) names the open questions and what is deliberately unbuilt; [4_decisions.md](./4_decisions.md) is the ADR log.
+This document is the entry point. [2_design.md](./2_design.md) specifies the two surfaces and how they compose; [3_vision.md](./3_vision.md) names the open questions and what is deliberately unbuilt; [4_decisions.md](./4_decisions.md) is the decision log.
 
 ---
 
@@ -40,15 +40,15 @@ The [archived task-sync design](../_archive/task-sync/1_overview.md) proposed cl
 
 ### 2.2 Workspace-keyed state + the `Ws` extractor
 
-The dashboard's axum state is a workspace-keyed, lazily-built runtime map ([`DashboardState`](../../../crates/orbit-dashboard/src/state.rs)) rather than a single runtime. Each request selects its workspace through the `Ws` extractor via a `?workspace=<id>` query parameter (falling back to a configured default). Stale-path workspaces are listed but skipped, never built. The machinery decision is owned by [user-interface ADR-00030](../user-interface/4_decisions.md).
+The dashboard's axum state is a workspace-keyed, lazily-built runtime map ([`DashboardState`](../../../crates/orbit-dashboard/src/state.rs)) rather than a single runtime. Each request selects its workspace through the `Ws` extractor via a `?workspace=<id>` query parameter (falling back to a configured default). Stale-path workspaces are listed but skipped, never built. The machinery decision is owned by [Global, Multi-Workspace Dashboard](../user-interface/4_decisions.md#global-multi-workspace-dashboard).
 
 ### 2.3 SSH-tunnel connect
 
-`orbit web connect <ssh-host>` forwards a local port over a single `ssh` invocation and waits for `/healthz`. It probes first: if a remote dashboard already answers through a bare forward, it attaches to that and never spawns anything ([ORB-10708], [4_decisions.md ADR-0353](./4_decisions.md)). Only when nothing answers does it run `orbit web serve --no-open` on the remote instead. Either way it opens a browser once ready, and tears the tunnel down on Ctrl-C — reaping the remote serve process only if this invocation spawned one; an attached, pre-existing one is left running. `--root` and `--global` are forwarded to the remote serve in spawn mode only (`--global` is a no-op against a post-[ORB-10029] remote; it matters only against an older remote binary). Introduced by [ORB-00029]; the transport decision is [4_decisions.md ADR-0201](./4_decisions.md).
+`orbit web connect <ssh-host>` forwards a local port over a single `ssh` invocation and waits for `/healthz`. It probes first: if a remote dashboard already answers through a bare forward, it attaches to that and never spawns anything ([ORB-10708], [orbit web connect attaches to an already-running remote dashboard instead of always spawning one](./4_decisions.md#orbit-web-connect-attaches-to-an-already-running-remote-dashboard-instead-of-always-spawning-one)). Only when nothing answers does it run `orbit web serve --no-open` on the remote instead. Either way it opens a browser once ready, and tears the tunnel down on Ctrl-C — reaping the remote serve process only if this invocation spawned one; an attached, pre-existing one is left running. `--root` and `--global` are forwarded to the remote serve in spawn mode only (`--global` is a no-op against a post-[ORB-10029] remote; it matters only against an older remote binary). Introduced by [ORB-00029]; the transport decision is [Remote dashboard access is an SSH tunnel over a loopback-only bind, never a network bind with auth](./4_decisions.md#remote-dashboard-access-is-an-ssh-tunnel-over-a-loopback-only-bind-never-a-network-bind-with-auth).
 
 ### 2.4 Viewing is not sync
 
-Remote access shows what already exists on a machine that is online and reachable. It has **no** offline path, **no** write/merge across machines, and the "All workspaces" aggregate is per-machine, not cross-machine. This boundary is the core cost named in [4_decisions.md ADR-0200](./4_decisions.md); a team that needs a shared *writable* registry is not served by it.
+Remote access shows what already exists on a machine that is online and reachable. It has **no** offline path, **no** write/merge across machines, and the "All workspaces" aggregate is per-machine, not cross-machine. This boundary is the core cost named in [Live remote/multi-workspace dashboard viewing supersedes the git-sync task registry](./4_decisions.md#live-remotemulti-workspace-dashboard-viewing-supersedes-the-git-sync-task-registry); a team that needs a shared *writable* registry is not served by it.
 
 ---
 
@@ -73,7 +73,7 @@ Remote access shows what already exists on a machine that is online and reachabl
 ## Task References
 
 - [ORB-00029] — Added `orbit web connect <ssh-host>`: SSH-tunnel viewing of a remote machine's dashboard, later extended to forward `--global`.
-- [ORB-10708] — Made `connect` probe for and attach to an already-running remote dashboard instead of always spawning one; see [ADR-0353].
+- [ORB-10708] — Made `connect` probe for and attach to an already-running remote dashboard instead of always spawning one; see [orbit web connect attaches to an already-running remote dashboard instead of always spawning one](./4_decisions.md#orbit-web-connect-attaches-to-an-already-running-remote-dashboard-instead-of-always-spawning-one).
 - [ORB-00030] — Made the dashboard global/multi-workspace: workspace-keyed state, `Ws` extractor, serve-from-anywhere, aggregate endpoints.
 - [ORB-00360] — Restricted the dashboard to loopback binds only and fixed stored XSS; the security floor remote access builds on.
 - [ORB-10029] — Made global mode the default and only mode for `orbit web serve`; `--global` is now a deprecated no-op retained for `connect` passthrough.

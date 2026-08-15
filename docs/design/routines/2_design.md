@@ -10,7 +10,7 @@ summary: Proposed contract for routine definitions, sweep dispatch, host-local s
 tags: [routines, scheduler]
 paths: ["crates/orbit-cli/src/command/routine/**", "crates/orbit-core/src/routines/**", "crates/orbit-remote/src/routines.rs", "crates/orbit-store/src/sqlite/routine_store/**"]
 related_features: [routines, activity-job, host-registry]
-related_artifacts: [ORB-10001, ORB-10021, ORB-10207, ORB-10270, ORB-10319, ADR-0223, ADR-0355, ORB-10800, ADR-0366]
+related_artifacts: [ORB-10001, ORB-10021, ORB-10207, ORB-10270, ORB-10319, ORB-10800]
 ---
 
 # Routines — Design
@@ -36,7 +36,7 @@ it preserves routine cursors, fire history, and per-routine pauses, and a delibe
 `set --cadence-seconds N` atomically rewrites the host setting and reloads the existing
 unit identity. On an activation failure Orbit reports the concrete native recovery
 command rather than claiming the clock is active. launchd and systemd user managers are
-the supported platforms; there is no resident Orbit daemon ([ADR-0355]).
+the supported platforms; there is no resident Orbit daemon ([Host-local sweep clock configuration](./4_decisions.md#host-local-sweep-clock-configuration)).
 
 ---
 
@@ -76,8 +76,8 @@ Field semantics:
   reserved and rejected at parse time with wrapping guidance: run dispatch is job-shaped
   (`submit_pipeline_run` resolves jobs by name; nothing dispatches a bare activity), and a
   one-step wrapper job in the same source workspace is the existing composition grammar
-  ([ADR-0206]). There is deliberately no inline command form: the `shell` activity variant
-  was removed fail-closed in [ORB-00374] / [ADR-0194], and reintroducing arbitrary-command
+  ([Routine targets are catalog references only — no inline command payloads](./4_decisions.md#routine-targets-are-catalog-references-only-no-inline-command-payloads)). There is deliberately no inline command form: the `shell` activity variant
+  was removed fail-closed in [ORB-00374] / [The v2 shell activity surface is removed, not sandboxed](../activity-job/4_decisions.md#the-v2-shell-activity-surface-is-removed-not-sandboxed), and reintroducing arbitrary-command
   payloads through the scheduler would reopen that surface on a timer.
 - **`policy`** — applied by the dispatcher around the run: timeout, bounded retries with
   fixed backoff, and overlap handling. `overlap: forbid` is the default; `timeout_minutes`
@@ -105,7 +105,7 @@ it adds a newly shipped default or recreates a deleted default, but byte-for-byt
 existing definitions, including `enabled`, `hosts`, cron, and policy edits. Only destructive
 force initialization recreates the workspace and therefore restores template defaults.
 
-After [ORB-10800] / [ADR-0366], routine seeding is manifest-aware: `.orbit/routines/`
+After [ORB-10800] / [All five definition-artifact kinds carry managed provenance, and doctor reports it](../activity-job/4_decisions.md#all-five-definition-artifact-kinds-carry-managed-provenance-and-doctor-reports-it), routine seeding is manifest-aware: `.orbit/routines/`
 carries a `.orbit-managed-assets.json` recording the digest Orbit last wrote for each
 seeded default. The digest is taken over the *rendered* document — after the host-id and
 routine-name placeholders resolve — because that is what actually lands on disk. Two
@@ -122,7 +122,7 @@ branch, invokes and waits for `task_auto_pipeline` without explicit task IDs, an
 its result. It never calls the legacy cross-workspace CLI sweep or consults
 `[workflow] auto_ship`; the child's existing empty-backlog path is a successful no-op.
 Waiting keeps the wrapper run active for the whole shipment, so routine overlap protection
-covers the child rather than only submission ([ADR-0223]).
+covers the child rather than only submission ([Delegate workspace ship routines through a synchronous wrapper job](./4_decisions.md#delegate-workspace-ship-routines-through-a-synchronous-wrapper-job)).
 
 ---
 
@@ -272,7 +272,7 @@ out of v1 scope for this reason.
 - **Scheduled execution is a real capability escalation.** A routine source workspace is
   scheduled code execution on every host that trusts it. Targets are catalog-resolved (no
   inline commands) and run under existing activity/job policy, but note the sandbox caveat
-  recorded in [ADR-0196]: enforcement depends on which runtime path the target takes.
+  recorded in [External Executor Protocol for dynamic out-of-process executor registration (retired)](../executors/4_decisions.md#external-executor-protocol-for-dynamic-out-of-process-executor-registration-retired): enforcement depends on which runtime path the target takes.
   PR review on the source workspace is part of the security boundary.
 - **Minute granularity, host-local time.** Cron is evaluated in host-local time; DST folds
   can skip or double a slot exactly as classic cron does. The idempotency key (name + slot)

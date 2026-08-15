@@ -11,32 +11,21 @@ summary: Decision record for host identity, per-machine coordination, prefix-par
 tags: [host-registry, mcp-bridge, multi-host, ownership]
 paths: ["crates/orbit-remote/**", "crates/orbit-core/**", "crates/orbit-store/**", "crates/orbit-mcp/**"]
 related_features: [host-registry, mcp-bridge]
-related_artifacts: [ORB-00424, ORB-10245, ORB-10248, ORB-10249, ORB-10255, ORB-10257, ORB-10267, ORB-10258, ORB-10268, ORB-10269, ORB-10271, ORB-10272, ORB-10276, ORB-10302, ORB-10319, ORB-10330, ORB-10332, ORB-10709, ORB-10723, ORB-10728, ORB-10730, ADR-0226, ADR-0227, ADR-0228, ADR-0229, ADR-0230, ADR-0231, ADR-0232, ADR-0235, ADR-0240, ADR-0352, ADR-0355, ADR-0356, ADR-0357, ADR-0358]
+related_artifacts: [ORB-00424, ORB-10245, ORB-10248, ORB-10249, ORB-10255, ORB-10257, ORB-10267, ORB-10258, ORB-10268, ORB-10269, ORB-10271, ORB-10272, ORB-10276, ORB-10302, ORB-10319, ORB-10330, ORB-10332, ORB-10709, ORB-10723, ORB-10728, ORB-10730]
 ---
 
 # Host Registry — Decisions
 
-Decision record for `host-registry`, in ascending number order. Entries are
-append-only: a superseded decision keeps its heading and body so the reason the
-earlier architecture existed is not rewritten after the fact. This file is the
-authoritative body — see [CONVENTIONS.md §4](../CONVENTIONS.md#4-adrs-strict) for
-why there is no longer a store behind it.
-
-ADR-0226 through ADR-0232 were the consolidated v1 behaviour contract shared with
+[Singular coordination hub, workspace owner, and per-run placement](#singular-coordination-hub-workspace-owner-and-per-run-placement) through [Retire Bridge’s Orbit-shaped contract](#retire-bridges-orbit-shaped-contract) were the consolidated v1 behaviour contract shared with
 [mcp-bridge](../mcp-bridge/4_decisions.md), built around a single coordination hub.
-**Four of them are superseded** by ADR-0355–ADR-0358, which replace the singular
-hub with per-machine coordination. ADR-0235 records the first registry-only crate
-extraction and ADR-0240 the vertical Remote boundary that replaced it; both are
-unaffected, as is ADR-0352.
+**Four of them are superseded** by [Every machine is its own coordination host](#every-machine-is-its-own-coordination-host)–[Defer fleet registration and execution placement to v2](#defer-fleet-registration-and-execution-placement-to-v2), which replace the singular
+hub with per-machine coordination. [Make orbit-registry the singular host/workspace registry domain crate](#make-orbit-registry-the-singular-hostworkspace-registry-domain-crate) records the first registry-only crate
+extraction and [Consolidate remote host and MCP behavior in the vertical orbit-remote crate](#consolidate-remote-host-and-mcp-behavior-in-the-vertical-orbit-remote-crate) the vertical Remote boundary that replaced it; both are
+unaffected, as is [Gate workflow dispatch on an exclusive TTL'd workspace claim](#gate-workflow-dispatch-on-an-exclusive-ttld-workspace-claim).
 
-## ADR-0226 — Singular coordination hub, workspace owner, and per-run placement
+## Singular coordination hub, workspace owner, and per-run placement
 
-**Status:** Accepted · 2026-07-17 07:03:25.976551Z · [ORB-10245]
-**Owner:** codex
-**Created:** 2026-07-17 07:02:53.852664Z
-**Last updated:** 2026-07-17 07:03:25.976551+00:00
-**Related features:** `host-registry`, `mcp-bridge`
-**Tags:** `coordination`, `ownership`, `placement`, `v1`
+**Recorded:** 2026-07-17 07:03:25.976551Z · [ORB-10245]
 **Paths:** `docs/design/host-registry/**`, `docs/design/mcp-bridge/**`
 
 ### Context
@@ -47,14 +36,9 @@ Use exactly one coordination hub for every workspace, declare one workspace owne
 - Coordination writes remain hub-routed while knowledge authorship remains owner-bound.
 - Cost: hub downtime stalls coordination for every workspace, and disconnected machines cannot write coordination records.
 
-## ADR-0227 — Stable machine identity, registry, and out-of-band hub pin
+## Stable machine identity, registry, and out-of-band hub pin
 
-**Status:** Accepted · 2026-07-17 07:03:26.175980Z · [ORB-10245], [ORB-10255]
-**Owner:** codex
-**Created:** 2026-07-17 07:03:20.499802Z
-**Last updated:** 2026-07-18 07:04:05.364678Z
-**Related features:** `host-registry`, `mcp-bridge`
-**Tags:** `identity`, `registry`, `transport-trust`, `v1`
+**Recorded:** 2026-07-17 07:03:26.175980Z · [ORB-10245], [ORB-10255]
 **Paths:** `docs/design/host-registry/**`, `docs/design/mcp-bridge/**`
 
 ### Context
@@ -65,14 +49,9 @@ Assign every machine an immutable generated machine_id, keep the registry at the
 - Names resolve once at binding time and persisted records retain the stable identity.
 - Cost: bootstrap transfers the hub identity out of band and registry/trust drift requires explicit diagnosis.
 
-## ADR-0228 — Local placement broker with capability-set filtering
+## Local placement broker with capability-set filtering
 
-**Status:** Accepted · 2026-07-17 07:03:26.373231Z · [ORB-10245]
-**Owner:** codex
-**Created:** 2026-07-17 07:03:20.635772Z
-**Last updated:** 2026-07-17 07:03:26.373231Z
-**Related features:** `mcp-bridge`, `host-registry`
-**Tags:** `broker`, `placement`, `capabilities`, `v1`
+**Recorded:** 2026-07-17 07:03:26.373231Z · [ORB-10245]
 **Paths:** `docs/design/mcp-bridge/**`
 
 ### Context
@@ -83,14 +62,9 @@ Make the client-facing MCP process a local placement broker whose canonical tool
 - Tool schemas have one placement and a non-empty allowed capability set.
 - Cost: the broker owns route preflight, composite auditing, and capability-by-placement conformance coverage.
 
-## ADR-0229 — Owner-authored knowledge with hub-global IDs and explicit replicas
+## Owner-authored knowledge with hub-global IDs and explicit replicas
 
-**Status:** Accepted · 2026-07-17 07:03:26.566162Z · [ORB-10245]
-**Owner:** codex
-**Created:** 2026-07-17 07:03:20.765693Z
-**Last updated:** 2026-07-17 07:03:26.566162Z
-**Related features:** `host-registry`, `mcp-bridge`
-**Tags:** `knowledge`, `ownership`, `replicas`, `ids`, `v1`
+**Recorded:** 2026-07-17 07:03:26.566162Z · [ORB-10245]
 **Paths:** `docs/design/host-registry/**`, `docs/design/mcp-bridge/**`
 
 ### Context
@@ -101,14 +75,9 @@ The hub allocates global IDs, the declared owner authors current knowledge, and 
 - A non-owner agent files work for the owner rather than writing through a new route.
 - Cost: finalize failures consume valid-but-unused IDs and current spoke-owned knowledge is unavailable off-owner.
 
-## ADR-0230 — Pull-based leases with immutable placement and explicit recovery
+## Pull-based leases with immutable placement and explicit recovery
 
-**Status:** Accepted · 2026-07-17 07:03:26.764043Z · [ORB-10245]
-**Owner:** codex
-**Created:** 2026-07-17 07:03:20.898467Z
-**Last updated:** 2026-07-17 07:03:26.764043Z
-**Related features:** `host-registry`, `mcp-bridge`
-**Tags:** `leases`, `placement`, `recovery`, `runner`, `v1`
+**Recorded:** 2026-07-17 07:03:26.764043Z · [ORB-10245]
 **Paths:** `docs/design/host-registry/**`, `docs/design/mcp-bridge/**`
 
 ### Context
@@ -119,14 +88,9 @@ Spokes poll the hub for placed runs; requested and actual placement are immutabl
 - The hub is a mailbox and never opens a route to a spoke.
 - Cost: pickup latency follows poll cadence and an interrupted started run requires operator/shepherd recovery rather than silent reassignment.
 
-## ADR-0231 — Committed-routine ownership with host-local cursors
+## Committed-routine ownership with host-local cursors
 
-**Status:** Accepted · 2026-07-17 07:03:26.898178Z · [ORB-10245], [ORB-10258], [ORB-10270]
-**Owner:** codex
-**Created:** 2026-07-17 07:03:21.036752Z
-**Last updated:** 2026-07-18 23:03:06.740466Z
-**Related features:** `host-registry`
-**Tags:** `routines`, `ownership`, `cursor`, `v1`
+**Recorded:** 2026-07-17 07:03:26.898178Z · [ORB-10245], [ORB-10258], [ORB-10270]
 **Paths:** `docs/design/host-registry/**`, `docs/design/routines/**`
 
 ### Context
@@ -137,14 +101,9 @@ A committed routine is owned by its registry-validated host pin; unpinned commit
 - Reassigning a routine is a reviewed pin change rather than a git-status inference.
 - Cost: handoff starts with no migrated cursor and existing committed routines need explicit pins before enforcement.
 
-## ADR-0232 — Retire Bridge’s Orbit-shaped contract
+## Retire Bridge’s Orbit-shaped contract
 
-**Status:** Accepted · 2026-07-17 07:03:27.035875Z · [ORB-10245]
-**Owner:** codex
-**Created:** 2026-07-17 07:03:21.165568Z
-**Last updated:** 2026-07-17 07:03:27.035875Z
-**Related features:** `mcp-bridge`
-**Tags:** `bridge`, `contract`, `retirement`, `v1`
+**Recorded:** 2026-07-17 07:03:27.035875Z · [ORB-10245]
 **Paths:** `docs/design/mcp-bridge/**`
 
 ### Context
@@ -155,14 +114,9 @@ Retire Bridge’s Orbit-shaped contract after Orbit MCP reaches parity; Bridge r
 - Clients register Orbit and Bridge side by side during migration.
 - Cost: cutover temporarily maintains two client registrations and requires deleting a compatibility layer rather than extending it.
 
-## ADR-0235 — Make orbit-registry the singular host/workspace registry domain crate
+## Make orbit-registry the singular host/workspace registry domain crate
 
-**Status:** Accepted · 2026-07-18 18:58:42.207312Z · [ORB-10302]
-**Owner:** codex
-**Created:** 2026-07-18 18:58:37.266035Z
-**Last updated:** 2026-07-18 18:58:42.207312Z
-**Related features:** `host-registry`, `mcp-bridge`
-**Tags:** `crate-boundary`, `host-registry`, `singular-hub`
+**Recorded:** 2026-07-18 18:58:42.207312Z · [ORB-10302]
 **Paths:** `crates/orbit-registry/**`, `crates/orbit-core/src/host_registry.rs`, `crates/orbit-core/src/routines/host.rs`, `crates/orbit-core/src/workspace_registry.rs`, `crates/orbit-core/src/registry_cache.rs`, `crates/orbit-store/**`
 
 ### Context
@@ -180,15 +134,10 @@ Repurpose orbit-registry as the machine/workspace registry domain crate. It owns
 - Compatibility re-exports let current callers migrate imports incrementally without preserving a second domain implementation.
 - Cost: orbit-registry is no longer a consumer-agnostic leaf and now compiles the store layer; reversing this boundary would require moving the domain again or introducing a cycle-prone abstraction.
 
-## ADR-0240 — Consolidate remote host and MCP behavior in the vertical orbit-remote crate
+## Consolidate remote host and MCP behavior in the vertical orbit-remote crate
 
-**Status:** Accepted · 2026-07-19 07:19:02.142649Z · [ORB-10319]
-**Owner:** codex
-**Created:** 2026-07-19 03:09:37.970409Z
-**Last updated:** 2026-07-19 07:19:02.142649Z
-**Related features:** `host-registry`, `mcp-bridge`
-**Supersedes:** `ADR-0235`
-**Tags:** `architecture`, `crate-boundary`, `orbit-remote`, `vertical-feature`, `plugin-style`, `dependency-direction`
+**Recorded:** 2026-07-19 07:19:02.142649Z · [ORB-10319]
+**Supersedes:** [Make orbit-registry the singular host/workspace registry domain crate](#make-orbit-registry-the-singular-hostworkspace-registry-domain-crate)
 **Paths:** `crates/orbit-remote/**`, `crates/orbit-cli/src/command/mcp/**`, `crates/orbit-core/**`, `crates/orbit-store/**`, `crates/orbit-tools/**`, `crates/orbit-mcp/**`, `crates/orbit-common/**`, `crates/orbit-dashboard/**`, `ARCHITECTURE.md`, `scripts/check-dependency-direction.sh`, `docs/design/host-registry/**`, `docs/design/mcp-bridge/**`
 
 ### Context
@@ -205,7 +154,7 @@ The dependency direction is `orbit-cli|orbit-dashboard -> orbit-remote -> {orbit
 
 Keep the existing config-resolved global `orbit.db`. Shipped global migrations v5, v6, and v8 remain immutable compatibility shims and v7 remains Store-owned audit schema. Global v9 introduces only the generic feature-schema ledger; `orbit-remote` feature migration v1 validates and adopts the existing registry tables without copying, renaming, or rewriting data. All future remote schema changes advance the Remote feature ledger rather than editing Store's domain migration list.
 
-This decision supersedes ADR-0235's narrower `orbit-registry -> orbit-store` domain boundary and replaces the unimplemented `orbit-mcp-broker` proposal.
+This decision supersedes [Make orbit-registry the singular host/workspace registry domain crate](#make-orbit-registry-the-singular-hostworkspace-registry-domain-crate)'s narrower `orbit-registry -> orbit-store` domain boundary and replaces the unimplemented `orbit-mcp-broker` proposal.
 
 ### Consequences
 
@@ -216,14 +165,9 @@ This decision supersedes ADR-0235's narrower `orbit-registry -> orbit-store` dom
 - Historical migrations cannot be deleted after ownership moves; Store permanently retains the frozen bootstrap shims required to open old and fresh databases.
 - Cost: this is a larger atomic refactor than a broker-only move. It requires neutral Core factories/providers, one generic Store migration seam, MCP composition hooks, and coordinated test relocation before the crate rename can compile without a dependency cycle.
 
-## ADR-0352 — Gate workflow dispatch on an exclusive TTL'd workspace claim
+## Gate workflow dispatch on an exclusive TTL'd workspace claim
 
-**Status:** Accepted · 2026-08-10 03:19:10.679145Z · [ORB-10709]
-**Owner:** human
-**Created:** 2026-08-10 01:29:41.181497Z
-**Last updated:** 2026-08-10 03:19:10.679145Z
-**Related features:** `host-registry`
-**Tags:** `host-registry`, `workflow`, `capability`, `coordination`
+**Recorded:** 2026-08-10 03:19:10.679145Z · [ORB-10709]
 **Paths:** `crates/orbit-core/src/command/job/pipeline.rs`, `crates/orbit-core/src/runtime/workspace_claim.rs`, `crates/orbit-common/src/authorization.rs`, `crates/orbit-store/src/sqlite/**`, `crates/orbit-core/src/runtime/task_locks.rs`
 
 ### Context
@@ -268,14 +212,13 @@ Surfaces: `claim_token` on the `orbit.workflow.ship` / `orbit.workflow.run.resum
 - **Cost:** this contradicts the resident-orchestrator design, which chose one-active-epic plus non-overlapping routine fires plus a host pin specifically to avoid introducing a lease or assignee subsystem. That decision is revised, not left standing in contradiction.
 - Declared ownership stays what it is. The claim answers "which operator is driving this workspace right now", not "which machine holds the canonical checkout", and the two must not be collapsed.
 
-## ADR-0355 — Every machine is its own coordination host
+## Every machine is its own coordination host
 
-**Status:** Accepted · 2026-08 · supersedes [ADR-0226]
-**Scope:** coordination-record routing, workspace ownership, machine roles
+**Recorded:** 2026-08 · supersedes [Singular coordination hub, workspace owner, and per-run placement](#singular-coordination-hub-workspace-owner-and-per-run-placement)
 
 ### Context
 
-[ADR-0226] fixed the coordination plane at one main host for every workspace, with
+[Singular coordination hub, workspace owner, and per-run placement](#singular-coordination-hub-workspace-owner-and-per-run-placement) fixed the coordination plane at one main host for every workspace, with
 each machine declaring `mode = standalone | hub | spoke` at init. Because `mode` is
 machine-level, a machine that becomes a spoke routes *every* workspace on it to the
 hub — including projects that exist only on that machine. There was no per-workspace
@@ -316,10 +259,9 @@ rather than removed.
   (present on disk, absent from `list`, refused for writes), and only the error
   message explains it.
 
-## ADR-0356 — Machine-scoped task-id prefix instead of a global allocator
+## Machine-scoped task-id prefix instead of a global allocator
 
-**Status:** Accepted · 2026-08 · [ORB-10723] implemented prefix- and width-agnostic parsing, host-prefix minting, and registry-constrained text scanning; [ORB-10728] implemented foreign-prefix relation storage and local-only validation.
-**Scope:** task ID minting, ID parsing, cross-machine references
+**Recorded:** 2026-08 · [ORB-10723] implemented prefix- and width-agnostic parsing, host-prefix minting, and registry-constrained text scanning; [ORB-10728] implemented foreign-prefix relation storage and local-only validation.
 **Code anchors:** `crates/orbit-common/src/types/task_artifacts.rs`, `crates/orbit-common/src/types/task.rs::task_reference_is_not_verifiable_here`, `crates/orbit-store/src/sqlite/task_registry/store.rs::parse_orb_task_number`, `crates/orbit-core/src/command/docs/artifact_ref.rs`
 
 ### Context
@@ -344,7 +286,7 @@ a human-scale choice, not a coordinated allocation. Reject `ORB`, `ADR`, `L`, an
   must be reachable to file a task.
 - Divergent ownership becomes recoverable: two machines that both believe they own a
   workspace produce disjoint task sets that merge by union with nothing to renumber.
-  This is what makes deferring registration ([ADR-0358]) safe, so the two decisions
+  This is what makes deferring registration ([Defer fleet registration and execution placement to v2](#defer-fleet-registration-and-execution-placement-to-v2)) safe, so the two decisions
   hold each other up and neither should be adopted alone.
 - Moving a workspace between owners becomes a row copy rather than an ID rewrite.
 - An unresolved target under a locally known prefix remains invalid. An unresolved
@@ -359,10 +301,9 @@ a human-scale choice, not a coordinated allocation. Reject `ORB`, `ADR`, `L`, an
   which makes the text scanner weaker against prose — it must match only prefixes
   known to the local registry rather than any `[A-Z]{2,5}-[0-9]+` shape.
 
-## ADR-0357 — Workspace-scoped knowledge keys, no global knowledge IDs
+## Workspace-scoped knowledge keys, no global knowledge IDs
 
-**Status:** Accepted · 2026-08 · supersedes [ADR-0229]
-**Scope:** learnings, ADRs, frictions; any cross-workspace read surface
+**Recorded:** 2026-08 · supersedes [Owner-authored knowledge with hub-global IDs and explicit replicas](#owner-authored-knowledge-with-hub-global-ids-and-explicit-replicas)
 
 ### Context
 
@@ -388,21 +329,20 @@ addressable.
 
 - The reservation/finalization protocol evaporates — no expiry, no orphaned IDs, no
   finalize/pull race, because there is no allocation step.
-- Owner-only authorship (the rule [ADR-0229] established) survives unchanged, and
+- Owner-only authorship (the rule [Owner-authored knowledge with hub-global IDs and explicit replicas](#owner-authored-knowledge-with-hub-global-ids-and-explicit-replicas) established) survives unchanged, and
   now needs no protocol to enforce it.
 - Together with the retirement of the ADR store
-  ([CONVENTIONS.md §4](../CONVENTIONS.md#4-adrs-strict)), the last consumer of
+  ([CONVENTIONS.md §4](../CONVENTIONS.md#4-decisions)), the last consumer of
   hub-allocated knowledge IDs disappears.
-- Cost: `ADR-0234` means different things in different workspaces. Cross-repo
-  citation is now forbidden rather than merely discouraged, and the existing
-  merged-search footgun — an ID that silently addresses the wrong record — widens
+- Cost: the same decision title can mean different things in different workspaces.
+  Cross-repo citation is forbidden rather than merely discouraged, and the existing
+  merged-search footgun — a context-free result that silently addresses the wrong record — widens
   from frictions to every knowledge type. Fixing the search projection is a
   precondition of this change, not a follow-up.
 
-## ADR-0358 — Defer fleet registration and execution placement to v2
+## Defer fleet registration and execution placement to v2
 
-**Status:** Accepted · 2026-08 · [ORB-10730] implemented the dormant fleet boundary and local routine-pin validation; supersedes [ADR-0230]; defers parts of [ADR-0227], [ADR-0228]; amends [ADR-0231]
-**Scope:** multi-machine scope boundary; what v1 refuses to build
+**Recorded:** 2026-08 · [ORB-10730] implemented the dormant fleet boundary and local routine-pin validation; supersedes [Pull-based leases with immutable placement and explicit recovery](#pull-based-leases-with-immutable-placement-and-explicit-recovery); defers parts of [Stable machine identity, registry, and out-of-band hub pin](#stable-machine-identity-registry-and-out-of-band-hub-pin), [Local placement broker with capability-set filtering](#local-placement-broker-with-capability-set-filtering); amends [Committed-routine ownership with host-local cursors](#committed-routine-ownership-with-host-local-cursors)
 
 ### Context
 
@@ -428,7 +368,7 @@ contradicts rather than merely anticipates the new model.
 
 ### Decision boundary
 
-Deferring registration is only safe because [ADR-0356] makes competing ownership
+Deferring registration is only safe because [Machine-scoped task-id prefix instead of a global allocator](#machine-scoped-task-id-prefix-instead-of-a-global-allocator) makes competing ownership
 claims produce disjoint records. Adopting this deferral without the prefix change
 would leave a silent, unrecoverable ID collision.
 
@@ -448,13 +388,9 @@ would leave a silent, unrecoverable ID collision.
   becomes dormant. "Deferred" is a promise that costs maintenance and may never be
   collected.
 
-## ADR-0243 — Drop the autonomous spoke runner track in favor of orchestrator-driven dispatch
+## Drop the autonomous spoke runner track in favor of orchestrator-driven dispatch
 
-**Status:** Proposed · 2026-07-19 21:59:19.974550Z · [ORB-10281], [ORB-10282], [ORB-10283], [ORB-10284], [ORB-10246], [ORB-10269]
-**Owner:** human
-**Created:** 2026-07-19 21:59:19.974550Z
-**Last updated:** 2026-07-19 21:59:19.974550Z
-**Tags:** `host-registry`, `mcp-bridge`, `runner`, `execution-placement`
+**Recorded:** 2026-07-19 21:59:19.974550Z · [ORB-10281], [ORB-10282], [ORB-10283], [ORB-10284], [ORB-10246], [ORB-10269]
 
 ### Context
 
@@ -480,8 +416,8 @@ If a second execution machine materializes, reach it with supervised push-style 
 - [ORB-00424] — completed design proposal for canonical Orbit MCP and Bridge parity retirement.
 - [ORB-10245] — accepted the coupled contract and recorded this ADR set.
 - [ORB-10709] — shipped the exclusive TTL'd workspace claim and gated workflow
-  dispatch on it at the shared run-submission path (ADR-0352).
-- [ORB-10723] — implemented ADR-0356: task parsing accepts registered machine
+  dispatch on it at the shared run-submission path ([Gate workflow dispatch on an exclusive TTL'd workspace claim](#gate-workflow-dispatch-on-an-exclusive-ttld-workspace-claim)).
+- [ORB-10723] — implemented [Machine-scoped task-id prefix instead of a global allocator](#machine-scoped-task-id-prefix-instead-of-a-global-allocator): task parsing accepts registered machine
   prefixes and wider numeric suffixes, while allocation retains one monotonic
   machine sequence and formats it with the immutable host prefix.
 - [ORB-10728] — stores unresolved foreign-prefix task relations with an explicit
@@ -493,14 +429,14 @@ If a second execution machine materializes, reach it with supervised push-style 
   cache codecs, and tables as explicitly documented dormant v2 modules.
 - [ORB-10248] — implemented the versioned logical-workspace/local-checkout split.
 - [ORB-10249] — implemented path-free task coordination and global task-relation/readiness lookup.
-- [ORB-10255] — implemented ADR-0227's append-only SQLite host/alias core with
+- [ORB-10255] — implemented [Stable machine identity, registry, and out-of-band hub pin](#stable-machine-identity-registry-and-out-of-band-hub-pin)'s append-only SQLite host/alias core with
   compatible idempotent registration, permanent rename history, typed resolution,
   and non-deleting retirement.
-- [ORB-10258] — implemented the enforcement half of ADR-0231 (Unit R1 of ORB-10246):
+- [ORB-10258] — implemented the enforcement half of [Committed-routine ownership with host-local cursors](#committed-routine-ownership-with-host-local-cursors) (Unit R1 of ORB-10246):
   origin-aware routine loading. Committed definitions fail closed without a non-empty host
   pin; `.orbit/routines/local/` definitions are implicit to the loading host and may not
   name another host; cross-origin name collisions fail deterministically.
-- [ORB-10270] — completed ADR-0231 enforcement (Unit R2): registry/cache-aware validation
+- [ORB-10270] — completed [Committed-routine ownership with host-local cursors](#committed-routine-ownership-with-host-local-cursors) enforcement (Unit R2): registry/cache-aware validation
   runs before scheduler mutation, degraded cache evidence remains warning-only with exact
   local fallback, and reassignment preserves A while B baselines without backfill.
 - [ORB-10267] — implemented Unit C3 of ORB-10246: operator host administration
@@ -530,12 +466,12 @@ If a second execution machine materializes, reach it with supervised push-style 
   guard, path-free coordination frames, friction reads, and two-root canary.
 - [ORB-10302] — implemented Unit C4: moved the host/workspace/cache/service domain
   and its tests into `orbit-registry`, retired the replicated-registry scaffold,
-  and preserved core/store/common ownership boundaries ([ADR-0235]).
-- [ORB-10319] — implements the proposed ADR-0240 boundary by renaming and widening
+  and preserved core/store/common ownership boundaries ([Make orbit-registry the singular host/workspace registry domain crate](#make-orbit-registry-the-singular-hostworkspace-registry-domain-crate)).
+- [ORB-10319] — implements the proposed [Consolidate remote host and MCP behavior in the vertical orbit-remote crate](#consolidate-remote-host-and-mcp-behavior-in-the-vertical-orbit-remote-crate) boundary by renaming and widening
   the registry crate into vertical `orbit-remote`, adopting its persistence in
   place, moving profile/routine/MCP composition into the feature, and removing
   Registry/Remote dependencies from Core and MCP.
-- [ORB-10272] — implements ADR-0229's dormant allocation substrate in Remote v2:
+- [ORB-10272] — implements [Owner-authored knowledge with hub-global IDs and explicit replicas](#owner-authored-knowledge-with-hub-global-ids-and-explicit-replicas)'s dormant allocation substrate in Remote v2:
   full pre-mutation legacy reconciliation, independent forward-only ADR/learning
   sequences, immutable correlation ledger plus atomic audit, replay-safe lookup,
   and late-workspace ineligibility. F3 retains authority over public activation and

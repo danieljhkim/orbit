@@ -13,20 +13,13 @@ tags: ["auditability"]
 
 # Auditability — Decisions
 
-This is the append-only ADR log for Auditability. Entries are ordered by ADR number. New entries should use the template in [../CONVENTIONS.md](../CONVENTIONS.md) and cite the task that made the decision real.
-
-Historical note ([ORB-10458]): the entries listed below were authored with local IDs that had no record in the ADR store. They were allocated through `orbit.adr.add`, their narratives migrated into the store verbatim, and their headings rewritten to the allocated global ID. The original local IDs survive as `legacy_ids`, so prior citations still resolve via `orbit tool run orbit.adr.show --input '{"legacy_id":"<feature>/ADR-NNN"}'`. Backfilled here: `auditability/ADR-012` → ADR-0278, `auditability/ADR-022` → ADR-0279, `auditability/ADR-023` → ADR-0280.
+This is the decision log for Auditability. Entries stay in historical order and use title-based links. New entries should use the template in [../CONVENTIONS.md](../CONVENTIONS.md) and cite the task that made the decision real.
 
 ---
 
-## ADR-0026 — Dedicated auditability design ownership
+## Dedicated auditability design ownership
 
-**Status:** Accepted · 2026-05-11 02:06:39.308694Z · [T20260426-0605]
-**Owner:** legacy:auditability
-**Created:** 2026-05-11 02:06:39.307854Z
-**Last updated:** 2026-05-11 02:06:39.308694+00:00
-**Related features:** `auditability`
-**Legacy IDs:** `auditability/ADR-001`
+**Recorded:** 2026-05-11 02:06:39.308694Z · [T20260426-0605]
 
 ### Context
 Auditability is a primary Orbit feature, but its implementation and rationale were spread across README prose, Activity / Job docs, SQLite audit code, loop audit code, and redaction utilities.
@@ -35,17 +28,12 @@ Auditability is a primary Orbit feature, but its implementation and rationale we
 Create `docs/design/auditability/` as the canonical auditability design folder, owned by codex.
 
 ### Consequences
-- Audit decisions now have one ADR log and one glossary.
+- Audit decisions now have one decision log and one glossary.
 - Cost: auditability overlaps with Activity / Job docs, so cross-links must stay current instead of duplicating the full runtime design.
 
-## ADR-0027 — Command audit rows stay compact and queryable
+## Command audit rows stay compact and queryable
 
-**Status:** Accepted · 2026-05-11 02:06:39.310068Z · [T20260426-0605]
-**Owner:** legacy:auditability
-**Created:** 2026-05-11 02:06:39.309194Z
-**Last updated:** 2026-05-11 02:06:39.310068Z
-**Related features:** `auditability`
-**Legacy IDs:** `auditability/ADR-002`
+**Recorded:** 2026-05-11 02:06:39.310068Z · [T20260426-0605]
 
 ### Context
 CLI commands need durable, filterable history across processes, but full provider payloads would make routine queries noisy and expensive.
@@ -57,14 +45,9 @@ Keep command audit records as compact SQLite rows with command, target, role, st
 - `orbit audit list/show/stats/export` can stay fast and table-shaped.
 - Cost: complete incident reconstruction may require joining command rows with job state and file-backed traces.
 
-## ADR-0028 — V2 run structure and loop transcript detail are separate audit layers
+## V2 run structure and loop transcript detail are separate audit layers
 
-**Status:** Accepted · 2026-05-11 02:06:39.311565Z · [T20260419-0002]
-**Owner:** legacy:auditability
-**Created:** 2026-05-11 02:06:39.310624Z
-**Last updated:** 2026-05-11 02:06:39.311565Z
-**Related features:** `auditability`
-**Legacy IDs:** `auditability/ADR-003`
+**Recorded:** 2026-05-11 02:06:39.311565Z · [T20260419-0002]
 
 ### Context
 Activity/job execution needs run, step, retry, fan-out, loop, and activity structure. Provider loops need HTTP, tool-call, payload, and session detail.
@@ -76,14 +59,9 @@ Use `V2AuditEnvelope` for activity/job structure and `LoopAuditEvent` for provid
 - Workflow replay can traverse a run tree without loading every provider payload.
 - Cost: reviewers need tooling or documentation to move between related files.
 
-## ADR-0029 — File-backed run traces are workspace-local state
+## File-backed run traces are workspace-local state
 
-**Status:** Accepted · 2026-05-11 02:06:39.312800Z · [T20260426-0519]
-**Owner:** legacy:auditability
-**Created:** 2026-05-11 02:06:39.311993Z
-**Last updated:** 2026-05-11 02:06:39.312800Z
-**Related features:** `auditability`
-**Legacy IDs:** `auditability/ADR-004`
+**Recorded:** 2026-05-11 02:06:39.312800Z · [T20260426-0519]
 
 ### Context
 V2 JSONL and blob traces are runtime artifacts, but their old first-level `.orbit/audit/` path blurred command audit, workspace state, and authored docs.
@@ -95,14 +73,9 @@ Store activity/job envelopes, loop events, and blobs under `.orbit/state/audit/`
 - Runtime traces live with other workspace-local run state.
 - Cost: old `.orbit/audit/` artifacts may need manual fallback or migration for historical reconstruction.
 
-## ADR-0030 — Redaction is a write-side durability boundary
+## Redaction is a write-side durability boundary
 
-**Status:** Accepted · 2026-05-11 02:06:39.313914Z · [T20260426-0605]
-**Owner:** legacy:auditability
-**Created:** 2026-05-11 02:06:39.313219Z
-**Last updated:** 2026-05-11 02:06:39.313914Z
-**Related features:** `auditability`
-**Legacy IDs:** `auditability/ADR-005`
+**Recorded:** 2026-05-11 02:06:39.313914Z · [T20260426-0605]
 
 ### Context
 Audit needs useful payloads for reproducibility, but raw provider keys or sensitive environment-derived values would make the trail unsafe by default.
@@ -114,14 +87,9 @@ Redact sensitive environment values, HTTP authorization patterns, API-key fields
 - Audit readers can treat normal stored blobs as already redacted.
 - Cost: redaction changes payload hashes and may remove exact bytes useful for reproducing a provider interaction.
 
-## ADR-0031 — Invocation metrics are audit-adjacent primary records
+## Invocation metrics are audit-adjacent primary records
 
-**Status:** Accepted · 2026-05-11 02:06:39.315068Z · [T20260426-0526]
-**Owner:** legacy:auditability
-**Created:** 2026-05-11 02:06:39.314335Z
-**Last updated:** 2026-05-20 04:57:15.893463Z
-**Related features:** `auditability`
-**Legacy IDs:** `auditability/ADR-006`
+**Recorded:** 2026-05-11 02:06:39.315068Z · [T20260426-0526]
 
 ### Context
 V2 job execution emits audit JSONL, but metrics and scoreboards read the invocation store. Scraping audit logs would couple reporting to transcript format and retention.
@@ -133,13 +101,9 @@ Persist `InvocationTrace` records beside audit as first-class metric records key
 - Dashboard metrics endpoints and scoreboards can avoid parsing audit JSONL.
 - Cost: metrics can diverge from transcript detail if a provider path reports incomplete usage.
 
-## ADR-0173 — Dashboard owns invocation metrics surfaces
+## Dashboard owns invocation metrics surfaces
 
-**Status:** Accepted · 2026-05-20 04:57:08.297992Z · [ORB-00190]
-**Owner:** codex
-**Created:** 2026-05-20 04:57:02.765354Z
-**Last updated:** 2026-05-20 04:57:08.297992Z
-**Related features:** `auditability`, `activity-job`
+**Recorded:** 2026-05-20 04:57:08.297992Z · [ORB-00190]
 
 ### Context
 The metrics CLI surface is unused, and ORB-00191 moved the missing knowledge, activity, tool, task, and invocation views into dashboard HTTP endpoints. Keeping a second JSON-capable command would make future metrics work maintain two surfaces.
@@ -153,14 +117,9 @@ The dashboard is the canonical user-facing and programmatic surface for invocati
 - No single code anchor; this convention is enforced through design docs and review.
 - Cost: shell scripts cannot rely on a dedicated metrics command and must call the local dashboard API or shared runtime libraries.
 
-## ADR-0032 — Run trace inspection stays separate from command audit
+## Run trace inspection stays separate from command audit
 
-**Status:** Accepted · 2026-05-11 02:06:39.316321Z · [T20260426-0705], [T20260426-0709]
-**Owner:** legacy:auditability
-**Created:** 2026-05-11 02:06:39.315505Z
-**Last updated:** 2026-05-11 02:06:39.316321Z
-**Related features:** `auditability`
-**Legacy IDs:** `auditability/ADR-007`
+**Recorded:** 2026-05-11 02:06:39.316321Z · [T20260426-0705], [T20260426-0709]
 
 ### Context
 Operators need first-class commands for activity/job envelope JSONL, but `orbit audit` is the compact SQLite command-audit surface.
@@ -172,14 +131,9 @@ Expose v2 envelope inspection under `orbit run events` and `orbit run trace`, an
 - Command history and run-local workflow traces have dedicated commands.
 - Cost: users must learn that `orbit audit` and `orbit run events/trace` answer related but different questions.
 
-## ADR-0033 — Process tracing feed is global JSONL
+## Process tracing feed is global JSONL
 
-**Status:** Accepted · 2026-05-11 02:06:39.317474Z · [T20260426-2343]
-**Owner:** legacy:auditability
-**Created:** 2026-05-11 02:06:39.316768Z
-**Last updated:** 2026-05-11 02:06:39.317474Z
-**Related features:** `auditability`
-**Legacy IDs:** `auditability/ADR-008`
+**Recorded:** 2026-05-11 02:06:39.317474Z · [T20260426-2343]
 
 ### Context
 CLI subprocess output emits structured tracing events after [T20260426-2313], but subscriber initialization happens before Orbit resolves a workspace root.
@@ -191,14 +145,9 @@ Append process-level tracing events to `~/.orbit/state/logs/orbit.jsonl` through
 - Operators and dashboards can tail one machine-readable feed across workspaces.
 - Cost: the v1 file is unrotated and concurrent processes can rarely interleave oversized JSONL records.
 
-## ADR-0034 — Tracing redaction is enforced by field formatting
+## Tracing redaction is enforced by field formatting
 
-**Status:** Accepted · 2026-05-11 02:06:39.318605Z · [T20260426-2349]
-**Owner:** legacy:auditability
-**Created:** 2026-05-11 02:06:39.317869Z
-**Last updated:** 2026-05-11 02:06:39.318605Z
-**Related features:** `auditability`
-**Legacy IDs:** `auditability/ADR-009`
+**Recorded:** 2026-05-11 02:06:39.318605Z · [T20260426-2349]
 
 ### Context
 A durable JSONL feed made tracing output persistent, but call-site helpers only protected emitters that remembered to use them.
@@ -210,14 +159,9 @@ Install redacting `FormatFields` implementations on stderr and JSONL tracing for
 - New structured tracing emitters inherit default redaction before terminal or disk output.
 - Cost: span attribute redaction, binary payload redaction, and user-configurable policies remain follow-up concerns.
 
-## ADR-0035 — Canonical audit stores project high-signal events to tracing
+## Canonical audit stores project high-signal events to tracing
 
-**Status:** Accepted · 2026-05-11 02:06:39.319833Z · [T20260427-0023]
-**Owner:** legacy:auditability
-**Created:** 2026-05-11 02:06:39.319030Z
-**Last updated:** 2026-05-11 02:06:39.319833Z
-**Related features:** `auditability`
-**Legacy IDs:** `auditability/ADR-010`
+**Recorded:** 2026-05-11 02:06:39.319833Z · [T20260427-0023]
 
 ### Context
 Policy denials and friction submissions reached canonical stores or return paths, but operators tailing the live feed could miss them.
@@ -229,14 +173,9 @@ Emit structured `tracing::warn!` projections beside canonical side effects for f
 - Dashboards can watch `orbit.policy.deny` and `orbit.friction.reported` without querying canonical stores.
 - Cost: the tracing feed is lossy and filterable, so missing live events cannot prove the canonical store has no matching record.
 
-## ADR-0036 — Unified log feed: producer completion + reader CLI
+## Unified log feed: producer completion + reader CLI
 
-**Status:** Accepted · 2026-05-11 02:06:39.321326Z · [T20260427-27]
-**Owner:** legacy:auditability
-**Created:** 2026-05-11 02:06:39.320335Z
-**Last updated:** 2026-05-11 02:06:39.321326Z
-**Related features:** `auditability`
-**Legacy IDs:** `auditability/ADR-011`
+**Recorded:** 2026-05-11 02:06:39.321326Z · [T20260427-27]
 
 ### Context
 The unified JSONL feed still lacked job-DAG lifecycle projections, library print hygiene, and a first-class reader for the v2-terminal-console mockup.
@@ -248,15 +187,9 @@ Add one `emit_job_event` dual-write helper for job lifecycle tracing, migrate li
 - The terminal-console mockup can use real Orbit events, and library crates fail clippy if raw prints return.
 - Cost: scheduler-event semantics remain aspirational, follow mode is v1, and the reader keeps the file in memory before applying `-n`.
 
-## ADR-0278 — Friction scorekeeping derives from lifecycle history
+## Friction scorekeeping derives from lifecycle history
 
-**Status:** Accepted · 2026-07-26 21:51:40.343066Z · [T20260510-13], [ORB-10458]
-**Owner:** codex
-**Created:** 2026-07-26 21:51:40.074392Z
-**Last updated:** 2026-07-26 21:51:40.343066Z
-**Related features:** `auditability`
-**Legacy IDs:** `auditability/ADR-012`
-**Tags:** `auditability`
+**Recorded:** 2026-07-26 21:51:40.343066Z · [T20260510-13], [ORB-10458]
 
 ### Context
 
@@ -272,18 +205,10 @@ Add `status: friction` as the creation status for self-reports, infer legacy fri
 - Friction inbox items were separated from human proposals while legacy task records remained readable during migration.
 - Cost: legacy untriaged reports need migration, and already-triaged legacy histories depend on existing transition records.
 
-## Provenance
 
-Migrated verbatim from the local heading `auditability/ADR-012` in `docs/design/auditability/4_decisions.md` by [ORB-10458]. Original status line: Superseded · 2026-05 · [T20260510-13]
+## Unified log feed exposes shared backend surfaces for dashboard UI
 
-## ADR-0038 — Unified log feed exposes shared backend surfaces for dashboard UI
-
-**Status:** Accepted · 2026-05-11 02:06:39.323654Z · [T20260427-44], [T20260427-46]
-**Owner:** legacy:auditability
-**Created:** 2026-05-11 02:06:39.322908Z
-**Last updated:** 2026-05-11 02:06:39.323654Z
-**Related features:** `auditability`
-**Legacy IDs:** `auditability/ADR-013`
+**Recorded:** 2026-05-11 02:06:39.323654Z · [T20260427-44], [T20260427-46]
 
 ### Context
 `orbit log tail` established terminal semantics, but the dashboard needed the same source/code/message vocabulary without copying formatter logic into browser JavaScript.
@@ -295,26 +220,22 @@ Extract log formatter/filter/path logic into a shared `orbit-cli` module and exp
 - CLI, dashboard backend, and dashboard UI share one log vocabulary and escaping boundary.
 - Cost: stream rotation/truncation handling is best-effort, and the visual panel ships separately under UI ownership.
 
-## ADR-014 — Tool-call provenance was model-first
+## Tool-call provenance was model-first
 
-**Status:** Superseded by [agent-families ADR-0154](../agent-families/4_decisions.md#adr-0154--collapse-agent-identity-to-family-and-move-model-strings-to-configuration) · 2026-05 · [ORB-00080]
+**Superseded by:** [Replace \[agent.<role>\] tables with named \[crews.*\] registry](../agent-families/4_decisions.md#replace-agentrole-tables-with-named-crews-registry)
+**Recorded:** 2026-05 · [ORB-00080]
 
 **Context.** Asking agents to pass both `agent` and `model` duplicated information and allowed exact models to be paired with the wrong family.
 
-**Decision.** Originally deprecated `agent` as a normal tool-call input and used `model` for provenance. [Agent-families ADR-0154](../agent-families/4_decisions.md#adr-0154--collapse-agent-identity-to-family-and-move-model-strings-to-configuration) superseded the exact-model convention: `model` now carries the canonical agent family, with full model strings accepted only as compatibility input that normalizes to family.
+**Decision.** Originally deprecated `agent` as a normal tool-call input and used `model` for provenance. [Replace `[agent.<role>]` tables with named `[crews.*]` registry](../agent-families/4_decisions.md#replace-agentrole-tables-with-named-crews-registry) superseded the exact-model convention: `model` now carries the canonical agent family, with full model strings accepted only as compatibility input that normalizes to family.
 
 **Consequences.**
 - Seeded skills and instructions still use a single `model` provenance field, but examples teach family values (`codex`, `claude`, `gemini`, `grok`).
 - Cost: compatibility normalization must remain for historical full-model inputs and external callers that have not migrated yet.
 
-## ADR-0040 — Task attribution can be corrected explicitly
+## Task attribution can be corrected explicitly
 
-**Status:** Accepted · 2026-05-11 02:06:39.326347Z · [T20260427-47]
-**Owner:** legacy:auditability
-**Created:** 2026-05-11 02:06:39.325522Z
-**Last updated:** 2026-05-11 02:06:39.326347Z
-**Related features:** `auditability`
-**Legacy IDs:** `auditability/ADR-015`
+**Recorded:** 2026-05-11 02:06:39.326347Z · [T20260427-47]
 
 ### Context
 Automatic task attribution is low-friction but can leave stale `planned_by` or `implemented_by` values when different actors start and finish work.
@@ -326,14 +247,9 @@ Keep automatic stamping for plan writes and review/done transitions, but let tas
 - Agents can correct split or stale provenance without editing task files directly.
 - Cost: attribution fields are editable metadata, so stronger authorship evidence still requires task history and audit rows.
 
-## ADR-0041 — Tool-invocation audit is owned by the runtime, with MCP preflight bracketing
+## Tool-invocation audit is owned by the runtime, with MCP preflight bracketing
 
-**Status:** Accepted · 2026-05-11 02:06:39.327530Z · [T20260428-4]
-**Owner:** legacy:auditability
-**Created:** 2026-05-11 02:06:39.326744Z
-**Last updated:** 2026-05-11 02:06:39.327530Z
-**Related features:** `auditability`
-**Legacy IDs:** `auditability/ADR-016`
+**Recorded:** 2026-05-11 02:06:39.327530Z · [T20260428-4]
 
 ### Context
 CLI `AuditGuard` historically wrote tool-invocation audit rows, leaving MCP `tools/call` dispatch and MCP preflight failures outside the SQLite command-audit trail.
@@ -345,14 +261,9 @@ Move tool-invocation audit to `OrbitRuntime::execute_tool_command_dispatch`, tag
 - CLI and MCP tool calls, including unknown/unexposed MCP failures, now produce one audit row with shared identity resolution.
 - Cost: the dedup signal is thread-local; future async or cross-thread guarded entry points must re-evaluate the boundary.
 
-## ADR-0042 — Command-audit rows carry task / run / activity correlation IDs
+## Command-audit rows carry task / run / activity correlation IDs
 
-**Status:** Accepted · 2026-05-11 02:06:39.328720Z · [T20260428-7]
-**Owner:** legacy:auditability
-**Created:** 2026-05-11 02:06:39.327934Z
-**Last updated:** 2026-05-11 02:06:39.328720Z
-**Related features:** `auditability`
-**Legacy IDs:** `auditability/ADR-017`
+**Recorded:** 2026-05-11 02:06:39.328720Z · [T20260428-7]
 
 ### Context
 SQLite command-audit rows recorded tool invocations but had no direct link to the task, job run, activity, or step that caused them.
@@ -364,14 +275,9 @@ Add nullable `task_id`, `job_run_id`, `activity_id`, and `step_index` columns, p
 - Operators can drill from a tool row to the originating task and run context without out-of-band correlation.
 - Cost: historical rows remain NULL, and caller-asserted JSON values are weaker evidence than engine-supplied env context.
 
-## ADR-0043 — Scoreboard tool-call totals project from command audit
+## Scoreboard tool-call totals project from command audit
 
-**Status:** Accepted · 2026-05-11 02:06:39.329894Z · [T20260428-11]
-**Owner:** legacy:auditability
-**Created:** 2026-05-11 02:06:39.329173Z
-**Last updated:** 2026-05-11 02:06:39.329894Z
-**Related features:** `auditability`
-**Legacy IDs:** `auditability/ADR-018`
+**Recorded:** 2026-05-11 02:06:39.329894Z · [T20260428-11]
 
 ### Context
 `summary.json` used token/invocation scoreboard tool-call totals, which can be empty for providers that do not emit invocation traces, while command audit records every tool-run attempt.
@@ -383,14 +289,9 @@ Count `command: tool` rows with `subcommand: "run"` or `"run-mcp"` and `tool_nam
 - Failed and denied tool runs become visible in compact summaries even for trace-sparse providers.
 - Cost: the legacy max overlay is conservative and may undercount the true union until both streams share an invocation id.
 
-## ADR-0044 — Task-review feedback scores separately from PR review comments
+## Task-review feedback scores separately from PR review comments
 
-**Status:** Accepted · 2026-05-11 02:06:39.330996Z · [T20260428-17], [T20260430-4], [T20260430-5]
-**Owner:** legacy:auditability
-**Created:** 2026-05-11 02:06:39.330329Z
-**Last updated:** 2026-05-11 02:06:39.330996Z
-**Related features:** `auditability`
-**Legacy IDs:** `auditability/ADR-019`
+**Recorded:** 2026-05-11 02:06:39.330996Z · [T20260428-17], [T20260430-4], [T20260430-5]
 
 ### Context
 Local Orbit task review threads and GitHub PR review comments are different workflow artifacts, and reply volume should not be scored as distinct review findings.
@@ -402,14 +303,9 @@ Keep `pr.review_comments` for synced PR/GitHub comments, score local review-thre
 - Local review feedback earns immediate task-review credit while synced PR feedback remains a separate PR metric.
 - Cost: review productivity now has two counters, and aggregate views must label them clearly rather than adding them blindly.
 
-## ADR-0045 — Command-audit execution ids are process-disambiguated
+## Command-audit execution ids are process-disambiguated
 
-**Status:** Accepted · 2026-05-11 02:06:39.332153Z · [T20260505-6]
-**Owner:** legacy:auditability
-**Created:** 2026-05-11 02:06:39.331453Z
-**Last updated:** 2026-05-11 02:06:39.332153Z
-**Related features:** `auditability`
-**Legacy IDs:** `auditability/ADR-020`
+**Recorded:** 2026-05-11 02:06:39.332153Z · [T20260505-6]
 
 ### Context
 Timestamp-only command-audit execution ids collided when concurrent `orbit tool run orbit.task.show` processes in one workspace generated ids at the same effective clock tick.
@@ -421,14 +317,9 @@ Generate command-audit execution ids through one shared helper that combines a s
 - Parallel CLI and runtime audit producers get deterministic collision resistance without weakening uniqueness constraints.
 - Cost: execution ids are longer and less visually compact than the old `exec-<nanos>` shape.
 
-## ADR-0046 — Loop audit JSONL files materialize on first loop event
+## Loop audit JSONL files materialize on first loop event
 
-**Status:** Accepted · 2026-05-11 02:06:39.333473Z · [T20260506-2]
-**Owner:** legacy:auditability
-**Created:** 2026-05-11 02:06:39.332626Z
-**Last updated:** 2026-05-11 02:06:39.333473Z
-**Related features:** `auditability`
-**Legacy IDs:** `auditability/ADR-021`
+**Recorded:** 2026-05-11 02:06:39.333473Z · [T20260506-2]
 
 ### Context
 V2 runs always constructed both the v2 envelope sink and the loop-level sink. Runs that emitted only envelope events or CLI-backend blobs therefore left zero-byte `.orbit/state/audit/loop/{run_id}.jsonl` files beside populated `v2_loop` files, making the audit tree look noisy and misleading.
@@ -440,15 +331,9 @@ Keep the loop sink available for HTTP agent-loop events and blob writes, but def
 - Runs with no loop-level provider/tool events no longer leave empty loop JSONL placeholders.
 - Cost: consumers must treat a missing loop JSONL file as "no loop events were emitted", not as a missing run; the v2 envelope file remains the canonical run spine.
 
-## ADR-0279 — Automated git commits carry implementer authorship
+## Automated git commits carry implementer authorship
 
-**Status:** Accepted · 2026-07-26 21:51:41.039598Z · [ORB-10369], [ORB-10458]
-**Owner:** codex
-**Created:** 2026-07-26 21:51:40.754573Z
-**Last updated:** 2026-07-26 21:53:51.994119Z
-**Related features:** `auditability`
-**Legacy IDs:** `auditability/ADR-022`
-**Tags:** `auditability`
+**Recorded:** 2026-07-26 21:51:41.039598Z · [ORB-10369], [ORB-10458]
 
 ### Context
 
@@ -456,7 +341,7 @@ Task records already store `implemented_by`, but automated `git_commit` actions 
 
 ### Decision
 
-Pass a per-commit `--author` derived from `task.implemented_by` for single-implementer commits. Mixed-implementer batch commits use `orbit <orbit@orbit.local>` as the aggregate author and add one `Co-Authored-By` trailer per distinct implementer identity. ADR-0280 extends this provenance to committer identity without reusing repo-local user config.
+Pass a per-commit `--author` derived from `task.implemented_by` for single-implementer commits. Mixed-implementer batch commits use `orbit <orbit@orbit.local>` as the aggregate author and add one `Co-Authored-By` trailer per distinct implementer identity. [Workflow git commit identity is process-scoped](#workflow-git-commit-identity-is-process-scoped) extends this provenance to committer identity without reusing repo-local user config.
 
 ### Consequences
 
@@ -465,19 +350,10 @@ Pass a per-commit `--author` derived from `task.implemented_by` for single-imple
 - Local git config is not written by workflow commit automation and is no longer the source of committer identity for those commits.
 - Cost: multi-implementer batch commits require trailer-aware attribution queries; `git log --author` finds the aggregate commit author, not every co-author trailer.
 
-## Provenance
 
-Migrated verbatim from the local heading `auditability/ADR-022` in `docs/design/auditability/4_decisions.md` by [ORB-10458]. Original status line: Superseded by [ADR-0249] · 2026-07 · [ORB-10369]
+## Workflow git commit identity is process-scoped
 
-## ADR-0280 — Workflow git commit identity is process-scoped
-
-**Status:** Accepted · 2026-07-26 21:51:41.628333Z · [ORB-10369], [ORB-10458]
-**Owner:** codex
-**Created:** 2026-07-26 21:51:41.330439Z
-**Last updated:** 2026-07-26 21:51:41.628333Z
-**Related features:** `auditability`
-**Legacy IDs:** `auditability/ADR-023`
-**Tags:** `auditability`
+**Recorded:** 2026-07-26 21:51:41.628333Z · [ORB-10369], [ORB-10458]
 
 ### Context
 
@@ -494,18 +370,11 @@ Automated `git_commit` actions set author and committer identity only for the sp
 - Worktrees with no local `user.*` config can still create workflow-owned commits with explicit provenance.
 - The public `git.commit` tool remains user-directed and ambient-config based; workflow-owned commit automation uses this scoped path instead.
 
-## Provenance
 
-Migrated verbatim from the local heading `auditability/ADR-023` in `docs/design/auditability/4_decisions.md` by [ORB-10458]. Original status line: Superseded by [ADR-0249] · 2026-07 · [ORB-10369]
+## Friction reports are append-only records, not lifecycle tasks
 
-## ADR-0049 — Friction reports are append-only records, not lifecycle tasks
-
-**Status:** Superseded by ADR-0343 · 2026-05-11 02:06:39.338334Z · [T20260510-13]
-**Owner:** legacy:auditability
-**Created:** 2026-05-11 02:06:39.336982Z
-**Last updated:** 2026-08-09 19:32:05.128055Z
-**Related features:** `auditability`
-**Legacy IDs:** `auditability/ADR-024`
+**Superseded by:** [Keep frictions as distinct workspace-scoped records backed by SQLite](#keep-frictions-as-distinct-workspace-scoped-records-backed-by-sqlite)
+**Recorded:** 2026-05-11 02:06:39.338334Z · [T20260510-13]
 
 ### Context
 Friction reports are operational signal, not planned work. Storing them as task records cluttered task lists and forced accept/reject triage decisions that were more about duplicate handling than report validity.
@@ -554,19 +423,14 @@ Store friction reports under `.orbit/frictions/{yyyy}-{mm}/F{nnn}.md` with YAML 
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.
 
-## ADR-0343 — Keep frictions as distinct workspace-scoped records backed by SQLite
+## Keep frictions as distinct workspace-scoped records backed by SQLite
 
-**Status:** Accepted · 2026-08-09 19:30:11.118493Z · [ORB-10680]
-**Owner:** codex
-**Created:** 2026-08-09 19:29:46.161687Z
-**Last updated:** 2026-08-09 19:30:11.118493Z
-**Related features:** `auditability`, `friction`, `mcp-bridge`
-**Supersedes:** `ADR-0049`
-**Tags:** `storage`, `sqlite`, `friction`, `performance`
+**Recorded:** 2026-08-09 19:30:11.118493Z · [ORB-10680]
+**Supersedes:** [Friction reports are append-only records, not lifecycle tasks](#friction-reports-are-append-only-records-not-lifecycle-tasks)
 **Paths:** `crates/orbit-store/src/file/friction_store/**`, `crates/orbit-store/src/sqlite/**`, `crates/orbit-core/src/runtime/orbit_tool_host/**`, `crates/orbit-dashboard/src/api/frictions.rs`, `docs/design/auditability/**`, `docs/design/mcp-bridge/**`
 
 ### Context
-ADR-0049 correctly separated friction reports from planned task work, but coupled that semantic decision to Markdown files under `.orbit/frictions/`. File backing was reasonable while records were low-volume, Git-visible, and directly inspectable. Frictions are now hub-only coordination state, authors and operators mutate them through Orbit surfaces, and every filtered list or stats request parses and materializes the complete retained file corpus. The real alternatives are to retain per-record Markdown for direct inspection or preserve the artifact semantics while moving live persistence to indexed SQLite.
+[Friction reports are append-only records, not lifecycle tasks](#friction-reports-are-append-only-records-not-lifecycle-tasks) correctly separated friction reports from planned task work, but coupled that semantic decision to Markdown files under `.orbit/frictions/`. File backing was reasonable while records were low-volume, Git-visible, and directly inspectable. Frictions are now hub-only coordination state, authors and operators mutate them through Orbit surfaces, and every filtered list or stats request parses and materializes the complete retained file corpus. The real alternatives are to retain per-record Markdown for direct inspection or preserve the artifact semantics while moving live persistence to indexed SQLite.
 
 ### Decision
 Keep friction as a first-class operational artifact outside the task lifecycle, with the existing `orbit.friction.*`, CLI, HTTP, dashboard, Bridge, status, tag, resolution, and task-relation semantics. Persist live friction records in the global Orbit SQLite store under composite identity `(workspace_id, friction_id)`, push filtering, ordering, pagination, and aggregation into SQL, and allocate workspace-local monthly IDs transactionally. Small tag-taxonomy configuration may remain file-backed. Direct inspection and portability are provided through supported show/list/export surfaces rather than live Markdown records.
@@ -612,13 +476,9 @@ Keep friction as a first-class operational artifact outside the task lifecycle, 
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.
 
-## ADR-0164 — Ship PR transitions preserve task implementer attribution
+## Ship PR transitions preserve task implementer attribution
 
-**Status:** Accepted · 2026-05-17 07:05:49.092815Z · [ORB-00106]
-**Owner:** codex
-**Created:** 2026-05-17 07:05:45.108498Z
-**Last updated:** 2026-05-17 07:34:11.347567Z
-**Related features:** `auditability`
+**Recorded:** 2026-05-17 07:05:49.092815Z · [ORB-00106]
 
 ### Context
 `orbit run ship` reached PR-open Review handoff and PR-merge Done handoff through system-owned automation even when the workflow had a resolved implementer identity. Prior attribution fixes in ORB-00067, ORB-00089, and ORB-00091 covered adjacent automation paths, but the ship PR loops still had two real alternatives: trust the ship actor/runtime context, or carry task/run provenance explicitly.
@@ -631,14 +491,9 @@ Ship-path PR transitions carry attribution on each automation update. The Review
 - Actor-less automation still records `system` instead of panicking or fabricating a family label.
 - Cost: the ship pipeline must explicitly bridge task/run provenance into automation update payloads, so future edits to PR-open or PR-merge loops need to preserve the regression tests rather than assuming runtime actor context is enough.
 
-## ADR-0245 — Derive invocation cost at query time from a versioned price table
+## Derive invocation cost at query time from a versioned price table
 
-**Status:** Accepted · 2026-07-20 04:06:48.987384Z · [ORB-10338]
-**Owner:** claude
-**Created:** 2026-07-20 03:47:48.144254Z
-**Last updated:** 2026-07-20 04:06:48.987384Z
-**Related features:** `auditability`
-**Tags:** `telemetry`, `pricing`
+**Recorded:** 2026-07-20 04:06:48.987384Z · [ORB-10338]
 **Paths:** `crates/orbit-common/src/types/pricing.rs`, `crates/orbit-common/assets/model_prices.yaml`, `crates/orbit-store/src/sqlite/invocation_store/**`
 
 **Context.** The invocation store already retains exact per-invocation token splits, but had no notion of USD cost — cost existed only as a provider-reported total buried in the worker's unparsed per-run JSON, never joined to a model or token split. [ORB-10338] adds cost. Two real alternatives existed: (a) compute cost once at ingest time and store it as a frozen column, or (b) keep rows token-only and derive cost from a versioned price table looked up by exact model string and the invocation's timestamp on every read/aggregate.
@@ -651,9 +506,10 @@ Ship-path PR transitions carry attribution on each automation update. The Review
 - `provider_cost_usd` never changes once written, so it stays the ground truth Daniel reconciles against monthly even if `derived_cost_usd` for the same row changes later.
 - Cost: because derived cost is recomputed on every read instead of frozen at ingest, editing a price row after the fact silently changes the reported cost of every past invocation under that model/date range — there is no record of what a row's derived cost "used to be", unlike the immutable `provider_cost_usd`.
 
-## ADR-0249 — Workflow commit authors use the persisted crew model
+## Workflow commit authors use the persisted crew model
 
-**Status:** Superseded by [ADR-0299] · 2026-07 · [ORB-10519]
+**Superseded by:** [Workflow alone creates shipment commits while dirty failures remain recoverable](#workflow-alone-creates-shipment-commits-while-dirty-failures-remain-recoverable)
+**Recorded:** 2026-07 · [ORB-10519]
 
 **Context.** Pipeline-created commits exposed only a generic or family author even though the job run already persisted the exact resolved crew model used as `AGENT_MODEL` for provider subprocess commit trailers. Deriving attribution again from `task.implemented_by` or crew aliases, or letting the author and trailer read different process state, would permit the ambient author to disagree with durable model telemetry.
 
@@ -667,22 +523,17 @@ Ship-path PR transitions carry attribution on each automation update. The Review
 
 ---
 
-## ADR-0299 — Workflow alone creates shipment commits while dirty failures remain recoverable
+## Workflow alone creates shipment commits while dirty failures remain recoverable
 
-**Status:** Accepted · 2026-07 · [ORB-10519]
+**Recorded:** 2026-07 · [ORB-10519]
 
-Narrative lives in the ADR store — retrieve it with `orbit tool run orbit.adr.show --input '{"id":"ADR-0299"}'`.
+The full reasoning is preserved in [Workflow alone creates shipment commits while dirty failures remain recoverable](../activity-job/4_decisions.md#workflow-alone-creates-shipment-commits-while-dirty-failures-remain-recoverable).
 
 ---
 
-## ADR-0297 — Provider subprocess liveness is a separate audit event probed at read time
+## Provider subprocess liveness is a separate audit event probed at read time
 
-**Status:** Accepted · 2026-07-27 02:57:13.483354Z · [ORB-10496]
-**Owner:** claude
-**Created:** 2026-07-27 02:57:08.994448Z
-**Last updated:** 2026-07-27 02:57:13.483354Z
-**Related features:** `auditability`
-**Tags:** `auditability`, `activity-job`, `lifecycle`, `tooling`, `run-rescue`
+**Recorded:** 2026-07-27 02:57:13.483354Z · [ORB-10496]
 **Paths:** `crates/orbit-engine/src/activity_job/cli_runner/**`, `crates/orbit-core/src/runtime/run_audit.rs`, `crates/orbit-common/src/utility/process_identity.rs`, `crates/orbit-dashboard/src/api/runs.rs`
 
 ### Context
@@ -712,14 +563,9 @@ Liveness is computed at read time, not stored. `orbit_common::utility::process_i
 - Cost: liveness is only as fresh as the moment it is queried and only meaningful on the host that ran the child. A remote or later reader of the same audit trail gets `exited` for every historical open invocation, because the answer is derived from the local process table rather than persisted with the event. A heartbeat would have survived that, at the price of a write per interval per invocation and a staleness threshold to tune.
 - Cost: `pid_start_time` costs one `ps` invocation per provider spawn. A sandbox that blocks `ps` yields `None`, which weakens the record to unguarded-PID liveness rather than failing the spawn.
 
-## ADR-0323 — Friction records carry an author-settable title; derivation is a structural fallback
+## Friction records carry an author-settable title; derivation is a structural fallback
 
-**Status:** Proposed · 2026-08-02 23:41:57.916629Z · [ORB-10590], [ORB-10598]
-**Owner:** claude
-**Created:** 2026-08-02 23:38:50.944727Z
-**Last updated:** 2026-08-02 23:41:57.916629Z
-**Related features:** `auditability`
-**Tags:** `friction`, `knowledge`
+**Recorded:** 2026-08-02 23:41:57.916629Z · [ORB-10590], [ORB-10598]
 **Paths:** `crates/orbit-common/src/friction/**`, `crates/orbit-store/src/file/friction_store/**`
 
 ### Context
@@ -758,14 +604,9 @@ The result is clamped to `FRICTION_TITLE_MAX_CHARS` (120) at a word boundary. An
 - Cost: two structural rules are more code than a first-line read, and they can still be wrong. A body whose first section genuinely holds the subject in its second sentence derives a weaker title than a careful author would write. The stored field is the escape hatch, which is why it is the primary mechanism and derivation only the fallback.
 - Cost: the deployed `orbit` binary and the Bridge MCP server must be rebuilt before `--title` is reachable from a live surface; until then existing records cannot be retitled through the tools.
 
-## ADR-0345 — Friction records move to SQLite with a legacy-evidence path projection
+## Friction records move to SQLite with a legacy-evidence path projection
 
-**Status:** Proposed · 2026-08-09 20:25:57.877485Z · [ORB-10680]
-**Owner:** claude
-**Created:** 2026-08-09 20:25:57.877485Z
-**Last updated:** 2026-08-09 20:25:57.877485Z
-**Related features:** `auditability`
-**Tags:** `storage`, `sqlite`, `migration`, `performance`
+**Recorded:** 2026-08-09 20:25:57.877485Z · [ORB-10680]
 **Paths:** `crates/orbit-store/src/sqlite/friction_store/**`, `crates/orbit-store/src/file/friction_store/**`
 
 **Context.** Friction list, filtered-query, and stats operations discovered every Markdown record under a workspace's friction tree, parsed every YAML envelope and body, allocated the complete corpus as `Vec<StoredFrictionRecord>`, and only then filtered, sorted, paginated, or aggregated. Peak memory and parse work therefore grew with total retained friction history even when a caller asked for a 50-row page or a narrow status filter. The file-backed rationale no longer matched the runtime contract: frictions are hub-only coordination state, writes go through Orbit surfaces rather than human file edits, and the canonical hub already copies checkout-local records into a global per-workspace file tree. A public `path` field pointed at the backing Markdown file, so moving persistence could not silently leave it fictitious.
@@ -779,14 +620,9 @@ The result is clamped to `FRICTION_TITLE_MAX_CHARS` (120) at a word boundary. An
 - Cost: a consumer that read `path` as an always-present file location now sees `null` for post-cutover records and must treat it as an optional legacy pointer.
 - Rejected alternative: keeping the file store and adding a SQLite index sidecar. That would have preserved two sources of truth for the same records and left the full parse cost on every cold read and index rebuild.
 
-## ADR-0039 — Tool-call provenance is model-first
+## Tool-call provenance is model-first
 
-**Status:** Accepted · 2026-05-11 02:06:39.325095Z · [T20260427-52]
-**Owner:** legacy:auditability
-**Created:** 2026-05-11 02:06:39.324149Z
-**Last updated:** 2026-05-11 02:06:39.325095Z
-**Related features:** `auditability`
-**Legacy IDs:** `auditability/ADR-014`
+**Recorded:** 2026-05-11 02:06:39.325095Z · [T20260427-52]
 
 ### Context
 Asking agents to pass both `agent` and `model` duplicated information and allowed exact models to be paired with the wrong family.
@@ -819,7 +655,7 @@ Deprecate `agent` as a normal tool-call input, prefer exact `model`, infer the a
 - **[T20260427-52]** — Deprecate `agent` in normal tool-call JSON, infer agent family from `model`, and reject inconsistent legacy pairs.
 - **[T20260428-4]** — Record audit events for MCP tool invocations by moving ownership into the runtime, adding the entry-point discriminator, and bracketing MCP preflight.
 - **[T20260428-7]** — Correlate command-audit rows with originating run/task/activity by adding nullable correlation columns and surfacing them on the dashboard.
-- **[ORB-10228]** — Supersede ADR-017 caller-JSON precedence for MCP; add trusted caller/process provenance, capability sets, and call/lease correlation.
+- **[ORB-10228]** — Supersede [Command-audit rows carry task / run / activity correlation IDs](#command-audit-rows-carry-task-run-activity-correlation-ids) caller-JSON precedence for MCP; add trusted caller/process provenance, capability sets, and call/lease correlation.
 - **[T20260428-11]** — Derive compact scoreboard all/failed tool-call counts from command-audit tool-run rows.
 - **[T20260428-17]** — Split local Orbit task-review scoring from PR review-comment scoring and surface both in compact scoreboards.
 - **[T20260430-4]** — Count local task-review score by review-thread creations, not replies, and rename the task-review summary field to `threads`.
@@ -840,11 +676,11 @@ Deprecate `agent` as a normal tool-call input, prefer exact `model`, infer the a
 - **[ORB-10338]** — Add the versioned model price table and query-time `derived_cost_usd`, plus a persisted `provider_cost_usd` column for reconciliation.
 - **[ORB-10370]** — Fill provider model/cost trace fields from CLI result JSON and prefer reported model identity at invocation ingest.
 - **[ORB-10579]** — Correct GPT-5.6 price periods, cache-write rates, gross-input accounting, and standard short-context estimate boundaries.
-- **[ORB-10519]** — Keep the persisted crew-model author and process-scoped Orbit committer while removing hook-specific trailer input and provider-commit adoption ([ADR-0299], superseding [ADR-0249] and [ADR-0294]).
-- **[ORB-10369]** — Introduce the persisted resolved crew model as the pipeline commit author with generic fallback and no alias resolver ([ADR-0249], superseded by [ADR-0299]).
+- **[ORB-10519]** — Keep the persisted crew-model author and process-scoped Orbit committer while removing hook-specific trailer input and provider-commit adoption ([Workflow alone creates shipment commits while dirty failures remain recoverable](#workflow-alone-creates-shipment-commits-while-dirty-failures-remain-recoverable), superseding [Workflow commit authors use the persisted crew model](#workflow-commit-authors-use-the-persisted-crew-model) and [Preserve failed worktree state before cleanup and admit only proven task commits](../activity-job/4_decisions.md#preserve-failed-worktree-state-before-cleanup-and-admit-only-proven-task-commits)).
+- **[ORB-10369]** — Introduce the persisted resolved crew model as the pipeline commit author with generic fallback and no alias resolver ([Workflow commit authors use the persisted crew model](#workflow-commit-authors-use-the-persisted-crew-model), superseded by [Workflow alone creates shipment commits while dirty failures remain recoverable](#workflow-alone-creates-shipment-commits-while-dirty-failures-remain-recoverable)).
 - **[ORB-10496]** — Record the spawned provider subprocess PID as its own audit event and expose read-time liveness through run status and `orbit run show`.
 
-- **[ORB-10590]** — Make the friction record handle an author-settable field and derive it structurally when omitted ([ADR-0323]).
-- **[ORB-10680]** — Moved hub friction records into the host-global SQLite store to bound scan memory ([ADR-0345]).
+- **[ORB-10590]** — Make the friction record handle an author-settable field and derive it structurally when omitted ([Friction records carry an author-settable title; derivation is a structural fallback](#friction-records-carry-an-author-settable-title-derivation-is-a-structural-fallback)).
+- **[ORB-10680]** — Moved hub friction records into the host-global SQLite store to bound scan memory ([Friction records move to SQLite with a legacy-evidence path projection](#friction-records-move-to-sqlite-with-a-legacy-evidence-path-projection)).
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

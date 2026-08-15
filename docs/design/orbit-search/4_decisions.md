@@ -13,29 +13,19 @@ tags: ["orbit-search"]
 
 # Semantic Search — Decisions
 
-> **Retired learning clauses:** [ORB-10736] / [ADR-0359] removed the native
+> **Retired learning clauses:** [ORB-10736] / [Remove the native project-learning subsystem](../project-learnings/4_decisions.md#remove-the-native-project-learning-subsystem) removed the native
 > project-learning corpus. Learning-specific statements in earlier entries are
 > historical records only and do not describe a supported search kind or index.
 
-ADR-style log of non-obvious orbit-search decisions. Each entry names the pressure, the choice, and the tradeoff. Entries are append-only and keyed by number; superseded entries are marked, not deleted.
+Decision log of non-obvious orbit-search decisions. Each entry names the pressure, the choice, and the tradeoff. Entries stay in historical order; title-based supersession links preserve changes in direction without deleting the earlier reasoning.
 
-Format for each entry: **Status · Date · Task(s)**, then *Context → Decision → Consequences*. Every ADR names at least one cost. Entries retain their recorded lifecycle status; implemented entries are `Accepted` and point to the task that shipped them.
-
-Historical note ([ORB-10458]): the entries listed below were authored with local IDs that had no record in the ADR store. They were allocated through `orbit.adr.add`, their narratives migrated into the store verbatim, and their headings rewritten to the allocated global ID. The original local IDs survive as `legacy_ids`, so prior citations still resolve via `orbit tool run orbit.adr.show --input '{"legacy_id":"<feature>/ADR-NNN"}'`. Backfilled here: `orbit-search/ADR-001` → ADR-0270, `orbit-search/ADR-002` → ADR-0271, `orbit-search/ADR-003` → ADR-0272, `orbit-search/ADR-004` → ADR-0273, `orbit-search/ADR-005` → ADR-0274, `orbit-search/ADR-006` → ADR-0275, `orbit-search/ADR-007` → ADR-0276, `orbit-search/ADR-008` → ADR-0277.
-
-Historical note ([ORB-10479]): the entries listed below already held a global ADR allocation, but their store bodies were lost when the worktrees that authored them were reaped (see [F2026-07-163]). The narratives were restored into the store at their existing IDs — no ID was reallocated — and their headings reduced to pointer form. Restored here: [ADR-0175].
+Format for each entry: **Recorded date and task provenance**, then *Context → Decision → Consequences*. Every decision names at least one cost.
 
 ---
 
-## ADR-0270 — fastembed-rs ONNX backend over Candle, llama.cpp, or external ollama
+## fastembed-rs ONNX backend over Candle, llama.cpp, or external ollama
 
-**Status:** Accepted · 2026-07-26 21:51:25.816199Z · [T20260510-3], [T20260510-9], [ORB-10458]
-**Owner:** claude
-**Created:** 2026-07-26 21:51:25.564120Z
-**Last updated:** 2026-07-26 21:53:50.758440+00:00
-**Related features:** `orbit-search`
-**Legacy IDs:** `orbit-search/ADR-001`
-**Tags:** `orbit-search`
+**Recorded:** 2026-07-26 21:51:25.816199Z · [T20260510-3], [T20260510-9], [ORB-10458]
 
 ### Context
 
@@ -48,11 +38,11 @@ Local embedding inference has four plausible backends:
 | **llama-cpp-rs** | Bindings to llama.cpp; GGUF format; runs anything from tiny embedding models to large LLMs; optional GPU; C++ build dependency. |
 | **External ollama or similar always-on daemon** | Outsources inference but requires the user to install and run a separate long-lived process. |
 
-This ADR addresses *which* backend to use. The orthogonal decision of *how* the backend is delivered to the user (in-process vs. companion binary vs. feature flag) is in ADR-0274. Within in-process or in-companion options, fastembed-rs covers the embedding-model use case directly; Candle is more general but requires more Orbit-side code; llama-cpp-rs is overkill and adds a C++ build dependency that complicates Orbit's release pipeline. An always-on ollama-style daemon contradicts Orbit's no-daemon posture regardless of binary placement.
+This ADR addresses *which* backend to use. The orthogonal decision of *how* the backend is delivered to the user (in-process vs. companion binary vs. feature flag) is in [Companion binary installed on demand, rather than bundled in `orbit`](#companion-binary-installed-on-demand-rather-than-bundled-in-orbit). Within in-process or in-companion options, fastembed-rs covers the embedding-model use case directly; Candle is more general but requires more Orbit-side code; llama-cpp-rs is overkill and adds a C++ build dependency that complicates Orbit's release pipeline. An always-on ollama-style daemon contradicts Orbit's no-daemon posture regardless of binary placement.
 
 ### Decision
 
-Phase 1 uses fastembed-rs as the inference backend, exposed through an `Embedder` trait that lives in a new `orbit-embed` library crate. Per ADR-0274, fastembed-rs is linked into a separate `orbit-embed-companion` binary, not into the main `orbit` binary; the trait abstraction means an alternative backend can later swap in without touching `orbit-store` or `orbit-tools`. The user-facing default model is BGE-small-en-v1.5 (384 dim, ~30MB), with `--model {bge-small | minilm-l6 | nomic-v1.5}` selected at install time. Reject external always-on ollama: contradicts the no-daemon posture. Reject llama-cpp-rs: C++ build dependency outweighs its flexibility for embedding-only work. Reject Candle as default: more integration work for less out-of-the-box behavior; remains a viable trait-impl swap.
+Phase 1 uses fastembed-rs as the inference backend, exposed through an `Embedder` trait that lives in a new `orbit-embed` library crate. Per [Companion binary installed on demand, rather than bundled in `orbit`](#companion-binary-installed-on-demand-rather-than-bundled-in-orbit), fastembed-rs is linked into a separate `orbit-embed-companion` binary, not into the main `orbit` binary; the trait abstraction means an alternative backend can later swap in without touching `orbit-store` or `orbit-tools`. The user-facing default model is BGE-small-en-v1.5 (384 dim, ~30MB), with `--model {bge-small | minilm-l6 | nomic-v1.5}` selected at install time. Reject external always-on ollama: contradicts the no-daemon posture. Reject llama-cpp-rs: C++ build dependency outweighs its flexibility for embedding-only work. Reject Candle as default: more integration work for less out-of-the-box behavior; remains a viable trait-impl swap.
 
 ### Consequences
 
@@ -62,19 +52,10 @@ Phase 1 uses fastembed-rs as the inference backend, exposed through an `Embedder
 - Model output is well-characterized by published benchmarks (MTEB) so the default is defensible without an Orbit-specific eval ([3_vision.md §1.1](./3_vision.md)).
 - Cost: locking in to the fastembed-rs catalog means models outside that catalog (e.g., voyage-code, code-tuned models in [3_vision.md §1.7](./3_vision.md)) need a different `Embedder` impl in a future task. The trait abstraction makes that mechanical, but it does mean the phase-1 menu is bounded by what fastembed-rs ships.
 
-## Provenance
 
-Migrated verbatim from the local heading `orbit-search/ADR-001` in `docs/design/orbit-search/4_decisions.md` by [ORB-10458]. Original status line: Accepted · 2026-05 · [T20260510-3], [T20260510-9]
+## Brute-force cosine over SQLite BLOBs; `sqlite-vec` reserved as phase-2 upgrade
 
-## ADR-0271 — Brute-force cosine over SQLite BLOBs; `sqlite-vec` reserved as phase-2 upgrade
-
-**Status:** Accepted · 2026-07-26 21:51:26.296186Z · [T20260510-3], [T20260510-9], [ORB-10458]
-**Owner:** claude
-**Created:** 2026-07-26 21:51:26.057432Z
-**Last updated:** 2026-07-26 21:51:26.296186Z
-**Related features:** `orbit-search`
-**Legacy IDs:** `orbit-search/ADR-002`
-**Tags:** `orbit-search`
+**Recorded:** 2026-07-26 21:51:26.296186Z · [T20260510-3], [T20260510-9], [ORB-10458]
 
 ### Context
 
@@ -100,19 +81,10 @@ Phase 1 implements brute-force cosine in Rust over `embeddings.embedding` BLOBs.
 - Query latency is acceptable until the corpus crosses ~100K vectors.
 - Cost: brute force scans every row every query. For a stable phase-1 corpus that's fine, but it means we can't ship "semantic search across the entire repository graph" without revisiting storage. The decision deliberately scopes phase 1 to where brute force is comfortable, and pays the upgrade cost later when there is operational evidence to size against.
 
-## Provenance
 
-Migrated verbatim from the local heading `orbit-search/ADR-002` in `docs/design/orbit-search/4_decisions.md` by [ORB-10458]. Original status line: Accepted · 2026-05 · [T20260510-3], [T20260510-9]
+## Per-field embeddings with chunked overflow, not whole-bundle concatenation
 
-## ADR-0272 — Per-field embeddings with chunked overflow, not whole-bundle concatenation
-
-**Status:** Accepted · 2026-07-26 21:51:26.815084Z · [T20260510-3], [T20260510-9], [ORB-10458]
-**Owner:** claude
-**Created:** 2026-07-26 21:51:26.548502Z
-**Last updated:** 2026-07-26 21:53:51.013540Z
-**Related features:** `orbit-search`
-**Legacy IDs:** `orbit-search/ADR-003`
-**Tags:** `orbit-search`
+**Recorded:** 2026-07-26 21:51:26.815084Z · [T20260510-3], [T20260510-9], [ORB-10458]
 
 ### Context
 
@@ -133,21 +105,12 @@ Phase 1 indexes one row per `(task_id, field, chunk_idx)`. Result formatting col
 - Result snippets point to the actual field that matched, which makes the answer interpretable to users and agents.
 - Comments and review messages become independently findable, which directly addresses the "decisions buried in long threads" failure mode in [1_overview.md §1](./1_overview.md).
 - Schema's `field` column carries the discriminator without a separate table.
-- Cost: 5–20× more rows per task, more storage, more indexing CPU. At phase-1 scale the cost is unproblematic; at much larger scales the per-field strategy may need revisiting alongside the storage upgrade in ADR-0271.
+- Cost: 5–20× more rows per task, more storage, more indexing CPU. At phase-1 scale the cost is unproblematic; at much larger scales the per-field strategy may need revisiting alongside the storage upgrade in [Brute-force cosine over SQLite BLOBs; `sqlite-vec` reserved as phase-2 upgrade](#brute-force-cosine-over-sqlite-blobs-sqlite-vec-reserved-as-phase-2-upgrade).
 
-## Provenance
 
-Migrated verbatim from the local heading `orbit-search/ADR-003` in `docs/design/orbit-search/4_decisions.md` by [ORB-10458]. Original status line: Accepted · 2026-05 · [T20260510-3], [T20260510-9]
+## Hybrid retrieval (FTS5 BM25 + cosine, fused via RRF) from day one
 
-## ADR-0273 — Hybrid retrieval (FTS5 BM25 + cosine, fused via RRF) from day one
-
-**Status:** Accepted · 2026-07-26 21:51:27.306164Z · [T20260510-3], [T20260510-9], [ORB-10458]
-**Owner:** claude
-**Created:** 2026-07-26 21:51:27.054702Z
-**Last updated:** 2026-07-26 21:51:27.306164Z
-**Related features:** `orbit-search`
-**Legacy IDs:** `orbit-search/ADR-004`
-**Tags:** `orbit-search`
+**Recorded:** 2026-07-26 21:51:27.306164Z · [T20260510-3], [T20260510-9], [ORB-10458]
 
 ### Context
 
@@ -173,23 +136,14 @@ Phase 1 ships hybrid retrieval. Both retrievers run on every `search` query. RRF
 - Score breakdown gives agents a real signal for confidence calibration without exposing raw incommensurable scores.
 - Cost: every `search` runs two SQL queries instead of one and computes one extra fusion pass. At phase-1 latency budgets (target <200ms p95) this is unproblematic, but it doubles the per-query work versus a single-retriever design and that overhead is paid even on queries where one retriever would have been enough.
 
-## Provenance
 
-Migrated verbatim from the local heading `orbit-search/ADR-004` in `docs/design/orbit-search/4_decisions.md` by [ORB-10458]. Original status line: Accepted · 2026-05 · [T20260510-3], [T20260510-9]
+## Companion binary installed on demand, rather than bundled in `orbit`
 
-## ADR-0274 — Companion binary installed on demand, rather than bundled in `orbit`
-
-**Status:** Accepted · 2026-07-26 21:51:27.766417Z · [T20260510-3], [T20260510-9], [ORB-10458]
-**Owner:** claude
-**Created:** 2026-07-26 21:51:27.546406Z
-**Last updated:** 2026-07-26 21:53:51.271545Z
-**Related features:** `orbit-search`
-**Legacy IDs:** `orbit-search/ADR-005`
-**Tags:** `orbit-search`
+**Recorded:** 2026-07-26 21:51:27.766417Z · [T20260510-3], [T20260510-9], [ORB-10458]
 
 ### Context
 
-Once fastembed-rs is the chosen backend (ADR-0270), the question of where it lives matters. Linking ONNX Runtime + fastembed-rs into the main `orbit` binary adds ~50MB and pays that cost for every user — including users who never invoke semantic search. Three packaging shapes are plausible:
+Once fastembed-rs is the chosen backend ([fastembed-rs ONNX backend over Candle, llama.cpp, or external ollama](#fastembed-rs-onnx-backend-over-candle-llamacpp-or-external-ollama)), the question of where it lives matters. Linking ONNX Runtime + fastembed-rs into the main `orbit` binary adds ~50MB and pays that cost for every user — including users who never invoke semantic search. Three packaging shapes are plausible:
 
 | Option | Default install size | Opt-in mechanism | Inference latency |
 |--------|----------------------|------------------|-------------------|
@@ -216,19 +170,10 @@ Phase 1 ships option C. Two new crates:
 - The subprocess-RPC boundary makes the companion swappable: a future `orbit-embed-companion-candle` could reuse the same RPC protocol with a different inference engine.
 - Cost: install becomes a two-step user action (`orbit` install, then `orbit semantic install`). Users hitting `orbit search` without the companion installed need a clean, helpful error. The subprocess introduces ~100–300ms ORT cold-start latency per process; mitigated by reusing the subprocess across batches but still visible on first interactive query. Additionally, the companion binary requires a per-platform release pipeline (Linux x86_64, Linux arm64, macOS x86_64, macOS arm64, Windows x86_64), which is real release-engineering work for follow-up tasks.
 
-## Provenance
 
-Migrated verbatim from the local heading `orbit-search/ADR-005` in `docs/design/orbit-search/4_decisions.md` by [ORB-10458]. Original status line: Accepted · 2026-05 · [T20260510-3], [T20260510-9]
+## Workspace-local semantic DB separate from global audit/tool DB
 
-## ADR-0275 — Workspace-local semantic DB separate from global audit/tool DB
-
-**Status:** Accepted · 2026-07-26 21:51:38.541365Z · [T20260510-9], [ORB-10458]
-**Owner:** claude
-**Created:** 2026-07-26 21:51:38.173306Z
-**Last updated:** 2026-07-26 21:53:51.497463Z
-**Related features:** `orbit-search`
-**Legacy IDs:** `orbit-search/ADR-006`
-**Tags:** `orbit-search`
+**Recorded:** 2026-07-26 21:51:38.541365Z · [T20260510-9], [ORB-10458]
 
 ### Context
 
@@ -236,7 +181,7 @@ Orbit already has a global SQLite database at `~/.orbit/orbit.db` for command au
 
 ### Decision
 
-Store phase-1 semantic tables in a workspace-local SQLite database at `.orbit/state/semantic.db`. The semantic feature crate (`orbit-embed`, see ADR-0276) opens and owns this file end-to-end: `VectorStore::open(path)` and `VectorStore::open_in_memory()` apply the WAL + busy_timeout pragmas, run `ensure_vector_schema(conn)` (CREATE TABLE IF NOT EXISTS for `embeddings` + `tasks_fts`), and return a `VectorStore` whose `Arc<Mutex<Connection>>` is the only handle into the database.
+Store phase-1 semantic tables in a workspace-local SQLite database at `.orbit/state/semantic.db`. The semantic feature crate (`orbit-embed`, see [Semantic-search ownership relocated to `orbit-embed`](#semantic-search-ownership-relocated-to-orbit-embed)) opens and owns this file end-to-end: `VectorStore::open(path)` and `VectorStore::open_in_memory()` apply the WAL + busy_timeout pragmas, run `ensure_vector_schema(conn)` (CREATE TABLE IF NOT EXISTS for `embeddings` + `tasks_fts`), and return a `VectorStore` whose `Arc<Mutex<Connection>>` is the only handle into the database.
 
 ### Consequences
 
@@ -244,21 +189,12 @@ Store phase-1 semantic tables in a workspace-local SQLite database at `.orbit/st
 - Task-derived vectors and FTS rows follow task scoping: one workspace cannot see another workspace's semantic index.
 - `orbit semantic index` can rebuild only the active workspace without filtering a global table by workspace ID.
 - Tests use `VectorStore::open_in_memory()` directly — no orbit-store handle to plumb through.
-- `semantic.db` carries only the embeddings/FTS5 schema. Earlier phase-1 implementations co-located the generic `orbit-store` migration bundle in the same file (audit, tools, reservations, etc.); that collateral was removed when ADR-0276 cut the `orbit-embed → orbit-store` dependency.
+- `semantic.db` carries only the embeddings/FTS5 schema. Earlier phase-1 implementations co-located the generic `orbit-store` migration bundle in the same file (audit, tools, reservations, etc.); that collateral was removed when [Semantic-search ownership relocated to `orbit-embed`](#semantic-search-ownership-relocated-to-orbit-embed) cut the `orbit-embed → orbit-store` dependency.
 
-## Provenance
 
-Migrated verbatim from the local heading `orbit-search/ADR-006` in `docs/design/orbit-search/4_decisions.md` by [ORB-10458]. Original status line: Accepted · 2026-05 · [T20260510-9]
+## Semantic-search ownership relocated to `orbit-embed`
 
-## ADR-0276 — Semantic-search ownership relocated to `orbit-embed`
-
-**Status:** Accepted · 2026-07-26 21:51:39.228648Z · [T20260510-20], [ORB-10458]
-**Owner:** claude
-**Created:** 2026-07-26 21:51:38.878638Z
-**Last updated:** 2026-07-26 21:53:51.737306Z
-**Related features:** `orbit-search`
-**Legacy IDs:** `orbit-search/ADR-007`
-**Tags:** `orbit-search`
+**Recorded:** 2026-07-26 21:51:39.228648Z · [T20260510-20], [ORB-10458]
 
 ### Context
 
@@ -282,24 +218,15 @@ Relocate orbit-search ownership into `orbit-embed` and make it self-contained:
 
 - Crate dependency direction matches the graph feature exactly: `orbit-embed` is a near-leaf feature crate that depends only on `orbit-common` (and its workspace-standard libs: rusqlite, blake3, chrono, reqwest). `orbit-store` is storage-only; both crates are independent.
 - `semantic.db` carries only the `embeddings` and `tasks_fts` tables — no audit/tools/reservations/task_tags collateral. Pre-T-20 implementations had `orbit-store::Store::open` apply the full migration bundle to `semantic.db` as a side effect; that's gone now.
-- `orbit-embed` gains `reqwest` (blocking) for the install download and inlines a small WAL helper. Neither violates ADR-0274's slim-client constraint: the prohibition is on linking ML inference (fastembed-rs / ONNX Runtime) into the main `orbit` binary; storage and HTTP client are fine. `orbit-embed-companion` remains the only crate that links fastembed.
-- The phase-2 graph corpus (per ADR-0271, ADR-0272) can land in `orbit-embed::vector` directly without crossing another crate boundary.
+- `orbit-embed` gains `reqwest` (blocking) for the install download and inlines a small WAL helper. Neither violates [Companion binary installed on demand, rather than bundled in `orbit`](#companion-binary-installed-on-demand-rather-than-bundled-in-orbit)'s slim-client constraint: the prohibition is on linking ML inference (fastembed-rs / ONNX Runtime) into the main `orbit` binary; storage and HTTP client are fine. `orbit-embed-companion` remains the only crate that links fastembed.
+- The phase-2 graph corpus (per [Brute-force cosine over SQLite BLOBs; `sqlite-vec` reserved as phase-2 upgrade](#brute-force-cosine-over-sqlite-blobs-sqlite-vec-reserved-as-phase-2-upgrade), [Per-field embeddings with chunked overflow, not whole-bundle concatenation](#per-field-embeddings-with-chunked-overflow-not-whole-bundle-concatenation)) can land in `orbit-embed::vector` directly without crossing another crate boundary.
 - The phase-1 CLI surface is preserved exactly (install / uninstall / reindex / stats produce identical observable output). `VectorStore::new(store)` is replaced by `VectorStore::open(path)` and `VectorStore::open_in_memory()`. Only one in-tree call site (`crates/orbit-core/src/runtime/builder.rs`) is affected: it stops opening `Store::open(&persistence.semantic_db)` and instead calls `VectorStore::open(&persistence.semantic_db)` directly.
 - Cost: a small amount of `rusqlite::Connection` plumbing duplicates what `orbit-store::Store` does (WAL pragma helper, parent-dir creation, mutex wrapping). The duplication is small (≈30 lines) and isolates the semantic feature's schema from migrations to other store domains, which is the whole point.
 
-## Provenance
 
-Migrated verbatim from the local heading `orbit-search/ADR-007` in `docs/design/orbit-search/4_decisions.md` by [ORB-10458]. Original status line: Accepted · 2026-05 · [T20260510-20]
+## Version-aware companion refresh and quiet background indexing
 
-## ADR-0277 — Version-aware companion refresh and quiet background indexing
-
-**Status:** Accepted · 2026-07-26 21:51:39.751563Z · [T20260510-26], [ORB-10458]
-**Owner:** claude
-**Created:** 2026-07-26 21:51:39.479621Z
-**Last updated:** 2026-07-26 21:51:39.751563Z
-**Related features:** `orbit-search`
-**Legacy IDs:** `orbit-search/ADR-008`
-**Tags:** `orbit-search`
+**Recorded:** 2026-07-26 21:51:39.751563Z · [T20260510-26], [ORB-10458]
 
 ### Context
 
@@ -317,17 +244,10 @@ The companion binary is installed outside the main `orbit` executable, so upgrad
 - Direct commands such as `orbit search <query> --hybrid`, `orbit search similar <task-id>`, and `orbit semantic index` still show actionable companion stderr because they use the inherited-stderr path.
 - Cost: install now trusts the companion's `--version-info` protocol. If a broken companion cannot answer the probe, Orbit conservatively replaces it, which can redownload or recopy the binary even when the file might have been usable for embeddings.
 
-## Provenance
 
-Migrated verbatim from the local heading `orbit-search/ADR-008` in `docs/design/orbit-search/4_decisions.md` by [ORB-10458]. Original status line: Accepted · 2026-05 · [T20260510-26]
+## Split lifecycle and query search namespaces
 
-## ADR-0174 — Split lifecycle and query search namespaces
-
-**Status:** Accepted · 2026-05-20 05:19:25.925165Z · [ORB-00196]
-**Owner:** codex
-**Created:** 2026-05-20 05:19:21.490657Z
-**Last updated:** 2026-05-20 05:19:25.925165Z
-**Related features:** `orbit-search`
+**Recorded:** 2026-05-20 05:19:25.925165Z · [ORB-00196]
 
 ### Context
 `orbit semantic` mixed embedding-companion lifecycle (`install`, `uninstall`, `stats`, `index`) with user query verbs (`search`, `related`). The phase-1 search engine now owns both lexical and vector ranking, so leaving queries under `semantic` would make users choose an implementation detail before they search.
@@ -342,14 +262,10 @@ Migrated verbatim from the local heading `orbit-search/ADR-008` in `docs/design/
 - Vector index coverage remains task-only today; docs, learnings, and ADRs continue to use lexical matching even when `--semantic` is set.
 - Cost: historical audit event names `semantic.search` and `semantic.related` become orphaned event types, accepted because no external audit-history consumers exist yet.
 
-## ADR-0175 — Rename search mode and neighbor flags
+## Rename search mode and neighbor flags
 
-**Status:** Superseded by ADR-0179 · 2026-08-01 19:15:27.082047Z · [ORB-00204], [ORB-10479]
-**Owner:** claude
-**Created:** 2026-08-01 19:15:25.559877Z
-**Last updated:** 2026-08-01 19:15:27.082047Z
-**Related features:** `orbit-search`
-**Tags:** `orbit-search`
+**Superseded by:** [Split orbit search modes and require per-kind statuses](#split-orbit-search-modes-and-require-per-kind-statuses)
+**Recorded:** 2026-08-01 19:15:27.082047Z · [ORB-00204], [ORB-10479]
 
 **Context.** Phase 1 used the semantic name for the hybrid BM25 plus cosine mode toggle and a separate related-task flag for cosine-neighbor lookup. That inverted the intuitive reading of semantic search: users expect semantic plus an ID to mean nearest neighbors, while hybrid is the honest name for the ranking algorithm.
 
@@ -358,23 +274,19 @@ Migrated verbatim from the local heading `orbit-search/ADR-008` in `docs/design/
 **Consequences.**
 - The CLI and MCP surfaces match user vocabulary before external consumers depend on the phase-1 names.
 - Historical phase-1 audit payloads that carried `semantic: true` are orphaned by the hard break, matching the no-shim policy for this young surface.
-- Documentation and packaged skills must distinguish the `orbit semantic` lifecycle command from the MCP `semantic: "<id>"` search parameter. ADR-0179 replaces the CLI flag form with `orbit search similar <id>`.
+- Documentation and packaged skills must distinguish the `orbit semantic` lifecycle command from the MCP `semantic: "<id>"` search parameter. [Split orbit search modes and require per-kind statuses](#split-orbit-search-modes-and-require-per-kind-statuses) replaces the CLI flag form with `orbit search similar <id>`.
 - Cost: Agents and docs written against phase 1 need a one-time rename sweep, and ORB-00202 may need a rebase because it edits adjacent search surfaces.
 - Cost: historical audit event names `semantic.search` and `semantic.related` become orphaned event types, accepted because no external audit-history consumers exist yet.
 
-## ADR-0176 — Consolidate per-domain search; cross-kind --path and --tag filters; learning list --path semantics flip
+## Consolidate per-domain search; cross-kind --path and --tag filters; learning list --path semantics flip
 
-**Status:** Accepted · 2026-05-21 01:14:54.176322Z · [ORB-00202]
-**Owner:** claude
-**Created:** 2026-05-20 06:47:51.011547Z
-**Last updated:** 2026-05-21 01:41:28.278376Z
-**Related features:** `orbit-search`
+**Recorded:** 2026-05-21 01:14:54.176322Z · [ORB-00202]
 
 ### Context
 
-After [ADR-0174] and [ADR-0175] consolidated `orbit search` as the unified query surface, the per-domain `search` subcommands (`orbit task search`, `orbit docs search`, `orbit learning search`) became redundant for content-similarity queries. Worse, `orbit learning search` was bundling three unrelated operations under one verb: substring search (content), path-glob applicability lookup (structural), and tag filter (structural). Two of those are filters dressed up as search.
+After [Split lifecycle and query search namespaces](#split-lifecycle-and-query-search-namespaces) and [Rename search mode and neighbor flags](#rename-search-mode-and-neighbor-flags) consolidated `orbit search` as the unified query surface, the per-domain `search` subcommands (`orbit task search`, `orbit docs search`, `orbit learning search`) became redundant for content-similarity queries. Worse, `orbit learning search` was bundling three unrelated operations under one verb: substring search (content), path-glob applicability lookup (structural), and tag filter (structural). Two of those are filters dressed up as search.
 
-At the same time, agents pre-edit need a single command that answers *given this file path, what tasks / learnings / ADRs apply here?* — the context-pack assembly query. In the final CLI shape after ADR-0179, that is the `orbit search path <path>` form; MCP keeps a `path` parameter. The same logic applies to `--tag`: one cross-kind label bridge.
+At the same time, agents pre-edit need a single command that answers *given this file path, what tasks / learnings / ADRs apply here?* — the context-pack assembly query. In the final CLI shape after [Split orbit search modes and require per-kind statuses](#split-orbit-search-modes-and-require-per-kind-statuses), that is the `orbit search path <path>` form; MCP keeps a `path` parameter. The same logic applies to `--tag`: one cross-kind label bridge.
 
 The phase-1 search engine already supported `--kind {task,doc,learning,adr,all}`. Phase 2 finishes the consolidation: removes the redundant verbs, re-homes their filters under the unified search surface, and fixes one observed semantics bug in `learning list --path`.
 
@@ -409,19 +321,14 @@ Five threads decided together because they share a single mental model — *sear
 - Cost: ADR carries tag and path no-ops until phase 3 lights them up. Documented in `--help` so users do not construct queries that silently return empty.
 - Cost: `AdrStatus` lacks a `Deprecated` variant; `--all` widening on ADRs is asymmetric with the task widener (which gets multiple terminal states). A separate task can extend `AdrStatus` if a deprecated state ever becomes load-bearing.
 
-## ADR-0179 — Split orbit search modes and require per-kind statuses
+## Split orbit search modes and require per-kind statuses
 
-**Status:** Accepted · 2026-05-21 01:31:03.329990Z · [ORB-00205]
-**Owner:** codex
-**Created:** 2026-05-21 01:30:56.646254Z
-**Last updated:** 2026-05-21 01:40:45.601596Z
-**Related features:** `orbit-search`
-**Supersedes:** `ADR-0175`
-**Tags:** `orbit-search`, `cli`, `mcp`
+**Recorded:** 2026-05-21 01:31:03.329990Z · [ORB-00205]
+**Supersedes:** [Rename search mode and neighbor flags](#rename-search-mode-and-neighbor-flags)
 **Paths:** `crates/orbit-cli/src/command/search.rs`, `crates/orbit-core/src/command/search.rs`, `crates/orbit-tools/src/builtin/orbit/search.rs`, `crates/orbit-core/src/runtime/orbit_tool_host/search_tools.rs`
 
 ### Context
-ADR-0175 corrected the search flag names after phase 1, but the resulting CLI still mixed a positional query with mode flags and allowed flat status tokens whose meaning changed by corpus kind. The real alternatives were to keep extending that single-command flag matrix, or split the user-facing CLI modes before more corpora grow vector support.
+[Rename search mode and neighbor flags](#rename-search-mode-and-neighbor-flags) corrected the search flag names after phase 1, but the resulting CLI still mixed a positional query with mode flags and allowed flat status tokens whose meaning changed by corpus kind. The real alternatives were to keep extending that single-command flag matrix, or split the user-facing CLI modes before more corpora grow vector support.
 
 ### Decision
 Use three explicit CLI forms: `orbit search <query>` for free-text search, `orbit search similar <id>` for cosine-neighbor lookup, and `orbit search path <path>` for applicability lookup. Require `--status` values to use `kind:value` tokens such as `task:open`, `doc:active`, and `adr:proposed`. Remove the CLI field-selection and embedding-model flags, and remove the parallel MCP `field` and `embedding_model` parameters while keeping MCP `model` only as provenance.
@@ -433,9 +340,9 @@ Use three explicit CLI forms: `orbit search <query>` for free-text search, `orbi
 - Cost: `similar` and `path` become reserved words immediately after `orbit search`; searching those literal words requires passing a quoted/free-text query with additional context.
 - Cost: callers using the young mode flags, flat `--status`, the retired CLI field/model flags, MCP `field`, or MCP `embedding_model` surfaces must migrate with no compatibility shim.
 
-## ADR-0180 — Doc corpus embeddings use `docs index` and opt-in hybrid search
+## Doc corpus embeddings use `docs index` and opt-in hybrid search
 
-**Status:** Accepted · 2026-05-21 · [ORB-00206]
+**Recorded:** 2026-05-21 · [ORB-00206]
 
 **Context.** Doc search was lexical-only after [ORB-00202] unified the query surface, while the orbit-search store already had a `source_kind` discriminator that could hold docs. The alternatives were to keep semantic ranking deferred, add a separate docs search verb, or reuse the existing vector store behind the unified `orbit search --kind doc --hybrid` path.
 
@@ -449,14 +356,9 @@ Use three explicit CLI forms: `orbit search <query>` for free-text search, `orbi
 
 ---
 
-## ADR-0244 — Expose unified search through a thin HTTP adapter
+## Expose unified search through a thin HTTP adapter
 
-**Status:** Accepted · 2026-07-20 02:13:41.746781Z · [ORB-10304]
-**Owner:** codex
-**Created:** 2026-07-20 02:13:36.199351Z
-**Last updated:** 2026-07-20 02:13:41.746781Z
-**Related features:** `orbit-search`
-**Tags:** `search`, `http-api`, `parity`
+**Recorded:** 2026-07-20 02:13:41.746781Z · [ORB-10304]
 **Paths:** `crates/orbit-dashboard/src/api/**`, `crates/orbit-core/src/command/search/**`
 
 ### Context
@@ -470,17 +372,12 @@ Expose GET /api/search as a thin transport adapter over OrbitRuntime::global_sea
 - CLI, tool, and HTTP search share filtering, ranking, result ordering, and fallback semantics.
 - Cost: the unified search parameter names and serialized result shape become an HTTP compatibility contract; future search changes must preserve or deliberately version that surface.
 
-## ADR-0117 — Companion binary installed on demand, rather than bundled in `orbit`
+## Companion binary installed on demand, rather than bundled in `orbit`
 
-**Status:** Accepted · 2026-05-11 02:06:39.422729Z · [T20260510-3], [T20260510-9]
-**Owner:** legacy:semantic-search
-**Created:** 2026-05-11 02:06:39.422050Z
-**Last updated:** 2026-05-11 02:06:39.422729Z
-**Related features:** `semantic-search`
-**Legacy IDs:** `semantic-search/ADR-005`
+**Recorded:** 2026-05-11 02:06:39.422729Z · [T20260510-3], [T20260510-9]
 
 ### Context
-Once fastembed-rs is the chosen backend (ADR-001), the question of where it lives matters. Linking ONNX Runtime + fastembed-rs into the main `orbit` binary adds ~50MB and pays that cost for every user — including users who never invoke semantic search. Three packaging shapes are plausible:
+Once fastembed-rs is the chosen backend ([fastembed-rs ONNX backend over Candle, llama.cpp, or external ollama](#fastembed-rs-onnx-backend-over-candle-llamacpp-or-external-ollama)), the question of where it lives matters. Linking ONNX Runtime + fastembed-rs into the main `orbit` binary adds ~50MB and pays that cost for every user — including users who never invoke semantic search. Three packaging shapes are plausible:
 
 | Option | Default install size | Opt-in mechanism | Inference latency |
 |--------|----------------------|------------------|-------------------|
@@ -509,15 +406,15 @@ Phase 1 ships option C. Two new crates:
 ## Task References
 
 - [T20260510-3] — Design semantic search over task artifacts and graph (v2). The task that produced this folder.
-- [T20260510-9] — Phase-1 semantic search foundation: orbit-embed + orbit-embed-companion + indexing pipeline. The task that accepted and implemented ADR-001 through ADR-006.
-- [T20260510-20] — Refactor: relocate orbit-search ownership to orbit-embed (vector store + commands). The task that accepted and implemented ADR-007.
-- [T20260510-26] — Make semantic companion install/update quiet and version-aware. The task that accepted and implemented ADR-008.
-- [ORB-00196] — Split `orbit semantic` lifecycle from the unified `orbit search` query surface. The task that accepted and implemented ADR-0174.
-- [ORB-00204] — Rename `orbit search` flags to `--hybrid` for free-text vector ranking and `--semantic <id>` for task-neighbor lookup. The task that accepted and implemented ADR-0175.
-- [ORB-00202] — Consolidate per-domain search subcommands and add cross-kind `--path` / `--tag` filters. The task that proposed and implemented ADR-0176.
+- [T20260510-9] — Phase-1 semantic search foundation: orbit-embed + orbit-embed-companion + indexing pipeline. The task that accepted and implemented [fastembed-rs ONNX backend over Candle, llama.cpp, or external ollama](#fastembed-rs-onnx-backend-over-candle-llamacpp-or-external-ollama) through [Workspace-local semantic DB separate from global audit/tool DB](#workspace-local-semantic-db-separate-from-global-audittool-db).
+- [T20260510-20] — Refactor: relocate orbit-search ownership to orbit-embed (vector store + commands). The task that accepted and implemented [Semantic-search ownership relocated to `orbit-embed`](#semantic-search-ownership-relocated-to-orbit-embed).
+- [T20260510-26] — Make semantic companion install/update quiet and version-aware. The task that accepted and implemented [Version-aware companion refresh and quiet background indexing](#version-aware-companion-refresh-and-quiet-background-indexing).
+- [ORB-00196] — Split `orbit semantic` lifecycle from the unified `orbit search` query surface. The task that accepted and implemented [Split lifecycle and query search namespaces](#split-lifecycle-and-query-search-namespaces).
+- [ORB-00204] — Rename `orbit search` flags to `--hybrid` for free-text vector ranking and `--semantic <id>` for task-neighbor lookup. The task that accepted and implemented [Rename search mode and neighbor flags](#rename-search-mode-and-neighbor-flags).
+- [ORB-00202] — Consolidate per-domain search subcommands and add cross-kind `--path` / `--tag` filters. The task that proposed and implemented [Consolidate per-domain search; cross-kind --path and --tag filters; learning list --path semantics flip](#consolidate-per-domain-search-cross-kind---path-and---tag-filters-learning-list---path-semantics-flip).
 - [ORB-00203] — Add ADR envelope `tags` and `paths` so ADRs participate in cross-kind `--tag` / `--path` search filters.
-- [ORB-00205] — Split `orbit search` into query / similar / path forms and require per-kind `--status` syntax. The task that accepted and implemented ADR-0179.
-- [ORB-00206] — Add doc-corpus embeddings through `orbit docs index` and `orbit search --kind doc --hybrid`. The task that accepted and implemented ADR-0180.
+- [ORB-00205] — Split `orbit search` into query / similar / path forms and require per-kind `--status` syntax. The task that accepted and implemented [Split orbit search modes and require per-kind statuses](#split-orbit-search-modes-and-require-per-kind-statuses).
+- [ORB-00206] — Add doc-corpus embeddings through `orbit docs index` and `orbit search --kind doc --hybrid`. The task that accepted and implemented [Doc corpus embeddings use `docs index` and opt-in hybrid search](#doc-corpus-embeddings-use-docs-index-and-opt-in-hybrid-search).
 - [ORB-10304] — Expose unified lexical, hybrid, and neighbor search through `GET /api/search`.
 
 Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

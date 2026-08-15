@@ -3,23 +3,28 @@ summary: "Worktree Artifacts - Design"
 type: design
 title: "Worktree Artifacts - Design"
 owner: codex
-last_updated: 2026-08-11
+last_updated: 2026-08-15
 status: Accepted
 feature: worktree-artifacts
 doc_role: design
 tags: ["worktree-artifacts"]
 paths: ["crates/orbit-remote/**", "crates/orbit-core/**", "crates/orbit-store/**", "crates/orbit-cli/**"]
 related_features: ["worktree-artifacts", "host-registry", "mcp-bridge"]
-related_artifacts: ["ORB-00199", "ORB-00200", "ORB-00201", "ORB-10272", "ORB-10297", "ORB-10330", "ORB-10545", "ORB-10668", "ORB-10669", "ORB-10725", "ADR-0177", "ADR-0229", "ADR-0302", "ADR-0339", "ADR-0342", "ADR-0357"]
+related_artifacts: ["ORB-00199", "ORB-00200", "ORB-00201", "ORB-10272", "ORB-10297", "ORB-10330", "ORB-10545", "ORB-10668", "ORB-10669", "ORB-10725"]
 ---
 
 # Worktree Artifacts — Design
 
 > Learning-specific storage and federation references below are retired history.
-> [ORB-10736] / [ADR-0359] remove the native learning subsystem and leave its
+> [ORB-10736] / [Remove the native project-learning subsystem](../project-learnings/4_decisions.md#remove-the-native-project-learning-subsystem) remove the native learning subsystem and leave its
 > existing repository files inert.
 
-The current implementation treats ADR and learning bodies as branch-local files with workspace-local IDs ([ADR-0357]). The shared root owns durable coordination state; the local root owns files that should be staged with the branch.
+> Decision-store storage, federation, allocation, and repair references below are
+> also retired history. [ORB-10726] retired the tool surface and moved reasoning
+> into feature decision docs; [ORB-10805] removed the redundant tracked store and
+> its IDs.
+
+The historical implementation treated decision and learning bodies as branch-local files with workspace-local IDs ([Workspace-scoped knowledge keys, no global knowledge IDs](../host-registry/4_decisions.md#workspace-scoped-knowledge-keys-no-global-knowledge-ids)). The root split remains relevant to task execution, while the artifact-specific mechanisms below document retired behavior.
 
 ## 1. Runtime Roots
 
@@ -39,7 +44,7 @@ shared lock, then body writes update the row with:
 
 Backfilled shared-root artifacts receive `body_path` during allocator initialization so old ADRs and migrated learnings remain readable from any worktree.
 
-This is the only allocator, and every create path uses it. [ADR-0357] keys
+This is the only allocator, and every create path uses it. [Workspace-scoped knowledge keys, no global knowledge IDs](../host-registry/4_decisions.md#workspace-scoped-knowledge-keys-no-global-knowledge-ids) keys
 knowledge `(workspace_id, artifact_key)`, so an ID is unique within its workspace
 and makes no claim outside it; [ORB-10725] deleted the hub-global sequence that
 §2.1 and §2.2 once described.
@@ -53,10 +58,10 @@ marker. [ORB-10330] added the owner-side `finalize_preallocated` paths and the
 gated broker composition that paired one hub allocation with one owner-checkout
 finalization, correlated by `mcp_call_id`.
 
-**Both are removed** ([ORB-10725], [ADR-0357]). Public issuance never activated, so
+**Both are removed** ([ORB-10725], [Workspace-scoped knowledge keys, no global knowledge IDs](../host-registry/4_decisions.md#workspace-scoped-knowledge-keys-no-global-knowledge-ids)). Public issuance never activated, so
 no ID was ever drawn from the sequence and nothing had to be renumbered; what the
 substrate encoded was a superseded model, which is why it was deleted rather than
-parked alongside the registry tables that ADR-0358 keeps dormant for v2. Remote
+parked alongside the registry tables that [Defer fleet registration and execution placement to v2](../host-registry/4_decisions.md#defer-fleet-registration-and-execution-placement-to-v2) keeps dormant for v2. Remote
 feature v2 keeps its ledger slot — feature-migration names are immutable, so a
 database that recorded it must still find it — but the slot is a no-op, and Remote
 feature v3 drops the tables `IF EXISTS` so a database that applied the original v2
@@ -104,7 +109,7 @@ List and search retain their existing defaults. Readable allocation-owned bundle
 ADR document update, accept, and supersede are local-only. A federated or unavailable allocation-owned artifact fails preflight with `artifact_not_local` (HTTP 409 or the same local MCP code) before any bundle, allocation, lifecycle timestamp, index, or audit mutation. Supersede preflights both operands before its first write. Landing the bundle in the current checkout restores ordinary local mutation semantics; a sibling-owned allocation row remains unchanged.
 
 Local-only is a boundary on *where* the write runs, not on which surface may run
-it. `orbit adr add`, `orbit adr update`, and `orbit adr supersede` ([ADR-0342],
+it. `orbit adr add`, `orbit adr update`, and `orbit adr supersede` ([orbit adr owns ADR authoring and lifecycle; reconcile stays the cross-checkout verb](./4_decisions.md#orbit-adr-owns-adr-authoring-and-lifecycle-reconcile-stays-the-cross-checkout-verb),
 [ORB-10668]) delegate to the same `orbit.adr.*` tools and so inherit this
 preflight unchanged; they exist so the checkout that owns a bundle can complete
 the lifecycle from a shell, which is the only place the 409 leaves open.
@@ -191,12 +196,12 @@ The `worktree_root` column preserves historical rows from earlier phases, so old
 - [ORB-10330] added the owner-side preallocated finalizers (`finalize_preallocated`
   on the ADR and learning stores) and the gated broker composition. Removed by
   [ORB-10725]: with no allocation step there is no preallocated ID to finalize.
-- [ORB-10725] deleted both substrates under [ADR-0357], turned Remote feature v2
+- [ORB-10725] deleted both substrates under [Workspace-scoped knowledge keys, no global knowledge IDs](../host-registry/4_decisions.md#workspace-scoped-knowledge-keys-no-global-knowledge-ids), turned Remote feature v2
   into a no-op slot, and added Remote feature v3 to drop its tables from databases
   that had applied it.
 - [ORB-10545] added exact-bundle reconciliation and made superseded ADR bodies
-  repository-published decision history under [ADR-0302].
-- [ORB-10669] published the remaining partitions (§6) under [ADR-0339], made the
+  repository-published decision history under [Publish superseded ADR bodies as durable decision history](./4_decisions.md#publish-superseded-adr-bodies-as-durable-decision-history).
+- [ORB-10669] published the remaining partitions (§6) under [Publish every ADR lifecycle partition and resolve duplicates by explicit precedence](./4_decisions.md#publish-every-adr-lifecycle-partition-and-resolve-duplicates-by-explicit-precedence), made the
   managed `.gitignore` block retire its own superseded lines, and replaced
   first-hit-wins ADR resolution with the explicit lifecycle precedence.
 
