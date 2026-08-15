@@ -4,6 +4,8 @@
   "assets": {
     "agent_implement": "6f789bcce1bbdf323a11e3ccede848b4848a3e99c8cc6e71dcb3a70baa681958",
     "apply_triage_dispositions": "ff38e3a981c6d9300d76d4719042185121bdd036859ae0dbf7a0387c38293876",
+    "classify_workspace_auto_tasks": "98be4394c5122ea5f3dc33ed0fb71e82ee34fc7c269023128b9512272ca3e372",
+    "epic_orchestrator": "970f624a1ee606cfdd00ea7924a835973a890d9b358438065f6223208284b183",
     "gate_starvation_fail": "91d39799663320d32d31b7ed7fa172f5c63f453fd086379ca5e5981534509888",
     "git_commit": "890ea46ba01ad6d4b6fa62cba925b855e968e1f56dcfa7a2d4278e63d67d5769",
     "git_merge": "7770bb756c6bd25385495fab2e830aafd8fb8652d532779a014dd9b59f92425c",
@@ -21,6 +23,7 @@
     "reserve_locks": "876b4dc08689083c8bdf8c265a8787076e916c51b1bc07a3588a1f9a88d26fc4",
     "resolve_workspace_ship_input": "9666a0e85d3665df1e28ee8055e22d8b907381019648f409a4bd3fe3fc95dd0a",
     "run_auto_task_scheduler": "ca962b8683a1ba63dd80913b7d3868ec49464001f264cd357e8381cb5a2a9d58",
+    "scan_unresolved_work": "bf343244e246187cec1283cc5dc7cbb211772c2395484f2e41becb8f31128fe8",
     "sleep": "645be154baaa87aebdb1985afd9880e3880d13afe9d96d6493d5617c867bae42",
     "step_failure_recovery": "dbdd647e00b5de77daccfbe0e47949646e326522b84d23d0fb41d72ef31c9f12",
     "task_pilot": "dc0ffc7dda0c5c4b27d58ef609cca347a27e52233f5e16b9f5e8b3527c2a32c8",
