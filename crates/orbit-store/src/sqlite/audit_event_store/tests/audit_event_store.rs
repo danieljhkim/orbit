@@ -60,7 +60,11 @@ fn insert_then_read_round_trips_correlation_fields() {
     let store = Store::open_in_memory().expect("open store");
     let params = sample_params();
     store
-        .insert_audit_event_record(&params)
+        .insert_audit_event_record_with_invocation(
+            &params,
+            Some("trace-test-1"),
+            Some("192.0.2.10"),
+        )
         .expect("insert audit event");
 
     let events = store
@@ -82,6 +86,8 @@ fn insert_then_read_round_trips_correlation_fields() {
     );
     assert_eq!(event.origin_session_id.as_deref(), Some("mcp-session-abc"));
     assert_eq!(event.mcp_call_id.as_deref(), Some("mcall-abc"));
+    assert_eq!(event.trace_id.as_deref(), Some("trace-test-1"));
+    assert_eq!(event.caller_ip.as_deref(), Some("192.0.2.10"));
     assert_eq!(event.lease_id.as_deref(), Some("lease-abc"));
 
     let by_id = store
@@ -94,6 +100,8 @@ fn insert_then_read_round_trips_correlation_fields() {
     assert_eq!(by_id.step_index, Some(2));
     assert_eq!(by_id.workspace_id.as_deref(), Some("ws_orbit"));
     assert_eq!(by_id.mcp_call_id.as_deref(), Some("mcall-abc"));
+    assert_eq!(by_id.trace_id.as_deref(), Some("trace-test-1"));
+    assert_eq!(by_id.caller_ip.as_deref(), Some("192.0.2.10"));
 }
 
 #[test]
@@ -251,6 +259,8 @@ fn migration_adds_correlation_columns_to_legacy_table() {
         "capabilities_json",
         "origin_session_id",
         "mcp_call_id",
+        "trace_id",
+        "caller_ip",
         "lease_id",
     ] {
         assert!(
@@ -271,6 +281,7 @@ fn migration_adds_correlation_columns_to_legacy_table() {
     assert!(indexes.iter().any(|i| i == "idx_audit_events_job_run_id"));
     assert!(indexes.iter().any(|i| i == "idx_audit_events_workspace_id"));
     assert!(indexes.iter().any(|i| i == "idx_audit_events_mcp_call_id"));
+    assert!(indexes.iter().any(|i| i == "idx_audit_events_trace_id"));
 
     let preserved: i64 = conn
         .query_row(
@@ -292,15 +303,34 @@ fn migration_adds_correlation_columns_to_legacy_table() {
         task_id.is_none(),
         "legacy row should have NULL task_id post-migration",
     );
-    let new_fields: (Option<String>, Option<String>, Option<String>) = conn
+    struct LegacyInvocationFields {
+        workspace_id: Option<String>,
+        capabilities_json: Option<String>,
+        mcp_call_id: Option<String>,
+        trace_id: Option<String>,
+        caller_ip: Option<String>,
+    }
+    let new_fields = conn
         .query_row(
-            "SELECT workspace_id, capabilities_json, mcp_call_id FROM audit_events \
+            "SELECT workspace_id, capabilities_json, mcp_call_id, trace_id, caller_ip FROM audit_events \
              WHERE execution_id = 'exec-legacy'",
             [],
-            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            |row| {
+                Ok(LegacyInvocationFields {
+                    workspace_id: row.get(0)?,
+                    capabilities_json: row.get(1)?,
+                    mcp_call_id: row.get(2)?,
+                    trace_id: row.get(3)?,
+                    caller_ip: row.get(4)?,
+                })
+            },
         )
         .expect("read legacy row additions");
-    assert_eq!(new_fields, (None, None, None));
+    assert!(new_fields.workspace_id.is_none());
+    assert!(new_fields.capabilities_json.is_none());
+    assert!(new_fields.mcp_call_id.is_none());
+    assert!(new_fields.trace_id.is_none());
+    assert!(new_fields.caller_ip.is_none());
 }
 
 #[test]

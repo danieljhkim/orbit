@@ -1,2 +1,0 @@
-mod adoption;
-mod registry;

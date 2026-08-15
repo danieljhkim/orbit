@@ -50,7 +50,7 @@ Patterns to copy:
 
 - **A new tool of this kind lands in three places.** New struct in `orbit/<area>/<verb>.rs`, new variant in `OrbitBuiltinAction`, new match arm in the host's `execute()`. The dispatcher and registry are untouched.
 - **Schema in `orbit-tools`; logic in `orbit-core`.** This is the rule that keeps `orbit-tools` free of runtime / store dependencies per the architecture diagram in `CLAUDE.md`. If your tool needs the task store, the activity-job engine, or sandboxed exec, it must dispatch through the host — don't pull those deps into `orbit-tools`.
-- **Remote MCP-only adapters stay in `orbit-remote`.** Global host/workspace discovery is not a generic `ToolRegistry` command. Its schema, policy, and execution live together in Remote and are composed over the generic MCP kernel; adding one does not add an `OrbitBuiltinAction` or Core `run_tool` arm.
+- **MCP-only adapters stay in `orbit-mcp`.** Global host/workspace discovery is not a generic `ToolRegistry` command. Its schema and projection live beside MCP framing and are composed with the caller-supplied host; adding one does not add an `OrbitBuiltinAction` or Core `run_tool` arm.
 
 ---
 

@@ -7,7 +7,7 @@
 //! delivery tail (F2026-07-121 / F2026-07-122):
 //!
 //! 1. **Blocked tasks.** A terminal run failure blocks every coupled task
-//!    (`task_block_on_run_failure`), and `blocked` is not in the
+//!    (`runtime::task::block_on_run_failure`), and `blocked` is not in the
 //!    workflow-admission allowlist. If the resumed run replays
 //!    `worktree_setup`, admission rejects the very task the resume exists to
 //!    recover — a catch-22.

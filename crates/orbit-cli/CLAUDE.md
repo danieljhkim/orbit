@@ -100,7 +100,7 @@ been migrated; do not half-migrate one.
 ## Crate boundary
 
 `orbit-cli` is a clap entry point. Domain logic lives in `orbit-core` and
-vertical feature crates such as `orbit-remote`. CLI
+focused feature crates such as `orbit-mcp`, `orbit-registry`, and `orbit-web`. CLI
 subcommand files hold only:
 
 - Clap `Args` / `Subcommand` definitions.

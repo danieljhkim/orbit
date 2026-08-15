@@ -1,7 +1,7 @@
 ---
 type: context
 summary: Orbit Configuration
-last_validated: 2026-08-09
+last_validated: 2026-08-15
 ---
 
 # Orbit Configuration
@@ -95,11 +95,12 @@ Fresh `orbit init` configuration advertises only detected provider CLIs. Claude 
 
 You can define any number of crews. Set the workspace-wide fallback with `workflow.default_crew`; assign a specific crew to individual tasks via the [per-task crew override](#per-task-crew-override). Crews are validated at load time: each crew must have non-empty `model`, `provider`, and `backend`; `workflow.default_crew` must name a defined crew.
 
-Crew metadata is canonical runtime data, not display-only TOML. Orbit trims
-`description` (blank becomes absent), trims each tag, drops blank tags, and stores
-tags in sorted deduplicated order. Owner execution-profile publication carries
-this complete projection to the hub and fails closed if provider or backend
-cannot be canonicalized to a concrete executable combination.
+Crew metadata is runtime data, not display-only TOML. Orbit trims `description`
+(blank becomes absent), trims each tag, drops blank tags, and stores tags in sorted
+deduplicated order. `orbit.crew.list` reads and normalizes the selected checkout's
+effective local configuration on the machine serving the request. It returns the
+versioned `CrewDiscoveryV1` projection directly; no execution-profile publication or
+registry database is involved.
 
 > **Retired crew shape.** `planner`, `implementer`, and `reviewer` sub-tables
 > are no longer accepted in a crew entry. A workspace using that old shape must

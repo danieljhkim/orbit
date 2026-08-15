@@ -5,8 +5,8 @@ use orbit_common::types::{
 use orbit_common::utility::redaction::redact_all;
 use orbit_store::TaskCreateParams as StoreTaskCreateParams;
 
+use super::TaskRecordUpdateParams;
 use crate::OrbitRuntime;
-use crate::runtime::TaskRecordUpdateParams;
 
 use super::helpers::{authored_role_value, build_task_comments, effective_actor_label};
 use super::params::TaskAddParams;

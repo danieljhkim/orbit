@@ -1,4 +1,4 @@
-//! Task command/runtime helpers.
+//! Task commands and coordinated record writes.
 
 mod add;
 mod helpers;
@@ -6,10 +6,12 @@ mod lint;
 mod params;
 mod paths;
 mod query;
+mod records;
 mod transitions;
 mod update;
 
 pub use lint::{TaskLintFinding, TaskLintReport, TaskLintSeverity};
+pub(crate) use params::TaskRecordUpdateParams;
 pub use params::{TaskAddParams, TaskUpdateParams};
 
 pub(crate) use helpers::{SYSTEM_ACTOR_LABEL, TaskAttributionInput, assemble_task_attribution};

@@ -115,12 +115,17 @@ pub(crate) const MIGRATIONS: &[Migration] = &[
         name: "remove_native_learning_subsystem",
         apply: super::apply_remove_native_learning_subsystem,
     },
+    Migration {
+        version: 15,
+        name: "invocation_audit_context",
+        apply: super::apply_invocation_audit_context,
+    },
 ];
 
 /// Highest schema version this binary knows how to produce. Public for
 /// the future `orbit migrate` surface (P3.4), alongside
 /// [`AppliedMigration`] and the `Store` version accessors.
-pub const SUPPORTED_SCHEMA_VERSION: u32 = 14;
+pub const SUPPORTED_SCHEMA_VERSION: u32 = 15;
 
 const LEDGER_KEY_PREFIX: &str = "migration.v";
 

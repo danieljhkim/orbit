@@ -47,6 +47,8 @@ mod tool_session_context {
         assert_eq!(context.workspace.as_deref(), Some("/repo"));
         assert_eq!(context.workspace_id, None);
         assert_eq!(context.transport, None);
+        assert_eq!(context.trace_id, None);
+        assert_eq!(context.caller_ip, None);
         assert!(context.effective_capabilities.is_empty());
         assert_eq!(context.origin_session_id, None);
         assert_eq!(context.mcp_call_id, None);
@@ -63,9 +65,13 @@ mod tool_session_context {
             BTreeSet::from([McpCapability::Agent, McpCapability::Operator]);
         context.origin_session_id = Some("mcp-session-1".to_string());
         context.mcp_call_id = Some("mcall-1".to_string());
+        context.trace_id = Some("trace-1".to_string());
+        context.caller_ip = Some("192.0.2.10".to_string());
 
         let value = serde_json::to_value(context).expect("serialize context");
         assert_eq!(value["transport"], "local");
+        assert_eq!(value["trace_id"], "trace-1");
+        assert_eq!(value["caller_ip"], "192.0.2.10");
         assert_eq!(
             value["effective_capabilities"],
             serde_json::json!(["agent", "operator"])

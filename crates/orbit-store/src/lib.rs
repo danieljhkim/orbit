@@ -8,11 +8,10 @@
     rustdoc::invalid_html_tags,
     rustdoc::private_intra_doc_links
 )]
-//! File-based (YAML) and SQLite persistence backends for Orbit data.
+//! File-based and SQLite persistence backends for Orbit data.
 //!
-//! Provides two storage backends — a file store for human-readable, git-friendly
-//! YAML artifacts (tasks, jobs, activities, skills) and a SQLite store for
-//! append-only data (audit events, stored tools). Store builders make the
+//! Provides file stores for human-readable YAML and JSONL artifacts, plus a
+//! SQLite store for relational and append-only data. Store builders make the
 //! supported workspace/global split explicit per domain. The SQLite layer also
 //! provides generic connection/transaction primitives and a namespaced feature
 //! migration ledger; feature crates own their active schemas and queries while
@@ -20,7 +19,7 @@
 //!
 //! # Role
 //! Depends only on `orbit-common`. Consumed by `orbit-core`, `orbit-engine`,
-//! `orbit-cmd`, and vertical feature crates such as `orbit-remote`.
+//! and `orbit-cmd`.
 //!
 //! # Key exports
 //! - Backend trait types: [`TaskStoreBackend`], [`TaskDocumentStoreBackend`],
@@ -30,11 +29,12 @@
 //! - Factory functions: `workspace_task_backends`, `workspace_job_run_store`,
 //!   `global_executor_def_store`, `global_policy_def_store`,
 //!   `audit_event_store_sqlite`, `task_reservation_store_sqlite`, `tool_store_sqlite`
+//! - [`SessionLogStore`] — lock-safe workspace session-log persistence
 //! - [`Store`] / [`StoreTx`] — SQLite connection handle and transaction wrapper
 //! - [`validate_instance_against_schema`] — JSON Schema validation for activity I/O
 //!
 //! # Dependency direction
-//! `orbit-common` ← `orbit-store` ← consumers such as orbit-core and orbit-remote
+//! `orbit-common` ← `orbit-store` ← consumers such as orbit-core and orbit-engine
 
 pub(crate) mod backend;
 mod file;
@@ -107,6 +107,9 @@ pub use backend::{
     global_executor_def_store, global_policy_def_store, layered_policy_def_store,
     task_reservation_store_sqlite, tool_store_sqlite, workspace_job_run_store,
     workspace_policy_def_store, workspace_task_backends,
+};
+pub use file::session_log_store::{
+    SessionLogAppendParams, SessionLogEntry, SessionLogFilter, SessionLogKind, SessionLogStore,
 };
 pub use file_lock::{LockHolderInfo, read_lock_holder};
 pub use json_schema::{validate_instance_against_schema, validate_schema_document};

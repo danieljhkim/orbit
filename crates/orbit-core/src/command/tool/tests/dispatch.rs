@@ -2,52 +2,17 @@ use orbit_common::types::{
     AuditEventStatus, McpCapability, McpTransport, OrbitError, ToolSessionContext,
 };
 use std::collections::BTreeSet;
-use std::sync::{Arc, Barrier, Mutex, MutexGuard, OnceLock};
+use std::sync::{Arc, Barrier};
 use std::thread;
 
 use serde_json::json;
 
-use crate::OrbitRuntime;
+use super::support::{clear_identity_env, env_guard, fresh_runtime, set_identity_env};
 use crate::command::tool::dispatch::{
     ORBIT_MANAGED_RUN_CONTEXT_ENV, ToolEntryPoint, audit_role_label,
     audit_role_label_for_entry_point, finalize_successful_dispatch, reservation_owner_from_env,
     resolve_audit_context, take_tool_audit_recorded, trusted_mcp_audit_context,
 };
-
-/// Serializes any test that mutates `ORBIT_AGENT_*` env vars or asserts on
-/// audit rows whose `role` depends on env-var precedence. Without this
-/// guard, cargo's parallel test harness can race two env writers and
-/// produce non-reproducible failures.
-fn env_guard() -> MutexGuard<'static, ()> {
-    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-    LOCK.get_or_init(|| Mutex::new(()))
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
-}
-
-fn clear_identity_env() {
-    // SAFETY: tests serialize through `env_guard()` before calling this.
-    unsafe {
-        std::env::remove_var("ORBIT_AGENT_NAME");
-        std::env::remove_var("ORBIT_AGENT_MODEL");
-    }
-}
-
-fn set_identity_env(agent: &str, model: &str) {
-    // SAFETY: tests serialize through `env_guard()` before calling this.
-    unsafe {
-        std::env::set_var("ORBIT_AGENT_NAME", agent);
-        std::env::set_var("ORBIT_AGENT_MODEL", model);
-    }
-}
-
-fn fresh_runtime() -> OrbitRuntime {
-    // Reset the dedup signal so cross-test thread-local leakage cannot
-    // mask real bugs in the per-call set/clear cycle.
-    let _ = take_tool_audit_recorded();
-    clear_identity_env();
-    OrbitRuntime::in_memory().expect("build in-memory runtime")
-}
 
 #[test]
 fn dispatch_records_success_audit_with_mcp_subcommand_and_clamped_duration() {
@@ -111,6 +76,25 @@ fn dispatch_records_failure_audit_when_tool_handler_errors() {
     assert_eq!(row.exit_code, 1);
     assert!(row.error_message.is_some());
     assert_eq!(row.subcommand.as_deref(), Some("run-mcp"));
+}
+
+#[test]
+fn mcp_v1_defers_capability_authorization_inside_core() {
+    let _g = env_guard();
+    let runtime = fresh_runtime();
+    let result = runtime.execute_tool_command_dispatch_with_session_context(
+        "orbit.task.delete",
+        json!({ "id": "ORB-NOT-THERE" }),
+        None,
+        None,
+        ToolEntryPoint::Mcp,
+        ToolSessionContext::default(),
+    );
+
+    assert!(
+        !matches!(result, Err(OrbitError::CapabilityDenied(_))),
+        "MCP v1 reaches domain validation without a capability decision"
+    );
 }
 
 #[test]
@@ -493,6 +477,8 @@ fn mcp_dispatch_persists_only_trusted_provenance_columns() {
     );
     context.origin_session_id = Some("mcp-session-1".to_string());
     context.mcp_call_id = Some("mcall-1".to_string());
+    context.trace_id = Some("trace-1".to_string());
+    context.caller_ip = Some("192.0.2.10".to_string());
 
     runtime
         .execute_tool_command_dispatch_with_session_context(
@@ -532,6 +518,8 @@ fn mcp_dispatch_persists_only_trusted_provenance_columns() {
     );
     assert_eq!(row.origin_session_id.as_deref(), Some("mcp-session-1"));
     assert_eq!(row.mcp_call_id.as_deref(), Some("mcall-1"));
+    assert_eq!(row.trace_id.as_deref(), Some("trace-1"));
+    assert_eq!(row.caller_ip.as_deref(), Some("192.0.2.10"));
     assert_eq!(row.task_id, None);
     // Both correlations came from the withdrawn run lease; a spoofed
     // `job_run_id`/`lease_id` in model-authored tool JSON still reaches neither.

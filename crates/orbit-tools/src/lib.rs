@@ -16,8 +16,8 @@
 //!
 //! # Role
 //! Depends on `orbit-exec` for process spawning and `orbit-common` for shared
-//! types. Consumed by `orbit-engine`, `orbit-core`, and `orbit-remote`, which
-//! compose its workspace-scoped definitions with Remote-owned discovery tools.
+//! types. Consumed by `orbit-engine`, `orbit-core`, and `orbit-mcp`, which
+//! composes its workspace-scoped definitions with MCP discovery tools.
 //!
 //! # Key exports
 //! - [`ToolRegistry`] — central registry; call `register_builtins()` to load all standard tools
@@ -35,7 +35,7 @@
 //! process allowlists, and the narrow Orbit host surface used by Orbit builtins.
 //!
 //! # Dependency direction
-//! orbit-common / orbit-exec / orbit-policy → `orbit-tools` → orbit-engine, orbit-core, orbit-remote
+//! orbit-common / orbit-exec / orbit-policy → `orbit-tools` → orbit-engine, orbit-core, orbit-mcp
 
 pub(crate) mod builtin;
 pub mod external;

@@ -3,12 +3,12 @@
 use chrono::Utc;
 use orbit_common::types::{JobRunState, TaskPriority, TaskStatus, TaskType};
 use orbit_engine::{DispatchError, RuntimeHost};
+use orbit_store::{SessionLogAppendParams, SessionLogEntry, SessionLogKind, SessionLogStore};
 use orbit_tools::ToolContext;
 use serde_json::{Value, json};
 
 use crate::OrbitRuntime;
 use crate::command::task::TaskAddParams;
-use crate::runtime::session_log::{SessionLogKind, append};
 use crate::runtime::v2_host::test_support::runtime_with_workspace_layout;
 
 fn scan(runtime: &OrbitRuntime, input: Value) -> Value {
@@ -73,6 +73,17 @@ fn seed_run(runtime: &OrbitRuntime, job_id: &str, state: JobRunState) -> String 
         .finalize_job_run(&run.run_id, state, Utc::now(), Some(1))
         .expect("finalize job run");
     run.run_id
+}
+
+fn seed_session_log(runtime: &OrbitRuntime, kind: SessionLogKind, body: &str) -> SessionLogEntry {
+    SessionLogStore::new(runtime.paths().orbit_dir.clone())
+        .append(SessionLogAppendParams {
+            kind,
+            body: body.to_string(),
+            related_task_ids: Vec::new(),
+            related_run_ids: Vec::new(),
+        })
+        .expect("seed session log")
 }
 
 fn string_ids(value: &Value) -> Vec<String> {
@@ -177,30 +188,13 @@ fn excludes_epic_pipeline_own_failed_runs() {
 #[test]
 fn unresolved_check_later_wakes_the_scan() {
     let (_root, runtime, _repo) = runtime_with_workspace_layout();
-    append(
-        &runtime.paths().orbit_dir,
+    seed_session_log(
+        &runtime,
         SessionLogKind::Status,
-        "previous fire drained nothing".into(),
-        vec![],
-        vec![],
-    )
-    .expect("status");
-    append(
-        &runtime.paths().orbit_dir,
-        SessionLogKind::Note,
-        "not a wake reason".into(),
-        vec![],
-        vec![],
-    )
-    .expect("note");
-    let later = append(
-        &runtime.paths().orbit_dir,
-        SessionLogKind::CheckLater,
-        "recheck CI".into(),
-        vec![],
-        vec![],
-    )
-    .expect("check_later");
+        "previous fire drained nothing",
+    );
+    seed_session_log(&runtime, SessionLogKind::Note, "not a wake reason");
+    let later = seed_session_log(&runtime, SessionLogKind::CheckLater, "recheck CI");
 
     let output = scan(&runtime, json!({}));
 

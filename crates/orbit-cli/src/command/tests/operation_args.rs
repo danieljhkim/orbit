@@ -1,19 +1,14 @@
-//! The clap adapter is noun-agnostic [ORB-10358].
+//! The clap adapter is noun-agnostic.
 //!
-//! ADR-0209 bearing 1 claims that adding a verb costs a registry entry and a
-//! handler, and that migrating the *next* noun costs a registry — not new
-//! surface code. This module is the executable proof of the CLI half: it
-//! declares a synthetic noun with a synthetic verb, feeds it to the same
-//! adapter `orbit friction` uses, and checks that a complete, correct command
-//! line falls out. Not one line below is friction-specific, and not one line of
-//! `operation_args.rs` had to change to accept a new noun.
+//! This module declares a synthetic noun with a synthetic verb, feeds it to the
+//! same adapter `orbit friction` uses, and checks that a complete command line
+//! falls out of the operation spec.
 
 use clap::Command;
 use orbit_common::operation::{
-    CliArgKind, CliBinding, CliRender, Description, McpExposure, OperationSpec, ParamSpec,
-    ParamType,
+    CliArgKind, CliBinding, CliRender, Description, OperationSpec, ParamSpec, ParamType,
 };
-use orbit_common::types::McpToolPlacement;
+use orbit_common::types::McpToolScope;
 use serde_json::json;
 
 use super::super::operation_args::{augment_subcommands, invocation_from_matches};
@@ -70,7 +65,7 @@ const POKE: OperationSpec<WidgetVerb> = OperationSpec {
         },
     ],
     rejects_agent_field: false,
-    mcp: McpExposure::AgentOperator(McpToolPlacement::Owner),
+    mcp_scope: Some(McpToolScope::WorkspaceRequired),
     cli_json_flag: true,
     cli_render: CliRender::Record,
 };
@@ -95,7 +90,7 @@ const LIST: OperationSpec<WidgetVerb> = OperationSpec {
         }),
     }],
     rejects_agent_field: false,
-    mcp: McpExposure::Inactive,
+    mcp_scope: None,
     cli_json_flag: false,
     cli_render: CliRender::RecordTable,
 };

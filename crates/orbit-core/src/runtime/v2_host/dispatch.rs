@@ -11,7 +11,7 @@ use orbit_tools::ToolContext;
 use serde_json::Value;
 
 use crate::OrbitRuntime;
-use crate::runtime::task_locks::{
+use crate::runtime::task::locks::{
     emit_expired_reservation_events, merge_task_lock_conflicts, parse_task_ids,
     requested_task_files, task_lock_conflicts, workspace_orbit_dir, workspace_task_reservation_id,
 };
@@ -220,7 +220,7 @@ pub(crate) fn run_deterministic(
         CoreDeterministicAction::ListTriageCandidates => {
             triage::list_triage_candidates(runtime, action, input)
         }
-        // Workspace drain scan [ORB-10779 / ADR-0363]: proposed/backlog/blocked
+        // Workspace drain scan [ORB-10779]: proposed/backlog/blocked
         // tasks, failed/timeout job-runs, and unresolved check_later notes.
         // Read-only; empty is success. Optional `fail_if_nonempty` is the
         // post-loop fail-closed guard for `epic_pipeline`.

@@ -180,6 +180,8 @@ fn audit_event_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<AuditEvent>
         effective_capabilities,
         origin_session_id: row.get(27)?,
         mcp_call_id: row.get(28)?,
+        trace_id: row.get(34)?,
+        caller_ip: row.get(35)?,
         lease_id: row.get(29)?,
         task_id: row.get(30)?,
         job_run_id: row.get(31)?,
@@ -209,7 +211,24 @@ impl Store {
             .lock()
             .map_err(|e| OrbitError::Store(format!("mutex poisoned: {e}")))?;
 
-        insert_audit_event_record_on_connection(&conn, params)
+        insert_audit_event_record_on_connection(&conn, params, None, None)
+    }
+
+    /// Insert a canonical audit row with the transport-neutral invocation
+    /// fields carried by a tool session. The legacy insert DTO remains stable
+    /// for non-tool producers; new invocation producers use this focused seam.
+    pub fn insert_audit_event_record_with_invocation(
+        &self,
+        params: &AuditEventInsertParams,
+        trace_id: Option<&str>,
+        caller_ip: Option<&str>,
+    ) -> Result<(), OrbitError> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| OrbitError::Store(format!("mutex poisoned: {e}")))?;
+
+        insert_audit_event_record_on_connection(&conn, params, trace_id, caller_ip)
     }
 }
 
@@ -221,13 +240,15 @@ impl StoreTx<'_> {
         &mut self,
         params: &AuditEventInsertParams,
     ) -> Result<(), OrbitError> {
-        insert_audit_event_record_on_connection(self.connection(), params)
+        insert_audit_event_record_on_connection(self.connection(), params, None, None)
     }
 }
 
 fn insert_audit_event_record_on_connection(
     conn: &rusqlite::Connection,
     params: &AuditEventInsertParams,
+    trace_id: Option<&str>,
+    caller_ip: Option<&str>,
 ) -> Result<(), OrbitError> {
     let capabilities_json = serde_json::to_string(&params.effective_capabilities)
         .map_err(|error| OrbitError::Store(format!("serialize MCP capability set: {error}")))?;
@@ -241,8 +262,8 @@ fn insert_audit_event_record_on_connection(
             host, pid, session_id, workspace_id, caller_machine_id,
             caller_host_id, process_machine_id, process_host_id, transport,
             capabilities_json, origin_session_id, mcp_call_id, lease_id,
-            task_id, job_run_id, activity_id, step_index
-        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32, ?33)"#,
+            task_id, job_run_id, activity_id, step_index, trace_id, caller_ip
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32, ?33, ?34, ?35)"#,
         rusqlite::params![
             params.execution_id,
             now_string(),
@@ -277,6 +298,8 @@ fn insert_audit_event_record_on_connection(
             params.job_run_id,
             params.activity_id,
             params.step_index,
+            trace_id,
+            caller_ip,
         ],
     )
         .map_err(|e| OrbitError::Store(e.to_string()))?;
@@ -374,7 +397,7 @@ impl Store {
              error_message, host, pid, session_id, workspace_id, caller_machine_id, \
              caller_host_id, process_machine_id, process_host_id, transport, \
              capabilities_json, origin_session_id, mcp_call_id, lease_id, task_id, \
-             job_run_id, activity_id, step_index \
+             job_run_id, activity_id, step_index, trace_id, caller_ip \
              FROM audit_events {where_clause} ORDER BY id DESC LIMIT ?{}",
             param_values.len() + 1
         );
@@ -407,7 +430,7 @@ impl Store {
                  error_message, host, pid, session_id, workspace_id, caller_machine_id, \
                  caller_host_id, process_machine_id, process_host_id, transport, \
                  capabilities_json, origin_session_id, mcp_call_id, lease_id, task_id, \
-                 job_run_id, activity_id, step_index \
+                 job_run_id, activity_id, step_index, trace_id, caller_ip \
                  FROM audit_events WHERE id = ?1",
             )
             .map_err(|e| OrbitError::Store(e.to_string()))?;

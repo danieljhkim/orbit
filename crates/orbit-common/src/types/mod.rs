@@ -29,9 +29,9 @@ pub mod artifact_ids;
 pub mod audit;
 pub mod audit_event;
 pub mod auto_task;
+pub mod crew_discovery;
 pub mod error;
 pub mod event;
-pub mod execution_profile;
 pub mod executor_def;
 pub mod friction;
 pub mod host;
@@ -42,7 +42,6 @@ pub mod metrics;
 pub mod policy_decision;
 pub mod policy_def;
 pub mod pricing;
-pub mod registry_snapshot;
 pub mod resource;
 pub mod role;
 pub mod routine;
@@ -53,6 +52,7 @@ pub mod task_artifacts;
 pub mod task_plan;
 pub mod tool;
 pub mod tool_input;
+pub mod tool_schema;
 pub mod workspace;
 
 pub use activity_job::{
@@ -84,25 +84,18 @@ pub use auto_task::{
     AUTO_TASK_SCHEMA_VERSION, AUTO_TASK_TAG_PREFIX, AutoTaskDefinition, AutoTaskSchedule,
     AutoTaskTemplate, DedupePolicy, auto_task_tag, is_valid_auto_task_name, parse_auto_task_yaml,
 };
+pub use crew_discovery::{CREW_DISCOVERY_SCHEMA_VERSION, CrewDiscoveryEntryV1, CrewDiscoveryV1};
 pub use error::{
     ArtifactOrigin, ArtifactOriginMode, DependencyNotDelivered, NotFoundKind, OrbitError,
     WorkspaceClaimHeld,
 };
 pub use event::OrbitEvent;
-pub use execution_profile::{
-    CREW_DISCOVERY_SCHEMA_VERSION, CrewDiscoveryV1, EXECUTION_CONFIG_DIGEST_DOMAIN,
-    EXECUTION_PROFILE_SCHEMA_VERSION, ExecutionProfileCrewV1, ExecutionProfileShipV1,
-    ExecutionProfileV1, HostWorkspacePresence, ProjectionFreshness, SanitizedExecutionProfile,
-    SanitizedWorkspacePresence, StoredExecutionProfile, WorkspaceOwnership,
-    WorkspacePresenceDeclaration,
-};
 pub use executor_def::{
     ExecutorDef, ExecutorSandboxKind, ExecutorType, ModelPairOverride, StdoutFormat,
 };
 pub use friction::{FrictionEntry, FrictionFrontmatter, FrictionRecord, FrictionStatus};
 pub use host::{
-    HostAlias, HostNameResolution, HostRecord, HostRegistration, HostStatus,
-    REGISTRY_IDENTIFIER_MAX_BYTES, validate_host_id, validate_machine_id,
+    MACHINE_ID_PREFIX, REGISTRY_IDENTIFIER_MAX_BYTES, validate_host_id, validate_machine_id,
     validate_registry_identifier,
 };
 pub use id::OrbitId;
@@ -119,11 +112,6 @@ pub use policy_def::{
     UNRESTRICTED_FS_PROFILE,
 };
 pub use pricing::{InputTokenBasis, PriceRow, derive_cost_usd, normalize_token_usage};
-pub use registry_snapshot::{
-    REGISTRY_CACHE_SCHEMA_VERSION, REGISTRY_SNAPSHOT_SCHEMA_VERSION, RegistryAliasV1,
-    RegistryCacheV1, RegistryHostV1, RegistryPresenceV1, RegistryProfileV1, RegistrySnapshotV1,
-    RegistryWorkspaceV1,
-};
 pub use resource::{
     EXECUTOR_RESOURCE_SCHEMA_VERSION, ExecutorResource, ExecutorResourceSpec,
     POLICY_RESOURCE_SCHEMA_VERSION, PolicyResource, PolicyResourceSpec, ResourceEnvelope,
@@ -160,15 +148,17 @@ pub use task_artifacts::{
 };
 pub use task_plan::{TaskPlan, TaskPlanCheckpoint, TaskPlanSuccessCriterion, parse_task_plan};
 pub use tool::{
-    ExecutionResult, McpCapability, McpCapabilityPlacementMatrix, McpToolDefinition,
-    McpToolPlacement, McpToolPolicy, McpToolPolicyError, McpToolScope, McpTransport, StoredTool,
-    ToolParam, ToolSchema, ToolSessionContext, mcp_advertised_tool_name,
-    mcp_capability_placement_matrix, validate_mcp_tool_definitions,
+    ExecutionResult, McpCapability, McpToolDefinition, McpToolDefinitionError, McpToolScope,
+    McpTransport, StoredTool, ToolParam, ToolSchema, ToolSessionContext, mcp_advertised_tool_name,
+    validate_mcp_tool_definitions,
 };
 pub use tool_input::{
     RETIRED_TASK_ADD_INPUT_FIELDS, optional_csv_or_string_list_alias, optional_raw_string,
     optional_string, optional_string_alias, optional_string_list_alias, optional_u32_alias,
     required_string, split_csv, strip_retired_task_add_input_fields,
+};
+pub use tool_schema::{
+    tool_input_schema, tool_input_schema_for, tool_parameter_enum_values, tool_parameter_schema,
 };
 pub use workspace::{
     WORKSPACE_REGISTRY_SCHEMA_VERSION, Workspace, WorkspaceCheckout, WorkspaceCheckoutRole,

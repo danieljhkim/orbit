@@ -13,17 +13,18 @@ workspace = true
 
 [dependencies]
 orbit-common = { path = "../orbit-common" }
-rmcp = { version = "1.5", default-features = false, features = ["client", "server", "transport-io"] }
-serde.workspace = true
+orbit-registry = { path = "../orbit-registry" }
+orbit-tools = { path = "../orbit-tools" }
+rmcp = { version = "1.5", default-features = false, features = ["server", "transport-io"] }
 serde_json.workspace = true
-# `io-std` supplies the stdio half of the client-side relay (`relay_stdio`)
-# and `io-util` the split/copy primitives it pumps bytes with [ORB-10710].
-tokio = { workspace = true, features = ["io-std", "io-util"] }
+tokio = { workspace = true, features = ["io-std", "rt"] }
 tracing.workspace = true
 
 [dev-dependencies]
+chrono.workspace = true
+rmcp = { version = "1.5", default-features = false, features = ["client", "transport-io"] }
 tempfile.workspace = true
-# `io-util` supplies the in-memory duplex transport and `time` the request
-# timeouts used by the crate-root wire integration tests.
-tokio = { workspace = true, features = ["io-util", "time"] }
+# `io-util` supplies the in-memory duplex transport used by the wire test.
+tokio = { workspace = true, features = ["io-util"] }
+toml.workspace = true
 tracing-subscriber.workspace = true

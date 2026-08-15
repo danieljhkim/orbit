@@ -64,6 +64,9 @@ fn fresh_db_applies_baseline_and_records_ledger() {
     assert_eq!(applied[10].version, 11);
     assert_eq!(applied[10].name, "routine_scheduler_schema");
     assert!(!applied[10].applied_at.is_empty());
+    assert_eq!(applied[14].version, 15);
+    assert_eq!(applied[14].name, "invocation_audit_context");
+    assert!(!applied[14].applied_at.is_empty());
 }
 
 #[test]
@@ -220,6 +223,10 @@ fn legacy_db_adopts_versioned_ledger() {
                 "migration.v0014".to_string(),
                 "remove_native_learning_subsystem".to_string()
             ),
+            (
+                "migration.v0015".to_string(),
+                "invocation_audit_context".to_string()
+            ),
         ]
     );
 }
@@ -231,7 +238,7 @@ fn refuses_db_from_a_newer_binary() {
 
     conn.execute(
         "INSERT INTO schema_meta(key, value, updated_at)
-        VALUES ('migration.v0015', 'from-the-future', '2099-01-01T00:00:00Z')",
+        VALUES ('migration.v0016', 'from-the-future', '2099-01-01T00:00:00Z')",
         [],
     )
     .expect("record future migration");
@@ -311,7 +318,7 @@ fn store_reopens_database_at_shipped_schema_v4_and_applies_through_latest() {
     );
     assert_eq!(
         applied.last().map(|migration| migration.name.as_str()),
-        Some("remove_native_learning_subsystem")
+        Some("invocation_audit_context")
     );
     let connection = store.connection();
     let conn = connection.lock().expect("connection");
@@ -402,6 +409,8 @@ fn store_reopens_shipped_v6_audit_rows_and_applies_v7_additively() {
     assert_eq!(rows[0].workspace_id, None);
     assert!(rows[0].effective_capabilities.is_empty());
     assert_eq!(rows[0].mcp_call_id, None);
+    assert_eq!(rows[0].trace_id, None);
+    assert_eq!(rows[0].caller_ip, None);
     drop(store);
 
     let reopened = crate::Store::open(&path).expect("reopen migrated store");

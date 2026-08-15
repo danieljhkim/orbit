@@ -4,8 +4,8 @@ use orbit_common::types::{
 };
 use orbit_engine::TaskActivityUpdate;
 
+use super::TaskRecordUpdateParams;
 use crate::OrbitRuntime;
-use crate::runtime::TaskRecordUpdateParams;
 
 use super::helpers::{
     SYSTEM_ACTOR_LABEL, TaskAttributionInput, assemble_task_attribution, build_task_comments,

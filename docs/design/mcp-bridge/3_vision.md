@@ -1,188 +1,79 @@
 ---
-title: Orbit MCP Bridge — Vision
-owner: claude
+title: Orbit MCP — Vision
+owner: codex
 last_updated: 2026-08-15
 last_validated: 2026-08-15
 status: Draft
 feature: mcp-bridge
 doc_role: vision
 type: design
-summary: Open questions and prior art for the owner-machine MCP route, schema skew, host identity assurance, transport evolution, and whether the advertised tool surface should become generic dispatch.
-tags: [mcp, remote-access, host-registry, bridge]
-paths: ["crates/orbit-remote/**", "crates/orbit-mcp/**", "crates/orbit-core/**", "crates/orbit-tools/**", "crates/orbit-store/**"]
-related_features: [mcp-bridge, host-registry, mcp-session-context, remote-access, orbit-search]
-related_artifacts: [ORB-00424, ORB-10319, ORB-10736, ORB-10767, ORB-10768]
+summary: Evidence-gated extensions beyond the deliberately small direct-SSH MCP v1.
+tags: [mcp, ssh, authorization, audit]
+paths: ["crates/orbit-mcp/**", "crates/orbit-core/**", "crates/orbit-registry/**"]
+related_features: [host-registry, mcp-session-context]
 ---
 
-# Orbit MCP Bridge — Vision
+# Orbit MCP — Vision
 
-> **Learning-subsystem retirement.** [ORB-10736] / [Remove the native project-learning subsystem](../project-learnings/4_decisions.md#remove-the-native-project-learning-subsystem) removed the native
-> project-learning resource. Its authoring, replica, sidecar, and search questions
-> are closed by removal rather than carried as future MCP work.
+V1 is a skeleton: local stdio, direct SSH stdio, server-side resolution, one Core
+dispatch boundary, and audit context. Future work should preserve that shape and
+add complexity only for a demonstrated requirement.
 
-> **Status: Draft — structural rewrite landed.** The singular-hub contract
-> ([Singular coordination hub, workspace owner, and per-run placement](./4_decisions.md#singular-coordination-hub-workspace-owner-and-per-run-placement), [Owner-authored knowledge with hub-global IDs and explicit replicas](./4_decisions.md#owner-authored-knowledge-with-hub-global-ids-and-explicit-replicas), [Pull-based leases with immutable placement and explicit recovery](./4_decisions.md#pull-based-leases-with-immutable-placement-and-explicit-recovery)) is superseded by [Every machine is its own coordination host](../host-registry/4_decisions.md#every-machine-is-its-own-coordination-host)–[Defer fleet registration and execution placement to v2](../host-registry/4_decisions.md#defer-fleet-registration-and-execution-placement-to-v2),
-> recorded in [../host-registry/4_decisions.md](../host-registry/4_decisions.md).
-> Questions and prior art below that concern execution placement, run leases, and
-> host registration are **deferred to v2**.
+## 1. Authorization in Core
 
-Forward-looking notes for the MCP bridge. V1 is deliberately narrow: one trusted
-operator, per-machine coordination for the workspaces each machine owns, a small
-host fleet, SSH transport, one declared owner per workspace, and no offline
-coordination writes for workspaces this machine does not own. Speculation below
-should not leak into implementation without demonstrated need. It also assumes
-[Consolidate remote coordination in one vertical feature crate](./4_decisions.md#consolidate-remote-coordination-in-one-vertical-feature-crate)'s vertical `orbit-remote` owner over neutral MCP, Store, Core, Tools,
-and Common kernels; new remote behavior should normally extend that feature rather
-than add another horizontal broker crate ([ORB-10319]).
+The next security layer belongs in Core, not in the local proxy, client UI, or
+tool advertisement path. A useful authorization design must first answer:
 
-## 1. Open Questions
+- What authenticated principal does the accepting server receive?
+- How is that principal bound to a machine or operator?
+- Which rules apply globally and which apply per workspace or operation?
+- How are denials audited without creating a second dispatch path?
 
-1. **Owner execution-profile freshness (v2).** Deferred with execution placement
-   ([Defer fleet registration and execution placement to v2](../host-registry/4_decisions.md#defer-fleet-registration-and-execution-placement-to-v2)). If cross-machine dispatch returns, crew validation would again need
-   a one-way owner→coordinator projection, and the questions are unchanged: is
-   poll-time publication enough, or should config changes trigger an immediate
-   publish? What fields belong in the profile without turning it into a copy of
-   `.orbit/config.toml`? In v1 crew validation reads the owner machine's local
-   config directly, so none of this is live.
-2. **Authenticated caller-machine identity.** V1 trusts caller host as provenance
-   inside a same-user SSH fleet. If hosts become mutually untrusted, should a v2
-   registration bind a dedicated SSH key/principal to `machine_id`, or should Orbit
-   sign a session challenge? This must be solved before machine identity becomes an
-   authorization boundary.
-3. **Contract skew policy.** Is one MCP contract revision enough, or should the
-   owner-routed and local subsets carry separate schema hashes so graph-only local
-   changes do not block coordination calls? Start coarse; split only after real
-   mixed-version deployments create friction.
-4. **Transport beyond SSH.** Narrowed by [Own the SSH tunnel as remote-access infrastructure, with a provisional surface over it](./4_decisions.md#own-the-ssh-tunnel-as-remote-access-infrastructure-with-a-provisional-surface-over-it). The owned tunnel adds a
-   loopback listener while keeping SSH as the authenticator, so listener hardening
-   is a bind guard rather than an authentication system, and Orbit still owns no
-   credential. What remains open is the original case: genuinely shell-less
-   environments, where Streamable HTTP would require Orbit to own authentication
-   and session management outright. Is there such a deployment?
-5. **Distributing the coordination plane — resolved.** The plane is now per-machine
-   by construction ([Every machine is its own coordination host](../host-registry/4_decisions.md#every-machine-is-its-own-coordination-host)); there is no single target left to shard. What
-   replaces the question is narrower: v1 exposes only the advertised task family across
-   machines, so what, if anything, should cross next — friction triage or workflow
-   observation — and does any of it justify a machine
-   answering for a workspace it does not own? That is a v2 question and should be
-   answered per record type, not as a topology change.
-6. **Whether the advertised per-tool surface should become generic dispatch.**
-   [Expose remote command execution as a claim-gated tool, retaining the advertised surface](./4_decisions.md#expose-remote-command-execution-as-a-claim-gated-tool-retaining-the-advertised-surface) adds command and changes nothing else, leaving this open. The
-   replacement shape would be two operations — enumerate the registry entries
-   visible to a caller with their schemas, and invoke one by name — collapsing
-   per-tool policy into a single authorization point. Note the argument is *not*
-   that the definitions are expensive to maintain; they are generated from the
-   registry. It is whether policy and placement metadata, the conformance count,
-   the contract digest, and the per-request context cost of carrying every schema
-   are worth it once one authorization point exists.
+The v1 `caller_machine_id` and `caller_ip` fields are insufficient for enforcement.
+The label is supplied by the caller and an IP address is neither stable nor a
+machine credential. Possible inputs include SSH certificate principals, forced-
+command metadata, or another server-verified identity, but no mechanism should be
+chosen before the required trust model is concrete.
 
-   Two things must be settled before it could land. It rebuilds the transport's
-   own list and call verbs inside a tool, which needs arguing on its merits rather
-   than assuming. And capability filtering currently happens twice — at
-   advertisement and at call — so a generic invoke inherits the whole burden:
-   tools registered inactive or active-without-policy (`orbit.task.delete`, the
-   pipeline primitives) are unreachable over MCP today *only* because they never
-   appear in the advertised set. Generic invoke must deny them explicitly, or the
-   replacement quietly grants an agent `orbit.task.delete` while nothing appears
-   to have changed.
+## 2. Better provenance
 
-   Deciding it needs evidence no endpoint currently produces — see the audit-event
-   cut described in [2_design.md §5.3](./2_design.md).
+Audit records may eventually need the authenticated SSH principal, key fingerprint,
+connection identifier, or proxy version. Each added field should have a clear
+source of trust and retention purpose. Audit enrichment must not silently turn an
+observational field into an authorization key.
 
-## 2. Prior Work
+## 3. Contract skew
 
-### Orbit MCP and session context
+Direct SSH can connect different Orbit versions. Standard MCP discovery already
+lets the accepting server advertise its actual surface. Add explicit compatibility
+negotiation only if mixed-version failures cannot be explained cleanly through
+normal discovery and errors.
 
-The generic MCP adapter separates protocol framing from an injected `McpHost`,
-sanitizes advertised names, resolves structural schemas, and threads
-`ToolSessionContext` into dispatch. `orbit-remote` composes generic builtin schemas
-with Remote-owned discovery definitions and supplies coordination and broker
-behavior. [MCP ambient workspace session context](../mcp-session-context/4_decisions.md#mcp-ambient-workspace-session-context) established deliberate
-workspace context instead of cwd fallback; [Workspace_path-addressable MCP host tools with surface-scoped containment](../mcp-session-context/4_decisions.md#workspacepath-addressable-mcp-host-tools-with-surface-scoped-containment) proposed per-call runtime
-resolution. The local broker extends those neutral seams rather than starting a
-second implementation.
+## 4. Other transports
 
-### Host registry and per-machine coordination
+SSH is appropriate while every supported remote has a shell and the same operator
+controls both ends. A network MCP service would require Orbit-owned authentication,
+session lifecycle, exposure hardening, and operational support. Do not add one
+merely to avoid launching SSH.
 
-[host-registry/2_design.md](../host-registry/2_design.md) supplies stable machine
-identity, the machine-scoped task-id prefix, and declared per-workspace ownership
-in the machine-local registry. The MCP bridge consumes those facts and never
-becomes a scheduler or owner proxy. The fleet inventory, presence map,
-requested/actual placement, and pull-based run leases that earlier drafts consumed
-are deferred to v2 ([Defer fleet registration and execution placement to v2](../host-registry/4_decisions.md#defer-fleet-registration-and-execution-placement-to-v2)).
+## 5. Multi-host routing
 
-### Remote access
+The v1 client chooses one destination and that server answers only from its own
+state. Automatic owner discovery, relays, replication, or fleet placement should
+be considered separate products, not incremental proxy features. Each needs a
+measured use case strong enough to justify new authority and failure modes.
 
-[remote-access/4_decisions.md](../remote-access/4_decisions.md) established two
-constraints reused here: do not synchronize task stores, and use SSH over a local-
-only process instead of adding a routable unauthenticated service. MCP adds writable
-coordination while preserving that transport posture.
+## 6. Evaluation gates
 
-### Bridge parity
+Any extension should preserve these properties unless the change explicitly
+replaces them:
 
-Bridge's parity layer proved the need for task/workflow access and multi-workspace
-selection. It also proved the maintenance cost of copying schemas and translating
-through a dashboard projection. [ORB-10768] retired the service entirely once the
-actual on-box clients registered Orbit directly; [ORB-10767] deliberately dropped
-its worker invocation family and descoped `repo_sync`.
+1. one canonical tool schema;
+2. one authoritative accepting server;
+3. one Core dispatch and audit boundary per tools/call, including unknown names;
+4. no policy in byte-forwarding transport;
+5. no client-side check required for correctness; and
+6. a focused end-to-end test for local and remote context propagation.
 
-### Search partitioning
-
-Orbit search ranks within each kind and round-robins task, doc, and friction
-branches under a total limit. The current composite MCP placement executes the
-whole query in one locally owned checkout; per-branch routing remains unimplemented
-and is not planned by this design.
-
-### External patterns
-
-- SSH stdio is a common transport for Git, remote language servers, and MCP servers:
-  SSH owns identity/encryption while the application owns framing.
-
-### External patterns held for v2
-
-- CI runner systems separate a central queue from machines that poll and execute.
-  That is the shape a returning placement design would borrow — pull direction with
-  orchestrator-selected placement — and it has no v1 consumer ([Defer fleet registration and execution placement to v2](../host-registry/4_decisions.md#defer-fleet-registration-and-execution-placement-to-v2)).
-
-## 3. What May Be Distinctive
-
-The distinctive part is the refusal to make "one MCP surface" mean "one machine
-serves every datum." The local broker has at most one network destination, yet
-placement still follows record semantics: coordination goes to the machine that
-owns the record, derived indexes stay with the checkout, and composite search
-fails unless its whole local-runtime requirement is met. No machine is a relay or
-a universal read proxy.
-
-## 4. References
-
-**Orbit-internal**
-
-- [1_overview.md](./1_overview.md), [2_design.md](./2_design.md)
-- [host-registry/1_overview.md](../host-registry/1_overview.md)
-- [host-registry/4_decisions.md](../host-registry/4_decisions.md)
-- [mcp-session-context/2_design.md](../mcp-session-context/2_design.md)
-- [remote-access/2_design.md](../remote-access/2_design.md)
-- [orbit-search/2_design.md](../orbit-search/2_design.md)
-- [archived Orbit Graph design](../_archive/orbit-graph/2_design.md)
-
-**External**
-
-- Model Context Protocol — initialization metadata, tool discovery, stdio transport.
-- OpenSSH — host aliases, key authentication, host verification, stdio process
-  transport.
-- GitHub Actions self-hosted runners — central queue with pull-based execution;
-  prior art for the v2 placement question only.
-
-## Task References
-
-- [ORB-00424] — umbrella proposal for canonical Orbit MCP and Bridge parity
-  retirement.
-- [ORB-10319] — consolidates registry persistence and MCP routing in the vertical
-  `orbit-remote` feature boundary assumed here ([Consolidate remote coordination in one vertical feature crate](./4_decisions.md#consolidate-remote-coordination-in-one-vertical-feature-crate)).
-- [ORB-10736] — closed the learning authoring/replica/search questions by removing
-  the native resource ([Remove the native project-learning subsystem](../project-learnings/4_decisions.md#remove-the-native-project-learning-subsystem)).
-- [ORB-10767] — deliberately dropped Bridge's worker invocation family and
-  descoped `repo_sync`.
-- [ORB-10768] — retired Bridge entirely after direct local Orbit registration.
-
-> Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.
+Current behavior is described in [`2_design.md`](./2_design.md). The machine-
+readable contract is [`references/conformance-v1.yaml`](./references/conformance-v1.yaml).

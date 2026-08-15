@@ -1,16 +1,16 @@
 ---
 title: "Orbit Docs — Overview"
 owner: claude
-last_updated: 2026-07-18
+last_updated: 2026-08-15
 status: Draft
 feature: orbit-docs
 doc_role: overview
 type: design
-summary: "Orbit Docs — what the human-authored docs corpus is, why it exists alongside learnings and ADRs, and how agents retrieve from it."
+summary: "Orbit Docs — the human-authored workspace corpus and how operators and agents retrieve from it."
 tags: [orbit-docs]
 related_features: [orbit-docs]
 related_artifacts: [ORB-00163, ORB-00206, ORB-10319]
-last_validated: 2026-08-09
+last_validated: 2026-08-15
 ---
 
 # Orbit Docs — Overview
@@ -22,7 +22,10 @@ last_validated: 2026-08-09
 
 Orbit Docs is the human-authored knowledge corpus for an Orbit workspace. It indexes the Markdown a team writes for itself — design narratives, reusable code patterns, runbooks, glossaries — and exposes CLI/admin verbs under `orbit docs` plus agent retrieval through the unified `orbit.search` MCP tool. It deliberately does not own a tool-managed copy of the corpus: docs remain PR-reviewed files under configurable `[docs].roots` entries.
 
-The system is **pull-first**: agents call `orbit search --kind doc` (or `--kind all` for federated doc+ADR) or `orbit docs show` when they need context. Task-time related-doc injection is available through `task show --with-context`; PreToolUse hook surfaces remain downstream work ([ORB-00166], [ORB-00167]).
+The system is **pull-first**: agents call `orbit search --kind doc` (or `--kind all`
+for federated task, doc, and friction results) or `orbit docs show` when they need
+context. Task-time related-doc injection is available through `task show --with-context`;
+PreToolUse hook surfaces remain downstream work ([ORB-00166], [ORB-00167]).
 
 Phase 1 ships the corpus, the locked frontmatter schema, the six-verb surface, the `orbit-docs` skill, doc-corpus embeddings via `orbit docs index`, and a one-shot migrator that backfills legacy `docs/design/<feature>/` and `docs/design-patterns/` files. [2_design.md](./2_design.md) specifies the schema, walker, surface, tolerant indexer, and hybrid search path; [3_vision.md](./3_vision.md) names open questions and the remaining roadmap; [4_decisions.md](./4_decisions.md) is the decision log.
 
@@ -33,7 +36,10 @@ Phase 1 ships the corpus, the locked frontmatter schema, the six-verb surface, t
 Three concrete gaps existed before [ORB-00163]:
 
 1. **Learnings cover load-bearing micro-rules — not explanatory context.** Learnings are scope-globbed, supersedable, and CRUD'd through `orbit.learning.*`. They were designed to carry *rules with known failure modes*, not multi-page design narratives. Stretching them to cover designs would distort the data model. See [docs/design/project-learnings/](../project-learnings/) for the learning shape.
-2. **Design docs were over-enforced.** The older `orbit-design` skill enforces a strict 4-numbered-doc layout under `docs/design/<feature>/`, a `Last updated:` freshness rule, and the ADR earning rule. Two of those three (layout + freshness) are over-opinionated for a framework-layer tool that's supposed to compose with team conventions. The ADR rule belongs to `orbit-adr`, not to a docs skill. Retiring `orbit-design` is filed as [ORB-00165].
+2. **Design docs were over-enforced.** The older `orbit-design` skill enforced a strict
+   four-file layout and freshness rule. Those constraints are too opinionated for a
+   framework-layer tool that should compose with team conventions. Retiring that skill
+   was tracked in [ORB-00165].
 3. **Other knowledge categories had no indexed surface.** Reusable code patterns (`docs/design-patterns/`), operational runbooks, business/domain context, glossaries — all existed in the repo but had no retrieval primitive. Agents could grep, but they had no way to ask "what's the documented shape for crate-boundary error translation?" without already knowing the file path.
 
 The hard constraint that shaped the design: **the corpus has to be tolerant.** Existing `docs/design/<feature>/*.md` and `docs/design-patterns/*.md` files have no frontmatter, and we will not force a flag-day migration. The indexer infers `type` and `summary` from directory and filename heuristics when frontmatter is absent, so day-one retrieval works without any author effort. The `migrate` verb provides the optional one-shot backfill.
@@ -84,20 +90,22 @@ Strict parsing still applies if you opt in via the `migrate` verb or by writing 
 | `orbit docs index` | Walk configured roots, embed doc fields into `.orbit/state/semantic.db`, and sweep stale doc rows. |
 | `orbit docs migrate [--dry-run]` | One-shot frontmatter backfill for legacy `docs/design/<feature>/*.md` and `docs/design-patterns/*.md`. Idempotent. Never touches `.orbit/`. |
 
-The five domain tool definitions (`orbit.docs.list`, `show`, `add`, `index`, and `migrate`) remain available to CLI/admin runtime dispatch but are intentionally inactive on the agent MCP safe surface. Agents retrieve docs through `orbit.search` with `kind: "doc"`; Remote owns that safe-surface policy, while `orbit-tools` owns the generic schemas and Core owns the runtime implementations. [ORB-10319]
+The five domain tool definitions (`orbit.docs.list`, `show`, `add`, `index`, and `migrate`)
+remain available to CLI/admin runtime dispatch but are intentionally inactive in
+`orbit-tools` for MCP advertisement. Agents retrieve docs through `orbit.search` with
+`kind: "doc"`. `orbit-mcp` assembles the canonical active definitions, the CLI MCP server
+advertises and routes them, and Core owns the runtime implementations and audit boundary.
 
 ### 2.5 The `.orbit/` exclusion
 
 The walker explicitly skips any path under `.orbit/`, even if a configured root accidentally points above it. Decision narratives now live in each feature's `4_decisions.md` and are indexed like other human-authored docs; the retired store and its separate query surface no longer sit behind the exclusion. The locating principle behind this boundary remains [`.orbit/` for tool-managed artifacts; `docs/` for human-authored content](./4_decisions.md#orbit-for-tool-managed-artifacts-docs-for-human-authored-content).
 
-### 2.6 Learning vs. doc
+### 2.6 Historical learning comparison
 
-The boundary is now explicit:
-
-- **Learning** = a load-bearing rule with a known failure mode. CRUD'd via `orbit.learning.*`. Supersedable. Scope-glob push-injected. Lives at `.orbit/learnings/`.
-- **Doc** = explanatory context. PR-reviewed Markdown under `docs/`. No supersede flow. Pull-retrieved via `orbit.docs.*`. Authors link to load-bearing learnings via `related_artifacts: [L-NNNN]` when useful.
-
-If you find yourself wanting to write "rule: do X because Y" in a doc, that's a learning. If you find yourself wanting to write a multi-paragraph explanation of *why* a rule exists, that's a doc that links to the learning.
+Older Orbit versions contrasted docs with a native project-learning subsystem. That
+subsystem and its CRUD/injection path are retired. The current corpus is the human-authored
+Markdown under configured docs roots; durable guidance should live there or in the owning
+repository's ordinary agent instructions.
 
 ---
 
@@ -108,7 +116,7 @@ If you find yourself wanting to write "rule: do X because Y" in a doc, that's a 
 | Frontmatter parsing, tolerant fallback, walker | [crates/orbit-core/src/command/docs/](../../../crates/orbit-core/src/command/docs/) | [ORB-00163] |
 | CLI verbs (`orbit docs list/show/add/index/migrate`) | [crates/orbit-cli/src/command/docs.rs](../../../crates/orbit-cli/src/command/docs.rs) | [ORB-00163] |
 | Generic doc tool schemas + inactive agent policy | [crates/orbit-tools/src/builtin/orbit/docs.rs](../../../crates/orbit-tools/src/builtin/orbit/docs.rs), [crates/orbit-tools/src/builtin/orbit/mod.rs](../../../crates/orbit-tools/src/builtin/orbit/mod.rs) | [ORB-00163], [ORB-10319] |
-| Agent MCP exposure and routing (`orbit.search`, `kind: "doc"`) | [crates/orbit-remote/src/mcp/host.rs](../../../crates/orbit-remote/src/mcp/host.rs) | [ORB-00202], [ORB-10319] |
+| Agent MCP exposure and routing (`orbit.search`, `kind: "doc"`) | [crates/orbit-mcp/src/remote/surface.rs](../../../crates/orbit-mcp/src/remote/surface.rs), [crates/orbit-cli/src/command/mcp/server.rs](../../../crates/orbit-cli/src/command/mcp/server.rs) | [ORB-00202], [ORB-10319] |
 | Tool host dispatch | [crates/orbit-core/src/runtime/orbit_tool_host/docs_tools.rs](../../../crates/orbit-core/src/runtime/orbit_tool_host/docs_tools.rs) | [ORB-00163] |
 | Skill (agent-facing entry point) | [crates/orbit-core/assets/skills/orbit-search/SKILL.md](../../../crates/orbit-core/assets/skills/orbit-search/SKILL.md) | [ORB-00163] |
 | Config root | `[docs].roots` in [.orbit/config.toml](../../../.orbit/config.toml) | [ORB-00163] |
@@ -116,9 +124,8 @@ If you find yourself wanting to write "rule: do X because Y" in a doc, that's a 
 | Internal hardening (real diff, robust YAML edit, batched gitignore) | [crates/orbit-core/src/command/docs/](../../../crates/orbit-core/src/command/docs/) | [ORB-00164] |
 | Retire `orbit-design` skill | [crates/orbit-core/assets/skills/orbit-design/](../../../crates/orbit-core/assets/skills/orbit-design/) | [ORB-00165] |
 | Inject into `task show --with-context` | [crates/orbit-cli/src/command/task/](../../../crates/orbit-cli/src/command/task/) | [ORB-00166] (shipped) |
-| Extend PreToolUse hook to surface docs | [crates/orbit-cmd/src/learning_hook.rs](../../../crates/orbit-cmd/src/learning_hook.rs) | [ORB-00167] |
+| Extend PreToolUse hook to surface docs | Not implemented; no current code owner | [ORB-00167] |
 | Doc semantic embeddings and hybrid ranker | [crates/orbit-core/src/command/semantic.rs](../../../crates/orbit-core/src/command/semantic.rs) | [ORB-00206] (shipped) |
-| Fold `.orbit/adrs/` into corpus (v2 design) | [.orbit/adrs/](../../../.orbit/adrs/) | [ORB-00169] |
 
 ---
 
@@ -130,7 +137,6 @@ If you find yourself wanting to write "rule: do X because Y" in a doc, that's a 
 - [ORB-00166] — Wire `orbit docs` retrieval into `task.show --with-context` and `task.start`
 - [ORB-00167] — Extend PreToolUse hook to surface relevant docs alongside learnings
 - [ORB-00168] — Add semantic embeddings index for orbit-docs corpus (v2)
-- [ORB-00169] — Design: fold `.orbit/adrs/` into the orbit-docs corpus (v2)
-- [ORB-10319] — Consolidate MCP exposure policy in `orbit-remote`; the `orbit.docs.*` admin tools stay inactive while unified `orbit.search` remains agent-facing.
+- [ORB-10319] — Historical MCP-boundary consolidation; current ownership is split across `orbit-tools`, `orbit-mcp`, the CLI server, and Core.
 
 Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

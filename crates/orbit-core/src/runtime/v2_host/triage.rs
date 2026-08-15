@@ -4,7 +4,7 @@
 //! `list_triage_candidates` materializes the set of blocked tasks that are
 //! attributable to a terminally-failed job run (the coupling stamped by
 //! `worktree_setup` and flipped to `blocked` by
-//! `task_block_on_run_failure.rs` [ORB-10127]). `apply_triage_dispositions`
+//! `runtime::task::block_on_run_failure`). `apply_triage_dispositions`
 //! applies the triage agent's per-task verdicts under hard deterministic
 //! bounds: only listed candidates may be touched, only `environmental`
 //! classifications may re-backlog, and a durable per-task re-backlog budget
@@ -23,9 +23,7 @@ use orbit_store::friction_store::FrictionAddParams;
 use serde_json::{Value, json};
 
 use crate::OrbitRuntime;
-use crate::runtime::task_block_on_run_failure::{
-    failed_run_error_context, is_workflow_failure_state,
-};
+use crate::runtime::{failed_run_error_context, is_workflow_failure_state};
 
 /// History event recorded when triage returns a blocked task to the backlog.
 pub(crate) const TRIAGE_REBACKLOGGED_EVENT: &str = "triage_rebacklogged";

@@ -8,9 +8,7 @@ use crate::paths;
 
 /// Returns the global orbit root at `~/.orbit/`.
 pub fn resolve_global_root() -> Result<PathBuf, OrbitError> {
-    paths::home_dir()
-        .map(|home| home.join(".orbit"))
-        .ok_or_else(|| OrbitError::WorkspaceError("cannot determine home directory".to_string()))
+    orbit_common::utility::path::global_orbit_dir()
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

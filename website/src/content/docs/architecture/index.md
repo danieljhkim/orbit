@@ -13,11 +13,12 @@ Orbit is a layered Rust workspace. Lower layers do not depend on higher layers.
 flowchart LR
   CLI["orbit-cli"] --> Cmd["orbit-cmd"]
   CLI --> Core["orbit-core"]
-  CLI --> Remote["orbit-remote"]
-  CLI --> Dashboard["orbit-dashboard"]
-  Dashboard --> Core
-  Dashboard --> Remote
-  Dashboard --> Cmd
+  CLI --> MCP["orbit-mcp"]
+  CLI --> Registry["orbit-registry"]
+  CLI --> Web["orbit-web"]
+  Web --> Core
+  Web --> Registry
+  Web --> Cmd
   Cmd --> Core
   Cmd --> Engine
   Cmd --> Store
@@ -34,11 +35,8 @@ flowchart LR
   Agent --> Common["orbit-common"]
   Tools --> Exec
   Tools --> Policy
-  Remote --> Core
-  Remote --> Store
-  Remote --> Tools
-  Remote --> MCP["orbit-mcp"]
-  Remote --> Common
+  MCP --> Registry
+  MCP --> Tools
   Search --> Common
   MCP --> Common
   Store --> Common
@@ -49,13 +47,11 @@ flowchart LR
   Cmd --> Common
 ```
 
-Arrows point from a consumer to its dependency. `orbit-store` and `orbit-mcp` are
-neutral kernels that depend only on `orbit-common`. The vertical `orbit-remote`
-feature composes registry persistence, MCP policy, broker/hub routing, SSH links,
-and spoke registration without introducing a reverse dependency from those kernels.
-Layering constrains dependency direction, not feature ownership: a vertical crate
-may own its domain model, feature schema, transport policy, and composition end to
-end while reusing neutral mechanisms.
+Arrows point from a consumer to a selected dependency. The repository's
+dependency-direction guard is the exhaustive edge contract. `orbit-store` is a neutral
+persistence kernel. Registry owns local machine/workspace files, MCP owns protocol and
+direct SSH transport, and Web owns its HTTP surface and SSH tunnel lifecycle.
+Layering constrains dependency direction while each feature keeps one clear owner.
 `orbit-core` does **not** depend on `orbit-agent`; the bridge is `orbit-engine`'s
 `backend: cli` subprocess runner.
 
@@ -71,12 +67,12 @@ end while reusing neutral mechanisms.
 | `orbit-agent` | HTTP loop transport and retained CLI runtimes. |
 | `orbit-engine` | Activity/job execution, template rendering, retries, CLI subprocess runner. |
 | `orbit-tools` | Generic built-in tool registry and external tool integration. |
-| `orbit-mcp` | Generic RMCP framing, server composition, and raw-client kernel. |
-| `orbit-remote` | Vertical host/workspace registry, feature persistence, MCP contract and extensions, broker, hub, SSH link, and registration composition. |
+| `orbit-registry` | Local machine identity and workspace catalog validation with atomic file persistence. |
+| `orbit-mcp` | RMCP framing, canonical discovery, server identity context, and direct SSH stdio proxy. |
 | `orbit-core` | Neutral runtime bootstrap, config, runtime-integrated commands, coordination executor, and default asset seeding. |
 | `orbit-cmd` | CLI-facing command layer (doctor, migrate, diagnostics, templates, hooks) over `OrbitRuntime`. |
-| `orbit-dashboard` | Web dashboard and HTTP API over Core and Remote registry state. |
-| `orbit-cli` | Clap-based entrypoint and local client-configuration surface; delegates Remote behavior to `orbit-remote`. |
+| `orbit-web` | HTTP API, embedded dashboard UI, dashboard mutations, and SSH web connection over Core and Registry. |
+| `orbit-cli` | Clap-based entrypoint that composes Core, Registry, MCP, and Web. |
 
 Detailed implementation records remain alongside the source code. They are not
 mirrored into this public reference because they contain historical interfaces

@@ -1,17 +1,17 @@
 ---
 title: "Orbit Docs — Design"
 owner: claude
-last_updated: 2026-07-18
+last_updated: 2026-08-15
 status: Draft
 feature: orbit-docs
 doc_role: design
 type: design
 summary: "Orbit Docs — frontmatter schema, walker, doc embeddings index, hybrid search, and the `.orbit/` exclusion invariant."
 tags: [orbit-docs]
-paths: ["crates/orbit-core/src/command/docs/**", "crates/orbit-core/src/runtime/orbit_tool_host/docs_tools.rs", "crates/orbit-tools/src/builtin/orbit/docs.rs", "crates/orbit-remote/src/mcp/host.rs", "crates/orbit-cli/src/command/docs.rs"]
+paths: ["crates/orbit-core/src/command/docs/**", "crates/orbit-core/src/runtime/orbit_tool_host/docs_tools.rs", "crates/orbit-tools/src/builtin/orbit/docs.rs", "crates/orbit-mcp/src/remote/surface.rs", "crates/orbit-cli/src/command/mcp/server.rs", "crates/orbit-cli/src/command/docs.rs"]
 related_features: [orbit-docs]
 related_artifacts: [ORB-00163, ORB-00206, ORB-10319]
-last_validated: 2026-08-09
+last_validated: 2026-08-15
 ---
 
 # Orbit Docs — Design
@@ -249,7 +249,14 @@ orbit.docs.index
 orbit.docs.migrate
 ```
 
-The per-domain doc-search MCP tool was retired by [ORB-00202]; content-similarity queries now route through the unified `orbit.search` tool with `kind: "doc"`. The five definitions above forward to `OrbitBuiltinAction::Docs*` and the same `OrbitRuntime` methods used by the CLI, but `crates/orbit-tools/src/builtin/orbit/mod.rs` registers them inactive for the agent surface. `orbit-remote` owns the canonical MCP schema-plus-policy set and therefore exposes `orbit.search`, not `orbit.docs.*`, to agents. Any runtime invocation that does enter through MCP retains the shared SQLite audit contract and `subcommand: "run-mcp"`. [ORB-10319]
+The per-domain doc-search MCP tool was retired by [ORB-00202]; content-similarity queries
+now route through the unified `orbit.search` tool with `kind: "doc"`. The five definitions
+above forward to `OrbitBuiltinAction::Docs*` and the same `OrbitRuntime` methods used by the
+CLI, but `crates/orbit-tools/src/builtin/orbit/mod.rs` registers them inactive for MCP.
+`orbit-mcp` combines active builtin definitions with discovery definitions, and the CLI
+server advertises that canonical list and dispatches calls into Core. Core records MCP tool
+success, denial, or failure directly in the shared SQLite audit store with
+`subcommand: "run-mcp"`; the transport layer does not add a second audit path.
 
 ---
 
@@ -276,7 +283,8 @@ When the section is absent or the file is empty, the default root is `["docs/"]`
 - **Migration uses a generated line diff.** The migrator now compares the complete before/after documents, while YAML frontmatter updates are round-tripped through `serde_yaml`.
 - **Hook-time injection is not wired yet.** Task-time related-doc injection is available through `task show --with-context`; PreToolUse hook integration remains [ORB-00167].
 - **Doc semantic freshness is explicit.** Task writes enqueue background embeddings, but docs require `orbit docs index` until a future watcher/background indexer exists.
-- **ADRs are not in the corpus.** [ORB-00169] is the design question.
+- **Tool-managed state is excluded.** Human-authored decision narratives under configured
+  docs roots are indexed normally; hidden `.orbit/` state is not.
 
 ---
 
@@ -287,7 +295,6 @@ When the section is absent or the file is empty, the default root is `["docs/"]`
 - [ORB-00166] — Wire `orbit docs` retrieval into `task.show --with-context` and `task.start`
 - [ORB-00167] — Extend PreToolUse hook to surface relevant docs alongside learnings
 - [ORB-00168] — Add semantic embeddings index for orbit-docs corpus (v2)
-- [ORB-10319] — Move canonical MCP exposure policy into `orbit-remote` while preserving Core's doc runtime and the unified agent search route.
-- [ORB-00169] — Design: fold `.orbit/adrs/` into the orbit-docs corpus (v2)
+- [ORB-10319] — Historical MCP-boundary move; the current canonical surface is assembled by `orbit-mcp` and served by the CLI over Core.
 
 Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

@@ -48,9 +48,10 @@ body:
         - orbit-knowledge
         - orbit-mcp
         - orbit-policy
-        - orbit-remote
+        - orbit-registry
         - orbit-store
         - orbit-tools
+        - orbit-web
         - Other / not sure
     validations:
       required: true

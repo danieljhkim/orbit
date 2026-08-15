@@ -38,8 +38,8 @@ mod output;
 mod parse;
 
 use clap::{Arg, ArgMatches, Command, CommandFactory, FromArgMatches};
+use orbit_cmd::registry_runtime::RegisteredRuntimeFactory;
 use orbit_core::ActorIdentity;
-use orbit_remote::runtime::RemoteRuntimeFactory;
 
 #[cfg(test)]
 use crate::command::init::InitCommand;
@@ -207,7 +207,7 @@ fn main() {
         return;
     }
 
-    let runtime = match RemoteRuntimeFactory::initialize_with_overrides(
+    let runtime = match RegisteredRuntimeFactory::initialize_with_overrides(
         root_override.as_deref(),
         workspace_selector.as_deref(),
     ) {

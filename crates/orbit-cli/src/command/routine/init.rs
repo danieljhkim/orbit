@@ -1,8 +1,8 @@
 use crate::command::{CommandOut, CommandOutput};
 use clap::Args;
 use orbit_core::routines::install_clock;
-use orbit_remote::load_host_identity;
-use orbit_remote::workspace_registry;
+use orbit_registry::load_host_identity;
+use orbit_registry::workspace_registry;
 
 #[derive(Args)]
 #[command(
@@ -26,8 +26,8 @@ impl RoutineInitArgs {
         // an actionable error when it is absent or unmigrated.
         let identity = load_host_identity(&global_root)?;
         println!(
-            "host identity: host_id=\"{}\", machine_id={}, mode={}",
-            identity.host_id, identity.machine_id, identity.mode
+            "host identity: host_id=\"{}\", machine_id={}",
+            identity.host_id, identity.machine_id
         );
 
         if !self.install_clock {

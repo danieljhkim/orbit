@@ -1,6 +1,6 @@
 use clap::{Args, Subcommand};
 use orbit_core::routines::{clock_status, set_clock_cadence, set_clock_enabled};
-use orbit_remote::workspace_registry;
+use orbit_registry::workspace_registry;
 
 use crate::command::{CommandOut, CommandOutput};
 

@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 use chrono::Utc;
 use clap::Args;
 use orbit_cmd::agent_rules::{InjectionAction, inject_agent_rules};
+use orbit_cmd::registry_runtime::RegisteredRuntimeFactory;
 use orbit_common::types::{
     Workspace, WorkspaceCheckout, WorkspaceCheckoutRole, WorkspaceRegistry, WorkspaceStatus,
     validate_machine_id,
@@ -10,9 +11,8 @@ use orbit_common::types::{
 use orbit_common::utility::fs::atomic_write_text;
 use orbit_core::OrbitError;
 use orbit_core::command::init::{InitOptions, init_workspace_at_root};
-use orbit_remote::runtime::RemoteRuntimeFactory;
-use orbit_remote::workspace_registry;
-use orbit_remote::{HostIdentityState, inspect_host_identity};
+use orbit_registry::workspace_registry;
+use orbit_registry::{HostIdentityState, inspect_host_identity};
 use serde::{Deserialize, Serialize};
 
 use super::role::CliCheckoutRole;
@@ -66,7 +66,7 @@ pub struct WorkspaceInitArgs {
 impl WorkspaceInitArgs {
     pub fn execute_without_runtime(self, root_override: Option<&Path>) -> CommandOut {
         let cwd = std::env::current_dir().map_err(|e| OrbitError::Io(e.to_string()))?;
-        let roots = RemoteRuntimeFactory::resolve_bootstrap_roots_for_cwd(&cwd, root_override)?;
+        let roots = RegisteredRuntimeFactory::resolve_bootstrap_roots_for_cwd(&cwd, root_override)?;
         let orbit_dir = roots.shared_root;
         let global_root = roots.global_root;
         let registry_path = workspace_registry::registry_path_for(&global_root);

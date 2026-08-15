@@ -6,11 +6,10 @@
 
 use orbit_common::types::{JobRunState, TaskStatus};
 use orbit_engine::DispatchError;
-use orbit_store::JobRunQuery;
+use orbit_store::{JobRunQuery, SessionLogFilter, SessionLogKind, SessionLogStore};
 use serde_json::{Value, json};
 
 use crate::OrbitRuntime;
-use crate::runtime::session_log::{SessionLogKind, list as list_session_log};
 
 /// Job whose own failed/timeout rows must not re-admit the drain loop.
 pub(super) const EPIC_PIPELINE_JOB_ID: &str = "epic_pipeline";
@@ -55,16 +54,16 @@ pub(super) fn scan_unresolved_work(
         .collect();
     run_ids.sort();
 
-    let mut check_later_ids: Vec<String> = list_session_log(
-        &runtime.paths().orbit_dir,
-        Some(SessionLogKind::CheckLater),
-        true,
-        None,
-    )
-    .map_err(|err| action_failed(action, format!("list session log: {err}")))?
-    .into_iter()
-    .map(|entry| entry.id)
-    .collect();
+    let mut check_later_ids: Vec<String> = SessionLogStore::new(runtime.paths().orbit_dir.clone())
+        .list(SessionLogFilter {
+            kind: Some(SessionLogKind::CheckLater),
+            unresolved_only: true,
+            ..SessionLogFilter::default()
+        })
+        .map_err(|err| action_failed(action, format!("list session log: {err}")))?
+        .into_iter()
+        .map(|entry| entry.id)
+        .collect();
     check_later_ids.sort();
 
     let empty = task_ids.is_empty() && run_ids.is_empty() && check_later_ids.is_empty();

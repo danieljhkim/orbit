@@ -32,6 +32,8 @@ pub(super) fn audit_event_to_json(event: &AuditEvent) -> Value {
         "process_machine_id": event.process_machine_id,
         "process_host_id": event.process_host_id,
         "transport": event.transport,
+        "trace_id": event.trace_id,
+        "caller_ip": event.caller_ip,
         "effective_capabilities": event.effective_capabilities,
         "origin_session_id": event.origin_session_id,
         "mcp_call_id": event.mcp_call_id,

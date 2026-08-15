@@ -4,8 +4,8 @@ members = [
   "crates/orbit-cli",
   "crates/orbit-cmd",
   "crates/orbit-common",
+  "crates/orbit-registry",
   "crates/orbit-search",
-  "crates/orbit-remote",
   "crates/orbit-core",
   "crates/orbit-engine",
   "crates/orbit-store",
@@ -13,7 +13,7 @@ members = [
   "crates/orbit-exec",
   "crates/orbit-tools",
   "crates/orbit-mcp",
-  "crates/orbit-dashboard",
+  "crates/orbit-web",
 ]
 resolver = "2"
 

@@ -1,162 +1,96 @@
 ---
-title: Orbit MCP Bridge — Overview
-owner: claude
+title: Orbit MCP — Overview
+owner: codex
 last_updated: 2026-08-15
 last_validated: 2026-08-15
 status: Draft
 feature: mcp-bridge
 doc_role: overview
 type: design
-summary: One canonical local Orbit MCP front door that routes coordination to the machine that owns the workspace, keeps derived indexes checkout-local, supports an owned SSH tunnel for checkoutless clients, and replaces the retired Bridge service.
-tags: [mcp, remote-access, host-registry, bridge, multi-host]
-paths: ["crates/orbit-remote/**", "crates/orbit-mcp/**", "crates/orbit-core/**", "crates/orbit-tools/**", "crates/orbit-store/**", "crates/orbit-common/**"]
-related_features: [mcp-bridge, host-registry, mcp-session-context, remote-access, orbit-search]
-related_artifacts: [ORB-00424, ORB-10262, ORB-10268, ORB-10319, ORB-10690, ORB-10711, ORB-10736, ORB-10767, ORB-10768]
+summary: One authoritative Orbit MCP server, reached either by local stdio or a byte-transparent direct SSH stdio proxy.
+tags: [mcp, ssh, remote-access, registry, audit]
+paths: ["crates/orbit-mcp/**", "crates/orbit-registry/**", "crates/orbit-core/**", "crates/orbit-cli/src/command/mcp/**"]
+related_features: [host-registry, mcp-session-context, remote-access]
 ---
 
-# Orbit MCP Bridge — Overview
+# Orbit MCP — Overview
 
-> **Learning-subsystem retirement.** [ORB-10736] / [Remove the native project-learning subsystem](../project-learnings/4_decisions.md#remove-the-native-project-learning-subsystem) removed the native
-> project-learning resource. Learning-specific behavior survives only in the
-> superseded decision history; it is not part of the current MCP contract.
+Orbit exposes the same MCP server in two ways:
 
-> **Status: Draft — structural rewrite landed.** The singular-hub contract
-> ([Singular coordination hub, workspace owner, and per-run placement](./4_decisions.md#singular-coordination-hub-workspace-owner-and-per-run-placement), [Owner-authored knowledge with hub-global IDs and explicit replicas](./4_decisions.md#owner-authored-knowledge-with-hub-global-ids-and-explicit-replicas), [Pull-based leases with immutable placement and explicit recovery](./4_decisions.md#pull-based-leases-with-immutable-placement-and-explicit-recovery)) is superseded by [Every machine is its own coordination host](../host-registry/4_decisions.md#every-machine-is-its-own-coordination-host)–[Defer fleet registration and execution placement to v2](../host-registry/4_decisions.md#defer-fleet-registration-and-execution-placement-to-v2),
-> recorded in [../host-registry/4_decisions.md](../host-registry/4_decisions.md).
-> Every machine is now its own coordination host for the workspaces it owns.
-> Sections describing execution placement, run leases, the presence map, and host
-> registration are **deferred to v2** — retained as history, not as design.
+```text
+local:  MCP client <-> stdio <-> orbit mcp serve <-> Orbit Core
+remote: MCP client <-> stdio <-> SSH <-> orbit mcp serve <-> Orbit Core
+```
 
-Orbit exposes one canonical MCP contract through a local broker on every
-machine, with at most one cross-machine destination: the machine that owns the
-workspace. Tasks, frictions, session logs, and workspace-registry state are local
-to the owning machine; docs-derived operations stay on the checkout where the
-agent is running. No machine forwards a call on another's behalf; a client reaches
-an owner machine directly or not at all.
+The remote side is intentionally just direct SSH stdio. The local proxy starts a
+non-interactive SSH process whose remote command is:
 
-When the workspace owner is another machine, a client may point at that machine's
-MCP over the existing SSH route for the advertised `orbit.task.*` family. It does not translate
-through the dashboard HTTP API, synchronize stores, or discover per-workspace
-network routes. Bridge no longer redeclares Orbit tools: [ORB-10768] retired the
-service entirely after the only registered clients moved to Orbit's local stdio
-server. Its worker-backed `agent_*` family was deliberately dropped and
-`repo_sync` was descoped rather than replaced ([ORB-10767]).
+```text
+ssh -T <host> orbit mcp serve --remote-caller-machine-id <audit-label>
+```
 
-That shape describes machines with a checkout to protect. A checkoutless client,
-such as an off-box orchestrator, holds no local-derived state and does not
-participate in owner routing. It reaches Orbit through an owned SSH tunnel
-terminating at a loopback-bound listener, where calls resolve remotely with no
-placement routing ([Own the SSH tunnel as remote-access infrastructure, with a provisional surface over it](./4_decisions.md#own-the-ssh-tunnel-as-remote-access-infrastructure-with-a-provisional-surface-over-it)). The tunnel adds one operation — running a command
-— requiring both operator capability and the workspace claim ([Expose remote command execution as a claim-gated tool, retaining the advertised surface](./4_decisions.md#expose-remote-command-execution-as-a-claim-gated-tool-retaining-the-advertised-surface),
-[host-registry/2_design.md §3.2](../host-registry/2_design.md)). The advertised
-per-tool surface is unchanged. See [2_design.md §5.3](./2_design.md).
+The proxy inherits stdin, stdout, and stderr. It does not parse MCP frames, open a
+checkout, resolve a workspace, filter tools, make authorization decisions, or
+forward the call through another machine.
 
-This feature and [host-registry](../host-registry/1_overview.md) are coupled.
-Host-registry declares machine identity, the machine-scoped task-id prefix, and
-per-workspace ownership in the machine-local workspace registry. MCP bridge turns
-those declarations into one local tool surface.
+## Runtime rule
 
-Their implementation is coupled as well: `orbit-remote` owns workspace-registry
-persistence, canonical schema composition, the broker, and the owner-machine MCP
-route. `orbit-mcp` is the neutral RMCP framing/raw-client
-kernel; `orbit-store` is the neutral SQLite/feature-migration kernel; `orbit-core`
-retains transport-independent execution. This vertical boundary replaces the
-earlier registry-only extraction without creating either a separate broker crate
-or a second database ([ORB-10319], [Consolidate remote coordination in one vertical feature crate](./4_decisions.md#consolidate-remote-coordination-in-one-vertical-feature-crate)).
+The machine accepting `orbit mcp serve` is authoritative for the call. It:
 
-## 1. Motivation
+1. derives its process identity from its local registry;
+2. uses definition scope to decide whether a workspace is required;
+3. resolves any required workspace against its own registry and opens that
+   server-local runtime;
+4. sends every call, including an unknown raw name, through Orbit Core exactly
+   once; and
+5. records success, failure, or denial at that boundary.
 
-Bridge presented an Orbit-shaped MCP surface by vendoring Orbit schemas,
-redeclaring arguments in Python, calling Orbit's dashboard HTTP API, and reshaping
-responses. That gave clients useful coverage quickly, but it created two
-contracts and two execution paths. Missing HTTP fields, provenance gaps, incomplete
-search behavior, and snapshot refreshes were consequences of that split,
-not isolated endpoint bugs ([ORB-00424]).
+This is the same rule for local and SSH-originated sessions. Remote access changes
+only how MCP bytes reach the server.
 
-A direct `ssh dk1 orbit mcp serve` replacement is also incomplete: it moves docs
-queries away from the branch/worktree the agent is using. The host-registry design
-explicitly says otherwise:
+## Audit context
 
-1. **Coordination is owner-local.** Each machine coordinates the workspaces it
-   owns, and refuses coordination writes for the ones it does not.
-2. **Derived state is checkout-local.** Docs indexes, semantic companions, and
-   routine scheduler state describe a particular local checkout.
-3. **Execution placement is out of scope in v1** (deferred to v2 with run leases
-   and the `runner` capability, [Defer fleet registration and execution placement to v2](../host-registry/4_decisions.md#defer-fleet-registration-and-execution-placement-to-v2)). MCP bridge opens no machine-to-machine
-   run-placement channel.
+Each tool call carries a fresh `trace_id`. The server also records:
 
-The required shape is one Orbit-owned contract with explicit placement and at most
-one network edge per client: client → owner machine.
+- `caller_machine_id`: an audit-only label supplied by the direct SSH proxy, or
+  the local process identity when available;
+- `caller_ip`: the first field of `SSH_CONNECTION`, when an SSH session provides
+  it;
+- `process_machine_id` and `process_host_id`: derived by the accepting server;
+- `transport`: `local` or `ssh-mcp`.
 
-## 2. Core Concepts
+`host/local` is the fallback machine label when no persisted identity is
+available. None of these caller fields is an authenticated authorization
+principal in v1.
 
-- **Local MCP broker** — the `orbit mcp serve` process registered with the client.
-  It preserves the exact local checkout, reads the machine-local workspace registry
-  to determine ownership, filters by capability, and dispatches each tool by
-  placement class.
-- **Owner route** — execution on the machine that owns the workspace, in-process
-  when that is this machine. Otherwise coordination writes fail closed and name the
-  owner; in v1 only the advertised task family may be sent to a remote owner over
-  the SSH route.
-- **Local-derived route** — execution against rebuildable state derived from the
-  current checkout. Docs never cross the owner route; graph is no longer an MCP
-  surface.
-- **Composite route** — a tool whose current broker preflight requires a validated
-  locally owned checkout. `orbit.search` is the only v1 composite; it searches the
-  local runtime's task, doc, and friction branches and does not route branches
-  independently.
-- **Placement class** — canonical metadata on each Orbit tool definition: `owner`,
-  `local-derived`, or `composite`. Placement is independent of capability.
-- **Owner link** — an SSH-carried MCP connection to an owner machine's stable
-  `machine_id`, used in v1 only for the advertised task family.
-- **Checkoutless client** — an MCP client with no local checkout: it owns no
-  workspace and holds no local-derived state. It does not participate in owner
-  routing.
-- **Owned tunnel** — an SSH tunnel Orbit establishes or reuses to a loopback-bound
-  listener on a remote machine. It is reusable infrastructure rather than one
-  consumer's implementation detail, and it carries no placement routing.
-- **Caller-host provenance** — originating host identity propagated to the owner
-  machine's audit, separately from the serving process host.
+## Ownership
 
-## 3. At a Glance
+| Concern | Owner |
+|---|---|
+| MCP framing, tool discovery, server identity context, direct SSH stdio proxy | `orbit-mcp` |
+| Host identity and workspace-registry state | `orbit-registry` |
+| Server composition and server-local runtime selection | `orbit-cli` |
+| Domain validation, sandboxing, audit persistence, and future authorization | `orbit-core` |
+| Canonical builtin tool definitions | `orbit-tools` |
+| HTTP UI and its own local-forward SSH connection | `orbit-web` |
 
-| Concern | File | Task |
-|---------|------|------|
-| Generic MCP wire adapter and raw stream client | [crates/orbit-mcp/](../../../crates/orbit-mcp/) | [ORB-00424] |
-| Local broker, trusted owner-route config/link pool, safe surface, and audit boundary | [crates/orbit-remote/src/mcp/](../../../crates/orbit-remote/src/mcp/) | [ORB-10262], [ORB-10268], [ORB-10269] |
-| Generic builtin schema + placement metadata | [crates/orbit-tools/src/builtin/orbit/mod.rs](../../../crates/orbit-tools/src/builtin/orbit/mod.rs) | [ORB-00424] |
-| Canonical workspace discovery schema, placement, and projection | [crates/orbit-remote/src/mcp/discovery.rs](../../../crates/orbit-remote/src/mcp/discovery.rs) | [ORB-10267] |
-| Local owner/builtin execution + transport-independent coordination executor | [crates/orbit-core/src/](../../../crates/orbit-core/src/) | [ORB-00424], [ORB-10319] |
-| Registry SQL and remote audit/snapshot persistence over shared `orbit.db` | [crates/orbit-remote/src/persistence/](../../../crates/orbit-remote/src/persistence/) | [ORB-10319] |
-| Machine identity, task-id prefix, and workspace ownership | [host-registry/2_design.md](../host-registry/2_design.md) | [ORB-00424] |
-| Session workspace and caller-host metadata | [mcp-session-context/2_design.md](../mcp-session-context/2_design.md) | [ORB-00424] |
-| Existing SSH-over-loopback posture | [remote-access/2_design.md](../remote-access/2_design.md) | — |
-| Cross-kind search merge behavior | [orbit-search/2_design.md](../orbit-search/2_design.md) | — |
+`orbit-web` is a separate application surface. Its HTTP tunnel is not an MCP
+transport and is not reused by MCP.
 
-Detailed topology, artifact semantics, routing, configuration, and migration are in
-[2_design.md](./2_design.md). Open directions are in [3_vision.md](./3_vision.md).
+## V1 boundaries
 
-## Task References
+V1 deliberately has no MCP TCP listener, shared broker, local checkout preflight,
+owner-placement routing, capability-based tool filtering, or Orbit authorization
+layer. SSH access is sufficient to start the remote server. If authorization is
+added later, it belongs in Core, after the accepting server has established the
+facts needed to enforce it.
 
-- [ORB-00424] — proposed replacing Bridge's duplicated Orbit parity layer with a
-  canonical local/remote Orbit MCP surface. The hub/owner split and star topology
-  it was revised around are superseded by the v1 ownership model; the canonical
-  contract and placement metadata survive.
-- [ORB-10268] — implemented the strict machine-global hub trust document and the
-  fixed, checkoutless, non-recursive hub MCP server boundary (hub-mode endpoint
-  superseded by the v1 owner-machine model; the trust document survives as the
-  client's per-route policy).
-- [ORB-10269] — implemented contract-pinned SSH MCP links, bounded per-capability
-  reuse, exact caller/workspace correlation, and no-replay outcome handling. The
-  transport survives; its single fixed hub target does not.
-- [ORB-10319] — consolidates registry persistence and the MCP bridge implementation
-  in vertical `orbit-remote`, leaving MCP, Store, Core, Tools, and Common as neutral
-  acyclic dependencies ([Consolidate remote coordination in one vertical feature crate](./4_decisions.md#consolidate-remote-coordination-in-one-vertical-feature-crate)). Unaffected by this revision.
-- [ORB-10736] — removed the native learning subsystem and its MCP/search/sidecar
-  contract ([Remove the native project-learning subsystem](../project-learnings/4_decisions.md#remove-the-native-project-learning-subsystem)).
-- [ORB-10767] — dropped Bridge's worker invocation family and descoped `repo_sync`
-  rather than replacing them.
-- [ORB-10768] — retired Bridge entirely after its on-box clients registered Orbit
-  directly.
+Advertised definitions contain only schema plus global-versus-workspace-required
+scope. `orbit.workspace.list` is the sole global tool and reports active logical
+workspaces that have a checkout registered on the accepting machine.
 
-> Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.
+The executable contract and validation map live in
+[`references/conformance-v1.yaml`](./references/conformance-v1.yaml). Detailed
+request flow is in [`2_design.md`](./2_design.md), future work in
+[`3_vision.md`](./3_vision.md), and the current decision set in
+[`4_decisions.md`](./4_decisions.md).

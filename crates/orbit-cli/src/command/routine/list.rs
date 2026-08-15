@@ -1,7 +1,7 @@
 use clap::Args;
 use comfy_table::Cell;
-use orbit_remote::routines::routine_statuses;
-use orbit_remote::workspace_registry;
+use orbit_cmd::registry_routines::routine_statuses;
+use orbit_registry::workspace_registry;
 use serde_json::json;
 
 use crate::command::{CommandOut, Payload};

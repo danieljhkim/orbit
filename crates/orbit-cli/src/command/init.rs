@@ -6,8 +6,8 @@ use orbit_core::config::agent_prompt::{
     StdinPrompter, collect_crew_setting, collect_qa_crew_setting,
 };
 use orbit_core::{OrbitError, OrbitRuntime};
-use orbit_remote::workspace_registry::global_orbit_dir;
-use orbit_remote::{
+use orbit_registry::workspace_registry::global_orbit_dir;
+use orbit_registry::{
     HostIdentityOutcome, NewHostIdentity, ensure_host_identity, os_hostname,
     validate_new_task_prefix,
 };

@@ -12,17 +12,21 @@
 //! `orbit_cmd::prelude::*`) to call them.
 //!
 //! # Role
-//! Depends on `orbit-core` (runtime/context) — never the other way around.
-//! Consumed by `orbit-cli` and `orbit-dashboard`. Command groups that
+//! Depends on `orbit-core` (runtime/context) and composes it with
+//! `orbit-registry` where an application needs both — never the other way
+//! around. Consumed by `orbit-cli` and `orbit-web`.
+//! Command groups that
 //! orbit-core's runtime internals (tool hosts, engine hosts, bootstrap
 //! seeding) invoke remain in `orbit-core::command`; see `ARCHITECTURE.md`
-//! and ADR [ORB-10016] for the boundary.
+//! for the boundary.
 
 pub mod activity_v2;
 pub mod agent_rules;
 pub mod diagnostics;
 pub mod doctor;
 pub mod migrate;
+pub mod registry_routines;
+pub mod registry_runtime;
 
 #[cfg(test)]
 mod tests;

@@ -50,13 +50,13 @@ For a noun with verbs `v₁…vₙ`, find:
 | What | Where (friction example) |
 |------|--------------------------|
 | MCP `Tool` impls | `crates/orbit-tools/src/builtin/orbit/<noun>/*.rs` |
-| MCP registration + exposure policy | `crates/orbit-tools/src/builtin/orbit/mod.rs` |
+| MCP registration + workspace scope | `crates/orbit-tools/src/builtin/orbit/mod.rs` |
 | Action enum variants | `crates/orbit-tools/src/lib.rs` (`OrbitBuiltinAction`) |
 | Handler dispatch | `crates/orbit-core/src/runtime/orbit_tool_host/dispatch.rs` |
 | Handlers | `crates/orbit-core/src/runtime/orbit_tool_host/<noun>_tools.rs` |
 | CLI args + `Execute` impls | `crates/orbit-cli/src/command/<noun>.rs` |
 | CLI audit metadata | `crates/orbit-cli/src/command/operation.rs` |
-| Dashboard handlers | `crates/orbit-dashboard/src/api/<noun>s.rs` |
+| Web handlers | `crates/orbit-web/src/api/<noun>s.rs` |
 
 Note where the *same* field is described differently in two places. Do **not**
 harmonize the wording during the migration — model the difference in the spec

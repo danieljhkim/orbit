@@ -5,7 +5,7 @@ use orbit_common::types::{
     OverlapPolicy, RoutineTarget, Workspace, WorkspaceCheckout, WorkspaceCheckoutRole,
     WorkspaceRegistry, WorkspaceStatus, parse_routine_yaml,
 };
-use orbit_remote::workspace_registry;
+use orbit_registry::workspace_registry;
 
 use crate::tests::env_isolation::EnvGuard;
 

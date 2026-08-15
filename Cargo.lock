@@ -2113,8 +2113,9 @@ dependencies = [
  "orbit-cmd",
  "orbit-common",
  "orbit-core",
- "orbit-dashboard",
- "orbit-remote",
+ "orbit-mcp",
+ "orbit-registry",
+ "orbit-web",
  "predicates",
  "regex",
  "rusqlite",
@@ -2122,6 +2123,7 @@ dependencies = [
  "serde_json",
  "serde_yaml",
  "tempfile",
+ "tokio",
  "toml",
  "tower",
  "tracing",
@@ -2138,6 +2140,7 @@ dependencies = [
  "orbit-common",
  "orbit-core",
  "orbit-engine",
+ "orbit-registry",
  "orbit-store",
  "serde",
  "serde_json",
@@ -2199,30 +2202,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "orbit-dashboard"
-version = "0.10.0"
-dependencies = [
- "axum",
- "chrono",
- "clap",
- "futures-core",
- "libc",
- "orbit-cmd",
- "orbit-common",
- "orbit-core",
- "orbit-remote",
- "serde",
- "serde_json",
- "serde_yaml",
- "tempfile",
- "tokio",
- "tower",
- "tracing",
- "tracing-subscriber",
- "url",
-]
-
-[[package]]
 name = "orbit-engine"
 version = "0.10.0"
 dependencies = [
@@ -2260,12 +2239,15 @@ dependencies = [
 name = "orbit-mcp"
 version = "0.10.0"
 dependencies = [
+ "chrono",
  "orbit-common",
+ "orbit-registry",
+ "orbit-tools",
  "rmcp",
- "serde",
  "serde_json",
  "tempfile",
  "tokio",
+ "toml",
  "tracing",
  "tracing-subscriber",
 ]
@@ -2281,27 +2263,16 @@ dependencies = [
 ]
 
 [[package]]
-name = "orbit-remote"
+name = "orbit-registry"
 version = "0.10.0"
 dependencies = [
  "chrono",
  "hostname",
  "orbit-common",
- "orbit-core",
- "orbit-mcp",
- "orbit-store",
- "orbit-tools",
- "rmcp",
- "rusqlite",
  "serde",
  "serde_json",
- "serde_yaml",
- "sha2 0.10.9",
  "tempfile",
- "tokio",
  "toml",
- "tracing",
- "tracing-subscriber",
 ]
 
 [[package]]
@@ -2363,6 +2334,30 @@ dependencies = [
  "thiserror",
  "tracing",
  "tracing-subscriber",
+]
+
+[[package]]
+name = "orbit-web"
+version = "0.10.0"
+dependencies = [
+ "axum",
+ "chrono",
+ "clap",
+ "futures-core",
+ "libc",
+ "orbit-cmd",
+ "orbit-common",
+ "orbit-core",
+ "orbit-registry",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "tempfile",
+ "tokio",
+ "tower",
+ "tracing",
+ "tracing-subscriber",
+ "url",
 ]
 
 [[package]]

@@ -1,10 +1,8 @@
-use std::net::SocketAddr;
 use std::path::Path;
 
 use clap::{Args, Subcommand, ValueEnum};
-use orbit_common::types::McpCapability;
 use orbit_core::{OrbitError, OrbitRuntime};
-use orbit_remote::{DEFAULT_REMOTE_MCP_PORT, McpServerRole, RemoteProxyArgs};
+use orbit_mcp::RemoteProxyArgs;
 
 use crate::command::{CommandOut, CommandOutput, Execute};
 
@@ -54,59 +52,26 @@ impl Execute for McpSubcommand {
 /// Which side of the wire this invocation is on.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
 pub enum ServeMode {
-    /// Client side: present stdio MCP locally and relay it to a remote
-    /// loopback listener over an SSH tunnel.
+    /// Present stdio MCP locally and relay it directly to a remote Orbit over
+    /// one non-PTY SSH process.
     Remote,
 }
 
 #[derive(Args)]
 #[command(about = "Serve the Orbit tool registry over Model Context Protocol")]
 pub struct ServeArgs {
-    // ORB-10727 / ADR-0355: source provenance for the owner-endpoint rename.
-    /// Serve the checkoutless owner endpoint for the workspaces this machine
-    /// owns, instead of the client-facing local broker.
-    ///
-    /// This replaces the withdrawn `--hub` spelling. It selects which server
-    /// this process presents; it no longer asserts a machine-level coordination
-    /// role, and `host.toml` mode is not consulted. Orbit constructs this
-    /// invocation itself for the far side of an owner route — it is not
-    /// something a client config should name.
-    #[arg(long)]
-    pub owner: bool,
-    /// Exact non-hierarchical capability for this broker or owner session. With
-    /// `--mode remote` this is the capability the remote listener is started
-    /// with, and only when this invocation is the one that starts it.
-    #[arg(long, value_name = "CAPABILITY")]
-    pub capabilities: Option<McpCapability>,
-    // ADR-0350: source provenance for the loopback-only listener and remote proxy.
-    /// Serve over TCP at this loopback address instead of stdio. A
-    /// non-loopback address is refused before the socket is opened, since the
-    /// listener carries no authentication of its own; reach it through an
-    /// authenticated SSH tunnel. Stdio remains the default when
-    /// this is omitted.
-    #[arg(long, value_name = "ADDR", conflicts_with = "mode")]
-    pub listen: Option<SocketAddr>,
     /// Run as a client-side proxy to a remote Orbit instead of serving this
-    /// machine. Requires an SSH destination, and refuses to start where a
-    /// local checkout exists.
-    #[arg(
-        long,
-        value_name = "MODE",
-        requires = "ssh_host",
-        conflicts_with = "owner"
-    )]
+    /// machine. Requires an SSH destination.
+    #[arg(long, value_name = "MODE", requires = "ssh_host")]
     pub mode: Option<ServeMode>,
-    /// SSH destination for `--mode remote` — anything `ssh` accepts (`host`,
-    /// `user@host`, or a `~/.ssh/config` alias).
+    /// SSH destination for `--mode remote`, such as a host, `user@host`, or a
+    /// configured alias.
     #[arg(value_name = "SSH_HOST", requires = "mode")]
     pub ssh_host: Option<String>,
-    /// Loopback port the remote MCP listener serves on, for `--mode remote`.
-    #[arg(long, value_name = "PORT", default_value_t = DEFAULT_REMOTE_MCP_PORT)]
-    pub remote_port: u16,
-    /// Local port for the `--mode remote` tunnel. Defaults to an ephemeral
-    /// port, which is normally right: nothing else needs to find it.
-    #[arg(long, value_name = "PORT")]
-    pub local_port: Option<u16>,
+    /// Audit identity supplied only by Orbit's direct SSH proxy command.
+    /// Presence also marks the server session's transport as SSH MCP.
+    #[arg(long, value_name = "MACHINE_ID", hide = true, conflicts_with = "mode")]
+    pub remote_caller_machine_id: Option<String>,
 }
 
 impl ServeArgs {
@@ -117,13 +82,8 @@ impl ServeArgs {
                     .to_string(),
             ));
         }
-        let role = if self.owner {
-            McpServerRole::Owner
-        } else {
-            McpServerRole::Broker
-        };
-        match (self.mode, self.listen) {
-            (Some(ServeMode::Remote), _) => {
+        match self.mode {
+            Some(ServeMode::Remote) => {
                 // Clap enforces the pairing; this keeps the invariant local
                 // rather than trusting a derive attribute at a distance.
                 let ssh_host = self.ssh_host.ok_or_else(|| {
@@ -133,15 +93,9 @@ impl ServeArgs {
                             .to_string(),
                     )
                 })?;
-                orbit_remote::serve_mcp_remote_proxy(RemoteProxyArgs {
-                    ssh_host,
-                    remote_port: self.remote_port,
-                    local_port: self.local_port,
-                    capability: self.capabilities,
-                })?
+                orbit_mcp::serve_mcp_remote_proxy(RemoteProxyArgs { ssh_host })?
             }
-            (None, Some(addr)) => orbit_remote::serve_mcp_tcp(addr, role, self.capabilities)?,
-            (None, None) => orbit_remote::serve_mcp_stdio(role, self.capabilities)?,
+            None => super::server::serve_mcp_stdio(self.remote_caller_machine_id)?,
         }
         Ok(CommandOutput::Silent)
     }

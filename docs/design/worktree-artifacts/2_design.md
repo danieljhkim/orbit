@@ -8,7 +8,7 @@ status: Accepted
 feature: worktree-artifacts
 doc_role: design
 tags: ["worktree-artifacts"]
-paths: ["crates/orbit-remote/**", "crates/orbit-core/**", "crates/orbit-store/**", "crates/orbit-cli/**"]
+paths: ["crates/orbit-core/**", "crates/orbit-store/**", "crates/orbit-cli/**"]
 related_features: ["worktree-artifacts", "host-registry", "mcp-bridge"]
 related_artifacts: ["ORB-00199", "ORB-00200", "ORB-00201", "ORB-10272", "ORB-10297", "ORB-10330", "ORB-10545", "ORB-10668", "ORB-10669", "ORB-10725"]
 ---
