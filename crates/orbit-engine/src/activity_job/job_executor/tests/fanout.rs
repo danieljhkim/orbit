@@ -49,6 +49,28 @@ fn fanout_empty_items_emits_dispatched_zero_and_joined_zero() {
         })
         .expect("FaninJoined event");
     assert_eq!(joined, (0, 0));
+
+    let pipeline = outcome.pipeline.as_object().expect("pipeline obj");
+    assert_eq!(pipeline.get("scatter"), Some(&json!([])));
+}
+
+#[test]
+fn fanout_empty_items_records_collect_alias() {
+    let host = ScriptedHost::new([("worker_action", vec![])]);
+    let job = job_with_steps(vec![fanout_step(
+        "scatter",
+        "{{ input.items }}",
+        4,
+        target_step("worker", "worker_action"),
+        JoinMode::All,
+        Some("results"),
+    )]);
+    let outcome = run_job(&host, &job, json!({"items": []}), "run-fanout-empty-alias");
+
+    assert!(outcome.success);
+    let pipeline = outcome.pipeline.as_object().expect("pipeline obj");
+    assert_eq!(pipeline.get("scatter"), Some(&json!([])));
+    assert_eq!(pipeline.get("results"), Some(&json!([])));
 }
 
 #[test]
