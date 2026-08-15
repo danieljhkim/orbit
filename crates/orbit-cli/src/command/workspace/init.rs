@@ -31,7 +31,7 @@ pub struct WorkspaceInitArgs {
     #[arg(long)]
     pub base_branch: Option<String>,
     /// Ship-pipeline mode for this workspace: `pr` or `local`. When omitted, the
-    /// effective mode defaults to `local` (only PR-gated workspaces set `pr`).
+    /// effective mode defaults to `pr`; pass `--ship-mode local` for in-place delivery.
     #[arg(long, value_name = "MODE")]
     pub ship_mode: Option<String>,
     /// Explicit local checkout role. Omit for the compatible local-owner

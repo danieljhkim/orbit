@@ -732,7 +732,7 @@ async fn refresh_rebuilds_runtime_for_ship_mode_only_change() {
     let global_root = tmp.path().join("global");
     std::fs::create_dir_all(&global_root).expect("create global root");
     let (_alpha_orbit, alpha_repo) = seed_workspace(&global_root, tmp.path(), "alpha");
-    write_registry_with_ship_modes(&global_root, &[("alpha", &alpha_repo, None)]);
+    write_registry_with_ship_modes(&global_root, &[("alpha", &alpha_repo, Some("local"))]);
     let state = registry_state(&global_root);
 
     assert_eq!(route_status(&state, "alpha").await, StatusCode::OK);

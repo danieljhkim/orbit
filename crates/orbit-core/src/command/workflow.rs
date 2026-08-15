@@ -61,18 +61,15 @@ impl ShipMode {
 /// Resolve the effective ship mode for a workspace registry entry.
 ///
 /// An explicit `ship_mode` on the entry wins; otherwise the mode defaults to
-/// `local`. The default is deliberately NOT derived from `git_remote`: several
-/// direct-commit workspaces (e.g. `worker`, `bridge`) still have GitHub remotes,
-/// so a "github → pr" heuristic would wrongly attempt PRs for them. Only the
-/// PR-gated workspaces (`orbit`, `sextant`) carry an explicit `ship_mode = "pr"`.
-/// Defaulting to `local` means a sweep never accidentally attempts a PR.
+/// `pr`. The default is deliberately NOT derived from `git_remote`: an omitted
+/// mode consistently preserves the review boundary, regardless of the remote.
 ///
-/// An unparseable explicit `ship_mode` falls back to `local` rather than
+/// An unparseable explicit `ship_mode` falls back to `pr` rather than
 /// erroring, so a malformed registry entry can never wedge a sweep.
 pub fn resolved_ship_mode(workspace: &orbit_common::types::Workspace) -> ShipMode {
     match workspace.ship_mode.as_deref() {
-        Some(explicit) => ShipMode::parse(explicit).unwrap_or(ShipMode::Local),
-        None => ShipMode::Local,
+        Some(explicit) => ShipMode::parse(explicit).unwrap_or(ShipMode::Pr),
+        None => ShipMode::Pr,
     }
 }
 
@@ -213,27 +210,26 @@ mod ship_mode_resolution_tests {
     }
 
     #[test]
-    fn unset_ship_mode_defaults_to_local_regardless_of_remote() {
-        // Direct-commit workspaces (worker, bridge) also have GitHub remotes,
-        // so the default must NOT be derived from the remote — it is always local.
+    fn unset_ship_mode_defaults_to_pr_regardless_of_remote() {
+        // The default is independent of the remote and preserves the review
+        // boundary for every workspace configured without a ship mode.
         assert_eq!(
             resolved_ship_mode(&workspace(Some("https://github.com/acme/worker.git"), None)),
-            ShipMode::Local
+            ShipMode::Pr
         );
         assert_eq!(
             resolved_ship_mode(&workspace(Some("git@github.com:acme/bridge.git"), None)),
-            ShipMode::Local
+            ShipMode::Pr
         );
         assert_eq!(
             resolved_ship_mode(&workspace(Some("/home/daniel/git/polaris.git"), None)),
-            ShipMode::Local
+            ShipMode::Pr
         );
-        assert_eq!(resolved_ship_mode(&workspace(None, None)), ShipMode::Local);
+        assert_eq!(resolved_ship_mode(&workspace(None, None)), ShipMode::Pr);
     }
 
     #[test]
     fn explicit_pr_wins_over_github_remote() {
-        // The PR-gated repos (orbit, sextant) carry an explicit ship_mode = "pr".
         let ws = workspace(Some("https://github.com/acme/orbit.git"), Some("pr"));
         assert_eq!(resolved_ship_mode(&ws), ShipMode::Pr);
     }
@@ -245,8 +241,8 @@ mod ship_mode_resolution_tests {
     }
 
     #[test]
-    fn unparseable_explicit_mode_falls_back_to_local() {
+    fn unparseable_explicit_mode_falls_back_to_pr() {
         let ws = workspace(Some("https://github.com/acme/orbit.git"), Some("bogus"));
-        assert_eq!(resolved_ship_mode(&ws), ShipMode::Local);
+        assert_eq!(resolved_ship_mode(&ws), ShipMode::Pr);
     }
 }

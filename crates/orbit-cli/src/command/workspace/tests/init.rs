@@ -55,6 +55,29 @@ fn workspace_reinit_requires_force_and_force_reconciles_matching_registration() 
         .into_iter()
         .next()
         .expect("registered workspace");
+    assert_eq!(original.ship_mode, None);
+    assert_eq!(
+        orbit_core::resolved_ship_mode(&original).as_input_value(),
+        "pr",
+        "an omitted ship mode must preserve the PR delivery default"
+    );
+
+    init(None, Some("local"), true)
+        .execute_without_runtime(None)
+        .expect("re-init with explicit local mode");
+    let after_local_registry = workspace_registry::load_registry_from(&registry_path)
+        .expect("load registry after local mode update");
+    let after_local_mode = after_local_registry
+        .workspaces
+        .iter()
+        .find(|workspace| workspace.id == original.id)
+        .expect("registered workspace");
+    assert_eq!(after_local_mode.ship_mode.as_deref(), Some("local"));
+    assert_eq!(
+        orbit_core::resolved_ship_mode(after_local_mode).as_input_value(),
+        "local",
+        "an explicit local ship mode must retain in-place delivery"
+    );
     let authored_routine = r#"schemaVersion: 1
 name: custom-ship-sweep
 description: operator-authored routine
