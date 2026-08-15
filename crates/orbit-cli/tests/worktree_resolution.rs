@@ -108,6 +108,7 @@ fn run_job_with_explicit_root_completes_instead_of_staying_pending() {
         ],
         None,
     );
+    pin_default_crew_for_isolated_root(&custom_root);
 
     let job_path = repo.join("root-override-smoke.yaml");
     fs::write(
@@ -152,15 +153,13 @@ spec:
         .to_string();
     assert_eq!(submitted["state"].as_str(), Some("submitted"));
 
-    let shown = wait_for_run_terminal_state(&repo, &home, &custom_root_arg, &run_id);
+    let shown = wait_for_run_terminal_state(&repo, &home, &custom_root, &run_id);
     let state = shown["run"]["state"].as_str().unwrap_or("missing");
-    let worker_log = custom_root
-        .join("state/logs")
-        .join(format!("{run_id}.worker.log"));
-    let worker_log_text = fs::read_to_string(&worker_log).unwrap_or_default();
     assert_eq!(
-        state, "success",
-        "run {run_id} must complete under --root {custom_root_arg}; last show={shown}; worker log:\n{worker_log_text}"
+        state,
+        "success",
+        "{}",
+        detached_worker_diagnostic(&custom_root, &run_id, &shown)
     );
 }
 
@@ -253,13 +252,21 @@ fn assert_root_fields(value: &Value, shared_root: &Path, local_root: &Path) {
     );
 }
 
-fn wait_for_run_terminal_state(cwd: &Path, home: &Path, custom_root: &str, run_id: &str) -> Value {
+fn wait_for_run_terminal_state(cwd: &Path, home: &Path, custom_root: &Path, run_id: &str) -> Value {
+    let custom_root_arg = custom_root.to_string_lossy();
     let deadline = Instant::now() + Duration::from_secs(15);
     loop {
         let last = run_orbit_json(
             cwd,
             home,
-            &["--root", custom_root, "run", "show", run_id, "--json"],
+            &[
+                "--root",
+                custom_root_arg.as_ref(),
+                "run",
+                "show",
+                run_id,
+                "--json",
+            ],
             None,
         );
         if last["run"]["state"]
@@ -270,10 +277,53 @@ fn wait_for_run_terminal_state(cwd: &Path, home: &Path, custom_root: &str, run_i
         }
         assert!(
             Instant::now() < deadline,
-            "run {run_id} stayed non-terminal under --root {custom_root}; last show={last}"
+            "{}",
+            detached_worker_diagnostic(custom_root, run_id, &last)
         );
         thread::sleep(Duration::from_millis(50));
     }
+}
+
+fn detached_worker_diagnostic(custom_root: &Path, run_id: &str, last: &Value) -> String {
+    let worker_log = custom_root
+        .join("state/logs")
+        .join(format!("{run_id}.worker.log"));
+    let worker_log_text = fs::read_to_string(&worker_log)
+        .unwrap_or_else(|error| format!("<missing worker log {}: {error}>", worker_log.display()));
+    let config = fs::read_to_string(custom_root.join("config.toml")).unwrap_or_default();
+    let state = last["run"]["state"].as_str().unwrap_or("missing");
+    let pid = last["run"]["pid"].clone();
+    let started_at = last["run"]["started_at"].clone();
+    format!(
+        "run {run_id} stayed non-terminal under --root {}; \
+         state={state} pid={pid} started_at={started_at}; last show={last}; \
+         config.toml:\n{config}\nworker log:\n{worker_log_text}",
+        custom_root.display()
+    )
+}
+
+/// `workspace init` only seeds `[crews]` / `default_crew` when it sees an agent
+/// CLI on PATH. The stub planted by [`plant_agent_cli_stub`] covers the common
+/// case; write the same contract into the isolated root so a detached worker
+/// cannot lose crew resolution if detection did not stick.
+fn pin_default_crew_for_isolated_root(custom_root: &Path) {
+    let config_path = custom_root.join("config.toml");
+    let existing = fs::read_to_string(&config_path).unwrap_or_default();
+    if existing.contains("default_crew") && existing.contains("[crews.") {
+        return;
+    }
+    fs::write(
+        &config_path,
+        r#"[workflow]
+default_crew = "codex"
+
+[crews.codex]
+provider = "codex"
+model = "gpt-5.4"
+backend = "cli"
+"#,
+    )
+    .expect("pin isolated-root default crew");
 }
 
 fn string_field<'a>(value: &'a Value, field: &str) -> &'a str {
@@ -321,7 +371,12 @@ fn clear_agent_identity_env(command: &mut AssertCommand) {
         .env_remove("ORBIT_AGENT_NAME")
         .env_remove("ORBIT_AGENT_MODEL")
         .env_remove("ORBIT_MANAGED_RUN_CONTEXT")
-        .env_remove("ORBIT_RUN_ID");
+        .env_remove("ORBIT_RUN_ID")
+        .env_remove("ORBIT_TASK_ID")
+        .env_remove("ORBIT_ACTIVE_TASK_ID")
+        .env_remove("ORBIT_SESSION_ID")
+        .env_remove("ORBIT_BIN")
+        .env_remove("LLVM_PROFILE_FILE");
 }
 
 fn set_orbit_root_env(command: &mut AssertCommand, orbit_root: Option<&Path>) {
