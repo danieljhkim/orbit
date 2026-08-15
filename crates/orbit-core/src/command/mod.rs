@@ -13,6 +13,7 @@
 use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
+use std::io;
 use std::path::{Path, PathBuf};
 
 use orbit_common::types::OrbitError;
@@ -209,7 +210,13 @@ pub(crate) fn reconcile_managed_assets<'a>(
         assets: next_assets,
     };
     if previous.as_ref() != Some(&manifest) {
-        write_managed_asset_manifest(&manifest_path, &manifest)?;
+        let encoded = encode_managed_asset_manifest(&manifest)?;
+        record_managed_manifest_write(
+            &manifest_path,
+            asset_kind,
+            atomic_write_text(&manifest_path, &encoded),
+            &mut result.warnings,
+        )?;
     }
 
     for warning in &result.warnings {
@@ -226,10 +233,21 @@ pub(crate) fn reconcile_managed_assets<'a>(
 
 /// Persist one managed-asset manifest. Callers compare against the previous
 /// manifest first so a steady-state bootstrap performs no write at all.
+///
+/// Explicit repair paths (`orbit doctor --fix-stale-artifacts`) use this
+/// fail-closed helper. Reconciliation uses [`record_managed_manifest_write`]
+/// so a read-only global root does not fail a later read-only command.
 fn write_managed_asset_manifest(
     manifest_path: &Path,
     manifest: &ManagedAssetManifest,
 ) -> Result<(), OrbitError> {
+    let encoded = encode_managed_asset_manifest(manifest)?;
+    atomic_write_text(manifest_path, &encoded).map_err(|error| {
+        managed_asset_manifest_io_error(manifest_path, &manifest.asset_kind, error)
+    })
+}
+
+fn encode_managed_asset_manifest(manifest: &ManagedAssetManifest) -> Result<String, OrbitError> {
     let asset_kind = &manifest.asset_kind;
     let mut encoded = serde_json::to_string_pretty(manifest).map_err(|error| {
         OrbitError::Store(format!(
@@ -237,12 +255,65 @@ fn write_managed_asset_manifest(
         ))
     })?;
     encoded.push('\n');
-    atomic_write_text(manifest_path, &encoded).map_err(|error| {
-        OrbitError::Io(format!(
-            "write managed {asset_kind} asset manifest '{}': {error}",
-            manifest_path.display()
-        ))
-    })
+    Ok(encoded)
+}
+
+/// Read-only / permission denials on a needed manifest write are a
+/// deployment shape (immutable global root, sandboxed runner), not a
+/// reason to refuse a later read-only command.
+pub(crate) fn managed_manifest_write_is_skippable(error: &io::Error) -> bool {
+    match error.kind() {
+        io::ErrorKind::PermissionDenied | io::ErrorKind::ReadOnlyFilesystem => true,
+        _ => error
+            .raw_os_error()
+            .is_some_and(is_readonly_or_access_errno),
+    }
+}
+
+#[cfg(unix)]
+fn is_readonly_or_access_errno(code: i32) -> bool {
+    code == libc::EROFS || code == libc::EACCES
+}
+
+#[cfg(not(unix))]
+fn is_readonly_or_access_errno(_code: i32) -> bool {
+    false
+}
+
+fn managed_asset_manifest_io_error(
+    manifest_path: &Path,
+    asset_kind: &str,
+    error: io::Error,
+) -> OrbitError {
+    OrbitError::Io(format!(
+        "write managed {asset_kind} asset manifest '{}': {error}",
+        manifest_path.display()
+    ))
+}
+
+/// Record a needed manifest write, warning (instead of failing closed) when
+/// the destination is EROFS/EACCES. Other I/O failures stay fatal.
+pub(crate) fn record_managed_manifest_write(
+    manifest_path: &Path,
+    asset_kind: &str,
+    write_result: Result<(), io::Error>,
+    warnings: &mut Vec<String>,
+) -> Result<(), OrbitError> {
+    match write_result {
+        Ok(()) => Ok(()),
+        Err(error) if managed_manifest_write_is_skippable(&error) => {
+            warnings.push(format!(
+                "could not write managed {asset_kind} asset manifest '{}': {error}; continuing without updating it",
+                manifest_path.display()
+            ));
+            Ok(())
+        }
+        Err(error) => Err(managed_asset_manifest_io_error(
+            manifest_path,
+            asset_kind,
+            error,
+        )),
+    }
 }
 
 fn load_managed_asset_manifest(
