@@ -20,7 +20,7 @@
 //!   no-op that then records version 1.
 
 use orbit_common::types::OrbitError;
-use rusqlite::{Connection, params};
+use rusqlite::{Connection, ErrorCode, params};
 
 /// One entry in the migration registry.
 pub(crate) struct Migration {
@@ -219,7 +219,12 @@ fn apply_one(conn: &Connection, migration: &Migration) -> Result<(), OrbitError>
         ))
     })?;
 
-    (migration.apply)(&tx)?;
+    (migration.apply)(&tx).map_err(|error| {
+        OrbitError::Migration(format!(
+            "failed to apply migration v{} ({}): {error}",
+            migration.version, migration.name
+        ))
+    })?;
 
     tx.execute(
         "INSERT INTO schema_meta(key, value, updated_at) VALUES (?1, ?2, ?3)
@@ -237,12 +242,8 @@ fn apply_one(conn: &Connection, migration: &Migration) -> Result<(), OrbitError>
         ))
     })?;
 
-    tx.commit().map_err(|e| {
-        OrbitError::Migration(format!(
-            "failed to commit migration v{} ({}): {e}",
-            migration.version, migration.name
-        ))
-    })?;
+    tx.commit()
+        .map_err(|error| commit_migration_error(migration, error))?;
 
     orbit_common::tracing::info!(
         target: "orbit.store.sqlite",
@@ -251,6 +252,24 @@ fn apply_one(conn: &Connection, migration: &Migration) -> Result<(), OrbitError>
         "applied store schema migration",
     );
     Ok(())
+}
+
+pub(super) fn commit_migration_error(migration: &Migration, error: rusqlite::Error) -> OrbitError {
+    if matches!(
+        &error,
+        rusqlite::Error::SqliteFailure(sqlite_error, _)
+            if sqlite_error.code == ErrorCode::DiskFull
+    ) {
+        return OrbitError::Store(format!(
+            "SQLITE_FULL / ENOSPC while committing migration v{} ({}): {error}",
+            migration.version, migration.name
+        ));
+    }
+
+    OrbitError::Migration(format!(
+        "failed to commit migration v{} ({}): {error}",
+        migration.version, migration.name
+    ))
 }
 
 fn ensure_schema_meta_table(conn: &Connection) -> Result<(), OrbitError> {

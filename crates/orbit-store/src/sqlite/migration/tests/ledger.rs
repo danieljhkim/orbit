@@ -1,6 +1,6 @@
 // ORB-10003: versioned schema-migration ledger.
 use orbit_common::types::OrbitError;
-use rusqlite::Connection;
+use rusqlite::{Connection, Error as SqliteError, ffi};
 
 use super::super::ledger::{self, Migration};
 use super::super::*;
@@ -453,11 +453,11 @@ fn migration_v1_marker(conn: &Connection) -> Result<(), OrbitError> {
 }
 
 fn migration_v2_fails_midway(conn: &Connection) -> Result<(), OrbitError> {
-    conn.execute_batch("CREATE TABLE ledger_test_half_applied (x INTEGER)")
+    conn.execute_batch(
+        "CREATE TABLE ledger_test_half_applied (x INTEGER);\n         this is not valid migration SQL",
+    )
         .map_err(|e| OrbitError::Store(e.to_string()))?;
-    Err(OrbitError::Migration(
-        "intentional mid-migration failure".to_string(),
-    ))
+    Ok(())
 }
 
 #[test]
@@ -478,6 +478,8 @@ fn failed_migration_rolls_back_schema_and_ledger() {
 
     let err = ledger::run_migrations(&conn, &registry).expect_err("v2 must fail");
     assert!(matches!(err, OrbitError::Migration(_)), "got {err:?}");
+    let message = err.to_string();
+    assert!(message.contains("v2 (fails-midway)"), "got {message}");
 
     // v1 committed; v2 rolled back completely — no half-applied schema,
     // no ledger row.
@@ -501,6 +503,23 @@ fn failed_migration_rolls_back_schema_and_ledger() {
     ];
     ledger::run_migrations(&conn, &fixed).expect("resume after fix");
     assert_eq!(current_schema_version(&conn).expect("current version"), 2);
+}
+
+#[test]
+fn sqlite_full_commit_error_is_a_store_resource_error() {
+    let migration = Migration {
+        version: 42,
+        name: "disk-full-test",
+        apply: migration_v1_marker,
+    };
+    let error = SqliteError::SqliteFailure(ffi::Error::new(ffi::SQLITE_FULL), None);
+
+    let mapped = ledger::commit_migration_error(&migration, error);
+
+    assert!(matches!(mapped, OrbitError::Store(_)), "got {mapped:?}");
+    let message = mapped.to_string();
+    assert!(message.contains("SQLITE_FULL"), "got {message}");
+    assert!(message.contains("v42 (disk-full-test)"), "got {message}");
 }
 
 fn migration_v1_marker_v2(conn: &Connection) -> Result<(), OrbitError> {
