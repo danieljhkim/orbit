@@ -2,6 +2,7 @@
 title: Resident Orchestrator — Design
 owner: codex, grok, claude
 last_updated: 2026-08-15
+last_validated: 2026-08-15
 status: Draft
 feature: resident-orchestrator
 doc_role: design

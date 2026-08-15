@@ -1,3 +1,10 @@
+---
+type: design
+summary: "Spec: Orbit Web SSH Local Forward"
+last_validated: 2026-08-15
+tags: [remote-access]
+---
+
 # Spec: Orbit Web SSH Local Forward
 
 orbit web connect <ssh-host> exposes a remote machine's loopback Orbit Web server through a foreground SSH local forward. It attaches to an existing healthy server when possible and starts one only when necessary.
