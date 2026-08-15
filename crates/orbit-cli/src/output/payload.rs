@@ -76,6 +76,16 @@ impl From<Payload> for CommandOutput {
     }
 }
 
+impl CommandOutput {
+    /// The process exit code to use after this output has been rendered.
+    pub(crate) fn exit_code(&self) -> i32 {
+        match self {
+            Self::Silent => 0,
+            Self::Payload(payload) => payload.exit_code(),
+        }
+    }
+}
+
 /// A document and its human rendering.
 pub struct Payload {
     /// The `json`-mode document: an array for a list, an object for a detail
@@ -83,6 +93,8 @@ pub struct Payload {
     doc: Value,
     /// How `table` and plain mode render the same records.
     view: View,
+    /// The process exit code to use after the payload has been rendered.
+    exit_code: i32,
 }
 
 /// One piece of a human view. A detail command is usually prose with a grid
@@ -141,6 +153,7 @@ impl Payload {
         Self {
             doc: Value::Array(records),
             view: View::Blocks(vec![Block::table(table)]),
+            exit_code: 0,
         }
     }
 
@@ -161,7 +174,15 @@ impl Payload {
         Self {
             doc,
             view: View::Blocks(blocks),
+            exit_code: 0,
         }
+    }
+
+    /// Set the process exit code after this payload is rendered.
+    #[must_use]
+    pub fn with_exit_code(mut self, exit_code: i32) -> Self {
+        self.exit_code = exit_code;
+        self
     }
 
     /// A payload with no human form of its own: rendered as its document in
@@ -170,6 +191,7 @@ impl Payload {
         Self {
             doc,
             view: View::Document,
+            exit_code: 0,
         }
     }
 
@@ -180,11 +202,16 @@ impl Payload {
         Self {
             doc,
             view: View::Stream(stream),
+            exit_code: 0,
         }
     }
 
     /// The human rendering, consumed by the renderer.
     pub(crate) fn into_view(self) -> (Value, View) {
         (self.doc, self.view)
+    }
+
+    pub(crate) fn exit_code(&self) -> i32 {
+        self.exit_code
     }
 }

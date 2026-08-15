@@ -1,6 +1,6 @@
 use clap::Args;
 use orbit_cmd::{DoctorCommands, WorkspaceDoctorResult, WorkspaceDoctorStatus};
-use orbit_core::{OrbitError, OrbitRuntime};
+use orbit_core::OrbitRuntime;
 use serde_json::{Value, json};
 
 use crate::command::{Block, CommandOut, Execute, Payload};
@@ -102,7 +102,7 @@ impl Execute for DoctorCommand {
                 table.add_row(vec![
                     Cell::new(&row.check_name),
                     crate::output::color::cell(status_label(row.status), Domain::DoctorStatus),
-                    Cell::new(human_detail(row)),
+                    Cell::new(human_detail(row).replace('\n', " | ")),
                 ]);
             }
             blocks.push(Block::table(table));
@@ -119,12 +119,10 @@ impl Execute for DoctorCommand {
 
         // Unlike `skill doctor` / `tool doctor`, a failed check exits nonzero
         // so unattended callers (cron, CI, systemd) can alert on it.
-        if failures > 0 {
-            return Err(OrbitError::Execution(format!(
-                "{failures} doctor check(s) failed"
-            )));
-        }
-        Ok(Payload::blocks(Value::Array(values), blocks).into())
+        let exit_code = i32::from(failures > 0);
+        Ok(Payload::blocks(Value::Array(values), blocks)
+            .with_exit_code(exit_code)
+            .into())
     }
 }
 

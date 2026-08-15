@@ -6,6 +6,7 @@ use orbit_core::{
     AuditEventInsertParams, AuditEventStatus, OrbitError, OrbitRuntime, redact_sensitive_env_text,
 };
 
+use crate::command::CommandOut;
 #[cfg(test)]
 use crate::command::Commands;
 pub use crate::command::operation::CommandMeta;
@@ -52,6 +53,23 @@ impl<'a> AuditGuard<'a> {
         self.status = AuditEventStatus::Success;
         self.exit_code = 0;
         self.error_message = None;
+    }
+
+    /// Classify the command's complete outcome, including rendered payloads
+    /// that deliberately request a nonzero process exit.
+    pub fn mark_result(&mut self, result: &CommandOut) {
+        match result {
+            Ok(output) if output.exit_code() != 0 => {
+                self.status = AuditEventStatus::Failure;
+                self.exit_code = output.exit_code();
+                self.error_message = None;
+            }
+            Ok(_) => self.mark_success(),
+            Err(OrbitError::PolicyDenied(msg) | OrbitError::CapabilityDenied(msg)) => {
+                self.mark_denied(msg);
+            }
+            Err(err) => self.mark_failure(err),
+        }
     }
 
     pub fn mark_failure(&mut self, error: &OrbitError) {

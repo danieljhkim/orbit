@@ -244,14 +244,7 @@ fn main() {
         Some(meta) => {
             let mut guard = audit_middleware::AuditGuard::new(&runtime, meta);
             let result = authorize(&runtime).and_then(|()| dispatch(cli.command, context));
-            match &result {
-                Ok(_) => guard.mark_success(),
-                Err(
-                    orbit_core::OrbitError::PolicyDenied(msg)
-                    | orbit_core::OrbitError::CapabilityDenied(msg),
-                ) => guard.mark_denied(msg),
-                Err(err) => guard.mark_failure(err),
-            }
+            guard.mark_result(&result);
             result
         }
         None => authorize(&runtime).and_then(|()| dispatch(cli.command, context)),
@@ -272,6 +265,10 @@ fn finish_command(
     suppress_errors: bool,
     json_error_preference: Option<bool>,
 ) {
+    let exit_code = result
+        .as_ref()
+        .map(command::CommandOutput::exit_code)
+        .unwrap_or(0);
     let rendered = result.and_then(|output| output::render::emit(output, sink));
     if let Err(err) = rendered {
         if suppress_errors {
@@ -279,6 +276,9 @@ fn finish_command(
         }
         print_error(&err, sink, json_error_preference);
         std::process::exit(1);
+    }
+    if exit_code != 0 {
+        std::process::exit(exit_code);
     }
 }
 
