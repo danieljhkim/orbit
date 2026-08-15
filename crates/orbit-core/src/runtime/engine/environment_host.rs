@@ -1,12 +1,11 @@
 use orbit_common::types::CrewAssignment;
-use orbit_common::types::activity_job::{Backend, Provider};
+use orbit_common::types::activity_job::Provider;
 use orbit_engine::CrewConfig;
 
 /// Convert a crew assignment (string fields) into the typed [`CrewConfig`]
-/// surface used by the engine resolver. Unrecognized
-/// `provider` / `backend` values yield `None` for that field with a warn-log
-/// — silently coercing dispatch onto a different runtime would defeat the
-/// point of the override.
+/// surface used by the engine resolver. An unrecognized `provider` yields
+/// `None` for that field with a warn-log — silently coercing dispatch onto a
+/// different runtime would defeat the point of the override.
 pub(crate) fn typed_crew_config_from_assignment(raw: &CrewAssignment) -> CrewConfig {
     let provider = Some(raw.provider.as_str()).and_then(|raw_value| {
         // Canonical string→provider parsing lives on the orbit-common `Provider`
@@ -36,24 +35,8 @@ pub(crate) fn typed_crew_config_from_assignment(raw: &CrewAssignment) -> CrewCon
         }
     });
 
-    let backend = Some(raw.backend.as_str()).and_then(|raw_value| {
-        let parsed = Backend::parse(raw_value);
-        if parsed.is_none() {
-            tracing::warn!(
-                target: "orbit.config.crew",
-                raw = raw_value,
-                "[crews.<name>].backend has an unrecognized value; falling back to inline activity backend",
-            );
-        }
-        parsed
-    });
-
     let model = raw.model.trim();
     let model = (!model.is_empty()).then(|| model.to_string());
 
-    CrewConfig {
-        provider,
-        model,
-        backend,
-    }
+    CrewConfig { provider, model }
 }

@@ -15,7 +15,6 @@ fn empty_answer_accepts_one_recommended_default_crew() {
     let result = collect_crew_setting(&detected, &mut prompter).unwrap();
 
     assert_eq!(result.provider.as_deref(), Some("claude"));
-    assert_eq!(result.backend.as_deref(), Some("cli"));
     let transcript = prompter.transcript();
     assert!(transcript.contains("one crew assignment"));
     assert!(transcript.contains("run's resolved crew"));
@@ -36,7 +35,6 @@ fn customization_selects_one_detected_agent() {
     let result = collect_crew_setting(&detected, &mut prompter).unwrap();
 
     assert_eq!(result.provider.as_deref(), Some("codex"));
-    assert_eq!(result.backend.as_deref(), Some("cli"));
     assert_eq!(result.model.as_deref(), Some(CODEX_DEFAULT_MODEL));
     assert!(
         prompter
@@ -46,20 +44,20 @@ fn customization_selects_one_detected_agent() {
 }
 
 #[test]
-fn custom_provider_prompts_for_backend_and_model() {
+fn custom_provider_prompts_for_provider_and_model() {
     let detected = DetectedAgents::default();
-    let mut prompter = CannedPrompter::new(["n", "custom", "openai_compat", "http", "my-model"]);
+    let mut prompter = CannedPrompter::new(["n", "custom", "gemini", "my-model"]);
     let result = collect_crew_setting(&detected, &mut prompter).unwrap();
-    assert_eq!(result.provider.as_deref(), Some("openai_compat"));
-    assert_eq!(result.backend.as_deref(), Some("http"));
+    assert_eq!(result.provider.as_deref(), Some("gemini"));
     assert_eq!(result.model.as_deref(), Some("my-model"));
+    // [ORB-10801] There is no backend left to choose, so init never asks.
+    assert!(!prompter.transcript().contains("Backend"));
 }
 
 #[test]
 fn custom_provider_reprompts_for_blank_unknown_model() {
     let detected = DetectedAgents::default();
-    let mut prompter =
-        CannedPrompter::new(["n", "custom", "openai_compat", "http", "", "my-model"]);
+    let mut prompter = CannedPrompter::new(["n", "custom", "openai_compat", "", "my-model"]);
     let result = collect_crew_setting(&detected, &mut prompter).unwrap();
     assert_eq!(result.model.as_deref(), Some("my-model"));
     assert!(
@@ -96,8 +94,6 @@ fn qa_crew_prompt_offers_only_detected_claude_and_codex_defaults() {
 #[test]
 fn qa_crew_is_omitted_without_claude_or_codex_cli() {
     let detected = DetectedAgents {
-        anthropic_api_key: true,
-        openai_api_key: true,
         gemini_cli: true,
         ..DetectedAgents::default()
     };

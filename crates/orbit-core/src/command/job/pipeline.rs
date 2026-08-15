@@ -16,6 +16,9 @@ use serde::Serialize;
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
+use orbit_common::types::JobV2;
+use orbit_common::types::activity_job::{load_job_asset, validate_job_retired_sessions};
+
 use crate::OrbitRuntime;
 use crate::command::job::exec::V2RunFinalizationOptions;
 use crate::command::job::resume::ResumePlan;
@@ -32,6 +35,29 @@ const PIPELINE_WORKER_LOG_TAIL_BYTES: u64 = 16 * 1024;
 /// Non-terminal runs are always among the newest rows, so a bounded window is
 /// enough to spot a duplicate dispatch without walking the whole history.
 const SHIP_IN_FLIGHT_SCAN_LIMIT: usize = 200;
+
+/// One durable pipeline submission: what to run, with what input, and how the
+/// detached worker will find the definition again.
+struct PipelineSubmission<'a> {
+    job_name: &'a str,
+    definition: SubmittedDefinition<'a>,
+    input: Value,
+    resume: Option<&'a ResumePlan>,
+    actor: Option<&'a str>,
+}
+
+/// How a submitted run's definition reaches its worker.
+enum SubmittedDefinition<'a> {
+    /// Resolve `job_name` from the catalog, at submission and again in the
+    /// worker. Catalog assets are managed, so name resolution stays the
+    /// contract for them.
+    Catalog,
+    /// Pin this exact validated YAML alongside the run [ORB-10801]. A direct
+    /// path is an unmanaged file the submitter happened to name; rereading it
+    /// from a detached worker would let an edit or deletion between submission
+    /// and execution change (or destroy) the run.
+    Snapshot { spec: &'a JobV2, yaml: &'a str },
+}
 
 #[derive(Debug, Clone, Serialize)]
 pub struct PipelineInvokeResult {
@@ -189,12 +215,73 @@ impl OrbitRuntime {
     ) -> Result<PipelineInvokeResult, OrbitError> {
         self.require_workspace_claim("orbit.workflow.run.resume", claim_token)?;
         let plan = self.plan_job_run_resume(source_run_id)?;
-        self.submit_persisted_pipeline_run(
-            &plan.source.job_id,
-            plan.input.clone(),
-            Some(&plan),
+        let job_id = plan.source.job_id.clone();
+        self.submit_persisted_pipeline_run(PipelineSubmission {
+            job_name: &job_id,
+            definition: SubmittedDefinition::Catalog,
+            input: plan.input.clone(),
+            resume: Some(&plan),
             actor,
-        )
+        })
+    }
+
+    /// Submit a run for a catalog job id or a direct schemaVersion 2 job YAML
+    /// path — the shared entry point behind `orbit run job` / `orbit job run`.
+    ///
+    /// [ORB-10801] Submission is one-shot: it validates the definition,
+    /// persists the run, and hands it to a detached worker. A direct path is
+    /// snapshotted next to the run before this returns, so the worker executes
+    /// exactly the definition that was validated even if the source file is
+    /// edited or deleted a moment later.
+    pub fn submit_job_run(
+        &self,
+        job_ref: &str,
+        input: Value,
+        actor: Option<&str>,
+    ) -> Result<PipelineInvokeResult, OrbitError> {
+        let direct_path = Path::new(job_ref);
+        if !direct_path.is_file() {
+            let entry = self.show_job_catalog_entry(job_ref)?;
+            if entry.kind() == orbit_common::types::JobKind::Subroutine {
+                return Err(OrbitError::InvalidInput(format!(
+                    "job '{}' declares `kind: subroutine` and cannot be run directly (asset: {}).",
+                    entry.job_id,
+                    entry.path.display()
+                )));
+            }
+            return self.submit_pipeline_run(&entry.job_id, input, None, actor);
+        }
+
+        let (job_name, spec, yaml) = self.load_direct_job_definition(direct_path)?;
+        let result = self.submit_persisted_pipeline_run(PipelineSubmission {
+            job_name: &job_name,
+            definition: SubmittedDefinition::Snapshot {
+                spec: &spec,
+                yaml: &yaml,
+            },
+            input: input.clone(),
+            resume: None,
+            actor,
+        });
+        self.record_submission_audit(&job_name, &input, actor, &result)?;
+        result
+    }
+
+    /// Read and fully validate a direct-path job definition in the submitting
+    /// process, so a broken asset is refused before any run is persisted.
+    fn load_direct_job_definition(
+        &self,
+        yaml_path: &Path,
+    ) -> Result<(String, JobV2, String), OrbitError> {
+        let yaml = std::fs::read_to_string(yaml_path).map_err(|error| {
+            OrbitError::InvalidInput(format!("read {}: {error}", yaml_path.display()))
+        })?;
+        let asset = load_job_asset(&yaml).map_err(|error| {
+            OrbitError::InvalidInput(format!("load {}: {error}", yaml_path.display()))
+        })?;
+        validate_job_retired_sessions(&asset.spec, &yaml_path.display().to_string())
+            .map_err(|error| OrbitError::InvalidInput(error.to_string()))?;
+        Ok((asset.name, asset.spec, yaml))
     }
 
     pub fn submit_pipeline_run(
@@ -204,7 +291,13 @@ impl OrbitRuntime {
         priority: Option<&str>,
         actor: Option<&str>,
     ) -> Result<PipelineInvokeResult, OrbitError> {
-        let result = self.submit_persisted_pipeline_run(job_name, input.clone(), None, actor);
+        let result = self.submit_persisted_pipeline_run(PipelineSubmission {
+            job_name,
+            definition: SubmittedDefinition::Catalog,
+            input: input.clone(),
+            resume: None,
+            actor,
+        });
 
         self.record_pipeline_audit(
             "pipeline.invoke",
@@ -227,6 +320,34 @@ impl OrbitRuntime {
         result
     }
 
+    /// Record the `pipeline.invoke` audit for a direct-path submission, which
+    /// does not route through [`Self::submit_pipeline_run`].
+    fn record_submission_audit(
+        &self,
+        job_name: &str,
+        input: &Value,
+        actor: Option<&str>,
+        result: &Result<PipelineInvokeResult, OrbitError>,
+    ) -> Result<(), OrbitError> {
+        self.record_pipeline_audit(
+            "pipeline.invoke",
+            result.as_ref().ok().map(|value| value.run_id.as_str()),
+            actor,
+            match result {
+                Ok(_) => AuditEventStatus::Success,
+                Err(_) => AuditEventStatus::Failure,
+            },
+            json!({
+                "actor": actor,
+                "job_name": job_name,
+                "priority": Option::<&str>::None,
+                "run_id": result.as_ref().ok().map(|value| value.run_id.clone()),
+                "input_hash": input_hash(input),
+            }),
+            result.as_ref().err().map(|error| error.to_string()),
+        )
+    }
+
     /// Persist a pipeline run and hand it to a detached worker.
     ///
     /// `resume` distinguishes the two submission shapes: `None` is a fresh
@@ -235,13 +356,20 @@ impl OrbitRuntime {
     /// lineage's task ownership before the worker can reach `worktree_setup`.
     fn submit_persisted_pipeline_run(
         &self,
-        job_name: &str,
-        input: Value,
-        resume: Option<&ResumePlan>,
-        actor: Option<&str>,
+        submission: PipelineSubmission<'_>,
     ) -> Result<PipelineInvokeResult, OrbitError> {
+        let PipelineSubmission {
+            job_name,
+            definition,
+            input,
+            resume,
+            actor,
+        } = submission;
         let result = (|| {
-            let (_, spec) = self.load_v2_job_asset_by_name(job_name)?;
+            let spec = match &definition {
+                SubmittedDefinition::Catalog => self.load_v2_job_asset_by_name(job_name)?.1,
+                SubmittedDefinition::Snapshot { spec, .. } => (*spec).clone(),
+            };
             if spec.state != JobScheduleState::Enabled {
                 return Err(OrbitError::InvalidInput(format!(
                     "job '{job_name}' is disabled"
@@ -257,6 +385,17 @@ impl OrbitRuntime {
                 resume.map(|plan| plan.source.run_id.clone()),
             )?;
             self.seed_v2_pipeline_run(&run, &input, resume)?;
+
+            // Pin the definition before the worker can exist. A direct-path
+            // submission must not depend on the source file surviving
+            // unchanged until the detached worker gets around to reading it.
+            if let SubmittedDefinition::Snapshot { yaml, .. } = &definition
+                && let Err(error) = self.write_run_definition_snapshot(&run.run_id, yaml)
+            {
+                let _ =
+                    self.finalize_pipeline_worker_startup_failure(&run, &error.to_string(), actor);
+                return Err(error);
+            }
 
             self.reconcile_stale_job_runs(Some(job_name))?;
             let active_runs = self
@@ -309,6 +448,43 @@ impl OrbitRuntime {
         }
 
         result
+    }
+
+    /// Durably pin a submitted run's job definition next to the run record.
+    fn write_run_definition_snapshot(&self, run_id: &str, yaml: &str) -> Result<(), OrbitError> {
+        let dir = self.paths().job_runs_dir.clone();
+        std::fs::create_dir_all(&dir).map_err(|error| {
+            OrbitError::Io(format!(
+                "create job run definition directory '{}': {error}",
+                dir.display()
+            ))
+        })?;
+        let path = run_definition_snapshot_path(&dir, run_id);
+        std::fs::write(&path, yaml).map_err(|error| {
+            OrbitError::Io(format!(
+                "write job run definition snapshot '{}': {error}",
+                path.display()
+            ))
+        })
+    }
+
+    /// The definition a persisted run must execute: its own snapshot when the
+    /// submission pinned one, otherwise the catalog asset named by the run.
+    pub(crate) fn resolve_run_definition(
+        &self,
+        run: &JobRun,
+    ) -> Result<(PathBuf, JobV2), OrbitError> {
+        let snapshot = run_definition_snapshot_path(&self.paths().job_runs_dir, &run.run_id);
+        if !snapshot.is_file() {
+            return self.load_v2_job_asset_by_name(&run.job_id);
+        }
+        let yaml = std::fs::read_to_string(&snapshot).map_err(|error| {
+            OrbitError::InvalidInput(format!("read {}: {error}", snapshot.display()))
+        })?;
+        let asset = load_job_asset(&yaml).map_err(|error| {
+            OrbitError::InvalidInput(format!("load {}: {error}", snapshot.display()))
+        })?;
+        Ok((snapshot, asset.spec))
     }
 
     pub fn wait_pipeline_runs(
@@ -400,7 +576,7 @@ impl OrbitRuntime {
                 }
             }
 
-            let (yaml_path, spec) = self.load_v2_job_asset_by_name(&run.job_id)?;
+            let (yaml_path, spec) = self.resolve_run_definition(&run)?;
             if spec.state != JobScheduleState::Enabled {
                 let _ = self.cancel_job_run(&run.run_id);
                 return Err(OrbitError::InvalidInput(format!(
@@ -487,7 +663,6 @@ impl OrbitRuntime {
         let outcome = self.run_job_v2_from_yaml_with_run_id_and_resume(
             yaml_path,
             input.clone(),
-            None,
             Some(run.run_id.clone()),
             run.retry_source_run_id.clone(),
             resume.as_ref(),
@@ -645,15 +820,26 @@ impl OrbitRuntime {
     }
 
     fn spawn_pipeline_worker(&self, run_id: &str, actor: Option<&str>) -> Result<(), OrbitError> {
+        let mut command = self.pipeline_worker_command(run_id)?;
+        let worker_log =
+            configure_pipeline_worker_stdio(&mut command, &self.paths().logs_dir, run_id)?;
+        self.spawn_pipeline_worker_process(run_id, actor, command, worker_log)
+            .map(|_| ())
+    }
+
+    /// The program a detached worker runs: this same `orbit` binary, re-entered
+    /// at the hidden worker subcommand and discovered by cwd.
+    fn pipeline_worker_command(&self, run_id: &str) -> Result<Command, OrbitError> {
+        #[cfg(test)]
+        if let Some(command) = worker_command_override::command(&self.paths().repo_root, run_id) {
+            return Ok(command);
+        }
         let current_exe = std::env::current_exe().map_err(|error| {
             OrbitError::Execution(format!("resolve current orbit executable: {error}"))
         })?;
         let mut command = Command::new(resolve_pipeline_worker_executable(current_exe));
         configure_pipeline_worker_command(&mut command, &self.paths().repo_root, run_id);
-        let worker_log =
-            configure_pipeline_worker_stdio(&mut command, &self.paths().logs_dir, run_id)?;
-        self.spawn_pipeline_worker_process(run_id, actor, command, worker_log)
-            .map(|_| ())
+        Ok(command)
     }
 
     pub(crate) fn spawn_pipeline_worker_process(
@@ -966,6 +1152,11 @@ pub(crate) fn configure_pipeline_worker_command(
         .stdin(Stdio::null());
 }
 
+/// Where a submitted run's pinned job definition lives.
+pub(crate) fn run_definition_snapshot_path(job_runs_dir: &Path, run_id: &str) -> PathBuf {
+    job_runs_dir.join(format!("{run_id}.job.yaml"))
+}
+
 pub(crate) fn pipeline_worker_log_path(logs_dir: &Path, run_id: &str) -> PathBuf {
     logs_dir.join(format!("{run_id}.worker.log"))
 }
@@ -1079,4 +1270,52 @@ fn pipeline_run_is_runnable(runs: &[JobRun], run_id: &str, max_active_runs: u32)
 fn input_hash(input: &Value) -> String {
     let encoded = serde_json::to_vec(input).unwrap_or_default();
     format!("{:x}", Sha256::digest(encoded))
+}
+
+/// Test-only substitute for the detached worker program.
+///
+/// Production re-execs `current_exe` at `job run-pipeline-worker <run_id>`. A
+/// test binary must never re-exec itself: libtest reads the worker argv as test
+/// filters and recurses through the whole suite. In-crate tests install a small
+/// script here instead and assert on the submission path around it.
+#[cfg(test)]
+pub(crate) mod worker_command_override {
+    use std::cell::RefCell;
+    use std::path::Path;
+    use std::process::{Command, Stdio};
+
+    /// Replaced with the submitted run id in every argv entry.
+    pub(crate) const RUN_ID_PLACEHOLDER: &str = "{run_id}";
+
+    thread_local! {
+        static ARGV: RefCell<Option<Vec<String>>> = const { RefCell::new(None) };
+    }
+
+    /// Install `argv` as this thread's worker program until [`clear`].
+    pub(crate) fn set<I, S>(argv: I)
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        let argv = argv.into_iter().map(Into::into).collect::<Vec<_>>();
+        ARGV.with(|slot| *slot.borrow_mut() = Some(argv));
+    }
+
+    pub(crate) fn clear() {
+        ARGV.with(|slot| *slot.borrow_mut() = None);
+    }
+
+    pub(crate) fn command(workspace: &Path, run_id: &str) -> Option<Command> {
+        let argv = ARGV.with(|slot| slot.borrow().clone())?;
+        let mut parts = argv
+            .iter()
+            .map(|part| part.replace(RUN_ID_PLACEHOLDER, run_id));
+        let program = parts.next()?;
+        let mut command = Command::new(program);
+        command
+            .args(parts)
+            .current_dir(workspace)
+            .stdin(Stdio::null());
+        Some(command)
+    }
 }

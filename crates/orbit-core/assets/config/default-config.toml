@@ -34,9 +34,6 @@ base_branch = "main"
 system_crew = "qa"
 
 [runtime]
-# `backend` selects the v2 `agent_loop` execution backend: "cli" | "http" | "auto".
-# backend = "cli"
-#
 # Rotation + retention for the global JSONL log (~/.orbit/state/logs/orbit.jsonl).
 # Applied opportunistically at process start. All optional; the conservative
 # defaults below are used when a key is omitted. Invalid values

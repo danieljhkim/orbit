@@ -51,22 +51,15 @@ Most commands accept the global `--root` option to override the Orbit root direc
 orbit --root /path/to/orbit-root task list
 ```
 
-## Backend Precedence
+## Retired Backend Selection
 
-For `agent_loop` execution, backend selection resolves once before dispatch.
+`agent_loop` execution runs through the provider's CLI agent. The `--backend`
+flag, `ORBIT_BACKEND`, `[runtime] backend`, and `[crews.<name>] backend` were
+removed: there is no backend left to select.
 
-1. command flag (`--backend`)
-2. `ORBIT_BACKEND`
-3. `[runtime] backend`
-4. hard-coded fallback: **`cli`**
-
-Accepted backend values:
-
-| Value | Behavior |
-|-------|----------|
-| `cli` | Supervised provider CLI subprocess. This is the default. |
-| `http` | Programmatic loop transport for providers that support it. |
-| `auto` | Resolves to a concrete backend at load time. |
+Existing declarations are recognized rather than ignored, so nothing is
+silently reinterpreted. `cli` is accepted and inert; `http` and `auto` are
+rejected with the migration message. Remove the setting.
 
 ## Workspace State
 

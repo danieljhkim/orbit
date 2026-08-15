@@ -83,5 +83,4 @@ orbit workspace init --mcp
 ## Configure Orbit
 
 `orbit init` seeds `~/.orbit/config.toml` with crews for detected provider CLIs.
-See [Configuration](../../reference/config/) for file locations, shape, and
-backend precedence.
+See [Configuration](../../reference/config/) for file locations and shape.

@@ -5,7 +5,7 @@
 //! The host returns the selected assignment and this module applies it over the
 //! inline activity baseline field by field.
 
-use orbit_common::types::activity_job::{AgentLoopSpec, Backend, Provider};
+use orbit_common::types::activity_job::{AgentLoopSpec, Provider};
 use serde_json::Value;
 
 use crate::context::CrewConfig;
@@ -17,7 +17,6 @@ use crate::context::RuntimeHost;
 pub struct ResolvedAgentSettings {
     pub provider: Provider,
     pub model: Option<String>,
-    pub backend: Backend,
 }
 
 /// Resolve one crew assignment for an activity. Explicit activity input wins;
@@ -85,12 +84,10 @@ pub(crate) fn resolve_from_config(
     ResolvedAgentSettings {
         provider: config.provider.unwrap_or(inline.provider),
         model: config.model.clone().or_else(|| inline.model.clone()),
-        backend: config.backend.unwrap_or(inline.backend),
     }
 }
 
 pub fn apply_resolved_settings(spec: &mut AgentLoopSpec, resolved: &ResolvedAgentSettings) {
     spec.provider = resolved.provider;
     spec.model = resolved.model.clone();
-    spec.backend = resolved.backend;
 }

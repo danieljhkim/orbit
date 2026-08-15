@@ -44,7 +44,7 @@ action: example_action
 config: {}
 ```
 
-For an agent loop, declare instruction, tools, provider, and backend:
+For an agent loop, declare instruction, tools, and provider:
 
 ```yaml
 type: agent_loop
@@ -53,16 +53,16 @@ tools:
   - orbit.task.show
   - orbit.search
 provider: claude
-backend: cli
 ```
 
-The default is `backend: cli`. `backend: http` runs the programmatic loop for a
-provider with HTTP transport support, while `backend: auto` resolves to a
-concrete backend before dispatch.
+Orbit dispatches every agent loop through the provider's CLI agent. There is no
+backend to choose: the retired `backend:` key still parses as `cli` and is
+ignored, while `backend: http` and `backend: auto` are refused at load.
 
 ## Use It
 
 ```bash
 orbit activity list
-orbit job run path/to/job.yaml --input key=value
+orbit job run path/to/job.yaml --input key=value   # submits and returns a run ID
+orbit job run path/to/job.yaml --wait              # block until the run is terminal
 ```

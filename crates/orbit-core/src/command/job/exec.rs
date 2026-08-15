@@ -8,8 +8,7 @@
 use std::path::Path;
 
 use orbit_common::types::activity_job::{
-    Backend, V2AuditEventKind, load_job_asset, resolve_job_backends,
-    validate_job_loop_session_backends,
+    V2AuditEventKind, load_job_asset, validate_job_retired_sessions,
 };
 use orbit_common::types::{
     JobRun, JobRunState, JobTargetType, NotFoundKind, OrbitError, OrbitEvent, PipelineState,
@@ -33,9 +32,6 @@ pub struct V2JobRunResult {
     pub pipeline: Value,
     pub message: Option<String>,
     pub events_emitted: usize,
-    /// Resolved backend applied at load time to every `agent_loop` step in
-    /// the DAG. Recorded so smokes can inspect the precedence outcome.
-    pub resolved_backend: Backend,
 }
 
 /// Path-specific durable records retained while finalizing a v2 run.
@@ -71,9 +67,8 @@ impl OrbitRuntime {
         &self,
         yaml_path: &Path,
         input: Value,
-        backend_flag: Option<Backend>,
     ) -> Result<V2JobRunResult, OrbitError> {
-        self.run_job_v2_from_yaml_with_retry_source(yaml_path, input, backend_flag, None, 1, None)
+        self.run_job_v2_from_yaml_with_retry_source(yaml_path, input, None, 1, None)
     }
 
     /// Re-run a completed or historical job run from step 0 using the current
@@ -89,7 +84,6 @@ impl OrbitRuntime {
         self.run_job_v2_from_yaml_with_retry_source(
             &job_path,
             input,
-            None,
             Some(source.run_id.clone()),
             1,
             None,
@@ -120,7 +114,6 @@ impl OrbitRuntime {
         self.run_job_v2_from_yaml_with_retry_source(
             &plan.job_path,
             plan.input.clone(),
-            None,
             Some(plan.source.run_id.clone()),
             plan.attempt,
             Some(&plan),
@@ -131,7 +124,6 @@ impl OrbitRuntime {
         &self,
         yaml_path: &Path,
         input: Value,
-        backend_flag: Option<Backend>,
         retry_source_run_id: Option<String>,
         attempt: u32,
         resume: Option<&ResumePlan>,
@@ -166,7 +158,6 @@ impl OrbitRuntime {
         let outcome = self.run_job_v2_from_yaml_with_run_context(
             yaml_path,
             input.clone(),
-            backend_flag,
             Some(run.run_id.clone()),
             retry_source_run_id,
             resume.and_then(|plan| plan.resume_state.as_ref()),
@@ -188,17 +179,9 @@ impl OrbitRuntime {
         &self,
         yaml_path: &Path,
         input: Value,
-        backend_flag: Option<Backend>,
         run_id_override: Option<String>,
     ) -> Result<V2JobRunResult, OrbitError> {
-        self.run_job_v2_from_yaml_with_run_context(
-            yaml_path,
-            input,
-            backend_flag,
-            run_id_override,
-            None,
-            None,
-        )
+        self.run_job_v2_from_yaml_with_run_context(yaml_path, input, run_id_override, None, None)
     }
 
     /// [ORB-10470] Execute a persisted run against its own checkpoints.
@@ -211,7 +194,6 @@ impl OrbitRuntime {
         &self,
         yaml_path: &Path,
         input: Value,
-        backend_flag: Option<Backend>,
         run_id_override: Option<String>,
         retry_source_run_id: Option<String>,
         resume: Option<&PipelineState>,
@@ -219,7 +201,6 @@ impl OrbitRuntime {
         self.run_job_v2_from_yaml_with_run_context(
             yaml_path,
             input,
-            backend_flag,
             run_id_override,
             retry_source_run_id,
             resume,
@@ -230,7 +211,6 @@ impl OrbitRuntime {
         &self,
         yaml_path: &Path,
         input: Value,
-        backend_flag: Option<Backend>,
         run_id_override: Option<String>,
         retry_source_run_id: Option<String>,
         resume: Option<&PipelineState>,
@@ -243,21 +223,16 @@ impl OrbitRuntime {
         })?;
 
         // Phase 4: resolve `target: activity:<name>` refs before any other
-        // pass, so backend-resolution + loader-rejection see concrete specs.
+        // pass, so retired-feature rejection sees concrete specs.
         let catalog = self
             .v2_activity_catalog()
             .map_err(|err| OrbitError::InvalidInput(format!("build activity catalog: {err}")))?;
         resolve_job_catalog_refs_for_execution(&mut asset.spec, &catalog)
             .map_err(dispatch_error_to_orbit)?;
 
-        // §3.1 resolution: replace every `Auto` with a concrete backend.
-        let resolution = self.resolve_v2_backend(backend_flag);
-        resolve_job_backends(&mut asset.spec, resolution.backend);
-
-        // §3.2 loader rejection: any `loop:`-nested step with `session:`
-        // binding must resolve to `backend: http`. We reject at load time so
-        // CLI-mode runs never start a DAG they can't finish.
-        validate_job_loop_session_backends(&asset.spec, &yaml_path.display().to_string())
+        // [ORB-10801] Reject retired declarations at load time so a run never
+        // starts a DAG it cannot finish as written.
+        validate_job_retired_sessions(&asset.spec, &yaml_path.display().to_string())
             .map_err(|err| OrbitError::InvalidInput(format!("{err}")))?;
         let run_id = run_id_override.unwrap_or_else(|| {
             format!(
@@ -317,7 +292,6 @@ impl OrbitRuntime {
                 pipeline: o.pipeline,
                 message: o.message,
                 events_emitted: events_count,
-                resolved_backend: resolution.backend,
             }),
             Err(err) => Err(err),
         }

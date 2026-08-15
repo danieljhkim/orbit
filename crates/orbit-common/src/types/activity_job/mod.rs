@@ -4,9 +4,9 @@ pub mod activity_roles;
 pub mod activity_v2;
 pub mod asset_loader;
 pub mod audit_envelope;
-pub mod backend;
 pub mod catalog;
 pub mod job_v2;
+pub mod retired;
 pub mod schema_header;
 pub mod tool_allowlist;
 
@@ -120,9 +120,10 @@ deterministic_action_catalog!(define_deterministic_actions);
 
 pub use activity_roles::JobActivityRoles;
 pub use activity_v2::{
-    ActivityV2, ActivityV2Spec, AgentLoopSpec, Backend, DeterministicSpec, OnDenial, Provider,
+    ActivityV2, ActivityV2Spec, AgentLoopSpec, DeterministicSpec, OnDenial, Provider,
     ProviderAlias, ProviderDeprecation, ProviderDiagnostic, ProviderEntryPoint, ProviderIdentity,
     ProviderParseError, ProviderResolution, ProviderResolveRequest, ProviderSource,
+    RETIRED_BACKEND_MIGRATION, RetiredAgentBackend, check_retired_backend_value,
 };
 pub use asset_loader::{
     ActivityAsset, AssetLoadError, JobAsset, load_activity_asset, load_job_asset,
@@ -132,10 +133,6 @@ pub use audit_envelope::{
     V2_EVENT_TYPE_FS_CALL_DENIED, V2_EVENT_TYPE_STEP_DENIED, V2_EVENT_TYPE_TOOL_DENIED,
     V2AuditEnvelope, V2AuditEvent, V2AuditEventKind,
 };
-pub use backend::{
-    BackendConstraintError, HttpOnlyFeature, resolve_activity_backends, resolve_job_backends,
-    validate_job_loop_session_backends,
-};
 pub use catalog::{
     ACTIVITY_REF_PREFIX, CatalogDirectory, CatalogDirectoryList, CatalogError, ResolveError,
     V2ActivityCatalog, V2JobCatalog, catalog_error_to_orbit, resolve_job_target_refs,
@@ -144,6 +141,7 @@ pub use job_v2::{
     BackoffStrategy, FanInSpec, FanOutBlock, JobKind, JobV2, JobV2Step, JobV2StepBody, JoinMode,
     LoopBlock, ParallelBlock, PipelineRef, RetrySpec, TargetRef, TargetStep,
 };
+pub use retired::{RetiredFeatureError, validate_job_retired_sessions};
 pub use schema_header::SchemaHeader;
 pub use tool_allowlist::{
     ToolAllowlistError, V2_INTENTIONALLY_EMPTY_TOOL_WILDCARD_ROOTS, V2_TOOL_WILDCARD_ROOTS,

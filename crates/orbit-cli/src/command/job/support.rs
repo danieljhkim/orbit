@@ -155,7 +155,6 @@ pub(super) fn write_v2_step(step: &JobV2Step, indent: usize, out: &mut String) {
                 ActivityV2Spec::AgentLoop(spec) => {
                     let _ = writeln!(out, "{pad}{} agent_loop", bold("Activity Type:"));
                     let _ = writeln!(out, "{pad}{} {}", bold("Provider:"), spec.provider.as_str());
-                    let _ = writeln!(out, "{pad}{} {}", bold("Backend:"), spec.backend.as_str());
                     if let Some(model) = &spec.model {
                         let _ = writeln!(out, "{pad}{} {}", bold("Model:"), model);
                     }

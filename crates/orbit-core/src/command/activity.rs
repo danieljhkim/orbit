@@ -590,10 +590,6 @@ backend = "cli"
         let asset = load_activity_asset(yaml).expect("parse epic orchestrator");
         match asset.spec.spec {
             ActivityV2Spec::AgentLoop(spec) => {
-                assert_eq!(
-                    spec.backend,
-                    orbit_common::types::activity_job::Backend::Cli
-                );
                 assert_eq!(spec.wall_clock_timeout_seconds, 7200);
                 assert_eq!(spec.on_denial, OnDenial::Terminate);
                 assert!(tool_allowed("orbit.task.add", &spec.tools));

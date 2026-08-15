@@ -4,7 +4,6 @@ metadata:
   name: epic_orchestrator
 spec:
   type: agent_loop
-  backend: cli
   description: >
     No-code-change workspace drain agent. Shrinks the
     `scan_unresolved_work` set by creating or triaging tasks, shipping

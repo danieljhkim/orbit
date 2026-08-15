@@ -81,7 +81,7 @@ fn render_crews(
                 RawCrewEntry {
                     provider: Some(crew.assignment.provider),
                     model: Some(crew.assignment.model),
-                    backend: Some(crew.assignment.backend),
+                    backend: None,
                     description: crew.description,
                     tags: crew.tags,
                     planner: None,
@@ -98,7 +98,7 @@ fn render_crews(
             RawCrewEntry {
                 provider: assignment.provider.clone(),
                 model: assignment.model.clone(),
-                backend: assignment.backend.clone(),
+                backend: None,
                 description: None,
                 tags: Vec::new(),
                 planner: None,
@@ -117,7 +117,7 @@ fn render_crews(
             RawCrewEntry {
                 provider: qa.provider,
                 model: qa.model,
-                backend: qa.backend,
+                backend: None,
                 description: None,
                 tags: Vec::new(),
                 planner: None,
@@ -149,7 +149,6 @@ fn default_qa_crew(detected: &DetectedAgents) -> Option<RawCrewAssignment> {
     };
     Some(RawCrewAssignment {
         provider: Some(provider.to_string()),
-        backend: Some("cli".to_string()),
         model: Some(model.to_string()),
     })
 }
@@ -159,7 +158,6 @@ fn render_crew_table(name: &str, entry: &RawCrewEntry) -> Result<String, OrbitEr
     for (field, value) in [
         ("model", entry.model.as_deref()),
         ("provider", entry.provider.as_deref()),
-        ("backend", entry.backend.as_deref()),
     ] {
         let value = value.ok_or_else(|| {
             OrbitError::InvalidInput(format!("crew `{name}` is missing `{field}`"))
@@ -195,7 +193,6 @@ fn render_crew_table(name: &str, entry: &RawCrewEntry) -> Result<String, OrbitEr
 fn validate_complete_crew_setting(config: &RawCrewAssignment) -> Result<(), OrbitError> {
     for (field, value) in [
         ("provider", config.provider.as_deref()),
-        ("backend", config.backend.as_deref()),
         ("model", config.model.as_deref()),
     ] {
         if value.map(str::trim).is_none_or(str::is_empty) {

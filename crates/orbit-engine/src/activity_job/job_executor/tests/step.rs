@@ -274,7 +274,7 @@ fn backoff_bound_grows_monotonically_to_cap_under_exponential() {
 
 // ----- [ORB-10449] Step-completion protocol -------------------------------
 
-use orbit_common::types::activity_job::{AgentLoopSpec, Backend, OnDenial, Provider};
+use orbit_common::types::activity_job::{AgentLoopSpec, OnDenial, Provider};
 
 /// Build the shipped `implement_one` shape: a `backend: cli` agent loop that is
 /// artifact-backed, so the *content* contract stays off and only the
@@ -286,7 +286,7 @@ fn agent_implement_shaped_step(id: &str, retry: Option<RetrySpec>) -> JobV2Step 
         on_denial: OnDenial::Terminate,
         model: None,
         max_iterations: 1,
-        backend: Backend::Cli,
+        backend: None,
         provider: Provider::Claude,
         wall_clock_timeout_seconds: 30,
         require_response_envelope: false,

@@ -7,18 +7,18 @@
     clippy::unwrap_used
 )]
 
-//! v2 `backend: cli` integration coverage — T20260419-0104.
+//! v2 CLI agent-dispatch integration coverage — T20260419-0104.
 //!
-//! Exercises the new §3.1 dispatch path, the §7.6 envelope events, the §6
-//! harness-delegated allowlist advisory, the §3.2 loader rejection, argv
-//! redaction, and wall-clock timeout.
+//! Exercises the agent dispatch path, the §7.6 envelope events, the §6
+//! harness-delegated allowlist advisory, the [ORB-10801] retired-declaration
+//! rejections, argv redaction, and wall-clock timeout.
 //!
 //! The smoke substitutes the real `claude` CLI with tempdir shell scripts
 //! named `claude` so `AgentConfig::from_cli_config` resolves them to the
 //! retained `ClaudeRuntime` (§10.1 keep/delete table). This is what the task
 //! AC #11 means by "substitutable" CLI.
 //!
-//! Runs under `cargo nextest run -p orbit-engine --test v2_cli_backend`.
+//! Runs under `cargo nextest run -p orbit-engine --test v2_cli_agent`.
 
 use std::fs;
 use std::io::Write;
@@ -29,9 +29,8 @@ use std::time::{Duration, Instant};
 
 use orbit_common::types::JobScheduleState;
 use orbit_common::types::activity_job::{
-    ActivityV2Spec, AgentLoopSpec, Backend, BackendConstraintError, JobKind, JobV2, JobV2Step,
-    JobV2StepBody, LoopBlock, OnDenial, Provider, TargetStep, load_activity_asset,
-    resolve_job_backends, validate_job_loop_session_backends,
+    ActivityV2Spec, AgentLoopSpec, JobKind, JobV2, JobV2Step, JobV2StepBody, LoopBlock, OnDenial,
+    Provider, RetiredFeatureError, TargetStep, load_activity_asset, validate_job_retired_sessions,
 };
 use orbit_engine::{
     DispatchError, ResolvedCliExecutor, RuntimeHost, V2AuditWriter, V2DispatchInput,
@@ -41,14 +40,12 @@ use serde_json::Value;
 use tempfile::TempDir;
 
 #[test]
-fn cli_backend_dispatch_regressions() -> Result<(), Box<dyn std::error::Error>> {
+fn cli_agent_dispatch_regressions() -> Result<(), Box<dyn std::error::Error>> {
     scenario_a_cli_dispatch_emits_envelope_events()?;
     scenario_b_argv_redaction()?;
     scenario_c_wall_clock_timeout()?;
-    scenario_d_no_silent_fallback_unwired_http()?;
-    scenario_e_loader_rejection_loop_session_cli()?;
-    scenario_f_loader_rejection_auto_resolved_to_cli()?;
-    scenario_g_auto_backend_unresolved_is_structural_error()?;
+    scenario_e_loader_rejection_retired_session()?;
+    scenario_f_loader_rejection_retired_backend_value()?;
     scenario_h_cli_reference_asset_round_trip()?;
     scenario_i_existing_agent_loop_assets_still_deserialize()?;
     scenario_j_cli_executor_static_args_are_audited()?;
@@ -192,100 +189,46 @@ fn scenario_c_wall_clock_timeout() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-/// D: `backend: http` + unwired provider surfaces `UnwiredHttpTransport`.
-fn scenario_d_no_silent_fallback_unwired_http() -> Result<(), Box<dyn std::error::Error>> {
-    println!("  D) no-silent-fallback: http + unwired provider (gemini)");
-    let tmp_audit = tempfile::tempdir()?;
-    let (writer, _sink) = build_writer(tmp_audit.path(), "smoke-cli-d")?;
-
-    let mut spec = cli_agent_loop_spec(Some(Provider::Gemini));
-    spec.backend = Backend::Http;
-    let host = NullCliHost;
-    let err = dispatch_v2_activity(V2DispatchInput {
-        activity_name: "cli_smoke_d",
-        spec: &ActivityV2Spec::AgentLoop(spec),
-        fs_profile: None,
-        input: serde_json::json!({ "prompt": "ignored" }),
-        audit: writer.clone(),
-        run_id: "smoke-cli-d",
-        host: Some(&host),
-    })
-    .expect_err("expected UnwiredHttpTransport");
-    match err {
-        DispatchError::UnwiredHttpTransport { provider } => {
-            assert_eq!(provider, "gemini");
-            println!("    got structured error for provider=gemini");
-        }
-        other => panic!("expected UnwiredHttpTransport, got {other:?}"),
-    }
-    Ok(())
-}
-
-/// E: loader-level rejection for `loop:`-nested step with `session:` +
-/// resolved `backend: cli`.
-fn scenario_e_loader_rejection_loop_session_cli() -> Result<(), Box<dyn std::error::Error>> {
-    println!("  E) loader rejects loop+session+cli");
-    let job = synthetic_loop_session_cli_job();
-    let err = validate_job_loop_session_backends(&job, "synthetic/loop_session_cli.yaml")
+/// E: [ORB-10801] a `session:` binding is refused at load time, so a run
+/// never starts a DAG whose cross-iteration semantics no longer exist.
+fn scenario_e_loader_rejection_retired_session() -> Result<(), Box<dyn std::error::Error>> {
+    println!("  E) loader rejects a retired `session:` binding");
+    let job = synthetic_loop_session_job();
+    let err = validate_job_retired_sessions(&job, "synthetic/loop_session.yaml")
         .expect_err("expected rejection");
-    let BackendConstraintError::LoopSessionOnCli {
+    let RetiredFeatureError::SessionBinding {
         asset_path,
         step_id,
         session_name,
-        item_number,
-        ..
     } = &err;
-    assert_eq!(asset_path, "synthetic/loop_session_cli.yaml");
+    assert_eq!(asset_path, "synthetic/loop_session.yaml");
     assert_eq!(step_id, "assess");
     assert_eq!(session_name, "assessor");
-    assert_eq!(*item_number, 1);
-    println!(
-        "    §3.2 item {} rejection for step `{}`",
-        item_number, step_id
+    assert!(
+        err.to_string().contains("CLI agent path"),
+        "rejection must carry the migration: {err}"
     );
     Ok(())
 }
 
-/// F: `auto` resolved to `cli` rejected identically to explicit `cli`.
-fn scenario_f_loader_rejection_auto_resolved_to_cli() -> Result<(), Box<dyn std::error::Error>> {
-    println!("  F) auto → cli rejected identically");
-    let mut job = synthetic_loop_session_auto_job();
-    resolve_job_backends(&mut job, Backend::Cli);
-    let err = validate_job_loop_session_backends(&job, "synthetic/loop_session_auto.yaml")
-        .expect_err("expected rejection");
-    let BackendConstraintError::LoopSessionOnCli { step_id, .. } = &err;
-    assert_eq!(step_id, "assess");
-    println!("    auto-resolved-to-cli rejected for step `{}`", step_id);
-    Ok(())
-}
-
-/// G: unresolved `Auto` at dispatch is a structural error, not a fallback.
-fn scenario_g_auto_backend_unresolved_is_structural_error() -> Result<(), Box<dyn std::error::Error>>
-{
-    println!("  G) unresolved Auto is a structural error at dispatch");
-    let tmp_audit = tempfile::tempdir()?;
-    let (writer, _sink) = build_writer(tmp_audit.path(), "smoke-cli-g")?;
-
-    let mut spec = cli_agent_loop_spec(None);
-    spec.backend = Backend::Auto; // deliberately unresolved
-    let host = NullCliHost;
-    let err = dispatch_v2_activity(V2DispatchInput {
-        activity_name: "cli_smoke_g",
-        spec: &ActivityV2Spec::AgentLoop(spec),
-        fs_profile: None,
-        input: serde_json::json!({ "prompt": "ignored" }),
-        audit: writer.clone(),
-        run_id: "smoke-cli-g",
-        host: Some(&host),
-    })
-    .expect_err("expected UnresolvedAutoBackend");
-    match err {
-        DispatchError::UnresolvedAutoBackend { step_id } => {
-            assert_eq!(step_id, "cli_smoke_g");
-            println!("    got UnresolvedAutoBackend for step `{}`", step_id);
-        }
-        other => panic!("expected UnresolvedAutoBackend, got {other:?}"),
+/// F: [ORB-10801] the removed `backend:` values are refused at parse time, and
+/// never quietly remapped onto the surviving CLI agent path.
+fn scenario_f_loader_rejection_retired_backend_value() -> Result<(), Box<dyn std::error::Error>> {
+    println!("  F) parser rejects retired backend values");
+    for removed in ["http", "auto"] {
+        let yaml = format!(
+            "schemaVersion: 2\nkind: Activity\nmetadata:\n  name: retired\nspec:\n  type: agent_loop\n  description: retired\n  instruction: hi\n  backend: {removed}\n"
+        );
+        let err = load_activity_asset(&yaml).expect_err("removed backend must fail closed");
+        assert!(
+            err.to_string()
+                .contains(&format!("`backend: {removed}` is no longer supported")),
+            "unexpected message: {err}"
+        );
     }
+    // `cli` named the surviving path, so it stays accepted and inert.
+    let yaml = "schemaVersion: 2\nkind: Activity\nmetadata:\n  name: retained\nspec:\n  type: agent_loop\n  description: retained\n  instruction: hi\n  backend: cli\n";
+    load_activity_asset(yaml).expect("`backend: cli` must keep loading");
     Ok(())
 }
 
@@ -303,11 +246,6 @@ fn scenario_h_cli_reference_asset_round_trip() -> Result<(), Box<dyn std::error:
     let asset = load_activity_asset(&yaml)?;
     match &asset.spec.spec {
         ActivityV2Spec::AgentLoop(spec) => {
-            assert_eq!(
-                spec.backend,
-                Backend::Cli,
-                "asset must declare backend: cli"
-            );
             assert_eq!(spec.provider, Provider::Claude);
             assert_eq!(spec.wall_clock_timeout_seconds, 30);
         }
@@ -352,17 +290,12 @@ fn scenario_i_existing_agent_loop_assets_still_deserialize()
     let yaml = fs::read_to_string(&asset_path)?;
     let asset = load_activity_asset(&yaml)?;
     if let ActivityV2Spec::AgentLoop(spec) = &asset.spec.spec {
-        // The post-sweep default is CLI with Claude as the provider.
-        assert_eq!(spec.backend, Backend::Cli, "default backend must be Cli");
         assert_eq!(spec.provider, Provider::Claude);
         assert!(spec.wall_clock_timeout_seconds > 0);
     } else {
         panic!("expected agent_loop");
     }
-    println!(
-        "    {}: backend=cli (default), provider=claude (default)",
-        asset.name
-    );
+    println!("    {}: provider=claude (default)", asset.name);
     Ok(())
 }
 
@@ -439,9 +372,9 @@ fn cli_agent_loop_spec(provider: Option<Provider>) -> AgentLoopSpec {
         instruction: "cli smoke".to_string(),
         tools: vec!["fs.read".to_string(), "fs.delete".to_string()],
         on_denial: OnDenial::Terminate,
-        model: Some(orbit_common::model_defaults::ANTHROPIC_HTTP_DEFAULT_MODEL.to_string()),
+        model: Some(orbit_common::model_defaults::CLAUDE_DEFAULT_STRONG.to_string()),
         max_iterations: 1,
-        backend: Backend::Cli,
+        backend: None,
         provider: provider.unwrap_or(Provider::Claude),
         wall_clock_timeout_seconds: 30,
         require_response_envelope: false,
@@ -506,7 +439,7 @@ fn fake_cli(basename: &str, body: &str) -> Result<FakeCli, Box<dyn std::error::E
     })
 }
 
-fn synthetic_loop_session_cli_job() -> JobV2 {
+fn synthetic_loop_session_job() -> JobV2 {
     let assess_step = JobV2Step {
         id: "assess".to_string(),
         when: None,
@@ -520,7 +453,7 @@ fn synthetic_loop_session_cli_job() -> JobV2 {
                 on_denial: OnDenial::Terminate,
                 model: None,
                 max_iterations: 1,
-                backend: Backend::Cli,
+                backend: None,
                 provider: Provider::Claude,
                 wall_clock_timeout_seconds: 30,
                 require_response_envelope: false,
@@ -562,17 +495,6 @@ fn synthetic_loop_session_cli_job() -> JobV2 {
     }
 }
 
-fn synthetic_loop_session_auto_job() -> JobV2 {
-    let mut job = synthetic_loop_session_cli_job();
-    if let JobV2StepBody::Loop { loop_ } = &mut job.steps[0].body
-        && let JobV2StepBody::Target(t) = &mut loop_.steps[0].body
-        && let ActivityV2Spec::AgentLoop(spec) = &mut t.spec
-    {
-        spec.backend = Backend::Auto;
-    }
-    job
-}
-
 // Hosts --------------------------------------------------------------------
 
 struct ScriptHost {
@@ -603,47 +525,11 @@ impl RuntimeHost for ScriptHost {
             "unused".to_string(),
         ))
     }
-    fn api_key_for(&self, _provider: &str) -> Result<String, DispatchError> {
-        Err(DispatchError::AgentLoopFailed("no key in smoke".into()))
-    }
     fn resolve_cli_executor(&self, _provider: &str) -> Result<ResolvedCliExecutor, DispatchError> {
         Ok(ResolvedCliExecutor {
             command: self.command.clone(),
             args: self.args.clone(),
         })
-    }
-
-    fn tool_context_for_activity(
-        &self,
-        _run_id: Option<&str>,
-        _fs_profile: Option<&str>,
-        _fs_audit: Option<std::sync::Arc<dyn orbit_tools::FsAuditLogger>>,
-        _proc_allowed_programs: Option<&[String]>,
-    ) -> orbit_tools::ToolContext {
-        orbit_tools::ToolContext::default()
-    }
-}
-
-struct NullCliHost;
-impl RuntimeHost for NullCliHost {
-    fn run_deterministic(
-        &self,
-        _action: &str,
-        _config: &Value,
-        _input: &Value,
-        _tool_context: orbit_tools::ToolContext,
-    ) -> Result<Value, DispatchError> {
-        Err(DispatchError::DeterministicActionNotRegistered(
-            "unused".to_string(),
-        ))
-    }
-    fn api_key_for(&self, _provider: &str) -> Result<String, DispatchError> {
-        Err(DispatchError::AgentLoopFailed("no key in smoke".into()))
-    }
-    fn resolve_cli_executor(&self, _provider: &str) -> Result<ResolvedCliExecutor, DispatchError> {
-        Err(DispatchError::CliInvocationFailed(
-            "NullCliHost has no CLI mapping".into(),
-        ))
     }
 
     fn tool_context_for_activity(

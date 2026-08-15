@@ -23,7 +23,7 @@ pub(super) struct RawRuntimeConfig {
     pub(super) duel: Option<toml::Value>,
 }
 
-/// Schema for one provider-model-backend crew assignment.
+/// Schema for one provider-model crew assignment.
 ///
 /// Serialize is derived so the writer in `bootstrap` can emit fresh entries
 /// without hand-rolling TOML. The struct is `pub` so the CLI can hand a map
@@ -35,8 +35,6 @@ pub struct RawCrewAssignment {
     pub provider: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub backend: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, Eq)]
@@ -45,7 +43,10 @@ pub struct RawCrewEntry {
     pub provider: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    /// Retired in ORB-10801. Read only so a crew that still pins the agent
+    /// execution backend is either accepted as inert (`cli`) or refused with
+    /// the migration message, never silently re-pointed at another runtime.
+    #[serde(default, skip_serializing)]
     pub backend: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,

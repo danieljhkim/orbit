@@ -3,16 +3,14 @@ use serde_json::json;
 use super::super::{
     CREW_DISCOVERY_SCHEMA_VERSION, Crew, CrewAssignment, CrewDiscoveryEntryV1, CrewDiscoveryV1,
 };
-use crate::types::activity_job::Backend;
 
 #[test]
-fn crew_normalization_canonicalizes_alias_metadata_and_auto_backend() {
+fn crew_normalization_canonicalizes_alias_and_metadata() {
     let crew = Crew {
         name: " alpha ".to_string(),
         assignment: CrewAssignment {
             provider: " OpenAI ".to_string(),
             model: " gpt-test ".to_string(),
-            backend: "auto".to_string(),
         },
         description: Some("  Fast implementation  ".to_string()),
         tags: vec![
@@ -23,11 +21,10 @@ fn crew_normalization_canonicalizes_alias_metadata_and_auto_backend() {
         ],
     };
 
-    let normalized = CrewDiscoveryEntryV1::from_crew(&crew, Backend::Cli).expect("crew normalizes");
+    let normalized = CrewDiscoveryEntryV1::from_crew(&crew).expect("crew normalizes");
     assert_eq!(normalized.name, "alpha");
     assert_eq!(normalized.provider, "codex");
     assert_eq!(normalized.model, "gpt-test");
-    assert_eq!(normalized.backend, "cli");
     assert_eq!(
         normalized.description.as_deref(),
         Some("Fast implementation")
@@ -46,7 +43,6 @@ fn discovery_wire_shape_is_stable_after_rust_type_rename() {
             name: "alpha".to_string(),
             provider: "codex".to_string(),
             model: "gpt-test".to_string(),
-            backend: "cli".to_string(),
             description: Some("Fast implementation".to_string()),
             tags: vec!["fast".to_string()],
         }],
@@ -55,7 +51,7 @@ fn discovery_wire_shape_is_stable_after_rust_type_rename() {
     assert_eq!(
         serde_json::to_value(discovery).expect("serialize crew discovery"),
         json!({
-            "schema_version": 1,
+            "schema_version": 2,
             "workspace_id": "ws_alpha",
             "owner_machine_id": "hm_alpha",
             "default_crew": "alpha",
@@ -63,7 +59,6 @@ fn discovery_wire_shape_is_stable_after_rust_type_rename() {
                 "name": "alpha",
                 "provider": "codex",
                 "model": "gpt-test",
-                "backend": "cli",
                 "description": "Fast implementation",
                 "tags": ["fast"]
             }]

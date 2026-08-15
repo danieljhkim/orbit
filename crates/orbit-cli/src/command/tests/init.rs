@@ -148,10 +148,8 @@ fn non_interactive_init_against_non_global_root_leaves_home_skill_links_untouche
                 .iter()
                 .find(|(expected_name, _, _)| expected_name == name)
                 .unwrap_or_else(|| panic!("unexpected seeded crew {name}"));
-            assert_eq!(
-                crew.get("backend").and_then(toml::Value::as_str),
-                Some("cli"),
-            );
+            // [ORB-10801] Seeded crews carry no retired backend key.
+            assert!(crew.get("backend").is_none());
             if name == "qa" {
                 let (provider, model) = if crews.contains_key("sol") {
                     ("codex", "gpt-5.6-terra")

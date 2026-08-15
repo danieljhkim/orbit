@@ -87,7 +87,7 @@ The audit emission goes through `ctx.fs_audit: Option<Arc<dyn FsAuditLogger>>` (
 
 `FsCallEvent` carries `{ kind, profile, op, path, allowed, matched_rule }`. There is no persisted negation flag; consumers that need to distinguish explicit deny matches from "no rule matched" must compare `matched_rule` with the policy denies. The exec layer does not consult the policy engine, so there is no `proc.spawn` policy gate today.
 
-**Backend scope.** This enforcement fires only under `backend: http` when a builtin fs tool runs. `backend: cli` spawns Claude Code, Codex CLI, Gemini, or another harness via `cli_runner.rs`, emits `tool_allowlist.harness_delegated`, and trusts that harness for tool allowlists. On macOS, executors declaring `sandbox: macos-sandbox-exec` also get the OS-level wrapper in §7, so `fsProfile:` can still narrow CLI filesystem writes.
+**Scope.** This enforcement fires when a builtin fs tool runs in-process. Agent dispatch spawns Claude Code, Codex CLI, Gemini, or another harness via `cli_runner.rs`, emits `tool_allowlist.harness_delegated`, and trusts that harness for tool allowlists — the engine-driven loop that enforced allowlists in-process was retired in [ORB-10801]. On macOS, executors declaring `sandbox: macos-sandbox-exec` also get the OS-level wrapper in §7, so `fsProfile:` can still narrow CLI filesystem writes.
 
 On Linux, shipped agent executors declare `linux-bwrap`. The wrapper enforces writes from the resolved `modify` policy but deliberately records reads as `read_delegated`; this is not general read-allowlist parity.
 

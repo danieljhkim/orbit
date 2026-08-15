@@ -10,7 +10,6 @@ mod resolution {
         CrewAssignment {
             model: model.to_string(),
             provider: provider.to_string(),
-            backend: "cli".to_string(),
         }
     }
 
@@ -44,7 +43,6 @@ mod resolution {
         assert_eq!(crew.name, "codex");
         assert_eq!(crew.assignment.model, TEST_CODEX_MODEL);
         assert_eq!(crew.assignment.provider, "codex");
-        assert_eq!(crew.assignment.backend, "cli");
     }
 
     #[test]

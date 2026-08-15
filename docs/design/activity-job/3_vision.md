@@ -29,11 +29,11 @@ README frames tasks, jobs, and activities as substrate. Should Orbit keep this l
 
 ### 1.3 Is the provider model too closed-set?
 
-The schema names multiple providers, but the HTTP transport path is still effectively single-provider today. Do we keep the closed enum and wire each transport deliberately, or move toward a more explicit "provider capability" registry?
+The schema names more providers than Orbit can execute — `openai_compat` has no CLI runtime. Do we keep the closed enum and wire each runtime deliberately, or move toward a more explicit "provider capability" registry?
 
-### 1.4 Should Orbit enforce tool allowlists on the CLI backend?
+### 1.4 Should Orbit enforce tool allowlists itself?
 
-The gap from [T20260419-0104] is significant: HTTP enforces, CLI advises. Does `backend: cli` need a wrapper so `tools:` means the same thing everywhere?
+Agent dispatch advises rather than enforces: the declared `tools:` list is delegated to the provider harness. Does the CLI agent path need a wrapper so `tools:` means the same thing everywhere?
 
 ### 1.5 Which limits should stay structural literals?
 
@@ -41,7 +41,7 @@ The gap from [T20260419-0104] is significant: HTTP enforces, CLI advises. Does `
 
 ### 1.6 What is the right audit landing zone?
 
-The v2 envelope from [T20260419-0002] makes runs traversable, but the full HTTP transcript still lives in the sibling loop sink. Should review converge on one query surface even if files remain separate?
+The v2 envelope from [T20260419-0002] makes runs traversable, but the full agent transcript still lives in the sibling loop sink. Should review converge on one query surface even if files remain separate?
 
 ### 1.7 How much more special-casing belongs in ActivityV2?
 
@@ -77,7 +77,7 @@ Orbit's difference is that a tool loop is one typed activity inside a durable ru
 - Sandbox and policy systems in CI/CD platforms establish the norm that execution policy is part of the runtime contract, not just ambient environment.
 - Agent harnesses frequently expose allowlists, but many treat them as soft guidance rather than a load-bearing runtime surface.
 
-Orbit's `fsProfile` attachment and the HTTP/CLI enforcement split make this concern explicit, even if the current behavior is still uneven.
+Orbit's `fsProfile` attachment makes this concern explicit, even if the current behavior is still uneven.
 
 ### 2.4 Executable reference assets
 
@@ -91,8 +91,8 @@ Orbit's seeded activities and jobs from [T20260419-2347] are already more than e
 
 Soft claims only:
 
-- **Load-time normalization as a public contract.** Target-ref resolution, backend concretization, and loop/session rejection are part of what a job *is*, not just hidden parser details.
-- **Backend choice separated from provider choice.** Orbit treats `backend: http|cli|auto` and `provider: ...` as orthogonal schema fields, then makes mismatches explicit instead of silently recovering.
+- **Load-time normalization as a public contract.** Target-ref resolution and retired-declaration rejection are part of what a job *is*, not just hidden parser details.
+- **One execution path, stated plainly.** Orbit retired agent backend selection rather than keeping a selector whose alternatives could not run ([ORB-10801]); a provider that cannot be executed fails structurally instead of silently recovering.
 - **A two-layer audit tree tied to repo provenance.** The v2 envelope from [T20260419-0002] gives runs, steps, activities, and workspace origin a stable skeleton while still preserving the underlying loop transcript and blobs.
 - **Seeded workflows as load-bearing contracts.** The shipped jobs from [T20260419-0622-3] and [T20260419-0623] are not toy examples; they are how the control-flow substrate proves itself against real Orbit work.
 
@@ -107,7 +107,7 @@ None of these are research contributions. Activity / Job earns its keep only if 
 - [1_overview.md](./1_overview.md) — feature purpose and core concepts
 - [2_design.md](./2_design.md) — current implementation
 - [4_decisions.md](./4_decisions.md) — ADR log
-- [specs/backend-resolution.md](./specs/backend-resolution.md) — backend concretization and HTTP-only session rule
+- [specs/backend-resolution.md](./specs/backend-resolution.md) — retired agent backend selection and its migration
 - [specs/audit-envelope.md](./specs/audit-envelope.md) — v2 audit event tree and persistence layout
 - [../knowledge-graph/1_overview.md](../_archive/knowledge-graph/1_overview.md) — graph substrate that sits beside this execution substrate
 

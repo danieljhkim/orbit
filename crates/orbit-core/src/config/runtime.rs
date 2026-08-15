@@ -6,6 +6,7 @@ use orbit_common::model_defaults::{
     CLAUDE_DEFAULT_STRONG, CLAUDE_DEFAULT_WEAK, CLAUDE_FABLE_MODEL, CODEX_LUNA_MODEL,
     CODEX_SOL_MODEL, CODEX_TERRA_MODEL, GEMINI_CREW_MODEL, GROK_DEFAULT_MODEL,
 };
+use orbit_common::types::activity_job::{RETIRED_BACKEND_MIGRATION, check_retired_backend_value};
 use orbit_common::types::{Crew, CrewAssignment, OrbitError};
 use orbit_common::utility::redaction::redact_home_dir;
 use orbit_engine::PrConfig;
@@ -88,10 +89,8 @@ pub(crate) struct RuntimeConfig {
     pub(crate) persistence: PersistenceConfig,
     pub(crate) pr: PrConfig,
     pub(crate) scoring_enabled: bool,
-    /// Persisted default for the v2 `agent_loop` execution backend (§3.1).
     /// `None` means "not configured"; the resolver falls through to the hard-
     /// coded `cli` default.
-    pub(crate) v2_backend: Option<String>,
     /// Default base branch for ship workflows. Sourced
     /// from `[workflow] base_branch` in `config.toml`; defaults to `"main"`
     /// when no key is set.
@@ -130,7 +129,6 @@ impl RuntimeConfig {
                 task_url_template: snapshot.pr_task_url_template.clone(),
             },
             scoring_enabled: snapshot.scoring_enabled,
-            v2_backend: snapshot.runtime_backend.clone(),
             workflow_base_branch: snapshot.workflow_base_branch.clone(),
             workflow_auto_ship: snapshot.workflow_auto_ship,
             routines_source: snapshot.routines_role.as_deref() == Some("source"),
@@ -194,6 +192,10 @@ impl RuntimeConfig {
 
         validate_task_artifact_store_from_raw(parsed.task.as_ref())?;
         reject_stale_agent_tables(parsed.agent.as_ref())?;
+        reject_retired_backend_overrides(
+            &document,
+            std::env::var(RETIRED_BACKEND_ENV).ok().as_deref(),
+        )?;
         let crews = crews_from_raw(parsed.crews.as_ref())?;
         let snapshot = ConfigSnapshot::admit(&document, config_path, &crews)?;
 
@@ -217,7 +219,6 @@ impl RuntimeConfig {
                 task_url_template: snapshot.pr_task_url_template.clone(),
             },
             scoring_enabled: snapshot.scoring_enabled,
-            v2_backend: snapshot.runtime_backend.clone(),
             workflow_base_branch: snapshot.workflow_base_branch.clone(),
             workflow_auto_ship: snapshot.workflow_auto_ship,
             routines_source: snapshot.routines_role.as_deref() == Some("source"),
@@ -232,11 +233,6 @@ impl RuntimeConfig {
     /// Configured `[tasks] id_start` floor, if any.
     pub(crate) fn tasks_id_start(&self) -> Option<u32> {
         self.tasks_id_start
-    }
-
-    /// Configured default backend for v2 `agent_loop` activities (§3.1 step 3).
-    pub(crate) fn v2_backend(&self) -> Option<&str> {
-        self.v2_backend.as_deref()
     }
 
     pub(crate) fn workflow_base_branch(&self) -> &str {
@@ -482,7 +478,6 @@ fn effective_values(
         for (field, value) in [
             ("model", serde_json::json!(crew.assignment.model)),
             ("provider", serde_json::json!(crew.assignment.provider)),
-            ("backend", serde_json::json!(crew.assignment.backend)),
             ("description", serde_json::json!(crew.description)),
             ("tags", serde_json::json!(crew.tags)),
         ] {
@@ -578,7 +573,7 @@ pub(crate) fn default_crews() -> BTreeMap<String, Crew> {
             name.to_string(),
             Crew {
                 name: name.to_string(),
-                assignment: crew_assignment(model, provider, "cli"),
+                assignment: crew_assignment(model, provider),
                 description: None,
                 tags: Vec::new(),
             },
@@ -587,12 +582,48 @@ pub(crate) fn default_crews() -> BTreeMap<String, Crew> {
     crews
 }
 
-fn crew_assignment(model: &str, provider: &str, backend: &str) -> CrewAssignment {
+fn crew_assignment(model: &str, provider: &str) -> CrewAssignment {
     CrewAssignment {
         model: model.to_string(),
         provider: provider.to_string(),
-        backend: backend.to_string(),
     }
+}
+
+/// The retired invocation-level agent backend override.
+pub(super) const RETIRED_BACKEND_ENV: &str = "ORBIT_BACKEND";
+
+/// [ORB-10801] `ORBIT_BACKEND` and `[runtime] backend` were tiers 2 and 3 of
+/// the retired agent-loop backend precedence chain. Both are refused rather
+/// than ignored: an operator who still pins `http` must be told their runs are
+/// now CLI-agent runs instead of having that substitution made for them.
+/// `cli` named the surviving path, so it stays accepted and inert.
+fn reject_retired_backend_overrides(
+    document: &toml::Value,
+    env_value: Option<&str>,
+) -> Result<(), OrbitError> {
+    if let Some(raw) = env_value.map(str::trim).filter(|value| !value.is_empty()) {
+        check_retired_backend_value(raw).map_err(|error| {
+            OrbitError::InvalidInput(format!("{RETIRED_BACKEND_ENV} is retired: {error}"))
+        })?;
+    }
+    let Some(value) = value_at_path(document, "runtime.backend") else {
+        return Ok(());
+    };
+    let raw = value.as_str().ok_or_else(|| {
+        OrbitError::InvalidInput(format!(
+            "[runtime] backend must be a string; {RETIRED_BACKEND_MIGRATION}"
+        ))
+    })?;
+    check_retired_backend_value(raw)
+        .map_err(|error| OrbitError::InvalidInput(format!("[runtime] {error}")))
+}
+
+#[cfg(test)]
+pub(super) fn retired_backend_override_check(
+    document: &toml::Value,
+    env_value: Option<&str>,
+) -> Result<(), OrbitError> {
+    reject_retired_backend_overrides(document, env_value)
 }
 
 fn reject_stale_agent_tables(
@@ -658,14 +689,26 @@ fn crew_assignment_from_raw(crew: &str, raw: &RawCrewEntry) -> Result<CrewAssign
     let has_legacy = raw.planner.is_some() || raw.implementer.is_some() || raw.reviewer.is_some();
     if has_legacy {
         return Err(OrbitError::InvalidInput(format!(
-            "[crews.{crew}] uses retired planner/implementer/reviewer role tables; rewrite it with flat `model`, `provider`, and `backend` fields only"
+            "[crews.{crew}] uses retired planner/implementer/reviewer role tables; rewrite it with flat `model` and `provider` fields only"
         )));
     }
+    reject_retired_crew_backend(crew, raw.backend.as_deref())?;
     Ok(CrewAssignment {
         model: required_crew_field(crew, "model", raw.model.as_deref())?,
         provider: required_crew_field(crew, "provider", raw.provider.as_deref())?,
-        backend: required_crew_field(crew, "backend", raw.backend.as_deref())?,
     })
+}
+
+/// [ORB-10801] `[crews.<name>] backend` selected the agent execution backend.
+/// Only the CLI agent path survives, so `cli` stays accepted and inert while
+/// the removed values are refused: remapping `http` onto the CLI agent would
+/// change which runtime the crew dispatches to without saying so.
+fn reject_retired_crew_backend(crew: &str, raw: Option<&str>) -> Result<(), OrbitError> {
+    let Some(value) = raw.map(str::trim).filter(|value| !value.is_empty()) else {
+        return Ok(());
+    };
+    check_retired_backend_value(value)
+        .map_err(|error| OrbitError::InvalidInput(format!("[crews.{crew}] {error}")))
 }
 
 fn required_crew_field(crew: &str, field: &str, value: Option<&str>) -> Result<String, OrbitError> {

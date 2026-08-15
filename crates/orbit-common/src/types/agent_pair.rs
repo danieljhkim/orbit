@@ -35,12 +35,11 @@ impl AgentModelPair {
     }
 }
 
-/// The provider-model-backend assignment selected by a named crew.
+/// The provider-model assignment selected by a named crew.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CrewAssignment {
     pub model: String,
     pub provider: String,
-    pub backend: String,
 }
 
 /// A named provider-model assignment used for activity dispatch.

@@ -15,7 +15,7 @@ tags: ["activity-job"]
 
 Activity / Job is Orbit's execution substrate. Activities describe runnable units; jobs compose them sequentially, in parallel, across collections, or through bounded loops. Orbit's product story is moving toward goals, graphs, sessions, and locks, but this layer remains the runtime underneath. [2_design.md](./2_design.md) is the current contract; [3_vision.md](./3_vision.md) captures open questions.
 
-> **v1 release scope.** v1 ships `backend: cli` as the supported agent invocation path. HTTP `LoopTransport` (`backend: http`) exists in code and tests, but remains preview-only until v2.
+> **Release scope.** Orbit executes agent activities through the CLI agent path only. The `backend: http | cli | auto` selector and the engine-driven HTTP agent loop were removed in [ORB-10801]; see [specs/backend-resolution.md](./specs/backend-resolution.md) for the migration.
 
 ---
 
@@ -61,19 +61,13 @@ orbit-core normalizes assets before a run starts:
 
 - loads YAML through a two-pass schema loader
 - resolves `target: activity:<name>` references for jobs
-- rewrites `backend: auto` to a concrete backend once per run
-- rejects loop/session/backend combinations that cannot execute safely
+- rejects retired declarations (`backend: http | auto`, any `session:` binding) that cannot execute as written
 
-Name resolution arrived in [T20260418-2019]. Backend resolution and `run-v2` entrypoints came in [T20260418-2143]; CLI backend support followed in [T20260419-0104].
+Name resolution arrived in [T20260418-2019]; `run-v2` entrypoints in [T20260418-2143]; CLI agent support in [T20260419-0104]. Backend selection was retired in [ORB-10801].
 
-### 2.4 Backends and providers are separate choices
+### 2.4 Provider is the only agent runtime choice
 
-For `agent_loop`, Orbit distinguishes:
-
-- **backend**: `http`, `cli`, or `auto`
-- **provider**: `claude`, `codex`, `gemini`, `ollama`, or `openai_compat`
-
-`backend: auto` resolves once at load time. `backend: http` against an unwired provider fails structurally instead of falling back. `backend: cli` intentionally retains the older CLI-provider runtimes per [T20260419-0104] and [T20260418-2210].
+For `agent_loop`, the asset declares a **provider** — `claude`, `codex`, `gemini`, `grok`, `ollama`, or `openai_compat` — and Orbit dispatches it through the CLI agent path. A provider without a CLI runtime (`openai_compat`) fails structurally instead of falling back.
 
 ### 2.5 Audit, policy, and seeded assets make the runtime inspectable
 
@@ -96,10 +90,10 @@ This layer also owns:
 | Job kinds (`workflow`, `subroutine`) | `crates/orbit-common/src/types/activity_job/job_v2.rs` | [T20260419-0339] |
 | Target-ref resolution | `crates/orbit-common/src/types/activity_job/catalog.rs` | [T20260418-2019] |
 | `run-v2` core entrypoints and host boundary | `crates/orbit-cmd/src/activity_v2.rs`, `crates/orbit-core/src/command/job/exec.rs` | [T20260418-2143], [T20260418-2210] |
-| Backend resolution and loop/session constraints | `crates/orbit-core/src/command/backend_resolver.rs`, `crates/orbit-common/src/types/activity_job/backend.rs` | [T20260419-0104] |
+| Retired-declaration rejection | `crates/orbit-common/src/types/activity_job/retired.rs` | [ORB-10801] |
 | v2 DAG executor | `crates/orbit-engine/src/activity_job/job_executor/` | [T20260418-2018], [T20260509-2] |
 | V2 audit envelope and disk sink | `crates/orbit-common/src/types/activity_job/audit_envelope.rs`, `crates/orbit-engine/src/activity_job/audit_writer.rs` | [T20260419-0002] |
-| `backend: cli` runtime path | `crates/orbit-engine/src/activity_job/cli_runner/mod.rs` | [T20260419-0104] |
+| CLI agent runtime path | `crates/orbit-engine/src/activity_job/cli_runner/mod.rs` | [T20260419-0104] |
 | `fsProfile` enforcement | `crates/orbit-policy`, `tool_context_for_activity`, CLI describe/get surfaces | [T20260419-0503] |
 | Seeded reference activities and pipeline jobs | `crates/orbit-core/assets/activities/`, `crates/orbit-core/assets/jobs/` | [T20260419-2347], [T20260419-0622-3], [T20260419-0623] |
 

@@ -52,7 +52,6 @@ pub struct ConfiguredCrewProjection {
     pub name: String,
     pub model: String,
     pub provider: String,
-    pub backend: String,
     pub description: Option<String>,
     pub tags: Vec<String>,
     pub is_default: bool,
@@ -64,7 +63,6 @@ impl ConfiguredCrewProjection {
             name: crew.name.clone(),
             model: crew.assignment.model.clone(),
             provider: crew.assignment.provider.clone(),
-            backend: crew.assignment.backend.clone(),
             description: crew.description.clone(),
             tags: crew.tags.clone(),
             is_default,
@@ -76,7 +74,7 @@ impl ConfiguredCrewProjection {
 ///
 /// Decouples projection consumers from the full `Crew` type so this struct can
 /// also be hydrated directly from persisted run-record fields, which carry only
-/// the model string (not provider/backend).
+/// the model string (not the provider).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ResolvedCrewProjection {
     pub name: String,
@@ -102,13 +100,12 @@ impl OrbitRuntime {
         workspace_id: &str,
         owner_machine_id: Option<String>,
     ) -> Result<CrewDiscoveryV1, OrbitError> {
-        let auto_backend = self.resolve_v2_backend(None).backend;
         let crews = self
             .context
             .settings()
             .crews()
             .values()
-            .map(|crew| CrewDiscoveryEntryV1::from_crew(crew, auto_backend))
+            .map(CrewDiscoveryEntryV1::from_crew)
             .collect::<Result<Vec<_>, _>>()?;
         Ok(CrewDiscoveryV1 {
             schema_version: CREW_DISCOVERY_SCHEMA_VERSION,

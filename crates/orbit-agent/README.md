@@ -5,15 +5,22 @@ Agent provider abstraction for Orbit. Two transport families coexist:
 - **CLI transports** drive `claude`, `codex`, `gemini`, `grok`, `ollama`, and `mock`
   as subprocesses via the existing `AgentRuntime` trait. An invocation
   builds an `AgentInvocationSpec` (program, args, stdin envelope) that the
-  engine runs through `orbit-exec`.
+  engine runs through `orbit-exec`. **This is the path Orbit executes
+  activities on.**
 - **HTTP transports** drive providers directly through the sibling
   `LoopTransport` trait. The provider-agnostic `AgentLoop` runs the
   send/parse/dispatch cycle, enforcing guardrails and tool-allowlist rules
   and emitting a complete structured audit trail.
 
+> **Not an Orbit execution backend.** ORB-10801 retired the
+> `backend: http | cli | auto` selector and the engine's HTTP agent-loop
+> driver, so no Orbit activity or job dispatches through `loop_engine`. It
+> remains a standalone SDK surface for this crate's own consumers and
+> examples (`cargo run -p orbit-agent --example ...`). Nothing in
+> `config.toml`, an activity asset, or a job asset can select it.
+
 The two trait shapes diverge enough — one-shot command descriptor vs.
-iterative conversation driver — that they are kept as siblings. The CLI
-path is unchanged by the HTTP layer's introduction.
+iterative conversation driver — that they are kept as siblings.
 
 ## HTTP loop primitives
 
@@ -205,7 +212,7 @@ These are split to follow-up tasks that build on the primitives here:
 
 ## Dependency direction
 
-`orbit-types`, `orbit-tools` → `orbit-agent` → `orbit-engine`. Adding
-the HTTP loop does not introduce any new edge on `orbit-engine`,
-`orbit-core`, or `orbit-cli`. The CLI providers and `AgentRuntime` trait
-are unchanged.
+`orbit-types`, `orbit-tools` → `orbit-agent` → `orbit-engine`. The HTTP
+loop introduces no edge on `orbit-engine`, `orbit-core`, or `orbit-cli`:
+since ORB-10801 the engine consumes only this crate's CLI runtimes and
+response types.

@@ -2,7 +2,7 @@
 //! implementors, plus the task-update param types those traits consume.
 
 use orbit_agent::AgentConfig;
-use orbit_common::types::activity_job::{Backend, Provider};
+use orbit_common::types::activity_job::Provider;
 use orbit_common::types::{
     ActivityV2, AgentModelPair, ExternalRef, InvocationTrace, JobRun, JobRunState, OrbitError,
     OrbitEvent, PipelineState, Role, Task, TaskArtifact, TaskComment, TaskHistoryEntry,
@@ -67,7 +67,7 @@ fn unsupported_dispatch_capability(capability: &str) -> DispatchError {
 ///
 /// String fields from the on-disk crew assignment are parsed into the
 /// strongly typed activity-job enums at the orbit-core boundary; an
-/// unrecognized provider/backend yields `None` for that field rather than
+/// unrecognized provider yields `None` for that field rather than
 /// silently coercing dispatch to a wrong runtime.
 /// The single capability boundary between the job executor and its runtime.
 ///
@@ -389,15 +389,8 @@ pub trait RuntimeHost: Send + Sync {
         true
     }
 
-    /// Source the API key for a given provider (e.g. `"anthropic"`). Returns
-    /// the raw key as a `String` so nothing orbit-agent-shaped bleeds across
-    /// the boundary. Implementors typically read from env or config.
-    fn api_key_for(&self, provider: &str) -> Result<String, DispatchError> {
-        Err(unsupported_dispatch_capability(provider))
-    }
-
     /// Resolve the CLI executor command and static args for a given v2
-    /// provider name (§3.1 backend: cli path). Workspace / env overrides live
+    /// provider name. Workspace / env overrides live
     /// in the host so the engine's CLI runner stays environment-agnostic.
     /// Returning an error is the structured failure path when a provider has no
     /// CLI mapping (e.g. `openai_compat` which is HTTP-only).
@@ -405,7 +398,7 @@ pub trait RuntimeHost: Send + Sync {
         Err(unsupported_dispatch_capability(provider))
     }
 
-    /// Return provider-specific CLI runtime config for `backend: cli`.
+    /// Return provider-specific CLI runtime config for agent execution.
     ///
     /// Most providers ignore this today. Codex uses it for sandbox,
     /// approval-policy, and writable-directory arguments that must stay dynamic
@@ -437,7 +430,7 @@ pub trait RuntimeHost: Send + Sync {
         Ok(None)
     }
 
-    /// Optional task snapshot to embed in a backend: cli agent envelope.
+    /// Optional task snapshot to embed in a CLI agent envelope.
     ///
     /// The engine keeps this as untyped JSON so orbit-core can source task data
     /// without leaking store or task-query details into orbit-engine.
@@ -523,7 +516,6 @@ pub trait RuntimeHost: Send + Sync {
 pub struct CrewConfig {
     pub provider: Option<Provider>,
     pub model: Option<String>,
-    pub backend: Option<Backend>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]

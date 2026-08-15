@@ -18,7 +18,7 @@ sidebar:
 
 | Command | Purpose |
 |---------|---------|
-| `orbit run job <job_id>` | Run an arbitrary job by ID. |
+| `orbit run job <job_id>` | Submit an arbitrary job by ID (or YAML path) and return its run ID immediately; `--wait` blocks until the run is terminal and exits nonzero unless it succeeded. |
 | `orbit run ship [task_id ...]` | Submit backlog or explicitly selected tasks through the gated shipment pipeline and return a run ID immediately. |
 | `orbit run ship --mode local [task_id ...]` | Run the local-only task path for backlog or explicitly selected tasks. |
 | `orbit task` | Create, update, and manage tasks. |

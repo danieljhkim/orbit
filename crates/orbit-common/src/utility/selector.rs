@@ -543,10 +543,7 @@ fn canonicalize_existing_prefix(path: &Path) -> PathBuf {
 
     let mut missing = Vec::new();
     let mut ancestor = path;
-    loop {
-        let Some(parent) = ancestor.parent() else {
-            break;
-        };
+    while let Some(parent) = ancestor.parent() {
         if parent == ancestor {
             break;
         }

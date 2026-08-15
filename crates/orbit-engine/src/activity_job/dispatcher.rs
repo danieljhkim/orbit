@@ -1,21 +1,17 @@
 use std::sync::Arc;
-use std::time::Instant;
 
 use orbit_common::types::activity_job::V2AuditEventKind;
-use orbit_common::types::activity_job::{
-    ActivityV2Spec, AgentLoopSpec, Backend, DeterministicSpec,
-};
+use orbit_common::types::activity_job::{ActivityV2Spec, AgentLoopSpec, DeterministicSpec};
 
 use crate::context::RuntimeHost;
 use orbit_common::types::{
     DeterministicAction, ExecutorSandboxKind, InvocationTrace, McpCapability, OrbitError,
-    ResolvedFsProfile, TokenUsage, ToolCallTrace,
+    ResolvedFsProfile,
 };
 use orbit_tools::{FsAuditLogger, FsCallEvent, FsCallEventKind};
 use serde_json::Value;
 use thiserror::Error;
 
-use super::agent_loop_driver::drive_agent_loop;
 use super::audit_writer::V2AuditWriter;
 use super::cli_runner::run_cli_backend;
 
@@ -98,20 +94,6 @@ pub enum DispatchError {
     #[error("agent_loop run failed: {0}")]
     AgentLoopFailed(String),
 
-    /// §3.1 no-silent-fallback: `backend: http` requested a provider whose
-    /// HTTP transport is not wired. Must surface as a structured error rather
-    /// than silently dispatching to CLI.
-    #[error(
-        "provider `{provider}` has no HTTP transport wired at this phase — set backend: cli or choose a provider whose HTTP path is implemented"
-    )]
-    UnwiredHttpTransport { provider: String },
-
-    /// `backend: auto` was observed past the load-time resolver — every
-    /// dispatch site must see a concrete backend. Indicates a caller that
-    /// forgot to run `resolve_*_backends` before dispatching.
-    #[error("backend `auto` leaked past load-time resolution (step id `{step_id}`)")]
-    UnresolvedAutoBackend { step_id: String },
-
     /// CLI subprocess invocation failed at the host layer (e.g. failed to
     /// spawn, or provider key unknown). Wraps the host's error text verbatim.
     /// Treated as transient: the step retry wrapper may re-attempt it.
@@ -179,8 +161,6 @@ impl DispatchError {
                 | DispatchError::JobValidation(_)
                 | DispatchError::RetryConfigInvalid { .. }
                 | DispatchError::HostRequired(_)
-                | DispatchError::UnwiredHttpTransport { .. }
-                | DispatchError::UnresolvedAutoBackend { .. }
                 | DispatchError::CliInvocationPermanent(_)
                 | DispatchError::WorktreeIntegrity { .. }
         )
@@ -371,21 +351,8 @@ fn run_agent_loop_activity(
     input: &Value,
     fs_profile: Option<&str>,
 ) -> Result<DispatchOutcome, DispatchError> {
-    match spec.backend {
-        Backend::Auto => Err(DispatchError::UnresolvedAutoBackend {
-            step_id: activity_name.to_string(),
-        }),
-        Backend::Http => {
-            if !spec.provider.has_http_transport() {
-                return Err(DispatchError::UnwiredHttpTransport {
-                    provider: spec.provider.as_str().to_string(),
-                });
-            }
-            run_agent_loop_via_driver(host, spec, run_id, audit, input, fs_profile)
-        }
-        Backend::Cli => run_cli_backend(host, spec, run_id, audit, input, fs_profile)
-            .map(|outcome| label_failure_with_step(activity_name, outcome)),
-    }
+    run_cli_backend(host, spec, run_id, audit, input, fs_profile)
+        .map(|outcome| label_failure_with_step(activity_name, outcome))
 }
 
 /// [ORB-10449] Prefix a failing CLI agent-loop message with the step that
@@ -405,126 +372,6 @@ fn label_failure_with_step(activity_name: &str, mut outcome: DispatchOutcome) ->
         outcome.message = Some(format!("step `{activity_name}`: {message}"));
     }
     outcome
-}
-
-fn run_agent_loop_via_driver(
-    host: &dyn RuntimeHost,
-    spec: &AgentLoopSpec,
-    run_id: &str,
-    audit: Arc<V2AuditWriter>,
-    input: &Value,
-    fs_profile: Option<&str>,
-) -> Result<DispatchOutcome, DispatchError> {
-    // Sourcing only: orbit-core pulls the provider credential from wherever
-    // makes sense (env var, config, secrets manager). We treat a sourcing
-    // failure as `None` so a `replay`-enabled `drive_agent_loop` can still
-    // honor ORBIT_V2_REPLAY without credentials. Default builds ignore replay
-    // variables; when the driver needs a key and none is present, it errors
-    // structurally.
-    let api_key = host.api_key_for("anthropic").ok();
-    let started = Instant::now();
-    let outcome = drive_agent_loop(
-        spec,
-        api_key.as_deref(),
-        run_id,
-        audit,
-        input,
-        host,
-        fs_profile,
-    )?;
-    let trace = loop_outcome_trace(&outcome, started.elapsed().as_millis() as u64);
-    let mut metadata = serde_json::Map::new();
-    metadata.insert(
-        "final_message".to_string(),
-        Value::String(outcome.final_message.clone()),
-    );
-    metadata.insert(
-        "terminate_reason".to_string(),
-        Value::String(format!("{:?}", outcome.terminate_reason)),
-    );
-    metadata.insert(
-        "usage".to_string(),
-        serde_json::json!({
-            "input_tokens": outcome.usage.input_tokens,
-            "cache_read_input_tokens": outcome.usage.cache_read_input_tokens,
-            "cache_creation_input_tokens": outcome.usage.cache_creation_input_tokens,
-            "output_tokens": outcome.usage.output_tokens,
-        }),
-    );
-    Ok(DispatchOutcome {
-        success: true,
-        output: agent_loop_output_from_final_message(&outcome.final_message, metadata),
-        message: None,
-        invocation: Some(DispatchInvocationTrace {
-            provider: spec.provider.as_str().to_string(),
-            model: spec.model.clone(),
-            trace,
-        }),
-    })
-}
-
-pub(crate) fn loop_outcome_trace(
-    outcome: &orbit_agent::loop_engine::LoopOutcome,
-    duration_ms: u64,
-) -> InvocationTrace {
-    let mut seq = 0;
-    let tool_calls = outcome
-        .trace
-        .iter()
-        .flat_map(|iteration| iteration.tool_calls.iter())
-        .map(|tool_name| {
-            seq += 1;
-            ToolCallTrace {
-                seq,
-                tool_name: tool_name.clone(),
-                result_bytes: 0,
-                result_payload: None,
-            }
-        })
-        .collect();
-
-    InvocationTrace {
-        usage: TokenUsage {
-            input: outcome.usage.input_tokens,
-            cache_read: outcome.usage.cache_read_input_tokens,
-            cache_create: outcome.usage.cache_creation_input_tokens,
-            // OpenAI-compatible and generic agent-loop usage reports a single
-            // cache-creation counter. The 1h/5m TTL split isn't surfaced here,
-            // so all reported writes retain the standard (5m) rate.
-            cache_create_1h: 0,
-            output: outcome.usage.output_tokens,
-        },
-        tool_calls,
-        duration_ms,
-        provider_model: None,
-        provider_cost_usd: None,
-    }
-}
-
-pub(crate) fn agent_loop_output_from_final_message(
-    final_message: &str,
-    metadata: serde_json::Map<String, Value>,
-) -> Value {
-    let mut output = parse_structured_final_message(final_message).unwrap_or_default();
-    for (key, value) in metadata {
-        output.entry(key).or_insert(value);
-    }
-    Value::Object(output)
-}
-
-fn parse_structured_final_message(final_message: &str) -> Option<serde_json::Map<String, Value>> {
-    let parsed: Value = serde_json::from_str(final_message.trim()).ok()?;
-    match parsed {
-        Value::Object(map) => {
-            if (map.contains_key("schemaVersion") || map.contains_key("status"))
-                && let Some(Value::Object(result)) = map.get("result")
-            {
-                return Some(result.clone());
-            }
-            Some(map)
-        }
-        _ => None,
-    }
 }
 
 struct V2FsAuditLogger {

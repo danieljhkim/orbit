@@ -75,10 +75,9 @@ fn is_executable_file(path: &std::path::Path) -> bool {
         .unwrap_or(false)
 }
 
-/// Snapshot of which agent surfaces are available. Each field is independent;
-/// detection treats CLI presence and API-key presence as orthogonal so the
-/// prompt-default logic can prefer CLI-backed providers while still honouring
-/// HTTP-only setups.
+/// Snapshot of which agent CLIs are available. Orbit executes agent activities
+/// through the CLI agent path only [ORB-10801], so a detected provider CLI is
+/// what makes a provider usable.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct DetectedAgents {
     pub claude_cli: bool,
@@ -86,9 +85,6 @@ pub struct DetectedAgents {
     pub gemini_cli: bool,
     pub grok_cli: bool,
     pub ollama_cli: bool,
-    pub anthropic_api_key: bool,
-    pub openai_api_key: bool,
-    pub gemini_api_key: bool,
 }
 
 /// Probe the host environment using `probe` and return a [`DetectedAgents`]
@@ -100,18 +96,13 @@ pub fn detect(probe: &dyn AgentEnvProbe) -> DetectedAgents {
         gemini_cli: probe.binary_on_path("gemini"),
         grok_cli: probe.binary_on_path("grok"),
         ollama_cli: probe.binary_on_path("ollama"),
-        anthropic_api_key: probe.env_var("ANTHROPIC_API_KEY").is_some(),
-        openai_api_key: probe.env_var("OPENAI_API_KEY").is_some(),
-        gemini_api_key: probe.env_var("GEMINI_API_KEY").is_some(),
     }
 }
 
 /// CLI agent families available for crew-backed config seeding.
 ///
-/// Seeded crews always use the CLI backend, so API-key-only detection is not
-/// sufficient. The order intentionally mirrors [`default_provider`] for the
-/// overlapping families, excluding `ollama` because Orbit does not ship an
-/// `ollama` crew.
+/// The order intentionally mirrors [`default_provider`] for the overlapping
+/// families, excluding `ollama` because Orbit does not ship an `ollama` crew.
 pub fn available_crew_families(detected: &DetectedAgents) -> Vec<&'static str> {
     let mut families = Vec::new();
     if detected.claude_cli {
@@ -155,9 +146,8 @@ pub fn default_model_for(provider: &str) -> Option<&'static str> {
 
 /// Pick a default provider for the role given a detection snapshot.
 ///
-/// Preference order: first detected CLI in [claude, codex, gemini, grok, ollama],
-/// else first detected API key in [anthropic→claude, openai→codex,
-/// gemini→gemini], else `claude` as a last resort.
+/// Preference order: first detected CLI in [claude, codex, gemini, grok,
+/// ollama], else `claude` as a last resort.
 pub fn default_provider(detected: &DetectedAgents) -> &'static str {
     if detected.claude_cli {
         return "claude";
@@ -174,30 +164,7 @@ pub fn default_provider(detected: &DetectedAgents) -> &'static str {
     if detected.ollama_cli {
         return "ollama";
     }
-    if detected.anthropic_api_key {
-        return "claude";
-    }
-    if detected.openai_api_key {
-        return "codex";
-    }
-    if detected.gemini_api_key {
-        return "gemini";
-    }
     "claude"
-}
-
-/// Decide the default backend for a chosen provider. CLI when the matching
-/// CLI binary is detected, otherwise HTTP.
-pub fn default_backend(provider: &str, detected: &DetectedAgents) -> &'static str {
-    let cli_present = match provider {
-        "claude" => detected.claude_cli,
-        "codex" => detected.codex_cli,
-        "gemini" => detected.gemini_cli,
-        "grok" => detected.grok_cli,
-        "ollama" => detected.ollama_cli,
-        _ => false,
-    };
-    if cli_present { "cli" } else { "http" }
 }
 
 #[cfg(test)]

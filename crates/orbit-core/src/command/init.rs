@@ -958,7 +958,6 @@ mod tests {
             "custom".into(),
             RawCrewAssignment {
                 provider: Some("codex".into()),
-                backend: Some("cli".into()),
                 model: Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.into()),
             },
         )]);
@@ -996,7 +995,7 @@ mod tests {
             .and_then(|v| v.get("custom"))
             .and_then(|v| v.as_table())
             .expect("custom crew table");
-        assert_eq!(custom.len(), 3);
+        assert_eq!(custom.len(), 2);
         assert_eq!(
             custom.get("provider").and_then(|v| v.as_str()),
             Some("codex")
@@ -1027,7 +1026,6 @@ mod tests {
             "custom".into(),
             RawCrewAssignment {
                 provider: Some("claude".into()),
-                backend: Some("cli".into()),
                 model: None,
             },
         )]);

@@ -6,8 +6,7 @@ fn detect_reflects_probe_results() {
     let probe = MockAgentEnvProbe::new()
         .with_binary("claude")
         .with_binary("grok")
-        .with_binary("ollama")
-        .with_env("ANTHROPIC_API_KEY", "sk-test");
+        .with_binary("ollama");
     let detected = detect(&probe);
     assert_eq!(
         detected,
@@ -15,7 +14,6 @@ fn detect_reflects_probe_results() {
             claude_cli: true,
             grok_cli: true,
             ollama_cli: true,
-            anthropic_api_key: true,
             ..DetectedAgents::default()
         }
     );
@@ -31,13 +29,15 @@ fn empty_probe_detects_nothing() {
 
 #[test]
 fn seeded_crew_availability_requires_cli_and_maps_defaults() {
-    let api_only = DetectedAgents {
-        anthropic_api_key: true,
-        openai_api_key: true,
-        gemini_api_key: true,
-        ..DetectedAgents::default()
-    };
-    assert!(available_crew_families(&api_only).is_empty());
+    // [ORB-10801] Only a detected provider CLI makes a crew executable; an
+    // exported API key no longer enables anything.
+    assert!(
+        available_crew_families(&DetectedAgents {
+            ollama_cli: true,
+            ..DetectedAgents::default()
+        })
+        .is_empty()
+    );
 
     for (binary, family, crew) in [
         ("claude", "claude", "opus"),
@@ -60,7 +60,6 @@ fn default_provider_prefers_cli_in_documented_order() {
         gemini_cli: true,
         grok_cli: true,
         ollama_cli: true,
-        ..DetectedAgents::default()
     };
     assert_eq!(default_provider(&detected), "claude");
 
@@ -100,50 +99,8 @@ fn default_provider_prefers_cli_in_documented_order() {
 }
 
 #[test]
-fn default_provider_falls_back_to_api_keys() {
-    // anthropic key → claude (http)
-    let detected = DetectedAgents {
-        anthropic_api_key: true,
-        openai_api_key: true,
-        ..DetectedAgents::default()
-    };
-    assert_eq!(default_provider(&detected), "claude");
-
-    let detected = DetectedAgents {
-        openai_api_key: true,
-        gemini_api_key: true,
-        ..DetectedAgents::default()
-    };
-    assert_eq!(default_provider(&detected), "codex");
-
-    let detected = DetectedAgents {
-        gemini_api_key: true,
-        ..DetectedAgents::default()
-    };
-    assert_eq!(default_provider(&detected), "gemini");
-}
-
-#[test]
 fn default_provider_last_resort_is_claude() {
     assert_eq!(default_provider(&DetectedAgents::default()), "claude");
-}
-
-#[test]
-fn default_backend_picks_cli_when_matching_cli_present() {
-    let detected = DetectedAgents {
-        codex_cli: true,
-        ..DetectedAgents::default()
-    };
-    assert_eq!(default_backend("codex", &detected), "cli");
-    assert_eq!(default_backend("claude", &detected), "http");
-}
-
-#[test]
-fn default_backend_unknown_provider_is_http() {
-    assert_eq!(
-        default_backend("openai_compat", &DetectedAgents::default()),
-        "http"
-    );
 }
 
 #[test]

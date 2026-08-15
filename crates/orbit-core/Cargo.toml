@@ -13,11 +13,6 @@ workspace = true
 
 [features]
 clap = ["orbit-common/clap"]
-# [ORB-10434] Opt-in scripted replay for orbit-core's own agent-loop tests.
-# Forwards to orbit-engine's default-off `replay` feature ([ORB-10414]);
-# without it `replay_active()` is compiled to `false` and the HTTP agent loop
-# demands a live provider credential.
-replay = ["orbit-engine/replay"]
 
 [dependencies]
 chrono.workspace = true

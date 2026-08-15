@@ -22,7 +22,7 @@ sidebar:
   </a>
   <a class="orbit-card" href="./config/">
     <h3>Configuration</h3>
-    <p>Runtime config and backend precedence.</p>
+    <p>Runtime config reference.</p>
   </a>
   <a class="orbit-card" href="./scoping/">
     <h3>Scoping Rules</h3>

@@ -1,57 +1,66 @@
 ---
 type: design
-summary: "Spec: Backend Resolution and Session Constraints"
+summary: "Spec: Retired agent backend selection and its migration"
 tags: ["activity-job"]
-last_validated: 2026-08-01
+last_validated: 2026-08-15
 ---
 
-# Spec: Backend Resolution and Session Constraints
+# Spec: Retired Agent Backend Selection
 
-> **Current release scope.** `backend: cli` remains the default and is available for the CLI-backed providers. `backend: http` is also a supported path for providers with a wired HTTP transport (currently Claude); the HTTP-only `loop`/`session:` constraint remains load-bearing.
+> **Current release scope.** Orbit executes agent activities through the CLI
+> agent path only. The `backend: http | cli | auto` selector, its precedence
+> chain, and the engine-driven HTTP agent loop it chose were removed in
+> ORB-10801. There is no runtime backend choice left to make.
 
-Activity / Job assets must never reach dispatch with unresolved backend intent. Orbit resolves `backend: auto` to a concrete backend once per run, then validates the concrete shape before execution begins. This keeps backend choice, provider wiring, and session semantics auditable instead of implicit.
+## What Was Removed
 
-## Why This Exists
+- The `--backend` flag on job runs.
+- The precedence chain `--backend` → `ORBIT_BACKEND` → `[runtime] backend` →
+  `cli`, along with the resolver that folded `auto` to a concrete value.
+- The engine-driven HTTP agent loop, its dispatch arm, and the
+  `session:` binding that only that loop could honor.
+- `[crews.<name>] backend`, which pinned the same selector per crew.
 
-Backend choice affects runtime behavior in ways that are not interchangeable:
+## Why
 
-- HTTP vs CLI has different tool-enforcement semantics.
-- Only some providers have HTTP transports wired.
-- Cross-iteration `session:` binding only makes sense on the HTTP loop path.
+Only the CLI agent path was supported. Keeping a selector whose other values
+either failed structurally or silently degraded made backend choice look like a
+live tuning knob, and it forced every new execution surface — including
+asynchronous job submission — to thread a parameter that could not change the
+outcome.
 
-Treating backend resolution as an early normalization step keeps those differences explicit.
+## Migration
 
-## Resolution Order
+Each retired declaration is recognized, so it is either accepted as inert or
+refused with an actionable message. Nothing is silently reinterpreted:
+remapping `http` onto the CLI agent would change which runtime executes the
+work without saying so.
 
-Orbit resolves `backend: auto` using this precedence order:
+| Declaration | `cli` | `http` / `auto` |
+|---|---|---|
+| `backend:` in an activity or job asset | parses, ignored | refused at asset load |
+| `[runtime] backend` in `config.toml` | accepted, ignored | refused at config load |
+| `ORBIT_BACKEND` | accepted, ignored | refused at config load |
+| `[crews.<name>] backend` | accepted, ignored | refused at config load |
 
-1. CLI flag override
-2. `ORBIT_BACKEND`
-3. config `[runtime] backend`
-4. hard-coded fallback `cli`
+`session:` on a job step has no `cli` equivalent — cross-iteration
+conversation history was an HTTP-loop capability — so **any** `session:`
+binding is refused at job load. Remove the binding and carry the state the loop
+needs through its step inputs instead.
 
-If any tier literally says `auto`, Orbit folds it to the hard-coded fallback. Downstream code must only observe `http` or `cli`.
+Every refusal carries the same instruction: remove the setting; agent execution
+runs through the CLI agent path.
 
 ## Invariants
 
-- `Backend::Auto` does not survive past the orbit-core load path.
-- `target: activity:<name>` resolution happens before job execution begins.
-- A loop-body step with `session:` must resolve to `backend: http`.
-- `backend: http` against an unwired provider fails with structured input validation; it does not silently fall back to CLI.
-
-## Failure Modes
-
-- Invalid backend flag or config values reject the run before dispatch.
-- Unresolved `TargetRef` reaching the executor is a caller bug and surfaces as `JobValidation`.
-- Loop/session/backend incompatibility rejects the job at load time when possible and again at runtime if a flat target shape still violates the rule.
-- `backend: http` plus an unwired provider returns a structured validation error naming the provider and missing HTTP transport.
-
-## Migration Notes
-
-- `schemaVersion: 1` assets are retired and do not participate in this contract.
-- `backend: cli` intentionally retains the older CLI-provider runtime implementation; this is not a temporary compatibility shim.
-- Jobs that need persistent conversation history across iterations must choose HTTP-capable activities explicitly.
+- `target: activity:<name>` resolution happens before job execution begins, so
+  retired-declaration validation sees concrete specs.
+- A retired declaration is refused at load time, before a run is persisted or a
+  detached worker is started — a run never begins work it cannot finish as
+  written.
+- `openai_compat` has no CLI runtime and therefore cannot be executed by any
+  crew; selecting it fails structurally rather than falling back.
 
 ## Agent Signature
 
-Last revised by `codex`.
+Last revised by `claude`.

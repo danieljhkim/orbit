@@ -115,7 +115,6 @@ pub(crate) fn build_context_from_roots(
     let actor = ActorIdentity::from_env();
     let scoring_enabled = runtime_config.scoring_enabled;
     let pr_config = runtime_config.pr_config().clone();
-    let v2_backend = runtime_config.v2_backend().map(ToString::to_string);
     let workflow_base_branch = runtime_config.workflow_base_branch().to_string();
     let workflow_auto_ship = runtime_config.workflow_auto_ship();
     let routines_source = runtime_config.routines_source();
@@ -150,7 +149,6 @@ pub(crate) fn build_context_from_roots(
             actor,
             scoring_enabled,
             pr_config,
-            v2_backend,
             workflow_base_branch,
             workflow_auto_ship,
             routines_source,

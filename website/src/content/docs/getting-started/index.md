@@ -26,7 +26,7 @@ Use this section when you are setting up Orbit for the first time.
 
 ## Prerequisites
 
-You need an authenticated supported provider CLI for the default CLI backend.
+You need an authenticated supported provider CLI: agent activities dispatch through it.
 PR mode also requires the GitHub CLI to be authenticated in the environment
 where Orbit runs.
 
