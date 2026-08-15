@@ -13,7 +13,8 @@ use crate::OrbitRuntime;
 use crate::command::job::JobRunListParams;
 use crate::command::job::pipeline::{
     configure_pipeline_worker_command, configure_pipeline_worker_stdio, pipeline_worker_log_path,
-    pipeline_worker_root_override, resolve_pipeline_worker_executable,
+    pipeline_worker_profile_file, pipeline_worker_root_override,
+    resolve_pipeline_worker_executable,
 };
 use crate::command::task::TaskAddParams;
 use crate::command::workflow::ShipMode;
@@ -79,6 +80,36 @@ fn pipeline_worker_command_forwards_explicit_root_to_the_detached_worker() {
         "a parent constructed with --root must forward that same global store to the worker"
     );
     assert_eq!(command.get_current_dir(), Some(workspace));
+    assert!(
+        command
+            .get_envs()
+            .any(|(key, value)| key == OsStr::new("ORBIT_ROOT") && value.is_none()),
+        "an explicit --root must not let inherited ORBIT_ROOT re-select $HOME/.orbit"
+    );
+}
+
+#[test]
+fn pipeline_worker_profile_file_is_none_without_inherited_coverage_env() {
+    assert_eq!(
+        pipeline_worker_profile_file(Path::new("/tmp/logs"), "jrun-child", None),
+        None
+    );
+    assert_eq!(
+        pipeline_worker_profile_file(Path::new("/tmp/logs"), "jrun-child", Some(OsStr::new(""))),
+        None
+    );
+}
+
+#[test]
+fn pipeline_worker_profile_file_rewrites_inherited_coverage_dump_under_the_worker_log_dir() {
+    assert_eq!(
+        pipeline_worker_profile_file(
+            Path::new("/tmp/logs"),
+            "jrun-child",
+            Some(OsStr::new("target/llvm-cov-target/orbit-%p-%m.profraw")),
+        ),
+        Some(PathBuf::from("/tmp/logs/jrun-child.%p.profraw"))
+    );
 }
 
 #[test]

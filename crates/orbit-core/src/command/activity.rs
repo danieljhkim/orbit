@@ -355,7 +355,9 @@ backend = "cli"
             .join(" ")
             .to_lowercase();
 
-        assert!(instruction.contains("each `file:` target with the provider-native file-read tool"));
+        assert!(
+            instruction.contains("each `file:` target with the provider-native file-read tool")
+        );
         assert!(instruction.contains("each `dir:` selector"));
         assert!(instruction.contains("do not call the file-read tool on the directory"));
         assert!(instruction.contains("resolves beneath the workspace root"));

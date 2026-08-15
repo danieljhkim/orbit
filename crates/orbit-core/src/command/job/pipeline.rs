@@ -1,5 +1,6 @@
+use std::ffi::OsStr;
 use std::fs::{File, OpenOptions};
-use std::io::{Read, Seek, SeekFrom};
+use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::mpsc;
@@ -1172,7 +1173,10 @@ pub(crate) fn configure_pipeline_worker_command(
     root_override: Option<&Path>,
 ) {
     if let Some(root) = root_override {
-        command.arg("--root").arg(root);
+        // `--root` pins both stores. Clear inherited `ORBIT_ROOT` so the child
+        // cannot reopen `$HOME/.orbit` via the env-only workspace selector
+        // while the parent persisted the run under the pinned root.
+        command.arg("--root").arg(root).env_remove("ORBIT_ROOT");
     }
     command
         .arg("job")
@@ -1180,6 +1184,23 @@ pub(crate) fn configure_pipeline_worker_command(
         .arg(run_id)
         .current_dir(workspace)
         .stdin(Stdio::null());
+}
+
+/// Give a detached worker its own coverage dump path when the parent inherited
+/// `LLVM_PROFILE_FILE` (cargo-llvm-cov / instrumented CI).
+///
+/// The child is the same instrumented `orbit` binary. Sharing the parent's
+/// profile file — or following a relative `LLVM_PROFILE_FILE` after cwd is
+/// moved to the registered workspace — can stall or abort in CRT init, before
+/// `main`, so the run never gets a PID and the worker log stays empty.
+pub(crate) fn pipeline_worker_profile_file(
+    logs_dir: &Path,
+    run_id: &str,
+    inherited: Option<&OsStr>,
+) -> Option<PathBuf> {
+    inherited
+        .filter(|value| !value.is_empty())
+        .map(|_| logs_dir.join(format!("{run_id}.%p.profraw")))
 }
 
 /// Where a submitted run's pinned job definition lives.
@@ -1219,6 +1240,14 @@ pub(crate) fn configure_pipeline_worker_stdio(
         ))
     })?;
     restrict_pipeline_worker_log_file(&log_path)?;
+    if let Some(profile) = pipeline_worker_profile_file(
+        logs_dir,
+        run_id,
+        std::env::var_os("LLVM_PROFILE_FILE").as_deref(),
+    ) {
+        command.env("LLVM_PROFILE_FILE", profile);
+    }
+    write_pipeline_worker_spawn_banner(&log_path, command);
     let stdout = log.try_clone().map_err(|error| {
         OrbitError::Io(format!(
             "clone pipeline worker log '{}': {error}",
@@ -1227,6 +1256,27 @@ pub(crate) fn configure_pipeline_worker_stdio(
     })?;
     command.stdout(Stdio::from(stdout)).stderr(Stdio::from(log));
     Ok(log_path)
+}
+
+fn write_pipeline_worker_spawn_banner(log_path: &Path, command: &Command) {
+    let mut file = match OpenOptions::new().create(true).append(true).open(log_path) {
+        Ok(file) => file,
+        Err(_) => return,
+    };
+    let args = command
+        .get_args()
+        .map(|arg| arg.to_string_lossy())
+        .collect::<Vec<_>>()
+        .join(" ");
+    let cwd = command.get_current_dir().map_or_else(
+        || "<inherit>".to_string(),
+        |path| path.display().to_string(),
+    );
+    let _ = writeln!(
+        file,
+        "orbit pipeline worker spawn\nprogram: {}\nargs: {args}\ncwd: {cwd}",
+        command.get_program().to_string_lossy()
+    );
 }
 
 fn read_pipeline_worker_log_tail(path: &Path) -> Option<String> {
