@@ -238,9 +238,11 @@ mod tests {
 
     #[test]
     fn plain_reinit_adds_a_new_missing_default_without_rewriting_existing_files() {
+        const HOST_ID: &str = "host-a";
+
         let root = tempdir().expect("create tempdir");
         let routines_dir = root.path().join("routines");
-        seed_default_routines(&routines_dir, "host-a", Some("workspace"), false)
+        seed_default_routines(&routines_dir, HOST_ID, Some("workspace"), false)
             .expect("first seed");
 
         let existing = routines_dir.join("task_triage.yaml");
@@ -248,7 +250,7 @@ mod tests {
         let missing = routines_dir.join("task_pilot.yaml");
         std::fs::remove_file(&missing).expect("remove newly introduced routine");
 
-        let seeded = seed_default_routines(&routines_dir, "host-b", Some("workspace"), false)
+        let seeded = seed_default_routines(&routines_dir, HOST_ID, Some("workspace"), false)
             .expect("plain re-init");
         assert_eq!(seeded.refreshed, 1, "only the missing default is created");
         assert_eq!(
@@ -261,7 +263,7 @@ mod tests {
             &std::fs::read_to_string(&missing).expect("read newly seeded task-pilot routine"),
         )
         .expect("newly seeded task-pilot routine parses");
-        assert_eq!(pilot.hosts, vec!["host-b".to_string()]);
+        assert_eq!(pilot.hosts, vec![HOST_ID.to_string()]);
         assert!(!pilot.enabled);
     }
 
