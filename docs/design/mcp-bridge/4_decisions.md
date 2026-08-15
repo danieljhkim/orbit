@@ -1,8 +1,8 @@
 ---
 title: Orbit MCP Bridge — Decisions
 owner: claude
-last_updated: 2026-08-14
-last_validated: 2026-08-02
+last_updated: 2026-08-15
+last_validated: 2026-08-15
 status: Draft
 feature: mcp-bridge
 doc_role: decisions
@@ -11,12 +11,12 @@ summary: ADR log for mcp-bridge, including the retired singular-hub contract and
 tags: [mcp, remote-access, host-registry, bridge]
 paths: ["crates/orbit-remote/**", "crates/orbit-mcp/**", "crates/orbit-core/**", "crates/orbit-tools/**", "crates/orbit-store/**"]
 related_features: [mcp-bridge, host-registry, mcp-session-context, remote-access]
-related_artifacts: [ORB-00424, ORB-10245, ORB-10708, ORB-10710, ORB-10262, ORB-10267, ORB-10268, ORB-10269, ORB-10271, ORB-10272, ORB-10276, ORB-10302, ORB-10319, ORB-10330, ORB-10332, ORB-10690, ORB-10761, ORB-10787, ADR-0226, ADR-0227, ADR-0228, ADR-0229, ADR-0230, ADR-0231, ADR-0232, ADR-0235, ADR-0240, ADR-0348, ADR-0350, ADR-0351, ADR-0352, ADR-0354, ADR-0355, ADR-0356, ADR-0357, ADR-0358, ADR-0360]
+related_artifacts: [ORB-00424, ORB-10245, ORB-10708, ORB-10710, ORB-10262, ORB-10267, ORB-10268, ORB-10269, ORB-10271, ORB-10272, ORB-10276, ORB-10302, ORB-10319, ORB-10330, ORB-10332, ORB-10690, ORB-10711, ORB-10736, ORB-10761, ORB-10767, ORB-10768, ORB-10787, ADR-0226, ADR-0227, ADR-0228, ADR-0229, ADR-0230, ADR-0231, ADR-0232, ADR-0235, ADR-0240, ADR-0347, ADR-0348, ADR-0350, ADR-0351, ADR-0352, ADR-0354, ADR-0355, ADR-0356, ADR-0357, ADR-0358, ADR-0359, ADR-0360]
 ---
 
 # Orbit MCP Bridge — Decisions
 
-> **Status: Draft — structural rewrite in flight.** The singular-hub contract
+> **Status: Draft — structural rewrite landed.** The singular-hub contract
 > ([ADR-0226], [ADR-0229], [ADR-0230]) is superseded by [ADR-0355]–[ADR-0358],
 > which are recorded in
 > [../host-registry/4_decisions.md](../host-registry/4_decisions.md) because that
@@ -35,7 +35,9 @@ ADR-0226 through ADR-0232 were the consolidated v1 behaviour contract shared wit
 hub. **Four of them are superseded** by ADR-0355–ADR-0358, which replace the
 singular hub with per-machine coordination. ADR-0235 records the intermediate
 registry-only extraction and ADR-0240 the vertical Remote boundary that replaced it;
-both are unaffected, as are ADR-0232, ADR-0350, ADR-0351, and ADR-0354.
+both are unaffected, as are ADR-0350, ADR-0351, and ADR-0354. ADR-0232 is
+amended below because [ORB-10768] retired the entire Bridge service rather than
+only the Orbit-shaped contract.
 
 ## ADR-0226 — Singular coordination hub, workspace owner, and per-run placement
 
@@ -224,7 +226,7 @@ load-bearing half.
 
 ## ADR-0232 — Retire Bridge’s Orbit-shaped contract
 
-**Status:** Accepted · 2026-07 · [ORB-10245] set the cutover boundary.
+**Status:** Accepted · 2026-08 · [ORB-10245], [ORB-10768]
 
 ### Context
 
@@ -233,13 +235,21 @@ though Orbit is the canonical domain owner.
 
 ### Decision
 
-Retire Bridge’s Orbit-shaped contract after Orbit MCP reaches parity; Bridge remains
-for its non-Orbit constellation domains.
+Retire Bridge’s Orbit-shaped contract after Orbit MCP reaches parity. The landed
+cutover went further: [ORB-10768] retired the whole Bridge service because Sextant
+and its other putative non-Orbit domains had no surviving consumer. Per
+[ORB-10767], the worker-backed `agent_invoke`/`agent_run_*` family was deliberately
+dropped and its callers rewritten, while `repo_sync` was descoped with no
+replacement.
 
 ### Consequences
 
-- Clients register Orbit and Bridge side by side during migration.
-- Cost: cutover temporarily maintains two registrations and requires deletion of a compatibility layer.
+- The two actual clients registered canonical Orbit locally and removed Bridge;
+  no side-by-side compatibility window was necessary.
+- Bridge's repository/history remains the evidence for why a copied contract
+  drifted, but no live gateway, worker surface, or non-Orbit remainder survives.
+- Cost: worker invocation and governed repository sync were removed capabilities;
+  dependent instructions had to be rewritten rather than migrated to a new tool.
 
 ## ADR-0235 — Make orbit-registry the singular host/workspace registry domain crate
 
@@ -346,10 +356,10 @@ Treat the SSH tunnel as owned infrastructure, and decide separately what it carr
 
 ## ADR-0351 — Expose remote command execution as a claim-gated tool, retaining the advertised surface
 
-**Status:** Proposed · 2026-08-10 02:49:53.224966Z
+**Status:** Accepted · 2026-08-10 05:46:58Z · [ORB-10711]
 **Owner:** human
 **Created:** 2026-08-10 01:02:27.338020Z
-**Last updated:** 2026-08-10 02:49:53.224966Z
+**Last updated:** 2026-08-10 05:46:58Z
 **Tags:** `mcp`, `remote-access`, `capability`, `bridge`
 **Paths:** `crates/orbit-tools/src/builtin/orbit/**`, `crates/orbit-remote/src/mcp/**`, `crates/orbit-common/src/authorization.rs`
 
@@ -466,10 +476,10 @@ edge**.
 
 ## ADR-0347 — Serve MCP over a network transport from the long-running server process
 
-**Status:** Proposed · 2026-08-09 22:11:50.145689Z · [ORB-10690], [ORB-10691]
+**Status:** Accepted · 2026-08-09 22:38:43Z · [ORB-10690]
 **Owner:** human
 **Created:** 2026-08-09 22:10:49.216799Z
-**Last updated:** 2026-08-09 22:11:50.145689Z
+**Last updated:** 2026-08-09 22:38:43Z
 **Tags:** `mcp`, `transport`, `capability`, `architecture`
 **Paths:** `crates/orbit-mcp`, `crates/orbit-remote`, `crates/orbit-dashboard`
 
@@ -681,5 +691,14 @@ names both the owning workspace and `orbit mcp serve` as the alternative.
   `orbit.workspace.list` / `orbit.crew.list` MCP discovery tools remain. The
   `orbit host list` CLI command it deferred to is itself withdrawn with the fleet
   inventory ([ADR-0358]).
+- [ORB-10690] — implemented the per-session network MCP transport recorded by
+  ADR-0347 (the supporting kernel ADR allocated as ADR-0348).
+- [ORB-10711] — implemented the claim-gated `orbit.command.exec` surface recorded
+  by ADR-0351.
+- [ORB-10736] — removed the native learning subsystem and accepted ADR-0359.
+- [ORB-10767] — decided to drop Bridge's worker invocation family and descope
+  `repo_sync` rather than build replacements.
+- [ORB-10768] — retired Bridge wholesale, extending ADR-0232 beyond its original
+  Orbit-shaped-contract boundary.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.
