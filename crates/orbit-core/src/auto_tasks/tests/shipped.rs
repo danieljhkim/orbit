@@ -202,10 +202,37 @@ fn qa_sweep_default_preserves_hands_on_validation_contract() {
         "validate them hands-on",
         "exercise the affected",
         "skip duplicates",
+        "failing test",
+        "standard validation command",
+        "must be filed as an orbit task",
+        "environment-specific",
+        "test-harness",
+        "portability",
+        "narrative-only",
+        "validation impact",
+        "production impact",
+        "failing command",
+        "exact error",
+        "environment evidence",
+        "scope assessment",
     ] {
         assert!(
             body.contains(required),
             "template should retain '{required}'"
         );
     }
+    assert!(
+        definition
+            .template
+            .acceptance_criteria
+            .iter()
+            .any(|criterion| {
+                let criterion = criterion.to_lowercase();
+                criterion.contains("failing test")
+                    && criterion.contains("validation command")
+                    && criterion.contains("validation impact")
+                    && criterion.contains("production impact")
+            }),
+        "qa-sweep acceptance criteria must require filing breaking tests"
+    );
 }
