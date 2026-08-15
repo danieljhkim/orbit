@@ -3,7 +3,7 @@
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command as StdCommand;
 use std::thread;
 use std::time::{Duration, Instant};
@@ -287,6 +287,10 @@ fn run_orbit_success(cwd: &Path, home: &Path, args: &[&str], orbit_root: Option<
     let mut command = cargo_bin_cmd!("orbit");
     command
         .current_dir(cwd)
+        .env(
+            "PATH",
+            stub_first_path(&plant_agent_cli_stub(home, "codex")),
+        )
         .env("HOME", home)
         .env("USERPROFILE", home)
         .args(args);
@@ -298,6 +302,10 @@ fn run_orbit_json(cwd: &Path, home: &Path, args: &[&str], orbit_root: Option<&Pa
     let mut command = cargo_bin_cmd!("orbit");
     command
         .current_dir(cwd)
+        .env(
+            "PATH",
+            stub_first_path(&plant_agent_cli_stub(home, "codex")),
+        )
         .env("HOME", home)
         .env("USERPROFILE", home)
         .args(args);
@@ -325,6 +333,39 @@ fn set_orbit_root_env(command: &mut AssertCommand, orbit_root: Option<&Path>) {
             command.env_remove("ORBIT_ROOT");
         }
     }
+}
+
+/// Write an executable no-op named `name` into `<home>/stub-bin`, standing in
+/// for an agent CLI during detection, and return that directory.
+///
+/// `orbit workspace init` freezes crew seeding to the agent CLIs it finds on
+/// `PATH`, so a host with none installed — every CI runner — seeds an empty
+/// `[crews]` table and leaves `[workflow].default_crew` unset. Any run that has
+/// to resolve a crew then dies with `no crew selected`. Planting on every
+/// invocation keeps the stub in place before `init` runs, whatever order the
+/// tests call the helpers in; nothing here dispatches an agent, so the stub only
+/// has to exist and be executable.
+fn plant_agent_cli_stub(home: &Path, name: &str) -> PathBuf {
+    let bin = home.join("stub-bin");
+    fs::create_dir_all(&bin).expect("create stub CLI directory");
+    let stub = bin.join(name);
+    fs::write(&stub, "#!/bin/sh\nexit 0\n").expect("write stub agent CLI");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&stub, fs::Permissions::from_mode(0o755))
+            .expect("mark the stub agent CLI executable");
+    }
+    bin
+}
+
+/// `PATH` with the fixture's stub directory first, so agent detection sees the
+/// stubs regardless of what the host has installed.
+fn stub_first_path(bin: &Path) -> std::ffi::OsString {
+    let inherited = std::env::var_os("PATH").unwrap_or_default();
+    let mut entries = vec![bin.to_path_buf()];
+    entries.extend(std::env::split_paths(&inherited));
+    std::env::join_paths(entries).expect("join PATH entries")
 }
 
 fn run_git(cwd: &Path, args: &[&str]) {
