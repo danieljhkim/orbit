@@ -34,9 +34,16 @@ impl RoutineClockArgs {
         match self.command {
             RoutineClockSubcommand::Status => {
                 let status = clock_status(&global_root)?;
+                let state = if !status.enabled {
+                    "paused"
+                } else if status.schedulable {
+                    "enabled"
+                } else {
+                    "unhealthy"
+                };
                 println!(
                     "clock: {} | configured cadence: {}s | effective cadence: {} | platform: {}",
-                    if status.enabled { "enabled" } else { "paused" },
+                    state,
                     status.configured_cadence_seconds,
                     status
                         .effective_cadence_seconds
@@ -44,6 +51,9 @@ impl RoutineClockArgs {
                         .unwrap_or_else(|| "inactive".to_string()),
                     status.platform
                 );
+                if let Some(issue) = status.health_issue {
+                    println!("clock health: {issue}");
+                }
             }
             RoutineClockSubcommand::Pause => {
                 let status = set_clock_enabled(&global_root, false)?;

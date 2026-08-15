@@ -459,6 +459,95 @@ fn interrupted_run_with_unprobeable_owner_is_reclaimed_at_the_policy_timeout() {
     assert_eq!(seeded.state, RoutineFireState::TimedOut);
 }
 
+#[test]
+fn running_run_orphaned_by_restart_releases_the_forbid_slot_immediately() {
+    let store = store();
+    let dispatch = FakeDispatch::default();
+    let coll = collection(vec![routine("job", "* * * * *", true, "forbid", 0)]);
+    store
+        .routine_record_baseline("job", &ts(2026, 1, 1, 0, 0, 0).to_rfc3339())
+        .unwrap();
+    let slot = ts(2026, 1, 1, 0, 5, 0).to_rfc3339();
+    store
+        .routine_record_fire_intent(&RoutineFireIntentParams {
+            routine_name: "job".to_string(),
+            slot: slot.clone(),
+            attempt: 1,
+            source_workspace: "polaris".to_string(),
+        })
+        .unwrap();
+    store
+        .routine_mark_fire_dispatched("job", &slot, 1, "orphaned")
+        .unwrap();
+    dispatch.set_state("orphaned", JobRunState::Running);
+    dispatch.set_liveness("orphaned", RunOwnerLiveness::Stopped);
+
+    let reports = run_sweep_core(
+        &store,
+        HOST,
+        &coll,
+        &dispatch,
+        SweepOptions::default(),
+        ts(2026, 1, 1, 0, 6, 20),
+    )
+    .unwrap();
+
+    assert_eq!(reports[0].action, "fired");
+    assert_eq!(dispatch.submit_count(), 1);
+    let orphaned = fires(&store, "job")
+        .into_iter()
+        .find(|fire| fire.slot == slot)
+        .unwrap();
+    assert_eq!(orphaned.state, RoutineFireState::Failed);
+    assert_eq!(
+        orphaned.detail.as_deref(),
+        Some("run owner stopped before recording a terminal outcome")
+    );
+}
+
+#[test]
+fn running_run_with_a_live_owner_keeps_the_forbid_slot() {
+    let store = store();
+    let dispatch = FakeDispatch::default();
+    let coll = collection(vec![routine("job", "* * * * *", true, "forbid", 0)]);
+    store
+        .routine_record_baseline("job", &ts(2026, 1, 1, 0, 0, 0).to_rfc3339())
+        .unwrap();
+    let slot = ts(2026, 1, 1, 0, 5, 0).to_rfc3339();
+    store
+        .routine_record_fire_intent(&RoutineFireIntentParams {
+            routine_name: "job".to_string(),
+            slot: slot.clone(),
+            attempt: 1,
+            source_workspace: "polaris".to_string(),
+        })
+        .unwrap();
+    store
+        .routine_mark_fire_dispatched("job", &slot, 1, "live")
+        .unwrap();
+    dispatch.set_state("live", JobRunState::Running);
+    dispatch.set_liveness("live", RunOwnerLiveness::Alive);
+
+    let reports = run_sweep_core(
+        &store,
+        HOST,
+        &coll,
+        &dispatch,
+        SweepOptions::default(),
+        ts(2026, 1, 1, 0, 6, 20),
+    )
+    .unwrap();
+
+    assert_eq!(reports[0].action, "skipped");
+    assert_eq!(reports[0].reason.as_deref(), Some("overlap_in_flight"));
+    assert_eq!(dispatch.submit_count(), 0);
+    let live = fires(&store, "job")
+        .into_iter()
+        .find(|fire| fire.slot == slot)
+        .unwrap();
+    assert_eq!(live.state, RoutineFireState::Dispatched);
+}
+
 // ---- outcome sync / staleness horizon -------------------------------------
 
 #[test]

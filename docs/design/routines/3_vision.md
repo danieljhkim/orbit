@@ -67,9 +67,9 @@ task, implementation, and validation evidence, not by drifting in.
 - **cron / anacron** — the trigger vocabulary (5-field expressions) and the missed-run
   problem anacron exists to solve; routines adopt the vocabulary and make missed-run policy
   per-definition instead of system-wide.
-- **systemd timers / launchd** — v1's actual clock. `Persistent=true` and launchd wake
-  behavior are load-bearing; routines deliberately delegate "when does the machine wake"
-  to them.
+- **systemd timers / launchd** — v1's actual clock. launchd wake behavior and systemd's
+  monotonic startup/post-activation triggers guarantee another sweep without replaying
+  every missed clock tick; routine cursors and `missed_run` own cron-gap semantics.
 
 ### Workflow engines
 - **Temporal / Cadence schedules** — durable schedules attached to durable executions,
@@ -110,7 +110,7 @@ Orbit-internal:
   relevant to what scheduled targets may do.
 
 External:
-- systemd.timer(5), launchd.plist(5) — persistence and wake semantics.
+- systemd.timer(5), launchd.plist(5) — monotonic restart and wake semantics.
 - Temporal "Schedules" documentation — overlap/catch-up policy vocabulary.
 - Kubernetes CronJob documentation — concurrency and missed-fire edge cases.
 
