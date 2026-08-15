@@ -9,7 +9,7 @@ use std::time::{Duration, Instant};
 use chrono::Utc;
 use orbit_common::types::{
     AuditEventStatus, JobRun, JobRunState, JobScheduleState, JobTargetType, NotFoundKind,
-    OrbitError, OrbitEvent, audit_execution_id,
+    OrbitError, OrbitEvent, WorkspacePaths, audit_execution_id,
 };
 use orbit_store::{AuditEventInsertParams, JobRunStepParams, TaskReservationReleaseReason};
 use serde::Serialize;
@@ -828,17 +828,25 @@ impl OrbitRuntime {
     }
 
     /// The program a detached worker runs: this same `orbit` binary, re-entered
-    /// at the hidden worker subcommand and discovered by cwd.
+    /// at the hidden worker subcommand. Workspace context is discovered by cwd;
+    /// an explicit parent `--root` is forwarded so the child opens the same
+    /// global store the parent used to persist the run [ORB-10821].
     fn pipeline_worker_command(&self, run_id: &str) -> Result<Command, OrbitError> {
+        let paths = self.paths();
         #[cfg(test)]
-        if let Some(command) = worker_command_override::command(&self.paths().repo_root, run_id) {
+        if let Some(command) = worker_command_override::command(&paths.repo_root, run_id) {
             return Ok(command);
         }
         let current_exe = std::env::current_exe().map_err(|error| {
             OrbitError::Execution(format!("resolve current orbit executable: {error}"))
         })?;
         let mut command = Command::new(resolve_pipeline_worker_executable(current_exe));
-        configure_pipeline_worker_command(&mut command, &self.paths().repo_root, run_id);
+        configure_pipeline_worker_command(
+            &mut command,
+            &paths.repo_root,
+            run_id,
+            pipeline_worker_root_override(paths),
+        );
         Ok(command)
     }
 
@@ -859,13 +867,13 @@ impl OrbitRuntime {
             });
         }
 
-        // Discover detached workers by registered cwd, never explicit --root.
         // Start the observer before the process so every successfully spawned
         // worker has a parent-side path that can terminalize a pre-claim exit.
-        // Passing `--root` here used to pin both the workspace and global roots
-        // to `.orbit/`, which disconnected the worker from the global registry
-        // database that contains the persisted run. Cwd discovery preserves
-        // the registered workspace context for top-level and nested workers.
+        // Cwd still carries the registered workspace. `--root` is forwarded
+        // only when the parent itself was pinned (see
+        // `pipeline_worker_root_override`); passing the workspace `.orbit`
+        // path here used to pin both roots and disconnect the worker from
+        // `$HOME/.orbit/orbit.db`.
         let (sender, receiver) = mpsc::sync_channel::<Child>(1);
         let runtime = self.clone();
         let run_id_for_observer = run_id.to_string();
@@ -1139,11 +1147,25 @@ pub(crate) fn resolve_pipeline_worker_executable(current_exe: PathBuf) -> PathBu
     current_exe
 }
 
+/// Forward `--root` only when the parent runtime is pinned to one directory
+/// (`global_dir == orbit_dir`). That is the `--root` flag's contract: it pins
+/// both the workspace and the global store. The default split-root layout
+/// (`$HOME/.orbit` vs workspace `.orbit`) must keep this `None` — an explicit
+/// `--root` would pin *both* roots and disconnect the worker from the global
+/// registry database that contains the persisted run.
+pub(crate) fn pipeline_worker_root_override(paths: &WorkspacePaths) -> Option<&Path> {
+    (paths.global_dir == paths.orbit_dir).then_some(paths.global_dir.as_path())
+}
+
 pub(crate) fn configure_pipeline_worker_command(
     command: &mut Command,
     workspace: &Path,
     run_id: &str,
+    root_override: Option<&Path>,
 ) {
+    if let Some(root) = root_override {
+        command.arg("--root").arg(root);
+    }
     command
         .arg("job")
         .arg("run-pipeline-worker")
