@@ -3,12 +3,12 @@ summary: "Policy & Sandboxing — Decisions"
 type: design
 title: "Policy & Sandboxing — Decisions"
 owner: claude
-last_updated: 2026-08-11
+last_updated: 2026-08-15
 status: Draft
 feature: policy-sandbox
 doc_role: decisions
 tags: ["policy-sandbox"]
-last_validated: 2026-08-11
+last_validated: 2026-08-15
 ---
 
 # Policy & Sandboxing — Decisions
@@ -90,6 +90,7 @@ A profile that grants `modify: ["./build/**"]` without granting `read: ["./build
 ## Tool layer is the policy enforcement point for HTTP-backed activities
 
 **Recorded:** 2026-05-11 02:06:39.399820Z · [T20260419-0503]
+**Status:** Superseded by [Retire the remaining unregistered fs builtins and their policy helpers](#retire-the-remaining-unregistered-fs-builtins-and-their-policy-helpers) ([ORB-10833])
 
 ### Context
 Policy enforcement could plausibly live at the syscall layer, the fs trait layer, the tool layer, or the activity layer. Each placement has different trust and coverage tradeoffs.
@@ -100,6 +101,23 @@ Enforcement lives in `orbit-tools::builtin::fs::enforce_fs_policy`. Every fs bui
 ### Consequences
 - HTTP-backed fs decisions have one auditable helper, but tool authors must route work through it.
 - Cost: CLI-backed activities still bypass this helper, and HTTP tools that skip it are also unguarded. Current macOS executors can narrow CLI filesystem writes with `sandbox-exec`, but closing the general gap likely requires a `PolicyAwareFs` trait, broader OS sandboxes, or both.
+
+## Retire the remaining unregistered fs builtins and their policy helpers
+
+**Recorded:** 2026-08-15 · [ORB-10833]
+**Status:** Accepted
+**Supersedes:** [Tool layer is the policy enforcement point for HTTP-backed activities](#tool-layer-is-the-policy-enforcement-point-for-http-backed-activities)
+
+### Context
+[ORB-10828] removed the last registered filesystem builtins (`fs.read`, `fs.delete`). The rest of the family (`write`, `patch`, `ls`, `copy`, `move`, `mkdir`, `create`) stayed on disk behind a no-op `fs::register` so that PR could stay scoped. The private policy helpers (`check_read_policy`, `check_modify_policy`, `check_workspace_boundary`, `enforce_fs_policy`) existed only for those unregistered tools. The live agent path is CLI-only and never hands a `ToolRegistry` to the subprocess.
+
+### Decision
+Delete the remaining unregistered `fs.*` implementations and the private policy helpers with them. Do not keep the helpers as a future-harness library. Keep public `FsCallEvent` / `FsAuditLogger` / `fs_profile` plumbing on `ToolContext` because the engine still constructs it and historical audit rows still name retired tools. A revived in-process harness is a clean revert, not leftover dead code.
+
+### Consequences
+- `ToolRegistry::register_builtins()` registers no `fs.*` tools. Activity and skill text must name provider-native filesystem tools, not Orbit `fs.*` builtins.
+- Historical store/audit fixtures that mention retired tool names continue to parse; unknown tool names are not a deserialization error.
+- Cost: a future in-process filesystem harness must rebuild the retired helper (or move enforcement below the tool layer). The rejected alternative was leaving `enforce_fs_policy` compiled but unused behind `#![allow(dead_code)]`.
 
 ## Children spawn as process-group leaders so orphan subprocesses are reapable
 
@@ -154,8 +172,8 @@ The `Sandbox` trait is the seam where kernel-level or container-level isolation 
 Ship `NoSandbox` as the default and only implementation. Defer kernel-level isolation (bubblewrap, sandbox-exec, container, seccomp) until policy enforcement at the tool layer is judged insufficient and the platform-coverage cost is understood. The trait surface is stable so a future impl can attach without changing the runner.
 
 ### Consequences
-- The trait surface is stable for future isolation, while today's generic runner stays explicit about relying on tool-layer policy.
-- Cost: a tool that performs fs work without `enforce_fs_policy` (or a future non-builtin tool) has no exec-level isolation backstop. This is the structural reason §1.1 of [3_vision.md](./3_vision.md) lists real sandboxing as the top open question.
+- The trait surface is stable for future isolation, while today's generic runner stays explicit about relying on CLI OS wrappers plus remaining in-process tool policy (`proc.spawn`).
+- Cost: a future in-process filesystem tool has no leftover helper and no generic exec-level isolation backstop. This is the structural reason §1.1 of [3_vision.md](./3_vision.md) lists real sandboxing as the top open question.
 
 ## `sandbox-exec` wraps cli-backend agent invocations on macOS
 
@@ -408,5 +426,6 @@ Derive Linux write-grant candidates at every provider spawn from the same ordere
 - **[ORB-10573]** — Amend Linux delivery with trusted, two-gate preparation of missing versioned-config mount anchors.
 - **[ORB-10602]** — Derive write-grant anchors from the effective profile at each spawn; remove the hardcoded target inventory and the context-file materialization gate. [Derive Linux sandbox write-grant anchors from the effective profile at each spawn](#derive-linux-sandbox-write-grant-anchors-from-the-effective-profile-at-each-spawn-1)
 - **[ORB-10607]** — Enforce final-policy materialization, canonical/symlink containment, rule-derived anchor types, and production failed-write attribution. [Derive Linux sandbox write-grant anchors from the effective profile at each spawn](#derive-linux-sandbox-write-grant-anchors-from-the-effective-profile-at-each-spawn-1)
+- **[ORB-10833]** — Retire the remaining unregistered `fs.*` builtins and their private policy helpers. [Retire the remaining unregistered fs builtins and their policy helpers](#retire-the-remaining-unregistered-fs-builtins-and-their-policy-helpers)
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

@@ -3,8 +3,8 @@ summary: "Policy & Sandboxing — Design"
 type: design
 title: "Policy & Sandboxing — Design"
 owner: claude
-last_updated: 2026-08-12
-last_validated: 2026-08-09
+last_updated: 2026-08-15
+last_validated: 2026-08-15
 status: Draft
 feature: policy-sandbox
 doc_role: design
@@ -13,7 +13,7 @@ tags: ["policy-sandbox"]
 
 # Policy & Sandboxing — Design
 
-This document describes Orbit's shipped policy and sandboxing implementation: v2 `PolicyDef`, profile resolution, last-match-wins path evaluation, HTTP-tool enforcement, activity/job `fsProfile` binding, macOS and Linux CLI sandbox wrapping, and `orbit-exec` supervision. See [1_overview.md](./1_overview.md) for purpose and [3_vision.md](./3_vision.md) for forward-looking gaps.
+This document describes Orbit's shipped policy and sandboxing implementation: v2 `PolicyDef`, profile resolution, last-match-wins path evaluation, activity/job `fsProfile` binding, macOS and Linux CLI sandbox wrapping, and `orbit-exec` supervision. See [1_overview.md](./1_overview.md) for purpose and [3_vision.md](./3_vision.md) for forward-looking gaps.
 
 ---
 
@@ -59,7 +59,7 @@ The implicit `unrestricted` profile appears only when an activity omitted `fsPro
 4. Walk rules in order and record the most recent match against the normalized workspace-relative path. Later matches override earlier ones.
 5. Use the last match's negation flag. If no rule matched but a positive rule exists, deny with `<no matching rule>`; if only negated rules exist, deny with `[]`.
 
-Path normalization (`normalize_path`) trims, flips slashes, strips `./` prefixes, and rejects absolute paths, `~`-anchored paths, and parent-directory traversal anywhere in the component list ([T20260509-27]). Tool callers are expected to canonicalize first and then express the path workspace-relative — `crates/orbit-tools/src/builtin/fs/mod.rs::workspace_relative_path` handles that on the call site.
+Path normalization (`normalize_path`) trims, flips slashes, strips `./` prefixes, and rejects absolute paths, `~`-anchored paths, and parent-directory traversal anywhere in the component list ([T20260509-27]). Callers canonicalize first (via `orbit_policy::resolve_symlinks` / `PolicyEngine::check_resolved`) and then express the path workspace-relative.
 
 The glob translator supports `*`, `**`, `?`, and `<prefix>/**`. It is intentionally narrower than POSIX glob syntax.
 
@@ -79,15 +79,17 @@ PolicyEngine::check(profile, operation, path) -> FsPolicyEvaluation
 
 ---
 
-## 5. Tool-Layer Enforcement
+## 5. Tool-Layer Enforcement (retired)
 
-`crates/orbit-tools/src/builtin/fs/mod.rs::enforce_fs_policy` is the only place fs operations consult the policy engine today. It reads `ctx.fs_profile` and `ctx.policy_engine`; if either is missing, it returns `Ok(None)` so fs work proceeds unguarded. That path is for unit tests / no-policy contexts, not the real v2 host path. Otherwise the helper converts the canonical path to workspace-relative form, calls `policy_engine.check`, emits a request or denied `FsCallEvent`, and returns either an `FsPolicyAllowance { profile, op, path, matched_rule }` or `OrbitError::PolicyDenied`.
+The in-process `fs.*` builtins and their private helper `enforce_fs_policy` were retired in [ORB-10828] and [ORB-10833]. Nothing in `ToolRegistry::register_builtins()` registers an `fs.*` tool, and the CLI agent path never handed the registry to the subprocess anyway.
 
-The audit emission goes through `ctx.fs_audit: Option<Arc<dyn FsAuditLogger>>` (`crates/orbit-tools/src/lib.rs`). The v2 dispatcher wires this to `v2_fs_audit_logger(audit.clone())`, which converts each `FsCallEvent` into a `V2AuditEvent` filesystem entry. The full audit-channel description belongs to [auditability](../auditability/2_design.md#3-tool-driven-and-runtime-audit-records); this folder owns the *enforcement* contract, not the storage contract.
+What remains:
 
-`FsCallEvent` carries `{ kind, profile, op, path, allowed, matched_rule }`. There is no persisted negation flag; consumers that need to distinguish explicit deny matches from "no rule matched" must compare `matched_rule` with the policy denies. The exec layer does not consult the policy engine, so there is no `proc.spawn` policy gate today.
+- `FsCallEvent` / `FsAuditLogger` on `ToolContext` (`crates/orbit-tools/src/lib.rs`). The v2 dispatcher still wires `v2_fs_audit_logger`, which would convert an emitted `FsCallEvent` into a `V2AuditEvent` filesystem entry. No shipped builtin emits those events.
+- Historical audit/import fixtures that name retired `fs.*` tools. Those strings stay parseable; a removed tool name is not a deserialization error.
+- `ctx.fs_profile` / `ctx.policy_engine`, which the CLI sandbox compiler still uses to compile OS write confinement.
 
-**Scope.** This enforcement fires when a builtin fs tool runs in-process. Agent dispatch spawns Claude Code, Codex CLI, Gemini, or another harness via `cli_runner.rs`, emits `tool_allowlist.harness_delegated`, and trusts that harness for tool allowlists — the engine-driven loop that enforced allowlists in-process was retired in [ORB-10801]. On macOS, executors declaring `sandbox: macos-sandbox-exec` also get the OS-level wrapper in §7, so `fsProfile:` can still narrow CLI filesystem writes.
+**Scope.** Agent dispatch spawns Claude Code, Codex CLI, Gemini, or another harness via `cli_runner.rs`, emits `tool_allowlist.harness_delegated`, and trusts that harness for tool allowlists — the engine-driven loop that enforced allowlists in-process was retired in [ORB-10801]. On macOS, executors declaring `sandbox: macos-sandbox-exec` also get the OS-level wrapper in §7, so `fsProfile:` can still narrow CLI filesystem writes.
 
 On Linux, shipped agent executors declare `linux-bwrap`. The wrapper enforces writes from the resolved `modify` policy but deliberately records reads as `read_delegated`; this is not general read-allowlist parity.
 
@@ -99,7 +101,7 @@ The `fsProfile:` field on an activity flows through `crates/orbit-engine/src/act
 
 - `dispatcher.rs` carries `fs_profile: Option<&str>` on `DispatchInput` and threads it into `run_activity_job_dispatch`, `run_loop_step_dispatch`, and `run_agent_loop_via_driver`.
 - `job_executor.rs` reads `t.fs_profile.as_deref()` from the activity spec at the call site of every step type.
-- `agent_loop_driver.rs` invokes `host.tool_context_for_activity(fs_profile, audit_logger)` to construct the `ToolContext` that fs builtins read from.
+- `agent_loop_driver.rs` invokes `host.tool_context_for_activity(fs_profile, audit_logger)` to construct the `ToolContext` the CLI path and remaining in-process tools read from.
 
 `crates/orbit-core/src/runtime/v2_host/mod.rs::tool_context_for_activity` is the single materialization point:
 
@@ -109,7 +111,7 @@ fs_profile: Some(fs_profile.unwrap_or(UNRESTRICTED_FS_PROFILE).to_string())
 
 This is the implicit-`unrestricted` rule from §2.2 in code form. Every v2 dispatcher path that constructs a `ToolContext` reaches this line, so omitting `fsProfile:` means "unrestricted within policy," not "no policy."
 
-Legacy pipeline contexts are different. `crates/orbit-core/src/runtime/tool_exec.rs` fills a missing profile from `ORBIT_ACTIVITY_FS_PROFILE`; if the variable is unset, `ctx.fs_profile` stays `None` and `enforce_fs_policy` returns `Ok(None)`. That unguarded path is a real gap, not another spelling of `unrestricted` (see §9).
+Legacy pipeline contexts are different. `crates/orbit-core/src/runtime/tool_exec.rs` fills a missing profile from `ORBIT_ACTIVITY_FS_PROFILE`; if the variable is unset, `ctx.fs_profile` stays `None`. That used to bypass the retired in-process helper; the live CLI sandbox still needs an explicit profile (see §9).
 
 ---
 
@@ -300,8 +302,8 @@ asserts 100 collision-free dense IDs per artifact kind ([ORB-10596]).
 3. **Provider state directories are trusted write roots.** `$HOME/.orbit` plus Codex, Claude, and Gemini state dirs are outside the activity workspace and emitted unconditionally.
 4. **Codex side-root appends are config-coupled.** If Codex is configured without the workspace-write side roots, inherited Orbit subprocesses can hit `.orbit` write denials.
 5. **macOS provenance syscall allowances are private.** `vnguard` and `Sandbox`/67 mirror current Codex startup needs and may require review after OS changes.
-6. **Pipeline env fallback can leave `fs_profile = None`.** Legacy contexts without `ORBIT_ACTIVITY_FS_PROFILE` still bypass `enforce_fs_policy`.
-7. **HTTP enforcement is helper-based.** A future builtin or non-builtin tool that skips `enforce_fs_policy` is unguarded.
+6. **Pipeline env fallback can leave `fs_profile = None`.** Legacy contexts without `ORBIT_ACTIVITY_FS_PROFILE` still omit a profile name; the retired in-process helper used to treat that as unguarded.
+7. **No in-process `fs.*` enforcement remains.** A revived harness would need to rebuild the retired helper (or move enforcement below the tool layer) rather than rely on leftover builtins.
 8. **Generic exec has no policy hook.** `proc.spawn` program allowlists are activity-layer data, and `run_process + NoSandbox` remains unchanged; the OS wrappers attach only to CLI-agent dispatch.
 9. **Symlink semantics are implicit.** `workspace_relative_path` follows symlinks and rejects out-of-workspace targets, but no spec states that invariant.
 10. **Glob syntax is narrow.** Character classes, brace expansion, and POSIX bracket expressions are unsupported.

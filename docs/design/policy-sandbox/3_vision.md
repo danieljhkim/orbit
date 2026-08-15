@@ -3,12 +3,12 @@ summary: "Policy & Sandboxing — Vision"
 type: design
 title: "Policy & Sandboxing — Vision"
 owner: claude
-last_updated: 2026-08-01
+last_updated: 2026-08-15
 status: Draft
 feature: policy-sandbox
 doc_role: vision
 tags: ["policy-sandbox"]
-last_validated: 2026-08-11
+last_validated: 2026-08-15
 ---
 
 # Policy & Sandboxing — Vision
@@ -20,7 +20,7 @@ This document captures the questions Orbit must answer before policy and sandbox
 ## 1. Open Questions
 
 1. **How far should Linux sandboxing go after the first backend?** §1.1 records the shipped Bubblewrap write-confinement boundary. Full read-policy parity, network policy, seccomp, and generic `run_process` adoption remain separate decisions.
-2. **Should enforcement move below the tool layer?** A future tool that skips `enforce_fs_policy` is unguarded unless Orbit adds a `PolicyAwareFs` trait, syscall interception, or linting.
+2. **Should enforcement move below the tool layer?** The in-process `fs.*` helper is gone ([ORB-10833]). A revived harness, or any future tool that performs filesystem work, is unguarded unless Orbit adds a `PolicyAwareFs` trait, syscall interception, or linting.
 3. **Should `proc.spawn` consult policy?** Activity program allowlists are not `PolicyDef`; future shapes include `allowExec` / `denyExec` or env access tied to `fsProfile`.
 4. **What is the symlink contract?** `workspace_relative_path` follows symlinks and denies out-of-workspace targets, but the invariant is not yet specified.
 5. **Should glob syntax grow?** Character classes, braces, and broader `**` forms would reduce user surprise but may re-evaluate existing profiles differently.
@@ -92,8 +92,8 @@ A direct invocation without that disposable boundary must fail closed when a non
 The initial backend keeps the host's executable, library, certificate, and provider state surface
 readable so existing CLIs can start. It may hide concrete existing matches for `denyRead`, but it
 does not claim general `read` allowlist or arbitrary negative-glob parity. The invocation audit
-must distinguish `write_enforced` from `read_delegated`; HTTP `fs.*` calls continue to enforce the
-full policy evaluator, while CLI read restrictions remain a harness responsibility.
+must distinguish `write_enforced` from `read_delegated`; there is no remaining in-process `fs.*`
+evaluator on the shipped path, so CLI read restrictions remain a harness responsibility.
 
 This is preferable to either extreme: mounting the whole host read-write would not be a sandbox,
 while constructing a minimal read tree for several independently-updated provider CLIs would
@@ -156,7 +156,7 @@ Bazel `exec.sandbox`, Buck2 hermetic execution, and Nix sandboxing treat the wor
 1. **Activity-bound profiles.** Every activity declares its profile, and the resolver re-evaluates per call.
 2. **Project-shaped globs.** Profiles use paths such as `./src/**`, trading capability precision for readable project intent.
 3. **Global negative denies.** `denyRead` / `denyModify` inject into every resolved profile; no profile opts out of them locally.
-4. **Auditable by construction.** HTTP fs decisions emit events as part of `enforce_fs_policy`.
+4. **Auditable by construction.** CLI sandbox decisions and remaining in-process tool denials still emit audit events; historical `FsCallEvent` rows from retired `fs.*` builtins stay parseable.
 5. **Workspace-relative resolution.** Profiles stay portable because paths are evaluated relative to the active workspace.
 
 ---

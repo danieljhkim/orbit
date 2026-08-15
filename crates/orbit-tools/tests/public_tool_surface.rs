@@ -57,13 +57,6 @@ fn unused_tools_are_not_registered_in_public_surface() {
     let names = registered_tool_names();
 
     for removed in [
-        "fs.copy",
-        "fs.create",
-        "fs.ls",
-        "fs.mkdir",
-        "fs.move",
-        "fs.patch",
-        "fs.write",
         "git.commit",
         "git.stage_paths",
         "github.auth.status",
@@ -83,8 +76,10 @@ fn unused_tools_are_not_registered_in_public_surface() {
     }
 
     // Constructed without dotted literals so a repo-wide grep for the
-    // retired read/delete builtins stays clean after ORB-10828.
-    for op in ["read", "delete"] {
+    // retired fs family stays clean after ORB-10828 / ORB-10833.
+    for op in [
+        "read", "delete", "copy", "create", "ls", "mkdir", "move", "patch", "write",
+    ] {
         let removed = format!("fs.{op}");
         assert!(
             !names.contains(removed.as_str()),
