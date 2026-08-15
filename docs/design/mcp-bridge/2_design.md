@@ -1,36 +1,35 @@
 ---
 title: Orbit MCP Bridge — Design
 owner: claude
-last_updated: 2026-08-14
-last_validated: 2026-08-02
+last_updated: 2026-08-15
+last_validated: 2026-08-15
 status: Draft
 feature: mcp-bridge
 doc_role: design
 type: design
-summary: Target design for a local Orbit MCP broker with an SSH owner route, owner-local coordination, workspace-scoped knowledge, checkout-local indexes, role-aware search, capability sets, provenance, an owned tunnel for checkoutless clients, and Bridge parity retirement.
+summary: Landed design for a local Orbit MCP broker with an SSH owner route, owner-local coordination, checkout-local indexes and search, capability sets, provenance, an owned tunnel for checkoutless clients, and complete Bridge retirement.
 tags: [mcp, remote-access, host-registry, bridge, ssh, routing]
 paths: ["crates/orbit-remote/**", "crates/orbit-mcp/**", "crates/orbit-core/**", "crates/orbit-tools/**", "crates/orbit-store/**", "crates/orbit-common/**"]
 related_features: [mcp-bridge, host-registry, mcp-session-context, remote-access, orbit-search]
-related_artifacts: [ORB-00424, ORB-10257, ORB-10262, ORB-10267, ORB-10268, ORB-10269, ORB-10271, ORB-10272, ORB-10276, ORB-10302, ORB-10319, ORB-10330, ORB-10332, ORB-10534, ORB-10540, ORB-10544, ORB-10690, ORB-10710, ORB-10725, ORB-10727, ORB-10729, ORB-10761, ORB-10787, ADR-0181, ADR-0199, ADR-0200, ADR-0201, ADR-0226, ADR-0227, ADR-0228, ADR-0229, ADR-0230, ADR-0231, ADR-0232, ADR-0235, ADR-0240, ADR-0303, ADR-0348, ADR-0350, ADR-0351, ADR-0354, ADR-0355, ADR-0356, ADR-0357, ADR-0358, ADR-0360]
+related_artifacts: [ORB-00424, ORB-10257, ORB-10262, ORB-10267, ORB-10268, ORB-10269, ORB-10271, ORB-10272, ORB-10276, ORB-10302, ORB-10319, ORB-10330, ORB-10332, ORB-10534, ORB-10540, ORB-10544, ORB-10690, ORB-10710, ORB-10711, ORB-10725, ORB-10727, ORB-10729, ORB-10736, ORB-10761, ORB-10763, ORB-10767, ORB-10768, ORB-10784, ORB-10787, ADR-0181, ADR-0199, ADR-0200, ADR-0201, ADR-0226, ADR-0227, ADR-0228, ADR-0229, ADR-0230, ADR-0231, ADR-0232, ADR-0235, ADR-0240, ADR-0303, ADR-0347, ADR-0348, ADR-0350, ADR-0351, ADR-0354, ADR-0355, ADR-0356, ADR-0357, ADR-0358, ADR-0359, ADR-0360]
 ---
 
 # Orbit MCP Bridge — Design
 
-> **Learning-subsystem retirement.** [ORB-10736] / [ADR-0359] remove the native
-> project-learning resource. Every learning-specific route, sidecar, placement,
-> allocation, search branch, and payload described below is retained only as
-> retired historical context and is not part of the current MCP contract.
+> **Learning-subsystem retirement.** [ORB-10736] / [ADR-0359] removed the native
+> project-learning resource. Learning-specific mechanisms remain only where a
+> superseded decision needs historical context; none is current or deferred work.
 
-> **Status: Draft — structural rewrite in flight.** The singular-hub contract
+> **Status: Draft — structural rewrite landed.** The singular-hub contract
 > ([ADR-0226], [ADR-0229], [ADR-0230]) is superseded by [ADR-0355]–[ADR-0358],
 > recorded in [../host-registry/4_decisions.md](../host-registry/4_decisions.md).
 > Every machine is its own coordination host for the workspaces it owns; the only
-> v1 cross-machine surface is task create/read against the owner machine. Sections
+> v1 cross-machine surface is the advertised `orbit.task.*` family against the owner machine. Sections
 > describing execution placement, run leases, the presence map, the `runner`
 > capability, and host registration are **deferred to v2** and are retained below
 > only as history.
 
-This document specifies the **target** design. The host-registry identity,
+This document records the **landed** design. The host-registry identity,
 workspace, registry core/projections, C3 discovery tools, and typed placement,
 capability, scope, and trusted-session metadata they depend on have landed. C4
 first placed identity, catalog, cache, and the store-backed registry service in
@@ -152,16 +151,15 @@ session context (§3), continuing [ADR-0199]'s direction.
 flowchart LR
     Client["MCP client"] -->|"stdio MCP"| Broker["local orbit mcp serve"]
     Broker --> Router["placement router"]
-    Router -->|"local-derived"| Derived["local graph and docs indexes"]
-    Router -->|"owner; when local"| Local["local coordination, knowledge, registry"]
+    Router -->|"local-derived"| Derived["local docs indexes"]
+    Router -->|"owner; when local"| Local["local coordination and registry"]
     Router -->|"owner; remote"| OwnerLink["SSH MCP owner link"]
     OwnerLink --> OwnerMcp["owner-machine orbit mcp serve"]
-    OwnerMcp --> Coordination["tasks (create/read)"]
+    OwnerMcp --> Coordination["advertised task family"]
 ```
 
-There is deliberately no edge between two non-owner machines. For a workspace
-owned elsewhere, current knowledge remains on that owner and reaches other
-machines only through Git replication in v1.
+There is deliberately no edge between two non-owner machines. The retired native
+learning subsystem contributes no route or replica mode.
 
 ### 2.2 Owner-machine endpoint
 
@@ -224,12 +222,11 @@ the checkout-independent coordination executor keyed by stable `workspace_id`.
 Placement and executor are separate questions, and the withdrawn `hub` class used
 to conflate them: it meant both "the hub machine" and "the checkoutless
 coordination store." Collapsing `hub` into `owner` splits them apart ([ORB-10727]).
-Placement answers *which machine*; the coordination surface — `orbit.task.*` and
-`orbit.friction.*`, exactly what the coordination executor implements — answers
-*which executor on it*. `orbit.learning.*` and `orbit.auto_task.*` are equally
-owner-placed but read checkout-derived state, so an owner-local call to one of them
-runs through the owner's validated checkout runtime instead, and is refused when
-that checkout is absent.
+Placement answers *which machine*; the checkoutless coordination surface —
+`orbit.task.*` and `orbit.friction.*`, exactly what the coordination executor
+implements — answers *which executor on it*. Owner-placed tools backed by the
+checkout runtime, including `orbit.auto_task.*` and `orbit.session_log.*`, require
+the validated owner checkout and are refused when it is absent.
 That executor opens only global task/friction coordination stores: it does not
 construct `OrbitRuntime`, `WorkspacePaths`, a checkout, owner stores, or local
 model/scoreboard configuration. The broker does not SSH to itself or add a
@@ -396,11 +393,10 @@ Initial classification:
 | `orbit.workspace.*` | `local-derived` | Ownership bindings live in the machine-local workspace registry, and enumeration returns only the workspaces this machine owns. This is the one `local-derived` entry whose backing state is machine-local rather than checkout-derived |
 | `orbit.crew.list`, task crew validation | `owner` | Reads the owner machine's local crew config (§8) |
 | `orbit.workflow.*`, run observation | `owner` | Single-host operator broker only in v1 |
-| `orbit.learning.show/update/supersede` | `owner` | Current content/lifecycle belongs to the workspace owner |
-| `orbit.learning.add` | `owner` | Allocates the workspace-scoped key and writes locally (§6) |
 | `orbit.auto_task.add/list/show/update/toggle` | `owner` | MCP CRUD manages the Git-versioned definition; it does not mint tasks |
+| `orbit.session_log.append/list/resolve` | `owner` | Workspace-local append-only coordination notes live with the owner checkout |
 | Docs/semantic index operations if later exposed | `local-derived` | Rebuildable checkout-derived state |
-| `orbit.search` | `composite` | Owner task/learning branches + local docs (§7) |
+| `orbit.search` | `composite` | Current implementation requires a locally owned checkout and searches task, doc, and friction branches there (§7) |
 
 `orbit.host.*` fleet inventory and `orbit.run.lease/report/presence` have no v1
 referent and are withdrawn with registration and execution placement ([ADR-0358]).
@@ -410,9 +406,9 @@ each feature's `4_decisions.md` ([CONVENTIONS.md §4](../CONVENTIONS.md)).
 Routine scheduler state stays local and CLI-only. The auto-task scheduler pass is
 composite in operation but is not an MCP tool-registry entry: it reads definitions
 and the host-local cursor from the machine's checkout, dedupes against the owner
-machine's task state, and creates due tasks there. It must never mint tasks for a
-workspace this machine does not own. Friction search is not a current
-`orbit.search` kind; if added, it is an owner branch.
+  machine's task state, and creates due tasks there. It must never mint tasks for a
+  workspace this machine does not own. Friction is a current lexical
+  `orbit.search` branch.
 
 ### 4.2 Owner preflight
 
@@ -421,20 +417,18 @@ workspace this machine does not own. Friction search is not a current
 1. resolve the owner from the machine-local `workspaces.json`;
 2. if the owner is this machine, require a validated owner checkout and execute
    locally;
-3. if the owner is another machine and the call is task creation or a task read,
-   dispatch over the configured owner route;
+3. if the owner is another machine and the call is in the advertised
+   `orbit.task.*` family, dispatch over the configured owner route;
 4. otherwise refuse, naming the owning `machine_id` and the configured route if one
    exists; and
 5. never relay the call through a third machine.
 
-A non-owner who needs a new learning files a task on the owner machine, matching
-host-registry's v1 rule.
-
 ### 4.3 Contract ownership and version skew
 
 Remote's canonical composition of generic builtin definitions plus Remote-owned
-discovery and graph definitions is the only production schema source. Bridge does
-not vendor a snapshot, duplicate Pydantic arguments, or recreate errors. Neither
+discovery definitions is the only production schema source. The retired Bridge
+service no longer vendors a snapshot, duplicates Pydantic arguments, or recreates
+errors. Neither
 the generic MCP kernel nor Core owns registry-aware placement/schema policy. The
 local broker advertises schemas from its installed Orbit binary and includes an MCP
 contract revision plus a digest for the owner-routed subset when opening the owner
@@ -705,8 +699,8 @@ the call, not of the pipe that carried it.
 
 `crates/orbit-mcp/src/tcp.rs` already implements the listener with one server
 instance per connection ([ORB-10690], [ADR-0348]). [ORB-10710] adds the CLI
-surface, the client-side mode, and the checkout guard; the command rider
-([ADR-0351]) remains outstanding.
+surface, the client-side mode, and the checkout guard; [ORB-10711] implemented the
+claim-gated `orbit.command.exec` rider recorded by [ADR-0351].
 
 #### How the client-side mode is built
 
@@ -730,142 +724,78 @@ whole implementation:
   exhaustively, so a new variant would compile cleanly while failing every one
   of them silently.
 
-## 6. Artifact and Knowledge Semantics
+## 6. Artifact Semantics
 
 ### 6.1 Read/write placement
 
 | Artifact | Current write path | Current read path | Replica/derived path |
 |----------|--------------------|-------------------|----------------------|
-| Task, review thread, task artifact | Owner MCP (in-process when locally owned) | Owner MCP | None |
+| Task and task artifact | Owner MCP (in-process when locally owned) | Owner MCP | None |
 | Friction | Owner MCP (in-process when locally owned) | Owner MCP | None |
-| Learning — owner machine | Owner-local write, key `(workspace_id, learning_key)` | Owner checkout | Git is downstream replication |
-| Learning — non-owner checkout | Refused, owner named | No live current route | Explicit Git replica after pull/reindex |
-| Code graph | Local-derived | Local-derived | Local graph index |
-| Docs search | Local-derived | Local-derived | Local docs/semantic index |
+| Session-log entry | Owner checkout runtime | Owner checkout runtime | None |
+| Docs search | Local checkout runtime | Local checkout runtime | Local docs/semantic index |
 | Routine cursor/pause | Local CLI | Local CLI | Local scheduler store |
 
-This is the honest cross-machine read contract. Coordination artifacts are read on
-the owner machine. Current knowledge does **not** flow across owners in v1: no
-machine proxies another owner's current knowledge. Every other machine reads a
-pulled Git replica explicitly or routes actionable work as a task to the owner.
-Graph/docs remain local. ADRs no longer appear in this table at all — they are
-git-committed markdown in each feature's `4_decisions.md` and travel by `git pull`
-like any other file ([ADR-0357], [CONVENTIONS.md §4](../CONVENTIONS.md)).
+This is the shipped cross-machine contract after [ORB-10736]. The native learning
+resource, its sidecar, its replica index, and every `orbit.learning.*` operation are
+removed, not deferred. ADRs are git-committed markdown in each feature's
+`4_decisions.md`; search retrieves them through the doc corpus rather than a
+separate store or tool family ([ADR-0359], [CONVENTIONS.md §4](../CONVENTIONS.md)).
 
 Friction records on the owning machine are partitioned by the composite
 `(workspace_id, friction_id)` key in the host-global store after [ORB-10680]
-([ADR-0345]), so the logical workspace ID alone scopes every read and write and
-identical IDs in two workspaces coexist. This is the precedent [ADR-0357]
-generalizes to learnings. `<global_root>/frictions/workspaces/<workspace_id>`
-remains the file tree that carries the tag taxonomy and, until the one-time
-import commits, the legacy records to import. Legacy checkout-local state is
-still copied to a staging tree and atomically published before a separate
-completion marker commits that publication: identical repeats are idempotent,
-differing trees fail closed, and the readable root stays the legacy tree until
-the marker exists. A caller that has no legacy-root binding may use the
-canonical root but cannot commit the publication marker. The record import
-itself is a separate transactional, idempotent, fail-closed step, after which
-SQLite is the sole live source and legacy files are read-only evidence.
+([ADR-0345]), so the logical workspace ID scopes every read and write and identical
+IDs in two workspaces coexist. `<global_root>/frictions/workspaces/<workspace_id>`
+remains the file tree that carries the tag taxonomy and legacy import evidence.
 
-`orbit.task.artifact.put` completes capability, workspace, and placement
-preflight before opening the caller-local source. It reads at most the typed
-content limit on the calling machine and sends a connector-private
-`{path, media_type, content}` byte payload under the same canonical tool/audit name.
-The owner machine accepts that preloaded form only on authenticated `ssh-mcp`;
-caller-local paths never cross the coordination boundary. The public
-`orbit.task.update` schema does not accept inline artifacts, so this private form is
-reachable only through `orbit.task.artifact.put`. Friction responses likewise omit
-their private backing-file path [ORB-10271] — after [ORB-10680] that field is the
-legacy evidence pointer of an imported record, and `null` for anything written
-since, but it stays owner-private either way.
+`orbit.task.artifact.put` completes capability, workspace, and placement preflight
+before opening the caller-local source. It reads at most the typed content limit on
+the calling machine and sends a connector-private `{path, media_type, content}` byte
+payload under the same canonical tool/audit name. The owner accepts that preloaded
+form only on authenticated `ssh-mcp`; caller-local paths never cross the
+coordination boundary. Friction responses likewise omit their private backing-file
+path ([ORB-10271]).
 
 **`orbit.task.artifact.put` is inside the v1 cross-machine task surface.** It is a
-task write, and the v1 rule admits task create, read, and update against a remote
-owner (§4.2); excluding artifact put would leave a task creatable off-owner but not
-completable. Every other coordination write — friction lifecycle, workflow
-dispatch, knowledge authoring — is refused off-owner.
+task write, and the v1 rule admits the advertised task family against a remote owner
+(§4.2). Other owner-placed families, including friction lifecycle, session logs,
+auto-task CRUD, and workflow dispatch, remain local to the owning machine.
 
-### 6.2 Knowledge creation
+### 6.2 Retired knowledge mechanisms
 
-> **Withdrawn.** This section previously specified two mechanisms: an *F1 dormant
-> allocation substrate* ([ORB-10272] — hub-global monotonic ADR/learning sequences,
-> an immutable allocation ledger, pre-activation reconciliation, and a
-> dormant/active authority flip) and an *F3 composite creation target*
-> ([ORB-10330] — allocate-at-the-hub then finalize-in-the-owner-checkout, with ID
-> gaps as the accepted cost). Both are withdrawn: [ADR-0357] keys knowledge by
-> `(workspace_id, artifact_key)`, so there is no allocator to activate and no
-> composite to compose. Public issuance never activated, so no ID was ever issued
-> and nothing needs renumbering.
+[ORB-10736] removed the native learning types, file and SQLite stores, CLI/MCP/HTTP
+routes, unified-search branch, automatic prompt/sidecar delivery, dashboard, and
+maintenance jobs. Existing `.orbit/learnings/**` files remain inert historical
+repository data. The older F1 allocator and F3 composite-finalization designs were
+already withdrawn before removal; public issuance never activated, so no allocated
+ID needs migration. There is no current `knowledge_read`, replica-consistency, or
+learning lifecycle contract.
 
-Learning keys are allocated per workspace by the owning machine; there is no
-cross-workspace sequence, no allocation ledger, and no ID gap. `orbit.learning.add`
-is an `owner` operation that writes atomically in the owner's exact checkout,
-reusing the existing local file/index atomicity and rollback boundary.
+## 7. Current `orbit.search`
 
-A learning add for a workspace this machine does not own is refused and names the
-owner; the recovery is a task filed on the owner machine, not an MCP route to it.
-That refusal governs the agent-facing CLI/MCP mutation surface only. It does not
-remove host-registry's explicit human manual-execution escape hatch: a human may
-author the knowledge file on a branch in the owner's checkout and let the
-repository gate arbitrate the PR. That path does not make a replica's Orbit store
-an author; see [host-registry/2_design.md §4–5](../host-registry/2_design.md).
+The shipped search kinds are `task`, `doc`, `friction`, and `all`. ADR entries are
+ordinary design-doc markdown and therefore arrive through the `doc` branch. The
+runtime ranks each requested branch and merges multiple branches round-robin under
+the total limit; hybrid ranking applies to task and doc vectors, while frictions
+remain lexical. `semantic=<task-id>` is task-neighbor lookup and supports only
+`kind=task|all`.
 
-### 6.3 Knowledge lifecycle and sidecars
+The MCP registry retains `composite` placement for `orbit.search`, but the broker
+does **not** route branches independently. Current preflight requires a validated
+checkout owned by this machine and executes the complete query through that local
+runtime. A remote-owned workspace or replica checkout is rejected before search;
+there is no owner-task/local-doc fan-out and no per-branch routing metadata.
 
-Update/supersede/show execute on the owner machine. Elsewhere the call is refused
-with `current knowledge owned by <machine>; no live route in v1`.
+An unscoped request with `all: true` is the separate cross-workspace mode: the
+broker runs the same local search against every active locally owned checkout and
+adds the logical workspace selector to each row. It still opens no owner route.
 
-The automatic learning sidecar follows the same rule:
-
-- workspace owned locally: query current local learnings;
-- workspace owned elsewhere: disabled by default with an explicit availability
-  note; a future freshness-checked replica mode may opt in.
-
-It never injects a stale replica silently.
-
-## 7. Role-Aware `orbit.search`
-
-`orbit.search` searches task, doc, and learning branches and merges them
-round-robin. The `adr` kind is retired with the ADR store — ADRs are ordinary
-design-doc markdown and are found by the `doc` branch ([ADR-0357]). The broker
-preserves in-kind ranking and total-limit fairness but routes branches by
-ownership:
-
-| Search branch | Route |
-|---------------|-------|
-| Task or task semantic-neighbor | Owner machine |
-| Doc | Exact local checkout |
-| Learning, workspace owned locally | Local current index |
-| Learning, workspace owned elsewhere | No current route; explicit replica only |
-
-Checkout requirements are also explicit. `kind=task` resolves on the owner machine
-and works from an ID-only operator session. `kind=learning` requires the owning
-machine. `kind=doc` and `kind=all` require a validated local checkout; without one,
-the broker fails before dispatch and asks the caller to provide a path or choose a
-narrower owner-readable kind. V1 has no implicit doc omission and never returns a
-partial `kind=all` result merely because the operator session has no checkout.
-
-Knowledge search adds an explicit input:
-
-```text
-knowledge_read = current | replica | omit
-```
-
-- `current` is the default. Explicit `kind=learning` fails when this machine does
-  not own the workspace.
-- `replica` is opt-in and requires a local checkout plus a successful
-  reindex-from-files. Results are marked `consistency=replica` with owner ID,
-  indexed commit, and index timestamp.
-- `omit` is accepted only for `kind=all`; it excludes the learning branch and
-  records that exclusion in response metadata.
-
-For `kind=all`, the broker either has a current knowledge route, receives explicit
-`replica`, receives explicit `omit`, or returns an actionable error. It never
-silently drops knowledge branches and presents the remainder as complete. When all
-requested branches resolve, the existing round-robin merge and total limit apply.
-
-Response routing metadata names the workspace ID, branch placement, machine IDs,
-and knowledge consistency. Absolute paths never cross the owner route.
+The previously documented `knowledge_read = current | replica | omit` input,
+`consistency=replica` result metadata, owner/index freshness fields, and learning
+branch were never implemented and are now deleted from the contract because the
+underlying resource no longer exists ([ORB-10736]). `kind=learning` and the retired
+standalone `kind=adr` are rejected with the supported-kind list rather than silently
+accepted.
 
 ## 8. Capability Sets, Discovery, and Dispatch
 
@@ -873,7 +803,7 @@ Placement answers *where*; capability answers *whether*:
 
 | Capability | Intended holder | Surface |
 |------------|-----------------|---------|
-| `agent` (default) | Ordinary coding agent | Safe task/knowledge/search/graph/auto-task tools plus read-only crew discovery |
+| `agent` (default) | Ordinary coding agent | Safe task/friction/search/auto-task/session-log tools plus read-only crew discovery |
 | `operator` | Cowork orchestrator or trusted operator | `agent` plus workspace discovery, `workflow.ship`, and run observation |
 
 A `runner` capability is deferred to v2 with execution placement ([ADR-0358]); it
@@ -939,9 +869,9 @@ projection tables.
 
 ### 8.2 Operator tools and placement
 
-Bridge's high-level workflow tools move into Orbit:
+Bridge's former high-level workflow tools moved into Orbit:
 
-| Bridge today | Orbit target |
+| Former Bridge tool | Orbit target |
 |--------------|--------------|
 | `workspace_list` | `orbit.workspace.list` |
 | `workflow_ship` | `orbit.workflow.ship` |
@@ -1025,37 +955,33 @@ it records local transport/preflight failures separately.
 
 If SSH drops after a coordination mutation is dispatched, the outcome is unknown and
 the broker returns `mcp_call_id`; it never retries. The caller inspects the owner
-machine's state/audit. Knowledge writes are a single local transaction, so there is
-no partial record and no consumed ID to reason about.
+machine's state/audit.
 
 ## 10. The Bridge Boundary
 
-After cutover, Bridge remains a constellation gateway but stops impersonating
-Orbit:
+[ORB-10768] retired Bridge as a whole, not merely its Orbit-shaped compatibility
+layer. The only registered clients were on `dk-server-1`, so they moved directly to
+the installed binary's local stdio `orbit mcp serve --capabilities operator`.
+[ORB-10763]'s listener, SSH alias, and remote-mode registration were therefore
+demoted to optional future work; no compatibility window or side-by-side client
+registration was needed.
 
-| Capability | Owner after migration |
-|------------|-----------------------|
-| Tasks, frictions, learnings, Orbit search | Orbit MCP |
-| Workspace/crew discovery and workflow submit/observe | Orbit MCP |
-| Sextant search and document retrieval | Bridge/Sextant |
-| Raw one-shot Worker invocation and non-pipeline run control | Bridge/Worker |
-| Repository synchronization | Bridge/Worker |
-| Personal-memory/profile tools | Bridge/Almanac |
-| Bridge session/failure telemetry for remaining calls | Bridge |
+The outcome by former capability is:
 
-Retired Bridge implementation:
+| Former Bridge capability | Outcome |
+|--------------------------|---------|
+| Orbit task, friction, search, workspace, crew, and workflow parity | Canonical Orbit MCP owns it directly |
+| ADR and learning parity | Removed with the underlying Orbit stores; ADRs are docs and native learnings are retired |
+| Sextant search/session/document retrieval | Removed; Sextant was already decommissioned |
+| `agent_invoke` and `agent_run_*` | Deliberately dropped; callers were rewritten to work without worker invocation ([ORB-10767]) |
+| `repo_sync` | Descoped with no replacement ([ORB-10767]) |
+| Almanac/profile and Bridge-only telemetry | Removed with Bridge; no surviving gateway contract |
 
-- the `orbit_parity` domain and duplicated DTOs;
-- the vendored `tools/list` snapshot and refresh script;
-- Orbit parity-specific HTTP translation tests;
-- Bridge workflow tools after Orbit operator tools reach parity; and
-- Orbit edge configuration when no remaining Bridge capability uses it.
-
-Clients register Orbit and Bridge side by side during migration. A later aggregator
-must proxy child MCP contracts generically; it must not restore hand-authored Orbit
-schemas. ADRs left the MCP surface entirely: they are git-committed markdown in each
-feature's `4_decisions.md` ([CONVENTIONS.md §4](../CONVENTIONS.md)) and are reached
-through the docs corpus, not a tool family.
+The parity domain, vendored schema snapshot, dashboard HTTP translation, workflow
+wrappers, edge routes/token, client registrations, units, and worker listener were
+retired. The Bridge repository/history was preserved as the record of the deleted
+compatibility layer. A future aggregator, if ever justified, must proxy child MCP
+contracts generically rather than restore hand-authored Orbit schemas.
 
 ## 11. Migration and Validation
 
@@ -1089,8 +1015,9 @@ through the docs corpus, not a tool family.
 
 - [ORB-10319] moved the broker, hub, link, trust, registration, and former
   graph/learning composition from CLI/MCP horizontal layers into `orbit-remote`.
-  [ORB-10325] subsequently removed graph composition from Remote and MCP; the
-  routing contract now applies only to registered tools.
+  [ORB-10325] subsequently removed graph composition from Remote and MCP, and
+  [ORB-10736] removed learning composition; the routing contract now applies only
+  to registered tools.
 
 ### Phase 3 — owner route
 
@@ -1103,13 +1030,15 @@ through the docs corpus, not a tool family.
 
 ### Phase 4 — knowledge and search split
 
-- Move learning and friction to `(workspace_id, artifact_key)` and remove the
-  [ORB-10272] allocation substrate rather than parking it ([ADR-0357]).
+- Friction moved to a workspace-partitioned owner store. The native learning
+  resource and the [ORB-10272] allocation substrate were subsequently removed
+  outright by [ORB-10736]/[ADR-0359].
 - Retire the ADR store in favour of git-committed entries in each feature's
   `4_decisions.md`, which drops the `adr` search kind and the `orbit.adr.*` tool
   family.
-- Add explicit replica knowledge reads plus reindex/freshness metadata.
-- Implement role-aware search and learning-sidecar availability behavior.
+- Unified search now supports task, doc, friction, and all. The proposed
+  per-branch owner routing, learning replicas, and `knowledge_read` metadata never
+  landed and are not deferred because their resource was removed.
 
 ### Phase 5 — operator surface (placement deferred to v2)
 
@@ -1120,62 +1049,69 @@ through the docs corpus, not a tool family.
 
 ### Phase 6 — Bridge cutover
 
-- Register Orbit directly on every client while Bridge remains for non-Orbit tools.
-- Run conformance tests on owner-machine and client brokers.
-- Remove Bridge parity after the compatibility window and client inventory complete.
+- [ORB-10761] narrowed the checkoutless guard to registry ownership, preserving a
+  safe remote-client path if one is needed.
+- [ORB-10763] inventoried the actual clients and found both were on-box with local
+  checkouts. It was demoted to optional: no production listener, tunnel, or SSH
+  client registration was required.
+- [ORB-10767] decided not to replace Bridge's worker-backed surface:
+  `agent_invoke`/`agent_run_*` were dropped, their callers rewritten, and
+  `repo_sync` descoped.
+- [ORB-10768] registered canonical local Orbit MCP for both clients, removed the
+  Bridge registrations, units, routes, token, docs, and orphaned worker service,
+  and completed the wholesale decommission.
 
 Required validation:
 
-1. A client opens connections only to configured owner machines; no machine opens
-   or forwards a connection on another machine's behalf.
-2. No coordination mutation executes for a workspace this machine does not own,
-   including when route config, SSH, or contract negotiation fails.
-3. Coordination writes against a non-owned checkout are rejected and name the
-   owner. The separate human file-plus-PR path does not enable replica-store writes.
-4. Knowledge add writes atomically in the owner's exact checkout under
-   `(workspace_id, key)`.
-5. Current knowledge for a workspace owned elsewhere is never served or proxied.
-6. Graph/docs observe the exact session checkout/worktree, never a base or remote
-   checkout.
-7. Search requires explicit replica/omit semantics when current knowledge is
-   unavailable, rejects `kind=doc|all` without a local checkout, and preserves
-   current round-robin ranking when branches resolve.
-8. Ordinary routing, session, coordination, response, cache, and audit frames carry
-   stable IDs, never absolute paths.
-9. Audits distinguish caller and process machine identity.
-10. `agent` and `operator` advertise/enforce the intended surfaces across the
-    capability × placement matrix.
-11. Crew validation reads the owner machine's local config.
-12. Auto-task CRUD stays owner-placed while the scheduler pass reads local
-    definition/cursor state and dedupes/creates tasks only on the owning machine.
-13. Bridge passes its remaining suite without an Orbit schema snapshot or Orbit
-    HTTP dependency.
+1. **Satisfied.** Owner links target only configured owner machines; the broker and
+   owner endpoint contain no third-machine forwarding path.
+2. **Satisfied.** Owner preflight refuses non-owned coordination mutations before
+   dispatch, including route/config/negotiation failures.
+3. **Satisfied for current artifacts.** Non-owned coordination writes are refused
+   and name the owner. The former learning-specific file/PR clause no longer
+   applies because [ORB-10736] removed the resource.
+4. **No longer applicable.** `orbit.learning.add` and its store were removed by
+   [ORB-10736]; existing learning files are inert history.
+5. **No longer applicable.** There is no current native learning read surface to
+   serve or proxy.
+6. **Satisfied for docs; graph clause retired.** Docs search uses the exact
+   validated checkout runtime. [ORB-10325] removed graph from MCP.
+7. **Satisfied in its shipped replacement form.** Search requires a locally owned
+   validated checkout, merges task/doc/friction branches round-robin, and rejects
+   retired kinds. Replica/omit semantics no longer apply because they never landed
+   and [ORB-10736] removed the learning branch.
+8. **Satisfied.** Remote routing/session/audit frames use stable workspace and
+   machine IDs; task artifact content is preloaded so caller-local paths do not
+   cross the owner boundary.
+9. **Satisfied.** Owner-routed audits carry distinct caller and process machine
+   identity.
+10. **Satisfied.** The typed conformance test derives and checks the full
+    capability × placement × scope matrix; the fixture now includes the 27 shipped
+    tools, including [ORB-10784]'s session-log family.
+11. **Satisfied.** [ORB-10729] made `orbit.crew.list` and task crew validation read
+    the owner machine's local layered config through one service.
+12. **Satisfied.** MCP auto-task CRUD remains owner-placed; the scheduler uses
+    local definition/cursor state and owner-local task creation.
+13. **No longer applicable.** Bridge has no remaining suite or runtime: [ORB-10768]
+    removed the service, schema snapshot, and HTTP dependency wholesale.
 
 ## 12. Concerns & Honest Limitations
 
 - **The owner machine is the dependency for coordination.** A machine can always
   coordinate the workspaces it owns, offline and without asking anyone. What it
-  cannot do offline is any deliberate cross-machine call: tasks, frictions, and
-  knowledge for a workspace owned elsewhere are unreachable while that owner is
+  cannot do offline is any deliberate cross-machine call: task coordination for a
+  workspace owned elsewhere is unreachable while that owner is
   down. The blast radius is per workspace rather than fleet-wide, which is better
   for containment and worse for predictability — several machines can now each take
   part of the system offline, and which ones depends on a per-machine file.
-- **Current knowledge does not flow across owners.** A machine that does not own a
-  workspace has only explicit, possibly stale Git replicas. This is a deliberate
-  v1 limitation, not an MCP gap any machine is allowed to hide.
 - **One MCP surface contains a router.** Orbit owns owner-route connection
-  lifecycle, ownership preflight, role-aware search, and split audit. At most one
-  remote destination per call bounds this.
+  lifecycle, ownership preflight, composite-search preflight, and split audit. At
+  most one remote destination per call bounds this.
 - **The Remote feature crate is intentionally broad.** Registry persistence and MCP
   routing change together, so they share one vertical owner. Internal modules must
   still keep protocol, persistence, registry, and broker seams explicit; unrelated
   shared machinery belongs in the neutral kernels rather than accumulating in
   Remote.
-- **Knowledge IDs are unique only within a workspace.** `L-0012` in one workspace
-  and `L-0012` in another are different records ([ADR-0357]), so any merged
-  cross-workspace result must carry the `workspace` field or the ID is not
-  addressable. Fixing that projection is a precondition of this model, not a
-  follow-up.
 - **Version skew needs an explicit contract revision.** V1 fails owner routing
   rather than translating incompatible schemas.
 - **Caller host identity is not independently authenticated in the initial
@@ -1183,8 +1119,6 @@ Required validation:
   validates a claimed `machine_id` exists. Mutually untrusted machines need
   per-host principal/key binding before the `operator` capability is a security
   boundary rather than a convention.
-- **Two client registrations remain.** Orbit and Bridge own different domains;
-  cosmetic aggregation is not worth recreating duplicate Orbit contracts.
 - **Operator workflow execution is single-host today.** The deliberate local
   operator broker can submit and observe runs, while the fixed checkoutless owner
   endpoint and owner routing do not yet own the runtime service required to
@@ -1219,7 +1153,7 @@ Required validation:
 ## Task References
 
 - [ORB-00424] — umbrella proposal for canonical local/remote Orbit MCP and Bridge
-  parity retirement; implementation should follow the coupled phases above.
+  parity retirement; the coupled phases above now record the landed sequence.
 - [ORB-10302] — established the `orbit-registry` domain boundary used by future
   broker registration, discovery, profile, and cache flows while preserving the
   MCP adapter as serialization/dispatch only ([ADR-0235]).
@@ -1270,14 +1204,26 @@ Required validation:
   submission path, so `orbit.workflow.ship` inherits it and returns the same
   typed conflict the dashboard maps to `409 ship_run_in_flight` ([ADR-0303]).
 - [ORB-10729] — pinned the v1 cross-machine surface to task coordination exactly:
-  task create/read/update plus `orbit.task.artifact.put` cross a configured owner
-  route, while friction lifecycle, workflow dispatch, and knowledge authoring are
-  refused off-owner naming the owning machine (§4.2, §6.1). It also moved crew
+  every advertised `orbit.task.*` operation crosses a configured owner route,
+  while friction lifecycle and workflow dispatch are refused off-owner
+  naming the owning machine (§4.2, §6.1). It also moved crew
   discovery and task-crew validation onto the owner machine's local crew config
   and deleted the execution-profile projection service (§8.1).
 - [ORB-10761] — reconciled §5.3's checkoutless-client definition with the guard
   that enforces it: ownership now comes from this machine's workspace registry
   alone, so a read-mirror clone carrying a tracked `.orbit/` directory starts the
   proxy while a registered on-disk checkout is still refused ([ADR-0360]).
+- [ORB-10736] — removed the native learning subsystem, including every search,
+  sidecar, replica, lifecycle, and advertised MCP surface described by older
+  drafts of §§6–7 ([ADR-0359]).
+- [ORB-10763] — established that both real Bridge clients were on-box and could
+  register local stdio Orbit directly; the listener/tunnel deployment task was
+  retained only as optional future work.
+- [ORB-10767] — decided to drop `agent_invoke`/`agent_run_*`, rewrite their
+  callers, and descope `repo_sync` instead of replacing Bridge's worker surface.
+- [ORB-10768] — retired Bridge wholesale: clients, units, edge/token, docs,
+  worker listener, and duplicated Orbit contract.
+- [ORB-10784] — added the three owner-placed workspace session-log tools reflected
+  in the canonical conformance matrix revision 5.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

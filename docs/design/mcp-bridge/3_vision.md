@@ -1,27 +1,26 @@
 ---
 title: Orbit MCP Bridge — Vision
 owner: claude
-last_updated: 2026-08-13
-last_validated: 2026-08-02
+last_updated: 2026-08-15
+last_validated: 2026-08-15
 status: Draft
 feature: mcp-bridge
 doc_role: vision
 type: design
-summary: Open questions and prior art for the owner-machine MCP route, workspace-scoped knowledge, explicit Git-replica reads, schema skew, host identity assurance, and what surface the owned tunnel should carry.
+summary: Open questions and prior art for the owner-machine MCP route, schema skew, host identity assurance, transport evolution, and whether the advertised tool surface should become generic dispatch.
 tags: [mcp, remote-access, host-registry, bridge]
 paths: ["crates/orbit-remote/**", "crates/orbit-mcp/**", "crates/orbit-core/**", "crates/orbit-tools/**", "crates/orbit-store/**"]
 related_features: [mcp-bridge, host-registry, mcp-session-context, remote-access, orbit-search]
-related_artifacts: [ORB-00424, ORB-10319, ADR-0181, ADR-0199, ADR-0200, ADR-0201, ADR-0226, ADR-0227, ADR-0228, ADR-0229, ADR-0230, ADR-0231, ADR-0232, ADR-0240, ADR-0350, ADR-0351, ADR-0355, ADR-0356, ADR-0357, ADR-0358]
+related_artifacts: [ORB-00424, ORB-10319, ORB-10736, ORB-10767, ORB-10768, ADR-0181, ADR-0199, ADR-0200, ADR-0201, ADR-0226, ADR-0227, ADR-0228, ADR-0229, ADR-0230, ADR-0231, ADR-0232, ADR-0240, ADR-0350, ADR-0351, ADR-0355, ADR-0356, ADR-0357, ADR-0358, ADR-0359]
 ---
 
 # Orbit MCP Bridge — Vision
 
-> **Learning-subsystem retirement.** [ORB-10736] / [ADR-0359] remove the native
-> project-learning resource. Learning-specific questions below are retained only
-> as retired historical context and do not describe a current or planned MCP
-> capability.
+> **Learning-subsystem retirement.** [ORB-10736] / [ADR-0359] removed the native
+> project-learning resource. Its authoring, replica, sidecar, and search questions
+> are closed by removal rather than carried as future MCP work.
 
-> **Status: Draft — structural rewrite in flight.** The singular-hub contract
+> **Status: Draft — structural rewrite landed.** The singular-hub contract
 > ([ADR-0226], [ADR-0229], [ADR-0230]) is superseded by [ADR-0355]–[ADR-0358],
 > recorded in [../host-registry/4_decisions.md](../host-registry/4_decisions.md).
 > Questions and prior art below that concern execution placement, run leases, and
@@ -38,50 +37,36 @@ than add another horizontal broker crate ([ORB-10319]).
 
 ## 1. Open Questions
 
-1. **Agent non-owner knowledge authoring.** The coupled v1 answer is "route a task
-   to the owner machine." The human manual path carries a narrative file through a
-   PR and does not enable replica-store writes; with no allocator ([ADR-0357])
-   there is no ID to reserve, so that path is now simply "write the file in the
-   owner's checkout." If the agent seam hurts, should an owner accept content and
-   queue a finalize action, or should ownership rules change? Either option
-   broadens a machine's obligations beyond the workspaces it owns.
-2. **Replica freshness UX.** What proves a Git knowledge replica is suitable for an
-   explicit read: indexed commit equals checkout HEAD, branch matches owner default,
-   a maximum age, or a signed owner projection? V1 should expose facts rather than
-   claim freshness it cannot know.
-3. **Owner execution-profile freshness (v2).** Deferred with execution placement
+1. **Owner execution-profile freshness (v2).** Deferred with execution placement
    ([ADR-0358]). If cross-machine dispatch returns, crew validation would again need
    a one-way owner→coordinator projection, and the questions are unchanged: is
    poll-time publication enough, or should config changes trigger an immediate
    publish? What fields belong in the profile without turning it into a copy of
    `.orbit/config.toml`? In v1 crew validation reads the owner machine's local
    config directly, so none of this is live.
-4. **Authenticated caller-machine identity.** V1 trusts caller host as provenance
+2. **Authenticated caller-machine identity.** V1 trusts caller host as provenance
    inside a same-user SSH fleet. If hosts become mutually untrusted, should a v2
    registration bind a dedicated SSH key/principal to `machine_id`, or should Orbit
    sign a session challenge? This must be solved before machine identity becomes an
    authorization boundary.
-5. **Contract skew policy.** Is one MCP contract revision enough, or should the
+3. **Contract skew policy.** Is one MCP contract revision enough, or should the
    owner-routed and local subsets carry separate schema hashes so graph-only local
    changes do not block coordination calls? Start coarse; split only after real
    mixed-version deployments create friction.
-6. **Transport beyond SSH.** Narrowed by [ADR-0350]. The owned tunnel adds a
+4. **Transport beyond SSH.** Narrowed by [ADR-0350]. The owned tunnel adds a
    loopback listener while keeping SSH as the authenticator, so listener hardening
    is a bind guard rather than an authentication system, and Orbit still owns no
    credential. What remains open is the original case: genuinely shell-less
    environments, where Streamable HTTP would require Orbit to own authentication
    and session management outright. Is there such a deployment?
-7. **Distributing the coordination plane — resolved.** The plane is now per-machine
+5. **Distributing the coordination plane — resolved.** The plane is now per-machine
    by construction ([ADR-0355]); there is no single target left to shard. What
-   replaces the question is narrower: v1 exposes only task create/read across
-   machines, so what, if anything, should cross next — current-knowledge reads,
-   friction triage, workflow observation — and does any of it justify a machine
+   replaces the question is narrower: v1 exposes only the advertised task family across
+   machines, so what, if anything, should cross next — friction triage or workflow
+   observation — and does any of it justify a machine
    answering for a workspace it does not own? That is a v2 question and should be
    answered per record type, not as a topology change.
-8. **Knowledge sidecar on replicas.** Should an agent explicitly opt into stale but
-   marked learning injection, or is disabling injection safer until owner-current
-   state is available? This should follow evidence from replica use, not convenience.
-9. **Whether the advertised per-tool surface should become generic dispatch.**
+6. **Whether the advertised per-tool surface should become generic dispatch.**
    [ADR-0351] adds command and changes nothing else, leaving this open. The
    replacement shape would be two operations — enumerate the registry entries
    visible to a caller with their schemas, and invoke one by name — collapsing
@@ -111,8 +96,8 @@ than add another horizontal broker crate ([ORB-10319]).
 The generic MCP adapter separates protocol framing from an injected `McpHost`,
 sanitizes advertised names, resolves structural schemas, and threads
 `ToolSessionContext` into dispatch. `orbit-remote` composes generic builtin schemas
-with Remote-owned discovery/graph definitions and supplies the in-process graph,
-learning, coordination, and broker behavior. [ADR-0181] established deliberate
+with Remote-owned discovery definitions and supplies coordination and broker
+behavior. [ADR-0181] established deliberate
 workspace context instead of cwd fallback; [ADR-0199] proposed per-call runtime
 resolution. The local broker extends those neutral seams rather than starting a
 second implementation.
@@ -135,23 +120,23 @@ coordination while preserving that transport posture.
 
 ### Bridge parity
 
-Bridge's parity layer proved the need for off-box task/workflow access and
-multi-workspace selection. It also proved the maintenance cost of copying schemas
-and translating through a dashboard projection. The migration preserves the need
-and removes the duplicate contract.
+Bridge's parity layer proved the need for task/workflow access and multi-workspace
+selection. It also proved the maintenance cost of copying schemas and translating
+through a dashboard projection. [ORB-10768] retired the service entirely once the
+actual on-box clients registered Orbit directly; [ORB-10767] deliberately dropped
+its worker invocation family and descoped `repo_sync`.
 
 ### Search partitioning
 
-Orbit search already ranks within each kind and round-robins task, doc, and
-learning branches under a total limit. Role-aware composition moves branches to
-owner/local or explicit replica sources without inventing another relevance model.
+Orbit search ranks within each kind and round-robins task, doc, and friction
+branches under a total limit. The current composite MCP placement executes the
+whole query in one locally owned checkout; per-branch routing remains unimplemented
+and is not planned by this design.
 
 ### External patterns
 
 - SSH stdio is a common transport for Git, remote language servers, and MCP servers:
   SSH owns identity/encryption while the application owns framing.
-- Git's distributed read model is the relevant precedent for owner-authored
-  knowledge: replicas are useful and inspectable, but not automatically current.
 
 ### External patterns held for v2
 
@@ -164,9 +149,9 @@ owner/local or explicit replica sources without inventing another relevance mode
 The distinctive part is the refusal to make "one MCP surface" mean "one machine
 serves every datum." The local broker has at most one network destination, yet
 placement still follows record semantics: coordination goes to the machine that
-owns the record, current knowledge stays with its owner, derived indexes stay with
-the checkout, and composite tools state exactly which pieces are unavailable. No
-machine is a relay or a universal read proxy.
+owns the record, derived indexes stay with the checkout, and composite search
+fails unless its whole local-runtime requirement is met. No machine is a relay or
+a universal read proxy.
 
 ## 4. References
 
@@ -194,5 +179,10 @@ machine is a relay or a universal read proxy.
   retirement.
 - [ORB-10319] — consolidates registry persistence and MCP routing in the vertical
   `orbit-remote` feature boundary assumed here ([ADR-0240]).
+- [ORB-10736] — closed the learning authoring/replica/search questions by removing
+  the native resource ([ADR-0359]).
+- [ORB-10767] — deliberately dropped Bridge's worker invocation family and
+  descoped `repo_sync`.
+- [ORB-10768] — retired Bridge entirely after direct local Orbit registration.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.
