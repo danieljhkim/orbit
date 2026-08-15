@@ -9,8 +9,9 @@ spec:
     `proposed` / `backlog` / `blocked`, job-runs in `failed` / `timeout`
     (excluding `epic_pipeline` itself), and unresolved `check_later`
     session-log ids. Empty is success. Optional `fail_if_nonempty`
-    fails the step when the set is still non-empty so `epic_pipeline`
-    can fail closed after its iteration cap.
+    fails the step when the set is still non-empty so a workspace
+    drain can fail closed after its iteration cap. `epic_pipeline`
+    no longer uses this activity as its completion gate.
   input_schema_json:
     type: object
     properties:

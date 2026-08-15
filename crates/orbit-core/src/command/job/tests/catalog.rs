@@ -1143,7 +1143,31 @@ fn epic_pipeline_opens_one_stable_worktree_and_drains_children_serially() {
     );
     let asset = load_job_asset(yaml).expect("epic pipeline parses");
     assert_eq!(asset.spec.max_active_runs, 1);
-    assert_eq!(asset.spec.steps.len(), 3);
+    assert_eq!(asset.spec.steps.len(), 13);
+    let root_step_ids = asset
+        .spec
+        .steps
+        .iter()
+        .map(|step| step.id.as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        root_step_ids,
+        [
+            "resolve_ship_input",
+            "worktree",
+            "assemble",
+            "require_empty",
+            "commit_delivery",
+            "prepare_branch",
+            "sync_base",
+            "push",
+            "pr_open",
+            "promote_pr",
+            "promote_pr_no_diff",
+            "merge",
+            "mark_done",
+        ]
+    );
 
     let JobV2StepBody::TargetRef(worktree) = &asset.spec.steps[1].body else {
         panic!("epic pipeline must set up its worktree before draining children");
@@ -1238,6 +1262,128 @@ fn epic_pipeline_opens_one_stable_worktree_and_drains_children_serially() {
         panic!("remaining descendant listing must be deterministic");
     };
     assert_eq!(remaining.action, "list_epic_descendants");
+
+    let require_empty = &asset.spec.steps[3];
+    assert_eq!(require_empty.id, "require_empty");
+    let JobV2StepBody::Target(require_empty_step) = &require_empty.body else {
+        panic!("post-loop gate must list descendants deterministically");
+    };
+    let ActivityV2Spec::Deterministic(require_empty_spec) = &require_empty_step.spec else {
+        panic!("post-loop descendant gate must be deterministic");
+    };
+    assert_eq!(require_empty_spec.action, "list_epic_descendants");
+    assert_eq!(
+        require_empty_step
+            .default_input
+            .as_ref()
+            .expect("require_empty input")["fail_if_nonempty"],
+        true
+    );
+
+    let commit_delivery = &asset.spec.steps[4];
+    let JobV2StepBody::TargetRef(commit_delivery) = &commit_delivery.body else {
+        panic!("delivery commit must reference git_commit");
+    };
+    assert_eq!(commit_delivery.target, "activity:git_commit");
+    let commit_input = commit_delivery
+        .default_input
+        .as_ref()
+        .expect("commit_delivery input");
+    assert_eq!(commit_input["allow_empty"], true);
+    assert_eq!(commit_input["allow_moved_head"], true);
+    assert_eq!(
+        commit_input["workspace_path"],
+        "{{ steps.worktree.output.workspace_path }}"
+    );
+
+    let pr_when = Some(
+        "{{ steps.resolve_ship_input.output.mode }} == pr && {{ steps.commit_delivery.output.skipped_no_diff_expected }} != true",
+    );
+    for (index, id) in [
+        "prepare_branch",
+        "sync_base",
+        "push",
+        "pr_open",
+        "promote_pr",
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let step = &asset.spec.steps[5 + index];
+        assert_eq!(step.id, id);
+        assert_eq!(step.when.as_deref(), pr_when);
+        let JobV2StepBody::TargetRef(target) = &step.body else {
+            panic!("{id} must be an activity reference");
+        };
+        assert!(
+            !target.target.contains("task_pr_pipeline"),
+            "delivery must compose activities, not invoke task_pr_pipeline"
+        );
+        if let Some(input) = target.default_input.as_ref() {
+            if let Some(workspace_path) = input.get("workspace_path") {
+                assert_eq!(
+                    workspace_path, "{{ steps.worktree.output.workspace_path }}",
+                    "{id} must reuse the epic worktree"
+                );
+            }
+            assert!(
+                input.get("job_name") != Some(&json!("task_pr_pipeline")),
+                "{id} must not dispatch task_pr_pipeline"
+            );
+        }
+    }
+
+    let promote_no_diff = &asset.spec.steps[10];
+    assert_eq!(
+        promote_no_diff.when.as_deref(),
+        Some(
+            "{{ steps.resolve_ship_input.output.mode }} == pr && {{ steps.commit_delivery.output.skipped_no_diff_expected }} == true"
+        )
+    );
+    let JobV2StepBody::TargetRef(promote_no_diff) = &promote_no_diff.body else {
+        panic!("no-diff PR path must update the epic root");
+    };
+    assert_eq!(promote_no_diff.target, "activity:update_task");
+    assert_eq!(
+        promote_no_diff
+            .default_input
+            .as_ref()
+            .expect("no-diff input")["status"],
+        "review"
+    );
+
+    let merge = &asset.spec.steps[11];
+    assert_eq!(
+        merge.when.as_deref(),
+        Some("{{ steps.resolve_ship_input.output.mode }} == local")
+    );
+    let JobV2StepBody::TargetRef(merge) = &merge.body else {
+        panic!("local delivery must merge the epic branch");
+    };
+    assert_eq!(merge.target, "activity:git_merge");
+    let merge_input = merge.default_input.as_ref().expect("merge input");
+    assert_eq!(
+        merge_input["workspace_path"],
+        "{{ steps.worktree.output.workspace_path }}"
+    );
+    assert_eq!(
+        merge_input["base"],
+        "{{ steps.resolve_ship_input.output.base_branch }}"
+    );
+
+    let mark_done = &asset.spec.steps[12];
+    assert_eq!(
+        mark_done.when.as_deref(),
+        Some("{{ steps.resolve_ship_input.output.mode }} == local")
+    );
+    let JobV2StepBody::TargetRef(mark_done) = &mark_done.body else {
+        panic!("local delivery must mark the epic done");
+    };
+    assert_eq!(mark_done.target, "activity:update_task");
+    assert_eq!(
+        mark_done.default_input.as_ref().expect("mark_done input")["status"],
+        "done"
+    );
 }
 
 fn collect_agent_loop_step_ids<'a>(

@@ -234,8 +234,9 @@ pub(crate) fn run_deterministic(
         }
         // Workspace drain scan [ORB-10779]: proposed/backlog/blocked
         // tasks, failed/timeout job-runs, and unresolved check_later notes.
-        // Read-only; empty is success. Optional `fail_if_nonempty` is the
-        // post-loop fail-closed guard for `epic_pipeline`.
+        // Read-only; empty is success. Optional `fail_if_nonempty` fails
+        // closed for a workspace-wide leftover set; `epic_pipeline` now
+        // gates on `list_epic_descendants` instead [ORB-10818].
         CoreDeterministicAction::ScanUnresolvedWork => {
             scan_unresolved::scan_unresolved_work(runtime, action, input)
         }

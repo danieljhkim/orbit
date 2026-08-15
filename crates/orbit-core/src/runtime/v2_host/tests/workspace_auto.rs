@@ -28,14 +28,41 @@ fn drain_window(runtime: &OrbitRuntime, input: Value) -> Value {
 }
 
 fn list_epic_descendants(runtime: &OrbitRuntime, epic_task_id: &str) -> Value {
+    list_epic_descendants_with(runtime, epic_task_id, json!({}))
+}
+
+fn list_epic_descendants_with(runtime: &OrbitRuntime, epic_task_id: &str, extra: Value) -> Value {
+    let mut input = extra;
+    if let Some(object) = input.as_object_mut() {
+        object.insert("epic_task_id".to_string(), json!(epic_task_id));
+    }
     runtime
         .run_deterministic(
             "list_epic_descendants",
             &json!({}),
-            &json!({ "epic_task_id": epic_task_id }),
+            &input,
             ToolContext::default(),
         )
         .expect("list epic descendants")
+}
+
+fn list_epic_descendants_err(
+    runtime: &OrbitRuntime,
+    epic_task_id: &str,
+    extra: Value,
+) -> orbit_engine::DispatchError {
+    let mut input = extra;
+    if let Some(object) = input.as_object_mut() {
+        object.insert("epic_task_id".to_string(), json!(epic_task_id));
+    }
+    runtime
+        .run_deterministic(
+            "list_epic_descendants",
+            &json!({}),
+            &input,
+            ToolContext::default(),
+        )
+        .expect_err("list epic descendants should fail")
 }
 
 #[test]
@@ -134,6 +161,89 @@ fn epic_with_no_descendants_has_an_empty_drain() {
     assert_eq!(output["task_ids"], json!([]));
     assert_eq!(output["task_count"], 0);
     assert_eq!(output["empty"], true);
+}
+
+#[test]
+fn leftover_descendants_fail_closed_and_name_the_ids() {
+    let (_root, runtime, _repo_root) = runtime_with_workspace_layout();
+    let epic = runtime
+        .add_task(TaskAddParams {
+            title: "Epic root".to_string(),
+            description: "Epic fixture".to_string(),
+            acceptance_criteria: vec!["Supervised".to_string()],
+            tags: vec!["epic".to_string()],
+            plan: "Delegate children".to_string(),
+            status: Some(TaskStatus::InProgress),
+            ..Default::default()
+        })
+        .expect("seed epic root");
+    let leftover = runtime
+        .add_task(TaskAddParams {
+            parent_id: Some(epic.id.clone()),
+            title: "Still open".to_string(),
+            description: "Unfinished descendant".to_string(),
+            acceptance_criteria: vec!["Done".to_string()],
+            plan: "Implement".to_string(),
+            status: Some(TaskStatus::Backlog),
+            ..Default::default()
+        })
+        .expect("seed leftover child");
+    let unrelated = seed_list_backlog_task(
+        &runtime,
+        "Unrelated chore",
+        TaskStatus::Backlog,
+        TaskPriority::Low,
+        TaskType::Chore,
+        None,
+        vec![],
+    );
+
+    let error = list_epic_descendants_err(&runtime, &epic.id, json!({ "fail_if_nonempty": true }));
+    match error {
+        orbit_engine::DispatchError::DeterministicActionFailed { action, message } => {
+            assert_eq!(action, "list_epic_descendants");
+            assert!(message.contains(&leftover.id), "{message}");
+            assert!(
+                message.contains("epic descendants remain after drain"),
+                "{message}"
+            );
+            assert!(
+                !message.contains(&unrelated.id),
+                "unrelated backlog must not appear in the epic fail-closed message: {message}"
+            );
+        }
+        other => panic!("expected leftover-descendant failure, got {other:?}"),
+    }
+}
+
+#[test]
+fn fail_if_nonempty_ignores_unrelated_backlog_when_the_epic_is_empty() {
+    let (_root, runtime, _repo_root) = runtime_with_workspace_layout();
+    let epic = runtime
+        .add_task(TaskAddParams {
+            title: "Empty epic".to_string(),
+            description: "Epic fixture".to_string(),
+            acceptance_criteria: vec!["No children".to_string()],
+            tags: vec!["epic".to_string()],
+            plan: "No-op".to_string(),
+            status: Some(TaskStatus::InProgress),
+            ..Default::default()
+        })
+        .expect("seed empty epic");
+    seed_list_backlog_task(
+        &runtime,
+        "Unrelated chore",
+        TaskStatus::Backlog,
+        TaskPriority::Low,
+        TaskType::Chore,
+        None,
+        vec![],
+    );
+
+    let output =
+        list_epic_descendants_with(&runtime, &epic.id, json!({ "fail_if_nonempty": true }));
+    assert_eq!(output["empty"], true);
+    assert_eq!(output["task_ids"], json!([]));
 }
 
 #[test]

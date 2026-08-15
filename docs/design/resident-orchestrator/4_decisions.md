@@ -230,7 +230,7 @@ to the drain phase when it does.
 
 ## Epic completion is epic-scoped, not workspace-scoped
 
-**Recorded:** 2026-08 · [ORB-10818] · **Not yet implemented**
+**Recorded:** 2026-08 · [ORB-10818] · **Implemented** in [ORB-10818]
 
 ### Context
 
