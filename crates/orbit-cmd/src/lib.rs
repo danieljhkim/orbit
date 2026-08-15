@@ -27,6 +27,7 @@ pub mod doctor;
 pub mod migrate;
 pub mod registry_routines;
 pub mod registry_runtime;
+pub mod task_owner;
 
 #[cfg(test)]
 mod tests;

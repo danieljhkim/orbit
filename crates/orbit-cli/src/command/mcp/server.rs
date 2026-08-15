@@ -10,14 +10,19 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use orbit_cmd::registry_runtime::{RegisteredRuntimeFactory, ResolvedWorkspaceSelection};
+use orbit_cmd::task_owner;
 use orbit_common::types::{
-    McpToolDefinition, McpToolScope, NotFoundKind, OrbitError, ToolSessionContext,
+    McpToolDefinition, McpToolScope, NotFoundKind, OrbitError, ToolSessionContext, required_string,
 };
 use orbit_core::OrbitRuntime;
 use orbit_core::command::tool::{ToolEntryPoint, execute_global_in_process_tool_dispatch};
 use orbit_core::runtime::resolve_global_root;
 use orbit_mcp::{ListenerExposure, McpHost, McpListener};
 use serde_json::Value;
+
+/// The one tool whose target is a machine-global primary key, and therefore the
+/// one whose default binding follows the ID instead of the session [ORB-10797].
+const TASK_SHOW_TOOL: &str = "orbit.task.show";
 
 pub(super) fn serve_mcp_stdio(remote_caller_machine_id: Option<String>) -> Result<(), OrbitError> {
     let (host, session_context) = compose_server(remote_caller_machine_id)?;
@@ -93,9 +98,7 @@ impl ServerMcpHost {
         input: &'a Value,
         context: &'a ToolSessionContext,
     ) -> Option<&'a str> {
-        input
-            .get("workspace")
-            .and_then(Value::as_str)
+        call_workspace_selector(input)
             .or(context.workspace.as_deref())
             .map(str::trim)
             .filter(|selector| !selector.is_empty())
@@ -144,16 +147,35 @@ impl ServerMcpHost {
         input: &Value,
         context: &ToolSessionContext,
     ) -> Result<(OrbitRuntime, ResolvedWorkspaceSelection), OrbitError> {
-        let selector = Self::workspace_selector(input, context)
-            .ok_or_else(|| self.workspace_required(name))?;
-        let selected =
-            RegisteredRuntimeFactory::resolve_workspace_selector(&self.global_root, selector)?;
+        let selected = self.workspace_selection(name, input, context)?;
         let runtime = RegisteredRuntimeFactory::open_registered_checkout(
             &self.global_root,
             &selected.workspace,
             &selected.checkout,
         )?;
         Ok((runtime, selected))
+    }
+
+    /// Which registered workspace this call lands in.
+    ///
+    /// `orbit.task.show` follows the globally unique task ID unless the call
+    /// itself passes `workspace` [ORB-10797]: the session's announced workspace
+    /// is ambient, like cwd, and is the right default for authoring but the
+    /// wrong one for addressing an ID. An explicit per-call `workspace` stays a
+    /// filter on every tool, so a task owned elsewhere is not found there.
+    fn workspace_selection(
+        &self,
+        name: &str,
+        input: &Value,
+        context: &ToolSessionContext,
+    ) -> Result<ResolvedWorkspaceSelection, OrbitError> {
+        if name == TASK_SHOW_TOOL && call_workspace_selector(input).is_none() {
+            let task_id = required_string(input, &["id"], "id")?;
+            return task_owner::resolve_task_owner(&self.global_root, &task_id);
+        }
+        let selector = Self::workspace_selector(input, context)
+            .ok_or_else(|| self.workspace_required(name))?;
+        RegisteredRuntimeFactory::resolve_workspace_selector(&self.global_root, selector)
     }
 
     fn audit_global_failure(
@@ -246,6 +268,13 @@ impl McpHost for ServerMcpHost {
         }
         self.call_workspace_tool(name, input, context)
     }
+}
+
+/// The selector the call itself passed, untrimmed. Distinguishing "the caller
+/// named a workspace" from "the session announced one" is what makes an
+/// explicit selector a filter and the ambient one a default.
+fn call_workspace_selector(input: &Value) -> Option<&str> {
+    input.get("workspace").and_then(Value::as_str)
 }
 
 fn execute_core_tool(

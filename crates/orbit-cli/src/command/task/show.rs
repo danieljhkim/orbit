@@ -1,6 +1,7 @@
 use clap::Args;
+use orbit_cmd::task_owner::{WorkspaceIdentity, bound_workspace_identity};
 use orbit_core::{OrbitError, OrbitRuntime, TaskRelatedDoc};
-use serde_json::Value;
+use serde_json::{Value, json};
 
 use crate::command::{Block, CommandOut, CommandOutput, Execute, Payload};
 
@@ -64,7 +65,13 @@ impl Execute for TaskShowArgs {
         } else {
             Vec::new()
         };
+        // The task may have been reached through the global registry rather
+        // than the cwd, so every full projection names where it was read from.
+        let owner = bound_workspace_identity(runtime);
         let mut doc = task_to_json_for_runtime(runtime, &task)?;
+        if let Some(owner) = &owner {
+            insert_workspace_identity(&mut doc, owner)?;
+        }
         if self.with_context {
             insert_related_docs(&mut doc, related_docs.clone())?;
         }
@@ -76,6 +83,9 @@ impl Execute for TaskShowArgs {
             let mut out = String::new();
             use crate::output::color::{Domain, bold, dimmed, text};
             let _ = writeln!(out, "{} {}", bold("ID:"), task.id);
+            if let Some(owner) = &owner {
+                let _ = writeln!(out, "{} {}", bold("Workspace:"), owner.label());
+            }
             if let Some(parent_id) = task.parent_id() {
                 let _ = writeln!(out, "{} {}", bold("Parent Task:"), parent_id);
             }
@@ -229,6 +239,23 @@ impl Execute for TaskShowArgs {
             Ok(Payload::blocks(doc, blocks).into())
         }
     }
+}
+
+/// Name the owning workspace in the machine-readable projection, in the same
+/// `(name, logical id)` shape the human line prints, so a follow-up write can
+/// address it with `--workspace`.
+fn insert_workspace_identity(
+    value: &mut Value,
+    owner: &WorkspaceIdentity,
+) -> Result<(), OrbitError> {
+    let object = value.as_object_mut().ok_or_else(|| {
+        OrbitError::Execution("task JSON projection did not produce an object".to_string())
+    })?;
+    object.insert(
+        "workspace".to_string(),
+        json!({ "id": owner.id, "name": owner.name }),
+    );
+    Ok(())
 }
 
 fn insert_related_docs(

@@ -38,7 +38,8 @@ pub enum TaskSubcommand {
     Locks(LocksCommand),
     /// List tasks with optional filters
     List(TaskListArgs),
-    /// Show detailed information about a task
+    /// Show detailed information about a task, found by ID in any registered
+    /// workspace unless `--workspace` narrows the search
     Show(TaskShowArgs),
     /// Lint tasks for stale paths and vague acceptance criteria; `--fix` prunes stale context files
     Lint(TaskLintArgs),
