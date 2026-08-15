@@ -1,8 +1,23 @@
-# Workspace logistics sequencer [ORB-10788 / ADR-0365].
+# Workspace logistics sequencer [ORB-10788 / ORB-10819].
 #
-# One tick drains eligible loose leaves first, holds while an epic root is
-# active, otherwise starts exactly one backlog epic root. Hold and empty are
-# successful no-ops. The external clock owns repeated ticks.
+# Drains the workspace for a caller-supplied window instead of taking one
+# action and exiting. Each iteration re-lists the admissible work, so a task
+# that entered `backlog` after the run started still ships. Loose leaves ship
+# through `task_auto_pipeline` and are waited on; an epic root is dispatched
+# detached, because waiting on a multi-hour epic would consume the rest of the
+# window and starve the conflict-free leaves behind it.
+#
+# `for_seconds` gates *starting* the next iteration. It never cancels or
+# shortens a child that has already begun: `invoke_and_wait` is still holding
+# that child, which is what makes "the window does not affect tasks already in
+# progress" true by construction. A zero or absent window is expired on its
+# first answer, and `break_when` runs after the body, so the default is exactly
+# one tick — the behavior every pre-window caller of `orbit run auto` has.
+#
+# `max_iterations` is the fail-closed ceiling, not the intended exit: at the
+# 60s idle sleep below, 1500 iterations outlast the 24h maximum window even if
+# every iteration is idle. An expired window with nothing left is a plain
+# success; fail-closed lives at the epic gate, not here.
 
 schemaVersion: 2
 kind: Job
@@ -14,45 +29,68 @@ spec:
   max_active_runs: 1
   default_input:
     max_tasks: 50
+    for_seconds: 0
+    idle_sleep_seconds: 60
 
   steps:
     - id: resolve_ship_input
       target: activity:resolve_workspace_ship_input
       default_input: {}
 
-    - id: classify
-      target: activity:classify_workspace_auto_tasks
+    - id: open_window
+      target: activity:drain_window
       default_input:
-        max_tasks: "{{ input.max_tasks }}"
+        for_seconds: "{{ input.for_seconds }}"
 
-    - id: ship_leaves
-      when: "{{ steps.classify.output.decision }} == ship"
-      target: activity:invoke_and_wait
-      default_input:
-        job_name: task_auto_pipeline
-        run_input:
-          task_ids: "{{ steps.classify.output.loose_task_ids }}"
-          mode: "{{ steps.resolve_ship_input.output.mode }}"
-          base_branch: "{{ steps.resolve_ship_input.output.base_branch }}"
+    - id: drain
+      loop:
+        max_iterations: 1500
+        break_when: "{{ steps.window.output.expired }} == true"
+        steps:
+          - id: admissible
+            target: activity:classify_workspace_auto_tasks
+            default_input:
+              max_tasks: "{{ input.max_tasks }}"
 
-    - id: require_leaf_success
-      when: "{{ steps.classify.output.decision }} == ship"
-      target: activity:pipeline_success_guard
-      default_input:
-        context: workspace auto leaf ship
-        result: "{{ steps.ship_leaves.output }}"
+          - id: ship_leaves
+            when: "{{ steps.admissible.output.has_leaves }} == true"
+            target: activity:invoke_and_wait
+            default_input:
+              job_name: task_auto_pipeline
+              run_input:
+                task_ids: "{{ steps.admissible.output.loose_task_ids }}"
+                mode: "{{ steps.resolve_ship_input.output.mode }}"
+                base_branch: "{{ steps.resolve_ship_input.output.base_branch }}"
 
-    - id: run_epic
-      when: "{{ steps.classify.output.decision }} == epic"
-      target: activity:invoke_and_wait
-      default_input:
-        job_name: epic_pipeline
-        run_input:
-          epic_task_id: "{{ steps.classify.output.epic_task_id }}"
+          - id: require_leaf_success
+            when: "{{ steps.admissible.output.has_leaves }} == true"
+            target: activity:pipeline_success_guard
+            default_input:
+              context: workspace auto leaf ship
+              result: "{{ steps.ship_leaves.output }}"
 
-    - id: require_epic_success
-      when: "{{ steps.classify.output.decision }} == epic"
-      target: activity:pipeline_success_guard
-      default_input:
-        context: workspace auto epic run
-        result: "{{ steps.run_epic.output }}"
+          # Detached: the next iteration keeps shipping leaves while the epic
+          # assembles its branch. `classify_workspace_auto_tasks` re-observes
+          # this run and withholds another root until it is terminal, so the
+          # drain never queues a second epic behind `max_active_runs: 1`.
+          - id: start_epic
+            when: "{{ steps.admissible.output.has_epic }} == true"
+            target: activity:invoke_detached
+            default_input:
+              job_name: epic_pipeline
+              run_input:
+                epic_task_id: "{{ steps.admissible.output.epic_task_id }}"
+
+          - id: window
+            target: activity:drain_window
+            default_input:
+              deadline: "{{ steps.open_window.output.deadline }}"
+
+          # Idle only. A window with work in it re-lists immediately; sleeping
+          # is how an otherwise-empty workspace waits for a task to arrive or
+          # for the detached epic to finish, without spinning the loop.
+          - id: idle_wait
+            when: "{{ steps.admissible.output.empty }} == true && {{ steps.window.output.expired }} == false"
+            target: activity:sleep
+            default_input:
+              seconds: "{{ input.idle_sleep_seconds }}"

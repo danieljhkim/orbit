@@ -4,6 +4,7 @@ use clap::Args;
 use orbit_core::OrbitRuntime;
 
 use crate::command::{CommandOut, CommandOutput, Execute};
+use crate::parse::parse_duration_seconds;
 
 use super::support::{WorkflowDispatchResult, print_workflow_dispatch_results};
 
@@ -11,11 +12,16 @@ pub(super) const AUTO_WORKFLOW: &str = "auto";
 
 #[derive(Args)]
 #[command(
-    about = "Run one workspace logistics tick (loose leaves, then one epic)",
+    about = "Drain the workspace backlog for a window (loose leaves, plus one epic)",
     override_usage = "orbit run auto [OPTIONS]",
     after_help = "Inspect submitted runs with `orbit run history -j workspace_auto_pipeline` and `orbit run show <RUN_ID>`."
 )]
 pub struct AutoCommand {
+    /// How long to keep draining, e.g. `30m`, `2h`. Without it the run takes
+    /// one tick and stops. The window bounds only the start of new work: a
+    /// task already being shipped when it expires still finishes.
+    #[arg(long = "for", value_name = "DURATION")]
+    pub for_duration: Option<String>,
     /// Output as JSON.
     #[arg(long)]
     pub json: bool,
@@ -27,7 +33,13 @@ pub struct AutoCommand {
 
 impl Execute for AutoCommand {
     fn execute(self, runtime: &OrbitRuntime) -> CommandOut {
-        let invoke = runtime.submit_workspace_auto_run(None, self.claim_token.as_deref())?;
+        let for_seconds = self
+            .for_duration
+            .as_deref()
+            .map(parse_duration_seconds)
+            .transpose()?;
+        let invoke =
+            runtime.submit_workspace_auto_run(for_seconds, None, self.claim_token.as_deref())?;
         let run = WorkflowDispatchResult {
             workflow_alias: AUTO_WORKFLOW,
             job_id: invoke.job_name,

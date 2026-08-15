@@ -26,7 +26,7 @@ related_artifacts: [ORB-10332, ORB-10775, ORB-10776, ORB-10779, ORB-10788, ORB-1
 > | [§1 Epic worktree and sequential child drain](#1-epic-worktree-and-sequential-child-drain) | **live** ([ORB-10816]) |
 > | [§2 Epic agent](#2-epic-agent-epic_orchestrator) | planned ([ORB-10817]) — the shipped activity is still the v1 dispatcher |
 > | [§3 `epic_pipeline` job](#3-epic_pipeline-job) | partly live — §1's phases ship; the agent step, completion gate, and delivery are [ORB-10818] |
-> | [§4 Workspace drain](#4-workspace-drain-workspace_auto_pipeline) | planned ([ORB-10819]) — the epic reservation is live, but `decision: hold` and the one-action tick still ship |
+> | [§4 Workspace drain](#4-workspace-drain-workspace_auto_pipeline) | **live** ([ORB-10819]) |
 > | [§5](#5-unresolved-work-scan)–[§8](#8-authority-and-completion) | live |
 
 ## 1. Epic worktree and sequential child drain
@@ -132,44 +132,54 @@ epic root -> review (pr) | done (local)
 
 ## 4. Workspace drain (`workspace_auto_pipeline`)
 
-> **Planned** ([ORB-10819]). `classify_workspace_auto_tasks` still returns the four-way
-> `ship`/`hold`/`epic`/`empty` decision and still short-circuits to `hold` whenever an epic root is
-> `in-progress`; there is no window. The epic reservation this section depends on is already live
-> (see below).
-
 `orbit run ship` is a leaf implementer. The logistics verb is a separate job; that split from v1
-stands. What changes is that a tick becomes a **window** ([Auto drains for a window instead of taking one action](./4_decisions.md#auto-drains-for-a-window-instead-of-taking-one-action), [ORB-10819]).
+stands. What changed is that a tick became a **window** ([Auto drains for a window instead of taking one action](./4_decisions.md#auto-drains-for-a-window-instead-of-taking-one-action), [ORB-10819]).
 
 ```text
 resolve_ship_input                      # mode + base_branch for this workspace
 open_window(input.for_seconds)          # stamps a deadline; absent/zero = one tick
 loop
     admissible = backlog leaves whose context_files do not overlap a live holder
-               + eligible backlog epic roots
+               + one backlog epic root, when no epic_pipeline run is live
     ship leaves      -> invoke_and_wait task_auto_pipeline
-    start epic roots -> dispatch epic_pipeline detached
-    sleep when nothing was admissible
+    start epic root  -> invoke_detached epic_pipeline
+    re-read the window
+    sleep when nothing was admissible and the window is still open
     break when the window expired
 ```
+
+`drain_window` is one deterministic activity with two call shapes. Given `for_seconds` and no
+`deadline` it stamps `now + for_seconds`; given that deadline back it answers whether the window has
+passed. The stamp therefore lives in the stamping step's own pipeline output — no new durable
+artifact, and re-reading the window is a pure function of a value the run already carries. Because
+`break_when` is evaluated after the loop body, a zero window still yields exactly one iteration,
+which is why `orbit run auto` with no `--for` behaves exactly as it did before the window existed.
 
 - The deadline gates **starting** new work. In-flight children finish because `invoke_and_wait`
   blocks on them — that is what makes "the window does not affect tasks already in progress" true
   by construction rather than by special-casing.
 - Each iteration **re-lists** the backlog, so a task created after the run started still ships.
-- Epic dispatch is **detached**. Waiting on a multi-hour epic would consume the rest of the window
-  and starve conflict-free leaves behind it, which is the v1 failure mode with a longer fuse. The
-  loop re-observes the epic's run state each iteration instead.
+- Epic dispatch is **detached** (`invoke_detached`). Waiting on a multi-hour epic would consume the
+  rest of the window and starve conflict-free leaves behind it, which is the v1 failure mode with a
+  longer fuse. `classify_workspace_auto_tasks` re-observes the epic's run each iteration instead,
+  and withholds another root until that run is terminal — `epic_pipeline` admits one active run, so
+  a second dispatch would queue a `pending` run rather than start work, and the loop would mint a
+  fresh one every iteration. Keying on the run rather than on the root's status also closes the
+  window between a detached submit and the child's `worktree_setup` moving that root to
+  `in-progress`.
 - An expired window with nothing left is a plain success. Fail-closed lives at the epic gate (§3),
-  not here.
+  not here. A failed **leaf** ship still fails the drain: `pipeline_success_guard` follows the wait,
+  as it did in v1, and the resulting `blocked` task is the triage pipeline's input.
 
 **Conflict admission replaces `hold`.** An `epic`-tagged root holds one reservation covering the
-union of its descendants' `context_files`. That union is **live** since [ORB-10816]:
+union of its descendants' `context_files`. That union is live since [ORB-10816]:
 `lock_context_files_for_task` walks `parent_id` to collect every descendant's declared files when
 the task carries `tag: epic`, and both `active_task_lock_holders` and `task_overlap_conflicts` read
-through it. So loose leaves are already admitted or excluded by machinery that exists —
-`task_overlap_conflicts` at discovery, `reserve_locks` atomically at the gate. What [ORB-10819]
-still owes is deleting the short-circuit above it, collapsing the four-way
-`ship`/`hold`/`epic`/`empty` decision to an admissible set.
+through it. So loose leaves are admitted or excluded by machinery that already exists —
+`task_overlap_conflicts` at discovery, `reserve_locks` atomically at the gate. [ORB-10819] deleted
+the short-circuit above it: `classify_workspace_auto_tasks` returns an admissible set
+(`loose_task_ids` + at most one `epic_task_id`) instead of a four-way
+`ship`/`hold`/`epic`/`empty` decision, and `hold` is gone.
 
 A task is in the **epic family** when it carries `tag: epic` or any ancestor does. Walk `parent_id`
 the same way `list_backlog_tasks` already walks it for lock grouping.
@@ -253,8 +263,11 @@ children, and answer humans. None of that is a seeded routine.
 
 `workspace_ship_pipeline` remains the stable wrapper name for existing sweeps and delegates to the
 sequencer. It waits on its child, so whatever window it passes is a window its routine's
-`overlap: forbid` holds for. Choose that window deliberately: `ship-sweep-orbit` fires every 30
-minutes.
+`overlap: forbid` holds for. That window is chosen deliberately: `ship-sweep-orbit` fires every 30
+minutes, so the wrapper passes `for_seconds: 1200` — 20 minutes of draining, leaving 10 minutes of
+slack for an in-flight child to finish past the deadline. A longer wrapper window would silently
+start skipping fires. An operator who wants a multi-hour drain runs `orbit run auto --for 2h`
+directly and accepts that it owns the sequencer's single `max_active_runs` slot for that long.
 
 ## 8. Authority and completion
 

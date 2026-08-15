@@ -17,7 +17,7 @@ use super::triage;
 
 const RUN_AFTER_HELP: &str = "\
 Workflow entrypoints:
-  orbit run auto
+  orbit run auto [--for 30m]
   orbit run ship [task_id ...]
   orbit run ship-sweep [--dry-run] [--json]
   orbit run triage [task_id ...]
@@ -48,7 +48,7 @@ Maintenance:
 {usage-heading} {usage}
 
 Workflows:
-  auto        Run one workspace logistics tick (loose leaves, then one epic)
+  auto        Drain the workspace backlog for a window (loose leaves, plus one epic)
   ship        Ship backlog or explicitly selected tasks through the gated task pipeline
   ship-sweep  Dispatch ship runs in every registered workspace with ready backlog tasks
   triage      Triage tasks blocked by failed runs; re-backlog environmental failures
@@ -81,7 +81,7 @@ impl Execute for RunCommand {
 
 #[derive(Subcommand)]
 pub enum RunSubcommand {
-    /// Run one workspace logistics tick (loose leaves, then one epic)
+    /// Drain the workspace backlog for a window (loose leaves, plus one epic)
     Auto(auto::AutoCommand),
     /// Ship backlog or explicitly selected tasks through the gated task pipeline
     Ship(ship::ShipCommand),

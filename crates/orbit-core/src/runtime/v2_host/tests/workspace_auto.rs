@@ -1,3 +1,4 @@
+use chrono::{SecondsFormat, Utc};
 use orbit_common::types::{TaskPriority, TaskStatus, TaskType};
 use orbit_engine::RuntimeHost;
 use orbit_tools::ToolContext;
@@ -6,7 +7,7 @@ use serde_json::{Value, json};
 use crate::OrbitRuntime;
 use crate::command::task::{TaskAddParams, TaskUpdateParams};
 use crate::runtime::v2_host::test_support::{
-    runtime_with_workspace_layout, seed_list_backlog_task,
+    runtime_with_workspace_layout, seed_list_backlog_task, write_workspace_file,
 };
 
 fn classify(runtime: &OrbitRuntime) -> Value {
@@ -18,6 +19,12 @@ fn classify(runtime: &OrbitRuntime) -> Value {
             ToolContext::default(),
         )
         .expect("classify workspace auto tasks")
+}
+
+fn drain_window(runtime: &OrbitRuntime, input: Value) -> Value {
+    runtime
+        .run_deterministic("drain_window", &json!({}), &input, ToolContext::default())
+        .expect("drain window")
 }
 
 fn list_epic_descendants(runtime: &OrbitRuntime, epic_task_id: &str) -> Value {
@@ -130,7 +137,7 @@ fn epic_with_no_descendants_has_an_empty_drain() {
 }
 
 #[test]
-fn two_loose_tasks_win_before_one_epic_and_three_children() {
+fn two_loose_tasks_and_one_epic_root_are_admissible_together() {
     let (_root, runtime, _repo_root) = runtime_with_workspace_layout();
     let loose_one = seed_list_backlog_task(
         &runtime,
@@ -173,10 +180,14 @@ fn two_loose_tasks_win_before_one_epic_and_three_children() {
         );
     }
 
+    // Leaves and the epic are independent answers, so both are admissible in
+    // the same iteration: the drain ships the leaves and starts the epic.
     let first = classify(&runtime);
-    assert_eq!(first["decision"], "ship");
     assert_eq!(first["loose_task_ids"], json!([loose_one.id, loose_two.id]));
-    assert_eq!(first["epic_task_id"], Value::Null);
+    assert_eq!(first["has_leaves"], true);
+    assert_eq!(first["epic_task_id"], epic.id);
+    assert_eq!(first["has_epic"], true);
+    assert_eq!(first["empty"], false);
 
     for loose in [&loose_one, &loose_two] {
         runtime
@@ -190,14 +201,20 @@ fn two_loose_tasks_win_before_one_epic_and_three_children() {
             .expect("complete loose task");
     }
     let second = classify(&runtime);
-    assert_eq!(second["decision"], "epic");
     assert_eq!(second["epic_task_id"], epic.id);
     assert_eq!(second["loose_task_ids"], json!([]));
+    assert_eq!(second["has_leaves"], false);
 }
 
+/// The `hold` decision this replaces froze every conflict-free chore for as
+/// long as an epic root was `in-progress`. Admission is the epic's lock
+/// reservation instead: the leaf that overlaps its descendants' declared files
+/// is excluded, and the one that does not still ships in the same drain.
 #[test]
-fn in_progress_epic_holds_and_empty_workspace_succeeds() {
-    let (_root, runtime, _repo_root) = runtime_with_workspace_layout();
+fn a_live_epic_excludes_only_the_leaves_that_overlap_its_reservation() {
+    let (_root, runtime, repo_root) = runtime_with_workspace_layout();
+    write_workspace_file(&repo_root, "crates/epic/src/lib.rs");
+    write_workspace_file(&repo_root, "crates/elsewhere/src/lib.rs");
     let epic = runtime
         .add_task(TaskAddParams {
             title: "Active epic".to_string(),
@@ -205,27 +222,164 @@ fn in_progress_epic_holds_and_empty_workspace_succeeds() {
             acceptance_criteria: vec!["Supervised".to_string()],
             tags: vec!["epic".to_string()],
             plan: "Delegate children".to_string(),
+            workspace_path: Some(".".to_string()),
             status: Some(TaskStatus::InProgress),
             ..Default::default()
         })
         .expect("seed active epic");
+    // The epic root reserves the union of its descendants' context files.
     seed_list_backlog_task(
         &runtime,
-        "Late loose task",
+        "Epic child",
+        TaskStatus::Backlog,
+        TaskPriority::Medium,
+        TaskType::Chore,
+        Some(epic.id.clone()),
+        vec!["crates/epic/src/lib.rs"],
+    );
+    let overlapping = seed_list_backlog_task(
+        &runtime,
+        "Late loose task inside the epic's files",
         TaskStatus::Backlog,
         TaskPriority::Critical,
         TaskType::Chore,
         None,
-        vec![],
+        vec!["crates/epic/src/lib.rs"],
+    );
+    let conflict_free = seed_list_backlog_task(
+        &runtime,
+        "Late loose task elsewhere",
+        TaskStatus::Backlog,
+        TaskPriority::Low,
+        TaskType::Chore,
+        None,
+        vec!["crates/elsewhere/src/lib.rs"],
     );
 
-    let held = classify(&runtime);
-    assert_eq!(held["decision"], "hold");
-    assert_eq!(held["epic_task_id"], epic.id);
+    let admissible = classify(&runtime);
+    assert_eq!(admissible["loose_task_ids"], json!([conflict_free.id]));
+    assert_eq!(admissible["has_leaves"], true);
+    assert_eq!(admissible["empty"], false);
+    assert!(
+        !admissible["loose_task_ids"]
+            .as_array()
+            .expect("loose task ids")
+            .contains(&json!(overlapping.id)),
+        "a leaf overlapping the epic's reserved files must not ship"
+    );
+}
 
-    let (_empty_root, empty_runtime, _empty_repo_root) = runtime_with_workspace_layout();
-    let empty = classify(&empty_runtime);
-    assert_eq!(empty["decision"], "empty");
+#[test]
+fn an_empty_workspace_is_admissibly_empty() {
+    let (_root, runtime, _repo_root) = runtime_with_workspace_layout();
+
+    let empty = classify(&runtime);
+
     assert_eq!(empty["loose_task_ids"], json!([]));
+    assert_eq!(empty["has_leaves"], false);
     assert_eq!(empty["epic_task_id"], Value::Null);
+    assert_eq!(empty["has_epic"], false);
+    assert_eq!(empty["empty"], true);
+    assert_eq!(empty["active_epic_run_id"], Value::Null);
+}
+
+#[test]
+fn a_backlog_epic_root_waits_while_an_epic_run_is_live() {
+    let (_root, runtime, _repo_root) = runtime_with_workspace_layout();
+    let waiting = runtime
+        .add_task(TaskAddParams {
+            title: "Second epic root".to_string(),
+            description: "Epic fixture".to_string(),
+            acceptance_criteria: vec!["Supervised".to_string()],
+            tags: vec!["epic".to_string()],
+            plan: "Delegate children".to_string(),
+            status: Some(TaskStatus::Backlog),
+            ..Default::default()
+        })
+        .expect("seed backlog epic root");
+
+    assert_eq!(classify(&runtime)["epic_task_id"], waiting.id);
+
+    // `epic_pipeline` admits one active run. Once one is live, offering
+    // another root would queue a pending run rather than start work — and the
+    // drain loop would mint a fresh one every iteration.
+    let live = runtime
+        .stores()
+        .jobs()
+        .insert_job_run(
+            "epic_pipeline",
+            1,
+            Utc::now(),
+            Some(json!({ "epic_task_id": "ORB-00001" })),
+            None,
+        )
+        .expect("insert live epic run");
+
+    let admissible = classify(&runtime);
+    assert_eq!(admissible["epic_task_id"], Value::Null);
+    assert_eq!(admissible["has_epic"], false);
+    assert_eq!(admissible["empty"], true);
+    assert_eq!(admissible["active_epic_run_id"], live.run_id);
+    assert_eq!(admissible["active_epic_task_id"], "ORB-00001");
+}
+
+#[test]
+fn an_absent_window_is_expired_on_its_first_answer() {
+    let (_root, runtime, _repo_root) = runtime_with_workspace_layout();
+
+    // `break_when` is evaluated after the loop body, so an already-expired
+    // window still yields exactly one iteration — today's one-tick behavior.
+    let stamped = drain_window(&runtime, json!({}));
+    assert_eq!(stamped["expired"], true);
+    assert_eq!(stamped["remaining_seconds"], 0.0);
+
+    // The template over an absent `for_seconds` renders an empty string.
+    let rendered_absent = drain_window(&runtime, json!({ "for_seconds": "" }));
+    assert_eq!(rendered_absent["expired"], true);
+}
+
+#[test]
+fn a_stamped_window_answers_expiry_against_its_own_deadline() {
+    let (_root, runtime, _repo_root) = runtime_with_workspace_layout();
+
+    let stamped = drain_window(&runtime, json!({ "for_seconds": 600 }));
+    assert_eq!(stamped["expired"], false);
+    let remaining = stamped["remaining_seconds"]
+        .as_f64()
+        .expect("remaining seconds");
+    assert!(
+        (595.0..=600.0).contains(&remaining),
+        "expected ~600s remaining, got {remaining}"
+    );
+
+    // Re-reading the stamp is a pure function of the deadline the first call
+    // returned; nothing durable is written between the two.
+    let reread = drain_window(&runtime, json!({ "deadline": stamped["deadline"] }));
+    assert_eq!(reread["expired"], false);
+    assert_eq!(reread["deadline"], stamped["deadline"]);
+
+    let past =
+        (Utc::now() - chrono::Duration::seconds(1)).to_rfc3339_opts(SecondsFormat::Secs, true);
+    assert_eq!(
+        drain_window(&runtime, json!({ "deadline": past }))["expired"],
+        true
+    );
+}
+
+#[test]
+fn a_drain_window_rejects_an_unparseable_deadline_or_an_oversize_request() {
+    let (_root, runtime, _repo_root) = runtime_with_workspace_layout();
+
+    for input in [
+        json!({ "deadline": "not-a-timestamp" }),
+        json!({ "for_seconds": 86_401 }),
+        json!({ "for_seconds": -1 }),
+    ] {
+        assert!(
+            runtime
+                .run_deterministic("drain_window", &json!({}), &input, ToolContext::default())
+                .is_err(),
+            "expected {input} to be refused"
+        );
+    }
 }
