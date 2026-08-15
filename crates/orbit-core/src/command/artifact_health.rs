@@ -438,8 +438,8 @@ fn diagnose_catalog(runtime: &OrbitRuntime, catalog: &ManagedCatalog) -> Artifac
                     condition: ArtifactCondition::Stale,
                     provenance: ArtifactProvenance::OrbitWritten,
                     detail: format!(
-                        "`{name}` is an Orbit-written copy of an older release of this bundled \
-                         default and has drifted from the content this binary ships"
+                        "`{name}` is a stale shipped default: an Orbit-written copy of an older \
+                         release that has drifted from the content this binary ships"
                     ),
                     remediation: "Run `orbit init --refresh-defaults`.".to_string(),
                 }),
@@ -485,8 +485,15 @@ fn finish_catalog_health(
         let provenance = read_artifact(&fault.path)
             .map(|on_disk| provenance(tracked.get(&fault.name), &on_disk))
             .unwrap_or(ArtifactProvenance::UserAuthored);
+        let stale_shipped_default = findings.iter().any(|finding| {
+            finding.name == fault.name
+                && finding.condition == ArtifactCondition::Stale
+                && finding.provenance == ArtifactProvenance::OrbitWritten
+        });
         let remediation = if let Some(command) = fault.repair_command {
             format!("Run `{command}`.")
+        } else if stale_shipped_default {
+            "Run `orbit init --refresh-defaults`.".to_string()
         } else if provenance == ArtifactProvenance::OrbitWritten {
             format!(
                 "A shipped {} default failed to load — reinstall or upgrade orbit, then run `orbit init --refresh-defaults`.",

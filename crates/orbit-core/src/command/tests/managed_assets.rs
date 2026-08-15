@@ -15,6 +15,7 @@ use super::super::job::seed_default_jobs;
 use crate::OrbitRuntime;
 use crate::command::job::JobCatalogFilter;
 use crate::config::agent_detect::DetectedAgents;
+use crate::runtime::OrbitRuntimeRoots;
 
 fn init_global(root: &Path) -> InitResult {
     init_workspace_at_root(
@@ -209,6 +210,69 @@ fn refresh_writes_asset_and_manifest_when_embedded_digest_changed() {
     assert_eq!(
         manifest["assets"]["sleep"].as_str().expect("sleep digest"),
         sha256(&original)
+    );
+}
+
+#[test]
+fn runtime_bootstrap_refreshes_orbit_written_stale_activity_before_catalog_load() {
+    let root = tempdir().expect("create tempdir");
+    let global_root = root.path().join("global");
+    let workspace_root = root.path().join("repo/.orbit");
+    init_global(&global_root);
+
+    let activities_dir = global_root.join("resources/activities");
+    let path = activities_dir.join("agent_implement.yaml");
+    let current = std::fs::read_to_string(&path).expect("read current activity");
+    let stale = current.replacen("  tools:\n", "  tools:\n    - fs.read\n", 1);
+    assert_ne!(stale, current, "fixture must contain the retired tool");
+    std::fs::write(&path, &stale).expect("write stale activity");
+    add_managed_manifest_entry(&activities_dir, "agent_implement", &stale);
+
+    let runtime = OrbitRuntime::initialize_from_resolved_roots(
+        OrbitRuntimeRoots {
+            global_root: global_root.clone(),
+            shared_root: workspace_root.clone(),
+            local_root: workspace_root.clone(),
+        },
+        None,
+    )
+    .expect("bootstrap refreshes the Orbit-written stale activity");
+    runtime
+        .v2_activity_catalog()
+        .expect("the current binary loads the refreshed catalog");
+    assert_eq!(
+        std::fs::read_to_string(&path).expect("read refreshed activity"),
+        current
+    );
+}
+
+#[test]
+fn runtime_bootstrap_preserves_locally_modified_stale_managed_activity() {
+    let root = tempdir().expect("create tempdir");
+    let global_root = root.path().join("global");
+    let workspace_root = root.path().join("repo/.orbit");
+    init_global(&global_root);
+
+    let activities_dir = global_root.join("resources/activities");
+    let path = activities_dir.join("agent_implement.yaml");
+    let current = std::fs::read_to_string(&path).expect("read current activity");
+    let stale = current.replacen("  tools:\n", "  tools:\n    - fs.read\n", 1);
+    let locally_modified = format!("{stale}# operator edit\n");
+    std::fs::write(&path, &locally_modified).expect("write locally modified stale activity");
+    add_managed_manifest_entry(&activities_dir, "agent_implement", &stale);
+
+    OrbitRuntime::initialize_from_resolved_roots(
+        OrbitRuntimeRoots {
+            global_root: global_root.clone(),
+            shared_root: workspace_root.clone(),
+            local_root: workspace_root,
+        },
+        None,
+    )
+    .expect("bootstrap preserves a locally modified managed activity");
+    assert_eq!(
+        std::fs::read_to_string(&path).expect("read preserved activity"),
+        locally_modified
     );
 }
 

@@ -29,4 +29,5 @@ libc.workspace = true
 
 [dev-dependencies]
 orbit-common = { path = "../orbit-common", features = ["test-util"] }
+sha2.workspace = true
 tempfile = "3"
