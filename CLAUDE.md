@@ -6,7 +6,10 @@ Project instructions for agents working on Orbit (loaded as both `AGENTS.md` and
 
 - **Don't commit** until the Orbit task has been explicitly approved by the human.
 - **Don't invent task IDs** — get them from `orbit.task.add`. Don't edit task files directly — use `orbit.task.update`.
-- **Don't add cross-crate dependencies** without checking [`ARCHITECTURE.md`](ARCHITECTURE.md). If a new edge is genuinely needed, file a task and an ADR before adding it.
+- **Don't add cross-crate dependencies** without checking and updating [`ARCHITECTURE.md`](ARCHITECTURE.md). If a new edge is genuinely needed, make its ownership and direction explicit in the same change.
+- Historical ADRs are being retired and are not an authority. Do not search for,
+  cite, or use ADRs to justify a decision. Judge from the current code, runtime
+  behavior, tests, documented constraints, and the requirements at hand.
 
 ## Branching
 
@@ -28,8 +31,8 @@ Reusable codebase-specific patterns (Command, RAII guard, newtype, crate-boundar
 
 ## Design Docs
 
-- **Layout.** Feature design docs live under `docs/design/<feature>/`. Folder layout, required sections, ADR format, and glossary shape are documented in [`docs/design/CONVENTIONS.md`](docs/design/CONVENTIONS.md). Use the `orbit-search` skill / `orbit docs` surface to retrieve indexed docs.
-- **Same-PR updates.** Change the doc in the same PR as the code: flip affected ADR statuses (`Proposed → Accepted` with task ID), bump `**Last updated:**`, add a new ADR for any non-obvious decision the change embodies. Stale docs are a review blocker.
+- **Layout.** Feature design docs live under `docs/design/<feature>/`. Keep current explanatory docs aligned with the implementation when they remain useful.
+- **Same-PR updates.** Change affected current docs in the same PR as the code. Stale descriptions of live behavior are a review blocker.
 
 ## CHANGELOG entries
 
@@ -37,7 +40,7 @@ Don't modify `CHANGELOG.md` during task execution — it is compiled at release 
 
 ## Rust Practices
 
-- Concrete internal task, ADR, learning, and friction IDs are allowed in ordinary source comments, but never expose them in user-facing errors, CLI help/output, generated files, or advertised MCP/tool text; note that Clap renders `///` comments on commands and arguments as public help.
+- Concrete internal task, learning, and friction IDs are allowed in ordinary source comments, but never expose them in user-facing errors, CLI help/output, generated files, or advertised MCP/tool text; note that Clap renders `///` comments on commands and arguments as public help.
 
 Lint-enforced rules (full set in `[workspace.lints]`; key implications below):
 
