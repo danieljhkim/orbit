@@ -32,8 +32,17 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
-use orbit_common::types::activity_job::{load_activity_asset, load_job_asset};
+use orbit_common::types::activity_job::load_job_asset;
 use orbit_common::types::{OrbitError, parse_routine_yaml};
+
+use super::activity_catalog_health::{
+    ActivityCatalogFault, collect_activity_catalog_faults,
+    repair_retired_activity_backends as repair_activity_backends,
+};
+
+pub use super::activity_catalog_health::{
+    FIX_RETIRED_ACTIVITY_BACKENDS_CMD, RetiredActivityBackendRepair, RetiredActivityBackendSkip,
+};
 
 use crate::OrbitRuntime;
 use crate::auto_tasks::{auto_tasks_dir, collect_auto_tasks};
@@ -296,6 +305,15 @@ impl OrbitRuntime {
         }
         Ok(removed)
     }
+
+    /// Remove known retired `spec.backend` values from schemaVersion 2
+    /// agent-loop activities. Unknown backends and unrelated malformed
+    /// files are left untouched and listed for a manual edit.
+    pub fn repair_retired_activity_backends(
+        &self,
+    ) -> Result<RetiredActivityBackendRepair, OrbitError> {
+        repair_activity_backends(self)
+    }
 }
 
 /// Read one artifact file, treating an unreadable file as absent.
@@ -319,11 +337,16 @@ fn diagnose_catalog(runtime: &OrbitRuntime, catalog: &ManagedCatalog) -> Artifac
     let mut findings = Vec::new();
 
     if !catalog.dir.is_dir() {
-        return ArtifactHealth {
-            kind,
-            scanned: 0,
-            findings,
-        };
+        // Activities also live in workspace / env catalog dirs. A missing
+        // managed directory must not hide those production-path faults.
+        if kind != ArtifactKind::Activity {
+            return ArtifactHealth {
+                kind,
+                scanned: 0,
+                findings,
+            };
+        }
+        return finish_catalog_health(runtime, catalog, findings, &BTreeMap::new());
     }
 
     let manifest_path = catalog.dir.join(MANAGED_ASSET_MANIFEST_FILE);
@@ -447,13 +470,24 @@ fn diagnose_catalog(runtime: &OrbitRuntime, catalog: &ManagedCatalog) -> Artifac
         }
     }
 
-    // Faulty: whatever is on disk now, does it still load?
+    finish_catalog_health(runtime, catalog, findings, &tracked)
+}
+
+fn finish_catalog_health(
+    runtime: &OrbitRuntime,
+    catalog: &ManagedCatalog,
+    mut findings: Vec<ArtifactFinding>,
+    tracked: &BTreeMap<String, String>,
+) -> ArtifactHealth {
+    let kind = catalog.kind;
     let (scanned, faults) = collect_faults(runtime, catalog);
-    for (name, path, message) in faults {
-        let provenance = read_artifact(&path)
-            .map(|on_disk| provenance(tracked.get(&name), &on_disk))
+    for fault in faults {
+        let provenance = read_artifact(&fault.path)
+            .map(|on_disk| provenance(tracked.get(&fault.name), &on_disk))
             .unwrap_or(ArtifactProvenance::UserAuthored);
-        let remediation = if provenance == ArtifactProvenance::OrbitWritten {
+        let remediation = if let Some(command) = fault.repair_command {
+            format!("Run `{command}`.")
+        } else if provenance == ArtifactProvenance::OrbitWritten {
             format!(
                 "A shipped {} default failed to load — reinstall or upgrade orbit, then run `orbit init --refresh-defaults`.",
                 kind.singular()
@@ -462,16 +496,16 @@ fn diagnose_catalog(runtime: &OrbitRuntime, catalog: &ManagedCatalog) -> Artifac
             format!(
                 "Fix the {} definition at `{}` (or move it aside), then rerun `orbit doctor`.",
                 kind.singular(),
-                path.display()
+                fault.path.display()
             )
         };
         findings.push(ArtifactFinding {
             kind,
-            name,
-            path,
+            name: fault.name,
+            path: fault.path,
             condition: ArtifactCondition::Faulty,
             provenance,
-            detail: message,
+            detail: fault.detail,
             remediation,
         });
     }
@@ -486,24 +520,45 @@ fn diagnose_catalog(runtime: &OrbitRuntime, catalog: &ManagedCatalog) -> Artifac
     }
 }
 
+struct LoadFault {
+    name: String,
+    path: PathBuf,
+    detail: String,
+    repair_command: Option<&'static str>,
+}
+
+impl From<ActivityCatalogFault> for LoadFault {
+    fn from(fault: ActivityCatalogFault) -> Self {
+        Self {
+            name: fault.name,
+            path: fault.path,
+            detail: fault.detail,
+            repair_command: fault.repair_command,
+        }
+    }
+}
+
 /// Load every artifact of one kind through its real loader, returning
 /// `(inspected count, failures)`. Using the production loader is the point:
 /// doctor must report exactly what dispatch would find, not a parallel parse.
-fn collect_faults(
-    runtime: &OrbitRuntime,
-    catalog: &ManagedCatalog,
-) -> (usize, Vec<(String, PathBuf, String)>) {
+fn collect_faults(runtime: &OrbitRuntime, catalog: &ManagedCatalog) -> (usize, Vec<LoadFault>) {
+    if catalog.kind == ArtifactKind::Activity {
+        let (scanned, faults) = collect_activity_catalog_faults(runtime);
+        return (scanned, faults.into_iter().map(LoadFault::from).collect());
+    }
+
     let mut faults = Vec::new();
 
     if catalog.kind == ArtifactKind::Skill {
         let rows = match runtime.skill_catalog().doctor() {
             Ok(rows) => rows,
             Err(error) => {
-                faults.push((
-                    "<catalog>".to_string(),
-                    catalog.dir.clone(),
-                    format!("cannot enumerate skills: {error}"),
-                ));
+                faults.push(LoadFault {
+                    name: "<catalog>".to_string(),
+                    path: catalog.dir.clone(),
+                    detail: format!("cannot enumerate skills: {error}"),
+                    repair_command: None,
+                });
                 return (0, faults);
             }
         };
@@ -511,7 +566,12 @@ fn collect_faults(
         for row in rows {
             if row.status == crate::skill_catalog::SkillCatalogDoctorStatus::Error {
                 let path = catalog.dir.join(&row.skill_id).join("SKILL.md");
-                faults.push((format!("{}/SKILL.md", row.skill_id), path, row.message));
+                faults.push(LoadFault {
+                    name: format!("{}/SKILL.md", row.skill_id),
+                    path,
+                    detail: row.message,
+                    repair_command: None,
+                });
             }
         }
         return (scanned, faults);
@@ -529,7 +589,12 @@ fn collect_faults(
                 .and_then(|stem| stem.to_str())
                 .unwrap_or_default()
                 .to_string();
-            faults.push((name, path, error.message));
+            faults.push(LoadFault {
+                name,
+                path,
+                detail: error.message,
+                repair_command: None,
+            });
         }
         return (scanned, faults);
     }
@@ -558,21 +623,28 @@ fn collect_faults(
             .unwrap_or_default()
             .to_string();
         let Some(raw) = read_artifact(&path) else {
-            faults.push((name, path, "file is unreadable".to_string()));
+            faults.push(LoadFault {
+                name,
+                path,
+                detail: "file is unreadable".to_string(),
+                repair_command: None,
+            });
             continue;
         };
         let outcome = match catalog.kind {
-            ArtifactKind::Activity => load_activity_asset(&raw)
-                .map(|_| ())
-                .map_err(|e| e.to_string()),
             ArtifactKind::Job => load_job_asset(&raw).map(|_| ()).map_err(|e| e.to_string()),
             ArtifactKind::Routine => parse_routine_yaml(&raw)
                 .map(|_| ())
                 .map_err(|e| e.to_string()),
-            ArtifactKind::Skill | ArtifactKind::AutoTask => Ok(()),
+            ArtifactKind::Activity | ArtifactKind::Skill | ArtifactKind::AutoTask => Ok(()),
         };
-        if let Err(message) = outcome {
-            faults.push((name, path, message));
+        if let Err(detail) = outcome {
+            faults.push(LoadFault {
+                name,
+                path,
+                detail,
+                repair_command: None,
+            });
         }
     }
     (scanned, faults)

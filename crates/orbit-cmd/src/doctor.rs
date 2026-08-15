@@ -23,7 +23,7 @@ use std::path::{Path, PathBuf};
 use fs2::FileExt;
 use orbit_common::types::{OrbitError, WorkspacePaths};
 use orbit_core::OrbitRuntime;
-use orbit_core::command::artifact_health::ArtifactFinding;
+use orbit_core::command::artifact_health::{ArtifactFinding, RetiredActivityBackendRepair};
 use orbit_store::sqlite::migration::SUPPORTED_SCHEMA_VERSION;
 use serde::Serialize;
 
@@ -119,6 +119,11 @@ pub trait DoctorCommands {
     /// catalog. Faulty and user-authored artifacts are never touched.
     fn remove_stale_definition_artifacts(&self) -> Result<usize, OrbitError>;
 
+    /// Remove known retired `spec.backend` values from schemaVersion 2
+    /// agent-loop activities. Unknown backends and unrelated malformed
+    /// files are left untouched.
+    fn repair_retired_activity_backends(&self) -> Result<RetiredActivityBackendRepair, OrbitError>;
+
     /// Cheap store write probe for health endpoints: open the store and
     /// acquire + roll back the write lock without mutating anything.
     fn health_check_store_writable(&self) -> Result<String, OrbitError>;
@@ -156,6 +161,10 @@ impl DoctorCommands for OrbitRuntime {
 
     fn remove_stale_definition_artifacts(&self) -> Result<usize, OrbitError> {
         OrbitRuntime::remove_stale_definition_artifacts(self)
+    }
+
+    fn repair_retired_activity_backends(&self) -> Result<RetiredActivityBackendRepair, OrbitError> {
+        OrbitRuntime::repair_retired_activity_backends(self)
     }
 
     fn remove_retired_graph_state(&self) -> Result<usize, OrbitError> {

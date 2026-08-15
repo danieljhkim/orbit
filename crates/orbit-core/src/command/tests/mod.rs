@@ -1,3 +1,4 @@
+mod artifact_health;
 mod executor;
 mod job_pipeline;
 mod job_submission;

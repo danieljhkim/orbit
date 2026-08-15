@@ -51,6 +51,13 @@ needs through its step inputs instead.
 Every refusal carries the same instruction: remove the setting; agent execution
 runs through the CLI agent path.
 
+`orbit doctor` applies that same activity-asset refusal on every production
+catalog directory, including workspace-local files. For the known retired
+values `http` and `auto` it names one opt-in repair,
+`orbit doctor --fix-retired-activity-backends`, which deletes only
+`spec.backend` and leaves unknown values or unrelated parse failures
+untouched.
+
 ## Invariants
 
 - `target: activity:<name>` resolution happens before job execution begins, so

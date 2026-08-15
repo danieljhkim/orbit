@@ -138,6 +138,7 @@ fn cli_parses_doctor_stale_task_lock_repair_without_blanket_fix() {
         Commands::Doctor(command) => {
             assert!(command.fix_stale_task_locks);
             assert!(!command.fix_stale_locks);
+            assert!(!command.fix_retired_activity_backends);
         }
         _ => panic!("expected top-level doctor command"),
     }
@@ -147,6 +148,24 @@ fn cli_parses_doctor_stale_task_lock_repair_without_blanket_fix() {
         ErrorKind::UnknownArgument,
         "unexpected argument '--fix'",
     );
+}
+
+#[test]
+fn cli_parses_doctor_retired_activity_backend_repair() {
+    let cli = Cli::parse_from([
+        "orbit",
+        "doctor",
+        "--fix-retired-activity-backends",
+        "--json",
+    ]);
+    match cli.command {
+        Commands::Doctor(command) => {
+            assert!(command.fix_retired_activity_backends);
+            assert!(!command.fix_stale_artifacts);
+            assert!(command.json);
+        }
+        _ => panic!("expected top-level doctor command"),
+    }
 }
 
 #[test]

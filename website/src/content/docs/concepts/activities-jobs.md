@@ -13,7 +13,7 @@ Supported activity types:
 
 | Type | Use |
 |------|-----|
-| `agent_loop` | Run an agent with an instruction, provider, backend, and tool allowlist. The default backend is `cli`; `http` and `auto` are also accepted. |
+| `agent_loop` | Run an agent with an instruction, provider, and tool allowlist. Agent execution uses the CLI path only; `spec.backend: http` and `auto` fail catalog load. Remove a leftover backend with `orbit doctor --fix-retired-activity-backends`. |
 | `deterministic` | Run a registered deterministic action. |
 
 ## Job
@@ -40,7 +40,7 @@ schemaVersion: 2
 kind: Activity
 name: analyze_code
 spec:
-  backend: cli
+  type: agent_loop
   provider: gemini
   model: gemini-3.1-pro
   instruction: "Analyze the provided code."

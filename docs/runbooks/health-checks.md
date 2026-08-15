@@ -28,6 +28,7 @@ aborting unless the store itself cannot open.
 | `task-reservations` | active reservations whose owner run or terminal task association proves the reservation stale |
 | `task-relations` | unresolved relation/dependency targets that would block a task-index rebuild |
 | `id-allocations` | learning/ADR ids pinned to a worktree that no longer exists, with no readable body |
+| `artifacts-*` | skills, jobs, activities, auto-tasks, and routines on disk: stale, deprecated, or catalog-invalid |
 
 Example:
 
@@ -80,8 +81,24 @@ This is distinct from `--fix-stale-locks`, which handles dead-holder filesystem 
 
 There is deliberately no blanket `--fix` or resolve-all option. Configuration repair, database
 recovery, job cancellation, graph cleanup, id-allocation retirement, filesystem lock deletion,
-and task-reservation release have different evidence and safety gates, so each repair remains
-explicit and safety-scoped.
+task-reservation release, and retired activity-backend cleanup have different evidence and
+safety gates, so each repair remains explicit and safety-scoped.
+
+### Repair retired activity backends
+
+`artifacts-activities` uses the same load and tool-allowlist path as production activity
+catalog construction, including workspace-local `.orbit/resources/activities/` files. A
+schemaVersion 2 `agent_loop` activity that still declares `spec.backend: http` or
+`spec.backend: auto` is a warning that names the file, the rejected field/value, the catalog
+parse error, and one opt-in repair:
+
+```sh
+orbit doctor --fix-retired-activity-backends
+```
+
+The repair deletes only that obsolete `spec.backend` key, leaves unknown backend values and
+unrelated malformed activities untouched (and reports them for a manual edit), and is
+idempotent across every activity catalog directory in the workspace.
 
 An `id-allocations` warning means an id was allocated inside a worktree that has since been
 reaped, before its body was merged: the body is unrecoverable and the row would otherwise stay
