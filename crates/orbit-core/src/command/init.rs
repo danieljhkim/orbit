@@ -7,6 +7,7 @@ use orbit_store::{friction_store, global_executor_def_store, global_policy_def_s
 
 use crate::OrbitRuntime;
 use crate::auto_tasks::seed_default_auto_tasks;
+use crate::command::MANAGED_ASSET_MANIFEST_FILE;
 use crate::command::activity::seed_default_activities;
 use crate::command::executor::seed_default_executors;
 use crate::command::job::seed_default_jobs;
@@ -142,8 +143,11 @@ pub fn init_workspace_at_root(
     };
 
     let overwrite = options.force || options.refresh_defaults;
+    let mut skill_asset_warnings: Vec<String> = Vec::new();
     let mut refreshed_skill_files = if options.global_only {
-        seed_default_skills(&skills_root, &orbit_root, overwrite)?
+        let reconciliation = seed_default_skills(&skills_root, &orbit_root, overwrite)?;
+        skill_asset_warnings = reconciliation.warnings;
+        reconciliation.refreshed
     } else {
         0
     };
@@ -190,7 +194,8 @@ pub fn init_workspace_at_root(
         let refreshed_default_policies = seed_default_policies(policy_store.as_ref(), overwrite)?;
         let activity_reconciliation = seed_default_activities(&layout.activities_dir, overwrite)?;
         let job_reconciliation = seed_default_jobs(&layout.jobs_dir, overwrite)?;
-        let mut managed_asset_warnings = activity_reconciliation.warnings;
+        let mut managed_asset_warnings = std::mem::take(&mut skill_asset_warnings);
+        managed_asset_warnings.extend(activity_reconciliation.warnings);
         managed_asset_warnings.extend(job_reconciliation.warnings);
         (
             activity_reconciliation.refreshed,
@@ -220,12 +225,16 @@ pub fn init_workspace_at_root(
         )?;
         refreshed_skill_files = global_result.refreshed_skill_files;
         created_skills_symlink = global_result.created_skills_symlink;
+        // Routines and auto-tasks are workspace-scoped, so their managed-asset
+        // reconciliation happens here rather than in the global branch; fold
+        // their warnings in alongside the global (skill/activity/job) ones.
+        let mut managed_asset_warnings = global_result.managed_asset_warnings;
         // Routines are workspace-authored (`.orbit/routines/`, no global
         // directory), so defaults seed here rather than in the global branch.
         // Host identity is owned by higher-level composition and injected;
         // Core never opens host.toml or falls back to an OS hostname.
         if let Some(host_id) = options.routine_host_id.as_deref() {
-            refreshed_default_routines = seed_default_routines(
+            let reconciliation = seed_default_routines(
                 &orbit_root.join("routines"),
                 host_id,
                 workspace_slug_from_orbit_root(&orbit_root).as_deref(),
@@ -235,17 +244,21 @@ pub fn init_workspace_at_root(
                 // destructive `force` already recreated the root.
                 options.force,
             )?;
+            refreshed_default_routines = reconciliation.refreshed;
+            managed_asset_warnings.extend(reconciliation.warnings);
         }
         // Auto-task definitions are workspace-authored after seeding. Never
         // refresh an existing file: `workspace init --force` reconciles
         // registration and must not overwrite an operator's definition.
-        seeded_default_auto_tasks = seed_default_auto_tasks(&orbit_root)?;
+        let auto_task_reconciliation = seed_default_auto_tasks(&orbit_root)?;
+        seeded_default_auto_tasks = auto_task_reconciliation.refreshed;
+        managed_asset_warnings.extend(auto_task_reconciliation.warnings);
         (
             global_result.refreshed_default_activities,
             global_result.retired_default_activities,
             global_result.refreshed_default_jobs,
             global_result.retired_default_jobs,
-            global_result.managed_asset_warnings,
+            managed_asset_warnings,
             global_result.refreshed_default_executors,
             global_result.refreshed_default_policies,
             RuntimeConfig::load_layered(&global_root, &orbit_root)?.scoring_enabled,
@@ -402,9 +415,29 @@ fn remove_workspace_seeded_default_skills(
             remove_path_if_exists(&skills_dir.join(skill_id))?;
         }
 
+        // Skills are only ever seeded into the *global* root, so a managed
+        // manifest here describes skill trees that were just removed. Drop it
+        // once nothing else remains, otherwise it would keep an otherwise-empty
+        // legacy workspace skills directory alive forever.
+        if directory_holds_only(skills_dir, MANAGED_ASSET_MANIFEST_FILE)? {
+            remove_path_if_exists(&skills_dir.join(MANAGED_ASSET_MANIFEST_FILE))?;
+        }
         remove_empty_dir(skills_dir)?;
     }
     Ok(())
+}
+
+/// Whether `dir` contains exactly one entry, named `file_name`.
+fn directory_holds_only(dir: &Path, file_name: &str) -> Result<bool, OrbitError> {
+    if !dir.is_dir() {
+        return Ok(false);
+    }
+    let mut entries = fs::read_dir(dir).map_err(|e| OrbitError::Io(e.to_string()))?;
+    let Some(first) = entries.next() else {
+        return Ok(false);
+    };
+    let first = first.map_err(|e| OrbitError::Io(e.to_string()))?;
+    Ok(first.file_name() == file_name && entries.next().is_none())
 }
 
 fn remove_empty_dir(dir: &Path) -> Result<(), OrbitError> {
@@ -797,7 +830,12 @@ mod tests {
         restore_home(previous_home);
 
         let result = result.expect("init global");
-        assert_eq!(result.refreshed_skill_files, default_skill_ids().len());
+        // Skills are now reconciled per managed file rather than per skill
+        // directory, so a refresh counts every SKILL.md *and* reference file.
+        assert_eq!(
+            result.refreshed_skill_files,
+            crate::command::skill::DEFAULT_SKILL_FILES.len()
+        );
         assert!(result.created_skills_symlink);
         assert!(
             home.path()
@@ -877,7 +915,12 @@ mod tests {
         restore_home(previous_home);
 
         let result = result.expect("init workspace");
-        assert_eq!(result.refreshed_skill_files, default_skill_ids().len());
+        // Skills are now reconciled per managed file rather than per skill
+        // directory, so a refresh counts every SKILL.md *and* reference file.
+        assert_eq!(
+            result.refreshed_skill_files,
+            crate::command::skill::DEFAULT_SKILL_FILES.len()
+        );
         assert!(result.created_skills_symlink);
         assert!(
             !orbit_root

@@ -3,7 +3,7 @@ summary: "Activity / Job — Design"
 type: design
 title: "Activity / Job — Design"
 owner: codex
-last_updated: 2026-08-14
+last_updated: 2026-08-15
 last_validated: 2026-07-26
 status: Draft
 feature: activity-job
@@ -140,6 +140,38 @@ with removed tool grants—or a retired managed job with removed actions—in th
 catalog. Legacy files whose history cannot be proven remain operator-owned:
 Orbit will not guess from their names, and the warning is the recovery contract
 for installations predating managed provenance.
+
+#### 4.1.1 All five artifact kinds, and the standing doctor surface
+
+After [ORB-10800] / [ADR-0366], the same mechanism governs all five definition
+artifact kinds. Skills, auto-tasks, and routines previously used an additive
+seeding path that skipped existing files and retired nothing, so a default
+dropped from a release stayed on disk — and dispatchable — in every existing
+workspace.
+
+Two generalizations made that possible. `reconcile_managed_assets` takes a
+layout: manifest keys are `<name>.yaml` stems for the four flat catalogs, and
+*relative paths* for skill directory trees, so `orbit-task/references/review.md`
+is managed independently of `orbit-task/SKILL.md`. And the recorded digest is
+always taken over the **rendered** document, which is what gives honest
+provenance to the two kinds that substitute placeholders before writing —
+routines (host id, workspace-scoped name) and skills (`ORBIT_ROOT_TOKEN`).
+
+`orbit doctor` reports one row per kind, classifying each artifact as *faulty*
+(fails to load), *deprecated* (digest proves Orbit wrote a default no longer
+shipped), or *stale* (an Orbit-written copy of an older release, or an untracked
+file occupying a bundled default's name). Classification reads the manifest
+only, never loader precedence — precisely because precedence is *not* uniform
+across kinds (§4 above): skills merge workspace-over-global while activities
+keep shipped defaults authoritative. Provenance of the file Orbit wrote is the
+same question for every kind.
+
+`orbit doctor --fix-stale-artifacts` retires only deprecated artifacts whose
+digest still proves Orbit wrote them, preserving locally modified ones under
+`.retired-managed/` rather than deleting them. Faulty and user-authored files
+are reported and never touched. A workspace-authored fault is a `Warning`; only
+an unloadable *shipped default* is an `Error`, which keeps the `orbit doctor`
+exit code stable for existing cron and CI callers.
 
 Direct single-activity runtime helpers:
 

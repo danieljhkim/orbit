@@ -8,7 +8,7 @@ use orbit_common::types::{JobKind, JobRun, JobScheduleState, JobV2, NotFoundKind
 use serde_json::Value;
 
 use crate::OrbitRuntime;
-use crate::command::{ManagedAssetReconciliation, reconcile_managed_assets};
+use crate::command::{ManagedAssetLayout, ManagedAssetReconciliation, reconcile_managed_assets};
 
 /// Shippable default workflow assets, seeded under
 /// `<orbit_root>/resources/jobs/<name>.yaml` on `orbit init`. The entries
@@ -18,7 +18,7 @@ use crate::command::{ManagedAssetReconciliation, reconcile_managed_assets};
 /// under `crates/orbit-core/assets/jobs/examples/` and are NOT seeded —
 /// they exist for `crates/orbit-engine/examples/v2_job_runtime_smoke.rs`
 /// only.
-const DEFAULT_JOB_FILES: &[(&str, &str)] = &[
+pub(crate) const DEFAULT_JOB_FILES: &[(&str, &str)] = &[
     (
         "auto_task_scheduler_pipeline",
         include_str!("../../../assets/jobs/auto_task_scheduler_pipeline.yaml"),
@@ -289,6 +289,7 @@ pub(crate) fn seed_default_jobs(
     reconcile_managed_assets(
         jobs_dir,
         "job",
+        ManagedAssetLayout::YamlStem,
         DEFAULT_JOB_FILES,
         overwrite,
         |_, content| Ok(Cow::Borrowed(content)),

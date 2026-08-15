@@ -286,6 +286,483 @@ fn refresh_retires_managed_activity_and_job_assets_and_is_idempotent() {
     assert!(repeated.managed_asset_warnings.is_empty());
 }
 
+// --- Definition-artifact health [ORB-10800] ---------------------------------
+
+mod artifacts {
+    use super::*;
+    use std::path::PathBuf;
+
+    use crate::command::artifact_health::{
+        ArtifactCondition, ArtifactHealth, ArtifactKind, ArtifactProvenance,
+    };
+
+    fn init_workspace(root: &Path) -> (PathBuf, PathBuf) {
+        let global_root = root.join("global");
+        let workspace_root = root.join("repo/.orbit");
+        init_global(&global_root);
+        init_workspace_at_root(
+            &workspace_root,
+            InitOptions {
+                refresh_defaults: true,
+                global_root_override: Some(global_root.clone()),
+                routine_host_id: Some("test-host".to_string()),
+                detected: Some(DetectedAgents::default()),
+                ..Default::default()
+            },
+        )
+        .expect("initialize workspace");
+        (global_root, workspace_root)
+    }
+
+    fn health_of(report: &[ArtifactHealth], kind: ArtifactKind) -> &ArtifactHealth {
+        report
+            .iter()
+            .find(|health| health.kind == kind)
+            .unwrap_or_else(|| panic!("missing artifact health for {kind:?}"))
+    }
+
+    /// Criterion: all five kinds record digest provenance after seeding.
+    #[test]
+    fn every_artifact_kind_records_digest_provenance_after_init() {
+        let root = tempdir().expect("create tempdir");
+        let (global_root, workspace_root) = init_workspace(root.path());
+
+        for dir in [
+            global_root.join("skills"),
+            global_root.join("resources/jobs"),
+            global_root.join("resources/activities"),
+            workspace_root.join("auto_tasks"),
+            workspace_root.join("routines"),
+        ] {
+            let manifest = dir.join(MANAGED_ASSET_MANIFEST_FILE);
+            let raw = std::fs::read_to_string(&manifest)
+                .unwrap_or_else(|e| panic!("read manifest {}: {e}", manifest.display()));
+            let parsed: Value = serde_json::from_str(&raw).expect("parse manifest");
+            assert!(
+                parsed["assets"]
+                    .as_object()
+                    .expect("assets object")
+                    .values()
+                    .all(|digest| digest.as_str().is_some_and(|d| d.len() == 64)),
+                "every managed asset in {} must record a sha256 digest",
+                dir.display()
+            );
+        }
+
+        // Skill manifests key on the relative path, not a bare stem, because
+        // skills are directory trees.
+        let skill_manifest: Value = serde_json::from_str(
+            &std::fs::read_to_string(global_root.join("skills").join(MANAGED_ASSET_MANIFEST_FILE))
+                .expect("read skill manifest"),
+        )
+        .expect("parse skill manifest");
+        let keys: Vec<&str> = skill_manifest["assets"]
+            .as_object()
+            .expect("assets object")
+            .keys()
+            .map(String::as_str)
+            .collect();
+        assert!(keys.contains(&"orbit/SKILL.md"), "{keys:?}");
+        assert!(
+            keys.contains(&"orbit-task/references/review.md"),
+            "reference files are managed too: {keys:?}"
+        );
+    }
+
+    /// A freshly initialized workspace is clean on every artifact kind.
+    #[test]
+    fn freshly_initialized_workspace_reports_no_artifact_findings() {
+        let root = tempdir().expect("create tempdir");
+        let (global_root, workspace_root) = init_workspace(root.path());
+        let runtime =
+            OrbitRuntime::from_roots(&global_root, &workspace_root).expect("build runtime");
+
+        let report = runtime
+            .inspect_definition_artifacts()
+            .expect("inspect artifacts");
+        assert_eq!(report.len(), 5);
+        for health in &report {
+            assert!(
+                health.findings.is_empty(),
+                "{:?} reported findings on a fresh workspace: {:?}",
+                health.kind,
+                health.findings
+            );
+            assert!(health.scanned > 0, "{:?} scanned nothing", health.kind);
+        }
+    }
+
+    /// Criteria: deprecated artifacts are detected across the newly covered
+    /// kinds; the fix flag removes only what Orbit provably wrote and
+    /// preserves a locally modified one instead of deleting it.
+    #[test]
+    fn fix_removes_orbit_written_deprecated_artifacts_and_preserves_modified_ones() {
+        let root = tempdir().expect("create tempdir");
+        let (global_root, workspace_root) = init_workspace(root.path());
+
+        let auto_tasks_dir = workspace_root.join("auto_tasks");
+        let routines_dir = workspace_root.join("routines");
+        let clean = "retired-auto-task";
+        let modified = "retired_routine";
+        let clean_body = std::fs::read_to_string(auto_tasks_dir.join("qa-sweep.yaml"))
+            .expect("read a seeded auto-task to reuse as retired content");
+        let modified_body = std::fs::read_to_string(routines_dir.join("task_triage.yaml"))
+            .expect("read a seeded routine");
+
+        // Both look exactly like assets a previous release seeded.
+        add_managed_manifest_entry(&auto_tasks_dir, clean, &clean_body);
+        std::fs::write(auto_tasks_dir.join(format!("{clean}.yaml")), &clean_body)
+            .expect("materialize retired auto-task");
+        add_managed_manifest_entry(&routines_dir, modified, &modified_body);
+        let edited_body = format!("{modified_body}# operator edit\n");
+        std::fs::write(routines_dir.join(format!("{modified}.yaml")), &edited_body)
+            .expect("materialize locally modified retired routine");
+
+        let runtime =
+            OrbitRuntime::from_roots(&global_root, &workspace_root).expect("build runtime");
+        let report = runtime
+            .inspect_definition_artifacts()
+            .expect("inspect artifacts");
+
+        let auto_task_finding = health_of(&report, ArtifactKind::AutoTask)
+            .findings
+            .iter()
+            .find(|finding| finding.name == clean)
+            .expect("deprecated auto-task is reported");
+        assert_eq!(auto_task_finding.condition, ArtifactCondition::Deprecated);
+        assert_eq!(
+            auto_task_finding.provenance,
+            ArtifactProvenance::OrbitWritten
+        );
+        assert!(
+            auto_task_finding
+                .remediation
+                .contains("orbit doctor --fix-stale-artifacts"),
+            "{}",
+            auto_task_finding.remediation
+        );
+
+        let routine_finding = health_of(&report, ArtifactKind::Routine)
+            .findings
+            .iter()
+            .find(|finding| finding.name == modified)
+            .expect("deprecated routine is reported");
+        assert_eq!(routine_finding.condition, ArtifactCondition::Deprecated);
+        assert_eq!(
+            routine_finding.provenance,
+            ArtifactProvenance::LocallyModified
+        );
+
+        let retired = runtime
+            .remove_stale_definition_artifacts()
+            .expect("retire deprecated artifacts");
+        assert_eq!(retired, 2);
+
+        assert!(
+            !auto_tasks_dir.join(format!("{clean}.yaml")).exists(),
+            "an unmodified Orbit-written deprecated artifact is deleted"
+        );
+        assert!(
+            !routines_dir.join(format!("{modified}.yaml")).exists(),
+            "a modified deprecated artifact leaves the active catalog"
+        );
+        assert_eq!(
+            std::fs::read_to_string(
+                workspace_root.join(format!(".retired-managed/routines/{modified}.yaml"))
+            )
+            .expect("locally modified content is preserved, not destroyed"),
+            edited_body
+        );
+
+        // Idempotent: a second pass has nothing left to retire.
+        assert_eq!(
+            runtime
+                .remove_stale_definition_artifacts()
+                .expect("second retire pass"),
+            0
+        );
+    }
+
+    /// Criteria: a faulty *user-authored* artifact is reported but never
+    /// removed or rewritten by the fix flag.
+    #[test]
+    fn faulty_user_authored_artifacts_are_reported_and_never_touched() {
+        let root = tempdir().expect("create tempdir");
+        let (global_root, workspace_root) = init_workspace(root.path());
+
+        let broken_path = workspace_root.join("routines/operator-routine.yaml");
+        let broken_body = "schemaVersion: 1\nname: broken\n";
+        std::fs::write(&broken_path, broken_body).expect("write malformed routine");
+
+        let runtime =
+            OrbitRuntime::from_roots(&global_root, &workspace_root).expect("build runtime");
+        let report = runtime
+            .inspect_definition_artifacts()
+            .expect("inspect artifacts");
+        let finding = health_of(&report, ArtifactKind::Routine)
+            .findings
+            .iter()
+            .find(|finding| finding.name == "operator-routine")
+            .expect("faulty routine is reported");
+        assert_eq!(finding.condition, ArtifactCondition::Faulty);
+        assert_eq!(finding.provenance, ArtifactProvenance::UserAuthored);
+        assert!(
+            !finding.is_unloadable_shipped_default(),
+            "a workspace-authored fault must not escalate the doctor exit code"
+        );
+        assert!(
+            finding.remediation.contains("operator-routine.yaml"),
+            "{}",
+            finding.remediation
+        );
+
+        assert_eq!(
+            runtime
+                .remove_stale_definition_artifacts()
+                .expect("retire pass"),
+            0
+        );
+        assert_eq!(
+            std::fs::read_to_string(&broken_path).expect("faulty user file survives"),
+            broken_body
+        );
+    }
+
+    /// An Orbit-written default that no longer parses is a broken install, and
+    /// is the one artifact fault that escalates to an Error row.
+    #[test]
+    fn unloadable_shipped_default_is_distinguished_from_a_user_authored_fault() {
+        let root = tempdir().expect("create tempdir");
+        let (global_root, workspace_root) = init_workspace(root.path());
+
+        // Corrupt a shipped default *and* record it as what Orbit wrote, which
+        // is what a truncated install or a bad upgrade looks like on disk.
+        let activities_dir = global_root.join("resources/activities");
+        let corrupt = "schemaVersion: 2\nkind: Activity\nmetadata: {}\n";
+        std::fs::write(activities_dir.join("sleep.yaml"), corrupt)
+            .expect("corrupt shipped default");
+        add_managed_manifest_entry(&activities_dir, "sleep", corrupt);
+
+        let runtime =
+            OrbitRuntime::from_roots(&global_root, &workspace_root).expect("build runtime");
+        let report = runtime
+            .inspect_definition_artifacts()
+            .expect("inspect artifacts");
+        let finding = health_of(&report, ArtifactKind::Activity)
+            .findings
+            .iter()
+            .find(|finding| {
+                finding.name == "sleep" && finding.condition == ArtifactCondition::Faulty
+            })
+            .expect("faulty shipped default is reported");
+        assert_eq!(finding.provenance, ArtifactProvenance::OrbitWritten);
+        assert!(finding.is_unloadable_shipped_default());
+        assert!(
+            finding
+                .remediation
+                .contains("orbit init --refresh-defaults"),
+            "{}",
+            finding.remediation
+        );
+    }
+
+    /// An Orbit-written copy of an older release is stale; refreshing is the
+    /// repair, and the fix flag deliberately leaves it alone.
+    #[test]
+    fn drifted_orbit_written_default_is_stale_and_not_removed_by_the_fix_flag() {
+        let root = tempdir().expect("create tempdir");
+        let (global_root, workspace_root) = init_workspace(root.path());
+
+        let auto_tasks_dir = workspace_root.join("auto_tasks");
+        let path = auto_tasks_dir.join("qa-sweep.yaml");
+        let older_release = format!(
+            "{}# shipped by an older release\n",
+            std::fs::read_to_string(&path).expect("read seeded auto-task")
+        );
+        std::fs::write(&path, &older_release).expect("simulate an older release's copy");
+        add_managed_manifest_entry(&auto_tasks_dir, "qa-sweep", &older_release);
+
+        let runtime =
+            OrbitRuntime::from_roots(&global_root, &workspace_root).expect("build runtime");
+        let finding = health_of(
+            &runtime
+                .inspect_definition_artifacts()
+                .expect("inspect artifacts"),
+            ArtifactKind::AutoTask,
+        )
+        .findings
+        .iter()
+        .find(|finding| finding.name == "qa-sweep")
+        .cloned()
+        .expect("drifted default is reported");
+        assert_eq!(finding.condition, ArtifactCondition::Stale);
+        assert_eq!(finding.provenance, ArtifactProvenance::OrbitWritten);
+        assert!(
+            finding
+                .remediation
+                .contains("orbit init --refresh-defaults"),
+            "{}",
+            finding.remediation
+        );
+
+        assert_eq!(
+            runtime
+                .remove_stale_definition_artifacts()
+                .expect("retire pass"),
+            0,
+            "staleness is repaired by refreshing, never by deleting"
+        );
+        assert_eq!(
+            std::fs::read_to_string(&path).expect("stale file survives"),
+            older_release
+        );
+    }
+
+    /// A user file wearing a bundled default's name keeps that default from
+    /// being installed — reported as stale, and never deleted.
+    #[test]
+    fn untracked_collision_with_a_bundled_default_is_reported_as_stale() {
+        let root = tempdir().expect("create tempdir");
+        let (global_root, workspace_root) = init_workspace(root.path());
+
+        let path = workspace_root.join("auto_tasks/qa-sweep.yaml");
+        let user_body = std::fs::read_to_string(&path)
+            .expect("read seeded auto-task")
+            .replace("enabled: false", "enabled: false # operator copy");
+        std::fs::write(&path, &user_body).expect("write colliding user file");
+        // Drop the managed provenance, leaving an untracked file behind.
+        let manifest_path =
+            workspace_root.join(format!("auto_tasks/{MANAGED_ASSET_MANIFEST_FILE}"));
+        let mut manifest: Value = serde_json::from_str(
+            &std::fs::read_to_string(&manifest_path).expect("read auto-task manifest"),
+        )
+        .expect("parse manifest");
+        manifest["assets"]
+            .as_object_mut()
+            .expect("assets object")
+            .remove("qa-sweep");
+        std::fs::write(
+            &manifest_path,
+            format!(
+                "{}\n",
+                serde_json::to_string_pretty(&manifest).expect("serialize manifest")
+            ),
+        )
+        .expect("write manifest without provenance");
+
+        let runtime =
+            OrbitRuntime::from_roots(&global_root, &workspace_root).expect("build runtime");
+        let finding = health_of(
+            &runtime
+                .inspect_definition_artifacts()
+                .expect("inspect artifacts"),
+            ArtifactKind::AutoTask,
+        )
+        .findings
+        .iter()
+        .find(|finding| finding.name == "qa-sweep")
+        .cloned()
+        .expect("collision is reported");
+        assert_eq!(finding.condition, ArtifactCondition::Stale);
+        assert_eq!(finding.provenance, ArtifactProvenance::UserAuthored);
+
+        assert_eq!(
+            runtime
+                .remove_stale_definition_artifacts()
+                .expect("retire pass"),
+            0
+        );
+        assert_eq!(
+            std::fs::read_to_string(&path).expect("user file survives"),
+            user_body
+        );
+    }
+
+    /// Removal refuses a manifest key that would escape the managed directory,
+    /// and never follows a symlink at the boundary.
+    #[test]
+    fn removal_rejects_escaping_paths_and_does_not_follow_symlinks() {
+        let root = tempdir().expect("create tempdir");
+        let (global_root, workspace_root) = init_workspace(root.path());
+        let auto_tasks_dir = workspace_root.join("auto_tasks");
+
+        // A traversing key is refused when the manifest is loaded, before any
+        // removal is attempted.
+        let manifest_path = auto_tasks_dir.join(MANAGED_ASSET_MANIFEST_FILE);
+        let mut manifest: Value =
+            serde_json::from_str(&std::fs::read_to_string(&manifest_path).expect("read manifest"))
+                .expect("parse manifest");
+        manifest["assets"]
+            .as_object_mut()
+            .expect("assets object")
+            .insert("../escaped".to_string(), Value::String(sha256("anything")));
+        std::fs::write(
+            &manifest_path,
+            format!(
+                "{}\n",
+                serde_json::to_string_pretty(&manifest).expect("serialize manifest")
+            ),
+        )
+        .expect("write traversing manifest");
+
+        let runtime =
+            OrbitRuntime::from_roots(&global_root, &workspace_root).expect("build runtime");
+        let error = runtime
+            .remove_stale_definition_artifacts()
+            .expect_err("a traversing manifest key must be refused");
+        assert!(
+            error.to_string().contains("not a safe managed asset path"),
+            "{error}"
+        );
+
+        // A symlinked artifact is left in place: deleting it would act on a
+        // target outside the catalog Orbit manages.
+        #[cfg(unix)]
+        {
+            std::fs::write(
+                &manifest_path,
+                format!(
+                    "{}\n",
+                    serde_json::to_string_pretty(&{
+                        let mut clean: Value = serde_json::from_str(
+                            &std::fs::read_to_string(&manifest_path).expect("read manifest"),
+                        )
+                        .expect("parse manifest");
+                        clean["assets"]
+                            .as_object_mut()
+                            .expect("assets object")
+                            .remove("../escaped");
+                        clean
+                    })
+                    .expect("serialize manifest")
+                ),
+            )
+            .expect("restore manifest");
+
+            let outside = root.path().join("outside.yaml");
+            std::fs::write(&outside, "outside content\n").expect("write link target");
+            let link = auto_tasks_dir.join("linked-auto-task.yaml");
+            std::os::unix::fs::symlink(&outside, &link).expect("create symlinked artifact");
+            add_managed_manifest_entry(&auto_tasks_dir, "linked-auto-task", "outside content\n");
+
+            let runtime =
+                OrbitRuntime::from_roots(&global_root, &workspace_root).expect("rebuild runtime");
+            assert_eq!(
+                runtime
+                    .remove_stale_definition_artifacts()
+                    .expect("retire pass"),
+                0,
+                "a symlinked artifact is not removed"
+            );
+            assert!(link.symlink_metadata().is_ok(), "the symlink survives");
+            assert_eq!(
+                std::fs::read_to_string(&outside).expect("link target survives"),
+                "outside content\n"
+            );
+        }
+    }
+}
+
 #[test]
 fn first_manifest_preserves_user_assets_and_warns_about_ambiguous_legacy_yaml() {
     let root = tempdir().expect("create tempdir");

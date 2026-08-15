@@ -23,6 +23,7 @@ use std::path::{Path, PathBuf};
 use fs2::FileExt;
 use orbit_common::types::{OrbitError, WorkspacePaths};
 use orbit_core::OrbitRuntime;
+use orbit_core::command::artifact_health::ArtifactFinding;
 use orbit_store::sqlite::migration::SUPPORTED_SCHEMA_VERSION;
 use serde::Serialize;
 
@@ -113,6 +114,11 @@ pub trait DoctorCommands {
     /// workspace locations. Missing locations are a successful no-op.
     fn remove_retired_graph_state(&self) -> Result<usize, OrbitError>;
 
+    /// Retire deprecated definition artifacts whose recorded digest proves
+    /// Orbit wrote them, preserving locally modified ones outside the active
+    /// catalog. Faulty and user-authored artifacts are never touched.
+    fn remove_stale_definition_artifacts(&self) -> Result<usize, OrbitError>;
+
     /// Cheap store write probe for health endpoints: open the store and
     /// acquire + roll back the write lock without mutating anything.
     fn health_check_store_writable(&self) -> Result<String, OrbitError>;
@@ -120,7 +126,7 @@ pub trait DoctorCommands {
 
 impl DoctorCommands for OrbitRuntime {
     fn doctor_workspace(&self) -> Result<Vec<WorkspaceDoctorResult>, OrbitError> {
-        Ok(vec![
+        let mut results = vec![
             doctor_check_config(self),
             doctor_check_database(self),
             doctor_check_disk_space(self),
@@ -129,7 +135,9 @@ impl DoctorCommands for OrbitRuntime {
             doctor_check_job_runs(self),
             doctor_check_task_reservations(self),
             doctor_check_task_relations(self),
-        ])
+        ];
+        results.extend(doctor_check_definition_artifacts(self));
+        Ok(results)
     }
 
     fn remove_stale_lock_files(&self) -> Result<usize, OrbitError> {
@@ -144,6 +152,10 @@ impl DoctorCommands for OrbitRuntime {
 
     fn clear_stale_task_reservations(&self) -> Result<usize, OrbitError> {
         self.release_stale_task_reservations()
+    }
+
+    fn remove_stale_definition_artifacts(&self) -> Result<usize, OrbitError> {
+        OrbitRuntime::remove_stale_definition_artifacts(self)
     }
 
     fn remove_retired_graph_state(&self) -> Result<usize, OrbitError> {
@@ -579,6 +591,89 @@ fn doctor_check_task_relations(runtime: &OrbitRuntime) -> WorkspaceDoctorResult 
             )
         }
     }
+}
+
+/// Definition-artifact health — one row per artifact kind (skills, jobs,
+/// activities, auto-tasks, routines) [ORB-10800].
+///
+/// Severity is deliberately asymmetric. A workspace-authored definition that
+/// fails to parse is the operator's own in-progress edit, and classifying it
+/// as `Error` would silently start failing `orbit doctor` in cron and CI for
+/// workspaces that were passing yesterday. Only an *unloadable shipped
+/// default* — provably Orbit-written content that no longer parses, i.e. a
+/// broken install — escalates to `Error`. Everything else warns.
+fn doctor_check_definition_artifacts(runtime: &OrbitRuntime) -> Vec<WorkspaceDoctorResult> {
+    let report = match runtime.inspect_definition_artifacts() {
+        Ok(report) => report,
+        Err(error) => {
+            return vec![actionable_check(
+                "artifacts",
+                WorkspaceDoctorStatus::Warning,
+                format!("cannot inspect definition artifacts: {error}"),
+                "Resolve the store/runtime error, then rerun `orbit doctor`.".to_string(),
+            )];
+        }
+    };
+
+    report
+        .into_iter()
+        .map(|health| {
+            let check_name = format!("artifacts-{}", health.kind.as_str());
+            if health.findings.is_empty() {
+                let message = if health.scanned == 0 {
+                    format!("no {} on disk yet", health.kind.as_str())
+                } else {
+                    format!(
+                        "{} {} loaded, none stale, deprecated, or faulty",
+                        health.scanned,
+                        health.kind.as_str()
+                    )
+                };
+                let status = if health.scanned == 0 {
+                    WorkspaceDoctorStatus::Skipped
+                } else {
+                    WorkspaceDoctorStatus::Ok
+                };
+                return check(&check_name, status, message);
+            }
+
+            let status = if health
+                .findings
+                .iter()
+                .any(ArtifactFinding::is_unloadable_shipped_default)
+            {
+                WorkspaceDoctorStatus::Error
+            } else {
+                WorkspaceDoctorStatus::Warning
+            };
+            let detail = health
+                .findings
+                .iter()
+                .map(|finding| format!("{}: {}", finding.condition.as_str(), finding.detail))
+                .collect::<Vec<_>>()
+                .join("; ");
+            // Every finding carries its own exact repair command; dedupe so a
+            // kind with five stale copies names one command, not five.
+            let mut remediations: Vec<&str> = Vec::new();
+            for finding in &health.findings {
+                let remediation = finding.remediation.as_str();
+                if !remediations.contains(&remediation) {
+                    remediations.push(remediation);
+                }
+            }
+            actionable_check(
+                &check_name,
+                status,
+                format!(
+                    "{} of {} {} need attention — {detail}",
+                    health.findings.len(),
+                    health.scanned,
+                    health.kind.as_str()
+                ),
+                remediations.join(" "),
+            )
+        })
+        .collect()
 }
 
 /// Free/total space thresholds for the volume containing `path`.

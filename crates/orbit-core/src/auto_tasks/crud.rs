@@ -78,10 +78,41 @@ impl OrbitRuntime {
     }
 
     /// List every definition in this workspace (stable filename order).
+    ///
     /// Fail-closed load errors are surfaced as an error only when nothing
-    /// loaded; otherwise malformed files are simply skipped by the loader.
+    /// loaded — a single malformed file must not hide the definitions that do
+    /// work. Anything skipped is still reported: it is logged here and stands
+    /// as a `faulty` row on the `orbit doctor` artifacts surface, so a
+    /// definition that silently stopped firing is discoverable [ORB-10800].
     pub fn auto_task_list(&self) -> Result<Vec<AutoTaskDefinition>, OrbitError> {
         let collection = collect_auto_tasks(&self.paths().local_dir);
+        for error in &collection.errors {
+            tracing::warn!(
+                target: "orbit.core.auto_tasks",
+                path = %error.path.as_ref().map_or_else(
+                    || "<auto_tasks dir>".to_string(),
+                    |path| path.display().to_string()
+                ),
+                reason = error.message.as_str(),
+                "auto-task definition failed to load and is treated as absent"
+            );
+        }
+        if collection.definitions.is_empty() && !collection.errors.is_empty() {
+            let detail = collection
+                .errors
+                .iter()
+                .map(|error| {
+                    error.path.as_ref().map_or_else(
+                        || error.message.clone(),
+                        |path| format!("{}: {}", path.display(), error.message),
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join("; ");
+            return Err(OrbitError::InvalidInput(format!(
+                "no auto-task definition could be loaded; every definition failed fail-closed: {detail}"
+            )));
+        }
         Ok(collection
             .definitions
             .into_iter()

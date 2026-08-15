@@ -1,7 +1,7 @@
 ---
 title: Auto-tasks — Design
 owner: claude
-last_updated: 2026-08-02
+last_updated: 2026-08-15
 last_validated: 2026-07-27
 status: Accepted
 feature: auto-tasks
@@ -11,7 +11,7 @@ summary: Current implementation of the auto-task record, due-math, host-local cu
 tags: [auto-tasks]
 paths: ["crates/orbit-core/src/auto_tasks/**"]
 related_features: [auto-tasks]
-related_artifacts: [ORB-10149, ORB-10439, ORB-10441, ORB-10446, ORB-10472, ORB-10583, ADR-0218, ADR-0217, ADR-0286]
+related_artifacts: [ORB-10149, ORB-10439, ORB-10441, ORB-10446, ORB-10472, ORB-10583, ADR-0218, ADR-0217, ADR-0286, ORB-10800, ADR-0366]
 ---
 
 # Auto-tasks — Design
@@ -88,6 +88,23 @@ rejects duplicate names; update patches present fields; toggle flips `enabled`
 persisted. Successful writes replace the target atomically; a staging or rename
 failure leaves the previous definition bytes intact. In a primary checkout the
 local and shared roots are identical, preserving the operator-facing path.
+
+`list` is fail-closed-aware. The loader collects a per-file `AutoTaskLoadError`
+for every definition it rejects, and after [ORB-10800] those errors are no longer
+discarded: each is logged, and `list` errors outright only when *nothing* loaded,
+so one malformed file cannot hide the definitions that still work. A definition
+that silently stopped firing is discoverable as a `faulty` row on the
+`orbit doctor` artifacts surface rather than only via the one command that
+happens to touch it.
+
+### 5a. Managed seeding
+
+Default definitions are seeded manifest-aware after [ORB-10800] / [ADR-0366]:
+`.orbit/auto_tasks/` carries a `.orbit-managed-assets.json` recording the digest
+Orbit wrote for each shipped default, so a default dropped from a later release
+can be retired by content provenance instead of remaining loadable forever.
+Seeding still never overwrites an existing definition, and an operator-edited
+default is preserved under `.retired-managed/auto_tasks/` rather than deleted.
 
 ## 5b. Manual mint — `mint` (ORB-10439, renamed by ORB-10446)
 

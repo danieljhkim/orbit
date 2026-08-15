@@ -25,6 +25,10 @@ pub struct DoctorCommand {
     /// Remove retired graph state from this worktree and the shared workspace.
     #[arg(long)]
     pub remove_graph: bool,
+
+    /// Retire deprecated skills, jobs, activities, auto-tasks, and routines that Orbit itself wrote. Locally modified ones are preserved, not deleted.
+    #[arg(long)]
+    pub fix_stale_artifacts: bool,
 }
 
 impl Execute for DoctorCommand {
@@ -45,6 +49,12 @@ impl Execute for DoctorCommand {
             let removed = runtime.remove_retired_graph_state()?;
             if !self.json {
                 println!("Removed {removed} retired graph location(s).");
+            }
+        }
+        if self.fix_stale_artifacts {
+            let removed = runtime.remove_stale_definition_artifacts()?;
+            if !self.json {
+                println!("Retired {removed} deprecated definition artifact(s).");
             }
         }
         let results = runtime.doctor_workspace()?;

@@ -3,7 +3,7 @@ summary: "Activity / Job — Decisions"
 type: design
 title: "Activity / Job — Decisions"
 owner: codex
-last_updated: 2026-08-13
+last_updated: 2026-08-15
 last_validated: 2026-07-26
 status: Draft
 feature: activity-job
@@ -1651,8 +1651,86 @@ Persist a per-resource-kind managed manifest containing the SHA-256 digest last 
 - Locally modified retired assets remain recoverable outside active catalog directories instead of breaking unrelated catalog/list operations.
 - Cost: managed manifests and preserved-retirement backups add local state and make the first legacy refresh potentially require operator review before an ambiguous stale file can be removed.
 
+## ADR-0366 — All five definition-artifact kinds carry managed provenance, and doctor reports it
+
+**Status:** Accepted · 2026-08 · [ORB-10800]
+**Code anchors:** `crates/orbit-core/src/command/mod.rs::ManagedAssetLayout`, `crates/orbit-core/src/command/skill.rs::seed_default_skills`, `crates/orbit-core/src/command/routine.rs::seed_default_routines`, `crates/orbit-core/src/auto_tasks/mod.rs::seed_default_auto_tasks`, `crates/orbit-core/src/command/artifact_health.rs`
+
+### Context
+
+[ADR-0346] gave activities and jobs a digest manifest so a bundled asset dropped
+from a release could be retired by content provenance rather than by filename
+guessing. The other three definition-artifact kinds — skills, auto-tasks, and
+routines — kept the older additive `seed_embedded_assets` path, which skips any
+file that already exists and retires nothing. A default skill, auto-task, or
+routine removed from a release therefore stayed on disk in every existing
+workspace forever: still loadable, still dispatchable, and reported by nothing.
+
+Two obstacles kept the mechanism from generalizing. Skills are directory trees
+(`<id>/SKILL.md` plus reference files) while the manifest keyed on `<name>.yaml`.
+Routines render placeholders — a host id and a workspace-scoped name — before
+being written, so a digest over the *embedded* template would never match disk.
+
+Separately, ADR-0346's reconciliation warnings were emitted once during
+bootstrap and then lost, and faulty definitions failed silently: the auto-task
+loader's per-file errors were dropped by `auto_task_list`, and `SkillCatalog::list`
+swallowed every load error.
+
+### Decision
+
+Extend the ADR-0346 mechanism to all five kinds rather than giving the three
+stragglers a sibling mechanism.
+
+`reconcile_managed_assets` takes a `ManagedAssetLayout`: `YamlStem` keys on
+`<name>.yaml` for the four flat catalogs, and `RelativePath` keys on the path
+itself for skill trees, so a single skill *reference file* can be retired
+independently of its `SKILL.md`. Manifest keys are validated per layout, which
+is what keeps a manifest from ever steering a write or a removal outside the
+directory it manages. The digest is always taken over the **rendered** document,
+so routines and skills — both of which substitute placeholders before writing —
+get honest provenance and re-seed as a genuine no-op.
+
+`orbit doctor` gains one row per artifact kind, classifying each artifact as
+*faulty* (fails to load), *deprecated* (digest proves Orbit wrote a default this
+binary no longer ships), or *stale* (an Orbit-written copy of an older release,
+or an untracked file colliding with a bundled default's name). Classification
+reads the manifest only. That is deliberate: loader precedence is not uniform —
+skills merge workspace-over-global while activities keep shipped defaults
+authoritative over workspace copies — so a rule phrased in terms of which copy
+wins would misreport at least one kind, while provenance of the file Orbit wrote
+is the same question everywhere.
+
+Repair is narrower than diagnosis. `--fix-stale-artifacts` retires only
+*deprecated* artifacts whose digest still proves Orbit wrote them; a locally
+modified one is preserved outside the active catalog exactly as init-time
+reconciliation does, and faulty or user-authored files are never touched. A
+faulty artifact is a `Warning` unless it is an unloadable *shipped default*,
+which is a broken install and the only artifact fault that escalates
+`orbit doctor` to a nonzero exit.
+
+### Consequences
+
+- A default skill, auto-task, or routine dropped from a release now leaves
+  existing workspaces instead of lingering indefinitely as dispatchable state.
+- The reconciliation signals ADR-0346 produced only at bootstrap are
+  re-derivable on demand, and every non-ok row names the exact repair command.
+- Faulty definitions are visible without running the one narrow command that
+  happens to touch them; `auto_task_list` now errors only when *nothing* loaded,
+  matching what its doc comment always claimed.
+- Existing workspaces keep their `orbit doctor` exit code: a malformed
+  workspace-authored definition warns rather than failing, so cron and CI
+  callers that pass today keep passing.
+- Cost: three more managed manifests and a wider retirement blast radius. A
+  skill tree is now reconciled file-by-file, so an operator who edits a shipped
+  reference file and later sees that file dropped from a release gets a
+  preserved copy under `.retired-managed/` to reconcile by hand — where
+  previously the file would simply have stayed put and kept working.
+
 ## Task References
 
+- **[ORB-10800]** — Extend managed provenance to skills, auto-tasks, and
+  routines, and add the `orbit doctor` definition-artifact check plus
+  `--fix-stale-artifacts` ([ADR-0366], extending [ADR-0346]).
 - **[ORB-10684]** — Reconcile retired managed activity and job assets by
   content provenance while preserving modified and ambiguous legacy files
   ([ADR-0346], Proposed).

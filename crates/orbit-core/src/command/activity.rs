@@ -3,7 +3,7 @@ use std::path::Path;
 
 use orbit_common::types::OrbitError;
 
-use super::{ManagedAssetReconciliation, reconcile_managed_assets};
+use super::{ManagedAssetLayout, ManagedAssetReconciliation, reconcile_managed_assets};
 
 /// Shippable default activity assets, seeded under
 /// `<orbit_root>/resources/activities/<name>.yaml` on `orbit init`. Keep this
@@ -156,6 +156,7 @@ pub(crate) fn seed_default_activities(
     reconcile_managed_assets(
         activities_dir,
         "activity",
+        ManagedAssetLayout::YamlStem,
         DEFAULT_ACTIVITY_FILES,
         overwrite,
         |_, content| Ok(Cow::Borrowed(content)),

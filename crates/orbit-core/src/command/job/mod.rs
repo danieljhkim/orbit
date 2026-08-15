@@ -1,4 +1,4 @@
-mod catalog;
+pub(crate) mod catalog;
 mod exec;
 pub(crate) mod pipeline;
 mod resume;

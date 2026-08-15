@@ -1,7 +1,7 @@
 ---
 title: Routines — Design
 owner: claude
-last_updated: 2026-08-11
+last_updated: 2026-08-15
 status: Accepted
 feature: routines
 doc_role: design
@@ -10,7 +10,7 @@ summary: Proposed contract for routine definitions, sweep dispatch, host-local s
 tags: [routines, scheduler]
 paths: ["crates/orbit-cli/src/command/routine/**", "crates/orbit-core/src/routines/**", "crates/orbit-remote/src/routines.rs", "crates/orbit-store/src/sqlite/routine_store/**"]
 related_features: [routines, activity-job, host-registry]
-related_artifacts: [ORB-10001, ORB-10021, ORB-10207, ORB-10270, ORB-10319, ADR-0223, ADR-0355]
+related_artifacts: [ORB-10001, ORB-10021, ORB-10207, ORB-10270, ORB-10319, ADR-0223, ADR-0355, ORB-10800, ADR-0366]
 ---
 
 # Routines — Design
@@ -104,6 +104,17 @@ Seeded files become workspace-authored immediately. Plain re-init is create-if-m
 it adds a newly shipped default or recreates a deleted default, but byte-for-byte preserves
 existing definitions, including `enabled`, `hosts`, cron, and policy edits. Only destructive
 force initialization recreates the workspace and therefore restores template defaults.
+
+After [ORB-10800] / [ADR-0366], routine seeding is manifest-aware: `.orbit/routines/`
+carries a `.orbit-managed-assets.json` recording the digest Orbit last wrote for each
+seeded default. The digest is taken over the *rendered* document — after the host-id and
+routine-name placeholders resolve — because that is what actually lands on disk. Two
+consequences follow. A default dropped from a later release is retired by content
+provenance rather than lingering forever in every existing workspace, and re-seeding
+unchanged content against the same host is a genuine no-op rather than a rewrite. A
+routine an operator has edited is never deleted: it is preserved under
+`.retired-managed/routines/`. `orbit doctor` reports routine artifacts as faulty,
+deprecated, or stale, and `orbit doctor --fix-stale-artifacts` performs the retirement.
 
 The seeded `ship_sweep` targets `job:workspace_ship_pipeline` with `missed_run: skip` and
 `overlap: forbid`. The wrapper resolves the source runtime's ship mode and configured base
