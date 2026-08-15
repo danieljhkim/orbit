@@ -8,15 +8,17 @@
     rustdoc::invalid_html_tags,
     rustdoc::private_intra_doc_links
 )]
-//! Orbit's Model Context Protocol framing, tool surface, and SSH transport.
+//! Orbit's Model Context Protocol framing, tool surface, and transports.
 //!
 //! This crate owns protocol framing, advertised-name translation, structured
-//! responses, canonical tool discovery, server identity presentation, and the
-//! direct SSH stdio proxy. Workspace resolution, domain validation, auditing,
-//! and authorization remain behind the injected [`McpHost`] boundary.
+//! responses, canonical tool discovery, server identity presentation, the TCP
+//! listener transport, and the direct SSH stdio proxy. Workspace resolution,
+//! domain validation, auditing, and authorization remain behind the injected
+//! [`McpHost`] boundary.
 
 mod adapter;
 mod error;
+mod listener;
 mod remote;
 
 use std::sync::Arc;
@@ -27,6 +29,7 @@ use rmcp::transport::io::stdio;
 use serde_json::Value;
 
 pub use adapter::OrbitToolServer;
+pub use listener::{DEFAULT_MCP_LISTEN_PORT, ListenerExposure, McpListener};
 pub use remote::{
     McpServerIdentity, RemoteProxyArgs, canonical_mcp_tool_definitions, execute_discovery_tool,
     mcp_server_identity, safe_mcp_tool_names, serve_mcp_remote_proxy,

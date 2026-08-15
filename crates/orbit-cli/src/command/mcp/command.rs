@@ -6,6 +6,7 @@ use orbit_mcp::RemoteProxyArgs;
 
 use crate::command::{CommandOut, CommandOutput, Execute};
 
+use super::listen::ListenArgs;
 use super::setup::{InitArgs, RemoveArgs};
 
 #[derive(Args)]
@@ -33,6 +34,17 @@ pub enum McpSubcommand {
     Remove(RemoveArgs),
     /// Serve the Orbit tool registry over Model Context Protocol
     Serve(ServeArgs),
+    /// Serve the Orbit tool registry over Model Context Protocol on a TCP socket
+    ///
+    /// This is the transport for deployments that need a socket — a server-side
+    /// Orbit reached through an SSH tunnel, for example. `orbit mcp serve`
+    /// remains the stdio server that MCP clients launch directly.
+    ///
+    /// Each accepted connection is an independent MCP session against the same
+    /// server-local tool surface, resolved and audited exactly as a stdio session
+    /// is. The socket authenticates no client, so it binds loopback unless a
+    /// wider bind is asked for explicitly.
+    Listen(ListenArgs),
 }
 
 impl Execute for McpSubcommand {
@@ -45,6 +57,7 @@ impl Execute for McpSubcommand {
             Self::Init(args) => args.execute_without_runtime(None),
             Self::Remove(args) => args.execute_without_runtime(None),
             Self::Serve(args) => args.execute_without_runtime(None),
+            Self::Listen(args) => args.execute_without_runtime(None),
         }
     }
 }

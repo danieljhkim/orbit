@@ -1,5 +1,11 @@
 //! Local composition for the authoritative MCP server process.
+//!
+//! Both transports — stdio and the TCP listener — serve the same host with the
+//! same trusted session envelope, so a call's dispatch and audit path does not
+//! depend on how its bytes arrived.
 
+use std::future::Future;
+use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -10,10 +16,34 @@ use orbit_common::types::{
 use orbit_core::OrbitRuntime;
 use orbit_core::command::tool::{ToolEntryPoint, execute_global_in_process_tool_dispatch};
 use orbit_core::runtime::resolve_global_root;
-use orbit_mcp::McpHost;
+use orbit_mcp::{ListenerExposure, McpHost, McpListener};
 use serde_json::Value;
 
 pub(super) fn serve_mcp_stdio(remote_caller_machine_id: Option<String>) -> Result<(), OrbitError> {
+    let (host, session_context) = compose_server(remote_caller_machine_id)?;
+    block_on_server(orbit_mcp::serve_stdio_with_context(host, session_context))
+}
+
+pub(super) fn serve_mcp_listener(
+    addr: SocketAddr,
+    exposure: ListenerExposure,
+) -> Result<(), OrbitError> {
+    // A listener has no forwarding proxy in front of it, so there is no caller
+    // machine label to trust; each accepted connection contributes only the
+    // peer address it was observed at.
+    let (host, session_context) = compose_server(None)?;
+    block_on_server(async move {
+        let listener = McpListener::bind(addr, exposure, host, session_context).await?;
+        tracing::info!(address = %listener.local_addr()?, "orbit mcp listener bound");
+        listener.serve().await
+    })
+}
+
+/// Build the one MCP host this process serves, together with the trusted audit
+/// envelope derived from the accepting machine's identity.
+fn compose_server(
+    remote_caller_machine_id: Option<String>,
+) -> Result<(Arc<dyn McpHost>, ToolSessionContext), OrbitError> {
     let global_root = resolve_global_root()?;
     let identity = orbit_mcp::mcp_server_identity(&global_root, remote_caller_machine_id)?;
     let host = Arc::new(ServerMcpHost::new(
@@ -21,14 +51,18 @@ pub(super) fn serve_mcp_stdio(remote_caller_machine_id: Option<String>) -> Resul
         identity.process_machine_id,
         identity.process_host_id,
     ));
+    Ok((host, identity.session_context))
+}
+
+fn block_on_server<F>(server: F) -> Result<(), OrbitError>
+where
+    F: Future<Output = Result<(), OrbitError>>,
+{
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()
         .map_err(|error| OrbitError::Execution(format!("tokio runtime: {error}")))?;
-    runtime.block_on(orbit_mcp::serve_stdio_with_context(
-        host,
-        identity.session_context,
-    ))
+    runtime.block_on(server)
 }
 
 /// One MCP server bound to the executing machine.

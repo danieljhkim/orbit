@@ -7,7 +7,7 @@ status: Draft
 feature: mcp-bridge
 doc_role: design
 type: design
-summary: Implemented v1 request flow for local MCP stdio and direct SSH stdio, with server-side resolution and one Core audit boundary.
+summary: Implemented v1 request flow for local MCP stdio, direct SSH stdio, and the TCP listener, with server-side resolution and one Core audit boundary.
 tags: [mcp, ssh, remote-access, registry, audit]
 paths: ["crates/orbit-mcp/**", "crates/orbit-registry/**", "crates/orbit-core/**", "crates/orbit-cli/src/command/mcp/**", "crates/orbit-tools/**"]
 related_features: [host-registry, mcp-session-context]
@@ -25,16 +25,17 @@ The v1 design rests on six invariants:
 4. Every tools/call enters Core's dispatch and audit boundary exactly once,
    including global discovery, unknown raw names, and setup failures.
 5. Caller metadata is useful for audit correlation but grants no authority.
-6. Local and remote calls use the same server implementation.
+6. Local, remote, and socket calls use the same server implementation.
 
 ## 2. Components
 
 ### `orbit-mcp`
 
 Owns MCP framing, advertised-name translation, structured responses, canonical
-surface composition, per-call trace creation, server identity context, and the
-direct SSH stdio proxy. Its `McpHost` boundary accepts canonical tool calls with a
-trusted session context. It does not open an Orbit runtime or decide policy.
+surface composition, per-call trace creation, server identity context, the TCP
+listener, and the direct SSH stdio proxy. Its `McpHost` boundary accepts canonical
+tool calls with a trusted session context. It does not open an Orbit runtime or
+decide policy.
 
 ### `orbit-registry`
 
@@ -43,9 +44,9 @@ uses it to derive its own identity and resolve server-local workspaces.
 
 ### `orbit-cli`
 
-Composes the concrete MCP host. It loads the accepting machine's registry,
-selects a workspace when required, opens the corresponding runtime, and hands the
-operation to Core.
+Composes the concrete MCP host once and serves it over whichever transport was
+asked for. It loads the accepting machine's registry, selects a workspace when
+required, opens the corresponding runtime, and hands the operation to Core.
 
 ### `orbit-core`
 
@@ -81,7 +82,9 @@ Global tools do not require a workspace selector, but they still enter Core once
 Their server-local registry projection is supplied through Core's in-process
 dispatch seam so discovery is audited like every other MCP call.
 
-## 4. Remote request flow
+## 4. Remote and socket request flows
+
+### Direct SSH stdio
 
 A client may register the local command:
 
@@ -108,6 +111,31 @@ not proof of caller identity.
 If SSH cannot start or exits unsuccessfully, the proxy reports that transport
 failure. It does not retry or replay tool calls because it cannot know whether a
 request crossed the process boundary.
+
+### TCP listener
+
+```text
+orbit mcp listen [ADDR] [--allow-non-loopback]
+```
+
+The listener binds before it accepts, so the bind policy is applied and the
+assigned address is known before any client can arrive. A non-loopback address is
+refused unless the operator asked for it explicitly, because the socket
+authenticates no client: whoever reaches it reaches the accepting machine's full
+surface.
+
+Each accepted connection is served on its own task with its own server instance.
+That isolation is load-bearing rather than defensive. The adapter's session state
+is written during `initialize`, so two clients sharing one instance would race on
+the announced workspace selector, and the loser would receive a *successful*
+response computed against the other client's workspace. Every session also mints
+its own origin session id, since a listener-wide id would collapse concurrent
+clients into one audit identity.
+
+Past that point the session follows the local request flow exactly: the same host,
+the same workspace resolution, and the same single Core dispatch and audit
+boundary. The listener adds no broker, checkout preflight, placement decision,
+capability filter, or authorization step.
 
 ## 5. Workspace authority
 
@@ -152,10 +180,10 @@ not depend on recognition or outcome.
 |---|---|---|
 | `trace_id` | MCP adapter, fresh per call | Correlates one invocation |
 | `caller_machine_id` | Local server identity or SSH proxy label | Audit label only |
-| `caller_ip` | First field of `SSH_CONNECTION` | Best-effort network observation |
+| `caller_ip` | First field of `SSH_CONNECTION`, or the accepted peer address | Best-effort network observation |
 | `process_machine_id` | Accepting machine registry | Machine executing the call |
 | `process_host_id` | Accepting machine registry | Host executing the call |
-| `transport` | Accepting server mode | `local` or `ssh-mcp` |
+| `transport` | Accepting server mode | `local` or `ssh-mcp`; a listener session is `local` |
 
 The adapter prevents caller-supplied tool input from replacing trusted session
 context. V1 does not treat the caller label or IP as credentials.
@@ -184,6 +212,8 @@ contract to source and focused tests. The important behavioral gates are:
 - exact tool-surface snapshot;
 - protocol and production MCP round trips;
 - direct SSH command construction and inherited stdio;
+- the listener bind policy, and a loopback listener round trip that shows the
+  accepted peer's IP reaching the audit context;
 - server identity and SSH caller-IP parsing;
 - discovery and unknown-name denial through one Core audit boundary; and
 - crate dependency-direction checks.

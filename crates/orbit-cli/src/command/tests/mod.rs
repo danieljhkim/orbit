@@ -174,6 +174,48 @@ fn cli_parses_mcp_serve() {
 }
 
 #[test]
+fn cli_parses_mcp_listen_with_a_loopback_default() {
+    let cli = Cli::parse_from(["orbit", "mcp", "listen"]);
+    match cli.command {
+        Commands::Mcp(command) => match command.command {
+            McpSubcommand::Listen(args) => {
+                assert!(args.addr.ip().is_loopback());
+                assert!(!args.allow_non_loopback);
+            }
+            _ => panic!("expected mcp listen"),
+        },
+        _ => panic!("expected top-level mcp command"),
+    }
+
+    let cli = Cli::parse_from([
+        "orbit",
+        "mcp",
+        "listen",
+        "0.0.0.0:9123",
+        "--allow-non-loopback",
+    ]);
+    match cli.command {
+        Commands::Mcp(command) => match command.command {
+            McpSubcommand::Listen(args) => {
+                assert_eq!(args.addr.to_string(), "0.0.0.0:9123");
+                assert!(args.allow_non_loopback);
+            }
+            _ => panic!("expected mcp listen"),
+        },
+        _ => panic!("expected top-level mcp command"),
+    }
+}
+
+#[test]
+fn cli_keeps_mcp_serve_stdio_only() {
+    assert_cli_rejects(
+        &["orbit", "mcp", "serve", "--listen", "127.0.0.1:7879"],
+        ErrorKind::UnknownArgument,
+        "--listen",
+    );
+}
+
+#[test]
 fn cli_rejects_removed_mcp_role_and_capability_flags() {
     assert_cli_rejects(
         &["orbit", "mcp", "serve", "--hub"],
