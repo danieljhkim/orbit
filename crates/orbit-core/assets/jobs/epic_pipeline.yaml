@@ -1,9 +1,10 @@
-# Epic branch assembly [ORB-10816].
+# Epic branch assembly [ORB-10816 / ORB-10817].
 #
-# One epic owns one stable worktree and branch. Its unfinished descendants are
-# ordered once, then landed into that branch through serial local pipelines.
-# The epic root remains in-progress; later stages finish and deliver the
-# assembled branch.
+# One epic owns one stable worktree and branch. Unfinished descendants land
+# into that branch through serial local pipelines; the worktree finisher then
+# validates and completes the combined result. If the finisher authors a new
+# child, the assemble loop re-lists descendants and drains again. The epic
+# root remains in-progress; later stages deliver the assembled branch.
 
 schemaVersion: 2
 kind: Job
@@ -36,36 +37,66 @@ spec:
         base: "{{ steps.resolve_ship_input.output.base_branch }}"
         base_sync: remote
 
-    - id: descendants
-      spec:
-        type: deterministic
-        action: list_epic_descendants
-        config: {}
-      default_input:
-        epic_task_id: "{{ input.epic_task_id }}"
-
-    - id: drain
+    - id: assemble
       loop:
-        items: "{{ steps.descendants.output.task_ids }}"
-        max_iterations: 256
+        max_iterations: 8
+        break_when: "{{ steps.remaining.output.empty }} == true"
         steps:
-          - id: land_child
-            target: activity:invoke_and_wait
-            timeout_seconds: 7200
+          - id: descendants
+            spec:
+              type: deterministic
+              action: list_epic_descendants
+              config: {}
             default_input:
-              job_name: task_local_pipeline
-              run_input:
-                task_ids:
-                  - "{{ item }}"
-                base_branch: "{{ steps.worktree.output.head_ref }}"
-                base_sync: local
-                auto_push: false
-                landing_branch: "{{ steps.resolve_ship_input.output.base_branch }}"
-                terminal_status: done
-              timeout_seconds: 7200
+              epic_task_id: "{{ input.epic_task_id }}"
 
-          - id: require_child_success
-            target: activity:pipeline_success_guard
+          - id: drain
+            loop:
+              items: "{{ steps.descendants.output.task_ids }}"
+              max_iterations: 256
+              steps:
+                - id: land_child
+                  target: activity:invoke_and_wait
+                  timeout_seconds: 7200
+                  default_input:
+                    job_name: task_local_pipeline
+                    run_input:
+                      task_ids:
+                        - "{{ item }}"
+                      base_branch: "{{ steps.worktree.output.head_ref }}"
+                      base_sync: local
+                      auto_push: false
+                      landing_branch: "{{ steps.resolve_ship_input.output.base_branch }}"
+                      terminal_status: done
+                    timeout_seconds: 7200
+
+                - id: require_child_success
+                  target: activity:pipeline_success_guard
+                  default_input:
+                    context: epic child local pipeline
+                    result: "{{ steps.land_child.output }}"
+
+          - id: finish
+            target: activity:epic_orchestrator
             default_input:
-              context: epic child local pipeline
-              result: "{{ steps.land_child.output }}"
+              task_id: "{{ input.epic_task_id }}"
+              workspace_path: "{{ steps.worktree.output.workspace_path }}"
+              repo_root: "{{ steps.worktree.output.workspace_path }}"
+
+          - id: commit_finish
+            when: "{{ steps.descendants.output.empty }} == true"
+            target: activity:git_commit
+            default_input:
+              job_run_id: "{{ steps.worktree.output.job_run_id }}"
+              scope: all
+              workspace_path: "{{ steps.worktree.output.workspace_path }}"
+              base_ref: "{{ steps.worktree.output.base_ref }}"
+              base_sha: "{{ steps.worktree.output.base_sha }}"
+
+          - id: remaining
+            spec:
+              type: deterministic
+              action: list_epic_descendants
+              config: {}
+            default_input:
+              epic_task_id: "{{ input.epic_task_id }}"
