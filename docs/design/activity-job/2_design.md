@@ -132,7 +132,14 @@ Refresh applies the same reconciliation to activities and jobs:
   as managed; other YAML remains in place and `orbit init` warns with the paths
   plus the manual remedy to move or delete a stale legacy file;
 - the new manifest contains only current assets whose managed ownership is
-  established, so repeating refresh is idempotent.
+  established, so repeating refresh is idempotent;
+- a needed manifest write that hits EROFS/EACCES (immutable or shared global
+  root, sandboxed runner) records a warning and continues. Read-only commands
+  such as `orbit task show` must not fail closed on that maintenance write.
+  Malformed manifests, unexpected `asset_kind`, and non-permission write
+  failures (ENOSPC, EIO) stay rejected. A writable directory whose embedded
+  digest changed still refreshes the asset and writes the manifest
+  ([ORB-10840]).
 
 This means a manifest-aware upgrade cannot leave a retired managed activity
 with removed tool grants—or a retired managed job with removed actions—in the

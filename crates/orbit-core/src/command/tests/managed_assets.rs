@@ -8,7 +8,6 @@ use tempfile::tempdir;
 use std::os::unix::fs::PermissionsExt;
 
 use super::super::MANAGED_ASSET_MANIFEST_FILE;
-#[cfg(unix)]
 use super::super::activity::seed_default_activities;
 use super::super::init::{InitOptions, InitResult, init_workspace_at_root};
 #[cfg(unix)]
@@ -175,6 +174,42 @@ fn runtime_bootstrap_reads_seeded_global_assets_without_write_access() {
     make_writable(&jobs_dir);
 
     result.expect("ordinary read-only runtime operation succeeds");
+}
+
+#[test]
+fn refresh_writes_asset_and_manifest_when_embedded_digest_changed() {
+    let root = tempdir().expect("create tempdir");
+    let global_root = root.path().join("global");
+    init_global(&global_root);
+
+    let activities_dir = global_root.join("resources/activities");
+    let path = activities_dir.join("sleep.yaml");
+    let original = std::fs::read_to_string(&path).expect("read seeded sleep activity");
+    let stale = format!("{original}# stale digest\n");
+    std::fs::write(&path, &stale).expect("materialize drifted bundled asset");
+    add_managed_manifest_entry(&activities_dir, "sleep", &stale);
+
+    let refreshed =
+        seed_default_activities(&activities_dir, true).expect("refresh drifted bundled asset");
+    assert!(
+        refreshed.refreshed >= 1,
+        "a digest change must rewrite the asset, got {refreshed:?}"
+    );
+    assert!(refreshed.warnings.is_empty(), "{:?}", refreshed.warnings);
+    assert_eq!(
+        std::fs::read_to_string(&path).expect("read refreshed sleep activity"),
+        original
+    );
+
+    let manifest: Value = serde_json::from_str(
+        &std::fs::read_to_string(activities_dir.join(MANAGED_ASSET_MANIFEST_FILE))
+            .expect("read refreshed manifest"),
+    )
+    .expect("parse refreshed manifest");
+    assert_eq!(
+        manifest["assets"]["sleep"].as_str().expect("sleep digest"),
+        sha256(&original)
+    );
 }
 
 #[test]
