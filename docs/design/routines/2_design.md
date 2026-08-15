@@ -28,8 +28,10 @@ decides whether that pass fires work. The OS clock is host-local infrastructure,
 routine definition. Its durable configuration is `~/.orbit/clock.toml`, defaults to a
 60-second cadence, and accepts only whole-minute values from 60 through 3600 seconds.
 
-`orbit routine clock status` reports both configured cadence and the native manager's
-effective enabled state. `orbit routine clock pause` disables only launchd/systemd
+`orbit routine clock status` reports configured cadence, native-manager enabled state,
+and whether an enabled Linux timer has a finite next trigger. An enabled timer with no
+future trigger is `unhealthy`, has no effective cadence, and reports the reinstall command
+that restores the generated unit. `orbit routine clock pause` disables only launchd/systemd
 scheduled invocations (surviving logout/reboot through the native per-user manager);
 it preserves routine cursors, fire history, and per-routine pauses, and a deliberate
 `orbit sweep` is still available. `enable` resumes with the configured cadence, while
@@ -191,10 +193,12 @@ Per pass:
    cache age, or remote registry state participate.
 4. Filter to routines where `enabled`, validation says this machine owns the pin, and no
    local pause.
-5. Sync unresolved fires against actual run state, reclaiming entries older than the
-   routine's `timeout_minutes` (the staleness horizon — a sweep that crashed between
-   intent and dispatch must not block `overlap: forbid` forever). Fires for a routine that
-   is no longer assigned to this machine are deliberately untouched.
+5. Sync unresolved fires against actual run state. A dispatched `running`/`retrying` run
+   whose recorded owner is conclusively stopped is failed immediately, including after a
+   host restart; an alive or unprobeable owner keeps its overlap slot. Other unresolved
+   entries are reclaimed after the routine's `timeout_minutes` staleness horizon, so a
+   sweep that crashed between intent and dispatch cannot block `overlap: forbid` forever.
+   Fires for a routine that is no longer assigned to this machine are deliberately untouched.
 6. For each, compute due-ness from the cron expression and the persisted cursor
    (last slot, else the first-observation baseline — a routine never fires for slots that
    predate its registration on this host; the first sweep records the baseline and fires
@@ -251,9 +255,13 @@ renders and installs the platform unit:
 
 - **macOS** — a launchd agent (`com.orbit.sweep`) with `StartInterval` 60s. launchd also
   fires on wake, which pairs with `missed_run: catch_up_once` for laptop sleep gaps.
-- **Linux** — `orbit-sweep.timer` (`OnCalendar=*:*:00`, `Persistent=true`) plus a oneshot
-  service. `Persistent=true` covers downtime at the OS layer; per-routine `missed_run`
-  still decides whether the covered gap produces a make-up fire.
+- **Linux** — `orbit-sweep.timer` combines `OnStartupSec=<cadence>` with
+  `OnUnitActiveSec=<cadence>` plus a oneshot service. A fresh user manager therefore arms a
+  finite first sweep; a reinstall after the startup deadline fires immediately; successful
+  service activations schedule subsequent sweeps at the configured cadence. These monotonic
+  triggers deliberately do not replay timer events missed while the manager or host was
+  down. The first sweep after restart evaluates each routine's cursor, so `catch_up_once`
+  collapses missed cron slots to one fire and `skip` waits for the next natural slot.
 
 There is no resident Orbit daemon. Sub-minute triggers and event triggers are explicitly
 out of v1 scope for this reason.
@@ -291,7 +299,8 @@ out of v1 scope for this reason.
   records it as `failed` — retryable under `policy.retries` like a run-level failure; a crashed
   sweep's reclaimed stale intent is *ambiguous* (a worker may have partially started), so the
   outcome sync records it as `error` — terminal, never re-fired, so a make-up fire cannot race
-  an orphaned run.
+  an orphaned run. A dispatched in-flight run is released before that timeout only when its
+  recorded owner is conclusively stopped; live and unprobeable owners remain protected.
 - **Routines carry no input payload.** v1 dispatches every target with an empty input
   object; jobs meant for routines must run with defaults. Parameterized fires would be a
   schema addition.

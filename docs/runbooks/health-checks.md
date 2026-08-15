@@ -129,12 +129,29 @@ monitoring at the detailed form.
 ## Check the routine clock
 
 Routines are Orbit's scheduling surface. Install or refresh the host clock with
-`orbit routine init --install-clock`. Inspect due work and recent fires through:
+`orbit routine init --install-clock`. Verify the native clock separately from routine due
+state:
 
 ```sh
+orbit routine clock status
 orbit routine list
 orbit sweep --json
 ```
+
+On Linux, a healthy enabled status includes a finite next systemd trigger and an effective
+cadence. `clock: unhealthy` with an inactive effective cadence means the timer is enabled but
+elapsed, unscheduled, or could not be probed; follow the printed diagnostic and reinstall the
+generated units with `orbit routine init --install-clock`. The generated timer schedules its
+first sweep from each systemd user-manager startup and then recurs from service activation.
+It does not replay every tick missed during host or manager downtime: on the next sweep,
+routine `missed_run: catch_up_once` fires once for a gap while `skip` waits for the next natural
+cron slot.
+
+If an `overlap: forbid` routine remains `overlap_in_flight` after a restart, run one explicit
+`orbit sweep --json` and inspect the referenced run. Sweep releases a dispatched in-flight
+fire immediately only when the recorded owner process is conclusively gone; a live or
+unprobeable owner remains protected until terminal or until the routine timeout. Use
+`orbit doctor` and the stuck-job-run runbook below when the run itself remains orphaned.
 
 The dashboard also exposes `GET /api/routines`. Auto-task definitions such as
 `qa-sweep` and `artifact-deprecation-review` are ordinary workspace data under

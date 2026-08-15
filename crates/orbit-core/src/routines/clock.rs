@@ -149,6 +149,12 @@ pub struct ClockStatus {
     pub configured_cadence_seconds: u64,
     pub effective_cadence_seconds: Option<u64>,
     pub enabled: bool,
+    /// Whether an enabled native clock has a future trigger. A paused clock is
+    /// intentionally not schedulable and is not unhealthy.
+    pub schedulable: bool,
+    /// Actionable detail when an enabled clock cannot be shown to have a
+    /// future trigger.
+    pub health_issue: Option<String>,
     pub platform: &'static str,
 }
 
@@ -192,6 +198,7 @@ impl ManagerCommand {
 
 pub(super) trait ClockCommandRunner {
     fn run(&self, command: &ManagerCommand) -> Result<bool, OrbitError>;
+    fn stdout(&self, command: &ManagerCommand) -> Result<Option<String>, OrbitError>;
 }
 
 struct NativeClockCommandRunner;
@@ -202,6 +209,19 @@ impl ClockCommandRunner for NativeClockCommandRunner {
             .args(&command.args)
             .output()
             .map(|output| output.status.success())
+            .map_err(|error| OrbitError::Execution(format!("run {}: {error}", command.display())))
+    }
+
+    fn stdout(&self, command: &ManagerCommand) -> Result<Option<String>, OrbitError> {
+        Command::new(command.program)
+            .args(&command.args)
+            .output()
+            .map(|output| {
+                output
+                    .status
+                    .success()
+                    .then(|| String::from_utf8_lossy(&output.stdout).into_owned())
+            })
             .map_err(|error| OrbitError::Execution(format!("run {}: {error}", command.display())))
     }
 }
@@ -343,16 +363,36 @@ fn install_systemd(
         program: "systemctl",
         args: vec!["--user".into(), "daemon-reload".into()],
     };
-    let enable = systemd_enable_command();
+    let enable = ManagerCommand {
+        program: "systemctl",
+        args: vec![
+            "--user".into(),
+            "enable".into(),
+            format!("{SYSTEMD_UNIT}.timer"),
+        ],
+    };
+    let restart = ManagerCommand {
+        program: "systemctl",
+        args: vec![
+            "--user".into(),
+            "restart".into(),
+            format!("{SYSTEMD_UNIT}.timer"),
+        ],
+    };
     let reloaded = runner.run(&reload).unwrap_or(false);
-    let activated = reloaded && runner.run(&enable).unwrap_or(false);
+    let enabled = reloaded && runner.run(&enable).unwrap_or(false);
+    // `enable --now` is a no-op for an already-active timer, including the
+    // broken `active (elapsed)` state this installer must repair. An explicit
+    // restart re-arms the rendered timer on both fresh installs and upgrades.
+    let activated = enabled && runner.run(&restart).unwrap_or(false);
 
     let manual_steps = if activated {
         Vec::new()
     } else {
         vec![
             "systemctl --user daemon-reload".to_string(),
-            format!("systemctl --user enable --now {SYSTEMD_UNIT}.timer"),
+            format!("systemctl --user enable {SYSTEMD_UNIT}.timer"),
+            format!("systemctl --user restart {SYSTEMD_UNIT}.timer"),
         ]
     };
     Ok(ClockInstallReport {
@@ -397,6 +437,19 @@ fn manager_status_command(platform: ClockPlatform) -> ManagerCommand {
                 format!("{SYSTEMD_UNIT}.timer"),
             ],
         },
+    }
+}
+
+fn systemd_next_trigger_command() -> ManagerCommand {
+    ManagerCommand {
+        program: "systemctl",
+        args: vec![
+            "--user".into(),
+            "show".into(),
+            format!("{SYSTEMD_UNIT}.timer"),
+            "--property=NextElapseUSecRealtime".into(),
+            "--property=NextElapseUSecMonotonic".into(),
+        ],
     }
 }
 
@@ -463,7 +516,9 @@ pub(super) fn set_clock_enabled_with(
         .run(&manager_status_command(platform))
         .unwrap_or(false);
     if current == enabled {
-        return Ok(clock_status_from(settings, enabled, platform));
+        return Ok(clock_status_from(
+            settings, enabled, enabled, platform, None,
+        ));
     }
     let command = manager_set_enabled_command(platform, enabled, home);
     let succeeded = runner.run(&command)?;
@@ -474,7 +529,9 @@ pub(super) fn set_clock_enabled_with(
             command.display()
         )));
     }
-    Ok(clock_status_from(settings, enabled, platform))
+    Ok(clock_status_from(
+        settings, enabled, enabled, platform, None,
+    ))
 }
 
 pub fn clock_status(global_root: &Path) -> Result<ClockStatus, OrbitError> {
@@ -494,18 +551,60 @@ pub(super) fn clock_status_with(
     let enabled = runner
         .run(&manager_status_command(platform))
         .unwrap_or(false);
-    Ok(clock_status_from(settings, enabled, platform))
+    let (schedulable, health_issue) = if enabled && platform == ClockPlatform::Systemd {
+        match runner.stdout(&systemd_next_trigger_command()) {
+            Ok(Some(output)) if systemd_output_has_future_trigger(&output) => (true, None),
+            Ok(Some(_)) => (
+                false,
+                Some(
+                    "systemd timer is enabled but has no future trigger; recovery: `orbit routine init --install-clock`"
+                        .to_string(),
+                ),
+            ),
+            Ok(None) | Err(_) => (
+                false,
+                Some(
+                    "systemd timer is enabled but its next trigger could not be verified; recovery: `systemctl --user status orbit-sweep.timer`, then `orbit routine init --install-clock`"
+                        .to_string(),
+                ),
+            ),
+        }
+    } else {
+        (enabled, None)
+    };
+    Ok(clock_status_from(
+        settings,
+        enabled,
+        schedulable,
+        platform,
+        health_issue,
+    ))
+}
+
+fn systemd_output_has_future_trigger(output: &str) -> bool {
+    output.lines().any(|line| {
+        let value = line.split_once('=').map_or(line, |(_, value)| value).trim();
+        !value.is_empty()
+            && !matches!(
+                value.to_ascii_lowercase().as_str(),
+                "n/a" | "infinity" | "0"
+            )
+    })
 }
 
 fn clock_status_from(
     settings: ClockSettings,
     enabled: bool,
+    schedulable: bool,
     platform: ClockPlatform,
+    health_issue: Option<String>,
 ) -> ClockStatus {
     ClockStatus {
         configured_cadence_seconds: settings.cadence_seconds,
-        effective_cadence_seconds: enabled.then_some(settings.cadence_seconds),
+        effective_cadence_seconds: (enabled && schedulable).then_some(settings.cadence_seconds),
         enabled,
+        schedulable,
+        health_issue,
         platform: platform.name(),
     }
 }

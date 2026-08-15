@@ -1,12 +1,15 @@
-# Configured timer for `orbit sweep` [ORB-10720] / ADR-0204.
-# Persistent=true covers host downtime at the OS layer; per-routine
-# `missed_run` policy decides whether a covered gap produces a make-up fire.
+# Configured timer for `orbit sweep` [ORB-10720].
+# OnStartupSec arms the first sweep in every fresh user-manager session (and
+# fires immediately when a re-install happens after that deadline). Subsequent
+# sweeps are measured from the last service activation. Monotonic timers do not
+# replay missed timer events; each routine's `missed_run` policy decides what a
+# sweep after downtime does with missed cron slots.
 [Unit]
 Description=Run orbit sweep every {{CADENCE_SECONDS}} seconds
 
 [Timer]
+OnStartupSec={{CADENCE_SECONDS}}s
 OnUnitActiveSec={{CADENCE_SECONDS}}s
-Persistent=true
 AccuracySec=5s
 
 [Install]

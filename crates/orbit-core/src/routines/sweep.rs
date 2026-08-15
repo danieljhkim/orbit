@@ -622,6 +622,24 @@ fn sync_unresolved_fires(
                     Some(JobRunState::Cancelled) => {
                         Some((RoutineFireState::Failed, Some("run cancelled")))
                     }
+                    // A persisted in-flight state is not enough to hold an
+                    // overlap slot after a restart. If the recorded owner is
+                    // conclusively gone, no work can still be executing and
+                    // the fire can be reconciled immediately. Alive and
+                    // unknown owners remain protected until their terminal
+                    // state or the normal policy timeout.
+                    Some(JobRunState::Running | JobRunState::Retrying) => {
+                        let liveness = run_id.map_or(RunOwnerLiveness::Unknown, |run_id| {
+                            dispatch.run_owner_liveness(&routine.source_orbit_dir, run_id)
+                        });
+                        match liveness {
+                            RunOwnerLiveness::Stopped => Some((
+                                RoutineFireState::Failed,
+                                Some("run owner stopped before recording a terminal outcome"),
+                            )),
+                            RunOwnerLiveness::Alive | RunOwnerLiveness::Unknown => timed_out(),
+                        }
+                    }
                     // [ORB-10597] Resolving a fire is what releases the
                     // `overlap:forbid` slot, and for `interrupted` alone the
                     // terminal state is not evidence that the work stopped:
