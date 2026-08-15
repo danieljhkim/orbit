@@ -11,7 +11,7 @@ use super::super::discovery::{discovery_tool_definitions, execute_discovery_tool
 use super::super::surface::canonical_mcp_tool_definitions;
 
 #[test]
-fn remote_owns_the_exact_global_discovery_definitions() {
+fn mcp_owns_the_exact_global_discovery_definitions() {
     let definitions = discovery_tool_definitions().expect("discovery definitions");
     assert_eq!(definitions.len(), 2);
     assert_eq!(

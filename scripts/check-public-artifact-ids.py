@@ -10,9 +10,10 @@ SOURCE_ROOTS = [
     ROOT / "crates/orbit-cli/src",
     ROOT / "crates/orbit-common/src",
     ROOT / "crates/orbit-core/src",
-    ROOT / "crates/orbit-dashboard/src",
+    ROOT / "crates/orbit-web/src",
+    ROOT / "crates/orbit-mcp/src",
+    ROOT / "crates/orbit-registry/src",
     ROOT / "crates/orbit-tools/src",
-    ROOT / "crates/orbit-remote/src",
 ]
 CONCRETE_ID = re.compile(
     r"(?<![A-Za-z0-9])(?:ORB-|ADR-|L-)\d+\b|(?<![A-Za-z0-9])F\d{4}-\d{2}-\d{3}\b"

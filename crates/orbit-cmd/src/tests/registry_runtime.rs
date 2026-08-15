@@ -10,8 +10,8 @@ use serde_json::{Value, json};
 
 use orbit_registry::workspace_registry::{registry_path_for, save_registry_to};
 
-use crate::remote_runtime::{
-    RemoteRuntimeFactory, resolved_workspace_binding, workspace_runtime_binding,
+use crate::registry_runtime::{
+    RegisteredRuntimeFactory, resolved_workspace_binding, workspace_runtime_binding,
 };
 
 fn workspace(id: &str, ship_mode: &str) -> Workspace {
@@ -74,8 +74,9 @@ fn registered_checkout_opens_a_bound_runtime() {
     let workspace = workspace("logical-abc123", "local");
     let checkout = WorkspaceCheckout::owner(workspace.id.clone(), repo.clone(), orbit_dir);
 
-    let runtime = RemoteRuntimeFactory::open_registered_checkout(&global, &workspace, &checkout)
-        .expect("bound runtime");
+    let runtime =
+        RegisteredRuntimeFactory::open_registered_checkout(&global, &workspace, &checkout)
+            .expect("bound runtime");
     let binding = runtime
         .workspace_runtime_binding()
         .expect("runtime binding");
@@ -115,8 +116,9 @@ fn registered_checkout_task_creation_uses_host_task_prefix() {
     .expect("workspace config");
     let workspace = workspace("logical-prefixed", "local");
     let checkout = WorkspaceCheckout::owner(workspace.id.clone(), repo, orbit_dir);
-    let runtime = RemoteRuntimeFactory::open_registered_checkout(&global, &workspace, &checkout)
-        .expect("bound runtime");
+    let runtime =
+        RegisteredRuntimeFactory::open_registered_checkout(&global, &workspace, &checkout)
+            .expect("bound runtime");
 
     let task = runtime
         .execute_tool_command(
@@ -158,8 +160,9 @@ fn replica_runtime_refuses_task_writes_and_hides_coordination_reads() {
         owner_machine_id: Some("hm_owner".to_string()),
         path_overrides: Vec::new(),
     };
-    let runtime = RemoteRuntimeFactory::open_registered_checkout(&global, &workspace, &checkout)
-        .expect("replica runtime");
+    let runtime =
+        RegisteredRuntimeFactory::open_registered_checkout(&global, &workspace, &checkout)
+            .expect("replica runtime");
 
     let error = runtime
         .add_task(orbit_core::command::task::TaskAddParams {
@@ -188,7 +191,7 @@ fn execute_cli_tool(
     name: &str,
     mut input: Value,
 ) -> Result<Value, OrbitError> {
-    let bound = RemoteRuntimeFactory::bind_cli_tool_workspace(runtime, &mut input)?;
+    let bound = RegisteredRuntimeFactory::bind_cli_tool_workspace(runtime, &mut input)?;
     bound.as_ref().unwrap_or(runtime).execute_tool_command(
         name,
         input,
@@ -223,10 +226,12 @@ fn dual_workspace_fixture() -> DualWorkspaceFixture {
     )
     .expect("workspace registry");
 
-    let alpha = RemoteRuntimeFactory::open_registered_checkout(&global, &ws_alpha, &checkout_alpha)
-        .expect("alpha runtime");
-    let beta = RemoteRuntimeFactory::open_registered_checkout(&global, &ws_beta, &checkout_beta)
-        .expect("beta runtime");
+    let alpha =
+        RegisteredRuntimeFactory::open_registered_checkout(&global, &ws_alpha, &checkout_alpha)
+            .expect("alpha runtime");
+    let beta =
+        RegisteredRuntimeFactory::open_registered_checkout(&global, &ws_beta, &checkout_beta)
+            .expect("beta runtime");
     let created = beta
         .execute_tool_command(
             "orbit.task.add",
@@ -410,7 +415,7 @@ fn cli_tool_run_write_rebounds_to_the_named_workspace() {
 fn initialize_with_workspace_selector_binds_the_named_checkout() {
     let fixture = dual_workspace_fixture();
     let global = fixture.alpha.global_root();
-    let runtime = RemoteRuntimeFactory::initialize_with_overrides(Some(&global), Some("beta"))
+    let runtime = RegisteredRuntimeFactory::initialize_with_overrides(Some(&global), Some("beta"))
         .expect("selector should bind beta");
     let listed = runtime
         .execute_tool_command(
@@ -425,7 +430,7 @@ fn initialize_with_workspace_selector_binds_the_named_checkout() {
         "initialize --workspace beta must open the beta checkout: {listed}"
     );
 
-    let unknown = match RemoteRuntimeFactory::initialize_with_overrides(
+    let unknown = match RegisteredRuntimeFactory::initialize_with_overrides(
         Some(&global),
         Some("no-such-workspace"),
     ) {

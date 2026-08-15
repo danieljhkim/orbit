@@ -1,4 +1,4 @@
-//! Unit tests for the shared SSH local-forward tunnel primitive [ORB-10710].
+//! Unit tests for the web SSH local-forward tunnel.
 //!
 //! No real `ssh` process is spawned — a `sleep`/`false` child stands in
 //! wherever a live [`SshTunnel`] is needed.
@@ -7,11 +7,11 @@ use std::net::{Ipv4Addr, TcpListener};
 use std::process::Command;
 use std::time::Duration;
 
-use crate::types::OrbitError;
-use crate::utility::ssh_tunnel::{
+use orbit_core::OrbitError;
+
+use super::super::ssh_tunnel::{
     SshTunnel, classify_ssh_exit, command_forward_args, ephemeral_port, forward_spec,
     poll_until_ready, probe_bindable, probe_forward_args, require_local_port, select_local_port,
-    shell_quote,
 };
 
 /// A `sleep`-backed stand-in for a live `ssh` child: alive but never exits on
@@ -27,10 +27,9 @@ fn fake_live_tunnel() -> SshTunnel {
 // ── port selection ────────────────────────────────────────────────────────
 
 #[test]
-fn ephemeral_port_is_nonzero_and_bindable() {
+fn ephemeral_port_is_nonzero() {
     let port = ephemeral_port().expect("ephemeral port");
     assert_ne!(port, 0);
-    assert!(probe_bindable(port).is_ok());
 }
 
 #[test]
@@ -51,18 +50,25 @@ fn require_local_port_rejects_a_busy_port() {
 #[test]
 fn select_local_port_falls_back_when_the_default_is_busy() {
     // Occupy the caller's preferred default; selection must pick something
-    // else that is itself bindable rather than handing back a doomed port.
+    // else rather than handing back the port we still hold.
     let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).expect("bind");
     let busy = listener.local_addr().expect("addr").port();
     let chosen = select_local_port(None, busy).expect("auto select");
     assert_ne!(chosen, busy);
-    assert!(probe_bindable(chosen).is_ok());
 }
 
 #[test]
 fn select_local_port_uses_a_free_default() {
-    let free = ephemeral_port().expect("ephemeral port");
-    assert_eq!(select_local_port(None, free).expect("auto select"), free);
+    // A returned ephemeral port is released before selection and can be
+    // claimed by another process. Retry until one remains free across the
+    // inherently racy probe boundary documented by `select_local_port`.
+    for _ in 0..100 {
+        let candidate = ephemeral_port().expect("ephemeral port");
+        if select_local_port(None, candidate).expect("auto select") == candidate {
+            return;
+        }
+    }
+    panic!("could not observe a free preferred port after 100 attempts");
 }
 
 // ── forward argument construction ─────────────────────────────────────────
@@ -109,13 +115,6 @@ fn forward_spec_binds_local_to_remote_loopback() {
     assert_eq!(forward_spec(1234, 5678), "1234:localhost:5678");
 }
 
-#[test]
-fn shell_quote_escapes_embedded_single_quotes() {
-    assert_eq!(shell_quote("plain"), "'plain'");
-    assert_eq!(shell_quote("a'b"), "'a'\\''b'");
-    assert_eq!(shell_quote("/srv/my ws"), "'/srv/my ws'");
-}
-
 // ── readiness polling (attach vs. spawn decision) ─────────────────────────
 
 #[test]
@@ -158,7 +157,7 @@ fn poll_until_ready_errors_when_ssh_exits_early() {
         &mut tunnel,
         || false,
         Duration::from_secs(2),
-        "orbit mcp serve --listen",
+        "orbit web serve --port 7878",
     )
     .expect_err("an early ssh exit must be an error, not a timeout");
     assert!(matches!(error, OrbitError::Execution(_)));
@@ -204,12 +203,12 @@ fn classify_other_exit_names_the_remote_command() {
 
     let error = classify_ssh_exit(
         std::process::ExitStatus::from_raw(3 << 8),
-        "orbit mcp serve --listen",
+        "orbit web serve --port 7878",
     );
     match error {
         OrbitError::Execution(message) => {
             assert!(
-                message.contains("orbit mcp serve --listen"),
+                message.contains("orbit web serve --port 7878"),
                 "got: {message}"
             );
         }

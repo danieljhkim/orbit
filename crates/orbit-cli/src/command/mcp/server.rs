@@ -3,7 +3,7 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use orbit_cmd::remote_runtime::RemoteRuntimeFactory;
+use orbit_cmd::registry_runtime::RegisteredRuntimeFactory;
 use orbit_common::types::{
     McpToolDefinition, McpToolScope, NotFoundKind, OrbitError, ToolSessionContext,
     WorkspaceCheckoutRole,
@@ -18,7 +18,7 @@ use super::crew::crew_discovery;
 
 pub(super) fn serve_mcp_stdio(remote_caller_machine_id: Option<String>) -> Result<(), OrbitError> {
     let global_root = resolve_global_root()?;
-    let identity = orbit_remote::mcp_server_identity(&global_root, remote_caller_machine_id)?;
+    let identity = orbit_mcp::mcp_server_identity(&global_root, remote_caller_machine_id)?;
     let host = Arc::new(ServerMcpHost::new(
         global_root,
         identity.process_machine_id,
@@ -51,7 +51,7 @@ impl ServerMcpHost {
     }
 
     fn definition(&self, name: &str) -> Result<McpToolDefinition, OrbitError> {
-        orbit_remote::canonical_mcp_tool_definitions()
+        orbit_mcp::canonical_mcp_tool_definitions()
             .map_err(|error| OrbitError::InvalidInput(error.to_string()))?
             .into_iter()
             .find(|definition| definition.schema.name == name)
@@ -80,7 +80,7 @@ impl ServerMcpHost {
         let registry_path =
             orbit_registry::workspace_registry::registry_path_for(&self.global_root);
         let registry = orbit_registry::workspace_registry::load_registry_from(&registry_path)?;
-        orbit_remote::execute_discovery_tool(
+        orbit_mcp::execute_discovery_tool(
             "orbit.workspace.list",
             &registry,
             &self.process_machine_id,
@@ -96,8 +96,8 @@ impl ServerMcpHost {
         let selector = Self::workspace_selector(&input, &context)
             .ok_or_else(|| self.workspace_required(name))?;
         let selected =
-            RemoteRuntimeFactory::resolve_workspace_selector(&self.global_root, selector)?;
-        orbit_cmd::remote_runtime::sync_runtime_task_prefix(&self.global_root)?;
+            RegisteredRuntimeFactory::resolve_workspace_selector(&self.global_root, selector)?;
+        orbit_cmd::registry_runtime::sync_runtime_task_prefix(&self.global_root)?;
         let binding = orbit_core::runtime::workspace_runtime_binding(
             &selected.workspace,
             &selected.checkout,
@@ -156,7 +156,7 @@ impl ServerMcpHost {
 
 impl McpHost for ServerMcpHost {
     fn list_mcp_tool_definitions(&self) -> Result<Vec<McpToolDefinition>, OrbitError> {
-        orbit_remote::canonical_mcp_tool_definitions()
+        orbit_mcp::canonical_mcp_tool_definitions()
             .map_err(|error| OrbitError::InvalidInput(error.to_string()))
     }
 

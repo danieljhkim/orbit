@@ -6,7 +6,7 @@ use orbit_store::sqlite::task_registry::{WorkspaceConfig, write_workspace_config
 use orbit_registry::host_identity::load_host_identity;
 use orbit_registry::workspace_registry;
 
-use crate::remote_routines::{discover_registered_workspaces, load_routine_placement_at};
+use crate::registry_routines::{discover_registered_workspaces, load_routine_placement_at};
 
 fn write_identity(root: &std::path::Path) {
     std::fs::create_dir_all(root).expect("global root");

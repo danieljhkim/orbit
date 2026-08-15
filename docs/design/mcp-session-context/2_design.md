@@ -3,135 +3,70 @@ summary: "MCP Session Context — Design"
 type: design
 title: "MCP Session Context — Design"
 owner: codex
-last_updated: 2026-08-14
-last_validated: 2026-08-08
+last_updated: 2026-08-15
+last_validated: 2026-08-15
 status: Accepted
 feature: mcp-session-context
 doc_role: design
-tags: ["mcp-session-context", "mcp", "workspace"]
-paths: ["crates/orbit-mcp/**", "crates/orbit-remote/src/mcp/**", "crates/orbit-tools/**", "crates/orbit-core/src/command/tool/**"]
-related_features: ["mcp-session-context", "task-artifacts"]
-related_artifacts: ["ORB-00256", "ORB-10228", "ORB-10262", "ORB-10319", "ORB-10448", "ORB-10690", "ORB-10758", "ORB-10769"]
+tags: ["mcp-session-context", "mcp", "workspace", "audit"]
+paths: ["crates/orbit-common/src/types/tool.rs", "crates/orbit-mcp/src/**", "crates/orbit-cli/src/command/mcp/**", "crates/orbit-core/src/command/tool/**", "crates/orbit-store/src/sqlite/audit_event_store/**"]
+related_features: ["mcp-session-context"]
+related_artifacts: []
 ---
 
 # MCP Session Context — Design
 
-MCP session context separates the caller-supplied workspace address from provenance established at a trusted Orbit adapter, broker, or managed runtime boundary.
+## 1. Field ownership
 
----
+| Field | Source | Meaning |
+|---|---|---|
+| workspace | Tool input or initialize metadata | Untrusted address selector |
+| workspace_id | Authoritative server resolution | Stable logical workspace selected for execution |
+| caller_machine_id | Local identity or SSH proxy argument | Opaque audit correlation label |
+| caller_host_id | Local accepting server | Local display label; unset for a remote caller |
+| process_machine_id, process_host_id | Accepting server | Machine that executes the call |
+| transport | Accepting server | local or ssh-mcp |
+| caller_ip | Accepting SSH environment | Best-effort first field of SSH_CONNECTION |
+| trace_id | MCP adapter | Fresh correlation ID for one tools/call |
 
-## 1. Initialize Metadata
+Clients cannot populate trusted fields through initialize metadata or tool JSON. Initialize accepts only the workspace selector under _meta.orbit.workspace, plus the compatibility spelling _meta["orbit.workspace"].
 
-Clients announce workspace with:
+## 2. Local and SSH sessions
 
-```json
-{
-  "_meta": {
-    "orbit": {
-      "workspace": "/absolute/path/to/repo"
-    }
-  }
-}
-```
+A local server derives caller and process identity from its own host identity. If no machine identity exists, the machine label is host/local and the display label falls back to the OS hostname or local.
 
-`orbit-mcp` also accepts the compatibility key `_meta["orbit.workspace"]`. Empty strings are ignored. All other initialize metadata is ignored for trusted purposes, including workspace ID, caller/process identity, transport, capabilities, origin/call IDs, lease, role, agent/model identity, and task/run/activity/step correlation.
+Remote mode starts one child:
 
-## 2. Storage And Thread-Through
+    ssh -T -- <host> "orbit mcp serve --remote-caller-machine-id '<label>'"
 
-`OrbitToolServer` stores a `ToolSessionContext` in an `RwLock` for the lifetime of one session. Each `tools/call` snapshots that context, generates exactly one unique `mcp_call_id` before name/exposure preflight, and passes the same snapshot through registry-backed dispatch.
+SSH inherits stdin, stdout, and stderr. Orbit does not parse or rewrite MCP in the proxy. The hidden caller argument marks the accepting session as ssh-mcp; its value remains audit metadata. The remote server derives its own process identity and may record the source address exposed by SSH_CONNECTION.
 
-That state is per session, not per process. A stdio server serves exactly one client for its lifetime, so the two coincide there; a listener does not. `McpSessionFactory::build_session` therefore constructs one `OrbitToolServer` per session, and `McpTcpServer` hands each accepted connection its own. Sharing one server across connections would let the last client to `initialize` overwrite every other client's workspace selector and return another workspace's data as a success. [Serve MCP over TCP with one server instance per session](./4_decisions.md#serve-mcp-over-tcp-with-one-server-instance-per-session), [ORB-10690]
+There is no TCP listener or reusable network session in v1.
 
-The Remote-owned `BrokerMcpHost` resolves and validates the logical workspace plus any exact local checkout before constructing or selecting an `OrbitRuntime`, then forwards the trusted context into `OrbitRuntime::execute_tool_command_dispatch_with_session_context`, which places it on `ToolContext` and audit. Unknown/unexposed denial and runtime success/failure retain the same per-call context. `orbit-cli` only delegates `mcp serve` into this composition. Graph commands have no MCP or CLI surface as of ORB-10357.
+## 3. Workspace resolution
 
-The trusted fields are `workspace_id`, caller/process `machine_id` and display `host_id`, `transport`, the complete sorted `effective_capabilities` set, `origin_session_id`, `mcp_call_id`, and optional typed `leased_run {run_id, lease_id}`. A standalone stdio session is always `transport=local`, has exactly `{agent}`, and audits as `role=unverified`. Ambient `ORBIT_*` identity/correlation is ignored unless `ORBIT_MANAGED_RUN_CONTEXT` authenticates the existing managed envelope.
+For a workspace-scoped tool, the authoritative server chooses the first non-empty selector:
 
-## 3. Workspace Resolution
+1. workspace in the tool input;
+2. workspace announced during initialize;
+3. otherwise, a missing-workspace error.
 
-`crates/orbit-tools/src/builtin/orbit/mod.rs` retains the shared builtin argument resolver:
+Process cwd is not an MCP fallback. The server resolves the selector against its registry, opens the selected local runtime, writes the resolved workspace_id into context, and normalizes an explicit workspace argument to the selected checkout path before Core dispatch.
 
-1. If the tool input has a non-empty `workspace`, use it.
-2. Else if `ToolContext.session_context.workspace` is non-empty, insert that value into the input passed to the runtime host.
-3. Else return a clear `missing workspace` error.
+Global tools do not require a workspace selector.
 
-When explicit input and session context differ, Orbit logs an info-level event and honors the explicit input. This preserves an operator escape hatch while making the mismatch visible in traces.
+## 4. Adapter and tool surface
 
-Before that tool-level fallback, `crates/orbit-remote/src/mcp/host.rs` resolves the same
-selector to a logical workspace and, when placement requires it, an exact checkout. That
-Remote preflight owns routing and authorization; it does not replace the builtin's
-explicit-over-session input contract. [ORB-10262], [ORB-10319]
+OrbitToolServer holds one context for its stdio session. Initialize may replace only the workspace selector. For every tools/call, the adapter clones the session context and mints one fresh trace_id without writing it back.
 
-The CLI `orbit tool run` path is a separate seam. `RemoteRuntimeFactory::bind_cli_tool_workspace`
-in `crates/orbit-remote/src/runtime.rs` reads a non-empty input `workspace` *above* the tools
-and either rebinds the cwd-bootstrapped `OrbitRuntime` to that registered checkout or fails
-closed naming the selector. It never continues against cwd on a typo. MCP resolution order is
-unchanged and still never falls back to process cwd. [ORB-10769]
+tools/list comes from the authoritative host on every request. The MCP kernel validates names and schemas but does not filter the list or calls by capability or placement metadata.
 
-### 3c. One selector grammar
+## 5. Core dispatch and audit
 
-CLI `--workspace` and MCP workspace-scoped tools accept the same three forms: a registered
-workspace name, a logical `ws_*` id, or an absolute checkout path. A linked worktree path
-resolves to its registered checkout. Ambiguous names fail closed. `--root` is not a selector;
-it remains a data-directory override. There is no stateful `switch_workspace` MCP tool —
-per-call `workspace` and `--workspace` are the override. [One workspace selector grammar on CLI and MCP](./4_decisions.md#one-workspace-selector-grammar-on-cli-and-mcp), [ORB-10758]
+The server passes the resolved context to Core through execute_tool_command_dispatch_with_session_context. Core is authoritative for domain dispatch and for the success, denial, or failure audit row. Audit records include resolved workspace, caller/process metadata, transport, trace ID, and caller IP when present.
 
-### 3a. The selector is advertised, not implied
+Model-authored fields with names resembling audit fields do not override the supplied ToolSessionContext.
 
-Step 1 is the only step a general-purpose MCP client can reach: no shipping client lets a
-caller inject `initialize.params._meta`, so a managed executor speaking through one has the
-`workspace` argument and nothing else. `crates/orbit-mcp/src/adapter/schema.rs` therefore
-injects an optional `workspace` string property into the advertised input schema of every
-`McpToolScope::WorkspaceRequired` definition, and
-`OrbitToolServer::input_schema_for` applies it to host-resolved and extension-owned schemas
-alike. A tool that declares its own `workspace` parameter — `orbit.task.add`, whose surviving task-artifact documentation records the workspace-binding rule —
-`orbit.crew.list` — keeps its own description. Global-scoped tools get nothing.
+## 6. Explicitly deferred
 
-Advertising at the adapter rather than in each tool's `ToolSchema` keeps the requirement
-stated once, next to the scope that creates it: the broker rejects a scoped call without a
-selector, so the broker's schema layer is what owns telling callers about it. [ORB-10448]
-
-### 3b. Coordination reads follow checkout identity
-
-A hub-placement call resolves against the coordination task registry, which partitions by the
-workspace identity written to `.orbit/config.yaml` — not by the logical ID in the host
-registry. `orbit workspace init` writes both from one value, so they normally coincide; for
-workspaces registered before that convergence they differ (L-0098), and a validated
-`ExactCheckoutBinding` carries the identity key precisely because of it.
-
-`BrokerMcpHost::coordination_workspace_id` resolves the partition key from that binding, then
-from the registered checkout's identity document, then falls back to the logical ID for a
-genuinely checkoutless workspace. Friction partitioning and audit identity stay on the logical
-ID. Without this, every hub-placement task tool addressed an empty partition on a diverged
-workspace and reported `task not found` for tasks the checkout-local CLI served fine
-(F2026-07-099). [ORB-10448]
-
-## 4. Task Add
-
-`orbit.task.add` advertises `workspace` as optional over the tool schema while still accepting explicit callers unchanged. The host action still receives a concrete `workspace` field because the tool wrapper resolves or rejects before dispatch.
-
-This means existing explicit-workspace clients continue to work, while MCP clients with session context can call `orbit.task.add` without a `workspace` field.
-
-## 5. Audit compatibility
-
-Legacy audit `host` remains the executing process hostname and `session_id` retains its old meaning. Caller/process machine and display-host fields are additive. `origin_session_id` does not replace `session_id`. `job_run_id` remains the only run column: a trusted lease run populates it when empty or must match it; `lease_id` is additive. Migration v7 adds nullable columns and capability-set JSON without rewriting v1-v6 rows.
-
-The trusted context carries the entire effective capability set. [ORB-10262] tests membership directly for both `tools/list` and `tools/call`; an empty set is denial and no arbitrary member, ordinal, maximum, or scalar ceiling represents authority.
-
-## 6. Concerns & Honest Limitations
-
-The session context covers stdio and TCP sessions. [ORB-10690] established per-session isolation for the multi-client case; any future HTTP transport must go through the same session-construction seam rather than promoting the value to process-global state. The TCP endpoint carries no authentication of its own — reachability is the deployment's concern — and its capability set is chosen by the caller that starts it, never by the client.
-
-The external channel carries a workspace address, not a trusted workspace ID. The local broker validates an absolute path against Git common-directory identity, `.orbit/config.yaml`, the logical registry, local role, and owner before separately populating `workspace_id`. Process cwd and `ORBIT_ROOT` are not fallbacks. Hub-link negotiation remains a later MCP Bridge unit.
-
-## Task References
-
-- [ORB-00256] implemented the initial session context channel and workspace resolver.
-- [ORB-10228] implemented trusted provenance, anti-spoofing, capability-set propagation and audit, call correlation, and audit migration v7.
-- [ORB-10262] implemented exact-checkout workspace resolution, placement preflight, capability enforcement, and runtime caching by exact binding.
-- [ORB-10319] moved broker/session resolution and MCP composition into the vertical `orbit-remote` feature crate while leaving runtime audit/dispatch in Core.
-- [ORB-10448] advertised the workspace selector on every workspace-scoped tool and routed hub-placement coordination reads by checkout identity, making the [MCP ambient workspace session context](./4_decisions.md#mcp-ambient-workspace-session-context) "clients that cannot send initialize metadata pass `workspace` explicitly" path reachable from a managed worktree activity.
-- [ORB-10690] added the TCP transport and moved session construction behind `McpSessionFactory` so concurrent clients cannot observe or overwrite each other's session context ([Serve MCP over TCP with one server instance per session](./4_decisions.md#serve-mcp-over-tcp-with-one-server-instance-per-session)).
-- [ORB-10769] bound CLI `orbit tool run` to the same fail-closed workspace selector above the tools; MCP resolution order is unchanged.
-- [ORB-10758] added `orbit --workspace` and made MCP accept the same name / `ws_*` id / absolute-path grammar ([One workspace selector grammar on CLI and MCP](./4_decisions.md#one-workspace-selector-grammar-on-cli-and-mcp)).
-
-Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.
+MCP v1 performs no capability authorization, lease validation, placement routing, broker negotiation, or Orbit principal authentication. Shared compatibility fields and policy tags may still exist in types or schemas, but the live MCP v1 path does not treat them as authority.

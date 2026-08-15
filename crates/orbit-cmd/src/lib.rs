@@ -13,8 +13,8 @@
 //!
 //! # Role
 //! Depends on `orbit-core` (runtime/context) and composes it with
-//! `orbit-remote`'s machine-local registry where an application needs both —
-//! never the other way around. Consumed by `orbit-cli` and `orbit-dashboard`.
+//! `orbit-registry` where an application needs both — never the other way
+//! around. Consumed by `orbit-cli` and `orbit-web`.
 //! Command groups that
 //! orbit-core's runtime internals (tool hosts, engine hosts, bootstrap
 //! seeding) invoke remain in `orbit-core::command`; see `ARCHITECTURE.md`
@@ -25,8 +25,8 @@ pub mod agent_rules;
 pub mod diagnostics;
 pub mod doctor;
 pub mod migrate;
-pub mod remote_routines;
-pub mod remote_runtime;
+pub mod registry_routines;
+pub mod registry_runtime;
 
 #[cfg(test)]
 mod tests;

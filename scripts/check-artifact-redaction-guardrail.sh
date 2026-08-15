@@ -14,7 +14,7 @@ targets=(
   # orbit_common::utility::redaction (redact_all / with_argv_secrets), never a
   # surface-local helper here.
   "crates/orbit-core/src/command/task/add.rs"
-  "crates/orbit-dashboard/src/api/tasks.rs"
+  "crates/orbit-web/src/api/tasks.rs"
   "crates/orbit-engine/src/activity_job/cli_runner/orchestrator.rs"
   "crates/orbit-engine/src/activity_job/cli_runner/argv.rs"
 )

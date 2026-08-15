@@ -3,59 +3,41 @@ summary: "MCP Session Context — Overview"
 type: design
 title: "MCP Session Context — Overview"
 owner: codex
-last_updated: 2026-07-18
-last_validated: 2026-08-02
+last_updated: 2026-08-15
+last_validated: 2026-08-15
 status: Accepted
 feature: mcp-session-context
 doc_role: overview
-tags: ["mcp-session-context", "mcp", "workspace"]
-paths: ["crates/orbit-mcp/**", "crates/orbit-remote/src/mcp/**", "crates/orbit-tools/**", "crates/orbit-core/src/command/tool/**"]
-related_features: ["mcp-session-context", "task-artifacts"]
-related_artifacts: ["ORB-00256", "ORB-10228", "ORB-10319"]
+tags: ["mcp-session-context", "mcp", "workspace", "audit"]
+paths: ["crates/orbit-common/src/types/tool.rs", "crates/orbit-mcp/src/**", "crates/orbit-cli/src/command/mcp/**", "crates/orbit-core/src/command/tool/**"]
+related_features: ["mcp-session-context"]
+related_artifacts: []
 ---
 
 # MCP Session Context — Overview
 
-MCP session context is the trusted transport envelope carried from an Orbit MCP adapter or broker to tool dispatch. External clients may announce only the legacy workspace address selector. Orbit separately carries the validated logical workspace, caller and executing-process identity, transport, the complete effective capability set, originating session, per-call correlation, and optional leased-run correlation without trusting model-authored JSON.
+ToolSessionContext is Orbit's transport-to-Core invocation envelope. It keeps caller-supplied addressing separate from facts constructed by the accepting Orbit server.
 
-This document is the entry point. [2_design.md](./2_design.md) describes the live mechanism, [3_vision.md](./3_vision.md) records open questions, and [4_decisions.md](./4_decisions.md) captures the ADR log.
+## Live v1 flow
 
----
+1. A client selects a workspace in tool input or MCP initialize metadata.
+2. The accepting server resolves that address to a registered workspace and local runtime.
+3. The server supplies caller, process, and transport audit metadata.
+4. The MCP adapter mints a fresh trace_id for each tools/call request.
+5. Core dispatch executes the tool and writes the authoritative audit event from the trusted context.
 
-## 1. Motivation
+The external workspace value is addressing input, not a trusted workspace identity. The resolved workspace_id is written only after server-side resolution.
 
-Orbit CLI commands can resolve workspace from the user's cwd because the process runs in the user's shell. MCP servers do not have that guarantee: the server cwd is wherever the client launched `orbit mcp serve`, while the agent may be working in a canonical checkout, a nested subdirectory, or an Orbit-managed worktree.
+## Identity and transport
 
-Before [ORB-00256], every MCP call to `orbit.task.add` had to pass `workspace`. That avoided silent misroutes, but it made tool calls noisy and encouraged schema trimming before a safe default existed. Session context gives MCP a deliberate ambient channel: the client says which workspace it means, Orbit stores that for the session, and tool calls can omit `workspace` only when that deliberate signal exists.
+- caller_machine_id is an opaque audit label. It is not an authenticated principal.
+- A direct SSH proxy forwards the caller's persisted machine ID when available and host/local otherwise.
+- caller_ip is best-effort audit data taken from SSH_CONNECTION when an SSH server exposes it.
+- process_machine_id and process_host_id describe the machine accepting and executing the call.
+- transport is local or ssh-mcp.
 
-## 2. Core Concepts
+## V1 boundary
 
-**Session context** is transport-owned metadata, not model-authored tool input. `initialize.params._meta.orbit.workspace` is the only external metadata accepted, and it remains an untrusted address selector until a local adapter/runtime validates it. Trusted `workspace_id`, machine/host identity, transport, capabilities, session/call IDs, and lease correlation are injected only at Orbit seams.
+MCP v1 has one authoritative server host and stdio framing, either local or carried byte-for-byte through SSH. It has no TCP listener, broker, remote placement routing, capability authorization, leases, or Orbit-authenticated caller identity. Those concerns must not be inferred from compatibility fields that remain in shared types.
 
-**Capability** is carried as a complete canonical `BTreeSet<McpCapability>`, never a scalar ceiling. [ORB-10228] establishes and audits that trusted set; capability-aware listing and dispatch are enforced by later broker units.
-
-**Correlation** keeps existing authorities intact: `AuditEvent.session_id` is unchanged; `origin_session_id` is additive; and `leased_run.run_id` populates or must match canonical `job_run_id`, with only `lease_id` added to audit.
-
-**Workspace resolution** is the tool-level rule: explicit `workspace` input wins, then session context, then a clear `missing workspace` error. Process cwd is not part of the chain.
-
-**Binding invariant.** Surviving documentation from the lost task-artifact decision records `.orbit/config.yaml`'s `workspace_id` as the durable binding key; session context changes only how MCP calls name the intended workspace path.
-
-## 3. At a Glance
-
-| Concern | File | Task |
-|---|---|---|
-| MCP initialization parsing | `crates/orbit-mcp/src/adapter/dispatch.rs` | [ORB-00256] |
-| Session metadata DTO | `crates/orbit-common/src/types/tool.rs` | [ORB-00256] |
-| Trusted provenance, capabilities, and per-call correlation | common DTOs, generic MCP session framing, Remote host policy, Core runtime, audit store | [ORB-10228], [ORB-10319] |
-| Runtime dispatch thread-through | `crates/orbit-core/src/command/tool/` | [ORB-00256] |
-| MCP host and server composition | `crates/orbit-remote/src/mcp/mod.rs` | [ORB-10319] |
-| Route selection, exact-checkout resolution, and placement preflight | `crates/orbit-remote/src/mcp/host.rs` | [ORB-10262], [ORB-10319] |
-| Builtin explicit/session workspace-argument fallback | `crates/orbit-tools/src/builtin/orbit/mod.rs` | [ORB-00256] |
-
-## Task References
-
-- [ORB-00256] implemented MCP ambient workspace session context.
-- [ORB-10228] made all non-address fields trusted adapter/runtime provenance and added additive audit correlation.
-- [ORB-10319] consolidated trusted broker/session policy and MCP server composition in `orbit-remote`; `orbit-mcp` remains the generic transport kernel.
-
-Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.
+See [2_design.md](./2_design.md) for the concrete path, [3_vision.md](./3_vision.md) for evolution gates, and [4_decisions.md](./4_decisions.md) for current design choices.

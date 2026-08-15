@@ -1,5 +1,5 @@
 use clap::Args;
-use orbit_cmd::remote_runtime::RemoteRuntimeFactory;
+use orbit_cmd::registry_runtime::RegisteredRuntimeFactory;
 use orbit_cmd::{MigrateCommands, MigrateStatus, migrate_dry_run_at};
 use orbit_core::{OrbitError, OrbitRuntime};
 use serde_json::json;
@@ -35,7 +35,7 @@ impl MigrateCommand {
     pub fn execute_without_runtime(self, root_override: Option<&std::path::Path>) -> CommandOut {
         let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
         let Some(resolved) =
-            RemoteRuntimeFactory::try_resolve_initialized_roots(&cwd, root_override)?
+            RegisteredRuntimeFactory::try_resolve_initialized_roots(&cwd, root_override)?
         else {
             return Err(OrbitError::WorkspaceError(
                 "no initialized orbit workspace found from the current directory; run `orbit init` first"

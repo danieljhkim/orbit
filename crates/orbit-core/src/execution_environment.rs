@@ -1,8 +1,5 @@
-//! Registry-neutral execution environment projection.
-//!
-//! The remote feature owns publication, ownership validation, and wire-profile
-//! construction. Core owns only the execution facts that must be derived from
-//! its effective runtime configuration and materialized job/activity catalog.
+//! Registry-neutral execution environment facts derived from Core's effective
+//! runtime configuration and materialized job/activity catalog.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -37,7 +34,7 @@ const UNSUPPORTED_PROFILE_ENV_OVERRIDES: [&str; 5] = [
     "ORBIT_BACKEND",
 ];
 
-/// Stable, path-free execution facts required by a remote profile publisher.
+/// Stable, path-free execution facts derived from one runtime.
 #[derive(Debug, Clone)]
 pub struct ExecutionEnvironmentSnapshot {
     pub workspace_id: String,

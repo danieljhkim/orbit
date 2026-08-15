@@ -898,13 +898,13 @@ fn dispatch_web(command: Commands, context: DispatchContext<'_>) -> CommandOut {
         Commands::Web(WebCommand {
             command: WebSubcommand::Serve(args),
         }) => {
-            orbit_dashboard::serve_from_env(args, context.root_override)?;
+            orbit_web::serve_from_env(args, context.root_override)?;
             Ok(CommandOutput::Silent)
         }
         Commands::Web(WebCommand {
             command: WebSubcommand::Connect(args),
         }) => {
-            orbit_dashboard::connect(args)?;
+            orbit_web::connect(args)?;
             Ok(CommandOutput::Silent)
         }
         _ => dispatch_mismatch("Web"),

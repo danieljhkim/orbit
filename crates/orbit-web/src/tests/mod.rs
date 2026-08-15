@@ -6,4 +6,5 @@ mod health;
 mod log_format;
 mod parse;
 mod serve;
+mod ssh_tunnel;
 mod state;

@@ -9,7 +9,7 @@
 
 use crate::command::{CommandOut, CommandOutput};
 use clap::Args;
-use orbit_cmd::remote_routines::run_sweep;
+use orbit_cmd::registry_routines::run_sweep;
 use orbit_core::routines::{RoutineSweepReport, SweepOptions, SweepOutcome};
 use serde_json::json;
 

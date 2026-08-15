@@ -1,4 +1,4 @@
-//! Read-only JSON HTTP handlers for the dashboard.
+//! JSON HTTP handlers for the dashboard.
 //!
 //! Each handler delegates to the same `*_to_json` helpers used by the CLI's
 //! `--json` paths so the wire format stays in lockstep with the CLI.

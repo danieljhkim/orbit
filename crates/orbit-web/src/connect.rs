@@ -1,18 +1,17 @@
 //! `orbit web connect <ssh-host>` — client-side SSH-tunnel convenience.
 //!
-//! The dashboard binds loopback-only by design (see [`crate::check_bindable_host`],
-//! ORB-00360): it has no authentication, so it must never be exposed to a
-//! network directly. To view a workspace's dashboard from another machine the
-//! supported path is an authenticated SSH tunnel — historically the manual
+//! The dashboard binds loopback-only by design (see [`crate::check_bindable_host`]):
+//! it has no authentication, so it must never be exposed to a network directly.
+//! To view a workspace's dashboard from another machine the supported path is
+//! an authenticated SSH tunnel — historically the manual
 //! `ssh -L 7878:localhost:7878 <host> "orbit web serve --no-open"`.
 //!
 //! `connect` automates exactly that workflow and nothing more: it delegates
 //! authentication to SSH, keeps the loopback bind guard intact, and adds no new
-//! attack surface. The attach-or-spawn tunnel itself lives in
-//! [`orbit_common::utility::ssh_tunnel`] — the one mechanism every Orbit
-//! loopback listener is reached through ([ORB-10710]) — so this module holds
-//! only what is specific to the dashboard: the `/healthz` readiness probe, the
-//! remote `orbit web serve` command line, the browser, and the shutdown wait.
+//! attack surface. The attach-or-spawn process lifecycle lives beside this
+//! command in [`crate::ssh_tunnel`]; this module adds the `/healthz` readiness
+//! probe, the remote `orbit web serve` command line, the browser, and the
+//! shutdown wait.
 //!
 //! Either way it waits for the remote server to answer `/healthz`, opens a
 //! browser, and — on Ctrl-C — tears down only the `ssh` process this invocation
@@ -27,12 +26,11 @@ use std::net::{Ipv4Addr, SocketAddr, TcpStream};
 use std::time::Duration;
 
 use clap::Args;
-use orbit_common::utility::ssh_tunnel::{self, TunnelOrigin, TunnelSpec};
+use orbit_common::utility::shell::quote_posix_arg;
 use orbit_core::OrbitError;
 
+use crate::ssh_tunnel::{self, SshTunnel, TunnelOrigin, TunnelSpec};
 use crate::{DEFAULT_DASHBOARD_PORT, open_browser};
-
-use orbit_common::utility::ssh_tunnel::SshTunnel;
 
 /// How long to wait for the remote dashboard to answer `/healthz` before
 /// giving up. Generous because it covers SSH connect + remote process spawn.
@@ -154,7 +152,7 @@ pub(crate) fn remote_serve_command(cfg: &ConnectArgs) -> String {
     }
     if let Some(root) = &cfg.root {
         cmd.push_str(" --root ");
-        cmd.push_str(&ssh_tunnel::shell_quote(root));
+        cmd.push_str(&quote_posix_arg(root));
     }
     cmd
 }

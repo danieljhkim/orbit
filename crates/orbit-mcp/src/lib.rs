@@ -8,15 +8,16 @@
     rustdoc::invalid_html_tags,
     rustdoc::private_intra_doc_links
 )]
-//! Generic Model Context Protocol stdio kernel for a caller-supplied tool host.
+//! Orbit's Model Context Protocol framing, tool surface, and SSH transport.
 //!
-//! The kernel owns protocol framing, advertised-name translation, input-schema
-//! encoding, trusted per-call context, and structured responses. Workspace
-//! resolution, domain validation, auditing, and authorization belong behind the
-//! injected [`McpHost`] boundary.
+//! This crate owns protocol framing, advertised-name translation, structured
+//! responses, canonical tool discovery, server identity presentation, and the
+//! direct SSH stdio proxy. Workspace resolution, domain validation, auditing,
+//! and authorization remain behind the injected [`McpHost`] boundary.
 
 mod adapter;
 mod error;
+mod remote;
 
 use std::sync::Arc;
 
@@ -26,6 +27,10 @@ use rmcp::transport::io::stdio;
 use serde_json::Value;
 
 pub use adapter::OrbitToolServer;
+pub use remote::{
+    McpServerIdentity, RemoteProxyArgs, canonical_mcp_tool_definitions, execute_discovery_tool,
+    mcp_server_identity, safe_mcp_tool_names, serve_mcp_remote_proxy,
+};
 
 /// Back-end for the complete MCP tool surface.
 ///

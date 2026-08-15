@@ -20,7 +20,7 @@
 //!
 //! # Role
 //! Depends only on `orbit-common`. Consumed by `orbit-core`, `orbit-engine`,
-//! `orbit-cmd`, and vertical feature crates such as `orbit-remote`.
+//! `orbit-cmd`, and stateful feature crates such as `orbit-registry`.
 //!
 //! # Key exports
 //! - Backend trait types: [`TaskStoreBackend`], [`TaskDocumentStoreBackend`],
@@ -34,7 +34,7 @@
 //! - [`validate_instance_against_schema`] — JSON Schema validation for activity I/O
 //!
 //! # Dependency direction
-//! `orbit-common` ← `orbit-store` ← consumers such as orbit-core and orbit-remote
+//! `orbit-common` ← `orbit-store` ← consumers such as orbit-core and orbit-registry
 
 pub(crate) mod backend;
 mod file;

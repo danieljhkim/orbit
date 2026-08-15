@@ -9,7 +9,7 @@ use std::path::Path;
 use std::process::{Command, Stdio};
 
 use orbit_common::types::OrbitError;
-use orbit_common::utility::ssh_tunnel::shell_quote;
+use orbit_common::utility::shell::quote_posix_arg;
 use orbit_registry::{HostIdentityState, inspect_host_identity};
 
 /// Audit-only identity used when this machine has no persisted Orbit identity.
@@ -71,7 +71,7 @@ pub(super) fn ssh_command(args: &RemoteProxyArgs, caller_machine_id: &str) -> Co
 pub(super) fn remote_serve_command(caller_machine_id: &str) -> String {
     format!(
         "orbit mcp serve --remote-caller-machine-id {}",
-        shell_quote(caller_machine_id)
+        quote_posix_arg(caller_machine_id)
     )
 }
 

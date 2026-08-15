@@ -10,9 +10,9 @@ pub mod path;
 pub mod process_identity;
 pub mod redaction;
 pub mod selector;
+pub mod shell;
 #[cfg(feature = "sqlite")]
 pub mod sqlite;
-pub mod ssh_tunnel;
 
 #[cfg(test)]
 mod tests;

@@ -1,4 +1,4 @@
-//! Remote-owned machine-local discovery definitions and execution.
+//! MCP machine-local discovery definitions and execution.
 
 use orbit_common::types::{
     McpToolDefinition, McpToolPlacement, McpToolPolicy, McpToolPolicyError, McpToolScope,

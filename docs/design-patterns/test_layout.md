@@ -89,7 +89,7 @@ This nests the test module as a *child* of the source module. Children can read 
 
 ## Reference: `orbit-mcp::adapter`
 
-The generic MCP `adapter` module has children `name_map.rs`, `schema.rs`, `dispatch.rs`, and `structured.rs`. The canonical layout: `adapter/mod.rs` declares each child plus `#[cfg(test)] mod tests;`, and `adapter/tests/` contains one file per source child (`tests/name_map.rs`, `tests/schema.rs`, etc.). Remote proxy/discovery tests live beside their implementations under `orbit-remote/src/mcp/tests/`; Registry's crate-level tests live under `orbit-registry/src/tests/`, while persistence sibling tests live under `orbit-registry/src/persistence/tests/`. Each test file accesses its sibling source through the narrowest deliberate visibility.
+The MCP `adapter` module has children `name_map.rs`, `schema.rs`, `dispatch.rs`, and `structured.rs`. The canonical layout: `adapter/mod.rs` declares each child plus `#[cfg(test)] mod tests;`, and `adapter/tests/` contains one file per source child (`tests/name_map.rs`, `tests/schema.rs`, etc.). MCP proxy/discovery tests live beside their implementations under `orbit-mcp/src/remote/tests/`; Registry's crate-level tests live under `orbit-registry/src/tests/`, while persistence sibling tests live under `orbit-registry/src/persistence/tests/`. Each test file accesses its sibling source through the narrowest deliberate visibility.
 
 ## Migration recipe
 

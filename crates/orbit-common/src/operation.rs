@@ -18,7 +18,7 @@
 //! |------------------|----------------------------------------------------|
 //! | `orbit-tools`    | `ToolSchema` + MCP exposure policy from the spec    |
 //! | `orbit-cli`      | `clap::Command` + input JSON + audit metadata       |
-//! | `orbit-dashboard`| tool names + request→input projection               |
+//! | `orbit-web`      | tool names + request→input projection               |
 //! | `orbit-core`     | the handler table, keyed by the verb enum           |
 //!
 //! Handlers need `&OrbitRuntime`, which lives above this crate, so the handler

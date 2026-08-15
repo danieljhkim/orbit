@@ -11,7 +11,7 @@ mod server;
 mod setup;
 
 pub use command::{McpCommand, McpSubcommand};
-pub(crate) use orbit_remote::safe_mcp_tool_names;
+pub(crate) use orbit_mcp::safe_mcp_tool_names;
 #[allow(unused_imports)]
 pub(crate) use setup::init_auto_for_workspace;
 

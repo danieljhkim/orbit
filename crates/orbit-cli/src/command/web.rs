@@ -1,7 +1,7 @@
-//! `orbit web` — thin delegator to the orbit-dashboard crate.
+//! `orbit web` — thin delegator to the `orbit-web` crate.
 //!
 //! The real implementation (ServeArgs, serve(), router, assets, API handlers)
-//! lives in the `orbit-dashboard` crate so that orbit-cli incremental builds
+//! lives in the `orbit-web` crate so that orbit-cli incremental builds
 //! do not pay the axum dependency tax on every change.
 
 use clap::{Args, Subcommand};
@@ -30,22 +30,22 @@ impl Execute for WebCommand {
 #[derive(Subcommand)]
 pub enum WebSubcommand {
     /// Run the Orbit dashboard
-    Serve(orbit_dashboard::ServeArgs),
+    Serve(orbit_web::ServeArgs),
     /// Open a remote workspace's dashboard over an SSH tunnel
-    Connect(orbit_dashboard::ConnectArgs),
+    Connect(orbit_web::ConnectArgs),
 }
 
 impl Execute for WebSubcommand {
     fn execute(self, runtime: &OrbitRuntime) -> CommandOut {
         match self {
             WebSubcommand::Serve(args) => {
-                orbit_dashboard::serve(runtime, args)?;
+                orbit_web::serve(runtime, args)?;
                 Ok(CommandOutput::Silent)
             }
             // `connect` is a client-side tunnel helper; the workspace lives on
             // the remote, so it needs no local runtime.
             WebSubcommand::Connect(args) => {
-                orbit_dashboard::connect(args)?;
+                orbit_web::connect(args)?;
                 Ok(CommandOutput::Silent)
             }
         }

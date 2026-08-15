@@ -1,4 +1,4 @@
-//! `orbit-dashboard` — read-only web dashboard and JSON API server.
+//! `orbit-web` — HTTP API, dashboard UI, and remote web connection.
 //!
 //! This crate isolates the axum-based dashboard (HTML/JS assets + `/api/*`
 //! handlers) from orbit-cli so that CLI changes do not force rebuilds of the
@@ -17,6 +17,7 @@ mod health;
 mod log_format;
 mod parse;
 mod projections;
+mod ssh_tunnel;
 mod state;
 
 #[cfg(test)]

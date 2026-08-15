@@ -4,5 +4,5 @@
 
 mod doctor;
 mod migrate;
-mod remote_routines;
-mod remote_runtime;
+mod registry_routines;
+mod registry_runtime;

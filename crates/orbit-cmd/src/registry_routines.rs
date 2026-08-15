@@ -15,14 +15,14 @@ use orbit_core::routines::{
 use orbit_registry::host_identity::{HostIdentity, load_host_identity};
 use orbit_registry::workspace_registry;
 
-use crate::remote_runtime::RemoteRuntimeFactory;
+use crate::registry_runtime::RegisteredRuntimeFactory;
 
-struct RemoteRoutineEnvironment {
+struct RegistryRoutineEnvironment {
     global_root: std::path::PathBuf,
     identity: HostIdentity,
 }
 
-impl RemoteRoutineEnvironment {
+impl RegistryRoutineEnvironment {
     fn load(global_root: &Path) -> Result<Self, OrbitError> {
         Ok(Self {
             global_root: global_root.to_path_buf(),
@@ -38,7 +38,7 @@ impl RemoteRoutineEnvironment {
     }
 }
 
-impl RoutinePlacementProvider for RemoteRoutineEnvironment {
+impl RoutinePlacementProvider for RegistryRoutineEnvironment {
     fn load_routine_placement(&self) -> Result<RoutinePlacementProjection, OrbitError> {
         load_routine_placement_at(&self.global_root, &self.identity)
     }
@@ -63,7 +63,7 @@ pub(crate) fn load_routine_placement_at(
     })
 }
 
-impl RoutineWorkspaceProvider for RemoteRoutineEnvironment {
+impl RoutineWorkspaceProvider for RegistryRoutineEnvironment {
     fn discover_workspaces(&self, global_root: &Path) -> Result<DiscoveredWorkspaces, OrbitError> {
         discover_registered_workspaces(global_root)
     }
@@ -85,7 +85,7 @@ pub(crate) fn discover_registered_workspaces(
         if workspace.status != WorkspaceStatus::Active || !checkout.orbit_dir.exists() {
             continue;
         }
-        match RemoteRuntimeFactory::open_registered_checkout(global_root, workspace, checkout) {
+        match RegisteredRuntimeFactory::open_registered_checkout(global_root, workspace, checkout) {
             Ok(runtime) => discovered.entries.push((workspace.clone(), runtime)),
             Err(error) => discovered.errors.push(RoutineLoadError {
                 source_workspace: workspace.name.clone(),
@@ -98,7 +98,7 @@ pub(crate) fn discover_registered_workspaces(
 }
 
 pub fn routine_statuses(global_root: &Path) -> Result<RoutineStatusReport, OrbitError> {
-    let environment = RemoteRoutineEnvironment::load(global_root)?;
+    let environment = RegistryRoutineEnvironment::load(global_root)?;
     orbit_core::routines::routine_statuses_with_providers(
         global_root,
         &environment,
@@ -109,7 +109,7 @@ pub fn routine_statuses(global_root: &Path) -> Result<RoutineStatusReport, Orbit
 
 pub fn run_sweep(options: SweepOptions) -> Result<SweepOutcome, OrbitError> {
     let global_root = workspace_registry::global_orbit_dir()?;
-    let environment = RemoteRoutineEnvironment::load(&global_root)?;
+    let environment = RegistryRoutineEnvironment::load(&global_root)?;
     orbit_core::routines::run_sweep_with_providers(
         options,
         environment.local_host(),
@@ -119,7 +119,7 @@ pub fn run_sweep(options: SweepOptions) -> Result<SweepOutcome, OrbitError> {
 }
 
 pub fn run_sweep_at(global_root: &Path, options: SweepOptions) -> Result<SweepOutcome, OrbitError> {
-    let environment = RemoteRoutineEnvironment::load(global_root)?;
+    let environment = RegistryRoutineEnvironment::load(global_root)?;
     orbit_core::routines::run_sweep_at_with_providers(
         global_root,
         options,

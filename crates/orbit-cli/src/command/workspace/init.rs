@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use chrono::Utc;
 use clap::Args;
 use orbit_cmd::agent_rules::{InjectionAction, inject_agent_rules};
-use orbit_cmd::remote_runtime::RemoteRuntimeFactory;
+use orbit_cmd::registry_runtime::RegisteredRuntimeFactory;
 use orbit_common::types::{
     Workspace, WorkspaceCheckout, WorkspaceCheckoutRole, WorkspaceRegistry, WorkspaceStatus,
     validate_machine_id,
@@ -66,7 +66,7 @@ pub struct WorkspaceInitArgs {
 impl WorkspaceInitArgs {
     pub fn execute_without_runtime(self, root_override: Option<&Path>) -> CommandOut {
         let cwd = std::env::current_dir().map_err(|e| OrbitError::Io(e.to_string()))?;
-        let roots = RemoteRuntimeFactory::resolve_bootstrap_roots_for_cwd(&cwd, root_override)?;
+        let roots = RegisteredRuntimeFactory::resolve_bootstrap_roots_for_cwd(&cwd, root_override)?;
         let orbit_dir = roots.shared_root;
         let global_root = roots.global_root;
         let registry_path = workspace_registry::registry_path_for(&global_root);

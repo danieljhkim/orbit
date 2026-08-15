@@ -1,5 +1,5 @@
 use clap::{Args, ValueEnum};
-use orbit_cmd::remote_runtime::RemoteRuntimeFactory;
+use orbit_cmd::registry_runtime::RegisteredRuntimeFactory;
 use orbit_common::types::{McpTransport, ToolSessionContext, audit_execution_id};
 use orbit_core::{OrbitError, OrbitRuntime};
 use orbit_registry::{HostIdentityState, inspect_host_identity};
@@ -68,7 +68,7 @@ impl Execute for ToolRunArgs {
 
         // Resolve `workspace` once above local CLI tools, then bind or fail
         // closed. MCP uses its own server-side selector resolution.
-        let bound = RemoteRuntimeFactory::bind_cli_tool_workspace(runtime, &mut input)?;
+        let bound = RegisteredRuntimeFactory::bind_cli_tool_workspace(runtime, &mut input)?;
         let runtime = bound.as_ref().unwrap_or(runtime);
 
         if self.dry_run {

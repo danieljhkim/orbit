@@ -1,35 +1,26 @@
-//! Client-side SSH local-forward tunnel — the one mechanism [ORB-10710].
+//! Client-side SSH local-forward tunnel for `orbit web connect`.
 //!
-//! Orbit's cross-machine surfaces are loopback-bound listeners with no
-//! authentication of their own: the dashboard ([ORB-00360], [ADR-0201]) and the
-//! MCP TCP endpoint ([ORB-10690], [ADR-0348], [ADR-0350]). Reaching either from
-//! another machine is delegated wholesale to SSH, which owns authentication,
-//! encryption, and host verification.
+//! The web server is loopback-bound and has no authentication of its own.
+//! Remote dashboard access therefore delegates authentication, encryption,
+//! and host verification to SSH while keeping the HTTP listener private.
 //!
-//! This module owns that delegation once. `orbit web connect` and
-//! `orbit mcp serve --mode remote` are both consumers; neither opens a second
-//! mechanism, which is what [mcp-bridge/2_design.md §5.3] requires. It lives at
-//! the leaf because those consumers sit in sibling crates
-//! (`orbit-dashboard`, `orbit-remote`) with no edge between them in the
-//! direction that would let one call the other.
-//!
-//! Establishing is **attach-first** ([ORB-10708]): a bare `-N` forward that
+//! Establishing is attach-first: a bare `-N` forward that
 //! invokes nothing remotely is opened and probed, and only when nothing answers
 //! behind it is a second `ssh` run that both forwards the port and starts the
 //! remote command. Teardown therefore only ever stops what this process
 //! started — an attached, pre-existing remote server is never touched.
 //!
-//! Deliberately synchronous and `std`-only: consumers own their own async
-//! runtime (or have none), and a tunnel is a process lifetime, not a future.
+//! Deliberately synchronous: the tunnel is a child-process lifetime, not a
+//! future. The `connect` command owns the small async wait around it.
 
 use std::net::{Ipv4Addr, TcpListener};
 use std::process::{Child, Command, ExitStatus, Stdio};
 use std::time::{Duration, Instant};
 
-use crate::types::OrbitError;
+use orbit_core::OrbitError;
 
 /// Delay between readiness probes.
-pub const POLL_INTERVAL: Duration = Duration::from_millis(250);
+pub(crate) const POLL_INTERVAL: Duration = Duration::from_millis(250);
 
 /// Grace period between SIGTERM and SIGKILL when tearing the tunnel down.
 #[cfg(unix)]
@@ -40,34 +31,35 @@ const TEARDOWN_GRACE: Duration = Duration::from_secs(2);
 /// The remote command is the caller's, never composed here: this module owns
 /// *how* a tunnel is opened and torn down, not *what* runs behind it.
 #[derive(Debug, Clone)]
-pub struct TunnelSpec {
+pub(crate) struct TunnelSpec {
     /// SSH destination — anything `ssh` accepts (`host`, `user@host`, or a
     /// `~/.ssh/config` alias).
-    pub ssh_host: String,
+    pub(crate) ssh_host: String,
     /// Local loopback port the forward binds.
-    pub local_port: u16,
+    pub(crate) local_port: u16,
     /// Remote loopback port the forward targets.
-    pub remote_port: u16,
+    pub(crate) remote_port: u16,
     /// Shell command line run on the remote host when nothing already answers
-    /// behind the forward. Shell-quote any embedded value with [`shell_quote`].
-    pub remote_command: String,
+    /// behind the forward. The caller must safely quote embedded values before
+    /// constructing this command.
+    pub(crate) remote_command: String,
     /// Human name for that command (`orbit web serve`), used in errors.
-    pub remote_description: String,
+    pub(crate) remote_description: String,
     /// Human name for what readiness means ("the remote dashboard at
     /// http://localhost:7878/healthz"), used in the timeout error.
-    pub readiness_target: String,
+    pub(crate) readiness_target: String,
     /// How long to wait for an *already-running* remote server to answer
     /// through a bare forward before concluding nothing is listening. Short:
     /// it covers an SSH handshake plus a couple of probes, not a process boot.
-    pub attach_timeout: Duration,
+    pub(crate) attach_timeout: Duration,
     /// How long to wait for a freshly spawned remote server to answer.
     /// Generous: it covers SSH connect plus remote process startup.
-    pub ready_timeout: Duration,
+    pub(crate) ready_timeout: Duration,
 }
 
 /// Whether [`establish`] attached to something already running or started it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum TunnelOrigin {
+pub(crate) enum TunnelOrigin {
     /// A server was already listening on the remote port; this process only
     /// opened a forward to it and must leave it running on teardown.
     Attached,
@@ -87,7 +79,7 @@ pub enum TunnelOrigin {
 ///
 /// The returned [`SshTunnel`] tears the forward down on drop, so every exit
 /// path — error, panic, normal return — releases it.
-pub fn establish(
+pub(crate) fn establish(
     spec: &TunnelSpec,
     mut ready: impl FnMut() -> bool,
 ) -> Result<(SshTunnel, TunnelOrigin), OrbitError> {
@@ -134,7 +126,7 @@ pub fn establish(
 ///
 /// `stdout`/`stderr` are inherited so `ssh`'s own diagnostics (host key
 /// prompts, auth failures) still reach the operator.
-pub fn spawn_ssh(ssh_args: &[String]) -> Result<Child, OrbitError> {
+pub(crate) fn spawn_ssh(ssh_args: &[String]) -> Result<Child, OrbitError> {
     Command::new("ssh")
         .args(ssh_args)
         .stdin(Stdio::null())
@@ -148,7 +140,7 @@ pub fn spawn_ssh(ssh_args: &[String]) -> Result<Child, OrbitError> {
 /// Because it never invokes anything remotely, tearing it down on disconnect
 /// cannot orphan or kill a pre-existing remote process; it only closes the
 /// forward. That is what makes attaching safe.
-pub fn probe_forward_args(ssh_host: &str, local_port: u16, remote_port: u16) -> Vec<String> {
+pub(crate) fn probe_forward_args(ssh_host: &str, local_port: u16, remote_port: u16) -> Vec<String> {
     vec![
         "-N".to_string(),
         "-o".to_string(),
@@ -165,7 +157,7 @@ pub fn probe_forward_args(ssh_host: &str, local_port: u16, remote_port: u16) -> 
 /// `ssh` delivers SIGHUP to the remote pty and the remote command exits with
 /// it — no orphan. `ExitOnForwardFailure` makes a port that cannot be forwarded
 /// a startup failure rather than a remote command running with no tunnel.
-pub fn command_forward_args(
+pub(crate) fn command_forward_args(
     ssh_host: &str,
     local_port: u16,
     remote_port: u16,
@@ -183,27 +175,17 @@ pub fn command_forward_args(
 }
 
 /// The `-L` argument value binding `local_port` to the remote's loopback.
-pub fn forward_spec(local_port: u16, remote_port: u16) -> String {
+pub(crate) fn forward_spec(local_port: u16, remote_port: u16) -> String {
     format!("{local_port}:localhost:{remote_port}")
 }
 
-/// POSIX single-quote a value for safe interpolation into a remote command.
-///
-/// `ssh` concatenates trailing args with spaces and re-parses them through the
-/// remote shell, so any value that could contain a space or metacharacter must
-/// go through here.
-pub fn shell_quote(value: &str) -> String {
-    // Wrap in single quotes; a literal `'` becomes `'\''`.
-    format!("'{}'", value.replace('\'', "'\\''"))
-}
-
 /// Return `Ok` if a loopback TCP listener can bind `port` (immediately released).
-pub fn probe_bindable(port: u16) -> std::io::Result<()> {
+pub(crate) fn probe_bindable(port: u16) -> std::io::Result<()> {
     TcpListener::bind((Ipv4Addr::LOCALHOST, port)).map(|_| ())
 }
 
 /// Ask the OS for a free ephemeral loopback port.
-pub fn ephemeral_port() -> Result<u16, OrbitError> {
+pub(crate) fn ephemeral_port() -> Result<u16, OrbitError> {
     let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
         .map_err(|error| OrbitError::Io(format!("could not reserve a local port: {error}")))?;
     listener
@@ -218,7 +200,7 @@ pub fn ephemeral_port() -> Result<u16, OrbitError> {
 /// Note: inherently racy (TOCTOU) — the probed port can be claimed by another
 /// process before `ssh` binds it. Acceptable because `ssh -L` then fails loudly
 /// on startup rather than silently forwarding nothing.
-pub fn require_local_port(port: u16) -> Result<u16, OrbitError> {
+pub(crate) fn require_local_port(port: u16) -> Result<u16, OrbitError> {
     probe_bindable(port).map_err(|error| {
         OrbitError::InvalidInput(format!(
             "requested local port {port} is not available: {error}"
@@ -230,7 +212,7 @@ pub fn require_local_port(port: u16) -> Result<u16, OrbitError> {
 /// Choose the local port to bind a forward to: an explicit request is honored
 /// or fails, otherwise `preferred_default` is used when free and an ephemeral
 /// port when it is not.
-pub fn select_local_port(
+pub(crate) fn select_local_port(
     requested: Option<u16>,
     preferred_default: u16,
 ) -> Result<u16, OrbitError> {
@@ -248,7 +230,7 @@ pub fn select_local_port(
 /// is still up; nothing has answered yet), or `Err` if `ssh` exited before
 /// either happened — a dead `ssh` is a configuration failure, not a
 /// "nothing running there yet".
-pub fn poll_until_ready(
+pub(crate) fn poll_until_ready(
     tunnel: &mut SshTunnel,
     mut ready: impl FnMut() -> bool,
     timeout: Duration,
@@ -270,7 +252,7 @@ pub fn poll_until_ready(
 }
 
 /// Map an early `ssh` exit to an actionable error.
-pub fn classify_ssh_exit(status: ExitStatus, remote_description: &str) -> OrbitError {
+pub(crate) fn classify_ssh_exit(status: ExitStatus, remote_description: &str) -> OrbitError {
     match status.code() {
         // The remote shell returns 127 when it cannot find the command.
         Some(127) => OrbitError::Execution(
@@ -302,17 +284,17 @@ pub fn classify_ssh_exit(status: ExitStatus, remote_description: &str) -> OrbitE
 /// When it only attached via a bare `-N` forward ([`TunnelOrigin::Attached`]),
 /// there is no remote command tied to this session, so teardown just closes the
 /// forward and leaves the pre-existing remote process running.
-pub struct SshTunnel {
+pub(crate) struct SshTunnel {
     child: Option<Child>,
 }
 
 impl SshTunnel {
-    pub fn new(child: Child) -> Self {
+    pub(crate) fn new(child: Child) -> Self {
         Self { child: Some(child) }
     }
 
     /// Non-blocking check for the child's exit status.
-    pub fn try_wait(&mut self) -> Result<Option<ExitStatus>, OrbitError> {
+    pub(crate) fn try_wait(&mut self) -> Result<Option<ExitStatus>, OrbitError> {
         match &mut self.child {
             Some(child) => child
                 .try_wait()
@@ -322,7 +304,7 @@ impl SshTunnel {
     }
 
     /// Terminate the `ssh` child if it is still running. Idempotent.
-    pub fn shutdown(&mut self) {
+    pub(crate) fn shutdown(&mut self) {
         let Some(mut child) = self.child.take() else {
             return;
         };
@@ -342,7 +324,7 @@ impl Drop for SshTunnel {
 /// Ask the child to exit gracefully (SIGTERM), then force it (SIGKILL) if it
 /// does not within [`TEARDOWN_GRACE`].
 #[cfg(unix)]
-pub fn terminate_child(child: &mut Child) {
+pub(crate) fn terminate_child(child: &mut Child) {
     let pid = child.id() as libc::pid_t;
     // SAFETY: `pid` is our own direct child; signalling it is well-defined.
     unsafe {
@@ -365,7 +347,7 @@ pub fn terminate_child(child: &mut Child) {
 }
 
 #[cfg(not(unix))]
-pub fn terminate_child(child: &mut Child) {
+pub(crate) fn terminate_child(child: &mut Child) {
     let _ = child.kill();
     let _ = child.wait();
 }

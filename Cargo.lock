@@ -2113,10 +2113,9 @@ dependencies = [
  "orbit-cmd",
  "orbit-common",
  "orbit-core",
- "orbit-dashboard",
  "orbit-mcp",
  "orbit-registry",
- "orbit-remote",
+ "orbit-web",
  "predicates",
  "regex",
  "rusqlite",
@@ -2203,30 +2202,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "orbit-dashboard"
-version = "0.10.0"
-dependencies = [
- "axum",
- "chrono",
- "clap",
- "futures-core",
- "libc",
- "orbit-cmd",
- "orbit-common",
- "orbit-core",
- "orbit-registry",
- "serde",
- "serde_json",
- "serde_yaml",
- "tempfile",
- "tokio",
- "tower",
- "tracing",
- "tracing-subscriber",
- "url",
-]
-
-[[package]]
 name = "orbit-engine"
 version = "0.10.0"
 dependencies = [
@@ -2264,10 +2239,15 @@ dependencies = [
 name = "orbit-mcp"
 version = "0.10.0"
 dependencies = [
+ "chrono",
  "orbit-common",
+ "orbit-registry",
+ "orbit-tools",
  "rmcp",
  "serde_json",
+ "tempfile",
  "tokio",
+ "toml",
  "tracing",
  "tracing-subscriber",
 ]
@@ -2295,20 +2275,6 @@ dependencies = [
  "serde_json",
  "tempfile",
  "toml",
-]
-
-[[package]]
-name = "orbit-remote"
-version = "0.10.0"
-dependencies = [
- "chrono",
- "orbit-common",
- "orbit-registry",
- "orbit-tools",
- "serde_json",
- "tempfile",
- "toml",
- "tracing",
 ]
 
 [[package]]
@@ -2370,6 +2336,30 @@ dependencies = [
  "thiserror",
  "tracing",
  "tracing-subscriber",
+]
+
+[[package]]
+name = "orbit-web"
+version = "0.10.0"
+dependencies = [
+ "axum",
+ "chrono",
+ "clap",
+ "futures-core",
+ "libc",
+ "orbit-cmd",
+ "orbit-common",
+ "orbit-core",
+ "orbit-registry",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "tempfile",
+ "tokio",
+ "tower",
+ "tracing",
+ "tracing-subscriber",
+ "url",
 ]
 
 [[package]]

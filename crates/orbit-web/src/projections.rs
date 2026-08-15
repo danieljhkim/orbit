@@ -1,6 +1,6 @@
 //! Minimal duplication of the `*_to_json` projection helpers that the dashboard
 //! API delegates to. These were originally in orbit-cli under command/* but are
-//! duplicated here (verbatim logic) so orbit-dashboard compiles in isolation
+//! duplicated here (verbatim logic) so orbit-web compiles in isolation
 //! without a dependency on orbit-cli (per ARCHITECTURE layering rules).
 
 use std::collections::{BTreeMap, BTreeSet};

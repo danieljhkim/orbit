@@ -38,7 +38,7 @@ use axum::extract::FromRequestParts;
 use axum::http::StatusCode;
 use axum::http::request::Parts;
 use axum::response::{IntoResponse, Json, Response};
-use orbit_cmd::remote_runtime::{RemoteRuntimeFactory, workspace_runtime_binding};
+use orbit_cmd::registry_runtime::{RegisteredRuntimeFactory, workspace_runtime_binding};
 use orbit_common::types::WorkspaceStatus;
 use orbit_core::runtime::WorkspaceRuntimeBinding;
 use orbit_core::{OrbitError, OrbitRuntime, ShipMode};
@@ -62,7 +62,7 @@ pub(crate) type PrePublishHook = Arc<dyn Fn(&str) + Send + Sync>;
 /// One registered workspace the dashboard can serve.
 ///
 /// `orbit_dir` is the workspace's `.orbit` directory — the value passed to
-/// [`RemoteRuntimeFactory::open_resolved_checkout`] as the workspace root. Active
+/// [`RegisteredRuntimeFactory::open_resolved_checkout`] as the workspace root. Active
 /// entries carry the complete runtime binding resolved from the logical
 /// workspace and local checkout. Inactive (stale-path) entries keep no binding:
 /// they are listed but never built.
@@ -255,7 +255,7 @@ impl StateInner {
         }
 
         // Build outside the lock (no lock held across construction).
-        let runtime = RemoteRuntimeFactory::open_resolved_checkout(
+        let runtime = RegisteredRuntimeFactory::open_resolved_checkout(
             &self.global_root,
             &orbit_dir,
             &orbit_dir,

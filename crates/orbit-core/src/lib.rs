@@ -12,15 +12,14 @@
 //! and default asset seeding.
 //!
 //! This is the library crate that assembles all subsystems into the
-//! [`OrbitRuntime`] — the single entry point used by the CLI, the dashboard,
-//! the extracted `orbit-cmd` command layer, and vertical feature crates such as
-//! `orbit-remote`. It handles initialization
+//! [`OrbitRuntime`] — the single entry point used by the CLI, the Web surface,
+//! and the extracted `orbit-cmd` command layer. It handles initialization
 //! from disk (two-root layout: global + workspace), config loading and
 //! merging, and default asset seeding via embedded YAML templates.
 //!
 //! # Role
 //! Depends on the lower Orbit crates (never on `orbit-cmd`). Consumed by
-//! `orbit-cmd`, `orbit-cli`, `orbit-dashboard`, and `orbit-remote`; neutral
+//! `orbit-cmd`, `orbit-cli`, and `orbit-web`; neutral
 //! kernels below this layer do not import from `orbit-core`.
 //!
 //! Command groups that runtime internals invoke (tool hosts, engine hosts,
@@ -29,7 +28,7 @@
 //!
 //! # Root re-export policy (ORB-10016)
 //! Every root `pub use` below is justified by a real import in a consumer
-//! crate (`orbit-cli`, `orbit-dashboard`, `orbit-cmd`). Anything else must be
+//! crate (`orbit-cli`, `orbit-web`, `orbit-cmd`). Anything else must be
 //! imported from its owning module (`orbit_core::command::…`,
 //! `orbit_core::runtime::…`) or its owning crate (`orbit_common`,
 //! `orbit_store`, `orbit_engine`).
@@ -43,7 +42,7 @@
 //!
 //! # Dependency direction
 //! orbit-common, orbit-store, orbit-policy, orbit-tools, orbit-search, orbit-engine
-//! → `orbit-core` → orbit-cmd / orbit-remote → orbit-cli / orbit-dashboard
+//! → `orbit-core` → orbit-cmd / orbit-web / orbit-cli
 
 pub mod auto_tasks;
 pub mod command;

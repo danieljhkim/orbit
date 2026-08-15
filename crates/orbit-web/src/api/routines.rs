@@ -17,7 +17,7 @@
 use axum::extract::State;
 use axum::response::{IntoResponse, Json, Response};
 use chrono::{DateTime, Utc};
-use orbit_cmd::remote_routines::routine_statuses;
+use orbit_cmd::registry_routines::routine_statuses;
 use orbit_core::routines::{RoutineStatus, RoutineStatusReport};
 use orbit_core::{RoutineFireRecord, RoutineFireState};
 use serde_json::{Value, json};

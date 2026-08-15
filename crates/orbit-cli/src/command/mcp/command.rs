@@ -2,7 +2,7 @@ use std::path::Path;
 
 use clap::{Args, Subcommand, ValueEnum};
 use orbit_core::{OrbitError, OrbitRuntime};
-use orbit_remote::RemoteProxyArgs;
+use orbit_mcp::RemoteProxyArgs;
 
 use crate::command::{CommandOut, CommandOutput, Execute};
 
@@ -93,7 +93,7 @@ impl ServeArgs {
                             .to_string(),
                     )
                 })?;
-                orbit_remote::serve_mcp_remote_proxy(RemoteProxyArgs { ssh_host })?
+                orbit_mcp::serve_mcp_remote_proxy(RemoteProxyArgs { ssh_host })?
             }
             None => super::server::serve_mcp_stdio(self.remote_caller_machine_id)?,
         }

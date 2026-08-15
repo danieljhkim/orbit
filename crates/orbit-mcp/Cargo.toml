@@ -13,13 +13,18 @@ workspace = true
 
 [dependencies]
 orbit-common = { path = "../orbit-common" }
+orbit-registry = { path = "../orbit-registry" }
+orbit-tools = { path = "../orbit-tools" }
 rmcp = { version = "1.5", default-features = false, features = ["server", "transport-io"] }
 serde_json.workspace = true
 tokio = { workspace = true, features = ["io-std", "rt"] }
 tracing.workspace = true
 
 [dev-dependencies]
+chrono.workspace = true
 rmcp = { version = "1.5", default-features = false, features = ["client", "transport-io"] }
+tempfile.workspace = true
 # `io-util` supplies the in-memory duplex transport used by the wire test.
 tokio = { workspace = true, features = ["io-util"] }
+toml.workspace = true
 tracing-subscriber.workspace = true

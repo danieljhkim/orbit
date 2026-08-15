@@ -1,160 +1,78 @@
-schema_version: 1
-contract: orbit-mcp-bridge-v1
+schema_version: 2
+contract: orbit-mcp-v1
 last_updated: 2026-08-15
 last_validated: 2026-08-15
+
 source_of_truth:
   exposed_tool_list:
-    - crates/orbit-remote/src/mcp/host.rs::canonical_mcp_tool_definitions
-  canonical_schema_registry:
-    - crates/orbit-remote/src/mcp/host.rs::canonical_mcp_tool_definitions
+    - crates/orbit-mcp/src/remote/surface.rs::canonical_mcp_tool_definitions
   composed_from:
     - crates/orbit-tools/src/registry.rs::canonical_builtin_mcp_tool_definitions
-    - crates/orbit-remote/src/mcp/discovery.rs::discovery_tool_definitions
-  placement_metadata_owner:
-    - crates/orbit-tools/src/builtin/orbit/mod.rs::register
-    - crates/orbit-remote/src/mcp/discovery.rs::discovery_tool_definitions
-  scope_metadata_owner:
-    - crates/orbit-tools/src/builtin/orbit/mod.rs::register
-    - crates/orbit-remote/src/mcp/discovery.rs::discovery_tool_definitions
+    - crates/orbit-mcp/src/remote/discovery.rs::discovery_tool_definitions
+  protocol_kernel:
+    - crates/orbit-mcp/src/lib.rs
+    - crates/orbit-mcp/src/adapter
+  accepting_server:
+    - crates/orbit-cli/src/command/mcp/server.rs::ServerMcpHost
+  authoritative_dispatch:
+    - crates/orbit-core/src/command/tool/dispatch.rs
 
-capabilities:
-  allowed_values: [agent, operator]
-  withdrawn_values:
-    - value: runner
-      reason: Deferred to v2 with execution placement, run leases, and the runner poll (Defer fleet registration and execution placement to v2). No v1 referent.
-  set_rules:
-    - Every exposed tool has exactly one placement, one scope, and a non-empty allowed_capabilities set.
-    - Placement and capability filtering are independent.
-    - operator does not imply agent; agent does not imply operator.
-    - A withdrawn capability is rejected on a tool policy, on an mcp.toml route, and on a session request, so no surface can drift back to advertising it.
-  route_config:
-    file: ~/.orbit/mcp.toml
-    form: zero or more [[owner]] entries, each pinning one machine_id
-    transport: ssh
-    legacy_hub_table: >-
-      Fail closed with an actionable migration message; never auto-migrated. A [hub] entry named a
-      machine-level coordination host, while [[owner]] names the machine that owns a given
-      workspace. The hub target need not own any of the caller's workspaces, so rewriting one form
-      into the other could silently route coordination calls to a non-owner (ORB-10727).
+transport:
+  local: stdio
+  remote:
+    mechanism: direct ssh stdio
+    argv_shape: "ssh -T -- <ssh-host> orbit mcp serve --remote-caller-machine-id <audit-label>"
+    implementation: crates/orbit-mcp/src/remote/proxy.rs
+  forbidden:
+    - mcp tcp listener
+    - local port forwarding
+    - shared broker process
+    - client-side frame parsing or rewriting
+    - third-machine relay
 
-placements:
-  allowed_values: [owner, local-derived, composite]
-  withdrawn_values:
-    - value: hub
-      reason: Collapsed into owner by Every machine is its own coordination host. Every machine is its own coordination host for the workspaces it owns, so "the coordinating machine for this tool's workspace" is in-process for an owned workspace.
-  rules:
-    - owner resolves to the machine declared as the workspace's owner in that machine's local workspaces.json.
-    - An owner call for a workspace this machine does not own is refused, naming the owner; advertised orbit.task.* operations may instead be dispatched over a configured owner route.
+authority:
+  accepting_machine:
+    - resolves workspace selectors against its own registry
+    - opens the selected server-local runtime
+    - performs domain and sandbox validation through Core
+    - records the invocation through Core audit persistence
+  caller:
+    - selects an SSH destination
+    - forwards MCP bytes unchanged
+    - may supply only audit metadata, never an authorization principal
+  forbidden_client_preflight:
+    - checkout ownership validation
+    - placement or owner routing
+    - capability filtering
+    - authorization decisions
 
-scopes:
-  allowed_values: [workspace-required, global]
-  rules:
-    - Existing tools default to workspace-required.
-    - Only registry-wide discovery tools are global and may execute without a workspace selector.
+authorization:
+  status: deferred
+  v1_rule: SSH access is sufficient to reach the remote MCP process
+  enforcement_owner_when_added: orbit-core
+  capability_filtering: false
 
-private_connector:
-  active: []
-  withdrawn:
-    - method: orbit/private/register-spoke/v1
-      reason: Withdrawn with the fleet registration protocol (Defer fleet registration and execution placement to v2). v1 has no registration step; a client opens a route and calls.
-      advanced_contract_revision_to: 2
-    - method: orbit/private/allocate-knowledge-id/v1
-      reason: Withdrawn with the global knowledge allocator (Workspace-scoped knowledge keys, no global knowledge IDs), before ORB-10736 removed the native learning resource entirely.
-      advanced_contract_revision_to: 3
+audit_context:
+  trace_id: generated once per MCP call
+  caller_machine_id: opaque audit-only label; local fallback is host/local
+  caller_ip: best-effort first field of SSH_CONNECTION for SSH sessions
+  process_machine_id: derived from the accepting machine registry
+  process_host_id: derived from the accepting machine registry
+  transport: local or ssh-mcp
 
-tools:
-  orbit.task.add: { placement: owner, scope: workspace-required, allowed_capabilities: [agent, operator] }
-  orbit.task.approve: { placement: owner, scope: workspace-required, allowed_capabilities: [agent, operator] }
-  orbit.task.artifact.put: { placement: owner, scope: workspace-required, allowed_capabilities: [agent, operator] }
-  orbit.task.list: { placement: owner, scope: workspace-required, allowed_capabilities: [agent, operator] }
-  orbit.task.show: { placement: owner, scope: workspace-required, allowed_capabilities: [agent, operator] }
-  orbit.task.start: { placement: owner, scope: workspace-required, allowed_capabilities: [agent, operator] }
-  orbit.task.update: { placement: owner, scope: workspace-required, allowed_capabilities: [agent, operator] }
-  orbit.friction.add: { placement: owner, scope: workspace-required, allowed_capabilities: [agent, operator] }
-  orbit.friction.list: { placement: owner, scope: workspace-required, allowed_capabilities: [operator] }
-  orbit.friction.show: { placement: owner, scope: workspace-required, allowed_capabilities: [operator] }
-  orbit.friction.tags: { placement: owner, scope: workspace-required, allowed_capabilities: [agent, operator] }
-  orbit.friction.update: { placement: owner, scope: workspace-required, allowed_capabilities: [operator] }
-  orbit.workspace.list: { placement: local-derived, scope: global, allowed_capabilities: [operator] }
-  orbit.crew.list: { placement: owner, scope: workspace-required, allowed_capabilities: [agent, operator] }
-  orbit.workflow.ship: { placement: owner, scope: workspace-required, allowed_capabilities: [operator] }
-  orbit.workflow.run.show: { placement: owner, scope: workspace-required, allowed_capabilities: [operator] }
-  orbit.workflow.run.list: { placement: owner, scope: workspace-required, allowed_capabilities: [operator] }
-  orbit.workflow.run.resume: { placement: owner, scope: workspace-required, allowed_capabilities: [operator] }
-  orbit.search: { placement: composite, scope: workspace-required, allowed_capabilities: [agent, operator] }
-  orbit.session_log.append: { placement: owner, scope: workspace-required, allowed_capabilities: [agent, operator] }
-  orbit.session_log.list: { placement: owner, scope: workspace-required, allowed_capabilities: [agent, operator] }
-  orbit.session_log.resolve: { placement: owner, scope: workspace-required, allowed_capabilities: [agent, operator] }
-  orbit.auto_task.add: { placement: owner, scope: workspace-required, allowed_capabilities: [agent, operator] }
-  orbit.auto_task.show: { placement: owner, scope: workspace-required, allowed_capabilities: [agent, operator] }
-  orbit.auto_task.update: { placement: owner, scope: workspace-required, allowed_capabilities: [agent, operator] }
-  orbit.auto_task.toggle: { placement: owner, scope: workspace-required, allowed_capabilities: [agent, operator] }
-  orbit.command.exec: { placement: local-derived, scope: workspace-required, allowed_capabilities: [operator] }
+workspace_selection:
+  accepted_sources:
+    - tool input workspace field
+    - MCP initialize metadata
+  resolution_owner: accepting server
+  missing_selector: fail clearly for workspace-scoped tools
+  global_tools:
+    - orbit.workspace.list
 
-# Absent from the advertised set today. The conformance test asserts this
-# directly, so a family cannot quietly return.
-withdrawn_tools:
-  - names: [orbit.run.lease, orbit.run.report, orbit.run.presence]
-    reason: Deferred to v2 with execution placement and run leases (Defer fleet registration and execution placement to v2).
-  - names: [orbit.host.list]
-    reason: Already removed as unused in ORB-10332; the fleet inventory behind it is deferred to v2 (Defer fleet registration and execution placement to v2), so it has nothing to enumerate.
-  - names: [orbit.adr.add, orbit.adr.show, orbit.adr.update, orbit.adr.supersede, orbit.adr.list]
-    reason: >-
-      The ADR store is retired in favour of git-committed entries in each feature's 4_decisions.md
-      (CONVENTIONS.md section 4). ORB-10726 performed the cutover; ORB-10727 was authored against
-      the pre-cutover surface and still carried the family here as a planned withdrawal, so this
-      entry closes that gap without advancing a revision — canonical_registry_revision 3 already
-      described a matrix without it.
-owner_schema_digest:
-  domain_tag: orbit.mcp.owner-schema.v1
-  contract_revision: 4
-  canonical_registry_revision: 5
-  instructions_prefix: 'orbit-owner-contract-v1:'
-  revision_notes:
-    - Revisions 2 and 3 were advanced by the two now-withdrawn private connector methods. Revision numbers are append-only, so revision 4 is assigned to the recomposition that removes them and collapses hub placement into owner (ORB-10727). No revision is ever reused or rolled back.
-    - canonical_registry_revision 4 removes the native project-learning family from the v1 tool matrix (ORB-10736).
-    - canonical_registry_revision 5 adds the workspace session-log append/list/resolve family (ORB-10784).
-    - The golden vector is a one-tool illustrative fixture. Its digest still changes with every recomposition, because the domain tag and canonical_registry_revision are both inputs.
-  golden_vector:
-    capability: agent
-    canonical_json: '{"canonical_registry_revision":5,"capability":"agent","tools":[{"advertised_name":"orbit_task_show","canonical_name":"orbit.task.show","description":"Show one task","input_schema":{"additionalProperties":true,"properties":{"id":{"description":"Task ID","type":"string"}},"required":["id"],"type":"object"}}]}'
-    expected_sha256: fb74c960560b6ad643c32abff6c5d1f0f6588b1ef741f508913788545ecc0116
-  inputs:
-    - canonical schema name, description, and input schema for every owner-placed tool
-    - canonical schema name, description, and input schema for every composite tool's owner step
-    - advertised MCP name mapping for each included canonical tool
-    - canonical registry revision
-  mismatch_behavior:
-    - Reject owner routing before dispatch when revision or digest differs.
-    - Local-derived and locally owned calls may continue without an owner route.
-
-run_protocol:
-  status: deferred-to-v2
-  reason: >-
-    Defer fleet registration and execution placement to v2 withdraws execution placement, the run queue, pull-based leases, the
-    presence map, and the runner capability. A run executes on the machine that
-    owns its workspace, in-process. The placed/leased/execution_started/
-    recovery_required state machine and its immutable requested-vs-actual placement
-    snapshot are the parts to reread if placement returns; see
-    host-registry/4_decisions.md Pull-based leases with immutable placement and explicit recovery.
-
-routing_expectations:
-  topology:
-    coordination_writer: workspace owner
-    coordination_writers_per_workspace: 1
-    machine_level_role: none
-    cross_machine_surface: [advertised orbit.task.* family]
-    forbidden_config_forms: ["[hub]", "workspace coordination-host"]
-    unsupported: [third-machine relay, owner-to-owner proxy, replication, failover, inbound dispatch to a client]
-  owner:
-    local_owner: execute locally in the validated owner checkout
-    remote_owner_task_call: execute through the configured owner route
-    remote_owner_other_call: reject, naming the owning machine_id and the configured route if one exists
-    rejects: [owner_proxy, third_machine_relay]
-  local-derived:
-    route: caller checkout only
-    rejects: [remote_execution, missing_validated_checkout]
-    note: orbit.workspace.list is the one local-derived entry backed by machine-local registry state rather than checkout-derived state, and it enumerates only owned workspaces.
-  composite:
-    search: one locally owned validated checkout; task, doc/ADR, and friction branches execute through the same local runtime
-    rejects: [remote_owner_workspace, replica_checkout, per_branch_owner_proxy]
+validation:
+  exact_tool_snapshot: crates/orbit-cli/tests/snapshots/mcp_tools_list.json
+  protocol_roundtrip: crates/orbit-mcp/tests/mcp_wire_roundtrip.rs
+  production_roundtrip: crates/orbit-cli/tests/mcp_roundtrip.rs
+  remote_proxy: crates/orbit-mcp/src/remote/tests/proxy.rs
+  server_identity: crates/orbit-mcp/src/remote/tests/identity.rs
+  discovery: crates/orbit-mcp/src/remote/tests/discovery.rs

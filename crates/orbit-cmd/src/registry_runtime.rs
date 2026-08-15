@@ -1,4 +1,4 @@
-//! Application composition over Remote's registry and Core's runtime seams.
+//! Application composition over Registry's workspace catalog and Core's runtime seams.
 
 use std::path::{Path, PathBuf};
 
@@ -15,7 +15,7 @@ use serde_json::Value;
 
 use orbit_registry::{HOST_TOML_FILE, load_host_identity, workspace_registry};
 
-/// Remote workspace metadata keeps the logical catalog ID distinct from the
+/// Registered workspace metadata keeps the logical catalog ID distinct from the
 /// task/runtime ID stored in `.orbit/config.yaml`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ResolvedWorkspaceBinding {
@@ -56,9 +56,9 @@ pub fn resolved_workspace_binding(
 
 /// Registry-aware runtime factory. Registered checkouts carry an explicit
 /// Core workspace binding.
-pub struct RemoteRuntimeFactory;
+pub struct RegisteredRuntimeFactory;
 
-impl RemoteRuntimeFactory {
+impl RegisteredRuntimeFactory {
     pub fn resolve_roots_for_cwd(
         cwd: &Path,
         root_override: Option<&Path>,

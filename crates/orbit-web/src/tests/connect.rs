@@ -1,11 +1,9 @@
 //! Unit tests for `orbit web connect` helpers.
 //!
 //! Only what this command owns is tested here: the remote `orbit web serve`
-//! command line, how that is wired into a [`TunnelSpec`], and local port
-//! selection. The tunnel mechanism itself (forward argument vectors, readiness
-//! polling, `ssh` exit classification, teardown) moved to
-//! `orbit_common::utility::ssh_tunnel` in ORB-10710 and is tested there — it is
-//! shared with `orbit mcp serve --mode remote` and no longer dashboard-specific.
+//! command line, how that is wired into a [`crate::ssh_tunnel::TunnelSpec`],
+//! and local port selection. The web-owned tunnel process lifecycle is tested
+//! separately in the sibling `tests/ssh_tunnel.rs` module.
 
 use std::net::{Ipv4Addr, TcpListener};
 

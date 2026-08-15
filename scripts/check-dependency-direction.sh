@@ -10,10 +10,6 @@ allowed_internal_deps() {
     orbit-common)
       echo ""
       ;;
-    orbit-remote)
-      # Remote is only the thin MCP proxy/discovery adapter.
-      echo "orbit-common orbit-registry orbit-tools"
-      ;;
     orbit-registry)
       # Registry owns machine/workspace state over the generic Store kernel.
       echo "orbit-common orbit-store"
@@ -47,15 +43,16 @@ allowed_internal_deps() {
       echo "orbit-common orbit-core orbit-engine orbit-registry orbit-store"
       ;;
     orbit-mcp)
-      echo "orbit-common"
+      # MCP owns framing, canonical discovery, and direct SSH stdio transport.
+      echo "orbit-common orbit-registry orbit-tools"
       ;;
-    orbit-dashboard)
+    orbit-web)
       echo "orbit-common orbit-cmd orbit-core orbit-registry"
       ;;
     orbit-cli)
-      # The executable assembles the generic MCP stdio kernel with Remote's
-      # machine-local support and Core's authoritative runtime dispatcher.
-      echo "orbit-common orbit-cmd orbit-core orbit-mcp orbit-registry orbit-remote orbit-dashboard"
+      # The executable assembles MCP and Web feature crates with Registry state
+      # and Core's authoritative runtime dispatcher.
+      echo "orbit-common orbit-cmd orbit-core orbit-mcp orbit-registry orbit-web"
       ;;
     *)
       return 1

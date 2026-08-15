@@ -26,8 +26,7 @@ orbit-common = { path = "../orbit-common" }
 orbit-core = { path = "../orbit-core", features = ["clap"] }
 orbit-mcp = { path = "../orbit-mcp" }
 orbit-registry = { path = "../orbit-registry" }
-orbit-remote = { path = "../orbit-remote" }
-orbit-dashboard = { path = "../orbit-dashboard" }
+orbit-web = { path = "../orbit-web" }
 regex.workspace = true
 serde.workspace = true
 serde_json.workspace = true

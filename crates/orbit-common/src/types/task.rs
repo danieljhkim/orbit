@@ -59,7 +59,7 @@ pub const TASK_REFERENCE_NOT_VERIFIABLE_HERE: &str = "not verifiable here";
 /// `orbit.task.list` MCP tool, and the dashboard HTTP task routes — returns the
 /// newest `DEFAULT_TASK_LIST_LIMIT` matching tasks first rather than filtering
 /// on lifecycle status, matching Orbit's existing recent-history convention
-/// (see `HISTORY_DEFAULT_LIMIT` in orbit-dashboard).
+/// (see `HISTORY_DEFAULT_LIMIT` in orbit-web).
 pub const DEFAULT_TASK_LIST_LIMIT: usize = 50;
 
 /// Current lifecycle state of a task.
