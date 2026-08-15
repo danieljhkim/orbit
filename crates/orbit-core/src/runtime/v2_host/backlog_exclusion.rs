@@ -1,14 +1,14 @@
 use std::collections::BTreeMap;
 use std::path::Path;
 
-use orbit_common::types::{Task, TaskStatus, prune_missing_context_files, task_dependencies_ready};
+use orbit_common::types::{Task, TaskStatus, task_dependencies_ready};
 use orbit_common::utility::path::workspace_relative_paths_overlap;
-use orbit_common::utility::selector::canonical_selector_in_workspace;
 use orbit_engine::DispatchError;
 use serde::Serialize;
 use serde_json::Value;
 
 use crate::OrbitRuntime;
+use crate::runtime::task::locks::lock_context_files_for_task;
 
 const MAX_TASK_PARENT_CHAIN_DEPTH: usize = 32;
 
@@ -40,14 +40,14 @@ struct BacklogTaskConflict {
     locking_task_id: String,
 }
 
-fn active_task_lock_holders<'a>(
-    tasks: impl IntoIterator<Item = &'a Task>,
+fn active_task_lock_holders(
+    tasks: &BTreeMap<String, Task>,
     workspace_root: &Path,
 ) -> BTreeMap<String, Vec<String>> {
     let mut holders: BTreeMap<String, Vec<String>> = BTreeMap::new();
-    for task in tasks {
+    for task in tasks.values() {
         if matches!(task.status, TaskStatus::InProgress | TaskStatus::Review) {
-            for file in existing_lock_context_files(task, workspace_root) {
+            for file in lock_context_files_for_task(task, tasks, workspace_root) {
                 holders.entry(file).or_default().push(task.id.clone());
             }
         }
@@ -61,11 +61,12 @@ fn active_task_lock_holders<'a>(
 
 fn task_overlap_conflicts(
     task: &Task,
+    task_lookup: &BTreeMap<String, Task>,
     holders: &BTreeMap<String, Vec<String>>,
     workspace_root: &Path,
 ) -> Vec<BacklogTaskConflict> {
     let mut conflicts = Vec::new();
-    for requested_file in existing_lock_context_files(task, workspace_root) {
+    for requested_file in lock_context_files_for_task(task, task_lookup, workspace_root) {
         for (held_file, locking_task_ids) in holders {
             if workspace_relative_paths_overlap(&requested_file, held_file) {
                 for locking_task_id in locking_task_ids {
@@ -80,16 +81,6 @@ fn task_overlap_conflicts(
     conflicts.sort();
     conflicts.dedup();
     conflicts
-}
-
-fn existing_lock_context_files(task: &Task, workspace_root: &Path) -> Vec<String> {
-    let canonical = task
-        .context_files
-        .iter()
-        .filter_map(|entry| canonical_selector_in_workspace(entry, workspace_root).ok())
-        .collect::<Vec<_>>();
-    let (kept, _dropped) = prune_missing_context_files(workspace_root, canonical);
-    kept
 }
 
 pub(super) fn list_backlog_tasks(
@@ -130,7 +121,7 @@ pub(super) fn list_backlog_tasks(
             }
         })?;
         let workspace_root = runtime.paths().repo_root.as_path();
-        let lock_holders = active_task_lock_holders(task_lookup.values(), workspace_root);
+        let lock_holders = active_task_lock_holders(&task_lookup, workspace_root);
         let mut backlog: Vec<Task> = all_tasks
             .into_iter()
             .filter(|task| {
@@ -157,7 +148,8 @@ pub(super) fn list_backlog_tasks(
             let direct_conflicts: BTreeMap<String, Vec<BacklogTaskConflict>> = backlog
                 .iter()
                 .filter_map(|task| {
-                    let conflicts = task_overlap_conflicts(task, &lock_holders, workspace_root);
+                    let conflicts =
+                        task_overlap_conflicts(task, &task_lookup, &lock_holders, workspace_root);
                     (!conflicts.is_empty()).then(|| (task.id.clone(), conflicts))
                 })
                 .collect();

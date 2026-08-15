@@ -213,6 +213,12 @@ pub(crate) fn run_deterministic(
         CoreDeterministicAction::ListBacklogTasks => {
             backlog_exclusion::list_backlog_tasks(runtime, action, input)
         }
+        // Resolve one epic's unfinished descendants once, in a deterministic
+        // dependency-first order, so the enclosing workflow can drain them
+        // with an ordinary sequential loop.
+        CoreDeterministicAction::ListEpicDescendants => {
+            workspace_auto::list_epic_descendants(runtime, action, input)
+        }
         // Materialize blocked tasks attributable to a terminally-failed job
         // run for the triage pipeline [ORB-10129]. Human-blocked tasks (no
         // `job_run_id`, or a non-failed run) never appear; tasks whose

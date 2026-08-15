@@ -89,6 +89,60 @@ fn unpublished_first_merge_does_not_cascade_into_second_local_merge() {
     );
 }
 
+#[test]
+fn child_pipeline_merges_into_an_epic_branch_checked_out_in_another_worktree() {
+    let temp = tempdir().unwrap();
+    let primary = temp.path().join("primary");
+    let epic_worktree = temp.path().join("epic-worktree");
+    let child_worktree = temp.path().join("child-worktree");
+    init_repo(&primary);
+    commit_file(&primary, "base.txt", "base");
+    git(
+        &primary,
+        &[
+            "worktree",
+            "add",
+            "-b",
+            "epic/ORB-10000",
+            path(&epic_worktree),
+            BASE_BRANCH,
+        ],
+    );
+    configure_identity(&epic_worktree);
+    git(
+        &primary,
+        &[
+            "worktree",
+            "add",
+            "-b",
+            "orbit/child",
+            path(&child_worktree),
+            "epic/ORB-10000",
+        ],
+    );
+    configure_identity(&child_worktree);
+    let child_commit = commit_file(&child_worktree, "child.txt", "child change");
+    let host = MergeTestHost::new(&primary, temp.path());
+
+    merge_batch_worktree_into_base(
+        &host,
+        &json!({
+            "run_id": "child-run",
+            "workspace_path": child_worktree,
+            "base": "epic/ORB-10000",
+            "base_sync": "local",
+        }),
+    )
+    .unwrap();
+
+    assert_eq!(git(&epic_worktree, &["rev-parse", "HEAD"]), child_commit);
+    assert_eq!(
+        fs::read_to_string(epic_worktree.join("child.txt")).unwrap(),
+        "child change"
+    );
+    assert!(!primary.join("child.txt").exists());
+}
+
 fn merge_input(run_id: &str, workspace_path: &Path, base_sync: &str) -> Value {
     json!({
         "run_id": run_id,

@@ -1,7 +1,7 @@
 //! Task reservation and file-lock operations.
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::path::PathBuf;
+use std::path::Path;
 
 use orbit_common::types::{
     AuditEventStatus, NotFoundKind, OrbitError, Task, TaskStatus,
@@ -31,8 +31,13 @@ pub(in crate::runtime) fn list(runtime: &OrbitRuntime) -> Result<Value, OrbitErr
         .list_active_task_reservations(&workspace_orbit_dir(runtime), workspace_id.as_deref())?;
     emit_expired_reservation_events(runtime, &reservation_result.expired_reservations)?;
 
-    let mut tasks: Vec<_> = runtime
-        .list_tasks()?
+    let all_tasks = runtime.list_tasks()?;
+    let task_lookup = all_tasks
+        .iter()
+        .cloned()
+        .map(|task| (task.id.clone(), task))
+        .collect::<BTreeMap<_, _>>();
+    let mut tasks: Vec<_> = all_tasks
         .into_iter()
         .filter(|task| matches!(task.status, TaskStatus::InProgress | TaskStatus::Review))
         .collect();
@@ -46,7 +51,9 @@ pub(in crate::runtime) fn list(runtime: &OrbitRuntime) -> Result<Value, OrbitErr
 
     let locked_files: BTreeSet<String> = tasks
         .iter()
-        .flat_map(|task| existing_context_files(runtime, task))
+        .flat_map(|task| {
+            lock_context_files_for_task(task, &task_lookup, runtime.paths().repo_root.as_path())
+        })
         .chain(
             reservation_result
                 .reservations
@@ -74,7 +81,19 @@ pub(in crate::runtime) fn list(runtime: &OrbitRuntime) -> Result<Value, OrbitErr
 
     Ok(json!({
         "locked_files": locked_files.iter().cloned().collect::<Vec<_>>(),
-        "by_task": tasks.iter().map(task_lock_to_json).collect::<Vec<_>>(),
+        "by_task": tasks
+            .iter()
+            .map(|task| {
+                task_lock_to_json(
+                    task,
+                    lock_context_files_for_task(
+                        task,
+                        &task_lookup,
+                        runtime.paths().repo_root.as_path(),
+                    ),
+                )
+            })
+            .collect::<Vec<_>>(),
         "by_reservation": by_reservation,
         "total_locked": locked_files.len(),
         "total_tasks": tasks.len(),
@@ -387,16 +406,58 @@ pub(crate) fn workspace_task_reservation_id(
     }
 }
 
-fn task_workspace_root(runtime: &OrbitRuntime, task: &Task) -> PathBuf {
-    let _ = task;
-    runtime.paths().repo_root.clone()
+/// Return the effective lock surface for one task.
+///
+/// An active epic root owns the union of every descendant's declared files so
+/// conflict admission can keep unrelated work moving while excluding only
+/// leaves that overlap the epic's actual family.
+pub(crate) fn lock_context_files_for_task(
+    task: &Task,
+    task_lookup: &BTreeMap<String, Task>,
+    workspace_root: &Path,
+) -> Vec<String> {
+    let mut files = existing_context_files_at_root(task, workspace_root)
+        .into_iter()
+        .collect::<BTreeSet<_>>();
+    if task.tags.iter().any(|tag| tag == "epic") {
+        for candidate in task_lookup.values() {
+            if task_is_descendant_of(candidate, &task.id, task_lookup) {
+                files.extend(existing_context_files_at_root(candidate, workspace_root));
+            }
+        }
+    }
+    files.into_iter().collect()
 }
 
-fn existing_context_files(runtime: &OrbitRuntime, task: &Task) -> Vec<String> {
-    let workspace_root = task_workspace_root(runtime, task);
-    let canonical = canonicalize_context_files_for_read(&task.context_files, &workspace_root);
-    let (kept, _dropped) = prune_missing_context_files(&workspace_root, canonical);
+fn existing_context_files_at_root(task: &Task, workspace_root: &Path) -> Vec<String> {
+    let canonical = canonicalize_context_files_for_read(&task.context_files, workspace_root);
+    let (kept, _dropped) = prune_missing_context_files(workspace_root, canonical);
     kept
+}
+
+fn task_is_descendant_of(
+    task: &Task,
+    ancestor_id: &str,
+    task_lookup: &BTreeMap<String, Task>,
+) -> bool {
+    let mut visited = BTreeSet::from([task.id.clone()]);
+    let mut next_parent_id = task.parent_id();
+    for _ in 0..32 {
+        let Some(parent_id) = next_parent_id else {
+            return false;
+        };
+        if parent_id == ancestor_id {
+            return true;
+        }
+        if !visited.insert(parent_id.to_string()) {
+            return false;
+        }
+        let Some(parent) = task_lookup.get(parent_id) else {
+            return false;
+        };
+        next_parent_id = parent.parent_id();
+    }
+    false
 }
 
 pub(crate) fn requested_task_files(
@@ -414,7 +475,11 @@ pub(crate) fn requested_task_files(
         let task = task_map
             .get(task_id)
             .ok_or_else(|| OrbitError::not_found(NotFoundKind::Task, task_id.clone()))?;
-        requested_files.extend(existing_context_files(runtime, task));
+        requested_files.extend(lock_context_files_for_task(
+            task,
+            &task_map,
+            runtime.paths().repo_root.as_path(),
+        ));
     }
 
     Ok(requested_files.into_iter().collect())
@@ -431,10 +496,13 @@ pub(crate) fn task_lock_conflicts(
         return Ok(Vec::new());
     }
 
-    let mut tasks: Vec<Task> = runtime
-        .stores()
-        .tasks()
-        .list_tasks()?
+    let all_tasks = runtime.stores().tasks().list_tasks()?;
+    let task_lookup = all_tasks
+        .iter()
+        .cloned()
+        .map(|task| (task.id.clone(), task))
+        .collect::<BTreeMap<_, _>>();
+    let mut tasks: Vec<Task> = all_tasks
         .into_iter()
         .filter(|task| {
             matches!(task.status, TaskStatus::InProgress | TaskStatus::Review)
@@ -451,7 +519,8 @@ pub(crate) fn task_lock_conflicts(
 
     let mut conflicts = Vec::new();
     for task in tasks {
-        let held_files = existing_context_files(runtime, &task);
+        let held_files =
+            lock_context_files_for_task(&task, &task_lookup, runtime.paths().repo_root.as_path());
         for requested_file in &requested_files {
             if held_files
                 .iter()
@@ -574,7 +643,7 @@ fn first_task_id(task_ids: &[String]) -> Option<&str> {
     task_ids.first().map(String::as_str)
 }
 
-fn task_lock_to_json(task: &Task) -> Value {
+fn task_lock_to_json(task: &Task, context_files: Vec<String>) -> Value {
     json!({
         "id": task.id,
         "title": task.title,
@@ -582,7 +651,7 @@ fn task_lock_to_json(task: &Task) -> Value {
         "job_run_id": task.job_run_id,
         "crew": task.crew,
         "orchestrator": task.orchestrator,
-        "context_files": task.context_files,
+        "context_files": context_files,
     })
 }
 
