@@ -6,8 +6,10 @@ use std::path::Path;
 use chrono::Utc;
 use fs2::FileExt;
 use orbit_common::types::{JobRun, JobRunState};
+use sha2::{Digest, Sha256};
 
 use orbit_core::OrbitRuntime;
+use orbit_core::runtime::OrbitRuntimeRoots;
 use orbit_store::TaskReservationReserveParams;
 
 use crate::doctor::{
@@ -689,5 +691,52 @@ fn workspace_retired_backend_warns_artifacts_activities_with_repair_command() {
         status_of(&after, "artifacts-activities").status,
         WorkspaceDoctorStatus::Ok,
         "{after:?}"
+    );
+}
+
+#[test]
+fn stale_shipped_activity_default_names_the_refresh_remediation() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let global_root = temp.path().join("global");
+    let workspace_root = temp.path().join("repo/.orbit");
+    let runtime = OrbitRuntime::initialize_from_resolved_roots(
+        OrbitRuntimeRoots {
+            global_root: global_root.clone(),
+            shared_root: workspace_root.clone(),
+            local_root: workspace_root,
+        },
+        None,
+    )
+    .expect("initialize runtime with defaults");
+    let activities_dir = global_root.join("resources/activities");
+    let path = activities_dir.join("agent_implement.yaml");
+    let current = fs::read_to_string(&path).expect("read current activity");
+    let stale = current.replacen("  tools:\n", "  tools:\n    - fs.read\n", 1);
+    assert_ne!(stale, current, "fixture must contain the retired tool");
+    fs::write(&path, &stale).expect("write stale activity");
+
+    let manifest_path = activities_dir.join(".orbit-managed-assets.json");
+    let mut manifest: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&manifest_path).expect("read managed manifest"))
+            .expect("parse managed manifest");
+    manifest["assets"]["agent_implement"] =
+        serde_json::Value::String(format!("{:x}", Sha256::digest(stale.as_bytes())));
+    fs::write(
+        &manifest_path,
+        format!(
+            "{}\n",
+            serde_json::to_string_pretty(&manifest).expect("serialize managed manifest")
+        ),
+    )
+    .expect("write stale managed manifest");
+
+    let results = runtime.doctor_workspace().expect("doctor");
+    let row = status_of(&results, "artifacts-activities");
+    assert_eq!(row.status, WorkspaceDoctorStatus::Error, "{row:?}");
+    assert!(row.message.contains("stale"), "{}", row.message);
+    assert!(row.message.contains("older release"), "{}", row.message);
+    assert_eq!(
+        row.remediation.as_deref(),
+        Some("Run `orbit init --refresh-defaults`.")
     );
 }

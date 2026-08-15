@@ -166,7 +166,27 @@ pub(crate) fn reconcile_managed_assets<'a>(
                 let Some(previous_digest) = previous_digest else {
                     continue;
                 };
-                next_assets.insert((*name).to_string(), previous_digest.clone());
+                let existing = fs::read_to_string(&path).map_err(|error| {
+                    OrbitError::Io(format!(
+                        "read existing {asset_kind} '{}': {error}",
+                        path.display()
+                    ))
+                })?;
+
+                // A digest match proves this is an unedited file Orbit wrote.
+                // Refresh it during ordinary bootstrap when a newer binary
+                // ships different content; otherwise a removed tool or schema
+                // value can leave the runtime unable to load its own catalog.
+                // Any mismatch is a local edit and must remain untouched.
+                if sha256_hex(existing.as_bytes()) == *previous_digest
+                    && previous_digest != &rendered_digest
+                {
+                    write_text_with_parent(&path, &rendered)?;
+                    next_assets.insert((*name).to_string(), rendered_digest);
+                    result.refreshed += 1;
+                } else {
+                    next_assets.insert((*name).to_string(), previous_digest.clone());
+                }
                 continue;
             }
 
