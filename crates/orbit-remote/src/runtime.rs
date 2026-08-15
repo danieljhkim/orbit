@@ -26,6 +26,19 @@ pub struct ResolvedWorkspaceBinding {
     pub owner_machine_id: Option<String>,
 }
 
+/// The registry identity attached to a runtime opened for a task lookup.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TaskWorkspaceIdentity {
+    pub id: String,
+    pub name: String,
+}
+
+/// A runtime rebound to the checkout that owns a globally registered task.
+pub struct TaskOwnerRuntime {
+    pub runtime: OrbitRuntime,
+    pub workspace: TaskWorkspaceIdentity,
+}
+
 /// Build Core's authoritative runtime binding for a registered checkout.
 /// The runtime ID deliberately comes from config.yaml rather than the logical
 /// registry record because legacy installations may validly differ (L-0098).
@@ -57,6 +70,102 @@ pub fn resolved_workspace_binding(
 pub struct RemoteRuntimeFactory;
 
 impl RemoteRuntimeFactory {
+    /// Open the active registered checkout that owns `task_id`.
+    ///
+    /// Task IDs are globally unique in the task registry, but their documents
+    /// and sidecars remain checkout-local. A missing or inactive checkout is
+    /// therefore an actionable owner-state error, not a task-not-found error.
+    pub fn open_task_owner(
+        global_root: &Path,
+        task_id: &str,
+    ) -> Result<TaskOwnerRuntime, OrbitError> {
+        sync_task_prefix(global_root)?;
+        let task_registry = TaskRegistryStore::open(&task_registry_path(global_root))?;
+        let task_binding = task_registry.find_task_binding(task_id)?.ok_or_else(|| {
+            orbit_common::types::OrbitError::not_found(
+                orbit_common::types::NotFoundKind::Task,
+                task_id.to_string(),
+            )
+        })?;
+        let registry = workspace_registry::load_registry_from(
+            &workspace_registry::registry_path_for(global_root),
+        )?;
+        let (workspace, checkout) = registry
+            .checkouts
+            .iter()
+            .find_map(|checkout| {
+                let workspace = registry
+                    .workspaces
+                    .iter()
+                    .find(|workspace| workspace.id == checkout.workspace_id)?;
+                if workspace.id == task_binding.workspace_id {
+                    return Some((workspace, checkout));
+                }
+                let runtime_workspace_id = workspace_id_for_orbit_dir(&checkout.orbit_dir).ok()?;
+                (runtime_workspace_id == task_binding.workspace_id).then_some((workspace, checkout))
+            })
+            .ok_or_else(|| {
+                OrbitError::InvalidInput(format!(
+                    "task '{task_id}' belongs to registered workspace '{}' but that workspace has no usable local checkout",
+                    task_binding.workspace_id
+                ))
+            })?;
+        let identity = TaskWorkspaceIdentity {
+            id: workspace.id.clone(),
+            name: workspace.name.clone(),
+        };
+        if workspace.status != WorkspaceStatus::Active {
+            return Err(OrbitError::InvalidInput(format!(
+                "task '{task_id}' belongs to inactive workspace '{} ({})'",
+                identity.name, identity.id
+            )));
+        }
+        if !checkout.repo_root.is_dir() || !checkout.orbit_dir.is_dir() {
+            return Err(OrbitError::InvalidInput(format!(
+                "task '{task_id}' belongs to workspace '{} ({})', but its registered checkout '{}' is unavailable",
+                identity.name,
+                identity.id,
+                checkout.repo_root.display()
+            )));
+        }
+        Self::open_registered_checkout(global_root, workspace, checkout)
+            .map(|runtime| TaskOwnerRuntime {
+                runtime,
+                workspace: identity.clone(),
+            })
+            .map_err(|error| {
+                OrbitError::InvalidInput(format!(
+                    "task '{task_id}' belongs to workspace '{} ({}), but its registered checkout could not be opened: {error}",
+                    identity.name, identity.id
+                ))
+            })
+    }
+
+    /// Find the registered logical workspace behind an already-bound runtime.
+    pub fn workspace_identity_for_runtime(
+        runtime: &OrbitRuntime,
+    ) -> Result<Option<TaskWorkspaceIdentity>, OrbitError> {
+        let registry = workspace_registry::load_registry_from(
+            &workspace_registry::registry_path_for(&runtime.global_root()),
+        )?;
+        let repo_root = canonical_path(&runtime.paths().repo_root);
+        Ok(registry
+            .checkouts
+            .iter()
+            .find_map(|checkout| {
+                (canonical_path(&checkout.repo_root) == repo_root).then(|| {
+                    registry
+                        .workspaces
+                        .iter()
+                        .find(|workspace| workspace.id == checkout.workspace_id)
+                        .map(|workspace| TaskWorkspaceIdentity {
+                            id: workspace.id.clone(),
+                            name: workspace.name.clone(),
+                        })
+                })
+            })
+            .flatten())
+    }
     pub fn resolve_roots_for_cwd(
         cwd: &Path,
         root_override: Option<&Path>,

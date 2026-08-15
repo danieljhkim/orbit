@@ -370,6 +370,22 @@ fn cli_tool_run_fails_closed_on_unresolvable_workspace_for_read_and_write() {
 }
 
 #[test]
+fn global_task_lookup_names_the_owner_when_its_checkout_is_stale() {
+    let fixture = dual_workspace_fixture();
+    let global = fixture.alpha.global_root();
+    std::fs::remove_dir_all(fixture.beta_repo.join(".orbit")).expect("stale beta checkout");
+
+    let error = match RemoteRuntimeFactory::open_task_owner(&global, &fixture.beta_task_id) {
+        Ok(_) => panic!("a known task must not become not-found when its checkout is stale"),
+        Err(error) => error,
+    };
+    let message = error.to_string();
+    assert!(message.contains("beta"), "{message}");
+    assert!(message.contains("ws_beta"), "{message}");
+    assert!(message.contains("unavailable"), "{message}");
+}
+
+#[test]
 fn cli_tool_run_write_rebounds_to_the_named_workspace() {
     let fixture = dual_workspace_fixture();
     let created = execute_cli_tool(

@@ -1,5 +1,6 @@
 use clap::Args;
 use orbit_core::{OrbitError, OrbitRuntime, TaskRelatedDoc};
+use orbit_remote::runtime::RemoteRuntimeFactory;
 use serde_json::Value;
 
 use crate::command::{Block, CommandOut, CommandOutput, Execute, Payload};
@@ -65,6 +66,19 @@ impl Execute for TaskShowArgs {
             Vec::new()
         };
         let mut doc = task_to_json_for_runtime(runtime, &task)?;
+        let workspace = RemoteRuntimeFactory::workspace_identity_for_runtime(runtime)?;
+        if let Some(workspace) = &workspace {
+            let object = doc.as_object_mut().ok_or_else(|| {
+                OrbitError::Execution("task JSON projection did not produce an object".to_string())
+            })?;
+            object.insert(
+                "workspace".to_string(),
+                serde_json::json!({
+                    "name": workspace.name.clone(),
+                    "id": workspace.id.clone()
+                }),
+            );
+        }
         if self.with_context {
             insert_related_docs(&mut doc, related_docs.clone())?;
         }
@@ -76,6 +90,15 @@ impl Execute for TaskShowArgs {
             let mut out = String::new();
             use crate::output::color::{Domain, bold, dimmed, text};
             let _ = writeln!(out, "{} {}", bold("ID:"), task.id);
+            if let Some(workspace) = &workspace {
+                let _ = writeln!(
+                    out,
+                    "{} {} ({})",
+                    bold("Workspace:"),
+                    workspace.name,
+                    workspace.id
+                );
+            }
             if let Some(parent_id) = task.parent_id() {
                 let _ = writeln!(out, "{} {}", bold("Parent Task:"), parent_id);
             }

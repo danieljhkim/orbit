@@ -181,6 +181,7 @@ fn main() {
     );
     let root_override = cli.root.clone();
     let workspace_selector = cli.workspace.clone();
+    let implicit_task_show_id = implicit_task_show_id(&cli.command, workspace_selector.as_deref());
     let actor = ActorIdentity::from_env();
     let CommandOperation {
         runtime_need,
@@ -207,10 +208,23 @@ fn main() {
         return;
     }
 
-    let runtime = match RemoteRuntimeFactory::initialize_with_overrides(
-        root_override.as_deref(),
-        workspace_selector.as_deref(),
-    ) {
+    let runtime_result = match implicit_task_show_id {
+        Some(task_id) => {
+            let global_root = match root_override.as_deref() {
+                Some(root) => Ok(root.to_path_buf()),
+                None => orbit_remote::workspace_registry::global_orbit_dir(),
+            };
+            global_root.and_then(|global_root| {
+                RemoteRuntimeFactory::open_task_owner(&global_root, task_id)
+                    .map(|owner| owner.runtime)
+            })
+        }
+        None => RemoteRuntimeFactory::initialize_with_overrides(
+            root_override.as_deref(),
+            workspace_selector.as_deref(),
+        ),
+    };
+    let runtime = match runtime_result {
         Ok(runtime) => runtime,
         Err(err) => {
             if suppress_errors {
@@ -250,6 +264,25 @@ fn main() {
     };
 
     finish_command(result, &sink, suppress_errors, json_error_preference);
+}
+
+/// `task show` is the only CLI verb whose identifier is globally unique.
+/// An explicit selector remains a fail-closed workspace filter; only the
+/// omitted-selector spelling follows the task registry to its owning checkout.
+fn implicit_task_show_id<'a>(
+    command: &'a command::Commands,
+    workspace_selector: Option<&str>,
+) -> Option<&'a str> {
+    if workspace_selector.is_some_and(|selector| !selector.trim().is_empty()) {
+        return None;
+    }
+    let command::Commands::Task(task) = command else {
+        return None;
+    };
+    let command::task::TaskSubcommand::Show(show) = &task.command else {
+        return None;
+    };
+    Some(&show.id)
 }
 
 /// Render what the command returned, or report why it failed.

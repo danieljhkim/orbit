@@ -126,6 +126,40 @@ fn global_workspace_flag_selects_by_name_and_id_from_a_foreign_checkout() {
         !task_ids(&other_cwd).contains(&orbit_task_id),
         "cwd discovery without --workspace must keep binding the other checkout: {other_cwd}"
     );
+
+    let shown_from_foreign_checkout = run_orbit_json(
+        &other_repo,
+        &home,
+        &["task", "show", &orbit_task_id, "--json"],
+    );
+    assert_eq!(shown_from_foreign_checkout["id"], orbit_task_id);
+    assert_eq!(shown_from_foreign_checkout["workspace"]["name"], "orbit");
+    assert_eq!(shown_from_foreign_checkout["workspace"]["id"], "ws_orbit");
+
+    let shown_outside_a_workspace = run_orbit_json(
+        &elsewhere,
+        &home,
+        &["task", "show", &orbit_task_id, "--json"],
+    );
+    assert_eq!(shown_outside_a_workspace["id"], orbit_task_id);
+
+    let explicit_miss = run_orbit(
+        &elsewhere,
+        &home,
+        &[
+            "--workspace",
+            "other",
+            "task",
+            "show",
+            &orbit_task_id,
+            "--json",
+        ],
+    )
+    .failure();
+    assert!(
+        !String::from_utf8_lossy(&explicit_miss.get_output().stdout).contains("Orbit-only task"),
+        "an explicit foreign workspace must not disclose the task"
+    );
 }
 
 #[test]

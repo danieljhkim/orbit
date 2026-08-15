@@ -346,6 +346,89 @@ impl BrokerMcpHost {
             })
     }
 
+    /// Only a per-call argument scopes task show. Session workspace metadata is
+    /// ambient (like a process cwd) and must not hide a globally unique task.
+    fn has_explicit_workspace(input: &Value) -> bool {
+        input
+            .get("workspace")
+            .and_then(Value::as_str)
+            .is_some_and(|value| !value.trim().is_empty())
+    }
+
+    fn attach_task_workspace_identity(
+        mut value: Value,
+        workspace: &crate::runtime::TaskWorkspaceIdentity,
+    ) -> Result<Value, OrbitError> {
+        let object = value.as_object_mut().ok_or_else(|| {
+            OrbitError::Execution("task JSON projection did not produce an object".to_string())
+        })?;
+        object.insert(
+            "workspace".to_string(),
+            json!({ "name": workspace.name.clone(), "id": workspace.id.clone() }),
+        );
+        Ok(value)
+    }
+
+    fn workspace_identity(
+        &self,
+        workspace_id: &str,
+    ) -> Result<Option<crate::runtime::TaskWorkspaceIdentity>, OrbitError> {
+        let registry = crate::workspace_registry::load_registry_from(
+            &crate::workspace_registry::registry_path_for(&self.global_root),
+        )?;
+        Ok(registry
+            .workspaces
+            .iter()
+            .find(|workspace| workspace.id == workspace_id)
+            .map(|workspace| crate::runtime::TaskWorkspaceIdentity {
+                id: workspace.id.clone(),
+                name: workspace.name.clone(),
+            }))
+    }
+
+    fn implicit_task_show(
+        &self,
+        name: &str,
+        input: Value,
+        mut context: ToolSessionContext,
+        in_process: Option<&mut dyn FnMut(Value, ToolSessionContext) -> Result<Value, OrbitError>>,
+    ) -> Result<Value, OrbitError> {
+        let id = input
+            .get("id")
+            .and_then(Value::as_str)
+            .ok_or_else(|| OrbitError::InvalidInput("`id` must be a string".to_string()))?;
+        let owner = match RemoteRuntimeFactory::open_task_owner(&self.global_root, id) {
+            Ok(owner) => owner,
+            Err(error) => {
+                self.record_preflight_denial(name, &input, &context, &error);
+                return Err(error);
+            }
+        };
+        context.workspace_id = Some(owner.workspace.id.clone());
+        context.workspace = Some(
+            owner
+                .runtime
+                .paths()
+                .repo_root
+                .to_string_lossy()
+                .into_owned(),
+        );
+        let result = match in_process {
+            Some(dispatch) => owner
+                .runtime
+                .execute_in_process_tool_dispatch(
+                    name,
+                    input,
+                    ToolEntryPoint::Mcp,
+                    context.clone(),
+                    |input| dispatch(input, context.clone()),
+                )
+                .map(|outcome| outcome.value),
+            None => audited_mcp_call_with_session_context(&owner.runtime, name, input, context),
+        };
+        result.and_then(|value| Self::attach_task_workspace_identity(value, &owner.workspace))
+    }
+
     /// Resolve a selector to its logical workspace ID and, when this machine
     /// holds one, its validated exact local checkout.
     ///
@@ -959,6 +1042,10 @@ impl BrokerMcpHost {
             return result;
         }
 
+        if name == "orbit.task.show" && !Self::has_explicit_workspace(&input) {
+            return self.implicit_task_show(name, input, context, in_process);
+        }
+
         // `all: true` without a workspace selector is the broker's explicit
         // cross-workspace search mode. Supplying a workspace (directly or in
         // session metadata) retains the established per-workspace meaning of
@@ -1150,13 +1237,20 @@ impl BrokerMcpHost {
             let result = crate::runtime::sync_task_prefix(&self.global_root).and_then(|()| {
                 HubCoordinationExecutor::new_with_task_partition(
                     &self.global_root,
-                    workspace_id,
+                    workspace_id.clone(),
                     task_partition_id,
                     legacy_root,
                 )
                 .and_then(|executor| executor.execute_tool(name, input, context.clone()))
             });
             self.record_coordination_outcome(name, &context, &result);
+            if name == "orbit.task.show" {
+                return match self.workspace_identity(&workspace_id)? {
+                    Some(workspace) => result
+                        .and_then(|value| Self::attach_task_workspace_identity(value, &workspace)),
+                    None => result,
+                };
+            }
             return result;
         }
         let binding = match binding {
@@ -1184,7 +1278,7 @@ impl BrokerMcpHost {
                 return Err(error);
             }
         };
-        match in_process {
+        let result = match in_process {
             Some(dispatch) => runtime
                 .execute_in_process_tool_dispatch(
                     name,
@@ -1195,7 +1289,17 @@ impl BrokerMcpHost {
                 )
                 .map(|outcome| outcome.value),
             None => audited_mcp_call_with_session_context(&runtime, name, input, context),
+        };
+        if name == "orbit.task.show" {
+            let workspace = RemoteRuntimeFactory::workspace_identity_for_runtime(&runtime)?;
+            return match workspace {
+                Some(workspace) => {
+                    result.and_then(|value| Self::attach_task_workspace_identity(value, &workspace))
+                }
+                None => result,
+            };
         }
+        result
     }
 }
 
