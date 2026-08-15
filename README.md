@@ -229,7 +229,7 @@ codex plugin add orbit@orbit
 | Shared Orbit skills | Bundled from `plugin/skills/` | Bundled from `plugin/skills/` | Seeded by `orbit workspace init` |
 | Web dashboard (`orbit web serve`) | No | No | Yes |
 | Other agent CLIs | No, scoped to Claude Code | No, scoped to Codex | Yes |
-| Workflows (ship, run show/list/resume) | No — plugin MCP is agent-capability | No — plugin MCP is agent-capability | Yes — CLI, or MCP via `orbit mcp serve --capabilities operator` |
+| Workflows (ship, run show/list/resume) | Yes — same MCP surface | Yes — same MCP surface | Yes — CLI or MCP |
 
 </details>
 
@@ -260,31 +260,33 @@ First-time onboarding (`.orbit/` absent) and "what is orbit" tour requests are h
 
 `orbit workspace init --mcp` registers the Orbit MCP server with the local agent CLI (Claude Code, Codex, Gemini), same as the plugin.
 
-**`orbit tool list` is the tool reference.** It prints the live registry with descriptions and active/inactive state. This file deliberately doesn't reproduce it — a hand-maintained table drifts from the registry the first time a tool is added, and then quietly misinforms.
+`tools/list` is the authoritative MCP reference. Orbit composes that surface from
+the explicitly MCP-registered builtins in `orbit-tools` plus the two discovery
+tools `orbit.workspace.list` and `orbit.crew.list`. `orbit tool list` remains the
+broader registry reference, including tools deliberately kept off MCP.
 
-The surface is namespaced by artifact:
+MCP v1 has no capability-specific advertisement or authorization tier. Local and
+SSH-originated sessions receive the same complete supported surface. Client
+permission profiles may auto-allow some names and prompt for others, but those
+settings are ergonomics, not a server security boundary. Domain validation,
+sandboxing, workspace claims, and other runtime checks still execute on the
+accepting server through Orbit Core.
 
-| Namespace | What it covers |
-|---|---|
-| `orbit.task.*` | Create, update, show, list, start; dependencies and relations; context files; artifacts; locks |
-| `orbit.search` | Unified query across tasks, docs, learnings, and ADRs — `kind` narrows the corpus, `hybrid: true` opts task results into BM25 + cosine ranking, `semantic: "<task-id>"` returns cosine neighbors. Cross-kind filters: `tag`, `all`, `status`, `path` |
-| `orbit.adr.*` | Author, edit, show, supersede Architecture Decision Records |
-| `orbit.learning.*` | Author, edit, show, list, supersede project learnings |
-| `orbit.friction.*` | Record, edit, show, list, resolve operational frictions; list taxonomy tags |
-| `orbit.docs.*` | List and show indexed Markdown under `[docs].roots`; register additional roots |
-| `orbit.workflow.*` | Operator-only ship submission plus durable run show, list, and resume |
+Workspace-scoped tools accept a registered workspace name, logical `ws_*` ID, or
+absolute path registered on the accepting server. The selector may come from the
+tool's `workspace` argument or MCP initialize metadata; server process cwd is not
+a fallback. `orbit.workspace.list` is global and reports active workspaces that
+have a checkout registered on that machine.
 
-Not every tool is intended for agent calls. Lifecycle/admin operations (`docs.index`, `docs.migrate`, `semantic.*`, `learning.sync`, `task.locks.*`, and `friction.*` reads/updates) are typically driven by humans via the CLI; the recommended agent permission profile auto-allows discovery/write tools and prompts on the rest. See `.claude/settings.json` (and `.codex/`, `.grok/`, `.gemini/` equivalents) in the seeded workspace for the default agent-facing subset.
+Remote MCP uses one direct, byte-transparent SSH stdio hop:
 
-A few admin and destructive tools — `orbit.task.delete`, `orbit.task.lint`, `orbit.semantic.uninstall`, `orbit.adr.list` (agents use `orbit search --kind adr`), `orbit.learning.prune` — stay registered for operator use via `orbit tool run` and their CLI equivalents, but are hidden from the agent MCP surface.
+```text
+orbit mcp serve --mode remote <ssh-host>
+  -> ssh -T <ssh-host> orbit mcp serve --remote-caller-machine-id <audit-label>
+```
 
-In a single-host deployment, start a deliberate operator session with
-`orbit mcp serve --capabilities operator` and announce the workspace through MCP
-initialize metadata (or the tool's `workspace` argument). The default plugin and
-`orbit workspace init --mcp` registrations remain agent-capability sessions and
-do not advertise workflow tools. Workflow ship/resume calls from an
-Orbit-managed run are rejected, so an executing agent cannot recursively fan
-out more runs; run observation remains an operator-only read surface.
+SSH access is sufficient for v1. Caller labels and the best-effort SSH source IP
+are audit metadata only; future authorization belongs in Core.
 
 ---
 
@@ -300,14 +302,8 @@ out more runs; run observation remains an operator-only read surface.
 ├── auto_tasks/                  # recurring task definitions
 ├── routines/                    # routine definitions
 ├── tasks/                       # symlinks → ~/.orbit/tasks/workspaces/<id>/
-├── adrs/                        # proposed/, accepted/, superseded/
-├── learnings/                   # your team's durable knowledge
-├── frictions/                   # local friction log + tags.yaml
-├── graph/                       # parsed code-graph index (.db, per worktree); vestigial, no command writes it
 ├── resources/                   # activities, jobs, executors, policies (customizable)
 └── state/
-    ├── audit/                   # reserved; audit events live in ~/.orbit/orbit.db
-    ├── job-runs/                # reserved; v2 run state lives in ~/.orbit/orbit.db
     ├── worktrees/               # live git worktrees for agent runs
     ├── logs/                    # captured agent stdout/stderr
     └── scoreboard/              # rolling counters (PRs, reviews, etc.)

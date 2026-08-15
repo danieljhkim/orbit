@@ -2,52 +2,17 @@ use orbit_common::types::{
     AuditEventStatus, McpCapability, McpTransport, OrbitError, ToolSessionContext,
 };
 use std::collections::BTreeSet;
-use std::sync::{Arc, Barrier, Mutex, MutexGuard, OnceLock};
+use std::sync::{Arc, Barrier};
 use std::thread;
 
 use serde_json::json;
 
-use crate::OrbitRuntime;
+use super::support::{clear_identity_env, env_guard, fresh_runtime, set_identity_env};
 use crate::command::tool::dispatch::{
     ORBIT_MANAGED_RUN_CONTEXT_ENV, ToolEntryPoint, audit_role_label,
     audit_role_label_for_entry_point, finalize_successful_dispatch, reservation_owner_from_env,
     resolve_audit_context, take_tool_audit_recorded, trusted_mcp_audit_context,
 };
-
-/// Serializes any test that mutates `ORBIT_AGENT_*` env vars or asserts on
-/// audit rows whose `role` depends on env-var precedence. Without this
-/// guard, cargo's parallel test harness can race two env writers and
-/// produce non-reproducible failures.
-fn env_guard() -> MutexGuard<'static, ()> {
-    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-    LOCK.get_or_init(|| Mutex::new(()))
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
-}
-
-fn clear_identity_env() {
-    // SAFETY: tests serialize through `env_guard()` before calling this.
-    unsafe {
-        std::env::remove_var("ORBIT_AGENT_NAME");
-        std::env::remove_var("ORBIT_AGENT_MODEL");
-    }
-}
-
-fn set_identity_env(agent: &str, model: &str) {
-    // SAFETY: tests serialize through `env_guard()` before calling this.
-    unsafe {
-        std::env::set_var("ORBIT_AGENT_NAME", agent);
-        std::env::set_var("ORBIT_AGENT_MODEL", model);
-    }
-}
-
-fn fresh_runtime() -> OrbitRuntime {
-    // Reset the dedup signal so cross-test thread-local leakage cannot
-    // mask real bugs in the per-call set/clear cycle.
-    let _ = take_tool_audit_recorded();
-    clear_identity_env();
-    OrbitRuntime::in_memory().expect("build in-memory runtime")
-}
 
 #[test]
 fn dispatch_records_success_audit_with_mcp_subcommand_and_clamped_duration() {

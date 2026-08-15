@@ -5,7 +5,7 @@ use tempfile::TempDir;
 
 use crate::OrbitRuntime;
 
-use super::super::task_locks::{
+use super::super::locks::{
     TaskLockReservationScope, parse_task_lock_reservation_scope, requested_task_files,
     task_lock_conflicts,
 };

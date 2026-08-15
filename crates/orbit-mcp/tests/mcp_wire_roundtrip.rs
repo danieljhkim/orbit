@@ -5,8 +5,7 @@
 use std::sync::{Arc, Mutex};
 
 use orbit_common::types::{
-    McpCapability, McpToolDefinition, McpToolPlacement, McpToolPolicy, OrbitError, ToolParam,
-    ToolSchema, ToolSessionContext,
+    McpToolDefinition, McpToolScope, OrbitError, ToolParam, ToolSchema, ToolSessionContext,
 };
 use orbit_mcp::{McpHost, OrbitToolServer};
 use rmcp::ServiceExt;
@@ -20,10 +19,7 @@ struct EchoHost {
 
 impl McpHost for EchoHost {
     fn list_mcp_tool_definitions(&self) -> Result<Vec<McpToolDefinition>, OrbitError> {
-        Ok(vec![
-            definition("demo.echo", McpCapability::Agent),
-            definition("demo.operator", McpCapability::Operator),
-        ])
+        Ok(vec![definition("demo.echo"), definition("demo.inspect")])
     }
 
     fn call_tool(
@@ -32,7 +28,7 @@ impl McpHost for EchoHost {
         input: Value,
         context: ToolSessionContext,
     ) -> Result<Value, OrbitError> {
-        if name != "demo.echo" && name != "demo.operator" {
+        if name != "demo.echo" && name != "demo.inspect" {
             return Err(OrbitError::not_found(
                 orbit_common::types::NotFoundKind::Tool,
                 name.to_string(),
@@ -50,7 +46,7 @@ impl McpHost for EchoHost {
     }
 }
 
-fn definition(name: &str, capability: McpCapability) -> McpToolDefinition {
+fn definition(name: &str) -> McpToolDefinition {
     McpToolDefinition::new(
         ToolSchema {
             name: name.to_string(),
@@ -63,9 +59,8 @@ fn definition(name: &str, capability: McpCapability) -> McpToolDefinition {
             }],
             builtin: false,
         },
-        McpToolPolicy::new(McpToolPlacement::LocalDerived, [capability]).expect("fixture policy"),
+        McpToolScope::WorkspaceRequired,
     )
-    .expect("fixture definition")
 }
 
 #[tokio::test]
@@ -131,20 +126,20 @@ async fn generic_kernel_round_trips_initialize_list_call_and_error() {
         listed
             .tools
             .iter()
-            .any(|tool| tool.name.as_ref() == "demo_operator"),
+            .any(|tool| tool.name.as_ref() == "demo_inspect"),
         "operator-tagged definitions remain on the complete surface"
     );
 
     let result = client
         .peer()
-        .call_tool(call("demo_operator", json!({ "value": "hello" })))
+        .call_tool(call("demo_inspect", json!({ "value": "hello" })))
         .await
         .expect("tools/call");
     assert_eq!(result.is_error, Some(false));
     assert_eq!(
         result.structured_content,
         Some(json!({
-            "tool": "demo.operator",
+            "tool": "demo.inspect",
             "echo": "hello",
             "workspace": "/tmp/generic-workspace",
         }))

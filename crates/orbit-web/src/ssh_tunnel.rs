@@ -174,9 +174,9 @@ pub(crate) fn command_forward_args(
     ]
 }
 
-/// The `-L` argument value binding `local_port` to the remote's loopback.
+/// The `-L` argument value binding both ends of the forward to loopback.
 pub(crate) fn forward_spec(local_port: u16, remote_port: u16) -> String {
-    format!("{local_port}:localhost:{remote_port}")
+    format!("127.0.0.1:{local_port}:localhost:{remote_port}")
 }
 
 /// Return `Ok` if a loopback TCP listener can bind `port` (immediately released).

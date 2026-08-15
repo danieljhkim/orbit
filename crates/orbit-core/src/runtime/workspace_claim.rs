@@ -36,7 +36,7 @@ use orbit_store::{
 };
 use serde_json::{Value, json};
 
-use super::task_locks::{
+use super::task::locks::{
     CoordinationAuditEvent, record_coordination_audit_event, workspace_orbit_dir,
     workspace_task_reservation_id,
 };

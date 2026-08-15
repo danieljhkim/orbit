@@ -6,7 +6,6 @@
 //! JSON schemas.
 
 mod command;
-mod crew;
 mod server;
 mod setup;
 

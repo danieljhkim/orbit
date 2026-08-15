@@ -1,8 +1,7 @@
 use std::sync::Mutex as StdMutex;
 
 use orbit_common::types::{
-    McpCapability, McpToolDefinition, McpToolPlacement, McpToolPolicy, OrbitError, ToolParam,
-    ToolSchema, ToolSessionContext,
+    McpToolDefinition, McpToolScope, OrbitError, ToolParam, ToolSchema, ToolSessionContext,
 };
 use rmcp::model::CallToolRequestParams;
 use serde_json::{Value, json};
@@ -34,15 +33,10 @@ pub(super) fn tool_schema(name: &str) -> ToolSchema {
 pub(super) fn test_mcp_definitions(
     schemas: impl IntoIterator<Item = ToolSchema>,
 ) -> Result<Vec<McpToolDefinition>, OrbitError> {
-    schemas
+    Ok(schemas
         .into_iter()
-        .map(|schema| {
-            let policy = McpToolPolicy::new(McpToolPlacement::LocalDerived, [McpCapability::Agent])
-                .expect("test MCP policy has one static capability");
-            McpToolDefinition::new(schema, policy)
-                .map_err(|error| OrbitError::InvalidInput(error.to_string()))
-        })
-        .collect()
+        .map(|schema| McpToolDefinition::new(schema, McpToolScope::WorkspaceRequired))
+        .collect())
 }
 
 pub(super) fn request_with_args(name: &str, args: Value) -> CallToolRequestParams {

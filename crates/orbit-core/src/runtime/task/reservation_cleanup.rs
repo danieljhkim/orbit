@@ -1,3 +1,5 @@
+//! Detection and cleanup of stale task reservations.
+
 use std::collections::{BTreeMap, BTreeSet};
 
 use chrono::{DateTime, Utc};
@@ -11,7 +13,7 @@ use serde_json::json;
 
 use crate::OrbitRuntime;
 
-use super::task_locks::{
+use super::locks::{
     emit_expired_reservation_events, emit_task_lock_release_event, workspace_orbit_dir,
     workspace_task_reservation_id,
 };
@@ -201,8 +203,7 @@ impl OrbitRuntime {
             // already moved on. Blocking is best-effort so a status-write
             // failure never blocks the run from terminalizing or its
             // reservations/file locks from being released.
-            if !was_terminal_before
-                && super::task_block_on_run_failure::is_workflow_failure_state(state)
+            if !was_terminal_before && super::block_on_run_failure::is_workflow_failure_state(state)
             {
                 self.best_effort_block_tasks_for_failed_run(run_id, state);
             }

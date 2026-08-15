@@ -170,9 +170,9 @@ fn schema_v2_identity_is_accepted_as_the_current_on_disk_format() {
     let dir = tempfile::tempdir().expect("tempdir");
     std::fs::write(
         dir.path().join("host.toml"),
-        "schema_version = 2\nmachine_id = \"hm_current\"\nhost_id = \"dk-server-1\"\ntask_prefix = \"DE\"\n",
+        "schema_version = 2\nmachine_id = \"hm_current\"\nhost_id = \"dk-server-1\"\ntask_prefix = \"DE\"\nmode = \"hub\"\n",
     )
-    .expect("write schema-v2 identity");
+    .expect("write schema-v2 identity with ignored legacy mode");
 
     let identity = load_host_identity(dir.path()).expect("schema v2 must load");
     assert_eq!(identity.schema_version, 2);

@@ -10,7 +10,7 @@ use crate::command::{CommandOut, CommandOutput, Execute};
 #[derive(Args)]
 #[command(about = "Rename this machine's local host identity")]
 pub struct HostRenameArgs {
-    /// Current local host name. Tombstone aliases are a dormant v2 feature.
+    /// Current local host name.
     current_name: String,
     /// New local host name.
     new_name: String,

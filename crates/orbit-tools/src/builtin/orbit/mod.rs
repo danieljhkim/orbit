@@ -12,7 +12,7 @@ pub mod workflow;
 pub mod workspace_claim;
 
 use orbit_common::types::{
-    McpToolPlacement, McpToolPolicy, OrbitError, ToolParam, normalize_agent_family_for_model,
+    McpToolScope, OrbitError, ToolParam, normalize_agent_family_for_model,
     normalize_optional_attribution_label,
 };
 use serde_json::Value;
@@ -29,129 +29,112 @@ pub(super) struct OrbitIdentity {
 }
 
 pub fn register(registry: &mut ToolRegistry) {
-    // Auto-task definitions [ORB-10149]: agents can define/retune/disable
-    // recurring chores. `list` stays CLI/admin only.
+    // Auto-task mutation is MCP-visible; `list` stays on non-MCP surfaces.
     registry.register_mcp(
         auto_task::add::OrbitAutoTaskAddTool,
-        agent_operator(McpToolPlacement::Owner),
+        McpToolScope::WorkspaceRequired,
     );
     registry.register_inactive(auto_task::list::OrbitAutoTaskListTool);
     registry.register_mcp(
         auto_task::show::OrbitAutoTaskShowTool,
-        agent_operator(McpToolPlacement::Owner),
+        McpToolScope::WorkspaceRequired,
     );
     registry.register_mcp(
         auto_task::update::OrbitAutoTaskUpdateTool,
-        agent_operator(McpToolPlacement::Owner),
+        McpToolScope::WorkspaceRequired,
     );
     registry.register_mcp(
         auto_task::toggle::OrbitAutoTaskToggleTool,
-        agent_operator(McpToolPlacement::Owner),
+        McpToolScope::WorkspaceRequired,
     );
     registry.register_inactive(docs::OrbitDocsListTool);
     registry.register_inactive(docs::OrbitDocsShowTool);
     registry.register_inactive(docs::OrbitDocsAddTool);
     registry.register_inactive(docs::OrbitDocsIndexTool);
     registry.register_inactive(docs::OrbitDocsMigrateTool);
-    // ADR-0209 bearing 1 [ORB-10358]: every friction verb — its schema, its
-    // placement, and whether MCP advertises it at all — is declared once in
-    // `orbit_common::friction::operations` and registered from there. Adding a
-    // friction verb needs no edit in this function.
+    // Friction schemas and MCP exposure are declared once in the shared
+    // operation registry and registered from there.
     friction::register(registry);
-    registry.register_mcp(
-        task::add::OrbitTaskAddTool,
-        agent_operator(McpToolPlacement::Owner),
-    );
+    registry.register_mcp(task::add::OrbitTaskAddTool, McpToolScope::WorkspaceRequired);
     registry.register_mcp(
         task::artifact_put::OrbitTaskArtifactPutTool,
-        agent_operator(McpToolPlacement::Owner),
+        McpToolScope::WorkspaceRequired,
     );
     registry.register_mcp(
         task::approve::OrbitTaskApproveTool,
-        agent_operator(McpToolPlacement::Owner),
+        McpToolScope::WorkspaceRequired,
     );
-    // ORB-00289: destructive / admin-only — CLI subcommands still reach
-    // them via `runtime.run_tool`; the agent MCP surface should not.
+    // Destructive administration remains reachable through non-MCP surfaces.
     registry.register_inactive(task::delete::OrbitTaskDeleteTool);
     registry.register_inactive(task::lint::OrbitTaskLintTool);
     registry.register_inactive(task::locks::OrbitTaskLocksTool);
     registry.register_inactive(task::locks_reserve::OrbitTaskLocksReserveTool);
     registry.register_inactive(task::locks_release::OrbitTaskLocksReleaseTool);
-    // ORB-10709: the workspace claim is a coordination hold like the task
-    // locks above, and is registered the same way — operator-reachable through
-    // `orbit tool run`, absent from the agent MCP surface.
+    // Workspace claims are coordination holds like task locks and remain off
+    // the MCP surface.
     registry.register_inactive(workspace_claim::OrbitWorkspaceClaimAcquireTool);
     registry.register_inactive(workspace_claim::OrbitWorkspaceClaimReleaseTool);
     registry.register_inactive(workspace_claim::OrbitWorkspaceClaimShowTool);
-    // ORB-10711 [ADR-0351]: the one operation the owned tunnel adds beyond the
-    // existing read/write surface. Operator-only and claim-gated so a
-    // claim-holding operator can reach it, exactly like `orbit.workflow.ship`.
+    // Command execution is workspace-scoped; Core retains its domain and claim
+    // validation.
     registry.register_mcp(
         command::OrbitCommandExecTool,
-        McpToolPolicy::operator_only(McpToolPlacement::LocalDerived),
+        McpToolScope::WorkspaceRequired,
     );
     registry.register_mcp(
         task::start::OrbitTaskStartTool,
-        agent_operator(McpToolPlacement::Owner),
+        McpToolScope::WorkspaceRequired,
     );
     // Task rejection is a human/operator decision — CLI / dashboard only.
     registry.register_inactive(task::reject::OrbitTaskRejectTool);
     registry.register_mcp(
         task::show::OrbitTaskShowTool,
-        agent_operator(McpToolPlacement::Owner),
+        McpToolScope::WorkspaceRequired,
     );
     registry.register_mcp(
         task::list::OrbitTaskListTool,
-        agent_operator(McpToolPlacement::Owner),
+        McpToolScope::WorkspaceRequired,
     );
     registry.register_mcp(
         task::update::OrbitTaskUpdateTool,
-        agent_operator(McpToolPlacement::Owner),
+        McpToolScope::WorkspaceRequired,
     );
     registry.register(pipeline::invoke::OrbitPipelineInvokeTool);
     registry.register(pipeline::wait::OrbitPipelineWaitTool);
-    registry.register_mcp(
-        search::OrbitSearchTool,
-        agent_operator(McpToolPlacement::Composite),
-    );
+    registry.register_mcp(search::OrbitSearchTool, McpToolScope::WorkspaceRequired);
     registry.register_mcp(
         session_log::OrbitSessionLogAppendTool,
-        agent_operator(McpToolPlacement::Owner),
+        McpToolScope::WorkspaceRequired,
     );
     registry.register_mcp(
         session_log::OrbitSessionLogListTool,
-        agent_operator(McpToolPlacement::Owner),
+        McpToolScope::WorkspaceRequired,
     );
     registry.register_mcp(
         session_log::OrbitSessionLogResolveTool,
-        agent_operator(McpToolPlacement::Owner),
+        McpToolScope::WorkspaceRequired,
     );
     registry.register_mcp(
         workflow::OrbitWorkflowShipTool,
-        McpToolPolicy::operator_only(McpToolPlacement::Owner),
+        McpToolScope::WorkspaceRequired,
     );
     registry.register_mcp(
         workflow::OrbitWorkflowRunShowTool,
-        McpToolPolicy::operator_only(McpToolPlacement::Owner),
+        McpToolScope::WorkspaceRequired,
     );
     registry.register_mcp(
         workflow::OrbitWorkflowRunListTool,
-        McpToolPolicy::operator_only(McpToolPlacement::Owner),
+        McpToolScope::WorkspaceRequired,
     );
     registry.register_mcp(
         workflow::OrbitWorkflowRunResumeTool,
-        McpToolPolicy::operator_only(McpToolPlacement::Owner),
+        McpToolScope::WorkspaceRequired,
     );
     registry.register_inactive(semantic::install::OrbitSemanticInstallTool);
-    // ORB-00289: destructive teardown of the local semantic index —
-    // admin-only, retained on the CLI surface (`orbit semantic uninstall`).
+    // Destructive semantic-index administration remains on the CLI surface.
     registry.register_inactive(semantic::uninstall::OrbitSemanticUninstallTool);
     registry.register_inactive(semantic::stats::OrbitSemanticStatsTool);
     registry.register_inactive(semantic::index::OrbitSemanticIndexTool);
-}
-
-fn agent_operator(placement: McpToolPlacement) -> McpToolPolicy {
-    McpToolPolicy::agent_and_operator(placement)
 }
 
 fn build_actor_label(agent: Option<&str>, model: Option<&str>) -> Option<String> {
@@ -288,8 +271,8 @@ pub(super) fn resolve_workspace_argument(
     tool_name: &str,
 ) -> Result<String, OrbitError> {
     // MCP workspace defaults come from explicit session context, never process cwd.
-    // ORB-10769: CLI `orbit tool run` binds the runtime in
-    // `RemoteRuntimeFactory::bind_cli_tool_workspace`. Do not add per-tool callers.
+    // CLI `orbit tool run` binds the runtime through RegisteredRuntimeFactory;
+    // individual tools must not repeat workspace resolution.
     let explicit = optional_string_alias(input, &["workspace"])?;
     let session = ctx
         .session_context

@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use orbit_common::types::{
-    McpToolDefinition, McpToolPolicy, McpToolPolicyError, NotFoundKind, OrbitError, ToolSchema,
+    McpToolDefinition, McpToolDefinitionError, McpToolScope, NotFoundKind, OrbitError, ToolSchema,
     mcp_advertised_tool_name, validate_mcp_tool_definitions,
 };
 use serde_json::Value;
@@ -24,13 +24,13 @@ impl ToolAvailability {
 struct ToolEntry {
     tool: Arc<dyn Tool>,
     availability: ToolAvailability,
-    mcp_policy: Option<McpToolPolicy>,
+    mcp_scope: Option<McpToolScope>,
 }
 
 #[derive(Default)]
 pub struct ToolRegistry {
     tools: HashMap<String, ToolEntry>,
-    mcp_registration_error: Option<McpToolPolicyError>,
+    mcp_registration_error: Option<McpToolDefinitionError>,
 }
 
 impl ToolRegistry {
@@ -45,16 +45,9 @@ impl ToolRegistry {
         self.register_with_availability(tool, ToolAvailability::Active, None);
     }
 
-    /// Register one active builtin with its inseparable MCP exposure policy.
-    pub fn register_mcp<T: Tool + 'static>(&mut self, tool: T, policy: McpToolPolicy) {
-        let policy = match policy.validate() {
-            Ok(()) => Some(policy),
-            Err(error) => {
-                self.record_mcp_error(error);
-                None
-            }
-        };
-        self.register_with_availability(tool, ToolAvailability::Active, policy);
+    /// Register one active builtin for MCP advertisement at the given scope.
+    pub fn register_mcp<T: Tool + 'static>(&mut self, tool: T, scope: McpToolScope) {
+        self.register_with_availability(tool, ToolAvailability::Active, Some(scope));
     }
 
     pub fn register_inactive<T: Tool + 'static>(&mut self, tool: T) {
@@ -65,24 +58,26 @@ impl ToolRegistry {
         &mut self,
         tool: T,
         availability: ToolAvailability,
-        mcp_policy: Option<McpToolPolicy>,
+        mcp_scope: Option<McpToolScope>,
     ) {
         let schema = tool.schema();
         if let Some(existing) = self.tools.get(&schema.name)
-            && (existing.mcp_policy.is_some() || mcp_policy.is_some())
+            && (existing.mcp_scope.is_some() || mcp_scope.is_some())
         {
-            self.record_mcp_error(McpToolPolicyError::DuplicateCanonicalName(
+            self.record_mcp_error(McpToolDefinitionError::DuplicateCanonicalName(
                 schema.name.clone(),
             ));
         }
-        if mcp_policy.is_some() {
+        if mcp_scope.is_some() {
             let advertised_name = mcp_advertised_tool_name(&schema.name);
             if self.tools.iter().any(|(name, entry)| {
-                entry.mcp_policy.is_some()
+                entry.mcp_scope.is_some()
                     && name != &schema.name
                     && mcp_advertised_tool_name(name) == advertised_name
             }) {
-                self.record_mcp_error(McpToolPolicyError::DuplicateAdvertisedName(advertised_name));
+                self.record_mcp_error(McpToolDefinitionError::DuplicateAdvertisedName(
+                    advertised_name,
+                ));
             }
         }
         self.tools.insert(
@@ -90,12 +85,12 @@ impl ToolRegistry {
             ToolEntry {
                 tool: Arc::new(tool),
                 availability,
-                mcp_policy,
+                mcp_scope,
             },
         );
     }
 
-    fn record_mcp_error(&mut self, error: McpToolPolicyError) {
+    fn record_mcp_error(&mut self, error: McpToolDefinitionError) {
         if self.mcp_registration_error.is_none() {
             self.mcp_registration_error = Some(error);
         }
@@ -162,7 +157,7 @@ impl ToolRegistry {
     }
 
     /// Enumerate validated, active builtin MCP definitions without runtime or workspace state.
-    pub fn mcp_tool_definitions(&self) -> Result<Vec<McpToolDefinition>, McpToolPolicyError> {
+    pub fn mcp_tool_definitions(&self) -> Result<Vec<McpToolDefinition>, McpToolDefinitionError> {
         if let Some(error) = &self.mcp_registration_error {
             return Err(error.clone());
         }
@@ -172,11 +167,10 @@ impl ToolRegistry {
             .filter(|entry| entry.availability.is_active())
             .filter_map(|entry| {
                 entry
-                    .mcp_policy
-                    .clone()
-                    .map(|policy| McpToolDefinition::new(entry.tool.schema(), policy))
+                    .mcp_scope
+                    .map(|scope| McpToolDefinition::new(entry.tool.schema(), scope))
             })
-            .collect::<Result<Vec<_>, _>>()?;
+            .collect::<Vec<_>>();
         definitions.sort_by(|left, right| left.schema.name.cmp(&right.schema.name));
         validate_mcp_tool_definitions(&definitions)?;
         Ok(definitions)
@@ -184,8 +178,8 @@ impl ToolRegistry {
 }
 
 /// Workspace-independent source for every canonical registry-backed MCP definition.
-pub fn canonical_builtin_mcp_tool_definitions() -> Result<Vec<McpToolDefinition>, McpToolPolicyError>
-{
+pub fn canonical_builtin_mcp_tool_definitions()
+-> Result<Vec<McpToolDefinition>, McpToolDefinitionError> {
     let mut registry = ToolRegistry::new();
     registry.register_builtins();
     registry.mcp_tool_definitions()

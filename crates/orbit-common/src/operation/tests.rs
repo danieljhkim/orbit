@@ -59,7 +59,7 @@ const DEMO: OperationSpec<DemoVerb> = OperationSpec {
         },
     ],
     rejects_agent_field: false,
-    mcp: McpExposure::AgentOperator(McpToolPlacement::Owner),
+    mcp_scope: Some(McpToolScope::WorkspaceRequired),
     cli_json_flag: true,
     cli_render: CliRender::Record,
 };

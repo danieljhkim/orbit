@@ -1,8 +1,7 @@
 use std::sync::Arc;
 
 use orbit_common::types::{
-    McpToolDefinition, McpToolPlacement, McpToolPolicy, McpToolScope, McpTransport, ToolParam,
-    ToolSchema, ToolSessionContext,
+    McpToolDefinition, McpToolScope, McpTransport, ToolParam, ToolSchema, ToolSessionContext,
 };
 use rmcp::model::{ClientCapabilities, Implementation, InitializeRequestParams, Meta};
 
@@ -148,8 +147,7 @@ fn definition_with_scope(
         parameters,
         builtin: true,
     };
-    let policy = McpToolPolicy::agent_and_operator(McpToolPlacement::Owner).with_scope(scope);
-    McpToolDefinition::new(schema, policy).expect("test definition policy is valid")
+    McpToolDefinition::new(schema, scope)
 }
 
 fn advertised_properties(definition: &McpToolDefinition) -> serde_json::Map<String, Value> {

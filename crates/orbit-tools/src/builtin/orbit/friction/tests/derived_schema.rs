@@ -1,14 +1,14 @@
-//! The friction MCP surface is derived from the operation registry [ORB-10358],
-//! and the derivation must reproduce the schemas that shipped before it.
+//! The friction MCP surface is derived from the operation registry and must
+//! preserve the shipped schemas.
 //
-// Sibling layout under `friction/tests/` per ORB-00243 and
+// Sibling layout under `friction/tests/` follows
 // docs/design-patterns/test_layout.md.
 
 use orbit_common::friction::{
     DEFAULT_FRICTION_TAGS, FRICTION_OPERATIONS, FRICTION_TITLE_MAX_CHARS, FrictionVerb,
     friction_tags_literal,
 };
-use orbit_common::types::{McpToolPlacement, ToolSchema};
+use orbit_common::types::{McpToolScope, ToolSchema};
 
 use super::super::FrictionOperationTool;
 use crate::{Tool, ToolRegistry};
@@ -173,7 +173,7 @@ fn aggregate_verbs_take_no_parameters() {
 }
 
 #[test]
-fn registration_reproduces_the_shipped_exposure_policy() {
+fn registration_reproduces_the_shipped_mcp_surface() {
     let mut registry = ToolRegistry::new();
     super::super::register(&mut registry);
 
@@ -197,7 +197,7 @@ fn registration_reproduces_the_shipped_exposure_policy() {
         "stats and resolve stay off the MCP surface"
     );
     for definition in &definitions {
-        assert_eq!(definition.policy.placement(), McpToolPlacement::Owner);
+        assert_eq!(definition.scope, McpToolScope::WorkspaceRequired);
     }
 
     // Every verb stays reachable through the CLI / dashboard `run_tool` path,

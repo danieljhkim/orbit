@@ -87,7 +87,7 @@ fn probe_forward_never_carries_a_remote_command() {
             "-o".to_string(),
             "ExitOnForwardFailure=yes".to_string(),
             "-L".to_string(),
-            "9999:localhost:7878".to_string(),
+            "127.0.0.1:9999:localhost:7878".to_string(),
             "box".to_string(),
         ]
     );
@@ -103,7 +103,7 @@ fn command_forward_allocates_a_pty_and_carries_the_command() {
             "-o".to_string(),
             "ExitOnForwardFailure=yes".to_string(),
             "-L".to_string(),
-            "7000:localhost:9000".to_string(),
+            "127.0.0.1:7000:localhost:9000".to_string(),
             "user@host".to_string(),
             "orbit web serve --no-open".to_string(),
         ]
@@ -112,7 +112,7 @@ fn command_forward_allocates_a_pty_and_carries_the_command() {
 
 #[test]
 fn forward_spec_binds_local_to_remote_loopback() {
-    assert_eq!(forward_spec(1234, 5678), "1234:localhost:5678");
+    assert_eq!(forward_spec(1234, 5678), "127.0.0.1:1234:localhost:5678");
 }
 
 // ── readiness polling (attach vs. spawn decision) ─────────────────────────

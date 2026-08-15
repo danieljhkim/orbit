@@ -48,7 +48,6 @@ pub mod auto_tasks;
 pub mod command;
 pub mod config;
 pub mod context;
-pub mod execution_environment;
 pub mod metrics;
 mod paths;
 pub mod routines;
@@ -70,21 +69,15 @@ pub use command::search::{
 };
 pub use command::workflow::{ShipMode, build_ship_input, find_workflow, resolved_ship_mode};
 pub use context::ActorIdentity;
-pub use execution_environment::{
-    ExecutionEnvironmentSnapshot, LocalCrewEnvironment, local_crew_environment,
-};
 // Shared domain types (owned by orbit-common) that the CLI and dashboard
 // render or construct.
 pub use auto_tasks::{AutoTaskAddParams, AutoTaskUpdateParams};
 pub use orbit_common::types::{
     AuditEvent, AuditEventStatus, AuditStats, AutoTaskDefinition, AutoTaskSchedule,
-    AutoTaskTemplate, DEFAULT_TASK_LIST_LIMIT, DedupePolicy, ExecutionProfileCrewV1,
-    ExecutionProfileShipV1, ExecutionProfileV1, ExecutorDef, ExternalRef, HostAlias,
-    HostNameResolution, HostRecord, HostRegistration, HostStatus, HostWorkspacePresence, JobRun,
-    JobRunState, JobRunStep, JobTargetType, ProjectionFreshness, SanitizedExecutionProfile,
-    SanitizedWorkspacePresence, StoredExecutionProfile, Task, TaskComplexity, TaskCreateStatus,
-    TaskPriority, TaskStatus, TaskType, WorkspaceOwnership, WorkspacePresenceDeclaration,
-    resolve_task_dependencies, resolve_task_relations, task_dependencies_ready,
+    AutoTaskTemplate, DEFAULT_TASK_LIST_LIMIT, DedupePolicy, ExecutorDef, ExternalRef, JobRun,
+    JobRunState, JobRunStep, JobTargetType, Task, TaskComplexity, TaskCreateStatus, TaskPriority,
+    TaskStatus, TaskType, resolve_task_dependencies, resolve_task_relations,
+    task_dependencies_ready,
 };
 pub use orbit_common::types::{MissedRunPolicy, NotFoundKind, OrbitError, OverlapPolicy};
 pub use orbit_common::utility::redaction::redact_sensitive_env_text;

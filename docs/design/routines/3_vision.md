@@ -1,14 +1,14 @@
 ---
 title: Routines — Vision
 owner: claude
-last_updated: 2026-07-18
+last_updated: 2026-08-15
 status: Draft
 feature: routines
 doc_role: vision
 type: design
 summary: Open questions and prior art for the routines scheduler — leases, event triggers, ship-sweep convergence.
 tags: [routines, scheduler]
-paths: ["crates/orbit-core/src/routines/**", "crates/orbit-remote/src/routines.rs"]
+paths: ["crates/orbit-core/src/routines/**", "crates/orbit-cmd/src/registry_routines.rs", "crates/orbit-cmd/src/registry_runtime.rs", "crates/orbit-registry/src/**"]
 related_features: [routines, activity-job, host-registry]
 related_artifacts: [ORB-10001, ORB-10021, ORB-10207, ORB-10270, ORB-10319]
 ---
@@ -16,8 +16,8 @@ related_artifacts: [ORB-10001, ORB-10021, ORB-10207, ORB-10270, ORB-10319]
 # Routines — Vision
 
 Forward-looking questions for the routines feature. Everything here is explicitly *not*
-part of the v1 contract in [2_design.md](./2_design.md); items graduate by getting a task
-and an ADR, not by drifting in.
+part of the v1 contract in [2_design.md](./2_design.md); items graduate through an explicit
+task, implementation, and validation evidence, not by drifting in.
 
 ---
 
@@ -121,6 +121,6 @@ External:
 - [ORB-10001] — authored this design-doc folder (proposal; no implementation).
 - [ORB-10021] — implemented routines v1.
 - [ORB-10207] — graduated workspace-local ship-sweep scheduling from this vision.
-- [ORB-10319] — separated Remote registry/runtime composition from Core's scheduler kernels without changing these open questions.
+- [ORB-10319] — historical boundary separation; current local registry/runtime composition lives in `orbit-cmd` over `orbit-registry`.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

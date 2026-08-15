@@ -31,7 +31,7 @@ bearing 1, piloted end to end on the **friction** noun in [ORB-10358].
 The cost was per-operation and paid up to four times. Adding `orbit.friction.foo`
 meant: a `Tool` impl in `orbit-tools` with a hand-written `ToolSchema`, a clap
 `Args` struct plus an `Execute` impl in `orbit-cli` that rebuilt the same JSON by
-hand, a route and an input-map in `orbit-dashboard`, a variant in
+hand, a route and an input-map in `orbit-web`, a variant in
 `OrbitBuiltinAction`, a dispatch arm in `orbit-core`, and an arm in the CLI's
 audit-metadata match. Six of those seven edits carried no information the other
 five did not already have.
@@ -61,11 +61,11 @@ exactly why it accumulated.
 |---------|------|------|
 | The kernel: spec, parameter, and exposure vocabulary | [crates/orbit-common/src/operation.rs](../../../crates/orbit-common/src/operation.rs) | [ORB-10358] |
 | The friction registry (single declaration site) | [crates/orbit-common/src/friction/operations.rs](../../../crates/orbit-common/src/friction/operations.rs) | [ORB-10358] |
-| MCP adapter: spec → `ToolSchema` + exposure policy | [crates/orbit-tools/src/builtin/orbit/operation.rs](../../../crates/orbit-tools/src/builtin/orbit/operation.rs) | [ORB-10358] |
+| MCP adapter: spec → `ToolSchema` + optional workspace scope | [crates/orbit-tools/src/builtin/orbit/operation.rs](../../../crates/orbit-tools/src/builtin/orbit/operation.rs) | [ORB-10358] |
 | Friction MCP tools, derived | [crates/orbit-tools/src/builtin/orbit/friction/mod.rs](../../../crates/orbit-tools/src/builtin/orbit/friction/mod.rs) | [ORB-10358] |
 | CLI adapter: spec → `clap::Command` + tool input | [crates/orbit-cli/src/command/operation_args.rs](../../../crates/orbit-cli/src/command/operation_args.rs) | [ORB-10358] |
 | Friction CLI, derived (renderers only) | [crates/orbit-cli/src/command/friction.rs](../../../crates/orbit-cli/src/command/friction.rs) | [ORB-10358] |
-| Dashboard handlers over registry field names | [crates/orbit-dashboard/src/api/frictions.rs](../../../crates/orbit-dashboard/src/api/frictions.rs) | [ORB-10358] |
+| Web handlers over registry field names | [crates/orbit-web/src/api/frictions.rs](../../../crates/orbit-web/src/api/frictions.rs) | [ORB-10358] |
 | Handler table, keyed on `FrictionVerb` | [crates/orbit-core/src/runtime/orbit_tool_host/friction_tools.rs](../../../crates/orbit-core/src/runtime/orbit_tool_host/friction_tools.rs) | [ORB-10358] |
 | Migration cookbook | [references/cookbook.md](references/cookbook.md) | [ORB-10358] |
 

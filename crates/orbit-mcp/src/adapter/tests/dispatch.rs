@@ -1,9 +1,6 @@
 use std::sync::{Arc, Mutex};
 
-use orbit_common::types::{
-    McpCapability, McpToolDefinition, McpToolPlacement, McpToolPolicy, OrbitError,
-    ToolSessionContext,
-};
+use orbit_common::types::{McpToolDefinition, McpToolScope, OrbitError, ToolSessionContext};
 use rmcp::model::CallToolRequestParams;
 use serde_json::{Value, json};
 
@@ -11,28 +8,22 @@ use super::super::OrbitToolServer;
 use super::super::name_map::sanitize_tool_name;
 use super::super::test_support::{EchoArrayHost, StubHost, tool_schema};
 
-struct PolicyTaggedHost {
+struct CompleteSurfaceHost {
     calls: Mutex<Vec<(String, ToolSessionContext)>>,
 }
 
-impl PolicyTaggedHost {
-    fn definition(
-        name: &str,
-        capabilities: impl IntoIterator<Item = McpCapability>,
-    ) -> Result<McpToolDefinition, OrbitError> {
-        let policy = McpToolPolicy::new(McpToolPlacement::Owner, capabilities)
-            .map_err(|error| OrbitError::InvalidInput(error.to_string()))?;
-        McpToolDefinition::new(tool_schema(name), policy)
-            .map_err(|error| OrbitError::InvalidInput(error.to_string()))
+impl CompleteSurfaceHost {
+    fn definition(name: &str) -> McpToolDefinition {
+        McpToolDefinition::new(tool_schema(name), McpToolScope::WorkspaceRequired)
     }
 }
 
-impl crate::McpHost for PolicyTaggedHost {
+impl crate::McpHost for CompleteSurfaceHost {
     fn list_mcp_tool_definitions(&self) -> Result<Vec<McpToolDefinition>, OrbitError> {
         Ok(vec![
-            Self::definition("demo.agent", [McpCapability::Agent])?,
-            Self::definition("demo.operator", [McpCapability::Operator])?,
-            Self::definition("demo.both", [McpCapability::Agent, McpCapability::Operator])?,
+            Self::definition("demo.read"),
+            Self::definition("demo.write"),
+            Self::definition("demo.inspect"),
         ])
     }
 
@@ -54,7 +45,7 @@ struct InvalidNameHost;
 
 impl crate::McpHost for InvalidNameHost {
     fn list_mcp_tool_definitions(&self) -> Result<Vec<McpToolDefinition>, OrbitError> {
-        PolicyTaggedHost::definition("", [McpCapability::Agent]).map(|definition| vec![definition])
+        Ok(vec![CompleteSurfaceHost::definition("")])
     }
 
     fn call_tool(
@@ -68,8 +59,8 @@ impl crate::McpHost for InvalidNameHost {
 }
 
 #[tokio::test]
-async fn policy_tags_do_not_filter_the_list_or_call_surface() {
-    let host = Arc::new(PolicyTaggedHost {
+async fn complete_definition_set_is_listed_and_callable() {
+    let host = Arc::new(CompleteSurfaceHost {
         calls: Mutex::new(Vec::new()),
     });
     let server = OrbitToolServer::new_with_context(host.clone(), ToolSessionContext::default());
@@ -80,9 +71,9 @@ async fn policy_tags_do_not_filter_the_list_or_call_surface() {
         .into_iter()
         .map(|schema| schema.name)
         .collect::<Vec<_>>();
-    assert_eq!(names, vec!["demo.agent", "demo.operator", "demo.both"]);
+    assert_eq!(names, vec!["demo.read", "demo.write", "demo.inspect"]);
 
-    for name in ["demo_agent", "demo_operator", "demo_both"] {
+    for name in ["demo_read", "demo_write", "demo_inspect"] {
         let result = server
             .call_tool_request(CallToolRequestParams::new(name))
             .await
@@ -92,14 +83,14 @@ async fn policy_tags_do_not_filter_the_list_or_call_surface() {
 
     let calls = host.calls.lock().expect("calls lock");
     assert_eq!(calls.len(), 3);
-    assert_eq!(calls[0].0, "demo.agent");
-    assert_eq!(calls[1].0, "demo.operator");
-    assert_eq!(calls[2].0, "demo.both");
+    assert_eq!(calls[0].0, "demo.read");
+    assert_eq!(calls[1].0, "demo.write");
+    assert_eq!(calls[2].0, "demo.inspect");
 }
 
 #[tokio::test]
 async fn every_tool_call_gets_one_fresh_trace_without_rewriting_legacy_call_id() {
-    let host = Arc::new(PolicyTaggedHost {
+    let host = Arc::new(CompleteSurfaceHost {
         calls: Mutex::new(Vec::new()),
     });
     let trusted = ToolSessionContext {
@@ -110,7 +101,7 @@ async fn every_tool_call_gets_one_fresh_trace_without_rewriting_legacy_call_id()
 
     for _ in 0..2 {
         server
-            .call_tool_request(CallToolRequestParams::new("demo_agent"))
+            .call_tool_request(CallToolRequestParams::new("demo_read"))
             .await
             .expect("call succeeds");
     }

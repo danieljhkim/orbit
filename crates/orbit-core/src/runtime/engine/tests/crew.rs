@@ -56,6 +56,28 @@ default_crew = "primary"
     (root, runtime)
 }
 
+#[test]
+fn crew_discovery_projects_the_open_runtime_configuration() {
+    let (_root, runtime) = runtime_with_named_crews();
+
+    let discovery = runtime
+        .crew_discovery("ws_example", Some("hm_owner".to_string()))
+        .expect("crew discovery");
+
+    assert_eq!(discovery.workspace_id, "ws_example");
+    assert_eq!(discovery.owner_machine_id.as_deref(), Some("hm_owner"));
+    assert_eq!(discovery.default_crew.as_deref(), Some("primary"));
+    assert_eq!(
+        discovery
+            .crews
+            .iter()
+            .map(|crew| crew.name.as_str())
+            .collect::<Vec<_>>(),
+        ["beta", "gamma", "primary"]
+    );
+    assert!(discovery.crews.iter().all(|crew| crew.backend == "cli"));
+}
+
 fn add_task_with_crew(runtime: &OrbitRuntime, crew: &str) -> String {
     runtime
         .add_task(TaskAddParams {

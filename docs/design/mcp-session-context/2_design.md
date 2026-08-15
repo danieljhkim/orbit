@@ -59,14 +59,16 @@ Global tools do not require a workspace selector.
 
 OrbitToolServer holds one context for its stdio session. Initialize may replace only the workspace selector. For every tools/call, the adapter clones the session context and mints one fresh trace_id without writing it back.
 
-tools/list comes from the authoritative host on every request. The MCP kernel validates names and schemas but does not filter the list or calls by capability or placement metadata.
+tools/list comes from the authoritative host on every request. Each definition carries a ToolSchema and one McpToolScope: Global or WorkspaceRequired. Scope controls only workspace-selector injection and server dispatch; it is not authorization metadata.
 
 ## 5. Core dispatch and audit
 
-The server passes the resolved context to Core through execute_tool_command_dispatch_with_session_context. Core is authoritative for domain dispatch and for the success, denial, or failure audit row. Audit records include resolved workspace, caller/process metadata, transport, trace ID, and caller IP when present.
+The server passes a resolved workspace call to Core through execute_tool_command_dispatch_with_session_context. Global calls use Core's global in-process dispatch seam. Unknown or unadvertised raw names use that same global seam and produce one denied row. Every tools/call therefore crosses one Core audit boundary exactly once with its per-call context.
+
+Audit records include resolved workspace when applicable, caller/process metadata, transport, trace ID, and caller IP when present.
 
 Model-authored fields with names resembling audit fields do not override the supplied ToolSessionContext.
 
 ## 6. Explicitly deferred
 
-MCP v1 performs no capability authorization, lease validation, placement routing, broker negotiation, or Orbit principal authentication. Shared compatibility fields and policy tags may still exist in types or schemas, but the live MCP v1 path does not treat them as authority.
+MCP v1 performs no capability authorization, lease validation, placement routing, broker negotiation, or Orbit principal authentication. McpCapability remains in shared execution and audit types for non-MCP authorization paths; it is not MCP exposure metadata in v1.

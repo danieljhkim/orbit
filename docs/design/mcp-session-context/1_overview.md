@@ -38,6 +38,6 @@ The external workspace value is addressing input, not a trusted workspace identi
 
 ## V1 boundary
 
-MCP v1 has one authoritative server host and stdio framing, either local or carried byte-for-byte through SSH. It has no TCP listener, broker, remote placement routing, capability authorization, leases, or Orbit-authenticated caller identity. Those concerns must not be inferred from compatibility fields that remain in shared types.
+MCP v1 has one authoritative server host and stdio framing, either local or carried byte-for-byte through SSH. Tool definitions carry only global-versus-workspace-required scope. V1 has no TCP listener, broker, remote placement routing, capability authorization, leases, or Orbit-authenticated caller identity.
 
 See [2_design.md](./2_design.md) for the concrete path, [3_vision.md](./3_vision.md) for evolution gates, and [4_decisions.md](./4_decisions.md) for current design choices.

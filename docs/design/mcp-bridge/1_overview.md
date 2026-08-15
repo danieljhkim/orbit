@@ -1,53 +1,96 @@
 ---
-title: Orbit MCP Bridge — Overview
+title: Orbit MCP — Overview
 owner: codex
 last_updated: 2026-08-15
 last_validated: 2026-08-15
-status: Accepted
+status: Draft
 feature: mcp-bridge
 doc_role: overview
 type: design
-summary: A thin stdio MCP server that can be reached directly over SSH and delegates execution authority to the accepting machine.
-tags: [mcp, ssh, remote-access]
-paths: ["crates/orbit-mcp/**", "crates/orbit-cli/src/command/mcp/**", "crates/orbit-core/src/command/tool/**", "crates/orbit-registry/**"]
-related_features: [mcp-bridge, mcp-session-context, host-registry]
-related_artifacts: []
+summary: One authoritative Orbit MCP server, reached either by local stdio or a byte-transparent direct SSH stdio proxy.
+tags: [mcp, ssh, remote-access, registry, audit]
+paths: ["crates/orbit-mcp/**", "crates/orbit-registry/**", "crates/orbit-core/**", "crates/orbit-cli/src/command/mcp/**"]
+related_features: [host-registry, mcp-session-context, remote-access]
 ---
 
-# Orbit MCP Bridge — Overview
+# Orbit MCP — Overview
 
-Orbit has one MCP implementation and two ways to reach it:
+Orbit exposes the same MCP server in two ways:
 
-- `orbit mcp serve` runs an MCP server over local stdio.
-- `orbit mcp serve --mode remote <ssh-host>` starts `orbit mcp serve` on the
-  selected machine through a direct, non-PTY SSH stdio child.
+```text
+local:  MCP client <-> stdio <-> orbit mcp serve <-> Orbit Core
+remote: MCP client <-> stdio <-> SSH <-> orbit mcp serve <-> Orbit Core
+```
 
-The remote path forwards MCP bytes unchanged. It has no TCP listener, local
-port forward, shared broker, frame parser, checkout preflight, owner routing,
-placement logic, or capability filter.
+The remote side is intentionally just direct SSH stdio. The local proxy starts a
+non-interactive SSH process whose remote command is:
 
-## Authority
+```text
+ssh -T <host> orbit mcp serve --remote-caller-machine-id <audit-label>
+```
 
-The accepting machine is authoritative. It resolves workspace selectors against
-its own registry, opens its own registered checkout, and dispatches against that
-runtime. A local client and an SSH client therefore reach the same server-side
-execution path.
+The proxy inherits stdin, stdout, and stderr. It does not parse MCP frames, open a
+checkout, resolve a workspace, filter tools, make authorization decisions, or
+forward the call through another machine.
 
-SSH access is sufficient for v1. Caller machine and network information is
-recorded for audit correlation only; it is not an authenticated Orbit identity.
-Future authorization belongs in Core, where every execution outcome can be
-decided and audited consistently.
+## Runtime rule
+
+The machine accepting `orbit mcp serve` is authoritative for the call. It:
+
+1. derives its process identity from its local registry;
+2. uses definition scope to decide whether a workspace is required;
+3. resolves any required workspace against its own registry and opens that
+   server-local runtime;
+4. sends every call, including an unknown raw name, through Orbit Core exactly
+   once; and
+5. records success, failure, or denial at that boundary.
+
+This is the same rule for local and SSH-originated sessions. Remote access changes
+only how MCP bytes reach the server.
+
+## Audit context
+
+Each tool call carries a fresh `trace_id`. The server also records:
+
+- `caller_machine_id`: an audit-only label supplied by the direct SSH proxy, or
+  the local process identity when available;
+- `caller_ip`: the first field of `SSH_CONNECTION`, when an SSH session provides
+  it;
+- `process_machine_id` and `process_host_id`: derived by the accepting server;
+- `transport`: `local` or `ssh-mcp`.
+
+`host/local` is the fallback machine label when no persisted identity is
+available. None of these caller fields is an authenticated authorization
+principal in v1.
 
 ## Ownership
 
 | Concern | Owner |
 |---|---|
-| MCP framing, schemas, discovery, direct SSH stdio | `orbit-mcp` |
-| Host identity and workspace registry | `orbit-registry` |
-| Runtime construction shared by CLI and Web | `orbit-cmd` |
-| Domain execution, validation, and audit | `orbit-core` |
-| CLI argument parsing and server composition | `orbit-cli` |
-| HTTP dashboard and its separate SSH port forward | `orbit-web` |
+| MCP framing, tool discovery, server identity context, direct SSH stdio proxy | `orbit-mcp` |
+| Host identity and workspace-registry state | `orbit-registry` |
+| Server composition and server-local runtime selection | `orbit-cli` |
+| Domain validation, sandboxing, audit persistence, and future authorization | `orbit-core` |
+| Canonical builtin tool definitions | `orbit-tools` |
+| HTTP UI and its own local-forward SSH connection | `orbit-web` |
 
-The exact v1 contract is pinned in
-[`references/conformance-v1.yaml`](./references/conformance-v1.yaml).
+`orbit-web` is a separate application surface. Its HTTP tunnel is not an MCP
+transport and is not reused by MCP.
+
+## V1 boundaries
+
+V1 deliberately has no MCP TCP listener, shared broker, local checkout preflight,
+owner-placement routing, capability-based tool filtering, or Orbit authorization
+layer. SSH access is sufficient to start the remote server. If authorization is
+added later, it belongs in Core, after the accepting server has established the
+facts needed to enforce it.
+
+Advertised definitions contain only schema plus global-versus-workspace-required
+scope. `orbit.workspace.list` is the sole global tool and reports active logical
+workspaces that have a checkout registered on the accepting machine.
+
+The executable contract and validation map live in
+[`references/conformance-v1.yaml`](./references/conformance-v1.yaml). Detailed
+request flow is in [`2_design.md`](./2_design.md), future work in
+[`3_vision.md`](./3_vision.md), and the current decision set in
+[`4_decisions.md`](./4_decisions.md).

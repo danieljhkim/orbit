@@ -3,18 +3,15 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use orbit_cmd::registry_runtime::RegisteredRuntimeFactory;
+use orbit_cmd::registry_runtime::{RegisteredRuntimeFactory, ResolvedWorkspaceSelection};
 use orbit_common::types::{
     McpToolDefinition, McpToolScope, NotFoundKind, OrbitError, ToolSessionContext,
-    WorkspaceCheckoutRole,
 };
 use orbit_core::OrbitRuntime;
-use orbit_core::command::tool::ToolEntryPoint;
+use orbit_core::command::tool::{ToolEntryPoint, execute_global_in_process_tool_dispatch};
 use orbit_core::runtime::resolve_global_root;
 use orbit_mcp::McpHost;
 use serde_json::Value;
-
-use super::crew::crew_discovery;
 
 pub(super) fn serve_mcp_stdio(remote_caller_machine_id: Option<String>) -> Result<(), OrbitError> {
     let global_root = resolve_global_root()?;
@@ -87,30 +84,74 @@ impl ServerMcpHost {
         )
     }
 
+    fn call_global_tool(
+        &self,
+        name: &str,
+        input: Value,
+        context: ToolSessionContext,
+    ) -> Result<Value, OrbitError> {
+        execute_global_in_process_tool_dispatch(
+            &self.global_root,
+            name,
+            input,
+            ToolEntryPoint::Mcp,
+            context,
+            |_| match name {
+                "orbit.workspace.list" => self.list_workspaces(),
+                _ => Err(OrbitError::not_found(NotFoundKind::Tool, name.to_string())),
+            },
+        )
+        .map(|outcome| outcome.value)
+    }
+
+    fn resolve_workspace_runtime(
+        &self,
+        name: &str,
+        input: &Value,
+        context: &ToolSessionContext,
+    ) -> Result<(OrbitRuntime, ResolvedWorkspaceSelection), OrbitError> {
+        let selector = Self::workspace_selector(input, context)
+            .ok_or_else(|| self.workspace_required(name))?;
+        let selected =
+            RegisteredRuntimeFactory::resolve_workspace_selector(&self.global_root, selector)?;
+        let runtime = RegisteredRuntimeFactory::open_registered_checkout(
+            &self.global_root,
+            &selected.workspace,
+            &selected.checkout,
+        )?;
+        Ok((runtime, selected))
+    }
+
+    fn audit_global_failure(
+        &self,
+        name: &str,
+        input: Value,
+        context: ToolSessionContext,
+        error: OrbitError,
+    ) -> Result<Value, OrbitError> {
+        execute_global_in_process_tool_dispatch(
+            &self.global_root,
+            name,
+            input,
+            ToolEntryPoint::Mcp,
+            context,
+            move |_| Err(error),
+        )
+        .map(|outcome| outcome.value)
+    }
+
     fn call_workspace_tool(
         &self,
         name: &str,
         mut input: Value,
         mut context: ToolSessionContext,
     ) -> Result<Value, OrbitError> {
-        let selector = Self::workspace_selector(&input, &context)
-            .ok_or_else(|| self.workspace_required(name))?;
-        let selected =
-            RegisteredRuntimeFactory::resolve_workspace_selector(&self.global_root, selector)?;
-        orbit_cmd::registry_runtime::sync_runtime_task_prefix(&self.global_root)?;
-        let binding = orbit_core::runtime::workspace_runtime_binding(
-            &selected.workspace,
-            &selected.checkout,
-        )?;
-        let replica_owner = (selected.checkout.role == Some(WorkspaceCheckoutRole::Replica))
-            .then(|| selected.checkout.owner_machine_id.clone())
-            .flatten();
-        let runtime = OrbitRuntime::from_roots_with_binding(
-            &self.global_root,
-            &selected.checkout.orbit_dir,
-            binding,
-        )?
-        .with_coordination_write_owner(replica_owner);
+        let (runtime, selected) = match self.resolve_workspace_runtime(name, &input, &context) {
+            Ok(resolved) => resolved,
+            Err(error) => {
+                return self.audit_global_failure(name, input, context, error);
+            }
+        };
         let repo_root = selected.checkout.repo_root.to_string_lossy().into_owned();
 
         context.workspace_id = Some(selected.workspace.id.clone());
@@ -125,10 +166,9 @@ impl ServerMcpHost {
         }
 
         if name == "orbit.crew.list" {
-            let global_root = self.global_root.clone();
-            let checkout_orbit_dir = selected.checkout.orbit_dir.clone();
             let workspace_id = selected.workspace.id.clone();
             let owner_machine_id = selected.workspace.owner_machine_id.clone();
+            let crew_runtime = &runtime;
             return runtime
                 .execute_in_process_tool_dispatch(
                     name,
@@ -136,12 +176,9 @@ impl ServerMcpHost {
                     ToolEntryPoint::Mcp,
                     context,
                     move |_| {
-                        serde_json::to_value(crew_discovery(
-                            &global_root,
-                            &checkout_orbit_dir,
-                            &workspace_id,
-                            owner_machine_id,
-                        )?)
+                        serde_json::to_value(
+                            crew_runtime.crew_discovery(&workspace_id, owner_machine_id)?,
+                        )
                         .map_err(|error| {
                             OrbitError::Execution(format!("serialize crew discovery: {error}"))
                         })
@@ -166,12 +203,12 @@ impl McpHost for ServerMcpHost {
         input: Value,
         context: ToolSessionContext,
     ) -> Result<Value, OrbitError> {
-        let definition = self.definition(name)?;
-        if definition.policy.scope() == McpToolScope::Global {
-            return match name {
-                "orbit.workspace.list" => self.list_workspaces(),
-                _ => Err(OrbitError::not_found(NotFoundKind::Tool, name.to_string())),
-            };
+        let definition = match self.definition(name) {
+            Ok(definition) => definition,
+            Err(error) => return self.audit_global_failure(name, input, context, error),
+        };
+        if definition.scope == McpToolScope::Global {
+            return self.call_global_tool(name, input, context);
         }
         self.call_workspace_tool(name, input, context)
     }

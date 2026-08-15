@@ -42,4 +42,5 @@ Add a field only when all three are true:
 - The accepting machine describes itself.
 - Caller machine and network labels are useful for audit correlation but remain fallible.
 - The MCP adapter owns call correlation.
-- Core remains the execution and audit authority.
+- Every tools/call, including an unknown raw name, crosses one Core audit boundary.
+- Core remains the execution, audit, and future authorization authority.

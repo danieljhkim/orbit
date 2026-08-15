@@ -35,7 +35,7 @@ authority:
     - resolves workspace selectors against its own registry
     - opens the selected server-local runtime
     - performs domain and sandbox validation through Core
-    - records the invocation through Core audit persistence
+    - records every tools/call through one Core audit boundary
   caller:
     - selects an SSH destination
     - forwards MCP bytes unchanged
@@ -51,6 +51,18 @@ authorization:
   v1_rule: SSH access is sufficient to reach the remote MCP process
   enforcement_owner_when_added: orbit-core
   capability_filtering: false
+
+tool_definitions:
+  metadata:
+    - schema
+    - scope
+  scopes:
+    global:
+      - orbit.workspace.list
+    workspace_required: all other advertised tools
+  forbidden_metadata:
+    - placement
+    - allowed capabilities
 
 audit_context:
   trace_id: generated once per MCP call
@@ -68,6 +80,17 @@ workspace_selection:
   missing_selector: fail clearly for workspace-scoped tools
   global_tools:
     - orbit.workspace.list
+  discovery_projection:
+    include: active logical workspaces with a checkout registered on the accepting machine
+    owner_machine_id_filter: false
+
+unknown_tool_calls:
+  name: preserve the raw unadvertised wire name
+  dispatch: Core global in-process audit seam
+  result: tool_not_found
+  audit_status: denied
+  audit_rows: exactly one
+  workspace_id: null
 
 validation:
   exact_tool_snapshot: crates/orbit-cli/tests/snapshots/mcp_tools_list.json
@@ -76,3 +99,4 @@ validation:
   remote_proxy: crates/orbit-mcp/src/remote/tests/proxy.rs
   server_identity: crates/orbit-mcp/src/remote/tests/identity.rs
   discovery: crates/orbit-mcp/src/remote/tests/discovery.rs
+  unknown_call_audit: crates/orbit-cli/tests/mcp_roundtrip.rs

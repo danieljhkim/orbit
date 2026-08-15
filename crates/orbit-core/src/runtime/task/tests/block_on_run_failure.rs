@@ -1,4 +1,4 @@
-//! Sibling tests for `task_block_on_run_failure.rs`: a coupled task is moved
+//! Sibling tests for `block_on_run_failure.rs`: a coupled task is moved
 //! to `blocked` when its `task_pr_pipeline` run terminalizes as a failure, the
 //! transition is idempotent, and it leaves `review`/`done` tasks (and the
 //! workflow-admission allowlist) untouched.

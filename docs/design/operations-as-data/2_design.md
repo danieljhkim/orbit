@@ -1,17 +1,17 @@
 ---
 title: Operations as Data — Design
 owner: claude
-last_updated: 2026-07-26
-last_validated: 2026-08-08
+last_updated: 2026-08-15
+last_validated: 2026-08-15
 status: Accepted
 feature: operations-as-data
 doc_role: design
 type: design
 summary: How the operation spec kernel, the split spec/handler table, and the MCP and CLI adapters work today on the friction noun.
-tags: [operations-as-data, architecture, adr-0209]
+tags: [operations-as-data, architecture]
 paths: ["crates/orbit-common/src/operation.rs", "crates/orbit-common/src/friction/**", "crates/orbit-tools/src/builtin/orbit/operation.rs", "crates/orbit-cli/src/command/operation_args.rs"]
 related_features: [operations-as-data, orbit-core]
-related_artifacts: [ORB-10358]
+related_artifacts: []
 ---
 
 # Operations as Data — Design
@@ -35,7 +35,7 @@ pub struct OperationSpec<V: 'static> {
     pub cli_about: &'static str,
     pub params: &'static [ParamSpec],  // declaration order is contract
     pub rejects_agent_field: bool,
-    pub mcp: McpExposure,
+    pub mcp_scope: Option<McpToolScope>,
     pub cli_json_flag: bool,
     pub cli_render: CliRender,
 }
@@ -56,11 +56,9 @@ const-constructible, so a whole registry stays a `const` item.
 
 ## 2. The split table
 
-[North-star architecture bearing: operations as data behind an operation registry](../orbit-core/4_decisions.md#north-star-architecture-bearing-operations-as-data-behind-an-operation-registry) bearing 1 describes "a serializable request/response pair with a handler
-registered in an operation table." One literal table is not reachable: handlers
-need `&OrbitRuntime`, which lives far above `orbit-common`. Co-locating them
-would either drag the runtime into the leaf crate or push the specs up above the
-surfaces that must read them.
+One literal table is not practical: handlers need `&OrbitRuntime`, which lives
+far above `orbit-common`. Co-locating them would either drag the runtime into the
+leaf crate or push the specs above the surfaces that must read them.
 
 The shape that works is **one table split across two crates, joined by the verb
 enum**:
@@ -79,7 +77,9 @@ table — until it is fully wired. A spec with no handler cannot ship.
 `orbit_tools::builtin::orbit::operation` is two generic functions:
 `operation_tool_schema(spec)` projects the spec's MCP parameters into a
 `ToolSchema` in declaration order, and `register_operation(registry, spec, tool)`
-resolves `McpExposure` into an `McpToolPolicy` and registers under it.
+registers the tool when `mcp_scope` is `Some`, or keeps it off MCP when the value
+is `None`. The scope says only whether dispatch is global or requires a workspace;
+it carries no placement or capability policy.
 
 `FrictionOperationTool(&'static FrictionOperation)` is the single `Tool` impl
 that replaced seven. Its `execute` applies `rejects_agent_field` (only
@@ -89,9 +89,9 @@ registry; `register_builtins` mentions no friction verb by name.
 
 `OrbitBuiltinAction` collapsed its seven `Friction*` variants into one
 `Friction(FrictionVerb)`. Downstream matches on specific verbs — artifact
-redaction policy for `Add`/`Update`, the checkoutless hub executor — pattern-match
-on the inner verb, and the hub executor is now exhaustive over `FrictionVerb` so a
-new verb must state whether the hub can serve it.
+redaction policy for `Add`/`Update`, for example — pattern-match on the inner
+verb. Core's handler match remains exhaustive, so a new verb cannot omit runtime
+wiring.
 
 ## 4. CLI adapter
 
@@ -165,29 +165,17 @@ The step-by-step procedure is [references/cookbook.md](references/cookbook.md).
   system enforces that a future clap upgrade keeps them aligned. The frozen
   `friction_help/*.txt` fixtures are the actual guard, and every future noun
   migration must capture its own before starting.
-- **Only one noun is migrated.** Two idioms coexist, exactly as [North-star architecture bearing: operations as data behind an operation registry](../orbit-core/4_decisions.md#north-star-architecture-bearing-operations-as-data-behind-an-operation-registry)
-  predicted. Readers of `orbit-tools`/`orbit-cli` will meet both shapes until the
-  ratchet finishes the job, and there is no deadline by design.
+- **Only one noun is migrated.** Readers of `orbit-tools` and `orbit-cli` will
+  meet both the registry-driven and hand-wired shapes until the ratchet moves
+  more nouns.
 - **Verb-level parameter validation is still the handler's job.** The spec
   declares types and requiredness; cross-field rules (`update` needs at least one
   of `status`/`tags`/`body`) live in the handler and are not visible to any
   surface.
-- **There are no per-verb Rust request/response structs.** [North-star architecture bearing: operations as data behind an operation registry](../orbit-core/4_decisions.md#north-star-architecture-bearing-operations-as-data-behind-an-operation-registry) bearing 1
-  says "a serializable request/response pair"; what shipped is a serializable
-  *declaration* of the request (`params`) with `serde_json::Value` still on the
-  wire. Deriving `Deserialize` request structs was rejected during the pilot for
-  a concrete reason: the shipped friction tools accept documented field aliases
+- **There are no per-verb Rust request/response structs.** What shipped is a
+  declaration of the request (`params`) with `serde_json::Value` still on the
+  wire. Derived request structs would complicate the documented field aliases
   (`body`/`description`, `tags`/`tag`, `during_task`/`task_id`) that agents send
-  today, and a derived `Deserialize` would silently drop them. Preserving them
-  would mean hand-written `Deserialize` impls — more duplication than the spec
-  removes — and the pilot's wire-compatibility requirement outranks the letter
-  of the bearing. Typed responses are similarly absent: the response is the
-  store's existing JSON projection, and re-typing it would be a second contract
-  to keep in sync. Revisit if alias tolerance is ever retired.
-
-## Task References
-
-- [ORB-10358] — piloted [North-star architecture bearing: operations as data behind an operation registry](../orbit-core/4_decisions.md#north-star-architecture-bearing-operations-as-data-behind-an-operation-registry) bearing 1 on the friction noun and built the
-  kernel plus the MCP, CLI, dashboard, and runtime adapters.
-
-> Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.
+  today. Typed responses are similarly absent: the response is the store's
+  existing JSON projection, and re-typing it would create a second contract to
+  keep in sync. Revisit if alias tolerance is retired.

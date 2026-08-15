@@ -7,7 +7,7 @@ use orbit_tools::ToolContext;
 use serde_json::Value;
 
 use crate::OrbitRuntime;
-use crate::runtime::task_locks::parse_task_ids;
+use crate::runtime::task::locks::parse_task_ids;
 
 pub(super) fn validate_bundles(action: &str, input: &Value) -> Result<Value, DispatchError> {
     let bundles_raw = input

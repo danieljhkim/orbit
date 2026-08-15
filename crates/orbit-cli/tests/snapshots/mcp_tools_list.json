@@ -213,12 +213,12 @@
     "name": "orbit_command_exec"
   },
   {
-    "description": "List a workspace owner's execution-profile crews with sanitized profile state, generation, and freshness (agent/operator, owner placement).",
+    "description": "List the effective configured crews for a selected workspace on this machine.",
     "inputSchema": {
       "additionalProperties": true,
       "properties": {
         "workspace": {
-          "description": "Stable logical workspace ID. Defaults to the trusted MCP session workspace; never resolved from process cwd or a checkout path.",
+          "description": "Registered workspace name, logical workspace ID (`ws_*`), or absolute path registered on the accepting server. Defaults to the MCP session workspace and is never inferred from process cwd.",
           "type": "string"
         }
       },
@@ -1284,7 +1284,7 @@
     "name": "orbit_workflow_ship"
   },
   {
-    "description": "List the workspaces this machine owns from its local workspace registry (operator, local-derived placement).",
+    "description": "List active workspaces with a checkout registered on this machine.",
     "inputSchema": {
       "additionalProperties": true,
       "properties": {},

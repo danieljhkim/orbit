@@ -22,12 +22,8 @@ pub(crate) mod orbit_tool_host;
 mod resolve;
 pub mod run_audit;
 pub(crate) mod run_input;
-pub(crate) mod session_log;
-mod task_block_on_run_failure;
-mod task_locks;
-mod task_records;
-mod task_reservation_cleanup;
-pub use task_reservation_cleanup::StaleTaskReservation;
+mod task;
+pub use task::StaleTaskReservation;
 pub(crate) mod tool_exec;
 mod v2_host;
 pub mod workspace_claim;
@@ -66,7 +62,7 @@ pub use resolve::{
 // `pub` for the runtime-less `orbit migrate --dry-run` inspection that moved
 // to `orbit-cmd` [ORB-10016].
 pub use resolve::{is_global_orbit_root, resolve_global_root, try_resolve_initialized_roots};
-pub(crate) use task_records::TaskRecordUpdateParams;
+pub(crate) use task::{failed_run_error_context, is_workflow_failure_state};
 
 #[derive(Clone)]
 pub struct OrbitRuntime {

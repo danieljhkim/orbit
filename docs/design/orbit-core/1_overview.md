@@ -1,15 +1,15 @@
 ---
 title: Orbit Core — Overview
 owner: claude
-last_updated: 2026-07-25
-last_validated: 2026-08-09
+last_updated: 2026-08-15
+last_validated: 2026-08-15
 status: Accepted
 feature: orbit-core
 doc_role: overview
 type: design
 summary: Crate boundary and public-surface contract of orbit-core after the ORB-10016 orbit-cmd extraction.
 tags: [orbit-core, orbit-cmd, architecture]
-paths: ["crates/orbit-core/**", "crates/orbit-cmd/**"]
+paths: ["crates/orbit-core/**", "crates/orbit-cmd/**", "crates/orbit-registry/**"]
 related_features: [orbit-core]
 related_artifacts: [ORB-10016]
 ---
@@ -17,8 +17,8 @@ related_artifacts: [ORB-10016]
 # Orbit Core — Overview
 
 `orbit-core` is the runtime kernel of Orbit: it assembles config, stores,
-policy, tools, and the event bus into the `OrbitRuntime` that every consumer
-(CLI, dashboard, extracted command layer) drives. This folder documents the
+policy, tools, and the event bus into the `OrbitRuntime` that consumers such
+as `orbit-cli`, `orbit-web`, and `orbit-cmd` drive. This folder documents the
 crate's boundary — what belongs inside the kernel, what was extracted to
 `orbit-cmd` in [ORB-10016], and the contract governing its root re-exports.
 
@@ -42,8 +42,12 @@ demonstrably import.
 - **CLI-facing command** — a command module that is a pure consumer of the
   runtime's public API. These live in `orbit-cmd` and attach their runtime
   methods via `*Commands` extension traits.
+- **Registry-aware composition** — opening a selected registered checkout and
+  composing routine discovery from local `host.toml` plus `workspaces.json`
+  lives in `orbit-cmd::registry_runtime` and `orbit-cmd::registry_routines`,
+  over persistence and validation owned by `orbit-registry`.
 - **Consumer-justified re-export** — a root `pub use` kept only because a
-  consumer crate (`orbit-cli`, `orbit-dashboard`, `orbit-cmd`) genuinely
+  consumer crate (`orbit-cli`, `orbit-web`, `orbit-cmd`) genuinely
   imports it from the root.
 
 ## 3. At a Glance
@@ -54,26 +58,20 @@ demonstrably import.
 | Context assembly | `crates/orbit-core/src/context.rs` | — |
 | Config layering | `crates/orbit-core/src/config/` | — |
 | Runtime-integrated commands | `crates/orbit-core/src/command/` | [ORB-10016] |
+| Registered runtime + routine composition | `crates/orbit-cmd/src/registry_runtime.rs`, `crates/orbit-cmd/src/registry_routines.rs` | — |
+| Host identity + local workspace catalog | `crates/orbit-registry/src/` | — |
+| Tool dispatch and command-audit boundary | `crates/orbit-core/src/command/tool/dispatch.rs` | — |
 | Root re-export policy | `crates/orbit-core/src/lib.rs` | [ORB-10016] |
 | Extracted command layer | `crates/orbit-cmd/src/` | [ORB-10016] |
-| Crate-boundary ADR log | [4_decisions.md](./4_decisions.md) | [ORB-10016] |
 
 ## 4. Store Access Boundary
 
-[ORB-10355] removed orbit-core's hand-written per-domain store forwarding
-layer. `OrbitStores` now exposes each typed `orbit-store` backend directly, so
-adding a method to a backend trait makes it available to core callers without
-adding a matching forwarding method. Callers use the backend's canonical
-method names, which also keeps the persistence contract searchable from the
-call site.
-
-Direct exposure was chosen over macro-generated forwarders because a macro
-would still maintain a second method inventory in orbit-core and could drift
-from the owning trait. The only retained service is task-record mutation:
-creating, updating, and deleting a task coordinates multiple task backends
-with semantic-index side effects, so those operations are orchestration rather
-than pure delegation. Read-only task access goes directly to the relevant
-typed backend like every other domain.
+`OrbitStores` is Core's internal holder for typed `orbit-store` backends; it is
+not an external SDK surface. Code inside Core delegates ordinary persistence
+to the owning backend traits, while outer crates use explicit `OrbitRuntime`
+methods and command APIs. Runtime methods may still coordinate several stores
+or side effects when an operation is more than a single persistence call;
+task mutation is one important example, not the only service wrapper.
 
 ## Task References
 

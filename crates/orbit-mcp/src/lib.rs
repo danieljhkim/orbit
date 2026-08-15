@@ -36,7 +36,7 @@ pub use remote::{
 ///
 /// The host returns the definitions it intends to expose and receives every
 /// canonicalized call with one trusted per-call context. The kernel performs no
-/// capability or placement filtering.
+/// authorization or cross-machine routing.
 pub trait McpHost: Send + Sync + 'static {
     fn list_mcp_tool_definitions(&self) -> Result<Vec<McpToolDefinition>, OrbitError>;
 

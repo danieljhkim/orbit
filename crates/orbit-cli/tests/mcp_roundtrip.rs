@@ -330,7 +330,7 @@ fn mcp_serve_tools_list_matches_production_snapshot() {
 }
 
 #[test]
-fn mcp_server_advertises_and_calls_the_workflow_family_without_capability_filtering() {
+fn mcp_server_advertises_and_calls_the_workflow_family() {
     let workspace = McpWorkspace::init();
     let mut client = workspace.serve();
     let response = client.request("tools/list", Value::Null);
@@ -355,7 +355,7 @@ fn mcp_server_advertises_and_calls_the_workflow_family_without_capability_filter
 }
 
 #[test]
-fn mcp_serve_lists_canonical_agent_surface_outside_any_checkout() {
+fn mcp_serve_lists_the_canonical_surface_outside_any_checkout() {
     let workspace = McpWorkspace::init();
     let scratch = workspace.home.join("scratch");
     std::fs::create_dir_all(&scratch).expect("create non-workspace launch dir");
@@ -391,6 +391,35 @@ fn mcp_serve_lists_canonical_agent_surface_outside_any_checkout() {
         message.contains("requires a workspace selector")
             && message.contains("MCP initialize metadata")
     }));
+    drop(client);
+
+    let connection =
+        Connection::open(workspace.home.join(".orbit/orbit.db")).expect("open server audit store");
+    let audited = connection
+        .query_row(
+            "SELECT COUNT(*), status, trace_id, caller_machine_id, process_machine_id
+             FROM audit_events WHERE tool_name = 'orbit.task.show'",
+            [],
+            |row| {
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, Option<String>>(2)?,
+                    row.get::<_, Option<String>>(3)?,
+                    row.get::<_, Option<String>>(4)?,
+                ))
+            },
+        )
+        .expect("missing-selector audit");
+    assert_eq!(audited.0, 1, "recognized setup failure is audited once");
+    assert_eq!(audited.1, "failure");
+    assert!(
+        audited
+            .2
+            .as_deref()
+            .is_some_and(|id| id.starts_with("trace-"))
+    );
+    assert_eq!(audited.3, audited.4);
 }
 
 #[test]
@@ -431,6 +460,15 @@ fn ssh_marked_mcp_server_audits_caller_and_server_identity_separately() {
         "missing task surface: {names:?}"
     );
     assert!(names.contains(&"orbit_friction_update"));
+
+    let workspaces = client.call_tool_ok("orbit_workspace_list", json!({}));
+    assert!(workspaces["machine_id"].as_str().is_some());
+    assert!(
+        workspaces["workspaces"]
+            .as_array()
+            .is_some_and(|items| !items.is_empty()),
+        "server-local workspace discovery returned no workspaces: {workspaces}"
+    );
 
     let created = client.call_tool_ok(
         "orbit_task_add",
@@ -480,6 +518,47 @@ fn ssh_marked_mcp_server_audits_caller_and_server_identity_separately() {
             .is_some_and(|id| id.starts_with("trace-"))
     );
     assert_eq!(audit.6.as_deref(), Some("192.0.2.8"));
+
+    let workspace_audit = connection
+        .query_row(
+            "SELECT COUNT(*), workspace_id, caller_machine_id, process_machine_id, process_host_id, transport, trace_id, caller_ip
+             FROM audit_events WHERE tool_name = 'orbit.workspace.list'",
+            [],
+            |row| {
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, Option<String>>(1)?,
+                    row.get::<_, Option<String>>(2)?,
+                    row.get::<_, Option<String>>(3)?,
+                    row.get::<_, Option<String>>(4)?,
+                    row.get::<_, Option<String>>(5)?,
+                    row.get::<_, Option<String>>(6)?,
+                    row.get::<_, Option<String>>(7)?,
+                ))
+            },
+        )
+        .expect("remote workspace-list audit");
+    assert_eq!(
+        workspace_audit.0, 1,
+        "workspace discovery records exactly one MCP audit row"
+    );
+    assert_eq!(workspace_audit.1, None, "global call has no workspace id");
+    assert_eq!(workspace_audit.2.as_deref(), Some("hm_caller"));
+    assert!(
+        workspace_audit
+            .3
+            .as_deref()
+            .is_some_and(|id| id.starts_with("hm_"))
+    );
+    assert!(workspace_audit.4.as_deref().is_some());
+    assert_eq!(workspace_audit.5.as_deref(), Some("ssh-mcp"));
+    assert!(
+        workspace_audit
+            .6
+            .as_deref()
+            .is_some_and(|id| id.starts_with("trace-"))
+    );
+    assert_eq!(workspace_audit.7.as_deref(), Some("192.0.2.8"));
 }
 
 #[test]
@@ -564,8 +643,8 @@ fn mcp_serve_round_trips_records_against_a_temp_workspace() {
     );
     assert!(listed_by_stable_id["items"].as_array().is_some());
 
-    // v1 performs no MCP capability filtering. Domain validation and mutation
-    // still run on the authoritative server-side runtime.
+    // V1 exposes one complete surface. Domain validation and mutation still run
+    // on the authoritative server-side runtime.
     let friction = client.call_tool_ok(
         "orbit_friction_add",
         json!({ "body": "MCP D2 exposure regression", "model": "codex" }),
@@ -616,7 +695,7 @@ fn mcp_serve_error_paths_return_tool_errors_and_keep_serving() {
 }
 
 #[test]
-fn mcp_registered_calls_are_audited_but_unknown_names_are_not_dispatched() {
+fn mcp_calls_are_audited_once_including_unknown_raw_names() {
     let workspace = McpWorkspace::init();
     let mut client = workspace.serve();
 
@@ -672,13 +751,27 @@ fn mcp_registered_calls_are_audited_but_unknown_names_are_not_dispatched() {
     }
 
     let output = McpWorkspace::orbit_command(&workspace.work, &workspace.home)
-        .args(["audit", "list", "--tool", "orbit.removed.tool", "--json"])
+        .args(["audit", "list", "--tool", "orbit_removed_tool", "--json"])
         .output()
         .expect("query unknown-tool audit rows");
     assert!(output.status.success());
     let rows: Value =
         serde_json::from_slice(&output.stdout).expect("parse unknown-tool audit rows");
-    assert_eq!(rows, json!([]));
+    let rows = rows.as_array().expect("unknown-tool audit row array");
+    assert_eq!(rows.len(), 1, "unknown call records exactly one row");
+    let row = &rows[0];
+    assert_eq!(row["tool_name"], "orbit_removed_tool");
+    assert_eq!(row["subcommand"], "run-mcp");
+    assert_eq!(row["status"], "denied");
+    assert_eq!(row["role"], "unverified");
+    assert_eq!(row["transport"], "local");
+    assert_eq!(row["effective_capabilities"], json!([]));
+    assert!(row["workspace_id"].is_null());
+    assert!(row["caller_machine_id"].as_str().is_some());
+    assert_eq!(row["caller_machine_id"], row["process_machine_id"]);
+    assert!(row["process_host_id"].as_str().is_some());
+    assert!(row["trace_id"].as_str().is_some());
+    assert!(row["origin_session_id"].as_str().is_some());
 }
 
 /// ORB-10448 / F2026-07-099: the managed-executor shape.

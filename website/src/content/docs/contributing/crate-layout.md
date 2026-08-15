@@ -12,7 +12,7 @@ sidebar:
 | `orbit-cli` | Clap-based entrypoint that composes Core, Registry, MCP, and Web. |
 | `orbit-cmd` | CLI-facing command layer extracted from `orbit-core`: doctor, migrate, diagnostics, hooks, agent-rules, direct v2 activity runs. Exposes `*Commands` extension traits over `OrbitRuntime`. |
 | `orbit-core` | Neutral runtime bootstrap, config layering, default asset seeding, and runtime-integrated command modules. Surfaces `OrbitRuntime` to `orbit-cmd`, `orbit-cli`, and `orbit-web`. |
-| `orbit-registry` | Machine identity, logical workspace catalog, registry validation/persistence, and host registry/cache. |
+| `orbit-registry` | Local machine identity and logical workspace catalog validation with atomic file persistence. |
 | `orbit-web` | HTTP API, embedded dashboard UI, dashboard mutations, and SSH web connection over Core and Registry. |
 | `orbit-engine` | Activity and job execution, template rendering, retry logic. Owns the `backend: cli` subprocess runner, which references `orbit-agent::{Agent, AgentConfig}` directly. |
 | `orbit-agent` | Per-provider `AgentRuntime` implementations under `providers/<name>/<name>_runtime.rs` (claude, codex, gemini, gemini_http, grok, openai_compat, anthropic, ollama, mock_agent). Hosts HTTP `LoopTransport` primitives. |

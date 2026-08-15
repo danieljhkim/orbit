@@ -1,8 +1,8 @@
-use std::collections::BTreeSet;
+use std::path::PathBuf;
 
 use chrono::Utc;
 use orbit_common::types::{
-    McpCapability, McpToolPlacement, McpToolScope, NotFoundKind, OrbitError, Workspace,
+    McpToolScope, NotFoundKind, OrbitError, Workspace, WorkspaceCheckout, WorkspaceCheckoutRole,
     WorkspaceRegistry, WorkspaceStatus, tool_input_schema,
 };
 use serde_json::json;
@@ -23,62 +23,41 @@ fn mcp_owns_the_exact_global_discovery_definitions() {
     );
     assert_eq!(
         definitions[0].schema.description,
-        "List the workspaces this machine owns from its local workspace registry \
-         (operator, local-derived placement)."
+        "List active workspaces with a checkout registered on this machine."
     );
-    // ORB-10727: the registry-wide tool stays operator-only and global, and is
-    // now `local-derived` — it reads the machine-local registry, so it never
-    // routes. It still does not treat capability as a hierarchy the crew tool
-    // extends.
-    for definition in &definitions[..1] {
-        assert!(definition.schema.builtin);
-        assert!(definition.schema.parameters.is_empty());
-        assert_eq!(
-            definition.policy.placement(),
-            McpToolPlacement::LocalDerived
-        );
-        assert_eq!(definition.policy.scope(), McpToolScope::Global);
-        assert_eq!(
-            definition.policy.allowed_capabilities(),
-            &BTreeSet::from([McpCapability::Operator])
-        );
-        assert_eq!(
-            tool_input_schema(&definition.schema),
-            json!({
-                "type": "object",
-                "properties": {},
-                "additionalProperties": true,
-            })
-            .as_object()
-            .expect("object schema")
-            .clone()
-        );
-    }
+    let workspace = &definitions[0];
+    assert!(workspace.schema.builtin);
+    assert!(workspace.schema.parameters.is_empty());
+    assert_eq!(workspace.scope, McpToolScope::Global);
+    assert_eq!(
+        tool_input_schema(&workspace.schema),
+        json!({
+            "type": "object",
+            "properties": {},
+            "additionalProperties": true,
+        })
+        .as_object()
+        .expect("object schema")
+        .clone()
+    );
 
-    // Crew discovery is workspace-scoped with exactly {agent, operator}; runner
-    // is never in its set.
     let crew = &definitions[1];
     assert_eq!(crew.schema.name, "orbit.crew.list");
-    assert!(crew.schema.builtin);
-    assert_eq!(crew.policy.placement(), McpToolPlacement::Owner);
-    assert_eq!(crew.policy.scope(), McpToolScope::WorkspaceRequired);
     assert_eq!(
-        crew.policy.allowed_capabilities(),
-        &BTreeSet::from([McpCapability::Agent, McpCapability::Operator])
+        crew.schema.description,
+        "List the effective configured crews for a selected workspace on this machine."
     );
-    assert!(
-        !crew
-            .policy
-            .allowed_capabilities()
-            .contains(&McpCapability::Runner)
-    );
+    assert!(crew.schema.builtin);
+    assert_eq!(crew.scope, McpToolScope::WorkspaceRequired);
+    assert_eq!(crew.schema.parameters.len(), 1);
+    assert_eq!(crew.schema.parameters[0].name, "workspace");
 
     let canonical = canonical_mcp_tool_definitions().expect("canonical definitions");
     assert_eq!(canonical.len(), 27, "the frozen production surface changed");
     assert_eq!(
         canonical
             .iter()
-            .filter(|definition| definition.policy.scope() == McpToolScope::Global)
+            .filter(|definition| definition.scope == McpToolScope::Global)
             .map(|definition| definition.schema.name.as_str())
             .collect::<Vec<_>>(),
         ["orbit.workspace.list"]
@@ -86,23 +65,42 @@ fn mcp_owns_the_exact_global_discovery_definitions() {
 }
 
 #[test]
-fn discovery_handlers_project_only_locally_owned_workspaces() {
+fn discovery_projects_active_workspaces_with_a_local_checkout() {
     let now = Utc::now();
-    let workspace = |id: &str, owner: &str| Workspace {
+    let workspace = |id: &str, owner: &str, status| Workspace {
         id: id.to_string(),
         name: id.to_string(),
         owner_machine_id: Some(owner.to_string()),
         git_remote: None,
         ship_mode: None,
         base_branch: "main".to_string(),
-        status: WorkspaceStatus::Active,
+        status,
         created_at: now,
         updated_at: now,
     };
+    let checkout = |id: &str, role, owner_machine_id| WorkspaceCheckout {
+        workspace_id: id.to_string(),
+        repo_root: PathBuf::from(format!("/tmp/{id}")),
+        orbit_dir: PathBuf::from(format!("/tmp/{id}/.orbit")),
+        role: Some(role),
+        owner_machine_id,
+        path_overrides: Vec::new(),
+    };
     let registry = WorkspaceRegistry {
         workspaces: vec![
-            workspace("ws_local", "hm_local"),
-            workspace("ws_remote", "hm_remote"),
+            workspace("ws_local", "hm_local", WorkspaceStatus::Active),
+            workspace("ws_replica", "hm_remote", WorkspaceStatus::Active),
+            workspace("ws_checkoutless", "hm_local", WorkspaceStatus::Active),
+            workspace("ws_invalid", "hm_local", WorkspaceStatus::Invalid),
+        ],
+        checkouts: vec![
+            checkout("ws_local", WorkspaceCheckoutRole::Owner, None),
+            checkout(
+                "ws_replica",
+                WorkspaceCheckoutRole::Replica,
+                Some("hm_remote".to_string()),
+            ),
+            checkout("ws_invalid", WorkspaceCheckoutRole::Owner, None),
         ],
         ..WorkspaceRegistry::default()
     };
@@ -110,8 +108,15 @@ fn discovery_handlers_project_only_locally_owned_workspaces() {
     let listed = execute_discovery_tool("orbit.workspace.list", &registry, "hm_local")
         .expect("workspace projection");
     assert_eq!(listed["machine_id"], "hm_local");
-    assert_eq!(listed["workspaces"].as_array().expect("rows").len(), 1);
-    assert_eq!(listed["workspaces"][0]["id"], "ws_local");
+    assert_eq!(
+        listed["workspaces"]
+            .as_array()
+            .expect("rows")
+            .iter()
+            .map(|workspace| workspace["id"].as_str().expect("workspace id"))
+            .collect::<Vec<_>>(),
+        ["ws_local", "ws_replica"]
+    );
     assert!(matches!(
         execute_discovery_tool("orbit.host.future", &registry, "hm_local"),
         Err(OrbitError::NotFound {

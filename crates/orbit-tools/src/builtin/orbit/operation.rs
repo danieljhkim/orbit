@@ -1,16 +1,15 @@
-//! The MCP adapter over the operations-as-data kernel [ORB-10358].
+//! MCP adapter over the operations-as-data kernel.
 //!
-//! ADR-0209 bearing 1: an operation is declared once in `orbit-common` and each
-//! surface derives its wiring. This module is the MCP half — it turns an
-//! [`OperationSpec`] into the [`ToolSchema`] MCP advertises and into the
-//! [`McpToolPolicy`] the registry enforces, so no verb needs a hand-written
-//! [`Tool`](crate::Tool) impl.
+//! An operation is declared once in `orbit-common` and each surface derives
+//! its wiring. This module turns an [`OperationSpec`] into the [`ToolSchema`]
+//! MCP advertises and registers it at the declared workspace scope, so no verb
+//! needs a hand-written [`Tool`](crate::Tool) implementation.
 //!
 //! It is generic over the verb type on purpose: the next noun to migrate reuses
 //! both functions unchanged and supplies only its own registry.
 
-use orbit_common::operation::{McpExposure, OperationSpec};
-use orbit_common::types::{McpToolPolicy, ToolParam, ToolSchema};
+use orbit_common::operation::OperationSpec;
+use orbit_common::types::{ToolParam, ToolSchema};
 
 use crate::ToolRegistry;
 
@@ -41,13 +40,8 @@ pub(super) fn register_operation<V: 'static, T: crate::Tool + 'static>(
     spec: &OperationSpec<V>,
     tool: T,
 ) {
-    match spec.mcp {
-        McpExposure::Inactive => registry.register_inactive(tool),
-        McpExposure::AgentOperator(placement) => {
-            registry.register_mcp(tool, McpToolPolicy::agent_and_operator(placement));
-        }
-        McpExposure::OperatorOnly(placement) => {
-            registry.register_mcp(tool, McpToolPolicy::operator_only(placement));
-        }
+    match spec.mcp_scope {
+        Some(scope) => registry.register_mcp(tool, scope),
+        None => registry.register_inactive(tool),
     }
 }

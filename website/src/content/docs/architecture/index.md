@@ -49,7 +49,7 @@ flowchart LR
 
 Arrows point from a consumer to a selected dependency. The repository's
 dependency-direction guard is the exhaustive edge contract. `orbit-store` is a neutral
-persistence kernel. Registry owns machine/workspace state, MCP owns protocol and
+persistence kernel. Registry owns local machine/workspace files, MCP owns protocol and
 direct SSH transport, and Web owns its HTTP surface and SSH tunnel lifecycle.
 Layering constrains dependency direction while each feature keeps one clear owner.
 `orbit-core` does **not** depend on `orbit-agent`; the bridge is `orbit-engine`'s
@@ -67,7 +67,7 @@ Layering constrains dependency direction while each feature keeps one clear owne
 | `orbit-agent` | HTTP loop transport and retained CLI runtimes. |
 | `orbit-engine` | Activity/job execution, template rendering, retries, CLI subprocess runner. |
 | `orbit-tools` | Generic built-in tool registry and external tool integration. |
-| `orbit-registry` | Machine identity, workspace catalog, validation/persistence, and host registry/cache. |
+| `orbit-registry` | Local machine identity and workspace catalog validation with atomic file persistence. |
 | `orbit-mcp` | RMCP framing, canonical discovery, server identity context, and direct SSH stdio proxy. |
 | `orbit-core` | Neutral runtime bootstrap, config, runtime-integrated commands, coordination executor, and default asset seeding. |
 | `orbit-cmd` | CLI-facing command layer (doctor, migrate, diagnostics, templates, hooks) over `OrbitRuntime`. |

@@ -10,8 +10,8 @@ use std::collections::BTreeSet;
 
 use super::operations::{FRICTION_OPERATIONS, FrictionVerb, friction_operation};
 use super::{DEFAULT_FRICTION_TAGS, friction_tags_literal};
-use crate::operation::{CliArgKind, McpExposure};
-use crate::types::McpToolPlacement;
+use crate::operation::CliArgKind;
+use crate::types::McpToolScope;
 
 const ALL_VERBS: &[FrictionVerb] = &[
     FrictionVerb::Add,
@@ -103,28 +103,17 @@ fn subcommand_order_is_the_shipped_help_order() {
 #[test]
 fn mcp_exposure_matches_the_shipped_conformance_contract() {
     // docs/design/mcp-bridge/references/conformance-v1.yaml
-    assert_eq!(
-        FrictionVerb::Add.spec().mcp,
-        McpExposure::AgentOperator(McpToolPlacement::Owner)
-    );
-    assert_eq!(
-        FrictionVerb::Tags.spec().mcp,
-        McpExposure::AgentOperator(McpToolPlacement::Owner)
-    );
-    assert_eq!(
-        FrictionVerb::List.spec().mcp,
-        McpExposure::OperatorOnly(McpToolPlacement::Owner)
-    );
-    assert_eq!(
-        FrictionVerb::Show.spec().mcp,
-        McpExposure::OperatorOnly(McpToolPlacement::Owner)
-    );
-    assert_eq!(
-        FrictionVerb::Update.spec().mcp,
-        McpExposure::OperatorOnly(McpToolPlacement::Owner)
-    );
-    assert_eq!(FrictionVerb::Stats.spec().mcp, McpExposure::Inactive);
-    assert_eq!(FrictionVerb::Resolve.spec().mcp, McpExposure::Inactive);
+    for verb in [
+        FrictionVerb::Add,
+        FrictionVerb::Tags,
+        FrictionVerb::List,
+        FrictionVerb::Show,
+        FrictionVerb::Update,
+    ] {
+        assert_eq!(verb.spec().mcp_scope, Some(McpToolScope::WorkspaceRequired));
+    }
+    assert_eq!(FrictionVerb::Stats.spec().mcp_scope, None);
+    assert_eq!(FrictionVerb::Resolve.spec().mcp_scope, None);
 }
 
 #[test]

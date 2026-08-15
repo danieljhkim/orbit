@@ -16,7 +16,7 @@ pub use crate::runtime::tool_exec::DryRunResult;
 
 pub use dispatch::{
     AuditContext, ToolDispatchOutcome, ToolEntryPoint, audit_role_label,
-    audit_role_label_for_entry_point, mark_tool_audit_recorded, take_tool_audit_recorded,
-    trusted_mcp_audit_context,
+    audit_role_label_for_entry_point, execute_global_in_process_tool_dispatch,
+    mark_tool_audit_recorded, take_tool_audit_recorded, trusted_mcp_audit_context,
 };
 pub use registry::{DoctorResult, DoctorStatus, ToolInfo};

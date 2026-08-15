@@ -223,29 +223,6 @@ impl OutputSink {
     }
 }
 
-/// A sink for a destination that is not a terminal: no color, no width, plain
-/// rendering.
-///
-/// This is what a test renders against unless it resolves a sink of its own,
-/// and it is what `main` falls back to on the paths that report a failure
-/// before a sink exists. Assuming "no terminal" degrades to correct output,
-/// while assuming one writes escape sequences into a file.
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "only tests render without resolving a sink; `main` always resolves one"
-    )
-)]
-pub const PIPED: OutputSink = OutputSink {
-    is_tty: false,
-    width: 0,
-    color_allowed: false,
-    mode: OutputMode::Plain,
-    explicit_table: false,
-    legacy_json: false,
-};
-
 /// `COLUMNS` first, then what the terminal reported, then 0.
 ///
 /// A non-TTY sink is 0 regardless of either, so `COLUMNS=200 orbit … > file`

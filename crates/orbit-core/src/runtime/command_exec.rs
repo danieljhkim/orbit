@@ -26,7 +26,7 @@ use orbit_common::types::{AuditEventStatus, ExecutionResult, OrbitError};
 use orbit_common::utility::redaction::is_sensitive_env_name;
 use serde_json::json;
 
-use super::task_locks::{CoordinationAuditEvent, record_coordination_audit_event};
+use super::task::locks::{CoordinationAuditEvent, record_coordination_audit_event};
 use crate::OrbitRuntime;
 
 const COMMAND_TOOL_NAME: &str = "orbit.command.exec";

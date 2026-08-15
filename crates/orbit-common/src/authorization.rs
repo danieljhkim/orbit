@@ -1,16 +1,9 @@
-//! Operation authorization — the capability chokepoint [ADR-0260, ORB-10453].
+//! Operation authorization shared by Orbit's execution surfaces.
 //!
-//! Orbit already had a capability model, but it governed exactly one surface:
-//! MCP. `McpToolPolicy` decided which `McpCapability` an MCP session needed to
-//! *see* a tool, and nothing decided what a caller needed to *perform* an
-//! operation. The CLI, the dashboard, the engine, and every future entry point
-//! reached destructive operations with no check at all.
-//!
-//! This module is the missing half. It declares, once, which operations are
-//! governed and which capabilities may perform them, and it owns the decision
-//! function every surface calls. It deliberately reuses [`McpCapability`]
-//! rather than inventing a second privilege vocabulary: there is one
-//! authorization model, and MCP is one of its consumers.
+//! This module declares which operations are governed, which capabilities may
+//! perform them, and the decision function every enforcing surface calls. MCP
+//! v1 deliberately defers this authorization; CLI and managed-run paths still
+//! use the same capability vocabulary.
 //!
 //! # What this is, and what it is not
 //!
@@ -84,7 +77,7 @@ pub struct GovernedOperation {
     /// Which chokepoint enforces this operation.
     pub surface: OperationSurface,
     /// Capabilities that may perform it. A caller holding **any** of these is
-    /// authorized, matching `McpToolPolicy::allowed_capabilities` semantics.
+    /// authorized.
     pub allowed: &'static [McpCapability],
     /// Why this operation is governed. Surfaced in the denial message, so it
     /// is written for the person who just got refused.

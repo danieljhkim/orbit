@@ -1,4 +1,4 @@
-//! Coupling-out on run terminalization: when a job run reaches a terminal
+//! Task coupling-out on run terminalization: when a job run reaches a terminal
 //! *failure* state (`failed`, `timeout`, `cancelled`), every task coupled to
 //! that run — stamped with its `job_run_id` during `worktree_setup` — is moved
 //! to `blocked` so a human/orchestrator has to look before anything runs again.

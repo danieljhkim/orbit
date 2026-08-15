@@ -52,48 +52,6 @@ fn validate_stored_task_prefix(value: &str) -> Result<String, OrbitError> {
     validate_new_task_prefix(value)
 }
 
-/// Legacy operating mode retained temporarily for callers being replaced by
-/// the per-workspace ownership model. It is not part of schema-v2 host.toml.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum HostMode {
-    /// Self-contained host (the standalone default; no registry/hub role).
-    Standalone,
-    /// Coordination hub for a multi-host constellation.
-    Hub,
-    /// Satellite that polls a hub for placed runs.
-    Spoke,
-}
-
-impl HostMode {
-    /// The legacy string form used by compatibility callers.
-    pub fn as_str(self) -> &'static str {
-        match self {
-            HostMode::Standalone => "standalone",
-            HostMode::Hub => "hub",
-            HostMode::Spoke => "spoke",
-        }
-    }
-
-    /// Parse a legacy external mode string, failing closed on anything
-    /// outside the fixed vocabulary.
-    pub fn parse(value: &str) -> Result<Self, OrbitError> {
-        match value.trim() {
-            "standalone" => Ok(HostMode::Standalone),
-            "hub" => Ok(HostMode::Hub),
-            "spoke" => Ok(HostMode::Spoke),
-            other => Err(OrbitError::InvalidInput(format!(
-                "unknown host mode '{other}' (expected 'standalone', 'hub', or 'spoke')"
-            ))),
-        }
-    }
-}
-
-impl std::fmt::Display for HostMode {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(self.as_str())
-    }
-}
-
 /// Versioned machine identity persisted in `~/.orbit/host.toml`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HostIdentity {
@@ -107,11 +65,6 @@ pub struct HostIdentity {
     pub host_id: String,
     /// Immutable namespace for task ids minted by this machine.
     pub task_prefix: String,
-    /// Transitional compatibility for callers removed by the ownership-model
-    /// follow-up. Schema v2 does not persist a machine-level mode; identities
-    /// loaded from disk therefore use `Standalone` until those callers are
-    /// replaced with per-workspace ownership checks.
-    pub mode: HostMode,
 }
 
 impl HostIdentity {
@@ -337,7 +290,6 @@ pub fn inspect_host_identity(global_root: &Path) -> Result<HostIdentityState, Or
                 machine_id: machine_id.to_string(),
                 host_id,
                 task_prefix,
-                mode: HostMode::Standalone,
             }))
         }
         Some(version) if version > HOST_IDENTITY_SCHEMA_VERSION => {
@@ -415,7 +367,6 @@ pub fn ensure_host_identity(
                 machine_id: machine_id.unwrap_or_else(generate_machine_id),
                 host_id,
                 task_prefix: LEGACY_TASK_PREFIX.to_string(),
-                mode: HostMode::Standalone,
             };
             write_host_identity(global_root, &identity)?;
             Ok(HostIdentityOutcome::Migrated(identity))
@@ -437,7 +388,6 @@ pub fn ensure_host_identity(
                 machine_id: generate_machine_id(),
                 host_id,
                 task_prefix,
-                mode: HostMode::Standalone,
             };
             write_host_identity(global_root, &identity)?;
             Ok(HostIdentityOutcome::Created(identity))
@@ -523,7 +473,6 @@ where
         machine_id: current.machine_id.clone(),
         host_id: new_host_id.to_string(),
         task_prefix: current.task_prefix.clone(),
-        mode: current.mode,
     };
     let staged = stage_host_identity_toml(&candidate)?;
     let path = host_toml_path(global_root);

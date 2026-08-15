@@ -33,7 +33,6 @@ flowchart LR
   MCP --> Common
   MCP --> Registry
   MCP --> Tools
-  Registry --> Store
   Registry --> Common
   Web --> Core
   Web --> Cmd
@@ -63,13 +62,12 @@ feature.
   It also builds `orbit-search-companion`, a separately installed search companion binary, as an additional `[[bin]]` target (folded from the standalone `orbit-search-companion` crate, ORB-10357); that target alone depends on fastembed-rs and is not linked into the default `orbit` CLI binary.
 - **orbit-registry**: machine identity and workspace registry feature crate. It
   owns `host.toml`, the logical workspace catalog and local checkout bindings,
-  validation and atomic file persistence, and the durable host registry/cache
-  over Store's generic SQLite primitives. It contains no command orchestration,
-  MCP transport, or Core runtime execution. Depends only on `orbit-common` and
-  `orbit-store` among workspace crates.
-- **orbit-store**: layered generic persistence kernel (YAML + SQLite). It owns shared backend traits, SQLite connection/transaction primitives, the namespaced feature-migration ledger, and immutable historical bootstrap migrations, but not Registry's active schema or queries. Match existing modules when adding new generic storage infrastructure. Depends only on `orbit-common`; the semantic vector schema is owned by `orbit-search::vector` (not `orbit-store`).
+  validation, and atomic file persistence. It contains no shared database,
+  command orchestration, MCP transport, or Core runtime execution. Depends only
+  on `orbit-common` among workspace crates.
+- **orbit-store**: layered generic persistence kernel (files + SQLite). It owns shared backend traits, lock-safe file persistence, SQLite connection/transaction primitives, the namespaced feature-migration ledger, and immutable historical bootstrap migrations. Match existing modules when adding new generic storage infrastructure. Depends only on `orbit-common`; the semantic vector schema is owned by `orbit-search::vector` (not `orbit-store`).
 - **orbit-tools**: generic tool registry plus built-in fs, policy-aware exec, and workspace-scoped Orbit definitions. It depends on `orbit-common`, `orbit-exec`, and `orbit-policy`; MCP composes these with its machine-local discovery definitions.
-- **orbit-mcp**: Model Context Protocol feature crate using `rmcp`. It owns stdio framing, advertised-name translation, per-call trace creation, structured responses, canonical tool discovery, server identity presentation, and the direct SSH stdio proxy. Registry supplies machine-local facts and Tools supplies workspace-scoped definitions. MCP performs no runtime workspace resolution, capability filtering, placement routing, or domain validation; those remain behind the caller-supplied host and Core dispatcher.
+- **orbit-mcp**: Model Context Protocol feature crate using `rmcp`. It owns stdio framing, advertised-name translation, per-call trace creation, structured responses, canonical tool discovery, server identity presentation, and the direct SSH stdio proxy. Registry supplies machine-local facts and Tools supplies definitions whose only routing metadata is global versus workspace-required scope. The CLI-owned host resolves server-local workspaces; Core owns domain validation, auditing, and the future authorization boundary.
 - **orbit-web**: HTTP API, embedded dashboard UI, and remote web connection. It owns axum handlers/assets, dashboard mutations, and the dashboard-specific SSH local-forward lifecycle. Depends on `orbit-core` for runtime-backed operations and projections and on `orbit-registry` for global workspace discovery; consumed by `orbit-cli` via `web serve` and `web connect`. Public surface is `ServeArgs`, `ConnectArgs`, and their serve/connect entry points.
 - **orbit-agent**: per-provider `AgentRuntime` implementations under `providers/<name>/<name>_runtime.rs` (claude, codex, gemini, gemini_http, grok, openai_compat, anthropic, ollama, mock_agent). Implements `backend: cli`, hosts HTTP `LoopTransport` primitives, and routes loop tool calls through the shared `orbit-tools` registry. Depends on `orbit-common` and `orbit-tools`.
 - **orbit-engine**: activity/job execution, template rendering, retry logic, subprocess execution, and tool-aware automation. Owns the `backend: cli` subprocess runner (`activity_job::cli_runner`), which references `orbit-agent::{Agent, AgentConfig}` directly so orbit-core stays clean of orbit-agent types. Depends on `orbit-agent`, `orbit-common`, `orbit-exec`, `orbit-store`, and `orbit-tools`.

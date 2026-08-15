@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 use std::fmt::{Display, Formatter};
 use std::str::FromStr;
 
@@ -126,37 +126,6 @@ pub struct ToolSchema {
     pub builtin: bool,
 }
 
-/// Where an MCP-exposed tool executes in the host-registry topology.
-///
-/// ADR-0355 collapsed the former `Hub` class into [`Self::Owner`]: every
-/// machine is its own coordination host for the workspaces it owns, so "the
-/// coordinating machine for this tool's workspace" is in-process for an owned
-/// workspace and there is no machine-level hub left to name.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash)]
-#[serde(rename_all = "kebab-case")]
-pub enum McpToolPlacement {
-    Owner,
-    LocalDerived,
-    Composite,
-}
-
-impl McpToolPlacement {
-    /// Stable contract spelling used in diagnostics and the conformance fixture.
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Owner => "owner",
-            Self::LocalDerived => "local-derived",
-            Self::Composite => "composite",
-        }
-    }
-}
-
-impl Display for McpToolPlacement {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        f.write_str(self.as_str())
-    }
-}
-
 /// Whether an MCP tool requires a logical workspace in its trusted session.
 ///
 /// Existing tools are workspace-scoped by default. Registry-wide discovery is
@@ -172,33 +141,15 @@ pub enum McpToolScope {
     Global,
 }
 
-/// A capability that may be granted to an MCP session.
+/// A capability granted to an invocation context.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[serde(rename_all = "lowercase")]
 pub enum McpCapability {
     Agent,
     Operator,
-    /// Not a v1 MCP bridge capability. ADR-0358 withdrew `runner` from the
-    /// bridge along with registration, presence, and leases, so no tool policy
-    /// allows it and no MCP session may hold it (see
-    /// [`McpCapability::BRIDGE_V1`]). It survives as the in-process grant a run
-    /// stamps onto its own dispatcher so the run can perform the destruction it
-    /// exists to perform (ORB-10453) — execution authorization, not a session
-    /// capability. Execution placement returns it to the bridge in v2.
+    /// In-process grant stamped by a managed run so it can perform the
+    /// destructive operation it exists to perform.
     Runner,
-}
-
-impl McpCapability {
-    /// The capabilities an MCP bridge v1 session or route may carry.
-    ///
-    /// `operator` does not imply `agent` and `agent` does not imply `operator`;
-    /// this is a flat allowlist, not a hierarchy.
-    pub const BRIDGE_V1: &'static [Self] = &[Self::Agent, Self::Operator];
-
-    /// Whether this capability is part of the v1 MCP bridge surface.
-    pub fn is_bridge_v1(self) -> bool {
-        Self::BRIDGE_V1.contains(&self)
-    }
 }
 
 impl Display for McpCapability {
@@ -224,116 +175,22 @@ impl FromStr for McpCapability {
     }
 }
 
-/// Typed placement and authorization metadata for one MCP tool.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct McpToolPolicy {
-    placement: McpToolPlacement,
-    allowed_capabilities: BTreeSet<McpCapability>,
-    #[serde(default)]
-    scope: McpToolScope,
-}
-
-impl McpToolPolicy {
-    pub fn new(
-        placement: McpToolPlacement,
-        allowed_capabilities: impl IntoIterator<Item = McpCapability>,
-    ) -> Result<Self, McpToolPolicyError> {
-        let mut capabilities = BTreeSet::new();
-        for capability in allowed_capabilities {
-            if !capabilities.insert(capability) {
-                return Err(McpToolPolicyError::DuplicateCapability(capability));
-            }
-        }
-        let policy = Self {
-            placement,
-            allowed_capabilities: capabilities,
-            scope: McpToolScope::WorkspaceRequired,
-        };
-        policy.validate()?;
-        Ok(policy)
-    }
-
-    pub fn placement(&self) -> McpToolPlacement {
-        self.placement
-    }
-
-    pub fn allowed_capabilities(&self) -> &BTreeSet<McpCapability> {
-        &self.allowed_capabilities
-    }
-
-    pub fn scope(&self) -> McpToolScope {
-        self.scope
-    }
-
-    /// Override the default workspace requirement for a deliberately global
-    /// tool. Keeping this schema-adjacent prevents name-based scope inference.
-    pub fn with_scope(mut self, scope: McpToolScope) -> Self {
-        self.scope = scope;
-        self
-    }
-
-    pub fn validate(&self) -> Result<(), McpToolPolicyError> {
-        if self.allowed_capabilities.is_empty() {
-            return Err(McpToolPolicyError::EmptyCapabilities);
-        }
-        // A withdrawn capability on a tool policy is unreachable rather than
-        // merely unused: no v1 session can hold it, so the tool would advertise
-        // to nobody. Reject it here so the registry cannot drift back.
-        if let Some(withdrawn) = self
-            .allowed_capabilities
-            .iter()
-            .find(|capability| !capability.is_bridge_v1())
-        {
-            return Err(McpToolPolicyError::WithdrawnCapability(*withdrawn));
-        }
-        Ok(())
-    }
-
-    /// Policy for the ordinary agent and trusted operator surfaces.
-    pub fn agent_and_operator(placement: McpToolPlacement) -> Self {
-        Self {
-            placement,
-            allowed_capabilities: BTreeSet::from([McpCapability::Agent, McpCapability::Operator]),
-            scope: McpToolScope::WorkspaceRequired,
-        }
-    }
-
-    /// Policy for an operator-only surface.
-    pub fn operator_only(placement: McpToolPlacement) -> Self {
-        Self {
-            placement,
-            allowed_capabilities: BTreeSet::from([McpCapability::Operator]),
-            scope: McpToolScope::WorkspaceRequired,
-        }
-    }
-}
-
-/// A schema paired with the policy required for MCP exposure.
+/// A schema paired with the only routing fact MCP needs for exposure.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct McpToolDefinition {
     pub schema: ToolSchema,
-    pub policy: McpToolPolicy,
+    pub scope: McpToolScope,
 }
 
 impl McpToolDefinition {
-    pub fn new(schema: ToolSchema, policy: McpToolPolicy) -> Result<Self, McpToolPolicyError> {
-        policy.validate()?;
-        Ok(Self { schema, policy })
+    pub fn new(schema: ToolSchema, scope: McpToolScope) -> Self {
+        Self { schema, scope }
     }
 }
 
-/// Why an MCP policy or canonical registry is invalid.
+/// Why a canonical MCP definition set is invalid.
 #[derive(Debug, Clone, thiserror::Error, PartialEq, Eq)]
-pub enum McpToolPolicyError {
-    #[error("MCP tool policy has no allowed capabilities")]
-    EmptyCapabilities,
-    #[error("MCP tool policy repeats capability {0:?}")]
-    DuplicateCapability(McpCapability),
-    // ADR-0358: source provenance for the narrowed bridge capabilities.
-    #[error(
-        "MCP tool policy allows capability '{0}', which the bridge does not support; only agent and operator remain"
-    )]
-    WithdrawnCapability(McpCapability),
+pub enum McpToolDefinitionError {
     #[error("canonical MCP tool name must not be empty")]
     EmptyCanonicalName,
     #[error("duplicate canonical MCP tool name: {0}")]
@@ -350,49 +207,27 @@ pub fn mcp_advertised_tool_name(canonical_name: &str) -> String {
 /// Validate schema-adjacent MCP definitions, including both canonical and advertised names.
 pub fn validate_mcp_tool_definitions(
     definitions: &[McpToolDefinition],
-) -> Result<(), McpToolPolicyError> {
+) -> Result<(), McpToolDefinitionError> {
     let mut canonical_names = BTreeSet::new();
     let mut advertised_names = BTreeSet::new();
     for definition in definitions {
         let canonical_name = definition.schema.name.as_str();
         if canonical_name.trim().is_empty() {
-            return Err(McpToolPolicyError::EmptyCanonicalName);
+            return Err(McpToolDefinitionError::EmptyCanonicalName);
         }
-        definition.policy.validate()?;
         if !canonical_names.insert(canonical_name) {
-            return Err(McpToolPolicyError::DuplicateCanonicalName(
+            return Err(McpToolDefinitionError::DuplicateCanonicalName(
                 canonical_name.to_string(),
             ));
         }
         let advertised_name = mcp_advertised_tool_name(canonical_name);
         if !advertised_names.insert(advertised_name.clone()) {
-            return Err(McpToolPolicyError::DuplicateAdvertisedName(advertised_name));
+            return Err(McpToolDefinitionError::DuplicateAdvertisedName(
+                advertised_name,
+            ));
         }
     }
     Ok(())
-}
-
-/// Capability-by-placement coverage generated from the canonical registry.
-pub type McpCapabilityPlacementMatrix =
-    BTreeMap<McpToolPlacement, BTreeMap<McpCapability, Vec<String>>>;
-
-/// Build the capability-by-placement matrix without a second allowlist.
-pub fn mcp_capability_placement_matrix(
-    definitions: &[McpToolDefinition],
-) -> Result<McpCapabilityPlacementMatrix, McpToolPolicyError> {
-    validate_mcp_tool_definitions(definitions)?;
-    let mut matrix = BTreeMap::new();
-    for definition in definitions {
-        for capability in definition.policy.allowed_capabilities() {
-            matrix
-                .entry(definition.policy.placement())
-                .or_insert_with(BTreeMap::new)
-                .entry(*capability)
-                .or_insert_with(Vec::new)
-                .push(definition.schema.name.clone());
-        }
-    }
-    Ok(matrix)
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

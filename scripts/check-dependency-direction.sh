@@ -11,8 +11,8 @@ allowed_internal_deps() {
       echo ""
       ;;
     orbit-registry)
-      # Registry owns machine/workspace state over the generic Store kernel.
-      echo "orbit-common orbit-store"
+      # Registry owns local machine/workspace files and needs only shared types.
+      echo "orbit-common"
       ;;
     orbit-policy | orbit-exec | orbit-store)
       echo "orbit-common"

@@ -1,4 +1,4 @@
-//! Sibling tests for `task_reservation_cleanup.rs` (migrated per ORB-00246 / docs/design-patterns/test_layout.md).
+//! Sibling tests for `reservation_cleanup.rs`.
 
 use crate::OrbitRuntime;
 use chrono::Utc;
@@ -6,7 +6,7 @@ use orbit_common::types::JobRunState;
 use orbit_store::TaskReservationReleaseReason;
 use serde_json::json;
 
-use super::super::task_locks::{workspace_orbit_dir, workspace_task_reservation_id};
+use super::super::locks::{workspace_orbit_dir, workspace_task_reservation_id};
 
 use chrono::Duration;
 use orbit_common::types::{AuditEventStatus, Role, TaskPriority, TaskStatus, TaskType};

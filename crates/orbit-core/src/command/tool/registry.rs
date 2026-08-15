@@ -34,7 +34,7 @@ pub struct DoctorResult {
 }
 
 impl OrbitRuntime {
-    /// Return runtime-enabled MCP definitions with schema and policy still paired.
+    /// Return runtime-enabled MCP definitions with their workspace scope.
     pub fn list_mcp_tool_definitions(&self) -> Result<Vec<McpToolDefinition>, OrbitError> {
         let stored_tools = self.stores().tools().list_tools()?;
         let mut definitions = self

@@ -1,7 +1,7 @@
 use orbit_common::types::activity_job::ProviderSource;
 use orbit_common::types::{
-    Crew, CrewAssignment, OrbitError, Task, all_agent_families, infer_agent_family_from_model,
-    resolve_crew,
+    CREW_DISCOVERY_SCHEMA_VERSION, Crew, CrewAssignment, CrewDiscoveryEntryV1, CrewDiscoveryV1,
+    OrbitError, Task, all_agent_families, infer_agent_family_from_model, resolve_crew,
 };
 use serde::Serialize;
 use serde_json::Value;
@@ -93,6 +93,36 @@ impl ResolvedCrewProjection {
 }
 
 impl OrbitRuntime {
+    /// Project the selected runtime's effective crew configuration for clients.
+    ///
+    /// This reads the already-open runtime rather than loading configuration a
+    /// second time in an outer transport adapter.
+    pub fn crew_discovery(
+        &self,
+        workspace_id: &str,
+        owner_machine_id: Option<String>,
+    ) -> Result<CrewDiscoveryV1, OrbitError> {
+        let auto_backend = self.resolve_v2_backend(None).backend;
+        let crews = self
+            .context
+            .settings()
+            .crews()
+            .values()
+            .map(|crew| CrewDiscoveryEntryV1::from_crew(crew, auto_backend))
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(CrewDiscoveryV1 {
+            schema_version: CREW_DISCOVERY_SCHEMA_VERSION,
+            workspace_id: workspace_id.to_string(),
+            owner_machine_id,
+            default_crew: self
+                .context
+                .settings()
+                .default_crew()
+                .map(ToOwned::to_owned),
+            crews,
+        })
+    }
+
     pub fn configured_crew_registry_projection(&self) -> ConfiguredCrewRegistryProjection {
         let default_crew = self
             .context

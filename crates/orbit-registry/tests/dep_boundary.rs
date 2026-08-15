@@ -7,7 +7,7 @@ use toml::Value;
 const MANIFEST: &str = include_str!("../Cargo.toml");
 
 #[test]
-fn registry_depends_only_on_common_and_store() {
+fn registry_depends_only_on_common() {
     let manifest: Value = toml::from_str(MANIFEST).expect("crate manifest parses");
     let mut names = BTreeSet::new();
 
@@ -29,7 +29,7 @@ fn registry_depends_only_on_common_and_store() {
 
     assert_eq!(
         names,
-        BTreeSet::from(["orbit-common".to_string(), "orbit-store".to_string()]),
-        "orbit-registry must stay independent of command, transport, and runtime crates"
+        BTreeSet::from(["orbit-common".to_string()]),
+        "orbit-registry must stay independent of database, command, transport, and runtime crates"
     );
 }

@@ -4,8 +4,8 @@ use orbit_common::types::{
     is_valid_friction_id, unmet_task_dependencies,
 };
 
+use super::TaskRecordUpdateParams as StoreTaskUpdateParams;
 use crate::OrbitRuntime;
-use crate::runtime::TaskRecordUpdateParams as StoreTaskUpdateParams;
 
 use super::helpers::{
     SYSTEM_ACTOR_LABEL, build_task_comments, effective_actor_label, implementation_label,

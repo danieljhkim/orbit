@@ -26,7 +26,7 @@ const WORKSPACE_SELECTOR_DESCRIPTION: &str = "Workspace selector for the authori
 
 /// Advertise the workspace selector on every workspace-scoped tool.
 pub(super) fn ensure_workspace_selector(schema: &mut JsonObject, definition: &McpToolDefinition) {
-    if definition.policy.scope() != McpToolScope::WorkspaceRequired {
+    if definition.scope != McpToolScope::WorkspaceRequired {
         return;
     }
     let Some(properties) = schema.get_mut("properties").and_then(Value::as_object_mut) else {

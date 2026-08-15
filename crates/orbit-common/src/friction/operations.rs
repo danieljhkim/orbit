@@ -1,19 +1,18 @@
 //! The friction operation registry — every friction verb, declared once.
 //!
-//! ADR-0209 bearing 1 pilot [ORB-10358]. Adding a friction verb is a
-//! [`FrictionVerb`] variant, one spec const listed in [`FRICTION_OPERATIONS`],
-//! and one handler arm in `orbit-core`. No CLI, MCP, or dashboard edit is
-//! required: those surfaces iterate this table.
+//! Adding a friction verb is a [`FrictionVerb`] variant, one spec const listed
+//! in [`FRICTION_OPERATIONS`], and one handler arm in `orbit-core`. Consumer
+//! surfaces iterate this table.
 //!
 //! **Every string below is shipped contract.** Tool names and parameter names
 //! are the MCP wire; CLI flag spellings and help text are the argv surface.
 //! Changing one is a consumer-visible break, not a rename.
 
 use crate::operation::{
-    CliArgKind, CliBinding, CliRender, Description, McpExposure, OperationSpec, ParamSpec,
-    ParamType, find_by_name,
+    CliArgKind, CliBinding, CliRender, Description, OperationSpec, ParamSpec, ParamType,
+    find_by_name,
 };
-use crate::types::McpToolPlacement;
+use crate::types::McpToolScope;
 
 use super::friction_tags_literal;
 use super::title::FRICTION_TITLE_MAX_CHARS;
@@ -146,7 +145,7 @@ const ADD: FrictionOperation = FrictionOperation {
         },
     ],
     rejects_agent_field: true,
-    mcp: McpExposure::AgentOperator(McpToolPlacement::Owner),
+    mcp_scope: Some(McpToolScope::WorkspaceRequired),
     cli_json_flag: true,
     cli_render: CliRender::Record,
 };
@@ -178,8 +177,7 @@ const LIST: FrictionOperation = FrictionOperation {
         count_param("offset", "Optional number of records to skip"),
     ],
     rejects_agent_field: false,
-    // Non-destructive triage reads are canonical hub/operator operations.
-    mcp: McpExposure::OperatorOnly(McpToolPlacement::Owner),
+    mcp_scope: Some(McpToolScope::WorkspaceRequired),
     cli_json_flag: true,
     cli_render: CliRender::RecordTable,
 };
@@ -192,7 +190,7 @@ const SHOW: FrictionOperation = FrictionOperation {
     cli_about: "Show a single Orbit friction record",
     params: &[BARE_ID_PARAM],
     rejects_agent_field: false,
-    mcp: McpExposure::OperatorOnly(McpToolPlacement::Owner),
+    mcp_scope: Some(McpToolScope::WorkspaceRequired),
     cli_json_flag: true,
     cli_render: CliRender::Record,
 };
@@ -205,8 +203,8 @@ const STATS: FrictionOperation = FrictionOperation {
     cli_about: "Compute friction rates",
     params: &[],
     rejects_agent_field: false,
-    // Aggregate administration stays off the agent MCP surface.
-    mcp: McpExposure::Inactive,
+    // Aggregate administration stays off the MCP surface.
+    mcp_scope: None,
     cli_json_flag: true,
     cli_render: CliRender::AlwaysJson,
 };
@@ -219,7 +217,7 @@ const TAGS: FrictionOperation = FrictionOperation {
     cli_about: "List configured friction taxonomy tags",
     params: &[],
     rejects_agent_field: false,
-    mcp: McpExposure::AgentOperator(McpToolPlacement::Owner),
+    mcp_scope: Some(McpToolScope::WorkspaceRequired),
     cli_json_flag: true,
     cli_render: CliRender::TagList,
 };
@@ -270,7 +268,7 @@ const UPDATE: FrictionOperation = FrictionOperation {
         },
     ],
     rejects_agent_field: false,
-    mcp: McpExposure::OperatorOnly(McpToolPlacement::Owner),
+    mcp_scope: Some(McpToolScope::WorkspaceRequired),
     cli_json_flag: true,
     cli_render: CliRender::Record,
 };
@@ -284,7 +282,7 @@ const RESOLVE: FrictionOperation = FrictionOperation {
     params: &[BARE_ID_PARAM],
     rejects_agent_field: false,
     // Resolution is an operator decision taken through the CLI / dashboard.
-    mcp: McpExposure::Inactive,
+    mcp_scope: None,
     cli_json_flag: true,
     cli_render: CliRender::Record,
 };

@@ -29,6 +29,37 @@ Crate layering, per-crate responsibilities, and scoping rules live in [`ARCHITEC
 
 Reusable codebase-specific patterns (Command, RAII guard, newtype, crate-boundary error translation) live in [`docs/design-patterns/`](docs/design-patterns/). When you reach for one of those shapes, copy from the documented reference instead of inventing a new one.
 
+## Simplicity and ownership
+
+- Optimize first for clarity and the fewest moving parts. Do not preserve a
+  wrapper, compatibility layer, abstraction, or configuration path merely
+  because it already exists. Keep compatibility only when an external contract
+  or persisted format requires it, and state that constraint next to the code.
+- Put each rule at its authoritative boundary. Transport and UI layers should
+  collect inputs and adapt protocols; domain validation, authorization, and
+  persistence invariants belong in the server/domain layer that can enforce
+  them. Do not duplicate a server rule as client-side orchestration.
+- Every crate and module must have one explainable job. If a dependency reads
+  backwards, a file contains unrelated domains, or two crates contain the same
+  helper, move the behavior to the lowest appropriate owner instead of adding
+  another facade or forwarding chain.
+- Treat roughly 800 lines in one source or test file as a design warning, not a
+  target. Likewise, several related flat files (`task_add.rs`, `task_list.rs`,
+  and so on) are a signal to create a domain module with sibling tests. Split by
+  responsibility before adding more code.
+- Treat a long function with several phases, policies, or failure modes as the
+  same warning at function scale. Name the phases, extract cohesive helpers,
+  and keep the top-level flow readable without jumping through empty wrappers.
+- Prefer one canonical execution path and test it at that boundary. Thin entry
+  points may attach context, but they must not grow parallel dispatch,
+  validation, persistence, or audit implementations.
+- Do not build speculative v2 machinery into a v1 change. Add the smallest
+  complete seam the current behavior needs; introduce policy frameworks or
+  generalized traits only when a concrete second use makes the boundary real.
+- Delete dead application code and stale current documentation together.
+  Preserve shipped migrations and durable data unless the change includes an
+  explicit, tested compatibility plan.
+
 ## Design Docs
 
 - **Layout.** Feature design docs live under `docs/design/<feature>/`. Keep current explanatory docs aligned with the implementation when they remain useful.

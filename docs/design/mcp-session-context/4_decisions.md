@@ -38,7 +38,7 @@ These are the current implementation choices for MCP v1.
 
 **Context.** A local MCP client needs the same remote tool surface without duplicating routing policy.
 
-**Decision.** Use one non-PTY SSH child with inherited stdio and a hidden remote caller label. The local proxy performs no workspace, checkout, tool, capability, or placement work.
+**Decision.** Use one non-PTY SSH child with inherited stdio and a hidden remote caller label. The local proxy performs no workspace resolution, checkout inspection, tool filtering, or routing.
 
 **Consequences.** MCP bytes remain unchanged and all domain decisions occur remotely. Cost: SSH setup is paid per client session, and remote shell stdout must remain protocol-clean.
 
@@ -46,7 +46,7 @@ These are the current implementation choices for MCP v1.
 
 **Context.** Session metadata alone cannot distinguish concurrent or repeated tool calls.
 
-**Decision.** Clone the session context and mint one fresh trace_id before each tools/call dispatch. Core persists that same trace with the outcome audit row.
+**Decision.** Clone the session context and mint one fresh trace_id before each tools/call dispatch. Every call, including an unknown or unadvertised raw name, enters one Core audit seam, which persists that trace with the outcome row.
 
 **Consequences.** Successes and failures can be correlated end to end. Cost: trace creation and propagation are mandatory for every MCP call.
 
@@ -54,6 +54,6 @@ These are the current implementation choices for MCP v1.
 
 **Context.** Identity transport and execution plumbing are useful before an Orbit authorization model is chosen.
 
-**Decision.** MCP v1 does not authorize by capability, placement, lease, IP address, SSH label, or machine label. The MCP kernel exposes the authoritative host's complete supported surface; Core remains the future policy seam.
+**Decision.** MCP definitions carry only global-versus-workspace-required scope. MCP v1 does not authorize by capability, placement, lease, IP address, SSH label, or machine label. The kernel exposes the authoritative host's complete supported surface; Core remains the future policy seam.
 
 **Consequences.** The skeleton stays small and avoids treating audit metadata as authority. Cost: deployments rely on access to the local process or SSH account until explicit Core authorization is designed.

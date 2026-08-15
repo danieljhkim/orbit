@@ -1,3 +1,5 @@
+//! Task reservation and file-lock operations.
+
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
@@ -20,7 +22,7 @@ use serde_json::{Value, json};
 use crate::OrbitRuntime;
 use crate::command::task::canonicalize_context_files_for_read;
 
-pub(super) fn list(runtime: &OrbitRuntime) -> Result<Value, OrbitError> {
+pub(in crate::runtime) fn list(runtime: &OrbitRuntime) -> Result<Value, OrbitError> {
     let workspace_id = workspace_task_reservation_id(runtime)?;
     let reservation_result = runtime
         .stores()
@@ -79,7 +81,7 @@ pub(super) fn list(runtime: &OrbitRuntime) -> Result<Value, OrbitError> {
     }))
 }
 
-pub(super) fn release(
+pub(in crate::runtime) fn release(
     runtime: &OrbitRuntime,
     input: Value,
     agent: Option<String>,
@@ -159,7 +161,7 @@ fn validate_reservation_id_form(reservation_id: &str) -> Result<(), OrbitError> 
     )))
 }
 
-pub(super) fn reserve(
+pub(in crate::runtime) fn reserve(
     runtime: &OrbitRuntime,
     input: Value,
     agent: Option<String>,

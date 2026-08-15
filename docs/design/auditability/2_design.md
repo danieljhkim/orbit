@@ -3,8 +3,8 @@ summary: "Auditability — Design"
 type: design
 title: "Auditability — Design"
 owner: codex
-last_updated: 2026-08-09
-last_validated: 2026-08-02
+last_updated: 2026-08-15
+last_validated: 2026-08-15
 status: Draft
 feature: auditability
 doc_role: design
@@ -32,7 +32,7 @@ The split is deliberate: command rows stay compact and queryable; envelopes pres
 
 ## 2. Command Audit Rows
 
-`AuditEvent` lives in `crates/orbit-common/src/types/audit_event.rs`. Rows include execution id, timestamp, command/subcommand, optional tool and target metadata, role, status, exit code, duration, working directory, optional argument/error/stdout/stderr fields, host, pid, and session id. Migration v7 adds nullable trusted MCP workspace, caller/process machine and display-host IDs, transport, full capability-set JSON, origin-session ID, call ID, and lease ID. Old rows read with null/empty additions and are not rewritten.
+`AuditEvent` lives in `crates/orbit-common/src/types/audit_event.rs`. Rows include execution id, timestamp, command/subcommand, optional tool and target metadata, role, status, exit code, duration, working directory, optional argument/error/stdout/stderr fields, host, pid, and session id. Nullable MCP additions include resolved workspace, caller/process machine and display-host fields, transport, origin-session id, per-call `trace_id`, and best-effort `caller_ip`. Caller machine and IP are audit metadata, not authenticated identity. Capability, `mcp_call_id`, and lease columns remain schema-compatible but current v1 MCP sessions leave them empty. Old rows read with null/empty additions and are not rewritten.
 
 After [T20260505-6], command-audit producers use the shared `audit_execution_id` helper instead of timestamp-only ids. The id keeps a stable producer prefix and appends wall-clock nanoseconds, process id, and a per-process atomic sequence so same-workspace parallel `orbit tool run ...` calls do not collide on clocks with coarse effective resolution. The SQLite unique index on `execution_id` remains the enforcement boundary.
 
@@ -40,13 +40,30 @@ The CLI RAII guard in `crates/orbit-cli/src/audit_middleware.rs` defaults to fai
 
 [ORB-10200] moved command and subcommand metadata selection out of the middleware into the exhaustive `Commands::operation` registry in `crates/orbit-cli/src/command/operation.rs`. The same operation declaration now owns dispatch, runtime bootstrap policy, audit metadata, JSON error preference, and hook error suppression, so a new top-level command cannot compile until all five concerns are declared; `audit_middleware.rs` owns only audit persistence.
 
-For `orbit tool run`, [T20260427-52] first collapsed duplicate `agent` + `model` inputs. [ORB-00080] later made the family the durable identity: agent-facing `model` inputs should be `codex`, `claude`, `gemini`, or `grok`, while full model strings remain accepted for compatibility and normalize to the family before persistence. [ORB-10451] applies that same trust boundary to runtime bootstrap: CLI and dashboard processes canonicalize `ORBIT_AGENT_NAME` / `ORBIT_AGENT_MODEL` to an agent family, and an absent or inconsistent envelope records `unknown` instead of asserting verified human presence. This changes attribution only; actor-based command gating remains separate work.
+For `orbit tool run`, [T20260427-52] first collapsed duplicate `agent` + `model` inputs. [ORB-00080] later made the family the durable identity: agent-facing `model` inputs should be `codex`, `claude`, `gemini`, or `grok`, while full model strings remain accepted for compatibility and normalize to the family before persistence. [ORB-10451] applies that same trust boundary to runtime bootstrap: CLI and `orbit-web` processes canonicalize `ORBIT_AGENT_NAME` / `ORBIT_AGENT_MODEL` to an agent family, and an absent or inconsistent envelope records `unknown` instead of asserting verified human presence. This changes attribution only; actor-based command gating remains separate work.
 
-After [T20260428-4], tool-invocation audit is written at the OrbitRuntime dispatch boundary for registered CLI/MCP tools. A `ToolEntryPoint` discriminator surfaces as `subcommand: "run"` or `"run-mcp"`, setup failures inside dispatch are audited, and `duration_ms` is clamped to at least `1`. [ORB-10225] extracted the shared boundary behind registry-backed dispatch and temporarily routed adapter-owned graph implementations through it; [ORB-10325] later removed graph from the registered tool and MCP surfaces, leaving `orbit graph` as a direct CLI command; [ORB-10357] then removed that CLI command too, so the graph has no audited surface of any kind. The legacy CLI guard skips its own emission when the runtime sets a per-thread `mark_tool_audit_recorded` signal; pre-runtime CLI failures such as invalid JSON still produce the existing guard-side row.
+After [T20260428-4], tool-invocation audit is written at Core's dispatch boundary for
+registered CLI/MCP tools. The current implementation is
+`crates/orbit-core/src/command/tool/dispatch.rs`: a `ToolEntryPoint` becomes
+`subcommand: "run"` or `"run-mcp"`, setup and handler failures inside the boundary are
+audited, and `duration_ms` is at least `1`. The CLI RAII guard covers top-level command
+execution and suppresses its duplicate after Core records a tool row; pre-runtime CLI
+failures such as invalid JSON still produce the guard-side row. A successful tool result is
+not returned if audit persistence fails, although the audit seam cannot roll back a
+mutation already committed. When the tool itself fails, that domain error remains primary.
 
-[ORB-10228] makes the MCP boundary fail closed against provenance spoofing. Only the external legacy workspace address selector is accepted. Standalone MCP is `transport=local`, has exactly `{agent}`, and records `role=unverified`; ambient engine provenance is ignored unless the existing managed-run marker authenticates it. Managed identity then wins over caller JSON. The adapter generates one `mcp_call_id` before preflight and preserves it across unknown/unexposed denial and registry success or failure. Capability filtering and authorization use membership in the complete canonical set, never a selected member or scalar maximum.
+For MCP, initialize metadata controls only the external workspace address selector. The
+server constructs the rest of `ToolSessionContext`: accepting-process identity,
+`local`/`ssh-mcp` transport, an origin-session id, and one new `trace_id` per call. The SSH
+proxy's caller machine label and the server-observed caller IP are opaque audit correlation.
+Only a managed process environment contributes task/run/activity/step correlation; model
+tool JSON does not. Outside that envelope the role is `unverified`. V1 performs no MCP
+authorization and records no capability grants or leases.
 
-Compatibility remains deliberate: legacy `host` is the executing-process hostname; caller/process display and machine IDs are separate. `session_id` is unchanged and `origin_session_id` is additive. `job_run_id` remains canonical; a trusted `leased_run.run_id` fills it when empty or must match it, while only `lease_id` gets a new column.
+Registered global calls, resolved workspace calls, and workspace setup failures enter a
+Core audit seam. Every `tools/call`, including an unknown or unadvertised raw name, crosses
+the global seam and records one denied row when dispatch rejects it. Legacy `host` remains
+the executing-process hostname, while caller/process fields are additive.
 
 ---
 
@@ -54,14 +71,14 @@ Compatibility remains deliberate: legacy `host` is the executing-process hostnam
 
 Some runtime paths write targeted command-audit rows directly:
 
-- `crates/orbit-core/src/command/tool.rs` records runtime-backed and in-process CLI/MCP tool invocations as `command: tool` with `subcommand: "run"` or `"run-mcp"`.
-- `crates/orbit-remote/src/mcp/host.rs` owns MCP safe-surface, capability, placement, and checkout preflight. Remote-owned discovery implementations run inside Core's shared runtime audit boundary; pre-runtime and checkoutless failures are recorded through Remote's config-resolved global audit seam. Unknown or unexposed names therefore produce denied rows without invoking them.
+- `crates/orbit-core/src/command/tool/dispatch.rs` records runtime-backed, in-process, and global CLI/MCP tool invocations as `command: tool` with `subcommand: "run"` or `"run-mcp"`.
+- `crates/orbit-cli/src/command/mcp/server.rs` composes `orbit-mcp` framing with `orbit-cmd` registered runtime selection. Global discovery, unknown/unadvertised names, and workspace setup failures use Core's global audit seam; resolved workspace calls use the runtime seam. The server does not make capability, placement, or authorization decisions in v1.
 - `crates/orbit-core/src/runtime/orbit_tool_host/mod.rs` records task lock reservation checks, reservations, releases, and denials.
 - `crates/orbit-core/src/runtime/v2_host/pipeline_actions.rs` records gate-starvation failures for task bundles.
 
 These producers share the SQLite schema and must preserve the same status, target, actor, and redaction expectations as CLI rows. Prescriptive coverage expectations live in [specs/coverage-matrix.md](./specs/coverage-matrix.md).
 
-After [T20260427-0023], selected canonical stores also project live tracing events: filesystem policy denials still write FS audit events, proc-spawn allowlist denials still return `OrbitError::PolicyDenied`, and each path also emits a redacted `orbit.policy.deny` event. Friction reports are records under `.orbit/frictions/` via [T20260510-13], not task lifecycle events or precomputed scoreboard updates; [ORB-00062] adds explicit record triage metadata (`open`, `triaged`, `resolved`) and dashboard/API mutation surfaces for status and tags.
+After [T20260427-0023], selected canonical stores also project live tracing events: filesystem policy denials still write FS audit events, proc-spawn allowlist denials still return `OrbitError::PolicyDenied`, and each path also emits a redacted `orbit.policy.deny` event. Friction reports are workspace-scoped records in host-global SQLite, not task lifecycle events or precomputed scoreboard updates; the old `.orbit/frictions/` tree is retained only as import/rollback evidence, and `orbit-web` owns the dashboard/API triage surface.
 
 ---
 
@@ -99,7 +116,7 @@ Dashboard log previews added by [T20260508-14] are derived views over the `v2_au
 
 Orbit currently carries identity through related fields rather than one universal key:
 
-- Direct CLI commands and dashboard runtime construction share the env-derived `agent family` / `unknown` actor rule. Standalone MCP is exactly `unverified`; only an authenticated managed envelope can supply MCP agent/model audit identity.
+- Direct CLI commands and `orbit-web` runtime construction share the env-derived `agent family` / `unknown` actor rule. MCP is `unverified` outside a managed process envelope; when that envelope is present, its process environment supplies audit identity and correlation rather than caller JSON.
 - `V2AuditEnvelope.agent_identity` records the workflow-envelope actor. CLI-launched v2 runs use `system`; concrete provider activity appears in event bodies and metrics.
 - Task records carry `created_by`, `planned_by`, `implemented_by`, `agent`, and `model`.
 - Invocation metrics record agent family and configured runtime model beside job run and activity ids.
@@ -116,7 +133,7 @@ The requirement is not to collapse every field into one value. It is that a revi
 
 ## 8. Query, Export, and Metrics Surfaces
 
-The audit CLI exposes command rows through `orbit audit list`, `show`, `stats`, `export --format json`, `export --format csv`, and `prune`. Additive filters cover workspace, caller/process machine, transport, capability membership, origin session, MCP call, canonical run, and lease. JSON, CSV, show output, and dashboard projections expose the optional provenance while preserving legacy columns and meanings.
+The audit CLI exposes command rows through `orbit audit list`, `show`, `stats`, `export --format json`, `export --format csv`, and `prune`. Additive fields and filters cover workspace, caller/process machine, transport, origin session, canonical run, and compatibility capability/call/lease columns. JSON, CSV, show output, and `orbit-web` projections preserve the nullable schema. Current MCP rows additionally expose a per-call `trace_id` and optional observed `caller_ip`; capability, `mcp_call_id`, and lease filters normally match nothing because v1 does not populate those fields.
 
 V2 traces are exposed separately: `orbit run events` prints chronological envelopes, `orbit run trace` renders the parent tree, and `orbit run logs` extracts CLI stdout/stderr blobs. `orbit run history` and `orbit run show` expose job-run state rather than the full envelope stream. Metrics and scoreboard commands read invocation records; they summarize cost and usage, not transcript structure.
 
@@ -223,9 +240,9 @@ Each record contains timestamp, level, target, and structured fields. After [T20
 - **[ORB-00106]** — Preserve per-task implementer attribution when `orbit run ship` moves batch PR tasks from Review to Done.
 - **[ORB-10200]** — Derive CLI audit metadata and the other cross-cutting command policies from one exhaustive command-operation registry.
 - **[ORB-10225]** — Route in-process graph MCP calls through the safe-surface allowlist and shared runtime audit boundary.
-- **[ORB-10228]** — Add trusted MCP context, anti-spoofing, full capability-set audit, per-call correlation, and additive audit migration v7.
-- **[ORB-10262]** — Enforce MCP capability and exact-checkout placement preflight, retaining one trusted call ID and one denial row before runtime/store mutation, including global checkoutless denials.
-- **[ORB-10319]** — Move Remote MCP policy/preflight and global audit composition out of CLI/Core ownership while preserving the shared `ToolEntryPoint::Mcp` audit contract.
+- **[ORB-10228]** — Historical expansion of the MCP audit schema; current v1 uses the resolved workspace/process fields, origin session, transport, trace, and optional caller IP while leaving capability/call/lease fields empty.
+- **[ORB-10262]** — Historical capability/placement preflight work, no longer part of the v1 MCP execution path.
+- **[ORB-10319]** — Historical MCP boundary move; current ownership is `orbit-mcp` framing, CLI server composition, and Core audit dispatch.
 - **[ORB-10325]** — Remove graph from MCP and registered tool dispatch while preserving the direct `orbit graph` CLI.
 - **[ORB-10357]** — Remove the direct `orbit graph` CLI too; the graph has no audited surface left.
 - **[ORB-10451]** — Attribute CLI and dashboard runtimes from the canonical agent env envelope, recording unenveloped callers as unknown.
