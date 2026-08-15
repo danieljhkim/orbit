@@ -49,7 +49,7 @@ provider = "codex"
 
 [crews.gemini]
 backend = "cli"
-model = "pro"
+model = "gemini-3.7-flash"
 provider = "gemini"
 
 [crews.grok]
