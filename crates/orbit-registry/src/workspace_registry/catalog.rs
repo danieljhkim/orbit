@@ -58,9 +58,11 @@ pub fn register_checkout(
             checkout.workspace_id
         )));
     }
-    if let Some(existing) = registry.checkouts.iter().find(|existing| {
-        existing.repo_root == checkout.repo_root || existing.orbit_dir == checkout.orbit_dir
-    }) {
+    if let Some(existing) = registry
+        .checkouts
+        .iter()
+        .find(|existing| existing.repo_root == checkout.repo_root)
+    {
         return Err(OrbitError::WorkspaceError(format!(
             "checkout path '{}' is already registered to workspace '{}'",
             checkout.repo_root.display(),
