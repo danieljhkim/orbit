@@ -120,6 +120,20 @@ fn parses_workspace_auto_defaults() {
         RunSubcommand::Auto(args) => {
             assert!(!args.json);
             assert!(args.claim_token.is_none());
+            // No window means one tick, the behavior every caller had before
+            // `--for` existed.
+            assert_eq!(args.for_duration, None);
+        }
+        _ => panic!("expected auto"),
+    }
+}
+
+#[test]
+fn parses_workspace_auto_drain_window() {
+    let command = parse_run(&["orbit", "run", "auto", "--for", "30m"]);
+    match command.command {
+        RunSubcommand::Auto(args) => {
+            assert_eq!(args.for_duration.as_deref(), Some("30m"));
         }
         _ => panic!("expected auto"),
     }

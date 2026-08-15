@@ -1,5 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 
+use chrono::{DateTime, SecondsFormat, TimeDelta, Utc};
 use orbit_common::types::{Task, TaskStatus, task_dependencies_ready};
 use orbit_engine::DispatchError;
 use serde_json::{Value, json};
@@ -10,11 +11,109 @@ use super::backlog_exclusion::{
     EpicFamilyMembership, epic_family_membership, list_backlog_tasks, sort_tasks_by_priority_age,
 };
 
+/// The job that supervises one epic root. `classify_workspace_auto_tasks`
+/// reads its live runs to decide whether another root may start.
+const EPIC_JOB_NAME: &str = "epic_pipeline";
+
+/// Longest drain window a caller may request, in seconds (24h). The window is
+/// the caller's, not a safety property, but an unbounded deadline would let a
+/// typo hold `workspace_auto_pipeline`'s single active-run slot indefinitely.
+const MAX_DRAIN_WINDOW_SECONDS: f64 = 86_400.0;
+
+/// The admissible work for one drain iteration [ORB-10819].
+///
+/// This answers "what may start right now", not "what is the one action for
+/// this tick". Loose leaves and an epic root are independent answers: a
+/// conflict-free chore ships in the same iteration that an epic is running,
+/// because an `in-progress` epic root already reserves the union of its
+/// descendants' `context_files` (ORB-10816) and `list_backlog_tasks` drops
+/// exactly the leaves that overlap it. That reservation is why the former
+/// `hold` decision is gone — a blanket freeze excluded conflict-free work the
+/// lock surface had no reason to exclude.
 pub(super) fn classify_workspace_auto_tasks(
     runtime: &OrbitRuntime,
     action: &str,
     input: &Value,
 ) -> Result<Value, DispatchError> {
+    let backlog = list_backlog_tasks(runtime, action, input)?;
+    let loose_task_ids = backlog
+        .get("task_ids")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+
+    let active_epic = active_epic_run(runtime, action)?;
+    let epic_task_id = match &active_epic {
+        // One epic at a time. `epic_pipeline` declares `max_active_runs: 1`,
+        // so offering a second root would not run it — it would queue a
+        // `pending` run behind the live one, and the drain loop would mint a
+        // fresh one every iteration. Keying on the run rather than on the
+        // root's status also closes the window between a detached submit and
+        // the child's `worktree_setup` moving that root to `in-progress`.
+        Some(_) => None,
+        None => next_admissible_epic_root(runtime, action)?,
+    };
+
+    let has_leaves = !loose_task_ids.is_empty();
+    let has_epic = epic_task_id.is_some();
+    Ok(json!({
+        "loose_task_ids": loose_task_ids,
+        "has_leaves": has_leaves,
+        "epic_task_id": epic_task_id,
+        "has_epic": has_epic,
+        "empty": !has_leaves && !has_epic,
+        "active_epic_run_id": active_epic.as_ref().map(|epic| epic.run_id.clone()),
+        "active_epic_task_id": active_epic.and_then(|epic| epic.task_id),
+    }))
+}
+
+/// A live `epic_pipeline` run, if one is already supervising a root.
+struct ActiveEpicRun {
+    run_id: String,
+    task_id: Option<String>,
+}
+
+fn active_epic_run(
+    runtime: &OrbitRuntime,
+    action: &str,
+) -> Result<Option<ActiveEpicRun>, DispatchError> {
+    // Reconcile first, exactly as the submit path does before it counts
+    // active runs. Without this, one orphaned `running` row — a worker killed
+    // by a reboot or an OOM — would read as a live epic forever and silently
+    // stop every epic dispatch in the workspace. That failure would be
+    // invisible: the drain keeps succeeding, it just never starts an epic.
+    runtime
+        .reconcile_stale_job_runs(Some(EPIC_JOB_NAME))
+        .map_err(|err| DispatchError::DeterministicActionFailed {
+            action: action.to_string(),
+            message: format!("reconcile stale {EPIC_JOB_NAME} runs: {err}"),
+        })?;
+    let runs = runtime
+        .stores()
+        .jobs()
+        .list_pending_or_running_job_runs(EPIC_JOB_NAME)
+        .map_err(|err| DispatchError::DeterministicActionFailed {
+            action: action.to_string(),
+            message: format!("list live {EPIC_JOB_NAME} runs: {err}"),
+        })?;
+    Ok(runs.into_iter().next().map(|run| ActiveEpicRun {
+        task_id: run
+            .input
+            .as_ref()
+            .and_then(|input| input.get("epic_task_id"))
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(ToOwned::to_owned),
+        run_id: run.run_id,
+    }))
+}
+
+/// The highest-priority `backlog` epic root whose dependencies are satisfied.
+fn next_admissible_epic_root(
+    runtime: &OrbitRuntime,
+    action: &str,
+) -> Result<Option<String>, DispatchError> {
     let all_tasks = runtime.stores().tasks().list_tasks().map_err(|err| {
         DispatchError::DeterministicActionFailed {
             action: action.to_string(),
@@ -26,38 +125,6 @@ pub(super) fn classify_workspace_auto_tasks(
         .cloned()
         .map(|task| (task.id.clone(), task))
         .collect();
-
-    let mut in_progress_epics = all_tasks
-        .iter()
-        .filter(|task| {
-            task.status == TaskStatus::InProgress
-                && epic_family_membership(task, &task_lookup) == Some(EpicFamilyMembership::Root)
-        })
-        .cloned()
-        .collect::<Vec<_>>();
-    sort_tasks_by_priority_age(&mut in_progress_epics);
-    if let Some(epic) = in_progress_epics.first() {
-        return Ok(json!({
-            "decision": "hold",
-            "loose_task_ids": [],
-            "epic_task_id": epic.id,
-        }));
-    }
-
-    let backlog = list_backlog_tasks(runtime, action, input)?;
-    let loose_task_ids = backlog
-        .get("task_ids")
-        .and_then(Value::as_array)
-        .cloned()
-        .unwrap_or_default();
-    if !loose_task_ids.is_empty() {
-        return Ok(json!({
-            "decision": "ship",
-            "loose_task_ids": loose_task_ids,
-            "epic_task_id": null,
-        }));
-    }
-
     let status_by_id =
         runtime
             .task_status_index()
@@ -65,6 +132,7 @@ pub(super) fn classify_workspace_auto_tasks(
                 action: action.to_string(),
                 message: format!("load global task status projection: {err}"),
             })?;
+
     let mut backlog_epics = all_tasks
         .into_iter()
         .filter(|task| {
@@ -74,19 +142,115 @@ pub(super) fn classify_workspace_auto_tasks(
         })
         .collect::<Vec<_>>();
     sort_tasks_by_priority_age(&mut backlog_epics);
-    if let Some(epic) = backlog_epics.first() {
-        return Ok(json!({
-            "decision": "epic",
-            "loose_task_ids": [],
-            "epic_task_id": epic.id,
-        }));
-    }
+    Ok(backlog_epics.into_iter().next().map(|epic| epic.id))
+}
 
+/// Open or re-read a drain window [ORB-10819].
+///
+/// Two call shapes, one action. Called with `for_seconds` and no `deadline` it
+/// *stamps*: the deadline is `now + for_seconds`, returned as RFC3339. Called
+/// with that `deadline` echoed back it *answers*: whether the window has since
+/// expired. The stamp therefore lives in the stamping step's own pipeline
+/// output, which the run state already persists — no new durable artifact, and
+/// re-reading the window is a pure function of a value the run carries.
+///
+/// A zero or absent window is expired on the first answer. `break_when` is
+/// evaluated after a loop body runs, so that yields exactly one iteration:
+/// the one-tick behavior every pre-window caller of `orbit run auto` has.
+///
+/// The deadline gates *starting* work. Nothing here cancels anything, which is
+/// what makes "the window does not affect tasks already in progress" true by
+/// construction: an in-flight child is held by `invoke_and_wait`, not by the
+/// window.
+pub(super) fn drain_window(action: &str, input: &Value) -> Result<Value, DispatchError> {
+    let now = Utc::now();
+    let deadline = match optional_deadline(action, input)? {
+        Some(deadline) => deadline,
+        None => {
+            let for_seconds = window_seconds(action, input)?;
+            now.checked_add_signed(seconds_to_delta(action, for_seconds)?)
+                .ok_or_else(|| {
+                    action_failed(
+                        action,
+                        format!("`for_seconds` {for_seconds} overflows the drain deadline"),
+                    )
+                })?
+        }
+    };
+
+    let remaining_seconds = (deadline - now).num_milliseconds() as f64 / 1000.0;
     Ok(json!({
-        "decision": "empty",
-        "loose_task_ids": [],
-        "epic_task_id": null,
+        "deadline": deadline.to_rfc3339_opts(SecondsFormat::Secs, true),
+        "expired": remaining_seconds <= 0.0,
+        "remaining_seconds": remaining_seconds.max(0.0),
     }))
+}
+
+fn optional_deadline(action: &str, input: &Value) -> Result<Option<DateTime<Utc>>, DispatchError> {
+    let Some(raw) = input
+        .get("deadline")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    else {
+        return Ok(None);
+    };
+    DateTime::parse_from_rfc3339(raw)
+        .map(|parsed| Some(parsed.with_timezone(&Utc)))
+        .map_err(|err| action_failed(action, format!("`deadline` '{raw}' is not RFC3339: {err}")))
+}
+
+/// Read `for_seconds`, tolerating the string a template renders when the
+/// caller supplied no window at all (`"{{ input.for_seconds }}"` over an
+/// absent key resolves to an empty string, not to JSON `null`).
+fn window_seconds(action: &str, input: &Value) -> Result<f64, DispatchError> {
+    let Some(raw) = input.get("for_seconds") else {
+        return Ok(0.0);
+    };
+    let seconds = match raw {
+        Value::Null => 0.0,
+        Value::Number(number) => number
+            .as_f64()
+            .ok_or_else(|| action_failed(action, "`for_seconds` is not a finite number".into()))?,
+        Value::String(text) => {
+            let text = text.trim();
+            if text.is_empty() {
+                0.0
+            } else {
+                text.parse::<f64>().map_err(|err| {
+                    action_failed(
+                        action,
+                        format!("`for_seconds` '{text}' is not a number: {err}"),
+                    )
+                })?
+            }
+        }
+        other => {
+            return Err(action_failed(
+                action,
+                format!("`for_seconds` must be a number, got {other}"),
+            ));
+        }
+    };
+    if !seconds.is_finite() || !(0.0..=MAX_DRAIN_WINDOW_SECONDS).contains(&seconds) {
+        return Err(action_failed(
+            action,
+            format!("`for_seconds` must be between 0 and {MAX_DRAIN_WINDOW_SECONDS}"),
+        ));
+    }
+    Ok(seconds)
+}
+
+fn seconds_to_delta(action: &str, seconds: f64) -> Result<TimeDelta, DispatchError> {
+    TimeDelta::try_milliseconds((seconds * 1000.0).round() as i64)
+        .ok_or_else(|| action_failed(action, format!("`for_seconds` {seconds} is out of range")))
+}
+
+fn action_failed(action: &str, message: String) -> DispatchError {
+    DispatchError::DeterministicActionFailed {
+        action: action.to_string(),
+        message,
+    }
 }
 
 pub(super) fn list_epic_descendants(

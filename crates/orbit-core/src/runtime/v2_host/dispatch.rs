@@ -192,12 +192,18 @@ pub(crate) fn run_deterministic(
                 }
             })
         }
-        // One workspace logistics tick [ORB-10788 / ADR-0365]: ship eligible
-        // loose leaves first, hold while an epic root is active, otherwise
-        // select one ordered backlog epic root for the supervisor pipeline.
+        // The admissible work for one drain iteration [ORB-10819]: the
+        // conflict-free backlog leaves, plus one backlog epic root when no
+        // `epic_pipeline` run is live. Leaves and epic are independent — an
+        // active epic excludes overlapping leaves through its lock
+        // reservation, not through a blanket hold.
         CoreDeterministicAction::ClassifyWorkspaceAutoTasks => {
             workspace_auto::classify_workspace_auto_tasks(runtime, action, input)
         }
+        // Stamp a drain deadline, or answer whether a stamped one has passed
+        // [ORB-10819]. Gates the start of the next iteration only; nothing
+        // here cancels or shortens an in-flight child run.
+        CoreDeterministicAction::DrainWindow => workspace_auto::drain_window(action, input),
         // ADR-0223: scheduled shipment resolves only the active runtime's
         // canonical ship input; cross-workspace enumeration stays in the
         // legacy CLI sweep and `workflow.auto_ship` is deliberately ignored.
@@ -345,6 +351,12 @@ pub(crate) fn run_deterministic(
         // with `{status, run_id, pipeline?, error?}` output.
         CoreDeterministicAction::InvokeAndWait => {
             pipeline_actions::invoke_and_wait(runtime, action, input, tool_context)
+        }
+        // Submit a child v2 Job and return as soon as its Run is durable, so
+        // the parent keeps working while it executes [ORB-10819]. The caller
+        // re-observes the child; this returns no status.
+        CoreDeterministicAction::InvokeDetached => {
+            pipeline_actions::invoke_detached(runtime, action, input, tool_context)
         }
         // Fail a workflow if one or more child pipeline wait results did not
         // reach `succeeded`.

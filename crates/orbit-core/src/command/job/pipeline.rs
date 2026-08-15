@@ -140,9 +140,16 @@ impl OrbitRuntime {
         self.submit_pipeline_run(workflow.job_id, input, None, actor)
     }
 
-    /// Submit one workspace logistics tick (`workspace_auto_pipeline`).
+    /// Submit one workspace drain (`workspace_auto_pipeline`).
+    ///
+    /// [ORB-10819] `for_seconds` is the drain window: the run keeps re-listing
+    /// admissible work and shipping it until the window expires. `None` (or
+    /// zero) means one tick, which is what every caller predating the window
+    /// gets. The window bounds only the *start* of new work — a child run
+    /// already in flight when the deadline passes finishes normally.
     pub fn submit_workspace_auto_run(
         &self,
+        for_seconds: Option<u64>,
         actor: Option<&str>,
         claim_token: Option<&str>,
     ) -> Result<PipelineInvokeResult, OrbitError> {
@@ -150,7 +157,8 @@ impl OrbitRuntime {
         let workflow =
             crate::command::workflow::find_workflow(crate::command::workflow::AUTO_WORKFLOW_ALIAS)
                 .ok_or_else(|| OrbitError::InvalidInput("unknown workflow 'auto'".to_string()))?;
-        self.submit_pipeline_run(workflow.job_id, json!({}), None, actor)
+        let input = json!({ "for_seconds": for_seconds.unwrap_or(0) });
+        self.submit_pipeline_run(workflow.job_id, input, None, actor)
     }
 
     /// The duplicate-dispatch refusal for the newest non-terminal run already

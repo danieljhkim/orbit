@@ -838,7 +838,16 @@ fn workspace_ship_pipeline_waits_for_workspace_auto_sequencer() {
             assert_eq!(target.target, "activity:invoke_and_wait");
             let input = target.default_input.as_ref().expect("ship input");
             assert_eq!(input["job_name"], "workspace_auto_pipeline");
-            assert_eq!(input["run_input"], json!({}));
+            // [ORB-10819] The wrapper blocks on its child, so the window it
+            // passes is a window `ship-sweep-orbit`'s `overlap: forbid` holds.
+            // It must stay comfortably inside that routine's 30-minute period.
+            let for_seconds = input["run_input"]["for_seconds"]
+                .as_u64()
+                .expect("wrapper drain window");
+            assert!(
+                (0..=1_500).contains(&for_seconds),
+                "wrapper window {for_seconds}s leaves too little slack before the next sweep fire"
+            );
         }
         other => panic!("expected invoke-and-wait target ref, got {other:?}"),
     }
@@ -848,9 +857,22 @@ fn workspace_ship_pipeline_waits_for_workspace_auto_sequencer() {
         }
         other => panic!("expected success guard target ref, got {other:?}"),
     }
-    assert!(!yaml.contains("auto_ship"));
-    assert!(!yaml.contains("ship-sweep"));
-    assert!(!yaml.contains("type: shell"));
+    // The v1 wrapper shelled out to the retired sweep. Check the definition,
+    // not the prose: the comment names `ship-sweep-orbit` deliberately,
+    // because that routine's period is why the window above is what it is.
+    let definition = yaml_without_comments(yaml);
+    assert!(!definition.contains("auto_ship"));
+    assert!(!definition.contains("ship-sweep"));
+    assert!(!definition.contains("type: shell"));
+}
+
+/// A job asset's YAML with whole-line comments removed, for assertions about
+/// what a definition *does* rather than about what its header explains.
+fn yaml_without_comments(yaml: &str) -> String {
+    yaml.lines()
+        .filter(|line| !line.trim_start().starts_with('#'))
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 #[test]
@@ -867,17 +889,56 @@ fn workspace_auto_pipeline_is_single_flight_and_conditionally_dispatches() {
     let asset = load_job_asset(yaml).expect("workspace auto pipeline parses");
     assert_eq!(asset.spec.max_active_runs, 1);
     assert_eq!(asset.spec.steps[0].id, "resolve_ship_input");
-    assert_eq!(asset.spec.steps[1].id, "classify");
-    let JobV2StepBody::TargetRef(classify) = &asset.spec.steps[1].body else {
-        panic!("classify step must use the deterministic activity");
-    };
-    assert_eq!(classify.target, "activity:classify_workspace_auto_tasks");
 
-    let ship = &asset.spec.steps[2];
-    assert_eq!(ship.id, "ship_leaves");
+    // [ORB-10819] The window is stamped once, before the loop, and re-read
+    // inside it. `break_when` is evaluated after the body, so a zero window
+    // still yields exactly one iteration.
+    assert_eq!(asset.spec.steps[1].id, "open_window");
+    let JobV2StepBody::TargetRef(open_window) = &asset.spec.steps[1].body else {
+        panic!("open_window step must use the deterministic activity");
+    };
+    assert_eq!(open_window.target, "activity:drain_window");
+    assert_eq!(
+        open_window.default_input.as_ref().expect("window input")["for_seconds"],
+        "{{ input.for_seconds }}"
+    );
+
+    let JobV2StepBody::Loop { loop_: drain } = &asset.spec.steps[2].body else {
+        panic!("the drain must be a loop, not a single tick");
+    };
+    assert_eq!(asset.spec.steps[2].id, "drain");
+    assert_eq!(
+        drain.break_when.as_deref(),
+        Some("{{ steps.window.output.expired }} == true")
+    );
+    let body_ids = drain
+        .steps
+        .iter()
+        .map(|step| step.id.as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        body_ids,
+        vec![
+            "admissible",
+            "ship_leaves",
+            "require_leaf_success",
+            "start_epic",
+            "window",
+            "idle_wait",
+        ],
+    );
+
+    // Re-listing inside the loop is what lets a task that entered `backlog`
+    // after the run started still ship.
+    let JobV2StepBody::TargetRef(admissible) = &drain.steps[0].body else {
+        panic!("admissible step must use the deterministic activity");
+    };
+    assert_eq!(admissible.target, "activity:classify_workspace_auto_tasks");
+
+    let ship = &drain.steps[1];
     assert_eq!(
         ship.when.as_deref(),
-        Some("{{ steps.classify.output.decision }} == ship")
+        Some("{{ steps.admissible.output.has_leaves }} == true")
     );
     let JobV2StepBody::TargetRef(ship_target) = &ship.body else {
         panic!("ship step must invoke and wait");
@@ -888,20 +949,45 @@ fn workspace_auto_pipeline_is_single_flight_and_conditionally_dispatches() {
         "task_auto_pipeline"
     );
 
-    let epic = &asset.spec.steps[4];
-    assert_eq!(epic.id, "run_epic");
+    // The epic must NOT be waited on: blocking on a multi-hour epic would
+    // consume the window and starve the conflict-free leaves behind it.
+    let epic = &drain.steps[3];
     assert_eq!(
         epic.when.as_deref(),
-        Some("{{ steps.classify.output.decision }} == epic")
+        Some("{{ steps.admissible.output.has_epic }} == true")
     );
     let JobV2StepBody::TargetRef(epic_target) = &epic.body else {
-        panic!("epic step must invoke and wait");
+        panic!("epic step must dispatch detached");
     };
-    assert_eq!(epic_target.target, "activity:invoke_and_wait");
+    assert_eq!(epic_target.target, "activity:invoke_detached");
     assert_eq!(
         epic_target.default_input.as_ref().expect("epic input")["job_name"],
         "epic_pipeline"
     );
+
+    let JobV2StepBody::TargetRef(window) = &drain.steps[4].body else {
+        panic!("window step must use the deterministic activity");
+    };
+    assert_eq!(window.target, "activity:drain_window");
+    assert_eq!(
+        window.default_input.as_ref().expect("window input")["deadline"],
+        "{{ steps.open_window.output.deadline }}"
+    );
+
+    // Sleeping only when idle keeps a busy window re-listing immediately, and
+    // an expired one from paying a final sleep it will not use.
+    assert_eq!(
+        drain.steps[5].when.as_deref(),
+        Some(
+            "{{ steps.admissible.output.empty }} == true && \
+             {{ steps.window.output.expired }} == false"
+        )
+    );
+    // The four-way `ship`/`hold`/`epic`/`empty` decision is gone; the loop
+    // reads an admissible set instead.
+    let definition = yaml_without_comments(yaml);
+    assert!(!definition.contains("decision"));
+    assert!(!definition.contains("hold"));
 }
 
 #[test]

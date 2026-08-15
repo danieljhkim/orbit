@@ -31,6 +31,10 @@ pub(crate) const DEFAULT_ACTIVITY_FILES: &[(&str, &str)] = &[
         include_str!("../../assets/activities/classify_workspace_auto_tasks.yaml"),
     ),
     (
+        "drain_window",
+        include_str!("../../assets/activities/drain_window.yaml"),
+    ),
+    (
         "epic_orchestrator",
         include_str!("../../assets/activities/epic_orchestrator.yaml"),
     ),
@@ -57,6 +61,10 @@ pub(crate) const DEFAULT_ACTIVITY_FILES: &[(&str, &str)] = &[
     (
         "invoke_and_wait",
         include_str!("../../assets/activities/invoke_and_wait.yaml"),
+    ),
+    (
+        "invoke_detached",
+        include_str!("../../assets/activities/invoke_detached.yaml"),
     ),
     (
         "pipeline_success_guard",

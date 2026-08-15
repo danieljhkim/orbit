@@ -166,6 +166,67 @@ pub(super) fn invoke_and_wait(
     Ok(first)
 }
 
+/// Submit a child v2 Job and return as soon as its Run is durable [ORB-10819].
+///
+/// The non-blocking counterpart to [`invoke_and_wait`], for a parent that must
+/// keep working while the child runs. `workspace_auto_pipeline` dispatches
+/// `epic_pipeline` this way: waiting on a multi-hour epic would consume the
+/// rest of the drain window and starve the conflict-free leaves behind it.
+///
+/// The caller owns re-observing the child. There is deliberately no `status`
+/// in the output: this action never looks at one, and reporting a freshly
+/// submitted run as `pending` would invite a `pipeline_success_guard` that
+/// cannot mean anything here.
+pub(super) fn invoke_detached(
+    runtime: &OrbitRuntime,
+    action: &str,
+    input: &Value,
+    tool_context: ToolContext,
+) -> Result<Value, DispatchError> {
+    let job_name = input
+        .get("job_name")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| action_failed(action, "missing `job_name`".to_string()))?
+        .to_string();
+    let run_input = input
+        .get("run_input")
+        .cloned()
+        .unwrap_or_else(|| Value::Object(Default::default()));
+
+    let mut invoke_args = serde_json::Map::new();
+    invoke_args.insert("job_name".to_string(), Value::String(job_name.clone()));
+    invoke_args.insert("input".to_string(), run_input);
+    if let Some(priority) = input.get("priority").cloned() {
+        invoke_args.insert("priority".to_string(), priority);
+    }
+
+    let invoke_output = runtime
+        .run_tool_with_context_and_role(
+            "orbit.pipeline.invoke",
+            Value::Object(invoke_args),
+            Role::Admin,
+            tool_context,
+        )
+        .map_err(|err| action_failed(action, format!("pipeline.invoke failed: {err}")))?;
+    let run_id = invoke_output
+        .get("run_id")
+        .and_then(Value::as_str)
+        .ok_or_else(|| action_failed(action, "pipeline.invoke returned no run_id".to_string()))?
+        .to_string();
+
+    Ok(serde_json::json!({
+        "run_id": run_id,
+        "job_name": job_name,
+        "queued": invoke_output
+            .get("queued")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+        "submitted_at": invoke_output.get("submitted_at").cloned(),
+    }))
+}
+
 fn stale_gate_admission_noop(
     runtime: &OrbitRuntime,
     action: &str,
