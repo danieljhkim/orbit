@@ -36,10 +36,8 @@ use orbit_store::{
 };
 use serde_json::{Value, json};
 
-use super::task::locks::{
-    CoordinationAuditEvent, record_coordination_audit_event, workspace_orbit_dir,
-    workspace_task_reservation_id,
-};
+use super::coordination_audit::{CoordinationAuditEvent, record_coordination_audit_event};
+use super::task::locks::{workspace_orbit_dir, workspace_task_reservation_id};
 use crate::OrbitRuntime;
 
 /// Environment fallback for the holder's token, so an operator shell does not

@@ -15,6 +15,7 @@ pub mod audit;
 mod authorization;
 pub mod builder;
 mod command_exec;
+mod coordination_audit;
 pub mod engine;
 pub mod event_bus;
 pub mod mutation;
