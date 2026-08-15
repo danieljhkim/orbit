@@ -1057,7 +1057,7 @@ fn epic_pipeline_opens_one_stable_worktree_and_drains_children_serially() {
     );
     let asset = load_job_asset(yaml).expect("epic pipeline parses");
     assert_eq!(asset.spec.max_active_runs, 1);
-    assert_eq!(asset.spec.steps.len(), 4);
+    assert_eq!(asset.spec.steps.len(), 3);
 
     let JobV2StepBody::TargetRef(worktree) = &asset.spec.steps[1].body else {
         panic!("epic pipeline must set up its worktree before draining children");
@@ -1068,25 +1068,35 @@ fn epic_pipeline_opens_one_stable_worktree_and_drains_children_serially() {
     assert_eq!(worktree_input["branch_prefix"], "epic");
     assert_eq!(worktree_input["base_sync"], "remote");
 
-    let JobV2StepBody::Target(descendants) = &asset.spec.steps[2].body else {
-        panic!("epic pipeline must list descendants deterministically");
+    let JobV2StepBody::Loop { loop_ } = &asset.spec.steps[2].body else {
+        panic!("epic pipeline must assemble descendants and the finisher in one loop");
+    };
+    assert_eq!(loop_.max_iterations, 8);
+    assert_eq!(
+        loop_.break_when.as_deref(),
+        Some("{{ steps.remaining.output.empty }} == true")
+    );
+    assert_eq!(loop_.steps.len(), 5);
+
+    let JobV2StepBody::Target(descendants) = &loop_.steps[0].body else {
+        panic!("assemble loop must list descendants deterministically");
     };
     let ActivityV2Spec::Deterministic(descendants) = &descendants.spec else {
         panic!("epic descendant listing must be deterministic");
     };
     assert_eq!(descendants.action, "list_epic_descendants");
 
-    let JobV2StepBody::Loop { loop_ } = &asset.spec.steps[3].body else {
-        panic!("epic pipeline must drain descendants through a sequential loop");
+    let JobV2StepBody::Loop { loop_: drain } = &loop_.steps[1].body else {
+        panic!("assemble loop must drain descendants through a sequential loop");
     };
     assert_eq!(
-        loop_.items.as_deref(),
+        drain.items.as_deref(),
         Some("{{ steps.descendants.output.task_ids }}")
     );
-    assert_eq!(loop_.max_iterations, 256);
-    assert_eq!(loop_.steps.len(), 2);
-    let JobV2StepBody::TargetRef(land_child) = &loop_.steps[0].body else {
-        panic!("first loop body must invoke one child pipeline");
+    assert_eq!(drain.max_iterations, 256);
+    assert_eq!(drain.steps.len(), 2);
+    let JobV2StepBody::TargetRef(land_child) = &drain.steps[0].body else {
+        panic!("first drain body must invoke one child pipeline");
     };
     assert_eq!(land_child.target, "activity:invoke_and_wait");
     let child_input = &land_child.default_input.as_ref().expect("child input")["run_input"];
@@ -1101,6 +1111,47 @@ fn epic_pipeline_opens_one_stable_worktree_and_drains_children_serially() {
         child_input["landing_branch"],
         "{{ steps.resolve_ship_input.output.base_branch }}"
     );
+
+    let JobV2StepBody::TargetRef(finish) = &loop_.steps[2].body else {
+        panic!("assemble loop must invoke the epic finisher");
+    };
+    assert_eq!(finish.target, "activity:epic_orchestrator");
+    let finish_input = finish.default_input.as_ref().expect("finish input");
+    assert_eq!(finish_input["task_id"], "{{ input.epic_task_id }}");
+    for field in ["workspace_path", "repo_root"] {
+        assert_eq!(
+            finish_input[field], "{{ steps.worktree.output.workspace_path }}",
+            "epic finisher must pin {field} to the assigned epic worktree"
+        );
+    }
+
+    let commit_finish = &loop_.steps[3];
+    assert_eq!(commit_finish.id, "commit_finish");
+    assert_eq!(
+        commit_finish.when.as_deref(),
+        Some("{{ steps.descendants.output.empty }} == true")
+    );
+    let JobV2StepBody::TargetRef(commit_finish) = &commit_finish.body else {
+        panic!("empty-descendant finish must commit through git_commit");
+    };
+    assert_eq!(commit_finish.target, "activity:git_commit");
+    let commit_input = commit_finish.default_input.as_ref().expect("commit input");
+    assert_eq!(
+        commit_input["workspace_path"],
+        "{{ steps.worktree.output.workspace_path }}"
+    );
+    assert_eq!(
+        commit_input["base_sha"],
+        "{{ steps.worktree.output.base_sha }}"
+    );
+
+    let JobV2StepBody::Target(remaining) = &loop_.steps[4].body else {
+        panic!("assemble loop must re-list descendants after the finisher");
+    };
+    let ActivityV2Spec::Deterministic(remaining) = &remaining.spec else {
+        panic!("remaining descendant listing must be deterministic");
+    };
+    assert_eq!(remaining.action, "list_epic_descendants");
 }
 
 fn collect_agent_loop_step_ids<'a>(

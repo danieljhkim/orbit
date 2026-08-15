@@ -211,7 +211,7 @@ backend = "cli"
 
         let expected = BTreeMap::from([
             ("agent_implement", ("codex", "gpt-5.6-sol".to_string())),
-            ("epic_orchestrator", ("codex", "gpt-5.6-terra".to_string())),
+            ("epic_orchestrator", ("codex", "gpt-5.6-sol".to_string())),
             (
                 "step_failure_recovery",
                 ("codex", "gpt-5.6-terra".to_string()),
@@ -229,7 +229,7 @@ backend = "cli"
             };
             let activity_input = match *name {
                 "task_pilot" => json!({ "crew": "luna" }),
-                "epic_orchestrator" | "step_failure_recovery" | "triage_failed_runs" => {
+                "step_failure_recovery" | "triage_failed_runs" => {
                     inject_system_crew_input(&runtime, &json!({ "system_crew": true }))
                         .expect("inject configured system crew")
                 }
@@ -577,7 +577,7 @@ backend = "cli"
     }
 
     #[test]
-    fn epic_orchestrator_is_cli_with_orbit_catalog_not_leaf_allowlist() {
+    fn epic_orchestrator_is_a_worktree_finisher_not_a_dispatcher() {
         let (_, yaml) = DEFAULT_ACTIVITY_FILES
             .iter()
             .find(|(name, _)| *name == "epic_orchestrator")
@@ -587,27 +587,74 @@ backend = "cli"
             include_str!("../../../../.orbit/resources/activities/epic_orchestrator.yaml"),
             "shipped and workspace epic_orchestrator activities must remain byte-identical"
         );
+        let lowered = yaml.to_ascii_lowercase();
+        for stale in [
+            "no-code-change",
+            "no code change",
+            "must not edit the repository",
+            "do not edit repository files",
+            "no git write",
+            "no worktree edit",
+            "no `agent_implement`",
+        ] {
+            assert!(
+                !lowered.contains(stale),
+                "stale dispatcher language remains: {stale}"
+            );
+        }
         let asset = load_activity_asset(yaml).expect("parse epic orchestrator");
+        assert_eq!(asset.spec.fs_profile.as_deref(), None);
         match asset.spec.spec {
             ActivityV2Spec::AgentLoop(spec) => {
-                assert_eq!(spec.wall_clock_timeout_seconds, 7200);
+                assert_eq!(spec.wall_clock_timeout_seconds, 10800);
                 assert_eq!(spec.on_denial, OnDenial::Terminate);
                 assert!(tool_allowed("orbit.task.add", &spec.tools));
+                assert!(tool_allowed("orbit.task.update", &spec.tools));
                 assert!(tool_allowed("orbit.session_log.append", &spec.tools));
                 assert!(tool_allowed("orbit.search", &spec.tools));
-                assert!(tool_allowed("orbit.workflow.ship", &spec.tools));
-                assert!(tool_allowed("orbit.workflow.run.resume", &spec.tools));
-                assert!(tool_allowed("orbit.pipeline.invoke", &spec.tools));
-                for denied in ["fs.write", "fs.patch", "fs.delete", "fs.read", "proc.spawn"] {
+                assert!(tool_allowed("fs.read", &spec.tools));
+                assert!(tool_allowed("fs.delete", &spec.tools));
+                assert!(tool_allowed("proc.spawn", &spec.tools));
+                for denied in [
+                    "orbit.workflow.ship",
+                    "orbit.workflow.run.resume",
+                    "orbit.pipeline.invoke",
+                    "orbit.pipeline.wait",
+                    "fs.write",
+                    "fs.patch",
+                ] {
                     assert!(
                         !tool_allowed(denied, &spec.tools),
-                        "orchestrator must not inherit the leaf implementer allowlist: {denied}"
+                        "finisher must not keep dispatcher or raw-write surfaces: {denied}"
                     );
                 }
-                assert!(spec.instruction.contains("shrink the scan set"));
-                assert!(spec.instruction.contains("human merge authority"));
-                assert!(!spec.instruction.contains("session resume"));
-                assert!(spec.proc_allowed_programs.is_none());
+                let instruction = spec
+                    .instruction
+                    .split_whitespace()
+                    .collect::<Vec<_>>()
+                    .join(" ")
+                    .to_lowercase();
+                assert!(instruction.contains("epic worktree finisher"));
+                assert!(instruction.contains("git rev-parse --show-toplevel"));
+                assert!(instruction.contains("worktree_mismatch"));
+                assert!(instruction.contains("pwd -p"));
+                assert!(instruction.contains("human merge authority"));
+                assert!(instruction.contains("execution_summary"));
+                assert!(instruction.contains("move the epic to `review`"));
+                assert!(!instruction.contains("session resume"));
+                assert!(!instruction.contains("shrink the scan set"));
+                assert_eq!(
+                    spec.proc_allowed_programs.as_deref(),
+                    Some(
+                        &[
+                            "git".to_string(),
+                            "make".to_string(),
+                            "cargo".to_string(),
+                            "rg".to_string(),
+                            "orbit".to_string(),
+                        ][..]
+                    )
+                );
             }
             other => panic!("expected agent_loop epic_orchestrator, got {other:?}"),
         }
