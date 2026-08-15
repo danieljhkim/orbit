@@ -164,7 +164,7 @@ epic-scoped gate instead of scoping the workspace scan.
 
 ## An epic owns one worktree and one branch
 
-**Recorded:** 2026-08 · [ORB-10816]
+**Recorded:** 2026-08 · [ORB-10816] · **Implemented** in [ORB-10816]
 
 ### Context
 
@@ -201,7 +201,7 @@ race that fast-forward.
 
 ## The epic agent works in the worktree instead of dispatching
 
-**Recorded:** 2026-08 · [ORB-10817]
+**Recorded:** 2026-08 · [ORB-10817] · **Not yet implemented**
 
 ### Context
 
@@ -230,7 +230,7 @@ to the drain phase when it does.
 
 ## Epic completion is epic-scoped, not workspace-scoped
 
-**Recorded:** 2026-08 · [ORB-10818]
+**Recorded:** 2026-08 · [ORB-10818] · **Not yet implemented**
 
 ### Context
 
@@ -259,7 +259,7 @@ worktree via its own `worktree_setup`.
 
 ## Auto drains for a window instead of taking one action
 
-**Recorded:** 2026-08 · [ORB-10819]
+**Recorded:** 2026-08 · [ORB-10819] · **Not yet implemented** (the epic reservation it relies on is live from [ORB-10816])
 
 ### Context
 
