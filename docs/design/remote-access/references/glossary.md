@@ -1,3 +1,10 @@
+---
+type: design
+summary: "Glossary: Remote Access"
+last_validated: 2026-08-15
+tags: [remote-access]
+---
+
 # Glossary: Remote Access
 
 Vocabulary specific to how Orbit is viewed across workspaces and machines. Standard terms (loopback, SSH port forwarding, pty, TOCTOU) are used with their ordinary meaning and excluded here unless remote access gives them a specific role.

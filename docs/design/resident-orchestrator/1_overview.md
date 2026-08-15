@@ -2,6 +2,7 @@
 title: Resident Orchestrator — Overview
 owner: codex, grok, claude
 last_updated: 2026-08-15
+last_validated: 2026-08-15
 status: Draft
 feature: resident-orchestrator
 doc_role: overview
@@ -15,10 +16,10 @@ related_artifacts: [ORB-10332, ORB-10775, ORB-10776, ORB-10779, ORB-10788, ORB-1
 
 # Resident Orchestrator — Overview
 
-> **Status: Draft.** This folder specifies the v2 contract ([ORB-10815]). The v1 sequencer it
-> replaces is still what ships: one auto tick takes one action, and an in-progress epic holds all
-> auto-ship. Each child task flips its own section's claims to live behavior in the PR that
-> implements it. [§9](./2_design.md#9-what-v1-did-and-why-it-changed) records what v1 did.
+> **Status: Draft.** This folder specifies the v2 contract ([ORB-10815]). The stable epic
+> worktree and serial child drain have landed ([ORB-10816]); the workspace drain still runs one
+> tick at a time, and the remaining v2 stages are design targets. Each child task flips its own
+> section's claims to live behavior in the PR that implements it. [§9](./2_design.md#9-what-v1-did-and-why-it-changed) records what v1 did.
 
 V1 is two Orbit jobs, not one command. V2 keeps that split and changes what each job *is*.
 

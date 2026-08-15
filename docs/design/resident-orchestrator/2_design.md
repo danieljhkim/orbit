@@ -2,6 +2,7 @@
 title: Resident Orchestrator — Design
 owner: codex, grok, claude
 last_updated: 2026-08-15
+last_validated: 2026-08-15
 status: Draft
 feature: resident-orchestrator
 doc_role: design
@@ -15,7 +16,8 @@ related_artifacts: [ORB-10332, ORB-10775, ORB-10776, ORB-10779, ORB-10788, ORB-1
 
 # Resident Orchestrator — Design
 
-> **Status: Draft.** This is the v2 contract ([ORB-10815]); v1 is what currently ships. [§10](#10-what-v1-did-and-why-it-changed)
+> **Status: Draft.** This is the v2 contract ([ORB-10815]). The stable epic worktree and serial
+> child drain have landed ([ORB-10816]); the remaining stages below are design targets. [§10](#10-what-v1-did-and-why-it-changed)
 > records the v1 shape and why each piece changed. It still does not add a resident server, an
 > Orbit routine, conversation resume, or a comment-typed decision protocol.
 

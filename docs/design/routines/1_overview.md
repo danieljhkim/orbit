@@ -2,6 +2,7 @@
 title: Routines — Overview
 owner: claude
 last_updated: 2026-08-15
+last_validated: 2026-08-15
 status: Accepted
 feature: routines
 doc_role: overview
