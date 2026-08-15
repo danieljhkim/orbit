@@ -668,6 +668,20 @@ in `tests/mod.rs` so each block module stays focused on its own invariants.
 New executor blocks must land with a matching test module under `tests/`
 covering the analogous invariants — see [Each new executor block ships with a sibling test module](./4_decisions.md#each-new-executor-block-ships-with-a-sibling-test-module).
 
+### 8.13 Recoverable automatic workflows (planned)
+
+The current executor can recover one configured step and retry it once, while higher-level
+shipment parents still fail when a required child run fails. The planned
+[`orbit run auto --recover` contract](./specs/recoverable-auto-workflows.md) adds a separate
+task-scoped orchestration layer: preserve per-task child outcomes, run bounded recovery for failed
+tasks, persist an evidence-gated completion disposition, and continue draining unrelated work.
+
+This does not make agent output authoritative and does not generalize `pipeline_success_guard` into
+a prose interpreter. Semantic similarity only retrieves possible already-landed implementations;
+a deterministic gate rechecks delivered commits, the pinned base, and the current task's acceptance
+checks before `already_satisfied` can move a task to `done`. Without the explicit recover input,
+existing fail-fast job behavior remains unchanged.
+
 ---
 
 ## 9. Filesystem Policy and `fsProfile`
