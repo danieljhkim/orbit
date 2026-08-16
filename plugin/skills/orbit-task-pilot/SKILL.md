@@ -1,6 +1,6 @@
 ---
 name: orbit-task-pilot
-description: Read-only preflight over a bounded partition of Orbit tasks — proposes canonical context_files, crew and complexity, dependencies, duplicate or already-landed evidence, and ADR conflicts, without promoting, dispatching, implementing, or mutating anything.
+description: Read-only preflight over a bounded partition of Orbit tasks — proposes canonical context_files, crew and complexity, dependencies, duplicate or already-landed evidence, and conflicts with recorded decisions, without promoting, dispatching, implementing, or mutating anything.
 ---
 
 # Orbit Task Pilot
@@ -12,7 +12,7 @@ Accept an explicit target workspace, target branch, and a partition of one to fi
 For each task:
 
 1. Read the complete record and preserve the current selector list exactly as `context_files_before`.
-2. Inspect the target branch, modification and deletion targets, related tasks, and relevant accepted ADRs using read-only tools.
+2. Inspect the target branch, modification and deletion targets, related tasks, and any decision entries governing the code in scope, using read-only tools. Decisions are titled sections in the feature's decision doc — reach them with `--kind doc`, not an ADR store.
 3. Return `context_files_after` using only canonical `file:`, `dir:`, or `symbol:` selectors whose anchors exist inside the target workspace. Modification and deletion targets only — never read-for-context files.
 4. Use disposition `selectors` for a non-empty proposal. An empty proposal is valid only with `verified_no_diff` or `host_operational`, plus concrete evidence.
 5. Report recommendations for crew, complexity, real blockers, duplicates, already-landed work, utility, and public surface — without applying them, and without silently picking an architecture alternative.
@@ -23,7 +23,7 @@ Never write: no editing, creating, moving, or deleting repository files; no task
 
 Never update an Orbit task.
 
-Never expand the partition beyond the supplied IDs, except to cite a concrete dependency, duplicate, or accepted ADR.
+Never expand the partition beyond the supplied IDs, except to cite a concrete dependency, duplicate, or recorded decision.
 
 Task-pilot is an operational role, not a crew, actor identity, or scheduler.
 

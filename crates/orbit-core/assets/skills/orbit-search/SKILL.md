@@ -1,6 +1,6 @@
 ---
 name: orbit-search
-description: Search tasks, docs, ADRs, and frictions through the unified `orbit search` surface. Also covers the `orbit semantic` embedding companion and the human-authored docs corpus.
+description: Search tasks, docs, and frictions through the unified `orbit search` surface. Also covers the `orbit semantic` embedding companion and the human-authored docs corpus.
 ---
 
 # Orbit Search
@@ -17,11 +17,11 @@ orbit search "agent loop deadlock" --hybrid --kind task --limit 5 # lexical + co
 orbit search similar "<task-id>" --limit 5                        # MCP: {"semantic":"<task-id>"}
 ```
 
-**Applicability (`search path`)** resolves differently per corpus: tasks match by selector containment over `context_files`; ADRs match by glob containment over their decision scopes; docs are content-indexed and never match by path.
+**Applicability (`search path`) filters tasks only.** A task matches when one of its `context_files` selectors overlaps the query path — `file:`, `dir:`, and `symbol:<file>#<name>:<kind>` all collapse to a plain path first, and containment is bidirectional, so querying a parent directory matches every selector beneath it. Docs are content-indexed and never match by path; frictions carry no path scope at all. Both are absent from `search path` results regardless of `--kind`.
 
 **`--status` takes `kind:value` tokens** (`--status task:open,doc:active`). Bare tokens are rejected because statuses collide across corpora.
 
-**Index coverage:** lexical covers tasks, docs, ADRs, and frictions. Vector search covers task fields and docs once `orbit semantic index --kind <kind>` has run. Missing vectors under `--hybrid` fall back to lexical with a note rather than failing — and if the companion isn't installed at all, fall back to lexical and continue. Never run `orbit semantic install` without operator consent.
+**Index coverage:** lexical covers all three corpora — tasks, docs, and frictions. Vector search covers task fields and docs once `orbit semantic index --kind <kind>` has run; frictions are never embedded, so they stay lexical even under `--hybrid`. Missing vectors under `--hybrid` fall back to lexical with a note rather than failing — and if the companion isn't installed at all, fall back to lexical and continue. Never run `orbit semantic install` without operator consent.
 
 **Where it earns its keep:** a `--hybrid --kind task` dedup check before creating a task; `semantic: "<task-id>"` after `orbit.task.show` to surface prior decisions the author never linked; and "where did we decide X" as `--kind all`. For a brand-new task, use `--hybrid` on title and description — it may not have embeddings yet. For exact identifiers, paths, and error strings, plain lexical is cheaper and more predictable than semantic.
 
@@ -33,4 +33,4 @@ Results carry `mode`, `kind`, `notes`, and `results[]` with some of `id`/`path`/
 
 **Docs** are PR-reviewed Markdown under configured `[docs].roots` (default `docs/`) — designs, patterns, domain notes, glossaries, runbooks. Orbit walks the roots on demand and indexes anything with valid frontmatter. Authoring a doc, registering a root, or migrating legacy files: [references/docs-corpus.md](references/docs-corpus.md).
 
-**ADRs** are complete entries in the repository's designated decision docs. They are indexed as ordinary docs; use `--kind doc` and search by ID, title, or body text. The retired `--kind adr` is rejected.
+**Decision records** are titled entries inside a feature's decision doc, not a separate corpus. They are indexed as ordinary docs: use `--kind doc` and search by title or body text. There is no ADR store to query — the retired `--kind adr` is rejected.
