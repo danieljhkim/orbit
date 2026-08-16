@@ -6,8 +6,8 @@ use chrono::{TimeZone, Utc};
 use orbit_common::OrbitError;
 use orbit_common::fs::io::{atomic_write_text, create_dir_symlink};
 use orbit_types::task::{
-    ORB_TASK_ID_MAX, TaskEnvelopeV2, TaskPriority, TaskRelation, TaskRelationType, TaskStatus,
-    TaskType,
+    ORB_TASK_ID_MAX, TaskComplexity, TaskEnvelopeV2, TaskPriority, TaskRelation, TaskRelationType,
+    TaskStatus, TaskType, UNSET_BUCKET,
 };
 use rusqlite::{Connection, OptionalExtension, params};
 use tempfile::TempDir;
@@ -207,6 +207,7 @@ fn open_migrates_existing_task_index_columns_before_creating_indexes() {
     let columns = table_columns(&conn, "task_bundle_index");
     assert!(columns.iter().any(|column| column == "job_run_id"));
     assert!(columns.iter().any(|column| column == "terminal_month"));
+    assert!(columns.iter().any(|column| column == "complexity"));
     assert!(index_exists(
         &conn,
         "idx_task_bundle_index_workspace_job_run"
@@ -214,6 +215,10 @@ fn open_migrates_existing_task_index_columns_before_creating_indexes() {
     assert!(index_exists(
         &conn,
         "idx_task_bundle_index_workspace_terminal"
+    ));
+    assert!(index_exists(
+        &conn,
+        "idx_task_bundle_index_workspace_complexity"
     ));
     assert_eq!(
         registry_user_version(&conn).expect("read user_version"),
@@ -1438,6 +1443,66 @@ fn projection_rebuild_errors_on_non_symlink_blocker() {
         ),
         Err(OrbitError::Store(_))
     ));
+}
+
+#[test]
+fn completion_by_complexity_keeps_unset_as_its_own_bucket() {
+    let temp = TempDir::new().expect("tempdir");
+    let store = store(&temp);
+    let workspace = bind(&store, temp.path());
+
+    for task_id in ["ORB-00000", "ORB-00001", "ORB-00002"] {
+        let bundle_dir = create_canonical_bundle(&store, &workspace, task_id);
+        store
+            .register_task_bundle(task_id, &workspace.workspace_id, &bundle_dir)
+            .expect("register bundle");
+    }
+
+    let mut hard_done = envelope("ORB-00000", TaskStatus::Done, Vec::new(), Vec::new());
+    hard_done.complexity = Some(TaskComplexity::Hard);
+    store
+        .replace_task_index(&workspace.workspace_id, &hard_done)
+        .expect("index hard");
+
+    let mut medium_rejected = envelope("ORB-00001", TaskStatus::Rejected, Vec::new(), Vec::new());
+    medium_rejected.complexity = Some(TaskComplexity::Medium);
+    store
+        .replace_task_index(&workspace.workspace_id, &medium_rejected)
+        .expect("index medium");
+
+    store
+        .replace_task_index(
+            &workspace.workspace_id,
+            &envelope("ORB-00002", TaskStatus::Archived, Vec::new(), Vec::new()),
+        )
+        .expect("index unset");
+
+    let rows = store
+        .completion_by_complexity(&workspace.workspace_id)
+        .expect("aggregate");
+    assert_eq!(
+        rows.iter()
+            .map(|row| row.complexity.as_str())
+            .collect::<Vec<_>>(),
+        [UNSET_BUCKET, "medium", "hard"]
+    );
+
+    let unset = rows
+        .iter()
+        .find(|row| row.complexity == UNSET_BUCKET)
+        .unwrap();
+    assert_eq!(unset.total, 1);
+    assert_eq!(unset.by_status.get("archived").copied(), Some(1));
+
+    let hard = rows.iter().find(|row| row.complexity == "hard").unwrap();
+    assert_eq!(hard.total, 1);
+    assert_eq!(hard.by_status.get("done").copied(), Some(1));
+
+    let map = store
+        .complexity_by_task_id(&workspace.workspace_id)
+        .expect("map");
+    assert_eq!(map.get("ORB-00000").map(String::as_str), Some("hard"));
+    assert_eq!(map.get("ORB-00002").map(String::as_str), Some(UNSET_BUCKET));
 }
 
 #[test]

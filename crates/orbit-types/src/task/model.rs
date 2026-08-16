@@ -64,6 +64,37 @@ pub const TASK_REFERENCE_NOT_VERIFIABLE_HERE: &str = "not verifiable here";
 /// (see `HISTORY_DEFAULT_LIMIT` in orbit-web).
 pub const DEFAULT_TASK_LIST_LIMIT: usize = 50;
 
+/// Named bucket for an optional indexed label that nobody set.
+///
+/// Aggregates must keep this visible rather than dropping the row or folding it
+/// into a populated band — the unlabeled set is often the largest bucket
+/// (ORB-10889 / ORB-10891).
+pub const UNSET_BUCKET: &str = "unset";
+
+/// Map an optional indexed label onto a display bucket.
+///
+/// Empty or missing values become [`UNSET_BUCKET`]. A present non-empty value
+/// is returned unchanged so unexpected labels stay their own band instead of
+/// being merged into a known one.
+pub fn labeled_or_unset(value: Option<&str>) -> &str {
+    match value.map(str::trim).filter(|value| !value.is_empty()) {
+        Some(label) => label,
+        None => UNSET_BUCKET,
+    }
+}
+
+/// Stable display order: `unset`, then `low` / `medium` / `hard`, then any
+/// unexpected label alphabetically.
+pub fn complexity_bucket_ord(label: &str) -> (u8, &str) {
+    match label {
+        UNSET_BUCKET => (0, ""),
+        "low" => (1, ""),
+        "medium" => (2, ""),
+        "hard" => (3, ""),
+        other => (4, other),
+    }
+}
+
 /// Current lifecycle state of a task.
 ///
 /// See the module-level doc for the full state transition diagram.

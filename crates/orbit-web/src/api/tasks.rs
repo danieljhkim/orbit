@@ -812,3 +812,62 @@ pub(super) async fn archive_task_action(Ws(runtime): Ws, Path(id): Path<String>)
         Err(e) => map_runtime_error(e),
     }
 }
+
+/// Status distribution per complexity bucket, including the explicit `unset`
+/// band. Counts come from the generated task index — no per-request YAML reads.
+pub(super) async fn completion_by_complexity(Ws(runtime): Ws) -> Response {
+    let runtime_clone = runtime.clone();
+    let rows =
+        match tokio::task::spawn_blocking(move || runtime_clone.task_completion_by_complexity())
+            .await
+        {
+            Ok(Ok(rows)) => rows,
+            Ok(Err(e)) => return server_error(e),
+            Err(join_err) => {
+                return server_error(orbit_core::OrbitError::Execution(format!(
+                    "completion-by-complexity aggregation panicked: {join_err}"
+                )));
+            }
+        };
+
+    const REQUIRED_STATUSES: &[&str] = &["done", "rejected", "archived"];
+    let by_complexity: Vec<Value> = rows
+        .into_iter()
+        .map(|row| {
+            let mut statuses = Vec::new();
+            let mut seen = std::collections::BTreeSet::new();
+            for status in REQUIRED_STATUSES {
+                let count = row.by_status.get(*status).copied().unwrap_or(0);
+                statuses.push(status_rate_json(status, count, row.total));
+                seen.insert((*status).to_string());
+            }
+            for (status, count) in &row.by_status {
+                if seen.contains(status) {
+                    continue;
+                }
+                statuses.push(status_rate_json(status, *count, row.total));
+            }
+            json!({
+                "complexity": row.complexity,
+                "total": row.total,
+                "statuses": statuses,
+            })
+        })
+        .collect();
+
+    Json(json!({ "by_complexity": by_complexity })).into_response()
+}
+
+fn status_rate_json(status: &str, count: i64, total: i64) -> Value {
+    let rate = if total > 0 {
+        count as f64 / total as f64
+    } else {
+        0.0
+    };
+    json!({
+        "status": status,
+        "count": count,
+        "total": total,
+        "rate": rate,
+    })
+}

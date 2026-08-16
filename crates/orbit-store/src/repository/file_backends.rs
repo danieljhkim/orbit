@@ -69,6 +69,16 @@ impl TaskStoreBackend for TaskV2Store {
     fn delete_task(&self, id: &str) -> Result<bool, OrbitError> {
         self.delete_task(id)
     }
+
+    fn task_completion_by_complexity(
+        &self,
+    ) -> Result<Vec<crate::contracts::TaskCompletionByComplexity>, OrbitError> {
+        self.task_completion_by_complexity()
+    }
+
+    fn task_complexity_by_id(&self) -> Result<BTreeMap<String, String>, OrbitError> {
+        self.task_complexity_by_id()
+    }
 }
 
 impl ScopedStore<Task> for TaskV2Store {

@@ -1,10 +1,39 @@
+use std::collections::BTreeMap;
+
 use super::*;
+use crate::contracts::TaskCompletionByComplexity;
 
 impl TaskV2Store {
     pub(crate) fn task_status_index(
         &self,
     ) -> Result<std::collections::BTreeMap<String, TaskStatus>, OrbitError> {
         self.registry.global_task_status_index()
+    }
+
+    pub(crate) fn task_completion_by_complexity(
+        &self,
+    ) -> Result<Vec<TaskCompletionByComplexity>, OrbitError> {
+        self.ensure_complexity_indexed()?;
+        self.registry.completion_by_complexity(&self.workspace_id)
+    }
+
+    pub(crate) fn task_complexity_by_id(&self) -> Result<BTreeMap<String, String>, OrbitError> {
+        self.ensure_complexity_indexed()?;
+        self.registry.complexity_by_task_id(&self.workspace_id)
+    }
+
+    /// One-time rebuild after `complexity` was added as a nullable column.
+    /// Indexed unset is `''`; leftover `NULL` means the row has not been
+    /// rewritten from its bundle yet.
+    fn ensure_complexity_indexed(&self) -> Result<(), OrbitError> {
+        if !self
+            .registry
+            .workspace_index_has_null_complexity(&self.workspace_id)?
+        {
+            return Ok(());
+        }
+        let _ = self.rebuild_index_best_effort("complexity column unpopulated");
+        Ok(())
     }
 
     pub(super) fn indexed_tasks(
