@@ -541,26 +541,57 @@ async fn dashboard_top_level_nav_matches_the_operator_tabs() {
 fn dashboard_operations_are_typed_guarded_and_responsive() {
     let index = include_str!("../../assets/dashboard/index.html");
     let operations = include_str!("../../assets/dashboard/operations.js");
+    let router = include_str!("../../assets/dashboard/router.js");
     let css = include_str!("../../assets/dashboard/dashboard.css");
 
-    for id in ["routines-body", "clock-body", "routine-operation-feedback"] {
-        assert!(index.contains(&format!(r#"id="{id}""#)));
+    for id in [
+        "routines-body",
+        "clock-body",
+        "routine-operation-feedback",
+        "auto-tasks-body",
+        "auto-task-operation-feedback",
+        "operations-subtabs",
+    ] {
+        assert!(index.contains(&format!(r#"id="{id}""#)), "{id}");
     }
     assert!(operations.contains(r#"postJson("/api/routines/toggle""#));
     assert!(operations.contains(r#"postJson("/api/routines/clock""#));
+    assert!(operations.contains(r#"postJson("/api/auto-tasks/toggle""#));
+    assert!(operations.contains(r#"postJson("/api/auto-tasks/mint""#));
     assert!(operations.contains("pendingOperations.has(key)"));
     assert!(operations.contains("window.confirm("));
     assert!(operations.contains("All-workspace mode is read-only"));
     assert!(operations.contains("routine.target"));
     assert!(operations.contains("last_evaluated_slot"));
     assert!(operations.contains("next_tick_at"));
+    assert!(operations.contains("acknowledge_unconditional: true"));
+    assert!(operations.contains("UNCONDITIONAL_MINT_WARNING"));
+    assert!(operations.contains(
+        "Manual mint ignores this definition's schedule, enabled flag, and scheduler dedupe policy."
+    ));
+    assert!(
+        operations.contains("An open instance already exists; this will create another open task.")
+    );
+    assert!(operations.contains("Minted") || operations.contains("result.message"));
+    assert!(operations.contains("Auto-task change failed"));
+    assert!(operations.contains("Manual mint failed"));
+    assert!(operations.contains("fetchJson(\"/api/auto-tasks\")"));
+    assert!(
+        !operations.contains("postJson(\"/api/auto-tasks")
+            || operations.contains("addEventListener(\"click\"")
+    );
+    assert!(
+        !operations.contains("hashchange") && !operations.contains("location.reload"),
+        "refresh/back must not replay a toggle or mint POST"
+    );
+    assert!(router.contains(r#"const OPERATIONS_SUBTABS = ["routines", "auto-tasks"];"#));
+    assert!(router.contains(r#"hash = `#operations/${sub}`;"#));
+    assert!(css.contains("@media (max-width: 720px)"));
     assert!(css.contains("@media (max-width: 600px)"));
     assert!(css.contains(".operation-grid { grid-template-columns: 1fr; }"));
     assert!(css.contains("body.operations-active"));
-    assert!(
-        include_str!("../../assets/dashboard/router.js")
-            .contains(r#"classList.toggle("operations-active", top === "operations")"#)
-    );
+    assert!(css.contains(".operation-mint-warning"));
+    assert!(router.contains(r#"classList.toggle("operations-active", top === "operations")"#));
 }
 
 /// ORB-10444: Scoreboard content stays reachable after the move — as a

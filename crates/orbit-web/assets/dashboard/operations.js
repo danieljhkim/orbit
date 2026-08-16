@@ -1,19 +1,37 @@
-// Routine-definition and host sweep-clock operations [ORB-10875].
+// Routine-definition, host sweep-clock, and auto-task operations [ORB-10875, ORB-10876].
 
 import { el, fetchJson, getWorkspace, postJson } from './common.js';
 
 const $ = (id) => document.getElementById(id);
 const pendingOperations = new Set();
+const UNCONDITIONAL_MINT_WARNING = "Manual mint ignores this definition's schedule, enabled flag, and scheduler dedupe policy.";
 let lastOperations = null;
+let lastAutoTasks = null;
 let context = null;
 
 export function initOperations(nextContext) {
   context = nextContext;
 }
 
-function selectedWorkspaceName() {
+function selectedWorkspace() {
   const selected = getWorkspace();
-  return context.getWorkspaces().find((workspace) => workspace.id === selected)?.name || null;
+  if (!selected) return null;
+  return context.getWorkspaces().find((workspace) => workspace.id === selected) || null;
+}
+
+function selectedWorkspaceName() {
+  return selectedWorkspace()?.name || null;
+}
+
+function workspaceReadOnlyReason() {
+  const selected = getWorkspace();
+  if (!selected) return "All-workspace mode is read-only. Select one workspace; auto-task definitions are workspace-scoped.";
+  const workspace = selectedWorkspace();
+  if (!workspace) return `Workspace ${selected} is not a concrete active selection.`;
+  if (workspace.status && workspace.status !== "active") {
+    return `Workspace ${workspace.name} is inactive; select an active workspace.`;
+  }
+  return "";
 }
 
 function feedback(id, kind, message) {
@@ -219,6 +237,178 @@ function renderClock(payload) {
   $("clock-host").textContent = payload.host_id || "unknown host";
 }
 
+function autoTaskControlReason(payload) {
+  const workspaceReason = workspaceReadOnlyReason();
+  if (workspaceReason) return workspaceReason;
+  if (payload && payload.read_only_reason) return payload.read_only_reason;
+  if (payload && payload.controls_authorized === false) return "Controls require an authorized operator session.";
+  return "";
+}
+
+function lastEvaluationText(definition) {
+  const evaluation = definition.last_evaluation;
+  if (!evaluation) return "Never evaluated";
+  if (evaluation.kind === "fired") {
+    const task = evaluation.last_task_id ? ` · ${evaluation.last_task_id}` : "";
+    return `${time(evaluation.last_fired_at || evaluation.last_slot)}${task}`;
+  }
+  return `Baselined ${time(evaluation.baseline_at)}; no fire yet`;
+}
+
+function autoTaskToggleButton(payload, definition) {
+  const nextEnabled = !definition.enabled;
+  const key = `auto-task-toggle:${definition.name}`;
+  const reason = autoTaskControlReason(payload);
+  const verb = nextEnabled ? "Enable" : "Disable";
+  const button = el("button", {
+    class: `operation-button ${nextEnabled ? "enable" : "disable"}`,
+    text: pendingOperations.has(key) ? "Pending…" : verb,
+    title: reason || `${verb} ${definition.name}`,
+  });
+  button.type = "button";
+  button.disabled = Boolean(reason) || pendingOperations.has(key);
+  button.addEventListener("click", async () => {
+    if (pendingOperations.has(key)) return;
+    const workspace = selectedWorkspace();
+    const summary = definition.template_summary || definition.template?.title || definition.name;
+    if (!window.confirm(`${verb} auto-task "${definition.name}" in workspace "${workspace?.name || workspace?.id}"?\n\nTarget: ${summary}\nThis writes the definition's enabled field.`)) return;
+    pendingOperations.add(key);
+    feedback("auto-task-operation-feedback", "pending", `${verb === "Enable" ? "Enabling" : "Disabling"} ${definition.name} (${summary})…`);
+    renderAutoTasks(payload);
+    try {
+      const result = await postJson("/api/auto-tasks/toggle", {
+        name: definition.name,
+        expected_enabled: definition.enabled,
+        enabled: nextEnabled,
+      });
+      feedback("auto-task-operation-feedback", "success", `${result.message}: ${definition.name}.`);
+      await fetchAndRenderAutoTasks();
+    } catch (error) {
+      feedback("auto-task-operation-feedback", "error", `Auto-task change failed: ${error.message}`);
+    } finally {
+      pendingOperations.delete(key);
+      if (lastAutoTasks) renderAutoTasks(lastAutoTasks);
+    }
+  });
+  return button;
+}
+
+function autoTaskMintButton(payload, definition) {
+  const key = `auto-task-mint:${definition.name}`;
+  const reason = autoTaskControlReason(payload);
+  const button = el("button", {
+    class: "operation-button secondary",
+    text: pendingOperations.has(key) ? "Pending…" : "Mint now",
+    title: reason || "Mint one task now, ignoring schedule, enabled, and dedupe",
+  });
+  button.type = "button";
+  button.disabled = Boolean(reason) || pendingOperations.has(key);
+  button.addEventListener("click", async () => {
+    if (pendingOperations.has(key)) return;
+    const workspace = selectedWorkspace();
+    const template = definition.template || {};
+    const duplicateLine = definition.may_create_open_duplicate
+      ? "An open instance already exists; this will create another open task."
+      : "No open instance is currently tagged for this definition.";
+    const confirmText = [
+      `Mint auto-task "${definition.name}" now in workspace "${workspace?.name || workspace?.id}"?`,
+      "",
+      `Resulting task: ${definition.template_summary || template.title || definition.name}`,
+      `Crew: ${template.crew || "none"} · Status: ${template.status || "backlog"} · Priority: ${template.priority || "medium"}`,
+      "",
+      `WARNING: ${payload.unconditional_mint_warning || UNCONDITIONAL_MINT_WARNING}`,
+      duplicateLine,
+    ].join("\n");
+    if (!window.confirm(confirmText)) return;
+    pendingOperations.add(key);
+    feedback("auto-task-operation-feedback", "pending", `Minting ${definition.name} now…`);
+    renderAutoTasks(payload);
+    try {
+      const result = await postJson("/api/auto-tasks/mint", {
+        name: definition.name,
+        acknowledge_unconditional: true,
+      });
+      feedback("auto-task-operation-feedback", "success", `${result.message}`);
+      await fetchAndRenderAutoTasks();
+    } catch (error) {
+      feedback("auto-task-operation-feedback", "error", `Manual mint failed: ${error.message}`);
+    } finally {
+      pendingOperations.delete(key);
+      if (lastAutoTasks) renderAutoTasks(lastAutoTasks);
+    }
+  });
+  return button;
+}
+
+function renderAutoTasks(payload) {
+  lastAutoTasks = payload;
+  const body = $("auto-tasks-body");
+  if (!body) return;
+  body.textContent = "";
+  const workspaceReason = workspaceReadOnlyReason();
+  const reason = workspaceReason || payload.read_only_reason || "";
+  const workspace = selectedWorkspace();
+  const definitions = workspace && !workspaceReason ? (payload.definitions || []) : [];
+  if (reason) {
+    body.appendChild(el("div", { class: "operations-readonly-note", text: reason }));
+  }
+  if (definitions.length === 0) {
+    body.appendChild(el("div", {
+      class: "empty-state",
+      text: workspace && !workspaceReason ? "No auto-task definitions are defined by this workspace." : "Select a workspace to list its auto-task definitions.",
+    }));
+  }
+  for (const definition of definitions) {
+    const state = definition.enabled ? "enabled" : "disabled";
+    const actions = el("div", { class: "operation-card-actions" }, [
+      autoTaskToggleButton(payload, definition),
+      autoTaskMintButton(payload, definition),
+    ]);
+    const card = el("article", { class: "operation-card auto-task-card" });
+    card.append(
+      el("div", { class: "operation-card-title" }, [
+        el("div", {}, [
+          el("strong", { text: definition.name }),
+          el("span", { class: `operation-state ${state}`, text: state }),
+        ]),
+        actions,
+      ]),
+      el("div", { class: "operation-target mono", text: definition.template_summary || definition.template?.title || "" }),
+      el("div", { class: "operation-grid" }, [
+        field("Schedule", definition.schedule_summary || "—"),
+        field("Dedupe", definition.dedupe === "always" ? "always fire" : "skip if open"),
+        field("Last evaluation / mint", lastEvaluationText(definition)),
+        field("Last minted task", definition.last_minted_task_id
+          ? `${definition.last_minted_task_id}${definition.last_minted_task_status ? ` · ${definition.last_minted_task_status}` : ""}`
+          : "None"),
+        field("Next evaluation", time(definition.next_evaluation)),
+        field("Open duplicate", definition.open_duplicate ? "Yes — mint will create another" : "No"),
+      ]),
+    );
+    if (definition.description) {
+      card.appendChild(el("p", { class: "operation-description", text: definition.description }));
+    }
+    card.appendChild(el("p", {
+      class: "operation-control-note operation-mint-warning",
+      text: payload.unconditional_mint_warning || UNCONDITIONAL_MINT_WARNING,
+    }));
+    const controlReason = autoTaskControlReason(payload);
+    if (controlReason) card.appendChild(el("p", { class: "operation-control-note", text: controlReason }));
+    body.appendChild(card);
+  }
+  const count = $("auto-tasks-count");
+  if (count) count.textContent = workspace && !workspaceReason ? `${definitions.length} · ${workspace.name}` : "read-only";
+}
+
+function fetchAndRenderAutoTasks() {
+  return fetchJson("/api/auto-tasks").then(renderAutoTasks);
+}
+
 export function fetchAndRenderOperations() {
-  return fetchJson("/api/routines").then(renderOperations);
+  return Promise.all([
+    fetchJson("/api/routines").then(renderOperations),
+    fetchAndRenderAutoTasks().catch((error) => {
+      feedback("auto-task-operation-feedback", "error", `Failed to load auto-tasks: ${error.message}`);
+    }),
+  ]);
 }

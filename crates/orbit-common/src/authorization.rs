@@ -128,6 +128,22 @@ pub const DASHBOARD_CLOCK_CADENCE: GovernedOperation = GovernedOperation {
     rationale: "changing the host sweep cadence reloads the native clock service",
 };
 
+/// Versioned auto-task definition toggle exposed by the dashboard.
+pub const DASHBOARD_AUTO_TASK_TOGGLE: GovernedOperation = GovernedOperation {
+    id: "auto_task.toggle",
+    surface: OperationSurface::Dashboard,
+    allowed: &[McpCapability::Operator],
+    rationale: "changing a versioned auto-task definition changes unattended task minting",
+};
+
+/// Unconditional on-demand auto-task mint exposed by the dashboard.
+pub const DASHBOARD_AUTO_TASK_MINT: GovernedOperation = GovernedOperation {
+    id: "auto_task.mint",
+    surface: OperationSurface::Dashboard,
+    allowed: &[McpCapability::Operator],
+    rationale: "manual mint ignores schedule, enabled state, and scheduler dedupe",
+};
+
 /// Every governed operation, declared exactly once.
 ///
 /// This is the single enumerable place the required capability lives. A call
@@ -240,6 +256,8 @@ pub const GOVERNED_OPERATIONS: &[GovernedOperation] = &[
     DASHBOARD_ROUTINE_TOGGLE,
     DASHBOARD_CLOCK_SERVICE,
     DASHBOARD_CLOCK_CADENCE,
+    DASHBOARD_AUTO_TASK_TOGGLE,
+    DASHBOARD_AUTO_TASK_MINT,
 ];
 
 /// Look up the governed tool operation for `tool_name`, if any.

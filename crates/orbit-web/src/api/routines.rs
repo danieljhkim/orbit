@@ -25,7 +25,7 @@ use crate::state::{DashboardState, Ws};
 
 #[derive(Debug, Deserialize, Default)]
 pub(super) struct OperationsQuery {
-    workspace: Option<String>,
+    pub(super) workspace: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -380,7 +380,9 @@ pub(super) fn clock_json(clock: &ClockStatus) -> Value {
     })
 }
 
-fn explicit_workspace(query: &OperationsQuery) -> Result<&str, (StatusCode, Json<Value>)> {
+pub(super) fn explicit_workspace(
+    query: &OperationsQuery,
+) -> Result<&str, (StatusCode, Json<Value>)> {
     query
         .workspace
         .as_deref()
@@ -396,7 +398,7 @@ fn explicit_workspace(query: &OperationsQuery) -> Result<&str, (StatusCode, Json
         })
 }
 
-fn authorized_caller(
+pub(super) fn authorized_caller(
     operation: &'static GovernedOperation,
 ) -> Result<CallerCapabilities, AuthorizationDenial> {
     let caller = CallerCapabilities::resolve(&CallerEnvelope::from_process_env(
@@ -406,7 +408,7 @@ fn authorized_caller(
     Ok(caller)
 }
 
-fn authorization_denied(denial: AuthorizationDenial) -> Response {
+pub(super) fn authorization_denied(denial: AuthorizationDenial) -> Response {
     (
         StatusCode::FORBIDDEN,
         Json(json!({
@@ -419,7 +421,7 @@ fn authorization_denied(denial: AuthorizationDenial) -> Response {
         .into_response()
 }
 
-fn not_found_or_conflict(code: &'static str, message: String) -> Response {
+pub(super) fn not_found_or_conflict(code: &'static str, message: String) -> Response {
     (
         StatusCode::CONFLICT,
         Json(json!({"error": message, "code": code})),
@@ -428,7 +430,7 @@ fn not_found_or_conflict(code: &'static str, message: String) -> Response {
 }
 
 #[allow(clippy::too_many_arguments)]
-fn record_operation_audit(
+pub(super) fn record_operation_audit(
     runtime: &OrbitRuntime,
     workspace: &str,
     operation: &str,

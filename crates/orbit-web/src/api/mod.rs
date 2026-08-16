@@ -20,6 +20,7 @@ use serde_json::json;
 use url::Url;
 
 mod audit;
+mod auto_tasks;
 mod crews;
 mod denials;
 mod diagnostics;
@@ -416,6 +417,9 @@ pub(super) fn router() -> Router<crate::state::DashboardState> {
         .route("/routines", get(routines::list_routine_health))
         .route("/routines/toggle", post(routines::toggle_routine))
         .route("/routines/clock", post(routines::control_clock))
+        .route("/auto-tasks", get(auto_tasks::list_auto_tasks))
+        .route("/auto-tasks/toggle", post(auto_tasks::toggle_auto_task))
+        .route("/auto-tasks/mint", post(auto_tasks::mint_auto_task))
         .route("/scoreboard", get(scoreboard::scoreboard))
         .route("/metrics/knowledge", get(metrics::knowledge_metrics))
         .route("/metrics/activity", get(metrics::activity_metrics))

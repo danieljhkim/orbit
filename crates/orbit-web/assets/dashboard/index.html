@@ -307,7 +307,11 @@
       </main>
     </section>
     <section class="tab-pane" data-tab="operations">
-      <main class="operations-layout">
+      <nav class="subtabs" id="operations-subtabs">
+        <button class="subtab active" data-subtab="routines" type="button">Routines</button>
+        <button class="subtab" data-subtab="auto-tasks" type="button">Auto-tasks</button>
+      </nav>
+      <main class="operations-layout" id="operations-routines-main">
         <section class="panel" id="routines-panel">
           <header>
             <span>Scheduled Routines</span>
@@ -322,6 +326,18 @@
           <header><span>Host Sweep Clock</span><span class="count" id="clock-host">-</span></header>
           <div class="operation-feedback" id="clock-operation-feedback" role="status" aria-live="polite"></div>
           <div class="body" id="clock-body">
+            <div class="skeleton-state"><div class="skeleton skeleton-row"></div></div>
+          </div>
+        </section>
+      </main>
+      <main class="operations-layout operations-auto-tasks-layout" id="operations-auto-tasks-main" hidden>
+        <section class="panel" id="auto-tasks-panel">
+          <header>
+            <span>Auto-task Definitions</span>
+            <span class="count" id="auto-tasks-count">-</span>
+          </header>
+          <div class="operation-feedback" id="auto-task-operation-feedback" role="status" aria-live="polite"></div>
+          <div class="body" id="auto-tasks-body">
             <div class="skeleton-state"><div class="skeleton skeleton-row"></div></div>
           </div>
         </section>

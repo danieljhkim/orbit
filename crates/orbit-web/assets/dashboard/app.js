@@ -77,6 +77,7 @@ let lastFrictionPayload = { stats: {}, tags: [], items: [] };
 let activeTab = "tasks";
 let activeDiagSubtab = "runs";
 let activeKnowledgeSubtab = "frictions";
+let activeOperationsSubtab = "routines";
 let isRefreshing = false;
 let activeFrictionId = null;
 let frictionSearchQuery = "";
@@ -147,6 +148,8 @@ function routerContext() {
     setDiagSubtab: (v) => { activeDiagSubtab = v; },
     getKnowledgeSubtab: () => activeKnowledgeSubtab,
     setKnowledgeSubtab: (v) => { activeKnowledgeSubtab = v; },
+    getOperationsSubtab: () => activeOperationsSubtab,
+    setOperationsSubtab: (v) => { activeOperationsSubtab = v; },
     getRunId: getActiveRunId,
     setRunId: setActiveRunId,
     getRunSubtab: getActiveRunSubtab,
