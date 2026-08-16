@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.11.0
+
+### Breaking Changes
+
+- **Store schema 11 → 15**: workspaces migrate on open (friction SQLite, workspace-claim scope, learning-projection removal, invocation audit context). A newer store still refuses an older binary. ([ORB-10680])
+- **Native project learnings removed**: `orbit learning`, `orbit.learning.*`, and learning search are gone — use tasks, docs, feature ADRs, and frictions. ([ORB-10736])
+- **Native ADR store and tools removed**: `orbit adr` / `orbit.adr.*` and `.orbit/adrs/` are gone — author decisions in each feature's `4_decisions.md`. ([ORB-10726])
+- **Duel, independent review, and `role:` retired**: planning-duel and review CLI/MCP/jobs are gone; activity YAML `role:` no longer loads — use `crew:` or the run-resolved crew, and ship via `task_pr_pipeline`. ([ORB-10628])
+- **Jobs are asynchronous by default**: `orbit run job` returns a durable run immediately; `--backend http|cli|auto` is gone — use `agent_cli` and pass `--wait` when you need to block. ([ORB-10801])
+- **MCP and `fs.*` builtins trimmed**: auto-task MCP advertises only list+mint; `fs.read`, `fs.delete`, and remaining `fs.*` tools are gone — use CLI/`orbit tool run` for auto-task authoring and provider-native file tools. ([ORB-10798])
+
+### Highlights
+
+- **Asynchronous job execution**: job submission returns a durable run immediately, with `--wait` and terminal diagnostics when you need to block. ([ORB-10801])
+- **Epic-owned continuous delivery**: an epic run drains descendant work through one owned worktree and lands the epic branch only after the epic's own destination checks pass. ([ORB-10815])
+- **One workspace selector grammar**: CLI and MCP accept the same registered name, logical `ws_*` id, or absolute checkout path. ([ORB-10758])
+- **Network MCP transports**: `orbit mcp listen` and related tunnel/loopback paths serve isolated sessions with explicit workspace routing and claim-gated remote execution. ([ORB-10690])
+- **Fail-closed Linux sandbox**: Bubblewrap plus policy-derived grants give Linux CLI agents and task-pilot a read-only, fail-closed execution path. ([ORB-10552])
+
 ## 0.10.0
 
 - **Telemetry no longer discards completed runs**: the `invocations` insert-bound columns (`cache_create_1h_tokens`, `provider_cost_usd`) reach existing databases through a new `invocation_telemetry_columns` migration (schema v10) instead of only the v1 baseline, and a failed invocation-trace write is now logged and recorded as a `telemetry.persist_failed` event on the run rather than failing the job. ([ORB-10367])
