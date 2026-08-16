@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -465,6 +465,8 @@ fn ensure_global_dirs(paths: &WorkspacePaths) -> Result<(), OrbitError> {
     Ok(())
 }
 
+/// Add or repair links for `skill_ids`, then reap Orbit-owned dangling
+/// leftovers whose IDs left the current default set.
 fn ensure_skill_links(
     skills_root: &Path,
     skill_ids: &[&str],
@@ -518,17 +520,7 @@ fn ensure_skill_links(
 
         if let Ok(link_meta) = fs::symlink_metadata(&link_path) {
             if link_meta.file_type().is_symlink() {
-                let target_path =
-                    fs::read_link(&link_path).map_err(|e| OrbitError::Io(e.to_string()))?;
-                let resolved_target = if target_path.is_absolute() {
-                    target_path
-                } else {
-                    link_path
-                        .parent()
-                        .unwrap_or(Path::new("."))
-                        .join(target_path)
-                        .to_path_buf()
-                };
+                let resolved_target = resolve_symlink_target(&link_path)?;
                 let canonical_expected = canonical_skills_root.join(skill_id);
                 if let Ok(canonical_existing) = resolved_target.canonicalize()
                     && canonical_existing == canonical_expected
@@ -557,6 +549,82 @@ fn ensure_skill_links(
         changed = true;
     }
 
+    changed |= reap_stale_skill_links(
+        skills_root,
+        &canonical_skills_root,
+        skill_ids,
+        skills_links_dir,
+    )?;
+
+    Ok(changed)
+}
+
+/// Resolve a symlink to the path it names without requiring the target to exist.
+fn resolve_symlink_target(link_path: &Path) -> Result<PathBuf, OrbitError> {
+    let target_path = fs::read_link(link_path).map_err(|e| OrbitError::Io(e.to_string()))?;
+    if target_path.is_absolute() {
+        Ok(target_path)
+    } else {
+        Ok(link_path
+            .parent()
+            .unwrap_or(Path::new("."))
+            .join(target_path))
+    }
+}
+
+fn is_orbit_skill_link_target(
+    resolved: &Path,
+    skills_root: &Path,
+    canonical_skills_root: &Path,
+    skill_id: &str,
+) -> bool {
+    resolved == skills_root.join(skill_id) || resolved == canonical_skills_root.join(skill_id)
+}
+
+/// Drop client-dir symlinks for skill IDs that left `default_skill_ids()`
+/// and whose Orbit-owned target has already been reaped.
+///
+/// A leftover is removed only when it is a symlink, its name is not a
+/// current default, it points at `{skills_root}/{name}` (the path Orbit
+/// itself writes), and that target no longer exists. User custom skill
+/// directories and custom symlinks that still resolve — or that point
+/// outside the Orbit skills root — are left alone.
+fn reap_stale_skill_links(
+    skills_root: &Path,
+    canonical_skills_root: &Path,
+    skill_ids: &[&str],
+    skills_links_dir: &Path,
+) -> Result<bool, OrbitError> {
+    if !skills_links_dir.exists() {
+        return Ok(false);
+    }
+
+    let current: BTreeSet<&str> = skill_ids.iter().copied().collect();
+    let mut changed = false;
+    let entries = fs::read_dir(skills_links_dir).map_err(|e| OrbitError::Io(e.to_string()))?;
+    for entry in entries {
+        let entry = entry.map_err(|e| OrbitError::Io(e.to_string()))?;
+        let path = entry.path();
+        let Some(name) = entry.file_name().to_str().map(str::to_string) else {
+            continue;
+        };
+        if current.contains(name.as_str()) {
+            continue;
+        }
+        let meta = fs::symlink_metadata(&path).map_err(|e| OrbitError::Io(e.to_string()))?;
+        if !meta.file_type().is_symlink() {
+            continue;
+        }
+        let resolved = resolve_symlink_target(&path)?;
+        if !is_orbit_skill_link_target(&resolved, skills_root, canonical_skills_root, &name) {
+            continue;
+        }
+        if path.exists() {
+            continue;
+        }
+        fs::remove_file(&path).map_err(|e| OrbitError::Io(e.to_string()))?;
+        changed = true;
+    }
     Ok(changed)
 }
 
@@ -1082,6 +1150,110 @@ mod tests {
         }
         assert!(!contents.contains("[crews."));
         assert!(!contents.contains("default_crew"));
+    }
+
+    fn retired_skill_ids() -> [&'static str; 5] {
+        [
+            "orbit-knowledge",
+            "orbit-search",
+            "orbit-task",
+            "orbit-task-pilot",
+            "orbit-workflow",
+        ]
+    }
+
+    fn write_skill_dir(dir: &Path) {
+        fs::create_dir_all(dir).expect("create skill dir");
+        fs::write(dir.join("SKILL.md"), "# skill\n").expect("write SKILL.md");
+    }
+
+    fn seed_orbit_owned_link(skills_root: &Path, links_dir: &Path, skill_id: &str) -> PathBuf {
+        let target = skills_root.join(skill_id);
+        let link = links_dir.join(skill_id);
+        fs::create_dir_all(links_dir).expect("create links dir");
+        create_dir_symlink(&target, &link).expect("create orbit-owned skill link");
+        link
+    }
+
+    #[test]
+    fn ensure_skill_links_reaps_dangling_retired_orbit_owned_links() {
+        let temp = tempdir().expect("tempdir");
+        let skills_root = temp.path().join("skills");
+        let links_dir = temp.path().join("client").join("skills");
+        write_skill_dir(&skills_root.join("orbit"));
+
+        let mut retired_links = Vec::new();
+        for id in retired_skill_ids() {
+            retired_links.push(seed_orbit_owned_link(&skills_root, &links_dir, id));
+        }
+        seed_orbit_owned_link(&skills_root, &links_dir, "orbit");
+
+        let changed = ensure_skill_links(&skills_root, &["orbit"], &links_dir, false)
+            .expect("reconcile skill links");
+        assert!(changed, "reaping retired dangling links is a change");
+
+        assert_skill_link_exists(links_dir.join("orbit"));
+        for link in retired_links {
+            assert!(
+                fs::symlink_metadata(&link).is_err(),
+                "retired dangling Orbit link must be reaped: {}",
+                link.display()
+            );
+        }
+    }
+
+    #[test]
+    fn ensure_skill_links_leaves_live_custom_and_non_orbit_entries() {
+        let temp = tempdir().expect("tempdir");
+        let skills_root = temp.path().join("skills");
+        let links_dir = temp.path().join("client").join("skills");
+        write_skill_dir(&skills_root.join("orbit"));
+
+        let custom_target = temp.path().join("custom-skill");
+        write_skill_dir(&custom_target);
+        let custom_link = links_dir.join("my-custom");
+        fs::create_dir_all(&links_dir).expect("create links dir");
+        create_dir_symlink(&custom_target, &custom_link).expect("create custom skill link");
+
+        let live_retired_target = skills_root.join("orbit-task");
+        write_skill_dir(&live_retired_target);
+        let live_retired_link = seed_orbit_owned_link(&skills_root, &links_dir, "orbit-task");
+
+        let foreign_dangling = links_dir.join("foreign-broken");
+        create_dir_symlink(&temp.path().join("does-not-exist"), &foreign_dangling)
+            .expect("create foreign dangling link");
+
+        let real_dir = links_dir.join("operator-dir");
+        write_skill_dir(&real_dir);
+
+        ensure_skill_links(&skills_root, &["orbit"], &links_dir, false)
+            .expect("reconcile skill links");
+
+        assert_skill_link_exists(links_dir.join("orbit"));
+        assert_eq!(
+            fs::read_link(&custom_link).expect("read custom link"),
+            custom_target
+        );
+        assert!(
+            custom_link.join("SKILL.md").exists(),
+            "live custom skill symlink must be left untouched"
+        );
+        assert_eq!(
+            fs::read_link(&live_retired_link).expect("read live retired link"),
+            live_retired_target,
+            "Orbit-owned link whose target still exists must be left"
+        );
+        assert!(
+            fs::symlink_metadata(&foreign_dangling)
+                .expect("foreign dangling metadata")
+                .file_type()
+                .is_symlink(),
+            "dangling symlink that does not point at the Orbit skills root stays"
+        );
+        assert!(
+            real_dir.join("SKILL.md").exists(),
+            "operator-owned skill directory must be left untouched"
+        );
     }
 
     fn assert_skill_link_exists(path: PathBuf) {
