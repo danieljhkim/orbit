@@ -2,16 +2,19 @@ use std::path::{Path, PathBuf};
 
 use chrono::Utc;
 use orbit_common::types::{
-    NotFoundKind, OrbitError, Workspace, WorkspaceCheckout, WorkspaceCheckoutRole, WorkspaceStatus,
+    NotFoundKind, OrbitError, Workspace, WorkspaceCheckout, WorkspaceCheckoutRole,
+    WorkspaceRegistry, WorkspaceStatus,
 };
 use orbit_core::OrbitRuntime;
+use orbit_core::runtime::OrbitRuntimeRoots;
 use orbit_store::sqlite::task_registry::{WorkspaceConfig, write_workspace_config};
 use serde_json::{Value, json};
 
 use orbit_registry::workspace_registry::{registry_path_for, save_registry_to};
 
 use crate::registry_runtime::{
-    RegisteredRuntimeFactory, resolved_workspace_binding, workspace_runtime_binding,
+    RegisteredRuntimeFactory, resolved_workspace_binding, select_workspace_for_cwd_and_roots,
+    workspace_runtime_binding,
 };
 
 fn workspace(id: &str, ship_mode: &str) -> Workspace {
@@ -91,6 +94,67 @@ fn registered_checkout_opens_a_bound_runtime() {
             ..
         })
     ));
+}
+
+#[test]
+fn explicit_shared_root_selects_checkout_by_cwd_and_does_not_fall_back() {
+    let root = tempfile::tempdir().expect("root");
+    let shared = root.path().join("shared");
+    let alpha_repo = root.path().join("alpha");
+    let beta_repo = root.path().join("beta");
+    let unregistered_repo = root.path().join("unregistered");
+    for directory in [&shared, &alpha_repo, &beta_repo, &unregistered_repo] {
+        std::fs::create_dir_all(directory).expect("fixture directory");
+    }
+    write_workspace_config(
+        &shared,
+        &WorkspaceConfig {
+            schema_version: 1,
+            workspace_id: "ws_shared_runtime".to_string(),
+        },
+    )
+    .expect("workspace config");
+
+    let mut alpha = workspace("ws_alpha", "pr");
+    alpha.name = "alpha".to_string();
+    let mut beta = workspace("ws_beta", "local");
+    beta.name = "beta".to_string();
+    let alpha_checkout = WorkspaceCheckout::owner(alpha.id.clone(), alpha_repo, shared.clone());
+    let beta_checkout =
+        WorkspaceCheckout::owner(beta.id.clone(), beta_repo.clone(), shared.clone());
+    save_registry_to(
+        &WorkspaceRegistry {
+            workspaces: vec![alpha, beta],
+            checkouts: vec![alpha_checkout, beta_checkout],
+            ..Default::default()
+        },
+        &registry_path_for(&shared),
+    )
+    .expect("shared registry");
+    let roots = OrbitRuntimeRoots {
+        global_root: shared.clone(),
+        shared_root: shared.clone(),
+        local_root: shared,
+    };
+
+    let selected = select_workspace_for_cwd_and_roots(&beta_repo, &roots)
+        .expect("select beta")
+        .expect("registered beta");
+    assert_eq!(selected.workspace.id, "ws_beta");
+    assert_eq!(selected.checkout.repo_root, beta_repo);
+    assert_eq!(
+        workspace_runtime_binding(&selected.workspace, &selected.checkout)
+            .expect("runtime binding")
+            .workspace_id,
+        "ws_shared_runtime"
+    );
+
+    assert!(
+        select_workspace_for_cwd_and_roots(&unregistered_repo, &roots)
+            .expect("unregistered selection")
+            .is_none(),
+        "a shared orbit_dir must not select the first registered checkout"
+    );
 }
 
 #[test]

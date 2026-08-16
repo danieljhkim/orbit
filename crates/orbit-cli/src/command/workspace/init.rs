@@ -184,8 +184,16 @@ impl WorkspaceInitArgs {
         let existing_checkout = registry
             .checkouts
             .iter()
-            .find(|checkout| checkout.repo_root == cwd || checkout.orbit_dir == orbit_dir);
+            .find(|checkout| checkout.repo_root == cwd);
         let reconciling_existing = existing_workspace.is_some() || existing_checkout.is_some();
+        let registered_shared_root = global_root == orbit_dir
+            && registry
+                .checkouts
+                .iter()
+                .any(|checkout| checkout.orbit_dir == orbit_dir);
+        if registered_shared_root {
+            validate_shared_root_identity(orbit_dir)?;
+        }
 
         if reconciling_existing && !self.force {
             return Err(OrbitError::WorkspaceError(format!(
@@ -203,8 +211,11 @@ impl WorkspaceInitArgs {
                 orbit_dir,
                 &id,
             )?;
-            validate_workspace_identity(orbit_dir, &id)?;
-        } else if let Some(identity) = read_workspace_identity(orbit_dir)?
+            if !registered_shared_root {
+                validate_workspace_identity(orbit_dir, &id)?;
+            }
+        } else if !registered_shared_root
+            && let Some(identity) = read_workspace_identity(orbit_dir)?
             && identity.workspace_id != id
         {
             // A checkout can carry an identity the registry never recorded:
@@ -325,7 +336,7 @@ impl WorkspaceInitArgs {
             }
         }
         workspace_registry::save_registry_to(&registry, registry_path)?;
-        if !reconciling_existing {
+        if !reconciling_existing && !registered_shared_root {
             write_workspace_identity(orbit_dir, &id)?;
         }
         orbit_core::runtime::HubCoordinationExecutor::register_workspace(global_root, &id, &name)?;
@@ -444,6 +455,23 @@ fn validate_workspace_identity(orbit_dir: &Path, workspace_id: &str) -> Result<(
     if identity.schema_version != 1 || identity.workspace_id != workspace_id {
         return Err(OrbitError::WorkspaceError(format!(
             "cannot reconcile workspace '{workspace_id}': checkout identity '{}' does not match",
+            path.display()
+        )));
+    }
+    Ok(())
+}
+
+fn validate_shared_root_identity(orbit_dir: &Path) -> Result<(), OrbitError> {
+    let path = orbit_dir.join("config.yaml");
+    let identity = read_workspace_identity(orbit_dir)?.ok_or_else(|| {
+        OrbitError::WorkspaceError(format!(
+            "cannot use registered shared root: runtime identity '{}' is missing",
+            path.display()
+        ))
+    })?;
+    if identity.schema_version != 1 || identity.workspace_id.trim().is_empty() {
+        return Err(OrbitError::WorkspaceError(format!(
+            "cannot use registered shared root: runtime identity '{}' is invalid",
             path.display()
         )));
     }
