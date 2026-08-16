@@ -13,7 +13,7 @@ use super::super::init::{InitOptions, init_workspace_at_root};
 use super::super::{managed_manifest_write_is_skippable, record_managed_manifest_write};
 use crate::OrbitRuntime;
 use crate::command::job::JobCatalogFilter;
-use crate::config::agent_detect::DetectedAgents;
+use orbit_config::ConfigSeed;
 
 fn init_global(root: &Path) {
     init_workspace_at_root(
@@ -21,7 +21,7 @@ fn init_global(root: &Path) {
         InitOptions {
             global_only: true,
             refresh_defaults: true,
-            detected: Some(DetectedAgents::default()),
+            config_seed: Some(ConfigSeed::default()),
             ..Default::default()
         },
     )

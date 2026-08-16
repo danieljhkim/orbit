@@ -16,18 +16,21 @@ use orbit_common::OrbitError;
 use orbit_common::fs::io::atomic_write_text;
 use orbit_common::security::redaction::redact_home_dir;
 
-use super::persistence::PersistenceConfig;
-use super::registry::{self, ConfigSnapshot};
-use super::runtime::RuntimeConfig;
+use crate::persistence::PersistenceConfig;
+use crate::registry::{self, ConfigSnapshot};
+use crate::resolved::ResolvedConfig;
 
 /// Which physical `config.toml` file a [`ConfigStore`] is bound to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ConfigScope {
+    /// The machine-wide `~/.orbit/config.toml`.
     Global,
+    /// The workspace-local `.orbit/config.toml`.
     Workspace,
 }
 
 impl ConfigScope {
+    /// Stable label used in command output.
     pub fn label(self) -> &'static str {
         match self {
             Self::Global => "global",
@@ -63,7 +66,7 @@ pub struct ConfigStore {
 impl ConfigStore {
     /// Open `path` for the given scope, reading its current content if it
     /// exists on disk. A missing file is not an error: it opens as an empty
-    /// document, matching how `RuntimeConfig::load_layered` treats a missing
+    /// document, matching how [`ResolvedConfig::load`] treats a missing
     /// config (every setting falls back to its default).
     pub fn open(scope: ConfigScope, path: impl Into<PathBuf>) -> Result<Self, OrbitError> {
         let path = path.into();
@@ -115,10 +118,12 @@ impl ConfigStore {
         Ok(Self { scope, path, doc })
     }
 
+    /// Which physical file this store is bound to.
     pub fn scope(&self) -> ConfigScope {
         self.scope
     }
 
+    /// The bound file path, whether or not it exists yet.
     pub fn path(&self) -> &Path {
         &self.path
     }
@@ -134,8 +139,8 @@ impl ConfigStore {
         let persistence =
             PersistenceConfig::default_for_data_root(self.path.parent().unwrap_or(&self.path));
         let raw = self.doc.to_string();
-        let runtime = RuntimeConfig::from_raw_str(&raw, &self.path, persistence)?;
-        Ok(runtime.snapshot.clone())
+        let resolved = ResolvedConfig::from_raw_str(&raw, &self.path, persistence)?;
+        Ok(resolved.snapshot)
     }
 
     /// Look up the effective value of a single registry key.
@@ -189,8 +194,8 @@ impl ConfigStore {
     }
 
     /// Run the in-memory document through the exact same
-    /// `RawRuntimeConfig` → `RuntimeConfig` validation pipeline as
-    /// `RuntimeConfig::load_layered`, without writing anything.
+    /// `RawRuntimeConfig` → [`ResolvedConfig`] validation pipeline as
+    /// [`ResolvedConfig::load`], without writing anything.
     pub fn validate(&self) -> Result<(), OrbitError> {
         self.snapshot().map(|_| ())
     }

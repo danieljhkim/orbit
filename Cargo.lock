@@ -2113,6 +2113,7 @@ dependencies = [
  "libc",
  "orbit-cmd",
  "orbit-common",
+ "orbit-config",
  "orbit-core",
  "orbit-mcp",
  "orbit-registry",
@@ -2140,6 +2141,7 @@ dependencies = [
  "fs2",
  "libc",
  "orbit-common",
+ "orbit-config",
  "orbit-core",
  "orbit-engine",
  "orbit-registry",
@@ -2179,6 +2181,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "orbit-config"
+version = "0.12.1"
+dependencies = [
+ "orbit-common",
+ "orbit-types",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "toml",
+ "toml_edit",
+ "tracing",
+]
+
+[[package]]
 name = "orbit-core"
 version = "0.12.1"
 dependencies = [
@@ -2187,6 +2203,7 @@ dependencies = [
  "fs2",
  "libc",
  "orbit-common",
+ "orbit-config",
  "orbit-engine",
  "orbit-exec",
  "orbit-policy",

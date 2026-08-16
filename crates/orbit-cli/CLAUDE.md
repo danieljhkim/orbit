@@ -6,11 +6,15 @@ Project instructions for the clap-based CLI entry point.
 
 `crates/orbit-cli/src/command/` follows one rule:
 
-**Directory ⟺ parent command.** A subdirectory under `command/` IS a parent
-command (`orbit <name>`) that owns subcommands. Its parent struct and
-`Subcommand` enum live in `command.rs`. `mod.rs` is module declarations and
-re-exports only — no clap derives, no command bodies. Each subcommand body
-lives in its own sibling file (`<subcommand>.rs`).
+**Directory ⟺ one command.** A subdirectory under `command/` IS a command
+(`orbit <name>`) — never a grouping of unrelated commands. Its clap struct and,
+when it has subcommands, its `Subcommand` enum live in `command.rs`. `mod.rs` is
+module declarations and re-exports only — no clap derives, no command bodies.
+Each subcommand body lives in its own sibling file (`<subcommand>.rs`).
+
+A command with no subcommands may still own a directory when it needs modules
+of its own — an adapter between the terminal/host and a domain crate, say. The
+test is the same one: everything under the directory serves that one command.
 
 **Single `.rs`** is fine for any command that fits comfortably in one file,
 whether it has subcommands inline or none at all. No minimum-files threshold
@@ -24,6 +28,10 @@ forces a directory.
   shared formatting in `output.rs`.
 - [`task/`](src/command/task) — large surface with `artifact` nested parent
   and a `tests/` subdir mirroring source files.
+- [`init/`](src/command/init) — no subcommands, but owns the host-facing init
+  adapter: `agent_detect.rs` probes `PATH` for provider CLIs, `agent_prompt.rs`
+  reads crew choices from stdin, and `seed.rs` turns both into the explicit
+  `orbit_config::ConfigSeed` handed to Core [ORB-10885].
 
 ### What `mod.rs` may contain
 

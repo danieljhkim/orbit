@@ -144,7 +144,7 @@ AO-002 scope: planning-duel plan quality on the Orbit codebase, single window in
 
 **Recorded:** 2026-07-11 19:53:22.638085Z · [ORB-10130]
 **Supersedes:** [Replace \[agent.<role>\] tables with named \[crews.*\] registry](#replace-agentrole-tables-with-named-crews-registry)
-**Paths:** `crates/orbit-common/src/types/agent_pair.rs`, `crates/orbit-core/src/config/**`, `crates/orbit-core/src/runtime/**`, `crates/orbit-store/src/**`, `crates/orbit-dashboard/src/**`, `docs/CONFIG.md`
+**Paths:** `crates/orbit-common/src/types/agent_pair.rs`, `crates/orbit-config/src/**`, `crates/orbit-core/src/runtime/**`, `crates/orbit-store/src/**`, `crates/orbit-dashboard/src/**`, `docs/CONFIG.md`
 
 ### Context
 Named crews currently carry separate planner, implementer, and reviewer assignments, but production crews are homogeneous and only the implementer is on the primary ship path. Role labels still matter for prompts and telemetry, while model selection through three independent slots adds configuration and persistence complexity without selecting distinct behavior.
@@ -161,7 +161,7 @@ A crew is one provider-model-backend assignment. Every activity role resolves to
 ## Freeze Agent Detection at Init Seeding
 
 **Recorded:** 2026-05-30 20:17:29.805438Z · [ORB-00347]
-**Paths:** `crates/orbit-core/src/config/**`, `crates/orbit-core/src/command/init.rs`, `crates/orbit-cli/src/command/init.rs`, `crates/orbit-core/assets/config/default-config.toml`
+**Paths:** `crates/orbit-config/src/**`, `crates/orbit-core/src/command/init.rs`, `crates/orbit-cli/src/command/init.rs`, `crates/orbit-config/assets/default-config.toml`
 
 ### Context
 `orbit init` needs a config that reflects installed agent surfaces, but live detection reads ambient PATH and API-key environment. Re-running detection during `RuntimeConfig::load_layered` would make crew and duel resolution vary between invocations without a config diff.
@@ -177,7 +177,7 @@ Agent availability is detected once during init using `DetectedAgents`, rendered
 ## Retire crew role slots and role-based model resolution
 
 **Recorded:** 2026-08-09 06:33:12.872319Z · [ORB-10620], [ORB-10621], [ORB-10622]
-**Paths:** `crates/orbit-common/src/types/agent_pair.rs`, `crates/orbit-common/src/types/activity_job/activity_v2.rs`, `crates/orbit-common/src/types/activity_job/job_v2.rs`, `crates/orbit-core/src/config/**`, `crates/orbit-core/src/runtime/**`, `crates/orbit-engine/src/activity_job/**`, `crates/orbit-core/assets/activities/**`, `docs/CONFIG.md`
+**Paths:** `crates/orbit-common/src/types/agent_pair.rs`, `crates/orbit-common/src/types/activity_job/activity_v2.rs`, `crates/orbit-common/src/types/activity_job/job_v2.rs`, `crates/orbit-config/src/**`, `crates/orbit-core/src/runtime/**`, `crates/orbit-engine/src/activity_job/**`, `crates/orbit-core/assets/activities/**`, `docs/CONFIG.md`
 
 ### Context
 

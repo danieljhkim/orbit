@@ -3,8 +3,9 @@
 
 use std::io::{self, BufRead, Write};
 
+use orbit_config::CrewSeed;
+
 use super::agent_detect::{DetectedAgents, default_model_for, default_provider};
-use super::raw::RawCrewAssignment;
 
 pub trait Prompter {
     fn message(&mut self, text: &str) -> io::Result<()>;
@@ -39,7 +40,7 @@ impl Prompter for StdinPrompter {
 pub fn collect_crew_setting(
     detected: &DetectedAgents,
     prompter: &mut dyn Prompter,
-) -> io::Result<RawCrewAssignment> {
+) -> io::Result<CrewSeed> {
     let recommended = recommended_crew_setting(detected);
     prompter.message(&intro_text(detected, &recommended))?;
     if yes_by_default(&prompter.prompt("Use this default crew? [Y/n]: ")?) {
@@ -67,7 +68,7 @@ pub fn collect_crew_setting(
             choice.parse::<usize>().ok().and_then(|n| n.checked_sub(1))
         };
         if let Some(option) = selected.and_then(|index| options.get(index)) {
-            return Ok(RawCrewAssignment {
+            return Ok(CrewSeed {
                 provider: Some(option.provider.to_string()),
                 model: collect_model_override(option.model, prompter)?,
             });
@@ -85,16 +86,16 @@ pub fn collect_crew_setting(
 pub fn collect_qa_crew_setting(
     detected: &DetectedAgents,
     prompter: &mut dyn Prompter,
-) -> io::Result<Option<RawCrewAssignment>> {
+) -> io::Result<Option<CrewSeed>> {
     let mut options = Vec::new();
     if detected.codex_cli {
-        options.push(RawCrewAssignment {
+        options.push(CrewSeed {
             provider: Some("codex".to_string()),
             model: Some(orbit_common::model_defaults::CODEX_DEFAULT_MODEL.to_string()),
         });
     }
     if detected.claude_cli {
-        options.push(RawCrewAssignment {
+        options.push(CrewSeed {
             provider: Some("claude".to_string()),
             model: Some(orbit_common::model_defaults::CLAUDE_DEFAULT_WEAK.to_string()),
         });
@@ -119,9 +120,9 @@ pub fn collect_qa_crew_setting(
     }
 }
 
-fn recommended_crew_setting(detected: &DetectedAgents) -> RawCrewAssignment {
+fn recommended_crew_setting(detected: &DetectedAgents) -> CrewSeed {
     let provider = default_provider(detected);
-    RawCrewAssignment {
+    CrewSeed {
         provider: Some(provider.to_string()),
         model: default_model_for(provider).map(str::to_string),
     }
@@ -130,7 +131,7 @@ fn recommended_crew_setting(detected: &DetectedAgents) -> RawCrewAssignment {
 fn collect_custom_crew(
     detected: &DetectedAgents,
     prompter: &mut dyn Prompter,
-) -> io::Result<RawCrewAssignment> {
+) -> io::Result<CrewSeed> {
     let provider_default = default_provider(detected);
     let provider = take_or_default(
         prompter.prompt(&format!("Provider [{provider_default}]: "))?,
@@ -138,7 +139,7 @@ fn collect_custom_crew(
     );
     let model_default = default_model_for(&provider).unwrap_or("");
     let model = collect_model_override(model_default, prompter)?;
-    Ok(RawCrewAssignment {
+    Ok(CrewSeed {
         provider: Some(provider),
         model,
     })
@@ -218,7 +219,7 @@ fn agent_option(label: &'static str, provider: &'static str) -> AgentOption {
     }
 }
 
-fn intro_text(detected: &DetectedAgents, recommended: &RawCrewAssignment) -> String {
+fn intro_text(detected: &DetectedAgents, recommended: &CrewSeed) -> String {
     format!(
         "Orbit routes every activity through one crew assignment. An activity input may select a different named crew; otherwise it uses the run's resolved crew.\n\nDetected agents:\n{}\n\nRecommended default crew:\n  {:<18} {}",
         detection_lines(detected),
@@ -261,7 +262,7 @@ fn format_agent_options(options: &[AgentOption]) -> String {
     lines.join("\n")
 }
 
-fn agent_display_name(config: &RawCrewAssignment) -> String {
+fn agent_display_name(config: &CrewSeed) -> String {
     match config.provider.as_deref().unwrap_or("custom") {
         "claude" => "Claude CLI".to_string(),
         "codex" => "Codex CLI".to_string(),

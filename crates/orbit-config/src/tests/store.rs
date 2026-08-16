@@ -3,7 +3,7 @@ use std::fs;
 use orbit_common::OrbitError;
 use tempfile::tempdir;
 
-use super::super::store::*;
+use crate::store::*;
 
 fn config_path(dir: &std::path::Path) -> std::path::PathBuf {
     dir.join("config.toml")
@@ -373,7 +373,7 @@ fn set_log_rotation_rejects_out_of_range_via_validate() {
 
 #[test]
 fn keys_registry_lists_all_runtime_log_keys() {
-    use super::super::registry::CONFIG_KEY_REGISTRY;
+    use crate::registry::CONFIG_KEY_REGISTRY;
     let keys: Vec<&str> = CONFIG_KEY_REGISTRY.iter().map(|entry| entry.key).collect();
     assert!(keys.contains(&"runtime.log_retention_days"), "{keys:?}");
     assert!(keys.contains(&"runtime.log_max_total_mb"), "{keys:?}");
@@ -394,7 +394,7 @@ fn keys_registry_lists_all_runtime_log_keys() {
 
 #[test]
 fn admission_registry_snapshot_and_lookup_are_complete() {
-    use super::super::registry::{CONFIG_KEY_REGISTRY, ConfigSnapshot};
+    use crate::registry::{CONFIG_KEY_REGISTRY, ConfigSnapshot};
 
     let snapshot = ConfigSnapshot::default();
     let values = snapshot.all_values();

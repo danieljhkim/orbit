@@ -1,8 +1,8 @@
 use orbit_common::model_defaults::CODEX_DEFAULT_MODEL;
 
-use super::super::agent_detect::DetectedAgents;
-use super::super::agent_prompt::testing::CannedPrompter;
-use super::super::agent_prompt::*;
+use crate::command::init::agent_detect::DetectedAgents;
+use crate::command::init::agent_prompt::testing::CannedPrompter;
+use crate::command::init::agent_prompt::*;
 
 #[test]
 fn empty_answer_accepts_one_recommended_default_crew() {

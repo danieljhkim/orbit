@@ -1,15 +1,19 @@
-use super::super::agent_detect::{DetectedAgents, detect, testing::MockAgentEnvProbe};
-use super::super::bootstrap::*;
-use super::super::raw::RawCrewAssignment;
-use super::super::raw::RawRuntimeConfig;
-use super::super::runtime::RuntimeConfig;
 use std::collections::BTreeMap;
+
 use tempfile::tempdir;
 
-fn sample_crew_settings() -> BTreeMap<String, RawCrewAssignment> {
+use crate::raw::RawRuntimeConfig;
+use crate::seed::DEFAULT_CONFIG_TEMPLATE;
+use crate::{ConfigRoots, ConfigSeed, CrewSeed, ResolvedConfig, seed_default_config};
+
+fn seed_for(families: &[&str]) -> ConfigSeed {
+    ConfigSeed::from_families(families.iter().copied())
+}
+
+fn sample_crew_settings() -> BTreeMap<String, CrewSeed> {
     BTreeMap::from([(
         "custom".to_string(),
-        RawCrewAssignment {
+        CrewSeed {
             provider: Some("codex".into()),
             model: Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.into()),
         },
@@ -29,12 +33,26 @@ fn default_template_keeps_agent_dependent_sections_out() {
     assert!(DEFAULT_CONFIG_TEMPLATE.contains("base_branch = \"main\""));
 }
 
+/// A seed is the only thing that produces crew tables. Without one the file is
+/// the static template, so config loading falls back to the built-in crews
+/// rather than to an explicitly empty registry.
+#[test]
+fn no_seed_writes_the_static_template_and_keeps_built_in_crews() {
+    let dir = tempdir().expect("tempdir");
+    let path = dir.path().join("config.toml");
+    assert!(seed_default_config(&path, None).expect("seed"));
+    let contents = std::fs::read_to_string(&path).expect("read");
+
+    assert!(!contents.contains("[crews"));
+    assert!(!contents.contains("default_crew"));
+    let resolved = load_seeded_config(&contents);
+    assert_eq!(resolved.crews, crate::resolved::default_crews());
+    assert_eq!(resolved.default_crew.as_deref(), Some("opus"));
+}
+
 #[test]
 fn claude_only_seeds_the_claude_family_plus_qa_and_system() {
-    let contents = seed_contents(
-        &detect(&MockAgentEnvProbe::new().with_binary("claude")),
-        None,
-    );
+    let contents = seed_contents(&seed_for(&["claude"]));
     let parsed = parsed_config(&contents);
 
     assert_eq!(
@@ -52,10 +70,7 @@ fn claude_only_seeds_the_claude_family_plus_qa_and_system() {
 
 #[test]
 fn codex_only_seeds_the_codex_family_plus_qa_and_system() {
-    let contents = seed_contents(
-        &detect(&MockAgentEnvProbe::new().with_binary("codex")),
-        None,
-    );
+    let contents = seed_contents(&seed_for(&["codex"]));
     let parsed = parsed_config(&contents);
 
     assert_eq!(
@@ -74,10 +89,7 @@ fn codex_only_seeds_the_codex_family_plus_qa_and_system() {
 
 #[test]
 fn gemini_only_seeds_gemini_and_a_system_crew() {
-    let contents = seed_contents(
-        &detect(&MockAgentEnvProbe::new().with_binary("gemini")),
-        None,
-    );
+    let contents = seed_contents(&seed_for(&["gemini"]));
     let parsed = parsed_config(&contents);
 
     assert_eq!(crew_names(&parsed), vec!["gemini", "system"]);
@@ -88,7 +100,7 @@ fn gemini_only_seeds_gemini_and_a_system_crew() {
 
 #[test]
 fn grok_only_seeds_grok_and_a_system_crew() {
-    let contents = seed_contents(&detect(&MockAgentEnvProbe::new().with_binary("grok")), None);
+    let contents = seed_contents(&seed_for(&["grok"]));
     let parsed = parsed_config(&contents);
 
     assert_eq!(crew_names(&parsed), vec!["grok", "system"]);
@@ -97,36 +109,25 @@ fn grok_only_seeds_grok_and_a_system_crew() {
     assert_default_crew(&parsed, Some("grok"));
 }
 
+/// Orbit ships no `ollama` crew, so a host whose only agent CLI is ollama
+/// seeds an explicitly empty registry rather than a dangling default.
 #[test]
-fn no_supported_cli_seeds_no_crews_or_dangling_default() {
-    let detected = detect(
-        &MockAgentEnvProbe::new()
-            .with_binary("ollama")
-            .with_env("ANTHROPIC_API_KEY", "anthropic")
-            .with_env("OPENAI_API_KEY", "openai")
-            .with_env("GEMINI_API_KEY", "gemini"),
-    );
-    let contents = seed_contents(&detected, None);
+fn no_supported_family_seeds_no_crews_or_dangling_default() {
+    let contents = seed_contents(&seed_for(&["ollama"]));
     let parsed = parsed_config(&contents);
 
     assert!(crew_names(&parsed).is_empty());
     assert_default_crew(&parsed, None);
     assert!(!contents.contains("[duel"));
     toml::from_str::<RawRuntimeConfig>(&contents).expect("no-provider config parses");
-    let runtime = load_seeded_config(&contents);
-    assert!(runtime.crews.is_empty());
-    assert_eq!(runtime.default_crew, None);
+    let resolved = load_seeded_config(&contents);
+    assert!(resolved.crews.is_empty());
+    assert_eq!(resolved.default_crew, None);
 }
 
 #[test]
 fn multi_provider_seed_includes_each_available_family_and_excludes_unavailable() {
-    let detected = detect(
-        &MockAgentEnvProbe::new()
-            .with_binary("claude")
-            .with_binary("codex")
-            .with_binary("grok"),
-    );
-    let parsed = parsed_config(&seed_contents(&detected, None));
+    let parsed = parsed_config(&seed_contents(&seed_for(&["claude", "codex", "grok"])));
 
     assert_eq!(
         crew_names(&parsed),
@@ -156,53 +157,18 @@ fn multi_provider_seed_includes_each_available_family_and_excludes_unavailable()
 }
 
 #[test]
-fn seeded_configs_round_trip_for_detection_permutations() {
-    let cases = [
-        ("none", DetectedAgents::default()),
-        (
-            "one cli",
-            detect(&MockAgentEnvProbe::new().with_binary("claude")),
-        ),
-        (
-            "two clis",
-            detect(
-                &MockAgentEnvProbe::new()
-                    .with_binary("claude")
-                    .with_binary("codex"),
-            ),
-        ),
-        (
-            "three clis",
-            detect(
-                &MockAgentEnvProbe::new()
-                    .with_binary("claude")
-                    .with_binary("codex")
-                    .with_binary("gemini"),
-            ),
-        ),
-        (
-            "four clis",
-            detect(
-                &MockAgentEnvProbe::new()
-                    .with_binary("claude")
-                    .with_binary("codex")
-                    .with_binary("gemini")
-                    .with_binary("grok"),
-            ),
-        ),
-        (
-            "api keys only",
-            detect(
-                &MockAgentEnvProbe::new()
-                    .with_env("ANTHROPIC_API_KEY", "anthropic")
-                    .with_env("OPENAI_API_KEY", "openai")
-                    .with_env("GEMINI_API_KEY", "gemini"),
-            ),
-        ),
+fn seeded_configs_round_trip_for_family_permutations() {
+    let cases: [(&str, &[&str]); 6] = [
+        ("none", &[]),
+        ("one family", &["claude"]),
+        ("two families", &["claude", "codex"]),
+        ("three families", &["claude", "codex", "gemini"]),
+        ("four families", &["claude", "codex", "gemini", "grok"]),
+        ("unsupported family only", &["ollama"]),
     ];
 
-    for (name, detected) in cases {
-        let contents = seed_contents(&detected, None);
+    for (name, families) in cases {
+        let contents = seed_contents(&seed_for(families));
         toml::from_str::<RawRuntimeConfig>(&contents)
             .unwrap_or_else(|err| panic!("{name} raw parse failed: {err}"));
         load_seeded_config(&contents);
@@ -211,33 +177,25 @@ fn seeded_configs_round_trip_for_detection_permutations() {
 
 #[test]
 fn seed_with_no_crew_settings_keeps_static_template_content() {
-    let dir = tempdir().expect("tempdir");
-    let path = dir.path().join("config.toml");
-    let detected = DetectedAgents::default();
-    let created = seed_default_config(&path, &detected, None).expect("seed");
-    assert!(created);
-    let contents = std::fs::read_to_string(&path).expect("read");
+    let contents = seed_contents(&ConfigSeed::default());
     assert!(no_active_role_section(&contents));
     assert!(crew_names(&parsed_config(&contents)).is_empty());
     assert!(!contents.contains("default_crew"));
     assert!(contents.contains("sandbox = \"danger-full-access\""));
 }
 
-fn seed_contents(
-    detected: &DetectedAgents,
-    crew_settings: Option<&BTreeMap<String, RawCrewAssignment>>,
-) -> String {
+fn seed_contents(seed: &ConfigSeed) -> String {
     let dir = tempdir().expect("tempdir");
     let path = dir.path().join("config.toml");
-    let created = seed_default_config(&path, detected, crew_settings).expect("seed");
+    let created = seed_default_config(&path, Some(seed)).expect("seed");
     assert!(created);
     std::fs::read_to_string(&path).expect("read")
 }
 
-fn load_seeded_config(contents: &str) -> RuntimeConfig {
+fn load_seeded_config(contents: &str) -> ResolvedConfig {
     let dir = tempdir().expect("tempdir");
     std::fs::write(dir.path().join("config.toml"), contents).expect("write config");
-    RuntimeConfig::load_layered(dir.path(), dir.path()).expect("runtime config loads")
+    ResolvedConfig::load(&ConfigRoots::global_only(dir.path())).expect("resolved config loads")
 }
 
 fn parsed_config(contents: &str) -> toml::Value {
@@ -289,13 +247,7 @@ fn no_active_role_section(contents: &str) -> bool {
 
 #[test]
 fn seed_with_crew_settings_writes_custom_crew() {
-    let dir = tempdir().expect("tempdir");
-    let path = dir.path().join("config.toml");
-    let settings = sample_crew_settings();
-    let detected = DetectedAgents::default();
-    let created = seed_default_config(&path, &detected, Some(&settings)).expect("seed");
-    assert!(created);
-    let contents = std::fs::read_to_string(&path).expect("read");
+    let contents = seed_contents(&ConfigSeed::default().with_crews(sample_crew_settings()));
 
     assert!(no_active_role_section(&contents));
     assert!(contents.contains("default_crew = \"custom\""));
@@ -312,7 +264,7 @@ fn seed_with_crew_settings_writes_custom_crew() {
         .get("crews")
         .expect("crews table")
         .as_table()
-        .unwrap();
+        .expect("crews is a table");
     assert_eq!(crews.len(), 1, "custom init must not invent provider crews");
     let custom = crews
         .get("custom")
@@ -335,9 +287,8 @@ fn seed_with_existing_file_is_noop() {
     let path = dir.path().join("config.toml");
     std::fs::write(&path, "# pre-existing user content\n").expect("preseed");
 
-    let settings = sample_crew_settings();
-    let detected = DetectedAgents::default();
-    let created = seed_default_config(&path, &detected, Some(&settings)).expect("seed");
+    let seed = ConfigSeed::default().with_crews(sample_crew_settings());
+    let created = seed_default_config(&path, Some(&seed)).expect("seed");
     assert!(!created);
 
     let contents = std::fs::read_to_string(&path).expect("read");
@@ -346,13 +297,7 @@ fn seed_with_existing_file_is_noop() {
 
 #[test]
 fn seed_with_empty_crew_map_uses_no_provider_behavior() {
-    let dir = tempdir().expect("tempdir");
-    let path = dir.path().join("config.toml");
-    let settings: BTreeMap<String, RawCrewAssignment> = BTreeMap::new();
-    let detected = DetectedAgents::default();
-    let created = seed_default_config(&path, &detected, Some(&settings)).expect("seed");
-    assert!(created);
-    let contents = std::fs::read_to_string(&path).expect("read");
+    let contents = seed_contents(&ConfigSeed::default().with_crews(BTreeMap::new()));
     let parsed = parsed_config(&contents);
     assert!(crew_names(&parsed).is_empty());
     assert_default_crew(&parsed, None);
@@ -364,9 +309,9 @@ fn seed_with_incomplete_crew_settings_fails() {
     let path = dir.path().join("config.toml");
     let mut settings = sample_crew_settings();
     settings.get_mut("custom").expect("custom").model.take();
-    let detected = DetectedAgents::default();
-    let error =
-        seed_default_config(&path, &detected, Some(&settings)).expect_err("missing model fails");
+    let seed = ConfigSeed::default().with_crews(settings);
+
+    let error = seed_default_config(&path, Some(&seed)).expect_err("missing model fails");
     assert!(
         error
             .to_string()

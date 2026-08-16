@@ -1,6 +1,6 @@
 use clap::Args;
+use orbit_config::CONFIG_KEY_REGISTRY;
 use orbit_core::OrbitRuntime;
-use orbit_core::config::CONFIG_KEY_REGISTRY;
 use serde_json::json;
 
 use crate::command::{CommandOut, CommandOutput, Execute, Payload};

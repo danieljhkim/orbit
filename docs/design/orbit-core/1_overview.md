@@ -34,8 +34,9 @@ demonstrably import.
 
 ## 2. Core Concepts
 
-- **Runtime kernel** — `OrbitRuntime` construction: root resolution, config
-  layering, store/policy/tool wiring, default asset seeding, event bus.
+- **Runtime kernel** — `OrbitRuntime` construction: root resolution, loading
+  the resolved configuration from `orbit-config`, store/policy/tool wiring,
+  default asset seeding, event bus.
 - **Runtime-integrated command** — a command module the kernel itself invokes
   (from the `orbit.*` tool hosts, the engine hosts, or bootstrap seeding).
   These stay in `orbit-core::command`.
@@ -56,7 +57,8 @@ demonstrably import.
 |---|---|---|
 | Runtime bootstrap + roots | `crates/orbit-core/src/runtime/` | [ORB-10012] |
 | Context assembly | `crates/orbit-core/src/context.rs` | — |
-| Config layering | `crates/orbit-core/src/config/` | — |
+| Config loading + engine translation | `crates/orbit-core/src/runtime/builder.rs` | [ORB-10885] |
+| Config layering (owning crate) | `crates/orbit-config/src/` | [ORB-10885] |
 | Runtime-integrated commands | `crates/orbit-core/src/command/` | [ORB-10016] |
 | Registered runtime + routine composition | `crates/orbit-cmd/src/registry_runtime.rs`, `crates/orbit-cmd/src/registry_routines.rs` | — |
 | Host identity + local workspace catalog | `crates/orbit-registry/src/` | — |

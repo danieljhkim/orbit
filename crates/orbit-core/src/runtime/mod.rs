@@ -586,11 +586,11 @@ impl OrbitRuntime {
         self.context.shared_root()
     }
 
-    pub(crate) fn execution_env_policy(&self) -> &crate::config::ExecutionEnvPolicy {
+    pub(crate) fn execution_env_policy(&self) -> &orbit_config::ExecutionEnvPolicy {
         self.context.execution_env_policy()
     }
 
-    pub(crate) fn codex_execution_policy(&self) -> &crate::config::CodexExecutionPolicy {
+    pub(crate) fn codex_execution_policy(&self) -> &orbit_config::CodexExecutionPolicy {
         self.context.codex_execution_policy()
     }
 

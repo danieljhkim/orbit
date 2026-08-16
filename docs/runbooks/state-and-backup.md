@@ -2,7 +2,7 @@
 type: runbook
 summary: Locate Orbit state and perform WAL-safe backups, restores, and task migrations.
 tags: [operations, backup, restore, state, sqlite]
-paths: ["crates/orbit-common/src/types/workspace.rs", "crates/orbit-core/src/config/**", "crates/orbit-registry/**", "crates/orbit-store/**", "crates/orbit-web/src/state.rs"]
+paths: ["crates/orbit-common/src/types/workspace.rs", "crates/orbit-config/src/**", "crates/orbit-registry/**", "crates/orbit-store/**", "crates/orbit-web/src/state.rs"]
 related_features: [orbit-core, remote-access]
 related_artifacts: [ORB-10014, ORB-10294, ORB-10473]
 last_validated: 2026-08-15
@@ -19,7 +19,7 @@ Two roots hold Orbit state. **Workspace state** lives in `<repo>/.orbit/`;
 **user/machine state** lives in `~/.orbit/` (override with `--root <dir>`, highest
 precedence). Path layout is defined in
 `crates/orbit-common/src/types/workspace.rs` (`WorkspacePaths`) and
-`crates/orbit-core/src/config/persistence.rs` (`PersistenceConfig`).
+`crates/orbit-config/src/persistence.rs` (`PersistenceConfig`).
 
 ### Workspace `.orbit/`
 
