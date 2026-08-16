@@ -12,8 +12,8 @@ spec:
     field, lifecycle state, dispatch state, and recommendation remains unchanged.
   input_schema_json:
     type: object
-    # No `crew`: the pilots resolve `workflow.system_crew` per machine at
-    # dispatch, so this step has no crew name it could record truthfully.
+    # No `crew`: this apply step is deterministic and runs no agent, so it has
+    # no crew to record. The pilots that fed it name `system` on their own step.
     required: [prepared, results, workspace_path]
     properties:
       prepared:

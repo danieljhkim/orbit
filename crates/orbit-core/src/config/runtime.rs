@@ -15,7 +15,7 @@ use crate::paths;
 
 use super::persistence::PersistenceConfig;
 use super::raw::{RawCrewEntry, RawRuntimeConfig, RawTaskSection};
-use super::registry::ConfigSnapshot;
+use super::registry::{ConfigSnapshot, DEFAULT_WORKFLOW_SYSTEM_CREW, LEGACY_WORKFLOW_SYSTEM_CREW};
 
 const WORKSPACE_REPLACE_ONLY_KEYS: &[&str] = &[
     "execution.codex.approval_policy",
@@ -196,8 +196,9 @@ impl RuntimeConfig {
             &document,
             std::env::var(RETIRED_BACKEND_ENV).ok().as_deref(),
         )?;
-        let crews = crews_from_raw(parsed.crews.as_ref())?;
+        let mut crews = crews_from_raw(parsed.crews.as_ref())?;
         let snapshot = ConfigSnapshot::admit(&document, config_path, &crews)?;
+        alias_system_crew(&mut crews, &snapshot.workflow_system_crew);
 
         if parsed
             .knowledge
@@ -568,6 +569,12 @@ pub(crate) fn default_crews() -> BTreeMap<String, Crew> {
         ("luna", CODEX_LUNA_MODEL, "codex"),
         ("gemini", GEMINI_CREW_MODEL, "gemini"),
         ("grok", GROK_DEFAULT_MODEL, "grok"),
+        // [ORB-10877] Shipped job steps name `system` directly, so the
+        // built-in set used by a config with no `[crews]` table must define it
+        // or those pipelines fail validation. `orbit init` overwrites this with
+        // the detected family's cheapest tier; the claude tier here matches the
+        // family the built-in `default_crew` already assumes.
+        (DEFAULT_WORKFLOW_SYSTEM_CREW, CLAUDE_DEFAULT_WEAK, "claude"),
     ] {
         crews.insert(
             name.to_string(),
@@ -665,6 +672,37 @@ fn crews_from_raw(
         }
     }
     Ok(crews)
+}
+
+/// [ORB-10877] Shipped job steps name the `system` crew directly so the
+/// definition says which crew does the work. A config written before that crew
+/// was seeded has no `[crews.system]` table, so resolve the name rather than
+/// failing those hosts at dispatch.
+///
+/// `configured` is `workflow.system_crew`, which is how such a config already
+/// says where system work belongs — honoring it keeps a host that points the
+/// lane at a cheap crew on that crew instead of silently relocating its system
+/// work. Only when that key is unset (so it still reads as the default
+/// `system`) does this fall back to `qa`, the crew that carried the lane
+/// before. An explicit `[crews.system]` always wins over both.
+fn alias_system_crew(crews: &mut BTreeMap<String, Crew>, configured: &str) {
+    if crews.contains_key(DEFAULT_WORKFLOW_SYSTEM_CREW) {
+        return;
+    }
+    let Some(source) = crews
+        .get(configured)
+        .or_else(|| crews.get(LEGACY_WORKFLOW_SYSTEM_CREW))
+        .cloned()
+    else {
+        return;
+    };
+    crews.insert(
+        DEFAULT_WORKFLOW_SYSTEM_CREW.to_string(),
+        Crew {
+            name: DEFAULT_WORKFLOW_SYSTEM_CREW.to_string(),
+            ..source
+        },
+    );
 }
 
 fn normalized_crew_description(raw: Option<&str>) -> Option<String> {

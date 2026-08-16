@@ -48,8 +48,8 @@ spec:
               type: number
             max_rebacklogs:
               type: number
-      system_crew:
-        type: boolean
+      crew:
+        type: string
   output_schema_json:
     type: object
     required: [dispositions]

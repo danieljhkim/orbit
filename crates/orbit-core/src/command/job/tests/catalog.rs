@@ -308,13 +308,13 @@ fn task_pilot_pipeline_resolves_system_crew_and_bounded_all_join_partitions() {
     let pilot_input = pilot.default_input.as_ref().expect("pilot input");
     assert_eq!(pilot_input["task_ids"], "{{ item.task_ids }}");
     assert_eq!(
-        pilot_input["system_crew"],
-        json!(true),
-        "the pilot worker must resolve workflow.system_crew at dispatch"
+        pilot_input["crew"],
+        json!("system"),
+        "the pilot worker must name the system crew so the definition states who runs it"
     );
     assert!(
-        pilot_input.get("crew").is_none(),
-        "the pilot worker must not name a crew literally"
+        pilot_input.get("system_crew").is_none(),
+        "naming the crew directly replaces the system-crew marker"
     );
 
     let JobV2StepBody::TargetRef(apply) = &asset.spec.steps[2].body else {

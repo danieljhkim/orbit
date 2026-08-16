@@ -7,7 +7,7 @@ use orbit_common::utility::fs::write_text_with_parent;
 
 use super::agent_detect::{DetectedAgents, available_crew_families, default_crew_name};
 use super::raw::{RawCrewAssignment, RawCrewEntry};
-use super::registry::DEFAULT_WORKFLOW_SYSTEM_CREW;
+use super::registry::{DEFAULT_WORKFLOW_SYSTEM_CREW, LEGACY_WORKFLOW_SYSTEM_CREW};
 use super::runtime::default_crews;
 
 pub(crate) const DEFAULT_CONFIG_TEMPLATE: &str =
@@ -109,6 +109,25 @@ fn render_crews(
         );
     }
 
+    if let Some(qa) = crew_settings
+        .and_then(|settings| settings.get(LEGACY_WORKFLOW_SYSTEM_CREW).cloned())
+        .or_else(|| default_qa_crew(detected))
+    {
+        crews.insert(
+            LEGACY_WORKFLOW_SYSTEM_CREW.to_string(),
+            RawCrewEntry {
+                provider: qa.provider,
+                model: qa.model,
+                backend: None,
+                description: None,
+                tags: Vec::new(),
+                planner: None,
+                implementer: None,
+                reviewer: None,
+            },
+        );
+    }
+
     if let Some(system) = crew_settings
         .and_then(|settings| settings.get(DEFAULT_WORKFLOW_SYSTEM_CREW).cloned())
         .or_else(|| default_system_crew(detected))
@@ -138,6 +157,24 @@ fn render_crews(
         rendered.push_str("[crews]\n");
     }
     Ok(rendered)
+}
+
+/// Seed the `qa` crew that predates the `system` lane. It stays seeded and
+/// keeps its interactive prompt because configs and workflows already name it;
+/// system activities moved to [`default_system_crew`] rather than repurposing
+/// this one.
+fn default_qa_crew(detected: &DetectedAgents) -> Option<RawCrewAssignment> {
+    let (provider, model) = if detected.codex_cli {
+        ("codex", orbit_common::model_defaults::CODEX_DEFAULT_MODEL)
+    } else if detected.claude_cli {
+        ("claude", orbit_common::model_defaults::CLAUDE_DEFAULT_WEAK)
+    } else {
+        return None;
+    };
+    Some(RawCrewAssignment {
+        provider: Some(provider.to_string()),
+        model: Some(model.to_string()),
+    })
 }
 
 /// Seed the bounded system lane: step-failure recovery, failed-run triage, and

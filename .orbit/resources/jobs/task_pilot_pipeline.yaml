@@ -10,15 +10,17 @@
 # fail the run before the context-only deterministic apply step can execute.
 #
 # Crew resolution
-# - The pilot step carries `system_crew: true`, so dispatch resolves
-#   `workflow.system_crew` on the machine that runs it. Naming a crew here
-#   instead would pin a family whose `[crews]` entry only exists where that
-#   agent CLI was on PATH at `orbit init` time, and a missing entry is a hard
-#   dispatch failure rather than a fallback.
-# - There is deliberately no per-run `crew` job input: the system-crew marker
-#   overwrites `crew` unconditionally before crew settings are resolved, so
-#   such an input could never take effect. Re-point `workflow.system_crew` to
-#   change which crew the pilots run on.
+# - The pilot step names the `system` crew directly, so this definition states
+#   which crew does the work instead of deferring it to a config key. `orbit
+#   init` seeds `[crews.system]` for whichever agent CLI it detects, choosing
+#   that family's cheapest tier, so the name resolves on any host rather than
+#   pinning a family the way a `luna` or `sonnet` here would.
+# - Change the model behind these pilots by editing `[crews.system]`. A config
+#   written before that crew existed resolves the name onto whichever crew its
+#   `workflow.system_crew` names, or onto `qa` when that key is unset.
+# - There is deliberately no per-run `crew` job input: the step-level crew
+#   below already wins over run input during dispatch, so such an input could
+#   never take effect.
 
 schemaVersion: 2
 kind: Job
@@ -56,9 +58,8 @@ spec:
             partition_index: "{{ item.partition_index }}"
             workspace_path: "{{ steps.prepare.output.workspace_path }}"
             base_branch: "{{ input.base_branch }}"
-            # Causes dispatch to resolve workflow.system_crew into the explicit
-            # crew input; see the crew-resolution note at the top of this file.
-            system_crew: true
+            # See the crew-resolution note at the top of this file.
+            crew: system
       fan_in:
         join:
           mode: all

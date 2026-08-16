@@ -16,9 +16,9 @@ spec:
     repository-write, task-update, lifecycle, dispatch, or scheduling grant.
   input_schema_json:
     type: object
-    # No `crew`: the pipeline marks this step `system_crew: true` and dispatch
-    # resolves `workflow.system_crew` for the machine that runs it, so the
-    # crew never has to appear in this activity's own contract.
+    # `crew` is optional here: the pipeline names `system` on the pilot step so
+    # the crew is readable in the job definition, while a direct invocation may
+    # omit it and inherit the run's resolved crew.
     required: [task_ids, workspace_path, base_branch, partition_index]
     properties:
       task_ids:
@@ -33,6 +33,8 @@ spec:
         type: string
       partition_index:
         type: number
+      crew:
+        type: string
   # Agent-returned data is advisory until apply_task_pilot_results validates
   # the complete fan-in, so keep fields optional at this boundary and let that
   # validation step — not the schema — reject an incomplete partition.

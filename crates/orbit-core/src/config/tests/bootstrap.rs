@@ -30,7 +30,7 @@ fn default_template_keeps_agent_dependent_sections_out() {
 }
 
 #[test]
-fn claude_only_seeds_the_claude_family_and_system() {
+fn claude_only_seeds_the_claude_family_plus_qa_and_system() {
     let contents = seed_contents(
         &detect(&MockAgentEnvProbe::new().with_binary("claude")),
         None,
@@ -39,29 +39,35 @@ fn claude_only_seeds_the_claude_family_and_system() {
 
     assert_eq!(
         crew_names(&parsed),
-        vec!["fable", "opus", "sonnet", "system"]
+        vec!["fable", "opus", "qa", "sonnet", "system"]
     );
     assert_crew(&parsed, "opus", "claude", "opus");
     assert_crew(&parsed, "sonnet", "claude", "sonnet");
     assert_crew(&parsed, "fable", "claude", "fable");
+    assert_crew(&parsed, "qa", "claude", "sonnet");
     assert_crew(&parsed, "system", "claude", "sonnet");
     assert_default_crew(&parsed, Some("opus"));
     assert!(!contents.contains("[duel"));
 }
 
 #[test]
-fn codex_only_seeds_the_codex_family_and_system() {
+fn codex_only_seeds_the_codex_family_plus_qa_and_system() {
     let contents = seed_contents(
         &detect(&MockAgentEnvProbe::new().with_binary("codex")),
         None,
     );
     let parsed = parsed_config(&contents);
 
-    assert_eq!(crew_names(&parsed), vec!["luna", "sol", "system", "terra"]);
+    assert_eq!(
+        crew_names(&parsed),
+        vec!["luna", "qa", "sol", "system", "terra"]
+    );
     assert_crew(&parsed, "sol", "codex", "gpt-5.6-sol");
     assert_crew(&parsed, "terra", "codex", "gpt-5.6-terra");
     assert_crew(&parsed, "luna", "codex", "gpt-5.6-luna");
-    // The system lane takes the cheapest codex tier, not the family default.
+    // `qa` keeps the family default it has always been seeded with; only the
+    // newer system lane drops to the cheapest tier.
+    assert_crew(&parsed, "qa", "codex", "gpt-5.6-terra");
     assert_crew(&parsed, "system", "codex", "gpt-5.6-luna");
     assert_default_crew(&parsed, Some("sol"));
 }
@@ -125,7 +131,7 @@ fn multi_provider_seed_includes_each_available_family_and_excludes_unavailable()
     assert_eq!(
         crew_names(&parsed),
         vec![
-            "fable", "grok", "luna", "opus", "sol", "sonnet", "system", "terra"
+            "fable", "grok", "luna", "opus", "qa", "sol", "sonnet", "system", "terra"
         ]
     );
     assert_default_crew(&parsed, Some("opus"));
@@ -136,6 +142,7 @@ fn multi_provider_seed_includes_each_available_family_and_excludes_unavailable()
     assert_crew(&parsed, "terra", "codex", "gpt-5.6-terra");
     assert_crew(&parsed, "luna", "codex", "gpt-5.6-luna");
     assert_crew(&parsed, "grok", "grok", "grok-4.6");
+    assert_crew(&parsed, "qa", "codex", "gpt-5.6-terra");
     // codex outranks claude and grok in the system-lane preference order.
     assert_crew(&parsed, "system", "codex", "gpt-5.6-luna");
     for crew in crews(&parsed).values() {

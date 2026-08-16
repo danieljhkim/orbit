@@ -9,7 +9,7 @@
 # runs remain available for any workspace task and do not use this gate.
 #
 # The four-hour cadence bounds unattended agent work. At most 50 tasks form
-# five-task partitions; five reviewers on the configured `workflow.system_crew`
+# five-task partitions; five reviewers on the `system` crew
 # run concurrently, so two 30-minute waves plus deterministic preparation/apply
 # fit inside the 90-minute timeout.
 schemaVersion: 1

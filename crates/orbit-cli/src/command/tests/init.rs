@@ -138,6 +138,7 @@ fn non_interactive_init_against_non_global_root_leaves_home_skill_links_untouche
         ("luna", "codex", "gpt-5.6-luna"),
         ("gemini", "gemini", "gemini-3.7-flash"),
         ("grok", "grok", "grok-4.6"),
+        ("qa", "", ""),
         ("system", "", ""),
     ];
     if let Some(crews) = crews {
@@ -150,7 +151,21 @@ fn non_interactive_init_against_non_global_root_leaves_home_skill_links_untouche
                 .unwrap_or_else(|| panic!("unexpected seeded crew {name}"));
             // [ORB-10801] Seeded crews carry no retired backend key.
             assert!(crew.get("backend").is_none());
-            if name == "system" {
+            if name == "qa" {
+                // `qa` predates the system lane and keeps the family default
+                // it has always been seeded with. It is only seeded for codex
+                // and claude, so no grok/gemini branch is reachable here.
+                let (provider, model) = if crews.contains_key("terra") {
+                    ("codex", "gpt-5.6-terra")
+                } else {
+                    ("claude", "sonnet")
+                };
+                assert_eq!(
+                    crew.get("provider").and_then(toml::Value::as_str),
+                    Some(provider),
+                );
+                assert_eq!(crew.get("model").and_then(toml::Value::as_str), Some(model),);
+            } else if name == "system" {
                 // Preference order: codex luna, then claude sonnet, then grok,
                 // then gemini flash. Cheapest tier per family, not the
                 // family default.
