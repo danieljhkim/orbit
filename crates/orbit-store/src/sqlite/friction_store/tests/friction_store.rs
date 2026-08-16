@@ -2,7 +2,7 @@
 
 use chrono::{TimeZone, Utc};
 use orbit_common::test_fixtures::TEST_CODEX_MODEL;
-use orbit_common::types::FrictionStatus;
+use orbit_types::record::FrictionStatus;
 use serde_json::json;
 
 use super::super::queries::DECODED_RECORDS;

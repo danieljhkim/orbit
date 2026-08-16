@@ -3,12 +3,11 @@ use crate::OrbitRuntime;
 use crate::command::task::{TaskAddParams, TaskUpdateParams};
 use crate::{ShipMode, WorkspaceRuntimeBinding};
 use chrono::Utc;
-use orbit_common::types::{
-    DeterministicAction, NO_DIFF_EXPECTED_TAG, PipelineState, TaskPriority, TaskStatus, TaskType,
-};
 use orbit_engine::DispatchError;
 use orbit_engine::RuntimeHost;
 use orbit_tools::ToolContext;
+use orbit_types::task::{NO_DIFF_EXPECTED_TAG, TaskPriority, TaskStatus, TaskType};
+use orbit_types::workflow::{DeterministicAction, PipelineState};
 use serde_json::json;
 use tempfile::tempdir;
 

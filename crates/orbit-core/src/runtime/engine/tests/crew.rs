@@ -3,7 +3,7 @@
 use std::sync::{Mutex, MutexGuard, OnceLock};
 
 use chrono::Utc;
-use orbit_common::types::activity_job::ProviderSource;
+use orbit_types::workflow::activity_job::ProviderSource;
 use serde_json::json;
 use tempfile::{TempDir, tempdir};
 

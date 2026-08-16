@@ -2,7 +2,8 @@
 
 use std::path::Path;
 
-use orbit_common::types::{McpTransport, OrbitError, ToolSessionContext};
+use orbit_common::OrbitError;
+use orbit_types::tool::{McpTransport, ToolSessionContext};
 
 use orbit_registry::{HostIdentityState, inspect_host_identity, os_hostname};
 

@@ -11,9 +11,11 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
-use orbit_common::types::{Crew, CrewAssignment, OrbitError, activity_job::Provider, resolve_crew};
-use orbit_common::utility::log_rotation::LogRotationConfig;
-use orbit_common::utility::redaction::redact_home_dir;
+use orbit_common::OrbitError;
+use orbit_common::observability::log_rotation::LogRotationConfig;
+use orbit_common::security::redaction::redact_home_dir;
+use orbit_types::identity::{Crew, CrewAssignment, resolve_crew};
+use orbit_types::workflow::Provider;
 use serde::de::DeserializeOwned;
 use serde_json::{Value as JsonValue, json};
 

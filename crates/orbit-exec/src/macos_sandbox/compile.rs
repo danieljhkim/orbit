@@ -1,6 +1,7 @@
 use std::ffi::OsStr;
 
-use orbit_common::types::{OrbitError, ResolvedFsProfile};
+use orbit_common::OrbitError;
+use orbit_types::policy::ResolvedFsProfile;
 
 /// Compile a [`ResolvedFsProfile`] into SBPL text suitable for
 /// `sandbox-exec -f`.

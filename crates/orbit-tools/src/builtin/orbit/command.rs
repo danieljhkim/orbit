@@ -6,7 +6,7 @@
 //! operator-precedence bugs are impossible by construction. It requires operator
 //! capability (enforced at the MCP policy layer and, uniformly across every
 //! entry point, at the governed-operation chokepoint in
-//! `orbit_common::authorization`) and the workspace claim (enforced in
+//! `orbit_common::governance::authorization`) and the workspace claim (enforced in
 //! `OrbitRuntime::execute_remote_command`, the same chokepoint `orbit.workflow.ship`
 //! uses).
 //!
@@ -14,7 +14,8 @@
 //! managed run's leaf agent must not reach a general command surface, which
 //! would let it bypass every tool-specific policy by invoking the CLI directly.
 
-use orbit_common::types::{OrbitError, ToolParam, ToolSchema};
+use orbit_common::OrbitError;
+use orbit_types::tool::{ToolParam, ToolSchema};
 use serde_json::Value;
 
 use crate::{OrbitBuiltinAction, Tool, ToolContext};

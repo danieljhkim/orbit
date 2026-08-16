@@ -3,9 +3,9 @@
 
 use std::path::Path;
 
-use orbit_common::types::{
-    McpToolDefinition, NotFoundKind, OrbitError, OrbitEvent, StoredTool, ToolParam,
-};
+use orbit_common::{NotFoundKind, OrbitError};
+use orbit_types::record::OrbitEvent;
+use orbit_types::tool::{McpToolDefinition, StoredTool, ToolParam};
 
 use crate::OrbitRuntime;
 
@@ -16,7 +16,7 @@ pub struct ToolInfo {
     pub enabled: bool,
     pub active: bool,
     pub builtin: bool,
-    pub parameters: Vec<orbit_common::types::ToolParam>,
+    pub parameters: Vec<orbit_types::tool::ToolParam>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

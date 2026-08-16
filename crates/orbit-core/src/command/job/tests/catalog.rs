@@ -3,12 +3,12 @@ use super::super::catalog::JobCatalogFilter;
 use std::path::{Path, PathBuf};
 
 use chrono::Utc;
-use orbit_common::types::activity_job::{V2ActivityCatalog, resolve_job_target_refs};
-use orbit_common::types::{
-    ActivityV2Spec, JobRunState, JobV2, JobV2Step, JobV2StepBody, PipelineState,
-    load_activity_asset, load_job_asset,
-};
+use orbit_engine::activity_job::{V2ActivityCatalog, resolve_job_target_refs};
+use orbit_engine::activity_job::{load_activity_asset, load_job_asset};
 use orbit_engine::{inject_system_crew_input, resolve_crew_settings};
+use orbit_types::workflow::{
+    ActivityV2Spec, JobRunState, JobV2, JobV2Step, JobV2StepBody, PipelineState,
+};
 use serde_json::{Value, json};
 use std::collections::BTreeSet;
 use tempfile::tempdir;
@@ -227,7 +227,7 @@ fn assert_condition_tokens_are_paths(condition: &str) {
     }
 }
 
-fn assert_step_condition_tokens_are_paths(step: &orbit_common::types::JobV2Step) {
+fn assert_step_condition_tokens_are_paths(step: &orbit_types::workflow::JobV2Step) {
     if let Some(when) = &step.when {
         assert_condition_tokens_are_paths(when);
     }
@@ -298,7 +298,7 @@ fn task_pilot_pipeline_resolves_system_crew_and_bounded_all_join_partitions() {
     assert_eq!(fan_out.max_workers, 5);
     assert_eq!(
         fan_in.join,
-        orbit_common::types::activity_job::JoinMode::All
+        orbit_types::workflow::activity_job::JoinMode::All
     );
     assert_eq!(fan_in.collect.as_deref(), Some("pilot_results"));
     let JobV2StepBody::TargetRef(pilot) = &fan_out.worker.body else {

@@ -1,4 +1,5 @@
-use orbit_common::types::{InvocationTrace, KnowledgeRunMetrics, TokenUsage, ToolCallTrace};
+use orbit_types::telemetry::{InvocationTrace, TokenUsage, ToolCallTrace};
+use orbit_types::workflow::KnowledgeRunMetrics;
 
 use super::super::merge_invocation_trace;
 

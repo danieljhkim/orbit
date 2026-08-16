@@ -47,7 +47,7 @@ pub use store::{ConfigScope, ConfigStore, WorkspaceInitMode};
 pub fn validate_layered_config(
     global_root: &std::path::Path,
     data_root: &std::path::Path,
-) -> Result<(), orbit_common::types::OrbitError> {
+) -> Result<(), orbit_common::OrbitError> {
     RuntimeConfig::load_layered(global_root, data_root).map(|_| ())
 }
 
@@ -57,7 +57,7 @@ pub fn validate_layered_config(
 pub fn resolved_audit_db_path(
     global_root: &std::path::Path,
     orbit_dir: &std::path::Path,
-) -> Result<std::path::PathBuf, orbit_common::types::OrbitError> {
+) -> Result<std::path::PathBuf, orbit_common::OrbitError> {
     Ok(RuntimeConfig::load_layered(global_root, orbit_dir)?
         .persistence
         .audit_db)

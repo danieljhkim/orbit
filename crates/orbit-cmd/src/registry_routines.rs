@@ -5,12 +5,13 @@
 use std::path::Path;
 
 use chrono::Utc;
-use orbit_common::types::{OrbitError, WorkspaceStatus};
+use orbit_common::OrbitError;
 use orbit_core::routines::{
     DiscoveredWorkspaces, RoutineHostIdentity, RoutineLoadError, RoutinePlacementProjection,
     RoutinePlacementProvider, RoutineRegistryView, RoutineStatusReport, RoutineWorkspaceProvider,
     SweepOptions, SweepOutcome,
 };
+use orbit_types::workspace::WorkspaceStatus;
 
 use orbit_registry::host_identity::{HostIdentity, load_host_identity};
 use orbit_registry::workspace_registry;

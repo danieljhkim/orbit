@@ -21,7 +21,8 @@
 use std::borrow::Cow;
 use std::path::Path;
 
-use orbit_common::types::{OrbitError, parse_auto_task_yaml};
+use orbit_common::OrbitError;
+use orbit_common::protocol::yaml::parse_auto_task_yaml;
 
 use crate::command::{ManagedAssetLayout, ManagedAssetReconciliation, reconcile_managed_assets};
 

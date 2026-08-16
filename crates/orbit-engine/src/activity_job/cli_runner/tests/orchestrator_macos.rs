@@ -5,8 +5,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use orbit_agent::loop_engine::audit::AuditSink;
-use orbit_common::types::activity_job::V2AuditEventKind;
 use orbit_exec::sandbox_exec_program_for_audit;
+use orbit_types::workflow::activity_job::V2AuditEventKind;
 use tempfile::tempdir;
 
 use super::super::super::audit_writer::V2AuditWriter;

@@ -4,7 +4,8 @@ use crate::agent::{AgentConfig, ProviderOptions};
 use crate::providers::codex::codex_cli::CodexCliTransport;
 use crate::runtime::{AgentRuntime, AgentRuntimeFactory};
 use crate::types::{AgentInvocationSpec, AgentRequest};
-use orbit_common::types::{InvocationTrace, OrbitError};
+use orbit_common::OrbitError;
+use orbit_types::telemetry::InvocationTrace;
 
 const RUNTIME_KEY: &str = "codex";
 const REQUIRED_ENV_VARS: &[&str] = &["HOME", "PATH"];

@@ -1,8 +1,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use chrono::{DateTime, SecondsFormat, TimeDelta, Utc};
-use orbit_common::types::{Task, TaskStatus, task_dependencies_ready};
 use orbit_engine::DispatchError;
+use orbit_types::task::{Task, TaskStatus, task_dependencies_ready};
 use serde_json::{Value, json};
 
 use crate::OrbitRuntime;

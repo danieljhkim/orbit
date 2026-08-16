@@ -1,13 +1,16 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::time::{Duration, Instant};
 
-use orbit_common::types::{
-    CoreDeterministicAction, DeterministicAction, McpCapability, OrbitError, Role,
-    UnsatisfiableTaskDependency, optional_string_list_alias, unmet_task_dependencies,
-    unsatisfiable_task_dependencies,
-};
+use orbit_common::OrbitError;
+use orbit_common::protocol::tool_input::optional_string_list_alias;
 use orbit_engine::DispatchError;
 use orbit_tools::ToolContext;
+use orbit_types::policy::Role;
+use orbit_types::task::{
+    UnsatisfiableTaskDependency, unmet_task_dependencies, unsatisfiable_task_dependencies,
+};
+use orbit_types::tool::McpCapability;
+use orbit_types::workflow::{CoreDeterministicAction, DeterministicAction};
 use serde_json::Value;
 
 use crate::OrbitRuntime;

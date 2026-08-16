@@ -2,9 +2,11 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::Arc;
 
-use orbit_common::types::{OrbitEvent, Role, activity_job::tool_allowed};
-use orbit_common::utility::redaction::{redact_all_error, redact_sensitive_env_json};
+use orbit_common::security::redaction::{redact_all_error, redact_sensitive_env_json};
 use orbit_tools::ToolContext;
+use orbit_types::policy::Role;
+use orbit_types::record::OrbitEvent;
+use orbit_types::workflow::tool_allowed;
 use serde_json::Value;
 
 use crate::{NotFoundKind, OrbitError, OrbitRuntime};

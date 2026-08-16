@@ -10,7 +10,8 @@ use std::path::Path;
 use std::time::Duration;
 
 use chrono::Utc;
-use orbit_common::types::{JobRunState, OrbitError};
+use orbit_common::OrbitError;
+use orbit_types::workflow::JobRunState;
 use tempfile::TempDir;
 
 use crate::OrbitRuntime;

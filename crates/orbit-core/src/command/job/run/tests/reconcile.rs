@@ -4,7 +4,7 @@ use super::*;
 
 use super::super::JobRunListParams;
 use chrono::{Duration, Utc};
-use orbit_common::types::JobRunState;
+use orbit_types::workflow::JobRunState;
 
 #[test]
 fn show_job_run_reconciles_stale_running_owner() {
@@ -34,7 +34,7 @@ fn show_job_run_reconciles_stale_running_owner() {
 #[cfg(unix)]
 #[test]
 fn show_job_run_keeps_live_owner_running() {
-    use orbit_common::utility::process_identity::process_start_identity_token;
+    use orbit_common::process::identity::process_start_identity_token;
 
     let (_root, runtime) = test_runtime();
     let run = insert_pending_run(&runtime, "qa_live");
@@ -180,7 +180,7 @@ fn reconcile_keeps_fresh_unclaimed_pending_run_pending() {
 #[cfg(unix)]
 #[test]
 fn pending_run_with_live_claimed_owner_stays_pending() {
-    use orbit_common::utility::process_identity::process_start_identity_token;
+    use orbit_common::process::identity::process_start_identity_token;
 
     let (_root, runtime) = test_runtime();
     let run = insert_pending_run(&runtime, "qa_claimed_live");
@@ -250,7 +250,7 @@ fn pending_run_with_dead_claimed_owner_is_reconciled() {
 #[cfg(unix)]
 #[test]
 fn sweep_spares_a_run_whose_owner_lives_in_another_pid_namespace() {
-    use orbit_common::utility::process_identity::{STABLE_TOKEN_PREFIX, current_pid_namespace};
+    use orbit_common::process::identity::{STABLE_TOKEN_PREFIX, current_pid_namespace};
 
     let (_root, runtime) = test_runtime();
     let Some(current) = current_pid_namespace() else {
@@ -292,7 +292,7 @@ fn sweep_spares_a_run_whose_owner_lives_in_another_pid_namespace() {
 #[cfg(unix)]
 #[test]
 fn sweep_still_condemns_a_run_whose_owner_died_in_this_pid_namespace() {
-    use orbit_common::utility::process_identity::{STABLE_TOKEN_PREFIX, current_pid_namespace};
+    use orbit_common::process::identity::{STABLE_TOKEN_PREFIX, current_pid_namespace};
 
     let (_root, runtime) = test_runtime();
     let Some(current) = current_pid_namespace() else {

@@ -1,5 +1,6 @@
 use crate::command::task::{TaskAddParams, compute_task_add_warnings};
-use orbit_common::types::{OrbitError, TaskStatus, TaskType};
+use orbit_common::OrbitError;
+use orbit_types::task::{TaskStatus, TaskType};
 
 use super::test_runtime;
 
@@ -172,7 +173,7 @@ fn task_add_redacts_secrets_in_stored_fields() {
         })
         .expect("task add succeeds");
 
-    let check = |task: &orbit_common::types::Task, label: &str| {
+    let check = |task: &orbit_types::task::Task, label: &str| {
         assert!(
             !task.title.contains(sk_key),
             "{label}: title leaked key: {}",

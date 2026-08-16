@@ -6,7 +6,8 @@
 //! distinct-run coverage is computed in one pass rather than summed.
 
 use chrono::{DateTime, Duration, TimeZone, Utc};
-use orbit_common::types::{InvocationTrace, JobRun, JobRunState};
+use orbit_types::telemetry::InvocationTrace;
+use orbit_types::workflow::{JobRun, JobRunState};
 
 use super::super::invocation_store::InvocationInsertParams;
 use crate::Store;

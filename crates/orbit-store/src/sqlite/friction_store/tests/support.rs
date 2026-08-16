@@ -3,9 +3,8 @@
 use std::path::Path;
 
 use chrono::{DateTime, TimeZone, Utc};
-use orbit_common::types::{
-    FrictionRecord, FrictionStatus, Task, TaskPriority, TaskStatus, TaskType,
-};
+use orbit_types::record::{FrictionRecord, FrictionStatus};
+use orbit_types::task::{Task, TaskPriority, TaskStatus, TaskType};
 
 use crate::Store;
 use crate::file::friction_store::write_record_at;

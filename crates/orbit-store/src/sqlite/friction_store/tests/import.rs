@@ -2,7 +2,7 @@
 
 use std::fs;
 
-use orbit_common::types::FrictionStatus;
+use orbit_types::record::FrictionStatus;
 
 use super::super::{
     FrictionListFilter, FrictionStore, FrictionUpdateParams, export_workspace_frictions,
@@ -209,7 +209,7 @@ fn an_import_marker_from_a_newer_schema_is_refused() {
                      VALUES ('ws_one', ?1, 0, 0, 99, '2026-05-01T00:00:00Z')",
                     rusqlite::params![canonical.to_string_lossy()],
                 )
-                .map_err(|error| orbit_common::types::OrbitError::Store(error.to_string()))?;
+                .map_err(|error| orbit_common::OrbitError::Store(error.to_string()))?;
             Ok(())
         })
         .expect("seed newer marker");
@@ -312,14 +312,14 @@ fn assert_no_partial_import(root: &std::path::Path, workspace_id: &str) {
                     rusqlite::params![workspace_id],
                     |row| row.get(0),
                 )
-                .map_err(|error| orbit_common::types::OrbitError::Store(error.to_string()))?;
+                .map_err(|error| orbit_common::OrbitError::Store(error.to_string()))?;
             let markers = conn
                 .query_row(
                     "SELECT COUNT(*) FROM friction_import_state WHERE workspace_id = ?1",
                     rusqlite::params![workspace_id],
                     |row| row.get(0),
                 )
-                .map_err(|error| orbit_common::types::OrbitError::Store(error.to_string()))?;
+                .map_err(|error| orbit_common::OrbitError::Store(error.to_string()))?;
             Ok((records, markers))
         })
         .expect("inspect import state");

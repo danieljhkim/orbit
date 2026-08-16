@@ -60,15 +60,15 @@ impl Execute for ActivityListArgs {
     }
 }
 
-fn v2_type_label(spec: &orbit_common::types::activity_job::ActivityV2) -> &'static str {
-    use orbit_common::types::activity_job::ActivityV2Spec;
+fn v2_type_label(spec: &orbit_types::workflow::activity_job::ActivityV2) -> &'static str {
+    use orbit_types::workflow::activity_job::ActivityV2Spec;
     match &spec.spec {
         ActivityV2Spec::AgentLoop(_) => "agent_loop",
         ActivityV2Spec::Deterministic(_) => "deterministic",
     }
 }
 
-fn v2_full_json(name: &str, spec: &orbit_common::types::activity_job::ActivityV2) -> Value {
+fn v2_full_json(name: &str, spec: &orbit_types::workflow::activity_job::ActivityV2) -> Value {
     json!({
         "id": name,
         "type": v2_type_label(spec),
@@ -80,7 +80,7 @@ fn v2_full_json(name: &str, spec: &orbit_common::types::activity_job::ActivityV2
     })
 }
 
-fn v2_signal_json(name: &str, spec: &orbit_common::types::activity_job::ActivityV2) -> Value {
+fn v2_signal_json(name: &str, spec: &orbit_types::workflow::activity_job::ActivityV2) -> Value {
     json!({
         "id": name,
         "type": v2_type_label(spec),

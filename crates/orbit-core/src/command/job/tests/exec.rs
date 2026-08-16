@@ -5,16 +5,17 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 use chrono::Utc;
-use orbit_common::types::{
-    ActivityV2Spec, AuditEventStatus, ExecutorDef, ExecutorType, JobRunState, JobV2Step,
-    JobV2StepBody, TaskPriority, TaskStatus, TaskType,
-};
 use orbit_engine::{
     DispatchError, JobOutcome, ResolvedCliExecutor, RuntimeHost, V2AuditWriter,
     execute_job_with_resume, resolve_job_catalog_refs_for_execution,
 };
 use orbit_store::{InvocationQuery, TaskReservationReleaseReason, V2AuditEventFilter};
 use orbit_tools::{FsAuditLogger, ToolContext};
+use orbit_types::task::{TaskPriority, TaskStatus, TaskType};
+use orbit_types::telemetry::AuditEventStatus;
+use orbit_types::workflow::{
+    ActivityV2Spec, ExecutorDef, ExecutorType, JobRunState, JobV2Step, JobV2StepBody,
+};
 use serde_json::{Value, json};
 use tempfile::tempdir;
 
@@ -87,7 +88,7 @@ fn seed_gate_task(runtime: &OrbitRuntime, repo_root: &Path, status: TaskStatus) 
 fn resolved_job(
     runtime: &OrbitRuntime,
     job_name: &str,
-) -> orbit_common::types::activity_job::JobV2 {
+) -> orbit_types::workflow::activity_job::JobV2 {
     let (_path, mut job) = runtime
         .load_v2_job_asset_by_name(job_name)
         .unwrap_or_else(|err| panic!("load {job_name}: {err}"));
@@ -150,8 +151,8 @@ fn try_execute_named_job(
 }
 
 fn epic_assemble_steps(
-    job: &orbit_common::types::activity_job::JobV2,
-) -> &[orbit_common::types::activity_job::JobV2Step] {
+    job: &orbit_types::workflow::activity_job::JobV2,
+) -> &[orbit_types::workflow::activity_job::JobV2Step] {
     let assemble = job
         .steps
         .iter()
@@ -163,7 +164,7 @@ fn epic_assemble_steps(
     &loop_.steps
 }
 
-fn patch_epic_child_run_input(drain: &mut orbit_common::types::activity_job::JobV2Step) {
+fn patch_epic_child_run_input(drain: &mut orbit_types::workflow::activity_job::JobV2Step) {
     let JobV2StepBody::Loop { loop_ } = &mut drain.body else {
         panic!("epic drain step");
     };
@@ -254,7 +255,7 @@ fn try_execute_epic_job(
     runtime: &OrbitRuntime,
     repo_root: &Path,
     host: &dyn RuntimeHost,
-    job: orbit_common::types::activity_job::JobV2,
+    job: orbit_types::workflow::activity_job::JobV2,
     input: Value,
     run_id: &str,
 ) -> Result<JobOutcome, DispatchError> {
@@ -299,7 +300,7 @@ fn try_execute_epic_drain_job(
 }
 
 fn patch_assemble_for_scripted_host(
-    assemble: &mut orbit_common::types::activity_job::JobV2Step,
+    assemble: &mut orbit_types::workflow::activity_job::JobV2Step,
     workspace: &Path,
 ) {
     let JobV2StepBody::Loop { loop_ } = &mut assemble.body else {
@@ -1058,7 +1059,7 @@ fn task_gate_noops_done_task_and_releases_reservation() {
         .run_tool_with_context_and_role(
             "orbit.task.locks",
             json!({}),
-            orbit_common::types::Role::Admin,
+            orbit_types::policy::Role::Admin,
             ToolContext::default(),
         )
         .expect("list locks");
@@ -1242,7 +1243,7 @@ fn epic_pipeline_reenters_drain_when_finisher_authors_a_child() {
     assert!(host.current_descendants().is_empty());
 }
 
-fn retarget_engine_actions_for_scripted_host(job: &mut orbit_common::types::activity_job::JobV2) {
+fn retarget_engine_actions_for_scripted_host(job: &mut orbit_types::workflow::activity_job::JobV2) {
     fn walk(step: &mut JobV2Step) {
         match &mut step.body {
             JobV2StepBody::Target(target) => {
@@ -1906,7 +1907,7 @@ fn checkpoint_step_records_into_run_state() {
         .jobs()
         .insert_job_run("qa_ckpt", 1, Utc::now(), Some(json!({"seconds": 0})), None)
         .expect("insert run");
-    let initial = orbit_common::types::PipelineState::new(
+    let initial = orbit_types::workflow::PipelineState::new(
         run.run_id.clone(),
         run.job_id.clone(),
         json!({"seconds": 0}),
@@ -1942,11 +1943,11 @@ fn checkpoint_step_records_into_run_state() {
         .expect("state exists");
     assert_eq!(
         state.step_states.get(&0),
-        Some(&orbit_common::types::JobRunState::Success)
+        Some(&orbit_types::workflow::JobRunState::Success)
     );
     assert_eq!(
         state.step_states.get(&1),
-        Some(&orbit_common::types::JobRunState::Success)
+        Some(&orbit_types::workflow::JobRunState::Success)
     );
     assert_eq!(state.step_outputs.get(&0), Some(&json!({"ok": 0})));
     assert_eq!(state.next_step_index, 2);
@@ -1997,7 +1998,7 @@ fn interrupted_run_resumes_skipping_checkpointed_steps() {
         .jobs()
         .insert_job_run("qa_resume_ckpt", 1, Utc::now(), Some(input.clone()), None)
         .expect("insert run");
-    let initial = orbit_common::types::PipelineState::new(
+    let initial = orbit_types::workflow::PipelineState::new(
         run.run_id.clone(),
         run.job_id.clone(),
         input.clone(),

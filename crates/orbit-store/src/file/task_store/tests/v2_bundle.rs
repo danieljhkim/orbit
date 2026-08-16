@@ -6,9 +6,8 @@ use std::sync::{Arc, Barrier};
 use std::thread;
 
 use chrono::{TimeZone, Utc};
-use orbit_common::types::{
-    NotFoundKind, OrbitError, TASK_ARTIFACT_SCHEMA_VERSION, TaskCommentRowV2, TaskEventRowV2,
-};
+use orbit_common::{NotFoundKind, OrbitError};
+use orbit_types::task::{TASK_ARTIFACT_SCHEMA_VERSION, TaskCommentRowV2, TaskEventRowV2};
 use tempfile::TempDir;
 
 use super::super::v2_bundle::*;

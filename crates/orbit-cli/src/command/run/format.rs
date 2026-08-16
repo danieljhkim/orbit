@@ -1,4 +1,4 @@
-use orbit_common::types::{JobRunState, PipelineState};
+use orbit_types::workflow::{JobRunState, PipelineState};
 
 pub(crate) fn summarize_error_message(raw: Option<&str>) -> String {
     let value = raw.unwrap_or("-").replace('\n', " ");

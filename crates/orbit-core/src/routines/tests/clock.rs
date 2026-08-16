@@ -4,7 +4,7 @@ use std::sync::Mutex;
 
 use tempfile::tempdir;
 
-use orbit_common::types::OrbitError;
+use orbit_common::OrbitError;
 
 use super::super::clock::{
     ClockCommandRunner, ClockPlatform, ClockSettings, ManagerCommand, clock_status_with,

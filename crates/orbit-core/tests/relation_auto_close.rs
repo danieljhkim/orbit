@@ -2,10 +2,11 @@
 #![allow(missing_docs)]
 
 use chrono::{TimeZone, Utc};
-use orbit_common::types::{FrictionStatus, TaskStatus};
 use orbit_core::OrbitRuntime;
 use orbit_engine::{RuntimeHost, TaskAutomationUpdate};
 use orbit_store::friction_store::{FrictionAddParams, FrictionStore};
+use orbit_types::record::FrictionStatus;
+use orbit_types::task::TaskStatus;
 use serde_json::{Value, json};
 use tempfile::TempDir;
 

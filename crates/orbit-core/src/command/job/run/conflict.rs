@@ -39,8 +39,10 @@
 //! 3. A `tracing::warn!` on `orbit.core.job_run` for log-based alerting.
 
 use chrono::{DateTime, Utc};
-use orbit_common::types::{AuditEventStatus, JobRunState, JobTargetType, OrbitError};
+use orbit_common::OrbitError;
 use orbit_store::JobRunStepParams;
+use orbit_types::telemetry::AuditEventStatus;
+use orbit_types::workflow::{JobRunState, JobTargetType};
 use serde_json::json;
 
 use crate::OrbitRuntime;

@@ -1,7 +1,7 @@
 use std::borrow::Cow;
 use std::path::Path;
 
-use orbit_common::types::OrbitError;
+use orbit_common::OrbitError;
 
 use super::{ManagedAssetLayout, ManagedAssetReconciliation, reconcile_managed_assets};
 
@@ -175,9 +175,10 @@ pub(crate) fn seed_default_activities(
 mod tests {
     use std::collections::BTreeMap;
 
-    use orbit_common::types::activity_job::{OnDenial, tool_allowed};
-    use orbit_common::types::{ActivityV2Spec, load_activity_asset};
+    use orbit_engine::activity_job::load_activity_asset;
     use orbit_engine::{inject_system_crew_input, resolve_crew_settings};
+    use orbit_types::workflow::ActivityV2Spec;
+    use orbit_types::workflow::activity_job::{OnDenial, tool_allowed};
     use serde_json::json;
     use tempfile::tempdir;
 

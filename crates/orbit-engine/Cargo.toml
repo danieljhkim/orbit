@@ -17,12 +17,14 @@ libc = { workspace = true }
 jsonschema.workspace = true
 orbit-agent = { path = "../orbit-agent" }
 orbit-common = { path = "../orbit-common" }
+orbit-types = { path = "../orbit-types" }
 orbit-exec = { path = "../orbit-exec" }
 orbit-store = { path = "../orbit-store" }
 orbit-tools = { path = "../orbit-tools" }
 regex.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+serde_yaml.workspace = true
 sha2.workspace = true
 tempfile = "3"
 thiserror.workspace = true

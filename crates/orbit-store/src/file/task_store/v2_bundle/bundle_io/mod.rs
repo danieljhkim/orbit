@@ -3,16 +3,17 @@ use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use orbit_common::migration::Plan;
-use orbit_common::types::{
-    ArtifactManifestV2, NotFoundKind, OrbitError, TASK_ACCEPTANCE_FILE_NAME,
-    TASK_ARTIFACT_FILES_DIR_NAME, TASK_ARTIFACT_MANIFEST_FILE_NAME, TASK_ARTIFACTS_DIR_NAME,
-    TASK_COMMENTS_FILE_NAME, TASK_DESCRIPTION_FILE_NAME, TASK_ENVELOPE_FILE_NAME,
-    TASK_EVENTS_FILE_NAME, TASK_EXECUTION_SUMMARY_FILE_NAME, TASK_PLAN_FILE_NAME, TaskCommentRowV2,
-    TaskEnvelopeV2, TaskEventRowV2,
-};
-use orbit_common::utility::fs::{
+use orbit_common::fs::io::{
     atomic_write_bytes, atomic_write_text, sync_parent_dir, with_exclusive_file_lock,
+};
+use orbit_common::migration::Plan;
+use orbit_common::{NotFoundKind, OrbitError};
+use orbit_types::task::{
+    ArtifactManifestV2, TASK_ACCEPTANCE_FILE_NAME, TASK_ARTIFACT_FILES_DIR_NAME,
+    TASK_ARTIFACT_MANIFEST_FILE_NAME, TASK_ARTIFACTS_DIR_NAME, TASK_COMMENTS_FILE_NAME,
+    TASK_DESCRIPTION_FILE_NAME, TASK_ENVELOPE_FILE_NAME, TASK_EVENTS_FILE_NAME,
+    TASK_EXECUTION_SUMMARY_FILE_NAME, TASK_PLAN_FILE_NAME, TaskCommentRowV2, TaskEnvelopeV2,
+    TaskEventRowV2,
 };
 use serde::de::DeserializeOwned;
 use sha2::{Digest, Sha256};

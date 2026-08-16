@@ -3,7 +3,7 @@
 use std::path::{Path, PathBuf};
 
 use crate::OrbitRuntime;
-use orbit_common::types::JobRunState;
+use orbit_types::workflow::JobRunState;
 
 use orbit_common::test_env;
 use tempfile::tempdir;

@@ -1,5 +1,5 @@
-use orbit_common::types::TaskStatus;
 use orbit_engine::{RuntimeHost, TaskAutomationUpdate, WORKFLOW_RUN_FAILED_EVENT};
+use orbit_types::task::TaskStatus;
 use serde_json::json;
 
 use crate::OrbitRuntime;

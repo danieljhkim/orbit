@@ -36,7 +36,8 @@ use std::borrow::Cow;
 use std::collections::BTreeMap;
 
 use chrono::{DateTime, Duration, Utc};
-use orbit_common::types::{AuditEvent, AuditEventStatus, OrbitError};
+use orbit_common::OrbitError;
+use orbit_types::telemetry::{AuditEvent, AuditEventStatus};
 use serde::{Deserialize, Serialize};
 
 use super::{AUDIT_EVENT_COLUMNS, audit_event_from_row};

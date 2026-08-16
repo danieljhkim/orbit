@@ -29,7 +29,7 @@ pub use doc_fields::DocEmbeddingSource;
 pub use store::{SOURCE_KIND_DOC, SOURCE_KIND_TASK, VectorStore};
 pub use worker::EmbedWorker;
 
-use orbit_common::types::OrbitError;
+use orbit_common::OrbitError;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Eq)]

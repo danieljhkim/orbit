@@ -154,7 +154,7 @@ struct MetricsExtras {
 fn compute_metrics_extras(
     runtime: &OrbitRuntime,
 ) -> Result<BTreeMap<String, MetricsExtras>, orbit_core::OrbitError> {
-    use orbit_common::types::ActorIdentity;
+    use orbit_types::identity::ActorIdentity;
 
     let now = Utc::now();
     let mut months = Vec::new();

@@ -1,7 +1,7 @@
 use std::path::Path;
 use std::process::Command;
 
-use orbit_common::types::OrbitError;
+use orbit_common::OrbitError;
 use serde::Serialize;
 
 use crate::commands::active_model;

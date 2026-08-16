@@ -5,7 +5,7 @@
 //! [`Store::apply_feature_migrations`] before exposing its persistence API.
 //! Feature versions are independent of Store's global schema version.
 
-use orbit_common::types::OrbitError;
+use orbit_common::OrbitError;
 use rusqlite::{Connection, TransactionBehavior, params};
 
 use crate::Store;

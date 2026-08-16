@@ -1,10 +1,9 @@
 use std::sync::Arc;
 
+use orbit_common::protocol::tool_schema::tool_input_schema_for;
 #[cfg(test)]
-use orbit_common::types::tool_parameter_schema;
-use orbit_common::types::{
-    McpToolDefinition, McpToolScope, ToolParam, ToolSchema, tool_input_schema_for,
-};
+use orbit_common::protocol::tool_schema::tool_parameter_schema;
+use orbit_types::tool::{McpToolDefinition, McpToolScope, ToolParam, ToolSchema};
 use rmcp::model::{JsonObject, Tool};
 use serde_json::{Value, json};
 

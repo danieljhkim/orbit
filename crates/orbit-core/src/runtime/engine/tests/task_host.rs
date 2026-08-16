@@ -6,11 +6,11 @@ use std::path::Path;
 use std::process::Command;
 
 use chrono::Utc;
-use orbit_common::types::activity_job::{ActivityV2Spec, DeterministicSpec};
-use orbit_common::types::{Task, TaskStatus};
 use orbit_engine::{
     RuntimeHost, TaskActivityUpdate, TaskAutomationUpdate, V2AuditWriter, V2DispatchInput,
 };
+use orbit_types::task::{Task, TaskStatus};
+use orbit_types::workflow::activity_job::{ActivityV2Spec, DeterministicSpec};
 use serde_json::{Value, json};
 use tempfile::tempdir;
 

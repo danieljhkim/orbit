@@ -5,7 +5,7 @@
 //! execution_summary, comment_<idx>, review_<thread>_msg_<idx>) so the
 //! best-matching field can surface as the snippet at search time.
 
-use orbit_common::types::Task;
+use orbit_types::task::Task;
 
 use super::EmbeddingField;
 

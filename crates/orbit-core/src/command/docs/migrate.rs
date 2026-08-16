@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 
 use serde_json::json;
 
-use orbit_common::types::OrbitError;
+use orbit_common::OrbitError;
 
 use super::frontmatter::{infer_frontmatter, parse_doc_strict, split_frontmatter};
 use super::path_util::{path_to_slash_string, repo_relative_path};

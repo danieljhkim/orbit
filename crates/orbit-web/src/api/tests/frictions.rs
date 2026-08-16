@@ -363,7 +363,7 @@ async fn stats_shape_exposes_triage_counts() {
 /// dropping a filter at runtime.
 #[test]
 fn dashboard_friction_parameters_are_declared_by_the_registry() {
-    use orbit_common::friction::FrictionVerb;
+    use orbit_common::governance::friction::FrictionVerb;
 
     let used: &[(FrictionVerb, &[&str])] = &[
         (

@@ -1,8 +1,7 @@
 use chrono::Utc;
-use orbit_common::types::{
-    OrbitError, Task, TaskComment, TaskStatus, normalize_attribution_label,
-    normalize_optional_attribution_label,
-};
+use orbit_common::OrbitError;
+use orbit_types::identity::{normalize_attribution_label, normalize_optional_attribution_label};
+use orbit_types::task::{Task, TaskComment, TaskStatus};
 
 pub(crate) const SYSTEM_ACTOR_LABEL: &str = "system";
 

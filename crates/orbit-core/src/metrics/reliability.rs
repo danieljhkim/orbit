@@ -52,8 +52,9 @@ use std::collections::{BTreeMap, BTreeSet};
 use chrono::{DateTime, Duration, Utc};
 use serde::Serialize;
 
-use orbit_common::types::{JobActivityRoles, JobRunState, OrbitError};
+use orbit_common::OrbitError;
 use orbit_store::{ActivityInvocationCount, InvocationRunCoverage, JobRunOutcomeFact};
+use orbit_types::workflow::{JobActivityRoles, JobRunState};
 
 use crate::runtime::OrbitRuntime;
 

@@ -2,7 +2,7 @@
 use super::super::*;
 use crate::Store;
 use orbit_common::test_fixtures::{TEST_CLAUDE_MODEL, TEST_CODEX_MODEL};
-use orbit_common::types::{McpCapability, McpTransport};
+use orbit_types::tool::{McpCapability, McpTransport};
 use std::collections::BTreeSet;
 
 fn sample_params() -> AuditEventInsertParams {

@@ -1,7 +1,7 @@
 use std::path::Path;
 
-use orbit_common::types::OrbitError;
-use orbit_common::utility::fs::create_dir_symlink;
+use orbit_common::OrbitError;
+use orbit_common::fs::io::create_dir_symlink;
 
 use super::types::ProjectionRebuildResult;
 

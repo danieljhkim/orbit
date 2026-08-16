@@ -11,8 +11,8 @@
 use std::time::{Duration, Instant};
 
 use chrono::Utc;
-use orbit_common::types::activity_job::{OnDenial, tool_allowed};
 use orbit_tools::{ToolContext, ToolRegistry};
+use orbit_types::workflow::activity_job::{OnDenial, tool_allowed};
 
 use super::audit::{AuditSink, LoopAuditEvent, UsageSnapshot};
 use super::session::Session;

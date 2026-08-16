@@ -29,7 +29,7 @@
 //! orbit-common, orbit-agent, orbit-exec, orbit-store, orbit-tools
 //! → `orbit-engine` → orbit-core
 
-mod activity_job;
+pub mod activity_job;
 mod condition;
 mod context;
 mod executor;
@@ -39,11 +39,14 @@ mod template;
 mod tests;
 
 pub use activity_job::{
-    DispatchError, DispatchOutcome, EnforcedAuditSink, JobOutcome, ResolvedAgentSettings,
-    ResolvedCliExecutor, ResolvedSandbox, V2AuditWriter, V2DispatchInput, V2SqliteSink,
-    dispatch_error_to_orbit, dispatch_v2_activity, execute_job_with_resume,
-    inject_system_crew_input, resolve_crew_settings, resolve_job_catalog_refs_for_execution,
-    validate_job, validate_job_deterministic_actions,
+    ActivityAsset, AssetLoadError, CatalogDirectory, CatalogDirectoryList, CatalogError,
+    DispatchError, DispatchOutcome, EnforcedAuditSink, JobAsset, JobOutcome, ResolveError,
+    ResolvedAgentSettings, ResolvedCliExecutor, ResolvedSandbox, V2ActivityCatalog, V2AuditWriter,
+    V2DispatchInput, V2JobCatalog, V2SqliteSink, catalog_error_to_orbit, dispatch_error_to_orbit,
+    dispatch_v2_activity, execute_job_with_resume, inject_system_crew_input, load_activity_asset,
+    load_activity_catalog_asset, load_job_asset, resolve_crew_settings,
+    resolve_job_catalog_refs_for_execution, resolve_job_target_refs,
+    validate_catalog_activity_tools, validate_job, validate_job_deterministic_actions,
 };
 pub use context::{
     AGENT_INVOCATION_FAILED, AGENT_TIMEOUT, ActivityInvocationResult, CrewConfig, PrConfig,

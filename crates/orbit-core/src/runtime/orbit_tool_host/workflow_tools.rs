@@ -2,7 +2,9 @@ use std::collections::BTreeSet;
 use std::str::FromStr;
 
 use chrono::{DateTime, Utc};
-use orbit_common::types::{JobRun, JobRunState, OrbitError, normalize_optional_attribution_label};
+use orbit_common::OrbitError;
+use orbit_types::identity::normalize_optional_attribution_label;
+use orbit_types::workflow::{JobRun, JobRunState};
 use serde_json::{Value, json};
 
 use crate::command::job::JobRunListParams;
@@ -53,7 +55,7 @@ pub(super) fn ship(
 }
 
 pub(super) fn show(runtime: &OrbitRuntime, input: Value) -> Result<Value, OrbitError> {
-    let id = orbit_common::types::required_string(&input, &["id"], "id")?;
+    let id = orbit_common::protocol::tool_input::required_string(&input, &["id"], "id")?;
     run_json(&runtime.show_job_run(&id)?)
 }
 
@@ -91,7 +93,7 @@ pub(super) fn resume(
     agent: Option<String>,
     model: Option<String>,
 ) -> Result<Value, OrbitError> {
-    let id = orbit_common::types::required_string(&input, &["id"], "id")?;
+    let id = orbit_common::protocol::tool_input::required_string(&input, &["id"], "id")?;
     let actor = actor(runtime, agent.as_deref(), model.as_deref());
     let claim_token = optional_string(&input, "claim_token")?;
     let invoke = runtime.submit_resume_run(&id, Some(&actor), claim_token.as_deref())?;
@@ -106,7 +108,7 @@ pub(super) fn resume(
 }
 
 fn optional_string(input: &Value, field: &str) -> Result<Option<String>, OrbitError> {
-    orbit_common::types::optional_string(input, field)
+    orbit_common::protocol::tool_input::optional_string(input, field)
 }
 
 fn actor(runtime: &OrbitRuntime, agent: Option<&str>, model: Option<&str>) -> String {

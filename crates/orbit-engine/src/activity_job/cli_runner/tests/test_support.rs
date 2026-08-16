@@ -15,12 +15,12 @@ use orbit_common::test_fixtures::TEST_CODEX_MODEL;
 
 use crate::context::CrewConfig;
 use orbit_agent::loop_engine::audit::{AuditSink, LoopAuditEvent};
-use orbit_common::types::ExecutorSandboxKind;
-use orbit_common::types::activity_job::{AgentLoopSpec, OnDenial, Provider};
-use orbit_common::utility::logging::RedactingFields;
+use orbit_common::observability::logging::RedactingFields;
 #[cfg(target_os = "macos")]
 use orbit_exec::sandbox_exec_path;
 use orbit_tools::{FsAuditLogger, ToolContext};
+use orbit_types::workflow::ExecutorSandboxKind;
+use orbit_types::workflow::activity_job::{AgentLoopSpec, OnDenial, Provider};
 use serde_json::Value;
 use tracing::field::{Field, Visit};
 use tracing::{Event, Metadata, Subscriber, span};
@@ -34,7 +34,7 @@ use crate::context::RuntimeHost;
 pub(in crate::activity_job::cli_runner) fn sandbox_for_test() -> ResolvedSandbox {
     ResolvedSandbox {
         kind: ExecutorSandboxKind::MacosSandboxExec,
-        fs_profile: orbit_common::types::ResolvedFsProfile {
+        fs_profile: orbit_types::policy::ResolvedFsProfile {
             name: "default".to_string(),
             read: vec!["/tmp".to_string()],
             modify: vec!["/tmp".to_string()],

@@ -26,6 +26,7 @@ clap = { workspace = true, optional = true }
 fastembed = { workspace = true, optional = true }
 libc.workspace = true
 orbit-common = { path = "../orbit-common", features = ["sqlite"] }
+orbit-types = { path = "../orbit-types" }
 reqwest.workspace = true
 rsa.workspace = true
 rusqlite.workspace = true

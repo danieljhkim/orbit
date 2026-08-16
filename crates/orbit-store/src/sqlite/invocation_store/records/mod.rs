@@ -4,7 +4,9 @@ use std::sync::LazyLock;
 use chrono::{DateTime, Utc};
 use rusqlite::{params, types::ToSql};
 
-use orbit_common::types::{OrbitError, TokenUsage, derive_cost_usd};
+use orbit_common::OrbitError;
+use orbit_common::model::pricing::derive_cost_usd;
+use orbit_types::telemetry::TokenUsage;
 
 use crate::{Store, now_string};
 
@@ -248,7 +250,7 @@ fn insert_invocation_task_ids(
 fn insert_tool_calls(
     tx: &rusqlite::Transaction<'_>,
     invocation_id: i64,
-    tool_calls: &[orbit_common::types::ToolCallTrace],
+    tool_calls: &[orbit_types::telemetry::ToolCallTrace],
 ) -> Result<(), OrbitError> {
     for tool_call in tool_calls {
         tx.execute(

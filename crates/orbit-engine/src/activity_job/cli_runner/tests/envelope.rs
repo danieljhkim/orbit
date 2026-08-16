@@ -3,8 +3,8 @@
 use std::collections::HashMap;
 use std::time::Duration;
 
-use orbit_common::types::TokenUsage;
 use orbit_store::{InvocationInsertParams, InvocationQuery, Store};
+use orbit_types::telemetry::TokenUsage;
 use serde_json::Value;
 
 use super::super::envelope::{

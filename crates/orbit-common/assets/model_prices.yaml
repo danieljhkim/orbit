@@ -24,7 +24,7 @@
 # Keyed by exact model string (the value that ends up in
 # `InvocationRecord.model` — never a crew name or unversioned CLI alias like
 # `opus`/`sonnet`/`fable`) plus an effective date range.
-# `orbit_common::types::pricing` looks up the row whose range covers an
+# `orbit_common::model::pricing` looks up the row whose range covers an
 # invocation's timestamp and derives USD cost from the token splits at query
 # time; nothing here is baked into Rust.
 #

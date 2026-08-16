@@ -24,8 +24,8 @@ impl TaskV2Store {
             .comments
             .iter()
             .enumerate()
-            .map(|(index, comment)| orbit_common::types::TaskCommentRowV2 {
-                schema_version: orbit_common::types::TASK_ARTIFACT_SCHEMA_VERSION,
+            .map(|(index, comment)| orbit_types::task::TaskCommentRowV2 {
+                schema_version: orbit_types::task::TASK_ARTIFACT_SCHEMA_VERSION,
                 comment_id: format!("C-{number:04}", number = index + 1),
                 at: comment.at,
                 by: comment.by.clone(),
@@ -33,8 +33,8 @@ impl TaskV2Store {
             })
             .collect();
         let bundle = TaskBundleV2 {
-            envelope: orbit_common::types::TaskEnvelopeV2 {
-                schema_version: orbit_common::types::TASK_ARTIFACT_SCHEMA_VERSION,
+            envelope: orbit_types::task::TaskEnvelopeV2 {
+                schema_version: orbit_types::task::TASK_ARTIFACT_SCHEMA_VERSION,
                 id: id.clone(),
                 title: params.title,
                 status: params.status,
@@ -59,8 +59,8 @@ impl TaskV2Store {
             acceptance: render_acceptance(&params.acceptance_criteria),
             plan: params.plan,
             execution_summary: params.execution_summary,
-            events: vec![orbit_common::types::TaskEventRowV2 {
-                schema_version: orbit_common::types::TASK_ARTIFACT_SCHEMA_VERSION,
+            events: vec![orbit_types::task::TaskEventRowV2 {
+                schema_version: orbit_types::task::TASK_ARTIFACT_SCHEMA_VERSION,
                 event_id: "EV-0001".to_string(),
                 at: now,
                 by: params.actor,
@@ -158,7 +158,7 @@ impl TaskV2Store {
     }
 
     pub(crate) fn get_task(&self, id: &str) -> Result<Option<Task>, OrbitError> {
-        orbit_common::types::validate_orb_task_id(id)?;
+        orbit_types::task::validate_orb_task_id(id)?;
         match self.bundle_store.read_bundle(id) {
             Ok(bundle) => self.task_from_bundle(bundle).map(Some),
             Err(OrbitError::NotFound {
@@ -190,7 +190,7 @@ impl TaskV2Store {
     }
 
     pub(crate) fn delete_task(&self, id: &str) -> Result<bool, OrbitError> {
-        orbit_common::types::validate_orb_task_id(id)?;
+        orbit_types::task::validate_orb_task_id(id)?;
         let lock_target = self.bundle_store.bundle_path(id)?;
         with_exclusive_file_lock(&lock_target, "task artifact v2 delete", || {
             self.bundle_store.delete_bundle(id)

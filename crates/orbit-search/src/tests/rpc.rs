@@ -1,7 +1,7 @@
 //! Unit tests for the RPC envelope's boundary translator (ORB-10013) —
 //! sibling layout.
 
-use orbit_common::types::OrbitError;
+use orbit_common::OrbitError;
 
 use crate::rpc::{RpcError, rpc_error_to_orbit};
 

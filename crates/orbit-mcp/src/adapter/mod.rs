@@ -13,7 +13,8 @@ mod tests;
 
 use std::sync::{Arc, RwLock};
 
-use orbit_common::types::{ToolSessionContext, audit_execution_id};
+use orbit_common::observability::audit_id::audit_execution_id;
+use orbit_types::tool::ToolSessionContext;
 
 use crate::McpHost;
 

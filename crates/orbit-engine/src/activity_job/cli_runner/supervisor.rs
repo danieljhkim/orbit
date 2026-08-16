@@ -11,7 +11,7 @@ use std::time::{Duration, Instant};
 
 use super::super::dispatcher::ResolvedSandbox;
 use super::spawn::{SpawnError, SpawnedChild, spawn_child_with_optional_sandbox};
-use orbit_common::utility::output_capture::capture_limit_from_env;
+use orbit_common::process::output_capture::capture_limit_from_env;
 
 /// Default wall-clock timeout when `AgentLoopSpec::wall_clock_timeout_seconds`
 /// is zero. Matches §7.6 guidance: CLI subprocesses must have a mandatory

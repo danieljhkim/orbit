@@ -8,11 +8,10 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 
-use orbit_common::types::{OrbitError, normalize_attribution_label};
+use orbit_common::OrbitError;
+use orbit_types::identity::normalize_attribution_label;
 
-use orbit_common::utility::fs::{
-    atomic_write_text_volatile as write_atomic, with_exclusive_file_lock,
-};
+use orbit_common::fs::io::{atomic_write_text_volatile as write_atomic, with_exclusive_file_lock};
 
 /// Per-model counters for one metric.
 pub(crate) type ModelScores = HashMap<String, u64>;

@@ -1,14 +1,15 @@
 use std::collections::BTreeSet;
 
-use orbit_common::friction::FrictionVerb;
-use orbit_common::types::{
-    AuditEventStatus, OrbitError, audit_execution_id, normalize_optional_attribution_label,
-};
-use orbit_common::utility::redaction::{
+use orbit_common::OrbitError;
+use orbit_common::governance::friction::FrictionVerb;
+use orbit_common::observability::audit_id::audit_execution_id;
+use orbit_common::security::redaction::{
     is_high_confidence_single_token_credential, redact_all, redact_home_dir,
     redact_sensitive_env_text,
 };
 use orbit_tools::OrbitBuiltinAction;
+use orbit_types::identity::normalize_optional_attribution_label;
+use orbit_types::telemetry::AuditEventStatus;
 use serde_json::{Map, Value, json};
 
 use crate::{AuditEventInsertParams, OrbitRuntime};

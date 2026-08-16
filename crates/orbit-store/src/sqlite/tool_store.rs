@@ -1,4 +1,5 @@
-use orbit_common::types::{OrbitError, StoredTool};
+use orbit_common::OrbitError;
+use orbit_types::tool::StoredTool;
 use rusqlite::{OptionalExtension, params};
 
 use crate::{Store, StoreTx, now_string};
@@ -104,7 +105,7 @@ impl<'a> StoreTx<'a> {
     }
 }
 
-fn parse_tool_parameters(raw: &str) -> rusqlite::Result<Vec<orbit_common::types::ToolParam>> {
+fn parse_tool_parameters(raw: &str) -> rusqlite::Result<Vec<orbit_types::tool::ToolParam>> {
     serde_json::from_str(raw).map_err(|error| {
         rusqlite::Error::FromSqlConversionFailure(
             raw.len(),

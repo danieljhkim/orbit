@@ -2,7 +2,7 @@
 //! `orbit-search-companion` subprocess. The protocol is deliberately small:
 //! `info`, `embed`, `token_count`, `exit`. Both sides serialize via serde.
 
-use orbit_common::types::OrbitError;
+use orbit_common::OrbitError;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

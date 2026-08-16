@@ -1,7 +1,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use orbit_common::types::OrbitError;
+use orbit_common::OrbitError;
 use serde::{Deserialize, Serialize};
 
 use crate::file::yaml_doc::{parse_yaml_with, write_yaml_atomic_with};

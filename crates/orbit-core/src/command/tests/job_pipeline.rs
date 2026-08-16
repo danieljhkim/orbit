@@ -5,8 +5,11 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use chrono::Utc;
-use orbit_common::types::{AuditEventStatus, JobRunState, OrbitError, WorkspacePaths};
+use orbit_common::OrbitError;
 use orbit_store::sqlite::migration::SUPPORTED_SCHEMA_VERSION;
+use orbit_types::telemetry::AuditEventStatus;
+use orbit_types::workflow::JobRunState;
+use orbit_types::workspace::WorkspacePaths;
 use tempfile::TempDir;
 
 use crate::OrbitRuntime;
@@ -260,7 +263,7 @@ fn routine_style_detached_worker_is_claimed_within_ownership_window() {
 fn wait_for_worker_ownership_outcome(
     runtime: &OrbitRuntime,
     run_id: &str,
-) -> orbit_common::types::JobRun {
+) -> orbit_types::workflow::JobRun {
     let deadline = Instant::now() + Duration::from_secs(2);
     loop {
         let stored = runtime.show_job_run(run_id).expect("show worker run");
@@ -282,8 +285,8 @@ fn wait_for_pipeline_audit_event(
     runtime: &OrbitRuntime,
     status: Option<AuditEventStatus>,
     description: &str,
-    predicate: impl Fn(&orbit_common::types::AuditEvent) -> bool,
-) -> orbit_common::types::AuditEvent {
+    predicate: impl Fn(&orbit_types::telemetry::AuditEvent) -> bool,
+) -> orbit_types::telemetry::AuditEvent {
     let deadline = Instant::now() + Duration::from_secs(2);
     loop {
         let audits = runtime
@@ -548,7 +551,7 @@ fn ship_submission_refuses_a_missing_explicit_task_before_persisting_a_run() {
     assert!(matches!(
         error,
         OrbitError::NotFound {
-            kind: orbit_common::types::NotFoundKind::Task,
+            kind: orbit_common::NotFoundKind::Task,
             id,
         } if id == missing_id
     ));
@@ -633,7 +636,7 @@ fn ship_submission_mixed_explicit_selection_identifies_the_missing_task() {
     assert!(matches!(
         error,
         OrbitError::NotFound {
-            kind: orbit_common::types::NotFoundKind::Task,
+            kind: orbit_common::NotFoundKind::Task,
             id,
         } if id == missing_id
     ));

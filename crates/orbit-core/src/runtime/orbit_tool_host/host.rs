@@ -3,17 +3,14 @@ use std::str::FromStr;
 use std::sync::Arc;
 
 use chrono::Utc;
-use orbit_common::friction::{FrictionVerb, effective_title, normalize_title};
-use orbit_common::types::{
-    FrictionStatus, NotFoundKind, OrbitError, Task, TaskComment, TaskPriority, TaskStatus,
-    TaskType, ToolSessionContext, is_valid_friction_id, normalize_optional_attribution_label,
-    normalize_task_dependencies, normalize_task_tags, optional_csv_or_string_list_alias,
-    optional_raw_string, optional_string, optional_string_alias, optional_string_list_alias,
-    required_string, resolve_task_dependencies, task_dependencies_ready, task_matches_tags,
-    validate_task_dependencies,
+use orbit_common::fs::selector::canonical_selector;
+use orbit_common::governance::friction::{FrictionVerb, effective_title, normalize_title};
+use orbit_common::protocol::tool_input::{
+    optional_csv_or_string_list_alias, optional_raw_string, optional_string, optional_string_alias,
+    optional_string_list_alias, required_string,
 };
-use orbit_common::utility::redaction::redact_all;
-use orbit_common::utility::selector::canonical_selector;
+use orbit_common::security::redaction::redact_all;
+use orbit_common::{NotFoundKind, OrbitError};
 use orbit_store::friction_store::{
     FrictionAddParams, FrictionStore, FrictionUpdateParams, prepare_hub_friction_root,
     readable_hub_friction_root,
@@ -29,6 +26,14 @@ use orbit_tools::{
     OrbitBuiltinAction, OrbitTaskScope, OrbitToolHost, ReservationOwnerContext, ToolContext,
     ToolRegistry,
 };
+use orbit_types::identity::{is_valid_friction_id, normalize_optional_attribution_label};
+use orbit_types::record::FrictionStatus;
+use orbit_types::task::{
+    Task, TaskComment, TaskPriority, TaskStatus, TaskType, normalize_task_dependencies,
+    normalize_task_tags, resolve_task_dependencies, task_dependencies_ready, task_matches_tags,
+    validate_task_dependencies,
+};
+use orbit_types::tool::ToolSessionContext;
 use serde_json::{Map, Value, json};
 
 use crate::OrbitRuntime;
@@ -481,7 +486,7 @@ impl HubCoordinationExecutor {
             && let Ok(frictions) = self.friction_store()
         {
             for relation in &updated.relations {
-                if relation.relation_type == orbit_common::types::TaskRelationType::Resolves
+                if relation.relation_type == orbit_types::task::TaskRelationType::Resolves
                     && is_valid_friction_id(&relation.target)
                     && let Err(error) = frictions.resolve_by_task(&relation.target, &id, Utc::now())
                 {

@@ -1,4 +1,4 @@
-use orbit_common::types::OrbitError;
+use orbit_common::OrbitError;
 use rusqlite::Connection;
 
 use super::REGISTRY_SCHEMA_VERSION;

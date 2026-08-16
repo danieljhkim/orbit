@@ -2,10 +2,10 @@ use std::collections::BTreeMap;
 use std::fmt::Write as _;
 
 use chrono::{DateTime, Utc};
-use orbit_common::types::{ArtifactManifestFileV2, TaskArtifact};
 use orbit_core::{
     OrbitError, OrbitRuntime, TaskStatus, resolve_task_dependencies, resolve_task_relations,
 };
+use orbit_types::task::{ArtifactManifestFileV2, TaskArtifact};
 use serde_json::{Value, json};
 
 use crate::output::color::Domain;

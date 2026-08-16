@@ -21,7 +21,7 @@
 use chrono::{DateTime, Utc};
 use rusqlite::params;
 
-use orbit_common::types::OrbitError;
+use orbit_common::OrbitError;
 
 use crate::Store;
 

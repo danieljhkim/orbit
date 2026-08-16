@@ -6,9 +6,10 @@
 //! success, not an error. This is no longer `epic_pipeline`'s completion
 //! gate — that job uses `list_epic_descendants`.
 
-use orbit_common::types::{JobRunState, TaskStatus};
 use orbit_engine::DispatchError;
 use orbit_store::{JobRunQuery, SessionLogFilter, SessionLogKind, SessionLogStore};
+use orbit_types::task::TaskStatus;
+use orbit_types::workflow::JobRunState;
 use serde_json::{Value, json};
 
 use crate::OrbitRuntime;

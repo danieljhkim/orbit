@@ -17,7 +17,7 @@
 
 use std::path::{Path, PathBuf};
 
-use orbit_common::types::OrbitError;
+use orbit_common::OrbitError;
 use orbit_store::layout::{self, LayoutMigrationInfo, SUPPORTED_LAYOUT_VERSION};
 use orbit_store::sqlite::migration::{
     PendingSchemaMigration, SUPPORTED_SCHEMA_VERSION, pending_schema_migrations_after,

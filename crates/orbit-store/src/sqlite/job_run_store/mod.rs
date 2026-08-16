@@ -1,11 +1,12 @@
 use std::str::FromStr;
 
 use chrono::{DateTime, Utc};
-use orbit_common::types::{
-    Crew, JobRun, JobRunState, JobRunStep, JobTargetType, KnowledgeRunMetrics, NotFoundKind,
-    OrbitError, PipelineState, RunEvent,
+use orbit_common::process::identity::process_start_identity_token;
+use orbit_common::{NotFoundKind, OrbitError};
+use orbit_types::identity::Crew;
+use orbit_types::workflow::{
+    JobRun, JobRunState, JobRunStep, JobTargetType, KnowledgeRunMetrics, PipelineState, RunEvent,
 };
-use orbit_common::utility::process_identity::process_start_identity_token;
 use rusqlite::TransactionBehavior;
 
 use crate::backend::{JobRunQuery, JobRunStepParams, JobRunStoreBackend};
@@ -723,7 +724,7 @@ mod tests {
     use std::time::Duration;
 
     use chrono::Utc;
-    use orbit_common::types::JobTargetType;
+    use orbit_types::workflow::JobTargetType;
     use tempfile::TempDir;
 
     use super::*;

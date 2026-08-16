@@ -6,8 +6,8 @@
 //! when a denominator is empty or too small to trust.
 
 use chrono::{DateTime, Duration, TimeZone, Utc};
-use orbit_common::types::JobActivityRoles;
 use orbit_store::{ActivityInvocationCount, InvocationRunCoverage, JobRunOutcomeFact};
+use orbit_types::workflow::JobActivityRoles;
 
 use crate::metrics::reliability::{
     ActivityRole, BucketGranularity, MIN_CONFIDENT_SAMPLE, Rate, ReliabilityWindow,
@@ -329,8 +329,9 @@ fn no_declared_recovery_activity_yields_an_empty_set_not_a_zero_rate() {
 /// denominator to zero.
 mod end_to_end {
     use chrono::{Duration, Utc};
-    use orbit_common::types::{InvocationTrace, JobRun, JobRunState};
     use orbit_store::InvocationInsertParams;
+    use orbit_types::telemetry::InvocationTrace;
+    use orbit_types::workflow::{JobRun, JobRunState};
     use tempfile::tempdir;
 
     use crate::OrbitRuntime;

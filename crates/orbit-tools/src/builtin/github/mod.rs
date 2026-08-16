@@ -1,6 +1,6 @@
-use orbit_common::types::OrbitError;
-use orbit_common::types::{ToolParam, ToolSchema};
+use orbit_common::OrbitError;
 use orbit_exec::{EnvironmentMode, ExecRequest, StdinMode};
+use orbit_types::tool::{ToolParam, ToolSchema};
 use serde_json::Value;
 
 use crate::{ToolRegistry, require_str};
@@ -56,7 +56,7 @@ macro_rules! gh_tool {
         $vis struct $name;
 
         impl crate::Tool for $name {
-            fn schema(&self) -> orbit_common::types::ToolSchema {
+            fn schema(&self) -> orbit_types::tool::ToolSchema {
                 super::gh_schema($tool_name, $description, vec![$($param),*])
             }
 
@@ -64,7 +64,7 @@ macro_rules! gh_tool {
                 &self,
                 ctx: &crate::ToolContext,
                 input: serde_json::Value,
-            ) -> Result<serde_json::Value, orbit_common::types::OrbitError> {
+            ) -> Result<serde_json::Value, orbit_common::OrbitError> {
                 let req = {
                     let $request_ctx = ctx;
                     let $request_input = &input;
@@ -88,7 +88,7 @@ macro_rules! gh_tool {
         $vis struct $name;
 
         impl crate::Tool for $name {
-            fn schema(&self) -> orbit_common::types::ToolSchema {
+            fn schema(&self) -> orbit_types::tool::ToolSchema {
                 super::gh_schema($tool_name, $description, vec![$($param),*])
             }
 
@@ -96,7 +96,7 @@ macro_rules! gh_tool {
                 &self,
                 ctx: &crate::ToolContext,
                 input: serde_json::Value,
-            ) -> Result<serde_json::Value, orbit_common::types::OrbitError> {
+            ) -> Result<serde_json::Value, orbit_common::OrbitError> {
                 let $execute_ctx = ctx;
                 let $execute_input = input;
                 $execute

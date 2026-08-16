@@ -4,7 +4,8 @@
 //! scheduler fire.
 
 use chrono::{DateTime, Duration, TimeZone, Utc};
-use orbit_common::types::{DedupePolicy, Task, TaskStatus, auto_task_tag};
+use orbit_types::task::{Task, TaskStatus};
+use orbit_types::workflow::{DedupePolicy, auto_task_tag};
 use serde_json::Value;
 
 use crate::OrbitRuntime;

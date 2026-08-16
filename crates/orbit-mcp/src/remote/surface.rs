@@ -1,12 +1,12 @@
 //! Canonical MCP definitions assembled from their owning registries.
 
-use orbit_common::types::{McpToolDefinition, McpToolDefinitionError};
+use orbit_types::tool::{McpToolDefinition, McpToolDefinitionError};
 
 pub fn canonical_mcp_tool_definitions() -> Result<Vec<McpToolDefinition>, McpToolDefinitionError> {
     let mut definitions = orbit_tools::canonical_builtin_mcp_tool_definitions()?;
     definitions.extend(super::discovery::discovery_tool_definitions()?);
     definitions.sort_by(|left, right| left.schema.name.cmp(&right.schema.name));
-    orbit_common::types::validate_mcp_tool_definitions(&definitions)?;
+    orbit_types::tool::validate_mcp_tool_definitions(&definitions)?;
     Ok(definitions)
 }
 

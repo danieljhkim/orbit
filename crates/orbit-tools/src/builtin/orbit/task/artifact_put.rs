@@ -2,7 +2,9 @@ use std::fs::File;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 
-use orbit_common::types::{OrbitError, TaskArtifact, ToolParam, ToolSchema};
+use orbit_common::OrbitError;
+use orbit_types::task::TaskArtifact;
+use orbit_types::tool::{ToolParam, ToolSchema};
 use serde_json::{Map, Value, json};
 
 use crate::{OrbitBuiltinAction, Tool, ToolContext};
@@ -49,7 +51,7 @@ impl Tool for OrbitTaskArtifactPutTool {
         // canonical tool name. The hub accepts that shape only on ssh-mcp;
         // local/model calls must continue to supply a real source_path.
         if input.get("artifacts").is_some() {
-            if ctx.session_context.transport != Some(orbit_common::types::McpTransport::SshMcp)
+            if ctx.session_context.transport != Some(orbit_types::tool::McpTransport::SshMcp)
                 || input.get("source_path").is_some()
                 || input.get("sourcePath").is_some()
                 || input.get("source-path").is_some()
@@ -149,7 +151,7 @@ fn read_bounded_artifact(
             ))
         })?;
     Ok(TaskArtifact {
-        media_type: orbit_common::types::media_type_for_artifact_path(&path).to_string(),
+        media_type: orbit_types::task::media_type_for_artifact_path(&path).to_string(),
         path,
         content,
         created_by: None,

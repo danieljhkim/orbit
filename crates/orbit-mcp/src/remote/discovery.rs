@@ -2,10 +2,12 @@
 
 use std::collections::BTreeSet;
 
-use orbit_common::types::{
-    McpToolDefinition, McpToolDefinitionError, McpToolScope, NotFoundKind, OrbitError, ToolParam,
-    ToolSchema, WorkspaceRegistry, WorkspaceStatus, validate_mcp_tool_definitions,
+use orbit_common::{NotFoundKind, OrbitError};
+use orbit_types::tool::{
+    McpToolDefinition, McpToolDefinitionError, McpToolScope, ToolParam, ToolSchema,
+    validate_mcp_tool_definitions,
 };
+use orbit_types::workspace::{WorkspaceRegistry, WorkspaceStatus};
 use serde_json::{Value, json};
 
 pub(super) fn discovery_tool_definitions() -> Result<Vec<McpToolDefinition>, McpToolDefinitionError>

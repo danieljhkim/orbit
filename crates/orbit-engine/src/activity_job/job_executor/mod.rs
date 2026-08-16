@@ -23,13 +23,14 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
-use orbit_common::types::activity_job::{
+use crate::activity_job::{V2ActivityCatalog, resolve_job_target_refs};
+use orbit_common::process::jitter::JitterRng;
+use orbit_types::workflow::activity_job::{
     ActivityV2Spec, AgentLoopSpec, BackoffStrategy, BranchOutcome, FanInSpec, FanOutBlock, JobV2,
     JobV2Step, JobV2StepBody, JoinMode, LoopBlock, ParallelBlock, RetrySpec, TargetStep,
-    V2ActivityCatalog, V2AuditEventKind, resolve_job_target_refs,
+    V2AuditEventKind,
 };
-use orbit_common::types::{JobRunState, PipelineState};
-use orbit_common::utility::jitter::JitterRng;
+use orbit_types::workflow::{JobRunState, PipelineState};
 use serde_json::Value;
 
 use crate::condition::evaluate_bool_expr;

@@ -13,12 +13,13 @@
 
 use std::path::Path;
 
-use orbit_common::types::{NotFoundKind, OrbitError, Workspace, WorkspaceStatus};
+use orbit_common::{NotFoundKind, OrbitError};
 use orbit_core::OrbitRuntime;
 use orbit_registry::workspace_registry;
 use orbit_store::sqlite::task_registry::{
     TaskRegistryStore, read_workspace_config_optional, task_registry_path,
 };
+use orbit_types::workspace::{Workspace, WorkspaceStatus};
 
 use crate::registry_runtime::{
     RegisteredRuntimeFactory, ResolvedWorkspaceSelection, global_root_for,

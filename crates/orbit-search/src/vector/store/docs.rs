@@ -2,7 +2,7 @@
 
 use std::collections::BTreeSet;
 
-use orbit_common::types::OrbitError;
+use orbit_common::OrbitError;
 
 use super::{SOURCE_KIND_DOC, VectorStore};
 use crate::Embedder;

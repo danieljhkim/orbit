@@ -3,9 +3,9 @@ use std::sync::Mutex;
 
 use chrono::{DateTime, Utc};
 use orbit_agent::loop_engine::audit::{AuditSink, BlobStore, LoopAuditEvent};
-use orbit_common::types::OrbitError;
-use orbit_common::types::activity_job::V2AuditEvent;
+use orbit_common::OrbitError;
 use orbit_store::{Store, V2AuditEventFilter, V2AuditEventInsertParams};
+use orbit_types::workflow::activity_job::V2AuditEvent;
 
 pub struct V2SqliteSink {
     store: Store,

@@ -10,7 +10,8 @@ use std::io::ErrorKind;
 use std::net::SocketAddr;
 use std::sync::Arc;
 
-use orbit_common::types::{OrbitError, ToolSessionContext};
+use orbit_common::OrbitError;
+use orbit_types::tool::ToolSessionContext;
 use rmcp::ServiceExt;
 use tokio::net::{TcpListener, TcpStream};
 

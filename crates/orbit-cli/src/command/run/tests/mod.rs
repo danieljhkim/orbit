@@ -9,9 +9,9 @@ mod support;
 
 use chrono::Utc;
 use clap::{Parser, error::ErrorKind};
-use orbit_common::types::{JobRun, JobRunState};
 use orbit_core::OrbitRuntime;
 use orbit_core::runtime::run_audit::RunAuditEvent;
+use orbit_types::workflow::{JobRun, JobRunState};
 use serde_json::{Value, json};
 
 use crate::command::{Cli, Commands, Execute};

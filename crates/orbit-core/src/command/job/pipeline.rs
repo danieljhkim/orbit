@@ -8,17 +8,20 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use chrono::Utc;
-use orbit_common::types::{
-    AuditEventStatus, JobRun, JobRunState, JobScheduleState, JobTargetType, NotFoundKind,
-    OrbitError, OrbitEvent, WorkspacePaths, audit_execution_id,
-};
+use orbit_common::observability::audit_id::audit_execution_id;
+use orbit_common::{NotFoundKind, OrbitError};
 use orbit_store::{AuditEventInsertParams, JobRunStepParams, TaskReservationReleaseReason};
+use orbit_types::record::OrbitEvent;
+use orbit_types::telemetry::AuditEventStatus;
+use orbit_types::workflow::{JobRun, JobRunState, JobScheduleState, JobTargetType};
+use orbit_types::workspace::WorkspacePaths;
 use serde::Serialize;
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
-use orbit_common::types::JobV2;
-use orbit_common::types::activity_job::{load_job_asset, validate_job_retired_sessions};
+use orbit_engine::activity_job::load_job_asset;
+use orbit_types::workflow::JobV2;
+use orbit_types::workflow::activity_job::validate_job_retired_sessions;
 
 use crate::OrbitRuntime;
 use crate::command::job::exec::V2RunFinalizationOptions;
@@ -251,7 +254,7 @@ impl OrbitRuntime {
         let direct_path = Path::new(job_ref);
         if !direct_path.is_file() {
             let entry = self.show_job_catalog_entry(job_ref)?;
-            if entry.kind() == orbit_common::types::JobKind::Subroutine {
+            if entry.kind() == orbit_types::workflow::JobKind::Subroutine {
                 return Err(OrbitError::InvalidInput(format!(
                     "job '{}' declares `kind: subroutine` and cannot be run directly (asset: {}).",
                     entry.job_id,
@@ -1287,7 +1290,7 @@ fn read_pipeline_worker_log_tail(path: &Path) -> Option<String> {
     let mut bytes = Vec::with_capacity((len - start) as usize);
     file.read_to_end(&mut bytes).ok()?;
     let output = String::from_utf8_lossy(&bytes);
-    let output = orbit_common::utility::logging::redact_event_text(output.trim());
+    let output = orbit_common::observability::logging::redact_event_text(output.trim());
     if output.is_empty() {
         None
     } else if start > 0 {

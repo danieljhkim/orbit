@@ -1,5 +1,5 @@
 use chrono::Utc;
-use orbit_common::types::{ExternalRef, Task, TaskPriority, TaskStatus, TaskType};
+use orbit_types::task::{ExternalRef, Task, TaskPriority, TaskStatus, TaskType};
 
 use super::super::message::batch_commit_message;
 

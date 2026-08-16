@@ -12,9 +12,9 @@ use std::path::{Path, PathBuf};
 use serde_json::Value as JsonValue;
 use toml_edit::{DocumentMut, Item, Table};
 
-use orbit_common::types::OrbitError;
-use orbit_common::utility::fs::atomic_write_text;
-use orbit_common::utility::redaction::redact_home_dir;
+use orbit_common::OrbitError;
+use orbit_common::fs::io::atomic_write_text;
+use orbit_common::security::redaction::redact_home_dir;
 
 use super::persistence::PersistenceConfig;
 use super::registry::{self, ConfigSnapshot};
@@ -196,7 +196,7 @@ impl ConfigStore {
     }
 
     /// Atomically write the current in-memory document to `self.path`
-    /// (temp file + rename, via `orbit_common::utility::fs::atomic_write_text`).
+    /// (temp file + rename, via `orbit_common::fs::io::atomic_write_text`).
     /// Callers should call [`Self::validate`] first: `save` does not
     /// validate on its own.
     pub fn save(&self) -> Result<(), OrbitError> {

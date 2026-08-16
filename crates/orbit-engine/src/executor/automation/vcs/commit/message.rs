@@ -1,4 +1,4 @@
-use orbit_common::types::{Task, TaskType};
+use orbit_types::task::{Task, TaskType};
 
 const BATCH_SUBJECT_BUDGET: usize = 72;
 const ELLIPSIS: char = '…';

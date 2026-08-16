@@ -3,7 +3,8 @@
 use super::super::related::{SemanticRelatedParams, run_with_embedder};
 
 use chrono::Utc;
-use orbit_common::types::{OrbitError, Task, TaskPriority, TaskStatus, TaskType};
+use orbit_common::OrbitError;
+use orbit_types::task::{Task, TaskPriority, TaskStatus, TaskType};
 
 use crate::Embedder;
 use crate::vector::VectorStore;

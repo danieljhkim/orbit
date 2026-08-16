@@ -10,10 +10,8 @@
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
-use orbit_common::types::OrbitError;
-use orbit_common::types::activity_job::{
-    load_activity_catalog_asset, validate_catalog_activity_tools,
-};
+use orbit_common::OrbitError;
+use orbit_engine::activity_job::{load_activity_catalog_asset, validate_catalog_activity_tools};
 
 use crate::OrbitRuntime;
 

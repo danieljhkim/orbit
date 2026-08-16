@@ -1,7 +1,7 @@
 //! Guarded status transitions through `update_task` (ORB-10000): the
 //! approve / reject / unarchive verbs folded into `--status` updates.
 
-use orbit_common::types::{Task, TaskStatus};
+use orbit_types::task::{Task, TaskStatus};
 
 use super::test_runtime;
 use crate::OrbitRuntime;
@@ -23,7 +23,7 @@ fn update_status(
     runtime: &OrbitRuntime,
     id: &str,
     status: TaskStatus,
-) -> Result<Task, orbit_common::types::OrbitError> {
+) -> Result<Task, orbit_common::OrbitError> {
     runtime.update_task(
         id,
         TaskUpdateParams {

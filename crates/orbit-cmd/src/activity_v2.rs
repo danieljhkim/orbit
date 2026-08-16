@@ -1,7 +1,7 @@
 //! Direct v2 activity execution helper.
 //!
 //! Reads a YAML file from disk, parses it through the two-pass loader at
-//! `orbit_common::types::activity_job::load_activity_asset`, and invokes the dispatcher with
+//! `orbit_engine::activity_job::load_activity_asset`, and invokes the dispatcher with
 //! `OrbitRuntime` as the `V2RuntimeHost` (impl lives in
 //! `orbit_core::runtime`'s v2 host).
 //!
@@ -10,12 +10,12 @@
 
 use std::path::Path;
 
-use orbit_common::types::activity_job::{
-    V2AuditEventKind, load_activity_asset,
-    validate_activity_tool_allowlist_against_registered_tools,
+use orbit_common::OrbitError;
+use orbit_engine::{V2AuditWriter, V2DispatchInput, dispatch_v2_activity, load_activity_asset};
+use orbit_types::record::OrbitEvent;
+use orbit_types::workflow::activity_job::{
+    V2AuditEventKind, validate_activity_tool_allowlist_against_registered_tools,
 };
-use orbit_common::types::{OrbitError, OrbitEvent};
-use orbit_engine::{V2AuditWriter, V2DispatchInput, dispatch_v2_activity};
 use serde_json::Value;
 
 use orbit_core::OrbitRuntime;
@@ -97,8 +97,10 @@ impl ActivityV2Commands for OrbitRuntime {
         });
 
         let activity_type = match &asset.spec.spec {
-            orbit_common::types::activity_job::ActivityV2Spec::AgentLoop(_) => "agent_loop",
-            orbit_common::types::activity_job::ActivityV2Spec::Deterministic(_) => "deterministic",
+            orbit_types::workflow::activity_job::ActivityV2Spec::AgentLoop(_) => "agent_loop",
+            orbit_types::workflow::activity_job::ActivityV2Spec::Deterministic(_) => {
+                "deterministic"
+            }
         };
 
         let dispatch = dispatch_v2_activity(V2DispatchInput {

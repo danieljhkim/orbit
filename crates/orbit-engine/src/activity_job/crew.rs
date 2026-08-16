@@ -5,7 +5,7 @@
 //! The host returns the selected assignment and this module applies it over the
 //! inline activity baseline field by field.
 
-use orbit_common::types::activity_job::{AgentLoopSpec, Provider};
+use orbit_types::workflow::activity_job::{AgentLoopSpec, Provider};
 use serde_json::Value;
 
 use crate::context::CrewConfig;

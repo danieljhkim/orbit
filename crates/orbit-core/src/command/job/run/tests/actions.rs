@@ -6,7 +6,7 @@ use super::*;
 use super::super::owner::process_is_alive;
 use chrono::{Duration, Utc};
 #[cfg(unix)]
-use orbit_common::types::OrbitError;
+use orbit_common::OrbitError;
 use std::path::Path;
 #[cfg(unix)]
 use std::process::{Command, Stdio};
@@ -110,7 +110,7 @@ fn failed_run_wait_entry_carries_the_terminal_step_diagnostic() {
             &run.run_id,
             &orbit_store::JobRunStepParams {
                 step_index: 0,
-                target_type: orbit_common::types::JobTargetType::Activity,
+                target_type: orbit_types::workflow::JobTargetType::Activity,
                 target_id: "task_pilot".to_string(),
                 started_at,
                 finished_at,
@@ -218,7 +218,7 @@ fn read_pid_pair(path: &Path) -> Option<(u32, u32)> {
 #[cfg(unix)]
 #[test]
 fn cancel_job_run_does_not_signal_reused_pid_identity_mismatch() {
-    use orbit_common::utility::process_identity::STABLE_TOKEN_PREFIX;
+    use orbit_common::process::identity::STABLE_TOKEN_PREFIX;
 
     let (_root, runtime) = test_runtime();
     let run = insert_pending_run(&runtime, "qa_cancel_reused_pid");

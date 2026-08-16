@@ -5,7 +5,7 @@ use std::path::Path;
 
 use chrono::Utc;
 use fs2::FileExt;
-use orbit_common::types::{JobRun, JobRunState};
+use orbit_types::workflow::{JobRun, JobRunState};
 use sha2::{Digest, Sha256};
 
 use orbit_core::OrbitRuntime;

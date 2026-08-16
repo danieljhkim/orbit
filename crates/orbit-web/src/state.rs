@@ -39,10 +39,10 @@ use axum::http::StatusCode;
 use axum::http::request::Parts;
 use axum::response::{IntoResponse, Json, Response};
 use orbit_cmd::registry_runtime::{RegisteredRuntimeFactory, workspace_runtime_binding};
-use orbit_common::types::WorkspaceStatus;
 use orbit_core::runtime::WorkspaceRuntimeBinding;
 use orbit_core::{OrbitError, OrbitRuntime, ShipMode};
 use orbit_registry::workspace_registry;
+use orbit_types::workspace::WorkspaceStatus;
 use serde_json::json;
 
 /// Synthetic workspace id used by [`DashboardState::single`].

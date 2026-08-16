@@ -9,6 +9,7 @@ ROOT = Path(__file__).resolve().parent.parent
 SOURCE_ROOTS = [
     ROOT / "crates/orbit-cli/src",
     ROOT / "crates/orbit-common/src",
+    ROOT / "crates/orbit-types/src",
     ROOT / "crates/orbit-core/src",
     ROOT / "crates/orbit-web/src",
     ROOT / "crates/orbit-mcp/src",

@@ -1,4 +1,4 @@
-use orbit_common::types::is_valid_orb_task_id;
+use orbit_types::task::is_valid_orb_task_id;
 use serde::Deserialize;
 
 use super::types::ArtifactRef;

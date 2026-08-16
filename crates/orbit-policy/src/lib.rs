@@ -15,7 +15,7 @@
 //! `PolicyDef` schema and answer "may this profile read/modify this path?"
 //!
 //! # Key exports
-//! - [`PolicyEngine`] — wraps a validated [`orbit_common::types::PolicyDef`]
+//! - [`PolicyEngine`] — wraps a validated [`orbit_types::policy::PolicyDef`]
 //! - [`FsPolicyEvaluation`] — structured allow/deny outcome with matched rule
 //! - [`resolve_symlinks`] — symlink-safe path resolution (dangling links
 //!   included) shared by policy evaluation and the tools-layer boundary check

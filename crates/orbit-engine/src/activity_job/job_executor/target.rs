@@ -22,7 +22,7 @@ pub(super) fn run_target(
         return Err(DispatchError::JobValidation(format!(
             "step `{}`: `session:` bindings are no longer supported; {}",
             step.id,
-            orbit_common::types::activity_job::RETIRED_BACKEND_MIGRATION
+            orbit_types::workflow::activity_job::RETIRED_BACKEND_MIGRATION
         )));
     }
 

@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, VecDeque};
 
-use orbit_common::types::OrbitError;
+use orbit_common::OrbitError;
 use orbit_search::{
     DocSemanticHit, DocSemanticSearchParams, SemanticRelatedParams, SemanticSearchParams,
 };
@@ -261,7 +261,7 @@ impl OrbitRuntime {
     ) -> Result<Vec<GlobalSearchHit>, OrbitError> {
         let status = status_filters
             .friction
-            .or((!params.all).then_some(orbit_common::types::FrictionStatus::Open));
+            .or((!params.all).then_some(orbit_types::record::FrictionStatus::Open));
         let records = crate::runtime::orbit_tool_host::friction_tools::store_for(self)?.list(
             &FrictionListFilter {
                 status,
@@ -290,7 +290,7 @@ impl OrbitRuntime {
                     source: "lexical".to_string(),
                     id: Some(record.id.clone()),
                     path: None,
-                    title: Some(orbit_common::friction::effective_title(
+                    title: Some(orbit_common::governance::friction::effective_title(
                         record.title.as_deref(),
                         &record.body,
                         &record.id,
@@ -311,7 +311,7 @@ impl OrbitRuntime {
         &self,
         query: &str,
         limit: usize,
-    ) -> Result<Vec<(GlobalSearchHit, Option<orbit_common::types::Task>)>, OrbitError> {
+    ) -> Result<Vec<(GlobalSearchHit, Option<orbit_types::task::Task>)>, OrbitError> {
         let mut tasks = self.search_tasks_filtered(query, &[])?;
         tasks.truncate(limit.saturating_mul(2).max(limit));
         Ok(tasks

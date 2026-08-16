@@ -5,12 +5,13 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use orbit_common::types::{ArtifactManifestFileV2, JobV2Step, JobV2StepBody, PipelineState};
 use orbit_core::command::job::JobCatalogEntry;
 use orbit_core::{
     AuditEvent, JobRun, OrbitError, OrbitRuntime, ResolvedCrewProjection, Task, TaskStatus,
     resolve_task_dependencies,
 };
+use orbit_types::task::ArtifactManifestFileV2;
+use orbit_types::workflow::{JobV2Step, JobV2StepBody, PipelineState};
 use serde_json::{Value, json};
 
 pub(crate) fn audit_event_to_json(event: &AuditEvent) -> Value {
@@ -201,7 +202,7 @@ pub(crate) fn task_to_json(task: &Task, status_by_id: &BTreeMap<String, TaskStat
         "type": task.task_type.to_string(),
         "pr_status": task.pr_status,
         "external_refs": task.external_refs,
-        "relations": orbit_common::types::resolve_task_relations(task, status_by_id),
+        "relations": orbit_types::task::resolve_task_relations(task, status_by_id),
         "source_task_id": task.source_task_id(),
         "job_run_id": task.job_run_id,
         "crew": task.crew,

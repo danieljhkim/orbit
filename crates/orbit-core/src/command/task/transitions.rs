@@ -1,7 +1,9 @@
 use chrono::Utc;
-use orbit_common::types::{
-    NotFoundKind, OrbitError, OrbitEvent, Task, TaskHistoryEntry, TaskRelationType, TaskStatus,
-    is_valid_friction_id, unmet_task_dependencies,
+use orbit_common::{NotFoundKind, OrbitError};
+use orbit_types::identity::is_valid_friction_id;
+use orbit_types::record::OrbitEvent;
+use orbit_types::task::{
+    Task, TaskHistoryEntry, TaskRelationType, TaskStatus, unmet_task_dependencies,
 };
 
 use super::TaskRecordUpdateParams as StoreTaskUpdateParams;

@@ -1,4 +1,4 @@
-use orbit_common::types::Task;
+use orbit_types::task::Task;
 
 use crate::context::PrConfig;
 

@@ -1,5 +1,5 @@
 use chrono::{DateTime, Utc};
-use orbit_common::types::OrbitError;
+use orbit_common::OrbitError;
 
 use crate::{Store, parse_timestamp};
 

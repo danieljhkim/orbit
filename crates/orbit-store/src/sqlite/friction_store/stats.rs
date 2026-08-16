@@ -8,7 +8,7 @@
 use std::collections::BTreeMap;
 
 use chrono::{DateTime, Utc};
-use orbit_common::types::OrbitError;
+use orbit_common::OrbitError;
 use rusqlite::Connection;
 
 use super::queries::encode_timestamp;

@@ -7,7 +7,7 @@
 
 use std::sync::Mutex as StdMutex;
 
-use orbit_common::types::{JobRunState, PipelineState};
+use orbit_types::workflow::{JobRunState, PipelineState};
 
 use super::*;
 

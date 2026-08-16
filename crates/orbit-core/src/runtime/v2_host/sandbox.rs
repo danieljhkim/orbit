@@ -1,9 +1,10 @@
 use std::path::Path;
 use std::path::PathBuf;
 
-use orbit_common::types::{ExecutorSandboxKind, ResolvedFsProfile, UNRESTRICTED_FS_PROFILE};
 use orbit_engine::RuntimeHost;
 use orbit_engine::{DispatchError, ResolvedSandbox};
+use orbit_types::policy::{ResolvedFsProfile, UNRESTRICTED_FS_PROFILE};
+use orbit_types::workflow::ExecutorSandboxKind;
 
 use crate::OrbitRuntime;
 
@@ -110,7 +111,7 @@ fn resolve_fs_profile_absolute(
     runtime: &OrbitRuntime,
     fs_profile: Option<&str>,
     workspace_override: Option<&Path>,
-) -> Result<ResolvedFsProfile, orbit_common::types::OrbitError> {
+) -> Result<ResolvedFsProfile, orbit_common::OrbitError> {
     let profile_name = fs_profile.unwrap_or(UNRESTRICTED_FS_PROFILE);
     let resolved = runtime
         .policy_engine()

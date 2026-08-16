@@ -4,7 +4,7 @@
 //! not an impact rank, quality score, or model-inferred summary.
 
 use chrono::{DateTime, Utc};
-use orbit_common::types::{Task, TaskPriority, TaskStatus};
+use orbit_types::task::{Task, TaskPriority, TaskStatus};
 use serde::{Deserialize, Serialize};
 
 /// Maximum notable completions shown for one window.
@@ -148,10 +148,10 @@ pub fn excerpt_execution_summary(raw: &str) -> Option<String> {
         return Some(collapsed);
     }
     let mut excerpt: String = collapsed.chars().take(SUMMARY_EXCERPT_MAX_CHARS).collect();
-    if let Some(last_space) = excerpt.rfind(' ') {
-        if last_space >= SUMMARY_EXCERPT_MAX_CHARS / 2 {
-            excerpt.truncate(last_space);
-        }
+    if let Some(last_space) = excerpt.rfind(' ')
+        && last_space >= SUMMARY_EXCERPT_MAX_CHARS / 2
+    {
+        excerpt.truncate(last_space);
     }
     excerpt.push('…');
     Some(excerpt)

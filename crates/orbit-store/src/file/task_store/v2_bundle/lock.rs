@@ -1,7 +1,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use orbit_common::types::OrbitError;
+use orbit_common::OrbitError;
 
 pub(crate) fn task_bundle_lock_sentinel_path(bundle_dir: &Path) -> Result<PathBuf, OrbitError> {
     let file_name = bundle_dir

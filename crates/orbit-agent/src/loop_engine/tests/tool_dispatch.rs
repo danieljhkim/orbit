@@ -5,8 +5,8 @@ mod schema {
 
     use super::super::super::tool_dispatch::*;
 
-    use orbit_common::types::{ToolParam, ToolSchema};
     use orbit_tools::ToolRegistry;
+    use orbit_types::tool::{ToolParam, ToolSchema};
 
     fn param_with_type(name: &str, param_type: &str) -> ToolParam {
         ToolParam {

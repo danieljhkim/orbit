@@ -3,7 +3,7 @@
 mod parse {
     #![allow(missing_docs)]
 
-    use orbit_common::types::ExecutionResult;
+    use orbit_types::tool::ExecutionResult;
 
     use super::super::super::response::AgentResponseStatus;
     use super::super::super::response::envelope::*;
@@ -371,7 +371,7 @@ mod sum {
 
     use serde_json::json;
 
-    use orbit_common::types::TokenUsage;
+    use orbit_types::telemetry::TokenUsage;
 
     use super::super::super::response::usage::*;
 
@@ -584,7 +584,7 @@ mod sum {
 mod structured_output {
     #![allow(missing_docs)]
 
-    use orbit_common::types::ExecutionResult;
+    use orbit_types::tool::ExecutionResult;
 
     use super::super::super::response::AgentResponseStatus;
     use super::super::super::response::envelope::*;

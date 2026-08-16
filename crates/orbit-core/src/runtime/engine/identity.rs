@@ -1,4 +1,5 @@
-use orbit_common::types::{AgentModelPair, OrbitError, normalize_agent_family_for_model};
+use orbit_common::OrbitError;
+use orbit_types::identity::{AgentModelPair, normalize_agent_family_for_model};
 
 use crate::OrbitRuntime;
 

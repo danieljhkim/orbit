@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 
-use orbit_common::types::PipelineState;
 use orbit_tools::OrbitTaskScope;
+use orbit_types::workflow::PipelineState;
 use serde_json::json;
 use tempfile::tempdir;
 

@@ -2,8 +2,8 @@ use std::collections::BTreeSet;
 use std::path::Path;
 use std::time::Instant;
 
-use orbit_common::types::OrbitError;
-use orbit_common::utility::selector::anchor_path;
+use orbit_common::OrbitError;
+use orbit_common::fs::selector::anchor_path;
 use serde::{Deserialize, Serialize};
 
 use crate::OrbitRuntime;
@@ -15,7 +15,7 @@ use super::paths::{
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct TaskLintReport {
-    pub task_id: orbit_common::types::OrbitId,
+    pub task_id: orbit_types::identity::OrbitId,
     pub duration_ms: u64,
     pub finding_count: usize,
     pub findings: Vec<TaskLintFinding>,

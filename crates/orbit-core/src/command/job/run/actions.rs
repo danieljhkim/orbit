@@ -1,10 +1,10 @@
 //! Cancellation, archive, delete, and run-state helpers for job runs.
 
 use chrono::Utc;
-use orbit_common::types::{
-    JobRun, JobRunState, NotFoundKind, OrbitError, OrbitEvent, PipelineState,
-};
+use orbit_common::{NotFoundKind, OrbitError};
 use orbit_store::TaskReservationReleaseReason;
+use orbit_types::record::OrbitEvent;
+use orbit_types::workflow::{JobRun, JobRunState, PipelineState};
 use serde_json::Value;
 
 use crate::OrbitRuntime;
@@ -42,7 +42,7 @@ impl OrbitRuntime {
             .get_job_run_backend(run_id)?
             .ok_or_else(|| OrbitError::not_found(NotFoundKind::JobRun, run_id.to_string()))?;
         run.state
-            .try_transition(orbit_common::types::RunEvent::Cancel)
+            .try_transition(orbit_types::workflow::RunEvent::Cancel)
             .map_err(|msg| {
                 OrbitError::JobValidation(format!("cannot cancel job run '{}': {}", run_id, msg))
             })?;
@@ -69,7 +69,7 @@ impl OrbitRuntime {
         if cancelled_run.state != JobRunState::Cancelled {
             let detail = cancelled_run
                 .state
-                .try_transition(orbit_common::types::RunEvent::Cancel)
+                .try_transition(orbit_types::workflow::RunEvent::Cancel)
                 .err()
                 .unwrap_or_else(|| {
                     format!(
@@ -141,7 +141,7 @@ impl OrbitRuntime {
     pub fn read_run_state(
         &self,
         run_id: &str,
-    ) -> Result<Option<orbit_common::types::PipelineState>, OrbitError> {
+    ) -> Result<Option<orbit_types::workflow::PipelineState>, OrbitError> {
         self.stores().jobs().read_run_state(run_id)
     }
 

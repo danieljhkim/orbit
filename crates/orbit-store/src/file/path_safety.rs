@@ -1,6 +1,6 @@
 use std::path::{Component, Path};
 
-use orbit_common::types::OrbitError;
+use orbit_common::OrbitError;
 
 pub(crate) fn validate_path_stem(stem: &str, kind: &str) -> Result<(), OrbitError> {
     if is_safe_path_stem(stem) {

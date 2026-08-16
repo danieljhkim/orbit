@@ -1,10 +1,12 @@
 use std::fs;
 use std::path::PathBuf;
 
-use orbit_common::types::{
-    EXECUTOR_RESOURCE_SCHEMA_VERSION, ExecutorDef, ExecutorResource, ExecutorResourceSpec,
-    OrbitError, ResourceKind, ResourceMetadata, validate_resource_name,
+use orbit_common::OrbitError;
+use orbit_types::resource::{
+    EXECUTOR_RESOURCE_SCHEMA_VERSION, ExecutorResource, ExecutorResourceSpec, ResourceKind,
+    ResourceMetadata, validate_resource_name,
 };
+use orbit_types::workflow::ExecutorDef;
 
 use crate::file::yaml_doc::{parse_yaml_with, write_yaml_atomic_with};
 

@@ -1,7 +1,7 @@
 #![allow(missing_docs)]
 
 use orbit_common::test_fixtures::{TEST_CLAUDE_MODEL, TEST_CODEX_MODEL};
-use orbit_common::types::activity_job::{AgentLoopSpec, OnDenial, Provider};
+use orbit_types::workflow::activity_job::{AgentLoopSpec, OnDenial, Provider};
 
 use crate::context::CrewConfig;
 

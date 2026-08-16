@@ -54,7 +54,7 @@ pub mod skill_store {
 /// (SQLite, ORB-10680); the file-layout helpers re-exported here own the hub
 /// publication decision and the legacy tree kept as read-only evidence.
 pub mod friction_store {
-    pub use orbit_common::types::validate_friction_id;
+    pub use orbit_types::identity::validate_friction_id;
 
     pub use crate::file::friction_store::{
         canonical_hub_friction_root, ensure_default_tag_taxonomy, prepare_hub_friction_root,

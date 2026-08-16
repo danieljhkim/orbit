@@ -2,7 +2,8 @@ use std::sync::mpsc;
 use std::thread;
 use std::time::Duration;
 
-use orbit_common::types::{OrbitError, StoredTool};
+use orbit_common::OrbitError;
+use orbit_types::tool::StoredTool;
 use rusqlite::TransactionBehavior;
 
 use crate::Store;

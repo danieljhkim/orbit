@@ -11,7 +11,7 @@
 //!   `"{{steps.a.state.status}} == success && {{steps.b.output.match}} != false"`
 //!   `"{{steps.a.state.status}} == success || {{steps.b.state.status}} == success"`
 
-use orbit_common::types::OrbitError;
+use orbit_common::OrbitError;
 
 use crate::template::{self, TemplateContext};
 

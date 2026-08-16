@@ -1,4 +1,5 @@
-use orbit_common::types::{FsCheckResult, FsOperation, OrbitError, PolicyDef};
+use orbit_common::OrbitError;
+use orbit_types::policy::{FsCheckResult, FsOperation, PolicyDef};
 
 pub(crate) fn evaluate(
     def: &PolicyDef,
@@ -6,5 +7,5 @@ pub(crate) fn evaluate(
     operation: FsOperation,
     path: &str,
 ) -> Result<FsCheckResult, OrbitError> {
-    def.check_path(profile, operation, path)
+    def.check_path(profile, operation, path).map_err(Into::into)
 }

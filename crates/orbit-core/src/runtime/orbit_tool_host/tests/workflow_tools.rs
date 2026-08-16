@@ -1,10 +1,13 @@
 use std::collections::BTreeSet;
 
 use chrono::Utc;
-use orbit_common::types::{
-    AuditEventStatus, JobRunState, McpCapability, OrbitError, Role, TaskStatus, ToolSessionContext,
-};
+use orbit_common::OrbitError;
 use orbit_tools::ToolContext;
+use orbit_types::policy::Role;
+use orbit_types::task::TaskStatus;
+use orbit_types::telemetry::AuditEventStatus;
+use orbit_types::tool::{McpCapability, ToolSessionContext};
+use orbit_types::workflow::JobRunState;
 use serde_json::{Value, json};
 
 use super::super::build_orbit_tool_host;
@@ -318,10 +321,7 @@ fn operator_can_observe_runs_and_agent_denial_is_audited() {
         },
     );
     assert!(
-        matches!(
-            denied,
-            Err(orbit_common::types::OrbitError::CapabilityDenied(_))
-        ),
+        matches!(denied, Err(orbit_common::OrbitError::CapabilityDenied(_))),
         "{denied:?}"
     );
 

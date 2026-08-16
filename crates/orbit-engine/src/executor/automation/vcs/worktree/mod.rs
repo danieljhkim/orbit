@@ -6,7 +6,7 @@ mod setup;
 
 use std::path::{Path, PathBuf};
 
-use orbit_common::types::OrbitError;
+use orbit_common::OrbitError;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 

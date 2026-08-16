@@ -2,7 +2,7 @@ use std::ffi::OsStr;
 use std::path::{Component, Path, PathBuf};
 use std::process::Command;
 
-use orbit_common::types::OrbitError;
+use orbit_common::OrbitError;
 
 pub(crate) const ORBIT_ROOT_TOKEN: &str = "{{ORBIT_ROOT}}";
 

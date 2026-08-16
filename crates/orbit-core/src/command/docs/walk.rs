@@ -4,7 +4,7 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
-use orbit_common::types::OrbitError;
+use orbit_common::OrbitError;
 
 use super::frontmatter::parse_doc_tolerant;
 use super::path_util::{path_to_slash_string, repo_relative_path};

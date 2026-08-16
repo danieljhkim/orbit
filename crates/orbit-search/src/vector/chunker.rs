@@ -3,7 +3,7 @@
 //! private machinery for splitting paragraphs, padding overlap, and falling
 //! back to word-level splitting when a single paragraph is too long.
 
-use orbit_common::types::OrbitError;
+use orbit_common::OrbitError;
 
 use crate::Embedder;
 

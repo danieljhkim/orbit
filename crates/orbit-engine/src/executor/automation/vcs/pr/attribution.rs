@@ -1,4 +1,6 @@
-use orbit_common::types::{OrbitError, Task, normalize_optional_attribution_label};
+use orbit_common::OrbitError;
+use orbit_types::identity::normalize_optional_attribution_label;
+use orbit_types::task::Task;
 use serde_json::json;
 
 use crate::context::RuntimeHost;

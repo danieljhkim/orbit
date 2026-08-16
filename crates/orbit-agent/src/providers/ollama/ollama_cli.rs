@@ -1,4 +1,4 @@
-use orbit_common::types::OrbitError;
+use orbit_common::OrbitError;
 
 use crate::providers::common::render_prompt_with_embedded_envelope;
 

@@ -21,7 +21,7 @@ use super::super::diagnostics::{
 };
 use super::super::router;
 use super::test_support::{body_json, write_lines};
-use orbit_common::utility::blob_store::BlobStore;
+use orbit_common::storage::blob_store::BlobStore;
 
 async fn request_dashboard_errors(runtime: OrbitRuntime) -> Response {
     Router::new()

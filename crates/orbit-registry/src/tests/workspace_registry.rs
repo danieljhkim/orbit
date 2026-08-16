@@ -2,9 +2,10 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use chrono::{TimeZone, Utc};
-use orbit_common::types::{
-    OrbitError, WORKSPACE_REGISTRY_SCHEMA_VERSION, Workspace, WorkspaceCheckout,
-    WorkspaceCheckoutRole, WorkspaceRegistry, WorkspaceStatus,
+use orbit_common::OrbitError;
+use orbit_types::workspace::{
+    WORKSPACE_REGISTRY_SCHEMA_VERSION, Workspace, WorkspaceCheckout, WorkspaceCheckoutRole,
+    WorkspaceRegistry, WorkspaceStatus,
 };
 use serde_json::{Value, json};
 use tempfile::tempdir;

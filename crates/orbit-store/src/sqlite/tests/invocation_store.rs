@@ -4,7 +4,7 @@
 
 use chrono::{TimeZone, Utc};
 use orbit_common::test_fixtures::TEST_CODEX_MODEL;
-use orbit_common::types::{InvocationTrace, TokenUsage, ToolCallTrace};
+use orbit_types::telemetry::{InvocationTrace, TokenUsage, ToolCallTrace};
 
 // Frozen production Claude model literal, chosen because the shipped
 // `assets/model_prices.yaml` prices it (unlike the frozen test fixtures,
@@ -205,7 +205,7 @@ fn historical_invocation_is_repriced_at_query_time_without_a_migration() {
                     "UPDATE invocations SET ts = ?1 WHERE job_run_id = ?2",
                     ["2026-07-29T23:59:59+00:00", "jrun-historical-gpt"],
                 )
-                .map_err(|error| orbit_common::types::OrbitError::Store(error.to_string()))?;
+                .map_err(|error| orbit_common::OrbitError::Store(error.to_string()))?;
             Ok(())
         })
         .expect("set historical timestamp");

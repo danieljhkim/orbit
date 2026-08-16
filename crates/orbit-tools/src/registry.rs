@@ -1,9 +1,10 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use orbit_common::types::{
-    McpToolDefinition, McpToolDefinitionError, McpToolScope, NotFoundKind, OrbitError, ToolSchema,
-    mcp_advertised_tool_name, validate_mcp_tool_definitions,
+use orbit_common::{NotFoundKind, OrbitError};
+use orbit_types::tool::{
+    McpToolDefinition, McpToolDefinitionError, McpToolScope, ToolSchema, mcp_advertised_tool_name,
+    validate_mcp_tool_definitions,
 };
 use serde_json::Value;
 

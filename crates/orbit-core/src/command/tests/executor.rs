@@ -1,8 +1,9 @@
 use std::sync::Mutex;
 
 use chrono::Utc;
-use orbit_common::types::{ExecutorDef, ExecutorSandboxKind, ExecutorType, OrbitError};
+use orbit_common::OrbitError;
 use orbit_store::ExecutorDefStoreBackend;
+use orbit_types::workflow::{ExecutorDef, ExecutorSandboxKind, ExecutorType};
 
 use crate::command::executor::{
     DEFAULT_EXECUTOR_FILES, migrated_default_executor, migrated_default_executor_for_platform,

@@ -1,8 +1,9 @@
 use std::collections::BTreeMap;
 
-use orbit_common::types::{
-    ArtifactManifestFileV2, ExternalRef, NotFoundKind, OrbitError, Task, TaskArtifact, TaskComment,
-    TaskHistoryEntry, prune_missing_context_files,
+use orbit_common::fs::task_io::prune_missing_context_files;
+use orbit_common::{NotFoundKind, OrbitError};
+use orbit_types::task::{
+    ArtifactManifestFileV2, ExternalRef, Task, TaskArtifact, TaskComment, TaskHistoryEntry,
 };
 
 use crate::OrbitRuntime;
@@ -67,7 +68,7 @@ impl OrbitRuntime {
     /// dependency readiness while leaving task listing workspace-scoped.
     pub fn task_status_index(
         &self,
-    ) -> Result<BTreeMap<String, orbit_common::types::TaskStatus>, OrbitError> {
+    ) -> Result<BTreeMap<String, orbit_types::task::TaskStatus>, OrbitError> {
         if !self.coordination_task_reads_visible() {
             return Ok(BTreeMap::new());
         }
@@ -114,8 +115,8 @@ impl OrbitRuntime {
 
     pub fn list_tasks_filtered(
         &self,
-        status: Option<orbit_common::types::TaskStatus>,
-        priority: Option<orbit_common::types::TaskPriority>,
+        status: Option<orbit_types::task::TaskStatus>,
+        priority: Option<orbit_types::task::TaskPriority>,
         parent_id: Option<&str>,
         job_run_id: Option<&str>,
         external_ref: Option<&ExternalRef>,

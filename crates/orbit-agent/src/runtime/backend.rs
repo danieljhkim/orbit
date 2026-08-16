@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
 
-use orbit_common::types::OrbitError;
+use orbit_common::OrbitError;
 
 use crate::runtime::AgentRuntimeFactory;
 

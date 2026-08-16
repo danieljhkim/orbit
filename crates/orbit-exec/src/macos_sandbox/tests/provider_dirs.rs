@@ -6,7 +6,7 @@ use std::path::PathBuf;
 #[cfg(target_os = "macos")]
 use super::super::compile::{SandboxCompileEnv, compile_macos_sandbox_profile_with_env};
 #[cfg(target_os = "macos")]
-use orbit_common::types::ResolvedFsProfile;
+use orbit_types::policy::ResolvedFsProfile;
 #[test]
 fn compile_grants_write_access_to_codex_home_when_set() {
     let resolved = profile("default", &["/Users/test/repo"], &["/Users/test/repo/src"]);

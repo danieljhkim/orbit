@@ -1,4 +1,4 @@
-use orbit_common::types::{Task, TaskPriority, TaskStatus, TaskType};
+use orbit_types::task::{Task, TaskPriority, TaskStatus, TaskType};
 use serde_json::{Value, json};
 
 use super::super::task_pilot::{apply, prepare};

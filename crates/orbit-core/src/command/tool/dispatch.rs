@@ -5,12 +5,16 @@ use std::cell::Cell;
 use std::path::Path;
 use std::time::Instant;
 
-use orbit_common::types::{
-    AuditEventStatus, NotFoundKind, OrbitError, Role, ToolSessionContext, audit_execution_id,
-    normalize_agent_family_for_model, normalize_optional_attribution_label,
-};
+use orbit_common::observability::audit_id::audit_execution_id;
+use orbit_common::{NotFoundKind, OrbitError};
 use orbit_store::{AuditEventInsertParams, Store};
 use orbit_tools::{ReservationOwnerContext, ToolContext};
+use orbit_types::identity::{
+    normalize_agent_family_for_model, normalize_optional_attribution_label,
+};
+use orbit_types::policy::Role;
+use orbit_types::telemetry::AuditEventStatus;
+use orbit_types::tool::ToolSessionContext;
 use serde_json::Value;
 
 use crate::OrbitRuntime;

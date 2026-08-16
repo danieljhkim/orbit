@@ -1,5 +1,5 @@
 use chrono::{DateTime, Utc};
-use orbit_common::types::JobRunState;
+use orbit_types::workflow::JobRunState;
 use serde::Serialize;
 
 /// Parameters for filtering and paging job run listings.

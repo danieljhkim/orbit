@@ -8,14 +8,13 @@ use std::process::Command;
 use std::sync::Arc;
 use std::time::Duration;
 
+use crate::activity_job::{load_activity_asset, load_job_asset};
 use orbit_agent::loop_engine::audit::AuditSink;
 use orbit_common::test_fixtures::TEST_CODEX_MODEL;
-use orbit_common::types::activity_job::{
-    ActivityV2Spec, JobV2StepBody, V2AuditEventKind, load_activity_asset, load_job_asset,
-};
 #[cfg(target_os = "linux")]
 use orbit_exec::probe_bwrap;
 use orbit_store::Store;
+use orbit_types::workflow::activity_job::{ActivityV2Spec, JobV2StepBody, V2AuditEventKind};
 use tempfile::{TempDir, tempdir};
 
 use crate::context::{ProvenanceEnv, provenance_env};
@@ -978,7 +977,7 @@ fn linux_bwrap_failed_invocation_names_ungranted_write_path_and_deny() {
         "#!/bin/sh\ncat > /dev/null\ntouch \"$PWD/.orbit/ungranted\"\n",
     );
     let blocked_path = orbit.join("ungranted");
-    let profile = orbit_common::types::ResolvedFsProfile {
+    let profile = orbit_types::policy::ResolvedFsProfile {
         name: "implementer".to_string(),
         read: vec![format!("{}/**", workspace.display())],
         modify: vec![
@@ -999,7 +998,7 @@ fn linux_bwrap_failed_invocation_names_ungranted_write_path_and_deny() {
         executor_args: Vec::new(),
         provider_config: HashMap::new(),
         sandbox: Some(ResolvedSandbox {
-            kind: orbit_common::types::ExecutorSandboxKind::LinuxBwrap,
+            kind: orbit_types::workflow::ExecutorSandboxKind::LinuxBwrap,
             fs_profile: profile,
             allow_fallback: false,
             managed_worktree: true,
@@ -1089,7 +1088,7 @@ fn linux_bwrap_exit_zero_without_an_envelope_still_names_the_denied_write() {
         "#!/bin/sh\ncat > /dev/null\ntouch \"$PWD/.orbit/ungranted\"\nexit 0\n",
     );
     let blocked_path = orbit.join("ungranted");
-    let profile = orbit_common::types::ResolvedFsProfile {
+    let profile = orbit_types::policy::ResolvedFsProfile {
         name: "unrestricted".to_string(),
         read: vec![format!("{}/**", workspace.display())],
         modify: vec![
@@ -1110,7 +1109,7 @@ fn linux_bwrap_exit_zero_without_an_envelope_still_names_the_denied_write() {
         executor_args: Vec::new(),
         provider_config: HashMap::new(),
         sandbox: Some(ResolvedSandbox {
-            kind: orbit_common::types::ExecutorSandboxKind::LinuxBwrap,
+            kind: orbit_types::workflow::ExecutorSandboxKind::LinuxBwrap,
             fs_profile: profile,
             allow_fallback: false,
             managed_worktree: true,
@@ -2828,13 +2827,13 @@ fn rendered_finish_input_from_epic_pipeline(
     rendered
 }
 
-fn epic_orchestrator_spec(timeout: Duration) -> orbit_common::types::activity_job::AgentLoopSpec {
+fn epic_orchestrator_spec(timeout: Duration) -> orbit_types::workflow::activity_job::AgentLoopSpec {
     let asset = load_activity_asset(EPIC_ORCHESTRATOR_YAML).expect("parse epic orchestrator");
     let ActivityV2Spec::AgentLoop(mut spec) = asset.spec.spec else {
         panic!("epic_orchestrator must be an agent_loop");
     };
     spec.wall_clock_timeout_seconds = timeout.as_secs();
-    spec.provider = orbit_common::types::activity_job::Provider::Codex;
+    spec.provider = orbit_types::workflow::activity_job::Provider::Codex;
     spec
 }
 

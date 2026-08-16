@@ -1,5 +1,5 @@
 use clap::Parser;
-use orbit_common::types::AuditEvent;
+use orbit_types::telemetry::AuditEvent;
 use serde_json::{Value, json};
 
 use crate::command::{Cli, Payload};
@@ -7,9 +7,9 @@ use crate::command::{Cli, Payload};
 use super::super::audit_middleware::*;
 use orbit_common::test_env::{self, AGENT_IDENTITY_ENV};
 use orbit_common::test_fixtures::TEST_CODEX_MODEL;
-use orbit_common::types::AuditEventStatus;
 use orbit_core::context::ActorKind;
 use orbit_core::{ActorIdentity, OrbitError, OrbitRuntime};
+use orbit_types::telemetry::AuditEventStatus;
 
 fn meta_for(args: &[&str]) -> CommandMeta {
     let cli = Cli::parse_from(args);

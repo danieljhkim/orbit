@@ -4,7 +4,8 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::path::Path;
 
-use orbit_common::types::{OrbitError, TaskStatus};
+use orbit_common::OrbitError;
+use orbit_types::task::TaskStatus;
 
 use super::{
     LAYOUT_MIGRATIONS, LayoutMigration, SUPPORTED_LAYOUT_VERSION, current_layout_version,

@@ -10,7 +10,8 @@ use std::path::PathBuf;
 use std::str::FromStr;
 
 use chrono::{DateTime, SecondsFormat, Utc};
-use orbit_common::types::{FrictionRecord, FrictionStatus, OrbitError};
+use orbit_common::OrbitError;
+use orbit_types::record::{FrictionRecord, FrictionStatus};
 use rusqlite::types::Value as SqlValue;
 use rusqlite::{Connection, Row};
 

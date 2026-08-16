@@ -16,9 +16,9 @@
 //!   which is also how `skip_if_open` finds prior instances.
 
 use chrono::{DateTime, Utc};
-use orbit_common::types::{
-    AutoTaskDefinition, DedupePolicy, OrbitError, Task, TaskStatus, auto_task_tag,
-};
+use orbit_common::OrbitError;
+use orbit_types::task::{Task, TaskStatus};
+use orbit_types::workflow::{AutoTaskDefinition, DedupePolicy, auto_task_tag};
 use serde_json::{Value, json};
 
 use crate::OrbitRuntime;

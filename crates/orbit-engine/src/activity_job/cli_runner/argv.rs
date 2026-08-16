@@ -1,11 +1,11 @@
 use std::collections::HashMap;
 use std::path::Path;
 
-use orbit_common::types::ExecutorSandboxKind;
 use orbit_exec::{
     bwrap_program_for_audit, claude_state_dir_from_env, compile_linux_bwrap_argv,
     sandbox_exec_program_for_audit,
 };
+use orbit_types::workflow::ExecutorSandboxKind;
 
 use super::super::dispatcher::ResolvedSandbox;
 
@@ -55,7 +55,7 @@ pub(super) fn try_audit_argv_for_dispatch(
     args: &[String],
     sandbox: Option<&ResolvedSandbox>,
     cwd: Option<&Path>,
-) -> Result<Vec<String>, orbit_common::types::OrbitError> {
+) -> Result<Vec<String>, orbit_common::OrbitError> {
     match sandbox {
         Some(sb) if sb.kind == ExecutorSandboxKind::LinuxBwrap => {
             let plan =

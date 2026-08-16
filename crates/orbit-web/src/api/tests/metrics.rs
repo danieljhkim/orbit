@@ -9,7 +9,6 @@ use axum::http::{Request, StatusCode};
 use axum::response::Response;
 use chrono::{Duration, SecondsFormat};
 use orbit_common::test_fixtures::TEST_CODEX_MODEL;
-use orbit_common::types::{InvocationTrace, KnowledgeRunMetrics, TokenUsage, ToolCallTrace};
 use orbit_core::command::job::JobRunListParams;
 use orbit_core::metrics::{KnowledgeStatsSummary, aggregate as aggregate_knowledge_stats};
 use orbit_core::{
@@ -17,6 +16,8 @@ use orbit_core::{
     JobRunState, OrbitRuntime, OrchestratorInvocationMetrics, OrchestratorMetricsBucketKind,
     TaskInvocationMetrics, ToolInvocationMetrics,
 };
+use orbit_types::telemetry::{InvocationTrace, TokenUsage, ToolCallTrace};
+use orbit_types::workflow::KnowledgeRunMetrics;
 use tower::ServiceExt;
 
 use super::super::router;

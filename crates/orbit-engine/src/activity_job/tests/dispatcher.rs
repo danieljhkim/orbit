@@ -48,7 +48,7 @@ fn dispatch_error_retryability_classification_table() {
 
 #[test]
 fn dispatch_error_to_orbit_keeps_validation_variant_and_buckets_the_rest() {
-    use orbit_common::types::OrbitError;
+    use orbit_common::OrbitError;
 
     use super::super::dispatcher::{DispatchError, dispatch_error_to_orbit};
 

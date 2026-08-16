@@ -3,8 +3,9 @@ use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
 use chrono::{DateTime, Duration, TimeZone, Utc};
-use orbit_common::types::{JobRunState, RoutineDefinition, parse_routine_yaml};
+use orbit_common::protocol::yaml::parse_routine_yaml;
 use orbit_store::{RoutineFireIntentParams, Store};
+use orbit_types::workflow::{JobRunState, RoutineDefinition};
 use tempfile::tempdir;
 
 use crate::OrbitError;

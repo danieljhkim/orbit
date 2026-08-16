@@ -7,9 +7,9 @@ use orbit_agent::{
     Agent, AgentConfig, AgentOperation, AgentRequest, peek_response_status,
     provider_invocation_diagnostic, response_envelope_protocol_check,
 };
-use orbit_common::types::activity_job::{AgentLoopSpec, V2AuditEventKind};
-use orbit_common::utility::process_identity::process_start_identity_token;
-use orbit_common::utility::redaction::{PatternRedactor, redact_sensitive_env_text};
+use orbit_common::process::identity::process_start_identity_token;
+use orbit_common::security::redaction::{PatternRedactor, redact_sensitive_env_text};
+use orbit_types::workflow::activity_job::{AgentLoopSpec, V2AuditEventKind};
 use serde_json::Value;
 
 use crate::context::{ProvenanceEnv, provenance_env};
@@ -236,7 +236,7 @@ pub fn run_cli_backend(
 
     let linux_post_run_guard = match sandbox {
         Some(sandbox)
-            if sandbox.kind == orbit_common::types::ExecutorSandboxKind::LinuxBwrap
+            if sandbox.kind == orbit_types::workflow::ExecutorSandboxKind::LinuxBwrap
                 && sandbox.managed_worktree =>
         {
             LinuxBwrapPostRunGuard::capture(&sandbox.fs_profile)
@@ -322,7 +322,7 @@ pub fn run_cli_backend(
     // stderr (the helper skips any line without an EROFS marker) and keeps the
     // Orbit-owned attribution available to every failure branch below.
     let sandbox_write_diagnostic = match sandbox {
-        Some(sandbox) if sandbox.kind == orbit_common::types::ExecutorSandboxKind::LinuxBwrap => {
+        Some(sandbox) if sandbox.kind == orbit_types::workflow::ExecutorSandboxKind::LinuxBwrap => {
             linux_bwrap_failed_write_diagnostic(
                 &sandbox.fs_profile,
                 stderr.protocol_bytes(),

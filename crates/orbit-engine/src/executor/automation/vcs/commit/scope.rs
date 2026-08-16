@@ -1,8 +1,9 @@
 use std::collections::BTreeSet;
 use std::path::{Component, Path, PathBuf};
 
-use orbit_common::types::{OrbitError, Task};
-use orbit_common::utility::selector::anchor_path;
+use orbit_common::OrbitError;
+use orbit_common::fs::selector::anchor_path;
+use orbit_types::task::Task;
 
 use super::super::git::git_output_paths;
 

@@ -2,8 +2,8 @@ use std::io::{Read, Write};
 use std::sync::mpsc::Sender;
 use std::thread::{self, JoinHandle};
 
-use orbit_common::utility::output_capture::{BoundedOutputCapture, capture_limit_from_env};
-use orbit_common::utility::redaction::redact_sensitive_env_text;
+use orbit_common::process::output_capture::{BoundedOutputCapture, capture_limit_from_env};
+use orbit_common::security::redaction::redact_sensitive_env_text;
 
 pub(super) const ORBIT_EXEC_OUTPUT_CAPTURE_LIMIT_ENV: &str =
     "ORBIT_EXEC_OUTPUT_CAPTURE_LIMIT_BYTES";

@@ -5,13 +5,13 @@
 
 use std::process::Stdio;
 
-use orbit_common::types::ResolvedFsProfile;
 use orbit_exec::{
     LinuxBwrapPostRunGuard, LinuxBwrapSpawnRequest, WriteAnchorKind, bwrap_path,
     bwrap_program_for_audit, compile_linux_bwrap_argv, linux_bwrap_write_grant_diagnostic,
     linux_bwrap_write_grants, prepare_linux_bwrap_write_grants, probe_bwrap,
     spawn_under_linux_bwrap,
 };
+use orbit_types::policy::ResolvedFsProfile;
 
 fn profile(modify: Vec<String>) -> ResolvedFsProfile {
     ResolvedFsProfile {

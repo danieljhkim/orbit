@@ -1,14 +1,13 @@
 use std::path::{Path, PathBuf};
 
 use chrono::Utc;
-use orbit_common::types::{
-    NotFoundKind, OrbitError, Workspace, WorkspaceCheckout, WorkspaceRegistry, WorkspaceStatus,
-};
+use orbit_common::{NotFoundKind, OrbitError};
 use orbit_core::OrbitRuntime;
 use orbit_registry::workspace_registry::{registry_path_for, save_registry_to};
 use orbit_store::sqlite::task_registry::{
     WorkspaceConfig, workspace_config_path, write_workspace_config,
 };
+use orbit_types::workspace::{Workspace, WorkspaceCheckout, WorkspaceRegistry, WorkspaceStatus};
 use serde_json::json;
 use tempfile::TempDir;
 

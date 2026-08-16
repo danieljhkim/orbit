@@ -47,8 +47,9 @@ use std::sync::Arc;
 use orbit_policy::PolicyEngine;
 use serde_json::{Map, Value};
 
-use orbit_common::friction::FrictionVerb;
-use orbit_common::types::{OrbitError, ToolSchema};
+use orbit_common::OrbitError;
+use orbit_common::governance::friction::FrictionVerb;
+use orbit_types::tool::ToolSchema;
 
 /// Fast operation timeout (1 s). Used for local command resolution (e.g. `which`).
 pub const TIMEOUT_FAST_MS: u64 = 1_000;
@@ -183,7 +184,7 @@ pub struct ReservationOwnerContext {
 pub struct ToolContext {
     pub cwd: Option<String>,
     /// Ambient metadata asserted by the transport/session, not by tool input.
-    pub session_context: orbit_common::types::ToolSessionContext,
+    pub session_context: orbit_types::tool::ToolSessionContext,
     /// If non-empty, only tools in this list may be called. Empty means unrestricted.
     pub allowed_tools: Vec<String>,
     /// Workspace root used by tools that enforce path containment.
@@ -274,7 +275,7 @@ pub fn require_str(input: &Value, key: &str) -> Result<String, OrbitError> {
 /// The `label` should be the command name (e.g. `"gh pr comment"`) and is included
 /// in the error message for diagnostics.
 pub fn check_exec_result(
-    result: &orbit_common::types::ExecutionResult,
+    result: &orbit_types::tool::ExecutionResult,
     label: &str,
 ) -> Result<(), OrbitError> {
     if result.success {

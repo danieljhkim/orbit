@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use orbit_common::types::OrbitError;
+use orbit_common::OrbitError;
 
 use super::path_util::component_str;
 use super::types::{DocFrontmatter, DocType, FrontmatterBlock, ParsedDoc, RawDocFrontmatter};

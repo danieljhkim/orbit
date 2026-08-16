@@ -5,7 +5,7 @@ impl TaskV2Store {
         &self,
         id: &str,
     ) -> Result<Option<Vec<TaskComment>>, OrbitError> {
-        orbit_common::types::validate_orb_task_id(id)?;
+        orbit_types::task::validate_orb_task_id(id)?;
         match self.bundle_store.read_bundle(id) {
             Ok(bundle) => Ok(Some(
                 bundle
@@ -30,7 +30,7 @@ impl TaskV2Store {
         &self,
         id: &str,
     ) -> Result<Option<Vec<TaskHistoryEntry>>, OrbitError> {
-        orbit_common::types::validate_orb_task_id(id)?;
+        orbit_types::task::validate_orb_task_id(id)?;
         match self.bundle_store.read_bundle(id) {
             Ok(bundle) => Ok(Some(
                 bundle

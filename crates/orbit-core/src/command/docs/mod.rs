@@ -17,9 +17,10 @@ mod walk;
 #[cfg(test)]
 mod tests;
 
-use orbit_common::types::{OrbitError, Task};
+use orbit_common::OrbitError;
 pub use orbit_search::{DocIndexParams, DocIndexResult, SearchResult};
 use orbit_search::{score_doc_record, sort_search_results};
+use orbit_types::task::Task;
 
 use crate::OrbitRuntime;
 

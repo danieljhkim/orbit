@@ -5,7 +5,7 @@ impl TaskV2Store {
         &self,
         id: &str,
     ) -> Result<Option<Vec<TaskArtifact>>, OrbitError> {
-        orbit_common::types::validate_orb_task_id(id)?;
+        orbit_types::task::validate_orb_task_id(id)?;
         let bundle = match self.bundle_store.read_bundle(id) {
             Ok(bundle) => bundle,
             Err(OrbitError::NotFound {
@@ -38,7 +38,7 @@ impl TaskV2Store {
         &self,
         id: &str,
     ) -> Result<Option<Vec<ArtifactManifestFileV2>>, OrbitError> {
-        orbit_common::types::validate_orb_task_id(id)?;
+        orbit_types::task::validate_orb_task_id(id)?;
         let bundle = match self.bundle_store.read_bundle(id) {
             Ok(bundle) => bundle,
             Err(OrbitError::NotFound {
@@ -60,7 +60,7 @@ impl TaskV2Store {
         id: &str,
         path: &str,
     ) -> Result<Option<TaskArtifact>, OrbitError> {
-        orbit_common::types::validate_orb_task_id(id)?;
+        orbit_types::task::validate_orb_task_id(id)?;
         let path = normalize_v2_artifact_path(path)?;
         let bundle = match self.bundle_store.read_bundle(id) {
             Ok(bundle) => bundle,
@@ -94,7 +94,7 @@ impl TaskV2Store {
         id: &str,
         fields: &TaskArtifactUpdateParams,
     ) -> Result<(), OrbitError> {
-        orbit_common::types::validate_orb_task_id(id)?;
+        orbit_types::task::validate_orb_task_id(id)?;
         if fields.upsert_artifacts.is_empty() {
             return Ok(());
         }

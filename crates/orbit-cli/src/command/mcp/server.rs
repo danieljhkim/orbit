@@ -11,13 +11,13 @@ use std::sync::Arc;
 
 use orbit_cmd::registry_runtime::{RegisteredRuntimeFactory, ResolvedWorkspaceSelection};
 use orbit_cmd::task_owner;
-use orbit_common::types::{
-    McpToolDefinition, McpToolScope, NotFoundKind, OrbitError, ToolSessionContext, required_string,
-};
+use orbit_common::protocol::tool_input::required_string;
+use orbit_common::{NotFoundKind, OrbitError};
 use orbit_core::OrbitRuntime;
 use orbit_core::command::tool::{ToolEntryPoint, execute_global_in_process_tool_dispatch};
 use orbit_core::runtime::resolve_global_root;
 use orbit_mcp::{ListenerExposure, McpHost, McpListener};
+use orbit_types::tool::{McpToolDefinition, McpToolScope, ToolSessionContext};
 use serde_json::Value;
 
 /// The one tool whose target is a machine-global primary key, and therefore the

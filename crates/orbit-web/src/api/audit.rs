@@ -7,12 +7,12 @@ use crate::state::Ws;
 use axum::extract::Query;
 use axum::response::{IntoResponse, Json, Response};
 use chrono::{DateTime, Duration, Utc};
-use orbit_common::types::{McpCapability, McpTransport};
 use orbit_core::command::job::JobRunListParams;
 use orbit_core::{
     AuditEventFilter, AuditEventStatus, AuditToolAggregate, FailureIncidentQuery, JobRunState,
     OrbitError, OrbitRuntime,
 };
+use orbit_types::tool::{McpCapability, McpTransport};
 use serde_json::{Value, json};
 
 use super::denials::{

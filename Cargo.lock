@@ -2089,6 +2089,7 @@ dependencies = [
  "chrono",
  "orbit-common",
  "orbit-tools",
+ "orbit-types",
  "regex",
  "reqwest",
  "serde",
@@ -2115,6 +2116,7 @@ dependencies = [
  "orbit-core",
  "orbit-mcp",
  "orbit-registry",
+ "orbit-types",
  "orbit-web",
  "predicates",
  "regex",
@@ -2142,6 +2144,7 @@ dependencies = [
  "orbit-engine",
  "orbit-registry",
  "orbit-store",
+ "orbit-types",
  "serde",
  "serde_json",
  "sha2 0.10.9",
@@ -2155,9 +2158,9 @@ name = "orbit-common"
 version = "0.12.1"
 dependencies = [
  "chrono",
- "clap",
  "fs2",
  "libc",
+ "orbit-types",
  "proptest",
  "regex",
  "rusqlite",
@@ -2190,6 +2193,7 @@ dependencies = [
  "orbit-search",
  "orbit-store",
  "orbit-tools",
+ "orbit-types",
  "rusqlite",
  "serde",
  "serde_json",
@@ -2213,9 +2217,11 @@ dependencies = [
  "orbit-exec",
  "orbit-store",
  "orbit-tools",
+ "orbit-types",
  "regex",
  "serde",
  "serde_json",
+ "serde_yaml",
  "sha2 0.10.9",
  "tempfile",
  "thiserror",
@@ -2230,6 +2236,7 @@ version = "0.12.1"
 dependencies = [
  "libc",
  "orbit-common",
+ "orbit-types",
  "regex",
  "tempfile",
  "wait-timeout",
@@ -2243,6 +2250,7 @@ dependencies = [
  "orbit-common",
  "orbit-registry",
  "orbit-tools",
+ "orbit-types",
  "rmcp",
  "serde_json",
  "tempfile",
@@ -2258,6 +2266,7 @@ version = "0.12.1"
 dependencies = [
  "chrono",
  "orbit-common",
+ "orbit-types",
  "serde",
  "tempfile",
 ]
@@ -2269,6 +2278,7 @@ dependencies = [
  "chrono",
  "hostname",
  "orbit-common",
+ "orbit-types",
  "serde",
  "serde_json",
  "tempfile",
@@ -2285,6 +2295,7 @@ dependencies = [
  "fastembed",
  "libc",
  "orbit-common",
+ "orbit-types",
  "reqwest",
  "rsa",
  "rusqlite",
@@ -2304,6 +2315,7 @@ dependencies = [
  "fs2",
  "jsonschema",
  "orbit-common",
+ "orbit-types",
  "regex",
  "rusqlite",
  "serde",
@@ -2325,6 +2337,7 @@ dependencies = [
  "orbit-common",
  "orbit-exec",
  "orbit-policy",
+ "orbit-types",
  "regex",
  "rusqlite",
  "serde",
@@ -2334,6 +2347,23 @@ dependencies = [
  "thiserror",
  "tracing",
  "tracing-subscriber",
+]
+
+[[package]]
+name = "orbit-types"
+version = "0.12.1"
+dependencies = [
+ "chrono",
+ "clap",
+ "proptest",
+ "regex",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "sha2 0.10.9",
+ "tempfile",
+ "thiserror",
+ "url",
 ]
 
 [[package]]
@@ -2349,6 +2379,7 @@ dependencies = [
  "orbit-common",
  "orbit-core",
  "orbit-registry",
+ "orbit-types",
  "serde",
  "serde_json",
  "serde_yaml",

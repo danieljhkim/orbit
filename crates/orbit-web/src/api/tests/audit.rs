@@ -7,8 +7,8 @@ use std::sync::Arc;
 
 use axum::body::Body;
 use axum::http::{Method, Request, StatusCode};
-use orbit_common::types::{McpCapability, McpTransport};
 use orbit_core::{AuditEventInsertParams, AuditEventStatus, OrbitRuntime};
+use orbit_types::tool::{McpCapability, McpTransport};
 use serde_json::Value;
 use tower::ServiceExt;
 

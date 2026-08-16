@@ -1,8 +1,8 @@
 use std::collections::BTreeSet;
 
 use chrono::{Duration, Utc};
-use orbit_common::types::OrbitError;
-use orbit_common::utility::path::workspace_relative_paths_overlap;
+use orbit_common::OrbitError;
+use orbit_common::fs::path::workspace_relative_paths_overlap;
 use rusqlite::{OptionalExtension, TransactionBehavior, params};
 
 use crate::{

@@ -17,12 +17,15 @@
 //! [`AuditEventStatus::Denied`]; the two rows answer different questions
 //! ("what was refused" versus "what call failed").
 
-use orbit_common::authorization::{
+use orbit_common::OrbitError;
+use orbit_common::governance::authorization::{
     CallerCapabilities, CallerEnvelope, GovernedOperation, authorize, governed_command,
     governed_tool,
 };
-use orbit_common::types::{AuditEventStatus, OrbitError, ToolSessionContext, audit_execution_id};
+use orbit_common::observability::audit_id::audit_execution_id;
 use orbit_store::AuditEventInsertParams;
+use orbit_types::telemetry::AuditEventStatus;
+use orbit_types::tool::ToolSessionContext;
 
 use crate::OrbitRuntime;
 

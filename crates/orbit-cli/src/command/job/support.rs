@@ -1,6 +1,6 @@
-use orbit_common::types::{ActivityV2Spec, JobKind, JobV2Step, JobV2StepBody};
 use orbit_core::JobRun;
 use orbit_core::command::job::{JobCatalogEntry, JobCatalogFilter};
+use orbit_types::workflow::{ActivityV2Spec, JobKind, JobV2Step, JobV2StepBody};
 use serde_json::{Value, json};
 
 pub(super) fn format_last_run(last_run: Option<&JobRun>) -> String {

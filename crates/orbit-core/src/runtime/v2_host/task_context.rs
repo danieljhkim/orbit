@@ -1,7 +1,8 @@
 use std::path::Path;
 
-use orbit_common::types::{Task, TaskHistoryEntry, TaskStatus, prune_missing_context_files};
+use orbit_common::fs::task_io::prune_missing_context_files;
 use orbit_engine::{DispatchError, WORKFLOW_RUN_FAILED_EVENT};
+use orbit_types::task::{Task, TaskHistoryEntry, TaskStatus};
 use serde_json::Value;
 
 use crate::OrbitRuntime;

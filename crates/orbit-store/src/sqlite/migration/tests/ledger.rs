@@ -1,5 +1,5 @@
 // ORB-10003: versioned schema-migration ledger.
-use orbit_common::types::OrbitError;
+use orbit_common::OrbitError;
 use rusqlite::{Connection, Error as SqliteError, ffi};
 
 use super::super::ledger::{self, Migration};
@@ -568,7 +568,7 @@ fn rejects_non_increasing_registry() {
 /// cache_create_1h_tokens` — the exact production failure.
 #[test]
 fn migrated_legacy_db_carries_every_invocation_insert_column() {
-    use orbit_common::types::{InvocationTrace, TokenUsage};
+    use orbit_types::telemetry::{InvocationTrace, TokenUsage};
 
     use crate::sqlite::invocation_store::{INVOCATION_INSERT_COLUMNS, InvocationInsertParams};
 

@@ -1,6 +1,7 @@
 use orbit_agent::{AgentResponseStatus, parse_and_validate_response};
-use orbit_common::types::activity_job::AgentLoopSpec;
-use orbit_common::types::{ExecutionResult, InvocationTrace};
+use orbit_types::telemetry::InvocationTrace;
+use orbit_types::tool::ExecutionResult;
+use orbit_types::workflow::activity_job::AgentLoopSpec;
 use serde_json::Value;
 
 use super::super::dispatcher::DispatchError;

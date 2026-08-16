@@ -11,7 +11,7 @@ use crate::state::Ws;
 use axum::extract::rejection::JsonRejection;
 use axum::extract::{Path, Query};
 use axum::response::{IntoResponse, Json, Response};
-use orbit_common::friction::FrictionVerb;
+use orbit_common::governance::friction::FrictionVerb;
 use orbit_core::{OrbitError, OrbitRuntime};
 use serde::Deserialize;
 use serde_json::{Map, Value, json};

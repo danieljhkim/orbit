@@ -1,8 +1,8 @@
 use std::path::PathBuf;
 
 use chrono::Utc;
-use orbit_common::types::{JobRunState, PipelineState};
 use orbit_core::{JobRun, NotFoundKind, OrbitError, OrbitRuntime};
+use orbit_types::workflow::{JobRunState, PipelineState};
 use serde_json::{Value, json};
 
 use crate::command::Execute;
@@ -109,7 +109,7 @@ fn job_replay_args_execute_creates_linked_run() {
         .expect("job history");
     assert!(history.iter().any(|run| {
         run.retry_source_run_id.as_deref() == Some(source.run_id.as_str())
-            && run.state == orbit_common::types::JobRunState::Success
+            && run.state == orbit_types::workflow::JobRunState::Success
     }));
 }
 

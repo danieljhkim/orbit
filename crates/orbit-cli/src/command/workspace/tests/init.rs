@@ -1,11 +1,12 @@
 use tempfile::tempdir;
 
 use chrono::Utc;
-use orbit_common::types::{
-    OverlapPolicy, RoutineTarget, Workspace, WorkspaceCheckout, WorkspaceCheckoutRole,
-    WorkspaceRegistry, WorkspaceStatus, parse_routine_yaml,
-};
+use orbit_common::protocol::yaml::parse_routine_yaml;
 use orbit_registry::workspace_registry;
+use orbit_types::workflow::{OverlapPolicy, RoutineTarget};
+use orbit_types::workspace::{
+    Workspace, WorkspaceCheckout, WorkspaceCheckoutRole, WorkspaceRegistry, WorkspaceStatus,
+};
 
 use crate::tests::env_isolation::EnvGuard;
 
@@ -535,7 +536,7 @@ fn multi_host_workspace_init_persists_an_explicit_local_owner() {
     );
     assert_eq!(
         registry.checkouts[0].role,
-        Some(orbit_common::types::WorkspaceCheckoutRole::Owner)
+        Some(orbit_types::workspace::WorkspaceCheckoutRole::Owner)
     );
 }
 

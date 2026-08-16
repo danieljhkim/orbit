@@ -1,6 +1,6 @@
 use clap::Args;
-use orbit_common::types::JobKind;
 use orbit_core::OrbitRuntime;
+use orbit_types::workflow::JobKind;
 
 use crate::command::{CommandOut, Execute, Payload};
 use crate::output::color::Domain;

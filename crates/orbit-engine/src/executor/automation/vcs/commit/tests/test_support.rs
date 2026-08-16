@@ -4,11 +4,11 @@ use std::process::Command;
 use std::sync::Mutex;
 
 use chrono::Utc;
-use orbit_common::types::{
-    ExternalRef, NotFoundKind, OrbitError, OrbitEvent, Role, Task, TaskArtifact, TaskPriority,
-    TaskStatus, TaskType,
-};
+use orbit_common::{NotFoundKind, OrbitError};
 use orbit_tools::ToolContext;
+use orbit_types::policy::Role;
+use orbit_types::record::OrbitEvent;
+use orbit_types::task::{ExternalRef, Task, TaskArtifact, TaskPriority, TaskStatus, TaskType};
 use serde_json::Value;
 use tempfile::tempdir;
 
@@ -82,7 +82,7 @@ impl RuntimeHost for CommitTestHost {
         priority: Option<TaskPriority>,
         parent_id: Option<&str>,
         batch_id: Option<&str>,
-        external_ref: Option<&orbit_common::types::ExternalRef>,
+        external_ref: Option<&orbit_types::task::ExternalRef>,
         has_external_ref_system: Option<&str>,
     ) -> Result<Vec<Task>, OrbitError> {
         Ok(self

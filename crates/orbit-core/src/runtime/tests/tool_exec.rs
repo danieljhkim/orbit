@@ -1,11 +1,11 @@
 //! Sibling tests for `tool_exec.rs` (migrated per ORB-00246 / docs/design-patterns/test_layout.md).
 
 use crate::OrbitRuntime;
-use orbit_common::types::Role;
 use orbit_tools::ToolContext;
+use orbit_types::policy::Role;
 
-use orbit_common::types::{TaskPriority, TaskStatus, TaskType};
 use orbit_store::TaskCreateParams;
+use orbit_types::task::{TaskPriority, TaskStatus, TaskType};
 use serde_json::json;
 
 #[test]

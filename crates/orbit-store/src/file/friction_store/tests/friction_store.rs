@@ -1,7 +1,7 @@
 // Migrated from file/friction_store.rs per ORB-00231
 use super::super::*;
 use chrono::Utc;
-use orbit_common::types::FrictionStatus;
+use orbit_types::record::FrictionStatus;
 
 #[test]
 fn hub_migration_publishes_complete_tree_and_is_idempotent() {

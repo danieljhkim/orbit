@@ -1,4 +1,4 @@
-use orbit_common::types::OrbitEvent;
+use orbit_types::record::OrbitEvent;
 
 use crate::{OrbitError, OrbitRuntime};
 

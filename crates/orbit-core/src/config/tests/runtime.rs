@@ -1,6 +1,7 @@
 use super::super::ConfigSnapshot;
 use super::super::runtime::*;
-use orbit_common::types::{Crew, CrewAssignment, OrbitError};
+use orbit_common::OrbitError;
+use orbit_types::identity::{Crew, CrewAssignment};
 use std::collections::BTreeMap;
 use std::path::Path;
 use tempfile::tempdir;

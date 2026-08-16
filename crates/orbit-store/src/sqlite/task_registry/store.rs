@@ -3,11 +3,11 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
-use orbit_common::types::{
-    NotFoundKind, ORB_TASK_ID_MAX, OrbitError, TaskEnvelopeV2, TaskRelation, TaskRelationEdge,
-    TaskRelationType, TaskStatus, format_task_id, is_valid_orb_task_id, is_valid_task_id_prefix,
-    normalize_task_tags, parse_task_number, task_id_prefix, validate_orb_task_id,
-    validate_task_relations_for_source,
+use orbit_common::{NotFoundKind, OrbitError};
+use orbit_types::task::{
+    ORB_TASK_ID_MAX, TaskEnvelopeV2, TaskRelation, TaskRelationEdge, TaskRelationType, TaskStatus,
+    format_task_id, is_valid_orb_task_id, is_valid_task_id_prefix, normalize_task_tags,
+    parse_task_number, task_id_prefix, validate_orb_task_id, validate_task_relations_for_source,
 };
 use rusqlite::{Connection, TransactionBehavior, params, params_from_iter};
 
@@ -47,7 +47,7 @@ impl TaskRegistryStore {
         fs::create_dir_all(&workspaces_dir).map_err(|e| OrbitError::Store(e.to_string()))?;
 
         let conn = Connection::open(path).map_err(|e| OrbitError::Store(e.to_string()))?;
-        orbit_common::utility::sqlite::apply_default_pragmas(&conn)?;
+        orbit_common::storage::sqlite::apply_default_pragmas(&conn)?;
         // The registry is the commit point that makes a created task official, so
         // its writes must be durable against power loss the moment they ack. WAL's
         // synchronous=NORMAL default only fsyncs the WAL at checkpoint, leaving an
@@ -254,7 +254,7 @@ impl TaskRegistryStore {
         tx.commit().map_err(|e| OrbitError::Store(e.to_string()))?;
 
         let next = u32::try_from(next).map_err(|e| OrbitError::Store(e.to_string()))?;
-        format_task_id(&task_prefix, next)
+        format_task_id(&task_prefix, next).map_err(Into::into)
     }
 
     /// Bind the allocator to the immutable prefix from this machine's host
@@ -1184,6 +1184,7 @@ fn validate_relations_in_registry(
             .cloned(),
     );
     validate_task_relations_for_source(source_task_id, relations, &existing_edges)
+        .map_err(Into::into)
 }
 
 fn validate_relation_targets_exist(

@@ -2,16 +2,20 @@
 //! implementors, plus the task-update param types those traits consume.
 
 use orbit_agent::AgentConfig;
-use orbit_common::types::activity_job::Provider;
-use orbit_common::types::{
-    ActivityV2, AgentModelPair, ExternalRef, InvocationTrace, JobRun, JobRunState, OrbitError,
-    OrbitEvent, PipelineState, Role, Task, TaskArtifact, TaskComment, TaskHistoryEntry,
-    TaskPriority, TaskStatus,
-};
+use orbit_common::OrbitError;
 use orbit_exec::EnvironmentMode;
 use orbit_store::JobRunStepParams;
 use orbit_store::{InvocationQuery, InvocationRecord};
 use orbit_tools::{FsAuditLogger, ToolContext};
+use orbit_types::identity::AgentModelPair;
+use orbit_types::policy::Role;
+use orbit_types::record::OrbitEvent;
+use orbit_types::task::{
+    ExternalRef, Task, TaskArtifact, TaskComment, TaskHistoryEntry, TaskPriority, TaskStatus,
+};
+use orbit_types::telemetry::InvocationTrace;
+use orbit_types::workflow::activity_job::Provider;
+use orbit_types::workflow::{ActivityV2, JobRun, JobRunState, PipelineState};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::path::Path;

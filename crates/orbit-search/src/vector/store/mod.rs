@@ -11,7 +11,7 @@
 //!
 //! This file owns the `VectorStore` struct itself plus the connection-handle
 //! plumbing (`open`, `open_in_memory`, `connection` — pragma defaults come
-//! from `orbit_common::utility::sqlite`) and the small `pub(super)`
+//! from `orbit_common::storage::sqlite`) and the small `pub(super)`
 //! constants shared across the submodules above.
 
 mod docs;
@@ -23,7 +23,7 @@ mod upsert;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
-use orbit_common::types::OrbitError;
+use orbit_common::OrbitError;
 use rusqlite::Connection;
 
 pub const SOURCE_KIND_TASK: &str = "task";
@@ -45,7 +45,7 @@ impl VectorStore {
             std::fs::create_dir_all(parent).map_err(|e| OrbitError::Store(e.to_string()))?;
         }
         let conn = Connection::open(path).map_err(|e| OrbitError::Store(e.to_string()))?;
-        orbit_common::utility::sqlite::apply_default_pragmas(&conn)?;
+        orbit_common::storage::sqlite::apply_default_pragmas(&conn)?;
         schema::ensure_vector_schema(&conn)?;
         Ok(Self {
             conn: Arc::new(Mutex::new(conn)),
@@ -55,7 +55,7 @@ impl VectorStore {
     /// Open an in-memory orbit-search database. Used by tests.
     pub fn open_in_memory() -> Result<Self, OrbitError> {
         let conn = Connection::open_in_memory().map_err(|e| OrbitError::Store(e.to_string()))?;
-        orbit_common::utility::sqlite::apply_default_pragmas(&conn)?;
+        orbit_common::storage::sqlite::apply_default_pragmas(&conn)?;
         schema::ensure_vector_schema(&conn)?;
         Ok(Self {
             conn: Arc::new(Mutex::new(conn)),

@@ -1,6 +1,6 @@
 use std::fs;
 
-use orbit_common::types::OrbitError;
+use orbit_common::OrbitError;
 use serde::Serialize;
 
 use crate::CompanionPaths;

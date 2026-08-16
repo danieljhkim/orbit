@@ -6,12 +6,13 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use orbit_common::types::{
-    ArtifactManifestV2, OrbitError, TASK_ARTIFACT_MANIFEST_FILE_NAME, TASK_ARTIFACTS_DIR_NAME,
+use orbit_common::OrbitError;
+use orbit_common::fs::io::{atomic_write_text, sync_parent_dir, with_exclusive_file_lock};
+use orbit_types::task::{
+    ArtifactManifestV2, TASK_ARTIFACT_MANIFEST_FILE_NAME, TASK_ARTIFACTS_DIR_NAME,
     TASK_COMMENTS_FILE_NAME, TASK_ENVELOPE_FILE_NAME, TASK_EVENTS_FILE_NAME, TaskCommentRowV2,
     TaskEnvelopeV2, TaskEventRowV2,
 };
-use orbit_common::utility::fs::{atomic_write_text, sync_parent_dir, with_exclusive_file_lock};
 
 use crate::file::yaml_doc::write_yaml_atomic_with;
 use crate::sqlite::task_registry::{ProjectionRebuildResult, TaskRegistryStore};
@@ -179,7 +180,7 @@ impl TaskBundleStoreV2 {
     }
 
     pub(crate) fn delete_bundle(&self, task_id: &str) -> Result<bool, OrbitError> {
-        orbit_common::types::validate_orb_task_id(task_id)?;
+        orbit_types::task::validate_orb_task_id(task_id)?;
         let bundle_dir = self.bundle_path(task_id)?;
 
         if let Some(workspace_orbit_dir) = self.workspace_orbit_dir.as_deref() {

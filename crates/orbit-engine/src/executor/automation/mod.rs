@@ -6,7 +6,8 @@ pub(crate) mod vcs;
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-use orbit_common::types::{DeterministicAction, EngineDeterministicAction, OrbitError};
+use orbit_common::OrbitError;
+use orbit_types::workflow::{DeterministicAction, EngineDeterministicAction};
 use serde_json::Value;
 
 #[derive(Debug, Clone, Default)]

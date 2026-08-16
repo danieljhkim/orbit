@@ -236,7 +236,7 @@ fn jittered_backoff_stays_within_deterministic_bound() {
         backoff_cap_ms: 1_000,
         backoff_strategy: BackoffStrategy::Exponential,
     };
-    let mut rng = orbit_common::utility::jitter::JitterRng::from_seed(0xdead_beef);
+    let mut rng = orbit_common::process::jitter::JitterRng::from_seed(0xdead_beef);
     for attempt in 0..8u32 {
         let bound = compute_backoff_ms(&retry, attempt);
         for _ in 0..128 {
@@ -274,7 +274,7 @@ fn backoff_bound_grows_monotonically_to_cap_under_exponential() {
 
 // ----- [ORB-10449] Step-completion protocol -------------------------------
 
-use orbit_common::types::activity_job::{AgentLoopSpec, OnDenial, Provider};
+use orbit_types::workflow::activity_job::{AgentLoopSpec, OnDenial, Provider};
 
 /// Build the shipped `implement_one` shape: a `backend: cli` agent loop that is
 /// artifact-backed, so the *content* contract stays off and only the

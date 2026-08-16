@@ -1,9 +1,11 @@
-use orbit_common::types::{
-    AuditEventStatus, Role, TaskStatus, audit_execution_id, optional_string_list_alias,
-};
+use orbit_common::observability::audit_id::audit_execution_id;
+use orbit_common::protocol::tool_input::optional_string_list_alias;
 use orbit_engine::DispatchError;
 use orbit_store::AuditEventInsertParams;
 use orbit_tools::ToolContext;
+use orbit_types::policy::Role;
+use orbit_types::task::TaskStatus;
+use orbit_types::telemetry::AuditEventStatus;
 use serde_json::Value;
 
 use crate::OrbitRuntime;

@@ -21,14 +21,14 @@ fn resolve_executor_sandbox_returns_none_when_executor_has_no_sandbox() {
 #[test]
 fn resolve_executor_sandbox_returns_linux_descriptor_with_absolute_mounts() {
     let runtime =
-        seeded_runtime_with_executor(Some(orbit_common::types::ExecutorSandboxKind::LinuxBwrap));
+        seeded_runtime_with_executor(Some(orbit_types::workflow::ExecutorSandboxKind::LinuxBwrap));
     let resolved = runtime
         .resolve_executor_sandbox("codex", None, None)
         .expect("resolve")
         .expect("descriptor");
     assert_eq!(
         resolved.kind,
-        orbit_common::types::ExecutorSandboxKind::LinuxBwrap
+        orbit_types::workflow::ExecutorSandboxKind::LinuxBwrap
     );
     assert!(!resolved.managed_worktree);
     for entry in &resolved.fs_profile.modify {
@@ -47,7 +47,7 @@ fn direct_reviewer_profile_does_not_gain_workspace_runtime_writes() {
     seed_executor(
         &runtime,
         "claude",
-        Some(orbit_common::types::ExecutorSandboxKind::LinuxBwrap),
+        Some(orbit_types::workflow::ExecutorSandboxKind::LinuxBwrap),
     );
 
     let reviewer = runtime
@@ -106,7 +106,7 @@ fn resolve_executor_sandbox_marks_only_specific_orbit_worktree_managed() {
     seed_executor(
         &runtime,
         "claude",
-        Some(orbit_common::types::ExecutorSandboxKind::LinuxBwrap),
+        Some(orbit_types::workflow::ExecutorSandboxKind::LinuxBwrap),
     );
     let worktrees = runtime.paths().orbit_dir.join("state/worktrees");
     let worktree = worktrees.join("orbit-jrun-test");
@@ -168,7 +168,7 @@ fn managed_worktree_without_an_fs_profile_can_write_under_docs() {
     seed_executor(
         &runtime,
         "claude",
-        Some(orbit_common::types::ExecutorSandboxKind::LinuxBwrap),
+        Some(orbit_types::workflow::ExecutorSandboxKind::LinuxBwrap),
     );
     let worktree = runtime
         .paths()
@@ -244,7 +244,7 @@ fn resolve_executor_sandbox_orders_versioned_orbit_exceptions_after_default_deny
     seed_executor(
         &runtime,
         "claude",
-        Some(orbit_common::types::ExecutorSandboxKind::LinuxBwrap),
+        Some(orbit_types::workflow::ExecutorSandboxKind::LinuxBwrap),
     );
     let worktree = runtime
         .paths()
@@ -301,7 +301,7 @@ fn resolve_executor_sandbox_orders_versioned_orbit_exceptions_after_default_deny
 #[test]
 fn resolve_executor_sandbox_returns_descriptor_with_absolutized_modify_paths() {
     let runtime = seeded_runtime_with_executor(Some(
-        orbit_common::types::ExecutorSandboxKind::MacosSandboxExec,
+        orbit_types::workflow::ExecutorSandboxKind::MacosSandboxExec,
     ));
     let resolved = runtime
         .resolve_executor_sandbox("codex", None, None)
@@ -309,7 +309,7 @@ fn resolve_executor_sandbox_returns_descriptor_with_absolutized_modify_paths() {
         .expect("descriptor");
     assert_eq!(
         resolved.kind,
-        orbit_common::types::ExecutorSandboxKind::MacosSandboxExec
+        orbit_types::workflow::ExecutorSandboxKind::MacosSandboxExec
     );
     let workspace_root = runtime
         .paths()
@@ -333,7 +333,7 @@ fn resolve_executor_sandbox_appends_codex_side_write_roots_after_policy_denies()
     seed_executor(
         &runtime,
         "codex",
-        Some(orbit_common::types::ExecutorSandboxKind::MacosSandboxExec),
+        Some(orbit_types::workflow::ExecutorSandboxKind::MacosSandboxExec),
     );
 
     let resolved = runtime
@@ -386,7 +386,7 @@ fn resolve_executor_sandbox_appends_gemini_orbit_runtime_roots_without_home_real
     seed_executor(
         &runtime,
         "gemini",
-        Some(orbit_common::types::ExecutorSandboxKind::MacosSandboxExec),
+        Some(orbit_types::workflow::ExecutorSandboxKind::MacosSandboxExec),
     );
 
     let resolved = runtime
@@ -465,7 +465,7 @@ fn resolve_executor_sandbox_appends_workspace_semantic_store_after_policy_deny()
     seed_executor(
         &runtime,
         "gemini",
-        Some(orbit_common::types::ExecutorSandboxKind::MacosSandboxExec),
+        Some(orbit_types::workflow::ExecutorSandboxKind::MacosSandboxExec),
     );
 
     let resolved = runtime
@@ -504,7 +504,7 @@ fn resolve_executor_sandbox_appends_workspace_semantic_store_after_policy_deny()
 #[test]
 fn resolve_executor_sandbox_errors_on_non_macos_platform() {
     let runtime = seeded_runtime_with_executor(Some(
-        orbit_common::types::ExecutorSandboxKind::MacosSandboxExec,
+        orbit_types::workflow::ExecutorSandboxKind::MacosSandboxExec,
     ));
     let err = runtime
         .resolve_executor_sandbox("codex", None, None)
@@ -527,7 +527,7 @@ fn resolve_executor_sandbox_reallows_claude_active_worktree_under_orbit() {
     seed_executor(
         &runtime,
         "claude",
-        Some(orbit_common::types::ExecutorSandboxKind::MacosSandboxExec),
+        Some(orbit_types::workflow::ExecutorSandboxKind::MacosSandboxExec),
     );
 
     let workspace_orbit = runtime
@@ -586,7 +586,7 @@ fn resolve_executor_sandbox_does_not_reallow_for_non_worktree_cwd() {
     seed_executor(
         &runtime,
         "claude",
-        Some(orbit_common::types::ExecutorSandboxKind::MacosSandboxExec),
+        Some(orbit_types::workflow::ExecutorSandboxKind::MacosSandboxExec),
     );
 
     // Repo root is a sibling of `.orbit`, well outside the worktrees prefix.
@@ -627,7 +627,7 @@ fn resolve_executor_sandbox_rejects_bare_worktrees_root_cwd() {
     seed_executor(
         &runtime,
         "claude",
-        Some(orbit_common::types::ExecutorSandboxKind::MacosSandboxExec),
+        Some(orbit_types::workflow::ExecutorSandboxKind::MacosSandboxExec),
     );
     let workspace_orbit = runtime
         .paths()

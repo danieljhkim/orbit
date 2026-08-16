@@ -3,7 +3,8 @@
 
 use std::fs;
 
-use orbit_common::types::{AutoTaskSchedule, DedupePolicy, parse_auto_task_yaml};
+use orbit_common::protocol::yaml::parse_auto_task_yaml;
+use orbit_types::workflow::{AutoTaskSchedule, DedupePolicy};
 use tempfile::tempdir;
 
 use crate::OrbitRuntime;

@@ -26,7 +26,7 @@ use std::net::{Ipv4Addr, SocketAddr, TcpStream};
 use std::time::Duration;
 
 use clap::Args;
-use orbit_common::utility::shell::quote_posix_arg;
+use orbit_common::process::shell::quote_posix_arg;
 use orbit_core::OrbitError;
 
 use crate::ssh_tunnel::{self, SshTunnel, TunnelOrigin, TunnelSpec};

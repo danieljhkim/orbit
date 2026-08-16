@@ -1,6 +1,6 @@
-use orbit_common::types::{
-    OrbitError, normalize_optional_attribution_label, optional_string, required_string,
-};
+use orbit_common::OrbitError;
+use orbit_common::protocol::tool_input::{optional_string, required_string};
+use orbit_types::identity::normalize_optional_attribution_label;
 use serde_json::Value;
 
 use crate::OrbitRuntime;

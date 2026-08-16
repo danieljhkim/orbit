@@ -6,12 +6,13 @@ use std::sync::Mutex as StdMutex;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::time::Duration;
 
+use crate::activity_job::{V2ActivityCatalog, load_job_asset};
 use orbit_agent::loop_engine::audit::{AuditSink, NullSink};
-use orbit_common::types::JobScheduleState;
-use orbit_common::types::activity_job::{
+use orbit_types::workflow::JobScheduleState;
+use orbit_types::workflow::activity_job::{
     ActivityV2, ActivityV2Spec, BackoffStrategy, BranchOutcome, DeterministicSpec, FanInSpec,
     FanOutBlock, JobKind, JobV2, JobV2Step, JobV2StepBody, JoinMode, LoopBlock, ParallelBlock,
-    RetrySpec, TargetStep, V2ActivityCatalog, V2AuditEvent, V2AuditEventKind, load_job_asset,
+    RetrySpec, TargetStep, V2AuditEvent, V2AuditEventKind,
 };
 use serde_json::{Value, json};
 use tracing::field::{Field, Visit};
@@ -51,8 +52,8 @@ fn execute_job(
 struct FailingEnvelopeSink;
 
 impl crate::activity_job::audit_writer::EnvelopeSink for FailingEnvelopeSink {
-    fn write_envelope(&self, _event: &V2AuditEvent) -> Result<(), orbit_common::types::OrbitError> {
-        Err(orbit_common::types::OrbitError::Store(
+    fn write_envelope(&self, _event: &V2AuditEvent) -> Result<(), orbit_common::OrbitError> {
+        Err(orbit_common::OrbitError::Store(
             "injected audit sink failure".to_string(),
         ))
     }

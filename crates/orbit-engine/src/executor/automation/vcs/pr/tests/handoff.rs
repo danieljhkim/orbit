@@ -10,7 +10,7 @@ use crate::context::RuntimeHost;
 use crate::executor::automation::vcs::failure::pr_failure_handoff;
 use crate::executor::automation::vcs::freshness::{prepare_pr_handoff, rebase_pr_branch};
 use crate::executor::automation::vcs::push::push_batch_changes;
-use orbit_common::types::TaskStatus;
+use orbit_types::task::TaskStatus;
 
 #[test]
 fn push_classifies_missing_current_fast_forward_remote_ahead_and_divergent_refs() {
@@ -583,7 +583,7 @@ fn pr_promote_no_diff_blocks_failed_outcome() {
         "Outcome: failed\nChanges:\n- Nothing safe to promote.",
     );
     task.tags
-        .push(orbit_common::types::NO_DIFF_EXPECTED_TAG.to_string());
+        .push(orbit_types::task::NO_DIFF_EXPECTED_TAG.to_string());
     let host = PrOpenTestHost::new(vec![task], workspace.repo.clone())
         .with_activity_implementer("codex", "codex");
 

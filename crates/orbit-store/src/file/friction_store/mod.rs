@@ -15,9 +15,10 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use chrono::Utc;
-use orbit_common::friction::DEFAULT_FRICTION_TAGS;
-use orbit_common::types::{FrictionFrontmatter, FrictionRecord, OrbitError};
-use orbit_common::utility::fs::{atomic_write_text, with_exclusive_file_lock};
+use orbit_common::OrbitError;
+use orbit_common::fs::io::{atomic_write_text, with_exclusive_file_lock};
+use orbit_common::governance::friction::DEFAULT_FRICTION_TAGS;
+use orbit_types::record::{FrictionFrontmatter, FrictionRecord};
 
 use crate::file::yaml_doc::{parse_yaml_with, serialize_yaml_with};
 use crate::sqlite::friction_store::StoredFrictionRecord;

@@ -3,14 +3,16 @@ use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 
-use orbit_common::types::{ExecutorSandboxKind, OrbitError, ResolvedFsProfile};
-use orbit_common::utility::redaction::non_sensitive_env_vars;
+use orbit_common::OrbitError;
+use orbit_common::security::redaction::non_sensitive_env_vars;
 use orbit_exec::{
     BwrapProbeOutcome, LinuxBwrapSpawnRequest, MacosSandboxSpawnRequest, UnsatisfiedWriteGrant,
     compile_linux_bwrap_argv, compile_macos_sandbox_profile, linux_bwrap_write_grant_diagnostic,
     prepare_linux_bwrap_write_grants, probe_bwrap, sandbox_exec_available,
     sandbox_exec_unavailable_message, spawn_under_linux_bwrap, spawn_under_macos_sandbox,
 };
+use orbit_types::policy::ResolvedFsProfile;
+use orbit_types::workflow::ExecutorSandboxKind;
 use tempfile::NamedTempFile;
 
 use super::super::dispatcher::ResolvedSandbox;

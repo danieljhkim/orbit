@@ -1,5 +1,5 @@
-use orbit_common::types::mcp_advertised_tool_name;
 use orbit_core::OrbitError;
+use orbit_types::tool::mcp_advertised_tool_name;
 use serde_json::{Map as JsonMap, Value as JsonValue};
 
 use crate::command::mcp::{ORBIT_MCP_SERVER_ID, safe_mcp_tool_names};

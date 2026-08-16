@@ -9,9 +9,10 @@ use std::fs::OpenOptions;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 
-use orbit_common::types::{OrbitError, ResolvedFsProfile};
-use orbit_common::utility::glob::compile_glob_regex;
-use orbit_common::utility::redaction::non_sensitive_env_vars;
+use orbit_common::OrbitError;
+use orbit_common::fs::glob::compile_glob_regex;
+use orbit_common::security::redaction::non_sensitive_env_vars;
+use orbit_types::policy::ResolvedFsProfile;
 
 const TRUSTED_BWRAP_PATH: &str = "/usr/bin/bwrap";
 

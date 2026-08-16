@@ -12,7 +12,7 @@ mod tasks;
 mod upsert;
 
 /// [ORB-10004] `VectorStore::open` must apply the shared Orbit connection
-/// defaults from `orbit_common::utility::sqlite` — historically this store
+/// defaults from `orbit_common::storage::sqlite` — historically this store
 /// drifted (it was missing `foreign_keys` and `synchronous`).
 mod open_pragmas {
     use crate::vector::store::VectorStore;

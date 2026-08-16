@@ -2,7 +2,7 @@
 //! repository-relative/absolute filesystem path (never a logical/bridge
 //! workspace id), and its errors must say so with a concrete example.
 
-use orbit_common::types::OrbitError;
+use orbit_common::OrbitError;
 use tempfile::tempdir;
 
 use crate::command::task::paths::{

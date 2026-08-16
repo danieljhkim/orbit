@@ -6,7 +6,7 @@
 use std::fs;
 use std::path::Path;
 
-use orbit_common::types::Task;
+use orbit_types::task::Task;
 use serde_json::{Value, json};
 
 use super::super::git_commit;
