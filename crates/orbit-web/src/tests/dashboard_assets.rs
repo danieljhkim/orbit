@@ -607,7 +607,9 @@ async fn dashboard_scoreboard_is_reachable_under_diagnostics() {
     );
     assert!(
         app.contains(r#"if (activeDiagSubtab === "scoreboard")"#)
-            && app.contains(r#"fetchJson(`/api/scoreboard?window=${encodeURIComponent(selectedWindow)}`)"#),
+            && app.contains(
+                r#"fetchJson(`/api/scoreboard?window=${encodeURIComponent(selectedWindow)}`)"#
+            ),
         "the scoreboard fetch must hang off the diagnostics subtab branch and honor the shared window"
     );
 }
@@ -945,8 +947,7 @@ fn dashboard_workspace_selection_persists_to_the_url() {
     let app = include_str!("../../assets/dashboard/app.js");
 
     assert!(
-        app.contains("function persistWorkspaceToUrl(")
-            && app.contains("persistScopeToUrl()"),
+        app.contains("function persistWorkspaceToUrl(") && app.contains("persistScopeToUrl()"),
         "the workspace selector must persist its choice to the URL on every change"
     );
 }
@@ -1191,7 +1192,8 @@ fn dashboard_scope_is_shared_labeled_and_url_backed() {
         "actor/metric drill-down must show removable actor/workspace/window/status/metric chips"
     );
     assert!(
-        router.contains(r#"hash = `#diagnostics/${sub}?window=${encodeURIComponent(getWindow())}`"#)
+        router
+            .contains(r#"hash = `#diagnostics/${sub}?window=${encodeURIComponent(getWindow())}`"#)
             && common.contains(r#"url.searchParams.set("window", currentWindow)"#)
             && audit.contains("sp.set(\"metric\", auditFilter.metric)"),
         "workspace, diagnostics subview, window, and drill-down filters must live in the URL"

@@ -97,6 +97,10 @@ fn insert_running_pipeline_run(runtime: &OrbitRuntime) -> JobRun {
 /// Record the single job-level diagnostic step the pipeline emits when
 /// `implement_one` fails, so the block note has real error context to surface.
 fn record_failing_step(runtime: &OrbitRuntime, run_id: &str) {
+    record_failing_step_with_message(runtime, run_id, FAILING_STEP_MESSAGE);
+}
+
+fn record_failing_step_with_message(runtime: &OrbitRuntime, run_id: &str, message: &str) {
     let now = Utc::now();
     runtime
         .stores()
@@ -114,7 +118,7 @@ fn record_failing_step(runtime: &OrbitRuntime, run_id: &str) {
                 agent_response_json: None,
                 state: JobRunState::Failed,
                 error_code: Some("STEP_FAILED".to_string()),
-                error_message: Some(FAILING_STEP_MESSAGE.to_string()),
+                error_message: Some(message.to_string()),
             },
         )
         .expect("record failing step");
@@ -171,6 +175,62 @@ fn failed_pipeline_run_blocks_coupled_in_progress_task() {
         "note names the failing step: {note}"
     );
     assert_eq!(entries[0].to_status, Some(TaskStatus::Blocked));
+}
+
+/// [ORB-10879] A sandbox write denial must be recoverable from the task record
+/// alone. ORB-10878 reached its operator as the model's own narrative ("remount
+/// the filesystem") with an empty `artifacts` array and no comments, so the one
+/// piece of text that names the attempted path and the shadowing rule has to
+/// survive run terminalization into the task's history — which is what
+/// `orbit task show` renders.
+#[test]
+fn sandbox_write_denial_is_recoverable_from_the_blocked_task_record() {
+    let (_root, runtime, repo_root) = test_runtime();
+    let task_id = create_backlog_task(&runtime, &repo_root, "denied-write");
+    let run = insert_running_pipeline_run(&runtime);
+    couple_task(&runtime, &task_id, &run.run_id, TaskStatus::InProgress);
+
+    // The real attribution text, produced by the helper the runner uses — not a
+    // re-spelling of it, so a change to that format fails this test too.
+    let worktree = std::path::Path::new("/tmp/orbit-jrun-doc-duties");
+    let profile = orbit_common::types::ResolvedFsProfile {
+        name: "unrestricted".to_string(),
+        read: vec![format!("{}/**", worktree.display())],
+        modify: vec![
+            format!("{}/**", worktree.display()),
+            format!("!{}/.orbit/**", worktree.display()),
+        ],
+    };
+    let denied = worktree.join(".orbit/state/orbit.db");
+    let diagnostic = orbit_exec::linux_bwrap_write_grant_diagnostic(&profile, &denied)
+        .expect("grant diagnostic")
+        .expect("the path is denied by this profile");
+    record_failing_step_with_message(
+        &runtime,
+        &run.run_id,
+        &format!("{FAILING_STEP_MESSAGE} {diagnostic}"),
+    );
+
+    assert!(finalize_failed(&runtime, &run.run_id));
+
+    let task = runtime.get_task(&task_id).expect("task after failure");
+    assert_eq!(task.status, TaskStatus::Blocked);
+
+    let entries = failure_history_entries(&runtime, &task_id);
+    assert_eq!(entries.len(), 1, "exactly one workflow-run-failed event");
+    let note = entries[0].note.as_deref().unwrap_or_default();
+    assert!(
+        note.contains(&denied.display().to_string()),
+        "note must name the attempted path: {note}"
+    );
+    assert!(
+        note.contains("denyModify rule"),
+        "note must name the shadowing rule: {note}"
+    );
+    assert!(
+        note.contains(&format!("!{}/.orbit/**", worktree.display())),
+        "note must quote the exact deny: {note}"
+    );
 }
 
 #[test]

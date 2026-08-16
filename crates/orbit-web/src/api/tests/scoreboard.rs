@@ -146,9 +146,7 @@ async fn scoreboard_query_window_7d_is_not_a_24h_payload() {
         "a 7d request must not report a 24h window"
     );
     let since = chrono::DateTime::parse_from_rfc3339(
-        body["window_since"]
-            .as_str()
-            .expect("window_since for 7d"),
+        body["window_since"].as_str().expect("window_since for 7d"),
     )
     .expect("parse window_since");
     let orch_since = chrono::DateTime::parse_from_rfc3339(
@@ -163,19 +161,23 @@ async fn scoreboard_query_window_7d_is_not_a_24h_payload() {
             .expect("orchestration until"),
     )
     .expect("parse until");
-    assert_eq!(since, orch_since, "scoreboard and managed-execution cutoffs must match");
+    assert_eq!(
+        since, orch_since,
+        "scoreboard and managed-execution cutoffs must match"
+    );
     let span = until.signed_duration_since(orch_since);
     assert!(
         span >= chrono::Duration::days(7) - chrono::Duration::seconds(2)
             && span <= chrono::Duration::days(7) + chrono::Duration::seconds(2),
         "7d orchestration span must be ~7 days, got {span}"
     );
-    assert!(until <= chrono::DateTime::parse_from_rfc3339(
-        body["orchestration"]["as_of"]
-            .as_str()
-            .expect("as_of"),
-    )
-    .expect("parse as_of"));
+    assert!(
+        until
+            <= chrono::DateTime::parse_from_rfc3339(
+                body["orchestration"]["as_of"].as_str().expect("as_of"),
+            )
+            .expect("parse as_of")
+    );
 }
 
 #[tokio::test]
