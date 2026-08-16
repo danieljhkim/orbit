@@ -57,4 +57,4 @@ Use `blocked` when execution cannot safely continue. Provenance follows the surf
 
 - `orbit-task`: create, execute, and review tasks through the lifecycle; file self-reported tooling and skill-guidance friction.
 - `orbit-workflow`: task-pilot preflight, jobs, activities, routines, `orbit sweep`, and `orbit run`; diagnosing failed, stuck, or cancelled runs.
-- `orbit-search`: find tasks, docs, ADRs, and frictions by topic; docs-corpus admin.
+- `orbit-search`: find tasks, docs, and frictions by topic; docs-corpus admin. Decision records are searched as docs.

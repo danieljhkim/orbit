@@ -34,7 +34,7 @@ Create a task another engineer or agent can execute without guessing: a crisp pr
 - `relations: [{"type": "resolves", "target": "F<YYYY>-<MM>-<NNN>"}]` — auto-resolves that friction when this task reaches `done`. Other types (`produces`, `blocked_by`, `child_of`, `spawned_from`, `regression_from`, `supersedes`, `related_to`) are tracked but inert. Only `produces`/`resolves` accept non-`ORB-` targets; the rest require `ORB-NNNNN`. A dangling target succeeds but emits a `TaskRelationDangling` audit event.
 - `parent_id`, `source_task_id` (the bug-introducing task; creation-time only — `update` silently drops it), `tags` (reuse existing before inventing new).
 
-**Quality bar.** Validation must not assume `.orbit/knowledge/` or uncommitted artifacts. File I/O checks use temp dirs or fakes. Behavior-changing work that touches external services, the filesystem, or time should ask for deterministic mock coverage in its acceptance criteria.
+**Quality bar.** Validation must not assume uncommitted artifacts or workspace-local runtime state under `.orbit/state/`. File I/O checks use temp dirs or fakes. Behavior-changing work that touches external services, the filesystem, or time should ask for deterministic mock coverage in its acceptance criteria.
 
 Description template:
 

@@ -8,7 +8,7 @@ Search the corpus first — the point of filing is a record someone finds *befor
 
 ## Record shape
 
-Bodies are append-only markdown under `.orbit/frictions/`; triage metadata is mutable. New records start `open` and may become `triaged` or `resolved`.
+Records live in Orbit's store, keyed by `(workspace_id, friction_id)` — IDs are workspace-local and monthly (`F<YYYY>-<MM>-<NNN>`), so the same ID in two workspaces is two unrelated records. Reach them only through `orbit.friction.*`; any `.orbit/frictions/` markdown tree is legacy evidence, and editing a file there cannot change what a read returns. Bodies are append-only, triage metadata is mutable. New records start `open` and may become `triaged` or `resolved`.
 
 ```bash
 orbit tool run orbit.friction.add --input '{

@@ -12,7 +12,7 @@ This document names what Orbit is for, who it's for, and what it deliberately is
 
 **Applying engineering rigor to AI-assisted coding.**
 
-Coding agents are fast enough that the disciplines that keep code maintainable — planning before edits, decision records for load-bearing choices, audit trails, conflict-aware parallel execution — become tempting to skip. Orbit makes those disciplines cheap and enforces them by default: every change starts as a task, every load-bearing decision becomes an ADR, every tool call lands in a structured audit log, and parallel runs are dispatched into worktrees with file-level locks.
+Coding agents are fast enough that the disciplines that keep code maintainable — planning before edits, decision records for load-bearing choices, audit trails, conflict-aware parallel execution — become tempting to skip. Orbit makes those disciplines cheap and enforces them by default: every change starts as a task, every load-bearing decision is written into the design docs for the feature it governs, every tool call lands in a structured audit log, and parallel runs are dispatched into worktrees with file-level locks.
 
 The audience is the individual engineer driving multiple coding agents against real code and unwilling to trade engineering rigor for raw throughput. Agent vendors solve in-session execution; Orbit is the layer above that turns individual agent sessions into a coherent, traceable body of work.
 
@@ -20,7 +20,7 @@ The audience is the individual engineer driving multiple coding agents against r
 
 ## Who Orbit is for
 
-The AI-native engineer running multiple coding agents (Claude Code, Codex CLI, Gemini CLI, plus any OpenAI-compatible or Ollama-served model) heavily, who has outgrown the in-session model and wants engineering discipline around their AI-assisted work — tasks, ADRs, audit, sandboxing, parallel dispatch.
+The AI-native engineer running multiple coding agents (Claude Code, Codex CLI, Gemini CLI, plus any OpenAI-compatible or Ollama-served model) heavily, who has outgrown the in-session model and wants engineering discipline around their AI-assisted work — tasks, decision records, a searchable docs corpus, audit, sandboxing, parallel dispatch.
 
 Staff and principal engineers, tech leads, and founding engineers fit the same profile. If they bring Orbit into their team's workflow, that's a natural extension — but the project is not positioned for team conversion. Orbit optimizes for the individual engineer who refuses to vibe-code their way through agent-driven development.
 
