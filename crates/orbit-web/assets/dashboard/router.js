@@ -41,6 +41,7 @@ function markWorkspaceSelectorScope(fleetWide) {
 // being diagnostics-shaped, now routes as `#diagnostics/scoreboard`.
 const TABS = ["tasks", "audit", "diagnostics", "operations", "knowledge", "run-detail"];
 const DIAG_SUBTABS = ["runs", "metrics", "errors", "incidents", "reliability", "scoreboard"];
+const OPERATIONS_SUBTABS = ["routines", "auto-tasks"];
 // ORB-10444/ORB-10588: subtabs that replace the two-column diagnostics layout
 // with their own full-width <main>, keyed by the element they reveal.
 const DIAG_FULL_WIDTH_MAINS = {
@@ -148,6 +149,18 @@ function setDiagSubtabImpl(ctx, name) {
   }
 }
 
+function setOperationsSubtabImpl(ctx, name) {
+  if (!OPERATIONS_SUBTABS.includes(name)) name = "routines";
+  ctx.setOperationsSubtab(name);
+  for (const btn of document.querySelectorAll("#operations-subtabs .subtab")) {
+    btn.classList.toggle("active", btn.dataset.subtab === name);
+  }
+  const routines = $("operations-routines-main");
+  const autoTasks = $("operations-auto-tasks-main");
+  if (routines) routines.hidden = name !== "routines";
+  if (autoTasks) autoTasks.hidden = name !== "auto-tasks";
+}
+
 function setKnowledgeSubtabImpl(ctx, name) {
   if (!KNOWLEDGE_SUBTABS.includes(name)) name = "frictions";
   ctx.setKnowledgeSubtab(name);
@@ -250,6 +263,10 @@ function setActiveTabImpl(ctx, raw, opts = {}) {
     const sub = KNOWLEDGE_SUBTABS.includes(segments[1]) ? segments[1] : ctx.getKnowledgeSubtab();
     setKnowledgeSubtabImpl(ctx, sub);
     hash = `#knowledge/${sub}`;
+  } else if (top === "operations") {
+    const sub = OPERATIONS_SUBTABS.includes(segments[1]) ? segments[1] : ctx.getOperationsSubtab();
+    setOperationsSubtabImpl(ctx, sub);
+    hash = `#operations/${sub}`;
   } else if (top === "tasks") {
     // ORB-10874: the status chips and search box are represented in the hash
     // (mirroring the audit tab) so they survive a reload or the browser's
@@ -308,6 +325,11 @@ function initTabsImpl(ctx) {
   for (const btn of document.querySelectorAll("#knowledge-subtabs .subtab")) {
     btn.addEventListener("click", () =>
       setActiveTabImpl(ctx, `knowledge/${btn.dataset.subtab}`, { refresh: false }),
+    );
+  }
+  for (const btn of document.querySelectorAll("#operations-subtabs .subtab")) {
+    btn.addEventListener("click", () =>
+      setActiveTabImpl(ctx, `operations/${btn.dataset.subtab}`, { refresh: false }),
     );
   }
   window.addEventListener("hashchange", () => {

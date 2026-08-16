@@ -63,6 +63,8 @@ fn lookup_is_surface_scoped() {
     assert!(governed_dashboard("routine.toggle").is_some());
     assert!(governed_dashboard("clock.service").is_some());
     assert!(governed_dashboard("clock.cadence").is_some());
+    assert!(governed_dashboard("auto_task.toggle").is_some());
+    assert!(governed_dashboard("auto_task.mint").is_some());
     assert!(governed_dashboard("routine.list").is_none());
 }
 
@@ -150,7 +152,13 @@ fn dashboard_operations_require_an_operator() {
         interactive_terminal: true,
         ..envelope()
     });
-    for id in ["routine.toggle", "clock.service", "clock.cadence"] {
+    for id in [
+        "routine.toggle",
+        "clock.service",
+        "clock.cadence",
+        "auto_task.toggle",
+        "auto_task.mint",
+    ] {
         let operation = governed_dashboard(id).expect("dashboard operation is declared");
         assert!(authorize(operation, &agent).is_err());
         assert!(authorize(operation, &operator).is_ok());

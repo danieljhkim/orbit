@@ -5,6 +5,7 @@
 mod test_support;
 
 mod audit;
+mod auto_tasks;
 mod denials;
 mod diagnostics;
 mod frictions;

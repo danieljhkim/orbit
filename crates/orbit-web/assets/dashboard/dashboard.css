@@ -3718,14 +3718,16 @@
       .rel-role-ambiguous { color: var(--priority-medium); border-color: var(--priority-medium); }
       .rel-role-unknown { color: var(--fg-dim); }
 
-      /* ORB-10875: routine definitions and the host clock deliberately use
-         separate cards and controls so one state cannot read as the other. */
+      /* ORB-10875 / ORB-10876: routine, clock, and auto-task cards stay
+         visually separate so one state cannot read as another. */
       .operations-layout {
         grid-template-columns: minmax(0, 2fr) minmax(300px, 1fr);
         align-items: start;
       }
+      .operations-auto-tasks-layout { grid-template-columns: minmax(0, 1fr); }
       body.operations-active { height: auto; min-height: 100vh; overflow-y: auto; }
       .operations-layout .panel { min-width: 0; }
+      .tab-pane[data-tab="operations"] .subtabs { border-bottom: 1px solid var(--border); }
       .operation-feedback {
         min-height: 30px; padding: 7px 14px; border-bottom: 1px solid var(--border);
         color: var(--fg-dim); font: 11px/1.4 var(--font-mono);
@@ -3734,15 +3736,16 @@
       .operation-feedback.pending { color: var(--priority-medium); }
       .operation-feedback.success { color: var(--state-success); }
       .operation-feedback.error { color: var(--state-failed); }
-      #routines-body, #clock-body { padding: 12px; background: var(--bg); }
+      #routines-body, #clock-body, #auto-tasks-body { padding: 12px; background: var(--bg); }
       .operation-card {
         padding: 12px; margin-bottom: 10px; border: 1px solid var(--border);
         border-radius: 4px; background: var(--bg-elev);
       }
       .operation-card:last-child { margin-bottom: 0; }
-      .operation-card-title, .operation-clock-summary, .operation-clock-actions {
+      .operation-card-title, .operation-clock-summary, .operation-clock-actions, .operation-card-actions {
         display: flex; align-items: center; justify-content: space-between; gap: 10px;
       }
+      .operation-card-actions { justify-content: flex-end; flex-wrap: wrap; }
       .operation-card-title > div, .operation-clock-summary { display: flex; align-items: center; gap: 8px; min-width: 0; }
       .operation-card-title strong { overflow-wrap: anywhere; }
       .operation-state {
@@ -3765,6 +3768,10 @@
       }
       .operations-readonly-note { margin: 0 0 12px; padding: 9px; border: 1px dashed var(--border); }
       .operation-control-note.error { color: var(--state-failed); }
+      .operation-mint-warning {
+        color: var(--priority-medium); border-left: 2px solid var(--priority-medium);
+        padding-left: 8px;
+      }
       .operation-button, .operation-cadence {
         min-height: 30px; padding: 5px 9px; border: 1px solid var(--border); border-radius: 3px;
         background: var(--bg); color: var(--fg); font: 11px var(--font-mono);
@@ -3780,14 +3787,20 @@
       @media (max-width: 900px) {
         .operations-layout { grid-template-columns: 1fr; }
       }
+      @media (max-width: 720px) {
+        .operation-grid { grid-template-columns: 1fr; }
+        .operation-card-title { align-items: flex-start; flex-wrap: wrap; }
+        .operation-card-actions { width: 100%; }
+        .operation-mint-warning { overflow-wrap: anywhere; }
+      }
       @media (max-width: 600px) {
         .operations-layout { display: block; padding: 8px; }
         .operations-layout .panel { margin-bottom: 8px; }
         .operation-grid { grid-template-columns: 1fr; }
         .operation-card-title { align-items: flex-start; }
         .operation-card-title > div { align-items: flex-start; flex-direction: column; }
-        .operation-clock-actions { align-items: stretch; }
-        .operation-clock-actions > * { flex: 1 1 100%; }
+        .operation-clock-actions, .operation-card-actions { align-items: stretch; }
+        .operation-clock-actions > *, .operation-card-actions > * { flex: 1 1 100%; }
       }
 
       /* ORB-10871: grouped failure incidents (Diagnostics → Incidents).
