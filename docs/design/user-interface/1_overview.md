@@ -4,6 +4,7 @@ type: design
 title: "User Interface — Overview"
 owner: gemini
 last_updated: 2026-08-15
+last_validated: 2026-08-16
 status: Draft
 feature: user-interface
 doc_role: overview
@@ -38,7 +39,7 @@ Agent runs produce more state changes, logs, and diagnostics than a human can re
 | Dashboard assets and HTTP API | `crates/orbit-web/assets/dashboard/`, `crates/orbit-web/src/api/` | Runtime tabs, tables, tiles, logs, and diagnostics. |
 | CLI adapter | `crates/orbit-cli/src/command/web.rs` | Delegates `serve` and `connect` to `orbit-web`. |
 | Theme rules | `./specs/theme.md` | Canon Refined tokens and visual invariants. |
-| Current mechanisms | `./2_design.md` | Layout, telemetry, palette, typography, and known limitations. |
+| Dashboard implementation | [crates/orbit-web/src/lib.rs](../../../crates/orbit-web/src/lib.rs) | HTTP server, embedded dashboard assets, workspace state, and API routing. |
 
 ## Task References
 
