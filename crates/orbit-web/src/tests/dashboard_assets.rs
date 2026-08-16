@@ -628,6 +628,7 @@ async fn dashboard_scoreboard_is_reachable_under_diagnostics() {
         "scoreboard-insights",
         "scoreboard-orchestration",
         "scoreboard-orchestration-count",
+        "scoreboard-highlights",
     ] {
         assert!(body.contains(&format!(r#"id="{id}""#)), "{id} must survive");
     }
@@ -1354,6 +1355,89 @@ fn dashboard_failure_metrics_are_incident_aware_and_state_their_denominators() {
             && css[responsive_at..].contains(".incident-evidence"),
         "the incident expansion must reflow rather than clip below 720px"
     );
+}
+
+/// ORB-10873: Scoreboard delivery highlights, honest empty-section coverage,
+/// accessible window tabs, and labeled abbreviations. Assets stay
+/// project-agnostic.
+#[test]
+fn dashboard_scoreboard_highlights_are_accessible_and_honest() {
+    let index = include_str!("../../assets/dashboard/index.html");
+    let scoreboard = include_str!("../../assets/dashboard/scoreboard.js");
+    let common = include_str!("../../assets/dashboard/common.js");
+    let css = include_str!("../../assets/dashboard/dashboard.css");
+
+    assert!(
+        index.contains(r#"id="scoreboard-window-selector" role="tablist" aria-label="Scoreboard time window""#)
+            && index.contains(r#"id="reliability-window-selector" role="tablist" aria-label="Reliability time window""#),
+        "window controls must be semantic tablists"
+    );
+    assert!(
+        index.contains(
+            r#"role="tab" class="scoreboard-window-seg on" data-window="24h" aria-selected="true""#
+        ) && common.contains("setAttribute(\"aria-selected\"")
+            && common.contains("ArrowRight")
+            && common.contains("ArrowLeft")
+            && common.contains("Home")
+            && common.contains("End"),
+        "window tabs must expose selected state and keyboard navigation"
+    );
+    assert!(
+        css.contains(".scoreboard-window-seg:focus-visible"),
+        "window tabs must have a visible focus ring"
+    );
+
+    assert!(
+        scoreboard.contains("Notable completions")
+            && scoreboard.contains("not a quality score")
+            && scoreboard.contains("No completion summary recorded.")
+            && scoreboard.contains("function renderNotableCompletions("),
+        "highlights must name the reading order and missing summaries"
+    );
+    assert!(
+        !scoreboard.contains("quality score") || scoreboard.contains("not a quality score"),
+        "the UI must not claim an objective quality score"
+    );
+    assert!(
+        scoreboard.contains("no observed review comments in this source")
+            && scoreboard.contains("coverage?.review?.availability === \"unavailable\"")
+            && scoreboard.contains("missing coverage, not zero activity"),
+        "empty Review must distinguish no events from incomplete coverage"
+    );
+    assert!(
+        scoreboard.contains("orbit.task.* tool-call count")
+            && scoreboard.contains("raw failed tool calls over total tool calls")
+            && scoreboard.contains("append-only friction reports filed by this agent")
+            && scoreboard.contains("Highest count in this row. Not a quality score."),
+        "abbreviated metrics and the leader mark need plain-language definitions"
+    );
+    assert!(
+        !scoreboard.contains("frict r"),
+        "the unexplained frict r abbreviation must be gone"
+    );
+
+    assert!(
+        css.contains(".scoreboard-highlights")
+            && css.contains(".scoreboard-highlight-excerpt")
+            && css.contains("overflow-wrap: anywhere;"),
+        "highlights must wrap instead of clipping"
+    );
+    let scoreboard_720 = css
+        .find("table.sb2-matrix col.metric { width: 132px; }")
+        .expect("narrow scoreboard metric column");
+    assert!(
+        css[..scoreboard_720].contains("@media (max-width: 720px)"),
+        "matrix labels must wrap at 480–720px"
+    );
+
+    for banned in ["constellation", "dk-server", "polaris", "SpaceX"] {
+        assert!(
+            !scoreboard
+                .to_ascii_lowercase()
+                .contains(&banned.to_ascii_lowercase()),
+            "scoreboard assets must stay project-agnostic; found {banned}"
+        );
+    }
 }
 
 async fn response_body(response: Response) -> String {

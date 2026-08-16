@@ -74,12 +74,13 @@ pub mod pr_scoreboard {
 
 pub mod scoreboard_summary {
     pub use crate::file::scoreboard::scoreboard_summary::{
-        AgentSummary, FrictionSummary, NormalizedTokenSummary, ORCHESTRATION_SCHEMA_VERSION,
+        AgentSummary, CoverageAvailability, CoverageNote, FrictionSummary, NormalizedTokenSummary,
+        NotableCompletion, NotableCompletions, ORCHESTRATION_SCHEMA_VERSION,
         OrchestrationBucketKind, OrchestrationBucketSummary, OrchestrationModelSummary,
-        OrchestrationSummary, PrSummary, RecentSummary, ScoreboardInputs, ScoreboardSummary,
-        ScoreboardWindow, TokenSummary, TopToolCall, WorkflowRunCount, generate_summary,
-        generate_summary_with_audit_tool_calls, generate_summary_with_inputs, summary_path,
-        write_summary,
+        OrchestrationSummary, PrSummary, RecentSummary, ScoreboardCoverage, ScoreboardInputs,
+        ScoreboardSummary, ScoreboardWindow, TokenSummary, TopToolCall, WorkflowRunCount,
+        generate_summary, generate_summary_with_audit_tool_calls, generate_summary_with_inputs,
+        summary_path, write_summary,
     };
 }
 

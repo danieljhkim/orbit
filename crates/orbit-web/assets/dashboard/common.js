@@ -94,6 +94,19 @@ export function persistScopeToUrl() {
   }
 }
 
+function windowTabs(selector) {
+  return Array.from(selector.querySelectorAll(".scoreboard-window-seg"));
+}
+
+function syncWindowTabState(selector, target) {
+  for (const tab of windowTabs(selector)) {
+    const on = tab.dataset.window === target;
+    tab.classList.toggle("on", on);
+    tab.setAttribute("aria-selected", on ? "true" : "false");
+    tab.tabIndex = on ? 0 : -1;
+  }
+}
+
 export function syncWindowSelectors() {
   const selected = currentWindow;
   const rel = reliabilityWindowFor(selected);
@@ -103,10 +116,17 @@ export function syncWindowSelectors() {
   ]) {
     const selector = document.getElementById(id);
     if (!selector) continue;
-    for (const seg of selector.querySelectorAll(".scoreboard-window-seg")) {
-      seg.classList.toggle("on", seg.dataset.window === target);
-    }
+    syncWindowTabState(selector, target);
   }
+}
+
+function activateWindowTab(tab, allowed) {
+  const next = tab && tab.dataset.window;
+  if (!next || !allowed.includes(next) || next === currentWindow) return;
+  setWindow(next);
+  persistScopeToUrl();
+  syncWindowSelectors();
+  notifyScopeChange();
 }
 
 export function wireWindowSelector(selectorId, opts = {}) {
@@ -115,14 +135,26 @@ export function wireWindowSelector(selectorId, opts = {}) {
   selector.dataset.wired = "true";
   const allowed = opts.allowAll === false ? RELIABILITY_WINDOWS : DASHBOARD_WINDOWS;
   selector.addEventListener("click", (event) => {
-    const seg = event.target && event.target.closest(".scoreboard-window-seg");
-    if (!seg || !selector.contains(seg)) return;
-    const next = seg.dataset.window;
-    if (!allowed.includes(next) || next === currentWindow) return;
-    setWindow(next);
-    persistScopeToUrl();
-    syncWindowSelectors();
-    notifyScopeChange();
+    const tab = event.target && event.target.closest(".scoreboard-window-seg");
+    if (!tab || !selector.contains(tab)) return;
+    activateWindowTab(tab, allowed);
+  });
+  selector.addEventListener("keydown", (event) => {
+    const tab = event.target && event.target.closest(".scoreboard-window-seg");
+    if (!tab || !selector.contains(tab)) return;
+    const tabs = windowTabs(selector);
+    const index = tabs.indexOf(tab);
+    if (index < 0) return;
+    let nextIndex = null;
+    if (event.key === "ArrowRight") nextIndex = (index + 1) % tabs.length;
+    else if (event.key === "ArrowLeft") nextIndex = (index - 1 + tabs.length) % tabs.length;
+    else if (event.key === "Home") nextIndex = 0;
+    else if (event.key === "End") nextIndex = tabs.length - 1;
+    if (nextIndex == null) return;
+    event.preventDefault();
+    const nextTab = tabs[nextIndex];
+    nextTab.focus();
+    activateWindowTab(nextTab, allowed);
   });
 }
 

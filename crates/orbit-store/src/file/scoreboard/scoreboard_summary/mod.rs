@@ -15,6 +15,13 @@ use crate::friction_store::FrictionReportedCount;
 use crate::{AuditToolCallCountsByRole, AuditToolCallCountsBySurfaceAndRole, AuditTopToolCall};
 use orbit_common::utility::fs::atomic_write_text_volatile as write_atomic;
 
+mod highlights;
+
+pub use highlights::{
+    CoverageAvailability, CoverageNote, NotableCompletion, NotableCompletions, ScoreboardCoverage,
+    select_notable_completions, snapshot_coverage,
+};
+
 const SUMMARY_FILENAME: &str = "summary.json";
 // v2 adds `task_review.threads`; v3 adds tasks_created/tasks_planned,
 // per-(role, surface) tool call counts, top-level workflows_run, and a
@@ -29,7 +36,10 @@ const SUMMARY_FILENAME: &str = "summary.json";
 // without folding it into execution-agent/model scoreboard rows.
 // v8 removes retired competition projections. Older readers ignore
 // unknown fields and maintained consumers treat absent fields as empty.
-const CURRENT_SCHEMA_VERSION: u32 = 8;
+// v9 ([ORB-10873]) adds `notable_completions` (priority then recency
+// reading order, not a quality score) and `coverage` notes that distinguish
+// observed zeros from snapshot sources that cannot be windowed.
+const CURRENT_SCHEMA_VERSION: u32 = 9;
 pub const ORCHESTRATION_SCHEMA_VERSION: u32 = 2;
 const RECENT_WINDOW_DAYS: i64 = 7;
 
@@ -299,6 +309,13 @@ pub struct ScoreboardSummary {
     /// window is `All` (lifetime). v6+.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub window_since: Option<String>,
+    /// Compact delivery highlights for the selected window. v9+.
+    #[serde(default)]
+    pub notable_completions: NotableCompletions,
+    /// Distinguishes observed empty sections from sources that cannot be
+    /// attributed to a finite window. v9+.
+    #[serde(default)]
+    pub coverage: ScoreboardCoverage,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -346,7 +363,7 @@ pub struct ScoreboardInputs<'a> {
     /// Friction counts per reporting model label, already windowed by the
     /// caller with the same cutoff this module derives from `now`/`window`.
     /// Populates per-family `friction.reported` counts (so the dashboard
-    /// `frict r` column and `orbit.friction.stats` agree, without using tool
+    /// friction column and `orbit.friction.stats` agree, without using tool
     /// call surface counts). ORB-10680 replaced the full record slice with
     /// this aggregate so scoreboard memory tracks distinct models, not corpus
     /// size.
@@ -540,6 +557,8 @@ pub fn generate_summary_with_inputs(
         orchestration: inputs.orchestration.clone(),
         window: inputs.window.as_str().to_string(),
         window_since: since.map(|t| t.to_rfc3339()),
+        notable_completions: select_notable_completions(tasks, since),
+        coverage: snapshot_coverage(windowed),
     })
 }
 
