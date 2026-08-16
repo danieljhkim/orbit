@@ -1,8 +1,10 @@
 use std::ffi::{OsStr, OsString};
+use std::sync::{Mutex, MutexGuard, OnceLock};
 
 use super::super::redaction::{
     backfill_login_identity, credential_safe_location, is_high_confidence_single_token_credential,
-    is_sensitive_env_name, os_login_name, redact_all,
+    is_redactable_value, is_sensitive_env_name, os_login_name, redact_all,
+    redact_sensitive_env_text,
 };
 
 fn values_for(vars: &[(OsString, OsString)], key: &str) -> Vec<OsString> {
@@ -300,4 +302,107 @@ fn redact_all_error_sanitizes_artifact_origin_locations() {
 
     assert_eq!(origin.worktree_root, "[REDACTED_LOCATION]");
     assert_eq!(origin.branch.as_deref(), Some("[REDACTED_LOCATION]"));
+}
+
+// [ORB-10867] Ordinary-word env values must not be eligible for substitution.
+
+#[test]
+fn ordinary_words_are_not_redactable_env_values() {
+    for word in [
+        "user", "true", "none", "root", "main", "test", "prod", "local", "auto", "User", "USER",
+    ] {
+        assert!(
+            !is_redactable_value(word),
+            "{word} looks like an ordinary word and must not be substituted"
+        );
+    }
+    assert!(
+        !is_redactable_value("  user  "),
+        "trim must not promote an ordinary word into a secret"
+    );
+    assert!(
+        !is_redactable_value("abc"),
+        "values shorter than 4 characters stay ineligible"
+    );
+}
+
+#[test]
+fn secret_shaped_env_values_remain_redactable() {
+    for secret in [
+        "a1b2",
+        "orbit-redaction-secret-value",
+        "orbit-friction-secret-value",
+        "ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZabcd123456",
+    ] {
+        assert!(
+            is_redactable_value(secret),
+            "{secret} is secret-shaped and must stay eligible"
+        );
+    }
+}
+
+#[test]
+fn common_word_env_value_is_not_substituted_even_as_a_token_or_substring() {
+    let _env = EnvVarGuard::set("GITHUB_TOKEN", "user");
+
+    assert_eq!(
+        redact_sensitive_env_text("No user-facing CLI behavior should change."),
+        "No user-facing CLI behavior should change."
+    );
+    assert_eq!(
+        redact_sensitive_env_text("superuser username users"),
+        "superuser username users"
+    );
+}
+
+#[test]
+fn secret_shaped_env_value_is_still_replaced_as_a_substring() {
+    // Pin: eligible (non-letter-containing) values keep bare substring
+    // matching. Mid-word occurrences of a short secret-shaped value are
+    // substituted; ordinary words are the other side of the line.
+    let _env = EnvVarGuard::set("GITHUB_TOKEN", "a1b2");
+
+    assert_eq!(redact_sensitive_env_text("xa1b2y"), "x[REDACTED_ENV]y");
+    assert_eq!(
+        redact_sensitive_env_text("leaked a1b2 token"),
+        "leaked [REDACTED_ENV] token"
+    );
+}
+
+struct EnvVarGuard {
+    _lock: MutexGuard<'static, ()>,
+    name: &'static str,
+    previous: Option<String>,
+}
+
+impl EnvVarGuard {
+    fn set(name: &'static str, value: &str) -> Self {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        let lock = LOCK
+            .get_or_init(|| Mutex::new(()))
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let previous = std::env::var(name).ok();
+        // SAFETY: this test guard serializes environment mutation and restores on drop.
+        unsafe {
+            std::env::set_var(name, value);
+        }
+        Self {
+            _lock: lock,
+            name,
+            previous,
+        }
+    }
+}
+
+impl Drop for EnvVarGuard {
+    fn drop(&mut self) {
+        // SAFETY: the guard holds the serialization lock for the full mutation window.
+        unsafe {
+            match &self.previous {
+                Some(value) => std::env::set_var(self.name, value),
+                None => std::env::remove_var(self.name),
+            }
+        }
+    }
 }
