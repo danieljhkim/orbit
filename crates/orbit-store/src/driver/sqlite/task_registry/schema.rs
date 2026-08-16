@@ -56,6 +56,7 @@ pub(super) fn apply_schema(conn: &Connection) -> Result<(), OrbitError> {
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL,
             terminal_month TEXT,
+            complexity TEXT,
             FOREIGN KEY(task_id) REFERENCES task_bundle_bindings(task_id) ON DELETE CASCADE,
             FOREIGN KEY(workspace_id) REFERENCES workspace_bindings(workspace_id) ON DELETE CASCADE
         );
@@ -104,6 +105,14 @@ pub(super) fn apply_schema(conn: &Connection) -> Result<(), OrbitError> {
         "terminal_month",
         "ALTER TABLE task_bundle_index ADD COLUMN terminal_month TEXT",
     )?;
+    // Nullable on purpose: existing rows stay NULL until the first aggregate
+    // rebuilds them from bundles. Empty string is the indexed "unset" value.
+    add_column_if_missing(
+        conn,
+        "task_bundle_index",
+        "complexity",
+        "ALTER TABLE task_bundle_index ADD COLUMN complexity TEXT",
+    )?;
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_task_bundle_index_workspace_job_run
             ON task_bundle_index(workspace_id, job_run_id, created_at DESC, task_id ASC)",
@@ -113,6 +122,12 @@ pub(super) fn apply_schema(conn: &Connection) -> Result<(), OrbitError> {
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_task_bundle_index_workspace_terminal
             ON task_bundle_index(workspace_id, terminal_month, task_id)",
+        [],
+    )
+    .map_err(|e| OrbitError::Store(e.to_string()))?;
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_task_bundle_index_workspace_complexity
+            ON task_bundle_index(workspace_id, complexity, status)",
         [],
     )
     .map_err(|e| OrbitError::Store(e.to_string()))?;

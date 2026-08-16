@@ -379,3 +379,22 @@ relations:
         assert_eq!(unmet, vec!["ORB-1".to_string(), "ORB-2".to_string()]);
     }
 }
+
+mod unlabeled_bucket {
+    use crate::task::{UNSET_BUCKET, complexity_bucket_ord, labeled_or_unset};
+
+    #[test]
+    fn empty_and_missing_labels_become_unset() {
+        assert_eq!(labeled_or_unset(None), UNSET_BUCKET);
+        assert_eq!(labeled_or_unset(Some("")), UNSET_BUCKET);
+        assert_eq!(labeled_or_unset(Some("   ")), UNSET_BUCKET);
+        assert_eq!(labeled_or_unset(Some("hard")), "hard");
+    }
+
+    #[test]
+    fn unexpected_labels_are_not_folded_into_a_known_band() {
+        assert_eq!(labeled_or_unset(Some("extreme")), "extreme");
+        assert!(complexity_bucket_ord("unset") < complexity_bucket_ord("low"));
+        assert!(complexity_bucket_ord("hard") < complexity_bucket_ord("extreme"));
+    }
+}

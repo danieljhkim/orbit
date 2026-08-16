@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use chrono::{DateTime, Utc};
@@ -93,4 +94,13 @@ pub struct AllocatorSeedOutcome {
     pub next: u32,
     /// Whether the seed changed the counter (`false` when it already matched).
     pub changed: bool,
+}
+
+/// Status distribution for one complexity bucket, including the explicit
+/// [`orbit_types::task::UNSET_BUCKET`] for tasks with no complexity set.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TaskCompletionByComplexity {
+    pub complexity: String,
+    pub total: i64,
+    pub by_status: BTreeMap<String, i64>,
 }

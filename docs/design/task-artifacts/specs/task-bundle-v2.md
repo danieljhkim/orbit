@@ -219,7 +219,7 @@ The local registry must maintain generated status and terminal-month views or re
 
 The initial registry projections are:
 
-- `task_bundle_index(task_id, workspace_id, status, priority, job_run_id, created_at, updated_at, terminal_month)`.
+- `task_bundle_index(task_id, workspace_id, status, priority, job_run_id, created_at, updated_at, terminal_month, complexity)`. `complexity` is `low`/`medium`/`hard`, or empty when the envelope left it unset. SQL `NULL` means the row has not been rewritten since the column was added.
 - `task_bundle_tags(task_id, workspace_id, tag)`.
 - `task_bundle_relations(source_task_id, workspace_id, relation_type, target_task_id)`. The physical column name is historical; `produces` and `resolves` rows may store non-task artifact IDs in `target_task_id`.
 

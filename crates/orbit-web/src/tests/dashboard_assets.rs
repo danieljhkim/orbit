@@ -378,6 +378,7 @@ fn dashboard_guards_diagnostics_and_detail_panels_in_aggregate_view() {
         // ORB-10871: the incidents subtab is per-workspace too (`Ws` extractor).
         "/api/audit/incidents",
         "/api/diagnostics/implement_one",
+        "/api/tasks/completion-by-complexity",
         "fetchAndRenderRuns()",
     ] {
         let fetch_at = index_of(app, "app.js", fetch);
@@ -445,6 +446,28 @@ fn dashboard_guards_diagnostics_and_detail_panels_in_aggregate_view() {
     assert!(
         app.contains(r#"renderKnowledgeDetailPlaceholder("friction")"#),
         "the friction list guard must also clear the stale detail panel"
+    );
+}
+
+#[test]
+fn dashboard_renders_complexity_as_its_own_dimension() {
+    let diagnostics = include_str!("../../assets/dashboard/diagnostics.js");
+    assert!(
+        diagnostics.contains("Task completion by complexity"),
+        "completion-by-complexity panel must exist"
+    );
+    assert!(
+        diagnostics.contains("unset (unlabeled)"),
+        "unset complexity must be a named bucket"
+    );
+    assert!(
+        diagnostics.contains("Average implement_one duration by actor (30d) · ${label} · n="),
+        "duration-by-actor must be faceted by complexity"
+    );
+    let app = include_str!("../../assets/dashboard/app.js");
+    assert!(
+        app.contains("/api/tasks/completion-by-complexity"),
+        "completion aggregate must be fetched from the generated index"
     );
 }
 
