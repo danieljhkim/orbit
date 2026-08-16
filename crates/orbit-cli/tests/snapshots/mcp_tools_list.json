@@ -256,7 +256,7 @@
     "name": "orbit_friction_update"
   },
   {
-    "description": "Search tasks, docs, ADRs, and frictions. ADR entries are retrieved through the docs corpus; hybrid vector ranking applies to indexed tasks and docs.",
+    "description": "Search tasks, docs, and frictions. Decision records are indexed as ordinary docs; hybrid vector ranking applies to indexed tasks and docs.",
     "inputSchema": {
       "additionalProperties": true,
       "properties": {
@@ -269,7 +269,7 @@
           "type": "boolean"
         },
         "kind": {
-          "description": "Corpus kind: task, doc, adr, friction, or all. Default: all.",
+          "description": "Corpus kind: task, doc, friction, or all. Default: all.",
           "type": "string"
         },
         "limit": {
@@ -324,7 +324,7 @@
               "type": "string"
             }
           ],
-          "description": "AND-filter by tag. Repeat or pass an array. Applies to task, doc, friction, and ADR."
+          "description": "AND-filter by tag. Repeat or pass an array. Applies to task, doc, and friction."
         },
         "workspace": {
           "description": "Workspace selector for the authoritative server: a registered workspace name, a logical workspace ID (`ws_*`), or an absolute path registered on that server. Optional when the MCP session announced `_meta.orbit.workspace` at initialize; never inferred from the server process cwd.",

@@ -35,7 +35,7 @@ impl Tool for OrbitSearchTool {
             },
             ToolParam {
                 name: "kind".to_string(),
-                description: "Corpus kind: task, doc, adr, friction, or all. Default: all."
+                description: "Corpus kind: task, doc, friction, or all. Default: all."
                     .to_string(),
                 param_type: "string".to_string(),
                 required: false,
@@ -49,7 +49,7 @@ impl Tool for OrbitSearchTool {
             ToolParam {
                 name: "tag".to_string(),
                 description:
-                    "AND-filter by tag. Repeat or pass an array. Applies to task, doc, friction, and ADR."
+                    "AND-filter by tag. Repeat or pass an array. Applies to task, doc, and friction."
                         .to_string(),
                 param_type: "string_list".to_string(),
                 required: false,
@@ -83,7 +83,7 @@ impl Tool for OrbitSearchTool {
         ToolSchema {
             name: "orbit.search".to_string(),
             description:
-                "Search tasks, docs, ADRs, and frictions. ADR entries are retrieved through the docs corpus; hybrid vector ranking applies to indexed tasks and docs."
+                "Search tasks, docs, and frictions. Decision records are indexed as ordinary docs; hybrid vector ranking applies to indexed tasks and docs."
                     .to_string(),
             parameters,
             builtin: true,

@@ -5,7 +5,7 @@ use crate::command::{CommandOut, Execute, Payload};
 
 #[derive(Args)]
 #[command(
-    about = "Search tasks, docs, ADRs, and frictions",
+    about = "Search tasks, docs, and frictions",
     subcommand_precedence_over_arg = true,
     after_help = "Forms:\n  orbit search <query>\n  orbit search similar <id>\n  orbit search path <path>"
 )]
@@ -196,8 +196,8 @@ struct SearchInput {
 
 fn search_table(results: &[GlobalSearchHit]) -> crate::output::table::Table {
     use crate::output::table::{Column, Table};
-    // Each hit's kind names its own detail command (`orbit task show`,
-    // `orbit docs show` or the corresponding ADR entry).
+    // Each hit's kind names its own detail command (`orbit task show`
+    // or `orbit docs show`).
     let mut table = Table::new(vec![
         Column::new("KIND").fixed(),
         Column::new("SOURCE").fixed(),
