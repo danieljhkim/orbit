@@ -30,9 +30,9 @@ use super::v2_audit::{V2AuditEventFilter, V2AuditEventInsertParams, V2AuditEvent
 
 use crate::contracts::incident::{FailureIncidentQuery, FailureIncidentReport};
 use crate::contracts::{
-    AuditEventFilter, AuditEventInsertParams, AuditRoleAggregate, AuditToolAggregate,
-    AuditToolCallCountsByRole, AuditToolCallCountsBySurfaceAndRole, AuditTopToolCall,
-    TaskCompletionByComplexity,
+    AuditActorAggregate, AuditEventFilter, AuditEventInsertParams, AuditRoleAggregate,
+    AuditToolAggregate, AuditToolCallCountsByRole, AuditToolCallCountsBySurfaceAndRole,
+    AuditTopToolCall, TaskCompletionByComplexity,
 };
 
 pub trait TaskStoreBackend: Send + Sync {

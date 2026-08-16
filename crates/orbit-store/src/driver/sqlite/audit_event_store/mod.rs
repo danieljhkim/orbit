@@ -779,8 +779,14 @@ impl Store {
     }
 
     /// Per-role aggregate of audit events with `timestamp >= since`, including
-    /// the MCP-vs-CLI surface split. Rows where `subcommand` is neither `'run'`
-    /// nor `'run-mcp'` still count toward `total` but neither `mcp` nor `cli`.
+    /// the MCP-vs-CLI surface split. Every row where `subcommand` is neither
+    /// `'run'` nor `'run-mcp'` is still counted toward `total`, and lands in
+    /// exactly one of `other` (a different non-null subcommand) or
+    /// `no_subcommand` (subcommand is `NULL`, e.g. internal lock traffic) —
+    /// so `mcp + cli + other + no_subcommand == total` for every row
+    /// (ORB-10889). `other` uses `subcommand IS NOT NULL AND ... NOT IN`
+    /// rather than a bare `NOT IN`, since SQL's `NULL NOT IN (...)` evaluates
+    /// to `NULL`/false and would silently drop the `no_subcommand` bucket.
     pub fn get_audit_event_aggregates_by_role(
         &self,
         since: &DateTime<Utc>,
@@ -790,7 +796,9 @@ impl Store {
         let sql = "SELECT role, \
                    COUNT(*), \
                    COALESCE(SUM(CASE WHEN subcommand = 'run-mcp' THEN 1 ELSE 0 END), 0), \
-                   COALESCE(SUM(CASE WHEN subcommand = 'run' THEN 1 ELSE 0 END), 0) \
+                   COALESCE(SUM(CASE WHEN subcommand = 'run' THEN 1 ELSE 0 END), 0), \
+                   COALESCE(SUM(CASE WHEN subcommand IS NOT NULL AND subcommand NOT IN ('run-mcp', 'run') THEN 1 ELSE 0 END), 0), \
+                   COALESCE(SUM(CASE WHEN subcommand IS NULL THEN 1 ELSE 0 END), 0) \
                    FROM audit_events WHERE timestamp >= ?1 \
                    GROUP BY role ORDER BY COUNT(*) DESC, role ASC";
 
@@ -805,6 +813,8 @@ impl Store {
                     total: row.get(1)?,
                     mcp: row.get(2)?,
                     cli: row.get(3)?,
+                    other: row.get(4)?,
+                    no_subcommand: row.get(5)?,
                 })
             })
             .map_err(|e| OrbitError::Store(e.to_string()))?;

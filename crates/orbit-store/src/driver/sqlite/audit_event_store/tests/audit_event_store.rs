@@ -635,6 +635,13 @@ fn audit_event_aggregates_by_role_splits_subcommand_surface() {
         .insert_audit_event_record(&codex_other)
         .expect("insert");
 
+    let mut codex_internal =
+        sample_params_with("exec-codex-internal", "codex", AuditEventStatus::Success);
+    codex_internal.subcommand = None;
+    store
+        .insert_audit_event_record(&codex_internal)
+        .expect("insert");
+
     let mut human = sample_params_with("exec-human", "human", AuditEventStatus::Success);
     human.subcommand = Some("run".to_string());
     store.insert_audit_event_record(&human).expect("insert");
@@ -644,12 +651,24 @@ fn audit_event_aggregates_by_role_splits_subcommand_surface() {
         .expect("aggregates by role");
 
     let codex = rows.iter().find(|r| r.role == "codex").expect("codex row");
-    assert_eq!(codex.total, 3);
+    assert_eq!(codex.total, 4);
     assert_eq!(codex.mcp, 1);
     assert_eq!(codex.cli, 1);
+    assert_eq!(codex.other, 1);
+    assert_eq!(codex.no_subcommand, 1);
+    assert_eq!(
+        codex.mcp + codex.cli + codex.other + codex.no_subcommand,
+        codex.total
+    );
 
     let human = rows.iter().find(|r| r.role == "human").expect("human row");
     assert_eq!(human.total, 1);
     assert_eq!(human.mcp, 0);
     assert_eq!(human.cli, 1);
+    assert_eq!(human.other, 0);
+    assert_eq!(human.no_subcommand, 0);
+    assert_eq!(
+        human.mcp + human.cli + human.other + human.no_subcommand,
+        human.total
+    );
 }
