@@ -386,6 +386,8 @@ fn compute_audit_summary_bundle(
                 "count": r.total,
                 "mcp": r.mcp,
                 "cli": r.cli,
+                "other": r.other,
+                "no_subcommand": r.no_subcommand,
             })
         })
         .collect();

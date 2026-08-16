@@ -369,7 +369,7 @@ function renderAuditSummary(data, ctx) {
       const table = el("table", { class: "summary-table" });
       const thead = el("thead");
       const tr = el("tr");
-      for (const c of cols) tr.appendChild(el("th", { class: c.num ? "num" : "", text: c.label }));
+      for (const c of cols) tr.appendChild(el("th", { class: c.num ? "num" : "", text: c.label, title: c.title }));
       thead.appendChild(tr);
       table.appendChild(thead);
 
@@ -454,7 +454,14 @@ function renderAuditSummary(data, ctx) {
   if (data.role_split) {
     container.appendChild(createCard("Role split", renderTable(
       data.role_split,
-      [{ key: "label", label: "role" }, { key: "count", label: "count", num: true }, { key: "mcp", label: "mcp", num: true }, { key: "cli", label: "cli", num: true }],
+      [
+        { key: "label", label: "role" },
+        { key: "count", label: "events", num: true, title: "All audit events in the window" },
+        { key: "mcp", label: "mcp", num: true, title: "Tool calls via MCP (subcommand = run-mcp)" },
+        { key: "cli", label: "cli", num: true, title: "Tool calls via CLI (subcommand = run)" },
+        { key: "other", label: "other", num: true, title: "Other CLI subcommands (non-tool, e.g. show/list)" },
+        { key: "no_subcommand", label: "internal", num: true, title: "Internal/system events with no subcommand (e.g. lock reservations)" },
+      ],
       (item) => {
         auditFilter.role = auditFilter.role === item.label ? null : item.label;
         syncAuditControls();

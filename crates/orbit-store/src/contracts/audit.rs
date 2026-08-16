@@ -96,9 +96,17 @@ pub struct AuditToolAggregate {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AuditRoleAggregate {
     pub role: String,
+    /// All audit events in the window, regardless of subcommand. Equal to
+    /// `mcp + cli + other + no_subcommand`.
     pub total: i64,
+    /// Tool invocations via MCP (`subcommand = 'run-mcp'`).
     pub mcp: i64,
+    /// Tool invocations via CLI (`subcommand = 'run'`).
     pub cli: i64,
+    /// Non-tool CLI subcommands (e.g. `show`, `list`) — present and not `run`/`run-mcp`.
+    pub other: i64,
+    /// Internal/system events with no subcommand at all (e.g. lock reservations).
+    pub no_subcommand: i64,
 }
 
 /// Per-canonical-actor aggregate of audit events (ORB-10888).
