@@ -17,6 +17,33 @@
 //! The goal is narrower and achievable: unintended destruction fails loudly
 //! and leaves a record.
 //!
+//! # Placement is not permission
+//!
+//! Orbit has two independent axes, and this module owns exactly one of them.
+//!
+//! *Placement* is [`crate::operation::OperationSpec::mcp_scope`] and its
+//! registry counterparts (`register_mcp` versus `register_inactive`): which
+//! surfaces *list* a tool. It is an audience decision — what an agent reading
+//! `tools/list` is pointed at — and it authorizes nothing. `tools/list` does no
+//! capability filtering, and the tool registry's `execute` never consults
+//! availability, so an unadvertised tool is still reachable through
+//! `orbit tool run`.
+//!
+//! *Permission* is [`GOVERNED_OPERATIONS`], resolved by [`authorize`] at one
+//! chokepoint per surface. This is the only authorization statement Orbit
+//! makes about a tool, and it is surface-independent: the same answer for an
+//! MCP call, a CLI `tool run`, the dashboard, and the deterministic dispatcher.
+//!
+//! The two therefore need not agree, and deliberately do not. A tool may be
+//! advertised and governed (the operator MCP surface: an operator session sees
+//! and performs it, an agent session sees and is refused), or unadvertised and
+//! ungoverned (`orbit friction show` — kept off the agent MCP surface because
+//! `list` already returns what an agent needs, but freely readable from any
+//! CLI). What must never happen is for a pairing to change by accident. The
+//! guardrail that pins every governed tool's placement is
+//! `crates/orbit-tools/src/builtin/orbit/tests/authorization.rs`, which lives
+//! in the lowest crate that can see both axes at once [ORB-10478].
+//!
 //! # Layering
 //!
 //! The kernel lives in the leaf crate for the same reason the operations-as-data
