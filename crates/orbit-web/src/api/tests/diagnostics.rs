@@ -283,9 +283,9 @@ fn seed_task(
             title: title.to_string(),
             description: format!("Fixture task: {title}."),
             status: Some(status),
-            // ORB-10892 made `complexity` required at create time; `None` here
-            // still means "this fixture never had one assessed", which is
-            // exactly what `Unassessed` records.
+            // `TaskAddParams::complexity` became required at create time
+            // [ORB-10892]; `None` here is the fixture's "nothing was assessed",
+            // which that surface spells `Unassessed`.
             complexity: complexity.unwrap_or(TaskComplexity::Unassessed),
             workspace_path: Some(".".to_string()),
             ..Default::default()

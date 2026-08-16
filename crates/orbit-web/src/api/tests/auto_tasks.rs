@@ -66,10 +66,49 @@ async fn send(
         .expect("response")
 }
 
+/// Pin the process signals `CallerCapabilities::resolve` reads, for the whole
+/// request rather than just its construction.
+///
+/// The guard in `orbit_common::test_env` is process-wide, so it serializes two
+/// tests only when *both* take it. Every case whose expected status depends on
+/// caller identity therefore goes through this helper — a case that merely
+/// reads `ORBIT_OPERATOR` without holding the guard can observe the override a
+/// sibling set concurrently and turn an expected 403 into a 200 [ORB-10894].
 #[allow(clippy::await_holding_lock)]
-async fn as_operator<T>(fut: impl std::future::Future<Output = T>) -> T {
-    let _env = orbit_common::test_env::scoped([(OPERATOR_OVERRIDE_ENV, Some("1"))]);
+async fn with_caller_env<'a, T>(
+    vars: impl IntoIterator<Item = (&'a str, Option<&'a str>)>,
+    fut: impl std::future::Future<Output = T>,
+) -> T {
+    let _env = orbit_common::test_env::scoped(vars);
     fut.await
+}
+
+/// Resolve as an explicit operator. The override outranks every other signal,
+/// so nothing else needs pinning to reach `Operator`.
+async fn as_operator<T>(fut: impl std::future::Future<Output = T>) -> T {
+    with_caller_env([(OPERATOR_OVERRIDE_ENV, Some("1"))], fut).await
+}
+
+/// Resolve as an agent: override cleared, agent envelope declared.
+///
+/// The envelope is *set* rather than cleared on purpose. With nothing declared,
+/// resolution falls through to its interactive-terminal probe, and `cargo test`
+/// run from a terminal inherits both handles — the caller would resolve to
+/// `Operator` and the denial assertion would fail for a reason that has nothing
+/// to do with the code under test. Declaring the agent stops resolution one
+/// rule earlier, so the expected 403 holds in CI, in a managed run, and in an
+/// interactive shell alike. The unidentified-caller branch is covered without
+/// process state in `orbit_common::governance::tests::authorization`.
+async fn as_agent<T>(fut: impl std::future::Future<Output = T>) -> T {
+    with_caller_env(
+        [
+            (OPERATOR_OVERRIDE_ENV, None),
+            ("ORBIT_AGENT_NAME", Some("orbit-web-test")),
+            ("ORBIT_AGENT_MODEL", Some("orbit-web-test")),
+        ],
+        fut,
+    )
+    .await
 }
 
 #[tokio::test]
@@ -177,16 +216,16 @@ async fn toggle_requires_an_explicit_workspace() {
 }
 
 #[tokio::test]
-async fn toggle_denies_an_unidentified_caller() {
+async fn toggle_denies_a_caller_without_operator_capability() {
     let runtime = runtime();
     runtime.auto_task_add(chore_params("nightly")).expect("add");
     let (state, runtime) = state(runtime);
-    let response = send(
+    let response = as_agent(send(
         state,
         Method::POST,
         "/auto-tasks/toggle?workspace=default",
         Some(r#"{"name":"nightly","expected_enabled":true,"enabled":false}"#),
-    )
+    ))
     .await;
     assert_eq!(response.status(), StatusCode::FORBIDDEN);
     let json = body_json(response).await;
@@ -303,16 +342,16 @@ async fn mint_requires_unconditional_acknowledgement() {
 }
 
 #[tokio::test]
-async fn mint_denies_an_unidentified_caller() {
+async fn mint_denies_a_caller_without_operator_capability() {
     let runtime = runtime();
     runtime.auto_task_add(chore_params("nightly")).expect("add");
     let (state, _) = state(runtime);
-    let response = send(
+    let response = as_agent(send(
         state,
         Method::POST,
         "/auto-tasks/mint?workspace=default",
         Some(r#"{"name":"nightly","acknowledge_unconditional":true}"#),
-    )
+    ))
     .await;
     assert_eq!(response.status(), StatusCode::FORBIDDEN);
     let json = body_json(response).await;
