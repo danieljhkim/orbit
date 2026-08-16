@@ -117,8 +117,8 @@ pub use contracts::incident::{
 };
 pub use contracts::{
     ActiveTaskReservation, ActivityInvocationCount, ActivityInvocationMetrics,
-    AgentInvocationMetrics, AuditEventFilter, AuditEventInsertParams, AuditEventStoreBackend,
-    AuditRoleAggregate, AuditToolAggregate, AuditToolCallCountsByRole,
+    AgentInvocationMetrics, AuditActorAggregate, AuditEventFilter, AuditEventInsertParams,
+    AuditEventStoreBackend, AuditRoleAggregate, AuditToolAggregate, AuditToolCallCountsByRole,
     AuditToolCallCountsBySurfaceAndRole, AuditTopToolCall, BoundedFacts, ExecutorDefStoreBackend,
     ExpiredTaskReservation, FrictionStoreBackend, InvocationAccountingFact,
     InvocationAccountingQuery, InvocationInsertParams, InvocationQuery, InvocationRecord,

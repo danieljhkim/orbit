@@ -15,6 +15,7 @@ use orbit_types::workflow::{JobV2Step, JobV2StepBody, PipelineState};
 use serde_json::{Value, json};
 
 pub(crate) fn audit_event_to_json(event: &AuditEvent) -> Value {
+    let actor = event.actor();
     json!({
         "id": event.id,
         "execution_id": event.execution_id,
@@ -25,6 +26,13 @@ pub(crate) fn audit_event_to_json(event: &AuditEvent) -> Value {
         "target_type": event.target_type,
         "target_id": event.target_id,
         "role": event.role,
+        // ORB-10888: the canonical actor beside the raw label. `role` stays
+        // byte-for-byte what was recorded; these are derived.
+        "actor": actor.id,
+        "actor_kind": actor.kind.to_string(),
+        "actor_vendor": actor.vendor,
+        "actor_family": actor.family,
+        "actor_model": actor.model,
         "status": event.status.to_string(),
         "exit_code": event.exit_code,
         "duration_ms": event.duration_ms,

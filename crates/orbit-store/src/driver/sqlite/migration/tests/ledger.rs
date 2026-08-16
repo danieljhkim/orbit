@@ -67,6 +67,9 @@ fn fresh_db_applies_baseline_and_records_ledger() {
     assert_eq!(applied[14].version, 15);
     assert_eq!(applied[14].name, "invocation_audit_context");
     assert!(!applied[14].applied_at.is_empty());
+    assert_eq!(applied[15].version, 16);
+    assert_eq!(applied[15].name, "audit_actor_identity");
+    assert!(!applied[15].applied_at.is_empty());
 }
 
 #[test]
@@ -227,6 +230,10 @@ fn legacy_db_adopts_versioned_ledger() {
                 "migration.v0015".to_string(),
                 "invocation_audit_context".to_string()
             ),
+            (
+                "migration.v0016".to_string(),
+                "audit_actor_identity".to_string()
+            ),
         ]
     );
 }
@@ -238,7 +245,7 @@ fn refuses_db_from_a_newer_binary() {
 
     conn.execute(
         "INSERT INTO schema_meta(key, value, updated_at)
-        VALUES ('migration.v0016', 'from-the-future', '2099-01-01T00:00:00Z')",
+        VALUES ('migration.v0017', 'from-the-future', '2099-01-01T00:00:00Z')",
         [],
     )
     .expect("record future migration");
@@ -318,7 +325,7 @@ fn store_reopens_database_at_shipped_schema_v4_and_applies_through_latest() {
     );
     assert_eq!(
         applied.last().map(|migration| migration.name.as_str()),
-        Some("invocation_audit_context")
+        Some("audit_actor_identity")
     );
     let connection = store.connection();
     let conn = connection.lock().expect("connection");

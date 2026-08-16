@@ -5,6 +5,7 @@ use std::str::FromStr;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
+use crate::telemetry::audit_actor::{CanonicalActor, canonical_actor_for_role_label};
 use crate::tool::{McpCapability, McpTransport};
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
@@ -116,6 +117,18 @@ pub struct AuditEvent {
     /// Zero-based step index within the enclosing job run, when known.
     #[serde(default)]
     pub step_index: Option<i64>,
+}
+
+impl AuditEvent {
+    /// Canonical actor identity for this event, derived from [`Self::role`].
+    ///
+    /// Derived rather than stored so a row always reads back under the current
+    /// alias map. The persisted `actor_*` columns exist for SQL grouping and
+    /// carry the alias version that produced them; see
+    /// [`crate::telemetry::canonical_actor_for_role_label`].
+    pub fn actor(&self) -> CanonicalActor {
+        canonical_actor_for_role_label(&self.role)
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

@@ -78,6 +78,8 @@ Some runtime paths write targeted command-audit rows directly:
 
 These producers share the SQLite schema and must preserve the same status, target, actor, and redaction expectations as CLI rows. Prescriptive coverage expectations live in [specs/coverage-matrix.md](./specs/coverage-matrix.md).
 
+[ORB-10888] added a canonical actor projection beside `role`: nullable `actor_kind`, `actor_id`, `actor_vendor`, `actor_family`, `actor_model`, and `actor_alias_version` columns, backfilled for existing rows by migration v16. `role` itself is untouched, so trust classification is unchanged; the projection exists so aggregates can group one agent recorded at family, shorthand, and full-model granularity as a single actor, and can tell synthetic (`admin`, `hook`) and unattributed (`unknown`, `unverified`) rows from real agents without string-matching the label. The alias map and its versioning rules live in [specs/actor-identity.md](./specs/actor-identity.md).
+
 After [T20260427-0023], selected canonical stores also project live tracing events: filesystem policy denials still write FS audit events, proc-spawn allowlist denials still return `OrbitError::PolicyDenied`, and each path also emits a redacted `orbit.policy.deny` event. Friction reports are workspace-scoped records in host-global SQLite, not task lifecycle events or precomputed scoreboard updates; the old `.orbit/frictions/` tree is retained only as import/rollback evidence, and `orbit-web` owns the dashboard/API triage surface.
 
 ---

@@ -238,6 +238,7 @@ pub(super) async fn audit_summary(Ws(runtime): Ws, Query(q): Query<AuditSummaryQ
         "duration_by_tool": bundle.duration_by_tool,
         "failure_rate_by_tool": bundle.failure_rate_by_tool,
         "role_split": bundle.role_split,
+        "actor_split": bundle.actor_split,
         "mcp_vs_cli_split": bundle.mcp_vs_cli_split,
         "denials_by_tool": bundle.denials_by_tool,
         "denials_by_reason": bundle.denials_by_reason,
@@ -260,6 +261,10 @@ struct AuditSummaryBundle {
     duration_by_tool: Vec<Value>,
     failure_rate_by_tool: Vec<Value>,
     role_split: Vec<Value>,
+    /// Canonical per-actor split [ORB-10888]. Unlike `role_split`, one agent
+    /// appears once regardless of the granularity its label was recorded at,
+    /// and `kind` says whether a row is a real agent at all.
+    actor_split: Vec<Value>,
     mcp_vs_cli_split: Value,
     denials_by_tool: Value,
     denials_by_reason: Value,
@@ -292,6 +297,7 @@ fn compute_audit_summary_bundle(
 
     let tool_aggs = runtime.audit_event_aggregates_by_tool(&since)?;
     let role_aggs = runtime.audit_event_aggregates_by_role(&since)?;
+    let actor_aggs = runtime.audit_event_aggregates_by_actor(&since)?;
 
     let mut failures_vec: Vec<_> = tool_aggs
         .iter()
@@ -384,6 +390,21 @@ fn compute_audit_summary_bundle(
         })
         .collect();
 
+    let actor_vec: Vec<_> = actor_aggs
+        .iter()
+        .map(|a| {
+            json!({
+                "label": a.actor,
+                "kind": a.kind,
+                "vendor": a.vendor,
+                "family": a.family,
+                "count": a.total,
+                "mcp": a.mcp,
+                "cli": a.cli,
+            })
+        })
+        .collect();
+
     let mcp_count: i64 = role_aggs.iter().map(|r| r.mcp).sum();
     let cli_count: i64 = role_aggs.iter().map(|r| r.cli).sum();
     let mcp_vs_cli_split = json!([
@@ -410,6 +431,7 @@ fn compute_audit_summary_bundle(
         duration_by_tool: duration_vec,
         failure_rate_by_tool: rate_vec,
         role_split: role_vec,
+        actor_split: actor_vec,
         mcp_vs_cli_split,
         denials_by_tool,
         denials_by_reason,

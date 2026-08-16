@@ -9,7 +9,7 @@ use std::collections::BTreeSet;
 
 use chrono::{DateTime, Utc};
 use orbit_common::OrbitError;
-use orbit_types::telemetry::{AuditEvent, AuditEventStatus};
+use orbit_types::telemetry::{AuditEvent, AuditEventStatus, canonical_actor_for_role_label};
 use orbit_types::tool::{McpCapability, McpTransport};
 use rusqlite::params;
 
@@ -29,8 +29,9 @@ pub(super) const AUDIT_EVENT_COLUMNS: &str = "id, execution_id, timestamp, comma
      job_run_id, activity_id, step_index, trace_id, caller_ip";
 
 use crate::contracts::{
-    AuditEventFilter, AuditEventInsertParams, AuditRoleAggregate, AuditToolAggregate,
-    AuditToolCallCountsByRole, AuditToolCallCountsBySurfaceAndRole, AuditTopToolCall,
+    AuditActorAggregate, AuditEventFilter, AuditEventInsertParams, AuditRoleAggregate,
+    AuditToolAggregate, AuditToolCallCountsByRole, AuditToolCallCountsBySurfaceAndRole,
+    AuditTopToolCall,
 };
 
 fn audit_event_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<AuditEvent> {
@@ -162,6 +163,10 @@ fn insert_audit_event_record_on_connection(
 ) -> Result<(), OrbitError> {
     let capabilities_json = serde_json::to_string(&params.effective_capabilities)
         .map_err(|error| OrbitError::Store(format!("serialize MCP capability set: {error}")))?;
+    // ORB-10888: the canonical actor is derived from the same label the row
+    // stores, by the same alias map the backfill uses, so new rows and
+    // migrated rows land in identical aggregate buckets.
+    let actor = canonical_actor_for_role_label(&params.role);
 
     conn.execute(
         r#"INSERT INTO audit_events(
@@ -172,8 +177,10 @@ fn insert_audit_event_record_on_connection(
             host, pid, session_id, workspace_id, caller_machine_id,
             caller_host_id, process_machine_id, process_host_id, transport,
             capabilities_json, origin_session_id, mcp_call_id, lease_id,
-            task_id, job_run_id, activity_id, step_index, trace_id, caller_ip
-        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32, ?33, ?34, ?35)"#,
+            task_id, job_run_id, activity_id, step_index, trace_id, caller_ip,
+            actor_kind, actor_id, actor_vendor, actor_family, actor_model,
+            actor_alias_version
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32, ?33, ?34, ?35, ?36, ?37, ?38, ?39, ?40, ?41)"#,
         rusqlite::params![
             params.execution_id,
             now_string(),
@@ -210,6 +217,12 @@ fn insert_audit_event_record_on_connection(
             params.step_index,
             trace_id,
             caller_ip,
+            actor.kind.as_str(),
+            actor.id,
+            actor.vendor,
+            actor.family,
+            actor.model,
+            actor.alias_version,
         ],
     )
         .map_err(|e| OrbitError::Store(e.to_string()))?;
@@ -792,6 +805,58 @@ impl Store {
                     total: row.get(1)?,
                     mcp: row.get(2)?,
                     cli: row.get(3)?,
+                })
+            })
+            .map_err(|e| OrbitError::Store(e.to_string()))?;
+
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(|e| OrbitError::Store(e.to_string()))
+    }
+
+    /// Per-canonical-actor aggregate of audit events with `timestamp >= since`,
+    /// carrying the same MCP-vs-CLI split as
+    /// [`Self::get_audit_event_aggregates_by_role`] (ORB-10888).
+    ///
+    /// Groups on the materialized actor projection rather than the raw `role`
+    /// label, so one agent recorded at family, shorthand, and full-model
+    /// granularity aggregates as one row and synthetic buckets are separable by
+    /// `kind` without string-matching the label. Rows written before the
+    /// projection existed are backfilled by migration v16, so old and new rows
+    /// group together.
+    pub fn get_audit_event_aggregates_by_actor(
+        &self,
+        since: &DateTime<Utc>,
+    ) -> Result<Vec<AuditActorAggregate>, OrbitError> {
+        let conn = self.read()?;
+
+        // COALESCE guards a row the backfill could not reach (a database
+        // opened read-only mid-upgrade); it reports as unattributed rather
+        // than collapsing every such row into one NULL bucket.
+        let sql = "SELECT COALESCE(actor_kind, 'unattributed'), \
+                   COALESCE(actor_id, 'unknown'), \
+                   actor_vendor, \
+                   actor_family, \
+                   COUNT(*), \
+                   COALESCE(SUM(CASE WHEN subcommand = 'run-mcp' THEN 1 ELSE 0 END), 0), \
+                   COALESCE(SUM(CASE WHEN subcommand = 'run' THEN 1 ELSE 0 END), 0) \
+                   FROM audit_events WHERE timestamp >= ?1 \
+                   GROUP BY 1, 2, 3, 4 \
+                   ORDER BY COUNT(*) DESC, 1 ASC, 2 ASC";
+
+        let mut stmt = conn
+            .prepare(sql)
+            .map_err(|e| OrbitError::Store(e.to_string()))?;
+
+        let rows = stmt
+            .query_map(params![since.to_rfc3339()], |row| {
+                Ok(AuditActorAggregate {
+                    kind: row.get(0)?,
+                    actor: row.get(1)?,
+                    vendor: row.get(2)?,
+                    family: row.get(3)?,
+                    total: row.get(4)?,
+                    mcp: row.get(5)?,
+                    cli: row.get(6)?,
                 })
             })
             .map_err(|e| OrbitError::Store(e.to_string()))?;

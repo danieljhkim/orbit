@@ -140,7 +140,16 @@ pub fn agent_from_model(model: &str) -> Option<&'static str> {
 
 /// Infer a provider family from a model identifier.
 pub fn provider_from_model(model: &str) -> Option<&'static str> {
-    match agent_from_model(model)? {
+    provider_for_agent_family(agent_from_model(model)?)
+}
+
+/// Map an Orbit agent family onto the provider that serves it.
+///
+/// Split out from [`provider_from_model`] so callers that already hold a
+/// family (rather than a model string) resolve the vendor through the same
+/// table instead of restating it.
+pub fn provider_for_agent_family(family: &str) -> Option<&'static str> {
+    match family {
         "claude" => Some("anthropic"),
         "codex" => Some("openai"),
         "gemini" => Some("google"),

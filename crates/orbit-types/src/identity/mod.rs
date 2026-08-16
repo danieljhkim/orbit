@@ -14,7 +14,7 @@ mod tests;
 
 pub use actor::{
     ActorIdentity, agent_from_model, normalize_attribution_label,
-    normalize_optional_attribution_label, provider_from_model,
+    normalize_optional_attribution_label, provider_for_agent_family, provider_from_model,
 };
 pub use agent_family::AgentFamily;
 pub use agent_pair::{
