@@ -6,7 +6,8 @@
 use std::path::Path;
 
 use chrono::{DateTime, Local, Utc};
-use orbit_common::types::OrbitError;
+use orbit_common::types::{OrbitError, parse_local_routine_yaml, parse_routine_yaml};
+use orbit_common::utility::fs::atomic_write_text;
 use orbit_store::RoutineFireRecord;
 
 use super::due::{parse_cron, truncate_to_minute};
@@ -27,6 +28,10 @@ pub struct RoutineStatus {
     pub validation: RoutinePinValidation,
     /// Host-local pause, when one is set (RFC 3339 pause timestamp).
     pub paused_at: Option<String>,
+    /// First scheduler observation on this host (RFC 3339).
+    pub first_observed_at: Option<String>,
+    /// Most recent scheduled slot consumed by the scheduler (RFC 3339).
+    pub last_evaluated_slot: Option<String>,
     /// Next scheduled slot (RFC 3339, host-local), when computable.
     pub next_due: Option<String>,
     /// Most recent fire attempt recorded on this host.
@@ -87,6 +92,7 @@ pub fn routine_statuses_with_providers(
             .and_then(|slot| truncate_to_minute(slot).ok())
             .map(|slot| slot.to_rfc3339());
         let last_fire = store.routine_latest_fire(&routine.definition.name)?;
+        let cursor = store.routine_cursor(&routine.definition.name)?;
         let paused_at = pauses
             .get(&routine.definition.name)
             .map(|pause| pause.paused_at.clone());
@@ -102,6 +108,8 @@ pub fn routine_statuses_with_providers(
             pinned_to_host,
             validation,
             paused_at,
+            first_observed_at: cursor.as_ref().map(|cursor| cursor.baseline_at.clone()),
+            last_evaluated_slot: cursor.and_then(|cursor| cursor.last_slot),
             next_due,
             last_fire,
         });
@@ -114,6 +122,107 @@ pub fn routine_statuses_with_providers(
         statuses,
         load_errors,
     })
+}
+
+/// Optimistic outcome for a versioned routine-definition toggle.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RoutineToggleOutcome {
+    /// The definition was atomically changed.
+    Changed,
+    /// The desired state already matched the current definition.
+    Unchanged,
+    /// The caller's expected state was stale, so no write occurred.
+    Conflict { actual_enabled: bool },
+}
+
+/// Change only the typed `enabled` field of a routine definition.
+///
+/// The path comes from a freshly loaded [`LoadedRoutine`], never from a
+/// transport payload. The surgical edit preserves comments and field ordering;
+/// the rewritten document is parsed and compared before the atomic rename so a
+/// toggle cannot accidentally alter any other routine behavior.
+pub fn set_routine_enabled(
+    routine: &LoadedRoutine,
+    local_host_id: &str,
+    expected_enabled: bool,
+    enabled: bool,
+) -> Result<RoutineToggleOutcome, OrbitError> {
+    let raw = std::fs::read_to_string(&routine.path)
+        .map_err(|error| OrbitError::Io(format!("read {}: {error}", routine.path.display())))?;
+    let current = parse_for_origin(&raw, routine.origin, local_host_id)?;
+    if current.name != routine.definition.name {
+        return Err(OrbitError::InvalidInput(format!(
+            "routine definition at {} changed identity from '{}' to '{}'",
+            routine.path.display(),
+            routine.definition.name,
+            current.name
+        )));
+    }
+    if current.enabled != expected_enabled {
+        return Ok(RoutineToggleOutcome::Conflict {
+            actual_enabled: current.enabled,
+        });
+    }
+    if current.enabled == enabled {
+        return Ok(RoutineToggleOutcome::Unchanged);
+    }
+
+    let rendered = rewrite_enabled_line(&raw, enabled)?;
+    let rewritten = parse_for_origin(&rendered, routine.origin, local_host_id)?;
+    let mut expected = current;
+    expected.enabled = enabled;
+    if rewritten != expected {
+        return Err(OrbitError::Execution(
+            "routine toggle validation changed fields other than enabled".to_string(),
+        ));
+    }
+    atomic_write_text(&routine.path, &rendered)
+        .map_err(|error| OrbitError::Io(format!("write {}: {error}", routine.path.display())))?;
+    Ok(RoutineToggleOutcome::Changed)
+}
+
+fn parse_for_origin(
+    raw: &str,
+    origin: super::loader::RoutineOrigin,
+    local_host_id: &str,
+) -> Result<orbit_common::types::RoutineDefinition, OrbitError> {
+    match origin {
+        super::loader::RoutineOrigin::Committed => parse_routine_yaml(raw),
+        super::loader::RoutineOrigin::Local => parse_local_routine_yaml(raw, local_host_id),
+    }
+}
+
+fn rewrite_enabled_line(raw: &str, enabled: bool) -> Result<String, OrbitError> {
+    let newline = if raw.contains("\r\n") { "\r\n" } else { "\n" };
+    let has_enabled = raw
+        .lines()
+        .any(|line| line.trim_end_matches('\r').starts_with("enabled:"));
+    let mut rendered = String::with_capacity(raw.len() + 16);
+    let mut replaced = false;
+    for line in raw.split_inclusive('\n') {
+        let content = line.trim_end_matches(['\r', '\n']);
+        let ending = &line[content.len()..];
+        if !replaced && content.starts_with("enabled:") {
+            let suffix = content
+                .split_once('#')
+                .map(|(_, comment)| format!(" # {}", comment.trim()))
+                .unwrap_or_default();
+            rendered.push_str(&format!("enabled: {enabled}{suffix}{ending}"));
+            replaced = true;
+        } else {
+            rendered.push_str(line);
+            if !has_enabled && !replaced && content.starts_with("name:") {
+                rendered.push_str(&format!("enabled: {enabled}{newline}"));
+                replaced = true;
+            }
+        }
+    }
+    if !replaced {
+        return Err(OrbitError::InvalidInput(
+            "routine definition has no canonical top-level `name:` or `enabled:` field".to_string(),
+        ));
+    }
+    Ok(rendered)
 }
 
 /// Pause a routine on this host (host-local, never synced). Returns `false`

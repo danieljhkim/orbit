@@ -149,12 +149,20 @@ pub struct ClockStatus {
     pub configured_cadence_seconds: u64,
     pub effective_cadence_seconds: Option<u64>,
     pub enabled: bool,
+    /// Whether the native manager reports the unit as loaded.
+    pub loaded: bool,
+    /// Whether the native timer is currently active/waiting, when exposed.
+    pub running: Option<bool>,
     /// Whether an enabled native clock has a future trigger. A paused clock is
     /// intentionally not schedulable and is not unhealthy.
     pub schedulable: bool,
     /// Actionable detail when an enabled clock cannot be shown to have a
     /// future trigger.
     pub health_issue: Option<String>,
+    /// Most recent native timer trigger, in the manager's display format.
+    pub last_tick_at: Option<String>,
+    /// Next native timer trigger, in the manager's display format.
+    pub next_tick_at: Option<String>,
     pub platform: &'static str,
 }
 
@@ -447,8 +455,11 @@ fn systemd_next_trigger_command() -> ManagerCommand {
             "--user".into(),
             "show".into(),
             format!("{SYSTEMD_UNIT}.timer"),
+            "--property=LoadState".into(),
+            "--property=ActiveState".into(),
             "--property=NextElapseUSecRealtime".into(),
             "--property=NextElapseUSecMonotonic".into(),
+            "--property=LastTriggerUSec".into(),
         ],
     }
 }
@@ -517,7 +528,7 @@ pub(super) fn set_clock_enabled_with(
         .unwrap_or(false);
     if current == enabled {
         return Ok(clock_status_from(
-            settings, enabled, enabled, platform, None,
+            settings, enabled, enabled, platform, None, None,
         ));
     }
     let command = manager_set_enabled_command(platform, enabled, home);
@@ -530,7 +541,7 @@ pub(super) fn set_clock_enabled_with(
         )));
     }
     Ok(clock_status_from(
-        settings, enabled, enabled, platform, None,
+        settings, enabled, enabled, platform, None, None,
     ))
 }
 
@@ -551,23 +562,35 @@ pub(super) fn clock_status_with(
     let enabled = runner
         .run(&manager_status_command(platform))
         .unwrap_or(false);
-    let (schedulable, health_issue) = if enabled && platform == ClockPlatform::Systemd {
+    let mut manager_details = None;
+    let (schedulable, health_issue) = if platform == ClockPlatform::Systemd {
         match runner.stdout(&systemd_next_trigger_command()) {
-            Ok(Some(output)) if systemd_output_has_future_trigger(&output) => (true, None),
-            Ok(Some(_)) => (
-                false,
-                Some(
-                    "systemd timer is enabled but has no future trigger; recovery: `orbit routine init --install-clock`"
-                        .to_string(),
-                ),
-            ),
-            Ok(None) | Err(_) => (
+            Ok(Some(output)) => {
+                let details = SystemdClockDetails::parse(&output);
+                let schedulable = enabled && details.next_tick_at.is_some();
+                manager_details = Some(details);
+                if !enabled {
+                    (false, None)
+                } else if schedulable {
+                    (true, None)
+                } else {
+                    (
+                        false,
+                        Some(
+                            "systemd timer is enabled but has no future trigger; recovery: `orbit routine init --install-clock`"
+                                .to_string(),
+                        ),
+                    )
+                }
+            }
+            Ok(None) | Err(_) if enabled => (
                 false,
                 Some(
                     "systemd timer is enabled but its next trigger could not be verified; recovery: `systemctl --user status orbit-sweep.timer`, then `orbit routine init --install-clock`"
                         .to_string(),
                 ),
             ),
+            Ok(None) | Err(_) => (false, None),
         }
     } else {
         (enabled, None)
@@ -578,18 +601,44 @@ pub(super) fn clock_status_with(
         schedulable,
         platform,
         health_issue,
+        manager_details,
     ))
 }
 
-fn systemd_output_has_future_trigger(output: &str) -> bool {
-    output.lines().any(|line| {
-        let value = line.split_once('=').map_or(line, |(_, value)| value).trim();
-        !value.is_empty()
-            && !matches!(
-                value.to_ascii_lowercase().as_str(),
-                "n/a" | "infinity" | "0"
-            )
-    })
+#[derive(Debug, Default)]
+struct SystemdClockDetails {
+    loaded: Option<bool>,
+    running: Option<bool>,
+    last_tick_at: Option<String>,
+    next_tick_at: Option<String>,
+}
+
+impl SystemdClockDetails {
+    fn parse(output: &str) -> Self {
+        let property = |name: &str| {
+            output.lines().find_map(|line| {
+                let (key, value) = line.split_once('=')?;
+                (key == name).then(|| useful_manager_value(value)).flatten()
+            })
+        };
+        Self {
+            loaded: property("LoadState").map(|value| value == "loaded"),
+            running: property("ActiveState").map(|value| value == "active"),
+            last_tick_at: property("LastTriggerUSec"),
+            next_tick_at: property("NextElapseUSecRealtime")
+                .or_else(|| property("NextElapseUSecMonotonic")),
+        }
+    }
+}
+
+fn useful_manager_value(raw: &str) -> Option<String> {
+    let value = raw.trim();
+    (!value.is_empty()
+        && !matches!(
+            value.to_ascii_lowercase().as_str(),
+            "n/a" | "infinity" | "0"
+        ))
+    .then(|| value.to_string())
 }
 
 fn clock_status_from(
@@ -598,13 +647,21 @@ fn clock_status_from(
     schedulable: bool,
     platform: ClockPlatform,
     health_issue: Option<String>,
+    manager_details: Option<SystemdClockDetails>,
 ) -> ClockStatus {
+    let details = manager_details.unwrap_or_default();
     ClockStatus {
         configured_cadence_seconds: settings.cadence_seconds,
         effective_cadence_seconds: (enabled && schedulable).then_some(settings.cadence_seconds),
         enabled,
+        loaded: details.loaded.unwrap_or(enabled),
+        running: details.running,
         schedulable,
         health_issue,
+        last_tick_at: details.last_tick_at,
+        next_tick_at: (enabled && schedulable)
+            .then_some(details.next_tick_at)
+            .flatten(),
         platform: platform.name(),
     }
 }

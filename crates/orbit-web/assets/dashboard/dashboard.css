@@ -3592,3 +3592,75 @@
       .rel-role-step { color: var(--state-success); border-color: var(--state-success); }
       .rel-role-ambiguous { color: var(--priority-medium); border-color: var(--priority-medium); }
       .rel-role-unknown { color: var(--fg-dim); }
+
+      /* ORB-10875: routine definitions and the host clock deliberately use
+         separate cards and controls so one state cannot read as the other. */
+      .operations-layout {
+        grid-template-columns: minmax(0, 2fr) minmax(300px, 1fr);
+        align-items: start;
+      }
+      body.operations-active { height: auto; min-height: 100vh; overflow-y: auto; }
+      .operations-layout .panel { min-width: 0; }
+      .operation-feedback {
+        min-height: 30px; padding: 7px 14px; border-bottom: 1px solid var(--border);
+        color: var(--fg-dim); font: 11px/1.4 var(--font-mono);
+      }
+      .operation-feedback:empty { display: none; }
+      .operation-feedback.pending { color: var(--priority-medium); }
+      .operation-feedback.success { color: var(--state-success); }
+      .operation-feedback.error { color: var(--state-failed); }
+      #routines-body, #clock-body { padding: 12px; background: var(--bg); }
+      .operation-card {
+        padding: 12px; margin-bottom: 10px; border: 1px solid var(--border);
+        border-radius: 4px; background: var(--bg-elev);
+      }
+      .operation-card:last-child { margin-bottom: 0; }
+      .operation-card-title, .operation-clock-summary, .operation-clock-actions {
+        display: flex; align-items: center; justify-content: space-between; gap: 10px;
+      }
+      .operation-card-title > div, .operation-clock-summary { display: flex; align-items: center; gap: 8px; min-width: 0; }
+      .operation-card-title strong { overflow-wrap: anywhere; }
+      .operation-state {
+        padding: 2px 6px; border: 1px solid var(--border); border-radius: 999px;
+        color: var(--fg-dim); font: 10px var(--font-mono); text-transform: uppercase;
+      }
+      .operation-state.enabled, .operation-state.healthy { color: var(--state-success); border-color: var(--state-success); }
+      .operation-state.disabled, .operation-state.paused { color: var(--fg-dim); }
+      .operation-state.blocked, .operation-state.missed { color: var(--state-failed); border-color: var(--state-failed); }
+      .operation-target { margin: 8px 0 10px; color: var(--accent); overflow-wrap: anywhere; }
+      .operation-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 14px; }
+      .operation-field { min-width: 0; }
+      .operation-field-label {
+        display: block; margin-bottom: 2px; color: var(--fg-dim); font: 9px var(--font-sans);
+        text-transform: uppercase; letter-spacing: .08em;
+      }
+      .operation-field-value { display: block; color: var(--fg); font: 11px/1.4 var(--font-mono); overflow-wrap: anywhere; }
+      .operation-description, .operation-control-note, .operations-readonly-note {
+        margin: 10px 0 0; color: var(--fg-dim); font: 11px/1.5 var(--font-sans);
+      }
+      .operations-readonly-note { margin: 0 0 12px; padding: 9px; border: 1px dashed var(--border); }
+      .operation-control-note.error { color: var(--state-failed); }
+      .operation-button, .operation-cadence {
+        min-height: 30px; padding: 5px 9px; border: 1px solid var(--border); border-radius: 3px;
+        background: var(--bg); color: var(--fg); font: 11px var(--font-mono);
+      }
+      .operation-button { cursor: pointer; white-space: nowrap; }
+      .operation-button:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+      .operation-button:disabled, .operation-cadence:disabled { opacity: .5; cursor: not-allowed; }
+      .operation-button.disable { color: var(--state-failed); }
+      .operation-button.enable { color: var(--state-success); }
+      .operation-clock-summary { justify-content: flex-start; margin-bottom: 14px; }
+      .operation-clock-actions { justify-content: flex-start; flex-wrap: wrap; margin-top: 14px; }
+
+      @media (max-width: 900px) {
+        .operations-layout { grid-template-columns: 1fr; }
+      }
+      @media (max-width: 600px) {
+        .operations-layout { display: block; padding: 8px; }
+        .operations-layout .panel { margin-bottom: 8px; }
+        .operation-grid { grid-template-columns: 1fr; }
+        .operation-card-title { align-items: flex-start; }
+        .operation-card-title > div { align-items: flex-start; flex-direction: column; }
+        .operation-clock-actions { align-items: stretch; }
+        .operation-clock-actions > * { flex: 1 1 100%; }
+      }

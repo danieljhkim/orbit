@@ -3,7 +3,7 @@ summary: "User Interface — Design"
 type: design
 title: "User Interface — Design"
 owner: gemini
-last_updated: 2026-08-13
+last_updated: 2026-08-16
 status: Draft
 feature: user-interface
 doc_role: design
@@ -48,7 +48,7 @@ Knowledge detail panels stay pinned while the artifact list scrolls after [ORB-1
 
 ## 6. Top-Level Navigation
 
-The top-level nav carries exactly the operator's four workflow surfaces — Tasks, Audit, Diagnostics, Knowledge — plus the hash-only `run-detail` route [ORB-10444] [Top-Level Dashboard Nav Is the Operator's Four Tabs](./4_decisions.md#top-level-dashboard-nav-is-the-operators-four-tabs). A deprecated review-threads tab was removed outright rather than hidden: nav entry, route, pane, refresh branch, and styles all went, so no dead asset ships and no route resolves to a missing pane. Scoreboard is diagnostics-shaped telemetry rather than a workflow surface, so it moved under Diagnostics as the `#diagnostics/scoreboard` sub-tab. Its markup moved verbatim, so every element `scoreboard.js` renders into — and therefore the `/api/scoreboard` response contract — is unchanged; the sub-tab swaps the diagnostics two-column layout for a full-width one while keeping the sub-tab nav reachable.
+The top-level nav carries five operator workflow surfaces — Tasks, Audit, Diagnostics, Operations, and Knowledge — plus the hash-only `run-detail` route [ORB-10444] [ORB-10875]. Operations owns routine and host-clock state; it is top-level because disabling unattended execution is an operational action rather than diagnostic telemetry. A deprecated review-threads tab was removed outright rather than hidden: nav entry, route, pane, refresh branch, and styles all went, so no dead asset ships and no route resolves to a missing pane. Scoreboard is diagnostics-shaped telemetry rather than a workflow surface, so it remains under Diagnostics as the `#diagnostics/scoreboard` sub-tab.
 
 ## 7. Task Write Actions
 
@@ -68,7 +68,15 @@ The Tasks count states what it means instead of an ambiguous `N/50`: it names th
 
 The active status filter and search query are represented in the `#tasks` hash (mirroring the Audit tab's own hash-encoded filters) and restated as plain text next to the count, so the current view survives a reload or the browser's back/forward button and is legible without reading each chip's color. The selected workspace is likewise mirrored into the page's `?workspace=` query parameter on every change [ORB-10874].
 
-## 9. Concerns & Honest Limitations
+## 9. Operations
+
+Operations renders routine-definition state separately from the host sweep clock [ORB-10875]. Each routine row names its source workspace, cron schedule, catalog target, host pins, last scheduler evaluation/fire, linked run outcome, and next due slot. Definition `enabled` is the versioned switch; the clock card independently reports its native provider, configured/effective cadence, loaded/active health, and native last/next tick values when available.
+
+Routine toggles and clock controls require one concrete workspace and the exact local host returned by the status response. All-workspace mode stays readable but has no active controls. Each mutation carries its displayed target plus expected prior state, so a delayed or duplicate click conflicts instead of overwriting a newer observation. The UI also holds an in-flight guard, renders pending state, and reports the server's exact success or failure. Starting/stopping the native service requires confirmation; cadence is a separate control and its feedback explicitly preserves the service-state distinction. The backend accepts typed actions only and resolves routine paths and native commands itself—browser input is never interpreted as shell text.
+
+The two-column desktop layout stacks below 900px, and routine/clock metadata collapses to one column below 600px so schedules, state labels, and controls remain scannable at 480–720px widths.
+
+## 10. Concerns & Honest Limitations
 
 Accessibility still needs a real WCAG pass; responsive behavior remains optimized for wide desktop viewports; raw HTML, CSS variables, and dashboard JavaScript keep the runtime simple but leave duplication across project surfaces.
 
@@ -85,5 +93,6 @@ Accessibility still needs a real WCAG pass; responsive behavior remains optimize
 - [ORB-00144] grouped scoreboard metrics and added knowledge counters.
 - [ORB-10444] retired a deprecated tab, folded Scoreboard under Diagnostics, pinned the Knowledge detail pane, and added task ship + comments.
 - [ORB-10874] clarified the Tasks count and filter state, made the log panel collapsible/resizable, and added pending/undo feedback and an aggregate-mode mutation guard to inline task edits.
+- [ORB-10875] added the Operations view and typed routine/clock controls.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

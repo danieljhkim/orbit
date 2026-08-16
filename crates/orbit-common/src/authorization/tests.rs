@@ -43,6 +43,11 @@ fn registry_declares_each_operation_once_with_a_capability() {
                 "command operation '{}' must be `<command> <subcommand>`",
                 operation.id
             ),
+            OperationSurface::Dashboard => assert!(
+                operation.id.split('.').count() == 2,
+                "dashboard operation '{}' must be `<domain>.<action>`",
+                operation.id
+            ),
         }
     }
 }
@@ -55,6 +60,10 @@ fn lookup_is_surface_scoped() {
     assert!(governed_command("orbit.task.delete", "").is_none());
     assert!(governed_tool("orbit.task.show").is_none());
     assert!(governed_command("workspace", "list").is_none());
+    assert!(governed_dashboard("routine.toggle").is_some());
+    assert!(governed_dashboard("clock.service").is_some());
+    assert!(governed_dashboard("clock.cadence").is_some());
+    assert!(governed_dashboard("routine.list").is_none());
 }
 
 #[test]
@@ -128,6 +137,23 @@ fn an_agent_is_denied_out_of_scope_destruction() {
             authorize(operation(id), &caller).is_err(),
             "agent must not reach '{id}'"
         );
+    }
+}
+
+#[test]
+fn dashboard_operations_require_an_operator() {
+    let agent = CallerCapabilities::resolve(&CallerEnvelope {
+        agent_declared: true,
+        ..envelope()
+    });
+    let operator = CallerCapabilities::resolve(&CallerEnvelope {
+        interactive_terminal: true,
+        ..envelope()
+    });
+    for id in ["routine.toggle", "clock.service", "clock.cadence"] {
+        let operation = governed_dashboard(id).expect("dashboard operation is declared");
+        assert!(authorize(operation, &agent).is_err());
+        assert!(authorize(operation, &operator).is_ok());
     }
 }
 

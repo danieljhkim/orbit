@@ -11,6 +11,7 @@ import { renderDiagnostics, renderImplementOneCard as renderImplOne, } from './d
 import { renderMarkdown } from './markdown.js';
 import { initRouter, initTabs as iT, navigateToRun as nTR, setActiveTab as sAT, setRunDetailSubtab, } from './router.js';
 import { initRuns, mergeRunsWithFriction, renderRuns, runIsCancellable, buildCancelRunButton, buildReplayRunButton } from './runs.js';
+import { fetchAndRenderOperations, initOperations } from './operations.js';
 import {
   renderRunDetailEmpty,
   renderRunDetailMeta,
@@ -882,7 +883,11 @@ async function initWorkspaceSelector() {
   // Feed the shared aggregate-view predicate (common.js): multi-workspace mode
   // is what makes the "All workspaces" (no concrete workspace) view possible.
   setMultiWorkspace(dashboardWorkspaces.length > 1);
-  if (dashboardWorkspaces.length <= 1) return; // single mode: no selector
+  if (dashboardWorkspaces.length <= 1) {
+    const only = dashboardWorkspaces.find((workspace) => workspace.status === "active");
+    if (only) setWorkspace(only.id);
+    return; // single mode: selected implicitly, no selector needed
+  }
 
   // Default to the workspace flagged by the server (the cwd workspace, if the
   // server was launched inside one) so every tab works out of the box; else the
@@ -977,6 +982,11 @@ function activeRefreshJobs() {
 
   if (activeTab === "knowledge") {
     jobs.push(fetchAndRenderFrictions());
+    return jobs;
+  }
+
+  if (activeTab === "operations") {
+    jobs.push(fetchAndRenderOperations());
     return jobs;
   }
 
@@ -1238,6 +1248,7 @@ buildAuditChips(auditContext());
 wireAuditSearch(auditContext());
 $("refresh-btn").addEventListener("click", refreshDashboard);
 wireReliabilityWindowSelector();
+initOperations({ getWorkspaces: () => dashboardWorkspaces, formatAbsoluteTime: fmtAbsTime });
 
 initRuns(runsContext());
 initRunDetail(runDetailContext());

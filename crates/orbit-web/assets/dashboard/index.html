@@ -36,6 +36,7 @@
       <button class="tab" data-tab="tasks" type="button">Tasks</button>
       <button class="tab" data-tab="audit" type="button">Audit</button>
       <button class="tab" data-tab="diagnostics" type="button">Diagnostics</button>
+      <button class="tab" data-tab="operations" type="button">Operations</button>
       <button class="tab" data-tab="knowledge" type="button">Knowledge</button>
     </nav>
     <section class="health-strip" id="health-strip" aria-label="Audit health summary">
@@ -299,6 +300,27 @@
         <section class="panel" id="scoreboard-insights-panel">
           <header><span>Insights</span><span class="count" id="scoreboard-insights-count">—</span></header>
           <div id="scoreboard-insights"></div>
+        </section>
+      </main>
+    </section>
+    <section class="tab-pane" data-tab="operations">
+      <main class="operations-layout">
+        <section class="panel" id="routines-panel">
+          <header>
+            <span>Scheduled Routines</span>
+            <span class="count" id="routines-count">-</span>
+          </header>
+          <div class="operation-feedback" id="routine-operation-feedback" role="status" aria-live="polite"></div>
+          <div class="body" id="routines-body">
+            <div class="skeleton-state"><div class="skeleton skeleton-row"></div></div>
+          </div>
+        </section>
+        <section class="panel" id="clock-panel">
+          <header><span>Host Sweep Clock</span><span class="count" id="clock-host">-</span></header>
+          <div class="operation-feedback" id="clock-operation-feedback" role="status" aria-live="polite"></div>
+          <div class="body" id="clock-body">
+            <div class="skeleton-state"><div class="skeleton skeleton-row"></div></div>
+          </div>
         </section>
       </main>
     </section>
