@@ -1,7 +1,7 @@
 use std::borrow::Cow;
 use std::path::{Path, PathBuf};
 
-use orbit_common::types::OrbitError;
+use orbit_common::OrbitError;
 
 use crate::OrbitRuntime;
 use crate::skill_catalog::{LoadedSkill, SkillCatalogDoctorStatus};
@@ -924,15 +924,15 @@ mod tests {
         let live_target = root.path().join("custom");
         std::fs::create_dir_all(&live_target).expect("create custom skill");
         std::fs::write(live_target.join("SKILL.md"), "# custom\n").expect("write custom skill");
-        orbit_common::utility::fs::create_dir_symlink(&live_target, &claude.join("my-custom"))
+        orbit_common::fs::io::create_dir_symlink(&live_target, &claude.join("my-custom"))
             .expect("create live custom link");
 
-        orbit_common::utility::fs::create_dir_symlink(
+        orbit_common::fs::io::create_dir_symlink(
             &root.path().join("missing-orbit-task"),
             &claude.join("orbit-task"),
         )
         .expect("create dangling claude link");
-        orbit_common::utility::fs::create_dir_symlink(
+        orbit_common::fs::io::create_dir_symlink(
             &root.path().join("missing-orbit-search"),
             &agents.join("orbit-search"),
         )

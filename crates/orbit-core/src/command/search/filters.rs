@@ -1,10 +1,12 @@
 use std::str::FromStr;
 
-use orbit_common::types::{FrictionStatus, OrbitError, TaskStatus};
+use orbit_common::OrbitError;
+use orbit_types::record::FrictionStatus;
+use orbit_types::task::TaskStatus;
 
 use super::types::GlobalSearchParams;
 
-pub(super) fn task_has_all_tags(task: &orbit_common::types::Task, tag_filter: &[String]) -> bool {
+pub(super) fn task_has_all_tags(task: &orbit_types::task::Task, tag_filter: &[String]) -> bool {
     tag_filter.iter().all(|needle| {
         task.tags
             .iter()

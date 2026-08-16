@@ -39,7 +39,7 @@ fail=0
 # crate is where the type (and therefore the translator) must be defined.
 registry=(
   "SelectorParseError:orbit-common:selector_error_to_orbit"
-  "CatalogError:orbit-common:catalog_error_to_orbit"
+  "CatalogError:orbit-engine:catalog_error_to_orbit"
   "RpcError:orbit-search:rpc_error_to_orbit"
   "DispatchError:orbit-engine:dispatch_error_to_orbit"
 )

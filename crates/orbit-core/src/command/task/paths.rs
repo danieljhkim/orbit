@@ -1,8 +1,9 @@
 use chrono::Utc;
-use orbit_common::types::{OrbitError, TaskHistoryEntry, TaskType};
-use orbit_common::utility::selector::{
+use orbit_common::OrbitError;
+use orbit_common::fs::selector::{
     anchor_path, canonical_selector_in_workspace, exists_in_workspace,
 };
+use orbit_types::task::{TaskHistoryEntry, TaskType};
 use std::path::{Path, PathBuf};
 
 pub(super) fn normalize_workspace_path(

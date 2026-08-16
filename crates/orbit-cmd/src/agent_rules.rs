@@ -9,8 +9,8 @@
 
 use std::path::{Path, PathBuf};
 
-use orbit_common::types::OrbitError;
-use orbit_common::utility::fs::atomic_write_text;
+use orbit_common::OrbitError;
+use orbit_common::fs::io::atomic_write_text;
 
 /// Asset block embedded at compile time. The asset contains the marker pair
 /// literally so a read-render-write round-trip is byte-stable when the asset

@@ -9,9 +9,10 @@
 use std::path::Path;
 
 use chrono::Utc;
-use orbit_common::types::{JobRunState, TaskStatus};
 use orbit_engine::RuntimeHost;
 use orbit_store::TaskReservationReleaseReason;
+use orbit_types::task::TaskStatus;
+use orbit_types::workflow::JobRunState;
 use serde_json::json;
 
 use crate::OrbitRuntime;
@@ -105,7 +106,7 @@ fn seed_failed_delivery_run(
             retry_source.map(ToOwned::to_owned),
         )
         .expect("insert source run");
-    let initial = orbit_common::types::PipelineState::new(
+    let initial = orbit_types::workflow::PipelineState::new(
         run.run_id.clone(),
         run.job_id.clone(),
         input.clone(),
@@ -345,7 +346,7 @@ fn pipeline_worker_resumes_from_the_runs_own_checkpoints() {
             Some("jrun-resume-worker-source".to_string()),
         )
         .expect("insert resumed run");
-    let mut seeded = orbit_common::types::PipelineState::new(
+    let mut seeded = orbit_types::workflow::PipelineState::new(
         run.run_id.clone(),
         run.job_id.clone(),
         input.clone(),
@@ -438,7 +439,7 @@ fn resume_submission_rejects_a_non_terminal_run_before_persisting_anything() {
 #[cfg(unix)]
 #[test]
 fn resume_refuses_an_interrupted_run_whose_worker_is_still_alive() {
-    use orbit_common::utility::process_identity::process_start_identity_token;
+    use orbit_common::process::identity::process_start_identity_token;
 
     let (_root, runtime, _repo_root, global_root) = test_runtime();
     let jobs_dir = global_root.join("resources/jobs");

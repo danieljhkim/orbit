@@ -1,8 +1,9 @@
 use chrono::Utc;
-use orbit_common::types::{
-    DEFAULT_POLICY_NAME, OrbitError, PolicyDef, ResourceKind, parse_policy_resource,
-};
+use orbit_common::OrbitError;
+use orbit_common::protocol::yaml::parse_policy_resource;
 use orbit_store::PolicyDefStoreBackend;
+use orbit_types::policy::{DEFAULT_POLICY_NAME, PolicyDef};
+use orbit_types::resource::ResourceKind;
 
 const DEFAULT_POLICY_FILES: &[(&str, &str)] = &[(
     DEFAULT_POLICY_NAME,

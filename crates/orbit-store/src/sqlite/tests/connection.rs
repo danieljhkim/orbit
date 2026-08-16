@@ -1,6 +1,6 @@
 //! Sibling tests for `sqlite/connection.rs` health probes [ORB-10005].
 
-use orbit_common::types::OrbitError;
+use orbit_common::OrbitError;
 
 use crate::Store;
 use crate::sqlite::migration::SUPPORTED_SCHEMA_VERSION;
@@ -98,14 +98,14 @@ fn quick_check_reports_page_corruption() {
             .with_transaction(|tx| {
                 tx.tx
                     .execute_batch("CREATE TABLE corruption_fixture(payload TEXT)")
-                    .map_err(|e| orbit_common::types::OrbitError::Store(e.to_string()))?;
+                    .map_err(|e| orbit_common::OrbitError::Store(e.to_string()))?;
                 for _ in 0..64 {
                     tx.tx
                         .execute(
                             "INSERT INTO corruption_fixture VALUES (hex(randomblob(512)))",
                             [],
                         )
-                        .map_err(|e| orbit_common::types::OrbitError::Store(e.to_string()))?;
+                        .map_err(|e| orbit_common::OrbitError::Store(e.to_string()))?;
                 }
                 Ok(())
             })

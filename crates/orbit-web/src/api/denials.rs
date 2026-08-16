@@ -7,10 +7,10 @@ use crate::state::Ws;
 use axum::extract::Query;
 use axum::response::{IntoResponse, Json, Response};
 use chrono::{DateTime, Utc};
-use orbit_common::types::activity_job::{
+use orbit_core::{AuditEventStatus, OrbitRuntime, V2AuditEventFilter};
+use orbit_types::workflow::activity_job::{
     V2_DENIAL_EVENT_TYPES, V2_EVENT_TYPE_FS_CALL_DENIED, V2_EVENT_TYPE_STEP_DENIED,
 };
-use orbit_core::{AuditEventStatus, OrbitRuntime, V2AuditEventFilter};
 use serde_json::{Value, json};
 
 use super::{DEFAULT_SUMMARY_WINDOW, DenialsQuery, bad_request, map_runtime_error, server_error};

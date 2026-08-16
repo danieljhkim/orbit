@@ -1,10 +1,10 @@
-use orbit_common::types::OrbitError;
+use orbit_common::OrbitError;
 use orbit_store::state_io;
 use orbit_tools::OrbitTaskScope;
 use serde_json::{Value, json};
 
 use super::input::{resolve_state_dir, resolve_state_payload, resolve_step_index};
-use orbit_common::types::optional_string;
+use orbit_common::protocol::tool_input::optional_string;
 
 pub(super) fn get(task_scope: &OrbitTaskScope, input: Value) -> Result<Value, OrbitError> {
     let state_dir = resolve_state_dir(task_scope, &input)?;

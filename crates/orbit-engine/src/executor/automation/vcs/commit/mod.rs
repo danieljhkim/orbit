@@ -7,7 +7,8 @@ mod summary;
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
-use orbit_common::types::{NO_DIFF_EXPECTED_TAG, OrbitError};
+use orbit_common::OrbitError;
+use orbit_types::task::NO_DIFF_EXPECTED_TAG;
 use serde_json::{Value, json};
 
 use crate::context::RuntimeHost;
@@ -287,7 +288,7 @@ pub(super) fn commit_failure_candidate<H: RuntimeHost + ?Sized>(
     host: &H,
     run_id: &str,
     workspace_path: &Path,
-    task: &orbit_common::types::Task,
+    task: &orbit_types::task::Task,
 ) -> Result<(String, Vec<String>), OrbitError> {
     ensure_named_branch(workspace_path)?;
     ensure_no_unmerged_changes(workspace_path)?;

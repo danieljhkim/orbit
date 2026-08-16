@@ -1,13 +1,16 @@
 use std::path::PathBuf;
 use std::str::FromStr;
 
-use orbit_common::types::{
-    DEFAULT_TASK_LIST_LIMIT, NotFoundKind, OrbitError, TaskArtifact, TaskComplexity, TaskPriority,
-    TaskRelation, TaskStatus, TaskType, media_type_for_artifact_path, optional_string,
-    optional_string_alias, optional_u32_alias,
+use orbit_common::protocol::tool_input::{
+    optional_string, optional_string_alias, optional_u32_alias,
 };
+use orbit_common::{NotFoundKind, OrbitError};
 use orbit_store::state_io;
 use orbit_tools::OrbitTaskScope;
+use orbit_types::task::{
+    DEFAULT_TASK_LIST_LIMIT, TaskArtifact, TaskComplexity, TaskPriority, TaskRelation, TaskStatus,
+    TaskType, media_type_for_artifact_path,
+};
 use serde_json::{Value, json};
 
 pub(super) fn resolve_state_dir(

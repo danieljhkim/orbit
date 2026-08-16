@@ -1,6 +1,6 @@
 use std::path::{Component, Path, PathBuf};
 
-use orbit_common::types::OrbitError;
+use orbit_common::OrbitError;
 
 pub(super) fn repo_relative_path(repo_root: &Path, path: &Path) -> Result<PathBuf, OrbitError> {
     if let Ok(relative) = path.strip_prefix(repo_root) {

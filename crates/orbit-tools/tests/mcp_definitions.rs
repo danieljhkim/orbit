@@ -2,8 +2,9 @@
 #![allow(missing_docs)]
 #![allow(clippy::expect_used)]
 
-use orbit_common::types::{McpToolDefinitionError, McpToolScope, OrbitError, ToolSchema};
+use orbit_common::OrbitError;
 use orbit_tools::{Tool, ToolContext, ToolRegistry, canonical_builtin_mcp_tool_definitions};
+use orbit_types::tool::{McpToolDefinitionError, McpToolScope, ToolSchema};
 use serde_json::Value;
 
 struct TestTool(&'static str);

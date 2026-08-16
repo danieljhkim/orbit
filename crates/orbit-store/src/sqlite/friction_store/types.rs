@@ -3,7 +3,7 @@
 use std::path::PathBuf;
 
 use chrono::{DateTime, Utc};
-use orbit_common::types::{FrictionRecord, FrictionStatus};
+use orbit_types::record::{FrictionRecord, FrictionStatus};
 
 /// Everything `orbit.friction.add` needs to allocate and persist a record.
 #[derive(Debug, Clone)]

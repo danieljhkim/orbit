@@ -9,9 +9,10 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use chrono::{DateTime, Duration, Local, Utc};
-use orbit_common::types::{JobRunState, OrbitError, OverlapPolicy};
-use orbit_common::utility::log_rotation::{self, LogRotationConfig};
+use orbit_common::OrbitError;
+use orbit_common::observability::log_rotation::{self, LogRotationConfig};
 use orbit_store::{RoutineFireIntentParams, RoutineFireRecord, RoutineFireState, Store};
+use orbit_types::workflow::{JobRunState, OverlapPolicy};
 use serde_json::json;
 
 use crate::OrbitRuntime;

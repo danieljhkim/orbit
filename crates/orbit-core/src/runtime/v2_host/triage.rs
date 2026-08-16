@@ -16,10 +16,11 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use chrono::Utc;
-use orbit_common::types::{JobRun, Task, TaskHistoryEntry, TaskStatus};
 use orbit_engine::DispatchError;
 use orbit_engine::{RuntimeHost, TaskAutomationUpdate};
 use orbit_store::friction_store::FrictionAddParams;
+use orbit_types::task::{Task, TaskHistoryEntry, TaskStatus};
+use orbit_types::workflow::JobRun;
 use serde_json::{Value, json};
 
 use crate::OrbitRuntime;

@@ -16,8 +16,9 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use orbit_common::types::{MACHINE_ID_PREFIX, OrbitError, validate_machine_id};
-use orbit_common::utility::fs::atomic_write_text;
+use orbit_common::OrbitError;
+use orbit_common::fs::io::atomic_write_text;
+use orbit_types::identity::{MACHINE_ID_PREFIX, validate_machine_id};
 use serde::Deserialize;
 
 /// File under the global Orbit root carrying the host identity.

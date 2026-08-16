@@ -48,7 +48,7 @@
 use std::collections::BTreeMap;
 use std::path::Path;
 
-use orbit_common::types::OrbitError;
+use orbit_common::OrbitError;
 use serde_json::Value;
 
 use super::super::input::input_string_field;

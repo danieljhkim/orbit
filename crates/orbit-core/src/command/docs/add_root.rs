@@ -2,7 +2,7 @@ use std::path::Path;
 
 use serde_json::json;
 
-use orbit_common::types::OrbitError;
+use orbit_common::OrbitError;
 
 use super::config::parse_docs_roots_from_config_toml;
 use super::path_util::path_to_slash_string;

@@ -2,8 +2,9 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use orbit_common::types::{OrbitError, WorkspacePaths};
+use orbit_common::OrbitError;
 use orbit_store::{friction_store, global_executor_def_store, global_policy_def_store};
+use orbit_types::workspace::WorkspacePaths;
 
 use crate::OrbitRuntime;
 use crate::auto_tasks::seed_default_auto_tasks;
@@ -16,7 +17,7 @@ use crate::command::routine::seed_default_routines;
 use crate::command::skill::{
     default_skill_ids, is_default_skill_file_for_root, seed_default_skills,
 };
-use orbit_common::utility::fs::{create_dir_symlink, remove_path_if_exists};
+use orbit_common::fs::io::{create_dir_symlink, remove_path_if_exists};
 
 use crate::config::{
     RawCrewAssignment, RuntimeConfig,
@@ -755,17 +756,17 @@ mod tests {
         let yaml = fs::read_to_string(orbit_root.join("routines/worktree_gc.yaml"))
             .expect("read seeded worktree GC routine");
         assert!(!yaml.contains("__ORBIT_"));
-        let routine = orbit_common::types::parse_routine_yaml(&yaml)
+        let routine = orbit_common::protocol::yaml::parse_routine_yaml(&yaml)
             .expect("seeded worktree GC routine parses");
         assert!(!routine.enabled);
         assert_eq!(routine.hosts, vec!["host-a".to_string()]);
         assert_eq!(
             routine.target,
-            orbit_common::types::RoutineTarget::Job("worktree_gc_pipeline".to_string())
+            orbit_types::workflow::RoutineTarget::Job("worktree_gc_pipeline".to_string())
         );
         assert_eq!(
             routine.policy.overlap,
-            orbit_common::types::OverlapPolicy::Forbid
+            orbit_types::workflow::OverlapPolicy::Forbid
         );
 
         let routine_path = orbit_root.join("routines/worktree_gc.yaml");
@@ -800,7 +801,7 @@ mod tests {
         let forced =
             fs::read_to_string(&routine_path).expect("read force-overwritten worktree GC routine");
         assert!(!forced.contains("operator edited"));
-        let forced = orbit_common::types::parse_routine_yaml(&forced)
+        let forced = orbit_common::protocol::yaml::parse_routine_yaml(&forced)
             .expect("force-overwritten routine parses");
         assert_eq!(forced.hosts, vec!["host-b".to_string()]);
         assert!(!forced.enabled);
@@ -823,7 +824,7 @@ mod tests {
         let friction_path = orbit_root.join("auto_tasks/friction-curation.yaml");
         let qa_path = orbit_root.join("auto_tasks/qa-sweep.yaml");
         let friction = fs::read_to_string(&friction_path).expect("read seeded friction definition");
-        let friction_definition = orbit_common::types::parse_auto_task_yaml(&friction)
+        let friction_definition = orbit_common::protocol::yaml::parse_auto_task_yaml(&friction)
             .expect("seeded friction definition parses through loader schema");
         assert!(!friction_definition.enabled);
         // [ORB-10877] Shipped recurring work names the portable system lane,
@@ -835,10 +836,10 @@ mod tests {
         );
         assert!(matches!(
             friction_definition.dedupe,
-            orbit_common::types::DedupePolicy::SkipIfOpen
+            orbit_types::workflow::DedupePolicy::SkipIfOpen
         ));
         let qa = fs::read_to_string(&qa_path).expect("read seeded QA definition");
-        let qa_definition = orbit_common::types::parse_auto_task_yaml(&qa)
+        let qa_definition = orbit_common::protocol::yaml::parse_auto_task_yaml(&qa)
             .expect("seeded QA definition parses through loader schema");
         assert!(!qa_definition.enabled);
         assert_eq!(qa_definition.template.crew.as_deref(), Some("system"));
@@ -848,7 +849,7 @@ mod tests {
         );
         assert!(matches!(
             qa_definition.dedupe,
-            orbit_common::types::DedupePolicy::SkipIfOpen
+            orbit_types::workflow::DedupePolicy::SkipIfOpen
         ));
         assert!(!orbit_root.join("state/auto-tasks.json").exists());
         let loaded = crate::auto_tasks::collect_auto_tasks(&orbit_root);

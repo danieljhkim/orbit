@@ -1,10 +1,14 @@
 use chrono::{DateTime, Utc};
-use orbit_common::types::{
-    ArtifactManifestFileV2, AuditEvent, Crew, ExecutorDef, ExternalRef, JobRun, JobRunState,
-    KnowledgeRunMetrics, OrbitError, OrbitId, PipelineState, PolicyDef, StoredTool, Task,
-    TaskArtifact, TaskComment, TaskHistoryEntry, TaskPriority, TaskStatus, normalize_task_tags,
-    task_matches_tags,
+use orbit_common::OrbitError;
+use orbit_types::identity::{Crew, OrbitId};
+use orbit_types::policy::PolicyDef;
+use orbit_types::task::{
+    ArtifactManifestFileV2, ExternalRef, Task, TaskArtifact, TaskComment, TaskHistoryEntry,
+    TaskPriority, TaskStatus, normalize_task_tags, task_matches_tags,
 };
+use orbit_types::telemetry::AuditEvent;
+use orbit_types::tool::StoredTool;
+use orbit_types::workflow::{ExecutorDef, JobRun, JobRunState, KnowledgeRunMetrics, PipelineState};
 use serde_json::Value;
 use std::collections::BTreeMap;
 
@@ -226,7 +230,7 @@ pub trait JobRunStoreBackend: Send + Sync {
 #[derive(Debug, Clone)]
 pub struct JobRunStepParams {
     pub step_index: usize,
-    pub target_type: orbit_common::types::JobTargetType,
+    pub target_type: orbit_types::workflow::JobTargetType,
     pub target_id: String,
     pub started_at: DateTime<Utc>,
     pub finished_at: DateTime<Utc>,

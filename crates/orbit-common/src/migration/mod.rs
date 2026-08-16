@@ -14,7 +14,7 @@ use std::collections::BTreeMap;
 
 use serde_yaml::Value;
 
-use crate::types::OrbitError;
+use crate::OrbitError;
 
 /// One step in a migration chain. Takes a YAML document at version `n`
 /// and returns the same document at version `n + 1`. The step is

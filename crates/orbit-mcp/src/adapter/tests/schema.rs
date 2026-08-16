@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use orbit_common::types::{
+use orbit_types::tool::{
     McpToolDefinition, McpToolScope, McpTransport, ToolParam, ToolSchema, ToolSessionContext,
 };
 use rmcp::model::{ClientCapabilities, Implementation, InitializeRequestParams, Meta};

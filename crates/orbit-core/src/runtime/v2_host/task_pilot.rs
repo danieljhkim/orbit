@@ -7,11 +7,11 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
-use orbit_common::types::{Task, TaskStatus};
-use orbit_common::utility::selector::{
+use orbit_common::fs::selector::{
     anchor_path, canonical_selector_in_workspace, exists_in_workspace,
 };
 use orbit_engine::DispatchError;
+use orbit_types::task::{Task, TaskStatus};
 use serde_json::{Value, json};
 
 use crate::OrbitRuntime;

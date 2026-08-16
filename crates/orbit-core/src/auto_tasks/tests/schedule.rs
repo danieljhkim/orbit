@@ -2,7 +2,7 @@
 //! catch-up collapse.
 
 use chrono::{DateTime, Duration, TimeZone, Utc};
-use orbit_common::types::AutoTaskSchedule;
+use orbit_types::workflow::AutoTaskSchedule;
 
 use crate::auto_tasks::schedule::{AutoTaskDueDecision, decide_due, validate_schedule};
 

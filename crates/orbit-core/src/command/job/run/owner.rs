@@ -2,19 +2,19 @@
 //!
 //! All Unix-specific; non-Unix shims return neutral outcomes without signalling.
 
-use orbit_common::types::OrbitError;
-use orbit_common::types::{JobRun, JobRunState};
+use orbit_common::OrbitError;
 /// Re-exported so the historical `owner::process_is_alive` path keeps working
 /// for this module's callers and sibling tests; the probe itself now lives in
 /// `orbit-common` so other run surfaces can share it [ORB-10496].
 #[cfg(unix)]
-pub(super) use orbit_common::utility::process_identity::process_is_alive;
+pub(super) use orbit_common::process::identity::process_is_alive;
 #[cfg(unix)]
-use orbit_common::utility::process_identity::{
+use orbit_common::process::identity::{
     KernelLiveness, PidNamespaceScope, ProbeOutcome, is_stable_token, legacy_lstart_matches,
     pid_namespace_scope, probe_process_group_liveness, probe_process_start_identity,
     stable_tokens_match,
 };
+use orbit_types::workflow::{JobRun, JobRunState};
 #[cfg(unix)]
 use std::thread;
 #[cfg(unix)]

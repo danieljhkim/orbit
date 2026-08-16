@@ -27,7 +27,7 @@ use std::path::Path;
 use std::time::{Duration, Instant};
 
 use fs2::FileExt;
-use orbit_common::types::OrbitError;
+use orbit_common::OrbitError;
 use serde::{Deserialize, Serialize};
 
 /// Default upper bound on how long an exclusive acquisition blocks before

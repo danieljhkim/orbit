@@ -6,7 +6,7 @@ impl TaskV2Store {
         id: &str,
         fields: &TaskDocumentUpdateParams,
     ) -> Result<(), OrbitError> {
-        orbit_common::types::validate_orb_task_id(id)?;
+        orbit_types::task::validate_orb_task_id(id)?;
         if fields.actor.trim().is_empty() {
             return Err(OrbitError::InvalidInput(
                 "task actor must not be empty".to_string(),
@@ -181,7 +181,7 @@ impl TaskV2Store {
         id: &str,
         fields: &TaskHistoryUpdateParams,
     ) -> Result<(), OrbitError> {
-        orbit_common::types::validate_orb_task_id(id)?;
+        orbit_types::task::validate_orb_task_id(id)?;
         if fields.actor.trim().is_empty() {
             return Err(OrbitError::InvalidInput(
                 "task actor must not be empty".to_string(),

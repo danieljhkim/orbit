@@ -1,8 +1,10 @@
 use std::sync::Arc;
 
+use orbit_common::OrbitError;
+use orbit_common::observability::audit_id::audit_execution_id;
 #[cfg(test)]
-use orbit_common::types::ToolSchema;
-use orbit_common::types::{McpToolDefinition, OrbitError, ToolSessionContext, audit_execution_id};
+use orbit_types::tool::ToolSchema;
+use orbit_types::tool::{McpToolDefinition, ToolSessionContext};
 use rmcp::ErrorData as McpError;
 use rmcp::ServerHandler;
 use rmcp::model::{

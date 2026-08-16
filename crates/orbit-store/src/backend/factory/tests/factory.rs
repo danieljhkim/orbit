@@ -1,5 +1,5 @@
 // Migrated from backend/factory.rs per ORB-00231
-use orbit_common::types::{
+use orbit_types::task::{
     TaskPriority, TaskRelation, TaskRelationType, TaskStatus, TaskType, task_dependencies_ready,
 };
 use tempfile::TempDir;

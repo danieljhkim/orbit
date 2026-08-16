@@ -1,6 +1,6 @@
-use orbit_common::types::CrewAssignment;
-use orbit_common::types::activity_job::Provider;
 use orbit_engine::CrewConfig;
+use orbit_types::identity::CrewAssignment;
+use orbit_types::workflow::activity_job::Provider;
 
 /// Convert a crew assignment (string fields) into the typed [`CrewConfig`]
 /// surface used by the engine resolver. An unrecognized `provider` yields

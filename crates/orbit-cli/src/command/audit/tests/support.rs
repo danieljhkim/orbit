@@ -1,6 +1,6 @@
 use chrono::{DateTime, Utc};
-use orbit_common::types::{McpCapability, McpTransport};
 use orbit_core::{AuditEvent, AuditEventStatus};
+use orbit_types::tool::{McpCapability, McpTransport};
 use serde_json::json;
 
 use super::super::support::audit_event_to_json;

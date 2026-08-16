@@ -1,6 +1,7 @@
-use orbit_common::types::{
-    ExternalRef, OrbitId, TaskArtifact, TaskComment, TaskComplexity, TaskHistoryEntry,
-    TaskPriority, TaskRelation, TaskStatus, TaskType,
+use orbit_types::identity::OrbitId;
+use orbit_types::task::{
+    ExternalRef, TaskArtifact, TaskComment, TaskComplexity, TaskHistoryEntry, TaskPriority,
+    TaskRelation, TaskStatus, TaskType,
 };
 
 #[derive(Default, Clone)]

@@ -21,8 +21,8 @@ use std::ops::Deref;
 use std::path::PathBuf;
 use std::sync::{Mutex, MutexGuard};
 
-use orbit_common::types::OrbitError;
-use orbit_common::utility::sqlite::apply_default_pragmas;
+use orbit_common::OrbitError;
+use orbit_common::storage::sqlite::apply_default_pragmas;
 use rusqlite::Connection;
 
 /// Maximum idle reader connections retained by the pool. Checkouts beyond

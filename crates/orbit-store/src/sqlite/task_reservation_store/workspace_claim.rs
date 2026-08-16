@@ -14,7 +14,7 @@
 //! worker reservations it is meant to leave alone.
 
 use chrono::{Duration, Utc};
-use orbit_common::types::OrbitError;
+use orbit_common::OrbitError;
 use rusqlite::{OptionalExtension, TransactionBehavior, params};
 
 use super::{expire_reservations_in_scope, reservation_scope_clause};

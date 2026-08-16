@@ -10,14 +10,14 @@ use super::super::owner::{
     running_run_owner_stale_reason, stale_job_run_message, verify_owner_termination,
 };
 use chrono::{Duration, Utc};
-use orbit_common::types::JobRunState;
 #[cfg(unix)]
-use orbit_common::utility::process_identity::{PidNamespaceScope, ProbeOutcome};
+use orbit_common::process::identity::{PidNamespaceScope, ProbeOutcome};
 #[cfg(unix)]
-use orbit_common::utility::process_identity::{
+use orbit_common::process::identity::{
     STABLE_TOKEN_PREFIX, STABLE_TOKEN_PREFIX_V1, current_pid_namespace,
     process_start_identity_token,
 };
+use orbit_types::workflow::JobRunState;
 #[cfg(unix)]
 use std::process::{Command, Stdio};
 
@@ -120,7 +120,7 @@ fn live_isolated_group_returns_typed_cancellation_evidence() {
         .expect_err("a genuine survivor must remain non-terminal");
     assert!(matches!(
         error,
-        orbit_common::types::OrbitError::RunCancellationIncomplete {
+        orbit_common::OrbitError::RunCancellationIncomplete {
             pid: error_pid,
             pgid: Some(error_pgid),
             term_sent: true,

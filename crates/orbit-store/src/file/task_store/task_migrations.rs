@@ -12,7 +12,7 @@
 use std::sync::OnceLock;
 
 use orbit_common::migration::Plan;
-use orbit_common::types::TASK_ARTIFACT_SCHEMA_VERSION;
+use orbit_types::task::TASK_ARTIFACT_SCHEMA_VERSION;
 
 /// Migration plan for the `task.yaml` envelope (the top-level metadata
 /// document in each bundle directory).

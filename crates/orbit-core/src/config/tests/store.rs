@@ -1,6 +1,6 @@
 use std::fs;
 
-use orbit_common::types::OrbitError;
+use orbit_common::OrbitError;
 use tempfile::tempdir;
 
 use super::super::store::*;

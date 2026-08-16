@@ -1,4 +1,4 @@
-use orbit_common::types::McpTransport;
+use orbit_types::tool::McpTransport;
 
 use super::super::identity::{local_identity, mcp_server_identity, ssh_caller_ip};
 

@@ -5,10 +5,11 @@
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 
-use orbit_common::types::{
-    McpToolDefinition, McpToolScope, OrbitError, ToolParam, ToolSchema, ToolSessionContext,
-};
+use orbit_common::OrbitError;
 use orbit_mcp::{ListenerExposure, McpHost, McpListener, OrbitToolServer};
+use orbit_types::tool::{
+    McpToolDefinition, McpToolScope, ToolParam, ToolSchema, ToolSessionContext,
+};
 use rmcp::ServiceExt;
 use rmcp::model::{CallToolRequestParams, ClientInfo, Meta};
 use serde_json::{Map, Value, json};
@@ -32,7 +33,7 @@ impl McpHost for EchoHost {
     ) -> Result<Value, OrbitError> {
         if name != "demo.echo" && name != "demo.inspect" {
             return Err(OrbitError::not_found(
-                orbit_common::types::NotFoundKind::Tool,
+                orbit_common::NotFoundKind::Tool,
                 name.to_string(),
             ));
         }

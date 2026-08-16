@@ -14,8 +14,9 @@
 use std::collections::HashMap;
 
 use chrono::Utc;
-use orbit_common::types::policy_def::FsProfile;
-use orbit_common::types::{FsOperation, OrbitError, PolicyDef};
+use orbit_common::OrbitError;
+use orbit_types::policy::FsProfile;
+use orbit_types::policy::{FsOperation, PolicyDef};
 
 use super::super::engine::PolicyEngine;
 

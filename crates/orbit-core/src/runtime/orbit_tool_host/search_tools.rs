@@ -1,8 +1,9 @@
 use std::str::FromStr;
 
-use orbit_common::types::{
-    OrbitError, optional_csv_or_string_list_alias, optional_string_alias,
-    optional_string_list_alias, optional_u32_alias,
+use orbit_common::OrbitError;
+use orbit_common::protocol::tool_input::{
+    optional_csv_or_string_list_alias, optional_string_alias, optional_string_list_alias,
+    optional_u32_alias,
 };
 use serde_json::Value;
 

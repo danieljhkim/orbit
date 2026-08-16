@@ -1,8 +1,10 @@
 use chrono::{DateTime, Utc};
-use orbit_common::types::{
-    ExternalRef, JobRunState, OrbitId, TaskArtifact, TaskComment, TaskComplexity, TaskHistoryEntry,
-    TaskPriority, TaskRelation, TaskStatus, TaskType,
+use orbit_types::identity::OrbitId;
+use orbit_types::task::{
+    ExternalRef, TaskArtifact, TaskComment, TaskComplexity, TaskHistoryEntry, TaskPriority,
+    TaskRelation, TaskStatus, TaskType,
 };
+use orbit_types::workflow::JobRunState;
 use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone)]
 pub struct TaskCreateParams {

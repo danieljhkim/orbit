@@ -8,7 +8,9 @@
 use std::collections::BTreeSet;
 
 use chrono::{DateTime, Utc};
-use orbit_common::types::{AuditEvent, AuditEventStatus, McpCapability, McpTransport, OrbitError};
+use orbit_common::OrbitError;
+use orbit_types::telemetry::{AuditEvent, AuditEventStatus};
+use orbit_types::tool::{McpCapability, McpTransport};
 use rusqlite::params;
 
 use crate::{Store, StoreTx, now_string, parse_timestamp};

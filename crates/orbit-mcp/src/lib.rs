@@ -23,7 +23,8 @@ mod remote;
 
 use std::sync::Arc;
 
-use orbit_common::types::{McpToolDefinition, OrbitError, ToolSessionContext};
+use orbit_common::OrbitError;
+use orbit_types::tool::{McpToolDefinition, ToolSessionContext};
 use rmcp::ServiceExt;
 use rmcp::transport::io::stdio;
 use serde_json::Value;

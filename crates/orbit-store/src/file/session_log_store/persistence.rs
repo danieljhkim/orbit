@@ -9,8 +9,8 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use chrono::Utc;
-use orbit_common::types::OrbitError;
-use orbit_common::utility::fs::{atomic_write_bytes, sync_parent_dir};
+use orbit_common::OrbitError;
+use orbit_common::fs::io::{atomic_write_bytes, sync_parent_dir};
 
 use super::{SessionLogAppendParams, SessionLogEntry, SessionLogFilter, SessionLogKind};
 use crate::file_lock::acquire_exclusive;

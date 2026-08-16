@@ -7,7 +7,8 @@
 
 use std::collections::BTreeSet;
 
-use orbit_common::types::{OrbitError, WorkspaceRegistry};
+use orbit_common::OrbitError;
+use orbit_types::workspace::WorkspaceRegistry;
 use serde::Serialize;
 
 use super::loader::RoutineOrigin;

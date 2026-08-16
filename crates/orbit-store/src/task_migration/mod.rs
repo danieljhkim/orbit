@@ -59,7 +59,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use chrono::{DateTime, Utc};
-use orbit_common::types::{OrbitError, TASK_ARTIFACT_SCHEMA_VERSION, validate_orb_task_id};
+use orbit_common::OrbitError;
+use orbit_types::task::{TASK_ARTIFACT_SCHEMA_VERSION, validate_orb_task_id};
 use serde::{Deserialize, Serialize};
 
 use crate::file::task_store::v2_bundle::{

@@ -4,7 +4,7 @@ use super::super::doc_search::{DocSemanticSearchParams, run_with_embedder};
 
 use crate::vector::{DocEmbeddingSource, VectorStore};
 use crate::{Embedder, NoopEmbedder};
-use orbit_common::types::OrbitError;
+use orbit_common::OrbitError;
 
 struct KeywordEmbedder;
 

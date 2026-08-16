@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use orbit_common::types::WorkspacePaths;
+use orbit_types::workspace::WorkspacePaths;
 use serde_json::{Value, json};
 
 /// Holds the resolved paths for all persistent artifact stores.

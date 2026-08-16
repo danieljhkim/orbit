@@ -66,7 +66,7 @@ impl ShipMode {
 ///
 /// An unparseable explicit `ship_mode` falls back to `pr` rather than
 /// erroring, so a malformed registry entry can never wedge a sweep.
-pub fn resolved_ship_mode(workspace: &orbit_common::types::Workspace) -> ShipMode {
+pub fn resolved_ship_mode(workspace: &orbit_types::workspace::Workspace) -> ShipMode {
     match workspace.ship_mode.as_deref() {
         Some(explicit) => ShipMode::parse(explicit).unwrap_or(ShipMode::Pr),
         None => ShipMode::Pr,
@@ -193,7 +193,7 @@ mod ship_input_tests {
 mod ship_mode_resolution_tests {
     use super::*;
     use chrono::Utc;
-    use orbit_common::types::{Workspace, WorkspaceStatus};
+    use orbit_types::workspace::{Workspace, WorkspaceStatus};
 
     fn workspace(git_remote: Option<&str>, ship_mode: Option<&str>) -> Workspace {
         Workspace {

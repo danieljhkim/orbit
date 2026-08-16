@@ -7,15 +7,16 @@ use axum::extract::{Query, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Json, Response};
 use chrono::{DateTime, Duration, Local, Utc};
-use orbit_common::authorization::{
+use orbit_common::governance::authorization::{
     DASHBOARD_AUTO_TASK_MINT, DASHBOARD_AUTO_TASK_TOGGLE, OPERATOR_OVERRIDE_ENV,
-};
-use orbit_common::types::{
-    AutoTaskDefinition, AutoTaskSchedule, AutoTaskTemplate, DedupePolicy, TaskStatus, auto_task_tag,
 };
 use orbit_core::OrbitRuntime;
 use orbit_core::auto_tasks::{collect_auto_tasks, cursor_state_path, load_cursor_state};
 use orbit_core::routines::parse_cron;
+use orbit_types::task::TaskStatus;
+use orbit_types::workflow::{
+    AutoTaskDefinition, AutoTaskSchedule, AutoTaskTemplate, DedupePolicy, auto_task_tag,
+};
 use serde::Deserialize;
 use serde_json::{Value, json};
 

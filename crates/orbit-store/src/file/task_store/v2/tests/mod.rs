@@ -1,5 +1,5 @@
 use chrono::{TimeZone, Utc};
-use orbit_common::types::{
+use orbit_types::task::{
     ExternalRef, TaskArtifact, TaskComment, TaskHistoryEntry, TaskPriority, TaskStatus, TaskType,
 };
 use tempfile::TempDir;

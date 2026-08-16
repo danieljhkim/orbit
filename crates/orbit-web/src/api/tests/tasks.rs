@@ -7,10 +7,10 @@ use axum::body::{Body, to_bytes};
 use axum::http::{HeaderValue, Method, Request, StatusCode, header};
 use axum::response::Response;
 use orbit_common::test_fixtures::TEST_CODEX_MODEL;
-use orbit_common::types::TaskArtifact;
-use orbit_common::types::task_artifacts::{TaskRelation, TaskRelationType};
 use orbit_core::command::task::{TaskAddParams, TaskUpdateParams};
 use orbit_core::{OrbitRuntime, TaskComplexity, TaskStatus, TaskType};
+use orbit_types::task::TaskArtifact;
+use orbit_types::task::{TaskRelation, TaskRelationType};
 use serde_json::{Value, json};
 use tower::ServiceExt;
 

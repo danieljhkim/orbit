@@ -1,7 +1,7 @@
 use chrono::{DateTime, TimeZone, Utc};
 
 use super::super::due::{DueDecision, due_decision, parse_cron};
-use orbit_common::types::MissedRunPolicy;
+use orbit_types::workflow::MissedRunPolicy;
 
 fn at(y: i32, mo: u32, d: u32, h: u32, mi: u32, s: u32) -> DateTime<Utc> {
     Utc.with_ymd_and_hms(y, mo, d, h, mi, s)

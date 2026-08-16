@@ -3,11 +3,12 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use chrono::{TimeZone, Utc};
-use orbit_common::types::{
-    ORB_TASK_ID_MAX, OrbitError, TaskEnvelopeV2, TaskPriority, TaskRelation, TaskRelationType,
-    TaskStatus, TaskType,
+use orbit_common::OrbitError;
+use orbit_common::fs::io::{atomic_write_text, create_dir_symlink};
+use orbit_types::task::{
+    ORB_TASK_ID_MAX, TaskEnvelopeV2, TaskPriority, TaskRelation, TaskRelationType, TaskStatus,
+    TaskType,
 };
-use orbit_common::utility::fs::{atomic_write_text, create_dir_symlink};
 use rusqlite::{Connection, OptionalExtension, params};
 use tempfile::TempDir;
 
@@ -64,7 +65,7 @@ fn envelope(
 ) -> TaskEnvelopeV2 {
     let now = Utc.with_ymd_and_hms(2026, 5, 11, 12, 0, 0).unwrap();
     TaskEnvelopeV2 {
-        schema_version: orbit_common::types::TASK_ARTIFACT_SCHEMA_VERSION,
+        schema_version: orbit_types::task::TASK_ARTIFACT_SCHEMA_VERSION,
         id: task_id.to_string(),
         title: format!("Task {task_id}"),
         status,

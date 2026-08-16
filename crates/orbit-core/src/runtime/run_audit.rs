@@ -2,9 +2,9 @@ use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 
 use chrono::{DateTime, Utc};
-use orbit_common::types::OrbitError;
-use orbit_common::utility::blob_store::BlobStore;
-use orbit_common::utility::process_identity::{ProcessLiveness, probe_process_liveness};
+use orbit_common::OrbitError;
+use orbit_common::process::identity::{ProcessLiveness, probe_process_liveness};
+use orbit_common::storage::blob_store::BlobStore;
 use serde_json::Value;
 
 use crate::{OrbitRuntime, V2AuditEventFilter};

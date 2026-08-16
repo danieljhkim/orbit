@@ -1,6 +1,6 @@
-use orbit_common::types::ExecutorType;
-use orbit_common::types::activity_job::{Provider, ProviderEntryPoint};
 use orbit_engine::{DispatchError, ResolvedCliExecutor};
+use orbit_types::workflow::ExecutorType;
+use orbit_types::workflow::activity_job::{Provider, ProviderEntryPoint};
 
 use crate::OrbitRuntime;
 

@@ -4,10 +4,11 @@ use std::collections::{BTreeMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use chrono::{DateTime, Utc};
-use orbit_common::types::{
-    NotFoundKind, OrbitError, WORKSPACE_REGISTRY_SCHEMA_VERSION, Workspace, WorkspaceCheckout,
-    WorkspaceCheckoutRole, WorkspaceRegistry, WorkspaceStatus, validate_host_id,
-    validate_machine_id,
+use orbit_common::{NotFoundKind, OrbitError};
+use orbit_types::identity::{validate_host_id, validate_machine_id};
+use orbit_types::workspace::{
+    WORKSPACE_REGISTRY_SCHEMA_VERSION, Workspace, WorkspaceCheckout, WorkspaceCheckoutRole,
+    WorkspaceRegistry, WorkspaceStatus,
 };
 use serde::Deserialize;
 use serde_json::Value;

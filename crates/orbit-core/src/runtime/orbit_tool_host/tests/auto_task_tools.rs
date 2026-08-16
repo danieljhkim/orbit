@@ -5,7 +5,7 @@
 //! adapters — what the tool input has to carry, what comes back, and that
 //! `mint` still delegates to the unconditional, cursor-neutral runtime path.
 
-use orbit_common::types::auto_task_tag;
+use orbit_types::workflow::auto_task_tag;
 use serde_json::{Value, json};
 
 use crate::OrbitRuntime;
@@ -21,18 +21,18 @@ fn params(name: &str) -> AutoTaskAddParams {
     AutoTaskAddParams {
         name: name.to_string(),
         description: format!("Auto-task {name}"),
-        schedule: orbit_common::types::AutoTaskSchedule::Interval { every_minutes: 60 },
-        template: orbit_common::types::AutoTaskTemplate {
+        schedule: orbit_types::workflow::AutoTaskSchedule::Interval { every_minutes: 60 },
+        template: orbit_types::workflow::AutoTaskTemplate {
             title: format!("Chore for {name}"),
             description: "Recurring chore body.".to_string(),
             acceptance_criteria: vec!["Chore is observable.".to_string()],
-            task_type: orbit_common::types::TaskType::Chore,
+            task_type: orbit_types::task::TaskType::Chore,
             tags: vec![],
-            priority: orbit_common::types::TaskPriority::Medium,
+            priority: orbit_types::task::TaskPriority::Medium,
             crew: None,
-            status: orbit_common::types::TaskStatus::Backlog,
+            status: orbit_types::task::TaskStatus::Backlog,
         },
-        dedupe: orbit_common::types::DedupePolicy::SkipIfOpen,
+        dedupe: orbit_types::workflow::DedupePolicy::SkipIfOpen,
     }
 }
 

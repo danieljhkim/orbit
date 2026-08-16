@@ -1,7 +1,7 @@
 use clap::Args;
-use orbit_common::types::WorkspaceRegistry;
 use orbit_core::OrbitRuntime;
 use orbit_registry::workspace_registry;
+use orbit_types::workspace::WorkspaceRegistry;
 use serde_json::{Value, json};
 
 use crate::command::{CommandOut, Execute, Payload};
@@ -43,7 +43,7 @@ pub(super) fn workspace_list_json(registry: &WorkspaceRegistry, include_replicas
             .filter(|workspace| {
                 include_replicas
                     || workspace_registry::find_checkout(registry, &workspace.id)
-                        .is_none_or(|checkout| checkout.role != Some(orbit_common::types::WorkspaceCheckoutRole::Replica))
+                        .is_none_or(|checkout| checkout.role != Some(orbit_types::workspace::WorkspaceCheckoutRole::Replica))
             })
             .map(|workspace| {
                 let checkout = workspace_registry::find_checkout(registry, &workspace.id);
@@ -72,7 +72,8 @@ pub(super) fn format_workspace_list(
             include_replicas
                 || workspace_registry::find_checkout(registry, &workspace.id).is_none_or(
                     |checkout| {
-                        checkout.role != Some(orbit_common::types::WorkspaceCheckoutRole::Replica)
+                        checkout.role
+                            != Some(orbit_types::workspace::WorkspaceCheckoutRole::Replica)
                     },
                 )
         })

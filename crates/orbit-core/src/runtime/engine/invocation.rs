@@ -1,13 +1,15 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use chrono::{DateTime, Utc};
-use orbit_common::types::{OrbitError, TokenUsage, normalize_token_usage};
+use orbit_common::OrbitError;
+use orbit_common::model::pricing::normalize_token_usage;
 use orbit_store::scoreboard_summary::{NormalizedTokenSummary, OrchestrationModelSummary};
 use orbit_store::{
     ActivityInvocationMetrics, AgentInvocationMetrics, InvocationAccountingFact,
     InvocationAccountingQuery, InvocationInsertParams, InvocationQuery, InvocationRecord, Store,
     TaskInvocationMetrics, ToolInvocationMetrics,
 };
+use orbit_types::telemetry::TokenUsage;
 use serde::{Deserialize, Serialize};
 
 use crate::OrbitRuntime;

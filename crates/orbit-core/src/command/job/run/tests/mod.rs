@@ -8,8 +8,8 @@ mod owner;
 mod reconcile;
 
 use chrono::{DateTime, Utc};
-use orbit_common::types::{JobRun, JobRunState};
 use orbit_store::V2AuditEventInsertParams;
+use orbit_types::workflow::{JobRun, JobRunState};
 use rusqlite::{Connection, params};
 use tempfile::tempdir;
 

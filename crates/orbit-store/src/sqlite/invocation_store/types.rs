@@ -1,7 +1,7 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
-use orbit_common::types::InvocationTrace;
+use orbit_types::telemetry::InvocationTrace;
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 pub struct InvocationQuery {
@@ -59,7 +59,7 @@ pub struct InvocationRecord {
     pub provider_cost_usd: Option<f64>,
     /// Normalized cost in USD derived at query time from `model`, `ts`, and
     /// the token splits against the versioned price table
-    /// (`orbit_common::types::pricing`). `None` when no price row covers
+    /// (`orbit_common::model::pricing`). `None` when no price row covers
     /// this model/date.
     pub derived_cost_usd: Option<f64>,
 }

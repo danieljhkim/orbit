@@ -1,10 +1,11 @@
 //! Unit coverage for `scan_unresolved_work` [ORB-10779].
 
 use chrono::Utc;
-use orbit_common::types::{JobRunState, TaskPriority, TaskStatus, TaskType};
 use orbit_engine::{DispatchError, RuntimeHost};
 use orbit_store::{SessionLogAppendParams, SessionLogEntry, SessionLogKind, SessionLogStore};
 use orbit_tools::ToolContext;
+use orbit_types::task::{TaskPriority, TaskStatus, TaskType};
+use orbit_types::workflow::JobRunState;
 use serde_json::{Value, json};
 
 use crate::OrbitRuntime;

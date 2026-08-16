@@ -19,7 +19,8 @@
 use std::borrow::Cow;
 use std::path::Path;
 
-use orbit_common::types::{OrbitError, parse_routine_yaml};
+use orbit_common::OrbitError;
+use orbit_common::protocol::yaml::parse_routine_yaml;
 
 use super::{ManagedAssetLayout, ManagedAssetReconciliation, reconcile_managed_assets};
 
@@ -132,7 +133,7 @@ fn sanitize_routine_name_part(raw: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use orbit_common::types::{OverlapPolicy, RoutineTarget};
+    use orbit_types::workflow::{OverlapPolicy, RoutineTarget};
     use tempfile::tempdir;
 
     use crate::routines::parse_cron;
@@ -184,7 +185,7 @@ mod tests {
         assert_eq!(pilot.trigger.cron, "45 */4 * * *");
         assert_eq!(
             pilot.trigger.missed_run,
-            orbit_common::types::MissedRunPolicy::Skip
+            orbit_types::workflow::MissedRunPolicy::Skip
         );
         assert_eq!(pilot.policy.timeout_minutes, 90);
         assert_eq!(pilot.policy.overlap, OverlapPolicy::Forbid);
@@ -195,7 +196,7 @@ mod tests {
         let ship = parse_routine_yaml(&ship).expect("ship routine parses");
         assert_eq!(
             ship.trigger.missed_run,
-            orbit_common::types::MissedRunPolicy::Skip
+            orbit_types::workflow::MissedRunPolicy::Skip
         );
         assert_eq!(ship.trigger.cron, "*/20 * * * *");
         parse_cron(&ship.trigger.cron).expect("ship cron parses");

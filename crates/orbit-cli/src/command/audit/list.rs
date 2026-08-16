@@ -1,6 +1,6 @@
 use clap::Args;
-use orbit_common::types::{McpCapability, McpTransport};
 use orbit_core::{AuditEventFilter, AuditEventStatus, OrbitRuntime};
+use orbit_types::tool::{McpCapability, McpTransport};
 use serde_json::Value;
 
 use crate::command::{CommandOut, Execute, Payload};

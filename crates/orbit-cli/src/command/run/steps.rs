@@ -1,7 +1,7 @@
-use orbit_common::types::PipelineState;
 use orbit_core::command::job::JobRunListParams;
 use orbit_core::runtime::run_audit::RunAuditStep;
 use orbit_core::{JobRun, JobRunStep, JobTargetType, NotFoundKind, OrbitError, OrbitRuntime};
+use orbit_types::workflow::PipelineState;
 use serde_json::{Value, json};
 
 use crate::command::{CommandOut, Payload};

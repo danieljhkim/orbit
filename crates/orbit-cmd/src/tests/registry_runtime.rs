@@ -1,13 +1,13 @@
 use std::path::{Path, PathBuf};
 
 use chrono::Utc;
-use orbit_common::types::{
-    NotFoundKind, OrbitError, Workspace, WorkspaceCheckout, WorkspaceCheckoutRole,
-    WorkspaceRegistry, WorkspaceStatus,
-};
+use orbit_common::{NotFoundKind, OrbitError};
 use orbit_core::OrbitRuntime;
 use orbit_core::runtime::OrbitRuntimeRoots;
 use orbit_store::sqlite::task_registry::{WorkspaceConfig, write_workspace_config};
+use orbit_types::workspace::{
+    Workspace, WorkspaceCheckout, WorkspaceCheckoutRole, WorkspaceRegistry, WorkspaceStatus,
+};
 use serde_json::{Value, json};
 
 use orbit_registry::workspace_registry::{registry_path_for, save_registry_to};
@@ -265,7 +265,7 @@ fn execute_cli_tool(
 }
 
 fn dual_workspace_fixture() -> DualWorkspaceFixture {
-    use orbit_common::types::WorkspaceRegistry;
+    use orbit_types::workspace::WorkspaceRegistry;
 
     let root = tempfile::tempdir().expect("root");
     let global = root.path().join("global");

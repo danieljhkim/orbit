@@ -6,7 +6,7 @@
 
 use std::path::Path;
 
-use orbit_common::types::OrbitError;
+use orbit_common::OrbitError;
 
 use super::common;
 

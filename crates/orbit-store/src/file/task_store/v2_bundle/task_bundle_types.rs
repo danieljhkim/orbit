@@ -1,4 +1,4 @@
-use orbit_common::types::{
+use orbit_types::task::{
     ArtifactManifestV2, TASK_ACCEPTANCE_FILE_NAME, TASK_DESCRIPTION_FILE_NAME,
     TASK_EXECUTION_SUMMARY_FILE_NAME, TASK_PLAN_FILE_NAME, TaskCommentRowV2, TaskEnvelopeV2,
     TaskEventRowV2,

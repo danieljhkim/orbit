@@ -1,5 +1,5 @@
-use orbit_common::types::{PolicyDef, UNRESTRICTED_FS_PROFILE};
 use orbit_core::OrbitError;
+use orbit_types::policy::{PolicyDef, UNRESTRICTED_FS_PROFILE};
 use serde_json::{Value, json};
 
 pub(super) fn policy_json(def: &PolicyDef) -> Result<Value, OrbitError> {

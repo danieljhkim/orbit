@@ -5,7 +5,9 @@
 //! or protocol adapter in the picture — that placement is the whole point, and a
 //! test that went through one surface would not prove the others inherit it.
 
-use orbit_common::types::{AuditEventStatus, OrbitError, TaskStatus};
+use orbit_common::OrbitError;
+use orbit_types::task::TaskStatus;
+use orbit_types::telemetry::AuditEventStatus;
 use serde_json::{Value, json};
 
 use crate::OrbitRuntime;

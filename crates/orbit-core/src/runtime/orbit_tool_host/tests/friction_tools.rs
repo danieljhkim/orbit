@@ -4,7 +4,7 @@
 //! These are the boundary tests for the record handle: what an author can set,
 //! what the surface refuses, and what a caller who sets nothing gets.
 
-use orbit_common::friction::FRICTION_TITLE_MAX_CHARS;
+use orbit_common::governance::friction::FRICTION_TITLE_MAX_CHARS;
 use orbit_common::test_fixtures::TEST_CODEX_MODEL;
 use serde_json::{Value, json};
 
@@ -15,7 +15,7 @@ use super::super::test_support::{invalid_input_message, run_tool_as_operator, te
 const SECTIONED_BODY: &str = "## What happened\n\nThe worker exited before claiming the run.\n\n\
                               ## Evidence\n\nOne log line.";
 
-fn add(input: Value) -> Result<Value, orbit_common::types::OrbitError> {
+fn add(input: Value) -> Result<Value, orbit_common::OrbitError> {
     let (_temp, runtime, _repo) = test_runtime();
     run_tool_as_operator(&runtime, "orbit.friction.add", input)
 }

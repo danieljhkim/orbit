@@ -1,6 +1,6 @@
-use orbit_common::types::{
-    AuditEventStatus, McpCapability, McpTransport, OrbitError, ToolSessionContext,
-};
+use orbit_common::OrbitError;
+use orbit_types::telemetry::AuditEventStatus;
+use orbit_types::tool::{McpCapability, McpTransport, ToolSessionContext};
 use std::collections::BTreeSet;
 use std::sync::{Arc, Barrier};
 use std::thread;
@@ -274,7 +274,7 @@ fn cli_tool_dispatch_env_identity_overwrites_task_update_self_reported_model() {
             description: "exercise CLI tool identity overwrite".to_string(),
             acceptance_criteria: vec!["implemented_by is canonical".to_string()],
             plan: "Do the work.".to_string(),
-            status: Some(orbit_common::types::TaskStatus::InProgress),
+            status: Some(orbit_types::task::TaskStatus::InProgress),
             ..Default::default()
         })
         .expect("seed in-progress task");

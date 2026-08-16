@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use chrono::{DateTime, Utc};
-use orbit_common::types::{TaskPriority, TaskStatus};
+use orbit_types::task::{TaskPriority, TaskStatus};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WorkspaceConfig {

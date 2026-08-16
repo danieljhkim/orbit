@@ -7,9 +7,10 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-use orbit_common::types::{
-    OrbitError, RoutineDefinition, Workspace, parse_local_routine_yaml, parse_routine_yaml,
-};
+use orbit_common::OrbitError;
+use orbit_common::protocol::yaml::{parse_local_routine_yaml, parse_routine_yaml};
+use orbit_types::workflow::RoutineDefinition;
+use orbit_types::workspace::Workspace;
 
 use crate::OrbitRuntime;
 

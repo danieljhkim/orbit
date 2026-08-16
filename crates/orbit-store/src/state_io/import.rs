@@ -2,8 +2,9 @@ use std::fs;
 use std::path::Path;
 
 use chrono::Utc;
-use orbit_common::types::activity_job::V2AuditEvent;
-use orbit_common::types::{JobRun, JobRunStep, OrbitError, PipelineState};
+use orbit_common::OrbitError;
+use orbit_types::workflow::activity_job::V2AuditEvent;
+use orbit_types::workflow::{JobRun, JobRunStep, PipelineState};
 use serde::Deserialize;
 
 use crate::sqlite::v2_audit_store::V2AuditEventInsertParams;
@@ -359,7 +360,7 @@ fn read_steps(run_path: &Path, report: &mut ImportReport) -> Result<Vec<JobRunSt
 #[cfg(test)]
 mod tests {
     use chrono::Utc;
-    use orbit_common::types::{JobRun, JobRunState};
+    use orbit_types::workflow::{JobRun, JobRunState};
     use tempfile::TempDir;
 
     use super::*;

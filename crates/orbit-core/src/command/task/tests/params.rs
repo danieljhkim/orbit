@@ -1,4 +1,4 @@
-use orbit_common::types::{TaskComplexity, TaskPriority, TaskStatus, TaskType};
+use orbit_types::task::{TaskComplexity, TaskPriority, TaskStatus, TaskType};
 
 use super::super::params::{TaskAddParams, TaskRecordUpdateParams, TaskUpdateParams};
 
@@ -39,7 +39,7 @@ fn task_update_params_route_document_history_and_artifact_fields() {
         crew: Some(Some("implementer".to_string())),
         orchestrator: Some(None),
         context_files: Some(vec!["file:src/lib.rs".to_string()]),
-        upsert_artifacts: vec![orbit_common::types::TaskArtifact::from_text(
+        upsert_artifacts: vec![orbit_types::task::TaskArtifact::from_text(
             "report.txt",
             "verified",
         )],

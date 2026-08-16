@@ -1,4 +1,5 @@
-use orbit_common::types::{NotFoundKind, OrbitError, Task};
+use orbit_common::{NotFoundKind, OrbitError};
+use orbit_types::task::Task;
 use serde::{Deserialize, Serialize};
 
 use crate::commands::resolve_query_model;

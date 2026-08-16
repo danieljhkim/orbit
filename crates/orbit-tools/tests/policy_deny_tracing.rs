@@ -5,8 +5,8 @@
 use std::fs;
 use std::time::{Duration, Instant};
 
-use orbit_common::types::OrbitError;
-use orbit_common::utility::logging::init_default_subscriber;
+use orbit_common::OrbitError;
+use orbit_common::observability::logging::init_default_subscriber;
 use orbit_tools::{ToolContext, ToolRegistry};
 use serde_json::{Value, json};
 use tempfile::tempdir;

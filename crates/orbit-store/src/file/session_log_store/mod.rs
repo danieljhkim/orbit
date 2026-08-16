@@ -12,7 +12,7 @@ mod tests;
 use std::path::PathBuf;
 
 use chrono::{DateTime, Utc};
-use orbit_common::types::OrbitError;
+use orbit_common::OrbitError;
 use serde::{Deserialize, Serialize};
 
 /// Kind of durable session-log record.

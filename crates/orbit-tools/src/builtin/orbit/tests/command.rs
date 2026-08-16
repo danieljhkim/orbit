@@ -6,7 +6,7 @@
 //! before the host is ever resolved, so a mock host is enough to prove it —
 //! no runtime, claim, or process spawn required.
 
-use orbit_common::types::OrbitError;
+use orbit_common::OrbitError;
 use serde_json::json;
 use std::sync::Arc;
 

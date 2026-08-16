@@ -1,5 +1,5 @@
 use chrono::{Duration, TimeZone, Utc};
-use orbit_common::types::{Task, TaskPriority, TaskStatus, TaskType};
+use orbit_types::task::{Task, TaskPriority, TaskStatus, TaskType};
 
 use super::super::highlights::{
     NOTABLE_COMPLETIONS_LIMIT, NOTABLE_SELECTION_LABEL, NOTABLE_SELECTION_METHOD,

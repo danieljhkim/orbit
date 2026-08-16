@@ -35,8 +35,9 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
-use orbit_common::types::activity_job::load_job_asset;
-use orbit_common::types::{OrbitError, parse_routine_yaml};
+use orbit_common::OrbitError;
+use orbit_common::protocol::yaml::parse_routine_yaml;
+use orbit_engine::activity_job::load_job_asset;
 
 use super::activity_catalog_health::{
     ActivityCatalogFault, collect_activity_catalog_faults,

@@ -1,6 +1,6 @@
 use clap::Args;
-use orbit_common::types::DEFAULT_POLICY_NAME;
 use orbit_core::{OrbitError, OrbitRuntime};
+use orbit_types::policy::DEFAULT_POLICY_NAME;
 use serde_json::json;
 
 use crate::command::{CommandOut, CommandOutput, Execute, Payload};
@@ -25,12 +25,12 @@ impl Execute for PolicyCheckArgs {
 
         let read = def.check_path(
             &self.profile_name,
-            orbit_common::types::FsOperation::Read,
+            orbit_types::policy::FsOperation::Read,
             &self.path,
         )?;
         let modify = def.check_path(
             &self.profile_name,
-            orbit_common::types::FsOperation::Modify,
+            orbit_types::policy::FsOperation::Modify,
             &self.path,
         )?;
 

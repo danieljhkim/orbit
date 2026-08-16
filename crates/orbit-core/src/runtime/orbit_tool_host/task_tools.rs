@@ -1,8 +1,9 @@
-use orbit_common::types::{
-    OrbitError, TaskPriority, optional_csv_or_string_list_alias, optional_raw_string,
-    optional_string, optional_string_alias, optional_string_list_alias, required_string,
-    strip_retired_task_add_input_fields, task_dependencies_ready,
+use orbit_common::OrbitError;
+use orbit_common::protocol::tool_input::{
+    optional_csv_or_string_list_alias, optional_raw_string, optional_string, optional_string_alias,
+    optional_string_list_alias, required_string, strip_retired_task_add_input_fields,
 };
+use orbit_types::task::{TaskPriority, task_dependencies_ready};
 use serde_json::{Value, json};
 
 use crate::OrbitRuntime;
@@ -152,7 +153,7 @@ pub(super) fn list(runtime: &OrbitRuntime, input: Value) -> Result<Value, OrbitE
                     .as_ref()
                     .is_none_or(|values| values.contains(&task.status))
             })
-            .filter(|task| orbit_common::types::task_matches_tags(task, &tags))
+            .filter(|task| orbit_types::task::task_matches_tags(task, &tags))
             .filter(|task| ready != Some(true) || task_dependencies_ready(task, &status_by_id))
             .filter(|task| {
                 path.as_deref()

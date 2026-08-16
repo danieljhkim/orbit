@@ -12,7 +12,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use chrono::Utc;
-use orbit_common::types::{Workspace, WorkspaceStatus};
+use orbit_types::workspace::{Workspace, WorkspaceStatus};
 use tempfile::{TempDir, tempdir};
 
 use crate::OrbitRuntime;

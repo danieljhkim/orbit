@@ -1,1 +1,1 @@
-pub use orbit_common::types::PolicyDecision;
+pub use orbit_types::policy::PolicyDecision;

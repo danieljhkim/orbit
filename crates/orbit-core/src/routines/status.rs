@@ -6,8 +6,9 @@
 use std::path::Path;
 
 use chrono::{DateTime, Local, Utc};
-use orbit_common::types::{OrbitError, parse_local_routine_yaml, parse_routine_yaml};
-use orbit_common::utility::fs::atomic_write_text;
+use orbit_common::OrbitError;
+use orbit_common::fs::io::atomic_write_text;
+use orbit_common::protocol::yaml::{parse_local_routine_yaml, parse_routine_yaml};
 use orbit_store::RoutineFireRecord;
 
 use super::due::{parse_cron, truncate_to_minute};
@@ -185,7 +186,7 @@ fn parse_for_origin(
     raw: &str,
     origin: super::loader::RoutineOrigin,
     local_host_id: &str,
-) -> Result<orbit_common::types::RoutineDefinition, OrbitError> {
+) -> Result<orbit_types::workflow::RoutineDefinition, OrbitError> {
     match origin {
         super::loader::RoutineOrigin::Committed => parse_routine_yaml(raw),
         super::loader::RoutineOrigin::Local => parse_local_routine_yaml(raw, local_host_id),

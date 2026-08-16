@@ -1,5 +1,5 @@
 use clap::Args;
-use orbit_common::utility::redaction::redact_home_dir;
+use orbit_common::security::redaction::redact_home_dir;
 use orbit_core::OrbitRuntime;
 use orbit_core::config::{EffectiveConfigValue, load_effective_config};
 use serde_json::{Map, Value as JsonValue, json};

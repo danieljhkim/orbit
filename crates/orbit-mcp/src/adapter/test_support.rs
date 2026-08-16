@@ -1,7 +1,8 @@
 use std::sync::Mutex as StdMutex;
 
-use orbit_common::types::{
-    McpToolDefinition, McpToolScope, OrbitError, ToolParam, ToolSchema, ToolSessionContext,
+use orbit_common::OrbitError;
+use orbit_types::tool::{
+    McpToolDefinition, McpToolScope, ToolParam, ToolSchema, ToolSessionContext,
 };
 use rmcp::model::CallToolRequestParams;
 use serde_json::{Value, json};

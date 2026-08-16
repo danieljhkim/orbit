@@ -1,10 +1,11 @@
 use std::borrow::Cow;
 use std::path::{Path, PathBuf};
 
-use orbit_common::types::activity_job::{
+use orbit_common::{NotFoundKind, OrbitError};
+use orbit_engine::activity_job::{
     CatalogDirectory, CatalogDirectoryList, V2JobCatalog, catalog_error_to_orbit,
 };
-use orbit_common::types::{JobKind, JobRun, JobScheduleState, JobV2, NotFoundKind, OrbitError};
+use orbit_types::workflow::{JobKind, JobRun, JobScheduleState, JobV2};
 use serde_json::Value;
 
 use crate::OrbitRuntime;

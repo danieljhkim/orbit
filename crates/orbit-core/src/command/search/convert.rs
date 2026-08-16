@@ -1,6 +1,6 @@
 use super::types::GlobalSearchHit;
 
-pub(super) fn lexical_task_hit(task: &orbit_common::types::Task) -> GlobalSearchHit {
+pub(super) fn lexical_task_hit(task: &orbit_types::task::Task) -> GlobalSearchHit {
     GlobalSearchHit {
         kind: "task".to_string(),
         source: "lexical".to_string(),

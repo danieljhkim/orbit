@@ -20,7 +20,9 @@
 
 use clap::error::ErrorKind;
 use clap::{Arg, ArgAction, ArgMatches, Command};
-use orbit_common::operation::{CliArgKind, CliBinding, OperationSpec, ParamSpec, ParamType};
+use orbit_common::governance::operation::{
+    CliArgKind, CliBinding, OperationSpec, ParamSpec, ParamType,
+};
 use serde_json::{Map, Value};
 
 /// Clap arg id for the `--json` flag an operation may offer.
@@ -66,7 +68,7 @@ pub(crate) fn invocation_from_matches<V: 'static>(
             format!("a {noun} subcommand is required\n"),
         ));
     };
-    let Some(spec) = orbit_common::operation::find_by_name(registry, name) else {
+    let Some(spec) = orbit_common::governance::operation::find_by_name(registry, name) else {
         return Err(clap::Error::raw(
             ErrorKind::InvalidSubcommand,
             format!("unrecognized {noun} subcommand `{name}`\n"),

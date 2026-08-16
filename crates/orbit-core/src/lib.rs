@@ -73,19 +73,23 @@ pub use context::ActorIdentity;
 // Shared domain types (owned by orbit-common) that the CLI and dashboard
 // render or construct.
 pub use auto_tasks::{AutoTaskAddParams, AutoTaskUpdateParams};
-pub use orbit_common::types::{
-    AuditEvent, AuditEventStatus, AuditStats, AutoTaskDefinition, AutoTaskSchedule,
-    AutoTaskTemplate, DEFAULT_TASK_LIST_LIMIT, DedupePolicy, ExecutorDef, ExternalRef, JobRun,
-    JobRunState, JobRunStep, JobTargetType, Task, TaskComplexity, TaskCreateStatus, TaskPriority,
-    TaskStatus, TaskType, resolve_task_dependencies, resolve_task_relations,
-    task_dependencies_ready,
-};
-pub use orbit_common::types::{MissedRunPolicy, NotFoundKind, OrbitError, OverlapPolicy};
-pub use orbit_common::utility::redaction::redact_sensitive_env_text;
+pub use orbit_common::security::redaction::redact_sensitive_env_text;
+pub use orbit_common::{NotFoundKind, OrbitError};
 pub use orbit_store::{
     AuditEventFilter, AuditEventInsertParams, AuditToolAggregate, V2AuditEventFilter,
     V2AuditEventInsertParams,
 };
+pub use orbit_types::task::{
+    DEFAULT_TASK_LIST_LIMIT, ExternalRef, Task, TaskComplexity, TaskCreateStatus, TaskPriority,
+    TaskStatus, TaskType, resolve_task_dependencies, resolve_task_relations,
+    task_dependencies_ready,
+};
+pub use orbit_types::telemetry::{AuditEvent, AuditEventStatus, AuditStats};
+pub use orbit_types::workflow::{
+    AutoTaskDefinition, AutoTaskSchedule, AutoTaskTemplate, DedupePolicy, ExecutorDef, JobRun,
+    JobRunState, JobRunStep, JobTargetType,
+};
+pub use orbit_types::workflow::{MissedRunPolicy, OverlapPolicy};
 // Failure-incident grouping over the raw audit rows [ORB-10871]; consumed by
 // the dashboard's incident, audit-summary, and scoreboard surfaces.
 pub use orbit_store::{

@@ -1,6 +1,6 @@
-use orbit_common::types::{
-    OrbitError, ToolParam, ToolSchema, required_string, strip_retired_task_add_input_fields,
-};
+use orbit_common::OrbitError;
+use orbit_common::protocol::tool_input::{required_string, strip_retired_task_add_input_fields};
+use orbit_types::tool::{ToolParam, ToolSchema};
 use serde_json::Value;
 
 use crate::{OrbitBuiltinAction, Tool, ToolContext};

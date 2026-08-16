@@ -9,8 +9,9 @@
 use std::collections::HashMap;
 
 use chrono::Utc;
-use orbit_common::types::{AgentModelPair, ExecutorDef, ExecutorType, ModelPairOverride};
 use orbit_engine::RuntimeHost;
+use orbit_types::identity::AgentModelPair;
+use orbit_types::workflow::{ExecutorDef, ExecutorType, ModelPairOverride};
 
 use crate::OrbitRuntime;
 

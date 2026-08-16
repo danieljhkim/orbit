@@ -12,7 +12,7 @@ use std::ffi::CStr;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use orbit_common::types::OrbitError;
+use orbit_common::OrbitError;
 
 pub(crate) const COMPANION_OVERRIDE_ENV: &str = "ORBIT_SEARCH_COMPANION";
 pub(crate) const UNSAFE_COMPANION_OVERRIDE_ENV: &str = "ORBIT_SEARCH_COMPANION_ALLOW_UNSAFE";

@@ -16,8 +16,8 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
-use orbit_common::types::OrbitError;
-use orbit_common::utility::fs::{atomic_write_text, write_text_with_parent};
+use orbit_common::OrbitError;
+use orbit_common::fs::io::{atomic_write_text, write_text_with_parent};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 

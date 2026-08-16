@@ -7,16 +7,18 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Json, Response};
 use chrono::{DateTime, Utc};
 use orbit_cmd::registry_routines::routine_statuses;
-use orbit_common::authorization::{
+use orbit_common::governance::authorization::{
     AuthorizationDenial, CallerCapabilities, CallerEnvelope, DASHBOARD_CLOCK_CADENCE,
     DASHBOARD_CLOCK_SERVICE, DASHBOARD_ROUTINE_TOGGLE, GovernedOperation, authorize,
 };
-use orbit_common::types::{AuditEventStatus, ToolSessionContext, audit_execution_id};
+use orbit_common::observability::audit_id::audit_execution_id;
 use orbit_core::routines::{
     ClockStatus, RoutineStatus, RoutineStatusReport, RoutineToggleOutcome, clock_status,
     set_clock_cadence, set_clock_enabled, set_routine_enabled,
 };
 use orbit_core::{AuditEventInsertParams, OrbitRuntime, RoutineFireRecord, RoutineFireState};
+use orbit_types::telemetry::AuditEventStatus;
+use orbit_types::tool::ToolSessionContext;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 

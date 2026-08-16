@@ -2,7 +2,8 @@ use std::str::FromStr;
 
 use crate::command::docs::DocType;
 use crate::command::semantic::{IndexKind, SemanticIndexParams};
-use orbit_common::types::{OrbitError, optional_string, required_string};
+use orbit_common::OrbitError;
+use orbit_common::protocol::tool_input::{optional_string, required_string};
 use serde_json::Value;
 
 use crate::OrbitRuntime;

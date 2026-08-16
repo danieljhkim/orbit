@@ -2,7 +2,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use chrono::{TimeZone, Utc};
-use orbit_common::types::{
+use orbit_types::task::{
     ArtifactManifestFileV2, ArtifactManifestV2, TASK_ARTIFACT_FILES_DIR_NAME,
     TASK_ARTIFACT_SCHEMA_VERSION, TASK_ARTIFACTS_DIR_NAME, TaskEnvelopeV2, TaskEventRowV2,
     TaskPriority, TaskRelation, TaskRelationType, TaskStatus, TaskType,

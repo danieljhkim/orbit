@@ -3,7 +3,8 @@
 //! `index_task` and `reindex_tasks` are the convenience wrappers that wire
 //! `task_embedding_fields(...)` (per-field extraction) into `upsert_embeddings`.
 
-use orbit_common::types::{OrbitError, Task};
+use orbit_common::OrbitError;
+use orbit_types::task::Task;
 
 use super::{SOURCE_KIND_TASK, VectorStore};
 use crate::Embedder;

@@ -2,7 +2,7 @@ use std::process::Child;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use orbit_common::types::OrbitError;
+use orbit_common::OrbitError;
 
 pub(super) const TERMINATION_GRACE_PERIOD: Duration = Duration::from_secs(5);
 

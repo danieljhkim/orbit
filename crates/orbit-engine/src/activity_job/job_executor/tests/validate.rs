@@ -287,7 +287,7 @@ fn unavailable_action_is_non_retryable_and_translates_to_job_validation() {
     assert!(err.is_non_retryable());
     assert!(matches!(
         crate::dispatch_error_to_orbit(err),
-        orbit_common::types::OrbitError::JobValidation(_)
+        orbit_common::OrbitError::JobValidation(_)
     ));
 }
 

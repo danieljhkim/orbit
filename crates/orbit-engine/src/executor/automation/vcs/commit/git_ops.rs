@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use orbit_common::types::OrbitError;
+use orbit_common::OrbitError;
 use orbit_exec::{EnvironmentMode, ExecRequest, NoSandbox, StdinMode, run_process};
 
 use super::super::git::{git_output, git_output_paths, git_success};

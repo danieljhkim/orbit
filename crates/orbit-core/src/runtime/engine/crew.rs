@@ -1,8 +1,10 @@
-use orbit_common::types::activity_job::ProviderSource;
-use orbit_common::types::{
-    CREW_DISCOVERY_SCHEMA_VERSION, Crew, CrewAssignment, CrewDiscoveryEntryV1, CrewDiscoveryV1,
-    OrbitError, Task, all_agent_families, infer_agent_family_from_model, resolve_crew,
+use orbit_common::OrbitError;
+use orbit_types::identity::{
+    Crew, CrewAssignment, all_agent_families, infer_agent_family_from_model, resolve_crew,
 };
+use orbit_types::record::{CREW_DISCOVERY_SCHEMA_VERSION, CrewDiscoveryEntryV1, CrewDiscoveryV1};
+use orbit_types::task::Task;
+use orbit_types::workflow::activity_job::ProviderSource;
 use serde::Serialize;
 use serde_json::Value;
 
@@ -158,7 +160,9 @@ impl OrbitRuntime {
         let Some(crew) = crew.map(str::trim).filter(|value| !value.is_empty()) else {
             return Ok(None);
         };
-        resolve_crew(crew, self.context.settings().crews()).map(|crew| Some(crew.name))
+        resolve_crew(crew, self.context.settings().crews())
+            .map(|crew| Some(crew.name))
+            .map_err(Into::into)
     }
 
     pub fn resolve_crew_for_task(
@@ -184,7 +188,7 @@ impl OrbitRuntime {
                     .to_string(),
             ));
         };
-        resolve_crew(selected, self.context.settings().crews())
+        resolve_crew(selected, self.context.settings().crews()).map_err(Into::into)
     }
 
     pub(crate) fn resolve_crew_for_run_input(&self, input: &Value) -> Result<Crew, OrbitError> {

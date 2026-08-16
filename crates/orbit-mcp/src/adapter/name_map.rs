@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, HashMap};
 use std::fmt;
 
-use orbit_common::types::{ToolSchema, mcp_advertised_tool_name};
+use orbit_types::tool::{ToolSchema, mcp_advertised_tool_name};
 use rmcp::ErrorData as McpError;
 use serde_json::json;
 

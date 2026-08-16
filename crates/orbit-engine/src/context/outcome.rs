@@ -1,7 +1,8 @@
 //! Invocation-result types, error-code constants, and workflow-failure
 //! helpers.
 
-use orbit_common::types::{InvocationTrace, TaskStatus};
+use orbit_types::task::TaskStatus;
+use orbit_types::telemetry::InvocationTrace;
 use serde_json::Value;
 
 use super::hosts::TaskAutomationUpdate;

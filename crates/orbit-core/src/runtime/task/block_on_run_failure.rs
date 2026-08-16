@@ -14,8 +14,10 @@
 //! sweep skips these tasks. The only way out is a human/orchestrator decision
 //! (`orbit task start`, which accepts `Blocked`, or moving it back to backlog).
 
-use orbit_common::types::{JobRun, JobRunState, OrbitError, TaskStatus};
+use orbit_common::OrbitError;
 use orbit_engine::{RuntimeHost, blocked_workflow_failure_update};
+use orbit_types::task::TaskStatus;
+use orbit_types::workflow::{JobRun, JobRunState};
 
 use crate::OrbitRuntime;
 

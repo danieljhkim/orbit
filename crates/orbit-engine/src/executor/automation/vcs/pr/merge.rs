@@ -1,7 +1,8 @@
 use std::path::Path;
 
-use orbit_common::types::{ExternalRef, OrbitError, Task, TaskStatus};
+use orbit_common::OrbitError;
 use orbit_store::pr_scoreboard;
+use orbit_types::task::{ExternalRef, Task, TaskStatus};
 use serde_json::{Value, json};
 
 use crate::context::{RuntimeHost, TaskAutomationUpdate};

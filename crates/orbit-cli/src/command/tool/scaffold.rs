@@ -2,8 +2,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use clap::Args;
-use orbit_common::types::ToolParam;
 use orbit_core::{OrbitError, OrbitRuntime};
+use orbit_types::tool::ToolParam;
 
 use crate::command::{CommandOut, CommandOutput, Execute};
 

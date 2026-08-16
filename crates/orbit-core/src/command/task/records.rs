@@ -1,11 +1,12 @@
 //! Coordinated task document, history, artifact, and search-index writes.
 
-use orbit_common::types::{NotFoundKind, OrbitError, Task};
+use orbit_common::{NotFoundKind, OrbitError};
 use orbit_search::{EmbedWorker, VectorStore};
 use orbit_store::{
     TaskArtifactStoreBackend, TaskArtifactUpdateParams, TaskCreateParams, TaskDocumentStoreBackend,
     TaskDocumentUpdateParams, TaskHistoryStoreBackend, TaskHistoryUpdateParams, TaskStoreBackend,
 };
+use orbit_types::task::Task;
 
 use super::params::TaskRecordUpdateParams;
 use crate::context::OrbitStores;

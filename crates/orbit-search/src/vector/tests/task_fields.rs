@@ -1,7 +1,7 @@
 //! Unit tests for `task_fields` — sibling layout under vector/tests/.
 
 use chrono::Utc;
-use orbit_common::types::{Task, TaskPriority, TaskStatus, TaskType};
+use orbit_types::task::{Task, TaskPriority, TaskStatus, TaskType};
 
 use super::super::task_fields::task_embedding_fields;
 

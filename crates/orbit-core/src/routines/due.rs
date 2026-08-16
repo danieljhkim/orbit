@@ -9,7 +9,8 @@
 
 use chrono::{DateTime, Duration, TimeZone, Timelike};
 use croner::Cron;
-use orbit_common::types::{MissedRunPolicy, OrbitError};
+use orbit_common::OrbitError;
+use orbit_types::workflow::MissedRunPolicy;
 
 /// How far past its scheduled slot a fire still counts as "natural" for
 /// `missed_run: skip`. Two sweep intervals: tolerates one slow or skipped

@@ -1,8 +1,8 @@
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 
-use orbit_common::types::OrbitError;
-use orbit_common::utility::redaction::non_sensitive_env_vars;
+use orbit_common::OrbitError;
+use orbit_common::security::redaction::non_sensitive_env_vars;
 use tempfile::NamedTempFile;
 
 const TRUSTED_SANDBOX_EXEC_PATHS: &[&str] = &["/usr/bin/sandbox-exec"];

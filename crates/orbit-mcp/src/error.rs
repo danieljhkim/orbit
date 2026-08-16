@@ -1,4 +1,4 @@
-use orbit_common::types::{NotFoundKind, OrbitError};
+use orbit_common::{NotFoundKind, OrbitError};
 use rmcp::model::CallToolResult;
 use serde_json::{Value, json};
 

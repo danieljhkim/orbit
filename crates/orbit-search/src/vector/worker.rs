@@ -7,7 +7,7 @@
 use std::sync::mpsc::{self, SyncSender, TrySendError};
 use std::thread;
 
-use orbit_common::types::Task;
+use orbit_types::task::Task;
 
 use crate::SubprocessEmbedder;
 

@@ -1,7 +1,7 @@
-use orbit_common::types::{
-    AuditEventStatus, McpTransport, NotFoundKind, OrbitError, ToolSessionContext,
-};
+use orbit_common::{NotFoundKind, OrbitError};
 use orbit_store::{AuditEventFilter, Store};
+use orbit_types::telemetry::AuditEventStatus;
+use orbit_types::tool::{McpTransport, ToolSessionContext};
 use serde_json::json;
 
 use crate::command::tool::dispatch::{

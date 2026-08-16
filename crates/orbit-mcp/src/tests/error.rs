@@ -1,5 +1,5 @@
 use super::*;
-use orbit_common::types::{ArtifactOrigin, ArtifactOriginMode};
+use orbit_common::{ArtifactOrigin, ArtifactOriginMode};
 
 fn federated_origin() -> ArtifactOrigin {
     ArtifactOrigin {

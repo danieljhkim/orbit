@@ -6,7 +6,8 @@ use orbit_store::sqlite::task_registry::read_workspace_config_optional;
 
 use crate::OrbitError;
 
-use orbit_common::types::{NotFoundKind, TaskStatus};
+use orbit_common::NotFoundKind;
+use orbit_types::task::TaskStatus;
 use tempfile::tempdir;
 
 use crate::OrbitRuntime;

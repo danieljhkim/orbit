@@ -5,16 +5,16 @@ use axum::body::Body;
 use axum::extract::{Path, RawQuery};
 use axum::http::{HeaderName, HeaderValue, header};
 use axum::response::{IntoResponse, Json, Response};
-use orbit_common::types::task_artifacts::TaskRelation;
-use orbit_common::types::{
-    agent_family_from_cli, all_agent_families, infer_agent_family_from_model,
-    validate_relative_artifact_path,
-};
 use orbit_core::command::task::{TaskAddParams, TaskUpdateParams};
 use orbit_core::{
     DEFAULT_TASK_LIST_LIMIT, ExternalRef, OrbitRuntime, Task, TaskComplexity, TaskCreateStatus,
     TaskPriority, TaskStatus, TaskType,
 };
+use orbit_types::identity::{
+    agent_family_from_cli, all_agent_families, infer_agent_family_from_model,
+};
+use orbit_types::task::TaskRelation;
+use orbit_types::task::validate_relative_artifact_path;
 use serde::{Deserialize, Deserializer};
 use serde_json::{Map, Value, json};
 
@@ -113,7 +113,7 @@ pub(super) struct CreateTaskBody {
     model: Option<String>,
     /// Retired create input, declared so it stays *knowingly* tolerated rather
     /// than falling into [`CreateTaskBody::unsupported`]. `comment` is one of
-    /// [`RETIRED_TASK_ADD_INPUT_FIELDS`](orbit_common::types::RETIRED_TASK_ADD_INPUT_FIELDS):
+    /// [`RETIRED_TASK_ADD_INPUT_FIELDS`](orbit_common::protocol::tool_input::RETIRED_TASK_ADD_INPUT_FIELDS):
     /// the native `orbit.task.add` tool strips it with a warning instead of
     /// failing, and this endpoint keeps that contract. Comment on a task with
     /// `POST /tasks/:id/comments`.
@@ -254,7 +254,7 @@ where
 ///   OR semantics across values; omitted means every lifecycle status.
 /// - `tag` (alias `tags`) — repeatable and/or comma-separated. AND semantics:
 ///   a task must carry every requested tag. Values go through Orbit's own
-///   [`normalize_task_tags`](orbit_common::types::normalize_task_tags) /
+///   [`normalize_task_tags`](orbit_types::task::normalize_task_tags) /
 ///   `task_matches_tags`, so a colon is ordinary tag content and
 ///   `auto-task:qa-sweep` matches that whole tag rather than being split.
 /// - `type` (alias `task_type`) — a single task type (`feature`/`bug`/

@@ -1,8 +1,8 @@
 use std::fs;
 
-use orbit_common::types::{TaskPriority, TaskStatus, TaskType};
 use orbit_search::{DocSemanticHit, ScoreBreakdown, SemanticHit};
 use orbit_store::TaskCreateParams;
+use orbit_types::task::{TaskPriority, TaskStatus, TaskType};
 
 use super::*;
 use crate::OrbitRuntime;

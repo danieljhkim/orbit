@@ -1,7 +1,7 @@
 use std::path::{Component, Path, PathBuf};
 
 use chrono::{DateTime, Utc};
-use orbit_common::types::{TaskRelationType, TaskStatus};
+use orbit_types::task::{TaskRelationType, TaskStatus};
 
 pub(super) fn normalize_path(path: &Path) -> PathBuf {
     if let Ok(canonical) = path.canonicalize() {

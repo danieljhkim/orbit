@@ -1,7 +1,7 @@
 use chrono::{SecondsFormat, Utc};
-use orbit_common::types::{TaskPriority, TaskStatus, TaskType};
 use orbit_engine::RuntimeHost;
 use orbit_tools::ToolContext;
+use orbit_types::task::{TaskPriority, TaskStatus, TaskType};
 use serde_json::{Value, json};
 
 use crate::OrbitRuntime;

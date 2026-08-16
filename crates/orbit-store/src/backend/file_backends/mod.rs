@@ -1,9 +1,12 @@
 use std::collections::BTreeMap;
 
-use orbit_common::types::{
-    ArtifactManifestFileV2, ExecutorDef, ExternalRef, OrbitError, PolicyDef, Task, TaskArtifact,
-    TaskComment, TaskHistoryEntry, TaskPriority, TaskStatus,
+use orbit_common::OrbitError;
+use orbit_types::policy::PolicyDef;
+use orbit_types::task::{
+    ArtifactManifestFileV2, ExternalRef, Task, TaskArtifact, TaskComment, TaskHistoryEntry,
+    TaskPriority, TaskStatus,
 };
+use orbit_types::workflow::ExecutorDef;
 
 use super::contracts::{
     ExecutorDefStoreBackend, PolicyDefStoreBackend, TaskArtifactStoreBackend,

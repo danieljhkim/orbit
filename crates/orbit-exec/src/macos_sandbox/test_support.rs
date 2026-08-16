@@ -2,7 +2,7 @@ use std::ffi::OsStr;
 #[cfg(target_os = "macos")]
 use std::path::{Path, PathBuf};
 
-use orbit_common::types::ResolvedFsProfile;
+use orbit_types::policy::ResolvedFsProfile;
 
 use super::compile::{SandboxCompileEnv, compile_macos_sandbox_profile_with_env};
 

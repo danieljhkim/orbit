@@ -8,7 +8,7 @@ use axum::body::Body;
 use axum::http::{Method, Request, StatusCode, header};
 use axum::response::Response;
 use chrono::Utc;
-use orbit_common::utility::blob_store::BlobStore;
+use orbit_common::storage::blob_store::BlobStore;
 use orbit_core::command::job::JobRunListParams;
 use orbit_core::command::task::TaskAddParams;
 use orbit_core::{JobRunState, OrbitRuntime, TaskStatus, V2AuditEventInsertParams};

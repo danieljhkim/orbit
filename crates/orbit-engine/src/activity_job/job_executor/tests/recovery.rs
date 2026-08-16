@@ -3,7 +3,7 @@
 use super::*;
 
 use orbit_common::test_fixtures::TEST_GEMINI_MODEL;
-use orbit_common::types::activity_job::{AgentLoopSpec, OnDenial, Provider};
+use orbit_types::workflow::activity_job::{AgentLoopSpec, OnDenial, Provider};
 
 use crate::CrewConfig;
 

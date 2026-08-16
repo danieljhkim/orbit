@@ -1,7 +1,7 @@
 //! The friction handler table [ORB-10358].
 //!
 //! ADR-0209 bearing 1: friction verbs are declared once as data in
-//! `orbit_common::friction::operations`. Handlers need `&OrbitRuntime`, which
+//! `orbit_common::governance::friction::operations`. Handlers need `&OrbitRuntime`, which
 //! lives above that leaf crate, so the handler half of the table lives here and
 //! is joined to the spec half by [`FrictionVerb`]. [`dispatch`] is the join
 //! point, and its exhaustive `match` is what makes a spec without a handler a
@@ -10,15 +10,16 @@
 use std::str::FromStr;
 
 use chrono::{DateTime, TimeZone, Utc};
-use orbit_common::friction::{FrictionVerb, effective_title, normalize_title};
-use orbit_common::types::{
-    FrictionRecord, FrictionStatus, OrbitError, optional_csv_or_string_list_alias,
-    optional_raw_string, optional_string, required_string,
+use orbit_common::OrbitError;
+use orbit_common::governance::friction::{FrictionVerb, effective_title, normalize_title};
+use orbit_common::protocol::tool_input::{
+    optional_csv_or_string_list_alias, optional_raw_string, optional_string, required_string,
 };
 use orbit_store::friction_store::{
     FrictionAddParams, FrictionListFilter, FrictionStore, FrictionUpdateParams,
     StoredFrictionRecord,
 };
+use orbit_types::record::{FrictionRecord, FrictionStatus};
 use serde_json::{Value, json};
 
 use crate::OrbitRuntime;

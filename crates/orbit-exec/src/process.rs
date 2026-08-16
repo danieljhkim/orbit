@@ -1,6 +1,6 @@
 use std::process::{Child, Command, Stdio};
 
-use orbit_common::types::OrbitError;
+use orbit_common::OrbitError;
 
 use crate::runner::{EnvironmentMode, ExecRequest, StdinMode};
 

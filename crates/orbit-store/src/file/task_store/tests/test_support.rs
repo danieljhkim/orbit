@@ -6,7 +6,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use chrono::{TimeZone, Utc};
-use orbit_common::types::{
+use orbit_types::task::{
     TASK_ARTIFACT_SCHEMA_VERSION, TaskCommentRowV2, TaskEnvelopeV2, TaskEventRowV2, TaskPriority,
     TaskStatus, TaskType,
 };

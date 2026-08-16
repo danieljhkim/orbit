@@ -26,14 +26,14 @@
 //! An unclaimed workspace gates nothing. The claim is an arbitration between
 //! operators who want one, not a mandatory ceremony before every dispatch.
 
-use orbit_common::types::{
-    AuditEventStatus, OrbitError, WorkspaceClaimHeld, normalize_optional_attribution_label,
-    optional_string, optional_u32_alias,
-};
+use orbit_common::protocol::tool_input::{optional_string, optional_u32_alias};
+use orbit_common::{OrbitError, WorkspaceClaimHeld};
 use orbit_store::{
     WorkspaceClaimAcquireParams, WorkspaceClaimCheckParams, WorkspaceClaimHolder,
     WorkspaceClaimReleaseParams,
 };
+use orbit_types::identity::normalize_optional_attribution_label;
+use orbit_types::telemetry::AuditEventStatus;
 use serde_json::{Value, json};
 
 use super::coordination_audit::{CoordinationAuditEvent, record_coordination_audit_event};

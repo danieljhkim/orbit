@@ -17,7 +17,7 @@
 use std::collections::BTreeSet;
 use std::path::Path;
 
-use orbit_common::types::OrbitError;
+use orbit_common::OrbitError;
 use rusqlite::{Connection, TransactionBehavior};
 
 use crate::Store;
@@ -247,7 +247,7 @@ fn verify_record_location(
 
 /// Splits `F<YYYY-MM>-<NNN>` into its month and counter parts.
 pub(super) fn split_friction_id(id: &str) -> Option<(String, u32)> {
-    orbit_common::types::validate_friction_id(id).ok()?;
+    orbit_types::identity::validate_friction_id(id).ok()?;
     let month = id.get(1..8)?.to_string();
     let seq = id.get(9..12)?.parse::<u32>().ok()?;
     (seq > 0).then_some((month, seq))

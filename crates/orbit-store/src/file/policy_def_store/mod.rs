@@ -1,9 +1,12 @@
 use std::fs;
 use std::path::PathBuf;
 
-use orbit_common::types::{
-    OrbitError, POLICY_RESOURCE_SCHEMA_VERSION, PolicyDef, PolicyResource, PolicyResourceSpec,
-    ResourceKind, ResourceMetadata, parse_policy_resource, validate_resource_name,
+use orbit_common::OrbitError;
+use orbit_common::protocol::yaml::parse_policy_resource;
+use orbit_types::policy::PolicyDef;
+use orbit_types::resource::{
+    POLICY_RESOURCE_SCHEMA_VERSION, PolicyResource, PolicyResourceSpec, ResourceKind,
+    ResourceMetadata, validate_resource_name,
 };
 
 use crate::file::yaml_doc::write_yaml_atomic_with;

@@ -3,12 +3,13 @@ use std::sync::{Arc, Barrier};
 use std::thread;
 
 use chrono::{TimeZone, Utc};
-use orbit_common::types::{
-    ArtifactManifestFileV2, ArtifactManifestV2, NotFoundKind, OrbitError,
-    TASK_ARTIFACT_FILES_DIR_NAME, TASK_ARTIFACT_SCHEMA_VERSION, TASK_ARTIFACTS_DIR_NAME,
-    TASK_ENVELOPE_FILE_NAME, TASK_EVENTS_FILE_NAME, TaskEventRowV2, TaskStatus,
+use orbit_common::fs::io::atomic_write_text;
+use orbit_common::{NotFoundKind, OrbitError};
+use orbit_types::task::{
+    ArtifactManifestFileV2, ArtifactManifestV2, TASK_ARTIFACT_FILES_DIR_NAME,
+    TASK_ARTIFACT_SCHEMA_VERSION, TASK_ARTIFACTS_DIR_NAME, TASK_ENVELOPE_FILE_NAME,
+    TASK_EVENTS_FILE_NAME, TaskEventRowV2, TaskStatus,
 };
-use orbit_common::utility::fs::atomic_write_text;
 use sha2::{Digest, Sha256};
 use tempfile::TempDir;
 

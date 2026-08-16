@@ -2,9 +2,8 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use chrono::Utc;
-use orbit_common::types::{
-    ExecutorDef, ExecutorSandboxKind, ExecutorType, Task, TaskPriority, TaskStatus, TaskType,
-};
+use orbit_types::task::{Task, TaskPriority, TaskStatus, TaskType};
+use orbit_types::workflow::{ExecutorDef, ExecutorSandboxKind, ExecutorType};
 use tempfile::tempdir;
 
 use crate::OrbitRuntime;

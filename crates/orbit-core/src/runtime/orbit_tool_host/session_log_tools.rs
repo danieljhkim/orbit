@@ -1,5 +1,5 @@
 use chrono::{DateTime, Utc};
-use orbit_common::types::OrbitError;
+use orbit_common::OrbitError;
 use orbit_store::{SessionLogAppendParams, SessionLogFilter, SessionLogKind, SessionLogStore};
 use serde_json::{Value, json};
 

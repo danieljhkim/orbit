@@ -1,4 +1,4 @@
-use orbit_common::types::OrbitError;
+use orbit_common::OrbitError;
 use rusqlite::params;
 
 use crate::vector::store::VectorStore;

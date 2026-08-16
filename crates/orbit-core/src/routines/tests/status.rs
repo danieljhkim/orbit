@@ -1,6 +1,6 @@
 use std::fs;
 
-use orbit_common::types::parse_routine_yaml;
+use orbit_common::protocol::yaml::parse_routine_yaml;
 use tempfile::tempdir;
 
 use super::super::loader::{LoadedRoutine, RoutineOrigin};

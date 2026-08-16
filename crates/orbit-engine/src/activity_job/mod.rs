@@ -1,10 +1,12 @@
 //! v2 activity runtime. Phase 2 coexistence layer — the v1 runtime is untouched.
 //!
-//! Depends on `orbit_common::types::activity_job` for the type surface (activity/spec/audit
+//! Depends on `orbit_types::workflow::activity_job::activity_job` for the type surface (activity/spec/audit
 //! shapes, tool-allowlist helpers). This module wires those types to the
 //! engine's executor infrastructure and to the loop-engine audit pipeline.
 
+pub mod asset_loader;
 pub mod audit_writer;
+pub mod catalog;
 pub mod cli_runner;
 pub mod crew;
 pub mod dispatcher;
@@ -28,3 +30,12 @@ pub use job_executor::{
 };
 pub use sqlite_sink::V2SqliteSink;
 pub use tool_enforcement::EnforcedAuditSink;
+
+pub use asset_loader::{
+    ActivityAsset, AssetLoadError, JobAsset, load_activity_asset, load_job_asset,
+};
+pub use catalog::{
+    ACTIVITY_REF_PREFIX, CatalogDirectory, CatalogDirectoryList, CatalogError, ResolveError,
+    V2ActivityCatalog, V2JobCatalog, catalog_error_to_orbit, load_activity_catalog_asset,
+    resolve_job_target_refs, validate_catalog_activity_tools,
+};

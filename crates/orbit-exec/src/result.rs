@@ -1,1 +1,1 @@
-pub use orbit_common::types::ExecutionResult;
+pub use orbit_types::tool::ExecutionResult;

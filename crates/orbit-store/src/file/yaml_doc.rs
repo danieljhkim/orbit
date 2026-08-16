@@ -1,7 +1,7 @@
 use std::path::Path;
 
-use orbit_common::types::OrbitError;
-use orbit_common::utility::fs::atomic_write_text_volatile as write_atomic;
+use orbit_common::OrbitError;
+use orbit_common::fs::io::atomic_write_text_volatile as write_atomic;
 
 pub(crate) fn parse_yaml_with<T: serde::de::DeserializeOwned, F>(
     raw: &str,

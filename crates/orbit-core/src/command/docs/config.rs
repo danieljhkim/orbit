@@ -2,7 +2,7 @@ use std::path::Path;
 
 use serde::Deserialize;
 
-use orbit_common::types::OrbitError;
+use orbit_common::OrbitError;
 
 const DEFAULT_DOC_ROOT: &str = "docs/";
 

@@ -6,7 +6,7 @@ use tempfile::tempdir;
 use crate::InitCommand;
 use crate::command::init::collect_crew_settings_for_init;
 use crate::tests::env_isolation::EnvGuard;
-use orbit_common::utility::fs::create_dir_symlink;
+use orbit_common::fs::io::create_dir_symlink;
 use orbit_core::config::agent_detect::DetectedAgents;
 
 fn seed_discovery_sentinel(home: &Path, agent_dir: &str) -> (PathBuf, PathBuf) {

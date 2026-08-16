@@ -1,4 +1,5 @@
-use orbit_common::types::{ExternalRef, NO_DIFF_EXPECTED_TAG, OrbitError, TaskStatus};
+use orbit_common::OrbitError;
+use orbit_types::task::{ExternalRef, NO_DIFF_EXPECTED_TAG, TaskStatus};
 use serde_json::{Value, json};
 
 use crate::context::{RuntimeHost, TaskAutomationUpdate};

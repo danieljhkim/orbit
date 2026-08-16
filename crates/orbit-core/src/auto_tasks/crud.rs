@@ -10,11 +10,12 @@
 //! rides here too: it mints a task from a definition on demand by reusing the
 //! scheduler's mint path, so there is exactly one template→task mapping.
 
-use orbit_common::types::{
+use orbit_common::OrbitError;
+use orbit_common::fs::io::atomic_write_text;
+use orbit_types::task::Task;
+use orbit_types::workflow::{
     AUTO_TASK_SCHEMA_VERSION, AutoTaskDefinition, AutoTaskSchedule, AutoTaskTemplate, DedupePolicy,
-    OrbitError, Task,
 };
-use orbit_common::utility::fs::atomic_write_text;
 
 use crate::OrbitRuntime;
 
@@ -128,7 +129,9 @@ impl OrbitRuntime {
         }
         let raw = std::fs::read_to_string(&path)
             .map_err(|error| OrbitError::Io(format!("read {}: {error}", path.display())))?;
-        Ok(Some(orbit_common::types::parse_auto_task_yaml(&raw)?))
+        Ok(Some(orbit_common::protocol::yaml::parse_auto_task_yaml(
+            &raw,
+        )?))
     }
 
     /// Apply a present-field patch to a definition.

@@ -1,6 +1,6 @@
 //! [ORB-10711, ADR-0351] Claim-gated remote command execution.
 
-use orbit_common::types::OrbitError;
+use orbit_common::OrbitError;
 use serde_json::{Value, json};
 
 use super::super::test_support::{

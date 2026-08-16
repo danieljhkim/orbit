@@ -15,6 +15,7 @@ workspace = true
 chrono.workspace = true
 fs2.workspace = true
 orbit-common = { path = "../orbit-common" }
+orbit-types = { path = "../orbit-types" }
 orbit-core = { path = "../orbit-core" }
 orbit-engine = { path = "../orbit-engine" }
 orbit-registry = { path = "../orbit-registry" }

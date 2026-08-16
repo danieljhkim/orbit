@@ -1,8 +1,8 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use orbit_common::types::ToolParam;
 use orbit_core::OrbitError;
+use orbit_types::tool::ToolParam;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

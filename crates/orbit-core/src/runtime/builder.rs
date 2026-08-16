@@ -13,9 +13,11 @@ use orbit_store::{
     workspace_job_run_store, workspace_policy_def_store, workspace_task_backends,
 };
 
-use orbit_common::types::{DEFAULT_POLICY_NAME, OrbitError, WorkspacePaths};
+use orbit_common::OrbitError;
 use orbit_tools::ToolRegistry;
 use orbit_tools::external::ExternalTool;
+use orbit_types::policy::DEFAULT_POLICY_NAME;
+use orbit_types::workspace::WorkspacePaths;
 
 use crate::command::init::global_skills_dir;
 use crate::command::policy::seed_default_policies;

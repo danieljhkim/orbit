@@ -436,15 +436,15 @@ fn test_task(
     status: TaskStatus,
     created_by: &str,
     planned_by: &str,
-) -> orbit_common::types::Task {
+) -> orbit_types::task::Task {
     let mut task = test_task_no_attrib(id, status);
     task.created_by = Some(created_by.to_string());
     task.planned_by = Some(planned_by.to_string());
     task
 }
 
-fn test_task_no_attrib(id: &str, status: TaskStatus) -> orbit_common::types::Task {
-    use orbit_common::types::{Task, TaskPriority, TaskType};
+fn test_task_no_attrib(id: &str, status: TaskStatus) -> orbit_types::task::Task {
+    use orbit_types::task::{Task, TaskPriority, TaskType};
     Task {
         id: id.to_string(),
         title: id.to_string(),

@@ -21,11 +21,14 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
 use chrono::{DateTime, Datelike, TimeZone, Utc};
-use orbit_common::friction::derive_title;
-use orbit_common::types::{
-    FrictionRecord, FrictionStatus, OrbitError, Task, TaskStatus, all_agent_families,
-    infer_agent_family_from_model, normalize_optional_attribution_label, validate_friction_id,
+use orbit_common::OrbitError;
+use orbit_common::governance::friction::derive_title;
+use orbit_types::identity::{
+    all_agent_families, infer_agent_family_from_model, normalize_optional_attribution_label,
+    validate_friction_id,
 };
+use orbit_types::record::{FrictionRecord, FrictionStatus};
+use orbit_types::task::{Task, TaskStatus};
 use rusqlite::TransactionBehavior;
 use serde_json::{Value, json};
 

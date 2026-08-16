@@ -17,7 +17,7 @@ use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use orbit_common::types::OrbitError;
+use orbit_common::OrbitError;
 use reqwest::Url;
 use rsa::RsaPublicKey;
 use rsa::pkcs1v15::{Signature as RsaSignature, VerifyingKey};

@@ -2,7 +2,7 @@
 //! need a real companion subprocess. The vector is derived from FNV-1a over
 //! the input bytes plus an xorshift expansion to fill `dim` floats.
 
-use orbit_common::types::OrbitError;
+use orbit_common::OrbitError;
 
 use crate::Embedder;
 

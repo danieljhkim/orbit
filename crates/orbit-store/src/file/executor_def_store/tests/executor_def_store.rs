@@ -1,8 +1,8 @@
 // Migrated from file/executor_def_store.rs per ORB-00231
 use super::super::*;
 use chrono::Utc;
-use orbit_common::types::ExecutorSandboxKind;
-use orbit_common::types::ExecutorType;
+use orbit_types::workflow::ExecutorSandboxKind;
+use orbit_types::workflow::ExecutorType;
 use std::collections::HashMap;
 use tempfile::tempdir;
 

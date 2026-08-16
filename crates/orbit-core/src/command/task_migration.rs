@@ -9,7 +9,7 @@
 use std::path::Path;
 
 use chrono::Utc;
-use orbit_common::types::OrbitError;
+use orbit_common::OrbitError;
 use orbit_store::sqlite::task_registry::{
     AllocatorSeedOutcome, TaskRegistryStore, task_registry_path,
 };

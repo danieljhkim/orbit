@@ -1,9 +1,9 @@
 use std::collections::BTreeMap;
 use std::path::Path;
 
-use orbit_common::types::{Task, TaskStatus, task_dependencies_ready};
-use orbit_common::utility::path::workspace_relative_paths_overlap;
+use orbit_common::fs::path::workspace_relative_paths_overlap;
 use orbit_engine::DispatchError;
+use orbit_types::task::{Task, TaskStatus, task_dependencies_ready};
 use serde::Serialize;
 use serde_json::Value;
 
@@ -243,11 +243,11 @@ pub(super) fn list_backlog_tasks(
 }
 
 pub(super) fn sort_tasks_by_priority_age(tasks: &mut [Task]) {
-    let rank = |priority: orbit_common::types::TaskPriority| match priority {
-        orbit_common::types::TaskPriority::Critical => 0,
-        orbit_common::types::TaskPriority::High => 1,
-        orbit_common::types::TaskPriority::Medium => 2,
-        orbit_common::types::TaskPriority::Low => 3,
+    let rank = |priority: orbit_types::task::TaskPriority| match priority {
+        orbit_types::task::TaskPriority::Critical => 0,
+        orbit_types::task::TaskPriority::High => 1,
+        orbit_types::task::TaskPriority::Medium => 2,
+        orbit_types::task::TaskPriority::Low => 3,
     };
     tasks.sort_by(|left, right| {
         rank(left.priority)

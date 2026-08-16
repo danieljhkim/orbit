@@ -1,4 +1,4 @@
-use orbit_common::types::OrbitError;
+use orbit_common::OrbitError;
 
 pub use orbit_search::{
     CompanionStatus, IndexKind, ScoreBreakdown, SemanticHit, SemanticIndexParams,

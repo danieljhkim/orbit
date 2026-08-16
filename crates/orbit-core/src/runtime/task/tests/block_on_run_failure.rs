@@ -4,9 +4,10 @@
 //! workflow-admission allowlist) untouched.
 
 use chrono::Utc;
-use orbit_common::types::{JobRun, JobRunState, JobTargetType, TaskPriority, TaskStatus, TaskType};
 use orbit_engine::{RuntimeHost, TaskAutomationUpdate, WORKFLOW_RUN_FAILED_EVENT};
 use orbit_store::{JobRunStepParams, TaskCreateParams, TaskReservationReleaseReason};
+use orbit_types::task::{TaskPriority, TaskStatus, TaskType};
+use orbit_types::workflow::{JobRun, JobRunState, JobTargetType};
 use tempfile::tempdir;
 
 use crate::OrbitRuntime;
@@ -139,7 +140,7 @@ fn finalize_failed(runtime: &OrbitRuntime, run_id: &str) -> bool {
 fn failure_history_entries(
     runtime: &OrbitRuntime,
     task_id: &str,
-) -> Vec<orbit_common::types::TaskHistoryEntry> {
+) -> Vec<orbit_types::task::TaskHistoryEntry> {
     runtime
         .get_task_history(task_id)
         .expect("task history")
@@ -193,7 +194,7 @@ fn sandbox_write_denial_is_recoverable_from_the_blocked_task_record() {
     // The real attribution text, produced by the helper the runner uses — not a
     // re-spelling of it, so a change to that format fails this test too.
     let worktree = std::path::Path::new("/tmp/orbit-jrun-doc-duties");
-    let profile = orbit_common::types::ResolvedFsProfile {
+    let profile = orbit_types::policy::ResolvedFsProfile {
         name: "unrestricted".to_string(),
         read: vec![format!("{}/**", worktree.display())],
         modify: vec![

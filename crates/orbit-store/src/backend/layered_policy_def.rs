@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
-use orbit_common::types::{OrbitError, PolicyDef};
+use orbit_common::OrbitError;
+use orbit_types::policy::PolicyDef;
 
 use super::contracts::PolicyDefStoreBackend;
 

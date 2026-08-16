@@ -1,4 +1,5 @@
-use orbit_common::types::{OrbitError, WorkspacePaths};
+use orbit_common::OrbitError;
+use orbit_types::workspace::WorkspacePaths;
 
 use crate::OrbitRuntime;
 

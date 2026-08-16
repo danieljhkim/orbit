@@ -4,7 +4,8 @@
 
 use std::path::PathBuf;
 
-use orbit_common::types::{AutoTaskSchedule, DedupePolicy, parse_auto_task_yaml};
+use orbit_common::protocol::yaml::parse_auto_task_yaml;
+use orbit_types::workflow::{AutoTaskSchedule, DedupePolicy};
 
 use crate::auto_tasks::DEFAULT_AUTO_TASK_FILES;
 
@@ -88,7 +89,7 @@ fn model_price_audit_is_weekly_report_only_and_routes_to_terra() {
     assert_eq!(definition.template.crew.as_deref(), Some("terra"));
     assert_eq!(
         definition.template.status,
-        orbit_common::types::TaskStatus::Backlog
+        orbit_types::task::TaskStatus::Backlog
     );
     for required_tag in ["model-price-audit", "pricing", "no-diff-expected"] {
         assert!(
@@ -197,7 +198,7 @@ fn qa_sweep_default_preserves_hands_on_validation_contract() {
     );
     assert_eq!(
         definition.template.status,
-        orbit_common::types::TaskStatus::Backlog
+        orbit_types::task::TaskStatus::Backlog
     );
     assert!(definition.template.tags.iter().any(|tag| tag == "qa-sweep"));
     assert!(

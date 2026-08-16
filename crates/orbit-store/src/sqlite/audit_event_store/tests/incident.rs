@@ -7,7 +7,7 @@
 use std::collections::BTreeSet;
 
 use chrono::{DateTime, Duration, TimeZone, Utc};
-use orbit_common::types::{AuditEvent, AuditEventStatus};
+use orbit_types::telemetry::{AuditEvent, AuditEventStatus};
 
 use crate::Store;
 use crate::sqlite::audit_event_store::incident::{

@@ -11,7 +11,8 @@
 use std::fs;
 use std::path::Path;
 
-use orbit_common::types::{NO_DIFF_EXPECTED_TAG, OrbitError};
+use orbit_common::OrbitError;
+use orbit_types::task::NO_DIFF_EXPECTED_TAG;
 use serde_json::{Value, json};
 
 use super::super::git_commit;

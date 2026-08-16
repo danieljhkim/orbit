@@ -1,8 +1,9 @@
 use std::collections::BTreeMap;
 
-use orbit_common::types::{
-    OrbitError, Task, TaskArtifact, TaskComment, TaskHistoryEntry, TaskStatus,
-    resolve_task_dependencies, resolve_task_relations,
+use orbit_common::OrbitError;
+use orbit_types::task::{
+    Task, TaskArtifact, TaskComment, TaskHistoryEntry, TaskStatus, resolve_task_dependencies,
+    resolve_task_relations,
 };
 use serde_json::{Map, Value, json};
 

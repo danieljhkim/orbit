@@ -1,4 +1,4 @@
-use orbit_common::types::ToolCallTrace;
+use orbit_types::telemetry::ToolCallTrace;
 use serde_json::Value;
 
 use super::{JsonMap, ToolCallCollector, usage::value_as_u64};

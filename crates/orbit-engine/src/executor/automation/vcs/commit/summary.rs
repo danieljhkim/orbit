@@ -17,7 +17,8 @@
 
 use std::path::Path;
 
-use orbit_common::types::{OrbitError, Task};
+use orbit_common::OrbitError;
+use orbit_types::task::Task;
 
 use crate::context::{RuntimeHost, TaskAutomationUpdate};
 

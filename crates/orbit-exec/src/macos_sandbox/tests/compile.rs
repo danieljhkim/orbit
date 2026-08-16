@@ -120,7 +120,7 @@ fn compile_allows_macos_sandbox_provenance_syscall() {
 #[cfg(target_os = "macos")]
 use super::super::compile_macos_sandbox_profile;
 #[cfg(target_os = "macos")]
-use orbit_common::types::ResolvedFsProfile;
+use orbit_types::policy::ResolvedFsProfile;
 
 #[cfg(target_os = "macos")]
 #[test]

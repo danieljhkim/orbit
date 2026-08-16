@@ -15,14 +15,15 @@ use std::fs;
 use std::path::{Component, Path, PathBuf};
 
 use chrono::Utc;
-use orbit_common::types::{
-    ArtifactManifestFileV2, ArtifactManifestV2, ExternalRef, NotFoundKind, OrbitError, OrbitId,
-    TASK_ARTIFACT_FILES_DIR_NAME, TASK_ARTIFACT_SCHEMA_VERSION, TASK_ARTIFACTS_DIR_NAME, Task,
-    TaskArtifact, TaskComment, TaskCommentRowV2, TaskEnvelopeV2, TaskEventRowV2, TaskHistoryEntry,
-    TaskPriority, TaskRelation, TaskRelationType, TaskStatus, normalize_task_tags,
-    validate_relative_artifact_path,
+use orbit_common::fs::io::{atomic_write_bytes, with_exclusive_file_lock};
+use orbit_common::{NotFoundKind, OrbitError};
+use orbit_types::identity::OrbitId;
+use orbit_types::task::{
+    ArtifactManifestFileV2, ArtifactManifestV2, ExternalRef, TASK_ARTIFACT_FILES_DIR_NAME,
+    TASK_ARTIFACT_SCHEMA_VERSION, TASK_ARTIFACTS_DIR_NAME, Task, TaskArtifact, TaskComment,
+    TaskCommentRowV2, TaskEnvelopeV2, TaskEventRowV2, TaskHistoryEntry, TaskPriority, TaskRelation,
+    TaskRelationType, TaskStatus, normalize_task_tags, validate_relative_artifact_path,
 };
-use orbit_common::utility::fs::{atomic_write_bytes, with_exclusive_file_lock};
 use sha2::{Digest, Sha256};
 
 use crate::backend::{

@@ -4,7 +4,9 @@ use std::sync::{Arc, Mutex};
 
 use serde_json::{Value, json};
 
-use orbit_common::types::{OrbitError, RETIRED_TASK_ADD_INPUT_FIELDS, ToolSessionContext};
+use orbit_common::OrbitError;
+use orbit_common::protocol::tool_input::RETIRED_TASK_ADD_INPUT_FIELDS;
+use orbit_types::tool::ToolSessionContext;
 
 use super::super::add::OrbitTaskAddTool;
 use crate::{OrbitBuiltinAction, OrbitTaskScope, OrbitToolHost, Tool, ToolContext};

@@ -13,7 +13,7 @@
 use std::path::Path;
 use std::time::Instant;
 
-use orbit_common::types::{FrictionRecord, FrictionStatus};
+use orbit_types::record::{FrictionRecord, FrictionStatus};
 
 use super::super::{FrictionListFilter, FrictionStore};
 use super::support::{at, store};

@@ -41,8 +41,9 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use orbit_common::types::{OrbitError, is_valid_orb_task_id};
-use orbit_common::utility::fs::atomic_write_text;
+use orbit_common::OrbitError;
+use orbit_common::fs::io::atomic_write_text;
+use orbit_types::task::is_valid_orb_task_id;
 
 /// Highest workspace-layout version this binary knows how to produce.
 /// Bump together with a new [`LAYOUT_MIGRATIONS`] entry — never without one.

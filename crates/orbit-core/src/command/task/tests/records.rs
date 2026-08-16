@@ -1,8 +1,8 @@
 use chrono::Utc;
-use orbit_common::types::{
+use orbit_store::TaskCreateParams;
+use orbit_types::task::{
     TaskArtifact, TaskComment, TaskHistoryEntry, TaskPriority, TaskStatus, TaskType,
 };
-use orbit_store::TaskCreateParams;
 
 use super::super::params::TaskRecordUpdateParams;
 use super::test_runtime;

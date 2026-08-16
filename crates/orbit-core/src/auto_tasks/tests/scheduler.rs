@@ -2,7 +2,8 @@
 //! catch-up collapse, dedupe, disabled skip, and dry-run inertness.
 
 use chrono::{DateTime, Duration, TimeZone, Utc};
-use orbit_common::types::{AutoTaskSchedule, TaskStatus, auto_task_tag};
+use orbit_types::task::TaskStatus;
+use orbit_types::workflow::{AutoTaskSchedule, auto_task_tag};
 use tempfile::tempdir;
 
 use crate::OrbitRuntime;
@@ -139,7 +140,7 @@ fn weekly_cron_fires_once_and_dedupes_while_audit_is_open() {
 fn always_dedupe_files_even_with_an_open_instance() {
     let runtime = runtime();
     let mut params = interval_params("chore", 60);
-    params.dedupe = orbit_common::types::DedupePolicy::Always;
+    params.dedupe = orbit_types::workflow::DedupePolicy::Always;
     runtime.auto_task_add(params).expect("add");
     let t0 = at(2026, 1, 1, 0, 0);
 

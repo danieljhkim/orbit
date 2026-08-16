@@ -5,10 +5,11 @@
 //! idempotency under replay/overlap.
 
 use chrono::Utc;
-use orbit_common::types::{JobRunState, JobTargetType, TaskPriority, TaskStatus, TaskType};
 use orbit_engine::{RuntimeHost, TaskAutomationUpdate, WORKFLOW_RUN_FAILED_EVENT};
 use orbit_store::friction_store::FrictionListFilter;
 use orbit_store::{JobRunStepParams, TaskCreateParams, TaskReservationReleaseReason};
+use orbit_types::task::{TaskPriority, TaskStatus, TaskType};
+use orbit_types::workflow::{JobRunState, JobTargetType};
 use serde_json::{Value, json};
 use tempfile::tempdir;
 

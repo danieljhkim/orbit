@@ -1,6 +1,6 @@
 use chrono::{Duration, Utc};
-use orbit_common::types::{InvocationTrace, TokenUsage};
 use orbit_store::scoreboard_summary::{ORCHESTRATION_SCHEMA_VERSION, ScoreboardWindow};
+use orbit_types::telemetry::{InvocationTrace, TokenUsage};
 use tempfile::tempdir;
 
 use crate::command::task::TaskAddParams;

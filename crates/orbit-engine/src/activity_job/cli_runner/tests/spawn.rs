@@ -2,8 +2,8 @@
 
 use std::ffi::OsString;
 
-use orbit_common::types::ExecutorSandboxKind;
 use orbit_exec::BwrapProbeOutcome;
+use orbit_types::workflow::ExecutorSandboxKind;
 use tempfile::tempdir;
 
 use super::super::super::dispatcher::ResolvedSandbox;
@@ -16,8 +16,8 @@ use super::test_support::{sandbox_for_test, sh_args};
 
 /// A profile shaped like a managed-worktree implementer: the worktree is
 /// writable, its `.orbit` store is not.
-fn worktree_profile(worktree: &std::path::Path) -> orbit_common::types::ResolvedFsProfile {
-    orbit_common::types::ResolvedFsProfile {
+fn worktree_profile(worktree: &std::path::Path) -> orbit_types::policy::ResolvedFsProfile {
+    orbit_types::policy::ResolvedFsProfile {
         name: "unrestricted".to_string(),
         read: vec![format!("{}/**", worktree.display())],
         modify: vec![

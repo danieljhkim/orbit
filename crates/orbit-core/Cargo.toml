@@ -12,13 +12,14 @@ stability = "internal"
 workspace = true
 
 [features]
-clap = ["orbit-common/clap"]
+clap = ["orbit-types/clap"]
 
 [dependencies]
 chrono.workspace = true
 croner.workspace = true
 fs2.workspace = true
 orbit-common = { path = "../orbit-common" }
+orbit-types = { path = "../orbit-types" }
 orbit-search = { path = "../orbit-search" }
 orbit-engine = { path = "../orbit-engine" }
 orbit-policy = { path = "../orbit-policy" }

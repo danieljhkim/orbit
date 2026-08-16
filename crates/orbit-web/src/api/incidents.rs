@@ -16,12 +16,12 @@ use std::collections::BTreeMap;
 use axum::extract::Query;
 use axum::response::{IntoResponse, Json, Response};
 use chrono::{DateTime, Utc};
-use orbit_common::types::{infer_agent_family_from_model, normalize_attribution_label};
-use orbit_common::utility::redaction::redact_all;
+use orbit_common::security::redaction::redact_all;
 use orbit_core::{
     FailureClass, FailureIncident, FailureIncidentQuery, FailureIncidentReport, IncidentEventRef,
     OrbitError, PropagationLink,
 };
+use orbit_types::identity::{infer_agent_family_from_model, normalize_attribution_label};
 use serde::Deserialize;
 use serde_json::{Value, json};
 

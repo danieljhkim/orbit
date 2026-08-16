@@ -1,8 +1,7 @@
-use orbit_common::types::{
-    EXECUTOR_RESOURCE_SCHEMA_VERSION, ExecutorDef, ExecutorResource, ExecutorSandboxKind,
-    ExecutorType, OrbitError, ResourceKind,
-};
+use orbit_common::OrbitError;
 use orbit_store::ExecutorDefStoreBackend;
+use orbit_types::resource::{EXECUTOR_RESOURCE_SCHEMA_VERSION, ExecutorResource, ResourceKind};
+use orbit_types::workflow::{ExecutorDef, ExecutorSandboxKind, ExecutorType};
 
 pub(crate) const DEFAULT_EXECUTOR_FILES: &[(&str, &str)] = &[
     ("claude", include_str!("../../assets/executors/claude.yaml")),

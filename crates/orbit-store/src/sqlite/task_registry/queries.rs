@@ -2,7 +2,8 @@ use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
 use chrono::{DateTime, Utc};
-use orbit_common::types::{OrbitError, TaskEnvelopeV2, normalize_task_tags};
+use orbit_common::OrbitError;
+use orbit_types::task::{TaskEnvelopeV2, normalize_task_tags};
 use rusqlite::{Connection, OptionalExtension, params};
 
 use super::types::{TaskBundleBinding, WorkspaceBinding, WorkspaceCheckoutBinding};

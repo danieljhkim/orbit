@@ -1,6 +1,7 @@
 use std::str::FromStr;
 
-use orbit_common::types::{OrbitError, optional_string_alias};
+use orbit_common::OrbitError;
+use orbit_common::protocol::tool_input::optional_string_alias;
 use orbit_search::{
     IndexKind, SemanticIndexParams, SemanticInstallParams, SemanticUninstallParams,
 };

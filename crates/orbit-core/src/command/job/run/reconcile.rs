@@ -1,8 +1,10 @@
 //! Stale-run reconciliation, terminal timing repair, and audit helpers.
 
 use chrono::{DateTime, Utc};
-use orbit_common::types::{JobRun, JobRunState, OrbitError, OrbitEvent};
+use orbit_common::OrbitError;
 use orbit_store::TaskReservationReleaseReason;
+use orbit_types::record::OrbitEvent;
+use orbit_types::workflow::{JobRun, JobRunState};
 
 use crate::OrbitRuntime;
 

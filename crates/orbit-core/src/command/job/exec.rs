@@ -7,17 +7,16 @@
 
 use std::path::Path;
 
-use orbit_common::types::activity_job::{
-    V2AuditEventKind, load_job_asset, validate_job_retired_sessions,
-};
-use orbit_common::types::{
-    JobRun, JobRunState, JobTargetType, NotFoundKind, OrbitError, OrbitEvent, PipelineState,
-};
+use orbit_common::{NotFoundKind, OrbitError};
+use orbit_engine::activity_job::load_job_asset;
 use orbit_engine::{
     JobOutcome, V2AuditWriter, dispatch_error_to_orbit, execute_job_with_resume,
     resolve_job_catalog_refs_for_execution,
 };
 use orbit_store::{JobRunStepParams, TaskReservationReleaseReason};
+use orbit_types::record::OrbitEvent;
+use orbit_types::workflow::activity_job::{V2AuditEventKind, validate_job_retired_sessions};
+use orbit_types::workflow::{JobRun, JobRunState, JobTargetType, PipelineState};
 use serde_json::{Value, json};
 
 use crate::OrbitRuntime;

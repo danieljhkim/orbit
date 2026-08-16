@@ -1,5 +1,6 @@
-use orbit_common::types::{OrbitError, ToolParam, ToolSchema};
+use orbit_common::OrbitError;
 use orbit_exec::{EnvironmentMode, ExecRequest, NoSandbox, StdinMode, run_process};
+use orbit_types::tool::{ToolParam, ToolSchema};
 use serde_json::{Value, json};
 
 use crate::builtin::git::{require_relative_file_paths, require_workspace_repo_root};

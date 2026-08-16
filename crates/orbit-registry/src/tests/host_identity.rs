@@ -23,7 +23,7 @@ fn fresh_task_prefix_validation_rejects_reserved_and_malformed_values() {
 fn requested(
     name: &str,
     task_prefix: &str,
-) -> impl FnOnce() -> Result<NewHostIdentity, orbit_common::types::OrbitError> {
+) -> impl FnOnce() -> Result<NewHostIdentity, orbit_common::OrbitError> {
     let name = name.to_string();
     let task_prefix = task_prefix.to_string();
     move || {

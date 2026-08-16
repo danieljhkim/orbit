@@ -1,6 +1,6 @@
 use std::time::{Duration, Instant};
 
-use orbit_common::utility::output_capture::OUTPUT_TRUNCATED_MARKER;
+use orbit_common::process::output_capture::OUTPUT_TRUNCATED_MARKER;
 
 use super::super::wait::wait_with_timeout_and_output_limit;
 use crate::runner::{EnvironmentMode, ExecRequest, StdinMode};

@@ -8,7 +8,7 @@
 use std::fs::File;
 use std::path::{Path, PathBuf};
 
-use orbit_common::types::OrbitError;
+use orbit_common::OrbitError;
 
 /// Compression level for the zstd frame. Task bundles are small text; a moderate
 /// level keeps archives compact without a slow compress path.

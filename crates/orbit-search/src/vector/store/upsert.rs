@@ -8,7 +8,7 @@
 use std::collections::BTreeSet;
 
 use chrono::Utc;
-use orbit_common::types::OrbitError;
+use orbit_common::OrbitError;
 use rusqlite::{Connection, params};
 
 use super::VectorStore;

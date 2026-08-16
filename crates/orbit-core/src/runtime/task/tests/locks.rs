@@ -1,5 +1,6 @@
-use orbit_common::types::{OrbitError, TaskStatus};
+use orbit_common::OrbitError;
 use orbit_store::{TaskLockConflict, TaskLockHolder};
+use orbit_types::task::TaskStatus;
 use serde_json::{Value, json};
 use tempfile::TempDir;
 
@@ -546,8 +547,9 @@ fn files_shape_reservations_conflict_and_release_like_task_reservations() {
     assert_eq!(task_reserve["reserved"], true);
 }
 
-use orbit_common::types::{AuditEvent, Role};
 use orbit_tools::{ReservationOwnerContext, ToolContext};
+use orbit_types::policy::Role;
+use orbit_types::telemetry::AuditEvent;
 
 fn task_lock_audit_event(runtime: &OrbitRuntime, tool_name: &str, command: &str) -> AuditEvent {
     runtime

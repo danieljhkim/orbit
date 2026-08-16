@@ -3,7 +3,7 @@
 use super::*;
 
 use orbit_common::test_fixtures::TEST_CLAUDE_MODEL;
-use orbit_common::types::activity_job::{AgentLoopSpec, OnDenial, Provider};
+use orbit_types::workflow::activity_job::{AgentLoopSpec, OnDenial, Provider};
 use std::sync::Mutex;
 
 use crate::CrewConfig;
@@ -234,7 +234,7 @@ impl RuntimeHost for FailingTelemetryHost {
         _provider: &str,
         _model: Option<&str>,
         _input: &Value,
-        _trace: &orbit_common::types::InvocationTrace,
+        _trace: &orbit_types::telemetry::InvocationTrace,
     ) -> Result<(), DispatchError> {
         Err(DispatchError::JobExecution(
             "persist invocation trace: store error: table invocations has no column named cache_create_1h_tokens"
@@ -251,7 +251,7 @@ fn dispatch_with_invocation() -> super::super::super::dispatcher::DispatchOutcom
         invocation: Some(super::super::super::dispatcher::DispatchInvocationTrace {
             provider: "claude".to_string(),
             model: Some(TEST_CLAUDE_MODEL.to_string()),
-            trace: orbit_common::types::InvocationTrace::default(),
+            trace: orbit_types::telemetry::InvocationTrace::default(),
         }),
     }
 }

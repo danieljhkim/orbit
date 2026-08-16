@@ -3,11 +3,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
-use orbit_common::types::{
-    ActivityV2, AgentModelPair, ExternalRef, InvocationTrace, JobRun, JobRunState, NotFoundKind,
-    OrbitError, OrbitEvent, Role, Task, TaskComment, TaskHistoryEntry, TaskPriority, TaskStatus,
-    UNRESTRICTED_FS_PROFILE, push_external_ref_if_missing,
-};
+use orbit_common::{NotFoundKind, OrbitError};
 use orbit_engine::{
     CrewConfig, DispatchError, ResolvedCliExecutor, ResolvedSandbox, RuntimeHost,
     TaskActivityUpdate, TaskAutomationUpdate, V2AuditWriter,
@@ -17,6 +13,15 @@ use orbit_store::{
     TaskReservationReleaseReason, token_scoreboard,
 };
 use orbit_tools::{FsAuditLogger, ReservationOwnerContext, ToolContext};
+use orbit_types::identity::AgentModelPair;
+use orbit_types::policy::{Role, UNRESTRICTED_FS_PROFILE};
+use orbit_types::record::OrbitEvent;
+use orbit_types::task::{
+    ExternalRef, Task, TaskComment, TaskHistoryEntry, TaskPriority, TaskStatus,
+    push_external_ref_if_missing,
+};
+use orbit_types::telemetry::InvocationTrace;
+use orbit_types::workflow::{ActivityV2, JobRun, JobRunState};
 use serde_json::Value;
 
 use super::paths::{codex_workspace_write_writable_dirs, current_repo_root};
@@ -95,14 +100,14 @@ impl RuntimeHost for OrbitRuntime {
     fn read_run_state(
         &self,
         run_id: &str,
-    ) -> Result<Option<orbit_common::types::PipelineState>, OrbitError> {
+    ) -> Result<Option<orbit_types::workflow::PipelineState>, OrbitError> {
         self.stores().jobs().read_run_state(run_id)
     }
 
     fn write_run_state(
         &self,
         run_id: &str,
-        state: &orbit_common::types::PipelineState,
+        state: &orbit_types::workflow::PipelineState,
     ) -> Result<(), OrbitError> {
         self.stores().jobs().write_run_state(run_id, state)
     }
@@ -114,7 +119,7 @@ impl RuntimeHost for OrbitRuntime {
     fn get_task_artifacts(
         &self,
         task_id: &str,
-    ) -> Result<Vec<orbit_common::types::TaskArtifact>, OrbitError> {
+    ) -> Result<Vec<orbit_types::task::TaskArtifact>, OrbitError> {
         OrbitRuntime::get_task_artifacts(self, task_id)
     }
 
@@ -482,7 +487,7 @@ impl RuntimeHost for OrbitRuntime {
         };
         state.record_step(
             step_index,
-            orbit_common::types::JobRunState::Success,
+            orbit_types::workflow::JobRunState::Success,
             Some(output.clone()),
             None,
         );

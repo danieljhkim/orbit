@@ -3,13 +3,13 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
-use orbit_common::types::{
-    AuditEventStatus, NotFoundKind, OrbitError, Task, TaskStatus,
-    normalize_optional_attribution_label, optional_string_list_alias, optional_u32_alias,
-    prune_missing_context_files, required_string,
+use orbit_common::fs::path::workspace_relative_paths_overlap;
+use orbit_common::fs::selector::Selector;
+use orbit_common::fs::task_io::prune_missing_context_files;
+use orbit_common::protocol::tool_input::{
+    optional_string_list_alias, optional_u32_alias, required_string,
 };
-use orbit_common::utility::path::workspace_relative_paths_overlap;
-use orbit_common::utility::selector::Selector;
+use orbit_common::{NotFoundKind, OrbitError};
 use orbit_store::sqlite::task_registry::read_workspace_config_optional;
 use orbit_store::{
     ExpiredTaskReservation, ReleasedTaskReservation, TaskLockConflict, TaskLockHolder,
@@ -17,6 +17,9 @@ use orbit_store::{
     TaskReservationReserveParams,
 };
 use orbit_tools::ReservationOwnerContext;
+use orbit_types::identity::normalize_optional_attribution_label;
+use orbit_types::task::{Task, TaskStatus};
+use orbit_types::telemetry::AuditEventStatus;
 use serde_json::{Value, json};
 
 use crate::OrbitRuntime;

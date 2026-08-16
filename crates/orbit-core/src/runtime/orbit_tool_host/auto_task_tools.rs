@@ -3,7 +3,8 @@
 //! call the same `OrbitRuntime` methods the CLI uses, so both entry points
 //! stay consistent. Each returns the full definition as JSON.
 
-use orbit_common::types::{AutoTaskSchedule, AutoTaskTemplate, DedupePolicy, OrbitError};
+use orbit_common::OrbitError;
+use orbit_types::workflow::{AutoTaskSchedule, AutoTaskTemplate, DedupePolicy};
 use serde_json::Value;
 
 use crate::OrbitRuntime;
@@ -112,7 +113,7 @@ fn parse_field<T: serde::de::DeserializeOwned>(
     }
 }
 
-fn to_json(definition: &orbit_common::types::AutoTaskDefinition) -> Result<Value, OrbitError> {
+fn to_json(definition: &orbit_types::workflow::AutoTaskDefinition) -> Result<Value, OrbitError> {
     serde_json::to_value(definition)
         .map_err(|error| OrbitError::Io(format!("encode auto-task: {error}")))
 }

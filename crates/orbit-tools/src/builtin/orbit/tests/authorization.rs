@@ -9,15 +9,17 @@
 //!
 //! It is also the one place both axes are visible at once. Placement (which
 //! surfaces list a tool) lives in the tool registry; permission (who may
-//! perform it) lives in `orbit_common::authorization`. Neither crate can check
+//! perform it) lives in `orbit_common::governance::authorization`. Neither crate can check
 //! the pairing alone, so the invariant is asserted here rather than left to a
 //! reader holding two files open. `orbit-tools` is the lowest crate that sees
 //! both, so this needs no new dependency edge.
 
 use std::collections::BTreeSet;
 
-use orbit_common::authorization::{GOVERNED_OPERATIONS, GovernedOperation, OperationSurface};
-use orbit_common::types::McpCapability;
+use orbit_common::governance::authorization::{
+    GOVERNED_OPERATIONS, GovernedOperation, OperationSurface,
+};
+use orbit_types::tool::McpCapability;
 
 use crate::ToolRegistry;
 
@@ -36,7 +38,7 @@ enum Placement {
 /// have.
 ///
 /// Advertisement authorizes nothing, so the two axes are free to disagree —
-/// see `orbit_common::authorization`'s "Placement is not permission" section.
+/// see `orbit_common::governance::authorization`'s "Placement is not permission" section.
 /// What this table forbids is *silent* disagreement. Advertising a governed
 /// tool, governing an advertised one, or dropping either half fails this test
 /// until the table is updated, which is the moment the decision gets made on

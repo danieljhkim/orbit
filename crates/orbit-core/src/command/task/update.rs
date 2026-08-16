@@ -1,8 +1,11 @@
-use orbit_common::types::{
-    OrbitError, OrbitEvent, Task, TaskHistoryEntry, TaskStatus, normalize_task_dependencies,
-    normalize_task_tags, prune_missing_context_files, validate_task_dependencies,
-};
+use orbit_common::OrbitError;
+use orbit_common::fs::task_io::prune_missing_context_files;
 use orbit_engine::TaskActivityUpdate;
+use orbit_types::record::OrbitEvent;
+use orbit_types::task::{
+    Task, TaskHistoryEntry, TaskStatus, normalize_task_dependencies, normalize_task_tags,
+    validate_task_dependencies,
+};
 
 use super::TaskRecordUpdateParams;
 use crate::OrbitRuntime;

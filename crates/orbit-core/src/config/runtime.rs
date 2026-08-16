@@ -2,14 +2,15 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use orbit_common::OrbitError;
 use orbit_common::model_defaults::{
     CLAUDE_DEFAULT_STRONG, CLAUDE_DEFAULT_WEAK, CLAUDE_FABLE_MODEL, CODEX_LUNA_MODEL,
     CODEX_SOL_MODEL, CODEX_TERRA_MODEL, GEMINI_CREW_MODEL, GROK_DEFAULT_MODEL,
 };
-use orbit_common::types::activity_job::{RETIRED_BACKEND_MIGRATION, check_retired_backend_value};
-use orbit_common::types::{Crew, CrewAssignment, OrbitError};
-use orbit_common::utility::redaction::redact_home_dir;
+use orbit_common::security::redaction::redact_home_dir;
 use orbit_engine::PrConfig;
+use orbit_types::identity::{Crew, CrewAssignment};
+use orbit_types::workflow::activity_job::{RETIRED_BACKEND_MIGRATION, check_retired_backend_value};
 
 use crate::paths;
 

@@ -1,7 +1,8 @@
 use std::env;
 
-use orbit_common::types::{OrbitError, ToolParam, ToolSchema};
+use orbit_common::OrbitError;
 use orbit_exec::{EnvironmentMode, ExecRequest, NoSandbox, StdinMode, run_process};
+use orbit_types::tool::{ToolParam, ToolSchema};
 use serde_json::Value;
 
 use crate::{TIMEOUT_DEFAULT_MS, Tool, ToolContext};

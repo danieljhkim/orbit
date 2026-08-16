@@ -1,8 +1,9 @@
 //! Sibling tests for `mod.rs` (the v2_host module root; migrated per ORB-10387 /
 //! docs/design-patterns/test_layout.md).
 
-use orbit_common::types::{InvocationTrace, JobRunState, TokenUsage, ToolCallTrace};
 use orbit_store::InvocationQuery;
+use orbit_types::telemetry::{InvocationTrace, TokenUsage, ToolCallTrace};
+use orbit_types::workflow::JobRunState;
 
 use super::super::test_support::runtime_with_workspace_layout;
 use super::super::*;

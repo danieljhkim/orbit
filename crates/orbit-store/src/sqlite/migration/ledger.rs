@@ -19,7 +19,7 @@
 //!   idempotent schema code, so running it on an existing database is a
 //!   no-op that then records version 1.
 
-use orbit_common::types::OrbitError;
+use orbit_common::OrbitError;
 use rusqlite::{Connection, ErrorCode, params};
 
 /// One entry in the migration registry.

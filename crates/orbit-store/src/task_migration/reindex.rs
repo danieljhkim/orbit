@@ -5,7 +5,8 @@
 
 use std::collections::BTreeSet;
 
-use orbit_common::types::{OrbitError, is_valid_orb_task_id};
+use orbit_common::OrbitError;
+use orbit_types::task::is_valid_orb_task_id;
 
 use crate::file::task_store::v2_bundle::read_bundle_at;
 use crate::sqlite::task_registry::{
