@@ -380,17 +380,7 @@ fn spawn_linux_bwrap(
         sandbox.managed_worktree,
     )
     .map_err(|error| SpawnError::permanent(error.to_string()))?;
-    // Inside a managed worktree, preparation should have satisfied every grant.
-    // Anything still unmountable is a defect in the grant set, and failing here
-    // — before the provider starts — keeps the denial attributable to a path
-    // and a rule instead of surfacing as an EROFS mid-turn.
-    if sandbox.managed_worktree && !plan.dropped_grants.is_empty() {
-        return Err(SpawnError::permanent(format!(
-            "linux-bwrap could not apply {} policy write grant(s): {}",
-            plan.dropped_grants.len(),
-            describe_grants(&plan.dropped_grants)
-        )));
-    }
+    reject_unsatisfiable_managed_grants(sandbox.managed_worktree, &plan.dropped_grants)?;
     report_unsatisfied_grants(&plan.dropped_grants);
     let child = spawn_under_linux_bwrap(LinuxBwrapSpawnRequest {
         plan: &plan,
@@ -405,6 +395,30 @@ fn spawn_linux_bwrap(
         child,
         _profile_temp: None,
     })
+}
+
+/// Inside a managed worktree, preparation should have satisfied every grant.
+/// Anything still unmountable is a defect in the grant set, and failing here —
+/// before the provider starts — keeps the denial attributable to a path and a
+/// rule instead of surfacing as an EROFS mid-turn.
+///
+/// Split out of the spawn path so the rejection is provable without launching
+/// Bubblewrap: the guarantee this check carries is that an unsatisfiable grant
+/// can never reach the provider, and a test that has to spawn a real sandbox to
+/// observe it would silently skip on any host without bwrap.
+// pub(crate) widened for tests/ layout under ORB-00225; test reaches via exposed surface.
+pub(crate) fn reject_unsatisfiable_managed_grants(
+    managed_worktree: bool,
+    dropped_grants: &[UnsatisfiedWriteGrant],
+) -> Result<(), SpawnError> {
+    if !managed_worktree || dropped_grants.is_empty() {
+        return Ok(());
+    }
+    Err(SpawnError::permanent(format!(
+        "linux-bwrap could not apply {} policy write grant(s): {}",
+        dropped_grants.len(),
+        describe_grants(dropped_grants)
+    )))
 }
 
 /// Host-owned anchors outside the managed worktree are the host's to create,

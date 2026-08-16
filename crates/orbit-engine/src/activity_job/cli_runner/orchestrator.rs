@@ -314,23 +314,24 @@ pub fn run_cli_backend(
     // and diagnostics, but only make them authoritative when the activity
     // explicitly declares that downstream templates require them.
     let exit_success = !timed_out && matches!(exit_code, Some(0));
-    let sandbox_write_diagnostic = if exit_success {
-        None
-    } else {
-        match sandbox {
-            Some(sandbox)
-                if sandbox.kind == orbit_common::types::ExecutorSandboxKind::LinuxBwrap =>
-            {
-                linux_bwrap_failed_write_diagnostic(
-                    &sandbox.fs_profile,
-                    stderr.protocol_bytes(),
-                    subprocess_cwd.as_deref(),
-                )
-                .map_err(|error| DispatchError::CliInvocationPermanent(error.to_string()))?
-                .map(|diagnostic| bounded_diagnostic(&diagnostic, &redaction))
-            }
-            _ => None,
+    // Attribution is deliberately not gated on the exit code. An agent that
+    // hits a policy-denied write mid-turn can still exit 0 — it narrates the
+    // denial and stops without emitting a terminating envelope — and that
+    // exit-0 shape is precisely the one that reached an operator with no path
+    // and no rule. Deriving the diagnostic here costs a substring scan of
+    // stderr (the helper skips any line without an EROFS marker) and keeps the
+    // Orbit-owned attribution available to every failure branch below.
+    let sandbox_write_diagnostic = match sandbox {
+        Some(sandbox) if sandbox.kind == orbit_common::types::ExecutorSandboxKind::LinuxBwrap => {
+            linux_bwrap_failed_write_diagnostic(
+                &sandbox.fs_profile,
+                stderr.protocol_bytes(),
+                subprocess_cwd.as_deref(),
+            )
+            .map_err(|error| DispatchError::CliInvocationPermanent(error.to_string()))?
+            .map(|diagnostic| bounded_diagnostic(&diagnostic, &redaction))
         }
+        _ => None,
     };
     // A truncated capture retains the final complete JSONL events separately
     // from its diagnostic prefix. Protocol parsing must use that tail so a
@@ -414,19 +415,26 @@ pub fn run_cli_backend(
     } else if (spec.require_completion_envelope || spec.require_response_envelope)
         && matches!(envelope_status.as_deref(), Some("failed") | Some("timeout"))
     {
-        Some(format!(
-            "cli subprocess reported declared envelope status={:?} despite exit 0",
-            envelope_status.as_deref().unwrap_or("unknown")
+        Some(with_sandbox_write_attribution(
+            format!(
+                "cli subprocess reported declared envelope status={:?} despite exit 0",
+                envelope_status.as_deref().unwrap_or("unknown")
+            ),
+            sandbox_write_diagnostic.as_deref(),
         ))
     } else if spec.require_response_envelope {
-        response_envelope_error.clone()
+        response_envelope_error
+            .clone()
+            .map(|error| with_sandbox_write_attribution(error, sandbox_write_diagnostic.as_deref()))
     } else if completion_protocol_violation {
         // Ordered last on purpose: an activity that opted into the content
         // contract already produced a strictly more specific diagnostic above,
         // and the two conditions largely overlap. This branch is what the
         // remaining activities — the ones that only ever had the advisory
         // parse — now report instead of silently checkpointing success.
-        completion_envelope_error.clone()
+        completion_envelope_error
+            .clone()
+            .map(|error| with_sandbox_write_attribution(error, sandbox_write_diagnostic.as_deref()))
     } else {
         None
     };
@@ -534,6 +542,28 @@ pub fn run_cli_backend(
             trace,
         }),
     })
+}
+
+/// Append the Orbit-owned write-denial attribution to a step message that was
+/// classified from the protocol frame alone.
+///
+/// A provider that exits 0 after a policy-denied write yields a frame-shaped
+/// message ("no terminating envelope") that says nothing about *why* the agent
+/// stopped. The sandbox diagnostic is the only text in the system that names
+/// the attempted path and the rule that shadowed it, so it rides along rather
+/// than replacing the frame classification — the step still failed for the
+/// protocol reason, and the denial is the cause worth acting on.
+///
+/// `diagnostic` is already the `linux_bwrap_write_grant_diagnostic` string
+/// (bounded and redacted); this deliberately does not reformat it, so operators
+/// and greps see one message format for a write denial regardless of which
+/// branch surfaced it.
+// pub(super) widened for tests/ layout under ORB-00225; test reaches via exposed surface.
+pub(super) fn with_sandbox_write_attribution(message: String, diagnostic: Option<&str>) -> String {
+    match diagnostic {
+        Some(diagnostic) => format!("{message} {diagnostic}"),
+        None => message,
+    }
 }
 
 fn response_diagnostic(error: &str, redactor: &PatternRedactor) -> String {

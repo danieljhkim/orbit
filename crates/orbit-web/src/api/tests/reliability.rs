@@ -193,14 +193,12 @@ async fn reliability_7d_window_is_a_half_open_week() {
     assert_eq!(response.status(), StatusCode::OK);
     let body = body_json(response).await;
     assert_eq!(body["window"]["label"], "7d");
-    let since = chrono::DateTime::parse_from_rfc3339(
-        body["window"]["since"].as_str().expect("since"),
-    )
-    .expect("parse since");
-    let until = chrono::DateTime::parse_from_rfc3339(
-        body["window"]["until"].as_str().expect("until"),
-    )
-    .expect("parse until");
+    let since =
+        chrono::DateTime::parse_from_rfc3339(body["window"]["since"].as_str().expect("since"))
+            .expect("parse since");
+    let until =
+        chrono::DateTime::parse_from_rfc3339(body["window"]["until"].as_str().expect("until"))
+            .expect("parse until");
     let span = until.signed_duration_since(since);
     assert!(
         span >= chrono::Duration::days(7) - chrono::Duration::seconds(2)

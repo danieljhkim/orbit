@@ -1035,6 +1035,135 @@ fn linux_bwrap_failed_invocation_names_ungranted_write_path_and_deny() {
     assert!(!blocked_path.exists());
 }
 
+/// [ORB-10879] The composition rule behind the exit-0 attribution, asserted
+/// without Bubblewrap: a host whose kernel forbids unprivileged user namespaces
+/// skips every `probe_bwrap`-gated test in this file, so the message contract
+/// gets a check that always runs.
+#[test]
+fn sandbox_write_attribution_rides_along_with_the_frame_classification() {
+    let denial = "Orbit linux-bwrap policy denied the attempted write: \
+                  `/w/.orbit/x` is not writable inside the sandbox: denyModify rule `!/w/.orbit/**` shadows it";
+
+    let composed = super::super::orchestrator::with_sandbox_write_attribution(
+        "agent step did not complete".to_string(),
+        Some(denial),
+    );
+    assert!(
+        composed.starts_with("agent step did not complete"),
+        "the frame classification stays the head of the message: {composed}"
+    );
+    assert!(
+        composed.ends_with(denial),
+        "the denial text is appended verbatim, not reformatted: {composed}"
+    );
+
+    assert_eq!(
+        super::super::orchestrator::with_sandbox_write_attribution(
+            "agent step did not complete".to_string(),
+            None,
+        ),
+        "agent step did not complete",
+        "a step that hit no write denial keeps its message unchanged"
+    );
+}
+
+/// [ORB-10879] ORB-10878's exact shape: the agent hits a policy-denied write,
+/// narrates it, and exits 0 without a terminating envelope. Attribution used to
+/// be gated on a nonzero exit, so this run reached its operator with the model's
+/// guess ("remount the filesystem") and no path or rule anywhere in the record.
+#[cfg(target_os = "linux")]
+#[test]
+fn linux_bwrap_exit_zero_without_an_envelope_still_names_the_denied_write() {
+    if !probe_bwrap().available {
+        return;
+    }
+
+    let temp = tempdir().expect("tempdir");
+    let workspace = temp.path().join("worktree");
+    let orbit = workspace.join(".orbit");
+    fs::create_dir_all(&orbit).expect("denied Orbit root");
+    let script = workspace.join("codex");
+    // Exit 0 with no envelope on stdout — the provider "completed" cleanly.
+    write_executable(
+        &script,
+        "#!/bin/sh\ncat > /dev/null\ntouch \"$PWD/.orbit/ungranted\"\nexit 0\n",
+    );
+    let blocked_path = orbit.join("ungranted");
+    let profile = orbit_common::types::ResolvedFsProfile {
+        name: "unrestricted".to_string(),
+        read: vec![format!("{}/**", workspace.display())],
+        modify: vec![
+            format!("{}/**", workspace.display()),
+            format!("!{}/**", orbit.display()),
+        ],
+    };
+
+    let sink = Arc::new(RecordingSink::default());
+    let sink_for_writer: Arc<dyn AuditSink> = sink;
+    let audit = Arc::new(V2AuditWriter::new(
+        "job-linux-exit-zero-denial",
+        "claude:test",
+        sink_for_writer,
+    ));
+    let host = TestHost {
+        command: script.display().to_string(),
+        executor_args: Vec::new(),
+        provider_config: HashMap::new(),
+        sandbox: Some(ResolvedSandbox {
+            kind: orbit_common::types::ExecutorSandboxKind::LinuxBwrap,
+            fs_profile: profile,
+            allow_fallback: false,
+            managed_worktree: true,
+        }),
+        task_context: Some(serde_json::json!({
+            "workspace_path": workspace.display().to_string()
+        })),
+        workspace_root: None,
+    };
+    let spec = test_agent_loop_spec(Duration::from_secs(5));
+
+    let outcome = run_cli_backend(
+        &host,
+        &spec,
+        "job-linux-exit-zero-denial",
+        audit,
+        &serde_json::json!({"prompt": "attempt the write"}),
+        None,
+    )
+    .expect("the invocation outcome should be classified");
+
+    assert!(
+        !outcome.success,
+        "an agent that stopped mid-turn must not checkpoint success"
+    );
+    assert_eq!(outcome.output["exit_code"], serde_json::json!(0));
+    let diagnostic = outcome.output["sandbox_write_diagnostic"]
+        .as_str()
+        .expect("exit 0 must not suppress the write-denial attribution");
+    assert!(
+        diagnostic.contains(&blocked_path.display().to_string()),
+        "diagnostic must name the attempted path: {diagnostic}"
+    );
+    assert!(
+        diagnostic.contains("denyModify rule"),
+        "diagnostic must name the shadowing deny: {diagnostic}"
+    );
+
+    // The step message is what becomes `job_run_steps.error_message` and then
+    // the task's `workflow_run_failed` note, so the attribution has to be in it.
+    let message = outcome.message.expect("failed step carries a message");
+    assert!(
+        message.contains("did not complete"),
+        "the frame classification must survive: {message}"
+    );
+    assert!(
+        message.contains(&blocked_path.display().to_string())
+            && message.contains("denyModify rule"),
+        "the persisted step message must carry the denial attribution: {message}"
+    );
+    assert!(!blocked_path.exists());
+}
+
 #[test]
 fn run_cli_backend_emits_provider_pid_between_the_started_and_finished_events() {
     let temp = tempdir().expect("tempdir");

@@ -1,6 +1,8 @@
 use orbit_engine::RuntimeHost;
 #[cfg(target_os = "linux")]
-use orbit_exec::{compile_linux_bwrap_argv, prepare_linux_bwrap_write_grants};
+use orbit_exec::{
+    compile_linux_bwrap_argv, linux_bwrap_write_grant_diagnostic, prepare_linux_bwrap_write_grants,
+};
 
 use crate::runtime::v2_host::test_support::seeded_runtime_with_executor;
 #[cfg(any(target_os = "macos", target_os = "linux"))]
@@ -149,6 +151,90 @@ fn resolve_executor_sandbox_marks_only_specific_orbit_worktree_managed() {
         .expect("resolve direct")
         .expect("descriptor");
     assert!(!direct.managed_worktree);
+}
+
+/// [ORB-10879] The doc-duties shape: `agent_implement` declares no `fsProfile`,
+/// so it resolves to the unrestricted profile, and its cwd is a managed
+/// worktree. ORB-10878 parked itself in `blocked` claiming this configuration
+/// could not write `docs/**`. It can.
+///
+/// The assertion runs entirely against the resolved profile and the compiled
+/// argv, so it holds on any host — a test that probed a real write would be
+/// reporting the runner's mount table rather than Orbit's policy.
+#[cfg(target_os = "linux")]
+#[test]
+fn managed_worktree_without_an_fs_profile_can_write_under_docs() {
+    let (_root, runtime, _repo_root) = runtime_with_workspace_layout();
+    seed_executor(
+        &runtime,
+        "claude",
+        Some(orbit_common::types::ExecutorSandboxKind::LinuxBwrap),
+    );
+    let worktree = runtime
+        .paths()
+        .orbit_dir
+        .join("state/worktrees/orbit-jrun-doc-duties");
+    std::fs::create_dir_all(worktree.join("docs/design/task-artifacts"))
+        .expect("create worktree docs fixture");
+
+    // `None` is exactly what agent_implement passes: no fsProfile declared.
+    let resolved = runtime
+        .resolve_executor_sandbox("claude", None, Some(&worktree))
+        .expect("resolve doc-duties sandbox")
+        .expect("descriptor");
+    assert!(
+        resolved.managed_worktree,
+        "a jrun worktree cwd must be recognized as managed"
+    );
+
+    let canonical_worktree = worktree.canonicalize().expect("canonical worktree");
+    for relative in [
+        "docs/design/task-artifacts/3_vision.md",
+        "docs/design/task-migration/1_overview.md",
+        "docs/runbooks/release.md",
+    ] {
+        let target = canonical_worktree.join(relative);
+        let denial = linux_bwrap_write_grant_diagnostic(&resolved.fs_profile, &target)
+            .expect("grant diagnostic");
+        assert!(
+            denial.is_none(),
+            "doc-duties must be able to stamp {relative} in its own worktree: {denial:?}"
+        );
+    }
+
+    // The worktree's own Orbit store stays denied — this test must not pass by
+    // having widened the grant set.
+    let store = canonical_worktree.join(".orbit/state/orbit.db");
+    assert!(
+        linux_bwrap_write_grant_diagnostic(&resolved.fs_profile, &store)
+            .expect("grant diagnostic")
+            .is_some(),
+        "the worktree Orbit store must remain unwritable: {:?}",
+        resolved.fs_profile.modify
+    );
+
+    // Every grant this profile declares is mountable for that worktree, so the
+    // pre-spawn check has nothing to reject and no EROFS can surface mid-turn.
+    let prepared = prepare_linux_bwrap_write_grants(&resolved.fs_profile, &worktree)
+        .expect("prepare doc-duties grants");
+    assert!(
+        prepared.unsatisfied.is_empty(),
+        "doc-duties grants must all be mountable: {:?}",
+        prepared.unsatisfied
+    );
+    let plan = compile_linux_bwrap_argv(
+        &resolved.fs_profile,
+        "/bin/true",
+        &[],
+        Some(&worktree),
+        resolved.managed_worktree,
+    )
+    .expect("compile doc-duties sandbox");
+    assert!(
+        plan.dropped_grants.is_empty(),
+        "doc-duties grants must not be dropped: {:?}",
+        plan.dropped_grants
+    );
 }
 
 #[cfg(target_os = "linux")]
