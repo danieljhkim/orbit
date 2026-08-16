@@ -239,6 +239,7 @@ pub(super) async fn audit_summary(Ws(runtime): Ws, Query(q): Query<AuditSummaryQ
         "failure_rate_by_tool": bundle.failure_rate_by_tool,
         "role_split": bundle.role_split,
         "actor_split": bundle.actor_split,
+        "attribution_split": bundle.attribution_split,
         "mcp_vs_cli_split": bundle.mcp_vs_cli_split,
         "denials_by_tool": bundle.denials_by_tool,
         "denials_by_reason": bundle.denials_by_reason,
@@ -265,6 +266,11 @@ struct AuditSummaryBundle {
     /// appears once regardless of the granularity its label was recorded at,
     /// and `kind` says whether a row is a real agent at all.
     actor_split: Vec<Value>,
+    /// Tool calls split by how each row's identity was established
+    /// [ORB-10890]. Every row carries its own `attribution`, so a consumer
+    /// cannot render a self-reported count as an authenticated one; the
+    /// buckets are disjoint, so summing them is the combined denominator.
+    attribution_split: Vec<Value>,
     mcp_vs_cli_split: Value,
     denials_by_tool: Value,
     denials_by_reason: Value,
@@ -407,6 +413,24 @@ fn compute_audit_summary_bundle(
         })
         .collect();
 
+    let attribution_vec: Vec<_> = runtime
+        .audit_tool_call_counts_by_attribution(Some(&since))?
+        .iter()
+        .map(|a| {
+            json!({
+                "label": a.actor,
+                "attribution": a.attribution,
+                // Redundant with `attribution`, but a chart legend that only
+                // reads `label` still says which half of the split it is in.
+                "verified": a.attribution.is_authenticated(),
+                "count": a.total,
+                "failed": a.failed,
+                "mcp": a.mcp,
+                "cli": a.cli,
+            })
+        })
+        .collect();
+
     let mcp_count: i64 = role_aggs.iter().map(|r| r.mcp).sum();
     let cli_count: i64 = role_aggs.iter().map(|r| r.cli).sum();
     let mcp_vs_cli_split = json!([
@@ -434,6 +458,7 @@ fn compute_audit_summary_bundle(
         failure_rate_by_tool: rate_vec,
         role_split: role_vec,
         actor_split: actor_vec,
+        attribution_split: attribution_vec,
         mcp_vs_cli_split,
         denials_by_tool,
         denials_by_reason,

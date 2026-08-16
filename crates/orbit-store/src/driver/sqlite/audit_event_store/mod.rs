@@ -9,7 +9,10 @@ use std::collections::BTreeSet;
 
 use chrono::{DateTime, Utc};
 use orbit_common::OrbitError;
-use orbit_types::telemetry::{AuditEvent, AuditEventStatus, canonical_actor_for_role_label};
+use orbit_types::telemetry::{
+    ANONYMOUS_ACTOR_LABEL, AuditAttribution, AuditEvent, AuditEventStatus,
+    canonical_actor_for_role_label,
+};
 use orbit_types::tool::{McpCapability, McpTransport};
 use rusqlite::params;
 
@@ -26,12 +29,13 @@ pub(super) const AUDIT_EVENT_COLUMNS: &str = "id, execution_id, timestamp, comma
      error_message, host, pid, session_id, workspace_id, caller_machine_id, \
      caller_host_id, process_machine_id, process_host_id, transport, \
      capabilities_json, origin_session_id, mcp_call_id, lease_id, task_id, \
-     job_run_id, activity_id, step_index, trace_id, caller_ip";
+     job_run_id, activity_id, step_index, trace_id, caller_ip, \
+     self_reported_actor";
 
 use crate::contracts::{
-    AuditActorAggregate, AuditEventFilter, AuditEventInsertParams, AuditRoleAggregate,
-    AuditToolAggregate, AuditToolCallCountsByRole, AuditToolCallCountsBySurfaceAndRole,
-    AuditTopToolCall,
+    AuditActorAggregate, AuditAttributionAggregate, AuditEventFilter, AuditEventInsertParams,
+    AuditInvocationFields, AuditRoleAggregate, AuditToolAggregate, AuditToolCallCountsByRole,
+    AuditToolCallCountsBySurfaceAndRole, AuditTopToolCall,
 };
 
 fn audit_event_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<AuditEvent> {
@@ -98,6 +102,7 @@ fn audit_event_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<AuditEvent>
         job_run_id: row.get(31)?,
         activity_id: row.get(32)?,
         step_index: row.get(33)?,
+        self_reported_actor: row.get(36)?,
     })
 }
 
@@ -122,7 +127,7 @@ impl Store {
             .lock()
             .map_err(|e| OrbitError::Store(format!("mutex poisoned: {e}")))?;
 
-        insert_audit_event_record_on_connection(&conn, params, None, None)
+        insert_audit_event_record_on_connection(&conn, params, AuditInvocationFields::default())
     }
 
     /// Insert a canonical audit row with the transport-neutral invocation
@@ -131,15 +136,14 @@ impl Store {
     pub fn insert_audit_event_record_with_invocation(
         &self,
         params: &AuditEventInsertParams,
-        trace_id: Option<&str>,
-        caller_ip: Option<&str>,
+        invocation: AuditInvocationFields<'_>,
     ) -> Result<(), OrbitError> {
         let conn = self
             .conn
             .lock()
             .map_err(|e| OrbitError::Store(format!("mutex poisoned: {e}")))?;
 
-        insert_audit_event_record_on_connection(&conn, params, trace_id, caller_ip)
+        insert_audit_event_record_on_connection(&conn, params, invocation)
     }
 }
 
@@ -151,21 +155,28 @@ impl StoreTx<'_> {
         &mut self,
         params: &AuditEventInsertParams,
     ) -> Result<(), OrbitError> {
-        insert_audit_event_record_on_connection(self.connection(), params, None, None)
+        insert_audit_event_record_on_connection(
+            self.connection(),
+            params,
+            AuditInvocationFields::default(),
+        )
     }
 }
 
 fn insert_audit_event_record_on_connection(
     conn: &rusqlite::Connection,
     params: &AuditEventInsertParams,
-    trace_id: Option<&str>,
-    caller_ip: Option<&str>,
+    invocation: AuditInvocationFields<'_>,
 ) -> Result<(), OrbitError> {
     let capabilities_json = serde_json::to_string(&params.effective_capabilities)
         .map_err(|error| OrbitError::Store(format!("serialize MCP capability set: {error}")))?;
     // ORB-10888: the canonical actor is derived from the same label the row
     // stores, by the same alias map the backfill uses, so new rows and
     // migrated rows land in identical aggregate buckets.
+    //
+    // ORB-10890: `invocation.self_reported_actor` is deliberately NOT an input
+    // here. The trusted projection is a function of `role` alone, so a caller's
+    // claim cannot reach any column an authorization or trust decision reads.
     let actor = canonical_actor_for_role_label(&params.role);
 
     conn.execute(
@@ -179,8 +190,8 @@ fn insert_audit_event_record_on_connection(
             capabilities_json, origin_session_id, mcp_call_id, lease_id,
             task_id, job_run_id, activity_id, step_index, trace_id, caller_ip,
             actor_kind, actor_id, actor_vendor, actor_family, actor_model,
-            actor_alias_version
-        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32, ?33, ?34, ?35, ?36, ?37, ?38, ?39, ?40, ?41)"#,
+            actor_alias_version, self_reported_actor
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32, ?33, ?34, ?35, ?36, ?37, ?38, ?39, ?40, ?41, ?42)"#,
         rusqlite::params![
             params.execution_id,
             now_string(),
@@ -215,14 +226,15 @@ fn insert_audit_event_record_on_connection(
             params.job_run_id,
             params.activity_id,
             params.step_index,
-            trace_id,
-            caller_ip,
+            invocation.trace_id,
+            invocation.caller_ip,
             actor.kind.as_str(),
             actor.id,
             actor.vendor,
             actor.family,
             actor.model,
             actor.alias_version,
+            invocation.self_reported_actor,
         ],
     )
         .map_err(|e| OrbitError::Store(e.to_string()))?;
@@ -565,6 +577,96 @@ impl Store {
             })
             .map_err(|e| OrbitError::Store(e.to_string()))?
             .collect::<Result<Vec<_>, _>>()
+        };
+
+        rows.map_err(|e| OrbitError::Store(e.to_string()))
+    }
+
+    /// Per-(actor, attribution) counts for audited tool invocations, over the
+    /// same rows as [`Self::get_audit_tool_call_counts_by_role`] [ORB-10890].
+    ///
+    /// Each row is classified once, into exactly one of three disjoint
+    /// buckets, so the three denominators the caller needs are all readable
+    /// off one result set: filter on `attribution` for authenticated-only or
+    /// self-reported-only, sum for combined.
+    ///
+    /// - **authenticated** — the ORB-10888 actor projection resolved to a real
+    ///   caller (`actor_kind` present and not `unattributed`). Grouped on
+    ///   `actor_id`, so one agent recorded at family, shorthand, and
+    ///   full-model granularity is a single row.
+    /// - **self_reported** — Orbit could not authenticate the caller, but the
+    ///   caller named itself. Grouped on that claim, which is why the bucket
+    ///   is kept separate: the label is only as good as the client's honesty.
+    /// - **anonymous** — neither. This is the residue that motivated the
+    ///   feature, and it stays visible instead of being absorbed.
+    ///
+    /// A NULL `actor_kind` (a row the v16 backfill could not reach) reads as
+    /// unattributed, matching [`Self::get_audit_event_aggregates_by_actor`],
+    /// so it falls through to the self-reported or anonymous bucket rather
+    /// than being counted as authenticated.
+    pub fn get_audit_tool_call_counts_by_attribution(
+        &self,
+        since: Option<&DateTime<Utc>>,
+    ) -> Result<Vec<AuditAttributionAggregate>, OrbitError> {
+        let conn = self.read()?;
+
+        let authenticated = "actor_kind IS NOT NULL AND actor_kind != 'unattributed'";
+        let attribution = format!(
+            "CASE WHEN {authenticated} THEN 'authenticated' \
+             WHEN self_reported_actor IS NOT NULL THEN 'self_reported' \
+             ELSE 'anonymous' END"
+        );
+        let actor = format!(
+            "CASE WHEN {authenticated} THEN actor_id \
+             WHEN self_reported_actor IS NOT NULL THEN self_reported_actor \
+             ELSE '{ANONYMOUS_ACTOR_LABEL}' END"
+        );
+        let window = if since.is_some() {
+            "AND timestamp >= ?1 "
+        } else {
+            ""
+        };
+        let sql = format!(
+            "SELECT {attribution} AS attribution, {actor} AS actor, COUNT(*), \
+             COALESCE(SUM(CASE WHEN status != 'success' THEN 1 ELSE 0 END), 0), \
+             COALESCE(SUM(CASE WHEN subcommand = 'run-mcp' THEN 1 ELSE 0 END), 0), \
+             COALESCE(SUM(CASE WHEN subcommand = 'run' THEN 1 ELSE 0 END), 0) \
+             FROM audit_events \
+             WHERE command = 'tool' \
+               AND subcommand IN ('run', 'run-mcp') \
+               AND tool_name IS NOT NULL \
+               {window}\
+             GROUP BY attribution, actor \
+             ORDER BY COUNT(*) DESC, attribution ASC, actor ASC"
+        );
+
+        let mut stmt = conn
+            .prepare(&sql)
+            .map_err(|e| OrbitError::Store(e.to_string()))?;
+
+        let map_row = |row: &rusqlite::Row<'_>| {
+            let attribution_raw: String = row.get(0)?;
+            let attribution = attribution_raw
+                .parse::<AuditAttribution>()
+                .map_err(|error| invalid_text(0, &attribution_raw, error))?;
+            Ok(AuditAttributionAggregate {
+                attribution,
+                actor: row.get(1)?,
+                total: row.get::<_, i64>(2)? as u64,
+                failed: row.get::<_, i64>(3)? as u64,
+                mcp: row.get::<_, i64>(4)? as u64,
+                cli: row.get::<_, i64>(5)? as u64,
+            })
+        };
+
+        let rows = if let Some(s) = since {
+            stmt.query_map(params![s.to_rfc3339()], map_row)
+                .map_err(|e| OrbitError::Store(e.to_string()))?
+                .collect::<Result<Vec<_>, _>>()
+        } else {
+            stmt.query_map([], map_row)
+                .map_err(|e| OrbitError::Store(e.to_string()))?
+                .collect::<Result<Vec<_>, _>>()
         };
 
         rows.map_err(|e| OrbitError::Store(e.to_string()))

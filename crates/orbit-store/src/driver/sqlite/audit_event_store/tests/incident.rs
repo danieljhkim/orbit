@@ -107,6 +107,7 @@ impl FailureFixture {
             job_run_id: self.run_id.map(str::to_string),
             activity_id: self.activity_id.map(str::to_string),
             step_index: None,
+            self_reported_actor: None,
         }
     }
 }

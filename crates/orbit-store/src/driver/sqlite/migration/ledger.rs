@@ -128,12 +128,20 @@ pub(crate) const MIGRATIONS: &[Migration] = &[
         name: "audit_actor_identity",
         apply: super::apply_audit_actor_identity,
     },
+    // ORB-10890: the untrusted half of attribution. An MCP client started from
+    // its own config cannot satisfy the managed-run trust boundary, so its
+    // self-declared identity lands beside `role` rather than in it.
+    Migration {
+        version: 17,
+        name: "audit_self_reported_actor",
+        apply: super::apply_audit_self_reported_actor,
+    },
 ];
 
 /// Highest schema version this binary knows how to produce. Public for
 /// the future `orbit migrate` surface (P3.4), alongside
 /// [`AppliedMigration`] and the `Store` version accessors.
-pub const SUPPORTED_SCHEMA_VERSION: u32 = 16;
+pub const SUPPORTED_SCHEMA_VERSION: u32 = 17;
 
 const LEDGER_KEY_PREFIX: &str = "migration.v";
 

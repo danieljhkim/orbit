@@ -30,9 +30,9 @@ use super::v2_audit::{V2AuditEventFilter, V2AuditEventInsertParams, V2AuditEvent
 
 use crate::contracts::incident::{FailureIncidentQuery, FailureIncidentReport};
 use crate::contracts::{
-    AuditActorAggregate, AuditEventFilter, AuditEventInsertParams, AuditRoleAggregate,
-    AuditToolAggregate, AuditToolCallCountsByRole, AuditToolCallCountsBySurfaceAndRole,
-    AuditTopToolCall, TaskCompletionByComplexity,
+    AuditActorAggregate, AuditAttributionAggregate, AuditEventFilter, AuditEventInsertParams,
+    AuditRoleAggregate, AuditToolAggregate, AuditToolCallCountsByRole,
+    AuditToolCallCountsBySurfaceAndRole, AuditTopToolCall, TaskCompletionByComplexity,
 };
 
 pub trait TaskStoreBackend: Send + Sync {
@@ -423,6 +423,14 @@ pub trait AuditEventStoreBackend: Send + Sync {
         &self,
         since: Option<&DateTime<Utc>>,
     ) -> Result<Vec<AuditToolCallCountsBySurfaceAndRole>, OrbitError>;
+    /// The same tool-call rows as [`Self::get_audit_tool_call_counts_by_role`],
+    /// classified by how each row's identity was established [ORB-10890]. The
+    /// buckets are disjoint, so authenticated-only, self-reported-only, and
+    /// combined counts all come from one call.
+    fn get_audit_tool_call_counts_by_attribution(
+        &self,
+        since: Option<&DateTime<Utc>>,
+    ) -> Result<Vec<AuditAttributionAggregate>, OrbitError>;
     fn get_audit_top_tool_calls(
         &self,
         since: Option<&DateTime<Utc>>,

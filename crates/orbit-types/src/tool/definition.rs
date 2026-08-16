@@ -44,6 +44,18 @@ pub struct ToolSessionContext {
     pub origin_session_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mcp_call_id: Option<String>,
+    /// Identity the client claimed for itself at session initialize, already
+    /// reduced by `orbit_types::telemetry::normalize_self_reported_actor`
+    /// [ORB-10890].
+    ///
+    /// Session-scoped rather than per-call: `initialize` is the one point in
+    /// the MCP protocol where the client describes itself, and a per-call
+    /// claim would let the same session present a different identity on every
+    /// tool call. It reaches the audit row and nothing else — it is not an
+    /// authenticated principal and never contributes to `role`, agent/model
+    /// resolution, or any authorization decision.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub self_reported_actor: Option<String>,
 }
 
 impl ToolSessionContext {
@@ -73,6 +85,9 @@ impl ToolSessionContext {
             effective_capabilities: BTreeSet::from([McpCapability::Agent]),
             origin_session_id: None,
             mcp_call_id: None,
+            // Trusted defaults describe the accepting machine; a claim only
+            // ever arrives from the client, at initialize.
+            self_reported_actor: None,
         }
     }
 

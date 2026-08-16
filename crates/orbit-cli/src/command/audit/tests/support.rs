@@ -46,6 +46,7 @@ fn audit_list_json_projection_shape_is_stable() {
         job_run_id: Some("jrun-1".to_string()),
         activity_id: Some("implement".to_string()),
         step_index: Some(2),
+        self_reported_actor: Some("claude-code".to_string()),
     };
 
     assert_eq!(
@@ -87,6 +88,9 @@ fn audit_list_json_projection_shape_is_stable() {
             "job_run_id": "jrun-1",
             "activity_id": "implement",
             "step_index": 2,
+            // ORB-10890: carried under its own key, next to but never merged
+            // with the authenticated `role` above.
+            "self_reported_actor": "claude-code",
         })
     );
 }

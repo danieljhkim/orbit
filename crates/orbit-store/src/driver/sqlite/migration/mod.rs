@@ -1225,6 +1225,31 @@ fn apply_audit_actor_identity(conn: &Connection) -> Result<(), OrbitError> {
     backfill_audit_actor_identity(conn)
 }
 
+/// v17 `audit_self_reported_actor` migration (ORB-10890): record the identity
+/// an unauthenticated caller claims for itself in a column of its own.
+///
+/// Strictly additive and deliberately **not** backfilled. Every existing row
+/// was written before any claim was collected, so there is no claim to recover;
+/// deriving one from `role` would retroactively attribute traffic Orbit never
+/// authenticated. Existing `unverified` rows therefore stay valid and read as
+/// anonymous.
+fn apply_audit_self_reported_actor(conn: &Connection) -> Result<(), OrbitError> {
+    ensure_audit_events_schema(conn)?;
+
+    add_column_if_missing(
+        conn,
+        "ALTER TABLE audit_events ADD COLUMN self_reported_actor TEXT",
+    )?;
+
+    conn.execute_batch(
+        r#"
+            CREATE INDEX IF NOT EXISTS idx_audit_events_self_reported_actor
+            ON audit_events(self_reported_actor);
+        "#,
+    )
+    .map_err(|error| OrbitError::Store(error.to_string()))
+}
+
 /// Derive the actor columns for every row whose stamped alias version is not
 /// the current one.
 ///
