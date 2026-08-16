@@ -285,7 +285,8 @@ fn seed_task(
             status: Some(status),
             // `TaskAddParams::complexity` became required at create time
             // [ORB-10892]; `None` here is the fixture's "nothing was assessed",
-            // which that surface spells `Unassessed`.
+            // which that surface spells `Unassessed` and which the reporting
+            // buckets fold into `unset` [ORB-10895].
             complexity: complexity.unwrap_or(TaskComplexity::Unassessed),
             workspace_path: Some(".".to_string()),
             ..Default::default()

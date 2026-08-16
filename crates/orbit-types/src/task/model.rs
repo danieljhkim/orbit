@@ -83,6 +83,24 @@ pub fn labeled_or_unset(value: Option<&str>) -> &str {
     }
 }
 
+/// Map an indexed complexity label onto a display bucket.
+///
+/// [`TaskComplexity::Unassessed`] is the stored spelling of "nobody assessed
+/// this" ([`TaskComplexity::is_assessed`] is `false`), and rows indexed before
+/// the column existed spell the same thing as `NULL`. Reporting surfaces get
+/// one bucket for that concept — [`UNSET_BUCKET`] — rather than splitting the
+/// unlabeled set across `unset` and `unassessed` (ORB-10895). The fold happens
+/// here, at read time: the persisted and indexed value stays the literal
+/// `unassessed` so provenance and `NULL`-backfill detection remain honest.
+pub fn complexity_bucket(value: Option<&str>) -> &str {
+    let label = labeled_or_unset(value);
+    if label == TaskComplexity::Unassessed.as_str() {
+        UNSET_BUCKET
+    } else {
+        label
+    }
+}
+
 /// Stable display order: `unset`, then `low` / `medium` / `hard`, then any
 /// unexpected label alphabetically.
 pub fn complexity_bucket_ord(label: &str) -> (u8, &str) {
