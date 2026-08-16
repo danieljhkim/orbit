@@ -8,9 +8,9 @@
   <em>The Orbit dashboard (<code>orbit web serve</code>) — task backlog, live audit log, per-agent scoreboard.</em>
 </p>
 
-**Orbit brings engineering rigor to AI-assisted coding. Tasks for every change, ADRs for load-bearing decisions, structured audit of every tool call and provider exchange, conflict-aware parallel dispatch — local-first.**
+**Orbit brings engineering rigor to AI-assisted coding. Tasks for every change, decisions recorded beside the code they explain, structured audit of every tool call and provider exchange, conflict-aware parallel dispatch — local-first.**
 
-You drive Claude Code, Codex, Grok Build, or Gemini CLI against real code, often in parallel. Agents make it easy to skip the disciplines that keep code maintainable — no plan, no decision record, no audit trail, just prompt-and-merge. Six months later you can't reconstruct why an agent wrote a given line. Orbit makes those disciplines cheap and enforces them by default: tasks before edits, ADRs for load-bearing decisions, every tool call landing in a structured audit log, parallel runs sandboxed into worktrees with file-level locks.
+You drive Claude Code, Codex, Grok Build, or Gemini CLI against real code, often in parallel. Agents make it easy to skip the disciplines that keep code maintainable — no plan, no decision record, no audit trail, just prompt-and-merge. Six months later you can't reconstruct why an agent wrote a given line. Orbit makes those disciplines cheap and enforces them by default: tasks before edits, load-bearing decisions written into the feature's design docs, every tool call landing in a structured audit log, parallel runs sandboxed into worktrees with file-level locks.
 
 The constraints are the point — they're what keep agent-assisted code shippable at volume. And the history of decisions lives right alongside the code, so that agents (and you) can reconstruct how the code came to be.
 
@@ -20,9 +20,11 @@ The constraints are the point — they're what keep agent-assisted code shippabl
 
 - **Durable, intent-tracked task layer.** Lifecycle (`proposed → backlog → in-progress → review → done`) survives sessions and branches; every commit carries the `task_id`, so `orbit task show` reconstructs prompt, plan, execution trace, and review threads months later. → [docs/design/task-artifacts/](docs/design/task-artifacts/)
 
-- **ADRs as first-class state.** Capture load-bearing decisions as ADR artifacts with status lifecycle (`proposed → accepted → superseded`), owner, related_tasks/features, and supersession chains — authored and queried via `orbit.adr.*`, cross-referenced from task IDs and commit messages. → [.orbit/adrs/](.orbit/adrs/)
+- **Decisions live beside the code they explain.** A load-bearing decision is a titled section in its feature's `docs/design/<feature>/4_decisions.md` — context, decision, consequences, and an explicit cost — reviewed in the same PR as the code and indexed with the ordinary docs corpus. Two admission doors keep the file honest: the decision either explains a specific surprising code site or governs decisions the project hasn't hit yet. → [docs/design/CONVENTIONS.md](docs/design/CONVENTIONS.md)
 
-- **Shared learnings, smarter agents.** Non-obvious knowledge — gotchas, root causes, validated approaches — captured once as scoped `L<date>-N` records that inject into any agent's context automatically when relevant code is touched (engine pre-prompt, MCP sidecar, optional `PreToolUse` hook). Authored via `orbit.learning.*`, checked into git so what one agent learns the next one inherits. → [docs/design/project-learnings/](docs/design/project-learnings/)
+- **A searchable docs corpus.** Register the markdown you already write — designs, runbooks, patterns — with `orbit docs add`, and agents retrieve it by concept instead of by filename: `orbit search --kind doc <query>` ranks against locked frontmatter, and `orbit docs index` plus `--hybrid` adds body-level embedding recall. → [docs/design/orbit-docs/](docs/design/orbit-docs/)
+
+- **A friction ledger for what the tooling gets wrong.** When Orbit itself is the obstacle — a confusing error, a missing flag, a misleading prompt — the agent files it (`orbit friction add`, or `orbit_friction_add` over MCP) instead of silently working around it. Records are triaged (`open → triaged → resolved`) and a task carrying `relations: [{"type": "resolves", ...}]` closes its friction on reaching `done`.
 
 - **Structured audit log.** Every tool call, provider request/response, and task transition becomes a queryable event with agent identity attached — append-only, tamper-evident, exportable. → [docs/design/auditability/](docs/design/auditability/)
 
@@ -57,7 +59,7 @@ Paste the prompt below into your agent (Claude Code, Codex CLI, or Gemini CLI) *
 >
 > I am a staff/principal/founding engineer who already uses multiple coding agents heavily (Claude Code, Codex, Gemini, Aider, etc.) and has started to feel the long-term maintainability cost of moving fast without enough structure.
 >
-> Your job is to install and configure Orbit inside this repository so that I can keep using my existing agents while gaining durable tasks, structured audit, ADRs, and safe parallel execution.
+> Your job is to install and configure Orbit inside this repository so that I can keep using my existing agents while gaining durable tasks, structured audit, a searchable docs corpus, and safe parallel execution.
 >
 > Follow these steps carefully:
 >
@@ -72,7 +74,7 @@ Paste the prompt below into your agent (Claude Code, Codex CLI, or Gemini CLI) *
 >    - `docs/POSITIONING.md` — what Orbit is for, what it isn't (especially "who this is for")
 >    - `CLAUDE.md` — agent operating rules (commit timing, task ID convention, lint constraints)
 >    - `ARCHITECTURE.md` — crate layering and dependency rules
->    - `docs/design/CONVENTIONS.md` — design-doc structure
+>    - `docs/design/CONVENTIONS.md` — design-doc structure, and the admission test for what earns a decision entry
 >    - `docs/CONFIG.md` — config reference: crew/workflow knobs and per-task crew override
 > 8. After setup, run `orbit task list` and `orbit semantic stats` and show me the output.
 > 9. Ask me what my first real task should be and create it properly using Orbit's task surface (use the `orbit-task` skill — it should be auto-discovered after step 5).
@@ -122,8 +124,11 @@ TASK_ID=$(orbit task add \
 
 orbit task update "$TASK_ID" --status backlog   # approve into the backlog
 
-# conflict-aware, parallel flush of the backlog tasks to PRs
+# conflict-aware, parallel flush of the backlog tasks to PRs.
+# jobs are asynchronous: this submits and returns a run id immediately.
 orbit run ship
+orbit run history -j task_auto_pipeline   # what got submitted
+orbit run show <RUN_ID>                   # step-by-step progress
 
 # launch interactive dashboard — one view over every registered workspace,
 # from any directory. The header selector preselects the workspace for the
@@ -179,7 +184,7 @@ Customizing crews (which provider-model runs a task) and the base branch: see [d
 
 ## Semantic Search (optional)
 
-`orbit search` is the unified query surface for tasks, docs, learnings, and ADRs. It defaults to lexical matching. Opt into hybrid embedding ranking over task fields or indexed docs with `--hybrid`, or find cosine-neighbor tasks with `orbit search similar <task-id>`. The embedder runs as a separate companion subprocess, so semantic search has zero cost when unused.
+`orbit search` is the unified query surface over three corpora — `--kind task`, `--kind doc`, `--kind friction`, or `--kind all`. It defaults to lexical matching. Opt into hybrid embedding ranking over task fields or indexed docs with `--hybrid`, or find cosine-neighbor tasks with `orbit search similar <task-id>`. The embedder runs as a separate companion subprocess, so semantic search has zero cost when unused.
 
 The semantic companion is released for macOS arm64 and Linux x86_64/aarch64
 with glibc >= 2.38 (Ubuntu 24.04 or equivalent). Intel macOS can run the
@@ -196,7 +201,7 @@ orbit search "why tasks serialize ORB ids" --hybrid --kind doc
 orbit search similar ORB-00042
 ```
 
-After install, task writes are embedded automatically in the background; `orbit semantic index` is only needed for the initial task backfill. Docs are indexed explicitly with `orbit docs index`, which skips unchanged content hashes and sweeps stale doc paths. Companion + models live under `~/.orbit/embed/`; the per-workspace index is `.orbit/state/semantic.db`. Learnings and ADRs remain lexical even when `--hybrid` is set.
+After install, task writes are embedded automatically in the background; `orbit semantic index` is only needed for the initial task backfill. Docs are indexed explicitly with `orbit docs index`, which skips unchanged content hashes and sweeps stale doc paths. Companion + models live under `~/.orbit/embed/`; the per-workspace index is `.orbit/state/semantic.db`. Only tasks and docs are embedded — friction results stay lexical even when `--hybrid` is set.
 
 ---
 
@@ -246,9 +251,8 @@ codex plugin add orbit@orbit
 `orbit workspace init` seeds skill files under `~/.orbit/skills/` and symlinks them into `~/.claude/skills/` and `~/.agents/skills/`, so Claude Code, Codex, and Gemini CLI discover them at session start with no per-agent configuration. The router skill (`orbit`) classifies intent; workflow-specific skills do the work:
 
 - `orbit-task` — author a task, carry it through implementation and review, file findings on another agent's work, or capture agent-self-reported tooling friction
-- `orbit-workflow` — use jobs, activities, routines, and `orbit sweep`/`orbit run`; diagnose failed, stuck, or cancelled runs
-- `orbit-search` — search tasks, docs, learnings, and ADRs; dedup and related-task lookups; docs-corpus admin
-- `orbit-knowledge` — author, accept, or supersede learnings and Architecture Decision Records
+- `orbit-workflow` — use jobs, activities, routines, and `orbit sweep`/`orbit run`; diagnose failed, stuck, or cancelled runs; run task-pilot preflight
+- `orbit-search` — search tasks, docs, and frictions; dedup and related-task lookups; docs-corpus admin
 
 First-time onboarding (`.orbit/` absent) and "what is orbit" tour requests are handled by the `orbit` skill itself, via its bundled setup reference.
 
@@ -306,21 +310,32 @@ are audit metadata only; future authorization belongs in Core.
 └── state/
     ├── worktrees/               # live git worktrees for agent runs
     ├── logs/                    # captured agent stdout/stderr
-    └── scoreboard/              # rolling counters (PRs, reviews, etc.)
+    ├── job-runs/                # per-run step state and checkpoints
+    ├── audit/                   # workspace-local audit spool
+    ├── diagnostics/             # doctor / health-check output
+    ├── scoreboard/              # rolling counters (PRs, runs, etc.)
+    ├── semantic.db              # embedding index for tasks and docs
+    └── layout.version           # layout migration marker
 
 ~/.orbit/                        # global (machine-level, survives repo moves)
 ├── tasks/
 │   ├── index.sqlite             # authority for ORB-XXXXX IDs
 │   └── workspaces/<workspace-id>/<task-id>/   # canonical task bundles
+├── orbit.db                     # host-global store: audit events, job runs,
+│                                #   routines, frictions
+├── workspaces.json              # workspace registry for this machine
+├── resources/                   # shipped activities, jobs, executors, policies
 ├── skills/                      # SKILL.md files (routable via MCP)
 ├── embed/                       # semantic companion binary + models
-└── config.toml                  # global settings
+├── config.toml                  # global settings
+└── host.toml                    # machine identity: machine_id, host_id,
+                                 #   task_prefix
 ```
 
 Couple things to note:
 - **`tasks/`** is a projection. Canonical task bundles live under `~/.orbit/tasks/workspaces/<workspace-id>/<task-id>/` so they survive repo moves; `.orbit/tasks/` is rebuildable from the canonical store. See [docs/design/task-artifacts/](docs/design/task-artifacts/).
 
-- Global state — credentials, the canonical task store, and cross-workspace config — lives under `~/.orbit/`, created by `orbit init`. The recommended `.gitignore` pattern is `.orbit/*` with `!.orbit/adrs/` and `!.orbit/learnings/` un-ignored, so local runtime state stays out of the repo while project memory stays in.
+- Global state — credentials, the canonical task store, and cross-workspace config — lives under `~/.orbit/`, created by `orbit init`. The recommended `.gitignore` pattern is `.orbit/*` with `!.orbit/auto_tasks/`, `!.orbit/resources/`, `!.orbit/routines/`, and `!.orbit/config.toml` un-ignored, so local runtime state stays out of the repo while the definitions your team authors stay in. `orbit workspace init` seeds this pattern.
 
 - Operating this state day-2 — backup/restore, stuck-job debugging, corrupted-DB recovery, log rotation, health checks (`orbit doctor`, `/healthz`), and upgrades (`orbit migrate`) — is covered in the [runbook index](docs/INDEX.md#runbooks).
 
@@ -328,11 +343,15 @@ Couple things to note:
 
 ## Current Status
 
-Pre-1.0 and under active development. Breaking changes ride a minor bump (`0.9.x → 0.10.0`); see [CHANGELOG.md](CHANGELOG.md) and [RELEASING.md](RELEASING.md).
+Pre-1.0 and under active development. Breaking changes ride a minor bump (`0.10.x → 0.11.0`); see [CHANGELOG.md](CHANGELOG.md) and [RELEASING.md](RELEASING.md).
 
-- Core local execution, workflows, MCP, tasks, reviews, ADRs, frictions, and audit infrastructure are usable today.
-- The former parsed code-graph subsystem was removed under ADR-0291. Agents inspect
-  source with `grep`/`rg` and direct file reads.
+- Core local execution, workflows, MCP, tasks, docs, frictions, and audit infrastructure are usable today.
+- 0.11.0 removed two native knowledge stores. `orbit adr` / `orbit.adr.*` and
+  `orbit learning` / `orbit.learning.*` are gone: decisions now live in each
+  feature's `4_decisions.md`, and durable know-how goes to the docs corpus,
+  tasks, or a friction record. Workspaces migrate on open.
+- The former parsed code-graph subsystem is also gone. Agents inspect source
+  with `grep`/`rg` and direct file reads.
 
 ---
 
