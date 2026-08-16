@@ -2,9 +2,9 @@ use chrono::{DateTime, Utc};
 use orbit_common::OrbitError;
 use orbit_common::observability::audit_id::audit_execution_id;
 use orbit_store::contracts::{
-    AuditEventFilter, AuditEventInsertParams, AuditRoleAggregate, AuditToolAggregate,
-    AuditToolCallCountsByRole, AuditToolCallCountsBySurfaceAndRole, AuditTopToolCall,
-    FailureIncidentQuery, FailureIncidentReport,
+    AuditActorAggregate, AuditEventFilter, AuditEventInsertParams, AuditRoleAggregate,
+    AuditToolAggregate, AuditToolCallCountsByRole, AuditToolCallCountsBySurfaceAndRole,
+    AuditTopToolCall, FailureIncidentQuery, FailureIncidentReport,
 };
 use orbit_types::telemetry::{AuditEvent, AuditEventStatus, AuditStats};
 
@@ -244,6 +244,23 @@ impl OrbitRuntime {
         self.stores()
             .audit_events()
             .get_audit_event_aggregates_by_role(since)
+    }
+
+    /// Per-canonical-actor aggregate of audit events at or after `since`
+    /// [ORB-10888].
+    ///
+    /// Same window and same MCP-vs-CLI split as
+    /// [`Self::audit_event_aggregates_by_role`], but grouped on the canonical
+    /// actor: one agent recorded as `claude`, `opus`, and `claude-opus-5` is a
+    /// single row, and `kind` separates synthetic and human actors from real
+    /// agents without matching on the label.
+    pub fn audit_event_aggregates_by_actor(
+        &self,
+        since: &DateTime<Utc>,
+    ) -> Result<Vec<AuditActorAggregate>, OrbitError> {
+        self.stores()
+            .audit_events()
+            .get_audit_event_aggregates_by_actor(since)
     }
 
     /// Failure incidents grouped from the raw failed/denied audit rows in

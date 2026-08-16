@@ -30,8 +30,9 @@ use super::v2_audit::{V2AuditEventFilter, V2AuditEventInsertParams, V2AuditEvent
 
 use crate::contracts::incident::{FailureIncidentQuery, FailureIncidentReport};
 use crate::contracts::{
-    AuditEventFilter, AuditEventInsertParams, AuditRoleAggregate, AuditToolAggregate,
-    AuditToolCallCountsByRole, AuditToolCallCountsBySurfaceAndRole, AuditTopToolCall,
+    AuditActorAggregate, AuditEventFilter, AuditEventInsertParams, AuditRoleAggregate,
+    AuditToolAggregate, AuditToolCallCountsByRole, AuditToolCallCountsBySurfaceAndRole,
+    AuditTopToolCall,
 };
 
 pub trait TaskStoreBackend: Send + Sync {
@@ -423,6 +424,12 @@ pub trait AuditEventStoreBackend: Send + Sync {
         &self,
         since: &DateTime<Utc>,
     ) -> Result<Vec<AuditRoleAggregate>, OrbitError>;
+    /// The same window as [`Self::get_audit_event_aggregates_by_role`], grouped
+    /// by canonical actor instead of the raw `role` label [ORB-10888].
+    fn get_audit_event_aggregates_by_actor(
+        &self,
+        since: &DateTime<Utc>,
+    ) -> Result<Vec<AuditActorAggregate>, OrbitError>;
     /// Failure incidents grouped from the raw failed/denied rows in `query`'s
     /// window [ORB-10871]. A derived view: it neither mutates nor withholds
     /// any row that `list_audit_events` would return.

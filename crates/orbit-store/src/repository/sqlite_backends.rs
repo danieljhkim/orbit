@@ -140,6 +140,13 @@ impl AuditEventStoreBackend for SqliteAuditEventStoreBackend {
         self.store.get_audit_event_aggregates_by_role(since)
     }
 
+    fn get_audit_event_aggregates_by_actor(
+        &self,
+        since: &DateTime<Utc>,
+    ) -> Result<Vec<crate::AuditActorAggregate>, OrbitError> {
+        self.store.get_audit_event_aggregates_by_actor(since)
+    }
+
     fn get_failure_incidents(
         &self,
         query: &crate::FailureIncidentQuery,

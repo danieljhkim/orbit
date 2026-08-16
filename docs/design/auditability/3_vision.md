@@ -77,6 +77,7 @@ Orbit-internal:
 - [specs/event-schema.md](./specs/event-schema.md) — prescriptive event-channel contract.
 - [specs/coverage-matrix.md](./specs/coverage-matrix.md) — expected audit coverage by operation class.
 - [specs/redaction-retention.md](./specs/redaction-retention.md) — write-side redaction and retention boundaries.
+- [specs/actor-identity.md](./specs/actor-identity.md) — canonical actor projection and its versioned alias map.
 - [../activity-job/specs/audit-envelope.md](../activity-job/specs/audit-envelope.md) — v2 activity/job audit envelope spec.
 - [../../../README.md](../../../README.md) — product-level auditability commitments and public status.
 - [../../POSITIONING.md](../../POSITIONING.md) — auditability as a non-negotiable.

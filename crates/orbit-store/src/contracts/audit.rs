@@ -100,3 +100,23 @@ pub struct AuditRoleAggregate {
     pub mcp: i64,
     pub cli: i64,
 }
+
+/// Per-canonical-actor aggregate of audit events (ORB-10888).
+///
+/// The grouping key is `(kind, actor)`, so every granularity of one agent —
+/// `claude`, `opus`, `claude-opus-5` — lands in a single row. `model` is
+/// deliberately absent from the key: it is the finer grain that the raw
+/// `role`-grouped aggregate already splits on.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AuditActorAggregate {
+    /// [`orbit_types::telemetry::ActorKind`] as its wire string.
+    pub kind: String,
+    /// Canonical grouping key within `kind`: the agent family for agents, the
+    /// canonical label otherwise.
+    pub actor: String,
+    pub vendor: Option<String>,
+    pub family: Option<String>,
+    pub total: i64,
+    pub mcp: i64,
+    pub cli: i64,
+}

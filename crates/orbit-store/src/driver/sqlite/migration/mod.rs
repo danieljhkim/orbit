@@ -1,6 +1,7 @@
 use std::path::Path;
 
 use orbit_common::OrbitError;
+use orbit_types::telemetry::{ACTOR_ALIAS_MAP_VERSION, canonical_actor_for_role_label};
 use rusqlite::Connection;
 
 mod feature;
@@ -1191,6 +1192,81 @@ fn apply_invocation_audit_context(conn: &Connection) -> Result<(), OrbitError> {
         "#,
     )
     .map_err(|error| OrbitError::Store(error.to_string()))
+}
+
+/// v16 `audit_actor_identity` migration (ORB-10888): materialize the canonical
+/// actor identity beside the overloaded `role` label, then backfill it for
+/// every existing row so a 30d/90d window stays comparable across the change.
+///
+/// `role` itself is never read back into, rewritten, or reinterpreted here —
+/// trust classification keeps reading exactly the bytes it read before.
+fn apply_audit_actor_identity(conn: &Connection) -> Result<(), OrbitError> {
+    ensure_audit_events_schema(conn)?;
+
+    for sql in [
+        "ALTER TABLE audit_events ADD COLUMN actor_kind TEXT",
+        "ALTER TABLE audit_events ADD COLUMN actor_id TEXT",
+        "ALTER TABLE audit_events ADD COLUMN actor_vendor TEXT",
+        "ALTER TABLE audit_events ADD COLUMN actor_family TEXT",
+        "ALTER TABLE audit_events ADD COLUMN actor_model TEXT",
+        "ALTER TABLE audit_events ADD COLUMN actor_alias_version INTEGER",
+    ] {
+        add_column_if_missing(conn, sql)?;
+    }
+
+    conn.execute_batch(
+        r#"
+            CREATE INDEX IF NOT EXISTS idx_audit_events_actor
+            ON audit_events(actor_kind, actor_id);
+        "#,
+    )
+    .map_err(|error| OrbitError::Store(error.to_string()))?;
+
+    backfill_audit_actor_identity(conn)
+}
+
+/// Derive the actor columns for every row whose stamped alias version is not
+/// the current one.
+///
+/// The mapping runs through the same Rust alias map the insert path uses, keyed
+/// on `SELECT DISTINCT role` — a handful of labels, not a row-by-row pass — so
+/// a new model never requires an SQL edit here. A later alias-map version bump
+/// re-runs this from its own append-only ledger entry.
+pub(crate) fn backfill_audit_actor_identity(conn: &Connection) -> Result<(), OrbitError> {
+    let labels = {
+        let mut stmt = conn
+            .prepare(
+                "SELECT DISTINCT role FROM audit_events \
+                 WHERE actor_alias_version IS NULL OR actor_alias_version != ?1",
+            )
+            .map_err(|error| OrbitError::Store(error.to_string()))?;
+        let rows = stmt
+            .query_map([ACTOR_ALIAS_MAP_VERSION], |row| row.get::<_, String>(0))
+            .map_err(|error| OrbitError::Store(error.to_string()))?;
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(|error| OrbitError::Store(error.to_string()))?
+    };
+
+    for label in labels {
+        let actor = canonical_actor_for_role_label(&label);
+        conn.execute(
+            "UPDATE audit_events SET actor_kind = ?1, actor_id = ?2, actor_vendor = ?3, \
+             actor_family = ?4, actor_model = ?5, actor_alias_version = ?6 \
+             WHERE role = ?7 AND (actor_alias_version IS NULL OR actor_alias_version != ?6)",
+            rusqlite::params![
+                actor.kind.as_str(),
+                actor.id,
+                actor.vendor,
+                actor.family,
+                actor.model,
+                actor.alias_version,
+                label,
+            ],
+        )
+        .map_err(|error| OrbitError::Store(error.to_string()))?;
+    }
+
+    Ok(())
 }
 
 fn ensure_task_reservations_schema(conn: &Connection) -> Result<(), OrbitError> {

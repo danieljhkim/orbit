@@ -120,12 +120,20 @@ pub(crate) const MIGRATIONS: &[Migration] = &[
         name: "invocation_audit_context",
         apply: super::apply_invocation_audit_context,
     },
+    // ORB-10888: `role` alone conflates agent families, model strings, system
+    // markers, and unattributed markers. The canonical actor projection lands
+    // beside it and is backfilled for existing rows.
+    Migration {
+        version: 16,
+        name: "audit_actor_identity",
+        apply: super::apply_audit_actor_identity,
+    },
 ];
 
 /// Highest schema version this binary knows how to produce. Public for
 /// the future `orbit migrate` surface (P3.4), alongside
 /// [`AppliedMigration`] and the `Store` version accessors.
-pub const SUPPORTED_SCHEMA_VERSION: u32 = 15;
+pub const SUPPORTED_SCHEMA_VERSION: u32 = 16;
 
 const LEDGER_KEY_PREFIX: &str = "migration.v";
 
