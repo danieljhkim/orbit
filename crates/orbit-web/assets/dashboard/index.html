@@ -67,9 +67,10 @@
           <section class="panel" id="tasks-panel">
             <header><span>Tasks</span><span class="count" id="tasks-count">-</span></header>
             <div class="controls">
-              <input type="search" id="task-search" placeholder="Search ID or title..." autocomplete="off" spellcheck="false" />
-              <div id="task-filter"></div>
+              <input type="search" id="task-search" placeholder="Search ID or title..." autocomplete="off" spellcheck="false" aria-label="Search tasks by ID or title" />
+              <div id="task-filter" role="group" aria-label="Filter tasks by status"></div>
             </div>
+            <div class="filter-summary" id="task-filter-summary" role="status" aria-live="polite"></div>
             <div class="body" id="tasks-body">
               <div class="skeleton-state">
                 <div class="skeleton skeleton-row"></div>
@@ -85,11 +86,13 @@
             <div class="body" id="locks-body"></div>
           </section>
           <section class="panel" id="log-panel">
+            <div class="log-resize-handle" id="log-panel-resize" role="separator" aria-orientation="horizontal" aria-label="Resize log panel" tabindex="0" title="Drag or use arrow keys to resize"></div>
             <header class="head">
               <div class="title"><span class="live-dot"></span>orbit.log <span style="color: var(--fg-dim); font-family: var(--font-mono); font-weight: 400; letter-spacing: 0; text-transform: none;">— tail -F</span></div>
               <div class="actions">
                 <span class="count" id="log-count" style="background: var(--bg-elev); padding: 1px 8px; border: 1px solid var(--border); border-radius: 3px; font-family: var(--font-mono); font-size: 11px;">0</span>
                 <span class="count" id="log-buffered-count" style="display: none; cursor: pointer; background: var(--bg-elev); padding: 1px 8px; border: 1px solid var(--border); border-radius: 3px; font-family: var(--font-mono); font-size: 11px; margin-left: 6px;">0 buffered</span>
+                <button type="button" class="log-panel-toggle" id="log-panel-toggle" aria-expanded="true" aria-controls="logInner" title="Collapse or expand the log panel">collapse</button>
               </div>
             </header>
             <div class="log-stream">

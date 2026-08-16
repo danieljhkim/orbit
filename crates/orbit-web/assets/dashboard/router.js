@@ -223,6 +223,13 @@ function setActiveTabImpl(ctx, raw, opts = {}) {
     const sub = KNOWLEDGE_SUBTABS.includes(segments[1]) ? segments[1] : ctx.getKnowledgeSubtab();
     setKnowledgeSubtabImpl(ctx, sub);
     hash = `#knowledge/${sub}`;
+  } else if (top === "tasks") {
+    // ORB-10874: the status chips and search box are represented in the hash
+    // (mirroring the audit tab) so they survive a reload or the browser's
+    // back/forward navigation instead of resetting to the in-memory default.
+    if (ctx.applyTasksHashQuery) ctx.applyTasksHashQuery(query);
+    if (ctx.syncTaskControls) ctx.syncTaskControls();
+    hash = ctx.buildTasksHash ? ctx.buildTasksHash() : "#tasks";
   } else {
     hash = `#${top}`;
   }

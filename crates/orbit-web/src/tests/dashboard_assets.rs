@@ -841,6 +841,165 @@ fn dashboard_task_write_actions_are_configuration_free() {
     );
 }
 
+/// ORB-10874: the Tasks count previously read an ambiguous `N/50` with no way
+/// to tell a total from a page size from a hard cap. It must now state which
+/// number means what, using the `/api/tasks` paging envelope
+/// (`{ items, total, limit, truncated }`, ORB-10400) when it is available.
+#[test]
+fn dashboard_task_count_states_shown_total_and_server_limit_explicitly() {
+    let tasks = include_str!("../../assets/dashboard/tasks.js");
+
+    assert!(
+        tasks.contains("export function formatTaskCount("),
+        "the count formatter must be a standalone, testable function"
+    );
+    assert!(
+        tasks.contains("shown") && tasks.contains("total") && tasks.contains("server limit"),
+        "the formatter must use explicit shown/total/server-limit language"
+    );
+    assert!(
+        !tasks.contains("filtered.length}/${tasks.length}"),
+        "the old ambiguous `N/M` shorthand must be gone"
+    );
+    assert!(
+        tasks.contains("$(\"tasks-count\").textContent = formatTaskCount("),
+        "the rendered count must go through the explicit formatter"
+    );
+}
+
+/// ORB-10874: the status chips and search box are represented in the tasks
+/// hash so a reload or the browser's back/forward button restores the same
+/// filtered view, mirroring the audit tab's existing buildAuditHash /
+/// applyAuditHashQuery pair. A visible summary line states the active filter
+/// in words, not just via chip color.
+#[test]
+fn dashboard_task_filters_are_represented_in_the_url_and_summarized() {
+    let tasks = include_str!("../../assets/dashboard/tasks.js");
+    let router = include_str!("../../assets/dashboard/router.js");
+    let index = include_str!("../../assets/dashboard/index.html");
+
+    assert!(
+        tasks.contains("export function buildTasksHash(")
+            && tasks.contains("export function applyTasksHashQuery(")
+            && tasks.contains("export function syncTaskControls("),
+        "tasks.js must expose a hash build/apply/sync trio like audit.js does"
+    );
+    assert!(
+        router.contains("ctx.applyTasksHashQuery(query)")
+            && router.contains("ctx.buildTasksHash()"),
+        "the router must apply and rebuild the tasks hash on every tasks-tab route"
+    );
+    assert!(
+        tasks.contains("function renderFilterSummary("),
+        "the active filter must be restated as text, not only via chip color"
+    );
+    assert!(
+        index.contains(r#"id="task-filter-summary""#) && index.contains(r#"aria-live="polite""#),
+        "the filter summary element must exist and announce updates to assistive tech"
+    );
+}
+
+/// ORB-10874: switching the workspace selector only updated in-memory state,
+/// so a reload silently fell back to the server's default workspace instead
+/// of the one the operator had selected.
+#[test]
+fn dashboard_workspace_selection_persists_to_the_url() {
+    let app = include_str!("../../assets/dashboard/app.js");
+
+    assert!(
+        app.contains("function persistWorkspaceToUrl(")
+            && app.contains("persistWorkspaceToUrl(select.value)"),
+        "the workspace selector must persist its choice to the URL on every change"
+    );
+}
+
+/// ORB-10874: the live `orbit.log` panel can now be collapsed and resized,
+/// and the presentation choice is remembered locally (not shared/synced
+/// state, so localStorage rather than the URL). The task list keeps an
+/// explicit minimum height so it can never be squeezed toward zero.
+#[test]
+fn dashboard_log_panel_is_collapsible_resizable_and_remembers_presentation() {
+    let log_tail = include_str!("../../assets/dashboard/log-tail.js");
+    let index = include_str!("../../assets/dashboard/index.html");
+    let css = include_str!("../../assets/dashboard/dashboard.css");
+
+    assert!(
+        log_tail.contains("orbit.dashboard.logPanel"),
+        "the log panel's collapsed/height preference must persist to localStorage"
+    );
+    assert!(
+        log_tail.contains("function wireLogPanelToggle(")
+            && log_tail.contains("function wireLogPanelResizeHandle("),
+        "the log panel must offer both a collapse toggle and a resize handle"
+    );
+    assert!(
+        index.contains(r#"id="log-panel-toggle""#) && index.contains(r#"id="log-panel-resize""#),
+        "the toggle and resize handle must exist in the markup"
+    );
+    assert!(
+        css.contains("#log-panel.collapsed") && css.contains(".log-resize-handle"),
+        "the collapsed state and the resize handle must be styled"
+    );
+    assert!(
+        css.contains("#tasks-panel > .body") && css.contains("min-height: 240px;"),
+        "the task list must keep a guaranteed minimum usable height regardless of log panel state"
+    );
+}
+
+/// ORB-10874: inline status/crew edits must show a pending state, refuse a
+/// second submission while one is in flight, report durable success/failure
+/// text (not just console.error), and offer a bounded undo while the prior
+/// value can still be safely restored.
+#[test]
+fn dashboard_inline_task_edits_report_pending_success_failure_and_offer_undo() {
+    let tasks = include_str!("../../assets/dashboard/tasks.js");
+
+    assert!(
+        tasks.contains(r#"{ kind: "pending", text: "saving…" }"#),
+        "a status/crew change must show a pending state"
+    );
+    assert!(
+        tasks.contains(r#"kind: "success""#) && tasks.contains(r#"kind: "error""#),
+        "a status/crew change must report durable success or failure feedback"
+    );
+    assert!(
+        tasks.contains("class: \"mutation-undo\", text: \"undo\""),
+        "a successful change must offer an undo control"
+    );
+    assert!(
+        tasks.contains("MUTATION_UNDO_WINDOW_MS") && tasks.contains("scheduleFeedbackExpiry("),
+        "undo must be bounded to a window, not offered indefinitely"
+    );
+    assert!(
+        tasks.contains("(feedback && feedback.kind === \"pending\")"),
+        "the control must disable itself while its own change is pending"
+    );
+}
+
+/// ORB-10874: in the aggregate ("All workspaces") view there is no ambient
+/// workspace to scope a status/crew mutation to. A task fetched through
+/// /api/tasks/all carries its own workspace_id (ORB-00037); mutation is
+/// refused unless that explicit, workspace-qualified target is available.
+#[test]
+fn dashboard_aggregate_view_guards_inline_task_mutations() {
+    let tasks = include_str!("../../assets/dashboard/tasks.js");
+
+    assert!(
+        tasks.contains("function canMutateTask(task) {")
+            && tasks.contains("!isAggregateView() || Boolean(task && task.workspace_id)"),
+        "mutation must be refused in aggregate mode unless the task names its own workspace"
+    );
+    assert!(
+        tasks.contains("function taskMutationPath(task"),
+        "an aggregate-mode mutation must target the task's own workspace explicitly, not the ambient one"
+    );
+    assert_eq!(
+        tasks.matches("!mutable").count(),
+        2,
+        "both the status and crew controls must be disabled when the task cannot be safely mutated"
+    );
+}
+
 /// ORB-10444: dashboard assets are a shipped, project-agnostic surface. A
 /// personal name, an Orbit/knowledge id, or a checkout path baked into them
 /// would ship to every install, so the served assets carry none.

@@ -18,13 +18,134 @@ let logRows = []; // Keep track to enforce max 200 after 250 limit
 let activeLogFilters = new Set(["all"]);
 let logPanelResizeWired = false;
 
+// ORB-10874: the log pane can be collapsed and resized; both are local
+// presentation preferences (not shared/synced state), so they persist to
+// localStorage rather than the URL. `heightPx` is only present once the
+// operator has dragged the handle — until then the panel keeps auto-fitting
+// to the viewport exactly as before.
+const LOG_PANEL_PREFS_KEY = "orbit.dashboard.logPanel";
+const LOG_PANEL_MIN_HEIGHT = 160;
+
+function loadLogPanelPrefs() {
+  try {
+    const raw = window.localStorage.getItem(LOG_PANEL_PREFS_KEY);
+    const parsed = raw ? JSON.parse(raw) : {};
+    return {
+      collapsed: Boolean(parsed.collapsed),
+      heightPx: Number.isFinite(parsed.heightPx) ? parsed.heightPx : null,
+    };
+  } catch (_) {
+    return { collapsed: false, heightPx: null };
+  }
+}
+
+function saveLogPanelPrefs(prefs) {
+  try {
+    window.localStorage.setItem(LOG_PANEL_PREFS_KEY, JSON.stringify(prefs));
+  } catch (_) {
+    /* localStorage unavailable (private mode, quota) — presentation prefs are non-essential */
+  }
+}
+
+let logPanelPrefs = loadLogPanelPrefs();
+
+function maxLogPanelHeight() {
+  const panel = $("log-panel");
+  if (!panel) return Infinity;
+  const top = panel.getBoundingClientRect().top;
+  return Math.max(LOG_PANEL_MIN_HEIGHT, Math.floor(window.innerHeight - top - 24));
+}
+
 export function fitLogPanelToViewport() {
   const panel = $("log-panel");
   if (!panel) return;
-  const top = panel.getBoundingClientRect().top;
-  const available = Math.floor(window.innerHeight - top - 24);
-  if (available <= 0) return;
-  panel.style.setProperty("--log-panel-height", `${available}px`);
+  applyLogPanelCollapsedState();
+  if (logPanelPrefs.collapsed) return;
+  const cap = maxLogPanelHeight();
+  const height = logPanelPrefs.heightPx != null
+    ? Math.min(Math.max(logPanelPrefs.heightPx, LOG_PANEL_MIN_HEIGHT), cap)
+    : cap;
+  panel.style.setProperty("--log-panel-height", `${height}px`);
+}
+
+function applyLogPanelCollapsedState() {
+  const panel = $("log-panel");
+  const toggle = $("log-panel-toggle");
+  if (!panel) return;
+  panel.classList.toggle("collapsed", logPanelPrefs.collapsed);
+  if (toggle) {
+    toggle.setAttribute("aria-expanded", logPanelPrefs.collapsed ? "false" : "true");
+    toggle.textContent = logPanelPrefs.collapsed ? "expand" : "collapse";
+  }
+  if (logPanelPrefs.collapsed) {
+    panel.style.removeProperty("--log-panel-height");
+  }
+}
+
+function wireLogPanelToggle() {
+  const toggle = $("log-panel-toggle");
+  if (!toggle) return;
+  toggle.addEventListener("click", () => {
+    logPanelPrefs = { ...logPanelPrefs, collapsed: !logPanelPrefs.collapsed };
+    saveLogPanelPrefs(logPanelPrefs);
+    fitLogPanelToViewport();
+  });
+}
+
+// A pointer-driven drag handle on the log panel's top edge. Dragging sets an
+// explicit height (persisted), clamped so the panel can never be resized
+// smaller than LOG_PANEL_MIN_HEIGHT nor larger than the viewport allows —
+// the task list beside/above it keeps its own independent minimum height
+// (dashboard.css), so this clamp only protects the log panel itself.
+function wireLogPanelResizeHandle() {
+  const handle = $("log-panel-resize");
+  const panel = $("log-panel");
+  if (!handle || !panel) return;
+
+  let dragStartY = 0;
+  let dragStartHeight = 0;
+
+  const onPointerMove = (event) => {
+    const delta = event.clientY - dragStartY;
+    const cap = maxLogPanelHeight();
+    const next = Math.min(Math.max(dragStartHeight + delta, LOG_PANEL_MIN_HEIGHT), cap);
+    panel.style.setProperty("--log-panel-height", `${next}px`);
+  };
+
+  const onPointerUp = (event) => {
+    document.removeEventListener("pointermove", onPointerMove);
+    document.removeEventListener("pointerup", onPointerUp);
+    const rect = panel.getBoundingClientRect();
+    logPanelPrefs = { ...logPanelPrefs, heightPx: Math.round(rect.height), collapsed: false };
+    saveLogPanelPrefs(logPanelPrefs);
+    applyLogPanelCollapsedState();
+  };
+
+  handle.addEventListener("pointerdown", (event) => {
+    if (logPanelPrefs.collapsed) return;
+    event.preventDefault();
+    dragStartY = event.clientY;
+    dragStartHeight = panel.getBoundingClientRect().height;
+    document.addEventListener("pointermove", onPointerMove);
+    document.addEventListener("pointerup", onPointerUp);
+  });
+
+  // Keyboard resize (ArrowUp/ArrowDown) for operators who cannot drag.
+  handle.addEventListener("keydown", (event) => {
+    if (logPanelPrefs.collapsed) return;
+    const step = 32;
+    let delta = 0;
+    if (event.key === "ArrowUp") delta = -step;
+    else if (event.key === "ArrowDown") delta = step;
+    else return;
+    event.preventDefault();
+    const cap = maxLogPanelHeight();
+    const current = panel.getBoundingClientRect().height;
+    const next = Math.min(Math.max(current + delta, LOG_PANEL_MIN_HEIGHT), cap);
+    panel.style.setProperty("--log-panel-height", `${next}px`);
+    logPanelPrefs = { ...logPanelPrefs, heightPx: Math.round(next), collapsed: false };
+    saveLogPanelPrefs(logPanelPrefs);
+  });
 }
 
 function wireLogPanelResize() {
@@ -35,6 +156,9 @@ function wireLogPanelResize() {
   if (window.visualViewport) {
     window.visualViewport.addEventListener("resize", scheduleFit);
   }
+  wireLogPanelToggle();
+  wireLogPanelResizeHandle();
+  applyLogPanelCollapsedState();
 }
 
 function getLogClass(level, code) {
