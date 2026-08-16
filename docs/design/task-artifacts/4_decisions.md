@@ -4,6 +4,7 @@ type: design
 title: "Task Artifacts — Decisions"
 owner: codex
 last_updated: 2026-08-11
+last_validated: 2026-08-16
 status: Draft
 feature: task-artifacts
 doc_role: decisions
@@ -26,14 +27,14 @@ The current `T<YYYYMMDD>-<N>` format is allocated by scanning one workspace's ta
 
 ### Decision
 
-Adopt `ORB-00000` as the canonical v2 task ID format: `ORB-` plus a five-digit decimal suffix allocated by an explicit authority. The ID is unique inside that authority, not across unrelated local registries. V2 task bundles do not preserve old `T...` identifiers as aliases.
+Adopt `ORB-00000` as the canonical v2 task ID example: `ORB-` plus a decimal suffix formatted with at least five digits and allocated by an explicit authority. The ID is unique inside that authority, not across unrelated local registries. V2 task bundles do not preserve old `T...` identifiers as aliases.
 
 ### Consequences
 
 - Task IDs become meaningful inside the scope of the configured allocator instead of implicitly workspace-local.
 - Local-only Orbit uses one allocator across all local workspaces, so one machine does not mint the same ID for two repositories.
 - Two unrelated local registries may both allocate the same bare ID; cross-registry references must carry registry, workspace, hosted tenant, or external-reference context.
-- Implementations must stop validating only `T<YYYYMMDD>-<N>` and must add numeric `ORB-\d{5}` validation.
+- Implementations must stop validating only `T<YYYYMMDD>-<N>` and must validate numeric `ORB-<digits>` task IDs, using five digits as the formatter's minimum width.
 - Existing local tasks need a cutover command, but the result is a clean v2 task store rather than a dual-ID store.
 - Cost: task creation now depends on an allocator outside the task directory scan. Sync and hosted modes need shared allocation before a task can be published.
 
@@ -44,7 +45,7 @@ Adopt `ORB-00000` as the canonical v2 task ID format: `ORB-` plus a five-digit d
 
 ### Context
 
-`task.yaml` currently stores metadata, long prose, acceptance criteria, comments, history, and review threads together. This makes simple tasks easy to inspect, but it turns every content edit or append into a YAML rewrite and makes Markdown-hostile fields harder for humans and agents to author.
+The pre-reset `task.yaml` stored metadata, long prose, acceptance criteria, comments, history, and review threads together. This made simple tasks easy to inspect, but it turned every content edit or append into a YAML rewrite and made Markdown-hostile fields harder for humans and agents to author.
 
 ### Decision
 
@@ -194,7 +195,7 @@ Each `Plan` is monotonically versioned within a single lineage. Cross-lineage re
 
 - The read path in `v2_bundle::read_bundle_at` goes through `task_migrations::envelope_plan().migrate(...)` before deserializing into `TaskEnvelopeV2`. Today the chain is empty; the next schema bump adds one `add_step(prev, fn)` call.
 - A new `OrbitError::Migration(String)` variant carries chain failures distinctly from `OrbitError::Store` so callers (and logs) can tell schema drift apart from IO/parse errors.
-- Other artifacts adopt the framework when their owners are ready; nothing is forced. Review-thread metadata and artifact manifest still go through `read_yaml_file` until they need a step.
+- Other artifacts adopt the framework when their owners are ready; nothing is forced. The artifact manifest still goes through `read_yaml_file` until it needs a step; retired review-thread sidecars are not part of bundle validity.
 - Cost: a single `Value` round-trip per envelope read (parse-to-`Value`, then `from_value::<T>`) replaces a direct `from_str::<T>`. Negligible for envelope-sized YAML; benchmark before extending to large lineages.
 - Cost: the framework lives in `orbit-common`, the most-depended-on crate. The surface is small (`Plan`, `Step`, `read_schema_version`) and depends only on `serde_yaml` and `OrbitError`, both already in `orbit-common`.
 
@@ -209,7 +210,7 @@ Task records already carry a typed `relations` array, but every relation type wa
 
 ### Decision
 
-Add two cross-artifact relation types to the task envelope: `produces` for artifacts created during execution and `resolves` for artifacts closed or superseded by the task. These two relation types accept task, friction, learning, and ADR ID shapes (`ORB-`, `FYYYY-MM-NNN`, `L-NNNN`, `ADR-NNNN+`). Existing relation types remain task-only. Friction auto-close is the only v1 side effect: when a task moves from Review to Done, `resolves -> F...` transitions the friction to `resolved` and records `resolved_by_task`.
+Add two cross-artifact relation types to the task envelope: `produces` for artifacts created during execution and `resolves` for artifacts closed or superseded by the task. These two relation types accept task, friction, and ADR ID shapes (`ORB-`, `FYYYY-MM-NNN`, `ADR-NNNN+`). Retired learning IDs are not valid relation targets. Existing relation types remain task-only. Friction auto-close is the only v1 side effect: when a task moves from Review to Done, `resolves -> F...` transitions the friction to `resolved` and records `resolved_by_task`.
 
 ### Consequences
 

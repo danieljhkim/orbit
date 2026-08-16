@@ -1,3 +1,10 @@
+---
+type: design
+summary: "Glossary: Task Artifacts"
+tags: ["task-artifacts"]
+last_validated: 2026-08-16
+---
+
 # Glossary: Task Artifacts
 
 This glossary covers Orbit-specific task artifact terms. Generic issue-tracker or version-control vocabulary is excluded unless Orbit gives the term a narrower meaning.
