@@ -1,10 +1,8 @@
 schemaVersion: 1
 name: release-prep
 description: Guarded workspace-local release preparation probe
-enabled: true
+enabled: false
 schedule:
-  # Poll hourly; the generic scheduler collapses missed slots and preserves
-  # the pending slot while an equivalent probe is still open.
   every_minutes: 60
 template:
   title: Check whether the next Orbit release is ready to prepare
@@ -115,5 +113,5 @@ template:
 dedupe: skip_if_open
 created_by: codex
 created_at: 2026-08-14T04:40:00Z
-updated_by: codex
-updated_at: 2026-08-14T04:40:00Z
+updated_by: unknown
+updated_at: 2026-08-16T17:24:10.982767150+00:00
