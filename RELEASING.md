@@ -64,7 +64,9 @@ git log v<prev>..HEAD --pretty='%h%x09%s' --no-merges
 git log v<prev>..HEAD --pretty='%s' --no-merges | grep -oE 'T[0-9]{8}-[0-9]+' | sort -u
 ```
 
-If the unique task ID count exceeds ~30, delegate the per-task lookups to a subagent. The subagent should call `orbit.task.show` for each ID, group findings by theme, and return a structured outline with breaking-change candidates flagged for human review.
+If the unique task ID count exceeds ~30, file an Orbit survey task for the release crew (luna) rather than running per-task lookups in-session. The survey is read-only: `orbit.task.show` each ID, group by theme, flag breaking-change candidates. Do not start the version bump until in-flight delivery has landed or the human says the queue is settled.
+
+Start the range at the last tag whose five version files actually match that tag. A recovery tag (for example `v0.10.1`, whose files still said `0.10.0`) is not a survey baseline.
 
 The survey is for *your* understanding and for breaking-change triage — not a CHANGELOG inventory. Most surveyed items will not make the cut in step 2.
 
@@ -123,6 +125,8 @@ make build
 
 Must finish clean. `cargo update --workspace` should report only Orbit workspace members re-locked — investigate any third-party version movement before continuing.
 
+If this cycle changed any CLI the plugin-install smoke drives (`orbit init`, `workspace init`, `mcp serve`, plugin layout), update [`scripts/smoke-plugin-install.sh`](scripts/smoke-plugin-install.sh) on the **same commit as the tag**. The on-tag workflow checks out that script and then runs `@orbit-tools/cli@latest` from npm — a post-tag script fix cannot green a tag-triggered run. Details and the post-npm triage live in [docs/runbooks/release.md](docs/runbooks/release.md#plugin-install-smoke-two-artifacts).
+
 ### 6. Create the Orbit task
 
 ```
@@ -136,9 +140,10 @@ context_files:
   - file:plugin/.claude-plugin/plugin.json
   - file:plugin/.codex-plugin/plugin.json
   - file:plugin/npm/package.json
+  - file:scripts/smoke-plugin-install.sh
 ```
 
-Acceptance criteria: each of the five version-bearing file bumps reports the new version, the CHANGELOG section is in place with the agreed structure, and every confirmed breaking change appears under Breaking Changes.
+Acceptance criteria: each of the five version-bearing file bumps reports the new version, the CHANGELOG section is in place with the agreed structure, every confirmed breaking change appears under Breaking Changes, and the plugin-install smoke script still drives this cycle's CLI non-interactively.
 
 ### 7. Human approval
 
@@ -176,11 +181,11 @@ git push origin <branch>
 git push origin v<X.Y.Z>
 ```
 
-Branch first, then tag — this lets release CI resolve the tag against an already-pushed commit.
+Branch first, then tag — this lets release CI resolve the tag against an already-pushed commit. `agent-main` may have moved while the prepare commit was in review; pull (rebase or merge) before push. Do not force-push a release commit.
 
 ### 10b. Promote to `main`
 
-After the tag pushes and release CI goes green, open a PR `agent-main → main` so the release reaches the production branch:
+After the tag pushes and release CI goes green, open a PR `agent-main → main` so the release reaches the production branch. Trial-merge `origin/main` into a throwaway checkout of `agent-main` first — `website/package.json` (js-yaml pin) has conflicted across this boundary; keep the tighter constraint (the one already on `agent-main`):
 
 ```sh
 gh pr create --base main --head agent-main \
@@ -251,13 +256,15 @@ Watch the Actions tab after pushing the tag. Real failure modes seen historicall
 
 - **`cargo build --locked` fails**: `Cargo.lock` was not refreshed after the version bump (step 4) — fix forward in the next patch.
 - **Homebrew tap step**: `secrets.TAP_GITHUB_TOKEN` expired, or the tap repo branch protection rejected the push.
-- **Smoke install**: a regression in `install.sh` itself, since the smoke test pulls it from the tagged ref. Verify locally before tagging if `install.sh` changed in this release.
+- **Smoke install** (`release.yml`): a regression in `install.sh` itself, since that smoke pulls it from the tagged ref. Verify locally before tagging if `install.sh` changed in this release.
+- **Plugin-install smoke** (separate workflow, `smoke-plugin-install.yml`): fails on the tag until npm is published (expected). After publish, a red run is either the tagged script speaking an old CLI contract, or a bad published artifact. Triage in [docs/runbooks/release.md](docs/runbooks/release.md#plugin-install-smoke-two-artifacts) — do not cut a patch for a script-only fix, and do not re-dispatch the old tag after the script has moved on.
 
 ## When something goes wrong
 
 - **Tag pushed pointing at the wrong commit**: do NOT force-update the tag. Cut the next patch release with the fix instead.
 - **Release CI fails after the tag landed**: leave the tag, fix forward in the next patch release. The GitHub Release can be re-run from the Actions UI once the underlying issue is resolved (if the failure was infrastructure, not artifact-correctness).
 - **Breaking change discovered post-tag that wasn't in the CHANGELOG**: amend the next release's CHANGELOG with a backdated note rather than rewriting the prior section.
+- **Plugin-install smoke red after a successful npm publish**: follow [docs/runbooks/release.md](docs/runbooks/release.md#plugin-install-smoke-two-artifacts). A missing `orbit init` flag is a script fix on `agent-main`, not a patch release.
 
 ## Hotfix flow
 
