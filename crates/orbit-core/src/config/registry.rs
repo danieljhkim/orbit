@@ -19,7 +19,15 @@ use serde_json::{Value as JsonValue, json};
 
 const DEFAULT_WORKFLOW_BASE_BRANCH: &str = "main";
 const DEFAULT_WORKFLOW_CREW: &str = "opus";
-const DEFAULT_WORKFLOW_SYSTEM_CREW: &str = "qa";
+/// Name of the crew seeded for the bounded system lane. `orbit init` writes
+/// both this crew table and the `workflow.system_crew` key that points at it,
+/// so the two must stay in step.
+pub(super) const DEFAULT_WORKFLOW_SYSTEM_CREW: &str = "system";
+/// Pre-ORB-10877 name for the same lane. Configs seeded before the rename name
+/// `qa` explicitly, so they keep resolving on their own; this covers the
+/// narrower case of a config that dropped the key and now falls through to a
+/// default naming a crew it never seeded.
+const LEGACY_WORKFLOW_SYSTEM_CREW: &str = "qa";
 const LEGACY_DEFAULT_WORKFLOW_CREW: &str = "claude";
 const CONSTELLATION_DEFAULT_PROVIDER_ENV: &str = "CONSTELLATION_DEFAULT_PROVIDER";
 
@@ -190,6 +198,17 @@ impl ConfigSnapshot {
         )?;
         self.workflow_default_crew =
             resolve_default_crew(self.workflow_default_crew.take(), crews, env_default)?;
+        // A config seeded before the `qa` -> `system` rename that also dropped
+        // its explicit `system_crew` key would otherwise fall through to a
+        // default naming a crew it never seeded, and fail at dispatch rather
+        // than at load. Resolution of a *named* system crew stays deferred to
+        // dispatch, so this only rewrites the unconfigured default.
+        if self.workflow_system_crew == DEFAULT_WORKFLOW_SYSTEM_CREW
+            && !crews.contains_key(DEFAULT_WORKFLOW_SYSTEM_CREW)
+            && crews.contains_key(LEGACY_WORKFLOW_SYSTEM_CREW)
+        {
+            self.workflow_system_crew = LEGACY_WORKFLOW_SYSTEM_CREW.to_string();
+        }
         Ok(())
     }
 }

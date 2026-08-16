@@ -373,19 +373,19 @@ fn task_pilot_dispatch_resolves_a_crew_with_no_codex_crew_configured() {
     std::fs::create_dir_all(&global).expect("create global root");
     std::fs::create_dir_all(&workspace).expect("create workspace root");
     // What `orbit init` seeds where only the claude CLI was detected: no
-    // `[crews.luna]`, and `workflow.system_crew` pointing at the claude `qa`.
+    // `[crews.luna]`, and `workflow.system_crew` pointing at the claude `system`.
     std::fs::write(
         workspace.join("config.toml"),
         r#"[workflow]
 default_crew = "opus"
-system_crew = "qa"
+system_crew = "system"
 
 [crews.opus]
 provider = "claude"
 model = "claude-opus-4-6"
 backend = "cli"
 
-[crews.qa]
+[crews.system]
 provider = "claude"
 model = "claude-sonnet-4-6"
 backend = "cli"

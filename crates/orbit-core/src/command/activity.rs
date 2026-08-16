@@ -194,16 +194,16 @@ mod tests {
             workspace.join("config.toml"),
             r#"[workflow]
 default_crew = "sol"
-system_crew = "qa"
+system_crew = "system"
 
 [crews.sol]
 provider = "codex"
 model = "gpt-5.6-sol"
 backend = "cli"
 
-[crews.qa]
+[crews.system]
 provider = "codex"
-model = "gpt-5.6-terra"
+model = "gpt-5.6-luna"
 backend = "cli"
 "#,
         )
@@ -217,10 +217,10 @@ backend = "cli"
             ("epic_orchestrator", ("codex", "gpt-5.6-sol".to_string())),
             (
                 "step_failure_recovery",
-                ("codex", "gpt-5.6-terra".to_string()),
+                ("codex", "gpt-5.6-luna".to_string()),
             ),
-            ("task_pilot", ("codex", "gpt-5.6-terra".to_string())),
-            ("triage_failed_runs", ("codex", "gpt-5.6-terra".to_string())),
+            ("task_pilot", ("codex", "gpt-5.6-luna".to_string())),
+            ("triage_failed_runs", ("codex", "gpt-5.6-luna".to_string())),
         ]);
         let mut actual = BTreeMap::new();
 

@@ -802,3 +802,33 @@ fn runtime_log_rotation_accepts_valid_values() {
     RuntimeConfig::load_layered(global.path(), workspace.path())
         .expect("valid log rotation config should load");
 }
+
+/// [ORB-10877] The system lane's seeded crew was renamed `qa` -> `system`.
+/// Configs written before the rename name `qa` explicitly and keep resolving on
+/// their own; the case that needs a shim is a config that dropped the key and
+/// would otherwise fall through to a default naming a crew it never seeded.
+#[test]
+fn unset_system_crew_falls_back_to_a_legacy_qa_crew() {
+    let global = tempdir().expect("global tempdir");
+    let workspace = tempdir().expect("workspace tempdir");
+    write_config(
+        workspace.path(),
+        "[workflow]\ndefault_crew = \"opus\"\n\n[crews.opus]\nprovider = \"claude\"\nmodel = \"opus\"\n\n[crews.qa]\nprovider = \"claude\"\nmodel = \"sonnet\"\n",
+    );
+    let runtime = RuntimeConfig::load_layered(global.path(), workspace.path())
+        .expect("pre-rename config without an explicit system_crew must load");
+    assert_eq!(runtime.system_crew(), "qa");
+}
+
+#[test]
+fn unset_system_crew_prefers_the_current_system_crew_when_both_exist() {
+    let global = tempdir().expect("global tempdir");
+    let workspace = tempdir().expect("workspace tempdir");
+    write_config(
+        workspace.path(),
+        "[workflow]\ndefault_crew = \"opus\"\n\n[crews.opus]\nprovider = \"claude\"\nmodel = \"opus\"\n\n[crews.system]\nprovider = \"claude\"\nmodel = \"sonnet\"\n\n[crews.qa]\nprovider = \"claude\"\nmodel = \"sonnet\"\n",
+    );
+    let runtime = RuntimeConfig::load_layered(global.path(), workspace.path())
+        .expect("config defining both crews must load");
+    assert_eq!(runtime.system_crew(), "system");
+}

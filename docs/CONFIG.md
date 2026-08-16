@@ -48,12 +48,12 @@ The workspace identity file `.orbit/config.yaml` is a separate artifact (it stor
 [workflow]
 base_branch = "main"        # default merge-base for ship
 default_crew = "sol"        # fallback crew when a task has no `crew` set
-system_crew = "qa"           # recovery and failed-run-triage crew
+system_crew = "system"      # recovery, failed-run-triage, and task-pilot crew
 ```
 
 - **`base_branch`** — the branch `orbit run ship` rebases against and targets with PRs. Override per-invocation with `--base <branch>`. If your repo uses a two-branch pattern like this repo does (`main` = release, `agent-main` = dev integration), set `base_branch = "agent-main"`.
 - **`default_crew`** — name of the crew under `[crews.<name>]` used for any task whose own `crew` field is unset. Must match a defined crew or config load fails. See [Per-task crew override](#per-task-crew-override) for how individual tasks select a different crew.
-- **`system_crew`** — name of the crew for `step_failure_recovery` and `triage_failed_runs`; defaults to `qa`, which `orbit init` seeds when it can configure an agent. It is resolved at every dispatch through the activities' explicit crew input, so it does not inherit a failed task's crew or the workspace default. A missing or unusable crew leaves the original failed step failed and emits a diagnostic naming `workflow.system_crew` and the configured crew.
+- **`system_crew`** — name of the crew for Orbit's bounded system activities: `step_failure_recovery`, `triage_failed_runs`, and the read-only `task_pilot`. Defaults to `system`, which `orbit init` seeds when it detects a supported CLI. That seed takes the cheapest tier the detected family offers rather than the family's default model, since system work is high-volume and low-judgment; the preference order is codex Luna, claude Sonnet, Grok, then Gemini Flash. Configs seeded before this crew was renamed from `qa` keep working: they name `qa` explicitly, and a config that dropped the key falls back to a `qa` crew when one is defined and `system` is not. It is resolved at every dispatch through the activities' explicit crew input, so it does not inherit a failed task's crew or the workspace default. A missing or unusable crew leaves the original failed step failed and emits a diagnostic naming `workflow.system_crew` and the configured crew.
 
 ---
 

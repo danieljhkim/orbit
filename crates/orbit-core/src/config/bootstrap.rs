@@ -7,6 +7,7 @@ use orbit_common::utility::fs::write_text_with_parent;
 
 use super::agent_detect::{DetectedAgents, available_crew_families, default_crew_name};
 use super::raw::{RawCrewAssignment, RawCrewEntry};
+use super::registry::DEFAULT_WORKFLOW_SYSTEM_CREW;
 use super::runtime::default_crews;
 
 pub(crate) const DEFAULT_CONFIG_TEMPLATE: &str =
@@ -108,15 +109,15 @@ fn render_crews(
         );
     }
 
-    if let Some(qa) = crew_settings
-        .and_then(|settings| settings.get("qa").cloned())
-        .or_else(|| default_qa_crew(detected))
+    if let Some(system) = crew_settings
+        .and_then(|settings| settings.get(DEFAULT_WORKFLOW_SYSTEM_CREW).cloned())
+        .or_else(|| default_system_crew(detected))
     {
         crews.insert(
-            "qa".to_string(),
+            DEFAULT_WORKFLOW_SYSTEM_CREW.to_string(),
             RawCrewEntry {
-                provider: qa.provider,
-                model: qa.model,
+                provider: system.provider,
+                model: system.model,
                 backend: None,
                 description: None,
                 tags: Vec::new(),
@@ -139,11 +140,29 @@ fn render_crews(
     Ok(rendered)
 }
 
-fn default_qa_crew(detected: &DetectedAgents) -> Option<RawCrewAssignment> {
+/// Seed the bounded system lane: step-failure recovery, failed-run triage, and
+/// the read-only task pilot. That work is high-volume and low-judgment, so this
+/// picks the cheapest tier each family offers rather than the family's default
+/// model — seeding a mid-tier crew here multiplies the cost of every unattended
+/// sweep for no gain.
+///
+/// The order below is a preference list, not a strict price sort. Gemini Flash
+/// undercuts both Sonnet and Grok per token but sits last because observed runs
+/// have failed outright on quota; a crew that does not finish costs more than a
+/// pricier one that does. Adjust the order here rather than teaching callers to
+/// special-case a family.
+fn default_system_crew(detected: &DetectedAgents) -> Option<RawCrewAssignment> {
+    use orbit_common::model_defaults::{
+        CLAUDE_DEFAULT_WEAK, CODEX_LUNA_MODEL, GEMINI_CREW_MODEL, GROK_DEFAULT_MODEL,
+    };
     let (provider, model) = if detected.codex_cli {
-        ("codex", orbit_common::model_defaults::CODEX_DEFAULT_MODEL)
+        ("codex", CODEX_LUNA_MODEL)
     } else if detected.claude_cli {
-        ("claude", orbit_common::model_defaults::CLAUDE_DEFAULT_WEAK)
+        ("claude", CLAUDE_DEFAULT_WEAK)
+    } else if detected.grok_cli {
+        ("grok", GROK_DEFAULT_MODEL)
+    } else if detected.gemini_cli {
+        ("gemini", GEMINI_CREW_MODEL)
     } else {
         return None;
     };

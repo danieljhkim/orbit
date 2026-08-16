@@ -138,7 +138,7 @@ fn non_interactive_init_against_non_global_root_leaves_home_skill_links_untouche
         ("luna", "codex", "gpt-5.6-luna"),
         ("gemini", "gemini", "gemini-3.7-flash"),
         ("grok", "grok", "grok-4.6"),
-        ("qa", "", ""),
+        ("system", "", ""),
     ];
     if let Some(crews) = crews {
         assert!(!crews.contains_key("claude"));
@@ -150,11 +150,18 @@ fn non_interactive_init_against_non_global_root_leaves_home_skill_links_untouche
                 .unwrap_or_else(|| panic!("unexpected seeded crew {name}"));
             // [ORB-10801] Seeded crews carry no retired backend key.
             assert!(crew.get("backend").is_none());
-            if name == "qa" {
-                let (provider, model) = if crews.contains_key("sol") {
-                    ("codex", "gpt-5.6-terra")
-                } else {
+            if name == "system" {
+                // Preference order: codex luna, then claude sonnet, then grok,
+                // then gemini flash. Cheapest tier per family, not the
+                // family default.
+                let (provider, model) = if crews.contains_key("luna") {
+                    ("codex", "gpt-5.6-luna")
+                } else if crews.contains_key("sonnet") {
                     ("claude", "sonnet")
+                } else if crews.contains_key("grok") {
+                    ("grok", "grok-4.6")
+                } else {
+                    ("gemini", "gemini-3.7-flash")
                 };
                 assert_eq!(
                     crew.get("provider").and_then(toml::Value::as_str),

@@ -30,58 +30,64 @@ fn default_template_keeps_agent_dependent_sections_out() {
 }
 
 #[test]
-fn claude_only_seeds_the_claude_family_and_qa() {
+fn claude_only_seeds_the_claude_family_and_system() {
     let contents = seed_contents(
         &detect(&MockAgentEnvProbe::new().with_binary("claude")),
         None,
     );
     let parsed = parsed_config(&contents);
 
-    assert_eq!(crew_names(&parsed), vec!["fable", "opus", "qa", "sonnet"]);
+    assert_eq!(
+        crew_names(&parsed),
+        vec!["fable", "opus", "sonnet", "system"]
+    );
     assert_crew(&parsed, "opus", "claude", "opus");
     assert_crew(&parsed, "sonnet", "claude", "sonnet");
     assert_crew(&parsed, "fable", "claude", "fable");
-    assert_crew(&parsed, "qa", "claude", "sonnet");
+    assert_crew(&parsed, "system", "claude", "sonnet");
     assert_default_crew(&parsed, Some("opus"));
     assert!(!contents.contains("[duel"));
 }
 
 #[test]
-fn codex_only_seeds_the_codex_family_and_qa() {
+fn codex_only_seeds_the_codex_family_and_system() {
     let contents = seed_contents(
         &detect(&MockAgentEnvProbe::new().with_binary("codex")),
         None,
     );
     let parsed = parsed_config(&contents);
 
-    assert_eq!(crew_names(&parsed), vec!["luna", "qa", "sol", "terra"]);
+    assert_eq!(crew_names(&parsed), vec!["luna", "sol", "system", "terra"]);
     assert_crew(&parsed, "sol", "codex", "gpt-5.6-sol");
     assert_crew(&parsed, "terra", "codex", "gpt-5.6-terra");
     assert_crew(&parsed, "luna", "codex", "gpt-5.6-luna");
-    assert_crew(&parsed, "qa", "codex", "gpt-5.6-terra");
+    // The system lane takes the cheapest codex tier, not the family default.
+    assert_crew(&parsed, "system", "codex", "gpt-5.6-luna");
     assert_default_crew(&parsed, Some("sol"));
 }
 
 #[test]
-fn gemini_only_seeds_gemini_without_qa() {
+fn gemini_only_seeds_gemini_and_a_system_crew() {
     let contents = seed_contents(
         &detect(&MockAgentEnvProbe::new().with_binary("gemini")),
         None,
     );
     let parsed = parsed_config(&contents);
 
-    assert_eq!(crew_names(&parsed), vec!["gemini"]);
+    assert_eq!(crew_names(&parsed), vec!["gemini", "system"]);
     assert_crew(&parsed, "gemini", "gemini", "gemini-3.7-flash");
+    assert_crew(&parsed, "system", "gemini", "gemini-3.7-flash");
     assert_default_crew(&parsed, Some("gemini"));
 }
 
 #[test]
-fn grok_only_seeds_grok_without_qa() {
+fn grok_only_seeds_grok_and_a_system_crew() {
     let contents = seed_contents(&detect(&MockAgentEnvProbe::new().with_binary("grok")), None);
     let parsed = parsed_config(&contents);
 
-    assert_eq!(crew_names(&parsed), vec!["grok"]);
+    assert_eq!(crew_names(&parsed), vec!["grok", "system"]);
     assert_crew(&parsed, "grok", "grok", "grok-4.6");
+    assert_crew(&parsed, "system", "grok", "grok-4.6");
     assert_default_crew(&parsed, Some("grok"));
 }
 
@@ -119,7 +125,7 @@ fn multi_provider_seed_includes_each_available_family_and_excludes_unavailable()
     assert_eq!(
         crew_names(&parsed),
         vec![
-            "fable", "grok", "luna", "opus", "qa", "sol", "sonnet", "terra"
+            "fable", "grok", "luna", "opus", "sol", "sonnet", "system", "terra"
         ]
     );
     assert_default_crew(&parsed, Some("opus"));
@@ -130,7 +136,8 @@ fn multi_provider_seed_includes_each_available_family_and_excludes_unavailable()
     assert_crew(&parsed, "terra", "codex", "gpt-5.6-terra");
     assert_crew(&parsed, "luna", "codex", "gpt-5.6-luna");
     assert_crew(&parsed, "grok", "grok", "grok-4.6");
-    assert_crew(&parsed, "qa", "codex", "gpt-5.6-terra");
+    // codex outranks claude and grok in the system-lane preference order.
+    assert_crew(&parsed, "system", "codex", "gpt-5.6-luna");
     for crew in crews(&parsed).values() {
         // [ORB-10801] Seeded crews no longer carry the retired backend key.
         assert!(crew.get("backend").is_none());
