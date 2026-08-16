@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.12.0
+
+### Breaking Changes
+
+- **Seeded skill directories retired**: `orbit-task`, `orbit-search`, `orbit-workflow`, and the plugin `orbit-task-pilot` skill are gone — use the `orbit` router skill and its `references/`. ([ORB-10860])
+
+### Highlights
+
+- **One Orbit skill**: four seeded skills collapsed into a single `orbit` router with on-demand references. ([ORB-10860])
+- **Stale skill links cleaned on upgrade**: `workspace init` removes dangling Claude/Codex skill symlinks left after skill retirement. ([ORB-10869])
+- **Doctor reports leftover skill directories**: orphaned skill dirs without SKILL.md are a warning, not a clean bill of health. ([ORB-10862])
+- **Safer artifact redaction**: env-value redaction no longer silently eats ordinary words in task prose. ([ORB-10867])
+
 ## 0.11.0
 
 ### Breaking Changes
