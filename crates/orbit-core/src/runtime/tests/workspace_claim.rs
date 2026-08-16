@@ -181,6 +181,7 @@ fn non_workflow_operations_succeed_while_a_claim_is_held() {
             "description": "Filing, reading, and updating stay concurrent under ADR-0352.",
             "workspace": repo.display().to_string(),
             "model": "codex",
+            "complexity": "medium",
         }),
     )
     .expect("filing a task must not be gated by the workspace claim");

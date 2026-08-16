@@ -78,7 +78,7 @@ fn model_price_audit_is_weekly_report_only_and_routes_to_terra() {
     let definition = parse_auto_task_yaml(&yaml).expect("parse model-price-audit");
 
     assert_eq!(definition.name, "model-price-audit");
-    assert!(definition.enabled, "definition must be enabled");
+    assert!(!definition.enabled, "definition must ship disabled");
     assert_eq!(
         definition.schedule,
         AutoTaskSchedule::Cron {
