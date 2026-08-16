@@ -4,6 +4,7 @@ type: design
 title: "Task Artifacts — Overview"
 owner: codex
 last_updated: 2026-05-17
+last_validated: 2026-08-16
 status: Draft
 feature: task-artifacts
 doc_role: overview
@@ -31,8 +32,8 @@ The v2 artifact matches the work to its readers:
 
 - `task.yaml` is a small, mergeable envelope of metadata.
 - Markdown sidecars (`description.md`, `acceptance.md`, `plan.md`, `execution-summary.md`) hold prose and long-form human/agent reasoning.
-- Append-only logs (`events.jsonl`, `comments.jsonl`, `review-threads/`) carry events, comments, and review traffic without rewriting the envelope.
-- `ORB-00000` IDs are stable inside the configured allocation authority and explicitly scoped when tasks cross registries; bare task IDs remain local search keys, in line with the graph-attribution removal in [T20260506-11].
+- Append-only logs (`events.jsonl`, `comments.jsonl`) carry events and comments without rewriting the envelope.
+- The default `ORB-00000` format uses a five-digit minimum width inside the configured allocation authority and explicitly scopes tasks when they cross registries; bare task IDs remain local search keys, in line with the graph-attribution removal in [T20260506-11].
 - Workspace task bundles live in one canonical local store under `~/.orbit/tasks/workspaces/<workspace-id>/`; each checkout gets a lightweight `.orbit/tasks/` symlink projection.
 - Local execution bindings stay in `~/.orbit/tasks/index.sqlite` rather than leaking into synced task identity.
 
@@ -57,7 +58,6 @@ A task bundle is the complete on-disk representation of one task. The canonical 
         execution-summary.md
         events.jsonl
         comments.jsonl
-        review-threads/
         artifacts/
 
 .orbit/
@@ -91,7 +91,7 @@ V2 bundles do not carry `legacy_ids` and lookup surfaces do not resolve old `T<Y
 
 ### 2.5 Task event stream
 
-Lifecycle changes, comments, review messages, and automation updates are naturally append-heavy. The store keeps those out of YAML arrays in append-only JSON Lines files (`events.jsonl`, `comments.jsonl`) and per-thread records under `review-threads/`, so concurrent writes can be merged intentionally and audited without rewriting the envelope.
+Lifecycle changes, comments, and automation updates are naturally append-heavy. The store keeps those out of YAML arrays in append-only JSON Lines files (`events.jsonl`, `comments.jsonl`), so concurrent writes can be merged intentionally and audited without rewriting the envelope.
 
 ### 2.6 Typed relations
 

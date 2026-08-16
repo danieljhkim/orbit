@@ -4,6 +4,7 @@ type: design
 title: "Task Artifacts — Design"
 owner: codex
 last_updated: 2026-08-09
+last_validated: 2026-08-16
 status: Draft
 feature: task-artifacts
 doc_role: design
@@ -169,7 +170,7 @@ schema_version: 1
 workspace_id: orbit-a3f9c2
 ```
 
-`workspace_id` is assigned once as `<slug>-<6char>`, where the slug is human-readable and the suffix prevents collisions. It survives repo renames and moves because Orbit reads it from `.orbit/config.yaml`, not from the directory name, remote URL, or path hash.
+`workspace_id` is assigned once in canonical `ws_<name>` form; legacy installations may use `<slug>-<6char>`. It survives repo renames and moves because Orbit reads it from `.orbit/config.yaml`, not from the directory name, remote URL, or path hash.
 
 The workspace projection under `.orbit/tasks/<task-id>` is a symlink to the canonical bundle. Task writes through either the canonical path or the projection update the same files; there is no second writable copy and no bundle-level divergence protocol. If `.orbit/tasks/` is deleted, Orbit rebuilds the symlinks from `.orbit/config.yaml` and `index.sqlite`. If `.orbit/config.yaml` is lost, Orbit prompts to rebind by matching the current path, repo root, and optional remote fingerprints against `index.sqlite`; if no confident match exists, the user chooses or creates a workspace binding.
 
