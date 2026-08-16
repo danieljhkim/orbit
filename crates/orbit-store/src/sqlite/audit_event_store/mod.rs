@@ -13,6 +13,19 @@ use rusqlite::params;
 
 use crate::{Store, StoreTx, now_string, parse_timestamp};
 
+pub mod incident;
+
+/// Canonical `SELECT` column list for a full [`AuditEvent`] row, in the order
+/// [`audit_event_from_row`] indexes. Shared by every query that hydrates whole
+/// events so a schema column can only be added in one place.
+pub(super) const AUDIT_EVENT_COLUMNS: &str = "id, execution_id, timestamp, command, subcommand, \
+     tool_name, target_type, target_id, role, status, exit_code, duration_ms, \
+     working_directory, arguments_json, stdout_truncated, stderr_truncated, \
+     error_message, host, pid, session_id, workspace_id, caller_machine_id, \
+     caller_host_id, process_machine_id, process_host_id, transport, \
+     capabilities_json, origin_session_id, mcp_call_id, lease_id, task_id, \
+     job_run_id, activity_id, step_index, trace_id, caller_ip";
+
 #[derive(Debug, Clone)]
 pub struct AuditEventInsertParams {
     pub execution_id: String,
@@ -391,13 +404,7 @@ impl Store {
         };
 
         let sql = format!(
-            "SELECT id, execution_id, timestamp, command, subcommand, tool_name, \
-             target_type, target_id, role, status, exit_code, duration_ms, \
-             working_directory, arguments_json, stdout_truncated, stderr_truncated, \
-             error_message, host, pid, session_id, workspace_id, caller_machine_id, \
-             caller_host_id, process_machine_id, process_host_id, transport, \
-             capabilities_json, origin_session_id, mcp_call_id, lease_id, task_id, \
-             job_run_id, activity_id, step_index, trace_id, caller_ip \
+            "SELECT {AUDIT_EVENT_COLUMNS} \
              FROM audit_events {where_clause} ORDER BY id DESC LIMIT ?{}",
             param_values.len() + 1
         );
@@ -423,16 +430,9 @@ impl Store {
         let conn = self.read()?;
 
         let mut stmt = conn
-            .prepare(
-                "SELECT id, execution_id, timestamp, command, subcommand, tool_name, \
-                 target_type, target_id, role, status, exit_code, duration_ms, \
-                 working_directory, arguments_json, stdout_truncated, stderr_truncated, \
-                 error_message, host, pid, session_id, workspace_id, caller_machine_id, \
-                 caller_host_id, process_machine_id, process_host_id, transport, \
-                 capabilities_json, origin_session_id, mcp_call_id, lease_id, task_id, \
-                 job_run_id, activity_id, step_index, trace_id, caller_ip \
-                 FROM audit_events WHERE id = ?1",
-            )
+            .prepare(&format!(
+                "SELECT {AUDIT_EVENT_COLUMNS} FROM audit_events WHERE id = ?1"
+            ))
             .map_err(|e| OrbitError::Store(e.to_string()))?;
 
         let result = stmt

@@ -5,6 +5,7 @@ use orbit_common::types::{
 use orbit_store::{
     AuditEventFilter, AuditEventInsertParams, AuditRoleAggregate, AuditToolAggregate,
     AuditToolCallCountsByRole, AuditToolCallCountsBySurfaceAndRole, AuditTopToolCall,
+    FailureIncidentQuery, FailureIncidentReport,
 };
 
 use crate::OrbitRuntime;
@@ -243,6 +244,19 @@ impl OrbitRuntime {
         self.stores()
             .audit_events()
             .get_audit_event_aggregates_by_role(since)
+    }
+
+    /// Failure incidents grouped from the raw failed/denied audit rows in
+    /// `query`'s window [ORB-10871]. The report carries both the incident
+    /// list and the raw event denominators it was derived from, so a caller
+    /// never has to infer one count from the other. Raw rows are neither
+    /// mutated nor withheld — `list_audit_events_filtered` remains the
+    /// authority on evidence.
+    pub fn audit_failure_incidents(
+        &self,
+        query: &FailureIncidentQuery,
+    ) -> Result<FailureIncidentReport, OrbitError> {
+        self.stores().audit_events().get_failure_incidents(query)
     }
 
     /// Sorted `duration_ms` values for audit events with NULL `tool_name`

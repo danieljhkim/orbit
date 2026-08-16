@@ -10,13 +10,15 @@ use chrono::{DateTime, Duration, Utc};
 use orbit_common::types::{McpCapability, McpTransport};
 use orbit_core::command::job::JobRunListParams;
 use orbit_core::{
-    AuditEventFilter, AuditEventStatus, AuditToolAggregate, JobRunState, OrbitError, OrbitRuntime,
+    AuditEventFilter, AuditEventStatus, AuditToolAggregate, FailureIncidentQuery, JobRunState,
+    OrbitError, OrbitRuntime,
 };
 use serde_json::{Value, json};
 
 use super::denials::{
     collect_denial_rows, denials_by_reason_summary, denials_by_tool_summary, scan_v2_loop_denials,
 };
+use super::incidents::ROLLUP_SCAN_LIMIT;
 use super::{
     AuditQuery, AuditSummaryQuery, DEFAULT_SUMMARY_WINDOW, HISTORY_DEFAULT_LIMIT,
     HISTORY_MAX_LIMIT, bad_request, bounded_limit, map_runtime_error, server_error,
@@ -218,6 +220,14 @@ pub(super) async fn audit_summary(Ws(runtime): Ws, Query(q): Query<AuditSummaryQ
         "denials": denials,
         "denials_sql": bundle.sql_denied,
         "denials_v2": bundle.v2_denials,
+        // ORB-10871: raw failed rows and grouped incidents are reported as two
+        // separate numbers over the same window, so neither is mistaken for
+        // the other. `failed_events` is the forensic count; `failure_incidents`
+        // is how many distinct problems those rows represent.
+        "failed_events": bundle.failed_events,
+        "failure_incidents": bundle.failure_incidents,
+        "failure_incidents_by_class": bundle.failure_incidents_by_class,
+        "failed_events_by_class": bundle.failed_events_by_class,
         "failed_runs": bundle.failed_runs,
         "active_long_runs": bundle.active_long_runs,
         "sparkline": sparkline,
@@ -239,6 +249,10 @@ struct AuditSummaryBundle {
     total: i64,
     sql_denied: i64,
     v2_denials: i64,
+    failed_events: u64,
+    failure_incidents: u64,
+    failure_incidents_by_class: BTreeMap<String, u64>,
+    failed_events_by_class: BTreeMap<String, u64>,
     failed_runs: i64,
     active_long_runs: i64,
     buckets: Vec<(String, i64)>,
@@ -263,6 +277,15 @@ fn compute_audit_summary_bundle(
     let sql_denied = stats.denied_count;
 
     let v2_denials = scan_v2_loop_denials(runtime, Some(since), None, None)?.len() as i64;
+
+    // ORB-10871: the same window, grouped. Reported next to `total` so the
+    // header tiles can state both counts with their denominators.
+    let incidents = runtime.audit_failure_incidents(&FailureIncidentQuery {
+        since: Some(since),
+        max_events: ROLLUP_SCAN_LIMIT,
+        ..Default::default()
+    })?;
+
     let failed_runs = count_failed_runs(runtime, since)?;
     let active_long_runs = count_active_long_runs(runtime, since)?;
     let buckets = runtime.audit_event_hourly_buckets(&since)?;
@@ -376,6 +399,10 @@ fn compute_audit_summary_bundle(
         total,
         sql_denied,
         v2_denials,
+        failed_events: incidents.raw_failed_events,
+        failure_incidents: incidents.incident_count(),
+        failure_incidents_by_class: incidents.incidents_by_class,
+        failed_events_by_class: incidents.raw_events_by_class,
         failed_runs,
         active_long_runs,
         buckets,

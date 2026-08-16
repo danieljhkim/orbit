@@ -42,6 +42,10 @@ Run Detail > Steps now includes compact per-step agent log expanders for CLI-bac
 
 Diagnostics has an Errors sub-tab after [T20260508-14]. It renders recent backend error rows independently of Metrics and Policy, combining Orbit process ERROR events with structured agent stderr rows. Rows with `job_run` provenance route back to the owning Run Detail step so error triage stays connected to workflow context.
 
+Diagnostics has an Incidents sub-tab after [ORB-10871]. A raw failed audit row is evidence, not an incident: one refusal repeated in a burst is one problem, and one failed run that propagates its failure up through its enclosing steps is one root cause with a chain beneath it. `/api/audit/incidents` groups the window's failed and denied audit rows by `(job run, signature)`, where the signature is `class | actor | surface | normalized message` and volatile tokens (paths, ids, numbers, timestamps, hashes) are replaced with placeholders; same-run clusters of the same class within a 60s cascade window collapse onto their earliest cluster, which becomes the incident root, with the rest recorded as its propagation chain. Grouping reads only durable audit columns, so no tool, agent, workspace, or task is special-cased.
+
+Both counts are always rendered together with their denominators and the selected window — the panel header reads `N incidents / M failed events`, and the summary states `grouped from M failed events of T audited events · window <w>`. Failures stay classified as policy denials, expected negative paths (an `OrbitError`-derived caller-input refusal), or unexpected failures; classes are counted separately and never merged into one incident. The scoreboard keeps its raw `tool fail/all` pair and gains a `fail inc/events` pair beside it, so a burst can no longer inflate an agent's apparent failure rate. Nothing is dropped: an incident expands to its grouping signature, actor, surface, run/task ids, first/last timestamps, and the exact underlying audit rows, and links back into the raw Audit view — which still returns every event.
+
 Diagnostics no longer has a Friction sub-tab after [ORB-00060]. The Friction name is reserved for append-only `.orbit/frictions/` artifacts, while audit-derived negative run signals stay visible in Recent Runs. Recent Runs joins `/api/job-runs` with `/api/diagnostics/friction` client-side by run id (`run_id`/`job_run`) and keeps the table sortable across `denials`, `tool fails`, and `duration`; the duration cell can carry the long-run flag when the diagnostics source supplies one. This preserves column continuity with the existing compact dashboard telemetry direction from [T20260428-15].
 
 Knowledge is a top-level dashboard tab for friction triage. The retired native learning panels, routes, metrics, and mutations were removed by [ORB-10736].
@@ -97,5 +101,6 @@ Accessibility still needs a real WCAG pass; responsive behavior remains optimize
 - [ORB-10874] clarified the Tasks count and filter state, made the log panel collapsible/resizable, and added pending/undo feedback and an aggregate-mode mutation guard to inline task edits.
 - [ORB-10875] added the Operations view and typed routine/clock controls.
 - [ORB-10872] made workspace and time window one dashboard scope across Scoreboard, Audit, Reliability, and Managed Execution.
+- [ORB-10871] made dashboard failure metrics incident-aware: grouped incidents and raw failed events are reported side by side with their denominators and window.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

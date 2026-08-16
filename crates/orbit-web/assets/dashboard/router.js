@@ -40,7 +40,7 @@ function markWorkspaceSelectorScope(fleetWide) {
 // `run-detail` route. A deprecated tab was retired outright and `scoreboard`,
 // being diagnostics-shaped, now routes as `#diagnostics/scoreboard`.
 const TABS = ["tasks", "audit", "diagnostics", "operations", "knowledge", "run-detail"];
-const DIAG_SUBTABS = ["runs", "metrics", "errors", "reliability", "scoreboard"];
+const DIAG_SUBTABS = ["runs", "metrics", "errors", "incidents", "reliability", "scoreboard"];
 // ORB-10444/ORB-10588: subtabs that replace the two-column diagnostics layout
 // with their own full-width <main>, keyed by the element they reveal.
 const DIAG_FULL_WIDTH_MAINS = {

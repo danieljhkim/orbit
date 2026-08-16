@@ -86,6 +86,12 @@ pub use orbit_store::{
     AuditEventFilter, AuditEventInsertParams, AuditToolAggregate, V2AuditEventFilter,
     V2AuditEventInsertParams,
 };
+// Failure-incident grouping over the raw audit rows [ORB-10871]; consumed by
+// the dashboard's incident, audit-summary, and scoreboard surfaces.
+pub use orbit_store::{
+    CASCADE_WINDOW_SECS, FailureClass, FailureIncident, FailureIncidentQuery,
+    FailureIncidentReport, IncidentEventRef, PropagationLink,
+};
 // Routine fire records surfaced by the dashboard's routine-health JSON API.
 pub use orbit_store::{RoutineFireRecord, RoutineFireState};
 pub use runtime::engine::ResolvedCrewProjection;

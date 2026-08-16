@@ -101,16 +101,40 @@ const OPERATIONS_SCOREBOARD_COLUMNS = [
     format: "pair",
     left: "failed_tool_calls",
     right: "tool_calls",
-    title: "failed / total tool calls",
+    title: "raw failed tool calls / total tool calls",
+    help: "raw events",
+  },
+  // ORB-10871: the same failures, grouped. A repeated burst is one incident
+  // with its raw event count beside it, so the left number answers "how many
+  // things went wrong" and the right one "how much evidence there is".
+  {
+    key: "failure_incidents",
+    label: "fail inc/events",
+    num: true,
+    format: "pair",
+    left: "failure_incidents",
+    right: "failure_incident_events",
+    tone: "warn",
+    title: "grouped failure incidents / raw failed events they collapsed",
+    help: "grouped",
   },
   { key: "friction.reported", label: "frict r", num: true },
 ];
 
-const ALL_SCOREBOARD_SECTIONS = [
-  { title: "Delivery", badge: "tasks created · planned · completed", columns: DELIVERY_SCOREBOARD_COLUMNS },
-  { title: "Review", badge: "review threads · PR comments", columns: PR_REVIEW_COLUMNS },
-  { title: "Operations", badge: "tool calls · failures · friction", columns: OPERATIONS_SCOREBOARD_COLUMNS },
-];
+function allScoreboardSections() {
+  // Badges name the window so a count is never read against an unstated
+  // cutoff; the Operations badge also states that its failures are grouped.
+  const window = getWindow();
+  return [
+    { title: "Delivery", badge: `tasks created · planned · completed · window ${window}`, columns: DELIVERY_SCOREBOARD_COLUMNS },
+    { title: "Review", badge: `review threads · PR comments · window ${window}`, columns: PR_REVIEW_COLUMNS },
+    {
+      title: "Operations",
+      badge: `tool calls · raw failed events and the incidents they group into · friction · window ${window}`,
+      columns: OPERATIONS_SCOREBOARD_COLUMNS,
+    },
+  ];
+}
 
 function readPath(obj, path) {
   let cur = obj;
@@ -172,7 +196,7 @@ function renderScoreboard(summary) {
   if (agentStrip) {
     syncNodes(agentStrip, [renderAgentStrip(canonicalRows)]);
   }
-  const matrix = buildLeaderboardMatrix(canonicalRows, ALL_SCOREBOARD_SECTIONS, {
+  const matrix = buildLeaderboardMatrix(canonicalRows, allScoreboardSections(), {
     showSectionDividers: true,
   });
   syncNodes(body, [el("div", { class: "scoreboard-sections" }, [matrix])]);
@@ -534,7 +558,9 @@ function buildLeaderboardMatrix(rows, sectionList, opts = {}) {
         td.addEventListener("click", () => navigateToDrilldown({
           role: name,
           metric: col.key,
-          status: col.key === "tools" || col.key === "failed_tool_calls" ? "failure" : null,
+          status: ["tools", "failed_tool_calls", "failure_incidents"].includes(col.key)
+            ? "failure"
+            : null,
         }));
         tr.appendChild(td);
       }
