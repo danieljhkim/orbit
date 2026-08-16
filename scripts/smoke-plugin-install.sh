@@ -57,6 +57,9 @@ mkdir -p "$npm_config_cache"
 SMOKE_HOME="$TMPDIR_ROOT/home"
 mkdir -p "$SMOKE_HOME"
 export HOME="$SMOKE_HOME"
+# A caller-exported ORBIT_ROOT would bypass the HOME sandbox and write
+# host identity / workspace state outside the throwaway tree.
+unset ORBIT_ROOT
 
 # Pick a timeout binary. macOS runners ship neither `timeout` nor `gtimeout`
 # unless coreutils is installed; fall back to perl, which is preinstalled on
@@ -140,8 +143,14 @@ echo "--- step 2: orbit init + workspace init ---"
 # OrbitRuntime::try_initialize_existing) — so without these two commands the
 # MCP server attaches but serves an empty tool surface. Initializing first
 # matches the documented /plugin install orbit flow.
-if ! npx -y "$NPM_PKG@latest" init --non-interactive >"$TMPDIR_ROOT/init.out" 2>"$TMPDIR_ROOT/init.err"; then
+# Fresh-host non-interactive init requires host identity (ORB-10721): a
+# host name plus a 2-5 letter task prefix that is not ORB/ADR/L/F.
+if ! npx -y "$NPM_PKG@latest" init --non-interactive \
+     --host-name smoke-plugin-install --task-prefix SMK \
+     >"$TMPDIR_ROOT/init.out" 2>"$TMPDIR_ROOT/init.err"; then
   echo "FAIL: orbit init exited non-zero" >&2
+  echo "--- stdout ---" >&2
+  cat "$TMPDIR_ROOT/init.out" >&2
   echo "--- stderr ---" >&2
   cat "$TMPDIR_ROOT/init.err" >&2
   exit 1
