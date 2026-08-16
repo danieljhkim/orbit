@@ -2,13 +2,14 @@
 title: Routines — Decisions
 owner: claude
 last_updated: 2026-08-12
+last_validated: 2026-08-16
 status: Accepted
 feature: routines
 doc_role: decisions
 type: design
 summary: Decision log for the routines scheduler, including default seeding and workspace-local shipment.
 tags: [routines, scheduler]
-paths: ["crates/orbit-core/src/routines/**", "crates/orbit-remote/src/routines.rs"]
+paths: ["crates/orbit-core/src/routines/**", "crates/orbit-cmd/src/registry_routines.rs", "crates/orbit-cmd/src/registry_runtime.rs", "crates/orbit-registry/src/**"]
 related_features: [routines, activity-job, host-registry]
 related_artifacts: [ORB-10001, ORB-10021, ORB-10207, ORB-10270, ORB-10319, ORB-10739]
 ---
@@ -174,9 +175,9 @@ Store the supported whole-minute cadence in host-local `~/.orbit/clock.toml` and
 - [ORB-10270] — completed [Committed-routine ownership with host-local cursors](../host-registry/4_decisions.md#committed-routine-ownership-with-host-local-cursors)'s runtime enforcement: committed pins resolve through
   current registry or classified spoke-cache data before scheduler mutation, diagnostics
   remain explicit under degradation, and reassignment starts with a fresh baseline.
-- [ORB-10319] — moved the Remote-specific providers that source identity, registry/cache,
-  workspace bindings, and runtimes into `orbit-remote`; the accepted routine decisions and
-  Core scheduler semantics are unchanged.
+- [ORB-10319] — moved the registry-specific providers that source identity, workspace
+  bindings, and runtimes into `orbit-cmd` over `orbit-registry`; the accepted routine
+  decisions and Core scheduler semantics are unchanged.
 - [ORB-10138] — exposed per-routine scheduler health over the dashboard HTTP API
   (`GET /api/routines`), realizing the single-host half of the §7 cross-host-visibility
   vision. Read-only projection of `routine_statuses`; no new ADR (no new architectural
