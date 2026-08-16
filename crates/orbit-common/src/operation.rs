@@ -179,6 +179,11 @@ pub struct OperationSpec<V: 'static> {
     pub rejects_agent_field: bool,
     /// MCP scope when advertised. `None` keeps the operation off MCP while it
     /// remains reachable through its other registered surfaces.
+    ///
+    /// This is placement, not permission: it decides who is *shown* the verb,
+    /// never who may perform it. Authorization is
+    /// [`crate::authorization::GOVERNED_OPERATIONS`] alone — see that module's
+    /// "Placement is not permission" section.
     pub mcp_scope: Option<McpToolScope>,
     /// Whether the CLI subcommand offers `--json`.
     pub cli_json_flag: bool,
