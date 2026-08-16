@@ -1757,10 +1757,12 @@ fn v2_claude_fable_alias_persists_provider_reported_model_and_cost() {
 #[cfg(unix)]
 #[test]
 fn task_triage_pipeline_applies_multiple_cli_envelope_dispositions() {
+    // The triage step names `crew: system` itself, so it resolves against the
+    // built-in `system` crew rather than through `workflow.system_crew`.
     let (_root, runtime, repo_root, global_root) = test_runtime_with_workspace_config(
         r#"
 [workflow]
-system_crew = "sonnet"
+base_branch = "main"
 "#,
     );
     seed_default_catalogs(&global_root);

@@ -29,9 +29,14 @@ enabled = true
 # Default base branch for `orbit run ship`.
 # Override per-invocation with `--base <branch>`.
 base_branch = "main"
-# Crew used by bounded system activities such as recovery and failed-run triage.
-# `orbit init` seeds the default `qa` crew whenever it detects a supported CLI.
-system_crew = "qa"
+# Crew used by bounded system activities, such as step-failure recovery.
+# `orbit init` seeds a `system` crew whenever it detects a supported CLI,
+# choosing the cheapest tier that family offers. Shipped job steps name that
+# crew directly, so edit the seeded `system` crew below to change what runs
+# them. This key covers recovery paths that have no job step to name a crew on,
+# and re-points the `system` name itself on a config that never seeded it. Old
+# single-family configs without `system` or `qa` reuse their validated default.
+system_crew = "system"
 
 [runtime]
 # Rotation + retention for the global JSONL log (~/.orbit/state/logs/orbit.jsonl).

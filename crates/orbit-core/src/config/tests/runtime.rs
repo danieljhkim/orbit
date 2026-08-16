@@ -25,10 +25,13 @@ fn single_family_crew(name: &str) -> Crew {
 #[test]
 fn built_in_crews_use_standard_model_specific_names() {
     let crews = default_crews();
+    // Every built-in is named for its model except `system`, which names a
+    // lane. [ORB-10877] It is built in because shipped job steps name it
+    // directly, so a config with no `[crews]` table must still resolve it.
     assert_eq!(
         crews.keys().map(String::as_str).collect::<Vec<_>>(),
         vec![
-            "fable", "gemini", "grok", "luna", "opus", "sol", "sonnet", "terra"
+            "fable", "gemini", "grok", "luna", "opus", "sol", "sonnet", "system", "terra"
         ]
     );
     for (name, provider, model) in [
@@ -40,6 +43,7 @@ fn built_in_crews_use_standard_model_specific_names() {
         ("luna", "codex", "gpt-5.6-luna"),
         ("gemini", "gemini", "gemini-3.7-flash"),
         ("grok", "grok", "grok-4.6"),
+        ("system", "claude", "sonnet"),
     ] {
         let assignment = &crews.get(name).expect("built-in crew").assignment;
         assert_eq!(assignment.provider, provider);
@@ -801,4 +805,114 @@ fn runtime_log_rotation_accepts_valid_values() {
     );
     RuntimeConfig::load_layered(global.path(), workspace.path())
         .expect("valid log rotation config should load");
+}
+
+/// [ORB-10877] Shipped job steps name `crew: system` directly. A config that
+/// points the lane elsewhere with `system_crew` must keep running system work
+/// on that crew — resolving to `qa` instead would silently relocate it, which
+/// on a host that deliberately picked a cheap lane crew is a cost regression.
+#[test]
+fn an_absent_system_crew_resolves_onto_the_configured_system_crew() {
+    let global = tempdir().expect("global tempdir");
+    let workspace = tempdir().expect("workspace tempdir");
+    write_config(
+        workspace.path(),
+        "[workflow]\ndefault_crew = \"opus\"\nsystem_crew = \"luna\"\n\n[crews.opus]\nprovider = \"claude\"\nmodel = \"opus\"\n\n[crews.luna]\nprovider = \"codex\"\nmodel = \"gpt-5.6-luna\"\n\n[crews.qa]\nprovider = \"codex\"\nmodel = \"gpt-5.6-terra\"\n",
+    );
+    let runtime = RuntimeConfig::load_layered(global.path(), workspace.path())
+        .expect("a config predating the system crew must load");
+
+    let system = runtime.crews.get("system").expect("system crew resolves");
+    assert_eq!(system.assignment.provider, "codex");
+    assert_eq!(
+        system.assignment.model, "gpt-5.6-luna",
+        "the configured system_crew must win over the qa fallback"
+    );
+}
+
+/// With no `system_crew` key the configured name is still the default `system`,
+/// so the only thing left to resolve against is the crew that carried the lane.
+#[test]
+fn an_absent_system_crew_resolves_onto_the_qa_crew() {
+    let global = tempdir().expect("global tempdir");
+    let workspace = tempdir().expect("workspace tempdir");
+    write_config(
+        workspace.path(),
+        "[workflow]\ndefault_crew = \"opus\"\n\n[crews.opus]\nprovider = \"claude\"\nmodel = \"opus\"\n\n[crews.qa]\nprovider = \"claude\"\nmodel = \"sonnet\"\n",
+    );
+    let runtime = RuntimeConfig::load_layered(global.path(), workspace.path())
+        .expect("a config predating the system crew must load");
+
+    let system = runtime.crews.get("system").expect("system crew resolves");
+    assert_eq!(system.name, "system");
+    assert_eq!(system.assignment.provider, "claude");
+    assert_eq!(system.assignment.model, "sonnet");
+    assert_eq!(runtime.system_crew(), "system");
+}
+
+/// The alias only fills an absent name; a host that defines both keeps its own.
+#[test]
+fn an_explicit_system_crew_is_not_overwritten_by_the_qa_alias() {
+    let global = tempdir().expect("global tempdir");
+    let workspace = tempdir().expect("workspace tempdir");
+    write_config(
+        workspace.path(),
+        "[workflow]\ndefault_crew = \"opus\"\n\n[crews.opus]\nprovider = \"claude\"\nmodel = \"opus\"\n\n[crews.system]\nprovider = \"codex\"\nmodel = \"gpt-5.6-luna\"\n\n[crews.qa]\nprovider = \"claude\"\nmodel = \"sonnet\"\n",
+    );
+    let runtime = RuntimeConfig::load_layered(global.path(), workspace.path())
+        .expect("config defining both crews must load");
+
+    let system = runtime.crews.get("system").expect("system crew is defined");
+    assert_eq!(system.assignment.provider, "codex");
+    assert_eq!(system.assignment.model, "gpt-5.6-luna");
+    assert_eq!(runtime.crews.get("qa").expect("qa stays").name, "qa");
+}
+
+/// Pre-system Gemini- and Grok-only configs had neither `system` nor `qa`.
+/// Their family default is the only configured portable target, so the
+/// compatibility alias must use it rather than leaving shipped system work
+/// undispatchable.
+#[test]
+fn legacy_configs_without_qa_alias_system_onto_the_default_crew() {
+    for (crew, provider, model) in [
+        ("gemini", "gemini", "gemini-3.7-flash"),
+        ("grok", "grok", "grok-4.6"),
+    ] {
+        let global = tempdir().expect("global tempdir");
+        let workspace = tempdir().expect("workspace tempdir");
+        write_config(
+            workspace.path(),
+            &format!(
+                "[workflow]\ndefault_crew = \"{crew}\"\nsystem_crew = \"qa\"\n\n[crews.{crew}]\nprovider = \"{provider}\"\nmodel = \"{model}\"\n"
+            ),
+        );
+        let runtime = RuntimeConfig::load_layered(global.path(), workspace.path())
+            .expect("a legacy single-family config must load");
+
+        let system = runtime.crews.get("system").expect("system crew resolves");
+        assert_eq!(system.name, "system");
+        assert_eq!(system.assignment.provider, provider);
+        assert_eq!(system.assignment.model, model);
+    }
+}
+
+/// Compatibility applies only to Orbit's own historical lane names. Silently
+/// substituting `qa` for an unknown custom name would make job steps run on a
+/// different crew while recovery paths still fail on the configured name.
+#[test]
+fn an_unknown_custom_system_crew_does_not_fall_back_to_qa() {
+    let global = tempdir().expect("global tempdir");
+    let workspace = tempdir().expect("workspace tempdir");
+    write_config(
+        workspace.path(),
+        "[workflow]\ndefault_crew = \"opus\"\nsystem_crew = \"missing\"\n\n[crews.opus]\nprovider = \"claude\"\nmodel = \"opus\"\n\n[crews.qa]\nprovider = \"claude\"\nmodel = \"sonnet\"\n",
+    );
+    let runtime = RuntimeConfig::load_layered(global.path(), workspace.path())
+        .expect("an unresolved system crew is diagnosed at dispatch, not config load");
+
+    assert_eq!(runtime.system_crew(), "missing");
+    assert!(
+        !runtime.crews.contains_key("system"),
+        "an unknown custom crew must not be masked by the legacy qa fallback"
+    );
 }

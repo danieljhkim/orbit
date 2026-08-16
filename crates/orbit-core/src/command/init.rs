@@ -826,7 +826,13 @@ mod tests {
         let friction_definition = orbit_common::types::parse_auto_task_yaml(&friction)
             .expect("seeded friction definition parses through loader schema");
         assert!(!friction_definition.enabled);
-        assert_eq!(friction_definition.template.crew.as_deref(), Some("luna"));
+        // [ORB-10877] Shipped recurring work names the portable system lane,
+        // not a family-specific crew.
+        assert_eq!(friction_definition.template.crew.as_deref(), Some("system"));
+        assert!(
+            friction.contains("\n  crew: system"),
+            "seeded friction default must name the system crew"
+        );
         assert!(matches!(
             friction_definition.dedupe,
             orbit_common::types::DedupePolicy::SkipIfOpen
@@ -835,7 +841,11 @@ mod tests {
         let qa_definition = orbit_common::types::parse_auto_task_yaml(&qa)
             .expect("seeded QA definition parses through loader schema");
         assert!(!qa_definition.enabled);
-        assert_eq!(qa_definition.template.crew.as_deref(), Some("sonnet"));
+        assert_eq!(qa_definition.template.crew.as_deref(), Some("system"));
+        assert!(
+            qa.contains("\n  crew: system"),
+            "seeded QA default must name the system crew"
+        );
         assert!(matches!(
             qa_definition.dedupe,
             orbit_common::types::DedupePolicy::SkipIfOpen

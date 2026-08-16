@@ -58,9 +58,12 @@ spec:
       target: activity:triage_failed_runs
       default_input:
         candidates: "{{ steps.list_candidates.output.candidates }}"
-        # Causes dispatch to resolve workflow.system_crew into the explicit
-        # crew input, rather than letting the reviewer label inherit a run crew.
-        system_crew: true
+        # Named directly so this definition states which crew triages, rather
+        # than letting the reviewer label inherit a run crew. `orbit init`
+        # seeds `[crews.system]` for whichever agent CLI it detects; a config
+        # written before that crew existed resolves the name onto whichever
+        # crew its `workflow.system_crew` names.
+        crew: system
 
     - id: apply_dispositions
       when: "{{ steps.list_candidates.output.candidate_count }} != 0"

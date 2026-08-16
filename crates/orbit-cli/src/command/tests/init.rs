@@ -139,6 +139,7 @@ fn non_interactive_init_against_non_global_root_leaves_home_skill_links_untouche
         ("gemini", "gemini", "gemini-3.7-flash"),
         ("grok", "grok", "grok-4.6"),
         ("qa", "", ""),
+        ("system", "", ""),
     ];
     if let Some(crews) = crews {
         assert!(!crews.contains_key("claude"));
@@ -151,10 +152,31 @@ fn non_interactive_init_against_non_global_root_leaves_home_skill_links_untouche
             // [ORB-10801] Seeded crews carry no retired backend key.
             assert!(crew.get("backend").is_none());
             if name == "qa" {
-                let (provider, model) = if crews.contains_key("sol") {
+                // `qa` predates the system lane and keeps the family default
+                // it has always been seeded with. It is only seeded for codex
+                // and claude, so no grok/gemini branch is reachable here.
+                let (provider, model) = if crews.contains_key("terra") {
                     ("codex", "gpt-5.6-terra")
                 } else {
                     ("claude", "sonnet")
+                };
+                assert_eq!(
+                    crew.get("provider").and_then(toml::Value::as_str),
+                    Some(provider),
+                );
+                assert_eq!(crew.get("model").and_then(toml::Value::as_str), Some(model),);
+            } else if name == "system" {
+                // Preference order: codex luna, then claude sonnet, then grok,
+                // then gemini flash. Cheapest tier per family, not the
+                // family default.
+                let (provider, model) = if crews.contains_key("luna") {
+                    ("codex", "gpt-5.6-luna")
+                } else if crews.contains_key("sonnet") {
+                    ("claude", "sonnet")
+                } else if crews.contains_key("grok") {
+                    ("grok", "grok-4.6")
+                } else {
+                    ("gemini", "gemini-3.7-flash")
                 };
                 assert_eq!(
                     crew.get("provider").and_then(toml::Value::as_str),

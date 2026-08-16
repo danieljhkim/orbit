@@ -142,7 +142,13 @@ fn friction_curation_default_is_portable_and_inert() {
         "friction curation runs on a cron cadence"
     );
     assert!(matches!(definition.dedupe, DedupePolicy::SkipIfOpen));
-    assert_eq!(definition.template.crew.as_deref(), Some("luna"));
+    // [ORB-10877] `system` is a portable lane seeded for every detected family,
+    // rather than a family-specific crew such as Luna or Sonnet.
+    assert_eq!(definition.template.crew.as_deref(), Some("system"));
+    assert!(
+        yaml.contains("\n  crew: system"),
+        "default must name the portable system crew"
+    );
     assert!(
         !yaml.contains("/home/") && !yaml.contains("/Users/"),
         "default must not contain a machine-specific path"
@@ -183,7 +189,12 @@ fn qa_sweep_default_preserves_hands_on_validation_contract() {
     assert!(!definition.enabled);
     assert!(matches!(definition.schedule, AutoTaskSchedule::Cron { .. }));
     assert!(matches!(definition.dedupe, DedupePolicy::SkipIfOpen));
-    assert_eq!(definition.template.crew.as_deref(), Some("sonnet"));
+    // [ORB-10877] Same portable system-lane rule as friction-curation above.
+    assert_eq!(definition.template.crew.as_deref(), Some("system"));
+    assert!(
+        yaml.contains("\n  crew: system"),
+        "default must name the portable system crew"
+    );
     assert_eq!(
         definition.template.status,
         orbit_common::types::TaskStatus::Backlog

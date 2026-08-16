@@ -194,21 +194,16 @@ mod tests {
             workspace.join("config.toml"),
             r#"[workflow]
 default_crew = "sol"
-system_crew = "qa"
+system_crew = "system"
 
 [crews.sol]
 provider = "codex"
 model = "gpt-5.6-sol"
 backend = "cli"
 
-[crews.luna]
+[crews.system]
 provider = "codex"
 model = "gpt-5.6-luna"
-backend = "cli"
-
-[crews.qa]
-provider = "codex"
-model = "gpt-5.6-terra"
 backend = "cli"
 "#,
         )
@@ -222,10 +217,10 @@ backend = "cli"
             ("epic_orchestrator", ("codex", "gpt-5.6-sol".to_string())),
             (
                 "step_failure_recovery",
-                ("codex", "gpt-5.6-terra".to_string()),
+                ("codex", "gpt-5.6-luna".to_string()),
             ),
             ("task_pilot", ("codex", "gpt-5.6-luna".to_string())),
-            ("triage_failed_runs", ("codex", "gpt-5.6-terra".to_string())),
+            ("triage_failed_runs", ("codex", "gpt-5.6-luna".to_string())),
         ]);
         let mut actual = BTreeMap::new();
 
@@ -235,9 +230,12 @@ backend = "cli"
             let ActivityV2Spec::AgentLoop(spec) = asset.spec.spec else {
                 continue;
             };
+            // [ORB-10877] Every system/utility activity resolves its crew from
+            // `workflow.system_crew` at dispatch. No shipped activity names a
+            // crew literally, so none of them depend on a family-specific
+            // `[crews]` entry existing on the machine that runs it.
             let activity_input = match *name {
-                "task_pilot" => json!({ "crew": "luna" }),
-                "step_failure_recovery" | "triage_failed_runs" => {
+                "task_pilot" | "step_failure_recovery" | "triage_failed_runs" => {
                     inject_system_crew_input(&runtime, &json!({ "system_crew": true }))
                         .expect("inject configured system crew")
                 }

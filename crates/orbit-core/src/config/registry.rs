@@ -19,7 +19,16 @@ use serde_json::{Value as JsonValue, json};
 
 const DEFAULT_WORKFLOW_BASE_BRANCH: &str = "main";
 const DEFAULT_WORKFLOW_CREW: &str = "opus";
-const DEFAULT_WORKFLOW_SYSTEM_CREW: &str = "qa";
+/// Name of the crew seeded for the bounded system lane. `orbit init` writes
+/// both this crew table and the `workflow.system_crew` key that points at it,
+/// so the two must stay in step. Shipped job steps also name this crew
+/// directly, so it must resolve on hosts whose config predates it — see the
+/// alias in `runtime::crews_from_raw`.
+pub(super) const DEFAULT_WORKFLOW_SYSTEM_CREW: &str = "system";
+/// The crew that carried the system lane before `system` existed. Still seeded
+/// in its own right; named here because a config written before ORB-10877
+/// defines only this one and must keep resolving system work.
+pub(super) const LEGACY_WORKFLOW_SYSTEM_CREW: &str = "qa";
 const LEGACY_DEFAULT_WORKFLOW_CREW: &str = "claude";
 const CONSTELLATION_DEFAULT_PROVIDER_ENV: &str = "CONSTELLATION_DEFAULT_PROVIDER";
 

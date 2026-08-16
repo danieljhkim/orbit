@@ -1,3 +1,27 @@
+# Schedulable task-pilot pipeline [ORB-10510, ORB-10739, ORB-10877].
+#
+# Scheduled and other zero-input runs leave discovery entirely to
+# `prepare_task_pilot`: automatic mode (task_ids empty) discovers only
+# proposed/backlog tasks in the active workspace with empty context_files,
+# excluding no-diff tasks. Explicit mode audits exactly the named workspace
+# tasks, including non-empty selectors.
+# Preparation never promotes or dispatches a task. Each read-only pilot
+# receives at most five tasks. The all-join makes any failed partition
+# fail the run before the context-only deterministic apply step can execute.
+#
+# Crew resolution
+# - The pilot step names the `system` crew directly, so this definition states
+#   which crew does the work instead of deferring it to a config key. `orbit
+#   init` seeds `[crews.system]` for whichever agent CLI it detects, choosing
+#   that family's cheapest tier, so the name resolves on any host rather than
+#   pinning a family the way a `luna` or `sonnet` here would.
+# - Change the model behind these pilots by editing `[crews.system]`. A config
+#   written before that crew existed resolves the name onto whichever crew its
+#   `workflow.system_crew` names, or onto `qa` when that key is unset.
+# - There is deliberately no per-run `crew` job input: the step-level crew
+#   below already wins over run input during dispatch, so such an input could
+#   never take effect.
+
 schemaVersion: 2
 kind: Job
 metadata:
@@ -10,9 +34,9 @@ spec:
     task_ids: []
     workspace_path: .
     base_branch: agent-main
-    crew: luna
     max_tasks: 50
     max_partition_size: 5
+
   steps:
     - id: prepare
       target: activity:prepare_task_pilot
@@ -21,6 +45,7 @@ spec:
         workspace_path: "{{ input.workspace_path }}"
         max_tasks: "{{ input.max_tasks }}"
         max_partition_size: "{{ input.max_partition_size }}"
+
     - id: pilots
       fan_out:
         items: "{{ steps.prepare.output.partitions }}"
@@ -33,14 +58,16 @@ spec:
             partition_index: "{{ item.partition_index }}"
             workspace_path: "{{ steps.prepare.output.workspace_path }}"
             base_branch: "{{ input.base_branch }}"
-            crew: "{{ input.crew }}"
+            # See the crew-resolution note at the top of this file.
+            crew: system
       fan_in:
-        join: {mode: all}
+        join:
+          mode: all
         collect: pilot_results
+
     - id: apply
       target: activity:apply_task_pilot_results
       default_input:
         prepared: "{{ steps.prepare.output }}"
         results: "{{ steps.pilot_results.output }}"
         workspace_path: "{{ steps.prepare.output.workspace_path }}"
-        crew: "{{ input.crew }}"

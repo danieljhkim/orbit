@@ -48,12 +48,14 @@ The workspace identity file `.orbit/config.yaml` is a separate artifact (it stor
 [workflow]
 base_branch = "main"        # default merge-base for ship
 default_crew = "sol"        # fallback crew when a task has no `crew` set
-system_crew = "qa"           # recovery and failed-run-triage crew
+system_crew = "system"      # crew for recovery paths with no job step to name one
 ```
 
 - **`base_branch`** — the branch `orbit run ship` rebases against and targets with PRs. Override per-invocation with `--base <branch>`. If your repo uses a two-branch pattern like this repo does (`main` = release, `agent-main` = dev integration), set `base_branch = "agent-main"`.
 - **`default_crew`** — name of the crew under `[crews.<name>]` used for any task whose own `crew` field is unset. Must match a defined crew or config load fails. See [Per-task crew override](#per-task-crew-override) for how individual tasks select a different crew.
-- **`system_crew`** — name of the crew for `step_failure_recovery` and `triage_failed_runs`; defaults to `qa`, which `orbit init` seeds when it can configure an agent. It is resolved at every dispatch through the activities' explicit crew input, so it does not inherit a failed task's crew or the workspace default. A missing or unusable crew leaves the original failed step failed and emits a diagnostic naming `workflow.system_crew` and the configured crew.
+- **`system_crew`** — name of the crew for system activities that are synthesized at runtime and so have no job step to name a crew on, principally `step_failure_recovery`. Defaults to `system`. Shipped pipelines such as `task_pilot_pipeline` and `task_triage_pipeline` do **not** read this key: their steps name `crew: system` directly, so the definition states which crew does the work. Either way the crew is resolved at dispatch through an explicit crew input, so system work never inherits a failed task's crew or the workspace default. A missing or unusable crew leaves the original failed step failed and emits a diagnostic naming `workflow.system_crew` and the configured crew.
+
+  **The `system` crew.** `orbit init` seeds `[crews.system]` whenever it detects a supported CLI, taking the cheapest tier that family offers rather than the family's default model, since system work is high-volume and low-judgment. The preference order is codex Luna, claude Sonnet, Grok, then Gemini Flash — a preference list, not a strict price sort: Flash undercuts Sonnet and Grok per token but sits last because observed runs have failed outright on quota. To change what runs system work, edit `[crews.system]`. Configs written before this crew existed have no such table, so the name is resolved first onto the crew `system_crew` names when that crew exists. For Orbit's default or legacy lane names (`system` and `qa`), a missing crew falls back to an existing `qa` crew and then to the already-validated workspace default; the latter keeps old Gemini- and Grok-only configs working even though they never seeded `qa`. Unknown custom names are not substituted. A host that points `system_crew` at a defined cheap crew therefore keeps running system work there rather than being silently relocated. An explicit `[crews.system]` always wins.
 
 ---
 
@@ -88,7 +90,7 @@ provider = "grok"
 
 The current Grok Build CLI lists `grok-4.6` as its default from `grok models`, so Orbit uses that live menu id. The older `grok-build` string is not retained as a default or alias.
 
-Fresh `orbit init` configuration advertises only detected provider CLIs. Claude seeds `opus`, `sonnet`, and `fable`; Codex seeds `sol`, `terra`, and `luna`; Gemini seeds `gemini`; and Grok seeds `grok`. When Codex or Claude is available, `qa` uses Terra or Sonnet respectively. If no supported provider CLI is detected, init leaves both the crew registry and `workflow.default_crew` unset instead of writing an unusable provider.
+Fresh `orbit init` configuration advertises only detected provider CLIs. Claude seeds `opus`, `sonnet`, and `fable`; Codex seeds `sol`, `terra`, and `luna`; Gemini seeds `gemini`; and Grok seeds `grok`. Every supported detected family also seeds the portable `system` lane; when Codex or Claude is available, the legacy `qa` crew uses Terra or Sonnet respectively. If no supported provider CLI is detected, init leaves both the crew registry and `workflow.default_crew` unset instead of writing an unusable provider.
 
 You can define any number of crews. Set the workspace-wide fallback with `workflow.default_crew`; assign a specific crew to individual tasks via the [per-task crew override](#per-task-crew-override). Crews are validated at load time: each crew must have non-empty `model` and `provider`; `workflow.default_crew` must name a defined crew.
 
