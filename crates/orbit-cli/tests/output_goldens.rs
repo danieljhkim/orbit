@@ -188,6 +188,59 @@ fn redact(text: &str, home: &Path) -> String {
     text.replace(&home.display().to_string(), "<HOME>")
 }
 
+/// `skill list`'s `content_hash` column is a SHA-256 digest over the bundled
+/// skill's own `SKILL.md` (`crates/orbit-core/src/command/skill.rs`'s
+/// `DEFAULT_SKILL_FILES`), so it changes whenever unrelated skill prose is
+/// edited even though no rendering code did. Redact it like `<TIMESTAMP>`/
+/// `<HOME>` above — but scoped to `skill_list` only, so the other three
+/// commands (which carry no content-derived field; see sibling goldens)
+/// still pin their output byte-for-byte.
+///
+/// Extracts the true hash(es) from the `--json` form first and asserts each
+/// is a well-formed 64-char lowercase hex digest, so this redaction cannot
+/// silently swallow a malformed or missing field. It also cross-checks that
+/// the plain form's 10-char `HASH` column is a genuine prefix of that same
+/// digest before redacting it, so the truncation performed by
+/// `crates/orbit-cli/src/command/skill/list.rs`'s rendering path stays
+/// covered rather than becoming a no-op once the hash itself is redacted.
+fn redact_skill_content_hash(json_text: &str, plain_text: &str) -> (String, String) {
+    static FULL_HASH: OnceLock<Regex> = OnceLock::new();
+    let full_hash = FULL_HASH
+        .get_or_init(|| Regex::new(r#""content_hash": "([0-9a-f]{64})""#).expect("valid regex"));
+
+    let hashes: Vec<String> = full_hash
+        .captures_iter(json_text)
+        .map(|caps| caps[1].to_string())
+        .collect();
+    assert!(
+        !hashes.is_empty(),
+        "no content_hash field found in skill_list.json output:\n{json_text}"
+    );
+    for hash in &hashes {
+        assert!(
+            hash.len() == 64
+                && hash
+                    .chars()
+                    .all(|c| c.is_ascii_digit() || ('a'..='f').contains(&c)),
+            "content_hash is not a well-formed 64-char lowercase hex digest: {hash}"
+        );
+    }
+
+    let mut plain_redacted = plain_text.to_string();
+    let mut json_redacted = json_text.to_string();
+    for hash in &hashes {
+        let short = &hash[..10];
+        assert!(
+            plain_text.contains(short),
+            "plain form's truncated HASH column ({short}) is not a prefix of the json form's \
+             content_hash ({hash}); truncation rendering coverage would be lost by redaction"
+        );
+        plain_redacted = plain_redacted.replace(short, "<CONTENT_HASH>");
+        json_redacted = json_redacted.replace(hash.as_str(), "<CONTENT_HASH>");
+    }
+    (json_redacted, plain_redacted)
+}
+
 fn golden_path(file_name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tests/output_goldens")
@@ -225,13 +278,21 @@ fn plain_and_json_forms_match_their_goldens() {
 
     for command in COMMANDS {
         let plain = fixture.run(command.args, &[]);
-        let plain_stdout = fixture.redact(&String::from_utf8_lossy(&plain.stdout));
-        assert_golden(&format!("{}.plain.txt", command.name), &plain_stdout);
+        let mut plain_stdout = fixture.redact(&String::from_utf8_lossy(&plain.stdout));
 
         let mut json_args = command.args.to_vec();
         json_args.push("--json");
         let json = fixture.run(&json_args, &[]);
-        let json_stdout = fixture.redact(&String::from_utf8_lossy(&json.stdout));
+        let mut json_stdout = fixture.redact(&String::from_utf8_lossy(&json.stdout));
+
+        if command.name == "skill_list" {
+            let (redacted_json, redacted_plain) =
+                redact_skill_content_hash(&json_stdout, &plain_stdout);
+            json_stdout = redacted_json;
+            plain_stdout = redacted_plain;
+        }
+
+        assert_golden(&format!("{}.plain.txt", command.name), &plain_stdout);
         assert_golden(&format!("{}.json", command.name), &json_stdout);
     }
 }
