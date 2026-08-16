@@ -207,6 +207,7 @@ impl OrbitRuntime {
                 skill_name: row.skill_id,
                 status: match row.status {
                     SkillCatalogDoctorStatus::Ok => SkillDoctorStatus::Ok,
+                    SkillCatalogDoctorStatus::Warning => SkillDoctorStatus::Warning,
                     SkillCatalogDoctorStatus::Error => SkillDoctorStatus::Error,
                 },
                 message: row.message,

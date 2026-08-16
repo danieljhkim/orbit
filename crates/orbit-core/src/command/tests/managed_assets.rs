@@ -495,6 +495,105 @@ mod artifacts {
         }
     }
 
+    /// Skill directories remain visible to health checks after their entry
+    /// point disappears, regardless of whether the manifest still remembers
+    /// the deleted payload. Repair never treats the directory itself as proof
+    /// of Orbit authorship.
+    #[test]
+    fn skill_residue_is_reported_and_fix_preserves_unproven_content() {
+        let root = tempdir().expect("create tempdir");
+        let (global_root, workspace_root) = init_workspace(root.path());
+        let skills_dir = global_root.join("skills");
+
+        let untracked_dir = skills_dir.join("orbit-search");
+        let untracked_reference = untracked_dir.join("references/manual.md");
+        std::fs::create_dir_all(untracked_reference.parent().expect("reference parent"))
+            .expect("create untracked residue");
+        std::fs::write(&untracked_reference, "operator reference\n")
+            .expect("write untracked residue");
+
+        let tracked_dir = skills_dir.join("orbit-task");
+        let tracked_reference = tracked_dir.join("references/task.md");
+        std::fs::create_dir_all(tracked_reference.parent().expect("reference parent"))
+            .expect("create tracked residue");
+        let previous_reference = "previous Orbit reference\n";
+        let modified_reference = "operator-modified reference\n";
+        std::fs::write(&tracked_reference, modified_reference)
+            .expect("write locally modified tracked residue");
+        add_managed_manifest_entry(
+            &skills_dir,
+            "orbit-task/SKILL.md",
+            "deleted Orbit entry point\n",
+        );
+        add_managed_manifest_entry(
+            &skills_dir,
+            "orbit-task/references/task.md",
+            previous_reference,
+        );
+
+        let runtime =
+            OrbitRuntime::from_roots(&global_root, &workspace_root).expect("build runtime");
+        let report = runtime
+            .inspect_definition_artifacts()
+            .expect("inspect artifacts");
+        let skill_health = health_of(&report, ArtifactKind::Skill);
+        assert_eq!(
+            skill_health.scanned, 3,
+            "one healthy skill plus two residues"
+        );
+        for residue in [&untracked_dir, &tracked_dir] {
+            let name = residue
+                .file_name()
+                .and_then(|name| name.to_str())
+                .expect("residue name");
+            let finding = skill_health
+                .findings
+                .iter()
+                .find(|finding| {
+                    finding.name == name && finding.condition == ArtifactCondition::Residual
+                })
+                .expect("residual skill directory is reported");
+            assert_eq!(finding.path, *residue);
+            assert_eq!(finding.provenance, ArtifactProvenance::UserAuthored);
+            assert!(
+                finding.detail.contains(residue.to_string_lossy().as_ref()),
+                "{}",
+                finding.detail
+            );
+            assert!(!finding.is_unloadable_shipped_default());
+        }
+
+        assert_eq!(
+            runtime
+                .remove_stale_definition_artifacts()
+                .expect("repair stale artifacts"),
+            1,
+            "only the manifest-tracked modified reference leaves the active catalog"
+        );
+        assert_eq!(
+            std::fs::read_to_string(&untracked_reference).expect("untracked residue survives"),
+            "operator reference\n"
+        );
+        let preserved = global_root.join(".retired-managed/skills/orbit-task/references/task.md");
+        assert_eq!(
+            std::fs::read_to_string(&preserved).expect("modified residue is preserved"),
+            modified_reference
+        );
+
+        let after_fix = runtime
+            .inspect_definition_artifacts()
+            .expect("inspect after repair");
+        let remaining = health_of(&after_fix, ArtifactKind::Skill)
+            .findings
+            .iter()
+            .filter(|finding| finding.condition == ArtifactCondition::Residual)
+            .count();
+        assert_eq!(
+            remaining, 2,
+            "repair leaves residual directories for review"
+        );
+    }
+
     /// Criteria: deprecated artifacts are detected across the newly covered
     /// kinds; the fix flag removes only what Orbit provably wrote and
     /// preserves a locally modified one instead of deleting it.
