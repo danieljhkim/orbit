@@ -75,6 +75,24 @@ impl OrbitRuntime {
         self.stores().tasks().task_status_index()
     }
 
+    /// Status distribution per complexity bucket from the generated task index.
+    pub fn task_completion_by_complexity(
+        &self,
+    ) -> Result<Vec<orbit_store::TaskCompletionByComplexity>, OrbitError> {
+        if !self.coordination_task_reads_visible() {
+            return Ok(Vec::new());
+        }
+        self.stores().tasks().task_completion_by_complexity()
+    }
+
+    /// `task_id →` complexity bucket from the generated task index.
+    pub fn task_complexity_by_id(&self) -> Result<BTreeMap<String, String>, OrbitError> {
+        if !self.coordination_task_reads_visible() {
+            return Ok(BTreeMap::new());
+        }
+        self.stores().tasks().task_complexity_by_id()
+    }
+
     pub fn list_tasks_by_tags(&self, tags: &[String]) -> Result<Vec<Task>, OrbitError> {
         if !self.coordination_task_reads_visible() {
             return Ok(Vec::new());

@@ -180,7 +180,7 @@ Task delete first verifies that any projection entry is a symlink, then unregist
 
 The bundle remains canonical. The registry maintains generated projections from each task envelope:
 
-- `task_bundle_index`: one row per registered task with workspace, status, priority, `job_run_id`, timestamps, and terminal month.
+- `task_bundle_index`: one row per registered task with workspace, status, priority, `job_run_id`, timestamps, terminal month, and complexity (empty string for unset; SQL `NULL` only until the first rebuild after the column was added).
 - `task_bundle_tags`: normalized tag rows with AND-style filtering semantics.
 - `task_bundle_relations`: directed `(source_task_id, relation_type, target_id)` rows plus an inverse lookup index for task targets.
 

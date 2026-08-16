@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 
 use chrono::{DateTime, Utc};
 use orbit_common::OrbitError;
-use orbit_types::task::{TaskEnvelopeV2, normalize_task_tags};
+use orbit_types::task::{TaskComplexity, TaskEnvelopeV2, normalize_task_tags};
 use rusqlite::{Connection, OptionalExtension, params};
 
 use super::util::{path_to_string, relation_type_name, terminal_month};
@@ -114,8 +114,8 @@ pub(super) fn write_task_index_rows(
 ) -> Result<(), OrbitError> {
     tx.execute(
         "INSERT INTO task_bundle_index (
-            task_id, workspace_id, status, priority, job_run_id, created_at, updated_at, terminal_month
-        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+            task_id, workspace_id, status, priority, job_run_id, created_at, updated_at, terminal_month, complexity
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
         ON CONFLICT(task_id) DO UPDATE SET
             workspace_id = excluded.workspace_id,
             status = excluded.status,
@@ -123,7 +123,8 @@ pub(super) fn write_task_index_rows(
             job_run_id = excluded.job_run_id,
             created_at = excluded.created_at,
             updated_at = excluded.updated_at,
-            terminal_month = excluded.terminal_month",
+            terminal_month = excluded.terminal_month,
+            complexity = excluded.complexity",
         params![
             &envelope.id,
             workspace_id,
@@ -133,6 +134,7 @@ pub(super) fn write_task_index_rows(
             envelope.created_at.to_rfc3339(),
             envelope.updated_at.to_rfc3339(),
             terminal_month(envelope.status, envelope.updated_at),
+            indexed_complexity(envelope.complexity),
         ],
     )
     .map_err(|e| OrbitError::Store(e.to_string()))?;
@@ -162,6 +164,14 @@ pub(super) fn write_task_index_rows(
     }
 
     Ok(())
+}
+
+/// Indexed form of [`TaskComplexity`]: a populated band, or `""` for unset.
+/// SQL `NULL` is reserved for “column not yet backfilled”.
+fn indexed_complexity(complexity: Option<TaskComplexity>) -> String {
+    complexity
+        .map(|value| value.to_string())
+        .unwrap_or_default()
 }
 
 fn parse_timestamp(raw: &str) -> rusqlite::Result<DateTime<Utc>> {

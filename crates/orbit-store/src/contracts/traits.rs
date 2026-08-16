@@ -30,9 +30,9 @@ use super::v2_audit::{V2AuditEventFilter, V2AuditEventInsertParams, V2AuditEvent
 
 use crate::contracts::incident::{FailureIncidentQuery, FailureIncidentReport};
 use crate::contracts::{
-    AuditActorAggregate, AuditEventFilter, AuditEventInsertParams, AuditRoleAggregate,
-    AuditToolAggregate, AuditToolCallCountsByRole, AuditToolCallCountsBySurfaceAndRole,
-    AuditTopToolCall,
+    AuditEventFilter, AuditEventInsertParams, AuditRoleAggregate, AuditToolAggregate,
+    AuditToolCallCountsByRole, AuditToolCallCountsBySurfaceAndRole, AuditTopToolCall,
+    TaskCompletionByComplexity,
 };
 
 pub trait TaskStoreBackend: Send + Sync {
@@ -73,6 +73,18 @@ pub trait TaskStoreBackend: Send + Sync {
         Ok(tasks)
     }
     fn delete_task(&self, id: &str) -> Result<bool, OrbitError>;
+
+    /// Status counts per complexity bucket from the generated task index.
+    /// Default is empty; the v2 store answers from SQLite without bundle reads.
+    fn task_completion_by_complexity(&self) -> Result<Vec<TaskCompletionByComplexity>, OrbitError> {
+        Ok(Vec::new())
+    }
+
+    /// `task_id →` complexity bucket (`low`/`medium`/`hard`/`unset`) from the
+    /// generated index. Used to facet invocation metrics without YAML reads.
+    fn task_complexity_by_id(&self) -> Result<BTreeMap<OrbitId, String>, OrbitError> {
+        Ok(BTreeMap::new())
+    }
 }
 
 pub trait SessionLogStoreBackend: Send + Sync {

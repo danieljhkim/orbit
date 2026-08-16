@@ -7,7 +7,7 @@ import { applyAuditHashQuery, buildAuditChips, buildAuditHash, fetchAndRenderAud
 import { renderScoreboard } from './scoreboard.js';
 import { fetchAndRenderReliability, wireReliabilityWindowSelector } from './reliability.js';
 import { initLogTail, fitLogPanelToViewport } from './log-tail.js';
-import { renderDiagnostics, renderImplementOneCard as renderImplOne, } from './diagnostics.js';
+import { renderDiagnostics } from './diagnostics.js';
 import { renderMarkdown } from './markdown.js';
 import { initRouter, initTabs as iT, navigateToRun as nTR, setActiveTab as sAT, setRunDetailSubtab, } from './router.js';
 import { initRuns, mergeRunsWithFriction, renderRuns, runIsCancellable, buildCancelRunButton, buildReplayRunButton } from './runs.js';
@@ -72,7 +72,7 @@ let lastTasks = [];
 // `/api/tasks/all` view, which answers a bare array with no such metadata.
 let lastTasksMeta = null;
 let lastRuns = [];
-let lastDiagnostics = { metrics: [], errors: [], incidents: null, implement_one: [] };
+let lastDiagnostics = { metrics: [], errors: [], incidents: null, implement_one: [], implement_one_by_complexity: [], completion_by_complexity: [] };
 let lastFrictionPayload = { stats: {}, tags: [], items: [] };
 let activeTab = "tasks";
 let activeDiagSubtab = "runs";
@@ -1082,12 +1082,19 @@ function activeRefreshJobs() {
     }
 
     jobs.push(
-      fetchJson(`/api/diagnostics/implement_one`)
-        .then((implOne) => {
+      Promise.all([
+        fetchJson(`/api/diagnostics/implement_one`),
+        fetchJson(`/api/tasks/completion-by-complexity`).catch((e) => {
+          console.error("Failed to fetch completion-by-complexity", e);
+          return { by_complexity: [] };
+        }),
+      ])
+        .then(([implOne, completion]) => {
           lastDiagnostics.implement_one = implOne.implement_one_by_actor || [];
-          const sidePanel = $("diagnostics-side-panel");
-          if (sidePanel) {
-            renderImplOne($("diag-implement-one-body"), lastDiagnostics.implement_one, diagnosticsContext());
+          lastDiagnostics.implement_one_by_complexity = implOne.implement_one_by_complexity || [];
+          lastDiagnostics.completion_by_complexity = completion.by_complexity || [];
+          if ($("diagnostics-side-panel")) {
+            renderDiagnostics(diagnosticsContext());
           }
         })
         .catch(e => console.error("Failed to fetch implement_one metrics", e))

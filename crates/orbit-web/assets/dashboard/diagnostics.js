@@ -372,7 +372,7 @@ function renderIncidents(payload, ctx) {
 
 function renderDiagnostics(ctx = {}) {
   const sub = ctx.getActiveDiagSubtab ? ctx.getActiveDiagSubtab() : "metrics";
-  const last = ctx.getLastDiagnostics ? ctx.getLastDiagnostics() : { metrics: [], errors: [], incidents: null, implement_one: [] };
+  const last = ctx.getLastDiagnostics ? ctx.getLastDiagnostics() : { metrics: [], errors: [], incidents: null, implement_one: [], implement_one_by_complexity: [], completion_by_complexity: [] };
 
   if (sub === "incidents") {
     const payload = last.incidents || {};
@@ -401,10 +401,16 @@ function renderDiagnostics(ctx = {}) {
 }
 
 function renderDiagnosticsSideCard(last, ctx) {
-  const sidePanel = $("diagnostics-side-panel");
-  if (sidePanel) {
-    renderImplementOneCard($("diag-implement-one-body"), last.implement_one || [], ctx);
-  }
+  const container = $("diag-implement-one-body");
+  if (!container) return;
+  container.innerHTML = "";
+  renderCompletionByComplexityCard(container, last.completion_by_complexity || [], ctx);
+  renderImplementOneCard(
+    container,
+    last.implement_one_by_complexity || [],
+    last.implement_one || [],
+    ctx,
+  );
 }
 
 function renderMetricsCard(container, title, rows, cols) {
@@ -434,13 +440,53 @@ function renderMetricsCard(container, title, rows, cols) {
   container.appendChild(card);
 }
 
-function renderImplementOneCard(container, rows, ctx = {}) {
-  container.innerHTML = "";
-  if (rows.length === 0) {
-    container.appendChild(el("div", { class: "empty", text: "No implement_one runs in last 30d." }));
+function formatCountRate(count, total) {
+  const n = Number(count) || 0;
+  const d = Number(total) || 0;
+  if (d <= 0) return `${n} / ${d}`;
+  return `${n} / ${d} (${((n / d) * 100).toFixed(1)}%)`;
+}
+
+function complexityLabel(value) {
+  return value === "unset" ? "unset (unlabeled)" : (value || "unset (unlabeled)");
+}
+
+function renderCompletionByComplexityCard(container, rows, _ctx = {}) {
+  if (!rows.length) {
+    const card = el("div", { class: "audit-summary-card" });
+    card.appendChild(el("div", { class: "card-title", text: "Task completion by complexity" }));
+    const body = el("div", { class: "card-body" });
+    body.appendChild(el("div", { class: "empty", text: "No tasks." }));
+    card.appendChild(body);
+    container.appendChild(card);
     return;
   }
+  const statusCols = [
+    { key: "complexity", label: "complexity" },
+    { key: "total", label: "n", num: true },
+    { key: "done", label: "done", num: true },
+    { key: "rejected", label: "rejected", num: true },
+    { key: "archived", label: "archived", num: true },
+  ];
+  const tableRows = rows.map((bucket) => {
+    const byStatus = {};
+    for (const status of bucket.statuses || []) {
+      byStatus[status.status] = status;
+    }
+    const total = bucket.total || 0;
+    const cell = (name) => formatCountRate((byStatus[name] || {}).count || 0, total);
+    return {
+      complexity: complexityLabel(bucket.complexity),
+      total,
+      done: cell("done"),
+      rejected: cell("rejected"),
+      archived: cell("archived"),
+    };
+  });
+  renderMetricsCard(container, "Task completion by complexity", tableRows, statusCols);
+}
 
+function renderImplementOneCard(container, byComplexity, fallbackRows, ctx = {}) {
   const durCols = [
     { key: "actor", label: "actor" },
     { key: "n", label: "n", num: true },
@@ -448,7 +494,24 @@ function renderImplementOneCard(container, rows, ctx = {}) {
     { key: "p50", label: "p50", num: true, format: (v) => fmtDurationValue(ctx, v) },
     { key: "p95", label: "p95", num: true, format: (v) => fmtDurationValue(ctx, v) }
   ];
-  renderMetricsCard(container, "Average implement_one duration by actor (30d)", rows, durCols);
+  const bands = Array.isArray(byComplexity) ? byComplexity.filter((band) => (band.actors || []).length) : [];
+  if (bands.length) {
+    for (const band of bands) {
+      const label = complexityLabel(band.complexity);
+      renderMetricsCard(
+        container,
+        `Average implement_one duration by actor (30d) · ${label} · n=${band.n || 0}`,
+        band.actors,
+        durCols,
+      );
+    }
+    return;
+  }
+  if (!fallbackRows.length) {
+    container.appendChild(el("div", { class: "empty", text: "No implement_one runs in last 30d." }));
+    return;
+  }
+  renderMetricsCard(container, "Average implement_one duration by actor (30d)", fallbackRows, durCols);
 }
 
 export {

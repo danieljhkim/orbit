@@ -6,8 +6,9 @@ use std::sync::{Arc, Mutex};
 use orbit_common::{NotFoundKind, OrbitError};
 use orbit_types::task::{
     ORB_TASK_ID_MAX, TaskEnvelopeV2, TaskRelation, TaskRelationEdge, TaskRelationType, TaskStatus,
-    format_task_id, is_valid_orb_task_id, is_valid_task_id_prefix, normalize_task_tags,
-    parse_task_number, task_id_prefix, validate_orb_task_id, validate_task_relations_for_source,
+    complexity_bucket_ord, format_task_id, is_valid_orb_task_id, is_valid_task_id_prefix,
+    labeled_or_unset, normalize_task_tags, parse_task_number, task_id_prefix, validate_orb_task_id,
+    validate_task_relations_for_source,
 };
 use rusqlite::{Connection, TransactionBehavior, params, params_from_iter};
 
@@ -25,7 +26,8 @@ use super::util::{
 use super::workspace_id::{next_workspace_id_candidate, sanitize_slug, validate_workspace_id};
 use crate::contracts::{
     AllocatorSeedOutcome, BindWorkspaceParams, DanglingRelationTarget, RegisterWorkspaceParams,
-    TaskBundleBinding, TaskIndexFilter, WorkspaceBinding, WorkspaceCheckoutBinding,
+    TaskBundleBinding, TaskCompletionByComplexity, TaskIndexFilter, WorkspaceBinding,
+    WorkspaceCheckoutBinding,
 };
 
 #[derive(Clone)]
@@ -625,6 +627,118 @@ impl TaskRegistryStore {
             statuses.insert(task_id, status);
         }
         Ok(statuses)
+    }
+
+    /// True when this workspace still has index rows whose `complexity` column
+    /// was added by migration and has not been written yet (`NULL`).
+    pub fn workspace_index_has_null_complexity(
+        &self,
+        workspace_id: &str,
+    ) -> Result<bool, OrbitError> {
+        let workspace_id = validate_workspace_id(workspace_id)?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| OrbitError::Store(format!("mutex poisoned: {e}")))?;
+        let exists: i64 = conn
+            .query_row(
+                "SELECT EXISTS(
+                    SELECT 1 FROM task_bundle_index
+                    WHERE workspace_id = ?1 AND complexity IS NULL
+                 )",
+                [workspace_id],
+                |row| row.get(0),
+            )
+            .map_err(|e| OrbitError::Store(e.to_string()))?;
+        Ok(exists != 0)
+    }
+
+    /// Status counts grouped by complexity bucket. `NULL` and empty index
+    /// values both become the named `unset` bucket.
+    pub fn completion_by_complexity(
+        &self,
+        workspace_id: &str,
+    ) -> Result<Vec<TaskCompletionByComplexity>, OrbitError> {
+        let workspace_id = validate_workspace_id(workspace_id)?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| OrbitError::Store(format!("mutex poisoned: {e}")))?;
+        let mut stmt = conn
+            .prepare(
+                "SELECT complexity, status, COUNT(*)
+                 FROM task_bundle_index
+                 WHERE workspace_id = ?1
+                 GROUP BY complexity, status",
+            )
+            .map_err(|e| OrbitError::Store(e.to_string()))?;
+        let rows = stmt
+            .query_map([&workspace_id], |row| {
+                Ok((
+                    row.get::<_, Option<String>>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, i64>(2)?,
+                ))
+            })
+            .map_err(|e| OrbitError::Store(e.to_string()))?;
+
+        let mut by_bucket: BTreeMap<String, BTreeMap<String, i64>> = BTreeMap::new();
+        for row in rows {
+            let (raw_complexity, status, count) =
+                row.map_err(|e| OrbitError::Store(e.to_string()))?;
+            let bucket = labeled_or_unset(raw_complexity.as_deref()).to_string();
+            *by_bucket
+                .entry(bucket)
+                .or_default()
+                .entry(status)
+                .or_insert(0) += count;
+        }
+
+        let mut out: Vec<TaskCompletionByComplexity> = by_bucket
+            .into_iter()
+            .map(|(complexity, by_status)| {
+                let total = by_status.values().sum();
+                TaskCompletionByComplexity {
+                    complexity,
+                    total,
+                    by_status,
+                }
+            })
+            .collect();
+        out.sort_by(|left, right| {
+            complexity_bucket_ord(&left.complexity).cmp(&complexity_bucket_ord(&right.complexity))
+        });
+        Ok(out)
+    }
+
+    /// `task_id →` complexity bucket for every indexed task in the workspace.
+    pub fn complexity_by_task_id(
+        &self,
+        workspace_id: &str,
+    ) -> Result<BTreeMap<String, String>, OrbitError> {
+        let workspace_id = validate_workspace_id(workspace_id)?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| OrbitError::Store(format!("mutex poisoned: {e}")))?;
+        let mut stmt = conn
+            .prepare(
+                "SELECT task_id, complexity FROM task_bundle_index
+                 WHERE workspace_id = ?1
+                 ORDER BY task_id ASC",
+            )
+            .map_err(|e| OrbitError::Store(e.to_string()))?;
+        let rows = stmt
+            .query_map([workspace_id], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?))
+            })
+            .map_err(|e| OrbitError::Store(e.to_string()))?;
+        let mut map = BTreeMap::new();
+        for row in rows {
+            let (task_id, raw) = row.map_err(|e| OrbitError::Store(e.to_string()))?;
+            map.insert(task_id, labeled_or_unset(raw.as_deref()).to_string());
+        }
+        Ok(map)
     }
 
     /// Validate task relations against every workspace in the coordination

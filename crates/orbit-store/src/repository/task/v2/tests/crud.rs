@@ -1,4 +1,53 @@
 use super::*;
+use orbit_types::task::{TaskComplexity, UNSET_BUCKET};
+
+#[test]
+fn completion_by_complexity_includes_unset_and_backfills_null_rows() {
+    let temp = TempDir::new().expect("tempdir");
+    let store = store(&temp);
+
+    let mut hard = create_params("Hard landed", TaskStatus::Done);
+    hard.complexity = Some(TaskComplexity::Hard);
+    store.create_task(hard).expect("create hard");
+    store
+        .create_task(create_params("Unlabeled", TaskStatus::Rejected))
+        .expect("create unset");
+
+    let rows = store
+        .task_completion_by_complexity()
+        .expect("aggregate after write");
+    assert!(
+        rows.iter()
+            .any(|row| row.complexity == "hard" && row.total == 1),
+        "{rows:?}"
+    );
+    assert!(
+        rows.iter()
+            .any(|row| row.complexity == UNSET_BUCKET && row.total == 1),
+        "{rows:?}"
+    );
+
+    let conn = rusqlite::Connection::open(task_registry_path(temp.path())).expect("open registry");
+    conn.execute("UPDATE task_bundle_index SET complexity = NULL", [])
+        .expect("clear indexed complexity");
+    drop(conn);
+
+    let backfilled = store
+        .task_completion_by_complexity()
+        .expect("aggregate after backfill");
+    assert!(
+        backfilled
+            .iter()
+            .any(|row| row.complexity == "hard" && row.total == 1),
+        "{backfilled:?}"
+    );
+    assert!(
+        backfilled
+            .iter()
+            .any(|row| row.complexity == UNSET_BUCKET && row.total == 1),
+        "{backfilled:?}"
+    );
+}
 
 #[test]
 fn create_get_and_list_task_round_trip_through_v2_bundle() {
