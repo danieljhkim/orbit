@@ -14,6 +14,118 @@ export function setWorkspace(id) {
   currentWorkspace = id || null;
 }
 
+// ORB-10872: workspace + time window are one dashboard scope. Scoreboard,
+// Audit, Reliability, and Managed Execution either honor this window or show
+// an equally prominent independent-scope label. Seeded from `?window=` or the
+// hash query so reload and shared links restore the same cutoff.
+export const DASHBOARD_WINDOWS = ["1h", "24h", "7d", "30d", "all"];
+export const RELIABILITY_WINDOWS = ["1h", "24h", "7d", "30d"];
+export const DEFAULT_DASHBOARD_WINDOW = "24h";
+export const INDEPENDENT_RELIABILITY_WINDOW = "7d";
+
+export function parseDashboardWindow(raw, allowed = DASHBOARD_WINDOWS) {
+  return allowed.includes(raw) ? raw : null;
+}
+
+function windowFromLocation() {
+  const fromSearch = parseDashboardWindow(params.get("window"));
+  if (fromSearch) return fromSearch;
+  const hash = String(window.location.hash || "");
+  const queryIdx = hash.indexOf("?");
+  if (queryIdx >= 0) {
+    const fromHash = parseDashboardWindow(new URLSearchParams(hash.slice(queryIdx + 1)).get("window"));
+    if (fromHash) return fromHash;
+  }
+  return DEFAULT_DASHBOARD_WINDOW;
+}
+
+let currentWindow = windowFromLocation();
+
+export function getWindow() {
+  return currentWindow;
+}
+
+export function setWindow(raw) {
+  const next = parseDashboardWindow(raw) || DEFAULT_DASHBOARD_WINDOW;
+  const changed = next !== currentWindow;
+  currentWindow = next;
+  return changed;
+}
+
+/// Reliability cannot serve an unbounded `all` window. When the dashboard
+/// selection is `all`, Reliability keeps a labeled independent 7d cutoff.
+export function reliabilityWindowFor(selected = currentWindow) {
+  if (RELIABILITY_WINDOWS.includes(selected)) {
+    return { window: selected, independent: false };
+  }
+  return { window: INDEPENDENT_RELIABILITY_WINDOW, independent: true };
+}
+
+/// True only when the payload's reported window matches the active selection.
+/// A 24h scoreboard/orchestration body must not render under an active 7d.
+export function payloadHonorsWindow(payload, selected) {
+  if (!payload || typeof payload !== "object" || !selected) return false;
+  const reported = payload.window;
+  if (typeof reported === "string") return reported === selected;
+  if (reported && typeof reported.label === "string") return reported.label === selected;
+  return false;
+}
+
+let scopeChangeListener = null;
+
+export function setScopeChangeListener(fn) {
+  scopeChangeListener = typeof fn === "function" ? fn : null;
+}
+
+export function notifyScopeChange() {
+  if (scopeChangeListener) scopeChangeListener();
+}
+
+// Mirror workspace + window into the query string without a navigation.
+// Hash routes still own view/filter history; this keeps reload-safe scope.
+export function persistScopeToUrl() {
+  const url = new URL(window.location.href);
+  if (currentWorkspace) url.searchParams.set("workspace", currentWorkspace);
+  else url.searchParams.delete("workspace");
+  if (currentWindow) url.searchParams.set("window", currentWindow);
+  else url.searchParams.delete("window");
+  if (url.href !== window.location.href) {
+    history.replaceState(null, "", url);
+  }
+}
+
+export function syncWindowSelectors() {
+  const selected = currentWindow;
+  const rel = reliabilityWindowFor(selected);
+  for (const [id, target] of [
+    ["scoreboard-window-selector", selected],
+    ["reliability-window-selector", rel.window],
+  ]) {
+    const selector = document.getElementById(id);
+    if (!selector) continue;
+    for (const seg of selector.querySelectorAll(".scoreboard-window-seg")) {
+      seg.classList.toggle("on", seg.dataset.window === target);
+    }
+  }
+}
+
+export function wireWindowSelector(selectorId, opts = {}) {
+  const selector = document.getElementById(selectorId);
+  if (!selector || selector.dataset.wired === "true") return;
+  selector.dataset.wired = "true";
+  const allowed = opts.allowAll === false ? RELIABILITY_WINDOWS : DASHBOARD_WINDOWS;
+  selector.addEventListener("click", (event) => {
+    const seg = event.target && event.target.closest(".scoreboard-window-seg");
+    if (!seg || !selector.contains(seg)) return;
+    const next = seg.dataset.window;
+    if (!allowed.includes(next) || next === currentWindow) return;
+    setWindow(next);
+    persistScopeToUrl();
+    syncWindowSelectors();
+    notifyScopeChange();
+  });
+}
+
 // ORB-00030/00039/00040: the dashboard can serve multiple workspaces. "Multi-
 // workspace mode" is on when more than one workspace is servable; the aggregate
 // ("All workspaces") view is that mode with no concrete workspace selected. In

@@ -176,6 +176,40 @@ async fn an_unknown_window_is_a_400_not_a_silent_default() {
 }
 
 #[tokio::test]
+async fn reliability_payload_is_explicitly_fleet_wide() {
+    let response = request_reliability(seeded_runtime(), "?window=7d").await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = body_json(response).await;
+    assert_eq!(
+        body["scope"].as_str(),
+        Some("fleet"),
+        "reliability must declare fleet-wide scope so the UI can label it"
+    );
+}
+
+#[tokio::test]
+async fn reliability_7d_window_is_a_half_open_week() {
+    let response = request_reliability(seeded_runtime(), "?window=7d").await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = body_json(response).await;
+    assert_eq!(body["window"]["label"], "7d");
+    let since = chrono::DateTime::parse_from_rfc3339(
+        body["window"]["since"].as_str().expect("since"),
+    )
+    .expect("parse since");
+    let until = chrono::DateTime::parse_from_rfc3339(
+        body["window"]["until"].as_str().expect("until"),
+    )
+    .expect("parse until");
+    let span = until.signed_duration_since(since);
+    assert!(
+        span >= chrono::Duration::days(7) - chrono::Duration::seconds(2)
+            && span <= chrono::Duration::days(7) + chrono::Duration::seconds(2),
+        "7d reliability span must be ~7 days, got {span}"
+    );
+}
+
+#[tokio::test]
 async fn omitting_the_window_still_yields_an_explicit_one() {
     let response = request_reliability(seeded_runtime(), "").await;
     assert_eq!(response.status(), StatusCode::OK);

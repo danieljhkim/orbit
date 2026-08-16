@@ -1,44 +1,16 @@
 // Orbit dashboard scoreboard-domain rendering.
 // Pure vanilla JS, split into ES modules with no build step.
 
-import { el, syncNodes, fetchJson, isAggregateView } from './common.js';
-import { navigateToRole } from './audit.js';
+import { el, syncNodes, getWindow, payloadHonorsWindow, wireWindowSelector, syncWindowSelectors } from './common.js';
+import { navigateToDrilldown } from './audit.js';
 
-// ORB-00337: canonical scoreboard windows (mirror of
-// `orbit_store::scoreboard_summary::ScoreboardWindow::as_str`). The
-// boot fetch in app.js hardcodes `24h` to match the visually-highlighted
-// segment; subsequent fetches happen from the selector click handler.
-const SCOREBOARD_WINDOWS = ["1h", "24h", "7d", "30d", "all"];
-
+// ORB-00337/ORB-10872: selector writes the shared dashboard window; app.js
+// refresh is the single fetch path so delivery/operations and Managed
+// Execution cannot drift onto different cutoffs.
 function wireScoreboardWindowSelector() {
-  const selector = document.getElementById("scoreboard-window-selector");
-  if (!selector || selector.dataset.wired === "true") return;
-  selector.dataset.wired = "true";
-  selector.addEventListener("click", (event) => {
-    const seg = event.target && event.target.closest(".scoreboard-window-seg");
-    if (!seg || !selector.contains(seg)) return;
-    const next = seg.dataset.window;
-    if (!SCOREBOARD_WINDOWS.includes(next)) return;
-    if (seg.classList.contains("on")) return; // no-op refetch
-    // ORB-00040: /api/scoreboard is per-workspace and 400s without a concrete
-    // workspace. The auto-refresh boot fetch is already guarded in app.js; this
-    // guards the user-initiated window re-fetch too, so selecting a window in the
-    // aggregate ("All workspaces") view is a no-op (the panel shows the
-    // placeholder) rather than flipping conn-status to red.
-    if (isAggregateView()) return;
-    for (const peer of selector.querySelectorAll(".scoreboard-window-seg")) {
-      peer.classList.remove("on");
-    }
-    seg.classList.add("on");
-    fetchJson(`/api/scoreboard?window=${encodeURIComponent(next)}`)
-      .then(renderScoreboard)
-      .catch((err) => {
-        // Surface fetch failures in the console so the dashboard's "no
-        // console errors" verification step catches regressions; the UI
-        // keeps the previously-rendered scoreboard.
-        console.error("scoreboard window refetch failed:", err);
-      });
-  });
+  // Selector writes shared dashboard window even in aggregate view so the
+  // URL stays authoritative; app.js skips the per-workspace fetch there.
+  wireWindowSelector("scoreboard-window-selector", { allowAll: true });
 }
 
 const $ = (id) => document.getElementById(id);
@@ -153,6 +125,16 @@ function renderScoreboard(summary) {
   // ORB-00337: idempotent attach of the window-selector click handler
   // (guarded internally so re-renders don't double-bind).
   wireScoreboardWindowSelector();
+  syncWindowSelectors();
+
+  // ORB-10872: never paint a 24h body under an active 7d (or any other)
+  // selection. The fetch path also guards this; keep the renderer honest.
+  if (summary && !payloadHonorsWindow(summary, getWindow())) {
+    console.error(
+      `scoreboard payload window ${summary.window} rejected under ${getWindow()} selection`,
+    );
+    return;
+  }
 
   const body = $("scoreboard-body");
   const narrativeHost = $("scoreboard-narrative");
@@ -378,9 +360,10 @@ function renderOrchestrationSummary(orchestration) {
     el("div", { class: "scoreboard-orchestration-context" }, [
       el("div", { class: "scoreboard-orchestration-scope" }, [
         el("span", { class: "scope-label", text: "Managed execution only" }),
+        el("span", { class: "scope-badge", text: `window ${getWindow()}` }),
         el("span", { text: "Direct interactive Codex or Claude orchestration-session overhead is excluded." }),
       ]),
-      el("div", { class: "scoreboard-orchestration-window", text: `Window: ${since} ≤ invocation < ${until} (exclusive cutoff; as of ${orchestration.as_of || "unknown"}).` }),
+      el("div", { class: "scoreboard-orchestration-window", text: `Window ${getWindow()}: ${since} ≤ invocation < ${until} (exclusive cutoff; as of ${orchestration.as_of || "unknown"}).` }),
       el("p", { class: "scoreboard-orchestration-policy", text: "Provider-first estimate policy: provider-reported values are primary; derived values remain explicitly labeled estimates with their own coverage. Only the explicitly comparable same-invocation population is safe to compare." }),
     ]),
     renderNormalizedTokenUsage(orchestration.normalized_tokens, orchestration.previous_normalized_tokens),
@@ -456,7 +439,7 @@ function renderAgentStrip(rows) {
       title: `${name} - click to filter audit by role`,
     }), name);
     card.type = "button";
-    card.addEventListener("click", () => navigateToRole(name));
+    card.addEventListener("click", () => navigateToDrilldown({ role: name }));
 
     card.appendChild(el("div", { class: "scoreboard-agent-rank", text: `#${String(index + 1).padStart(2, "0")} · activity` }));
     card.appendChild(el("div", { class: "scoreboard-agent-heading" }, [
@@ -509,7 +492,7 @@ function buildLeaderboardMatrix(rows, sectionList, opts = {}) {
       document.createTextNode(name),
       el("span", { class: "totals", text: `${fmtScoreboardCount(agentActivityTotal(agent))} activity` }),
     ]), name);
-    th.addEventListener("click", () => navigateToRole(name));
+    th.addEventListener("click", () => navigateToDrilldown({ role: name }));
     headRow.appendChild(th);
   }
   thead.appendChild(headRow);
@@ -546,6 +529,13 @@ function buildLeaderboardMatrix(rows, sectionList, opts = {}) {
           : metricCell(name, agent, col, rowMax, isLeader);
         td.dataset.agent = name;
         td.dataset.metric = col.key;
+        td.classList.add("clickable");
+        td.title = `${col.title || col.label}: click to filter audit`;
+        td.addEventListener("click", () => navigateToDrilldown({
+          role: name,
+          metric: col.key,
+          status: col.key === "tools" || col.key === "failed_tool_calls" ? "failure" : null,
+        }));
         tr.appendChild(td);
       }
       tbody.appendChild(tr);

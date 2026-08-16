@@ -133,6 +133,52 @@ async fn scoreboard_query_window_bogus_returns_400_with_error_body() {
 }
 
 #[tokio::test]
+async fn scoreboard_query_window_7d_is_not_a_24h_payload() {
+    let runtime = OrbitRuntime::in_memory().expect("build runtime");
+    let response = get_scoreboard(runtime, Some("window=7d")).await;
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = body_json(response).await;
+    assert_eq!(body["window"].as_str(), Some("7d"));
+    assert_ne!(
+        body["window"].as_str(),
+        Some("24h"),
+        "a 7d request must not report a 24h window"
+    );
+    let since = chrono::DateTime::parse_from_rfc3339(
+        body["window_since"]
+            .as_str()
+            .expect("window_since for 7d"),
+    )
+    .expect("parse window_since");
+    let orch_since = chrono::DateTime::parse_from_rfc3339(
+        body["orchestration"]["since"]
+            .as_str()
+            .expect("orchestration since"),
+    )
+    .expect("parse orchestration since");
+    let until = chrono::DateTime::parse_from_rfc3339(
+        body["orchestration"]["until"]
+            .as_str()
+            .expect("orchestration until"),
+    )
+    .expect("parse until");
+    assert_eq!(since, orch_since, "scoreboard and managed-execution cutoffs must match");
+    let span = until.signed_duration_since(orch_since);
+    assert!(
+        span >= chrono::Duration::days(7) - chrono::Duration::seconds(2)
+            && span <= chrono::Duration::days(7) + chrono::Duration::seconds(2),
+        "7d orchestration span must be ~7 days, got {span}"
+    );
+    assert!(until <= chrono::DateTime::parse_from_rfc3339(
+        body["orchestration"]["as_of"]
+            .as_str()
+            .expect("as_of"),
+    )
+    .expect("parse as_of"));
+}
+
+#[tokio::test]
 async fn scoreboard_query_window_all_round_trips_explicitly() {
     let runtime = OrbitRuntime::in_memory().expect("build runtime");
     let response = get_scoreboard(runtime, Some("window=all")).await;

@@ -17,10 +17,24 @@
 //
 // Also exports parseHashRoute for symmetry (used only internally today).
 
-import { el, isAggregateView, renderPanelPlaceholder } from './common.js';
+import { el, isAggregateView, renderPanelPlaceholder, getWindow, setWindow, parseDashboardWindow, persistScopeToUrl, syncWindowSelectors } from './common.js';
 import { renderRuns } from './runs.js';
 
 const $ = (id) => document.getElementById(id);
+
+// ORB-10872: Reliability is fleet-wide. While that subtab is showing, the
+// header workspace selector must not look like it scopes the visible panel.
+function markWorkspaceSelectorScope(fleetWide) {
+  const select = $("workspace-select");
+  if (select) {
+    select.classList.toggle("scope-ignored", fleetWide);
+    select.title = fleetWide
+      ? "Reliability is Fleet-wide; workspace does not apply"
+      : "Workspace";
+  }
+  const note = $("workspace-scope-note");
+  if (note) note.hidden = !fleetWide;
+}
 
 // ORB-10444: the top-level nav is exactly these four tabs plus the hash-only
 // `run-detail` route. A deprecated tab was retired outright and `scoreboard`,
@@ -97,6 +111,8 @@ function setDiagSubtabImpl(ctx, name) {
       ? "minmax(0, 1fr)"
       : "minmax(0, 2fr) minmax(280px, 1.15fr)";
   }
+  document.body.classList.toggle("reliability-active", name === "reliability");
+  markWorkspaceSelectorScope(name === "reliability");
   if (fullWidthMain) {
     $("diag-body").style.display = "none";
     $("runs-body").style.display = "none";
@@ -184,6 +200,10 @@ function setActiveTabImpl(ctx, raw, opts = {}) {
   }
   ctx.setTab(top);
   document.body.classList.toggle("operations-active", top === "operations");
+  if (top !== "diagnostics") {
+    document.body.classList.remove("reliability-active");
+    markWorkspaceSelectorScope(false);
+  }
   for (const tab of document.querySelectorAll(".tab")) {
     tab.classList.toggle("active", tab.dataset.tab === top);
   }
@@ -207,8 +227,14 @@ function setActiveTabImpl(ctx, raw, opts = {}) {
   let hash;
   if (top === "diagnostics") {
     const sub = DIAG_SUBTABS.includes(segments[1]) ? segments[1] : ctx.getDiagSubtab();
+    const hashedWindow = parseDashboardWindow(query.get("window"));
+    if (hashedWindow && hashedWindow !== getWindow()) {
+      setWindow(hashedWindow);
+      persistScopeToUrl();
+      syncWindowSelectors();
+    }
     setDiagSubtabImpl(ctx, sub);
-    hash = `#diagnostics/${sub}`;
+    hash = `#diagnostics/${sub}?window=${encodeURIComponent(getWindow())}`;
   } else if (top === "audit") {
     ctx.applyAuditHashQuery(query);
     const sub = ["events", "policy"].includes(segments[1]) ? segments[1] : ctx.getActiveAuditSubtab();

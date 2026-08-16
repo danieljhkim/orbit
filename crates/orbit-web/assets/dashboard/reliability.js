@@ -19,19 +19,18 @@
 // still in flight, so the summary spells out the excluded bucket rather than
 // letting the two visible numbers imply they add up.
 
-import { el, syncNodes, fetchJson } from './common.js';
+import { el, syncNodes, fetchJson, getWindow, payloadHonorsWindow, reliabilityWindowFor, wireWindowSelector, syncWindowSelectors } from './common.js';
 
 const $ = (id) => document.getElementById(id);
 
 // Mirrors the windows the endpoint accepts. `all` is deliberately absent:
-// a failure rate with no time range is not actionable.
+// a failure rate with no time range is not actionable. When the dashboard
+// window is `all`, Reliability keeps a labeled independent 7d cutoff.
 const RELIABILITY_WINDOWS = ["1h", "24h", "7d", "30d"];
 const DEFAULT_RELIABILITY_WINDOW = "7d";
 
-let activeWindow = DEFAULT_RELIABILITY_WINDOW;
-
 function getReliabilityWindow() {
-  return activeWindow;
+  return reliabilityWindowFor(getWindow()).window;
 }
 
 const pctFormatter = new Intl.NumberFormat("en-US", {
@@ -397,13 +396,37 @@ function renderActivities(payload) {
   ]);
 }
 
+function renderReliabilityScope(payload) {
+  const badge = $("reliability-scope-badge");
+  if (!badge) return;
+  const scope = payload && payload.scope === "workspace" ? "Workspace" : "Fleet-wide";
+  const rel = reliabilityWindowFor(getWindow());
+  badge.textContent = rel.independent ? `${scope} · independent ${rel.window}` : scope;
+  badge.className = "scope-badge independent";
+  badge.hidden = false;
+  badge.title = rel.independent
+    ? "Reliability is fleet-wide and cannot use the unbounded all window"
+    : "Reliability is fleet-wide; the workspace selector does not apply";
+}
+
 function renderReliability(payload) {
   if (!payload) return;
+  const rel = reliabilityWindowFor(getWindow());
+  if (!payloadHonorsWindow(payload, rel.window)) {
+    console.error(
+      `reliability payload window ${(payload.window || {}).label} rejected under ${rel.window} selection`,
+    );
+    return;
+  }
+  syncWindowSelectors();
+  renderReliabilityScope(payload);
   const meta = $("reliability-meta");
   if (meta) {
     const range = fmtWindowRange(payload.window);
     const unreadable = (payload.unreadable_workspaces || []).length;
-    meta.textContent = range + (unreadable ? ` · ${unreadable} workspace(s) unreadable` : "");
+    const fleet = "Fleet-wide";
+    const independent = rel.independent ? " · independent window" : "";
+    meta.textContent = `${fleet} · ${range}${independent}${unreadable ? ` · ${unreadable} workspace(s) unreadable` : ""}`;
   }
   const count = $("reliability-count");
   if (count) {
@@ -417,29 +440,14 @@ function renderReliability(payload) {
 }
 
 function fetchAndRenderReliability() {
-  return fetchJson(`/api/metrics/reliability?window=${encodeURIComponent(activeWindow)}`)
+  const rel = reliabilityWindowFor(getWindow());
+  return fetchJson(`/api/metrics/reliability?window=${encodeURIComponent(rel.window)}`)
     .then(renderReliability);
 }
 
 // Idempotent attach, matching the scoreboard selector's contract.
 function wireReliabilityWindowSelector() {
-  const selector = $("reliability-window-selector");
-  if (!selector || selector.dataset.wired === "true") return;
-  selector.dataset.wired = "true";
-  selector.addEventListener("click", (event) => {
-    const seg = event.target && event.target.closest(".scoreboard-window-seg");
-    if (!seg || !selector.contains(seg)) return;
-    const next = seg.dataset.window;
-    if (!RELIABILITY_WINDOWS.includes(next) || seg.classList.contains("on")) return;
-    for (const peer of selector.querySelectorAll(".scoreboard-window-seg")) {
-      peer.classList.remove("on");
-    }
-    seg.classList.add("on");
-    activeWindow = next;
-    fetchAndRenderReliability().catch((err) => {
-      console.error("reliability window refetch failed:", err);
-    });
-  });
+  wireWindowSelector("reliability-window-selector", { allowAll: false });
 }
 
 export {

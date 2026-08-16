@@ -1,7 +1,7 @@
 // Orbit dashboard — terminal-dark, manually refreshed SPA.
 // Pure vanilla JS, split into ES modules with no build step.
 
-import { el, statusPill, stateCell, fetchJson, listItems, requestJson, postJson, patchJson, syncNodes, positiveIntParam, getWorkspace, setWorkspace, setMultiWorkspace, isAggregateView, renderPanelPlaceholder } from './common.js';
+import { el, statusPill, stateCell, fetchJson, listItems, requestJson, postJson, patchJson, syncNodes, positiveIntParam, getWorkspace, setWorkspace, setMultiWorkspace, isAggregateView, renderPanelPlaceholder, getWindow, persistScopeToUrl, setScopeChangeListener, syncWindowSelectors, payloadHonorsWindow } from './common.js';
 import { buildChips, buildTasksHash, applyTasksHashQuery, cacheCrewPayload, copyTaskIdWithNotice, hasCrewOptions, openVisibleTask, renderTasks, setPinnedExternalTask, syncTaskControls, wireSearch } from './tasks.js';
 import { applyAuditHashQuery, buildAuditChips, buildAuditHash, fetchAndRenderAudit, fetchAndRenderPolicy, getActiveAuditSubtab, navigateToAuditExecution, renderAuditSummary, setActiveAuditSubtabFromButton, setAuditSubtab, syncAuditControls, wireAuditSearch, } from './audit.js';
 import { renderScoreboard } from './scoreboard.js';
@@ -923,27 +923,29 @@ function buildWorkspaceSelector() {
 
   select.addEventListener("change", () => {
     setWorkspace(select.value);
-    persistWorkspaceToUrl(select.value);
+    persistScopeToUrl();
     refreshDashboard();
   });
 
+  const note = el("span", {
+    class: "workspace-scope-note",
+    text: "Fleet-wide on Reliability",
+  });
+  note.id = "workspace-scope-note";
+  note.hidden = true;
+  note.title = "Reliability ignores the selected workspace";
+
   const meta = $("meta");
   meta.insertBefore(select, $("refresh-btn"));
+  meta.insertBefore(note, $("refresh-btn"));
 }
 
-// ORB-10874: the workspace selector only updated in-memory state, so a reload
-// or a copied link silently fell back to the server's default workspace
-// instead of the one the operator was actually looking at. `getWorkspace()`
-// already seeds from `?workspace=` on first load (common.js); this keeps that
-// query param in sync on every selection without a full navigation/reload.
+// ORB-10874/ORB-10872: workspace + window live in the query string so a
+// reload or copied link restores the same dashboard scope. `persistScopeToUrl`
+// is the single writer; this wrapper stays for the existing call sites.
 function persistWorkspaceToUrl(id) {
-  const url = new URL(window.location.href);
-  if (id) {
-    url.searchParams.set("workspace", id);
-  } else {
-    url.searchParams.delete("workspace");
-  }
-  history.replaceState(null, "", url);
+  setWorkspace(id);
+  persistScopeToUrl();
 }
 
 function activeRefreshJobs() {
@@ -1026,12 +1028,22 @@ function activeRefreshJobs() {
     }
     if (activeDiagSubtab === "scoreboard") {
       // ORB-10444: Scoreboard folded in from the retired top-level tab.
-      // ORB-00337: the boot fetch matches the visually-highlighted segment
-      // (`24h`); picking a different window calls /api/scoreboard?window=...
-      // directly from scoreboard.js (itself aggregate-guarded, ORB-00040).
-      // The scoreboard subtab replaces the diagnostics two-column layout, so it
-      // returns early rather than also fetching the implement_one side card.
-      jobs.push(fetchJson("/api/scoreboard?window=24h").then(renderScoreboard));
+      // ORB-10872: every refresh honors the shared dashboard window so
+      // delivery/operations and Managed Execution stay on the same cutoff.
+      // A payload that reports a different window is refused rather than
+      // painted under a mismatched selector (the 7d-selected / 24h-body bug).
+      const selectedWindow = getWindow();
+      jobs.push(
+        fetchJson(`/api/scoreboard?window=${encodeURIComponent(selectedWindow)}`).then((summary) => {
+          if (!payloadHonorsWindow(summary, selectedWindow)) {
+            console.error(
+              `scoreboard payload window ${summary && summary.window} rejected under ${selectedWindow} selection`,
+            );
+            return;
+          }
+          renderScoreboard(summary);
+        }),
+      );
       return jobs;
     }
     if (activeDiagSubtab === "runs") {
@@ -1248,6 +1260,21 @@ buildAuditChips(auditContext());
 wireAuditSearch(auditContext());
 $("refresh-btn").addEventListener("click", refreshDashboard);
 wireReliabilityWindowSelector();
+setScopeChangeListener(() => {
+  persistScopeToUrl();
+  syncWindowSelectors();
+  if (activeTab === "diagnostics") {
+    const url = new URL(window.location.href);
+    url.hash = `diagnostics/${activeDiagSubtab}?window=${encodeURIComponent(getWindow())}`;
+    if (url.href !== window.location.href) history.replaceState(null, "", url);
+  } else if (activeTab === "audit") {
+    const next = buildAuditHash();
+    const url = new URL(window.location.href);
+    url.hash = next.replace(/^#/, "");
+    if (url.href !== window.location.href) history.replaceState(null, "", url);
+  }
+  refreshDashboard();
+});
 initOperations({ getWorkspaces: () => dashboardWorkspaces, formatAbsoluteTime: fmtAbsTime });
 
 initRuns(runsContext());
@@ -1257,6 +1284,8 @@ initRouter(rctx);
 // Resolve workspaces before the router fires its first refresh so the initial
 // fetches carry the right workspace (top-level await; app.js is an ES module).
 await initWorkspaceSelector();
+persistScopeToUrl();
+syncWindowSelectors();
 iT();
 
 initLogTail();
