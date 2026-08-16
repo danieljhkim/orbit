@@ -6,8 +6,8 @@
 // - `?window=1h` round-trips into the serialized payload + populates
 //   `window_since`
 // - unknown values produce HTTP 400 (not a 500)
-// - schema_version is the post-retirement v8 value with its separately-versioned
-//   managed-execution orchestration section
+// - schema_version is the v9 value (notable completions + coverage) with its
+//   separately-versioned managed-execution orchestration section
 
 use std::sync::Arc;
 
@@ -38,14 +38,29 @@ async fn get_scoreboard(runtime: OrbitRuntime, query: Option<&str>) -> axum::res
 }
 
 #[tokio::test]
-async fn scoreboard_default_returns_lifetime_window_and_v8_schema() {
+async fn scoreboard_default_returns_lifetime_window_and_v9_schema() {
     let runtime = OrbitRuntime::in_memory().expect("build runtime");
     let response = get_scoreboard(runtime, None).await;
 
     assert_eq!(response.status(), StatusCode::OK);
     let body = body_json(response).await;
-    assert_eq!(body["schema_version"].as_u64(), Some(8));
+    assert_eq!(body["schema_version"].as_u64(), Some(9));
     assert_eq!(body["window"].as_str(), Some("all"));
+    assert_eq!(
+        body["coverage"]["review"]["availability"].as_str(),
+        Some("observed")
+    );
+    assert_eq!(
+        body["notable_completions"]["method"].as_str(),
+        Some("priority_then_completion_recency")
+    );
+    assert!(
+        body["notable_completions"]["label"]
+            .as_str()
+            .expect("selection label")
+            .contains("not a quality score")
+    );
+    assert!(body["notable_completions"]["items"].as_array().is_some());
     assert!(
         body["window_since"].is_null(),
         "window_since is null for lifetime, got {:?}",
@@ -82,8 +97,18 @@ async fn scoreboard_query_window_1h_populates_window_and_since() {
 
     assert_eq!(response.status(), StatusCode::OK);
     let body = body_json(response).await;
-    assert_eq!(body["schema_version"].as_u64(), Some(8));
+    assert_eq!(body["schema_version"].as_u64(), Some(9));
     assert_eq!(body["window"].as_str(), Some("1h"));
+    assert_eq!(
+        body["coverage"]["review"]["availability"].as_str(),
+        Some("unavailable")
+    );
+    assert!(
+        body["coverage"]["review"]["detail"]
+            .as_str()
+            .expect("coverage detail")
+            .contains("omitted from this window")
+    );
     assert!(body["orchestration"]["previous_normalized_tokens"].is_object());
     let since = body["window_since"]
         .as_str()

@@ -225,12 +225,12 @@
           <div class="scoreboard-controls" id="reliability-controls">
             <div class="scoreboard-control-group">
               <span class="scoreboard-control-label">window</span>
-              <span class="scoreboard-window-selector" id="reliability-window-selector" title="window scope">
-                <span class="scoreboard-window-seg" data-window="1h">1h</span>
-                <span class="scoreboard-window-seg" data-window="24h">24h</span>
-                <span class="scoreboard-window-seg on" data-window="7d">7d</span>
-                <span class="scoreboard-window-seg" data-window="30d">30d</span>
-              </span>
+              <div class="scoreboard-window-selector" id="reliability-window-selector" role="tablist" aria-label="Reliability time window">
+                <button type="button" role="tab" class="scoreboard-window-seg" data-window="1h" aria-selected="false" tabindex="-1">1h</button>
+                <button type="button" role="tab" class="scoreboard-window-seg" data-window="24h" aria-selected="false" tabindex="-1">24h</button>
+                <button type="button" role="tab" class="scoreboard-window-seg on" data-window="7d" aria-selected="true" tabindex="0">7d</button>
+                <button type="button" role="tab" class="scoreboard-window-seg" data-window="30d" aria-selected="false" tabindex="-1">30d</button>
+              </div>
             </div>
             <span class="scoreboard-controls-spacer"></span>
             <span class="scoreboard-controls-meta" id="reliability-meta">-</span>
@@ -268,19 +268,20 @@
               <span class="scoreboard-control-label">window</span>
               <!-- Window selector — click a segment to refetch the
                    scoreboard scoped to that window. Wired in ORB-00337. -->
-              <span class="scoreboard-window-selector" id="scoreboard-window-selector" title="window scope">
-                <span class="scoreboard-window-seg" data-window="1h">1h</span>
-                <span class="scoreboard-window-seg on" data-window="24h">24h</span>
-                <span class="scoreboard-window-seg" data-window="7d">7d</span>
-                <span class="scoreboard-window-seg" data-window="30d">30d</span>
-                <span class="scoreboard-window-seg" data-window="all">all</span>
-              </span>
+              <div class="scoreboard-window-selector" id="scoreboard-window-selector" role="tablist" aria-label="Scoreboard time window">
+                <button type="button" role="tab" class="scoreboard-window-seg" data-window="1h" aria-selected="false" tabindex="-1">1h</button>
+                <button type="button" role="tab" class="scoreboard-window-seg on" data-window="24h" aria-selected="true" tabindex="0">24h</button>
+                <button type="button" role="tab" class="scoreboard-window-seg" data-window="7d" aria-selected="false" tabindex="-1">7d</button>
+                <button type="button" role="tab" class="scoreboard-window-seg" data-window="30d" aria-selected="false" tabindex="-1">30d</button>
+                <button type="button" role="tab" class="scoreboard-window-seg" data-window="all" aria-selected="false" tabindex="-1">all</button>
+              </div>
             </div>
             <span class="scoreboard-controls-spacer"></span>
             <span class="scoreboard-controls-meta" id="scoreboard-meta">-</span>
           </div>
           <div id="scoreboard-narrative" class="scoreboard-narrative"></div>
           <div id="scoreboard-agent-strip" class="scoreboard-agent-strip"></div>
+          <section id="scoreboard-highlights" class="scoreboard-highlights-host" aria-label="Notable completions"></section>
           <div class="body scoreboard-table-wrap" id="scoreboard-body">
             <div class="skeleton-state">
               <div class="skeleton skeleton-row"></div>

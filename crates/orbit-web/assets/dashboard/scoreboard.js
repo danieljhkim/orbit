@@ -75,7 +75,12 @@ const DELIVERY_SCOREBOARD_COLUMNS = [
 
 const PR_REVIEW_COLUMNS = [
   { key: "agent", label: "agent", num: false },
-  { key: "pr.review_comments", label: "pr rev", num: true },
+  {
+    key: "pr.review_comments",
+    label: "pr rev",
+    num: true,
+    title: "pull-request review comments from the lifetime snapshot",
+  },
 ];
 
 const OPERATIONS_SCOREBOARD_COLUMNS = [
@@ -92,7 +97,7 @@ const OPERATIONS_SCOREBOARD_COLUMNS = [
     label: "task calls",
     num: true,
     compute: (agent) => agent?.tool_calls_by_surface?.task ?? 0,
-    title: "orbit.task.* calls",
+    title: "orbit.task.* tool-call count",
   },
   {
     key: "tools",
@@ -101,7 +106,7 @@ const OPERATIONS_SCOREBOARD_COLUMNS = [
     format: "pair",
     left: "failed_tool_calls",
     right: "tool_calls",
-    title: "raw failed tool calls / total tool calls",
+    title: "raw failed tool calls over total tool calls",
     help: "raw events",
   },
   // ORB-10871: the same failures, grouped. A repeated burst is one incident
@@ -118,7 +123,12 @@ const OPERATIONS_SCOREBOARD_COLUMNS = [
     title: "grouped failure incidents / raw failed events they collapsed",
     help: "grouped",
   },
-  { key: "friction.reported", label: "frict r", num: true },
+  {
+    key: "friction.reported",
+    label: "friction",
+    num: true,
+    title: "append-only friction reports filed by this agent",
+  },
 ];
 
 function allScoreboardSections() {
@@ -163,6 +173,7 @@ function renderScoreboard(summary) {
   const body = $("scoreboard-body");
   const narrativeHost = $("scoreboard-narrative");
   const agentStrip = $("scoreboard-agent-strip");
+  const highlightsHost = $("scoreboard-highlights");
   const meta = $("scoreboard-meta");
   const insightsHost = $("scoreboard-insights");
   const insightsCount = $("scoreboard-insights-count");
@@ -180,6 +191,7 @@ function renderScoreboard(summary) {
     ])]);
     if (narrativeHost) syncNodes(narrativeHost, []);
     if (agentStrip) syncNodes(agentStrip, []);
+    if (highlightsHost) syncNodes(highlightsHost, [renderNotableCompletions(summary?.notable_completions)]);
     if (meta) meta.textContent = "-";
     if (insightsHost) syncNodes(insightsHost, []);
     if (insightsCount) insightsCount.textContent = "—";
@@ -196,8 +208,12 @@ function renderScoreboard(summary) {
   if (agentStrip) {
     syncNodes(agentStrip, [renderAgentStrip(canonicalRows)]);
   }
+  if (highlightsHost) {
+    syncNodes(highlightsHost, [renderNotableCompletions(summary?.notable_completions)]);
+  }
   const matrix = buildLeaderboardMatrix(canonicalRows, allScoreboardSections(), {
     showSectionDividers: true,
+    coverage: summary?.coverage,
   });
   syncNodes(body, [el("div", { class: "scoreboard-sections" }, [matrix])]);
 
@@ -530,7 +546,7 @@ function buildLeaderboardMatrix(rows, sectionList, opts = {}) {
       .filter((candidate) => metricHasActivity(rows, candidate));
     if (showSectionDividers) {
       const badge = metrics.length === 0
-        ? "no activity this window"
+        ? emptySectionBadge(section.title, opts.coverage)
         : section.badge;
       tbody.appendChild(sectionDividerRow(section.title, badge, columnCount));
     }
@@ -538,13 +554,15 @@ function buildLeaderboardMatrix(rows, sectionList, opts = {}) {
       const rowMax = rowMaxValue(rows, col);
       const tr = el("tr", { class: "metric" });
       tr.dataset.key = `scoreboard-${section.title}-${col.key}`;
-      tr.appendChild(el("td", {
+      const metricLabel = el("td", {
         class: "m-label",
         title: col.title || col.label,
       }, [
         document.createTextNode(col.label),
         ...(col.help ? [el("span", { class: "help", text: col.help })] : []),
-      ]));
+      ]);
+      metricLabel.setAttribute("aria-label", col.title || col.label);
+      tr.appendChild(metricLabel);
       for (const [name, agent] of rows) {
         const value = scoreboardColumnValue(agent, col);
         const isLeader = rowMax > 0 && value === rowMax;
@@ -643,7 +661,76 @@ function scoreboardCellNode(name, value, rowMax, isLeader, opts = {}) {
 }
 
 function leaderBadge() {
-  return el("span", { class: "lead-mark", text: "▲", title: "row leader" });
+  const mark = el("span", {
+    class: "lead-mark",
+    text: "▲",
+    title: "Highest count in this row. Not a quality score.",
+  });
+  mark.setAttribute("aria-label", "Highest count in this row. Not a quality score.");
+  return mark;
+}
+
+function emptySectionBadge(title, coverage) {
+  if (title === "Review") {
+    if (coverage?.review?.availability === "unavailable") {
+      return coverage.review.detail
+        || "review snapshot is not windowed; this is missing coverage, not zero activity";
+    }
+    return "no observed review comments in this source";
+  }
+  if (title === "Delivery") return "no observed task events this window";
+  if (title === "Operations") return "no observed tool calls or friction this window";
+  return "no observed events this window";
+}
+
+function formatHighlightTime(raw) {
+  if (!raw) return "completion time unknown";
+  const parsed = Date.parse(raw);
+  if (Number.isNaN(parsed)) return raw;
+  return new Date(parsed).toISOString().replace("T", " ").replace(/\.\d+Z$/, " UTC");
+}
+
+function renderHighlightItem(item) {
+  const bits = [item.priority, item.task_type, item.impact_tag].filter(Boolean);
+  const excerpt = item.summary_excerpt
+    ? el("p", { class: "scoreboard-highlight-excerpt", text: item.summary_excerpt })
+    : el("p", {
+      class: "scoreboard-highlight-excerpt missing",
+      text: "No completion summary recorded.",
+    });
+  const time = el("time", { class: "scoreboard-highlight-time", text: formatHighlightTime(item.completed_at) });
+  if (item.completed_at) time.setAttribute("datetime", item.completed_at);
+  return el("li", { class: "scoreboard-highlight" }, [
+    el("div", { class: "scoreboard-highlight-head" }, [
+      el("span", { class: "scoreboard-highlight-id", text: item.task_id || "unknown id" }),
+      el("span", { class: "scoreboard-highlight-title", text: item.title || "(untitled)" }),
+    ]),
+    el("div", { class: "scoreboard-highlight-meta" }, [
+      el("span", { class: "scoreboard-highlight-tags", text: bits.join(" · ") || "no priority or type" }),
+      time,
+    ]),
+    excerpt,
+  ]);
+}
+
+function renderNotableCompletions(block) {
+  const items = Array.isArray(block?.items) ? block.items : [];
+  const label = block?.label
+    || "Ordered by priority, then most recently completed. This is a reading order, not a quality score.";
+  const children = [
+    el("div", { class: "scoreboard-highlights-heading" }, [
+      el("h3", { class: "scoreboard-highlights-title", text: "Notable completions" }),
+      el("p", { class: "scoreboard-highlights-rule", text: label }),
+    ]),
+  ];
+  if (items.length === 0) {
+    children.push(el("div", { class: "empty-state compact" }, [
+      el("div", { class: "text", text: "No completed tasks observed in this window." }),
+    ]));
+  } else {
+    children.push(el("ul", { class: "scoreboard-highlights-list" }, items.map(renderHighlightItem)));
+  }
+  return el("section", { class: "scoreboard-highlights" }, children);
 }
 
 function emptyScoreboardNode() {

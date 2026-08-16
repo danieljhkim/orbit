@@ -16,7 +16,9 @@ This document describes the current Orbit UI implementation: the local dashboard
 
 ## 1. Dense Layout
 
-The dashboard favors wide, dense tables and panels over narrative screens. Tight spacing, small radii, and expandable sunken detail rows preserve hierarchy without hiding root lists. The scoreboard groups per-agent metrics into Delivery, Review, Knowledge, Operations, and Attribution Cleanup sections so task attribution, review work, tool reliability, and knowledge artifacts are scanned separately. Compact pair cells stay local to the sections where they add context: `tool fail/all` is failed over total tool calls [T20260428-15] [ORB-00144] [Grouped Scoreboard Sections](./4_decisions.md#grouped-scoreboard-sections).
+The dashboard favors wide, dense tables and panels over narrative screens. Tight spacing, small radii, and expandable sunken detail rows preserve hierarchy without hiding root lists. The scoreboard groups per-agent metrics into Delivery, Review, Knowledge, Operations, and Attribution Cleanup sections so task attribution, review work, tool reliability, and knowledge artifacts are scanned separately. Compact pair cells stay local to the sections where they add context: `tool fail/all` is failed over total tool calls, and every abbreviated metric or leader mark has a plain-language title or accessible name [T20260428-15] [ORB-00144] [ORB-10873] [Grouped Scoreboard Sections](./4_decisions.md#grouped-scoreboard-sections).
+
+The selected window also includes a compact Notable completions list built only from durable task fields (id, title, priority, type, optional `impact:*` tag, completion timestamp, bounded `execution_summary` excerpt). Selection is priority then completion recency, labeled as a reading order rather than a quality score. Empty Review and other snapshot-backed sections distinguish no observed events from unavailable windowed coverage: PR comments come from a lifetime snapshot with no per-event timestamps, so a finite window reports that limitation instead of "no activity". Window selectors are `role="tablist"` buttons with `aria-selected`, keyboard movement, and a visible focus ring [ORB-10873].
 
 ## 2. Layered Palette
 
@@ -102,5 +104,6 @@ Accessibility still needs a real WCAG pass; responsive behavior remains optimize
 - [ORB-10875] added the Operations view and typed routine/clock controls.
 - [ORB-10872] made workspace and time window one dashboard scope across Scoreboard, Audit, Reliability, and Managed Execution.
 - [ORB-10871] made dashboard failure metrics incident-aware: grouped incidents and raw failed events are reported side by side with their denominators and window.
+- [ORB-10873] added Scoreboard notable completions, honest coverage language, labeled abbreviations, and accessible window tabs.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

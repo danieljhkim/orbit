@@ -1606,16 +1606,29 @@
         cursor: not-allowed;
       }
       .scoreboard-window-seg {
+        appearance: none;
         padding: 4px 10px;
         color: var(--fg-dim);
         background: transparent;
+        border: 0;
         border-right: 1px solid var(--border);
+        border-radius: 0;
+        font: inherit;
+        letter-spacing: inherit;
+        text-transform: inherit;
+        cursor: pointer;
         user-select: none;
       }
       .scoreboard-window-seg:last-child { border-right: none; }
       .scoreboard-window-seg.on {
         color: var(--fg);
         background: var(--bg);
+      }
+      .scoreboard-window-seg:focus-visible {
+        outline: 2px solid var(--accent-hover);
+        outline-offset: -2px;
+        z-index: 1;
+        position: relative;
       }
 
       .scoreboard-controls {
@@ -1662,6 +1675,90 @@
       .scoreboard-insights .ag-tag.gemini { color: var(--ag-gemini); background: var(--ag-gemini-low); }
       .scoreboard-narrative .ag-tag.grok,
       .scoreboard-insights .ag-tag.grok { color: var(--ag-grok); background: var(--ag-grok-low); }
+
+      .scoreboard-highlights-host {
+        border-bottom: 1px solid var(--border);
+        background: var(--bg);
+        min-width: 0;
+      }
+      .scoreboard-highlights-host:empty { display: none; }
+      .scoreboard-highlights {
+        padding: 12px 16px 14px;
+        display: grid;
+        gap: 10px;
+        min-width: 0;
+      }
+      .scoreboard-highlights-heading {
+        display: grid;
+        gap: 4px;
+        min-width: 0;
+      }
+      .scoreboard-highlights-title {
+        margin: 0;
+        font-family: var(--font-sans);
+        font-size: 13px;
+        font-weight: 600;
+        color: var(--fg);
+      }
+      .scoreboard-highlights-rule {
+        margin: 0;
+        font-size: 12px;
+        line-height: 1.45;
+        color: var(--fg-dim);
+        overflow-wrap: anywhere;
+      }
+      .scoreboard-highlights-list {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+        display: grid;
+        gap: 8px;
+        min-width: 0;
+      }
+      .scoreboard-highlight {
+        display: grid;
+        gap: 4px;
+        min-width: 0;
+        padding: 8px 10px;
+        border: 1px solid var(--border);
+        border-radius: 2px;
+        background: var(--bg-elev, #111);
+      }
+      .scoreboard-highlight-head,
+      .scoreboard-highlight-meta {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px 12px;
+        align-items: baseline;
+        min-width: 0;
+      }
+      .scoreboard-highlight-id {
+        font-family: var(--font-mono);
+        font-size: 11px;
+        color: var(--accent-hover, var(--accent));
+      }
+      .scoreboard-highlight-title {
+        font-size: 13px;
+        color: var(--fg);
+        overflow-wrap: anywhere;
+        min-width: 0;
+      }
+      .scoreboard-highlight-meta {
+        font-family: var(--font-mono);
+        font-size: 11px;
+        color: var(--fg-dim);
+      }
+      .scoreboard-highlight-excerpt {
+        margin: 0;
+        font-size: 12.5px;
+        line-height: 1.45;
+        color: var(--fg);
+        overflow-wrap: anywhere;
+      }
+      .scoreboard-highlight-excerpt.missing {
+        color: var(--fg-dim);
+        font-style: italic;
+      }
 
       .scoreboard-agent-strip {
         border-bottom: 1px solid var(--border);
@@ -1765,6 +1862,19 @@
       @media (max-width: 1000px) {
         .scoreboard-agent-strip-inner {
           grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+      }
+      @media (max-width: 720px) {
+        table.sb2-matrix col.metric { width: 132px; }
+        table.sb2-matrix tr.group td,
+        table.sb2-matrix td.m-label {
+          white-space: normal;
+          overflow-wrap: anywhere;
+        }
+        table.sb2-matrix tr.group td .badge {
+          display: block;
+          margin-left: 0;
+          margin-top: 4px;
         }
       }
       @media (max-width: 620px) {

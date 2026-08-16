@@ -56,6 +56,9 @@ impl OrbitRuntime {
         let friction_reported = crate::runtime::orbit_tool_host::friction_tools::store_for(self)?
             .reported_by_model(since_window)?;
 
+        // Notable completions and coverage notes are projected inside
+        // generate_summary_with_inputs from this same `tasks` slice — no extra
+        // store read, and no model inference (ORB-10873).
         let summary = orbit_store::scoreboard_summary::generate_summary_with_inputs(
             &self.paths().scoreboard_dir,
             &tasks,
