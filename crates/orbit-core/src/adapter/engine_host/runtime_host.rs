@@ -8,10 +8,11 @@ use orbit_engine::{
     CrewConfig, DispatchError, ResolvedCliExecutor, ResolvedSandbox, RuntimeHost,
     TaskActivityUpdate, TaskAutomationUpdate, V2AuditWriter,
 };
-use orbit_store::{
-    InvocationInsertParams, InvocationQuery, InvocationRecord, JobRunStepParams, Store,
-    TaskReservationReleaseReason, token_scoreboard,
+use orbit_store::contracts::{
+    InvocationInsertParams, InvocationQuery, InvocationRecord, JobRunStepParams,
+    TaskReservationReleaseReason,
 };
+use orbit_store::token_scoreboard;
 use orbit_tools::{FsAuditLogger, ReservationOwnerContext, ToolContext};
 use orbit_types::identity::AgentModelPair;
 use orbit_types::policy::{Role, UNRESTRICTED_FS_PROFILE};
@@ -375,7 +376,7 @@ impl RuntimeHost for OrbitRuntime {
     fn v2_audit_writer(&self, run_id: &str) -> Result<Arc<V2AuditWriter>, OrbitError> {
         V2AuditWriter::with_disk_sinks(
             &self.paths().audit_dir,
-            self.sqlite_store()?,
+            self.v2_audit_store()?,
             self.workspace_id()?,
             run_id,
             "system",
@@ -570,9 +571,10 @@ impl RuntimeHost for OrbitRuntime {
             job_run_id,
             activity_id,
         );
-        let store = Store::open(&self.context.persistence().audit_db).map_err(|error| {
-            DispatchError::JobExecution(format!("open invocation store: {error}"))
-        })?;
+        let store = orbit_store::compose::invocation_store(&self.context.persistence().audit_db)
+            .map_err(|error| {
+                DispatchError::JobExecution(format!("open invocation store: {error}"))
+            })?;
         store
             .insert_invocation_trace_record(&InvocationInsertParams {
                 job_run_id: job_run_id.to_string(),
@@ -587,7 +589,7 @@ impl RuntimeHost for OrbitRuntime {
             })?;
 
         if let Err(error) =
-            token_scoreboard::write_token_scoreboard(&self.paths().scoreboard_dir, &store)
+            token_scoreboard::write_token_scoreboard(&self.paths().scoreboard_dir, store.as_ref())
         {
             tracing::warn!(
                 target: "orbit.core.scoreboard",

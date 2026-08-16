@@ -1,7 +1,7 @@
 //! Query, list, show, and history methods for job runs, with reconciliation.
 
 use orbit_common::{NotFoundKind, OrbitError};
-use orbit_store::JobRunQuery;
+use orbit_store::contracts::JobRunQuery;
 use orbit_types::workflow::JobRun;
 
 use crate::OrbitRuntime;

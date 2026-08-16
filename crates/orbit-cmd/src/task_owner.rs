@@ -16,7 +16,7 @@ use std::path::Path;
 use orbit_common::{NotFoundKind, OrbitError};
 use orbit_core::OrbitRuntime;
 use orbit_registry::workspace_registry;
-use orbit_store::sqlite::task_registry::{
+use orbit_store::maintenance::task_registry::{
     TaskRegistryStore, read_workspace_config_optional, task_registry_path,
 };
 use orbit_types::workspace::{Workspace, WorkspaceStatus};

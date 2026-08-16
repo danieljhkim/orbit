@@ -8,8 +8,8 @@
 //!
 //! Everything here derives from persisted `job_runs` and `invocations` rows.
 //! No agent-loop output, no token field, and no cost field is read — see
-//! [`orbit_store::JobRunOutcomeFact`] and
-//! [`orbit_store::ActivityInvocationCount`] for the projected column sets.
+//! [`orbit_store::contracts::JobRunOutcomeFact`] and
+//! [`orbit_store::contracts::ActivityInvocationCount`] for the projected column sets.
 //!
 //! # Outcome classification
 //!
@@ -53,7 +53,7 @@ use chrono::{DateTime, Duration, Utc};
 use serde::Serialize;
 
 use orbit_common::OrbitError;
-use orbit_store::{ActivityInvocationCount, InvocationRunCoverage, JobRunOutcomeFact};
+use orbit_store::contracts::{ActivityInvocationCount, InvocationRunCoverage, JobRunOutcomeFact};
 use orbit_types::workflow::{JobActivityRoles, JobRunState};
 
 use crate::runtime::OrbitRuntime;

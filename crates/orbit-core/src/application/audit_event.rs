@@ -1,7 +1,7 @@
 use chrono::{DateTime, Utc};
 use orbit_common::OrbitError;
 use orbit_common::observability::audit_id::audit_execution_id;
-use orbit_store::{
+use orbit_store::contracts::{
     AuditEventFilter, AuditEventInsertParams, AuditRoleAggregate, AuditToolAggregate,
     AuditToolCallCountsByRole, AuditToolCallCountsBySurfaceAndRole, AuditTopToolCall,
     FailureIncidentQuery, FailureIncidentReport,

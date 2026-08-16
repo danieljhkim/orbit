@@ -10,12 +10,12 @@ use orbit_common::protocol::tool_input::{
     optional_string_list_alias, optional_u32_alias, required_string,
 };
 use orbit_common::{NotFoundKind, OrbitError};
-use orbit_store::sqlite::task_registry::read_workspace_config_optional;
-use orbit_store::{
+use orbit_store::contracts::{
     ExpiredTaskReservation, ReleasedTaskReservation, TaskLockConflict, TaskLockHolder,
     TaskReservationCheckParams, TaskReservationReleaseParams, TaskReservationReleaseReason,
     TaskReservationReserveParams,
 };
+use orbit_store::maintenance::task_registry::read_workspace_config_optional;
 use orbit_tools::ReservationOwnerContext;
 use orbit_types::identity::normalize_optional_attribution_label;
 use orbit_types::task::{Task, TaskStatus};
@@ -168,7 +168,7 @@ pub(crate) fn release(
 }
 
 /// Reservation ids are minted as `reservation-<nanos>`
-/// (`orbit_store::sqlite::task_reservation_store::reserve_task_reservation`). A
+/// (`TaskReservationStoreBackend::reserve_task_reservation`). A
 /// task id or other identifier passed here can never match a stored
 /// reservation, so without this check `release` falls through to the "no
 /// matching row" path and returns a falsy `{"released": false}` — indistinguishable
@@ -257,7 +257,7 @@ pub(crate) fn reserve(
             })?;
         conflicts = merge_task_lock_conflicts(conflicts, check.conflicts);
         emit_expired_reservation_events(runtime, &check.expired_reservations)?;
-        orbit_store::TaskReservationReserveResult {
+        orbit_store::contracts::TaskReservationReserveResult {
             reserved: false,
             reservation_id: None,
             expires_at: None,

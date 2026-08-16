@@ -10,7 +10,9 @@ use std::time::{Duration, Instant};
 use chrono::Utc;
 use orbit_common::observability::audit_id::audit_execution_id;
 use orbit_common::{NotFoundKind, OrbitError};
-use orbit_store::{AuditEventInsertParams, JobRunStepParams, TaskReservationReleaseReason};
+use orbit_store::contracts::{
+    AuditEventInsertParams, JobRunStepParams, TaskReservationReleaseReason,
+};
 use orbit_types::record::OrbitEvent;
 use orbit_types::telemetry::AuditEventStatus;
 use orbit_types::workflow::{JobRun, JobRunState, JobScheduleState, JobTargetType};
@@ -621,7 +623,7 @@ impl OrbitRuntime {
     /// work. Invocation persistence still reopens independently, but it can no
     /// longer be the first compatibility check after useful work completes.
     pub(crate) fn preflight_pipeline_worker_store(&self) -> Result<(), OrbitError> {
-        drop(self.sqlite_store()?);
+        self.ensure_persistence_ready()?;
         Ok(())
     }
 

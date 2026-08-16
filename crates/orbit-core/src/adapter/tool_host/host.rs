@@ -11,16 +11,18 @@ use orbit_common::protocol::tool_input::{
 };
 use orbit_common::security::redaction::redact_all;
 use orbit_common::{NotFoundKind, OrbitError};
+use orbit_store::Store;
+use orbit_store::compose::{
+    WorkspaceTaskBackends, coordination_task_backends, workspace_friction_store,
+};
+use orbit_store::contracts::{
+    TaskArtifactUpdateParams, TaskCreateParams, TaskDocumentUpdateParams, TaskHistoryUpdateParams,
+};
 use orbit_store::friction_store::{
-    FrictionAddParams, FrictionStore, FrictionUpdateParams, prepare_hub_friction_root,
-    readable_hub_friction_root,
+    FrictionAddParams, FrictionUpdateParams, prepare_hub_friction_root, readable_hub_friction_root,
 };
-use orbit_store::sqlite::task_registry::{
+use orbit_store::maintenance::task_registry::{
     RegisterWorkspaceParams, TaskRegistryStore, task_registry_path,
-};
-use orbit_store::{
-    Store, TaskArtifactUpdateParams, TaskCreateParams, TaskDocumentUpdateParams,
-    TaskHistoryUpdateParams, WorkspaceTaskBackends, coordination_task_backends,
 };
 use orbit_tools::{
     OrbitBuiltinAction, OrbitTaskScope, OrbitToolHost, ReservationOwnerContext, ToolContext,
@@ -692,7 +694,9 @@ impl HubCoordinationExecutor {
     /// publishes the checkout-local tree into the canonical hub location
     /// first, so a workspace that never opened the hub before still imports
     /// its own history exactly once.
-    fn friction_store(&self) -> Result<FrictionStore, OrbitError> {
+    fn friction_store(
+        &self,
+    ) -> Result<Arc<dyn orbit_store::contracts::FrictionStoreBackend>, OrbitError> {
         let files_root = match self.friction_root() {
             Ok(root) => root,
             Err(_) => self.readable_friction_root()?,
@@ -700,7 +704,7 @@ impl HubCoordinationExecutor {
         let database = orbit_config::resolved_audit_db_path(
             &orbit_config::ConfigRoots::global_only(&self.inner.global_root),
         )?;
-        FrictionStore::open(
+        workspace_friction_store(
             Store::open(&database)?,
             self.inner.workspace_id.clone(),
             files_root,
@@ -720,12 +724,14 @@ impl HubCoordinationExecutor {
     ) -> Result<Value, OrbitError> {
         match verb {
             FrictionVerb::List => {
-                let mut value = super::friction_tools::list_in(&self.friction_store()?, input)?;
+                let mut value =
+                    super::friction_tools::list_in(self.friction_store()?.as_ref(), input)?;
                 strip_private_friction_paths(&mut value);
                 Ok(value)
             }
             FrictionVerb::Show => {
-                let mut value = super::friction_tools::show_in(&self.friction_store()?, input)?;
+                let mut value =
+                    super::friction_tools::show_in(self.friction_store()?.as_ref(), input)?;
                 strip_private_friction_paths(&mut value);
                 Ok(value)
             }

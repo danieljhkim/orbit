@@ -3,14 +3,16 @@ use std::sync::Arc;
 
 use orbit_policy::PolicyEngine;
 use orbit_search::{EmbedWorker, VectorStore};
-use orbit_store::sqlite::task_registry::{
+use orbit_store::Store;
+use orbit_store::compose::{
+    WorkspaceTaskBackends, audit_event_store_sqlite, global_executor_def_store,
+    global_policy_def_store, layered_policy_def_store, task_reservation_store_sqlite,
+    tool_store_sqlite, workspace_job_run_store, workspace_policy_def_store,
+    workspace_task_backends,
+};
+use orbit_store::maintenance::task_registry::{
     BindWorkspaceParams, TaskRegistryStore, WorkspaceConfig, read_workspace_config_optional,
     task_registry_path, workspace_id_for_orbit_dir, write_workspace_config,
-};
-use orbit_store::{
-    Store, audit_event_store_sqlite, global_executor_def_store, global_policy_def_store,
-    layered_policy_def_store, task_reservation_store_sqlite, tool_store_sqlite,
-    workspace_job_run_store, workspace_policy_def_store, workspace_task_backends,
 };
 
 use orbit_common::OrbitError;
@@ -65,7 +67,11 @@ pub(crate) fn build_context_from_roots(
         binding.map(|binding| binding.workspace_id.as_str()),
     )?;
     let workspace_id = workspace_id_for_orbit_dir(&paths.orbit_dir)?;
-    let import_report = store.ensure_legacy_v2_state_imported(&paths.orbit_dir, &workspace_id)?;
+    let import_report = orbit_store::workflow::legacy_state::import_legacy_v2_state(
+        &store,
+        &paths.orbit_dir,
+        &workspace_id,
+    )?;
     if import_report.skipped_records() {
         tracing::warn!(
             workspace_id = %workspace_id,
@@ -160,7 +166,7 @@ fn build_v2_task_backends(
     global_root: &Path,
     paths: &WorkspacePaths,
     workspace_id_hint: Option<&str>,
-) -> Result<orbit_store::WorkspaceTaskBackends, OrbitError> {
+) -> Result<WorkspaceTaskBackends, OrbitError> {
     let registry = TaskRegistryStore::open(&task_registry_path(global_root))?;
     let config = read_workspace_config_optional(&paths.orbit_dir)?;
     let workspace_id = if let Some(config) = &config {

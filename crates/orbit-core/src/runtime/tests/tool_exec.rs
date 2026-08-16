@@ -4,7 +4,7 @@ use crate::OrbitRuntime;
 use orbit_tools::ToolContext;
 use orbit_types::policy::Role;
 
-use orbit_store::TaskCreateParams;
+use orbit_store::contracts::TaskCreateParams;
 use orbit_types::task::{TaskPriority, TaskStatus, TaskType};
 use serde_json::json;
 

@@ -24,7 +24,7 @@ use fs2::FileExt;
 use orbit_common::OrbitError;
 use orbit_core::OrbitRuntime;
 use orbit_core::application::artifact_health::{ArtifactFinding, RetiredActivityBackendRepair};
-use orbit_store::sqlite::migration::SUPPORTED_SCHEMA_VERSION;
+use orbit_store::maintenance::migration::SUPPORTED_SCHEMA_VERSION;
 use orbit_types::workspace::WorkspacePaths;
 use serde::Serialize;
 

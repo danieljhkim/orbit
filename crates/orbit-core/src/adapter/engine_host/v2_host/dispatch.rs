@@ -138,16 +138,18 @@ pub(crate) fn run_deterministic(
             let reservation_check = runtime
                 .stores()
                 .task_reservations()
-                .check_task_reservation_conflicts(orbit_store::TaskReservationCheckParams {
-                    workspace_orbit_dir: workspace_orbit_dir(runtime),
-                    workspace_id: workspace_task_reservation_id(runtime).map_err(|error| {
-                        DispatchError::DeterministicActionFailed {
-                            action: action.to_string(),
-                            message: error.to_string(),
-                        }
-                    })?,
-                    requested_files,
-                })
+                .check_task_reservation_conflicts(
+                    orbit_store::contracts::TaskReservationCheckParams {
+                        workspace_orbit_dir: workspace_orbit_dir(runtime),
+                        workspace_id: workspace_task_reservation_id(runtime).map_err(|error| {
+                            DispatchError::DeterministicActionFailed {
+                                action: action.to_string(),
+                                message: error.to_string(),
+                            }
+                        })?,
+                        requested_files,
+                    },
+                )
                 .map_err(|error| DispatchError::DeterministicActionFailed {
                     action: action.to_string(),
                     message: error.to_string(),

@@ -13,7 +13,7 @@ use orbit_engine::{
     JobOutcome, V2AuditWriter, dispatch_error_to_orbit, execute_job_with_resume,
     resolve_job_catalog_refs_for_execution,
 };
-use orbit_store::{JobRunStepParams, TaskReservationReleaseReason};
+use orbit_store::contracts::{JobRunStepParams, TaskReservationReleaseReason};
 use orbit_types::record::OrbitEvent;
 use orbit_types::workflow::activity_job::{V2AuditEventKind, validate_job_retired_sessions};
 use orbit_types::workflow::{JobRun, JobRunState, JobTargetType, PipelineState};
@@ -245,7 +245,7 @@ impl OrbitRuntime {
         let workspace_path = self.paths().repo_root.clone();
         let writer = V2AuditWriter::with_disk_sinks(
             &audit_root,
-            self.sqlite_store()?,
+            self.v2_audit_store()?,
             self.workspace_id()?,
             &run_id,
             SYSTEM_AUDIT_IDENTITY,

@@ -10,9 +10,10 @@
 //! synced (ADR-0204..ADR-0208; design in `docs/design/routines/`).
 
 use std::path::Path;
+use std::sync::Arc;
 
 use orbit_common::OrbitError;
-use orbit_store::Store;
+use orbit_store::contracts::RoutineStoreBackend;
 
 pub mod clock;
 pub mod due;
@@ -45,10 +46,10 @@ pub use validation::{
 };
 
 /// Open the config-resolved machine-local scheduler store.
-fn open_routine_store(global_root: &Path) -> Result<Store, OrbitError> {
+fn open_routine_store(global_root: &Path) -> Result<Arc<dyn RoutineStoreBackend>, OrbitError> {
     let database =
         orbit_config::resolved_audit_db_path(&orbit_config::ConfigRoots::global_only(global_root))?;
-    Store::open(&database)
+    orbit_store::compose::routine_store(&database)
 }
 
 #[cfg(test)]

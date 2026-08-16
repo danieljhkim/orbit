@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 
 use orbit_common::OrbitError;
 use orbit_config::{ConfigRoots, ResolvedConfig};
-use orbit_store::global_policy_def_store;
+use orbit_store::compose::global_policy_def_store;
 
 use crate::bootstrap::init::ensure_orbit_root_initialized;
 use crate::bootstrap::policy::seed_default_policies;
@@ -128,7 +128,7 @@ fn build_runtime(
     local_root: &Path,
     binding: Option<WorkspaceRuntimeBinding>,
 ) -> Result<OrbitRuntime, OrbitError> {
-    let layout_report = orbit_store::layout::upgrade_workspace_layout(shared_root)?;
+    let layout_report = orbit_store::workflow::layout::upgrade_workspace_layout(shared_root)?;
     let runtime_config = prepare_resolved_config(global_root, shared_root)?;
     let runtime = OrbitRuntime::build_from_resolved_config(
         global_root,

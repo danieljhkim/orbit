@@ -1,6 +1,7 @@
 use chrono::{DateTime, Utc};
 use orbit_common::OrbitError;
-use orbit_store::{SessionLogAppendParams, SessionLogFilter, SessionLogKind, SessionLogStore};
+use orbit_store::compose::workspace_session_log_store;
+use orbit_store::contracts::{SessionLogAppendParams, SessionLogFilter, SessionLogKind};
 use serde_json::{Value, json};
 
 use crate::OrbitRuntime;
@@ -12,12 +13,14 @@ pub(super) fn append_entry(runtime: &OrbitRuntime, input: Value) -> Result<Value
         .and_then(Value::as_str)
         .ok_or_else(|| OrbitError::InvalidInput("body is required".to_string()))?
         .to_string();
-    let entry = session_log_store(runtime).append(SessionLogAppendParams {
-        kind,
-        body,
-        related_task_ids: parse_id_list(&input, "related_task_ids")?,
-        related_run_ids: parse_id_list(&input, "related_run_ids")?,
-    })?;
+    let entry = workspace_session_log_store(runtime.paths().orbit_dir.clone()).append(
+        SessionLogAppendParams {
+            kind,
+            body,
+            related_task_ids: parse_id_list(&input, "related_task_ids")?,
+            related_run_ids: parse_id_list(&input, "related_run_ids")?,
+        },
+    )?;
     Ok(json!(entry))
 }
 
@@ -26,11 +29,12 @@ pub(super) fn list_entries(runtime: &OrbitRuntime, input: Value) -> Result<Value
         .get("unresolved_only")
         .and_then(Value::as_bool)
         .unwrap_or(false);
-    let entries = session_log_store(runtime).list(SessionLogFilter {
-        kind: parse_optional_kind(&input)?,
-        unresolved_only,
-        since: parse_since(&input)?,
-    })?;
+    let entries =
+        workspace_session_log_store(runtime.paths().orbit_dir.clone()).list(SessionLogFilter {
+            kind: parse_optional_kind(&input)?,
+            unresolved_only,
+            since: parse_since(&input)?,
+        })?;
     Ok(json!({
         "entries": entries,
         "count": entries.len(),
@@ -42,12 +46,8 @@ pub(super) fn resolve_entry(runtime: &OrbitRuntime, input: Value) -> Result<Valu
         .get("id")
         .and_then(Value::as_str)
         .ok_or_else(|| OrbitError::InvalidInput("id is required".to_string()))?;
-    let entry = session_log_store(runtime).resolve(id)?;
+    let entry = workspace_session_log_store(runtime.paths().orbit_dir.clone()).resolve(id)?;
     Ok(json!(entry))
-}
-
-fn session_log_store(runtime: &OrbitRuntime) -> SessionLogStore {
-    SessionLogStore::new(runtime.paths().orbit_dir.clone())
 }
 
 fn parse_kind(input: &Value) -> Result<SessionLogKind, OrbitError> {

@@ -7,7 +7,7 @@ use orbit_core::OrbitRuntime;
 use orbit_core::runtime::{
     OrbitRuntimeRoots, ResolvedOrbitRoots, WorkspaceRootHint, WorkspaceRuntimeBinding,
 };
-use orbit_store::sqlite::task_registry::{TaskRegistryStore, task_registry_path};
+use orbit_store::maintenance::task_registry::{TaskRegistryStore, task_registry_path};
 use orbit_types::workspace::{
     Workspace, WorkspaceCheckout, WorkspaceCheckoutRole, WorkspaceRegistry, WorkspaceStatus,
 };

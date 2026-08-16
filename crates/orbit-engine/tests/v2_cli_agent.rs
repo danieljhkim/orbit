@@ -401,7 +401,7 @@ fn build_writer(
     fs::create_dir_all(&audit_root)?;
     let writer = V2AuditWriter::with_disk_sinks(
         &audit_root,
-        orbit_store::Store::open_in_memory()?,
+        Arc::new(orbit_store::Store::open_in_memory()?),
         "ws_smoke",
         run_id,
         "smoke".to_string(),

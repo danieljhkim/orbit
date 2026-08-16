@@ -76,7 +76,18 @@ feature.
   validation, and atomic file persistence. It contains no shared database,
   command orchestration, MCP transport, or Core runtime execution. Depends only
   on `orbit-types` and `orbit-common` among workspace crates.
-- **orbit-store**: layered generic persistence kernel (files + SQLite). It owns shared backend traits, lock-safe file persistence, SQLite connection/transaction primitives, the namespaced feature-migration ledger, and immutable historical bootstrap migrations. Match existing modules when adding new generic storage infrastructure. Depends on `orbit-types` and `orbit-common`; the semantic vector schema is owned by `orbit-search::vector` (not `orbit-store`).
+- **orbit-store**: one directional persistence crate. `contracts` owns every
+  consumer-visible trait, parameter, query/filter, and result projection;
+  `fs` owns narrowly named lock, path-safety, and YAML mechanics; private
+  `driver/file` and `driver/sqlite` modules implement exactly one persistence
+  technology each. `repository` owns live invariants that join drivers (task
+  bundles + registry indexes + checkout projections, and friction SQLite +
+  file taxonomy). `workflow` owns explicit import/export/reindex/repair and
+  layout-upgrade operations. `compose` constructs concrete implementations and
+  returns contract-facing stores. The crate retains the namespaced feature
+  migration ledger and immutable historical bootstrap migrations. It depends
+  on `orbit-types` and `orbit-common`; the semantic vector schema remains owned
+  by `orbit-search::vector`.
 - **orbit-tools**: generic tool registry plus built-in fs, policy-aware exec, and workspace-scoped Orbit definitions. It depends on `orbit-types`, `orbit-common`, `orbit-exec`, and `orbit-policy`; MCP composes these with its machine-local discovery definitions.
 - **orbit-mcp**: Model Context Protocol feature crate using `rmcp`. It owns stdio framing, advertised-name translation, per-call trace creation, structured responses, canonical tool discovery, server identity presentation, the TCP listener transport, and the direct SSH stdio proxy. Registry supplies machine-local facts and Tools supplies definitions whose only routing metadata is global versus workspace-required scope. The CLI-owned host resolves server-local workspaces; Core owns domain validation, auditing, and the future authorization boundary.
 - **orbit-web**: HTTP API, embedded dashboard UI, and remote web connection. It owns axum handlers/assets, dashboard mutations, and the dashboard-specific SSH local-forward lifecycle. Depends on `orbit-core` for runtime-backed operations and projections and on `orbit-registry` for global workspace discovery; consumed by `orbit-cli` via `web serve` and `web connect`. Public surface is `ServeArgs`, `ConnectArgs`, and their serve/connect entry points.
@@ -98,6 +109,51 @@ feature.
   `orbit-agent`, or `orbit-cmd`.
 - **orbit-cmd**: shared application composition for CLI and Web consumers. It owns CLI-facing command groups plus registry-aware runtime and routine assembly, joining `orbit-core` kernels to `orbit-registry` without reversing either lower-layer dependency. Runtime methods are exposed as per-module `*Commands` extension traits.
 - **orbit-cli**: clap-based entry point and local client-configuration surface. It assembles MCP, Registry, Web, and Core. `mcp serve` and `mcp listen` compose one host and serve it over stdio or TCP; `mcp serve --mode remote` delegates only the byte-transparent SSH process to `orbit-mcp`. In every case the accepting machine resolves local state and dispatches through Core.
+
+---
+
+## orbit-store internal direction
+
+```mermaid
+flowchart BT
+  File["driver/file"] --> Contracts["contracts"]
+  File --> Fs["fs primitives"]
+  Sqlite["driver/sqlite"] --> Contracts
+  Sqlite --> Fs
+  Repository["repository"] --> File
+  Repository --> Sqlite
+  Repository --> Contracts
+  Repository --> Fs
+  Workflow["workflow"] --> File
+  Workflow --> Sqlite
+  Workflow --> Repository
+  Compose["compose"] --> File
+  Compose --> Sqlite
+  Compose --> Repository
+  Compose --> Workflow
+```
+
+The file and SQLite drivers are private and never import one another. Shared
+atomic-write, advisory-lock, path-safety, and YAML mechanics belong to `fs`,
+not to a backend-shaped utility module. Checkout projection and workspace
+binding YAML are file behavior even though registry rows are SQLite-backed.
+
+Live task writes are committed by the composite task repository: canonical
+bundle durability is the file-driver operation, allocation/binding/index rows
+are the registry-driver operation, and `.orbit/tasks` symlinks are disposable
+checkout projections. The drivers do not call each other. Task archive
+import/export/reindex, friction Markdown import/SQLite export, legacy audit and
+job-run import, and workspace layout upgrades are explicit `workflow` modules.
+In particular, constructing a friction repository does not perform a hidden
+Markdown import; `compose::workspace_friction_store` invokes the idempotent,
+transactional workflow before opening the live repository.
+
+[`scripts/check-dependency-direction.sh`](scripts/check-dependency-direction.sh)
+enforces these source-level arrows in addition to crate-level edges. It rejects
+implementation or `rusqlite` imports from contracts, cross-driver imports, and
+driver imports of repositories/workflows. Concrete construction and migration
+access stay in composition, bootstrap, and maintenance adapters; ordinary
+application code consumes the contract traits and DTOs.
 
 ---
 

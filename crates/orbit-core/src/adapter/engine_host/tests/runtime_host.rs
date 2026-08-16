@@ -4,6 +4,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 use std::process::Command;
+use std::sync::Arc;
 
 use chrono::Utc;
 use orbit_engine::{
@@ -75,7 +76,7 @@ fn run_update_task_v2_activity(runtime: &OrbitRuntime, run_id: &str, input: Valu
     let audit_dir = tempdir().expect("audit tempdir");
     let audit = V2AuditWriter::with_disk_sinks(
         audit_dir.path(),
-        orbit_store::Store::open_in_memory().expect("audit store"),
+        Arc::new(orbit_store::Store::open_in_memory().expect("audit store")),
         "ws_test",
         run_id,
         "test:update_task".to_string(),

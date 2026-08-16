@@ -9,7 +9,7 @@ use chrono::{DateTime, Local, Utc};
 use orbit_common::OrbitError;
 use orbit_common::fs::io::atomic_write_text;
 use orbit_common::protocol::yaml::{parse_local_routine_yaml, parse_routine_yaml};
-use orbit_store::RoutineFireRecord;
+use orbit_store::contracts::RoutineFireRecord;
 
 use super::due::{parse_cron, truncate_to_minute};
 use super::loader::{LoadedRoutine, RoutineLoadError, RoutineWorkspaceProvider, collect_routines};

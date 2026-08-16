@@ -7,7 +7,8 @@ use std::time::Instant;
 
 use orbit_common::observability::audit_id::audit_execution_id;
 use orbit_common::{NotFoundKind, OrbitError};
-use orbit_store::{AuditEventInsertParams, Store};
+use orbit_store::Store;
+use orbit_store::contracts::AuditEventInsertParams;
 use orbit_tools::{ReservationOwnerContext, ToolContext};
 use orbit_types::identity::{
     normalize_agent_family_for_model, normalize_optional_attribution_label,

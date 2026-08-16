@@ -2,7 +2,7 @@
 
 use crate::OrbitRuntime;
 use chrono::Utc;
-use orbit_store::TaskReservationReleaseReason;
+use orbit_store::contracts::TaskReservationReleaseReason;
 use orbit_types::workflow::JobRunState;
 use serde_json::json;
 

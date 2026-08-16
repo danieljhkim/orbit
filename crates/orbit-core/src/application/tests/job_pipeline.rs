@@ -6,7 +6,7 @@ use std::time::{Duration, Instant};
 
 use chrono::Utc;
 use orbit_common::OrbitError;
-use orbit_store::sqlite::migration::SUPPORTED_SCHEMA_VERSION;
+use orbit_store::maintenance::migration::SUPPORTED_SCHEMA_VERSION;
 use orbit_types::telemetry::AuditEventStatus;
 use orbit_types::workflow::JobRunState;
 use orbit_types::workspace::WorkspacePaths;

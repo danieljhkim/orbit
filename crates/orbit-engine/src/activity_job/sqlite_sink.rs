@@ -4,11 +4,11 @@ use std::sync::Mutex;
 use chrono::{DateTime, Utc};
 use orbit_agent::loop_engine::audit::{AuditSink, BlobStore, LoopAuditEvent};
 use orbit_common::OrbitError;
-use orbit_store::{Store, V2AuditEventFilter, V2AuditEventInsertParams};
+use orbit_store::contracts::{V2AuditEventFilter, V2AuditEventInsertParams, V2AuditStoreBackend};
 use orbit_types::workflow::activity_job::V2AuditEvent;
 
 pub struct V2SqliteSink {
-    store: Store,
+    store: std::sync::Arc<dyn V2AuditStoreBackend>,
     workspace_id: String,
     run_id: String,
     agent_identity: String,
@@ -19,7 +19,7 @@ pub struct V2SqliteSink {
 
 impl V2SqliteSink {
     pub fn new(
-        store: Store,
+        store: std::sync::Arc<dyn V2AuditStoreBackend>,
         workspace_id: impl Into<String>,
         run_id: impl Into<String>,
         agent_identity: impl Into<String>,
@@ -38,7 +38,7 @@ impl V2SqliteSink {
     }
 
     pub fn for_audit_root(
-        store: Store,
+        store: std::sync::Arc<dyn V2AuditStoreBackend>,
         workspace_id: impl Into<String>,
         run_id: impl Into<String>,
         agent_identity: impl Into<String>,

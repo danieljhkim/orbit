@@ -164,6 +164,46 @@ if rg -n 'ResolvedConfig::load|ConfigRoots::' \
   fail=1
 fi
 
+# orbit-store is intentionally one crate, but its internal persistence graph
+# is directional: contracts and shared fs mechanics are leaves; each driver is
+# isolated; only repositories, workflows, and composition may join drivers.
+store_src="$repo_root/crates/orbit-store/src"
+if rg -n 'crate::(driver|repository|workflow)|\brusqlite\b' \
+  "$store_src/contracts" -g '*.rs' -g '!**/tests/**'; then
+  echo "orbit-store contracts must not import persistence implementations"
+  fail=1
+fi
+
+if rg -n 'crate::(driver::sqlite|repository|workflow)|use crate::(Store|StoreTx)' \
+  "$store_src/driver/file" -g '*.rs' -g '!**/tests/**'; then
+  echo "orbit-store file driver must not import SQLite, repositories, or workflows"
+  fail=1
+fi
+
+if rg -n 'crate::(driver::file|repository|workflow)' \
+  "$store_src/driver/sqlite" -g '*.rs' -g '!**/tests/**'; then
+  echo "orbit-store SQLite driver must not import file drivers, repositories, or workflows"
+  fail=1
+fi
+
+if rg -n 'crate::(driver|repository|workflow)' \
+  "$store_src/fs" -g '*.rs' -g '!**/tests/**'; then
+  echo "orbit-store filesystem primitives must not import drivers or orchestration"
+  fail=1
+fi
+
+for retired_path in \
+  "$store_src/backend" \
+  "$store_src/file" \
+  "$store_src/sqlite" \
+  "$store_src/state_io" \
+  "$store_src/task_migration"; do
+  if [[ -e "$retired_path" ]]; then
+    echo "retired orbit-store ownership path still exists: $retired_path"
+    fail=1
+  fi
+done
+
 for retired_path in \
   "$repo_root/crates/orbit-core/src/command" \
   "$repo_root/crates/orbit-core/src/runtime/orbit_tool_host" \

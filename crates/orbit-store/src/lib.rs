@@ -8,14 +8,13 @@
     rustdoc::invalid_html_tags,
     rustdoc::private_intra_doc_links
 )]
-//! File-based and SQLite persistence backends for Orbit data.
+//! One directional persistence crate for Orbit data.
 //!
-//! Provides file stores for human-readable YAML and JSONL artifacts, plus a
-//! SQLite store for relational and append-only data. Store builders make the
-//! supported workspace/global split explicit per domain. The SQLite layer also
-//! provides generic connection/transaction primitives and a namespaced feature
-//! migration ledger; feature crates own their active schemas and queries while
-//! Store retains any immutable historical bootstrap migrations needed for compatibility.
+//! Consumer-visible traits and data live in [`contracts`]. Private file and
+//! SQLite drivers never import one another; live invariants are joined by
+//! repositories, one-shot migration/repair operations live in [`workflow`],
+//! and [`compose`] is the construction boundary. Shared locking, path-safety,
+//! atomic-write, and YAML mechanics live in narrowly named filesystem modules.
 //!
 //! # Role
 //! Depends only on `orbit-common`. Consumed by `orbit-core`, `orbit-engine`,
@@ -26,7 +25,7 @@
 //!   [`TaskHistoryStoreBackend`],
 //!   [`TaskArtifactStoreBackend`], [`TaskReservationStoreBackend`],
 //!   [`JobRunStoreBackend`], [`AuditEventStoreBackend`], [`ToolStoreBackend`]
-//! - Factory functions: `workspace_task_backends`, `workspace_job_run_store`,
+//! - Composition functions: `compose::workspace_task_backends`, `compose::workspace_job_run_store`,
 //!   `global_executor_def_store`, `global_policy_def_store`,
 //!   `audit_event_store_sqlite`, `task_reservation_store_sqlite`, `tool_store_sqlite`
 //! - [`SessionLogStore`] — lock-safe workspace session-log persistence
@@ -36,18 +35,34 @@
 //! # Dependency direction
 //! `orbit-common` ← `orbit-store` ← consumers such as orbit-core and orbit-engine
 
-pub(crate) mod backend;
-mod file;
-pub(crate) mod file_lock;
+pub mod compose;
+pub mod contracts;
+mod driver;
+mod fs;
 pub(crate) mod json_schema;
-pub mod layout;
+mod repository;
 pub(crate) mod scope;
-pub mod sqlite;
-pub mod state_io;
-pub mod task_migration;
+pub mod workflow;
+
+/// Operator-only SQLite and coordination-registry access. Ordinary consumers
+/// should depend on [`contracts`] and obtain implementations from composition.
+pub mod maintenance {
+    pub use crate::driver::sqlite::migration;
+    pub mod task_registry {
+        pub use crate::contracts::WorkspaceConfig;
+        pub use crate::driver::file::workspace_binding::{
+            read_workspace_config, read_workspace_config_optional, workspace_config_path,
+            workspace_id_for_orbit_dir, write_workspace_config,
+        };
+        pub use crate::driver::sqlite::task_registry::*;
+    }
+}
+
+/// Live JSON state-file operations used by the tool protocol adapter.
+pub use driver::file::run_state as state_io;
 
 pub mod skill_store {
-    pub use crate::file::skill_store::*;
+    pub use crate::driver::file::skill_store::*;
 }
 
 /// Friction records. Live reads and writes go through [`FrictionStore`]
@@ -56,24 +71,27 @@ pub mod skill_store {
 pub mod friction_store {
     pub use orbit_types::identity::validate_friction_id;
 
-    pub use crate::file::friction_store::{
+    pub use crate::driver::file::friction_store::{
         canonical_hub_friction_root, ensure_default_tag_taxonomy, prepare_hub_friction_root,
         readable_hub_friction_root,
     };
-    pub use crate::sqlite::friction_store::{
-        FrictionAddParams, FrictionImportReport, FrictionListFilter, FrictionReportedCount,
-        FrictionStore, FrictionUpdateParams, StoredFrictionRecord, export_workspace_frictions,
+    pub use crate::repository::friction::{
+        FrictionAddParams, FrictionListFilter, FrictionReportedCount, FrictionStore,
+        FrictionUpdateParams, StoredFrictionRecord,
+    };
+    pub use crate::workflow::friction::{
+        FrictionImportReport, export_workspace_frictions, import_workspace_frictions,
     };
 }
 
 pub mod pr_scoreboard {
-    pub use crate::file::scoreboard::pr_scoreboard::{
+    pub use crate::driver::file::scoreboard::pr_scoreboard::{
         record_pr_count_with_revision, record_pr_count_without_revision,
     };
 }
 
 pub mod scoreboard_summary {
-    pub use crate::file::scoreboard::scoreboard_summary::{
+    pub use crate::driver::file::scoreboard::scoreboard_summary::{
         AgentSummary, CoverageAvailability, CoverageNote, FrictionSummary, NormalizedTokenSummary,
         NotableCompletion, NotableCompletions, ORCHESTRATION_SCHEMA_VERSION,
         OrchestrationBucketKind, OrchestrationBucketSummary, OrchestrationModelSummary,
@@ -85,61 +103,53 @@ pub mod scoreboard_summary {
 }
 
 pub mod token_scoreboard {
-    pub use crate::file::scoreboard::token_scoreboard::write_token_scoreboard;
+    pub use crate::repository::token_scoreboard::write_token_scoreboard;
 }
 
 use chrono::{DateTime, Utc};
 
-pub use backend::{
-    ActiveTaskReservation, AuditEventStoreBackend, ExecutorDefStoreBackend, ExpiredTaskReservation,
-    JobRunQuery, JobRunStepParams, JobRunStoreBackend, PolicyDefStoreBackend,
-    ReleasedTaskReservation, TaskArtifactStoreBackend, TaskArtifactUpdateParams, TaskCreateParams,
-    TaskDocumentStoreBackend, TaskDocumentUpdateParams, TaskHistoryStoreBackend,
-    TaskHistoryUpdateParams, TaskLockConflict, TaskLockHolder, TaskReservationCheckParams,
-    TaskReservationCheckResult, TaskReservationListResult, TaskReservationOwnedConflictsParams,
-    TaskReservationOwnedConflictsResult, TaskReservationReleaseByOwnerParams,
-    TaskReservationReleaseByOwnerResult, TaskReservationReleaseParams,
-    TaskReservationReleaseReason, TaskReservationReleaseResult, TaskReservationReserveParams,
-    TaskReservationReserveResult, TaskReservationScope, TaskReservationStoreBackend,
-    TaskStoreBackend, ToolStoreBackend, WorkspaceClaimAcquireParams, WorkspaceClaimAcquireResult,
-    WorkspaceClaimCheckParams, WorkspaceClaimCheckResult, WorkspaceClaimHolder,
-    WorkspaceClaimReleaseParams, WorkspaceClaimReleaseResult, WorkspaceClaimStatusResult,
-    WorkspaceTaskBackends, audit_event_store_sqlite, coordination_task_backends,
-    global_executor_def_store, global_policy_def_store, layered_policy_def_store,
-    task_reservation_store_sqlite, tool_store_sqlite, workspace_job_run_store,
-    workspace_policy_def_store, workspace_task_backends,
-};
-pub use file::session_log_store::{
-    SessionLogAppendParams, SessionLogEntry, SessionLogFilter, SessionLogKind, SessionLogStore,
-};
-pub use file_lock::{LockHolderInfo, read_lock_holder};
-pub use json_schema::{validate_instance_against_schema, validate_schema_document};
-pub use sqlite::audit_event_store::incident::{
+pub use contracts::incident::{
     CASCADE_WINDOW_SECS, DEFAULT_SCAN_LIMIT as FAILURE_INCIDENT_SCAN_LIMIT, FailureClass,
     FailureIncident, FailureIncidentQuery, FailureIncidentReport, IncidentEventRef,
     PropagationLink, build_report as build_failure_incident_report, classify as classify_failure,
     group_failure_incidents, normalize_message as normalize_failure_message,
     signature_for as failure_signature_for,
 };
-pub use sqlite::audit_event_store::{
-    AuditEventFilter, AuditEventInsertParams, AuditRoleAggregate, AuditToolAggregate,
-    AuditToolCallCountsByRole, AuditToolCallCountsBySurfaceAndRole, AuditTopToolCall,
-};
-pub use sqlite::connection::{Store, StoreTx};
-pub use sqlite::invocation_store::{
-    ActivityInvocationMetrics, AgentInvocationMetrics, InvocationAccountingFact,
+pub use contracts::{
+    ActiveTaskReservation, ActivityInvocationCount, ActivityInvocationMetrics,
+    AgentInvocationMetrics, AuditEventFilter, AuditEventInsertParams, AuditEventStoreBackend,
+    AuditRoleAggregate, AuditToolAggregate, AuditToolCallCountsByRole,
+    AuditToolCallCountsBySurfaceAndRole, AuditTopToolCall, BoundedFacts, ExecutorDefStoreBackend,
+    ExpiredTaskReservation, FrictionStoreBackend, InvocationAccountingFact,
     InvocationAccountingQuery, InvocationInsertParams, InvocationQuery, InvocationRecord,
-    InvocationToolCallRecord, TaskInvocationMetrics, ToolInvocationMetrics,
+    InvocationRunCoverage, InvocationStoreBackend, InvocationToolCallRecord, JobRunOutcomeFact,
+    JobRunQuery, JobRunStepParams, JobRunStoreBackend, PolicyDefStoreBackend,
+    ReleasedTaskReservation, RoutineCursor, RoutineFireIntentParams, RoutineFireRecord,
+    RoutineFireState, RoutinePauseRecord, RoutineStoreBackend, SessionLogAppendParams,
+    SessionLogEntry, SessionLogFilter, SessionLogKind, SessionLogStoreBackend,
+    TaskArtifactStoreBackend, TaskArtifactUpdateParams, TaskCreateParams, TaskDocumentStoreBackend,
+    TaskDocumentUpdateParams, TaskHistoryStoreBackend, TaskHistoryUpdateParams,
+    TaskInvocationMetrics, TaskLockConflict, TaskLockHolder, TaskReservationCheckParams,
+    TaskReservationCheckResult, TaskReservationListResult, TaskReservationOwnedConflictsParams,
+    TaskReservationOwnedConflictsResult, TaskReservationReleaseByOwnerParams,
+    TaskReservationReleaseByOwnerResult, TaskReservationReleaseParams,
+    TaskReservationReleaseReason, TaskReservationReleaseResult, TaskReservationReserveParams,
+    TaskReservationReserveResult, TaskReservationScope, TaskReservationStoreBackend,
+    TaskStoreBackend, ToolInvocationMetrics, ToolStoreBackend, V2AuditEventFilter,
+    V2AuditEventInsertParams, V2AuditEventRow, V2AuditStoreBackend, WorkspaceClaimAcquireParams,
+    WorkspaceClaimAcquireResult, WorkspaceClaimCheckParams, WorkspaceClaimCheckResult,
+    WorkspaceClaimHolder, WorkspaceClaimReleaseParams, WorkspaceClaimReleaseResult,
+    WorkspaceClaimStatusResult,
 };
-pub use sqlite::reliability_store::{
-    ActivityInvocationCount, BoundedFacts, InvocationRunCoverage, JobRunOutcomeFact,
+pub use driver::file::session_log_store::SessionLogStore;
+pub use driver::file::workspace_binding::{
+    read_workspace_config, read_workspace_config_optional, workspace_config_path,
+    workspace_id_for_orbit_dir, write_workspace_config,
 };
-pub use sqlite::routine_store::{
-    RoutineCursor, RoutineFireIntentParams, RoutineFireRecord, RoutineFireState,
-    RoutinePauseRecord, RoutineSweepLock, try_acquire_routine_sweep_lock,
-};
-pub use sqlite::task_registry::workspace_id_for_orbit_dir;
-pub use sqlite::v2_audit_store::{V2AuditEventFilter, V2AuditEventInsertParams, V2AuditEventRow};
+pub use driver::sqlite::connection::{Store, StoreTx};
+pub use driver::sqlite::routine_store::{RoutineSweepLock, try_acquire_routine_sweep_lock};
+pub use fs::lock::{LockHolderInfo, read_lock_holder};
+pub use json_schema::{validate_instance_against_schema, validate_schema_document};
 
 pub(crate) fn parse_timestamp(raw: &str) -> rusqlite::Result<DateTime<Utc>> {
     let parsed = DateTime::parse_from_rfc3339(raw)

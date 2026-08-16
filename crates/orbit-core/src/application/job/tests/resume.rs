@@ -10,7 +10,7 @@ use std::path::Path;
 
 use chrono::Utc;
 use orbit_engine::RuntimeHost;
-use orbit_store::TaskReservationReleaseReason;
+use orbit_store::contracts::TaskReservationReleaseReason;
 use orbit_types::task::TaskStatus;
 use orbit_types::workflow::JobRunState;
 use serde_json::json;

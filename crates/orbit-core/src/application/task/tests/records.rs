@@ -1,5 +1,5 @@
 use chrono::Utc;
-use orbit_store::TaskCreateParams;
+use orbit_store::contracts::TaskCreateParams;
 use orbit_types::task::{
     TaskArtifact, TaskComment, TaskHistoryEntry, TaskPriority, TaskStatus, TaskType,
 };

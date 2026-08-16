@@ -18,11 +18,11 @@
 use std::path::{Path, PathBuf};
 
 use orbit_common::OrbitError;
-use orbit_store::layout::{self, LayoutMigrationInfo, SUPPORTED_LAYOUT_VERSION};
-use orbit_store::sqlite::migration::{
+use orbit_store::maintenance::migration::{
     PendingSchemaMigration, SUPPORTED_SCHEMA_VERSION, pending_schema_migrations_after,
     read_schema_ledger_status,
 };
+use orbit_store::workflow::layout::{self, LayoutMigrationInfo, SUPPORTED_LAYOUT_VERSION};
 
 use orbit_core::OrbitRuntime;
 

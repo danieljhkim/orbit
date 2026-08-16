@@ -2,7 +2,7 @@
 
 use chrono::Utc;
 use orbit_common::{NotFoundKind, OrbitError};
-use orbit_store::TaskReservationReleaseReason;
+use orbit_store::contracts::TaskReservationReleaseReason;
 use orbit_types::record::OrbitEvent;
 use orbit_types::workflow::{JobRun, JobRunState, PipelineState};
 use serde_json::Value;

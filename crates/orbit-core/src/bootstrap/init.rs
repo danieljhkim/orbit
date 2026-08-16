@@ -3,7 +3,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use orbit_common::OrbitError;
-use orbit_store::{friction_store, global_executor_def_store, global_policy_def_store};
+use orbit_store::compose::{global_executor_def_store, global_policy_def_store};
+use orbit_store::friction_store;
 use orbit_types::workspace::WorkspacePaths;
 
 use crate::OrbitRuntime;

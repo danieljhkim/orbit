@@ -1,7 +1,7 @@
 use std::fs;
 
 use orbit_search::{DocSemanticHit, ScoreBreakdown, SemanticHit};
-use orbit_store::TaskCreateParams;
+use orbit_store::contracts::TaskCreateParams;
 use orbit_types::task::{TaskPriority, TaskStatus, TaskType};
 
 use super::*;

@@ -37,7 +37,8 @@ use std::sync::Arc;
 use chrono::Utc;
 use orbit_common::OrbitError;
 use orbit_engine::activity_job::{CatalogDirectory, CatalogDirectoryList};
-use orbit_store::{Store, V2AuditEventFilter, V2AuditEventRow, workspace_id_for_orbit_dir};
+use orbit_store::contracts::{V2AuditEventFilter, V2AuditEventRow};
+use orbit_store::{Store, workspace_id_for_orbit_dir};
 use orbit_types::record::{Audit, OrbitEvent};
 use orbit_types::workspace::{Workspace, WorkspaceCheckout, WorkspacePaths};
 use serde_json::Value;
@@ -72,7 +73,7 @@ pub struct OrbitRuntime {
     /// Outcome of the [ORB-10012] workspace-layout pre-flight that ran when
     /// this runtime opened (empty `applied` when the layout was already
     /// current). Surfaced by `orbit migrate`.
-    layout_report: Arc<orbit_store::layout::LayoutUpgradeReport>,
+    layout_report: Arc<orbit_store::workflow::layout::LayoutUpgradeReport>,
     _temp_dir: Option<Arc<builder::TempDir>>,
 }
 
@@ -115,7 +116,7 @@ impl OrbitRuntime {
         local_root: &Path,
         binding: Option<WorkspaceRuntimeBinding>,
         runtime_config: &orbit_config::ResolvedConfig,
-        layout_report: orbit_store::layout::LayoutUpgradeReport,
+        layout_report: orbit_store::workflow::layout::LayoutUpgradeReport,
     ) -> Result<Self, OrbitError> {
         let context = builder::build_context_from_roots(
             global_root,
@@ -151,14 +152,14 @@ impl OrbitRuntime {
             workspace_binding: None,
             coordination_write_owner: None,
             event_log: event_bus::EventLog::default(),
-            layout_report: Arc::new(orbit_store::layout::LayoutUpgradeReport::default()),
+            layout_report: Arc::new(orbit_store::workflow::layout::LayoutUpgradeReport::default()),
             _temp_dir: Some(Arc::new(temp_dir)),
         })
     }
 
     /// Outcome of the workspace-layout pre-flight that ran when this runtime
     /// opened: which layout migrations (if any) were auto-applied.
-    pub fn layout_upgrade_report(&self) -> &orbit_store::layout::LayoutUpgradeReport {
+    pub fn layout_upgrade_report(&self) -> &orbit_store::workflow::layout::LayoutUpgradeReport {
         &self.layout_report
     }
 
@@ -243,6 +244,16 @@ impl OrbitRuntime {
         Store::open(&self.context.persistence().audit_db)
     }
 
+    pub fn v2_audit_store(
+        &self,
+    ) -> Result<Arc<dyn orbit_store::contracts::V2AuditStoreBackend>, OrbitError> {
+        orbit_store::compose::v2_audit_store(&self.context.persistence().audit_db)
+    }
+
+    pub fn ensure_persistence_ready(&self) -> Result<(), OrbitError> {
+        orbit_store::compose::ensure_sqlite_store_ready(&self.context.persistence().audit_db)
+    }
+
     pub fn workspace_id(&self) -> Result<String, OrbitError> {
         workspace_id_for_orbit_dir(&self.context.paths().orbit_dir)
     }
@@ -254,14 +265,14 @@ impl OrbitRuntime {
         if filter.workspace_id.trim().is_empty() {
             filter.workspace_id = self.workspace_id()?;
         }
-        self.sqlite_store()?.list_v2_audit_events(&filter)
+        self.v2_audit_store()?.list_v2_audit_events(&filter)
     }
 
     pub fn insert_v2_audit_event(
         &self,
-        params: &orbit_store::V2AuditEventInsertParams,
+        params: &orbit_store::contracts::V2AuditEventInsertParams,
     ) -> Result<(), OrbitError> {
-        self.sqlite_store()?.insert_v2_audit_event(params)
+        self.v2_audit_store()?.insert_v2_audit_event(params)
     }
 
     pub fn scoring_enabled(&self) -> bool {

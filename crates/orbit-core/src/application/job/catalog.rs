@@ -106,7 +106,7 @@ impl OrbitRuntime {
         include_disabled: bool,
         filter: JobCatalogFilter,
     ) -> Result<Vec<(JobCatalogEntry, Option<JobRun>)>, OrbitError> {
-        use orbit_store::JobRunQuery;
+        use orbit_store::contracts::JobRunQuery;
 
         let v2_jobs = self.load_v2_job_assets()?;
         let mut result = Vec::new();

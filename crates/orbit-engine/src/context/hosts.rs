@@ -4,8 +4,8 @@
 use orbit_agent::AgentConfig;
 use orbit_common::OrbitError;
 use orbit_exec::EnvironmentMode;
-use orbit_store::JobRunStepParams;
-use orbit_store::{InvocationQuery, InvocationRecord};
+use orbit_store::contracts::JobRunStepParams;
+use orbit_store::contracts::{InvocationQuery, InvocationRecord};
 use orbit_tools::{FsAuditLogger, ToolContext};
 use orbit_types::identity::AgentModelPair;
 use orbit_types::policy::Role;

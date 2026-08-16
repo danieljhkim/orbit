@@ -28,7 +28,7 @@ use std::collections::BTreeSet;
 use std::path::PathBuf;
 
 use orbit_common::OrbitError;
-use orbit_store::JobRunQuery;
+use orbit_store::contracts::JobRunQuery;
 use orbit_types::workflow::{JobRun, JobRunState, PipelineState};
 use serde_json::Value;
 
