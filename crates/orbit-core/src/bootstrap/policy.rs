@@ -1,7 +1,7 @@
 use chrono::Utc;
 use orbit_common::OrbitError;
 use orbit_common::protocol::yaml::parse_policy_resource;
-use orbit_store::PolicyDefStoreBackend;
+use orbit_store::contracts::PolicyDefStoreBackend;
 use orbit_types::policy::{DEFAULT_POLICY_NAME, PolicyDef};
 use orbit_types::resource::ResourceKind;
 

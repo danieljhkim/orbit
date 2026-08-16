@@ -2,7 +2,7 @@
 
 use orbit_common::{NotFoundKind, OrbitError};
 use orbit_search::{EmbedWorker, VectorStore};
-use orbit_store::{
+use orbit_store::contracts::{
     TaskArtifactStoreBackend, TaskArtifactUpdateParams, TaskCreateParams, TaskDocumentStoreBackend,
     TaskDocumentUpdateParams, TaskHistoryStoreBackend, TaskHistoryUpdateParams, TaskStoreBackend,
 };

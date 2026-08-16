@@ -23,7 +23,7 @@ use orbit_common::governance::authorization::{
     governed_tool,
 };
 use orbit_common::observability::audit_id::audit_execution_id;
-use orbit_store::AuditEventInsertParams;
+use orbit_store::contracts::AuditEventInsertParams;
 use orbit_types::telemetry::AuditEventStatus;
 use orbit_types::tool::ToolSessionContext;
 

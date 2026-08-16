@@ -7,7 +7,8 @@
 //! gate — that job uses `list_epic_descendants`.
 
 use orbit_engine::DispatchError;
-use orbit_store::{JobRunQuery, SessionLogFilter, SessionLogKind, SessionLogStore};
+use orbit_store::compose::workspace_session_log_store;
+use orbit_store::contracts::{JobRunQuery, SessionLogFilter, SessionLogKind};
 use orbit_types::task::TaskStatus;
 use orbit_types::workflow::JobRunState;
 use serde_json::{Value, json};
@@ -57,16 +58,17 @@ pub(super) fn scan_unresolved_work(
         .collect();
     run_ids.sort();
 
-    let mut check_later_ids: Vec<String> = SessionLogStore::new(runtime.paths().orbit_dir.clone())
-        .list(SessionLogFilter {
-            kind: Some(SessionLogKind::CheckLater),
-            unresolved_only: true,
-            ..SessionLogFilter::default()
-        })
-        .map_err(|err| action_failed(action, format!("list session log: {err}")))?
-        .into_iter()
-        .map(|entry| entry.id)
-        .collect();
+    let mut check_later_ids: Vec<String> =
+        workspace_session_log_store(runtime.paths().orbit_dir.clone())
+            .list(SessionLogFilter {
+                kind: Some(SessionLogKind::CheckLater),
+                unresolved_only: true,
+                ..SessionLogFilter::default()
+            })
+            .map_err(|err| action_failed(action, format!("list session log: {err}")))?
+            .into_iter()
+            .map(|entry| entry.id)
+            .collect();
     check_later_ids.sort();
 
     let empty = task_ids.is_empty() && run_ids.is_empty() && check_later_ids.is_empty();

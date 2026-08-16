@@ -4,8 +4,8 @@
 use std::fs;
 use std::path::PathBuf;
 
-use orbit_store::layout::SUPPORTED_LAYOUT_VERSION;
-use orbit_store::sqlite::migration::SUPPORTED_SCHEMA_VERSION;
+use orbit_store::maintenance::migration::SUPPORTED_SCHEMA_VERSION;
+use orbit_store::workflow::layout::SUPPORTED_LAYOUT_VERSION;
 
 use orbit_core::OrbitRuntime;
 

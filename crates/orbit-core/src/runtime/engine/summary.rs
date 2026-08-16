@@ -1,6 +1,6 @@
 use chrono::{Duration, Utc};
 use orbit_common::OrbitError;
-use orbit_store::JobRunQuery;
+use orbit_store::contracts::JobRunQuery;
 use orbit_store::scoreboard_summary::{
     ORCHESTRATION_SCHEMA_VERSION, OrchestrationSummary, ScoreboardInputs, ScoreboardWindow,
 };

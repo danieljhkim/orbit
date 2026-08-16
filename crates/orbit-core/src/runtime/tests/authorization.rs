@@ -11,7 +11,7 @@
 use std::collections::BTreeSet;
 
 use orbit_common::OrbitError;
-use orbit_store::TaskCreateParams;
+use orbit_store::contracts::TaskCreateParams;
 use orbit_tools::ToolContext;
 use orbit_types::policy::Role;
 use orbit_types::task::{TaskPriority, TaskStatus, TaskType};

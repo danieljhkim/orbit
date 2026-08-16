@@ -137,7 +137,7 @@ fn try_execute_named_job(
     let writer = V2AuditWriter::with_disk_sinks(
         &runtime.paths().audit_dir,
         runtime
-            .sqlite_store()
+            .v2_audit_store()
             .map_err(|err| DispatchError::JobExecution(format!("open audit store: {err}")))?,
         runtime
             .workspace_id()
@@ -262,7 +262,7 @@ fn try_execute_epic_job(
     let writer = V2AuditWriter::with_disk_sinks(
         &runtime.paths().audit_dir,
         runtime
-            .sqlite_store()
+            .v2_audit_store()
             .map_err(|error| DispatchError::JobExecution(format!("open audit store: {error}")))?,
         runtime.workspace_id().map_err(|error| {
             DispatchError::JobExecution(format!("resolve workspace id: {error}"))

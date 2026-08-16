@@ -11,7 +11,8 @@ use std::path::{Path, PathBuf};
 use chrono::{DateTime, Duration, Local, Utc};
 use orbit_common::OrbitError;
 use orbit_common::observability::log_rotation::{self, LogRotationConfig};
-use orbit_store::{RoutineFireIntentParams, RoutineFireRecord, RoutineFireState, Store};
+use orbit_store::contracts::RoutineStoreBackend;
+use orbit_store::contracts::{RoutineFireIntentParams, RoutineFireRecord, RoutineFireState};
 use orbit_types::workflow::{JobRunState, OverlapPolicy};
 use serde_json::json;
 
@@ -214,7 +215,7 @@ pub fn run_sweep_at_with_providers(
     };
 
     let reports = run_sweep_core_with_registry(
-        &store,
+        store.as_ref(),
         &local_host,
         &registry_view,
         &collection,
@@ -240,7 +241,7 @@ pub fn run_sweep_at_with_providers(
 /// [`RoutineCollection`], a fake [`RoutineDispatch`], and an explicit `now`.
 #[cfg(test)]
 pub(crate) fn run_sweep_core(
-    store: &Store,
+    store: &dyn RoutineStoreBackend,
     host_id: &str,
     collection: &RoutineCollection,
     dispatch: &dyn RoutineDispatch,
@@ -266,7 +267,7 @@ pub(crate) fn run_sweep_core(
 
 /// Registry-aware core used by production and deterministic R2 fixtures.
 pub(crate) fn run_sweep_core_with_registry(
-    store: &Store,
+    store: &dyn RoutineStoreBackend,
     identity: &dyn RoutineHostIdentityView,
     registry_view: &RoutineRegistryView,
     collection: &RoutineCollection,
@@ -341,11 +342,11 @@ pub(crate) fn run_sweep_core_with_registry(
 }
 
 fn sweep_routine(
-    store: &Store,
+    store: &dyn RoutineStoreBackend,
     routine: &LoadedRoutine,
     dispatch: &dyn RoutineDispatch,
     validation: &RoutinePinValidation,
-    pauses: &BTreeMap<String, orbit_store::RoutinePauseRecord>,
+    pauses: &BTreeMap<String, orbit_store::contracts::RoutinePauseRecord>,
     options: SweepOptions,
     now_utc: DateTime<Utc>,
 ) -> Result<RoutineSweepReport, OrbitError> {
@@ -436,7 +437,7 @@ fn sweep_routine(
 /// by the outcome sync, where a worker may have partially started — and stays
 /// terminal so a make-up fire never races an orphaned run.
 fn retry_candidate(
-    store: &Store,
+    store: &dyn RoutineStoreBackend,
     routine: &LoadedRoutine,
     now_utc: DateTime<Utc>,
 ) -> Result<Option<RoutineFireRecord>, OrbitError> {
@@ -470,7 +471,7 @@ struct FireRequest<'a> {
 }
 
 fn fire(
-    store: &Store,
+    store: &dyn RoutineStoreBackend,
     routine: &LoadedRoutine,
     dispatch: &dyn RoutineDispatch,
     validation: &RoutinePinValidation,
@@ -568,7 +569,7 @@ fn fire(
 /// without it, a sweep that crashed between intent and dispatch would block
 /// `overlap: forbid` forever).
 fn sync_unresolved_fires(
-    store: &Store,
+    store: &dyn RoutineStoreBackend,
     routines_by_name: &BTreeMap<String, &LoadedRoutine>,
     dispatch: &dyn RoutineDispatch,
     now_utc: DateTime<Utc>,

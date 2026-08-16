@@ -2,7 +2,7 @@
 
 use std::path::PathBuf;
 
-use orbit_store::sqlite::task_registry::read_workspace_config_optional;
+use orbit_store::maintenance::task_registry::read_workspace_config_optional;
 
 use crate::OrbitError;
 
@@ -56,9 +56,9 @@ fn registry_neutral_binding_rejects_a_conflicting_workspace_config() {
     let workspace_root = root.path().join("repo/.orbit");
     std::fs::create_dir_all(&global_root).expect("create global root");
     std::fs::create_dir_all(&workspace_root).expect("create workspace root");
-    orbit_store::sqlite::task_registry::write_workspace_config(
+    orbit_store::maintenance::task_registry::write_workspace_config(
         &workspace_root,
-        &orbit_store::sqlite::task_registry::WorkspaceConfig {
+        &orbit_store::maintenance::task_registry::WorkspaceConfig {
             schema_version: 1,
             workspace_id: "ws_configured".to_string(),
         },

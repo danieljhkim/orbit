@@ -15,8 +15,8 @@ use orbit_common::governance::friction::{FrictionVerb, effective_title, normaliz
 use orbit_common::protocol::tool_input::{
     optional_csv_or_string_list_alias, optional_raw_string, optional_string, required_string,
 };
-use orbit_store::friction_store::{
-    FrictionAddParams, FrictionListFilter, FrictionStore, FrictionUpdateParams,
+use orbit_store::contracts::{
+    FrictionAddParams, FrictionListFilter, FrictionStoreBackend, FrictionUpdateParams,
     StoredFrictionRecord,
 };
 use orbit_types::record::{FrictionRecord, FrictionStatus};
@@ -71,12 +71,15 @@ fn add(runtime: &OrbitRuntime, input: Value, model: Option<String>) -> Result<Va
 }
 
 fn list(runtime: &OrbitRuntime, input: Value) -> Result<Value, OrbitError> {
-    list_in(&crate::runtime::friction::store_for(runtime)?, input)
+    list_in(
+        crate::runtime::friction::store_for(runtime)?.as_ref(),
+        input,
+    )
 }
 
 /// Translate the wire filter into the store filter, including the page, so
 /// SQLite decides which rows exist before any body is decoded.
-pub(super) fn list_in(store: &FrictionStore, input: Value) -> Result<Value, OrbitError> {
+pub(super) fn list_in(store: &dyn FrictionStoreBackend, input: Value) -> Result<Value, OrbitError> {
     let month_bounds = optional_string(&input, "month")?
         .map(|raw| parse_month_bounds(&raw))
         .transpose()?;
@@ -111,10 +114,13 @@ pub(super) fn list_in(store: &FrictionStore, input: Value) -> Result<Value, Orbi
 }
 
 fn show(runtime: &OrbitRuntime, input: Value) -> Result<Value, OrbitError> {
-    show_in(&crate::runtime::friction::store_for(runtime)?, input)
+    show_in(
+        crate::runtime::friction::store_for(runtime)?.as_ref(),
+        input,
+    )
 }
 
-pub(super) fn show_in(store: &FrictionStore, input: Value) -> Result<Value, OrbitError> {
+pub(super) fn show_in(store: &dyn FrictionStoreBackend, input: Value) -> Result<Value, OrbitError> {
     let id = required_string(&input, &["id"], "id")?;
     let Some(stored) = store.show(&id)? else {
         return Err(OrbitError::InvalidInput(format!(

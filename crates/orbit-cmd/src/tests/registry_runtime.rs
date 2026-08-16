@@ -4,7 +4,7 @@ use chrono::Utc;
 use orbit_common::{NotFoundKind, OrbitError};
 use orbit_core::OrbitRuntime;
 use orbit_core::runtime::OrbitRuntimeRoots;
-use orbit_store::sqlite::task_registry::{WorkspaceConfig, write_workspace_config};
+use orbit_store::maintenance::task_registry::{WorkspaceConfig, write_workspace_config};
 use orbit_types::workspace::{
     Workspace, WorkspaceCheckout, WorkspaceCheckoutRole, WorkspaceRegistry, WorkspaceStatus,
 };

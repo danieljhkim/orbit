@@ -12,7 +12,7 @@ use orbit_types::workflow::activity_job::{
 };
 use thiserror::Error;
 
-use orbit_store::Store;
+use orbit_store::contracts::V2AuditStoreBackend;
 
 use super::sqlite_sink::V2SqliteSink;
 
@@ -115,7 +115,7 @@ impl V2AuditWriter {
     /// `with_envelope_sink` directly.
     pub fn with_disk_sinks(
         audit_root: &Path,
-        store: Store,
+        store: Arc<dyn V2AuditStoreBackend>,
         workspace_id: impl Into<String>,
         run_id: impl Into<String>,
         agent_identity: impl Into<String>,

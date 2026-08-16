@@ -1,5 +1,5 @@
 use orbit_common::OrbitError;
-use orbit_store::ExecutorDefStoreBackend;
+use orbit_store::contracts::ExecutorDefStoreBackend;
 use orbit_types::resource::{EXECUTOR_RESOURCE_SCHEMA_VERSION, ExecutorResource, ResourceKind};
 use orbit_types::workflow::{ExecutorDef, ExecutorSandboxKind, ExecutorType};
 

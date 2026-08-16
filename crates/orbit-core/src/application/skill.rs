@@ -775,8 +775,8 @@ mod tests {
     #[test]
     fn task_id_scanner_matches_only_prefixes_known_to_the_local_registry() {
         let root = tempfile::tempdir().expect("registry root");
-        let registry = orbit_store::sqlite::task_registry::TaskRegistryStore::open(
-            &orbit_store::sqlite::task_registry::task_registry_path(root.path()),
+        let registry = orbit_store::maintenance::task_registry::TaskRegistryStore::open(
+            &orbit_store::maintenance::task_registry::task_registry_path(root.path()),
         )
         .expect("open task registry");
         registry

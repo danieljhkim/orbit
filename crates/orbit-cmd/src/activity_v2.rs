@@ -79,7 +79,7 @@ impl ActivityV2Commands for OrbitRuntime {
         let workspace_path = self.paths().repo_root.clone();
         let writer = V2AuditWriter::with_disk_sinks(
             &audit_root,
-            self.sqlite_store()?,
+            self.v2_audit_store()?,
             self.workspace_id()?,
             &run_id,
             SYSTEM_AUDIT_IDENTITY,
@@ -153,7 +153,7 @@ mod tests {
 
     use std::path::PathBuf;
 
-    use orbit_store::V2AuditEventFilter;
+    use orbit_store::contracts::V2AuditEventFilter;
     use serde_json::json;
     use tempfile::tempdir;
 

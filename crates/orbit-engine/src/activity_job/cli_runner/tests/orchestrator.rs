@@ -803,7 +803,7 @@ fn run_cli_backend_redacts_live_env_values_in_stored_blobs() {
     );
 
     let loop_sink = Arc::new(V2SqliteSink::new(
-        Store::open_in_memory().expect("open sqlite store"),
+        Arc::new(Store::open_in_memory().expect("open sqlite store")),
         "ws-test",
         "job-cli-blob-redaction",
         "codex:gpt-5.5",

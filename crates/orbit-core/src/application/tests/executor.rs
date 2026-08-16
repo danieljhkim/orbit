@@ -2,7 +2,7 @@ use std::sync::Mutex;
 
 use chrono::Utc;
 use orbit_common::OrbitError;
-use orbit_store::ExecutorDefStoreBackend;
+use orbit_store::contracts::ExecutorDefStoreBackend;
 use orbit_types::workflow::{ExecutorDef, ExecutorSandboxKind, ExecutorType};
 
 use crate::application::executor::{

@@ -10,7 +10,7 @@
 use super::*;
 
 use chrono::Duration;
-use orbit_store::TaskReservationReleaseReason;
+use orbit_store::contracts::TaskReservationReleaseReason;
 
 use crate::application::job::TERMINAL_OUTCOME_CONFLICT_CODE;
 

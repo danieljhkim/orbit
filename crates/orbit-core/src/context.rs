@@ -4,7 +4,7 @@ use std::sync::Arc;
 use orbit_engine::PrConfig;
 use orbit_policy::PolicyEngine;
 use orbit_search::{EmbedWorker, VectorStore};
-use orbit_store::{
+use orbit_store::contracts::{
     AuditEventStoreBackend, ExecutorDefStoreBackend, JobRunStoreBackend, PolicyDefStoreBackend,
     TaskArtifactStoreBackend, TaskDocumentStoreBackend, TaskHistoryStoreBackend,
     TaskReservationStoreBackend, TaskStoreBackend, ToolStoreBackend,

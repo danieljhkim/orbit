@@ -1,7 +1,7 @@
 use orbit_common::OrbitError;
 use orbit_common::fs::task_io::prune_missing_context_files;
 use orbit_common::security::redaction::redact_all;
-use orbit_store::TaskCreateParams as StoreTaskCreateParams;
+use orbit_store::contracts::TaskCreateParams as StoreTaskCreateParams;
 use orbit_types::record::OrbitEvent;
 use orbit_types::task::{
     Task, TaskStatus, TaskType, normalize_task_dependencies, normalize_task_tags,

@@ -4,7 +4,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use chrono::{DateTime, Utc};
 use orbit_common::OrbitError;
-use orbit_store::{
+use orbit_store::contracts::{
     ActiveTaskReservation, ReleasedTaskReservation, TaskReservationOwnedConflictsParams,
     TaskReservationReleaseByOwnerParams, TaskReservationReleaseParams,
     TaskReservationReleaseReason,

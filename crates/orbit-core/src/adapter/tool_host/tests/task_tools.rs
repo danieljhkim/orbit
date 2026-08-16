@@ -2,7 +2,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard, OnceLock};
 
-use orbit_store::sqlite::task_registry::read_workspace_config;
+use orbit_store::maintenance::task_registry::read_workspace_config;
 use orbit_types::task::TaskStatus;
 use orbit_types::tool::ToolSessionContext;
 use serde_json::{Value, json};
