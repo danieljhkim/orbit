@@ -745,6 +745,10 @@ function navigateToDrilldown(opts = {}, ctx) {
   auditFilter.role = opts.role || null;
   auditFilter.metric = opts.metric || null;
   auditFilter.status = opts.status || null;
+  // ORB-10871: an incident names one surface, so its "open raw events" link
+  // lands on exactly the rows the incident collapsed rather than every failure
+  // by that actor.
+  auditFilter.tool = opts.tool || null;
   if (opts.window) auditFilter.since = opts.window === "all" ? null : opts.window;
   activeAuditSubtab = "events";
   syncAuditControls();

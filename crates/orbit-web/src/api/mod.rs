@@ -24,6 +24,7 @@ mod crews;
 mod denials;
 mod diagnostics;
 mod frictions;
+mod incidents;
 mod jobs;
 mod log;
 mod metrics;
@@ -411,6 +412,7 @@ pub(super) fn router() -> Router<crate::state::DashboardState> {
         .route("/log", get(log::get_log))
         .route("/log/stream", get(log::stream_log))
         .route("/audit/summary", get(audit::audit_summary))
+        .route("/audit/incidents", get(incidents::list_failure_incidents))
         .route("/routines", get(routines::list_routine_health))
         .route("/routines/toggle", post(routines::toggle_routine))
         .route("/routines/clock", post(routines::control_clock))

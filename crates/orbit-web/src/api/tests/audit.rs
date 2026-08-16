@@ -294,3 +294,54 @@ async fn audit_rejects_non_numeric_limit_without_500() {
     // error, never a 500/panic.
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
 }
+
+/// ORB-10871: the header summary reports the raw failed-event count and the
+/// grouped incident count as two distinct fields over the same window, so a
+/// repeated burst can no longer be read as many independent failures.
+#[tokio::test]
+async fn audit_summary_separates_raw_failed_events_from_grouped_incidents() {
+    let runtime = OrbitRuntime::in_memory().expect("build runtime");
+    for index in 0..12 {
+        seed_audit_event(
+            &runtime,
+            &format!("exec-burst-{index}"),
+            "surface.alpha",
+            AuditEventStatus::Failure,
+            "actor-one",
+            Some(&format!("could not remove /work/dir-{index}/file.txt")),
+        );
+    }
+    seed_audit_event(
+        &runtime,
+        "exec-denied-one",
+        "surface.beta",
+        AuditEventStatus::Denied,
+        "actor-one",
+        Some("policy denied: write outside the allowed scope"),
+    );
+
+    let response = request_audit(runtime, "/audit/summary?since=24h").await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = body_json(response).await;
+
+    assert_eq!(body["window"], "24h", "both counts state their window");
+    assert_eq!(body["events"].as_u64(), Some(13), "all-events denominator");
+    assert_eq!(
+        body["failed_events"].as_u64(),
+        Some(13),
+        "raw failed rows stay counted in full"
+    );
+    assert_eq!(
+        body["failure_incidents"].as_u64(),
+        Some(2),
+        "the burst collapses to one incident; the denial stays its own"
+    );
+    assert_eq!(
+        body["failure_incidents_by_class"]["denied"].as_u64(),
+        Some(1)
+    );
+    assert_eq!(
+        body["failed_events_by_class"]["unexpected"].as_u64(),
+        Some(12)
+    );
+}

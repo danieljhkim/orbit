@@ -375,6 +375,8 @@ fn dashboard_guards_diagnostics_and_detail_panels_in_aggregate_view() {
     for fetch in [
         "/api/diagnostics/metrics",
         "/api/diagnostics/errors",
+        // ORB-10871: the incidents subtab is per-workspace too (`Ws` extractor).
+        "/api/audit/incidents",
         "/api/diagnostics/implement_one",
         "fetchAndRenderRuns()",
     ] {
@@ -601,7 +603,7 @@ async fn dashboard_scoreboard_is_reachable_under_diagnostics() {
     // ORB-10588 appended `reliability` to the same list.
     assert!(
         router.contains(
-            r#"const DIAG_SUBTABS = ["runs", "metrics", "errors", "reliability", "scoreboard"];"#
+            r#"const DIAG_SUBTABS = ["runs", "metrics", "errors", "incidents", "reliability", "scoreboard"];"#
         ),
         "the scoreboard must route as a diagnostics subtab"
     );
@@ -1204,6 +1206,122 @@ fn dashboard_scope_is_shared_labeled_and_url_backed() {
             && css.contains(".scope-chip-v")
             && css.contains("max-width: 10ch"),
         "scope badges and filter chips must stay legible at 480–720px"
+    );
+}
+
+/// ORB-10871: a repeated failure burst is one incident, not hundreds of
+/// independent quality failures. The dashboard must therefore (a) show the
+/// grouped count and the raw failed-event count side by side, each with its
+/// denominator and the selected window, (b) let an operator expand an incident
+/// down to the exact audit rows, actor, surfaces, run/task ids, first/last
+/// timestamps, and grouping signature, and (c) never imply that a propagated
+/// pipeline failure is its own root cause. All three live in the assets; this
+/// pins them so a later edit cannot quietly go back to counting raw rows.
+#[test]
+fn dashboard_failure_metrics_are_incident_aware_and_state_their_denominators() {
+    let index = include_str!("../../assets/dashboard/index.html");
+    let app = include_str!("../../assets/dashboard/app.js");
+    let router = include_str!("../../assets/dashboard/router.js");
+    let diagnostics = include_str!("../../assets/dashboard/diagnostics.js");
+    let scoreboard = include_str!("../../assets/dashboard/scoreboard.js");
+    let audit = include_str!("../../assets/dashboard/audit.js");
+    let css = include_str!("../../assets/dashboard/dashboard.css");
+
+    // Routed as a diagnostics subtab, fetched against the shared window.
+    assert!(
+        index.contains(r#"<button class="subtab" data-subtab="incidents" type="button">"#),
+        "Incidents must be offered as a diagnostics subtab"
+    );
+    assert!(
+        router.contains(r#""incidents""#),
+        "the incidents subtab must be routable"
+    );
+    assert!(
+        app.contains(r#"if (activeDiagSubtab === "incidents")"#)
+            && app.contains("/api/audit/incidents?since=${encodeURIComponent(selectedWindow)}"),
+        "the incidents fetch must hang off the diagnostics subtab branch and honor the shared window"
+    );
+
+    // Both counts, both denominators, and the window are rendered — never one
+    // number standing in for the other.
+    assert!(
+        diagnostics.contains("${asCount(payload.incident_count)} incidents / ${asCount(payload.raw_failed_events)} failed events"),
+        "the panel count must show grouped incidents and raw failed events together"
+    );
+    assert!(
+        diagnostics.contains("grouped from ${failed} failed events of ${total} audited events"),
+        "the incident count must state what it is out of"
+    );
+    assert!(
+        diagnostics.contains("`window ${window}`"),
+        "the incident summary must name the window it was measured over"
+    );
+    assert!(
+        diagnostics.contains("incident-class-chip") && diagnostics.contains("INCIDENT_CLASS_ORDER"),
+        "denials, expected negative paths, and unexpected failures must stay distinguishable"
+    );
+
+    // Expansion exposes the underlying evidence.
+    for needle in [
+        "grouping signature",
+        "first seen",
+        "last seen",
+        "\"actor\"",
+        "\"runs\"",
+        "\"tasks\"",
+        "Underlying audit events",
+    ] {
+        assert!(
+            diagnostics.contains(needle),
+            "incident expansion must reveal `{needle}`"
+        );
+    }
+    assert!(
+        diagnostics.contains("downstream failures, not independent root causes"),
+        "a propagation chain must be labeled as a chain, not as separate root causes"
+    );
+    assert!(
+        diagnostics.contains("navigateToDrilldown(")
+            && diagnostics.contains("Open raw audit events"),
+        "an incident must link out to the raw audit rows it collapsed"
+    );
+    assert!(
+        audit.contains("auditFilter.tool = opts.tool || null;"),
+        "the drill-down must carry the incident's surface into the raw Audit filter"
+    );
+
+    // Scoreboard keeps the raw failure column and gains the grouped one.
+    assert!(
+        scoreboard.contains(r#"left: "failed_tool_calls""#)
+            && scoreboard.contains(r#"right: "tool_calls""#),
+        "the raw failed/total tool-call pair must survive"
+    );
+    assert!(
+        scoreboard.contains(r#"key: "failure_incidents""#)
+            && scoreboard.contains(r#"left: "failure_incidents""#)
+            && scoreboard.contains(r#"right: "failure_incident_events""#),
+        "the scoreboard must show grouped incidents against the raw events they collapsed"
+    );
+    assert!(
+        scoreboard.contains("function allScoreboardSections()")
+            && scoreboard.contains("window ${window}"),
+        "every scoreboard section badge must name the selected window"
+    );
+
+    // Narrow-viewport presentation hooks (480–720px).
+    assert!(
+        css.contains(".incident-summary")
+            && css.contains(".incident-facts")
+            && css.contains(".incident-evidence"),
+        "the incident summary and its expansion need their own presentation hooks"
+    );
+    let responsive_at = css
+        .rfind("@media (max-width: 720px)")
+        .expect("a 720px breakpoint must exist");
+    assert!(
+        css[responsive_at..].contains(".incident-facts { grid-template-columns: minmax(0, 1fr);")
+            && css[responsive_at..].contains(".incident-evidence"),
+        "the incident expansion must reflow rather than clip below 720px"
     );
 }
 

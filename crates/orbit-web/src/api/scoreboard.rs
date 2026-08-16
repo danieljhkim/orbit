@@ -8,11 +8,12 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Json, Response};
 use chrono::{Duration, Utc};
 use orbit_cmd::DiagnosticsCommands;
-use orbit_core::OrbitRuntime;
 use orbit_core::scoreboard_summary::ScoreboardWindow;
+use orbit_core::{FailureIncidentQuery, OrbitRuntime};
 use serde::Deserialize;
 use serde_json::json;
 
+use super::incidents::{ActorFailureRollup, ROLLUP_SCAN_LIMIT, agent_family_key, rollup_by_actor};
 use super::server_error;
 
 /// Query-string shape for `GET /api/scoreboard`.
@@ -62,6 +63,20 @@ pub(super) async fn scoreboard(Ws(runtime): Ws, Query(query): Query<ScoreboardQu
         .unwrap_or_default();
     let denial_map: BTreeMap<String, i64> = denials_by_role.into_iter().collect();
 
+    // ORB-10871: a repeated failure burst is one incident, not one failure per
+    // raw row. The scoreboard keeps `failed_tool_calls` (the raw count) and
+    // gains the grouped counts beside it, over the same window, so an operator
+    // reads "how many things went wrong" and "how much evidence there is" as
+    // two distinct numbers.
+    let failure_rollup = runtime
+        .audit_failure_incidents(&FailureIncidentQuery {
+            since: since_window,
+            max_events: ROLLUP_SCAN_LIMIT,
+            ..Default::default()
+        })
+        .map(|report| rollup_by_actor(&report))
+        .unwrap_or_default();
+
     if let Some(agents) = value.get_mut("agents").and_then(|v| v.as_object_mut()) {
         // Collect all agent keys upfront so we can also surface metrics rows
         // that have no scoreboard counterpart yet.
@@ -72,6 +87,7 @@ pub(super) async fn scoreboard(Ws(runtime): Ws, Query(query): Query<ScoreboardQu
                 .cloned()
                 .unwrap_or_default();
             let denials = lookup_denials_for_agent(&denial_map, key);
+            let failures = lookup_failures_for_agent(&failure_rollup, key);
             if let Some(obj) = agents.get_mut(key.as_str()).and_then(|v| v.as_object_mut()) {
                 obj.insert(
                     "avg_step_duration_ms".to_string(),
@@ -83,6 +99,15 @@ pub(super) async fn scoreboard(Ws(runtime): Ws, Query(query): Query<ScoreboardQu
                     json!(extras.p95_duration_ms),
                 );
                 obj.insert("denials".to_string(), json!(denials));
+                obj.insert("failure_incidents".to_string(), json!(failures.incidents));
+                obj.insert(
+                    "unexpected_failure_incidents".to_string(),
+                    json!(failures.unexpected_incidents),
+                );
+                obj.insert(
+                    "failure_incident_events".to_string(),
+                    json!(failures.events),
+                );
             }
         }
         // Surface metrics-only agents so retries/durations show even when no
@@ -92,6 +117,7 @@ pub(super) async fn scoreboard(Ws(runtime): Ws, Query(query): Query<ScoreboardQu
                 continue;
             }
             let denials = lookup_denials_for_agent(&denial_map, key);
+            let failures = lookup_failures_for_agent(&failure_rollup, key);
             agents.insert(
                 key.clone(),
                 json!({
@@ -106,6 +132,9 @@ pub(super) async fn scoreboard(Ws(runtime): Ws, Query(query): Query<ScoreboardQu
                     "retries": extras.retry_count,
                     "p95_wall_clock_ms": extras.p95_duration_ms,
                     "denials": denials,
+                    "failure_incidents": failures.incidents,
+                    "unexpected_failure_incidents": failures.unexpected_incidents,
+                    "failure_incident_events": failures.events,
                 }),
             );
         }
@@ -190,6 +219,22 @@ fn compute_metrics_extras(
         });
     }
     Ok(out)
+}
+
+/// Looks up an agent's grouped failure counts. The rollup is already keyed by
+/// canonical agent family, so a scoreboard key that is itself a model label
+/// (metrics-only rows can be) is normalized the same way before matching.
+fn lookup_failures_for_agent(
+    rollup: &BTreeMap<String, ActorFailureRollup>,
+    agent_key: &str,
+) -> ActorFailureRollup {
+    if let Some(found) = rollup.get(agent_key) {
+        return *found;
+    }
+    rollup
+        .get(&agent_family_key(agent_key))
+        .copied()
+        .unwrap_or_default()
 }
 
 /// Looks up the SQLite per-role denials for a scoreboard agent key. The audit

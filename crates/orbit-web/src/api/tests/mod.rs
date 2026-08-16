@@ -9,6 +9,7 @@ mod denials;
 mod diagnostics;
 mod frictions;
 mod handlers;
+mod incidents;
 mod log;
 mod metrics;
 mod reliability;

@@ -113,6 +113,13 @@ pub use file::session_log_store::{
 };
 pub use file_lock::{LockHolderInfo, read_lock_holder};
 pub use json_schema::{validate_instance_against_schema, validate_schema_document};
+pub use sqlite::audit_event_store::incident::{
+    CASCADE_WINDOW_SECS, DEFAULT_SCAN_LIMIT as FAILURE_INCIDENT_SCAN_LIMIT, FailureClass,
+    FailureIncident, FailureIncidentQuery, FailureIncidentReport, IncidentEventRef,
+    PropagationLink, build_report as build_failure_incident_report, classify as classify_failure,
+    group_failure_incidents, normalize_message as normalize_failure_message,
+    signature_for as failure_signature_for,
+};
 pub use sqlite::audit_event_store::{
     AuditEventFilter, AuditEventInsertParams, AuditRoleAggregate, AuditToolAggregate,
     AuditToolCallCountsByRole, AuditToolCallCountsBySurfaceAndRole, AuditTopToolCall,

@@ -72,7 +72,7 @@ let lastTasks = [];
 // `/api/tasks/all` view, which answers a bare array with no such metadata.
 let lastTasksMeta = null;
 let lastRuns = [];
-let lastDiagnostics = { metrics: [], errors: [], implement_one: [] };
+let lastDiagnostics = { metrics: [], errors: [], incidents: null, implement_one: [] };
 let lastFrictionPayload = { stats: {}, tags: [], items: [] };
 let activeTab = "tasks";
 let activeDiagSubtab = "runs";
@@ -129,6 +129,9 @@ function diagnosticsContext() {
     getActiveDiagSubtab: () => activeDiagSubtab,
     fmtRelative,
     fmtDuration,
+    // ORB-10871: incident expansion states exact first/last timestamps, not
+    // just "3h ago" — the raw evidence has to be locatable in the Audit view.
+    fmtAbsTime,
     truncate,
     setActiveTab: sAT,
     navigateToRun: nTR,
@@ -1059,6 +1062,17 @@ function activeRefreshJobs() {
       jobs.push(
         fetchJson(`/api/diagnostics/errors?limit=${DIAG_LIMIT}`).then((rows) => {
           lastDiagnostics.errors = rows;
+          renderDiagnostics(diagnosticsContext());
+        })
+      );
+    } else if (activeDiagSubtab === "incidents") {
+      // ORB-10871: grouped failure incidents. Scoped to the shared dashboard
+      // window so the incident count and the raw failed-event count it states
+      // its denominator against are read off the same cutoff.
+      const selectedWindow = getWindow();
+      jobs.push(
+        fetchJson(`/api/audit/incidents?since=${encodeURIComponent(selectedWindow)}&limit=${DIAG_LIMIT}`).then((payload) => {
+          lastDiagnostics.incidents = payload;
           renderDiagnostics(diagnosticsContext());
         })
       );
