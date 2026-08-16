@@ -61,7 +61,7 @@
   {
     "active": true,
     "builtin": true,
-    "description": "Append an Orbit friction report under .orbit/frictions/",
+    "description": "Append an Orbit friction report to the Orbit store via orbit.friction.*",
     "enabled": true,
     "name": "orbit.friction.add",
     "parameters": [
@@ -101,7 +101,7 @@
   {
     "active": true,
     "builtin": true,
-    "description": "List Orbit friction records from .orbit/frictions/",
+    "description": "List Orbit friction records from the Orbit store via orbit.friction.*",
     "enabled": true,
     "name": "orbit.friction.list",
     "parameters": [

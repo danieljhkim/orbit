@@ -99,7 +99,7 @@
     "name": "orbit_crew_list"
   },
   {
-    "description": "Append an Orbit friction report under .orbit/frictions/",
+    "description": "Append an Orbit friction report to the Orbit store via orbit.friction.*",
     "inputSchema": {
       "additionalProperties": true,
       "properties": {
@@ -153,7 +153,7 @@
     "name": "orbit_friction_add"
   },
   {
-    "description": "List Orbit friction records from .orbit/frictions/",
+    "description": "List Orbit friction records from the Orbit store via orbit.friction.*",
     "inputSchema": {
       "additionalProperties": true,
       "properties": {
