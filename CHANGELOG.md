@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.12.1
+
+### Highlights
+
+- **Release cut**: version files and the GitHub tag aligned at 0.12.1. ([ORB-10870])
+
 ## 0.12.0
 
 ### Breaking Changes
