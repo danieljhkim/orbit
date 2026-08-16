@@ -198,7 +198,11 @@ impl RuntimeConfig {
         )?;
         let mut crews = crews_from_raw(parsed.crews.as_ref())?;
         let snapshot = ConfigSnapshot::admit(&document, config_path, &crews)?;
-        alias_system_crew(&mut crews, &snapshot.workflow_system_crew);
+        alias_system_crew(
+            &mut crews,
+            &snapshot.workflow_system_crew,
+            snapshot.workflow_default_crew.as_deref(),
+        );
 
         if parsed
             .knowledge
@@ -680,20 +684,34 @@ fn crews_from_raw(
 /// failing those hosts at dispatch.
 ///
 /// `configured` is `workflow.system_crew`, which is how such a config already
-/// says where system work belongs — honoring it keeps a host that points the
-/// lane at a cheap crew on that crew instead of silently relocating its system
-/// work. Only when that key is unset (so it still reads as the default
-/// `system`) does this fall back to `qa`, the crew that carried the lane
-/// before. An explicit `[crews.system]` always wins over both.
-fn alias_system_crew(crews: &mut BTreeMap<String, Crew>, configured: &str) {
+/// says where system work belongs. A defined configured crew wins. For the two
+/// names Orbit itself has used for this lane (`system` and legacy `qa`), fall
+/// back to `qa` and then the already-validated default crew. That final fallback
+/// keeps pre-system Gemini- and Grok-only configs portable: those versions never
+/// seeded `qa`, but they did seed their family default. Unknown custom names do
+/// not receive this compatibility fallback, so a typo still fails closed at
+/// dispatch. An explicit `[crews.system]` always wins.
+fn alias_system_crew(
+    crews: &mut BTreeMap<String, Crew>,
+    configured: &str,
+    default_crew: Option<&str>,
+) {
     if crews.contains_key(DEFAULT_WORKFLOW_SYSTEM_CREW) {
         return;
     }
-    let Some(source) = crews
-        .get(configured)
-        .or_else(|| crews.get(LEGACY_WORKFLOW_SYSTEM_CREW))
-        .cloned()
-    else {
+    let source = crews.get(configured).cloned().or_else(|| {
+        if !matches!(
+            configured,
+            DEFAULT_WORKFLOW_SYSTEM_CREW | LEGACY_WORKFLOW_SYSTEM_CREW
+        ) {
+            return None;
+        }
+        crews
+            .get(LEGACY_WORKFLOW_SYSTEM_CREW)
+            .or_else(|| default_crew.and_then(|name| crews.get(name)))
+            .cloned()
+    });
+    let Some(source) = source else {
         return;
     };
     crews.insert(

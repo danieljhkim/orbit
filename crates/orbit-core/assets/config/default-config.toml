@@ -34,7 +34,8 @@ base_branch = "main"
 # choosing the cheapest tier that family offers. Shipped job steps name that
 # crew directly, so edit the seeded `system` crew below to change what runs
 # them. This key covers recovery paths that have no job step to name a crew on,
-# and re-points the `system` name itself on a config that never seeded it.
+# and re-points the `system` name itself on a config that never seeded it. Old
+# single-family configs without `system` or `qa` reuse their validated default.
 system_crew = "system"
 
 [runtime]

@@ -826,13 +826,12 @@ mod tests {
         let friction_definition = orbit_common::types::parse_auto_task_yaml(&friction)
             .expect("seeded friction definition parses through loader schema");
         assert!(!friction_definition.enabled);
-        // [ORB-10877] Seeded defaults must not pin a crew: `DetectedAgents`
-        // here is empty, so any literal name would name a `[crews]` entry this
-        // freshly initialized workspace does not have.
-        assert_eq!(friction_definition.template.crew, None);
+        // [ORB-10877] Shipped recurring work names the portable system lane,
+        // not a family-specific crew.
+        assert_eq!(friction_definition.template.crew.as_deref(), Some("system"));
         assert!(
-            !friction.contains("\n  crew:"),
-            "seeded friction default must not pin a family-specific crew"
+            friction.contains("\n  crew: system"),
+            "seeded friction default must name the system crew"
         );
         assert!(matches!(
             friction_definition.dedupe,
@@ -842,10 +841,10 @@ mod tests {
         let qa_definition = orbit_common::types::parse_auto_task_yaml(&qa)
             .expect("seeded QA definition parses through loader schema");
         assert!(!qa_definition.enabled);
-        assert_eq!(qa_definition.template.crew, None);
+        assert_eq!(qa_definition.template.crew.as_deref(), Some("system"));
         assert!(
-            !qa.contains("\n  crew:"),
-            "seeded QA default must not pin a family-specific crew"
+            qa.contains("\n  crew: system"),
+            "seeded QA default must name the system crew"
         );
         assert!(matches!(
             qa_definition.dedupe,

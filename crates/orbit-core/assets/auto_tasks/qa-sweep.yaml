@@ -40,9 +40,9 @@ template:
   - qa-sweep
   - no-diff-expected
   priority: medium
-  # No crew: an omitted template crew lets the created task resolve
-  # workflow.default_crew on whichever machine runs it, instead of pinning a
-  # family whose [crews] entry only exists where that CLI was detected at init.
+  # The portable system lane is seeded per machine and compatibility-aliased
+  # for configs written before that crew existed.
+  crew: system
   status: backlog
 dedupe: skip_if_open
 created_by: system

@@ -73,8 +73,15 @@ fn crew_discovery_projects_the_open_runtime_configuration() {
             .iter()
             .map(|crew| crew.name.as_str())
             .collect::<Vec<_>>(),
-        ["beta", "gamma", "primary"]
+        ["beta", "gamma", "primary", "system"]
     );
+    let system = discovery
+        .crews
+        .iter()
+        .find(|crew| crew.name == "system")
+        .expect("legacy config gains the portable system alias");
+    assert_eq!(system.provider, "codex");
+    assert_eq!(system.model, "default-model");
 }
 
 fn add_task_with_crew(runtime: &OrbitRuntime, crew: &str) -> String {
