@@ -11,8 +11,8 @@ use tempfile::tempdir;
 
 use crate::workspace_registry::{
     assign_checkout_role, find_checkout_by_path, find_workspace, find_workspace_by_path,
-    load_registry_from, load_registry_from_with_writer, rename_local_owner_host_id,
-    resolve_logical_workspace, save_registry_to,
+    load_registry_from, load_registry_from_with_writer, register_checkout,
+    rename_local_owner_host_id, resolve_logical_workspace, save_registry_to,
 };
 
 fn timestamp() -> chrono::DateTime<Utc> {
@@ -364,6 +364,35 @@ fn identity_lookup_is_path_independent_and_path_lookup_is_checkout_only() {
         Some("ws_inner")
     );
     assert!(find_workspace_by_path(&registry, Path::new("/remote/ws_remote")).is_none());
+}
+
+#[test]
+fn checkout_registration_allows_distinct_repos_to_share_an_orbit_root() {
+    let shared_root = PathBuf::from("/srv/orbit");
+    let mut registry = WorkspaceRegistry {
+        workspaces: vec![
+            logical_workspace("ws_alpha", None),
+            logical_workspace("ws_beta", None),
+        ],
+        checkouts: vec![WorkspaceCheckout::owner(
+            "ws_alpha".to_string(),
+            PathBuf::from("/repos/alpha"),
+            shared_root.clone(),
+        )],
+        ..Default::default()
+    };
+
+    register_checkout(
+        &mut registry,
+        WorkspaceCheckout::owner(
+            "ws_beta".to_string(),
+            PathBuf::from("/repos/beta"),
+            shared_root,
+        ),
+    )
+    .expect("shared Orbit root is not checkout identity");
+
+    assert_eq!(registry.checkouts.len(), 2);
 }
 
 #[test]

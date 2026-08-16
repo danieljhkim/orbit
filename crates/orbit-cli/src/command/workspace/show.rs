@@ -1,5 +1,7 @@
+use std::path::Path;
+
 use clap::Args;
-use orbit_common::types::{Workspace, WorkspaceCheckout};
+use orbit_common::types::{Workspace, WorkspaceCheckout, WorkspaceRegistry};
 use orbit_core::OrbitRuntime;
 use orbit_registry::workspace_registry;
 use serde_json::{Value, json};
@@ -12,22 +14,18 @@ pub struct WorkspaceShowArgs {}
 impl Execute for WorkspaceShowArgs {
     fn execute(self, runtime: &OrbitRuntime) -> CommandOut {
         let data_root = runtime.data_root();
-        let data_root_canonical = std::fs::canonicalize(&data_root).unwrap_or(data_root.clone());
         let global_root = runtime.global_root();
         let registry_path = workspace_registry::registry_path_for(&global_root);
         let registry = workspace_registry::load_registry_from(&registry_path)?;
 
-        // Find workspace whose orbit_dir matches the current runtime's data root
-        let checkout = registry.checkouts.iter().find(|checkout| {
-            let ws_canonical = std::fs::canonicalize(&checkout.orbit_dir)
-                .unwrap_or_else(|_| checkout.orbit_dir.clone());
-            ws_canonical == data_root_canonical
-        });
+        // The runtime factory resolves the current checkout from cwd (or an
+        // explicit --workspace selector). `orbit_dir` is not checkout identity:
+        // every checkout under an explicit shared root has the same value.
+        let repo_root = runtime
+            .workspace_runtime_binding()
+            .map(|binding| binding.repo_root.as_path());
 
-        match checkout.and_then(|checkout| {
-            workspace_registry::find_workspace(&registry, &checkout.workspace_id)
-                .map(|workspace| (workspace, checkout))
-        }) {
+        match registered_workspace_for_repo_root(&registry, repo_root) {
             Some((workspace, checkout)) => Ok(Payload::detail(
                 workspace_show_json(workspace, checkout),
                 format_workspace_show(workspace, checkout),
@@ -50,6 +48,20 @@ impl Execute for WorkspaceShowArgs {
             .into()),
         }
     }
+}
+
+pub(super) fn registered_workspace_for_repo_root<'a>(
+    registry: &'a WorkspaceRegistry,
+    repo_root: Option<&Path>,
+) -> Option<(&'a Workspace, &'a WorkspaceCheckout)> {
+    let checkout = repo_root.and_then(|repo_root| {
+        registry
+            .checkouts
+            .iter()
+            .find(|checkout| checkout.repo_root == repo_root)
+    })?;
+    workspace_registry::find_workspace(registry, &checkout.workspace_id)
+        .map(|workspace| (workspace, checkout))
 }
 
 /// `workspace show` had no machine-readable form; this is the record behind

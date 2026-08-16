@@ -110,8 +110,16 @@ impl RegisteredRuntimeFactory {
             let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
             let roots = Self::resolve_roots_for_cwd(&cwd, root_override)?;
             sync_task_prefix(&roots.global_root)?;
-            let binding = binding_for_roots(&roots)?;
-            let replica_owner = replica_owner_for_roots(&roots)?;
+            let selection = select_workspace_for_cwd_and_roots(&cwd, &roots)?;
+            let binding = selection
+                .as_ref()
+                .map(|selection| {
+                    workspace_runtime_binding(&selection.workspace, &selection.checkout)
+                })
+                .transpose()?;
+            let replica_owner = selection
+                .as_ref()
+                .and_then(|selection| replica_owner_for_checkout(&selection.checkout));
             return OrbitRuntime::initialize_from_resolved_roots(roots, binding)
                 .map(|runtime| runtime.with_coordination_write_owner(replica_owner));
         };
@@ -491,6 +499,52 @@ fn binding_for_roots(
     let registry_path = workspace_registry::registry_path_for(&roots.global_root);
     let registry = workspace_registry::load_registry_from(&registry_path)?;
     binding_for_registry_roots(&registry, &roots.shared_root)
+}
+
+/// Resolve the registered checkout represented by this cwd/root pair.
+///
+/// Cwd is authoritative when several checkouts deliberately share one
+/// explicit root. The historical orbit-dir fallback remains for ordinary and
+/// linked-worktree roots, where the shared root is still a checkout identity.
+pub(crate) fn select_workspace_for_cwd_and_roots(
+    cwd: &Path,
+    roots: &OrbitRuntimeRoots,
+) -> Result<Option<ResolvedWorkspaceSelection>, OrbitError> {
+    let registry_path = workspace_registry::registry_path_for(&roots.global_root);
+    let registry = workspace_registry::load_registry_from(&registry_path)?;
+    let shared = canonical_or_original(&roots.shared_root);
+
+    if let Some(checkout) = workspace_registry::find_checkout_by_path(&registry, cwd)
+        && canonical_or_original(&checkout.orbit_dir) == shared
+        && let Some(workspace) =
+            workspace_registry::find_workspace(&registry, &checkout.workspace_id)
+    {
+        return Ok(Some(ResolvedWorkspaceSelection {
+            workspace: workspace.clone(),
+            checkout: checkout.clone(),
+        }));
+    }
+
+    // An explicit --root pins global_root to shared_root. In that mode an
+    // orbit-dir-only fallback would silently select the first unrelated
+    // checkout registered under the shared data directory.
+    if canonical_or_original(&roots.global_root) == shared {
+        return Ok(None);
+    }
+
+    for (workspace, checkout) in workspace_registry::local_workspaces(&registry) {
+        if canonical_or_original(&checkout.orbit_dir) == shared {
+            return Ok(Some(ResolvedWorkspaceSelection {
+                workspace: workspace.clone(),
+                checkout: checkout.clone(),
+            }));
+        }
+    }
+    Ok(None)
+}
+
+fn canonical_or_original(path: &Path) -> PathBuf {
+    std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
 }
 
 fn binding_for_registry_roots(
