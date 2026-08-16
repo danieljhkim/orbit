@@ -32,6 +32,16 @@ fn workspace_runtime(temp: &tempfile::TempDir) -> OrbitRuntime {
     OrbitRuntime::from_roots(&global_root, &workspace_root).expect("build runtime")
 }
 
+fn write_skill(root: &Path, id: &str, purpose: &str) {
+    let dir = root.join(id);
+    fs::create_dir_all(&dir).expect("create skill dir");
+    fs::write(
+        dir.join("SKILL.md"),
+        format!("---\nname: {id}\ndescription: test skill\n---\n\n# Purpose\n\n{purpose}\n"),
+    )
+    .expect("write skill");
+}
+
 fn split_root_runtime(temp: &tempfile::TempDir) -> OrbitRuntime {
     let global_root = temp.path().join("global");
     let shared_root = temp.path().join("main").join(".orbit");
@@ -118,6 +128,68 @@ fn every_warning_or_error_has_structured_remediation() {
             "actionable row needs remediation: {row:?}"
         );
     }
+}
+
+#[test]
+fn skill_residue_warns_and_names_the_directory() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let runtime = workspace_runtime(&temp);
+    let skills = temp.path().join("global/skills");
+    write_skill(&skills, "orbit", "healthy global skill");
+    let residue = skills.join("orbit-search");
+    fs::create_dir_all(residue.join("references")).expect("create residue references");
+    fs::write(residue.join("references/search.md"), "retired reference\n")
+        .expect("write residue reference");
+    let empty_residue = skills.join("orbit-task");
+    fs::create_dir(&empty_residue).expect("create empty residue");
+
+    let results = runtime.doctor_workspace().expect("doctor");
+    let row = status_of(&results, "artifacts-skills");
+    assert_eq!(row.status, WorkspaceDoctorStatus::Warning, "{row:?}");
+    assert!(row.message.contains("residual"), "{}", row.message);
+    assert!(
+        row.message.contains(residue.to_string_lossy().as_ref()),
+        "DETAILS must name the residue directory: {}",
+        row.message
+    );
+    assert!(
+        row.message
+            .contains(empty_residue.to_string_lossy().as_ref()),
+        "DETAILS must name the empty residue directory: {}",
+        row.message
+    );
+    assert_ne!(row.status, WorkspaceDoctorStatus::Error);
+}
+
+#[test]
+fn healthy_single_skill_and_workspace_shadow_keep_the_loaded_count() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let runtime = workspace_runtime(&temp);
+    write_skill(&temp.path().join("global/skills"), "orbit", "global skill");
+
+    let global_only = runtime.doctor_workspace().expect("doctor global catalog");
+    let row = status_of(&global_only, "artifacts-skills");
+    assert_eq!(row.status, WorkspaceDoctorStatus::Ok, "{row:?}");
+    assert!(
+        row.message.starts_with("1 skills loaded"),
+        "{}",
+        row.message
+    );
+    assert!(row.message.contains("none residual"), "{}", row.message);
+
+    write_skill(
+        &temp.path().join("repo/.orbit/skills"),
+        "orbit",
+        "workspace override",
+    );
+    let shadowed = runtime.doctor_workspace().expect("doctor layered catalog");
+    let row = status_of(&shadowed, "artifacts-skills");
+    assert_eq!(row.status, WorkspaceDoctorStatus::Ok, "{row:?}");
+    assert!(
+        row.message.starts_with("1 skills loaded"),
+        "{}",
+        row.message
+    );
 }
 
 #[test]

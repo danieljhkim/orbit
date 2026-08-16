@@ -81,7 +81,7 @@ const ADD: FrictionOperation = FrictionOperation {
     verb: FrictionVerb::Add,
     name: "add",
     tool_name: "orbit.friction.add",
-    tool_description: "Append an Orbit friction report under .orbit/frictions/",
+    tool_description: "Append an Orbit friction report to the Orbit store via orbit.friction.*",
     cli_about: "Append an Orbit friction report",
     params: &[
         ParamSpec {
@@ -154,7 +154,7 @@ const LIST: FrictionOperation = FrictionOperation {
     verb: FrictionVerb::List,
     name: "list",
     tool_name: "orbit.friction.list",
-    tool_description: "List Orbit friction records from .orbit/frictions/",
+    tool_description: "List Orbit friction records from the Orbit store via orbit.friction.*",
     cli_about: "List Orbit friction records",
     params: &[
         text_param("model", "Optional model filter"),
@@ -201,7 +201,7 @@ const STATS: FrictionOperation = FrictionOperation {
     verb: FrictionVerb::Stats,
     name: "stats",
     tool_name: "orbit.friction.stats",
-    tool_description: "Compute friction rates from .orbit/frictions/ and the task store",
+    tool_description: "Compute friction rates from the Orbit and task stores via orbit.friction.*",
     cli_about: "Compute friction rates",
     params: &[],
     rejects_agent_field: false,

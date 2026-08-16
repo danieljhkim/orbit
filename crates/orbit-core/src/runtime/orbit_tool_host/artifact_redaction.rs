@@ -698,6 +698,33 @@ mod tests {
     }
 
     #[test]
+    fn dispatch_preserves_common_word_github_token_in_task_description() {
+        let word = "user";
+        let _env = EnvVarGuard::set("GITHUB_TOKEN", word);
+        let (_root, runtime, _repo_root) = test_runtime();
+        let description = format!("No {word}-facing CLI behavior should change.");
+
+        let output = runtime
+            .execute_tool_command(
+                "orbit.task.add",
+                json!({
+                    "title": "plain",
+                    "description": description,
+                    "workspace": ".",
+                }),
+                Some("codex".to_string()),
+                Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
+            )
+            .expect("task add succeeds");
+
+        assert_eq!(output["redactions_applied"], false);
+        assert_eq!(output["description"], description);
+        let id = output["id"].as_str().expect("task id");
+        let task = runtime.get_task(id).expect("task persisted");
+        assert_eq!(task.description, description);
+    }
+
+    #[test]
     fn dispatch_redacts_live_github_token_before_task_persistence_and_audits() {
         let token = "orbit-redaction-secret-value";
         let _env = EnvVarGuard::set("GITHUB_TOKEN", token);

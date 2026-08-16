@@ -92,7 +92,7 @@ Operate:
   friction    Report, list, and triage friction records
 
 Observe:
-  search      Search tasks, docs, ADRs, and frictions
+  search      Search tasks, docs, and frictions
   audit       Query the audit event log
   log         Tail the unified Orbit log feed
   doctor      Diagnose workspace health (config, database, disk, indexes)

@@ -61,7 +61,7 @@
   {
     "active": true,
     "builtin": true,
-    "description": "Append an Orbit friction report under .orbit/frictions/",
+    "description": "Append an Orbit friction report to the Orbit store via orbit.friction.*",
     "enabled": true,
     "name": "orbit.friction.add",
     "parameters": [
@@ -101,7 +101,7 @@
   {
     "active": true,
     "builtin": true,
-    "description": "List Orbit friction records from .orbit/frictions/",
+    "description": "List Orbit friction records from the Orbit store via orbit.friction.*",
     "enabled": true,
     "name": "orbit.friction.list",
     "parameters": [
@@ -285,7 +285,7 @@
   {
     "active": true,
     "builtin": true,
-    "description": "Search tasks, docs, ADRs, and frictions. ADR entries are retrieved through the docs corpus; hybrid vector ranking applies to indexed tasks and docs.",
+    "description": "Search tasks, docs, and frictions. Decision records are indexed as ordinary docs; hybrid vector ranking applies to indexed tasks and docs.",
     "enabled": true,
     "name": "orbit.search",
     "parameters": [
@@ -308,7 +308,7 @@
         "required": false
       },
       {
-        "description": "Corpus kind: task, doc, adr, friction, or all. Default: all.",
+        "description": "Corpus kind: task, doc, friction, or all. Default: all.",
         "name": "kind",
         "param_type": "string",
         "required": false
@@ -320,7 +320,7 @@
         "required": false
       },
       {
-        "description": "AND-filter by tag. Repeat or pass an array. Applies to task, doc, friction, and ADR.",
+        "description": "AND-filter by tag. Repeat or pass an array. Applies to task, doc, and friction.",
         "name": "tag",
         "param_type": "string_list",
         "required": false

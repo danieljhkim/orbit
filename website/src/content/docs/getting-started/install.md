@@ -72,7 +72,7 @@ cd <repo>
 orbit workspace init
 ```
 
-`orbit init` seeds default skills under `~/.orbit/skills` and links them into `~/.agents/skills` and `~/.claude/skills`. Workspace skills are optional overrides by skill name.
+`orbit init` seeds default skills under `~/.orbit/skills` and links them into `~/.agents/skills` and `~/.claude/skills`. The same reconcile removes dangling Orbit-owned links for retired default skill IDs; a leftover custom skill is left in place. Workspace skills are optional overrides by skill name.
 
 Pass `--mcp` to also auto-detect and set up MCP client integrations during workspace initialization:
 

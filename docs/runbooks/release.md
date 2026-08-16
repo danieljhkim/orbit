@@ -92,11 +92,16 @@ Each step names the exact file or command. Do them in order.
 
 4. **Commit the version bumps** and merge to `agent-main`, the development
    integration branch. One commit, one PR, one bump set — do not let the two
-   plugin manifests or the npm package drift across commits. This is not the
-   final release landing: after the tag and release CI, step 6 directs the
-   required promotion to `main`.
+   plugin manifests or the npm package drift across commits. If this cycle
+   changed any CLI the plugin-install smoke drives, land the
+   [`scripts/smoke-plugin-install.sh`](../../scripts/smoke-plugin-install.sh)
+   update in the same bump (or earlier). This is not the final release
+   landing: after the tag and release CI, step 6 directs the required
+   promotion to `main`.
 
-5. **Push the matching tag.** From the merge commit:
+5. **Push the matching tag** from the merge commit, after confirming the
+   smoke script on that commit still speaks the new CLI (see
+   [Plugin-install smoke](#plugin-install-smoke-two-artifacts)):
 
    ```bash
    git tag -a vX.Y.Z -m "orbit vX.Y.Z"
@@ -152,11 +157,12 @@ Each step names the exact file or command. Do them in order.
 
    - `make release-check` should now pass (all local manifests, npm, and the
      release tag agree).
-   - The on-tag run of
+   - Re-run
      [`.github/workflows/smoke-plugin-install.yml`](../../.github/workflows/smoke-plugin-install.yml)
-     should be green on macOS and Linux. (If you re-run via
-     `workflow_dispatch` it'll pull the freshly-published npm and exercise
-     the full chain.)
+     via `workflow_dispatch` **on the tag** (or on `agent-main` if the tagged
+     script already matches this cycle's CLI). The on-tag push run usually
+     fired before step 7 and is expected red; that first failure is not
+     actionable. See [Plugin-install smoke](#plugin-install-smoke-two-artifacts).
    - Optionally re-run the smoke locally:
 
      ```bash
@@ -222,6 +228,76 @@ Installer environment overrides are trust-boundary changes:
   installers log a deprecation notice when it's in use. Both overrides cannot
   be set simultaneously.
 
+## Plugin-install smoke: two artifacts
+
+The workflow checks out
+[`scripts/smoke-plugin-install.sh`](../../scripts/smoke-plugin-install.sh)
+from the **trigger ref**, then that script drives
+`npx -y @orbit-tools/cli@latest` (npm) and the GitHub Release binary the
+package pins. Those are independent versions.
+
+| Trigger | Script comes from | CLI comes from |
+|---|---|---|
+| push of tag `vX.Y.Z` | that tag | npm `@latest` at run time |
+| `workflow_dispatch` | the ref you selected | npm `@latest` at run time |
+| weekly cron | the workflow file's default branch | npm `@latest` at run time |
+
+A green smoke therefore needs **both** a published `@latest` that matches
+the tag **and** a script on the chosen ref that speaks that CLI's current
+non-interactive contract (`orbit init`, `workspace init`, `mcp serve`).
+
+### Before the tag
+
+If this cycle changed any command the smoke drives — most often
+`orbit init --non-interactive` growing required flags — land the script
+update on the **same commit as the tag** (or earlier on `agent-main`). A
+follow-up commit cannot turn the on-tag run green, because the tag's
+checkout is frozen.
+
+Walk the script against a throwaway HOME before tagging:
+
+```bash
+# From a clean tree that contains the release commit.
+# Uses npm @latest, so this is only decisive *after* step 7; before
+# publish it still proves the script's flags match the binary you are
+# about to ship if you point NPM_PKG at a locally packed tarball or
+# run the same argv against the freshly-built `target/release/orbit`.
+./scripts/smoke-plugin-install.sh
+```
+
+At minimum, grep the script for every `orbit` / `npx` invocation and
+confirm each still works non-interactively against the new binary.
+
+### After npm, the smoke is still red
+
+1. Confirm `npm view @orbit-tools/cli version` equals the tag (no `v`).
+   If it does not, step 7 did not finish — publish, then continue.
+2. Read the failing step. The script now dumps both stdout and stderr for
+   `orbit init` (`init.out` + `init.err`); the useful line is often on
+   stdout, so an empty `--- stderr ---` block is not a silent failure.
+3. Decide **script vs published package**:
+   - **Script-only** (missing flags, HOME / `ORBIT_ROOT` sandbox, log
+     capture): fix on `agent-main`. Dispatch against **that ref**, not
+     the old tag. Do not retag. Do not publish a second npm version.
+     v0.11.0 / [ORB-10849] is this case — host identity required
+     `--host-name` and `--task-prefix` on fresh non-interactive init,
+     and the tagged script did not pass them.
+   - **Published CLI, npm package, or GitHub Release asset**: cut a
+     patch (`vX.Y.Z+1`). Do **not** retag. npm publishes are immutable.
+4. `gh workflow run smoke-plugin-install.yml --ref <ref>` needs Actions
+   write. Agent tokens often get HTTP 403; a maintainer dispatches.
+
+```bash
+# After a script-only fix has landed on agent-main:
+gh workflow run smoke-plugin-install.yml --ref agent-main
+
+# After npm publish, when the tagged script is already correct:
+gh workflow run smoke-plugin-install.yml --ref vX.Y.Z
+```
+
+Do not dispatch the old tag after a script fix — it will check out the
+broken script again and fail the same way.
+
 ## Release signing key rotation and revocation
 
 Normal rotation uses an overlap window:
@@ -266,8 +342,9 @@ Emergency revocation is intentionally more disruptive:
 
 Because npm publish is manual, the on-tag smoke run will fail if it fires
 before step 7 completes. That is expected and not actionable on its own;
-re-run via `workflow_dispatch` after publishing to npm. The weekly cron
-catches a lingering broken state.
+re-run via `workflow_dispatch` after publishing to npm, choosing the ref
+as described in [Plugin-install smoke](#plugin-install-smoke-two-artifacts).
+The weekly cron catches a lingering broken state.
 
 ## What `make release-check` enforces
 
@@ -293,11 +370,15 @@ described in step 3 is by design.
 
 ## Out-of-band fixes
 
-If a release lands and the smoke fails:
+If a release lands and the plugin-install smoke fails, follow
+[Plugin-install smoke](#plugin-install-smoke-two-artifacts) before
+cutting a patch. The short form:
 
-1. Re-run [`.github/workflows/smoke-plugin-install.yml`](../../.github/workflows/smoke-plugin-install.yml)
-   via `workflow_dispatch` to rule out a transient network failure or a
-   "smoke fired before manual npm publish" race.
-2. If the failure is reproducible, cut a patch release (`vX.Y.Z+1`) with
-   the fix. Do **not** retag — npm publishes are immutable and the
-   marketplace already cached the broken assets.
+1. `npm view @orbit-tools/cli version` still on the previous release →
+   finish the manual publish, then `workflow_dispatch` the **tag**.
+2. npm matches the tag, failure is a missing smoke-script flag or
+   sandbox → fix the script on `agent-main`, dispatch **that** ref, no
+   retag, no second npm publish.
+3. npm matches the tag and the published binary or package is wrong →
+   patch release (`vX.Y.Z+1`). Do **not** retag — npm publishes are
+   immutable and the marketplace already cached the broken assets.

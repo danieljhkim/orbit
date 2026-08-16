@@ -65,7 +65,7 @@ fn add_schema_matches_the_shipped_contract() {
     assert_eq!(schema.name, "orbit.friction.add");
     assert_eq!(
         schema.description,
-        "Append an Orbit friction report under .orbit/frictions/"
+        "Append an Orbit friction report to the Orbit store via orbit.friction.*"
     );
     assert!(schema.builtin);
     assert_eq!(
@@ -121,7 +121,7 @@ fn list_schema_matches_the_shipped_contract() {
     assert_eq!(schema.name, "orbit.friction.list");
     assert_eq!(
         schema.description,
-        "List Orbit friction records from .orbit/frictions/"
+        "List Orbit friction records from the Orbit store via orbit.friction.*"
     );
     assert_eq!(
         param_shape(&schema),
@@ -170,6 +170,11 @@ fn aggregate_verbs_take_no_parameters() {
     for verb in [FrictionVerb::Stats, FrictionVerb::Tags] {
         assert!(schema_for(verb).parameters.is_empty());
     }
+
+    assert_eq!(
+        schema_for(FrictionVerb::Stats).description,
+        "Compute friction rates from the Orbit and task stores via orbit.friction.*"
+    );
 }
 
 #[test]

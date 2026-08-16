@@ -3,25 +3,28 @@
 //!
 //! `orbit doctor` already diagnoses infrastructure (config, database, disk,
 //! indexes, locks, runs). This module supplies the missing half: the
-//! definitions themselves, classified into three conditions.
+//! definitions themselves, classified into four conditions.
 //!
 //! - **Faulty** — the file fails to parse or validate, so its definition is
 //!   absent at dispatch time even though the file is still on disk.
+//! - **Residual** — an on-disk skill directory has no `SKILL.md` entry point,
+//!   so it cannot load but still occupies the catalog.
 //! - **Deprecated** — the managed manifest proves Orbit wrote this file for a
 //!   default that the running binary no longer ships.
 //! - **Stale** — the file is a managed copy of an *older* release of a default
 //!   this binary still ships, or an untracked file colliding with a bundled
 //!   default name.
 //!
-//! Every judgement is made from the per-kind managed manifest written by
-//! [`super::reconcile_managed_assets`] (ADR-0346, extended to all five kinds by
-//! ADR-0366), never from filename guessing. That matters for correctness as
-//! well as safety: precedence differs across kinds — skills merge
-//! workspace-over-global while activities keep shipped defaults authoritative
-//! over workspace copies — so a rule phrased in terms of "which copy wins"
-//! would misreport at least one kind. Provenance is a property of the file
-//! Orbit wrote, in the directory Orbit wrote it to, and is unaffected by which
-//! copy a loader later prefers.
+//! Provenance judgements are made from the per-kind managed manifest written by
+//! [`super::reconcile_managed_assets`]. Residual skill directories are the one
+//! condition discovered directly from the catalog layout because a deleted
+//! entry point cannot be represented by a successfully loaded skill. That
+//! matters for correctness as well as safety: precedence differs across kinds —
+//! skills merge workspace-over-global while activities keep shipped defaults
+//! authoritative over workspace copies — so a rule phrased in terms of "which
+//! copy wins" would misreport at least one kind. Provenance is a property of
+//! the file Orbit wrote, in the directory Orbit wrote it to, and is unaffected
+//! by which copy a loader later prefers.
 //!
 //! Repair ([`OrbitRuntime::remove_stale_definition_artifacts`]) is deliberately
 //! narrower than diagnosis: only a *deprecated* artifact whose digest still
@@ -114,6 +117,8 @@ impl ArtifactKind {
 pub enum ArtifactCondition {
     /// Fails to parse or validate — absent at dispatch time.
     Faulty,
+    /// A skill directory remains on disk without its `SKILL.md` entry point.
+    Residual,
     /// A managed default this binary no longer ships.
     Deprecated,
     /// Drifted from the current release, or colliding with a bundled name.
@@ -124,6 +129,7 @@ impl ArtifactCondition {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Faulty => "faulty",
+            Self::Residual => "residual",
             Self::Deprecated => "deprecated",
             Self::Stale => "stale",
         }
@@ -178,7 +184,7 @@ impl ArtifactFinding {
 #[derive(Debug, Clone)]
 pub struct ArtifactHealth {
     pub kind: ArtifactKind,
-    /// Artifact files inspected for this kind.
+    /// Artifact catalog entries inspected for this kind.
     pub scanned: usize,
     /// Unhealthy artifacts, deterministically ordered.
     pub findings: Vec<ArtifactFinding>,
@@ -490,7 +496,12 @@ fn finish_catalog_health(
                 && finding.condition == ArtifactCondition::Stale
                 && finding.provenance == ArtifactProvenance::OrbitWritten
         });
-        let remediation = if let Some(command) = fault.repair_command {
+        let remediation = if fault.condition == ArtifactCondition::Residual {
+            format!(
+                "Review the residual skill directory at `{}` and remove it manually if it is no longer needed.",
+                fault.path.display()
+            )
+        } else if let Some(command) = fault.repair_command {
             format!("Run `{command}`.")
         } else if stale_shipped_default {
             "Run `orbit init --refresh-defaults`.".to_string()
@@ -510,7 +521,7 @@ fn finish_catalog_health(
             kind,
             name: fault.name,
             path: fault.path,
-            condition: ArtifactCondition::Faulty,
+            condition: fault.condition,
             provenance,
             detail: fault.detail,
             remediation,
@@ -530,6 +541,7 @@ fn finish_catalog_health(
 struct LoadFault {
     name: String,
     path: PathBuf,
+    condition: ArtifactCondition,
     detail: String,
     repair_command: Option<&'static str>,
 }
@@ -539,6 +551,7 @@ impl From<ActivityCatalogFault> for LoadFault {
         Self {
             name: fault.name,
             path: fault.path,
+            condition: ArtifactCondition::Faulty,
             detail: fault.detail,
             repair_command: fault.repair_command,
         }
@@ -563,6 +576,7 @@ fn collect_faults(runtime: &OrbitRuntime, catalog: &ManagedCatalog) -> (usize, V
                 faults.push(LoadFault {
                     name: "<catalog>".to_string(),
                     path: catalog.dir.clone(),
+                    condition: ArtifactCondition::Faulty,
                     detail: format!("cannot enumerate skills: {error}"),
                     repair_command: None,
                 });
@@ -571,14 +585,26 @@ fn collect_faults(runtime: &OrbitRuntime, catalog: &ManagedCatalog) -> (usize, V
         };
         let scanned = rows.len();
         for row in rows {
-            if row.status == crate::skill_catalog::SkillCatalogDoctorStatus::Error {
-                let path = catalog.dir.join(&row.skill_id).join("SKILL.md");
-                faults.push(LoadFault {
-                    name: format!("{}/SKILL.md", row.skill_id),
-                    path,
-                    detail: row.message,
-                    repair_command: None,
-                });
+            match row.status {
+                crate::skill_catalog::SkillCatalogDoctorStatus::Ok => {}
+                crate::skill_catalog::SkillCatalogDoctorStatus::Warning => {
+                    faults.push(LoadFault {
+                        name: row.skill_id,
+                        path: row.path,
+                        condition: ArtifactCondition::Residual,
+                        detail: row.message,
+                        repair_command: None,
+                    });
+                }
+                crate::skill_catalog::SkillCatalogDoctorStatus::Error => {
+                    faults.push(LoadFault {
+                        name: format!("{}/SKILL.md", row.skill_id),
+                        path: row.path.join("SKILL.md"),
+                        condition: ArtifactCondition::Faulty,
+                        detail: row.message,
+                        repair_command: None,
+                    });
+                }
             }
         }
         return (scanned, faults);
@@ -599,6 +625,7 @@ fn collect_faults(runtime: &OrbitRuntime, catalog: &ManagedCatalog) -> (usize, V
             faults.push(LoadFault {
                 name,
                 path,
+                condition: ArtifactCondition::Faulty,
                 detail: error.message,
                 repair_command: None,
             });
@@ -633,6 +660,7 @@ fn collect_faults(runtime: &OrbitRuntime, catalog: &ManagedCatalog) -> (usize, V
             faults.push(LoadFault {
                 name,
                 path,
+                condition: ArtifactCondition::Faulty,
                 detail: "file is unreadable".to_string(),
                 repair_command: None,
             });
@@ -649,6 +677,7 @@ fn collect_faults(runtime: &OrbitRuntime, catalog: &ManagedCatalog) -> (usize, V
             faults.push(LoadFault {
                 name,
                 path,
+                condition: ArtifactCondition::Faulty,
                 detail,
                 repair_command: None,
             });

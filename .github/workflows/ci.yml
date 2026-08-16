@@ -43,7 +43,9 @@ jobs:
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.head_ref || github.ref_name }}
+          # PR head SHA, not the branch name GitHub deletes on merge, and
+          # not github.sha (the ephemeral merge commit).
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.ref_name }}
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable (2026-05-07)
@@ -75,7 +77,9 @@ jobs:
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.head_ref || github.ref_name }}
+          # PR head SHA, not the branch name GitHub deletes on merge, and
+          # not github.sha (the ephemeral merge commit).
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.ref_name }}
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable (2026-05-07)
@@ -129,7 +133,9 @@ jobs:
 
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.head_ref || github.ref_name }}
+          # PR head SHA, not the branch name GitHub deletes on merge, and
+          # not github.sha (the ephemeral merge commit).
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.ref_name }}
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable (2026-05-07)
@@ -210,7 +216,9 @@ jobs:
 
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.head_ref || github.ref_name }}
+          # PR head SHA, not the branch name GitHub deletes on merge, and
+          # not github.sha (the ephemeral merge commit).
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.ref_name }}
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable (2026-05-07)
@@ -275,22 +283,81 @@ jobs:
           WORKFLOW: ${{ format('{0}', github.workflow) }}
           PR_NUMBER: ${{ format('{0}', github.event.pull_request.number) }}
           BRANCH: ${{ format('{0}', github.head_ref) }}
-          SHA: ${{ format('{0}', github.sha) }}
+          SHA: ${{ format('{0}', github.event.pull_request.head.sha) }}
           RUN_ID: ${{ format('{0}', github.run_id) }}
         run: |
-          run_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${RUN_ID}"
+          # This step must never fail the job. A missing checkout, a merged PR,
+          # or a missing orbit binary are skip conditions, not new reds.
+          set +e
+          report() { echo "Create orbit task on CI failure: $*"; }
+
+          if [ ! -f Cargo.toml ]; then
+            report "skipping because no checkout is present"
+            exit 0
+          fi
+
+          if [ -n "${PR_NUMBER:-}" ] && [ -n "${GITHUB_REPOSITORY:-}" ] && command -v gh >/dev/null 2>&1; then
+            merged="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}" --jq .merged 2>/dev/null)"
+            if [ "$merged" = "true" ]; then
+              report "skipping because PR #${PR_NUMBER} is already merged"
+              exit 0
+            fi
+          fi
+
+          orbit_bin=""
+          if command -v orbit >/dev/null 2>&1; then
+            orbit_bin="$(command -v orbit)"
+          elif [ -x "${HOME}/.orbit/bin/orbit" ]; then
+            orbit_bin="${HOME}/.orbit/bin/orbit"
+          elif [ -x target/debug/orbit ]; then
+            orbit_bin="$(pwd)/target/debug/orbit"
+          elif [ -x target/release/orbit ]; then
+            orbit_bin="$(pwd)/target/release/orbit"
+          fi
+          if [ -z "$orbit_bin" ]; then
+            report "skipping because orbit CLI is not available (will not compile from source)"
+            exit 0
+          fi
+
+          workspace="${GITHUB_WORKSPACE:-}"
+          case "$workspace" in
+            /*) ;;
+            *) workspace="$(pwd -P)" ;;
+          esac
+
+          run_url="${GITHUB_SERVER_URL:-}/${GITHUB_REPOSITORY:-}/actions/runs/${RUN_ID:-}"
+          description="$(printf '%s\n' \
+            "## Problem" \
+            "CI failed on PR #${PR_NUMBER} (\`${BRANCH}\`)." \
+            "" \
+            "Commit: \`${SHA}\`" \
+            "Run: ${run_url}")"
+
           payload="$(jq -n \
-            --arg title "CI failure: $WORKFLOW on PR #$PR_NUMBER" \
-            --arg description "## Problem\nCI failed on PR #$PR_NUMBER (\`$BRANCH\`).\n\nCommit: \`$SHA\`\nRun: $run_url" \
-            --arg branch "$BRANCH" \
+            --arg title "CI failure: ${WORKFLOW} on PR #${PR_NUMBER}" \
+            --arg description "$description" \
+            --arg branch "${BRANCH:-}" \
+            --arg workspace "$workspace" \
             '{
               title: $title,
               description: $description,
               acceptance_criteria: ["CI passes on branch \($branch)"],
-              context: ".github/workflows/ci.yml",
-              workspace: ".",
+              context_files: ["file:.github/workflows/ci.yml"],
+              workspace: $workspace,
               priority: "high",
-              type: "bug"
+              type: "bug",
+              model: "github-actions",
+              tags: ["ci"]
             }'
           )"
-          cargo run -p orbit-cli --bin orbit -- tool run orbit.task.add --input "$payload"
+          if [ -z "$payload" ]; then
+            report "skipping because payload construction failed"
+            exit 0
+          fi
+
+          "$orbit_bin" tool run orbit.task.add --input "$payload"
+          status=$?
+          if [ "$status" -ne 0 ]; then
+            report "orbit.task.add failed with exit ${status}; not failing the job"
+          fi
+          exit 0

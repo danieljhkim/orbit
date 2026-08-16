@@ -2,6 +2,7 @@
 title: Routines — Design
 owner: claude
 last_updated: 2026-08-15
+last_validated: 2026-08-16
 status: Accepted
 feature: routines
 doc_role: design
@@ -97,8 +98,9 @@ as absent; it never degrades into "fire with defaults".
 
 ### Seeded defaults and ownership
 
-`orbit workspace init` seeds `auto_task_scheduler.yaml`, `task_triage.yaml`, and
-`ship_sweep.yaml` with a workspace-unique name, the resolved host pin, and
+`orbit workspace init` seeds `auto_task_scheduler.yaml`, `task_triage.yaml`,
+`task_pilot.yaml`, `ship_sweep.yaml`, and `worktree_gc.yaml` with a workspace-unique
+name, the resolved host pin, and
 `enabled: false`. The definition's versioned `enabled` field is the opt-in: changing it
 to `true` deliberately grants that scheduled capability in the workspace.
 

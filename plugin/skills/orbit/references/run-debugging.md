@@ -69,7 +69,7 @@ Do not paste huge transcripts back to the human — summarize the decisive lines
 - **Recovery failure:** the original step failed and `step_failure_recovery` also failed — report both, keep the original step as primary unless recovery caused additional damage.
 - **Parent orchestration failure:** a child run failed and a gate/auto/epic parent is still running or waiting — identify both run ids.
 
-For recurring signatures and known remedies, read [common_failures.md](common_failures.md) after the initial classification — keep this file focused on investigation flow; add new patterns there.
+For recurring signatures and known remedies, read [common-failures.md](common-failures.md) after the initial classification — keep this file focused on investigation flow; add new patterns there.
 
 ## Check Task State
 
@@ -139,4 +139,4 @@ Keep the report short unless the human asks for a full forensic trace.
 
 ## Validation Checklist
 
-Before finalizing a diagnosis, verify: you matched the right run id and task id(s); you identified the first failed step, not just the last logged error; you checked recovery events when present; you checked stdout/stderr blobs for the failing invocation when available; you checked live process state for runs marked `running`; you separated root cause from downstream fallout; you filed friction (via `orbit-task`) if Orbit diagnostics or recovery behavior were misleading.
+Before finalizing a diagnosis, verify: you matched the right run id and task id(s); you identified the first failed step, not just the last logged error; you checked recovery events when present; you checked stdout/stderr blobs for the failing invocation when available; you checked live process state for runs marked `running`; you separated root cause from downstream fallout; you recorded friction ([friction.md](friction.md)) if Orbit diagnostics or recovery behavior were misleading.

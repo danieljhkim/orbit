@@ -1,7 +1,7 @@
 <!-- orbit-managed:start -->
 ## Orbit Workflow Rules
 
-- **Task before work.** File an Orbit task before non-trivial code changes. Use the `orbit-task` skill (or `orbit.task.add`). Don't invent task IDs — `orbit.task.add` allocates them.
-- **Tool surface over file edits.** Use `orbit.task.*` and `orbit.docs.*` for their respective artifacts. ADRs are git-reviewed entries in feature `docs/design/**/4_decisions.md`; never edit files under `.orbit/` directly.
-- **Route via the `orbit` skill.** Start sessions by reading the `orbit` skill (`<orbit-root>/skills/orbit/SKILL.md`). It is the entry point that lists every workflow skill (`orbit-task`, `orbit-workflow`, `orbit-search`, `orbit-knowledge`).
+- **Task before work.** File an Orbit task before non-trivial code changes. Use the `orbit` skill (or `orbit.task.add`). Don't invent task IDs — `orbit.task.add` allocates them.
+- **Tool surface over file edits.** Use `orbit.task.*` and `orbit.docs.*` for their respective artifacts. Decisions are git-reviewed entries in the design docs for the feature they govern; never edit files under `.orbit/` directly.
+- **Route via the `orbit` skill.** Start sessions by reading the `orbit` skill (`<orbit-root>/skills/orbit/SKILL.md`). It is the entry point, and its reference table covers task authoring and execution, review, search, friction, workflows, and setup.
 <!-- orbit-managed:end -->
