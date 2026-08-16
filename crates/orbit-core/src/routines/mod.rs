@@ -46,7 +46,8 @@ pub use validation::{
 
 /// Open the config-resolved machine-local scheduler store.
 fn open_routine_store(global_root: &Path) -> Result<Store, OrbitError> {
-    let database = crate::config::resolved_audit_db_path(global_root, global_root)?;
+    let database =
+        orbit_config::resolved_audit_db_path(&orbit_config::ConfigRoots::global_only(global_root))?;
     Store::open(&database)
 }
 

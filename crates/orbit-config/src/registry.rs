@@ -25,19 +25,23 @@ const DEFAULT_WORKFLOW_CREW: &str = "opus";
 /// both this crew table and the `workflow.system_crew` key that points at it,
 /// so the two must stay in step. Shipped job steps also name this crew
 /// directly, so it must resolve on hosts whose config predates it — see the
-/// alias in `runtime::crews_from_raw`.
-pub(super) const DEFAULT_WORKFLOW_SYSTEM_CREW: &str = "system";
+/// alias in `resolved::crews_from_raw`.
+pub(crate) const DEFAULT_WORKFLOW_SYSTEM_CREW: &str = "system";
 /// The crew that carried the system lane before `system` existed. Still seeded
 /// in its own right; named here because a config written before ORB-10877
 /// defines only this one and must keep resolving system work.
-pub(super) const LEGACY_WORKFLOW_SYSTEM_CREW: &str = "qa";
+pub(crate) const LEGACY_WORKFLOW_SYSTEM_CREW: &str = "qa";
 const LEGACY_DEFAULT_WORKFLOW_CREW: &str = "claude";
 const CONSTELLATION_DEFAULT_PROVIDER_ENV: &str = "CONSTELLATION_DEFAULT_PROVIDER";
 
+/// One settable `config.toml` key, as advertised by `orbit config keys`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ConfigKeyDescriptor {
+    /// Dotted key path.
     pub key: &'static str,
+    /// Human-readable value type (`string`, `bool`, `array<string>`, ...).
     pub value_type: &'static str,
+    /// What the setting controls.
     pub description: &'static str,
 }
 
@@ -55,9 +59,13 @@ macro_rules! define_config_settings {
         pub struct ConfigSnapshot {
             /// Derived security invariant, shown by `config show` but not settable.
             pub execution_env_inherit: bool,
-            $(pub $field: $resolved,)+
+            $(
+                #[doc = $description]
+                pub $field: $resolved,
+            )+
         }
 
+        /// Every settable key, in declaration order.
         pub const CONFIG_KEY_REGISTRY: &[ConfigKeyDescriptor] = &[
             $(ConfigKeyDescriptor {
                 key: $key,
@@ -94,6 +102,8 @@ macro_rules! define_config_settings {
                 Ok(snapshot)
             }
 
+            /// JSON projection of one registry key, or `None` when the key is
+            /// not a registered setting.
             pub fn value_for(&self, key: &str) -> Option<JsonValue> {
                 match key {
                     $($key => Some(json!(self.$field)),)+
@@ -101,6 +111,7 @@ macro_rules! define_config_settings {
                 }
             }
 
+            /// JSON projection of every registry key, in registry order.
             pub fn all_values(&self) -> Vec<(&'static str, JsonValue)> {
                 CONFIG_KEY_REGISTRY
                     .iter()
@@ -233,11 +244,13 @@ fn default_admission_crews() -> BTreeMap<String, Crew> {
     )])
 }
 
+/// Look up one registry key's metadata.
 pub fn describe(key: &str) -> Option<&'static ConfigKeyDescriptor> {
     CONFIG_KEY_REGISTRY.iter().find(|entry| entry.key == key)
 }
 
-pub fn all_key_names() -> Vec<String> {
+/// Every settable key name, used for did-you-mean suggestions.
+pub(crate) fn all_key_names() -> Vec<String> {
     CONFIG_KEY_REGISTRY
         .iter()
         .map(|entry| entry.key.to_string())
@@ -320,7 +333,7 @@ fn resolve_optional_non_empty(
     .transpose()
 }
 
-pub(super) fn resolve_default_crew(
+pub(crate) fn resolve_default_crew(
     configured: Option<String>,
     crews: &BTreeMap<String, Crew>,
     env_default: Option<&str>,

@@ -697,9 +697,8 @@ impl HubCoordinationExecutor {
             Ok(root) => root,
             Err(_) => self.readable_friction_root()?,
         };
-        let database = crate::config::resolved_audit_db_path(
-            &self.inner.global_root,
-            &self.inner.global_root,
+        let database = orbit_config::resolved_audit_db_path(
+            &orbit_config::ConfigRoots::global_only(&self.inner.global_root),
         )?;
         FrictionStore::open(
             Store::open(&database)?,

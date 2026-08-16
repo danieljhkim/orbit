@@ -1,20 +1,15 @@
 use clap::Args;
 use orbit_core::command::init::{InitOptions, init_global};
-use orbit_core::config::RawCrewAssignment;
-use orbit_core::config::agent_detect::{DetectedAgents, RealAgentEnvProbe, detect};
-use orbit_core::config::agent_prompt::{
-    StdinPrompter, collect_crew_setting, collect_qa_crew_setting,
-};
 use orbit_core::{OrbitError, OrbitRuntime};
 use orbit_registry::workspace_registry::global_orbit_dir;
 use orbit_registry::{
     HostIdentityOutcome, NewHostIdentity, ensure_host_identity, os_hostname,
     validate_new_task_prefix,
 };
-use std::collections::BTreeMap;
 use std::io::{self, Write};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
+use super::collect_config_seed_for_init;
 use crate::command::{CommandOut, CommandOutput, Execute};
 
 #[derive(Args)]
@@ -61,20 +56,14 @@ impl InitCommand {
     }
 
     fn run(self, root_override: Option<&Path>) -> Result<(), OrbitError> {
-        let detected = detect(&RealAgentEnvProbe);
-        let crew_settings = collect_crew_settings_for_init(
-            root_override,
-            self.force,
-            self.non_interactive,
-            &detected,
-        )?;
+        let config_seed =
+            collect_config_seed_for_init(root_override, self.force, self.non_interactive)?;
         let result = init_global(
             root_override,
             InitOptions {
                 force: self.force,
                 refresh_defaults: true,
-                crew_settings,
-                detected: Some(detected),
+                config_seed: Some(config_seed),
                 ..Default::default()
             },
         )?;
@@ -206,47 +195,6 @@ fn read_line(prompt: &str) -> Result<String, OrbitError> {
         .read_line(&mut line)
         .map_err(|error| OrbitError::Io(error.to_string()))?;
     Ok(line.trim().to_string())
-}
-
-/// Decide whether to prompt for the default and QA crew settings.
-///
-/// Prompts run only when ALL of:
-/// - `--non-interactive` is unset
-/// - the target config.toml does not already exist (or `--force` is set, which
-///   wipes it)
-pub(crate) fn collect_crew_settings_for_init(
-    root_override: Option<&Path>,
-    force: bool,
-    non_interactive: bool,
-    detected: &DetectedAgents,
-) -> Result<Option<BTreeMap<String, RawCrewAssignment>>, OrbitError> {
-    if non_interactive {
-        return Ok(None);
-    }
-
-    let config_path = resolve_config_path(root_override)?;
-    if config_path.exists() && !force {
-        return Ok(None);
-    }
-
-    let mut prompter = StdinPrompter;
-    let custom = collect_crew_setting(detected, &mut prompter)
-        .map_err(|err| OrbitError::Io(format!("agent prompts failed: {err}")))?;
-    let mut collected = BTreeMap::from([("custom".to_string(), custom)]);
-    let qa = collect_qa_crew_setting(detected, &mut prompter)
-        .map_err(|err| OrbitError::Io(format!("QA crew prompt failed: {err}")))?;
-    if let Some(qa) = qa {
-        collected.insert("qa".to_string(), qa);
-    }
-    Ok(Some(collected))
-}
-
-fn resolve_config_path(root_override: Option<&Path>) -> Result<PathBuf, OrbitError> {
-    let root = match root_override {
-        Some(root) => root.to_path_buf(),
-        None => global_orbit_dir()?,
-    };
-    Ok(root.join("config.toml"))
 }
 
 fn print_init_result(output: InitOutput) {

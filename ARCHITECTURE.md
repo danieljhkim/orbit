@@ -6,13 +6,16 @@ Layered Rust crates. Lower layers do not depend on higher layers.
 flowchart LR
   CLI["orbit-cli"] --> Core["orbit-core"]
   CLI --> Cmd["orbit-cmd"]
+  CLI --> Config["orbit-config"]
   CLI --> Registry["orbit-registry"]
   CLI --> MCP["orbit-mcp"]
   CLI --> Web["orbit-web"]
   Cmd --> Core
+  Cmd --> Config
   Cmd --> Engine
   Cmd --> Registry
   Cmd --> Store
+  Core --> Config
   Core --> Engine["orbit-engine"]
   Core --> Store["orbit-store"]
   Core --> Tools["orbit-tools"]
@@ -39,6 +42,8 @@ flowchart LR
   Web --> Registry
   Cmd --> Common
   Core --> Common
+  Config --> Common
+  Config --> Types
   Common --> Types["orbit-types"]
   Exec --> Types
   Policy --> Types
@@ -60,6 +65,7 @@ feature.
 
 - **orbit-types**: lowest internal contract crate — no Orbit deps. Domain-qualified modules (`identity`, `workspace`, `task`, `workflow`, `policy`, `resource`, `tool`, `telemetry`, `record`) own shared serde contracts, pure constructors, normalization, and narrow domain errors. `OrbitId` is the only crate-root primitive. This crate does not perform filesystem, process, environment, database, network, logging, or tracing work.
 - **orbit-common**: mechanism crate above `orbit-types`. Owns workspace-wide `OrbitError`, governance (`authorization`, `operation`, `friction`), filesystem/path helpers, process support, storage, protocol/YAML codecs, observability, and security/redaction. Operation registries still live here so every consumer surface can read them without a new dependency edge; the matching handler table lives in `orbit-core` and is joined to it by the noun's verb enum. MCP v1 explicitly defers capability decisions inside Core while retaining ordinary domain and sandbox validation.
+- **orbit-config**: owner of `config.toml`. Fixed-key admission registry, global-over-workspace layering with replace-only security keys, source provenance for `orbit config show`/`get`, resolved views (`ResolvedConfig`, execution/env policies, crew registry, persistence paths, config-owned PR settings), comment-preserving `ConfigStore` edits with atomic save, and default-config seeding. Callers pass an explicit `ConfigRoots`, so the crate performs no cwd or `$HOME` discovery; host provider-CLI detection and interactive prompting stay in the `orbit-cli` init adapter, which hands down a `ConfigSeed`. Depends only on `orbit-types` and `orbit-common`, and deliberately not on `orbit-engine` — Core translates `PrSettings` into `orbit_engine::PrConfig` at composition time.
 - **orbit-policy**: filesystem-scoping policy engine. Owns `FsProfile` resolution and `denyRead` / `denyModify` evaluation. Depends on `orbit-types` and `orbit-common`.
 - **orbit-exec**: process / sandbox / supervision primitives for shell-command execution under an `FsProfile`. Depends on `orbit-types` and `orbit-common`.
 - **orbit-search**: retrieval and ranking feature crate. Owns lexical docs/ADR scoring, the `Embedder` trait, JSON-Lines RPC types, `SubprocessEmbedder`, `NoopEmbedder`, the workspace-local vector store (`vector::VectorStore` with its own `rusqlite::Connection`, WAL + busy_timeout pragmas, idempotent `embeddings` / `corpus_fts` schema, `EmbedWorker`, paragraph chunker, BLAKE3 dedup, BM25, cosine, and reciprocal-rank fusion helpers), and the install/uninstall/reindex/stats `commands::*` surface. Depends on `orbit-types` and `orbit-common` for its library surface; does not depend on `orbit-core` or `orbit-store`.
@@ -76,7 +82,7 @@ feature.
 - **orbit-web**: HTTP API, embedded dashboard UI, and remote web connection. It owns axum handlers/assets, dashboard mutations, and the dashboard-specific SSH local-forward lifecycle. Depends on `orbit-core` for runtime-backed operations and projections and on `orbit-registry` for global workspace discovery; consumed by `orbit-cli` via `web serve` and `web connect`. Public surface is `ServeArgs`, `ConnectArgs`, and their serve/connect entry points.
 - **orbit-agent**: per-provider `AgentRuntime` implementations under `providers/<name>/<name>_runtime.rs` (claude, codex, gemini, gemini_http, grok, openai_compat, anthropic, ollama, mock_agent). Provides the CLI agent runtimes Orbit dispatches, plus a standalone HTTP `LoopTransport` / `AgentLoop` SDK surface with its own examples — Orbit's job execution no longer reaches that loop ([ORB-10801]). Depends on `orbit-types`, `orbit-common`, and `orbit-tools`.
 - **orbit-engine**: activity/job execution, template rendering, retry logic, subprocess execution, and tool-aware automation. Owns the CLI agent subprocess runner (`activity_job::cli_runner`), which references `orbit-agent::{Agent, AgentConfig}` directly so orbit-core stays clean of orbit-agent types. Depends on `orbit-agent`, `orbit-types`, `orbit-common`, `orbit-exec`, `orbit-store`, and `orbit-tools`.
-- **orbit-core**: neutral runtime bootstrap, config layering, default asset seeding, runtime-integrated command modules, and metrics. It exposes the `OrbitRuntime` kernels composed by `orbit-cmd`, `orbit-cli`, and `orbit-web`; it does not depend on transport or presentation feature crates, `orbit-agent`, or `orbit-cmd`.
+- **orbit-core**: neutral runtime bootstrap, default asset seeding, runtime-integrated command modules, and metrics. It exposes the `OrbitRuntime` kernels composed by `orbit-cmd`, `orbit-cli`, and `orbit-web`; it does not depend on transport or presentation feature crates, `orbit-agent`, or `orbit-cmd`.
 - **orbit-cmd**: shared application composition for CLI and Web consumers. It owns CLI-facing command groups plus registry-aware runtime and routine assembly, joining `orbit-core` kernels to `orbit-registry` without reversing either lower-layer dependency. Runtime methods are exposed as per-module `*Commands` extension traits.
 - **orbit-cli**: clap-based entry point and local client-configuration surface. It assembles MCP, Registry, Web, and Core. `mcp serve` and `mcp listen` compose one host and serve it over stdio or TCP; `mcp serve --mode remote` delegates only the byte-transparent SSH process to `orbit-mcp`. In every case the accepting machine resolves local state and dispatches through Core.
 
@@ -94,6 +100,7 @@ Each workspace crate declares a stability tier in its `Cargo.toml` under `[packa
 |-----------------------|--------------|
 | orbit-types           | stable       |
 | orbit-common          | stable       |
+| orbit-config          | internal     |
 | orbit-store           | stable       |
 | orbit-registry        | internal     |
 | orbit-agent           | internal     |

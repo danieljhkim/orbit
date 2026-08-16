@@ -14,8 +14,8 @@ use super::super::init::{InitOptions, InitResult, init_workspace_at_root};
 use super::super::job::seed_default_jobs;
 use crate::OrbitRuntime;
 use crate::command::job::JobCatalogFilter;
-use crate::config::agent_detect::DetectedAgents;
 use crate::runtime::OrbitRuntimeRoots;
+use orbit_config::ConfigSeed;
 
 fn init_global(root: &Path) -> InitResult {
     init_workspace_at_root(
@@ -23,7 +23,7 @@ fn init_global(root: &Path) -> InitResult {
         InitOptions {
             global_only: true,
             refresh_defaults: true,
-            detected: Some(DetectedAgents::default()),
+            config_seed: Some(ConfigSeed::default()),
             ..Default::default()
         },
     )
@@ -405,7 +405,7 @@ mod artifacts {
                 refresh_defaults: true,
                 global_root_override: Some(global_root.clone()),
                 routine_host_id: Some("test-host".to_string()),
-                detected: Some(DetectedAgents::default()),
+                config_seed: Some(ConfigSeed::default()),
                 ..Default::default()
             },
         )

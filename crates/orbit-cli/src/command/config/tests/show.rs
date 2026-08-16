@@ -1,6 +1,6 @@
 use std::fs;
 
-use orbit_core::config::load_effective_config;
+use orbit_config::{ConfigRoots, load_effective_config};
 
 use super::super::show::effective_json;
 use super::test_runtime;
@@ -25,7 +25,7 @@ sandbox = "danger-full-access"
     )
     .expect("write workspace config");
 
-    let effective = load_effective_config(&global_root, &workspace_root)
+    let effective = load_effective_config(&ConfigRoots::new(&global_root, &workspace_root))
         .expect("load effective layered config");
     let json = effective_json(&runtime, effective.values());
 

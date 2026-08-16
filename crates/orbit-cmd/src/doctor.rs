@@ -192,8 +192,10 @@ impl DoctorCommands for OrbitRuntime {
 /// Parse + validate the effective (workspace-over-global) `config.toml`.
 fn doctor_check_config(runtime: &OrbitRuntime) -> WorkspaceDoctorResult {
     let path = runtime.config_path();
-    match orbit_core::config::validate_layered_config(&runtime.global_root(), &runtime.data_root())
-    {
+    match orbit_config::validate_layered_config(&orbit_config::ConfigRoots::new(
+        runtime.global_root(),
+        runtime.data_root(),
+    )) {
         Ok(_) => check(
             "config",
             WorkspaceDoctorStatus::Ok,

@@ -5,29 +5,41 @@ use serde_json::{Value, json};
 
 /// Holds the resolved paths for all persistent artifact stores.
 ///
+/// These are derived from the two roots, never from the config document, so a
+/// `config.toml` cannot relocate a store.
+///
 /// - Tasks: workspace only
 /// - Skills: workspace override directory layered over global defaults
 /// - Activities/Jobs/Executors/Policies: global only
 /// - Audit: global only (single SQLite database)
 #[derive(Debug, Clone)]
-pub(crate) struct PersistenceConfig {
-    pub(crate) task_dir: PathBuf,
-    pub(crate) activity_dir: PathBuf,
-    pub(crate) job_dir: PathBuf,
-    pub(crate) skill_dir: PathBuf,
-    pub(crate) executor_dir: PathBuf,
-    pub(crate) audit_db: PathBuf,
-    pub(crate) semantic_db: PathBuf,
-    pub(crate) policy_dir: PathBuf,
+pub struct PersistenceConfig {
+    /// Workspace task documents.
+    pub task_dir: PathBuf,
+    /// Global activity definitions.
+    pub activity_dir: PathBuf,
+    /// Global job definitions.
+    pub job_dir: PathBuf,
+    /// Skill directory (workspace overrides layered over global).
+    pub skill_dir: PathBuf,
+    /// Global executor definitions.
+    pub executor_dir: PathBuf,
+    /// Single global audit database.
+    pub audit_db: PathBuf,
+    /// Workspace semantic index database.
+    pub semantic_db: PathBuf,
+    /// Global policy definitions.
+    pub policy_dir: PathBuf,
 }
 
 impl PersistenceConfig {
-    pub(crate) fn default_for_data_root(data_root: &Path) -> Self {
+    /// Defaults for a single root used as both layers.
+    pub fn default_for_data_root(data_root: &Path) -> Self {
         Self::default_for_roots(data_root, data_root)
     }
 
-    /// Two-root defaults (raw paths). Delegates to [`Self::from_workspace_paths`].
-    pub(crate) fn default_for_roots(global_root: &Path, workspace_root: &Path) -> Self {
+    /// Two-root defaults (raw paths), resolved through `WorkspacePaths`.
+    pub fn default_for_roots(global_root: &Path, workspace_root: &Path) -> Self {
         let repo_root = workspace_root
             .parent()
             .unwrap_or(workspace_root)
@@ -40,9 +52,9 @@ impl PersistenceConfig {
         Self::from_workspace_paths(&paths)
     }
 
-    /// Build persistence config from [`WorkspacePaths`]. This is the **single
-    /// source of truth** for artifact path resolution.
-    pub(crate) fn from_workspace_paths(paths: &WorkspacePaths) -> Self {
+    /// Build persistence config from [`WorkspacePaths`]. This is the single
+    /// source of truth for artifact path resolution.
+    fn from_workspace_paths(paths: &WorkspacePaths) -> Self {
         let global_resources_dir = paths.global_dir.join("resources");
 
         Self {
@@ -57,7 +69,9 @@ impl PersistenceConfig {
         }
     }
 
-    pub(crate) fn as_json_value(&self) -> Value {
+    /// JSON projection of every resolved store path, for `orbit doctor` and
+    /// runtime diagnostics.
+    pub fn as_json_value(&self) -> Value {
         json!({
             "task": { "path": self.task_dir.to_string_lossy() },
             "activity": { "path": self.activity_dir.to_string_lossy() },

@@ -6,7 +6,7 @@ last_validated: 2026-08-15
 
 # Orbit Configuration
 
-Reference for Orbit's runtime config — the `config.toml` consumed by `orbit run ship` and the activity-job dispatcher. The defaults shipped with the binary live in [`crates/orbit-core/assets/config/default-config.toml`](../crates/orbit-core/assets/config/default-config.toml).
+Reference for Orbit's runtime config — the `config.toml` consumed by `orbit run ship` and the activity-job dispatcher. The defaults shipped with the binary live in [`crates/orbit-config/assets/default-config.toml`](../crates/orbit-config/assets/default-config.toml).
 
 This doc focuses on the user-facing knobs: `[workflow]` and `[crews.*]`. Other sections are summarized at the end.
 
@@ -242,4 +242,4 @@ Config is parsed at startup; invalid entries fail loud rather than silently fall
 
 The runtime parser intentionally accepts sections owned by other readers of the shared file, such as `[docs]`. Consequently, retired keys with no runtime reader can remain syntactically accepted but have no effect. Existing configs containing `[duel]` and `[duel.models]` still load during the compatibility window and emit a warning naming both retired tables; remove them. The keys `execution.env.inherit`, `task.approval.delegate_approval`, and `task.approval.required_for_agent` are also inert and should be removed; environment inheritance is fixed off, while agent approval is enforced by the capability/policy surfaces rather than these old flags.
 
-When in doubt, start with a minimal workspace file containing only genuine overrides. The annotated default ([`crates/orbit-core/assets/config/default-config.toml`](../crates/orbit-core/assets/config/default-config.toml)) is a reference for available settings, not a template that must be copied wholesale.
+When in doubt, start with a minimal workspace file containing only genuine overrides. The annotated default ([`crates/orbit-config/assets/default-config.toml`](../crates/orbit-config/assets/default-config.toml)) is a reference for available settings, not a template that must be copied wholesale.

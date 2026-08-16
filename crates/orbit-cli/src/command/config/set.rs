@@ -1,6 +1,6 @@
 use clap::Args;
+use orbit_config::{ConfigScope, ConfigStore, WorkspaceInitMode};
 use orbit_core::OrbitRuntime;
-use orbit_core::config::{ConfigScope, ConfigStore, WorkspaceInitMode};
 
 use crate::command::{CommandOut, CommandOutput, Execute};
 

@@ -13,6 +13,11 @@ allowed_internal_deps() {
     orbit-common)
       echo "orbit-types"
       ;;
+    orbit-config)
+      # Config owns config.toml admission, layering, and persistence; it is a
+      # leaf above the shared mechanism crates and depends on nothing higher.
+      echo "orbit-common orbit-types"
+      ;;
     orbit-registry)
       # Registry owns local machine/workspace files and needs only shared types.
       echo "orbit-common orbit-types"
@@ -38,12 +43,12 @@ allowed_internal_deps() {
     orbit-core)
       # ORB-10617: Linux sandbox regression tests compose Core with Exec; this
       # remains test-only and does not widen Core's production dependency graph.
-      echo "orbit-common orbit-search orbit-engine orbit-exec orbit-policy orbit-store orbit-tools orbit-types"
+      echo "orbit-common orbit-config orbit-search orbit-engine orbit-exec orbit-policy orbit-store orbit-tools orbit-types"
       ;;
     orbit-cmd)
       # The shared application composition layer joins Core runtime kernels to
       # machine-local Registry state for CLI and dashboard consumers.
-      echo "orbit-common orbit-core orbit-engine orbit-registry orbit-store orbit-types"
+      echo "orbit-common orbit-config orbit-core orbit-engine orbit-registry orbit-store orbit-types"
       ;;
     orbit-mcp)
       # MCP owns framing, canonical discovery, and direct SSH stdio transport.
@@ -55,7 +60,7 @@ allowed_internal_deps() {
     orbit-cli)
       # The executable assembles MCP and Web feature crates with Registry state
       # and Core's authoritative runtime dispatcher.
-      echo "orbit-common orbit-cmd orbit-core orbit-mcp orbit-registry orbit-web orbit-types"
+      echo "orbit-common orbit-cmd orbit-config orbit-core orbit-mcp orbit-registry orbit-web orbit-types"
       ;;
     *)
       return 1

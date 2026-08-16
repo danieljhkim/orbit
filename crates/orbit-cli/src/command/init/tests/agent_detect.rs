@@ -1,5 +1,5 @@
-use super::super::agent_detect::testing::MockAgentEnvProbe;
-use super::super::agent_detect::*;
+use crate::command::init::agent_detect::testing::MockAgentEnvProbe;
+use crate::command::init::agent_detect::*;
 
 #[test]
 fn detect_reflects_probe_results() {
@@ -24,11 +24,10 @@ fn empty_probe_detects_nothing() {
     let probe = MockAgentEnvProbe::new();
     assert_eq!(detect(&probe), DetectedAgents::default());
     assert!(available_crew_families(&detect(&probe)).is_empty());
-    assert_eq!(default_crew_name(&detect(&probe)), None);
 }
 
 #[test]
-fn seeded_crew_availability_requires_cli_and_maps_defaults() {
+fn seeded_crew_availability_requires_a_detected_cli() {
     // [ORB-10801] Only a detected provider CLI makes a crew executable; an
     // exported API key no longer enables anything.
     assert!(
@@ -39,15 +38,14 @@ fn seeded_crew_availability_requires_cli_and_maps_defaults() {
         .is_empty()
     );
 
-    for (binary, family, crew) in [
-        ("claude", "claude", "opus"),
-        ("codex", "codex", "sol"),
-        ("gemini", "gemini", "gemini"),
-        ("grok", "grok", "grok"),
+    for (binary, family) in [
+        ("claude", "claude"),
+        ("codex", "codex"),
+        ("gemini", "gemini"),
+        ("grok", "grok"),
     ] {
         let detected = detect(&MockAgentEnvProbe::new().with_binary(binary));
         assert_eq!(available_crew_families(&detected), vec![family]);
-        assert_eq!(default_crew_name(&detected), Some(crew));
     }
 }
 

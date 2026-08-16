@@ -1,14 +1,13 @@
 //! Agent environment detection used to seed `orbit init` prompt defaults.
 //!
-//! Probes which agent CLIs are on `PATH` and which provider API keys are set
-//! in the environment, then derives a sensible default `(provider, backend,
-//! model)` tuple for each role. The detection layer is gated by
-//! [`AgentEnvProbe`] so unit tests can simulate environments without touching
-//! real `PATH` or env vars (T20260428-9 AC #2).
+//! Probes which agent CLIs are on `PATH`, then derives the provider and model
+//! defaults the init prompts offer. The detection layer is gated by
+//! [`AgentEnvProbe`] so unit tests can simulate a host without touching the
+//! real `PATH`.
 //!
-//! Only the writer path uses these helpers in this task. The follow-up
-//! T20260428-12 reuses the probe trait when wiring resolution at dispatch
-//! time.
+//! Detection is frozen at `orbit init`: the results become an explicit
+//! `orbit_config::ConfigSeed`, and config loading itself never probes the
+//! host.
 
 use std::env;
 use std::path::PathBuf;
@@ -18,13 +17,9 @@ use std::path::PathBuf;
 pub trait AgentEnvProbe {
     /// Returns true when an executable named `name` is found on `PATH`.
     fn binary_on_path(&self, name: &str) -> bool;
-
-    /// Returns the value of an environment variable, or `None` if unset.
-    fn env_var(&self, name: &str) -> Option<String>;
 }
 
-/// Real probe: walks the process `PATH` manually (no extra crate dep) and
-/// reads from `std::env`.
+/// Real probe: walks the process `PATH` manually (no extra crate dep).
 pub struct RealAgentEnvProbe;
 
 impl AgentEnvProbe for RealAgentEnvProbe {
@@ -52,10 +47,6 @@ impl AgentEnvProbe for RealAgentEnvProbe {
             }
         }
         false
-    }
-
-    fn env_var(&self, name: &str) -> Option<String> {
-        env::var(name).ok()
     }
 }
 
@@ -99,7 +90,8 @@ pub fn detect(probe: &dyn AgentEnvProbe) -> DetectedAgents {
     }
 }
 
-/// CLI agent families available for crew-backed config seeding.
+/// CLI agent families available for crew-backed config seeding. This is the
+/// whole host-derived input `orbit-config` receives.
 ///
 /// The order intentionally mirrors [`default_provider`] for the overlapping
 /// families, excluding `ollama` because Orbit does not ship an `ollama` crew.
@@ -118,20 +110,6 @@ pub fn available_crew_families(detected: &DetectedAgents) -> Vec<&'static str> {
         families.push("grok");
     }
     families
-}
-
-/// Default crew name frozen into newly seeded config, when a supported CLI is
-/// available. The result always names the first emitted crew for that family.
-pub fn default_crew_name(detected: &DetectedAgents) -> Option<&'static str> {
-    available_crew_families(detected)
-        .first()
-        .map(|family| match *family {
-            "claude" => "opus",
-            "codex" => "sol",
-            "gemini" => "gemini",
-            "grok" => "grok",
-            _ => unreachable!("available crew families are fixed"),
-        })
 }
 
 /// "Latest known good" model per provider. Returned to seed prompt defaults;
@@ -169,17 +147,16 @@ pub fn default_provider(detected: &DetectedAgents) -> &'static str {
 
 #[cfg(test)]
 pub(crate) mod testing {
-    //! In-crate test double exposed at `pub(crate)` so the `init` integration
-    //! tests can reuse it without copying the implementation.
+    //! In-crate test double exposed at `pub(crate)` so the `init` tests can
+    //! reuse it without copying the implementation.
 
     use super::AgentEnvProbe;
-    use std::collections::{HashMap, HashSet};
+    use std::collections::HashSet;
 
-    /// Test double with seedable PATH and env-var results.
+    /// Test double with a seedable PATH.
     #[derive(Debug, Default, Clone)]
     pub(crate) struct MockAgentEnvProbe {
         binaries: HashSet<String>,
-        env: HashMap<String, String>,
     }
 
     impl MockAgentEnvProbe {
@@ -191,20 +168,11 @@ pub(crate) mod testing {
             self.binaries.insert(name.to_string());
             self
         }
-
-        pub(crate) fn with_env(mut self, name: &str, value: &str) -> Self {
-            self.env.insert(name.to_string(), value.to_string());
-            self
-        }
     }
 
     impl AgentEnvProbe for MockAgentEnvProbe {
         fn binary_on_path(&self, name: &str) -> bool {
             self.binaries.contains(name)
-        }
-
-        fn env_var(&self, name: &str) -> Option<String> {
-            self.env.get(name).cloned()
         }
     }
 }

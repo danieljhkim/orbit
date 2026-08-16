@@ -4,10 +4,8 @@ use std::path::{Path, PathBuf};
 use tempfile::tempdir;
 
 use crate::InitCommand;
-use crate::command::init::collect_crew_settings_for_init;
 use crate::tests::env_isolation::EnvGuard;
 use orbit_common::fs::io::create_dir_symlink;
-use orbit_core::config::agent_detect::DetectedAgents;
 
 fn seed_discovery_sentinel(home: &Path, agent_dir: &str) -> (PathBuf, PathBuf) {
     let target = home.join("live-sentinels").join(agent_dir).join("orbit");
@@ -25,33 +23,6 @@ fn assert_discovery_sentinel(link: &Path, target: &Path) {
         target,
         "temporary-root validation must not rewrite live skill discovery links",
     );
-}
-
-/// `collect_crew_settings_for_init` short-circuits when --non-interactive
-/// is set, regardless of whether config.toml exists. No prompts are
-/// attempted (we can't stub stdin from here, so the test passing without
-/// hanging is the proof).
-#[test]
-fn non_interactive_short_circuits_before_prompts() {
-    let _env = EnvGuard::acquire();
-    let home = tempdir().expect("home tempdir");
-    let detected = DetectedAgents::default();
-    let result = collect_crew_settings_for_init(Some(home.path()), false, true, &detected);
-    assert!(matches!(result, Ok(None)));
-}
-
-/// When config.toml already exists and --force is unset, prompts are
-/// skipped — `orbit init` is idempotent over an existing global root.
-#[test]
-fn existing_config_short_circuits_before_prompts() {
-    let _env = EnvGuard::acquire();
-    let root = tempdir().expect("orbit root");
-    let config_path = root.path().join("config.toml");
-    fs::write(&config_path, "# pre-existing\n").expect("preseed");
-
-    let detected = DetectedAgents::default();
-    let result = collect_crew_settings_for_init(Some(root.path()), false, false, &detected);
-    assert!(matches!(result, Ok(None)));
 }
 
 /// End-to-end: initializing against a non-global (temporary/custom) orbit

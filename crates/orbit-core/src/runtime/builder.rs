@@ -14,6 +14,8 @@ use orbit_store::{
 };
 
 use orbit_common::OrbitError;
+use orbit_config::{ConfigRoots, ResolvedConfig};
+use orbit_engine::PrConfig;
 use orbit_tools::ToolRegistry;
 use orbit_tools::external::ExternalTool;
 use orbit_types::policy::DEFAULT_POLICY_NAME;
@@ -21,7 +23,6 @@ use orbit_types::workspace::WorkspacePaths;
 
 use crate::command::init::global_skills_dir;
 use crate::command::policy::seed_default_policies;
-use crate::config::RuntimeConfig;
 use crate::context::OrbitContext;
 use crate::context::{
     ActorIdentity, OrbitExecutionAssets, OrbitPolicyContext, OrbitRuntimeSettings, OrbitStores,
@@ -38,10 +39,10 @@ pub(crate) fn build_context_from_roots(
     local_root: &Path,
     binding: Option<&WorkspaceRuntimeBinding>,
 ) -> Result<OrbitContext, OrbitError> {
-    let runtime_config = RuntimeConfig::load_layered(global_root, workspace_root)?;
+    let runtime_config = ResolvedConfig::load(&ConfigRoots::new(global_root, workspace_root))?;
     // Apply a configured `[tasks] id_start` floor before any task ids are
     // allocated. Forward-only, so it is a no-op once the counter has advanced.
-    if let Some(start) = runtime_config.tasks_id_start() {
+    if let Some(start) = runtime_config.tasks_id_start {
         crate::command::task_migration::apply_configured_id_start(global_root, start)?;
     }
     let persistence = &runtime_config.persistence;
@@ -116,13 +117,17 @@ pub(crate) fn build_context_from_roots(
     let persistence = runtime_config.persistence.clone();
     let actor = ActorIdentity::from_env();
     let scoring_enabled = runtime_config.scoring_enabled;
-    let pr_config = runtime_config.pr_config().clone();
-    let workflow_base_branch = runtime_config.workflow_base_branch().to_string();
-    let workflow_auto_ship = runtime_config.workflow_auto_ship();
-    let routines_source = runtime_config.routines_source();
+    // Config owns PR settings as plain data; Core is the composition layer
+    // that translates them into the execution engine's shape.
+    let pr_config = PrConfig {
+        task_url_template: runtime_config.pr.task_url_template.clone(),
+    };
+    let workflow_base_branch = runtime_config.workflow_base_branch.clone();
+    let workflow_auto_ship = runtime_config.workflow_auto_ship;
+    let routines_source = runtime_config.routines_source;
     let crews = runtime_config.crews.clone();
     let default_crew = runtime_config.default_crew.clone();
-    let system_crew = runtime_config.system_crew().to_string();
+    let system_crew = runtime_config.system_crew.clone();
 
     Ok(OrbitContext::new(
         paths,

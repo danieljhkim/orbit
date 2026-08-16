@@ -1,18 +1,18 @@
 //! Shared helpers for the `orbit config` subcommand family: `--scope`
 //! resolution and the two well-known config file paths (global/workspace).
-//! Domain logic (validation, file I/O) stays in `orbit_core::config`; these
+//! Domain logic (validation, file I/O) stays in `orbit_config`; these
 //! helpers only translate CLI flags into `orbit-core` calls.
 
 use std::path::PathBuf;
 
 use clap::ValueEnum;
-use orbit_core::config::{ConfigScope, ConfigStore};
+use orbit_config::{ConfigRoots, ConfigScope, ConfigStore};
 use orbit_core::{OrbitError, OrbitRuntime};
 
 /// `--scope` value shared by `orbit config show` and `orbit config get`.
 ///
 /// `Effective` asks callers to use the layered runtime view (see the
-/// `orbit_core::config` module documentation). `Global`/`Workspace` always
+/// `orbit_config` module documentation). `Global`/`Workspace` always
 /// read one specific file directly, without applying the other layer.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum, Default)]
 pub enum ConfigScopeArg {
@@ -20,6 +20,12 @@ pub enum ConfigScopeArg {
     Effective,
     Global,
     Workspace,
+}
+
+/// The two roots `orbit config show`/`get` layer, taken from the open runtime.
+/// `orbit-config` resolves no roots of its own, so the CLI states them.
+pub(super) fn runtime_config_roots(runtime: &OrbitRuntime) -> ConfigRoots {
+    ConfigRoots::new(runtime.global_root(), runtime.shared_root())
 }
 
 /// The global `config.toml` path, whether or not it exists on disk.
@@ -34,7 +40,7 @@ pub(super) fn workspace_config_path(runtime: &OrbitRuntime) -> PathBuf {
 
 /// Resolve `--scope` into a concrete file path. For `Effective`, this returns
 /// the highest-precedence file path for display and compatibility only; show
-/// and get load both layers through `orbit_core::config::load_effective_config`.
+/// and get load both layers through `orbit_config::load_effective_config`.
 pub(super) fn resolve_scope(
     runtime: &OrbitRuntime,
     scope: ConfigScopeArg,

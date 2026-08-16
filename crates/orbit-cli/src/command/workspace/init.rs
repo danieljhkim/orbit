@@ -15,6 +15,9 @@ use orbit_types::workspace::{
 };
 use serde::{Deserialize, Serialize};
 
+use crate::command::init::agent_detect::{RealAgentEnvProbe, detect};
+use crate::command::init::config_seed_from_detection;
+
 use super::role::CliCheckoutRole;
 use super::support::{detect_git_remote, dir_name_or_fallback, ensure_orbit_gitignore_entry};
 use crate::command::{CommandOut, CommandOutput};
@@ -247,6 +250,9 @@ impl WorkspaceInitArgs {
                 refresh_defaults: true,
                 global_root_override: Some(global_root.to_path_buf()),
                 routine_host_id: local_host_id.clone(),
+                // Host detection is a CLI concern: Core seeds config from the
+                // families this adapter reports, never by probing PATH itself.
+                config_seed: Some(config_seed_from_detection(&detect(&RealAgentEnvProbe))),
                 ..Default::default()
             },
         )?;

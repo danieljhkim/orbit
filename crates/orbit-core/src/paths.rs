@@ -24,11 +24,6 @@ pub(crate) fn cwd_orbit_root(cwd: &Path) -> PathBuf {
     normalize_path_components(&cwd.join(".orbit"))
 }
 
-pub(crate) fn current_dir_orbit_root() -> PathBuf {
-    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-    cwd_orbit_root(&cwd)
-}
-
 pub(crate) fn resolve_path_value(
     raw: &str,
     base_dir: &Path,

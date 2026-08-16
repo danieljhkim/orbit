@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -19,12 +19,8 @@ use crate::command::skill::{
 };
 use orbit_common::fs::io::{create_dir_symlink, remove_path_if_exists};
 
-use crate::config::{
-    RawCrewAssignment, RuntimeConfig,
-    agent_detect::{DetectedAgents, RealAgentEnvProbe, detect},
-    seed_default_config,
-};
 use crate::runtime::{is_global_orbit_root, resolve_global_root};
+use orbit_config::{ConfigRoots, ConfigSeed, ResolvedConfig, seed_default_config};
 
 const LEGACY_WORKSPACE_SEEDED_SKILL_IDS: [&str; 2] = ["orbit-approve-task", "orbit-pr"];
 
@@ -61,15 +57,15 @@ pub struct InitOptions {
     pub routine_host_id: Option<String>,
     /// When true, create/update user-level skill symlinks for global skills.
     pub link_global_skills: bool,
-    /// Crew settings collected by the init prompt. The `custom` assignment is
-    /// embedded as the flat `[crews.custom]` table. `None` and
-    /// an empty map both mean "use
-    /// the default crew template". Ignored when config.toml already exists
-    /// — init remains idempotent.
-    pub crew_settings: Option<BTreeMap<String, RawCrewAssignment>>,
-    /// Agent availability snapshot used to freeze agent-dependent config at
-    /// init time. When omitted, init probes the real host environment.
-    pub detected: Option<DetectedAgents>,
+    /// Explicit inputs for seeding a fresh `config.toml`: which provider
+    /// families this host can dispatch to, plus any crew assignments the init
+    /// prompt collected. Core never probes the host for these — the CLI init
+    /// adapter owns detection and prompting and passes the result down.
+    ///
+    /// `None` seeds the static template alone, so config loading falls back to
+    /// the built-in crew registry. Ignored when config.toml already exists —
+    /// init remains idempotent.
+    pub config_seed: Option<ConfigSeed>,
 }
 
 impl OrbitRuntime {
@@ -84,6 +80,13 @@ impl OrbitRuntime {
 /// Ensures both global and workspace roots are bootstrapped.
 /// Global root gets config plus all globally scoped resource defaults.
 /// Workspace root gets only workspace-local layout and runtime state dirs.
+///
+/// This runs on every runtime open, so it deliberately supplies no
+/// [`InitOptions::config_seed`]: implicit bootstrap has no operator present to
+/// detect a host for, and probing `PATH` here would cost every runtime open a
+/// filesystem scan. A config seeded this way carries no `[crews]` table, so it
+/// resolves to the built-in crew registry until an explicit `orbit init`
+/// freezes the host's detected families. [ORB-10885]
 pub(crate) fn ensure_orbit_root_initialized(
     global_root: &Path,
     workspace_root: &Path,
@@ -96,7 +99,7 @@ pub(crate) fn ensure_orbit_root_initialized(
         },
     )?;
     prepare_workspace_root_layout(workspace_root)?;
-    if RuntimeConfig::load_layered(global_root, global_root)?.scoring_enabled {
+    if ResolvedConfig::load(&ConfigRoots::global_only(global_root))?.scoring_enabled {
         seed_scoreboard_templates(workspace_root)?;
     }
     Ok(())
@@ -154,11 +157,7 @@ pub fn init_workspace_at_root(
     };
     let created_config = if options.global_only {
         let config_path = orbit_root.join("config.toml");
-        let detected = options
-            .detected
-            .clone()
-            .unwrap_or_else(|| detect(&RealAgentEnvProbe));
-        seed_default_config(&config_path, &detected, options.crew_settings.as_ref())?
+        seed_default_config(&config_path, options.config_seed.as_ref())?
     } else {
         false
     };
@@ -219,8 +218,7 @@ pub fn init_workspace_at_root(
                 refresh_defaults: options.refresh_defaults,
                 global_only: true,
                 link_global_skills: options.link_global_skills || options.refresh_defaults,
-                crew_settings: options.crew_settings.clone(),
-                detected: options.detected.clone(),
+                config_seed: options.config_seed.clone(),
                 ..Default::default()
             },
         )?;
@@ -262,7 +260,7 @@ pub fn init_workspace_at_root(
             managed_asset_warnings,
             global_result.refreshed_default_executors,
             global_result.refreshed_default_policies,
-            RuntimeConfig::load_layered(&global_root, &orbit_root)?.scoring_enabled,
+            ResolvedConfig::load(&ConfigRoots::new(&global_root, &orbit_root))?.scoring_enabled,
         )
     };
 
@@ -725,6 +723,7 @@ fn dir_is_empty(path: &Path) -> Result<bool, OrbitError> {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeMap;
     use std::sync::Mutex;
 
     use tempfile::tempdir;
@@ -814,7 +813,7 @@ mod tests {
         let orbit_root = temp.path().join("repo/.orbit");
         let options = InitOptions {
             global_root_override: Some(global_root),
-            detected: Some(DetectedAgents::default()),
+            config_seed: Some(ConfigSeed::default()),
             ..Default::default()
         };
 
@@ -901,7 +900,7 @@ mod tests {
             None,
             InitOptions {
                 refresh_defaults: true,
-                detected: Some(DetectedAgents::default()),
+                config_seed: Some(ConfigSeed::default()),
                 ..Default::default()
             },
         );
@@ -987,7 +986,7 @@ mod tests {
             InitOptions {
                 refresh_defaults: true,
                 global_root_override: Some(home.path().join(".orbit")),
-                detected: Some(DetectedAgents::default()),
+                config_seed: Some(ConfigSeed::default()),
                 ..Default::default()
             },
         );
@@ -1035,8 +1034,8 @@ mod tests {
         }
 
         let settings = BTreeMap::from([(
-            "custom".into(),
-            RawCrewAssignment {
+            "custom".to_string(),
+            orbit_config::CrewSeed {
                 provider: Some("codex".into()),
                 model: Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.into()),
             },
@@ -1046,8 +1045,7 @@ mod tests {
             None,
             InitOptions {
                 refresh_defaults: true,
-                crew_settings: Some(settings),
-                detected: Some(DetectedAgents::default()),
+                config_seed: Some(ConfigSeed::default().with_crews(settings)),
                 ..Default::default()
             },
         );
@@ -1103,8 +1101,8 @@ mod tests {
         fs::write(&config_path, user_content).expect("preseed");
 
         let settings = BTreeMap::from([(
-            "custom".into(),
-            RawCrewAssignment {
+            "custom".to_string(),
+            orbit_config::CrewSeed {
                 provider: Some("claude".into()),
                 model: None,
             },
@@ -1114,8 +1112,7 @@ mod tests {
             None,
             InitOptions {
                 refresh_defaults: true,
-                crew_settings: Some(settings),
-                detected: Some(DetectedAgents::default()),
+                config_seed: Some(ConfigSeed::default().with_crews(settings)),
                 ..Default::default()
             },
         );
@@ -1141,8 +1138,7 @@ mod tests {
             None,
             InitOptions {
                 refresh_defaults: true,
-                crew_settings: None,
-                detected: Some(DetectedAgents::default()),
+                config_seed: Some(ConfigSeed::default()),
                 ..Default::default()
             },
         );

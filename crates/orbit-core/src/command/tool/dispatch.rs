@@ -79,7 +79,9 @@ where
             session_context: Some(session_context),
         },
         || {
-            let audit_db = crate::config::resolved_audit_db_path(global_root, global_root)?;
+            let audit_db = orbit_config::resolved_audit_db_path(
+                &orbit_config::ConfigRoots::global_only(global_root),
+            )?;
             Store::open(&audit_db)
         },
         dispatch,

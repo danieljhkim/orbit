@@ -19,6 +19,7 @@ chrono.workspace = true
 croner.workspace = true
 fs2.workspace = true
 orbit-common = { path = "../orbit-common" }
+orbit-config = { path = "../orbit-config" }
 orbit-types = { path = "../orbit-types" }
 orbit-search = { path = "../orbit-search" }
 orbit-engine = { path = "../orbit-engine" }

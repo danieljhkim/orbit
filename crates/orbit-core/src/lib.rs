@@ -46,7 +46,6 @@
 
 pub mod auto_tasks;
 pub mod command;
-pub mod config;
 pub mod context;
 pub mod metrics;
 mod paths;
