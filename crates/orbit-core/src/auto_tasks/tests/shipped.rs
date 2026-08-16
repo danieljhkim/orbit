@@ -142,7 +142,14 @@ fn friction_curation_default_is_portable_and_inert() {
         "friction curation runs on a cron cadence"
     );
     assert!(matches!(definition.dedupe, DedupePolicy::SkipIfOpen));
-    assert_eq!(definition.template.crew.as_deref(), Some("luna"));
+    // [ORB-10877] An omitted crew resolves `workflow.default_crew` per machine.
+    // Any literal name here would only exist where that agent CLI was detected
+    // at `orbit init`, and `validate_crew_name` rejects it everywhere else.
+    assert_eq!(definition.template.crew, None);
+    assert!(
+        !yaml.contains("\n  crew:"),
+        "default must not pin a family-specific crew"
+    );
     assert!(
         !yaml.contains("/home/") && !yaml.contains("/Users/"),
         "default must not contain a machine-specific path"
@@ -183,7 +190,12 @@ fn qa_sweep_default_preserves_hands_on_validation_contract() {
     assert!(!definition.enabled);
     assert!(matches!(definition.schedule, AutoTaskSchedule::Cron { .. }));
     assert!(matches!(definition.dedupe, DedupePolicy::SkipIfOpen));
-    assert_eq!(definition.template.crew.as_deref(), Some("sonnet"));
+    // [ORB-10877] Same portability rule as friction-curation above.
+    assert_eq!(definition.template.crew, None);
+    assert!(
+        !yaml.contains("\n  crew:"),
+        "default must not pin a family-specific crew"
+    );
     assert_eq!(
         definition.template.status,
         orbit_common::types::TaskStatus::Backlog

@@ -8,6 +8,7 @@ use orbit_common::types::{
     ActivityV2Spec, JobRunState, JobV2, JobV2Step, JobV2StepBody, PipelineState,
     load_activity_asset, load_job_asset,
 };
+use orbit_engine::{inject_system_crew_input, resolve_crew_settings};
 use serde_json::{Value, json};
 use std::collections::BTreeSet;
 use tempfile::tempdir;
@@ -263,8 +264,12 @@ fn default_job_target_refs_resolve_against_default_activities() {
     }
 }
 
+/// [ORB-10877] The pilots must resolve their crew per machine. A literal crew
+/// name in this asset only exists on a host where the matching agent CLI was
+/// detected at `orbit init`; everywhere else it is a hard dispatch failure,
+/// and the `all` join turns that into a whole-run failure.
 #[test]
-fn task_pilot_pipeline_defaults_to_luna_and_bounded_all_join_partitions() {
+fn task_pilot_pipeline_resolves_system_crew_and_bounded_all_join_partitions() {
     let yaml = DEFAULT_JOB_FILES
         .iter()
         .find_map(|(name, yaml)| (*name == "task_pilot_pipeline").then_some(*yaml))
@@ -272,8 +277,11 @@ fn task_pilot_pipeline_defaults_to_luna_and_bounded_all_join_partitions() {
     let asset = load_job_asset(yaml).expect("task pilot pipeline parses");
     let defaults = asset.spec.default_input.as_ref().expect("default input");
     assert_eq!(defaults["task_ids"], json!([]));
-    assert_eq!(defaults["crew"], "luna");
     assert_eq!(defaults["max_partition_size"], 5);
+    assert!(
+        defaults.get("crew").is_none(),
+        "a job-input crew would be dead: the system-crew marker overwrites it before resolution"
+    );
     assert_eq!(asset.spec.steps.len(), 3);
 
     let JobV2StepBody::TargetRef(prepare) = &asset.spec.steps[0].body else {
@@ -299,7 +307,15 @@ fn task_pilot_pipeline_defaults_to_luna_and_bounded_all_join_partitions() {
     assert_eq!(pilot.target, "activity:task_pilot");
     let pilot_input = pilot.default_input.as_ref().expect("pilot input");
     assert_eq!(pilot_input["task_ids"], "{{ item.task_ids }}");
-    assert_eq!(pilot_input["crew"], "{{ input.crew }}");
+    assert_eq!(
+        pilot_input["system_crew"],
+        json!(true),
+        "the pilot worker must resolve workflow.system_crew at dispatch"
+    );
+    assert!(
+        pilot_input.get("crew").is_none(),
+        "the pilot worker must not name a crew literally"
+    );
 
     let JobV2StepBody::TargetRef(apply) = &asset.spec.steps[2].body else {
         panic!("task pilot apply must be deterministic activity reference");
@@ -308,6 +324,15 @@ fn task_pilot_pipeline_defaults_to_luna_and_bounded_all_join_partitions() {
     let apply_input = apply.default_input.as_ref().expect("apply input");
     assert_eq!(apply_input["prepared"], "{{ steps.prepare.output }}");
     assert_eq!(apply_input["results"], "{{ steps.pilot_results.output }}");
+    assert!(
+        apply_input.get("crew").is_none() && apply_input.get("system_crew").is_none(),
+        "the deterministic apply step must carry no crew key: it cannot receive the \
+         system-crew injection, which only runs for agent-loop targets"
+    );
+    assert!(
+        !yaml.contains("crew: luna") && !yaml.contains("{{ input.crew }}"),
+        "no shipped job may pin a family-specific crew"
+    );
     assert!(
         yaml.contains("Schedulable task-pilot pipeline"),
         "task pilot must document scheduled zero-input support"
@@ -330,6 +355,81 @@ fn task_pilot_pipeline_defaults_to_luna_and_bounded_all_join_partitions() {
         pilot.fs_profile.as_deref(),
         Some("reviewer"),
         "resolved task-pilot worker must preserve the read-only filesystem profile"
+    );
+}
+
+/// [ORB-10877] The regression this pipeline shipped with: on a host whose
+/// `[crews]` table has no codex crew, the literal `crew: luna` made every
+/// pilot partition fail dispatch with "explicit activity crew `luna` cannot be
+/// resolved or used", and the `all` join turned that into a whole-run failure.
+///
+/// The crew table here is synthetic on purpose — the outcome must not depend
+/// on which agent CLIs happen to be installed on the machine running the test.
+#[test]
+fn task_pilot_dispatch_resolves_a_crew_with_no_codex_crew_configured() {
+    let root = tempdir().expect("create tempdir");
+    let global = root.path().join("global");
+    let workspace = root.path().join("workspace");
+    std::fs::create_dir_all(&global).expect("create global root");
+    std::fs::create_dir_all(&workspace).expect("create workspace root");
+    // What `orbit init` seeds where only the claude CLI was detected: no
+    // `[crews.luna]`, and `workflow.system_crew` pointing at the claude `qa`.
+    std::fs::write(
+        workspace.join("config.toml"),
+        r#"[workflow]
+default_crew = "opus"
+system_crew = "qa"
+
+[crews.opus]
+provider = "claude"
+model = "claude-opus-4-6"
+backend = "cli"
+
+[crews.qa]
+provider = "claude"
+model = "claude-sonnet-4-6"
+backend = "cli"
+"#,
+    )
+    .expect("write claude-only crew config");
+    let runtime =
+        OrbitRuntime::from_roots(&global, &workspace).expect("build claude-only crew runtime");
+
+    let yaml = DEFAULT_JOB_FILES
+        .iter()
+        .find_map(|(name, yaml)| (*name == "task_pilot_pipeline").then_some(*yaml))
+        .expect("task pilot pipeline exists");
+    let mut asset = load_job_asset(yaml).expect("task pilot pipeline parses");
+    resolve_job_target_refs(&mut asset.spec, &default_activity_catalog())
+        .expect("task pilot activity references resolve");
+    let JobV2StepBody::FanOut { fan_out, .. } = &asset.spec.steps[1].body else {
+        panic!("task pilot agent work must fan out");
+    };
+    let JobV2StepBody::Target(pilot) = &fan_out.worker.body else {
+        panic!("task pilot worker must resolve to an activity target");
+    };
+    let ActivityV2Spec::AgentLoop(spec) = &pilot.spec else {
+        panic!("task pilot worker must be an agent loop");
+    };
+    let pilot_input = pilot.default_input.clone().expect("pilot input");
+
+    // Exactly what `crew_overridden_spec` does at dispatch, in order.
+    let dispatched_input =
+        inject_system_crew_input(&runtime, &pilot_input).expect("inject configured system crew");
+    let resolved = resolve_crew_settings(&runtime, spec, &dispatched_input, &json!({}))
+        .expect("task pilot dispatch must not fail without a codex crew")
+        .expect("task pilot dispatch must resolve a crew");
+    assert_eq!(resolved.provider.as_str(), "claude");
+    assert_eq!(resolved.model.as_deref(), Some("claude-sonnet-4-6"));
+
+    // The old shape still fails on this host, so the assertion above is load-bearing.
+    let error = resolve_crew_settings(&runtime, spec, &json!({ "crew": "luna" }), &json!({}))
+        .expect_err("a literal codex crew must still fail where that crew is unconfigured");
+    assert!(
+        error
+            .to_string()
+            .contains("explicit activity crew `luna` cannot be resolved or used"),
+        "unexpected error: {error}"
     );
 }
 

@@ -232,7 +232,6 @@ fn apply_validates_all_results_then_mutates_context_files_only() {
             "prepared": prepared_snapshot,
             "results": [result],
             "workspace_path": repo_root,
-            "crew": "luna",
         }),
     )
     .expect("apply validated pilot results");
@@ -250,7 +249,6 @@ fn apply_validates_all_results_then_mutates_context_files_only() {
     assert_eq!(after_operational.title, before_operational.title);
     assert_eq!(after_operational.status, before_operational.status);
     assert_eq!(output["status"], "success");
-    assert_eq!(output["crew"], "luna");
     assert_eq!(output["tasks"][0]["context_files_before"], json!([]));
     assert_eq!(
         output["tasks"][0]["context_files_after"],
@@ -288,7 +286,6 @@ fn invalid_selector_in_later_assessment_prevents_every_mutation() {
             "prepared": prepared_snapshot,
             "results": [result],
             "workspace_path": repo_root,
-            "crew": "luna",
         }),
     )
     .expect_err("missing selector target must fail closed");
@@ -328,7 +325,6 @@ fn empty_context_requires_verified_no_diff_or_host_operational_evidence() {
             "prepared": invalid_prepared,
             "results": [invalid],
             "workspace_path": repo_root,
-            "crew": "luna",
         }),
     )
     .expect_err("unverified empty result must fail");
@@ -361,7 +357,6 @@ fn empty_context_requires_verified_no_diff_or_host_operational_evidence() {
             "prepared": valid_prepared,
             "results": [valid],
             "workspace_path": repo_root,
-            "crew": "luna",
         }),
     )
     .expect("verified no-diff result is valid");
@@ -395,7 +390,6 @@ fn out_of_workspace_selector_is_rejected_before_mutation() {
             "prepared": prepared,
             "results": [result],
             "workspace_path": repo_root,
-            "crew": "luna",
         }),
     )
     .expect_err("out-of-workspace selector must fail");

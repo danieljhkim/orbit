@@ -12,7 +12,9 @@ spec:
     field, lifecycle state, dispatch state, and recommendation remains unchanged.
   input_schema_json:
     type: object
-    required: [prepared, results, workspace_path, crew]
+    # No `crew`: the pilots resolve `workflow.system_crew` per machine at
+    # dispatch, so this step has no crew name it could record truthfully.
+    required: [prepared, results, workspace_path]
     properties:
       prepared:
         type: object
@@ -22,12 +24,10 @@ spec:
           type: object
       workspace_path:
         type: string
-      crew:
-        type: string
   output_schema_json:
     type: object
     required:
-      [status, mode, crew, workspace_path, discovery, partition_decisions,
+      [status, mode, workspace_path, discovery, partition_decisions,
        partition_count, failed_partitions, tasks]
     properties:
       status:
@@ -36,8 +36,6 @@ spec:
       mode:
         type: string
         enum: [automatic, explicit]
-      crew:
-        type: string
       workspace_path:
         type: string
       discovery:

@@ -40,7 +40,9 @@ template:
   - qa-sweep
   - no-diff-expected
   priority: medium
-  crew: sonnet
+  # No crew: an omitted template crew lets the created task resolve
+  # workflow.default_crew on whichever machine runs it, instead of pinning a
+  # family whose [crews] entry only exists where that CLI was detected at init.
   status: backlog
 dedupe: skip_if_open
 created_by: system

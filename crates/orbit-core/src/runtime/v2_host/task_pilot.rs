@@ -365,7 +365,6 @@ pub(super) fn apply(
     Ok(json!({
         "status": "success",
         "mode": mode,
-        "crew": input.get("crew").cloned().unwrap_or(Value::Null),
         "workspace_path": workspace_root,
         "discovery": {
             "task_ids": prepared.get("task_ids").cloned().unwrap_or_else(|| json!([])),

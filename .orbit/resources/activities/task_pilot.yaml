@@ -16,7 +16,10 @@ spec:
     repository-write, task-update, lifecycle, dispatch, or scheduling grant.
   input_schema_json:
     type: object
-    required: [task_ids, workspace_path, base_branch, crew, partition_index]
+    # No `crew`: the pipeline marks this step `system_crew: true` and dispatch
+    # resolves `workflow.system_crew` for the machine that runs it, so the
+    # crew never has to appear in this activity's own contract.
+    required: [task_ids, workspace_path, base_branch, partition_index]
     properties:
       task_ids:
         type: array
@@ -27,8 +30,6 @@ spec:
       workspace_path:
         type: string
       base_branch:
-        type: string
-      crew:
         type: string
       partition_index:
         type: number
@@ -54,8 +55,8 @@ spec:
     You are Orbit's task-pilot for one explicit, bounded partition.
 
     Input contains `task_ids` (one to five exact IDs), `workspace_path`,
-    `base_branch`, `crew`, and `partition_index`. Work only on those task IDs
-    and treat the workspace as read-only.
+    `base_branch`, and `partition_index`. Work only on those task IDs and
+    treat the workspace as read-only.
 
     For every task:
 
@@ -99,7 +100,7 @@ spec:
         "context_files_after":["file:path/to/target"],
         "disposition":"selectors|verified_no_diff|host_operational",
         "evidence":"required when context_files_after is empty",
-        "recommended_crew":"luna",
+        "recommended_crew":"<crew configured in this workspace>",
         "recommended_complexity":"low|medium|hard",
         "blocked_by":[],
         "duplicate_of":null,
