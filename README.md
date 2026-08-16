@@ -248,7 +248,7 @@ codex plugin add orbit@orbit
 
 ## Agent Skills
 
-`orbit workspace init` seeds skill files under `~/.orbit/skills/` and symlinks them into `~/.claude/skills/` and `~/.agents/skills/`, so Claude Code, Codex, and Gemini CLI discover them at session start with no per-agent configuration.
+`orbit workspace init` seeds skill files under `~/.orbit/skills/` and symlinks them into `~/.claude/skills/` and `~/.agents/skills/`, so Claude Code, Codex, and Gemini CLI discover them at session start with no per-agent configuration. The same pass removes dangling Orbit-owned links for skill IDs that left the default set (a leftover custom skill directory or a live custom symlink is left alone).
 
 Orbit ships one skill, `orbit`. Its `SKILL.md` is a router — the tool-invocation surface, the lifecycle, and a table of references that load on demand:
 
@@ -257,7 +257,7 @@ Orbit ships one skill, `orbit`. Its `SKILL.md` is a router — the tool-invocati
 
 First-time onboarding (`.orbit/` absent) and "what is orbit" tour requests are handled by the same skill, via its bundled setup references.
 
-`orbit skill doctor` flags drift between the local copy and the upstream definition. Edit any seeded `SKILL.md` to customize behavior for your team.
+`orbit skill doctor` flags drift between the local copy and the upstream definition, and reports dangling or orphaned symlinks under the client skill link directories. Edit any seeded `SKILL.md` to customize behavior for your team.
 
 ---
 

@@ -1,5 +1,5 @@
 use std::borrow::Cow;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use orbit_common::types::OrbitError;
 
@@ -201,7 +201,7 @@ impl OrbitRuntime {
 
     pub fn doctor_file_skills(&self) -> Result<Vec<SkillDoctorResult>, OrbitError> {
         let rows = self.skill_catalog().doctor()?;
-        Ok(rows
+        let mut results: Vec<SkillDoctorResult> = rows
             .into_iter()
             .map(|row| SkillDoctorResult {
                 skill_name: row.skill_id,
@@ -212,8 +212,57 @@ impl OrbitRuntime {
                 },
                 message: row.message,
             })
-            .collect())
+            .collect();
+        if let Some(home) = crate::paths::home_dir() {
+            results.extend(doctor_client_skill_links(&super::init::skill_link_roots(
+                &home,
+            ))?);
+        }
+        Ok(results)
     }
+}
+
+/// Report dangling/orphaned client skill symlinks under the agent
+/// discovery directories (`~/.claude/skills`, `~/.agents/skills`).
+///
+/// Catalog doctor only walks seeded skill trees. Client CLIs discover
+/// skills through these link dirs, so a leftover after a default-set
+/// shrink is invisible unless this pass inspects them.
+pub(crate) fn doctor_client_skill_links(
+    skills_links_dirs: &[PathBuf],
+) -> Result<Vec<SkillDoctorResult>, OrbitError> {
+    let mut rows = Vec::new();
+    for dir in skills_links_dirs {
+        if !dir.exists() {
+            continue;
+        }
+        let mut paths = Vec::new();
+        for entry in std::fs::read_dir(dir).map_err(|e| OrbitError::Io(e.to_string()))? {
+            paths.push(entry.map_err(|e| OrbitError::Io(e.to_string()))?.path());
+        }
+        paths.sort();
+        for path in paths {
+            let meta =
+                std::fs::symlink_metadata(&path).map_err(|e| OrbitError::Io(e.to_string()))?;
+            if !meta.file_type().is_symlink() {
+                continue;
+            }
+            if path.exists() {
+                continue;
+            }
+            let skill_name = path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or("?")
+                .to_string();
+            rows.push(SkillDoctorResult {
+                skill_name,
+                status: SkillDoctorStatus::Error,
+                message: format!("dangling skill link at {} (target missing)", path.display()),
+            });
+        }
+    }
+    Ok(rows)
 }
 
 #[cfg(test)]
@@ -861,6 +910,59 @@ mod tests {
              artifact id (ORB-10208):\n{}",
             failures.len(),
             failures.join("\n"),
+        );
+    }
+
+    #[test]
+    fn doctor_client_skill_links_reports_dangling_and_ignores_live_targets() {
+        let root = tempfile::tempdir().expect("tempdir");
+        let claude = root.path().join(".claude").join("skills");
+        let agents = root.path().join(".agents").join("skills");
+        std::fs::create_dir_all(&claude).expect("create claude skills dir");
+        std::fs::create_dir_all(&agents).expect("create agents skills dir");
+
+        let live_target = root.path().join("custom");
+        std::fs::create_dir_all(&live_target).expect("create custom skill");
+        std::fs::write(live_target.join("SKILL.md"), "# custom\n").expect("write custom skill");
+        orbit_common::utility::fs::create_dir_symlink(&live_target, &claude.join("my-custom"))
+            .expect("create live custom link");
+
+        orbit_common::utility::fs::create_dir_symlink(
+            &root.path().join("missing-orbit-task"),
+            &claude.join("orbit-task"),
+        )
+        .expect("create dangling claude link");
+        orbit_common::utility::fs::create_dir_symlink(
+            &root.path().join("missing-orbit-search"),
+            &agents.join("orbit-search"),
+        )
+        .expect("create dangling agents link");
+
+        let real_dir = claude.join("operator-dir");
+        std::fs::create_dir_all(&real_dir).expect("create operator dir");
+
+        let rows = doctor_client_skill_links(&[claude, agents]).expect("inspect client links");
+        assert_eq!(
+            rows.len(),
+            2,
+            "only dangling symlinks are reported: {rows:?}"
+        );
+        assert!(
+            rows.iter()
+                .all(|row| row.status == SkillDoctorStatus::Error),
+            "dangling client links are errors: {rows:?}"
+        );
+        let names: BTreeSet<&str> = rows.iter().map(|row| row.skill_name.as_str()).collect();
+        assert_eq!(
+            names,
+            BTreeSet::from(["orbit-search", "orbit-task"]),
+            "reported names: {rows:?}"
+        );
+        assert!(
+            rows.iter()
+                .all(|row| row.message.contains("dangling skill link")
+                    && row.message.contains("target missing")),
+            "messages name the dangling-link condition: {rows:?}"
         );
     }
 }
