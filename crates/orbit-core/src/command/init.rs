@@ -845,13 +845,14 @@ mod tests {
                 .join("SKILL.md")
                 .exists()
         );
+        // Reference files seed as a nested tree, not just the router document.
         assert!(
             home.path()
                 .join(".orbit")
                 .join("skills")
-                .join("orbit-workflow")
+                .join("orbit")
                 .join("references")
-                .join("debug-job-failure.md")
+                .join("run-debugging.md")
                 .exists()
         );
         assert!(
