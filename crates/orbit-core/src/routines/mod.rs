@@ -31,8 +31,8 @@ pub use loader::{
     RoutineWorkspaceProvider, collect_routines,
 };
 pub use status::{
-    RoutineStatus, RoutineStatusReport, pause_routine, recent_fires, resume_routine,
-    routine_statuses_with_providers,
+    RoutineStatus, RoutineStatusReport, RoutineToggleOutcome, pause_routine, recent_fires,
+    resume_routine, routine_statuses_with_providers, set_routine_enabled,
 };
 pub use sweep::{
     RoutineSweepReport, SweepOptions, SweepOutcome, run_sweep_at_with_providers,

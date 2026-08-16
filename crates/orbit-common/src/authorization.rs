@@ -62,6 +62,8 @@ pub enum OperationSurface {
     Tool,
     /// A CLI command that performs its destruction without a tool.
     CliCommand,
+    /// A typed state-changing dashboard action.
+    Dashboard,
 }
 
 /// One operation whose performance requires a capability.
@@ -101,6 +103,30 @@ impl GovernedOperation {
             .join(" or ")
     }
 }
+
+/// Versioned routine-definition toggle exposed by the dashboard.
+pub const DASHBOARD_ROUTINE_TOGGLE: GovernedOperation = GovernedOperation {
+    id: "routine.toggle",
+    surface: OperationSurface::Dashboard,
+    allowed: &[McpCapability::Operator],
+    rationale: "changing a versioned routine definition changes unattended execution",
+};
+
+/// Native sweep-clock start/stop action exposed by the dashboard.
+pub const DASHBOARD_CLOCK_SERVICE: GovernedOperation = GovernedOperation {
+    id: "clock.service",
+    surface: OperationSurface::Dashboard,
+    allowed: &[McpCapability::Operator],
+    rationale: "starting or stopping the host sweep clock changes unattended execution",
+};
+
+/// Native sweep-clock cadence action exposed by the dashboard.
+pub const DASHBOARD_CLOCK_CADENCE: GovernedOperation = GovernedOperation {
+    id: "clock.cadence",
+    surface: OperationSurface::Dashboard,
+    allowed: &[McpCapability::Operator],
+    rationale: "changing the host sweep cadence reloads the native clock service",
+};
 
 /// Every governed operation, declared exactly once.
 ///
@@ -211,6 +237,9 @@ pub const GOVERNED_OPERATIONS: &[GovernedOperation] = &[
         allowed: &[McpCapability::Operator, McpCapability::Runner],
         rationale: "collection force-removes worktrees and deletes their branches",
     },
+    DASHBOARD_ROUTINE_TOGGLE,
+    DASHBOARD_CLOCK_SERVICE,
+    DASHBOARD_CLOCK_CADENCE,
 ];
 
 /// Look up the governed tool operation for `tool_name`, if any.
@@ -229,6 +258,13 @@ pub fn governed_command(command: &str, subcommand: &str) -> Option<&'static Gove
                 .split_once(' ')
                 .is_some_and(|(head, tail)| head == command && tail == subcommand)
     })
+}
+
+/// Look up a governed dashboard operation by its stable typed action id.
+pub fn governed_dashboard(id: &str) -> Option<&'static GovernedOperation> {
+    GOVERNED_OPERATIONS
+        .iter()
+        .find(|operation| operation.surface == OperationSurface::Dashboard && operation.id == id)
 }
 
 /// Where a caller's capabilities came from.

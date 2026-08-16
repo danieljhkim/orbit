@@ -25,7 +25,7 @@ const $ = (id) => document.getElementById(id);
 // ORB-10444: the top-level nav is exactly these four tabs plus the hash-only
 // `run-detail` route. A deprecated tab was retired outright and `scoreboard`,
 // being diagnostics-shaped, now routes as `#diagnostics/scoreboard`.
-const TABS = ["tasks", "audit", "diagnostics", "knowledge", "run-detail"];
+const TABS = ["tasks", "audit", "diagnostics", "operations", "knowledge", "run-detail"];
 const DIAG_SUBTABS = ["runs", "metrics", "errors", "reliability", "scoreboard"];
 // ORB-10444/ORB-10588: subtabs that replace the two-column diagnostics layout
 // with their own full-width <main>, keyed by the element they reveal.
@@ -183,6 +183,7 @@ function setActiveTabImpl(ctx, raw, opts = {}) {
     top = "tasks";
   }
   ctx.setTab(top);
+  document.body.classList.toggle("operations-active", top === "operations");
   for (const tab of document.querySelectorAll(".tab")) {
     tab.classList.toggle("active", tab.dataset.tab === top);
   }

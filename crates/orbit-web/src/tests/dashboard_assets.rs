@@ -4,9 +4,9 @@ use axum::response::Response;
 
 use crate::{
     DASHBOARD_CSP, serve_app_js, serve_audit_js, serve_common_js, serve_diagnostics_js,
-    serve_index, serve_log_tail_js, serve_markdown_js, serve_marked_js, serve_purify_js,
-    serve_reliability_js, serve_router_js, serve_run_detail_js, serve_runs_js, serve_scoreboard_js,
-    serve_tasks_js,
+    serve_index, serve_log_tail_js, serve_markdown_js, serve_marked_js, serve_operations_js,
+    serve_purify_js, serve_reliability_js, serve_router_js, serve_run_detail_js, serve_runs_js,
+    serve_scoreboard_js, serve_tasks_js,
 };
 
 #[tokio::test]
@@ -27,6 +27,7 @@ async fn dashboard_html_and_js_routes_emit_csp() {
         ("router", serve_router_js().await),
         ("runs", serve_runs_js().await),
         ("run_detail", serve_run_detail_js().await),
+        ("operations", serve_operations_js().await),
     ];
 
     for (name, response) in routes {
@@ -482,13 +483,13 @@ fn dashboard_task_detail_shows_orchestrator_as_attribution_not_execution_crew() 
     );
 }
 
-/// ORB-10444: the top-level nav is exactly Tasks, Audit, Diagnostics, Knowledge.
+/// ORB-10444/ORB-10875: the top-level nav includes the bounded Operations view.
 /// A deprecated tab was retired outright — nav entry, route and pane — and
 /// Scoreboard, being a diagnostics-shaped view, moved under Diagnostics. A route
 /// left behind in `TABS` would resolve to a pane that no longer exists, so the
 /// router's tab list is asserted alongside the markup.
 #[tokio::test]
-async fn dashboard_top_level_nav_is_the_four_operator_tabs() {
+async fn dashboard_top_level_nav_matches_the_operator_tabs() {
     let body = response_body(serve_index().await).await;
     let router = include_str!("../../assets/dashboard/router.js");
 
@@ -502,16 +503,26 @@ async fn dashboard_top_level_nav_is_the_four_operator_tabs() {
             }
         })
         .collect();
-    assert_eq!(nav, vec!["tasks", "audit", "diagnostics", "knowledge"]);
+    assert_eq!(
+        nav,
+        vec!["tasks", "audit", "diagnostics", "operations", "knowledge"]
+    );
 
     assert!(
         router.contains(
-            r#"const TABS = ["tasks", "audit", "diagnostics", "knowledge", "run-detail"];"#
+            r#"const TABS = ["tasks", "audit", "diagnostics", "operations", "knowledge", "run-detail"];"#
         ),
         "the router's tab list must match the nav (plus the hash-only run-detail route)"
     );
     // Every routable tab must still have a pane to render into.
-    for tab in ["tasks", "audit", "diagnostics", "knowledge", "run-detail"] {
+    for tab in [
+        "tasks",
+        "audit",
+        "diagnostics",
+        "operations",
+        "knowledge",
+        "run-detail",
+    ] {
         assert!(
             body.contains(&format!(r#"<section class="tab-pane" data-tab="{tab}">"#)),
             "routable tab `{tab}` must have a pane"
@@ -520,6 +531,32 @@ async fn dashboard_top_level_nav_is_the_four_operator_tabs() {
     assert!(
         !body.contains(r#"data-tab="scoreboard""#),
         "Scoreboard must no longer be a top-level tab or pane"
+    );
+}
+
+#[test]
+fn dashboard_operations_are_typed_guarded_and_responsive() {
+    let index = include_str!("../../assets/dashboard/index.html");
+    let operations = include_str!("../../assets/dashboard/operations.js");
+    let css = include_str!("../../assets/dashboard/dashboard.css");
+
+    for id in ["routines-body", "clock-body", "routine-operation-feedback"] {
+        assert!(index.contains(&format!(r#"id="{id}""#)));
+    }
+    assert!(operations.contains(r#"postJson("/api/routines/toggle""#));
+    assert!(operations.contains(r#"postJson("/api/routines/clock""#));
+    assert!(operations.contains("pendingOperations.has(key)"));
+    assert!(operations.contains("window.confirm("));
+    assert!(operations.contains("All-workspace mode is read-only"));
+    assert!(operations.contains("routine.target"));
+    assert!(operations.contains("last_evaluated_slot"));
+    assert!(operations.contains("next_tick_at"));
+    assert!(css.contains("@media (max-width: 600px)"));
+    assert!(css.contains(".operation-grid { grid-template-columns: 1fr; }"));
+    assert!(css.contains("body.operations-active"));
+    assert!(
+        include_str!("../../assets/dashboard/router.js")
+            .contains(r#"classList.toggle("operations-active", top === "operations")"#)
     );
 }
 
@@ -1049,6 +1086,10 @@ fn dashboard_assets_carry_no_project_specific_identifiers() {
         (
             "reliability.js",
             include_str!("../../assets/dashboard/reliability.js"),
+        ),
+        (
+            "operations.js",
+            include_str!("../../assets/dashboard/operations.js"),
         ),
     ];
     // Personal names and layout paths of the machine Orbit is developed on, plus

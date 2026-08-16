@@ -55,6 +55,7 @@ const DIAGNOSTICS_JS: &str = include_str!("../assets/dashboard/diagnostics.js");
 const ROUTER_JS: &str = include_str!("../assets/dashboard/router.js");
 const RUNS_JS: &str = include_str!("../assets/dashboard/runs.js");
 const RUN_DETAIL_JS: &str = include_str!("../assets/dashboard/run-detail.js");
+const OPERATIONS_JS: &str = include_str!("../assets/dashboard/operations.js");
 const DASHBOARD_CSP: &str = concat!(
     "default-src 'self'; ",
     "script-src 'self'; ",
@@ -240,6 +241,7 @@ fn run_server(args: &ServeArgs, state: state::DashboardState) -> Result<(), Orbi
         .route("/static/router.js", get(serve_router_js))
         .route("/static/runs.js", get(serve_runs_js))
         .route("/static/run-detail.js", get(serve_run_detail_js))
+        .route("/static/operations.js", get(serve_operations_js))
         .route("/healthz", get(health::healthz))
         .nest("/api", api::router())
         .with_state(state);
@@ -364,6 +366,10 @@ async fn serve_runs_js() -> Response {
 
 async fn serve_run_detail_js() -> Response {
     dashboard_response("application/javascript; charset=utf-8", RUN_DETAIL_JS)
+}
+
+async fn serve_operations_js() -> Response {
+    dashboard_response("application/javascript; charset=utf-8", OPERATIONS_JS)
 }
 
 fn dashboard_response(content_type: &'static str, body: &'static str) -> Response {
