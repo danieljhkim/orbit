@@ -122,6 +122,7 @@
             </nav>
             <div class="controls" id="audit-events-controls">
               <input type="search" id="audit-search" placeholder="Search command, tool, target..." autocomplete="off" spellcheck="false" />
+              <div id="audit-scope-chips" class="scope-chips" aria-label="Active audit scope"></div>
               <div id="audit-filter"></div>
             </div>
             <div class="body scoreboard-table-wrap" id="audit-body">
@@ -217,6 +218,7 @@
         <section class="panel" id="reliability-panel">
           <header>
             <span>Pipeline Reliability</span>
+            <span class="scope-badge independent" id="reliability-scope-badge">Fleet-wide</span>
             <span class="count" id="reliability-count">-</span>
           </header>
           <div class="scoreboard-controls" id="reliability-controls">

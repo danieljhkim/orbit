@@ -36,6 +36,8 @@ The log panel can be collapsed to its header or resized by dragging (or, with fo
 
 Summary tiles and drill-down panels must agree. Audit > Policy is the detail view for the Denials 24h tile, so `/api/diagnostics/denials` combines v2 loop JSONL denial rows with SQLite `status = denied` audit events. SQLite filesystem boundary denials without an activity fsProfile use the stable `workspace-boundary` label [T20260428-13].
 
+Workspace and time window are one dashboard scope after [ORB-10872]. `?workspace=` and `?window=` plus the diagnostics hash (`#diagnostics/scoreboard?window=7d`) are the source of truth. Scoreboard delivery/operations and the Managed Execution cost/token panel share that window: a 7d selection fetches one `/api/scoreboard?window=7d` payload, and a 24h body is refused rather than painted under a 7d selector. Audit Events honor the same window as `since` and open from an actor or metric click with removable chips for actor, workspace, window, outcome/status, and source metric. Reliability stays fleet-wide (ORB-10588) and labels that exception — `scope: "fleet"` plus a Fleet-wide badge — so the header workspace selector cannot imply it applies; if the dashboard window is unbounded `all`, Reliability keeps an independent labeled 7d cutoff because a rate without a range is not actionable. Half-open cutoffs (`since ≤ t < until`) from ORB-10609 are unchanged.
+
 Run Detail > Steps now includes compact per-step agent log expanders for CLI-backed activity steps [T20260508-14]. The UI renders bounded stdout and stderr previews from `/api/runs/:id/logs`, distinguishes stderr blocks from stdout blocks, highlights structured `ERROR <target>:` lines, and keeps blob references behind the API so operators do not need to resolve content hashes manually.
 
 Diagnostics has an Errors sub-tab after [T20260508-14]. It renders recent backend error rows independently of Metrics and Policy, combining Orbit process ERROR events with structured agent stderr rows. Rows with `job_run` provenance route back to the owning Run Detail step so error triage stays connected to workflow context.
@@ -94,5 +96,6 @@ Accessibility still needs a real WCAG pass; responsive behavior remains optimize
 - [ORB-10444] retired a deprecated tab, folded Scoreboard under Diagnostics, pinned the Knowledge detail pane, and added task ship + comments.
 - [ORB-10874] clarified the Tasks count and filter state, made the log panel collapsible/resizable, and added pending/undo feedback and an aggregate-mode mutation guard to inline task edits.
 - [ORB-10875] added the Operations view and typed routine/clock controls.
+- [ORB-10872] made workspace and time window one dashboard scope across Scoreboard, Audit, Reliability, and Managed Execution.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

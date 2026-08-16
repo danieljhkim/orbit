@@ -313,15 +313,16 @@ fn dashboard_guards_remaining_panels_in_aggregate_view() {
         "knowledge frictions must show a placeholder in aggregate mode"
     );
 
-    // Scoreboard: the tab body shows a placeholder, and the user-initiated window
-    // re-fetch is a no-op in aggregate mode (not just the auto-refresh boot fetch).
+    // Scoreboard: the tab body shows a placeholder. Window clicks write shared
+    // dashboard state; the per-workspace fetch stays on the refresh path, which
+    // is already aggregate-guarded above.
     assert!(
         app.contains(r#"renderPanelPlaceholder("scoreboard-body")"#),
         "scoreboard panel must show a placeholder in aggregate mode"
     );
     assert!(
-        scoreboard.contains("if (isAggregateView()) return;"),
-        "the scoreboard window selector must skip its re-fetch in aggregate mode"
+        !scoreboard.contains("fetchJson(`/api/scoreboard"),
+        "the scoreboard window selector must not fetch on its own"
     );
 
     // The guards read the live predicate before fetching (not a stale captured
@@ -606,8 +607,8 @@ async fn dashboard_scoreboard_is_reachable_under_diagnostics() {
     );
     assert!(
         app.contains(r#"if (activeDiagSubtab === "scoreboard")"#)
-            && app.contains(r#"fetchJson("/api/scoreboard?window=24h")"#),
-        "the scoreboard fetch must hang off the diagnostics subtab branch"
+            && app.contains(r#"fetchJson(`/api/scoreboard?window=${encodeURIComponent(selectedWindow)}`)"#),
+        "the scoreboard fetch must hang off the diagnostics subtab branch and honor the shared window"
     );
 }
 
@@ -945,7 +946,7 @@ fn dashboard_workspace_selection_persists_to_the_url() {
 
     assert!(
         app.contains("function persistWorkspaceToUrl(")
-            && app.contains("persistWorkspaceToUrl(select.value)"),
+            && app.contains("persistScopeToUrl()"),
         "the workspace selector must persist its choice to the URL on every change"
     );
 }
@@ -1129,6 +1130,79 @@ fn dashboard_assets_carry_no_project_specific_identifiers() {
             }
         }
     }
+}
+
+/// ORB-10872: workspace + window are one dashboard scope. Scoreboard and
+/// Managed Execution honor the same window; a mismatched 24h payload is
+/// refused under a 7d selection; Reliability labels Fleet-wide; Audit
+/// drill-downs expose removable chips; the URL restores the scope.
+#[test]
+fn dashboard_scope_is_shared_labeled_and_url_backed() {
+    let common = include_str!("../../assets/dashboard/common.js");
+    let app = include_str!("../../assets/dashboard/app.js");
+    let router = include_str!("../../assets/dashboard/router.js");
+    let scoreboard = include_str!("../../assets/dashboard/scoreboard.js");
+    let reliability = include_str!("../../assets/dashboard/reliability.js");
+    let audit = include_str!("../../assets/dashboard/audit.js");
+    let index = include_str!("../../assets/dashboard/index.html");
+    let css = include_str!("../../assets/dashboard/dashboard.css");
+
+    assert!(
+        common.contains("export function getWindow(")
+            && common.contains("export function setWindow(")
+            && common.contains("export function payloadHonorsWindow(")
+            && common.contains("export function persistScopeToUrl(")
+            && common.contains("export function reliabilityWindowFor("),
+        "common.js must own the shared dashboard window and payload-window guard"
+    );
+    assert!(
+        common.contains("if (typeof reported === \"string\") return reported === selected;")
+            && common.contains("reported.label === selected"),
+        "payloadHonorsWindow must reject a 24h body under an active 7d selection"
+    );
+    assert!(
+        app.contains("if (!payloadHonorsWindow(summary, selectedWindow))")
+            && scoreboard.contains("if (summary && !payloadHonorsWindow(summary, getWindow()))"),
+        "the scoreboard fetch and renderer must refuse a mismatched window payload"
+    );
+    assert!(
+        reliability.contains("Fleet-wide")
+            && index.contains(r#"id="reliability-scope-badge""#)
+            && index.contains("Fleet-wide")
+            && reliability.contains(r#"payload.scope === "workspace""#),
+        "Reliability must label Fleet-wide when it ignores the selected workspace"
+    );
+    assert!(
+        router.contains("markWorkspaceSelectorScope")
+            && router.contains("Reliability is Fleet-wide; workspace does not apply")
+            && css.contains(".workspace-select.scope-ignored")
+            && css.contains(".scope-badge.independent"),
+        "the workspace selector must not imply a scope Reliability does not use"
+    );
+    assert!(
+        audit.contains("function navigateToDrilldown(")
+            && audit.contains("function renderScopeChips(")
+            && audit.contains(r#"removableChip("actor""#)
+            && audit.contains(r#"removableChip("workspace""#)
+            && audit.contains(r#"removableChip("window""#)
+            && audit.contains(r#"removableChip("status""#)
+            && audit.contains(r#"removableChip("metric""#)
+            && index.contains(r#"id="audit-scope-chips""#),
+        "actor/metric drill-down must show removable actor/workspace/window/status/metric chips"
+    );
+    assert!(
+        router.contains(r#"hash = `#diagnostics/${sub}?window=${encodeURIComponent(getWindow())}`"#)
+            && common.contains(r#"url.searchParams.set("window", currentWindow)"#)
+            && audit.contains("sp.set(\"metric\", auditFilter.metric)"),
+        "workspace, diagnostics subview, window, and drill-down filters must live in the URL"
+    );
+    assert!(
+        css.contains("@media (max-width: 720px)")
+            && css.contains("@media (max-width: 520px)")
+            && css.contains(".scope-chip-v")
+            && css.contains("max-width: 10ch"),
+        "scope badges and filter chips must stay legible at 480–720px"
+    );
 }
 
 async fn response_body(response: Response) -> String {

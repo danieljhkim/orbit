@@ -89,6 +89,10 @@ pub(super) async fn pipeline_reliability(
 
     let payload = json!({
         "window": window,
+        // ORB-10872: this endpoint is intentionally fleet-wide (ORB-10588).
+        // The dashboard must label that exception rather than inherit the
+        // header workspace selector.
+        "scope": "fleet",
         "workspaces": workspaces,
         "totals": {
             "job_runs": {
