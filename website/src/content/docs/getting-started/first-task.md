@@ -17,6 +17,7 @@ TASK_ID=$(orbit task add \
   --description "Add orbit-hello.txt at the repository root containing the text 'hello from orbit'." \
   --acceptance-criteria "orbit-hello.txt exists at the repository root." \
   --acceptance-criteria "orbit-hello.txt contains the text 'hello from orbit'." \
+  --complexity low \
   --workspace .)
 
 echo "$TASK_ID"

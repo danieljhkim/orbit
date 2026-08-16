@@ -295,6 +295,13 @@ impl FromStr for TaskPriority {
     }
 }
 
+/// How much work a task is expected to take.
+///
+/// `Low` / `Medium` / `Hard` are operator assessments. `Unassessed` is the
+/// explicit non-answer for automated creation (auto-task mint, unlabeled
+/// import). It is never a silent stand-in for `Medium`. Human and agent
+/// create surfaces accept only assessed values. Persisted `Task.complexity`
+/// stays `Option` so the historical unlabeled set remains `None`.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[cfg_attr(feature = "clap", derive(clap::ValueEnum))]
 #[serde(rename_all = "snake_case")]
@@ -302,16 +309,16 @@ pub enum TaskComplexity {
     Low,
     Medium,
     Hard,
+    /// Explicit non-answer for automated creation. Not offered on CLI
+    /// `--complexity` (clap skips it) and rejected on human/agent create
+    /// surfaces so agents cannot dodge an assessment.
+    #[cfg_attr(feature = "clap", value(skip))]
+    Unassessed,
 }
 
 impl Display for TaskComplexity {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        let s = match self {
-            TaskComplexity::Low => "low",
-            TaskComplexity::Medium => "medium",
-            TaskComplexity::Hard => "hard",
-        };
-        write!(f, "{s}")
+        write!(f, "{}", self.as_str())
     }
 }
 
@@ -323,7 +330,37 @@ impl FromStr for TaskComplexity {
             "low" => Ok(TaskComplexity::Low),
             "medium" => Ok(TaskComplexity::Medium),
             "hard" => Ok(TaskComplexity::Hard),
+            "unassessed" => Ok(TaskComplexity::Unassessed),
             other => Err(format!("unknown task complexity: {other}")),
+        }
+    }
+}
+
+impl TaskComplexity {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            TaskComplexity::Low => "low",
+            TaskComplexity::Medium => "medium",
+            TaskComplexity::Hard => "hard",
+            TaskComplexity::Unassessed => "unassessed",
+        }
+    }
+
+    /// `low` / `medium` / `hard` — values an operator or agent may assign.
+    pub fn is_assessed(self) -> bool {
+        !matches!(self, TaskComplexity::Unassessed)
+    }
+
+    /// Reject [`TaskComplexity::Unassessed`] on human/agent create surfaces.
+    pub fn require_assessed(self) -> Result<Self, String> {
+        if self.is_assessed() {
+            Ok(self)
+        } else {
+            Err(
+                "complexity must be an assessed value (low, medium, or hard); \
+                 unassessed is reserved for automated creation"
+                    .to_string(),
+            )
         }
     }
 }

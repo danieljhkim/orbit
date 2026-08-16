@@ -62,6 +62,7 @@ fn owner_fixture() -> OwnerFixture {
             json!({
                 "title": "Beta-only task",
                 "description": "Filed in beta; addressable from anywhere by ID.",
+                "complexity": "low",
                 "workspace": checkout_beta.repo_root
             }),
             Some("codex".to_string()),

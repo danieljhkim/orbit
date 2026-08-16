@@ -98,7 +98,7 @@ title: Short title
 status: proposed
 type: chore
 priority: medium
-complexity: null
+complexity: null   # legacy unlabeled only; new creates always persist a value
 job_run_id: null
 crew: implementer-crew
 orchestrator: orchestration-crew

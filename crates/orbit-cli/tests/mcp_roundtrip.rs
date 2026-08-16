@@ -588,6 +588,7 @@ fn ssh_marked_mcp_server_audits_caller_and_server_identity_separately() {
             "workspace": "ws_mcp-roundtrip",
             "title": "Remote server round trip",
             "description": "Created through the server-local runtime",
+            "complexity": "low",
             "model": "codex"
         }),
     );
@@ -698,6 +699,7 @@ fn mcp_listen_round_trips_over_a_loopback_socket_and_audits_the_peer_ip() {
         json!({
             "title": "Listener round trip",
             "description": "Created over the MCP TCP listener",
+            "complexity": "low",
             "model": "codex",
         }),
     );
@@ -766,6 +768,7 @@ fn mcp_serve_round_trips_records_against_a_temp_workspace() {
         json!({
             "title": "MCP round-trip task",
             "description": "Created over the MCP stdio transport",
+            "complexity": "medium",
             "type": "chore",
             "tags": ["mcp-roundtrip"],
             "crew": "sol",
@@ -1003,6 +1006,7 @@ fn worktree_backed_activity_routes_task_and_search_by_advertised_workspace_argum
         "title": "Worktree routing regression",
         "description": "Authored via the CLI fallback",
         "workspace": workspace.work.to_str().expect("utf8 checkout path"),
+        "complexity": "low",
         "model": "codex",
     })
     .to_string();
@@ -1156,6 +1160,7 @@ fn mcp_task_show_follows_the_global_id_and_explicit_workspace_stays_a_filter() {
         "title": "Owned by the other workspace",
         "description": "Addressed by ID from a session bound elsewhere",
         "workspace": elsewhere.to_str().expect("utf8 checkout path"),
+        "complexity": "low",
         "model": "codex",
     })
     .to_string();

@@ -7,6 +7,7 @@ fn task_add_params_preserve_workspace_routing_and_defaults() {
     let defaults = TaskAddParams::default();
     assert_eq!(defaults.workspace_path, None);
     assert_eq!(defaults.priority, TaskPriority::Medium);
+    assert_eq!(defaults.complexity, TaskComplexity::Unassessed);
     assert!(defaults.acceptance_criteria.is_empty());
 
     let params = TaskAddParams {

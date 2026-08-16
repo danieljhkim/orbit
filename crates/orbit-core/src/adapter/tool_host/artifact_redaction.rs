@@ -711,6 +711,7 @@ mod tests {
                 json!({
                     "title": "plain",
                     "description": description,
+                    "complexity": "low",
                     "workspace": ".",
                 }),
                 Some("codex".to_string()),
@@ -737,6 +738,7 @@ mod tests {
                 json!({
                     "title": format!("leaked {token}"),
                     "description": "body",
+                    "complexity": "low",
                     "workspace": ".",
                 }),
                 Some("codex".to_string()),
@@ -787,6 +789,7 @@ mod tests {
                     "description": format!(
                         "debug1: Connecting to build-node.example.test [192.0.2.10] port 22.\n256 {fingerprint} automation@build-node.example.test (ED25519)"
                     ),
+                    "complexity": "low",
                     "workspace": ".",
                 }),
                 Some("codex".to_string()),
@@ -814,6 +817,7 @@ mod tests {
                 json!({
                     "title": "plain",
                     "description": "body",
+                    "complexity": "low",
                     "workspace": ".",
                 }),
                 Some("codex".to_string()),
@@ -857,6 +861,7 @@ mod tests {
                 json!({
                     "title": "plain",
                     "description": "body",
+                    "complexity": "low",
                     "workspace": ".",
                 }),
                 Some("codex".to_string()),

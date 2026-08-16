@@ -130,6 +130,8 @@ impl TestWorkspace {
                 "Task used by the semantic indexing stderr regression test.",
                 "--acceptance-criteria",
                 "task mutation succeeds",
+                "--complexity",
+                "low",
                 "--json",
             ],
             "add task",

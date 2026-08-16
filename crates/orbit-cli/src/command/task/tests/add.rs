@@ -17,6 +17,8 @@ fn task_add_parses_repeat_and_comma_delimited_lists() {
         "Plain plan",
         "--priority",
         "high",
+        "--complexity",
+        "hard",
         "--type",
         "bug",
         "--acceptance-criteria",
@@ -51,6 +53,7 @@ fn task_add_parses_repeat_and_comma_delimited_lists() {
     assert_eq!(args.description, "Plain description");
     assert_eq!(args.plan, "Plain plan");
     assert_eq!(args.priority, orbit_core::TaskPriority::High);
+    assert_eq!(args.complexity, orbit_core::TaskComplexity::Hard);
     assert_eq!(args.task_type, Some(orbit_core::TaskType::Bug));
 }
 
@@ -62,6 +65,8 @@ fn task_add_acceptance_criteria_does_not_split_on_commas() {
         "add",
         "--title",
         "Comma criteria",
+        "--complexity",
+        "low",
         "--acceptance-criteria",
         "given X, then Y",
         "--acceptance-criteria",
@@ -108,6 +113,19 @@ fn task_add_status_only_advertises_creation_legal_values() {
         "removed task-template flag leaked into help: {rendered}"
     );
 
+    assert!(
+        rendered.contains("--complexity"),
+        "complexity must be advertised: {rendered}"
+    );
+    assert!(
+        !rendered.contains("Optional task complexity"),
+        "complexity must not be described as optional: {rendered}"
+    );
+    assert!(
+        !rendered.contains("unassessed"),
+        "unassessed is reserved for automated creation: {rendered}"
+    );
+
     for legal in ["- proposed:", "- backlog:", "- someday:"] {
         assert!(rendered.contains(legal), "{rendered}");
     }
@@ -125,6 +143,27 @@ fn task_add_status_only_advertises_creation_legal_values() {
             "{illegal} leaked into help: {rendered}"
         );
     }
+}
+
+#[test]
+fn task_add_requires_assessed_complexity() {
+    assert!(
+        Cli::try_parse_from(["orbit", "task", "add", "--title", "No complexity"]).is_err(),
+        "missing --complexity must fail"
+    );
+    assert!(
+        Cli::try_parse_from([
+            "orbit",
+            "task",
+            "add",
+            "--title",
+            "Automated non-answer",
+            "--complexity",
+            "unassessed",
+        ])
+        .is_err(),
+        "unassessed is not a CLI create value"
+    );
 }
 
 #[test]

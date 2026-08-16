@@ -122,6 +122,7 @@ fn task_add_tool_creates_proposed_tasks_for_agents() {
             json!({
                 "title": "Propose task from tool",
                 "description": "Exercise the agent-facing task creation path.",
+                "complexity": "low",
                 "workspace": ".",
             }),
             Some("codex".to_string()),
@@ -155,7 +156,8 @@ fn mcp_task_add_uses_session_workspace_from_worktree_cwd() {
             "orbit.task.add",
             json!({
                 "title": "Ambient worktree task",
-                "description": "Session workspace must beat process cwd."
+                "description": "Session workspace must beat process cwd.",
+                "complexity": "low",
             }),
             Some("codex".to_string()),
             Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
@@ -187,9 +189,10 @@ fn task_add_tool_rejects_dropped_task_types_and_ignores_retired_status() {
         let message = invalid_input_message(runtime.execute_tool_command(
             "orbit.task.add",
             json!({
-            "title": "Legacy friction type",
-            "description": "Should use the new friction record surface.",
-            "workspace": ".",
+                "title": "Legacy friction type",
+                "description": "Should use the new friction record surface.",
+                "complexity": "low",
+                "workspace": ".",
                 "type": dropped_type,
             }),
             Some("codex".to_string()),
@@ -210,6 +213,7 @@ fn task_add_tool_rejects_dropped_task_types_and_ignores_retired_status() {
             json!({
                 "title": "Retired task-add status",
                 "description": "Should ignore retired task-add status.",
+                "complexity": "low",
                 "workspace": ".",
                 "status": "done",
             }),
@@ -406,6 +410,7 @@ fn task_add_tool_ignores_retired_dependencies() {
             json!({
                 "title": "Dependent task from tool",
                 "description": "Exercise dependency input on the agent-facing task creation path.",
+                "complexity": "low",
                 "workspace": ".",
                 "dependencies": [dependency.id.clone()],
             }),
@@ -427,6 +432,7 @@ fn task_add_and_show_tools_roundtrip_tags() {
             json!({
                 "title": "Tagged task",
                 "description": "Exercise tag input on the agent-facing task creation path.",
+                "complexity": "low",
                 "workspace": ".",
                 "tags": ["perf", "bench"],
             }),
@@ -461,6 +467,7 @@ fn task_add_and_show_tools_roundtrip_crew() {
             json!({
                 "title": "Crew task",
                 "description": "Exercise crew input on the agent-facing create path.",
+                "complexity": "low",
                 "workspace": ".",
                 "crew": "sol",
                 "orchestrator": "sol",
@@ -498,6 +505,7 @@ fn task_update_tool_persists_priority() {
             json!({
                 "title": "Priority update task",
                 "description": "Starts at the default priority and is raised on update.",
+                "complexity": "low",
                 "workspace": ".",
             }),
             Some("codex".to_string()),
@@ -547,7 +555,8 @@ fn task_update_tool_persists_complexity_without_adding_history() {
             "orbit.task.add",
             json!({
                 "title": "Complexity update task",
-                "description": "Starts without complexity and receives one on update.",
+                "description": "Starts assessed and receives a replacement on update.",
+                "complexity": "low",
                 "workspace": ".",
             }),
             Some("codex".to_string()),
@@ -555,7 +564,7 @@ fn task_update_tool_persists_complexity_without_adding_history() {
         )
         .expect("task add tool succeeds");
     let task_id = added["id"].as_str().expect("task id");
-    assert_eq!(added.get("complexity"), Some(&Value::Null));
+    assert_eq!(added.get("complexity"), Some(&json!("low")));
     let history_before = runtime.get_task_history(task_id).expect("initial history");
 
     runtime
@@ -623,6 +632,7 @@ fn task_add_tool_rejects_unknown_crew() {
         json!({
             "title": "Bad crew task",
             "description": "Unknown crew must be rejected on the create path.",
+            "complexity": "low",
             "workspace": ".",
             "crew": "does-not-exist",
         }),
@@ -674,6 +684,7 @@ fn foreign_task_references_are_marked_and_do_not_block_readiness() {
             json!({
                 "title": "Coordinate with a foreign task",
                 "description": "The target is owned by another machine.",
+                "complexity": "low",
                 "workspace": ".",
                 "relations": [
                     {"type": "blocked_by", "target": foreign_id},
@@ -775,6 +786,7 @@ fn task_add_tool_normalizes_tags_at_write_time() {
             json!({
                 "title": "Normalized tags",
                 "description": "Exercise tag normalization.",
+                "complexity": "low",
                 "workspace": ".",
                 "tags": ["  Perf ", "BENCH"],
             }),
@@ -798,6 +810,7 @@ fn task_add_tool_ignores_retired_external_refs() {
             json!({
                 "title": "External ref task",
                 "description": "Exercise external ref input on the agent-facing task creation path.",
+                "complexity": "low",
                 "workspace": ".",
                 "external_refs": [
                     {"system": "jira", "id": "ENG-1234", "url": "https://example.com/browse/ENG-1234"},
@@ -825,6 +838,7 @@ fn task_add_tool_recovers_mcp_encoded_acceptance_and_context_arrays() {
             json!({
                 "title": "Encoded list task",
                 "description": "Exercise MCP single-element encoded array recovery.",
+                "complexity": "low",
                 "workspace": repo_root.to_string_lossy(),
                 "acceptance_criteria": ["[\"Criterion A\", \"Criterion B\"]"],
                 "context_files": ["[\"file:src/lib.rs\"]"],
@@ -854,6 +868,7 @@ fn task_add_tool_preserves_commas_in_acceptance_criteria_array() {
             json!({
                 "title": "Comma-safe criteria",
                 "description": "Exercise explicit acceptance criteria arrays.",
+                "complexity": "low",
                 "workspace": ".",
                 "acceptance_criteria": [
                     "first criterion, with a comma",
@@ -884,6 +899,7 @@ fn task_add_tool_keeps_scalar_acceptance_criteria_as_one_value() {
             json!({
                 "title": "Scalar criterion",
                 "description": "Exercise scalar acceptance criteria input.",
+                "complexity": "low",
                 "workspace": ".",
                 "acceptance_criteria": "one criterion, with a comma",
             }),
@@ -910,6 +926,7 @@ fn task_add_tool_infers_agent_from_model_only_input() {
             json!({
                 "title": "Propose model-only task",
                 "description": "Exercise model-first provenance.",
+                "complexity": "low",
                 "workspace": ".",
                 "model": orbit_common::test_fixtures::TEST_CODEX_MODEL,
             }),
@@ -1164,6 +1181,7 @@ fn task_update_tool_persists_source_task_id_and_history() {
             json!({
                 "title": "Bug without source",
                 "description": "A bug whose source is discovered later.",
+                "complexity": "low",
                 "workspace": ".",
                 "type": "bug",
             }),
@@ -1247,6 +1265,7 @@ fn task_update_tool_clears_source_task_id_with_empty_string() {
             json!({
                 "title": "Bug with source",
                 "description": "A bug whose source should be cleared.",
+                "complexity": "low",
                 "workspace": ".",
                 "type": "bug",
             }),
@@ -1311,6 +1330,7 @@ fn task_update_tool_rejects_unresolved_source_task_id_atomically() {
             json!({
                 "title": "Bug without resolved source",
                 "description": "A bug whose retired add-side source ID should be ignored.",
+                "complexity": "low",
                 "workspace": ".",
                 "type": "bug",
                 "source_task_id": "ORB-99998",
@@ -1354,6 +1374,7 @@ fn task_update_tool_replaces_tags() {
             json!({
                 "title": "Replace tags",
                 "description": "Exercise tag replacement through tool input.",
+                "complexity": "low",
                 "workspace": ".",
                 "tags": ["perf", "bench"],
             }),
@@ -1392,6 +1413,7 @@ fn task_update_tool_replaces_context_files_and_keeps_future_paths() {
             json!({
                 "title": "Context update",
                 "description": "Exercise context_files replacement through tool input.",
+                "complexity": "low",
                 "workspace": repo_root.to_string_lossy(),
                 "context_files": ["file:src/lib.rs"],
             }),
@@ -1467,6 +1489,7 @@ fn task_list_and_search_tools_filter_by_tags_with_and_semantics() {
                 json!({
                     "title": title,
                     "description": "Shared tag-search marker.",
+                    "complexity": "low",
                     "workspace": ".",
                     "tags": tags,
                 }),
@@ -1998,6 +2021,7 @@ fn task_tool_rejects_mismatched_agent_and_model() {
             json!({
                 "title": "Reject mismatched identity",
                 "description": "Exercise explicit mismatch validation.",
+                "complexity": "low",
                 "workspace": ".",
                 "agent": "claude",
                 "model": orbit_common::test_fixtures::TEST_CODEX_MODEL,

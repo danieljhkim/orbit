@@ -58,6 +58,8 @@ fn global_workspace_flag_selects_by_name_and_id_from_a_foreign_checkout() {
             "Orbit-only task",
             "--description",
             "Must stay in the orbit workspace",
+            "--complexity",
+            "low",
             "--json",
         ],
     );
@@ -221,6 +223,8 @@ fn task_show_follows_the_global_task_id_and_explicit_workspace_stays_a_filter() 
             "Globally addressable task",
             "--description",
             "Reachable by ID from anywhere",
+            "--complexity",
+            "low",
             "--json",
         ],
     );

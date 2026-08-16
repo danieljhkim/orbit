@@ -278,6 +278,11 @@ struct ImportTarget {
 /// `target_workspace_id` overrides the destination; otherwise the archive's
 /// source workspace is used (registering it if unknown). Conflicts on
 /// already-used ids are resolved by `policy`.
+///
+/// Import is a restore of existing records, not a create-time assessment:
+/// a source task with no complexity stays unlabeled (`None`) so re-import
+/// stays byte-identical and historical gaps are not rewritten. New work
+/// from auto-task mint uses [`orbit_types::task::TaskComplexity::Unassessed`].
 pub fn import_tasks(
     registry: &TaskRegistryStore,
     archive_path: &Path,
