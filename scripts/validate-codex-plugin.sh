@@ -139,29 +139,23 @@ def validate_skill_frontmatter(skill_dir: Path) -> None:
 
 
 def validate_task_pilot_assets() -> None:
-    skill_path = plugin_root / "skills" / "orbit-task-pilot" / "SKILL.md"
+    # The task-pilot contract lives in two places, and neither is a skill: the
+    # `task_pilot` activity instructs the agent the pipeline actually runs, and
+    # this agent profile instructs the one a plugin user delegates to. A third
+    # copy as a skill was redundant and free to drift, so it was retired — these
+    # markers keep the read-only bounds asserted on the copy that remains.
     agent_path = plugin_root / "agents" / "orbit-task-pilot.md"
-    if not skill_path.is_file():
-        errors.append("plugin is missing skills/orbit-task-pilot/SKILL.md")
-    else:
-        skill = skill_path.read_text(encoding="utf-8")
-        for required in (
-            "context_files_before",
-            "context_files_after",
-            "verified_no_diff",
-            "Never update an Orbit task",
-        ):
-            if required not in skill:
-                errors.append(f"orbit-task-pilot skill is missing contract marker {required!r}")
     if not agent_path.is_file():
         errors.append("plugin is missing agents/orbit-task-pilot.md")
     else:
         agent = agent_path.read_text(encoding="utf-8")
         for required in (
             "name: orbit-task-pilot",
-            "skills: orbit-task-pilot",
             "tools: Read, Grep, Glob, Bash",
             "Never edit repository files",
+            "context_files_before",
+            "context_files_after",
+            "verified_no_diff",
         ):
             if required not in agent:
                 errors.append(f"orbit-task-pilot agent is missing profile marker {required!r}")

@@ -77,7 +77,7 @@ Paste the prompt below into your agent (Claude Code, Codex CLI, or Gemini CLI) *
 >    - `docs/design/CONVENTIONS.md` — design-doc structure, and the admission test for what earns a decision entry
 >    - `docs/CONFIG.md` — config reference: crew/workflow knobs and per-task crew override
 > 8. After setup, run `orbit task list` and `orbit semantic stats` and show me the output.
-> 9. Ask me what my first real task should be and create it properly using Orbit's task surface (use the `orbit-task` skill — it should be auto-discovered after step 5).
+> 9. Ask me what my first real task should be and create it properly using Orbit's task surface (use the `orbit` skill — it should be auto-discovered after step 5).
 >
 > Rules:
 > - Never run destructive commands without explicit confirmation. Specifically: cloning, installing rustup, running `make install` outside `~/.cargo/bin`, and any shell-profile modification all need a confirmation prompt.
@@ -248,13 +248,14 @@ codex plugin add orbit@orbit
 
 ## Agent Skills
 
-`orbit workspace init` seeds skill files under `~/.orbit/skills/` and symlinks them into `~/.claude/skills/` and `~/.agents/skills/`, so Claude Code, Codex, and Gemini CLI discover them at session start with no per-agent configuration. The router skill (`orbit`) classifies intent; workflow-specific skills do the work:
+`orbit workspace init` seeds skill files under `~/.orbit/skills/` and symlinks them into `~/.claude/skills/` and `~/.agents/skills/`, so Claude Code, Codex, and Gemini CLI discover them at session start with no per-agent configuration.
 
-- `orbit-task` — author a task, carry it through implementation and review, file findings on another agent's work, or capture agent-self-reported tooling friction
-- `orbit-workflow` — use jobs, activities, routines, and `orbit sweep`/`orbit run`; diagnose failed, stuck, or cancelled runs; run task-pilot preflight
-- `orbit-search` — search tasks, docs, and frictions; dedup and related-task lookups; docs-corpus admin
+Orbit ships one skill, `orbit`. Its `SKILL.md` is a router — the tool-invocation surface, the lifecycle, and a table of references that load on demand:
 
-First-time onboarding (`.orbit/` absent) and "what is orbit" tour requests are handled by the `orbit` skill itself, via its bundled setup reference.
+- **Working through Orbit** — task authoring, execution, and review; search and the docs corpus; friction; orchestration and the `orbit run` surface; debugging a failed run.
+- **Setting Orbit up** — first run and host identity, configuration and crews, the routine scheduler, auto-tasks, maintenance and worktree GC, multi-host task-ID namespacing, and remote access.
+
+First-time onboarding (`.orbit/` absent) and "what is orbit" tour requests are handled by the same skill, via its bundled setup references.
 
 `orbit skill doctor` flags drift between the local copy and the upstream definition. Edit any seeded `SKILL.md` to customize behavior for your team.
 

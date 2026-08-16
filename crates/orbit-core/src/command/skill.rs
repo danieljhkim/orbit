@@ -12,53 +12,96 @@ use super::{ManagedAssetLayout, ManagedAssetReconciliation, reconcile_managed_as
 ///
 /// Skills are directory trees rather than single documents, so their managed
 /// manifest keys on the relative path ([`ManagedAssetLayout::RelativePath`])
-/// instead of a bare definition name. Keep each skill's `SKILL.md` adjacent to
-/// its reference files: the ordering here is what a reader uses to see a
-/// skill's full shipped surface at a glance.
-pub(crate) const DEFAULT_SKILL_FILES: [(&str, &str); 11] = [
+/// instead of a bare definition name.
+///
+/// Orbit ships exactly one skill. `SKILL.md` is a router carrying only what
+/// every call needs; each reference is loaded on demand, so the whole surface
+/// stays discoverable through one skill description without a per-topic skill
+/// competing for the same trigger. The ordering below mirrors the router's
+/// own reference tables, so the shipped surface reads the same in both
+/// places.
+pub(crate) const DEFAULT_SKILL_FILES: [(&str, &str); 20] = [
     (
         "orbit/SKILL.md",
         include_str!("../../assets/skills/orbit/SKILL.md"),
     ),
+    // The vocabulary, then working through Orbit.
     (
-        "orbit/references/guide.md",
-        include_str!("../../assets/skills/orbit/references/guide.md"),
+        "orbit/references/concepts.md",
+        include_str!("../../assets/skills/orbit/references/concepts.md"),
     ),
     (
-        "orbit-task/SKILL.md",
-        include_str!("../../assets/skills/orbit-task/SKILL.md"),
+        "orbit/references/task-authoring.md",
+        include_str!("../../assets/skills/orbit/references/task-authoring.md"),
     ),
     (
-        "orbit-task/references/review.md",
-        include_str!("../../assets/skills/orbit-task/references/review.md"),
+        "orbit/references/task-execution.md",
+        include_str!("../../assets/skills/orbit/references/task-execution.md"),
     ),
     (
-        "orbit-task/references/friction.md",
-        include_str!("../../assets/skills/orbit-task/references/friction.md"),
+        "orbit/references/task-review.md",
+        include_str!("../../assets/skills/orbit/references/task-review.md"),
     ),
     (
-        "orbit-workflow/SKILL.md",
-        include_str!("../../assets/skills/orbit-workflow/SKILL.md"),
+        "orbit/references/search.md",
+        include_str!("../../assets/skills/orbit/references/search.md"),
     ),
     (
-        "orbit-workflow/references/debug-job-failure.md",
-        include_str!("../../assets/skills/orbit-workflow/references/debug-job-failure.md"),
+        "orbit/references/docs-corpus.md",
+        include_str!("../../assets/skills/orbit/references/docs-corpus.md"),
     ),
     (
-        "orbit-workflow/references/common_failures.md",
-        include_str!("../../assets/skills/orbit-workflow/references/common_failures.md"),
+        "orbit/references/friction.md",
+        include_str!("../../assets/skills/orbit/references/friction.md"),
     ),
     (
-        "orbit-workflow/references/operational-logs.md",
-        include_str!("../../assets/skills/orbit-workflow/references/operational-logs.md"),
+        "orbit/references/orchestration.md",
+        include_str!("../../assets/skills/orbit/references/orchestration.md"),
     ),
     (
-        "orbit-search/SKILL.md",
-        include_str!("../../assets/skills/orbit-search/SKILL.md"),
+        "orbit/references/workflows.md",
+        include_str!("../../assets/skills/orbit/references/workflows.md"),
     ),
     (
-        "orbit-search/references/docs-corpus.md",
-        include_str!("../../assets/skills/orbit-search/references/docs-corpus.md"),
+        "orbit/references/run-debugging.md",
+        include_str!("../../assets/skills/orbit/references/run-debugging.md"),
+    ),
+    (
+        "orbit/references/common-failures.md",
+        include_str!("../../assets/skills/orbit/references/common-failures.md"),
+    ),
+    (
+        "orbit/references/operational-logs.md",
+        include_str!("../../assets/skills/orbit/references/operational-logs.md"),
+    ),
+    // Setting Orbit up.
+    (
+        "orbit/references/setup/first-run.md",
+        include_str!("../../assets/skills/orbit/references/setup/first-run.md"),
+    ),
+    (
+        "orbit/references/setup/configuration.md",
+        include_str!("../../assets/skills/orbit/references/setup/configuration.md"),
+    ),
+    (
+        "orbit/references/setup/automation.md",
+        include_str!("../../assets/skills/orbit/references/setup/automation.md"),
+    ),
+    (
+        "orbit/references/setup/auto-tasks.md",
+        include_str!("../../assets/skills/orbit/references/setup/auto-tasks.md"),
+    ),
+    (
+        "orbit/references/setup/maintenance.md",
+        include_str!("../../assets/skills/orbit/references/setup/maintenance.md"),
+    ),
+    (
+        "orbit/references/setup/multi-host.md",
+        include_str!("../../assets/skills/orbit/references/setup/multi-host.md"),
+    ),
+    (
+        "orbit/references/setup/remote-access.md",
+        include_str!("../../assets/skills/orbit/references/setup/remote-access.md"),
     ),
 ];
 
@@ -271,12 +314,51 @@ mod tests {
         );
     }
 
+    /// Every shipped file must be byte-identical to its plugin mirror.
+    ///
+    /// The plugin package is a hand-mirrored copy of the embedded tree, so a
+    /// file edited on one side and not the other ships two different documents
+    /// under one name. Asserting the whole set — rather than one representative
+    /// file — is what makes a forgotten mirror a test failure instead of a
+    /// silent release.
     #[test]
-    fn orbit_task_skill_matches_plugin_copy() {
-        assert_eq!(
-            include_str!("../../assets/skills/orbit-task/SKILL.md"),
-            include_str!("../../../../plugin/skills/orbit-task/SKILL.md"),
-            "the embedded and plugin copies of orbit-task must remain byte-identical"
+    fn every_shipped_skill_file_matches_its_plugin_copy() {
+        let plugin_skills = repo_root().join("plugin/skills");
+
+        let mut failures: Vec<String> = Vec::new();
+        for (relative, embedded) in DEFAULT_SKILL_FILES {
+            let mirror = plugin_skills.join(relative);
+            match std::fs::read_to_string(&mirror) {
+                Ok(contents) if contents == embedded => {}
+                Ok(_) => failures.push(format!("  {relative}: differs from the embedded copy")),
+                Err(e) => failures.push(format!(
+                    "  {relative}: unreadable at {}: {e}",
+                    mirror.display()
+                )),
+            }
+        }
+
+        // A file only in the plugin tree is equally broken: it ships to plugin
+        // users and to nobody else.
+        let mirrored = collect_relative_files(&plugin_skills)
+            .unwrap_or_else(|e| panic!("collect_relative_files({}): {e}", plugin_skills.display()));
+        let shipped: BTreeSet<PathBuf> = DEFAULT_SKILL_FILES
+            .iter()
+            .map(|(relative, _)| PathBuf::from(relative))
+            .collect();
+        for extra in mirrored.difference(&shipped) {
+            failures.push(format!(
+                "  {}: present in plugin/skills/ but not shipped",
+                extra.display()
+            ));
+        }
+
+        assert!(
+            failures.is_empty(),
+            "plugin/skills/ is out of sync with the embedded skill tree ({} file(s)) — \
+             re-mirror it so both copies ship the same bytes:\n{}",
+            failures.len(),
+            failures.join("\n"),
         );
     }
 
@@ -438,26 +520,36 @@ mod tests {
         );
     }
 
+    /// The router must link every shipped reference.
+    ///
+    /// With one skill, progressive disclosure runs entirely through
+    /// `SKILL.md`'s reference table: a reference the router does not link is
+    /// unreachable, however good it is. This replaces the old per-skill
+    /// enumeration check, which goes vacuous once only one skill ships.
     #[test]
-    fn router_skill_enumerates_all_defaults() {
+    fn router_links_every_shipped_reference() {
         let router_path = assets_skills_dir().join("orbit/SKILL.md");
         let contents = std::fs::read_to_string(&router_path)
             .unwrap_or_else(|e| panic!("read {}: {e}", router_path.display()));
 
         let mut missing: Vec<&str> = Vec::new();
-        for id in default_skill_ids() {
-            if id == "orbit" {
-                // The router skill itself is not enumerated within itself.
+        for (relative, _) in DEFAULT_SKILL_FILES {
+            let Some(reference) = relative.strip_prefix("orbit/") else {
+                continue;
+            };
+            if reference == "SKILL.md" {
                 continue;
             }
-            let needle = format!("`{id}`");
-            if !contents.contains(&needle) {
-                missing.push(id);
+            // The markdown link target, as written from the skill root.
+            if !contents.contains(&format!("({reference})")) {
+                missing.push(relative);
             }
         }
+
         assert!(
             missing.is_empty(),
-            "router skill at {} does not name these default skills as inline-code identifiers (expected occurrences of `<id>`): {missing:?}\nfix by adding a bullet to the ## Skill Selection block.",
+            "router skill at {} does not link these shipped references, so they are \
+             unreachable: {missing:?}\nfix by adding a row to a ## References table.",
             router_path.display(),
         );
     }

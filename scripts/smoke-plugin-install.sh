@@ -265,13 +265,14 @@ if payload.get("name") != "orbit" or payload.get("marketplaceName") != "orbit":
     raise SystemExit(f"FAIL: expected installed orbit@orbit, got {payload!r}")
 installed = Path(payload.get("installedPath", ""))
 required = [
-    installed / "skills" / "orbit-task-pilot" / "SKILL.md",
+    installed / "skills" / "orbit" / "SKILL.md",
+    installed / "skills" / "orbit" / "references" / "task-execution.md",
     installed / "agents" / "orbit-task-pilot.md",
 ]
 missing = [str(path) for path in required if not path.is_file()]
 if missing:
-    raise SystemExit(f"FAIL: installed Orbit plugin is missing task-pilot assets: {missing}")
-print(f"codex plugin installed with task-pilot assets => {installed}")
+    raise SystemExit(f"FAIL: installed Orbit plugin is missing expected assets: {missing}")
+print(f"codex plugin installed with skill and agent assets => {installed}")
 PY
 
 if ! "${CODEX_ENV[@]}" codex mcp list --json \
@@ -323,17 +324,15 @@ python3 - "$CODEX_PROMPT_OUT" <<'PY'
 import json
 import sys
 text = json.dumps(json.load(open(sys.argv[1], encoding="utf-8")))
+# Orbit ships one skill; its references load on demand rather than as separate
+# discoverable entries, so `orbit:orbit` is the whole expected surface here.
 required = [
     "orbit:orbit",
-    "orbit:orbit-task",
-    "orbit:orbit-search",
-    "orbit:orbit-knowledge",
-    "orbit:orbit-task-pilot",
 ]
 missing = [name for name in required if name not in text]
 if missing:
     raise SystemExit(f"FAIL: fresh Codex task prompt is missing Orbit skills: {missing}")
-print("codex prompt-input => canonical Orbit skills discovered")
+print("codex prompt-input => canonical Orbit skill discovered")
 PY
 
 echo "--- step 6: Codex plugin MCP command handles read-only tool call ---"

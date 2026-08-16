@@ -94,4 +94,4 @@ Conventions (not lint-enforced):
 
 ## Orbit Workflow
 
-For any Orbit lifecycle work (creating tasks, executing, reviewing, raising PRs), invoke the relevant `orbit-*` skill. The `orbit` skill is the entry point and router. Task authoring quality standards live in `orbit-task`.
+For any Orbit lifecycle work (creating tasks, executing, reviewing, raising PRs), invoke the `orbit` skill. Its `SKILL.md` is a router: load the reference that matches the job — `references/task-authoring.md` for authoring quality standards, `references/task-execution.md` for pickup through handoff, and so on.

@@ -463,8 +463,12 @@ mod artifacts {
             .collect();
         assert!(keys.contains(&"orbit/SKILL.md"), "{keys:?}");
         assert!(
-            keys.contains(&"orbit-task/references/review.md"),
+            keys.contains(&"orbit/references/task-review.md"),
             "reference files are managed too: {keys:?}"
+        );
+        assert!(
+            keys.contains(&"orbit/references/setup/first-run.md"),
+            "references nest, so a manifest key is a full relative path: {keys:?}"
         );
     }
 

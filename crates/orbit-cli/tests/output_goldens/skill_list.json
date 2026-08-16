@@ -1,26 +1,8 @@
 [
   {
-    "content_hash": "5687224c6f7eb5c9e829466ed758de48aa8e89ed1ea4e3c0bfc826c3cdf54cea",
+    "content_hash": "f4695c39887be297d40bc66c002a627c2fdb6c8f44432366fb63a6eb42f4bdd5",
     "id": "orbit",
     "meta": null,
     "path": "<HOME>/.orbit/skills/orbit"
-  },
-  {
-    "content_hash": "b9e81b8fb34b95c151ed2bc118928d560e4df5ebcecae79f512e3bcfc8220e73",
-    "id": "orbit-search",
-    "meta": null,
-    "path": "<HOME>/.orbit/skills/orbit-search"
-  },
-  {
-    "content_hash": "4828d77a48b1a7dcbfbc0b464ef4e2d8afb5770fea28c022e02fb7c76b12d3f1",
-    "id": "orbit-task",
-    "meta": null,
-    "path": "<HOME>/.orbit/skills/orbit-task"
-  },
-  {
-    "content_hash": "2384d0e65b834177199c330553d1b1a666e7fe581e54190813f2f99a49ecfb4a",
-    "id": "orbit-workflow",
-    "meta": null,
-    "path": "<HOME>/.orbit/skills/orbit-workflow"
   }
 ]
