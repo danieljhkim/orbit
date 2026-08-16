@@ -231,6 +231,10 @@
       
       #tasks-panel > .body {
         max-height: calc(100vh - 240px);
+        /* ORB-10874: floor so the task inventory stays usable (a few visible
+           rows) even on a short viewport or with the log panel expanded — it
+           never gets squeezed toward zero by the surrounding chrome. */
+        min-height: 240px;
         overflow-y: auto;
         overflow-x: auto;
         view-transition-name: task-list;
@@ -476,6 +480,59 @@
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
+      }
+
+      /* ORB-10874: inline pending/success/error feedback for the status/crew
+         selects. Never color-only — each state carries its own text, and
+         `success`/`error` additionally offer a bounded undo. */
+      .mutation-feedback {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        font-family: var(--font-mono);
+        font-size: 10px;
+        line-height: 1.25;
+      }
+      .mutation-feedback.pending { color: var(--fg-dim); font-style: italic; }
+      .mutation-feedback.success { color: var(--state-success); }
+      .mutation-feedback.error {
+        color: var(--state-failed);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .mutation-undo {
+        font: inherit;
+        color: var(--accent);
+        background: transparent;
+        border: 1px solid var(--accent);
+        border-radius: 2px;
+        padding: 0 5px;
+        cursor: pointer;
+        flex-shrink: 0;
+      }
+      .mutation-undo:hover { background: rgba(110, 159, 255, 0.1); }
+
+      /* ORB-10874: task/status controls must be usable without relying on
+         color alone — a visible focus ring on top of the existing
+         border-color change. */
+      .task-status-select:focus-visible,
+      .task-crew-select:focus-visible,
+      .chip:focus-visible,
+      .mutation-undo:focus-visible,
+      .log-panel-toggle:focus-visible,
+      .log-resize-handle:focus-visible {
+        outline: 2px solid var(--accent-hover);
+        outline-offset: 2px;
+      }
+
+      .filter-summary {
+        padding: 6px 16px;
+        font-family: var(--font-mono);
+        font-size: 11px;
+        color: var(--fg-dim);
+        border-bottom: 1px solid var(--border);
+        background: var(--bg);
       }
 
       .detail-side .complexity {
@@ -3196,6 +3253,23 @@
           grid-template-columns: minmax(0, 2fr) minmax(280px, 1.15fr) !important;
         }
       }
+      /* ORB-10874: below ~760px the two-column task/log layout has no room
+         left for either column, so stack them — the task list keeps its own
+         independently-scrolling, min-height-guaranteed body (below) and the
+         log panel follows underneath rather than both being squeezed into
+         slivers side by side. */
+      @media (max-width: 760px) {
+        main.tasks-layout {
+          grid-template-columns: 1fr !important;
+        }
+        .col-log {
+          min-height: auto;
+        }
+        #log-panel {
+          height: var(--log-panel-height, 260px);
+          max-height: var(--log-panel-height, 260px);
+        }
+      }
       .col-log {
         display: flex;
         flex-direction: column;
@@ -3279,9 +3353,59 @@
         white-space: nowrap;
       }
       #log-panel {
+        position: relative;
         height: var(--log-panel-height, calc(100dvh - 420px));
         max-height: var(--log-panel-height, calc(100dvh - 420px));
       }
+      /* ORB-10874: collapsed keeps only the header (with its toggle/filters
+         reachable via the header itself where relevant) so the operator can
+         still see the panel exists and re-expand it, without it occupying
+         the space a mid-height panel would. */
+      #log-panel.collapsed {
+        height: auto;
+        max-height: none;
+        flex: 0 0 auto;
+      }
+      #log-panel.collapsed .log-stream,
+      #log-panel.collapsed .log-foot {
+        display: none;
+      }
+      .log-resize-handle {
+        position: absolute;
+        top: -5px;
+        left: 0;
+        right: 0;
+        height: 10px;
+        cursor: row-resize;
+        z-index: 2;
+        touch-action: none;
+      }
+      .log-resize-handle::after {
+        content: "";
+        display: block;
+        margin: 4px auto 0;
+        width: 36px;
+        height: 3px;
+        border-radius: 2px;
+        background: var(--border);
+      }
+      .log-resize-handle:hover::after { background: var(--fg-dim); }
+      #log-panel.collapsed .log-resize-handle { cursor: default; pointer-events: none; }
+      .log-panel-toggle {
+        font: inherit;
+        font-family: var(--font-mono);
+        font-size: 10px;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        color: var(--fg-dim);
+        background: var(--bg-elev);
+        border: 1px solid var(--border);
+        border-radius: 3px;
+        padding: 2px 8px;
+        cursor: pointer;
+        margin-left: 6px;
+      }
+      .log-panel-toggle:hover { color: var(--fg); border-color: var(--fg-dim); }
       .col-log .panel > header .title {
         display: flex; align-items: center; gap: 10px;
       }

@@ -1,7 +1,7 @@
 // Orbit dashboard task-domain rendering and actions.
 // Pure vanilla JS, split into ES modules with no build step.
 
-import { el, statusPill, patchJson, postJson, syncNodes, withWorkspace } from './common.js';
+import { el, statusPill, patchJson, postJson, syncNodes, isAggregateView, withWorkspace } from './common.js';
 import { renderMarkdown, renderMarkdownInline } from './markdown.js';
 
 const $ = (id) => document.getElementById(id);
@@ -9,8 +9,15 @@ const $ = (id) => document.getElementById(id);
 let lastCrewPayload = { default_crew: null, crews: [] };
 let expandedTaskIds = new Set();
 let taskActionNotice = null;
-let crewUpdateErrors = new Map();
 let pinnedExternalTask = null;
+// ORB-10874: per-task inline-edit feedback for the status/crew selects. Each
+// entry is `{ kind: 'pending'|'success'|'error', text, undo }`, where `undo`
+// (when present) is `{ previousValue, expiresAt }` — a bounded window in which
+// the prior value can still be restored with one click. Cleared automatically
+// once that window lapses (see scheduleFeedbackExpiry).
+let statusFeedback = new Map();
+let crewFeedback = new Map();
+const MUTATION_UNDO_WINDOW_MS = 8000;
 // ORB-10444: task ids whose Ship dispatch this page has already issued. Ship is
 // a write against a live pipeline, so a second click must not launch a second
 // run: the id stays here for the life of the page once a dispatch succeeds (the
@@ -64,6 +71,81 @@ function refreshTasks(context) {
     : Promise.resolve();
 }
 
+function defaultActiveStatuses(context) {
+  return context && Array.isArray(context.defaultActiveStatuses)
+    ? context.defaultActiveStatuses
+    : statusOrder(context);
+}
+
+function tasksMeta(context) {
+  return context && typeof context.getTasksMeta === "function" ? context.getTasksMeta() : null;
+}
+
+// ORB-10874: explicit shown/total/server-limit language instead of the
+// ambiguous `N/50` shorthand — `50` could previously have meant a total, a
+// page size, or a hard cap with no way to tell which from the UI alone.
+export function formatTaskCount(filteredCount, fetchedCount, meta) {
+  if (meta && Number.isFinite(meta.total)) {
+    const base = filteredCount === fetchedCount
+      ? `${filteredCount} shown`
+      : `${filteredCount} shown (of ${fetchedCount} fetched)`;
+    return meta.truncated
+      ? `${base} · ${meta.total} total · server limit ${meta.limit}`
+      : `${base} · ${meta.total} total`;
+  }
+  return filteredCount === fetchedCount
+    ? `${fetchedCount} shown`
+    : `${filteredCount} shown of ${fetchedCount} fetched`;
+}
+
+// ORB-10874: aggregate ("All workspaces") mode has no ambient workspace to
+// scope a mutation to. A task fetched through /api/tasks/all carries its own
+// `workspace_id`, so that's an explicit, workspace-qualified target; anything
+// else is refused rather than silently applied to the wrong (or no) workspace.
+function canMutateTask(task) {
+  return !isAggregateView() || Boolean(task && task.workspace_id);
+}
+
+function taskMutationPath(task, suffix = "") {
+  const base = `/api/tasks/${encodeURIComponent(task.id)}${suffix}`;
+  if (isAggregateView() && task.workspace_id) {
+    const sep = base.includes("?") ? "&" : "?";
+    return `${base}${sep}workspace=${encodeURIComponent(task.workspace_id)}`;
+  }
+  return base;
+}
+
+function scheduleFeedbackExpiry(map, taskId, context, delay) {
+  setTimeout(() => {
+    const entry = map.get(taskId);
+    if (entry && entry.kind !== "pending") {
+      map.delete(taskId);
+      renderTasks(taskList(context), context);
+    }
+  }, delay);
+}
+
+// Renders the inline pending/success/error text next to a status or crew
+// select, plus a bounded "undo" button while `entry.undo` is still live. The
+// wrapper is a live region so screen-reader users get the same feedback a
+// sighted user reads from the text/color change.
+function buildMutationFeedback(entry, onUndo) {
+  if (!entry) return null;
+  const wrap = el("span", { class: `mutation-feedback ${entry.kind}`, text: entry.text });
+  wrap.setAttribute("role", "status");
+  wrap.setAttribute("aria-live", entry.kind === "error" ? "assertive" : "polite");
+  if (entry.undo) {
+    const undoBtn = el("button", { class: "mutation-undo", text: "undo" });
+    undoBtn.type = "button";
+    undoBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      onUndo();
+    });
+    wrap.appendChild(undoBtn);
+  }
+  return wrap;
+}
+
 export function normalizeCrewPayload(payload) {
   const crews = Array.isArray(payload && payload.crews)
     ? payload.crews
@@ -92,6 +174,15 @@ export function hasCrewOptions() {
 
 function crewOptionsSignature() {
   return JSON.stringify(lastCrewPayload);
+}
+
+// A stable string for a task's current mutation-feedback entry (or "" when
+// none), so a syncNodes row diff picks up pending/success/error/undo
+// transitions the same way it picks up any other task field change.
+function feedbackSignature(map, taskId) {
+  const entry = map.get(taskId);
+  if (!entry) return "";
+  return `${entry.kind}:${entry.text}:${entry.undo ? entry.undo.expiresAt : ""}`;
 }
 
 function explicitCrewValue(task) {
@@ -236,6 +327,63 @@ function refreshChips(context) {
     const allOn = activeStatuses.size === statusOrder(context).length;
     const on = isAll ? allOn : activeStatuses.has(status);
     chip.classList.toggle("active", on);
+    // ORB-10874: chip state must not rely on the active/inactive color
+    // difference alone — aria-pressed exposes it to assistive tech too.
+    chip.setAttribute("aria-pressed", on ? "true" : "false");
+  }
+}
+
+// ORB-10874: the status filter and search query are represented in the tasks
+// hash (`#tasks?status=a,b&q=...`), mirroring the audit tab's buildAuditHash/
+// applyAuditHashQuery pair, so a reload or the browser's back/forward button
+// restores the same filtered view instead of resetting to the default.
+export function buildTasksHash(context) {
+  const sp = new URLSearchParams();
+  const order = statusOrder(context);
+  const activeStatuses = activeStatusSet(context);
+  if (activeStatuses.size !== order.length) {
+    const selected = order.filter((s) => activeStatuses.has(s));
+    sp.set("status", selected.length > 0 ? selected.join(",") : "none");
+  }
+  const q = searchQueryValue(context);
+  if (q) sp.set("q", q);
+  const qs = sp.toString();
+  return qs ? `#tasks?${qs}` : "#tasks";
+}
+
+export function applyTasksHashQuery(query, context) {
+  const order = statusOrder(context);
+  const statusParam = query.get("status");
+  if (statusParam == null) {
+    setActiveStatuses(context, new Set(defaultActiveStatuses(context)));
+  } else if (statusParam === "none") {
+    setActiveStatuses(context, new Set());
+  } else {
+    const wanted = new Set(statusParam.split(",").map((s) => s.trim()).filter(Boolean));
+    setActiveStatuses(context, new Set(order.filter((s) => wanted.has(s))));
+  }
+  setSearchQuery(context, (query.get("q") || "").trim().toLowerCase());
+}
+
+// Re-syncs the search box and chip states from context after the hash (not a
+// direct user interaction with these controls) changed them — e.g. on load,
+// or after a back/forward navigation.
+export function syncTaskControls(context) {
+  const search = $("task-search");
+  if (search) {
+    const q = searchQueryValue(context);
+    if (search.value !== q) search.value = q;
+  }
+  refreshChips(context);
+}
+
+function navigateTasksHash(context) {
+  const hash = buildTasksHash(context);
+  if (window.location.hash !== hash) {
+    window.location.hash = hash;
+  } else {
+    refreshChips(context);
+    renderTasks(taskList(context), context);
   }
 }
 
@@ -243,15 +391,16 @@ export function buildChips(context) {
   const container = $("task-filter");
   container.innerHTML = "";
   const allChip = el("button", { class: "chip", text: "all" });
+  allChip.type = "button";
   allChip.dataset.role = "all";
   allChip.addEventListener("click", () => {
     setActiveStatuses(context, new Set(statusOrder(context)));
-    refreshChips(context);
-    renderTasks(taskList(context), context);
+    navigateTasksHash(context);
   });
   container.appendChild(allChip);
   for (const status of statusOrder(context)) {
     const chip = el("button", { class: "chip", text: status });
+    chip.type = "button";
     chip.dataset.status = status;
     chip.style.borderLeft = `2px solid var(--status-${status}, var(--border))`;
     chip.addEventListener("click", () => {
@@ -261,8 +410,7 @@ export function buildChips(context) {
       } else {
         activeStatuses.add(status);
       }
-      refreshChips(context);
-      renderTasks(taskList(context), context);
+      navigateTasksHash(context);
     });
     container.appendChild(chip);
   }
@@ -270,10 +418,34 @@ export function buildChips(context) {
 }
 
 export function wireSearch(context) {
-  $("task-search").addEventListener("input", (e) => {
+  const input = $("task-search");
+  let debounce = null;
+  input.addEventListener("input", (e) => {
     setSearchQuery(context, e.target.value.trim().toLowerCase());
-    renderTasks(taskList(context), context);
+    if (debounce) clearTimeout(debounce);
+    debounce = setTimeout(() => navigateTasksHash(context), 250);
   });
+}
+
+// ORB-10874: a compact, always-visible restatement of the filters currently
+// narrowing the list — the chips/search box already encode this, but not in a
+// form a screen reader announces or a glance confirms without reading each
+// control. Rendered next to the count so "why am I seeing this many" is
+// answered in the same place as "how many is this".
+function renderFilterSummary(context) {
+  const node = $("task-filter-summary");
+  if (!node) return;
+  const order = statusOrder(context);
+  const activeStatuses = activeStatusSet(context);
+  const parts = [];
+  if (activeStatuses.size === 0) {
+    parts.push("status: none selected");
+  } else if (activeStatuses.size < order.length) {
+    parts.push(`status: ${order.filter((s) => activeStatuses.has(s)).join(", ")}`);
+  }
+  const q = searchQueryValue(context);
+  if (q) parts.push(`search: "${q}"`);
+  node.textContent = parts.length > 0 ? `Filtering by ${parts.join(" · ")}` : "Showing all statuses";
 }
 
 function buildTagRow(tags) {
@@ -656,14 +828,18 @@ function buildStatusUpdateControl(task, context) {
   const cell = el("span", { class: "status-cell" });
   const targets = statusUpdateTargets(context).filter((status) => status !== task.status);
   const color = `var(--status-${task.status}, var(--fg))`;
+  const mutable = canMutateTask(task);
+  const feedback = statusFeedback.get(task.id);
+  const label = `Update status for ${task.id}`;
   const select = el("select", {
     class: "task-status-select mono",
-    title: `Update status for ${task.id}`,
+    title: mutable ? label : `${label} — select a specific workspace to change status in aggregate view`,
     style: {
       color,
       borderLeftColor: color,
     },
   });
+  select.setAttribute("aria-label", label);
   const placeholder = el("option", { text: task.status || "status" });
   placeholder.value = "";
   placeholder.disabled = true;
@@ -677,7 +853,7 @@ function buildStatusUpdateControl(task, context) {
     select.appendChild(option);
   }
 
-  if (targets.length === 0) {
+  if (targets.length === 0 || !mutable || (feedback && feedback.kind === "pending")) {
     select.disabled = true;
   }
 
@@ -687,18 +863,26 @@ function buildStatusUpdateControl(task, context) {
     event.stopPropagation();
     const targetStatus = select.value;
     if (!targetStatus) return;
-    updateTaskStatus(task, select, context);
+    applyTaskStatusChange(task, targetStatus, context);
   });
   cell.appendChild(select);
+  const feedbackNode = buildMutationFeedback(feedback, () => {
+    if (feedback && feedback.undo) applyTaskStatusChange(task, feedback.undo.previousValue, context);
+  });
+  if (feedbackNode) cell.appendChild(feedbackNode);
   return cell;
 }
 
 function buildCrewUpdateControl(task, context) {
   const cell = el("span", { class: "crew-cell" });
+  const mutable = canMutateTask(task);
+  const feedback = crewFeedback.get(task.id);
+  const label = `Update crew for ${task.id}`;
   const select = el("select", {
     class: "task-crew-select mono",
-    title: `Update crew for ${task.id}`,
+    title: mutable ? label : `${label} — select a specific workspace to change crew in aggregate view`,
   });
+  select.setAttribute("aria-label", label);
   const currentValue = explicitCrewValue(task);
   const staleCurrentValue = hasStaleExplicitCrew(task);
   select.dataset.currentValue = currentValue;
@@ -733,66 +917,72 @@ function buildCrewUpdateControl(task, context) {
     select.disabled = true;
     defaultOption.textContent = "crew unavailable";
   }
+  if (!mutable || (feedback && feedback.kind === "pending")) {
+    select.disabled = true;
+  }
 
   select.value = currentValue;
   stopRowInteraction(cell);
   stopRowInteraction(select);
   select.addEventListener("change", (event) => {
     event.stopPropagation();
-    updateTaskCrew(task, select, context);
+    applyTaskCrewChange(task, select.value || "", context);
   });
 
   cell.appendChild(select);
-  const error = crewUpdateErrors.get(task.id);
-  if (error) {
-    cell.appendChild(el("span", { class: "crew-error", text: error }));
-  }
+  const feedbackNode = buildMutationFeedback(feedback, () => {
+    if (feedback && feedback.undo) applyTaskCrewChange(task, feedback.undo.previousValue, context);
+  });
+  if (feedbackNode) cell.appendChild(feedbackNode);
   return cell;
 }
 
-async function updateTaskStatus(task, select, context) {
-  const nextStatus = select.value || "";
-  if (!nextStatus || nextStatus === task.status) return;
-
-  select.disabled = true;
+async function applyTaskStatusChange(task, nextStatus, context) {
+  if (!nextStatus || nextStatus === task.status || !canMutateTask(task)) return;
+  const previousValue = task.status;
+  statusFeedback.set(task.id, { kind: "pending", text: "saving…" });
+  renderTasks(taskList(context), context);
   try {
-    const updatedTask = await patchJson(`/api/tasks/${encodeURIComponent(task.id)}`, {
-      status: nextStatus,
-    });
+    const updatedTask = await patchJson(taskMutationPath(task), { status: nextStatus });
     applyUpdatedTask(updatedTask, context);
-    renderTasks(taskList(context), context);
+    statusFeedback.set(task.id, {
+      kind: "success",
+      text: "status saved",
+      undo: { previousValue, expiresAt: Date.now() + MUTATION_UNDO_WINDOW_MS },
+    });
   } catch (error) {
-    select.value = "";
-    select.disabled = false;
+    statusFeedback.set(task.id, {
+      kind: "error",
+      text: `status update failed: ${error.message || String(error)}`,
+    });
     console.error(error);
   }
+  renderTasks(taskList(context), context);
+  scheduleFeedbackExpiry(statusFeedback, task.id, context, MUTATION_UNDO_WINDOW_MS + 500);
 }
 
-async function updateTaskCrew(task, select, context) {
-  const previousValue = select.dataset.currentValue || "";
-  const nextValue = select.value || "";
-  if (nextValue === previousValue) return;
-
-  crewUpdateErrors.delete(task.id);
-  select.disabled = true;
+async function applyTaskCrewChange(task, nextValue, context) {
+  const previousValue = explicitCrewValue(task);
+  if (nextValue === previousValue || !canMutateTask(task)) return;
+  crewFeedback.set(task.id, { kind: "pending", text: "saving…" });
+  renderTasks(taskList(context), context);
   try {
-    const updatedTask = await patchJson(`/api/tasks/${encodeURIComponent(task.id)}`, {
-      crew: nextValue || null,
-    });
+    const updatedTask = await patchJson(taskMutationPath(task), { crew: nextValue || null });
     applyUpdatedTask(updatedTask, context);
-    crewUpdateErrors.delete(task.id);
-    renderTasks(taskList(context), context);
+    crewFeedback.set(task.id, {
+      kind: "success",
+      text: "crew saved",
+      undo: { previousValue, expiresAt: Date.now() + MUTATION_UNDO_WINDOW_MS },
+    });
   } catch (error) {
-    select.value = previousValue;
-    select.dataset.currentValue = previousValue;
-    select.disabled = false;
-    crewUpdateErrors.set(
-      task.id,
-      `crew update failed: ${error.message || String(error)}`,
-    );
-    renderTasks(taskList(context), context);
+    crewFeedback.set(task.id, {
+      kind: "error",
+      text: `crew update failed: ${error.message || String(error)}`,
+    });
     console.error(error);
   }
+  renderTasks(taskList(context), context);
+  scheduleFeedbackExpiry(crewFeedback, task.id, context, MUTATION_UNDO_WINDOW_MS + 500);
 }
 
 /* ORB-10444: one-click Ship. The dispatch carries only the task id — the
@@ -948,6 +1138,8 @@ function takeTaskActionNotice() {
   const notice = el("div", { class: "task-action-notice", text: taskActionNotice });
   notice.dataset.key = "task-action-notice";
   notice.dataset.hash = taskActionNotice;
+  notice.setAttribute("role", "status");
+  notice.setAttribute("aria-live", "polite");
   taskActionNotice = null;
   return notice;
 }
@@ -992,7 +1184,7 @@ export function renderTasks(tasks, context) {
       e.stopPropagation();
       if (navigator.clipboard) navigator.clipboard.writeText(ptask.id).catch(() => {});
     });
-    pRow.dataset.hash = `${ptask.id}-${ptask.title}-${ptask.status}-${ptask.crew || ""}-${ptask.resolved_crew || ""}-${crewOptionsSignature()}-${crewUpdateErrors.get(ptask.id) || ""}`;
+    pRow.dataset.hash = `${ptask.id}-${ptask.title}-${ptask.status}-${ptask.crew || ""}-${ptask.resolved_crew || ""}-${crewOptionsSignature()}-${feedbackSignature(statusFeedback, ptask.id)}-${feedbackSignature(crewFeedback, ptask.id)}`;
     const pDetail = buildTaskDetail(ptask, context);
     // Dismiss button to close the global detail without affecting chips
     const dismiss = el("button", { class: "action", text: "Close" });
@@ -1015,10 +1207,8 @@ export function renderTasks(tasks, context) {
   }
 
   const filtered = filterTasks(tasks, context);
-  $("tasks-count").textContent =
-    filtered.length === tasks.length
-      ? `${tasks.length}`
-      : `${filtered.length}/${tasks.length}`;
+  $("tasks-count").textContent = formatTaskCount(filtered.length, tasks.length, tasksMeta(context));
+  renderFilterSummary(context);
   if (filtered.length === 0 && frag.children.length === 0) {
     const defaultText = tasks.length === 0 ? "No tasks available." : "No tasks match filter.";
     const emptyState = el("div", { class: "empty-state" }, [
@@ -1086,7 +1276,7 @@ export function renderTasks(tasks, context) {
       ]);
       row.dataset.key = `task-${t.id}`;
       // Basic hash based on row presentation parameters + expanded state
-      row.dataset.hash = `${t.id}-${t.title}-${t.status}-${t.crew || ""}-${t.resolved_crew || ""}-${t.workspace_id || ""}-${crewOptionsSignature()}-${crewUpdateErrors.get(t.id) || ""}-${expandedTaskIds.has(t.id)}`;
+      row.dataset.hash = `${t.id}-${t.title}-${t.status}-${t.crew || ""}-${t.resolved_crew || ""}-${t.workspace_id || ""}-${crewOptionsSignature()}-${feedbackSignature(statusFeedback, t.id)}-${feedbackSignature(crewFeedback, t.id)}-${expandedTaskIds.has(t.id)}`;
       row.addEventListener("click", () => {
         const toggle = () => {
           if (expandedTaskIds.has(t.id)) expandedTaskIds.delete(t.id);

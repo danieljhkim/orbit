@@ -30,6 +30,8 @@ The UI uses layered dark surfaces instead of flat black: base canvas, elevated p
 
 Live processing is visible through pulsing dots, spinners, buffered-log counters, periodically refreshed tiles, and compact ticker-style values. The `orbit.log` panel is viewport-bounded; overflowing rows scroll inside the log stream so footer filters and follow-tail controls remain visible [T20260430-29]. Motion is functional: it points to active work without making the operator read raw logs first.
 
+The log panel can be collapsed to its header or resized by dragging (or, with focus, arrow-key nudging) its top edge, and the chosen presentation is remembered per browser via `localStorage` rather than the URL, since it is a local viewing preference rather than shared state [ORB-10874]. The task list beside it keeps an independent, guaranteed-minimum body height regardless of the log panel's state, and below ~760px the two-column Tasks layout stacks into one column instead of squeezing both into slivers.
+
 ## 5. Dashboard Telemetry Consistency
 
 Summary tiles and drill-down panels must agree. Audit > Policy is the detail view for the Denials 24h tile, so `/api/diagnostics/denials` combines v2 loop JSONL denial rows with SQLite `status = denied` audit events. SQLite filesystem boundary denials without an activity fsProfile use the stable `workspace-boundary` label [T20260428-13].
@@ -56,7 +58,17 @@ The Tasks tab is writable for the two actions that otherwise force a context swi
 
 **Comments** post to `POST /api/tasks/:id/comments`, which writes through the task's existing review-thread structure rather than adding a field to the task record, so a comment survives a reload like any other task history. Authorship is forced to a human identity: an absent, agent-family, or model-constant author collapses to the `human` label, because the dashboard process may itself run inside a managed Orbit run where the runtime's ambient actor is a model.
 
-## 8. Concerns & Honest Limitations
+Inline status/crew edits show a pending state on the control, refuse a duplicate submission while one is in flight, and report durable success or exact failure text next to the control (a live region, so the same feedback reaches assistive tech) rather than only logging to the console. A successful edit offers a bounded-window undo that restores the prior value with one click, expiring automatically once the window (or a further edit) makes restoring it unsafe [ORB-10874].
+
+In the aggregate ("All workspaces") view there is no ambient workspace to scope a mutation to, so status/crew edits are refused unless the task carries its own `workspace_id` (present on every `/api/tasks/all` row), in which case the mutation is sent explicitly qualified to that workspace rather than the currently-selected one [ORB-10874].
+
+## 8. Task Count, Filters, and the Tasks/Log Layout
+
+The Tasks count states what it means instead of an ambiguous `N/50`: it names the shown count, the filtered-to-fetched relationship when they differ, and — using the `/api/tasks` paging envelope (`{ items, total, limit, truncated }`, ORB-10400) — the true total and the server's page limit when the result was truncated. The active status chips are sent to the server as an explicit `status=` filter rather than fetched wholesale and narrowed client-side, so `total`/`truncated` describe the filter actually in effect [ORB-10874].
+
+The active status filter and search query are represented in the `#tasks` hash (mirroring the Audit tab's own hash-encoded filters) and restated as plain text next to the count, so the current view survives a reload or the browser's back/forward button and is legible without reading each chip's color. The selected workspace is likewise mirrored into the page's `?workspace=` query parameter on every change [ORB-10874].
+
+## 9. Concerns & Honest Limitations
 
 Accessibility still needs a real WCAG pass; responsive behavior remains optimized for wide desktop viewports; raw HTML, CSS variables, and dashboard JavaScript keep the runtime simple but leave duplication across project surfaces.
 
@@ -72,5 +84,6 @@ Accessibility still needs a real WCAG pass; responsive behavior remains optimize
 - [ORB-10736] removed the native learning curation surface while preserving friction triage.
 - [ORB-00144] grouped scoreboard metrics and added knowledge counters.
 - [ORB-10444] retired a deprecated tab, folded Scoreboard under Diagnostics, pinned the Knowledge detail pane, and added task ship + comments.
+- [ORB-10874] clarified the Tasks count and filter state, made the log panel collapsible/resizable, and added pending/undo feedback and an aggregate-mode mutation guard to inline task edits.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

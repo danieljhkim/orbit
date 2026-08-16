@@ -2,7 +2,7 @@
 // Pure vanilla JS, split into ES modules with no build step.
 
 import { el, statusPill, stateCell, fetchJson, listItems, requestJson, postJson, patchJson, syncNodes, positiveIntParam, getWorkspace, setWorkspace, setMultiWorkspace, isAggregateView, renderPanelPlaceholder } from './common.js';
-import { buildChips, cacheCrewPayload, copyTaskIdWithNotice, hasCrewOptions, openVisibleTask, renderTasks, setPinnedExternalTask, wireSearch } from './tasks.js';
+import { buildChips, buildTasksHash, applyTasksHashQuery, cacheCrewPayload, copyTaskIdWithNotice, hasCrewOptions, openVisibleTask, renderTasks, setPinnedExternalTask, syncTaskControls, wireSearch } from './tasks.js';
 import { applyAuditHashQuery, buildAuditChips, buildAuditHash, fetchAndRenderAudit, fetchAndRenderPolicy, getActiveAuditSubtab, navigateToAuditExecution, renderAuditSummary, setActiveAuditSubtabFromButton, setAuditSubtab, syncAuditControls, wireAuditSearch, } from './audit.js';
 import { renderScoreboard } from './scoreboard.js';
 import { fetchAndRenderReliability, wireReliabilityWindowSelector } from './reliability.js';
@@ -49,6 +49,10 @@ const DEFAULT_INACTIVE_STATUSES = new Set(["someday"]);
 const STATUS_UPDATE_TARGETS = STATUS_ORDER
   .filter((status) => !["rejected", "archived"].includes(status))
   .concat(["done"]);
+// ORB-10874: the statuses shown when no `status` filter is represented in the
+// URL — a single source both the initial in-memory state and the hash-parsing
+// default (applyTasksHashQuery) read from, so they cannot drift apart.
+const DEFAULT_ACTIVE_STATUSES = STATUS_ORDER.filter((s) => !DEFAULT_INACTIVE_STATUSES.has(s));
 
 const JOB_RUN_LIMIT = positiveIntParam("runs", 25);
 const DIAG_LIMIT = positiveIntParam("diag", 50);
@@ -59,10 +63,13 @@ const FRICTION_STATUSES = ["open", "triaged", "resolved"];
 const $ = (id) => document.getElementById(id);
 
 let searchQuery = "";
-let activeStatuses = new Set(
-  STATUS_ORDER.filter((s) => !DEFAULT_INACTIVE_STATUSES.has(s)),
-);
+let activeStatuses = new Set(DEFAULT_ACTIVE_STATUSES);
 let lastTasks = [];
+// ORB-10874: paging metadata from the single-workspace `/api/tasks` envelope
+// (`{ items, total, limit, truncated }`) so the count can state a shown/total/
+// server-limit fact instead of an ambiguous `N/50`. Null for the aggregate
+// `/api/tasks/all` view, which answers a bare array with no such metadata.
+let lastTasksMeta = null;
 let lastRuns = [];
 let lastDiagnostics = { metrics: [], errors: [], implement_one: [] };
 let lastFrictionPayload = { stats: {}, tags: [], items: [] };
@@ -83,6 +90,7 @@ let dashboardWorkspaces = [];
 function taskContext() {
   return {
     getTasks: () => lastTasks,
+    getTasksMeta: () => lastTasksMeta,
     replaceTask: (updatedTask) => {
       const index = lastTasks.findIndex((task) => task.id === updatedTask.id);
       if (index >= 0) {
@@ -94,6 +102,7 @@ function taskContext() {
     getActiveStatuses: () => activeStatuses,
     setActiveStatuses: (statuses) => { activeStatuses = statuses; },
     statusOrder: STATUS_ORDER,
+    defaultActiveStatuses: DEFAULT_ACTIVE_STATUSES,
     statusUpdateTargets: STATUS_UPDATE_TARGETS,
     fmtAbsTime,
     refreshDashboard,
@@ -167,6 +176,13 @@ function routerContext() {
     setActiveAuditSubtabFromButton,
     buildAuditHash,
     syncAuditControls,
+
+    // ORB-10874: tasks pass-throughs (mirrors the audit ones above) so the
+    // status/search filters shown on the Tasks tab are represented in the
+    // hash and survive reload/back-navigation the same way audit's do.
+    applyTasksHashQuery: (query) => applyTasksHashQuery(query, taskContext()),
+    buildTasksHash: () => buildTasksHash(taskContext()),
+    syncTaskControls: () => syncTaskControls(taskContext()),
   };
 }
 
@@ -807,12 +823,27 @@ function fetchAndCacheCrews() {
   });
 }
 
+// ORB-10874: the single-workspace list endpoint filters server-side, so the
+// active status chips are sent as `?status=a,b` instead of over-fetching every
+// status and filtering client-side. That keeps the `total`/`limit`/`truncated`
+// envelope meaningful for the filter actually in effect (see formatTaskCount
+// in tasks.js). Omitted when every status (or none) is active, matching the
+// endpoint's own "status-neutral" default for the all-active case.
+function tasksListPath() {
+  const sp = new URLSearchParams();
+  if (activeStatuses.size > 0 && activeStatuses.size < STATUS_ORDER.length) {
+    sp.set("status", STATUS_ORDER.filter((s) => activeStatuses.has(s)).join(","));
+  }
+  const qs = sp.toString();
+  return qs ? `/api/tasks?${qs}` : "/api/tasks";
+}
+
 function fetchAndRenderTasks() {
   // In global mode with the aggregate ("All workspaces") view selected, pull
   // every workspace's tasks; otherwise the single/selected workspace's tasks
   // (the workspace query param is applied by fetchJson).
   const aggregate = isAggregateView();
-  const path = aggregate ? "/api/tasks/all" : "/api/tasks";
+  const path = aggregate ? "/api/tasks/all" : tasksListPath();
   // /api/crews is per-workspace and 400s without a concrete workspace, so in
   // aggregate mode skip the crew fetch and let the crew controls degrade to a
   // disabled "crew unavailable" fallback rather than rejecting the Promise.all
@@ -825,9 +856,13 @@ function fetchAndRenderTasks() {
     fetchJson(path),
     crews,
   ]).then(([payload]) => {
-    // /api/tasks answers `{ items, ... }` (ORB-10400); /api/tasks/all a bare array.
+    // /api/tasks answers `{ items, total, limit, truncated }` (ORB-10400);
+    // /api/tasks/all a bare array with no paging metadata.
     const tasks = listItems(payload);
     lastTasks = tasks;
+    lastTasksMeta = !aggregate && payload && !Array.isArray(payload)
+      ? { total: payload.total, limit: payload.limit, truncated: payload.truncated }
+      : null;
     renderTasks(tasks, taskContext());
   });
 }
@@ -883,11 +918,27 @@ function buildWorkspaceSelector() {
 
   select.addEventListener("change", () => {
     setWorkspace(select.value);
+    persistWorkspaceToUrl(select.value);
     refreshDashboard();
   });
 
   const meta = $("meta");
   meta.insertBefore(select, $("refresh-btn"));
+}
+
+// ORB-10874: the workspace selector only updated in-memory state, so a reload
+// or a copied link silently fell back to the server's default workspace
+// instead of the one the operator was actually looking at. `getWorkspace()`
+// already seeds from `?workspace=` on first load (common.js); this keeps that
+// query param in sync on every selection without a full navigation/reload.
+function persistWorkspaceToUrl(id) {
+  const url = new URL(window.location.href);
+  if (id) {
+    url.searchParams.set("workspace", id);
+  } else {
+    url.searchParams.delete("workspace");
+  }
+  history.replaceState(null, "", url);
 }
 
 function activeRefreshJobs() {
