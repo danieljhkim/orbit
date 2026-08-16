@@ -1,6 +1,6 @@
 use clap::Args;
 use orbit_core::OrbitRuntime;
-use orbit_core::command::skill::{SkillDoctorResult, SkillDoctorStatus};
+use orbit_core::application::skill::{SkillDoctorResult, SkillDoctorStatus};
 use serde_json::{Value, json};
 
 use crate::command::{Block, CommandOut, Execute, Payload};

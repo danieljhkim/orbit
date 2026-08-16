@@ -82,7 +82,20 @@ feature.
 - **orbit-web**: HTTP API, embedded dashboard UI, and remote web connection. It owns axum handlers/assets, dashboard mutations, and the dashboard-specific SSH local-forward lifecycle. Depends on `orbit-core` for runtime-backed operations and projections and on `orbit-registry` for global workspace discovery; consumed by `orbit-cli` via `web serve` and `web connect`. Public surface is `ServeArgs`, `ConnectArgs`, and their serve/connect entry points.
 - **orbit-agent**: per-provider `AgentRuntime` implementations under `providers/<name>/<name>_runtime.rs` (claude, codex, gemini, gemini_http, grok, openai_compat, anthropic, ollama, mock_agent). Provides the CLI agent runtimes Orbit dispatches, plus a standalone HTTP `LoopTransport` / `AgentLoop` SDK surface with its own examples — Orbit's job execution no longer reaches that loop ([ORB-10801]). Depends on `orbit-types`, `orbit-common`, and `orbit-tools`.
 - **orbit-engine**: activity/job execution, template rendering, retry logic, subprocess execution, and tool-aware automation. Owns the CLI agent subprocess runner (`activity_job::cli_runner`), which references `orbit-agent::{Agent, AgentConfig}` directly so orbit-core stays clean of orbit-agent types. Depends on `orbit-agent`, `orbit-types`, `orbit-common`, `orbit-exec`, `orbit-store`, and `orbit-tools`.
-- **orbit-core**: neutral runtime bootstrap, default asset seeding, runtime-integrated command modules, and metrics. It exposes the `OrbitRuntime` kernels composed by `orbit-cmd`, `orbit-cli`, and `orbit-web`; it does not depend on transport or presentation feature crates, `orbit-agent`, or `orbit-cmd`.
+- **orbit-core**: directional application/runtime composition and metrics. Its
+  `runtime` module owns stores, eventing, audit, claims, reservations, tool and
+  process execution mechanisms, and construction from an already-resolved
+  `orbit-config` value. `application` owns shared use-case DTOs and coordinated
+  operations. `adapter` owns Orbit-tool and engine-host protocol translation;
+  `bootstrap` owns initialization, managed defaults, policy seeding, and
+  forward-only startup migrations; `composition` is the only module that joins
+  those pieces and loads resolved configuration. The enforced internal graph is
+  `runtime <- application <- adapter`, with `composition -> config + bootstrap
+  + runtime + adapters`. Runtime production code may not import `application`
+  or a former `command` module, and application production code may not import
+  adapters. Core exposes `OrbitRuntime` to `orbit-cmd`, `orbit-cli`, and
+  `orbit-web`; it does not depend on transport/presentation crates,
+  `orbit-agent`, or `orbit-cmd`.
 - **orbit-cmd**: shared application composition for CLI and Web consumers. It owns CLI-facing command groups plus registry-aware runtime and routine assembly, joining `orbit-core` kernels to `orbit-registry` without reversing either lower-layer dependency. Runtime methods are exposed as per-module `*Commands` extension traits.
 - **orbit-cli**: clap-based entry point and local client-configuration surface. It assembles MCP, Registry, Web, and Core. `mcp serve` and `mcp listen` compose one host and serve it over stdio or TCP; `mcp serve --mode remote` delegates only the byte-transparent SSH process to `orbit-mcp`. In every case the accepting machine resolves local state and dispatches through Core.
 

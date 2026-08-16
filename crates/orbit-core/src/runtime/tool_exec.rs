@@ -4,7 +4,6 @@ use std::sync::Arc;
 
 use orbit_common::security::redaction::{redact_all_error, redact_sensitive_env_json};
 use orbit_tools::ToolContext;
-use orbit_types::policy::Role;
 use orbit_types::record::OrbitEvent;
 use orbit_types::workflow::tool_allowed;
 use serde_json::Value;
@@ -23,40 +22,10 @@ pub(crate) enum CapabilityEnforcement {
 }
 
 impl OrbitRuntime {
-    pub fn run_tool(&self, name: &str, input: Value) -> Result<Value, OrbitError> {
-        self.run_tool_with_role(name, input, Role::Admin)
-    }
-
-    pub(crate) fn run_tool_with_role(
+    pub(crate) fn execute_registered_tool(
         &self,
         name: &str,
         input: Value,
-        role: Role,
-    ) -> Result<Value, OrbitError> {
-        self.run_tool_with_context_and_role(name, input, role, ToolContext::default())
-    }
-
-    pub(crate) fn run_tool_with_context_and_role(
-        &self,
-        name: &str,
-        input: Value,
-        role: Role,
-        tool_context: ToolContext,
-    ) -> Result<Value, OrbitError> {
-        self.run_tool_with_context_and_role_and_capability(
-            name,
-            input,
-            role,
-            tool_context,
-            CapabilityEnforcement::Enforce,
-        )
-    }
-
-    pub(crate) fn run_tool_with_context_and_role_and_capability(
-        &self,
-        name: &str,
-        input: Value,
-        _role: Role,
         mut tool_context: ToolContext,
         capability_enforcement: CapabilityEnforcement,
     ) -> Result<Value, OrbitError> {
@@ -70,14 +39,6 @@ impl OrbitRuntime {
             Some(host) => host.task_scope().task_id,
             None => resolve_task_id_from_context(self, &tool_context)?,
         };
-
-        if tool_context.orbit_host.is_none() {
-            tool_context.orbit_host = Some(super::build_orbit_tool_host(
-                self,
-                resolved_task_id.clone(),
-                None,
-            ));
-        }
 
         // Ensure fs tools always have a workspace boundary for sandboxing.
         if tool_context.workspace_root.is_none() {
@@ -207,7 +168,7 @@ impl OrbitRuntime {
     }
 }
 
-fn resolve_task_id_from_context(
+pub(crate) fn resolve_task_id_from_context(
     runtime: &OrbitRuntime,
     tool_context: &ToolContext,
 ) -> Result<Option<String>, OrbitError> {

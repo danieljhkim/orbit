@@ -9,7 +9,7 @@ use tempfile::{TempDir, tempdir};
 
 use super::super::crew::select_crew_name;
 use crate::OrbitRuntime;
-use crate::command::task::TaskAddParams;
+use crate::application::task::TaskAddParams;
 
 const CONSTELLATION_DEFAULT_PROVIDER_ENV: &str = "CONSTELLATION_DEFAULT_PROVIDER";
 

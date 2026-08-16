@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use clap::Parser;
 use orbit_core::OrbitRuntime;
-use orbit_core::command::task::TaskAddParams;
+use orbit_core::application::task::TaskAddParams;
 use tempfile::tempdir;
 
 use crate::command::Execute;

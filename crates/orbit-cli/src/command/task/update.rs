@@ -1,5 +1,5 @@
 use clap::{ArgAction, Args};
-use orbit_core::command::task::TaskUpdateParams;
+use orbit_core::application::task::TaskUpdateParams;
 use orbit_core::{OrbitError, OrbitRuntime, TaskComplexity, TaskStatus, TaskType};
 use orbit_types::task::TaskArtifact;
 

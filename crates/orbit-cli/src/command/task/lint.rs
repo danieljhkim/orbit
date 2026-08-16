@@ -1,5 +1,5 @@
 use clap::Args;
-use orbit_core::command::task::TaskLintSeverity;
+use orbit_core::application::task::TaskLintSeverity;
 use orbit_core::{OrbitError, OrbitRuntime, TaskStatus};
 use serde_json::{Value, json};
 

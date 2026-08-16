@@ -1,0 +1,179 @@
+//! Composition root joining resolved configuration, the runtime kernel, and adapters.
+
+use std::path::{Path, PathBuf};
+
+use orbit_common::OrbitError;
+use orbit_config::{ConfigRoots, ResolvedConfig};
+use orbit_store::global_policy_def_store;
+
+use crate::bootstrap::init::ensure_orbit_root_initialized;
+use crate::bootstrap::policy::seed_default_policies;
+use crate::bootstrap::task_migration::apply_configured_id_start;
+use crate::runtime::run_input::managed_run_context_from_env;
+use crate::runtime::{
+    OrbitRuntime, OrbitRuntimeRoots, ResolvedOrbitRoots, WorkspaceRootHint,
+    WorkspaceRuntimeBinding, resolve_bootstrap_roots, resolve_bootstrap_roots_with_hint,
+    resolve_global_root, resolve_initialize_roots, resolve_initialize_roots_with_hint,
+};
+
+impl OrbitRuntime {
+    pub fn initialize() -> Result<Self, OrbitError> {
+        Self::initialize_with_root_override(None)
+    }
+
+    pub fn initialize_with_root_override(root_override: Option<&Path>) -> Result<Self, OrbitError> {
+        let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+        let roots = Self::resolve_roots_for_cwd(&cwd, root_override)?;
+        Self::initialize_from_resolved_roots(roots, None)
+    }
+
+    pub fn initialize_from_resolved_roots(
+        roots: OrbitRuntimeRoots,
+        binding: Option<WorkspaceRuntimeBinding>,
+    ) -> Result<Self, OrbitError> {
+        ensure_orbit_root_initialized(&roots.global_root, &roots.shared_root)?;
+        build_runtime(
+            &roots.global_root,
+            &roots.shared_root,
+            &roots.local_root,
+            binding,
+        )
+    }
+
+    pub fn resolve_roots_for_cwd(
+        cwd: &Path,
+        root_override: Option<&Path>,
+    ) -> Result<OrbitRuntimeRoots, OrbitError> {
+        roots_from_resolved(
+            resolve_initialize_roots(cwd, root_override)?,
+            root_override.is_some(),
+        )
+    }
+
+    pub fn resolve_roots_for_cwd_with_hint(
+        cwd: &Path,
+        root_override: Option<&Path>,
+        hint: Option<&WorkspaceRootHint>,
+    ) -> Result<OrbitRuntimeRoots, OrbitError> {
+        roots_from_resolved(
+            resolve_initialize_roots_with_hint(cwd, root_override, hint)?,
+            root_override.is_some(),
+        )
+    }
+
+    pub fn resolve_bootstrap_roots_for_cwd(
+        cwd: &Path,
+        root_override: Option<&Path>,
+    ) -> Result<OrbitRuntimeRoots, OrbitError> {
+        roots_from_resolved(
+            resolve_bootstrap_roots(cwd, root_override)?,
+            has_explicit_root_override(root_override),
+        )
+    }
+
+    pub fn resolve_bootstrap_roots_for_cwd_with_hint(
+        cwd: &Path,
+        root_override: Option<&Path>,
+        hint: Option<&WorkspaceRootHint>,
+    ) -> Result<OrbitRuntimeRoots, OrbitError> {
+        roots_from_resolved(
+            resolve_bootstrap_roots_with_hint(cwd, root_override, hint)?,
+            has_explicit_root_override(root_override),
+        )
+    }
+
+    pub fn from_roots(global_root: &Path, workspace_root: &Path) -> Result<Self, OrbitError> {
+        Self::from_resolved_roots(global_root, workspace_root, workspace_root)
+    }
+
+    pub fn from_roots_with_binding(
+        global_root: &Path,
+        workspace_root: &Path,
+        binding: WorkspaceRuntimeBinding,
+    ) -> Result<Self, OrbitError> {
+        Self::from_resolved_roots_with_binding(global_root, workspace_root, workspace_root, binding)
+    }
+
+    pub fn from_resolved_roots(
+        global_root: &Path,
+        shared_root: &Path,
+        local_root: &Path,
+    ) -> Result<Self, OrbitError> {
+        build_runtime(global_root, shared_root, local_root, None)
+    }
+
+    pub fn from_resolved_roots_with_binding(
+        global_root: &Path,
+        shared_root: &Path,
+        local_root: &Path,
+        binding: WorkspaceRuntimeBinding,
+    ) -> Result<Self, OrbitError> {
+        build_runtime(global_root, shared_root, local_root, Some(binding))
+    }
+
+    pub fn in_memory() -> Result<Self, OrbitError> {
+        let temp_dir = tempfile::Builder::new()
+            .prefix("orbit-in-memory-")
+            .tempdir()
+            .map_err(|error| OrbitError::Io(error.to_string()))?;
+        let data_root = temp_dir.path().to_path_buf();
+        let runtime_config = prepare_resolved_config(&data_root, &data_root)?;
+        Self::build_in_memory_from_resolved_config(&data_root, &runtime_config, temp_dir)
+    }
+}
+
+fn build_runtime(
+    global_root: &Path,
+    shared_root: &Path,
+    local_root: &Path,
+    binding: Option<WorkspaceRuntimeBinding>,
+) -> Result<OrbitRuntime, OrbitError> {
+    let layout_report = orbit_store::layout::upgrade_workspace_layout(shared_root)?;
+    let runtime_config = prepare_resolved_config(global_root, shared_root)?;
+    let runtime = OrbitRuntime::build_from_resolved_config(
+        global_root,
+        shared_root,
+        local_root,
+        binding,
+        &runtime_config,
+        layout_report,
+    )?;
+    if !managed_run_context_from_env() {
+        runtime.reconcile_stale_job_runs_on_open();
+    }
+    Ok(runtime)
+}
+
+fn prepare_resolved_config(
+    global_root: &Path,
+    workspace_root: &Path,
+) -> Result<ResolvedConfig, OrbitError> {
+    let resolved = ResolvedConfig::load(&ConfigRoots::new(global_root, workspace_root))?;
+    if let Some(start) = resolved.tasks_id_start {
+        apply_configured_id_start(global_root, start)?;
+    }
+    let global_policy_store = global_policy_def_store(resolved.persistence.policy_dir.clone());
+    seed_default_policies(global_policy_store.as_ref(), false)?;
+    Ok(resolved)
+}
+
+fn roots_from_resolved(
+    resolved: ResolvedOrbitRoots,
+    pin_global_to_shared: bool,
+) -> Result<OrbitRuntimeRoots, OrbitError> {
+    let global_root = if pin_global_to_shared {
+        resolved.shared_root.clone()
+    } else {
+        resolve_global_root()?
+    };
+    Ok(OrbitRuntimeRoots {
+        global_root,
+        shared_root: resolved.shared_root,
+        local_root: resolved.local_root,
+    })
+}
+
+fn has_explicit_root_override(root_override: Option<&Path>) -> bool {
+    root_override.is_some()
+        || std::env::var("ORBIT_ROOT").is_ok_and(|value| !value.trim().is_empty())
+}

@@ -22,7 +22,7 @@ use orbit_types::workflow::{AutoTaskDefinition, DedupePolicy, auto_task_tag};
 use serde_json::{Value, json};
 
 use crate::OrbitRuntime;
-use crate::command::task::TaskAddParams;
+use crate::application::task::TaskAddParams;
 
 use super::loader::{AutoTaskLoadError, collect_auto_tasks};
 use super::schedule::{AutoTaskDueDecision, decide_due};

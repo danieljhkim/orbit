@@ -14,15 +14,13 @@ use orbit_store::{
 };
 
 use orbit_common::OrbitError;
-use orbit_config::{ConfigRoots, ResolvedConfig};
+use orbit_config::ResolvedConfig;
 use orbit_engine::PrConfig;
 use orbit_tools::ToolRegistry;
 use orbit_tools::external::ExternalTool;
 use orbit_types::policy::DEFAULT_POLICY_NAME;
 use orbit_types::workspace::WorkspacePaths;
 
-use crate::command::init::global_skills_dir;
-use crate::command::policy::seed_default_policies;
 use crate::context::OrbitContext;
 use crate::context::{
     ActorIdentity, OrbitExecutionAssets, OrbitPolicyContext, OrbitRuntimeSettings, OrbitStores,
@@ -38,13 +36,8 @@ pub(crate) fn build_context_from_roots(
     workspace_root: &Path,
     local_root: &Path,
     binding: Option<&WorkspaceRuntimeBinding>,
+    runtime_config: &ResolvedConfig,
 ) -> Result<OrbitContext, OrbitError> {
-    let runtime_config = ResolvedConfig::load(&ConfigRoots::new(global_root, workspace_root))?;
-    // Apply a configured `[tasks] id_start` floor before any task ids are
-    // allocated. Forward-only, so it is a no-op once the counter has advanced.
-    if let Some(start) = runtime_config.tasks_id_start {
-        crate::command::task_migration::apply_configured_id_start(global_root, start)?;
-    }
     let persistence = &runtime_config.persistence;
 
     let store = Store::open(&persistence.audit_db)?;
@@ -91,7 +84,6 @@ pub(crate) fn build_context_from_roots(
     let task_reservation_store = task_reservation_store_sqlite(store.clone());
     let executor_def_store = global_executor_def_store(persistence.executor_dir.clone());
     let global_policy_store = global_policy_def_store(persistence.policy_dir.clone());
-    seed_default_policies(global_policy_store.as_ref(), false)?;
     let workspace_policy_store = workspace_policy_def_store(paths.policies_dir.clone());
     let policy_def_store = layered_policy_def_store(workspace_policy_store, global_policy_store);
     let active_policy = policy_def_store
@@ -102,10 +94,8 @@ pub(crate) fn build_context_from_roots(
             ))
         })?;
 
-    let skill_catalog = SkillCatalog::layered(
-        persistence.skill_dir.clone(),
-        global_skills_dir(global_root),
-    );
+    let skill_catalog =
+        SkillCatalog::layered(persistence.skill_dir.clone(), global_root.join("skills"));
     skill_catalog.ensure_layout()?;
 
     let mut registry = ToolRegistry::new();
@@ -244,18 +234,7 @@ fn workspace_slug(repo_root: &Path) -> String {
         .to_string()
 }
 
-pub(super) type TempDir = tempfile::TempDir;
-
-pub(super) fn build_context_in_memory() -> Result<(OrbitContext, TempDir), OrbitError> {
-    let guard = tempfile::Builder::new()
-        .prefix("orbit-in-memory-")
-        .tempdir()
-        .map_err(|e| OrbitError::Io(e.to_string()))?;
-    let data_root = guard.path().to_path_buf();
-
-    let context = build_context_from_roots(&data_root, &data_root, &data_root, None)?;
-    Ok((context, guard))
-}
+pub(crate) type TempDir = tempfile::TempDir;
 
 fn load_external_tools(store: &Store, registry: &mut ToolRegistry) -> Result<(), OrbitError> {
     let stored_tools = store.list_tools()?;

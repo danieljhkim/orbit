@@ -4,7 +4,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
 use orbit_common::fs::path::workspace_relative_paths_overlap;
-use orbit_common::fs::selector::Selector;
+use orbit_common::fs::selector::{Selector, canonical_selector_in_workspace};
 use orbit_common::fs::task_io::prune_missing_context_files;
 use orbit_common::protocol::tool_input::{
     optional_string_list_alias, optional_u32_alias, required_string,
@@ -23,10 +23,9 @@ use orbit_types::telemetry::AuditEventStatus;
 use serde_json::{Value, json};
 
 use crate::OrbitRuntime;
-use crate::command::task::canonicalize_context_files_for_read;
 use crate::runtime::coordination_audit::{CoordinationAuditEvent, record_coordination_audit_event};
 
-pub(in crate::runtime) fn list(runtime: &OrbitRuntime) -> Result<Value, OrbitError> {
+pub(crate) fn list(runtime: &OrbitRuntime) -> Result<Value, OrbitError> {
     let workspace_id = workspace_task_reservation_id(runtime)?;
     let reservation_result = runtime
         .stores()
@@ -104,7 +103,7 @@ pub(in crate::runtime) fn list(runtime: &OrbitRuntime) -> Result<Value, OrbitErr
     }))
 }
 
-pub(in crate::runtime) fn release(
+pub(crate) fn release(
     runtime: &OrbitRuntime,
     input: Value,
     agent: Option<String>,
@@ -184,7 +183,7 @@ fn validate_reservation_id_form(reservation_id: &str) -> Result<(), OrbitError> 
     )))
 }
 
-pub(in crate::runtime) fn reserve(
+pub(crate) fn reserve(
     runtime: &OrbitRuntime,
     input: Value,
     agent: Option<String>,
@@ -436,6 +435,16 @@ fn existing_context_files_at_root(task: &Task, workspace_root: &Path) -> Vec<Str
     let canonical = canonicalize_context_files_for_read(&task.context_files, workspace_root);
     let (kept, _dropped) = prune_missing_context_files(workspace_root, canonical);
     kept
+}
+
+fn canonicalize_context_files_for_read(
+    candidates: &[String],
+    workspace_root: &Path,
+) -> Vec<String> {
+    candidates
+        .iter()
+        .filter_map(|entry| canonical_selector_in_workspace(entry, workspace_root).ok())
+        .collect()
 }
 
 fn task_is_descendant_of(

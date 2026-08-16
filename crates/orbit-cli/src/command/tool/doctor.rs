@@ -5,7 +5,7 @@ use crate::output::color::{Domain, Role};
 use serde_json::json;
 
 pub(super) fn execute_doctor(runtime: &OrbitRuntime) -> CommandOut {
-    use orbit_core::command::tool::DoctorStatus;
+    use orbit_core::adapter::command::DoctorStatus;
 
     let results = runtime.doctor()?;
     let mut issues = 0;

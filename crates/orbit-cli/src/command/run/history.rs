@@ -1,6 +1,6 @@
 use clap::Args;
 use orbit_core::OrbitRuntime;
-use orbit_core::command::job::JobRunListParams;
+use orbit_core::application::job::JobRunListParams;
 use serde_json::json;
 
 use crate::command::{Block, CommandOut, Execute, Payload};

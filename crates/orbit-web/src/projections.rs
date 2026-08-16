@@ -5,7 +5,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use orbit_core::command::job::JobCatalogEntry;
+use orbit_core::application::job::JobCatalogEntry;
 use orbit_core::{
     AuditEvent, JobRun, OrbitError, OrbitRuntime, ResolvedCrewProjection, Task, TaskStatus,
     resolve_task_dependencies,

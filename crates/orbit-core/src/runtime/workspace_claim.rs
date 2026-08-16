@@ -49,7 +49,7 @@ const DEFAULT_CLAIM_TTL_SECONDS: u32 = 3600;
 const MAX_CLAIM_TTL_SECONDS: u32 = 43_200;
 const CLAIM_TARGET_TYPE: &str = "workspace_claim";
 
-pub(super) fn acquire(
+pub(crate) fn acquire(
     runtime: &OrbitRuntime,
     input: Value,
     agent: Option<String>,
@@ -125,7 +125,7 @@ pub(super) fn acquire(
     }))
 }
 
-pub(super) fn release(
+pub(crate) fn release(
     runtime: &OrbitRuntime,
     input: Value,
     agent: Option<String>,
@@ -209,7 +209,7 @@ pub(super) fn release(
     }))
 }
 
-pub(super) fn show(runtime: &OrbitRuntime) -> Result<Value, OrbitError> {
+pub(crate) fn show(runtime: &OrbitRuntime) -> Result<Value, OrbitError> {
     let result = runtime.stores().task_reservations().show_workspace_claim(
         &workspace_orbit_dir(runtime),
         workspace_task_reservation_id(runtime)?.as_deref(),

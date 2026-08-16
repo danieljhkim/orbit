@@ -139,6 +139,41 @@ for index in "${!workspace_crates[@]}"; do
   )
 done
 
+# orbit-core is one crate, but its internal boundaries are directional too.
+# Keep the runtime kernel independent from use cases and protocol adapters;
+# composition is the only owner allowed to join resolved config, bootstrap,
+# runtime construction, and adapter registration.
+if rg -n 'crate::(command|application)' \
+  "$repo_root/crates/orbit-core/src/runtime" \
+  -g '*.rs' -g '!**/tests/**'; then
+  echo "forbidden orbit-core runtime-to-command/application import"
+  fail=1
+fi
+
+if rg -n 'crate::adapter' \
+  "$repo_root/crates/orbit-core/src/application" \
+  -g '*.rs' -g '!**/tests/**'; then
+  echo "forbidden orbit-core application-to-adapter import"
+  fail=1
+fi
+
+if rg -n 'ResolvedConfig::load|ConfigRoots::' \
+  "$repo_root/crates/orbit-core/src/runtime" \
+  -g '*.rs' -g '!**/tests/**'; then
+  echo "orbit-core runtime must consume resolved config supplied by composition"
+  fail=1
+fi
+
+for retired_path in \
+  "$repo_root/crates/orbit-core/src/command" \
+  "$repo_root/crates/orbit-core/src/runtime/orbit_tool_host" \
+  "$repo_root/crates/orbit-core/src/runtime/engine/runtime_host.rs"; do
+  if [[ -e "$retired_path" ]]; then
+    echo "retired orbit-core ownership path still exists: $retired_path"
+    fail=1
+  fi
+done
+
 if [[ "$fail" -ne 0 ]]; then
   exit 1
 fi

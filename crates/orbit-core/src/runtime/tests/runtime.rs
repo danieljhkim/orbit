@@ -8,7 +8,7 @@ use orbit_types::workflow::JobRunState;
 use orbit_common::test_env;
 use tempfile::tempdir;
 
-use crate::command::activity::DEFAULT_ACTIVITY_FILES;
+use crate::bootstrap::activity::DEFAULT_ACTIVITY_FILES;
 
 fn test_runtime() -> (tempfile::TempDir, OrbitRuntime, PathBuf, PathBuf) {
     let root = tempdir().expect("create tempdir");

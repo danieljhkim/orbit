@@ -245,7 +245,7 @@ fn an_open_manually_minted_instance_defers_the_next_fire_like_a_fired_one() {
     runtime
         .update_task(
             &minted.id,
-            crate::command::task::TaskUpdateParams {
+            crate::application::task::TaskUpdateParams {
                 status: Some(TaskStatus::Rejected),
                 ..Default::default()
             },

@@ -7,6 +7,7 @@ mod executor_def;
 mod job;
 mod routine;
 mod run_state;
+mod ship;
 mod skill;
 pub use error::WorkflowError;
 
@@ -46,4 +47,5 @@ pub use routine::{
     RoutineRetries, RoutineTarget, RoutineTrigger,
 };
 pub use run_state::PipelineState;
+pub use ship::{ShipMode, resolved_ship_mode};
 pub use skill::Skill;

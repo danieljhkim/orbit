@@ -229,7 +229,7 @@ fn replica_runtime_refuses_task_writes_and_hides_coordination_reads() {
             .expect("replica runtime");
 
     let error = runtime
-        .add_task(orbit_core::command::task::TaskAddParams {
+        .add_task(orbit_core::application::task::TaskAddParams {
             title: "must not fork".to_string(),
             ..Default::default()
         })
