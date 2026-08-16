@@ -40,6 +40,63 @@ fn layered_catalog_uses_merge_by_key_precedence() {
         .map(|skill| skill.id)
         .collect::<Vec<_>>();
     assert_eq!(ids, vec!["orbit", "orbit-search"]);
+
+    let rows = catalog.doctor().expect("doctor layered catalog");
+    assert_eq!(rows.len(), 2, "the workspace shadow is counted once");
+    assert!(
+        rows.iter()
+            .all(|row| row.status == SkillCatalogDoctorStatus::Ok),
+        "a valid workspace shadow must not make its global peer faulty: {rows:?}"
+    );
+}
+
+#[test]
+fn doctor_reports_skill_directories_without_skill_markdown() {
+    let root = tempdir().expect("catalog tempdir");
+    write_skill(root.path(), "orbit", "healthy skill");
+
+    let reference_residue = root.path().join("orbit-search");
+    fs::create_dir_all(reference_residue.join("references")).expect("create reference residue");
+    fs::write(
+        reference_residue.join("references/search.md"),
+        "retired reference\n",
+    )
+    .expect("write retired reference");
+    let empty_residue = root.path().join("orbit-task");
+    fs::create_dir(&empty_residue).expect("create empty residue");
+
+    let catalog = SkillCatalog::new(root.path().to_path_buf());
+    let rows = catalog.doctor().expect("doctor catalog");
+    assert_eq!(rows.len(), 3, "every immediate skill directory is scanned");
+    assert_eq!(
+        rows.iter()
+            .filter(|row| row.status == SkillCatalogDoctorStatus::Ok)
+            .count(),
+        1
+    );
+    for residue in [&reference_residue, &empty_residue] {
+        let id = residue
+            .file_name()
+            .and_then(|name| name.to_str())
+            .expect("residue id");
+        let row = rows
+            .iter()
+            .find(|row| row.skill_id == id)
+            .expect("residue row");
+        assert_eq!(row.status, SkillCatalogDoctorStatus::Warning);
+        assert!(row.message.contains("missing SKILL.md"), "{}", row.message);
+        assert!(
+            row.message.contains(residue.to_string_lossy().as_ref()),
+            "the finding names the residue directory: {}",
+            row.message
+        );
+    }
+
+    assert_eq!(
+        catalog.list().expect("list healthy skills").len(),
+        1,
+        "residue is diagnosed but never loaded"
+    );
 }
 
 fn write_skill(root: &Path, id: &str, purpose: &str) {

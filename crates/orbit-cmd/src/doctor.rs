@@ -633,7 +633,7 @@ fn doctor_check_definition_artifacts(runtime: &OrbitRuntime) -> Vec<WorkspaceDoc
                     format!("no {} on disk yet", health.kind.as_str())
                 } else {
                     format!(
-                        "{} {} loaded, none stale, deprecated, or faulty",
+                        "{} {} loaded, none residual, stale, deprecated, or faulty",
                         health.scanned,
                         health.kind.as_str()
                     )

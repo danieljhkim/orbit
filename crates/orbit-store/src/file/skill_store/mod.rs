@@ -63,12 +63,14 @@ struct SkillFrontmatter {
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub enum SkillCatalogDoctorStatus {
     Ok,
+    Warning,
     Error,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
 pub struct SkillCatalogDoctorRow {
     pub skill_id: String,
+    pub path: PathBuf,
     pub status: SkillCatalogDoctorStatus,
     pub message: String,
 }
@@ -127,17 +129,27 @@ impl SkillCatalog {
         ids.sort();
         let mut rows = Vec::new();
         for id in ids {
+            let path = self.candidate_path(&id);
             match self.load(&id) {
                 Ok(_) => rows.push(SkillCatalogDoctorRow {
                     skill_id: id,
+                    path,
                     status: SkillCatalogDoctorStatus::Ok,
                     message: String::new(),
                 }),
-                Err(err) => rows.push(SkillCatalogDoctorRow {
-                    skill_id: id,
-                    status: SkillCatalogDoctorStatus::Error,
-                    message: err.to_string(),
-                }),
+                Err(err) => {
+                    let status = if path.is_dir() && !path.join("SKILL.md").exists() {
+                        SkillCatalogDoctorStatus::Warning
+                    } else {
+                        SkillCatalogDoctorStatus::Error
+                    };
+                    rows.push(SkillCatalogDoctorRow {
+                        skill_id: id,
+                        path,
+                        status,
+                        message: err.to_string(),
+                    });
+                }
             }
         }
         Ok(rows)
@@ -178,6 +190,17 @@ impl SkillCatalog {
         }
 
         Ok(ids)
+    }
+
+    fn candidate_path(&self, skill_id: &str) -> PathBuf {
+        let workspace = self.root.join(skill_id);
+        if workspace.exists() {
+            workspace
+        } else {
+            self.global_root
+                .as_ref()
+                .map_or(workspace, |global| global.join(skill_id))
+        }
     }
 }
 
@@ -222,8 +245,9 @@ fn load_skill_from_dir(skill_id: &str, dir: &Path) -> Result<LoadedSkill, OrbitE
     let skill_md_path = dir.join("SKILL.md");
     if !skill_md_path.exists() {
         return Err(OrbitError::SkillValidation(format!(
-            "missing SKILL.md for skill '{}'",
-            skill_id
+            "skill directory '{}' is missing SKILL.md for skill '{}'",
+            dir.display(),
+            skill_id,
         )));
     }
     let content = fs::read_to_string(&skill_md_path).map_err(|e| OrbitError::Io(e.to_string()))?;
@@ -273,9 +297,7 @@ fn collect_candidate_ids(root: &Path) -> Result<Vec<String>, OrbitError> {
         let Some(name) = path.file_name().and_then(|v| v.to_str()) else {
             continue;
         };
-        if path.join("SKILL.md").exists() {
-            ids.push(name.to_string());
-        }
+        ids.push(name.to_string());
     }
     Ok(ids)
 }
