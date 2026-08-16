@@ -6,9 +6,9 @@ use std::sync::{Arc, Mutex};
 use orbit_common::{NotFoundKind, OrbitError};
 use orbit_types::task::{
     ORB_TASK_ID_MAX, TaskEnvelopeV2, TaskRelation, TaskRelationEdge, TaskRelationType, TaskStatus,
-    complexity_bucket_ord, format_task_id, is_valid_orb_task_id, is_valid_task_id_prefix,
-    labeled_or_unset, normalize_task_tags, parse_task_number, task_id_prefix, validate_orb_task_id,
-    validate_task_relations_for_source,
+    complexity_bucket, complexity_bucket_ord, format_task_id, is_valid_orb_task_id,
+    is_valid_task_id_prefix, normalize_task_tags, parse_task_number, task_id_prefix,
+    validate_orb_task_id, validate_task_relations_for_source,
 };
 use rusqlite::{Connection, TransactionBehavior, params, params_from_iter};
 
@@ -653,8 +653,9 @@ impl TaskRegistryStore {
         Ok(exists != 0)
     }
 
-    /// Status counts grouped by complexity bucket. `NULL` and empty index
-    /// values both become the named `unset` bucket.
+    /// Status counts grouped by complexity bucket. `NULL`, empty, and
+    /// `unassessed` index values all become the named `unset` bucket — see
+    /// [`complexity_bucket`].
     pub fn completion_by_complexity(
         &self,
         workspace_id: &str,
@@ -686,7 +687,7 @@ impl TaskRegistryStore {
         for row in rows {
             let (raw_complexity, status, count) =
                 row.map_err(|e| OrbitError::Store(e.to_string()))?;
-            let bucket = labeled_or_unset(raw_complexity.as_deref()).to_string();
+            let bucket = complexity_bucket(raw_complexity.as_deref()).to_string();
             *by_bucket
                 .entry(bucket)
                 .or_default()
@@ -712,6 +713,8 @@ impl TaskRegistryStore {
     }
 
     /// `task_id →` complexity bucket for every indexed task in the workspace.
+    /// Buckets match [`Self::completion_by_complexity`], so an `unassessed`
+    /// task reports `unset` here too.
     pub fn complexity_by_task_id(
         &self,
         workspace_id: &str,
@@ -736,7 +739,7 @@ impl TaskRegistryStore {
         let mut map = BTreeMap::new();
         for row in rows {
             let (task_id, raw) = row.map_err(|e| OrbitError::Store(e.to_string()))?;
-            map.insert(task_id, labeled_or_unset(raw.as_deref()).to_string());
+            map.insert(task_id, complexity_bucket(raw.as_deref()).to_string());
         }
         Ok(map)
     }

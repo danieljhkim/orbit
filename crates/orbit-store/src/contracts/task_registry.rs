@@ -97,7 +97,9 @@ pub struct AllocatorSeedOutcome {
 }
 
 /// Status distribution for one complexity bucket, including the explicit
-/// [`orbit_types::task::UNSET_BUCKET`] for tasks with no complexity set.
+/// [`orbit_types::task::UNSET_BUCKET`] for tasks with no assessed complexity
+/// (unindexed, empty, or `unassessed` — see
+/// [`orbit_types::task::complexity_bucket`]).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TaskCompletionByComplexity {
     pub complexity: String,

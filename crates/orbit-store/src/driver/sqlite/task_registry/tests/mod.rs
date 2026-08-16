@@ -1451,7 +1451,7 @@ fn completion_by_complexity_keeps_unset_as_its_own_bucket() {
     let store = store(&temp);
     let workspace = bind(&store, temp.path());
 
-    for task_id in ["ORB-00000", "ORB-00001", "ORB-00002"] {
+    for task_id in ["ORB-00000", "ORB-00001", "ORB-00002", "ORB-00003"] {
         let bundle_dir = create_canonical_bundle(&store, &workspace, task_id);
         store
             .register_task_bundle(task_id, &workspace.workspace_id, &bundle_dir)
@@ -1477,6 +1477,14 @@ fn completion_by_complexity_keeps_unset_as_its_own_bucket() {
         )
         .expect("index unset");
 
+    // An explicitly `unassessed` task is the same "nobody assessed this"
+    // concept as an unindexed one and shares its bucket [ORB-10895].
+    let mut unassessed_backlog = envelope("ORB-00003", TaskStatus::Backlog, Vec::new(), Vec::new());
+    unassessed_backlog.complexity = Some(TaskComplexity::Unassessed);
+    store
+        .replace_task_index(&workspace.workspace_id, &unassessed_backlog)
+        .expect("index unassessed");
+
     let rows = store
         .completion_by_complexity(&workspace.workspace_id)
         .expect("aggregate");
@@ -1491,8 +1499,9 @@ fn completion_by_complexity_keeps_unset_as_its_own_bucket() {
         .iter()
         .find(|row| row.complexity == UNSET_BUCKET)
         .unwrap();
-    assert_eq!(unset.total, 1);
+    assert_eq!(unset.total, 2);
     assert_eq!(unset.by_status.get("archived").copied(), Some(1));
+    assert_eq!(unset.by_status.get("backlog").copied(), Some(1));
 
     let hard = rows.iter().find(|row| row.complexity == "hard").unwrap();
     assert_eq!(hard.total, 1);
@@ -1503,6 +1512,7 @@ fn completion_by_complexity_keeps_unset_as_its_own_bucket() {
         .expect("map");
     assert_eq!(map.get("ORB-00000").map(String::as_str), Some("hard"));
     assert_eq!(map.get("ORB-00002").map(String::as_str), Some(UNSET_BUCKET));
+    assert_eq!(map.get("ORB-00003").map(String::as_str), Some(UNSET_BUCKET));
 }
 
 #[test]
