@@ -117,6 +117,17 @@ pub struct AuditEvent {
     /// Zero-based step index within the enclosing job run, when known.
     #[serde(default)]
     pub step_index: Option<i64>,
+    /// Identity the caller claimed for itself, recorded verbatim-after-
+    /// normalization and **never authenticated** [ORB-10890].
+    ///
+    /// This is the only attribution an MCP client started from its own config
+    /// can supply, and it is deliberately kept out of [`Self::role`] and the
+    /// `actor_*` projection. `None` means the caller claimed nothing usable —
+    /// anonymous, never inherited from anywhere else. Any surface that renders
+    /// it must mark it unverified; see
+    /// [`crate::telemetry::normalize_self_reported_actor`].
+    #[serde(default)]
+    pub self_reported_actor: Option<String>,
 }
 
 impl AuditEvent {

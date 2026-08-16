@@ -118,6 +118,13 @@ impl AuditEventStoreBackend for SqliteAuditEventStoreBackend {
             .get_audit_tool_call_counts_by_surface_and_role(since)
     }
 
+    fn get_audit_tool_call_counts_by_attribution(
+        &self,
+        since: Option<&DateTime<Utc>>,
+    ) -> Result<Vec<crate::AuditAttributionAggregate>, OrbitError> {
+        self.store.get_audit_tool_call_counts_by_attribution(since)
+    }
+
     fn get_audit_top_tool_calls(
         &self,
         since: Option<&DateTime<Utc>>,

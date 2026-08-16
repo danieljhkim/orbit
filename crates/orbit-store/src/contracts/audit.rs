@@ -1,7 +1,7 @@
 use std::collections::BTreeSet;
 
 use chrono::{DateTime, Utc};
-use orbit_types::telemetry::AuditEventStatus;
+use orbit_types::telemetry::{AuditAttribution, AuditEventStatus};
 use orbit_types::tool::{McpCapability, McpTransport};
 
 #[derive(Debug, Clone)]
@@ -127,4 +127,53 @@ pub struct AuditActorAggregate {
     pub total: i64,
     pub mcp: i64,
     pub cli: i64,
+}
+
+/// Transport-neutral invocation facts a tool session contributes to its audit
+/// row, alongside the legacy [`AuditEventInsertParams`] DTO.
+///
+/// These stay off the DTO so the ~two dozen non-tool audit producers do not
+/// have to name a field that can only ever be `None` for them.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct AuditInvocationFields<'a> {
+    /// Per-invocation correlation ID minted by the accepting process.
+    pub trace_id: Option<&'a str>,
+    /// Caller network address observed by the accepting process. Audit
+    /// metadata, not caller identity.
+    pub caller_ip: Option<&'a str>,
+    /// Identity the caller claimed for itself, already normalized by
+    /// [`orbit_types::telemetry::normalize_self_reported_actor`] [ORB-10890].
+    ///
+    /// Written to its own column and nothing else. It never contributes to
+    /// [`AuditEventInsertParams::role`] or to the `actor_*` projection derived
+    /// from it, so no query that reads trusted identity can pick it up.
+    pub self_reported_actor: Option<&'a str>,
+}
+
+/// Per-(actor, attribution) aggregate of audited tool calls [ORB-10890].
+///
+/// Every tool-call row in the window lands in exactly one bucket, so the
+/// caller can read authenticated-only, self-reported-only, and combined
+/// denominators off the same result set without inferring one from another.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AuditAttributionAggregate {
+    /// How this row's identity was established.
+    pub attribution: AuditAttribution,
+    /// The actor label for this bucket: the canonical actor for
+    /// [`AuditAttribution::Authenticated`], the caller's own claim for
+    /// [`AuditAttribution::SelfReported`], and
+    /// [`orbit_types::telemetry::ANONYMOUS_ACTOR_LABEL`] otherwise.
+    ///
+    /// Two rows may carry the same `actor` under different `attribution`
+    /// values. That is not a duplicate to be merged: it is one agent whose
+    /// traffic Orbit could authenticate some of the time.
+    pub actor: String,
+    pub total: u64,
+    /// Non-`success` rows (`failure` + `denied`), matching
+    /// [`AuditToolCallCountsByRole::failed`].
+    pub failed: u64,
+    /// Tool invocations via MCP (`subcommand = 'run-mcp'`).
+    pub mcp: u64,
+    /// Tool invocations via CLI (`subcommand = 'run'`).
+    pub cli: u64,
 }

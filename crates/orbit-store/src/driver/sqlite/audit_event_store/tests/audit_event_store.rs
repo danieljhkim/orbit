@@ -62,8 +62,11 @@ fn insert_then_read_round_trips_correlation_fields() {
     store
         .insert_audit_event_record_with_invocation(
             &params,
-            Some("trace-test-1"),
-            Some("192.0.2.10"),
+            AuditInvocationFields {
+                trace_id: Some("trace-test-1"),
+                caller_ip: Some("192.0.2.10"),
+                ..AuditInvocationFields::default()
+            },
         )
         .expect("insert audit event");
 

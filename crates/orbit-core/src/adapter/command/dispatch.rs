@@ -8,7 +8,7 @@ use std::time::Instant;
 use orbit_common::observability::audit_id::audit_execution_id;
 use orbit_common::{NotFoundKind, OrbitError};
 use orbit_store::Store;
-use orbit_store::contracts::AuditEventInsertParams;
+use orbit_store::contracts::{AuditEventInsertParams, AuditInvocationFields};
 use orbit_tools::{ReservationOwnerContext, ToolContext};
 use orbit_types::identity::{
     normalize_agent_family_for_model, normalize_optional_attribution_label,
@@ -409,15 +409,23 @@ where
         step_index: audit_context.step_index,
     };
 
-    let trace_id = session_context
-        .as_ref()
-        .and_then(|context| context.trace_id.as_deref());
-    let caller_ip = session_context
-        .as_ref()
-        .and_then(|context| context.caller_ip.as_deref());
-    let audit_write = open_audit_store().and_then(|store| {
-        store.insert_audit_event_record_with_invocation(&params, trace_id, caller_ip)
-    });
+    // ORB-10890: the session's self-reported actor rides to the audit row and
+    // stops there. `role_label` above was computed without it, and no field of
+    // `ToolContext` reads it, so an MCP client naming itself cannot move its
+    // own trust label off `unverified`.
+    let invocation = AuditInvocationFields {
+        trace_id: session_context
+            .as_ref()
+            .and_then(|context| context.trace_id.as_deref()),
+        caller_ip: session_context
+            .as_ref()
+            .and_then(|context| context.caller_ip.as_deref()),
+        self_reported_actor: session_context
+            .as_ref()
+            .and_then(|context| context.self_reported_actor.as_deref()),
+    };
+    let audit_write = open_audit_store()
+        .and_then(|store| store.insert_audit_event_record_with_invocation(&params, invocation));
 
     // Claim the row for the runtime the moment it persists, so the CLI
     // `AuditGuard` suppresses its own duplicate emission. This is

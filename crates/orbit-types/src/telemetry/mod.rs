@@ -6,6 +6,7 @@ mod error;
 mod invocation;
 mod metrics;
 mod pricing;
+mod self_reported_actor;
 pub use error::TelemetryError;
 
 #[cfg(test)]
@@ -18,3 +19,7 @@ pub use audit_event::{AuditEvent, AuditEventStatus, AuditStats};
 pub use invocation::{InvocationTrace, TokenUsage, ToolCallTrace};
 pub use metrics::MetricsEntry;
 pub use pricing::{InputTokenBasis, PriceRow, cost_from_rows, normalize_token_usage_from_rows};
+pub use self_reported_actor::{
+    ANONYMOUS_ACTOR_LABEL, AuditAttribution, SELF_REPORTED_ACTOR_MAX_LEN,
+    normalize_self_reported_actor,
+};

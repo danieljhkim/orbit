@@ -2,9 +2,10 @@ use chrono::{DateTime, Utc};
 use orbit_common::OrbitError;
 use orbit_common::observability::audit_id::audit_execution_id;
 use orbit_store::contracts::{
-    AuditActorAggregate, AuditEventFilter, AuditEventInsertParams, AuditRoleAggregate,
-    AuditToolAggregate, AuditToolCallCountsByRole, AuditToolCallCountsBySurfaceAndRole,
-    AuditTopToolCall, FailureIncidentQuery, FailureIncidentReport,
+    AuditActorAggregate, AuditAttributionAggregate, AuditEventFilter, AuditEventInsertParams,
+    AuditRoleAggregate, AuditToolAggregate, AuditToolCallCountsByRole,
+    AuditToolCallCountsBySurfaceAndRole, AuditTopToolCall, FailureIncidentQuery,
+    FailureIncidentReport,
 };
 use orbit_types::telemetry::{AuditEvent, AuditEventStatus, AuditStats};
 
@@ -207,6 +208,22 @@ impl OrbitRuntime {
         self.stores()
             .audit_events()
             .get_audit_tool_call_counts_by_surface_and_role(since)
+    }
+
+    /// The same tool-call rows as [`Self::audit_tool_call_counts_by_role`],
+    /// split by how each row's identity was established [ORB-10890].
+    ///
+    /// Authenticated, self-reported, and anonymous traffic are disjoint
+    /// buckets carrying their own `total`/`failed`, so a per-agent fail rate
+    /// can name the denominator it was computed over instead of quietly
+    /// dropping the ~92% of MCP calls Orbit cannot authenticate.
+    pub fn audit_tool_call_counts_by_attribution(
+        &self,
+        since: Option<&DateTime<Utc>>,
+    ) -> Result<Vec<AuditAttributionAggregate>, OrbitError> {
+        self.stores()
+            .audit_events()
+            .get_audit_tool_call_counts_by_attribution(since)
     }
 
     /// Top (role, tool_name) pairs from the audit log, restricted to

@@ -42,6 +42,9 @@ pub(super) fn audit_event_to_json(event: &AuditEvent) -> Value {
         "job_run_id": event.job_run_id,
         "activity_id": event.activity_id,
         "step_index": event.step_index,
+        // ORB-10890: named `self_reported_*` rather than `actor` precisely so
+        // a consumer cannot mistake it for the authenticated `role` above.
+        "self_reported_actor": event.self_reported_actor,
     })
 }
 
