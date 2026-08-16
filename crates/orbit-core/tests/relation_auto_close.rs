@@ -61,6 +61,7 @@ fn add_task_with_resolves(
                 "title": format!("Resolve {target}"),
                 "description": "Fixture task with a resolves relation.",
                 "acceptance_criteria": ["Relation is visible."],
+                "complexity": "low",
                 "workspace": repo_root.to_string_lossy(),
                 "type": "feature",
                 "relations": [

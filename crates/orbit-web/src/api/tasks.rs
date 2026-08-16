@@ -90,8 +90,7 @@ pub(super) struct CreateTaskBody {
     workspace: Option<String>,
     #[serde(default = "default_priority")]
     priority: TaskPriority,
-    #[serde(default)]
-    complexity: Option<TaskComplexity>,
+    complexity: TaskComplexity,
     #[serde(default)]
     task_type: Option<TaskType>,
     #[serde(default)]
@@ -601,6 +600,10 @@ pub(super) async fn create_task_action(
             "ignored retired POST /api/tasks field; comment with POST /api/tasks/:id/comments"
         );
     }
+    let complexity = match body.complexity.require_assessed() {
+        Ok(complexity) => complexity,
+        Err(message) => return bad_request(message),
+    };
     let model = body.model.as_deref().and_then(non_empty_string);
     let params = TaskAddParams {
         parent_id: body.parent_id,
@@ -615,7 +618,7 @@ pub(super) async fn create_task_action(
         context_files: body.context_files,
         workspace_path: body.workspace_path,
         priority: body.priority,
-        complexity: body.complexity,
+        complexity,
         task_type: body.task_type,
         status: body.status.map(Into::into),
         system_created: false,

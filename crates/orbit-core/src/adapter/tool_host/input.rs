@@ -308,6 +308,18 @@ pub(super) fn parse_task_complexity(field: &str, raw: &str) -> Result<TaskComple
         .map_err(|error| OrbitError::InvalidInput(format!("`{field}` {error}")))
 }
 
+/// Parse a complexity that a human or agent may assign at create time.
+///
+/// [`TaskComplexity::Unassessed`] is reserved for automated mint/import.
+pub(super) fn parse_assessed_task_complexity(
+    field: &str,
+    raw: &str,
+) -> Result<TaskComplexity, OrbitError> {
+    parse_task_complexity(field, raw)?
+        .require_assessed()
+        .map_err(OrbitError::InvalidInput)
+}
+
 pub(super) fn parse_task_type(field: &str, raw: &str) -> Result<TaskType, OrbitError> {
     TaskType::from_str(raw).map_err(|error| OrbitError::InvalidInput(format!("`{field}` {error}")))
 }

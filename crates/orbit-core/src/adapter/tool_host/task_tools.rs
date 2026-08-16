@@ -10,8 +10,9 @@ use crate::OrbitRuntime;
 use crate::application::task::{TaskAddParams, TaskUpdateParams, compute_task_add_warnings};
 
 use super::input::{
-    empty_string_to_none, optional_bool_alias, parse_artifacts, parse_relations,
-    parse_task_complexity, parse_task_priority, parse_task_status, parse_task_type,
+    empty_string_to_none, optional_bool_alias, parse_artifacts, parse_assessed_task_complexity,
+    parse_relations, parse_task_complexity, parse_task_priority, parse_task_status,
+    parse_task_type,
 };
 use super::json::{serialize_task, serialize_task_lint_report, task_fields_to_json, task_to_json};
 
@@ -60,9 +61,10 @@ pub(super) fn add(
                 .map(|value| parse_task_priority("priority", &value))
                 .transpose()?
                 .unwrap_or(TaskPriority::Medium),
-            complexity: optional_string(&input, "complexity")?
-                .map(|value| parse_task_complexity("complexity", &value))
-                .transpose()?,
+            complexity: parse_assessed_task_complexity(
+                "complexity",
+                &required_string(&input, &["complexity"], "complexity")?,
+            )?,
             task_type: optional_string_alias(&input, &["type", "task_type", "taskType"])?
                 .map(|value| parse_task_type("type", &value))
                 .transpose()?,

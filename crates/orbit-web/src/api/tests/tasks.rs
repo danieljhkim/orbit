@@ -840,7 +840,7 @@ async fn list_tasks_includes_complexity_when_set() {
             description: "Task with explicit complexity for dashboard test.".to_string(),
             status: Some(TaskStatus::Backlog),
             workspace_path: Some(".".to_string()),
-            complexity: Some(TaskComplexity::Hard),
+            complexity: TaskComplexity::Hard,
             ..Default::default()
         })
         .expect("seed task with complexity");
@@ -1257,6 +1257,7 @@ async fn create_task_rejects_stray_workspace_body_key() {
                     json!({
                         "title": "mis-keyed",
                         "description": "workspace does not belong in the body",
+                        "complexity": "low",
                         "workspace": "ws_polaris",
                     })
                     .to_string(),
@@ -1284,6 +1285,7 @@ async fn create_task_only_accepts_creation_legal_statuses_and_ignores_comment() 
             json!({
                 "title": "illegal status",
                 "description": "must not start done",
+                "complexity": "low",
                 "status": "done",
             }),
         ))
@@ -1297,6 +1299,7 @@ async fn create_task_only_accepts_creation_legal_statuses_and_ignores_comment() 
             json!({
                 "title": "legal status",
                 "description": "starts in backlog",
+                "complexity": "medium",
                 "status": "backlog",
                 "comment": "retired create input",
             }),
@@ -1324,6 +1327,7 @@ async fn create_task_persists_relations_from_body() {
             json!({
                 "title": "task with relations",
                 "description": "records a typed relation on create",
+                "complexity": "medium",
                 "status": "backlog",
                 "relations": [{ "type": "related_to", "target": target.id }],
             }),
@@ -1429,6 +1433,7 @@ async fn create_task_rejects_invalid_relation_target() {
             json!({
                 "title": "task with a bad relation",
                 "description": "malformed relation target must be rejected",
+                "complexity": "low",
                 "status": "backlog",
                 "relations": [{ "type": "related_to", "target": "not-a-task-id" }],
             }),
@@ -1690,6 +1695,47 @@ async fn update_task_rejects_an_undeclared_body_field_without_partial_applicatio
     );
 }
 
+#[tokio::test]
+async fn create_task_requires_assessed_complexity() {
+    let runtime = Arc::new(OrbitRuntime::in_memory().expect("build runtime"));
+
+    let missing = post_task(
+        runtime.clone(),
+        json!({
+            "title": "missing complexity",
+            "description": "create must require an assessed value",
+        }),
+    )
+    .await;
+    assert!(
+        missing.status().is_client_error(),
+        "missing complexity must fail create"
+    );
+
+    let unassessed = post_task(
+        runtime.clone(),
+        json!({
+            "title": "unassessed create",
+            "description": "automated non-answer is not a human create value",
+            "complexity": "unassessed",
+        }),
+    )
+    .await;
+    assert_eq!(unassessed.status(), StatusCode::BAD_REQUEST);
+    let message = body_json(unassessed).await["error"]
+        .as_str()
+        .expect("error message")
+        .to_string();
+    assert!(
+        message.contains("assessed") || message.contains("unassessed"),
+        "error should reject unassessed: {message}"
+    );
+    assert!(
+        runtime.list_tasks().expect("list tasks").is_empty(),
+        "rejected creates write nothing"
+    );
+}
+
 /// ORB-10648: the same contract on create — `POST /api/tasks` no longer absorbs
 /// keys it cannot apply. The tailored `workspace` diagnostic (ORB-00042) still
 /// wins for that key, since it is a declared trap field.
@@ -1702,6 +1748,7 @@ async fn create_task_rejects_an_undeclared_body_field() {
         json!({
             "title": "undeclared input",
             "description": "carries a key the endpoint cannot apply",
+            "complexity": "low",
             "assignee": "someone",
         }),
     )
@@ -1739,6 +1786,7 @@ async fn task_bodies_reject_the_retired_agent_attribution_key() {
             json!({
                 "title": "agent attribution",
                 "description": "agent is not an accepted key",
+                "complexity": "low",
                 "agent": "codex",
             }),
         )

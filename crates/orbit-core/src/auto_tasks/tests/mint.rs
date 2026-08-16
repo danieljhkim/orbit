@@ -91,6 +91,11 @@ fn mint_matches_a_scheduler_fire_field_for_field() {
         TaskStatus::Backlog,
         "mint honors the template-supplied status default"
     );
+    assert_eq!(
+        minted.complexity,
+        Some(orbit_types::task::TaskComplexity::Unassessed),
+        "automated mint writes the explicit non-answer, never a fabricated assessment"
+    );
 }
 
 #[test]

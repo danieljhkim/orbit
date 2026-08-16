@@ -261,9 +261,10 @@ impl HubCoordinationExecutor {
                 .map(|value| super::input::parse_task_priority("priority", &value))
                 .transpose()?
                 .unwrap_or(TaskPriority::Medium),
-            complexity: optional_string(&input, "complexity")?
-                .map(|value| super::input::parse_task_complexity("complexity", &value))
-                .transpose()?,
+            complexity: Some(super::input::parse_assessed_task_complexity(
+                "complexity",
+                &required_string(&input, &["complexity"], "complexity")?,
+            )?),
             task_type,
             external_refs: Vec::new(),
             source_task_id: None,
@@ -931,6 +932,7 @@ mod checkoutless_hub_tests {
                     "workspace": "ws_checkoutless",
                     "title": "Coordinate from hub",
                     "description": "No checkout required",
+                    "complexity": "low",
                     "context_files": ["future/new.rs", "symbol:src/lib.rs#Host:struct"],
                     "model": "codex"
                 }),
@@ -996,6 +998,7 @@ mod checkoutless_hub_tests {
                     "workspace": "ws_checkoutless",
                     "title": "Canonical hub orchestrator",
                     "description": "Validate against the checkoutless registry",
+                    "complexity": "low",
                     "orchestrator": "  sol  ",
                     "model": "codex"
                 }),
@@ -1086,6 +1089,7 @@ mod checkoutless_hub_tests {
                         "workspace": "ws_checkoutless",
                         "title": title,
                         "description": "multi-status fixture",
+                        "complexity": "low",
                         "model": "codex"
                     }),
                     context.clone(),

@@ -160,6 +160,48 @@ updated_at: 2026-01-01T00:00:00Z
     }
 
     #[test]
+    fn task_deserializes_missing_complexity_as_none() {
+        let task = serde_yaml::from_str::<Task>(
+            r#"id: T20260101-1
+title: Legacy unlabeled task
+description: Existing task record.
+acceptance_criteria: []
+dependencies: []
+plan: ""
+execution_summary: ""
+context_files: []
+status: backlog
+priority: medium
+task_type: chore
+created_at: 2026-01-01T00:00:00Z
+updated_at: 2026-01-01T00:00:00Z
+"#,
+        )
+        .expect("task without complexity deserializes");
+
+        assert_eq!(task.complexity, None);
+    }
+
+    #[test]
+    fn task_complexity_unassessed_round_trips_and_is_not_assessed() {
+        use crate::task::TaskComplexity;
+        use std::str::FromStr;
+
+        assert_eq!(
+            TaskComplexity::from_str("unassessed").expect("parse"),
+            TaskComplexity::Unassessed
+        );
+        assert_eq!(TaskComplexity::Unassessed.to_string(), "unassessed");
+        assert!(!TaskComplexity::Unassessed.is_assessed());
+        assert!(TaskComplexity::Low.is_assessed());
+        assert!(TaskComplexity::Unassessed.require_assessed().is_err());
+        assert_eq!(
+            TaskComplexity::Hard.require_assessed().expect("assessed"),
+            TaskComplexity::Hard
+        );
+    }
+
+    #[test]
     fn task_status_deserializes_both_hyphen_and_snake_for_in_progress() {
         let snake: TaskStatus = serde_json::from_str("\"in_progress\"").expect("snake de");
         let hyphen: TaskStatus = serde_json::from_str("\"in-progress\"").expect("hyphen de");

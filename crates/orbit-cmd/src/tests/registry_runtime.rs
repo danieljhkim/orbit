@@ -190,6 +190,7 @@ fn registered_checkout_task_creation_uses_host_task_prefix() {
             json!({
                 "title": "Prefix-aware task",
                 "description": "Mint through the normal task creation surface.",
+                "complexity": "low",
                 "workspace": "."
             }),
             Some("codex".to_string()),
@@ -302,6 +303,7 @@ fn dual_workspace_fixture() -> DualWorkspaceFixture {
             json!({
                 "title": "Beta-only task",
                 "description": "Lives in the beta workspace.",
+                "complexity": "low",
                 "workspace": checkout_beta.repo_root
             }),
             Some("codex".to_string()),
@@ -427,6 +429,7 @@ fn cli_tool_run_fails_closed_on_unresolvable_workspace_for_read_and_write() {
         json!({
             "title": "must not land in cwd",
             "description": "unresolvable workspace must fail closed",
+            "complexity": "low",
             "workspace": BOGUS
         }),
     )
@@ -450,6 +453,7 @@ fn cli_tool_run_write_rebounds_to_the_named_workspace() {
         json!({
             "title": "Filed onto beta by name",
             "description": "CLI workspace selector must rebind writes.",
+            "complexity": "low",
             "workspace": "beta"
         }),
     )

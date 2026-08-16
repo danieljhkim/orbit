@@ -123,6 +123,8 @@ impl Fixture {
                     description,
                     "--priority",
                     priority,
+                    "--complexity",
+                    "medium",
                     "--type",
                     task_type,
                 ],

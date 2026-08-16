@@ -178,7 +178,7 @@ fn schema_exposes_only_trimmed_create_task_fields() {
         .filter(|param| param.required)
         .map(|param| param.name.as_str())
         .collect();
-    assert_eq!(required, vec!["title", "description"]);
+    assert_eq!(required, vec!["title", "description", "complexity"]);
     let workspace = schema
         .parameters
         .iter()
@@ -199,8 +199,16 @@ fn schema_exposes_only_trimmed_create_task_fields() {
         .find(|p| p.name == "complexity")
         .expect("complexity param");
     assert_eq!(complexity.param_type, "string");
-    assert!(!complexity.required);
+    assert!(complexity.required);
     assert!(complexity.description.contains("low, medium, or hard"));
+    assert!(
+        !complexity
+            .description
+            .to_ascii_lowercase()
+            .contains("optional"),
+        "complexity must not be described as optional: {}",
+        complexity.description
+    );
 
     let relations = schema
         .parameters
@@ -320,6 +328,7 @@ fn add_call_uses_session_workspace_when_input_omits_workspace() {
         json!({
             "title": "Ambient workspace test",
             "description": "MCP session context supplies workspace",
+            "complexity": "low",
             "model": "codex"
         }),
     )
@@ -348,6 +357,7 @@ fn explicit_workspace_overrides_mismatched_session_workspace() {
                 "title": "Explicit workspace wins",
                 "description": "The caller can override session context",
                 "workspace": "/tmp/explicit-ws",
+                "complexity": "low",
                 "model": "codex"
             }),
         )
@@ -374,6 +384,7 @@ fn add_call_missing_required_fields_returns_required_field_error() {
             "title",
             json!({
                 "description": "missing title",
+                "complexity": "low",
                 "workspace": "/tmp/test-ws"
             }),
         ),
@@ -381,6 +392,15 @@ fn add_call_missing_required_fields_returns_required_field_error() {
             "description",
             json!({
                 "title": "missing description",
+                "complexity": "low",
+                "workspace": "/tmp/test-ws"
+            }),
+        ),
+        (
+            "complexity",
+            json!({
+                "title": "missing complexity",
+                "description": "complexity is now required",
                 "workspace": "/tmp/test-ws"
             }),
         ),
@@ -414,7 +434,8 @@ fn add_call_missing_workspace_without_session_context_returns_clear_error() {
             &ctx,
             json!({
                 "title": "missing workspace",
-                "description": "missing workspace"
+                "description": "missing workspace",
+                "complexity": "low"
             }),
         )
         .expect_err("missing workspace and session context should fail");

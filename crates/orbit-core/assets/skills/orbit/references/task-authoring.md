@@ -18,8 +18,9 @@ Every `orbit.task.*` call needs `model` — your agent family. Never use bare
 3. **Write acceptance criteria that name observable success** — a command, an
    inspection step, or an output. "Works correctly" is not a criterion.
 4. **Optionally fill `context_files`** (see below).
-5. **Set `complexity`** (`low` / `medium` / `hard`) whenever scope is clear
-   enough to judge; dispatch batching honors it.
+5. **Set `complexity`** (`low` / `medium` / `hard`). It is required at
+   creation. `unassessed` is reserved for automated mint/import and is not
+   an operator create value.
 6. **Add assumptions, risks, and rollback notes** to the description when they
    matter.
 7. **Call `orbit.task.add`.** Confirm via the result, or re-fetch with
@@ -59,8 +60,8 @@ job fills them from real inspection. → [orchestration.md](orchestration.md)
 
 - Never edit task files directly; never invent task IDs (`orbit.task.add`
   allocates them).
-- Required: `title`, `description`, `workspace`. Strongly prefer
-  `acceptance_criteria` and `complexity`.
+- Required: `title`, `description`, `workspace`, `complexity`. Strongly prefer
+  `acceptance_criteria`.
 - `description` should be multi-line markdown for anything non-trivial.
 - Valid `type`: `feature`, `bug`, `refactor`, `chore`.
 - Do not pass the retired `plan` field.

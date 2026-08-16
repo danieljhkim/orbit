@@ -219,6 +219,9 @@ pub(super) fn mint_task(
         acceptance_criteria: template.acceptance_criteria.clone(),
         tags,
         priority: template.priority,
+        // Automated mint has no operator to assess; persist the explicit
+        // non-answer so aggregates can separate it from low/medium/hard.
+        complexity: orbit_types::task::TaskComplexity::Unassessed,
         task_type: Some(template.task_type),
         status: Some(template.status),
         crew: template.crew.clone(),

@@ -29,7 +29,10 @@ documented under `docs/design/routines/`.
 `updated_by/at`). `schedule` is an untagged enum — `{ cron: "…" }` or
 `{ every_minutes: N }`. `template` carries `title`, `description`,
 `acceptance_criteria`, `task_type`, `tags`, `priority`, `crew`, and `status`
-(default `backlog`). Per [Run budgets are provider-neutral: wall-clock timeouts, never turn caps](./4_decisions.md#run-budgets-are-provider-neutral-wall-clock-timeouts-never-turn-caps) there are **no turn-based knobs**; `deny_unknown_fields`
+(default `backlog`). Minted tasks always receive
+`complexity: unassessed` — an explicit non-answer, not a fabricated
+`low`/`medium`/`hard` assessment. Definitions do not carry complexity;
+the shared template-to-task mapping stamps the value. Per [Run budgets are provider-neutral: wall-clock timeouts, never turn caps](./4_decisions.md#run-budgets-are-provider-neutral-wall-clock-timeouts-never-turn-caps) there are **no turn-based knobs**; `deny_unknown_fields`
 makes a stray `max_turns`/`turns` a hard parse error.
 
 Definitions live as `.orbit/auto_tasks/<name>.yaml` in the active checkout.
@@ -68,7 +71,8 @@ fires nothing; otherwise it evaluates due-math. On `Fire`, if `dedupe =
 skip_if_open` and a task tagged `auto-task:<name>` is still open, it skips
 **without advancing the cursor** — so the pending occurrence fires (once,
 collapsed) the moment the queue drains. Otherwise it mints a `system_created`
-task from the template (tagged for provenance) and advances the cursor. Every
+task from the template (tagged for provenance, complexity `unassessed`)
+and advances the cursor. Every
 minted title is `[auto-task] ` followed by the template title; the prefix is
 applied at the shared template-to-task mapping, so definition YAML titles stay
 clean and an already-prefixed template is not double-prefixed.

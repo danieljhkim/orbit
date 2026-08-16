@@ -480,10 +480,10 @@
         "required": false
       },
       {
-        "description": "Optional task complexity level (low, medium, or hard)",
+        "description": "Task complexity level (low, medium, or hard)",
         "name": "complexity",
         "param_type": "string",
-        "required": false
+        "required": true
       },
       {
         "description": "Optional task type",

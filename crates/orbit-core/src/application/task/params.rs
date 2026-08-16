@@ -88,7 +88,9 @@ pub struct TaskAddParams {
     pub context_files: Vec<String>,
     pub workspace_path: Option<String>,
     pub priority: TaskPriority,
-    pub complexity: Option<TaskComplexity>,
+    /// Required at create time. Human/agent surfaces must pass an assessed
+    /// value; automated mint and `Default` use [`TaskComplexity::Unassessed`].
+    pub complexity: TaskComplexity,
     pub task_type: Option<TaskType>,
     pub status: Option<TaskStatus>,
     /// When true, the task metadata attributes creation to `system`.
@@ -116,7 +118,7 @@ impl Default for TaskAddParams {
             context_files: Vec::new(),
             workspace_path: None,
             priority: TaskPriority::Medium,
-            complexity: None,
+            complexity: TaskComplexity::Unassessed,
             task_type: None,
             status: None,
             system_created: false,

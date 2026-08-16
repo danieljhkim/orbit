@@ -117,6 +117,7 @@ TASK_ID=$(orbit task add \
   --title "..." \
   --description "..." \
   --acceptance-criteria "..." \
+  --complexity medium \
   --workspace .)
 
 # or simply ask an agent to create a task:
