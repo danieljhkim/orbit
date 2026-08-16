@@ -1,11 +1,12 @@
 use std::path::Path;
 
-use clap::{Args, Subcommand};
-use orbit_common::types::McpCapability;
+use clap::{Args, Subcommand, ValueEnum};
 use orbit_core::{OrbitError, OrbitRuntime};
+use orbit_mcp::RemoteProxyArgs;
 
-use crate::command::Execute;
+use crate::command::{CommandOut, CommandOutput, Execute};
 
+use super::listen::ListenArgs;
 use super::setup::{InitArgs, RemoveArgs};
 
 #[derive(Args)]
@@ -20,7 +21,7 @@ pub struct McpCommand {
 }
 
 impl Execute for McpCommand {
-    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+    fn execute(self, runtime: &OrbitRuntime) -> CommandOut {
         self.command.execute(runtime)
     }
 }
@@ -33,10 +34,21 @@ pub enum McpSubcommand {
     Remove(RemoveArgs),
     /// Serve the Orbit tool registry over Model Context Protocol
     Serve(ServeArgs),
+    /// Serve the Orbit tool registry over Model Context Protocol on a TCP socket
+    ///
+    /// This is the transport for deployments that need a socket — a server-side
+    /// Orbit reached through an SSH tunnel, for example. `orbit mcp serve`
+    /// remains the stdio server that MCP clients launch directly.
+    ///
+    /// Each accepted connection is an independent MCP session against the same
+    /// server-local tool surface, resolved and audited exactly as a stdio session
+    /// is. The socket authenticates no client, so it binds loopback unless a
+    /// wider bind is asked for explicitly.
+    Listen(ListenArgs),
 }
 
 impl Execute for McpSubcommand {
-    fn execute(self, _runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+    fn execute(self, _runtime: &OrbitRuntime) -> CommandOut {
         match self {
             // All MCP subcommands are dispatched runtime-free via main.rs's
             // pattern match before runtime initialization. They reach this
@@ -45,29 +57,59 @@ impl Execute for McpSubcommand {
             Self::Init(args) => args.execute_without_runtime(None),
             Self::Remove(args) => args.execute_without_runtime(None),
             Self::Serve(args) => args.execute_without_runtime(None),
+            Self::Listen(args) => args.execute_without_runtime(None),
         }
     }
+}
+
+/// Which side of the wire this invocation is on.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
+pub enum ServeMode {
+    /// Present stdio MCP locally and relay it directly to a remote Orbit over
+    /// one non-PTY SSH process.
+    Remote,
 }
 
 #[derive(Args)]
 #[command(about = "Serve the Orbit tool registry over Model Context Protocol")]
 pub struct ServeArgs {
-    /// Serve only checkoutless coordination tools as the fixed local hub.
-    #[arg(long)]
-    pub hub: bool,
-    /// Exact non-hierarchical capability for this hub server session.
-    #[arg(long, value_name = "CAPABILITY", requires = "hub")]
-    pub capabilities: Option<McpCapability>,
+    /// Run as a client-side proxy to a remote Orbit instead of serving this
+    /// machine. Requires an SSH destination.
+    #[arg(long, value_name = "MODE", requires = "ssh_host")]
+    pub mode: Option<ServeMode>,
+    /// SSH destination for `--mode remote`, such as a host, `user@host`, or a
+    /// configured alias.
+    #[arg(value_name = "SSH_HOST", requires = "mode")]
+    pub ssh_host: Option<String>,
+    /// Audit identity supplied only by Orbit's direct SSH proxy command.
+    /// Presence also marks the server session's transport as SSH MCP.
+    #[arg(long, value_name = "MACHINE_ID", hide = true, conflicts_with = "mode")]
+    pub remote_caller_machine_id: Option<String>,
 }
 
 impl ServeArgs {
-    pub fn execute_without_runtime(self, root_override: Option<&Path>) -> Result<(), OrbitError> {
+    pub fn execute_without_runtime(self, root_override: Option<&Path>) -> CommandOut {
         if root_override.is_some() {
             return Err(OrbitError::InvalidInput(
                 "orbit mcp serve does not accept a workspace root override; select a workspace per initialize or tool call"
                     .to_string(),
             ));
         }
-        orbit_remote::serve_mcp_stdio(self.hub, self.capabilities)
+        match self.mode {
+            Some(ServeMode::Remote) => {
+                // Clap enforces the pairing; this keeps the invariant local
+                // rather than trusting a derive attribute at a distance.
+                let ssh_host = self.ssh_host.ok_or_else(|| {
+                    OrbitError::InvalidInput(
+                        "`orbit mcp serve --mode remote` needs an SSH destination, e.g. \
+                         `orbit mcp serve --mode remote my-box`"
+                            .to_string(),
+                    )
+                })?;
+                orbit_mcp::serve_mcp_remote_proxy(RemoteProxyArgs { ssh_host })?
+            }
+            None => super::server::serve_mcp_stdio(self.remote_caller_machine_id)?,
+        }
+        Ok(CommandOutput::Silent)
     }
 }

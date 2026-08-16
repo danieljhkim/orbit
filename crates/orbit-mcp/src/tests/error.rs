@@ -42,12 +42,12 @@ fn adr_artifact_errors_keep_stable_codes_and_safe_origin() {
 }
 
 #[test]
-fn hub_transport_errors_keep_stable_codes_and_call_identity() {
-    let unavailable = error_payload(&OrbitError::HubUnavailable("offline".to_string()));
-    assert_eq!(unavailable["code"], "hub_unavailable");
+fn owner_transport_errors_keep_stable_codes_and_call_identity() {
+    let unavailable = error_payload(&OrbitError::OwnerUnavailable("offline".to_string()));
+    assert_eq!(unavailable["code"], "owner_unavailable");
 
-    let negotiation = error_payload(&OrbitError::HubNegotiation("digest drift".to_string()));
-    assert_eq!(negotiation["code"], "hub_negotiation");
+    let negotiation = error_payload(&OrbitError::OwnerNegotiation("digest drift".to_string()));
+    assert_eq!(negotiation["code"], "owner_negotiation");
 
     let unknown = error_payload(&OrbitError::OutcomeUnknown {
         mcp_call_id: "mcall-exact".to_string(),
@@ -81,4 +81,34 @@ fn task_bundle_corruption_has_a_stable_code_and_structured_context() {
     assert_eq!(payload["task_id"], "ORB-00123");
     assert_eq!(payload["path"], "/safe/tasks/ORB-00123");
     assert_eq!(payload["reason"], "missing description.md");
+}
+
+/// ORB-10544: the shared ship submission path refuses a duplicate dispatch with
+/// a typed conflict; the MCP projection of it must name the contended task and
+/// the run holding it under the same `ship_run_in_flight` code the dashboard's
+/// 409 body carries, so a tool caller can wait on or cancel that run without
+/// parsing the message.
+#[test]
+fn ship_run_in_flight_has_a_stable_code_and_names_both_ids() {
+    let error = OrbitError::ShipRunInFlight {
+        task_id: "TST-00001".to_string(),
+        run_id: "jrun-in-flight".to_string(),
+    };
+    let payload = error_payload(&error);
+
+    assert_eq!(payload["code"], "ship_run_in_flight");
+    assert_eq!(payload["task_id"], "TST-00001");
+    assert_eq!(payload["run_id"], "jrun-in-flight");
+    assert!(
+        payload["message"].as_str().is_some_and(
+            |message| message.contains("TST-00001") && message.contains("jrun-in-flight")
+        )
+    );
+
+    let result = tool_error_result(&error);
+    assert_eq!(result.is_error, Some(true));
+    assert_eq!(
+        result.structured_content.expect("structured error payload")["code"],
+        "ship_run_in_flight"
+    );
 }

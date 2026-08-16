@@ -1,11 +1,11 @@
 use clap::{ArgAction, Args, Subcommand, ValueEnum};
 use orbit_core::{GlobalSearchHit, GlobalSearchKind, GlobalSearchParams, OrbitError, OrbitRuntime};
 
-use crate::command::Execute;
+use crate::command::{CommandOut, Execute, Payload};
 
 #[derive(Args)]
 #[command(
-    about = "Search tasks, docs, learnings, and ADRs",
+    about = "Search tasks, docs, ADRs, and frictions",
     subcommand_precedence_over_arg = true,
     after_help = "Forms:\n  orbit search <query>\n  orbit search similar <id>\n  orbit search path <path>"
 )]
@@ -18,7 +18,7 @@ pub struct SearchCommand {
     pub command: Option<SearchSubcommand>,
 
     // ADR-0179: free-text search keeps the hybrid ranker; neighbor/path modes are separate forms.
-    /// Use hybrid lexical + cosine ranking for indexed task, doc, learning, or ADR fields.
+    /// Use hybrid lexical + cosine ranking for indexed task or doc fields.
     #[arg(long)]
     pub hybrid: bool,
     /// Restrict results to one corpus kind.
@@ -28,15 +28,14 @@ pub struct SearchCommand {
     /// round-robin per kind to ensure fair representation).
     #[arg(long, default_value_t = 10, global = true)]
     pub limit: usize,
-    /// Filter by tag (AND semantics). Applies to task, doc, learning, and ADR.
+    /// Filter by tag (AND semantics). Applies to task, doc, and friction results.
     #[arg(long = "tag", action = ArgAction::Append, value_delimiter = ',', global = true)]
     pub tags: Vec<String>,
     /// Include normally-hidden statuses for the queried kind. Task adds
-    /// done/rejected/archived; ADR adds superseded; learning adds
-    /// superseded; doc is a no-op.
+    /// done/rejected/archived; friction adds triaged/resolved; doc is a no-op.
     #[arg(long, global = true)]
     pub all: bool,
-    /// Explicit per-kind status override, e.g. task:open,doc:active,adr:proposed.
+    /// Explicit per-kind status override, e.g. task:open,doc:active,friction:open.
     #[arg(long, value_delimiter = ',', global = true)]
     pub status: Vec<String>,
     /// Output as JSON.
@@ -68,8 +67,7 @@ pub struct SearchPathArgs {
 pub enum SearchKindArg {
     Task,
     Doc,
-    Learning,
-    Adr,
+    Friction,
     All,
 }
 
@@ -78,8 +76,7 @@ impl std::fmt::Display for SearchKindArg {
         f.write_str(match self {
             Self::Task => "task",
             Self::Doc => "doc",
-            Self::Learning => "learning",
-            Self::Adr => "adr",
+            Self::Friction => "friction",
             Self::All => "all",
         })
     }
@@ -90,15 +87,14 @@ impl From<SearchKindArg> for GlobalSearchKind {
         match value {
             SearchKindArg::Task => Self::Task,
             SearchKindArg::Doc => Self::Doc,
-            SearchKindArg::Learning => Self::Learning,
-            SearchKindArg::Adr => Self::Adr,
+            SearchKindArg::Friction => Self::Friction,
             SearchKindArg::All => Self::All,
         }
     }
 }
 
 impl Execute for SearchCommand {
-    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+    fn execute(self, runtime: &OrbitRuntime) -> CommandOut {
         let input = self.search_input()?;
         let response = runtime.global_search(GlobalSearchParams {
             query: input.query,
@@ -112,15 +108,13 @@ impl Execute for SearchCommand {
             path: input.path,
         })?;
 
-        if self.json {
-            crate::output::json::print_pretty(&serde_json::json!(response))
-        } else {
-            for note in &response.notes {
-                eprintln!("note: {note}");
-            }
-            print_search_table(&response.results);
-            Ok(())
+        for note in &response.notes {
+            eprintln!("note: {note}");
         }
+        // The `--json` shape is the whole response object, not just the hits,
+        // and stays that way: it is the payload [ADR-0306].
+        let doc = serde_json::json!(response);
+        Ok(Payload::detail_table(doc, search_table(&response.results)).into())
     }
 }
 
@@ -200,9 +194,18 @@ struct SearchInput {
     path: Option<String>,
 }
 
-fn print_search_table(results: &[GlobalSearchHit]) {
-    let mut table =
-        crate::output::table::build_table(&["KIND", "SOURCE", "ID/PATH", "TITLE/SUMMARY", "MATCH"]);
+fn search_table(results: &[GlobalSearchHit]) -> crate::output::table::Table {
+    use crate::output::table::{Column, Table};
+    // Each hit's kind names its own detail command (`orbit task show`,
+    // `orbit docs show` or the corresponding ADR entry).
+    let mut table = Table::new(vec![
+        Column::new("KIND").fixed(),
+        Column::new("SOURCE").fixed(),
+        Column::new("ID/PATH").path(),
+        Column::new("TITLE/SUMMARY"),
+        Column::new("MATCH").fixed(),
+    ])
+    .empty_message("no results matching the query");
     for hit in results {
         table.add_row(vec![
             hit.kind.clone(),
@@ -215,7 +218,7 @@ fn print_search_table(results: &[GlobalSearchHit]) {
             match_text(hit),
         ]);
     }
-    println!("{table}");
+    table
 }
 
 fn match_text(hit: &GlobalSearchHit) -> String {

@@ -1,42 +1,91 @@
-use clap::Args;
-use orbit_common::types::{Workspace, WorkspaceCheckout};
-use orbit_core::{OrbitError, OrbitRuntime};
-use orbit_remote::workspace_registry;
+use std::path::Path;
 
-use crate::command::Execute;
+use clap::Args;
+use orbit_common::types::{Workspace, WorkspaceCheckout, WorkspaceRegistry};
+use orbit_core::OrbitRuntime;
+use orbit_registry::workspace_registry;
+use serde_json::{Value, json};
+
+use crate::command::{CommandOut, Execute, Payload};
 
 #[derive(Args)]
 pub struct WorkspaceShowArgs {}
 
 impl Execute for WorkspaceShowArgs {
-    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+    fn execute(self, runtime: &OrbitRuntime) -> CommandOut {
         let data_root = runtime.data_root();
-        let data_root_canonical = std::fs::canonicalize(&data_root).unwrap_or(data_root.clone());
         let global_root = runtime.global_root();
         let registry_path = workspace_registry::registry_path_for(&global_root);
         let registry = workspace_registry::load_registry_from(&registry_path)?;
 
-        // Find workspace whose orbit_dir matches the current runtime's data root
-        let checkout = registry.checkouts.iter().find(|checkout| {
-            let ws_canonical = std::fs::canonicalize(&checkout.orbit_dir)
-                .unwrap_or_else(|_| checkout.orbit_dir.clone());
-            ws_canonical == data_root_canonical
-        });
+        // The runtime factory resolves the current checkout from cwd (or an
+        // explicit --workspace selector). `orbit_dir` is not checkout identity:
+        // every checkout under an explicit shared root has the same value.
+        let repo_root = runtime
+            .workspace_runtime_binding()
+            .map(|binding| binding.repo_root.as_path());
 
-        match checkout.and_then(|checkout| {
-            workspace_registry::find_workspace(&registry, &checkout.workspace_id)
-                .map(|workspace| (workspace, checkout))
-        }) {
-            Some((workspace, checkout)) => {
-                print!("{}", format_workspace_show(workspace, checkout));
-            }
-            None => {
-                println!("current orbit root: {}", data_root.display());
-                println!("(not registered as a workspace)");
-            }
+        match registered_workspace_for_repo_root(&registry, repo_root) {
+            Some((workspace, checkout)) => Ok(Payload::detail(
+                workspace_show_json(workspace, checkout),
+                format_workspace_show(workspace, checkout),
+            )
+            .into()),
+            // An unregistered root is still a describable state, not an error:
+            // the record says which root it is and that it is not registered.
+            None => Ok(Payload::detail(
+                json!({
+                    "orbit_root": data_root.to_string_lossy(),
+                    "registered": false,
+                    "workspace": Value::Null,
+                    "checkout": Value::Null,
+                }),
+                format!(
+                    "current orbit root: {}\n(not registered as a workspace)",
+                    data_root.display()
+                ),
+            )
+            .into()),
         }
-        Ok(())
     }
+}
+
+pub(super) fn registered_workspace_for_repo_root<'a>(
+    registry: &'a WorkspaceRegistry,
+    repo_root: Option<&Path>,
+) -> Option<(&'a Workspace, &'a WorkspaceCheckout)> {
+    let checkout = repo_root.and_then(|repo_root| {
+        registry
+            .checkouts
+            .iter()
+            .find(|checkout| checkout.repo_root == repo_root)
+    })?;
+    workspace_registry::find_workspace(registry, &checkout.workspace_id)
+        .map(|workspace| (workspace, checkout))
+}
+
+/// `workspace show` had no machine-readable form; this is the record behind
+/// the text below, added with the rest of the payload conversion (ORB-10586).
+/// Both halves are built from the same two structs, so they cannot disagree.
+pub(super) fn workspace_show_json(workspace: &Workspace, checkout: &WorkspaceCheckout) -> Value {
+    json!({
+        "orbit_root": checkout.orbit_dir.to_string_lossy(),
+        "registered": true,
+        "workspace": {
+            "id": workspace.id,
+            "name": workspace.name,
+            "base_branch": workspace.base_branch,
+            "ship_mode": orbit_core::resolved_ship_mode(workspace).as_input_value(),
+            "status": workspace.status.to_string(),
+            "owner_machine_id": workspace.owner_machine_id,
+        },
+        "checkout": {
+            "repo_root": checkout.repo_root.to_string_lossy(),
+            "orbit_dir": checkout.orbit_dir.to_string_lossy(),
+            "role": checkout.role.map(|role| role.to_string()),
+            "owner_machine_id": checkout.owner_machine_id,
+        },
+    })
 }
 
 pub(super) fn format_workspace_show(workspace: &Workspace, checkout: &WorkspaceCheckout) -> String {

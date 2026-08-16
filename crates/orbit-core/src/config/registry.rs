@@ -11,10 +11,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
-use orbit_common::types::{
-    Crew, CrewRoleAssignment, ORB_TASK_ID_MAX, OrbitError, activity_job::Provider,
-    all_agent_families, resolve_crew,
-};
+use orbit_common::types::{Crew, CrewAssignment, OrbitError, activity_job::Provider, resolve_crew};
 use orbit_common::utility::log_rotation::LogRotationConfig;
 use orbit_common::utility::redaction::redact_home_dir;
 use serde::de::DeserializeOwned;
@@ -22,6 +19,7 @@ use serde_json::{Value as JsonValue, json};
 
 const DEFAULT_WORKFLOW_BASE_BRANCH: &str = "main";
 const DEFAULT_WORKFLOW_CREW: &str = "opus";
+const DEFAULT_WORKFLOW_SYSTEM_CREW: &str = "qa";
 const LEGACY_DEFAULT_WORKFLOW_CREW: &str = "claude";
 const CONSTELLATION_DEFAULT_PROVIDER_ENV: &str = "CONSTELLATION_DEFAULT_PROVIDER";
 
@@ -107,16 +105,6 @@ macro_rules! define_config_settings {
 }
 
 define_config_settings! {
-    duel_candidates: Vec<String> => Vec<String> {
-        key: "duel.candidates", value_type: "array<string>",
-        description: "Agent families eligible as planning-duel candidates (at least 3, from the known agent family set).",
-        resolve: |raw: Option<Vec<String>>| resolve_duel_candidates(raw.as_deref()),
-    },
-    duel_models: BTreeMap<String, String> => BTreeMap<String, String> {
-        key: "duel.models", value_type: "table<string, string>",
-        description: "Per-family model override for planning-duel candidates, e.g. { codex = \"<model-id>\" }.",
-        resolve: |raw: Option<BTreeMap<String, String>>| resolve_duel_models(raw),
-    },
     codex_approval_policy: Option<String> => String {
         key: "execution.codex.approval_policy", value_type: "string",
         description: "Codex approval policy: one of untrusted, on-request, never.",
@@ -142,11 +130,6 @@ define_config_settings! {
         description: "Opt-in for the routine scheduler; the only supported value is 'source' (marks this workspace as a routine source for `orbit sweep`).",
         resolve: |raw: Option<String>| resolve_optional_choice(raw, "routines.role", &["source"]),
     },
-    runtime_backend: Option<String> => String {
-        key: "runtime.backend", value_type: "string",
-        description: "Default v2 agent_loop execution backend: one of http, cli, auto.",
-        resolve: |raw: Option<String>| resolve_optional_choice(raw, "[runtime] backend", &["http", "cli", "auto"]),
-    },
     runtime_log_max_file_mb: u64 => u64 {
         key: "runtime.log_max_file_mb", value_type: "integer",
         description: "Roll the active JSONL log once it grows past this many MiB (must be >= 1 and <= runtime.log_max_total_mb).",
@@ -169,8 +152,8 @@ define_config_settings! {
     },
     tasks_id_start: Option<u32> => u32 {
         key: "tasks.id_start", value_type: "integer",
-        description: "Floor for the local task-id allocator on this machine (forward-only; lets machines hold disjoint id ranges). Capped by ORB_TASK_ID_MAX.",
-        resolve: |raw: Option<u32>| resolve_tasks_id_start(raw),
+        description: "Floor for the local task-id allocator on this machine (forward-only; lets machines hold disjoint id ranges).",
+        resolve: |raw: Option<u32>| Ok::<_, OrbitError>(raw),
     },
     workflow_auto_ship: bool => bool {
         key: "workflow.auto_ship", value_type: "bool",
@@ -179,13 +162,18 @@ define_config_settings! {
     },
     workflow_base_branch: String => String {
         key: "workflow.base_branch", value_type: "string",
-        description: "Default base branch for ship and duel-plan workflows.",
+        description: "Default base branch for ship workflows.",
         resolve: |raw: Option<String>| resolve_non_empty(raw, DEFAULT_WORKFLOW_BASE_BRANCH, "workflow.base_branch"),
     },
     workflow_default_crew: Option<String> => String {
         key: "workflow.default_crew", value_type: "string",
         description: "Named crew used when a task does not declare `crew` and no CLI override is given.",
         resolve: |raw: Option<String>| resolve_optional_non_empty(raw, "workflow.default_crew"),
+    },
+    workflow_system_crew: String => String {
+        key: "workflow.system_crew", value_type: "string",
+        description: "Named crew used by system activities such as step-failure recovery and failed-run triage.",
+        resolve: |raw: Option<String>| resolve_non_empty(raw, DEFAULT_WORKFLOW_SYSTEM_CREW, "workflow.system_crew"),
     },
 }
 
@@ -195,7 +183,6 @@ impl ConfigSnapshot {
         crews: &BTreeMap<String, Crew>,
         env_default: Option<&str>,
     ) -> Result<(), OrbitError> {
-        validate_duel_models(&self.duel_models, &self.duel_candidates)?;
         LogRotationConfig::from_parts(
             Some(self.runtime_log_retention_days),
             Some(self.runtime_log_max_total_mb),
@@ -225,10 +212,9 @@ fn default_admission_crews() -> BTreeMap<String, Crew> {
         DEFAULT_WORKFLOW_CREW.to_string(),
         Crew {
             name: DEFAULT_WORKFLOW_CREW.to_string(),
-            assignment: CrewRoleAssignment {
+            assignment: CrewAssignment {
                 model: String::new(),
                 provider: "claude".to_string(),
-                backend: String::new(),
             },
             description: None,
             tags: Vec::new(),
@@ -321,86 +307,6 @@ fn resolve_optional_non_empty(
         }
     })
     .transpose()
-}
-
-fn resolve_tasks_id_start(raw: Option<u32>) -> Result<Option<u32>, OrbitError> {
-    if raw.is_some_and(|start| start > ORB_TASK_ID_MAX) {
-        return Err(OrbitError::InvalidInput(format!(
-            "tasks.id_start {} exceeds maximum task id {ORB_TASK_ID_MAX}",
-            raw.unwrap_or_default()
-        )));
-    }
-    Ok(raw)
-}
-
-fn resolve_duel_candidates(raw: Option<&[String]>) -> Result<Vec<String>, OrbitError> {
-    let Some(raw) = raw else {
-        return Ok(all_agent_families()
-            .iter()
-            .map(|v| (*v).to_string())
-            .collect());
-    };
-    let valid: BTreeSet<&str> = all_agent_families().into_iter().collect();
-    let mut seen = BTreeSet::new();
-    let mut candidates = Vec::new();
-    for candidate in raw {
-        let normalized = candidate.trim().to_ascii_lowercase();
-        if !seen.insert(normalized.clone()) {
-            return Err(OrbitError::InvalidInput(format!(
-                "[duel] candidates contains duplicate '{normalized}' after normalization; valid candidates: {}",
-                all_agent_families().join(", ")
-            )));
-        }
-        if !valid.contains(normalized.as_str()) {
-            return Err(OrbitError::InvalidInput(format!(
-                "[duel] candidates contains unknown entry '{normalized}'; valid candidates: {}",
-                all_agent_families().join(", ")
-            )));
-        }
-        candidates.push(normalized);
-    }
-    if candidates.len() < 3 {
-        return Err(OrbitError::InvalidInput(format!(
-            "[duel] candidates must contain at least 3 distinct entries after normalization (got {}: {}); valid candidates: {}",
-            candidates.len(),
-            candidates.join(", "),
-            all_agent_families().join(", ")
-        )));
-    }
-    Ok(candidates)
-}
-
-fn resolve_duel_models(
-    raw: Option<BTreeMap<String, String>>,
-) -> Result<BTreeMap<String, String>, OrbitError> {
-    let mut models = BTreeMap::new();
-    for (family, model) in raw.unwrap_or_default() {
-        let family = family.trim().to_ascii_lowercase();
-        let trimmed_model = model.trim();
-        if trimmed_model.is_empty() {
-            return Err(OrbitError::InvalidInput(format!(
-                "[duel.models].{family} must not be empty (found '{model}')"
-            )));
-        }
-        models.insert(family, trimmed_model.to_string());
-    }
-    Ok(models)
-}
-
-fn validate_duel_models(
-    models: &BTreeMap<String, String>,
-    candidates: &[String],
-) -> Result<(), OrbitError> {
-    for family in models.keys() {
-        if !candidates.contains(family) {
-            return Err(OrbitError::InvalidInput(format!(
-                "[duel.models] contains key '{family}' that is not in resolved [duel].candidates ({}); valid candidates: {}",
-                candidates.join(", "),
-                all_agent_families().join(", ")
-            )));
-        }
-    }
-    Ok(())
 }
 
 pub(super) fn resolve_default_crew(

@@ -233,3 +233,204 @@ updated_at: 2026-01-01T00:00:00Z
         assert!("friction".parse::<TaskStatus>().is_err());
     }
 }
+
+mod dependency_satisfaction {
+    use super::super::super::task::{
+        DependencyDeadEnd, TASK_REFERENCE_NOT_VERIFIABLE_HERE, Task, TaskStatus,
+        resolve_task_dependencies, task_dependencies_ready, unmet_task_dependencies,
+        unsatisfiable_task_dependencies,
+    };
+    use std::collections::BTreeMap;
+
+    /// `Task::dependencies()` reads `blocked_by` *relations*, not the legacy
+    /// `dependencies` field, so the fixture must declare them that way.
+    fn task_with_dependencies(id: &str, dependencies: &[&str]) -> Task {
+        let relations_yaml = dependencies
+            .iter()
+            .map(|dependency| format!("  - type: blocked_by\n    target: {dependency}\n"))
+            .collect::<String>();
+        let mut task = serde_yaml::from_str::<Task>(&format!(
+            r#"id: {id}
+title: Dependent task
+description: Fixture.
+acceptance_criteria: []
+dependencies: []
+plan: ""
+execution_summary: ""
+context_files: []
+status: backlog
+priority: medium
+task_type: chore
+created_at: 2026-01-01T00:00:00Z
+updated_at: 2026-01-01T00:00:00Z
+relations:
+{relations_yaml}"#
+        ))
+        .expect("fixture task deserializes");
+        assert_eq!(task.dependencies().len(), dependencies.len());
+        task.relations.sort_by(|a, b| a.target.cmp(&b.target));
+        task
+    }
+
+    fn status_index(entries: &[(&str, TaskStatus)]) -> BTreeMap<String, TaskStatus> {
+        entries
+            .iter()
+            .map(|(id, status)| ((*id).to_string(), *status))
+            .collect()
+    }
+
+    #[test]
+    fn only_archived_and_rejected_are_dead_ends() {
+        assert_eq!(
+            TaskStatus::Archived.dependency_dead_end(),
+            Some(DependencyDeadEnd::Archived)
+        );
+        assert_eq!(
+            TaskStatus::Rejected.dependency_dead_end(),
+            Some(DependencyDeadEnd::Rejected)
+        );
+        for status in [
+            TaskStatus::Proposed,
+            TaskStatus::Backlog,
+            TaskStatus::InProgress,
+            TaskStatus::Review,
+            TaskStatus::Done,
+            TaskStatus::Blocked,
+            TaskStatus::Someday,
+        ] {
+            assert_eq!(
+                status.dependency_dead_end(),
+                None,
+                "{status} must remain a legitimate wait"
+            );
+        }
+    }
+
+    #[test]
+    fn done_only_still_satisfies_a_dependency() {
+        // Guardrail: this task made dead ends fail loudly; it must not have
+        // widened what counts as satisfied.
+        for status in [
+            TaskStatus::Proposed,
+            TaskStatus::Backlog,
+            TaskStatus::InProgress,
+            TaskStatus::Review,
+            TaskStatus::Blocked,
+            TaskStatus::Archived,
+            TaskStatus::Rejected,
+            TaskStatus::Someday,
+        ] {
+            assert!(
+                !status.satisfies_dependency(),
+                "{status} must not satisfy a dependency"
+            );
+        }
+        assert!(TaskStatus::Done.satisfies_dependency());
+    }
+
+    #[test]
+    fn archived_dependency_is_unsatisfiable() {
+        let task = task_with_dependencies("ORB-2", &["ORB-1"]);
+        let statuses = status_index(&[("ORB-1", TaskStatus::Archived)]);
+
+        let unsatisfiable = unsatisfiable_task_dependencies(&task, &statuses);
+
+        assert_eq!(unsatisfiable.len(), 1);
+        assert_eq!(unsatisfiable[0].task_id, "ORB-2");
+        assert_eq!(unsatisfiable[0].dependency_id, "ORB-1");
+        assert_eq!(unsatisfiable[0].status, "archived");
+        assert_eq!(unsatisfiable[0].reason, DependencyDeadEnd::Archived);
+        assert!(unsatisfiable[0].label().contains("ORB-2 blocked_by ORB-1"));
+    }
+
+    #[test]
+    fn rejected_dependency_is_unsatisfiable() {
+        let task = task_with_dependencies("ORB-2", &["ORB-1"]);
+        let statuses = status_index(&[("ORB-1", TaskStatus::Rejected)]);
+
+        let unsatisfiable = unsatisfiable_task_dependencies(&task, &statuses);
+
+        assert_eq!(unsatisfiable.len(), 1);
+        assert_eq!(unsatisfiable[0].reason, DependencyDeadEnd::Rejected);
+    }
+
+    #[test]
+    fn dangling_dependency_is_unsatisfiable() {
+        let task = task_with_dependencies("ORB-2", &["ORB-404"]);
+        let statuses = status_index(&[]);
+
+        let unsatisfiable = unsatisfiable_task_dependencies(&task, &statuses);
+
+        assert_eq!(unsatisfiable.len(), 1);
+        assert_eq!(unsatisfiable[0].dependency_id, "ORB-404");
+        assert_eq!(unsatisfiable[0].status, "missing");
+        assert_eq!(unsatisfiable[0].reason, DependencyDeadEnd::Missing);
+    }
+
+    #[test]
+    fn foreign_dependency_is_marked_ready_and_not_a_dead_end() {
+        let task = task_with_dependencies("ORB-2", &["DK-404"]);
+        let statuses = status_index(&[("ORB-2", TaskStatus::Backlog)]);
+
+        assert_eq!(
+            resolve_task_dependencies(&task, &statuses)[0].status,
+            TASK_REFERENCE_NOT_VERIFIABLE_HERE
+        );
+        assert!(task_dependencies_ready(&task, &statuses));
+        assert!(unmet_task_dependencies(&task, &statuses).is_empty());
+        assert!(unsatisfiable_task_dependencies(&task, &statuses).is_empty());
+    }
+
+    #[test]
+    fn in_flight_dependency_is_unmet_but_not_unsatisfiable() {
+        let task = task_with_dependencies("ORB-2", &["ORB-1"]);
+        for status in [
+            TaskStatus::Backlog,
+            TaskStatus::Proposed,
+            TaskStatus::InProgress,
+            TaskStatus::Review,
+        ] {
+            let statuses = status_index(&[("ORB-1", status)]);
+
+            assert!(
+                unsatisfiable_task_dependencies(&task, &statuses).is_empty(),
+                "{status} must not fail dispatch fast"
+            );
+            assert_eq!(
+                unmet_task_dependencies(&task, &statuses).len(),
+                1,
+                "{status} must still be reported as an unmet wait"
+            );
+        }
+    }
+
+    #[test]
+    fn satisfied_dependency_is_neither_unmet_nor_unsatisfiable() {
+        let task = task_with_dependencies("ORB-2", &["ORB-1"]);
+        let statuses = status_index(&[("ORB-1", TaskStatus::Done)]);
+
+        assert!(unsatisfiable_task_dependencies(&task, &statuses).is_empty());
+        assert!(unmet_task_dependencies(&task, &statuses).is_empty());
+    }
+
+    #[test]
+    fn mixed_edges_report_only_the_dead_ends_as_unsatisfiable() {
+        let task = task_with_dependencies("ORB-4", &["ORB-1", "ORB-2", "ORB-3"]);
+        let statuses = status_index(&[
+            ("ORB-1", TaskStatus::Backlog),
+            ("ORB-2", TaskStatus::Archived),
+            ("ORB-3", TaskStatus::Done),
+        ]);
+
+        let unsatisfiable = unsatisfiable_task_dependencies(&task, &statuses);
+
+        assert_eq!(unsatisfiable.len(), 1);
+        assert_eq!(unsatisfiable[0].dependency_id, "ORB-2");
+        // The plain unmet rollup is unchanged: it still reports both.
+        let unmet: Vec<String> = unmet_task_dependencies(&task, &statuses)
+            .into_iter()
+            .map(|dependency| dependency.id)
+            .collect();
+        assert_eq!(unmet, vec!["ORB-1".to_string(), "ORB-2".to_string()]);
+    }
+}

@@ -34,6 +34,7 @@ impl ArtifactRedactionKind {
 pub(super) struct ArtifactRedactionField {
     pub field_path: String,
     pub kinds: BTreeSet<ArtifactRedactionKind>,
+    pub classes: BTreeSet<&'static str>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -46,11 +47,38 @@ impl ArtifactRedactionReport {
         !self.fields.is_empty()
     }
 
-    fn push(&mut self, field_path: String, kinds: BTreeSet<ArtifactRedactionKind>) {
+    fn push(
+        &mut self,
+        field_path: String,
+        kinds: BTreeSet<ArtifactRedactionKind>,
+        classes: BTreeSet<&'static str>,
+    ) {
         if !kinds.is_empty() {
-            self.fields
-                .push(ArtifactRedactionField { field_path, kinds });
+            self.fields.push(ArtifactRedactionField {
+                field_path,
+                kinds,
+                classes,
+            });
         }
+    }
+
+    fn response_details(&self) -> Value {
+        Value::Array(
+            self.fields
+                .iter()
+                .map(|field| {
+                    json!({
+                        "field_path": field.field_path,
+                        "redaction_kinds": field
+                            .kinds
+                            .iter()
+                            .map(|kind| kind.as_str())
+                            .collect::<Vec<_>>(),
+                        "redaction_classes": field.classes,
+                    })
+                })
+                .collect(),
+        )
     }
 }
 
@@ -100,6 +128,7 @@ pub(super) fn finish_tool_response(
             "redactions_applied".to_string(),
             Value::Bool(report.redactions_applied()),
         );
+        object.insert("redactions".to_string(), report.response_details());
     }
     if report.redactions_applied() {
         emit_audit_events(runtime, action, response, report, agent, model)?;
@@ -129,27 +158,6 @@ struct ActionPolicy {
     nested_arrays: &'static [NestedArrayPolicy],
 }
 
-const LEARNING_NESTED: &[NestedArrayPolicy] = &[
-    NestedArrayPolicy {
-        array_key: "scope",
-        field_key: "tags",
-        field_alias: None,
-        mode: TextMode::Free,
-    },
-    NestedArrayPolicy {
-        array_key: "scope",
-        field_key: "paths",
-        field_alias: None,
-        mode: TextMode::PathOnly,
-    },
-    NestedArrayPolicy {
-        array_key: "evidence",
-        field_key: "ref",
-        field_alias: Some("reference"),
-        mode: TextMode::Free,
-    },
-];
-
 const TASK_ADD_NESTED: &[NestedArrayPolicy] = &[
     NestedArrayPolicy {
         array_key: "external_refs",
@@ -173,22 +181,15 @@ const TASK_ADD_NESTED: &[NestedArrayPolicy] = &[
 
 fn policy_for_action(action: OrbitBuiltinAction) -> Option<ActionPolicy> {
     match action {
-        OrbitBuiltinAction::AdrAdd | OrbitBuiltinAction::AdrUpdate => Some(ActionPolicy {
+        OrbitBuiltinAction::AdrAdd
+        | OrbitBuiltinAction::AdrRestore
+        | OrbitBuiltinAction::AdrUpdate => Some(ActionPolicy {
             free_text_fields: &["title", "body"],
             free_text_arrays: &[],
             path_fields: &[],
             path_arrays: &[],
             nested_arrays: &[],
         }),
-        OrbitBuiltinAction::LearningAdd | OrbitBuiltinAction::LearningUpdate => {
-            Some(ActionPolicy {
-                free_text_fields: &["summary", "body"],
-                free_text_arrays: &[],
-                path_fields: &[],
-                path_arrays: &[],
-                nested_arrays: LEARNING_NESTED,
-            })
-        }
         OrbitBuiltinAction::TaskAdd => Some(ActionPolicy {
             free_text_fields: &["title", "description", "plan", "comment"],
             free_text_arrays: &["acceptance_criteria"],
@@ -230,9 +231,7 @@ fn policy_for_action(action: OrbitBuiltinAction) -> Option<ActionPolicy> {
             path_arrays: &[],
             nested_arrays: &[],
         }),
-        OrbitBuiltinAction::AdrSupersede
-        | OrbitBuiltinAction::LearningSupersede
-        | OrbitBuiltinAction::LearningArchive => Some(ActionPolicy {
+        OrbitBuiltinAction::AdrSupersede => Some(ActionPolicy {
             free_text_fields: &[],
             free_text_arrays: &[],
             path_fields: &[],
@@ -247,12 +246,9 @@ fn is_covered_mutating_action(action: OrbitBuiltinAction) -> bool {
     matches!(
         action,
         OrbitBuiltinAction::AdrAdd
+            | OrbitBuiltinAction::AdrRestore
             | OrbitBuiltinAction::AdrUpdate
             | OrbitBuiltinAction::AdrSupersede
-            | OrbitBuiltinAction::LearningAdd
-            | OrbitBuiltinAction::LearningUpdate
-            | OrbitBuiltinAction::LearningSupersede
-            | OrbitBuiltinAction::LearningArchive
             | OrbitBuiltinAction::TaskAdd
             | OrbitBuiltinAction::TaskUpdate
             | OrbitBuiltinAction::TaskReject
@@ -270,10 +266,10 @@ fn sanitize_string_field(
     let Some(Value::String(raw)) = object.get(key) else {
         return Ok(());
     };
-    let (sanitized, kinds) = sanitize_string(raw, field_path, mode)?;
+    let (sanitized, kinds, classes) = sanitize_string(raw, field_path, mode)?;
     if sanitized != *raw {
         object.insert(key.to_string(), Value::String(sanitized));
-        report.push(field_path.to_string(), kinds);
+        report.push(field_path.to_string(), kinds, classes);
     }
     Ok(())
 }
@@ -287,10 +283,10 @@ fn sanitize_string_array_field(
 ) -> Result<(), OrbitError> {
     match object.get_mut(key) {
         Some(Value::String(raw)) => {
-            let (sanitized, kinds) = sanitize_string(raw, field_path, mode)?;
+            let (sanitized, kinds, classes) = sanitize_string(raw, field_path, mode)?;
             if sanitized != *raw {
                 *raw = sanitized;
-                report.push(field_path.to_string(), kinds);
+                report.push(field_path.to_string(), kinds, classes);
             }
         }
         Some(Value::Array(items)) => {
@@ -299,10 +295,10 @@ fn sanitize_string_array_field(
                     continue;
                 };
                 let item_path = format!("{field_path}[{index}]");
-                let (sanitized, kinds) = sanitize_string(raw, &item_path, mode)?;
+                let (sanitized, kinds, classes) = sanitize_string(raw, &item_path, mode)?;
                 if sanitized != *raw {
                     *raw = sanitized;
-                    report.push(item_path, kinds);
+                    report.push(item_path, kinds, classes);
                 }
             }
         }
@@ -351,10 +347,10 @@ fn sanitize_nested_string_array_field(
             continue;
         };
         let field_path = format!("{}[{index}].{key}", policy.array_key);
-        let (sanitized, kinds) = sanitize_string(raw, &field_path, policy.mode)?;
+        let (sanitized, kinds, classes) = sanitize_string(raw, &field_path, policy.mode)?;
         if sanitized != *raw {
             entry.insert(key.to_string(), Value::String(sanitized));
-            report.push(field_path, kinds);
+            report.push(field_path, kinds, classes);
         }
     }
     Ok(())
@@ -364,15 +360,24 @@ fn sanitize_string(
     raw: &str,
     field_path: &str,
     mode: TextMode,
-) -> Result<(String, BTreeSet<ArtifactRedactionKind>), OrbitError> {
+) -> Result<
+    (
+        String,
+        BTreeSet<ArtifactRedactionKind>,
+        BTreeSet<&'static str>,
+    ),
+    OrbitError,
+> {
     match mode {
         TextMode::PathOnly => {
             let sanitized = redact_home_dir(raw);
             let mut kinds = BTreeSet::new();
+            let mut classes = BTreeSet::new();
             if sanitized != raw {
                 kinds.insert(ArtifactRedactionKind::HomeDir);
+                classes.insert("home_directory");
             }
-            Ok((sanitized, kinds))
+            Ok((sanitized, kinds, classes))
         }
         TextMode::Free => {
             if is_high_confidence_single_token_credential(raw) {
@@ -386,18 +391,38 @@ fn sanitize_string(
             let pattern_scrubbed = redact_all(raw);
             let sanitized = redact_home_dir(&pattern_scrubbed);
             let mut kinds = BTreeSet::new();
+            let mut classes = BTreeSet::new();
             if env_scrubbed != raw {
                 kinds.insert(ArtifactRedactionKind::Env);
+                classes.insert("sensitive_environment_value");
             }
             if pattern_scrubbed != env_scrubbed {
                 kinds.insert(ArtifactRedactionKind::Pattern);
+                classes.extend(pattern_redaction_classes(&env_scrubbed, &pattern_scrubbed));
             }
             if sanitized != pattern_scrubbed {
                 kinds.insert(ArtifactRedactionKind::HomeDir);
+                classes.insert("home_directory");
             }
-            Ok((sanitized, kinds))
+            Ok((sanitized, kinds, classes))
         }
     }
+}
+
+fn pattern_redaction_classes(before: &str, after: &str) -> BTreeSet<&'static str> {
+    [
+        ("[REDACTED_AUTH]", "authorization"),
+        ("[REDACTED_SECRET]", "credential"),
+        ("[REDACTED_API_KEY]", "credential"),
+        ("[REDACTED_SSH_FINGERPRINT]", "ssh_fingerprint"),
+        ("[REDACTED_SSH_KEY_COMMENT]", "ssh_key_comment"),
+        ("[REDACTED_SSH_HOST]", "ssh_host"),
+    ]
+    .into_iter()
+    .filter_map(|(marker, class)| {
+        (after.matches(marker).count() > before.matches(marker).count()).then_some(class)
+    })
+    .collect()
 }
 
 fn emit_audit_events(
@@ -426,6 +451,7 @@ fn emit_audit_events(
             "actor": actor,
             "tool_name": tool_name,
             "redaction_kinds": redaction_kinds,
+            "redaction_classes": field.classes,
         });
         runtime.record_audit_event(&AuditEventInsertParams {
             execution_id: audit_execution_id("audit-artifact-redaction"),
@@ -481,18 +507,11 @@ fn artifact_target(
 ) -> Result<ArtifactTarget<'_>, OrbitError> {
     match action {
         OrbitBuiltinAction::AdrAdd
+        | OrbitBuiltinAction::AdrRestore
         | OrbitBuiltinAction::AdrUpdate
         | OrbitBuiltinAction::AdrSupersede => Ok(ArtifactTarget {
             artifact_type: "adr",
             artifact_id: response_string(response, "id")?,
-            task_id: None,
-        }),
-        OrbitBuiltinAction::LearningAdd
-        | OrbitBuiltinAction::LearningUpdate
-        | OrbitBuiltinAction::LearningSupersede
-        | OrbitBuiltinAction::LearningArchive => Ok(ArtifactTarget {
-            artifact_type: "learning",
-            artifact_id: learning_response_id(action, response)?,
             task_id: None,
         }),
         OrbitBuiltinAction::TaskAdd
@@ -518,19 +537,6 @@ fn artifact_target(
     }
 }
 
-fn learning_response_id(action: OrbitBuiltinAction, response: &Value) -> Result<&str, OrbitError> {
-    if action == OrbitBuiltinAction::LearningSupersede {
-        return response
-            .get("old")
-            .and_then(|value| value.get("id"))
-            .and_then(Value::as_str)
-            .ok_or_else(|| {
-                OrbitError::Execution("learning supersede response missing old.id".to_string())
-            });
-    }
-    response_string(response, "id")
-}
-
 fn response_string<'a>(response: &'a Value, field: &str) -> Result<&'a str, OrbitError> {
     response.get(field).and_then(Value::as_str).ok_or_else(|| {
         OrbitError::Execution(format!("redaction audit response missing string `{field}`"))
@@ -540,12 +546,9 @@ fn response_string<'a>(response: &'a Value, field: &str) -> Result<&'a str, Orbi
 fn tool_name(action: OrbitBuiltinAction) -> &'static str {
     match action {
         OrbitBuiltinAction::AdrAdd => "orbit.adr.add",
+        OrbitBuiltinAction::AdrRestore => "orbit.adr.restore",
         OrbitBuiltinAction::AdrUpdate => "orbit.adr.update",
         OrbitBuiltinAction::AdrSupersede => "orbit.adr.supersede",
-        OrbitBuiltinAction::LearningAdd => "orbit.learning.add",
-        OrbitBuiltinAction::LearningUpdate => "orbit.learning.update",
-        OrbitBuiltinAction::LearningSupersede => "orbit.learning.supersede",
-        OrbitBuiltinAction::LearningArchive => "orbit.learning.archive",
         OrbitBuiltinAction::TaskAdd => "orbit.task.add",
         OrbitBuiltinAction::TaskUpdate => "orbit.task.update",
         OrbitBuiltinAction::TaskReject => "orbit.task.reject",
@@ -562,23 +565,6 @@ mod tests {
     use std::sync::{Mutex, MutexGuard, OnceLock};
 
     use crate::runtime::orbit_tool_host::test_support::test_runtime;
-
-    /// Declare a human caller context for a test that dispatches a learning
-    /// *write* tool.
-    ///
-    /// [ORB-10364] gates `orbit.learning.add`/`update`/`supersede` on the
-    /// `ORBIT_AGENT_*` pair, which a child of a managed Orbit run inherits (the
-    /// ORB-10350 hazard). These tests assert redaction behaviour, not the role
-    /// gate, so they state the context they need instead of inheriting whatever
-    /// the suite was launched with.
-    fn human_context_env() -> orbit_common::test_env::ScopedEnv {
-        orbit_common::test_env::unset(
-            orbit_common::test_env::AGENT_IDENTITY_ENV
-                .iter()
-                .copied()
-                .chain(std::iter::once("ORBIT_LEARNING_AUTHOR")),
-        )
-    }
 
     struct EnvVarGuard {
         _lock: MutexGuard<'static, ()>,
@@ -659,13 +645,6 @@ mod tests {
                 }),
             ),
             (
-                OrbitBuiltinAction::LearningAdd,
-                json!({
-                    "summary": "ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZabcd123456",
-                    "body": "Body",
-                }),
-            ),
-            (
                 OrbitBuiltinAction::TaskAdd,
                 json!({
                     "title": "xoxb-0123456789",
@@ -689,31 +668,6 @@ mod tests {
                 "{action:?}: {err:?}"
             );
         }
-    }
-
-    #[test]
-    fn learning_policy_treats_tags_as_text_and_paths_as_paths() {
-        let home = std::env::var("HOME").expect("HOME for redaction test");
-        let input = json!({
-            "summary": "summary",
-            "scope": {
-                "tags": ["token ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZabcd123456"],
-                "paths": [format!("{home}/repo/**/*.rs"), "[ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZabcd123456]/**/*.rs"],
-            },
-            "evidence": [{"kind": "task", "ref": "see xoxb-0123456789"}],
-        });
-
-        let (sanitized, report) =
-            sanitize_tool_input(OrbitBuiltinAction::LearningAdd, input).expect("sanitize");
-
-        assert!(report.redactions_applied());
-        assert_eq!(sanitized["scope"]["tags"][0], "token [REDACTED_SECRET]");
-        assert_eq!(sanitized["scope"]["paths"][0], "~/repo/**/*.rs");
-        assert_eq!(
-            sanitized["scope"]["paths"][1],
-            "[ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZabcd123456]/**/*.rs"
-        );
-        assert_eq!(sanitized["evidence"][0]["ref"], "see [REDACTED_SECRET]");
     }
 
     #[test]
@@ -763,6 +717,14 @@ mod tests {
             .expect("task add succeeds");
 
         assert_eq!(output["redactions_applied"], true);
+        assert_eq!(
+            output["redactions"],
+            json!([{
+                "field_path": "title",
+                "redaction_kinds": ["env"],
+                "redaction_classes": ["sensitive_environment_value"]
+            }])
+        );
         let id = output["id"].as_str().expect("task id");
         let task = runtime.get_task(id).expect("task persisted");
         assert_eq!(task.title, "leaked [REDACTED_ENV]");
@@ -785,46 +747,34 @@ mod tests {
     }
 
     #[test]
-    fn adr_and_learning_dispatch_redact_live_github_token_in_persisted_fields() {
-        let token = "orbit-adr-learning-secret-value";
-        // Acquired before `EnvVarGuard` so the two locks are always taken in
-        // the same order.
-        let _identity = human_context_env();
-        let _env = EnvVarGuard::set("GITHUB_TOKEN", token);
+    fn dispatch_reports_structural_ssh_redaction_classes() {
         let (_root, runtime, _repo_root) = test_runtime();
+        let fingerprint = format!("SHA256:{}", "A".repeat(43));
 
-        let adr = runtime
+        let output = runtime
             .execute_tool_command(
-                "orbit.adr.add",
+                "orbit.task.add",
                 json!({
-                    "title": format!("decision {token}"),
-                    "body": format!("## Context\n{token}"),
+                    "title": "SSH diagnostic",
+                    "description": format!(
+                        "debug1: Connecting to build-node.example.test [192.0.2.10] port 22.\n256 {fingerprint} automation@build-node.example.test (ED25519)"
+                    ),
+                    "workspace": ".",
                 }),
                 Some("codex".to_string()),
                 Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
             )
-            .expect("adr add succeeds");
-        assert_eq!(adr["redactions_applied"], true);
-        assert_eq!(adr["title"], "decision [REDACTED_ENV]");
+            .expect("task add succeeds");
 
-        let learning = runtime
-            .execute_tool_command(
-                "orbit.learning.add",
-                json!({
-                    "summary": format!("summary {token}"),
-                    "body": format!("body {token}"),
-                    "scope": { "tags": [format!("tag {token}")] },
-                    "evidence": [{ "kind": "task", "ref": format!("ref {token}") }],
-                }),
-                Some("codex".to_string()),
-                Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
-            )
-            .expect("learning add succeeds");
-        assert_eq!(learning["redactions_applied"], true);
-        assert_eq!(learning["summary"], "summary [REDACTED_ENV]");
-        assert_eq!(learning["body"], "body [REDACTED_ENV]");
-        assert_eq!(learning["scope"]["tags"][0], "tag [redacted_env]");
-        assert_eq!(learning["evidence"][0]["ref"], "ref [REDACTED_ENV]");
+        assert_eq!(output["redactions_applied"], true);
+        assert_eq!(
+            output["redactions"],
+            json!([{
+                "field_path": "description",
+                "redaction_kinds": ["pattern"],
+                "redaction_classes": ["ssh_fingerprint", "ssh_host", "ssh_key_comment"]
+            }])
+        );
     }
 
     #[test]
@@ -857,6 +807,7 @@ mod tests {
             .expect("task update succeeds");
 
         assert_eq!(output["redactions_applied"], false);
+        assert_eq!(output["redactions"], json!([]));
         let events = runtime
             .list_audit_events(None, Some("orbit.task.update".to_string()), None, None, 16)
             .expect("L-0009: same backing query as `orbit audit list --json`");
@@ -870,7 +821,6 @@ mod tests {
 
     #[test]
     fn dispatch_adds_false_response_flags_for_each_covered_family() {
-        let _identity = human_context_env();
         let (_root, runtime, _repo_root) = test_runtime();
 
         let task = runtime
@@ -886,33 +836,6 @@ mod tests {
             )
             .expect("task add succeeds");
         assert_eq!(task["redactions_applied"], false);
-
-        let adr = runtime
-            .execute_tool_command(
-                "orbit.adr.add",
-                json!({
-                    "title": "Decision",
-                    "body": "## Context\nBody",
-                }),
-                Some("codex".to_string()),
-                Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
-            )
-            .expect("adr add succeeds");
-        assert_eq!(adr["redactions_applied"], false);
-
-        let learning = runtime
-            .execute_tool_command(
-                "orbit.learning.add",
-                json!({
-                    "summary": "Always test the seam",
-                    "body": "Body",
-                    "scope": { "paths": ["crates/**"], "tags": ["testing"] },
-                }),
-                Some("codex".to_string()),
-                Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
-            )
-            .expect("learning add succeeds");
-        assert_eq!(learning["redactions_applied"], false);
 
         let friction = runtime
             .execute_tool_command(

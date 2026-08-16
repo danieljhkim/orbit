@@ -1,145 +1,79 @@
 ---
-title: Orbit MCP Bridge — Vision
+title: Orbit MCP — Vision
 owner: codex
-last_updated: 2026-07-18
-status: Accepted
+last_updated: 2026-08-15
+last_validated: 2026-08-15
+status: Draft
 feature: mcp-bridge
 doc_role: vision
 type: design
-summary: Open questions and prior art for a singular hub MCP link, owner-bound knowledge, explicit Git-replica reads, execution-profile projection, schema skew, and host identity assurance.
-tags: [mcp, remote-access, host-registry, bridge]
-paths: ["crates/orbit-remote/**", "crates/orbit-mcp/**", "crates/orbit-core/**", "crates/orbit-tools/**", "crates/orbit-store/**"]
-related_features: [mcp-bridge, host-registry, mcp-session-context, remote-access, orbit-search]
-related_artifacts: [ORB-00424, ORB-10319, ADR-0181, ADR-0199, ADR-0200, ADR-0201, ADR-0226, ADR-0227, ADR-0228, ADR-0229, ADR-0230, ADR-0231, ADR-0232, ADR-0240]
+summary: Evidence-gated extensions beyond the deliberately small direct-SSH MCP v1.
+tags: [mcp, ssh, authorization, audit]
+paths: ["crates/orbit-mcp/**", "crates/orbit-core/**", "crates/orbit-registry/**"]
+related_features: [host-registry, mcp-session-context]
 ---
 
-# Orbit MCP Bridge — Vision
+# Orbit MCP — Vision
 
-Forward-looking notes for the MCP bridge. V1 is deliberately narrow: one trusted
-operator, one coordination hub, a small host fleet, SSH transport, one declared
-owner per workspace, no spoke-to-spoke routes, and no offline coordination writes.
-Speculation below should not leak into implementation without demonstrated need.
-It also assumes [ADR-0240]'s vertical `orbit-remote` owner over neutral MCP, Store,
-Core, Tools, and Common kernels; new remote behavior should normally extend that
-feature rather than add another horizontal broker crate ([ORB-10319]).
+V1 is a skeleton: local stdio, direct SSH stdio, server-side resolution, one Core
+dispatch boundary, and audit context. Future work should preserve that shape and
+add complexity only for a demonstrated requirement.
 
-## 1. Open Questions
+## 1. Authorization in Core
 
-1. **Agent non-owner knowledge authoring.** The coupled v1 answer is "route a task
-   to the owner." The human manual path may allocate an ID and carry a narrative
-   file through a PR, but it does not enable replica-store writes. If the agent seam
-   hurts, should the hub accept content and queue an owner finalize action, should
-   IDs gain a real reservation/finalization lifecycle, or should ownership rules
-   change? Any option broadens the hub beyond mailbox/coordination metadata.
-2. **Replica freshness UX.** What proves a Git knowledge replica is suitable for an
-   explicit read: indexed commit equals checkout HEAD, branch matches owner default,
-   a maximum age, or a signed owner projection? V1 should expose facts rather than
-   claim freshness it cannot know.
-3. **Owner execution-profile freshness.** Crew/dispatch validation requires a
-   one-way owner→hub projection. Is poll-time publication enough, or should config
-   changes trigger an immediate publish? What fields belong in the profile without
-   turning it into a copy of `.orbit/config.toml`?
-4. **Authenticated caller-machine identity.** V1 trusts caller host as provenance
-   inside a same-user SSH fleet. If hosts become mutually untrusted, should
-   registration bind a dedicated SSH key/principal to `machine_id`, or should Orbit
-   sign a session challenge? This must be solved before machine identity becomes an
-   authorization boundary.
-5. **Contract skew policy.** Is one MCP contract revision enough, or should hub and
-   local subsets carry separate schema hashes so graph-only local changes do not
-   block coordination calls? Start coarse; split only after real mixed-version
-   deployments create friction.
-6. **Transport beyond SSH.** Streamable HTTP would help environments without shell
-   access, but it adds Orbit-owned authentication, authorization, listener
-   hardening, and session management. Is there a deployment that justifies crossing
-   that boundary after SSH is observed?
-7. **Distributing the coordination plane.** Host-registry currently says no. If the
-   hub ever shards or replicates, the MCP bridge loses its one-target invariant and
-   needs a new design rather than a configurable list of hidden authorities.
-8. **Knowledge sidecar on replicas.** Should an agent explicitly opt into stale but
-   marked learning injection, or is disabling injection safer until owner-current
-   state is available? This should follow evidence from replica use, not convenience.
+The next security layer belongs in Core, not in the local proxy, client UI, or
+tool advertisement path. A useful authorization design must first answer:
 
-## 2. Prior Work
+- What authenticated principal does the accepting server receive?
+- How is that principal bound to a machine or operator?
+- Which rules apply globally and which apply per workspace or operation?
+- How are denials audited without creating a second dispatch path?
 
-### Orbit MCP and session context
+The v1 `caller_machine_id` and `caller_ip` fields are insufficient for enforcement.
+The label is supplied by the caller and an IP address is neither stable nor a
+machine credential. Possible inputs include SSH certificate principals, forced-
+command metadata, or another server-verified identity, but no mechanism should be
+chosen before the required trust model is concrete.
 
-The generic MCP adapter separates protocol framing from an injected `McpHost`,
-sanitizes advertised names, resolves structural schemas, and threads
-`ToolSessionContext` into dispatch. `orbit-remote` composes generic builtin schemas
-with Remote-owned discovery/graph definitions and supplies the in-process graph,
-learning, hub, and broker behavior. [ADR-0181] established deliberate workspace
-context instead of cwd fallback; [ADR-0199] proposed per-call runtime resolution.
-The local broker extends those neutral seams rather than starting a second
-implementation.
+## 2. Better provenance
 
-### Host registry and star topology
+Audit records may eventually need the authenticated SSH principal, key fingerprint,
+connection identifier, or proxy version. Each added field should have a clear
+source of trust and retention purpose. Audit enrichment must not silently turn an
+observational field into an authorization key.
 
-[host-registry/2_design.md](../host-registry/2_design.md) supplies stable machine
-identity, a singular hub, declared workspace ownership, local replica role,
-presence maps, requested/actual placement, and pull-based run leases. The MCP bridge
-consumes those facts and never becomes a scheduler or owner proxy.
+## 3. Contract skew
 
-### Remote access
+Direct SSH can connect different Orbit versions. Standard MCP discovery already
+lets the accepting server advertise its actual surface. Add explicit compatibility
+negotiation only if mixed-version failures cannot be explained cleanly through
+normal discovery and errors.
 
-[remote-access/4_decisions.md](../remote-access/4_decisions.md) established two
-constraints reused here: do not synchronize task stores, and use SSH over a local-
-only process instead of adding a routable unauthenticated service. MCP adds writable
-coordination while preserving that transport posture.
+## 4. Other transports
 
-### Bridge parity
+SSH is appropriate while every supported remote has a shell and the same operator
+controls both ends. A network MCP service would require Orbit-owned authentication,
+session lifecycle, exposure hardening, and operational support. Do not add one
+merely to avoid launching SSH.
 
-Bridge's parity layer proved the need for off-box task/workflow access and
-multi-workspace selection. It also proved the maintenance cost of copying schemas
-and translating through a dashboard projection. The migration preserves the need
-and removes the duplicate contract.
+## 5. Multi-host routing
 
-### Search partitioning
+The v1 client chooses one destination and that server answers only from its own
+state. Automatic owner discovery, relays, replication, or fleet placement should
+be considered separate products, not incremental proxy features. Each needs a
+measured use case strong enough to justify new authority and failure modes.
 
-Orbit search already ranks within each kind and round-robins task, doc, ADR, and
-learning branches under a total limit. Role-aware composition moves branches to hub,
-owner/local, or explicit replica sources without inventing another relevance model.
+## 6. Evaluation gates
 
-### External patterns
+Any extension should preserve these properties unless the change explicitly
+replaces them:
 
-- SSH stdio is a common transport for Git, remote language servers, and MCP servers:
-  SSH owns identity/encryption while the application owns framing.
-- CI runner systems separate a central queue from machines that poll and execute.
-  Orbit borrows the pull direction but keeps placement orchestrator-selected.
-- Git's distributed read model is the relevant precedent for owner-authored
-  knowledge: replicas are useful and inspectable, but not automatically current.
+1. one canonical tool schema;
+2. one authoritative accepting server;
+3. one Core dispatch and audit boundary per tools/call, including unknown names;
+4. no policy in byte-forwarding transport;
+5. no client-side check required for correctness; and
+6. a focused end-to-end test for local and remote context propagation.
 
-## 3. What May Be Distinctive
-
-The distinctive part is the refusal to make "one MCP surface" mean "one machine
-serves every datum." The local broker has one network destination, yet placement
-still follows record semantics: coordination goes to the hub, current knowledge
-stays with its owner, derived indexes stay with the checkout, and composite tools
-state exactly which pieces are unavailable. The hub is a mailbox and allocator, not
-a relay or universal read proxy.
-
-## 4. References
-
-**Orbit-internal**
-
-- [1_overview.md](./1_overview.md), [2_design.md](./2_design.md)
-- [host-registry/1_overview.md](../host-registry/1_overview.md)
-- [mcp-session-context/2_design.md](../mcp-session-context/2_design.md)
-- [remote-access/2_design.md](../remote-access/2_design.md)
-- [orbit-search/2_design.md](../orbit-search/2_design.md)
-- [archived Orbit Graph design](../_archive/orbit-graph/2_design.md)
-
-**External**
-
-- Model Context Protocol — initialization metadata, tool discovery, stdio transport.
-- OpenSSH — host aliases, key authentication, host verification, stdio process
-  transport.
-- GitHub Actions self-hosted runners — central queue with pull-based execution.
-
-## Task References
-
-- [ORB-00424] — umbrella proposal for canonical Orbit MCP and Bridge parity
-  retirement.
-- [ORB-10319] — consolidates registry persistence and MCP routing in the vertical
-  `orbit-remote` feature boundary assumed here ([ADR-0240]).
-
-> Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.
+Current behavior is described in [`2_design.md`](./2_design.md). The machine-
+readable contract is [`references/conformance-v1.yaml`](./references/conformance-v1.yaml).

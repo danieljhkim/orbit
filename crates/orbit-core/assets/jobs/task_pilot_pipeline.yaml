@@ -1,8 +1,10 @@
-# Invoked-only task-pilot pipeline [ORB-10510].
+# Schedulable task-pilot pipeline [ORB-10510, ORB-10739].
 #
-# Automatic mode (task_ids empty) discovers only proposed/backlog tasks in the
-# active workspace with empty context_files, excluding no-diff tasks. Explicit
-# mode audits exactly the named workspace tasks, including non-empty selectors.
+# Scheduled and other zero-input runs leave discovery entirely to
+# `prepare_task_pilot`: automatic mode (task_ids empty) discovers only
+# proposed/backlog tasks in the active workspace with empty context_files,
+# excluding no-diff tasks. Explicit mode audits exactly the named workspace
+# tasks, including non-empty selectors.
 # Preparation never promotes or dispatches a task. Each read-only Luna-backed
 # pilot receives at most five tasks. The all-join makes any failed partition
 # fail the run before the context-only deterministic apply step can execute.

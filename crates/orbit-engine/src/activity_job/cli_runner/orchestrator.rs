@@ -3,13 +3,11 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use chrono::Utc;
 use orbit_agent::{
     Agent, AgentConfig, AgentOperation, AgentRequest, peek_response_status,
-    response_envelope_protocol_check,
+    provider_invocation_diagnostic, response_envelope_protocol_check,
 };
 use orbit_common::types::activity_job::{AgentLoopSpec, V2AuditEventKind};
-use orbit_common::types::{LearningInjectionCaps, LearningInjectionState, prepend_reminder_block};
 use orbit_common::utility::process_identity::process_start_identity_token;
 use orbit_common::utility::redaction::{PatternRedactor, redact_sensitive_env_text};
 use serde_json::Value;
@@ -17,30 +15,33 @@ use serde_json::Value;
 use crate::context::{ProvenanceEnv, provenance_env};
 
 use super::super::audit_writer::V2AuditWriter;
-use super::super::dispatcher::{
-    DispatchError, DispatchInvocationTrace, DispatchOutcome, V2RuntimeHost,
-};
+use super::super::dispatcher::{DispatchError, DispatchInvocationTrace, DispatchOutcome};
 use super::super::workspace::{
     WorktreeBoundaryGuard, resolve_subprocess_cwd, validate_declared_worktree_pair,
 };
 use super::argv::{
-    apply_provider_static_arg_fixups, audit_argv_for_dispatch, neutralize_inner_sandbox,
+    apply_provider_static_arg_fixups, neutralize_inner_sandbox, try_audit_argv_for_dispatch,
 };
 use super::envelope::{
     cli_agent_envelope_json, parse_cli_invocation_trace, parse_cli_response_result,
     task_id_from_input,
 };
-use super::spawn::resolve_provider_launcher;
+use super::spawn::{
+    linux_bwrap_failed_write_diagnostic, orbit_tool_env, prepare_sandbox_for_dispatch,
+    resolve_provider_launcher,
+};
 use super::supervisor::{
     DEFAULT_WALL_CLOCK_TIMEOUT_SECONDS, SpawnTraceContext, SpawnWithTimeoutRequest,
     spawn_with_timeout,
 };
+use crate::context::RuntimeHost;
+use orbit_exec::LinuxBwrapPostRunGuard;
 
 const STDOUT_TEXT_PREVIEW_LIMIT_BYTES: usize = 64 * 1024;
 const RESPONSE_DIAGNOSTIC_LIMIT_CHARS: usize = 1024;
 
 pub fn run_cli_backend(
-    host: &dyn V2RuntimeHost,
+    host: &dyn RuntimeHost,
     spec: &AgentLoopSpec,
     run_id: &str,
     audit: Arc<V2AuditWriter>,
@@ -91,17 +92,13 @@ pub fn run_cli_backend(
     let subprocess_cwd_string = subprocess_cwd
         .as_ref()
         .map(|path| path.display().to_string());
-    let sandbox =
+    let resolved_sandbox =
         host.resolve_executor_sandbox(&provider, fs_profile, subprocess_cwd.as_deref())?;
+    let prepared_sandbox = prepare_sandbox_for_dispatch(resolved_sandbox.as_ref())
+        .map_err(|error| DispatchError::CliInvocationPermanent(error.message))?;
+    let sandbox = prepared_sandbox.effective;
 
-    let learning_context = cli_learning_context(host, input, tool_ctx.workspace_root.as_deref())?;
-    let envelope_json = cli_agent_envelope_json(
-        spec,
-        run_id,
-        input,
-        task_ctx.as_ref(),
-        learning_context.prompt.as_deref(),
-    )?;
+    let envelope_json = cli_agent_envelope_json(spec, run_id, input, task_ctx.as_ref())?;
 
     let mut provider_config = host.provider_cli_config(&provider);
 
@@ -163,7 +160,13 @@ pub fn run_cli_backend(
     // under bare exec it's `<program> <args...>`. The redactor still scrubs
     // the child's program name + args so secrets in argv stay redacted.
     let redaction = PatternRedactor::with_argv_secrets();
-    let audit_argv = audit_argv_for_dispatch(&resolved_program, &subprocess_args, sandbox.as_ref());
+    let audit_argv = try_audit_argv_for_dispatch(
+        &resolved_program,
+        &subprocess_args,
+        sandbox,
+        subprocess_cwd.as_deref(),
+    )
+    .map_err(|error| DispatchError::CliInvocationPermanent(error.to_string()))?;
     let argv_redacted: Vec<String> = audit_argv.iter().map(|a| redaction.apply_str(a)).collect();
 
     let stdin_blob_ref = audit.write_blob(&invocation.stdin);
@@ -191,24 +194,32 @@ pub fn run_cli_backend(
         model: model_redacted,
         cwd: subprocess_cwd_string.clone(),
         wall_clock_timeout_ms: wall_clock_timeout.as_millis() as u64,
+        sandbox_backend: prepared_sandbox.metadata.backend.clone(),
+        sandbox_trusted_wrapper: prepared_sandbox.metadata.trusted_wrapper.clone(),
+        sandbox_probe_outcome: prepared_sandbox.metadata.probe_outcome.clone(),
+        sandbox_write_enforcement: Some(prepared_sandbox.metadata.write_enforcement.clone()),
+        sandbox_read_enforcement: Some(prepared_sandbox.metadata.read_enforcement.clone()),
     });
 
     let task_id = task_id_from_input(input);
     // ADR-0182: external CLI agents get the same active-task hook binding as
     // direct-agent executions. The AGENT_* fields preserve ORB-10342's
     // commit-telemetry contract and omit unknown model/task values.
-    let child_env = provenance_env(ProvenanceEnv {
+    let mut child_env = provenance_env(ProvenanceEnv {
         orbit_run_id: Some(run_id),
         orbit_managed_run_context: true,
         orbit_agent_name: tool_ctx.agent_name.as_deref(),
         orbit_agent_model: tool_ctx.model_name.as_deref(),
-        orbit_session_id: learning_context.session_id.as_deref(),
+        orbit_session_id: None,
         orbit_task_id: task_id,
         orbit_active_task: true,
         agent_run_id: Some(run_id),
         agent_model: model.as_deref(),
         agent_task_id: task_id,
     });
+    child_env.extend(
+        orbit_tool_env().map_err(|error| DispatchError::CliInvocationPermanent(error.message))?,
+    );
     // [ORB-10496] Record the provider child's PID the moment it exists. Emitted
     // through the same writer, so it is persisted (and therefore readable by
     // `orbit run show` / the run-status API) while the invocation is still
@@ -223,6 +234,17 @@ pub fn run_cli_backend(
         });
     };
 
+    let linux_post_run_guard = match sandbox {
+        Some(sandbox)
+            if sandbox.kind == orbit_common::types::ExecutorSandboxKind::LinuxBwrap
+                && sandbox.managed_worktree =>
+        {
+            LinuxBwrapPostRunGuard::capture(&sandbox.fs_profile)
+                .map_err(|error| DispatchError::CliInvocationPermanent(error.to_string()))?
+        }
+        _ => None,
+    };
+
     let spawn_result = spawn_with_timeout(SpawnWithTimeoutRequest {
         program: &resolved_program,
         args: &subprocess_args,
@@ -230,7 +252,7 @@ pub fn run_cli_backend(
         env: &child_env,
         cwd: subprocess_cwd.as_deref(),
         timeout: wall_clock_timeout,
-        sandbox: sandbox.as_ref(),
+        sandbox,
         trace: SpawnTraceContext {
             provider: &provider,
             job_run_id: run_id,
@@ -259,6 +281,12 @@ pub fn run_cli_backend(
         }
     };
 
+    if let Some(guard) = linux_post_run_guard {
+        guard
+            .verify()
+            .map_err(|error| DispatchError::CliInvocationPermanent(error.to_string()))?;
+    }
+
     let stdout_blob_ref = audit.write_blob(stdout.bytes());
     let stderr_blob_ref = audit.write_blob(stderr.bytes());
 
@@ -286,6 +314,24 @@ pub fn run_cli_backend(
     // and diagnostics, but only make them authoritative when the activity
     // explicitly declares that downstream templates require them.
     let exit_success = !timed_out && matches!(exit_code, Some(0));
+    let sandbox_write_diagnostic = if exit_success {
+        None
+    } else {
+        match sandbox {
+            Some(sandbox)
+                if sandbox.kind == orbit_common::types::ExecutorSandboxKind::LinuxBwrap =>
+            {
+                linux_bwrap_failed_write_diagnostic(
+                    &sandbox.fs_profile,
+                    stderr.protocol_bytes(),
+                    subprocess_cwd.as_deref(),
+                )
+                .map_err(|error| DispatchError::CliInvocationPermanent(error.to_string()))?
+                .map(|diagnostic| bounded_diagnostic(&diagnostic, &redaction))
+            }
+            _ => None,
+        }
+    };
     // A truncated capture retains the final complete JSONL events separately
     // from its diagnostic prefix. Protocol parsing must use that tail so a
     // verbose provider's final Orbit envelope remains authoritative.
@@ -310,8 +356,8 @@ pub fn run_cli_backend(
     // by construction — `response_envelope_protocol_check` reads the envelope
     // frame and never `result`/`error`, so this asks only "did the invocation
     // run its contract to the end", never "do we believe what it said". An
-    // agent that declares `status: "failed"` passes; one that yielded mid-turn
-    // emitted no envelope and does not.
+    // agent that declares `status: "failed"` passes this frame check; one that
+    // yielded mid-turn emitted no envelope and does not.
     //
     // Only meaningful on an otherwise-clean exit: a timeout or nonzero exit
     // already fails the step with a more specific message.
@@ -321,12 +367,20 @@ pub fn run_cli_backend(
         .map(|error| completion_diagnostic(&error.to_string(), &redaction));
     let completion_protocol_violation =
         spec.require_completion_envelope && completion_envelope_error.is_some();
+    // [ORB-10733] Protocol termination and control-plane outcome are distinct:
+    // all recognized status tokens finish the frame, but a required completion
+    // contract cannot checkpoint an explicit failed/timeout outcome. Only the
+    // token controls this; the envelope's result/error payload stays advisory.
+    let completion_status_failure = spec.require_completion_envelope
+        && completion_envelope_error.is_none()
+        && matches!(envelope_status.as_deref(), Some("failed") | Some("timeout"));
     // Two orthogonal contracts. `require_completion_envelope` gates step
-    // completion (above); `require_response_envelope` additionally gates the
+    // completion and its status outcome (above); `require_response_envelope` additionally gates the
     // envelope's *content* for activities whose downstream templates consume it
     // (ADR-0224 / L-0087) — outside that opt-in, parsing stays advisory.
     let success = exit_success
         && !completion_protocol_violation
+        && !completion_status_failure
         && (!spec.require_response_envelope || response_envelope_valid);
     let trace = parse_cli_invocation_trace(
         stdout.protocol_bytes(),
@@ -341,12 +395,27 @@ pub fn run_cli_backend(
             timeout_seconds
         ))
     } else if !exit_success {
-        Some(format!("cli subprocess exited with code {:?}", exit_code))
-    } else if spec.require_response_envelope
+        Some(
+            sandbox_write_diagnostic
+                .clone()
+                // [ORB-10746] A bare exit code cannot distinguish "this CLI
+                // has no --json-schema" from "the provider rejected Orbit's
+                // schema" from any other nonzero exit, and the first two are
+                // configuration faults an operator can act on immediately.
+                .or_else(|| {
+                    provider_invocation_diagnostic(
+                        stdout_text.as_ref(),
+                        String::from_utf8_lossy(stderr.protocol_bytes()).as_ref(),
+                    )
+                    .map(|diagnostic| bounded_diagnostic(&diagnostic, &redaction))
+                })
+                .unwrap_or_else(|| format!("cli subprocess exited with code {:?}", exit_code)),
+        )
+    } else if (spec.require_completion_envelope || spec.require_response_envelope)
         && matches!(envelope_status.as_deref(), Some("failed") | Some("timeout"))
     {
         Some(format!(
-            "cli subprocess reported envelope status={:?} despite exit 0",
+            "cli subprocess reported declared envelope status={:?} despite exit 0",
             envelope_status.as_deref().unwrap_or("unknown")
         ))
     } else if spec.require_response_envelope {
@@ -407,6 +476,10 @@ pub fn run_cli_backend(
         (
             "completion_envelope_error",
             completion_envelope_error.map_or(Value::Null, Value::String),
+        ),
+        (
+            "sandbox_write_diagnostic",
+            sandbox_write_diagnostic.map_or(Value::Null, Value::String),
         ),
         ("stdout_text", Value::String(stdout_text)),
         (
@@ -496,48 +569,6 @@ fn bounded_diagnostic(error: &str, redactor: &PatternRedactor) -> String {
         ""
     };
     format!("{bounded}{suffix}")
-}
-
-struct CliLearningContext {
-    prompt: Option<String>,
-    session_id: Option<String>,
-}
-
-fn cli_learning_context(
-    host: &dyn V2RuntimeHost,
-    input: &Value,
-    workspace_root: Option<&std::path::Path>,
-) -> Result<CliLearningContext, DispatchError> {
-    let caps = LearningInjectionCaps::from_env();
-    let reminders = host.learning_reminders_for_task(input, caps)?;
-    if reminders.is_empty() {
-        return Ok(CliLearningContext {
-            prompt: None,
-            session_id: None,
-        });
-    }
-
-    let mut state = LearningInjectionState::new();
-    let admitted = state.admit_reminders(&reminders, caps);
-    if admitted.is_empty() {
-        return Ok(CliLearningContext {
-            prompt: None,
-            session_id: None,
-        });
-    }
-    let base_prompt = super::envelope::user_prompt_from_input(input)?;
-    let prompt = prepend_reminder_block(&base_prompt, &admitted);
-    let session_id = format!("S{:x}-cli", Utc::now().timestamp_micros());
-    if workspace_root.is_some() {
-        host.persist_session_learning_state(&session_id, &state)
-            .map_err(|err| {
-                DispatchError::CliInvocationFailed(format!("persist learning state: {err}"))
-            })?;
-    }
-    Ok(CliLearningContext {
-        prompt: Some(prompt),
-        session_id: Some(session_id),
-    })
 }
 
 struct StdoutTextPreview {

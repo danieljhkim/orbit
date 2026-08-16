@@ -2,9 +2,7 @@
 #![allow(missing_docs)]
 #![allow(clippy::expect_used)]
 
-use orbit_common::types::{
-    McpToolPlacement, McpToolPolicy, McpToolPolicyError, McpToolScope, OrbitError, ToolSchema,
-};
+use orbit_common::types::{McpToolDefinitionError, McpToolScope, OrbitError, ToolSchema};
 use orbit_tools::{Tool, ToolContext, ToolRegistry, canonical_builtin_mcp_tool_definitions};
 use serde_json::Value;
 
@@ -26,25 +24,47 @@ impl Tool for TestTool {
 }
 
 #[test]
-fn canonical_builtin_definitions_are_workspace_independent() {
+fn canonical_builtin_definitions_preserve_the_exact_workspace_surface() {
     let definitions =
         canonical_builtin_mcp_tool_definitions().expect("builtin MCP definitions are valid");
-    assert_eq!(definitions.len(), 26);
+    assert_eq!(
+        definitions
+            .iter()
+            .map(|definition| definition.schema.name.as_str())
+            .collect::<Vec<_>>(),
+        [
+            "orbit.auto_task.list",
+            "orbit.auto_task.mint",
+            "orbit.command.exec",
+            "orbit.friction.add",
+            "orbit.friction.list",
+            "orbit.friction.update",
+            "orbit.search",
+            "orbit.session_log.append",
+            "orbit.session_log.list",
+            "orbit.session_log.resolve",
+            "orbit.task.add",
+            "orbit.task.approve",
+            "orbit.task.artifact.put",
+            "orbit.task.list",
+            "orbit.task.show",
+            "orbit.task.start",
+            "orbit.task.update",
+            "orbit.workflow.run.list",
+            "orbit.workflow.run.resume",
+            "orbit.workflow.run.show",
+            "orbit.workflow.ship",
+        ]
+    );
     assert!(
         definitions
             .iter()
             .all(|definition| definition.schema.builtin)
     );
-}
-
-#[test]
-fn generic_builtin_definitions_are_workspace_scoped_and_exclude_remote_discovery() {
-    let definitions =
-        canonical_builtin_mcp_tool_definitions().expect("builtin MCP definitions are valid");
     assert!(
         definitions
             .iter()
-            .all(|definition| definition.policy.scope() == McpToolScope::WorkspaceRequired)
+            .all(|definition| definition.scope == McpToolScope::WorkspaceRequired)
     );
     assert!(
         definitions.iter().all(|definition| {
@@ -54,7 +74,7 @@ fn generic_builtin_definitions_are_workspace_scoped_and_exclude_remote_discovery
 }
 
 #[test]
-fn missing_and_invalid_policy_fail_closed() {
+fn ordinary_registration_stays_off_the_mcp_surface() {
     let mut missing = ToolRegistry::new();
     missing.register(TestTool("demo.missing"));
     assert!(
@@ -63,37 +83,30 @@ fn missing_and_invalid_policy_fail_closed() {
             .expect("unclassified tools are valid but unexposed")
             .is_empty()
     );
-
-    let invalid = serde_json::from_value::<McpToolPolicy>(serde_json::json!({
-        "placement": "hub",
-        "allowed_capabilities": []
-    }))
-    .expect("deserialize invalid policy for validation coverage");
-    let mut registry = ToolRegistry::new();
-    registry.register_mcp(TestTool("demo.invalid"), invalid);
-    assert_eq!(
-        registry.mcp_tool_definitions(),
-        Err(McpToolPolicyError::EmptyCapabilities)
-    );
 }
 
 #[test]
-fn duplicate_canonical_and_advertised_names_fail_closed() {
-    let policy = || McpToolPolicy::agent_and_operator(McpToolPlacement::Hub);
+fn invalid_and_duplicate_names_fail_closed() {
+    let mut invalid = ToolRegistry::new();
+    invalid.register_mcp(TestTool(" "), McpToolScope::WorkspaceRequired);
+    assert_eq!(
+        invalid.mcp_tool_definitions(),
+        Err(McpToolDefinitionError::EmptyCanonicalName)
+    );
 
     let mut canonical = ToolRegistry::new();
-    canonical.register_mcp(TestTool("demo.same"), policy());
-    canonical.register_mcp(TestTool("demo.same"), policy());
+    canonical.register_mcp(TestTool("demo.same"), McpToolScope::WorkspaceRequired);
+    canonical.register_mcp(TestTool("demo.same"), McpToolScope::WorkspaceRequired);
     assert!(matches!(
         canonical.mcp_tool_definitions(),
-        Err(McpToolPolicyError::DuplicateCanonicalName(_))
+        Err(McpToolDefinitionError::DuplicateCanonicalName(_))
     ));
 
     let mut advertised = ToolRegistry::new();
-    advertised.register_mcp(TestTool("demo.name"), policy());
-    advertised.register_mcp(TestTool("demo_name"), policy());
+    advertised.register_mcp(TestTool("demo.name"), McpToolScope::WorkspaceRequired);
+    advertised.register_mcp(TestTool("demo_name"), McpToolScope::WorkspaceRequired);
     assert!(matches!(
         advertised.mcp_tool_definitions(),
-        Err(McpToolPolicyError::DuplicateAdvertisedName(_))
+        Err(McpToolDefinitionError::DuplicateAdvertisedName(_))
     ));
 }

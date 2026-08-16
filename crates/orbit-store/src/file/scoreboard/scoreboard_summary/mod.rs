@@ -4,30 +4,33 @@ use std::path::Path;
 
 use chrono::{DateTime, Duration, Utc};
 use orbit_common::types::{
-    Adr, AdrStatus, JobRun, JobRunState, Learning, OrbitError, PlannerSlot, Task, TaskStatus,
-    all_agent_families, infer_agent_family_from_model, normalize_attribution_label,
+    JobRun, JobRunState, OrbitError, Task, TaskStatus, all_agent_families,
+    infer_agent_family_from_model, normalize_attribution_label,
     normalize_optional_attribution_label,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use super::planning_duel_scoreboard;
-use crate::friction_store::StoredFrictionRecord;
+use crate::friction_store::FrictionReportedCount;
 use crate::{AuditToolCallCountsByRole, AuditToolCallCountsBySurfaceAndRole, AuditTopToolCall};
 use orbit_common::utility::fs::atomic_write_text_volatile as write_atomic;
 
 const SUMMARY_FILENAME: &str = "summary.json";
 // v2 adds `task_review.threads`; v3 adds tasks_created/tasks_planned,
 // per-(role, surface) tool call counts, top-level workflows_run, and a
-// recent_7d window block. v4 adds per-agent knowledge counters and a
-// planning-duel head-to-head matrix. v5 adds per-agent `friction.reported`
+// recent_7d window block. v5 adds per-agent `friction.reported`
 // (from append-only `.orbit/frictions/` records, matching `orbit.friction.stats`).
 // v6 ([ORB-00337]) adds top-level `window` + `window_since` fields and the
 // `ScoreboardInputs.window` plumbing — snapshot-sourced per-agent fields
-// (`tokens`, `pr`, `duels`, `task_review.threads`) zero out under non-`All`
+// (`tokens`, `pr`, `task_review.threads`) zero out under non-`All`
 // windows because we lack a timestamped snapshot log to filter against.
-// Older readers ignore unknown fields.
-const CURRENT_SCHEMA_VERSION: u32 = 6;
+// v7 adds the separately-versioned `orchestration` projection. Its v2 token
+// extension normalizes provider input semantics and retains model attribution
+// without folding it into execution-agent/model scoreboard rows.
+// v8 removes retired competition projections. Older readers ignore
+// unknown fields and maintained consumers treat absent fields as empty.
+const CURRENT_SCHEMA_VERSION: u32 = 8;
+pub const ORCHESTRATION_SCHEMA_VERSION: u32 = 2;
 const RECENT_WINDOW_DAYS: i64 = 7;
 
 type FamilyScoreboard = BTreeMap<String, BTreeMap<String, u64>>;
@@ -39,7 +42,7 @@ type FamilyScoreboard = BTreeMap<String, BTreeMap<String, u64>>;
 /// String forms (used in the dashboard query param and the serialized
 /// `ScoreboardSummary.window` field): `1h`, `24h`, `7d`, `30d`, `all`.
 ///
-/// Snapshot-sourced fields (`tokens`, `pr`, `duels`, `task_review.threads`)
+/// Snapshot-sourced fields (`tokens`, `pr`, `task_review.threads`)
 /// have no per-event timestamp, so they zero out under any non-`All` window;
 /// see the v6 schema comment. Per-(role) audit aggregates are filtered at
 /// query time by the caller (the runtime in `orbit-core`).
@@ -113,25 +116,10 @@ pub struct TokenSummary {
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
-pub struct DuelSummary {
-    pub wins: u64,
-    pub losses: u64,
-    pub participated: u64,
-}
-
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct PrSummary {
     pub review_comments: u64,
     pub merged_clean: u64,
     pub merged_with_revision: u64,
-}
-
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
-pub struct KnowledgeSummary {
-    pub learnings_created: u64,
-    pub adrs_created: u64,
-    pub adrs_accepted: u64,
-    pub adrs_proposed_open: u64,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -151,10 +139,7 @@ pub struct AgentSummary {
     #[serde(default)]
     pub tasks_planned: u64,
     pub tokens: TokenSummary,
-    pub duels: DuelSummary,
     pub pr: PrSummary,
-    #[serde(default)]
-    pub knowledge: KnowledgeSummary,
     #[serde(default)]
     pub friction: FrictionSummary,
     pub tool_calls: u64,
@@ -199,12 +184,88 @@ pub struct RecentSummary {
     pub workflows_run: u64,
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
-pub struct PlanningDuelSummary {
-    pub head_to_head: planning_duel_scoreboard::HeadToHeadMatrix,
+/// Conservative ownership class for managed invocation accounting.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
+#[serde(rename_all = "snake_case")]
+pub enum OrchestrationBucketKind {
+    Missing,
+    Unattributed,
+    Orchestrator,
+    Shared,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+/// One managed-execution accounting bucket, classified by canonical task
+/// orchestration ownership rather than executor agent or model identity.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct OrchestrationBucketSummary {
+    pub kind: OrchestrationBucketKind,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub orchestrator: Option<String>,
+    pub invocation_count: u64,
+    pub linked_task_count: u64,
+    pub input_tokens: u64,
+    pub cache_read_tokens: u64,
+    pub cache_create_tokens: u64,
+    pub cache_create_1h_tokens: u64,
+    pub output_tokens: u64,
+    pub provider_cost_usd: f64,
+    pub provider_cost_count: u64,
+    pub derived_cost_usd: f64,
+    pub derived_cost_count: u64,
+    pub comparable_provider_cost_usd: f64,
+    pub comparable_derived_cost_usd: f64,
+    pub comparable_cost_count: u64,
+    pub comparable_cost_delta_usd: f64,
+    pub missing_provider_count: u64,
+    pub unpriced_derived_count: u64,
+    /// Normalized, mutually-exclusive token usage for covered models only.
+    #[serde(default)]
+    pub normalized_tokens: NormalizedTokenSummary,
+    /// Model attribution is descriptive only; tokenizers are not ranked.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub models: Vec<OrchestrationModelSummary>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct NormalizedTokenSummary {
+    pub invocation_count: u64,
+    pub linked_task_count: u64,
+    pub uncached_input_tokens: u64,
+    pub cache_read_tokens: u64,
+    pub cache_create_tokens: u64,
+    pub cache_create_1h_tokens: u64,
+    pub output_tokens: u64,
+    pub normalized_token_total: u64,
+    pub covered_invocation_count: u64,
+    pub unknown_input_basis_or_model_count: u64,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct OrchestrationModelSummary {
+    pub model: String,
+    pub tokens: NormalizedTokenSummary,
+}
+
+/// Independently-versioned accounting for managed execution only.
+///
+/// `until` is exclusive and no later than `as_of`. Provider, derived, and
+/// comparable cost populations are separate so partial sums are never implied
+/// to reconcile.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct OrchestrationSummary {
+    pub schema_version: u32,
+    pub scope: String,
+    pub as_of: DateTime<Utc>,
+    pub since: Option<DateTime<Utc>>,
+    pub until: DateTime<Utc>,
+    pub buckets: Vec<OrchestrationBucketSummary>,
+    #[serde(default)]
+    pub normalized_tokens: NormalizedTokenSummary,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub previous_normalized_tokens: Option<NormalizedTokenSummary>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ScoreboardSummary {
     pub schema_version: u32,
     pub generated_at: String,
@@ -225,9 +286,10 @@ pub struct ScoreboardSummary {
     /// its absence.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub recent_7d: Option<RecentSummary>,
-    /// Planning-duel reports that are not naturally per-agent columns.
-    #[serde(default)]
-    pub planning_duels: PlanningDuelSummary,
+    /// Managed-execution accounting by task orchestrator, deliberately kept
+    /// outside executor-agent rankings. v7+.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub orchestration: Option<OrchestrationSummary>,
     /// Selected scoreboard window in canonical short form (`"1h"`,
     /// `"24h"`, `"7d"`, `"30d"`, `"all"`). v6+. Older readers tolerate
     /// the field's absence via `#[serde(default)]`.
@@ -281,14 +343,14 @@ pub struct ScoreboardInputs<'a> {
     /// Top (role, tool_name) pairs across the audit log, sorted desc by
     /// count. Drives the "most-called tools" leaderboard.
     pub top_tool_calls: &'a [AuditTopToolCall],
-    /// Workspace learning records, used for knowledge-stewardship counters.
-    pub learnings: &'a [Learning],
-    /// Workspace ADR records, used for knowledge-stewardship counters.
-    pub adrs: &'a [Adr],
-    /// Append-only friction records from `.orbit/frictions/`. Used to populate
-    /// per-family `friction.reported` counts (so the dashboard `frict r` column
-    /// and `orbit.friction.stats` agree, without using tool call surface counts).
-    pub frictions: &'a [StoredFrictionRecord],
+    /// Friction counts per reporting model label, already windowed by the
+    /// caller with the same cutoff this module derives from `now`/`window`.
+    /// Populates per-family `friction.reported` counts (so the dashboard
+    /// `frict r` column and `orbit.friction.stats` agree, without using tool
+    /// call surface counts). ORB-10680 replaced the full record slice with
+    /// this aggregate so scoreboard memory tracks distinct models, not corpus
+    /// size.
+    pub friction_reported: &'a [FrictionReportedCount],
     /// Reference "now" for recency windowing. `None` means no recency
     /// section is emitted (used by legacy callers).
     pub now: Option<DateTime<Utc>>,
@@ -297,6 +359,9 @@ pub struct ScoreboardInputs<'a> {
     /// sourced fields and filter timestamp-bearing slices to the window.
     /// See [`ScoreboardWindow`] for the per-source semantics. v6+.
     pub window: ScoreboardWindow,
+    /// Runtime/API-sourced accounting for the same bounded window. It does
+    /// not use all-time snapshot token aggregates.
+    pub orchestration: Option<OrchestrationSummary>,
 }
 
 impl<'a> Default for ScoreboardInputs<'a> {
@@ -305,19 +370,16 @@ impl<'a> Default for ScoreboardInputs<'a> {
         static EMPTY_SURFACE: [AuditToolCallCountsBySurfaceAndRole; 0] = [];
         static EMPTY_JOB: [JobRun; 0] = [];
         static EMPTY_TOP: [AuditTopToolCall; 0] = [];
-        static EMPTY_LEARNING: [Learning; 0] = [];
-        static EMPTY_ADR: [Adr; 0] = [];
         Self {
             audit_tool_calls: &EMPTY_AUDIT,
             audit_tool_calls_by_surface: &EMPTY_SURFACE,
             audit_tool_calls_by_surface_recent: &EMPTY_SURFACE,
             job_runs: &EMPTY_JOB,
             top_tool_calls: &EMPTY_TOP,
-            learnings: &EMPTY_LEARNING,
-            adrs: &EMPTY_ADR,
-            frictions: &[],
+            friction_reported: &[],
             now: None,
             window: ScoreboardWindow::All,
+            orchestration: None,
         }
     }
 }
@@ -360,8 +422,7 @@ pub fn generate_summary_with_inputs(
     let since: Option<DateTime<Utc>> = inputs.window.duration().map(|d| now_for_window - d);
     let windowed = since.is_some();
 
-    // Snapshot reads (pr.json, task_review.json, tokens.json,
-    // planning_duels.json) have no per-event timestamp, so they only run
+    // Snapshot reads (pr.json, task_review.json, tokens.json) have no per-event timestamp, so they only run
     // for the lifetime (`All`) window. Under a windowed view they zero
     // out — the frontend renders 0 as `—` via emptyScoreboardNode().
     // TODO(phase-3+): timestamped snapshot logs would unblock real
@@ -413,55 +474,7 @@ pub fn generate_summary_with_inputs(
     overlay_audit_tool_calls(&mut agents, audit_tool_calls);
     overlay_audit_tool_calls_by_surface(&mut agents, inputs.audit_tool_calls_by_surface);
 
-    // Planning-duel rows are the "who actually ran?" scoreboard projection:
-    // metrics are recorded from invocation family + slot, while the stored
-    // roles identify the selected family for each slot. Skipped under
-    // windowed views — see the snapshot-zeroing comment above.
-    let planning_duel_runs = if windowed {
-        Vec::new()
-    } else {
-        planning_duel_scoreboard::load_runs(scoreboard_dir)?
-    };
-    for run in &planning_duel_runs {
-        let planner_a = agents
-            .entry(run.roles.planner_a.family.to_string())
-            .or_default();
-        planner_a.duels.participated = planner_a.duels.participated.saturating_add(1);
-        let planner_b = agents
-            .entry(run.roles.planner_b.family.to_string())
-            .or_default();
-        planner_b.duels.participated = planner_b.duels.participated.saturating_add(1);
-        let arbiter = agents
-            .entry(run.roles.arbiter.family.to_string())
-            .or_default();
-        arbiter.duels.participated = arbiter.duels.participated.saturating_add(1);
-
-        match run.outcome.winner {
-            PlannerSlot::PlannerA => {
-                let planner_a = agents
-                    .entry(run.roles.planner_a.family.to_string())
-                    .or_default();
-                planner_a.duels.wins = planner_a.duels.wins.saturating_add(1);
-                let planner_b = agents
-                    .entry(run.roles.planner_b.family.to_string())
-                    .or_default();
-                planner_b.duels.losses = planner_b.duels.losses.saturating_add(1);
-            }
-            PlannerSlot::PlannerB => {
-                let planner_b = agents
-                    .entry(run.roles.planner_b.family.to_string())
-                    .or_default();
-                planner_b.duels.wins = planner_b.duels.wins.saturating_add(1);
-                let planner_a = agents
-                    .entry(run.roles.planner_a.family.to_string())
-                    .or_default();
-                planner_a.duels.losses = planner_a.duels.losses.saturating_add(1);
-            }
-        }
-    }
-
-    overlay_knowledge_counters(&mut agents, inputs, since);
-    overlay_friction_reported(&mut agents, inputs.frictions, since);
+    overlay_friction_reported(&mut agents, inputs.friction_reported);
 
     for task in tasks {
         if matches!(task.status, TaskStatus::Done | TaskStatus::Archived)
@@ -517,10 +530,6 @@ pub fn generate_summary_with_inputs(
     let recent_7d = inputs
         .now
         .map(|now| build_recent_summary(now, tasks, inputs));
-    let planning_duels = PlanningDuelSummary {
-        head_to_head: planning_duel_scoreboard::aggregate_head_to_head(&planning_duel_runs),
-    };
-
     Ok(ScoreboardSummary {
         schema_version: CURRENT_SCHEMA_VERSION,
         generated_at: Utc::now().to_rfc3339(),
@@ -528,7 +537,7 @@ pub fn generate_summary_with_inputs(
         workflows_run,
         top_tools,
         recent_7d,
-        planning_duels,
+        orchestration: inputs.orchestration.clone(),
         window: inputs.window.as_str().to_string(),
         window_since: since.map(|t| t.to_rfc3339()),
     })
@@ -722,63 +731,21 @@ fn overlay_audit_tool_calls(
     }
 }
 
-fn overlay_knowledge_counters(
-    agents: &mut BTreeMap<String, AgentSummary>,
-    inputs: &ScoreboardInputs<'_>,
-    since: Option<DateTime<Utc>>,
-) {
-    for learning in inputs.learnings {
-        if !in_window(Some(learning.created_at), since) {
-            continue;
-        }
-        let Some(created_by) = learning
-            .created_by
-            .as_deref()
-            .map(|raw| normalize_attribution_label(raw, None))
-            .filter(|value| !value.is_empty())
-        else {
-            continue;
-        };
-        let summary = agents.entry(family_key(&created_by)).or_default();
-        summary.knowledge.learnings_created = summary.knowledge.learnings_created.saturating_add(1);
-    }
-
-    for adr in inputs.adrs {
-        if !in_window(Some(adr.created_at), since) {
-            continue;
-        }
-        let owner = normalize_attribution_label(&adr.owner, None);
-        if owner.is_empty() {
-            continue;
-        }
-        let summary = agents.entry(family_key(&owner)).or_default();
-        summary.knowledge.adrs_created = summary.knowledge.adrs_created.saturating_add(1);
-        if adr.status == AdrStatus::Accepted || adr.accepted_at.is_some() {
-            summary.knowledge.adrs_accepted = summary.knowledge.adrs_accepted.saturating_add(1);
-        }
-        if adr.status == AdrStatus::Proposed {
-            summary.knowledge.adrs_proposed_open =
-                summary.knowledge.adrs_proposed_open.saturating_add(1);
-        }
-    }
-}
-
+/// Fold per-model friction counts into per-family agent rows. The caller has
+/// already applied the window cutoff in SQL, so this only maps model labels to
+/// families and sums collisions.
 fn overlay_friction_reported(
     agents: &mut BTreeMap<String, AgentSummary>,
-    frictions: &[StoredFrictionRecord],
-    since: Option<DateTime<Utc>>,
+    reported: &[FrictionReportedCount],
 ) {
     let mut counts: BTreeMap<String, u64> = BTreeMap::new();
-    for stored in frictions {
-        if !in_window(Some(stored.record.created_at), since) {
-            continue;
-        }
+    for entry in reported {
         let family = {
-            let normalized = normalize_optional_attribution_label(Some(&stored.record.model), None)
-                .unwrap_or_default();
+            let normalized =
+                normalize_optional_attribution_label(Some(&entry.model), None).unwrap_or_default();
             infer_agent_family_from_model(&normalized).unwrap_or(normalized)
         };
-        *counts.entry(family).or_insert(0) += 1;
+        *counts.entry(family).or_insert(0) += entry.count;
     }
     for (family, count) in counts {
         let summary = agents.entry(family).or_default();

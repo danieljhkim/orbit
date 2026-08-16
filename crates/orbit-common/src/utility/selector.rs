@@ -509,7 +509,10 @@ fn normalize_workspace_anchor(path: &str, workspace: &Path) -> Result<String, Se
     } else {
         workspace.join(&anchor)
     };
-    let contained = resolved.canonicalize().unwrap_or_else(|_| resolved.clone());
+    // Canonicalize the candidate the same way as the workspace root so macOS
+    // `/var` → `/private/var` aliases compare equal. Walk to the nearest
+    // existing ancestor when the leaf is not yet on disk.
+    let contained = canonicalize_existing_prefix(&resolved);
     if !contained.starts_with(&workspace) {
         return Err(SelectorParseError {
             input: path.to_string(),
@@ -520,7 +523,7 @@ fn normalize_workspace_anchor(path: &str, workspace: &Path) -> Result<String, Se
             ),
         });
     }
-    resolved
+    contained
         .strip_prefix(&workspace)
         .map(|path| path.to_string_lossy().replace('\\', "/"))
         .map_err(|_| SelectorParseError {
@@ -531,6 +534,32 @@ fn normalize_workspace_anchor(path: &str, workspace: &Path) -> Result<String, Se
                 workspace.display()
             ),
         })
+}
+
+fn canonicalize_existing_prefix(path: &Path) -> PathBuf {
+    if let Ok(canonical) = path.canonicalize() {
+        return canonical;
+    }
+
+    let mut missing = Vec::new();
+    let mut ancestor = path;
+    while let Some(parent) = ancestor.parent() {
+        if parent == ancestor {
+            break;
+        }
+        if let Some(name) = ancestor.file_name() {
+            missing.push(name.to_os_string());
+        }
+        if let Ok(canonical) = parent.canonicalize() {
+            let mut resolved = canonical;
+            for name in missing.iter().rev() {
+                resolved.push(name);
+            }
+            return resolved;
+        }
+        ancestor = parent;
+    }
+    path.to_path_buf()
 }
 
 fn normalize_path_text(raw: &str) -> Result<String, String> {

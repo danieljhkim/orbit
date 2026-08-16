@@ -1,5 +1,4 @@
 pub mod activity;
-pub mod adr;
 pub mod audit;
 pub mod auto_task;
 pub mod config;
@@ -8,11 +7,9 @@ pub mod doctor;
 pub mod executor;
 pub mod friction;
 pub mod gc;
-pub mod hook;
 pub mod host;
 pub mod init;
 pub mod job;
-pub mod learning;
 pub mod locks;
 pub mod log;
 pub mod mcp;
@@ -36,8 +33,20 @@ use std::path::PathBuf;
 use clap::{Parser, Subcommand};
 use orbit_core::{OrbitError, OrbitRuntime};
 
+// Re-exported so a command file imports its return type from the module that
+// defines the trait, rather than reaching into `output` for half of it.
+pub use crate::output::payload::{Block, CommandOutput, Payload};
+
+/// What every command body returns: the records it produced, or
+/// [`CommandOutput::Silent`] when its effect was its output.
+///
+/// A command never writes a record to stdout and never inspects the sink;
+/// `output::render` projects this into the resolved mode
+/// (`docs/design/terminal-interface/specs/output-modes.md` §3, ADR-0306).
+pub type CommandOut = Result<CommandOutput, OrbitError>;
+
 pub trait Execute {
-    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError>;
+    fn execute(self, runtime: &OrbitRuntime) -> CommandOut;
 }
 
 /// Require the standard non-interactive confirmation flag before an
@@ -76,16 +85,14 @@ Environment:
   migrate     Apply or inspect pending .orbit layout/schema migrations
 
 Operate:
-  run         Run a workflow (ship, duel-plan, job)
+  run         Run a workflow (ship, job)
   gc          Inspect and explicitly reap Orbit-managed garbage
   task        Create, update, and manage tasks
   docs        Search and manage the indexed docs corpus
-  adr         List and inspect Architecture Decision Records
   friction    Report, list, and triage friction records
-  learning    Create, search, and curate project learnings
 
 Observe:
-  search      Search tasks, docs, learnings, and ADRs
+  search      Search tasks, docs, ADRs, and frictions
   audit       Query the audit event log
   log         Tail the unified Orbit log feed
   doctor      Diagnose workspace health (config, database, disk, indexes)
@@ -104,7 +111,6 @@ Scheduler:
 
 Services:
   mcp         Register MCP client integrations and run the MCP server
-  hook        Run Orbit-owned editor hooks
   web         Run the Orbit dashboard
 
 Options:
@@ -114,6 +120,12 @@ pub struct Cli {
     /// Override the Orbit root directory (highest precedence)
     #[arg(long, global = true)]
     pub root: Option<PathBuf>,
+
+    /// Select a workspace by registered name, logical ID (`ws_*`), or absolute
+    /// checkout path. Distinct from `--root`, which overrides the Orbit data
+    /// directory.
+    #[arg(long, value_name = "SELECTOR")]
+    pub workspace: Option<String>,
 
     #[command(subcommand)]
     pub command: Commands,
@@ -134,9 +146,7 @@ pub enum Commands {
     Gc(gc::GcCommand),
     Task(Box<task::TaskCommand>),
     Docs(docs::DocsCommand),
-    Adr(adr::AdrCommand),
     Friction(friction::FrictionCommand),
-    Learning(learning::LearningCommand),
 
     // ── Observe ──
     Search(search::SearchCommand),
@@ -159,7 +169,6 @@ pub enum Commands {
 
     // ── Services ──
     Mcp(mcp::McpCommand),
-    Hook(hook::HookCommand),
     Web(web::WebCommand),
 
     // ── hidden compatibility commands ──

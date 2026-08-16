@@ -1,93 +1,9 @@
 use chrono::{DateTime, Utc};
 use orbit_common::types::{
-    Adr, AdrStatus, ArtifactOrigin, ExternalRef, JobRunState, Learning, LegacyValidation, OrbitId,
-    TaskArtifact, TaskComment, TaskComplexity, TaskHistoryEntry, TaskPriority, TaskRelation,
-    TaskStatus, TaskType,
+    ExternalRef, JobRunState, OrbitId, TaskArtifact, TaskComment, TaskComplexity, TaskHistoryEntry,
+    TaskPriority, TaskRelation, TaskStatus, TaskType,
 };
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
-
-#[derive(Debug, Clone)]
-pub struct AdrCreateParams {
-    pub title: String,
-    pub owner: String,
-    pub related_features: Vec<String>,
-    pub related_tasks: Vec<String>,
-    pub tags: Vec<String>,
-    pub paths: Vec<String>,
-    pub body: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct AdrArtifact {
-    pub adr: Adr,
-    pub body: String,
-    pub artifact_origin: ArtifactOrigin,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum AdrArtifactResolution {
-    Local(AdrArtifact),
-    Federated(AdrArtifact),
-    RemoteArtifactUnavailable(ArtifactOrigin),
-    NotFound,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct RemoteArtifactStub {
-    pub id: String,
-    pub kind: String,
-    pub status: String,
-    pub worktree_root: PathBuf,
-    pub branch: Option<String>,
-    pub body_path: Option<PathBuf>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum AdrListEntry {
-    Local(Adr),
-    Remote(RemoteArtifactStub),
-}
-
-#[derive(Debug, Clone, Copy, Default)]
-pub struct AdrListFilter<'a> {
-    pub status: Option<AdrStatus>,
-    pub owner: Option<&'a str>,
-    pub feature: Option<&'a str>,
-    pub task_id: Option<&'a str>,
-    pub legacy_id: Option<&'a str>,
-    pub tag: Option<&'a str>,
-    pub path: Option<&'a str>,
-    pub validation_warned: Option<bool>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum LearningListEntry {
-    Local(Learning),
-    Remote(RemoteArtifactStub),
-}
-
-/// Parameters for a partial update to an existing ADR document.
-///
-/// Fields that are `None` are left unchanged. `superseded_by` follows the
-/// double-`Option` convention to distinguish "leave unchanged" (`None`) from
-/// "clear this field" (`Some(None)`).
-#[derive(Debug, Clone, Default)]
-pub struct AdrDocumentUpdateParams {
-    pub title: Option<String>,
-    pub owner: Option<String>,
-    pub body: Option<String>,
-    pub related_features: Option<Vec<String>>,
-    pub related_tasks: Option<Vec<String>>,
-    pub tags: Option<Vec<String>>,
-    pub paths: Option<Vec<String>>,
-    pub supersedes: Option<Vec<String>>,
-    pub superseded_by: Option<Option<String>>,
-    pub legacy_ids: Option<Vec<String>>,
-    pub validation_warnings: Option<Vec<String>>,
-    pub legacy_validation: Option<LegacyValidation>,
-}
-
 #[derive(Debug, Clone)]
 pub struct TaskCreateParams {
     pub actor: String,
@@ -120,6 +36,7 @@ pub struct TaskCreateParams {
     pub external_refs: Vec<ExternalRef>,
     pub source_task_id: Option<String>,
     pub crew: Option<String>,
+    pub orchestrator: Option<String>,
     pub comments: Vec<TaskComment>,
 }
 
@@ -153,6 +70,7 @@ pub struct TaskDocumentUpdateParams {
     pub source_task_id: Option<Option<String>>,
     pub job_run_id: Option<Option<String>>,
     pub crew: Option<Option<String>>,
+    pub orchestrator: Option<Option<String>>,
 }
 
 #[derive(Debug, Default, Clone)]
@@ -199,6 +117,7 @@ pub enum TaskReservationReleaseReason {
     Explicit,
     RunTerminal,
     StaleRunReconciled,
+    DoctorStaleTaskLock,
     TtlExpired,
 }
 
@@ -208,6 +127,7 @@ impl TaskReservationReleaseReason {
             Self::Explicit => "explicit",
             Self::RunTerminal => "run_terminal",
             Self::StaleRunReconciled => "stale_run_reconciled",
+            Self::DoctorStaleTaskLock => "doctor_stale_task_lock",
             Self::TtlExpired => "ttl_expired",
         }
     }
@@ -327,6 +247,124 @@ pub struct TaskReservationOwnedConflictsParams {
 pub struct TaskReservationOwnedConflictsResult {
     pub reservations: Vec<ActiveTaskReservation>,
     pub expired_reservations: Vec<ExpiredTaskReservation>,
+}
+
+/// Which coordination dimension a `task_reservations` row belongs to
+/// [ADR-0352, ORB-10709].
+///
+/// File reservations arbitrate between *workers* over paths; a workspace claim
+/// arbitrates between *orchestrators* over dispatch authority. They share the
+/// table — and therefore the atomic acquisition, TTL, lazy expiry, audit, and
+/// release escape hatch already built for reservations — but never each other's
+/// rows. Expressing the claim as a whole-workspace file selector instead would
+/// block exactly the worker reservations it is meant to leave alone.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TaskReservationScope {
+    /// A path-scoped worker reservation.
+    Files,
+    /// A whole-workspace, dispatch-only operator claim.
+    WorkspaceClaim,
+}
+
+impl TaskReservationScope {
+    /// The persisted discriminator. A closed set of `'static` literals, which is
+    /// what makes it safe to inline into SQL rather than bind as a parameter.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Files => "files",
+            Self::WorkspaceClaim => "workspace_claim",
+        }
+    }
+}
+
+/// The current holder of a workspace claim, as reported to a contender.
+///
+/// `machine_id` and `session_id` are diagnostics only. The claim is keyed on
+/// [`WorkspaceClaimAcquireResult::claim_token`], never on session identity: MCP
+/// session identity is minted per connection and cleared when client-supplied,
+/// so a reconnecting client would orphan the workspace.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WorkspaceClaimHolder {
+    pub claim_id: String,
+    pub workspace_id: Option<String>,
+    pub actor: String,
+    pub created_at: String,
+    pub expires_at: String,
+    pub machine_id: Option<String>,
+    pub session_id: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct WorkspaceClaimAcquireParams {
+    pub workspace_orbit_dir: String,
+    pub workspace_id: Option<String>,
+    pub actor: String,
+    pub ttl_seconds: u32,
+    pub machine_id: Option<String>,
+    pub session_id: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WorkspaceClaimAcquireResult {
+    pub acquired: bool,
+    /// The minted bearer token, returned exactly once to the acquiring holder.
+    /// Never populated on the contention path, so a refused contender cannot
+    /// learn the incumbent's token from its own refusal.
+    pub claim_token: Option<String>,
+    pub claim: Option<WorkspaceClaimHolder>,
+    /// The incumbent when acquisition was refused.
+    pub conflict: Option<WorkspaceClaimHolder>,
+    pub expired_claims: Vec<ExpiredTaskReservation>,
+}
+
+#[derive(Debug, Clone)]
+pub struct WorkspaceClaimReleaseParams {
+    pub workspace_orbit_dir: String,
+    pub workspace_id: Option<String>,
+    /// The holder's token. Required unless `force` is set.
+    pub claim_token: Option<String>,
+    /// Release the claim without its token — the audited escape hatch for a
+    /// holder that has gone away.
+    pub force: bool,
+    pub released_by: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WorkspaceClaimReleaseResult {
+    pub released: bool,
+    pub forced: bool,
+    pub released_at: Option<String>,
+    /// The claim that was released, or — when a token release was refused — the
+    /// incumbent it did not match.
+    pub claim: Option<WorkspaceClaimHolder>,
+    pub expired_claims: Vec<ExpiredTaskReservation>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WorkspaceClaimStatusResult {
+    pub claim: Option<WorkspaceClaimHolder>,
+    pub expired_claims: Vec<ExpiredTaskReservation>,
+}
+
+#[derive(Debug, Clone)]
+pub struct WorkspaceClaimCheckParams {
+    pub workspace_orbit_dir: String,
+    pub workspace_id: Option<String>,
+    /// The token the caller presented, if any.
+    pub claim_token: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WorkspaceClaimCheckResult {
+    /// The active claim after lazy expiry, or `None` when the workspace is
+    /// unclaimed. An unclaimed workspace gates nothing.
+    pub claim: Option<WorkspaceClaimHolder>,
+    /// Whether the presented token matches the active claim. Always `false`
+    /// when `claim` is `None`: there is no token to match, and the caller must
+    /// read the absent claim rather than a truthy match.
+    pub token_matches: bool,
+    pub expired_claims: Vec<ExpiredTaskReservation>,
 }
 
 #[derive(Debug, Clone, Default)]

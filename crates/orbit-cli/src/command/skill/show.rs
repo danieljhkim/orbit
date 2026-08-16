@@ -3,7 +3,7 @@ use orbit_core::skill_catalog::LoadedSkill;
 use orbit_core::{OrbitError, OrbitRuntime};
 use serde_json::{Value, json};
 
-use crate::command::Execute;
+use crate::command::{CommandOut, Execute, Payload};
 
 #[derive(Args)]
 pub struct SkillShowArgs {
@@ -13,27 +13,32 @@ pub struct SkillShowArgs {
 }
 
 impl Execute for SkillShowArgs {
-    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+    fn execute(self, runtime: &OrbitRuntime) -> CommandOut {
         let skill = runtime.show_file_skill(&self.name)?;
-        if self.json {
-            crate::output::json::print_pretty(&skill_to_json(&skill))
-        } else {
-            println!("Skill:         {}", skill.id);
-            println!("Path:          {}", skill.path.display());
-            println!("Content hash:  {}", skill.content_hash);
-            println!("\nBehavioral Contract (SKILL.md):");
-            println!("{}", skill.content);
-            println!("\nStructured Metadata (meta.json):");
-            match &skill.meta_raw {
-                Some(value) => println!(
+        let doc = skill_to_json(&skill);
+
+        use std::fmt::Write as _;
+        let mut out = String::new();
+        let _ = writeln!(out, "Skill:         {}", skill.id);
+        let _ = writeln!(out, "Path:          {}", skill.path.display());
+        let _ = writeln!(out, "Content hash:  {}", skill.content_hash);
+        let _ = writeln!(out, "\nBehavioral Contract (SKILL.md):");
+        let _ = writeln!(out, "{}", skill.content);
+        let _ = writeln!(out, "\nStructured Metadata (meta.json):");
+        match &skill.meta_raw {
+            Some(value) => {
+                let _ = writeln!(
+                    out,
                     "{}",
                     serde_json::to_string_pretty(value)
                         .map_err(|e| OrbitError::Execution(e.to_string()))?
-                ),
-                None => println!("(none)"),
+                );
             }
-            Ok(())
+            None => {
+                let _ = writeln!(out, "(none)");
+            }
         }
+        Ok(Payload::detail(doc, out).into())
     }
 }
 

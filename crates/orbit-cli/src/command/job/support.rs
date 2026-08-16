@@ -120,68 +120,93 @@ fn job_v2_step_to_json(step: &JobV2Step) -> Value {
     value
 }
 
-pub(super) fn print_v2_step(step: &JobV2Step, indent: usize) {
+pub(super) fn write_v2_step(step: &JobV2Step, indent: usize, out: &mut String) {
     use crate::output::color::bold;
+    use std::fmt::Write as _;
 
     let pad = " ".repeat(indent);
-    println!("{pad}{} {}", bold("ID:"), step.id.as_str());
+    let _ = writeln!(out, "{pad}{} {}", bold("ID:"), step.id.as_str());
     if let Some(when) = &step.when {
-        println!("{pad}{} {}", bold("When:"), when);
+        let _ = writeln!(out, "{pad}{} {}", bold("When:"), when);
     }
     if let Some(retry) = &step.retry {
-        println!("{pad}{} {:?}", bold("Retry:"), retry);
+        let _ = writeln!(out, "{pad}{} {:?}", bold("Retry:"), retry);
     }
     match &step.body {
         JobV2StepBody::TargetRef(target) => {
-            println!("{pad}{} {}", bold("Target Ref:"), target.target.as_str());
+            let _ = writeln!(
+                out,
+                "{pad}{} {}",
+                bold("Target Ref:"),
+                target.target.as_str()
+            );
             if let Some(session) = &target.session {
-                println!("{pad}{} {}", bold("Session:"), session);
+                let _ = writeln!(out, "{pad}{} {}", bold("Session:"), session);
             }
-            println!("{pad}{} {}", bold("Timeout (s):"), target.timeout_seconds);
+            let _ = writeln!(
+                out,
+                "{pad}{} {}",
+                bold("Timeout (s):"),
+                target.timeout_seconds
+            );
         }
         JobV2StepBody::Target(target) => {
             match &target.spec {
                 ActivityV2Spec::AgentLoop(spec) => {
-                    println!("{pad}{} agent_loop", bold("Activity Type:"));
-                    println!("{pad}{} {}", bold("Provider:"), spec.provider.as_str());
-                    println!("{pad}{} {}", bold("Backend:"), spec.backend.as_str());
+                    let _ = writeln!(out, "{pad}{} agent_loop", bold("Activity Type:"));
+                    let _ = writeln!(out, "{pad}{} {}", bold("Provider:"), spec.provider.as_str());
                     if let Some(model) = &spec.model {
-                        println!("{pad}{} {}", bold("Model:"), model);
+                        let _ = writeln!(out, "{pad}{} {}", bold("Model:"), model);
                     }
                 }
                 ActivityV2Spec::Deterministic(spec) => {
-                    println!("{pad}{} deterministic", bold("Activity Type:"));
-                    println!("{pad}{} {}", bold("Action:"), spec.action.as_str());
+                    let _ = writeln!(out, "{pad}{} deterministic", bold("Activity Type:"));
+                    let _ = writeln!(out, "{pad}{} {}", bold("Action:"), spec.action.as_str());
                 }
             }
             if let Some(session) = &target.session {
-                println!("{pad}{} {}", bold("Session:"), session);
+                let _ = writeln!(out, "{pad}{} {}", bold("Session:"), session);
             }
-            println!("{pad}{} {}", bold("Timeout (s):"), target.timeout_seconds);
+            let _ = writeln!(
+                out,
+                "{pad}{} {}",
+                bold("Timeout (s):"),
+                target.timeout_seconds
+            );
         }
         JobV2StepBody::Parallel { parallel } => {
-            println!("{pad}{} parallel", bold("Body:"));
-            println!("{pad}{} {:?}", bold("Join:"), parallel.join);
-            println!("{pad}{} {}", bold("Branches:"), parallel.branches.len());
+            let _ = writeln!(out, "{pad}{} parallel", bold("Body:"));
+            let _ = writeln!(out, "{pad}{} {:?}", bold("Join:"), parallel.join);
+            let _ = writeln!(
+                out,
+                "{pad}{} {}",
+                bold("Branches:"),
+                parallel.branches.len()
+            );
             for branch in &parallel.branches {
-                print_v2_step(branch, indent + 2);
+                write_v2_step(branch, indent + 2, out);
             }
         }
         JobV2StepBody::FanOut { fan_out, fan_in } => {
-            println!("{pad}{} fan_out", bold("Body:"));
-            println!("{pad}{} {}", bold("Items:"), fan_out.items.as_str());
-            println!("{pad}{} {}", bold("Max Workers:"), fan_out.max_workers);
-            println!("{pad}{} {:?}", bold("Fan In:"), fan_in);
-            print_v2_step(&fan_out.worker, indent + 2);
+            let _ = writeln!(out, "{pad}{} fan_out", bold("Body:"));
+            let _ = writeln!(out, "{pad}{} {}", bold("Items:"), fan_out.items.as_str());
+            let _ = writeln!(out, "{pad}{} {}", bold("Max Workers:"), fan_out.max_workers);
+            let _ = writeln!(out, "{pad}{} {:?}", bold("Fan In:"), fan_in);
+            write_v2_step(&fan_out.worker, indent + 2, out);
         }
         JobV2StepBody::Loop { loop_ } => {
-            println!("{pad}{} loop", bold("Body:"));
-            println!("{pad}{} {}", bold("Max Iterations:"), loop_.max_iterations);
+            let _ = writeln!(out, "{pad}{} loop", bold("Body:"));
+            let _ = writeln!(
+                out,
+                "{pad}{} {}",
+                bold("Max Iterations:"),
+                loop_.max_iterations
+            );
             if let Some(break_when) = &loop_.break_when {
-                println!("{pad}{} {}", bold("Break When:"), break_when);
+                let _ = writeln!(out, "{pad}{} {}", bold("Break When:"), break_when);
             }
             for nested in &loop_.steps {
-                print_v2_step(nested, indent + 2);
+                write_v2_step(nested, indent + 2, out);
             }
         }
     }

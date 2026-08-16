@@ -41,31 +41,31 @@ impl fmt::Display for ExecutorType {
 /// Sandbox primitive applied to a CLI-backend agent invocation. The variant
 /// names a concrete OS primitive; `orbit-exec` selects the implementation.
 ///
-/// Today only `macos-sandbox-exec` is wired; a future Linux variant
-/// (`linux-bwrap` or similar) can land alongside without changing the
-/// schema shape.
+/// Each variant names one concrete, platform-specific kernel wrapper.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
 #[serde(rename_all = "kebab-case")]
 pub enum ExecutorSandboxKind {
     MacosSandboxExec,
+    LinuxBwrap,
 }
 
 impl ExecutorSandboxKind {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::MacosSandboxExec => "macos-sandbox-exec",
+            Self::LinuxBwrap => "linux-bwrap",
         }
     }
 
     /// OS this sandbox primitive can be applied on, named to match
     /// `std::env::consts::OS` (e.g. `"macos"`, `"linux"`).
     ///
-    /// Every kind is single-OS today. When a Linux variant (`linux-bwrap`
-    /// or similar) lands, add its arm here; the seed-time platform scrub in
-    /// `orbit-core` reads this to decide whether to keep a declaration.
+    /// Every kind is single-OS. The seed-time platform selector in
+    /// `orbit-core` reads this value when installing shipped executors.
     pub fn target_os(self) -> &'static str {
         match self {
             Self::MacosSandboxExec => "macos",
+            Self::LinuxBwrap => "linux",
         }
     }
 

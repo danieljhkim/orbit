@@ -229,6 +229,167 @@ fn check_global_deny_read_overrides_profile_read_allow() {
     );
 }
 
+#[test]
+fn host_modify_exception_intersects_selected_profile_authority() {
+    let broad = make_def(
+        vec![],
+        vec![".orbit/**", "!.orbit/resources/**"],
+        &[("implementer", &["**"], &["**"])],
+    );
+    let engine = PolicyEngine::from_def(&broad).expect("engine");
+    assert!(
+        engine
+            .check(
+                "implementer",
+                FsOperation::Modify,
+                ".orbit/resources/jobs/example.yaml"
+            )
+            .expect("check versioned resource")
+            .allowed
+    );
+    assert!(
+        !engine
+            .check(
+                "implementer",
+                FsOperation::Modify,
+                ".orbit/unknown/example.yaml"
+            )
+            .expect("check unknown Orbit path")
+            .allowed
+    );
+
+    let narrow = make_def(
+        vec![],
+        vec![".orbit/**", "!.orbit/resources/**"],
+        &[("docs", &["docs/**"], &["docs/**"])],
+    );
+    let engine = PolicyEngine::from_def(&narrow).expect("engine");
+    assert!(
+        !engine
+            .check(
+                "docs",
+                FsOperation::Modify,
+                ".orbit/resources/jobs/example.yaml"
+            )
+            .expect("check profile intersection")
+            .allowed,
+        "a host exception must not create authority absent from the profile"
+    );
+
+    let profile_denied = make_def(
+        vec![],
+        vec![".orbit/**", "!.orbit/resources/**"],
+        &[(
+            "implementer",
+            &["**"],
+            &["**", "!.orbit/resources/private/**"],
+        )],
+    );
+    let engine = PolicyEngine::from_def(&profile_denied).expect("engine");
+    assert!(
+        !engine
+            .check(
+                "implementer",
+                FsOperation::Modify,
+                ".orbit/resources/private/secret.yaml"
+            )
+            .expect("check profile negative")
+            .allowed,
+        "profile negative rules must continue to narrow host exceptions"
+    );
+}
+
+#[test]
+fn workspace_policy_cannot_add_modify_exception() {
+    let global = make_def(
+        vec![],
+        vec![".orbit/**", "!.orbit/resources/**"],
+        &[("implementer", &["**"], &["**"])],
+    );
+    let workspace = make_def(
+        vec![],
+        vec![".orbit/**", "!.orbit/unknown/**"],
+        &[("implementer", &["**"], &["**"])],
+    );
+    let error = PolicyDef::merged(&global, &workspace)
+        .expect_err("workspace exception must not override host protection");
+    assert!(
+        error
+            .to_string()
+            .contains("outside the host policy exception surface")
+    );
+}
+
+#[test]
+fn modify_exception_validation_is_fail_closed() {
+    for (deny_read, deny_modify, expected) in [
+        (
+            vec!["!.orbit/config.yaml"],
+            vec![],
+            "cannot be an exception",
+        ),
+        (
+            vec![],
+            vec!["!.orbit/config.yaml"],
+            "strictly contained by an earlier denyModify rule",
+        ),
+        (
+            vec![],
+            vec![".orbit/**", "!.orbit/*/config.yaml"],
+            "must name an exact path or `<path>/**` subtree",
+        ),
+        (
+            vec![],
+            vec![".orbit/**", "!.orbit/**"],
+            "strictly contained by an earlier denyModify rule",
+        ),
+    ] {
+        let def = make_def(deny_read, deny_modify, &[("implementer", &["**"], &["**"])]);
+        let error = PolicyEngine::from_def(&def).expect_err("invalid exception must fail");
+        assert!(
+            error.to_string().contains(expected),
+            "expected `{expected}` in `{error}`"
+        );
+    }
+}
+
+#[test]
+fn workspace_deny_still_overrides_host_modify_exception() {
+    let global = make_def(
+        vec![],
+        vec![".orbit/**", "!.orbit/resources/**"],
+        &[("implementer", &["**"], &["**"])],
+    );
+    let workspace = make_def(
+        vec![],
+        vec![".orbit/resources/private/**"],
+        &[("implementer", &["**"], &["**"])],
+    );
+    let merged = PolicyDef::merged(&global, &workspace).expect("merge");
+    let engine = PolicyEngine::from_def(&merged).expect("engine");
+
+    assert!(
+        engine
+            .check(
+                "implementer",
+                FsOperation::Modify,
+                ".orbit/resources/public.yaml"
+            )
+            .expect("check public resource")
+            .allowed
+    );
+    assert!(
+        !engine
+            .check(
+                "implementer",
+                FsOperation::Modify,
+                ".orbit/resources/private/secret.yaml"
+            )
+            .expect("check workspace deny")
+            .allowed
+    );
+}
+
 // --- [ORB-00418] Symlink-safe evaluation (check_resolved) ---
 
 #[cfg(unix)]

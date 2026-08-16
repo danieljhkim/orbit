@@ -9,7 +9,7 @@ use chrono::Utc;
 use orbit_common::types::activity_job::{ActivityV2Spec, DeterministicSpec};
 use orbit_common::types::{Task, TaskStatus};
 use orbit_engine::{
-    TaskActivityUpdate, TaskAutomationUpdate, TaskWriteHost, V2AuditWriter, V2DispatchInput,
+    RuntimeHost, TaskActivityUpdate, TaskAutomationUpdate, V2AuditWriter, V2DispatchInput,
 };
 use serde_json::{Value, json};
 use tempfile::tempdir;
@@ -48,14 +48,14 @@ fn attribution_test_config() -> &'static str {
 default_crew = "claude-team"
 
 [crews.claude-team]
-planner = { model = "claude-opus-4-7", provider = "claude", backend = "cli" }
-implementer = { model = "claude-sonnet-4-6", provider = "claude", backend = "cli" }
-reviewer = { model = "claude-opus-4-7", provider = "claude", backend = "cli" }
+model = "claude-sonnet-4-6"
+provider = "claude"
+backend = "cli"
 
 [crews.codex-team]
-planner = { model = "gpt-5.5", provider = "codex", backend = "cli" }
-implementer = { model = "gpt-5.5", provider = "codex", backend = "cli" }
-reviewer = { model = "gpt-5.5", provider = "codex", backend = "cli" }
+model = "gpt-5.5"
+provider = "codex"
+backend = "cli"
 "#
 }
 
@@ -94,7 +94,6 @@ fn run_update_task_v2_activity(runtime: &OrbitRuntime, run_id: &str, input: Valu
         input,
         audit,
         run_id,
-        agent_override: None,
         host: Some(runtime),
     })
     .expect("dispatch update_task activity")
@@ -153,6 +152,76 @@ fn run_worktree_setup(runtime: &OrbitRuntime, task_ids: &[String], run_id: &str)
         None,
     )
     .expect("run worktree setup")
+}
+
+/// ORB-10602: worktree setup no longer materializes sandbox mount anchors.
+///
+/// It only ever saw a snapshot of the task's context files and a policy profile
+/// that was neither absolutized against the worktree nor augmented with the
+/// host's run roots, so the grant set it computed could not match the one the
+/// kernel would enforce. Anchors are now derived from the effective profile at
+/// each spawn (`orbit_exec::prepare_linux_bwrap_write_grants`); setup must
+/// leave the checkout's `.orbit` exactly as `git worktree add` produced it, and
+/// must never touch the registered primary checkout.
+#[cfg(target_os = "linux")]
+#[test]
+fn worktree_setup_materializes_no_orbit_targets_from_context_files() {
+    let (root, runtime) = test_runtime();
+    let repo = root.path().join("repo");
+    let activities = root.path().join("global/resources/activities");
+    fs::create_dir_all(&activities).expect("create global activities");
+    fs::write(
+        activities.join("agent_implement.yaml"),
+        include_str!("../../../../assets/activities/agent_implement.yaml"),
+    )
+    .expect("seed agent implementation activity");
+    init_git_repo(&repo);
+    let task = runtime
+        .add_task(TaskAddParams {
+            title: "Create versioned Orbit config".to_string(),
+            description: "Exercise trusted missing-target preparation.".to_string(),
+            plan: "Prepare the exact scoped targets and validate the sandbox.".to_string(),
+            workspace_path: Some(".".to_string()),
+            ..Default::default()
+        })
+        .expect("add task");
+    runtime
+        .apply_task_automation_update(
+            &task.id,
+            TaskAutomationUpdate {
+                context_files: Some(vec![
+                    "file:.orbit/config.toml".to_string(),
+                    "dir:.orbit/routines".to_string(),
+                    "file:.orbit/state/forbidden.json".to_string(),
+                    "dir:.orbit/future-store".to_string(),
+                    "file:.env".to_string(),
+                    "file:../outside".to_string(),
+                ]),
+                ..TaskAutomationUpdate::default()
+            },
+        )
+        .expect("persist explicit future selectors");
+    approve_for_execution(&runtime, &task);
+
+    let output = run_worktree_setup(&runtime, std::slice::from_ref(&task.id), "jrun-config");
+    let worktree = Path::new(output["workspace_path"].as_str().expect("workspace path"));
+
+    for target in [
+        ".orbit/config.toml",
+        ".orbit/routines",
+        ".orbit/state/forbidden.json",
+        ".orbit/future-store",
+        ".env",
+    ] {
+        assert!(
+            !worktree.join(target).exists(),
+            "setup must not materialize any context-file target: {target}"
+        );
+    }
+    assert!(
+        !repo.join(".orbit/config.toml").exists(),
+        "setup must never write into the registered primary checkout"
+    );
 }
 
 #[test]
@@ -475,12 +544,12 @@ fn update_task_automation_records_status_history_as_system() {
 }
 
 #[test]
-fn v2_update_task_activity_uses_resolved_crew_implementer_identity() {
+fn v2_update_task_activity_uses_resolved_crew_identity() {
     let (_root, runtime) = test_runtime_with_config(attribution_test_config());
     let task = runtime
         .add_task(TaskAddParams {
             title: "Review attributed update".to_string(),
-            description: "Exercise update_task activity implementer attribution.".to_string(),
+            description: "Exercise update_task activity crew attribution.".to_string(),
             workspace_path: Some(".".to_string()),
             crew: Some("claude-team".to_string()),
             ..Default::default()

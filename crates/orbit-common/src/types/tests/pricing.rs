@@ -1,7 +1,10 @@
 use chrono::{DateTime, Utc};
 
 use crate::types::TokenUsage;
-use crate::types::pricing::{PriceRow, cost_from_rows, derive_cost_usd, shipped_price_table};
+use crate::types::pricing::{
+    InputTokenBasis, PriceRow, cost_from_rows, derive_cost_usd, normalize_token_usage,
+    shipped_price_table,
+};
 
 fn dt(rfc3339: &str) -> DateTime<Utc> {
     DateTime::parse_from_rfc3339(rfc3339)
@@ -159,6 +162,8 @@ fn every_fleet_model_string_is_priced() {
         "gpt-5.6-luna",
         "gemini-3.5-flash",
         "grok-build",
+        "grok-4.5",
+        "grok-4.6",
     ];
     // A nonzero split so a zero-rate row would still yield Some (we assert
     // coverage, not a specific figure).
@@ -167,9 +172,10 @@ fn every_fleet_model_string_is_priced() {
         output: 1_000,
         ..TokenUsage::default()
     };
-    // 2026-07-24 (not 07-19): must be on/after claude-opus-5's effective_from
-    // so its row is in range too, while still covering every other row below.
-    let at = dt("2026-07-24T00:00:00Z");
+    // 2026-08-13 (not 07-24): must be on/after grok-4.6's effective_from so
+    // its row is in range too, while still covering every other open-ended
+    // row (claude-opus-5 from 07-24, grok-4.5 from 08-12).
+    let at = dt("2026-08-13T00:00:00Z");
     for model in FLEET_MODELS {
         assert!(
             derive_cost_usd(model, at, &usage).is_some(),
@@ -183,12 +189,213 @@ fn flat_row(model: &str, effective_from: &str, input_per_million_usd: f64) -> Pr
         model: model.to_string(),
         effective_from: dt(effective_from),
         effective_until: None,
+        input_token_basis: InputTokenBasis::Exclusive,
         input_per_million_usd,
         cache_read_per_million_usd: 0.0,
         cache_create_per_million_usd: 0.0,
         cache_create_1h_per_million_usd: 0.0,
         output_per_million_usd: 0.0,
     }
+}
+
+fn covering_rows(model: &str, at: DateTime<Utc>) -> Vec<&'static PriceRow> {
+    shipped_price_table()
+        .iter()
+        .filter(|row| {
+            row.model == model
+                && at >= row.effective_from
+                && row.effective_until.is_none_or(|until| at < until)
+        })
+        .collect()
+}
+
+#[test]
+fn gpt_5_6_rates_change_at_the_exclusive_july_30_boundary_without_overlap() {
+    let historical_at = dt("2026-07-29T23:59:59Z");
+    let current_at = dt("2026-07-30T00:00:00Z");
+    let expected = [
+        (
+            "gpt-5.6-sol",
+            [5.0, 0.5, 6.25, 30.0],
+            [5.0, 0.5, 6.25, 30.0],
+        ),
+        (
+            "gpt-5.6-terra",
+            [2.5, 0.25, 3.125, 15.0],
+            [2.0, 0.2, 2.5, 12.0],
+        ),
+        (
+            "gpt-5.6-luna",
+            [1.0, 0.1, 1.25, 6.0],
+            [0.2, 0.02, 0.25, 1.2],
+        ),
+    ];
+
+    for (model, historical, current) in expected {
+        let historical_rows = covering_rows(model, historical_at);
+        let current_rows = covering_rows(model, current_at);
+        assert_eq!(historical_rows.len(), 1, "{model} historical coverage");
+        assert_eq!(current_rows.len(), 1, "{model} current coverage");
+
+        let rates = |row: &PriceRow| {
+            [
+                row.input_per_million_usd,
+                row.cache_read_per_million_usd,
+                row.cache_create_per_million_usd,
+                row.output_per_million_usd,
+            ]
+        };
+        assert_eq!(
+            rates(historical_rows[0]),
+            historical,
+            "{model} historical rates"
+        );
+        assert_eq!(rates(current_rows[0]), current, "{model} current rates");
+        assert_eq!(
+            historical_rows[0].input_token_basis,
+            InputTokenBasis::GrossIncludesCache
+        );
+        assert_eq!(
+            current_rows[0].input_token_basis,
+            InputTokenBasis::GrossIncludesCache
+        );
+    }
+}
+
+#[test]
+fn gross_openai_input_is_split_into_uncached_read_and_write_buckets() {
+    let at = dt("2026-07-30T00:00:00Z");
+    let cached = TokenUsage {
+        input: 1_000_000,
+        cache_read: 500_000,
+        ..TokenUsage::default()
+    };
+    let cached_cost = derive_cost_usd("gpt-5.6-sol", at, &cached).expect("priced");
+    assert!(
+        (cached_cost - 2.75).abs() < f64::EPSILON,
+        "cost was {cached_cost}"
+    );
+
+    let combined = TokenUsage {
+        input: 1_000_000,
+        cache_read: 200_000,
+        cache_create: 300_000,
+        ..TokenUsage::default()
+    };
+    let combined_cost = derive_cost_usd("gpt-5.6-sol", at, &combined).expect("priced");
+    assert!(
+        (combined_cost - 4.475).abs() < 1e-12,
+        "cost was {combined_cost}"
+    );
+}
+
+#[test]
+fn normalization_keeps_every_cache_bucket_mutually_exclusive() {
+    let gross = TokenUsage {
+        input: 100,
+        cache_read: 20,
+        cache_create: 30,
+        cache_create_1h: 10,
+        output: 5,
+    };
+    let normalized = normalize_token_usage("gpt-5.6-sol", dt("2026-07-30T00:00:00Z"), &gross)
+        .expect("covered gross model");
+    assert_eq!(normalized.input, 40);
+    assert_eq!(normalized.cache_read, 20);
+    assert_eq!(normalized.cache_create, 30);
+    assert_eq!(normalized.cache_create_1h, 10);
+    assert_eq!(normalized.output, 5);
+
+    let exclusive = normalize_token_usage("claude-opus-4-7", dt("2026-07-30T00:00:00Z"), &gross)
+        .expect("covered exclusive model");
+    assert_eq!(exclusive, gross);
+    assert!(normalize_token_usage("unknown", dt("2026-07-30T00:00:00Z"), &gross).is_none());
+}
+
+#[test]
+fn gross_openai_input_rejects_cache_detail_larger_than_the_total() {
+    let invalid = TokenUsage {
+        input: 100,
+        cache_read: 60,
+        cache_create: 41,
+        ..TokenUsage::default()
+    };
+    assert_eq!(
+        derive_cost_usd("gpt-5.6-sol", dt("2026-07-30T00:00:00Z"), &invalid),
+        None
+    );
+}
+
+#[test]
+fn malformed_openai_one_hour_writes_are_not_priced_as_free() {
+    let usage = TokenUsage {
+        input: 1_000_000,
+        cache_create_1h: 100_000,
+        ..TokenUsage::default()
+    };
+    let cost = derive_cost_usd("gpt-5.6-sol", dt("2026-07-30T00:00:00Z"), &usage)
+        .expect("nonzero fallback rate prices malformed 1h data");
+    assert!((cost - 5.125).abs() < 1e-12, "cost was {cost}");
+}
+
+#[test]
+fn ground_truth_grok_4_6_uses_official_short_context_rates() {
+    // Official short-context rates retrieved 2026-08-14T03:45:16Z from
+    // https://docs.x.ai/developers/models/grok-4.6 and
+    // https://docs.x.ai/developers/pricing: $2.00 input / $0.50 cached /
+    // $6.00 output per 1M. 1M of each split → 2.0 + 0.5 + 6.0 = 8.5.
+    let usage = TokenUsage {
+        input: 1_000_000,
+        cache_read: 1_000_000,
+        cache_create: 0,
+        cache_create_1h: 0,
+        output: 1_000_000,
+    };
+    let cost = derive_cost_usd("grok-4.6", dt("2026-08-14T00:00:00Z"), &usage)
+        .expect("grok-4.6 is priced in the shipped table");
+    assert!((cost - 8.5).abs() < f64::EPSILON, "cost was {cost}");
+}
+
+#[test]
+fn grok_4_5_uses_official_short_context_rates() {
+    // Official short-context rates retrieved 2026-08-14T03:45:16Z from
+    // https://docs.x.ai/developers/models/grok-4.5 and
+    // https://docs.x.ai/developers/pricing: $2.00 input / $0.30 cached /
+    // $6.00 output per 1M. 1M of each split → 2.0 + 0.3 + 6.0 = 8.3.
+    let usage = TokenUsage {
+        input: 1_000_000,
+        cache_read: 1_000_000,
+        cache_create: 0,
+        cache_create_1h: 0,
+        output: 1_000_000,
+    };
+    let cost = derive_cost_usd("grok-4.5", dt("2026-08-14T00:00:00Z"), &usage)
+        .expect("grok-4.5 is priced in the shipped table");
+    assert!((cost - 8.3).abs() < f64::EPSILON, "cost was {cost}");
+}
+
+#[test]
+fn grok_malformed_one_hour_writes_are_not_priced_as_free() {
+    let usage = TokenUsage {
+        input: 1_000_000,
+        cache_create_1h: 100_000,
+        ..TokenUsage::default()
+    };
+    let cost = derive_cost_usd("grok-4.6", dt("2026-08-14T00:00:00Z"), &usage)
+        .expect("nonzero fallback rate prices malformed 1h data");
+    assert!((cost - 2.2).abs() < 1e-12, "cost was {cost}");
+}
+
+#[test]
+fn exclusive_input_rows_preserve_existing_non_openai_accounting() {
+    let usage = TokenUsage {
+        input: 1_000_000,
+        cache_read: 500_000,
+        ..TokenUsage::default()
+    };
+    let cost =
+        derive_cost_usd("claude-opus-4-7", dt("2026-07-30T00:00:00Z"), &usage).expect("priced");
+    assert!((cost - 5.25).abs() < f64::EPSILON, "cost was {cost}");
 }
 
 #[test]

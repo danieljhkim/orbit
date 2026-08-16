@@ -104,6 +104,10 @@ impl TaskV2Store {
                 bundle.envelope.crew = value.clone();
                 envelope_changed = true;
             }
+            if let Some(value) = &fields.orchestrator {
+                bundle.envelope.orchestrator = value.clone();
+                envelope_changed = true;
+            }
             if let Some(value) = &fields.external_refs {
                 bundle.envelope.external_refs = value.clone();
                 envelope_changed = true;

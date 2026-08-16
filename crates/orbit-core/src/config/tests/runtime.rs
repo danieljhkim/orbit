@@ -1,5 +1,6 @@
+use super::super::ConfigSnapshot;
 use super::super::runtime::*;
-use orbit_common::types::{Crew, CrewRoleAssignment, OrbitError, all_agent_families};
+use orbit_common::types::{Crew, CrewAssignment, OrbitError};
 use std::collections::BTreeMap;
 use std::path::Path;
 use tempfile::tempdir;
@@ -9,14 +10,13 @@ fn write_config(dir: &Path, body: &str) {
 }
 
 fn single_family_crew(name: &str) -> Crew {
-    let role = CrewRoleAssignment {
+    let assignment = CrewAssignment {
         model: format!("{name}-model"),
         provider: name.to_string(),
-        backend: "cli".to_string(),
     };
     Crew {
         name: name.to_string(),
-        assignment: role,
+        assignment,
         description: None,
         tags: Vec::new(),
     }
@@ -38,13 +38,12 @@ fn built_in_crews_use_standard_model_specific_names() {
         ("sol", "codex", "gpt-5.6-sol"),
         ("terra", "codex", "gpt-5.6-terra"),
         ("luna", "codex", "gpt-5.6-luna"),
-        ("gemini", "gemini", "pro"),
-        ("grok", "grok", "grok-build"),
+        ("gemini", "gemini", "gemini-3.7-flash"),
+        ("grok", "grok", "grok-4.6"),
     ] {
         let assignment = &crews.get(name).expect("built-in crew").assignment;
         assert_eq!(assignment.provider, provider);
         assert_eq!(assignment.model, model);
-        assert_eq!(assignment.backend, "cli");
     }
     assert!(!crews.contains_key("claude"));
     assert!(!crews.contains_key("codex"));
@@ -58,18 +57,6 @@ fn load_config(body: &str) -> Result<RuntimeConfig, OrbitError> {
     let workspace = tempdir().expect("workspace tempdir");
     write_config(workspace.path(), body);
     RuntimeConfig::load_layered(global.path(), workspace.path())
-}
-
-fn assert_invalid_duel_config(body: &str, substrings: &[&str]) {
-    let error = load_config(body).expect_err("invalid duel config must fail");
-    let message = error.to_string();
-    assert!(matches!(error, OrbitError::InvalidInput(_)), "{message}");
-    for substring in substrings {
-        assert!(
-            message.contains(substring),
-            "expected {message:?} to contain {substring:?}"
-        );
-    }
 }
 
 #[test]
@@ -94,114 +81,28 @@ tags = [" review ", "", "hard", "review"]
 }
 
 #[test]
-fn duel_config_loads_candidates_and_models() {
+fn retired_duel_config_written_by_orbit_init_loads_and_is_ignored() {
     let config = load_config(
         r#"
+[workflow]
+base_branch = "agent-main"
+
 [duel]
-candidates = [" Codex ", "CLAUDE", "gemini"]
+candidates = ["claude", "codex", "gemini"]
 
 [duel.models]
-" Codex " = " gpt-5.5 "
-CLAUDE = " opus-4.7 "
+claude = "opus"
+codex = "gpt-5.6-sol"
+gemini = "pro"
 "#,
     )
-    .expect("config loads");
+    .expect("retired init-era duel config must load");
 
-    let mut expected_models = BTreeMap::new();
-    expected_models.insert("claude".to_string(), "opus-4.7".to_string());
-    expected_models.insert(
-        "codex".to_string(),
-        orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string(),
-    );
-    assert_eq!(
-        config.duel,
-        DuelConfig {
-            candidates: vec![
-                "codex".to_string(),
-                "claude".to_string(),
-                "gemini".to_string()
-            ],
-            models: expected_models,
-        }
-    );
-}
-
-#[test]
-fn duel_config_defaults_to_all_families_without_section() {
-    let config = load_config("[scoring]\nenabled = true\n").expect("config loads");
-
-    assert_eq!(
-        config.duel.candidates,
-        all_agent_families()
-            .iter()
-            .map(|family| (*family).to_string())
-            .collect::<Vec<_>>()
-    );
-    assert!(config.duel.models.is_empty());
-}
-
-#[test]
-fn duel_config_rejects_empty_candidates() {
-    assert_invalid_duel_config(
-        "[duel]\ncandidates = []\n",
-        &["candidates", "at least 3", "codex, claude, gemini, grok"],
-    );
-}
-
-#[test]
-fn duel_config_rejects_fewer_than_three_distinct_candidates() {
-    assert_invalid_duel_config(
-        "[duel]\ncandidates = [\"codex\", \"claude\"]\n",
-        &["3 distinct", "codex, claude", "codex, claude, gemini, grok"],
-    );
-}
-
-#[test]
-fn duel_config_rejects_duplicate_candidates_after_normalization() {
-    assert_invalid_duel_config(
-        "[duel]\ncandidates = [\"codex\", \" Codex \", \"claude\"]\n",
-        &["duplicate", "codex", "codex, claude, gemini, grok"],
-    );
-}
-
-#[test]
-fn duel_config_rejects_unknown_candidate() {
-    assert_invalid_duel_config(
-        "[duel]\ncandidates = [\"codex\", \"claude\", \"notabot\"]\n",
-        &["notabot", "valid candidates", "codex, claude, gemini, grok"],
-    );
-}
-
-#[test]
-fn duel_config_rejects_model_key_outside_resolved_candidates() {
-    assert_invalid_duel_config(
-        r#"
-[duel]
-candidates = ["codex", "claude", "gemini"]
-
-[duel.models]
-grok = "grok-4"
-"#,
-        &[
-            "grok",
-            "resolved [duel].candidates",
-            "codex, claude, gemini",
-        ],
-    );
-}
-
-#[test]
-fn duel_config_rejects_empty_model_value() {
-    assert_invalid_duel_config(
-        r#"
-[duel]
-candidates = ["codex", "claude", "gemini"]
-
-[duel.models]
-codex = "   "
-"#,
-        &["duel.models", "codex", "   "],
-    );
+    assert_eq!(config.workflow_base_branch(), "agent-main");
+    assert!(config.snapshot.value_for("duel.candidates").is_none());
+    assert!(config.snapshot.value_for("duel.models").is_none());
+    assert!(RETIRED_DUEL_CONFIG_WARNING.contains("[duel]"));
+    assert!(RETIRED_DUEL_CONFIG_WARNING.contains("[duel.models]"));
 }
 
 #[test]
@@ -213,9 +114,7 @@ fn deprecated_task_id_pattern_loads_valid_regex_from_workspace_config() {
         "[knowledge]\ntask_id_pattern = \"[A-Z]+-\\\\d+\"\n",
     );
 
-    let config =
-        RuntimeConfig::load_layered(global.path(), workspace.path()).expect("config loads");
-    assert!(config.v2_backend().is_none());
+    RuntimeConfig::load_layered(global.path(), workspace.path()).expect("config loads");
 }
 
 #[test]
@@ -249,7 +148,6 @@ fn deprecated_task_id_pattern_absent_when_section_absent() {
 
     let config =
         RuntimeConfig::load_layered(global.path(), workspace.path()).expect("config loads");
-    assert!(config.v2_backend().is_none());
     assert_eq!(config.pr_config().task_url_template.as_deref(), None);
 }
 
@@ -282,31 +180,59 @@ fn pr_task_url_template_loads_from_workspace_config() {
     );
 }
 
+/// [ORB-10801] `[runtime] backend` selected the retired agent-loop execution
+/// backend. `cli` named the surviving path, so it stays accepted and inert.
 #[test]
-fn runtime_backend_loads_auto_from_workspace_config() {
+fn retired_runtime_backend_cli_is_accepted_and_ignored() {
     let global = tempdir().expect("global tempdir");
     let workspace = tempdir().expect("workspace tempdir");
-    write_config(workspace.path(), "[runtime]\nbackend = \"auto\"\n");
+    write_config(workspace.path(), "[runtime]\nbackend = \"cli\"\n");
 
-    let config =
-        RuntimeConfig::load_layered(global.path(), workspace.path()).expect("config loads");
-
-    assert_eq!(config.v2_backend(), Some("auto"));
+    RuntimeConfig::load_layered(global.path(), workspace.path())
+        .expect("`backend = \"cli\"` must keep loading");
 }
 
+/// [ORB-10801] `ORBIT_BACKEND` was tier 2 of the same retired chain, and gets
+/// the same treatment: `cli` is inert, the removed values fail closed.
 #[test]
-fn runtime_backend_rejects_invalid_value() {
-    let global = tempdir().expect("global tempdir");
-    let workspace = tempdir().expect("workspace tempdir");
-    write_config(workspace.path(), "[runtime]\nbackend = \"clii\"\n");
+fn retired_backend_env_override_is_inert_for_cli_and_fails_closed_otherwise() {
+    let empty = toml::Value::Table(toml::map::Map::new());
 
-    let error = RuntimeConfig::load_layered(global.path(), workspace.path())
-        .expect_err("invalid backend must fail config load");
-    let message = error.to_string();
+    for accepted in [None, Some(""), Some("cli")] {
+        super::super::runtime::retired_backend_override_check(&empty, accepted)
+            .unwrap_or_else(|error| panic!("{accepted:?} must be accepted: {error}"));
+    }
 
-    assert!(message.contains("[runtime] backend"));
-    assert!(message.contains("clii"));
-    assert!(message.contains("http, cli, auto"));
+    for removed in ["http", "auto"] {
+        let error = super::super::runtime::retired_backend_override_check(&empty, Some(removed))
+            .expect_err("a removed ORBIT_BACKEND value must fail closed");
+        let message = error.to_string();
+        assert!(message.contains("ORBIT_BACKEND"), "message: {message}");
+        assert!(message.contains(removed), "message: {message}");
+        assert!(message.contains("CLI agent path"), "message: {message}");
+    }
+}
+
+/// [ORB-10801] The removed values fail closed rather than being reinterpreted
+/// as CLI agent execution behind the operator's back.
+#[test]
+fn retired_runtime_backend_http_fails_closed_with_migration() {
+    for removed in ["http", "auto", "clii"] {
+        let global = tempdir().expect("global tempdir");
+        let workspace = tempdir().expect("workspace tempdir");
+        write_config(
+            workspace.path(),
+            &format!("[runtime]\nbackend = \"{removed}\"\n"),
+        );
+
+        let error = RuntimeConfig::load_layered(global.path(), workspace.path())
+            .expect_err("retired backend value must fail config load");
+        let message = error.to_string();
+
+        assert!(message.contains("[runtime]"), "message: {message}");
+        assert!(message.contains(removed), "message: {message}");
+        assert!(message.contains("CLI agent path"), "message: {message}");
+    }
 }
 
 #[test]
@@ -339,6 +265,22 @@ default_crew = "codex"
             .model,
         orbit_common::test_fixtures::TEST_CODEX_MODEL
     );
+}
+
+#[test]
+fn absent_crews_use_built_in_defaults() {
+    let config = load_config("[scoring]\nenabled = true\n").expect("config without crews loads");
+
+    assert_eq!(config.crews, default_crews());
+    assert_eq!(config.default_crew.as_deref(), Some("opus"));
+}
+
+#[test]
+fn explicitly_empty_crews_preserve_an_empty_registry() {
+    let config = load_config("[crews]\n").expect("empty crew registry loads");
+
+    assert!(config.crews.is_empty());
+    assert_eq!(config.default_crew, None);
 }
 
 #[test]
@@ -445,6 +387,44 @@ fn workflow_default_crew_uses_environment_then_claude_system_default() {
     assert!(error.to_string().contains("CONSTELLATION_DEFAULT_PROVIDER"));
 }
 
+/// [ORB-10801] `[crews.<name>] backend` pinned the same retired selector. A
+/// crew that still declares `cli` keeps loading; the removed values are
+/// refused rather than re-pointed at the CLI agent silently.
+#[test]
+fn retired_crew_backend_is_inert_for_cli_and_fails_closed_otherwise() {
+    load_config(
+        r#"
+[crews.legacy]
+model = "gpt-test"
+provider = "codex"
+backend = "cli"
+
+[workflow]
+default_crew = "legacy"
+"#,
+    )
+    .expect("`backend = \"cli\"` must keep loading");
+
+    for removed in ["http", "auto"] {
+        let error = load_config(&format!(
+            r#"
+[crews.legacy]
+model = "gpt-test"
+provider = "codex"
+backend = "{removed}"
+
+[workflow]
+default_crew = "legacy"
+"#
+        ))
+        .expect_err("a removed crew backend must fail config load");
+        let message = error.to_string();
+        assert!(message.contains("[crews.legacy]"), "message: {message}");
+        assert!(message.contains(removed), "message: {message}");
+        assert!(message.contains("CLI agent path"), "message: {message}");
+    }
+}
+
 #[test]
 fn flat_crews_with_incomplete_assignment_fail_load() {
     let global = tempdir().expect("global tempdir");
@@ -453,7 +433,6 @@ fn flat_crews_with_incomplete_assignment_fail_load() {
         workspace.path(),
         r#"
 [crews.codex]
-model = "gpt-5.5"
 provider = "codex"
 "#,
     );
@@ -463,12 +442,12 @@ provider = "codex"
 
     assert!(matches!(error, OrbitError::InvalidInput(_)));
     assert!(error.to_string().contains("[crews.codex]"));
-    assert!(error.to_string().contains("backend"));
+    assert!(error.to_string().contains("model"));
 }
 
 #[test]
-fn legacy_divergent_crew_uses_implementer_assignment() {
-    let config = load_config(
+fn legacy_role_tables_fail_with_flat_shape_rewrite_guidance() {
+    let error = load_config(
         r#"
 [crews.legacy]
 planner = { model = "planner-model", provider = "claude", backend = "cli" }
@@ -479,11 +458,47 @@ reviewer = { model = "reviewer-model", provider = "gemini", backend = "cli" }
 default_crew = "legacy"
 "#,
     )
-    .expect("legacy crew loads");
+    .expect_err("legacy role tables must fail config load");
+    let message = error.to_string();
 
-    let crew = config.crews.get("legacy").expect("legacy crew");
-    assert_eq!(crew.assignment.model, "implementer-model");
-    assert_eq!(crew.assignment.provider, "codex");
+    for expected in [
+        "[crews.legacy]",
+        "planner/implementer/reviewer",
+        "model",
+        "provider",
+    ] {
+        assert!(
+            message.contains(expected),
+            "expected {message:?} to contain {expected:?}"
+        );
+    }
+}
+
+#[test]
+fn flat_crew_mixed_with_role_tables_fails_with_flat_shape_rewrite_guidance() {
+    let error = load_config(
+        r#"
+[crews.mixed]
+model = "gpt-test"
+provider = "codex"
+backend = "cli"
+implementer = { model = "gpt-test", provider = "codex", backend = "cli" }
+"#,
+    )
+    .expect_err("mixed crew shape must fail config load");
+    let message = error.to_string();
+
+    for expected in [
+        "[crews.mixed]",
+        "planner/implementer/reviewer",
+        "model",
+        "provider",
+    ] {
+        assert!(
+            message.contains(expected),
+            "expected {message:?} to contain {expected:?}"
+        );
+    }
 }
 
 #[test]
@@ -524,7 +539,7 @@ auto_ship = true
 }
 
 #[test]
-fn workspace_config_replaces_global_instead_of_merging() {
+fn workspace_single_key_inherits_other_global_keys_then_built_in_defaults() {
     let global = tempdir().expect("global tempdir");
     let workspace = tempdir().expect("workspace tempdir");
     write_config(
@@ -537,8 +552,216 @@ fn workspace_config_replaces_global_instead_of_merging() {
         .expect("workspace config loads");
 
     assert!(config.workflow_auto_ship());
-    assert_eq!(config.workflow_base_branch(), "main");
-    assert!(config.scoring_enabled);
+    assert_eq!(config.workflow_base_branch(), "global-branch");
+    assert!(!config.scoring_enabled);
+}
+
+#[test]
+fn workspace_file_does_not_inherit_security_relevant_global_keys() {
+    let global = tempdir().expect("global tempdir");
+    let workspace = tempdir().expect("workspace tempdir");
+    write_config(
+        global.path(),
+        r#"
+[execution.codex]
+sandbox = "danger-full-access"
+approval_policy = "on-request"
+
+[execution.env]
+inherit = true
+pass = ["GLOBAL_SECRET"]
+"#,
+    );
+    write_config(workspace.path(), "[scoring]\nenabled = false\n");
+
+    let config = RuntimeConfig::load_layered(global.path(), workspace.path())
+        .expect("workspace config loads");
+
+    assert_eq!(config.codex_execution.sandbox(), "workspace-write");
+    assert_eq!(config.codex_execution.approval_policy(), None);
+    assert_eq!(
+        config.snapshot.execution_env_pass,
+        ConfigSnapshot::default().execution_env_pass
+    );
+    assert!(!config.execution_env.inherit());
+}
+
+#[test]
+fn workspace_crew_field_override_keeps_global_crew_fields_and_other_crews() {
+    let global = tempdir().expect("global tempdir");
+    let workspace = tempdir().expect("workspace tempdir");
+    write_config(
+        global.path(),
+        r#"
+[workflow]
+default_crew = "build"
+
+[crews.build]
+model = "global-model"
+provider = "codex"
+backend = "cli"
+
+[crews.review]
+model = "review-model"
+provider = "claude"
+backend = "cli"
+"#,
+    );
+    write_config(
+        workspace.path(),
+        r#"
+[crews.build]
+model = "workspace-model"
+"#,
+    );
+
+    let config = RuntimeConfig::load_layered(global.path(), workspace.path())
+        .expect("layered crew config loads");
+
+    let build = config.crews.get("build").expect("overridden crew remains");
+    assert_eq!(build.assignment.model, "workspace-model");
+    assert_eq!(build.assignment.provider, "codex");
+    assert_eq!(
+        config
+            .crews
+            .get("review")
+            .expect("global-only crew remains")
+            .assignment
+            .model,
+        "review-model"
+    );
+}
+
+#[test]
+fn layered_config_rejects_legacy_global_crew_before_flat_workspace_override() {
+    let global = tempdir().expect("global tempdir");
+    let workspace = tempdir().expect("workspace tempdir");
+    write_config(
+        global.path(),
+        r#"
+[workflow]
+default_crew = "build"
+
+[crews.build]
+planner = { model = "old-model", provider = "codex", backend = "cli" }
+implementer = { model = "old-model", provider = "codex", backend = "cli" }
+reviewer = { model = "old-model", provider = "codex", backend = "cli" }
+"#,
+    );
+    write_config(
+        workspace.path(),
+        r#"
+[crews.build]
+model = "new-model"
+"#,
+    );
+
+    let error = RuntimeConfig::load_layered(global.path(), workspace.path())
+        .expect_err("legacy global crew must not be masked by workspace fields");
+    let message = error.to_string();
+
+    assert!(message.contains("[crews.build]"), "{message}");
+    assert!(
+        message.contains("planner/implementer/reviewer"),
+        "{message}"
+    );
+}
+
+#[test]
+fn effective_config_attributes_values_to_workspace_global_and_built_in_sources() {
+    let global = tempdir().expect("global tempdir");
+    let workspace = tempdir().expect("workspace tempdir");
+    write_config(
+        global.path(),
+        r#"
+[workflow]
+base_branch = "integration"
+default_crew = "build"
+
+[execution.codex]
+sandbox = "danger-full-access"
+
+[crews.build]
+model = "global-model"
+provider = "codex"
+backend = "cli"
+"#,
+    );
+    write_config(
+        workspace.path(),
+        r#"
+[scoring]
+enabled = false
+
+[crews.build]
+model = "workspace-model"
+"#,
+    );
+
+    let effective =
+        load_effective_config(global.path(), workspace.path()).expect("effective config loads");
+    let values = effective
+        .values()
+        .iter()
+        .map(|entry| (entry.key.as_str(), entry))
+        .collect::<BTreeMap<_, _>>();
+
+    assert_eq!(
+        values["scoring.enabled"].source.kind(),
+        ConfigValueSourceKind::Workspace
+    );
+    assert_eq!(
+        values["workflow.base_branch"].source.kind(),
+        ConfigValueSourceKind::Global
+    );
+    assert_eq!(
+        values["execution.codex.sandbox"].source.kind(),
+        ConfigValueSourceKind::BuiltIn
+    );
+    assert_eq!(
+        values["crews.build.model"].source.kind(),
+        ConfigValueSourceKind::Workspace
+    );
+    assert_eq!(
+        values["crews.build.provider"].source.kind(),
+        ConfigValueSourceKind::Global
+    );
+    let workspace_config_path = workspace.path().join("config.toml");
+    assert_eq!(
+        values["scoring.enabled"].source.path(),
+        Some(workspace_config_path.as_path())
+    );
+    let global_config_path = global.path().join("config.toml");
+    assert_eq!(
+        values["crews.build.model"].source.path(),
+        Some(workspace_config_path.as_path())
+    );
+    assert_eq!(
+        values["crews.build.provider"].source.path(),
+        Some(global_config_path.as_path())
+    );
+}
+
+#[test]
+fn module_and_user_docs_share_the_layering_contract() {
+    const CONTRACT: &str = "Ordinary settings inherit per key: workspace values override global values, global values fill omissions, and built-in defaults fill remaining gaps.";
+    let module_docs = include_str!("../mod.rs");
+    let user_docs = include_str!("../../../../../docs/CONFIG.md");
+
+    assert!(module_docs.contains(CONTRACT));
+    assert!(user_docs.contains(CONTRACT));
+}
+
+#[test]
+fn shipped_default_config_has_no_workspace_specific_identifiers() {
+    let shipped = include_str!("../../../assets/config/default-config.toml");
+
+    for forbidden in ["ORB-", "agent-main", "dk-server", "F2026-"] {
+        assert!(
+            !shipped.contains(forbidden),
+            "shipped config must not contain workspace-specific marker {forbidden:?}"
+        );
+    }
 }
 
 #[test]

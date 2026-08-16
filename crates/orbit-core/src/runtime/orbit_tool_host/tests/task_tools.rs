@@ -179,94 +179,6 @@ fn mcp_task_add_uses_session_workspace_from_worktree_cwd() {
 }
 
 #[test]
-fn duel_plan_add_persists_gemini_planner_artifact() {
-    let (_root, runtime, repo_root) = test_runtime();
-    let task = create_task(
-        &runtime,
-        &repo_root,
-        "Gemini planning duel artifact",
-        "Exercise the planner artifact write path used by direct-agent duels.",
-        TaskStatus::InProgress,
-        &[],
-    );
-    let content = "## Plan\nPersist through Orbit tools.";
-
-    runtime
-        .execute_tool_command(
-            "orbit.duel.plan.add",
-            json!({
-                "id": task.id.clone(),
-                "planning_duel_slot": "planner_a",
-                "content": content,
-            }),
-            Some("gemini".to_string()),
-            Some(orbit_common::test_fixtures::TEST_GEMINI_MODEL.to_string()),
-        )
-        .expect("gemini duel plan add succeeds");
-
-    let artifacts = runtime
-        .get_task_artifacts(&task.id)
-        .expect("read task artifacts");
-    let artifact = artifacts
-        .iter()
-        .find(|artifact| artifact.path == "planning-duel/planner_a.md")
-        .expect("gemini planner artifact");
-    assert_eq!(
-        artifact.text_content(),
-        Some("*authored by: gemini / planner_a*\n## Plan\nPersist through Orbit tools.")
-    );
-}
-
-#[test]
-fn duel_plan_winner_persists_gemini_arbiter_artifact() {
-    // ORB-00037: extends ORB-00027 coverage from planner `plan.add` to arbiter
-    // `plan.winner`. Both delegate to the same TaskUpdate artifact contract;
-    // this test guards against the arbiter path silently regressing when the
-    // planner path is refactored.
-    let (_root, runtime, repo_root) = test_runtime();
-    let task = create_task(
-        &runtime,
-        &repo_root,
-        "Gemini arbiter winner",
-        "Exercise the arbiter winner.json write path used by direct-agent duels.",
-        TaskStatus::InProgress,
-        &[],
-    );
-
-    runtime
-        .execute_tool_command(
-            "orbit.duel.plan.winner",
-            json!({
-                "id": task.id.clone(),
-                "winner_slot": "planner_a",
-                "arbiter_rationale": "Tighter scope and clearer staged plan.",
-            }),
-            Some("gemini".to_string()),
-            Some(orbit_common::test_fixtures::TEST_GEMINI_MODEL.to_string()),
-        )
-        .expect("gemini duel plan winner succeeds");
-
-    let artifacts = runtime
-        .get_task_artifacts(&task.id)
-        .expect("read task artifacts");
-    let artifact = artifacts
-        .iter()
-        .find(|artifact| artifact.path == "planning-duel/winner.json")
-        .expect("arbiter winner.json artifact");
-    let raw = artifact
-        .text_content()
-        .expect("winner.json must be text content");
-    let payload: Value = serde_json::from_str(raw).expect("winner.json is valid JSON");
-    assert_eq!(payload["winner_slot"], "planner_a");
-    assert_eq!(payload["arbiter_family"], "gemini");
-    assert_eq!(payload["artifact_path"], "planning-duel/planner_a.md");
-    assert_eq!(
-        payload["arbiter_rationale"],
-        "Tighter scope and clearer staged plan."
-    );
-}
-
-#[test]
 fn task_add_tool_rejects_dropped_task_types_and_ignores_retired_status() {
     let (_root, runtime, _repo_root) = test_runtime();
 
@@ -326,13 +238,23 @@ fn friction_add_writes_markdown_record_and_validates_tags() {
         )
         .expect("friction add succeeds");
 
-    let path = output["path"].as_str().expect("record path");
-    let raw = std::fs::read_to_string(path).expect("read friction markdown");
-    assert!(raw.starts_with("---\n"), "{raw}");
-    assert!(raw.contains("id: F"), "{raw}");
-    assert!(raw.contains("model: codex"), "{raw}");
-    assert!(raw.contains("tooling"), "{raw}");
-    assert!(raw.contains("skill-guidance"), "{raw}");
+    // ADR-0345: records written after the SQLite cutover report `path: null`
+    // rather than a file location nothing could open.
+    assert_eq!(output["path"], Value::Null);
+    let id = output["id"].as_str().expect("record id");
+    assert!(id.starts_with('F'), "{id}");
+    assert_eq!(output["model"], json!("codex"));
+
+    // ORB-10798: `show` is inactive on the agent tool surface, so it is read
+    // back through the CLI / dashboard `run_tool` path, as `orbit friction
+    // show` does.
+    let shown = runtime
+        .run_tool("orbit.friction.show", json!({ "id": id }))
+        .expect("friction show succeeds");
+    assert_eq!(shown["id"], json!(id));
+    assert_eq!(shown["status"], json!("open"));
+    assert_eq!(shown["tags"], json!(["skill-guidance", "tooling"]));
+    assert_eq!(shown["path"], Value::Null);
 
     let message = invalid_input_message(runtime.execute_tool_command(
         "orbit.friction.add",
@@ -540,6 +462,7 @@ fn task_add_and_show_tools_roundtrip_crew() {
                 "description": "Exercise crew input on the agent-facing create path.",
                 "workspace": ".",
                 "crew": "sol",
+                "orchestrator": "sol",
             }),
             Some("codex".to_string()),
             Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
@@ -547,6 +470,7 @@ fn task_add_and_show_tools_roundtrip_crew() {
         .expect("task add tool succeeds with a valid crew");
     let task_id = added["id"].as_str().expect("task id");
     assert_eq!(added.get("crew"), Some(&json!("sol")));
+    assert_eq!(added.get("orchestrator"), Some(&json!("sol")));
 
     let shown = runtime
         .execute_tool_command(
@@ -557,6 +481,61 @@ fn task_add_and_show_tools_roundtrip_crew() {
         )
         .expect("task show tool succeeds");
     assert_eq!(shown.get("crew"), Some(&json!("sol")));
+    assert_eq!(shown.get("orchestrator"), Some(&json!("sol")));
+}
+
+/// ORB-10648: `priority` is an advertised and applied update field. The record
+/// layer could always persist it, but neither the tool schema nor the update
+/// handler read it, so a caller's re-prioritization was discarded while the
+/// tool answered with the unchanged task.
+#[test]
+fn task_update_tool_persists_priority() {
+    let (_root, runtime, _repo_root) = test_runtime();
+    let added = runtime
+        .execute_tool_command(
+            "orbit.task.add",
+            json!({
+                "title": "Priority update task",
+                "description": "Starts at the default priority and is raised on update.",
+                "workspace": ".",
+            }),
+            Some("codex".to_string()),
+            Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
+        )
+        .expect("task add tool succeeds");
+    let task_id = added["id"].as_str().expect("task id");
+    assert_eq!(added.get("priority"), Some(&json!("medium")));
+
+    let updated = runtime
+        .execute_tool_command(
+            "orbit.task.update",
+            json!({ "id": task_id, "priority": "high" }),
+            Some("codex".to_string()),
+            Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
+        )
+        .expect("priority update succeeds");
+    assert_eq!(updated.get("priority"), Some(&json!("high")));
+
+    let shown = runtime
+        .execute_tool_command(
+            "orbit.task.show",
+            json!({ "id": task_id }),
+            Some("codex".to_string()),
+            Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
+        )
+        .expect("task show succeeds");
+    assert_eq!(shown.get("priority"), Some(&json!("high")));
+
+    let message = invalid_input_message(runtime.execute_tool_command(
+        "orbit.task.update",
+        json!({ "id": task_id, "priority": "nonsense" }),
+        Some("codex".to_string()),
+        Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
+    ));
+    assert!(
+        message.contains("priority"),
+        "an unparseable priority names the field: {message}"
+    );
 }
 
 #[test]
@@ -685,6 +664,66 @@ fn task_show_tool_includes_empty_tags_array() {
 }
 
 #[test]
+fn foreign_task_references_are_marked_and_do_not_block_readiness() {
+    let (_root, runtime, _repo_root) = test_runtime();
+    let foreign_id = "DK-00042";
+    let created = runtime
+        .execute_tool_command(
+            "orbit.task.add",
+            json!({
+                "title": "Coordinate with a foreign task",
+                "description": "The target is owned by another machine.",
+                "workspace": ".",
+                "relations": [
+                    {"type": "blocked_by", "target": foreign_id},
+                    {"type": "related_to", "target": foreign_id}
+                ],
+            }),
+            Some("codex".to_string()),
+            Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
+        )
+        .expect("foreign-prefix task references are accepted");
+    let task_id = created["id"].as_str().expect("created task id");
+
+    let shown = runtime
+        .execute_tool_command(
+            "orbit.task.show",
+            json!({"id": task_id}),
+            Some("codex".to_string()),
+            Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
+        )
+        .expect("show foreign-prefix task");
+    assert_eq!(
+        shown["resolved_dependencies"],
+        json!(["DK-00042 [not verifiable here]"])
+    );
+    let related_to = shown["relations"]
+        .as_array()
+        .expect("relations array")
+        .iter()
+        .find(|relation| relation["type"] == "related_to")
+        .expect("related_to relation");
+    assert_eq!(related_to["verification"], json!("not verifiable here"));
+
+    let ready = runtime
+        .execute_tool_command(
+            "orbit.task.list",
+            json!({"ready": true}),
+            Some("codex".to_string()),
+            Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
+        )
+        .expect("list ready tasks");
+    assert!(
+        ready
+            .as_array()
+            .expect("ready task array")
+            .iter()
+            .any(|task| task["id"] == task_id),
+        "foreign dependencies do not gate readiness"
+    );
+}
+
+#[test]
 fn task_show_tool_with_context_includes_related_docs() {
     let (_root, runtime, repo_root) = test_runtime();
     fs::create_dir_all(repo_root.join("docs")).expect("docs dir");
@@ -801,6 +840,60 @@ fn task_add_tool_recovers_mcp_encoded_acceptance_and_context_arrays() {
     assert_eq!(
         output.get("context_files"),
         Some(&json!(["file:src/lib.rs"]))
+    );
+}
+
+#[test]
+fn task_add_tool_preserves_commas_in_acceptance_criteria_array() {
+    let (_root, runtime, _repo_root) = test_runtime();
+
+    let output = runtime
+        .execute_tool_command(
+            "orbit.task.add",
+            json!({
+                "title": "Comma-safe criteria",
+                "description": "Exercise explicit acceptance criteria arrays.",
+                "workspace": ".",
+                "acceptance_criteria": [
+                    "first criterion, with a comma",
+                    "second criterion"
+                ],
+            }),
+            Some("codex".to_string()),
+            Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
+        )
+        .expect("task add tool succeeds");
+
+    assert_eq!(
+        output.get("acceptance_criteria"),
+        Some(&json!([
+            "first criterion, with a comma",
+            "second criterion"
+        ]))
+    );
+}
+
+#[test]
+fn task_add_tool_keeps_scalar_acceptance_criteria_as_one_value() {
+    let (_root, runtime, _repo_root) = test_runtime();
+
+    let output = runtime
+        .execute_tool_command(
+            "orbit.task.add",
+            json!({
+                "title": "Scalar criterion",
+                "description": "Exercise scalar acceptance criteria input.",
+                "workspace": ".",
+                "acceptance_criteria": "one criterion, with a comma",
+            }),
+            Some("codex".to_string()),
+            Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
+        )
+        .expect("task add tool succeeds");
+
+    assert_eq!(
+        output.get("acceptance_criteria"),
+        Some(&json!(["one criterion, with a comma"]))
     );
 }
 
@@ -1707,6 +1800,72 @@ fn task_update_tool_recovers_mcp_encoded_acceptance_array() {
     assert_eq!(
         output.get("acceptance_criteria"),
         Some(&json!(["Criterion A", "Criterion B"]))
+    );
+}
+
+#[test]
+fn task_update_tool_preserves_commas_in_acceptance_criteria_array() {
+    let (_root, runtime, repo_root) = test_runtime();
+    let task = create_task(
+        &runtime,
+        &repo_root,
+        "Update comma-safe criteria",
+        "Exercise explicit acceptance criteria replacement.",
+        TaskStatus::Backlog,
+        &[],
+    );
+
+    let output = runtime
+        .execute_tool_command(
+            "orbit.task.update",
+            json!({
+                "id": task.id,
+                "acceptance_criteria": [
+                    "updated criterion, with a comma",
+                    "another updated criterion"
+                ],
+            }),
+            Some("codex".to_string()),
+            Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
+        )
+        .expect("task update tool succeeds");
+
+    assert_eq!(
+        output.get("acceptance_criteria"),
+        Some(&json!([
+            "updated criterion, with a comma",
+            "another updated criterion"
+        ]))
+    );
+}
+
+#[test]
+fn task_update_tool_keeps_scalar_acceptance_criteria_as_one_value() {
+    let (_root, runtime, repo_root) = test_runtime();
+    let task = create_task(
+        &runtime,
+        &repo_root,
+        "Update scalar criterion",
+        "Exercise scalar acceptance criteria replacement.",
+        TaskStatus::Backlog,
+        &[],
+    );
+
+    let output = runtime
+        .execute_tool_command(
+            "orbit.task.update",
+            json!({
+                "id": task.id,
+                "acceptance_criteria": "updated criterion, with a comma",
+            }),
+            Some("codex".to_string()),
+            Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
+        )
+        .expect("task update tool succeeds");
+
+    assert_eq!(
+        output.get("acceptance_criteria"),
+        Some(&json!(["updated criterion, with a comma"]))
     );
 }
 

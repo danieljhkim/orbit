@@ -1,7 +1,7 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
-use orbit_common::types::{InvocationTrace, RoleSlot};
+use orbit_common::types::InvocationTrace;
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 pub struct InvocationQuery {
@@ -12,7 +12,6 @@ pub struct InvocationQuery {
     pub task_id: Option<String>,
     pub agent: Option<String>,
     pub model: Option<String>,
-    pub slot: Option<RoleSlot>,
     pub tool_name: Option<String>,
     pub limit: usize,
 }
@@ -23,7 +22,6 @@ pub struct InvocationInsertParams {
     pub activity_id: String,
     pub agent: String,
     pub model: Option<String>,
-    pub slot: Option<RoleSlot>,
     pub task_ids: Vec<String>,
     pub trace: InvocationTrace,
 }
@@ -44,7 +42,6 @@ pub struct InvocationRecord {
     pub activity_id: String,
     pub agent: String,
     pub model: Option<String>,
-    pub slot: Option<RoleSlot>,
     pub duration_ms: u64,
     pub input_tokens: u64,
     pub cache_read_tokens: u64,
@@ -64,6 +61,32 @@ pub struct InvocationRecord {
     /// the token splits against the versioned price table
     /// (`orbit_common::types::pricing`). `None` when no price row covers
     /// this model/date.
+    pub derived_cost_usd: Option<f64>,
+}
+
+/// Date window for reconciliation-safe invocation accounting reads.
+///
+/// `until` is always exclusive. Callers capture it before loading so rows
+/// arriving during aggregation cannot make one read internally inconsistent.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct InvocationAccountingQuery {
+    pub since: Option<DateTime<Utc>>,
+    pub until: DateTime<Utc>,
+}
+
+/// One invocation and its distinct task linkage, without detailed tool calls.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct InvocationAccountingFact {
+    pub id: i64,
+    pub ts: DateTime<Utc>,
+    pub model: Option<String>,
+    pub input_tokens: u64,
+    pub cache_read_tokens: u64,
+    pub cache_create_tokens: u64,
+    pub cache_create_1h_tokens: u64,
+    pub output_tokens: u64,
+    pub task_ids: Vec<String>,
+    pub provider_cost_usd: Option<f64>,
     pub derived_cost_usd: Option<f64>,
 }
 

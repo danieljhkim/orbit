@@ -65,7 +65,7 @@ Five named transitions; each lives in one module. The V1 read model is deliberat
 
 **Open V2 questions:**
 
-- How are edits exposed to non-Rust callers while preserving the CLI-only boundary? A future `orbit graph stage` / `orbit graph commit` pair could wrap the Rust API, but the payload shape for `Rename` vs `ReplaceBody` differs enough that one command with a union type may be awkward. MCP exposure is excluded by ADR-0241.
+- How are edits exposed to non-Rust callers while preserving the CLI-only boundary? A future `orbit graph stage` / `orbit graph commit` pair could wrap the Rust API, but the payload shape for `Rename` vs `ReplaceBody` differs enough that one command with a union type may be awkward. MCP exposure is excluded by [orbit-graph is CLI-surface only; separate MCP deferred until a shell-less consumer exists](./4_decisions.md#orbit-graph-is-cli-surface-only-separate-mcp-deferred-until-a-shell-less-consumer-exists).
 - Should the working graph be persistable across processes? V1's answer is no — ephemeral, per session. But agents on long tasks may want to stage many edits and commit at the end of the session.
 - Cross-language renames are out of V2's scope. A Rust symbol's TypeScript binding stays untouched unless V3 adds cross-language refs (§1.2).
 

@@ -1,18 +1,18 @@
-pub mod adr;
 pub mod auto_task;
+pub mod command;
 pub mod docs;
-pub mod duel;
 pub mod friction;
-pub mod learning;
 pub mod operation;
 pub mod pipeline;
 pub mod search;
 pub mod semantic;
-pub mod state;
+pub mod session_log;
 pub mod task;
+pub mod workflow;
+pub mod workspace_claim;
 
 use orbit_common::types::{
-    McpToolPlacement, McpToolPolicy, OrbitError, ToolParam, normalize_agent_family_for_model,
+    McpToolScope, OrbitError, ToolParam, normalize_agent_family_for_model,
     normalize_optional_attribution_label,
 };
 use serde_json::Value;
@@ -29,138 +29,109 @@ pub(super) struct OrbitIdentity {
 }
 
 pub fn register(registry: &mut ToolRegistry) {
+    // Auto-task definitions are authored by humans through the CLI; the MCP
+    // surface carries only what an executing agent needs — reading the
+    // definitions and minting one on demand.
+    registry.register_inactive(auto_task::add::OrbitAutoTaskAddTool);
     registry.register_mcp(
-        adr::add::OrbitAdrAddTool,
-        agent_operator(McpToolPlacement::Composite),
-    );
-    // ORB-00289: agents query ADR metadata via `orbit search --kind adr`;
-    // `orbit.adr.list` stays available on the CLI / dashboard `runtime.run_tool`
-    // path for admin workflows.
-    registry.register_inactive(adr::list::OrbitAdrListTool);
-    registry.register_mcp(
-        adr::show::OrbitAdrShowTool,
-        agent_operator(McpToolPlacement::Owner),
+        auto_task::list::OrbitAutoTaskListTool,
+        McpToolScope::WorkspaceRequired,
     );
     registry.register_mcp(
-        adr::supersede::OrbitAdrSupersedeTool,
-        agent_operator(McpToolPlacement::Owner),
+        auto_task::mint::OrbitAutoTaskMintTool,
+        McpToolScope::WorkspaceRequired,
     );
-    registry.register_mcp(
-        adr::update::OrbitAdrUpdateTool,
-        agent_operator(McpToolPlacement::Owner),
-    );
-    // Auto-task definitions [ORB-10149]: agents can define/retune/disable
-    // recurring chores. `list` stays CLI/admin only (mirrors learning::list).
-    registry.register_mcp(
-        auto_task::add::OrbitAutoTaskAddTool,
-        agent_operator(McpToolPlacement::Owner),
-    );
-    registry.register_inactive(auto_task::list::OrbitAutoTaskListTool);
-    registry.register_mcp(
-        auto_task::show::OrbitAutoTaskShowTool,
-        agent_operator(McpToolPlacement::Owner),
-    );
-    registry.register_mcp(
-        auto_task::update::OrbitAutoTaskUpdateTool,
-        agent_operator(McpToolPlacement::Owner),
-    );
-    registry.register_mcp(
-        auto_task::toggle::OrbitAutoTaskToggleTool,
-        agent_operator(McpToolPlacement::Owner),
-    );
+    registry.register_inactive(auto_task::show::OrbitAutoTaskShowTool);
+    registry.register_inactive(auto_task::update::OrbitAutoTaskUpdateTool);
+    registry.register_inactive(auto_task::toggle::OrbitAutoTaskToggleTool);
     registry.register_inactive(docs::OrbitDocsListTool);
     registry.register_inactive(docs::OrbitDocsShowTool);
     registry.register_inactive(docs::OrbitDocsAddTool);
     registry.register_inactive(docs::OrbitDocsIndexTool);
     registry.register_inactive(docs::OrbitDocsMigrateTool);
-    // ADR-0209 bearing 1 [ORB-10358]: every friction verb — its schema, its
-    // placement, and whether MCP advertises it at all — is declared once in
-    // `orbit_common::friction::operations` and registered from there. Adding a
-    // friction verb needs no edit in this function.
+    // Friction schemas and MCP exposure are declared once in the shared
+    // operation registry and registered from there.
     friction::register(registry);
-    registry.register_mcp(
-        task::add::OrbitTaskAddTool,
-        agent_operator(McpToolPlacement::Hub),
-    );
+    registry.register_mcp(task::add::OrbitTaskAddTool, McpToolScope::WorkspaceRequired);
     registry.register_mcp(
         task::artifact_put::OrbitTaskArtifactPutTool,
-        agent_operator(McpToolPlacement::Hub),
+        McpToolScope::WorkspaceRequired,
     );
     registry.register_mcp(
         task::approve::OrbitTaskApproveTool,
-        agent_operator(McpToolPlacement::Hub),
+        McpToolScope::WorkspaceRequired,
     );
-    // ORB-00289: destructive / admin-only — CLI subcommands still reach
-    // them via `runtime.run_tool`; the agent MCP surface should not.
+    // Destructive administration remains reachable through non-MCP surfaces.
     registry.register_inactive(task::delete::OrbitTaskDeleteTool);
     registry.register_inactive(task::lint::OrbitTaskLintTool);
     registry.register_inactive(task::locks::OrbitTaskLocksTool);
     registry.register_inactive(task::locks_reserve::OrbitTaskLocksReserveTool);
     registry.register_inactive(task::locks_release::OrbitTaskLocksReleaseTool);
+    // Workspace claims are coordination holds like task locks and remain off
+    // the MCP surface.
+    registry.register_inactive(workspace_claim::OrbitWorkspaceClaimAcquireTool);
+    registry.register_inactive(workspace_claim::OrbitWorkspaceClaimReleaseTool);
+    registry.register_inactive(workspace_claim::OrbitWorkspaceClaimShowTool);
+    // Command execution is workspace-scoped; Core retains its domain and claim
+    // validation.
+    registry.register_mcp(
+        command::OrbitCommandExecTool,
+        McpToolScope::WorkspaceRequired,
+    );
     registry.register_mcp(
         task::start::OrbitTaskStartTool,
-        agent_operator(McpToolPlacement::Hub),
+        McpToolScope::WorkspaceRequired,
     );
     // Task rejection is a human/operator decision — CLI / dashboard only.
     registry.register_inactive(task::reject::OrbitTaskRejectTool);
     registry.register_mcp(
         task::show::OrbitTaskShowTool,
-        agent_operator(McpToolPlacement::Hub),
+        McpToolScope::WorkspaceRequired,
     );
     registry.register_mcp(
         task::list::OrbitTaskListTool,
-        agent_operator(McpToolPlacement::Hub),
+        McpToolScope::WorkspaceRequired,
     );
     registry.register_mcp(
         task::update::OrbitTaskUpdateTool,
-        agent_operator(McpToolPlacement::Hub),
-    );
-    registry.register(duel::plan_add::OrbitDuelPlanAddTool);
-    registry.register(duel::plan_winner::OrbitDuelPlanWinnerTool);
-    registry.register_mcp(
-        learning::add::OrbitLearningAddTool,
-        agent_operator(McpToolPlacement::Composite),
-    );
-    registry.register_inactive(learning::list::OrbitLearningListTool);
-    // ORB-00289: destructive cleanup — admin-only, CLI path retains it.
-    registry.register_inactive(learning::prune::OrbitLearningPruneTool);
-    registry.register_inactive(learning::sync::OrbitLearningSyncTool);
-    registry.register_mcp(
-        learning::show::OrbitLearningShowTool,
-        agent_operator(McpToolPlacement::Owner),
-    );
-    registry.register_mcp(
-        learning::supersede::OrbitLearningSupersedeTool,
-        agent_operator(McpToolPlacement::Owner),
-    );
-    // ORB-10469: named single-learning retirement without a replacement,
-    // gated the same as add/update/supersede (ADR-0250).
-    registry.register_mcp(
-        learning::archive::OrbitLearningArchiveTool,
-        agent_operator(McpToolPlacement::Owner),
-    );
-    registry.register_mcp(
-        learning::update::OrbitLearningUpdateTool,
-        agent_operator(McpToolPlacement::Owner),
+        McpToolScope::WorkspaceRequired,
     );
     registry.register(pipeline::invoke::OrbitPipelineInvokeTool);
     registry.register(pipeline::wait::OrbitPipelineWaitTool);
+    registry.register_mcp(search::OrbitSearchTool, McpToolScope::WorkspaceRequired);
     registry.register_mcp(
-        search::OrbitSearchTool,
-        agent_operator(McpToolPlacement::Composite),
+        session_log::OrbitSessionLogAppendTool,
+        McpToolScope::WorkspaceRequired,
+    );
+    registry.register_mcp(
+        session_log::OrbitSessionLogListTool,
+        McpToolScope::WorkspaceRequired,
+    );
+    registry.register_mcp(
+        session_log::OrbitSessionLogResolveTool,
+        McpToolScope::WorkspaceRequired,
+    );
+    registry.register_mcp(
+        workflow::OrbitWorkflowShipTool,
+        McpToolScope::WorkspaceRequired,
+    );
+    registry.register_mcp(
+        workflow::OrbitWorkflowRunShowTool,
+        McpToolScope::WorkspaceRequired,
+    );
+    registry.register_mcp(
+        workflow::OrbitWorkflowRunListTool,
+        McpToolScope::WorkspaceRequired,
+    );
+    registry.register_mcp(
+        workflow::OrbitWorkflowRunResumeTool,
+        McpToolScope::WorkspaceRequired,
     );
     registry.register_inactive(semantic::install::OrbitSemanticInstallTool);
-    // ORB-00289: destructive teardown of the local semantic index —
-    // admin-only, retained on the CLI surface (`orbit semantic uninstall`).
+    // Destructive semantic-index administration remains on the CLI surface.
     registry.register_inactive(semantic::uninstall::OrbitSemanticUninstallTool);
     registry.register_inactive(semantic::stats::OrbitSemanticStatsTool);
     registry.register_inactive(semantic::index::OrbitSemanticIndexTool);
-    registry.register(state::get::OrbitStateGetTool);
-    registry.register(state::set::OrbitStateSetTool);
-}
-
-fn agent_operator(placement: McpToolPlacement) -> McpToolPolicy {
-    McpToolPolicy::agent_and_operator(placement)
 }
 
 fn build_actor_label(agent: Option<&str>, model: Option<&str>) -> Option<String> {
@@ -297,6 +268,8 @@ pub(super) fn resolve_workspace_argument(
     tool_name: &str,
 ) -> Result<String, OrbitError> {
     // MCP workspace defaults come from explicit session context, never process cwd.
+    // CLI `orbit tool run` binds the runtime through RegisteredRuntimeFactory;
+    // individual tools must not repeat workspace resolution.
     let explicit = optional_string_alias(input, &["workspace"])?;
     let session = ctx
         .session_context
@@ -329,10 +302,9 @@ pub(super) fn resolve_workspace_argument(
             Ok(workspace)
         }
         (None, None) => Err(OrbitError::InvalidInput(
-            "missing `workspace`; it must be a filesystem path to an existing directory inside \
-             the repository (e.g. the repository root), never a logical workspace id such as a \
-             bridge `ws_*` id — provide that path explicitly or initialize the MCP session with \
-             `_meta.orbit.workspace` set to the same path"
+            "missing `workspace`; pass a registered workspace name, a logical workspace ID \
+             (`ws_*`), or an absolute local checkout path, or initialize the MCP session with \
+             `_meta.orbit.workspace`"
                 .to_string(),
         )),
     }

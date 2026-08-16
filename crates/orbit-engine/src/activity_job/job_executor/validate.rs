@@ -46,7 +46,7 @@ pub fn validate_job(job: &JobV2) -> Result<(), DispatchError> {
 /// to the structural error the dispatcher already raises.
 pub fn validate_job_deterministic_actions(
     job: &JobV2,
-    host: &dyn V2RuntimeHost,
+    host: &dyn RuntimeHost,
 ) -> Result<(), DispatchError> {
     check_activity_action(
         job.resolved_recovery_activity.as_ref().map(|a| &a.spec),
@@ -66,7 +66,7 @@ pub fn validate_job_deterministic_actions(
 
 fn validate_step_deterministic_actions(
     step: &JobV2Step,
-    host: &dyn V2RuntimeHost,
+    host: &dyn RuntimeHost,
 ) -> Result<(), DispatchError> {
     check_activity_action(
         step.resolved_recovery_activity.as_ref().map(|a| &a.spec),
@@ -104,7 +104,7 @@ fn validate_step_deterministic_actions(
 fn check_activity_action(
     spec: Option<&ActivityV2Spec>,
     label: impl Fn() -> String,
-    host: &dyn V2RuntimeHost,
+    host: &dyn RuntimeHost,
 ) -> Result<(), DispatchError> {
     let Some(ActivityV2Spec::Deterministic(deterministic)) = spec else {
         return Ok(());
@@ -142,23 +142,11 @@ pub(super) fn validate_step(step: &JobV2Step) -> Result<(), DispatchError> {
 
     match &step.body {
         JobV2StepBody::Parallel { parallel } => {
-            let mut seen: HashMap<&str, &str> = HashMap::new();
             for branch in &parallel.branches {
-                collect_session_bindings(branch, &mut seen, &step.id)?;
                 validate_step(branch)?;
             }
         }
         JobV2StepBody::FanOut { fan_out, .. } => {
-            // Workers execute concurrently against one another. If the worker
-            // template names a session binding, every worker would share it.
-            let mut seen: HashMap<&str, &str> = HashMap::new();
-            collect_session_bindings(&fan_out.worker, &mut seen, &step.id)?;
-            if !seen.is_empty() {
-                return Err(DispatchError::JobValidation(format!(
-                    "fan_out step `{}` worker names session binding(s); workers run concurrently and Session is !Sync",
-                    step.id
-                )));
-            }
             validate_step(&fan_out.worker)?;
         }
         JobV2StepBody::Loop { loop_ } => {
@@ -166,11 +154,7 @@ pub(super) fn validate_step(step: &JobV2Step) -> Result<(), DispatchError> {
                 validate_step(body)?;
             }
         }
-        JobV2StepBody::Target(_) => {}
-        JobV2StepBody::TargetRef(_) => {
-            // Surfaces as a structural error in `run_step_body`; no session
-            // binding to validate here.
-        }
+        JobV2StepBody::Target(_) | JobV2StepBody::TargetRef(_) => {}
     }
     Ok(())
 }
@@ -210,44 +194,6 @@ pub(super) fn validate_retry_spec(step_id: &str, retry: &RetrySpec) -> Result<()
                 retry.initial_backoff_ms
             ),
         });
-    }
-    Ok(())
-}
-
-pub(super) fn collect_session_bindings<'a>(
-    step: &'a JobV2Step,
-    seen: &mut HashMap<&'a str, &'a str>,
-    parent_id: &'a str,
-) -> Result<(), DispatchError> {
-    match &step.body {
-        JobV2StepBody::Target(t) => {
-            if let Some(binding) = &t.session {
-                let name: &str = binding.as_str();
-                if let Some(other) = seen.insert(name, step.id.as_str()) {
-                    return Err(DispatchError::JobValidation(format!(
-                        "parallel siblings under `{parent_id}` both bind session `{name}`: steps `{other}` and `{}`",
-                        step.id
-                    )));
-                }
-            }
-        }
-        JobV2StepBody::Parallel { parallel } => {
-            for b in &parallel.branches {
-                collect_session_bindings(b, seen, parent_id)?;
-            }
-        }
-        JobV2StepBody::FanOut { fan_out, .. } => {
-            collect_session_bindings(&fan_out.worker, seen, parent_id)?;
-        }
-        JobV2StepBody::Loop { loop_ } => {
-            for b in &loop_.steps {
-                collect_session_bindings(b, seen, parent_id)?;
-            }
-        }
-        JobV2StepBody::TargetRef(_) => {
-            // Can't collect bindings from an unresolved ref; dispatcher
-            // surfaces the structural error.
-        }
     }
     Ok(())
 }

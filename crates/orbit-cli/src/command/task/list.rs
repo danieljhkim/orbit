@@ -5,9 +5,9 @@ use orbit_core::{
 };
 use serde_json::Value;
 
-use crate::command::Execute;
+use crate::command::{CommandOut, Execute, Payload};
 
-use super::output::{print_task_table, task_to_json, task_to_signal_json};
+use super::output::{TaskTableFilters, task_table, task_to_json, task_to_signal_json};
 
 #[derive(Args)]
 #[command(
@@ -69,7 +69,7 @@ pub struct TaskListArgs {
 }
 
 impl Execute for TaskListArgs {
-    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+    fn execute(self, runtime: &OrbitRuntime) -> CommandOut {
         let status = self.status;
         let limit = self.limit;
         let priority = self.priority;
@@ -88,6 +88,13 @@ impl Execute for TaskListArgs {
             .map(|system| validate_external_ref_system(&system))
             .transpose()?;
         let ready = self.ready;
+        // A column the caller filtered on stays on screen even when the filter
+        // made it uniform.
+        let filtered = TaskTableFilters {
+            status: !status.is_empty(),
+            priority: priority.is_some(),
+            task_type: task_type.is_some(),
+        };
 
         // `list_tasks_by_tags` returns tasks already ordered newest-first
         // (`created_at DESC`, task ID ascending for ties); the filters below
@@ -133,19 +140,18 @@ impl Execute for TaskListArgs {
             .take(limit)
             .collect();
 
-        if self.ops {
-            let json_tasks: Vec<Value> = tasks.iter().map(task_to_signal_json).collect();
-            crate::output::json::print_pretty(&Value::Array(json_tasks))
-        } else if self.json {
-            let json_tasks: Vec<Value> = tasks
+        // `--ops` selects a narrower record shape, not a different output
+        // channel: the table is the same either way, and the renderer decides
+        // whether the caller sees records or rows.
+        let records: Vec<Value> = if self.ops {
+            tasks.iter().map(task_to_signal_json).collect()
+        } else {
+            tasks
                 .iter()
                 .map(|task| task_to_json(task, &status_by_id))
-                .collect();
-            crate::output::json::print_pretty(&Value::Array(json_tasks))
-        } else {
-            print_task_table(&tasks, self.full);
-            Ok(())
-        }
+                .collect()
+        };
+        Ok(Payload::list(records, task_table(&tasks, self.full, filtered)).into())
     }
 }
 

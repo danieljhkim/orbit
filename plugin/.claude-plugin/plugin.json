@@ -1,8 +1,7 @@
 {
   "name": "orbit",
-  "version": "0.10.0",
+  "version": "0.11.0",
   "description": "Task and activity orchestration for AI coding agents. Adds Orbit's MCP tool surface, skills, and orchestration subagents to Claude Code.",
-  "hooks": "./hooks/hooks.json",
   "author": {
     "name": "danieljhkim",
     "url": "https://github.com/danieljhkim"

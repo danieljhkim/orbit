@@ -4,7 +4,7 @@ use clap::Args;
 use orbit_core::{OrbitError, OrbitRuntime};
 use serde_json::{Value, json};
 
-use crate::command::Execute;
+use crate::command::{CommandOut, CommandOutput, Execute};
 
 use super::support::{dispatch_workflow, print_workflow_dispatch_results};
 
@@ -14,7 +14,7 @@ pub(super) const TRIAGE_WORKFLOW: &str = "triage";
 #[command(
     about = "Triage tasks blocked by failed runs; re-backlog environmental failures",
     override_usage = "orbit run triage [<TASK_ID>...] [OPTIONS]",
-    after_help = "Examples:\n  orbit run triage\n  orbit run triage ORB-10126\n\nOnly blocked tasks coupled to a failed job run are triaged; tasks a human\nblocked by hand are never touched. An empty candidate set is a clean no-op.\nInspect submitted runs with `orbit run history -j task_triage_pipeline` and\n`orbit run show <RUN_ID>`."
+    after_help = "Examples:\n  orbit run triage\n  orbit run triage <TASK_ID>\n\nOnly blocked tasks coupled to a failed job run are triaged; tasks a human\nblocked by hand are never touched. An empty candidate set is a clean no-op.\nInspect submitted runs with `orbit run history -j task_triage_pipeline` and\n`orbit run show <RUN_ID>`."
 )]
 pub struct TriageCommand {
     /// Optional task IDs to narrow the triage scan. Omit to scan every
@@ -27,10 +27,13 @@ pub struct TriageCommand {
 }
 
 impl Execute for TriageCommand {
-    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+    fn execute(self, runtime: &OrbitRuntime) -> CommandOut {
         let input = build_triage_input(&self.task_ids)?;
         let runs = dispatch_workflow(runtime, TRIAGE_WORKFLOW, &input, false, false, 1)?;
-        print_workflow_dispatch_results(TRIAGE_WORKFLOW, &runs, self.json)
+        {
+            print_workflow_dispatch_results(TRIAGE_WORKFLOW, &runs, self.json)?;
+            Ok(CommandOutput::Silent)
+        }
     }
 }
 

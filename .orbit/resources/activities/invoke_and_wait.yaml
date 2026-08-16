@@ -11,10 +11,7 @@ spec:
     `orbit.pipeline.wait` (to block on completion). Workflows that require
     a successful child Run should follow this activity with
     `pipeline_success_guard` after any cleanup that depends on the raw
-    child status. Callers that must create at most one child across parent
-    retry/resume may set `dedupe_run_input_field`; an existing child with the
-    same job and exact persisted input-field value is reused, while multiple
-    matches fail closed. The returned `status` mirrors the child Run's terminal state:
+    child status. The returned `status` mirrors the child Run's terminal state:
     `succeeded`,
     `failed`, `cancelled`, or `timeout`. A `timeout` here means the
     WAIT side of the activity exceeded `timeout_seconds`; the child
@@ -42,9 +39,6 @@ spec:
       priority:
         type: string
         enum: [low, medium, high, critical]
-      dedupe_run_input_field:
-        type: string
-        minLength: 1
       admission_task_ids:
         type: array
         items:

@@ -1,5 +1,5 @@
 #![deny(clippy::print_stderr, clippy::print_stdout)]
-// ORB-00004: legacy process-execution surfaces still need a focused documentation pass.
+// Legacy process-execution surfaces still need a focused documentation pass.
 #![allow(missing_docs)]
 // Unit tests use unwrap/expect for fixture setup; production call sites remain linted.
 #![cfg_attr(test, allow(clippy::expect_used, clippy::unwrap_used))]
@@ -29,6 +29,7 @@
 //! # Dependency direction
 //! `orbit-types` → `orbit-exec` → orbit-tools
 
+pub mod linux_sandbox;
 pub mod macos_sandbox;
 pub mod process;
 pub mod result;
@@ -36,6 +37,13 @@ pub mod runner;
 pub mod sandbox;
 mod supervision;
 
+pub use linux_sandbox::{
+    BwrapProbeOutcome, LinuxBwrapPlan, LinuxBwrapPostRunGuard, LinuxBwrapSpawnRequest,
+    PreparedWriteGrants, UnsatisfiedWriteGrant, WriteAnchorKind, WriteGrant, bwrap_path,
+    bwrap_program_for_audit, bwrap_unavailable_message, compile_linux_bwrap_argv,
+    linux_bwrap_write_grant_diagnostic, linux_bwrap_write_grants, prepare_linux_bwrap_write_grants,
+    probe_bwrap, spawn_under_linux_bwrap,
+};
 pub use macos_sandbox::{
     MacosSandboxSpawnRequest, claude_state_dir_from_env, compile_macos_sandbox_profile,
     grok_state_dir_from_env, sandbox_exec_available, sandbox_exec_path,

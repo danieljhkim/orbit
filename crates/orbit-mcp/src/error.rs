@@ -31,6 +31,15 @@ fn error_payload(err: &OrbitError) -> Value {
     {
         object.insert("artifact_origin".to_string(), json!(artifact_origin));
     }
+    // [ORB-10544] A ship duplicate-dispatch refusal names the contended task and
+    // the run holding it, so a tool caller can wait on or cancel that run
+    // without parsing the message — the same pair the dashboard's 409 carries.
+    if let Some((task_id, run_id)) = err.ship_run_in_flight()
+        && let Some(object) = payload.as_object_mut()
+    {
+        object.insert("task_id".to_string(), json!(task_id));
+        object.insert("run_id".to_string(), json!(run_id));
+    }
     if let Some((task_id, path, reason)) = err.task_bundle_corruption()
         && let Some(object) = payload.as_object_mut()
     {
@@ -52,7 +61,6 @@ fn error_code(err: &OrbitError) -> &str {
             | NotFoundKind::Activity
             | NotFoundKind::Adr
             | NotFoundKind::DesignFeature
-            | NotFoundKind::Learning
             | NotFoundKind::AgentSession
             | NotFoundKind::Workspace => "not_found",
         },
@@ -66,12 +74,14 @@ fn error_code(err: &OrbitError) -> &str {
         | OrbitError::JobRunStateTransition(_)
         | OrbitError::AdrInvalidTransition(_) => "invalid_transition",
         OrbitError::DependencyNotDelivered { .. } => "dependency_not_delivered",
+        OrbitError::ShipRunInFlight { .. } => "ship_run_in_flight",
+        OrbitError::WorkspaceClaimHeld(_) => "workspace_claim_held",
         OrbitError::RemoteArtifactUnavailable { .. } => "remote_artifact_unavailable",
         OrbitError::ArtifactNotLocal { .. } => "artifact_not_local",
         OrbitError::AgentProtocolViolation(_) => "agent_protocol_violation",
         OrbitError::UnsupportedAgentProvider(_) => "unsupported_provider",
-        OrbitError::HubUnavailable(_) => "hub_unavailable",
-        OrbitError::HubNegotiation(_) => "hub_negotiation",
+        OrbitError::OwnerUnavailable(_) => "owner_unavailable",
+        OrbitError::OwnerNegotiation(_) => "owner_negotiation",
         OrbitError::OutcomeUnknown { .. } => "outcome_unknown",
         OrbitError::RemoteTool { code, .. } => code.as_str(),
         OrbitError::Execution(_) => "execution_failed",

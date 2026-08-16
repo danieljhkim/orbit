@@ -3,7 +3,7 @@ use std::path::Path;
 
 use orbit_common::types::OrbitError;
 
-use super::seed_embedded_assets;
+use super::{ManagedAssetLayout, ManagedAssetReconciliation, reconcile_managed_assets};
 
 /// Shippable default activity assets, seeded under
 /// `<orbit_root>/resources/activities/<name>.yaml` on `orbit init`. Keep this
@@ -15,16 +15,8 @@ use super::seed_embedded_assets;
 /// runtime defaults.
 pub(crate) const DEFAULT_ACTIVITY_FILES: &[(&str, &str)] = &[
     (
-        "arbitrate_duel_plan",
-        include_str!("../../assets/activities/arbitrate_duel_plan.yaml"),
-    ),
-    (
         "agent_implement",
         include_str!("../../assets/activities/agent_implement.yaml"),
-    ),
-    (
-        "agent_review",
-        include_str!("../../assets/activities/agent_review.yaml"),
     ),
     (
         "apply_triage_dispositions",
@@ -35,8 +27,16 @@ pub(crate) const DEFAULT_ACTIVITY_FILES: &[(&str, &str)] = &[
         include_str!("../../assets/activities/apply_task_pilot_results.yaml"),
     ),
     (
-        "dispatch_agent",
-        include_str!("../../assets/activities/dispatch_agent.yaml"),
+        "classify_workspace_auto_tasks",
+        include_str!("../../assets/activities/classify_workspace_auto_tasks.yaml"),
+    ),
+    (
+        "drain_window",
+        include_str!("../../assets/activities/drain_window.yaml"),
+    ),
+    (
+        "epic_orchestrator",
+        include_str!("../../assets/activities/epic_orchestrator.yaml"),
     ),
     (
         "gate_starvation_fail",
@@ -63,8 +63,8 @@ pub(crate) const DEFAULT_ACTIVITY_FILES: &[(&str, &str)] = &[
         include_str!("../../assets/activities/invoke_and_wait.yaml"),
     ),
     (
-        "independent_review_guard",
-        include_str!("../../assets/activities/independent_review_guard.yaml"),
+        "invoke_detached",
+        include_str!("../../assets/activities/invoke_detached.yaml"),
     ),
     (
         "pipeline_success_guard",
@@ -79,8 +79,8 @@ pub(crate) const DEFAULT_ACTIVITY_FILES: &[(&str, &str)] = &[
         include_str!("../../assets/activities/list_triage_candidates.yaml"),
     ),
     (
-        "load_epic",
-        include_str!("../../assets/activities/load_epic.yaml"),
+        "scan_unresolved_work",
+        include_str!("../../assets/activities/scan_unresolved_work.yaml"),
     ),
     (
         "pr_open",
@@ -103,10 +103,6 @@ pub(crate) const DEFAULT_ACTIVITY_FILES: &[(&str, &str)] = &[
         include_str!("../../assets/activities/prepare_task_pilot.yaml"),
     ),
     (
-        "propose_duel_plan",
-        include_str!("../../assets/activities/propose_duel_plan.yaml"),
-    ),
-    (
         "reserve_locks",
         include_str!("../../assets/activities/reserve_locks.yaml"),
     ),
@@ -122,18 +118,10 @@ pub(crate) const DEFAULT_ACTIVITY_FILES: &[(&str, &str)] = &[
         "run_auto_task_scheduler",
         include_str!("../../assets/activities/run_auto_task_scheduler.yaml"),
     ),
-    (
-        "run_planning_duel",
-        include_str!("../../assets/activities/run_planning_duel.yaml"),
-    ),
     ("sleep", include_str!("../../assets/activities/sleep.yaml")),
     (
         "step_failure_recovery",
         include_str!("../../assets/activities/step_failure_recovery.yaml"),
-    ),
-    (
-        "summarize_epic",
-        include_str!("../../assets/activities/summarize_epic.yaml"),
     ),
     (
         "task_pilot",
@@ -172,9 +160,11 @@ pub(crate) const DEFAULT_ACTIVITY_FILES: &[(&str, &str)] = &[
 pub(crate) fn seed_default_activities(
     activities_dir: &Path,
     overwrite: bool,
-) -> Result<usize, OrbitError> {
-    seed_embedded_assets(
+) -> Result<ManagedAssetReconciliation, OrbitError> {
+    reconcile_managed_assets(
         activities_dir,
+        "activity",
+        ManagedAssetLayout::YamlStem,
         DEFAULT_ACTIVITY_FILES,
         overwrite,
         |_, content| Ok(Cow::Borrowed(content)),
@@ -183,13 +173,90 @@ pub(crate) fn seed_default_activities(
 
 #[cfg(test)]
 mod tests {
-    use orbit_common::types::activity_job::{
-        AgentRole, OnDenial, tool_allowed, validate_tool_allowlist,
-    };
+    use std::collections::BTreeMap;
+
+    use orbit_common::types::activity_job::{OnDenial, tool_allowed};
     use orbit_common::types::{ActivityV2Spec, load_activity_asset};
+    use orbit_engine::{inject_system_crew_input, resolve_crew_settings};
+    use serde_json::json;
     use tempfile::tempdir;
 
     use super::*;
+
+    #[test]
+    fn shipped_agent_catalog_preserves_provider_and_model_routing() {
+        let root = tempdir().expect("create tempdir");
+        let global = root.path().join("global");
+        let workspace = root.path().join("workspace");
+        std::fs::create_dir_all(&global).expect("create global root");
+        std::fs::create_dir_all(&workspace).expect("create workspace root");
+        std::fs::write(
+            workspace.join("config.toml"),
+            r#"[workflow]
+default_crew = "sol"
+system_crew = "qa"
+
+[crews.sol]
+provider = "codex"
+model = "gpt-5.6-sol"
+backend = "cli"
+
+[crews.luna]
+provider = "codex"
+model = "gpt-5.6-luna"
+backend = "cli"
+
+[crews.qa]
+provider = "codex"
+model = "gpt-5.6-terra"
+backend = "cli"
+"#,
+        )
+        .expect("write crew config");
+        let runtime = crate::OrbitRuntime::from_roots(&global, &workspace)
+            .expect("build catalog routing runtime");
+        let run_input = json!({ "crew": "sol" });
+
+        let expected = BTreeMap::from([
+            ("agent_implement", ("codex", "gpt-5.6-sol".to_string())),
+            ("epic_orchestrator", ("codex", "gpt-5.6-sol".to_string())),
+            (
+                "step_failure_recovery",
+                ("codex", "gpt-5.6-terra".to_string()),
+            ),
+            ("task_pilot", ("codex", "gpt-5.6-luna".to_string())),
+            ("triage_failed_runs", ("codex", "gpt-5.6-terra".to_string())),
+        ]);
+        let mut actual = BTreeMap::new();
+
+        for (name, yaml) in DEFAULT_ACTIVITY_FILES {
+            let asset = load_activity_asset(yaml)
+                .unwrap_or_else(|error| panic!("load shipped activity {name}: {error}"));
+            let ActivityV2Spec::AgentLoop(spec) = asset.spec.spec else {
+                continue;
+            };
+            let activity_input = match *name {
+                "task_pilot" => json!({ "crew": "luna" }),
+                "step_failure_recovery" | "triage_failed_runs" => {
+                    inject_system_crew_input(&runtime, &json!({ "system_crew": true }))
+                        .expect("inject configured system crew")
+                }
+                _ => json!({}),
+            };
+            let resolved = resolve_crew_settings(&runtime, &spec, &activity_input, &run_input)
+                .unwrap_or_else(|error| panic!("resolve shipped activity {name}: {error}"))
+                .unwrap_or_else(|| panic!("shipped activity {name} did not resolve a crew"));
+            actual.insert(
+                *name,
+                (
+                    resolved.provider.as_str(),
+                    resolved.model.expect("shipped crew has a model"),
+                ),
+            );
+        }
+
+        assert_eq!(actual, expected);
+    }
 
     #[test]
     fn seeded_deterministic_activities_match_actions() {
@@ -198,15 +265,14 @@ mod tests {
         seed_default_activities(&activities_dir, true).expect("seed default activities");
 
         for (name, action) in [
-            ("run_planning_duel", "run_planning_duel"),
             ("git_commit", "git_commit"),
             ("git_rebase", "git_rebase"),
             ("pr_prepare", "pr_prepare"),
             ("pr_failure_handoff", "pr_failure_handoff"),
             ("pr_promote", "pr_promote"),
             ("release_locks", "release_locks"),
-            ("independent_review_guard", "independent_review_guard"),
             ("list_triage_candidates", "list_triage_candidates"),
+            ("scan_unresolved_work", "scan_unresolved_work"),
             ("apply_triage_dispositions", "apply_triage_dispositions"),
             ("worktree_gc", "worktree_gc"),
         ] {
@@ -225,41 +291,16 @@ mod tests {
     }
 
     #[test]
-    fn seeded_planning_duel_agent_activities_preserve_v1_contracts() {
-        let root = tempdir().expect("create tempdir");
-        let activities_dir = root.path().join("resources/activities");
-        seed_default_activities(&activities_dir, true).expect("seed default activities");
-
-        for (name, timeout, required_tool) in [
-            ("propose_duel_plan", 1_800, "orbit.duel.plan.add"),
-            ("arbitrate_duel_plan", 900, "orbit.duel.plan.winner"),
-        ] {
-            let yaml = std::fs::read_to_string(activities_dir.join(format!("{name}.yaml")))
-                .expect("read seeded planning-duel activity");
-            let asset = load_activity_asset(&yaml).expect("parse planning-duel activity");
-            match asset.spec.spec {
-                ActivityV2Spec::AgentLoop(spec) => {
-                    assert_eq!(
-                        spec.backend,
-                        orbit_common::types::activity_job::Backend::Cli
-                    );
-                    assert_eq!(spec.wall_clock_timeout_seconds, timeout);
-                    assert!(spec.tools.iter().any(|tool| tool == required_tool));
-                    assert!(spec.tools.iter().any(|tool| tool == "orbit.task.show"));
-                    assert!(spec.tools.iter().any(|tool| tool == "orbit.search"));
-                    assert!(spec.tools.iter().any(|tool| tool == "fs.read"));
-                }
-                other => panic!("expected agent_loop activity, got {other:?}"),
-            }
-        }
-    }
-
-    #[test]
     fn agent_implement_guidance_allows_bounded_scope_expansion() {
         let (_, yaml) = DEFAULT_ACTIVITY_FILES
             .iter()
             .find(|(name, _)| *name == "agent_implement")
             .expect("agent implement activity is seeded");
+        assert_eq!(
+            *yaml,
+            include_str!("../../../../.orbit/resources/activities/agent_implement.yaml"),
+            "shipped and workspace implementation activities must remain byte-identical"
+        );
         let asset = load_activity_asset(yaml).expect("parse agent implement activity");
         match asset.spec.spec {
             ActivityV2Spec::AgentLoop(spec) => {
@@ -267,49 +308,66 @@ mod tests {
                     .instruction
                     .split_whitespace()
                     .collect::<Vec<_>>()
-                    .join(" ");
-                assert_eq!(spec.role, Some(AgentRole::Implementer));
+                    .join(" ")
+                    .to_lowercase();
+                assert!(!yaml.contains("\n  role:"));
                 assert!(instruction.contains("not as a perfect inventory"));
                 assert!(instruction.contains("make the smallest compatible change"));
-                assert!(instruction.contains("Stop after commenting"));
-                assert!(instruction.contains("Before the first write"));
+                assert!(instruction.contains("stop after a task comment"));
+                assert!(instruction.contains("before the first edit"));
+                assert!(instruction.contains("before validation"));
                 assert!(instruction.contains("git rev-parse --show-toplevel"));
                 assert!(instruction.contains("worktree_mismatch"));
+                for contract in [
+                    "task.terminal",
+                    "pwd -p",
+                    "context_files",
+                    "eperm",
+                    "orbit.friction.add",
+                    "orbit.task.start",
+                    "move the task to `review`",
+                    "execution_summary",
+                ] {
+                    assert!(
+                        instruction.contains(contract),
+                        "implementation contract disappeared: {contract}"
+                    );
+                }
             }
             other => panic!("expected agent_loop activity, got {other:?}"),
         }
     }
 
     #[test]
-    fn agent_implement_grants_allocate_then_update_adr() {
+    fn agent_implement_context_loading_reads_files_and_lists_directories() {
         let (_, yaml) = DEFAULT_ACTIVITY_FILES
             .iter()
             .find(|(name, _)| *name == "agent_implement")
             .expect("agent implement activity is seeded");
         let asset = load_activity_asset(yaml).expect("parse agent implement activity");
-        match asset.spec.spec {
-            ActivityV2Spec::AgentLoop(spec) => {
-                for tool in ["orbit.adr.add", "orbit.adr.update"] {
-                    assert!(
-                        spec.tools.iter().any(|granted| granted == tool),
-                        "implementers must be able to {tool} ADR artifacts"
-                    );
-                    assert!(tool_allowed(tool, &spec.tools));
-                }
-                validate_tool_allowlist(&spec.tools)
-                    .expect("agent implement allowlist must remain valid");
-            }
-            other => panic!("expected agent_loop activity, got {other:?}"),
-        }
+        let ActivityV2Spec::AgentLoop(spec) = asset.spec.spec else {
+            panic!("expected agent_loop activity");
+        };
+        let instruction = spec
+            .instruction
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ")
+            .to_lowercase();
+
+        assert!(
+            instruction.contains("each `file:` target with the provider-native file-read tool")
+        );
+        assert!(instruction.contains("each `dir:` selector"));
+        assert!(instruction.contains("do not call the file-read tool on the directory"));
+        assert!(instruction.contains("resolves beneath the workspace root"));
+        assert!(instruction.contains("`rg --files <directory>`"));
+        assert!(!instruction.contains("is a directory"));
     }
 
     #[test]
     fn agent_response_contract_matches_durable_handoff_shape() {
-        for (name, required) in [
-            ("agent_implement", false),
-            ("agent_review", true),
-            ("triage_failed_runs", true),
-        ] {
+        for (name, required) in [("agent_implement", false), ("triage_failed_runs", true)] {
             let (_, yaml) = DEFAULT_ACTIVITY_FILES
                 .iter()
                 .find(|(candidate, _)| *candidate == name)
@@ -331,13 +389,11 @@ mod tests {
     ///
     /// The flag defaults to `true`, so a new activity inherits the check by
     /// omitting it; this test exists to make the opt-out list explicit and to
-    /// force a deliberate edit here when one is added. `dispatch_agent` is the
-    /// sole entry: its notes are advisory and nothing consumes them, so its
-    /// non-completion is harmless. Everything else does work whose absence must
-    /// stop the pipeline.
+    /// force a deliberate edit here when one is added. Every seeded agent-loop
+    /// activity does work whose absence must stop the pipeline.
     #[test]
     fn agent_step_completion_contract_is_required_except_where_declared() {
-        const DECLARED_OPT_OUTS: &[&str] = &["dispatch_agent"];
+        const DECLARED_OPT_OUTS: &[&str] = &[];
 
         let mut checked = 0;
         for (name, yaml) in DEFAULT_ACTIVITY_FILES {
@@ -365,38 +421,23 @@ mod tests {
     }
 
     #[test]
-    fn agent_review_is_read_only_and_requires_an_exact_head_verdict() {
-        let (_, yaml) = DEFAULT_ACTIVITY_FILES
-            .iter()
-            .find(|(name, _)| *name == "agent_review")
-            .expect("agent review activity is seeded");
-        let asset = load_activity_asset(yaml).expect("parse agent review activity");
-        assert_eq!(
-            asset.spec.output_schema_json["required"],
-            serde_json::json!(["verdict", "reviewed_head_sha"])
-        );
-        match asset.spec.spec {
-            ActivityV2Spec::AgentLoop(spec) => {
-                assert!(spec.require_response_envelope);
-                assert_eq!(
-                    spec.role, None,
-                    "flat review crew must not need a role field"
-                );
-                assert!(!spec.tools.iter().any(|tool| tool == "fs.delete"));
-                assert!(spec.instruction.contains("candidate_head_sha"));
-                assert!(spec.instruction.contains("Do not edit"));
-            }
-            other => panic!("expected agent_loop agent_review, got {other:?}"),
-        }
-    }
-
-    #[test]
     fn task_pilot_is_read_only_bounded_and_uses_advisory_output() {
         let (_, yaml) = DEFAULT_ACTIVITY_FILES
             .iter()
             .find(|(name, _)| *name == "task_pilot")
             .expect("task pilot activity is seeded");
+        let workspace_yaml =
+            include_str!("../../../../.orbit/resources/activities/task_pilot.yaml");
+        assert_eq!(
+            *yaml, workspace_yaml,
+            "shipped and workspace task-pilot resources must remain byte-identical"
+        );
         let asset = load_activity_asset(yaml).expect("parse task pilot activity");
+        assert_eq!(
+            asset.spec.fs_profile.as_deref(),
+            Some("reviewer"),
+            "read-only direct activities must not inherit unrestricted workspace writes"
+        );
         assert!(
             asset.spec.output_schema_json.get("required").is_none(),
             "agent-returned task-pilot fields stay advisory until deterministic apply"
@@ -408,14 +449,13 @@ mod tests {
         match asset.spec.spec {
             ActivityV2Spec::AgentLoop(spec) => {
                 assert!(spec.require_response_envelope);
-                assert_eq!(spec.role, None, "task-pilot is not a new crew role");
                 assert_eq!(spec.on_denial, OnDenial::Terminate);
                 assert!(!spec.tools.iter().any(|tool| tool == "orbit.task.update"));
                 assert!(!spec.tools.iter().any(|tool| tool == "orbit.task.*"));
                 assert!(!spec.tools.iter().any(|tool| {
                     matches!(
                         tool.as_str(),
-                        "fs.write" | "fs.patch" | "fs.delete" | "orbit.pipeline.invoke"
+                        "fs.write" | "fs.patch" | "orbit.pipeline.invoke"
                     )
                 }));
                 assert!(
@@ -458,7 +498,7 @@ mod tests {
         let asset = load_activity_asset(yaml).expect("parse triage agent activity");
         match asset.spec.spec {
             ActivityV2Spec::AgentLoop(spec) => {
-                assert_eq!(spec.role, Some(AgentRole::Reviewer));
+                assert!(!yaml.contains("\n  role:"));
                 assert_eq!(spec.on_denial, OnDenial::Terminate);
                 for denied in [
                     // code edits
@@ -489,8 +529,7 @@ mod tests {
                     "orbit.task.show",
                     "orbit.task.update",
                     "orbit.friction.add",
-                    "fs.read",
-                    "fs.delete",
+                    "proc.spawn",
                 ] {
                     assert!(
                         tool_allowed(allowed, &spec.tools),
@@ -534,7 +573,7 @@ mod tests {
         );
         match asset.spec.spec {
             ActivityV2Spec::AgentLoop(spec) => {
-                assert_eq!(spec.role, Some(AgentRole::Reviewer));
+                assert!(!yaml.contains("\n  role:"));
                 assert!(!yaml.contains("\n  backend:"));
                 assert!(!yaml.contains("\n  provider:"));
                 assert!(
@@ -543,6 +582,88 @@ mod tests {
                 );
             }
             other => panic!("expected agent_loop activity, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn epic_orchestrator_is_a_worktree_finisher_not_a_dispatcher() {
+        let (_, yaml) = DEFAULT_ACTIVITY_FILES
+            .iter()
+            .find(|(name, _)| *name == "epic_orchestrator")
+            .expect("epic orchestrator activity is seeded");
+        assert_eq!(
+            *yaml,
+            include_str!("../../../../.orbit/resources/activities/epic_orchestrator.yaml"),
+            "shipped and workspace epic_orchestrator activities must remain byte-identical"
+        );
+        let lowered = yaml.to_ascii_lowercase();
+        for stale in [
+            "no-code-change",
+            "no code change",
+            "must not edit the repository",
+            "do not edit repository files",
+            "no git write",
+            "no worktree edit",
+            "no `agent_implement`",
+        ] {
+            assert!(
+                !lowered.contains(stale),
+                "stale dispatcher language remains: {stale}"
+            );
+        }
+        let asset = load_activity_asset(yaml).expect("parse epic orchestrator");
+        assert_eq!(asset.spec.fs_profile.as_deref(), None);
+        match asset.spec.spec {
+            ActivityV2Spec::AgentLoop(spec) => {
+                assert_eq!(spec.wall_clock_timeout_seconds, 10800);
+                assert_eq!(spec.on_denial, OnDenial::Terminate);
+                assert!(tool_allowed("orbit.task.add", &spec.tools));
+                assert!(tool_allowed("orbit.task.update", &spec.tools));
+                assert!(tool_allowed("orbit.session_log.append", &spec.tools));
+                assert!(tool_allowed("orbit.search", &spec.tools));
+                assert!(tool_allowed("proc.spawn", &spec.tools));
+                for denied in [
+                    "orbit.workflow.ship",
+                    "orbit.workflow.run.resume",
+                    "orbit.pipeline.invoke",
+                    "orbit.pipeline.wait",
+                    "fs.write",
+                    "fs.patch",
+                ] {
+                    assert!(
+                        !tool_allowed(denied, &spec.tools),
+                        "finisher must not keep dispatcher or raw-write surfaces: {denied}"
+                    );
+                }
+                let instruction = spec
+                    .instruction
+                    .split_whitespace()
+                    .collect::<Vec<_>>()
+                    .join(" ")
+                    .to_lowercase();
+                assert!(instruction.contains("epic worktree finisher"));
+                assert!(instruction.contains("git rev-parse --show-toplevel"));
+                assert!(instruction.contains("worktree_mismatch"));
+                assert!(instruction.contains("pwd -p"));
+                assert!(instruction.contains("human merge authority"));
+                assert!(instruction.contains("execution_summary"));
+                assert!(instruction.contains("move the epic to `review`"));
+                assert!(!instruction.contains("session resume"));
+                assert!(!instruction.contains("shrink the scan set"));
+                assert_eq!(
+                    spec.proc_allowed_programs.as_deref(),
+                    Some(
+                        &[
+                            "git".to_string(),
+                            "make".to_string(),
+                            "cargo".to_string(),
+                            "rg".to_string(),
+                            "orbit".to_string(),
+                        ][..]
+                    )
+                );
+            }
+            other => panic!("expected agent_loop epic_orchestrator, got {other:?}"),
         }
     }
 }

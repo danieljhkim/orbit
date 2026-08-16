@@ -11,20 +11,26 @@ use serde_json::json;
 use super::super::setup::{ensure_worktree, worktree_setup_output};
 
 #[test]
-fn ensure_worktree_resets_existing_checkout_to_supplied_start_point() {
+fn ensure_worktree_reattaches_existing_checkout_without_resetting_its_branch() {
     let temp = tempdir().unwrap();
     let repo = temp.path().join("repo");
     let worktree = temp.path().join("worktree");
     init_repo(&repo, "agent-main");
     let first_base = commit_file(&repo, "base.txt", "v1");
 
-    ensure_worktree(&repo, &worktree, &first_base, "orbit/test").unwrap();
+    assert_eq!(
+        ensure_worktree(&repo, &worktree, &first_base, "orbit/test").unwrap(),
+        "orbit/test"
+    );
     assert_eq!(git(&worktree, &["rev-parse", "HEAD"]), first_base);
 
-    let second_base = commit_file(&repo, "base.txt", "v2");
-    ensure_worktree(&repo, &worktree, &second_base, "orbit/test").unwrap();
+    let epic_commit = commit_file(&worktree, "child.txt", "landed");
 
-    assert_eq!(git(&worktree, &["rev-parse", "HEAD"]), second_base);
+    let second_base = commit_file(&repo, "base.txt", "v2");
+    let reattached = ensure_worktree(&repo, &worktree, &second_base, "orbit/new-name").unwrap();
+
+    assert_eq!(reattached, "orbit/test");
+    assert_eq!(git(&worktree, &["rev-parse", "HEAD"]), epic_commit);
 }
 
 #[test]
@@ -39,7 +45,7 @@ fn ensure_worktree_reuses_orphan_branch_from_failed_attempt() {
     let second_base = commit_file(&repo, "base.txt", "v2");
     ensure_worktree(&repo, &worktree, &second_base, "orbit/test").unwrap();
 
-    assert_eq!(git(&worktree, &["rev-parse", "HEAD"]), second_base);
+    assert_eq!(git(&worktree, &["rev-parse", "HEAD"]), first_base);
 }
 
 #[test]

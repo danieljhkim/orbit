@@ -409,7 +409,10 @@ pub struct KnowledgeRunMetrics {
     pub knowledge_pack_tokens: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub compression_ratio: Option<f64>,
+    /// Historical read-token counter. New traces no longer increment this
+    /// (ORB-10828); the field remains so stored job runs keep deserializing.
     pub actual_fs_read_tokens_during_run: u64,
+    /// Historical gauge. New traces leave this unset (ORB-10828).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub double_read_rate: Option<f64>,
     pub knowledge_pack_used: bool,

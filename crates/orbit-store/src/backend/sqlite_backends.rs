@@ -7,11 +7,13 @@ use super::contracts::{
     TaskReservationOwnedConflictsResult, TaskReservationReleaseByOwnerParams,
     TaskReservationReleaseByOwnerResult, TaskReservationReleaseParams,
     TaskReservationReleaseResult, TaskReservationReserveParams, TaskReservationReserveResult,
-    TaskReservationStoreBackend, ToolStoreBackend,
+    TaskReservationStoreBackend, ToolStoreBackend, WorkspaceClaimAcquireParams,
+    WorkspaceClaimAcquireResult, WorkspaceClaimCheckParams, WorkspaceClaimCheckResult,
+    WorkspaceClaimReleaseParams, WorkspaceClaimReleaseResult, WorkspaceClaimStatusResult,
 };
-use crate::Store;
 use crate::scope::{ScopeStrategy, ScopedStore, resolve};
 use crate::sqlite::audit_event_store::{AuditEventFilter, AuditEventInsertParams};
+use crate::{ActiveTaskReservation, Store};
 
 #[derive(Clone)]
 pub(crate) struct SqliteToolStoreBackend {
@@ -136,13 +138,6 @@ impl AuditEventStoreBackend for SqliteAuditEventStoreBackend {
         self.store.get_audit_event_aggregates_by_role(since)
     }
 
-    fn get_learning_usage_stats(
-        &self,
-        since: Option<&DateTime<Utc>>,
-    ) -> Result<Vec<crate::LearningUsageStat>, OrbitError> {
-        self.store.get_learning_usage_stats(since)
-    }
-
     fn prune_audit_events(&self, older_than: &DateTime<Utc>) -> Result<usize, OrbitError> {
         self.store.prune_audit_events(older_than)
     }
@@ -173,6 +168,15 @@ pub(crate) struct SqliteTaskReservationStoreBackend {
 }
 
 impl TaskReservationStoreBackend for SqliteTaskReservationStoreBackend {
+    fn inspect_active_task_reservations(
+        &self,
+        workspace_orbit_dir: &str,
+        workspace_id: Option<&str>,
+    ) -> Result<Vec<ActiveTaskReservation>, OrbitError> {
+        self.store
+            .inspect_active_task_reservations(workspace_orbit_dir, workspace_id)
+    }
+
     fn list_active_task_reservations(
         &self,
         workspace_orbit_dir: &str,
@@ -216,5 +220,35 @@ impl TaskReservationStoreBackend for SqliteTaskReservationStoreBackend {
         params: TaskReservationOwnedConflictsParams,
     ) -> Result<TaskReservationOwnedConflictsResult, OrbitError> {
         self.store.list_owned_task_reservation_conflicts(&params)
+    }
+
+    fn acquire_workspace_claim(
+        &self,
+        params: WorkspaceClaimAcquireParams,
+    ) -> Result<WorkspaceClaimAcquireResult, OrbitError> {
+        self.store.acquire_workspace_claim(&params)
+    }
+
+    fn release_workspace_claim(
+        &self,
+        params: WorkspaceClaimReleaseParams,
+    ) -> Result<WorkspaceClaimReleaseResult, OrbitError> {
+        self.store.release_workspace_claim(&params)
+    }
+
+    fn show_workspace_claim(
+        &self,
+        workspace_orbit_dir: &str,
+        workspace_id: Option<&str>,
+    ) -> Result<WorkspaceClaimStatusResult, OrbitError> {
+        self.store
+            .show_workspace_claim(workspace_orbit_dir, workspace_id)
+    }
+
+    fn check_workspace_claim(
+        &self,
+        params: WorkspaceClaimCheckParams,
+    ) -> Result<WorkspaceClaimCheckResult, OrbitError> {
+        self.store.check_workspace_claim(&params)
     }
 }

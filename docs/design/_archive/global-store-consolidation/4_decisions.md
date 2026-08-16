@@ -1,118 +1,61 @@
 ---
 title: Global Store Consolidation — Decisions
 owner: codex
-last_updated: 2026-05-23
+last_updated: 2026-08-11
 status: Accepted
 feature: global-store-consolidation
 doc_role: decisions
 type: design
-summary: ADR log for consolidating v2 runtime state into the global SQLite store.
+summary: Decision log for consolidating v2 runtime state into the global SQLite store.
 tags: [global-store-consolidation, storage, sqlite]
 paths: ["crates/orbit-store/**", "crates/orbit-core/**", "crates/orbit-engine/**", "crates/orbit-dashboard/**"]
 related_features: [global-store-consolidation]
-related_artifacts: [ORB-00276, ADR-0183]
+related_artifacts: [ORB-00276]
 ---
 
 # Global Store Consolidation — Decisions
 
-ADR entries use globally allocated `ADR-NNNN` identifiers. Metadata lives in `.orbit/adrs/`; this file is the local narrative log.
+This document preserves the feature's non-obvious decisions and their reasoning.
 
-## ADR-0183 — Consolidate v2 audit, job-run, and session-learning state into the global SQLite store
+---
 
-**Status:** Accepted · 2026-05 · [ORB-00276]
+## Consolidate v2 audit, job-run, and session-learning state into the global SQLite store
 
-**Context.** `.orbit/state/audit/v2_loop/`, `.orbit/state/job-runs/`, and `.orbit/state/sessions/<id>/learnings.json` are high-cardinality, machine-only stores. They create inode pressure and force scan-heavy queries for time ranges, denials, run status, and session resumption.
+**Superseded by:** [Include friction records in the global SQLite coordination store](#include-friction-records-in-the-global-sqlite-coordination-store)
+**Recorded:** 2026-05-23 05:40:56.163428Z · [ORB-00276]
+**Paths:** `crates/orbit-store/**`, `crates/orbit-core/**`, `crates/orbit-engine/**`, `crates/orbit-agent/**`, `crates/orbit-dashboard/**`, `docs/design/global-store-consolidation/**`
 
-**Decision.** Store those records in `~/.orbit/orbit.db` with `workspace_id TEXT NOT NULL` sourced from `<workspace>/.orbit/config.yaml`. Release N imports legacy JSON once and then single-writes to SQLite; Release N+1 will delete the legacy JSON dirs and importer in a follow-up. Friction reports stay file-backed.
+### Context
+Orbit currently writes high-cardinality v2 audit envelopes, job-run records, and per-session learning admission state as JSON files under each workspace. Those stores are machine-only, grow quickly, and need indexed time/status lookups, while the global SQLite store already owns append-oriented machine data.
 
-**Schema.**
+### Decision
+Consolidate the v2 audit envelope rows, job run/step rows, and session learning state rows into `~/.orbit/orbit.db`, keyed by the workspace identity from `<workspace>/.orbit/config.yaml` `workspace_id`. Release N performs a one-shot import and then single-writes new rows to SQLite while leaving legacy JSON directories in place; Release N+1 will remove the legacy directories and importer. Friction reports and audit blob bodies remain file-backed.
 
-```sql
-CREATE TABLE IF NOT EXISTS v2_audit_events (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    workspace_id TEXT NOT NULL,
-    event_id TEXT NOT NULL,
-    source TEXT NOT NULL,
-    schema_version INTEGER NOT NULL,
-    event_type TEXT NOT NULL,
-    ts TEXT NOT NULL,
-    run_id TEXT NOT NULL,
-    agent_identity TEXT NOT NULL,
-    parent_event_id TEXT,
-    workspace_path TEXT,
-    payload_json TEXT NOT NULL,
-    UNIQUE(workspace_id, event_id)
-);
-CREATE INDEX IF NOT EXISTS idx_v2_audit_events_ws_ts ON v2_audit_events(workspace_id, ts);
-CREATE INDEX IF NOT EXISTS idx_v2_audit_events_ws_run ON v2_audit_events(workspace_id, run_id, ts);
-CREATE INDEX IF NOT EXISTS idx_v2_audit_events_ws_event_type ON v2_audit_events(workspace_id, event_type);
+### Consequences
+- V2 audit, job-run, and session-learning reads can use indexed SQLite queries scoped by `workspace_id`; cross-workspace queries remain a future explicit admin surface.
+- Table names are explicit: `v2_audit_events`, `job_runs`, `job_run_steps`, and `session_learning_state`; the last avoids confusion with the existing `agent_sessions` table.
+- Legacy JSON directories are retained as read-only fallback evidence for one release; import idempotency is tracked in `schema_meta` by workspace.
+- Friction reports under `.orbit/frictions/`, diagnostics, logs, scoreboards, worktrees, and content-addressed audit blobs stay on disk.
+- Cost: The global SQLite database now carries higher write volume from all workspaces, so callers must preserve workspace scoping and rely on WAL/busy-timeout behavior rather than per-workspace file isolation.
 
-CREATE TABLE IF NOT EXISTS job_runs (
-    run_id TEXT NOT NULL,
-    workspace_id TEXT NOT NULL,
-    job_id TEXT NOT NULL,
-    attempt INTEGER NOT NULL,
-    state TEXT NOT NULL,
-    scheduled_at TEXT NOT NULL,
-    started_at TEXT,
-    finished_at TEXT,
-    duration_ms INTEGER,
-    created_at TEXT NOT NULL,
-    pid INTEGER,
-    pid_start_time TEXT,
-    input_json TEXT,
-    retry_source_run_id TEXT,
-    knowledge_metrics_json TEXT,
-    resolved_crew TEXT,
-    planner_model TEXT,
-    implementer_model TEXT,
-    reviewer_model TEXT,
-    pipeline_state_json TEXT,
-    PRIMARY KEY(workspace_id, run_id)
-);
-CREATE INDEX IF NOT EXISTS idx_job_runs_ws_job_sched ON job_runs(workspace_id, job_id, scheduled_at DESC);
-CREATE INDEX IF NOT EXISTS idx_job_runs_ws_state ON job_runs(workspace_id, state);
+## Include friction records in the global SQLite coordination store
 
-CREATE TABLE IF NOT EXISTS job_run_steps (
-    workspace_id TEXT NOT NULL,
-    run_id TEXT NOT NULL,
-    step_index INTEGER NOT NULL,
-    target_type TEXT NOT NULL,
-    target_id TEXT NOT NULL,
-    state TEXT NOT NULL,
-    started_at TEXT,
-    finished_at TEXT,
-    duration_ms INTEGER,
-    exit_code INTEGER,
-    error_code TEXT,
-    error_message TEXT,
-    agent_response_json TEXT,
-    PRIMARY KEY(workspace_id, run_id, step_index),
-    FOREIGN KEY(workspace_id, run_id) REFERENCES job_runs(workspace_id, run_id) ON DELETE CASCADE
-);
+**Recorded:** 2026-08-09 19:30:16.031389Z · [ORB-10680]
+**Supersedes:** [Consolidate v2 audit, job-run, and session-learning state into the global SQLite store](#consolidate-v2-audit-job-run-and-session-learning-state-into-the-global-sqlite-store)
+**Paths:** `crates/orbit-store/src/sqlite/**`, `crates/orbit-store/src/file/friction_store/**`, `crates/orbit-core/src/runtime/orbit_tool_host/**`, `docs/design/mcp-bridge/**`, `docs/design/auditability/**`
 
-CREATE TABLE IF NOT EXISTS session_learning_state (
-    workspace_id TEXT NOT NULL,
-    session_id TEXT NOT NULL,
-    learning_injection_state_json TEXT NOT NULL,
-    updated_at TEXT NOT NULL,
-    PRIMARY KEY(workspace_id, session_id)
-);
-CREATE INDEX IF NOT EXISTS idx_session_learning_state_ws ON session_learning_state(workspace_id, updated_at);
+### Context
+[Consolidate v2 audit, job-run, and session-learning state into the global SQLite store](#consolidate-v2-audit-job-run-and-session-learning-state-into-the-global-sqlite-store) consolidated high-cardinality machine state into `~/.orbit/orbit.db` but explicitly left frictions file-backed on the assumption that they were low-volume, human-edited records benefiting from grep, diff, and PR review. The hub coordination model has since made frictions hub-only and tool-mutated, while the file store performs corpus-wide discovery, YAML parsing, allocation, filtering, sorting, and aggregation for narrow reads. The alternatives are to maintain a separate file database with its own locks and migration markers or extend the already-ledgered global SQLite coordination store.
 
-CREATE TABLE IF NOT EXISTS schema_meta (
-    key TEXT PRIMARY KEY,
-    value TEXT NOT NULL,
-    updated_at TEXT NOT NULL
-);
-```
+### Decision
+Extend the global SQLite coordination store to own live friction records, tags, workspace-month allocation counters, and per-workspace import state. A ledgered schema migration creates the tables and indexes; workspace activation transactionally imports canonical hub and legacy checkout records, verifies complete field/content preservation, and commits an idempotent import marker. After that marker, Orbit single-writes and reads SQLite only. Existing v2 audit, job-run, session-learning, blob, diagnostic, log, scoreboard, and worktree placement decisions remain unchanged. This is a scan-memory and query-shaping change, not a retention or disk-reclamation policy.
 
-**Consequences.**
-- Reads default to the current workspace id; cross-workspace queries require a future explicit admin surface.
-- `session_learning_state` is named specifically to avoid collision with existing `agent_sessions`.
-- `audit/blobs/` remains content-addressed on disk; SQLite rows keep blob refs in `payload_json`.
-- `.orbit/frictions/` remains file-backed because friction reports are human-edited, low-volume, and benefit from grep/diff/PR review.
-- Cost: all workspaces share one WAL and busy-timeout envelope for higher-volume runtime writes.
+### Consequences
+- Workspace, status, time, model, tag, ordering, pagination, and stats queries execute against indexed rows without first materializing every body.
+- Composite `(workspace_id, friction_id)` identity preserves workspace-local IDs and prevents cross-workspace collisions.
+- Legacy friction files remain untouched as read-only evidence for one release; repeated or interrupted imports are safe, and malformed or conflicting sources fail before authority switches.
+- SQLite integrity checks, backups, WAL/busy-timeout behavior, and the newer-schema downgrade guard cover frictions alongside existing coordination state.
+- Cost: The global database gains another write domain and a per-workspace data migration; rollback to a pre-migration binary requires the guarded export/recovery procedure rather than silently resuming writes to stale files.
 
 ## Task References
 

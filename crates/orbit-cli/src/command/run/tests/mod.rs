@@ -1,6 +1,5 @@
 #![allow(missing_docs)]
 
-mod duel;
 mod format;
 mod job;
 mod ship;
@@ -115,6 +114,32 @@ fn parses_ship_auto_mode_defaults() {
 }
 
 #[test]
+fn parses_workspace_auto_defaults() {
+    let command = parse_run(&["orbit", "run", "auto"]);
+    match command.command {
+        RunSubcommand::Auto(args) => {
+            assert!(!args.json);
+            assert!(args.claim_token.is_none());
+            // No window means one tick, the behavior every caller had before
+            // `--for` existed.
+            assert_eq!(args.for_duration, None);
+        }
+        _ => panic!("expected auto"),
+    }
+}
+
+#[test]
+fn parses_workspace_auto_drain_window() {
+    let command = parse_run(&["orbit", "run", "auto", "--for", "30m"]);
+    match command.command {
+        RunSubcommand::Auto(args) => {
+            assert_eq!(args.for_duration.as_deref(), Some("30m"));
+        }
+        _ => panic!("expected auto"),
+    }
+}
+
+#[test]
 fn parses_explicit_ship_defaults() {
     let command = parse_run(&["orbit", "run", "ship", "T1", "T2"]);
     match command.command {
@@ -149,31 +174,6 @@ fn parses_ship_local_as_deprecated_top_level_subcommand() {
             assert_eq!(args.base.as_deref(), Some("main"));
         }
         _ => panic!("expected ship-local"),
-    }
-}
-
-#[test]
-fn parses_duel_plan_as_top_level_subcommand() {
-    let command = parse_run(&["orbit", "run", "duel-plan", "T1", "-b", "main"]);
-    match command.command {
-        RunSubcommand::DuelPlan(args) => {
-            assert_eq!(args.task_id, "T1");
-            assert_eq!(args.base.as_deref(), Some("main"));
-            assert!(!args.wait);
-        }
-        _ => panic!("expected duel-plan"),
-    }
-}
-
-#[test]
-fn parses_duel_plan_wait_flag() {
-    let command = parse_run(&["orbit", "run", "duel-plan", "T1", "--wait"]);
-    match command.command {
-        RunSubcommand::DuelPlan(args) => {
-            assert_eq!(args.task_id, "T1");
-            assert!(args.wait);
-        }
-        _ => panic!("expected duel-plan"),
     }
 }
 
@@ -444,27 +444,13 @@ spec:
     )
     .expect("write job yaml");
     let result = runtime
-        .run_job_v2_from_yaml(&yaml_path, json!({ "seconds": 0 }), None)
+        .run_job_v2_from_yaml(&yaml_path, json!({ "seconds": 0 }))
         .expect("run job");
     let run = runtime.show_job_run(&result.run_id).expect("show run");
 
     let resolved = super::steps::resolve_run_step(&runtime, &run, "nap").expect("resolve step");
     assert_eq!(resolved.target_id, "nap");
     assert_eq!(resolved.target_type, "activity");
-}
-
-#[test]
-fn rejects_removed_duel_history_forms() {
-    for args in [
-        &["orbit", "run", "duel", "list"][..],
-        &["orbit", "run", "duel", "show"][..],
-    ] {
-        assert_cli_rejects(
-            args,
-            ErrorKind::InvalidSubcommand,
-            "unrecognized subcommand 'duel'",
-        );
-    }
 }
 
 fn test_audit_event(

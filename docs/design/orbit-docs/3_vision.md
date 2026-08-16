@@ -9,12 +9,18 @@ type: design
 summary: "Orbit Docs — open questions, the remaining roadmap (injection, ADR folding), and prior work in the agent-knowledge-base space."
 tags: [orbit-docs]
 related_features: [orbit-docs]
-related_artifacts: [ORB-00164, ORB-00165, ORB-00166, ORB-00167, ORB-00168, ORB-00169, ORB-00206, ADR-0180]
+related_artifacts: [ORB-00164, ORB-00165, ORB-00166, ORB-00167, ORB-00168, ORB-00169, ORB-00206]
+last_validated: 2026-08-09
 ---
 
 # Orbit Docs — Vision
 
-The v1 from [ORB-00163] is the corpus and the retrieval primitive; [ORB-00206] adds doc embeddings and opt-in hybrid ranking. Injection wiring and the ADR-folding question remain future work. This document names the open questions, the planned follow-up work, the prior art that shaped the design, and the dimensions on which orbit-docs differs from sibling tools.
+> **Historical comparison:** learning-specific comparisons in this document
+> describe the retired native subsystem. [ORB-10736] / [Remove the native project-learning subsystem](../project-learnings/4_decisions.md#remove-the-native-project-learning-subsystem) remove that
+> resource and its tool, storage, and delivery contracts; those passages are
+> non-normative.
+
+The v1 from [ORB-00163] is the corpus and the retrieval primitive; [ORB-00206] adds doc embeddings and opt-in hybrid ranking. Task-time related-doc injection is shipped; PreToolUse hook integration and the ADR-folding question remain future work. This document names the open questions, the planned follow-up work, the prior art that shaped the design, and the dimensions on which orbit-docs differs from sibling tools.
 
 ---
 
@@ -22,7 +28,7 @@ The v1 from [ORB-00163] is the corpus and the retrieval primitive; [ORB-00206] a
 
 ### 1.1 Should `orbit-design` retire on the same cadence as orbit-docs adoption?
 
-[ORB-00165] is filed but deliberately gated on three pre-flight conditions: at least two PRs using `orbit docs`, hook + task.show injection wired, and explicit team agreement that the 4-numbered layout is a recommendation rather than a rule. Retiring `orbit-design` too early forces a flag-day for authors who learned the old convention; retiring it too late leaves a duplicated retrieval surface (`orbit design list/show` vs `orbit docs list/show`) and a "which mental model do I use?" friction for new agents.
+[ORB-00165] is filed but deliberately gated on three pre-flight conditions: at least two PRs using `orbit docs`, PreToolUse hook injection wired, and explicit team agreement that the 4-numbered layout is a recommendation rather than a rule. Task-time `task.show --with-context` injection is already wired. Retiring `orbit-design` too early forces a flag-day for authors who learned the old convention; retiring it too late leaves a duplicated retrieval surface (`orbit design list/show` vs `orbit docs list/show`) and a "which mental model do I use?" friction for new agents.
 
 The harder sub-question: does `orbit-design` carry anything load-bearing that orbit-docs doesn't? Two candidates:
 
@@ -43,11 +49,11 @@ The author's current bias is toward path 2 — keep the lifecycles separate, but
 
 ### 1.3 When do semantic embeddings start paying off?
 
-[ORB-00168] is filed but priority-low. With ~100 docs today, BM25-ish substring + tag-exact matches the corpus shape well: most queries are "find the doc about RAII" (exact concept name) rather than "find the doc that explains anything resembling X" (semantic similarity).
+[ORB-00168] is filed, and [ORB-00206] has since shipped doc embeddings and opt-in hybrid ranking. With ~100 docs today, BM25-ish substring + tag-exact matches the corpus shape well: most queries are "find the doc about RAII" (exact concept name) rather than "find the doc that explains anything resembling X" (semantic similarity).
 
 The break-even point is roughly the size at which agents stop knowing the exact phrase they're looking for. Empirically, that's around 500 docs in our experience with similar systems, but the threshold is corpus-shape-dependent, not just count-dependent. A team that writes prose-heavy designs hits orbit-search payoff sooner than a team whose docs are mostly bullet lists and tables.
 
-The right trigger is *retrieval-quality complaint*: when agents start saying "I can't find the doc I know exists," that's the signal to land [ORB-00168]. Not before.
+The remaining question is when hybrid ranking should become the default. A retrieval-quality complaint — agents saying "I can't find the doc I know exists" — is a useful signal to revisit the default, while keeping the explicit `orbit docs index` freshness step visible.
 
 ### 1.4 What does injection latency cost the hook?
 
@@ -71,7 +77,7 @@ The tradeoff is straightforward: stability of cross-references vs. human-authore
 
 ### 2.1 Orbit project learnings
 
-[docs/design/project-learnings/](../project-learnings/) is the closest internal sibling. Both surfaces aim to elevate knowledge above per-agent memory into a shared queryable artifact, and both are intended for push-style injection eventually. They differ on:
+[docs/design/project-learnings/](../project-learnings/) is the closest internal sibling. Both surfaces aim to elevate knowledge above per-agent memory into a shared queryable artifact. Learnings are push-first; Orbit Docs supports pull retrieval plus task-time context injection, while hook-time injection remains future work. They differ on:
 
 | Dimension | Learnings | Orbit Docs |
 |-----------|-----------|------------|
@@ -79,18 +85,18 @@ The tradeoff is straightforward: stability of cross-references vs. human-authore
 | Storage | `.orbit/learnings/<id>.yaml` + SQLite index | `docs/**/*.md`, no on-disk store |
 | Allocation | `orbit.learning.add` mints `L-NNNN` IDs | Author writes a file; no ID allocation |
 | Lifecycle | `update`, `supersede`, `prune`, `upvote` | `add` a root, write files; no supersede flow |
-| Discovery | Push-first (scope-glob injection) | Pull-first (search / show); push is downstream |
+| Discovery | Push-first (scope-glob injection) | Pull-first (search / show), with task-time context injection |
 | Cross-references | `related_features`, `evidence` | `related_features`, `related_artifacts`, `paths` |
 
 The boundary (rule-with-failure-mode vs. explanatory-context) is the load-bearing decision. Both surfaces being separate, with explicit cross-references via `related_artifacts: [L-NNNN]`, is the v1 shape.
 
 ### 2.2 Orbit ADRs
 
-[.orbit/adrs/](../../../.orbit/adrs/) is the ADR artifact store. ADRs share with docs the "PR-reviewed Markdown" property but differ on lifecycle: ADRs have `proposed → accepted → superseded` and are tool-managed via `orbit.adr.add`. The locating principle ([ADR-0170]) puts them under `.orbit/adrs/`. Whether to fold them into orbit-docs is [ORB-00169].
+[.orbit/adrs/](../../../.orbit/adrs/) is the ADR artifact store. ADRs share with docs the "PR-reviewed Markdown" property but differ on lifecycle: ADRs have `proposed → accepted → superseded` and are tool-managed via `orbit.adr.add`. The locating principle ([`.orbit/` for tool-managed artifacts; `docs/` for human-authored content](./4_decisions.md#orbit-for-tool-managed-artifacts-docs-for-human-authored-content)) puts them under `.orbit/adrs/`. Whether to fold them into orbit-docs is [ORB-00169].
 
 ### 2.3 Semantic search
 
-[docs/design/orbit-search/](../orbit-search/) covers the embeddings infrastructure that orbit-search uses for tasks. [ORB-00168] extends that infrastructure to cover docs. The model and vector store stay the same; the index is a sibling of the task index.
+[docs/design/orbit-search/](../orbit-search/) covers the embeddings infrastructure that orbit-search uses for tasks. [ORB-00206] extends that infrastructure to cover docs. The model and vector store stay the same; the index is a sibling of the task index.
 
 ### 2.4 Retired graph design
 
@@ -107,7 +113,7 @@ The dimensions where Orbit Docs differs:
 
 - **Author surface.** docs.rs/devdocs are read-only outputs of an upstream tool. Orbit Docs is author-edited Markdown checked into the repo.
 - **Scope.** docs.rs/devdocs aggregate a known set of language/framework docs. Orbit Docs is unbounded — whatever the team writes.
-- **Cross-corpus links.** docs.rs/devdocs link only to themselves. Orbit Docs links to tasks, learnings, ADRs, and friction reports via [ADR-0171].
+- **Cross-corpus links.** docs.rs/devdocs link only to themselves. Orbit Docs links to tasks, learnings, and friction reports via [ID-prefix dispatch for orbit-docs `related_artifacts`](./4_decisions.md#id-prefix-dispatch-for-orbit-docs-relatedartifacts), while decisions use ordinary title-based Markdown links.
 
 ### 2.6 External: Diátaxis framework
 
@@ -127,7 +133,7 @@ This bias shows up in small places — `paths` as a glob list rather than a sing
 
 ### 3.2 Storage-agnostic, lifecycle-free
 
-Most indexed-corpus tools own the storage shape (a database, a folder layout, an allocation scheme). Orbit-docs owns *one line of TOML* (`[docs].roots`) and nothing else on disk. Authors keep ownership of layout, files, and convention. The locking principle from [ADR-0170] makes this an enforceable boundary: tool-managed artifacts go under `.orbit/`, human-authored content goes under `docs/`, and `orbit-docs` is the convention layer between the two.
+Most indexed-corpus tools own the storage shape (a database, a folder layout, an allocation scheme). Orbit-docs owns *one line of TOML* (`[docs].roots`) and nothing else on disk. Authors keep ownership of layout, files, and convention. The locking principle from [`.orbit/` for tool-managed artifacts; `docs/` for human-authored content](./4_decisions.md#orbit-for-tool-managed-artifacts-docs-for-human-authored-content) makes this an enforceable boundary: tool-managed artifacts go under `.orbit/`, human-authored content goes under `docs/`, and `orbit-docs` is the convention layer between the two.
 
 The cost is that orbit-docs cannot enforce things the storage-owner could enforce (frontmatter freshness, supersede chains, etc.). That's the v1 bet — that authors prefer un-enforced freedom over tool-enforced rigor for explanatory content.
 

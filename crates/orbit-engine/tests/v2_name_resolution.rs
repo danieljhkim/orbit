@@ -11,7 +11,7 @@
 //!
 //! Exercises:
 //!   A) `V2ActivityCatalog::load_dir` picks up the four new v2 activities
-//!      (`agent_review_diff`, `agent_apply_fixes`, `promote_agent_main`,
+//!      (`agent_assess_diff`, `agent_apply_fixes`, `promote_agent_main`,
 //!      `revert_on_red`) and skips v1 assets silently.
 //!   B) `resolve_job_target_refs` rewrites `target: activity:<name>` refs
 //!      into inline `TargetStep`s using the catalog.
@@ -31,12 +31,12 @@ use std::sync::Arc;
 
 use orbit_common::types::JobScheduleState;
 use orbit_common::types::activity_job::{
-    ActivityV2, ActivityV2Spec, Backend, JobKind, JobV2, JobV2Step, JobV2StepBody, LoopBlock,
-    Provider, ResolveError, TargetRef, V2ActivityCatalog, load_job_asset, resolve_job_backends,
-    resolve_job_target_refs, validate_job_loop_session_backends,
+    ActivityV2, ActivityV2Spec, JobKind, JobV2, JobV2Step, JobV2StepBody, LoopBlock, Provider,
+    ResolveError, TargetRef, V2ActivityCatalog, load_job_asset, resolve_job_target_refs,
+    validate_job_retired_sessions,
 };
 use orbit_engine::{
-    DispatchError, ResolvedCliExecutor, V2AuditWriter, V2DispatchInput, V2RuntimeHost,
+    DispatchError, ResolvedCliExecutor, RuntimeHost, V2AuditWriter, V2DispatchInput,
     dispatch_v2_activity,
 };
 use serde_json::Value;
@@ -47,7 +47,7 @@ fn name_resolution_regressions() -> Result<(), Box<dyn std::error::Error>> {
     scenario_b_target_ref_resolves()?;
     scenario_c_unknown_ref_is_structural_error()?;
     scenario_d_pipeline_yaml_partial_resolution()?;
-    scenario_e_backend_rejection_runs_after_resolution()?;
+    scenario_e_retired_session_rejection_runs_after_resolution()?;
     scenario_f_deterministic_activities_dispatch()?;
 
     Ok(())
@@ -59,7 +59,7 @@ fn scenario_a_catalog_loads_new_activities() -> Result<(), Box<dyn std::error::E
     let dir = repo_root().join("crates/orbit-core/assets/activities");
     catalog.load_dir(&dir)?;
 
-    for name in ["agent_review_diff", "agent_apply_fixes", "revert_on_red"] {
+    for name in ["agent_assess_diff", "agent_apply_fixes", "revert_on_red"] {
         assert!(
             catalog.get(name).is_some(),
             "catalog missing new activity `{}` (present: {:?})",
@@ -67,20 +67,14 @@ fn scenario_a_catalog_loads_new_activities() -> Result<(), Box<dyn std::error::E
             catalog.names().collect::<Vec<_>>()
         );
     }
-    // Pinning: reviewer must be backend: http (§3.2 item 1).
-    let reviewer = catalog.get("agent_review_diff").expect("present");
-    let ActivityV2Spec::AgentLoop(spec) = &reviewer.spec else {
-        panic!("agent_review_diff should be agent_loop");
+    let assessor = catalog.get("agent_assess_diff").expect("present");
+    let ActivityV2Spec::AgentLoop(spec) = &assessor.spec else {
+        panic!("agent_assess_diff should be agent_loop");
     };
-    assert_eq!(spec.backend, Backend::Http, "reviewer must pin http");
     assert_eq!(spec.provider, Provider::Claude);
 
-    // Fixer is auto — no `session:` binding in the activity itself.
     let fixer = catalog.get("agent_apply_fixes").expect("present");
-    let ActivityV2Spec::AgentLoop(fixer_spec) = &fixer.spec else {
-        panic!("agent_apply_fixes should be agent_loop");
-    };
-    assert_eq!(fixer_spec.backend, Backend::Auto);
+    assert!(matches!(&fixer.spec, ActivityV2Spec::AgentLoop(_)));
 
     let revert = catalog.get("revert_on_red").expect("present");
     assert!(matches!(&revert.spec, ActivityV2Spec::Deterministic(_)));
@@ -100,7 +94,7 @@ fn scenario_b_target_ref_resolves() -> Result<(), Box<dyn std::error::Error>> {
     println!("  B) resolve_job_target_refs rewrites named refs to inline specs");
     let catalog = load_reference_catalog()?;
 
-    let mut job = synthetic_job_using_ref("agent_review_diff");
+    let mut job = synthetic_job_using_ref("agent_assess_diff");
     resolve_job_target_refs(&mut job, &catalog)?;
 
     // After resolution the body must be an inline Target, not a TargetRef.
@@ -110,12 +104,9 @@ fn scenario_b_target_ref_resolves() -> Result<(), Box<dyn std::error::Error>> {
             job.steps[0].body
         );
     };
-    let ActivityV2Spec::AgentLoop(spec) = &t.spec else {
-        panic!("expected agent_loop spec");
-    };
-    assert_eq!(spec.backend, Backend::Http);
-    assert_eq!(t.session.as_deref(), Some("reviewer"));
-    println!("    resolved ref → inline Target with session=reviewer");
+    assert!(matches!(&t.spec, ActivityV2Spec::AgentLoop(_)));
+    assert_eq!(t.session.as_deref(), Some("assessor"));
+    println!("    resolved ref → inline Target carrying its session binding");
     Ok(())
 }
 
@@ -181,34 +172,17 @@ fn scenario_d_pipeline_yaml_partial_resolution() -> Result<(), Box<dyn std::erro
     Ok(())
 }
 
-fn scenario_e_backend_rejection_runs_after_resolution() -> Result<(), Box<dyn std::error::Error>> {
-    println!("  E) §3.2 rejection operates on resolved specs — reviewer session survives");
+fn scenario_e_retired_session_rejection_runs_after_resolution()
+-> Result<(), Box<dyn std::error::Error>> {
+    println!("  E) retired-session rejection operates on resolved specs");
     let catalog = load_reference_catalog()?;
-    let mut job = pipeline_with_reviewer_loop();
+    let mut job = pipeline_with_assessor_loop();
     resolve_job_target_refs(&mut job, &catalog)?;
-    // After resolution, the reviewer step has Backend::Http pinned (from
-    // the asset file), so backend auto-resolution + §3.2 validator pass.
-    resolve_job_backends(&mut job, Backend::Http);
-    validate_job_loop_session_backends(&job, "synthetic")?;
-    println!("    loop+session+http reviewer accepted by validator");
-
-    // Flipping the reviewer activity to cli in-catalog triggers the §3.2
-    // rejection once resolution inlines the spec.
-    let mut cli_catalog = V2ActivityCatalog::new();
-    let mut reviewer_cli = catalog.get("agent_review_diff").expect("present").clone();
-    if let ActivityV2Spec::AgentLoop(spec) = &mut reviewer_cli.spec {
-        spec.backend = Backend::Cli;
-    }
-    cli_catalog.insert("agent_review_diff", reviewer_cli);
-    let mut job = pipeline_with_reviewer_loop();
-    resolve_job_target_refs(&mut job, &cli_catalog)?;
-    resolve_job_backends(&mut job, Backend::Cli);
-    let err =
-        validate_job_loop_session_backends(&job, "synthetic").expect_err("expected §3.2 rejection");
-    println!(
-        "    flipping reviewer backend → cli triggers rejection: {}",
-        err
-    );
+    // [ORB-10801] The `session:` binding survives ref resolution, so the
+    // load-time validator sees it and refuses the job rather than running a
+    // loop whose cross-iteration semantics no longer exist.
+    let err = validate_job_retired_sessions(&job, "synthetic").expect_err("expected rejection");
+    println!("    resolved assessor session rejected: {err}");
     Ok(())
 }
 
@@ -233,7 +207,6 @@ fn scenario_f_deterministic_activities_dispatch() -> Result<(), Box<dyn std::err
         }),
         audit: writer,
         run_id: "name-resolution-revert",
-        agent_override: None,
         host: Some(&host),
     })
     .expect_err("retired action must be rejected");
@@ -268,7 +241,7 @@ fn build_writer(
 /// Host that models the post-sweep deterministic action surface.
 struct PipelineHost;
 
-impl V2RuntimeHost for PipelineHost {
+impl RuntimeHost for PipelineHost {
     fn run_deterministic(
         &self,
         action: &str,
@@ -278,12 +251,6 @@ impl V2RuntimeHost for PipelineHost {
     ) -> Result<Value, DispatchError> {
         Err(DispatchError::DeterministicActionNotRegistered(
             action.to_string(),
-        ))
-    }
-
-    fn api_key_for(&self, _provider: &str) -> Result<String, DispatchError> {
-        Err(DispatchError::AgentLoopFailed(
-            "PipelineHost has no credentials".into(),
         ))
     }
 
@@ -340,26 +307,24 @@ fn synthetic_job_using_ref(target_name: &str) -> JobV2 {
                 target: format!("activity:{}", target_name),
                 default_input: None,
                 timeout_seconds: 0,
-                session: Some("reviewer".to_string()),
-                role: None,
+                session: Some("assessor".to_string()),
             }),
         }],
     }
 }
 
-fn pipeline_with_reviewer_loop() -> JobV2 {
-    let review_step = JobV2Step {
-        id: "review".to_string(),
+fn pipeline_with_assessor_loop() -> JobV2 {
+    let assess_step = JobV2Step {
+        id: "assess".to_string(),
         when: None,
         retry: None,
         recovery_activity: None,
         resolved_recovery_activity: None,
         body: JobV2StepBody::TargetRef(TargetRef {
-            target: "activity:agent_review_diff".to_string(),
+            target: "activity:agent_assess_diff".to_string(),
             default_input: None,
             timeout_seconds: 0,
-            session: Some("reviewer".to_string()),
-            role: None,
+            session: Some("assessor".to_string()),
         }),
     };
     JobV2 {
@@ -372,7 +337,7 @@ fn pipeline_with_reviewer_loop() -> JobV2 {
         max_active_runs: 1,
         kind: JobKind::Workflow,
         steps: vec![JobV2Step {
-            id: "review_fix".to_string(),
+            id: "assess_fix".to_string(),
             when: None,
             retry: None,
             recovery_activity: None,
@@ -382,7 +347,7 @@ fn pipeline_with_reviewer_loop() -> JobV2 {
                     items: None,
                     max_iterations: 3,
                     break_when: None,
-                    steps: vec![review_step],
+                    steps: vec![assess_step],
                 },
             },
         }],

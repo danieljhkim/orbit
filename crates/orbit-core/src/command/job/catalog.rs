@@ -8,25 +8,24 @@ use orbit_common::types::{JobKind, JobRun, JobScheduleState, JobV2, NotFoundKind
 use serde_json::Value;
 
 use crate::OrbitRuntime;
-use crate::command::seed_embedded_assets;
+use crate::command::{ManagedAssetLayout, ManagedAssetReconciliation, reconcile_managed_assets};
 
 /// Shippable default workflow assets, seeded under
 /// `<orbit_root>/resources/jobs/<name>.yaml` on `orbit init`. The entries
 /// here are the admission-controlled task shipment workflows
-/// (auto / gate / local / pr), the planning-duel workflow, and the
-/// failed-run triage workflow [ORB-10129].
+/// (auto / gate / local / pr) and the failed-run triage workflow [ORB-10129].
 /// Example and smoke fixtures live
 /// under `crates/orbit-core/assets/jobs/examples/` and are NOT seeded —
 /// they exist for `crates/orbit-engine/examples/v2_job_runtime_smoke.rs`
 /// only.
-const DEFAULT_JOB_FILES: &[(&str, &str)] = &[
+pub(crate) const DEFAULT_JOB_FILES: &[(&str, &str)] = &[
     (
         "auto_task_scheduler_pipeline",
         include_str!("../../../assets/jobs/auto_task_scheduler_pipeline.yaml"),
     ),
     (
-        "job_duel_plan_pipeline",
-        include_str!("../../../assets/jobs/job_duel_plan_pipeline.yaml"),
+        "epic_pipeline",
+        include_str!("../../../assets/jobs/epic_pipeline.yaml"),
     ),
     (
         "task_auto_pipeline",
@@ -49,16 +48,16 @@ const DEFAULT_JOB_FILES: &[(&str, &str)] = &[
         include_str!("../../../assets/jobs/task_pr_pipeline.yaml"),
     ),
     (
-        "task_review_pipeline",
-        include_str!("../../../assets/jobs/task_review_pipeline.yaml"),
-    ),
-    (
         "task_triage_pipeline",
         include_str!("../../../assets/jobs/task_triage_pipeline.yaml"),
     ),
     (
         "workspace_ship_pipeline",
         include_str!("../../../assets/jobs/workspace_ship_pipeline.yaml"),
+    ),
+    (
+        "workspace_auto_pipeline",
+        include_str!("../../../assets/jobs/workspace_auto_pipeline.yaml"),
     ),
     (
         "worktree_gc_pipeline",
@@ -283,8 +282,16 @@ fn matches_job_filter(kind: JobKind, filter: JobCatalogFilter) -> bool {
 ///
 /// When `overwrite` is false, existing files are preserved — users who've
 /// edited a previously-seeded workflow won't lose their changes on re-init.
-pub(crate) fn seed_default_jobs(jobs_dir: &Path, overwrite: bool) -> Result<usize, OrbitError> {
-    seed_embedded_assets(jobs_dir, DEFAULT_JOB_FILES, overwrite, |_, content| {
-        Ok(Cow::Borrowed(content))
-    })
+pub(crate) fn seed_default_jobs(
+    jobs_dir: &Path,
+    overwrite: bool,
+) -> Result<ManagedAssetReconciliation, OrbitError> {
+    reconcile_managed_assets(
+        jobs_dir,
+        "job",
+        ManagedAssetLayout::YamlStem,
+        DEFAULT_JOB_FILES,
+        overwrite,
+        |_, content| Ok(Cow::Borrowed(content)),
+    )
 }

@@ -1,7 +1,7 @@
 use clap::{Args, Subcommand};
-use orbit_core::{OrbitError, OrbitRuntime};
+use orbit_core::OrbitRuntime;
 
-use crate::command::Execute;
+use crate::command::{CommandOut, Execute};
 
 use super::list::ActivityListArgs;
 
@@ -13,7 +13,7 @@ pub struct ActivityCommand {
 }
 
 impl Execute for ActivityCommand {
-    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+    fn execute(self, runtime: &OrbitRuntime) -> CommandOut {
         self.command.execute(runtime)
     }
 }
@@ -25,7 +25,7 @@ pub enum ActivitySubcommand {
 }
 
 impl Execute for ActivitySubcommand {
-    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+    fn execute(self, runtime: &OrbitRuntime) -> CommandOut {
         match self {
             ActivitySubcommand::List(args) => args.execute(runtime),
         }

@@ -1,16 +1,17 @@
 ---
 title: "Orbit Docs — Design"
 owner: claude
-last_updated: 2026-07-18
+last_updated: 2026-08-15
 status: Draft
 feature: orbit-docs
 doc_role: design
 type: design
 summary: "Orbit Docs — frontmatter schema, walker, doc embeddings index, hybrid search, and the `.orbit/` exclusion invariant."
 tags: [orbit-docs]
-paths: ["crates/orbit-core/src/command/docs/**", "crates/orbit-core/src/runtime/orbit_tool_host/docs_tools.rs", "crates/orbit-tools/src/builtin/orbit/docs.rs", "crates/orbit-remote/src/mcp/host.rs", "crates/orbit-cli/src/command/docs.rs"]
+paths: ["crates/orbit-core/src/command/docs/**", "crates/orbit-core/src/runtime/orbit_tool_host/docs_tools.rs", "crates/orbit-tools/src/builtin/orbit/docs.rs", "crates/orbit-mcp/src/remote/surface.rs", "crates/orbit-cli/src/command/mcp/server.rs", "crates/orbit-cli/src/command/docs.rs"]
 related_features: [orbit-docs]
-related_artifacts: [ORB-00163, ORB-00206, ORB-10319, ADR-0169, ADR-0170, ADR-0171, ADR-0180]
+related_artifacts: [ORB-00163, ORB-00206, ORB-10319]
+last_validated: 2026-08-15
 ---
 
 # Orbit Docs — Design
@@ -23,7 +24,7 @@ The design lives in [crates/orbit-core/src/command/docs/](../../../crates/orbit-
 
 ## 1. Frontmatter Schema
 
-The schema is locked at six fields. Two are required; four are optional. See [ADR-0169] for why the schema is closed.
+The schema is locked at six fields. Two are required; four are optional. See [Locked orbit-docs frontmatter schema](./4_decisions.md#locked-orbit-docs-frontmatter-schema) for why the schema is closed.
 
 ```yaml
 ---
@@ -32,7 +33,7 @@ summary: One-line hook for agent retrieval                # required
 tags: [hook, learning, audit]                             # optional
 paths: ["crates/orbit-cli/**"]                            # optional
 related_features: [hook-rewrite]                          # optional
-related_artifacts: [ORB-00160, ADR-0168, L-0003]     # optional
+related_artifacts: [ORB-00160, L-0003]                  # optional
 ---
 ```
 
@@ -56,17 +57,17 @@ The tolerant indexer populates `tags` with the feature slug for design docs (e.g
 
 ### 1.4 `paths` (optional)
 
-Glob string list. Names file paths the doc applies to. This is the join key for hook-time scoping ([ORB-00167]): when an agent is about to Edit / Read / Write a file, the hook can surface docs whose `paths` glob matches.
+Glob string list. Names file paths the doc applies to. This is the join key for task-context scoping and planned hook-time scoping ([ORB-00167]): task context can surface docs whose `paths` glob matches, and a future hook can do the same for Edit / Read / Write operations.
 
 Not used by `orbit search --kind doc` ranking in v1; the field exists for the injection wiring.
 
 ### 1.5 `related_features` (optional)
 
-Free-form string list. The join key for task-time scoping ([ORB-00166]): when an agent runs `task show <id> --with-context`, the renderer can surface docs whose `related_features` overlaps with the task's `related_features`.
+Free-form string list. The join key for task-time scoping ([ORB-00166]): when an agent runs `task show <id> --with-context`, the renderer can surface docs whose `related_features` overlaps with the task's normalized tags, which currently act as feature selectors.
 
 ### 1.6 `related_artifacts` (optional)
 
-String list with ID-prefix dispatch (see [ADR-0171]):
+String list with ID-prefix dispatch (see [ID-prefix dispatch for orbit-docs `related_artifacts`](./4_decisions.md#id-prefix-dispatch-for-orbit-docs-relatedartifacts)):
 
 | Prefix shape | Resolves to |
 |--------------|-------------|
@@ -148,12 +149,12 @@ Each entry in `[docs].roots` is treated as either a literal path or a wildcard p
 
 ### 4.2 The `.orbit/` exclusion (load-bearing)
 
-Two layers of defense, enforced by [ADR-0170]:
+Two layers of defense, enforced by [`.orbit/` for tool-managed artifacts; `docs/` for human-authored content](./4_decisions.md#orbit-for-tool-managed-artifacts-docs-for-human-authored-content):
 
 1. **Per-root precheck.** Before descending into a configured root, `path_is_or_contains_dot_orbit` rejects it if any path component is `.orbit`. This catches `docs/.orbit/...` and any misconfigured root pointing at or under `.orbit/`.
 2. **Per-file recheck.** Inside `maybe_push_doc`, the same check runs again on every Markdown file. Catches the case where a configured root is *above* `.orbit/` (e.g. someone sets `roots = ["."]` to index everything) and the recursion descended past the per-root check.
 
-A unit test (`walker_skips_dot_orbit_even_when_root_points_above_it`) pins the contract: a tempdir with `.orbit/adrs/ADR-0001/body.md` under a configured root must produce zero records starting with `.orbit/`.
+A unit test (`walker_skips_dot_orbit_even_when_root_points_above_it`) pins the contract: a tempdir with `.orbit/adrs/<retired-id>/body.md` under a configured root must produce zero records starting with `.orbit/`.
 
 ### 4.3 Other skips
 
@@ -192,7 +193,7 @@ Default limit is 20. `--limit N` (CLI) or `limit` field (MCP) caps results. v1 d
 ### 5.4 What's missing
 
 - No body-text scoring. The whole point of frontmatter is that the body is unstructured; ranking against arbitrary Markdown adds noise without semantic ranking.
-- No semantic embeddings. Deferred to [ORB-00168].
+- Semantic embeddings are opt-in through `orbit docs index` and `orbit search --hybrid`; lexical search remains the default.
 - No `paths` or `related_features` scoring. These fields exist for *injection-time* scoping (hook + task.show), not for direct search.
 
 ---
@@ -248,7 +249,14 @@ orbit.docs.index
 orbit.docs.migrate
 ```
 
-The per-domain doc-search MCP tool was retired by [ORB-00202]; content-similarity queries now route through the unified `orbit.search` tool with `kind: "doc"`. The five definitions above forward to `OrbitBuiltinAction::Docs*` and the same `OrbitRuntime` methods used by the CLI, but `crates/orbit-tools/src/builtin/orbit/mod.rs` registers them inactive for the agent surface. `orbit-remote` owns the canonical MCP schema-plus-policy set and therefore exposes `orbit.search`, not `orbit.docs.*`, to agents. Any runtime invocation that does enter through MCP retains the shared SQLite audit contract and `subcommand: "run-mcp"`. [ORB-10319]
+The per-domain doc-search MCP tool was retired by [ORB-00202]; content-similarity queries
+now route through the unified `orbit.search` tool with `kind: "doc"`. The five definitions
+above forward to `OrbitBuiltinAction::Docs*` and the same `OrbitRuntime` methods used by the
+CLI, but `crates/orbit-tools/src/builtin/orbit/mod.rs` registers them inactive for MCP.
+`orbit-mcp` combines active builtin definitions with discovery definitions, and the CLI
+server advertises that canonical list and dispatches calls into Core. Core records MCP tool
+success, denial, or failure directly in the shared SQLite audit store with
+`subcommand: "run-mcp"`; the transport layer does not add a second audit path.
 
 ---
 
@@ -272,12 +280,11 @@ When the section is absent or the file is empty, the default root is `["docs/"]`
 ## 9. Concerns & Honest Limitations
 
 - **Lexical search is still frontmatter-only.** Plain `orbit search --kind doc` scores summary + tags + type only. Body-level concept recall requires `orbit docs index` plus `orbit search --kind doc --hybrid`.
-- **`migration_diff` is not a real diff.** It prints the first 12 lines of `before` and first 16 lines of `after` glued together with `@@` markers. Misleading label. [ORB-00164] tracks the fix.
-- **`update_existing_frontmatter` hand-edits YAML by line.** Works for simple `key: scalar` legacy headers. Will misbehave on multi-line block scalars (`description: |`) and quoted values containing colons. [ORB-00164] tracks the round-trip-through-`serde_yaml` fix.
-- **`is_git_ignored` shells out per file.** Acceptable at ~100 docs. Will degrade at thousands. [ORB-00164] tracks the batched-stdin or `ignore`-crate fix.
-- **No hook-time or task-time injection yet.** The retrieval primitive ships in v1; injection is [ORB-00166] and [ORB-00167].
+- **Migration uses a generated line diff.** The migrator now compares the complete before/after documents, while YAML frontmatter updates are round-tripped through `serde_yaml`.
+- **Hook-time injection is not wired yet.** Task-time related-doc injection is available through `task show --with-context`; PreToolUse hook integration remains [ORB-00167].
 - **Doc semantic freshness is explicit.** Task writes enqueue background embeddings, but docs require `orbit docs index` until a future watcher/background indexer exists.
-- **ADRs are not in the corpus.** [ORB-00169] is the design question.
+- **Tool-managed state is excluded.** Human-authored decision narratives under configured
+  docs roots are indexed normally; hidden `.orbit/` state is not.
 
 ---
 
@@ -288,7 +295,6 @@ When the section is absent or the file is empty, the default root is `["docs/"]`
 - [ORB-00166] — Wire `orbit docs` retrieval into `task.show --with-context` and `task.start`
 - [ORB-00167] — Extend PreToolUse hook to surface relevant docs alongside learnings
 - [ORB-00168] — Add semantic embeddings index for orbit-docs corpus (v2)
-- [ORB-10319] — Move canonical MCP exposure policy into `orbit-remote` while preserving Core's doc runtime and the unified agent search route.
-- [ORB-00169] — Design: fold `.orbit/adrs/` into the orbit-docs corpus (v2)
+- [ORB-10319] — Historical MCP-boundary move; the current canonical surface is assembled by `orbit-mcp` and served by the CLI over Core.
 
 Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

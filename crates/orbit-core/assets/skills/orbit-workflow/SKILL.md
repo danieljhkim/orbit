@@ -1,17 +1,17 @@
 ---
 name: orbit-workflow
-description: How to use Orbit's execution layer — jobs, activities, routines, `orbit sweep`, and `orbit run` — and how to diagnose a failed, stuck, cancelled, or suspicious job run. Triggers on running/inspecting a job or pipeline, scheduling routines, or when a human provides a `jrun-*` id, says a job failed, asks why a run is stuck, which task a run is handling, whether to kill a run, or wants a failure diagnosis involving Orbit activities/jobs.
+description: Orbit's execution layer — jobs, activities, routines, `orbit sweep`, and `orbit run` — plus task-pilot preflight and diagnosing a failed, stuck, or cancelled run. Triggers on task-pilot, running or inspecting a job or pipeline, scheduling routines, or a `jrun-*` id.
 ---
 
 # Orbit Workflow
 
 ## Concepts
 
-- **Job** — a deterministic, multi-step pipeline (schemaVersion 2 YAML) from the installed job catalog; discover it with `orbit job list` / `orbit job show <id>` (e.g. `task_pr_pipeline`, `task_auto_pipeline`, `task_gate_pipeline`, `job_duel_plan_pipeline`). Jobs compose **activities**.
-- **Activity** — one named step definition referenced by a job's step list (`agent_implement`, `agent_review`, `git_commit`, `git_push`, `pr_open`, `worktree_setup`, `reserve_locks`, ...). Activities aren't invoked directly by CLI; a job's step list references them.
+- **Job** — a deterministic, multi-step pipeline (schemaVersion 2 YAML) from the installed job catalog; discover it with `orbit job list` / `orbit job show <id>` (e.g. `task_pr_pipeline`, `task_auto_pipeline`, `task_gate_pipeline`). Jobs compose **activities**.
+- **Activity** — one named step definition referenced by a job's step list (`agent_implement`, `task_pilot`, `git_commit`, `git_push`, `pr_open`, `worktree_setup`, `reserve_locks`, ...). Activities aren't invoked directly by CLI; a job's step list references them.
 - **Routine** — a git-versioned cron trigger (`.orbit/routines/*.yaml`) pointing at a `job:<name>` target, with host pinning and a retry/overlap policy.
 - **Sweep** — the stateless per-minute clock tick (`orbit sweep`, fired by an OS timer) that fires whatever routine is due on this host. All scheduler state (last fires, pauses, locks) is host-local in `~/.orbit/orbit.db`, never synced; routine *definitions* sync via git.
-- **`orbit run`** — the execution frontend: `orbit run ship` / `ship-local` / `ship-sweep` (dispatch across every registered workspace) / `duel-plan` / `job <id>` / `history` / `show <run_id>` / `logs <run_id>` / `events <run_id>` / `trace <run_id>`. Equivalent job-catalog commands exist as `orbit job list|show|run|replay|resume`.
+- **`orbit run`** — the execution frontend: `orbit run ship` / `ship-local` / `ship-sweep` (dispatch across every registered workspace) / `job <id>` / `history` / `show <run_id>` / `logs <run_id>` / `events <run_id>` / `trace <run_id>`. Equivalent job-catalog commands exist as `orbit job list|show|run|replay|resume`.
 
 ## Running a job
 
@@ -19,10 +19,39 @@ description: How to use Orbit's execution layer — jobs, activities, routines, 
 orbit job list                                  # catalog
 orbit job show <job_id>
 orbit run job <job_id> --input key=value --json  # or: orbit job run <job_id> --input key=value
+orbit run job <job_id> --wait                    # block until terminal; nonzero exit unless it succeeded
 orbit run ship                                   # ship backlog/selected tasks through the gated pipeline
 orbit run history --json
 orbit run show <run_id> --json
 ```
+
+### Task-pilot pipeline
+
+When an orchestrator needs task selectors prepared before ship traffic, inspect
+the job with `orbit job show task_pilot_pipeline`, then invoke it with:
+
+```bash
+orbit run job task_pilot_pipeline
+```
+
+The run is submitted to a detached worker and the command returns as soon as
+the run is durable — it prints the run id and the inspection commands, and does
+not claim the eventual outcome. Add `--wait` to block on the submitted run and
+exit nonzero unless it succeeded.
+
+With no input, the job discovers only `proposed`/`backlog` tasks in the
+invoking workspace whose `context_files` is empty. To audit specific tasks,
+pass their IDs explicitly; this mode audits exactly those tasks, including
+tasks that already have selectors:
+
+```bash
+orbit run job task_pilot_pipeline --input task_ids=<TASK_ID>,<TASK_ID>
+```
+
+Use this job before reservation or conflict checks when ship traffic is high.
+Do not fill `context_files` inline: the job's apply step writes only validated
+selectors, reducing file-collision risk. An enabled workspace routine may
+already run the zero-input job on a schedule; invoke an extra run when needed.
 
 ## Routines & scheduling
 
@@ -45,21 +74,15 @@ Fires appear in `orbit run history` under actor `routine/<name>`. `orbit routine
 
 Consult `orbit routine --help` for the full field schema before hand-authoring a routine — don't answer field semantics from memory.
 
-## Checking Operational Logs
+## Diagnosis
 
-For a host-level incident, service warning, JSONL tracing problem, or missing
-run output, use [references/operational-logs.md](references/operational-logs.md).
-It separates journal/service logs, global JSONL tracing, and per-run evidence
-and keeps runtime state read-only during diagnosis.
-
-## Diagnosing a failed/stuck/cancelled run
-
-Given a `jrun-*` id, see [references/debug-job-failure.md](references/debug-job-failure.md) for the full investigation flow (run bundle, v2 audit trail, logs/blobs, failure classification, task/git/process state, kill procedure, report format). Don't use it for ordinary task implementation unless the request is specifically about a failed run.
+- Host-level incident, service warning, JSONL tracing problem, or missing run output → [references/operational-logs.md](references/operational-logs.md).
+- A `jrun-*` id that failed, stuck, or was cancelled → [references/debug-job-failure.md](references/debug-job-failure.md) for the full flow: run bundle, v2 audit trail, logs and blobs, failure classification, task/git/process state, kill procedure, report format.
 
 **Safety, up front:**
-- Do not edit files under `.orbit/state/job-runs/` or `.orbit/state/audit/` to "fix" a run — treat them as evidence.
-- Do not kill a process until you've matched run id → `pid`/`pgid`/task id(s)/command; prefer terminating the process group for that run id only.
-- Do not kill parent auto/gate runs unless you've verified they own the same task(s).
-- Do not rely on top-level `state: failed` alone — find the first failed step/activity.
-- Do not parse agent prose as the durable handoff when task state, run state, or `orbit.state.*` records exist.
-- If Orbit tooling or diagnostics are misleading, file friction via `orbit-task`.
+
+- Files under `.orbit/state/job-runs/` and `.orbit/state/audit/` are evidence. Never edit them to "fix" a run.
+- Never kill a process before matching run id → `pid`/`pgid`/task id(s)/command; terminate the process group for that run id only. Never kill a parent auto or gate run without verifying it owns the same task(s).
+- Top-level `state: failed` is not a diagnosis — find the first failed step or activity.
+- Task state, run state, and `orbit.state.*` records are the durable handoff. Never parse agent prose in their place.
+- If Orbit's own tooling or diagnostics mislead you, file friction (`orbit-task`).

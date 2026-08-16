@@ -1,13 +1,16 @@
 //! Sibling tests for `command/doctor.rs` — workspace self-diagnostics [ORB-10005].
 
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use chrono::Utc;
 use fs2::FileExt;
 use orbit_common::types::{JobRun, JobRunState};
+use sha2::{Digest, Sha256};
 
 use orbit_core::OrbitRuntime;
+use orbit_core::runtime::OrbitRuntimeRoots;
+use orbit_store::TaskReservationReserveParams;
 
 use crate::doctor::{
     DoctorCommands, WorkspaceDoctorResult, WorkspaceDoctorStatus, collect_lock_files,
@@ -45,7 +48,9 @@ fn healthy_fresh_workspace_has_no_failures() {
     let runtime = OrbitRuntime::in_memory().expect("build runtime");
     let results = runtime.doctor_workspace().expect("doctor");
 
-    assert_eq!(results.len(), 8, "one row per check: {results:?}");
+    // Eight infrastructure checks plus one definition-artifact row per kind
+    // (skills, jobs, activities, auto-tasks, routines).
+    assert_eq!(results.len(), 13, "one row per check: {results:?}");
     assert!(
         results
             .iter()
@@ -77,15 +82,83 @@ fn healthy_fresh_workspace_has_no_failures() {
         status_of(&results, "job-runs").status,
         WorkspaceDoctorStatus::Ok
     );
+    assert_eq!(
+        status_of(&results, "task-reservations").status,
+        WorkspaceDoctorStatus::Ok
+    );
     // No tasks yet → no unresolved relation/dependency targets.
     assert_eq!(
         status_of(&results, "task-relations").status,
         WorkspaceDoctorStatus::Ok
     );
-    // No ids allocated yet → nothing pinned to a reaped worktree.
+}
+
+#[test]
+fn every_warning_or_error_has_structured_remediation() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let runtime = workspace_runtime(&temp);
+    fs::write(
+        temp.path().join("repo").join(".orbit").join("config.toml"),
+        "not = [valid toml",
+    )
+    .expect("write broken config");
+
+    let results = runtime.doctor_workspace().expect("doctor");
+    let actionable = results.iter().filter(|row| {
+        matches!(
+            row.status,
+            WorkspaceDoctorStatus::Warning | WorkspaceDoctorStatus::Error
+        )
+    });
+    for row in actionable {
+        assert!(
+            row.remediation
+                .as_ref()
+                .is_some_and(|value| !value.is_empty()),
+            "actionable row needs remediation: {row:?}"
+        );
+    }
+}
+
+#[test]
+fn absent_owner_task_reservation_warning_names_context_reason_and_exact_repair() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let runtime = workspace_runtime(&temp);
+    let store = runtime.sqlite_store().expect("store");
+    let reservation = store
+        .reserve_task_reservation(&TaskReservationReserveParams {
+            workspace_orbit_dir: runtime.paths().orbit_dir.to_string_lossy().into_owned(),
+            workspace_id: None,
+            task_ids: vec!["ORB-12345".to_string()],
+            requested_files: vec!["file:src/lib.rs".to_string()],
+            actor: "test".to_string(),
+            ttl_seconds: 3600,
+            owner_run_id: Some("jrun-missing".to_string()),
+            owner_metadata_json: None,
+        })
+        .expect("reserve")
+        .reservation_id
+        .expect("reservation id");
+
+    let results = runtime.doctor_workspace().expect("doctor");
+    let row = status_of(&results, "task-reservations");
+    assert_eq!(row.status, WorkspaceDoctorStatus::Warning, "{row:?}");
+    assert!(row.message.contains(&reservation), "{}", row.message);
+    assert!(row.message.contains("ORB-12345"), "{}", row.message);
+    assert!(row.message.contains("jrun-missing"), "{}", row.message);
+    assert!(row.message.contains("is absent"), "{}", row.message);
     assert_eq!(
-        status_of(&results, "id-allocations").status,
-        WorkspaceDoctorStatus::Ok
+        row.remediation.as_deref(),
+        Some("Run `orbit doctor --fix-stale-task-locks`.")
+    );
+    let still_active = store
+        .inspect_active_task_reservations(&runtime.paths().orbit_dir.to_string_lossy(), None)
+        .expect("inspect after read-only doctor");
+    assert!(
+        still_active
+            .iter()
+            .any(|candidate| candidate.reservation_id == reservation),
+        "ordinary doctor must not release a diagnosed reservation"
     );
 }
 
@@ -191,15 +264,34 @@ fn dead_holder_lock_file_is_reported_stale() {
 
 #[cfg(unix)]
 #[test]
-fn stale_task_learning_and_adr_lock_files_are_removed() {
+fn interrupted_layout_upgrade_is_reported_stale() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let runtime = workspace_runtime(&temp);
+    let lock_path = temp
+        .path()
+        .join("repo")
+        .join(".orbit")
+        .join("state")
+        .join("layout.lock");
+    write_holder_lock(&lock_path, reaped_child_pid(), "layout upgrade");
+
+    let results = runtime.doctor_workspace().expect("doctor");
+    let locks = status_of(&results, "stale-locks");
+    assert_eq!(locks.status, WorkspaceDoctorStatus::Warning, "{locks:?}");
+    assert!(
+        locks.message.contains("layout.lock") && locks.message.contains("layout upgrade"),
+        "message names the interrupted layout upgrade: {}",
+        locks.message
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn stale_task_lock_files_are_removed() {
     let temp = tempfile::tempdir().expect("tempdir");
     let runtime = workspace_runtime(&temp);
     let paths = runtime.paths();
-    let stale_locks = [
-        paths.tasks_dir.join(".ORB-00001.lock"),
-        paths.learnings_dir.join(".L-0001.lock"),
-        paths.adrs_dir.join(".locks").join("adr-0001.lock"),
-    ];
+    let stale_locks = [paths.tasks_dir.join(".ORB-00001.lock")];
 
     let dead_pid = reaped_child_pid();
     for path in &stale_locks {
@@ -405,100 +497,6 @@ fn fresh_pending_run_is_not_reported_as_orphan() {
     assert_eq!(job_runs.status, WorkspaceDoctorStatus::Ok, "{job_runs:?}");
 }
 
-/// [ORB-10501] Allocate a learning id from a worktree that is then reaped —
-/// the steady state behind F2026-07-161, where a job-run worktree is GC'd
-/// before its learning body was ever merged. Returns the stranded id.
-fn seed_learning_allocation_in(runtime: &OrbitRuntime, worktree: &Path, reap: bool) -> String {
-    fs::create_dir_all(worktree).expect("seed worktree");
-    let paths = runtime.paths();
-    // The effective semantic.db path is config-resolved, so read it from the
-    // runtime rather than reconstructing the default layout.
-    let semantic_db = PathBuf::from(
-        runtime.persistence_config_json()["semantic"]["path"]
-            .as_str()
-            .expect("semantic db path"),
-    );
-    let allocator = orbit_store::IdAllocator::open(orbit_store::IdAllocatorConfig::new(
-        semantic_db,
-        paths.state_dir.join(".id_alloc.lock"),
-        paths.orbit_dir.clone(),
-        worktree.to_path_buf(),
-        paths.adrs_dir.clone(),
-        paths.learnings_dir.clone(),
-    ))
-    .expect("open allocator");
-    let id = allocator.allocate_learning().expect("allocate learning").id;
-    drop(allocator);
-    if reap {
-        fs::remove_dir_all(worktree).expect("reap worktree");
-    }
-    id
-}
-
-#[test]
-fn allocation_pinned_to_a_reaped_worktree_is_reported_and_repairable() {
-    let temp = tempfile::tempdir().expect("tempdir");
-    let runtime = workspace_runtime(&temp);
-    let id = seed_learning_allocation_in(&runtime, &temp.path().join("ghost-worktree"), true);
-
-    let row = status_of(
-        &runtime.doctor_workspace().expect("doctor"),
-        "id-allocations",
-    )
-    .clone();
-    assert_eq!(row.status, WorkspaceDoctorStatus::Warning, "{row:?}");
-    assert!(
-        row.message.contains(&id) && row.message.contains("--fix-orphaned-allocations"),
-        "message names the orphan and its repair: {}",
-        row.message
-    );
-
-    assert_eq!(
-        runtime
-            .clear_orphaned_id_allocations()
-            .expect("clear orphaned allocations"),
-        1
-    );
-    assert_eq!(
-        status_of(
-            &runtime.doctor_workspace().expect("doctor"),
-            "id-allocations"
-        )
-        .status,
-        WorkspaceDoctorStatus::Ok
-    );
-    assert_eq!(
-        runtime
-            .clear_orphaned_id_allocations()
-            .expect("repeat repair"),
-        0,
-        "repair is idempotent once the row is abandoned"
-    );
-}
-
-/// An allocation whose worktree is still on disk is an ordinary remote stub —
-/// its body may yet be merged — so neither the check nor the repair touches it.
-#[test]
-fn allocation_with_a_live_worktree_is_left_alone() {
-    let temp = tempfile::tempdir().expect("tempdir");
-    let runtime = workspace_runtime(&temp);
-    let _id = seed_learning_allocation_in(&runtime, &temp.path().join("live-worktree"), false);
-
-    assert_eq!(
-        status_of(
-            &runtime.doctor_workspace().expect("doctor"),
-            "id-allocations"
-        )
-        .status,
-        WorkspaceDoctorStatus::Ok
-    );
-    assert_eq!(
-        runtime.clear_orphaned_id_allocations().expect("clear"),
-        0,
-        "a live worktree is not an orphan"
-    );
-}
-
 #[cfg(unix)]
 #[test]
 fn process_liveness_probe_distinguishes_dead_from_live() {
@@ -532,8 +530,6 @@ fn collect_lock_files_scans_the_store_lock_locations() {
     let expected = [
         paths.state_dir.join(".id_alloc.lock"),
         paths.tasks_dir.join(".ORB-00001.lock"),
-        paths.learnings_dir.join(".L-0001.lock"),
-        paths.adrs_dir.join(".locks").join("adr-0001.lock"),
     ];
     for path in &expected {
         fs::create_dir_all(path.parent().expect("parent")).expect("create dir");
@@ -635,4 +631,112 @@ fn retired_graph_cleanup_unlinks_boundaries_without_following_them() {
     );
     assert!(fs::symlink_metadata(local_graph).is_err());
     assert!(fs::symlink_metadata(shared_graph).is_err());
+}
+
+#[test]
+fn workspace_retired_backend_warns_artifacts_activities_with_repair_command() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let runtime = workspace_runtime(&temp);
+    let activities = temp
+        .path()
+        .join("repo")
+        .join(".orbit")
+        .join("resources")
+        .join("activities");
+    fs::create_dir_all(&activities).expect("create workspace activities");
+    let path = activities.join("epic_orchestrator.yaml");
+    fs::write(
+        &path,
+        "schemaVersion: 2\nkind: Activity\nmetadata:\n  name: epic_orchestrator\nspec:\n  type: agent_loop\n  description: fixture\n  instruction: do the work\n  backend: http\n",
+    )
+    .expect("write retired backend activity");
+
+    let results = runtime.doctor_workspace().expect("doctor");
+    let row = status_of(&results, "artifacts-activities");
+    assert_eq!(row.status, WorkspaceDoctorStatus::Warning, "{row:?}");
+    assert!(
+        row.message.contains("epic_orchestrator.yaml"),
+        "{}",
+        row.message
+    );
+    assert!(
+        row.message.contains("spec.backend: http"),
+        "{}",
+        row.message
+    );
+    assert!(
+        row.message.contains("schemaVersion 2 parse failed"),
+        "{}",
+        row.message
+    );
+    assert_eq!(
+        row.remediation.as_deref(),
+        Some("Run `orbit doctor --fix-retired-activity-backends`.")
+    );
+
+    let repaired = runtime
+        .repair_retired_activity_backends()
+        .expect("repair retired backends");
+    assert_eq!(repaired.repaired, vec![path.clone()]);
+    assert!(repaired.skipped.is_empty(), "{repaired:?}");
+    assert!(
+        !fs::read_to_string(&path)
+            .expect("read repaired activity")
+            .contains("backend:"),
+        "repair must remove only the backend key"
+    );
+
+    let after = runtime.doctor_workspace().expect("doctor after repair");
+    assert_eq!(
+        status_of(&after, "artifacts-activities").status,
+        WorkspaceDoctorStatus::Ok,
+        "{after:?}"
+    );
+}
+
+#[test]
+fn stale_shipped_activity_default_names_the_refresh_remediation() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let global_root = temp.path().join("global");
+    let workspace_root = temp.path().join("repo/.orbit");
+    let runtime = OrbitRuntime::initialize_from_resolved_roots(
+        OrbitRuntimeRoots {
+            global_root: global_root.clone(),
+            shared_root: workspace_root.clone(),
+            local_root: workspace_root,
+        },
+        None,
+    )
+    .expect("initialize runtime with defaults");
+    let activities_dir = global_root.join("resources/activities");
+    let path = activities_dir.join("agent_implement.yaml");
+    let current = fs::read_to_string(&path).expect("read current activity");
+    let stale = current.replacen("  tools:\n", "  tools:\n    - fs.read\n", 1);
+    assert_ne!(stale, current, "fixture must contain the retired tool");
+    fs::write(&path, &stale).expect("write stale activity");
+
+    let manifest_path = activities_dir.join(".orbit-managed-assets.json");
+    let mut manifest: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&manifest_path).expect("read managed manifest"))
+            .expect("parse managed manifest");
+    manifest["assets"]["agent_implement"] =
+        serde_json::Value::String(format!("{:x}", Sha256::digest(stale.as_bytes())));
+    fs::write(
+        &manifest_path,
+        format!(
+            "{}\n",
+            serde_json::to_string_pretty(&manifest).expect("serialize managed manifest")
+        ),
+    )
+    .expect("write stale managed manifest");
+
+    let results = runtime.doctor_workspace().expect("doctor");
+    let row = status_of(&results, "artifacts-activities");
+    assert_eq!(row.status, WorkspaceDoctorStatus::Error, "{row:?}");
+    assert!(row.message.contains("stale"), "{}", row.message);
+    assert!(row.message.contains("older release"), "{}", row.message);
+    assert_eq!(
+        row.remediation.as_deref(),
+        Some("Run `orbit init --refresh-defaults`.")
+    );
 }

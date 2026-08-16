@@ -1034,6 +1034,165 @@ fn apply_feature_schema_ledger(conn: &Connection) -> Result<(), OrbitError> {
     .map_err(|error| OrbitError::Store(error.to_string()))
 }
 
+/// v12 `friction_records_sqlite` migration (ORB-10680): hub friction records
+/// move from the per-workspace Markdown tree into the host-global store.
+///
+/// Identity is composite `(workspace_id, friction_id)` (L-0072): friction IDs
+/// stay workspace-local, so the same `F2026-05-001` in two workspaces are two
+/// distinct rows. Indexes cover the read shapes the scan path used to satisfy
+/// by parsing the whole corpus — workspace + status + creation order, and
+/// workspace + tag.
+///
+/// `legacy_path` is the read-only evidence pointer for an imported record and
+/// is NULL for anything written after cutover (ADR-0345).
+fn apply_friction_records_schema(conn: &Connection) -> Result<(), OrbitError> {
+    conn.execute_batch(
+        r#"
+            CREATE TABLE IF NOT EXISTS friction_records (
+                workspace_id     TEXT NOT NULL,
+                friction_id      TEXT NOT NULL,
+                month            TEXT NOT NULL,
+                seq              INTEGER NOT NULL,
+                title            TEXT,
+                model            TEXT NOT NULL,
+                status           TEXT NOT NULL,
+                created_at       TEXT NOT NULL,
+                resolved_at      TEXT,
+                during_task      TEXT,
+                resolved_by_task TEXT,
+                tags_json        TEXT NOT NULL DEFAULT '[]',
+                body             TEXT NOT NULL,
+                legacy_path      TEXT,
+                PRIMARY KEY(workspace_id, friction_id),
+                CHECK (length(workspace_id) > 0 AND workspace_id = trim(workspace_id)),
+                CHECK (length(friction_id) > 0 AND friction_id = trim(friction_id)),
+                CHECK (length(month) = 7),
+                CHECK (typeof(seq) = 'integer' AND seq > 0),
+                CHECK (status IN ('open', 'triaged', 'resolved')),
+                CHECK (length(model) > 0),
+                CHECK (length(created_at) > 0),
+                CHECK (json_valid(tags_json) AND json_type(tags_json) = 'array')
+            );
+
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_friction_records_month_seq
+                ON friction_records(workspace_id, month, seq);
+            CREATE INDEX IF NOT EXISTS idx_friction_records_status_created
+                ON friction_records(workspace_id, status, created_at, friction_id);
+            CREATE INDEX IF NOT EXISTS idx_friction_records_created
+                ON friction_records(workspace_id, created_at, friction_id);
+
+            CREATE TABLE IF NOT EXISTS friction_record_tags (
+                workspace_id TEXT NOT NULL,
+                friction_id  TEXT NOT NULL,
+                tag          TEXT NOT NULL,
+                PRIMARY KEY(workspace_id, friction_id, tag),
+                CHECK (length(tag) > 0 AND tag = trim(tag)),
+                FOREIGN KEY(workspace_id, friction_id)
+                    REFERENCES friction_records(workspace_id, friction_id)
+                    ON UPDATE CASCADE ON DELETE CASCADE
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_friction_record_tags_lookup
+                ON friction_record_tags(workspace_id, tag, friction_id);
+
+            CREATE TABLE IF NOT EXISTS friction_import_state (
+                workspace_id   TEXT NOT NULL,
+                source_key     TEXT NOT NULL,
+                record_count   INTEGER NOT NULL,
+                imported_count INTEGER NOT NULL,
+                schema_version INTEGER NOT NULL,
+                completed_at   TEXT NOT NULL,
+                PRIMARY KEY(workspace_id, source_key),
+                CHECK (length(workspace_id) > 0),
+                CHECK (typeof(record_count) = 'integer' AND record_count >= 0),
+                CHECK (typeof(imported_count) = 'integer' AND imported_count >= 0),
+                CHECK (typeof(schema_version) = 'integer' AND schema_version > 0),
+                CHECK (length(completed_at) > 0)
+            );
+        "#,
+    )
+    .map_err(|error| OrbitError::Store(error.to_string()))
+}
+
+/// v13 `workspace_claim_scope` migration (ORB-10709, ADR-0352).
+///
+/// The exclusive workspace claim reuses `task_reservations` rather than a
+/// parallel table, because atomic acquisition, TTL, lazy expiry, audit, and a
+/// release escape hatch already live there. `scope` is the dimension that keeps
+/// the two apart — worker file reservations arbitrate over paths, the claim
+/// arbitrates dispatch authority — and every existing row is a file
+/// reservation, which is exactly what the column default says.
+///
+/// `claim_token` is the holder's bearer token. It is deliberately absent from
+/// `select_reservation_columns()`, so no reservation read path can carry it
+/// into a response.
+fn apply_workspace_claim_scope(conn: &Connection) -> Result<(), OrbitError> {
+    // A database that recorded a ledger version without ever running the
+    // baseline has no reservation table to widen. Create it at its baseline
+    // shape first so this migration widens a table that exists rather than
+    // wedging the ledger; on every ordinary database this is a no-op.
+    ensure_task_reservations_schema(conn)?;
+
+    add_column_if_missing(
+        conn,
+        "ALTER TABLE task_reservations ADD COLUMN scope TEXT NOT NULL DEFAULT 'files'",
+    )?;
+    add_column_if_missing(
+        conn,
+        "ALTER TABLE task_reservations ADD COLUMN claim_token TEXT",
+    )?;
+
+    conn.execute_batch(
+        r#"
+            CREATE INDEX IF NOT EXISTS idx_task_reservations_scope_release
+            ON task_reservations(workspace_id, scope, released_at);
+        "#,
+    )
+    .map_err(|e| OrbitError::Store(e.to_string()))?;
+
+    Ok(())
+}
+
+/// v14 `remove_native_learning_subsystem` (ORB-10736): remove every SQLite
+/// projection owned by the retired native learning resource. Existing files
+/// under `.orbit/learnings/` are deliberately outside the database migration
+/// and remain untouched as inert historical data.
+fn apply_remove_native_learning_subsystem(conn: &Connection) -> Result<(), OrbitError> {
+    if table_exists(conn, "embeddings")? && table_has_column(conn, "embeddings", "source_kind")? {
+        conn.execute("DELETE FROM embeddings WHERE source_kind = 'learning'", [])
+            .map_err(|error| OrbitError::Store(error.to_string()))?;
+    }
+    conn.execute_batch(
+        r#"
+            DROP TABLE IF EXISTS learnings_index;
+            DROP TABLE IF EXISTS session_learning_state;
+            DROP TABLE IF EXISTS id_allocations;
+        "#,
+    )
+    .map_err(|error| OrbitError::Store(error.to_string()))
+}
+
+/// Add transport-neutral invocation correlation to command-audit rows.
+/// Existing rows and non-invocation producers remain NULL-compatible.
+fn apply_invocation_audit_context(conn: &Connection) -> Result<(), OrbitError> {
+    // A ledger may outlive an incomplete pre-ledger schema (for example, an
+    // invocation-only fixture). Re-establish the canonical audit table and
+    // its existing provenance projection before extending it.
+    ensure_audit_events_schema(conn)?;
+    apply_trusted_mcp_audit_provenance(conn)?;
+
+    add_column_if_missing(conn, "ALTER TABLE audit_events ADD COLUMN trace_id TEXT")?;
+    add_column_if_missing(conn, "ALTER TABLE audit_events ADD COLUMN caller_ip TEXT")?;
+
+    conn.execute_batch(
+        r#"
+            CREATE INDEX IF NOT EXISTS idx_audit_events_trace_id
+            ON audit_events(trace_id);
+        "#,
+    )
+    .map_err(|error| OrbitError::Store(error.to_string()))
+}
+
 fn ensure_task_reservations_schema(conn: &Connection) -> Result<(), OrbitError> {
     conn.execute_batch(
         r#"

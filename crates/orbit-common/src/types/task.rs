@@ -42,7 +42,7 @@ use serde::{Deserialize, Serialize};
 use url::Url;
 
 use crate::types::task_artifacts::{TaskRelation, TaskRelationType};
-use crate::types::{OrbitError, OrbitId};
+use crate::types::{OrbitError, OrbitId, is_valid_orb_task_id, task_id_prefix};
 use crate::utility::selector::exists_in_workspace;
 
 /// Tasks carrying this tag may complete successfully without producing a
@@ -50,12 +50,16 @@ use crate::utility::selector::exists_in_workspace;
 /// QA validation tasks file follow-up Orbit tasks).
 pub const NO_DIFF_EXPECTED_TAG: &str = "no-diff-expected";
 
+/// Operator-facing projection for a valid task reference whose prefix is not
+/// represented in this machine's coordination registry.
+pub const TASK_REFERENCE_NOT_VERIFIABLE_HERE: &str = "not verifiable here";
+
 /// Default maximum number of tasks a status-neutral task listing returns
 /// (ORB-10310). Every discovery surface — the `orbit task list` CLI, the
 /// `orbit.task.list` MCP tool, and the dashboard HTTP task routes — returns the
 /// newest `DEFAULT_TASK_LIST_LIMIT` matching tasks first rather than filtering
 /// on lifecycle status, matching Orbit's existing recent-history convention
-/// (see `HISTORY_DEFAULT_LIMIT` in orbit-dashboard).
+/// (see `HISTORY_DEFAULT_LIMIT` in orbit-web).
 pub const DEFAULT_TASK_LIST_LIMIT: usize = 50;
 
 /// Current lifecycle state of a task.
@@ -157,6 +161,34 @@ impl TaskStatus {
     /// tasks today; accepted work lands in `done`.
     pub fn satisfies_dependency(self) -> bool {
         matches!(self, TaskStatus::Done)
+    }
+
+    /// Classifies a *non*-satisfying status as either a legitimate wait or a
+    /// dead end.
+    ///
+    /// `satisfies_dependency` answers "is this edge satisfied now?"; this
+    /// answers the complementary "could waiting ever satisfy it?". A
+    /// dependency in `backlog` / `proposed` / `in-progress` / `review` /
+    /// `blocked` / `someday` returns `None` — it can still reach `done`, so
+    /// callers must keep waiting. `archived` and `rejected` return `Some`:
+    /// both are restorable, but only by an operator editing the task graph,
+    /// never by the passage of time.
+    ///
+    /// This deliberately does *not* widen what counts as satisfied
+    /// (`Done`-only stays) — it only lets dispatch fail loudly instead of
+    /// polling out its whole budget against an edge that cannot close.
+    pub fn dependency_dead_end(self) -> Option<DependencyDeadEnd> {
+        match self {
+            TaskStatus::Archived => Some(DependencyDeadEnd::Archived),
+            TaskStatus::Rejected => Some(DependencyDeadEnd::Rejected),
+            TaskStatus::Proposed
+            | TaskStatus::Backlog
+            | TaskStatus::InProgress
+            | TaskStatus::Review
+            | TaskStatus::Done
+            | TaskStatus::Blocked
+            | TaskStatus::Someday => None,
+        }
     }
 
     /// Validates a status transition using a short blocklist of invariants:
@@ -449,9 +481,82 @@ pub struct ResolvedTaskDependency {
     pub status: String,
 }
 
+/// Read projection of a typed relation. Persisted relations remain only the
+/// relation type and target; verification is derived from the local status
+/// projection so a foreign target can become locally verifiable later.
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct ResolvedTaskRelation {
+    /// Canonical typed edge kind.
+    #[serde(rename = "type")]
+    pub relation_type: TaskRelationType,
+    /// Referenced task or artifact ID.
+    pub target: OrbitId,
+    /// Local verification limitation, present only for a foreign task prefix.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub verification: Option<String>,
+}
+
 impl ResolvedTaskDependency {
     pub fn label(&self) -> String {
         format!("{} [{}]", self.id, self.status)
+    }
+}
+
+/// Why a `blocked_by` edge can never close on its own.
+///
+/// Distinct from "unmet": an unmet dependency may simply be unfinished, and
+/// waiting is the correct response. A dead end will still be unmet after any
+/// amount of waiting.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum DependencyDeadEnd {
+    /// The dependency ID resolves to no task in this workspace.
+    Missing,
+    /// Soft-deleted. Restorable via `orbit task restore`, not by waiting.
+    Archived,
+    /// Declined. Re-openable to backlog/in-progress, not by waiting.
+    Rejected,
+}
+
+impl DependencyDeadEnd {
+    /// Operator-facing explanation of why the edge is a dead end, phrased so
+    /// the remedy is obvious from the failure message alone.
+    pub fn explanation(self) -> &'static str {
+        match self {
+            DependencyDeadEnd::Missing => {
+                "no such task in this workspace (dangling dependency; drop the blocked_by edge or restore the task)"
+            }
+            DependencyDeadEnd::Archived => {
+                "archived (soft-deleted; restore it or drop the blocked_by edge)"
+            }
+            DependencyDeadEnd::Rejected => {
+                "rejected (re-open it to backlog or drop the blocked_by edge)"
+            }
+        }
+    }
+}
+
+/// A dependency edge that dispatch must refuse rather than wait on.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct UnsatisfiableTaskDependency {
+    /// The task that declares the edge.
+    pub task_id: OrbitId,
+    /// The `blocked_by` target that can never satisfy it.
+    pub dependency_id: OrbitId,
+    /// The dependency's current status, or `missing` when it does not resolve.
+    pub status: String,
+    pub reason: DependencyDeadEnd,
+}
+
+impl UnsatisfiableTaskDependency {
+    pub fn label(&self) -> String {
+        format!(
+            "{} blocked_by {} [{}]: {}",
+            self.task_id,
+            self.dependency_id,
+            self.status,
+            self.reason.explanation()
+        )
     }
 }
 
@@ -598,6 +703,10 @@ pub struct Task {
     pub job_run_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub crew: Option<String>,
+    /// Explicit named crew that owns orchestration of this task. This is
+    /// attribution metadata only; execution resolution continues to use `crew`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub orchestrator: Option<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -746,9 +855,61 @@ pub fn resolve_task_dependencies(
             status: status_by_id
                 .get(&dependency_id)
                 .map(|status| status.to_string())
-                .unwrap_or_else(|| "missing".to_string()),
+                .unwrap_or_else(|| {
+                    if task_reference_is_not_verifiable_here(task, &dependency_id, status_by_id) {
+                        TASK_REFERENCE_NOT_VERIFIABLE_HERE.to_string()
+                    } else {
+                        "missing".to_string()
+                    }
+                }),
         })
         .collect()
+}
+
+/// Project typed relations with a marker on unresolved foreign-prefix task
+/// targets. Resolvable and locally missing targets retain their stored shape.
+pub fn resolve_task_relations(
+    task: &Task,
+    status_by_id: &BTreeMap<OrbitId, TaskStatus>,
+) -> Vec<ResolvedTaskRelation> {
+    task.relations
+        .iter()
+        .map(|relation| ResolvedTaskRelation {
+            relation_type: relation.relation_type,
+            target: relation.target.clone(),
+            verification: task_reference_is_not_verifiable_here(
+                task,
+                &relation.target,
+                status_by_id,
+            )
+            .then(|| TASK_REFERENCE_NOT_VERIFIABLE_HERE.to_string()),
+        })
+        .collect()
+}
+
+/// Whether a missing valid task target belongs to a prefix this status
+/// projection cannot verify. The source prefix is always local for its task;
+/// prefixes on projected task IDs cover additional locally registered legacy
+/// or migrated partitions.
+pub fn task_reference_is_not_verifiable_here(
+    task: &Task,
+    target: &str,
+    status_by_id: &BTreeMap<OrbitId, TaskStatus>,
+) -> bool {
+    if status_by_id.contains_key(target) || !is_valid_orb_task_id(target) {
+        return false;
+    }
+    let Some(target_prefix) = task_id_prefix(target) else {
+        return false;
+    };
+    let mut known_prefixes = status_by_id
+        .keys()
+        .filter_map(|id| task_id_prefix(id))
+        .collect::<BTreeSet<_>>();
+    if let Some(source_prefix) = task_id_prefix(&task.id) {
+        known_prefixes.insert(source_prefix);
+    }
+    !known_prefixes.contains(target_prefix)
 }
 
 pub fn task_dependencies_ready(task: &Task, status_by_id: &BTreeMap<OrbitId, TaskStatus>) -> bool {
@@ -756,6 +917,7 @@ pub fn task_dependencies_ready(task: &Task, status_by_id: &BTreeMap<OrbitId, Tas
         status_by_id
             .get(dependency_id)
             .is_some_and(|status| status.satisfies_dependency())
+            || task_reference_is_not_verifiable_here(task, dependency_id, status_by_id)
     })
 }
 
@@ -766,9 +928,39 @@ pub fn unmet_task_dependencies(
     resolve_task_dependencies(task, status_by_id)
         .into_iter()
         .filter(|dependency| {
-            status_by_id
-                .get(&dependency.id)
-                .is_none_or(|status| !status.satisfies_dependency())
+            !task_reference_is_not_verifiable_here(task, &dependency.id, status_by_id)
+                && status_by_id
+                    .get(&dependency.id)
+                    .is_none_or(|status| !status.satisfies_dependency())
+        })
+        .collect()
+}
+
+/// Returns the task's dependency edges that can never be satisfied by waiting.
+///
+/// Empty means every unmet edge is a legitimate wait, so the caller should
+/// keep polling. Non-empty means polling is futile and the caller should fail
+/// now, naming these edges.
+pub fn unsatisfiable_task_dependencies(
+    task: &Task,
+    status_by_id: &BTreeMap<OrbitId, TaskStatus>,
+) -> Vec<UnsatisfiableTaskDependency> {
+    task.dependencies()
+        .into_iter()
+        .filter_map(|dependency_id| {
+            if task_reference_is_not_verifiable_here(task, &dependency_id, status_by_id) {
+                return None;
+            }
+            let (status, reason) = match status_by_id.get(&dependency_id) {
+                None => ("missing".to_string(), DependencyDeadEnd::Missing),
+                Some(status) => (status.to_string(), status.dependency_dead_end()?),
+            };
+            Some(UnsatisfiableTaskDependency {
+                task_id: task.id.clone(),
+                dependency_id,
+                status,
+                reason,
+            })
         })
         .collect()
 }

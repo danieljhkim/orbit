@@ -1,8 +1,7 @@
-// ORB-00004: this implementation tree is crate-private; some planned or
+// This implementation tree is crate-private; some planned or
 // connector-specific tools are intentionally not registered by default yet.
 #![allow(dead_code)]
 
-pub mod fs;
 pub mod git;
 pub mod github;
 pub mod net;
@@ -13,7 +12,6 @@ pub mod time;
 use crate::ToolRegistry;
 
 pub fn register_builtins(registry: &mut ToolRegistry) {
-    fs::register(registry);
     git::register(registry);
     github::register(registry);
     orbit::register(registry);

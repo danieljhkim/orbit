@@ -1,14 +1,14 @@
 ---
 type: context
 summary: Orbit Configuration
-last_validated: 2026-07-27
+last_validated: 2026-08-15
 ---
 
 # Orbit Configuration
 
-Reference for Orbit's runtime config — the `config.toml` consumed by `orbit run ship`, `duel-plan`, and the activity-job dispatcher. The defaults shipped with the binary live in [`crates/orbit-core/assets/config/default-config.toml`](../crates/orbit-core/assets/config/default-config.toml).
+Reference for Orbit's runtime config — the `config.toml` consumed by `orbit run ship` and the activity-job dispatcher. The defaults shipped with the binary live in [`crates/orbit-core/assets/config/default-config.toml`](../crates/orbit-core/assets/config/default-config.toml).
 
-This doc focuses on the user-facing knobs: `[workflow]`, `[crews.*]`, and `[duel]`. Other sections are summarized at the end.
+This doc focuses on the user-facing knobs: `[workflow]` and `[crews.*]`. Other sections are summarized at the end.
 
 ## Where config lives
 
@@ -19,7 +19,24 @@ Two paths are consulted, in order:
 | `<workspace>/.orbit/config.toml` | Workspace-local | Hand-authored (optional) |
 | `~/.orbit/config.toml` | Global / user | `orbit init` |
 
-**Workspace config REPLACES global config — it does not merge.** If `.orbit/config.toml` exists in your workspace, the global file is ignored entirely. This is intentional: per-repo agent behaviour (sandbox mode, approval policy, crew composition) must be fully deterministic and not silently inherit whatever happens to be in the user's global config.
+Ordinary settings inherit per key: workspace values override global values, global values fill omissions, and built-in defaults fill remaining gaps.
+
+Tables layer down to individual settings, while scalar and array values replace the matching global value. Named crews layer by crew name and field, so this is a complete workspace override when the global file already defines `sol`:
+
+```toml
+[crews.sol]
+model = "gpt-5.6-terra"
+```
+
+Three security-sensitive settings deliberately do not inherit from global whenever a distinct workspace file exists:
+
+- `execution.codex.sandbox`
+- `execution.codex.approval_policy`
+- `execution.env.pass`
+
+If the workspace file omits one of these, Orbit uses that setting's built-in default. This keeps repository agent sandboxing, approval, and environment passthrough deterministic instead of depending on a user's global policy. `execution.env.inherit` is not a configurable key: agent subprocesses always start from a cleared environment.
+
+Run `orbit config show` for the effective merged view. Every setting is annotated as `workspace`, `global`, `built-in`, or `environment`, including the source file path where one applies. `orbit config show --json` exposes the same attribution in its `provenance` object. Use `--scope global` or `--scope workspace` to inspect either physical file alone.
 
 The workspace identity file `.orbit/config.yaml` is a separate artifact (it stores `workspace_id` for the canonical task store binding) and is unrelated to runtime config.
 
@@ -29,24 +46,25 @@ The workspace identity file `.orbit/config.yaml` is a separate artifact (it stor
 
 ```toml
 [workflow]
-base_branch = "main"        # default merge-base for ship / duel-plan
+base_branch = "main"        # default merge-base for ship
 default_crew = "sol"        # fallback crew when a task has no `crew` set
+system_crew = "qa"           # recovery and failed-run-triage crew
 ```
 
-- **`base_branch`** — the branch `orbit run ship` and `duel-plan` rebase against and target with PRs. Override per-invocation with `--base <branch>`. If your repo uses a two-branch pattern like this repo does (`main` = release, `agent-main` = dev integration), set `base_branch = "agent-main"`.
+- **`base_branch`** — the branch `orbit run ship` rebases against and targets with PRs. Override per-invocation with `--base <branch>`. If your repo uses a two-branch pattern like this repo does (`main` = release, `agent-main` = dev integration), set `base_branch = "agent-main"`.
 - **`default_crew`** — name of the crew under `[crews.<name>]` used for any task whose own `crew` field is unset. Must match a defined crew or config load fails. See [Per-task crew override](#per-task-crew-override) for how individual tasks select a different crew.
+- **`system_crew`** — name of the crew for `step_failure_recovery` and `triage_failed_runs`; defaults to `qa`, which `orbit init` seeds when it can configure an agent. It is resolved at every dispatch through the activities' explicit crew input, so it does not inherit a failed task's crew or the workspace default. A missing or unusable crew leaves the original failed step failed and emits a diagnostic naming `workflow.system_crew` and the configured crew.
 
 ---
 
 ## `[crews.<name>]` — which provider-model runs the task
 
-A **crew** is one provider-model-backend assignment. Every activity role (`planner`, `implementer`, or `reviewer`) resolves to that same assignment; the role remains a prompt and telemetry label, not a separate model-selection slot.
+A **crew** is one provider-model assignment. Activities do not carry a model-selection role: a rendered activity input may name a `crew`, and otherwise the activity inherits the run's resolved crew.
 
 | Field | Purpose | Values |
 |---|---|---|
-| `model` | Model identifier passed to the provider CLI | Provider-specific (e.g. `opus`, `sonnet`, `gpt-5.6-sol`, `pro`, `grok-build`) |
+| `model` | Model identifier passed to the provider CLI | Provider-specific (e.g. `opus`, `sonnet`, `gpt-5.6-sol`, `gemini-3.7-flash`, `grok-4.6`) |
 | `provider` | Agent family | `claude`, `codex`, `gemini`, `grok` (the CLI-executable families; see [Provider identity and resolution](#provider-identity-and-resolution) for the full canonical set) |
-| `backend` | How Orbit dispatches the agent | `cli` (today the only supported value for these roles) |
 | `description` | Optional human-facing crew summary | Any non-empty string after trimming |
 | `tags` | Optional discovery labels | Array of strings; normalized, sorted, and deduplicated |
 
@@ -56,24 +74,44 @@ Example — the standard Codex Sol crew:
 [crews.sol]
 model = "gpt-5.6-sol"
 provider = "codex"
-backend = "cli"
 description = "Systems implementation"
 tags = ["implementation", "review"]
 ```
 
-Fresh `orbit init` configuration advertises only detected provider CLIs. Claude seeds `opus`, `sonnet`, and `fable`; Codex seeds `sol`, `terra`, and `luna`; Gemini seeds `gemini`; and Grok seeds `grok`. When Codex or Claude is available, `qa` uses Terra or Sonnet respectively. Every generated entry uses the CLI backend. If no supported provider CLI is detected, init leaves both the crew registry and `workflow.default_crew` unset instead of writing an unusable provider.
+Example — the standard Grok crew:
 
-You can define any number of crews. Set the workspace-wide fallback with `workflow.default_crew`; assign a specific crew to individual tasks via the [per-task crew override](#per-task-crew-override). Crews are validated at load time: each crew must have non-empty `model`, `provider`, and `backend`; `workflow.default_crew` must name a defined crew.
+```toml
+[crews.grok]
+model = "grok-4.6"
+provider = "grok"
+```
 
-Crew metadata is canonical runtime data, not display-only TOML. Orbit trims
-`description` (blank becomes absent), trims each tag, drops blank tags, and stores
-tags in sorted deduplicated order. Legacy crew entries without these fields
-normalize to no description and an empty tag list. Owner execution-profile
-publication carries this complete projection to the hub; publication is stricter
-than legacy dispatch compatibility and fails closed if provider or backend cannot
-be canonicalized to a concrete executable combination.
+The current Grok Build CLI lists `grok-4.6` as its default from `grok models`, so Orbit uses that live menu id. The older `grok-build` string is not retained as a default or alias.
 
-> **Legacy compatibility.** Orbit still accepts the former `planner` / `implementer` / `reviewer` inline-table shape. It uses the `implementer` assignment for every role and logs an `orbit.config.crew` warning when planner or reviewer differs. Rewrite legacy crews to the flat shape above; cross-provider comparison belongs in the duel system.
+Fresh `orbit init` configuration advertises only detected provider CLIs. Claude seeds `opus`, `sonnet`, and `fable`; Codex seeds `sol`, `terra`, and `luna`; Gemini seeds `gemini`; and Grok seeds `grok`. When Codex or Claude is available, `qa` uses Terra or Sonnet respectively. If no supported provider CLI is detected, init leaves both the crew registry and `workflow.default_crew` unset instead of writing an unusable provider.
+
+You can define any number of crews. Set the workspace-wide fallback with `workflow.default_crew`; assign a specific crew to individual tasks via the [per-task crew override](#per-task-crew-override). Crews are validated at load time: each crew must have non-empty `model` and `provider`; `workflow.default_crew` must name a defined crew.
+
+Crew metadata is runtime data, not display-only TOML. Orbit trims `description`
+(blank becomes absent), trims each tag, drops blank tags, and stores tags in sorted
+deduplicated order. `orbit.crew.list` reads and normalizes the selected checkout's
+effective local configuration on the machine serving the request. It returns the
+versioned `CrewDiscoveryV1` projection directly; no execution-profile publication or
+registry database is involved.
+
+> **Retired crew shape.** `planner`, `implementer`, and `reviewer` sub-tables
+> are no longer accepted in a crew entry. A workspace using that old shape must
+> rewrite every `[crews.<name>]` entry to set flat `model` and `provider`
+> fields before Orbit can load its configuration. Use separate crew-bound runs
+> when comparing providers.
+
+> **Retired `backend` field.** `[crews.<name>] backend` selected the agent
+> execution backend. Orbit executes agent activities through the CLI agent path
+> only, so the setting no longer chooses anything: `backend = "cli"` is accepted
+> and ignored, while `"http"` and `"auto"` are rejected at config load with the
+> migration message. Remove the key. Orbit never rewrites `http` to the CLI
+> agent for you — that would change which runtime a crew dispatches to without
+> saying so.
 
 > **Note.** Earlier Orbit versions used `[agent.<role>]` tables. That schema was removed in [ORB-00058](../.orbit/) — config load now hard-errors if `[agent.*]` is present. Migrate to `[crews.<name>]` + `workflow.default_crew`.
 
@@ -81,7 +119,7 @@ be canonicalized to a concrete executable combination.
 
 ## Provider identity and resolution
 
-Every `provider` string Orbit reads — in `[crews.<name>]`, in an activity's inline `provider`, and in setup detection — is parsed through **one canonical surface** (`orbit_common::types::activity_job::Provider`, ORB-10091). Centralizing parsing means the crew layer, the agent-role resolver, the CLI executor, and reconciliation cannot disagree with each other or with Worker/Bridge about what a provider name means.
+Every `provider` string Orbit reads — in `[crews.<name>]`, in an activity's inline `provider`, and in setup detection — is parsed through **one canonical surface** (`orbit_common::types::activity_job::Provider`, ORB-10091). Centralizing parsing means the crew resolver, the CLI executor, and reconciliation cannot disagree with each other or with Worker/Bridge about what a provider name means.
 
 ### Canonical providers
 
@@ -106,11 +144,11 @@ Every `provider` string Orbit reads — in `[crews.<name>]`, in an activity's in
 
 - **Canonical ≠ Worker-executable.** Orbit's canonical set is deliberately wider than what the model-neutral Worker leaf executor can run: `ollama` and `openai_compat` are first-class Orbit providers but Worker does not execute them. This distinction is preserved on purpose — do not narrow the canonical set to Worker's subset.
 - **Known ≠ executable at this entry point.** The shared contract recognizes `ollama`, but the Orbit CLI capability set is the canonical cross-repo four; explicitly selecting `ollama` fails as `provider.unsupported` rather than falling back.
-- **`openai_compat` is HTTP-only.** It has no CLI runtime, so selecting it with `backend = "cli"` fails structurally (see below) rather than falling back.
+- **`openai_compat` has no CLI runtime.** Every crew dispatches through the CLI agent path, so selecting it fails structurally (see below) rather than falling back.
 
 ### Resolution precedence
 
-Provider selection is **two composed steps**, not one. Describe them precisely — the inline `provider` on an activity is the *template baseline*, **not** an explicit override that outranks the crew.
+Provider selection is **three composed steps**, not one. Describe them precisely — the inline `provider` on an activity is the *template baseline*, **not** an explicit override that outranks the crew.
 
 **1 — Which crew is dispatched** (`resolve_crew_for_task`). The crew *name* is chosen by the Constellation provider-resolution precedence (contract §3), first non-empty tier wins:
 
@@ -120,7 +158,9 @@ Provider selection is **two composed steps**, not one. Describe them precisely �
 4. **environment_default** — the `CONSTELLATION_DEFAULT_PROVIDER` environment variable (a canonical provider id, which names the same-named single-family crew).
 5. **system_default** — the canonical baseline (see below).
 
-**2 — The selected crew's assignment overrides the activity's inline baseline** (`resolve_from_config`). For each `(provider, model, backend)` field independently: the selected crew value wins **when present**; otherwise the activity's inline `agent_loop` value stands. A crew override that omits a field (or whose `provider` string is unparseable) leaves the inline baseline in place — so a config typo never coerces dispatch onto a wrong runtime. This is also why **persisted provider identity is never re-defaulted** during reconciliation: a provider already frozen on a run record is reused verbatim, not reset to the enum default.
+**2 — Which crew an activity uses.** A non-empty `crew` in the activity's rendered input selects that named crew. Without one, the activity uses the run's resolved crew from step 1. This is the only activity-authoring routing mechanism. Activity and job assets that declare `role` are rejected with guidance to pass `crew` in the activity input instead.
+
+**3 — The activity crew's assignment overrides the inline baseline** (`resolve_from_config`). For each `(provider, model)` field independently: the selected crew value wins **when present**; otherwise the activity's inline `agent_loop` value stands. A crew assignment that omits a field (or whose `provider` string is unparseable) leaves the inline baseline in place — so a config typo never coerces dispatch onto a wrong runtime. This is also why **persisted provider identity is never re-defaulted** during reconciliation: a provider already frozen on a run record is reused verbatim, not reset to the enum default.
 
 ### The one setting that changes the default — `CONSTELLATION_DEFAULT_PROVIDER`
 
@@ -175,38 +215,16 @@ The dropdown label `default: codex` in the dashboard means *the task has no `cre
 
 ---
 
-## `[duel]` — bake-off candidates for `duel-plan`
-
-`orbit run duel-plan` runs the planning step across multiple agent families in parallel and scores the results. `[duel]` controls which families participate.
-
-```toml
-[duel]
-candidates = ["codex", "claude", "gemini", "grok"]
-
-[duel.models]
-codex  = "gpt-5.6-terra"
-claude = "opus"
-gemini = "pro"
-grok   = "grok-build"
-```
-
-- **`candidates`** — at least 3 distinct entries drawn from the valid family list (`codex`, `claude`, `gemini`, `grok`). Duplicates and unknown families are rejected at load.
-- **`[duel.models]`** — optional per-family model override. Keys must be a subset of `candidates`. Values must be non-empty. When omitted, the duel executor uses a built-in model-pair default for that family.
-
-Use `[duel]` to constrain which CLIs Orbit will spawn — e.g. drop `grok` from `candidates` if Grok Build isn't authenticated on this machine.
-
----
-
 ## Other sections (brief)
 
 | Section | Purpose |
 |---|---|
-| `[execution.env]` | Env vars passed to agent subprocesses. `inherit = false` (default) means only the explicit `pass` list crosses the boundary; useful for keeping secrets out of agent CLIs. |
+| `[execution.env]` | Env vars passed to agent subprocesses. Only the explicit `pass` list crosses the boundary; the process environment is never inherited wholesale. |
 | `[execution.codex]` | Codex CLI sandbox mode. Valid: `read-only`, `workspace-write` (default), `danger-full-access`. Optional `approval_policy = "on-request"` enables escalation prompts. |
 | `[tasks]` | `id_start = N` sets a floor for the local task-id allocator: on runtime build the counter is raised to at least `N` (never lowered), so machines can hold disjoint id ranges (e.g. one `0–9999`, another `10000+`) and avoid cross-machine collisions. Capped by `ORB_TASK_ID_MAX` (99999) — setting it near the ceiling shrinks the usable range. Prefer the one-shot `orbit workspace init --task-id-start N` for the initial seed; the config key keeps the floor sticky across machines that share a config. See [task-migration overview](design/task-migration/1_overview.md). |
 | `[scoring]` | `enabled = true` records per-agent scoreboard counters under `.orbit/state/scoreboard/`. |
 | `[pr]` | PR creation defaults (template, labels, draft mode) for `orbit run ship --mode pr`. |
-| `[runtime]` | `backend = "cli" \| "http" \| "auto"` selects the activity-job dispatcher backend for v2 `agent_loop` activities. **JSONL log rotation/retention** (`~/.orbit/state/logs/orbit.jsonl`): `log_retention_days` (default `7`) deletes archives older than N days; `log_max_total_mb` (default `500`) caps total archive size, pruning oldest first; `log_max_file_mb` (default `100`) rolls the active file to a dated archive once it exceeds N MiB. Rotation runs opportunistically at process start. Invalid values (`0`, or `log_max_file_mb > log_max_total_mb`) are rejected at config load. |
+| `[runtime]` | **JSONL log rotation/retention** (`~/.orbit/state/logs/orbit.jsonl`): `log_retention_days` (default `7`) deletes archives older than N days; `log_max_total_mb` (default `500`) caps total archive size, pruning oldest first; `log_max_file_mb` (default `100`) rolls the active file to a dated archive once it exceeds N MiB. Rotation runs opportunistically at process start. Invalid values (`0`, or `log_max_file_mb > log_max_total_mb`) are rejected at config load. |
 
 ---
 
@@ -214,12 +232,12 @@ Use `[duel]` to constrain which CLIs Orbit will spawn — e.g. drop `grok` from 
 
 Config is parsed at startup; invalid entries fail loud rather than silently falling back. Common failure modes:
 
-- `[duel] candidates must contain at least 3 entries` — duel requires a non-trivial bake-off.
-- `[duel.models] contains key '<x>' that is not in resolved [duel].candidates` — model override for an unlisted family.
 - `[workflow].default_crew = '<x>' is not defined under [crews]` — name a crew that exists.
 - `config schema changed in ORB-00058; remove [agent.<role>] tables` — migrate to crews.
 - `execution.codex.sandbox has invalid value` — must be `read-only`, `workspace-write`, or `danger-full-access`.
 - `tasks.id_start N exceeds maximum task id 99999` — the allocator start must fit the `ORB-00000` id space.
 - `tasks.id_start N would lower the allocator below its current position M` — the counter only moves forward (raised only via `orbit workspace init --task-id-start`; the config key is a silent forward-only floor).
 
-When in doubt, copy the default ([`crates/orbit-core/assets/config/default-config.toml`](../crates/orbit-core/assets/config/default-config.toml)) into `.orbit/config.toml` and edit from there.
+The runtime parser intentionally accepts sections owned by other readers of the shared file, such as `[docs]`. Consequently, retired keys with no runtime reader can remain syntactically accepted but have no effect. Existing configs containing `[duel]` and `[duel.models]` still load during the compatibility window and emit a warning naming both retired tables; remove them. The keys `execution.env.inherit`, `task.approval.delegate_approval`, and `task.approval.required_for_agent` are also inert and should be removed; environment inheritance is fixed off, while agent approval is enforced by the capability/policy surfaces rather than these old flags.
+
+When in doubt, start with a minimal workspace file containing only genuine overrides. The annotated default ([`crates/orbit-core/assets/config/default-config.toml`](../crates/orbit-core/assets/config/default-config.toml)) is a reference for available settings, not a template that must be copied wholesale.

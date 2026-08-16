@@ -1,16 +1,16 @@
 use std::collections::HashMap;
-use std::str::FromStr;
 use std::sync::LazyLock;
 
 use chrono::{DateTime, Utc};
 use rusqlite::{params, types::ToSql};
 
-use orbit_common::types::{OrbitError, RoleSlot, TokenUsage, derive_cost_usd};
+use orbit_common::types::{OrbitError, TokenUsage, derive_cost_usd};
 
 use crate::{Store, now_string};
 
 use super::types::{
-    InvocationInsertParams, InvocationQuery, InvocationRecord, InvocationToolCallRecord,
+    InvocationAccountingFact, InvocationAccountingQuery, InvocationInsertParams, InvocationQuery,
+    InvocationRecord, InvocationToolCallRecord,
 };
 
 /// Every column the invocation-trace insert binds, in bind order.
@@ -26,7 +26,6 @@ pub(crate) const INVOCATION_INSERT_COLUMNS: &[&str] = &[
     "activity_id",
     "agent",
     "model",
-    "slot",
     "duration_ms",
     "input_tokens",
     "cache_read_tokens",
@@ -70,7 +69,6 @@ impl Store {
                 params.activity_id,
                 params.agent,
                 params.model,
-                params.slot.map(|slot| slot.as_str().to_string()),
                 params.trace.duration_ms as i64,
                 params.trace.usage.input as i64,
                 params.trace.usage.cache_read as i64,
@@ -117,6 +115,65 @@ impl Store {
 
         hydrate_invocation_records(self, &mut records)?;
         Ok(records)
+    }
+
+    /// Loads every invocation in the requested half-open window exactly once.
+    ///
+    /// This intentionally bypasses the detailed-list limit and hydrates only
+    /// distinct linked task ids, never tool-call rows.
+    pub fn list_invocation_accounting_facts(
+        &self,
+        query: &InvocationAccountingQuery,
+    ) -> Result<Vec<InvocationAccountingFact>, OrbitError> {
+        let conn = self.read()?;
+        let (sql, params): (&str, Vec<Box<dyn ToSql>>) = match query.since {
+            Some(since) => (
+                r#"SELECT i.id, i.ts, i.model, i.input_tokens, i.cache_read_tokens,
+                          i.cache_create_tokens, i.cache_create_1h_tokens, i.output_tokens,
+                          i.provider_cost_usd
+                   FROM invocations i
+                   WHERE i.ts >= ?1 AND i.ts < ?2
+                   ORDER BY i.ts ASC, i.id ASC"#,
+                vec![
+                    Box::new(since.to_rfc3339()),
+                    Box::new(query.until.to_rfc3339()),
+                ],
+            ),
+            None => (
+                r#"SELECT i.id, i.ts, i.model, i.input_tokens, i.cache_read_tokens,
+                          i.cache_create_tokens, i.cache_create_1h_tokens, i.output_tokens,
+                          i.provider_cost_usd
+                   FROM invocations i
+                   WHERE i.ts < ?1
+                   ORDER BY i.ts ASC, i.id ASC"#,
+                vec![Box::new(query.until.to_rfc3339())],
+            ),
+        };
+        let param_refs = params
+            .iter()
+            .map(|value| value.as_ref())
+            .collect::<Vec<_>>();
+        let mut stmt = conn
+            .prepare(sql)
+            .map_err(|error| OrbitError::Store(error.to_string()))?;
+        let rows = stmt
+            .query_map(param_refs.as_slice(), map_invocation_accounting_fact)
+            .map_err(|error| OrbitError::Store(error.to_string()))?;
+        let mut facts = rows
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|error| OrbitError::Store(error.to_string()))?;
+        drop(stmt);
+        drop(conn);
+
+        if facts.is_empty() {
+            return Ok(facts);
+        }
+        let invocation_ids = facts.iter().map(|fact| fact.id).collect::<Vec<_>>();
+        let mut task_ids = self.load_invocation_task_ids(&invocation_ids)?;
+        for fact in &mut facts {
+            fact.task_ids = task_ids.remove(&fact.id).unwrap_or_default();
+        }
+        Ok(facts)
     }
 
     fn load_invocation_task_ids(
@@ -236,9 +293,6 @@ fn build_invocation_list_query(filter: &InvocationQuery) -> (String, Vec<Box<dyn
     if let Some(model) = &filter.model {
         query.push_filter("i.model = ?", model.clone());
     }
-    if let Some(slot) = filter.slot {
-        query.push_filter("i.slot = ?", slot.as_str().to_string());
-    }
     if let Some(tool_name) = &filter.tool_name {
         query.push_filter(
             "EXISTS (SELECT 1 FROM tool_calls tc WHERE tc.invocation_id = i.id AND tc.tool_name = ?)",
@@ -250,7 +304,7 @@ fn build_invocation_list_query(filter: &InvocationQuery) -> (String, Vec<Box<dyn
     query.push_value(limit as i64);
 
     let sql = format!(
-        "SELECT i.id, i.ts, i.job_run_id, i.activity_id, i.agent, i.model, i.slot, i.duration_ms, \
+        "SELECT i.id, i.ts, i.job_run_id, i.activity_id, i.agent, i.model, i.duration_ms, \
          i.input_tokens, i.cache_read_tokens, i.cache_create_tokens, i.cache_create_1h_tokens, \
          i.output_tokens, i.tool_call_count, i.provider_cost_usd \
          FROM invocations i {} ORDER BY i.ts DESC, i.id DESC LIMIT ?{}",
@@ -263,15 +317,14 @@ fn build_invocation_list_query(filter: &InvocationQuery) -> (String, Vec<Box<dyn
 
 fn map_invocation_record(row: &rusqlite::Row<'_>) -> rusqlite::Result<InvocationRecord> {
     let ts_raw: String = row.get(1)?;
-    let slot_raw: Option<String> = row.get(6)?;
     let model: Option<String> = row.get(5)?;
     let ts = parse_rfc3339_timestamp(&ts_raw)?;
-    let input_tokens = row.get::<_, i64>(8)? as u64;
-    let cache_read_tokens = row.get::<_, i64>(9)? as u64;
-    let cache_create_tokens = row.get::<_, i64>(10)? as u64;
-    let cache_create_1h_tokens = row.get::<_, i64>(11)? as u64;
-    let output_tokens = row.get::<_, i64>(12)? as u64;
-    let provider_cost_usd: Option<f64> = row.get(14)?;
+    let input_tokens = row.get::<_, i64>(7)? as u64;
+    let cache_read_tokens = row.get::<_, i64>(8)? as u64;
+    let cache_create_tokens = row.get::<_, i64>(9)? as u64;
+    let cache_create_1h_tokens = row.get::<_, i64>(10)? as u64;
+    let output_tokens = row.get::<_, i64>(11)? as u64;
+    let provider_cost_usd: Option<f64> = row.get(13)?;
 
     let derived_cost_usd = model.as_deref().and_then(|model| {
         derive_cost_usd(
@@ -294,27 +347,57 @@ fn map_invocation_record(row: &rusqlite::Row<'_>) -> rusqlite::Result<Invocation
         activity_id: row.get(3)?,
         agent: row.get(4)?,
         model,
-        slot: slot_raw
-            .as_deref()
-            .map(RoleSlot::from_str)
-            .transpose()
-            .map_err(|error| {
-                rusqlite::Error::FromSqlConversionFailure(
-                    6,
-                    rusqlite::types::Type::Text,
-                    Box::new(error),
-                )
-            })?,
-        duration_ms: row.get::<_, i64>(7)? as u64,
+        duration_ms: row.get::<_, i64>(6)? as u64,
         input_tokens,
         cache_read_tokens,
         cache_create_tokens,
         cache_create_1h_tokens,
         output_tokens,
         total_tokens: input_tokens.saturating_add(output_tokens),
-        tool_call_count: row.get::<_, i64>(13)? as u64,
+        tool_call_count: row.get::<_, i64>(12)? as u64,
         task_ids: Vec::new(),
         tool_calls: Vec::new(),
+        provider_cost_usd,
+        derived_cost_usd,
+    })
+}
+
+fn map_invocation_accounting_fact(
+    row: &rusqlite::Row<'_>,
+) -> rusqlite::Result<InvocationAccountingFact> {
+    let ts_raw: String = row.get(1)?;
+    let ts = parse_rfc3339_timestamp(&ts_raw)?;
+    let model: Option<String> = row.get(2)?;
+    let input_tokens = row.get::<_, i64>(3)? as u64;
+    let cache_read_tokens = row.get::<_, i64>(4)? as u64;
+    let cache_create_tokens = row.get::<_, i64>(5)? as u64;
+    let cache_create_1h_tokens = row.get::<_, i64>(6)? as u64;
+    let output_tokens = row.get::<_, i64>(7)? as u64;
+    let provider_cost_usd = row.get(8)?;
+    let derived_cost_usd = model.as_deref().and_then(|model| {
+        derive_cost_usd(
+            model,
+            ts,
+            &TokenUsage {
+                input: input_tokens,
+                cache_read: cache_read_tokens,
+                cache_create: cache_create_tokens,
+                cache_create_1h: cache_create_1h_tokens,
+                output: output_tokens,
+            },
+        )
+    });
+
+    Ok(InvocationAccountingFact {
+        id: row.get(0)?,
+        ts,
+        model,
+        input_tokens,
+        cache_read_tokens,
+        cache_create_tokens,
+        cache_create_1h_tokens,
+        output_tokens,
+        task_ids: Vec::new(),
         provider_cost_usd,
         derived_cost_usd,
     })

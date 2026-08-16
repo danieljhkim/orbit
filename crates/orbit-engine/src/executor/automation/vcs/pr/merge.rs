@@ -1,22 +1,20 @@
 use std::path::Path;
 
-use orbit_common::types::{ExternalRef, OrbitError, Role, Task, TaskStatus};
+use orbit_common::types::{ExternalRef, OrbitError, Task, TaskStatus};
 use orbit_store::pr_scoreboard;
-use orbit_tools::ToolContext;
 use serde_json::{Value, json};
 
-use crate::context::{DeterministicActionHost, TaskAutomationUpdate, TaskHost};
+use crate::context::{RuntimeHost, TaskAutomationUpdate};
 
 use super::super::super::input::{
     canonicalize_existing_dir, input_string_field, required_job_run_id,
 };
 use super::super::freshness::ensure_branch_fresh_against_base;
 use super::super::git::{base_sync_mode_from_input, git_command_success, git_output};
+use super::super::operations;
 use super::attribution::ship_done_attribution;
 
-pub(in crate::executor::automation) fn git_merge<
-    H: DeterministicActionHost + TaskHost + Sync + ?Sized,
->(
+pub(in crate::executor::automation) fn git_merge<H: RuntimeHost + Sync + ?Sized>(
     host: &H,
     input: &Value,
 ) -> Result<Value, OrbitError> {
@@ -41,7 +39,7 @@ pub(in crate::executor::automation) fn git_merge<
     }
 }
 
-pub(super) fn merge_batch_pr<H: DeterministicActionHost + TaskHost + ?Sized>(
+pub(super) fn merge_batch_pr<H: RuntimeHost + ?Sized>(
     host: &H,
     input: &Value,
 ) -> Result<Value, OrbitError> {
@@ -97,25 +95,13 @@ pub(super) fn merge_batch_pr<H: DeterministicActionHost + TaskHost + ?Sized>(
 
     ensure_branch_fresh_against_base(&workspace_path, &head, &base, base_sync_mode)?;
 
-    let tool_context = ToolContext {
-        cwd: Some(workspace_path.to_string_lossy().to_string()),
-        allowed_tools: vec![],
-        ..Default::default()
-    };
-    host.run_tool_with_context_and_role(
-        "github.pr.merge",
+    host.run_private_vcs_operation(
+        operations::PR_MERGE,
         json!({
             "pr": pr_number,
             "strategy": "squash",
-            // Do not pass --delete-branch to `gh pr merge` because the local
-            // branch is still attached to the shared worktree and `gh` would
-            // fail trying to delete it.  We delete the remote branch separately
-            // below, tolerating errors (the repo may auto-delete branches after
-            // merge).
-            "delete_branch": false,
+            "workspace_path": workspace_path,
         }),
-        Role::Admin,
-        tool_context,
     )?;
 
     // Best-effort remote branch cleanup.  Some repos have GitHub's
@@ -163,7 +149,7 @@ pub(super) fn merge_batch_pr<H: DeterministicActionHost + TaskHost + ?Sized>(
     Ok(json!({ "merged": true }))
 }
 
-fn resolve_batch_workspace_path<H: DeterministicActionHost + ?Sized>(
+fn resolve_batch_workspace_path<H: RuntimeHost + ?Sized>(
     host: &H,
     input: &Value,
     batch_id: &str,
@@ -177,7 +163,10 @@ fn resolve_batch_workspace_path<H: DeterministicActionHost + ?Sized>(
     }
 }
 
-fn task_required_revision<H: TaskHost + ?Sized>(host: &H, task: &Task) -> Result<bool, OrbitError> {
+fn task_required_revision<H: RuntimeHost + ?Sized>(
+    host: &H,
+    task: &Task,
+) -> Result<bool, OrbitError> {
     let history = host.get_task_history(&task.id)?;
     Ok(history.iter().any(|entry| {
         entry.event == "status_changed"

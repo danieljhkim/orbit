@@ -1,9 +1,14 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
+use std::fmt::Write as _;
 
 use chrono::{DateTime, Utc};
 use orbit_common::types::{ArtifactManifestFileV2, TaskArtifact};
-use orbit_core::{OrbitError, OrbitRuntime, TaskStatus, resolve_task_dependencies};
+use orbit_core::{
+    OrbitError, OrbitRuntime, TaskStatus, resolve_task_dependencies, resolve_task_relations,
+};
 use serde_json::{Value, json};
+
+use crate::output::color::Domain;
 
 /// Legacy bare `commented` history entries duplicate the authoritative Comments
 /// list, so human-facing history rendering omits them (ORB-10311). Raw JSON/MCP
@@ -49,10 +54,11 @@ pub(crate) fn task_to_json(
         "type": task.task_type.to_string(),
         "pr_status": task.pr_status,
         "external_refs": task.external_refs,
-        "relations": task.relations,
+        "relations": resolve_task_relations(task, status_by_id),
         "source_task_id": task.source_task_id(),
         "job_run_id": task.job_run_id,
         "crew": task.crew,
+        "orchestrator": task.orchestrator,
         "created_at": task.created_at.to_rfc3339(),
         "updated_at": task.updated_at.to_rfc3339(),
     })
@@ -89,48 +95,71 @@ pub(crate) fn task_to_json_with_sidecars(
         "artifacts".to_string(),
         task_artifact_manifest_to_json(&runtime.get_task_artifact_manifest(&task.id)?),
     );
-    if let Some(projection) = runtime.resolved_crew_projection(task)? {
-        object.insert("resolved_crew".to_string(), Value::String(projection.name));
-        object.insert("crew_model".to_string(), Value::String(projection.model));
+    // `resolved_crew` enriches the record; it does not define it. A task may
+    // name a crew this workspace has no `[crews.*]` entry for — a config gap,
+    // not a corrupt task — and the fields are simply absent then.
+    //
+    // This used to propagate, which was invisible while only `--json` built
+    // this projection. Since ORB-10586 every mode does (the payload is the
+    // same records in both), so propagating would mean `orbit task show`
+    // refusing to display a task whose crew is undefined here. The reason goes
+    // to stderr rather than being swallowed.
+    match runtime.resolved_crew_projection(task) {
+        Ok(Some(projection)) => {
+            object.insert("resolved_crew".to_string(), Value::String(projection.name));
+            object.insert("crew_model".to_string(), Value::String(projection.model));
+        }
+        Ok(None) => {}
+        Err(error) => eprintln!(
+            "warning: crew for task {} could not be resolved: {error}",
+            task.id
+        ),
     }
     Ok(value)
 }
 
-pub(crate) fn task_lock_to_json(task: &orbit_core::Task) -> Value {
-    json!({
-        "id": task.id,
-        "title": task.title,
-        "status": task.status.to_string(),
-        "job_run_id": task.job_run_id,
-        "crew": task.crew,
-        "context_files": task.context_files,
-    })
+/// Which columns the caller filtered on, and so must keep even when the filter
+/// left them carrying a single value.
+#[derive(Clone, Copy, Default)]
+pub(super) struct TaskTableFilters {
+    pub(super) status: bool,
+    pub(super) priority: bool,
+    pub(super) task_type: bool,
 }
 
-pub(super) fn print_task_table(tasks: &[orbit_core::Task], full: bool) {
+/// Build the list view for `orbit task list`. The renderer decides how it is
+/// projected; this only describes the columns and the rows.
+pub(super) fn task_table(
+    tasks: &[orbit_core::Task],
+    full: bool,
+    filtered: TaskTableFilters,
+) -> crate::output::table::Table {
+    use crate::output::table::Column;
     use comfy_table::Cell;
-    let headers = if full {
-        vec![
-            "ID",
-            "TITLE",
-            "STATUS",
-            "PRIORITY",
-            "TYPE",
-            "IMPLEMENTED_BY",
-            "CREATED_AT",
-            "UPDATED_AT",
-        ]
-    } else {
-        vec!["ID", "TITLE", "STATUS", "PRIORITY", "TYPE"]
-    };
-    let mut table = crate::output::table::build_table(&headers);
+    // `orbit task show <id>` prints the untruncated title and body of any row.
+    let mut columns = vec![
+        Column::new("ID").fixed(),
+        Column::new("TITLE"),
+        Column::new("STATUS").fixed().filtered(filtered.status),
+        Column::new("PRIORITY").fixed().filtered(filtered.priority),
+        Column::new("TYPE").fixed().filtered(filtered.task_type),
+    ];
+    if full {
+        columns.extend([
+            Column::new("IMPLEMENTED_BY").fixed(),
+            Column::new("CREATED_AT").fixed(),
+            Column::new("UPDATED_AT").fixed(),
+        ]);
+    }
+    let mut table = crate::output::table::Table::new(columns)
+        .empty_message("no tasks matching the given filters");
     for task in tasks {
         let mut row = vec![
             Cell::new(&task.id),
             Cell::new(&task.title),
-            crate::output::color::status_color_cell(&task.status.to_string()),
-            crate::output::color::priority_color_cell(&task.priority.to_string()),
-            crate::output::color::task_type_color_cell(&task.task_type.to_string()),
+            crate::output::color::cell(&task.status.to_string(), Domain::TaskStatus),
+            crate::output::color::cell(&task.priority.to_string(), Domain::Priority),
+            crate::output::color::cell(&task.task_type.to_string(), Domain::TaskType),
         ];
         if full {
             row.extend([
@@ -139,40 +168,88 @@ pub(super) fn print_task_table(tasks: &[orbit_core::Task], full: bool) {
                 Cell::new(format_task_table_timestamp(task.updated_at)),
             ]);
         }
-        crate::output::table::add_single_line_row(&mut table, row);
+        table.add_row(row);
     }
-    println!("{table}");
+    table
 }
 
-pub(crate) fn print_task_locks(tasks: &[orbit_core::Task], locked_files: &BTreeSet<String>) {
-    if tasks.is_empty() {
-        println!("No files currently locked.");
-        return;
+/// Render `orbit task locks list`'s human-readable view from the same
+/// `orbit.task.locks` projection `--json` prints verbatim, so the two
+/// surfaces cannot disagree about what a reservation is.
+pub(crate) fn format_task_locks(locks: &Value) -> String {
+    let by_task = locks["by_task"].as_array().map_or(&[][..], Vec::as_slice);
+    let by_reservation = locks["by_reservation"]
+        .as_array()
+        .map_or(&[][..], Vec::as_slice);
+
+    let mut out = String::new();
+    if by_task.is_empty() && by_reservation.is_empty() {
+        out.push_str("No files currently locked.\n");
+        return out;
     }
 
-    for (index, task) in tasks.iter().enumerate() {
+    for (index, task) in by_task.iter().enumerate() {
         if index > 0 {
-            println!();
+            out.push('\n');
         }
 
-        match task.job_run_id.as_deref() {
-            Some(job_run_id) => println!(
-                "[{}] {} ({}, job_run={})",
-                task.id, task.title, task.status, job_run_id
-            ),
-            None => println!("[{}] {} ({})", task.id, task.title, task.status),
+        let id = task["id"].as_str().unwrap_or_default();
+        let title = task["title"].as_str().unwrap_or_default();
+        let status = task["status"].as_str().unwrap_or_default();
+        match task["job_run_id"].as_str() {
+            Some(job_run_id) => {
+                let _ = writeln!(out, "[{id}] {title} ({status}, job_run={job_run_id})");
+            }
+            None => {
+                let _ = writeln!(out, "[{id}] {title} ({status})");
+            }
         }
 
-        for path in &task.context_files {
-            println!("  - {}", path);
+        for path in task["context_files"]
+            .as_array()
+            .map_or(&[][..], Vec::as_slice)
+        {
+            if let Some(path) = path.as_str() {
+                let _ = writeln!(out, "  - {path}");
+            }
         }
     }
 
-    println!(
-        "\n{} file(s) locked across {} task(s).",
-        locked_files.len(),
-        tasks.len()
+    let total_locked = locks["total_locked"].as_u64().unwrap_or(0);
+    let total_tasks = locks["total_tasks"].as_u64().unwrap_or(0);
+    let _ = writeln!(
+        out,
+        "\n{total_locked} file(s) locked across {total_tasks} task(s)."
     );
+
+    if !by_reservation.is_empty() {
+        out.push_str("\nReservations:\n");
+        for reservation in by_reservation {
+            let id = reservation["reservation_id"].as_str().unwrap_or_default();
+            let task_ids = json_str_list(&reservation["task_ids"]);
+            let files = json_str_list(&reservation["files"]);
+            let expires_at = reservation["expires_at"].as_str().unwrap_or_default();
+            let _ = writeln!(
+                out,
+                "[{id}] tasks=[{task_ids}] files=[{files}] expires_at={expires_at}"
+            );
+        }
+    }
+
+    out
+}
+
+fn json_str_list(value: &Value) -> String {
+    value
+        .as_array()
+        .map(|values| {
+            values
+                .iter()
+                .filter_map(Value::as_str)
+                .collect::<Vec<_>>()
+                .join(", ")
+        })
+        .unwrap_or_default()
 }
 
 pub(super) fn task_field_to_json(
@@ -207,11 +284,15 @@ pub(super) fn task_field_to_json(
         "context_files" => {
             serde_json::to_value(&task.context_files).map_err(|e| OrbitError::Io(e.to_string()))
         }
+        "crew" => serde_json::to_value(&task.crew).map_err(|e| OrbitError::Io(e.to_string())),
+        "orchestrator" => {
+            serde_json::to_value(&task.orchestrator).map_err(|e| OrbitError::Io(e.to_string()))
+        }
         "artifacts" => Ok(task_artifacts_to_json(
             &runtime.get_task_artifacts(&task.id)?,
         )),
         other => Err(OrbitError::InvalidInput(format!(
-            "unknown field selector `{other}`. Valid values: comments, plan, execution_summary, description, acceptance_criteria, dependencies, resolved_dependencies, tags, history, context_files, artifacts"
+            "unknown field selector `{other}`. Valid values: comments, plan, execution_summary, description, acceptance_criteria, dependencies, resolved_dependencies, tags, history, context_files, crew, orchestrator, artifacts"
         ))),
     }
 }
@@ -350,6 +431,14 @@ pub(super) fn print_single_task_field(
             }
             Ok(())
         }
+        "crew" => {
+            print!("{}", task.crew.as_deref().unwrap_or_default());
+            Ok(())
+        }
+        "orchestrator" => {
+            print!("{}", task.orchestrator.as_deref().unwrap_or_default());
+            Ok(())
+        }
         "artifacts" => {
             use crate::output::color::bold;
             let artifacts = runtime.get_task_artifacts(&task.id)?;
@@ -373,7 +462,7 @@ pub(super) fn print_single_task_field(
             Ok(())
         }
         other => Err(OrbitError::InvalidInput(format!(
-            "unknown field selector `{other}`. Valid values: comments, plan, execution_summary, description, acceptance_criteria, dependencies, resolved_dependencies, tags, history, context_files, artifacts"
+            "unknown field selector `{other}`. Valid values: comments, plan, execution_summary, description, acceptance_criteria, dependencies, resolved_dependencies, tags, history, context_files, crew, orchestrator, artifacts"
         ))),
     }
 }

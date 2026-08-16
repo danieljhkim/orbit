@@ -2,6 +2,7 @@
 title: Operations as Data — Vision
 owner: claude
 last_updated: 2026-07-26
+last_validated: 2026-08-09
 status: Accepted
 feature: operations-as-data
 doc_role: vision
@@ -10,7 +11,7 @@ summary: Open questions left by the friction pilot — which nouns migrate next,
 tags: [operations-as-data, architecture, adr-0209]
 paths: ["crates/orbit-common/src/operation.rs"]
 related_features: [operations-as-data, orbit-core]
-related_artifacts: [ORB-10358, ADR-0209]
+related_artifacts: [ORB-10358]
 ---
 
 # Operations as Data — Vision
@@ -37,7 +38,7 @@ schedule migrations.
    lifecycle state, reservations, and the semantic index. Whether those fit
    `OperationSpec` unchanged, or need an effects declaration, is unknown until
    someone tries.
-4. **Does the split table survive bearing 2?** ADR-0209 bearing 2 (knowledge /
+4. **Does the split table survive bearing 2?** [North-star architecture bearing: operations as data behind an operation registry](../orbit-core/4_decisions.md#north-star-architecture-bearing-operations-as-data-behind-an-operation-registry) bearing 2 (knowledge /
    execution split) would move the knowledge nouns' handlers away from the
    current `OrbitRuntime`. If handlers end up in a crate that can sit below the
    surfaces, the spec and handler halves could merge — which is the shape bearing
@@ -55,14 +56,14 @@ schedule migrations.
 
 ### Inside Orbit
 
-- **ADR-0209** — the north-star bearing this feature implements, now carrying the
+- **[North-star architecture bearing: operations as data behind an operation registry](../orbit-core/4_decisions.md#north-star-architecture-bearing-operations-as-data-behind-an-operation-registry)** — the north-star bearing this feature implements, now carrying the
   pilot outcome and the ratchet.
-- **`orbit-cli/src/command/operation.rs`** — the pre-existing "commands as data"
+- **`crates/orbit-cli/src/command/operation.rs`** — the pre-existing "commands as data"
   table for *top-level CLI dispatch* (runtime need, audit metadata, JSON error
   preference). Same instinct, different axis: it declares cross-cutting policy
   per top-level command, where this feature declares the operation itself. The
   two compose — the friction arm of that table now reads the operation registry.
-- **ADR-0203 / ORB-10016** — the orbit-cmd extraction whose documented residuals
+- **[Extract the CLI-facing command layer into orbit-cmd](../orbit-core/4_decisions.md#extract-the-cli-facing-command-layer-into-orbit-cmd) / ORB-10016** — the orbit-cmd extraction whose documented residuals
   (runtime-entangled command groups that could not move because of inherent impls
   and the orphan rule) are the concrete pain bearing 1 exists to dissolve.
 

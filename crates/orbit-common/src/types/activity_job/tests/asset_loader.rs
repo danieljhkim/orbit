@@ -45,3 +45,43 @@ fn load_activity_asset_rejects_empty_tool_name() {
     assert!(message.contains("empty tool name"), "{message}");
     assert!(message.contains("index 0"), "{message}");
 }
+
+#[test]
+fn activity_role_error_names_asset_and_crew_replacement() {
+    let yaml = agent_loop_activity_yaml("legacy_activity", "    - orbit.task.show\n")
+        + "  role: implementer\n";
+    let error = load_activity_asset(&yaml).expect_err("retired role must fail");
+    let message = error.to_string();
+    assert!(message.contains("activity `legacy_activity`"), "{message}");
+    assert!(
+        message.contains("pass `crew` in the activity input"),
+        "{message}"
+    );
+    assert!(message.contains("run's resolved crew"), "{message}");
+}
+
+#[test]
+fn nested_job_role_error_names_asset_and_crew_replacement() {
+    let yaml = r#"schemaVersion: 2
+kind: Job
+metadata:
+  name: legacy_job
+spec:
+  state: enabled
+  steps:
+    - id: outer
+      loop:
+        max_iterations: 1
+        steps:
+          - id: legacy
+            role: planner
+            target: activity:anything
+"#;
+    let error = load_job_asset(yaml).expect_err("retired role must fail");
+    let message = error.to_string();
+    assert!(message.contains("job `legacy_job`"), "{message}");
+    assert!(
+        message.contains("pass `crew` in the activity input"),
+        "{message}"
+    );
+}

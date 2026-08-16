@@ -4,6 +4,8 @@ use orbit_common::types::{
 use serde::Deserialize;
 use serde_json::{Deserializer, Value};
 
+use super::protocol_schema::{RESPONSE_ENVELOPE_SCHEMA_VERSION, RESPONSE_ENVELOPE_STATUSES};
+use super::wrapper::wrapper_signals;
 use super::{AgentResponseStatus, ResponseParseResult, trace::extract_invocation_trace};
 
 pub fn parse_and_validate_response(exec_result: &ExecutionResult) -> ResponseParseResult {
@@ -70,24 +72,43 @@ pub fn response_envelope_protocol_check(stdout: &str) -> Result<(), OrbitError> 
             .find_map(find_agent_response_envelope),
         Err(_) => find_agent_response_envelope_in_string(stdout),
     };
-    let envelope = envelope.ok_or_else(|| {
-        OrbitError::AgentProtocolViolation(
-            "stdout does not contain an Orbit response envelope".to_string(),
-        )
-    })?;
-    if envelope.schema_version != 1 {
+    let envelope = envelope
+        .ok_or_else(|| OrbitError::AgentProtocolViolation(missing_envelope_message(stdout)))?;
+    if envelope.schema_version != RESPONSE_ENVELOPE_SCHEMA_VERSION {
         return Err(OrbitError::AgentProtocolViolation(format!(
             "unsupported schemaVersion: {}",
             envelope.schema_version
         )));
     }
-    if !matches!(envelope.status.as_str(), "success" | "failed" | "timeout") {
+    if !RESPONSE_ENVELOPE_STATUSES.contains(&envelope.status.as_str()) {
         return Err(OrbitError::AgentProtocolViolation(format!(
             "unknown status: {}",
             envelope.status
         )));
     }
     Ok(())
+}
+
+/// The invariant the [ORB-10449] completion guard is built on. Kept verbatim
+/// as the prefix of every missing-envelope diagnostic so the failure stays
+/// recognizable while [ORB-10746] appends a cause when one is available.
+const MISSING_ENVELOPE_MESSAGE: &str = "stdout does not contain an Orbit response envelope";
+
+/// [ORB-10746] Explain *why* a run ended without an envelope when the
+/// provider's own wrapper says the ending was abnormal.
+///
+/// A turn-limit or otherwise-errored ending exits 0 with no envelope, exactly
+/// like an agent that answered in prose, and used to be indistinguishable from
+/// it. This changes only the message: the decision to fail was already made by
+/// the caller, and no wrapper signal can reverse it.
+fn missing_envelope_message(stdout: &str) -> String {
+    let Some(diagnostic) = parse_json_documents(stdout)
+        .ok()
+        .and_then(|documents| wrapper_signals(&documents).terminal_ending_diagnostic())
+    else {
+        return MISSING_ENVELOPE_MESSAGE.to_string();
+    };
+    format!("{MISSING_ENVELOPE_MESSAGE}: {diagnostic}")
 }
 
 fn parse_json_documents(stdout: &str) -> Result<Vec<Value>, OrbitError> {
@@ -144,13 +165,11 @@ fn parse_json_envelope(exec_result: &ExecutionResult) -> ResponseParseResult {
         .rev()
         .find_map(find_agent_response_envelope)
         .ok_or_else(|| {
-            OrbitError::AgentProtocolViolation(
-                "stdout does not contain an Orbit response envelope".to_string(),
-            )
+            OrbitError::AgentProtocolViolation(missing_envelope_message(&exec_result.stdout))
         })?;
     let trace = extract_invocation_trace(&documents, exec_result.duration_ms);
 
-    if envelope.schema_version != 1 {
+    if envelope.schema_version != RESPONSE_ENVELOPE_SCHEMA_VERSION {
         return Err(OrbitError::AgentProtocolViolation(format!(
             "unsupported schemaVersion: {}",
             envelope.schema_version
@@ -207,25 +226,74 @@ pub(in crate::types) fn synthesize_response(
         ));
     }
 
+    // [ORB-10746] An exit-0 ending the provider itself flagged as abnormal —
+    // a turn limit, an errored terminal reason — carries no envelope, so the
+    // guard above would have returned `None` and the run would surface only
+    // the generic missing-envelope text. Synthesize the failure it plainly is,
+    // with the provider's own reason attached.
+    //
+    // This is the only new synthesis path, and it is failure-only by
+    // construction: no combination of `is_error`, `subtype`, `terminal_reason`,
+    // exit code, or provider prose can produce a `success` envelope here.
+    if let Some(diagnostic) = exit_zero_terminal_failure(exec_result) {
+        return Some(synthesized_failure(
+            exec_result,
+            "AGENT_TERMINAL_ENDING",
+            diagnostic,
+        ));
+    }
+
     if exec_result.exit_code.unwrap_or(1) == 0 || !exec_result.stdout.trim().is_empty() {
         return None;
     }
 
-    Some((
+    Some(synthesized_failure(
+        exec_result,
+        "AGENT_INVOCATION_FAILED",
+        synthetic_error_message(exec_result),
+    ))
+}
+
+fn synthesized_failure(
+    exec_result: &ExecutionResult,
+    code: &str,
+    message: String,
+) -> (AgentResponseEnvelope, AgentResponseStatus, InvocationTrace) {
+    (
         AgentResponseEnvelope {
-            schema_version: 1,
+            schema_version: RESPONSE_ENVELOPE_SCHEMA_VERSION,
             status: "failed".to_string(),
             result: None,
             error: Some(AgentRunError {
-                code: "AGENT_INVOCATION_FAILED".to_string(),
-                message: synthetic_error_message(exec_result),
+                code: code.to_string(),
+                message,
                 details: Value::Null,
             }),
             duration_ms: Some(exec_result.duration_ms),
         },
         AgentResponseStatus::Failed,
         synthesize_trace(exec_result),
-    ))
+    )
+}
+
+/// A clean exit whose wrapper nonetheless reports an abnormal ending, with no
+/// envelope anywhere in stdout.
+///
+/// Requires the absence of an envelope: a real envelope is the authoritative
+/// outcome whatever its status, and must never be displaced by a synthesized
+/// one — that would let wrapper prose overrule the protocol.
+fn exit_zero_terminal_failure(exec_result: &ExecutionResult) -> Option<String> {
+    if exec_result.exit_code.unwrap_or(1) != 0 {
+        return None;
+    }
+    let documents = parse_json_documents(&exec_result.stdout).ok()?;
+    if documents
+        .iter()
+        .any(|document| find_agent_response_envelope(document).is_some())
+    {
+        return None;
+    }
+    wrapper_signals(&documents).terminal_ending_diagnostic()
 }
 
 // Best-effort trace extraction for the fallback path. Provider CLIs (e.g.
@@ -267,6 +335,14 @@ fn find_agent_response_envelope(value: &Value) -> Option<AgentResponseEnvelope> 
         Value::Array(items) => items.iter().rev().find_map(find_agent_response_envelope),
         Value::Object(map) => {
             for key in [
+                // [ORB-10746] `structured_output` first: with `--json-schema`
+                // in play it is the schema-validated object the provider
+                // committed to, and Claude duplicates it into `result` only as
+                // a JSON-encoded string. `result` is null on several terminal
+                // paths where `structured_output` still holds the envelope, so
+                // probing it first is the difference between reading the
+                // authoritative field and parsing a copy by luck.
+                "structured_output",
                 "result",
                 "response",
                 "message",
@@ -306,5 +382,24 @@ fn deserialize_envelope(value: &Value) -> Option<AgentResponseEnvelope> {
     if !object.contains_key("schemaVersion") || !object.contains_key("status") {
         return None;
     }
-    serde_json::from_value(value.clone()).ok()
+    // [ORB-10770] Claude's constrained decoder, given an untyped `error` and a
+    // description that said "null when status is success", emits the JSON
+    // *string* `"null"` (`jrun-20260813-0451-3`). `Option<AgentRunError>`
+    // cannot accept a string, so the finder used to miss a completed
+    // envelope. Treat `"null"` / `""` as absent; JSON null is already `None`
+    // via `#[serde(default)]`. This only makes a recognizable frame parse —
+    // it does not infer success from wrapper signals.
+    match object.get("error") {
+        Some(Value::String(token)) if is_absent_error_string(token) => {
+            let mut object = object.clone();
+            object.remove("error");
+            serde_json::from_value(Value::Object(object)).ok()
+        }
+        _ => serde_json::from_value(value.clone()).ok(),
+    }
+}
+
+fn is_absent_error_string(token: &str) -> bool {
+    let trimmed = token.trim();
+    trimmed.is_empty() || trimmed == "null"
 }

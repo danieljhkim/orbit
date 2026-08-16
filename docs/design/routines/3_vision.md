@@ -1,30 +1,30 @@
 ---
 title: Routines — Vision
 owner: claude
-last_updated: 2026-07-18
+last_updated: 2026-08-15
 status: Draft
 feature: routines
 doc_role: vision
 type: design
 summary: Open questions and prior art for the routines scheduler — leases, event triggers, ship-sweep convergence.
 tags: [routines, scheduler]
-paths: ["crates/orbit-core/src/routines/**", "crates/orbit-remote/src/routines.rs"]
+paths: ["crates/orbit-core/src/routines/**", "crates/orbit-cmd/src/registry_routines.rs", "crates/orbit-cmd/src/registry_runtime.rs", "crates/orbit-registry/src/**"]
 related_features: [routines, activity-job, host-registry]
-related_artifacts: [ORB-10001, ORB-10021, ORB-10207, ORB-10270, ORB-10319, ADR-0223]
+related_artifacts: [ORB-10001, ORB-10021, ORB-10207, ORB-10270, ORB-10319]
 ---
 
 # Routines — Vision
 
 Forward-looking questions for the routines feature. Everything here is explicitly *not*
-part of the v1 contract in [2_design.md](./2_design.md); items graduate by getting a task
-and an ADR, not by drifting in.
+part of the v1 contract in [2_design.md](./2_design.md); items graduate through an explicit
+task, implementation, and validation evidence, not by drifting in.
 
 ---
 
 ## 1. Open Questions
 
 0. **First-class `activity:` targets.** v1 rejects `activity:<name>` at parse time because
-   run dispatch is job-shaped ([ADR-0206]); the wrapper-job idiom covers current needs. A
+   run dispatch is job-shaped ([Routine targets are catalog references only — no inline command payloads](./4_decisions.md#routine-targets-are-catalog-references-only-no-inline-command-payloads)); the wrapper-job idiom covers current needs. A
    standalone activity run entrypoint (or auto-wrapping) would let routines fire
    activities directly — worth doing only if the wrapper friction proves real.
 1. **Single-fire across hosts.** v1 pins routines to explicit hosts. A "exactly one of N"
@@ -53,7 +53,7 @@ and an ADR, not by drifting in.
 
 ### Graduated
 
-- **Workspace-local ship-sweep convergence ([ORB-10207], [ADR-0223]).** The default
+- **Workspace-local ship-sweep convergence ([ORB-10207], [Delegate workspace ship routines through a synchronous wrapper job](./4_decisions.md#delegate-workspace-ship-routines-through-a-synchronous-wrapper-job)).** The default
   `ship_sweep` routine delegates synchronously to the normal shipment pipeline for only
   its source workspace. It is seeded disabled and enabled through the versioned
   definition. The legacy global CLI entrypoint remains during burn-in; removing it is a
@@ -67,9 +67,9 @@ and an ADR, not by drifting in.
 - **cron / anacron** — the trigger vocabulary (5-field expressions) and the missed-run
   problem anacron exists to solve; routines adopt the vocabulary and make missed-run policy
   per-definition instead of system-wide.
-- **systemd timers / launchd** — v1's actual clock. `Persistent=true` and launchd wake
-  behavior are load-bearing; routines deliberately delegate "when does the machine wake"
-  to them.
+- **systemd timers / launchd** — v1's actual clock. launchd wake behavior and systemd's
+  monotonic startup/post-activation triggers guarantee another sweep without replaying
+  every missed clock tick; routine cursors and `missed_run` own cron-gap semantics.
 
 ### Workflow engines
 - **Temporal / Cadence schedules** — durable schedules attached to durable executions,
@@ -89,7 +89,7 @@ and an ADR, not by drifting in.
 ## 3. What May Be Distinctive
 
 - **Git-versioned, PR-reviewed schedules over a knowledge-integrated runtime.** Fires are
-  ordinary Orbit runs with audit envelopes, linkable to tasks and learnings — the scheduler
+  ordinary Orbit runs with audit envelopes, linkable to tasks — the scheduler
   and the knowledge system share one substrate.
 - **Agent-invoking targets.** A routine can fire an `agent_loop` activity: scheduled agent
   work (nightly triage, periodic research) with the same policy and audit surface as any
@@ -104,13 +104,13 @@ and an ADR, not by drifting in.
 Orbit-internal:
 - [../activity-job/1_overview.md](../activity-job/1_overview.md) — the execution substrate
   routines trigger into.
-- [../activity-job/4_decisions.md](../activity-job/4_decisions.md) — [ADR-0194], the
+- [../activity-job/4_decisions.md](../activity-job/4_decisions.md) — [The v2 shell activity surface is removed, not sandboxed](../activity-job/4_decisions.md#the-v2-shell-activity-surface-is-removed-not-sandboxed), the
   removed-shell posture routines inherit.
-- [../executors/4_decisions.md](../executors/4_decisions.md) — [ADR-0196], sandbox caveats
+- [../executors/4_decisions.md](../executors/4_decisions.md) — [External Executor Protocol for dynamic out-of-process executor registration (retired)](../executors/4_decisions.md#external-executor-protocol-for-dynamic-out-of-process-executor-registration-retired), sandbox caveats
   relevant to what scheduled targets may do.
 
 External:
-- systemd.timer(5), launchd.plist(5) — persistence and wake semantics.
+- systemd.timer(5), launchd.plist(5) — monotonic restart and wake semantics.
 - Temporal "Schedules" documentation — overlap/catch-up policy vocabulary.
 - Kubernetes CronJob documentation — concurrency and missed-fire edge cases.
 
@@ -121,6 +121,6 @@ External:
 - [ORB-10001] — authored this design-doc folder (proposal; no implementation).
 - [ORB-10021] — implemented routines v1.
 - [ORB-10207] — graduated workspace-local ship-sweep scheduling from this vision.
-- [ORB-10319] — separated Remote registry/runtime composition from Core's scheduler kernels without changing these open questions.
+- [ORB-10319] — historical boundary separation; current local registry/runtime composition lives in `orbit-cmd` over `orbit-registry`.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

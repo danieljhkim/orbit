@@ -1,7 +1,7 @@
 #![allow(missing_docs)]
 
 //! [ORB-10002] Checkpoint/resume behavior of the v2 DAG executor:
-//! per-step checkpoints flow through `V2RuntimeHost::checkpoint_step`, and
+//! per-step checkpoints flow through `RuntimeHost::checkpoint_step`, and
 //! `execute_job_with_resume` skips checkpointed steps while feeding their
 //! recorded outputs into the pipeline for later steps.
 
@@ -53,7 +53,7 @@ impl CheckpointHost {
     }
 }
 
-impl V2RuntimeHost for CheckpointHost {
+impl RuntimeHost for CheckpointHost {
     fn run_deterministic(
         &self,
         action: &str,
@@ -67,10 +67,6 @@ impl V2RuntimeHost for CheckpointHost {
             .push((action.to_string(), input.clone()));
         self.inner
             .run_deterministic(action, config, input, tool_context)
-    }
-
-    fn api_key_for(&self, provider: &str) -> Result<String, DispatchError> {
-        self.inner.api_key_for(provider)
     }
 
     fn resolve_cli_executor(
@@ -251,17 +247,23 @@ fn resume_reexecuted_pr_output_reaches_promotion_and_checkpoint() {
     // attempt, pr_open failed, then resume skips push, re-executes pr_open,
     // and renders its numeric-looking string output into pr_promote.
     let host = CheckpointHost::new(ScriptedHost::new([
-        ("git_push", vec![Action::Ok(json!({"pushed": "again"}))]),
         (
-            "pr_open",
+            "test_git_push",
+            vec![Action::Ok(json!({"pushed": "again"}))],
+        ),
+        (
+            "test_pr_open",
             vec![Action::Ok(json!({
                 "pr_number": "618",
                 "pr_url": "https://github.example/pull/618",
             }))],
         ),
-        ("pr_promote", vec![Action::Ok(json!({"promoted": true}))]),
+        (
+            "test_pr_promote",
+            vec![Action::Ok(json!({"promoted": true}))],
+        ),
     ]));
-    let mut promote = target_step("promote_tasks", "pr_promote");
+    let mut promote = target_step("promote_tasks", "test_pr_promote");
     promote.when = Some("{{ steps.pr_open.output.pr_number }} == 618".to_string());
     let JobV2StepBody::Target(target) = &mut promote.body else {
         panic!("target step");
@@ -271,8 +273,8 @@ fn resume_reexecuted_pr_output_reaches_promotion_and_checkpoint() {
         "pr_url": "{{ steps.pr_open.output.pr_url }}",
     }));
     let job = job_with_steps(vec![
-        target_step("push", "git_push"),
-        target_step("pr_open", "pr_open"),
+        target_step("push", "test_git_push"),
+        target_step("pr_open", "test_pr_open"),
         promote,
     ]);
     let mut resume = resume_state_with_completed_steps(&[(0, "push", json!({"pushed": true}))]);
@@ -299,11 +301,11 @@ fn resume_reexecuted_pr_output_reaches_promotion_and_checkpoint() {
     .expect("resume succeeds through promotion");
 
     assert!(outcome.success);
-    assert_eq!(host.inner.call_count("git_push"), 0);
-    assert_eq!(host.inner.call_count("pr_open"), 1);
-    assert_eq!(host.inner.call_count("pr_promote"), 1);
+    assert_eq!(host.inner.call_count("test_git_push"), 0);
+    assert_eq!(host.inner.call_count("test_pr_open"), 1);
+    assert_eq!(host.inner.call_count("test_pr_promote"), 1);
     assert_eq!(
-        host.inputs_for("pr_promote"),
+        host.inputs_for("test_pr_promote"),
         vec![json!({
             "pr_number": "618",
             "pr_url": "https://github.example/pull/618",
@@ -330,7 +332,7 @@ fn resume_reexecuted_pr_output_reaches_promotion_and_checkpoint() {
 #[test]
 fn resume_starts_at_the_failed_push_and_reuses_checkpoints_idempotently() {
     let delivery_job = || {
-        let mut push = target_step("push", "git_push");
+        let mut push = target_step("push", "test_git_push");
         let JobV2StepBody::Target(target) = &mut push.body else {
             panic!("target step");
         };
@@ -338,7 +340,7 @@ fn resume_starts_at_the_failed_push_and_reuses_checkpoints_idempotently() {
             "job_run_id": "{{ steps.worktree.output.job_run_id }}",
             "workspace_path": "{{ steps.worktree.output.workspace_path }}",
         }));
-        let mut pr_open = target_step("pr_open", "pr_open");
+        let mut pr_open = target_step("pr_open", "test_pr_open");
         let JobV2StepBody::Target(target) = &mut pr_open.body else {
             panic!("target step");
         };
@@ -346,11 +348,11 @@ fn resume_starts_at_the_failed_push_and_reuses_checkpoints_idempotently() {
             "job_run_id": "{{ steps.worktree.output.job_run_id }}",
         }));
         job_with_steps(vec![
-            target_step("worktree", "worktree_setup"),
+            target_step("worktree", "test_worktree_setup"),
             target_step("implement_bundle", "agent_implement"),
-            target_step("commit", "git_commit"),
-            target_step("prepare_branch", "pr_prepare"),
-            target_step("sync_base", "git_rebase"),
+            target_step("commit", "test_git_commit"),
+            target_step("prepare_branch", "test_pr_prepare"),
+            target_step("sync_base", "test_git_rebase"),
             push,
             pr_open,
         ])
@@ -358,18 +360,30 @@ fn resume_starts_at_the_failed_push_and_reuses_checkpoints_idempotently() {
     let scripted = || {
         ScriptedHost::new([
             (
-                "worktree_setup",
+                "test_worktree_setup",
                 vec![Action::Ok(json!({"replayed": true}))],
             ),
             (
                 "agent_implement",
                 vec![Action::Ok(json!({"replayed": true}))],
             ),
-            ("git_commit", vec![Action::Ok(json!({"replayed": true}))]),
-            ("pr_prepare", vec![Action::Ok(json!({"replayed": true}))]),
-            ("git_rebase", vec![Action::Ok(json!({"replayed": true}))]),
-            ("git_push", vec![Action::Ok(json!({"pushed": true}))]),
-            ("pr_open", vec![Action::Ok(json!({"pr_number": "711"}))]),
+            (
+                "test_git_commit",
+                vec![Action::Ok(json!({"replayed": true}))],
+            ),
+            (
+                "test_pr_prepare",
+                vec![Action::Ok(json!({"replayed": true}))],
+            ),
+            (
+                "test_git_rebase",
+                vec![Action::Ok(json!({"replayed": true}))],
+            ),
+            ("test_git_push", vec![Action::Ok(json!({"pushed": true}))]),
+            (
+                "test_pr_open",
+                vec![Action::Ok(json!({"pr_number": "711"}))],
+            ),
         ])
     };
 
@@ -399,11 +413,11 @@ fn resume_starts_at_the_failed_push_and_reuses_checkpoints_idempotently() {
 
     assert!(outcome.success);
     for skipped in [
-        "worktree_setup",
+        "test_worktree_setup",
         "agent_implement",
-        "git_commit",
-        "pr_prepare",
-        "git_rebase",
+        "test_git_commit",
+        "test_pr_prepare",
+        "test_git_rebase",
     ] {
         assert_eq!(
             host.inner.call_count(skipped),
@@ -411,10 +425,10 @@ fn resume_starts_at_the_failed_push_and_reuses_checkpoints_idempotently() {
             "resume must not re-execute the checkpointed step `{skipped}`",
         );
     }
-    assert_eq!(host.inner.call_count("git_push"), 1);
-    assert_eq!(host.inner.call_count("pr_open"), 1);
+    assert_eq!(host.inner.call_count("test_git_push"), 1);
+    assert_eq!(host.inner.call_count("test_pr_open"), 1);
     assert_eq!(
-        host.inputs_for("git_push"),
+        host.inputs_for("test_git_push"),
         vec![json!({
             "job_run_id": "jrun-source",
             "workspace_path": "/wt/jrun-source",
@@ -443,11 +457,11 @@ fn resume_starts_at_the_failed_push_and_reuses_checkpoints_idempotently() {
 
     assert!(replayed.success);
     assert_eq!(
-        replay_host.inner.call_count("git_push"),
+        replay_host.inner.call_count("test_git_push"),
         0,
         "checkpoint reuse is idempotent: a completed push is never repeated",
     );
-    assert_eq!(replay_host.inner.call_count("pr_open"), 0);
+    assert_eq!(replay_host.inner.call_count("test_pr_open"), 0);
     assert!(replay_host.checkpoints().is_empty());
 }
 

@@ -1,9 +1,7 @@
-use std::collections::HashMap;
 use std::sync::Mutex as StdMutex;
 
 use orbit_common::types::{
-    McpCapability, McpToolDefinition, McpToolPlacement, McpToolPolicy, OrbitError, ToolParam,
-    ToolSchema, ToolSessionContext,
+    McpToolDefinition, McpToolScope, OrbitError, ToolParam, ToolSchema, ToolSessionContext,
 };
 use rmcp::model::CallToolRequestParams;
 use serde_json::{Value, json};
@@ -35,15 +33,10 @@ pub(super) fn tool_schema(name: &str) -> ToolSchema {
 pub(super) fn test_mcp_definitions(
     schemas: impl IntoIterator<Item = ToolSchema>,
 ) -> Result<Vec<McpToolDefinition>, OrbitError> {
-    schemas
+    Ok(schemas
         .into_iter()
-        .map(|schema| {
-            let policy = McpToolPolicy::new(McpToolPlacement::LocalDerived, [McpCapability::Agent])
-                .expect("test MCP policy has one static capability");
-            McpToolDefinition::new(schema, policy)
-                .map_err(|error| OrbitError::InvalidInput(error.to_string()))
-        })
-        .collect()
+        .map(|schema| McpToolDefinition::new(schema, McpToolScope::WorkspaceRequired))
+        .collect())
 }
 
 pub(super) fn request_with_args(name: &str, args: Value) -> CallToolRequestParams {
@@ -73,16 +66,6 @@ impl crate::McpHost for StubHost {
     ) -> Result<Value, OrbitError> {
         Ok(Value::Null)
     }
-
-    fn call_in_process_tool(
-        &self,
-        _name: &str,
-        input: Value,
-        session_context: ToolSessionContext,
-        dispatch: &mut dyn FnMut(Value, ToolSessionContext) -> Result<Value, OrbitError>,
-    ) -> Result<Value, OrbitError> {
-        dispatch(input, session_context)
-    }
 }
 
 pub(super) struct EchoArrayHost {
@@ -101,28 +84,6 @@ impl crate::McpHost for EchoArrayHost {
         _session_context: ToolSessionContext,
     ) -> Result<Value, OrbitError> {
         Ok(json!([{ "tool": name }]))
-    }
-}
-
-/// Simple in-memory persistence host for e2e MCP learning add/update/show tests.
-/// Verifies that array-shaped evidence reaches the handler (proving schema allows it).
-pub(super) struct LearningPersistenceHost {
-    store: StdMutex<HashMap<String, Value>>,
-    next: StdMutex<u32>,
-}
-
-impl LearningPersistenceHost {
-    pub(super) fn new() -> Self {
-        Self {
-            store: StdMutex::new(HashMap::new()),
-            next: StdMutex::new(0),
-        }
-    }
-
-    fn next_id(&self) -> String {
-        let mut n = self.next.lock().expect("next lock");
-        *n += 1;
-        format!("L-test-{:04}", *n)
     }
 }
 
@@ -167,87 +128,5 @@ impl crate::McpHost for SessionContextHost {
             "tool": name,
             "effective_workspace": effective_workspace,
         }))
-    }
-}
-
-impl crate::McpHost for LearningPersistenceHost {
-    fn list_mcp_tool_definitions(&self) -> Result<Vec<McpToolDefinition>, OrbitError> {
-        test_mcp_definitions(vec![
-            tool_schema("orbit.learning.add"),
-            tool_schema("orbit.learning.update"),
-            tool_schema("orbit.learning.show"),
-        ])
-    }
-
-    fn call_tool(
-        &self,
-        name: &str,
-        input: Value,
-        _session_context: ToolSessionContext,
-    ) -> Result<Value, OrbitError> {
-        let canonical = if name.contains("learning.add") {
-            "orbit.learning.add"
-        } else if name.contains("learning.update") {
-            "orbit.learning.update"
-        } else if name.contains("learning.show") {
-            "orbit.learning.show"
-        } else {
-            name
-        };
-        match canonical {
-            "orbit.learning.add" => {
-                let id = self.next_id();
-                let mut rec = input.clone();
-                if let Some(obj) = rec.as_object_mut() {
-                    obj.insert("id".to_string(), Value::String(id.clone()));
-                    obj.insert(
-                        "created_at".to_string(),
-                        Value::String("2026-05-17T12:00:00Z".to_string()),
-                    );
-                    if !obj.contains_key("evidence") {
-                        obj.insert("evidence".to_string(), Value::Array(vec![]));
-                    }
-                }
-                self.store
-                    .lock()
-                    .expect("store lock")
-                    .insert(id.clone(), rec.clone());
-                Ok(rec)
-            }
-            "orbit.learning.update" => {
-                let id = input
-                    .get("id")
-                    .and_then(Value::as_str)
-                    .unwrap_or_default()
-                    .to_string();
-                let mut guard = self.store.lock().expect("store lock");
-                if let Some(existing) = guard.get_mut(&id) {
-                    if let (Some(obj), Some(up)) = (existing.as_object_mut(), input.as_object()) {
-                        for (k, v) in up.iter() {
-                            if k != "id" {
-                                obj.insert(k.clone(), v.clone());
-                            }
-                        }
-                    }
-                    Ok(existing.clone())
-                } else {
-                    Ok(json!({ "id": id, "updated": false }))
-                }
-            }
-            "orbit.learning.show" => {
-                let id = input
-                    .get("id")
-                    .and_then(Value::as_str)
-                    .unwrap_or_default()
-                    .to_string();
-                let guard = self.store.lock().expect("store lock");
-                if let Some(rec) = guard.get(&id) {
-                    Ok(rec.clone())
-                } else {
-                    Ok(json!({ "id": id, "found": false }))
-                }
-            }
-            _ => Ok(json!({ "ok": true, "echo": name })),
-        }
     }
 }

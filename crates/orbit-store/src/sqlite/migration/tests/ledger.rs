@@ -1,6 +1,6 @@
 // ORB-10003: versioned schema-migration ledger.
 use orbit_common::types::OrbitError;
-use rusqlite::Connection;
+use rusqlite::{Connection, Error as SqliteError, ffi};
 
 use super::super::ledger::{self, Migration};
 use super::super::*;
@@ -64,6 +64,9 @@ fn fresh_db_applies_baseline_and_records_ledger() {
     assert_eq!(applied[10].version, 11);
     assert_eq!(applied[10].name, "routine_scheduler_schema");
     assert!(!applied[10].applied_at.is_empty());
+    assert_eq!(applied[14].version, 15);
+    assert_eq!(applied[14].name, "invocation_audit_context");
+    assert!(!applied[14].applied_at.is_empty());
 }
 
 #[test]
@@ -208,6 +211,22 @@ fn legacy_db_adopts_versioned_ledger() {
                 "migration.v0011".to_string(),
                 "routine_scheduler_schema".to_string()
             ),
+            (
+                "migration.v0012".to_string(),
+                "friction_records_sqlite".to_string()
+            ),
+            (
+                "migration.v0013".to_string(),
+                "workspace_claim_scope".to_string()
+            ),
+            (
+                "migration.v0014".to_string(),
+                "remove_native_learning_subsystem".to_string()
+            ),
+            (
+                "migration.v0015".to_string(),
+                "invocation_audit_context".to_string()
+            ),
         ]
     );
 }
@@ -219,7 +238,7 @@ fn refuses_db_from_a_newer_binary() {
 
     conn.execute(
         "INSERT INTO schema_meta(key, value, updated_at)
-         VALUES ('migration.v0012', 'from-the-future', '2099-01-01T00:00:00Z')",
+        VALUES ('migration.v0016', 'from-the-future', '2099-01-01T00:00:00Z')",
         [],
     )
     .expect("record future migration");
@@ -299,7 +318,7 @@ fn store_reopens_database_at_shipped_schema_v4_and_applies_through_latest() {
     );
     assert_eq!(
         applied.last().map(|migration| migration.name.as_str()),
-        Some("routine_scheduler_schema")
+        Some("invocation_audit_context")
     );
     let connection = store.connection();
     let conn = connection.lock().expect("connection");
@@ -390,6 +409,8 @@ fn store_reopens_shipped_v6_audit_rows_and_applies_v7_additively() {
     assert_eq!(rows[0].workspace_id, None);
     assert!(rows[0].effective_capabilities.is_empty());
     assert_eq!(rows[0].mcp_call_id, None);
+    assert_eq!(rows[0].trace_id, None);
+    assert_eq!(rows[0].caller_ip, None);
     drop(store);
 
     let reopened = crate::Store::open(&path).expect("reopen migrated store");
@@ -432,11 +453,11 @@ fn migration_v1_marker(conn: &Connection) -> Result<(), OrbitError> {
 }
 
 fn migration_v2_fails_midway(conn: &Connection) -> Result<(), OrbitError> {
-    conn.execute_batch("CREATE TABLE ledger_test_half_applied (x INTEGER)")
+    conn.execute_batch(
+        "CREATE TABLE ledger_test_half_applied (x INTEGER);\n         this is not valid migration SQL",
+    )
         .map_err(|e| OrbitError::Store(e.to_string()))?;
-    Err(OrbitError::Migration(
-        "intentional mid-migration failure".to_string(),
-    ))
+    Ok(())
 }
 
 #[test]
@@ -457,6 +478,8 @@ fn failed_migration_rolls_back_schema_and_ledger() {
 
     let err = ledger::run_migrations(&conn, &registry).expect_err("v2 must fail");
     assert!(matches!(err, OrbitError::Migration(_)), "got {err:?}");
+    let message = err.to_string();
+    assert!(message.contains("v2 (fails-midway)"), "got {message}");
 
     // v1 committed; v2 rolled back completely — no half-applied schema,
     // no ledger row.
@@ -480,6 +503,23 @@ fn failed_migration_rolls_back_schema_and_ledger() {
     ];
     ledger::run_migrations(&conn, &fixed).expect("resume after fix");
     assert_eq!(current_schema_version(&conn).expect("current version"), 2);
+}
+
+#[test]
+fn sqlite_full_commit_error_is_a_store_resource_error() {
+    let migration = Migration {
+        version: 42,
+        name: "disk-full-test",
+        apply: migration_v1_marker,
+    };
+    let error = SqliteError::SqliteFailure(ffi::Error::new(ffi::SQLITE_FULL), None);
+
+    let mapped = ledger::commit_migration_error(&migration, error);
+
+    assert!(matches!(mapped, OrbitError::Store(_)), "got {mapped:?}");
+    let message = mapped.to_string();
+    assert!(message.contains("SQLITE_FULL"), "got {message}");
+    assert!(message.contains("v42 (disk-full-test)"), "got {message}");
 }
 
 fn migration_v1_marker_v2(conn: &Connection) -> Result<(), OrbitError> {
@@ -614,7 +654,6 @@ fn migrated_legacy_db_carries_every_invocation_insert_column() {
             activity_id: "implement_one".to_string(),
             agent: "claude".to_string(),
             model: Some("claude-opus-4-7".to_string()),
-            slot: None,
             task_ids: vec!["ORB-10367".to_string()],
             trace: InvocationTrace {
                 usage: TokenUsage {

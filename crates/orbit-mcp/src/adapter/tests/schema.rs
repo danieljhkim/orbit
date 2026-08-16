@@ -1,8 +1,7 @@
 use std::sync::Arc;
 
 use orbit_common::types::{
-    McpCapability, McpToolDefinition, McpToolPlacement, McpToolPolicy, McpToolScope, McpTransport,
-    ToolParam, ToolSchema, ToolSessionContext,
+    McpToolDefinition, McpToolScope, McpTransport, ToolParam, ToolSchema, ToolSessionContext,
 };
 use rmcp::model::{ClientCapabilities, Implementation, InitializeRequestParams, Meta};
 
@@ -12,30 +11,29 @@ use serde_json::{Value, json};
 
 use super::super::OrbitToolServer;
 use super::super::test_support::{
-    LearningPersistenceHost, SessionContextHost, param, param_with_type, request_with_args,
-    tool_schema,
+    SessionContextHost, param, param_with_type, request_with_args, tool_schema,
 };
 
 #[test]
-fn generic_task_schema_is_structural_and_owns_no_domain_enums() {
+fn task_schema_uses_common_domain_enums() {
     let schema = build_input_schema("orbit.task.add", &[param("type"), param("status")]);
     let properties = schema
         .get("properties")
         .and_then(Value::as_object)
         .expect("properties");
 
-    assert!(properties["type"].get("enum").is_none());
-    assert!(properties["status"].get("enum").is_none());
+    assert!(properties["type"]["enum"].as_array().is_some());
+    assert!(properties["status"]["enum"].as_array().is_some());
 }
 
 #[test]
-fn generic_task_update_schema_is_structural() {
+fn task_update_schema_uses_common_status_enum() {
     let schema = build_input_schema("orbit.task.update", &[param("status")]);
     let properties = schema
         .get("properties")
         .and_then(Value::as_object)
         .expect("properties");
-    assert!(properties["status"].get("enum").is_none());
+    assert!(properties["status"]["enum"].as_array().is_some());
 }
 
 #[test]
@@ -133,7 +131,7 @@ fn required_string_list_param_is_advertised_as_string_or_array() {
     );
 }
 
-// --- ORB-10448 / F2026-07-099: the broker's workspace selector must be
+// The authoritative server's workspace selector must be
 // advertised on every workspace-scoped tool. A managed executor speaks through
 // a general-purpose MCP client that cannot inject initialize `_meta`, so the
 // call argument is its only routing surface.
@@ -149,8 +147,7 @@ fn definition_with_scope(
         parameters,
         builtin: true,
     };
-    let policy = McpToolPolicy::agent_and_operator(McpToolPlacement::Hub).with_scope(scope);
-    McpToolDefinition::new(schema, policy).expect("test definition policy is valid")
+    McpToolDefinition::new(schema, scope)
 }
 
 fn advertised_properties(definition: &McpToolDefinition) -> serde_json::Map<String, Value> {
@@ -166,7 +163,7 @@ fn advertised_properties(definition: &McpToolDefinition) -> serde_json::Map<Stri
 }
 
 #[test]
-fn workspace_scoped_tool_advertises_the_broker_workspace_selector() {
+fn workspace_scoped_tool_advertises_the_authoritative_server_selector() {
     let definition = definition_with_scope(
         "orbit.task.show",
         vec![param("id")],
@@ -188,12 +185,16 @@ fn workspace_scoped_tool_advertises_the_broker_workspace_selector() {
         .and_then(Value::as_str)
         .expect("selector carries routing guidance");
     assert!(
-        description.contains("absolute path to a local checkout"),
-        "selector must document the checkout-path form: {description}"
+        description.contains("registered workspace name"),
+        "selector must document the registered-name form: {description}"
     );
     assert!(
-        description.contains("worktree"),
-        "selector must state that a linked worktree resolves: {description}"
+        description.contains("ws_*"),
+        "selector must document logical ws_* ids: {description}"
+    );
+    assert!(
+        description.contains("absolute path registered on that server"),
+        "selector must document the server-side path form: {description}"
     );
 }
 
@@ -259,9 +260,9 @@ fn initialize_meta_extracts_orbit_workspace_session_context() {
             "caller_machine_id": "spoofed-caller",
             "process_machine_id": "spoofed-process",
             "transport": "ssh-mcp",
-            "effective_capabilities": ["operator", "runner"],
             "origin_session_id": "spoofed-session",
             "mcp_call_id": "spoofed-call",
+            "trace_id": "spoofed-trace",
             "leased_run": {"run_id": "spoofed-run", "lease_id": "spoofed-lease"},
             "role": "admin",
             "model": "spoofed-model",
@@ -277,10 +278,9 @@ fn initialize_meta_extracts_orbit_workspace_session_context() {
     assert_eq!(session_context.caller_machine_id, None);
     assert_eq!(session_context.process_machine_id, None);
     assert_eq!(session_context.transport, None);
-    assert!(session_context.effective_capabilities.is_empty());
     assert_eq!(session_context.origin_session_id, None);
     assert_eq!(session_context.mcp_call_id, None);
-    assert_eq!(session_context.leased_run, None);
+    assert_eq!(session_context.trace_id, None);
 }
 
 #[test]
@@ -332,6 +332,7 @@ async fn mcp_session_context_reaches_tool_calls_without_workspace_input() {
     );
     trusted_context.workspace = Some("/repo/main".to_string());
     trusted_context.origin_session_id = Some("mcp-session-shared".to_string());
+    trusted_context.mcp_call_id = Some("legacy-call".to_string());
     server.replace_session_context(trusted_context);
 
     let explicit = server
@@ -358,17 +359,15 @@ async fn mcp_session_context_reaches_tool_calls_without_workspace_input() {
     assert_eq!(calls[0].2.workspace_id.as_deref(), Some("ws_orbit"));
     assert_eq!(calls[0].2.transport, Some(McpTransport::Local));
     assert_eq!(
-        calls[0].2.effective_capabilities,
-        [McpCapability::Agent].into_iter().collect()
-    );
-    assert_eq!(
         calls[0].2.origin_session_id.as_deref(),
         Some("mcp-session-shared")
     );
     assert_eq!(calls[1].2.origin_session_id, calls[0].2.origin_session_id);
-    assert!(calls[0].2.mcp_call_id.is_some());
-    assert!(calls[1].2.mcp_call_id.is_some());
-    assert_ne!(calls[0].2.mcp_call_id, calls[1].2.mcp_call_id);
+    assert_eq!(calls[0].2.mcp_call_id.as_deref(), Some("legacy-call"));
+    assert_eq!(calls[1].2.mcp_call_id.as_deref(), Some("legacy-call"));
+    assert!(calls[0].2.trace_id.is_some());
+    assert!(calls[1].2.trace_id.is_some());
+    assert_ne!(calls[0].2.trace_id, calls[1].2.trace_id);
 }
 
 // --- ORB-00102 tests: object_list schema + loud fallback + e2e via MCP adapter ---
@@ -458,144 +457,21 @@ fn property_for_unknown_emits_tracing_warn_at_target() {
         logs.contains("unknown ToolParam type degrading to string"),
         "warning message present: {logs}"
     );
-    assert!(logs.contains("orbit.mcp.adapter"), "target present: {logs}");
+    assert!(
+        logs.contains("orbit.common.tool_schema"),
+        "target present: {logs}"
+    );
     assert!(
         logs.contains(token),
         "offending token named in event: {logs}"
     );
 }
 
-#[test]
-fn learning_add_schema_advertises_object_list_shape_for_evidence() {
-    let params = vec![
-        param_with_type("summary", "string"),
-        param_with_type("scope", "object"),
-        param_with_type("evidence", "object_list"),
-        param_with_type("model", "string"),
-    ];
-    let schema = build_input_schema("orbit.learning.add", &params);
-    let properties = schema
-        .get("properties")
-        .and_then(Value::as_object)
-        .expect("properties");
-    let ev = properties
-        .get("evidence")
-        .and_then(Value::as_object)
-        .expect("evidence property");
-    assert!(
-        ev.get("anyOf").is_some(),
-        "evidence must use anyOf (array-of-object | string), got: {ev:?}"
-    );
-    // must not be the old silent string
-    assert_ne!(
-        ev.get("type").and_then(Value::as_str),
-        Some("string"),
-        "evidence must not degrade to plain string"
-    );
-}
-
-#[tokio::test]
-async fn orbit_learning_add_via_mcp_adapter_accepts_evidence_array() {
-    let host = Arc::new(LearningPersistenceHost::new());
-    let server = OrbitToolServer::new(host);
-
-    let evidence = json!([{ "kind": "task", "ref": "T-test" }]);
-    let req = request_with_args(
-        "orbit.learning.add",
-        json!({
-            "summary": "MCP evidence array test",
-            "scope": { "tags": ["mcp-test"] },
-            "evidence": evidence,
-            "model": "grok"
-        }),
-    );
-    let res = server
-        .call_tool_request(req)
-        .await
-        .expect("MCP call to learning.add succeeds");
-    let body = res.structured_content.expect("structured response");
-    let id = body.get("id").and_then(Value::as_str).expect("created id");
-
-    // re-fetch via show (exercises round-trip)
-    let show_req = request_with_args("orbit.learning.show", json!({ "id": id }));
-    let show_res = server
-        .call_tool_request(show_req)
-        .await
-        .expect("show after add");
-    let shown = show_res.structured_content.expect("shown record");
-    let got_ev = shown
-        .get("evidence")
-        .and_then(Value::as_array)
-        .expect("evidence persisted as array");
-    assert_eq!(got_ev.len(), 1, "one evidence entry");
-    assert_eq!(got_ev[0]["kind"], "task");
-    assert_eq!(got_ev[0]["ref"], "T-test");
-    // response shape has the fields show would return
-    assert!(shown.get("id").is_some());
-    assert!(shown.get("created_at").is_some() || shown.get("updated_at").is_some());
-}
-
-#[tokio::test]
-async fn orbit_learning_update_via_mcp_adapter_accepts_evidence_array_live_repro() {
-    let host = Arc::new(LearningPersistenceHost::new());
-    let server = OrbitToolServer::new(host);
-
-    // seed via add
-    let seed = request_with_args(
-        "orbit.learning.add",
-        json!({
-            "summary": "for update repro",
-            "scope": { "tags": ["repro"] },
-            "model": "claude"
-        }),
-    );
-    let seed_res = server.call_tool_request(seed).await.expect("seed add");
-    let seed_id = seed_res
-        .structured_content
-        .expect("seed body")
-        .get("id")
-        .and_then(Value::as_str)
-        .expect("seed id")
-        .to_string();
-
-    // now the live repro: update evidence via MCP (the F2026-05-025 case)
-    let new_evidence = json!([{ "kind": "task", "ref": "ORB-00022" }]);
-    let upd_req = request_with_args(
-        "orbit.learning.update",
-        json!({
-            "id": seed_id,
-            "model": "claude",
-            "evidence": new_evidence
-        }),
-    );
-    let upd_res = server
-        .call_tool_request(upd_req)
-        .await
-        .expect("update via MCP must succeed (was failing before fix)");
-    let _updated = upd_res.structured_content.expect("update response");
-
-    // verify by show
-    let show_req = request_with_args("orbit.learning.show", json!({ "id": seed_id }));
-    let shown = server
-        .call_tool_request(show_req)
-        .await
-        .expect("show after update")
-        .structured_content
-        .expect("shown");
-    let ev = shown
-        .get("evidence")
-        .and_then(Value::as_array)
-        .expect("evidence after update is array");
-    assert_eq!(ev.len(), 1);
-    assert_eq!(ev[0]["ref"], "ORB-00022");
-    assert_eq!(ev[0]["kind"], "task");
-}
-
 /// ORB-00234/ORB-00255: MCP schema for orbit_task_add advertises the trimmed
 /// create-task fields with correct enums (verifiable via debug surfaces or this
 /// direct build).
 #[test]
-fn task_add_structural_schema_exposes_trimmed_fields_without_domain_enums() {
+fn task_add_schema_exposes_trimmed_fields_with_common_domain_enums() {
     // Use representative params that the real add schema includes (the
     // build_input_schema only cares about the ones passed for enum injection).
     let params = vec![
@@ -637,8 +513,8 @@ fn task_add_structural_schema_exposes_trimmed_fields_without_domain_enums() {
         ]
     );
 
-    assert!(properties["complexity"].get("enum").is_none());
-    assert!(properties["model"].get("enum").is_none());
+    assert!(properties["complexity"]["enum"].as_array().is_some());
+    assert!(properties["model"]["enum"].as_array().is_some());
 
     for removed in [
         "plan",

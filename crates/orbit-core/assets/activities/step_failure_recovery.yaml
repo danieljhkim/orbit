@@ -30,6 +30,10 @@ spec:
       max_attempts:
         type: integer
         minimum: 1
+      # Injected by the recovery dispatcher only. It records that this system
+      # activity must resolve workflow.system_crew into its crew input.
+      system_crew:
+        type: boolean
   # Advisory reporting surface only — never a contract anything depends on.
   #
   # Nothing consumes these fields. A step's `recovery_activity` has no step id,
@@ -191,9 +195,6 @@ spec:
   tools:
     - orbit.task.*
     - orbit.friction.*
-    - orbit.state.*
-    - fs.read
-    - fs.delete
     - proc.spawn
   proc_allowed_programs:
     - git
@@ -201,7 +202,7 @@ spec:
     - orbit
     - rg
   on_denial: terminate
-  role: reviewer
+  # Dispatch supplies the configured workflow.system_crew as an explicit crew input.
   # One hour accommodates provider startup plus networked git/PR operations
   # and a resumed pipeline while retaining a hard terminal bound. This bound is
   # enforced: the CLI runner spawns the subprocess with this deadline.

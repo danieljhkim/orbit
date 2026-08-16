@@ -1,16 +1,14 @@
 use std::collections::BTreeMap;
 use std::path::Path;
 
-use orbit_common::types::{
-    Task, TaskStatus, TaskType, prune_missing_context_files, task_dependencies_ready,
-};
+use orbit_common::types::{Task, TaskStatus, task_dependencies_ready};
 use orbit_common::utility::path::workspace_relative_paths_overlap;
-use orbit_common::utility::selector::canonical_selector_in_workspace;
 use orbit_engine::DispatchError;
 use serde::Serialize;
 use serde_json::Value;
 
 use crate::OrbitRuntime;
+use crate::runtime::task::locks::lock_context_files_for_task;
 
 const MAX_TASK_PARENT_CHAIN_DEPTH: usize = 32;
 
@@ -25,7 +23,15 @@ struct BacklogTaskExclusion {
 #[serde(rename_all = "snake_case")]
 enum BacklogTaskExclusionReason {
     ContextLockConflict,
+    EpicChild,
+    EpicRoot,
     GroupMemberConflict,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum EpicFamilyMembership {
+    Child,
+    Root,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize)]
@@ -34,14 +40,14 @@ struct BacklogTaskConflict {
     locking_task_id: String,
 }
 
-fn active_task_lock_holders<'a>(
-    tasks: impl IntoIterator<Item = &'a Task>,
+fn active_task_lock_holders(
+    tasks: &BTreeMap<String, Task>,
     workspace_root: &Path,
 ) -> BTreeMap<String, Vec<String>> {
     let mut holders: BTreeMap<String, Vec<String>> = BTreeMap::new();
-    for task in tasks {
+    for task in tasks.values() {
         if matches!(task.status, TaskStatus::InProgress | TaskStatus::Review) {
-            for file in existing_lock_context_files(task, workspace_root) {
+            for file in lock_context_files_for_task(task, tasks, workspace_root) {
                 holders.entry(file).or_default().push(task.id.clone());
             }
         }
@@ -53,35 +59,14 @@ fn active_task_lock_holders<'a>(
     holders
 }
 
-fn is_feature_child_terminal_status(status: TaskStatus) -> bool {
-    matches!(
-        status,
-        TaskStatus::Done
-            | TaskStatus::Blocked
-            | TaskStatus::Archived
-            | TaskStatus::Rejected
-            | TaskStatus::Review
-    )
-}
-
-fn feature_child_state_for_task_status(status: TaskStatus) -> &'static str {
-    match status {
-        // For epic orchestration, `review` means a child shipment workflow
-        // reached the human handoff point and should not be dispatched again.
-        TaskStatus::Done | TaskStatus::Archived | TaskStatus::Review => "done",
-        TaskStatus::Blocked | TaskStatus::Rejected => "blocked",
-        TaskStatus::InProgress => "in_flight",
-        TaskStatus::Proposed | TaskStatus::Backlog | TaskStatus::Someday => "pending",
-    }
-}
-
 fn task_overlap_conflicts(
     task: &Task,
+    task_lookup: &BTreeMap<String, Task>,
     holders: &BTreeMap<String, Vec<String>>,
     workspace_root: &Path,
 ) -> Vec<BacklogTaskConflict> {
     let mut conflicts = Vec::new();
-    for requested_file in existing_lock_context_files(task, workspace_root) {
+    for requested_file in lock_context_files_for_task(task, task_lookup, workspace_root) {
         for (held_file, locking_task_ids) in holders {
             if workspace_relative_paths_overlap(&requested_file, held_file) {
                 for locking_task_id in locking_task_ids {
@@ -96,16 +81,6 @@ fn task_overlap_conflicts(
     conflicts.sort();
     conflicts.dedup();
     conflicts
-}
-
-fn existing_lock_context_files(task: &Task, workspace_root: &Path) -> Vec<String> {
-    let canonical = task
-        .context_files
-        .iter()
-        .filter_map(|entry| canonical_selector_in_workspace(entry, workspace_root).ok())
-        .collect::<Vec<_>>();
-    let (kept, _dropped) = prune_missing_context_files(workspace_root, canonical);
-    kept
 }
 
 pub(super) fn list_backlog_tasks(
@@ -146,30 +121,35 @@ pub(super) fn list_backlog_tasks(
             }
         })?;
         let workspace_root = runtime.paths().repo_root.as_path();
-        let lock_holders = active_task_lock_holders(task_lookup.values(), workspace_root);
+        let lock_holders = active_task_lock_holders(&task_lookup, workspace_root);
         let mut backlog: Vec<Task> = all_tasks
             .into_iter()
             .filter(|task| {
                 task.status == TaskStatus::Backlog && task_dependencies_ready(task, &status_by_id)
             })
             .collect();
-        backlog.sort_by(|a, b| {
-            let rank = |p: orbit_common::types::TaskPriority| match p {
-                orbit_common::types::TaskPriority::Critical => 0,
-                orbit_common::types::TaskPriority::High => 1,
-                orbit_common::types::TaskPriority::Medium => 2,
-                orbit_common::types::TaskPriority::Low => 3,
-            };
-            rank(a.priority)
-                .cmp(&rank(b.priority))
-                .then(a.created_at.cmp(&b.created_at))
-        });
+        sort_tasks_by_priority_age(&mut backlog);
         let mut excluded = Vec::new();
+        backlog.retain(|task| {
+            let Some(membership) = epic_family_membership(task, &task_lookup) else {
+                return true;
+            };
+            excluded.push(BacklogTaskExclusion {
+                id: task.id.clone(),
+                reason: match membership {
+                    EpicFamilyMembership::Root => BacklogTaskExclusionReason::EpicRoot,
+                    EpicFamilyMembership::Child => BacklogTaskExclusionReason::EpicChild,
+                },
+                conflicts: Vec::new(),
+            });
+            false
+        });
         if !lock_holders.is_empty() {
             let direct_conflicts: BTreeMap<String, Vec<BacklogTaskConflict>> = backlog
                 .iter()
                 .filter_map(|task| {
-                    let conflicts = task_overlap_conflicts(task, &lock_holders, workspace_root);
+                    let conflicts =
+                        task_overlap_conflicts(task, &task_lookup, &lock_holders, workspace_root);
                     (!conflicts.is_empty()).then(|| (task.id.clone(), conflicts))
                 })
                 .collect();
@@ -206,10 +186,10 @@ pub(super) fn list_backlog_tasks(
                         kept.push(task);
                     }
                 }
-                excluded.sort_by(|a, b| a.id.cmp(&b.id));
                 backlog = kept;
             }
         }
+        excluded.sort_by(|a, b| a.id.cmp(&b.id));
         (backlog, Some(excluded))
     } else {
         let tasks = explicit_task_ids
@@ -262,143 +242,43 @@ pub(super) fn list_backlog_tasks(
     Ok(Value::Object(payload))
 }
 
-pub(super) fn load_epic(
-    runtime: &OrbitRuntime,
-    action: &str,
-    input: &Value,
-) -> Result<Value, DispatchError> {
-    let epic_id = input
-        .get("epic_task_id")
-        .and_then(Value::as_str)
-        .ok_or_else(|| DispatchError::DeterministicActionFailed {
-            action: action.to_string(),
-            message: "missing `epic_task_id`".to_string(),
-        })?;
-    let epic =
-        runtime
-            .get_task(epic_id)
-            .map_err(|err| DispatchError::DeterministicActionFailed {
-                action: action.to_string(),
-                message: format!("load epic {epic_id}: {err}"),
-            })?;
-    if epic.task_type != TaskType::Feature {
-        return Err(DispatchError::DeterministicActionFailed {
-            action: action.to_string(),
-            message: format!(
-                "task `{epic_id}` has type `{}`; expected `feature`",
-                epic.task_type
-            ),
-        });
-    }
-    let subtasks = runtime
-        .list_tasks_filtered(None, None, Some(epic_id), None, None, None)
-        .map_err(|err| DispatchError::DeterministicActionFailed {
-            action: action.to_string(),
-            message: format!("list subtasks of {epic_id}: {err}"),
-        })?;
-    let final_subtasks = subtasks
-        .iter()
-        .map(|t| {
-            (
-                t.id.clone(),
-                serde_json::json!({
-                    "state": feature_child_state_for_task_status(t.status),
-                    "status": t.status.to_string(),
-                    "title": t.title,
-                }),
-            )
-        })
-        .collect::<serde_json::Map<String, Value>>();
-    let open_subtasks = subtasks
-        .iter()
-        .filter(|task| !is_feature_child_terminal_status(task.status))
-        .collect::<Vec<_>>();
-    let subtask_payload: Vec<Value> = open_subtasks
-        .iter()
-        .map(|t| {
-            serde_json::json!({
-                "id": t.id,
-                "title": t.title,
-                "description": t.description,
-                "type": t.task_type.to_string(),
-                "status": t.status.to_string(),
-                "context_files": t.context_files,
-            })
-        })
-        .collect();
-    Ok(serde_json::json!({
-        "epic": {
-            "id": epic.id,
-            "title": epic.title,
-            "description": epic.description,
-            "type": epic.task_type.to_string(),
-            "status": epic.status.to_string(),
-        },
-        "subtasks": subtask_payload,
-        "all_terminal": open_subtasks.is_empty(),
-        "final_state": {
-            "epic_id": epic.id.clone(),
-            "subtasks": final_subtasks,
-        },
-    }))
+pub(super) fn sort_tasks_by_priority_age(tasks: &mut [Task]) {
+    let rank = |priority: orbit_common::types::TaskPriority| match priority {
+        orbit_common::types::TaskPriority::Critical => 0,
+        orbit_common::types::TaskPriority::High => 1,
+        orbit_common::types::TaskPriority::Medium => 2,
+        orbit_common::types::TaskPriority::Low => 3,
+    };
+    tasks.sort_by(|left, right| {
+        rank(left.priority)
+            .cmp(&rank(right.priority))
+            .then(left.created_at.cmp(&right.created_at))
+    });
 }
 
-pub(super) fn summarize_epic(input: &Value) -> Result<Value, DispatchError> {
-    let state = input.get("state").cloned().unwrap_or(Value::Null);
-    let subtasks_map = state
-        .get("subtasks")
-        .and_then(Value::as_object)
-        .cloned()
-        .unwrap_or_default();
-    let mut done = 0u64;
-    let mut failed = 0u64;
-    let mut blocked = 0u64;
-    let mut in_flight = 0u64;
-    let mut unfinished_ids: Vec<String> = Vec::new();
-    for (id, entry) in subtasks_map.iter() {
-        let entry_state = entry
-            .get("state")
-            .and_then(Value::as_str)
-            .unwrap_or("unknown");
-        match entry_state {
-            "done" => done += 1,
-            "blocked" => {
-                blocked += 1;
-                unfinished_ids.push(id.clone());
-            }
-            "failed" => {
-                failed += 1;
-                unfinished_ids.push(id.clone());
-            }
-            "in_flight" | "pending" => {
-                in_flight += 1;
-                unfinished_ids.push(id.clone());
-            }
-            _ => {
-                unfinished_ids.push(id.clone());
-            }
-        }
+pub(super) fn epic_family_membership(
+    task: &Task,
+    task_lookup: &BTreeMap<String, Task>,
+) -> Option<EpicFamilyMembership> {
+    if task.tags.iter().any(|tag| tag == "epic") {
+        return Some(EpicFamilyMembership::Root);
     }
-    let total = subtasks_map.len() as u64;
-    let message = if total == 0 {
-        "epic had no subtasks".to_string()
-    } else if unfinished_ids.is_empty() {
-        format!("all {total} subtasks complete")
-    } else {
-        format!(
-            "{done}/{total} done; {failed} failed, {blocked} blocked, \
-             {in_flight} in flight/pending"
-        )
-    };
-    Ok(serde_json::json!({
-        "total": total,
-        "done": done,
-        "failed": failed,
-        "blocked": blocked,
-        "in_flight": in_flight,
-        "unfinished_ids": unfinished_ids,
-        "message": message,
-    }))
+
+    let mut visited = vec![task.id.clone()];
+    let mut next_parent_id = task.parent_id().map(ToOwned::to_owned);
+    for _ in 0..MAX_TASK_PARENT_CHAIN_DEPTH {
+        let parent_id = next_parent_id?;
+        if visited.iter().any(|task_id| task_id == &parent_id) {
+            return None;
+        }
+        let parent = task_lookup.get(&parent_id)?;
+        if parent.tags.iter().any(|tag| tag == "epic") {
+            return Some(EpicFamilyMembership::Child);
+        }
+        visited.push(parent.id.clone());
+        next_parent_id = parent.parent_id().map(ToOwned::to_owned);
+    }
+    None
 }
 
 fn task_root_id(task: &Task, task_lookup: &BTreeMap<String, Task>) -> String {

@@ -99,6 +99,11 @@ fn locks_list_projects_files_held_by_active_tasks() {
     assert_eq!(value["total_tasks"], json!(1));
     assert_eq!(value["locked_files"], json!(["file:held.rs"]));
     assert_eq!(value["by_task"][0]["id"], json!(id));
+    // ORB-10651: the CLI must project the same `by_reservation` /
+    // `total_reservations` fields the underlying `orbit.task.locks` tool
+    // returns, not a hand-built projection that omits them.
+    assert_eq!(value["by_reservation"], json!([]));
+    assert_eq!(value["total_reservations"], json!(0));
 
     let text = workspace.run(&["task", "locks", "list"], "task locks list text");
     let stdout = String::from_utf8_lossy(&text.stdout);
@@ -192,15 +197,23 @@ fn task_add_attributes_from_model_flag_and_managed_identity_env() {
 #[test]
 fn locks_release_reaches_the_admin_tool_only_with_the_operator_capability() {
     let workspace = TestWorkspace::new();
+    // ORB-10651: reservation ids must have the `reservation-<id>` form or
+    // `release` now rejects them before reaching the "no matching row" path
+    // this test otherwise exercises.
     const RELEASE: &[&str] = &[
         "task",
         "locks",
         "release",
-        "no-such-reservation",
+        "reservation-no-such-reservation",
         "--confirm",
     ];
 
-    let refused = workspace.run_raw(&["task", "locks", "release", "no-such-reservation"]);
+    let refused = workspace.run_raw(&[
+        "task",
+        "locks",
+        "release",
+        "reservation-no-such-reservation",
+    ]);
     assert!(!refused.status.success());
     assert!(
         String::from_utf8_lossy(&refused.stderr).contains("--confirm"),

@@ -1,10 +1,10 @@
 use clap::{Args, Subcommand};
-use orbit_core::{OrbitError, OrbitRuntime};
+use orbit_core::OrbitRuntime;
 
-use crate::command::Execute;
+use crate::command::{CommandOut, Execute};
 
+use super::auto;
 use super::cancel::RunCancelArgs;
-use super::duel;
 use super::events::RunEventsArgs;
 use super::history::RunHistoryArgs;
 use super::job::JobRunArgs;
@@ -17,10 +17,10 @@ use super::triage;
 
 const RUN_AFTER_HELP: &str = "\
 Workflow entrypoints:
+  orbit run auto [--for 30m]
   orbit run ship [task_id ...]
   orbit run ship-sweep [--dry-run] [--json]
   orbit run triage [task_id ...]
-  orbit run duel-plan <task_id>
   orbit run job <job_id> [--input key=value] [--json] [--debug]
 
 Run history:
@@ -37,7 +37,7 @@ Maintenance:
 
 #[derive(Args)]
 #[command(
-    about = "Run a job workflow (supports run ship / duel-plan / job)",
+    about = "Run a job workflow (supports run ship / job)",
     arg_required_else_help = true,
     subcommand_required = true,
     override_usage = "orbit run <COMMAND>",
@@ -48,10 +48,10 @@ Maintenance:
 {usage-heading} {usage}
 
 Workflows:
+  auto        Drain the workspace backlog for a window (loose leaves, plus one epic)
   ship        Ship backlog or explicitly selected tasks through the gated task pipeline
   ship-sweep  Dispatch ship runs in every registered workspace with ready backlog tasks
   triage      Triage tasks blocked by failed runs; re-backlog environmental failures
-  duel-plan   Run a planning duel for one task
   job         Run an arbitrary job by ID
 
 Audits:
@@ -74,13 +74,15 @@ pub struct RunCommand {
 }
 
 impl Execute for RunCommand {
-    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+    fn execute(self, runtime: &OrbitRuntime) -> CommandOut {
         self.command.execute(runtime)
     }
 }
 
 #[derive(Subcommand)]
 pub enum RunSubcommand {
+    /// Drain the workspace backlog for a window (loose leaves, plus one epic)
+    Auto(auto::AutoCommand),
     /// Ship backlog or explicitly selected tasks through the gated task pipeline
     Ship(ship::ShipCommand),
     /// Deprecated alias for `orbit run ship --mode local`
@@ -91,9 +93,6 @@ pub enum RunSubcommand {
     ShipSweep(sweep::ShipSweepCommand),
     /// Triage tasks blocked by failed runs; re-backlog environmental failures
     Triage(triage::TriageCommand),
-    /// Run a planning duel for one task
-    #[command(name = "duel-plan")]
-    DuelPlan(duel::DuelPlanCommand),
     /// Show recent job runs, optionally filtered to one job
     History(RunHistoryArgs),
     /// Show structured state and step summary for a job run
@@ -111,15 +110,15 @@ pub enum RunSubcommand {
 }
 
 impl Execute for RunSubcommand {
-    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+    fn execute(self, runtime: &OrbitRuntime) -> CommandOut {
         match self {
+            RunSubcommand::Auto(command) => command.execute(runtime),
             RunSubcommand::Ship(command) => command.execute(runtime),
             RunSubcommand::ShipLocal(command) => command.execute(runtime),
             // Normally dispatched before runtime init (see main.rs); the
             // registry-driven sweep never uses the cwd-derived runtime.
             RunSubcommand::ShipSweep(command) => command.execute_without_runtime(),
             RunSubcommand::Triage(command) => command.execute(runtime),
-            RunSubcommand::DuelPlan(command) => command.execute(runtime),
             RunSubcommand::History(command) => command.execute(runtime),
             RunSubcommand::Show(command) => command.execute(runtime),
             RunSubcommand::Logs(command) => command.execute(runtime),

@@ -2,6 +2,7 @@ mod author;
 mod git_ops;
 mod message;
 mod scope;
+mod summary;
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
@@ -9,7 +10,7 @@ use std::path::{Path, PathBuf};
 use orbit_common::types::{NO_DIFF_EXPECTED_TAG, OrbitError};
 use serde_json::{Value, json};
 
-use crate::context::{DeterministicActionHost, TaskHost};
+use crate::context::RuntimeHost;
 
 use super::super::input::{canonicalize_existing_dir, input_string_field, required_job_run_id};
 use super::git::{git_output, git_success};
@@ -21,10 +22,9 @@ use git_ops::{
 };
 use message::{batch_commit_message, finalize_commit_message, task_commit_message};
 use scope::{changed_files_for_task, collect_worktree_changes, filter_changed_files_for_task};
+use summary::ensure_durable_execution_summary;
 
-pub(in crate::executor::automation) fn git_commit<
-    H: TaskHost + DeterministicActionHost + ?Sized,
->(
+pub(in crate::executor::automation) fn git_commit<H: RuntimeHost + ?Sized>(
     host: &H,
     input: &Value,
 ) -> Result<Value, OrbitError> {
@@ -39,7 +39,7 @@ pub(in crate::executor::automation) fn git_commit<
     }
 }
 
-pub(super) fn commit_task_artifact_changes<H: TaskHost + DeterministicActionHost + ?Sized>(
+pub(super) fn commit_task_artifact_changes<H: RuntimeHost + ?Sized>(
     host: &H,
     input: &Value,
 ) -> Result<Value, OrbitError> {
@@ -114,7 +114,7 @@ pub(super) fn commit_task_artifact_changes<H: TaskHost + DeterministicActionHost
     }))
 }
 
-pub(super) fn commit_finalize_artifact_changes<H: TaskHost + DeterministicActionHost + ?Sized>(
+pub(super) fn commit_finalize_artifact_changes<H: RuntimeHost + ?Sized>(
     host: &H,
     input: &Value,
 ) -> Result<Value, OrbitError> {
@@ -168,7 +168,7 @@ pub(super) fn commit_finalize_artifact_changes<H: TaskHost + DeterministicAction
     }))
 }
 
-pub(super) fn commit_batch_changes<H: TaskHost + DeterministicActionHost + ?Sized>(
+pub(super) fn commit_batch_changes<H: RuntimeHost + ?Sized>(
     host: &H,
     input: &Value,
 ) -> Result<Value, OrbitError> {
@@ -181,35 +181,61 @@ pub(super) fn commit_batch_changes<H: TaskHost + DeterministicActionHost + ?Size
         )));
     };
 
-    // ORB-10313: fail closed on the durable execution outcome before resolving
-    // the delivery checkout, staging files, mutating the index, or committing.
-    reject_failed_delivery(task)?;
-
     let workspace_path = resolve_workspace_path(host, input, batch_id)?;
     ensure_named_branch(&workspace_path)?;
 
     ensure_no_unmerged_changes(&workspace_path)?;
 
+    // ORB-10603: the summary the gate reads is durable state, and nothing in the
+    // pipeline filled it when the implementing agent skipped the instruction to
+    // persist one. Derive it read-only from the change about to be delivered —
+    // never from the agent's advisory response envelope — and only when the
+    // agent persisted nothing of its own.
+    let task = ensure_durable_execution_summary(host, task.clone(), &workspace_path, batch_id)?;
+
+    // ORB-10313: fail closed on the durable execution outcome before staging
+    // files, mutating the index, or committing. Only read-only resolution and
+    // validation run ahead of it; the gate itself is unchanged, and an empty or
+    // underivable summary still refuses delivery here.
+    reject_failed_delivery(&task)?;
+
     // ADR-0219: an explicitly side-effect-only task skips this phase instead of
     // failing it. Read the tag before any gate so the carve-out is reachable
     // from every failure branch below, not just the empty-stage one (ORB-10380).
     let no_diff_expected = task.tags.iter().any(|tag| tag == NO_DIFF_EXPECTED_TAG);
+    let allow_empty = input
+        .get("allow_empty")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let allow_moved_head = input
+        .get("allow_moved_head")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
 
-    let base_sha = match validate_pinned_head(&workspace_path, input)? {
-        PinnedHead::Matched(base_sha) => Some(base_sha),
-        PinnedHead::Unpinned => None,
+    let (base_sha, head_moved) = match validate_pinned_head(&workspace_path, input)? {
+        PinnedHead::Matched(base_sha) => (Some(base_sha), false),
+        PinnedHead::Unpinned => (None, false),
         PinnedHead::Changed { base_sha, head_sha } => {
             if no_diff_expected {
                 return Ok(skipped_no_diff_expected_result(&task.id));
             }
-            return Err(changed_head_error(
-                &task.id,
-                &workspace_path,
-                &base_sha,
-                &head_sha,
-            ));
+            if !allow_moved_head {
+                return Err(changed_head_error(
+                    &task.id,
+                    &workspace_path,
+                    &base_sha,
+                    &head_sha,
+                ));
+            }
+            (Some(base_sha), true)
         }
     };
+
+    // A proposed ADR the run allocated lives in an ignored partition, so
+    // `git add --all` below would skip it and ship the code without the
+    // decision documenting it. Hand it off first: this is the step that can
+    // fail on read-only worktree metadata, and going first means that failure
+    // names the bundle instead of surfacing as a bare `git add` error.
 
     git_success(&workspace_path, &["add", "--all", "--", "."])?;
 
@@ -219,7 +245,12 @@ pub(super) fn commit_batch_changes<H: TaskHost + DeterministicActionHost + ?Size
         // `git add --all` staged nothing here, so the index already matches
         // HEAD and the former `git reset HEAD` was both pointless and a
         // mutation performed while erroring.
-        if no_diff_expected {
+        if head_moved {
+            // Child pipelines already advanced HEAD. There is a diff to
+            // deliver; it just is not sitting uncommitted.
+            return Ok(already_committed_result(&task.id, base_sha.as_deref()));
+        }
+        if no_diff_expected || allow_empty {
             return Ok(skipped_no_diff_expected_result(&task.id));
         }
         return Err(empty_stage_error(
@@ -229,7 +260,7 @@ pub(super) fn commit_batch_changes<H: TaskHost + DeterministicActionHost + ?Size
         )?);
     }
 
-    let message = batch_commit_message(task);
+    let message = batch_commit_message(&task);
     let resolved_model = host.resolved_crew_model(batch_id)?;
 
     git_commit_with_identity(&workspace_path, &message, resolved_model.as_deref())?;
@@ -252,7 +283,7 @@ pub(super) fn commit_batch_changes<H: TaskHost + DeterministicActionHost + ?Size
 /// Commit a terminally-failed shipment's dirty candidate without consulting
 /// the normal success-summary delivery gate. ADR-0246 confines this bypass to
 /// the failure handoff, which blocks rather than promotes the task.
-pub(super) fn commit_failure_candidate<H: DeterministicActionHost + ?Sized>(
+pub(super) fn commit_failure_candidate<H: RuntimeHost + ?Sized>(
     host: &H,
     run_id: &str,
     workspace_path: &Path,
@@ -344,6 +375,20 @@ fn skipped_no_diff_expected_result(task_id: &str) -> Value {
     })
 }
 
+fn already_committed_result(task_id: &str, base_sha: Option<&str>) -> Value {
+    let mut result = json!({
+        "phase": "commit",
+        "decision": "already_committed",
+        "committed": false,
+        "skipped_no_diff_expected": false,
+        "task_id": task_id,
+    });
+    if let Some(base_sha) = base_sha {
+        result["base_sha"] = json!(base_sha);
+    }
+    result
+}
+
 /// The worktree carries no committable work. Reports only what was observed —
 /// this message shares no wording with [`unrelated_history_error`] so a reader
 /// can tell the two conditions apart (ORB-10380).
@@ -415,7 +460,7 @@ fn worktree_status_counts(workspace_path: &Path) -> Result<WorktreeStatusCounts,
     Ok(counts)
 }
 
-fn resolve_workspace_path<H: DeterministicActionHost + ?Sized>(
+fn resolve_workspace_path<H: RuntimeHost + ?Sized>(
     host: &H,
     input: &Value,
     batch_id: &str,

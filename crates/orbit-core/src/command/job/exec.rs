@@ -8,8 +8,7 @@
 use std::path::Path;
 
 use orbit_common::types::activity_job::{
-    Backend, V2AuditEventKind, load_job_asset, resolve_job_backends,
-    validate_job_loop_session_backends,
+    V2AuditEventKind, load_job_asset, validate_job_retired_sessions,
 };
 use orbit_common::types::{
     JobRun, JobRunState, JobTargetType, NotFoundKind, OrbitError, OrbitEvent, PipelineState,
@@ -33,9 +32,31 @@ pub struct V2JobRunResult {
     pub pipeline: Value,
     pub message: Option<String>,
     pub events_emitted: usize,
-    /// Resolved backend applied at load time to every `agent_loop` step in
-    /// the DAG. Recorded so smokes can inspect the precedence outcome.
-    pub resolved_backend: Backend,
+}
+
+/// Path-specific durable records retained while finalizing a v2 run.
+///
+/// The foreground path predates per-step checkpointing, so its legacy summary
+/// row and synthetic success step remain observable API. Detached workers
+/// already persist their authoritative per-step checkpoints and must not add a
+/// synthetic step 0 that can obscure them. Keeping that distinction explicit
+/// lets both paths share the terminal-state, reservation, and event sequence.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct V2RunFinalizationOptions {
+    write_legacy_summary_step: bool,
+    record_synthetic_success_step: bool,
+}
+
+impl V2RunFinalizationOptions {
+    pub(crate) const DIRECT: Self = Self {
+        write_legacy_summary_step: true,
+        record_synthetic_success_step: true,
+    };
+
+    pub(crate) const DETACHED_WORKER: Self = Self {
+        write_legacy_summary_step: false,
+        record_synthetic_success_step: false,
+    };
 }
 
 impl OrbitRuntime {
@@ -46,9 +67,8 @@ impl OrbitRuntime {
         &self,
         yaml_path: &Path,
         input: Value,
-        backend_flag: Option<Backend>,
     ) -> Result<V2JobRunResult, OrbitError> {
-        self.run_job_v2_from_yaml_with_retry_source(yaml_path, input, backend_flag, None, 1, None)
+        self.run_job_v2_from_yaml_with_retry_source(yaml_path, input, None, 1, None)
     }
 
     /// Re-run a completed or historical job run from step 0 using the current
@@ -64,7 +84,6 @@ impl OrbitRuntime {
         self.run_job_v2_from_yaml_with_retry_source(
             &job_path,
             input,
-            None,
             Some(source.run_id.clone()),
             1,
             None,
@@ -95,7 +114,6 @@ impl OrbitRuntime {
         self.run_job_v2_from_yaml_with_retry_source(
             &plan.job_path,
             plan.input.clone(),
-            None,
             Some(plan.source.run_id.clone()),
             plan.attempt,
             Some(&plan),
@@ -106,7 +124,6 @@ impl OrbitRuntime {
         &self,
         yaml_path: &Path,
         input: Value,
-        backend_flag: Option<Backend>,
         retry_source_run_id: Option<String>,
         attempt: u32,
         resume: Option<&ResumePlan>,
@@ -120,21 +137,7 @@ impl OrbitRuntime {
             Some(input.clone()),
             retry_source_run_id.clone(),
         )?;
-        // [ORB-10002] A resumed run starts from the source run's checkpoint
-        // state (re-keyed to the new run) instead of a blank pipeline.
-        let initial_state = match resume.and_then(|plan| plan.resume_state.as_ref()) {
-            Some(source_state) => seeded_resume_state(source_state, &run),
-            None => PipelineState::new(run.run_id.clone(), run.job_id.clone(), input.clone()),
-        };
-        self.stores()
-            .jobs()
-            .write_run_state(&run.run_id, &initial_state)?;
-        // [ORB-10470] Re-admit and re-claim this lineage's tasks before the
-        // first step runs, so a resume of a failed run is not gated by the
-        // block that same failure applied.
-        if let Some(plan) = resume {
-            self.reconcile_resume_task_ownership(plan, &run.run_id)?;
-        }
+        self.seed_v2_pipeline_run(&run, &input, resume)?;
 
         let started_at = chrono::Utc::now();
         let changed = self.stores().jobs().mark_job_run_running(
@@ -155,88 +158,30 @@ impl OrbitRuntime {
         let outcome = self.run_job_v2_from_yaml_with_run_context(
             yaml_path,
             input.clone(),
-            backend_flag,
             Some(run.run_id.clone()),
             retry_source_run_id,
             resume.and_then(|plan| plan.resume_state.as_ref()),
         );
         let finished_at = chrono::Utc::now();
-        let duration_ms = Some(
-            finished_at
-                .signed_duration_since(started_at)
-                .num_milliseconds()
-                .max(0) as u64,
-        );
 
-        match outcome {
-            Ok(result) => {
-                let final_state = if result.success {
-                    JobRunState::Success
-                } else {
-                    JobRunState::Failed
-                };
-                self.persist_direct_v2_run_state(&run, &input, &result, final_state)?;
-                if result.success {
-                    self.record_direct_v2_success_step(&run, started_at, finished_at, &result)?;
-                } else {
-                    let fallback = "job completed with success=false but emitted no failure detail";
-                    let message = result.message.as_deref().unwrap_or(fallback);
-                    let _ =
-                        self.record_pipeline_failure_step(&run, started_at, finished_at, message);
-                }
-                self.finalize_job_run_with_reservation_cleanup(
-                    &run.run_id,
-                    final_state,
-                    finished_at,
-                    duration_ms,
-                    TaskReservationReleaseReason::RunTerminal,
-                )?;
-                self.record_event(OrbitEvent::JobRunCompleted {
-                    job_id: run.job_id.clone(),
-                    run_id: run.run_id.clone(),
-                    state: final_state.to_string(),
-                })?;
-                Ok(result)
-            }
-            Err(error) => {
-                let _ = self.record_pipeline_failure_step(
-                    &run,
-                    started_at,
-                    finished_at,
-                    &error.to_string(),
-                );
-                self.finalize_job_run_with_reservation_cleanup(
-                    &run.run_id,
-                    JobRunState::Failed,
-                    finished_at,
-                    duration_ms,
-                    TaskReservationReleaseReason::RunTerminal,
-                )?;
-                self.record_event(OrbitEvent::JobRunCompleted {
-                    job_id: run.job_id.clone(),
-                    run_id: run.run_id.clone(),
-                    state: JobRunState::Failed.to_string(),
-                })?;
-                Err(error)
-            }
-        }
+        self.finalize_v2_pipeline_run(
+            &run,
+            &input,
+            started_at,
+            finished_at,
+            outcome.as_ref(),
+            V2RunFinalizationOptions::DIRECT,
+        )?;
+        outcome
     }
 
     pub fn run_job_v2_from_yaml_with_run_id(
         &self,
         yaml_path: &Path,
         input: Value,
-        backend_flag: Option<Backend>,
         run_id_override: Option<String>,
     ) -> Result<V2JobRunResult, OrbitError> {
-        self.run_job_v2_from_yaml_with_run_context(
-            yaml_path,
-            input,
-            backend_flag,
-            run_id_override,
-            None,
-            None,
-        )
+        self.run_job_v2_from_yaml_with_run_context(yaml_path, input, run_id_override, None, None)
     }
 
     /// [ORB-10470] Execute a persisted run against its own checkpoints.
@@ -249,7 +194,6 @@ impl OrbitRuntime {
         &self,
         yaml_path: &Path,
         input: Value,
-        backend_flag: Option<Backend>,
         run_id_override: Option<String>,
         retry_source_run_id: Option<String>,
         resume: Option<&PipelineState>,
@@ -257,7 +201,6 @@ impl OrbitRuntime {
         self.run_job_v2_from_yaml_with_run_context(
             yaml_path,
             input,
-            backend_flag,
             run_id_override,
             retry_source_run_id,
             resume,
@@ -268,7 +211,6 @@ impl OrbitRuntime {
         &self,
         yaml_path: &Path,
         input: Value,
-        backend_flag: Option<Backend>,
         run_id_override: Option<String>,
         retry_source_run_id: Option<String>,
         resume: Option<&PipelineState>,
@@ -281,21 +223,16 @@ impl OrbitRuntime {
         })?;
 
         // Phase 4: resolve `target: activity:<name>` refs before any other
-        // pass, so backend-resolution + loader-rejection see concrete specs.
+        // pass, so retired-feature rejection sees concrete specs.
         let catalog = self
             .v2_activity_catalog()
             .map_err(|err| OrbitError::InvalidInput(format!("build activity catalog: {err}")))?;
         resolve_job_catalog_refs_for_execution(&mut asset.spec, &catalog)
             .map_err(dispatch_error_to_orbit)?;
 
-        // §3.1 resolution: replace every `Auto` with a concrete backend.
-        let resolution = self.resolve_v2_backend(backend_flag);
-        resolve_job_backends(&mut asset.spec, resolution.backend);
-
-        // §3.2 loader rejection: any `loop:`-nested step with `session:`
-        // binding must resolve to `backend: http`. We reject at load time so
-        // CLI-mode runs never start a DAG they can't finish.
-        validate_job_loop_session_backends(&asset.spec, &yaml_path.display().to_string())
+        // [ORB-10801] Reject retired declarations at load time so a run never
+        // starts a DAG it cannot finish as written.
+        validate_job_retired_sessions(&asset.spec, &yaml_path.display().to_string())
             .map_err(|err| OrbitError::InvalidInput(format!("{err}")))?;
         let run_id = run_id_override.unwrap_or_else(|| {
             format!(
@@ -355,18 +292,96 @@ impl OrbitRuntime {
                 pipeline: o.pipeline,
                 message: o.message,
                 events_emitted: events_count,
-                resolved_backend: resolution.backend,
             }),
             Err(err) => Err(err),
         }
     }
 
-    fn persist_direct_v2_run_state(
+    /// Seed a persisted run before either the foreground or detached path
+    /// executes it. A resume re-keys checkpoints and reconciles the failed
+    /// lineage's task ownership before admission evaluates the first step.
+    pub(crate) fn seed_v2_pipeline_run(
+        &self,
+        run: &JobRun,
+        input: &Value,
+        resume: Option<&ResumePlan>,
+    ) -> Result<(), OrbitError> {
+        let initial_state = match resume.and_then(|plan| plan.resume_state.as_ref()) {
+            Some(source_state) => seeded_resume_state(source_state, run),
+            None => PipelineState::new(run.run_id.clone(), run.job_id.clone(), input.clone()),
+        };
+        self.stores()
+            .jobs()
+            .write_run_state(&run.run_id, &initial_state)?;
+        if let Some(plan) = resume {
+            self.reconcile_resume_task_ownership(plan, &run.run_id)?;
+        }
+        Ok(())
+    }
+
+    /// Persist the common terminal lifecycle for foreground and detached v2
+    /// execution without changing their established checkpoint conventions.
+    pub(crate) fn finalize_v2_pipeline_run(
+        &self,
+        run: &JobRun,
+        input: &Value,
+        started_at: chrono::DateTime<chrono::Utc>,
+        finished_at: chrono::DateTime<chrono::Utc>,
+        outcome: Result<&V2JobRunResult, &OrbitError>,
+        options: V2RunFinalizationOptions,
+    ) -> Result<(), OrbitError> {
+        let duration_ms = Some(
+            finished_at
+                .signed_duration_since(started_at)
+                .num_milliseconds()
+                .max(0) as u64,
+        );
+        let final_state = match outcome {
+            Ok(result) if result.success => {
+                self.persist_v2_run_state(run, input, result, JobRunState::Success, options)?;
+                if options.record_synthetic_success_step {
+                    self.record_synthetic_v2_success_step(run, started_at, finished_at, result)?;
+                }
+                JobRunState::Success
+            }
+            Ok(result) => {
+                self.persist_v2_run_state(run, input, result, JobRunState::Failed, options)?;
+                let fallback = "job completed with success=false but emitted no failure detail";
+                let message = result.message.as_deref().unwrap_or(fallback);
+                let _ = self.record_pipeline_failure_step(run, started_at, finished_at, message);
+                JobRunState::Failed
+            }
+            Err(error) => {
+                let _ = self.record_pipeline_failure_step(
+                    run,
+                    started_at,
+                    finished_at,
+                    &error.to_string(),
+                );
+                JobRunState::Failed
+            }
+        };
+        self.finalize_job_run_with_reservation_cleanup(
+            &run.run_id,
+            final_state,
+            finished_at,
+            duration_ms,
+            TaskReservationReleaseReason::RunTerminal,
+        )?;
+        self.record_event(OrbitEvent::JobRunCompleted {
+            job_id: run.job_id.clone(),
+            run_id: run.run_id.clone(),
+            state: final_state.to_string(),
+        })
+    }
+
+    fn persist_v2_run_state(
         &self,
         run: &JobRun,
         input: &Value,
         result: &V2JobRunResult,
         final_state: JobRunState,
+        options: V2RunFinalizationOptions,
     ) -> Result<(), OrbitError> {
         let mut state = self.read_run_state(&run.run_id)?.unwrap_or_else(|| {
             PipelineState::new(run.run_id.clone(), run.job_id.clone(), input.clone())
@@ -376,13 +391,13 @@ impl OrbitRuntime {
         // this run; only fall back to the legacy single-summary step record
         // when no checkpoint was ever written, so a later `resume` never sees
         // a whole-run summary clobbering step 0's real checkpoint.
-        if state.step_states.is_empty() {
+        if options.write_legacy_summary_step && state.step_states.is_empty() {
             state.record_step(0, final_state, Some(result.pipeline.clone()), None);
         }
         self.stores().jobs().write_run_state(&run.run_id, &state)
     }
 
-    fn record_direct_v2_success_step(
+    fn record_synthetic_v2_success_step(
         &self,
         run: &JobRun,
         started_at: chrono::DateTime<chrono::Utc>,

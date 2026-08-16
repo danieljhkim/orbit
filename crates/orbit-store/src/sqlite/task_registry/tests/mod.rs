@@ -74,6 +74,7 @@ fn envelope(
         pr_status: None,
         job_run_id: None,
         crew: None,
+        orchestrator: None,
         relations,
         tags,
         context_files: Vec::new(),
@@ -134,6 +135,26 @@ fn allocator_returns_monotonic_orb_ids() {
     assert_eq!(
         store.allocate_task_id(&workspace.workspace_id).expect("id"),
         "ORB-00001"
+    );
+}
+
+#[test]
+fn allocator_uses_host_prefix_and_expands_past_five_digits() {
+    let temp = TempDir::new().expect("tempdir");
+    let store = store(&temp);
+    store.set_task_prefix("DE").expect("set host prefix");
+    store
+        .seed_allocator_start(99_999)
+        .expect("seed near width boundary");
+    let workspace = bind(&store, temp.path());
+
+    assert_eq!(
+        store.allocate_task_id(&workspace.workspace_id).expect("id"),
+        "DE-99999"
+    );
+    assert_eq!(
+        store.allocate_task_id(&workspace.workspace_id).expect("id"),
+        "DE-100000"
     );
 }
 
@@ -334,6 +355,12 @@ fn open_migrates_path_coupled_registry_once_without_changing_coordination_state(
     assert_eq!(statuses.get("ORB-00041"), Some(&TaskStatus::Done));
     assert_eq!(migrated.allocator_next_number().expect("allocator"), 42);
     assert_eq!(
+        migrated
+            .allocate_task_id("legacy-workspace-aaaaaa")
+            .expect("continue migrated allocator"),
+        "ORB-00042"
+    );
+    assert_eq!(
         fs::read_to_string(canonical_path.join("payload.sentinel")).expect("read payload"),
         "preserve-me"
     );
@@ -375,7 +402,7 @@ fn open_migrates_path_coupled_registry_once_without_changing_coordination_state(
             .expect("status projection"),
         statuses
     );
-    assert_eq!(reopened.allocator_next_number().expect("allocator"), 42);
+    assert_eq!(reopened.allocator_next_number().expect("allocator"), 43);
 }
 
 #[test]
@@ -594,6 +621,50 @@ fn checkoutless_workspaces_coordinate_cross_workspace_relations_without_paths() 
             .indexed_relation_targets(&first.workspace_id, &source_id, TaskRelationType::BlockedBy,)
             .expect("relation after rejected update"),
         vec![target_id]
+    );
+
+    let foreign_target = "DK-00042";
+    store
+        .validate_new_task_relation_targets(
+            &first.workspace_id,
+            &[TaskRelation {
+                relation_type: TaskRelationType::BlockedBy,
+                target: foreign_target.into(),
+            }],
+        )
+        .expect("foreign-prefix target cannot be verified locally");
+    store
+        .replace_task_index(
+            &first.workspace_id,
+            &envelope(
+                &source_id,
+                TaskStatus::Review,
+                Vec::new(),
+                vec![
+                    TaskRelation {
+                        relation_type: TaskRelationType::BlockedBy,
+                        target: foreign_target.into(),
+                    },
+                    TaskRelation {
+                        relation_type: TaskRelationType::RelatedTo,
+                        target: foreign_target.into(),
+                    },
+                ],
+            ),
+        )
+        .expect("index foreign-prefix relations");
+    assert_eq!(
+        store
+            .indexed_relation_targets(&first.workspace_id, &source_id, TaskRelationType::RelatedTo)
+            .expect("foreign relation target"),
+        vec![foreign_target.to_string()]
+    );
+    assert!(
+        store
+            .dangling_relation_targets(Some(&first.workspace_id))
+            .expect("audit foreign target")
+            .is_empty(),
+        "allowed foreign references are not locally dangling"
     );
 }
 
@@ -1373,16 +1444,6 @@ fn seed_allocator_start_refuses_to_lower() {
         .expect_err("must refuse lowering");
     assert!(matches!(err, OrbitError::InvalidInput(_)));
     assert_eq!(store.allocator_next_number().expect("read"), 5_000);
-}
-
-#[test]
-fn seed_allocator_start_rejects_above_max() {
-    let temp = TempDir::new().expect("tempdir");
-    let store = store(&temp);
-    let err = store
-        .seed_allocator_start(ORB_TASK_ID_MAX + 1)
-        .expect_err("must reject above max");
-    assert!(matches!(err, OrbitError::InvalidInput(_)));
 }
 
 #[test]

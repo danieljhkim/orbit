@@ -1,3 +1,9 @@
+---
+type: context
+summary: "Orbit Positioning"
+last_validated: 2026-08-13
+---
+
 # Orbit Positioning
 
 This document names what Orbit is for, who it's for, and what it deliberately isn't. Use it as a decision lens — when a design debate feels like it's really about *what Orbit is for*, reference this doc instead of re-litigating case by case.

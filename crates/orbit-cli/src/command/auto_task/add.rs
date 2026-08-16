@@ -1,10 +1,10 @@
 use clap::{ArgAction, Args};
 use orbit_core::{
-    AutoTaskAddParams, AutoTaskTemplate, DedupePolicy, OrbitError, OrbitRuntime, TaskPriority,
-    TaskStatus, TaskType,
+    AutoTaskAddParams, AutoTaskTemplate, DedupePolicy, OrbitRuntime, TaskPriority, TaskStatus,
+    TaskType,
 };
 
-use crate::command::Execute;
+use crate::command::{CommandOut, CommandOutput, Execute, Payload};
 
 use super::output::definition_to_json;
 use super::schedule_args::require_schedule;
@@ -56,7 +56,7 @@ pub struct AutoTaskAddArgs {
 }
 
 impl Execute for AutoTaskAddArgs {
-    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+    fn execute(self, runtime: &OrbitRuntime) -> CommandOut {
         let schedule = require_schedule(self.cron, self.every_minutes)?;
         let template = AutoTaskTemplate {
             title: self.title,
@@ -77,10 +77,10 @@ impl Execute for AutoTaskAddArgs {
         })?;
 
         if self.json {
-            crate::output::json::print_pretty(&definition_to_json(&definition))
+            Ok(Payload::document(definition_to_json(&definition)).into())
         } else {
             println!("{}", definition.name);
-            Ok(())
+            Ok(CommandOutput::Silent)
         }
     }
 }

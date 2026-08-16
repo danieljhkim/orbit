@@ -3,19 +3,28 @@ summary: "Worktree Artifacts - Design"
 type: design
 title: "Worktree Artifacts - Design"
 owner: codex
-last_updated: 2026-07-19
+last_updated: 2026-08-15
 status: Accepted
 feature: worktree-artifacts
 doc_role: design
 tags: ["worktree-artifacts"]
-paths: ["crates/orbit-remote/**", "crates/orbit-core/**", "crates/orbit-store/**", "crates/orbit-cli/**"]
+paths: ["crates/orbit-core/**", "crates/orbit-store/**", "crates/orbit-cli/**"]
 related_features: ["worktree-artifacts", "host-registry", "mcp-bridge"]
-related_artifacts: ["ORB-00199", "ORB-00200", "ORB-00201", "ORB-10272", "ORB-10297", "ORB-10330", "ADR-0177", "ADR-0229"]
+related_artifacts: ["ORB-00199", "ORB-00200", "ORB-00201", "ORB-10272", "ORB-10297", "ORB-10330", "ORB-10545", "ORB-10668", "ORB-10669", "ORB-10725"]
 ---
 
-# Worktree Artifacts - Design
+# Worktree Artifacts — Design
 
-The current implementation treats ADR and learning bodies as branch-local files with globally allocated IDs. The shared root owns durable coordination state; the local root owns files that should be staged with the branch.
+> Learning-specific storage and federation references below are retired history.
+> [ORB-10736] / [Remove the native project-learning subsystem](../project-learnings/4_decisions.md#remove-the-native-project-learning-subsystem) remove the native learning subsystem and leave its
+> existing repository files inert.
+
+> Decision-store storage, federation, allocation, and repair references below are
+> also retired history. [ORB-10726] retired the tool surface and moved reasoning
+> into feature decision docs; [ORB-10805] removed the redundant tracked store and
+> its IDs.
+
+The historical implementation treated decision and learning bodies as branch-local files with workspace-local IDs ([Workspace-scoped knowledge keys, no global knowledge IDs](../host-registry/4_decisions.md#workspace-scoped-knowledge-keys-no-global-knowledge-ids)). The root split remains relevant to task execution, while the artifact-specific mechanisms below document retired behavior.
 
 ## 1. Runtime Roots
 
@@ -35,65 +44,34 @@ shared lock, then body writes update the row with:
 
 Backfilled shared-root artifacts receive `body_path` during allocator initialization so old ADRs and migrated learnings remain readable from any worktree.
 
-This remains the compatibility allocator and every current create path continues to
-use it during F1. [ORB-10272] does not redirect standalone or worktree creation.
+This is the only allocator, and every create path uses it. [Workspace-scoped knowledge keys, no global knowledge IDs](../host-registry/4_decisions.md#workspace-scoped-knowledge-keys-no-global-knowledge-ids) keys
+knowledge `(workspace_id, artifact_key)`, so an ID is unique within its workspace
+and makes no claim outside it; [ORB-10725] deleted the hub-global sequence that
+§2.1 and §2.2 once described.
 
-### 2.1 Hub-global sequence substrate
+### 2.1 The withdrawn hub-global sequence substrate
 
-Multi-host authority is separate from worktree federation. Remote feature migration
-v2 installs dormant, independent ADR and learning sequences in the hub's
-config-resolved `orbit.db`, together with per-workspace reconciliation state and an
-immutable `mcp_call_id` allocation ledger. Those rows are path-free; they neither
-replace `body_path` nor make the hub a reader of a spoke owner's worktree.
+[ORB-10272] added Remote feature migration v2: dormant hub-global ADR and learning
+sequences in the hub's config-resolved `orbit.db`, per-workspace reconciliation
+state, an immutable `mcp_call_id` allocation ledger, and a dormant/active authority
+marker. [ORB-10330] added the owner-side `finalize_preallocated` paths and the
+gated broker composition that paired one hub allocation with one owner-checkout
+finalization, correlated by `mcp_call_id`.
 
-Before hub authority can activate, every registered workspace's complete hub-local
-legacy inventory is validated: all valid lifecycle files and all legacy allocation
-rows in every status. Missing sources and cross-workspace duplicate IDs fail before
-any mutation. The final forward-only reseed and authority flip are one restart-safe
-transition. A late workspace stays knowledge-ineligible until the same complete
-local reconciliation succeeds. The hub never contacts an owner to repair a missing
-source.
+**Both are removed** ([ORB-10725], [Workspace-scoped knowledge keys, no global knowledge IDs](../host-registry/4_decisions.md#workspace-scoped-knowledge-keys-no-global-knowledge-ids)). Public issuance never activated, so
+no ID was ever drawn from the sequence and nothing had to be renumbered; what the
+substrate encoded was a superseded model, which is why it was deleted rather than
+parked alongside the registry tables that [Defer fleet registration and execution placement to v2](../host-registry/4_decisions.md#defer-fleet-registration-and-execution-placement-to-v2) keeps dormant for v2. Remote
+feature v2 keeps its ledger slot — feature-migration names are immutable, so a
+database that recorded it must still find it — but the slot is a no-op, and Remote
+feature v3 drops the tables `IF EXISTS` so a database that applied the original v2
+converges on the same shape as a fresh one.
 
-After activation, allocation advances one kind's sequence and commits its immutable
-correlation ledger plus canonical audit atomically. It still does not write the
-artifact body: the owner writes the branch-local bundle under `local_root`. A
-finalize failure therefore consumes a valid unused global ID. There is no
-reservation, release, reuse, or remote-finalize protocol.
-
-F1 leaves the substrate dormant and exposes no public allocation tool. F3 alone
-activates public issuance and cuts owner creation over; standalone hosts cannot
-enter hub authority.
-
-### 2.2 Preallocated owner finalizers
-
-[ORB-10330] adds the owner-side finalizer that consumes a hub allocation without
-becoming an allocation authority. Each owner file store gains a
-`finalize_preallocated(id, payload)` path beside its standalone create path: it
-takes the caller-supplied canonical id (chosen upstream by the §2.1 hub
-sequence), so it never calls the compatibility allocator, abandons, retries, or
-selects a second id. It preserves the existing validation, exclusive bundle
-creation, sidecar/index update, and local partial-write cleanup, and it installs
-a **non-authoritative** owner-local body-path projection in the standalone
-`id_allocations` table so ADR/learning list, show, and lifecycle resolve the
-finalized body. The projection is inserted directly for the given id; it never
-advances the local sequence and never claims canonical allocation authority.
-
-A pre-existing artifact at the supplied id fails the finalization
-deterministically and is never overwritten or adopted. A failure after the id is
-fixed removes only the local partial bundle and projection; it never rolls back
-or abandons the immutable hub allocation, which stays consumed as a valid gap.
-The finalizer takes no absolute path — it operates on the D3-selected
-checkout-bound owner store, so process cwd and remote paths cannot redirect it.
-
-The composite `orbit.learning.add` / `orbit.adr.add` broker path pairs one hub
-allocation with one owner finalization: for a local (hub-owned) workspace it
-allocates through §2.1 then finalizes in the selected owner checkout; a foreign
-spoke owner or a local replica is rejected by D3 owner preflight *before*
-allocation, so no avoidable gap is burned. Allocation and owner finalization
-correlate through the original trusted `mcp_call_id`, workspace id, kind, and
-allocated id. [ORB-10330] adds and tests these finalizers and the broker
-composition behind an inactive cutover gate; public creation stays on the
-compatibility path until F3 activates issuance and cuts the callers over.
+What is left is the shape §2 already described: one workspace-local allocator per
+workspace, reached only by the owning machine. `orbit.learning.add` and
+`orbit.adr.add` are single owner-local transactions — no reservation, no expiry, no
+orphaned ID, no finalize/pull race — and the [ORB-10364] authoring role gate sits on
+that one surface with nothing at stake on refusal.
 
 ## 3. Write Path
 
@@ -130,11 +108,77 @@ List and search retain their existing defaults. Readable allocation-owned bundle
 
 ADR document update, accept, and supersede are local-only. A federated or unavailable allocation-owned artifact fails preflight with `artifact_not_local` (HTTP 409 or the same local MCP code) before any bundle, allocation, lifecycle timestamp, index, or audit mutation. Supersede preflights both operands before its first write. Landing the bundle in the current checkout restores ordinary local mutation semantics; a sibling-owned allocation row remains unchanged.
 
-## 6. Indexing Behavior
+Local-only is a boundary on *where* the write runs, not on which surface may run
+it. `orbit adr add`, `orbit adr update`, and `orbit adr supersede` ([orbit adr owns ADR authoring and lifecycle; reconcile stays the cross-checkout verb](./4_decisions.md#orbit-adr-owns-adr-authoring-and-lifecycle-reconcile-stays-the-cross-checkout-verb),
+[ORB-10668]) delegate to the same `orbit.adr.*` tools and so inherit this
+preflight unchanged; they exist so the checkout that owns a bundle can complete
+the lifecycle from a shell, which is the only place the 409 leaves open.
+
+### 5.1 Federated ADR reconciliation
+
+`orbit adr reconcile <id> --source-worktree <path>` localizes an already
+published ADR bundle from an explicitly named registered sibling worktree. It
+does not allocate, reconstruct metadata, change lifecycle state, or repoint the
+allocation row. The store requires both checkouts to appear in the same Git
+worktree registry, reads a complete non-empty bundle whose metadata status
+matches its lifecycle partition, and accepts an existing destination only when
+both files are byte-equivalent.
+
+The source and destination ADR locks cover validation, while the shared
+allocator lock pins the complete allocation snapshot across the final atomic
+rename. A changed source, allocation, incomplete bundle, lifecycle mismatch,
+unregistered checkout, or divergent destination fails before the canonical
+destination changes. This is deliberately distinct from `adr restore`: restore
+authors a replacement only when no readable copy exists; reconciliation
+preserves a readable published bundle verbatim.
+
+## 6. Publication Policy and Duplicate Partitions
+
+Every ADR lifecycle partition — `proposed/`, `accepted/`, `superseded/`,
+`deleted/` — is tracked by git and travels with the repository [ORB-10669].
+Publishing `proposed/` puts the decision under review in the same PR as the
+change that motivates it, and means an ADR authored inside a managed job
+worktree lands on that run's branch instead of stranding on the box until an
+operator reconciles it. Only the rebuildable `adrs/index.sqlite*` and the
+host-local `*.lock` files stay ignored. The managed `.gitignore` block that
+`orbit workspace init` writes carries this policy to every workspace; re-init
+over an older block retires that block's `proposed/` and `superseded/` ignore
+lines rather than leaving them to out-rank the appended re-include.
+
+Publishing every partition makes a duplicate ID reachable. Acceptance is a
+directory rename, so a branch cut before acceptance still carries
+`proposed/<id>`; merging it re-adds that directory next to `accepted/<id>`, and
+git merges both without a conflict because the two paths are unrelated.
+Resolution follows one explicit precedence: **the most-advanced lifecycle state
+wins** (`proposed` < `accepted` < `superseded` < `deleted`), because every
+sanctioned transition moves forward and `accepted → proposed` is rejected
+outright — so the lower-ranked copy is always the stale one. `get_adr`, every
+mutation preflight, and `list_adrs` share that precedence, and each shadowed
+partition is named in a `warn` log with its path, so the leftover is visible and
+removable rather than silently deciding the read. This replaces the implicit
+precedence that fell out of partition declaration order. `orbit adr reconcile`
+keeps its stricter contract: a source checkout holding more than one lifecycle
+artifact for an ID is refused, not resolved.
+
+### 6.1 Managed job-worktree drafts
+
+A managed job-run worktree scaffolds a real `.orbit/adrs/proposed` for its run.
+Drafts written there are now tracked, so the on-box auto-commit sweeps them into
+the run's branch. That is the intended disposition for work that ships: the
+draft rides its PR and merges with the code. For a run that is abandoned or
+whose PR is rejected, the disposition is that **the draft dies with the branch**
+— no operator cleanup step, no reconciliation. Nothing reaches `agent-main`
+unless the branch merges, and the ID allocation left behind is an ordinary valid
+gap (§2). Deleting the worktree removes the only copy; that is expected and is
+not the orphaned-allocation condition ORB-10501 repairs. An operator who instead
+wants to keep a draft from a discarded branch pulls it over with
+`orbit adr reconcile` before the worktree is reaped.
+
+## 7. Indexing Behavior
 
 Learning reindex and docs/ADR search operate on locally readable bodies. Remote-only allocation rows are skipped without error; once the recorded worktree is present and readable again, the same list/reindex path can read and index the body.
 
-## 7. Concerns & Honest Limitations
+## 8. Concerns & Honest Limitations
 
 Remote stubs are intentionally envelope-poor. They expose allocation metadata, not the artifact title, summary, or body, because those fields live in the unreadable body file. Filters that require body fields can only apply to locally readable artifacts.
 
@@ -148,11 +192,17 @@ The `worktree_root` column preserves historical rows from earlier phases, so old
 - [ORB-10297] made ADR federation body-preserving and typed the read/mutation boundary.
 - [ORB-10272] added the dormant, path-free Remote-v2 hub sequence and reconciliation
   substrate while preserving the standalone shared-root allocator and owner-local
-  body/federation semantics; F3 owns activation and caller cutover.
+  body/federation semantics. Never activated; removed by [ORB-10725].
 - [ORB-10330] added the owner-side preallocated finalizers (`finalize_preallocated`
-  on the ADR and learning stores) and the gated broker composition: they consume a
-  hub allocation into the exact owner checkout via a non-authoritative body-path
-  projection, never allocate/abandon/retry, and reject replica/foreign-spoke owners
-  before allocation. Public creation stays on the compatibility path until F3.
+  on the ADR and learning stores) and the gated broker composition. Removed by
+  [ORB-10725]: with no allocation step there is no preallocated ID to finalize.
+- [ORB-10725] deleted both substrates under [Workspace-scoped knowledge keys, no global knowledge IDs](../host-registry/4_decisions.md#workspace-scoped-knowledge-keys-no-global-knowledge-ids), turned Remote feature v2
+  into a no-op slot, and added Remote feature v3 to drop its tables from databases
+  that had applied it.
+- [ORB-10545] added exact-bundle reconciliation and made superseded ADR bodies
+  repository-published decision history under [Publish superseded ADR bodies as durable decision history](./4_decisions.md#publish-superseded-adr-bodies-as-durable-decision-history).
+- [ORB-10669] published the remaining partitions (§6) under [Publish every ADR lifecycle partition and resolve duplicates by explicit precedence](./4_decisions.md#publish-every-adr-lifecycle-partition-and-resolve-duplicates-by-explicit-precedence), made the
+  managed `.gitignore` block retire its own superseded lines, and replaced
+  first-hit-wins ADR resolution with the explicit lifecycle precedence.
 
 Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

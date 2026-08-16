@@ -1,5 +1,5 @@
 #![deny(clippy::print_stderr, clippy::print_stdout)]
-// ORB-00004: legacy public provider surfaces still need a focused documentation pass.
+// Legacy public provider surfaces still need a focused documentation pass.
 #![allow(missing_docs)]
 // Unit tests use unwrap/expect for fixture setup; production call sites remain linted.
 #![cfg_attr(test, allow(clippy::expect_used, clippy::unwrap_used))]
@@ -24,8 +24,13 @@
 //!
 //! The two trait shapes differ intentionally — one-shot command descriptor
 //! vs. iterative conversation driver — so they coexist instead of being
-//! forcibly unified. The CLI path is unchanged by this module's introduction;
-//! existing activities keep working.
+//! forcibly unified.
+//!
+//! **Only the CLI path executes Orbit activities.** ORB-10801 retired the
+//! `backend: http | cli | auto` selector and the engine's HTTP agent-loop
+//! driver, so nothing in an activity asset, job asset, or `config.toml` can
+//! reach [`loop_engine`]. It stays as a standalone SDK surface with its own
+//! example consumers.
 //!
 //! # Role
 //! Depends on `orbit-types` (shared domain types) and `orbit-tools`
@@ -37,7 +42,8 @@
 //! - [`parse_and_validate_response`] for CLI response envelopes
 //! - [`loop_engine::AgentLoop`], [`loop_engine::Session`],
 //!   [`loop_engine::LoopTransport`], [`loop_engine::LoopAuditEvent`],
-//!   [`loop_engine::AuditSink`] for the HTTP path
+//!   [`loop_engine::AuditSink`] for the standalone HTTP SDK path, which Orbit
+//!   activity/job execution does not use (ORB-10801)
 //! - [`providers::anthropic::AnthropicMessagesTransport`] — Anthropic HTTP
 //!   transport
 //! - [`providers::openai_compat::OpenAiCompatTransport`] — OpenAI-compatible
@@ -60,4 +66,8 @@ pub use runtime::AgentRuntime;
 pub use types::{AgentInvocationSpec, AgentOperation, AgentRequest, AgentResponseStatus};
 pub use types::{
     is_timeout, parse_and_validate_response, peek_response_status, response_envelope_protocol_check,
+};
+pub use types::{
+    provider_invocation_diagnostic, response_envelope_json_schema,
+    response_envelope_json_schema_arg,
 };

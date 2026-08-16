@@ -1,8 +1,8 @@
 ---
 title: Design Doc Conventions
 owner: daniel
-last_updated: 2026-07-26
-last_validated: 2026-07-26
+last_updated: 2026-08-15
+last_validated: 2026-08-15
 status: Accepted
 ---
 
@@ -21,7 +21,7 @@ docs/design/<feature>/
 ├── 1_overview.md       recommended — what and why
 ├── 2_design.md         recommended — current implementation
 ├── 3_vision.md         recommended — forward-looking
-├── 4_decisions.md      recommended — ADR pointer index
+├── 4_decisions.md      recommended — titled decisions and their reasoning
 ├── specs/              recommended folder; may be empty initially
 │   └── <mechanism>.md  one mechanism per file
 └── references/         recommended folder; may be empty initially
@@ -54,7 +54,7 @@ Every numbered design doc starts with the YAML frontmatter carried by the [`_tem
 - `feature` is the folder slug (e.g. `host-registry`, `knowledge-graph`). Lets tooling group docs by feature without parsing paths.
 - `doc_role` is one of `overview`, `design`, `vision`, `decisions` — corresponds 1:1 with the filename prefix `1_`/`2_`/`3_`/`4_`.
 
-The template frontmatter also carries the orbit-docs retrieval fields (`type`, `summary`, `tags`, `paths`, `related_features`, `related_artifacts`) so the doc is indexable on day one. `type` and `summary` are required by the strict parser. `summary` must be a non-empty single line. `related_artifacts` accepts `ORB-NNNNN`, `L-NNNN`, `FYYYY-MM-NNN`, and `ADR-NNNN` strings. The tolerant indexer infers these fields for legacy design docs and pattern docs, but new docs should write them explicitly. The docs indexer does not index `.orbit/`; ADR bodies remain owned by the ADR tool surface (see the `orbit-knowledge` skill).
+The template frontmatter also carries the orbit-docs retrieval fields (`type`, `summary`, `tags`, `paths`, `related_features`, `related_artifacts`) so the doc is indexable on day one. `type` and `summary` are required by the strict parser. `summary` must be a non-empty single line. `related_artifacts` accepts task, learning, and friction references (`ORB-NNNNN`, `L-NNNN`, and `FYYYY-MM-NNN`). Decisions are addressed by their titles and links, not artifact IDs, so they do not belong in `related_artifacts`. The tolerant indexer infers these fields for legacy design docs and pattern docs, but new docs should write them explicitly.
 
 ---
 
@@ -65,7 +65,7 @@ The template frontmatter also carries the orbit-docs retrieval fields (`type`, `
 | **1_overview.md** | Elevator paragraph · §1 Motivation · §2 Core Concepts · §3 At a Glance (table: concern → file → task) · Task References |
 | **2_design.md** | Scope paragraph · mechanism sections (variable count, numbered) · §N Concerns & Honest Limitations (mandatory last section) · Task References |
 | **3_vision.md** | Scope paragraph · §1 Open Questions (numbered) · §2 Prior Work (subsections by category) · §3 What May Be Distinctive · §4 References (Orbit-internal + External) · Task References |
-| **4_decisions.md** | Pointer-index explainer (including the `orbit.adr.show` command) · ADR pointers in ascending number order |
+| **4_decisions.md** | Scope explainer · titled entries, each with Recorded provenance · Context · Decision · Consequences (incl. `Cost:`) |
 
 Every numbered doc ends with a **Task References** section listing only the task IDs cited in that doc, plus the line:
 
@@ -73,39 +73,55 @@ Every numbered doc ends with a **Task References** section listing only the task
 
 ---
 
-## 4. ADR Template (strict)
+## 4. Decisions
 
-**Allocation order is non-negotiable.** Before adding an ADR pointer, allocate the global ID via `orbit.adr.add` (see the `orbit-knowledge` skill and [ADR-0153]). The local pointer then uses the allocated global ID verbatim — never invent a four-digit number that "looks global." The store is the source of truth for the title, body, ID, status, owner, `related_features`, and `related_tasks`; `4_decisions.md` is an ordered pointer index, not a second narrative log.
+**`4_decisions.md` keeps the reasoning.** A decision is a titled section in its feature's `4_decisions.md`, reviewed in the same change as the code it describes and indexed with the ordinary docs corpus. Orbit tasks carry identity, lifecycle, ownership, and delivery provenance; the decision section carries only the reasoning that should outlive the task.
 
-Copy the pointer from [`_templates/4_decisions.md`](./_templates/4_decisions.md): `- **ADR-NNNN — <title>** — <status>.` Readers retrieve the authoritative `Context` / `Decision` / `Consequences` body with `orbit tool run orbit.adr.show --input '{"id":"ADR-NNNN"}'`. The store body, not the local index, must carry the ADR's mandatory `Cost:` consequence.
+### 4a. What earns a decision entry
 
-Rules:
+A decision entry is admitted through exactly one of two doors. Most implementation choices go through neither.
 
-- **Allocate first.** `orbit.adr.add` returns the global `ADR-NNNN` (4-digit, zero-padded). That ID is your local pointer. Never hand-author an `ADR-NNNN` pointer without an allocation behind it. Bypassing this is the failure mode [ORB-00098] resolved; see [ADR-0153].
-- **Inline cross-references** use the global ID (`[ADR-0042]`), resolvable via `orbit tool run orbit.adr.show --input '{"id":"ADR-0042"}'`.
-- Numbers are append-only; superseded records stay in the index with their store status.
-- `Proposed` is allowed only before the relevant task ships. Flip the store record to `Accepted` via `orbit.adr.update` when it lands, then refresh the index status on its next edit.
-- Every ADR body must cite at least one cost. No cost = the decision wasn't real.
-- **Legacy 3-digit headings.** Existing local 3-digit headings (`## ADR-NNN`) authored before the global-ID convention are grandfathered narrative records until separately backfilled. When backfilled, allocate the global ID first, preserve the original local ID as a `legacy_id` in the store record, verify that the store body carries the narrative, and replace the local body with its global pointer. See `docs/design/project-learnings/4_decisions.md` and `docs/design/agent-families/4_decisions.md` for worked examples.
+**Door 1 — it explains surprising code.** A future reader will hit a specific site, think *this looks wrong*, and be right to think so until they know the decision. The test is concrete: name the file, ideally the function.
 
-An entry earns its own ADR only if **all three** hold:
+**Door 2 — it governs future decisions.** A standing preference or constraint that decides tradeoffs the project has not yet encountered — "prefer coverage over precision when the two conflict," "fail closed rather than degrade silently." These cannot be anchored to a site because they apply everywhere, and they are load-bearing precisely because they are invoked repeatedly across unrelated work.
 
-1. **Real alternative.** A different choice was on the table and would have produced a materially different design — not "we did the obvious next instance of an existing pattern."
-2. **Forward constraint.** The decision shapes future work, rules out a class of approaches, or imposes a non-trivial tradeoff readers will need to know about months later.
-3. **Non-trivial cost.** The cost line names something a reader couldn't infer from the decision itself ("we now depend on grammar X" is trivial; "stable_id reallocates every object hash on first rebuild" is not).
+Door 2 has one discipline, and the convention collapses without it: **the entry must be applicable to a case nobody has seen yet.** Write it as a rule a reader could apply to tomorrow's decision. A retrospective account of a choice already made — "we chose a native primitive over a flat markdown directory" — reads like Door 2 and is not: it settles one past question and governs nothing. That belongs in `2_design.md` prose.
 
-If only one or two hold, the decision belongs in `2_design.md` prose, as a row in an existing ADR's table, or — for plain-instance work — as a task-ID citation on the parent ADR's Status line.
+Whichever door, the entry must still name a **real alternative** (a different choice was on the table and would have produced a materially different design) and a **non-trivial cost** (something a reader could not infer from the decision itself). No cost line means the decision wasn't real.
 
----
+Everything else — organizational choices, crate boundaries, the obvious next instance of an existing pattern — is design prose. Put it in `2_design.md`, or cite the task on the existing decision's `Recorded` line.
 
-## 4a. Rollup ADRs
+### 4b. Why IDs and lifecycle records were retired
 
-When a cluster of accepted ADRs all instantiate the same underlying decision (e.g. "added language X to the tree-sitter extractor set"), the cluster may be folded into a single rollup ADR:
+Measured over the 210 accepted-and-superseded records the store held: 39% were cited from code, 55% only from other design docs, and 24% from nowhere at all. The split was qualitatively clean — code-cited entries described runtime behaviour contracts; doc-only entries described how the tree was arranged. Against that, the store cost ten CLI subcommands, an MCP write surface whose supersede path silently half-worked, a `proposed/` partition that the workspace-init gitignore template hid inside run worktrees — requiring a host-side staging handoff just to ship a draft — a dashboard API, a search index redundant with the docs corpus, and a dormant hub-global sequence allocator. Two systems of record for one decision, and the expensive one was not the one being read.
 
-- The rollup either reuses the parent ADR's number with an expanded body and a per-instance table, or claims a new number that lists the cluster.
-- Each folded entry stays in the index with the store status (for example, `Superseded by ADR-NNN (folded)`).
-- The rollup's store body must preserve every Cost line from the folded entries that doesn't duplicate a cost already named.
-- Compaction is a normal maintenance operation, not an emergency cleanup. Owners should fold a cluster when the third instance lands, not the tenth.
+Migration was mechanical rather than a rescue: the tracked bodies moved verbatim into their feature's `4_decisions.md` before the duplicate store and tool surface were retired by [ORB-10726]. Orbit tasks already supply allocation-safe IDs, lifecycle state, ownership, and review handoff, so assigning a second identity to the reasoning added no durable capability.
+
+Dropping decision IDs keeps every title and narrative while removing the remaining allocation and cross-link bureaucracy. Door 2 was added after the first draft of this rule made code-citation the sole test, which would have discarded the project's standing preferences along with the noise.
+
+### 4c. Format and links
+
+Copy the entry skeleton from [`_templates/4_decisions.md`](./_templates/4_decisions.md). Each entry is a unique `## <title>` heading followed by **Recorded**, **Context**, **Decision**, and **Consequences**, the last carrying at least one `Cost:` line.
+
+- **Titles are the address.** Make the title specific and unique within the file. Link directly to its generated Markdown anchor: `[Decision title](./4_decisions.md#decision-title)`.
+- **Cross-repository references use prose.** Name the repository and decision title; a relative anchor cannot cross repository boundaries honestly.
+- **Door 1 entries carry `**Code anchors:**` or `**Paths:**`.** Prefer `path::symbol` when a stable symbol exists. The code site may link back to the decisions file in ordinary prose, but it does not carry a second decision identifier.
+- **Door 2 entries state their reach in the Decision prose.** Do not add lifecycle or scope metadata solely to classify the entry.
+- **Supersession is a title link:** `**Superseded by:** [New title](#new-title)`. The old entry and body stay in place so the reason the earlier architecture existed is not rewritten after the fact.
+- **Provenance is task-backed.** `**Recorded:** <date> · [ORB-NNNNN]` preserves when and why the reasoning entered the project. It is historical context, not a second lifecycle.
+
+### 4d. Tasks carry the tracking job
+
+An executing agent adds or updates a decision entry only when the task and the admission test above require it. The task remains the searchable allocation key and lifecycle record. If a choice does not clear the admission test, capture it in the design prose or execution summary instead of creating a durable decision section.
+
+### 4e. Rollup decisions
+
+When a cluster of entries all instantiate the same underlying decision (e.g. "added language X to the tree-sitter extractor set"), fold the cluster into a single rollup entry:
+
+- Expand the parent body with a per-instance table, or add a newly titled rollup that lists the cluster.
+- Each folded entry keeps its heading and gets a title-based `**Superseded by:**` link.
+- The rollup must preserve every Cost line from the folded entries that doesn't duplicate a cost already named.
+- Compaction is normal maintenance, not emergency cleanup. Fold when the third instance lands, not the tenth.
 
 ---
 
@@ -125,7 +141,7 @@ Rules:
 
 Copy [`_templates/specs/_mechanism.md`](./_templates/specs/_mechanism.md): a one-paragraph contract statement, a **Why This Exists** section, mechanism-specific sections, and an optional **Agent Signature**.
 
-A spec is **prescriptive**. It names invariants ("writes do not fall back"), failure modes ("detached HEAD errors"), and migration paths. It is *not* a design-rationale doc — rationale lives in the ADR store and is indexed by `4_decisions.md`.
+A spec is **prescriptive**. It names invariants ("writes do not fall back"), failure modes ("detached HEAD errors"), and migration paths. It is *not* a design-rationale doc — rationale lives in feature `4_decisions.md` entries.
 
 ---
 
@@ -149,7 +165,7 @@ There is no `Deprecated` status at the doc level. If the feature is retired, arc
 ## 9. Task ID Citation Format
 
 - Inline: plain bracketed text `[ORB-00042]`.
-- In ADRs: on the status line after the date.
+- In decisions: on the `Recorded` line after the date.
 - Never cite a task without naming what that task did — `([ORB-00042])` alone is opaque; always give a verb phrase.
 
 ---
@@ -162,7 +178,7 @@ There is no `Deprecated` status at the doc level. If the feature is retired, arc
 | `roadmap.md` | Belongs in Orbit task system |
 | `changelog.md` | Covered by git history + task IDs |
 | `tutorial.md` | Belongs at top-level project README |
-| Task-artifact mirrors in `references/` | ADRs should absorb the "why"; rot risk otherwise |
+| Task-artifact mirrors in `references/` | Decision entries or design prose should absorb the "why"; rot risk otherwise |
 | Top-level doc outside the numbered four | If it's important, it belongs inside one of them |
 
 ---
@@ -171,10 +187,15 @@ There is no `Deprecated` status at the doc level. If the feature is retired, arc
 
 These are recommendations, not mechanically enforced by `orbit-design` (retired) or the docs indexer. The tolerant indexer (see the `orbit-search` skill) accepts both strict numbered design folders and free-form docs.
 
-Two mechanical checks worth adding later (as optional lints, never blocking):
+Five mechanical checks worth adding later (as optional lints, never blocking):
 
 1. Lint: every numbered doc has required frontmatter + Task References section.
-2. Lint: every ADR has a Cost line.
+2. Lint: every decision has a Cost line.
+3. Lint: every decision is admitted through exactly one door and carries concrete code/path anchors when it uses Door 1.
+4. Lint: every path in a `Code anchors` or `Paths` line exists.
+5. Lint: every title-based decision link resolves, including supersession links.
+
+Check 4 also gives a maintenance signal worth acting on: a Door 1 entry whose paths no longer exist has stopped explaining live code and is a demotion candidate.
 
 Until those exist: cross-review and author judgment are the quality mechanism. When one agent reviews the other's docs, the reviewer treats this doc as a checklist and gives feedback on deviations; the author decides whether the deviation is justified for that folder.
 
@@ -195,7 +216,7 @@ Retired features stay listed with their `_archive/` path as a historical record.
 | Global Store Consolidation | [docs/design/_archive/global-store-consolidation/](./_archive/global-store-consolidation/) | codex |
 | Host Registry | [docs/design/host-registry/](./host-registry/) | claude |
 | Knowledge graph | [docs/design/_archive/knowledge-graph/](./_archive/knowledge-graph/) | claude |
-| MCP Bridge | [docs/design/mcp-bridge/](./mcp-bridge/) | codex |
+| MCP Bridge | [docs/design/mcp-bridge/](./mcp-bridge/) | claude |
 | MCP Session Context | [docs/design/mcp-session-context/](./mcp-session-context/) | codex |
 | Orbit Core | [docs/design/orbit-core/](./orbit-core/) | claude |
 | Orbit Docs | [docs/design/orbit-docs/](./orbit-docs/) | claude |
@@ -208,7 +229,8 @@ Retired features stay listed with their `_archive/` path as a historical record.
 | Routines | [docs/design/routines/](./routines/) | claude |
 | Task Artifacts | [docs/design/task-artifacts/](./task-artifacts/) | codex |
 | Task Sync (archived) | [docs/design/_archive/task-sync/](./_archive/task-sync/) | claude |
+| Terminal Interface | [docs/design/terminal-interface/](./terminal-interface/) | claude |
 | User Interface | [docs/design/user-interface/](./user-interface/) | gemini |
 | Worktree Artifacts | [docs/design/worktree-artifacts/](./worktree-artifacts/) | codex |
 
-Ownership means: the lead is accountable for keeping the folder's docs in sync with implementation, for flipping ADR status when tasks ship, and for responding to cross-review comments. Ownership does not preclude other agents from editing — it names who's on the hook when things drift.
+Ownership means: the lead is accountable for keeping the folder's docs in sync with implementation, for recording task provenance when decisions change, and for responding to cross-review comments. Ownership does not preclude other agents from editing — it names who's on the hook when things drift.

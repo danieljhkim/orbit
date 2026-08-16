@@ -2,6 +2,7 @@
 title: Operations as Data — Overview
 owner: claude
 last_updated: 2026-07-26
+last_validated: 2026-08-08
 status: Accepted
 feature: operations-as-data
 doc_role: overview
@@ -10,7 +11,7 @@ summary: Declaring each verb of a noun once as data so CLI, MCP, dashboard, and 
 tags: [operations-as-data, architecture, adr-0209]
 paths: ["crates/orbit-common/src/operation.rs", "crates/orbit-common/src/friction/**", "crates/orbit-tools/src/builtin/orbit/operation.rs", "crates/orbit-cli/src/command/operation_args.rs"]
 related_features: [operations-as-data, orbit-core]
-related_artifacts: [ORB-10358, ADR-0209]
+related_artifacts: [ORB-10358]
 ---
 
 # Operations as Data — Overview
@@ -22,7 +23,7 @@ field-to-JSON mapping — so a noun with seven verbs was written out four times 
 drifted four ways. **Operations as data** replaces that with one declaration per
 verb: a `const` spec listing the wire name, the parameters, how each parameter
 binds to the command line, whether MCP advertises it, and how the CLI renders the
-result. Every surface then derives its wiring from that spec. This is ADR-0209
+result. Every surface then derives its wiring from that spec. This is [North-star architecture bearing: operations as data behind an operation registry](../orbit-core/4_decisions.md#north-star-architecture-bearing-operations-as-data-behind-an-operation-registry)
 bearing 1, piloted end to end on the **friction** noun in [ORB-10358].
 
 ## 1. Motivation
@@ -30,7 +31,7 @@ bearing 1, piloted end to end on the **friction** noun in [ORB-10358].
 The cost was per-operation and paid up to four times. Adding `orbit.friction.foo`
 meant: a `Tool` impl in `orbit-tools` with a hand-written `ToolSchema`, a clap
 `Args` struct plus an `Execute` impl in `orbit-cli` that rebuilt the same JSON by
-hand, a route and an input-map in `orbit-dashboard`, a variant in
+hand, a route and an input-map in `orbit-web`, a variant in
 `OrbitBuiltinAction`, a dispatch arm in `orbit-core`, and an arm in the CLI's
 audit-metadata match. Six of those seven edits carried no information the other
 five did not already have.
@@ -60,17 +61,17 @@ exactly why it accumulated.
 |---------|------|------|
 | The kernel: spec, parameter, and exposure vocabulary | [crates/orbit-common/src/operation.rs](../../../crates/orbit-common/src/operation.rs) | [ORB-10358] |
 | The friction registry (single declaration site) | [crates/orbit-common/src/friction/operations.rs](../../../crates/orbit-common/src/friction/operations.rs) | [ORB-10358] |
-| MCP adapter: spec → `ToolSchema` + exposure policy | [crates/orbit-tools/src/builtin/orbit/operation.rs](../../../crates/orbit-tools/src/builtin/orbit/operation.rs) | [ORB-10358] |
+| MCP adapter: spec → `ToolSchema` + optional workspace scope | [crates/orbit-tools/src/builtin/orbit/operation.rs](../../../crates/orbit-tools/src/builtin/orbit/operation.rs) | [ORB-10358] |
 | Friction MCP tools, derived | [crates/orbit-tools/src/builtin/orbit/friction/mod.rs](../../../crates/orbit-tools/src/builtin/orbit/friction/mod.rs) | [ORB-10358] |
 | CLI adapter: spec → `clap::Command` + tool input | [crates/orbit-cli/src/command/operation_args.rs](../../../crates/orbit-cli/src/command/operation_args.rs) | [ORB-10358] |
 | Friction CLI, derived (renderers only) | [crates/orbit-cli/src/command/friction.rs](../../../crates/orbit-cli/src/command/friction.rs) | [ORB-10358] |
-| Dashboard handlers over registry field names | [crates/orbit-dashboard/src/api/frictions.rs](../../../crates/orbit-dashboard/src/api/frictions.rs) | [ORB-10358] |
+| Web handlers over registry field names | [crates/orbit-web/src/api/frictions.rs](../../../crates/orbit-web/src/api/frictions.rs) | [ORB-10358] |
 | Handler table, keyed on `FrictionVerb` | [crates/orbit-core/src/runtime/orbit_tool_host/friction_tools.rs](../../../crates/orbit-core/src/runtime/orbit_tool_host/friction_tools.rs) | [ORB-10358] |
 | Migration cookbook | [references/cookbook.md](references/cookbook.md) | [ORB-10358] |
 
 ## Task References
 
-- [ORB-10358] — piloted ADR-0209 bearing 1 on the friction noun: built the
+- [ORB-10358] — piloted [North-star architecture bearing: operations as data behind an operation registry](../orbit-core/4_decisions.md#north-star-architecture-bearing-operations-as-data-behind-an-operation-registry) bearing 1 on the friction noun: built the
   operations-as-data kernel, the friction registry, and the derived CLI, MCP,
   dashboard, and runtime adapters.
 

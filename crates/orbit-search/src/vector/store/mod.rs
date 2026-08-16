@@ -7,9 +7,6 @@
 //!   plus its private SQL helpers (`delete_field_rows`, content-hash check).
 //! - [`tasks`] — `index_task` / `reindex_tasks` task-corpus entry points.
 //! - [`docs`] — `index_doc` / `reindex_docs` docs-corpus entry points.
-//! - [`adrs`] — `index_adr` / `reindex_adrs` ADR-corpus entry points.
-//! - [`learning`] — `index_learning` / `reindex_learnings` project-learning
-//!   corpus entry points.
 //! - [`queries`] — `delete_source` and `stats` read/cascade operations.
 //!
 //! This file owns the `VectorStore` struct itself plus the connection-handle
@@ -17,9 +14,7 @@
 //! from `orbit_common::utility::sqlite`) and the small `pub(super)`
 //! constants shared across the submodules above.
 
-mod adrs;
 mod docs;
-mod learning;
 mod queries;
 mod schema;
 mod tasks;
@@ -34,8 +29,6 @@ use rusqlite::Connection;
 pub const SOURCE_KIND_TASK: &str = "task";
 // ADR-0180: docs share the embeddings table through source_kind, not a separate schema.
 pub const SOURCE_KIND_DOC: &str = "doc";
-pub const SOURCE_KIND_LEARNING: &str = "learning";
-pub const SOURCE_KIND_ADR: &str = "adr";
 
 #[derive(Clone)]
 pub struct VectorStore {

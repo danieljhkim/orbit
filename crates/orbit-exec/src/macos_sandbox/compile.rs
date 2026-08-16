@@ -17,9 +17,10 @@ use orbit_common::types::{OrbitError, ResolvedFsProfile};
 ///   well-known scratch areas (`/tmp`, `/private/tmp`,
 ///   `/private/var/folders`, `~/Library/Caches`, and the HOME-derived Orbit
 ///   JSONL log directory) that tools and the filesystem layer expect to write to;
-/// - appends explicit `(deny ...)` clauses for any negated entry in
-///   `read` / `modify` so global `denyRead` / `denyModify` rules win
-///   under SBPL's last-match-wins evaluation.
+/// - emits resolved `read` / `modify` rules in order, including explicit
+///   `(deny ...)` clauses for negated entries and narrow host-policy or
+///   runtime re-allows after their enclosing deny, preserving SBPL's
+///   last-match-wins evaluation.
 ///
 /// Paths in `rules.modify` are emitted as-is. Callers must resolve
 /// workspace-relative globs to absolute paths before invoking this

@@ -3,9 +3,7 @@
 // expect/assert for fixture setup and end-to-end validation.
 #![allow(clippy::expect_used)]
 
-use orbit_common::types::activity_job::{
-    ActivityV2Spec, AgentLoopSpec, Backend, OnDenial, Provider,
-};
+use orbit_common::types::activity_job::{ActivityV2Spec, AgentLoopSpec, OnDenial, Provider};
 use orbit_common::types::{EXECUTOR_RESOURCE_SCHEMA_VERSION, ExecutorDef, ExecutorResource};
 use orbit_core::OrbitRuntime;
 use orbit_engine::{V2AuditWriter, V2DispatchInput, dispatch_v2_activity};
@@ -60,7 +58,7 @@ fn installed_grok_cli_backend_smoke_captures_stdout_artifact() {
         orbit_store::Store::open_in_memory().expect("audit store"),
         "ws_test",
         "grok-installed-smoke",
-        "grok:grok-build".to_string(),
+        "grok:grok-4.6".to_string(),
         None,
     )
     .expect("build audit writer");
@@ -68,14 +66,13 @@ fn installed_grok_cli_backend_smoke_captures_stdout_artifact() {
         instruction: "Return the requested Orbit response envelope.".to_string(),
         tools: Vec::new(),
         on_denial: OnDenial::Terminate,
-        model: Some("grok-build".to_string()),
+        model: Some("grok-4.6".to_string()),
         max_iterations: 1,
-        backend: Backend::Cli,
+        backend: None,
         provider: Provider::Grok,
         wall_clock_timeout_seconds: 120,
         require_response_envelope: true,
         require_completion_envelope: true,
-        role: None,
         proc_allowed_programs: None,
     };
 
@@ -88,7 +85,6 @@ fn installed_grok_cli_backend_smoke_captures_stdout_artifact() {
         }),
         audit: audit.clone(),
         run_id: "grok-installed-smoke",
-        agent_override: None,
         host: Some(&runtime),
     })
     .expect("dispatch grok cli backend");
@@ -120,5 +116,5 @@ fn installed_grok_cli_backend_smoke_captures_stdout_artifact() {
         .as_ref()
         .expect("well-formed grok stdout should parse invocation trace");
     assert_eq!(invocation.provider, "grok");
-    assert_eq!(invocation.model.as_deref(), Some("grok-build"));
+    assert_eq!(invocation.model.as_deref(), Some("grok-4.6"));
 }

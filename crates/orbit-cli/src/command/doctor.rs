@@ -1,9 +1,10 @@
 use clap::Args;
 use orbit_cmd::{DoctorCommands, WorkspaceDoctorResult, WorkspaceDoctorStatus};
-use orbit_core::{OrbitError, OrbitRuntime};
+use orbit_core::OrbitRuntime;
 use serde_json::{Value, json};
 
-use crate::command::Execute;
+use crate::command::{Block, CommandOut, Execute, Payload};
+use crate::output::color::{Domain, Role};
 
 /// `orbit doctor` — workspace-level self-diagnostics [ORB-10005].
 #[derive(Args)]
@@ -17,22 +18,35 @@ pub struct DoctorCommand {
     #[arg(long)]
     pub fix_stale_locks: bool,
 
+    /// Release only task reservations whose owner/task state is conclusively inactive.
+    #[arg(long)]
+    pub fix_stale_task_locks: bool,
+
     /// Remove retired graph state from this worktree and the shared workspace.
     #[arg(long)]
     pub remove_graph: bool,
 
-    /// Abandon learning/ADR id allocations whose pinned worktree is gone and whose body is
-    /// unreadable, before diagnosing the workspace. The ids are never reissued.
+    /// Retire deprecated skills, jobs, activities, auto-tasks, and routines that Orbit itself wrote. Locally modified ones are preserved, not deleted.
     #[arg(long)]
-    pub fix_orphaned_allocations: bool,
+    pub fix_stale_artifacts: bool,
+
+    /// Remove known retired `spec.backend` values (`http`, `auto`) from schemaVersion 2 agent-loop activities. Unknown backends and unrelated parse failures are left untouched.
+    #[arg(long)]
+    pub fix_retired_activity_backends: bool,
 }
 
 impl Execute for DoctorCommand {
-    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+    fn execute(self, runtime: &OrbitRuntime) -> CommandOut {
         if self.fix_stale_locks {
             let removed = runtime.remove_stale_lock_files()?;
             if !self.json {
                 println!("Removed {removed} stale lock file(s).");
+            }
+        }
+        if self.fix_stale_task_locks {
+            let released = runtime.clear_stale_task_reservations()?;
+            if !self.json {
+                println!("Released {released} stale task reservation(s).");
             }
         }
         if self.remove_graph {
@@ -41,10 +55,26 @@ impl Execute for DoctorCommand {
                 println!("Removed {removed} retired graph location(s).");
             }
         }
-        if self.fix_orphaned_allocations {
-            let cleared = runtime.clear_orphaned_id_allocations()?;
+        if self.fix_stale_artifacts {
+            let removed = runtime.remove_stale_definition_artifacts()?;
             if !self.json {
-                println!("Abandoned {cleared} orphaned id allocation(s).");
+                println!("Retired {removed} deprecated definition artifact(s).");
+            }
+        }
+        if self.fix_retired_activity_backends {
+            let report = runtime.repair_retired_activity_backends()?;
+            if !self.json {
+                println!(
+                    "Removed retired spec.backend from {} activity file(s).",
+                    report.repaired.len()
+                );
+                for skipped in &report.skipped {
+                    println!(
+                        "Left untouched {}: {}",
+                        skipped.path.display(),
+                        skipped.reason
+                    );
+                }
             }
         }
         let results = runtime.doctor_workspace()?;
@@ -57,26 +87,31 @@ impl Execute for DoctorCommand {
             .filter(|row| row.status == WorkspaceDoctorStatus::Warning)
             .count();
 
-        if self.json {
-            let values = results.iter().map(doctor_row_json).collect::<Vec<_>>();
-            crate::output::json::print_pretty(&Value::Array(values))?;
-        } else {
-            let mut table = crate::output::table::build_table(&["CHECK", "STATUS", "DETAILS"]);
+        let values = results.iter().map(doctor_row_json).collect::<Vec<_>>();
+        let mut blocks = Vec::new();
+        {
+            use crate::output::table::{Column, Table};
+            let mut table = Table::new(vec![
+                Column::new("CHECK").fixed(),
+                Column::new("STATUS").fixed(),
+                Column::new("DETAILS"),
+            ])
+            .empty_message("no workspace checks ran");
             for row in &results {
                 use comfy_table::Cell;
                 table.add_row(vec![
                     Cell::new(&row.check_name),
-                    crate::output::color::doctor_status_color_cell(status_label(row.status)),
-                    Cell::new(&row.message),
+                    crate::output::color::cell(status_label(row.status), Domain::DoctorStatus),
+                    Cell::new(human_detail(row).replace('\n', " | ")),
                 ]);
             }
-            println!("{table}");
+            blocks.push(Block::table(table));
 
             if failures == 0 && warnings == 0 {
-                println!(
+                blocks.push(Block::text(format!(
                     "\n{}",
-                    crate::output::color::job_state_color("Workspace healthy.")
-                );
+                    crate::output::color::text("Workspace healthy.", Role::Ok)
+                )));
             } else {
                 eprintln!("\n{failures} failure(s), {warnings} warning(s).");
             }
@@ -84,12 +119,10 @@ impl Execute for DoctorCommand {
 
         // Unlike `skill doctor` / `tool doctor`, a failed check exits nonzero
         // so unattended callers (cron, CI, systemd) can alert on it.
-        if failures > 0 {
-            return Err(OrbitError::Execution(format!(
-                "{failures} doctor check(s) failed"
-            )));
-        }
-        Ok(())
+        let exit_code = i32::from(failures > 0);
+        Ok(Payload::blocks(Value::Array(values), blocks)
+            .with_exit_code(exit_code)
+            .into())
     }
 }
 
@@ -102,7 +135,14 @@ fn status_label(status: WorkspaceDoctorStatus) -> &'static str {
     }
 }
 
-fn doctor_row_json(row: &WorkspaceDoctorResult) -> Value {
+pub(crate) fn human_detail(row: &WorkspaceDoctorResult) -> String {
+    row.remediation.as_ref().map_or_else(
+        || row.message.clone(),
+        |remediation| format!("{}\nAction: {remediation}", row.message),
+    )
+}
+
+pub(crate) fn doctor_row_json(row: &WorkspaceDoctorResult) -> Value {
     json!({
         "check": row.check_name,
         "status": match row.status {
@@ -112,5 +152,6 @@ fn doctor_row_json(row: &WorkspaceDoctorResult) -> Value {
             WorkspaceDoctorStatus::Skipped => "skipped",
         },
         "message": row.message,
+        "remediation": row.remediation,
     })
 }

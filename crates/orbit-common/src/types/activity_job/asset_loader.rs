@@ -31,6 +31,13 @@ pub enum AssetLoadError {
     UnsupportedVersion(u32),
     #[error("schemaVersion 2 parse failed: {0}")]
     Parse(serde_yaml::Error),
+    #[error(
+        "{asset_kind} `{asset}` declares retired `role`; remove it and pass `crew` in the activity input to select a non-default crew (activities without `crew` use the run's resolved crew)"
+    )]
+    RetiredRole {
+        asset_kind: &'static str,
+        asset: String,
+    },
     #[error("kind mismatch: expected `{expected}`, got `{actual}`")]
     KindMismatch { expected: String, actual: String },
     #[error("activity `{activity}` tool allowlist invalid: {source}")]
@@ -46,6 +53,9 @@ pub fn load_activity_asset(yaml: &str) -> Result<ActivityAsset, AssetLoadError> 
     match header.schema_version {
         1 => Err(AssetLoadError::RetiredVersion(1)),
         2 => {
+            let document: serde_yaml::Value =
+                serde_yaml::from_str(yaml).map_err(AssetLoadError::Parse)?;
+            reject_activity_role(&document)?;
             let res: V2EnvelopeYaml<ActivityV2> =
                 serde_yaml::from_str(yaml).map_err(AssetLoadError::Parse)?;
             require_kind(&res.kind, ResourceKind::Activity)?;
@@ -70,6 +80,9 @@ pub fn load_job_asset(yaml: &str) -> Result<JobAsset, AssetLoadError> {
     match header.schema_version {
         1 => Err(AssetLoadError::RetiredVersion(1)),
         2 => {
+            let document: serde_yaml::Value =
+                serde_yaml::from_str(yaml).map_err(AssetLoadError::Parse)?;
+            reject_job_roles(&document)?;
             let res: V2EnvelopeYaml<JobV2> =
                 serde_yaml::from_str(yaml).map_err(AssetLoadError::Parse)?;
             require_kind(&res.kind, ResourceKind::Job)?;
@@ -80,6 +93,78 @@ pub fn load_job_asset(yaml: &str) -> Result<JobAsset, AssetLoadError> {
         }
         other => Err(AssetLoadError::UnsupportedVersion(other)),
     }
+}
+
+fn reject_activity_role(document: &serde_yaml::Value) -> Result<(), AssetLoadError> {
+    let Some(spec) = field(document, "spec") else {
+        return Ok(());
+    };
+    if has_field(spec, "role") {
+        return Err(retired_role_error("activity", document));
+    }
+    Ok(())
+}
+
+fn reject_job_roles(document: &serde_yaml::Value) -> Result<(), AssetLoadError> {
+    let Some(steps) = field(document, "spec")
+        .and_then(|spec| field(spec, "steps"))
+        .and_then(serde_yaml::Value::as_sequence)
+    else {
+        return Ok(());
+    };
+    for step in steps {
+        reject_step_roles(step, document)?;
+    }
+    Ok(())
+}
+
+fn reject_step_roles(
+    step: &serde_yaml::Value,
+    document: &serde_yaml::Value,
+) -> Result<(), AssetLoadError> {
+    if has_field(step, "role") || field(step, "spec").is_some_and(|spec| has_field(spec, "role")) {
+        return Err(retired_role_error("job", document));
+    }
+
+    if let Some(branches) = field(step, "parallel")
+        .and_then(|parallel| field(parallel, "branches"))
+        .and_then(serde_yaml::Value::as_sequence)
+    {
+        for branch in branches {
+            reject_step_roles(branch, document)?;
+        }
+    }
+    if let Some(worker) = field(step, "fan_out").and_then(|fan_out| field(fan_out, "worker")) {
+        reject_step_roles(worker, document)?;
+    }
+    if let Some(steps) = field(step, "loop")
+        .and_then(|loop_block| field(loop_block, "steps"))
+        .and_then(serde_yaml::Value::as_sequence)
+    {
+        for nested in steps {
+            reject_step_roles(nested, document)?;
+        }
+    }
+    Ok(())
+}
+
+fn retired_role_error(asset_kind: &'static str, document: &serde_yaml::Value) -> AssetLoadError {
+    let asset = field(document, "metadata")
+        .and_then(|metadata| field(metadata, "name"))
+        .and_then(serde_yaml::Value::as_str)
+        .unwrap_or("<unnamed>")
+        .to_string();
+    AssetLoadError::RetiredRole { asset_kind, asset }
+}
+
+fn has_field(value: &serde_yaml::Value, name: &str) -> bool {
+    field(value, name).is_some()
+}
+
+fn field<'a>(value: &'a serde_yaml::Value, name: &str) -> Option<&'a serde_yaml::Value> {
+    value
+        .as_mapping()?
+        .get(serde_yaml::Value::String(name.to_string()))
 }
 
 fn require_kind(actual: &ResourceKind, expected: ResourceKind) -> Result<(), AssetLoadError> {

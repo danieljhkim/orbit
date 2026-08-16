@@ -53,21 +53,16 @@ fn cli_agent_envelope_carries_input_run_id_and_task_context() {
         })),
         workspace_root: None,
     };
-    let spec = test_agent_loop_spec(Duration::from_secs(5));
+    let mut spec = test_agent_loop_spec(Duration::from_secs(5));
+    spec.instruction = "perform the requested task".to_string();
     let input = serde_json::json!({
         "prompt": "do it",
         "task_id": "TCTX",
         "workspace_path": "/tmp/orbit-worktree"
     });
 
-    let raw = cli_agent_envelope_json(
-        &spec,
-        "jrun-context",
-        &input,
-        host.task_context.as_ref(),
-        None,
-    )
-    .expect("build cli agent envelope");
+    let raw = cli_agent_envelope_json(&spec, "jrun-context", &input, host.task_context.as_ref())
+        .expect("build cli agent envelope");
     let envelope: Value = serde_json::from_slice(&raw).expect("parse envelope json");
 
     assert_eq!(envelope["schemaVersion"], 1);
@@ -77,6 +72,11 @@ fn cli_agent_envelope_carries_input_run_id_and_task_context() {
     assert_eq!(envelope["input"]["workspace_path"], "/tmp/orbit-worktree");
     assert_eq!(envelope["task"]["id"], "TCTX");
     assert_eq!(envelope["task"]["workspace_path"], "/tmp/orbit-worktree");
+    assert_eq!(envelope["instruction"], "perform the requested task");
+    assert!(
+        envelope.get("response_schema").is_none(),
+        "the provider renderer owns response framing; the embedded task envelope must not duplicate it"
+    );
 }
 
 #[test]
@@ -185,7 +185,6 @@ fn claude_cache_creation_ttl_split_ingests_at_the_one_hour_rate() {
             activity_id: "implement_one".to_string(),
             agent: "claude".to_string(),
             model: Some("claude-opus-4-8[1m]".to_string()),
-            slot: None,
             task_ids: vec!["ORB-10353".to_string()],
             trace,
         })

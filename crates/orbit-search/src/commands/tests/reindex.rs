@@ -21,14 +21,6 @@ fn semantic_index_params_serde_defaults_to_tasks_at_runtime() {
     assert_eq!(docs.kind, Some(IndexKind::Docs));
     assert_eq!(docs.resolved_kind(), IndexKind::Docs);
 
-    let adrs: SemanticIndexParams = serde_json::from_str(r#"{"kind":"adrs"}"#).unwrap();
-    assert_eq!(adrs.kind, Some(IndexKind::Adrs));
-    assert_eq!(adrs.resolved_kind(), IndexKind::Adrs);
-
-    let learnings: SemanticIndexParams = serde_json::from_str(r#"{"kind":"learnings"}"#).unwrap();
-    assert_eq!(learnings.kind, Some(IndexKind::Learnings));
-    assert_eq!(learnings.resolved_kind(), IndexKind::Learnings);
-
     let all: SemanticIndexParams = serde_json::from_str(r#"{"kind":"all"}"#).unwrap();
     assert_eq!(all.kind, Some(IndexKind::All));
     assert_eq!(all.resolved_kind(), IndexKind::All);
@@ -39,15 +31,7 @@ fn semantic_index_kind_rejects_singular_learning() {
     let error = IndexKind::from_str("learning").expect_err("singular kind should fail");
 
     assert!(error.to_string().contains("`learning`"));
-    assert!(error.to_string().contains("learnings"));
-}
-
-#[test]
-fn semantic_index_kind_rejects_singular_adr() {
-    let error = IndexKind::from_str("adr").expect_err("singular kind should fail");
-
-    assert!(error.to_string().contains("`adr`"));
-    assert!(error.to_string().contains("adrs"));
+    assert!(error.to_string().contains("tasks, docs, all"));
 }
 
 #[test]

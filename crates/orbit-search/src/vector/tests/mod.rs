@@ -1,7 +1,5 @@
-mod adr_fields;
 mod chunker;
 mod doc_fields;
-mod learning_fields;
 mod task_fields;
 
 #[test]

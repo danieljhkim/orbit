@@ -6,13 +6,17 @@ use serde::{Deserialize, Serialize};
 
 use crate::types::{
     ExternalRef, OrbitError, OrbitId, TaskComplexity, TaskPriority, TaskStatus, TaskType,
-    is_valid_adr_id, is_valid_friction_id, is_valid_learning_id,
+    is_valid_adr_id, is_valid_friction_id,
 };
 
 pub const TASK_ARTIFACT_SCHEMA_VERSION: u32 = 1;
+/// Historical task prefix retained for source compatibility. Task parsing is
+/// prefix-agnostic; new ids should be formatted with [`format_task_id`].
 pub const ORB_TASK_ID_PREFIX: &str = "ORB-";
+/// Minimum numeric width used when minting task ids. Parsers accept wider ids.
 pub const ORB_TASK_ID_WIDTH: usize = 5;
-pub const ORB_TASK_ID_MAX: u32 = 99_999;
+/// Maximum representable allocator value, no longer the five-digit boundary.
+pub const ORB_TASK_ID_MAX: u32 = u32::MAX;
 
 pub const TASK_ENVELOPE_FILE_NAME: &str = "task.yaml";
 pub const TASK_DESCRIPTION_FILE_NAME: &str = "description.md";
@@ -26,10 +30,30 @@ pub const TASK_ARTIFACT_MANIFEST_FILE_NAME: &str = "manifest.yaml";
 pub const TASK_ARTIFACT_FILES_DIR_NAME: &str = "files";
 
 pub fn is_valid_orb_task_id(id: &str) -> bool {
-    let Some(suffix) = id.strip_prefix(ORB_TASK_ID_PREFIX) else {
+    let Some((prefix, suffix)) = id.split_once('-') else {
         return false;
     };
-    suffix.len() == ORB_TASK_ID_WIDTH && suffix.chars().all(|character| character.is_ascii_digit())
+    is_valid_task_id_prefix(prefix)
+        && !suffix.is_empty()
+        && suffix.chars().all(|character| character.is_ascii_digit())
+}
+
+/// Validate a stored task-id prefix. `ORB` remains valid for migrated hosts;
+/// other artifact namespaces cannot be interpreted as tasks.
+pub fn is_valid_task_id_prefix(prefix: &str) -> bool {
+    (2..=5).contains(&prefix.len())
+        && prefix.bytes().all(|byte| byte.is_ascii_uppercase())
+        && !matches!(prefix, "ADR" | "L" | "F")
+}
+
+pub fn task_id_prefix(id: &str) -> Option<&str> {
+    is_valid_orb_task_id(id).then(|| id.split_once('-').map(|(prefix, _)| prefix))?
+}
+
+pub fn parse_task_number(id: &str) -> Option<u32> {
+    is_valid_orb_task_id(id)
+        .then(|| id.split_once('-').map(|(_, suffix)| suffix))?
+        .and_then(|suffix| suffix.parse().ok())
 }
 
 pub fn validate_orb_task_id(id: &str) -> Result<(), OrbitError> {
@@ -37,17 +61,21 @@ pub fn validate_orb_task_id(id: &str) -> Result<(), OrbitError> {
         return Ok(());
     }
     Err(OrbitError::InvalidInput(format!(
-        "task id '{id}' must match ORB-00000"
+        "task id '{id}' must match <2-5 uppercase-letter prefix>-<digits>"
     )))
 }
 
 pub fn format_orb_task_id(value: u32) -> Result<String, OrbitError> {
-    if value > ORB_TASK_ID_MAX {
+    format_task_id("ORB", value)
+}
+
+pub fn format_task_id(prefix: &str, value: u32) -> Result<String, OrbitError> {
+    if !is_valid_task_id_prefix(prefix) {
         return Err(OrbitError::InvalidInput(format!(
-            "task id value {value} exceeds maximum {ORB_TASK_ID_MAX}"
+            "task id prefix '{prefix}' must be 2-5 uppercase ASCII letters and must not use a reserved artifact namespace"
         )));
     }
-    Ok(format!("{ORB_TASK_ID_PREFIX}{value:0ORB_TASK_ID_WIDTH$}"))
+    Ok(format!("{prefix}-{value:0ORB_TASK_ID_WIDTH$}"))
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -68,6 +96,9 @@ pub struct TaskEnvelopeV2 {
     pub job_run_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub crew: Option<String>,
+    /// Named crew responsible for task orchestration, distinct from execution crew.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub orchestrator: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub relations: Vec<TaskRelation>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -191,13 +222,12 @@ fn validate_target_for(relation_type: TaskRelationType, target: &str) -> Result<
         TaskRelationType::Produces | TaskRelationType::Resolves => {
             if is_valid_orb_task_id(target)
                 || is_valid_friction_id(target)
-                || is_valid_learning_id(target)
                 || is_valid_adr_id(target)
             {
                 return Ok(());
             }
             Err(OrbitError::InvalidInput(format!(
-                "relation target '{target}' must be an ORB-/F-/L-/ADR- id"
+                "relation target '{target}' must be an ORB-/F-/ADR- id"
             )))
         }
         TaskRelationType::BlockedBy

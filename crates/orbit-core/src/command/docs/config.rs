@@ -35,34 +35,6 @@ struct DocsSearchConfigSection {
     semantic_weight: Option<f32>,
 }
 
-#[derive(Debug, Deserialize)]
-struct AdrConfigFile {
-    adr: Option<AdrConfigSection>,
-}
-
-#[derive(Debug, Deserialize)]
-struct AdrConfigSection {
-    search: Option<AdrSearchConfigSection>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct AdrSearchConfig {
-    pub semantic_weight: f32,
-}
-
-impl Default for AdrSearchConfig {
-    fn default() -> Self {
-        Self {
-            semantic_weight: 0.5,
-        }
-    }
-}
-
-#[derive(Debug, Deserialize)]
-struct AdrSearchConfigSection {
-    semantic_weight: Option<f32>,
-}
-
 pub fn parse_docs_roots_from_config_toml(raw: &str) -> Result<Vec<String>, OrbitError> {
     if raw.trim().is_empty() {
         return Ok(default_doc_roots());
@@ -94,22 +66,6 @@ pub fn parse_docs_search_config_from_config_toml(
     Ok(DocsSearchConfig { semantic_weight })
 }
 
-pub fn parse_adr_search_config_from_config_toml(raw: &str) -> Result<AdrSearchConfig, OrbitError> {
-    if raw.trim().is_empty() {
-        return Ok(AdrSearchConfig::default());
-    }
-    let parsed = toml::from_str::<AdrConfigFile>(raw).map_err(|error| {
-        OrbitError::InvalidInput(format!("invalid ADR config in config.toml: {error}"))
-    })?;
-    let semantic_weight = parsed
-        .adr
-        .and_then(|section| section.search)
-        .and_then(|section| section.semantic_weight)
-        .unwrap_or_else(|| AdrSearchConfig::default().semantic_weight)
-        .clamp(0.0, 1.0);
-    Ok(AdrSearchConfig { semantic_weight })
-}
-
 pub(super) fn read_docs_roots_from_config_path(path: &Path) -> Result<Vec<String>, OrbitError> {
     if !path.exists() {
         return Ok(default_doc_roots());
@@ -128,17 +84,6 @@ pub(super) fn read_docs_search_config_from_config_path(
     let raw = std::fs::read_to_string(path)
         .map_err(|error| OrbitError::Io(format!("read {}: {error}", path.display())))?;
     parse_docs_search_config_from_config_toml(&raw)
-}
-
-pub(super) fn read_adr_search_config_from_config_path(
-    path: &Path,
-) -> Result<AdrSearchConfig, OrbitError> {
-    if !path.exists() {
-        return Ok(AdrSearchConfig::default());
-    }
-    let raw = std::fs::read_to_string(path)
-        .map_err(|error| OrbitError::Io(format!("read {}: {error}", path.display())))?;
-    parse_adr_search_config_from_config_toml(&raw)
 }
 
 pub(super) fn read_task_context_docs_roots_from_config_path(

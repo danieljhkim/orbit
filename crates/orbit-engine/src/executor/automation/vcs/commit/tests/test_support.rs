@@ -1,6 +1,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::Mutex;
 
 use chrono::Utc;
 use orbit_common::types::{
@@ -11,14 +12,15 @@ use orbit_tools::ToolContext;
 use serde_json::Value;
 use tempfile::tempdir;
 
-use crate::context::{
-    DeterministicActionHost, TaskActivityUpdate, TaskAutomationUpdate, TaskReadHost, TaskWriteHost,
-};
+use crate::context::{RuntimeHost, TaskActivityUpdate, TaskAutomationUpdate};
 
 use super::super::super::git::git_success;
 
 pub struct CommitTestHost {
-    tasks: Vec<Task>,
+    tasks: Mutex<Vec<Task>>,
+    /// ORB-10603: every `execution_summary` an automation update persisted, in
+    /// call order, so a test can assert what durable state actually received.
+    persisted_summaries: Mutex<Vec<(String, String)>>,
     crew_model: Option<String>,
     repo_root: PathBuf,
     data_root: PathBuf,
@@ -30,7 +32,8 @@ impl CommitTestHost {
         let data_root = repo_root.join(".orbit-test-data");
         let scoreboard_dir = data_root.join("scoreboard");
         Self {
-            tasks,
+            tasks: Mutex::new(tasks),
+            persisted_summaries: Mutex::new(Vec::new()),
             crew_model: None,
             repo_root,
             data_root,
@@ -42,11 +45,27 @@ impl CommitTestHost {
         self.crew_model = Some(model.into());
         self
     }
+
+    pub fn persisted_summaries(&self) -> Vec<(String, String)> {
+        self.persisted_summaries.lock().unwrap().clone()
+    }
+
+    pub fn task_execution_summary(&self, task_id: &str) -> String {
+        self.tasks
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|task| task.id == task_id)
+            .map(|task| task.execution_summary.clone())
+            .expect("task exists in the commit test host")
+    }
 }
 
-impl TaskReadHost for CommitTestHost {
+impl RuntimeHost for CommitTestHost {
     fn get_task(&self, task_id: &str) -> Result<Task, OrbitError> {
         self.tasks
+            .lock()
+            .unwrap()
             .iter()
             .find(|task| task.id == task_id)
             .cloned()
@@ -68,6 +87,8 @@ impl TaskReadHost for CommitTestHost {
     ) -> Result<Vec<Task>, OrbitError> {
         Ok(self
             .tasks
+            .lock()
+            .unwrap()
             .iter()
             .filter(|task| status.is_none_or(|status| task.status == status))
             .filter(|task| priority.is_none_or(|priority| task.priority == priority))
@@ -92,9 +113,7 @@ impl TaskReadHost for CommitTestHost {
             .cloned()
             .collect())
     }
-}
 
-impl TaskWriteHost for CommitTestHost {
     fn start_task(
         &self,
         _task_id: &str,
@@ -124,16 +143,24 @@ impl TaskWriteHost for CommitTestHost {
 
     fn apply_task_automation_update(
         &self,
-        _task_id: &str,
-        _update: TaskAutomationUpdate,
+        task_id: &str,
+        update: TaskAutomationUpdate,
     ) -> Result<(), OrbitError> {
-        Err(OrbitError::Execution(
-            "apply_task_automation_update is not needed by commit tests".to_string(),
-        ))
+        let mut tasks = self.tasks.lock().unwrap();
+        let task = tasks
+            .iter_mut()
+            .find(|task| task.id == task_id)
+            .ok_or_else(|| OrbitError::not_found(NotFoundKind::Task, task_id.to_string()))?;
+        if let Some(execution_summary) = update.execution_summary {
+            task.execution_summary = execution_summary.clone();
+            self.persisted_summaries
+                .lock()
+                .unwrap()
+                .push((task_id.to_string(), execution_summary));
+        }
+        Ok(())
     }
-}
 
-impl DeterministicActionHost for CommitTestHost {
     fn record_event(&self, _event: OrbitEvent) -> Result<(), OrbitError> {
         Ok(())
     }
@@ -303,6 +330,7 @@ pub fn task_with_file(id: &str, title: &str, path: &str, implemented_by: &str) -
         relations: Vec::new(),
         job_run_id: Some("batch-1".to_string()),
         crew: None,
+        orchestrator: None,
         created_at: now,
         updated_at: now,
     }

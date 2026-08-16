@@ -1,16 +1,16 @@
 ---
 title: Routines — Design
 owner: claude
-last_updated: 2026-07-18
+last_updated: 2026-08-15
 status: Accepted
 feature: routines
 doc_role: design
 type: design
 summary: Proposed contract for routine definitions, sweep dispatch, host-local state, and OS clock integration.
 tags: [routines, scheduler]
-paths: ["crates/orbit-cli/src/command/routine/**", "crates/orbit-core/src/routines/**", "crates/orbit-remote/src/routines.rs", "crates/orbit-store/src/sqlite/routine_store/**"]
+paths: ["crates/orbit-cli/src/command/routine/**", "crates/orbit-core/src/routines/**", "crates/orbit-cmd/src/registry_routines.rs", "crates/orbit-cmd/src/registry_runtime.rs", "crates/orbit-registry/src/host_identity.rs", "crates/orbit-registry/src/workspace_registry/**", "crates/orbit-store/src/sqlite/routine_store/**"]
 related_features: [routines, activity-job, host-registry]
-related_artifacts: [ORB-10001, ORB-10021, ORB-10207, ORB-10270, ORB-10319, ADR-0223]
+related_artifacts: [ORB-10001, ORB-10021, ORB-10207, ORB-10270, ORB-10319, ORB-10800]
 ---
 
 # Routines — Design
@@ -19,6 +19,26 @@ This doc is the v1 contract as shipped in [ORB-10021]: the routine definition sc
 how definitions are discovered, what `orbit sweep` does on each invocation, where state
 lives, and how the OS clock drives it. Cross-host coordination, event triggers, and everything else deferred is
 in [3_vision.md](./3_vision.md). Decision rationale lives in [4_decisions.md](./4_decisions.md).
+
+## OS sweep clock controls
+
+There are two independent scheduling layers. The per-user OS clock wakes Orbit and
+invokes the stateless `orbit sweep` pass; each versioned routine's cron expression then
+decides whether that pass fires work. The OS clock is host-local infrastructure, not a
+routine definition. Its durable configuration is `~/.orbit/clock.toml`, defaults to a
+60-second cadence, and accepts only whole-minute values from 60 through 3600 seconds.
+
+`orbit routine clock status` reports configured cadence, native-manager enabled state,
+and whether an enabled Linux timer has a finite next trigger. An enabled timer with no
+future trigger is `unhealthy`, has no effective cadence, and reports the reinstall command
+that restores the generated unit. `orbit routine clock pause` disables only launchd/systemd
+scheduled invocations (surviving logout/reboot through the native per-user manager);
+it preserves routine cursors, fire history, and per-routine pauses, and a deliberate
+`orbit sweep` is still available. `enable` resumes with the configured cadence, while
+`set --cadence-seconds N` atomically rewrites the host setting and reloads the existing
+unit identity. On an activation failure Orbit reports the concrete native recovery
+command rather than claiming the clock is active. launchd and systemd user managers are
+the supported platforms; there is no resident Orbit daemon ([Host-local sweep clock configuration](./4_decisions.md#host-local-sweep-clock-configuration)).
 
 ---
 
@@ -58,8 +78,8 @@ Field semantics:
   reserved and rejected at parse time with wrapping guidance: run dispatch is job-shaped
   (`submit_pipeline_run` resolves jobs by name; nothing dispatches a bare activity), and a
   one-step wrapper job in the same source workspace is the existing composition grammar
-  ([ADR-0206]). There is deliberately no inline command form: the `shell` activity variant
-  was removed fail-closed in [ORB-00374] / [ADR-0194], and reintroducing arbitrary-command
+  ([Routine targets are catalog references only — no inline command payloads](./4_decisions.md#routine-targets-are-catalog-references-only-no-inline-command-payloads)). There is deliberately no inline command form: the `shell` activity variant
+  was removed fail-closed in [ORB-00374] / [The v2 shell activity surface is removed, not sandboxed](../activity-job/4_decisions.md#the-v2-shell-activity-surface-is-removed-not-sandboxed), and reintroducing arbitrary-command
   payloads through the scheduler would reopen that surface on a timer.
 - **`policy`** — applied by the dispatcher around the run: timeout, bounded retries with
   fixed backoff, and overlap handling. `overlap: forbid` is the default; `timeout_minutes`
@@ -87,13 +107,24 @@ it adds a newly shipped default or recreates a deleted default, but byte-for-byt
 existing definitions, including `enabled`, `hosts`, cron, and policy edits. Only destructive
 force initialization recreates the workspace and therefore restores template defaults.
 
+After [ORB-10800] / [All five definition-artifact kinds carry managed provenance, and doctor reports it](../activity-job/4_decisions.md#all-five-definition-artifact-kinds-carry-managed-provenance-and-doctor-reports-it), routine seeding is manifest-aware: `.orbit/routines/`
+carries a `.orbit-managed-assets.json` recording the digest Orbit last wrote for each
+seeded default. The digest is taken over the *rendered* document — after the host-id and
+routine-name placeholders resolve — because that is what actually lands on disk. Two
+consequences follow. A default dropped from a later release is retired by content
+provenance rather than lingering forever in every existing workspace, and re-seeding
+unchanged content against the same host is a genuine no-op rather than a rewrite. A
+routine an operator has edited is never deleted: it is preserved under
+`.retired-managed/routines/`. `orbit doctor` reports routine artifacts as faulty,
+deprecated, or stale, and `orbit doctor --fix-stale-artifacts` performs the retirement.
+
 The seeded `ship_sweep` targets `job:workspace_ship_pipeline` with `missed_run: skip` and
 `overlap: forbid`. The wrapper resolves the source runtime's ship mode and configured base
 branch, invokes and waits for `task_auto_pipeline` without explicit task IDs, and guards
 its result. It never calls the legacy cross-workspace CLI sweep or consults
 `[workflow] auto_ship`; the child's existing empty-backlog path is a successful no-op.
 Waiting keeps the wrapper run active for the whole shipment, so routine overlap protection
-covers the child rather than only submission ([ADR-0223]).
+covers the child rather than only submission ([Delegate workspace ship routines through a synchronous wrapper job](./4_decisions.md#delegate-workspace-ship-routines-through-a-synchronous-wrapper-job)).
 
 ---
 
@@ -123,16 +154,18 @@ properties fall out:
   routine's source workspace so provenance is never ambiguous.
 
 Host identity is the one genuinely host-local datum: `~/.orbit/host.toml` carries the
-versioned `machine_id`, human-facing `host_id`, and `mode`. `orbit init` owns identity
+versioned `machine_id`, human-facing `host_id`, and immutable `task_prefix`. `orbit init` owns identity
 creation and legacy migration; `orbit routine init --install-clock` only installs the OS
 clock unit (§5). A malformed `host.toml` is an error, not a fallback; a `[routines] role`
 value other than `"source"` is a config error (fail-closed on both).
 
-The implementation boundary is vertical: `crates/orbit-remote/src/routines.rs` reads host
-identity, the logical workspace catalog, the hub snapshot or spoke cache, and constructs
-registered checkout runtimes. It projects those inputs through `RoutinePlacementProvider`
-and `RoutineWorkspaceProvider` into `crates/orbit-core/src/routines/`. Core owns the
-registry-neutral scheduler and never reaches back into Remote persistence. [ORB-10319]
+The implementation boundary is vertical: `crates/orbit-cmd/src/registry_routines.rs` reads
+`host.toml` and `workspaces.json` through `orbit-registry`, validates local checkout paths,
+and constructs registered runtimes through `registry_runtime`. It projects those inputs
+through `RoutinePlacementProvider` and `RoutineWorkspaceProvider` into
+`crates/orbit-core/src/routines/`. Core owns the registry-neutral scheduler and does not
+read either registry file directly. There is no hub snapshot, satellite cache, fleet
+health, or remote placement service in the v1 path.
 
 ---
 
@@ -140,33 +173,32 @@ registry-neutral scheduler and never reaches back into Remote persistence. [ORB-
 
 `orbit sweep` is the stateless entrypoint the OS clock invokes every minute. Like
 `ship-sweep`, it never bootstraps a workspace from the caller's cwd, isolates per-routine
-failures, and exits non-zero only on infrastructure errors (registry unreadable, store
-unopenable) — an unconfigured host logs one line and exits 0, because launchd/systemd will
-invoke it forever and an unconfigured host is not an error state.
+failures, and exits non-zero on infrastructure errors such as malformed host identity,
+an unreadable registry, or an unopenable store. A valid empty local registry simply
+produces no routines and exits successfully.
 
 Per pass:
 
 1. Take a host-global advisory lock (in the host store, §4). If another sweep holds it,
    exit immediately — overlapping invocations from a slow prior pass must not double-fire.
-2. Load the local registry source; collect routines from all source workspaces (fail-closed
-   per file). A hub uses its current registry snapshot, a spoke uses the classified atomic
-   registry cache, and standalone mode uses exact local identity.
-3. Validate every committed routine pin before any scheduler mutation. Current registry
-   data resolves aliases to stable `machine_id` and reports unknown, retired, collision,
-   alias, and quiet-host diagnostics. Missing, malformed, future-schema, or stale spoke
-   cache is warning-only: an exact local `host_id` remains eligible offline, while stale
-   positive active/alias matches remain usable. During an upgrade, a hub whose trusted
-   `host.toml` identity predates its registry record also keeps an exact local pin eligible
-   and emits `local_host_unregistered` until `orbit host register` is run; this preserves
-   pre-registry schedules without treating any non-local unknown pin as valid.
-   Location-scoped local routines bypass registry validation because their loader already
-   binds them to this machine.
+2. Load local `workspaces.json`, validate checkout paths, persist any resulting status
+   updates, and build runtimes for active local checkouts whose `.orbit/` directory exists.
+   Collect routines from those whose config declares `role = "source"`, failing closed per
+   source or definition without stopping other valid sources.
+3. Validate every committed routine pin before scheduler mutation. An exact match for this
+   machine's `host_id` is eligible. A name used by another workspace owner's local
+   `owner_host_ids` projection reports `host_belongs_elsewhere`; any other name reports
+   `host_unresolvable`. Machine-local definitions under `.orbit/routines/local/` are bound
+   to this host by their loader and bypass this committed-pin check. No aliases, liveness,
+   cache age, or remote registry state participate.
 4. Filter to routines where `enabled`, validation says this machine owns the pin, and no
    local pause.
-5. Sync unresolved fires against actual run state, reclaiming entries older than the
-   routine's `timeout_minutes` (the staleness horizon — a sweep that crashed between
-   intent and dispatch must not block `overlap: forbid` forever). Fires for a routine that
-   is no longer assigned to this machine are deliberately untouched.
+5. Sync unresolved fires against actual run state. A dispatched `running`/`retrying` run
+   whose recorded owner is conclusively stopped is failed immediately, including after a
+   host restart; an alive or unprobeable owner keeps its overlap slot. Other unresolved
+   entries are reclaimed after the routine's `timeout_minutes` staleness horizon, so a
+   sweep that crashed between intent and dispatch cannot block `overlap: forbid` forever.
+   Fires for a routine that is no longer assigned to this machine are deliberately untouched.
 6. For each, compute due-ness from the cron expression and the persisted cursor
    (last slot, else the first-observation baseline — a routine never fires for slots that
    predate its registration on this host; the first sweep records the baseline and fires
@@ -179,9 +211,10 @@ Per pass:
    source workspace with actor `routine/<name>` as run provenance.
 8. Record outcomes and exit.
 
-`orbit routine list`, `orbit routine show`, and `orbit sweep` expose the registry source,
-cache state/age, stable diagnostic codes, severity, and stale provenance additively in
-human and JSON output. Moving a committed pin from host A to host B never mutates A's
+`orbit routine list`, `orbit routine show`, and `orbit sweep` expose the local registry
+source (`local_workspace_registry`) plus stable diagnostic codes and severity in human and
+JSON output. Compatibility fields for cache age and staleness remain empty/false. Moving a
+committed pin from host A to host B never mutates A's
 cursor, fires, or pause. B has no migrated state, so its first sweep records the normal
 first-observation baseline; only the next natural slot can fire.
 
@@ -222,9 +255,13 @@ renders and installs the platform unit:
 
 - **macOS** — a launchd agent (`com.orbit.sweep`) with `StartInterval` 60s. launchd also
   fires on wake, which pairs with `missed_run: catch_up_once` for laptop sleep gaps.
-- **Linux** — `orbit-sweep.timer` (`OnCalendar=*:*:00`, `Persistent=true`) plus a oneshot
-  service. `Persistent=true` covers downtime at the OS layer; per-routine `missed_run`
-  still decides whether the covered gap produces a make-up fire.
+- **Linux** — `orbit-sweep.timer` combines `OnStartupSec=<cadence>` with
+  `OnUnitActiveSec=<cadence>` plus a oneshot service. A fresh user manager therefore arms a
+  finite first sweep; a reinstall after the startup deadline fires immediately; successful
+  service activations schedule subsequent sweeps at the configured cadence. These monotonic
+  triggers deliberately do not replay timer events missed while the manager or host was
+  down. The first sweep after restart evaluates each routine's cursor, so `catch_up_once`
+  collapses missed cron slots to one fire and `skip` waits for the next natural slot.
 
 There is no resident Orbit daemon. Sub-minute triggers and event triggers are explicitly
 out of v1 scope for this reason.
@@ -243,7 +280,7 @@ out of v1 scope for this reason.
 - **Scheduled execution is a real capability escalation.** A routine source workspace is
   scheduled code execution on every host that trusts it. Targets are catalog-resolved (no
   inline commands) and run under existing activity/job policy, but note the sandbox caveat
-  recorded in [ADR-0196]: enforcement depends on which runtime path the target takes.
+  recorded in [External Executor Protocol for dynamic out-of-process executor registration (retired)](../executors/4_decisions.md#external-executor-protocol-for-dynamic-out-of-process-executor-registration-retired): enforcement depends on which runtime path the target takes.
   PR review on the source workspace is part of the security boundary.
 - **Minute granularity, host-local time.** Cron is evaluated in host-local time; DST folds
   can skip or double a slot exactly as classic cron does. The idempotency key (name + slot)
@@ -262,7 +299,8 @@ out of v1 scope for this reason.
   records it as `failed` — retryable under `policy.retries` like a run-level failure; a crashed
   sweep's reclaimed stale intent is *ambiguous* (a worker may have partially started), so the
   outcome sync records it as `error` — terminal, never re-fired, so a make-up fire cannot race
-  an orphaned run.
+  an orphaned run. A dispatched in-flight run is released before that timeout only when its
+  recorded owner is conclusively stopped; live and unprobeable owners remain protected.
 - **Routines carry no input payload.** v1 dispatches every target with an empty input
   object; jobs meant for routines must run with defaults. Parameterized fires would be a
   schema addition.
@@ -273,10 +311,10 @@ out of v1 scope for this reason.
 
 - [ORB-10001] — authored this design-doc folder (proposal; no implementation).
 - [ORB-10021] — implemented routines v1 (types, store, sweep, CLI, clock units).
-- [ORB-10270] — implemented registry-aware validation before scheduler mutation,
-  cache-degraded offline behavior, stable diagnostics, and no-backfill reassignment.
-- [ORB-10319] — extracted Remote-specific routine placement/workspace composition from
-  Core while preserving the v1 sweep contract.
+- [ORB-10270] — historically implemented fleet-aware validation; current local-only
+  validation retains stable diagnostics and no-backfill reassignment.
+- [ORB-10319] — historical boundary extraction; current placement/workspace composition
+  lives in `orbit-cmd` over `orbit-registry` local files.
 - [ORB-10207] — added disabled-by-default seeding and workspace-local ship sweep.
 - [ORB-00374] — removed the `shell` activity variant and `run_shell` dispatch (fail-closed);
   routines inherit this constraint.

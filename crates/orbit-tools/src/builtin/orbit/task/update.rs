@@ -61,6 +61,12 @@ impl Tool for OrbitTaskUpdateTool {
                 required: false,
             },
             ToolParam {
+                name: "priority".to_string(),
+                description: "New dispatch priority (low, medium, high, or critical)".to_string(),
+                param_type: "string".to_string(),
+                required: false,
+            },
+            ToolParam {
                 name: "complexity".to_string(),
                 description: "Optional task complexity level (low, medium, or hard)".to_string(),
                 param_type: "string".to_string(),
@@ -123,6 +129,12 @@ impl Tool for OrbitTaskUpdateTool {
                 name: "crew".to_string(),
                 description: "Named crew to use when running this task (empty string clears)"
                     .to_string(),
+                param_type: "string".to_string(),
+                required: false,
+            },
+            ToolParam {
+                name: "orchestrator".to_string(),
+                description: "Named crew responsible for orchestration attribution (empty string clears; mutable only before execution)".to_string(),
                 param_type: "string".to_string(),
                 required: false,
             },

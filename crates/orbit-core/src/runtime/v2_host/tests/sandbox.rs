@@ -1,7 +1,9 @@
-use orbit_engine::V2RuntimeHost;
+use orbit_engine::RuntimeHost;
+#[cfg(target_os = "linux")]
+use orbit_exec::{compile_linux_bwrap_argv, prepare_linux_bwrap_write_grants};
 
 use crate::runtime::v2_host::test_support::seeded_runtime_with_executor;
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 use crate::runtime::v2_host::test_support::{runtime_with_workspace_layout, seed_executor};
 
 #[test]
@@ -11,6 +13,202 @@ fn resolve_executor_sandbox_returns_none_when_executor_has_no_sandbox() {
         .resolve_executor_sandbox("codex", None, None)
         .expect("resolve");
     assert!(resolved.is_none());
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn resolve_executor_sandbox_returns_linux_descriptor_with_absolute_mounts() {
+    let runtime =
+        seeded_runtime_with_executor(Some(orbit_common::types::ExecutorSandboxKind::LinuxBwrap));
+    let resolved = runtime
+        .resolve_executor_sandbox("codex", None, None)
+        .expect("resolve")
+        .expect("descriptor");
+    assert_eq!(
+        resolved.kind,
+        orbit_common::types::ExecutorSandboxKind::LinuxBwrap
+    );
+    assert!(!resolved.managed_worktree);
+    for entry in &resolved.fs_profile.modify {
+        let body = entry.strip_prefix('!').unwrap_or(entry);
+        assert!(
+            body.starts_with('/'),
+            "linux-bwrap mount rule must be absolute: {entry}"
+        );
+    }
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn direct_reviewer_profile_does_not_gain_workspace_runtime_writes() {
+    let (_root, runtime, repo_root) = runtime_with_workspace_layout();
+    seed_executor(
+        &runtime,
+        "claude",
+        Some(orbit_common::types::ExecutorSandboxKind::LinuxBwrap),
+    );
+
+    let reviewer = runtime
+        .resolve_executor_sandbox("claude", Some("reviewer"), Some(&repo_root))
+        .expect("resolve reviewer sandbox")
+        .expect("descriptor");
+    assert!(!reviewer.managed_worktree);
+    let canonical_repo = repo_root.canonicalize().expect("canonical repo");
+    assert!(
+        reviewer
+            .fs_profile
+            .modify
+            .iter()
+            .filter(|rule| !rule.starts_with('!'))
+            .all(|rule| !rule.starts_with(&canonical_repo.display().to_string())),
+        "read-only activity profile must not gain workspace runtime writes: {:?}",
+        reviewer.fs_profile.modify
+    );
+    assert!(
+        reviewer
+            .fs_profile
+            .read
+            .iter()
+            .any(|rule| rule.starts_with('!') && rule.ends_with("/**/*.env")),
+        "global denyRead rules must remain in the resolved profile: {:?}",
+        reviewer.fs_profile.read
+    );
+    compile_linux_bwrap_argv(
+        &reviewer.fs_profile,
+        "/bin/true",
+        &[],
+        Some(&canonical_repo),
+        reviewer.managed_worktree,
+    )
+    .expect("direct reviewer sandbox must compile with default dotenv denies");
+
+    let writer = runtime
+        .resolve_executor_sandbox("claude", None, Some(&repo_root))
+        .expect("resolve write-capable sandbox")
+        .expect("descriptor");
+    let error = compile_linux_bwrap_argv(
+        &writer.fs_profile,
+        "/bin/true",
+        &[],
+        Some(&canonical_repo),
+        writer.managed_worktree,
+    )
+    .expect_err("a direct write-capable sandbox must still fail closed");
+    assert!(error.to_string().contains("non-subtree denyModify"));
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn resolve_executor_sandbox_marks_only_specific_orbit_worktree_managed() {
+    let (_root, runtime, repo_root) = runtime_with_workspace_layout();
+    seed_executor(
+        &runtime,
+        "claude",
+        Some(orbit_common::types::ExecutorSandboxKind::LinuxBwrap),
+    );
+    let worktrees = runtime.paths().orbit_dir.join("state/worktrees");
+    let worktree = worktrees.join("orbit-jrun-test");
+    std::fs::create_dir_all(&worktree).expect("create worktree");
+
+    let managed = runtime
+        .resolve_executor_sandbox("claude", None, Some(&worktree))
+        .expect("resolve managed")
+        .expect("descriptor");
+    assert!(managed.managed_worktree);
+    let canonical_worktree = worktree.canonicalize().expect("canonical worktree");
+    assert!(
+        managed
+            .fs_profile
+            .modify
+            .iter()
+            .any(|entry| entry == &format!("{}/**", canonical_worktree.display()))
+    );
+    let prepared = prepare_linux_bwrap_write_grants(&managed.fs_profile, &worktree)
+        .expect("prepare resolved managed-worktree grants");
+    assert!(
+        prepared.unsatisfied.is_empty(),
+        "resolved managed-worktree grants must all be mountable: {:?}",
+        prepared.unsatisfied
+    );
+    let plan = compile_linux_bwrap_argv(
+        &managed.fs_profile,
+        "/bin/true",
+        &[],
+        Some(&worktree),
+        managed.managed_worktree,
+    )
+    .expect("compile resolved managed-worktree sandbox");
+    assert!(
+        plan.dropped_grants.is_empty(),
+        "prepared managed-worktree grants must not be dropped: {:?}",
+        plan.dropped_grants
+    );
+
+    let direct = runtime
+        .resolve_executor_sandbox("claude", None, Some(&repo_root))
+        .expect("resolve direct")
+        .expect("descriptor");
+    assert!(!direct.managed_worktree);
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn resolve_executor_sandbox_orders_versioned_orbit_exceptions_after_default_deny() {
+    let (_root, runtime, _repo_root) = runtime_with_workspace_layout();
+    seed_executor(
+        &runtime,
+        "claude",
+        Some(orbit_common::types::ExecutorSandboxKind::LinuxBwrap),
+    );
+    let worktree = runtime
+        .paths()
+        .orbit_dir
+        .join("state/worktrees/orbit-jrun-versioned-config");
+    for directory in ["auto_tasks", "routines", "resources", "state", "tasks"] {
+        std::fs::create_dir_all(worktree.join(".orbit").join(directory))
+            .expect("create worktree Orbit fixture");
+    }
+    for file in ["config.yaml", "config.toml"] {
+        std::fs::write(worktree.join(".orbit").join(file), "versioned = true")
+            .expect("create versioned config fixture");
+    }
+
+    let resolved = runtime
+        .resolve_executor_sandbox("claude", None, Some(&worktree))
+        .expect("resolve")
+        .expect("descriptor");
+    let modify = &resolved.fs_profile.modify;
+    let canonical_worktree = worktree.canonicalize().expect("canonical worktree");
+    let orbit = canonical_worktree.join(".orbit");
+    let deny = format!("!{}/**", orbit.display());
+    let deny_pos = modify
+        .iter()
+        .position(|rule| rule == &deny)
+        .unwrap_or_else(|| panic!("default Orbit deny missing from {modify:?}"));
+
+    for allowed in [
+        format!("{}/auto_tasks/**", orbit.display()),
+        format!("{}/routines/**", orbit.display()),
+        format!("{}/config.yaml", orbit.display()),
+        format!("{}/config.toml", orbit.display()),
+        format!("{}/resources/**", orbit.display()),
+    ] {
+        let allow_pos = modify
+            .iter()
+            .position(|rule| rule == &allowed)
+            .unwrap_or_else(|| panic!("versioned exception `{allowed}` missing from {modify:?}"));
+        assert!(deny_pos < allow_pos, "exception must follow default deny");
+    }
+    for protected in [
+        format!("{}/state/**", orbit.display()),
+        format!("{}/tasks/**", orbit.display()),
+        format!("{}/future-store/**", orbit.display()),
+    ] {
+        assert!(
+            !modify.iter().any(|rule| rule == &protected),
+            "worktree store must not be re-allowed by policy: {protected} in {modify:?}"
+        );
+    }
 }
 
 #[cfg(target_os = "macos")]
@@ -138,10 +336,8 @@ fn resolve_executor_sandbox_appends_gemini_orbit_runtime_roots_without_home_real
         format!("{global}/orbit.db*"),
         format!("{global}/tasks/**"),
         format!("{workspace_orbit}/tasks/**"),
-        format!("{workspace_orbit}/learnings/**"),
         format!("{workspace_orbit}/frictions/**"),
         format!("{workspace_orbit}/state/audit/**"),
-        format!("{workspace_orbit}/state/.id_alloc.lock"),
         format!("{workspace_orbit}/state/logs/**"),
         format!("{workspace_orbit}/state/semantic.db*"),
     ];
@@ -164,12 +360,8 @@ fn resolve_executor_sandbox_appends_gemini_orbit_runtime_roots_without_home_real
         !modify.iter().any(|entry| entry == &workspace_orbit),
         "gemini sandbox must not re-allow the whole workspace .orbit root: {modify:?}"
     );
-    // Registered-but-not-activity-exposed write stores are intentionally
-    // outside this child-runtime inventory. If agent_implement, agent_review,
-    // step_failure_recovery, or dispatch_agent exposes ADR or graph write
-    // tools, revisit this allowlist alongside those surfaces.
+    // Registered-but-not-activity-exposed stores remain outside this child-runtime inventory.
     for excluded in [
-        format!("{workspace_orbit}/adrs/**"),
         format!("{workspace_orbit}/knowledge/**"),
         format!("{workspace_orbit}/state/knowledge/**"),
     ] {

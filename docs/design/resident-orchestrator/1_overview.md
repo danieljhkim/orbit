@@ -1,91 +1,133 @@
 ---
 title: Resident Orchestrator — Overview
-owner: codex
-last_updated: 2026-07-20
+owner: codex, grok, claude
+last_updated: 2026-08-15
+last_validated: 2026-08-15
 status: Draft
 feature: resident-orchestrator
 doc_role: overview
 type: design
-summary: Workspace-addressed epic delegation to a specialized CLI orchestrator that decomposes and shepherds work without a resident server.
-tags: [resident-orchestrator, epic, routines, cli]
-paths: [".orbit/resources/activities/**", ".orbit/resources/jobs/**", ".orbit/routines/**", "crates/orbit-core/assets/**"]
-related_features: [resident-orchestrator, activity-job, routines, agent-families]
-related_artifacts: []
+summary: An epic owns one worktree and one branch; its children land into that branch sequentially and the epic agent finishes the work inside it. workspace_auto_pipeline drains the workspace for a caller-supplied window instead of taking one action per tick. The fire clock lives outside Orbit.
+tags: [resident-orchestrator, epic, jobs, mcp]
+paths: [".orbit/resources/jobs/**", "crates/orbit-core/assets/jobs/**", "crates/orbit-core/assets/activities/**"]
+related_features: [resident-orchestrator, activity-job]
+related_artifacts: [ORB-10332, ORB-10775, ORB-10776, ORB-10779, ORB-10788, ORB-10815, ORB-10816, ORB-10817, ORB-10818, ORB-10819]
 ---
 
 # Resident Orchestrator — Overview
 
-A **resident orchestrator** is a specialized agent bound to one Orbit workspace. The workspace is
-its address, a root task tagged `epic` is its durable work order, and a workspace-local routine
-wakes a bounded `backend: cli` ownership cycle. The resident decomposes the epic into normal child
-tasks, ships explicit child task IDs through the existing delivery workflows, and shepherds the
-whole tree to a verified terminal state. No per-agent server, inbox pump, or retained HTTP agent
-session is required.
+> **Status: Draft, landing incrementally.** This folder specifies the v2 contract ([ORB-10815]).
+> The epic worktree and the sequential child drain are **live** ([ORB-10816]); the epic agent,
+> epic-scoped completion with inlined delivery, and the drain window are **not yet built**. Until
+> they are, one auto tick still takes one action and `decision: hold` still freezes auto-ship
+> behind an in-progress epic. Each child task flips its own section's claims to live behavior in
+> the PR that implements it — see the status column in [§3](#3-at-a-glance).
+> [§10](./2_design.md#10-what-v1-did-and-why-it-changed) records what v1 did.
+
+V1 is two Orbit jobs, not one command. V2 keeps that split and changes what each job *is*.
+
+`epic_pipeline` owns a body of work end to end. It opens **one worktree and one branch** for the
+epic root. Child tasks — when the epic has any — land into that branch **one at a time** in local
+mode and reach `done` on merge. Then the epic agent works **inside that worktree**: it validates
+the merged result, resolves what the children missed, and finishes the epic with subagents as
+needed. The job delivers the branch once, as a PR or a local merge, per the workspace's ship mode.
+
+Sub-task breakdown is optional. A human or a higher-up orchestrator decomposes an epic when the
+decomposition earns its keep. An epic with no children is normal: the agent does the whole thing.
+
+`workspace_auto_pipeline` is the drain ([ORB-10819]). `orbit run auto --for <duration>` polls and
+re-lists the backlog until the window expires, so work created *after* the run started still ships.
+The window gates starting new work, never in-flight work. Loose leaves and an epic proceed
+concurrently whenever their `context_files` do not overlap; the epic excludes what it actually
+touches by holding one reservation, not by freezing the workspace.
+
+The **clock** that fires either job is not an Orbit routine. A cron (or a human, or a front-door
+session) on a separate knowledgebase checkout, with Orbit MCP wired in, calls `orbit run auto` or
+`orbit run job epic_pipeline`. Selection still lives there.
 
 ## 1. Motivation
 
-The constellation currently has two useful but insufficient levels of delegation:
+V1's sequencer was strictly less useful than `orbit run ship` in the common case. One tick did one
+thing; `decision: hold` froze every conflict-free chore behind an unrelated epic; and backlog
+membership was sampled once, so anything created a second later waited for the next external fire.
 
-1. A front-door orchestrator can make cross-workspace decisions.
-2. A one-shot runner can execute one scoped leaf mandate.
-
-What is missing is durable, codebase-local ownership between those levels. A single front door
-cannot retain deep context for several codebases while also following every task, workflow run,
-review, merge conflict, and acceptance criterion to completion. Repeated generic runner calls do
-not solve that problem: the front door remains the shepherd and must reconstruct the codebase's
-state on every turn.
-
-Orbit already provides the durable pieces needed for a smaller solution: workspace routing,
-tagged tasks, parent/child task relationships, dependencies, CLI agent activities, jobs, routines,
-and explicit-ID shipment workflows. The missing mechanism is a convention and a thin pickup cycle
-that hand ownership of a high-level task to the workspace's specialized orchestrator.
-
-The former `task_epic_pipeline` was not that mechanism. It assumed child tasks already existed,
-used an HTTP agent loop with retained session state, and treated `review` as the end of automated
-shipment. Orbit v1 supports CLI agent invocation; the resident must also own decomposition and the
-post-review delivery loop. This design supersedes the HTTP epic path, which was removed as unused
-in [ORB-10332], rather than porting it.
+The deeper problem was the orchestrator's shape. It could create and dispatch tasks but not edit
+the tree, so one epic fragmented into N worktrees, N PRs, and N review items, and nothing ever saw
+the epic's combined result before it reached the base branch. That constraint made sense when the
+epic had no worktree of its own. Giving it one removes the reason for the constraint.
 
 ## 2. Core Concepts
 
-**Resident workspace.** One Orbit workspace is the durable address for one specialized
-orchestrator. For example, an Orbit systems agent receives work in the Orbit codebase workspace;
-no separate agent queue is required.
+**Epic worktree.** One stable worktree and branch per epic root, keyed by the epic's id through
+`worktree_setup`'s `run_id` / `branch_prefix` inputs. It is reattachable across runs of the same
+epic and is retained by `worktree_gc` for as long as the root is non-terminal.
 
-**Epic assignment.** A root task with no `parent_id` and the tag `epic`. Creating that task in a
-workspace is the act of delegation. Its description and acceptance criteria define the outcome;
-the resident authors the execution plan after pickup.
+**Child drain.** Non-terminal descendants land into the epic branch sequentially through
+`task_local_pipeline` (`base_sync: local`, no push, `landing_branch` set to the real base). A child
+is `done` on merge into the epic branch — the epic root is the single review artifact.
 
-**Resident activity.** A workspace-local `agent_loop` activity using `backend: cli`. It explicitly
-binds the provider, model, and identity-loading instruction for that workspace's resident agent.
-Different workspaces can use different resident agents without a new invocation service.
+**Epic agent.** `epic_orchestrator`: one `backend: cli` agent_loop that runs **inside** the epic
+worktree with write access scoped to it. It validates and finishes the work, delegating to
+subagents as needed, and may author further children when decomposition is warranted. It still must
+not merge PRs reserved for the human merge authority, edit a second workspace, or invent approval
+policy.
 
-**Ownership cycle.** One bounded resident invocation. It resumes an active epic before selecting a
-new one, advances as much of its task tree as current state permits, persists every decision in
-Orbit, and exits. A later routine fire resumes from durable state rather than conversation memory.
+**Epic completion.** Epic-scoped, not workspace-scoped: the run is finished when the root has no
+non-terminal descendants and the agent reported completion. A leftover set at the iteration ceiling
+fails the run closed. Success is never inferred from agent prose.
 
-**Child task.** A normal task created with `parent_id` pointing to the epic. Child tasks use the
-ordinary lifecycle, dependency, crew, validation, review, and PR machinery; the `epic` tag does not
-create a second execution model.
+**Unresolved work / scan.** `scan_unresolved_work` keeps its workspace-wide shape — every task in
+`proposed`, `backlog`, or `blocked`, plus every `failed`/`timeout` run and unresolved `check_later`
+note. It is no longer `epic_pipeline`'s completion gate; it serves the workspace drain.
 
-**Shepherding.** The resident's responsibility for the entire workspace-local delivery loop:
-decomposition, explicit dispatch, run observation, failure recovery, independent review,
-conflict/finding resolution, merge verification, child closure, and finally parent closure.
+**Drain window.** `orbit run auto --for <duration>`: how long the auto run keeps polling and
+flushing the backlog. Absent or zero means one tick. The deadline stops *starting* new work; in-flight
+children finish on their own.
+
+**Conflict admission.** An `epic`-tagged root holds one reservation over the union of its
+descendants' `context_files` — live since [ORB-10816] via `lock_context_files_for_task`. Loose
+leaves are then admitted by the ordinary overlap check. Deleting `decision: hold` so that check is
+the *only* gate is [ORB-10819]; until then `hold` still short-circuits it.
+
+**Session log.** Workspace-scoped append-only notebook (`orbit.session_log`), kinds `status`,
+`note`, `check_later`. Unresolved `check_later` rows are a scan wake reason. This is the memory
+between fires; conversation resume stays out of scope.
+
+**External clock.** Cron / knowledgebase supervisor / front door. Not a seeded Orbit routine.
+
+**Epic tag.** Supervisor delegation for a root body of work ([Epic tag is a supervisor delegation signal, not the job predicate](./4_decisions.md#epic-tag-is-a-supervisor-delegation-signal-not-the-job-predicate)). It is **not** `epic_pipeline`'s pickup
+key. It **is** the leaf-ship exclusion key: auto `list_backlog` skips the root and its descendants,
+and explicit ship of the root is refused.
 
 ## 3. At a Glance
 
-| Concern | File | Task |
-|---------|------|------|
-| Resident CLI identity | workspace `.orbit/resources/activities/resident_orchestrator.yaml` | Not allocated |
-| Epic selection and resume | proposed deterministic `select_resident_epic` activity | Not allocated |
-| Bounded ownership cycle | proposed `resident_epic_cycle` job | Not allocated |
-| Scheduled pickup | workspace `.orbit/routines/resident_epic.yaml` | Not allocated |
-| Child delivery | existing `task_gate_pipeline` / explicit-ID shipment workflows | Existing mechanism |
-| HTTP epic retirement | former `task_epic_pipeline` and `epic_orchestrator` assets (removed in [ORB-10332]) | [ORB-10332] |
+| Concern | Where | Task | Status |
+|---------|-------|------|--------|
+| This split | this folder | [ORB-10776] | live |
+| Epic tag = supervisor delegation signal | [Epic tag is a supervisor delegation signal, not the job predicate](./4_decisions.md#epic-tag-is-a-supervisor-delegation-signal-not-the-job-predicate) | [ORB-10776] | live |
+| Clock and supervisor stay outside Orbit | [The supervisor clock is not an Orbit primitive](./4_decisions.md#the-supervisor-clock-is-not-an-orbit-primitive) | [ORB-10776] | live |
+| `orbit.session_log` (notes / check-later / status) | workspace session-log store + tools | [ORB-10784] | live |
+| `scan_unresolved_work` + `epic_pipeline` v1 | catalog | [ORB-10779] | live |
+| Epic owns one worktree; children land sequentially | [An epic owns one worktree and one branch](./4_decisions.md#an-epic-owns-one-worktree-and-one-branch) | [ORB-10816] | live |
+| Epic reservation over the descendant context union | `lock_context_files_for_task` | [ORB-10816] | live |
+| Epic agent edits the tree instead of dispatching | [The epic agent works in the worktree instead of dispatching](./4_decisions.md#the-epic-agent-works-in-the-worktree-instead-of-dispatching) | [ORB-10817] | planned |
+| Epic-scoped completion + inlined delivery | [Epic completion is epic-scoped](./4_decisions.md#epic-completion-is-epic-scoped-not-workspace-scoped) | [ORB-10818] | planned |
+| Drain window, no `hold`, detached epic dispatch | [Auto drains for a window instead of taking one action](./4_decisions.md#auto-drains-for-a-window-instead-of-taking-one-action) | [ORB-10819] | planned |
+| Child delivery inside an epic | `task_local_pipeline` onto the epic branch | [ORB-10816] | live |
+| HTTP epic retirement | removed assets | [ORB-10332] | live |
 
 ## Task References
 
-- **[ORB-10332]** — Remove the unused HTTP epic pipeline assets (`task_epic_pipeline`, `epic_orchestrator`) this design supersedes.
-- Further implementation tasks will be allocated after this Draft is accepted.
+- **[ORB-10332]** — Remove the unused HTTP epic pipeline.
+- **[ORB-10775]** — Epic: drain job in Orbit; supervisor clock stays external.
+- **[ORB-10776]** — Accept the v1 contract; epic-tag and external-clock decisions.
+- **[ORB-10779]** — Ship the scan, the orchestrator activity, and `epic_pipeline`.
+- **[ORB-10784]** — `orbit.session_log` (status / note / check_later).
+- **[ORB-10788]** — v1 sequencer job, leaf-ship exclusion, `orbit run auto`.
+- **[ORB-10815]** — Epic-owned worktree and continuous workspace drain (this revision).
+- **[ORB-10816]** — Epic worktree; sequential child drain; epic reservation.
+- **[ORB-10817]** — `epic_orchestrator` becomes a code-editing finisher.
+- **[ORB-10818]** — Epic-scoped completion gate and inlined delivery.
+- **[ORB-10819]** — Drain window, classifier collapse, detached epic dispatch.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

@@ -30,7 +30,7 @@ spec:
 
 | Type | Required fields | Notes |
 |------|-----------------|-------|
-| `agent_loop` | `instruction`; optional `tools`, `provider`, `backend`, `model`, `max_iterations`, `wall_clock_timeout_seconds` | The backend defaults to `cli`; `http` and `auto` are also accepted. `max_iterations` applies only to HTTP loops, while `wall_clock_timeout_seconds` bounds CLI invocations. |
+| `agent_loop` | `instruction`; optional `tools`, `provider`, `model`, `wall_clock_timeout_seconds` | Agent execution uses the CLI path only. `backend: cli` still parses and is ignored; `http` and `auto` fail catalog load. `orbit doctor --fix-retired-activity-backends` removes those retired keys. `max_iterations` is inert. |
 | `deterministic` | `action`; optional `config` | Runs a registered deterministic action. |
 
 ## Job Envelope
@@ -54,8 +54,8 @@ spec:
 Reference an activity:
 
 ```yaml
-- id: review
-  target: activity:agent_review_diff
+- id: assess
+  target: activity:agent_assess_diff
 ```
 
 Inline a full activity spec:
@@ -71,14 +71,14 @@ Inline a full activity spec:
 Run branches in parallel:
 
 ```yaml
-- id: parallel_review
+- id: parallel_assessment
   parallel:
     join: { mode: all }
     branches:
       - id: branch_a
-        target: activity:review_a
+        target: activity:assess_a
       - id: branch_b
-        target: activity:review_b
+        target: activity:assess_b
 ```
 
 ## Modifiers

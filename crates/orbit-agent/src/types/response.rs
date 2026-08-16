@@ -2,6 +2,10 @@
 // Visible to sibling-layout tests for this file-rooted module without
 // reintroducing a nested `response/tests` tree.
 pub(in crate::types) mod envelope;
+#[path = "response/protocol_schema.rs"]
+// Visible to sibling-layout tests for this file-rooted module without
+// reintroducing a nested `response/tests` tree.
+pub(in crate::types) mod protocol_schema;
 #[path = "response/tool_calls.rs"]
 mod tool_calls;
 #[path = "response/trace.rs"]
@@ -10,6 +14,10 @@ mod trace;
 // Visible to sibling-layout tests for this file-rooted module without
 // reintroducing a nested `response/tests` tree.
 pub(in crate::types) mod usage;
+#[path = "response/wrapper.rs"]
+// Visible to sibling-layout tests for this file-rooted module without
+// reintroducing a nested `response/tests` tree.
+pub(in crate::types) mod wrapper;
 
 use orbit_common::types::{OrbitError, ToolCallTrace};
 use serde_json::Value;
@@ -17,6 +25,8 @@ use serde_json::Value;
 pub use envelope::{
     is_timeout, parse_and_validate_response, peek_response_status, response_envelope_protocol_check,
 };
+pub use protocol_schema::{response_envelope_json_schema, response_envelope_json_schema_arg};
+pub use wrapper::provider_invocation_diagnostic;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AgentInvocationSpec {

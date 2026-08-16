@@ -14,6 +14,34 @@ use std::process::{Command, Stdio};
 use std::time::{Duration as StdDuration, Instant as StdInstant};
 use tempfile::tempdir;
 
+#[cfg(unix)]
+struct ReapingChild(std::process::Child);
+
+#[cfg(unix)]
+impl ReapingChild {
+    fn id(&self) -> u32 {
+        self.0.id()
+    }
+
+    fn wait(&mut self) -> std::io::Result<std::process::ExitStatus> {
+        self.0.wait()
+    }
+
+    fn kill(&mut self) -> std::io::Result<()> {
+        self.0.kill()
+    }
+}
+
+#[cfg(unix)]
+impl Drop for ReapingChild {
+    fn drop(&mut self) {
+        if self.0.try_wait().ok().flatten().is_none() {
+            let _ = self.0.kill();
+        }
+        let _ = self.0.wait();
+    }
+}
+
 #[test]
 fn cancel_job_run_marks_pending_cancelled_without_signal() {
     let (_root, runtime) = test_runtime();
@@ -62,6 +90,54 @@ fn cancelled_pending_run_is_not_claimed_by_pipeline_worker() {
     assert_eq!(stored.state, JobRunState::Cancelled);
     assert!(stored.started_at.is_none());
     assert!(stored.steps.is_empty());
+}
+
+#[test]
+fn failed_run_wait_entry_carries_the_terminal_step_diagnostic() {
+    let (_root, runtime) = test_runtime();
+    let run = insert_pending_run(&runtime, "task_pilot_pipeline");
+    let started_at = Utc::now() - Duration::seconds(2);
+    let finished_at = Utc::now();
+    runtime
+        .stores()
+        .jobs()
+        .mark_job_run_running(&run.run_id, started_at, std::process::id())
+        .expect("mark child run running");
+    runtime
+        .stores()
+        .jobs()
+        .complete_job_run_step(
+            &run.run_id,
+            &orbit_store::JobRunStepParams {
+                step_index: 0,
+                target_type: orbit_common::types::JobTargetType::Activity,
+                target_id: "task_pilot".to_string(),
+                started_at,
+                finished_at,
+                duration_ms: Some(2_000),
+                exit_code: None,
+                agent_response_json: None,
+                state: JobRunState::Failed,
+                error_code: Some("worktree_mismatch".to_string()),
+                error_message: Some("declared path pair is incomplete".to_string()),
+            },
+        )
+        .expect("record child startup failure");
+    runtime
+        .stores()
+        .jobs()
+        .finalize_job_run(&run.run_id, JobRunState::Failed, finished_at, Some(2_000))
+        .expect("finalize failed child run");
+
+    let waited = runtime
+        .wait_pipeline_runs(std::slice::from_ref(&run.run_id), 1, 1, Some("test"))
+        .expect("wait failed review run");
+
+    assert_eq!(waited.results[0].status, "failed");
+    assert_eq!(
+        waited.results[0].error.as_deref(),
+        Some("worktree_mismatch: declared path pair is incomplete")
+    );
 }
 
 #[test]
@@ -146,13 +222,15 @@ fn cancel_job_run_does_not_signal_reused_pid_identity_mismatch() {
 
     let (_root, runtime) = test_runtime();
     let run = insert_pending_run(&runtime, "qa_cancel_reused_pid");
-    let mut sentinel = Command::new("sleep")
-        .arg("30")
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-        .expect("spawn sentinel");
+    let mut sentinel = ReapingChild(
+        Command::new("sleep")
+            .arg("30")
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("spawn sentinel"),
+    );
     let sentinel_pid = sentinel.id();
     let started_at = Utc::now() - Duration::seconds(1);
     runtime
@@ -211,7 +289,7 @@ fn cancel_job_run_kills_term_resistant_process_group() {
             Ok(())
         });
     }
-    let mut owner = owner.spawn().expect("spawn owner");
+    let mut owner = ReapingChild(owner.spawn().expect("spawn owner"));
     let mut pid_pair = None;
     assert!(
         wait_until(StdDuration::from_secs(2), || {
@@ -246,17 +324,57 @@ fn cancel_job_run_kills_term_resistant_process_group() {
 
 #[cfg(unix)]
 #[test]
+fn cancel_job_run_terminates_cooperative_process_group() {
+    use std::os::unix::process::CommandExt;
+
+    let (_root, runtime) = test_runtime();
+    let run = insert_pending_run(&runtime, "qa_cancel_term_process_group");
+    let mut owner = Command::new("sleep");
+    owner
+        .arg("30")
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    unsafe {
+        owner.pre_exec(|| {
+            if libc::setsid() == -1 {
+                return Err(std::io::Error::last_os_error());
+            }
+            Ok(())
+        });
+    }
+    let mut owner = ReapingChild(owner.spawn().expect("spawn cooperative owner"));
+    let owner_pid = owner.id();
+    runtime
+        .stores()
+        .jobs()
+        .mark_job_run_running(&run.run_id, Utc::now(), owner_pid)
+        .expect("mark running");
+
+    let result = runtime.cancel_job_run(&run.run_id).expect("cancel run");
+    owner.wait().expect("reap cooperative owner");
+
+    assert_eq!(
+        result.signal_outcome.as_deref(),
+        Some("terminated_process_group")
+    );
+}
+
+#[cfg(unix)]
+#[test]
 fn cancellation_of_an_already_exited_process_group_is_successful() {
     let (_root, runtime) = test_runtime();
     let run = insert_pending_run(&runtime, "qa_cancel_exited_group");
-    let mut owner = Command::new("/bin/sh")
-        .arg("-c")
-        .arg("exit 0")
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-        .expect("spawn exited owner");
+    let mut owner = ReapingChild(
+        Command::new("/bin/sh")
+            .arg("-c")
+            .arg("exit 0")
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("spawn exited owner"),
+    );
     let owner_pid = owner.id();
     owner.wait().expect("reap exited owner");
     runtime

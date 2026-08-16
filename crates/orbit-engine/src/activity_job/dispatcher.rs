@@ -1,23 +1,17 @@
-use std::collections::HashMap;
-use std::path::Path;
 use std::sync::Arc;
-use std::time::Instant;
 
 use orbit_common::types::activity_job::V2AuditEventKind;
-use orbit_common::types::activity_job::{
-    ActivityV2Spec, AgentLoopSpec, AgentRole, Backend, DeterministicSpec, Provider,
-};
+use orbit_common::types::activity_job::{ActivityV2Spec, AgentLoopSpec, DeterministicSpec};
 
-use crate::context::AgentRoleConfig;
+use crate::context::RuntimeHost;
 use orbit_common::types::{
-    ExecutorSandboxKind, InvocationTrace, LearningInjectionCaps, LearningInjectionState,
-    LearningReminder, OrbitError, ResolvedFsProfile, TokenUsage, ToolCallTrace,
+    DeterministicAction, ExecutorSandboxKind, InvocationTrace, McpCapability, OrbitError,
+    ResolvedFsProfile,
 };
-use orbit_tools::{FsAuditLogger, FsCallEvent, FsCallEventKind, ToolContext};
+use orbit_tools::{FsAuditLogger, FsCallEvent, FsCallEventKind};
 use serde_json::Value;
 use thiserror::Error;
 
-use super::agent_loop_driver::drive_agent_loop;
 use super::audit_writer::V2AuditWriter;
 use super::cli_runner::run_cli_backend;
 
@@ -41,199 +35,9 @@ pub struct ResolvedSandbox {
     pub fs_profile: ResolvedFsProfile,
     /// Whether to fall back to bare exec if the OS primitive is unavailable.
     pub allow_fallback: bool,
-}
-
-/// Orbit-core-owned responsibilities the v2 dispatcher delegates back across
-/// the engine→core boundary: deterministic action execution (which needs the
-/// runtime's tool registry + ToolContext) and provider credential sourcing
-/// (which needs env/config access).
-///
-/// Agent-loop construction itself is NOT on this trait — it lives in
-/// `orbit_engine::activity_job::agent_loop_driver::drive_agent_loop`, so implementors
-/// never have to name orbit-agent types. The dispatcher calls
-/// `host.api_key_for(provider)?` then `drive_agent_loop(spec, &api_key, ...)`
-/// directly.
-pub trait V2RuntimeHost: Send + Sync {
-    /// Dispatch a deterministic action by name. The host looks up `action`
-    /// in its registry and returns the action's structured output.
-    fn run_deterministic(
-        &self,
-        action: &str,
-        config: &Value,
-        input: &Value,
-        tool_context: ToolContext,
-    ) -> Result<Value, DispatchError>;
-
-    /// Report whether `action` names a deterministic action this host's
-    /// registry can actually dispatch.
-    ///
-    /// [ORB-10385] Catalog assets and the installed binary are separate
-    /// artifacts: a workspace can load an activity whose `action:` the running
-    /// runtime does not implement. Job validation consults this before the
-    /// first step runs, so that skew fails admission instead of being
-    /// discovered by a terminal failure hook after a task was admitted and
-    /// implemented. The default is `true`: hosts that cannot enumerate their
-    /// registry (tests, smoke examples) keep the pre-ORB-10385 behavior of
-    /// surfacing the miss at dispatch as
-    /// [`DispatchError::DeterministicActionNotRegistered`]. Reporting `true`
-    /// for an unknown action is therefore safe; reporting `false` for a
-    /// dispatchable one would reject a healthy job.
-    fn has_deterministic_action(&self, _action: &str) -> bool {
-        true
-    }
-
-    /// Source the API key for a given provider (e.g. `"anthropic"`). Returns
-    /// the raw key as a `String` so nothing orbit-agent-shaped bleeds across
-    /// the boundary. Implementors typically read from env or config.
-    fn api_key_for(&self, provider: &str) -> Result<String, DispatchError>;
-
-    /// Resolve the CLI executor command and static args for a given v2
-    /// provider name (§3.1 backend: cli path). Workspace / env overrides live
-    /// in the host so the engine's CLI runner stays environment-agnostic.
-    /// Returning an error is the structured failure path when a provider has no
-    /// CLI mapping (e.g. `openai_compat` which is HTTP-only).
-    fn resolve_cli_executor(&self, provider: &str) -> Result<ResolvedCliExecutor, DispatchError>;
-
-    /// Return provider-specific CLI runtime config for `backend: cli`.
-    ///
-    /// Most providers ignore this today. Codex uses it for sandbox,
-    /// approval-policy, and writable-directory arguments that must stay dynamic
-    /// rather than living in the static executor definition.
-    fn provider_cli_config(&self, _provider: &str) -> HashMap<String, String> {
-        HashMap::new()
-    }
-
-    /// Resolve the OS sandbox payload for a CLI invocation. The host reads
-    /// the executor's `sandbox` declaration, materializes the activity's
-    /// `fs_profile` against the active policy, and compiles the result via
-    /// `orbit-exec`. Returns `Ok(None)` when the executor has no sandbox
-    /// declared (today's behavior). Returns a structured error on
-    /// platform mismatch (e.g. `macos-sandbox-exec` on Linux) so the
-    /// activity fails closed at dispatch time.
-    ///
-    /// `subprocess_cwd` is the resolved working directory the subprocess
-    /// will run in. The host uses it to re-allow the active worktree path
-    /// after the policy's `denyModify .orbit/**` rule when the cwd is a
-    /// jrun worktree under `.orbit/state/worktrees/`. Without this, every
-    /// non-codex provider (claude/gemini) cannot write inside its own
-    /// worktree because the deny rule wins last-match. See T20260508-17.
-    fn resolve_executor_sandbox(
-        &self,
-        _provider: &str,
-        _fs_profile: Option<&str>,
-        _subprocess_cwd: Option<&Path>,
-    ) -> Result<Option<ResolvedSandbox>, DispatchError> {
-        Ok(None)
-    }
-
-    /// Optional task snapshot to embed in a backend: cli agent envelope.
-    ///
-    /// The engine keeps this as untyped JSON so orbit-core can source task data
-    /// without leaking store or task-query details into orbit-engine.
-    fn task_context_for_agent_input(&self, _input: &Value) -> Result<Option<Value>, DispatchError> {
-        Ok(None)
-    }
-
-    /// Return project-learning reminders relevant to the task represented by
-    /// `input`. Implementors that do not own task storage can ignore this; the
-    /// engine preserves the original prompt when the returned set is empty.
-    fn learning_reminders_for_task(
-        &self,
-        _input: &Value,
-        _caps: LearningInjectionCaps,
-    ) -> Result<Vec<LearningReminder>, DispatchError> {
-        Ok(Vec::new())
-    }
-
-    fn persist_session_learning_state(
-        &self,
-        _session_id: &str,
-        _state: &LearningInjectionState,
-    ) -> Result<(), DispatchError> {
-        Ok(())
-    }
-
-    /// Persist a durable checkpoint after a completed top-level job step
-    /// (ORB-10002). `pipeline_snapshot` is the executor's accumulated
-    /// step-output map (step id → raw output) at the moment the step
-    /// finished; `output` is the completing step's own raw output.
-    ///
-    /// Hosts with run persistence (orbit-core) record this into the run's
-    /// `PipelineState` so an interrupted run can be resumed without
-    /// re-executing completed steps. The default is a no-op for hosts
-    /// without run storage (tests, smoke examples). Checkpoint failures are
-    /// non-fatal to the run: the executor logs and continues.
-    fn checkpoint_step(
-        &self,
-        _run_id: &str,
-        _step_index: u32,
-        _step_id: &str,
-        _output: &Value,
-        _pipeline_snapshot: &Value,
-    ) -> Result<(), DispatchError> {
-        Ok(())
-    }
-
-    fn tool_context_for_activity(
-        &self,
-        run_id: Option<&str>,
-        fs_profile: Option<&str>,
-        fs_audit: Option<Arc<dyn FsAuditLogger>>,
-        proc_allowed_programs: Option<&[String]>,
-    ) -> ToolContext;
-
-    fn persist_invocation_trace(
-        &self,
-        _job_run_id: &str,
-        _activity_id: &str,
-        _provider: &str,
-        _model: Option<&str>,
-        _input: &Value,
-        _trace: &InvocationTrace,
-    ) -> Result<(), DispatchError> {
-        Ok(())
-    }
-
-    /// Resolve the selected crew role from the active workspace's
-    /// `config.toml`.
-    /// Mirrors [`crate::context::EnvironmentHost::agent_role_config`]; the
-    /// engine's job dispatcher receives only `&dyn V2RuntimeHost`, so this
-    /// method is the seam dispatch consults at run time. Default returns
-    /// `None`, which makes the resolver fall through to inline activity
-    /// values (preserving pre-ADR-029 dispatch behaviour for tests and other
-    /// hosts that have no role-config layer).
-    fn agent_role_config(&self, _role: AgentRole) -> Option<AgentRoleConfig> {
-        None
-    }
-
-    fn agent_role_config_for_input(
-        &self,
-        role: AgentRole,
-        _input: &Value,
-    ) -> Option<AgentRoleConfig> {
-        self.agent_role_config(role)
-    }
-
-    /// Resolve a flat crew selected explicitly by the rendered activity
-    /// input. This is separate from role-tag lookup: modern crews have one
-    /// assignment, so an activity carrying `crew` does not need a synthetic
-    /// reviewer/implementer/planner role merely to select that assignment.
-    fn explicit_agent_crew_config_for_input(
-        &self,
-        input: &Value,
-    ) -> Result<Option<AgentRoleConfig>, DispatchError> {
-        if let Some(crew) = input
-            .get("crew")
-            .and_then(Value::as_str)
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-        {
-            return Err(DispatchError::JobValidation(format!(
-                "explicit activity crew '{crew}' cannot be resolved by this runtime host"
-            )));
-        }
-        Ok(None)
-    }
+    /// Whether the subprocess runs in an Orbit-owned disposable worktree.
+    /// Linux may snapshot-expand non-subtree deny globs only in this case.
+    pub managed_worktree: bool,
 }
 
 /// Input bundle for a single v2 activity dispatch.
@@ -244,20 +48,10 @@ pub struct V2DispatchInput<'a> {
     pub input: Value,
     pub audit: Arc<V2AuditWriter>,
     pub run_id: &'a str,
-    /// Optional caller-selected provider/model for this invocation. This is
-    /// applied to a cloned agent-loop spec, so catalog assets remain immutable
-    /// and concurrent dispatches can select different duel roles safely.
-    pub agent_override: Option<V2AgentDispatchOverride<'a>>,
     /// Runtime host for agent_loop + deterministic paths. A `None` host is only
     /// valid for callers that never dispatch a host-backed activity; host-backed
     /// specs return `DispatchError::HostRequired` when it is absent.
-    pub host: Option<&'a dyn V2RuntimeHost>,
-}
-
-#[derive(Debug, Clone, Copy)]
-pub struct V2AgentDispatchOverride<'a> {
-    pub provider: &'a str,
-    pub model: Option<&'a str>,
+    pub host: Option<&'a dyn RuntimeHost>,
 }
 
 /// Outcome of a v2 dispatch attempt.
@@ -299,20 +93,6 @@ pub enum DispatchError {
 
     #[error("agent_loop run failed: {0}")]
     AgentLoopFailed(String),
-
-    /// §3.1 no-silent-fallback: `backend: http` requested a provider whose
-    /// HTTP transport is not wired. Must surface as a structured error rather
-    /// than silently dispatching to CLI.
-    #[error(
-        "provider `{provider}` has no HTTP transport wired at this phase — set backend: cli or choose a provider whose HTTP path is implemented"
-    )]
-    UnwiredHttpTransport { provider: String },
-
-    /// `backend: auto` was observed past the load-time resolver — every
-    /// dispatch site must see a concrete backend. Indicates a caller that
-    /// forgot to run `resolve_*_backends` before dispatching.
-    #[error("backend `auto` leaked past load-time resolution (step id `{step_id}`)")]
-    UnresolvedAutoBackend { step_id: String },
 
     /// CLI subprocess invocation failed at the host layer (e.g. failed to
     /// spawn, or provider key unknown). Wraps the host's error text verbatim.
@@ -381,8 +161,6 @@ impl DispatchError {
                 | DispatchError::JobValidation(_)
                 | DispatchError::RetryConfigInvalid { .. }
                 | DispatchError::HostRequired(_)
-                | DispatchError::UnwiredHttpTransport { .. }
-                | DispatchError::UnresolvedAutoBackend { .. }
                 | DispatchError::CliInvocationPermanent(_)
                 | DispatchError::WorktreeIntegrity { .. }
         )
@@ -440,8 +218,7 @@ fn dispatch_v2_activity_inner(
     } else {
         input.input.clone()
     };
-    let overridden_spec = overridden_agent_spec(input.spec, input.agent_override)?;
-    let spec = overridden_spec.as_ref().unwrap_or(input.spec);
+    let spec = input.spec;
     let activity_type = match spec {
         ActivityV2Spec::AgentLoop(_) => "agent_loop",
         ActivityV2Spec::Deterministic(_) => "deterministic",
@@ -500,29 +277,6 @@ fn dispatch_v2_activity_inner(
     result
 }
 
-pub(crate) fn overridden_agent_spec(
-    spec: &ActivityV2Spec,
-    agent_override: Option<V2AgentDispatchOverride<'_>>,
-) -> Result<Option<ActivityV2Spec>, DispatchError> {
-    let Some(agent_override) = agent_override else {
-        return Ok(None);
-    };
-    let ActivityV2Spec::AgentLoop(agent_spec) = spec else {
-        return Err(DispatchError::JobValidation(
-            "agent override requires an agent_loop activity".to_string(),
-        ));
-    };
-    let provider = Provider::parse(agent_override.provider)
-        .map_err(|error| DispatchError::JobValidation(error.to_string()))?;
-    let mut overridden = agent_spec.clone();
-    overridden.provider = provider;
-    overridden.model = agent_override.model.map(ToOwned::to_owned);
-    overridden.instruction = overridden
-        .instruction
-        .replace("{{agent_family}}", provider.as_str());
-    Ok(Some(ActivityV2Spec::AgentLoop(overridden)))
-}
-
 fn inject_run_id(input: &Value, run_id: &str) -> Value {
     let Value::Object(map) = input else {
         return input.clone();
@@ -537,20 +291,49 @@ fn inject_run_id(input: &Value, run_id: &str) -> Value {
 }
 
 fn run_deterministic(
-    host: &dyn V2RuntimeHost,
+    host: &dyn RuntimeHost,
     run_id: &str,
     spec: &DeterministicSpec,
     fs_profile: Option<&str>,
     audit: Arc<V2AuditWriter>,
     input: &Value,
 ) -> Result<DispatchOutcome, DispatchError> {
-    let tool_context = host.tool_context_for_activity(
+    let mut tool_context = host.tool_context_for_activity(
         Some(run_id),
         fs_profile,
         Some(v2_fs_audit_logger(audit.clone())),
         None,
     );
-    let output = host.run_deterministic(&spec.action, &spec.config, input, tool_context)?;
+    tool_context
+        .session_context
+        .effective_capabilities
+        .insert(McpCapability::Runner);
+    let output = match DeterministicAction::parse(&spec.action) {
+        Some(DeterministicAction::Engine(action)) => {
+            let state_context = crate::executor::automation::StateExecutionContext {
+                run_id: input
+                    .get("run_id")
+                    .and_then(Value::as_str)
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                    .map(ToOwned::to_owned),
+                ..crate::executor::automation::StateExecutionContext::default()
+            };
+            crate::executor::automation::execute_engine_action(
+                host,
+                action,
+                input,
+                Some(&state_context),
+            )
+            .map_err(|error| DispatchError::DeterministicActionFailed {
+                action: spec.action.clone(),
+                message: error.to_string(),
+            })?
+        }
+        Some(DeterministicAction::Core(_)) | None => {
+            host.run_deterministic(&spec.action, &spec.config, input, tool_context)?
+        }
+    };
     Ok(DispatchOutcome {
         success: true,
         output,
@@ -560,7 +343,7 @@ fn run_deterministic(
 }
 
 fn run_agent_loop_activity(
-    host: &dyn V2RuntimeHost,
+    host: &dyn RuntimeHost,
     activity_name: &str,
     spec: &AgentLoopSpec,
     run_id: &str,
@@ -568,21 +351,8 @@ fn run_agent_loop_activity(
     input: &Value,
     fs_profile: Option<&str>,
 ) -> Result<DispatchOutcome, DispatchError> {
-    match spec.backend {
-        Backend::Auto => Err(DispatchError::UnresolvedAutoBackend {
-            step_id: activity_name.to_string(),
-        }),
-        Backend::Http => {
-            if !spec.provider.has_http_transport() {
-                return Err(DispatchError::UnwiredHttpTransport {
-                    provider: spec.provider.as_str().to_string(),
-                });
-            }
-            run_agent_loop_via_driver(host, spec, run_id, audit, input, fs_profile)
-        }
-        Backend::Cli => run_cli_backend(host, spec, run_id, audit, input, fs_profile)
-            .map(|outcome| label_failure_with_step(activity_name, outcome)),
-    }
+    run_cli_backend(host, spec, run_id, audit, input, fs_profile)
+        .map(|outcome| label_failure_with_step(activity_name, outcome))
 }
 
 /// [ORB-10449] Prefix a failing CLI agent-loop message with the step that
@@ -602,124 +372,6 @@ fn label_failure_with_step(activity_name: &str, mut outcome: DispatchOutcome) ->
         outcome.message = Some(format!("step `{activity_name}`: {message}"));
     }
     outcome
-}
-
-fn run_agent_loop_via_driver(
-    host: &dyn V2RuntimeHost,
-    spec: &AgentLoopSpec,
-    run_id: &str,
-    audit: Arc<V2AuditWriter>,
-    input: &Value,
-    fs_profile: Option<&str>,
-) -> Result<DispatchOutcome, DispatchError> {
-    // Sourcing only: orbit-core pulls the provider credential from wherever
-    // makes sense (env var, config, secrets manager). We treat a sourcing
-    // failure as `None` so a `replay`-enabled `drive_agent_loop` can still
-    // honor ORBIT_V2_REPLAY without credentials. Default builds ignore replay
-    // variables; when the driver needs a key and none is present, it errors
-    // structurally.
-    let api_key = host.api_key_for("anthropic").ok();
-    let started = Instant::now();
-    let outcome = drive_agent_loop(
-        spec,
-        api_key.as_deref(),
-        run_id,
-        audit,
-        input,
-        host,
-        fs_profile,
-    )?;
-    let trace = loop_outcome_trace(&outcome, started.elapsed().as_millis() as u64);
-    let mut metadata = serde_json::Map::new();
-    metadata.insert(
-        "final_message".to_string(),
-        Value::String(outcome.final_message.clone()),
-    );
-    metadata.insert(
-        "terminate_reason".to_string(),
-        Value::String(format!("{:?}", outcome.terminate_reason)),
-    );
-    metadata.insert(
-        "usage".to_string(),
-        serde_json::json!({
-            "input_tokens": outcome.usage.input_tokens,
-            "output_tokens": outcome.usage.output_tokens,
-        }),
-    );
-    Ok(DispatchOutcome {
-        success: true,
-        output: agent_loop_output_from_final_message(&outcome.final_message, metadata),
-        message: None,
-        invocation: Some(DispatchInvocationTrace {
-            provider: spec.provider.as_str().to_string(),
-            model: spec.model.clone(),
-            trace,
-        }),
-    })
-}
-
-pub(crate) fn loop_outcome_trace(
-    outcome: &orbit_agent::loop_engine::LoopOutcome,
-    duration_ms: u64,
-) -> InvocationTrace {
-    let mut seq = 0;
-    let tool_calls = outcome
-        .trace
-        .iter()
-        .flat_map(|iteration| iteration.tool_calls.iter())
-        .map(|tool_name| {
-            seq += 1;
-            ToolCallTrace {
-                seq,
-                tool_name: tool_name.clone(),
-                result_bytes: 0,
-                result_payload: None,
-            }
-        })
-        .collect();
-
-    InvocationTrace {
-        usage: TokenUsage {
-            input: outcome.usage.input_tokens,
-            cache_read: outcome.usage.cache_read_input_tokens,
-            cache_create: outcome.usage.cache_creation_input_tokens,
-            // The agent loop reports a single cache-creation counter; the 1h/5m
-            // TTL split isn't surfaced here yet, so all cache-creation tokens
-            // are treated as the standard (5m) rate (ORB-10338 follow-up).
-            cache_create_1h: 0,
-            output: outcome.usage.output_tokens,
-        },
-        tool_calls,
-        duration_ms,
-        provider_model: None,
-        provider_cost_usd: None,
-    }
-}
-
-pub(crate) fn agent_loop_output_from_final_message(
-    final_message: &str,
-    metadata: serde_json::Map<String, Value>,
-) -> Value {
-    let mut output = parse_structured_final_message(final_message).unwrap_or_default();
-    for (key, value) in metadata {
-        output.entry(key).or_insert(value);
-    }
-    Value::Object(output)
-}
-
-fn parse_structured_final_message(final_message: &str) -> Option<serde_json::Map<String, Value>> {
-    let parsed: Value = serde_json::from_str(final_message.trim()).ok()?;
-    match parsed {
-        Value::Object(map) => {
-            if (map.contains_key("schemaVersion") || map.contains_key("status"))
-                && let Some(Value::Object(result)) = map.get("result")
-            {
-                return Some(result.clone());
-            }
-            Some(map)
-        }
-        _ => None,
-    }
 }
 
 struct V2FsAuditLogger {

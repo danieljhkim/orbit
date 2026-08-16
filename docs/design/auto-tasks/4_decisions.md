@@ -1,103 +1,100 @@
 ---
 title: Auto-tasks — Decisions
 owner: claude
-last_updated: 2026-07-26
+last_updated: 2026-08-11
 last_validated: 2026-07-27
 status: Accepted
 feature: auto-tasks
 doc_role: decisions
 type: design
-summary: ADR log for the auto-task primitive.
+summary: Decision log for the auto-task primitive.
 tags: [auto-tasks]
 paths: ["crates/orbit-core/src/auto_tasks/**"]
 related_features: [auto-tasks]
-related_artifacts: [ADR-0218, ADR-0219, ADR-0286]
+related_artifacts: []
 ---
 
 # Auto-tasks — Decisions
 
-ADR log for auto-tasks. Entries are append-only and ordered by ascending global
-ID. The store (`orbit.adr.show ADR-0218`) owns ID, status, owner, and links;
-this file is the long-form narrative keyed on that same ID.
+This document preserves the feature's non-obvious decisions and their reasoning.
 
-## ADR-0218 — Auto-task primitive: file-backed recurring task templates + one generic scheduler routine
+---
 
-**Status:** Accepted · 2026-07 · [ORB-10149]
+## Auto-task primitive: file-backed recurring task templates + one generic scheduler routine
 
-**Context.** Every periodic need in orbit was bespoke code, so the marginal cost
-of a new recurring chore was a code change, review, and release.
+**Recorded:** 2026-07-12 02:58:04.684957Z · [ORB-10149], [ORB-10148]
+**Paths:** `crates/orbit-core/src/auto_tasks/**`
 
-**Decision.** Introduce auto-tasks: a git-versioned YAML record
-(`.orbit/auto_tasks/<name>.yaml`, modeled on the file-backed routine convention,
-not the SQLite-indexed learning/ADR one) with a cron/interval `schedule`, an
-`enabled` toggle, a task `template`, and a `dedupe` policy. One generic
-deterministic activity (`run_auto_task_scheduler`, wrapped in a job, fired by a
-seeded routine) mints tasks from the due definitions — the only scheduler
-surface. Per-definition last-fired state is host-local under `.orbit/state/`.
-Catch-up always collapses; `skip_if_open` dedupe keys on the `auto-task:<name>`
-provenance tag. Provider-neutral per ADR-0217 — no turn knobs in the schema.
-Full CRUD via CLI and MCP; disabling is a toggle, not a delete.
+### Context
 
-**Consequences.**
+Every periodic need in Orbit was previously bespoke code, and each future recurring chore meant another hardcoded routine. The marginal cost of a periodic chore was therefore a code change, review, and release.
 
-- Periodic work becomes data: a new chore is a definition, not orbit code.
-  qa-sweep V1 (ORB-10148) is the first definition.
-- Routine fires are observable on `/api/routines` for free, and the minutely
-  sweep stays cheap because each definition's cursor + catch-up collapse make
-  the pass idempotent.
-- Definitions are workspace-scoped (the scheduler processes the firing
-  workspace's `auto_tasks/`), and the host-local cursor keeps the git-versioned
-  definition churn-free.
-- Cost: a second file-backed record convention now exists alongside the
-  SQLite-indexed one; the two must be kept mentally distinct, and auto-task
-  definitions are not full-text searchable via the learning/ADR index.
+### Decision
 
-## ADR-0219 — No-diff-expected tasks bypass repository change gates
+Introduce auto-tasks as git-versioned YAML definitions under `.orbit/auto_tasks/<name>.yaml`, with cron/interval schedules, host-local cursors, task templates, dedupe, and provenance. One generic deterministic scheduler activity wrapped in a job and fired by the seeded routine processes every definition. Definitions parse fail-closed, catch-up collapses, and CRUD is available through CLI and MCP. Templates remain provider-neutral per [Run budgets are provider-neutral: wall-clock timeouts, never turn caps](#run-budgets-are-provider-neutral-wall-clock-timeouts-never-turn-caps).
 
-**Status:** Accepted · 2026-07 · [ORB-10148]
+### Consequences
 
-**Context.** QA validation creates durable findings through Orbit tasks and may
-correctly leave the repository unchanged. The normal empty-diff gate must still
-fail closed for implementation tasks.
+- Periodic work becomes data; QA sweep is the first checked-in definition.
+- Definitions are workspace-scoped and scheduler fires remain observable through routine health.
+- Host-local cursor state avoids churn in git-versioned definitions.
+- Cost: a second file-backed record convention exists alongside the SQLite-indexed knowledge records, and auto-task definitions are not full-text indexed.
 
-**Decision.** Make `no-diff-expected` a first-class task tag. Commit and PR
-handoff skip their empty-stage and zero-commits-ahead failures only for an
-explicitly tagged task (or a bundle in which every task is tagged). Such tasks
-still require a meaningful execution summary and follow the normal lifecycle;
-Orbit creates neither an empty commit nor an empty PR.
+## No-diff-expected tasks bypass repository change gates
 
-**Consequences.**
+**Recorded:** 2026-07-12 03:33:35.554901Z · [ORB-10148]
+**Paths:** `crates/orbit-engine/src/executor/automation/vcs/**`, `crates/orbit-common/src/types/task.rs`, `.orbit/auto_tasks/**`
 
-- Side-effect-only validation tasks flow through normal orchestrator dispatch.
+### Context
+
+Some normal workflow tasks produce durable side effects through Orbit rather than repository changes. QA validation files follow-up tasks and may correctly leave the worktree unchanged; treating every empty diff as an implementation failure strands valid runs, while weakening the gate globally would hide broken implementation tasks.
+
+### Decision
+
+`no-diff-expected` is a first-class task tag. The commit and PR handoff gates bypass empty-stage and zero-commits-ahead failures only when the relevant task (or every task in a PR bundle) carries the tag; the run still requires a meaningful execution summary and advances through the normal lifecycle without creating an empty commit or PR.
+
+### Consequences
+
+- Side-effect-only validation tasks can complete through normal orchestrator dispatch.
 - Ordinary implementation tasks retain fail-closed empty-diff checks.
-- The QA auto-task definition carries the exemption visibly in its template.
-- Cost: a mistakenly tagged task can reach review without repository changes,
-  so the tag is a privileged workflow exemption.
+- The checked-in QA auto-task template carries the exemption explicitly, keeping the exception visible in data.
+- Cost: a mistagged task can reach review without repository changes, so definition authors and reviewers must treat this tag as a privileged workflow exemption.
 
-## ADR-0286 — Route tracked auto-task definitions through the active worktree
+## Route tracked auto-task definitions through the active worktree
 
-**Status:** Proposed · 2026-07 · [ORB-10472]
+**Recorded:** 2026-08-08 19:11:08.591438Z · [ORB-10472]
+**Paths:** `crates/orbit-core/src/auto_tasks/**`, `crates/orbit-engine/src/activity_job/workspace.rs`
 
-**Context.** Auto-task definition CRUD used the shared Orbit root even when a
-workflow executor was assigned a linked worktree. That let a refresh expose
-tracked dirt in the registered primary checkout while unrelated implementation
-guards were sampling it. The alternatives were to tolerate `auto_tasks` drift
-in the integrity guard or to make tracked definition mutation worktree-local.
+### Context
+Auto-task definition CRUD used the shared Orbit root even when a workflow executor was assigned a linked worktree. That let a refresh expose tracked dirt in the registered primary checkout while unrelated implementation guards were sampling it. The alternatives were to tolerate auto_tasks drift in the integrity guard or to make tracked definition mutation worktree-local.
 
-**Decision.** Read and replace tracked auto-task definitions through the runtime
-local root. Keep scheduler cursors and coordination state under the shared root,
-and replace each definition atomically so a failed refresh cannot expose partial
-bytes.
+### Decision
+Read and replace tracked auto-task definitions through the runtime local root. Keep scheduler cursors and coordination state under the shared root, and replace each definition atomically so a failed refresh cannot expose partial bytes.
 
-**Consequences.**
+### Consequences
+- Linked-worktree refreshes become ordinary branch changes and concurrent implementation guards continue to observe an unchanged primary checkout.
+- Primary-checkout operator commands retain existing behavior because local and shared roots are identical there.
+- Cost: callers in linked worktrees see that checkout version of definition YAML while scheduler cursor state remains shared, so definition and cursor roots must remain deliberately separate.
 
-- Linked-worktree refreshes become ordinary branch changes and concurrent
-  implementation guards continue to observe an unchanged primary checkout.
-- Primary-checkout operator commands retain existing behavior because local and
-  shared roots are identical there.
-- Cost: callers in linked worktrees see that checkout version of definition
-  YAML while scheduler cursor state remains shared, so definition and cursor
-  roots must remain deliberately separate.
+## Run budgets are provider-neutral: wall-clock timeouts, never turn caps
+
+**Recorded:** 2026-07-12 03:33:34.766432Z · [ORB-10146], [ORB-10148]
+**Paths:** `crates/orbit-core/assets/**`, `crates/orbit-common/src/types/auto_task.rs`, `.orbit/auto_tasks/**`
+
+### Context
+
+Orbit dispatches agent runs across provider families through named crews, and any crew can be assigned to any lane. Turn caps are not portable: provider CLIs expose different controls and semantics. Real alternatives were to retain optional provider-specific turn budgets, or forbid them as cross-provider policy and use neutral limits.
+
+### Decision
+
+All run budgets in Orbit config, auto-task definitions, job/activity assets, workflow invoke payloads, and task specs are provider-neutral: wall-clock timeout is the primary bound, with neutral resource caps where needed. Turn caps (`max_turns` or equivalents) do not appear on these surfaces. Provider-specific throttles may exist only inside one provider adapter as implementation detail.
+
+### Consequences
+
+- Swapping a crew never changes configured budget semantics.
+- Config and job assets stay portable across crews without provider conditionals in dispatch paths.
+- Existing turn-based policy knobs must be retired or demoted to adapter-internal defaults.
+- Cost: Orbit gives up fine-grained turn limits exposed by individual providers; a looping run is bounded by neutral time/resource limits instead.
 
 ## Task References
 

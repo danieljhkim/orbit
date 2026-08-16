@@ -1,7 +1,8 @@
 use clap::Args;
-use orbit_core::{OrbitError, OrbitRuntime};
+use orbit_core::OrbitRuntime;
+use serde_json::json;
 
-use crate::command::Execute;
+use crate::command::{Block, CommandOut, Execute, Payload};
 
 use super::support::tool_status;
 
@@ -12,41 +13,52 @@ pub struct ToolShowArgs {
 }
 
 impl Execute for ToolShowArgs {
-    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+    fn execute(self, runtime: &OrbitRuntime) -> CommandOut {
         let tool = runtime.show_tool(&self.name)?;
 
-        use crate::output::color::{bold, job_state_color};
-        println!("{} {}", bold("Name:"), tool.name);
-        println!("{} {}", bold("Description:"), tool.description);
-        println!(
-            "{} {}",
+        use crate::output::color::{Domain, bold, text};
+        let doc = json!({
+            "name": tool.name,
+            "description": tool.description,
+            "enabled": tool.enabled,
+            "active": tool.active,
+            "status": tool_status(&tool),
+            "builtin": tool.builtin,
+            "parameters": &tool.parameters,
+        });
+
+        let mut header = format!(
+            "{} {}\n{} {}\n{} {}\n{} {}",
+            bold("Name:"),
+            tool.name,
+            bold("Description:"),
+            tool.description,
             bold("Builtin:"),
-            if tool.builtin { "yes" } else { "no" }
-        );
-        println!(
-            "{} {}",
+            if tool.builtin { "yes" } else { "no" },
             bold("Status:"),
-            job_state_color(tool_status(&tool))
+            text(tool_status(&tool), Domain::JobState)
         );
 
         if tool.parameters.is_empty() {
-            println!("{} (none)", bold("Parameters:"));
-        } else {
-            println!("{}", bold("Parameters:"));
-            let mut table =
-                crate::output::table::build_table(&["NAME", "TYPE", "REQUIRED", "DESCRIPTION"]);
-            for p in &tool.parameters {
-                let req = if p.required { "required" } else { "optional" };
-                table.add_row(vec![
-                    p.name.clone(),
-                    p.param_type.clone(),
-                    req.to_string(),
-                    p.description.clone(),
-                ]);
-            }
-            println!("{table}");
+            header.push_str(&format!("\n{} (none)", bold("Parameters:")));
+            return Ok(Payload::detail(doc, header).into());
         }
 
-        Ok(())
+        header.push_str(&format!("\n{}", bold("Parameters:")));
+        // A parameter schema, not a result set: keep every column even when
+        // every parameter happens to share a type or be required.
+        let mut table =
+            crate::output::table::build_table(&["NAME", "TYPE", "REQUIRED", "DESCRIPTION"])
+                .keep_all_columns();
+        for p in &tool.parameters {
+            let req = if p.required { "required" } else { "optional" };
+            table.add_row(vec![
+                p.name.clone(),
+                p.param_type.clone(),
+                req.to_string(),
+                p.description.clone(),
+            ]);
+        }
+        Ok(Payload::blocks(doc, vec![Block::text(header), Block::table(table)]).into())
     }
 }

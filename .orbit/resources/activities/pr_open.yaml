@@ -29,6 +29,19 @@ spec:
         type: string
       base_sha:
         type: string
+      base_sync:
+        type: string
+        enum: [remote, local]
+      landing_branch:
+        type: string
+        description: >
+          The branch this work must ultimately land on. When it differs from
+          `base`, the base is a stacked intermediate branch and pr_open refuses
+          delivery once that branch has itself landed. Leave empty
+          for ordinary delivery, where the base is the landing branch.
+      base_obsolescence:
+        type: string
+        enum: [enforce, ignore]
       head:
         type: string
       workspace_path:

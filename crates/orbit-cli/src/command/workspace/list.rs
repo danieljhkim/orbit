@@ -1,39 +1,87 @@
 use clap::Args;
 use orbit_common::types::WorkspaceRegistry;
-use orbit_core::{OrbitError, OrbitRuntime};
-use orbit_remote::workspace_registry;
+use orbit_core::OrbitRuntime;
+use orbit_registry::workspace_registry;
+use serde_json::{Value, json};
 
-use crate::command::Execute;
+use crate::command::{CommandOut, Execute, Payload};
 
 #[derive(Args)]
-pub struct WorkspaceListArgs {}
+pub struct WorkspaceListArgs {
+    /// Include local replica checkouts, marked with their declared owner.
+    #[arg(long)]
+    pub all: bool,
+}
 
 impl Execute for WorkspaceListArgs {
-    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+    fn execute(self, runtime: &OrbitRuntime) -> CommandOut {
         let global_root = runtime.global_root();
         let registry_path = workspace_registry::registry_path_for(&global_root);
         let mut registry = workspace_registry::load_registry_from(&registry_path)?;
         workspace_registry::validate_workspaces(&mut registry);
 
-        if registry.workspaces.is_empty() {
-            print!("{}", format_workspace_list(&registry));
-            return Ok(());
+        if !registry.workspaces.is_empty() {
+            // Save back if staleness changed any status
+            workspace_registry::save_registry_to(&registry, &registry_path)?;
         }
-
-        // Save back if staleness changed any status
-        workspace_registry::save_registry_to(&registry, &registry_path)?;
-        print!("{}", format_workspace_list(&registry));
-        Ok(())
+        Ok(Payload::detail(
+            workspace_list_json(&registry, self.all),
+            format_workspace_list(&registry, self.all),
+        )
+        .into())
     }
 }
 
-pub(super) fn format_workspace_list(registry: &WorkspaceRegistry) -> String {
-    if registry.workspaces.is_empty() {
+/// `workspace list` had no machine-readable form either; one record per
+/// registered workspace, carrying the same fields the text columns show
+/// (ORB-10586).
+pub(super) fn workspace_list_json(registry: &WorkspaceRegistry, include_replicas: bool) -> Value {
+    Value::Array(
+        registry
+            .workspaces
+            .iter()
+            .filter(|workspace| {
+                include_replicas
+                    || workspace_registry::find_checkout(registry, &workspace.id)
+                        .is_none_or(|checkout| checkout.role != Some(orbit_common::types::WorkspaceCheckoutRole::Replica))
+            })
+            .map(|workspace| {
+                let checkout = workspace_registry::find_checkout(registry, &workspace.id);
+                json!({
+                    "id": workspace.id,
+                    "name": workspace.name,
+                    "status": workspace.status.to_string(),
+                    "ship_mode": orbit_core::resolved_ship_mode(workspace).as_input_value(),
+                    "owner_machine_id": workspace.owner_machine_id,
+                    "role": checkout.and_then(|checkout| checkout.role.map(|role| role.to_string())),
+                    "repo_root": checkout.map(|checkout| checkout.repo_root.to_string_lossy()),
+                })
+            })
+            .collect(),
+    )
+}
+
+pub(super) fn format_workspace_list(
+    registry: &WorkspaceRegistry,
+    include_replicas: bool,
+) -> String {
+    let workspaces: Vec<_> = registry
+        .workspaces
+        .iter()
+        .filter(|workspace| {
+            include_replicas
+                || workspace_registry::find_checkout(registry, &workspace.id).is_none_or(
+                    |checkout| {
+                        checkout.role != Some(orbit_common::types::WorkspaceCheckoutRole::Replica)
+                    },
+                )
+        })
+        .collect();
+    if workspaces.is_empty() {
         return "no workspaces registered\n".to_string();
     }
 
-    let id_width = registry
-        .workspaces
+    let id_width = workspaces
         .iter()
         .map(|workspace| workspace.id.chars().count())
         .max()
@@ -49,7 +97,7 @@ pub(super) fn format_workspace_list(registry: &WorkspaceRegistry) -> String {
         "ROLE",
         id_width = id_width
     );
-    for workspace in &registry.workspaces {
+    for workspace in workspaces {
         let checkout = workspace_registry::find_checkout(registry, &workspace.id);
         let root = checkout
             .map(|checkout| checkout.repo_root.display().to_string())

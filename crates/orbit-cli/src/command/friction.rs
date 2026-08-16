@@ -13,11 +13,11 @@
 use clap::{ArgMatches, Args, Command, FromArgMatches, Subcommand};
 use orbit_common::friction::{FRICTION_OPERATIONS, FrictionVerb, friction_operation};
 use orbit_common::operation::CliRender;
-use orbit_core::{OrbitError, OrbitRuntime};
+use orbit_core::OrbitRuntime;
 use serde_json::Value;
 
 use super::operation_args::{Invocation, augment_subcommands, invocation_from_matches};
-use crate::command::Execute;
+use crate::command::{CommandOut, Execute, Payload};
 
 /// One parsed friction verb invocation.
 pub type FrictionInvocation = Invocation<FrictionVerb>;
@@ -55,32 +55,44 @@ impl FromArgMatches for FrictionInvocation {
 }
 
 impl Execute for FrictionCommand {
-    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+    fn execute(self, runtime: &OrbitRuntime) -> CommandOut {
         let FrictionInvocation { spec, input, json } = self.command;
+        // `--json` no longer picks a branch here: it resolves the sink's mode
+        // in `main`, and the renderer projects whichever payload this builds.
+        // The flag stays declared and accepted [ADR-0306].
+        let _ = json;
         let value = runtime.run_tool(spec.tool_name, input)?;
-        render(&value, spec.cli_render, json)
+        render(&value, spec.cli_render)
     }
 }
 
-/// Render a friction response, honoring the spec's declared default rendering.
-fn render(value: &Value, kind: CliRender, json: bool) -> Result<(), OrbitError> {
+/// Build a friction response's payload, per the spec's declared rendering.
+fn render(value: &Value, kind: CliRender) -> CommandOut {
     match kind {
-        CliRender::Record if !json => print_record(value),
-        CliRender::RecordTable if !json => print_records_table(value),
-        CliRender::TagList if !json => print_tags(value),
-        // `AlwaysJson` responses have no useful flat rendering, and `--json`
-        // asks for this branch explicitly.
-        _ => crate::output::json::print_pretty(value),
+        CliRender::Record => record_payload(value),
+        CliRender::RecordTable => records_table_payload(value),
+        CliRender::TagList => tags_payload(value),
+        // `AlwaysJson` responses have no useful flat rendering.
+        _ => Ok(Payload::document(value.clone()).into()),
     }
 }
 
-fn print_records_table(value: &Value) -> Result<(), OrbitError> {
+fn records_table_payload(value: &Value) -> CommandOut {
     let Some(records) = value.as_array() else {
-        return crate::output::json::print_pretty(value);
+        return Ok(Payload::document(value.clone()).into());
     };
 
-    let mut table =
-        crate::output::table::build_table(&["ID", "STATUS", "MODEL", "TAGS", "TASK", "TITLE"]);
+    use crate::output::table::{Column, Table};
+    // `orbit friction show <id>` prints a record in full.
+    let mut table = Table::new(vec![
+        Column::new("ID").fixed(),
+        Column::new("STATUS").fixed(),
+        Column::new("MODEL").fixed(),
+        Column::new("TAGS"),
+        Column::new("TASK").fixed(),
+        Column::new("TITLE"),
+    ])
+    .empty_message("no friction records matching the given filters");
     for record in records {
         table.add_row(vec![
             value_string(record, "id"),
@@ -91,44 +103,49 @@ fn print_records_table(value: &Value) -> Result<(), OrbitError> {
             value_string(record, "title"),
         ]);
     }
-    println!("{table}");
-    Ok(())
+    Ok(Payload::list(records.clone(), table).into())
 }
 
-fn print_record(value: &Value) -> Result<(), OrbitError> {
+fn record_payload(value: &Value) -> CommandOut {
     if !value.is_object() {
-        return crate::output::json::print_pretty(value);
+        return Ok(Payload::document(value.clone()).into());
     }
 
-    println!("ID: {}", value_string(value, "id"));
-    println!("Status: {}", value_string(value, "status"));
-    println!("Model: {}", value_string(value, "model"));
+    let mut lines = vec![
+        format!("ID: {}", value_string(value, "id")),
+        format!("Status: {}", value_string(value, "status")),
+        format!("Model: {}", value_string(value, "model")),
+    ];
     let tags = value_string_list(value, "tags");
     if !tags.is_empty() {
-        println!("Tags: {tags}");
+        lines.push(format!("Tags: {tags}"));
     }
     let task = value_string(value, "during_task");
     if !task.is_empty() {
-        println!("Task: {task}");
+        lines.push(format!("Task: {task}"));
     }
+    // ADR-0345: `path` is the legacy evidence file an imported record came
+    // from. Records written after the SQLite cutover carry `null` and render
+    // no row rather than a location nothing could open.
     let path = value_string(value, "path");
     if !path.is_empty() {
-        println!("Path: {path}");
+        lines.push(format!("Legacy file: {path}"));
     }
     let body = value_string(value, "body");
     if !body.is_empty() {
-        println!("\n{body}");
+        lines.push(format!("\n{body}"));
     }
-    Ok(())
+    Ok(Payload::detail(value.clone(), lines.join("\n")).into())
 }
 
-fn print_tags(value: &Value) -> Result<(), OrbitError> {
+fn tags_payload(value: &Value) -> CommandOut {
     let Some(tags) = value.as_array() else {
-        return crate::output::json::print_pretty(value);
+        return Ok(Payload::document(value.clone()).into());
     };
-    for tag in tags {
-        match tag {
-            Value::String(name) => println!("{name}"),
+    let lines = tags
+        .iter()
+        .map(|tag| match tag {
+            Value::String(name) => name.clone(),
             Value::Object(object) => {
                 let name = object
                     .get("name")
@@ -139,15 +156,15 @@ fn print_tags(value: &Value) -> Result<(), OrbitError> {
                     .and_then(Value::as_str)
                     .unwrap_or_default();
                 if description.is_empty() {
-                    println!("{name}");
+                    name.to_string()
                 } else {
-                    println!("{name}\t{description}");
+                    format!("{name}\t{description}")
                 }
             }
-            _ => println!("{tag}"),
-        }
-    }
-    Ok(())
+            other => other.to_string(),
+        })
+        .collect::<Vec<_>>();
+    Ok(Payload::detail(value.clone(), lines.join("\n")).into())
 }
 
 fn value_string(value: &Value, key: &str) -> String {

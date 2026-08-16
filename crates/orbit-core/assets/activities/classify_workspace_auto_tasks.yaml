@@ -1,0 +1,52 @@
+schemaVersion: 2
+kind: Activity
+metadata:
+  name: classify_workspace_auto_tasks
+spec:
+  type: deterministic
+  description: >
+    Materialize the admissible work for one workspace drain iteration. Returns
+    the eligible loose backlog leaves in `list_backlog` priority/age order, plus
+    at most one backlog epic root. The two are independent answers, not a
+    choice: an `in-progress` epic root already reserves the union of its
+    descendants' `context_files`, so `list_backlog_tasks` excludes exactly the
+    leaves that overlap it and conflict-free chores keep shipping alongside it.
+    An epic root is offered only when no `epic_pipeline` run is pending or
+    running, because that job admits one active run and a second dispatch would
+    queue rather than execute; `active_epic_run_id` names the live run when one
+    exists. Epic children are never selected.
+  input_schema_json:
+    type: object
+    properties:
+      max_tasks:
+        type: number
+        minimum: 1
+        maximum: 500
+  output_schema_json:
+    type: object
+    required: [loose_task_ids, has_leaves, epic_task_id, has_epic, empty]
+    properties:
+      loose_task_ids:
+        type: array
+        items:
+          type: string
+      has_leaves:
+        type: boolean
+      epic_task_id:
+        oneOf:
+          - type: string
+          - type: "null"
+      has_epic:
+        type: boolean
+      empty:
+        type: boolean
+      active_epic_run_id:
+        oneOf:
+          - type: string
+          - type: "null"
+      active_epic_task_id:
+        oneOf:
+          - type: string
+          - type: "null"
+  action: classify_workspace_auto_tasks
+  config: {}

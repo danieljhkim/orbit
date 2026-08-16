@@ -3,16 +3,22 @@ summary: "User Interface — Overview"
 type: design
 title: "User Interface — Overview"
 owner: gemini
-last_updated: 2026-04-30
+last_updated: 2026-08-15
 status: Draft
 feature: user-interface
 doc_role: overview
 tags: ["user-interface"]
+paths: ["crates/orbit-web/**", "crates/orbit-cli/src/command/web.rs"]
 ---
 
 # User Interface — Overview
 
-Orbit UI covers the local dashboard served by `orbit-cli` and the project-facing web surface. It gives operators a dense, legible way to monitor agents, workflows, telemetry, and audit signals.
+Orbit UI covers the dashboard and HTTP API owned by `orbit-web`; `orbit-cli` is the thin
+`orbit web serve` / `connect` command adapter. It gives operators a dense, legible way to
+monitor agents, workflows, telemetry, and audit signals. Terminal output — what `orbit`
+writes to stdout — is a separate surface owned by
+[terminal-interface](../terminal-interface/1_overview.md); the two share operator
+vocabulary and status semantics but no tokens, components, or rendering assumptions.
 
 ## 1. Motivation
 
@@ -21,13 +27,16 @@ Agent runs produce more state changes, logs, and diagnostics than a human can re
 ## 2. Core Concepts
 
 - **Canon Refined and typography:** Layered dark surfaces, fine borders, compact spacing, and muted status colors; `Inter` carries labels and prose while `JetBrains Mono` carries IDs, metrics, timestamps, code, and logs.
-- **Surfaces:** The local dashboard lives in `crates/orbit-dashboard/assets/dashboard/`; static docs and project pages should reuse the same visual grammar without importing runtime-only dashboard assumptions.
+- **Surfaces:** The dashboard assets and `/api/*` handlers live in `crates/orbit-web/`.
+  Static docs and project pages should reuse the same visual grammar without importing
+  runtime-only dashboard assumptions.
 
 ## 3. At a Glance
 
 | Concern | File | Task |
 |---------|------|------|
-| Local dashboard | `crates/orbit-dashboard/assets/dashboard/` | Runtime tabs, tables, tiles, logs, and diagnostics. |
+| Dashboard assets and HTTP API | `crates/orbit-web/assets/dashboard/`, `crates/orbit-web/src/api/` | Runtime tabs, tables, tiles, logs, and diagnostics. |
+| CLI adapter | `crates/orbit-cli/src/command/web.rs` | Delegates `serve` and `connect` to `orbit-web`. |
 | Theme rules | `./specs/theme.md` | Canon Refined tokens and visual invariants. |
 | Current mechanisms | `./2_design.md` | Layout, telemetry, palette, typography, and known limitations. |
 

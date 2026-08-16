@@ -21,13 +21,6 @@ pub fn validate_friction_id(id: &str) -> Result<(), OrbitError> {
     }
 }
 
-pub fn is_valid_learning_id(id: &str) -> bool {
-    let Some(suffix) = id.strip_prefix("L-") else {
-        return false;
-    };
-    suffix.len() >= 4 && suffix.as_bytes().iter().all(u8::is_ascii_digit)
-}
-
 pub fn is_valid_adr_id(id: &str) -> bool {
     let Some(suffix) = id.strip_prefix("ADR-") else {
         return false;

@@ -4,10 +4,9 @@
 //! shapes, tool-allowlist helpers). This module wires those types to the
 //! engine's executor infrastructure and to the loop-engine audit pipeline.
 
-pub mod agent_loop_driver;
-pub mod agent_role;
 pub mod audit_writer;
 pub mod cli_runner;
+pub mod crew;
 pub mod dispatcher;
 pub mod job_executor;
 pub mod sqlite_sink;
@@ -17,15 +16,15 @@ pub mod workspace;
 #[cfg(test)]
 mod tests;
 
-pub use agent_loop_driver::{drive_agent_loop, reset_replay_transport};
 pub use audit_writer::V2AuditWriter;
+pub use crew::{ResolvedAgentSettings, inject_system_crew_input, resolve_crew_settings};
 pub use dispatcher::{
-    DispatchError, DispatchOutcome, ResolvedCliExecutor, ResolvedSandbox, V2AgentDispatchOverride,
-    V2DispatchInput, V2RuntimeHost, dispatch_error_to_orbit, dispatch_v2_activity,
+    DispatchError, DispatchOutcome, ResolvedCliExecutor, ResolvedSandbox, V2DispatchInput,
+    dispatch_error_to_orbit, dispatch_v2_activity,
 };
 pub use job_executor::{
-    JobOutcome, execute_job, execute_job_with_resume, resolve_job_catalog_refs_for_execution,
-    validate_job, validate_job_deterministic_actions,
+    JobOutcome, execute_job_with_resume, resolve_job_catalog_refs_for_execution, validate_job,
+    validate_job_deterministic_actions,
 };
 pub use sqlite_sink::V2SqliteSink;
 pub use tool_enforcement::EnforcedAuditSink;

@@ -5,9 +5,30 @@
 use std::collections::BTreeSet;
 
 use orbit_common::types::RETIRED_TASK_ADD_INPUT_FIELDS;
-use orbit_tools::ToolRegistry;
+use orbit_tools::{ToolContext, ToolRegistry};
+
+const RETIRED_AGENT_TOOL_NAMES: &[&str] = &[
+    "git.push",
+    "github.pr.comment",
+    "github.pr.comment.reply",
+    "github.pr.comments",
+    "github.pr.create",
+    "github.pr.list",
+    "github.pr.merge",
+    "github.pr.review",
+    "github.pr.review.comment",
+    "github.pr.view",
+    "orbit.state.get",
+    "orbit.state.set",
+];
 
 const INACTIVE_TOOL_NAMES: &[&str] = &[
+    // ORB-10798: auto-task definitions are authored by humans; the agent
+    // surface keeps only `list` and `mint`.
+    "orbit.auto_task.add",
+    "orbit.auto_task.show",
+    "orbit.auto_task.toggle",
+    "orbit.auto_task.update",
     "orbit.docs.index",
     "orbit.docs.migrate",
     "orbit.docs.add",
@@ -16,19 +37,19 @@ const INACTIVE_TOOL_NAMES: &[&str] = &[
     "orbit.task.locks",
     "orbit.task.locks.release",
     "orbit.task.locks.reserve",
+    // ORB-10709: workspace claim, a coordination hold like the task locks.
+    "orbit.workspace.claim.acquire",
+    "orbit.workspace.claim.release",
+    "orbit.workspace.claim.show",
     "orbit.semantic.index",
     "orbit.semantic.install",
     "orbit.semantic.stats",
-    "orbit.learning.sync",
-    "orbit.learning.list",
     "orbit.friction.stats",
-    // ORB-00289: admin/destructive ops — CLI path retains them, agent
-    // MCP surface does not expose them.
-    "orbit.adr.list",
+    // Admin/destructive ops — CLI path retains them, agent MCP surface does
+    // not expose them.
     "orbit.semantic.uninstall",
     "orbit.task.delete",
     "orbit.task.lint",
-    "orbit.learning.prune",
 ];
 
 #[test]
@@ -36,13 +57,6 @@ fn unused_tools_are_not_registered_in_public_surface() {
     let names = registered_tool_names();
 
     for removed in [
-        "fs.copy",
-        "fs.create",
-        "fs.ls",
-        "fs.mkdir",
-        "fs.move",
-        "fs.patch",
-        "fs.write",
         "git.commit",
         "git.stage_paths",
         "github.auth.status",
@@ -61,6 +75,30 @@ fn unused_tools_are_not_registered_in_public_surface() {
         );
     }
 
+    // Constructed without dotted literals so a repo-wide grep for the
+    // retired fs family stays clean after ORB-10828 / ORB-10833.
+    for op in [
+        "read", "delete", "copy", "create", "ls", "mkdir", "move", "patch", "write",
+    ] {
+        let removed = format!("fs.{op}");
+        assert!(
+            !names.contains(removed.as_str()),
+            "removed tool still registered: {removed}"
+        );
+    }
+
+    for removed in RETIRED_AGENT_TOOL_NAMES {
+        assert!(
+            !names.contains(*removed),
+            "retired agent tool still registered: {removed}"
+        );
+    }
+
+    assert!(
+        names.iter().all(|name| !name.starts_with("orbit.adr.")),
+        "retired orbit.adr tool family still registered"
+    );
+
     let removed_prefix = "orbit.semantic.";
     for removed in ["related", "search"] {
         let name = format!("{removed_prefix}{removed}");
@@ -75,6 +113,31 @@ fn unused_tools_are_not_registered_in_public_surface() {
         !names.contains(removed_docs_reindex.as_str()),
         "removed docs reindex tool still registered"
     );
+}
+
+#[test]
+fn retired_agent_tools_are_absent_from_every_registry_surface_and_dispatch() {
+    let mut registry = ToolRegistry::new();
+    registry.register_builtins();
+    let all_names = registry
+        .all_schemas()
+        .into_iter()
+        .map(|schema| schema.name)
+        .collect::<BTreeSet<_>>();
+
+    for retired in RETIRED_AGENT_TOOL_NAMES {
+        assert!(
+            !all_names.contains(*retired),
+            "retired agent tool remains inspectable: {retired}"
+        );
+        let error = registry
+            .execute(retired, &ToolContext::default(), serde_json::json!({}))
+            .expect_err("retired agent tool dispatch must fail");
+        assert!(
+            error.to_string().contains(retired),
+            "dispatch error must name retired tool {retired}: {error}"
+        );
+    }
 }
 
 #[test]
@@ -99,21 +162,16 @@ fn workflow_critical_tools_remain_registered() {
     let names = registered_tool_names();
 
     for retained in [
-        "fs.read",
-        "fs.delete",
-        "git.push",
-        "github.pr.comment",
-        "github.pr.comment.reply",
-        "github.pr.comments",
-        "github.pr.create",
-        "github.pr.list",
-        "github.pr.merge",
-        "github.pr.review",
-        "github.pr.review.comment",
-        "github.pr.view",
         "orbit.pipeline.invoke",
         "orbit.pipeline.wait",
         "orbit.search",
+        "orbit.workflow.ship",
+        "orbit.session_log.append",
+        "orbit.session_log.list",
+        "orbit.session_log.resolve",
+        "orbit.workflow.run.show",
+        "orbit.workflow.run.list",
+        "orbit.workflow.run.resume",
         // ORB-00289: `orbit.semantic.uninstall` is inactive on the agent
         // surface; its inactive-classification is covered by
         // `inactive_ops_tools_*` and `INACTIVE_TOOL_NAMES` above.
@@ -197,8 +255,6 @@ fn friction_surface_supports_artifact_triage() {
     for retained in [
         "orbit.friction.add",
         "orbit.friction.list",
-        "orbit.friction.show",
-        "orbit.friction.tags",
         "orbit.friction.update",
     ] {
         assert!(
@@ -214,8 +270,14 @@ fn friction_surface_supports_artifact_triage() {
         );
     }
 
-    // Destructive resolution and aggregate stats remain CLI / dashboard only.
-    for cli_only in ["orbit.friction.resolve", "orbit.friction.stats"] {
+    // Single-record reads `list` already covers, the tag taxonomy, destructive
+    // resolution, and aggregate stats remain CLI / dashboard only [ORB-10798].
+    for cli_only in [
+        "orbit.friction.show",
+        "orbit.friction.tags",
+        "orbit.friction.resolve",
+        "orbit.friction.stats",
+    ] {
         assert!(
             !active.contains(cli_only),
             "{cli_only} must stay hidden from the default registry surface"
@@ -225,6 +287,34 @@ fn friction_surface_supports_artifact_triage() {
             "{cli_only} must remain reachable via `runtime.run_tool`"
         );
     }
+}
+
+#[test]
+fn auto_task_surface_exposes_only_list_and_mint() {
+    let mut registry = ToolRegistry::new();
+    registry.register_builtins();
+    let active: BTreeSet<String> = registry
+        .schemas()
+        .into_iter()
+        .map(|schema| schema.name)
+        .collect();
+
+    let auto_task: BTreeSet<&str> = active
+        .iter()
+        .map(String::as_str)
+        .filter(|name| name.starts_with("orbit.auto_task."))
+        .collect();
+    assert_eq!(
+        auto_task,
+        BTreeSet::from(["orbit.auto_task.list", "orbit.auto_task.mint"])
+    );
+
+    let mint = registry
+        .get_schema("orbit.auto_task.mint")
+        .expect("orbit.auto_task.mint schema");
+    assert_eq!(mint.parameters.len(), 1);
+    assert_eq!(mint.parameters[0].name, "name");
+    assert!(mint.parameters[0].required);
 }
 
 #[test]
@@ -255,6 +345,7 @@ fn task_add_schema_uses_trimmed_authoring_surface() {
             "type",
             "relations",
             "crew",
+            "orchestrator",
             "model",
         ]
     );
@@ -286,6 +377,32 @@ fn task_update_dependency_params_remain_in_agent_tool_schema() {
         schema.parameters.iter().any(|param| param.name == "crew"),
         "orbit.task.update should expose crew"
     );
+    assert!(
+        schema
+            .parameters
+            .iter()
+            .any(|param| param.name == "orchestrator"),
+        "orbit.task.update should expose explicit orchestration attribution"
+    );
+}
+
+#[test]
+fn task_show_schema_distinguishes_execution_crew_from_orchestrator() {
+    let mut registry = ToolRegistry::new();
+    registry.register_builtins();
+
+    let schema = registry
+        .get_schema("orbit.task.show")
+        .expect("orbit.task.show schema");
+    let fields = schema
+        .parameters
+        .iter()
+        .find(|param| param.name == "fields")
+        .expect("task show fields parameter");
+    assert!(fields.description.contains("crew"));
+    assert!(fields.description.contains("orchestrator"));
+    assert!(schema.description.contains("execution"));
+    assert!(schema.description.contains("orchestration attribution"));
 }
 
 #[test]
@@ -339,4 +456,43 @@ fn registered_tool_names() -> BTreeSet<String> {
         .into_iter()
         .map(|schema| schema.name)
         .collect()
+}
+
+#[test]
+fn advertised_tool_text_uses_only_placeholder_artifact_ids() {
+    let mut registry = ToolRegistry::new();
+    registry.register_builtins();
+
+    for schema in registry.all_schemas() {
+        for text in std::iter::once(schema.description.as_str()).chain(
+            schema
+                .parameters
+                .iter()
+                .map(|parameter| parameter.description.as_str()),
+        ) {
+            for prefix in ["ORB-", "ADR-", "L-"] {
+                assert!(
+                    !text.match_indices(prefix).any(|(index, _)| {
+                        text.as_bytes()
+                            .get(index + prefix.len())
+                            .is_some_and(u8::is_ascii_digit)
+                    }),
+                    "tool {} advertises a concrete workspace-local artifact ID: {text}",
+                    schema.name
+                );
+            }
+            assert!(
+                !text.as_bytes().windows(12).any(|window| {
+                    window[0] == b'F'
+                        && window[1..5].iter().all(u8::is_ascii_digit)
+                        && window[5] == b'-'
+                        && window[6..8].iter().all(u8::is_ascii_digit)
+                        && window[8] == b'-'
+                        && window[9..12].iter().all(u8::is_ascii_digit)
+                }),
+                "tool {} advertises a concrete workspace-local friction ID: {text}",
+                schema.name
+            );
+        }
+    }
 }

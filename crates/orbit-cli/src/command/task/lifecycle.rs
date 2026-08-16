@@ -1,7 +1,7 @@
 use clap::Args;
-use orbit_core::{OrbitError, OrbitRuntime};
+use orbit_core::OrbitRuntime;
 
-use crate::command::Execute;
+use crate::command::{CommandOut, CommandOutput, Execute, Payload};
 
 use super::output::task_to_json_for_runtime;
 
@@ -27,7 +27,7 @@ pub struct TaskStartArgs {
 }
 
 impl Execute for TaskStartArgs {
-    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+    fn execute(self, runtime: &OrbitRuntime) -> CommandOut {
         let (agent, model) = super::mutation_identity(self.model);
         let task = runtime.start_task_with_identity_and_crew(
             &self.id,
@@ -38,10 +38,10 @@ impl Execute for TaskStartArgs {
             self.crew,
         )?;
         if self.json {
-            crate::output::json::print_pretty(&task_to_json_for_runtime(runtime, &task)?)
+            Ok(Payload::document(task_to_json_for_runtime(runtime, &task)?).into())
         } else {
             println!("Started task '{}'", task.id);
-            Ok(())
+            Ok(CommandOutput::Silent)
         }
     }
 }
@@ -57,14 +57,14 @@ pub struct TaskArchiveArgs {
 }
 
 impl Execute for TaskArchiveArgs {
-    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+    fn execute(self, runtime: &OrbitRuntime) -> CommandOut {
         runtime.archive_task(&self.id)?;
         if self.json {
             let task = runtime.get_task(&self.id)?;
-            crate::output::json::print_pretty(&task_to_json_for_runtime(runtime, &task)?)
+            Ok(Payload::document(task_to_json_for_runtime(runtime, &task)?).into())
         } else {
             println!("Archived task '{}'", self.id);
-            Ok(())
+            Ok(CommandOutput::Silent)
         }
     }
 }

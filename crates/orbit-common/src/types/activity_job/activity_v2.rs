@@ -55,30 +55,28 @@ pub struct AgentLoopSpec {
     /// Optional model override (provider-specific name).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
-    /// Upper bound on loop iterations. **HTTP path only.**
+    /// Upper bound on loop iterations. **Inert.**
     ///
-    /// This binds solely where the engine drives the loop itself — the
-    /// `drive_agent_loop*` entry points, reached from `Backend::Http` dispatch,
-    /// `session:`-bound steps (which the loader restricts to `backend: http`),
-    /// and the reference smoke examples that call the driver directly. The CLI
-    /// runner never reads it: under `backend: cli` the provider owns its own
-    /// turn budget and only `wall_clock_timeout_seconds` bounds the invocation.
+    /// It bound only the engine-driven HTTP loop, which was retired with the
+    /// `backend:` selector [ORB-10801]. The CLI agent runner never reads it:
+    /// the provider owns its own turn budget and only
+    /// `wall_clock_timeout_seconds` bounds the invocation.
     ///
-    /// So do not declare it on an activity that runs under `backend: cli` —
-    /// there it is inert config that reads as a live safety bound. [ORB-10382]
+    /// So do not declare it on an activity — it is inert config that reads as
+    /// a live safety bound. [ORB-10382]
     #[serde(default = "default_max_iterations")]
     pub max_iterations: u32,
-    /// Execution backend (§3.1). Missing values default to the v1 `Cli`
-    /// release path. `Auto` is resolved to `Http` or `Cli` once per Run at
-    /// load time per the precedence rules in §3.1 and then never observed by
-    /// the dispatcher — everything downstream sees the concrete backend.
-    #[serde(default)]
-    pub backend: Backend,
+    /// Retired `backend:` selector [ORB-10801]. Agent execution runs through
+    /// the CLI agent path only; there is no runtime backend choice left to
+    /// make. The key is still parsed so an asset that declares the removed
+    /// `http` / `auto` values fails closed at load instead of being silently
+    /// reinterpreted as CLI execution.
+    #[serde(default, skip_serializing)]
+    pub backend: Option<RetiredAgentBackend>,
     /// Provider whose runtime executes this activity (§3.1).
     #[serde(default)]
     pub provider: Provider,
-    /// Wall-clock timeout for a CLI invocation (§7.6). Ignored in HTTP mode
-    /// where the loop engine applies its own timeout.
+    /// Wall-clock timeout for a CLI agent invocation (§7.6).
     #[serde(default = "default_cli_wall_clock_timeout_seconds")]
     pub wall_clock_timeout_seconds: u64,
     /// Require a fully valid Orbit response envelope — exit alignment,
@@ -97,7 +95,7 @@ pub struct AgentLoopSpec {
     /// response envelope. This is the **step-completion protocol contract**
     /// ([ADR-0258] / [ORB-10449], amending ADR-0224), and it defaults to `true`.
     ///
-    /// Every `backend: cli` invocation is prompted with the response-envelope
+    /// Every agent invocation is prompted with the response-envelope
     /// contract, so a provider that exits 0 with no envelope did not finish its
     /// turn — it stopped mid-work. Checkpointing that as success lets the run
     /// advance on work that never happened and defers the failure to whatever
@@ -111,17 +109,8 @@ pub struct AgentLoopSpec {
     /// Set to `false` only for an activity whose work is genuinely decorative —
     /// one whose non-completion should not stop the pipeline. Record why in the
     /// asset; the exception must be explicit, not incidental.
-    ///
-    /// **CLI only.** `backend: http` is driven by the engine's own loop, which
-    /// has its own termination accounting and never renders this envelope.
     #[serde(default = "default_require_completion_envelope")]
     pub require_completion_envelope: bool,
-    /// Optional role tag (ADR-029). When set, the engine consults
-    /// `[agent.<role>]` in `config.toml` and overrides `provider`/`model`/
-    /// `backend` field-by-field at dispatch time. The step-level role on
-    /// `TargetStep` takes precedence over this activity-level role.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub role: Option<AgentRole>,
     /// Program allowlist enforced before `proc.spawn` executes a request.
     /// `None` means `proc.spawn` is not constrained at the activity layer
     /// (legacy / human-driven paths); an empty `Some(vec![])` denies all
@@ -130,43 +119,52 @@ pub struct AgentLoopSpec {
     pub proc_allowed_programs: Option<Vec<String>>,
 }
 
-/// Execution backend for an `agent_loop` activity (§3.1). `Auto` resolves at
-/// load time per the precedence chain in §3.1: flag → env → config → default.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
-#[serde(rename_all = "snake_case")]
-pub enum Backend {
-    Http,
-    #[default]
-    Cli,
-    Auto,
+/// Accepted-but-inert value of the retired `backend:` key [ORB-10801].
+///
+/// Orbit executes agent activities through the CLI agent path only, so the
+/// selector no longer chooses anything. `cli` (the value every shipped asset
+/// carried) still parses so existing assets keep loading unchanged; the
+/// removed `http` and `auto` values are refused with the migration message
+/// rather than being remapped onto CLI execution behind the operator's back.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RetiredAgentBackend;
+
+/// Migration text shared by every surface that still accepts the retired
+/// `backend` key, so an operator reads the same instruction from an asset, a
+/// crew table, or `config.toml`.
+pub const RETIRED_BACKEND_MIGRATION: &str = "agent execution runs through the CLI agent path only; remove the `backend` \
+     setting (the value `cli` is still accepted and ignored)";
+
+/// Validate one retired `backend` value. `Ok(())` for `cli`; the migration
+/// error for anything else, including the removed `http` and `auto`.
+pub fn check_retired_backend_value(raw: &str) -> Result<(), String> {
+    match raw.trim() {
+        "cli" => Ok(()),
+        other => Err(format!(
+            "`backend: {other}` is no longer supported: {RETIRED_BACKEND_MIGRATION}"
+        )),
+    }
 }
 
-impl Backend {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Backend::Http => "http",
-            Backend::Cli => "cli",
-            Backend::Auto => "auto",
-        }
-    }
-
-    pub fn parse(raw: &str) -> Option<Self> {
-        match raw.trim() {
-            "http" => Some(Backend::Http),
-            "cli" => Some(Backend::Cli),
-            "auto" => Some(Backend::Auto),
-            _ => None,
-        }
+impl<'de> Deserialize<'de> for RetiredAgentBackend {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let raw = String::deserialize(deserializer)?;
+        check_retired_backend_value(&raw)
+            .map(|()| RetiredAgentBackend)
+            .map_err(serde::de::Error::custom)
     }
 }
 
 /// Named provider whose runtime executes an `agent_loop` activity. The enum is
-/// closed-set: adding a provider means wiring a new HTTP transport AND/OR a new
-/// CLI runtime factory, both of which are code changes.
+/// closed-set: adding a provider means wiring a new CLI runtime factory, which
+/// is a code change.
 ///
 /// This is the **single canonical provider-identity surface** for Orbit
 /// (ORB-10091): every crew/runtime path that turns a string into a provider —
-/// crew-role parsing, agent-role resolution, CLI executor selection, setup
+/// crew parsing, activity resolution, CLI executor selection, setup
 /// detection — routes through [`Provider::parse`] so canonical IDs, alias
 /// normalization, and capability predicates cannot drift across layers or
 /// disagree with Worker/Bridge. The set mirrors the Constellation
@@ -335,17 +333,9 @@ impl Provider {
         Provider::resolve_name(raw).map(|identity| identity.provider)
     }
 
-    /// Whether Phase 2c wires an HTTP transport for this provider. Used by the
-    /// dispatcher's §3.1 no-silent-fallback check: `backend: http` against a
-    /// provider whose HTTP transport is not wired must fail structurally, not
-    /// silently fall back to CLI.
-    pub fn has_http_transport(self) -> bool {
-        matches!(self, Provider::Claude)
-    }
-
-    /// Whether Orbit ships a CLI runtime for this provider. `openai_compat` is
-    /// HTTP-only, so `backend: cli` selecting it must fail structurally rather
-    /// than fall back. All other canonical providers have a CLI runtime.
+    /// Whether Orbit ships a CLI runtime for this provider. `openai_compat`
+    /// has none, so selecting it must fail structurally rather than fall back.
+    /// All other canonical providers have a CLI runtime.
     pub fn has_cli_runtime(self) -> bool {
         !matches!(self, Provider::OpenaiCompat)
     }
@@ -650,38 +640,6 @@ pub struct DeterministicSpec {
     /// Optional literal configuration passed through to the action.
     #[serde(default)]
     pub config: Value,
-}
-
-/// Role tag for an `agent_loop` activity (ADR-029). Maps to
-/// `[agent.<role>]` blocks in `config.toml`; the dispatcher resolves the
-/// effective role to a `(provider, model, backend)` triple before invoking
-/// the runner. The set is closed because `orbit init` only prompts for these
-/// three roles today; widening it requires a config-schema change.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
-#[serde(rename_all = "lowercase")]
-pub enum AgentRole {
-    Reviewer,
-    Implementer,
-    Planner,
-}
-
-impl AgentRole {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            AgentRole::Reviewer => "reviewer",
-            AgentRole::Implementer => "implementer",
-            AgentRole::Planner => "planner",
-        }
-    }
-
-    pub fn parse(raw: &str) -> Option<Self> {
-        match raw.trim() {
-            "reviewer" => Some(AgentRole::Reviewer),
-            "implementer" => Some(AgentRole::Implementer),
-            "planner" => Some(AgentRole::Planner),
-            _ => None,
-        }
-    }
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]

@@ -6,11 +6,10 @@ mod resolution {
     use super::super::super::OrbitError;
     use super::super::super::agent_pair::*;
 
-    fn assignment(model: &str, provider: &str) -> CrewRoleAssignment {
-        CrewRoleAssignment {
+    fn assignment(model: &str, provider: &str) -> CrewAssignment {
+        CrewAssignment {
             model: model.to_string(),
             provider: provider.to_string(),
-            backend: "cli".to_string(),
         }
     }
 
@@ -44,10 +43,6 @@ mod resolution {
         assert_eq!(crew.name, "codex");
         assert_eq!(crew.assignment.model, TEST_CODEX_MODEL);
         assert_eq!(crew.assignment.provider, "codex");
-        assert_eq!(crew.assignment.backend, "cli");
-        assert_eq!(crew.role("planner"), Some(&crew.assignment));
-        assert_eq!(crew.role("reviewer"), Some(&crew.assignment));
-        assert_eq!(crew.role("unknown"), None);
     }
 
     #[test]

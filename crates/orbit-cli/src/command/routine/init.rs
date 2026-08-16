@@ -1,8 +1,8 @@
+use crate::command::{CommandOut, CommandOutput};
 use clap::Args;
-use orbit_core::OrbitError;
 use orbit_core::routines::install_clock;
-use orbit_remote::load_host_identity;
-use orbit_remote::workspace_registry;
+use orbit_registry::load_host_identity;
+use orbit_registry::workspace_registry;
 
 #[derive(Args)]
 #[command(
@@ -19,20 +19,20 @@ pub struct RoutineInitArgs {
 }
 
 impl RoutineInitArgs {
-    pub fn execute_without_runtime(self) -> Result<(), OrbitError> {
+    pub fn execute_without_runtime(self) -> CommandOut {
         let global_root = workspace_registry::global_orbit_dir()?;
 
         // Read-only: host identity is owned by `orbit init`. Fail closed with
         // an actionable error when it is absent or unmigrated.
         let identity = load_host_identity(&global_root)?;
         println!(
-            "host identity: host_id=\"{}\", machine_id={}, mode={}",
-            identity.host_id, identity.machine_id, identity.mode
+            "host identity: host_id=\"{}\", machine_id={}",
+            identity.host_id, identity.machine_id
         );
 
         if !self.install_clock {
             println!("clock unit not installed (pass --install-clock to set up `orbit sweep`)");
-            return Ok(());
+            return Ok(CommandOutput::Silent);
         }
 
         let report = install_clock(&global_root)?;
@@ -47,6 +47,6 @@ impl RoutineInitArgs {
                 println!("  {step}");
             }
         }
-        Ok(())
+        Ok(CommandOutput::Silent)
     }
 }

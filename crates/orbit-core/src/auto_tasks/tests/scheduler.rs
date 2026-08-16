@@ -2,7 +2,7 @@
 //! catch-up collapse, dedupe, disabled skip, and dry-run inertness.
 
 use chrono::{DateTime, Duration, TimeZone, Utc};
-use orbit_common::types::{TaskStatus, auto_task_tag};
+use orbit_common::types::{AutoTaskSchedule, TaskStatus, auto_task_tag};
 use tempfile::tempdir;
 
 use crate::OrbitRuntime;
@@ -113,6 +113,26 @@ fn skip_if_open_never_files_a_second_open_instance() {
     let drained = fire(&runtime, t0 + Duration::minutes(240));
     assert_eq!(drained[0].0, "fired");
     assert_eq!(runtime.list_tasks().expect("tasks").len(), 2);
+}
+
+#[test]
+fn weekly_cron_fires_once_and_dedupes_while_audit_is_open() {
+    let runtime = runtime();
+    let mut params = interval_params("model-price-audit", 60);
+    params.schedule = AutoTaskSchedule::Cron {
+        cron: "0 6 * * 1".to_string(),
+    };
+    runtime.auto_task_add(params).expect("add");
+    let first_monday = at(2026, 1, 5, 6, 0);
+
+    assert_eq!(fire(&runtime, first_monday)[0].0, "baselined");
+    assert_eq!(fire(&runtime, at(2026, 1, 12, 6, 1))[0].0, "fired");
+    assert_eq!(runtime.list_tasks().expect("tasks").len(), 1);
+
+    // The following weekly slot is deferred rather than duplicated while the
+    // report task remains open.
+    assert_eq!(fire(&runtime, at(2026, 1, 19, 6, 1))[0].0, "skipped");
+    assert_eq!(runtime.list_tasks().expect("tasks").len(), 1);
 }
 
 #[test]

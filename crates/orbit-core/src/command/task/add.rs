@@ -5,8 +5,8 @@ use orbit_common::types::{
 use orbit_common::utility::redaction::redact_all;
 use orbit_store::TaskCreateParams as StoreTaskCreateParams;
 
+use super::TaskRecordUpdateParams;
 use crate::OrbitRuntime;
-use crate::runtime::TaskRecordUpdateParams;
 
 use super::helpers::{authored_role_value, build_task_comments, effective_actor_label};
 use super::params::TaskAddParams;
@@ -26,6 +26,7 @@ impl OrbitRuntime {
         agent: Option<String>,
         model: Option<String>,
     ) -> Result<Task, OrbitError> {
+        self.ensure_coordination_task_write_permitted()?;
         // [ORB-00417] Redact secrets at the single task-creation choke point
         // (shared by the dashboard POST, CLI `task add`, and the MCP task tool)
         // so a pasted key never lands in the task registry or the audit trail.
@@ -63,6 +64,14 @@ impl OrbitRuntime {
             normalize_workspace_path(&self.paths().repo_root, params.workspace_path.as_deref())?;
         let dependencies = normalize_task_dependencies(params.dependencies.clone())?;
         self.validate_crew_name(params.crew.as_deref())?;
+        params.orchestrator = self.canonical_crew_name(params.orchestrator.as_deref())?;
+        if params.orchestrator.is_some()
+            && !matches!(initial_status, TaskStatus::Proposed | TaskStatus::Backlog)
+        {
+            return Err(OrbitError::InvalidInput(format!(
+                "initial status {initial_status} cannot carry an orchestrator; orchestrator can only be set while proposed or backlog"
+            )));
+        }
 
         let prune_root = context_workspace_root(&self.paths().repo_root, workspace_path.as_deref());
         let normalized_context_files =
@@ -95,6 +104,7 @@ impl OrbitRuntime {
                 external_refs: params.external_refs.clone(),
                 source_task_id: params.source_task_id.clone(),
                 crew: params.crew.clone(),
+                orchestrator: params.orchestrator.clone(),
                 comments: comments.clone(),
             })?;
             Ok((

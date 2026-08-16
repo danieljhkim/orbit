@@ -15,7 +15,7 @@
 //!
 //! Callers pick the layer they need:
 //! - [`redact_sensitive_env_text`] — scrub live env-var values from a string
-//! - [`PatternRedactor`] — regex pattern scrubbing (HTTP / argv / JSON)
+//! - [`PatternRedactor`] — regex pattern scrubbing (HTTP / argv / JSON / SSH diagnostics)
 //! - [`redact_all`] — env + default patterns in one pass (use when you don't
 //!   know what shape the input has and want maximum coverage)
 
@@ -31,7 +31,7 @@ use std::{
 use regex::Regex;
 use serde_json::Value;
 
-use crate::types::{ArtifactOrigin, DependencyNotDelivered, OrbitError};
+use crate::types::{ArtifactOrigin, DependencyNotDelivered, OrbitError, WorkspaceClaimHeld};
 
 const REDACTED_ENV_VALUE: &str = "[REDACTED_ENV]";
 static DEFAULT_PATTERN_REDACTOR: OnceLock<PatternRedactor> = OnceLock::new();
@@ -144,8 +144,12 @@ pub fn redact_sensitive_env_error(error: OrbitError) -> OrbitError {
         OrbitError::UnsupportedAgentProvider(m) => {
             OrbitError::UnsupportedAgentProvider(redact_sensitive_env_text(&m))
         }
-        OrbitError::HubUnavailable(m) => OrbitError::HubUnavailable(redact_sensitive_env_text(&m)),
-        OrbitError::HubNegotiation(m) => OrbitError::HubNegotiation(redact_sensitive_env_text(&m)),
+        OrbitError::OwnerUnavailable(m) => {
+            OrbitError::OwnerUnavailable(redact_sensitive_env_text(&m))
+        }
+        OrbitError::OwnerNegotiation(m) => {
+            OrbitError::OwnerNegotiation(redact_sensitive_env_text(&m))
+        }
         OrbitError::OutcomeUnknown {
             mcp_call_id,
             message,
@@ -193,6 +197,13 @@ pub fn redact_sensitive_env_error(error: OrbitError) -> OrbitError {
         }
         OrbitError::DependencyNotDelivered(diagnostic) => OrbitError::DependencyNotDelivered(
             redact_dependency_not_delivered(*diagnostic, redact_sensitive_env_text),
+        ),
+        OrbitError::ShipRunInFlight { task_id, run_id } => OrbitError::ShipRunInFlight {
+            task_id: redact_sensitive_env_text(&task_id),
+            run_id: redact_sensitive_env_text(&run_id),
+        },
+        OrbitError::WorkspaceClaimHeld(claim) => OrbitError::WorkspaceClaimHeld(
+            redact_workspace_claim_held(*claim, redact_sensitive_env_text),
         ),
         OrbitError::JobRunStateTransition(m) => {
             OrbitError::JobRunStateTransition(redact_sensitive_env_text(&m))
@@ -259,8 +270,8 @@ pub fn redact_all_error(error: OrbitError) -> OrbitError {
         OrbitError::UnsupportedAgentProvider(m) => {
             OrbitError::UnsupportedAgentProvider(redact_all(&m))
         }
-        OrbitError::HubUnavailable(m) => OrbitError::HubUnavailable(redact_all(&m)),
-        OrbitError::HubNegotiation(m) => OrbitError::HubNegotiation(redact_all(&m)),
+        OrbitError::OwnerUnavailable(m) => OrbitError::OwnerUnavailable(redact_all(&m)),
+        OrbitError::OwnerNegotiation(m) => OrbitError::OwnerNegotiation(redact_all(&m)),
         OrbitError::OutcomeUnknown {
             mcp_call_id,
             message,
@@ -307,11 +318,30 @@ pub fn redact_all_error(error: OrbitError) -> OrbitError {
         OrbitError::DependencyNotDelivered(diagnostic) => OrbitError::DependencyNotDelivered(
             redact_dependency_not_delivered(*diagnostic, redact_all),
         ),
+        OrbitError::ShipRunInFlight { task_id, run_id } => OrbitError::ShipRunInFlight {
+            task_id: redact_all(&task_id),
+            run_id: redact_all(&run_id),
+        },
+        OrbitError::WorkspaceClaimHeld(claim) => {
+            OrbitError::WorkspaceClaimHeld(redact_workspace_claim_held(*claim, redact_all))
+        }
         OrbitError::JobRunStateTransition(m) => OrbitError::JobRunStateTransition(redact_all(&m)),
         OrbitError::Io(m) => OrbitError::Io(redact_all(&m)),
         OrbitError::WorkspaceError(m) => OrbitError::WorkspaceError(redact_all(&m)),
         OrbitError::Migration(m) => OrbitError::Migration(redact_all(&m)),
     }
+}
+
+fn redact_workspace_claim_held(
+    claim: WorkspaceClaimHeld,
+    redact: fn(&str) -> String,
+) -> Box<WorkspaceClaimHeld> {
+    Box::new(WorkspaceClaimHeld {
+        operation: redact(&claim.operation),
+        holder: redact(&claim.holder),
+        claim_id: redact(&claim.claim_id),
+        expires_at: redact(&claim.expires_at),
+    })
 }
 
 fn redact_dependency_not_delivered(
@@ -524,20 +554,20 @@ pub fn is_sensitive_env_name(name: &str) -> bool {
 // Pattern-based redaction (HTTP + argv)
 // ---------------------------------------------------------------------------
 
-/// Regex-driven scrubber for HTTP-shape and argv-shape secrets.
+/// Regex-driven scrubber for credential shapes and infrastructure identifiers.
 ///
-/// Builds to `default()` give you the same coverage as the former
-/// `RedactionMiddleware` (Authorization / x-api-key / URL key params /
-/// Bearer / raw header lines). Use [`PatternRedactor::with_argv_secrets`] to
-/// also catch bare `sk-…` tokens — needed when scrubbing subprocess argv where
-/// a provider key sometimes ends up mis-configured.
+/// Builds to `default()` cover Authorization / x-api-key / URL key params /
+/// Bearer / raw header lines, high-confidence provider credentials, and
+/// structurally recognizable SSH fingerprints, public-key comments, and
+/// connection hosts. Use [`PatternRedactor::with_argv_secrets`] to also catch
+/// short bare `sk-…` tokens — needed when scrubbing subprocess argv where a
+/// provider key sometimes ends up mis-configured.
 pub struct PatternRedactor {
     patterns: Vec<(Regex, &'static str)>,
 }
 
 impl PatternRedactor {
-    /// HTTP-only default: Authorization / x-api-key / api_key / URL key
-    /// params / Bearer in both JSON and raw-header form.
+    /// Shared default for unknown-shape persisted text.
     pub fn http_default() -> Self {
         let patterns = vec![
             (
@@ -571,6 +601,66 @@ impl PatternRedactor {
             (
                 Regex::new(r"(?i)([?&]key=)[^&\s]+").expect("valid regex"),
                 "${1}[REDACTED_AUTH]",
+            ),
+            // `ssh-keygen -l` output: redact the fingerprint and the key comment,
+            // while retaining key size and algorithm for diagnostic value.
+            (
+                Regex::new(
+                    r"(?im)^(\s*\d{3,4}\s+)SHA256:[A-Za-z0-9+/]{43}\s+[^\r\n]+?\s+(\((?:RSA|DSA|ECDSA|ED25519)\))\s*$",
+                )
+                .expect("valid regex"),
+                "${1}[REDACTED_SSH_FINGERPRINT] [REDACTED_SSH_KEY_COMMENT] ${2}",
+            ),
+            // OpenSSH verbose key-offer lines identify the local key through a
+            // path or comment immediately before its algorithm and fingerprint.
+            (
+                Regex::new(
+                    r"(?im)^(\s*(?:debug\d+:\s*)?(?:Offering public key|Will attempt key|Server accepts key):\s+)[^\r\n]+?\s+((?:RSA|DSA|ECDSA|ED25519)(?:-SK)?\s+)SHA256:[A-Za-z0-9+/]{43}([^\r\n]*)$",
+                )
+                .expect("valid regex"),
+                "${1}[REDACTED_SSH_KEY_COMMENT] ${2}[REDACTED_SSH_FINGERPRINT]${3}",
+            ),
+            // A serialized OpenSSH public key may carry an arbitrary comment
+            // after its base64 material. Preserve the public key, redact only
+            // the comment that commonly names a person, host, or key role.
+            (
+                Regex::new(
+                    r"(?im)^(\s*(?:ssh-(?:rsa|dss|ed25519)|ecdsa-sha2-nistp(?:256|384|521)|sk-(?:ssh-ed25519|ecdsa-sha2-nistp256)@openssh\.com)\s+[A-Za-z0-9+/]{20,}={0,3})\s+[^\r\n]+$",
+                )
+                .expect("valid regex"),
+                "${1} [REDACTED_SSH_KEY_COMMENT]",
+            ),
+            // Host redaction is deliberately limited to canonical OpenSSH
+            // diagnostic sentences. A general hostname regex would erase
+            // repository prose, model names, paths, and other useful records.
+            (
+                Regex::new(
+                    r"(?im)^(\s*(?:debug\d+:\s*)?Connecting to\s+)\S+(?:\s+\[[^\]\r\n]+\])?(\s+port\s+\d+\.)\s*$",
+                )
+                .expect("valid regex"),
+                "${1}[REDACTED_SSH_HOST]${2}",
+            ),
+            (
+                Regex::new(
+                    r"(?im)^(\s*(?:debug\d+:\s*)?Authenticating to\s+)\S+(\s+as\s+[^\r\n]+)$",
+                )
+                .expect("valid regex"),
+                "${1}[REDACTED_SSH_HOST]${2}",
+            ),
+            (
+                Regex::new(
+                    r"(?im)^(\s*Authenticated to\s+)\S+(?:\s+\([^\r\n)]+\))?(\.)\s*$",
+                )
+                .expect("valid regex"),
+                "${1}[REDACTED_SSH_HOST]${2}",
+            ),
+            (
+                Regex::new(r"SHA256:[A-Za-z0-9+/]{43}=").expect("valid regex"),
+                "[REDACTED_SSH_FINGERPRINT]",
+            ),
+            (
+                Regex::new(r"SHA256:[A-Za-z0-9+/]{43}\b").expect("valid regex"),
+                "[REDACTED_SSH_FINGERPRINT]",
             ),
             (
                 Regex::new(r"sk-[A-Za-z0-9_\-]{20,}").expect("valid regex"),
@@ -674,8 +764,8 @@ impl Default for PatternRedactor {
 // Combined
 // ---------------------------------------------------------------------------
 
-/// Apply env-value and default HTTP pattern redaction in one pass. Use when
-/// the input shape is unknown (log lines, aggregated error messages).
+/// Apply env-value and default pattern redaction in one pass. Use when the
+/// input shape is unknown (knowledge records, log lines, aggregated errors).
 pub fn redact_all(input: &str) -> String {
     let env_scrubbed = redact_sensitive_env_text(input);
     default_pattern_redactor().apply_str(&env_scrubbed)

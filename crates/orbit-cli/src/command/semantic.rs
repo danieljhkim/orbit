@@ -6,7 +6,7 @@ use orbit_core::command::semantic::{
 use orbit_core::{OrbitError, OrbitRuntime};
 use serde_json::json;
 
-use crate::command::Execute;
+use crate::command::{Block, CommandOut, CommandOutput, Execute, Payload};
 
 #[derive(Args)]
 #[command(about = "Manage local orbit-search indexing")]
@@ -59,7 +59,7 @@ pub struct SemanticIndexArgs {
         value_enum,
         default_value_t = SemanticIndexKindArg::Tasks,
         value_name = "KIND",
-        help = "--kind selects corpus: tasks (default), docs (same as `orbit docs index`), adrs, learnings, all (rebuilds all indexed corpora)."
+        help = "--kind selects corpus: tasks (default), docs (same as `orbit docs index`), all (rebuilds all indexed corpora)."
     )]
     pub kind: SemanticIndexKindArg,
     #[arg(long)]
@@ -70,8 +70,6 @@ pub struct SemanticIndexArgs {
 pub enum SemanticIndexKindArg {
     Tasks,
     Docs,
-    Adrs,
-    Learnings,
     All,
 }
 
@@ -80,8 +78,6 @@ impl From<SemanticIndexKindArg> for IndexKind {
         match value {
             SemanticIndexKindArg::Tasks => Self::Tasks,
             SemanticIndexKindArg::Docs => Self::Docs,
-            SemanticIndexKindArg::Adrs => Self::Adrs,
-            SemanticIndexKindArg::Learnings => Self::Learnings,
             SemanticIndexKindArg::All => Self::All,
         }
     }
@@ -94,13 +90,13 @@ pub struct SemanticStatsArgs {
 }
 
 impl Execute for SemanticCommand {
-    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+    fn execute(self, runtime: &OrbitRuntime) -> CommandOut {
         self.command.execute(runtime)
     }
 }
 
 impl Execute for SemanticSubcommand {
-    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+    fn execute(self, runtime: &OrbitRuntime) -> CommandOut {
         match self {
             SemanticSubcommand::Install(args) => args.execute(runtime),
             SemanticSubcommand::Uninstall(args) => args.execute(runtime),
@@ -111,13 +107,13 @@ impl Execute for SemanticSubcommand {
 }
 
 impl Execute for SemanticInstallArgs {
-    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+    fn execute(self, runtime: &OrbitRuntime) -> CommandOut {
         let result = runtime.semantic_install(SemanticInstallParams {
             model: self.model,
             force: self.force,
         })?;
         if self.json {
-            crate::output::json::print_pretty(&json!(result))
+            Ok(Payload::document(json!(result)).into())
         } else {
             println!(
                 "Installed semantic search: companion={} model={} companion_changed={} model_changed={}",
@@ -126,19 +122,19 @@ impl Execute for SemanticInstallArgs {
                 result.companion_changed,
                 result.model_installed
             );
-            Ok(())
+            Ok(CommandOutput::Silent)
         }
     }
 }
 
 impl Execute for SemanticUninstallArgs {
-    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+    fn execute(self, runtime: &OrbitRuntime) -> CommandOut {
         let result = runtime.semantic_uninstall(SemanticUninstallParams {
             model: self.model,
             all: self.all,
         })?;
         if self.json {
-            crate::output::json::print_pretty(&json!(result))
+            Ok(Payload::document(json!(result)).into())
         } else {
             println!(
                 "Removed semantic search assets: companion={} models={}",
@@ -149,22 +145,25 @@ impl Execute for SemanticUninstallArgs {
                     result.removed_models.join(", ")
                 }
             );
-            Ok(())
+            Ok(CommandOutput::Silent)
         }
     }
 }
 
 impl Execute for SemanticIndexArgs {
-    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+    fn execute(self, runtime: &OrbitRuntime) -> CommandOut {
         let result = runtime.semantic_index(SemanticIndexParams {
             model: self.model,
             force: self.force,
             kind: Some(self.kind.into()),
         })?;
         if self.json {
-            crate::output::json::print_pretty(&json!(result))
+            Ok(Payload::document(json!(result)).into())
         } else {
-            print_semantic_index_text(result)
+            {
+                print_semantic_index_text(result)?;
+                Ok(CommandOutput::Silent)
+            }
         }
     }
 }
@@ -192,44 +191,9 @@ fn print_semantic_index_text(result: SemanticIndexResult) -> Result<(), OrbitErr
                 stale_sources.len()
             );
         }
-        SemanticIndexResult::Adrs {
-            model_id,
-            report,
-            indexed_sources,
-            stale_sources,
-        } => {
+        SemanticIndexResult::All { tasks, docs } => {
             println!(
-                "Indexed ADRs: model={} indexed_sources={} embedded_chunks={} skipped_fields={} stale_sources={}",
-                model_id,
-                indexed_sources,
-                report.embedded_chunks,
-                report.skipped_fields,
-                stale_sources.len()
-            );
-        }
-        SemanticIndexResult::Learnings {
-            model_id,
-            report,
-            indexed_sources,
-            stale_sources,
-        } => {
-            println!(
-                "Indexed learnings: model={} indexed_sources={} embedded_chunks={} skipped_fields={} stale_sources={}",
-                model_id,
-                indexed_sources,
-                report.embedded_chunks,
-                report.skipped_fields,
-                stale_sources.len()
-            );
-        }
-        SemanticIndexResult::All {
-            tasks,
-            docs,
-            adrs,
-            learnings,
-        } => {
-            println!(
-                "Indexed semantic search: tasks_model={} tasks_embedded_chunks={} tasks_skipped_fields={} docs_model={} docs_indexed_sources={} docs_embedded_chunks={} docs_skipped_fields={} docs_stale_sources={} adrs_model={} adrs_indexed_sources={} adrs_embedded_chunks={} adrs_skipped_fields={} adrs_stale_sources={} learnings_model={} learnings_indexed_sources={} learnings_embedded_chunks={} learnings_skipped_fields={} learnings_stale_sources={}",
+                "Indexed semantic search: tasks_model={} tasks_embedded_chunks={} tasks_skipped_fields={} docs_model={} docs_indexed_sources={} docs_embedded_chunks={} docs_skipped_fields={} docs_stale_sources={}",
                 tasks.model_id,
                 tasks.report.embedded_chunks,
                 tasks.report.skipped_fields,
@@ -237,17 +201,7 @@ fn print_semantic_index_text(result: SemanticIndexResult) -> Result<(), OrbitErr
                 docs.indexed_sources,
                 docs.report.embedded_chunks,
                 docs.report.skipped_fields,
-                docs.stale_sources.len(),
-                adrs.model_id,
-                adrs.indexed_sources,
-                adrs.report.embedded_chunks,
-                adrs.report.skipped_fields,
-                adrs.stale_sources.len(),
-                learnings.model_id,
-                learnings.indexed_sources,
-                learnings.report.embedded_chunks,
-                learnings.report.skipped_fields,
-                learnings.stale_sources.len()
+                docs.stale_sources.len()
             );
         }
     }
@@ -255,12 +209,17 @@ fn print_semantic_index_text(result: SemanticIndexResult) -> Result<(), OrbitErr
 }
 
 impl Execute for SemanticStatsArgs {
-    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+    fn execute(self, runtime: &OrbitRuntime) -> CommandOut {
         let result = runtime.semantic_stats()?;
-        if self.json {
-            crate::output::json::print_pretty(&json!(result))
-        } else {
-            let mut table = crate::output::table::build_table(&["SOURCE_KIND", "MODEL", "ROWS"]);
+        let doc = json!(result);
+        {
+            use crate::output::table::{Column, Table};
+            let mut table = Table::new(vec![
+                Column::new("SOURCE_KIND").fixed(),
+                Column::new("MODEL").fixed(),
+                Column::new("ROWS").number(),
+            ])
+            .empty_message("no embedded rows");
             for row in &result.rows.counts {
                 table.add_row(vec![
                     row.source_kind.clone(),
@@ -268,8 +227,7 @@ impl Execute for SemanticStatsArgs {
                     row.rows.to_string(),
                 ]);
             }
-            println!("{table}");
-            println!(
+            let trailer = format!(
                 "stale_rows={} companion={} version={} active_model={}",
                 result.rows.stale_rows,
                 if result.companion.installed {
@@ -280,7 +238,7 @@ impl Execute for SemanticStatsArgs {
                 result.companion.version.as_deref().unwrap_or("-"),
                 result.companion.model.as_deref().unwrap_or("-")
             );
-            Ok(())
+            Ok(Payload::blocks(doc, vec![Block::table(table), Block::text(trailer)]).into())
         }
     }
 }

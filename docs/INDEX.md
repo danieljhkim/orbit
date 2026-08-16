@@ -51,24 +51,25 @@ a conservative title/status fallback.
 | [Agent Families](./design/agent-families/1_overview.md) | Orbit models AI coding systems as first-class agent families and groups concrete provider-model assignments into named crews. | Draft | grok |
 | [Auditability](./design/auditability/1_overview.md) | Auditability is Orbit's answer to the operator question that matters after an agent touches a real repository: what happened, why, and who is accountable? | Draft | codex |
 | [Auto-tasks](./design/auto-tasks/1_overview.md) | Dynamically-defined recurring task templates minted by one generic scheduler routine — periodic work as data, not code. | Accepted | claude |
-| [Executors](./design/executors/4_decisions.md) | ADR log for executor registration and the (now retired) External Executor Protocol. | Draft | claude |
-| [Host Registry](./design/host-registry/1_overview.md) | First-class, validated machine identity plus a main-host inventory, enabling pull-based orchestrator-selected execution placement and a strict per-record data-placement split. | Accepted | claude |
-| [Orbit MCP Bridge](./design/mcp-bridge/1_overview.md) | One canonical local Orbit MCP front door that routes coordination to a single hub, keeps owner-authored knowledge and derived indexes local, and removes Bridge's duplicated Orbit parity layer. | Accepted | codex |
-| [MCP Session Context](./design/mcp-session-context/1_overview.md) | MCP session context is the trusted transport envelope carried from an Orbit MCP adapter or broker to tool dispatch. | Accepted | codex |
+| [Executors](./design/executors/4_decisions.md) | Decision log for executor registration and the (now retired) External Executor Protocol. | Draft | claude |
+| [Host Registry](./design/host-registry/1_overview.md) | The live host-registry feature is a machine-local identity and workspace catalog. | Accepted | codex |
+| [Orbit MCP](./design/mcp-bridge/1_overview.md) | One authoritative Orbit MCP server, reached by local stdio, a byte-transparent direct SSH stdio proxy, or a loopback-default TCP listener. | Draft | codex |
+| [MCP Session Context](./design/mcp-session-context/1_overview.md) | ToolSessionContext is Orbit's transport-to-Core invocation envelope. | Accepted | codex |
 | [Operations as Data](./design/operations-as-data/1_overview.md) | Declaring each verb of a noun once as data so CLI, MCP, dashboard, and runtime handlers are derived adapters instead of four hand-copied layers. | Accepted | claude |
 | [Orbit Core](./design/orbit-core/1_overview.md) | Crate boundary and public-surface contract of orbit-core after the ORB-10016 orbit-cmd extraction. | Accepted | claude |
-| [Orbit Docs](./design/orbit-docs/1_overview.md) | Orbit Docs — what the human-authored docs corpus is, why it exists alongside learnings and ADRs, and how agents retrieve from it. | Draft | claude |
+| [Orbit Docs](./design/orbit-docs/1_overview.md) | Orbit Docs — the human-authored workspace corpus and how operators and agents retrieve from it. | Draft | claude |
 | [Orbit Docs Plugin](./design/orbit-docs-plugin/1_scope.md) | Scope: extract docs + search into a plugin-style feature crate | Draft | — |
 | [Semantic Search](./design/orbit-search/1_overview.md) | Semantic search is a local, offline-first retrieval layer over Orbit's task artifacts (phase 1) and, eventually, the knowledge-graph corpus (phase 2). | Draft | claude |
 | [Policy & Sandboxing](./design/policy-sandbox/1_overview.md) | Policy & Sandboxing is Orbit's safety surface for filesystem access and process execution. | Draft | claude |
-| [Project Learnings](./design/project-learnings/1_overview.md) | Project learnings is a system for preserving and surfacing non-obvious project knowledge — gotchas, root causes from incidents, validated approaches, hard-won workflow insights — so agents can retrieve and apply them when they are relevant. | Draft | claude |
-| [Remote Access](./design/remote-access/1_overview.md) | How an operator views Orbit across every local workspace and across machines, with no shared server and no new auth. | Accepted | claude |
-| [Resident Orchestrator](./design/resident-orchestrator/1_overview.md) | Workspace-addressed epic delegation to a specialized CLI orchestrator that decomposes and shepherds work without a resident server. | Draft | codex |
+| [Project Learnings](./design/project-learnings/4_decisions.md) | Project Learnings — Decisions | Superseded | claude |
+| [Remote Access](./design/remote-access/1_overview.md) | Multi-workspace Orbit Web serving and loopback-safe remote access over an SSH local forward. | Accepted | codex |
+| [Resident Orchestrator](./design/resident-orchestrator/1_overview.md) | An epic owns one worktree and one branch; its children land into that branch sequentially and the epic agent finishes the work inside it. workspace_auto_pipeline drains the workspace for a caller-supplied window instead of taking one action per tick. The fire clock lives outside Orbit. | Draft | codex, grok, claude |
 | [Routines](./design/routines/1_overview.md) | Durable, git-versioned scheduler primitive that fires catalog jobs/activities on cron triggers, per host, with local state. | Accepted | claude |
 | [Task Artifacts](./design/task-artifacts/1_overview.md) | Tasks are Orbit's durable intent records: they explain what an agent or human is trying to change, how the work should be validated, what context is relevant, who acted on the work, and how the work connects to other Orbit artifacts. | Draft | codex |
 | [Task Migration](./design/task-migration/1_overview.md) | Move orbit tasks between machines with export/import (tar.zst) and disjoint id ranges, without hand-written SQL. | Draft | claude |
-| [User Interface](./design/user-interface/1_overview.md) | Orbit UI covers the local dashboard served by `orbit-cli` and the project-facing web surface. | Draft | gemini |
-| [Worktree Artifacts](./design/worktree-artifacts/1_overview.md) | Worktree artifacts let ADR and learning body files travel with the branch that created them while preserving one shared ID authority for the whole repository. | Accepted | codex |
+| [Terminal Interface](./design/terminal-interface/1_overview.md) | House style for orbit-cli terminal output — machine-readable first, borderless single-line tables, semantic color resolved at the sink. | Accepted | claude |
+| [User Interface](./design/user-interface/1_overview.md) | Orbit UI covers the dashboard and HTTP API owned by `orbit-web`; `orbit-cli` is the thin `orbit web serve` / `connect` command adapter. | Draft | gemini |
+| [Worktree Artifacts](./design/worktree-artifacts/1_overview.md) | Historically, worktree artifacts let decision and learning body files travel with the branch that created them while preserving one shared ID authority for the repository. | Accepted | codex |
 
 Folder layout, frontmatter, ADR, and ownership rules live in
 [design conventions](./design/CONVENTIONS.md).

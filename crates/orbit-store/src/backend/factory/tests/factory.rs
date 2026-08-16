@@ -35,6 +35,7 @@ fn task_params(title: &str, status: TaskStatus) -> TaskCreateParams {
         external_refs: Vec::new(),
         source_task_id: None,
         crew: None,
+        orchestrator: None,
         comments: Vec::new(),
     }
 }
@@ -91,6 +92,7 @@ fn workspace_task_backends_exposes_create_get_and_list_trait_surface() {
             external_refs: Vec::new(),
             source_task_id: None,
             crew: None,
+            orchestrator: None,
             comments: Vec::new(),
         })
         .expect("create task");
@@ -177,23 +179,20 @@ fn coordination_backends_create_and_schedule_across_checkoutless_workspaces() {
         allocator_before
     );
     assert_eq!(alpha.task.list_tasks().expect("alpha list after").len(), 1);
-}
 
-#[test]
-fn workspace_learning_backend_rejects_legacy_flat_layout() {
-    let temp = TempDir::new().expect("tempdir");
-    let root = temp.path().join("learnings");
-    std::fs::create_dir_all(&root).expect("create learnings");
-    std::fs::write(root.join("L-0001.yaml"), "").expect("legacy learning");
-    let store = Store::open_in_memory().expect("open store");
-
-    let id_allocator =
-        IdAllocator::for_test_roots(temp.path().join("adrs"), temp.path().join("learnings2"));
-    let err = match workspace_learning_backend(root, store, id_allocator, "ws-000000".to_string()) {
-        Ok(_) => panic!("legacy rejected"),
-        Err(err) => err,
-    };
-
-    assert!(matches!(err, orbit_common::types::OrbitError::Migration(_)));
-    assert!(err.to_string().contains("orbit learning migrate-layout"));
+    let mut foreign = task_params("Foreign dependency", TaskStatus::Backlog);
+    foreign.dependencies = vec!["DK-00042".into()];
+    foreign.relations.push(TaskRelation {
+        relation_type: TaskRelationType::RelatedTo,
+        target: "DK-00042".into(),
+    });
+    let foreign = alpha
+        .task
+        .create_task(foreign)
+        .expect("foreign-prefix references are stored unverified");
+    let statuses = alpha.task.task_status_index().expect("global statuses");
+    assert!(
+        task_dependencies_ready(&foreign, &statuses),
+        "foreign dependencies cannot gate on state this machine cannot see"
+    );
 }

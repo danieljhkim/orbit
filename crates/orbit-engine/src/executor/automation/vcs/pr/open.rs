@@ -1,24 +1,23 @@
-use orbit_common::types::{OrbitError, Role};
-use orbit_tools::ToolContext;
+use orbit_common::types::OrbitError;
 use serde_json::{Value, json};
 
-use crate::context::{DeterministicActionHost, TaskHost};
+use crate::context::RuntimeHost;
 
 use super::super::super::input::{
     input_string_field, json_number_to_string, required_input_string,
 };
+use super::super::base_obsolescence::ensure_base_can_still_land;
 use super::super::freshness::branch_freshness_against_ref;
 use super::super::git::git_output;
 use super::super::handoff::{
     FailedHandoffPhase, HandoffContext, load_handoff_context, record_failed_handoff,
 };
+use super::super::operations;
 use super::body::{
     GITHUB_PR_BODY_BYTE_LIMIT, bound_pr_body, build_batch_pr_body, default_pr_title,
 };
 
-pub(in crate::executor::automation) fn pr_open<
-    H: DeterministicActionHost + TaskHost + Sync + ?Sized,
->(
+pub(in crate::executor::automation) fn pr_open<H: RuntimeHost + Sync + ?Sized>(
     host: &H,
     input: &Value,
 ) -> Result<Value, OrbitError> {
@@ -32,7 +31,7 @@ pub(in crate::executor::automation) fn pr_open<
     }
 }
 
-fn open_or_reuse_pr<H: DeterministicActionHost + TaskHost + ?Sized>(
+fn open_or_reuse_pr<H: RuntimeHost + ?Sized>(
     host: &H,
     input: &Value,
     context: &HandoffContext,
@@ -55,6 +54,12 @@ fn open_or_reuse_pr<H: DeterministicActionHost + TaskHost + ?Sized>(
             )),
         ));
     }
+    // ORB-10644: divergence against the pinned base says nothing about whether
+    // that base is still a branch work can land through. A base that merged and
+    // was deleted (or restored to its pre-merge tip) still resolves, so every
+    // later step would report success against a PR nobody merges again.
+    ensure_base_can_still_land(&context.workspace_path, "pr_open", base, base_sha, input)
+        .map_err(|error| (FailedHandoffPhase::ObsoleteBase, error))?;
     let freshness = branch_freshness_against_ref(&context.workspace_path, head, base_ref, base_sha)
         .map_err(invalid_prepare)?;
     if freshness.commits_behind != 0 || freshness.commits_ahead == 0 {
@@ -92,13 +97,7 @@ fn open_or_reuse_pr<H: DeterministicActionHost + TaskHost + ?Sized>(
             )
         });
     let body = bound_pr_body(body, &context.tasks);
-    let tool_context = ToolContext {
-        cwd: Some(context.workspace_path.to_string_lossy().to_string()),
-        allowed_tools: vec![],
-        ..Default::default()
-    };
-
-    match find_pr_by_head(host, head, tool_context.clone()) {
+    match find_pr_by_head(host, &context.workspace_path, head) {
         Ok(Some((pr_number, pr_url))) => Ok(pr_output(PrOutput {
             decision: "reused",
             pr_created: false,
@@ -118,16 +117,15 @@ fn open_or_reuse_pr<H: DeterministicActionHost + TaskHost + ?Sized>(
                 "creating pull request with bounded body projection"
             );
             let created = host
-                .run_tool_with_context_and_role(
-                    "github.pr.create",
+                .run_private_vcs_operation(
+                    operations::PR_CREATE,
                     json!({
                         "title": title,
                         "body": body,
                         "base": base,
                         "head": head,
+                        "workspace_path": context.workspace_path,
                     }),
-                    Role::Admin,
-                    tool_context.clone(),
                 )
                 .map_err(|error| (FailedHandoffPhase::PrCreate, error))?;
             let pr_url = created
@@ -140,11 +138,11 @@ fn open_or_reuse_pr<H: DeterministicActionHost + TaskHost + ?Sized>(
                     (
                         FailedHandoffPhase::PrCreate,
                         OrbitError::Execution(
-                            "github.pr.create did not return a PR url".to_string(),
+                            "private automation VCS PR create did not return a PR url".to_string(),
                         ),
                     )
                 })?;
-            let (pr_number, viewed_url) = view_pr(host, &pr_url, tool_context)
+            let (pr_number, viewed_url) = view_pr(host, &context.workspace_path, &pr_url)
                 .map_err(|error| (FailedHandoffPhase::PrView, error))?;
             Ok(pr_output(PrOutput {
                 decision: "performed",
@@ -166,9 +164,7 @@ fn open_or_reuse_pr<H: DeterministicActionHost + TaskHost + ?Sized>(
 /// Create or reuse a PR for an already-pushed recovery branch without the
 /// normal freshness/success gate. The caller owns candidate validation and
 /// must block, never promote, the associated task.
-pub(in crate::executor::automation::vcs) fn open_or_reuse_unchecked<
-    H: DeterministicActionHost + ?Sized,
->(
+pub(in crate::executor::automation::vcs) fn open_or_reuse_unchecked<H: RuntimeHost + ?Sized>(
     host: &H,
     workspace_path: &std::path::Path,
     head: &str,
@@ -177,12 +173,7 @@ pub(in crate::executor::automation::vcs) fn open_or_reuse_unchecked<
     body: &str,
 ) -> Result<(String, Option<String>, bool), OrbitError> {
     let body = bound_pr_body(body.to_string(), &[]);
-    let tool_context = ToolContext {
-        cwd: Some(workspace_path.to_string_lossy().to_string()),
-        allowed_tools: vec![],
-        ..Default::default()
-    };
-    if let Some((number, url)) = find_pr_by_head(host, head, tool_context.clone())? {
+    if let Some((number, url)) = find_pr_by_head(host, workspace_path, head)? {
         return Ok((number, url, false));
     }
     tracing::info!(
@@ -190,16 +181,15 @@ pub(in crate::executor::automation::vcs) fn open_or_reuse_unchecked<
         allowed_body_bytes = GITHUB_PR_BODY_BYTE_LIMIT,
         "creating unchecked pull request with bounded body projection"
     );
-    let created = host.run_tool_with_context_and_role(
-        "github.pr.create",
+    let created = host.run_private_vcs_operation(
+        operations::PR_CREATE,
         json!({
             "title": title,
             "body": body,
             "base": base,
             "head": head,
+            "workspace_path": workspace_path,
         }),
-        Role::Admin,
-        tool_context.clone(),
     )?;
     let url = created
         .get("url")
@@ -207,9 +197,11 @@ pub(in crate::executor::automation::vcs) fn open_or_reuse_unchecked<
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .ok_or_else(|| {
-            OrbitError::Execution("github.pr.create did not return a PR url".to_string())
+            OrbitError::Execution(
+                "private automation VCS PR create did not return a PR url".to_string(),
+            )
         })?;
-    let (number, viewed_url) = view_pr(host, url, tool_context)?;
+    let (number, viewed_url) = view_pr(host, workspace_path, url)?;
     Ok((number, viewed_url.or_else(|| Some(url.to_string())), true))
 }
 
@@ -217,25 +209,27 @@ fn invalid_prepare(error: OrbitError) -> (FailedHandoffPhase, OrbitError) {
     (FailedHandoffPhase::PrLookup, error)
 }
 
-fn view_pr<H: DeterministicActionHost + ?Sized>(
+fn view_pr<H: RuntimeHost + ?Sized>(
     host: &H,
+    workspace_path: &std::path::Path,
     selector: &str,
-    tool_context: ToolContext,
 ) -> Result<(String, Option<String>), OrbitError> {
-    let value = host.run_tool_with_context_and_role(
-        "github.pr.view",
-        json!({ "pr": selector }),
-        Role::Admin,
-        tool_context,
+    let value = host.run_private_vcs_operation(
+        operations::PR_VIEW,
+        json!({ "pr": selector, "workspace_path": workspace_path }),
     )?;
     let pull_request = value.get("pull_request").ok_or_else(|| {
-        OrbitError::Execution("github.pr.view did not return pull_request metadata".to_string())
+        OrbitError::Execution(
+            "private automation VCS PR view did not return pull_request metadata".to_string(),
+        )
     })?;
     let pr_number = pull_request
         .get("number")
         .and_then(json_number_to_string)
         .ok_or_else(|| {
-            OrbitError::Execution("github.pr.view did not return a PR number".to_string())
+            OrbitError::Execution(
+                "private automation VCS PR view did not return a PR number".to_string(),
+            )
         })?;
     let pr_url = pull_request
         .get("url")
@@ -246,23 +240,21 @@ fn view_pr<H: DeterministicActionHost + ?Sized>(
     Ok((pr_number, pr_url))
 }
 
-fn find_pr_by_head<H: DeterministicActionHost + ?Sized>(
+fn find_pr_by_head<H: RuntimeHost + ?Sized>(
     host: &H,
+    workspace_path: &std::path::Path,
     head: &str,
-    tool_context: ToolContext,
 ) -> Result<Option<(String, Option<String>)>, OrbitError> {
-    let value = host.run_tool_with_context_and_role(
-        "github.pr.list",
-        json!({ "head": head, "state": "open" }),
-        Role::Admin,
-        tool_context.clone(),
+    let value = host.run_private_vcs_operation(
+        operations::PR_LIST,
+        json!({ "head": head, "state": "open", "workspace_path": workspace_path }),
     )?;
     let pull_requests = value
         .get("pull_requests")
         .and_then(Value::as_array)
         .ok_or_else(|| {
             OrbitError::Execution(
-                "github.pr.list did not return pull_requests metadata".to_string(),
+                "private automation VCS PR list did not return pull_requests metadata".to_string(),
             )
         })?;
 
@@ -273,7 +265,8 @@ fn find_pr_by_head<H: DeterministicActionHost + ?Sized>(
             .and_then(Value::as_str)
             .ok_or_else(|| {
                 OrbitError::Execution(
-                    "github.pr.list returned a pull request without headRefName".to_string(),
+                    "private automation VCS PR list returned a pull request without headRefName"
+                        .to_string(),
                 )
             })?;
         if listed_head != head {
@@ -284,18 +277,19 @@ fn find_pr_by_head<H: DeterministicActionHost + ?Sized>(
             .and_then(json_number_to_string)
             .ok_or_else(|| {
                 OrbitError::Execution(
-                    "github.pr.list returned a matching pull request without a number".to_string(),
+                    "private automation VCS PR list returned a matching pull request without a number"
+                        .to_string(),
                 )
             })?;
         if matching_pr_number.replace(pr_number).is_some() {
             return Err(OrbitError::Execution(format!(
-                "github.pr.list returned multiple open pull requests for head branch '{head}'"
+                "private automation VCS PR list returned multiple open pull requests for head branch '{head}'"
             )));
         }
     }
 
     matching_pr_number
-        .map(|pr_number| view_pr(host, &pr_number, tool_context))
+        .map(|pr_number| view_pr(host, workspace_path, &pr_number))
         .transpose()
 }
 

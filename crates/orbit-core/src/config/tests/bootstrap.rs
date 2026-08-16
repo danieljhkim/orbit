@@ -1,39 +1,19 @@
 use super::super::agent_detect::{DetectedAgents, detect, testing::MockAgentEnvProbe};
 use super::super::bootstrap::*;
-use super::super::raw::RawAgentRoleConfig;
+use super::super::raw::RawCrewAssignment;
 use super::super::raw::RawRuntimeConfig;
 use super::super::runtime::RuntimeConfig;
-use orbit_common::types::all_agent_families;
 use std::collections::BTreeMap;
 use tempfile::tempdir;
 
-fn sample_roles() -> BTreeMap<String, RawAgentRoleConfig> {
-    let mut roles = BTreeMap::new();
-    roles.insert(
-        "reviewer".to_string(),
-        RawAgentRoleConfig {
-            provider: Some("claude".into()),
-            backend: Some("cli".into()),
-            model: Some(orbit_common::test_fixtures::TEST_CLAUDE_MODEL.into()),
-        },
-    );
-    roles.insert(
-        "implementer".to_string(),
-        RawAgentRoleConfig {
+fn sample_crew_settings() -> BTreeMap<String, RawCrewAssignment> {
+    BTreeMap::from([(
+        "custom".to_string(),
+        RawCrewAssignment {
             provider: Some("codex".into()),
-            backend: Some("cli".into()),
             model: Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.into()),
         },
-    );
-    roles.insert(
-        "planner".to_string(),
-        RawAgentRoleConfig {
-            provider: Some("claude".into()),
-            backend: Some("http".into()),
-            model: Some(orbit_common::test_fixtures::TEST_CLAUDE_MODEL.into()),
-        },
-    );
-    roles
+    )])
 }
 
 #[test]
@@ -91,7 +71,7 @@ fn gemini_only_seeds_gemini_without_qa() {
     let parsed = parsed_config(&contents);
 
     assert_eq!(crew_names(&parsed), vec!["gemini"]);
-    assert_crew(&parsed, "gemini", "gemini", "pro");
+    assert_crew(&parsed, "gemini", "gemini", "gemini-3.7-flash");
     assert_default_crew(&parsed, Some("gemini"));
 }
 
@@ -101,7 +81,7 @@ fn grok_only_seeds_grok_without_qa() {
     let parsed = parsed_config(&contents);
 
     assert_eq!(crew_names(&parsed), vec!["grok"]);
-    assert_crew(&parsed, "grok", "grok", "grok-build");
+    assert_crew(&parsed, "grok", "grok", "grok-4.6");
     assert_default_crew(&parsed, Some("grok"));
 }
 
@@ -127,48 +107,6 @@ fn no_supported_cli_seeds_no_crews_or_dangling_default() {
 }
 
 #[test]
-fn seed_with_three_available_families_writes_duel_candidates_and_models() {
-    let detected = detect(
-        &MockAgentEnvProbe::new()
-            .with_binary("claude")
-            .with_binary("codex")
-            .with_binary("gemini"),
-    );
-    let contents = seed_contents(&detected, None);
-    let parsed: toml::Value = toml::from_str(&contents).expect("parse seeded config");
-
-    let candidates = parsed
-        .get("duel")
-        .and_then(|duel| duel.get("candidates"))
-        .and_then(|candidates| candidates.as_array())
-        .expect("duel candidates");
-    let candidates: Vec<&str> = candidates
-        .iter()
-        .map(|candidate| candidate.as_str().expect("candidate string"))
-        .collect();
-    assert_eq!(candidates, vec!["claude", "codex", "gemini"]);
-
-    let models = parsed
-        .get("duel")
-        .and_then(|duel| duel.get("models"))
-        .and_then(|models| models.as_table())
-        .expect("duel models");
-    assert_eq!(models.len(), 3);
-    assert_eq!(
-        models.get("claude").and_then(|v| v.as_str()),
-        Some(orbit_common::model_defaults::CLAUDE_DEFAULT_STRONG)
-    );
-    assert_eq!(
-        models.get("codex").and_then(|v| v.as_str()),
-        Some(orbit_common::model_defaults::CODEX_DEFAULT_MODEL)
-    );
-    assert_eq!(
-        models.get("gemini").and_then(|v| v.as_str()),
-        Some(orbit_common::model_defaults::GEMINI_DEFAULT_MODEL)
-    );
-}
-
-#[test]
 fn multi_provider_seed_includes_each_available_family_and_excludes_unavailable() {
     let detected = detect(
         &MockAgentEnvProbe::new()
@@ -191,32 +129,16 @@ fn multi_provider_seed_includes_each_available_family_and_excludes_unavailable()
     assert_crew(&parsed, "sol", "codex", "gpt-5.6-sol");
     assert_crew(&parsed, "terra", "codex", "gpt-5.6-terra");
     assert_crew(&parsed, "luna", "codex", "gpt-5.6-luna");
-    assert_crew(&parsed, "grok", "grok", "grok-build");
+    assert_crew(&parsed, "grok", "grok", "grok-4.6");
     assert_crew(&parsed, "qa", "codex", "gpt-5.6-terra");
     for crew in crews(&parsed).values() {
-        assert_eq!(
-            crew.get("backend").and_then(toml::Value::as_str),
-            Some("cli")
-        );
+        // [ORB-10801] Seeded crews no longer carry the retired backend key.
+        assert!(crew.get("backend").is_none());
         assert_ne!(
             crew.get("provider").and_then(toml::Value::as_str),
             Some("gemini")
         );
     }
-}
-
-#[test]
-fn seed_with_fewer_than_three_families_omits_duel_and_runtime_falls_back() {
-    let detected = detect(&MockAgentEnvProbe::new().with_binary("claude"));
-    let contents = seed_contents(&detected, None);
-
-    assert!(!contents.contains("[duel"));
-    let config = load_seeded_config(&contents);
-    let expected: Vec<String> = all_agent_families()
-        .into_iter()
-        .map(str::to_string)
-        .collect();
-    assert_eq!(config.duel.candidates, expected);
 }
 
 #[test]
@@ -274,7 +196,7 @@ fn seeded_configs_round_trip_for_detection_permutations() {
 }
 
 #[test]
-fn seed_with_no_role_settings_keeps_static_template_content() {
+fn seed_with_no_crew_settings_keeps_static_template_content() {
     let dir = tempdir().expect("tempdir");
     let path = dir.path().join("config.toml");
     let detected = DetectedAgents::default();
@@ -289,11 +211,11 @@ fn seed_with_no_role_settings_keeps_static_template_content() {
 
 fn seed_contents(
     detected: &DetectedAgents,
-    role_settings: Option<&BTreeMap<String, RawAgentRoleConfig>>,
+    crew_settings: Option<&BTreeMap<String, RawCrewAssignment>>,
 ) -> String {
     let dir = tempdir().expect("tempdir");
     let path = dir.path().join("config.toml");
-    let created = seed_default_config(&path, detected, role_settings).expect("seed");
+    let created = seed_default_config(&path, detected, crew_settings).expect("seed");
     assert!(created);
     std::fs::read_to_string(&path).expect("read")
 }
@@ -332,10 +254,7 @@ fn assert_crew(parsed: &toml::Value, name: &str, provider: &str, model: &str) {
         Some(provider)
     );
     assert_eq!(crew.get("model").and_then(toml::Value::as_str), Some(model));
-    assert_eq!(
-        crew.get("backend").and_then(toml::Value::as_str),
-        Some("cli")
-    );
+    assert!(crew.get("backend").is_none());
 }
 
 fn assert_default_crew(parsed: &toml::Value, expected: Option<&str>) {
@@ -355,12 +274,12 @@ fn no_active_role_section(contents: &str) -> bool {
 }
 
 #[test]
-fn seed_with_role_settings_writes_custom_crew() {
+fn seed_with_crew_settings_writes_custom_crew() {
     let dir = tempdir().expect("tempdir");
     let path = dir.path().join("config.toml");
-    let roles = sample_roles();
+    let settings = sample_crew_settings();
     let detected = DetectedAgents::default();
-    let created = seed_default_config(&path, &detected, Some(&roles)).expect("seed");
+    let created = seed_default_config(&path, &detected, Some(&settings)).expect("seed");
     assert!(created);
     let contents = std::fs::read_to_string(&path).expect("read");
 
@@ -389,7 +308,7 @@ fn seed_with_role_settings_writes_custom_crew() {
         custom.get("provider").and_then(|v| v.as_str()),
         Some("codex")
     );
-    assert_eq!(custom.get("backend").and_then(|v| v.as_str()), Some("cli"));
+    assert!(custom.get("backend").is_none());
     assert_eq!(
         custom.get("model").and_then(|v| v.as_str()),
         Some(orbit_common::test_fixtures::TEST_CODEX_MODEL)
@@ -402,9 +321,9 @@ fn seed_with_existing_file_is_noop() {
     let path = dir.path().join("config.toml");
     std::fs::write(&path, "# pre-existing user content\n").expect("preseed");
 
-    let roles = sample_roles();
+    let settings = sample_crew_settings();
     let detected = DetectedAgents::default();
-    let created = seed_default_config(&path, &detected, Some(&roles)).expect("seed");
+    let created = seed_default_config(&path, &detected, Some(&settings)).expect("seed");
     assert!(!created);
 
     let contents = std::fs::read_to_string(&path).expect("read");
@@ -412,12 +331,12 @@ fn seed_with_existing_file_is_noop() {
 }
 
 #[test]
-fn seed_with_empty_role_map_uses_no_provider_behavior() {
+fn seed_with_empty_crew_map_uses_no_provider_behavior() {
     let dir = tempdir().expect("tempdir");
     let path = dir.path().join("config.toml");
-    let roles: BTreeMap<String, RawAgentRoleConfig> = BTreeMap::new();
+    let settings: BTreeMap<String, RawCrewAssignment> = BTreeMap::new();
     let detected = DetectedAgents::default();
-    let created = seed_default_config(&path, &detected, Some(&roles)).expect("seed");
+    let created = seed_default_config(&path, &detected, Some(&settings)).expect("seed");
     assert!(created);
     let contents = std::fs::read_to_string(&path).expect("read");
     let parsed = parsed_config(&contents);
@@ -426,18 +345,14 @@ fn seed_with_empty_role_map_uses_no_provider_behavior() {
 }
 
 #[test]
-fn seed_with_incomplete_role_settings_fails() {
+fn seed_with_incomplete_crew_settings_fails() {
     let dir = tempdir().expect("tempdir");
     let path = dir.path().join("config.toml");
-    let mut roles = sample_roles();
-    roles
-        .get_mut("implementer")
-        .expect("implementer")
-        .model
-        .take();
+    let mut settings = sample_crew_settings();
+    settings.get_mut("custom").expect("custom").model.take();
     let detected = DetectedAgents::default();
     let error =
-        seed_default_config(&path, &detected, Some(&roles)).expect_err("missing model fails");
+        seed_default_config(&path, &detected, Some(&settings)).expect_err("missing model fails");
     assert!(
         error
             .to_string()

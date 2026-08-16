@@ -25,6 +25,18 @@ spec:
       base_sha:
         type: string
         description: Full commit id pinned by worktree_setup; HEAD must still equal it when this step begins.
+      allow_empty:
+        type: boolean
+        description: >
+          Treat a clean empty stage as `skipped_no_diff_expected` even when
+          the task does not carry the no-diff-expected tag. Used by
+          `epic_pipeline` so a no-op epic does not fail commit.
+      allow_moved_head:
+        type: boolean
+        description: >
+          Allow HEAD to have moved past the pinned `base_sha` (child merges
+          into an epic branch). A clean moved HEAD is `already_committed`
+          rather than `skipped_no_diff_expected`, so delivery still runs.
   output_schema_json:
     type: object
     properties:

@@ -4,9 +4,7 @@ use orbit_common::types::OrbitError;
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
-use crate::context::{
-    DeterministicActionHost, TaskAutomationUpdate, TaskHost, ensure_task_can_enter_workflow,
-};
+use crate::context::{RuntimeHost, TaskAutomationUpdate};
 use crate::executor::automation::input::input_string_field;
 
 use super::super::git::{
@@ -25,11 +23,9 @@ const DEFAULT_BASE: &str = "main";
 /// `job_run_id` and `workspace_path` on every task in scope, and move them to
 /// `in_progress`.
 ///
-/// Generic automation — not tied to duel or any specific workflow. Any
+/// Generic automation — not tied to any specific workflow. Any
 /// pipeline can reuse this by passing a `branch_prefix`.
-pub(in crate::executor::automation) fn setup_worktree<
-    H: DeterministicActionHost + TaskHost + ?Sized,
->(
+pub(in crate::executor::automation) fn setup_worktree<H: RuntimeHost + ?Sized>(
     host: &H,
     input: &Value,
 ) -> Result<Value, OrbitError> {
@@ -46,10 +42,6 @@ pub(in crate::executor::automation) fn setup_worktree<
 
     let repo_root_str = host.repo_root()?;
     let repo_root = Path::new(&repo_root_str);
-
-    for task_id in task_ids {
-        ensure_task_can_enter_workflow(host, task_id, "worktree_setup")?;
-    }
 
     let start_point = resolve_worktree_start_point(repo_root, &base, base_sync_mode)?;
     // ORB-10380: `start_point` is a moving name (`origin/<base>`) shared by every
@@ -83,7 +75,14 @@ pub(in crate::executor::automation) fn setup_worktree<
 
     let worktree_path = identity.path(repo_root)?;
 
-    ensure_worktree(repo_root, &worktree_path, &base_sha, &branch_name)?;
+    let branch_name = ensure_worktree(repo_root, &worktree_path, &base_sha, &branch_name)?;
+
+    // ORB-10602: mount-anchor materialization deliberately does *not* happen
+    // here any more. Setup only ever saw a snapshot of the task's context files
+    // and the un-absolutized policy profile, so the grant set it computed could
+    // not match the one the sandbox would enforce, and could not grow with the
+    // run. Anchors are now derived from the effective profile at each spawn —
+    // see `activity_job::cli_runner::spawn::spawn_linux_bwrap`.
 
     let workspace_path_str = worktree_path.to_string_lossy().to_string();
 
@@ -141,7 +140,7 @@ pub(crate) fn ensure_worktree(
     worktree_path: &Path,
     start_point: &str,
     branch_name: &str,
-) -> Result<(), OrbitError> {
+) -> Result<String, OrbitError> {
     let target = git_output(
         repo_root,
         &[
@@ -153,9 +152,12 @@ pub(crate) fn ensure_worktree(
 
     if worktree_path.exists() {
         if git_command_success(worktree_path, &["rev-parse", "--is-inside-work-tree"])? {
-            git_success(worktree_path, &["checkout", "-B", branch_name, &target])?;
+            let attached_branch = git_output(
+                worktree_path,
+                &["symbolic-ref", "--quiet", "--short", "HEAD"],
+            )?;
             git_success(worktree_path, &["clean", "-fd"])?;
-            return Ok(());
+            return Ok(attached_branch);
         }
 
         if is_empty_dir(worktree_path)? {
@@ -184,17 +186,26 @@ pub(crate) fn ensure_worktree(
 
     git_success(repo_root, &["worktree", "prune"])?;
     let worktree_path_arg = worktree_path.to_string_lossy();
-    git_success(
-        repo_root,
-        &[
-            "worktree",
-            "add",
-            "-B",
-            branch_name,
-            &worktree_path_arg,
-            &target,
-        ],
-    )
+    let branch_ref = format!("refs/heads/{branch_name}");
+    if git_command_success(repo_root, &["show-ref", "--verify", "--quiet", &branch_ref])? {
+        git_success(
+            repo_root,
+            &["worktree", "add", &worktree_path_arg, branch_name],
+        )?;
+    } else {
+        git_success(
+            repo_root,
+            &[
+                "worktree",
+                "add",
+                "-b",
+                branch_name,
+                &worktree_path_arg,
+                &target,
+            ],
+        )?;
+    }
+    Ok(branch_name.to_string())
 }
 
 fn is_empty_dir(path: &Path) -> Result<bool, OrbitError> {

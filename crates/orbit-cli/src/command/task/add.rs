@@ -1,10 +1,10 @@
 use clap::{ArgAction, Args};
 use orbit_core::command::task::TaskAddParams;
 use orbit_core::{
-    ExternalRef, OrbitError, OrbitRuntime, TaskComplexity, TaskCreateStatus, TaskPriority, TaskType,
+    ExternalRef, OrbitRuntime, TaskComplexity, TaskCreateStatus, TaskPriority, TaskType,
 };
 
-use crate::command::Execute;
+use crate::command::{CommandOut, CommandOutput, Execute, Payload};
 
 use super::output::task_to_json_for_runtime;
 
@@ -19,8 +19,8 @@ pub struct TaskAddArgs {
     /// Task description
     #[arg(long, default_value = "")]
     pub description: String,
-    /// Acceptance criteria. Repeat or comma-separate for multiple criteria.
-    #[arg(long = "acceptance-criteria", action = ArgAction::Append, value_delimiter = ',')]
+    /// Acceptance criteria. Repeat the flag for multiple criteria.
+    #[arg(long = "acceptance-criteria", action = ArgAction::Append)]
     pub acceptance_criteria: Vec<String>,
     /// Dependency task IDs. Repeat or comma-separate for multiple dependencies.
     #[arg(long, alias = "dependency", action = ArgAction::Append, value_delimiter = ',')]
@@ -59,6 +59,9 @@ pub struct TaskAddArgs {
     /// Named crew to use when running this task
     #[arg(long)]
     pub crew: Option<String>,
+    /// Named crew responsible for orchestration attribution
+    #[arg(long)]
+    pub orchestrator: Option<String>,
     /// Explicit agent model to persist on the task artifact
     #[arg(long)]
     pub model: Option<String>,
@@ -68,7 +71,7 @@ pub struct TaskAddArgs {
 }
 
 impl Execute for TaskAddArgs {
-    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+    fn execute(self, runtime: &OrbitRuntime) -> CommandOut {
         let (agent, model) = super::mutation_identity(self.model);
         if let Some(parent_id) = self.parent_id.as_deref()
             && runtime.get_task(parent_id).is_err()
@@ -101,16 +104,17 @@ impl Execute for TaskAddArgs {
                     .collect::<Result<Vec<_>, _>>()?,
                 source_task_id: self.source_task.clone(),
                 crew: self.crew,
+                orchestrator: self.orchestrator,
             },
             agent,
             model,
         )?;
 
         if self.json {
-            crate::output::json::print_pretty(&task_to_json_for_runtime(runtime, &task)?)
+            Ok(Payload::document(task_to_json_for_runtime(runtime, &task)?).into())
         } else {
             println!("{}", task.id);
-            Ok(())
+            Ok(CommandOutput::Silent)
         }
     }
 }

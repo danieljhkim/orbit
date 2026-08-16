@@ -58,6 +58,7 @@ fn seed_task(runtime: &OrbitRuntime) -> String {
             external_refs: Vec::new(),
             source_task_id: None,
             crew: None,
+            orchestrator: None,
             comments: Vec::new(),
         })
         .expect("create task")
@@ -116,7 +117,7 @@ fn a_run_retains_the_destruction_it_dispatches() {
     let released = runtime
         .run_tool_with_context_and_role(
             "orbit.task.locks.release",
-            json!({ "reservation_id": "no-such-reservation" }),
+            json!({ "reservation_id": "reservation-no-such-reservation" }),
             Role::Admin,
             context_with([McpCapability::Runner]),
         )

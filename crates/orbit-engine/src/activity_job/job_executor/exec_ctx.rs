@@ -3,16 +3,12 @@
 
 use super::*;
 
-pub(super) const DEFAULT_MODEL_FOR_SESSION: &str =
-    orbit_common::model_defaults::ANTHROPIC_HTTP_DEFAULT_MODEL;
-
 pub(super) struct ExecCtx<'a> {
     pub(super) run_id: String,
     pub(super) audit: Arc<V2AuditWriter>,
-    pub(super) host: &'a dyn V2RuntimeHost,
+    pub(super) host: &'a dyn RuntimeHost,
     pub(super) input: Value,
     pub(super) pipeline: Arc<Mutex<HashMap<String, Value>>>,
-    pub(super) sessions: Arc<Mutex<HashMap<String, Session>>>,
     pub(super) recovery_activity: Option<ResolvedRecoveryActivity>,
     pub(super) failure_activity: Option<ResolvedRecoveryActivity>,
     /// `Some(value)` inside a fan-out worker. Rendered into template context

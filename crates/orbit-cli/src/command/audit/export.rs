@@ -4,7 +4,7 @@ use clap::{Args, ValueEnum};
 use orbit_core::{AuditEvent, OrbitError, OrbitRuntime};
 use serde_json::Value;
 
-use crate::command::Execute;
+use crate::command::{CommandOut, CommandOutput, Execute};
 use crate::parse::parse_since;
 
 use super::support::audit_event_to_json;
@@ -32,13 +32,19 @@ pub struct AuditExportArgs {
 }
 
 impl Execute for AuditExportArgs {
-    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+    fn execute(self, runtime: &OrbitRuntime) -> CommandOut {
         let since = self.since.map(|s| parse_since(&s)).transpose()?;
         let events = runtime.list_audit_events(since, self.tool, None, None, 0)?;
 
         match self.format {
-            ExportFormat::Json => export_json(&self.output, &events),
-            ExportFormat::Csv => export_csv(&self.output, &events),
+            ExportFormat::Json => {
+                export_json(&self.output, &events)?;
+                Ok(CommandOutput::Silent)
+            }
+            ExportFormat::Csv => {
+                export_csv(&self.output, &events)?;
+                Ok(CommandOutput::Silent)
+            }
         }
     }
 }
@@ -98,6 +104,8 @@ fn export_csv(path: &str, events: &[AuditEvent]) -> Result<(), OrbitError> {
             "effective_capabilities",
             "origin_session_id",
             "mcp_call_id",
+            "trace_id",
+            "caller_ip",
             "lease_id",
             "task_id",
             "job_run_id",
@@ -146,6 +154,8 @@ fn export_csv(path: &str, events: &[AuditEvent]) -> Result<(), OrbitError> {
                     .join("|"),
                 event.origin_session_id.clone().unwrap_or_default(),
                 event.mcp_call_id.clone().unwrap_or_default(),
+                event.trace_id.clone().unwrap_or_default(),
+                event.caller_ip.clone().unwrap_or_default(),
                 event.lease_id.clone().unwrap_or_default(),
                 event.task_id.clone().unwrap_or_default(),
                 event.job_run_id.clone().unwrap_or_default(),
@@ -180,7 +190,7 @@ mod tests {
         let header = csv.lines().next().expect("CSV header");
         assert!(header.contains("host,pid,session_id,workspace_id,caller_machine_id"));
         assert!(header.contains("process_host_id,transport,effective_capabilities"));
-        assert!(header.contains("origin_session_id,mcp_call_id,lease_id"));
+        assert!(header.contains("origin_session_id,mcp_call_id,trace_id,caller_ip,lease_id"));
         assert!(header.ends_with("task_id,job_run_id,activity_id,step_index"));
     }
 }

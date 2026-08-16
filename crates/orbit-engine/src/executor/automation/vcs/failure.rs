@@ -4,7 +4,7 @@ use chrono::Utc;
 use orbit_common::types::{ExternalRef, OrbitError, TaskComment, TaskStatus};
 use serde_json::{Value, json};
 
-use crate::context::{DeterministicActionHost, TaskAutomationUpdate, TaskHost};
+use crate::context::{RuntimeHost, TaskAutomationUpdate};
 use crate::executor::automation::input::{
     canonicalize_existing_dir, input_string_field, required_input_string,
 };
@@ -26,9 +26,7 @@ const FAILURE_HANDOFF_EVENT: &str = "pr_failure_handoff";
 /// candidate recoverable: restore the pre-rebase branch, commit dirtiness,
 /// push without rewriting unknown remote history, publish a blocked PR, and
 /// leave the task in `blocked` rather than `review`.
-pub(in crate::executor::automation) fn pr_failure_handoff<
-    H: DeterministicActionHost + TaskHost + Sync + ?Sized,
->(
+pub(in crate::executor::automation) fn pr_failure_handoff<H: RuntimeHost + Sync + ?Sized>(
     host: &H,
     input: &Value,
 ) -> Result<Value, OrbitError> {
@@ -39,24 +37,6 @@ pub(in crate::executor::automation) fn pr_failure_handoff<
     let job_input = input
         .get("job_input")
         .ok_or_else(|| OrbitError::InvalidInput("missing required input.job_input".to_string()))?;
-    let worktree = pipeline_step(input, "worktree")?;
-    let workspace_path = canonicalize_existing_dir(
-        required_input_string(worktree, "workspace_path")?,
-        "pipeline.worktree.workspace_path",
-    )?;
-
-    let mut conflicting_paths = unmerged_paths(&workspace_path)?;
-    let rebase_aborted = git_command_success(&workspace_path, &["rebase", "--abort"])?;
-    if !conflicting_paths.is_empty() && !rebase_aborted {
-        return Err(OrbitError::Execution(
-            "pr_failure_handoff: conflicts exist but the in-progress rebase could not be aborted"
-                .to_string(),
-        ));
-    }
-    if conflicting_paths.is_empty() {
-        conflicting_paths = conflicts_from_error(error_message);
-    }
-
     let task_ids = job_input
         .get("task_ids")
         .and_then(Value::as_array)
@@ -82,6 +62,24 @@ pub(in crate::executor::automation) fn pr_failure_handoff<
             "pr_failure_handoff: task '{}' no longer belongs to run '{}'",
             task.id, run_id
         )));
+    }
+
+    let worktree = pipeline_step(input, "worktree")?;
+    let workspace_path = canonicalize_existing_dir(
+        required_input_string(worktree, "workspace_path")?,
+        "pipeline.worktree.workspace_path",
+    )?;
+
+    let mut conflicting_paths = unmerged_paths(&workspace_path)?;
+    let rebase_aborted = git_command_success(&workspace_path, &["rebase", "--abort"])?;
+    if !conflicting_paths.is_empty() && !rebase_aborted {
+        return Err(OrbitError::Execution(
+            "pr_failure_handoff: conflicts exist but the in-progress rebase could not be aborted"
+                .to_string(),
+        ));
+    }
+    if conflicting_paths.is_empty() {
+        conflicting_paths = conflicts_from_error(error_message);
     }
 
     let (head_sha, committed_files) =

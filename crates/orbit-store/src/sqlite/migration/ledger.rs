@@ -20,7 +20,7 @@
 //!   no-op that then records version 1.
 
 use orbit_common::types::OrbitError;
-use rusqlite::{Connection, params};
+use rusqlite::{Connection, ErrorCode, params};
 
 /// One entry in the migration registry.
 pub(crate) struct Migration {
@@ -93,12 +93,39 @@ pub(crate) const MIGRATIONS: &[Migration] = &[
         name: "routine_scheduler_schema",
         apply: super::apply_routine_scheduler_schema,
     },
+    // ORB-10680: hub friction records leave the Markdown tree for the
+    // host-global store, keyed by `(workspace_id, friction_id)`.
+    Migration {
+        version: 12,
+        name: "friction_records_sqlite",
+        apply: super::apply_friction_records_schema,
+    },
+    // ORB-10709 / ADR-0352: `task_reservations` gains the coordination
+    // dimension that separates worker file reservations from the exclusive
+    // workspace claim, plus the claim's bearer token.
+    Migration {
+        version: 13,
+        name: "workspace_claim_scope",
+        apply: super::apply_workspace_claim_scope,
+    },
+    // ORB-10736: keep the shipped learning migrations above intact, then
+    // retire their projections explicitly for both upgraded and fresh stores.
+    Migration {
+        version: 14,
+        name: "remove_native_learning_subsystem",
+        apply: super::apply_remove_native_learning_subsystem,
+    },
+    Migration {
+        version: 15,
+        name: "invocation_audit_context",
+        apply: super::apply_invocation_audit_context,
+    },
 ];
 
 /// Highest schema version this binary knows how to produce. Public for
 /// the future `orbit migrate` surface (P3.4), alongside
 /// [`AppliedMigration`] and the `Store` version accessors.
-pub const SUPPORTED_SCHEMA_VERSION: u32 = 11;
+pub const SUPPORTED_SCHEMA_VERSION: u32 = 15;
 
 const LEDGER_KEY_PREFIX: &str = "migration.v";
 
@@ -192,7 +219,12 @@ fn apply_one(conn: &Connection, migration: &Migration) -> Result<(), OrbitError>
         ))
     })?;
 
-    (migration.apply)(&tx)?;
+    (migration.apply)(&tx).map_err(|error| {
+        OrbitError::Migration(format!(
+            "failed to apply migration v{} ({}): {error}",
+            migration.version, migration.name
+        ))
+    })?;
 
     tx.execute(
         "INSERT INTO schema_meta(key, value, updated_at) VALUES (?1, ?2, ?3)
@@ -210,12 +242,8 @@ fn apply_one(conn: &Connection, migration: &Migration) -> Result<(), OrbitError>
         ))
     })?;
 
-    tx.commit().map_err(|e| {
-        OrbitError::Migration(format!(
-            "failed to commit migration v{} ({}): {e}",
-            migration.version, migration.name
-        ))
-    })?;
+    tx.commit()
+        .map_err(|error| commit_migration_error(migration, error))?;
 
     orbit_common::tracing::info!(
         target: "orbit.store.sqlite",
@@ -224,6 +252,24 @@ fn apply_one(conn: &Connection, migration: &Migration) -> Result<(), OrbitError>
         "applied store schema migration",
     );
     Ok(())
+}
+
+pub(super) fn commit_migration_error(migration: &Migration, error: rusqlite::Error) -> OrbitError {
+    if matches!(
+        &error,
+        rusqlite::Error::SqliteFailure(sqlite_error, _)
+            if sqlite_error.code == ErrorCode::DiskFull
+    ) {
+        return OrbitError::Store(format!(
+            "SQLITE_FULL / ENOSPC while committing migration v{} ({}): {error}",
+            migration.version, migration.name
+        ));
+    }
+
+    OrbitError::Migration(format!(
+        "failed to commit migration v{} ({}): {error}",
+        migration.version, migration.name
+    ))
 }
 
 fn ensure_schema_meta_table(conn: &Connection) -> Result<(), OrbitError> {

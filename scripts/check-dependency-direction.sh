@@ -10,13 +10,9 @@ allowed_internal_deps() {
     orbit-common)
       echo ""
       ;;
-    orbit-remote)
-      # ADR-0240: vertical Remote feature composes neutral Core kernels over
-      # Store persistence and generic MCP/tool definitions; none of those
-      # lower layers may depend back on Remote.
-      # orbit-cmd is test-only: the shared learning-state canary crosses the
-      # Remote MCP host and the CLI hook command layer.
-      echo "orbit-cmd orbit-common orbit-core orbit-mcp orbit-store orbit-tools"
+    orbit-registry)
+      # Registry owns local machine/workspace files and needs only shared types.
+      echo "orbit-common"
       ;;
     orbit-policy | orbit-exec | orbit-store)
       echo "orbit-common"
@@ -37,21 +33,26 @@ allowed_internal_deps() {
       echo "orbit-agent orbit-common orbit-exec orbit-store orbit-tools"
       ;;
     orbit-core)
-      echo "orbit-common orbit-search orbit-engine orbit-policy orbit-store orbit-tools"
+      # ORB-10617: Linux sandbox regression tests compose Core with Exec; this
+      # remains test-only and does not widen Core's production dependency graph.
+      echo "orbit-common orbit-search orbit-engine orbit-exec orbit-policy orbit-store orbit-tools"
       ;;
     orbit-cmd)
-      # ORB-10016: CLI-facing command layer extracted from orbit-core.
-      # Depends on orbit-core (runtime/context) — never the other way around.
-      echo "orbit-common orbit-core orbit-engine orbit-store"
+      # The shared application composition layer joins Core runtime kernels to
+      # machine-local Registry state for CLI and dashboard consumers.
+      echo "orbit-common orbit-core orbit-engine orbit-registry orbit-store"
       ;;
     orbit-mcp)
-      echo "orbit-common"
+      # MCP owns framing, canonical discovery, and direct SSH stdio transport.
+      echo "orbit-common orbit-registry orbit-tools"
       ;;
-    orbit-dashboard)
-      echo "orbit-common orbit-cmd orbit-core orbit-remote"
+    orbit-web)
+      echo "orbit-common orbit-cmd orbit-core orbit-registry"
       ;;
     orbit-cli)
-      echo "orbit-common orbit-cmd orbit-core orbit-remote orbit-dashboard"
+      # The executable assembles MCP and Web feature crates with Registry state
+      # and Core's authoritative runtime dispatcher.
+      echo "orbit-common orbit-cmd orbit-core orbit-mcp orbit-registry orbit-web"
       ;;
     *)
       return 1

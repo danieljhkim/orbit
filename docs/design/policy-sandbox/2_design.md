@@ -3,7 +3,8 @@ summary: "Policy & Sandboxing — Design"
 type: design
 title: "Policy & Sandboxing — Design"
 owner: claude
-last_updated: 2026-07-20
+last_updated: 2026-08-15
+last_validated: 2026-08-15
 status: Draft
 feature: policy-sandbox
 doc_role: design
@@ -12,7 +13,7 @@ tags: ["policy-sandbox"]
 
 # Policy & Sandboxing — Design
 
-This document describes Orbit's shipped policy and sandboxing implementation: v2 `PolicyDef`, profile resolution, last-match-wins path evaluation, HTTP-tool enforcement, activity/job `fsProfile` binding, macOS CLI sandbox wrapping, and `orbit-exec` supervision. See [1_overview.md](./1_overview.md) for purpose and [3_vision.md](./3_vision.md) for forward-looking gaps.
+This document describes Orbit's shipped policy and sandboxing implementation: v2 `PolicyDef`, profile resolution, last-match-wins path evaluation, activity/job `fsProfile` binding, macOS and Linux CLI sandbox wrapping, and `orbit-exec` supervision. See [1_overview.md](./1_overview.md) for purpose and [3_vision.md](./3_vision.md) for forward-looking gaps.
 
 ---
 
@@ -28,8 +29,11 @@ A valid policy declares `name`, optional `description`, global `denyRead` / `den
 2. Every profile name is non-empty.
 3. Every positive `modify` rule is covered by a positive `read` rule in the same profile.
 4. Profile rules do not exactly duplicate global deny entries.
+5. `denyRead` never contains exceptions. A `denyModify` exception uses `!<path>`, names an exact path or `<path>/**` subtree, and is strictly contained by an earlier deny in the same policy.
 
-`PolicyDef::merged(global, workspace)` lets workspace `fsProfiles` overwrite globals by name while global denies accumulate. The merged policy is revalidated.
+`PolicyDef::merged(global, workspace)` lets workspace `fsProfiles` overwrite globals by name while global denies accumulate. A workspace may repeat or narrow a host `denyModify` exception, but cannot introduce an exception outside the host exception surface. Workspace denies are appended after host exceptions and therefore can narrow them. The merged policy is revalidated.
+
+The shipped default expresses the versioned Orbit boundary as an ordered `.orbit/**` deny followed by exceptions for `.orbit/auto_tasks/**`, `.orbit/routines/**`, `.orbit/config.yaml`, `.orbit/config.toml`, and `.orbit/resources/**`. The broad deny continues to cover `.orbit/state/**`, task/learning/ADR/friction stores, databases, locks, and any future or misspelled `.orbit` path. Task `context_files` remain planning and conflict selectors; policy resolution does not convert them into filesystem grants ([ORB-10560]), and anchor materialization does not consult them at all ([ORB-10602]).
 
 ---
 
@@ -39,7 +43,7 @@ A valid policy declares `name`, optional `description`, global `denyRead` / `den
 
 1. **Lookup.** Use the named profile. If the missing name is `unrestricted`, synthesize `read: ["./**"]` and `modify: ["./**"]`; other missing profiles return `OrbitError::InvalidInput`.
 2. **Normalization.** Trim, convert backslashes, strip leading `./`, reject absolute, `~`, and parent-traversal rules, then compile the narrow glob syntax to regex.
-3. **Deny injection.** Append `denyRead` to `read` and `denyModify` to `modify` as negated rules (`!<rule>`), so global denies participate in the same ordered list.
+3. **Deny injection.** Append `denyRead` to `read` as negated rules. Walk `denyModify` in order: ordinary entries append as negated rules, while `!<path>` entries are host exceptions. An exception is intersected with the selected profile, so an empty/read-only profile gains nothing and profile negative rules still narrow the result.
 
 The implicit `unrestricted` profile appears only when an activity omitted `fsProfile:` and the policy did not define `unrestricted`. A real profile with that name shadows the fallback.
 
@@ -55,7 +59,7 @@ The implicit `unrestricted` profile appears only when an activity omitted `fsPro
 4. Walk rules in order and record the most recent match against the normalized workspace-relative path. Later matches override earlier ones.
 5. Use the last match's negation flag. If no rule matched but a positive rule exists, deny with `<no matching rule>`; if only negated rules exist, deny with `[]`.
 
-Path normalization (`normalize_path`) trims, flips slashes, strips `./` prefixes, and rejects absolute paths, `~`-anchored paths, and parent-directory traversal anywhere in the component list ([T20260509-27]). Tool callers are expected to canonicalize first and then express the path workspace-relative — `crates/orbit-tools/src/builtin/fs/mod.rs::workspace_relative_path` handles that on the call site.
+Path normalization (`normalize_path`) trims, flips slashes, strips `./` prefixes, and rejects absolute paths, `~`-anchored paths, and parent-directory traversal anywhere in the component list ([T20260509-27]). Callers canonicalize first (via `orbit_policy::resolve_symlinks` / `PolicyEngine::check_resolved`) and then express the path workspace-relative.
 
 The glob translator supports `*`, `**`, `?`, and `<prefix>/**`. It is intentionally narrower than POSIX glob syntax.
 
@@ -75,15 +79,19 @@ PolicyEngine::check(profile, operation, path) -> FsPolicyEvaluation
 
 ---
 
-## 5. Tool-Layer Enforcement
+## 5. Tool-Layer Enforcement (retired)
 
-`crates/orbit-tools/src/builtin/fs/mod.rs::enforce_fs_policy` is the only place fs operations consult the policy engine today. It reads `ctx.fs_profile` and `ctx.policy_engine`; if either is missing, it returns `Ok(None)` so fs work proceeds unguarded. That path is for unit tests / no-policy contexts, not the real v2 host path. Otherwise the helper converts the canonical path to workspace-relative form, calls `policy_engine.check`, emits a request or denied `FsCallEvent`, and returns either an `FsPolicyAllowance { profile, op, path, matched_rule }` or `OrbitError::PolicyDenied`.
+The in-process `fs.*` builtins and their private helper `enforce_fs_policy` were retired in [ORB-10828] and [ORB-10833]. Nothing in `ToolRegistry::register_builtins()` registers an `fs.*` tool, and the CLI agent path never handed the registry to the subprocess anyway.
 
-The audit emission goes through `ctx.fs_audit: Option<Arc<dyn FsAuditLogger>>` (`crates/orbit-tools/src/lib.rs`). The v2 dispatcher wires this to `v2_fs_audit_logger(audit.clone())`, which converts each `FsCallEvent` into a `V2AuditEvent` filesystem entry. The full audit-channel description belongs to [auditability](../auditability/2_design.md#3-tool-driven-and-runtime-audit-records); this folder owns the *enforcement* contract, not the storage contract.
+What remains:
 
-`FsCallEvent` carries `{ kind, profile, op, path, allowed, matched_rule }`. There is no persisted negation flag; consumers that need to distinguish explicit deny matches from "no rule matched" must compare `matched_rule` with the policy denies. The exec layer does not consult the policy engine, so there is no `proc.spawn` policy gate today.
+- `FsCallEvent` / `FsAuditLogger` on `ToolContext` (`crates/orbit-tools/src/lib.rs`). The v2 dispatcher still wires `v2_fs_audit_logger`, which would convert an emitted `FsCallEvent` into a `V2AuditEvent` filesystem entry. No shipped builtin emits those events.
+- Historical audit/import fixtures that name retired `fs.*` tools. Those strings stay parseable; a removed tool name is not a deserialization error.
+- `ctx.fs_profile` / `ctx.policy_engine`, which the CLI sandbox compiler still uses to compile OS write confinement.
 
-**Backend scope.** This enforcement fires only under `backend: http` when a builtin fs tool runs. `backend: cli` spawns Claude Code, Codex CLI, Gemini, or another harness via `cli_runner.rs`, emits `tool_allowlist.harness_delegated`, and trusts that harness for tool allowlists. On macOS, executors declaring `sandbox: macos-sandbox-exec` also get the OS-level wrapper in §7, so `fsProfile:` can still narrow CLI filesystem writes.
+**Scope.** Agent dispatch spawns Claude Code, Codex CLI, Gemini, or another harness via `cli_runner.rs`, emits `tool_allowlist.harness_delegated`, and trusts that harness for tool allowlists — the engine-driven loop that enforced allowlists in-process was retired in [ORB-10801]. On macOS, executors declaring `sandbox: macos-sandbox-exec` also get the OS-level wrapper in §7, so `fsProfile:` can still narrow CLI filesystem writes.
+
+On Linux, shipped agent executors declare `linux-bwrap`. The wrapper enforces writes from the resolved `modify` policy but deliberately records reads as `read_delegated`; this is not general read-allowlist parity.
 
 ---
 
@@ -93,7 +101,7 @@ The `fsProfile:` field on an activity flows through `crates/orbit-engine/src/act
 
 - `dispatcher.rs` carries `fs_profile: Option<&str>` on `DispatchInput` and threads it into `run_activity_job_dispatch`, `run_loop_step_dispatch`, and `run_agent_loop_via_driver`.
 - `job_executor.rs` reads `t.fs_profile.as_deref()` from the activity spec at the call site of every step type.
-- `agent_loop_driver.rs` invokes `host.tool_context_for_activity(fs_profile, audit_logger)` to construct the `ToolContext` that fs builtins read from.
+- `agent_loop_driver.rs` invokes `host.tool_context_for_activity(fs_profile, audit_logger)` to construct the `ToolContext` the CLI path and remaining in-process tools read from.
 
 `crates/orbit-core/src/runtime/v2_host/mod.rs::tool_context_for_activity` is the single materialization point:
 
@@ -103,7 +111,7 @@ fs_profile: Some(fs_profile.unwrap_or(UNRESTRICTED_FS_PROFILE).to_string())
 
 This is the implicit-`unrestricted` rule from §2.2 in code form. Every v2 dispatcher path that constructs a `ToolContext` reaches this line, so omitting `fsProfile:` means "unrestricted within policy," not "no policy."
 
-Legacy pipeline contexts are different. `crates/orbit-core/src/runtime/tool_exec.rs` fills a missing profile from `ORBIT_ACTIVITY_FS_PROFILE`; if the variable is unset, `ctx.fs_profile` stays `None` and `enforce_fs_policy` returns `Ok(None)`. That unguarded path is a real gap, not another spelling of `unrestricted` (see §9).
+Legacy pipeline contexts are different. `crates/orbit-core/src/runtime/tool_exec.rs` fills a missing profile from `ORBIT_ACTIVITY_FS_PROFILE`; if the variable is unset, `ctx.fs_profile` stays `None`. That used to bypass the retired in-process helper; the live CLI sandbox still needs an explicit profile (see §9).
 
 ---
 
@@ -133,11 +141,90 @@ The compiled macOS profile denies by default, allows broad reads required by age
 - Claude `$HOME/.claude.json` sibling files (`.claude.json`, `.claude.json.lock`, atomic-write `.claude.json.tmp.<pid>.<ms_ts>`) when `CLAUDE_CONFIG_DIR` is unset, since these live at the home root rather than under `$HOME/.claude/` ([T20260508-13])
 - positive `modify` roots from the resolved profile
 - Codex side-write roots from runtime provider config, appended after policy denies so workflow state remains writable under the outer sandbox
-- narrow child Orbit runtime roots appended by the v2 host after policy denies: global logs, global `orbit.db*`, global tasks, workspace `.orbit/tasks/**`, workspace `.orbit/learnings/**`, workspace `.orbit/frictions/**`, workspace audit/logs, workspace semantic DB sidecars, and workspace `.orbit/state/job-runs/**`
+- narrow child Orbit runtime roots appended by the v2 host after policy denies: global logs, global `orbit.db*`, global tasks, workspace `.orbit/tasks/**`, workspace `.orbit/frictions/**`, workspace audit/logs, and workspace semantic DB sidecars
 
-The child Orbit runtime roots are deliberately narrower than the workspace `.orbit` tree. They cover stores used by currently activity-exposed Orbit write tools: task/review/artifact/duel writes under `.orbit/tasks/**`, learning curation under `.orbit/learnings/**`, friction reporting under `.orbit/frictions/**`, `orbit.state.set` writes under `.orbit/state/job-runs/**`, and startup/runtime audit, log, semantic-index, and global database writes. Registered stores that are not exposed by the current activity allowlists, including `.orbit/adrs/**` and graph write roots, remain outside this inventory and must be revisited when those write tools are exposed.
+The child Orbit runtime roots are deliberately narrower than the workspace `.orbit` tree. They cover stores used by currently activity-exposed Orbit write tools: task/review/artifact writes under `.orbit/tasks/**`, friction reporting under `.orbit/frictions/**`, and startup/runtime audit, log, semantic-index, and global database writes. Generic agent-callable state writes were removed in [ORB-10738]; graph write roots and every unlisted or future store remain outside this inventory.
 
-Negated `read` / `modify` rules become explicit SBPL denies after ordinary profile allows to preserve last-match-wins. Simple path and `/**` subtree denials compile to `subpath`; non-subpath globs such as `**/*.env` compile to `regex`. Host-owned provider side roots are the exception because the provider CLI and inherited Orbit subprocesses must write workflow state.
+`agent_implement` also exposes `orbit.adr.add` and `orbit.adr.update` ([ORB-10596]). On Linux, only the active managed worktree's `.orbit/adrs/proposed` and `.orbit/adrs/.locks` directories are bind-mounted writable after the enclosing worktree `.orbit/**` read-only mount; Accepted/Superseded ADRs and learning, task, state, and unknown local stores remain read-only. Allocation still uses the workspace-shared semantic database and `.id_alloc.lock`, so simultaneous worktrees serialize ID selection while each Proposed body lands under `<job-worktree>/.orbit/adrs/proposed/<id>/`. The allocator records that worktree-relative body path, allowing an orchestrator runtime to resolve and search it as a federated artifact while the worktree is live. macOS already re-allows the active job worktree as a whole after the policy deny, so this change adds no macOS SBPL allowance and changes no policy YAML.
+
+Creation remains Proposed-only. In a managed-run context, `orbit.adr.update` may correct the title, body, and metadata of a Proposed record, but it cannot transition lifecycle status or modify an Accepted record. Acceptance and historical correction remain separate unmanaged human/orchestrator actions. A hub-side allocator or a second pending-decision queue was rejected: the existing shared allocator and federated artifact resolution already provide collision safety and discovery, while another protocol would duplicate allocation and introduce a second promotion lifecycle.
+
+Negated `read` / `modify` rules become explicit SBPL denies in resolved order. Explicit host-policy exceptions and host-owned runtime roots appear after the enclosing deny, preserving last-match-wins without opening unrelated siblings. Simple path and `/**` subtree denials compile to `subpath`; non-subpath globs such as `**/*.env` compile to `regex`.
+
+### 7.1 Linux Bubblewrap backend
+
+On Linux, `ExecutorSandboxKind::LinuxBwrap` resolves only `/usr/bin/bwrap` and runs a real capability probe using the same private user, PID, IPC, and UTS namespaces plus mount setup required by provider execution. Absence or probe failure is permanent and fail-closed unless the executor explicitly sets `allow_fallback: true`. The availability decision happens before provider argv construction: an active outer wrapper neutralizes provider-native sandbox flags, while a bare fallback preserves them.
+
+The deterministic argv starts with a read-only bind of `/`, explicitly retains the host network namespace, and applies canonical `modify` mounts in policy order. Broad positive roots are mounted before denials. A positive exact/subtree root is mounted after an earlier deny only when it is strictly nested beneath that denied root; equal or ancestor positives cannot mask the protection. This implements versioned-config and trusted runtime-store re-allows while unknown `.orbit` children remain read-only. A re-allowed file or directory must already exist because Bubblewrap cannot bind-mount a nonexistent child beneath a read-only parent; §7.1.1 covers how absent anchors are materialized, and a narrow re-allow that still cannot be mounted is returned on the plan's dropped-grant list rather than discarded. `/dev`, `/proc`, and `/tmp` are replaced with private minimal mounts, the wrapper creates a fresh session, and parent-death cleanup remains enabled.
+
+The ADR authoring exception follows that same ordering: trusted host setup ensures only `<active-worktree>/.orbit/adrs/{proposed,.locks}` exists, then mounts those exact directories writable after the local `.orbit/**` deny. The ADR parent and its Accepted/Superseded lifecycle directories remain read-only. This does not add a policy exception, does not re-allow the shared workspace ADR tree, and does not expose any sibling under the worktree-local `.orbit` directory.
+
+#### 7.1.1 Write-grant anchors are derived from the effective profile at each spawn
+
+`spawn_linux_bwrap` prepares mount anchors immediately before compiling argv, from the same `ResolvedFsProfile` that compiles it. The grant set is every positive exact/subtree `modify` rule that is a narrow re-allow beneath an earlier deny and remains writable at its anchor after the full ordered rule list is evaluated. A later deny covering the anchor therefore prevents materialization, while a narrower deny below a writable subtree leaves the remaining subtree grant intact. Broad writable roots are excluded; they are host-owned and must already exist, so an absent one still fails closed at compile.
+
+The policy grammar is the explicit anchor-type contract: an exact rule denotes a file, while `<root>/**` denotes a directory subtree. Filename punctuation is never type evidence, so an extensionless exact rule materializes a file and a dotted subtree root materializes a directory without any hardcoded path inventory. An existing target whose filesystem type contradicts its rule fails closed.
+
+Creation is confined to the canonical managed worktree, which is trusted and disposable. Every worktree-owned component is checked for symlinks before both existing- and absent-target handling, the resolved existing anchor (or newly created parent) must remain inside the canonical root, and files use create-new semantics. Anchors outside that root are the host's to create and are reported, not invented. Creating an anchor grants nothing new — the final effective profile already decided the path is writable — so this is materialization, not policy.
+
+Two consequences follow from deriving at spawn rather than during `worktree_setup`. The grant set matches the profile the kernel will enforce, including the host-appended run roots that setup never saw; and it is recomputed for each provider launch, so a run whose needs grow does not depend on a snapshot taken before it started. After a failed Bubblewrap child, the executor inspects EROFS stderr that names an attempted path and evaluates that path against the same effective profile, replacing a generic nonzero-exit message with an Orbit-owned missing-grant or shadowing-deny diagnostic. Children that omit the path retain the generic failure. [ORB-10602] [ORB-10607] [Derive Linux sandbox write-grant anchors from the effective profile at each spawn](./4_decisions.md#derive-linux-sandbox-write-grant-anchors-from-the-effective-profile-at-each-spawn-1)
+
+The policy syntax remains schema v2. Existing policies without `denyModify` exceptions retain their prior behavior. After installing a binary that carries a changed shipped default, `orbit init` refreshes the machine-global policy assets without changing executor sandbox selection or `allow_fallback`; `--force` is unnecessary and would reset the global root. Workspace policy can then narrow the refreshed host boundary but cannot expand its exception surface.
+
+Existing matches of non-subtree negative globs are mounted read-only before spawn. Because mount namespaces cannot reject a matching filename created later, direct invocations with an overlapping non-subtree deny fail closed. An Orbit-managed single-writer worktree may run with snapshot expansion, followed by a post-run scan that rejects any newly-created forbidden match before downstream commit. Audit metadata records the effective backend, trusted wrapper, probe outcome, redacted effective argv, `write_enforced` or `write_delegated`, and the honest `read_delegated` boundary. [ORB-10552] [Use Bubblewrap for shipped Linux CLI write confinement](./4_decisions.md#use-bubblewrap-for-shipped-linux-cli-write-confinement)
+
+Bubblewrap's private PID namespace also establishes a liveness-authority boundary. A nested
+`orbit` command receiving both truthy `ORBIT_MANAGED_RUN_CONTEXT` and a non-blank
+`ORBIT_RUN_ID` is a managed child, not an authority for its host pipeline worker. On runtime
+open it skips only the opportunistic orphan scan: the host worker can be alive while invisible
+inside that namespace. Top-level runtime opens and explicit host recovery surfaces retain their
+normal reconciliation behavior. Do not weaken the PID namespace, enable bare fallback, or infer
+that an invisible host worker is dead from inside a sandboxed child. [ORB-10557]
+
+### 7.2 Linux host readiness on Ubuntu 24.04
+
+Ubuntu 24.04 (Noble) enables AppArmor restriction of unprivileged user namespaces through
+`kernel.apparmor_restrict_unprivileged_userns`. When `/usr/bin/bwrap` starts Orbit's probe,
+Bubblewrap creates the private user namespace and configures its UID map. If AppArmor has no
+narrow profile granting that operation to Bubblewrap, the kernel rejects the setup and bwrap
+reports `bwrap: setting up uid map: Permission denied`. A present executable is therefore not
+enough; the real namespace-and-mount probe in `probe_bwrap` must succeed.
+
+The supported Noble remediation is the distro `apparmor-profiles` package's
+`bwrap-userns-restrict` profile. The package provides it under
+`/usr/share/apparmor/extra-profiles/`; copy it into `/etc/apparmor.d/` and load that copy with
+`apparmor_parser -r`. Verify both that the profile is visible to AppArmor and that the exact
+probe shape used by Orbit exits successfully:
+
+```bash
+sudo apt-get update
+sudo apt-get install --yes bubblewrap apparmor-profiles
+test -x /usr/bin/bwrap
+test -f /usr/share/apparmor/extra-profiles/bwrap-userns-restrict
+sudo install -m 0644 \
+  /usr/share/apparmor/extra-profiles/bwrap-userns-restrict \
+  /etc/apparmor.d/bwrap-userns-restrict
+test -f /etc/apparmor.d/bwrap-userns-restrict
+sudo apparmor_parser -r /etc/apparmor.d/bwrap-userns-restrict
+grep -Fq 'bwrap-userns-restrict' /sys/kernel/security/apparmor/profiles
+/usr/bin/bwrap --die-with-parent --new-session --unshare-all --share-net \
+  --ro-bind / / -- /bin/true
+```
+
+To roll back only this host remediation, unload the packaged profile with
+`sudo apparmor_parser -R /etc/apparmor.d/bwrap-userns-restrict`, then remove only the copied
+`/etc/apparmor.d/bwrap-userns-restrict` file; leave the package-managed source under
+`/usr/share/apparmor/extra-profiles/` intact. The probe should then fail again on a host where the
+global restriction is active, and repeating the copy-and-load sequence restores the remediation.
+Do not disable
+`kernel.apparmor_restrict_unprivileged_userns` globally or install a broad unconfined profile:
+those changes expand the user-namespace attack surface beyond Bubblewrap. Do not set
+`allow_fallback: true` to hide a failed probe, because that bypasses the fail-closed OS boundary
+and runs the provider without `linux-bwrap`.
+
+This subsection records the shipped Linux behavior from [ORB-10552] and the Ubuntu host rescue
+context from [ORB-10553]. No sandbox design decision changed, and this operational remediation
+requires no new ADR.
 
 ---
 
@@ -168,21 +255,23 @@ Risk-weighted regression tests sit beside the implementations they guard
 - `crates/orbit-policy/src/engine.rs#tests` — `PolicyEngine::check` boundary
   semantics: positive read-rule matches return `allowed=true` with the rule
   recorded in `matched_rule`; modify paths outside any positive rule resolve
-  to `allowed=false`; global `denyRead` / `denyModify` rules override
+  to `allowed=false`; ordinary global `denyRead` / `denyModify` rules override
   profile-level positive rules under last-match-wins; an unknown profile name
   errors structurally (with the documented `unrestricted` exception); and the
   `matched_rule` field is populated for audit attribution. Traversal inputs
   such as `../secret.txt`, `src/../secret.txt`, and their backslash-normalized
   equivalents are rejected as `OrbitError::InvalidInput` for both read and
-  modify checks ([T20260509-27]).
+  modify checks ([T20260509-27]). The same surface proves host modify
+  exceptions intersect profile authority, workspace exceptions cannot exceed
+  the host surface, and later workspace denies still win ([ORB-10560]).
 - `crates/orbit-exec/src/macos_sandbox/compile.rs#tests` and
   `crates/orbit-exec/src/macos_sandbox/tests/provider_dirs.rs` — trusted wrapper
   resolution ignores `PATH`, including a macOS runtime test that places a fake
   `sandbox-exec` earlier on `PATH` and verifies the fake wrapper is not
   executed ([T20260509-30]). SBPL compilation tests
   cover `denyRead` / `denyModify` clause emission (`subpath` for simple
-  rules, `regex` for non-trivial globs) and the deny-after-allow ordering
-  required for last-match-wins. macOS-gated runtime tests
+  rules, `regex` for non-trivial globs) and resolved deny/re-allow ordering
+  under last-match-wins. macOS-gated runtime tests
   (`compiled_profile_denies_reads_to_negated_read_path` and
   `compiled_profile_for_realistic_agent_loop_profile_allows_repo_writes_denies_dotenv`)
   exercise an `agent_loop`-shaped profile end-to-end against the kernel
@@ -192,23 +281,30 @@ Risk-weighted regression tests sit beside the implementations they guard
   construction and assert no file is written outside the policy store
   ([T20260509-28]).
 
-Tests skip on non-macOS (and on macOS hosts where `sandbox-exec` cannot
-apply) via the existing `cfg(target_os = "macos")` + `sandbox_exec_can_apply()`
-gate. SBPL-text assertions paired with each runtime case keep coverage
-non-empty on Linux CI.
+macOS runtime tests skip where `sandbox-exec` cannot apply. Linux Bubblewrap
+tests compile argv and exercise fail-closed/fallback behavior on every host;
+kernel tests probe real `/usr/bin/bwrap` and skip with its concrete capability
+failure when user or mount namespaces are unavailable. The Linux argv and
+kernel cases also cover writable versioned `.orbit` paths versus protected
+state, record, database/lock, and unknown paths ([ORB-10560]). Runtime-host
+tests pin the managed-worktree ADR mount as the sole local record-store
+exception, tool-host tests prove executors can refine Proposed ADRs but cannot
+accept or rewrite Accepted records, and the SQLite allocator race test launches
+two child processes with distinct worktree roots against one database/lock and
+asserts 100 collision-free dense IDs per artifact kind ([ORB-10596]).
 
 ---
 
 ## 10. Concerns & Honest Limitations
 
-1. **OS-level CLI sandboxing is macOS-only.** Linux (`bwrap`), Docker, and other wrappers remain future work; generic `run_process` still defaults to `NoSandbox`.
-2. **CLI tool allowlists are delegated.** The macOS wrapper narrows writes, but Orbit still trusts Claude/Codex/Gemini harnesses for declared `tools:`.
+1. **CLI read policy is delegated.** Both shipped OS wrappers confine writes, but Linux Bubblewrap intentionally keeps the host read surface available and neither backend replaces harness enforcement of arbitrary read globs.
+2. **CLI tool allowlists are delegated.** The OS wrappers narrow writes, but Orbit still trusts Claude/Codex/Gemini/Grok harnesses for declared `tools:`.
 3. **Provider state directories are trusted write roots.** `$HOME/.orbit` plus Codex, Claude, and Gemini state dirs are outside the activity workspace and emitted unconditionally.
 4. **Codex side-root appends are config-coupled.** If Codex is configured without the workspace-write side roots, inherited Orbit subprocesses can hit `.orbit` write denials.
 5. **macOS provenance syscall allowances are private.** `vnguard` and `Sandbox`/67 mirror current Codex startup needs and may require review after OS changes.
-6. **Pipeline env fallback can leave `fs_profile = None`.** Legacy contexts without `ORBIT_ACTIVITY_FS_PROFILE` still bypass `enforce_fs_policy`.
-7. **HTTP enforcement is helper-based.** A future builtin or non-builtin tool that skips `enforce_fs_policy` is unguarded.
-8. **Exec has no policy hook.** `proc.spawn` program allowlists are activity-layer data, not part of `PolicyDef` or `effective_profile`.
+6. **Pipeline env fallback can leave `fs_profile = None`.** Legacy contexts without `ORBIT_ACTIVITY_FS_PROFILE` still omit a profile name; the retired in-process helper used to treat that as unguarded.
+7. **No in-process `fs.*` enforcement remains.** A revived harness would need to rebuild the retired helper (or move enforcement below the tool layer) rather than rely on leftover builtins.
+8. **Generic exec has no policy hook.** `proc.spawn` program allowlists are activity-layer data, and `run_process + NoSandbox` remains unchanged; the OS wrappers attach only to CLI-agent dispatch.
 9. **Symlink semantics are implicit.** `workspace_relative_path` follows symlinks and rejects out-of-workspace targets, but no spec states that invariant.
 10. **Glob syntax is narrow.** Character classes, brace expansion, and POSIX bracket expressions are unsupported.
 11. **Policy result shapes are parallel.** `PolicyDecision` and `FsPolicyEvaluation` have no bridge for future non-fs evaluators.
@@ -237,5 +333,11 @@ non-empty on Linux CI.
 - **[T20260509-28]** — Validate policy and executor resource names as safe file stems before file-store path construction.
 - **[T20260509-30]** — Resolve `sandbox-exec` from trusted absolute locations and keep availability errors fail-closed and explicit.
 - **[ORB-00129]** — Re-allow narrow workspace child Orbit runtime stores for activity-exposed learning, friction, and job-run state tools without removing the default workspace `.orbit/**` deny.
+- **[ORB-10552]** — Ship fail-closed Linux Bubblewrap write confinement without claiming read-policy parity.
+- **[ORB-10553]** — Rescue the Ubuntu host prerequisite for the shipped Linux Bubblewrap probe.
+- **[ORB-10560]** — Add host-policy modify exceptions for the explicit versioned `.orbit` surface while preserving protected stores and unknown-path denial.
+- **[ORB-10573]** — Materialize only exact missing versioned-config anchors gated by both task scope and the effective host policy/profile before Linux provider launch.
+- **[ORB-10602]** — Replace that table-and-selector gate with per-spawn derivation from the effective profile, and surface every unmountable grant against its path and rule.
+- **[ORB-10596]** — Allow executor-authored Proposed ADRs through one narrow managed-worktree mount while preserving global allocation, federated discovery, and separate acceptance.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

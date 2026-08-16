@@ -9,19 +9,23 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use orbit_agent::loop_engine::audit::AuditSink;
-use orbit_common::test_fixtures::{TEST_CLAUDE_MODEL, TEST_CODEX_MODEL};
+use orbit_common::test_fixtures::TEST_CODEX_MODEL;
 use orbit_common::types::activity_job::{
-    AgentRole, JobV2StepBody, V2AuditEventKind, load_job_asset,
+    ActivityV2Spec, JobV2StepBody, V2AuditEventKind, load_activity_asset, load_job_asset,
 };
+#[cfg(target_os = "linux")]
+use orbit_exec::probe_bwrap;
 use orbit_store::Store;
 use tempfile::{TempDir, tempdir};
 
 use crate::context::{ProvenanceEnv, provenance_env};
 use crate::template::{self, TemplateContext};
 
-use super::super::super::agent_role::{apply_resolved_settings, resolve_agent_settings};
 use super::super::super::audit_writer::V2AuditWriter;
+use super::super::super::crew::{apply_resolved_settings, resolve_crew_settings};
 use super::super::super::dispatcher::DispatchError;
+#[cfg(target_os = "linux")]
+use super::super::super::dispatcher::ResolvedSandbox;
 use super::super::super::sqlite_sink::V2SqliteSink;
 use super::super::super::workspace::{WorktreeBoundaryGuard, validate_declared_worktree_pair};
 use super::super::run_cli_backend;
@@ -316,13 +320,51 @@ fn run_cli_backend_keeps_advisory_activity_successful_without_an_envelope() {
     );
 }
 
-/// The completion check is content-blind. An agent that declares
-/// `status: "failed"` ran its contract to the end, so it satisfies the protocol
-/// gate; whether that declared failure means anything is a question for durable
-/// state, not for this step's success. Guards the doctrine boundary: no
-/// activity decision may read an agent-loop response's content.
+/// The decorative opt-out suppresses both completion gates. A failed token is
+/// recorded for diagnostics but remains advisory when no contract consumes it.
 #[test]
-fn run_cli_backend_completion_check_accepts_a_declared_failure_envelope() {
+fn run_cli_backend_keeps_opted_out_declared_failure_advisory() {
+    let temp = tempdir().expect("tempdir");
+    let script = temp.path().join("claude");
+    write_executable(
+        &script,
+        "#!/bin/sh\ncat > /dev/null\nprintf '%s\\n' '{\"schemaVersion\":1,\"status\":\"failed\",\"result\":{},\"error\":{\"code\":\"decorative\",\"message\":\"ignored\"}}'\n",
+    );
+
+    let sink = Arc::new(RecordingSink::default());
+    let sink_for_writer: Arc<dyn AuditSink> = sink;
+    let audit = Arc::new(V2AuditWriter::new(
+        "job-advisory-declared-failure",
+        "claude:sonnet",
+        sink_for_writer,
+    ));
+    let host = TestHost::with_command(script.display().to_string());
+    let mut spec = test_agent_loop_spec_for("claude", Duration::from_secs(5));
+    spec.require_completion_envelope = false;
+
+    let outcome = run_cli_backend(
+        &host,
+        &spec,
+        "job-advisory-declared-failure",
+        audit,
+        &serde_json::json!({"prompt": "emit decorative status"}),
+        None,
+    )
+    .expect("run cli backend");
+
+    assert!(outcome.success);
+    assert!(outcome.message.is_none());
+    assert_eq!(outcome.output["response_envelope_status"], "failed");
+    assert_eq!(outcome.output["completion_envelope_required"], false);
+    assert_eq!(outcome.output["completion_envelope_satisfied"], true);
+}
+
+/// The completion frame remains content-blind, but an explicit failed status
+/// is the invocation's control-plane outcome. It must fail a required
+/// completion contract without making its `result` or `error` advisory prose
+/// authoritative.
+#[test]
+fn run_cli_backend_completion_gate_demotes_a_declared_failure_envelope() {
     let temp = tempdir().expect("tempdir");
     let script = temp.path().join("codex");
     write_executable(
@@ -350,10 +392,56 @@ fn run_cli_backend_completion_check_accepts_a_declared_failure_envelope() {
     )
     .expect("run cli backend");
 
-    assert!(outcome.success, "content must not decide step completion");
+    assert!(
+        !outcome.success,
+        "a declared failed status must not checkpoint a required completion"
+    );
     assert_eq!(outcome.output["completion_envelope_required"], true);
     assert_eq!(outcome.output["completion_envelope_satisfied"], true);
     assert!(outcome.output["completion_envelope_error"].is_null());
+    assert_eq!(outcome.output["response_envelope_status"], "failed");
+    let message = outcome.message.expect("declared failure message");
+    assert!(message.contains("declared envelope status"), "{message}");
+    assert!(message.contains("failed"), "{message}");
+}
+
+/// `timeout` is just as terminal as `failed` when the provider reports it in
+/// the completed Orbit envelope, even though the process itself exited 0.
+#[test]
+fn run_cli_backend_completion_gate_demotes_a_declared_timeout_envelope() {
+    let temp = tempdir().expect("tempdir");
+    let script = temp.path().join("codex");
+    write_executable(
+        &script,
+        "#!/bin/sh\ncat > /dev/null\nprintf '%s\\n' '{\"schemaVersion\":1,\"status\":\"timeout\",\"result\":{},\"error\":{\"code\":\"deadline\",\"message\":\"timed out\"}}'\n",
+    );
+
+    let sink = Arc::new(RecordingSink::default());
+    let sink_for_writer: Arc<dyn AuditSink> = sink;
+    let audit = Arc::new(V2AuditWriter::new(
+        "job-declared-timeout",
+        "codex:gpt-5.5",
+        sink_for_writer,
+    ));
+    let host = TestHost::with_command(script.display().to_string());
+    let spec = test_agent_loop_spec(Duration::from_secs(5));
+
+    let outcome = run_cli_backend(
+        &host,
+        &spec,
+        "job-declared-timeout",
+        audit,
+        &serde_json::json!({"task_id": "ORB-10733"}),
+        None,
+    )
+    .expect("run cli backend");
+
+    assert!(!outcome.success);
+    assert_eq!(outcome.output["completion_envelope_satisfied"], true);
+    assert_eq!(outcome.output["response_envelope_status"], "timeout");
+    let message = outcome.message.expect("declared timeout message");
+    assert!(message.contains("declared envelope status"), "{message}");
+    assert!(message.contains("timeout"), "{message}");
 }
 
 /// A provider that interleaves a wrapped tool's stdout with its own protocol
@@ -873,6 +961,80 @@ fn run_cli_backend_records_resolved_cwd_in_started_event() {
     assert_eq!(cwd, workspace_string);
 }
 
+#[cfg(target_os = "linux")]
+#[test]
+fn linux_bwrap_failed_invocation_names_ungranted_write_path_and_deny() {
+    if !probe_bwrap().available {
+        return;
+    }
+
+    let temp = tempdir().expect("tempdir");
+    let workspace = temp.path().join("worktree");
+    let orbit = workspace.join(".orbit");
+    fs::create_dir_all(&orbit).expect("denied Orbit root");
+    let script = workspace.join("codex");
+    write_executable(
+        &script,
+        "#!/bin/sh\ncat > /dev/null\ntouch \"$PWD/.orbit/ungranted\"\n",
+    );
+    let blocked_path = orbit.join("ungranted");
+    let profile = orbit_common::types::ResolvedFsProfile {
+        name: "implementer".to_string(),
+        read: vec![format!("{}/**", workspace.display())],
+        modify: vec![
+            format!("{}/**", workspace.display()),
+            format!("!{}/**", orbit.display()),
+        ],
+    };
+
+    let sink = Arc::new(RecordingSink::default());
+    let sink_for_writer: Arc<dyn AuditSink> = sink;
+    let audit = Arc::new(V2AuditWriter::new(
+        "job-linux-write-denial",
+        "codex:test",
+        sink_for_writer,
+    ));
+    let host = TestHost {
+        command: script.display().to_string(),
+        executor_args: Vec::new(),
+        provider_config: HashMap::new(),
+        sandbox: Some(ResolvedSandbox {
+            kind: orbit_common::types::ExecutorSandboxKind::LinuxBwrap,
+            fs_profile: profile,
+            allow_fallback: false,
+            managed_worktree: true,
+        }),
+        task_context: Some(serde_json::json!({
+            "workspace_path": workspace.display().to_string()
+        })),
+        workspace_root: None,
+    };
+    let spec = test_agent_loop_spec(Duration::from_secs(5));
+
+    let outcome = run_cli_backend(
+        &host,
+        &spec,
+        "job-linux-write-denial",
+        audit,
+        &serde_json::json!({"prompt": "attempt the write"}),
+        None,
+    )
+    .expect("the invocation outcome should be classified");
+
+    assert!(!outcome.success);
+    let message = outcome.message.expect("Orbit-owned denial diagnostic");
+    assert!(
+        message.contains(&blocked_path.display().to_string()),
+        "diagnostic must name the attempted path: {message}"
+    );
+    assert!(
+        message.contains("denyModify rule"),
+        "diagnostic must name the shadowing deny: {message}"
+    );
+    assert_eq!(outcome.output["sandbox_write_diagnostic"], message);
+    assert!(!blocked_path.exists());
+}
+
 #[test]
 fn run_cli_backend_emits_provider_pid_between_the_started_and_finished_events() {
     let temp = tempdir().expect("tempdir");
@@ -957,6 +1119,10 @@ const TASK_LOCAL_PIPELINE_YAML: &str =
     include_str!("../../../../../../.orbit/resources/jobs/task_local_pipeline.yaml");
 const TASK_PR_PIPELINE_YAML: &str =
     include_str!("../../../../../../.orbit/resources/jobs/task_pr_pipeline.yaml");
+const EPIC_PIPELINE_YAML: &str =
+    include_str!("../../../../../../.orbit/resources/jobs/epic_pipeline.yaml");
+const EPIC_ORCHESTRATOR_YAML: &str =
+    include_str!("../../../../../../.orbit/resources/activities/epic_orchestrator.yaml");
 
 #[test]
 fn actual_ship_pipeline_implementers_run_for_each_provider_and_stay_in_the_worktree() {
@@ -1017,6 +1183,88 @@ printf '%s\n' '{{"schemaVersion":1,"status":"success","result":{{}},"error":null
         ]),
         "the matrix must load and render both committed shipment assets"
     );
+}
+
+#[test]
+fn epic_orchestrator_finisher_writes_stay_in_the_epic_worktree() {
+    let fixture = linked_worktree_fixture();
+    let assigned = fixture.assigned.display().to_string();
+    let script = fixture.root().join("codex");
+    write_executable(
+        &script,
+        &format!(
+            r#"#!/bin/sh
+cat > /dev/null
+test "$(pwd -P)" = '{assigned}' || exit 41
+test "$(git rev-parse --show-toplevel)" = '{assigned}' || exit 42
+printf '%s\n' 'finisher work' > finisher.txt
+printf '%s\n' '{{"schemaVersion":1,"status":"success","result":{{}},"error":null}}'
+"#
+        ),
+    );
+    let mut host = TestHost::with_command(script.display().to_string());
+    host.workspace_root = Some(fixture.primary.clone());
+    let input = rendered_finish_input_from_epic_pipeline(&fixture.assigned, "ORB-EPIC-FINISH");
+    let spec = epic_orchestrator_spec(Duration::from_secs(5));
+
+    let outcome = run_cli_backend(
+        &host,
+        &spec,
+        "run-epic-finisher",
+        test_audit("run-epic-finisher", "codex"),
+        &input,
+        None,
+    )
+    .expect("epic finisher invocation");
+
+    assert!(outcome.success);
+    assert_eq!(
+        fs::read_to_string(fixture.assigned.join("finisher.txt")).expect("assigned finisher write"),
+        "finisher work\n"
+    );
+    assert!(
+        !fixture.primary.join("finisher.txt").exists(),
+        "finisher must not write the registered primary checkout"
+    );
+}
+
+#[test]
+fn epic_orchestrator_declared_root_mismatch_fails_before_provider_spawn() {
+    let fixture = linked_worktree_fixture();
+    let marker = fixture.root().join("provider-started");
+    let script = fixture.root().join("codex");
+    write_executable(
+        &script,
+        &format!(
+            "#!/bin/sh\nprintf started > '{}'\nexit 0\n",
+            marker.display()
+        ),
+    );
+    let mut host = TestHost::with_command(script.display().to_string());
+    host.workspace_root = Some(fixture.primary.clone());
+    let mut input =
+        rendered_finish_input_from_epic_pipeline(&fixture.assigned, "ORB-EPIC-MISMATCH");
+    input["repo_root"] = serde_json::json!(fixture.primary);
+    let spec = epic_orchestrator_spec(Duration::from_secs(5));
+    let audit = test_audit("run-epic-finisher-mismatch", "codex");
+
+    let error = run_cli_backend(
+        &host,
+        &spec,
+        "run-epic-finisher-mismatch",
+        audit.clone(),
+        &input,
+        None,
+    )
+    .expect_err("mismatched epic finisher roots must fail closed");
+
+    assert_worktree_mismatch(
+        &error,
+        "ORB-EPIC-MISMATCH",
+        "run-epic-finisher-mismatch",
+        "different Git checkouts",
+    );
+    assert_pre_spawn_failure(&audit, &marker);
 }
 
 #[test]
@@ -1962,8 +2210,8 @@ fn dirty_to_clean_primary_fast_forward_is_accepted() {
     // `dirty_paths` moves from non-empty to empty even though no interference
     // occurred (HEAD proven to have advanced, `conflicting_paths` empty).
     let fixture = linked_worktree_fixture();
-    let dirty_record = ".orbit/learnings/L-0009/learning.yaml";
-    write_primary_file(&fixture, dirty_record, "id: L-0009\n");
+    let dirty_record = ".orbit/auto_tasks/nightly.yaml";
+    write_primary_file(&fixture, dirty_record, "name: nightly\n");
 
     let guard = boundary_guard(&fixture, "ORB-DIRTY-TO-CLEAN-FF", "run-dirty-to-clean-ff");
 
@@ -2031,10 +2279,10 @@ fn primary_dirt_intersecting_the_run_defeats_a_fast_forward() {
 #[test]
 fn stationary_primary_record_store_dirt_disjoint_from_the_run_is_accepted() {
     let fixture = linked_worktree_fixture();
-    let tracked_record = ".orbit/learnings/L-0001/learning.yaml";
-    write_primary_file(&fixture, tracked_record, "id: L-0001\n");
+    let tracked_record = ".orbit/auto_tasks/nightly.yaml";
+    write_primary_file(&fixture, tracked_record, "name: nightly\n");
     git_ok(&fixture.primary, &["add", "--", tracked_record]);
-    git_ok(&fixture.primary, &["commit", "-m", "track a learning"]);
+    git_ok(&fixture.primary, &["commit", "-m", "track an auto-task"]);
 
     let guard = boundary_guard(&fixture, "ORB-STATIONARY-DIRT", "run-stationary-dirt");
 
@@ -2043,7 +2291,7 @@ fn stationary_primary_record_store_dirt_disjoint_from_the_run_is_accepted() {
     // already-tracked record and drops an untracked sibling, all disjoint from
     // the run, while the primary HEAD and branch never move.
     let head_before = git_bytes(&fixture.primary, &["rev-parse", "HEAD"]);
-    write_primary_file(&fixture, tracked_record, "id: L-0001\ntags: []\n");
+    write_primary_file(&fixture, tracked_record, "name: nightly\nenabled: true\n");
     let untracked_record = write_primary_file(
         &fixture,
         ".orbit/frictions/F-0002/friction.yaml",
@@ -2079,11 +2327,7 @@ fn stationary_primary_source_edit_stays_fail_closed_even_when_disjoint() {
     fs::write(fixture.assigned.join("candidate.txt"), "candidate\n").expect("write run candidate");
     // Disjoint from the run, but outside Orbit's record store: this is the
     // ORB-10134 escape shape, and no path-disjointness argument may excuse it.
-    write_primary_file(
-        &fixture,
-        ".orbit/learnings/L-0003/learning.yaml",
-        "id: L-0003\n",
-    );
+    write_primary_file(&fixture, ".orbit/routines/nightly.yaml", "name: nightly\n");
     write_primary_file(&fixture, "src/escaped.rs", "fn escaped() {}\n");
 
     let error = guard
@@ -2401,6 +2645,68 @@ fn rendered_implement_input_from_asset(
     assert_eq!(rendered["workspace_path"], assigned);
     assert_eq!(rendered["repo_root"], assigned);
     (asset.name, rendered)
+}
+
+fn rendered_finish_input_from_epic_pipeline(
+    assigned_root: &Path,
+    task_id: &str,
+) -> serde_json::Value {
+    let asset = load_job_asset(EPIC_PIPELINE_YAML).expect("epic pipeline parses");
+    let assemble = asset
+        .spec
+        .steps
+        .iter()
+        .find(|step| step.id == "assemble")
+        .expect("epic pipeline has assemble");
+    let JobV2StepBody::Loop { loop_ } = &assemble.body else {
+        panic!("epic assemble must be a loop");
+    };
+    let finish = loop_
+        .steps
+        .iter()
+        .find(|step| step.id == "finish")
+        .expect("epic assemble has finish");
+    let JobV2StepBody::TargetRef(finish) = &finish.body else {
+        panic!("epic finish must reference epic_orchestrator");
+    };
+    assert_eq!(finish.target, "activity:epic_orchestrator");
+    let template_input = finish
+        .default_input
+        .as_ref()
+        .expect("epic_orchestrator default input");
+    for field in ["workspace_path", "repo_root"] {
+        assert_eq!(
+            template_input[field], "{{ steps.worktree.output.workspace_path }}",
+            "epic finisher must source {field} from the assigned worktree"
+        );
+    }
+
+    let assigned = assigned_root.display().to_string();
+    let mut steps = HashMap::new();
+    steps.insert(
+        "worktree".to_string(),
+        serde_json::json!({ "output": { "workspace_path": assigned } }),
+    );
+    let context = TemplateContext {
+        input: serde_json::json!({ "epic_task_id": task_id }),
+        steps,
+        ..TemplateContext::default()
+    };
+    let rendered = render_asset_value(template_input, &context);
+    assert_eq!(rendered["task_id"], task_id);
+    assert_eq!(rendered["workspace_path"], assigned);
+    assert_eq!(rendered["repo_root"], assigned);
+    rendered
+}
+
+fn epic_orchestrator_spec(timeout: Duration) -> orbit_common::types::activity_job::AgentLoopSpec {
+    let asset = load_activity_asset(EPIC_ORCHESTRATOR_YAML).expect("parse epic orchestrator");
+    let ActivityV2Spec::AgentLoop(mut spec) = asset.spec.spec else {
+        panic!("epic_orchestrator must be an agent_loop");
+    };
+    spec.wall_clock_timeout_seconds = timeout.as_secs();
+    spec.provider = orbit_common::types::activity_job::Provider::Codex;
+    spec
 }
 
 fn render_asset_value(value: &serde_json::Value, context: &TemplateContext) -> serde_json::Value {
@@ -2930,77 +3236,14 @@ fn run_cli_backend_keeps_success_when_envelope_reports_success() {
 /// implementer (identity attribution stays family; no leakage of family name
 /// into the --model flag that reaches the CLI).
 #[test]
-fn mixed_crew_drives_exact_models_to_planner_and_implementer() {
+fn single_crew_drives_exact_model_to_agent() {
     let temp = tempdir().expect("tempdir");
-    let claude_script = temp.path().join("claude");
     let codex_script = temp.path().join("codex");
-    write_executable(
-        &claude_script,
-        "#!/bin/sh\nprintf '{\"schemaVersion\":1,\"status\":\"success\",\"result\":{},\"error\":null}\\n'\n",
-    );
     write_executable(
         &codex_script,
         "#!/bin/sh\nprintf '{\"schemaVersion\":1,\"status\":\"success\",\"result\":{},\"error\":null}\\n'\n",
     );
 
-    // planner leg via mixed fixture crew
-    let sink_for_writer_p: Arc<dyn AuditSink> = Arc::new(RecordingSink::default());
-    let audit_p = Arc::new(V2AuditWriter::new(
-        "job-crew-planner",
-        format!("claude:{TEST_CLAUDE_MODEL}"),
-        sink_for_writer_p,
-    ));
-    let host_p = TestHost::with_command(claude_script.display().to_string());
-    let mut spec_p = test_agent_loop_spec_for("claude", Duration::from_secs(5));
-    spec_p.role = Some(AgentRole::Planner);
-    let input_p = serde_json::json!({
-        "prompt": "draft plan",
-        "crew": "mixed-fixture",
-        "task_id": "T-crew"
-    });
-    let resolved_p = resolve_agent_settings(AgentRole::Planner, &host_p, &spec_p, &input_p);
-    assert_eq!(resolved_p.model.as_deref(), Some(TEST_CLAUDE_MODEL));
-    let mut spec_p_run = spec_p.clone();
-    apply_resolved_settings(&mut spec_p_run, &resolved_p);
-    let _ = run_cli_backend(
-        &host_p,
-        &spec_p_run,
-        "job-crew-planner",
-        audit_p.clone(),
-        &input_p,
-        None,
-    )
-    .expect("planner cli run");
-
-    let events_p = audit_p.events_snapshot().expect("planner events");
-    let argv_p = events_p
-        .iter()
-        .find_map(|e| match &e.kind {
-            V2AuditEventKind::CliInvocationStarted {
-                argv_redacted,
-                provider,
-                ..
-            } => {
-                assert_eq!(
-                    provider, "claude",
-                    "identity attribution must be claude family"
-                );
-                Some(argv_redacted.clone())
-            }
-            _ => None,
-        })
-        .expect("planner started event");
-    let model_idx_p = argv_p
-        .iter()
-        .position(|a| a == "--model")
-        .expect("planner argv has --model");
-    assert_eq!(
-        argv_p.get(model_idx_p + 1).map(String::as_str),
-        Some(TEST_CLAUDE_MODEL),
-        "planner --model must be exact {TEST_CLAUDE_MODEL}, not family"
-    );
-
-    // implementer leg via same crew
     let sink_for_writer_i: Arc<dyn AuditSink> = Arc::new(RecordingSink::default());
     let audit_i = Arc::new(V2AuditWriter::new(
         "job-crew-impl",
@@ -3008,14 +3251,15 @@ fn mixed_crew_drives_exact_models_to_planner_and_implementer() {
         sink_for_writer_i,
     ));
     let host_i = TestHost::with_command(codex_script.display().to_string());
-    let mut spec_i = test_agent_loop_spec_for("codex", Duration::from_secs(5));
-    spec_i.role = Some(AgentRole::Implementer);
+    let spec_i = test_agent_loop_spec_for("codex", Duration::from_secs(5));
     let input_i = serde_json::json!({
         "prompt": "implement",
-        "crew": "mixed-fixture",
+        "crew": "single-fixture",
         "task_id": "T-crew"
     });
-    let resolved_i = resolve_agent_settings(AgentRole::Implementer, &host_i, &spec_i, &input_i);
+    let resolved_i = resolve_crew_settings(&host_i, &spec_i, &input_i, &input_i)
+        .expect("crew resolution")
+        .expect("fixture crew config");
     assert_eq!(resolved_i.model.as_deref(), Some(TEST_CODEX_MODEL));
     let mut spec_i_run = spec_i.clone();
     apply_resolved_settings(&mut spec_i_run, &resolved_i);
@@ -3115,4 +3359,224 @@ fn run_cli_backend_redacts_token_shaped_argv_in_audit() {
         joined.contains("[REDACTED"),
         "argv should carry a redaction placeholder: {joined}"
     );
+}
+
+/// [ORB-10746] The `error_max_turns` ending: exit 0, `is_error: true`, no
+/// envelope in either `result` or `structured_output`. Structured output stops
+/// a model from *answering in prose*; it cannot stop a run from hitting its
+/// turn limit. The step must still fail — and must now say why, instead of
+/// leaving an operator to explain a full-cost run from the generic message.
+#[test]
+fn run_cli_backend_names_the_terminal_reason_on_an_exit_zero_error_ending() {
+    let temp = tempdir().expect("tempdir");
+    let script = temp.path().join("claude");
+    let stdout = serde_json::json!({
+        "is_error": true,
+        "subtype": "error_max_turns",
+        "terminal_reason": "max_turns",
+        "num_turns": 200,
+        "total_cost_usd": 4.17,
+        "result": Option::<String>::None,
+        "structured_output": Option::<String>::None
+    })
+    .to_string();
+    write_executable(
+        &script,
+        &format!("#!/bin/sh\ncat > /dev/null\nprintf '%s\\n' '{stdout}'\n"),
+    );
+
+    let sink = Arc::new(RecordingSink::default());
+    let sink_for_writer: Arc<dyn AuditSink> = sink;
+    let audit = Arc::new(V2AuditWriter::new(
+        "job-max-turns",
+        "claude:sonnet",
+        sink_for_writer,
+    ));
+    let host = TestHost::with_command(script.display().to_string());
+    let spec = test_agent_loop_spec_for("claude", Duration::from_secs(5));
+
+    let outcome = run_cli_backend(
+        &host,
+        &spec,
+        "job-max-turns",
+        audit,
+        &serde_json::json!({"task_id": "ORB-10746"}),
+        None,
+    )
+    .expect("run cli backend");
+
+    // The decision is unchanged from ORB-10449; only the message improves.
+    assert!(!outcome.success, "a turn-limit ending must not checkpoint");
+    assert_eq!(outcome.output["exit_code"], 0);
+    assert_eq!(outcome.output["completion_envelope_satisfied"], false);
+    let message = outcome.message.expect("terminal ending message");
+    assert!(message.contains("agent step did not complete"), "{message}");
+    assert!(message.contains("error_max_turns"), "{message}");
+    assert!(message.contains("max_turns"), "{message}");
+}
+
+/// A claude build without `--json-schema` rejects it at argument parsing, so
+/// the run fails before any agent work — and before any cost. The whole point
+/// of failing this early is lost if the operator only sees an exit code.
+#[test]
+fn run_cli_backend_reports_a_missing_json_schema_flag_as_a_capability_failure() {
+    let temp = tempdir().expect("tempdir");
+    let script = temp.path().join("claude");
+    write_executable(
+        &script,
+        "#!/bin/sh\ncat > /dev/null\n\
+         printf '%s\\n' \"error: unknown option '--json-schema'\" >&2\nexit 1\n",
+    );
+
+    let sink = Arc::new(RecordingSink::default());
+    let sink_for_writer: Arc<dyn AuditSink> = sink;
+    let audit = Arc::new(V2AuditWriter::new(
+        "job-missing-flag",
+        "claude:sonnet",
+        sink_for_writer,
+    ));
+    let host = TestHost::with_command(script.display().to_string());
+    let spec = test_agent_loop_spec_for("claude", Duration::from_secs(5));
+
+    let outcome = run_cli_backend(
+        &host,
+        &spec,
+        "job-missing-flag",
+        audit,
+        &serde_json::json!({"task_id": "ORB-10746"}),
+        None,
+    )
+    .expect("run cli backend");
+
+    assert!(!outcome.success);
+    let message = outcome.message.expect("capability message");
+    assert!(
+        message.contains("does not support --json-schema"),
+        "{message}"
+    );
+    assert!(message.contains("no agent work ran"), "{message}");
+}
+
+/// The other half of the capability story: a CLI that accepts the flag but
+/// whose API rejects the schema fails mid-run, with the evidence in the
+/// response wrapper rather than on stderr. `subtype` still reads `"success"`
+/// in this shape, so nothing may key on it.
+#[test]
+fn run_cli_backend_reports_a_rejected_schema_from_the_response_wrapper() {
+    let temp = tempdir().expect("tempdir");
+    let script = temp.path().join("claude");
+    let stdout = serde_json::json!({
+        "is_error": true,
+        "subtype": "success",
+        "structured_output": Option::<String>::None,
+        "result": "API Error: 400 tools.0.custom.input_schema: input_schema does not support \
+                   oneOf, allOf, or anyOf at the top level"
+    })
+    .to_string();
+    let stdout_file = temp.path().join("stdout.json");
+    fs::write(&stdout_file, &stdout).expect("write rejection fixture");
+    write_executable(
+        &script,
+        &format!(
+            "#!/bin/sh\ncat > /dev/null\ncat '{}'\nexit 1\n",
+            stdout_file.display()
+        ),
+    );
+
+    let sink = Arc::new(RecordingSink::default());
+    let sink_for_writer: Arc<dyn AuditSink> = sink;
+    let audit = Arc::new(V2AuditWriter::new(
+        "job-rejected-schema",
+        "claude:sonnet",
+        sink_for_writer,
+    ));
+    let host = TestHost::with_command(script.display().to_string());
+    let spec = test_agent_loop_spec_for("claude", Duration::from_secs(5));
+
+    let outcome = run_cli_backend(
+        &host,
+        &spec,
+        "job-rejected-schema",
+        audit,
+        &serde_json::json!({"task_id": "ORB-10746"}),
+        None,
+    )
+    .expect("run cli backend");
+
+    assert!(!outcome.success);
+    let message = outcome.message.expect("schema rejection message");
+    assert!(
+        message.contains("rejected Orbit's response-envelope schema"),
+        "{message}"
+    );
+    assert!(message.contains("input_schema"), "{message}");
+}
+
+/// [ORB-10746] The prevented shape, end to end: a tool-using run that would
+/// once have ended in prose now terminates with the schema-validated envelope
+/// in `structured_output`, and the step checkpoints. Verified against Claude
+/// Code 2.1.220, whose reply carried `stop_reason: "tool_use"` — the exact
+/// condition under which ORB-10734 produced prose.
+#[test]
+fn run_cli_backend_accepts_a_structured_output_envelope_from_a_tool_using_run() {
+    let temp = tempdir().expect("tempdir");
+    let script = temp.path().join("claude");
+    let stdout = serde_json::json!({
+        "is_error": false,
+        "stop_reason": "tool_use",
+        "num_turns": 20,
+        "session_id": "44a7dbc8-333e-4852-aaf5-b61d8f4db174",
+        "total_cost_usd": 0.2455644,
+        "usage": {
+            "input_tokens": 154,
+            "cache_creation_input_tokens": 19922,
+            "cache_read_input_tokens": 714235,
+            "output_tokens": 3372
+        },
+        "terminal_reason": "completed",
+        "subtype": "success",
+        // Claude emits the validated envelope in both places; the object is
+        // the authoritative one.
+        "result": "{\"schemaVersion\":1,\"status\":\"success\",\"result\":{\"summary\":\"done\"},\"error\":null}",
+        "structured_output": {
+            "schemaVersion": 1,
+            "status": "success",
+            "result": {"summary": "done"},
+            "error": null
+        }
+    })
+    .to_string();
+    let stdout_file = temp.path().join("stdout.json");
+    fs::write(&stdout_file, &stdout).expect("write structured-output fixture");
+    write_executable(
+        &script,
+        &format!(
+            "#!/bin/sh\ncat > /dev/null\ncat '{}'\n",
+            stdout_file.display()
+        ),
+    );
+
+    let sink = Arc::new(RecordingSink::default());
+    let sink_for_writer: Arc<dyn AuditSink> = sink;
+    let audit = Arc::new(V2AuditWriter::new(
+        "job-structured-output",
+        "claude:sonnet",
+        sink_for_writer,
+    ));
+    let host = TestHost::with_command(script.display().to_string());
+    let spec = test_agent_loop_spec_for("claude", Duration::from_secs(5));
+
+    let outcome = run_cli_backend(
+        &host,
+        &spec,
+        "job-structured-output",
+        audit,
+        &serde_json::json!({"task_id": "ORB-10734"}),
+        None,
+    )
+    .expect("run cli backend");
+
+    assert!(outcome.success, "{:?}", outcome.message);
+    assert_eq!(outcome.output["completion_envelope_satisfied"], true);
+    assert_eq!(outcome.output["response_envelope_status"], "success");
 }

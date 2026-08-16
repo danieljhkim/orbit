@@ -14,6 +14,8 @@ if ! command -v python3 >/dev/null 2>&1; then
 fi
 
 python3 - "$repo_root" <<'PY'
+from __future__ import annotations
+
 import json
 import re
 import sys

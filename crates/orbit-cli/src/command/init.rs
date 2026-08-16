@@ -1,20 +1,21 @@
 use clap::Args;
 use orbit_core::command::init::{InitOptions, init_global};
-use orbit_core::config::RawAgentRoleConfig;
+use orbit_core::config::RawCrewAssignment;
 use orbit_core::config::agent_detect::{DetectedAgents, RealAgentEnvProbe, detect};
 use orbit_core::config::agent_prompt::{
-    StdinPrompter, collect_qa_crew_setting, collect_role_settings,
+    StdinPrompter, collect_crew_setting, collect_qa_crew_setting,
 };
 use orbit_core::{OrbitError, OrbitRuntime};
-use orbit_remote::workspace_registry::global_orbit_dir;
-use orbit_remote::{
-    HostIdentityOutcome, HostMode, NewHostIdentity, ensure_host_identity, os_hostname,
+use orbit_registry::workspace_registry::global_orbit_dir;
+use orbit_registry::{
+    HostIdentityOutcome, NewHostIdentity, ensure_host_identity, os_hostname,
+    validate_new_task_prefix,
 };
 use std::collections::BTreeMap;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 
-use crate::command::Execute;
+use crate::command::{CommandOut, CommandOutput, Execute};
 
 #[derive(Args)]
 #[command(about = "Initialize the global Orbit root (~/.orbit)")]
@@ -35,26 +36,33 @@ pub struct InitCommand {
     #[arg(long)]
     pub host_name: Option<String>,
 
-    /// Host operating mode for this machine's identity: standalone | hub |
-    /// spoke. Defaults to standalone. Used only on first init.
-    #[arg(long, value_name = "MODE")]
-    pub host_mode: Option<String>,
+    /// Immutable task-id namespace for this machine (2-5 uppercase ASCII
+    /// letters). Required on first init; reserved artifact namespaces cannot
+    /// be chosen.
+    #[arg(long, value_name = "PREFIX")]
+    pub task_prefix: Option<String>,
 }
 
 impl Execute for InitCommand {
-    fn execute(self, _runtime: &OrbitRuntime) -> Result<(), OrbitError> {
-        self.run(None)
+    fn execute(self, _runtime: &OrbitRuntime) -> CommandOut {
+        {
+            self.run(None)?;
+            Ok(CommandOutput::Silent)
+        }
     }
 }
 
 impl InitCommand {
-    pub fn execute_without_runtime(self, root_override: Option<&Path>) -> Result<(), OrbitError> {
-        self.run(root_override)
+    pub fn execute_without_runtime(self, root_override: Option<&Path>) -> CommandOut {
+        {
+            self.run(root_override)?;
+            Ok(CommandOutput::Silent)
+        }
     }
 
     fn run(self, root_override: Option<&Path>) -> Result<(), OrbitError> {
         let detected = detect(&RealAgentEnvProbe);
-        let role_settings = collect_role_settings_for_init(
+        let crew_settings = collect_crew_settings_for_init(
             root_override,
             self.force,
             self.non_interactive,
@@ -65,7 +73,7 @@ impl InitCommand {
             InitOptions {
                 force: self.force,
                 refresh_defaults: true,
-                role_settings,
+                crew_settings,
                 detected: Some(detected),
                 ..Default::default()
             },
@@ -77,7 +85,7 @@ impl InitCommand {
             root_override,
             self.non_interactive,
             self.host_name,
-            self.host_mode,
+            self.task_prefix,
         )?;
         let paths = reported_init_paths(root_override);
         print_init_result(InitOutput {
@@ -87,7 +95,10 @@ impl InitCommand {
             config_path: paths.config_path,
             created_config: result.created_config,
             refreshed_default_activities: result.refreshed_default_activities,
+            retired_default_activities: result.retired_default_activities,
             refreshed_default_jobs: result.refreshed_default_jobs,
+            retired_default_jobs: result.retired_default_jobs,
+            managed_asset_warnings: result.managed_asset_warnings,
             refreshed_default_executors: result.refreshed_default_executors,
             refreshed_default_policies: result.refreshed_default_policies,
         });
@@ -95,44 +106,46 @@ impl InitCommand {
     }
 }
 
-/// Create or migrate this machine's host identity. Host name and mode are only
+/// Create or migrate this machine's host identity. Host name and task prefix are only
 /// consulted when the identity is absent (a fresh create); a present identity
 /// is preserved unchanged and a legacy file is migrated without prompting.
 fn ensure_host_identity_for_init(
     root_override: Option<&Path>,
     non_interactive: bool,
     host_name: Option<String>,
-    host_mode: Option<String>,
+    task_prefix: Option<String>,
 ) -> Result<(), OrbitError> {
     let global_root = match root_override {
         Some(root) => root.to_path_buf(),
         None => global_orbit_dir()?,
     };
-    // Validate an explicit mode up front so an invalid value fails closed even
-    // when the identity already exists.
-    let requested_mode = match host_mode.as_deref() {
-        Some(mode) => Some(HostMode::parse(mode)?),
-        None => None,
-    };
-
     let outcome = ensure_host_identity(&global_root, move || {
         let host_id = match host_name {
             Some(name) => name,
             None if non_interactive => {
                 return Err(OrbitError::InvalidInput(
-                    "host identity is absent; pass --host-name (and optionally --host-mode) \
+                    "host identity is absent; pass --host-name and --task-prefix \
                      to initialize a fresh host non-interactively"
                         .to_string(),
                 ));
             }
             None => prompt_host_name()?,
         };
-        let mode = match requested_mode {
-            Some(mode) => mode,
-            None if non_interactive => HostMode::Standalone,
-            None => prompt_host_mode()?,
+        let task_prefix = match task_prefix {
+            Some(prefix) => validate_new_task_prefix(&prefix)?,
+            None if non_interactive => {
+                return Err(OrbitError::InvalidInput(
+                    "host identity is absent; pass --task-prefix <PREFIX> (2-5 uppercase ASCII letters) \
+                     to initialize a fresh host non-interactively"
+                        .to_string(),
+                ));
+            }
+            None => prompt_task_prefix()?,
         };
-        Ok(NewHostIdentity { host_id, mode })
+        Ok(NewHostIdentity {
+            host_id,
+            task_prefix,
+        })
     })?;
 
     report_host_identity(&outcome);
@@ -147,8 +160,8 @@ fn report_host_identity(outcome: &HostIdentityOutcome) {
         HostIdentityOutcome::Unchanged(_) => "unchanged",
     };
     println!(
-        "host identity ({verb}): host_id=\"{}\", machine_id={}, mode={}",
-        identity.host_id, identity.machine_id, identity.mode
+        "host identity ({verb}): host_id=\"{}\", machine_id={}, task_prefix={}",
+        identity.host_id, identity.machine_id, identity.task_prefix
     );
 }
 
@@ -172,14 +185,11 @@ fn prompt_host_name() -> Result<String, OrbitError> {
     }
 }
 
-fn prompt_host_mode() -> Result<HostMode, OrbitError> {
+fn prompt_task_prefix() -> Result<String, OrbitError> {
     loop {
-        let answer = read_line("Host mode (standalone/hub/spoke) [standalone]: ")?;
-        if answer.is_empty() {
-            return Ok(HostMode::Standalone);
-        }
-        match HostMode::parse(&answer) {
-            Ok(mode) => return Ok(mode),
+        let answer = read_line("Task prefix (2-5 uppercase ASCII letters): ")?;
+        match validate_new_task_prefix(&answer) {
+            Ok(prefix) => return Ok(prefix),
             Err(error) => println!("{error}"),
         }
     }
@@ -198,18 +208,18 @@ fn read_line(prompt: &str) -> Result<String, OrbitError> {
     Ok(line.trim().to_string())
 }
 
-/// Decide whether to prompt for `[agent.<role>]` settings and collect them.
+/// Decide whether to prompt for the default and QA crew settings.
 ///
 /// Prompts run only when ALL of:
 /// - `--non-interactive` is unset
 /// - the target config.toml does not already exist (or `--force` is set, which
 ///   wipes it)
-pub(crate) fn collect_role_settings_for_init(
+pub(crate) fn collect_crew_settings_for_init(
     root_override: Option<&Path>,
     force: bool,
     non_interactive: bool,
     detected: &DetectedAgents,
-) -> Result<Option<BTreeMap<String, RawAgentRoleConfig>>, OrbitError> {
+) -> Result<Option<BTreeMap<String, RawCrewAssignment>>, OrbitError> {
     if non_interactive {
         return Ok(None);
     }
@@ -220,8 +230,9 @@ pub(crate) fn collect_role_settings_for_init(
     }
 
     let mut prompter = StdinPrompter;
-    let mut collected = collect_role_settings(detected, &mut prompter)
+    let custom = collect_crew_setting(detected, &mut prompter)
         .map_err(|err| OrbitError::Io(format!("agent prompts failed: {err}")))?;
+    let mut collected = BTreeMap::from([("custom".to_string(), custom)]);
     let qa = collect_qa_crew_setting(detected, &mut prompter)
         .map_err(|err| OrbitError::Io(format!("QA crew prompt failed: {err}")))?;
     if let Some(qa) = qa {
@@ -240,20 +251,25 @@ fn resolve_config_path(root_override: Option<&Path>) -> Result<PathBuf, OrbitErr
 
 fn print_init_result(output: InitOutput) {
     println!(
-        "skills: root={}, refreshed={}, symlink_created={}; config: path={}, created={}; default_activities_refreshed={}; default_jobs_refreshed={}; default_executors_refreshed={}; default_policies_refreshed={}",
+        "skills: root={}, refreshed={}, symlink_created={}; config: path={}, created={}; default_activities_refreshed={}, retired={}; default_jobs_refreshed={}, retired={}; default_executors_refreshed={}; default_policies_refreshed={}",
         output.skills_root,
         output.refreshed_skill_files,
         output.created_skills_symlink,
         output.config_path,
         output.created_config,
         output.refreshed_default_activities,
+        output.retired_default_activities,
         output.refreshed_default_jobs,
+        output.retired_default_jobs,
         output.refreshed_default_executors,
         output.refreshed_default_policies,
     );
+    for warning in output.managed_asset_warnings {
+        eprintln!("warning: {warning}");
+    }
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 struct InitOutput {
     skills_root: &'static str,
     refreshed_skill_files: usize,
@@ -261,7 +277,10 @@ struct InitOutput {
     config_path: &'static str,
     created_config: bool,
     refreshed_default_activities: usize,
+    retired_default_activities: usize,
     refreshed_default_jobs: usize,
+    retired_default_jobs: usize,
+    managed_asset_warnings: Vec<String>,
     refreshed_default_executors: usize,
     refreshed_default_policies: usize,
 }
@@ -273,7 +292,7 @@ struct ReportedInitPaths {
 }
 
 fn reported_init_paths(root_override: Option<&Path>) -> ReportedInitPaths {
-    if root_override.is_some_and(|path| !is_global_orbit_root(path)) {
+    if root_override.is_some_and(|path| !orbit_core::runtime::is_global_orbit_root(path)) {
         ReportedInitPaths {
             skills_root: "<custom orbit root>/skills",
             config_path: "<custom orbit root>/config.toml",
@@ -284,13 +303,4 @@ fn reported_init_paths(root_override: Option<&Path>) -> ReportedInitPaths {
             config_path: "~/.orbit/config.toml",
         }
     }
-}
-
-fn is_global_orbit_root(path: &Path) -> bool {
-    global_orbit_root().is_some_and(|expected| path == expected)
-}
-
-fn global_orbit_root() -> Option<PathBuf> {
-    let home = std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE"))?;
-    Some(PathBuf::from(home).join(".orbit"))
 }

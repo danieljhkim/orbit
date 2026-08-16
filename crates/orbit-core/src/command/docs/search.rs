@@ -1,10 +1,10 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
-use orbit_common::types::{Adr, AdrStatus, OrbitError};
+use orbit_common::types::OrbitError;
 use orbit_common::utility::glob::{match_glob, normalize_glob_path};
 use orbit_common::utility::selector::anchor_path;
-use orbit_search::{AdrEmbeddingSource, AdrSearchSource, DocEmbeddingSource, DocSearchSource};
+use orbit_search::{DocEmbeddingSource, DocSearchSource};
 
 use super::frontmatter::parse_doc_tolerant;
 use super::path_util::{path_to_slash_string, repo_relative_path};
@@ -90,12 +90,7 @@ pub(super) fn path_is_under_configured_roots(
     Ok(false)
 }
 
-pub(super) fn adr_status_in_docs_search(status: AdrStatus, include_superseded: bool) -> bool {
-    matches!(status, AdrStatus::Proposed | AdrStatus::Accepted)
-        || (include_superseded && status == AdrStatus::Superseded)
-}
-
-pub(super) fn doc_search_source(record: DocRecord) -> DocSearchSource {
+pub(super) fn doc_search_source(record: DocRecord, body: String) -> DocSearchSource {
     DocSearchSource {
         path: record.path,
         doc_type: record.frontmatter.doc_type.as_str().to_string(),
@@ -109,6 +104,7 @@ pub(super) fn doc_search_source(record: DocRecord) -> DocSearchSource {
             .into_iter()
             .map(|artifact| artifact.as_str().to_string())
             .collect(),
+        body,
     }
 }
 
@@ -127,50 +123,6 @@ pub(super) fn doc_embedding_sources(
         });
     }
     Ok(sources)
-}
-
-pub(super) fn adr_embedding_sources(
-    repo_root: &Path,
-    adrs: Vec<Adr>,
-) -> Result<Vec<AdrEmbeddingSource>, OrbitError> {
-    let mut sources = Vec::new();
-    // ADR ids can briefly appear in multiple status directories; index one source per id.
-    let adrs = adrs
-        .into_iter()
-        .map(|adr| (adr.id.clone(), adr))
-        .collect::<BTreeMap<_, _>>();
-    for adr in adrs.into_values() {
-        let body_path = repo_root.join(adr_body_search_path(adr.status, &adr.id));
-        let body = std::fs::read_to_string(&body_path)
-            .map_err(|error| OrbitError::Io(format!("read {}: {error}", body_path.display())))?;
-        sources.push(AdrEmbeddingSource {
-            id: adr.id,
-            title: adr.title,
-            body,
-            tags: adr.tags,
-        });
-    }
-    Ok(sources)
-}
-
-pub(super) fn adr_search_source(adr: Adr) -> AdrSearchSource {
-    AdrSearchSource {
-        path: adr_body_search_path(adr.status, &adr.id),
-        id: adr.id,
-        title: adr.title,
-        status: adr.status,
-        tags: adr.tags,
-        paths: adr.paths,
-        related_features: adr.related_features,
-    }
-}
-
-pub(super) fn adr_body_search_path(status: AdrStatus, id: &str) -> std::path::PathBuf {
-    std::path::PathBuf::from(".orbit")
-        .join("adrs")
-        .join(status.cli_name())
-        .join(id)
-        .join("body.md")
 }
 
 #[derive(Debug)]

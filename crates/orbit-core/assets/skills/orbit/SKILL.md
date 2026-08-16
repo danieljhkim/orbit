@@ -1,69 +1,42 @@
 ---
 name: orbit
-description: Entry point for Orbit. Once a workspace is initialized (`.orbit/` present), routes to workflow siblings (`orbit-task`, `orbit-task-pilot`, `orbit-workflow`, `orbit-search`, `orbit-knowledge`) and covers tool invocation surfaces and task lifecycle. When `.orbit/` is absent, or for first-time setup/install ("set up orbit", "install orbit", "wire orbit into this repo", "I'm new to orbit") or feature-tour requests ("what is orbit", "give me a tour"), see references/guide.md.
+description: Entry point for Orbit — tool invocation surfaces, task lifecycle, and routing to the per-topic skills. Also covers first-time setup and orientation when `.orbit/` is absent.
 ---
 
 # Orbit
 
-## Purpose
+Durable operations go through the registered Orbit tool surface — never direct lifecycle subcommands, never a rebuild from source. Lifecycle and authoring detail lives in the per-topic skills listed at the bottom.
 
-This skill orients agents working with Orbit. Durable operations should go through the registered Orbit tool surface — not direct lifecycle subcommands or rebuilds from source.
-
-Lifecycle and authoring details live in the per-topic skills below; this skill stays brief on purpose.
-
-## First-Time Setup / Tour
-
-If `.orbit/` is absent in the current workspace, or the user asks "what is orbit" / "give me a tour" / hasn't committed to using it yet, read [references/guide.md](references/guide.md) and follow it end-to-end (detect state → pick setup path → run setup → verify → hand off). Once the workspace is initialized, the rest of this skill applies.
+If `.orbit/` is absent, or the user is still deciding whether to adopt Orbit, read [references/guide.md](references/guide.md) and follow it end-to-end. Once the workspace is initialized, the rest of this skill applies.
 
 ## Tool Invocation
 
-Registered Orbit tools are reachable via two surfaces. Both accept identical JSON arguments.
+Registered tools are reachable two ways, with identical JSON arguments:
 
-| Surface | When to use | Form |
-|---------|-------------|------|
-| **MCP** | Claude Code with the orbit plugin (or any MCP client connected to `orbit mcp serve`); look for `orbit_*` tools in your toolbox | `orbit_task_add({"title": "...", "model": "<agent-family>"})` |
-| **CLI** | Shell access (inside an activity step, or with the `orbit` binary on `PATH`) | `orbit tool run orbit.task.add --input '{"title": "...", "model": "<agent-family>"}'` |
+| Surface | Form |
+|---------|------|
+| **MCP** — Claude Code with the orbit plugin, or any client connected to `orbit mcp serve` | `orbit_task_add({...})` |
+| **CLI** — inside an activity step, or with `orbit` on `PATH` | `orbit tool run orbit.task.add --input '{...}'` |
 
-**Mapping rule**: `orbit.<group>.<action>` ↔ `orbit_<group>_<action>` (dots become underscores; JSON args identical). For multi-segment names like `orbit.task.artifact.put`, every dot becomes an underscore: `orbit_task_artifact_put`.
+**Mapping rule:** `orbit.<group>.<action>` ↔ `orbit_<group>_<action>` — every dot becomes an underscore, so `orbit.task.artifact.put` is `orbit_task_artifact_put`. A gateway fronting the MCP mirrors this surface exactly; it may add an optional `workspace` routing param and tools of its own, documented by that gateway rather than here.
 
-**Environment parity**: the registered `orbit.*` tool surface is identical across MCP and `orbit tool run`. Some deployments front the orbit MCP behind a gateway that mirrors the surface exactly and may add an optional `workspace` routing param on tools that lack one. Any non-standard tools a gateway adds beyond the Orbit surface are documented by that gateway, not here — consult its own reference before relying on them.
+**Always include `model`** in the JSON — `codex`, `claude`, `gemini`, or `grok` — so Orbit attributes the call. Full model strings auto-normalize; the family is the persisted identity. This holds for every `orbit.*` call in every skill.
 
-**Surface coverage:**
+`orbit tool list` (CLI) or `tools/list` (MCP) is the authoritative surface; never guess a tool name. Two gaps worth knowing up front:
 
-- Task lifecycle (`orbit.task.*`), ADR artifacts (`orbit.adr.*`), learnings (`orbit.learning.*`), unified search (`orbit.search`): both surfaces.
-- Semantic lifecycle (`orbit semantic install|stats|index|uninstall`) and state handoff (`orbit.state.*`), routine/sweep/job commands: **CLI only** — used inside activity steps or from a shell where the agent has direct process access.
-- Code-structure questions (callers, refs, symbols, implementors): no dedicated query surface. Use `fs.read` to inspect files directly, or `rg`/`grep` with shell access. Task-to-commit lookup is not a graph query; use `git log --grep '[T<task-id>]'`.
+- **CLI-only:** `orbit semantic`, `orbit.state.*`, and the routine/sweep/job commands — they need direct process access.
+- **No query surface at all:** code structure (callers, refs, symbols, implementors). Inspect files with the provider-native file-read tool, or `rg` with shell access. Task-to-commit lookup is `git log --grep '[T<task-id>]'`, not a graph query.
 
-**Always include `model` in the JSON** so Orbit can attribute the call to the right agent family: `codex`, `claude`, `gemini`, or `grok`. Full model strings are accepted and auto-normalized, but the family is the persisted identity.
+Some CLI flags have no MCP counterpart because they are already the MCP default: `orbit tool run orbit.task.show --full` is plain `orbit_task_show({"id": "<id>"})`. Pass `field` or `fields` to project instead — valid values are `comments`, `plan`, `execution_summary`, `description`, `acceptance_criteria`, `history`, `context_files`, `artifacts`. `orbit.task.list` also accepts `path`, returning tasks whose `context_files` selectors cover that path.
 
-**CLI-flag → JSON mapping:** the CLI exposes some flags (e.g. `orbit tool run orbit.task.show --full ...`) that don't appear over MCP. The MCP equivalent is the default behavior when the corresponding JSON field is omitted (e.g. `orbit_task_show({"id": "<id>"})` returns the full task; pass `field` or `fields` to project).
-
-Examples below use CLI form for readability; substitute the MCP form using the mapping above when MCP tools are loaded.
-
-## Common Command Reference
-
-Intentionally common, not exhaustive. Never guess — run `orbit tool list` (CLI) or call `tools/list` (MCP) for the full registered tool surface. If an activity already injected `task` into the execution envelope, use that snapshot instead of calling `orbit.task.show` again.
-
-```bash
-orbit tool run orbit.task.show --full --input '{"id": "<id>", "model": "<agent-family>"}'                    # Load full task
-orbit tool run orbit.task.show --input '{"id": "<id>", "field": "comments", "model": "<agent-family>"}'       # Load one field
-# Valid field values: comments, plan, execution_summary, description, acceptance_criteria, history, context_files, artifacts
-orbit tool run orbit.task.list --input '{"status": "backlog", "model": "<agent-family>"}'
-orbit tool run orbit.task.list --input '{"path": "src/auth/login.rs", "model": "<agent-family>"}'             # Tasks whose context_files apply to this path
-orbit tool run orbit.search --input '{"query": "topic phrase", "kind": "task", "limit": 5, "model": "<agent-family>"}'
-orbit tool run orbit.search --input '{"query": "topic phrase", "hybrid": true, "kind": "task", "limit": 5, "model": "<agent-family>"}'
-orbit tool run orbit.task.add --input '{"title": "...", "description": "...", "acceptance_criteria": ["..."], "workspace": ".", "model": "<agent-family>"}'
-orbit tool run orbit.task.update --input '{"id": "<id>", "plan": "...", "model": "<agent-family>"}'
-orbit tool run orbit.task.start --input '{"id": "<id>", "note": "...", "model": "<agent-family>"}'            # backlog -> in-progress
-orbit tool run orbit.task.approve --input '{"id": "<id>", "note": "...", "model": "<agent-family>"}'          # proposed -> backlog, review -> done
-```
+If an activity already injected `task` into the execution envelope, read that snapshot instead of calling `orbit.task.show` again.
 
 ## Common Mistakes — DO NOT
 
 | Mistake | Why it fails | Correct form |
 |---------|-------------|--------------|
-| `cargo run -- tool run ...` | Agents must use the installed `orbit` binary, not rebuild from source | `orbit tool run ...` |
-| `orbit task show <id>` | Direct CLI subcommands skip agent provenance tracking | `orbit tool run orbit.task.show --full --input '{"id":"<id>"}'` |
+| `cargo run -- tool run ...` | Rebuilds from source instead of using the installed binary | `orbit tool run ...` |
+| `orbit task show <id>` | Direct CLI subcommands skip agent provenance tracking | `orbit tool run orbit.task.show --input '{"id":"<id>"}'` |
 
 ## Lifecycle
 
@@ -78,16 +51,10 @@ review      → rejected
 rejected    → backlog | in-progress  (reconsider)
 ```
 
-Use `blocked` when execution cannot safely continue. Command surface determines provenance by default: `orbit tool run ...` is agent-driven, direct `orbit task ...` CLI usage is human-driven.
+Use `blocked` when execution cannot safely continue. Provenance follows the surface: `orbit tool run ...` is agent-driven, bare `orbit task ...` is human-driven.
 
 ## Skill Selection
 
-- `orbit-task`: Create, execute, and review tasks through the full lifecycle; also files self-reported tooling/skill-guidance friction.
-- `orbit-task-pilot`: Read-only preflight for a bounded partition of existing tasks — proposes canonical `context_files`, crew/complexity, blockers, and duplicate evidence without mutating or dispatching anything.
-- `orbit-workflow`: Jobs, activities, routines, `orbit sweep`, and `orbit run`; diagnosing failed/stuck/cancelled job runs.
-- `orbit-search`: Find tasks, docs, learnings, and ADRs by topic; docs-corpus admin (list/show/add root/index/migrate).
-- `orbit-knowledge`: Author, update, and supersede learnings and ADRs.
-
-## Voice Your Opinion
-
-If something is unclear, missing, buggy, or creates friction during agent work, track it with `orbit-task` (friction reporting).
+- `orbit-task`: create, execute, and review tasks through the lifecycle; file self-reported tooling and skill-guidance friction.
+- `orbit-workflow`: task-pilot preflight, jobs, activities, routines, `orbit sweep`, and `orbit run`; diagnosing failed, stuck, or cancelled runs.
+- `orbit-search`: find tasks, docs, ADRs, and frictions by topic; docs-corpus admin.

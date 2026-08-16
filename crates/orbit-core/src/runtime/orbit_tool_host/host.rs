@@ -3,28 +3,27 @@ use std::str::FromStr;
 use std::sync::Arc;
 
 use chrono::Utc;
-use orbit_common::friction::FrictionVerb;
+use orbit_common::friction::{FrictionVerb, effective_title, normalize_title};
 use orbit_common::types::{
     FrictionStatus, NotFoundKind, OrbitError, Task, TaskComment, TaskPriority, TaskStatus,
     TaskType, ToolSessionContext, is_valid_friction_id, normalize_optional_attribution_label,
     normalize_task_dependencies, normalize_task_tags, optional_csv_or_string_list_alias,
-    optional_raw_string, optional_string, optional_string_alias, required_string,
-    resolve_task_dependencies, task_dependencies_ready, task_matches_tags,
+    optional_raw_string, optional_string, optional_string_alias, optional_string_list_alias,
+    required_string, resolve_task_dependencies, task_dependencies_ready, task_matches_tags,
     validate_task_dependencies,
 };
 use orbit_common::utility::redaction::redact_all;
 use orbit_common::utility::selector::canonical_selector;
 use orbit_store::friction_store::{
-    FrictionAddParams, FrictionUpdateParams, add_friction, friction_tags,
-    prepare_hub_friction_root, readable_hub_friction_root, resolve_friction_by_task,
-    update_friction,
+    FrictionAddParams, FrictionStore, FrictionUpdateParams, prepare_hub_friction_root,
+    readable_hub_friction_root,
 };
 use orbit_store::sqlite::task_registry::{
     RegisterWorkspaceParams, TaskRegistryStore, task_registry_path,
 };
 use orbit_store::{
-    TaskArtifactUpdateParams, TaskCreateParams, TaskDocumentUpdateParams, TaskHistoryUpdateParams,
-    WorkspaceTaskBackends, coordination_task_backends,
+    Store, TaskArtifactUpdateParams, TaskCreateParams, TaskDocumentUpdateParams,
+    TaskHistoryUpdateParams, WorkspaceTaskBackends, coordination_task_backends,
 };
 use orbit_tools::{
     OrbitBuiltinAction, OrbitTaskScope, OrbitToolHost, ReservationOwnerContext, ToolContext,
@@ -33,6 +32,7 @@ use orbit_tools::{
 use serde_json::{Map, Value, json};
 
 use crate::OrbitRuntime;
+use crate::runtime::run_input::managed_run_context_run_id_from_env;
 
 pub(crate) fn build_orbit_tool_host(
     runtime: &OrbitRuntime,
@@ -218,7 +218,7 @@ impl HubCoordinationExecutor {
             .unwrap_or(TaskType::Feature);
         let title = redact_all(&required_string(&input, &["title"], "title")?);
         let description = redact_all(&required_string(&input, &["description"], "description")?);
-        let acceptance_criteria = optional_csv_or_string_list_alias(
+        let acceptance_criteria = optional_string_list_alias(
             &input,
             &[
                 "acceptance_criteria",
@@ -261,6 +261,7 @@ impl HubCoordinationExecutor {
             external_refs: Vec::new(),
             source_task_id: None,
             crew: optional_string(&input, "crew")?,
+            orchestrator: optional_string(&input, "orchestrator")?,
             comments: Vec::new(),
         })?;
         self.task_json(&task)
@@ -294,6 +295,7 @@ impl HubCoordinationExecutor {
             "pr_status",
             "job_run_id",
             "crew",
+            "orchestrator",
             "context_files",
             "context",
             "artifacts",
@@ -392,13 +394,22 @@ impl HubCoordinationExecutor {
             .transpose()?;
         let explicit_planned_by = raw_clearable(&input, "planned_by")?;
         let explicit_implemented_by = raw_clearable(&input, "implemented_by")?;
+        let orchestrator = raw_clearable(&input, "orchestrator")?;
+        if orchestrator.is_some()
+            && !matches!(current.status, TaskStatus::Proposed | TaskStatus::Backlog)
+        {
+            return Err(OrbitError::InvalidInput(format!(
+                "task {id} is {}; orchestrator can only be changed while proposed or backlog",
+                current.status
+            )));
+        }
         self.inner.tasks.document.update_task_document(
             &id,
             TaskDocumentUpdateParams {
                 actor: actor.clone(),
                 title: optional_string(&input, "title")?.map(|value| redact_all(&value)),
                 description,
-                acceptance_criteria: optional_csv_or_string_list_alias(
+                acceptance_criteria: optional_string_list_alias(
                     &input,
                     &[
                         "acceptance_criteria",
@@ -430,6 +441,7 @@ impl HubCoordinationExecutor {
                 source_task_id: raw_clearable(&input, "source_task_id")?,
                 job_run_id: raw_clearable(&input, "job_run_id")?,
                 crew: raw_clearable(&input, "crew")?,
+                orchestrator,
                 created_by: None,
             },
         )?;
@@ -466,13 +478,12 @@ impl HubCoordinationExecutor {
         let updated = self.task(&id)?;
         if updated.status == TaskStatus::Done
             && current.status != TaskStatus::Done
-            && let Ok(root) = self.friction_root()
+            && let Ok(frictions) = self.friction_store()
         {
             for relation in &updated.relations {
                 if relation.relation_type == orbit_common::types::TaskRelationType::Resolves
                     && is_valid_friction_id(&relation.target)
-                    && let Err(error) =
-                        resolve_friction_by_task(&root, &relation.target, &id, Utc::now())
+                    && let Err(error) = frictions.resolve_by_task(&relation.target, &id, Utc::now())
                 {
                     tracing::warn!(
                         task_id = id,
@@ -596,8 +607,10 @@ impl HubCoordinationExecutor {
                 )),
                 "tags" => Ok(json!(task.tags)),
                 "context_files" => Ok(json!(task.context_files)),
+                "crew" => Ok(json!(task.crew)),
+                "orchestrator" => Ok(json!(task.orchestrator)),
                 other => Err(OrbitError::InvalidInput(format!(
-                    "unknown field selector `{other}`"
+                    "unknown field selector `{other}`. Valid values: comments, plan, execution_summary, description, acceptance_criteria, dependencies, resolved_dependencies, tags, history, context_files, crew, orchestrator, artifacts"
                 ))),
             }
         };
@@ -666,6 +679,30 @@ impl HubCoordinationExecutor {
         )
     }
 
+    /// The hub's friction store, partitioned by the logical workspace ID.
+    ///
+    /// Records live in the host-global SQLite database; the hub file tree is
+    /// still resolved because it carries the tag taxonomy and, until the
+    /// one-time import commits, the legacy records to import. `friction_root`
+    /// publishes the checkout-local tree into the canonical hub location
+    /// first, so a workspace that never opened the hub before still imports
+    /// its own history exactly once.
+    fn friction_store(&self) -> Result<FrictionStore, OrbitError> {
+        let files_root = match self.friction_root() {
+            Ok(root) => root,
+            Err(_) => self.readable_friction_root()?,
+        };
+        let database = crate::config::resolved_audit_db_path(
+            &self.inner.global_root,
+            &self.inner.global_root,
+        )?;
+        FrictionStore::open(
+            Store::open(&database)?,
+            self.inner.workspace_id.clone(),
+            files_root,
+        )
+    }
+
     /// The hub-coordination half of the friction handler table.
     ///
     /// Exhaustive over [`FrictionVerb`] on purpose (ADR-0209 bearing 1,
@@ -679,48 +716,37 @@ impl HubCoordinationExecutor {
     ) -> Result<Value, OrbitError> {
         match verb {
             FrictionVerb::List => {
-                let root = self.readable_friction_root()?;
-                let mut value = super::friction_tools::list_at_root(&root, input)?;
+                let mut value = super::friction_tools::list_in(&self.friction_store()?, input)?;
                 strip_private_friction_paths(&mut value);
                 Ok(value)
             }
             FrictionVerb::Show => {
-                let root = self.readable_friction_root()?;
-                let mut value = super::friction_tools::show_at_root(&root, input)?;
+                let mut value = super::friction_tools::show_in(&self.friction_store()?, input)?;
                 strip_private_friction_paths(&mut value);
                 Ok(value)
             }
-            FrictionVerb::Tags => {
-                let root = self.readable_friction_root()?;
-                Ok(json!(friction_tags(&root)?))
-            }
+            FrictionVerb::Tags => Ok(json!(self.friction_store()?.tags()?)),
             FrictionVerb::Add => {
-                let root = self.friction_root()?;
                 let model = model
                     .filter(|value| !value.trim().is_empty())
                     .ok_or_else(|| {
                         OrbitError::InvalidInput("orbit.friction.add requires `model`".to_string())
                     })?;
-                let stored = add_friction(
-                    &root,
-                    FrictionAddParams {
-                        model,
-                        body: redact_all(&required_string(
-                            &input,
-                            &["body", "description"],
-                            "body",
-                        )?),
-                        tags: optional_csv_or_string_list_alias(&input, &["tags", "tag"])?
-                            .unwrap_or_default(),
-                        during_task: optional_string(&input, "during_task")?
-                            .or(optional_string(&input, "task_id")?),
-                        created_at: Utc::now(),
-                    },
-                )?;
+                let stored = self.friction_store()?.add(FrictionAddParams {
+                    model,
+                    title: optional_raw_string(&input, "title")?
+                        .map(|raw| normalize_title(&redact_all(&raw)))
+                        .transpose()?,
+                    body: redact_all(&required_string(&input, &["body", "description"], "body")?),
+                    tags: optional_csv_or_string_list_alias(&input, &["tags", "tag"])?
+                        .unwrap_or_default(),
+                    during_task: optional_string(&input, "during_task")?
+                        .or(optional_string(&input, "task_id")?),
+                    created_at: Utc::now(),
+                })?;
                 friction_json(stored)
             }
             FrictionVerb::Update => {
-                let root = self.friction_root()?;
                 let id = required_string(&input, &["id"], "id")?;
                 let status = optional_string(&input, "status")?
                     .map(|value| {
@@ -730,17 +756,23 @@ impl HubCoordinationExecutor {
                     .transpose()?;
                 let tags = optional_csv_or_string_list_alias(&input, &["tags", "tag"])?;
                 let body = optional_string(&input, "body")?.map(|value| redact_all(&value));
-                if status.is_none() && tags.is_none() && body.is_none() {
+                let title = match optional_raw_string(&input, "title")? {
+                    None => None,
+                    Some(raw) if raw.trim().is_empty() => Some(None),
+                    Some(raw) => Some(Some(normalize_title(&redact_all(&raw))?)),
+                };
+                if status.is_none() && tags.is_none() && body.is_none() && title.is_none() {
                     return Err(OrbitError::InvalidInput(
-                        "orbit.friction.update requires `status`, `tags`, or `body`".to_string(),
+                        "orbit.friction.update requires `status`, `tags`, `body`, or `title`"
+                            .to_string(),
                     ));
                 }
-                friction_json(update_friction(
-                    &root,
+                friction_json(self.friction_store()?.update(
                     &id,
                     FrictionUpdateParams {
                         status,
                         tags,
+                        title,
                         body,
                         resolved_by_task: None,
                         updated_at: Utc::now(),
@@ -797,8 +829,22 @@ fn raw_clearable(input: &Value, field: &str) -> Result<Option<Option<String>>, O
 fn friction_json(
     stored: orbit_store::friction_store::StoredFrictionRecord,
 ) -> Result<Value, OrbitError> {
-    serde_json::to_value(&stored.record)
-        .map_err(|error| OrbitError::Store(format!("serialize friction record: {error}")))
+    let record = &stored.record;
+    let mut value = serde_json::to_value(record)
+        .map_err(|error| OrbitError::Store(format!("serialize friction record: {error}")))?;
+    // Match the checkout-backed projection: `title` is always on the wire, so
+    // a hub consumer never has to know derivation exists.
+    if let Some(object) = value.as_object_mut() {
+        object.insert(
+            "title".to_string(),
+            json!(effective_title(
+                record.title.as_deref(),
+                &record.body,
+                &record.id
+            )),
+        );
+    }
+    Ok(value)
 }
 
 fn strip_private_friction_paths(value: &mut Value) {
@@ -840,16 +886,7 @@ impl OrbitToolHost for RuntimeOrbitToolHost {
 }
 
 fn trusted_env_run_id() -> Option<String> {
-    let managed = std::env::var("ORBIT_MANAGED_RUN_CONTEXT")
-        .ok()
-        .is_some_and(|value| matches!(value.trim(), "1" | "true" | "TRUE"));
-    if !managed {
-        return None;
-    }
-    std::env::var("ORBIT_RUN_ID")
-        .ok()
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty())
+    managed_run_context_run_id_from_env()
 }
 
 #[cfg(test)]
@@ -940,27 +977,86 @@ mod checkoutless_hub_tests {
     }
 
     #[test]
-    fn friction_writes_use_canonical_workspace_partition() {
+    fn task_orchestrator_add_update_and_clear_round_trip_without_checkout() {
+        let (_root, executor, context) = executor();
+        let created = executor
+            .execute_tool(
+                "orbit.task.add",
+                json!({
+                    "workspace": "ws_checkoutless",
+                    "title": "Canonical hub orchestrator",
+                    "description": "Validate against the checkoutless registry",
+                    "orchestrator": "  sol  ",
+                    "model": "codex"
+                }),
+                context.clone(),
+            )
+            .expect("add trims and persists orchestrator");
+        let id = created["id"].as_str().expect("task id");
+        assert_eq!(created["orchestrator"], "sol");
+
+        let updated = executor
+            .execute_tool(
+                "orbit.task.update",
+                json!({"id": id, "orchestrator": "  terra  ", "model": "codex"}),
+                context.clone(),
+            )
+            .expect("update trims and persists orchestrator");
+        assert_eq!(updated["orchestrator"], "terra");
+        assert_eq!(
+            executor
+                .execute_tool(
+                    "orbit.task.show",
+                    json!({"id": id, "fields": ["crew", "orchestrator"]}),
+                    context.clone(),
+                )
+                .expect("show execution and orchestration fields"),
+            json!({"crew": null, "orchestrator": "terra"})
+        );
+
+        let cleared = executor
+            .execute_tool(
+                "orbit.task.update",
+                json!({"id": id, "orchestrator": "", "model": "codex"}),
+                context,
+            )
+            .expect("empty string clears orchestrator");
+        assert_eq!(cleared["orchestrator"], Value::Null);
+    }
+
+    /// After ORB-10680 the partition is the `(workspace_id, friction_id)` key
+    /// in the host-global store, not a per-workspace directory: a record filed
+    /// through one workspace's hub executor is invisible to another's.
+    #[test]
+    fn friction_writes_use_the_workspace_sqlite_partition() {
         let (root, executor, context) = executor();
         let result = executor
             .execute_tool(
                 "orbit.friction.add",
                 json!({"body": "Hub friction", "tags": ["tooling"], "model": "codex"}),
-                context,
+                context.clone(),
             )
             .expect("add friction");
         assert!(result.get("path").is_none(), "hub responses are path-free");
-        let month = Utc::now().format("%Y-%m").to_string();
-        let directory = root
-            .path()
-            .join("frictions/workspaces/ws_checkoutless")
-            .join(month);
-        assert!(
-            std::fs::read_dir(directory)
-                .expect("workspace friction month")
-                .flatten()
-                .any(|entry| entry.path().extension().is_some_and(|ext| ext == "md")),
-            "friction persisted in the canonical workspace partition"
+        let id = result["id"].as_str().expect("friction id").to_string();
+
+        let listed = executor
+            .execute_tool("orbit.friction.list", json!({}), context.clone())
+            .expect("list frictions");
+        assert_eq!(listed.as_array().map(Vec::len), Some(1));
+        assert_eq!(listed[0]["id"], json!(id));
+
+        HubCoordinationExecutor::register_workspace(root.path(), "ws_other", "other")
+            .expect("register second workspace");
+        let other = HubCoordinationExecutor::new(root.path(), "ws_other", None)
+            .expect("second coordination executor");
+        let other_listed = other
+            .execute_tool("orbit.friction.list", json!({}), context)
+            .expect("list frictions in the other workspace");
+        assert_eq!(
+            other_listed.as_array().map(Vec::len),
+            Some(0),
+            "a second workspace must not see the first workspace's records"
         );
     }
 

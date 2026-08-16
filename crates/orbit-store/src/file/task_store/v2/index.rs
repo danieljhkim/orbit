@@ -113,6 +113,7 @@ impl TaskV2Store {
             relations: bundle.envelope.relations,
             job_run_id: bundle.envelope.job_run_id,
             crew: bundle.envelope.crew,
+            orchestrator: bundle.envelope.orchestrator,
             created_at: bundle.envelope.created_at,
             updated_at: bundle.envelope.updated_at,
         })

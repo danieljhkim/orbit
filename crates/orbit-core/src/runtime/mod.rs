@@ -14,6 +14,8 @@
 pub mod audit;
 mod authorization;
 pub mod builder;
+mod command_exec;
+mod coordination_audit;
 pub mod engine;
 pub mod event_bus;
 pub mod mutation;
@@ -21,12 +23,11 @@ pub(crate) mod orbit_tool_host;
 mod resolve;
 pub mod run_audit;
 pub(crate) mod run_input;
-mod task_block_on_run_failure;
-mod task_locks;
-mod task_records;
-mod task_reservation_cleanup;
+mod task;
+pub use task::StaleTaskReservation;
 pub(crate) mod tool_exec;
 mod v2_host;
+pub mod workspace_claim;
 
 #[cfg(test)]
 mod tests;
@@ -36,16 +37,19 @@ use std::sync::Arc;
 
 use chrono::Utc;
 use orbit_common::types::activity_job::{CatalogDirectory, CatalogDirectoryList};
-use orbit_common::types::{Audit, LearningInjectionState, OrbitError, OrbitEvent, WorkspacePaths};
+use orbit_common::types::{
+    Audit, OrbitError, OrbitEvent, Workspace, WorkspaceCheckout, WorkspacePaths,
+};
 use orbit_store::{Store, V2AuditEventFilter, V2AuditEventRow, workspace_id_for_orbit_dir};
 use serde_json::Value;
 
 use crate::command::activity::DEFAULT_ACTIVITY_FILES;
 use crate::command::init::ensure_orbit_root_initialized;
-use crate::command::workflow::ShipMode;
+use crate::command::workflow::{ShipMode, resolved_ship_mode};
 use crate::context::ActorIdentity;
 use crate::context::OrbitContext;
 use crate::context::OrbitStores;
+use crate::runtime::run_input::managed_run_context_from_env;
 
 pub use orbit_tool_host::HubCoordinationExecutor;
 pub(crate) use orbit_tool_host::build_orbit_tool_host;
@@ -58,13 +62,17 @@ pub use resolve::{
 };
 // `pub` for the runtime-less `orbit migrate --dry-run` inspection that moved
 // to `orbit-cmd` [ORB-10016].
-pub use resolve::{resolve_global_root, try_resolve_initialized_roots};
-pub(crate) use task_records::TaskRecordUpdateParams;
+pub use resolve::{is_global_orbit_root, resolve_global_root, try_resolve_initialized_roots};
+pub(crate) use task::{failed_run_error_context, is_workflow_failure_state};
 
 #[derive(Clone)]
 pub struct OrbitRuntime {
     context: OrbitContext,
     workspace_binding: Option<Arc<WorkspaceRuntimeBinding>>,
+    /// A higher-level registry may mark this local checkout as a replica. Core
+    /// stays registry-neutral; it only carries the refusal supplied by that
+    /// owner so every task-record writer shares one fail-closed gate.
+    coordination_write_owner: Option<Arc<str>>,
     pub event_log: event_bus::EventLog,
     /// Outcome of the [ORB-10012] workspace-layout pre-flight that ran when
     /// this runtime opened (empty `applied` when the layout was already
@@ -91,6 +99,18 @@ pub struct WorkspaceRuntimeBinding {
     pub workspace_id: String,
     pub repo_root: PathBuf,
     pub ship_mode: ShipMode,
+}
+
+/// Build the neutral Core binding for one registered local checkout.
+pub fn workspace_runtime_binding(
+    workspace: &Workspace,
+    checkout: &WorkspaceCheckout,
+) -> Result<WorkspaceRuntimeBinding, OrbitError> {
+    Ok(WorkspaceRuntimeBinding {
+        workspace_id: workspace_id_for_orbit_dir(&checkout.orbit_dir)?,
+        repo_root: checkout.repo_root.clone(),
+        ship_mode: resolved_ship_mode(workspace),
+    })
 }
 
 impl OrbitRuntimeRoots {
@@ -249,6 +269,7 @@ impl OrbitRuntime {
         let runtime = Self {
             context,
             workspace_binding: binding.map(Arc::new),
+            coordination_write_owner: None,
             event_log: event_bus::EventLog::default(),
             layout_report: Arc::new(layout_report),
             _temp_dir: None,
@@ -257,7 +278,15 @@ impl OrbitRuntime {
         // whose recorded owner process is conclusively gone flip to
         // `interrupted` so dashboards and `orbit job resume` see them.
         // Best-effort — a scan failure must never block opening the runtime.
-        runtime.reconcile_stale_job_runs_on_open();
+        //
+        // A managed activity child can intentionally have a private PID
+        // namespace (for example, under Linux Bubblewrap), so it cannot
+        // adjudicate the host worker's liveness. Explicit recovery surfaces
+        // still reconcile; only this opportunistic workspace-open scan is
+        // skipped for the trusted managed-run envelope [ORB-10557].
+        if !managed_run_context_from_env() {
+            runtime.reconcile_stale_job_runs_on_open();
+        }
         Ok(runtime)
     }
 
@@ -266,6 +295,7 @@ impl OrbitRuntime {
         Ok(Self {
             context,
             workspace_binding: None,
+            coordination_write_owner: None,
             event_log: event_bus::EventLog::default(),
             layout_report: Arc::new(orbit_store::layout::LayoutUpgradeReport::default()),
             _temp_dir: Some(Arc::new(temp_dir)),
@@ -281,6 +311,26 @@ impl OrbitRuntime {
     pub fn with_actor(mut self, actor: ActorIdentity) -> Self {
         self.context.set_actor(actor);
         self
+    }
+
+    /// Attach the declared remote owner for a replica checkout. This is set by
+    /// the registry-owning composition layer, never inferred by Core.
+    pub fn with_coordination_write_owner(mut self, owner_machine_id: Option<String>) -> Self {
+        self.coordination_write_owner = owner_machine_id.map(Arc::from);
+        self
+    }
+
+    pub(crate) fn ensure_coordination_task_write_permitted(&self) -> Result<(), OrbitError> {
+        let Some(owner_machine_id) = self.coordination_write_owner.as_deref() else {
+            return Ok(());
+        };
+        Err(OrbitError::InvalidInput(format!(
+            "coordination writes are refused in this replica checkout; workspace is owned by machine '{owner_machine_id}'"
+        )))
+    }
+
+    pub(crate) fn coordination_task_reads_visible(&self) -> bool {
+        self.coordination_write_owner.is_none()
     }
 
     /// Returns in-process events recorded during this session only. Not persisted across process
@@ -343,25 +393,6 @@ impl OrbitRuntime {
         workspace_id_for_orbit_dir(&self.context.paths().orbit_dir)
     }
 
-    pub fn get_session_learning_state(
-        &self,
-        session_id: &str,
-    ) -> Result<Option<LearningInjectionState>, OrbitError> {
-        let workspace_id = self.workspace_id()?;
-        self.sqlite_store()?
-            .get_session_learning_state(&workspace_id, session_id)
-    }
-
-    pub fn upsert_session_learning_state(
-        &self,
-        session_id: &str,
-        state: &LearningInjectionState,
-    ) -> Result<(), OrbitError> {
-        let workspace_id = self.workspace_id()?;
-        self.sqlite_store()?
-            .upsert_session_learning_state(&workspace_id, session_id, state)
-    }
-
     pub fn list_v2_audit_events(
         &self,
         mut filter: V2AuditEventFilter,
@@ -387,13 +418,7 @@ impl OrbitRuntime {
         self.context.settings().pr_config()
     }
 
-    /// Configured default for the v2 `agent_loop` execution backend (§3.1
-    /// precedence step 3). Returns `None` when not set.
-    pub fn v2_backend_config(&self) -> Option<&str> {
-        self.context.settings().v2_backend()
-    }
-
-    /// Default base branch for ship/duel-plan workflows. Sourced
+    /// Default base branch for ship workflows. Sourced
     /// from `[workflow] base_branch` in the active `config.toml`; defaults
     /// to `"main"` when no key is present.
     pub fn workflow_base_branch(&self) -> &str {
@@ -414,16 +439,6 @@ impl OrbitRuntime {
     /// definitions nobody registered explicitly.
     pub fn routines_source(&self) -> bool {
         self.context.settings().routines_source()
-    }
-
-    /// Returns the configured `[duel] candidates` list (e.g. ["codex", "claude", "gemini", "grok"]).
-    /// Used by `orbit run duel-plan --planner-a ...` overrides to validate explicit families.
-    pub fn duel_candidate_families(&self) -> Vec<String> {
-        self.context.settings().duel_config().candidates.clone()
-    }
-
-    pub(crate) fn duel_config(&self) -> &crate::config::DuelConfig {
-        self.context.settings().duel_config()
     }
 
     /// Build the activity catalog for `target: activity:<name>` resolution
@@ -494,6 +509,16 @@ impl OrbitRuntime {
             .schemas()
             .into_iter()
             .map(|schema| schema.name)
+            .collect()
+    }
+
+    /// Production activity-catalog directories in load order. Doctor reuses
+    /// this list so a workspace file that fails catalog construction cannot
+    /// be reported healthy.
+    pub(crate) fn v2_activity_catalog_paths(&self) -> Vec<PathBuf> {
+        self.v2_activity_catalog_dirs()
+            .into_iter()
+            .map(|dir| dir.path().to_path_buf())
             .collect()
     }
 

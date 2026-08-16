@@ -1,44 +1,13 @@
 use std::collections::BTreeMap;
 
 use orbit_common::types::{
-    Learning, OrbitError, Task, TaskArtifact, TaskComment, TaskHistoryEntry, TaskStatus,
-    resolve_task_dependencies,
+    OrbitError, Task, TaskArtifact, TaskComment, TaskHistoryEntry, TaskStatus,
+    resolve_task_dependencies, resolve_task_relations,
 };
 use serde_json::{Map, Value, json};
 
 use crate::OrbitRuntime;
 use crate::command::task::TaskLintReport;
-
-pub(super) fn learning_to_json(learning: &Learning) -> Value {
-    json!({
-        "id": learning.id,
-        "status": learning.status.as_str(),
-        "scope": {
-            "paths": learning.scope.paths,
-            "tags": learning.scope.tags,
-            "symbols": learning.scope.symbols,
-            "semantic_seed": learning.scope.semantic_seed,
-        },
-        "summary": learning.summary,
-        "body": learning.body,
-        "evidence": learning
-            .evidence
-            .iter()
-            .map(|e| json!({"kind": e.kind.to_string(), "ref": e.reference}))
-            .collect::<Vec<_>>(),
-        "supersedes": learning.supersedes,
-        "superseded_by": learning.superseded_by,
-        "legacy_ids": learning.legacy_ids,
-        "created_at": learning.created_at.to_rfc3339(),
-        "updated_at": learning.updated_at.to_rfc3339(),
-        "created_by": learning.created_by,
-        "priority": learning.priority,
-    })
-}
-
-pub(super) fn learning_show_to_json(learning: &Learning) -> Value {
-    learning_to_json(learning)
-}
 
 pub(super) fn task_to_json(task: &Task, status_by_id: &BTreeMap<String, TaskStatus>) -> Value {
     json!({
@@ -65,10 +34,11 @@ pub(super) fn task_to_json(task: &Task, status_by_id: &BTreeMap<String, TaskStat
         "type": task.task_type.to_string(),
         "pr_status": task.pr_status,
         "external_refs": task.external_refs,
-        "relations": task.relations,
+        "relations": resolve_task_relations(task, status_by_id),
         "source_task_id": task.source_task_id(),
         "job_run_id": task.job_run_id,
         "crew": task.crew,
+        "orchestrator": task.orchestrator,
         "created_at": task.created_at.to_rfc3339(),
         "updated_at": task.updated_at.to_rfc3339(),
     })
@@ -167,11 +137,14 @@ fn task_field_to_json(
         "history" => serialize_history(&runtime.get_task_history(&task.id)?),
         "context_files" => serde_json::to_value(&task.context_files)
             .map_err(serialize_error("serialize context files")),
+        "crew" => serde_json::to_value(&task.crew).map_err(serialize_error("serialize crew")),
+        "orchestrator" => serde_json::to_value(&task.orchestrator)
+            .map_err(serialize_error("serialize orchestrator")),
         "artifacts" => Ok(serialize_task_artifacts(
             &runtime.get_task_artifacts(&task.id)?,
         )),
         other => Err(OrbitError::InvalidInput(format!(
-            "unknown field selector `{other}`. Valid values: comments, plan, execution_summary, description, acceptance_criteria, dependencies, resolved_dependencies, tags, history, context_files, artifacts"
+            "unknown field selector `{other}`. Valid values: comments, plan, execution_summary, description, acceptance_criteria, dependencies, resolved_dependencies, tags, history, context_files, crew, orchestrator, artifacts"
         ))),
     }
 }

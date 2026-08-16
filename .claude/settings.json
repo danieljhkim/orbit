@@ -1,17 +1,4 @@
 {
-  "hooks": {
-    "PreToolUse": [
-      {
-        "hooks": [
-          {
-            "command": "scripts/orbit-file-lock",
-            "type": "command"
-          }
-        ],
-        "matcher": "Edit|Write"
-      }
-    ]
-  },
   "permissions": {
     "allow": [
       "mcp__orbit__orbit_search",

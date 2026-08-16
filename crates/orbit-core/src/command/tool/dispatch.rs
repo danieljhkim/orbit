@@ -2,20 +2,26 @@
 //! trusted MCP envelope boundary.
 
 use std::cell::Cell;
+use std::path::Path;
 use std::time::Instant;
 
 use orbit_common::types::{
     AuditEventStatus, NotFoundKind, OrbitError, Role, ToolSessionContext, audit_execution_id,
     normalize_agent_family_for_model, normalize_optional_attribution_label,
 };
-use orbit_store::AuditEventInsertParams;
+use orbit_store::{AuditEventInsertParams, Store};
 use orbit_tools::{ReservationOwnerContext, ToolContext};
 use serde_json::Value;
 
 use crate::OrbitRuntime;
 use crate::redact_sensitive_env_text;
+use crate::runtime::run_input::{
+    managed_run_context_from_env, managed_run_context_run_id_from_env,
+};
+use crate::runtime::tool_exec::CapabilityEnforcement;
 
-pub(super) const ORBIT_MANAGED_RUN_CONTEXT_ENV: &str = "ORBIT_MANAGED_RUN_CONTEXT";
+#[cfg(test)]
+pub(super) use crate::runtime::run_input::ORBIT_MANAGED_RUN_CONTEXT_ENV;
 
 /// Where a tool invocation arrived from. Captured in the audit row so a single
 /// audit table can attribute tool calls back to their origin (CLI vs MCP).
@@ -40,6 +46,40 @@ impl ToolEntryPoint {
 
 thread_local! {
     static TOOL_AUDIT_RECORDED: Cell<bool> = const { Cell::new(false) };
+}
+
+/// Execute a server-global implementation inside Core's ordinary tool audit
+/// boundary without constructing a workspace runtime.
+///
+/// The callback owns its server-local projection. Core opens only the global
+/// audit store, records the supplied invocation context, and preserves the
+/// same fail-closed success semantics as runtime-backed tool dispatch.
+pub fn execute_global_in_process_tool_dispatch<F>(
+    global_root: &Path,
+    name: &str,
+    input: Value,
+    entry_point: ToolEntryPoint,
+    session_context: ToolSessionContext,
+    dispatch: F,
+) -> Result<ToolDispatchOutcome, OrbitError>
+where
+    F: FnOnce(Value) -> Result<Value, OrbitError>,
+{
+    execute_tool_dispatch_with_audit_store(
+        name,
+        input,
+        ToolDispatchAuditContext {
+            agent_override: None,
+            model_override: None,
+            entry_point,
+            session_context: Some(session_context),
+        },
+        || {
+            let audit_db = crate::config::resolved_audit_db_path(global_root, global_root)?;
+            Store::open(&audit_db)
+        },
+        dispatch,
+    )
 }
 
 /// Mark that the runtime has already persisted an audit row for the current
@@ -89,6 +129,28 @@ impl OrbitRuntime {
             agent_override,
             model_override,
             ToolEntryPoint::Cli,
+        )
+        .map(|outcome| outcome.value)
+    }
+
+    /// Execute a local CLI tool call with a caller-supplied invocation
+    /// envelope. The CLI owns machine identity discovery; Core owns dispatch
+    /// and persists the resulting audit context.
+    pub fn execute_tool_command_with_session_context(
+        &self,
+        name: &str,
+        input: Value,
+        agent_override: Option<String>,
+        model_override: Option<String>,
+        session_context: ToolSessionContext,
+    ) -> Result<Value, OrbitError> {
+        self.execute_tool_command_dispatch_with_session_context(
+            name,
+            input,
+            agent_override,
+            model_override,
+            ToolEntryPoint::Cli,
+            session_context,
         )
         .map(|outcome| outcome.value)
     }
@@ -166,7 +228,17 @@ impl OrbitRuntime {
                     reservation_owner: reservation_owner_from_env(),
                     ..Default::default()
                 };
-                self.run_tool_with_context_and_role(name, input, Role::Admin, tool_context)
+                let capability_enforcement = match entry_point {
+                    ToolEntryPoint::Cli => CapabilityEnforcement::Enforce,
+                    ToolEntryPoint::Mcp => CapabilityEnforcement::DeferredForMcpV1,
+                };
+                self.run_tool_with_context_and_role_and_capability(
+                    name,
+                    input,
+                    Role::Admin,
+                    tool_context,
+                    capability_enforcement,
+                )
             },
         )
     }
@@ -211,141 +283,157 @@ impl OrbitRuntime {
     where
         F: FnOnce(Value) -> Result<Value, OrbitError>,
     {
-        let ToolDispatchAuditContext {
-            agent_override,
-            model_override,
-            entry_point,
-            session_context,
-        } = audit;
-        let start = Instant::now();
-        let role_label = audit_role_label_for_entry_point(
-            &input,
-            agent_override.as_deref(),
-            model_override.as_deref(),
-            entry_point,
-        );
-        let working_directory = std::env::current_dir()
-            .map(|path| path.to_string_lossy().into_owned())
-            .unwrap_or_else(|_| ".".to_string());
-        let (audit_context, correlation_error) =
-            resolve_audit_context(&input, entry_point, session_context.as_ref());
-
-        // Keep the callback inside the audit boundary so setup, policy, and
-        // implementation failures all produce a failure-status row.
-        let result = match correlation_error {
-            Some(error) => Err(error),
-            None => dispatch(input),
-        };
-        let duration_ms = (start.elapsed().as_millis() as i64).max(1);
-
-        let (status, exit_code, error_message) = match &result {
-            Ok(_) => (AuditEventStatus::Success, 0, None),
-            // A refusal is not a failure: both the path-scoping denial and the
-            // ORB-10453 capability denial keep the row queryable as `denied`.
-            Err(OrbitError::PolicyDenied(msg) | OrbitError::CapabilityDenied(msg)) => (
-                AuditEventStatus::Denied,
-                1,
-                Some(redact_sensitive_env_text(msg)),
-            ),
-            Err(
-                err @ OrbitError::NotFound {
-                    kind: NotFoundKind::Tool,
-                    ..
-                },
-            ) if entry_point == ToolEntryPoint::Mcp => (
-                AuditEventStatus::Denied,
-                1,
-                Some(redact_sensitive_env_text(&err.to_string())),
-            ),
-            Err(err) => (
-                AuditEventStatus::Failure,
-                1,
-                Some(redact_sensitive_env_text(&err.to_string())),
-            ),
-        };
-
-        let params = AuditEventInsertParams {
-            execution_id: audit_execution_id("exec"),
-            command: "tool".to_string(),
-            subcommand: Some(entry_point.audit_subcommand().to_string()),
-            tool_name: Some(name.to_string()),
-            target_type: Some("tool".to_string()),
-            target_id: Some(name.to_string()),
-            role: role_label,
-            status,
-            exit_code,
-            duration_ms,
-            working_directory,
-            arguments_json: None,
-            stdout_truncated: None,
-            stderr_truncated: None,
-            error_message,
-            host: std::env::var("HOSTNAME").ok(),
-            pid: std::process::id(),
-            session_id: None,
-            workspace_id: session_context
-                .as_ref()
-                .and_then(|context| context.workspace_id.clone()),
-            caller_machine_id: session_context
-                .as_ref()
-                .and_then(|context| context.caller_machine_id.clone()),
-            caller_host_id: session_context
-                .as_ref()
-                .and_then(|context| context.caller_host_id.clone()),
-            process_machine_id: session_context
-                .as_ref()
-                .and_then(|context| context.process_machine_id.clone()),
-            process_host_id: session_context
-                .as_ref()
-                .and_then(|context| context.process_host_id.clone()),
-            transport: session_context
-                .as_ref()
-                .and_then(|context| context.transport),
-            effective_capabilities: session_context
-                .as_ref()
-                .map(|context| context.effective_capabilities.clone())
-                .unwrap_or_default(),
-            origin_session_id: session_context
-                .as_ref()
-                .and_then(|context| context.origin_session_id.clone()),
-            mcp_call_id: session_context
-                .as_ref()
-                .and_then(|context| context.mcp_call_id.clone()),
-            lease_id: session_context
-                .as_ref()
-                .and_then(|context| context.leased_run.as_ref())
-                .map(|leased_run| leased_run.lease_id.clone()),
-            task_id: audit_context.task_id,
-            job_run_id: audit_context.job_run_id,
-            activity_id: audit_context.activity_id,
-            step_index: audit_context.step_index,
-        };
-
-        let audit_write = self.record_audit_event(&params);
-
-        // Claim the row for the runtime the moment it persists, so the CLI
-        // `AuditGuard` suppresses its own duplicate emission. This is
-        // independent of the tool's own success/failure: the audit row is
-        // written for both (a failed call still gets a failure-status row).
-        if audit_write.is_ok() {
-            mark_tool_audit_recorded();
-        }
-
-        // Propagate the tool's own error first. A call that already failed
-        // carries no committed mutation to strand, so its error is the
-        // authoritative result and the audit-write outcome is irrelevant.
-        let value = result?;
-
-        // The tool call succeeded, so any mutation it performed is now
-        // committed. Audit persistence is part of that success contract:
-        // finding M1 (SECURITY-REVIEW-2026-07-15) — the previous code only
-        // `warn!`ed on an audit-write `Err` and still returned the tool's
-        // successful value, so an unwritable audit store (disk full, locked
-        // db, bad perms) yielded a successful, un-audited mutation with no
-        // error surfaced. Fail the call instead so a committed change can
-        // never surface without its audit row.
-        finalize_successful_dispatch(name, value, audit_write)
+        execute_tool_dispatch_with_audit_store(name, input, audit, || self.sqlite_store(), dispatch)
     }
+}
+
+fn execute_tool_dispatch_with_audit_store<F, S>(
+    name: &str,
+    input: Value,
+    audit: ToolDispatchAuditContext,
+    open_audit_store: S,
+    dispatch: F,
+) -> Result<ToolDispatchOutcome, OrbitError>
+where
+    F: FnOnce(Value) -> Result<Value, OrbitError>,
+    S: FnOnce() -> Result<Store, OrbitError>,
+{
+    let ToolDispatchAuditContext {
+        agent_override,
+        model_override,
+        entry_point,
+        session_context,
+    } = audit;
+    let start = Instant::now();
+    let role_label = audit_role_label_for_entry_point(
+        &input,
+        agent_override.as_deref(),
+        model_override.as_deref(),
+        entry_point,
+    );
+    let working_directory = std::env::current_dir()
+        .map(|path| path.to_string_lossy().into_owned())
+        .unwrap_or_else(|_| ".".to_string());
+    let audit_context = resolve_audit_context(&input, entry_point, session_context.as_ref());
+
+    // Keep the callback inside the audit boundary so setup, policy, and
+    // implementation failures all produce a failure-status row.
+    let result = dispatch(input);
+    let duration_ms = (start.elapsed().as_millis() as i64).max(1);
+
+    let (status, exit_code, error_message) = match &result {
+        Ok(_) => (AuditEventStatus::Success, 0, None),
+        // A refusal is not a failure: policy and capability refusals remain
+        // queryable as `denied`.
+        Err(OrbitError::PolicyDenied(msg) | OrbitError::CapabilityDenied(msg)) => (
+            AuditEventStatus::Denied,
+            1,
+            Some(redact_sensitive_env_text(msg)),
+        ),
+        Err(
+            err @ OrbitError::NotFound {
+                kind: NotFoundKind::Tool,
+                ..
+            },
+        ) if entry_point == ToolEntryPoint::Mcp => (
+            AuditEventStatus::Denied,
+            1,
+            Some(redact_sensitive_env_text(&err.to_string())),
+        ),
+        Err(err) => (
+            AuditEventStatus::Failure,
+            1,
+            Some(redact_sensitive_env_text(&err.to_string())),
+        ),
+    };
+
+    let params = AuditEventInsertParams {
+        execution_id: audit_execution_id("exec"),
+        command: "tool".to_string(),
+        subcommand: Some(entry_point.audit_subcommand().to_string()),
+        tool_name: Some(name.to_string()),
+        target_type: Some("tool".to_string()),
+        target_id: Some(name.to_string()),
+        role: role_label,
+        status,
+        exit_code,
+        duration_ms,
+        working_directory,
+        arguments_json: None,
+        stdout_truncated: None,
+        stderr_truncated: None,
+        error_message,
+        host: std::env::var("HOSTNAME").ok(),
+        pid: std::process::id(),
+        session_id: None,
+        workspace_id: session_context
+            .as_ref()
+            .and_then(|context| context.workspace_id.clone()),
+        caller_machine_id: session_context
+            .as_ref()
+            .and_then(|context| context.caller_machine_id.clone()),
+        caller_host_id: session_context
+            .as_ref()
+            .and_then(|context| context.caller_host_id.clone()),
+        process_machine_id: session_context
+            .as_ref()
+            .and_then(|context| context.process_machine_id.clone()),
+        process_host_id: session_context
+            .as_ref()
+            .and_then(|context| context.process_host_id.clone()),
+        transport: session_context
+            .as_ref()
+            .and_then(|context| context.transport),
+        effective_capabilities: session_context
+            .as_ref()
+            .map(|context| context.effective_capabilities.clone())
+            .unwrap_or_default(),
+        origin_session_id: session_context
+            .as_ref()
+            .and_then(|context| context.origin_session_id.clone()),
+        mcp_call_id: session_context
+            .as_ref()
+            .and_then(|context| context.mcp_call_id.clone()),
+        // V1 MCP sessions do not carry execution leases.
+        lease_id: None,
+        task_id: audit_context.task_id,
+        job_run_id: audit_context.job_run_id,
+        activity_id: audit_context.activity_id,
+        step_index: audit_context.step_index,
+    };
+
+    let trace_id = session_context
+        .as_ref()
+        .and_then(|context| context.trace_id.as_deref());
+    let caller_ip = session_context
+        .as_ref()
+        .and_then(|context| context.caller_ip.as_deref());
+    let audit_write = open_audit_store().and_then(|store| {
+        store.insert_audit_event_record_with_invocation(&params, trace_id, caller_ip)
+    });
+
+    // Claim the row for the runtime the moment it persists, so the CLI
+    // `AuditGuard` suppresses its own duplicate emission. This is
+    // independent of the tool's own success/failure: the audit row is
+    // written for both (a failed call still gets a failure-status row).
+    if audit_write.is_ok() {
+        mark_tool_audit_recorded();
+    }
+
+    // Propagate the tool's own error first. A call that already failed
+    // carries no committed mutation to strand, so its error is the
+    // authoritative result and the audit-write outcome is irrelevant.
+    let value = result?;
+
+    // The tool call succeeded, so any mutation it performed is now
+    // committed. Audit persistence is part of that success contract:
+    // finding M1 (SECURITY-REVIEW-2026-07-15) — the previous code only
+    // `warn!`ed on an audit-write `Err` and still returned the tool's
+    // successful value, so an unwritable audit store (disk full, locked
+    // db, bad perms) yielded a successful, un-audited mutation with no
+    // error surfaced. Fail the call instead so a committed change can
+    // never surface without its audit row.
+    finalize_successful_dispatch(name, value, audit_write)
 }
 
 /// Fold a successful tool call together with its audit-write outcome into the
@@ -396,7 +484,7 @@ pub(super) fn resolve_audit_context(
     input: &Value,
     entry_point: ToolEntryPoint,
     session_context: Option<&ToolSessionContext>,
-) -> (AuditContext, Option<OrbitError>) {
+) -> AuditContext {
     fn input_str(input: &Value, key: &str) -> Option<String> {
         input
             .get(key)
@@ -413,33 +501,30 @@ pub(super) fn resolve_audit_context(
     }
 
     if entry_point == ToolEntryPoint::Mcp {
-        return trusted_mcp_audit_context(
-            session_context.unwrap_or(&ToolSessionContext::default()),
-        );
+        // The MCP entry point never reads model-authored tool JSON for
+        // correlation; `session_context` is retained in the signature because
+        // it is the trusted envelope the caller must hand over to reach it.
+        let _ = session_context;
+        return trusted_mcp_audit_context();
     }
 
-    (
-        AuditContext {
-            task_id: input_str(input, "task_id").or_else(|| env_str("ORBIT_TASK_ID")),
-            job_run_id: input_str(input, "job_run_id")
-                .or_else(|| input_str(input, "run_id"))
-                .or_else(|| env_str("ORBIT_RUN_ID")),
-            activity_id: input_str(input, "activity_id").or_else(|| env_str("ORBIT_ACTIVITY_ID")),
-            step_index: input
-                .get("step_index")
-                .and_then(Value::as_i64)
-                .or_else(|| env_str("ORBIT_STEP_INDEX").and_then(|s| s.parse().ok())),
-        },
-        None,
-    )
+    AuditContext {
+        task_id: input_str(input, "task_id").or_else(|| env_str("ORBIT_TASK_ID")),
+        job_run_id: input_str(input, "job_run_id")
+            .or_else(|| input_str(input, "run_id"))
+            .or_else(|| env_str("ORBIT_RUN_ID")),
+        activity_id: input_str(input, "activity_id").or_else(|| env_str("ORBIT_ACTIVITY_ID")),
+        step_index: input
+            .get("step_index")
+            .and_then(Value::as_i64)
+            .or_else(|| env_str("ORBIT_STEP_INDEX").and_then(|s| s.parse().ok())),
+    }
 }
 
-/// Resolve MCP audit correlation exclusively from an authenticated managed
-/// envelope and trusted broker context. Model-authored tool JSON is never an
-/// input to this function.
-pub fn trusted_mcp_audit_context(
-    session_context: &ToolSessionContext,
-) -> (AuditContext, Option<OrbitError>) {
+/// Resolve MCP audit correlation exclusively from the managed process
+/// envelope. Model-authored tool JSON and session audit metadata are not
+/// correlation inputs.
+pub fn trusted_mcp_audit_context() -> AuditContext {
     fn env_str(name: &str) -> Option<String> {
         std::env::var(name)
             .ok()
@@ -447,7 +532,7 @@ pub fn trusted_mcp_audit_context(
             .filter(|value| !value.is_empty())
     }
 
-    let mut context = if managed_run_context() {
+    if managed_run_context() {
         AuditContext {
             task_id: env_str("ORBIT_TASK_ID"),
             job_run_id: env_str("ORBIT_RUN_ID"),
@@ -456,51 +541,23 @@ pub fn trusted_mcp_audit_context(
         }
     } else {
         AuditContext::default()
-    };
-
-    let Some(leased_run) = session_context.leased_run.as_ref() else {
-        return (context, None);
-    };
-    match context.job_run_id.as_deref() {
-        None => {
-            context.job_run_id = Some(leased_run.run_id.clone());
-            (context, None)
-        }
-        Some(job_run_id) if job_run_id == leased_run.run_id => (context, None),
-        Some(job_run_id) => {
-            let error = OrbitError::InvalidInput(format!(
-                "trusted leased run '{}' does not match managed job run '{job_run_id}'",
-                leased_run.run_id
-            ));
-            (context, Some(error))
-        }
     }
 }
 
 pub(super) fn reservation_owner_from_env() -> Option<ReservationOwnerContext> {
-    if !managed_run_context() {
-        return None;
-    }
-
-    std::env::var("ORBIT_RUN_ID")
-        .ok()
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty())
-        .map(|owner_run_id| ReservationOwnerContext {
-            owner_metadata_json: Some(
-                serde_json::json!({
-                    "source": "orbit_cli",
-                })
-                .to_string(),
-            ),
-            owner_run_id,
-        })
+    managed_run_context_run_id_from_env().map(|owner_run_id| ReservationOwnerContext {
+        owner_metadata_json: Some(
+            serde_json::json!({
+                "source": "orbit_cli",
+            })
+            .to_string(),
+        ),
+        owner_run_id,
+    })
 }
 
 fn managed_run_context() -> bool {
-    std::env::var(ORBIT_MANAGED_RUN_CONTEXT_ENV)
-        .ok()
-        .is_some_and(|value| matches!(value.trim(), "1" | "true" | "TRUE"))
+    managed_run_context_from_env()
 }
 
 fn read_agent_identity_from_env() -> (Option<String>, Option<String>) {

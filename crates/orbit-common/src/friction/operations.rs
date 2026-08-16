@@ -1,21 +1,21 @@
 //! The friction operation registry — every friction verb, declared once.
 //!
-//! ADR-0209 bearing 1 pilot [ORB-10358]. Adding a friction verb is a
-//! [`FrictionVerb`] variant, one spec const listed in [`FRICTION_OPERATIONS`],
-//! and one handler arm in `orbit-core`. No CLI, MCP, or dashboard edit is
-//! required: those surfaces iterate this table.
+//! Adding a friction verb is a [`FrictionVerb`] variant, one spec const listed
+//! in [`FRICTION_OPERATIONS`], and one handler arm in `orbit-core`. Consumer
+//! surfaces iterate this table.
 //!
 //! **Every string below is shipped contract.** Tool names and parameter names
 //! are the MCP wire; CLI flag spellings and help text are the argv surface.
 //! Changing one is a consumer-visible break, not a rename.
 
 use crate::operation::{
-    CliArgKind, CliBinding, CliRender, Description, McpExposure, OperationSpec, ParamSpec,
-    ParamType, find_by_name,
+    CliArgKind, CliBinding, CliRender, Description, OperationSpec, ParamSpec, ParamType,
+    find_by_name,
 };
-use crate::types::McpToolPlacement;
+use crate::types::McpToolScope;
 
 use super::friction_tags_literal;
+use super::title::FRICTION_TITLE_MAX_CHARS;
 
 /// Every verb the friction noun supports.
 ///
@@ -95,6 +95,16 @@ const ADD: FrictionOperation = FrictionOperation {
             }),
         },
         ParamSpec {
+            name: "title",
+            param_type: ParamType::String,
+            required: false,
+            mcp_description: Some(ADD_TITLE_HELP),
+            cli: Some(CliBinding {
+                kind: flag("title"),
+                help: ADD_TITLE_CLI_HELP,
+            }),
+        },
+        ParamSpec {
             name: "tags",
             param_type: ParamType::StringList,
             required: false,
@@ -135,7 +145,7 @@ const ADD: FrictionOperation = FrictionOperation {
         },
     ],
     rejects_agent_field: true,
-    mcp: McpExposure::AgentOperator(McpToolPlacement::Hub),
+    mcp_scope: Some(McpToolScope::WorkspaceRequired),
     cli_json_flag: true,
     cli_render: CliRender::Record,
 };
@@ -167,8 +177,7 @@ const LIST: FrictionOperation = FrictionOperation {
         count_param("offset", "Optional number of records to skip"),
     ],
     rejects_agent_field: false,
-    // Non-destructive triage reads are canonical hub/operator operations.
-    mcp: McpExposure::OperatorOnly(McpToolPlacement::Hub),
+    mcp_scope: Some(McpToolScope::WorkspaceRequired),
     cli_json_flag: true,
     cli_render: CliRender::RecordTable,
 };
@@ -181,7 +190,9 @@ const SHOW: FrictionOperation = FrictionOperation {
     cli_about: "Show a single Orbit friction record",
     params: &[BARE_ID_PARAM],
     rejects_agent_field: false,
-    mcp: McpExposure::OperatorOnly(McpToolPlacement::Hub),
+    // `list` already returns the record bodies an agent needs; fetching one by
+    // id is a human/dashboard follow-up and stays on the CLI surface.
+    mcp_scope: None,
     cli_json_flag: true,
     cli_render: CliRender::Record,
 };
@@ -194,8 +205,8 @@ const STATS: FrictionOperation = FrictionOperation {
     cli_about: "Compute friction rates",
     params: &[],
     rejects_agent_field: false,
-    // Aggregate administration stays off the agent MCP surface.
-    mcp: McpExposure::Inactive,
+    // Aggregate administration stays off the MCP surface.
+    mcp_scope: None,
     cli_json_flag: true,
     cli_render: CliRender::AlwaysJson,
 };
@@ -208,7 +219,9 @@ const TAGS: FrictionOperation = FrictionOperation {
     cli_about: "List configured friction taxonomy tags",
     params: &[],
     rejects_agent_field: false,
-    mcp: McpExposure::AgentOperator(McpToolPlacement::Hub),
+    // The taxonomy is already spelled out in the `add`/`update` tag parameter
+    // descriptions, so a separate advertised lookup earns nothing.
+    mcp_scope: None,
     cli_json_flag: true,
     cli_render: CliRender::TagList,
 };
@@ -247,9 +260,19 @@ const UPDATE: FrictionOperation = FrictionOperation {
             }),
         },
         text_param("body", "Optional replacement markdown body"),
+        ParamSpec {
+            name: "title",
+            param_type: ParamType::String,
+            required: false,
+            mcp_description: Some(UPDATE_TITLE_HELP),
+            cli: Some(CliBinding {
+                kind: flag("title"),
+                help: UPDATE_TITLE_CLI_HELP,
+            }),
+        },
     ],
     rejects_agent_field: false,
-    mcp: McpExposure::OperatorOnly(McpToolPlacement::Hub),
+    mcp_scope: Some(McpToolScope::WorkspaceRequired),
     cli_json_flag: true,
     cli_render: CliRender::Record,
 };
@@ -263,7 +286,7 @@ const RESOLVE: FrictionOperation = FrictionOperation {
     params: &[BARE_ID_PARAM],
     rejects_agent_field: false,
     // Resolution is an operator decision taken through the CLI / dashboard.
-    mcp: McpExposure::Inactive,
+    mcp_scope: None,
     cli_json_flag: true,
     cli_render: CliRender::Record,
 };
@@ -278,9 +301,15 @@ pub fn friction_operation(name: &str) -> Option<&'static FrictionOperation> {
     find_by_name(FRICTION_OPERATIONS, name)
 }
 
-const FRICTION_ID_HELP: Description = Description::Static("Friction record id, e.g. F2026-05-001");
+const FRICTION_ID_HELP: Description = Description::Static("Friction record ID, e.g. FYYYY-MM-NNN");
 const BODY_HELP: Description =
     Description::Static("Markdown body describing what happened and why it caused friction");
+// The MCP descriptions carry the authoring guidance an agent needs at call
+// time; the CLI help stays one line so `--help` keeps its compact layout.
+const ADD_TITLE_HELP: Description = Description::Computed(add_title_description);
+const ADD_TITLE_CLI_HELP: Description = Description::Computed(add_title_cli_help);
+const UPDATE_TITLE_HELP: Description = Description::Computed(update_title_description);
+const UPDATE_TITLE_CLI_HELP: Description = Description::Computed(update_title_cli_help);
 const DURING_TASK_HELP: Description =
     Description::Static("Optional task ID being worked on when friction occurred");
 
@@ -334,6 +363,31 @@ const fn flag(long: &'static str) -> CliArgKind {
         long,
         delimiter: None,
     }
+}
+
+fn add_title_description() -> String {
+    format!(
+        "One-line handle identifying the problem, at most {FRICTION_TITLE_MAX_CHARS} characters. \
+         This is what lists and searches show, so name the surface and the failure. \
+         Derived from the body's opening line when omitted"
+    )
+}
+
+fn update_title_description() -> String {
+    format!(
+        "Optional replacement one-line title, at most {FRICTION_TITLE_MAX_CHARS} characters; \
+         an empty string restores derivation from the body"
+    )
+}
+
+fn add_title_cli_help() -> String {
+    format!("One-line record handle, max {FRICTION_TITLE_MAX_CHARS} chars; derived when omitted")
+}
+
+fn update_title_cli_help() -> String {
+    format!(
+        "Optional replacement title, max {FRICTION_TITLE_MAX_CHARS} chars; empty restores derivation"
+    )
 }
 
 fn add_tags_description() -> String {

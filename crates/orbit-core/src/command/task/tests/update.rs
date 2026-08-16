@@ -117,6 +117,106 @@ fn update_status_covers_approve_transitions() {
     assert_eq!(done.status, TaskStatus::Done);
 }
 
+#[test]
+fn orchestrator_is_explicit_mutable_before_start_and_never_routes_execution() {
+    let (_root, runtime) = test_runtime();
+    let task = runtime
+        .add_task(TaskAddParams {
+            title: "Orchestration ownership".to_string(),
+            description: "Keep orchestration attribution separate from execution.".to_string(),
+            crew: Some("implementer".to_string()),
+            orchestrator: Some("  orchestration  ".to_string()),
+            ..Default::default()
+        })
+        .expect("add task with orchestration attribution");
+    assert_eq!(task.orchestrator.as_deref(), Some("orchestration"));
+    assert_eq!(
+        runtime
+            .resolve_crew_for_task(None, task.crew.as_deref())
+            .expect("resolve execution crew")
+            .name,
+        "implementer"
+    );
+
+    let changed = runtime
+        .update_task(
+            &task.id,
+            TaskUpdateParams {
+                orchestrator: Some(Some("  implementer  ".to_string())),
+                ..Default::default()
+            },
+        )
+        .expect("change orchestration attribution while proposed");
+    assert_eq!(changed.orchestrator.as_deref(), Some("implementer"));
+    let cleared = runtime
+        .update_task(
+            &task.id,
+            TaskUpdateParams {
+                orchestrator: Some(None),
+                ..Default::default()
+            },
+        )
+        .expect("clear orchestration attribution while proposed");
+    assert_eq!(cleared.orchestrator, None);
+
+    let invalid = runtime
+        .update_task(
+            &task.id,
+            TaskUpdateParams {
+                orchestrator: Some(Some("missing".to_string())),
+                ..Default::default()
+            },
+        )
+        .expect_err("reject unconfigured orchestrator");
+    assert!(invalid.to_string().contains("missing"), "{invalid}");
+
+    runtime
+        .update_task(
+            &task.id,
+            TaskUpdateParams {
+                plan: Some("Implement it.".to_string()),
+                status: Some(TaskStatus::InProgress),
+                ..Default::default()
+            },
+        )
+        .expect("start task");
+    let immutable = runtime
+        .update_task(
+            &task.id,
+            TaskUpdateParams {
+                orchestrator: Some(Some("orchestration".to_string())),
+                ..Default::default()
+            },
+        )
+        .expect_err("orchestrator becomes immutable after execution starts");
+    assert!(
+        immutable.to_string().contains("proposed or backlog"),
+        "{immutable}"
+    );
+}
+
+#[test]
+fn orchestrator_is_rejected_on_non_draft_initial_statuses_including_someday() {
+    let (_root, runtime) = test_runtime();
+
+    for status in [TaskStatus::Someday, TaskStatus::InProgress] {
+        let error = runtime
+            .add_task(TaskAddParams {
+                title: format!("Invalid {status} orchestration attribution"),
+                description: "Orchestration ownership must be assigned before this state."
+                    .to_string(),
+                status: Some(status),
+                orchestrator: Some("orchestration".to_string()),
+                ..Default::default()
+            })
+            .expect_err("non-draft initial status rejects orchestrator");
+        assert!(
+            error.to_string().contains("proposed or backlog"),
+            "{status}: {error}"
+        );
+    }
+}
+
 /// Walks a task through backlog -> in-progress -> review -> done using only
 /// `update_task`, satisfying the plan and execution-summary guards.
 fn drive_to_done(runtime: &OrbitRuntime, id: &str) -> Task {

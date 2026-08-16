@@ -1,10 +1,10 @@
 use orbit_common::types::OrbitError;
 
 pub use orbit_search::{
-    AdrIndexResult, CompanionStatus, IndexKind, LearningIndexResult, ScoreBreakdown, SemanticHit,
-    SemanticIndexParams, SemanticIndexResult, SemanticInstallParams, SemanticInstallResult,
-    SemanticRelatedParams, SemanticRelatedResult, SemanticSearchParams, SemanticSearchResult,
-    SemanticStatsResult, SemanticUninstallParams, SemanticUninstallResult, TaskIndexResult,
+    CompanionStatus, IndexKind, ScoreBreakdown, SemanticHit, SemanticIndexParams,
+    SemanticIndexResult, SemanticInstallParams, SemanticInstallResult, SemanticRelatedParams,
+    SemanticRelatedResult, SemanticSearchParams, SemanticSearchResult, SemanticStatsResult,
+    SemanticUninstallParams, SemanticUninstallResult, TaskIndexResult,
 };
 
 use crate::OrbitRuntime;
@@ -35,30 +35,13 @@ impl OrbitRuntime {
             IndexKind::Docs => self
                 .semantic_index_docs(params)
                 .map(SemanticIndexResult::from),
-            IndexKind::Adrs => self
-                .semantic_index_adrs(params)
-                .map(SemanticIndexResult::from),
-            IndexKind::Learnings => self
-                .semantic_index_learnings(params)
-                .map(SemanticIndexResult::from),
             IndexKind::All => {
                 let tasks = self.semantic_index_tasks(params.clone());
-                let docs = self.semantic_index_docs(params.clone());
-                let adrs = self.semantic_index_adrs(params.clone());
-                let learnings = self.semantic_index_learnings(params);
-                match (tasks, docs, adrs, learnings) {
-                    (Ok(tasks), Ok(docs), Ok(adrs), Ok(learnings)) => {
-                        Ok(SemanticIndexResult::All {
-                            tasks,
-                            docs,
-                            adrs,
-                            learnings,
-                        })
-                    }
-                    (Err(error), _, _, _) => Err(error),
-                    (_, Err(error), _, _) => Err(error),
-                    (_, _, Err(error), _) => Err(error),
-                    (_, _, _, Err(error)) => Err(error),
+                let docs = self.semantic_index_docs(params);
+                match (tasks, docs) {
+                    (Ok(tasks), Ok(docs)) => Ok(SemanticIndexResult::All { tasks, docs }),
+                    (Err(error), _) => Err(error),
+                    (_, Err(error)) => Err(error),
                 }
             }
         }
@@ -80,35 +63,6 @@ impl OrbitRuntime {
             model: params.model,
             force: params.force,
         })
-    }
-
-    fn semantic_index_adrs(
-        &self,
-        params: SemanticIndexParams,
-    ) -> Result<AdrIndexResult, OrbitError> {
-        self.index_adrs(orbit_search::AdrIndexParams {
-            model: params.model,
-            force: params.force,
-        })
-    }
-
-    fn semantic_index_learnings(
-        &self,
-        params: SemanticIndexParams,
-    ) -> Result<LearningIndexResult, OrbitError> {
-        let sources = self
-            .list_learnings(None)?
-            .iter()
-            .map(orbit_search::LearningEmbeddingSource::from)
-            .collect::<Vec<_>>();
-        orbit_search::learning_index(
-            &self.stores().semantic_vector,
-            &sources,
-            orbit_search::LearningIndexParams {
-                model: params.model,
-                force: params.force,
-            },
-        )
     }
 
     pub fn semantic_stats(&self) -> Result<SemanticStatsResult, OrbitError> {

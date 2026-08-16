@@ -3,6 +3,7 @@
     "activity_id": null,
     "arguments_json": "{\"id\":\"ORB-00002\",\"model\":\"gpt-5.5\"}",
     "caller_host_id": null,
+    "caller_ip": null,
     "caller_machine_id": null,
     "command": "tool",
     "duration_ms": 0,
@@ -31,6 +32,7 @@
     "task_id": null,
     "timestamp": "<timestamp>",
     "tool_name": "orbit.task.update",
+    "trace_id": null,
     "transport": null,
     "working_directory": "<working_directory>",
     "workspace_id": null
@@ -39,6 +41,7 @@
     "activity_id": null,
     "arguments_json": "{\"id\":\"ORB-00002\",\"model\":\"gpt-5.5\"}",
     "caller_host_id": null,
+    "caller_ip": null,
     "caller_machine_id": null,
     "command": "tool",
     "duration_ms": 0,
@@ -67,6 +70,7 @@
     "task_id": null,
     "timestamp": "<timestamp>",
     "tool_name": "orbit.task.update",
+    "trace_id": null,
     "transport": null,
     "working_directory": "<working_directory>",
     "workspace_id": null
@@ -75,6 +79,7 @@
     "activity_id": null,
     "arguments_json": "{\"id\":\"ORB-00002\",\"model\":\"gpt-5.5\"}",
     "caller_host_id": null,
+    "caller_ip": null,
     "caller_machine_id": null,
     "command": "tool",
     "duration_ms": 0,
@@ -103,6 +108,7 @@
     "task_id": null,
     "timestamp": "<timestamp>",
     "tool_name": "orbit.task.update",
+    "trace_id": null,
     "transport": null,
     "working_directory": "<working_directory>",
     "workspace_id": null

@@ -28,10 +28,10 @@ impl Tool for OrbitTaskAddTool {
             ToolParam {
                 name: "workspace".to_string(),
                 description:
-                    "Filesystem path to an existing directory inside the target repository \
-                     (e.g. the repository root). This is a repository path, never a logical/bridge \
-                     workspace id (such as a `ws_*` id). Falls back to the MCP session's \
-                     `_meta.orbit.workspace` when omitted."
+                    "Workspace selector: a registered workspace name, a logical workspace ID \
+                     (`ws_*`), or an absolute path to a local checkout (a linked Git worktree \
+                     resolves to its registered checkout). Falls back to the MCP session's \
+                     `_meta.orbit.workspace` when omitted; never inferred from process cwd."
                         .to_string(),
                 param_type: "string".to_string(),
                 required: false,
@@ -86,6 +86,12 @@ impl Tool for OrbitTaskAddTool {
             ToolParam {
                 name: "crew".to_string(),
                 description: "Optional named crew to use when running this task".to_string(),
+                param_type: "string".to_string(),
+                required: false,
+            },
+            ToolParam {
+                name: "orchestrator".to_string(),
+                description: "Optional named crew responsible for orchestration attribution; does not select execution".to_string(),
                 param_type: "string".to_string(),
                 required: false,
             },

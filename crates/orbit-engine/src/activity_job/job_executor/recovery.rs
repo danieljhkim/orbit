@@ -46,15 +46,65 @@ pub(super) fn attempt_recovery_activity(
     attempt: u32,
     max_attempts: u32,
 ) -> bool {
-    let input = serde_json::json!({
+    let mut input = serde_json::json!({
         "failed_step_id": step.id,
         "activity_name": step_activity_name(step),
         "error_message": original_err.to_string(),
         "attempt": attempt,
         "max_attempts": max_attempts,
     });
-    let role_overridden_spec = role_overridden_recovery_spec(recovery, ctx);
-    let spec = role_overridden_spec.as_ref().unwrap_or(&recovery.spec);
+    if recovery.name == "step_failure_recovery"
+        && let Some(object) = input.as_object_mut()
+    {
+        object.insert("system_crew".to_string(), Value::Bool(true));
+    }
+    let input = match inject_system_crew_input(ctx.host, &input) {
+        Ok(input) => input,
+        Err(error) => {
+            tracing::warn!(
+                target: "orbit.engine.job_executor",
+                run_id = %ctx.run_id,
+                failed_step_id = %step.id,
+                recovery_activity = %recovery.name,
+                error = %error,
+                "step recovery crew resolution failed; preserving original step outcome"
+            );
+            emit_job_event_lossy(
+                &ctx.audit,
+                ctx.task_id(),
+                V2AuditEventKind::StepRecoveryAttempted {
+                    step_id: step.id.clone(),
+                    recovery_activity: recovery.name.clone(),
+                    recovery_succeeded: false,
+                },
+            );
+            return false;
+        }
+    };
+    let crew_overridden_spec = match crew_overridden_recovery_spec(recovery, ctx, &input) {
+        Ok(spec) => spec,
+        Err(error) => {
+            tracing::warn!(
+                target: "orbit.engine.job_executor",
+                run_id = %ctx.run_id,
+                failed_step_id = %step.id,
+                recovery_activity = %recovery.name,
+                error = %error,
+                "step recovery crew resolution failed; preserving original step outcome"
+            );
+            emit_job_event_lossy(
+                &ctx.audit,
+                ctx.task_id(),
+                V2AuditEventKind::StepRecoveryAttempted {
+                    step_id: step.id.clone(),
+                    recovery_activity: recovery.name.clone(),
+                    recovery_succeeded: false,
+                },
+            );
+            return false;
+        }
+    };
+    let spec = crew_overridden_spec.as_ref().unwrap_or(&recovery.spec);
     let dispatch = dispatch_v2_activity_without_run_id_injection(V2DispatchInput {
         activity_name: &recovery.name,
         spec,
@@ -62,7 +112,6 @@ pub(super) fn attempt_recovery_activity(
         input: input.clone(),
         audit: ctx.audit.clone(),
         run_id: &ctx.run_id,
-        agent_override: None,
         host: Some(ctx.host),
     });
 
@@ -136,7 +185,6 @@ pub(super) fn attempt_failure_activity(
         input: input.clone(),
         audit: ctx.audit.clone(),
         run_id: &ctx.run_id,
-        agent_override: None,
         host: Some(ctx.host),
     });
     match dispatch {
@@ -163,16 +211,19 @@ pub(super) fn attempt_failure_activity(
     }
 }
 
-pub(super) fn role_overridden_recovery_spec(
+pub(super) fn crew_overridden_recovery_spec(
     recovery: &ResolvedRecoveryActivity,
     ctx: &ExecCtx<'_>,
-) -> Option<ActivityV2Spec> {
+    input: &Value,
+) -> Result<Option<ActivityV2Spec>, DispatchError> {
     let ActivityV2Spec::AgentLoop(inline_spec) = &recovery.spec else {
-        return None;
+        return Ok(None);
     };
-    let role = inline_spec.role?;
-    let resolved = resolve_agent_settings(role, ctx.host, inline_spec, &ctx.input);
+    let input = inject_system_crew_input(ctx.host, input)?;
+    let Some(resolved) = resolve_crew_settings(ctx.host, inline_spec, &input, &ctx.input)? else {
+        return Ok(None);
+    };
     let mut spec = inline_spec.clone();
     apply_resolved_settings(&mut spec, &resolved);
-    Some(ActivityV2Spec::AgentLoop(spec))
+    Ok(Some(ActivityV2Spec::AgentLoop(spec)))
 }

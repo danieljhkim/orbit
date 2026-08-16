@@ -5,7 +5,6 @@ import { fileURLToPath } from 'node:url';
 const websiteRoot = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const repoRoot = path.dirname(websiteRoot);
 const sourcePath = path.join(repoRoot, '.orbit', 'state', 'scoreboard', 'summary.json');
-const duelPath = path.join(repoRoot, '.orbit', 'state', 'scoreboard', 'duel_plan.json');
 const docsRoot = path.join(websiteRoot, 'src', 'content', 'docs');
 const metricsDir = path.join(docsRoot, 'metrics');
 const operationsPath = path.join(metricsDir, 'operations.md');
@@ -15,7 +14,6 @@ const scoreboardPath = path.join(metricsDir, 'scoreboard.md');
 const legacyPath = path.join(docsRoot, 'scoreboard.md');
 
 const HIDDEN_AGENTS = new Set(['human', 'agent', 'system', 'admin']);
-const KNOWN_AGENT_FAMILIES = ['claude', 'codex', 'gemini', 'grok'];
 const TOP_TOOLS_RENDER_LIMIT = 20;
 
 const summary = await loadSummary(sourcePath);
@@ -36,7 +34,6 @@ const generatedAt = summary.generated_at ?? null;
 const recent = summary.recent_7d ?? null;
 const workflowsRun = Array.isArray(summary.workflows_run) ? summary.workflows_run : [];
 const topTools = Array.isArray(summary.top_tools) ? summary.top_tools : [];
-const duelsByModel = await loadDuelStats(duelPath);
 
 const operationsSections = [
   renderTasksTable(agents, recent),
@@ -47,7 +44,6 @@ const operationsSections = [
 
 const scoreboardSections = [
   renderPrsTable(agents),
-  renderDuelsTable(duelsByModel),
   renderTaskReviewTable(agents),
 ].filter(Boolean);
 
@@ -73,7 +69,7 @@ await writeFile(
   scoreboardPath,
   frontmatter(
     'Scoreboard',
-    'Per-agent quality and engagement signals — PRs, planning duels, task reviews.',
+    'Per-agent quality and engagement signals — PRs and task reviews.',
   ) +
     [
       pageHeader(
@@ -106,51 +102,6 @@ async function loadSummary(filePath) {
     if (err.code === 'ENOENT') return null;
     throw err;
   }
-}
-
-async function loadDuelStats(filePath) {
-  let runs = [];
-  try {
-    const raw = await readFile(filePath, 'utf8');
-    runs = JSON.parse(raw)?.runs ?? [];
-  } catch (err) {
-    if (err.code !== 'ENOENT') throw err;
-  }
-
-  const stats = new Map(
-    KNOWN_AGENT_FAMILIES.map((family) => [
-      family,
-      { wins: 0, losses: 0, plannerRuns: 0, arbiterRuns: 0 },
-    ]),
-  );
-  const bump = (agent, key) => {
-    if (!agent || HIDDEN_AGENTS.has(agent)) return;
-    if (!stats.has(agent)) {
-      stats.set(agent, { wins: 0, losses: 0, plannerRuns: 0, arbiterRuns: 0 });
-    }
-    stats.get(agent)[key] += 1;
-  };
-
-  for (const run of runs) {
-    const a = run.roles?.planner_a?.agent ?? run.roles?.planner_a?.model;
-    const b = run.roles?.planner_b?.agent ?? run.roles?.planner_b?.model;
-    const arb = run.roles?.arbiter?.agent ?? run.roles?.arbiter?.model;
-    const winner = run.outcome?.winner;
-
-    if (a) bump(a, 'plannerRuns');
-    if (b) bump(b, 'plannerRuns');
-    if (arb) bump(arb, 'arbiterRuns');
-
-    if (winner === 'planner_a') {
-      if (a) bump(a, 'wins');
-      if (b) bump(b, 'losses');
-    } else if (winner === 'planner_b') {
-      if (b) bump(b, 'wins');
-      if (a) bump(a, 'losses');
-    }
-  }
-
-  return [...stats.entries()].sort(([a], [b]) => a.localeCompare(b));
 }
 
 function pageHeader(title, blurb, generatedAt, agentCount) {
@@ -214,7 +165,7 @@ function renderToolCallsTable(agents, recent) {
   }`;
   return section(
     'Tool calls',
-    'Audit-recorded `orbit.*` tool invocations per agent, broken down by Orbit surface. `Total` sums every surface (graph + task + duel + fs + …). Sorted by total.',
+    'Audit-recorded `orbit.*` tool invocations per agent, broken down by Orbit surface. `Total` sums every surface. Sorted by total.',
     headline,
     ['Agent', 'Graph', 'Task', 'Total'],
     sortRows(rows),
@@ -285,33 +236,6 @@ function renderPrsTable(agents) {
     'Pull requests merged through `orbit run ship`. Clean rate = `merged_clean / (merged_clean + merged_with_revision)`. Sorted by total.',
     headline,
     ['Agent', 'Total', 'Clean', 'With revision', 'Clean rate'],
-    sortRows(rows),
-  );
-}
-
-function renderDuelsTable(duelsByModel) {
-  const rows = duelsByModel
-    .map(([name, d]) => {
-      const decided = d.wins + d.losses;
-      const rate = decided > 0 ? d.wins / decided : null;
-      const winRate = rate == null ? '—' : `${Math.round(rate * 100)}%`;
-      return {
-        sortKey: rate,
-        cells: [
-          agentCell(name),
-          num(d.wins),
-          num(d.losses),
-          num(d.plannerRuns),
-          num(d.arbiterRuns),
-          winRate,
-        ],
-      };
-    });
-  return section(
-    'Planning duels',
-    'Head-to-head planning runs. Wins and losses are recorded only for planner roles; arbiter runs decide outcomes and are listed separately. Win rate is `wins / (wins + losses)`. Sorted by win rate.',
-    null,
-    ['Agent', 'Wins', 'Losses', 'As planner', 'As arbiter', 'Win rate'],
     sortRows(rows),
   );
 }

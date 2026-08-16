@@ -1,11 +1,11 @@
 use std::ffi::OsStr;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::thread;
 use std::time::{Duration, Instant};
 
 use chrono::Utc;
-use orbit_common::types::{AuditEventStatus, JobRunState, OrbitError};
+use orbit_common::types::{AuditEventStatus, JobRunState, OrbitError, WorkspacePaths};
 use orbit_store::sqlite::migration::SUPPORTED_SCHEMA_VERSION;
 use tempfile::TempDir;
 
@@ -13,6 +13,7 @@ use crate::OrbitRuntime;
 use crate::command::job::JobRunListParams;
 use crate::command::job::pipeline::{
     configure_pipeline_worker_command, configure_pipeline_worker_stdio, pipeline_worker_log_path,
+    pipeline_worker_profile_file, pipeline_worker_root_override,
     resolve_pipeline_worker_executable,
 };
 use crate::command::task::TaskAddParams;
@@ -29,62 +30,14 @@ fn test_runtime() -> (TempDir, OrbitRuntime) {
     (root, runtime)
 }
 
-fn review_test_runtime() -> (TempDir, OrbitRuntime) {
-    let root = TempDir::new().expect("tempdir");
-    let global_root = root.path().join("global");
-    let workspace_root = root.path().join("repo/.orbit");
-    std::fs::create_dir_all(&global_root).expect("create global root");
-    std::fs::create_dir_all(&workspace_root).expect("create workspace root");
-    std::fs::write(
-        workspace_root.join("config.toml"),
-        r#"
-[workflow]
-base_branch = "main"
-default_crew = "sol"
-
-[crews.sol]
-model = "gpt-5.6-sol"
-provider = "codex"
-backend = "cli"
-
-[crews.opus]
-model = "opus"
-provider = "claude"
-backend = "cli"
-
-[crews.opus_alias]
-model = "opus"
-provider = "claude"
-backend = "cli"
-
-[crews.opus_vendor_alias]
-model = "opus"
-provider = "anthropic"
-backend = "cli"
-
-[crews.unmaterializable]
-model = "mystery"
-provider = "not-a-provider"
-backend = "cli"
-"#,
-    )
-    .expect("write config");
-    let runtime =
-        OrbitRuntime::from_roots(&global_root, &workspace_root).expect("build test runtime");
-    (root, runtime)
-}
-
-fn add_review_test_task(runtime: &OrbitRuntime, crew: &str) -> String {
+fn add_backlog_task(runtime: &OrbitRuntime) -> String {
     runtime
         .add_task(TaskAddParams {
-            title: "review preflight fixture".to_string(),
-            description: "prove review validation occurs before submission".to_string(),
-            plan: "validate without implementation side effects".to_string(),
-            status: Some(orbit_common::types::TaskStatus::Backlog),
-            crew: Some(crew.to_string()),
-            ..TaskAddParams::default()
+            title: "Ship submission fixture".to_string(),
+            description: "A task selected by a ship-submission test.".to_string(),
+            ..Default::default()
         })
-        .expect("add task")
+        .expect("create backlog task")
         .id
 }
 
@@ -93,7 +46,7 @@ fn pipeline_worker_command_discovers_registered_workspace_from_cwd() {
     let workspace = Path::new("/registered/workspace");
     let mut command = Command::new("orbit");
 
-    configure_pipeline_worker_command(&mut command, workspace, "jrun-child");
+    configure_pipeline_worker_command(&mut command, workspace, "jrun-child", None);
 
     assert_eq!(
         command.get_args().collect::<Vec<_>>(),
@@ -102,9 +55,84 @@ fn pipeline_worker_command_discovers_registered_workspace_from_cwd() {
             OsStr::new("run-pipeline-worker"),
             OsStr::new("jrun-child"),
         ],
-        "an explicit --root pins the worker to the wrong global store"
+        "an unpinned parent must not pass --root; that pins both roots and disconnects the worker from the global store"
     );
     assert_eq!(command.get_current_dir(), Some(workspace));
+}
+
+#[test]
+fn pipeline_worker_command_forwards_explicit_root_to_the_detached_worker() {
+    let workspace = Path::new("/registered/workspace");
+    let pinned_root = Path::new("/tmp/custom-orbit");
+    let mut command = Command::new("orbit");
+
+    configure_pipeline_worker_command(&mut command, workspace, "jrun-child", Some(pinned_root));
+
+    assert_eq!(
+        command.get_args().collect::<Vec<_>>(),
+        vec![
+            OsStr::new("--root"),
+            OsStr::new("/tmp/custom-orbit"),
+            OsStr::new("job"),
+            OsStr::new("run-pipeline-worker"),
+            OsStr::new("jrun-child"),
+        ],
+        "a parent constructed with --root must forward that same global store to the worker"
+    );
+    assert_eq!(command.get_current_dir(), Some(workspace));
+    assert!(
+        command
+            .get_envs()
+            .any(|(key, value)| key == OsStr::new("ORBIT_ROOT") && value.is_none()),
+        "an explicit --root must not let inherited ORBIT_ROOT re-select $HOME/.orbit"
+    );
+}
+
+#[test]
+fn pipeline_worker_profile_file_is_none_without_inherited_coverage_env() {
+    assert_eq!(
+        pipeline_worker_profile_file(Path::new("/tmp/logs"), "jrun-child", None),
+        None
+    );
+    assert_eq!(
+        pipeline_worker_profile_file(Path::new("/tmp/logs"), "jrun-child", Some(OsStr::new(""))),
+        None
+    );
+}
+
+#[test]
+fn pipeline_worker_profile_file_rewrites_inherited_coverage_dump_under_the_worker_log_dir() {
+    assert_eq!(
+        pipeline_worker_profile_file(
+            Path::new("/tmp/logs"),
+            "jrun-child",
+            Some(OsStr::new("target/llvm-cov-target/orbit-%p-%m.profraw")),
+        ),
+        Some(PathBuf::from("/tmp/logs/jrun-child.%p.profraw"))
+    );
+}
+
+#[test]
+fn pipeline_worker_root_override_is_none_in_the_default_split_root_layout() {
+    let paths = WorkspacePaths::new(
+        PathBuf::from("/repo"),
+        PathBuf::from("/repo/.orbit"),
+        PathBuf::from("/home/user/.orbit"),
+    );
+    assert_eq!(pipeline_worker_root_override(&paths), None);
+}
+
+#[test]
+fn pipeline_worker_root_override_forwards_a_pinned_global_store() {
+    let paths = WorkspacePaths::new(
+        PathBuf::from("/repo"),
+        PathBuf::from("/tmp/custom-orbit"),
+        PathBuf::from("/tmp/custom-orbit"),
+    );
+    assert_eq!(
+        pipeline_worker_root_override(&paths),
+        Some(Path::new("/tmp/custom-orbit"))
+    );
 }
 
 #[cfg(unix)]
@@ -163,17 +191,19 @@ fn worker_exit_before_claim_terminalizes_persisted_run_with_diagnostic() {
     assert!(durable_output.contains("worker stdout context"));
     assert!(durable_output.contains("action registration missing: routine_dispatch"));
 
-    let audits = runtime
-        .list_audit_events(None, None, Some(AuditEventStatus::Failure), None, 20)
-        .expect("list startup failure audit");
-    assert!(audits.iter().any(|audit| {
-        audit.tool_name.as_deref() == Some("pipeline.worker.startup")
-            && audit.target_id.as_deref() == Some(run.run_id.as_str())
-            && audit
-                .error_message
-                .as_deref()
-                .is_some_and(|error| error.contains("before claiming"))
-    }));
+    wait_for_pipeline_audit_event(
+        &runtime,
+        Some(AuditEventStatus::Failure),
+        "startup failure audit",
+        |audit| {
+            audit.tool_name.as_deref() == Some("pipeline.worker.startup")
+                && audit.target_id.as_deref() == Some(run.run_id.as_str())
+                && audit
+                    .error_message
+                    .as_deref()
+                    .is_some_and(|error| error.contains("before claiming"))
+        },
+    );
 }
 
 #[cfg(unix)]
@@ -214,23 +244,10 @@ fn routine_style_detached_worker_is_claimed_within_ownership_window() {
         "detached routine worker exceeded ownership window"
     );
 
-    let deadline = Instant::now() + Duration::from_secs(2);
-    loop {
-        let audits = runtime
-            .list_audit_events(None, None, None, None, 20)
-            .expect("list claimed-worker audit");
-        if audits.iter().any(|audit| {
-            audit.tool_name.as_deref() == Some("pipeline.worker.claimed")
-                && audit.target_id.as_deref() == Some(run.run_id.as_str())
-        }) {
-            break;
-        }
-        assert!(
-            Instant::now() < deadline,
-            "ownership observer did not persist a claimed audit"
-        );
-        thread::sleep(Duration::from_millis(10));
-    }
+    wait_for_pipeline_audit_event(&runtime, None, "claimed-worker audit", |audit| {
+        audit.tool_name.as_deref() == Some("pipeline.worker.claimed")
+            && audit.target_id.as_deref() == Some(run.run_id.as_str())
+    });
 
     assert_eq!(
         log_path,
@@ -258,6 +275,31 @@ fn wait_for_worker_ownership_outcome(
     }
 }
 
+/// Retry a pipeline audit lookup instead of asserting on a single snapshot:
+/// the audit event is written after the run's terminal state and diagnostic
+/// step, so an observer that only waits for those can still race the audit.
+fn wait_for_pipeline_audit_event(
+    runtime: &OrbitRuntime,
+    status: Option<AuditEventStatus>,
+    description: &str,
+    predicate: impl Fn(&orbit_common::types::AuditEvent) -> bool,
+) -> orbit_common::types::AuditEvent {
+    let deadline = Instant::now() + Duration::from_secs(2);
+    loop {
+        let audits = runtime
+            .list_audit_events(None, None, status, None, 20)
+            .expect("list pipeline audit events");
+        if let Some(audit) = audits.into_iter().find(|audit| predicate(audit)) {
+            return audit;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "expected {description} was not persisted within the window"
+        );
+        thread::sleep(Duration::from_millis(10));
+    }
+}
+
 fn wait_for_log_contains(path: &Path, expected: &str) -> String {
     let deadline = Instant::now() + Duration::from_secs(2);
     loop {
@@ -280,12 +322,23 @@ fn long_lived_worker_reopens_and_applies_compatible_pending_schema() {
     {
         let connection = store.connection();
         let conn = connection.lock().expect("store connection");
-        conn.execute("DELETE FROM schema_meta WHERE key = 'migration.v0011'", [])
-            .expect("rewind routine migration ledger");
+        // Rewind past the newest ledger entry as well: the recorded version is
+        // the highest key present, so leaving a later key behind would report
+        // the store as current and apply nothing. Every entry from v0011 up is
+        // therefore dropped, not a fixed list that a new migration would
+        // silently outrun.
+        conn.execute(
+            "DELETE FROM schema_meta WHERE key LIKE 'migration.v%' AND key >= 'migration.v0011'",
+            [],
+        )
+        .expect("rewind routine migration ledger");
         conn.execute_batch(
             "DROP TABLE routine_pauses;
              DROP TABLE routine_fires;
-             DROP TABLE routine_cursors;",
+             DROP TABLE routine_cursors;
+             DROP TABLE friction_import_state;
+             DROP TABLE friction_record_tags;
+             DROP TABLE friction_records;",
         )
         .expect("rewind routine schema");
     }
@@ -300,17 +353,18 @@ fn long_lived_worker_reopens_and_applies_compatible_pending_schema() {
     );
     let connection = store.connection();
     let conn = connection.lock().expect("store connection");
-    let routine_tables: i64 = conn
+    let restored_tables: i64 = conn
         .query_row(
             "SELECT COUNT(*) FROM sqlite_master
              WHERE type = 'table' AND name IN (
-                 'routine_cursors', 'routine_fires', 'routine_pauses'
+                 'routine_cursors', 'routine_fires', 'routine_pauses',
+                 'friction_records', 'friction_record_tags', 'friction_import_state'
              )",
             [],
             |row| row.get(0),
         )
-        .expect("count routine tables");
-    assert_eq!(routine_tables, 3);
+        .expect("count restored tables");
+    assert_eq!(restored_tables, 6);
 }
 
 #[test]
@@ -378,69 +432,216 @@ fn deleted_current_executable_resolves_to_replaced_installed_path() {
     );
 }
 
+/// ORB-10544: the duplicate-dispatch guard lives in the shared submission path,
+/// so it cannot be bypassed by a future adapter that calls `submit_ship_run`
+/// directly instead of going through the dashboard endpoint or the MCP tool.
+/// Asserted here against the shared entry point itself, with no HTTP or tool
+/// surface in the picture.
 #[test]
-fn review_submission_rejects_unknown_same_or_unmaterializable_crews_before_run_insert() {
-    for (review_crew, expected) in [
-        ("missing", "is not defined"),
-        ("sol", "is not independent"),
-        ("opus_alias", "is not independent"),
-        ("opus_vendor_alias", "is not independent"),
-        ("unmaterializable", "unmaterializable provider"),
+fn ship_submission_refuses_a_task_already_carried_by_a_non_terminal_run() {
+    let (_root, runtime) = test_runtime();
+    let selected_task_id = add_backlog_task(&runtime);
+    let in_flight = runtime
+        .stores()
+        .jobs()
+        .insert_job_run(
+            "task_auto_pipeline",
+            1,
+            Utc::now(),
+            Some(serde_json::json!({"mode": "local", "task_ids": [selected_task_id]})),
+            None,
+        )
+        .expect("insert in-flight run");
+    assert!(!in_flight.state.is_terminal());
+
+    let error = runtime
+        .submit_ship_run(
+            ShipMode::Local,
+            Some("main"),
+            std::slice::from_ref(&selected_task_id),
+            Some("test"),
+            None,
+        )
+        .expect_err("a task with a run in flight must not dispatch a second run");
+
+    let OrbitError::ShipRunInFlight {
+        task_id: guarded_task_id,
+        run_id,
+    } = &error
+    else {
+        panic!("expected ShipRunInFlight, got {error:?}");
+    };
+    assert_eq!(guarded_task_id, &selected_task_id);
+    assert_eq!(run_id, &in_flight.run_id);
+
+    let runs = runtime
+        .list_job_runs(JobRunListParams::default())
+        .expect("list job runs");
+    assert_eq!(
+        runs.iter().map(|run| &run.run_id).collect::<Vec<_>>(),
+        vec![&in_flight.run_id],
+        "the refused submission must not persist another run"
+    );
+}
+
+/// The shared guard is keyed on the explicit selection: an unrelated task is
+/// still shippable while another one is in flight, and auto (backlog-discovery)
+/// mode — which names no tasks — is never keyed and so never refused.
+///
+/// Neither call is expected to dispatch: this fixture seeds no job asset, so
+/// both fall through the guard to the same job-not-found refusal. That the
+/// refusal is *not* `ShipRunInFlight` is exactly the assertion, and it keeps the
+/// test from spawning a detached pipeline worker.
+#[test]
+fn ship_submission_guard_is_scoped_to_the_selected_tasks() {
+    let (_root, runtime) = test_runtime();
+    let in_flight_task_id = add_backlog_task(&runtime);
+    let unrelated_task_id = add_backlog_task(&runtime);
+    runtime
+        .stores()
+        .jobs()
+        .insert_job_run(
+            "task_auto_pipeline",
+            1,
+            Utc::now(),
+            Some(serde_json::json!({"mode": "local", "task_ids": [in_flight_task_id]})),
+            None,
+        )
+        .expect("insert in-flight run");
+
+    for (label, task_ids) in [
+        ("an unrelated explicit task", vec![unrelated_task_id]),
+        ("auto discovery", Vec::new()),
     ] {
-        let (_root, runtime) = review_test_runtime();
-        let implementation_crew = if matches!(review_crew, "opus_alias" | "opus_vendor_alias") {
-            "opus"
-        } else {
-            "sol"
-        };
-        let task_id = add_review_test_task(&runtime, implementation_crew);
-
         let error = runtime
-            .submit_ship_run(
-                ShipMode::Pr,
-                Some("main"),
-                &[task_id],
-                true,
-                Some(review_crew),
-                Some("test"),
-            )
-            .expect_err("invalid review crew must fail before submission");
-
+            .submit_ship_run(ShipMode::Local, Some("main"), &task_ids, Some("test"), None)
+            .expect_err("no job asset is deployed in this fixture");
         assert!(
-            error.to_string().contains(expected),
-            "unexpected error for {review_crew}: {error}"
+            !matches!(error, OrbitError::ShipRunInFlight { .. }),
+            "{label} must pass the in-flight guard: {error:?}"
         );
         assert!(
-            runtime
-                .list_job_runs(JobRunListParams::default())
-                .expect("list job runs")
-                .is_empty(),
-            "validation failure must not persist an implementation run"
+            matches!(error, OrbitError::NotFound { .. }),
+            "{label} must fail on the missing job asset instead: {error:?}"
         );
     }
 }
 
+/// Explicit task validation belongs in the shared runtime path, ahead of
+/// pipeline persistence, so every submission surface reports a typo directly
+/// and cannot leave an orphaned worker/run behind.
 #[test]
-fn review_submission_fails_closed_when_deployed_review_assets_are_missing() {
-    let (_root, runtime) = review_test_runtime();
-    let task_id = add_review_test_task(&runtime, "sol");
+fn ship_submission_refuses_a_missing_explicit_task_before_persisting_a_run() {
+    let (_root, runtime) = test_runtime();
+    let missing_id = "ORB-99999".to_string();
 
     let error = runtime
         .submit_ship_run(
-            ShipMode::Pr,
+            ShipMode::Local,
             Some("main"),
-            &[task_id],
-            true,
-            Some("opus"),
+            std::slice::from_ref(&missing_id),
             Some("test"),
+            None,
         )
-        .expect_err("missing review assets must fail before submission");
+        .expect_err("a missing explicit task must be rejected before dispatch");
 
-    assert!(error.to_string().contains("job not found"), "{error}");
+    assert!(matches!(
+        error,
+        OrbitError::NotFound {
+            kind: orbit_common::types::NotFoundKind::Task,
+            id,
+        } if id == missing_id
+    ));
     assert!(
         runtime
             .list_job_runs(JobRunListParams::default())
             .expect("list job runs")
-            .is_empty()
+            .is_empty(),
+        "the refusal must not persist a run or spawn a worker"
+    );
+}
+
+#[test]
+fn ship_submission_refuses_an_epic_root_but_allows_its_child() {
+    let (_root, runtime) = test_runtime();
+    let epic = runtime
+        .add_task(TaskAddParams {
+            title: "Epic root".to_string(),
+            description: "Supervisor-owned fixture".to_string(),
+            tags: vec!["epic".to_string()],
+            ..Default::default()
+        })
+        .expect("create epic root");
+    let child = runtime
+        .add_task(TaskAddParams {
+            parent_id: Some(epic.id.clone()),
+            title: "Epic child".to_string(),
+            description: "Leaf fixture".to_string(),
+            ..Default::default()
+        })
+        .expect("create epic child");
+
+    let error = runtime
+        .submit_ship_run(
+            ShipMode::Local,
+            Some("main"),
+            std::slice::from_ref(&epic.id),
+            Some("test"),
+            None,
+        )
+        .expect_err("epic root must be refused before dispatch");
+    assert!(matches!(error, OrbitError::InvalidInput(message) if message.contains("epic root")));
+    assert!(
+        runtime
+            .list_job_runs(JobRunListParams::default())
+            .expect("list job runs")
+            .is_empty(),
+        "root refusal must happen before pipeline persistence"
+    );
+
+    let child_error = runtime
+        .submit_ship_run(
+            ShipMode::Local,
+            Some("main"),
+            std::slice::from_ref(&child.id),
+            Some("test"),
+            None,
+        )
+        .expect_err("fixture intentionally has no deployed job asset");
+    assert!(
+        matches!(child_error, OrbitError::NotFound { .. }),
+        "epic child must pass leaf admission and reach job lookup: {child_error:?}"
+    );
+}
+
+#[test]
+fn ship_submission_mixed_explicit_selection_identifies_the_missing_task() {
+    let (_root, runtime) = test_runtime();
+    let existing_id = add_backlog_task(&runtime);
+    let missing_id = "ORB-99999".to_string();
+
+    let error = runtime
+        .submit_ship_run(
+            ShipMode::Local,
+            Some("main"),
+            &[existing_id, missing_id.clone()],
+            Some("test"),
+            None,
+        )
+        .expect_err("mixed selections must refuse their missing task before dispatch");
+
+    assert!(matches!(
+        error,
+        OrbitError::NotFound {
+            kind: orbit_common::types::NotFoundKind::Task,
+            id,
+        } if id == missing_id
+    ));
+    assert!(
+        runtime
+            .list_job_runs(JobRunListParams::default())
+            .expect("list job runs")
+            .is_empty(),
+        "mixed-selection refusal must not persist a run"
     );
 }

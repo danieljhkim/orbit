@@ -1,6 +1,9 @@
 use orbit_core::AuditEvent;
 use serde_json::{Value, json};
 
+use crate::output::color::{Domain, cell};
+use crate::output::table::{Column, Table};
+
 pub(super) fn audit_event_to_json(event: &AuditEvent) -> Value {
     json!({
         "id": event.id,
@@ -29,6 +32,8 @@ pub(super) fn audit_event_to_json(event: &AuditEvent) -> Value {
         "process_machine_id": event.process_machine_id,
         "process_host_id": event.process_host_id,
         "transport": event.transport,
+        "trace_id": event.trace_id,
+        "caller_ip": event.caller_ip,
         "effective_capabilities": event.effective_capabilities,
         "origin_session_id": event.origin_session_id,
         "mcp_call_id": event.mcp_call_id,
@@ -40,15 +45,46 @@ pub(super) fn audit_event_to_json(event: &AuditEvent) -> Value {
     })
 }
 
-pub(super) fn print_audit_event_line(event: &AuditEvent) {
-    let tool = event.tool_name.as_deref().unwrap_or("-");
-    println!(
-        "[{}] {:<8} {:<6} {}:{:<20} {}ms",
-        event.timestamp.format("%Y-%m-%dT%H:%M:%S"),
-        event.status,
-        event.role,
-        event.command,
-        tool,
-        event.duration_ms,
-    );
+/// Which columns the caller filtered on, so a column the filter made
+/// informationally uniform still stays on screen.
+#[derive(Clone, Copy, Default)]
+pub(super) struct AuditListFilters {
+    pub(super) status: bool,
+    pub(super) role: bool,
+    pub(super) tool: bool,
+}
+
+/// The audit log's list view.
+///
+/// This replaces a `"[{}] {:<8} {:<6} {}:{:<20} {}ms"` format string whose
+/// padding was a literal rather than a function of the data, so a tool name
+/// over 20 characters broke the column the operator was scanning, and no
+/// header said what any column was (ADR-0306). Widths now come from the
+/// result set and the sink; `DURATION (ms)` is a number column, so magnitudes
+/// line up on their right edge and the unit is named once in the header
+/// instead of being suffixed to every value.
+pub(super) fn audit_event_table(events: &[AuditEvent], filters: AuditListFilters) -> Table {
+    let mut table = Table::new(vec![
+        Column::new("TIME").fixed(),
+        Column::new("STATUS").fixed().filtered(filters.status),
+        Column::new("ROLE").fixed().filtered(filters.role),
+        Column::new("COMMAND").fixed(),
+        Column::new("TOOL").filtered(filters.tool),
+        Column::new("DURATION (ms)").number(),
+    ])
+    .empty_message("no audit events matching the given filters");
+
+    for event in events {
+        let status = event.status.to_string();
+        table.add_row(vec![
+            comfy_table::Cell::new(event.timestamp.format("%Y-%m-%dT%H:%M:%S").to_string()),
+            cell(&status, Domain::AuditStatus),
+            comfy_table::Cell::new(&event.role),
+            comfy_table::Cell::new(&event.command),
+            comfy_table::Cell::new(event.tool_name.as_deref().unwrap_or("-")),
+            comfy_table::Cell::new(event.duration_ms.to_string()),
+        ]);
+    }
+
+    table
 }

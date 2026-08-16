@@ -1,5 +1,5 @@
 use orbit_common::types::{Task, TaskPriority, TaskStatus, TaskType};
-use orbit_engine::V2RuntimeHost;
+use orbit_engine::RuntimeHost;
 use orbit_tools::ToolContext;
 use serde_json::{Value, json};
 
@@ -18,17 +18,6 @@ fn list_backlog_tasks(runtime: &OrbitRuntime, input: Value) -> Value {
             ToolContext::default(),
         )
         .expect("list backlog tasks")
-}
-
-fn load_epic(runtime: &OrbitRuntime, epic_task_id: &str) -> Value {
-    runtime
-        .run_deterministic(
-            "load_epic",
-            &json!({}),
-            &json!({ "epic_task_id": epic_task_id }),
-            ToolContext::default(),
-        )
-        .expect("load epic")
 }
 
 fn excluded_entry<'a>(output: &'a Value, task_id: &str) -> &'a Value {
@@ -94,104 +83,6 @@ fn seed_backlog_task_with_dependencies(
     dependencies: Vec<String>,
 ) -> Task {
     seed_task_with_dependencies(runtime, title, TaskStatus::Backlog, dependencies)
-}
-
-#[test]
-fn load_epic_treats_review_subtasks_as_shipped_terminal_state() {
-    let (_root, runtime, _repo_root) = runtime_with_workspace_layout();
-    let epic = seed_list_backlog_task(
-        &runtime,
-        "Epic",
-        TaskStatus::InProgress,
-        TaskPriority::High,
-        TaskType::Feature,
-        None,
-        vec![],
-    );
-    let review = seed_list_backlog_task(
-        &runtime,
-        "Review child",
-        TaskStatus::Review,
-        TaskPriority::High,
-        TaskType::Chore,
-        Some(epic.id.clone()),
-        vec![],
-    );
-    let done = seed_list_backlog_task(
-        &runtime,
-        "Done child",
-        TaskStatus::Done,
-        TaskPriority::Medium,
-        TaskType::Chore,
-        Some(epic.id.clone()),
-        vec![],
-    );
-
-    let output = load_epic(&runtime, &epic.id);
-
-    assert_eq!(output["all_terminal"], json!(true));
-    assert_eq!(output["subtasks"], json!([]));
-    assert_eq!(
-        output["final_state"]["subtasks"][review.id.as_str()],
-        json!({
-            "state": "done",
-            "status": "review",
-            "title": "Review child"
-        })
-    );
-    assert_eq!(
-        output["final_state"]["subtasks"][done.id.as_str()],
-        json!({
-            "state": "done",
-            "status": "done",
-            "title": "Done child"
-        })
-    );
-}
-
-#[test]
-fn load_epic_keeps_in_progress_subtasks_open_when_review_is_shipped() {
-    let (_root, runtime, _repo_root) = runtime_with_workspace_layout();
-    let epic = seed_list_backlog_task(
-        &runtime,
-        "Epic",
-        TaskStatus::InProgress,
-        TaskPriority::High,
-        TaskType::Feature,
-        None,
-        vec![],
-    );
-    let review = seed_list_backlog_task(
-        &runtime,
-        "Review child",
-        TaskStatus::Review,
-        TaskPriority::High,
-        TaskType::Chore,
-        Some(epic.id.clone()),
-        vec![],
-    );
-    let in_progress = seed_list_backlog_task(
-        &runtime,
-        "In progress child",
-        TaskStatus::InProgress,
-        TaskPriority::High,
-        TaskType::Chore,
-        Some(epic.id.clone()),
-        vec![],
-    );
-
-    let output = load_epic(&runtime, &epic.id);
-    let subtasks = output["subtasks"].as_array().expect("subtasks array");
-
-    assert_eq!(output["all_terminal"], json!(false));
-    assert_eq!(subtasks.len(), 1);
-    assert_eq!(subtasks[0]["id"], json!(in_progress.id));
-    assert_eq!(subtasks[0]["status"], json!("in-progress"));
-    assert!(
-        subtasks
-            .iter()
-            .all(|entry| entry["id"].as_str() != Some(review.id.as_str()))
-    );
 }
 
 #[test]
@@ -433,6 +324,58 @@ fn list_backlog_tasks_reports_direct_context_lock_conflicts() {
 }
 
 #[test]
+fn active_epic_excludes_only_loose_tasks_overlapping_descendant_union() {
+    let (_root, runtime, repo_root) = runtime_with_workspace_layout();
+    write_workspace_file(&repo_root, "crates/epic/src/lib.rs");
+    write_workspace_file(&repo_root, "crates/loose/src/lib.rs");
+    let epic = runtime
+        .add_task(TaskAddParams {
+            title: "Active epic".to_string(),
+            description: "Epic fixture".to_string(),
+            acceptance_criteria: vec!["Assembled".to_string()],
+            tags: vec!["epic".to_string()],
+            plan: "Drain children".to_string(),
+            status: Some(TaskStatus::InProgress),
+            ..Default::default()
+        })
+        .expect("seed active epic");
+    seed_list_backlog_task(
+        &runtime,
+        "Epic child",
+        TaskStatus::Backlog,
+        TaskPriority::High,
+        TaskType::Chore,
+        Some(epic.id.clone()),
+        vec!["file:crates/epic/src/lib.rs"],
+    );
+    let overlapping = seed_list_backlog_task(
+        &runtime,
+        "Overlapping loose leaf",
+        TaskStatus::Backlog,
+        TaskPriority::High,
+        TaskType::Chore,
+        None,
+        vec!["file:crates/epic/src/lib.rs"],
+    );
+    let unrelated = seed_list_backlog_task(
+        &runtime,
+        "Unrelated loose leaf",
+        TaskStatus::Backlog,
+        TaskPriority::Medium,
+        TaskType::Chore,
+        None,
+        vec!["file:crates/loose/src/lib.rs"],
+    );
+
+    let output = list_backlog_tasks(&runtime, json!({}));
+
+    assert_eq!(output_task_ids(&output), vec![unrelated.id]);
+    let excluded = excluded_entry(&output, &overlapping.id);
+    assert_eq!(excluded["reason"], "context_lock_conflict");
+    assert_eq!(excluded["conflicts"][0]["locking_task_id"], epic.id);
+}
+
+#[test]
 fn list_backlog_tasks_reports_group_member_conflicts_with_trigger_conflicts() {
     let (_root, runtime, repo_root) = runtime_with_workspace_layout();
     write_workspace_file(&repo_root, "docs/parent.md");
@@ -575,4 +518,60 @@ fn list_backlog_tasks_omits_excluded_for_explicit_task_ids() {
     assert_eq!(output["task_count"], json!(1));
     assert_eq!(output["task_ids"], json!([backlog.id]));
     assert!(output.get("excluded").is_none());
+}
+
+#[test]
+fn list_backlog_tasks_excludes_epic_roots_and_descendants_with_reasons() {
+    let (_root, runtime, _repo_root) = runtime_with_workspace_layout();
+    let loose_one = seed_list_backlog_task(
+        &runtime,
+        "Loose one",
+        TaskStatus::Backlog,
+        TaskPriority::High,
+        TaskType::Chore,
+        None,
+        vec![],
+    );
+    let loose_two = seed_list_backlog_task(
+        &runtime,
+        "Loose two",
+        TaskStatus::Backlog,
+        TaskPriority::Medium,
+        TaskType::Chore,
+        None,
+        vec![],
+    );
+    let epic = runtime
+        .add_task(TaskAddParams {
+            title: "Epic root".to_string(),
+            description: "Epic fixture".to_string(),
+            acceptance_criteria: vec!["Supervised".to_string()],
+            tags: vec!["epic".to_string()],
+            plan: "Delegate children".to_string(),
+            status: Some(TaskStatus::Backlog),
+            ..Default::default()
+        })
+        .expect("seed epic root");
+    let children = (0..3)
+        .map(|index| {
+            seed_list_backlog_task(
+                &runtime,
+                &format!("Epic child {index}"),
+                TaskStatus::Backlog,
+                TaskPriority::Medium,
+                TaskType::Chore,
+                Some(epic.id.clone()),
+                vec![],
+            )
+        })
+        .collect::<Vec<_>>();
+
+    let output = list_backlog_tasks(&runtime, json!({}));
+    assert_eq!(output_task_ids(&output), vec![loose_one.id, loose_two.id]);
+    assert_eq!(excluded_entry(&output, &epic.id)["reason"], "epic_root");
+    assert_eq!(excluded_entry(&output, &epic.id)["conflicts"], json!([]));
+    for child in children {
+        assert_eq!(excluded_entry(&output, &child.id)["reason"], "epic_child");
+        assert_eq!(excluded_entry(&output, &child.id)["conflicts"], json!([]));
+    }
 }

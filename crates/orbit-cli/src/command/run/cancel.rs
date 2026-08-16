@@ -1,10 +1,10 @@
 //! `orbit run cancel` — terminalize a pending/running job run [ORB-10070].
 
 use clap::Args;
-use orbit_core::{OrbitError, OrbitRuntime};
+use orbit_core::OrbitRuntime;
 use serde_json::json;
 
-use crate::command::{Execute, require_confirmation};
+use crate::command::{CommandOut, CommandOutput, Execute, Payload, require_confirmation};
 
 #[derive(Args)]
 #[command(
@@ -29,17 +29,18 @@ pub struct RunCancelArgs {
 }
 
 impl Execute for RunCancelArgs {
-    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+    fn execute(self, runtime: &OrbitRuntime) -> CommandOut {
         require_confirmation(self.confirm, "run cancellation")?;
         let result = runtime.cancel_job_run_with_context(&self.run_id, "cli", "run_cancel")?;
         if self.json {
-            return crate::output::json::print_pretty(&json!({
+            return Ok(Payload::document(json!({
                 "run_id": result.run_id,
                 "previous_state": result.previous_state,
                 "final_state": result.final_state,
                 "signal_attempted": result.signal_attempted,
                 "signal_outcome": result.signal_outcome,
-            }));
+            }))
+            .into());
         }
         println!(
             "cancelled job run {} ({} -> {})",
@@ -48,6 +49,6 @@ impl Execute for RunCancelArgs {
         if let Some(outcome) = &result.signal_outcome {
             println!("owner process signal outcome: {outcome}");
         }
-        Ok(())
+        Ok(CommandOutput::Silent)
     }
 }

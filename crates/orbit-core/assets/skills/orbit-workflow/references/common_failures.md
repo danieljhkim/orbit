@@ -94,14 +94,14 @@ Solution:
 Symptoms:
 
 - Agent activity runs under macOS sandbox and a nested Orbit tool fails with `Operation not permitted`.
-- Failures mention `.orbit/learnings`, `.orbit/adrs`, or another Orbit store that is not exposed to the activity sandbox.
+- Failures mention an Orbit store that is not exposed to the activity sandbox.
 - The root workspace may have the file or command, but the generated job worktree cannot access the needed path.
 
 Confirm:
 
 ```bash
 orbit run logs <run_id> --json
-rg -n 'Operation not permitted|orbit_learning_add|orbit.adr.add|sandbox' \
+rg -n 'Operation not permitted|sandbox' \
   .orbit/state/audit/v2_loop/<run_id>.jsonl .orbit/state/audit/blobs
 ```
 
@@ -122,8 +122,7 @@ Confirm:
 
 ```bash
 orbit run show <run_id> --json
-rg -n 'step_failure_recovery|semantic.db|orbit.db|invalid L-|learning' .orbit/state/audit/v2_loop/<run_id>.jsonl
-orbit learning list --json
+rg -n 'step_failure_recovery|semantic.db|orbit.db' .orbit/state/audit/v2_loop/<run_id>.jsonl
 ```
 
 Solution:

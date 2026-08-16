@@ -1,10 +1,10 @@
 use clap::{Args, ValueEnum};
 use orbit_common::types::WorkspaceCheckoutRole;
-use orbit_core::{OrbitError, OrbitRuntime};
-use orbit_remote::workspace_registry;
-use orbit_remote::{HostIdentityState, inspect_host_identity};
+use orbit_core::OrbitRuntime;
+use orbit_registry::workspace_registry;
+use orbit_registry::{HostIdentityState, inspect_host_identity};
 
-use crate::command::Execute;
+use crate::command::{CommandOut, CommandOutput, Execute};
 
 #[derive(Clone, Copy, ValueEnum)]
 pub enum CliCheckoutRole {
@@ -37,7 +37,7 @@ pub struct WorkspaceRoleArgs {
 }
 
 impl Execute for WorkspaceRoleArgs {
-    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+    fn execute(self, runtime: &OrbitRuntime) -> CommandOut {
         let global_root = runtime.global_root();
         let local_machine_id = match inspect_host_identity(&global_root)? {
             HostIdentityState::Present(identity) => Some(identity.machine_id),
@@ -60,6 +60,6 @@ impl Execute for WorkspaceRoleArgs {
         workspace_registry::save_registry_to(&registry, &registry_path)?;
 
         println!("workspace '{}' local role set to {}", self.workspace, role);
-        Ok(())
+        Ok(CommandOutput::Silent)
     }
 }

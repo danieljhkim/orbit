@@ -1,8 +1,8 @@
 use clap::Args;
-use orbit_core::{OrbitError, OrbitRuntime};
+use orbit_core::OrbitRuntime;
 use serde_json::Value;
 
-use crate::command::Execute;
+use crate::command::{CommandOut, Execute, Payload};
 
 use super::output::{definition_to_json, schedule_summary};
 
@@ -20,7 +20,7 @@ pub struct AutoTaskListArgs {
 }
 
 impl Execute for AutoTaskListArgs {
-    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+    fn execute(self, runtime: &OrbitRuntime) -> CommandOut {
         let mut definitions = runtime.auto_task_list()?;
         if self.enabled {
             definitions.retain(|d| d.enabled);
@@ -29,25 +29,29 @@ impl Execute for AutoTaskListArgs {
             definitions.retain(|d| !d.enabled);
         }
 
-        if self.json {
-            let array = Value::Array(definitions.iter().map(definition_to_json).collect());
-            return crate::output::json::print_pretty(&array);
-        }
+        let records: Vec<Value> = definitions.iter().map(definition_to_json).collect();
 
+        use crate::output::table::{Column, Table};
+        let mut table = Table::new(vec![
+            Column::new("NAME").fixed(),
+            Column::new("STATE").fixed(),
+            Column::new("SCHEDULE").fixed(),
+            Column::new("TITLE"),
+        ])
+        .empty_message("no auto-task definitions");
         for definition in &definitions {
             let state = if definition.enabled {
                 "enabled"
             } else {
                 "disabled"
             };
-            println!(
-                "{}\t{}\t{}\t{}",
-                definition.name,
-                state,
+            table.add_row(vec![
+                definition.name.clone(),
+                state.to_string(),
                 schedule_summary(definition),
-                definition.template.title
-            );
+                definition.template.title.clone(),
+            ]);
         }
-        Ok(())
+        Ok(Payload::list(records, table).into())
     }
 }

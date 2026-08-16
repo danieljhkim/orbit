@@ -1,4 +1,8 @@
 [execution.env]
+# Ordinary workspace settings inherit from the global config per key. The
+# environment allowlist and the Codex sandbox/approval keys below are the
+# security exceptions: when a workspace config exists, omitted values use
+# built-in defaults instead of inheriting the global file.
 # Agent subprocesses always run with a cleared environment plus the allowlist
 # below — the orbit process's full environment is never inherited (not
 # configurable, by design).
@@ -22,20 +26,17 @@ sandbox = "danger-full-access"
 enabled = true
 
 [workflow]
-# Default base branch for `orbit run ship` and `duel-plan`.
-# Override per-invocation with `--base <branch>`. The Orbit repo itself uses
-# this two-branch pattern: `main` is the release/production branch, and
-# `agent-main` is the dev integration branch where task PRs land — set
-# `base_branch = "agent-main"` for the same layout in your own repo.
+# Default base branch for `orbit run ship`.
+# Override per-invocation with `--base <branch>`.
 base_branch = "main"
+# Crew used by bounded system activities such as recovery and failed-run triage.
+# `orbit init` seeds the default `qa` crew whenever it detects a supported CLI.
+system_crew = "qa"
 
 [runtime]
-# `backend` selects the v2 `agent_loop` execution backend: "cli" | "http" | "auto".
-# backend = "cli"
-#
 # Rotation + retention for the global JSONL log (~/.orbit/state/logs/orbit.jsonl).
-# [ORB-00415] Applied opportunistically at process start. All optional; the
-# conservative defaults below are used when a key is omitted. Invalid values
+# Applied opportunistically at process start. All optional; the conservative
+# defaults below are used when a key is omitted. Invalid values
 # (0, or log_max_file_mb > log_max_total_mb) are rejected at config load.
 # log_retention_days = 7    # delete archives older than N days (>= 1)
 # log_max_total_mb   = 500  # total MiB budget across archives; oldest pruned first (>= 1)

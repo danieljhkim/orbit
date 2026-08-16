@@ -1,11 +1,11 @@
-use super::super::catalog::{JobCatalogFilter, seed_default_jobs};
+use super::super::catalog::JobCatalogFilter;
 
 use std::path::{Path, PathBuf};
 
 use chrono::Utc;
 use orbit_common::types::activity_job::{V2ActivityCatalog, resolve_job_target_refs};
 use orbit_common::types::{
-    ActivityV2Spec, JobKind, JobRunState, JobV2, JobV2Step, JobV2StepBody, PipelineState,
+    ActivityV2Spec, JobRunState, JobV2, JobV2Step, JobV2StepBody, PipelineState,
     load_activity_asset, load_job_asset,
 };
 use serde_json::{Value, json};
@@ -21,8 +21,8 @@ const DEFAULT_JOB_FILES: &[(&str, &str)] = &[
         include_str!("../../../../assets/jobs/auto_task_scheduler_pipeline.yaml"),
     ),
     (
-        "job_duel_plan_pipeline",
-        include_str!("../../../../assets/jobs/job_duel_plan_pipeline.yaml"),
+        "epic_pipeline",
+        include_str!("../../../../assets/jobs/epic_pipeline.yaml"),
     ),
     (
         "task_auto_pipeline",
@@ -45,16 +45,16 @@ const DEFAULT_JOB_FILES: &[(&str, &str)] = &[
         include_str!("../../../../assets/jobs/task_pr_pipeline.yaml"),
     ),
     (
-        "task_review_pipeline",
-        include_str!("../../../../assets/jobs/task_review_pipeline.yaml"),
-    ),
-    (
         "task_triage_pipeline",
         include_str!("../../../../assets/jobs/task_triage_pipeline.yaml"),
     ),
     (
         "workspace_ship_pipeline",
         include_str!("../../../../assets/jobs/workspace_ship_pipeline.yaml"),
+    ),
+    (
+        "workspace_auto_pipeline",
+        include_str!("../../../../assets/jobs/workspace_auto_pipeline.yaml"),
     ),
     (
         "worktree_gc_pipeline",
@@ -189,6 +189,25 @@ fn default_activity_catalog() -> V2ActivityCatalog {
     catalog
 }
 
+#[test]
+fn seeded_step_failure_recovery_asset_stays_aligned_without_retired_role() {
+    let seeded = DEFAULT_ACTIVITY_FILES
+        .iter()
+        .find_map(|(name, yaml)| (*name == "step_failure_recovery").then_some(*yaml))
+        .expect("seeded step failure recovery activity");
+    assert_eq!(
+        seeded,
+        include_str!("../../../../../../.orbit/resources/activities/step_failure_recovery.yaml"),
+        "dogfood and seeded recovery activity assets must remain behaviorally aligned"
+    );
+
+    let asset = load_activity_asset(seeded).expect("parse recovery activity");
+    let ActivityV2Spec::AgentLoop(_) = asset.spec.spec else {
+        panic!("step_failure_recovery must remain an agent loop");
+    };
+    assert!(!seeded.contains("\n  role:"));
+}
+
 fn assert_condition_tokens_are_paths(condition: &str) {
     let mut remaining = condition;
     while let Some(start) = remaining.find("{{") {
@@ -230,19 +249,6 @@ fn assert_step_condition_tokens_are_paths(step: &orbit_common::types::JobV2Step)
         }
         JobV2StepBody::TargetRef(_) | JobV2StepBody::Target(_) => {}
     }
-}
-
-#[test]
-fn seeded_jobs_include_planning_duel_pipeline() {
-    let (_root, runtime, global_root, _workspace_root) = test_runtime();
-    seed_default_jobs(&global_root.join("resources/jobs"), true).expect("seed default jobs");
-
-    let entry = runtime
-        .show_job_catalog_entry("job_duel_plan_pipeline")
-        .expect("planning duel job is seeded");
-    assert_eq!(entry.spec.kind, JobKind::Workflow);
-    assert_eq!(entry.spec.steps.len(), 1);
-    assert_eq!(entry.spec.steps[0].id, "run_planning_duel");
 }
 
 #[test]
@@ -303,8 +309,27 @@ fn task_pilot_pipeline_defaults_to_luna_and_bounded_all_join_partitions() {
     assert_eq!(apply_input["prepared"], "{{ steps.prepare.output }}");
     assert_eq!(apply_input["results"], "{{ steps.pilot_results.output }}");
     assert!(
-        yaml.contains("Invoked-only"),
-        "task pilot must remain an explicitly invoked workflow"
+        yaml.contains("Schedulable task-pilot pipeline"),
+        "task pilot must document scheduled zero-input support"
+    );
+    assert!(
+        !yaml.contains("Invoked-only"),
+        "task pilot is no longer restricted to explicit invocation"
+    );
+
+    let mut resolved = load_job_asset(yaml).expect("task pilot pipeline parses for resolution");
+    resolve_job_target_refs(&mut resolved.spec, &default_activity_catalog())
+        .expect("task pilot activity references resolve");
+    let JobV2StepBody::FanOut { fan_out, .. } = &resolved.spec.steps[1].body else {
+        panic!("resolved task pilot agent work must remain a fan-out");
+    };
+    let JobV2StepBody::Target(pilot) = &fan_out.worker.body else {
+        panic!("task pilot worker must resolve to an activity target");
+    };
+    assert_eq!(
+        pilot.fs_profile.as_deref(),
+        Some("reviewer"),
+        "resolved task-pilot worker must preserve the read-only filesystem profile"
     );
 }
 
@@ -345,7 +370,7 @@ fn default_deterministic_activities_are_registered_in_the_runtime() {
             continue;
         };
         assert!(
-            orbit_engine::V2RuntimeHost::has_deterministic_action(&runtime, &spec.action),
+            orbit_engine::RuntimeHost::has_deterministic_action(&runtime, &spec.action),
             "seeded activity `{name}` names deterministic action `{}`, which this runtime cannot dispatch",
             spec.action
         );
@@ -353,11 +378,16 @@ fn default_deterministic_activities_are_registered_in_the_runtime() {
 }
 
 #[test]
-fn local_task_pipeline_commits_before_merge() {
+fn local_task_pipeline_commits_before_merge_and_reconciles_with_local_base() {
     let yaml = DEFAULT_JOB_FILES
         .iter()
         .find_map(|(name, yaml)| (*name == "task_local_pipeline").then_some(*yaml))
         .expect("task local pipeline default exists");
+    assert_eq!(
+        yaml,
+        include_str!("../../../../../../.orbit/resources/jobs/task_local_pipeline.yaml"),
+        "shipped and workspace task_local_pipeline resources must remain byte-identical"
+    );
     let asset = load_job_asset(yaml).expect("parse task local pipeline");
     let root_step_ids = asset
         .spec
@@ -378,207 +408,42 @@ fn local_task_pipeline_commits_before_merge() {
         commit_index < merge_index,
         "task local pipeline must commit before merge"
     );
-}
 
-#[test]
-fn ship_review_controls_propagate_through_auto_and_gate_pipelines() {
-    let auto_yaml = DEFAULT_JOB_FILES
-        .iter()
-        .find_map(|(name, yaml)| (*name == "task_auto_pipeline").then_some(*yaml))
-        .expect("task auto pipeline default exists");
-    let auto = load_job_asset(auto_yaml).expect("parse task auto pipeline");
-    let auto_defaults = auto
-        .spec
-        .default_input
-        .as_ref()
-        .expect("task auto pipeline default input");
-    assert_eq!(auto_defaults["review"], false);
-    assert_eq!(auto_defaults["review_crew"], Value::Null);
-
-    let auto_dispatch = auto
+    let merge = asset
         .spec
         .steps
         .iter()
-        .find(|step| step.id == "dispatch")
-        .expect("task auto pipeline dispatch step");
-    let JobV2StepBody::FanOut { fan_out, .. } = &auto_dispatch.body else {
-        panic!("task auto pipeline dispatch must be a fan-out");
+        .find(|step| step.id == "merge")
+        .expect("task local pipeline has merge step");
+    let JobV2StepBody::TargetRef(merge) = &merge.body else {
+        panic!("task local pipeline merge must reference git_merge");
     };
-    let JobV2StepBody::TargetRef(auto_target) = &fan_out.worker.body else {
-        panic!("task auto pipeline worker must reference invoke_and_wait");
-    };
-    let auto_run_input = &auto_target
-        .default_input
-        .as_ref()
-        .expect("task auto pipeline dispatch input");
-    assert_eq!(auto_run_input["job_name"], "task_gate_pipeline");
-    let auto_run_input = &auto_run_input["run_input"];
-    assert_eq!(auto_run_input["review"], "{{ input.review }}");
-    assert_eq!(auto_run_input["review_crew"], "{{ input.review_crew }}");
+    let merge_input = merge.default_input.as_ref().expect("merge input");
+    assert_eq!(
+        merge_input["base_sync"], "local",
+        "an unpublished earlier merge must be a valid base for the next local merge"
+    );
 
-    let gate_yaml = DEFAULT_JOB_FILES
-        .iter()
-        .find_map(|(name, yaml)| (*name == "task_gate_pipeline").then_some(*yaml))
-        .expect("task gate pipeline default exists");
-    let gate = load_job_asset(gate_yaml).expect("parse task gate pipeline");
-    let gate_defaults = gate
-        .spec
-        .default_input
-        .as_ref()
-        .expect("task gate pipeline default input");
-    assert_eq!(gate_defaults["review"], false);
-    assert_eq!(gate_defaults["review_crew"], Value::Null);
-
-    let gate_dispatch = gate
+    assert_eq!(
+        asset.spec.default_input.as_ref().unwrap()["terminal_status"],
+        "review"
+    );
+    let mark_review = asset
         .spec
         .steps
         .iter()
-        .find(|step| step.id == "dispatch_child")
-        .expect("task gate pipeline child dispatch step");
-    let JobV2StepBody::TargetRef(gate_target) = &gate_dispatch.body else {
-        panic!("task gate pipeline dispatch must reference invoke_and_wait");
+        .find(|step| step.id == "mark_review")
+        .expect("task local pipeline has terminal task update loop");
+    let JobV2StepBody::Loop { loop_ } = &mark_review.body else {
+        panic!("task local terminal update must be a loop");
     };
-    let gate_run_input = &gate_target
-        .default_input
-        .as_ref()
-        .expect("task gate pipeline dispatch input");
-    assert_eq!(gate_run_input["job_name"], "task_{{ input.mode }}_pipeline");
-    let gate_run_input = &gate_run_input["run_input"];
-    assert_eq!(gate_run_input["review"], "{{ input.review }}");
-    assert_eq!(gate_run_input["review_crew"], "{{ input.review_crew }}");
-}
-
-#[test]
-fn pr_review_materializes_one_exact_head_child_with_the_explicit_crew() {
-    let yaml = DEFAULT_JOB_FILES
-        .iter()
-        .find_map(|(name, yaml)| (*name == "task_pr_pipeline").then_some(*yaml))
-        .expect("task PR pipeline exists");
-    let asset = load_job_asset(yaml).expect("task PR pipeline parses");
-    let defaults = asset.spec.default_input.as_ref().expect("default input");
-    assert_eq!(defaults["review"], false);
-    assert_eq!(defaults["review_crew"], Value::Null);
-    assert!(
-        asset
-            .spec
-            .steps
-            .iter()
-            .all(|step| step.id != "review_bundle"),
-        "the implementation run must not inline the independent reviewer"
-    );
-
-    let review_steps = asset
-        .spec
-        .steps
-        .iter()
-        .filter(|step| {
-            matches!(
-                &step.body,
-                JobV2StepBody::TargetRef(target)
-                    if target.target == "activity:invoke_and_wait"
-                        && target
-                            .default_input
-                            .as_ref()
-                            .and_then(|input| input.get("job_name"))
-                            .and_then(Value::as_str)
-                            == Some("task_review_pipeline")
-            )
-        })
-        .collect::<Vec<_>>();
-    assert_eq!(review_steps.len(), 1, "exactly one review Run is submitted");
-    let review = review_steps[0];
-    assert_eq!(review.id, "independent_review");
-    assert_eq!(review.retry, None);
-    assert_eq!(review.recovery_activity, None);
-    assert_eq!(
-        review.when.as_deref(),
-        Some(
-            "{{ input.review }} == true && {{ steps.commit.output.skipped_no_diff_expected }} != true"
-        )
-    );
-    let JobV2StepBody::TargetRef(target) = &review.body else {
-        panic!("independent review must use invoke_and_wait");
+    let JobV2StepBody::TargetRef(update) = &loop_.steps[0].body else {
+        panic!("task local terminal update must reference update_task");
     };
-    assert_eq!(target.target, "activity:invoke_and_wait");
-    let input = target
-        .default_input
-        .as_ref()
-        .expect("review dispatch input");
-    assert_eq!(input["job_name"], "task_review_pipeline");
-    assert_eq!(input["dedupe_run_input_field"], "parent_run_id");
-    let run_input = &input["run_input"];
-    assert_eq!(run_input["crew"], "{{ input.review_crew }}");
     assert_eq!(
-        run_input["parent_run_id"],
-        "{{ steps.worktree.output.job_run_id }}"
+        update.default_input.as_ref().unwrap()["status"],
+        "{{ input.terminal_status }}"
     );
-    assert_eq!(run_input["task_ids"], "{{ input.task_ids }}");
-    assert_eq!(
-        run_input["workspace_path"],
-        "{{ steps.worktree.output.workspace_path }}"
-    );
-    assert_eq!(
-        run_input["candidate_head"],
-        "{{ steps.push.output.branch }}"
-    );
-    assert_eq!(
-        run_input["candidate_head_sha"],
-        "{{ steps.push.output.local_sha }}"
-    );
-    assert_eq!(
-        run_input["pr_number"],
-        "{{ steps.pr_open.output.pr_number }}"
-    );
-
-    let step_ids = asset
-        .spec
-        .steps
-        .iter()
-        .map(|step| step.id.as_str())
-        .collect::<Vec<_>>();
-    let review_index = step_ids
-        .iter()
-        .position(|id| *id == "independent_review")
-        .expect("review index");
-    for prerequisite in ["push", "pr_open", "promote_tasks"] {
-        assert!(
-            step_ids
-                .iter()
-                .position(|id| *id == prerequisite)
-                .expect("phase")
-                < review_index,
-            "review must run after {prerequisite}"
-        );
-    }
-
-    for job_name in ["task_pr_pipeline", "task_local_pipeline"] {
-        let yaml = DEFAULT_JOB_FILES
-            .iter()
-            .find_map(|(name, yaml)| (*name == job_name).then_some(*yaml))
-            .unwrap_or_else(|| panic!("default job {job_name} exists"));
-        let asset = load_job_asset(yaml).expect("leaf job parses");
-        let implement = asset
-            .spec
-            .steps
-            .iter()
-            .find(|step| step.id == "implement_bundle")
-            .expect("implement bundle");
-        let JobV2StepBody::Loop { loop_ } = &implement.body else {
-            panic!("implement bundle must be a loop");
-        };
-        let JobV2StepBody::TargetRef(implement_target) = &loop_.steps[0].body else {
-            panic!("implement step must reference agent_implement");
-        };
-        assert!(
-            implement_target
-                .default_input
-                .as_ref()
-                .expect("implement input")
-                .get("crew")
-                .is_none(),
-            "review crew must not reach {job_name} implementation"
-        );
-    }
 }
 
 #[test]
@@ -645,74 +510,6 @@ fn task_shipment_commit_steps_use_the_worktree_base_checkpoint() {
 }
 
 #[test]
-fn independent_review_job_requires_structured_exact_head_verdict() {
-    let yaml = DEFAULT_JOB_FILES
-        .iter()
-        .find_map(|(name, yaml)| (*name == "task_review_pipeline").then_some(*yaml))
-        .expect("review pipeline exists");
-    let asset = load_job_asset(yaml).expect("review pipeline parses");
-    assert_eq!(asset.spec.steps.len(), 2);
-    let JobV2StepBody::TargetRef(review) = &asset.spec.steps[0].body else {
-        panic!("review step must be an activity reference");
-    };
-    assert_eq!(review.target, "activity:agent_review");
-    let review_input = review.default_input.as_ref().expect("review input");
-    for field in [
-        "task_ids",
-        "workspace_path",
-        "crew",
-        "parent_run_id",
-        "candidate_head",
-        "candidate_head_sha",
-        "pr_number",
-    ] {
-        assert!(review_input.get(field).is_some(), "missing {field}");
-    }
-    let JobV2StepBody::TargetRef(guard) = &asset.spec.steps[1].body else {
-        panic!("verdict guard must be an activity reference");
-    };
-    assert_eq!(guard.target, "activity:independent_review_guard");
-    // The guard reads acceptance criteria and comment authority from the task
-    // records, so it must be handed the run's own bundle. Templating these off
-    // the reviewer's response would let the thing being checked narrow the set
-    // of criteria that must be covered.
-    let guard_input = guard.default_input.as_ref().expect("guard input");
-    for (field, expected) in [
-        ("candidate_head_sha", "{{ input.candidate_head_sha }}"),
-        ("task_ids", "{{ input.task_ids }}"),
-    ] {
-        assert_eq!(
-            guard_input[field], expected,
-            "verdict guard must take {field} from the run input"
-        );
-    }
-}
-
-#[test]
-fn local_review_fails_before_worktree_or_implementation() {
-    let yaml = DEFAULT_JOB_FILES
-        .iter()
-        .find_map(|(name, yaml)| (*name == "task_local_pipeline").then_some(*yaml))
-        .expect("local pipeline exists");
-    let asset = load_job_asset(yaml).expect("local pipeline parses");
-    let first = asset.spec.steps.first().expect("local pipeline has steps");
-    assert_eq!(first.id, "reject_unsupported_review");
-    assert_eq!(first.when.as_deref(), Some("{{ input.review }} == true"));
-    assert!(matches!(
-        &first.body,
-        JobV2StepBody::TargetRef(target)
-            if target.target == "activity:pipeline_success_guard"
-    ));
-    assert!(
-        asset
-            .spec
-            .steps
-            .iter()
-            .all(|step| step.id != "review_bundle")
-    );
-}
-
-#[test]
 fn pr_pipeline_models_handoff_phases_as_ordered_activity_checkpoints() {
     let yaml = DEFAULT_JOB_FILES
         .iter()
@@ -759,12 +556,6 @@ fn pr_pipeline_models_handoff_phases_as_ordered_activity_checkpoints() {
                 "activity:pr_promote",
                 Some("step_failure_recovery")
             ),
-            ("independent_review", "activity:invoke_and_wait", None),
-            (
-                "require_independent_review_success",
-                "activity:pipeline_success_guard",
-                None
-            ),
             (
                 "promote_no_diff",
                 "activity:pr_promote",
@@ -797,6 +588,11 @@ fn gate_pipeline_releases_reservation_before_child_success_guard() {
         .iter()
         .find_map(|(name, yaml)| (*name == "task_gate_pipeline").then_some(*yaml))
         .expect("task gate pipeline default exists");
+    assert_eq!(
+        yaml,
+        include_str!("../../../../../../.orbit/resources/jobs/task_gate_pipeline.yaml"),
+        "shipped and workspace task_gate_pipeline resources must remain byte-identical"
+    );
     let asset = load_job_asset(yaml).expect("parse task gate pipeline");
     let root_step_ids = asset
         .spec
@@ -1026,46 +822,172 @@ fn triage_pipeline_is_single_flight_and_gates_on_candidates() {
 }
 
 #[test]
-fn workspace_ship_pipeline_resolves_then_waits_for_normal_auto_ship() {
+fn workspace_ship_pipeline_waits_for_workspace_auto_sequencer() {
     let yaml = DEFAULT_JOB_FILES
         .iter()
         .find_map(|(name, yaml)| (*name == "workspace_ship_pipeline").then_some(*yaml))
         .expect("workspace ship pipeline default exists");
     let asset = load_job_asset(yaml).expect("parse workspace ship pipeline");
     assert_eq!(asset.spec.max_active_runs, 1);
-    assert_eq!(asset.spec.steps.len(), 3);
-    assert_eq!(asset.spec.steps[0].id, "resolve_ship_input");
-    assert_eq!(asset.spec.steps[1].id, "ship");
-    assert_eq!(asset.spec.steps[2].id, "require_ship_success");
+    assert_eq!(asset.spec.steps.len(), 2);
+    assert_eq!(asset.spec.steps[0].id, "auto");
+    assert_eq!(asset.spec.steps[1].id, "require_auto_success");
 
     match &asset.spec.steps[0].body {
         JobV2StepBody::TargetRef(target) => {
-            assert_eq!(target.target, "activity:resolve_workspace_ship_input");
-        }
-        other => panic!("expected resolver target ref, got {other:?}"),
-    }
-    match &asset.spec.steps[1].body {
-        JobV2StepBody::TargetRef(target) => {
             assert_eq!(target.target, "activity:invoke_and_wait");
             let input = target.default_input.as_ref().expect("ship input");
-            assert_eq!(input["job_name"], "task_auto_pipeline");
-            assert_eq!(
-                input["run_input"],
-                Value::String("{{ steps.resolve_ship_input.output }}".to_string())
+            assert_eq!(input["job_name"], "workspace_auto_pipeline");
+            // [ORB-10819] The wrapper blocks on its child, so the window it
+            // passes is a window `ship-sweep-orbit`'s `overlap: forbid` holds.
+            // It must stay comfortably inside that routine's 30-minute period.
+            let for_seconds = input["run_input"]["for_seconds"]
+                .as_u64()
+                .expect("wrapper drain window");
+            assert!(
+                (0..=1_500).contains(&for_seconds),
+                "wrapper window {for_seconds}s leaves too little slack before the next sweep fire"
             );
-            assert!(input.get("task_ids").is_none());
         }
         other => panic!("expected invoke-and-wait target ref, got {other:?}"),
     }
-    match &asset.spec.steps[2].body {
+    match &asset.spec.steps[1].body {
         JobV2StepBody::TargetRef(target) => {
             assert_eq!(target.target, "activity:pipeline_success_guard");
         }
         other => panic!("expected success guard target ref, got {other:?}"),
     }
-    assert!(!yaml.contains("auto_ship"));
-    assert!(!yaml.contains("ship-sweep"));
-    assert!(!yaml.contains("type: shell"));
+    // The v1 wrapper shelled out to the retired sweep. Check the definition,
+    // not the prose: the comment names `ship-sweep-orbit` deliberately,
+    // because that routine's period is why the window above is what it is.
+    let definition = yaml_without_comments(yaml);
+    assert!(!definition.contains("auto_ship"));
+    assert!(!definition.contains("ship-sweep"));
+    assert!(!definition.contains("type: shell"));
+}
+
+/// A job asset's YAML with whole-line comments removed, for assertions about
+/// what a definition *does* rather than about what its header explains.
+fn yaml_without_comments(yaml: &str) -> String {
+    yaml.lines()
+        .filter(|line| !line.trim_start().starts_with('#'))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+#[test]
+fn workspace_auto_pipeline_is_single_flight_and_conditionally_dispatches() {
+    let yaml = DEFAULT_JOB_FILES
+        .iter()
+        .find_map(|(name, yaml)| (*name == "workspace_auto_pipeline").then_some(*yaml))
+        .expect("workspace auto pipeline exists");
+    assert_eq!(
+        yaml,
+        include_str!("../../../../../../.orbit/resources/jobs/workspace_auto_pipeline.yaml"),
+        "shipped and workspace workspace_auto_pipeline resources must remain byte-identical"
+    );
+    let asset = load_job_asset(yaml).expect("workspace auto pipeline parses");
+    assert_eq!(asset.spec.max_active_runs, 1);
+    assert_eq!(asset.spec.steps[0].id, "resolve_ship_input");
+
+    // [ORB-10819] The window is stamped once, before the loop, and re-read
+    // inside it. `break_when` is evaluated after the body, so a zero window
+    // still yields exactly one iteration.
+    assert_eq!(asset.spec.steps[1].id, "open_window");
+    let JobV2StepBody::TargetRef(open_window) = &asset.spec.steps[1].body else {
+        panic!("open_window step must use the deterministic activity");
+    };
+    assert_eq!(open_window.target, "activity:drain_window");
+    assert_eq!(
+        open_window.default_input.as_ref().expect("window input")["for_seconds"],
+        "{{ input.for_seconds }}"
+    );
+
+    let JobV2StepBody::Loop { loop_: drain } = &asset.spec.steps[2].body else {
+        panic!("the drain must be a loop, not a single tick");
+    };
+    assert_eq!(asset.spec.steps[2].id, "drain");
+    assert_eq!(
+        drain.break_when.as_deref(),
+        Some("{{ steps.window.output.expired }} == true")
+    );
+    let body_ids = drain
+        .steps
+        .iter()
+        .map(|step| step.id.as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        body_ids,
+        vec![
+            "admissible",
+            "ship_leaves",
+            "require_leaf_success",
+            "start_epic",
+            "window",
+            "idle_wait",
+        ],
+    );
+
+    // Re-listing inside the loop is what lets a task that entered `backlog`
+    // after the run started still ship.
+    let JobV2StepBody::TargetRef(admissible) = &drain.steps[0].body else {
+        panic!("admissible step must use the deterministic activity");
+    };
+    assert_eq!(admissible.target, "activity:classify_workspace_auto_tasks");
+
+    let ship = &drain.steps[1];
+    assert_eq!(
+        ship.when.as_deref(),
+        Some("{{ steps.admissible.output.has_leaves }} == true")
+    );
+    let JobV2StepBody::TargetRef(ship_target) = &ship.body else {
+        panic!("ship step must invoke and wait");
+    };
+    assert_eq!(ship_target.target, "activity:invoke_and_wait");
+    assert_eq!(
+        ship_target.default_input.as_ref().expect("ship input")["job_name"],
+        "task_auto_pipeline"
+    );
+
+    // The epic must NOT be waited on: blocking on a multi-hour epic would
+    // consume the window and starve the conflict-free leaves behind it.
+    let epic = &drain.steps[3];
+    assert_eq!(
+        epic.when.as_deref(),
+        Some("{{ steps.admissible.output.has_epic }} == true")
+    );
+    let JobV2StepBody::TargetRef(epic_target) = &epic.body else {
+        panic!("epic step must dispatch detached");
+    };
+    assert_eq!(epic_target.target, "activity:invoke_detached");
+    assert_eq!(
+        epic_target.default_input.as_ref().expect("epic input")["job_name"],
+        "epic_pipeline"
+    );
+
+    let JobV2StepBody::TargetRef(window) = &drain.steps[4].body else {
+        panic!("window step must use the deterministic activity");
+    };
+    assert_eq!(window.target, "activity:drain_window");
+    assert_eq!(
+        window.default_input.as_ref().expect("window input")["deadline"],
+        "{{ steps.open_window.output.deadline }}"
+    );
+
+    // Sleeping only when idle keeps a busy window re-listing immediately, and
+    // an expired one from paying a final sleep it will not use.
+    assert_eq!(
+        drain.steps[5].when.as_deref(),
+        Some(
+            "{{ steps.admissible.output.empty }} == true && \
+             {{ steps.window.output.expired }} == false"
+        )
+    );
+    // The four-way `ship`/`hold`/`epic`/`empty` decision is gone; the loop
+    // reads an admissible set instead.
+    let definition = yaml_without_comments(yaml);
+    assert!(!definition.contains("decision"));
+    assert!(!definition.contains("hold"));
 }
 
 #[test]
@@ -1086,16 +1008,6 @@ fn default_jobs_template_only_declared_agent_loop_handoffs() {
             "task_triage_pipeline",
             "triage",
             "steps.triage.output.dispositions",
-        ),
-        (
-            "task_review_pipeline",
-            "independent_review",
-            "steps.independent_review.output.verdict",
-        ),
-        (
-            "task_review_pipeline",
-            "independent_review",
-            "steps.independent_review.output.reviewed_head_sha",
         ),
     ]);
 
@@ -1197,11 +1109,12 @@ fn task_shipment_jobs_resolve_default_recovery_activity() {
 #[test]
 fn orchestration_jobs_do_not_enable_generic_recovery() {
     for job_name in [
-        "job_duel_plan_pipeline",
+        "epic_pipeline",
         "task_auto_pipeline",
         "task_gate_pipeline",
         "task_triage_pipeline",
         "workspace_ship_pipeline",
+        "workspace_auto_pipeline",
     ] {
         let yaml = DEFAULT_JOB_FILES
             .iter()
@@ -1215,6 +1128,262 @@ fn orchestration_jobs_do_not_enable_generic_recovery() {
             "default job {job_name} should not generically recover child orchestration"
         );
     }
+}
+
+#[test]
+fn epic_pipeline_opens_one_stable_worktree_and_drains_children_serially() {
+    let yaml = DEFAULT_JOB_FILES
+        .iter()
+        .find_map(|(name, yaml)| (*name == "epic_pipeline").then_some(*yaml))
+        .expect("epic pipeline exists");
+    assert_eq!(
+        yaml,
+        include_str!("../../../../../../.orbit/resources/jobs/epic_pipeline.yaml"),
+        "shipped and workspace epic_pipeline resources must remain byte-identical"
+    );
+    let asset = load_job_asset(yaml).expect("epic pipeline parses");
+    assert_eq!(asset.spec.max_active_runs, 1);
+    assert_eq!(asset.spec.steps.len(), 13);
+    let root_step_ids = asset
+        .spec
+        .steps
+        .iter()
+        .map(|step| step.id.as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        root_step_ids,
+        [
+            "resolve_ship_input",
+            "worktree",
+            "assemble",
+            "require_empty",
+            "commit_delivery",
+            "prepare_branch",
+            "sync_base",
+            "push",
+            "pr_open",
+            "promote_pr",
+            "promote_pr_no_diff",
+            "merge",
+            "mark_done",
+        ]
+    );
+
+    let JobV2StepBody::TargetRef(worktree) = &asset.spec.steps[1].body else {
+        panic!("epic pipeline must set up its worktree before draining children");
+    };
+    assert_eq!(worktree.target, "activity:worktree_setup");
+    let worktree_input = worktree.default_input.as_ref().expect("worktree input");
+    assert_eq!(worktree_input["run_id"], "epic-{{ input.epic_task_id }}");
+    assert_eq!(worktree_input["branch_prefix"], "epic");
+    assert_eq!(worktree_input["base_sync"], "remote");
+
+    let JobV2StepBody::Loop { loop_ } = &asset.spec.steps[2].body else {
+        panic!("epic pipeline must assemble descendants and the finisher in one loop");
+    };
+    assert_eq!(loop_.max_iterations, 8);
+    assert_eq!(
+        loop_.break_when.as_deref(),
+        Some("{{ steps.remaining.output.empty }} == true")
+    );
+    assert_eq!(loop_.steps.len(), 5);
+
+    let JobV2StepBody::Target(descendants) = &loop_.steps[0].body else {
+        panic!("assemble loop must list descendants deterministically");
+    };
+    let ActivityV2Spec::Deterministic(descendants) = &descendants.spec else {
+        panic!("epic descendant listing must be deterministic");
+    };
+    assert_eq!(descendants.action, "list_epic_descendants");
+
+    let JobV2StepBody::Loop { loop_: drain } = &loop_.steps[1].body else {
+        panic!("assemble loop must drain descendants through a sequential loop");
+    };
+    assert_eq!(
+        drain.items.as_deref(),
+        Some("{{ steps.descendants.output.task_ids }}")
+    );
+    assert_eq!(drain.max_iterations, 256);
+    assert_eq!(drain.steps.len(), 2);
+    let JobV2StepBody::TargetRef(land_child) = &drain.steps[0].body else {
+        panic!("first drain body must invoke one child pipeline");
+    };
+    assert_eq!(land_child.target, "activity:invoke_and_wait");
+    let child_input = &land_child.default_input.as_ref().expect("child input")["run_input"];
+    assert_eq!(
+        child_input["base_branch"],
+        "{{ steps.worktree.output.head_ref }}"
+    );
+    assert_eq!(child_input["base_sync"], "local");
+    assert_eq!(child_input["auto_push"], false);
+    assert_eq!(child_input["terminal_status"], "done");
+    assert_eq!(
+        child_input["landing_branch"],
+        "{{ steps.resolve_ship_input.output.base_branch }}"
+    );
+
+    let JobV2StepBody::TargetRef(finish) = &loop_.steps[2].body else {
+        panic!("assemble loop must invoke the epic finisher");
+    };
+    assert_eq!(finish.target, "activity:epic_orchestrator");
+    let finish_input = finish.default_input.as_ref().expect("finish input");
+    assert_eq!(finish_input["task_id"], "{{ input.epic_task_id }}");
+    for field in ["workspace_path", "repo_root"] {
+        assert_eq!(
+            finish_input[field], "{{ steps.worktree.output.workspace_path }}",
+            "epic finisher must pin {field} to the assigned epic worktree"
+        );
+    }
+
+    let commit_finish = &loop_.steps[3];
+    assert_eq!(commit_finish.id, "commit_finish");
+    assert_eq!(
+        commit_finish.when.as_deref(),
+        Some("{{ steps.descendants.output.empty }} == true")
+    );
+    let JobV2StepBody::TargetRef(commit_finish) = &commit_finish.body else {
+        panic!("empty-descendant finish must commit through git_commit");
+    };
+    assert_eq!(commit_finish.target, "activity:git_commit");
+    let commit_input = commit_finish.default_input.as_ref().expect("commit input");
+    assert_eq!(
+        commit_input["workspace_path"],
+        "{{ steps.worktree.output.workspace_path }}"
+    );
+    assert_eq!(
+        commit_input["base_sha"],
+        "{{ steps.worktree.output.base_sha }}"
+    );
+
+    let JobV2StepBody::Target(remaining) = &loop_.steps[4].body else {
+        panic!("assemble loop must re-list descendants after the finisher");
+    };
+    let ActivityV2Spec::Deterministic(remaining) = &remaining.spec else {
+        panic!("remaining descendant listing must be deterministic");
+    };
+    assert_eq!(remaining.action, "list_epic_descendants");
+
+    let require_empty = &asset.spec.steps[3];
+    assert_eq!(require_empty.id, "require_empty");
+    let JobV2StepBody::Target(require_empty_step) = &require_empty.body else {
+        panic!("post-loop gate must list descendants deterministically");
+    };
+    let ActivityV2Spec::Deterministic(require_empty_spec) = &require_empty_step.spec else {
+        panic!("post-loop descendant gate must be deterministic");
+    };
+    assert_eq!(require_empty_spec.action, "list_epic_descendants");
+    assert_eq!(
+        require_empty_step
+            .default_input
+            .as_ref()
+            .expect("require_empty input")["fail_if_nonempty"],
+        true
+    );
+
+    let commit_delivery = &asset.spec.steps[4];
+    let JobV2StepBody::TargetRef(commit_delivery) = &commit_delivery.body else {
+        panic!("delivery commit must reference git_commit");
+    };
+    assert_eq!(commit_delivery.target, "activity:git_commit");
+    let commit_input = commit_delivery
+        .default_input
+        .as_ref()
+        .expect("commit_delivery input");
+    assert_eq!(commit_input["allow_empty"], true);
+    assert_eq!(commit_input["allow_moved_head"], true);
+    assert_eq!(
+        commit_input["workspace_path"],
+        "{{ steps.worktree.output.workspace_path }}"
+    );
+
+    let pr_when = Some(
+        "{{ steps.resolve_ship_input.output.mode }} == pr && {{ steps.commit_delivery.output.skipped_no_diff_expected }} != true",
+    );
+    for (index, id) in [
+        "prepare_branch",
+        "sync_base",
+        "push",
+        "pr_open",
+        "promote_pr",
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let step = &asset.spec.steps[5 + index];
+        assert_eq!(step.id, id);
+        assert_eq!(step.when.as_deref(), pr_when);
+        let JobV2StepBody::TargetRef(target) = &step.body else {
+            panic!("{id} must be an activity reference");
+        };
+        assert!(
+            !target.target.contains("task_pr_pipeline"),
+            "delivery must compose activities, not invoke task_pr_pipeline"
+        );
+        if let Some(input) = target.default_input.as_ref() {
+            if let Some(workspace_path) = input.get("workspace_path") {
+                assert_eq!(
+                    workspace_path, "{{ steps.worktree.output.workspace_path }}",
+                    "{id} must reuse the epic worktree"
+                );
+            }
+            assert!(
+                input.get("job_name") != Some(&json!("task_pr_pipeline")),
+                "{id} must not dispatch task_pr_pipeline"
+            );
+        }
+    }
+
+    let promote_no_diff = &asset.spec.steps[10];
+    assert_eq!(
+        promote_no_diff.when.as_deref(),
+        Some(
+            "{{ steps.resolve_ship_input.output.mode }} == pr && {{ steps.commit_delivery.output.skipped_no_diff_expected }} == true"
+        )
+    );
+    let JobV2StepBody::TargetRef(promote_no_diff) = &promote_no_diff.body else {
+        panic!("no-diff PR path must update the epic root");
+    };
+    assert_eq!(promote_no_diff.target, "activity:update_task");
+    assert_eq!(
+        promote_no_diff
+            .default_input
+            .as_ref()
+            .expect("no-diff input")["status"],
+        "review"
+    );
+
+    let merge = &asset.spec.steps[11];
+    assert_eq!(
+        merge.when.as_deref(),
+        Some("{{ steps.resolve_ship_input.output.mode }} == local")
+    );
+    let JobV2StepBody::TargetRef(merge) = &merge.body else {
+        panic!("local delivery must merge the epic branch");
+    };
+    assert_eq!(merge.target, "activity:git_merge");
+    let merge_input = merge.default_input.as_ref().expect("merge input");
+    assert_eq!(
+        merge_input["workspace_path"],
+        "{{ steps.worktree.output.workspace_path }}"
+    );
+    assert_eq!(
+        merge_input["base"],
+        "{{ steps.resolve_ship_input.output.base_branch }}"
+    );
+
+    let mark_done = &asset.spec.steps[12];
+    assert_eq!(
+        mark_done.when.as_deref(),
+        Some("{{ steps.resolve_ship_input.output.mode }} == local")
+    );
+    let JobV2StepBody::TargetRef(mark_done) = &mark_done.body else {
+        panic!("local delivery must mark the epic done");
+    };
+    assert_eq!(mark_done.target, "activity:update_task");
+    assert_eq!(
+        mark_done.default_input.as_ref().expect("mark_done input")["status"],
+        "done"
+    );
 }
 
 fn collect_agent_loop_step_ids<'a>(

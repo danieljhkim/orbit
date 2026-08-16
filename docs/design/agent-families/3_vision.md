@@ -3,7 +3,7 @@ summary: "Agent Families — Vision"
 type: design
 title: "Agent Families — Vision"
 owner: human
-last_updated: 2026-07-11
+last_updated: 2026-08-09
 last_validated: 2026-07-27
 status: Draft
 feature: agent-families
@@ -17,10 +17,9 @@ The long-term direction is to keep family discovery small and explicit while mov
 
 ## 1. Open Questions
 
-1. Should duel-plan participant selection read directly from the crew registry, or should it use a separate experiment matrix that references crews by name?
-2. If cross-provider review returns, should it be an explicit duel/review workflow rather than part of crew selection?
-3. Should Orbit eventually version crew definitions so run-start can detect that a task pinned an older semantic lineup?
-4. How much validation should occur at task authoring time versus run-start when remote config stores are introduced?
+1. If cross-provider review returns, should it be an explicit review workflow rather than part of crew selection?
+2. Should Orbit eventually version crew definitions so run-start can detect that a task pinned an older semantic lineup?
+3. How much validation should occur at task authoring time versus run-start when remote config stores are introduced?
 
 ## 2. Prior Work
 

@@ -1,7 +1,7 @@
 use clap::Args;
-use orbit_core::{OrbitError, OrbitRuntime};
+use orbit_core::OrbitRuntime;
 
-use crate::command::{Execute, require_confirmation};
+use crate::command::{CommandOut, CommandOutput, Execute, require_confirmation};
 use crate::parse::parse_since;
 
 #[derive(Args)]
@@ -15,11 +15,11 @@ pub struct AuditPruneArgs {
 }
 
 impl Execute for AuditPruneArgs {
-    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+    fn execute(self, runtime: &OrbitRuntime) -> CommandOut {
         require_confirmation(self.confirm, "audit pruning")?;
         let cutoff = parse_since(&self.older_than)?;
         let pruned = runtime.prune_audit_events(&cutoff)?;
         println!("Pruned {pruned} audit events");
-        Ok(())
+        Ok(CommandOutput::Silent)
     }
 }

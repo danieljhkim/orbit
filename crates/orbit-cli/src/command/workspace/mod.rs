@@ -1,6 +1,5 @@
 mod command;
 mod init;
-mod link;
 mod list;
 mod remove;
 mod role;

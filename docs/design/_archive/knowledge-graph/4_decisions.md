@@ -12,17 +12,17 @@ tags: ["knowledge-graph"]
 
 # Knowledge Graph — Decisions
 
-ADR-style log of non-obvious knowledge-graph decisions. Each entry names the pressure, the choice, and the tradeoff. Entries are append-only and keyed by number; superseded entries are marked, not deleted.
+Decision log of non-obvious knowledge-graph decisions. Each entry names the pressure, the choice, and the tradeoff. Entries stay in historical order; title-based supersession links preserve changes in direction without deleting the earlier reasoning.
 
-Format for each entry: **Status · Date · Task(s)**, then *Context → Decision → Consequences*. The [T20260430-22] cleanup folds the former top-level evidence log into ADR-018 so this folder keeps only the convention-approved numbered docs.
+Format for each entry: **Recorded date and task provenance**, then *Context → Decision → Consequences*. The [T20260430-22] cleanup folds the former top-level evidence log into [Retain agent-facing `orbit_graph_*` MCP surface; provider-dependent value](#retain-agent-facing-orbitgraph-mcp-surface-provider-dependent-value).
 
-The [T20260506-19] maintenance pass keeps every remaining ADR tied to exactly one non-trivial Cost line; plain language-coverage instances that were already folded into ADR-003 remain as non-ADR coverage records below.
+The [T20260506-19] maintenance pass keeps every remaining decision tied to exactly one non-trivial Cost line; plain language-coverage instances already folded into [Tree-sitter extractors over an LSP backend](#tree-sitter-extractors-over-an-lsp-backend) remain as coverage records below.
 
 ---
 
-## ADR-001 — Content-addressed objects + mutable refs
+## Content-addressed objects + mutable refs
 
-**Status:** Accepted · 2026-04 · [T20260407-0222], [T20260411-0424]
+**Recorded:** 2026-04 · [T20260407-0222], [T20260411-0424]
 
 **Context.** The graph has to survive crashes mid-rebuild, support concurrent reads during a rebuild, and deduplicate unchanged nodes across builds. A single mutable JSON file fails all three. The original content-addressing refactor landed in [T20260407-0222] (then under `orbit-agent`); the layout stabilized in its current shape during the `orbit-knowledge` consolidation [T20260411-0424].
 
@@ -35,9 +35,9 @@ The [T20260506-19] maintenance pass keeps every remaining ADR tied to exactly on
 
 ---
 
-## ADR-002 — Branch-scoped refs over a single shared ref
+## Branch-scoped refs over a single shared ref
 
-**Status:** Accepted · 2026-04 · [T20260421-0358], [T20260505-1]
+**Recorded:** 2026-04 · [T20260421-0358], [T20260505-1]
 
 **Context.** The original layout used `.orbit/knowledge/graph/refs/current.json` — one mutable ref shared across every branch and worktree. The last rebuild won globally. Multi-branch and multi-worktree workflows therefore saw graph reads for the wrong branch, and concurrent rebuilds raced on the single pointer.
 
@@ -51,9 +51,9 @@ The [T20260506-19] maintenance pass keeps every remaining ADR tied to exactly on
 
 ---
 
-## ADR-003 — Tree-sitter extractors over an LSP backend
+## Tree-sitter extractors over an LSP backend
 
-**Status:** Accepted · 2026-04 (rollup updated 2026-05) · [T20260406-0455-3], [T20260409-0550], [T20260416-0352], [T20260505-11], [T20260505-13], [T20260505-14], [T20260505-15], [T20260505-16]
+**Recorded:** 2026-04 (rollup updated 2026-05) · [T20260406-0455-3], [T20260409-0550], [T20260416-0352], [T20260505-11], [T20260505-13], [T20260505-14], [T20260505-15], [T20260505-16]
 
 **Context.** Reference resolution is strongest via a language server, but LSPs are stateful long-running processes tuned for interactive UX. Agent tools want bulk, structured, token-budgeted output and low lifecycle overhead.
 
@@ -78,11 +78,11 @@ The [T20260506-19] maintenance pass keeps every remaining ADR tied to exactly on
 
 ---
 
-## ADR-004 — Shell out to the `git` CLI instead of an in-process library
+## Shell out to the `git` CLI instead of an in-process library
 
-**Status:** Accepted · 2026-04 · [T20260421-0528]
+**Recorded:** 2026-04 · [T20260421-0528]
 
-**Superseded by:** ADR-029 / [T20260506-11].
+**Superseded by:** [Remove graph task attribution](#remove-graph-task-attribution) / [T20260506-11].
 
 **Context.** The history walker diffs every new commit against its first parent, parses unified diffs, and resolves trees. An in-process git library (`gix`, `git2`) would avoid per-commit fork cost.
 
@@ -95,9 +95,9 @@ The [T20260506-19] maintenance pass keeps every remaining ADR tied to exactly on
 
 ---
 
-## ADR-005 — Working graph is in-memory, not persistent
+## Working graph is in-memory, not persistent
 
-**Status:** Accepted (with open question) · 2026-04 · [T20260411-0424], [T20260409-0656], [T20260416-0236], [T20260417-0302]
+**Recorded:** 2026-04 · [T20260411-0424], [T20260409-0656], [T20260416-0236], [T20260417-0302]
 
 **Context.** Activities mutate the graph as they edit code. Those mutations must not perturb the persisted store mid-turn (cache stability, concurrent-reader safety). Two implementations are plausible: in-memory overlay vs. per-activity disk staging. Working-graph edit buffering, version chains, and insertion support landed in [T20260409-0656]; write-anchor validation and atomicity guarantees followed in the [T20260416-0236] series (`-2` conflict/audit, `-3` canonical selectors, `-4` atomic moves). Source-file durability on edit ops was added in [T20260417-0302].
 
@@ -110,9 +110,10 @@ The [T20260506-19] maintenance pass keeps every remaining ADR tied to exactly on
 
 ---
 
-## ADR-006 — Hunk-to-symbol attribution by line-range overlap only
+## Hunk-to-symbol attribution by line-range overlap only
 
-**Status:** Superseded by ADR-029 · 2026-04 · [T20260421-0528]
+**Superseded by:** [Remove graph task attribution](#remove-graph-task-attribution)
+**Recorded:** 2026-04 · [T20260421-0528]
 
 **Context.** `git log --follow` chases renames through history but at non-trivial per-hop cost. Hunk coordinates have to be re-mapped after every rename hop. At commit volumes typical of this repo, follow mode compounds into minutes of extra walker time. This decision described the now-removed attribution walker.
 
@@ -125,11 +126,11 @@ The [T20260506-19] maintenance pass keeps every remaining ADR tied to exactly on
 
 ---
 
-## ADR-007 — Task-ID attribution is a flat union, not state-aware
+## Task-ID attribution is a flat union, not state-aware
 
-**Status:** Accepted (with open question) · 2026-04 · [T20260421-0528]
+**Recorded:** 2026-04 · [T20260421-0528]
 
-**Superseded by:** ADR-029 / [T20260506-11].
+**Superseded by:** [Remove graph task attribution](#remove-graph-task-attribution) / [T20260506-11].
 
 **Context.** A leaf touched by a reverted task and by a shipped task currently carries both IDs with no distinction. Consumers that want "which change is live" signal have to join against task status externally.
 
@@ -141,9 +142,9 @@ The [T20260506-19] maintenance pass keeps every remaining ADR tied to exactly on
 
 ---
 
-## ADR-008 — File-based lock store in `orbit-knowledge`, no standalone `orbit-lock` crate
+## File-based lock store in `orbit-knowledge`, no standalone `orbit-lock` crate
 
-**Status:** Accepted · 2026-04 · [T20260411-0424], [T20260417-0301-2]
+**Recorded:** 2026-04 · [T20260411-0424], [T20260417-0301-2]
 
 **Context.** An earlier prototype factored graph-node locks into a standalone `orbit-lock` crate. The crate added a dependency edge without buying reuse — no consumer other than `orbit-knowledge` ever imported it.
 
@@ -156,9 +157,9 @@ The [T20260506-19] maintenance pass keeps every remaining ADR tied to exactly on
 
 ---
 
-## ADR-009 — Debounced, single-flighted refresh
+## Debounced, single-flighted refresh
 
-**Status:** Accepted · 2026-04 · [T20260417-0307], [T20260416-0719], [T20260417-0639], [T20260505-1]
+**Recorded:** 2026-04 · [T20260417-0307], [T20260416-0719], [T20260417-0639], [T20260505-1]
 
 **Context.** Every read can trigger `ensure_fresh`. Without coordination, a dirty worktree plus many quick reads would stack rebuilds, and concurrent callers would duplicate work.
 
@@ -171,12 +172,12 @@ The [T20260506-19] maintenance pass keeps every remaining ADR tied to exactly on
 
 ---
 
-## ADR-010 — Orbit-owned symbol-level write operations
+## Orbit-owned symbol-level write operations
 
-**Status:** Proposed · 2026-04 · [T20260421-0543]
+**Recorded:** 2026-04 · [T20260421-0543]
 **Superseded by:** [T20260506-11] for graph task-attribution preservation.
 
-**Context.** This ADR was written when `task_ids` attribution was still a graph feature. That feature was removed in ADR-029 / [T20260506-11], so the attribution-preservation motivation is historical. The remaining symbol-operation taxonomy may still inform future graph write tools, but it no longer has an attribution consumer.
+**Context.** This ADR was written when `task_ids` attribution was still a graph feature. That feature was removed in [Remove graph task attribution](#remove-graph-task-attribution) / [T20260506-11], so the attribution-preservation motivation is historical. The remaining symbol-operation taxonomy may still inform future graph write tools, but it no longer has an attribution consumer.
 
 **Decision.** Formalize the contract that hook validates against via [specs/graph-operations.md](./specs/graph-operations.md). Eight-op taxonomy (`create`, `delete`, `rename`, `move`, `change_signature`, `change_body`, `split`, `merge`), each atomic per entry — compound refactors emit multiple entries rather than a single "relocate" primitive. Address symbols by a graph-level **stable ID** (`stable_id: node:<nanoid-21>`) persisted on every node; rejected pre/post address pairs because disambiguation under simultaneous axis changes and N-ary ops (`split`/`merge`) requires a subject handle equivalent to a stable ID under a different name. Operations are **advisory-authoritative**: accepted when consistent with the commit's tree diff, ignored with a warning otherwise — the tree is always ground truth.
 
@@ -187,26 +188,26 @@ The [T20260506-19] maintenance pass keeps every remaining ADR tied to exactly on
 
 ---
 
-## ADR-011 — Non-code extraction via `FileKind`-dispatched extractors
+## Non-code extraction via `FileKind`-dispatched extractors
 
-**Status:** Accepted · 2026-04 · [T20260422-1540] (config/table extraction collapsed by ADR-038 / [T20260509-64])
+**Recorded:** 2026-04 · [T20260422-1540] (config/table extraction collapsed by [Collapse YAML/JSON/TOML/CSV/TSV extraction to file-as-leaf](#collapse-yamljsontomlcsvtsv-extraction-to-file-as-leaf) / [T20260509-64])
 
 **Context.** Tree-sitter extractors covered five source-code languages; every other file landed in the graph as a leafless `FileNode`. Design docs under `docs/design/` and scoreboard/config files under `.orbit/` were load-bearing context but invisible to graph queries at sub-file granularity. The `LanguageExtractor` trait was the natural extension point — a pluggable design without plugins. Implementing a parallel system for non-code files would duplicate the registry and the pipeline dispatch.
 
 **Decision.** Rename `LanguageExtractor` → `FileExtractor` and switch its discriminator from `Language` to a new `FileKind { Code(Language), Doc(DocFormat), Config(ConfigFormat), Table(TableFormat), Unknown }`. Add three `LeafKind` variants: `Section { depth: u8 }` (markdown heading), `ConfigKey` (top-level key in YAML/JSON/TOML), `Column` (header cell in CSV/TSV). Ship shallow extractors only: ATX headings (not frontmatter, not fenced blocks), top-level map entries (not nested paths), first-row cells (not row-level nodes). 1 MiB size cap on tabular extraction short-circuits before parsing. Extraction is the only pipeline path that changes — `FileKind::from_extension` replaces `Language::from_extension` at build time.
 
-**Amendment ([T20260509-64]).** ADR-038 collapses the config and table extractors to file-as-leaf: YAML/JSON/TOML/CSV/TSV files keep `FileKind::Config(_)` / `FileKind::Table(_)` classification but emit zero leaves. The `ConfigKey` and `Column` `LeafKind` variants remain in the enum for forward compatibility but are no longer produced. Markdown `Section { depth }` extraction is unchanged.
+**Amendment ([T20260509-64]).** [Collapse YAML/JSON/TOML/CSV/TSV extraction to file-as-leaf](#collapse-yamljsontomlcsvtsv-extraction-to-file-as-leaf) collapses the config and table extractors to file-as-leaf: YAML/JSON/TOML/CSV/TSV files keep `FileKind::Config(_)` / `FileKind::Table(_)` classification but emit zero leaves. The `ConfigKey` and `Column` `LeafKind` variants remain in the enum for forward compatibility but are no longer produced. Markdown `Section { depth }` extraction is unchanged.
 
 **Consequences.**
-- Markdown section anchors are first-class graph nodes; config keys and table columns are not (per ADR-038).
+- Markdown section anchors are first-class graph nodes; config keys and table columns are not (per [Collapse YAML/JSON/TOML/CSV/TSV extraction to file-as-leaf](#collapse-yamljsontomlcsvtsv-extraction-to-file-as-leaf)).
 - Stored index-file `kind` field switches from direct enum serialization to `LeafKind::to_string()` — required because `Section { depth }` serializes as `{"section": {"depth": 1}}` and the index's `kind: Option<String>` consumer expects bare strings. The full depth payload lives in the object body.
 - Cost: `LeafKind` JSON shape becomes heterogeneous (some variants are bare strings, `Section { depth }` is an externally-tagged object). Acceptable because no consumer pins the full LeafKind JSON string; `#[non_exhaustive]` not yet set on the enum — future LeafKind additions remain a breaking change for downstream exhaustive matches.
 
 ---
 
-## ADR-012 — Keep scan-time graph inclusion separate from runtime policy access
+## Keep scan-time graph inclusion separate from runtime policy access
 
-**Status:** Accepted · 2026-04 · [T20260423-0452]
+**Recorded:** 2026-04 · [T20260423-0452]
 
 **Context.** The graph scanner originally filtered only through `git check-ignore`, which meant committed benchmark artifacts and other checked-in generated files still entered the graph and polluted search results. Reusing runtime policy for this would have mixed two different concerns: whether a path should be indexed at all versus whether an activity may read or modify it at runtime.
 
@@ -220,9 +221,9 @@ The [T20260506-19] maintenance pass keeps every remaining ADR tied to exactly on
 
 ---
 
-## ADR-013 — Changed-path incremental leaf reuse
+## Changed-path incremental leaf reuse
 
-**Status:** Accepted · 2026-04 · [T20260426-0140]
+**Recorded:** 2026-04 · [T20260426-0140]
 
 **Context.** Incremental rebuilds already computed `ctx.changed_paths`, but the leaf phase still re-read and re-extracted every extractable file. That made dirty-read refreshes O(repo) even when one file changed, and it wasted the content-addressed store's ability to preserve identical file/leaf objects.
 
@@ -236,9 +237,9 @@ The [T20260506-19] maintenance pass keeps every remaining ADR tied to exactly on
 
 ---
 
-## ADR-014 — Store-scoped LRU for graph objects and blobs
+## Store-scoped LRU for graph objects and blobs
 
-**Status:** Accepted · 2026-04 · [T20260426-0141]
+**Recorded:** 2026-04 · [T20260426-0141]
 
 **Context.** `KnowledgeStore` selector reads loaded content-addressed graph objects and source blobs through fresh per-call `HashMap`s. Repeated `pack`, `leaf_data`, and history queries against the same store therefore paid disk I/O, JSON parsing, and SHA-256 verification again for immutable hash-addressed data.
 
@@ -252,9 +253,9 @@ The [T20260506-19] maintenance pass keeps every remaining ADR tied to exactly on
 
 ---
 
-## ADR-015 — Parallel per-file build work with ordered merge
+## Parallel per-file build work with ordered merge
 
-**Status:** Accepted · 2026-04 · [T20260426-0139]
+**Recorded:** 2026-04 · [T20260426-0139]
 
 **Context.** Hashing and extractor dispatch were fully sequential even though each file can be read, hashed, and parsed independently. The graph writer is content-addressed, so any parallel implementation also had to preserve the previous file-order leaf stream and the unchanged-file reuse path from [T20260426-0140].
 
@@ -268,11 +269,11 @@ The [T20260506-19] maintenance pass keeps every remaining ADR tied to exactly on
 
 ---
 
-## ADR-016 — Task-id graph search as a scan filter, not a sidecar index
+## Task-id graph search as a scan filter, not a sidecar index
 
-**Status:** Accepted · 2026-04 · [T20260426-0220]
+**Recorded:** 2026-04 · [T20260426-0220]
 
-**Superseded by:** ADR-029 / [T20260506-11].
+**Superseded by:** [Remove graph task attribution](#remove-graph-task-attribution) / [T20260506-11].
 
 **Context.** Nodes already carry `task_ids` from the attribution pass, but agents had no inverse lookup for "which selectors did this task touch?" A dedicated sidecar index could make that lookup faster, but it would add another persisted source of truth before usage patterns justify it.
 
@@ -285,9 +286,9 @@ The [T20260506-19] maintenance pass keeps every remaining ADR tied to exactly on
 
 ---
 
-## ADR-017 — Local graph build benchmark scoreboard over CI regression gates
+## Local graph build benchmark scoreboard over CI regression gates
 
-**Status:** Accepted · 2026-04 · [T20260426-0236]
+**Recorded:** 2026-04 · [T20260426-0236]
 
 **Context.** Recent graph-build performance work proved wins with one-off manual benchmarks in task execution summaries. Those summaries are hard to compare after the task scrolls away, and the hot path (`ensure_fresh` before pack/search) can regress through pipeline, persistence, or cache changes. Criterion-style microbenchmarks would miss the dominant disk I/O and tree-sitter costs.
 
@@ -301,9 +302,9 @@ The [T20260506-19] maintenance pass keeps every remaining ADR tied to exactly on
 
 ---
 
-## ADR-018 — Retain agent-facing `orbit_graph_*` MCP surface; provider-dependent value
+## Retain agent-facing `orbit_graph_*` MCP surface; provider-dependent value
 
-**Status:** Accepted · 2026-04 · [T20260423-0524], [T20260426-0402]
+**Recorded:** 2026-04 · [T20260423-0524], [T20260426-0402]
 
 **Context.** Three benchmark rounds asked whether the eight-tool agent-facing `orbit_graph_*` MCP surface earns its token cost against grep/read. v1/v2 first looked like a null result, but codex only had shell access to graph tools there; v3 gave codex MCP parity and hybrid utilization moved from 0/30 to 23/30, with hybrid aggregate tokens at 0.65× no-graph and graph-only accuracy at 30/30. Claude stayed at 0/30 hybrid graph use because its baseline already included specialized `Read` / `Grep` / `Glob`. The pre-registered keep threshold passed on utilization but remained mixed on per-cell cost: codex passed 4/10 fixtures, claude 1/10.
 
@@ -320,9 +321,9 @@ The [T20260506-19] maintenance pass keeps every remaining ADR tied to exactly on
 
 ---
 
-## ADR-019 — Keep the public graph surface read-only
+## Keep the public graph surface read-only
 
-**Status:** Accepted · 2026-04 · [T20260426-0453]
+**Recorded:** 2026-04 · [T20260426-0453]
 
 **Context.** Prototype graph mutation tools (`orbit.graph.add`, `orbit.graph.delete`, `orbit.graph.move`, and `orbit.graph.write`) implied that graph-node locks could coordinate write safety. That is not true for the workflow Orbit actually uses: agents commonly work in separate worktrees and branches, each with its own graph ref. A lock inside a branch-local graph snapshot cannot reliably serialize writes in another worktree.
 
@@ -336,11 +337,11 @@ The [T20260506-19] maintenance pass keeps every remaining ADR tied to exactly on
 
 ---
 
-## ADR-020 — Configurable task-ID extraction with manifest-driven backfill
+## Configurable task-ID extraction with manifest-driven backfill
 
-**Status:** Accepted · 2026-04 · [T20260426-0507]
+**Recorded:** 2026-04 · [T20260426-0507]
 
-**Superseded by:** ADR-029 / [T20260506-11].
+**Superseded by:** [Remove graph task attribution](#remove-graph-task-attribution) / [T20260506-11].
 
 **Context.** Task-ID attribution was hardcoded to the Orbit format `\[T\d{8}-\d{4}(?:-\d+)?\]` in two places (`pipeline/history.rs` and `service/history.rs`). Codebases using Jira (`PROJ-123`), Linear (`ENG-123`), or GitHub-issue (`#123`) conventions saw empty graph-backed results and a silently empty fallback — the feature was unusable outside Orbit's own repo. The same `orbit task history` CLI surface also lived under the wrong subcommand: it never touches task lifecycle, only the graph.
 
@@ -354,9 +355,9 @@ The [T20260506-19] maintenance pass keeps every remaining ADR tied to exactly on
 
 ---
 
-## ADR-021 — Route graph CLI through the tools facade
+## Route graph CLI through the tools facade
 
-**Status:** Accepted · 2026-04 · [T20260426-2042]
+**Recorded:** 2026-04 · [T20260426-2042]
 
 **Context.** `orbit-cli` imported `orbit-knowledge` directly for graph build/update, show/search, history payloads, workspace-init graph build, and `.orbitignore` defaults. That made clap command files a second graph application layer and duplicated JSON shaping already present in the agent tool surface.
 
@@ -370,15 +371,15 @@ The [T20260506-19] maintenance pass keeps every remaining ADR tied to exactly on
 
 ---
 
-## ADR-022 — Align graph task-ID grammar with task-store IDs
+## Align graph task-ID grammar with task-store IDs
 
-**Status:** Accepted · 2026-04 · [T20260428-1]
+**Recorded:** 2026-04 · [T20260428-1]
 
-**Superseded by:** ADR-029 / [T20260506-11].
+**Superseded by:** [Remove graph task attribution](#remove-graph-task-attribution) / [T20260506-11].
 
 **Context.** `orbit.graph.search` added an exact `task_id` filter in [T20260426-0220], but its input validator hardcoded `T\d{8}-\d{4}`. The task store now creates unpadded daily suffixes such as `T20260428-1`, while historical graph/task references also include amended numeric suffixes such as `T20260412-0645-2`. The graph attribution default still only matched the older four-digit base suffix, so a selector-first task lookup could fail before search, or miss current task IDs after a rebuild.
 
-**Decision.** Treat the bare Orbit task-ID body accepted by graph attribution/search as `T\d{8}-\d+(?:-\d+)*`. Keep the configurable `TaskIdPattern` mechanism from ADR-020; this change only updates Orbit's default pattern and the agent-facing `orbit.graph.search` input validator.
+**Decision.** Treat the bare Orbit task-ID body accepted by graph attribution/search as `T\d{8}-\d+(?:-\d+)*`. Keep the configurable `TaskIdPattern` mechanism from [Configurable task-ID extraction with manifest-driven backfill](#configurable-task-id-extraction-with-manifest-driven-backfill); this change only updates Orbit's default pattern and the agent-facing `orbit.graph.search` input validator.
 
 **Consequences.**
 - Current task-store IDs, historical four-digit IDs, and amended numeric IDs all share one graph default.
@@ -387,9 +388,9 @@ The [T20260506-19] maintenance pass keeps every remaining ADR tied to exactly on
 
 ---
 
-## ADR-023 — Keep MCP graph exposure equal to the read-only graph tool set
+## Keep MCP graph exposure equal to the read-only graph tool set
 
-**Status:** Accepted · 2026-04 · [T20260428-3]
+**Recorded:** 2026-04 · [T20260428-3]
 
 **Context.** The MCP safe list exposed the original eight read-only graph tools, but `orbit.graph.history` later joined the registered graph tool surface as a read-only history/query tool. That left Codex and Gemini MCP discovery dependent on a stale client-visible safe list even though the runtime registry had the tool.
 
@@ -397,28 +398,27 @@ The [T20260506-19] maintenance pass keeps every remaining ADR tied to exactly on
 
 **Consequences.**
 - Codex, Gemini, and other MCP clients discover the same read-only graph capabilities that `orbit tool list` reports as active.
-- The history tool is now a compatibility stub after ADR-029; agents should use `git log --grep '[T<task-id>]'` for local forward lookup.
-- Cost: the MCP schema payload gains one more graph tool, so the provider-dependent schema-cache caveat from ADR-018 still applies.
+- The history tool is now a compatibility stub after [Remove graph task attribution](#remove-graph-task-attribution); agents should use `git log --grep '[T<task-id>]'` for local forward lookup.
+- Cost: the MCP schema payload gains one more graph tool, so the provider-dependent schema-cache caveat from [Retain agent-facing `orbit_graph_*` MCP surface; provider-dependent value](#retain-agent-facing-orbitgraph-mcp-surface-provider-dependent-value) still applies.
 
 ---
 
 ## Folded language coverage records
 
-These entries were formerly ADR headings, but they are plain instances of ADR-003's extractor decision rather than standalone decisions under the three-test rule. The task IDs and current behavior stay in ADR-003's per-language table.
+These entries were formerly ADR headings, but they are plain instances of [Tree-sitter extractors over an LSP backend](#tree-sitter-extractors-over-an-lsp-backend)'s extractor decision rather than standalone decisions under the three-test rule. The task IDs and current behavior stay in [Tree-sitter extractors over an LSP backend](#tree-sitter-extractors-over-an-lsp-backend)'s per-language table.
 
 | Former entry | Status | Current home |
 |--------------|--------|--------------|
-| ADR-024 — TypeScript and TSX use dedicated tree-sitter grammars · [T20260505-11] | Superseded by ADR-003 (folded 2026-05) | ADR-003 TypeScript / TSX row |
-| ADR-026 — C source and headers share one extractor · [T20260505-16] | Superseded by ADR-003 (folded 2026-05) | ADR-003 C row |
-| ADR-027 — Kotlin mirrors Java-style tree-sitter extraction · [T20260505-14] | Superseded by ADR-003 (folded 2026-05) | ADR-003 Kotlin row |
-| ADR-028 — C# uses syntax-only enterprise coverage · [T20260505-13] | Superseded by ADR-003 (folded 2026-05) | ADR-003 C# row |
+| [Shipping worktrees default to fetched remote base refs](../../activity-job/4_decisions.md#shipping-worktrees-default-to-fetched-remote-base-refs) — TypeScript and TSX use dedicated tree-sitter grammars · [T20260505-11] | Superseded by [Tree-sitter extractors over an LSP backend](#tree-sitter-extractors-over-an-lsp-backend) (folded 2026-05) | [Tree-sitter extractors over an LSP backend](#tree-sitter-extractors-over-an-lsp-backend) TypeScript / TSX row |
+| [Workflow admission is distinct from generic task updates](../../activity-job/4_decisions.md#workflow-admission-is-distinct-from-generic-task-updates) — C source and headers share one extractor · [T20260505-16] | Superseded by [Tree-sitter extractors over an LSP backend](#tree-sitter-extractors-over-an-lsp-backend) (folded 2026-05) | [Tree-sitter extractors over an LSP backend](#tree-sitter-extractors-over-an-lsp-backend) C row |
+| [`orbit init` is the writer for per-role agent settings](../../activity-job/4_decisions.md#orbit-init-is-the-writer-for-per-role-agent-settings) — Kotlin mirrors Java-style tree-sitter extraction · [T20260505-14] | Superseded by [Tree-sitter extractors over an LSP backend](#tree-sitter-extractors-over-an-lsp-backend) (folded 2026-05) | [Tree-sitter extractors over an LSP backend](#tree-sitter-extractors-over-an-lsp-backend) Kotlin row |
+| [Job-level recovery activity handles retry-exhausted step errors](../../activity-job/4_decisions.md#job-level-recovery-activity-handles-retry-exhausted-step-errors) — C# uses syntax-only enterprise coverage · [T20260505-13] | Superseded by [Tree-sitter extractors over an LSP backend](#tree-sitter-extractors-over-an-lsp-backend) (folded 2026-05) | [Tree-sitter extractors over an LSP backend](#tree-sitter-extractors-over-an-lsp-backend) C# row |
 
 ---
 
-## ADR-025 — Pack favors prompt-time responsiveness over inline refresh
+## Pack favors prompt-time responsiveness over inline refresh
 
-**Status:** Accepted · 2026-05 · [T20260505-5]
-**Author:** gpt-5.5
+**Recorded:** 2026-05 · [T20260505-5]
 
 **Context.** Agents use `orbit.graph.pack` at the start of execution to turn task context selectors into prompt material. Letting that call trigger an unbounded inline graph refresh can make the selector-first workflow appear hung, with no partial selector results or timeout hint.
 
@@ -431,10 +431,9 @@ These entries were formerly ADR headings, but they are plain instances of ADR-00
 
 ---
 
-## ADR-029 — Remove graph task attribution
+## Remove graph task attribution
 
-**Status:** Accepted · 2026-05 · [T20260506-11]
-**Author:** gpt-5
+**Recorded:** 2026-05 · [T20260506-11]
 
 **Context.** Orbit carried a task attribution pipeline that parsed task IDs from commit messages, mapped hunks back to graph nodes, persisted `task_ids`/`structural_conflict` fields, wrote a task-commits sidecar, and exposed reverse lookup through `orbit.graph.search task_id` and `orbit.graph.history`. A 10-day audit window from 2026-04-26 to 2026-05-06 found 961 `orbit.graph.*` tool calls and 0 uses of the reverse-lookup parameters. The forward lookup users actually need is already native git text search: `git log --grep '[T<task-id>]'`. Separately, the task-sync doctrine now treats Orbit `task_id` as local-only; cross-engineer references go through `external_refs`.
 
@@ -449,10 +448,9 @@ These entries were formerly ADR headings, but they are plain instances of ADR-00
 
 ---
 
-## ADR-030 — Skip symlinked scan entries by default
+## Skip symlinked scan entries by default
 
-**Status:** Accepted · 2026-05 · [T20260509-33]
-**Author:** gpt-5.5
+**Recorded:** 2026-05 · [T20260509-33]
 
 **Context.** The scanner used `Path::is_dir()` while walking files and discovering nested `.orbitignore` files. That follows directory symlinks, so a repository symlink could index files outside the workspace or recurse through cyclic self/parent links. A more permissive option would canonicalize symlink targets, follow only those still inside the workspace, and maintain a visited-directory set.
 
@@ -466,10 +464,9 @@ These entries were formerly ADR headings, but they are plain instances of ADR-00
 
 ---
 
-## ADR-031 — Refresh freshness by checkout identity
+## Refresh freshness by checkout identity
 
-**Status:** Accepted · 2026-05 · [T20260509-34]
-**Author:** gpt-5.5
+**Recorded:** 2026-05 · [T20260509-34]
 
 **Context.** Auto-refresh used `manifest.generated_at` versus `git log -1 --format=%cI` to decide if a clean branch graph was fresh. A branch reset, rebase, or old-date commit can move `HEAD` to a different checkout with a committer timestamp older than the manifest, causing reads to reuse a graph built for the previous checkout.
 
@@ -483,10 +480,9 @@ These entries were formerly ADR headings, but they are plain instances of ADR-00
 
 ---
 
-## ADR-032 — Source hydration is explicit per graph read
+## Source hydration is explicit per graph read
 
-**Status:** Accepted · 2026-05 · [T20260509-65]
-**Author:** gpt-5.5
+**Recorded:** 2026-05 · [T20260509-65]
 
 **Context.** `GraphObjectStore::read_graph` historically hydrated every file and leaf source blob when node objects carried empty `source` plus `source_blob_hash`. Broad tools such as overview, default search, deps, and the history compatibility stub do not need source bodies, so large repositories paid blob I/O on reads whose answers are metadata-only.
 
@@ -500,10 +496,9 @@ These entries were formerly ADR headings, but they are plain instances of ADR-00
 
 ---
 
-## ADR-033 — Default search ranking uses a bounded candidate pool
+## Default search ranking uses a bounded candidate pool
 
-**Status:** Accepted · 2026-05 · [T20260509-67]
-**Author:** gpt-5.5
+**Recorded:** 2026-05 · [T20260509-67]
 
 **Context.** `orbit.graph.search` default ranking previously asked the service for `usize::MAX` hits so ranking could choose the best `limit` results from the full match set. On large graphs this let a small user-facing limit retain an effectively unbounded candidate list before ranking.
 
@@ -517,10 +512,9 @@ These entries were formerly ADR headings, but they are plain instances of ADR-00
 
 ---
 
-## ADR-034 — SQLite sidecar for secondary graph indexes
+## SQLite sidecar for secondary graph indexes
 
-**Status:** Accepted · 2026-05 · [T20260509-70], [T20260509-72]
-**Author:** gpt-5.5
+**Recorded:** 2026-05 · [T20260509-70], [T20260509-72]
 
 **Context.** Selector resolution, name search, and file-symbol counts still walk the hydrated graph or JSON by-id index. A JSON sidecar would keep persistence simple but would not provide efficient prefix/range lookup, partial indexes, or concurrent read/write behavior.
 
@@ -535,10 +529,9 @@ These entries were formerly ADR headings, but they are plain instances of ADR-00
 
 ---
 
-## ADR-035 — Search exact-name and path-prefix fast paths use SQLite
+## Search exact-name and path-prefix fast paths use SQLite
 
-**Status:** Accepted · 2026-05 · [T20260509-73]
-**Author:** gpt-5.5
+**Recorded:** 2026-05 · [T20260509-73]
 
 **Context.** Default graph search is intentionally substring-capable, but the most common agent searches are exact symbol names and path prefixes. Walking the graph for those shapes burns the same scan cost as broad substring search even though the SQLite sidecar already stores indexed `name_lower` and `location_lower` columns.
 
@@ -551,10 +544,9 @@ These entries were formerly ADR headings, but they are plain instances of ADR-00
 
 ---
 
-## ADR-036 — Knowledge commands are the canonical query boundary
+## Knowledge commands are the canonical query boundary
 
-**Status:** Accepted · 2026-05 · [T20260510-5]
-**Author:** gpt-5.5
+**Recorded:** 2026-05 · [T20260510-5]
 
 **Context.** The `orbit-tools` graph adapters had accumulated ranking, classification, fast-path, and fallback semantics. That made the tool layer the only consumer able to reproduce canonical `search`, `overview`, `refs`, `show`, and pack behavior, while `orbit-knowledge` exposed lower-level services without a command boundary.
 
@@ -568,10 +560,9 @@ These entries were formerly ADR headings, but they are plain instances of ADR-00
 
 ---
 
-## ADR-037 — Leaf IDs use language-natural qualifiers plus occurrence suffixes
+## Leaf IDs use language-natural qualifiers plus occurrence suffixes
 
-**Status:** Accepted · 2026-05 · [T20260510-7]
-**Author:** gpt-5.5
+**Recorded:** 2026-05 · [T20260510-7]
 
 **Context.** Leaf node IDs are derived from `symbol:{path}#{qualified_name}:{kind}`. Python methods in different classes, Rust inherent/trait impls for the same type, Java overloads, and TypeScript overloads can naturally produce duplicate `(qualified_name, kind)` pairs within one file, causing SQLite fast paths keyed by `node.id` to drop leaves that the JSON fallback preserves.
 
@@ -585,12 +576,11 @@ These entries were formerly ADR headings, but they are plain instances of ADR-00
 
 ---
 
-## ADR-038 — Collapse YAML/JSON/TOML/CSV/TSV extraction to file-as-leaf
+## Collapse YAML/JSON/TOML/CSV/TSV extraction to file-as-leaf
 
-**Status:** Accepted · 2026-05 · [T20260509-64]
-**Author:** claude-opus-4-7
+**Recorded:** 2026-05 · [T20260509-64]
 
-**Context.** ADR-011 shipped `ConfigKey` and `Column` extractors that emitted one leaf per top-level YAML/JSON/TOML key and one leaf per CSV/TSV header column. Those leaves had `source: ""` because the body was the file's source rather than a sub-span. Downstream tools special-cased empty-source leaves; search namespaces filled with `name`, `version`, `dependencies`, etc. from every config file in the repo; and the unit agents actually navigate to is the file (`package.json`, `Cargo.toml`, `tsconfig.json`), not the key. The same change also lands before the `benchmarks/graph-latency/` Phase 0 baseline freeze, so v1 numbers measure the leaf model we are keeping.
+**Context.** [Non-code extraction via `FileKind`-dispatched extractors](#non-code-extraction-via-filekind-dispatched-extractors) shipped `ConfigKey` and `Column` extractors that emitted one leaf per top-level YAML/JSON/TOML key and one leaf per CSV/TSV header column. Those leaves had `source: ""` because the body was the file's source rather than a sub-span. Downstream tools special-cased empty-source leaves; search namespaces filled with `name`, `version`, `dependencies`, etc. from every config file in the repo; and the unit agents actually navigate to is the file (`package.json`, `Cargo.toml`, `tsconfig.json`), not the key. The same change also lands before the `benchmarks/graph-latency/` Phase 0 baseline freeze, so v1 numbers measure the leaf model we are keeping.
 
 **Decision.** `ConfigExtractor` (YAML/JSON/TOML) and `TableExtractor` (CSV/TSV) return zero leaves. `FileKind::Config(_)` / `FileKind::Table(_)` classification stays so file-level filtering keeps working, and the file node still carries source so `orbit.graph.search` substring queries and `orbit.graph.show` against config selectors return file-level content. Markdown extraction (`Section { depth }`) is explicitly out of scope and unchanged — section bodies have real content and a forward path to per-section embeddings.
 
@@ -602,10 +592,9 @@ These entries were formerly ADR headings, but they are plain instances of ADR-00
 
 ---
 
-## ADR-039 — Attribute refreshes to the active git checkout, not the shared Orbit root
+## Attribute refreshes to the active git checkout, not the shared Orbit root
 
-**Status:** Accepted · 2026-05 · [ORB-00099]
-**Author:** codex
+**Recorded:** 2026-05 · [ORB-00099]
 
 **Context.** Linked worktrees intentionally resolve Orbit data through the main checkout's `.orbit/` directory so tasks, audit state, and knowledge objects stay shared. The read-side graph refresh path reused that same resolved root as `workspace_root`, so a graph tool invoked from `.orbit/state/worktrees/...` ran `git current-branch` against the main checkout and wrote `refs/heads/agent-main.json` even when the agent was on an `orbit/ORB-*` worktree branch.
 
@@ -619,10 +608,9 @@ These entries were formerly ADR headings, but they are plain instances of ADR-00
 
 ---
 
-## ADR-040 — Serve hot graph reads from the SQLite index
+## Serve hot graph reads from the SQLite index
 
-**Status:** Accepted · 2026-06 · [ORB-00380]
-**Author:** codex
+**Recorded:** 2026-06 · [ORB-00380]
 
 **Context.** `orbit.graph.show`, `orbit.graph.refs`, and `orbit.graph.callers` are hot navigation reads. The legacy command paths hydrated the full content-addressed graph for each call: one object-envelope open and JSON parse per node, plus leaf blob hydration for `refs` and a tree-sitter reparse of every Rust function/method leaf for `callers`. On the Orbit repository this meant roughly 18k object reads per call before returning one selector or a small result set.
 
@@ -641,7 +629,7 @@ These entries were formerly ADR headings, but they are plain instances of ADR-00
 Tasks cited by ADRs above:
 
 - **[T20260406-0455-3]** — Add Rust graph extractor.
-- **[T20260407-0222]** — Refactor graph storage to content-addressed objects (origin of ADR-001).
+- **[T20260407-0222]** — Refactor graph storage to content-addressed objects (origin of [Content-addressed objects + mutable refs](#content-addressed-objects-mutable-refs)).
 - **[T20260409-0550]** — Validate and harden RustGraphExtractor.
 - **[T20260409-0656]** — Leaf-level write tool with edit buffering and version chains.
 - **[T20260411-0424]** — Consolidate `orbit-knowledge` crate; add tree-sitter extractors, build pipeline, lock store.
@@ -653,24 +641,24 @@ Tasks cited by ADRs above:
 - **[T20260417-0307]** — Gate and guard graph refresh hot paths.
 - **[T20260417-0639]** — Speed up workspace-init graph persistence.
 - **[T20260421-0358]** — Branch-scoped refs.
-- **[T20260421-0528]** — Historical `task_ids` schema + git history walker; removed by ADR-029 / [T20260506-11].
+- **[T20260421-0528]** — Historical `task_ids` schema + git history walker; removed by [Remove graph task attribution](#remove-graph-task-attribution) / [T20260506-11].
 - **[T20260421-0543]** — Orbit-owned symbol-level write operation schema ([specs/graph-operations.md](./specs/graph-operations.md)).
 - **[T20260422-1540]** — Non-code extraction via `FileKind`-dispatched extractors (markdown, YAML/JSON/TOML, CSV/TSV).
 - **[T20260423-0452]** — `.orbitignore` scan exclusions and separation from runtime policy access.
 - **[T20260426-0139]** — Parallel per-file hashing and leaf extraction with ordered graph merge.
 - **[T20260426-0140]** — Changed-path incremental leaf reuse.
 - **[T20260426-0141]** — Store-scoped LRU for graph objects and blobs.
-- **[T20260426-0220]** — Historical exact task-id filtering through `orbit.graph.search`; removed by ADR-029 / [T20260506-11].
+- **[T20260426-0220]** — Historical exact task-id filtering through `orbit.graph.search`; removed by [Remove graph task attribution](#remove-graph-task-attribution) / [T20260506-11].
 - **[T20260426-0236]** — End-to-end graph build benchmark with scoreboard trend records.
 - **[T20260423-0524]** — v3 graph MCP parity sweep (utilization & cost disposition).
-- **[T20260423-0607]** — Pointer-only graph reads (deferred; cited by ADR-018 consequences).
+- **[T20260423-0607]** — Pointer-only graph reads (deferred; cited by [Retain agent-facing `orbit_graph_*` MCP surface; provider-dependent value](#retain-agent-facing-orbitgraph-mcp-surface-provider-dependent-value) consequences).
 - **[T20260426-0402]** — Land v3 retention decision in the ADR index.
 - **[T20260426-0453]** — Remove graph write operations from the public tool/MCP surface and standardize on task lock reservations as preflight write guards.
-- **[T20260426-0507]** — Historical `orbit graph history` and configurable task-ID regex; attribution behavior removed by ADR-029 / [T20260506-11].
+- **[T20260426-0507]** — Historical `orbit graph history` and configurable task-ID regex; attribution behavior removed by [Remove graph task attribution](#remove-graph-task-attribution) / [T20260506-11].
 - **[T20260426-2042]** — Move graph CLI behavior behind the `orbit-tools::graph` facade and remove the direct `orbit-knowledge` dependency from `orbit-cli`.
-- **[T20260428-1]** — Historical graph task-ID attribution/search alignment; removed by ADR-029 / [T20260506-11].
+- **[T20260428-1]** — Historical graph task-ID attribution/search alignment; removed by [Remove graph task attribution](#remove-graph-task-attribution) / [T20260506-11].
 - **[T20260428-3]** — Expose the full read-only graph tool set through the MCP safe surface for Codex and Gemini.
-- **[T20260430-22]** — Compact the knowledge-graph design docs and fold the obsolete evidence log into ADR-018.
+- **[T20260430-22]** — Compact the knowledge-graph design docs and fold the obsolete evidence log into [Retain agent-facing `orbit_graph_*` MCP surface; provider-dependent value](#retain-agent-facing-orbitgraph-mcp-surface-provider-dependent-value).
 - **[T20260505-1]** — Require auto-refresh freshness checks to materialize missing current-branch graph refs before returning fresh.
 - **[T20260505-5]** — Bound `orbit.graph.pack` selector gathering and skip inline refresh by default.
 - **[T20260505-11]** — Add TypeScript and TSX classification, extraction, and graph search/pack coverage.
@@ -682,7 +670,7 @@ Tasks cited by ADRs above:
 - **[T20260506-19]** — Normalize knowledge-graph ADR Cost lines and demote folded language instances to coverage records.
 - **[T20260509-33]** — Skip symlinked directory entries during scanner traversal and `.orbitignore` discovery.
 - **[T20260509-34]** — Use exact git checkout identity instead of commit timestamps for clean graph freshness.
-- **[T20260509-64]** — Collapse YAML/JSON/TOML/CSV/TSV extraction to file-as-leaf (ADR-038).
+- **[T20260509-64]** — Collapse YAML/JSON/TOML/CSV/TSV extraction to file-as-leaf ([Collapse YAML/JSON/TOML/CSV/TSV extraction to file-as-leaf](#collapse-yamljsontomlcsvtsv-extraction-to-file-as-leaf)).
 - **[T20260509-65]** — Add `GraphReadOptions` so broad graph reads skip file/leaf source hydration unless a tool opts in.
 - **[T20260509-67]** — Bound default-ranking graph search candidate retention with named headroom and hard cap constants.
 - **[T20260509-68]** — Replace `overview.top_files` Vec-then-sort with a bounded min-heap top-K.

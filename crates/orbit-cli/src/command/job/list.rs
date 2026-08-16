@@ -1,9 +1,9 @@
 use clap::Args;
 use orbit_common::types::JobKind;
-use orbit_core::{OrbitError, OrbitRuntime};
-use serde_json::Value;
+use orbit_core::OrbitRuntime;
 
-use crate::command::Execute;
+use crate::command::{CommandOut, Execute, Payload};
+use crate::output::color::Domain;
 
 use super::support::{
     format_last_run, job_catalog_filter, job_catalog_target_summary,
@@ -30,47 +30,46 @@ pub struct JobListArgs {
 }
 
 impl Execute for JobListArgs {
-    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+    fn execute(self, runtime: &OrbitRuntime) -> CommandOut {
         let filter = job_catalog_filter(self.all, self.kind);
-        if self.ops {
-            let jobs = runtime.list_job_catalog_with_last_run(self.all, filter)?;
-            let values = jobs
+        let jobs_with_runs = runtime.list_job_catalog_with_last_run(self.all, filter)?;
+        // `--ops` picks the narrower record shape; the rows are the same jobs
+        // either way, so the renderer still has a table to fall back to.
+        let values = if self.ops {
+            jobs_with_runs
                 .iter()
                 .map(|(job, _)| job_catalog_to_signal_json(job))
-                .collect::<Vec<_>>();
-            return crate::output::json::print_pretty(&Value::Array(values));
-        }
-
-        let jobs_with_runs = runtime.list_job_catalog_with_last_run(self.all, filter)?;
-        if self.json {
-            let values = jobs_with_runs
+                .collect::<Vec<_>>()
+        } else {
+            jobs_with_runs
                 .iter()
                 .map(|(job, last_run)| job_catalog_to_json_with_last_run(job, last_run.as_ref()))
-                .collect::<Vec<_>>();
-            crate::output::json::print_pretty(&Value::Array(values))
-        } else {
-            let mut table = crate::output::table::build_table(&[
-                "JOB_ID",
-                "KIND",
-                "TARGET_TYPE",
-                "TARGET_ID",
-                "STATE",
-                "LAST_RUN",
+                .collect::<Vec<_>>()
+        };
+
+        use crate::output::table::{Column, Table};
+        // `orbit job show <job_id>` prints a job's full definition.
+        let mut table = Table::new(vec![
+            Column::new("JOB_ID").fixed(),
+            Column::new("KIND").fixed(),
+            Column::new("TARGET_TYPE").fixed(),
+            Column::new("TARGET_ID"),
+            Column::new("STATE").fixed(),
+            Column::new("LAST_RUN").fixed(),
+        ])
+        .empty_message("no jobs matching the given filters");
+        for (job, last_run) in &jobs_with_runs {
+            use comfy_table::Cell;
+            let (target_type, target_id) = job_catalog_target_summary(job);
+            table.add_row(vec![
+                Cell::new(&job.job_id),
+                Cell::new(job.kind().to_string()),
+                Cell::new(target_type),
+                Cell::new(target_id),
+                crate::output::color::cell(&job.state().to_string(), Domain::JobState),
+                Cell::new(format_last_run(last_run.as_ref())),
             ]);
-            for (job, last_run) in &jobs_with_runs {
-                use comfy_table::Cell;
-                let (target_type, target_id) = job_catalog_target_summary(job);
-                table.add_row(vec![
-                    Cell::new(&job.job_id),
-                    Cell::new(job.kind().to_string()),
-                    Cell::new(target_type),
-                    Cell::new(target_id),
-                    crate::output::color::job_state_color_cell(&job.state().to_string()),
-                    Cell::new(format_last_run(last_run.as_ref())),
-                ]);
-            }
-            println!("{table}");
-            Ok(())
         }
+        Ok(Payload::list(values, table).into())
     }
 }

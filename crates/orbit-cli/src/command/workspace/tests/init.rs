@@ -2,21 +2,21 @@ use tempfile::tempdir;
 
 use chrono::Utc;
 use orbit_common::types::{
-    OverlapPolicy, RoutineTarget, Workspace, WorkspaceCheckout, WorkspaceRegistry, WorkspaceStatus,
-    parse_routine_yaml,
+    OverlapPolicy, RoutineTarget, Workspace, WorkspaceCheckout, WorkspaceCheckoutRole,
+    WorkspaceRegistry, WorkspaceStatus, parse_routine_yaml,
 };
-use orbit_remote::workspace_registry;
+use orbit_registry::workspace_registry;
 
 use crate::tests::env_isolation::EnvGuard;
 
 use super::super::init::{WorkspaceInitArgs, canonical_workspace_id};
-use super::super::list::format_workspace_list;
+use super::super::list::{format_workspace_list, workspace_list_json};
 use super::super::role::CliCheckoutRole;
 use super::super::show::format_workspace_show;
 use super::super::support::orbit_gitignore_block;
 
 #[test]
-fn workspace_reinit_merges_explicit_registration_updates_without_resetting_authored_state() {
+fn workspace_reinit_requires_force_and_force_reconciles_matching_registration() {
     let workspace = tempdir().expect("workspace tempdir");
     let home = tempdir().expect("home tempdir");
     let global = home.path().join(".orbit");
@@ -25,13 +25,13 @@ fn workspace_reinit_merges_explicit_registration_updates_without_resetting_autho
     // (which creates `.orbit/routines/`); `orbit init` owns its creation.
     std::fs::write(
         global.join("host.toml"),
-        "schema_version = 1\nmachine_id = \"hm_reinit\"\nhost_id = \"reinit-host\"\nmode = \"standalone\"\n",
+        "schema_version = 2\nmachine_id = \"hm_reinit\"\nhost_id = \"reinit-host\"\ntask_prefix = \"ORB\"\n",
     )
     .expect("write host identity");
 
     let _env = EnvGuard::acquire().home(home.path()).cwd(workspace.path());
 
-    let init = |base_branch: Option<&str>, ship_mode: Option<&str>| WorkspaceInitArgs {
+    let init = |base_branch: Option<&str>, ship_mode: Option<&str>, force| WorkspaceInitArgs {
         name: Some("reinit-merge".to_string()),
         base_branch: base_branch.map(str::to_string),
         ship_mode: ship_mode.map(str::to_string),
@@ -41,9 +41,10 @@ fn workspace_reinit_merges_explicit_registration_updates_without_resetting_autho
         mcp: false,
         inject_agent_rules: false,
         refresh_defaults: false,
+        force,
     };
 
-    init(Some("agent-main"), None)
+    init(Some("agent-main"), None, false)
         .execute_without_runtime(None)
         .expect("initial workspace init");
 
@@ -54,6 +55,29 @@ fn workspace_reinit_merges_explicit_registration_updates_without_resetting_autho
         .into_iter()
         .next()
         .expect("registered workspace");
+    assert_eq!(original.ship_mode, None);
+    assert_eq!(
+        orbit_core::resolved_ship_mode(&original).as_input_value(),
+        "pr",
+        "an omitted ship mode must preserve the PR delivery default"
+    );
+
+    init(None, Some("local"), true)
+        .execute_without_runtime(None)
+        .expect("re-init with explicit local mode");
+    let after_local_registry = workspace_registry::load_registry_from(&registry_path)
+        .expect("load registry after local mode update");
+    let after_local_mode = after_local_registry
+        .workspaces
+        .iter()
+        .find(|workspace| workspace.id == original.id)
+        .expect("registered workspace");
+    assert_eq!(after_local_mode.ship_mode.as_deref(), Some("local"));
+    assert_eq!(
+        orbit_core::resolved_ship_mode(after_local_mode).as_input_value(),
+        "local",
+        "an explicit local ship mode must retain in-place delivery"
+    );
     let authored_routine = r#"schemaVersion: 1
 name: custom-ship-sweep
 description: operator-authored routine
@@ -69,8 +93,46 @@ policy:
 "#;
     let routine_path = workspace.path().join(".orbit/routines/ship_sweep.yaml");
     std::fs::write(&routine_path, authored_routine).expect("author routine");
+    let auto_task_path = workspace
+        .path()
+        .join(".orbit/auto_tasks/friction-curation.yaml");
+    let seeded_auto_task =
+        std::fs::read_to_string(&auto_task_path).expect("read seeded friction-curation definition");
+    assert!(
+        seeded_auto_task.contains("enabled: false"),
+        "workspace initialization must not enable a default auto-task"
+    );
+    let qa_auto_task_path = workspace.path().join(".orbit/auto_tasks/qa-sweep.yaml");
+    let seeded_qa_auto_task =
+        std::fs::read_to_string(&qa_auto_task_path).expect("read seeded qa-sweep definition");
+    assert!(
+        seeded_qa_auto_task.contains("enabled: false"),
+        "workspace initialization must not enable the QA default auto-task"
+    );
+    let authored_auto_task = "operator-authored auto-task definition\n";
+    let authored_qa_auto_task = "operator-authored QA auto-task definition\n";
+    std::fs::write(&auto_task_path, authored_auto_task).expect("author auto-task definition");
+    std::fs::write(&qa_auto_task_path, authored_qa_auto_task)
+        .expect("author QA auto-task definition");
 
-    init(None, Some("pr"))
+    let registry_bytes = std::fs::read_to_string(&registry_path).expect("read protected registry");
+    let identity_path = workspace.path().join(".orbit/config.yaml");
+    let identity_bytes = std::fs::read_to_string(&identity_path).expect("read protected identity");
+    let error = init(None, Some("pr"), false)
+        .execute_without_runtime(None)
+        .expect_err("existing checkout must require force")
+        .to_string();
+    assert!(error.contains("already exists"), "unexpected: {error}");
+    assert_eq!(
+        std::fs::read_to_string(&registry_path).expect("read registry"),
+        registry_bytes
+    );
+    assert_eq!(
+        std::fs::read_to_string(&identity_path).expect("read identity"),
+        identity_bytes
+    );
+
+    init(None, Some("pr"), true)
         .execute_without_runtime(None)
         .expect("re-init with explicit PR mode");
     let after_ship_mode = workspace_registry::load_registry_from(&registry_path)
@@ -92,8 +154,18 @@ policy:
         std::fs::read_to_string(&routine_path).expect("read authored routine"),
         authored_routine
     );
+    assert_eq!(
+        std::fs::read_to_string(&auto_task_path).expect("read authored auto-task definition"),
+        authored_auto_task,
+        "workspace --force reconciliation must preserve an authored auto-task definition"
+    );
+    assert_eq!(
+        std::fs::read_to_string(&qa_auto_task_path).expect("read authored QA auto-task definition"),
+        authored_qa_auto_task,
+        "workspace --force reconciliation must preserve an authored QA auto-task definition"
+    );
 
-    init(None, None)
+    init(None, None, true)
         .execute_without_runtime(None)
         .expect("re-init with omitted registration options");
     let after_omitted = workspace_registry::load_registry_from(&registry_path)
@@ -111,7 +183,7 @@ policy:
         authored_routine
     );
 
-    init(Some("release"), None)
+    init(Some("release"), None, true)
         .execute_without_runtime(None)
         .expect("re-init with explicit base branch");
     let after_base_branch = workspace_registry::load_registry_from(&registry_path)
@@ -124,7 +196,7 @@ policy:
     assert_eq!(after_base_branch.ship_mode.as_deref(), Some("pr"));
 
     let before_invalid = after_base_branch.clone();
-    let error = init(None, Some("invalid"))
+    let error = init(None, Some("invalid"), true)
         .execute_without_runtime(None)
         .expect_err("invalid ship mode must fail closed");
     assert!(error.to_string().contains("unknown ship mode 'invalid'"));
@@ -138,57 +210,344 @@ policy:
 }
 
 #[test]
-fn multi_host_workspace_init_persists_an_explicit_local_owner() {
-    for mode in ["hub", "spoke"] {
-        let workspace = tempdir().expect("workspace tempdir");
-        let home = tempdir().expect("home tempdir");
-        let global = home.path().join(".orbit");
-        std::fs::create_dir_all(&global).expect("create global orbit");
-        std::fs::write(
-            global.join("host.toml"),
-            format!(
-                "schema_version = 1\nmachine_id = \"hm_local\"\nhost_id = \"local\"\nmode = \"{mode}\"\n"
-            ),
-        )
-        .expect("write host identity");
-
-        let _env = EnvGuard::acquire().home(home.path()).cwd(workspace.path());
-        WorkspaceInitArgs {
-            name: Some(format!("{mode}-owner")),
-            base_branch: Some("agent-main".to_string()),
-            ship_mode: Some("pr".to_string()),
-            role: None,
-            owner: None,
-            task_id_start: None,
-            mcp: false,
-            inject_agent_rules: false,
-            refresh_defaults: false,
-        }
-        .execute_without_runtime(None)
-        .expect("explicit multi-host workspace init");
-
-        let registry = workspace_registry::load_registry_from(&global.join("workspaces.json"))
-            .expect("reload multi-host registry");
-        assert_eq!(
-            registry.workspaces[0].owner_machine_id.as_deref(),
-            Some("hm_local")
-        );
-        assert_eq!(
-            registry.checkouts[0].role,
-            Some(orbit_common::types::WorkspaceCheckoutRole::Owner)
-        );
-    }
-}
-
-#[test]
-fn spoke_workspace_init_can_atomically_declare_a_remote_owner_replica() {
+fn workspace_init_rejects_existing_checkout_path_with_different_id_without_force() {
     let workspace = tempdir().expect("workspace tempdir");
     let home = tempdir().expect("home tempdir");
     let global = home.path().join(".orbit");
     std::fs::create_dir_all(&global).expect("create global orbit");
     std::fs::write(
         global.join("host.toml"),
-        "schema_version = 1\nmachine_id = \"hm_spoke\"\nhost_id = \"spoke\"\nmode = \"spoke\"\n",
+        "schema_version = 1\nmachine_id = \"hm_path_collision\"\nhost_id = \"path-collision\"\nmode = \"standalone\"\n",
+    )
+    .expect("write host identity");
+    let _env = EnvGuard::acquire().home(home.path()).cwd(workspace.path());
+    let args = |name: &str| WorkspaceInitArgs {
+        name: Some(name.to_string()),
+        base_branch: Some("agent-main".to_string()),
+        ship_mode: None,
+        role: None,
+        owner: None,
+        task_id_start: None,
+        mcp: false,
+        inject_agent_rules: false,
+        refresh_defaults: false,
+        force: false,
+    };
+    args("path-owner")
+        .execute_without_runtime(None)
+        .expect("initial workspace init");
+    let registry_path = global.join("workspaces.json");
+    let identity_path = workspace.path().join(".orbit/config.yaml");
+    let registry_bytes = std::fs::read_to_string(&registry_path).expect("read protected registry");
+    let identity_bytes = std::fs::read_to_string(&identity_path).expect("read protected identity");
+
+    let error = args("different-id")
+        .execute_without_runtime(None)
+        .expect_err("existing checkout path must require force")
+        .to_string();
+    assert!(error.contains("already exists"), "unexpected: {error}");
+    assert_eq!(
+        std::fs::read_to_string(&registry_path).expect("read registry"),
+        registry_bytes
+    );
+    assert_eq!(
+        std::fs::read_to_string(&identity_path).expect("read identity"),
+        identity_bytes
+    );
+}
+
+#[test]
+fn workspace_init_rejects_existing_durable_id_without_force() {
+    let first = tempdir().expect("first workspace tempdir");
+    let second = tempdir().expect("second workspace tempdir");
+    let home = tempdir().expect("home tempdir");
+    let global = home.path().join(".orbit");
+    std::fs::create_dir_all(&global).expect("create global orbit");
+    std::fs::write(
+        global.join("host.toml"),
+        "schema_version = 1\nmachine_id = \"hm_id_collision\"\nhost_id = \"id-collision\"\nmode = \"standalone\"\n",
+    )
+    .expect("write host identity");
+    let _env = EnvGuard::acquire().home(home.path()).cwd(first.path());
+    let args = |force| WorkspaceInitArgs {
+        name: Some("shared-id".to_string()),
+        base_branch: Some("agent-main".to_string()),
+        ship_mode: None,
+        role: None,
+        owner: None,
+        task_id_start: None,
+        mcp: false,
+        inject_agent_rules: false,
+        refresh_defaults: false,
+        force,
+    };
+    args(false)
+        .execute_without_runtime(None)
+        .expect("initial workspace init");
+    let registry_path = global.join("workspaces.json");
+    let registry_bytes = std::fs::read_to_string(&registry_path).expect("read protected registry");
+
+    std::env::set_current_dir(second.path()).expect("switch to second workspace");
+    let error = args(false)
+        .execute_without_runtime(None)
+        .expect_err("existing durable ID must require force")
+        .to_string();
+    assert!(error.contains("already exists"), "unexpected: {error}");
+    assert_eq!(
+        std::fs::read_to_string(&registry_path).expect("read registry"),
+        registry_bytes
+    );
+    assert!(!second.path().join(".orbit").exists());
+}
+
+#[test]
+fn force_replaces_a_checkout_identity_that_no_registration_claims() {
+    let workspace = tempdir().expect("workspace tempdir");
+    let home = tempdir().expect("home tempdir");
+    let global = home.path().join(".orbit");
+    std::fs::create_dir_all(&global).expect("create global orbit");
+    std::fs::write(
+        global.join("host.toml"),
+        "schema_version = 1\nmachine_id = \"hm_bootstrap\"\nhost_id = \"bootstrap-host\"\nmode = \"standalone\"\n",
+    )
+    .expect("write host identity");
+    let _env = EnvGuard::acquire().home(home.path()).cwd(workspace.path());
+
+    // Any command that opens a runtime in an uninitialized checkout seeds a
+    // legacy bootstrap identity here before `workspace init` ever runs.
+    let orbit_dir = workspace.path().join(".orbit");
+    std::fs::create_dir_all(&orbit_dir).expect("create checkout orbit dir");
+    let identity_path = orbit_dir.join("config.yaml");
+    let bootstrap_identity = "schema_version: 1\nworkspace_id: work-a1b2c3\n";
+    std::fs::write(&identity_path, bootstrap_identity).expect("seed bootstrap identity");
+
+    let args = |force| WorkspaceInitArgs {
+        name: Some("bootstrap-claim".to_string()),
+        base_branch: Some("agent-main".to_string()),
+        ship_mode: None,
+        role: None,
+        owner: None,
+        task_id_start: None,
+        mcp: false,
+        inject_agent_rules: false,
+        refresh_defaults: false,
+        force,
+    };
+
+    let registry_path = global.join("workspaces.json");
+    let error = args(false)
+        .execute_without_runtime(None)
+        .expect_err("a conflicting checkout identity must require force")
+        .to_string();
+    assert!(error.contains("rerun with --force"), "unexpected: {error}");
+    assert_eq!(
+        std::fs::read_to_string(&identity_path).expect("read identity"),
+        bootstrap_identity
+    );
+    assert!(!registry_path.exists(), "refusal must not seed a registry");
+
+    args(true)
+        .execute_without_runtime(None)
+        .expect("force must reconcile an unclaimed checkout identity");
+    let expected_id = canonical_workspace_id("bootstrap-claim");
+    assert!(
+        std::fs::read_to_string(&identity_path)
+            .expect("read reconciled identity")
+            .contains(&expected_id),
+        "force must rewrite the checkout identity"
+    );
+    let registry = workspace_registry::load_registry_from(&registry_path).expect("load registry");
+    assert_eq!(registry.workspaces.len(), 1);
+    assert_eq!(registry.workspaces[0].id, expected_id);
+    assert_eq!(registry.checkouts.len(), 1);
+    assert_eq!(registry.checkouts[0].workspace_id, expected_id);
+    assert_eq!(
+        std::fs::canonicalize(&registry.checkouts[0].repo_root).expect("canonical checkout root"),
+        std::fs::canonicalize(workspace.path()).expect("canonical workspace root")
+    );
+}
+
+#[test]
+fn force_refuses_to_replace_a_checkout_identity_a_registration_still_claims() {
+    let workspace = tempdir().expect("workspace tempdir");
+    let home = tempdir().expect("home tempdir");
+    let global = home.path().join(".orbit");
+    std::fs::create_dir_all(&global).expect("create global orbit");
+    std::fs::write(
+        global.join("host.toml"),
+        "schema_version = 1\nmachine_id = \"hm_claimed\"\nhost_id = \"claimed-host\"\nmode = \"standalone\"\n",
+    )
+    .expect("write host identity");
+    let _env = EnvGuard::acquire().home(home.path()).cwd(workspace.path());
+
+    // A registered workspace bound to some *other* checkout: this checkout's
+    // stray identity claims it, so no registry lookup by path reconciles it.
+    let now = Utc::now();
+    let claimed = Workspace {
+        id: "ws_claimed".to_string(),
+        name: "claimed".to_string(),
+        owner_machine_id: None,
+        git_remote: None,
+        ship_mode: None,
+        base_branch: "agent-main".to_string(),
+        status: WorkspaceStatus::Active,
+        created_at: now,
+        updated_at: now,
+    };
+    let other_root = home.path().join("elsewhere");
+    let registry = WorkspaceRegistry {
+        workspaces: vec![claimed.clone()],
+        checkouts: vec![WorkspaceCheckout::owner(
+            claimed.id.clone(),
+            other_root.clone(),
+            other_root.join(".orbit"),
+        )],
+        ..Default::default()
+    };
+    let registry_path = global.join("workspaces.json");
+    workspace_registry::save_registry_to(&registry, &registry_path).expect("seed registry");
+    let registry_bytes = std::fs::read_to_string(&registry_path).expect("read protected registry");
+
+    let orbit_dir = workspace.path().join(".orbit");
+    std::fs::create_dir_all(&orbit_dir).expect("create checkout orbit dir");
+    let identity_path = orbit_dir.join("config.yaml");
+    let claimed_identity = "schema_version: 1\nworkspace_id: ws_claimed\n";
+    std::fs::write(&identity_path, claimed_identity).expect("seed claimed identity");
+
+    let error = WorkspaceInitArgs {
+        name: Some("claim-jumper".to_string()),
+        base_branch: Some("agent-main".to_string()),
+        ship_mode: None,
+        role: None,
+        owner: None,
+        task_id_start: None,
+        mcp: false,
+        inject_agent_rules: false,
+        refresh_defaults: false,
+        force: true,
+    }
+    .execute_without_runtime(None)
+    .expect_err("force must not detach a claimed checkout identity")
+    .to_string();
+    assert!(
+        error.contains("claimed by an existing registration"),
+        "unexpected: {error}"
+    );
+    assert_eq!(
+        std::fs::read_to_string(&identity_path).expect("read identity"),
+        claimed_identity
+    );
+    assert_eq!(
+        std::fs::read_to_string(&registry_path).expect("read registry"),
+        registry_bytes
+    );
+}
+
+#[test]
+fn forced_workspace_reconciliation_preserves_registry_and_identity_on_validation_failure() {
+    let workspace = tempdir().expect("workspace tempdir");
+    let home = tempdir().expect("home tempdir");
+    let global = home.path().join(".orbit");
+    std::fs::create_dir_all(&global).expect("create global orbit");
+    std::fs::write(
+        global.join("host.toml"),
+        "schema_version = 1\nmachine_id = \"hm_force_failure\"\nhost_id = \"force-failure\"\nmode = \"standalone\"\n",
+    )
+    .expect("write host identity");
+    let _env = EnvGuard::acquire().home(home.path()).cwd(workspace.path());
+    let args = |force| WorkspaceInitArgs {
+        name: Some("force-failure".to_string()),
+        base_branch: Some("agent-main".to_string()),
+        ship_mode: Some("pr".to_string()),
+        role: None,
+        owner: None,
+        task_id_start: None,
+        mcp: false,
+        inject_agent_rules: false,
+        refresh_defaults: false,
+        force,
+    };
+    args(false)
+        .execute_without_runtime(None)
+        .expect("initial workspace init");
+    let registry_path = global.join("workspaces.json");
+    let identity_path = workspace.path().join(".orbit/config.yaml");
+    std::fs::write(
+        &identity_path,
+        "schema_version: 1\nworkspace_id: ws_other\n",
+    )
+    .expect("corrupt identity for validation test");
+    let registry_bytes = std::fs::read_to_string(&registry_path).expect("read protected registry");
+    let identity_bytes = std::fs::read_to_string(&identity_path).expect("read protected identity");
+
+    let error = args(true)
+        .execute_without_runtime(None)
+        .expect_err("mismatched identity must reject forced reconciliation")
+        .to_string();
+    assert!(error.contains("checkout identity"), "unexpected: {error}");
+    assert_eq!(
+        std::fs::read_to_string(&registry_path).expect("read registry"),
+        registry_bytes
+    );
+    assert_eq!(
+        std::fs::read_to_string(&identity_path).expect("read identity"),
+        identity_bytes
+    );
+}
+
+#[test]
+fn multi_host_workspace_init_persists_an_explicit_local_owner() {
+    let workspace = tempdir().expect("workspace tempdir");
+    let home = tempdir().expect("home tempdir");
+    let global = home.path().join(".orbit");
+    std::fs::create_dir_all(&global).expect("create global orbit");
+    std::fs::write(
+        global.join("host.toml"),
+        "schema_version = 2\nmachine_id = \"hm_local\"\nhost_id = \"local\"\ntask_prefix = \"ORB\"\n",
+    )
+    .expect("write host identity");
+
+    let _env = EnvGuard::acquire().home(home.path()).cwd(workspace.path());
+    WorkspaceInitArgs {
+        name: Some("local-owner".to_string()),
+        base_branch: Some("agent-main".to_string()),
+        ship_mode: Some("pr".to_string()),
+        role: None,
+        owner: None,
+        task_id_start: None,
+        mcp: false,
+        inject_agent_rules: false,
+        refresh_defaults: false,
+        force: false,
+    }
+    .execute_without_runtime(None)
+    .expect("explicit owner workspace init");
+
+    let registry = workspace_registry::load_registry_from(&global.join("workspaces.json"))
+        .expect("reload owner registry");
+    assert_eq!(
+        registry.workspaces[0].owner_machine_id.as_deref(),
+        Some("hm_local")
+    );
+    assert_eq!(
+        registry.owner_host_ids.get("hm_local").map(String::as_str),
+        Some("local")
+    );
+    assert_eq!(
+        registry.checkouts[0].role,
+        Some(orbit_common::types::WorkspaceCheckoutRole::Owner)
+    );
+}
+
+#[test]
+fn workspace_init_can_atomically_declare_a_remote_owner_replica() {
+    let workspace = tempdir().expect("workspace tempdir");
+    let home = tempdir().expect("home tempdir");
+    let global = home.path().join(".orbit");
+    std::fs::create_dir_all(&global).expect("create global orbit");
+    std::fs::write(
+        global.join("host.toml"),
+        "schema_version = 2\nmachine_id = \"hm_local\"\nhost_id = \"local\"\ntask_prefix = \"ORB\"\n",
     )
     .expect("write host identity");
 
@@ -203,6 +562,7 @@ fn spoke_workspace_init_can_atomically_declare_a_remote_owner_replica() {
         mcp: false,
         inject_agent_rules: false,
         refresh_defaults: false,
+        force: false,
     }
     .execute_without_runtime(None)
     .expect("atomic replica workspace init");
@@ -221,24 +581,22 @@ fn spoke_workspace_init_can_atomically_declare_a_remote_owner_replica() {
         registry.checkouts[0].owner_machine_id.as_deref(),
         Some("hm_owner")
     );
+    assert_eq!(
+        registry.owner_host_ids.get("hm_owner").map(String::as_str),
+        Some("hm_owner")
+    );
 }
 
 #[test]
 fn invalid_replica_init_fails_before_workspace_artifacts_or_registry_mutation() {
-    for (mode, rejected_owner, expected) in [
-        ("spoke", "hm_spoke", "local machine"),
-        ("spoke", "ssh:hub", "machine_id"),
-        ("standalone", "hm_owner", "standalone mode"),
-    ] {
+    for (rejected_owner, expected) in [("hm_local", "local machine"), ("ssh:hub", "machine_id")] {
         let workspace = tempdir().expect("workspace tempdir");
         let home = tempdir().expect("home tempdir");
         let global = home.path().join(".orbit");
         std::fs::create_dir_all(&global).expect("create global orbit");
         std::fs::write(
             global.join("host.toml"),
-            format!(
-                "schema_version = 1\nmachine_id = \"hm_spoke\"\nhost_id = \"spoke\"\nmode = \"{mode}\"\n"
-            ),
+            "schema_version = 2\nmachine_id = \"hm_local\"\nhost_id = \"local\"\ntask_prefix = \"ORB\"\n",
         )
         .expect("write host identity");
 
@@ -253,6 +611,7 @@ fn invalid_replica_init_fails_before_workspace_artifacts_or_registry_mutation() 
             mcp: false,
             inject_agent_rules: false,
             refresh_defaults: false,
+            force: false,
         }
         .execute_without_runtime(None)
         .expect_err("invalid replica declaration must fail before bootstrap")
@@ -288,7 +647,7 @@ fn workspace_list_and_show_report_effective_ship_mode() {
         ..Default::default()
     };
 
-    let list = format_workspace_list(&registry);
+    let list = format_workspace_list(&registry, false);
     assert!(list.contains("SHIP MODE"), "{list}");
     assert!(list.contains("pr"), "{list}");
     let mut lines = list.lines();
@@ -304,6 +663,68 @@ fn workspace_list_and_show_report_effective_ship_mode() {
 }
 
 #[test]
+fn workspace_list_hides_replicas_unless_all_and_marks_their_owner() {
+    let now = Utc::now();
+    let owner = Workspace {
+        id: "ws_owner".to_string(),
+        name: "owner".to_string(),
+        owner_machine_id: Some("hm_local".to_string()),
+        git_remote: None,
+        ship_mode: None,
+        base_branch: "agent-main".to_string(),
+        status: WorkspaceStatus::Active,
+        created_at: now,
+        updated_at: now,
+    };
+    let replica = Workspace {
+        id: "ws_replica".to_string(),
+        name: "replica".to_string(),
+        owner_machine_id: Some("hm_owner".to_string()),
+        git_remote: None,
+        ship_mode: None,
+        base_branch: "agent-main".to_string(),
+        status: WorkspaceStatus::Active,
+        created_at: now,
+        updated_at: now,
+    };
+    let registry = WorkspaceRegistry {
+        workspaces: vec![owner.clone(), replica.clone()],
+        checkouts: vec![
+            WorkspaceCheckout::owner(
+                owner.id.clone(),
+                "/work/owner".into(),
+                "/work/owner/.orbit".into(),
+            ),
+            WorkspaceCheckout {
+                workspace_id: replica.id.clone(),
+                repo_root: "/work/replica".into(),
+                orbit_dir: "/work/replica/.orbit".into(),
+                role: Some(WorkspaceCheckoutRole::Replica),
+                owner_machine_id: Some("hm_owner".to_string()),
+                path_overrides: Vec::new(),
+            },
+        ],
+        ..Default::default()
+    };
+
+    assert_eq!(
+        workspace_list_json(&registry, false)
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+    assert!(!format_workspace_list(&registry, false).contains("replica"));
+
+    let all = workspace_list_json(&registry, true);
+    assert_eq!(all.as_array().unwrap().len(), 2);
+    assert_eq!(all[1]["owner_machine_id"], "hm_owner");
+    let text = format_workspace_list(&registry, true);
+    assert!(text.contains("replica"));
+    assert!(text.contains("hm_owner"));
+}
+
+#[test]
 fn workspace_init_seeds_disabled_routines_and_reinit_preserves_authored_files() {
     let workspace = tempdir().expect("workspace tempdir");
     let home = tempdir().expect("home tempdir");
@@ -311,13 +732,13 @@ fn workspace_init_seeds_disabled_routines_and_reinit_preserves_authored_files() 
     std::fs::create_dir_all(&global).expect("create global orbit");
     std::fs::write(
         global.join("host.toml"),
-        "schema_version = 1\nmachine_id = \"hm_inithost\"\nhost_id = \"init-host\"\nmode = \"standalone\"\n",
+        "schema_version = 2\nmachine_id = \"hm_inithost\"\nhost_id = \"init-host\"\ntask_prefix = \"ORB\"\n",
     )
     .expect("write host identity");
 
     let _env = EnvGuard::acquire().home(home.path()).cwd(workspace.path());
 
-    let init = || WorkspaceInitArgs {
+    let init = |force| WorkspaceInitArgs {
         name: Some("routine-seed-test".to_string()),
         base_branch: Some("agent-main".to_string()),
         ship_mode: Some("pr".to_string()),
@@ -327,8 +748,9 @@ fn workspace_init_seeds_disabled_routines_and_reinit_preserves_authored_files() 
         mcp: false,
         inject_agent_rules: false,
         refresh_defaults: false,
+        force,
     };
-    init()
+    init(false)
         .execute_without_runtime(None)
         .expect("first workspace init");
 
@@ -376,7 +798,7 @@ policy:
     std::fs::remove_file(routines_dir.join("task_triage.yaml"))
         .expect("remove one default routine");
 
-    init()
+    init(true)
         .execute_without_runtime(None)
         .expect("second workspace init");
 
@@ -422,6 +844,7 @@ fn workspace_init_seeds_auto_detected_mcp_configs() {
         mcp: true,
         inject_agent_rules: false,
         refresh_defaults: false,
+        force: false,
     }
     .execute_without_runtime(None);
 
@@ -471,6 +894,7 @@ fn workspace_init_skips_mcp_by_default() {
         mcp: false,
         inject_agent_rules: false,
         refresh_defaults: false,
+        force: false,
     }
     .execute_without_runtime(None);
 
@@ -512,18 +936,21 @@ fn workspace_init_under_home_with_global_orbit_creates_repo_orbit() {
         mcp: false,
         inject_agent_rules: false,
         refresh_defaults: false,
+        force: false,
     }
     .execute_without_runtime(None);
 
     result.expect("workspace init");
     assert!(workspace.join(".orbit").join("state").is_dir());
     assert!(workspace.join(".orbit").join("knowledge").is_dir());
+    assert!(!workspace.join(".orbit").join("adrs").exists());
     assert!(!home.path().join(".orbit").join("state").exists());
     assert!(!home.path().join(".orbit").join("knowledge").exists());
     assert_eq!(
         std::fs::read_to_string(workspace.join(".gitignore")).expect("read .gitignore"),
         orbit_gitignore_block()
     );
+    assert!(!orbit_gitignore_block().contains(".orbit/adrs"));
 }
 
 #[test]
@@ -546,6 +973,7 @@ fn workspace_init_appends_orbit_to_existing_gitignore() {
         mcp: false,
         inject_agent_rules: false,
         refresh_defaults: false,
+        force: false,
     }
     .execute_without_runtime(None);
 
@@ -559,7 +987,7 @@ fn workspace_init_appends_orbit_to_existing_gitignore() {
 #[test]
 fn workspace_init_replaces_legacy_bare_orbit_gitignore_line_with_managed_block() {
     // A bare `.orbit` line (written by earlier init versions) ignores the whole
-    // directory, so the ADR / learning re-includes can never apply. Init must
+    // directory, so artifact re-includes can never apply. Init must
     // replace the legacy line with the managed block, not merely append.
     let workspace = tempdir().expect("workspace tempdir");
     let home = tempdir().expect("home tempdir");
@@ -569,7 +997,7 @@ fn workspace_init_replaces_legacy_bare_orbit_gitignore_line_with_managed_block()
 
     let _env = EnvGuard::acquire().home(home.path()).cwd(workspace.path());
 
-    let init = || WorkspaceInitArgs {
+    let init = |force| WorkspaceInitArgs {
         name: None,
         base_branch: Some("main".to_string()),
         ship_mode: None,
@@ -579,9 +1007,10 @@ fn workspace_init_replaces_legacy_bare_orbit_gitignore_line_with_managed_block()
         mcp: false,
         inject_agent_rules: false,
         refresh_defaults: false,
+        force,
     };
 
-    init()
+    init(false)
         .execute_without_runtime(None)
         .expect("workspace init");
     let expected = format!("target/\n{}", orbit_gitignore_block());
@@ -592,13 +1021,86 @@ fn workspace_init_replaces_legacy_bare_orbit_gitignore_line_with_managed_block()
     );
 
     // Re-init is idempotent: the block is not duplicated or reordered.
-    init()
+    init(true)
         .execute_without_runtime(None)
         .expect("workspace re-init");
     assert_eq!(
         std::fs::read_to_string(workspace.path().join(".gitignore")).expect("read .gitignore"),
         expected,
         "re-init must be idempotent once the managed block is present"
+    );
+}
+
+#[test]
+fn workspace_init_retires_adr_store_gitignore_lines() {
+    // Workspaces initialized before ORB-10726 may carry ADR partition rules.
+    // Re-init must remove every retired line.
+    let workspace = tempdir().expect("workspace tempdir");
+    let home = tempdir().expect("home tempdir");
+    std::fs::create_dir_all(workspace.path().join(".git")).expect("create .git");
+    let older_managed_block = concat!(
+        "target/\n",
+        ".orbit/*\n",
+        "!.orbit/adrs/\n",
+        ".orbit/adrs/index.sqlite*\n",
+        ".orbit/adrs/proposed/\n",
+        ".orbit/adrs/superseded/\n",
+        "!.orbit/auto_tasks/\n",
+        "!.orbit/resources/\n",
+        "!.orbit/routines/\n",
+        "!.orbit/config.toml\n",
+        ".orbit/**/*.lock\n",
+    );
+    std::fs::write(workspace.path().join(".gitignore"), older_managed_block)
+        .expect("write .gitignore");
+
+    let _env = EnvGuard::acquire().home(home.path()).cwd(workspace.path());
+
+    let init = |force| WorkspaceInitArgs {
+        name: None,
+        base_branch: Some("main".to_string()),
+        ship_mode: None,
+        role: None,
+        owner: None,
+        task_id_start: None,
+        mcp: false,
+        inject_agent_rules: false,
+        refresh_defaults: false,
+        force,
+    };
+
+    init(false)
+        .execute_without_runtime(None)
+        .expect("workspace init");
+    let expected = format!("target/\n{}", orbit_gitignore_block());
+    assert_eq!(
+        std::fs::read_to_string(workspace.path().join(".gitignore")).expect("read .gitignore"),
+        expected,
+        "retired partition lines must be stripped, not stacked under a second block"
+    );
+
+    // Re-init converges: no duplicated block, no resurrected retired line.
+    init(true)
+        .execute_without_runtime(None)
+        .expect("workspace re-init");
+    let converged =
+        std::fs::read_to_string(workspace.path().join(".gitignore")).expect("read .gitignore");
+    assert_eq!(converged, expected, "re-init must converge on one block");
+    for retired in [
+        "!.orbit/adrs/",
+        ".orbit/adrs/index.sqlite*",
+        ".orbit/adrs/proposed/",
+        ".orbit/adrs/superseded/",
+    ] {
+        assert!(
+            !converged.lines().any(|line| line.trim() == retired),
+            "retired ADR store line `{retired}` must be absent"
+        );
+    }
+    assert_eq!(
+        converged.matches(".orbit/*\n").count(),
+        1,
+        "the managed block must appear exactly once"
     );
 }
 
@@ -622,6 +1124,7 @@ fn workspace_init_from_git_subdir_gitignores_repo_orbit_dir() {
         mcp: false,
         inject_agent_rules: false,
         refresh_defaults: false,
+        force: false,
     }
     .execute_without_runtime(None);
 
@@ -652,6 +1155,7 @@ fn workspace_init_with_root_override_uses_custom_registry() {
         mcp: false,
         inject_agent_rules: false,
         refresh_defaults: false,
+        force: false,
     }
     .execute_without_runtime(Some(custom_root.as_path()));
 
@@ -702,6 +1206,7 @@ fn workspace_init_does_not_create_orbitignore() {
         mcp: false,
         inject_agent_rules: false,
         refresh_defaults: false,
+        force: false,
     }
     .execute_without_runtime(None);
 
@@ -734,6 +1239,7 @@ fn workspace_init_preserves_existing_orbitignore() {
         mcp: false,
         inject_agent_rules: false,
         refresh_defaults: false,
+        force: false,
     }
     .execute_without_runtime(None);
 
@@ -767,6 +1273,7 @@ fn workspace_init_with_root_override_does_not_modify_repo_gitignore() {
         mcp: false,
         inject_agent_rules: false,
         refresh_defaults: false,
+        force: false,
     }
     .execute_without_runtime(Some(custom_root.as_path()));
 
@@ -824,6 +1331,7 @@ fn nameless_tmp_workspace_registers_only_in_isolated_registry() {
             mcp: false,
             inject_agent_rules: false,
             refresh_defaults: false,
+            force: false,
         }
         .execute_without_runtime(None)
         .expect("nameless workspace init");

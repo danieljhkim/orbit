@@ -1,9 +1,10 @@
 use clap::Args;
+use orbit_core::OrbitRuntime;
 use orbit_core::command::skill::{SkillDoctorResult, SkillDoctorStatus};
-use orbit_core::{OrbitError, OrbitRuntime};
 use serde_json::{Value, json};
 
-use crate::command::Execute;
+use crate::command::{Block, CommandOut, Execute, Payload};
+use crate::output::color::{Domain, Role};
 
 #[derive(Args)]
 pub struct SkillDoctorArgs {
@@ -12,15 +13,18 @@ pub struct SkillDoctorArgs {
 }
 
 impl Execute for SkillDoctorArgs {
-    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+    fn execute(self, runtime: &OrbitRuntime) -> CommandOut {
         let rows = runtime.doctor_file_skills()?;
-        if self.json {
-            let values = rows.iter().map(doctor_row_json).collect::<Vec<_>>();
-            return crate::output::json::print_pretty(&Value::Array(values));
-        }
+        let values = rows.iter().map(doctor_row_json).collect::<Vec<_>>();
 
         let mut issues = 0usize;
-        let mut table = crate::output::table::build_table(&["SKILL", "STATUS", "DETAILS"]);
+        use crate::output::table::{Column, Table};
+        let mut table = Table::new(vec![
+            Column::new("SKILL").fixed(),
+            Column::new("STATUS").fixed(),
+            Column::new("DETAILS"),
+        ])
+        .empty_message("no file skills installed");
         for row in &rows {
             let status = match row.status {
                 SkillDoctorStatus::Ok => "ok",
@@ -33,21 +37,20 @@ impl Execute for SkillDoctorArgs {
             use comfy_table::Cell;
             table.add_row(vec![
                 Cell::new(&row.skill_name),
-                crate::output::color::doctor_status_color_cell(status),
+                crate::output::color::cell(status, Domain::DoctorStatus),
                 Cell::new(&row.message),
             ]);
         }
-        println!("{table}");
-
+        let mut blocks = vec![Block::table(table)];
         if issues == 0 {
-            println!(
+            blocks.push(Block::text(format!(
                 "\n{}",
-                crate::output::color::job_state_color("All skills healthy.")
-            );
+                crate::output::color::text("All skills healthy.", Role::Ok)
+            )));
         } else {
             eprintln!("\n{} issue(s) found.", issues);
         }
-        Ok(())
+        Ok(Payload::blocks(Value::Array(values), blocks).into())
     }
 }
 

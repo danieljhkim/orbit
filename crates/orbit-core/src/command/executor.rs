@@ -58,9 +58,8 @@ pub(super) fn seed_default_executors_for_platform(
 }
 
 /// Select the sandbox setting a *shipped* executor should be installed with on
-/// `target_os`. Shipped assets declare their macOS sandbox intent; keep it on
-/// hosts where the primitive applies and install without an OS sandbox
-/// elsewhere until a native backend for that host exists.
+/// `target_os`. Shipped assets declare sandbox intent with the macOS backend;
+/// Linux installs translate that marker to the native Bubblewrap backend.
 ///
 /// This is deliberate platform selection for Orbit's own defaults, so it is
 /// silent. It does NOT relax validation of user-authored executor defs: a
@@ -73,6 +72,7 @@ fn select_shipped_sandbox(
 ) -> Option<ExecutorSandboxKind> {
     match declared {
         Some(kind) if kind.is_available_on(target_os) => Some(kind),
+        Some(_) if target_os == "linux" => Some(ExecutorSandboxKind::LinuxBwrap),
         _ => None,
     }
 }
@@ -123,6 +123,17 @@ pub(super) fn migrated_default_executor_for_platform(
         changed = true;
     }
 
+    // Linux shipped without an OS wrapper before ORB-10552, so an installed
+    // default commonly has `None` rather than a mismatched concrete kind.
+    // Upgrade that old shipped state to Bubblewrap on the next seed.
+    if existing.sandbox.is_none()
+        && seeded.sandbox == Some(ExecutorSandboxKind::LinuxBwrap)
+        && target_os == "linux"
+    {
+        migrated.sandbox = seeded.sandbox;
+        changed = true;
+    }
+
     if changed { Some(migrated) } else { None }
 }
 
@@ -165,14 +176,10 @@ pub(super) fn parse_default_executor_for_platform(
         resource.spec.updated_at,
     );
 
-    // Shipped executor assets declare their macOS sandbox intent
-    // (`macos-sandbox-exec`), which dispatch fails closed on if the runner
-    // platform can't apply it. Select the platform-appropriate sandbox at seed
-    // time so first-install and re-install (overwrite mode) persist the value
-    // that matches the host: kept where the primitive applies, dropped
-    // elsewhere until a native backend for that host lands. This is deliberate
-    // selection for our own defaults, so — unlike the earlier mismatch
-    // handling — it is silent. See [ORB-10112] / [ORB-10047].
+    // Shipped agent assets use their sandbox field as an opt-in marker. Keep
+    // sandbox-exec on macOS, translate it to linux-bwrap on Linux, and omit it
+    // on unsupported platforms. Custom definitions never pass through this
+    // selector, so their explicit concrete choice remains fail-closed.
     def.sandbox = select_shipped_sandbox(def.sandbox, target_os);
 
     Ok(def)

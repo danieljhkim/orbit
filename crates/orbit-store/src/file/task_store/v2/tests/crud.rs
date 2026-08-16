@@ -5,9 +5,9 @@ fn create_get_and_list_task_round_trip_through_v2_bundle() {
     let temp = TempDir::new().expect("tempdir");
     let store = store(&temp);
 
-    let created = store
-        .create_task(create_params("Build task v2", TaskStatus::Backlog))
-        .expect("create task");
+    let mut params = create_params("Build task v2", TaskStatus::Backlog);
+    params.orchestrator = Some("orchestration".to_string());
+    let created = store.create_task(params).expect("create task");
 
     assert_eq!(created.id, "ORB-00000");
     assert_eq!(
@@ -36,6 +36,7 @@ fn create_get_and_list_task_round_trip_through_v2_bundle() {
         .expect("get task")
         .expect("task exists");
     assert_eq!(fetched.title, created.title);
+    assert_eq!(fetched.orchestrator.as_deref(), Some("orchestration"));
 
     let listed = store.list_tasks().expect("list tasks");
     assert_eq!(listed.len(), 1);

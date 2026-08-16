@@ -73,7 +73,7 @@ mod matching {
 }
 
 mod parse {
-    use std::path::PathBuf;
+    use std::path::{Path, PathBuf};
     use std::str::FromStr;
 
     use proptest::prelude::*;
@@ -169,6 +169,67 @@ mod parse {
             canonical_selector_in_workspace("src/nested", workspace).unwrap(),
             "dir:src/nested"
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn canonical_selector_in_workspace_accepts_macos_var_alias() {
+        let (_guard, presented_workspace) = var_aliased_workspace();
+        std::fs::create_dir_all(presented_workspace.join("src/nested")).unwrap();
+        std::fs::write(presented_workspace.join("src/lib.rs"), "pub fn ok() {}\n").unwrap();
+
+        let presented_file = presented_workspace.join("src/lib.rs");
+        let presented_dir = presented_workspace.join("src/nested");
+        assert_eq!(
+            canonical_selector_in_workspace(
+                &presented_file.to_string_lossy(),
+                &presented_workspace
+            )
+            .unwrap(),
+            "file:src/lib.rs"
+        );
+        assert_eq!(
+            canonical_selector_in_workspace(&presented_dir.to_string_lossy(), &presented_workspace)
+                .unwrap(),
+            "dir:src/nested"
+        );
+        assert!(exists_in_workspace(
+            &format!("file:{}", presented_file.display()),
+            &presented_workspace
+        ));
+    }
+
+    /// Present a workspace through `/var` when the host aliases it to
+    /// `/private/var`. Otherwise build a local `var` → `private/var` replica
+    /// so the case does not depend on tempfile's layout.
+    #[cfg(unix)]
+    fn var_aliased_workspace() -> (tempfile::TempDir, PathBuf) {
+        let temp = tempdir().unwrap();
+        let canonical = temp.path().canonicalize().unwrap();
+        if let Some(presented) = rewrite_private_var_to_var(&canonical) {
+            return (temp, presented);
+        }
+
+        let private_var = temp.path().join("private/var");
+        std::fs::create_dir_all(&private_var).unwrap();
+        std::os::unix::fs::symlink(&private_var, temp.path().join("var")).unwrap();
+        let workspace = private_var.join("workspace");
+        std::fs::create_dir_all(&workspace).unwrap();
+        let presented = temp.path().join("var/workspace");
+        (temp, presented)
+    }
+
+    #[cfg(unix)]
+    fn rewrite_private_var_to_var(path: &Path) -> Option<PathBuf> {
+        let var = Path::new("/var");
+        if !var.is_symlink() {
+            return None;
+        }
+        if var.canonicalize().ok()?.as_path() != Path::new("/private/var") {
+            return None;
+        }
+        let rest = path.to_str()?.strip_prefix("/private/var")?;
+        Some(PathBuf::from(format!("/var{rest}")))
     }
 
     #[test]

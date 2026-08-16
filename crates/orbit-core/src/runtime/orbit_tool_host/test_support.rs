@@ -1,6 +1,5 @@
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
-use std::sync::{Mutex, MutexGuard, OnceLock};
 
 use orbit_common::types::{
     McpCapability, OrbitError, Role, Task, TaskPriority, TaskStatus, TaskType, ToolSessionContext,
@@ -89,6 +88,7 @@ pub(super) fn create_task(
             external_refs: Vec::new(),
             source_task_id: None,
             crew: None,
+            orchestrator: None,
             comments: Vec::new(),
         })
         .expect("create task")
@@ -118,50 +118,41 @@ pub(crate) fn invalid_input_message<T>(result: Result<T, OrbitError>) -> String 
     }
 }
 
-pub(crate) struct UnmanagedToolEnvGuard {
-    _lock: MutexGuard<'static, ()>,
-    vars: Vec<(&'static str, Option<String>)>,
+/// Every variable an `orbit-engine` managed run exports that a tool-host test
+/// must state rather than inherit.
+const TOOL_ENV: [&str; 8] = [
+    "ORBIT_MANAGED_RUN_CONTEXT",
+    "ORBIT_TASK_ID",
+    "ORBIT_ACTIVE_TASK_ID",
+    "ORBIT_AGENT_NAME",
+    "ORBIT_AGENT_MODEL",
+    "ORBIT_RUN_ID",
+    "ORBIT_ACTIVITY_ID",
+    "ORBIT_STEP_INDEX",
+];
+
+/// Clear the managed-run envelope for the guard's lifetime.
+///
+/// Delegates to `orbit_common::test_env` rather than holding a private lock:
+/// the managed and unmanaged tool-host tests mutate the same process
+/// environment, so they have to serialize against *each other* and against the
+/// `test_env::unset` callers elsewhere in this crate. Two independent mutexes
+/// would let a managed-env test publish `ORBIT_RUN_ID` while a sibling was
+/// asserting its absence (ORB-10540).
+pub(crate) fn unmanaged_tool_env_guard() -> orbit_common::test_env::ScopedEnv {
+    orbit_common::test_env::unset(TOOL_ENV)
 }
 
-pub(crate) fn unmanaged_tool_env_guard() -> UnmanagedToolEnvGuard {
-    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-    let lock = LOCK
-        .get_or_init(|| Mutex::new(()))
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
-    let names = [
-        "ORBIT_MANAGED_RUN_CONTEXT",
-        "ORBIT_TASK_ID",
-        "ORBIT_ACTIVE_TASK_ID",
-        "ORBIT_AGENT_NAME",
-        "ORBIT_AGENT_MODEL",
-        "ORBIT_RUN_ID",
-        "ORBIT_ACTIVITY_ID",
-        "ORBIT_STEP_INDEX",
-    ];
-    let vars = names
-        .into_iter()
-        .map(|name| (name, std::env::var(name).ok()))
-        .collect::<Vec<_>>();
-    // SAFETY: the guard serializes these test env mutations and restores values on drop.
-    unsafe {
-        for (name, _) in &vars {
-            std::env::remove_var(name);
-        }
-    }
-    UnmanagedToolEnvGuard { _lock: lock, vars }
-}
-
-impl Drop for UnmanagedToolEnvGuard {
-    fn drop(&mut self) {
-        // SAFETY: the guard holds the serialization lock for the full mutation window.
-        unsafe {
-            for (name, value) in &self.vars {
-                match value {
-                    Some(value) => std::env::set_var(name, value),
-                    None => std::env::remove_var(name),
-                }
-            }
-        }
-    }
+/// Populate the exact envelope `orbit-engine` exports into a managed run's
+/// activity processes, leaving every other tool-env variable cleared.
+///
+/// This is the production input to `trusted_env_run_id`: the marker
+/// authenticates the envelope and `ORBIT_RUN_ID` carries the run. A test that
+/// hand-builds a host reporting a run id skips exactly this step.
+pub(crate) fn managed_tool_env_guard(run_id: &str) -> orbit_common::test_env::ScopedEnv {
+    orbit_common::test_env::scoped(TOOL_ENV.into_iter().map(|name| match name {
+        "ORBIT_MANAGED_RUN_CONTEXT" => (name, Some("1")),
+        "ORBIT_RUN_ID" => (name, Some(run_id)),
+        _ => (name, None),
+    }))
 }

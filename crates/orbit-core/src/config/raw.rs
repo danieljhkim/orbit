@@ -3,6 +3,10 @@ use std::collections::BTreeMap;
 
 #[derive(Debug, Clone, Deserialize)]
 pub(super) struct RawRuntimeConfig {
+    // Deliberately no `deny_unknown_fields`: config.toml is also home to
+    // independently parsed surfaces such as `[docs]`. Runtime admission reads
+    // only its owned keys, while explicit migration guards below reject retired
+    // runtime keys whose continued acceptance would be unsafe or misleading.
     #[allow(dead_code)]
     pub(super) identity: Option<toml::Value>,
     pub(super) task: Option<RawTaskSection>,
@@ -10,26 +14,27 @@ pub(super) struct RawRuntimeConfig {
     pub(super) watch: Option<toml::Value>,
     /// Removed in ORB-00058. Kept only so config loading can reject stale
     /// `[agent.<role>]` tables with an explicit migration error.
-    pub(super) agent: Option<BTreeMap<String, RawAgentRoleConfig>>,
+    pub(super) agent: Option<BTreeMap<String, toml::Value>>,
     /// `[crews.<name>]` registry. Each table supplies one assignment Orbit
-    /// resolves for every activity role at task run start.
+    /// resolves for activity dispatch at run start.
     pub(super) crews: Option<BTreeMap<String, RawCrewEntry>>,
+    /// Retired in ORB-10627. Existing workspaces may still carry the section
+    /// written by older `orbit init`; loaders warn and ignore it.
+    pub(super) duel: Option<toml::Value>,
 }
 
-/// Schema for a single role assignment in `[crews.<name>]`.
+/// Schema for one provider-model crew assignment.
 ///
 /// Serialize is derived so the writer in `bootstrap` can emit fresh entries
 /// without hand-rolling TOML. The struct is `pub` so the CLI can hand a map
-/// of these directly into `InitOptions::role_settings` when running
+/// of these directly into `InitOptions::crew_settings` when running
 /// interactive prompts.
 #[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, Eq)]
-pub struct RawAgentRoleConfig {
+pub struct RawCrewAssignment {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub provider: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub backend: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, Eq)]
@@ -38,28 +43,24 @@ pub struct RawCrewEntry {
     pub provider: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    /// Retired in ORB-10801. Read only so a crew that still pins the agent
+    /// execution backend is either accepted as inert (`cli`) or refused with
+    /// the migration message, never silently re-pointed at another runtime.
+    #[serde(default, skip_serializing)]
     pub backend: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tags: Vec<String>,
-    /// Legacy three-role fields retained for compatibility. Runtime loading
-    /// selects `implementer` and warns when the discarded roles diverge.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub planner: Option<RawAgentRoleConfig>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub implementer: Option<RawAgentRoleConfig>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub reviewer: Option<RawAgentRoleConfig>,
-}
-
-/// Bootstrap writer shape for the fixed planning-duel section. Runtime
-/// admission reads these keys through the registry table.
-#[derive(Debug, Clone, Deserialize, Serialize)]
-pub(super) struct RawDuelSection {
-    pub(super) candidates: Option<Vec<String>>,
-    pub(super) models: Option<BTreeMap<String, String>>,
+    /// Retired role tables are retained only to reject stale configuration
+    /// with rewrite guidance at load time. They are not part of the crew
+    /// schema and never participate in assignment resolution or serialization.
+    #[serde(default, skip_serializing)]
+    pub planner: Option<BTreeMap<String, String>>,
+    #[serde(default, skip_serializing)]
+    pub implementer: Option<BTreeMap<String, String>>,
+    #[serde(default, skip_serializing)]
+    pub reviewer: Option<BTreeMap<String, String>>,
 }
 
 #[derive(Debug, Clone, Deserialize)]

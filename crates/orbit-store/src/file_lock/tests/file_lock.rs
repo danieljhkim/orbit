@@ -31,7 +31,16 @@ fn acquire_release_then_reacquire() {
 
     {
         let _guard: FileLockGuard = acquire_exclusive(&path, "first").expect("first acquire");
+        assert_eq!(
+            read_lock_holder(&path).expect("holder while held").label,
+            "first"
+        );
     } // guard dropped here -> flock released
+
+    assert!(
+        read_lock_holder(&path).is_none(),
+        "clean release must clear diagnostic holder metadata"
+    );
 
     // Parent dirs were created by the first acquisition; a second one succeeds.
     let _guard = acquire_exclusive(&path, "second").expect("second acquire after release");

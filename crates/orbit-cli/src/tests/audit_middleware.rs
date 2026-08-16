@@ -2,7 +2,7 @@ use clap::Parser;
 use orbit_common::types::AuditEvent;
 use serde_json::{Value, json};
 
-use crate::command::Cli;
+use crate::command::{Cli, Payload};
 
 use super::super::audit_middleware::*;
 use orbit_common::test_env::{self, AGENT_IDENTITY_ENV};
@@ -55,6 +55,25 @@ fn audit_event_for_actor(actor: ActorIdentity) -> AuditEvent {
 }
 
 #[test]
+fn nonzero_payload_exit_is_audited_as_failure() {
+    let runtime = OrbitRuntime::in_memory().expect("build in-memory runtime");
+    {
+        let mut guard = AuditGuard::new(&runtime, meta_for(&["orbit", "doctor"]));
+        let result = Ok(Payload::document(json!({"status": "error"}))
+            .with_exit_code(1)
+            .into());
+        guard.mark_result(&result);
+    }
+
+    let events = runtime
+        .list_audit_events(None, None, Some(AuditEventStatus::Failure), None, 8)
+        .expect("list audit events");
+    assert_eq!(events.len(), 1);
+    assert_eq!(events[0].command, "doctor");
+    assert_eq!(events[0].exit_code, 1);
+}
+
+#[test]
 fn cli_agent_envelope_records_canonical_actor_family() {
     let _env = test_env::unset(AGENT_IDENTITY_ENV.iter().copied());
     // SAFETY: the shared test-env guard serializes and restores this mutation.
@@ -99,15 +118,6 @@ fn run_ship_local_audit_meta_uses_deprecated_top_level_command() {
     assert_eq!(meta.subcommand.as_deref(), Some("ship-local"));
     assert_eq!(meta.target_type.as_deref(), Some("workflow"));
     assert_eq!(meta.target_id.as_deref(), Some("ship-local"));
-}
-
-#[test]
-fn run_duel_plan_audit_meta_targets_task() {
-    let meta = meta_for(&["orbit", "run", "duel-plan", "T1"]);
-    assert_eq!(meta.command, "run");
-    assert_eq!(meta.subcommand.as_deref(), Some("duel-plan"));
-    assert_eq!(meta.target_type.as_deref(), Some("task"));
-    assert_eq!(meta.target_id.as_deref(), Some("T1"));
 }
 
 #[test]
@@ -192,21 +202,14 @@ fn search_audit_meta_preserves_kind_discriminator() {
     // subcommand with the search mode (`query` / `similar` / `path`),
     // so a query-mode search of kind `task` emits `query:task`. The
     // `--kind` value is still preserved on the right side of the colon
-    // so downstream audit queries can distinguish task / doc /
-    // learning / adr searches.
+    // so downstream audit queries can distinguish task and doc searches.
     let task = meta_for(&["orbit", "search", "foo", "--kind", "task"]);
     assert_eq!(task.command, "search");
     assert_eq!(task.subcommand.as_deref(), Some("query:task"));
     assert_eq!(task.target_type.as_deref(), Some("search"));
 
-    let learning = meta_for(&["orbit", "search", "foo", "--kind", "learning"]);
-    assert_eq!(learning.subcommand.as_deref(), Some("query:learning"));
-
     let doc = meta_for(&["orbit", "search", "foo", "--kind", "doc"]);
     assert_eq!(doc.subcommand.as_deref(), Some("query:doc"));
-
-    let adr = meta_for(&["orbit", "search", "foo", "--kind", "adr"]);
-    assert_eq!(adr.subcommand.as_deref(), Some("query:adr"));
 
     // Default `--kind all` is captured explicitly rather than left blank.
     let all = meta_for(&["orbit", "search", "foo"]);

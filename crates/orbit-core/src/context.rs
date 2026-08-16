@@ -6,14 +6,13 @@ use orbit_engine::PrConfig;
 use orbit_policy::PolicyEngine;
 use orbit_search::{EmbedWorker, VectorStore};
 use orbit_store::{
-    AdrStoreBackend, AuditEventStoreBackend, ExecutorDefStoreBackend, JobRunStoreBackend,
-    LearningStoreBackend, PolicyDefStoreBackend, TaskArtifactStoreBackend,
-    TaskDocumentStoreBackend, TaskHistoryStoreBackend, TaskReservationStoreBackend,
-    TaskStoreBackend, ToolStoreBackend,
+    AuditEventStoreBackend, ExecutorDefStoreBackend, JobRunStoreBackend, PolicyDefStoreBackend,
+    TaskArtifactStoreBackend, TaskDocumentStoreBackend, TaskHistoryStoreBackend,
+    TaskReservationStoreBackend, TaskStoreBackend, ToolStoreBackend,
 };
 use orbit_tools::ToolRegistry;
 
-use crate::config::{CodexExecutionPolicy, DuelConfig, ExecutionEnvPolicy, PersistenceConfig};
+use crate::config::{CodexExecutionPolicy, ExecutionEnvPolicy, PersistenceConfig};
 use crate::skill_catalog::SkillCatalog;
 
 const ORBIT_AGENT_NAME: &str = "ORBIT_AGENT_NAME";
@@ -98,8 +97,6 @@ pub(crate) struct OrbitStores {
     pub(crate) task_document: Arc<dyn TaskDocumentStoreBackend>,
     pub(crate) task_history: Arc<dyn TaskHistoryStoreBackend>,
     pub(crate) task_artifact: Arc<dyn TaskArtifactStoreBackend>,
-    pub(crate) adr: Arc<dyn AdrStoreBackend>,
-    pub(crate) learning: Arc<dyn LearningStoreBackend>,
     pub(crate) semantic_vector: Arc<VectorStore>,
     pub(crate) semantic_worker: Arc<EmbedWorker>,
     pub(crate) task_reservation: Arc<dyn TaskReservationStoreBackend>,
@@ -117,8 +114,6 @@ impl OrbitStores {
         task_document: Arc<dyn TaskDocumentStoreBackend>,
         task_history: Arc<dyn TaskHistoryStoreBackend>,
         task_artifact: Arc<dyn TaskArtifactStoreBackend>,
-        adr: Arc<dyn AdrStoreBackend>,
-        learning: Arc<dyn LearningStoreBackend>,
         semantic_vector: Arc<VectorStore>,
         semantic_worker: Arc<EmbedWorker>,
         task_reservation: Arc<dyn TaskReservationStoreBackend>,
@@ -133,8 +128,6 @@ impl OrbitStores {
             task_document,
             task_history,
             task_artifact,
-            adr,
-            learning,
             semantic_vector,
             semantic_worker,
             task_reservation,
@@ -160,14 +153,6 @@ impl OrbitStores {
 
     pub(crate) fn task_artifacts(&self) -> &dyn TaskArtifactStoreBackend {
         self.task_artifact.as_ref()
-    }
-
-    pub(crate) fn adrs(&self) -> &dyn AdrStoreBackend {
-        self.adr.as_ref()
-    }
-
-    pub(crate) fn learnings(&self) -> &dyn LearningStoreBackend {
-        self.learning.as_ref()
     }
 
     pub(crate) fn semantic_vector(&self) -> &VectorStore {
@@ -245,9 +230,7 @@ pub(crate) struct OrbitRuntimeSettings {
     actor: ActorIdentity,
     scoring_enabled: bool,
     pr_config: PrConfig,
-    /// Persisted default for the v2 `agent_loop` execution backend (§3.1).
-    v2_backend: Option<String>,
-    /// Default base branch for ship/duel-plan workflows
+    /// Default base branch for ship workflows
     /// (`[workflow] base_branch` in `config.toml`, default `"main"`).
     workflow_base_branch: String,
     /// Opt-in for unattended ship dispatch
@@ -258,7 +241,7 @@ pub(crate) struct OrbitRuntimeSettings {
     routines_source: bool,
     crews: std::collections::BTreeMap<String, Crew>,
     default_crew: Option<String>,
-    duel: DuelConfig,
+    system_crew: String,
 }
 
 impl OrbitRuntimeSettings {
@@ -268,35 +251,29 @@ impl OrbitRuntimeSettings {
         actor: ActorIdentity,
         scoring_enabled: bool,
         pr_config: PrConfig,
-        v2_backend: Option<String>,
         workflow_base_branch: String,
         workflow_auto_ship: bool,
         routines_source: bool,
         crews: std::collections::BTreeMap<String, Crew>,
         default_crew: Option<String>,
-        duel: DuelConfig,
+        system_crew: String,
     ) -> Self {
         Self {
             persistence,
             actor,
             scoring_enabled,
             pr_config,
-            v2_backend,
             workflow_base_branch,
             workflow_auto_ship,
             routines_source,
             crews,
             default_crew,
-            duel,
+            system_crew,
         }
     }
 
     pub(crate) fn pr_config(&self) -> &PrConfig {
         &self.pr_config
-    }
-
-    pub(crate) fn v2_backend(&self) -> Option<&str> {
-        self.v2_backend.as_deref()
     }
 
     pub(crate) fn workflow_base_branch(&self) -> &str {
@@ -319,8 +296,8 @@ impl OrbitRuntimeSettings {
         self.default_crew.as_deref()
     }
 
-    pub(crate) fn duel_config(&self) -> &DuelConfig {
-        &self.duel
+    pub(crate) fn system_crew(&self) -> &str {
+        &self.system_crew
     }
 }
 

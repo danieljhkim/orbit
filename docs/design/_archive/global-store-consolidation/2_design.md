@@ -10,7 +10,7 @@ summary: Current implementation of SQLite-backed v2 audit, job-run, and session-
 tags: [global-store-consolidation, storage, sqlite]
 paths: ["crates/orbit-store/**", "crates/orbit-core/**", "crates/orbit-engine/**"]
 related_features: [global-store-consolidation]
-related_artifacts: [ORB-00276, ADR-0183]
+related_artifacts: [ORB-00276]
 ---
 
 # Global Store Consolidation — Design

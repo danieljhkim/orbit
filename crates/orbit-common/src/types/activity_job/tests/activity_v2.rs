@@ -90,17 +90,12 @@ fn provider_capability_predicates_match_contract() {
             canonical.contains(name),
             "is_worker_executable for {name}",
         );
-        // openai_compat is the only HTTP-only id (no CLI runtime); claude is the
-        // only id with an HTTP transport wired in Orbit today.
+        // openai_compat is the only id without a CLI runtime, and therefore
+        // the only id no crew can execute [ORB-10801].
         assert_eq!(
             provider.has_cli_runtime(),
             name != "openai_compat",
             "has_cli_runtime for {name}",
-        );
-        assert_eq!(
-            provider.has_http_transport(),
-            name == "claude",
-            "has_http_transport for {name}",
         );
     }
 }
@@ -259,38 +254,39 @@ fn resolver_matches_contract_cases_for_orbit_entry_points() {
 }
 
 #[test]
-fn agent_role_serde_roundtrips_lowercase() {
-    for (value, expected) in [
-        (AgentRole::Reviewer, "\"reviewer\""),
-        (AgentRole::Implementer, "\"implementer\""),
-        (AgentRole::Planner, "\"planner\""),
-    ] {
-        let serialized = serde_json::to_string(&value).expect("serialize role");
-        assert_eq!(serialized, expected);
-        let parsed: AgentRole = serde_json::from_str(expected).expect("deserialize role");
-        assert_eq!(parsed, value);
+fn agent_loop_spec_omits_backend_by_default() {
+    let yaml = "instruction: hi\n";
+    let parsed: AgentLoopSpec = serde_yaml::from_str(yaml).expect("parse spec");
+    assert!(parsed.backend.is_none());
+}
+
+/// [ORB-10801] `backend: cli` named the surviving path, so an asset that still
+/// carries it keeps loading unchanged.
+#[test]
+fn agent_loop_spec_accepts_retired_cli_backend() {
+    let yaml = "instruction: hi\nbackend: cli\n";
+    let parsed: AgentLoopSpec = serde_yaml::from_str(yaml).expect("parse spec");
+    assert_eq!(parsed.backend, Some(RetiredAgentBackend));
+}
+
+/// [ORB-10801] The removed values fail closed: reinterpreting `http` as CLI
+/// execution would change what the asset does without saying so.
+#[test]
+fn agent_loop_spec_rejects_removed_backend_values() {
+    for removed in ["http", "auto"] {
+        let yaml = format!("instruction: hi\nbackend: {removed}\n");
+        let error = serde_yaml::from_str::<AgentLoopSpec>(&yaml)
+            .expect_err("removed backend value must fail closed");
+        let rendered = error.to_string();
+        assert!(
+            rendered.contains(&format!("`backend: {removed}` is no longer supported")),
+            "unexpected message: {rendered}",
+        );
+        assert!(
+            rendered.contains("CLI agent path"),
+            "message must carry the migration: {rendered}",
+        );
     }
-}
-
-#[test]
-fn agent_loop_spec_yaml_includes_role_when_present() {
-    let yaml = "instruction: hi\nrole: implementer\n";
-    let parsed: AgentLoopSpec = serde_yaml::from_str(yaml).expect("parse spec");
-    assert_eq!(parsed.role, Some(AgentRole::Implementer));
-}
-
-#[test]
-fn agent_loop_spec_yaml_role_is_optional() {
-    let yaml = "instruction: hi\n";
-    let parsed: AgentLoopSpec = serde_yaml::from_str(yaml).expect("parse spec");
-    assert_eq!(parsed.role, None);
-}
-
-#[test]
-fn agent_loop_spec_defaults_to_cli_backend() {
-    let yaml = "instruction: hi\n";
-    let parsed: AgentLoopSpec = serde_yaml::from_str(yaml).expect("parse spec");
-    assert_eq!(parsed.backend, Backend::Cli);
 }
 
 #[test]

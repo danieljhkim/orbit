@@ -20,13 +20,13 @@ Use this section when you are setting up Orbit for the first time.
   </a>
   <a class="orbit-card" href="./workflows/">
     <h3>Default Workflows</h3>
-    <p>Run ship and duel-plan.</p>
+    <p>Run the built-in ship workflow.</p>
   </a>
 </div>
 
 ## Prerequisites
 
-You need an authenticated supported provider CLI for the default CLI backend.
+You need an authenticated supported provider CLI: agent activities dispatch through it.
 PR mode also requires the GitHub CLI to be authenticated in the environment
 where Orbit runs.
 

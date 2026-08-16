@@ -13,7 +13,7 @@ use orbit_common::types::{
 use serde_json::{Value, json};
 use tempfile::tempdir;
 
-use crate::context::TaskReadHost;
+use crate::context::RuntimeHost;
 
 use super::super::cleanup::remove_worktree;
 use super::super::gc::{WorktreeGcOptions, collect_worktrees};
@@ -42,7 +42,7 @@ impl FakeTaskHost {
     }
 }
 
-impl TaskReadHost for FakeTaskHost {
+impl RuntimeHost for FakeTaskHost {
     fn get_task(&self, task_id: &str) -> Result<Task, OrbitError> {
         self.tasks
             .get(task_id)
@@ -90,6 +90,7 @@ fn task_fixture(id: &str, status: TaskStatus) -> Task {
         relations: Vec::new(),
         job_run_id: None,
         crew: None,
+        orchestrator: None,
         created_at: now,
         updated_at: now,
     }
@@ -751,7 +752,6 @@ fn pipeline_run(id: &str, state: JobRunState, task_ids: &[&str]) -> JobRun {
             "base_branch": "agent-main",
             "base_sync": "remote",
             "review": false,
-            "review_crew": null,
             "task_ids": task_ids,
         }),
     )

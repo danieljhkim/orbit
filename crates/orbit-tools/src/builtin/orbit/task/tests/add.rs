@@ -165,6 +165,7 @@ fn schema_exposes_only_trimmed_create_task_fields() {
             "type",
             "relations",
             "crew",
+            "orchestrator",
             "model",
         ]
     );
@@ -420,12 +421,12 @@ fn add_call_missing_workspace_without_session_context_returns_clear_error() {
             assert!(message.contains("missing `workspace`"), "{message}");
             assert!(message.contains("MCP session"), "{message}");
             assert!(
-                message.contains("filesystem path"),
-                "error must state the accepted form is a filesystem path: {message}"
+                message.contains("registered workspace name"),
+                "error must state the accepted name form: {message}"
             );
             assert!(
-                message.contains("logical workspace id"),
-                "error must call out that a logical/bridge id is not accepted: {message}"
+                message.contains("ws_*"),
+                "error must state that a logical ws_* id is accepted: {message}"
             );
         }
         other => panic!("unexpected error for missing workspace: {other}"),
@@ -437,7 +438,7 @@ fn add_call_missing_workspace_without_session_context_returns_clear_error() {
 }
 
 #[test]
-fn schema_workspace_param_documents_a_filesystem_path_not_a_logical_id() {
+fn schema_workspace_param_documents_the_shared_selector_grammar() {
     let schema = OrbitTaskAddTool.schema();
     let workspace = schema
         .parameters
@@ -446,13 +447,23 @@ fn schema_workspace_param_documents_a_filesystem_path_not_a_logical_id() {
         .expect("workspace param");
 
     assert!(
-        workspace.description.contains("Filesystem path"),
-        "workspace param must document the accepted path form: {}",
+        workspace.description.contains("registered workspace name"),
+        "workspace param must document the registered-name form: {}",
         workspace.description
     );
     assert!(
-        workspace.description.contains("never a logical/bridge"),
-        "workspace param must rule out logical/bridge ids: {}",
+        workspace.description.contains("ws_*"),
+        "workspace param must document logical ws_* ids: {}",
+        workspace.description
+    );
+    assert!(
+        workspace.description.contains("absolute path"),
+        "workspace param must document the checkout-path form: {}",
+        workspace.description
+    );
+    assert!(
+        !workspace.description.contains("never a logical"),
+        "workspace param must not forbid logical ids: {}",
         workspace.description
     );
 }

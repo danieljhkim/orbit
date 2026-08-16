@@ -9,14 +9,6 @@
 //! Parallel branches and fan-out workers run under `std::thread::scope`
 //! (matching v1's DAG scheduler). No tokio, no async.
 //!
-//! ## Session reuse
-//! Loop bodies share a `HashMap<String, Session>`. Target steps with
-//! `session: <name>` route through `drive_agent_loop_with_session`, preserving
-//! provider conversation history across iterations. Parallel branches /
-//! workers that name the same session binding are rejected at validation time
-//! — `Session` is `!Sync` by construction and sharing it concurrently would
-//! race on `history_mut`.
-//!
 //! ## Audit
 //! Every construct emits §7 envelope events (`step.*`, `fanout.dispatched`,
 //! `worker.state`, `fanin.joined`, `loop.iteration.{start,end}`,
@@ -29,9 +21,8 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
-use orbit_agent::loop_engine::Session;
 use orbit_common::types::activity_job::{
     ActivityV2Spec, AgentLoopSpec, BackoffStrategy, BranchOutcome, FanInSpec, FanOutBlock, JobV2,
     JobV2Step, JobV2StepBody, JoinMode, LoopBlock, ParallelBlock, RetrySpec, TargetStep,
@@ -44,15 +35,13 @@ use serde_json::Value;
 use crate::condition::evaluate_bool_expr;
 use crate::template::{self, TemplateContext};
 
-use super::agent_loop_driver::drive_agent_loop_with_session;
-use super::agent_role::{
-    apply_resolved_settings, resolve_agent_settings, resolve_explicit_crew_settings,
-};
 use super::audit_writer::{V2AuditWriter, WriteError};
+use super::crew::{apply_resolved_settings, inject_system_crew_input, resolve_crew_settings};
 use super::dispatcher::{
-    DispatchError, V2DispatchInput, V2RuntimeHost, dispatch_v2_activity,
+    DispatchError, V2DispatchInput, dispatch_v2_activity,
     dispatch_v2_activity_without_run_id_injection,
 };
+use crate::context::RuntimeHost;
 
 mod audit;
 mod concurrency;
@@ -115,19 +104,6 @@ pub fn resolve_job_catalog_refs_for_execution(
         .map_err(|err| DispatchError::JobValidation(err.to_string()))
 }
 
-/// Execute a v2 Job against the given host. Mutates pipeline context across
-/// steps, writes §7 envelope events through `audit`, and returns the final
-/// pipeline map serialized as JSON.
-pub fn execute_job(
-    job: &JobV2,
-    input: Value,
-    run_id: &str,
-    audit: Arc<V2AuditWriter>,
-    host: &dyn V2RuntimeHost,
-) -> Result<JobOutcome, DispatchError> {
-    execute_job_with_resume(job, input, run_id, audit, host, None)
-}
-
 /// [ORB-10002] Execute a v2 Job, optionally resuming from a persisted
 /// checkpoint state.
 ///
@@ -144,7 +120,7 @@ pub fn execute_job_with_resume(
     input: Value,
     run_id: &str,
     audit: Arc<V2AuditWriter>,
-    host: &dyn V2RuntimeHost,
+    host: &dyn RuntimeHost,
     resume: Option<&PipelineState>,
 ) -> Result<JobOutcome, DispatchError> {
     validate_job(job)?;
@@ -175,7 +151,6 @@ pub fn execute_job_with_resume(
         host,
         input: base_input.clone(),
         pipeline: Arc::new(Mutex::new(seed_pipeline_from_resume(job, resume))),
-        sessions: Arc::new(Mutex::new(HashMap::new())),
         recovery_activity,
         failure_activity,
         item: None,

@@ -1,7 +1,9 @@
 use chrono::{Duration, Utc};
 use orbit_common::types::OrbitError;
-use orbit_store::scoreboard_summary::{ScoreboardInputs, ScoreboardWindow};
-use orbit_store::{AdrListFilter, JobRunQuery};
+use orbit_store::JobRunQuery;
+use orbit_store::scoreboard_summary::{
+    ORCHESTRATION_SCHEMA_VERSION, OrchestrationSummary, ScoreboardInputs, ScoreboardWindow,
+};
 
 use crate::OrbitRuntime;
 
@@ -29,6 +31,14 @@ impl OrbitRuntime {
         let now = Utc::now();
         let since_recent = now - Duration::days(RECENT_WINDOW_DAYS);
         let since_window = window.duration().map(|d| now - d);
+        let orchestration = self.orchestrator_invocation_metrics(since_window, Some(now))?;
+        let previous_normalized_tokens = match (since_window, window.duration()) {
+            (Some(since), Some(duration)) => Some(
+                self.orchestrator_invocation_metrics(Some(since - duration), Some(since))?
+                    .normalized_tokens,
+            ),
+            _ => None,
+        };
 
         let audit_tool_calls = self.audit_tool_call_counts_by_role(since_window.as_ref())?;
         let audit_tool_calls_by_surface =
@@ -40,15 +50,11 @@ impl OrbitRuntime {
             .stores()
             .jobs()
             .list_job_runs_filtered(&JobRunQuery::default())?;
-        let learnings = self.list_learnings(None)?;
-        let adrs = self
-            .stores()
-            .adrs()
-            .list_adrs_filtered(AdrListFilter::default())?;
-        let frictions = orbit_store::friction_store::list_frictions(
-            &self.data_root().join("frictions"),
-            &orbit_store::friction_store::FrictionListFilter::default(),
-        )?;
+        // Same cutoff `generate_summary_with_inputs` derives internally, applied
+        // in SQL so the scoreboard never materializes the friction corpus
+        // (ORB-10680).
+        let friction_reported = crate::runtime::orbit_tool_host::friction_tools::store_for(self)?
+            .reported_by_model(since_window)?;
 
         let summary = orbit_store::scoreboard_summary::generate_summary_with_inputs(
             &self.paths().scoreboard_dir,
@@ -59,11 +65,19 @@ impl OrbitRuntime {
                 audit_tool_calls_by_surface_recent: &audit_tool_calls_by_surface_recent,
                 job_runs: &job_runs,
                 top_tool_calls: &top_tool_calls,
-                learnings: &learnings,
-                adrs: &adrs,
-                frictions: &frictions,
+                friction_reported: &friction_reported,
                 now: Some(now),
                 window,
+                orchestration: Some(OrchestrationSummary {
+                    schema_version: ORCHESTRATION_SCHEMA_VERSION,
+                    scope: "managed_execution".to_string(),
+                    as_of: orchestration.as_of,
+                    since: orchestration.since,
+                    until: orchestration.until,
+                    buckets: orchestration.buckets,
+                    normalized_tokens: orchestration.normalized_tokens,
+                    previous_normalized_tokens,
+                }),
             },
         )?;
         let _ =

@@ -96,7 +96,7 @@ impl ToolCallCollector {
             seq: (self.calls.len() + 1) as u32,
             tool_name: tool_name.clone(),
             result_bytes: result_bytes_from_map(map),
-            result_payload: inline_result_payload(map, &tool_name),
+            result_payload: None,
         });
     }
 
@@ -124,8 +124,7 @@ impl ToolCallCollector {
             && let Some(index) = self.by_id.get(tool_use_id).copied()
         {
             self.calls[index].result_bytes = result_bytes;
-            self.calls[index].result_payload =
-                structured_result_payload(map, &self.calls[index].tool_name);
+            self.calls[index].result_payload = None;
             return;
         }
 
@@ -136,7 +135,7 @@ impl ToolCallCollector {
             .find(|call| call.result_bytes == 0)
         {
             last.result_bytes = result_bytes;
-            last.result_payload = structured_result_payload(map, &last.tool_name);
+            last.result_payload = None;
             if let Some(id) = tool_call_id(map) {
                 self.by_id
                     .entry(id.to_string())
@@ -154,7 +153,7 @@ impl ToolCallCollector {
             seq: (index + 1) as u32,
             tool_name: tool_name.clone(),
             result_bytes,
-            result_payload: structured_result_payload(map, &tool_name),
+            result_payload: None,
         });
         if let Some(id) = tool_call_id(map) {
             self.by_id.insert(id.to_string(), index);
@@ -201,43 +200,11 @@ fn result_bytes_from_map(map: &JsonMap) -> u64 {
         .unwrap_or_else(|| result_value_from_map(map).map(serialized_size).unwrap_or(0))
 }
 
-fn inline_result_payload(map: &JsonMap, tool_name: &str) -> Option<Value> {
-    if !should_capture_result_payload(tool_name) {
-        return None;
-    }
-    result_value_from_map(map).map(normalize_captured_payload)
-}
-
-fn structured_result_payload(map: &JsonMap, tool_name: &str) -> Option<Value> {
-    if !should_capture_result_payload(tool_name) {
-        return None;
-    }
-    result_value_from_map(map).map(normalize_captured_payload)
-}
-
 fn result_value_from_map(map: &JsonMap) -> Option<&Value> {
     map.get("result")
         .or_else(|| map.get("content"))
         .or_else(|| map.get("output"))
         .or_else(|| map.get("aggregated_output"))
-}
-
-fn normalize_captured_payload(value: &Value) -> Value {
-    if let Value::String(raw) = value {
-        let trimmed = raw.trim();
-        if (trimmed.starts_with('{') || trimmed.starts_with('['))
-            && let Ok(parsed) = serde_json::from_str::<Value>(trimmed)
-        {
-            return parsed;
-        }
-    }
-    value.clone()
-}
-
-fn should_capture_result_payload(tool_name: &str) -> bool {
-    // ORB-00391: orbit.graph.pack was removed with orbit-knowledge (v1); only
-    // fs.read payloads now feed the knowledge-stats double-read metric.
-    matches!(tool_name, "fs.read")
 }
 
 fn is_tool_use_kind(kind: &str) -> bool {

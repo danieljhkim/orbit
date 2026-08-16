@@ -2,12 +2,14 @@
 
 use std::ffi::OsString;
 
+use orbit_common::types::ExecutorSandboxKind;
+use orbit_exec::BwrapProbeOutcome;
 use tempfile::tempdir;
 
 use super::super::super::dispatcher::ResolvedSandbox;
 use super::super::spawn::{
-    SpawnError, SpawnedChild, resolve_provider_launcher_with, spawn_bare,
-    spawn_macos_sandboxed_with,
+    SpawnError, SpawnedChild, orbit_tool_env_with, prepare_linux_sandbox_for_dispatch_with_probe,
+    resolve_provider_launcher_with, spawn_bare, spawn_macos_sandboxed_with,
 };
 use super::test_support::{sandbox_for_test, sh_args};
 
@@ -72,6 +74,65 @@ fn spawn_macos_sandboxed_returns_error_when_sandbox_exec_missing_and_fallback_di
         "error should describe fallback opt-in: {}",
         err.message
     );
+}
+
+fn linux_sandbox_for_test(allow_fallback: bool) -> ResolvedSandbox {
+    ResolvedSandbox {
+        kind: ExecutorSandboxKind::LinuxBwrap,
+        allow_fallback,
+        ..sandbox_for_test()
+    }
+}
+
+fn failed_bwrap_probe() -> BwrapProbeOutcome {
+    BwrapProbeOutcome {
+        available: false,
+        trusted_path: "/usr/bin/bwrap".to_string(),
+        detail: "Bubblewrap capability probe failed: user namespaces disabled".to_string(),
+    }
+}
+
+#[test]
+fn linux_bwrap_probe_failure_is_permanent_when_fallback_disabled() {
+    let sandbox = linux_sandbox_for_test(false);
+    let error = prepare_linux_sandbox_for_dispatch_with_probe(&sandbox, failed_bwrap_probe())
+        .err()
+        .expect("probe failure must stop dispatch");
+    assert!(error.permanent);
+    assert!(error.message.contains("user namespaces disabled"));
+    assert!(error.message.contains("allow_fallback: true"));
+}
+
+#[test]
+fn linux_bwrap_probe_failure_uses_honest_bare_fallback_metadata() {
+    let sandbox = linux_sandbox_for_test(true);
+    let prepared = prepare_linux_sandbox_for_dispatch_with_probe(&sandbox, failed_bwrap_probe())
+        .expect("explicit fallback");
+    assert!(prepared.effective.is_none());
+    assert_eq!(prepared.metadata.backend.as_deref(), Some("bare-fallback"));
+    assert_eq!(prepared.metadata.write_enforcement, "write_delegated");
+    assert_eq!(prepared.metadata.read_enforcement, "read_delegated");
+    assert_eq!(
+        prepared.metadata.trusted_wrapper.as_deref(),
+        Some("/usr/bin/bwrap")
+    );
+}
+
+#[test]
+fn successful_linux_bwrap_probe_marks_write_enforcement() {
+    let sandbox = linux_sandbox_for_test(false);
+    let prepared = prepare_linux_sandbox_for_dispatch_with_probe(
+        &sandbox,
+        BwrapProbeOutcome {
+            available: true,
+            trusted_path: "/usr/bin/bwrap".to_string(),
+            detail: "capability probe succeeded".to_string(),
+        },
+    )
+    .expect("probe success");
+    assert!(prepared.effective.is_some());
+    assert_eq!(prepared.metadata.backend.as_deref(), Some("linux-bwrap"));
+    assert_eq!(prepared.metadata.write_enforcement, "write_enforced");
 }
 
 #[test]
@@ -173,6 +234,65 @@ fn missing_provider_launcher_error_names_provider_and_searched_locations() {
             error.message
         );
     }
+}
+
+#[test]
+fn agent_tool_environment_prefers_dispatching_orbit_over_stale_path_entry() {
+    let inherited = std::env::join_paths(["/home/test/.cargo/bin", "/usr/bin"])
+        .expect("construct inherited PATH");
+    let env = orbit_tool_env_with(
+        None,
+        std::path::Path::new("/home/test/.orbit/bin/orbit"),
+        Some(&inherited),
+    )
+    .expect("pin dispatching Orbit");
+
+    assert_eq!(
+        env[0],
+        (
+            "ORBIT_BIN".to_string(),
+            "/home/test/.orbit/bin/orbit".to_string()
+        )
+    );
+    let pinned = env
+        .iter()
+        .find(|(name, _)| name == "PATH")
+        .map(|(_, value)| value)
+        .expect("PATH override");
+    assert_eq!(
+        std::env::split_paths(std::ffi::OsStr::new(pinned)).collect::<Vec<_>>(),
+        vec![
+            std::path::PathBuf::from("/home/test/.orbit/bin"),
+            std::path::PathBuf::from("/home/test/.cargo/bin"),
+            std::path::PathBuf::from("/usr/bin"),
+        ]
+    );
+}
+
+#[test]
+fn configured_orbit_bin_wins_and_its_path_entry_is_deduplicated() {
+    let inherited = std::env::join_paths(["/home/test/.cargo/bin", "/opt/orbit/bin", "/usr/bin"])
+        .expect("construct inherited PATH");
+    let env = orbit_tool_env_with(
+        Some(std::ffi::OsStr::new("/opt/orbit/bin/orbit")),
+        std::path::Path::new("/home/test/.orbit/bin/orbit"),
+        Some(&inherited),
+    )
+    .expect("pin configured Orbit");
+
+    assert_eq!(
+        env[0],
+        ("ORBIT_BIN".to_string(), "/opt/orbit/bin/orbit".to_string())
+    );
+    let pinned = &env[1].1;
+    assert_eq!(
+        std::env::split_paths(std::ffi::OsStr::new(pinned)).collect::<Vec<_>>(),
+        vec![
+            std::path::PathBuf::from("/opt/orbit/bin"),
+            std::path::PathBuf::from("/home/test/.cargo/bin"),
+            std::path::PathBuf::from("/usr/bin"),
+        ]
+    );
 }
 
 #[test]

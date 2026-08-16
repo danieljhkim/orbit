@@ -1,25 +1,12 @@
 use std::str::FromStr;
 
-use orbit_common::types::{AdrStatus, LearningStatus, OrbitError, TaskStatus};
+use orbit_common::types::{FrictionStatus, OrbitError, TaskStatus};
 
 use super::types::GlobalSearchParams;
 
 pub(super) fn task_has_all_tags(task: &orbit_common::types::Task, tag_filter: &[String]) -> bool {
     tag_filter.iter().all(|needle| {
         task.tags
-            .iter()
-            .any(|candidate| candidate.eq_ignore_ascii_case(needle))
-    })
-}
-
-pub(super) fn learning_has_all_tags(
-    learning: &orbit_common::types::Learning,
-    tag_filter: &[String],
-) -> bool {
-    tag_filter.iter().all(|needle| {
-        learning
-            .scope
-            .tags
             .iter()
             .any(|candidate| candidate.eq_ignore_ascii_case(needle))
     })
@@ -38,32 +25,11 @@ pub(super) fn doc_has_all_tags(
     })
 }
 
-pub(super) fn adr_has_all_tags(adr: &orbit_common::types::Adr, tag_filter: &[String]) -> bool {
-    tag_filter.iter().all(|needle| {
-        adr.tags
-            .iter()
-            .any(|candidate| candidate.eq_ignore_ascii_case(needle))
-    })
-}
-
-pub(super) fn adr_result_has_all_tags(
-    result: &orbit_search::AdrSearchResult,
-    tag_filter: &[String],
-) -> bool {
-    tag_filter.iter().all(|needle| {
-        result
-            .tags
-            .iter()
-            .any(|candidate| candidate.eq_ignore_ascii_case(needle))
-    })
-}
-
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(super) struct SearchStatusFilters {
     pub(super) task: Option<Vec<TaskStatus>>,
     pub(super) doc_active: Option<bool>,
-    pub(super) learning: Option<Vec<LearningStatus>>,
-    pub(super) adr: Option<Vec<AdrStatus>>,
+    pub(super) friction: Option<FrictionStatus>,
 }
 
 impl SearchStatusFilters {
@@ -91,11 +57,10 @@ impl SearchStatusFilters {
                 match kind.as_str() {
                     "task" => filters.push_task_status(&value)?,
                     "doc" => filters.set_doc_status(&value)?,
-                    "learning" => filters.push_learning_status(&value)?,
-                    "adr" => filters.push_adr_status(&value)?,
+                    "friction" => filters.set_friction_status(&value)?,
                     other => {
                         return Err(OrbitError::InvalidInput(format!(
-                            "invalid status kind `{other}` in token `{token}`; expected task, doc, learning, or adr"
+                            "invalid status kind `{other}` in token `{token}`; expected task, doc, or friction"
                         )));
                     }
                 }
@@ -129,25 +94,13 @@ impl SearchStatusFilters {
         Ok(())
     }
 
-    fn push_learning_status(&mut self, value: &str) -> Result<(), OrbitError> {
-        let status = LearningStatus::from_str(value).map_err(|_| {
+    fn set_friction_status(&mut self, value: &str) -> Result<(), OrbitError> {
+        let status = FrictionStatus::from_str(value).map_err(|_| {
             OrbitError::InvalidInput(format!(
-                "invalid status `{value}` for kind `learning`; expected active or superseded"
+                "invalid status `{value}` for kind `friction`; expected open, triaged, or resolved"
             ))
         })?;
-        let statuses = self.learning.get_or_insert_with(Vec::new);
-        push_unique(statuses, status);
-        Ok(())
-    }
-
-    fn push_adr_status(&mut self, value: &str) -> Result<(), OrbitError> {
-        let status = AdrStatus::from_str(value).map_err(|_| {
-            OrbitError::InvalidInput(format!(
-                "invalid status `{value}` for kind `adr`; expected proposed, accepted, superseded, or deleted"
-            ))
-        })?;
-        let statuses = self.adr.get_or_insert_with(Vec::new);
-        push_unique(statuses, status);
+        self.friction = Some(status);
         Ok(())
     }
 }
@@ -183,34 +136,6 @@ pub(super) fn resolve_task_statuses(
     let mut set = task_open_statuses().to_vec();
     if params.all {
         set.extend([TaskStatus::Done, TaskStatus::Rejected, TaskStatus::Archived]);
-    }
-    set
-}
-
-pub(super) fn resolve_learning_statuses(
-    params: &GlobalSearchParams,
-    status_filters: &SearchStatusFilters,
-) -> Vec<LearningStatus> {
-    if let Some(statuses) = &status_filters.learning {
-        return statuses.clone();
-    }
-    let mut set = vec![LearningStatus::Active];
-    if params.all {
-        set.push(LearningStatus::Superseded);
-    }
-    set
-}
-
-pub(super) fn resolve_adr_statuses(
-    params: &GlobalSearchParams,
-    status_filters: &SearchStatusFilters,
-) -> Vec<AdrStatus> {
-    if let Some(statuses) = &status_filters.adr {
-        return statuses.clone();
-    }
-    let mut set = vec![AdrStatus::Proposed, AdrStatus::Accepted];
-    if params.all {
-        set.push(AdrStatus::Superseded);
     }
     set
 }

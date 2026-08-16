@@ -9,7 +9,7 @@ use crate::OrbitRuntime;
 /// binary for the real provider CLI; production normally comes from the
 /// registered executor def, falling back to the provider name itself
 /// (`claude`, `codex`, `gemini`, `grok`, `ollama`) when no executor is registered.
-pub(super) fn resolve_cli_executor(
+pub(crate) fn resolve_cli_executor(
     runtime: &OrbitRuntime,
     provider: &str,
 ) -> Result<ResolvedCliExecutor, DispatchError> {

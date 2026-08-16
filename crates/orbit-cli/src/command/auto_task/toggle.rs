@@ -1,7 +1,7 @@
 use clap::{Args, ValueEnum};
-use orbit_core::{OrbitError, OrbitRuntime};
+use orbit_core::OrbitRuntime;
 
-use crate::command::Execute;
+use crate::command::{CommandOut, CommandOutput, Execute, Payload};
 
 use super::output::definition_to_json;
 
@@ -26,12 +26,12 @@ pub struct AutoTaskToggleArgs {
 }
 
 impl Execute for AutoTaskToggleArgs {
-    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+    fn execute(self, runtime: &OrbitRuntime) -> CommandOut {
         let enabled = self.state == ToggleState::On;
         let definition = runtime.auto_task_toggle(&self.name, enabled)?;
 
         if self.json {
-            crate::output::json::print_pretty(&definition_to_json(&definition))
+            Ok(Payload::document(definition_to_json(&definition)).into())
         } else {
             println!(
                 "{} {}",
@@ -42,7 +42,7 @@ impl Execute for AutoTaskToggleArgs {
                     "disabled"
                 }
             );
-            Ok(())
+            Ok(CommandOutput::Silent)
         }
     }
 }

@@ -1,12 +1,15 @@
 //! `orbit run ship` CLI entrypoint.
 
 use clap::{Args, ValueEnum};
-use orbit_core::{OrbitError, OrbitRuntime, build_ship_input, find_workflow};
+#[cfg(test)]
+use orbit_core::build_ship_input;
+use orbit_core::{OrbitError, OrbitRuntime, find_workflow};
+#[cfg(test)]
 use serde_json::Value;
 
-use crate::command::Execute;
+use crate::command::{CommandOut, CommandOutput, Execute};
 
-use super::support::{dispatch_workflow, print_workflow_dispatch_results};
+use super::support::{WorkflowDispatchResult, print_workflow_dispatch_results};
 
 pub(super) const SHIP_WORKFLOW: &str = "ship";
 
@@ -29,7 +32,7 @@ impl ShipMode {
 #[command(
     about = "Ship backlog or explicitly selected tasks through the gated task pipeline",
     override_usage = "orbit run ship [<TASK_ID>...] [OPTIONS]",
-    after_help = "Examples:\n  orbit run ship\n  orbit run ship T123\n  orbit run ship T123 T456 --mode local\n  orbit run ship T123 --base main\n  orbit run ship T123 --review --review-crew opus-review\n\nInspect submitted runs with `orbit run history -j task_auto_pipeline` and `orbit run show <RUN_ID>`."
+    after_help = "Examples:\n  orbit run ship\n  orbit run ship T123\n  orbit run ship T123 T456 --mode local\n  orbit run ship T123 --base main\n\nInspect submitted runs with `orbit run history -j task_auto_pipeline` and `orbit run show <RUN_ID>`."
 )]
 pub struct ShipCommand {
     /// Optional task IDs to seed explicit gated shipment. Omit for auto mode.
@@ -37,31 +40,53 @@ pub struct ShipCommand {
     pub task_ids: Vec<String>,
     /// Pipeline mode for selected or auto-discovered task bundles. When omitted,
     /// the mode is resolved from the current workspace's registry entry
-    /// (explicit `ship_mode`, else defaults to `local`).
+    /// (explicit `ship_mode`, else defaults to `pr`).
     #[arg(short = 'm', long, value_enum)]
     pub mode: Option<ShipMode>,
     /// Base branch for shipment. Defaults to
     /// `[workflow] base_branch` from `config.toml` (or `main` if unset).
     #[arg(short = 'b', long)]
     pub base: Option<String>,
-    /// Run an independent review after implementation and before shipment.
-    /// Requires `--review-crew`.
-    #[arg(long)]
-    pub review: bool,
-    /// Explicit crew used only for the independent review step.
-    #[arg(long, value_name = "CREW")]
-    pub review_crew: Option<String>,
     /// Output as JSON.
     #[arg(long)]
     pub json: bool,
+    /// Token for this workspace's exclusive claim, when another operator holds
+    /// one. Falls back to `ORBIT_WORKSPACE_CLAIM_TOKEN`.
+    #[arg(long)]
+    pub claim_token: Option<String>,
 }
 
 impl Execute for ShipCommand {
-    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+    fn execute(self, runtime: &OrbitRuntime) -> CommandOut {
         let mode = resolve_ship_mode(&self, runtime)?;
-        let plan = build_ship_run_plan(&self, runtime.workflow_base_branch(), mode)?;
-        let runs = dispatch_workflow(runtime, plan.workflow_alias, &plan.input, false, false, 1)?;
-        print_workflow_dispatch_results(plan.workflow_alias, &runs, self.json)
+        validate_task_selection(&self.task_ids)?;
+        ensure_workflow_exists(SHIP_WORKFLOW)?;
+        // Ship is the one workflow whose submission carries task-level
+        // admission checks, so it must not use the generic CLI dispatcher.
+        let invoke = runtime.submit_ship_run(
+            mode,
+            self.base.as_deref(),
+            &self.task_ids,
+            None,
+            self.claim_token.as_deref(),
+        )?;
+        let run = WorkflowDispatchResult {
+            workflow_alias: SHIP_WORKFLOW,
+            job_id: invoke.job_name,
+            run_id: invoke.run_id,
+            state: if invoke.queued {
+                "queued".to_string()
+            } else {
+                "submitted".to_string()
+            },
+            attempt: 1,
+            error_code: None,
+            error_message: None,
+        };
+        {
+            print_workflow_dispatch_results(SHIP_WORKFLOW, &[run], self.json)?;
+            Ok(CommandOutput::Silent)
+        }
     }
 }
 
@@ -69,9 +94,8 @@ impl Execute for ShipCommand {
 ///
 /// An explicit `--mode` wins. Otherwise the mode is resolved from the current
 /// workspace's registry entry (matched by `orbit_dir`): explicit `ship_mode`,
-/// else the `local` default. If the current workspace isn't found in the
-/// registry, fall back to `local` (the safe default — a repo without an explicit
-/// `pr` mode should never attempt a PR that could fail structurally).
+/// else the `pr` default. If the current workspace isn't found in the registry,
+/// fall back to `pr` so omitted configuration still uses reviewable delivery.
 fn resolve_ship_mode(
     args: &ShipCommand,
     runtime: &OrbitRuntime,
@@ -79,17 +103,17 @@ fn resolve_ship_mode(
     if let Some(mode) = args.mode {
         return Ok(mode.to_core());
     }
-    let registry = orbit_remote::workspace_registry::load_registry()?;
+    let registry = orbit_registry::workspace_registry::load_registry()?;
     let orbit_dir = runtime.shared_root();
     let mode = registry
         .checkouts
         .iter()
         .find(|checkout| checkout.orbit_dir == orbit_dir)
         .and_then(|checkout| {
-            orbit_remote::workspace_registry::find_workspace(&registry, &checkout.workspace_id)
+            orbit_registry::workspace_registry::find_workspace(&registry, &checkout.workspace_id)
         })
         .map(orbit_core::resolved_ship_mode)
-        .unwrap_or(orbit_core::ShipMode::Local);
+        .unwrap_or(orbit_core::ShipMode::Pr);
     Ok(mode)
 }
 
@@ -112,7 +136,7 @@ pub struct LegacyShipLocalCommand {
 }
 
 impl Execute for LegacyShipLocalCommand {
-    fn execute(self, _runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+    fn execute(self, _runtime: &OrbitRuntime) -> CommandOut {
         let _ = self;
         Err(OrbitError::InvalidInput(
             "`orbit run ship-local` was replaced by `orbit run ship --mode local`".to_string(),
@@ -120,12 +144,14 @@ impl Execute for LegacyShipLocalCommand {
     }
 }
 
+#[cfg(test)]
 #[derive(Debug)]
 pub(crate) struct WorkflowRunPlan {
     pub workflow_alias: &'static str,
     pub input: Value,
 }
 
+#[cfg(test)]
 pub(crate) fn build_ship_run_plan(
     args: &ShipCommand,
     config_base_branch: &str,
@@ -137,13 +163,7 @@ pub(crate) fn build_ship_run_plan(
     let base = args.base.as_deref().unwrap_or(config_base_branch);
     Ok(WorkflowRunPlan {
         workflow_alias,
-        input: build_ship_input(
-            mode,
-            base,
-            &args.task_ids,
-            args.review,
-            args.review_crew.as_deref(),
-        )?,
+        input: build_ship_input(mode, base, &args.task_ids)?,
     })
 }
 
@@ -161,7 +181,7 @@ fn legacy_ship_form(value: &str) -> Option<&'static str> {
         }
         "pr" => Some("`orbit run ship pr` was replaced by `orbit run ship --mode pr <TASK_ID>`"),
         "auto" | "ship-auto" => Some(
-            "`orbit run ship auto` was replaced by `orbit run ship` (auto mode runs when no task ids are supplied)",
+            "`orbit run ship auto` was replaced by `orbit run auto`; `orbit run ship` remains leaf-only auto shipment when no task ids are supplied",
         ),
         "list" | "show" => Some(
             "`orbit run ship list/show` was removed; use `orbit run history -j <JOB_ID>` and `orbit run show <RUN_ID>` for run inspection",

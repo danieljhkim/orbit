@@ -10,16 +10,16 @@ doc_role: overview
 tags: ["orbit-graph"]
 paths: ["crates/orbit-graph/**"]
 related_features: [knowledge-graph]
-related_artifacts: [ORB-00391, ORB-00396, ORB-10011, ORB-10225, ORB-10319, ORB-10325, ADR-0241, ORB-10357]
+related_artifacts: [ORB-00391, ORB-00396, ORB-10011, ORB-10225, ORB-10319, ORB-10325, ORB-10357]
 ---
 
 # Orbit Graph — Overview
 
 Orbit Graph is the code-intelligence layer for Orbit: a per-worktree SQLite-backed code index that agents can query for symbols, references, callees, impact, and command traces. It is a derived index — regenerable in seconds from `(file_contents, extractor_version)` — with no durable state beyond a single `.db` file per worktree. It replaced the former `orbit-knowledge` crate, a content-addressed versioned store with mutable refs, locks, and a working-graph layer.
 
-The v2 cutover completed in ORB-00391: `orbit-knowledge` (v1) was decommissioned and orbit-graph is now the sole graph implementation. Its external surface was the CLI-only `orbit graph` command embedded by `orbit-cli`; ORB-10325 and ADR-0241 had already removed graph from MCP and from the registered `orbit.*` tool namespace. **ORB-10357 removed the `orbit graph` subcommand from `orbit-cli` entirely and folded the former `orbit-graph-extract` and `orbit-graph-cli` crates into `orbit-graph` as the `extract` and `cli` modules.** `orbit-graph` now has **zero workspace dependents** and no command surface of any kind (CLI, MCP, or tool registry); it is consolidated into a single crate and parked awaiting deletion — no further investment planned. See [`GRAPH_SPEC.md`](./specs/GRAPH_SPEC.md) §16 for the migration outcome.
+The v2 cutover completed in ORB-00391: `orbit-knowledge` (v1) was decommissioned and orbit-graph is now the sole graph implementation. Its external surface was the CLI-only `orbit graph` command embedded by `orbit-cli`; ORB-10325 and [orbit-graph is CLI-surface only; separate MCP deferred until a shell-less consumer exists](./4_decisions.md#orbit-graph-is-cli-surface-only-separate-mcp-deferred-until-a-shell-less-consumer-exists) had already removed graph from MCP and from the registered `orbit.*` tool namespace. **ORB-10357 removed the `orbit graph` subcommand from `orbit-cli` entirely and folded the former `orbit-graph-extract` and `orbit-graph-cli` crates into `orbit-graph` as the `extract` and `cli` modules.** `orbit-graph` now has **zero workspace dependents** and no command surface of any kind (CLI, MCP, or tool registry); it is consolidated into a single crate and parked awaiting deletion — no further investment planned. See [`GRAPH_SPEC.md`](./specs/GRAPH_SPEC.md) §16 for the migration outcome.
 
-This document is the entry point. The prescriptive V1 specification — schema, query surface, build pipeline, performance budgets, migration plan — lives in [`GRAPH_SPEC.md`](./specs/GRAPH_SPEC.md) under `specs/`. [2_design.md](./2_design.md) is the long-form design discussion at a higher level of abstraction. [3_vision.md](./3_vision.md) captures the V2 write surface and other forward-looking items. [4_decisions.md](./4_decisions.md) is the ADR log; the v2 cutover + decommission is recorded in ADR-0198 (supersedes ADR-0192).
+This document is the entry point. The prescriptive V1 specification — schema, query surface, build pipeline, performance budgets, migration plan — lives in [`GRAPH_SPEC.md`](./specs/GRAPH_SPEC.md) under `specs/`. [2_design.md](./2_design.md) is the long-form design discussion at a higher level of abstraction. [3_vision.md](./3_vision.md) captures the V2 write surface and other forward-looking items. [4_decisions.md](./4_decisions.md) is the ADR log; the v2 cutover + decommission is recorded in [Cut over to orbit-graph (v2) and decommission orbit-knowledge](./4_decisions.md#cut-over-to-orbit-graph-v2-and-decommission-orbit-knowledge) (supersedes [Roll back orbit-graph tool cutover to orbit-knowledge](./4_decisions.md#roll-back-orbit-graph-tool-cutover-to-orbit-knowledge)).
 
 ---
 
@@ -29,7 +29,7 @@ The existing `orbit-knowledge` crate (~24k LOC) was designed as a git-like histo
 
 1. **Two storage paths must agree.** Object store + SQLite sidecar drift; agents see stale or contradictory results.
 2. **Unshipped mutation layer.** ~1.5k LOC of `working_graph/` exists but isn't exposed publicly, because the lock protocol cannot coordinate independent worktrees.
-3. **Locks that don't lock the right thing.** Same-branch worktrees still race (acknowledged in `knowledge-graph` ADR-002).
+3. **Locks that don't lock the right thing.** Same-branch worktrees still race (acknowledged in [Branch-scoped refs over a single shared ref](../knowledge-graph/4_decisions.md#branch-scoped-refs-over-a-single-shared-ref)).
 4. **Full re-extraction on any file change.** No incremental refresh.
 5. **Mixed concerns.** Query, mutation, durable storage, ref management, pack rendering, and task lineage share one crate.
 

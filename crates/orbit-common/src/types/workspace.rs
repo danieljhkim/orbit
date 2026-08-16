@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::fmt;
 use std::path::PathBuf;
 use std::str::FromStr;
@@ -47,8 +48,8 @@ pub struct Workspace {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub git_remote: Option<String>,
     /// Explicit ship-pipeline mode for this workspace: `"pr"` or `"local"`.
-    /// When unset, the effective mode is derived from `git_remote`
-    /// (see `orbit_core::resolved_ship_mode`). Stored on the registry entry
+    /// When unset, the effective mode is `"pr"` (see
+    /// `orbit_core::resolved_ship_mode`). Stored on the registry entry
     /// rather than `config.toml` because per-workspace `[workflow]` config
     /// is stripped by task-mutation commands.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -132,6 +133,11 @@ impl WorkspaceCheckout {
 #[serde(deny_unknown_fields)]
 pub struct WorkspaceRegistry {
     pub schema_version: u32,
+    /// Human host names known through this machine's local workspace records,
+    /// keyed by stable owner machine id. This is not a fleet inventory: an
+    /// entry exists only for an owner named by a local workspace record.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub owner_host_ids: BTreeMap<String, String>,
     #[serde(default)]
     pub workspaces: Vec<Workspace>,
     #[serde(default)]
@@ -142,6 +148,7 @@ impl Default for WorkspaceRegistry {
     fn default() -> Self {
         Self {
             schema_version: WORKSPACE_REGISTRY_SCHEMA_VERSION,
+            owner_host_ids: BTreeMap::new(),
             workspaces: Vec::new(),
             checkouts: Vec::new(),
         }
@@ -160,8 +167,6 @@ pub struct WorkspacePaths {
     pub resources_dir: PathBuf,
     pub state_dir: PathBuf,
     pub tasks_dir: PathBuf,
-    pub adrs_dir: PathBuf,
-    pub learnings_dir: PathBuf,
     pub knowledge_dir: PathBuf,
     pub activities_dir: PathBuf,
     pub jobs_dir: PathBuf,
@@ -193,8 +198,6 @@ impl WorkspacePaths {
             resources_dir: resources_dir.clone(),
             state_dir: state_dir.clone(),
             tasks_dir: orbit_dir.join("tasks"),
-            adrs_dir: orbit_dir.join("adrs"),
-            learnings_dir: orbit_dir.join("learnings"),
             knowledge_dir: orbit_dir.join("knowledge"),
             activities_dir: resources_dir.join("activities"),
             jobs_dir: resources_dir.join("jobs"),

@@ -7,14 +7,15 @@
 use std::path::Path;
 
 use clap::Args;
+use orbit_cmd::registry_runtime::RegisteredRuntimeFactory;
 use orbit_common::types::{Workspace, WorkspaceCheckout, WorkspaceStatus};
 use orbit_core::{JobRunState, OrbitError, TaskStatus, task_dependencies_ready};
-use orbit_remote::runtime::RemoteRuntimeFactory;
-use orbit_remote::workspace_registry;
+use orbit_registry::workspace_registry;
 use serde_json::{Value, json};
 
 use super::ship::ShipMode;
 use super::support::TASK_AUTO_PIPELINE_JOB;
+use crate::command::{CommandOut, CommandOutput};
 
 #[derive(Args)]
 #[command(
@@ -28,7 +29,7 @@ use super::support::TASK_AUTO_PIPELINE_JOB;
 pub struct ShipSweepCommand {
     /// Override the pipeline mode for every dispatched ship run. When omitted,
     /// each workspace's mode is resolved from its registry entry
-    /// (explicit `ship_mode`, else defaults to `local`).
+    /// (explicit `ship_mode`, else defaults to `pr`).
     #[arg(short = 'm', long, value_enum)]
     pub mode: Option<ShipMode>,
     /// Report what would be dispatched without submitting any run.
@@ -105,7 +106,7 @@ impl ShipSweepCommand {
     /// Runs without a pre-initialized runtime: the sweep resolves every
     /// workspace from the global registry and must never bootstrap a
     /// `.orbit/` in the scheduler's working directory.
-    pub fn execute_without_runtime(self) -> Result<(), OrbitError> {
+    pub fn execute_without_runtime(self) -> CommandOut {
         let global_root = workspace_registry::global_orbit_dir()?;
         let registry_path = workspace_registry::registry_path_for(&global_root);
         let mut registry = workspace_registry::load_registry_from(&registry_path)?;
@@ -150,7 +151,7 @@ impl ShipSweepCommand {
                 reports.len()
             )));
         }
-        Ok(())
+        Ok(CommandOutput::Silent)
     }
 }
 
@@ -166,9 +167,8 @@ fn sweep_workspace(
     }
     // An explicit `--mode` override wins for every workspace; otherwise resolve
     // per-workspace from its registry entry (explicit `ship_mode`, else the
-    // `local` default). This keeps direct-commit workspaces on the `local`
-    // pipeline instead of failing `pr_open` — only workspaces that carry an
-    // explicit `ship_mode = "pr"` ship via PR.
+    // `pr` default). Workspaces that deliberately ship in-place must carry an
+    // explicit `ship_mode = "local"`.
     let mode = mode_override.unwrap_or_else(|| orbit_core::resolved_ship_mode(ws));
     sweep_active_workspace(global_root, ws, checkout, mode, dry_run).unwrap_or_else(|error| {
         SweepReport {
@@ -191,7 +191,7 @@ fn sweep_active_workspace(
     mode: orbit_core::ShipMode,
     dry_run: bool,
 ) -> Result<SweepReport, OrbitError> {
-    let runtime = RemoteRuntimeFactory::open_registered_checkout(global_root, ws, checkout)?;
+    let runtime = RegisteredRuntimeFactory::open_registered_checkout(global_root, ws, checkout)?;
     if !runtime.workflow_auto_ship() {
         return Ok(SweepReport::skipped(ws, "auto_ship_disabled", 0));
     }
@@ -234,7 +234,21 @@ fn sweep_active_workspace(
         });
     }
 
-    let invoke = runtime.submit_ship_run(mode, None, &[], false, None, Some("ship-sweep"))?;
+    // [ORB-10709] The sweep has no token of its own and does not force: an
+    // operator holding the workspace claim is driving dispatch by hand, so the
+    // unattended sweep stands down for that workspace and reports why, rather
+    // than failing the whole run.
+    let invoke = match runtime.submit_ship_run(mode, None, &[], Some("ship-sweep"), None) {
+        Ok(invoke) => invoke,
+        Err(OrbitError::WorkspaceClaimHeld(claim)) => {
+            return Ok(SweepReport::skipped(
+                ws,
+                &format!("workspace_claimed_by:{}", claim.holder),
+                ready_backlog,
+            ));
+        }
+        Err(error) => return Err(error),
+    };
     Ok(SweepReport {
         workspace_id: ws.id.clone(),
         workspace_name: ws.name.clone(),

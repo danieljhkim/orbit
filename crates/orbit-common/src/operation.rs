@@ -1,4 +1,4 @@
-//! Operations-as-data kernel — ADR-0209 bearing 1 [ORB-10358].
+//! Operations-as-data kernel shared by Orbit's consumer surfaces.
 //!
 //! An *operation* is one verb on one noun (`friction add`, `friction list`).
 //! This module lets a noun declare each of its verbs exactly once, as data:
@@ -16,9 +16,9 @@
 //!
 //! | Surface          | Derives                                            |
 //! |------------------|----------------------------------------------------|
-//! | `orbit-tools`    | `ToolSchema` + MCP exposure policy from the spec    |
+//! | `orbit-tools`    | `ToolSchema` + optional MCP scope from the spec     |
 //! | `orbit-cli`      | `clap::Command` + input JSON + audit metadata       |
-//! | `orbit-dashboard`| tool names + request→input projection               |
+//! | `orbit-web`      | tool names + request→input projection               |
 //! | `orbit-core`     | the handler table, keyed by the verb enum           |
 //!
 //! Handlers need `&OrbitRuntime`, which lives above this crate, so the handler
@@ -29,7 +29,7 @@
 //!
 //! See `docs/design/operations-as-data/` for the migration cookbook.
 
-use crate::types::McpToolPlacement;
+use crate::types::McpToolScope;
 
 /// Wire type of an operation parameter.
 ///
@@ -140,24 +140,6 @@ impl ParamSpec {
     }
 }
 
-/// How MCP exposes an operation.
-///
-/// Kept as data rather than as a constructed [`McpToolPolicy`] because a policy
-/// owns a `BTreeSet` and cannot be built in a `const`; `orbit-tools` resolves
-/// this into a policy at registration time.
-///
-/// [`McpToolPolicy`]: crate::types::McpToolPolicy
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum McpExposure {
-    /// Registered but not advertised to MCP clients. The verb is still reachable
-    /// through the CLI and dashboard `run_tool` path.
-    Inactive,
-    /// Advertised to both agent and operator capabilities.
-    AgentOperator(McpToolPlacement),
-    /// Advertised to operator capability only.
-    OperatorOnly(McpToolPlacement),
-}
-
 /// How the CLI renders an operation's response when `--json` is not passed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CliRender {
@@ -195,8 +177,9 @@ pub struct OperationSpec<V: 'static> {
     /// Whether the operation rejects a legacy top-level `agent` field
     /// (attribution was consolidated to `model`-only).
     pub rejects_agent_field: bool,
-    /// MCP exposure.
-    pub mcp: McpExposure,
+    /// MCP scope when advertised. `None` keeps the operation off MCP while it
+    /// remains reachable through its other registered surfaces.
+    pub mcp_scope: Option<McpToolScope>,
     /// Whether the CLI subcommand offers `--json`.
     pub cli_json_flag: bool,
     /// Default (non-`--json`) CLI rendering.

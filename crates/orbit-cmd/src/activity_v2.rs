@@ -11,7 +11,7 @@
 use std::path::Path;
 
 use orbit_common::types::activity_job::{
-    Backend, V2AuditEventKind, load_activity_asset, resolve_activity_backends,
+    V2AuditEventKind, load_activity_asset,
     validate_activity_tool_allowlist_against_registered_tools,
 };
 use orbit_common::types::{OrbitError, OrbitEvent};
@@ -30,10 +30,6 @@ pub struct V2ActivityRunResult {
     pub message: Option<String>,
     pub run_id: String,
     pub events_emitted: usize,
-    /// Resolved execution backend applied to the asset at load time. `None`
-    /// when the activity isn't `agent_loop` (deterministic ignores
-    /// `backend:`).
-    pub resolved_backend: Option<Backend>,
 }
 
 /// Direct v2 activity execution surface for [`OrbitRuntime`] (extension
@@ -42,14 +38,10 @@ pub trait ActivityV2Commands {
     /// Execute a v2 activity from a YAML path. Returns a structural result.
     /// Audit events for the run are queryable via `list_v2_audit_events` using
     /// the `run_id`.
-    ///
-    /// `backend_flag` is the `--backend` invocation-level override; when
-    /// `None`, the resolver falls through to env → config → default.
     fn run_activity_v2_from_yaml(
         &self,
         yaml_path: &Path,
         input: Value,
-        backend_flag: Option<Backend>,
     ) -> Result<V2ActivityRunResult, OrbitError>;
 }
 
@@ -58,12 +50,11 @@ impl ActivityV2Commands for OrbitRuntime {
         &self,
         yaml_path: &Path,
         input: Value,
-        backend_flag: Option<Backend>,
     ) -> Result<V2ActivityRunResult, OrbitError> {
         let yaml = std::fs::read_to_string(yaml_path).map_err(|err| {
             OrbitError::InvalidInput(format!("read {}: {err}", yaml_path.display()))
         })?;
-        let mut asset = load_activity_asset(&yaml).map_err(|err| {
+        let asset = load_activity_asset(&yaml).map_err(|err| {
             OrbitError::InvalidInput(format!("load {}: {err}", yaml_path.display()))
         })?;
         let registered_tools = self.allowlist_known_tool_names();
@@ -77,17 +68,6 @@ impl ActivityV2Commands for OrbitRuntime {
                 asset.name
             ))
         })?;
-
-        // §3.1 resolution: replace `Auto` with a concrete backend per
-        // precedence (flag → env → config → cli).
-        let resolution = self.resolve_v2_backend(backend_flag);
-        resolve_activity_backends(&mut asset.spec, resolution.backend);
-        let resolved_backend = match &asset.spec.spec {
-            orbit_common::types::activity_job::ActivityV2Spec::AgentLoop(spec) => {
-                Some(spec.backend)
-            }
-            _ => None,
-        };
 
         let run_id = format!(
             "activity-{}-{}",
@@ -128,7 +108,6 @@ impl ActivityV2Commands for OrbitRuntime {
             input,
             audit: writer.clone(),
             run_id: &run_id,
-            agent_override: None,
             host: Some(self),
         });
 
@@ -160,7 +139,6 @@ impl ActivityV2Commands for OrbitRuntime {
                 message: o.message,
                 run_id,
                 events_emitted: events_count,
-                resolved_backend,
             }),
             Err(err) => Err(OrbitError::Execution(format!("v2 dispatch: {err}"))),
         }
@@ -229,7 +207,7 @@ spec:
         write_activity(&yaml_path, "qa_activity_sleep");
 
         let result = runtime
-            .run_activity_v2_from_yaml(&yaml_path, json!({ "seconds": 0 }), None)
+            .run_activity_v2_from_yaml(&yaml_path, json!({ "seconds": 0 }))
             .expect("direct activity run succeeds");
 
         let rows = runtime
@@ -260,7 +238,7 @@ spec:
         write_agent_loop_activity(&yaml_path, "unknown_tool_activity", "orbit.task.nope");
 
         let err = runtime
-            .run_activity_v2_from_yaml(&yaml_path, json!({}), None)
+            .run_activity_v2_from_yaml(&yaml_path, json!({}))
             .expect_err("unknown tool should fail before dispatch");
         let message = err.to_string();
 

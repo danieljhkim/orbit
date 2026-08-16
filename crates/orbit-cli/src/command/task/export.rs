@@ -1,11 +1,11 @@
 use std::path::PathBuf;
 
 use clap::Args;
+use orbit_core::OrbitRuntime;
 use orbit_core::command::task_migration::ExportSelection;
-use orbit_core::{OrbitError, OrbitRuntime};
 use serde_json::json;
 
-use crate::command::Execute;
+use crate::command::{CommandOut, CommandOutput, Execute, Payload};
 
 /// `orbit task export` — pack a workspace's task bundles into a portable tar.zst.
 #[derive(Args)]
@@ -28,7 +28,7 @@ pub struct TaskExportArgs {
 }
 
 impl Execute for TaskExportArgs {
-    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+    fn execute(self, runtime: &OrbitRuntime) -> CommandOut {
         let selection = if self.ids.is_empty() {
             ExportSelection::All
         } else {
@@ -37,12 +37,13 @@ impl Execute for TaskExportArgs {
         let outcome = runtime.export_tasks(self.workspace.as_deref(), selection, &self.output)?;
 
         if self.json {
-            crate::output::json::print_pretty(&json!({
+            Ok(Payload::document(json!({
                 "archive": outcome.archive_path.display().to_string(),
                 "workspace_id": outcome.workspace_id,
                 "task_ids": outcome.task_ids,
                 "count": outcome.task_ids.len(),
             }))
+            .into())
         } else {
             println!(
                 "exported {} task(s) from workspace '{}' to {}",
@@ -50,7 +51,7 @@ impl Execute for TaskExportArgs {
                 outcome.workspace_id,
                 outcome.archive_path.display()
             );
-            Ok(())
+            Ok(CommandOutput::Silent)
         }
     }
 }

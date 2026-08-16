@@ -6,6 +6,8 @@ use orbit_common::types::{OrbitError, WorkspacePaths};
 use orbit_store::{friction_store, global_executor_def_store, global_policy_def_store};
 
 use crate::OrbitRuntime;
+use crate::auto_tasks::seed_default_auto_tasks;
+use crate::command::MANAGED_ASSET_MANIFEST_FILE;
 use crate::command::activity::seed_default_activities;
 use crate::command::executor::seed_default_executors;
 use crate::command::job::seed_default_jobs;
@@ -17,11 +19,11 @@ use crate::command::skill::{
 use orbit_common::utility::fs::{create_dir_symlink, remove_path_if_exists};
 
 use crate::config::{
-    RawAgentRoleConfig, RuntimeConfig,
+    RawCrewAssignment, RuntimeConfig,
     agent_detect::{DetectedAgents, RealAgentEnvProbe, detect},
     seed_default_config,
 };
-use crate::runtime::resolve_global_root;
+use crate::runtime::{is_global_orbit_root, resolve_global_root};
 
 const LEGACY_WORKSPACE_SEEDED_SKILL_IDS: [&str; 2] = ["orbit-approve-task", "orbit-pr"];
 
@@ -31,10 +33,14 @@ pub struct InitResult {
     pub created_skills_symlink: bool,
     pub created_config: bool,
     pub refreshed_default_activities: usize,
+    pub retired_default_activities: usize,
     pub refreshed_default_jobs: usize,
+    pub retired_default_jobs: usize,
+    pub managed_asset_warnings: Vec<String>,
     pub refreshed_default_executors: usize,
     pub refreshed_default_policies: usize,
     pub refreshed_default_routines: usize,
+    pub seeded_default_auto_tasks: usize,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -54,12 +60,12 @@ pub struct InitOptions {
     pub routine_host_id: Option<String>,
     /// When true, create/update user-level skill symlinks for global skills.
     pub link_global_skills: bool,
-    /// Agent settings collected by the legacy init prompt. The implementer
-    /// assignment is embedded as the flat `[crews.custom]` table. `None` and
+    /// Crew settings collected by the init prompt. The `custom` assignment is
+    /// embedded as the flat `[crews.custom]` table. `None` and
     /// an empty map both mean "use
     /// the default crew template". Ignored when config.toml already exists
     /// — init remains idempotent.
-    pub role_settings: Option<BTreeMap<String, RawAgentRoleConfig>>,
+    pub crew_settings: Option<BTreeMap<String, RawCrewAssignment>>,
     /// Agent availability snapshot used to freeze agent-dependent config at
     /// init time. When omitted, init probes the real host environment.
     pub detected: Option<DetectedAgents>,
@@ -137,8 +143,11 @@ pub fn init_workspace_at_root(
     };
 
     let overwrite = options.force || options.refresh_defaults;
+    let mut skill_asset_warnings: Vec<String> = Vec::new();
     let mut refreshed_skill_files = if options.global_only {
-        seed_default_skills(&skills_root, &orbit_root, overwrite)?
+        let reconciliation = seed_default_skills(&skills_root, &orbit_root, overwrite)?;
+        skill_asset_warnings = reconciliation.warnings;
+        reconciliation.refreshed
     } else {
         0
     };
@@ -148,14 +157,18 @@ pub fn init_workspace_at_root(
             .detected
             .clone()
             .unwrap_or_else(|| detect(&RealAgentEnvProbe));
-        seed_default_config(&config_path, &detected, options.role_settings.as_ref())?
+        seed_default_config(&config_path, &detected, options.crew_settings.as_ref())?
     } else {
         false
     };
 
     let skill_ids = default_skill_ids();
     let mut created_skills_symlink = false;
-    if options.global_only && options.link_global_skills {
+    // Home-scoped skill link directories (`~/.agents/skills`, `~/.claude/skills`)
+    // are only ever touched for the true global Orbit root. A non-global root
+    // (a validation root, an alternate `--root`, a workspace root) must leave
+    // them exactly as found — no removal, no re-creation, no replacement.
+    if options.global_only && options.link_global_skills && is_global_orbit_root(&orbit_root) {
         for skills_links_root in &init_target.skills_links_roots {
             created_skills_symlink |=
                 ensure_skill_links(&skills_root, &skill_ids, skills_links_root, options.force)?;
@@ -163,9 +176,13 @@ pub fn init_workspace_at_root(
     }
 
     let mut refreshed_default_routines = 0usize;
+    let mut seeded_default_auto_tasks = 0usize;
     let (
         refreshed_default_activities,
+        retired_default_activities,
         refreshed_default_jobs,
+        retired_default_jobs,
+        managed_asset_warnings,
         refreshed_default_executors,
         refreshed_default_policies,
         scoring_enabled,
@@ -175,12 +192,17 @@ pub fn init_workspace_at_root(
         let refreshed_default_executors =
             seed_default_executors(executor_store.as_ref(), overwrite)?;
         let refreshed_default_policies = seed_default_policies(policy_store.as_ref(), overwrite)?;
-        let refreshed_default_activities =
-            seed_default_activities(&layout.activities_dir, overwrite)?;
-        let refreshed_default_jobs = seed_default_jobs(&layout.jobs_dir, overwrite)?;
+        let activity_reconciliation = seed_default_activities(&layout.activities_dir, overwrite)?;
+        let job_reconciliation = seed_default_jobs(&layout.jobs_dir, overwrite)?;
+        let mut managed_asset_warnings = std::mem::take(&mut skill_asset_warnings);
+        managed_asset_warnings.extend(activity_reconciliation.warnings);
+        managed_asset_warnings.extend(job_reconciliation.warnings);
         (
-            refreshed_default_activities,
-            refreshed_default_jobs,
+            activity_reconciliation.refreshed,
+            activity_reconciliation.retired,
+            job_reconciliation.refreshed,
+            job_reconciliation.retired,
+            managed_asset_warnings,
             refreshed_default_executors,
             refreshed_default_policies,
             false,
@@ -196,19 +218,23 @@ pub fn init_workspace_at_root(
                 refresh_defaults: options.refresh_defaults,
                 global_only: true,
                 link_global_skills: options.link_global_skills || options.refresh_defaults,
-                role_settings: options.role_settings.clone(),
+                crew_settings: options.crew_settings.clone(),
                 detected: options.detected.clone(),
                 ..Default::default()
             },
         )?;
         refreshed_skill_files = global_result.refreshed_skill_files;
         created_skills_symlink = global_result.created_skills_symlink;
+        // Routines and auto-tasks are workspace-scoped, so their managed-asset
+        // reconciliation happens here rather than in the global branch; fold
+        // their warnings in alongside the global (skill/activity/job) ones.
+        let mut managed_asset_warnings = global_result.managed_asset_warnings;
         // Routines are workspace-authored (`.orbit/routines/`, no global
         // directory), so defaults seed here rather than in the global branch.
         // Host identity is owned by higher-level composition and injected;
         // Core never opens host.toml or falls back to an OS hostname.
         if let Some(host_id) = options.routine_host_id.as_deref() {
-            refreshed_default_routines = seed_default_routines(
+            let reconciliation = seed_default_routines(
                 &orbit_root.join("routines"),
                 host_id,
                 workspace_slug_from_orbit_root(&orbit_root).as_deref(),
@@ -218,10 +244,21 @@ pub fn init_workspace_at_root(
                 // destructive `force` already recreated the root.
                 options.force,
             )?;
+            refreshed_default_routines = reconciliation.refreshed;
+            managed_asset_warnings.extend(reconciliation.warnings);
         }
+        // Auto-task definitions are workspace-authored after seeding. Never
+        // refresh an existing file: `workspace init --force` reconciles
+        // registration and must not overwrite an operator's definition.
+        let auto_task_reconciliation = seed_default_auto_tasks(&orbit_root)?;
+        seeded_default_auto_tasks = auto_task_reconciliation.refreshed;
+        managed_asset_warnings.extend(auto_task_reconciliation.warnings);
         (
             global_result.refreshed_default_activities,
+            global_result.retired_default_activities,
             global_result.refreshed_default_jobs,
+            global_result.retired_default_jobs,
+            managed_asset_warnings,
             global_result.refreshed_default_executors,
             global_result.refreshed_default_policies,
             RuntimeConfig::load_layered(&global_root, &orbit_root)?.scoring_enabled,
@@ -240,10 +277,14 @@ pub fn init_workspace_at_root(
         created_skills_symlink,
         created_config,
         refreshed_default_activities,
+        retired_default_activities,
         refreshed_default_jobs,
+        retired_default_jobs,
+        managed_asset_warnings,
         refreshed_default_executors,
         refreshed_default_policies,
         refreshed_default_routines,
+        seeded_default_auto_tasks,
     })
 }
 
@@ -374,9 +415,29 @@ fn remove_workspace_seeded_default_skills(
             remove_path_if_exists(&skills_dir.join(skill_id))?;
         }
 
+        // Skills are only ever seeded into the *global* root, so a managed
+        // manifest here describes skill trees that were just removed. Drop it
+        // once nothing else remains, otherwise it would keep an otherwise-empty
+        // legacy workspace skills directory alive forever.
+        if directory_holds_only(skills_dir, MANAGED_ASSET_MANIFEST_FILE)? {
+            remove_path_if_exists(&skills_dir.join(MANAGED_ASSET_MANIFEST_FILE))?;
+        }
         remove_empty_dir(skills_dir)?;
     }
     Ok(())
+}
+
+/// Whether `dir` contains exactly one entry, named `file_name`.
+fn directory_holds_only(dir: &Path, file_name: &str) -> Result<bool, OrbitError> {
+    if !dir.is_dir() {
+        return Ok(false);
+    }
+    let mut entries = fs::read_dir(dir).map_err(|e| OrbitError::Io(e.to_string()))?;
+    let Some(first) = entries.next() else {
+        return Ok(false);
+    };
+    let first = first.map_err(|e| OrbitError::Io(e.to_string()))?;
+    Ok(first.file_name() == file_name && entries.next().is_none())
 }
 
 fn remove_empty_dir(dir: &Path) -> Result<(), OrbitError> {
@@ -678,6 +739,77 @@ mod tests {
     }
 
     #[test]
+    fn workspace_init_seeds_inert_defaults_without_clobbering_edits() {
+        let temp = tempdir().expect("tempdir");
+        let global_root = temp.path().join("global");
+        let orbit_root = temp.path().join("repo/.orbit");
+        let options = InitOptions {
+            global_root_override: Some(global_root),
+            detected: Some(DetectedAgents::default()),
+            ..Default::default()
+        };
+
+        let initial = init_workspace_at_root(&orbit_root, options.clone())
+            .expect("initialize fresh workspace");
+        assert_eq!(initial.seeded_default_auto_tasks, 2);
+        let friction_path = orbit_root.join("auto_tasks/friction-curation.yaml");
+        let qa_path = orbit_root.join("auto_tasks/qa-sweep.yaml");
+        let friction = fs::read_to_string(&friction_path).expect("read seeded friction definition");
+        let friction_definition = orbit_common::types::parse_auto_task_yaml(&friction)
+            .expect("seeded friction definition parses through loader schema");
+        assert!(!friction_definition.enabled);
+        assert_eq!(friction_definition.template.crew.as_deref(), Some("luna"));
+        assert!(matches!(
+            friction_definition.dedupe,
+            orbit_common::types::DedupePolicy::SkipIfOpen
+        ));
+        let qa = fs::read_to_string(&qa_path).expect("read seeded QA definition");
+        let qa_definition = orbit_common::types::parse_auto_task_yaml(&qa)
+            .expect("seeded QA definition parses through loader schema");
+        assert!(!qa_definition.enabled);
+        assert_eq!(qa_definition.template.crew.as_deref(), Some("sonnet"));
+        assert!(matches!(
+            qa_definition.dedupe,
+            orbit_common::types::DedupePolicy::SkipIfOpen
+        ));
+        assert!(!orbit_root.join("state/auto-tasks.json").exists());
+        let loaded = crate::auto_tasks::collect_auto_tasks(&orbit_root);
+        assert!(
+            loaded.errors.is_empty(),
+            "seeded definition must load cleanly"
+        );
+        assert_eq!(loaded.definitions.len(), 2);
+        assert!(
+            loaded
+                .definitions
+                .iter()
+                .any(|loaded| loaded.definition.name == "friction-curation")
+        );
+        assert!(
+            loaded
+                .definitions
+                .iter()
+                .any(|loaded| loaded.definition.name == "qa-sweep")
+        );
+
+        let authored_friction = "operator-authored friction definition\n";
+        let authored_qa = "operator-authored QA definition\n";
+        fs::write(&friction_path, authored_friction).expect("write friction edit");
+        fs::write(&qa_path, authored_qa).expect("write QA edit");
+        let repeated =
+            init_workspace_at_root(&orbit_root, options).expect("reinitialize workspace");
+        assert_eq!(repeated.seeded_default_auto_tasks, 0);
+        assert_eq!(
+            fs::read_to_string(friction_path).expect("read preserved friction definition"),
+            authored_friction
+        );
+        assert_eq!(
+            fs::read_to_string(qa_path).expect("read preserved QA definition"),
+            authored_qa
+        );
+    }
+
+    #[test]
     fn global_init_seeds_skills_and_home_level_links() {
         let _guard = ENV_LOCK.lock().expect("lock env");
         let home = tempdir().expect("home tempdir");
@@ -698,7 +830,12 @@ mod tests {
         restore_home(previous_home);
 
         let result = result.expect("init global");
-        assert_eq!(result.refreshed_skill_files, default_skill_ids().len());
+        // Skills are now reconciled per managed file rather than per skill
+        // directory, so a refresh counts every SKILL.md *and* reference file.
+        assert_eq!(
+            result.refreshed_skill_files,
+            crate::command::skill::DEFAULT_SKILL_FILES.len()
+        );
         assert!(result.created_skills_symlink);
         assert!(
             home.path()
@@ -778,7 +915,12 @@ mod tests {
         restore_home(previous_home);
 
         let result = result.expect("init workspace");
-        assert_eq!(result.refreshed_skill_files, default_skill_ids().len());
+        // Skills are now reconciled per managed file rather than per skill
+        // directory, so a refresh counts every SKILL.md *and* reference file.
+        assert_eq!(
+            result.refreshed_skill_files,
+            crate::command::skill::DEFAULT_SKILL_FILES.len()
+        );
         assert!(result.created_skills_symlink);
         assert!(
             !orbit_root
@@ -804,7 +946,7 @@ mod tests {
     }
 
     #[test]
-    fn global_init_writes_role_settings_as_custom_crew_to_config_toml() {
+    fn global_init_writes_crew_settings_as_custom_crew_to_config_toml() {
         let _guard = ENV_LOCK.lock().expect("lock env");
         let home = tempdir().expect("home tempdir");
         let previous_home = std::env::var_os("HOME");
@@ -812,37 +954,19 @@ mod tests {
             std::env::set_var("HOME", home.path());
         }
 
-        let mut roles: BTreeMap<String, RawAgentRoleConfig> = BTreeMap::new();
-        roles.insert(
-            "reviewer".into(),
-            RawAgentRoleConfig {
-                provider: Some("claude".into()),
-                backend: Some("cli".into()),
-                model: Some(orbit_common::test_fixtures::TEST_CLAUDE_MODEL.into()),
-            },
-        );
-        roles.insert(
-            "implementer".into(),
-            RawAgentRoleConfig {
+        let settings = BTreeMap::from([(
+            "custom".into(),
+            RawCrewAssignment {
                 provider: Some("codex".into()),
-                backend: Some("cli".into()),
                 model: Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.into()),
             },
-        );
-        roles.insert(
-            "planner".into(),
-            RawAgentRoleConfig {
-                provider: Some("gemini".into()),
-                backend: Some("http".into()),
-                model: Some(orbit_common::test_fixtures::TEST_GEMINI_MODEL.into()),
-            },
-        );
+        )]);
 
         let result = init_global(
             None,
             InitOptions {
                 refresh_defaults: true,
-                role_settings: Some(roles),
+                crew_settings: Some(settings),
                 detected: Some(DetectedAgents::default()),
                 ..Default::default()
             },
@@ -850,7 +974,7 @@ mod tests {
 
         restore_home(previous_home);
 
-        let result = result.expect("init global with role settings");
+        let result = result.expect("init global with crew settings");
         assert!(result.created_config);
 
         let config_path = home.path().join(".orbit").join("config.toml");
@@ -871,7 +995,7 @@ mod tests {
             .and_then(|v| v.get("custom"))
             .and_then(|v| v.as_table())
             .expect("custom crew table");
-        assert_eq!(custom.len(), 3);
+        assert_eq!(custom.len(), 2);
         assert_eq!(
             custom.get("provider").and_then(|v| v.as_str()),
             Some("codex")
@@ -883,7 +1007,7 @@ mod tests {
     }
 
     #[test]
-    fn global_init_with_existing_config_does_not_overwrite_role_settings() {
+    fn global_init_with_existing_config_does_not_overwrite_crew_settings() {
         let _guard = ENV_LOCK.lock().expect("lock env");
         let home = tempdir().expect("home tempdir");
         let previous_home = std::env::var_os("HOME");
@@ -898,21 +1022,19 @@ mod tests {
         let user_content = "# pre-existing user config\n";
         fs::write(&config_path, user_content).expect("preseed");
 
-        let mut roles: BTreeMap<String, RawAgentRoleConfig> = BTreeMap::new();
-        roles.insert(
-            "reviewer".into(),
-            RawAgentRoleConfig {
+        let settings = BTreeMap::from([(
+            "custom".into(),
+            RawCrewAssignment {
                 provider: Some("claude".into()),
-                backend: Some("cli".into()),
                 model: None,
             },
-        );
+        )]);
 
         let result = init_global(
             None,
             InitOptions {
                 refresh_defaults: true,
-                role_settings: Some(roles),
+                crew_settings: Some(settings),
                 detected: Some(DetectedAgents::default()),
                 ..Default::default()
             },
@@ -927,7 +1049,7 @@ mod tests {
     }
 
     #[test]
-    fn global_init_without_role_settings_writes_clean_template() {
+    fn global_init_without_crew_settings_writes_clean_template() {
         let _guard = ENV_LOCK.lock().expect("lock env");
         let home = tempdir().expect("home tempdir");
         let previous_home = std::env::var_os("HOME");
@@ -939,7 +1061,7 @@ mod tests {
             None,
             InitOptions {
                 refresh_defaults: true,
-                role_settings: None,
+                crew_settings: None,
                 detected: Some(DetectedAgents::default()),
                 ..Default::default()
             },

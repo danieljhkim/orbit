@@ -22,6 +22,7 @@ use reqwest::Url;
 use rsa::RsaPublicKey;
 use rsa::pkcs1v15::{Signature as RsaSignature, VerifyingKey};
 use rsa::pkcs8::DecodePublicKey;
+use rsa::sha2::Sha256 as RsaSha256;
 use rsa::signature::Verifier;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -352,7 +353,7 @@ pub(crate) fn verify_release_checksum_signature_with_key(
             "release checksum signature verification failed for {RELEASE_CHECKSUMS_FILENAME}: {error}"
         ))
     })?;
-    let verifying_key = VerifyingKey::<Sha256>::new(public_key);
+    let verifying_key = VerifyingKey::<RsaSha256>::new(public_key);
     verifying_key
         .verify(manifest, &signature)
         .map_err(|error| {

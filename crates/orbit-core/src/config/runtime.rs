@@ -1,20 +1,85 @@
 use std::collections::BTreeMap;
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use orbit_common::model_defaults::{
     CLAUDE_DEFAULT_STRONG, CLAUDE_DEFAULT_WEAK, CLAUDE_FABLE_MODEL, CODEX_LUNA_MODEL,
     CODEX_SOL_MODEL, CODEX_TERRA_MODEL, GEMINI_CREW_MODEL, GROK_DEFAULT_MODEL,
 };
-use orbit_common::types::{Crew, CrewRoleAssignment, OrbitError, all_agent_families};
+use orbit_common::types::activity_job::{RETIRED_BACKEND_MIGRATION, check_retired_backend_value};
+use orbit_common::types::{Crew, CrewAssignment, OrbitError};
 use orbit_common::utility::redaction::redact_home_dir;
 use orbit_engine::PrConfig;
 
 use crate::paths;
 
 use super::persistence::PersistenceConfig;
-use super::raw::{RawAgentRoleConfig, RawCrewEntry, RawRuntimeConfig, RawTaskSection};
+use super::raw::{RawCrewEntry, RawRuntimeConfig, RawTaskSection};
 use super::registry::ConfigSnapshot;
+
+const WORKSPACE_REPLACE_ONLY_KEYS: &[&str] = &[
+    "execution.codex.approval_policy",
+    "execution.codex.sandbox",
+    "execution.env.pass",
+];
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConfigValueSourceKind {
+    BuiltIn,
+    Environment,
+    Global,
+    Workspace,
+}
+
+impl ConfigValueSourceKind {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::BuiltIn => "built-in",
+            Self::Environment => "environment",
+            Self::Global => "global",
+            Self::Workspace => "workspace",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConfigValueSource {
+    kind: ConfigValueSourceKind,
+    path: Option<PathBuf>,
+}
+
+impl ConfigValueSource {
+    pub fn kind(&self) -> ConfigValueSourceKind {
+        self.kind
+    }
+
+    pub fn path(&self) -> Option<&Path> {
+        self.path.as_deref()
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct EffectiveConfigValue {
+    pub key: String,
+    pub value: serde_json::Value,
+    pub source: ConfigValueSource,
+}
+
+#[derive(Debug, Clone)]
+pub struct EffectiveConfig {
+    snapshot: ConfigSnapshot,
+    values: Vec<EffectiveConfigValue>,
+}
+
+impl EffectiveConfig {
+    pub fn value_for(&self, key: &str) -> Option<serde_json::Value> {
+        self.snapshot.value_for(key)
+    }
+
+    pub fn values(&self) -> &[EffectiveConfigValue] {
+        &self.values
+    }
+}
 
 #[derive(Debug, Clone)]
 pub(crate) struct RuntimeConfig {
@@ -24,11 +89,9 @@ pub(crate) struct RuntimeConfig {
     pub(crate) persistence: PersistenceConfig,
     pub(crate) pr: PrConfig,
     pub(crate) scoring_enabled: bool,
-    /// Persisted default for the v2 `agent_loop` execution backend (§3.1).
     /// `None` means "not configured"; the resolver falls through to the hard-
     /// coded `cli` default.
-    pub(crate) v2_backend: Option<String>,
-    /// Default base branch for ship/duel-plan workflows. Sourced
+    /// Default base branch for ship workflows. Sourced
     /// from `[workflow] base_branch` in `config.toml`; defaults to `"main"`
     /// when no key is set.
     pub(crate) workflow_base_branch: String,
@@ -42,29 +105,11 @@ pub(crate) struct RuntimeConfig {
     /// Named provider-model assignments from `[crews.<name>]`.
     pub(crate) crews: BTreeMap<String, Crew>,
     pub(crate) default_crew: Option<String>,
-    pub(crate) duel: DuelConfig,
+    pub(crate) system_crew: String,
     /// Optional floor for the local task-id allocator (`[tasks] id_start`).
     /// Applied forward-only on runtime build so machines can hold disjoint id
     /// ranges. `None` leaves the allocator untouched.
     pub(crate) tasks_id_start: Option<u32>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct DuelConfig {
-    pub(crate) candidates: Vec<String>,
-    pub(crate) models: BTreeMap<String, String>,
-}
-
-impl Default for DuelConfig {
-    fn default() -> Self {
-        Self {
-            candidates: all_agent_families()
-                .iter()
-                .map(|family| (*family).to_string())
-                .collect(),
-            models: BTreeMap::new(),
-        }
-    }
 }
 
 impl Default for RuntimeConfig {
@@ -84,61 +129,30 @@ impl RuntimeConfig {
                 task_url_template: snapshot.pr_task_url_template.clone(),
             },
             scoring_enabled: snapshot.scoring_enabled,
-            v2_backend: snapshot.runtime_backend.clone(),
             workflow_base_branch: snapshot.workflow_base_branch.clone(),
             workflow_auto_ship: snapshot.workflow_auto_ship,
             routines_source: snapshot.routines_role.as_deref() == Some("source"),
             crews: default_crews(),
             default_crew: snapshot.workflow_default_crew.clone(),
-            duel: DuelConfig {
-                candidates: snapshot.duel_candidates.clone(),
-                models: snapshot.duel_models.clone(),
-            },
+            system_crew: snapshot.workflow_system_crew.clone(),
             tasks_id_start: snapshot.tasks_id_start,
             snapshot,
         }
     }
 
-    /// Load config with workspace-replaces-global semantics for execution/approval/user.
+    /// Load config with per-key workspace-over-global layering.
     ///
     /// Persistence paths are always derived from the two roots (not configurable).
     ///
-    /// **Workspace config REPLACES global config** — this is intentional and
-    /// different from a merge/layer model. When `workspace_root/config.toml`
-    /// exists, it is used exclusively; the `global_root/config.toml` is ignored.
-    /// Rationale: per-repo agent behaviour (sandbox mode, approval policy,
-    /// allowed env vars) must be fully deterministic and cannot be accidentally
-    /// influenced by whatever happens to be in the user's global config.
-    /// If workspace_root/config.toml exists, it replaces global config entirely.
-    /// Otherwise falls back to global_root/config.toml.
+    /// Ordinary keys inherit from global when absent from the workspace file.
+    /// Sandbox mode, approval policy, and the environment allowlist are the
+    /// exception: whenever a distinct workspace file exists, omissions for
+    /// those keys resolve to built-in defaults rather than global values.
     pub(crate) fn load_layered(
         global_root: &Path,
         workspace_root: &Path,
     ) -> Result<Self, OrbitError> {
-        let ws_config = workspace_root.join("config.toml");
-        let global_config = global_root.join("config.toml");
-
-        let persistence = PersistenceConfig::default_for_roots(global_root, workspace_root);
-
-        // Workspace config replaces global entirely if present
-        let config_path = if ws_config.exists() && workspace_root != global_root {
-            ws_config
-        } else if global_config.exists() {
-            global_config
-        } else {
-            return Ok(Self {
-                persistence,
-                ..Self::default_for_data_root(global_root)
-            });
-        };
-
-        let raw = fs::read_to_string(&config_path).map_err(|err| {
-            OrbitError::Io(format!(
-                "failed to read runtime config '{}': {err}",
-                redact_home_dir(&config_path.display().to_string())
-            ))
-        })?;
-        Self::from_raw_str(&raw, &config_path, persistence)
+        load_layered_runtime(global_root, workspace_root).map(|loaded| loaded.runtime)
     }
 
     /// Parse and validate a raw `config.toml` document string into a fully
@@ -177,7 +191,11 @@ impl RuntimeConfig {
         }
 
         validate_task_artifact_store_from_raw(parsed.task.as_ref())?;
-        reject_stale_agent_role_tables(parsed.agent.as_ref())?;
+        reject_stale_agent_tables(parsed.agent.as_ref())?;
+        reject_retired_backend_overrides(
+            &document,
+            std::env::var(RETIRED_BACKEND_ENV).ok().as_deref(),
+        )?;
         let crews = crews_from_raw(parsed.crews.as_ref())?;
         let snapshot = ConfigSnapshot::admit(&document, config_path, &crews)?;
 
@@ -189,6 +207,9 @@ impl RuntimeConfig {
         {
             warn_deprecated_task_id_pattern(config_path);
         }
+        if parsed.duel.is_some() {
+            warn_retired_duel_config(config_path);
+        }
 
         Ok(Self {
             execution_env: ExecutionEnvPolicy::from_snapshot(&snapshot),
@@ -198,16 +219,12 @@ impl RuntimeConfig {
                 task_url_template: snapshot.pr_task_url_template.clone(),
             },
             scoring_enabled: snapshot.scoring_enabled,
-            v2_backend: snapshot.runtime_backend.clone(),
             workflow_base_branch: snapshot.workflow_base_branch.clone(),
             workflow_auto_ship: snapshot.workflow_auto_ship,
             routines_source: snapshot.routines_role.as_deref() == Some("source"),
             crews,
             default_crew: snapshot.workflow_default_crew.clone(),
-            duel: DuelConfig {
-                candidates: snapshot.duel_candidates.clone(),
-                models: snapshot.duel_models.clone(),
-            },
+            system_crew: snapshot.workflow_system_crew.clone(),
             tasks_id_start: snapshot.tasks_id_start,
             snapshot,
         })
@@ -218,17 +235,19 @@ impl RuntimeConfig {
         self.tasks_id_start
     }
 
-    /// Configured default backend for v2 `agent_loop` activities (§3.1 step 3).
-    pub(crate) fn v2_backend(&self) -> Option<&str> {
-        self.v2_backend.as_deref()
-    }
-
     pub(crate) fn workflow_base_branch(&self) -> &str {
         &self.workflow_base_branch
     }
 
     pub(crate) fn workflow_auto_ship(&self) -> bool {
         self.workflow_auto_ship
+    }
+
+    /// Configured crew for system activities. Resolution of the named crew is
+    /// deliberately deferred to dispatch so a bad system crew does not stop
+    /// unrelated activity execution.
+    pub(crate) fn system_crew(&self) -> &str {
+        &self.system_crew
     }
 
     pub(crate) fn routines_source(&self) -> bool {
@@ -238,9 +257,303 @@ impl RuntimeConfig {
     pub(crate) fn pr_config(&self) -> &PrConfig {
         &self.pr
     }
+}
 
-    pub(crate) fn duel_config(&self) -> &DuelConfig {
-        &self.duel
+pub fn load_effective_config(
+    global_root: &Path,
+    workspace_root: &Path,
+) -> Result<EffectiveConfig, OrbitError> {
+    let loaded = load_layered_runtime(global_root, workspace_root)?;
+    let values = effective_values(
+        &loaded.runtime,
+        loaded.global.as_ref(),
+        loaded.workspace.as_ref(),
+    );
+    Ok(EffectiveConfig {
+        snapshot: loaded.runtime.snapshot,
+        values,
+    })
+}
+
+struct ConfigDocument {
+    path: PathBuf,
+    value: toml::Value,
+}
+
+struct LoadedRuntimeConfig {
+    runtime: RuntimeConfig,
+    global: Option<ConfigDocument>,
+    workspace: Option<ConfigDocument>,
+}
+
+fn load_layered_runtime(
+    global_root: &Path,
+    workspace_root: &Path,
+) -> Result<LoadedRuntimeConfig, OrbitError> {
+    let global = read_config_document(&global_root.join("config.toml"))?;
+    let workspace = if workspace_root != global_root {
+        read_config_document(&workspace_root.join("config.toml"))?
+    } else {
+        None
+    };
+    let persistence = PersistenceConfig::default_for_roots(global_root, workspace_root);
+
+    if global.is_none() && workspace.is_none() {
+        return Ok(LoadedRuntimeConfig {
+            runtime: RuntimeConfig {
+                persistence,
+                ..RuntimeConfig::default_for_data_root(global_root)
+            },
+            global,
+            workspace,
+        });
+    }
+
+    let mut merged = global
+        .as_ref()
+        .map(|document| document.value.clone())
+        .unwrap_or_else(empty_document);
+    if let Some(workspace_document) = &workspace {
+        merge_tables(&mut merged, &workspace_document.value);
+
+        // Registry table values are one config key, so a workspace value
+        // replaces the global table rather than merging its members.
+        // Dynamically named crews are intentionally excluded:
+        // their fields layer recursively so one crew field can be overridden.
+        for descriptor in super::registry::CONFIG_KEY_REGISTRY {
+            if let Some(value) = value_at_path(&workspace_document.value, descriptor.key) {
+                set_value_at_path(&mut merged, descriptor.key, value.clone());
+            }
+        }
+        for key in WORKSPACE_REPLACE_ONLY_KEYS {
+            if value_at_path(&workspace_document.value, key).is_none() {
+                remove_value_at_path(&mut merged, key);
+            }
+        }
+    }
+
+    let config_path = workspace
+        .as_ref()
+        .or(global.as_ref())
+        .map(|document| document.path.as_path())
+        .unwrap_or_else(|| Path::new("<built-in defaults>"));
+    let merged_raw = toml::to_string(&merged).map_err(|err| {
+        OrbitError::InvalidInput(format!(
+            "failed to render layered runtime config '{}': {err}",
+            redact_home_dir(&config_path.display().to_string())
+        ))
+    })?;
+    let runtime = RuntimeConfig::from_raw_str(&merged_raw, config_path, persistence)?;
+    Ok(LoadedRuntimeConfig {
+        runtime,
+        global,
+        workspace,
+    })
+}
+
+fn read_config_document(path: &Path) -> Result<Option<ConfigDocument>, OrbitError> {
+    if !path.exists() {
+        return Ok(None);
+    }
+    let raw = fs::read_to_string(path).map_err(|err| {
+        OrbitError::Io(format!(
+            "failed to read runtime config '{}': {err}",
+            redact_home_dir(&path.display().to_string())
+        ))
+    })?;
+    let value = toml::from_str(&raw).map_err(|err| {
+        OrbitError::InvalidInput(format!(
+            "invalid runtime config '{}': {err}",
+            redact_home_dir(&path.display().to_string())
+        ))
+    })?;
+    Ok(Some(ConfigDocument {
+        path: path.to_path_buf(),
+        value,
+    }))
+}
+
+fn empty_document() -> toml::Value {
+    toml::Value::Table(toml::map::Map::new())
+}
+
+fn merge_tables(base: &mut toml::Value, overlay: &toml::Value) {
+    match (base, overlay) {
+        (toml::Value::Table(base), toml::Value::Table(overlay)) => {
+            for (key, value) in overlay {
+                match base.get_mut(key) {
+                    Some(existing) => merge_tables(existing, value),
+                    None => {
+                        base.insert(key.clone(), value.clone());
+                    }
+                }
+            }
+        }
+        (base, overlay) => *base = overlay.clone(),
+    }
+}
+
+fn value_at_path<'a>(document: &'a toml::Value, key: &str) -> Option<&'a toml::Value> {
+    let mut value = document;
+    for segment in key.split('.') {
+        value = value.as_table()?.get(segment)?;
+    }
+    Some(value)
+}
+
+fn crew_entry<'a>(
+    document: &'a toml::Value,
+    name: &str,
+) -> Option<&'a toml::map::Map<String, toml::Value>> {
+    document
+        .as_table()?
+        .get("crews")?
+        .as_table()?
+        .get(name)?
+        .as_table()
+}
+
+fn set_value_at_path(document: &mut toml::Value, key: &str, value: toml::Value) {
+    let segments = key.split('.').collect::<Vec<_>>();
+    let Some((last, ancestors)) = segments.split_last() else {
+        return;
+    };
+    let mut table = document.as_table_mut();
+    for segment in ancestors {
+        let Some(current) = table else {
+            return;
+        };
+        let entry = current
+            .entry((*segment).to_string())
+            .or_insert_with(empty_document);
+        table = entry.as_table_mut();
+    }
+    if let Some(table) = table {
+        table.insert((*last).to_string(), value);
+    }
+}
+
+fn remove_value_at_path(document: &mut toml::Value, key: &str) {
+    let segments = key.split('.').collect::<Vec<_>>();
+    let Some((last, ancestors)) = segments.split_last() else {
+        return;
+    };
+    let mut value = document;
+    for segment in ancestors {
+        let Some(next) = value
+            .as_table_mut()
+            .and_then(|table| table.get_mut(*segment))
+        else {
+            return;
+        };
+        value = next;
+    }
+    if let Some(table) = value.as_table_mut() {
+        table.remove(*last);
+    }
+}
+
+fn effective_values(
+    runtime: &RuntimeConfig,
+    global: Option<&ConfigDocument>,
+    workspace: Option<&ConfigDocument>,
+) -> Vec<EffectiveConfigValue> {
+    let mut values = runtime
+        .snapshot
+        .all_values()
+        .into_iter()
+        .map(|(key, value)| EffectiveConfigValue {
+            key: key.to_string(),
+            value,
+            source: source_for_key(key, global, workspace),
+        })
+        .collect::<Vec<_>>();
+    values.push(EffectiveConfigValue {
+        key: "execution.env.inherit".to_string(),
+        value: serde_json::json!(runtime.snapshot.execution_env_inherit),
+        source: built_in_source(),
+    });
+
+    for (name, crew) in &runtime.crews {
+        for (field, value) in [
+            ("model", serde_json::json!(crew.assignment.model)),
+            ("provider", serde_json::json!(crew.assignment.provider)),
+            ("description", serde_json::json!(crew.description)),
+            ("tags", serde_json::json!(crew.tags)),
+        ] {
+            let key = format!("crews.{name}.{field}");
+            values.push(EffectiveConfigValue {
+                source: source_for_crew_field(name, field, global, workspace),
+                key,
+                value,
+            });
+        }
+    }
+    values.sort_by(|left, right| left.key.cmp(&right.key));
+    values
+}
+
+fn source_for_key(
+    key: &str,
+    global: Option<&ConfigDocument>,
+    workspace: Option<&ConfigDocument>,
+) -> ConfigValueSource {
+    if let Some(document) = workspace
+        && value_at_path(&document.value, key).is_some()
+    {
+        return file_source(ConfigValueSourceKind::Workspace, &document.path);
+    }
+    if workspace.is_some() && WORKSPACE_REPLACE_ONLY_KEYS.contains(&key) {
+        return built_in_source();
+    }
+    if let Some(document) = global
+        && value_at_path(&document.value, key).is_some()
+    {
+        return file_source(ConfigValueSourceKind::Global, &document.path);
+    }
+    if key == "workflow.default_crew"
+        && std::env::var("CONSTELLATION_DEFAULT_PROVIDER")
+            .is_ok_and(|value| !value.trim().is_empty())
+    {
+        return ConfigValueSource {
+            kind: ConfigValueSourceKind::Environment,
+            path: None,
+        };
+    }
+    built_in_source()
+}
+
+fn source_for_crew_field(
+    crew: &str,
+    field: &str,
+    global: Option<&ConfigDocument>,
+    workspace: Option<&ConfigDocument>,
+) -> ConfigValueSource {
+    for (kind, document) in [
+        (ConfigValueSourceKind::Workspace, workspace),
+        (ConfigValueSourceKind::Global, global),
+    ] {
+        if let Some(document) = document
+            && let Some(entry) = crew_entry(&document.value, crew)
+            && entry.contains_key(field)
+        {
+            return file_source(kind, &document.path);
+        }
+    }
+    built_in_source()
+}
+
+fn file_source(kind: ConfigValueSourceKind, path: &Path) -> ConfigValueSource {
+    ConfigValueSource {
+        kind,
+        path: Some(path.to_path_buf()),
+    }
+}
+
+fn built_in_source() -> ConfigValueSource {
+    ConfigValueSource {
+        kind: ConfigValueSourceKind::BuiltIn,
+        path: None,
     }
 }
 
@@ -260,7 +573,7 @@ pub(crate) fn default_crews() -> BTreeMap<String, Crew> {
             name.to_string(),
             Crew {
                 name: name.to_string(),
-                assignment: crew_role(model, provider, "cli"),
+                assignment: crew_assignment(model, provider),
                 description: None,
                 tags: Vec::new(),
             },
@@ -269,20 +582,57 @@ pub(crate) fn default_crews() -> BTreeMap<String, Crew> {
     crews
 }
 
-fn crew_role(model: &str, provider: &str, backend: &str) -> CrewRoleAssignment {
-    CrewRoleAssignment {
+fn crew_assignment(model: &str, provider: &str) -> CrewAssignment {
+    CrewAssignment {
         model: model.to_string(),
         provider: provider.to_string(),
-        backend: backend.to_string(),
     }
 }
 
-fn reject_stale_agent_role_tables(
-    raw: Option<&BTreeMap<String, RawAgentRoleConfig>>,
+/// The retired invocation-level agent backend override.
+pub(super) const RETIRED_BACKEND_ENV: &str = "ORBIT_BACKEND";
+
+/// [ORB-10801] `ORBIT_BACKEND` and `[runtime] backend` were tiers 2 and 3 of
+/// the retired agent-loop backend precedence chain. Both are refused rather
+/// than ignored: an operator who still pins `http` must be told their runs are
+/// now CLI-agent runs instead of having that substitution made for them.
+/// `cli` named the surviving path, so it stays accepted and inert.
+fn reject_retired_backend_overrides(
+    document: &toml::Value,
+    env_value: Option<&str>,
+) -> Result<(), OrbitError> {
+    if let Some(raw) = env_value.map(str::trim).filter(|value| !value.is_empty()) {
+        check_retired_backend_value(raw).map_err(|error| {
+            OrbitError::InvalidInput(format!("{RETIRED_BACKEND_ENV} is retired: {error}"))
+        })?;
+    }
+    let Some(value) = value_at_path(document, "runtime.backend") else {
+        return Ok(());
+    };
+    let raw = value.as_str().ok_or_else(|| {
+        OrbitError::InvalidInput(format!(
+            "[runtime] backend must be a string; {RETIRED_BACKEND_MIGRATION}"
+        ))
+    })?;
+    check_retired_backend_value(raw)
+        .map_err(|error| OrbitError::InvalidInput(format!("[runtime] {error}")))
+}
+
+#[cfg(test)]
+pub(super) fn retired_backend_override_check(
+    document: &toml::Value,
+    env_value: Option<&str>,
+) -> Result<(), OrbitError> {
+    reject_retired_backend_overrides(document, env_value)
+}
+
+fn reject_stale_agent_tables(
+    raw: Option<&BTreeMap<String, toml::Value>>,
 ) -> Result<(), OrbitError> {
     if raw.is_some() {
+        // ORB-00058: source provenance for retiring the old agent-role schema.
         return Err(OrbitError::InvalidInput(
-            "config schema changed in ORB-00058; remove [agent.<role>] tables and migrate to [crews.<name>] with [workflow].default_crew".to_string(),
+            "config schema no longer supports [agent.<role>] tables; migrate to [crews.<name>] with [workflow].default_crew".to_string(),
         ));
     }
     Ok(())
@@ -335,65 +685,30 @@ fn normalized_crew_tags(raw: &[String]) -> Vec<String> {
     tags
 }
 
-fn crew_assignment_from_raw(
-    crew: &str,
-    raw: &RawCrewEntry,
-) -> Result<CrewRoleAssignment, OrbitError> {
-    let has_flat = raw.model.is_some() || raw.provider.is_some() || raw.backend.is_some();
+fn crew_assignment_from_raw(crew: &str, raw: &RawCrewEntry) -> Result<CrewAssignment, OrbitError> {
     let has_legacy = raw.planner.is_some() || raw.implementer.is_some() || raw.reviewer.is_some();
-    if has_flat && has_legacy {
+    if has_legacy {
         return Err(OrbitError::InvalidInput(format!(
-            "[crews.{crew}] mixes the flat {{ model, provider, backend }} shape with legacy planner/implementer/reviewer assignments"
+            "[crews.{crew}] uses retired planner/implementer/reviewer role tables; rewrite it with flat `model` and `provider` fields only"
         )));
     }
-    if has_flat {
-        return Ok(CrewRoleAssignment {
-            model: required_crew_field(crew, "model", raw.model.as_deref())?,
-            provider: required_crew_field(crew, "provider", raw.provider.as_deref())?,
-            backend: required_crew_field(crew, "backend", raw.backend.as_deref())?,
-        });
-    }
-
-    let implementer = required_legacy_assignment(crew, "implementer", raw.implementer.as_ref())?;
-    let planner = required_legacy_assignment(crew, "planner", raw.planner.as_ref())?;
-    let reviewer = required_legacy_assignment(crew, "reviewer", raw.reviewer.as_ref())?;
-    if planner != implementer || reviewer != implementer {
-        tracing::warn!(
-            target: "orbit.config.crew",
-            crew,
-            "legacy three-role crew assignments diverge; using implementer for every role — rewrite [crews.<name>] with flat model/provider/backend fields",
-        );
-    }
-    Ok(implementer)
-}
-
-fn required_legacy_assignment(
-    crew: &str,
-    role: &str,
-    raw: Option<&RawAgentRoleConfig>,
-) -> Result<CrewRoleAssignment, OrbitError> {
-    let raw = raw.ok_or_else(|| {
-        OrbitError::InvalidInput(format!(
-            "[crews.{crew}] must define {role} = {{ model, provider, backend }}"
-        ))
-    })?;
-    Ok(CrewRoleAssignment {
-        model: required_legacy_field(crew, role, "model", raw.model.as_deref())?,
-        provider: required_legacy_field(crew, role, "provider", raw.provider.as_deref())?,
-        backend: required_legacy_field(crew, role, "backend", raw.backend.as_deref())?,
+    reject_retired_crew_backend(crew, raw.backend.as_deref())?;
+    Ok(CrewAssignment {
+        model: required_crew_field(crew, "model", raw.model.as_deref())?,
+        provider: required_crew_field(crew, "provider", raw.provider.as_deref())?,
     })
 }
 
-fn required_legacy_field(
-    crew: &str,
-    role: &str,
-    field: &str,
-    value: Option<&str>,
-) -> Result<String, OrbitError> {
-    let value = value.map(str::trim).filter(|value| !value.is_empty());
-    value.map(ToOwned::to_owned).ok_or_else(|| {
-        OrbitError::InvalidInput(format!("[crews.{crew}].{role}.{field} must not be empty"))
-    })
+/// [ORB-10801] `[crews.<name>] backend` selected the agent execution backend.
+/// Only the CLI agent path survives, so `cli` stays accepted and inert while
+/// the removed values are refused: remapping `http` onto the CLI agent would
+/// change which runtime the crew dispatches to without saying so.
+fn reject_retired_crew_backend(crew: &str, raw: Option<&str>) -> Result<(), OrbitError> {
+    let Some(value) = raw.map(str::trim).filter(|value| !value.is_empty()) else {
+        return Ok(());
+    };
+    check_retired_backend_value(value)
+        .map_err(|error| OrbitError::InvalidInput(format!("[crews.{crew}] {error}")))
 }
 
 fn required_crew_field(crew: &str, field: &str, value: Option<&str>) -> Result<String, OrbitError> {
@@ -418,6 +733,17 @@ fn warn_deprecated_task_id_pattern(config_path: &Path) {
     tracing::warn!(
         config = %path,
         "knowledge.task_id_pattern is deprecated and ignored",
+    );
+}
+
+pub(super) const RETIRED_DUEL_CONFIG_WARNING: &str =
+    "[duel] and [duel.models] are retired and ignored; remove both keys from config.toml";
+
+fn warn_retired_duel_config(config_path: &Path) {
+    let path = redact_home_dir(&config_path.display().to_string());
+    tracing::warn!(
+        config = %path,
+        RETIRED_DUEL_CONFIG_WARNING,
     );
 }
 

@@ -5,13 +5,14 @@
 //! (see `main.rs`), like `orbit sweep` itself.
 
 use clap::{Args, Subcommand};
-use orbit_core::OrbitError;
 
+use super::clock::RoutineClockArgs;
 use super::init::RoutineInitArgs;
 use super::list::RoutineListArgs;
 use super::pause::RoutinePauseArgs;
 use super::resume::RoutineResumeArgs;
 use super::show::RoutineShowArgs;
+use crate::command::CommandOut;
 
 #[derive(Args)]
 #[command(
@@ -30,7 +31,7 @@ pub struct RoutineCommand {
 impl RoutineCommand {
     /// All routine subcommands resolve state from the global root; none may
     /// bootstrap a workspace from the caller's cwd.
-    pub fn execute_without_runtime(self) -> Result<(), OrbitError> {
+    pub fn execute_without_runtime(self) -> CommandOut {
         self.command.execute_without_runtime()
     }
 }
@@ -45,17 +46,20 @@ pub enum RoutineSubcommand {
     Pause(RoutinePauseArgs),
     /// Clear a host-local pause
     Resume(RoutineResumeArgs),
+    /// Show, pause, enable, or configure the host OS sweep clock
+    Clock(RoutineClockArgs),
     /// Read this host's identity and optionally install the OS clock unit
     Init(RoutineInitArgs),
 }
 
 impl RoutineSubcommand {
-    fn execute_without_runtime(self) -> Result<(), OrbitError> {
+    fn execute_without_runtime(self) -> CommandOut {
         match self {
             Self::List(args) => args.execute_without_runtime(),
             Self::Show(args) => args.execute_without_runtime(),
             Self::Pause(args) => args.execute_without_runtime(),
             Self::Resume(args) => args.execute_without_runtime(),
+            Self::Clock(args) => args.execute_without_runtime(),
             Self::Init(args) => args.execute_without_runtime(),
         }
     }

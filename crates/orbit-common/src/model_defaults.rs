@@ -57,19 +57,19 @@ pub const CODEX_DEFAULT_MODEL: &str = CODEX_TERRA_MODEL;
 pub const CODEX_DEFAULT_WEAK: &str = "gpt-5.4-mini";
 
 /// Default gemini model for the provider-default map.
-pub const GEMINI_DEFAULT_MODEL: &str = "gemini-3-pro";
+pub const GEMINI_DEFAULT_MODEL: &str = "gemini-3.7-flash";
 
-/// Default gemini model seeded into crew roles (the `pro` CLI alias).
-pub const GEMINI_CREW_MODEL: &str = "pro";
+/// Default gemini model seeded into crew roles.
+pub const GEMINI_CREW_MODEL: &str = "gemini-3.7-flash";
 
 /// Default gemini "strong" model used by the executor model pair.
 pub const GEMINI_PAIR_STRONG: &str = "gemini-3.1-pro";
 
 /// Default gemini "weak" model used by the executor model pair.
-pub const GEMINI_PAIR_WEAK: &str = "gemini-3-flash";
+pub const GEMINI_PAIR_WEAK: &str = "gemini-3.7-flash";
 
-/// Default grok model (single value used everywhere grok defaults appear).
-pub const GROK_DEFAULT_MODEL: &str = "grok-build";
+/// Default Grok Build model (the canonical model listed by `grok models`).
+pub const GROK_DEFAULT_MODEL: &str = "grok-4.6";
 
 /// Cheap Claude model used by the orbit-agent HTTP examples.
 ///
@@ -77,7 +77,7 @@ pub const GROK_DEFAULT_MODEL: &str = "grok-build";
 /// hit the Anthropic Messages API directly, which rejects bare aliases.
 pub const ANTHROPIC_EXAMPLE_MODEL: &str = "claude-haiku-4-5-20251001";
 
-/// Provider → default model used to seed prompt/duel defaults.
+/// Provider → default model used to seed prompt defaults.
 ///
 /// Mirrors the historical `agent_detect::default_model_for` map; `claude` now
 /// resolves to the unversioned [`CLAUDE_DEFAULT_STRONG`] alias. codex/gemini/

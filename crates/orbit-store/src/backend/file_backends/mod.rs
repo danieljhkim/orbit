@@ -1,23 +1,16 @@
 use std::collections::BTreeMap;
 
 use orbit_common::types::{
-    Adr, AdrStatus, ArtifactManifestFileV2, ExecutorDef, ExternalRef, Learning, LearningStatus,
-    OrbitError, PolicyDef, Task, TaskArtifact, TaskComment, TaskHistoryEntry, TaskPriority,
-    TaskStatus,
+    ArtifactManifestFileV2, ExecutorDef, ExternalRef, OrbitError, PolicyDef, Task, TaskArtifact,
+    TaskComment, TaskHistoryEntry, TaskPriority, TaskStatus,
 };
 
 use super::contracts::{
-    AdrArtifactResolution, AdrCreateParams, AdrDocumentUpdateParams, AdrListEntry, AdrListFilter,
-    AdrStoreBackend, ExecutorDefStoreBackend, LearningCreateParams, LearningListEntry,
-    LearningSearchParams, LearningSearchResult, LearningStoreBackend, LearningUpdateParams,
-    PolicyDefStoreBackend, RemoteArtifactStub, TaskArtifactStoreBackend, TaskArtifactUpdateParams,
-    TaskCreateParams, TaskDocumentStoreBackend, TaskDocumentUpdateParams, TaskHistoryStoreBackend,
-    TaskHistoryUpdateParams, TaskStoreBackend,
+    ExecutorDefStoreBackend, PolicyDefStoreBackend, TaskArtifactStoreBackend,
+    TaskArtifactUpdateParams, TaskCreateParams, TaskDocumentStoreBackend, TaskDocumentUpdateParams,
+    TaskHistoryStoreBackend, TaskHistoryUpdateParams, TaskStoreBackend,
 };
-use crate::IdAllocationRecord;
-use crate::file::adr_store::AdrFileStore;
 use crate::file::executor_def_store::ExecutorDefFileStore;
-use crate::file::learning_store::LearningFileStore;
 use crate::file::policy_def_store::PolicyDefFileStore;
 use crate::file::task_store::TaskV2Store;
 use crate::scope::{ScopeStrategy, ScopedStore, resolve};
@@ -172,192 +165,5 @@ impl PolicyDefStoreBackend for PolicyDefFileStore {
     }
 }
 
-impl AdrStoreBackend for AdrFileStore {
-    fn add_adr(&self, params: AdrCreateParams) -> Result<Adr, OrbitError> {
-        self.add_adr(params)
-    }
-
-    fn finalize_preallocated_adr(
-        &self,
-        id: &str,
-        params: AdrCreateParams,
-    ) -> Result<Adr, OrbitError> {
-        self.finalize_preallocated_adr(id, params)
-    }
-
-    fn get_adr(&self, id: &str) -> Result<Option<Adr>, OrbitError> {
-        // ADRs use the WorkspaceOnly strategy per `CLAUDE.md`.
-        resolve::<Adr, _>(self, id)
-    }
-
-    fn resolve_adr_artifact(&self, id: &str) -> Result<AdrArtifactResolution, OrbitError> {
-        AdrFileStore::resolve_adr_artifact(self, id)
-    }
-
-    fn list_adrs(&self) -> Result<Vec<Adr>, OrbitError> {
-        self.list_adrs()
-    }
-
-    fn list_adrs_filtered(&self, filter: AdrListFilter<'_>) -> Result<Vec<Adr>, OrbitError> {
-        AdrFileStore::list_adrs_filtered(self, filter)
-    }
-
-    fn list_adr_entries_filtered(
-        &self,
-        filter: AdrListFilter<'_>,
-        include_remote: bool,
-    ) -> Result<Vec<AdrListEntry>, OrbitError> {
-        AdrFileStore::list_adr_entries_filtered(self, filter, include_remote)
-    }
-
-    fn get_adr_remote_stub(&self, id: &str) -> Result<Option<RemoteArtifactStub>, OrbitError> {
-        AdrFileStore::get_adr_remote_stub(self, id)
-    }
-
-    fn list_orphaned_adr_allocations(&self) -> Result<Vec<IdAllocationRecord>, OrbitError> {
-        AdrFileStore::list_orphaned_adr_allocations(self)
-    }
-
-    fn abandon_orphaned_adr_allocation(&self, id: &str) -> Result<bool, OrbitError> {
-        AdrFileStore::abandon_orphaned_adr_allocation(self, id)
-    }
-
-    fn update_adr_status(&self, id: &str, new_status: AdrStatus) -> Result<(), OrbitError> {
-        self.update_adr_status(id, new_status)
-    }
-
-    fn update_adr_document(
-        &self,
-        id: &str,
-        fields: &AdrDocumentUpdateParams,
-    ) -> Result<(), OrbitError> {
-        self.update_adr_document(id, fields)
-    }
-
-    fn delete_adr(&self, id: &str) -> Result<bool, OrbitError> {
-        self.delete_adr(id)
-    }
-
-    fn rebuild_index(&self) -> Result<(), OrbitError> {
-        self.rebuild_index()
-    }
-
-    fn supersede_adr(&self, old_id: &str, new_id: &str) -> Result<(), OrbitError> {
-        self.supersede_adr(old_id, new_id)
-    }
-}
-
-impl LearningStoreBackend for LearningFileStore {
-    fn create_learning(&self, params: LearningCreateParams) -> Result<Learning, OrbitError> {
-        self.create_learning(params)
-    }
-
-    fn finalize_preallocated_learning(
-        &self,
-        id: &str,
-        params: LearningCreateParams,
-    ) -> Result<Learning, OrbitError> {
-        self.finalize_preallocated_learning(id, params)
-    }
-
-    fn get_learning(&self, id: &str) -> Result<Option<Learning>, OrbitError> {
-        // Learnings use the WorkspaceOnly strategy per `CLAUDE.md` Scoping
-        // Rules and ADR-003.
-        resolve::<Learning, _>(self, id)
-    }
-
-    fn get_learning_federated(&self, id: &str) -> Result<Option<Learning>, OrbitError> {
-        LearningFileStore::get_learning_federated(self, id)
-    }
-
-    fn list_learnings(&self, status: Option<LearningStatus>) -> Result<Vec<Learning>, OrbitError> {
-        self.list_learnings(status)
-    }
-
-    fn list_learning_entries(
-        &self,
-        status: Option<LearningStatus>,
-        include_remote: bool,
-    ) -> Result<Vec<LearningListEntry>, OrbitError> {
-        LearningFileStore::list_learning_entries(self, status, include_remote)
-    }
-
-    fn get_learning_remote_stub(&self, id: &str) -> Result<Option<RemoteArtifactStub>, OrbitError> {
-        LearningFileStore::get_learning_remote_stub(self, id)
-    }
-
-    fn list_orphaned_learning_allocations(&self) -> Result<Vec<IdAllocationRecord>, OrbitError> {
-        LearningFileStore::list_orphaned_learning_allocations(self)
-    }
-
-    fn abandon_orphaned_learning_allocation(&self, id: &str) -> Result<bool, OrbitError> {
-        LearningFileStore::abandon_orphaned_learning_allocation(self, id)
-    }
-
-    fn search_learnings(
-        &self,
-        params: LearningSearchParams,
-    ) -> Result<Vec<LearningSearchResult>, OrbitError> {
-        self.search_learnings(params)
-    }
-
-    fn update_learning(
-        &self,
-        id: &str,
-        params: LearningUpdateParams,
-    ) -> Result<Learning, OrbitError> {
-        self.update_learning(id, params)
-    }
-
-    fn supersede_learning(&self, old_id: &str, new_id: &str) -> Result<(), OrbitError> {
-        self.supersede_learning(old_id, new_id)
-    }
-
-    fn archive_learning(&self, id: &str) -> Result<bool, OrbitError> {
-        self.archive_learning(id)
-    }
-
-    fn delete_learning(&self, id: &str) -> Result<bool, OrbitError> {
-        self.delete_learning(id)
-    }
-
-    fn sync_learnings(&self) -> Result<(), OrbitError> {
-        self.sync_learnings()
-    }
-}
-
-impl ScopedStore<Learning> for LearningFileStore {
-    type Err = OrbitError;
-
-    fn strategy(&self) -> ScopeStrategy {
-        ScopeStrategy::WorkspaceOnly
-    }
-
-    fn get_workspace(&self, key: &str) -> Result<Option<Learning>, OrbitError> {
-        self.get_learning(key)
-    }
-
-    fn get_global(&self, _key: &str) -> Result<Option<Learning>, OrbitError> {
-        Ok(None)
-    }
-}
-
-impl ScopedStore<Adr> for AdrFileStore {
-    type Err = OrbitError;
-
-    fn strategy(&self) -> ScopeStrategy {
-        ScopeStrategy::WorkspaceOnly
-    }
-
-    fn get_workspace(&self, key: &str) -> Result<Option<Adr>, OrbitError> {
-        self.get_adr(key)
-    }
-
-    fn get_global(&self, _key: &str) -> Result<Option<Adr>, OrbitError> {
-        Ok(None)
-    }
-}
-
-#[cfg(test)]
 #[cfg(test)]
 mod tests;

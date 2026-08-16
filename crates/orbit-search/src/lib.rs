@@ -1,5 +1,5 @@
 #![deny(clippy::print_stderr, clippy::print_stdout)]
-// ORB-00004: legacy semantic-indexing surfaces still need a focused documentation pass.
+// Legacy semantic-indexing surfaces still need a focused documentation pass.
 #![allow(missing_docs)]
 // Unit tests use unwrap/expect for fixture setup; production call sites remain linted.
 #![cfg_attr(test, allow(clippy::expect_used, clippy::unwrap_used))]
@@ -39,31 +39,25 @@ mod vector;
 mod tests;
 
 pub use commands::{
-    AdrIndexParams, AdrIndexResult, AdrSemanticHit, AdrSemanticSearchParams,
-    AdrSemanticSearchResult, CompanionStatus, DocIndexParams, DocIndexResult, DocSemanticHit,
-    DocSemanticSearchParams, DocSemanticSearchResult, IndexKind, LearningIndexParams,
-    LearningIndexResult, LearningSemanticHit, LearningSemanticSearchParams,
-    LearningSemanticSearchResult, ScoreBreakdown, SemanticHit, SemanticIndexParams,
+    CompanionStatus, DocIndexParams, DocIndexResult, DocSemanticHit, DocSemanticSearchParams,
+    DocSemanticSearchResult, IndexKind, ScoreBreakdown, SemanticHit, SemanticIndexParams,
     SemanticIndexResult, SemanticInstallParams, SemanticInstallResult, SemanticReindexParams,
     SemanticReindexResult, SemanticRelatedParams, SemanticRelatedResult, SemanticSearchParams,
     SemanticSearchResult, SemanticStatsResult, SemanticUninstallParams, SemanticUninstallResult,
-    TaskIndexResult, adr_index, adr_semantic_search, doc_index, doc_semantic_search,
-    learning_index, learning_semantic_search, semantic_index, semantic_install, semantic_reindex,
-    semantic_related, semantic_search, semantic_stats, semantic_uninstall,
+    TaskIndexResult, doc_index, doc_semantic_search, semantic_index, semantic_install,
+    semantic_reindex, semantic_related, semantic_search, semantic_stats, semantic_uninstall,
 };
 pub use companion::{
     CompanionPaths, INSTALL_REMEDIATION, locate_companion, platform_companion_filename, platform_id,
 };
 pub use embedder::{DEFAULT_MODEL, Embedder, ModelSpec, default_model, supported_models};
 pub use lexical::docs::{
-    AdrSearchResult, AdrSearchSource, DocSearchResult, DocSearchSource, SearchResult,
-    adr_paths_contain_path, score_adr_record, score_doc_record, sort_search_results,
+    DocSearchResult, DocSearchSource, SearchResult, score_doc_record, sort_search_results,
 };
 pub use noop::NoopEmbedder;
 pub use rpc::{RpcError, RpcRequest, RpcResponse, RpcResult, rpc_error_to_orbit};
 pub use subprocess::SubprocessEmbedder;
 pub use vector::{
-    AdrEmbeddingSource, DocEmbeddingSource, EmbedWorker, LearningEmbeddingSource, SOURCE_KIND_ADR,
-    SOURCE_KIND_DOC, SOURCE_KIND_LEARNING, SOURCE_KIND_TASK, SemanticStats, UpsertReport,
-    VectorStore,
+    DocEmbeddingSource, EmbedWorker, SOURCE_KIND_DOC, SOURCE_KIND_TASK, SemanticStats,
+    UpsertReport, VectorStore,
 };

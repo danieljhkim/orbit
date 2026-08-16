@@ -2,71 +2,19 @@
 // invocation_store.rs) to sibling under `sqlite/tests/` per ORB-00247 and
 // docs/design-patterns/test_layout.md.
 
-use orbit_common::test_fixtures::{TEST_CODEX_MODEL, TEST_GEMINI_MODEL};
-use orbit_common::types::{InvocationTrace, RoleSlot, TokenUsage, ToolCallTrace};
+use chrono::{TimeZone, Utc};
+use orbit_common::test_fixtures::TEST_CODEX_MODEL;
+use orbit_common::types::{InvocationTrace, TokenUsage, ToolCallTrace};
 
 // Frozen production Claude model literal, chosen because the shipped
 // `assets/model_prices.yaml` prices it (unlike the frozen test fixtures,
 // which are deliberately kept out of the production price table).
 const PRICED_MODEL: &str = "claude-opus-4-7";
 
-use super::super::invocation_store::{InvocationInsertParams, InvocationQuery};
+use super::super::invocation_store::{
+    InvocationAccountingQuery, InvocationInsertParams, InvocationQuery,
+};
 use crate::Store;
-
-#[test]
-fn invocation_records_persist_planning_duel_slot() {
-    let store = Store::open_in_memory().expect("open store");
-
-    store
-        .insert_invocation_trace_record(&InvocationInsertParams {
-            job_run_id: "jrun-1".to_string(),
-            activity_id: "propose_duel_plan".to_string(),
-            agent: "gemini".to_string(),
-            model: Some(TEST_GEMINI_MODEL.to_string()),
-            slot: Some(RoleSlot::PlannerA),
-            task_ids: vec!["ORB-1".to_string()],
-            trace: InvocationTrace::default(),
-        })
-        .expect("insert invocation");
-
-    let records = store
-        .list_invocation_records(&InvocationQuery {
-            job_run_id: Some("jrun-1".to_string()),
-            slot: Some(RoleSlot::PlannerA),
-            limit: 10,
-            ..InvocationQuery::default()
-        })
-        .expect("list records");
-    assert_eq!(records.len(), 1);
-    assert_eq!(records[0].slot, Some(RoleSlot::PlannerA));
-}
-
-#[test]
-fn invocation_records_persist_non_duel_slot_as_null() {
-    let store = Store::open_in_memory().expect("open store");
-
-    store
-        .insert_invocation_trace_record(&InvocationInsertParams {
-            job_run_id: "jrun-2".to_string(),
-            activity_id: "implement_one".to_string(),
-            agent: "codex".to_string(),
-            model: Some(TEST_CODEX_MODEL.to_string()),
-            slot: None,
-            task_ids: vec!["ORB-2".to_string()],
-            trace: InvocationTrace::default(),
-        })
-        .expect("insert invocation");
-
-    let records = store
-        .list_invocation_records(&InvocationQuery {
-            job_run_id: Some("jrun-2".to_string()),
-            limit: 10,
-            ..InvocationQuery::default()
-        })
-        .expect("list records");
-    assert_eq!(records.len(), 1);
-    assert_eq!(records[0].slot, None);
-}
 
 #[test]
 fn invocation_records_filter_by_nested_task_and_tool() {
@@ -78,7 +26,6 @@ fn invocation_records_filter_by_nested_task_and_tool() {
             activity_id: "implement_one".to_string(),
             agent: "codex".to_string(),
             model: Some(TEST_CODEX_MODEL.to_string()),
-            slot: None,
             task_ids: vec!["ORB-1".to_string()],
             trace: InvocationTrace {
                 usage: TokenUsage {
@@ -104,7 +51,6 @@ fn invocation_records_filter_by_nested_task_and_tool() {
             activity_id: "implement_one".to_string(),
             agent: "codex".to_string(),
             model: Some(TEST_CODEX_MODEL.to_string()),
-            slot: None,
             task_ids: vec!["ORB-2".to_string()],
             trace: InvocationTrace {
                 tool_calls: vec![ToolCallTrace {
@@ -144,7 +90,6 @@ fn invocation_records_derive_cost_from_price_table_and_keep_provider_cost() {
             activity_id: "implement_one".to_string(),
             agent: "claude".to_string(),
             model: Some(PRICED_MODEL.to_string()),
-            slot: None,
             task_ids: vec!["ORB-3".to_string()],
             trace: InvocationTrace {
                 usage: TokenUsage {
@@ -194,7 +139,6 @@ fn invocation_records_round_trip_one_hour_cache_writes_and_derive_ground_truth()
             activity_id: "implement_one".to_string(),
             agent: "claude".to_string(),
             model: Some("claude-opus-4-8[1m]".to_string()),
-            slot: None,
             task_ids: vec!["ORB-5".to_string()],
             trace: InvocationTrace {
                 usage: TokenUsage {
@@ -228,6 +172,63 @@ fn invocation_records_round_trip_one_hour_cache_writes_and_derive_ground_truth()
 }
 
 #[test]
+fn historical_invocation_is_repriced_at_query_time_without_a_migration() {
+    let store = Store::open_in_memory().expect("open store");
+
+    store
+        .insert_invocation_trace_record(&InvocationInsertParams {
+            job_run_id: "jrun-historical-gpt".to_string(),
+            activity_id: "implement_one".to_string(),
+            agent: "codex".to_string(),
+            model: Some("gpt-5.6-terra".to_string()),
+            task_ids: vec!["ORB-10579".to_string()],
+            trace: InvocationTrace {
+                usage: TokenUsage {
+                    // OpenAI input is gross: 500k uncached + 200k read + 300k write.
+                    input: 1_000_000,
+                    cache_read: 200_000,
+                    cache_create: 300_000,
+                    output: 1_000_000,
+                    ..TokenUsage::default()
+                },
+                ..InvocationTrace::default()
+            },
+        })
+        .expect("insert invocation");
+
+    // Simulate a row stored before the July 30 price change. No schema or row
+    // migration is involved; the query-time lookup uses this persisted date.
+    store
+        .with_transaction(|tx| {
+            tx.connection()
+                .execute(
+                    "UPDATE invocations SET ts = ?1 WHERE job_run_id = ?2",
+                    ["2026-07-29T23:59:59+00:00", "jrun-historical-gpt"],
+                )
+                .map_err(|error| orbit_common::types::OrbitError::Store(error.to_string()))?;
+            Ok(())
+        })
+        .expect("set historical timestamp");
+
+    let records = store
+        .list_invocation_records(&InvocationQuery {
+            job_run_id: Some("jrun-historical-gpt".to_string()),
+            limit: 10,
+            ..InvocationQuery::default()
+        })
+        .expect("list historical invocation");
+
+    let derived = records[0]
+        .derived_cost_usd
+        .expect("historical row is priced");
+    // Historical Terra: 0.5M*$2.50 + 0.2M*$0.25 + 0.3M*$3.125 + 1M*$15.
+    assert!(
+        (derived - 17.2375).abs() < 1e-12,
+        "derived cost was {derived}"
+    );
+}
+
+#[test]
 fn invocation_records_leave_derived_cost_none_for_an_unpriced_model() {
     let store = Store::open_in_memory().expect("open store");
 
@@ -237,7 +238,6 @@ fn invocation_records_leave_derived_cost_none_for_an_unpriced_model() {
             activity_id: "implement_one".to_string(),
             agent: "codex".to_string(),
             model: Some("some-unpriced-model".to_string()),
-            slot: None,
             task_ids: vec!["ORB-4".to_string()],
             trace: InvocationTrace::default(),
         })
@@ -254,4 +254,87 @@ fn invocation_records_leave_derived_cost_none_for_an_unpriced_model() {
     assert_eq!(records.len(), 1);
     assert_eq!(records[0].provider_cost_usd, None);
     assert_eq!(records[0].derived_cost_usd, None);
+}
+
+#[test]
+fn accounting_facts_are_unbounded_distinct_and_half_open_without_tool_hydration() {
+    let store = Store::open_in_memory().expect("open store");
+    let lower = Utc
+        .with_ymd_and_hms(2026, 8, 1, 0, 0, 0)
+        .single()
+        .expect("lower bound");
+    let upper = Utc
+        .with_ymd_and_hms(2026, 8, 2, 0, 0, 0)
+        .single()
+        .expect("upper bound");
+
+    for index in 0..125 {
+        store
+            .insert_invocation_trace_record(&InvocationInsertParams {
+                job_run_id: format!("jrun-accounting-{index}"),
+                activity_id: "implement".to_string(),
+                agent: "codex".to_string(),
+                model: Some(PRICED_MODEL.to_string()),
+                task_ids: vec![
+                    "ORB-DUPLICATE".to_string(),
+                    "ORB-DUPLICATE".to_string(),
+                    format!("ORB-{index}"),
+                ],
+                trace: InvocationTrace {
+                    usage: TokenUsage {
+                        input: 10,
+                        cache_read: 2,
+                        cache_create: 3,
+                        cache_create_1h: 4,
+                        output: 5,
+                    },
+                    tool_calls: vec![ToolCallTrace {
+                        seq: 0,
+                        tool_name: "fs.read".to_string(),
+                        result_bytes: 99,
+                        result_payload: None,
+                    }],
+                    duration_ms: 1,
+                    provider_model: None,
+                    provider_cost_usd: Some(0.25),
+                },
+            })
+            .expect("insert accounting invocation");
+    }
+
+    let connection = store.connection();
+    let conn = connection.lock().expect("lock store");
+    conn.execute(
+        "UPDATE invocations SET ts = ?1",
+        [(lower + chrono::Duration::hours(1)).to_rfc3339()],
+    )
+    .expect("place rows inside window");
+    conn.execute(
+        "UPDATE invocations SET ts = ?1 WHERE id = 1",
+        [lower.to_rfc3339()],
+    )
+    .expect("place lower boundary");
+    conn.execute(
+        "UPDATE invocations SET ts = ?1 WHERE id = 125",
+        [upper.to_rfc3339()],
+    )
+    .expect("place upper boundary");
+    drop(conn);
+
+    let facts = store
+        .list_invocation_accounting_facts(&InvocationAccountingQuery {
+            since: Some(lower),
+            until: upper,
+        })
+        .expect("load accounting facts");
+
+    assert_eq!(facts.len(), 124, "the loader has no detailed-list row cap");
+    assert_eq!(facts[0].task_ids.len(), 2, "duplicate task ids collapse");
+    assert_eq!(facts[0].cache_create_1h_tokens, 4);
+    assert_eq!(facts[0].provider_cost_usd, Some(0.25));
+    assert!(facts[0].derived_cost_usd.is_some());
+    assert!(
+        facts.iter().all(|fact| fact.id != 125),
+        "until is exclusive"
+    );
 }

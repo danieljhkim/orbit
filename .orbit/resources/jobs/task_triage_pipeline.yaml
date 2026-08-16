@@ -58,6 +58,9 @@ spec:
       target: activity:triage_failed_runs
       default_input:
         candidates: "{{ steps.list_candidates.output.candidates }}"
+        # Causes dispatch to resolve workflow.system_crew into the explicit
+        # crew input, rather than letting the reviewer label inherit a run crew.
+        system_crew: true
 
     - id: apply_dispositions
       when: "{{ steps.list_candidates.output.candidate_count }} != 0"

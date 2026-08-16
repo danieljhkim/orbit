@@ -36,6 +36,16 @@ fn test_writer(run_id: &str) -> V2AuditWriter {
     V2AuditWriter::new(run_id, "test-agent", inner)
 }
 
+fn execute_job(
+    job: &JobV2,
+    input: Value,
+    run_id: &str,
+    audit: std::sync::Arc<V2AuditWriter>,
+    host: &dyn RuntimeHost,
+) -> Result<JobOutcome, DispatchError> {
+    super::execute_job_with_resume(job, input, run_id, audit, host, None)
+}
+
 /// [ORB-00414] Envelope sink that always fails, used to exercise the non-fatal
 /// audit-failure recording path (counter + tracing error + degraded flag).
 struct FailingEnvelopeSink;
@@ -168,7 +178,7 @@ impl Visit for FieldCapture {
 // Shared scripted host for executor-block tests
 // --------------------------------------------------------------------------
 //
-// `ScriptedHost` is a minimal `V2RuntimeHost` returning scripted outcomes
+// `ScriptedHost` is a minimal `RuntimeHost` returning scripted outcomes
 // per deterministic-action name. Per ADR-047 each executor-block test module
 // reuses this scaffolding instead of re-deriving its own; broadening the
 // surface (e.g. agent_loop or shell hosts) belongs here rather than in any
@@ -248,7 +258,7 @@ impl ScriptedHost {
     }
 }
 
-impl V2RuntimeHost for ScriptedHost {
+impl RuntimeHost for ScriptedHost {
     fn run_deterministic(
         &self,
         action: &str,
@@ -307,12 +317,6 @@ impl V2RuntimeHost for ScriptedHost {
         !self.unregistered.iter().any(|name| name == action)
     }
 
-    fn api_key_for(&self, _provider: &str) -> Result<String, DispatchError> {
-        Err(DispatchError::AgentLoopFailed(
-            "scripted host: no credentials".into(),
-        ))
-    }
-
     fn resolve_cli_executor(
         &self,
         _provider: &str,
@@ -354,7 +358,6 @@ pub(super) fn deterministic_target(action: &str) -> TargetStep {
         default_input: None,
         timeout_seconds: 0,
         session: None,
-        role: None,
     }
 }
 

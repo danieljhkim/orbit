@@ -6,7 +6,7 @@ use orbit_core::{DocType, OrbitError, OrbitRuntime};
 use serde::Serialize;
 use serde_json::Value;
 
-use crate::command::Execute;
+use crate::command::{CommandOut, CommandOutput, Execute, Payload};
 
 #[derive(Args)]
 #[command(about = "List, show, and curate the indexed docs corpus")]
@@ -88,7 +88,7 @@ pub struct DocsMigrateArgs {
 }
 
 impl Execute for DocsCommand {
-    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+    fn execute(self, runtime: &OrbitRuntime) -> CommandOut {
         match self.command {
             DocsSubcommand::List(args) => args.execute(runtime),
             DocsSubcommand::Show(args) => args.execute(runtime),
@@ -100,7 +100,7 @@ impl Execute for DocsCommand {
 }
 
 impl Execute for DocsListArgs {
-    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+    fn execute(self, runtime: &OrbitRuntime) -> CommandOut {
         let doc_type = self
             .doc_type
             .as_deref()
@@ -108,11 +108,19 @@ impl Execute for DocsListArgs {
             .transpose()
             .map_err(OrbitError::InvalidInput)?;
         let records = runtime.list_docs(doc_type, self.tag.as_deref())?;
-        if self.json {
-            print_json(&records)
-        } else {
-            let mut table =
-                crate::output::table::build_table(&["PATH", "TYPE", "SUMMARY", "TAGS", "RELATED"]);
+        let values = to_json_values(&records)?;
+
+        {
+            use crate::output::table::{Column, Table};
+            // `orbit docs show <path>` prints a doc in full.
+            let mut table = Table::new(vec![
+                Column::new("PATH").path(),
+                Column::new("TYPE").fixed().filtered(doc_type.is_some()),
+                Column::new("SUMMARY"),
+                Column::new("TAGS").filtered(self.tag.is_some()),
+                Column::new("RELATED"),
+            ])
+            .empty_message("no docs matching the given filters");
             for record in records {
                 table.add_row(vec![
                     record.path,
@@ -128,17 +136,19 @@ impl Execute for DocsListArgs {
                         .join(", "),
                 ]);
             }
-            println!("{table}");
-            Ok(())
+            Ok(Payload::list(values, table).into())
         }
     }
 }
 
 impl Execute for DocsShowArgs {
-    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+    fn execute(self, runtime: &OrbitRuntime) -> CommandOut {
         let shown = runtime.show_doc(&self.path)?;
         if self.json {
-            print_json(&shown)
+            {
+                print_json(&shown)?;
+                Ok(CommandOutput::Silent)
+            }
         } else {
             println!("Path: {}", shown.path);
             println!("Type: {}", shown.frontmatter.doc_type);
@@ -168,37 +178,43 @@ impl Execute for DocsShowArgs {
                 );
             }
             println!("\n{}", shown.body);
-            Ok(())
+            Ok(CommandOutput::Silent)
         }
     }
 }
 
 impl Execute for DocsAddArgs {
-    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+    fn execute(self, runtime: &OrbitRuntime) -> CommandOut {
         let outcome = runtime.add_docs_root(&self.path)?;
         if self.json {
-            print_json(&outcome)
+            {
+                print_json(&outcome)?;
+                Ok(CommandOutput::Silent)
+            }
         } else if outcome.added {
             println!("Added docs root: {}", outcome.path);
-            Ok(())
+            Ok(CommandOutput::Silent)
         } else {
             println!("Docs root already registered: {}", outcome.path);
-            Ok(())
+            Ok(CommandOutput::Silent)
         }
     }
 }
 
 impl Execute for DocsIndexArgs {
-    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+    fn execute(self, runtime: &OrbitRuntime) -> CommandOut {
         let result = runtime.semantic_index(SemanticIndexParams {
             model: self.model,
             force: self.force,
             kind: Some(IndexKind::Docs),
         })?;
         if self.json {
-            crate::output::json::print_pretty(&serde_json::json!(result))
+            Ok(Payload::document(serde_json::json!(result)).into())
         } else {
-            print_docs_index_text(result)
+            {
+                print_docs_index_text(result)?;
+                Ok(CommandOutput::Silent)
+            }
         }
     }
 }
@@ -227,13 +243,16 @@ fn print_docs_index_text(result: SemanticIndexResult) -> Result<(), OrbitError> 
 }
 
 impl Execute for DocsMigrateArgs {
-    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+    fn execute(self, runtime: &OrbitRuntime) -> CommandOut {
         let report = runtime.migrate_docs(!self.confirm)?;
         if self.json {
-            print_json(&report)
+            {
+                print_json(&report)?;
+                Ok(CommandOutput::Silent)
+            }
         } else if report.changed.is_empty() {
             println!("No docs need migration.");
-            Ok(())
+            Ok(CommandOutput::Silent)
         } else {
             for change in &report.changed {
                 println!("{}", change.diff);
@@ -243,7 +262,7 @@ impl Execute for DocsMigrateArgs {
             } else {
                 println!("Migrated {} doc(s).", report.changed.len());
             }
-            Ok(())
+            Ok(CommandOutput::Silent)
         }
     }
 }
@@ -252,4 +271,15 @@ fn print_json<T: Serialize>(value: &T) -> Result<(), OrbitError> {
     let value: Value = serde_json::to_value(value)
         .map_err(|error| OrbitError::Execution(format!("serialize docs output: {error}")))?;
     crate::output::json::print_pretty(&value)
+}
+
+/// The list's records, in the same shape `--json` has always emitted.
+fn to_json_values<T: Serialize>(records: &[T]) -> Result<Vec<Value>, OrbitError> {
+    records
+        .iter()
+        .map(|record| {
+            serde_json::to_value(record)
+                .map_err(|error| OrbitError::Execution(format!("serialize docs output: {error}")))
+        })
+        .collect()
 }

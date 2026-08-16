@@ -2,7 +2,7 @@ use clap::Args;
 use orbit_core::{OrbitError, OrbitRuntime};
 use serde_json::{Value, json};
 
-use crate::command::Execute;
+use crate::command::{CommandOut, Execute, Payload};
 
 #[derive(Args)]
 pub struct ActivityListArgs {
@@ -14,25 +14,36 @@ pub struct ActivityListArgs {
 }
 
 impl Execute for ActivityListArgs {
-    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+    fn execute(self, runtime: &OrbitRuntime) -> CommandOut {
         let catalog = runtime
             .v2_activity_catalog()
             .map_err(|err| OrbitError::Store(format!("v2 activity catalog: {err}")))?;
 
-        if self.ops {
-            let values: Vec<Value> = catalog
+        // `--ops` narrows the record shape only; every mode lists the same
+        // activities.
+        let values: Vec<Value> = if self.ops {
+            catalog
                 .names()
                 .filter_map(|name| catalog.get(name).map(|spec| v2_signal_json(name, spec)))
-                .collect();
-            crate::output::json::print_pretty(&Value::Array(values))
-        } else if self.json {
-            let values: Vec<Value> = catalog
+                .collect()
+        } else {
+            catalog
                 .names()
                 .filter_map(|name| catalog.get(name).map(|spec| v2_full_json(name, spec)))
-                .collect();
-            crate::output::json::print_pretty(&Value::Array(values))
-        } else {
-            let mut table = crate::output::table::build_table(&["ID", "TYPE", "DESCRIPTION"]);
+                .collect()
+        };
+
+        {
+            use crate::output::table::{Column, Table};
+            // No `orbit activity show` exists yet, so a machine-readable mode
+            // is the only untruncated view of a description. Tracked in
+            // docs/design/terminal-interface/references/detail-commands.md.
+            let mut table = Table::new(vec![
+                Column::new("ID").fixed(),
+                Column::new("TYPE").fixed(),
+                Column::new("DESCRIPTION"),
+            ])
+            .empty_message("no activities registered");
             for name in catalog.names() {
                 use comfy_table::Cell;
                 let Some(spec) = catalog.get(name) else {
@@ -44,8 +55,7 @@ impl Execute for ActivityListArgs {
                     Cell::new(&spec.description),
                 ]);
             }
-            println!("{table}");
-            Ok(())
+            Ok(Payload::list(values, table).into())
         }
     }
 }

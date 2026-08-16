@@ -6,7 +6,7 @@ use serde_json::{Value, json};
 use super::super::open::pr_open;
 use super::super::promote::pr_promote;
 use super::test_support::*;
-use crate::context::TaskReadHost;
+use crate::context::RuntimeHost;
 use crate::executor::automation::vcs::failure::pr_failure_handoff;
 use crate::executor::automation::vcs::freshness::{prepare_pr_handoff, rebase_pr_branch};
 use crate::executor::automation::vcs::push::push_batch_changes;
@@ -33,7 +33,7 @@ fn push_classifies_missing_current_fast_forward_remote_ahead_and_divergent_refs(
             .expect("reuse current ref")["decision"],
         json!("reused_current")
     );
-    assert!(current_host.tool_calls().is_empty());
+    assert!(current_host.vcs_calls().is_empty());
 
     let fast_forward = pr_workspace();
     fs::write(fast_forward.repo.join("fast-forward.txt"), "local\n").expect("write local");
@@ -46,7 +46,7 @@ fn push_classifies_missing_current_fast_forward_remote_ahead_and_divergent_refs(
         json!("performed_fast_forward")
     );
     assert_eq!(
-        fast_forward_host.tool_calls()[0].input["force_with_lease"],
+        fast_forward_host.vcs_calls()[0].input["force_with_lease"],
         json!(false)
     );
 
@@ -61,7 +61,7 @@ fn push_classifies_missing_current_fast_forward_remote_ahead_and_divergent_refs(
     let error = push_batch_changes(&remote_ahead_host, &generic_push_input(&remote_ahead.repo))
         .expect_err("remote-only commit must not be overwritten");
     assert!(error.to_string().contains("remote-only history"));
-    assert!(remote_ahead_host.tool_calls().is_empty());
+    assert!(remote_ahead_host.vcs_calls().is_empty());
 
     let divergent = pr_workspace();
     let pre_divergence = git(&divergent.repo, &["rev-parse", "HEAD"]);
@@ -85,20 +85,37 @@ fn push_classifies_missing_current_fast_forward_remote_ahead_and_divergent_refs(
     let error = push_batch_changes(&divergent_host, &input)
         .expect_err("stale expected remote SHA must not authorize force push");
     assert!(error.to_string().contains("no durable rewrite checkpoint"));
-    assert!(divergent_host.tool_calls().is_empty());
+    assert!(divergent_host.vcs_calls().is_empty());
     input["expected_remote_sha"] = json!(observed_remote);
     let result = push_batch_changes(&divergent_host, &input).expect("exact checkpoint authorizes");
     assert_eq!(result["decision"], json!("performed_force_with_lease"));
     let push = divergent_host
-        .tool_calls()
+        .vcs_calls()
         .into_iter()
-        .find(|call| call.name == "git.push")
+        .find(|call| call.operation == PUSH_OPERATION)
         .expect("force push call");
     assert_eq!(push.input["force_with_lease"], json!(true));
     assert_eq!(
         push.input["expected_remote_sha"],
         input["expected_remote_sha"]
     );
+}
+
+#[test]
+fn push_propagates_private_vcs_failure() {
+    let workspace = pr_workspace();
+    fs::write(workspace.repo.join("push-failure.txt"), "local\n").expect("write local change");
+    git(&workspace.repo, &["add", "push-failure.txt"]);
+    git(&workspace.repo, &["commit", "-m", "local push candidate"]);
+    let host = PrOpenTestHost::new(Vec::new(), workspace.repo.clone());
+    host.fail_vcs(PUSH_OPERATION, "git: simulated push failure");
+
+    let error = push_batch_changes(&host, &generic_push_input(&workspace.repo))
+        .expect_err("private push failure must propagate");
+
+    assert!(error.to_string().contains("simulated push failure"));
+    assert_eq!(host.vcs_calls().len(), 1);
+    assert_eq!(host.vcs_calls()[0].operation, PUSH_OPERATION);
 }
 
 #[test]
@@ -130,6 +147,38 @@ fn recovered_rebase_continues_remaining_handoff_phases_without_replay() {
     assert_eq!(prepared["decision"], json!("rebase_required"));
     let rebase_input = rebase_input(&input, &prepared);
     rebase_pr_branch(&host, &rebase_input).expect_err("first rebase conflicts");
+    let retry_error =
+        rebase_pr_branch(&host, &rebase_input).expect_err("retry reports the still-stopped rebase");
+    let retry_message = retry_error.to_string();
+    assert!(
+        retry_message.contains("rebase remains stopped with unresolved conflicts"),
+        "{retry_message}"
+    );
+    assert!(
+        retry_message.contains("conflicting paths: src/lib.rs"),
+        "{retry_message}"
+    );
+    assert!(
+        !retry_message.contains("prepared branch"),
+        "stopped rebase must not be misclassified as a checkout mismatch: {retry_message}"
+    );
+    let failure_comment = host
+        .comments_for(task_id)
+        .into_iter()
+        .find(|comment| comment.message.contains("[phase=rebase]"))
+        .expect("rebase failure handoff comment");
+    assert!(
+        failure_comment
+            .message
+            .contains("Worktree state: rebase stopped with unresolved conflicts."),
+        "{}",
+        failure_comment.message
+    );
+    assert!(
+        failure_comment.message.contains("`git rebase --continue`"),
+        "{}",
+        failure_comment.message
+    );
 
     fs::write(
         workspace.repo.join("src/lib.rs"),
@@ -170,15 +219,15 @@ fn recovered_rebase_continues_remaining_handoff_phases_without_replay() {
     let push = push_batch_changes(&host, &push_input(&input, &synced)).expect("safe force push");
     assert_eq!(push["decision"], json!("performed_force_with_lease"));
 
-    host.queue_tool_error("github.pr.view", "local persistence/view failed");
+    host.queue_vcs_error(PR_VIEW_OPERATION, "local persistence/view failed");
     let open_input = open_input(&input, &synced);
     pr_open(&host, &open_input).expect_err("first create loses local view result");
     let opened = pr_open(&host, &open_input).expect("retry reuses external PR");
     assert_eq!(opened["decision"], json!("reused"));
     assert_eq!(
-        host.tool_calls()
+        host.vcs_calls()
             .iter()
-            .filter(|call| call.name == "github.pr.create")
+            .filter(|call| call.operation == PR_CREATE_OPERATION)
             .count(),
         1
     );
@@ -198,6 +247,39 @@ fn recovered_rebase_continues_remaining_handoff_phases_without_replay() {
     let task = host.get_task(task_id).expect("task");
     assert_eq!(task.status, TaskStatus::Review);
     assert_eq!(task.github_pr_number(), Some("42"));
+}
+
+#[test]
+fn rebase_retry_distinguishes_wrong_branch_from_stopped_rebase() {
+    let workspace = rebase_conflict_pr_workspace();
+    let task_id = "ORB-WRONG-BRANCH";
+    let host = PrOpenTestHost::new(
+        vec![batch_task(
+            task_id,
+            "Reject wrong branch",
+            "Outcome: success\nChanges:\n- Candidate is ready.",
+        )],
+        workspace.repo.clone(),
+    );
+    let input = json!({
+        "workspace_path": workspace.repo,
+        "job_run_id": "batch-1",
+        "completed_task_ids": [task_id],
+        "base": "agent-main",
+        "base_sync": "local",
+    });
+    let prepared = prepare_pr_handoff(&host, &input).expect("prepare branch checkpoint");
+    git(&workspace.repo, &["checkout", "agent-main"]);
+
+    let error = rebase_pr_branch(&host, &rebase_input(&input, &prepared))
+        .expect_err("genuine wrong branch remains rejected");
+    let message = error.to_string();
+    assert!(
+        message
+            .contains("prepared branch 'orbit/test-batch' is not checked out (found 'agent-main')"),
+        "{message}"
+    );
+    assert!(!message.contains("rebase remains stopped"), "{message}");
 }
 
 #[test]
@@ -382,19 +464,23 @@ fn non_fast_forward_drift_handoff_commits_dirty_work_and_raises_pr() {
         "chore: Preserve dirty candidate [ORB-DIRTY-HANDOFF]"
     );
     assert!(
-        host.tool_calls().iter().any(|call| call.name == "git.push"),
+        host.vcs_calls()
+            .iter()
+            .any(|call| call.operation == PUSH_OPERATION),
         "the recovery branch is pushed before PR creation"
     );
     assert!(
         host.pr_create_body().contains("primary_checkout_drift"),
         "the blocked PR preserves the typed primary-drift classification"
     );
-    let calls = host.tool_calls();
+    let calls = host.vcs_calls();
     assert!(
-        calls.iter().position(|call| call.name == "git.push")
+        calls
+            .iter()
+            .position(|call| call.operation == PUSH_OPERATION)
             < calls
                 .iter()
-                .position(|call| call.name == "github.pr.create"),
+                .position(|call| call.operation == PR_CREATE_OPERATION),
         "push precedes PR creation"
     );
 }
@@ -419,7 +505,7 @@ fn pr_open_blocks_failed_outcome_before_external_calls() {
         .expect_err("explicit failed outcome must block PR handoff");
     assert!(error.to_string().contains("ORB-10313-PR"), "{error}");
     assert!(error.to_string().contains("failed"), "{error}");
-    assert!(host.tool_calls().is_empty(), "zero GitHub calls");
+    assert!(host.vcs_calls().is_empty(), "zero GitHub calls");
     assert!(
         host.automation_updates().is_empty(),
         "zero external-ref writes and zero promotion updates"
@@ -448,9 +534,9 @@ fn pr_open_allows_meaningful_non_failed_outcomes() {
         pr_open(&host, &pr_open_input(&workspace.repo, vec!["ORB-10313-PR"]))
             .expect("meaningful summary without explicit failure may open a PR");
         assert!(
-            host.tool_calls()
+            host.vcs_calls()
                 .iter()
-                .any(|call| call.name == "github.pr.create"),
+                .any(|call| call.operation == PR_CREATE_OPERATION),
             "the allowed handoff reaches PR creation"
         );
     }
@@ -481,7 +567,7 @@ fn pr_prepare_blocks_failed_outcome_before_git_inspection() {
         prepare_pr_handoff(&host, &input).expect_err("prepare must revalidate durable outcome");
     assert!(error.to_string().contains("ORB-10313-PREP"), "{error}");
     assert!(error.to_string().contains("failed"), "{error}");
-    assert!(host.tool_calls().is_empty());
+    assert!(host.vcs_calls().is_empty());
     assert!(host.automation_updates().is_empty());
 }
 
@@ -513,7 +599,7 @@ fn pr_promote_no_diff_blocks_failed_outcome() {
     .expect_err("failed outcome must block no-diff promotion");
     assert!(error.to_string().contains("ORB-10313-ND"), "{error}");
     assert!(error.to_string().contains("failed"), "{error}");
-    assert!(host.tool_calls().is_empty());
+    assert!(host.vcs_calls().is_empty());
     assert!(host.automation_updates().is_empty());
     let task = host.get_task("ORB-10313-ND").expect("task");
     assert_eq!(task.status, TaskStatus::InProgress);

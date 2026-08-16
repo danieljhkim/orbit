@@ -18,14 +18,12 @@ mod walk;
 mod tests;
 
 use orbit_common::types::{OrbitError, Task};
-pub use orbit_search::{
-    AdrIndexParams, AdrIndexResult, DocIndexParams, DocIndexResult, SearchResult,
-};
-use orbit_search::{score_adr_record, score_doc_record, sort_search_results};
+pub use orbit_search::{DocIndexParams, DocIndexResult, SearchResult};
+use orbit_search::{score_doc_record, sort_search_results};
 
 use crate::OrbitRuntime;
 
-pub use config::{AdrSearchConfig, DocsSearchConfig};
+pub use config::DocsSearchConfig;
 pub use types::{DocAddOutcome, DocMigrationReport, DocRecord, DocShow, DocType, TaskRelatedDoc};
 pub use walk::walk_docs_roots;
 
@@ -33,14 +31,11 @@ pub use walk::walk_docs_roots;
 // continues to compile with bare calls.
 use self::add_root::add_docs_root;
 use self::config::{
-    read_adr_search_config_from_config_path, read_docs_roots_from_config_path,
-    read_docs_search_config_from_config_path, read_task_context_docs_roots_from_config_path,
+    read_docs_roots_from_config_path, read_docs_search_config_from_config_path,
+    read_task_context_docs_roots_from_config_path,
 };
 use self::migrate::migrate_docs;
-use self::search::{
-    adr_embedding_sources, adr_search_source, adr_status_in_docs_search, doc_embedding_sources,
-    doc_search_source, related_docs_for_context, show_doc,
-};
+use self::search::{doc_embedding_sources, doc_search_source, related_docs_for_context, show_doc};
 
 // The original impl block (291-408) is preserved verbatim except for path adjustments
 // that are mechanical (use of super:: paths). All bodies delegate to submodules.
@@ -51,10 +46,6 @@ impl OrbitRuntime {
 
     pub fn docs_search_config(&self) -> Result<DocsSearchConfig, OrbitError> {
         read_docs_search_config_from_config_path(&self.config_path())
-    }
-
-    pub fn adr_search_config(&self) -> Result<AdrSearchConfig, OrbitError> {
-        read_adr_search_config_from_config_path(&self.config_path())
     }
 
     pub fn list_docs(
@@ -88,7 +79,7 @@ impl OrbitRuntime {
         &self,
         query: &str,
         limit: Option<usize>,
-        include_superseded: bool,
+        _include_superseded: bool,
     ) -> Result<Vec<SearchResult>, OrbitError> {
         let query = query.trim();
         if query.is_empty() {
@@ -98,23 +89,13 @@ impl OrbitRuntime {
         }
         let limit = limit.unwrap_or(20);
         let query_lower = query.to_ascii_lowercase();
-        let mut scored = self
-            .list_docs(None, None)?
-            .into_iter()
-            .map(doc_search_source)
-            .filter_map(|record| score_doc_record(record, &query_lower))
-            .map(SearchResult::Doc)
-            .collect::<Vec<_>>();
-        scored.extend(
-            self.stores()
-                .adrs()
-                .list_adrs()?
-                .into_iter()
-                .filter(|adr| adr_status_in_docs_search(adr.status, include_superseded))
-                .map(adr_search_source)
-                .filter_map(|adr| score_adr_record(adr, &query_lower))
-                .map(SearchResult::Adr),
-        );
+        let mut scored = Vec::new();
+        for record in self.list_docs(None, None)? {
+            let body = self.show_doc(&record.path)?.body;
+            if let Some(result) = score_doc_record(doc_search_source(record, body), &query_lower) {
+                scored.push(SearchResult::Doc(result));
+            }
+        }
         sort_search_results(&mut scored);
         scored.truncate(limit);
         Ok(scored)
@@ -149,12 +130,6 @@ impl OrbitRuntime {
         let roots = self.docs_roots()?;
         let sources = doc_embedding_sources(&self.paths().repo_root, &roots)?;
         orbit_search::doc_index(&self.stores().semantic_vector, &sources, params)
-    }
-
-    pub fn index_adrs(&self, params: AdrIndexParams) -> Result<AdrIndexResult, OrbitError> {
-        let sources =
-            adr_embedding_sources(&self.paths().repo_root, self.stores().adrs().list_adrs()?)?;
-        orbit_search::adr_index(&self.stores().semantic_vector, &sources, params)
     }
 
     pub fn migrate_docs(&self, dry_run: bool) -> Result<DocMigrationReport, OrbitError> {

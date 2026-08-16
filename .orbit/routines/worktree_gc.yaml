@@ -5,7 +5,7 @@ name: worktree-gc-orbit
 description: >
   Hourly reclamation of worktrees whose associated task has settled to
   rejected, archived, or done.
-enabled: false
+enabled: true
 hosts:
   - dk-server-1
 trigger:

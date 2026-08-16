@@ -1,19 +1,17 @@
 use std::path::{Path, PathBuf};
 
-use orbit_common::types::{OrbitError, Role};
-use orbit_tools::ToolContext;
+use orbit_common::types::OrbitError;
 use serde_json::{Value, json};
 
-use crate::context::{DeterministicActionHost, TaskHost};
+use crate::context::RuntimeHost;
 
 use super::super::input::{canonicalize_existing_dir, input_string_field, required_job_run_id};
 use super::freshness::{commit_sha, remote_branch_sha};
 use super::git::{git_command_success, git_output, git_success};
 use super::handoff::{FailedHandoffPhase, load_handoff_context, record_failed_handoff};
+use super::operations;
 
-pub(in crate::executor::automation) fn push_batch_changes<
-    H: DeterministicActionHost + TaskHost + ?Sized,
->(
+pub(in crate::executor::automation) fn push_batch_changes<H: RuntimeHost + ?Sized>(
     host: &H,
     input: &Value,
 ) -> Result<Value, OrbitError> {
@@ -39,7 +37,7 @@ pub(in crate::executor::automation) fn push_batch_changes<
     }
 }
 
-pub(super) fn push_batch_changes_inner<H: DeterministicActionHost + ?Sized>(
+pub(super) fn push_batch_changes_inner<H: RuntimeHost + ?Sized>(
     host: &H,
     input: &Value,
     workspace_path: &Path,
@@ -84,11 +82,6 @@ pub(super) fn push_batch_changes_inner<H: DeterministicActionHost + ?Sized>(
         }
     };
 
-    let tool_context = ToolContext {
-        cwd: Some(workspace_path.to_string_lossy().to_string()),
-        allowed_tools: vec![],
-        ..Default::default()
-    };
     let mut tool_input = json!({
         "repo_root": workspace_path.to_string_lossy().to_string(),
         "branch": branch,
@@ -97,7 +90,7 @@ pub(super) fn push_batch_changes_inner<H: DeterministicActionHost + ?Sized>(
     if force_with_lease {
         tool_input["expected_remote_sha"] = json!(remote_sha);
     }
-    host.run_tool_with_context_and_role("git.push", tool_input, Role::Admin, tool_context)?;
+    host.run_private_vcs_operation(operations::PUSH, tool_input)?;
 
     Ok(push_output(
         label,
@@ -108,7 +101,7 @@ pub(super) fn push_batch_changes_inner<H: DeterministicActionHost + ?Sized>(
     ))
 }
 
-fn resolve_workspace_path<H: DeterministicActionHost + ?Sized>(
+fn resolve_workspace_path<H: RuntimeHost + ?Sized>(
     host: &H,
     input: &Value,
 ) -> Result<PathBuf, OrbitError> {

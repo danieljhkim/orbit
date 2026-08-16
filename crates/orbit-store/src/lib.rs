@@ -1,5 +1,5 @@
 #![deny(clippy::print_stderr, clippy::print_stdout)]
-// ORB-00004: legacy persistence surfaces still need a focused documentation pass.
+// Legacy persistence surfaces still need a focused documentation pass.
 #![allow(missing_docs)]
 // Unit tests use unwrap/expect for fixture setup; production call sites remain linted.
 #![cfg_attr(test, allow(clippy::expect_used, clippy::unwrap_used))]
@@ -8,11 +8,10 @@
     rustdoc::invalid_html_tags,
     rustdoc::private_intra_doc_links
 )]
-//! File-based (YAML) and SQLite persistence backends for Orbit data.
+//! File-based and SQLite persistence backends for Orbit data.
 //!
-//! Provides two storage backends — a file store for human-readable, git-friendly
-//! YAML artifacts (tasks, jobs, activities, skills) and a SQLite store for
-//! append-only data (audit events, stored tools). Store builders make the
+//! Provides file stores for human-readable YAML and JSONL artifacts, plus a
+//! SQLite store for relational and append-only data. Store builders make the
 //! supported workspace/global split explicit per domain. The SQLite layer also
 //! provides generic connection/transaction primitives and a namespaced feature
 //! migration ledger; feature crates own their active schemas and queries while
@@ -20,7 +19,7 @@
 //!
 //! # Role
 //! Depends only on `orbit-common`. Consumed by `orbit-core`, `orbit-engine`,
-//! `orbit-cmd`, and vertical feature crates such as `orbit-remote`.
+//! and `orbit-cmd`.
 //!
 //! # Key exports
 //! - Backend trait types: [`TaskStoreBackend`], [`TaskDocumentStoreBackend`],
@@ -30,11 +29,12 @@
 //! - Factory functions: `workspace_task_backends`, `workspace_job_run_store`,
 //!   `global_executor_def_store`, `global_policy_def_store`,
 //!   `audit_event_store_sqlite`, `task_reservation_store_sqlite`, `tool_store_sqlite`
+//! - [`SessionLogStore`] — lock-safe workspace session-log persistence
 //! - [`Store`] / [`StoreTx`] — SQLite connection handle and transaction wrapper
 //! - [`validate_instance_against_schema`] — JSON Schema validation for activity I/O
 //!
 //! # Dependency direction
-//! `orbit-common` ← `orbit-store` ← consumers such as orbit-core and orbit-remote
+//! `orbit-common` ← `orbit-store` ← consumers such as orbit-core and orbit-engine
 
 pub(crate) mod backend;
 mod file;
@@ -50,13 +50,19 @@ pub mod skill_store {
     pub use crate::file::skill_store::*;
 }
 
+/// Friction records. Live reads and writes go through [`FrictionStore`]
+/// (SQLite, ORB-10680); the file-layout helpers re-exported here own the hub
+/// publication decision and the legacy tree kept as read-only evidence.
 pub mod friction_store {
+    pub use orbit_common::types::validate_friction_id;
+
     pub use crate::file::friction_store::{
-        FrictionAddParams, FrictionListFilter, FrictionUpdateParams, StoredFrictionRecord,
-        add_friction, canonical_hub_friction_root, ensure_default_tag_taxonomy, friction_stats,
-        friction_tags, list_frictions, prepare_hub_friction_root, readable_hub_friction_root,
-        resolve_friction, resolve_friction_by_task, show_friction, update_friction,
-        validate_friction_id,
+        canonical_hub_friction_root, ensure_default_tag_taxonomy, prepare_hub_friction_root,
+        readable_hub_friction_root,
+    };
+    pub use crate::sqlite::friction_store::{
+        FrictionAddParams, FrictionImportReport, FrictionListFilter, FrictionReportedCount,
+        FrictionStore, FrictionUpdateParams, StoredFrictionRecord, export_workspace_frictions,
     };
 }
 
@@ -68,25 +74,12 @@ pub mod pr_scoreboard {
 
 pub mod scoreboard_summary {
     pub use crate::file::scoreboard::scoreboard_summary::{
-        AgentSummary, DuelSummary, FrictionSummary, KnowledgeSummary, PlanningDuelSummary,
-        PrSummary, RecentSummary, ScoreboardInputs, ScoreboardSummary, ScoreboardWindow,
-        TokenSummary, TopToolCall, WorkflowRunCount, generate_summary,
+        AgentSummary, FrictionSummary, NormalizedTokenSummary, ORCHESTRATION_SCHEMA_VERSION,
+        OrchestrationBucketKind, OrchestrationBucketSummary, OrchestrationModelSummary,
+        OrchestrationSummary, PrSummary, RecentSummary, ScoreboardInputs, ScoreboardSummary,
+        ScoreboardWindow, TokenSummary, TopToolCall, WorkflowRunCount, generate_summary,
         generate_summary_with_audit_tool_calls, generate_summary_with_inputs, summary_path,
         write_summary,
-    };
-}
-
-pub mod duel_scoreboard {
-    pub use crate::file::scoreboard::duel_scoreboard::{
-        AggregateFilter, AggregateRow, Aggregates, ReviewerTally, RoleAxis, SegmentBy, aggregate,
-        append_run, derive_task_scope, known_agent_families, load_runs, tally_reviewer_stats,
-    };
-}
-
-pub mod planning_duel_scoreboard {
-    pub use crate::file::scoreboard::planning_duel_scoreboard::{
-        AggregateFilter, AggregateRow, Aggregates, HeadToHeadCell, HeadToHeadMatrix, RoleAxis,
-        aggregate, aggregate_head_to_head, append_run, load_runs,
     };
 }
 
@@ -94,49 +87,44 @@ pub mod token_scoreboard {
     pub use crate::file::scoreboard::token_scoreboard::write_token_scoreboard;
 }
 
-pub mod learning_layout {
-    pub use crate::file::learning_store::migration::{
-        LearningLayoutMigrationReport, inspect_learning_layout, migrate_learning_layout,
-    };
-}
-
 use chrono::{DateTime, Utc};
 
 pub use backend::{
-    ActiveTaskReservation, AdrArtifact, AdrArtifactResolution, AdrCreateParams,
-    AdrDocumentUpdateParams, AdrListEntry, AdrListFilter, AdrStoreBackend, AuditEventStoreBackend,
-    ExecutorDefStoreBackend, ExpiredTaskReservation, JobRunQuery, JobRunStepParams,
-    JobRunStoreBackend, LearningCreateParams, LearningListEntry, LearningSearchParams,
-    LearningSearchResult, LearningStoreBackend, LearningUpdateParams, PolicyDefStoreBackend,
-    ReleasedTaskReservation, RemoteArtifactStub, TaskArtifactStoreBackend,
-    TaskArtifactUpdateParams, TaskCreateParams, TaskDocumentStoreBackend, TaskDocumentUpdateParams,
-    TaskHistoryStoreBackend, TaskHistoryUpdateParams, TaskLockConflict, TaskLockHolder,
-    TaskReservationCheckParams, TaskReservationCheckResult, TaskReservationListResult,
-    TaskReservationOwnedConflictsParams, TaskReservationOwnedConflictsResult,
-    TaskReservationReleaseByOwnerParams, TaskReservationReleaseByOwnerResult,
-    TaskReservationReleaseParams, TaskReservationReleaseReason, TaskReservationReleaseResult,
-    TaskReservationReserveParams, TaskReservationReserveResult, TaskReservationStoreBackend,
-    TaskStoreBackend, ToolStoreBackend, WorkspaceTaskBackends, audit_event_store_sqlite,
-    coordination_task_backends, global_executor_def_store, global_policy_def_store,
-    layered_policy_def_store, task_reservation_store_sqlite, tool_store_sqlite,
-    workspace_adr_backends, workspace_job_run_store, workspace_learning_backend,
+    ActiveTaskReservation, AuditEventStoreBackend, ExecutorDefStoreBackend, ExpiredTaskReservation,
+    JobRunQuery, JobRunStepParams, JobRunStoreBackend, PolicyDefStoreBackend,
+    ReleasedTaskReservation, TaskArtifactStoreBackend, TaskArtifactUpdateParams, TaskCreateParams,
+    TaskDocumentStoreBackend, TaskDocumentUpdateParams, TaskHistoryStoreBackend,
+    TaskHistoryUpdateParams, TaskLockConflict, TaskLockHolder, TaskReservationCheckParams,
+    TaskReservationCheckResult, TaskReservationListResult, TaskReservationOwnedConflictsParams,
+    TaskReservationOwnedConflictsResult, TaskReservationReleaseByOwnerParams,
+    TaskReservationReleaseByOwnerResult, TaskReservationReleaseParams,
+    TaskReservationReleaseReason, TaskReservationReleaseResult, TaskReservationReserveParams,
+    TaskReservationReserveResult, TaskReservationScope, TaskReservationStoreBackend,
+    TaskStoreBackend, ToolStoreBackend, WorkspaceClaimAcquireParams, WorkspaceClaimAcquireResult,
+    WorkspaceClaimCheckParams, WorkspaceClaimCheckResult, WorkspaceClaimHolder,
+    WorkspaceClaimReleaseParams, WorkspaceClaimReleaseResult, WorkspaceClaimStatusResult,
+    WorkspaceTaskBackends, audit_event_store_sqlite, coordination_task_backends,
+    global_executor_def_store, global_policy_def_store, layered_policy_def_store,
+    task_reservation_store_sqlite, tool_store_sqlite, workspace_job_run_store,
     workspace_policy_def_store, workspace_task_backends,
+};
+pub use file::session_log_store::{
+    SessionLogAppendParams, SessionLogEntry, SessionLogFilter, SessionLogKind, SessionLogStore,
 };
 pub use file_lock::{LockHolderInfo, read_lock_holder};
 pub use json_schema::{validate_instance_against_schema, validate_schema_document};
 pub use sqlite::audit_event_store::{
     AuditEventFilter, AuditEventInsertParams, AuditRoleAggregate, AuditToolAggregate,
     AuditToolCallCountsByRole, AuditToolCallCountsBySurfaceAndRole, AuditTopToolCall,
-    LEARNING_INJECTED_TARGET_TYPE, LEARNING_SHOWN_TARGET_TYPE, LearningUsageStat,
 };
 pub use sqlite::connection::{Store, StoreTx};
-pub use sqlite::id_allocator::{
-    IdAllocation, IdAllocationKind, IdAllocationRecord, IdAllocator, IdAllocatorConfig,
-    LearningIdMigrationReport, LearningIdRename, ensure_id_allocation_schema,
-};
 pub use sqlite::invocation_store::{
-    ActivityInvocationMetrics, AgentInvocationMetrics, InvocationInsertParams, InvocationQuery,
-    InvocationRecord, InvocationToolCallRecord, TaskInvocationMetrics, ToolInvocationMetrics,
+    ActivityInvocationMetrics, AgentInvocationMetrics, InvocationAccountingFact,
+    InvocationAccountingQuery, InvocationInsertParams, InvocationQuery, InvocationRecord,
+    InvocationToolCallRecord, TaskInvocationMetrics, ToolInvocationMetrics,
+};
+pub use sqlite::reliability_store::{
+    ActivityInvocationCount, BoundedFacts, InvocationRunCoverage, JobRunOutcomeFact,
 };
 pub use sqlite::routine_store::{
     RoutineCursor, RoutineFireIntentParams, RoutineFireRecord, RoutineFireState,

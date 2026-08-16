@@ -5,7 +5,7 @@ use orbit_core::runtime::run_audit::RunAuditEvent;
 use orbit_core::{OrbitError, OrbitRuntime};
 use serde_json::{Value, json};
 
-use crate::command::Execute;
+use crate::command::{CommandOut, CommandOutput, Execute};
 
 use super::events::summarize_audit_event;
 use super::steps::resolve_run;
@@ -24,8 +24,11 @@ pub struct RunTraceArgs {
 }
 
 impl Execute for RunTraceArgs {
-    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
-        print_run_trace(runtime, self.run_id.as_deref(), self.json)
+    fn execute(self, runtime: &OrbitRuntime) -> CommandOut {
+        {
+            print_run_trace(runtime, self.run_id.as_deref(), self.json)?;
+            Ok(CommandOutput::Silent)
+        }
     }
 }
 

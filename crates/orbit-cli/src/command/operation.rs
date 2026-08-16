@@ -12,7 +12,7 @@ use orbit_common::types::{normalize_agent_family_for_model, normalize_optional_a
 use orbit_core::{ActorIdentity, OrbitError, OrbitRuntime};
 use serde_json::Value;
 
-use super::{Commands, Execute};
+use super::{CommandOut, CommandOutput, Commands, Execute};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CommandMeta {
@@ -26,10 +26,20 @@ pub struct CommandMeta {
     pub job_run_id: Option<String>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RuntimeNeed {
     Required,
     Forbidden,
+    /// Bind the workspace that owns this task ID rather than the one the cwd
+    /// or `--workspace` walk would pick [ORB-10797].
+    ///
+    /// Task IDs are a machine-global primary key, so `task show` is the one
+    /// verb whose target is addressable without knowing its workspace. A
+    /// `--workspace` selector still wins and still filters: the bootstrap
+    /// binds that workspace, and a task owned elsewhere is simply not found.
+    TaskOwner {
+        task_id: String,
+    },
 }
 
 pub struct DispatchContext<'a> {
@@ -61,7 +71,7 @@ impl<'a> DispatchContext<'a> {
     }
 }
 
-pub type CommandDispatch = for<'a> fn(Commands, DispatchContext<'a>) -> Result<(), OrbitError>;
+pub type CommandDispatch = for<'a> fn(Commands, DispatchContext<'a>) -> CommandOut;
 
 pub struct CommandOperation {
     pub runtime_need: RuntimeNeed,
@@ -156,7 +166,7 @@ macro_rules! boxed_runtime_dispatch {
     }};
 }
 
-fn dispatch_mismatch(variant: &str) -> Result<(), OrbitError> {
+fn dispatch_mismatch(variant: &str) -> CommandOut {
     Err(OrbitError::Execution(format!(
         "command operation dispatch invariant violated for {variant}"
     )))
@@ -199,7 +209,6 @@ impl Commands {
                     WorkspaceSubcommand::Init(_) => ("init", RuntimeNeed::Forbidden, false),
                     WorkspaceSubcommand::List(_) => ("list", RuntimeNeed::Required, false),
                     WorkspaceSubcommand::Show(_) => ("show", RuntimeNeed::Required, false),
-                    WorkspaceSubcommand::Link(_) => ("link", RuntimeNeed::Required, false),
                     WorkspaceSubcommand::Role(_) => ("role", RuntimeNeed::Required, false),
                     WorkspaceSubcommand::Remove(_) => ("remove", RuntimeNeed::Required, true),
                     WorkspaceSubcommand::Teardown(args) => {
@@ -223,10 +232,7 @@ impl Commands {
             Commands::Host(command) => {
                 use super::host::HostSubcommand;
                 let subcommand = match &command.command {
-                    HostSubcommand::Register(_) => "register",
-                    HostSubcommand::List(_) => "list",
                     HostSubcommand::Rename(_) => "rename",
-                    HostSubcommand::Retire(_) => "retire",
                 };
                 CommandOperation::new(
                     RuntimeNeed::Required,
@@ -289,6 +295,12 @@ impl Commands {
             Commands::Run(command) => {
                 use super::run::RunSubcommand;
                 let (subcommand, target_type, target_id, runtime_need) = match &command.command {
+                    RunSubcommand::Auto(_) => (
+                        "auto",
+                        Some("workflow"),
+                        Some("auto"),
+                        RuntimeNeed::Required,
+                    ),
                     RunSubcommand::Ship(_) => (
                         "ship",
                         Some("workflow"),
@@ -311,12 +323,6 @@ impl Commands {
                         "triage",
                         Some("workflow"),
                         Some("triage"),
-                        RuntimeNeed::Required,
-                    ),
-                    RunSubcommand::DuelPlan(args) => (
-                        "duel-plan",
-                        Some("task"),
-                        Some(args.task_id.as_str()),
                         RuntimeNeed::Required,
                     ),
                     RunSubcommand::History(args) => (
@@ -403,6 +409,7 @@ impl Commands {
                     RoutineSubcommand::Show(_) => "show",
                     RoutineSubcommand::Pause(_) => "pause",
                     RoutineSubcommand::Resume(_) => "resume",
+                    RoutineSubcommand::Clock(_) => "clock",
                     RoutineSubcommand::Init(_) => "init",
                 };
                 CommandOperation::new(
@@ -455,8 +462,17 @@ impl Commands {
                     ),
                     TaskSubcommand::Reindex(_) => ("reindex", None, None),
                 };
+                let runtime_need = match &command.command {
+                    TaskSubcommand::Show(args) => RuntimeNeed::TaskOwner {
+                        task_id: args.id.clone(),
+                    },
+                    // Every other task verb keeps cwd (or `--workspace`) as its
+                    // binding: only a read addressed by a globally unique ID can
+                    // be routed from the ID alone.
+                    _ => RuntimeNeed::Required,
+                };
                 CommandOperation::new(
-                    RuntimeNeed::Required,
+                    runtime_need,
                     Some(admin_meta("task", Some(subcommand), target_type, target_id)),
                     None,
                     false,
@@ -497,19 +513,6 @@ impl Commands {
                     runtime_dispatch!(Docs),
                 )
             }
-            Commands::Adr(command) => {
-                use super::adr::AdrSubcommand;
-                let subcommand = match &command.command {
-                    AdrSubcommand::List(_) => "list",
-                };
-                CommandOperation::new(
-                    RuntimeNeed::Required,
-                    Some(admin_meta("adr", Some(subcommand), Some("adr"), None)),
-                    None,
-                    false,
-                    runtime_dispatch!(Adr),
-                )
-            }
             // ADR-0209 bearing 1 [ORB-10358]: friction is registry-driven, so
             // this arm reads the invocation instead of matching verb by verb.
             // A new friction verb needs no edit here.
@@ -527,38 +530,6 @@ impl Commands {
                     false,
                     runtime_dispatch!(Friction),
                 )
-            }
-            Commands::Learning(command) => {
-                use super::learning::LearningSubcommand;
-                let (subcommand, runtime_need, governed) = match &command.command {
-                    LearningSubcommand::Add(_) => ("add", RuntimeNeed::Required, false),
-                    LearningSubcommand::List(_) => ("list", RuntimeNeed::Required, false),
-                    LearningSubcommand::Show(_) => ("show", RuntimeNeed::Required, false),
-                    LearningSubcommand::Stats(_) => ("stats", RuntimeNeed::Required, false),
-                    LearningSubcommand::Update(_) => ("update", RuntimeNeed::Required, false),
-                    LearningSubcommand::Supersede(_) => ("supersede", RuntimeNeed::Required, false),
-                    LearningSubcommand::Archive(_) => ("archive", RuntimeNeed::Required, false),
-                    LearningSubcommand::Sync(_) => ("sync", RuntimeNeed::Required, false),
-                    LearningSubcommand::MigrateLayout(_) => {
-                        ("migrate-layout", RuntimeNeed::Forbidden, false)
-                    }
-                    LearningSubcommand::Prune(args) => {
-                        ("prune", RuntimeNeed::Required, args.confirm)
-                    }
-                };
-                CommandOperation::new(
-                    runtime_need,
-                    Some(admin_meta(
-                        "learning",
-                        Some(subcommand),
-                        Some("learning"),
-                        None,
-                    )),
-                    None,
-                    false,
-                    dispatch_learning,
-                )
-                .governed_when(governed, "learning", subcommand)
             }
             Commands::Audit(command) => {
                 use super::audit::AuditSubcommand;
@@ -798,6 +769,7 @@ impl Commands {
                     McpSubcommand::Init(_) => "init",
                     McpSubcommand::Remove(_) => "remove",
                     McpSubcommand::Serve(_) => "serve",
+                    McpSubcommand::Listen(_) => "listen",
                 };
                 CommandOperation::new(
                     RuntimeNeed::Forbidden,
@@ -805,23 +777,6 @@ impl Commands {
                     None,
                     false,
                     dispatch_mcp,
-                )
-            }
-            Commands::Hook(command) => {
-                use super::hook::HookSubcommand;
-                let (subcommand, suppress_errors) = match &command.command {
-                    HookSubcommand::Install(_) => ("install", false),
-                    HookSubcommand::Pretooluse(_) => ("pretooluse", true),
-                    HookSubcommand::Uninstall(_) => ("uninstall", false),
-                };
-                let mut meta = admin_meta("hook", Some(subcommand), Some("hook"), None);
-                meta.role = "hook".to_string();
-                CommandOperation::new(
-                    RuntimeNeed::Required,
-                    Some(meta),
-                    None,
-                    suppress_errors,
-                    runtime_dispatch!(Hook),
                 )
             }
             Commands::Web(command) => {
@@ -888,14 +843,14 @@ impl Commands {
     }
 }
 
-fn dispatch_init(command: Commands, context: DispatchContext<'_>) -> Result<(), OrbitError> {
+fn dispatch_init(command: Commands, context: DispatchContext<'_>) -> CommandOut {
     match command {
         Commands::Init(command) => command.execute_without_runtime(context.root_override),
         _ => dispatch_mismatch("Init"),
     }
 }
 
-fn dispatch_workspace(command: Commands, context: DispatchContext<'_>) -> Result<(), OrbitError> {
+fn dispatch_workspace(command: Commands, context: DispatchContext<'_>) -> CommandOut {
     use super::workspace::{WorkspaceCommand, WorkspaceSubcommand};
     match command {
         Commands::Workspace(WorkspaceCommand {
@@ -906,7 +861,7 @@ fn dispatch_workspace(command: Commands, context: DispatchContext<'_>) -> Result
     }
 }
 
-fn dispatch_mcp(command: Commands, context: DispatchContext<'_>) -> Result<(), OrbitError> {
+fn dispatch_mcp(command: Commands, context: DispatchContext<'_>) -> CommandOut {
     use super::mcp::{McpCommand, McpSubcommand};
     match command {
         Commands::Mcp(McpCommand {
@@ -918,11 +873,14 @@ fn dispatch_mcp(command: Commands, context: DispatchContext<'_>) -> Result<(), O
         Commands::Mcp(McpCommand {
             command: McpSubcommand::Serve(args),
         }) => args.execute_without_runtime(context.root_override),
+        Commands::Mcp(McpCommand {
+            command: McpSubcommand::Listen(args),
+        }) => args.execute_without_runtime(context.root_override),
         _ => dispatch_mismatch("Mcp"),
     }
 }
 
-fn dispatch_migrate(command: Commands, context: DispatchContext<'_>) -> Result<(), OrbitError> {
+fn dispatch_migrate(command: Commands, context: DispatchContext<'_>) -> CommandOut {
     match command {
         Commands::Migrate(command) if !command.confirm => {
             command.execute_without_runtime(context.root_override)
@@ -932,18 +890,7 @@ fn dispatch_migrate(command: Commands, context: DispatchContext<'_>) -> Result<(
     }
 }
 
-fn dispatch_learning(command: Commands, context: DispatchContext<'_>) -> Result<(), OrbitError> {
-    use super::learning::{LearningCommand, LearningSubcommand};
-    match command {
-        Commands::Learning(LearningCommand {
-            command: LearningSubcommand::MigrateLayout(args),
-        }) => args.execute_without_runtime(context.root_override),
-        Commands::Learning(command) => command.execute(context.runtime()?),
-        _ => dispatch_mismatch("Learning"),
-    }
-}
-
-fn dispatch_run(command: Commands, context: DispatchContext<'_>) -> Result<(), OrbitError> {
+fn dispatch_run(command: Commands, context: DispatchContext<'_>) -> CommandOut {
     use super::run::{RunCommand, RunSubcommand};
     match command {
         Commands::Run(RunCommand {
@@ -954,29 +901,35 @@ fn dispatch_run(command: Commands, context: DispatchContext<'_>) -> Result<(), O
     }
 }
 
-fn dispatch_sweep(command: Commands, _context: DispatchContext<'_>) -> Result<(), OrbitError> {
+fn dispatch_sweep(command: Commands, _context: DispatchContext<'_>) -> CommandOut {
     match command {
         Commands::Sweep(command) => command.execute_without_runtime(),
         _ => dispatch_mismatch("Sweep"),
     }
 }
 
-fn dispatch_routine(command: Commands, _context: DispatchContext<'_>) -> Result<(), OrbitError> {
+fn dispatch_routine(command: Commands, _context: DispatchContext<'_>) -> CommandOut {
     match command {
         Commands::Routine(command) => command.execute_without_runtime(),
         _ => dispatch_mismatch("Routine"),
     }
 }
 
-fn dispatch_web(command: Commands, context: DispatchContext<'_>) -> Result<(), OrbitError> {
+fn dispatch_web(command: Commands, context: DispatchContext<'_>) -> CommandOut {
     use super::web::{WebCommand, WebSubcommand};
     match command {
         Commands::Web(WebCommand {
             command: WebSubcommand::Serve(args),
-        }) => orbit_dashboard::serve_from_env(args, context.root_override),
+        }) => {
+            orbit_web::serve_from_env(args, context.root_override)?;
+            Ok(CommandOutput::Silent)
+        }
         Commands::Web(WebCommand {
             command: WebSubcommand::Connect(args),
-        }) => orbit_dashboard::connect(args),
+        }) => {
+            orbit_web::connect(args)?;
+            Ok(CommandOutput::Silent)
+        }
         _ => dispatch_mismatch("Web"),
     }
 }

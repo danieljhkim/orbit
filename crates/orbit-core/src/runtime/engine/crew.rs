@@ -1,7 +1,7 @@
 use orbit_common::types::activity_job::ProviderSource;
 use orbit_common::types::{
-    Crew, CrewRoleAssignment, OrbitError, Task, all_agent_families, infer_agent_family_from_model,
-    resolve_crew,
+    CREW_DISCOVERY_SCHEMA_VERSION, Crew, CrewAssignment, CrewDiscoveryEntryV1, CrewDiscoveryV1,
+    OrbitError, Task, all_agent_families, infer_agent_family_from_model, resolve_crew,
 };
 use serde::Serialize;
 use serde_json::Value;
@@ -52,7 +52,6 @@ pub struct ConfiguredCrewProjection {
     pub name: String,
     pub model: String,
     pub provider: String,
-    pub backend: String,
     pub description: Option<String>,
     pub tags: Vec<String>,
     pub is_default: bool,
@@ -64,7 +63,6 @@ impl ConfiguredCrewProjection {
             name: crew.name.clone(),
             model: crew.assignment.model.clone(),
             provider: crew.assignment.provider.clone(),
-            backend: crew.assignment.backend.clone(),
             description: crew.description.clone(),
             tags: crew.tags.clone(),
             is_default,
@@ -76,7 +74,7 @@ impl ConfiguredCrewProjection {
 ///
 /// Decouples projection consumers from the full `Crew` type so this struct can
 /// also be hydrated directly from persisted run-record fields, which carry only
-/// the model string (not provider/backend).
+/// the model string (not the provider).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ResolvedCrewProjection {
     pub name: String,
@@ -93,6 +91,35 @@ impl ResolvedCrewProjection {
 }
 
 impl OrbitRuntime {
+    /// Project the selected runtime's effective crew configuration for clients.
+    ///
+    /// This reads the already-open runtime rather than loading configuration a
+    /// second time in an outer transport adapter.
+    pub fn crew_discovery(
+        &self,
+        workspace_id: &str,
+        owner_machine_id: Option<String>,
+    ) -> Result<CrewDiscoveryV1, OrbitError> {
+        let crews = self
+            .context
+            .settings()
+            .crews()
+            .values()
+            .map(CrewDiscoveryEntryV1::from_crew)
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(CrewDiscoveryV1 {
+            schema_version: CREW_DISCOVERY_SCHEMA_VERSION,
+            workspace_id: workspace_id.to_string(),
+            owner_machine_id,
+            default_crew: self
+                .context
+                .settings()
+                .default_crew()
+                .map(ToOwned::to_owned),
+            crews,
+        })
+    }
+
     pub fn configured_crew_registry_projection(&self) -> ConfiguredCrewRegistryProjection {
         let default_crew = self
             .context
@@ -119,10 +146,19 @@ impl OrbitRuntime {
     }
 
     pub fn validate_crew_name(&self, crew: Option<&str>) -> Result<(), OrbitError> {
+        self.canonical_crew_name(crew).map(|_| ())
+    }
+
+    /// Resolve a user-supplied crew name to the exact alias stored in the
+    /// active named-crew registry. Blank optional values remain unset.
+    pub(crate) fn canonical_crew_name(
+        &self,
+        crew: Option<&str>,
+    ) -> Result<Option<String>, OrbitError> {
         let Some(crew) = crew.map(str::trim).filter(|value| !value.is_empty()) else {
-            return Ok(());
+            return Ok(None);
         };
-        resolve_crew(crew, self.context.settings().crews()).map(|_| ())
+        resolve_crew(crew, self.context.settings().crews()).map(|crew| Some(crew.name))
     }
 
     pub fn resolve_crew_for_task(
@@ -295,7 +331,7 @@ impl OrbitRuntime {
     }
 }
 
-fn family_from_assignment(assignment: &CrewRoleAssignment) -> Option<String> {
+fn family_from_assignment(assignment: &CrewAssignment) -> Option<String> {
     let provider = assignment.provider.trim().to_ascii_lowercase();
     if all_agent_families()
         .iter()

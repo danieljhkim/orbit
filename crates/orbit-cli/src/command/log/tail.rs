@@ -2,20 +2,20 @@
 //! feed at `~/.orbit/state/logs/orbit.jsonl` (or wherever `--path` /
 //! `ORBIT_LOG_PATH` points). Renders the v2-terminal-console mockup's four
 //! columns: timestamp, source, code, message. Designed for human eyes by
-//! default and pipeline-friendly when stdout is not a TTY (`--json` or
+//! default and pipeline-friendly when the sink disallows color (`--json` or
 //! plain-text without ANSI escapes).
 
 use std::fs::File;
-use std::io::{self, BufRead, BufReader, IsTerminal, Seek, SeekFrom, Write};
+use std::io::{self, BufRead, BufReader, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::thread;
 use std::time::Duration;
 
 use clap::Args;
 use orbit_core::{OrbitError, OrbitRuntime};
-use serde_json::Value;
+use serde_json::{Value, json};
 
-use crate::command::Execute;
+use crate::command::{CommandOut, Execute, Payload};
 
 use super::format::{
     Filters, LevelFilter, build_filters as build_shared_filters, format_event_line,
@@ -57,13 +57,33 @@ pub struct TailArgs {
 }
 
 impl Execute for TailArgs {
-    fn execute(self, _runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+    fn execute(self, _runtime: &OrbitRuntime) -> CommandOut {
         let path = resolve_log_path(self.path.as_deref())?;
         let filters = build_filters(&self)?;
-        let stdout = io::stdout();
-        let use_color = stdout.is_terminal();
-        let mut writer = stdout.lock();
-        run_tail(&path, &self, &filters, use_color, &mut writer).map_err(io_to_orbit)
+        // A follow tail is unbounded, so its records cannot be collected into a
+        // document before the first one is written. It is handed back as a
+        // stream the renderer drives instead: that keeps the sink out of the
+        // command (whether to colorize is the sink's answer, not this
+        // command's — the local `is_terminal()` check that used to live here
+        // ignored NO_COLOR and disagreed with every table-rendering command,
+        // ADR-0308 §2) without pretending the output is a payload.
+        let doc = json!({
+            "path": path.to_string_lossy(),
+            "follow": self.follow,
+        });
+        Ok(Payload::stream(
+            doc,
+            Box::new(move |sink, writer| {
+                match run_tail(&path, &self, &filters, sink.color_allowed(), writer) {
+                    Ok(()) => Ok(()),
+                    // The reader closing the pipe is how `orbit log tail -f |
+                    // head` ends, not a failure to report (spec §5).
+                    Err(err) if crate::output::pipe::is_broken_pipe(&err) => Ok(()),
+                    Err(err) => Err(io_to_orbit(err)),
+                }
+            }),
+        )
+        .into())
     }
 }
 
@@ -71,7 +91,7 @@ pub(super) fn build_filters(args: &TailArgs) -> Result<Filters, OrbitError> {
     build_shared_filters(args.target.clone(), args.level, args.since.as_deref())
 }
 
-pub(super) fn run_tail<W: Write>(
+pub(super) fn run_tail<W: Write + ?Sized>(
     path: &Path,
     args: &TailArgs,
     filters: &Filters,
@@ -93,7 +113,7 @@ pub(super) fn run_tail<W: Write>(
     follow_file(path, initial_offset, filters, args.json, use_color, writer)
 }
 
-fn print_initial_window<W: Write>(
+fn print_initial_window<W: Write + ?Sized>(
     path: &Path,
     args: &TailArgs,
     filters: &Filters,
@@ -129,7 +149,7 @@ fn print_initial_window<W: Write>(
     Ok(total_bytes)
 }
 
-fn follow_file<W: Write>(
+fn follow_file<W: Write + ?Sized>(
     path: &Path,
     initial_offset: u64,
     filters: &Filters,
@@ -168,7 +188,12 @@ fn follow_file<W: Write>(
     }
 }
 
-fn emit_line<W: Write>(raw: &str, json: bool, use_color: bool, writer: &mut W) -> io::Result<()> {
+fn emit_line<W: Write + ?Sized>(
+    raw: &str,
+    json: bool,
+    use_color: bool,
+    writer: &mut W,
+) -> io::Result<()> {
     if json {
         writeln!(writer, "{raw}")?;
         return Ok(());

@@ -48,7 +48,6 @@ fn the_destructive_builtins_this_task_closed_are_still_governed() {
         "orbit.task.delete",
         "orbit.task.reject",
         "orbit.task.locks.release",
-        "orbit.learning.prune",
         "orbit.semantic.uninstall",
     ] {
         assert!(

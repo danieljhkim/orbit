@@ -15,6 +15,7 @@ use chrono::{DateTime, Duration, TimeZone, Utc};
 use orbit_common::types::{JobRunState, OrbitError, RoutineDefinition, parse_routine_yaml};
 use orbit_store::{RoutineFireIntentParams, RoutineFireState, Store};
 
+use crate::command::job::RunOwnerLiveness;
 use crate::routines::loader::{DiscoveredWorkspaces, RoutineWorkspaceProvider};
 use crate::routines::loader::{LoadedRoutine, RoutineCollection, RoutineOrigin};
 use crate::routines::sweep::{
@@ -86,6 +87,9 @@ struct FakeDispatch {
     counter: Cell<u32>,
     submits: RefCell<Vec<(PathBuf, String)>>,
     states: RefCell<HashMap<String, JobRunState>>,
+    /// Owner liveness per run id [ORB-10597]. Absent means `Stopped` — the
+    /// historical assumption that a terminal run has finished working.
+    liveness: RefCell<HashMap<String, RunOwnerLiveness>>,
 }
 
 impl FakeDispatch {
@@ -94,6 +98,11 @@ impl FakeDispatch {
     }
     fn set_state(&self, run_id: &str, state: JobRunState) {
         self.states.borrow_mut().insert(run_id.to_string(), state);
+    }
+    fn set_liveness(&self, run_id: &str, liveness: RunOwnerLiveness) {
+        self.liveness
+            .borrow_mut()
+            .insert(run_id.to_string(), liveness);
     }
     /// Make the next `submit` calls fail (dispatch-time error) until cleared.
     fn set_fail(&self, fail: bool) {
@@ -116,6 +125,14 @@ impl RoutineDispatch for FakeDispatch {
 
     fn run_state(&self, _dir: &Path, run_id: &str) -> Option<JobRunState> {
         self.states.borrow().get(run_id).cloned()
+    }
+
+    fn run_owner_liveness(&self, _dir: &Path, run_id: &str) -> RunOwnerLiveness {
+        self.liveness
+            .borrow()
+            .get(run_id)
+            .copied()
+            .unwrap_or(RunOwnerLiveness::Stopped)
     }
 }
 
@@ -318,6 +335,219 @@ fn overlap_forbid_skips_while_in_flight_then_fires_once_terminal() {
     assert_eq!(seeded.state, RoutineFireState::Succeeded);
 }
 
+// ---- overlap: forbid + interrupted source run [ORB-10597] -----------------
+
+/// Seed an `overlap: forbid` routine with one dispatched fire whose run is
+/// marked `interrupted`, and return the store, dispatch, collection, and the
+/// seeded slot. `created_at` is real-clock now, so a `now_utc` in the fixture's
+/// past keeps the fire inside its policy timeout.
+fn interrupted_forbid_fixture(
+    liveness: RunOwnerLiveness,
+) -> (Store, FakeDispatch, RoutineCollection, String) {
+    let store = store();
+    let dispatch = FakeDispatch::default();
+    let coll = collection(vec![routine("job", "* * * * *", true, "forbid", 0)]);
+
+    store
+        .routine_record_baseline("job", &ts(2026, 1, 1, 0, 0, 0).to_rfc3339())
+        .unwrap();
+    let slot = ts(2026, 1, 1, 0, 5, 0).to_rfc3339();
+    store
+        .routine_record_fire_intent(&RoutineFireIntentParams {
+            routine_name: "job".to_string(),
+            slot: slot.clone(),
+            attempt: 1,
+            source_workspace: "polaris".to_string(),
+        })
+        .unwrap();
+    store
+        .routine_mark_fire_dispatched("job", &slot, 1, "condemned")
+        .unwrap();
+
+    // Condemned to `interrupted`. Marking a run interrupted attaches no
+    // teardown, so this says nothing about whether the worker stopped.
+    dispatch.set_state("condemned", JobRunState::Interrupted);
+    dispatch.set_liveness("condemned", liveness);
+    (store, dispatch, coll, slot)
+}
+
+/// The defect: a false interrupt used to resolve the fire, which released the
+/// `overlap: forbid` slot and admitted a second instance against the same
+/// surface while the first was still executing.
+#[test]
+fn interrupted_run_still_executing_keeps_the_forbid_slot_held() {
+    let (store, dispatch, coll, slot) = interrupted_forbid_fixture(RunOwnerLiveness::Alive);
+
+    let reports = run_sweep_core(
+        &store,
+        HOST,
+        &coll,
+        &dispatch,
+        SweepOptions::default(),
+        ts(2026, 1, 1, 0, 6, 20),
+    )
+    .unwrap();
+
+    assert_eq!(reports[0].action, "skipped");
+    assert_eq!(reports[0].reason.as_deref(), Some("overlap_in_flight"));
+    assert_eq!(
+        dispatch.submit_count(),
+        0,
+        "no second instance while the condemned run's worker is still alive"
+    );
+    let seeded = fires(&store, "job")
+        .into_iter()
+        .find(|fire| fire.slot == slot)
+        .unwrap();
+    assert_eq!(
+        seeded.state,
+        RoutineFireState::Dispatched,
+        "the fire holding the slot must stay unresolved"
+    );
+}
+
+/// The counterpart the fix must not break: a genuinely stopped run still
+/// releases its slot, exactly as before.
+#[test]
+fn interrupted_run_that_genuinely_stopped_releases_the_forbid_slot() {
+    let (store, dispatch, coll, slot) = interrupted_forbid_fixture(RunOwnerLiveness::Stopped);
+
+    let reports = run_sweep_core(
+        &store,
+        HOST,
+        &coll,
+        &dispatch,
+        SweepOptions::default(),
+        ts(2026, 1, 1, 0, 6, 20),
+    )
+    .unwrap();
+
+    assert_eq!(reports[0].action, "fired");
+    assert_eq!(dispatch.submit_count(), 1);
+    let seeded = fires(&store, "job")
+        .into_iter()
+        .find(|fire| fire.slot == slot)
+        .unwrap();
+    assert_eq!(seeded.state, RoutineFireState::Failed);
+    assert_eq!(seeded.detail.as_deref(), Some("run interrupted"));
+}
+
+/// Holding the slot is bounded, not permanent: an owner that never becomes
+/// conclusively stopped is still reclaimed by the policy timeout, the same
+/// bound every genuinely in-flight run already lives under.
+#[test]
+fn interrupted_run_with_unprobeable_owner_is_reclaimed_at_the_policy_timeout() {
+    let (store, dispatch, coll, slot) = interrupted_forbid_fixture(RunOwnerLiveness::Unknown);
+
+    // Past the routine's 10-minute policy timeout, measured from the fire's
+    // real-clock `created_at`.
+    let reports = run_sweep_core(
+        &store,
+        HOST,
+        &coll,
+        &dispatch,
+        SweepOptions::default(),
+        Utc::now() + Duration::minutes(20),
+    )
+    .unwrap();
+
+    assert_eq!(reports[0].action, "fired");
+    let seeded = fires(&store, "job")
+        .into_iter()
+        .find(|fire| fire.slot == slot)
+        .unwrap();
+    assert_eq!(seeded.state, RoutineFireState::TimedOut);
+}
+
+#[test]
+fn running_run_orphaned_by_restart_releases_the_forbid_slot_immediately() {
+    let store = store();
+    let dispatch = FakeDispatch::default();
+    let coll = collection(vec![routine("job", "* * * * *", true, "forbid", 0)]);
+    store
+        .routine_record_baseline("job", &ts(2026, 1, 1, 0, 0, 0).to_rfc3339())
+        .unwrap();
+    let slot = ts(2026, 1, 1, 0, 5, 0).to_rfc3339();
+    store
+        .routine_record_fire_intent(&RoutineFireIntentParams {
+            routine_name: "job".to_string(),
+            slot: slot.clone(),
+            attempt: 1,
+            source_workspace: "polaris".to_string(),
+        })
+        .unwrap();
+    store
+        .routine_mark_fire_dispatched("job", &slot, 1, "orphaned")
+        .unwrap();
+    dispatch.set_state("orphaned", JobRunState::Running);
+    dispatch.set_liveness("orphaned", RunOwnerLiveness::Stopped);
+
+    let reports = run_sweep_core(
+        &store,
+        HOST,
+        &coll,
+        &dispatch,
+        SweepOptions::default(),
+        ts(2026, 1, 1, 0, 6, 20),
+    )
+    .unwrap();
+
+    assert_eq!(reports[0].action, "fired");
+    assert_eq!(dispatch.submit_count(), 1);
+    let orphaned = fires(&store, "job")
+        .into_iter()
+        .find(|fire| fire.slot == slot)
+        .unwrap();
+    assert_eq!(orphaned.state, RoutineFireState::Failed);
+    assert_eq!(
+        orphaned.detail.as_deref(),
+        Some("run owner stopped before recording a terminal outcome")
+    );
+}
+
+#[test]
+fn running_run_with_a_live_owner_keeps_the_forbid_slot() {
+    let store = store();
+    let dispatch = FakeDispatch::default();
+    let coll = collection(vec![routine("job", "* * * * *", true, "forbid", 0)]);
+    store
+        .routine_record_baseline("job", &ts(2026, 1, 1, 0, 0, 0).to_rfc3339())
+        .unwrap();
+    let slot = ts(2026, 1, 1, 0, 5, 0).to_rfc3339();
+    store
+        .routine_record_fire_intent(&RoutineFireIntentParams {
+            routine_name: "job".to_string(),
+            slot: slot.clone(),
+            attempt: 1,
+            source_workspace: "polaris".to_string(),
+        })
+        .unwrap();
+    store
+        .routine_mark_fire_dispatched("job", &slot, 1, "live")
+        .unwrap();
+    dispatch.set_state("live", JobRunState::Running);
+    dispatch.set_liveness("live", RunOwnerLiveness::Alive);
+
+    let reports = run_sweep_core(
+        &store,
+        HOST,
+        &coll,
+        &dispatch,
+        SweepOptions::default(),
+        ts(2026, 1, 1, 0, 6, 20),
+    )
+    .unwrap();
+
+    assert_eq!(reports[0].action, "skipped");
+    assert_eq!(reports[0].reason.as_deref(), Some("overlap_in_flight"));
+    assert_eq!(dispatch.submit_count(), 0);
+    let live = fires(&store, "job")
+        .into_iter()
+        .find(|fire| fire.slot == slot)
+        .unwrap();
+    assert_eq!(live.state, RoutineFireState::Dispatched);
+}
+
 // ---- outcome sync / staleness horizon -------------------------------------
 
 #[test]
@@ -472,11 +702,7 @@ fn dry_run_records_no_state() {
 struct MustNotLoad;
 
 impl RoutinePlacementProvider for MustNotLoad {
-    fn load_routine_placement(
-        &self,
-        _now: DateTime<Utc>,
-        _cache_max_age: Duration,
-    ) -> Result<RoutinePlacementProjection, OrbitError> {
+    fn load_routine_placement(&self) -> Result<RoutinePlacementProjection, OrbitError> {
         panic!("placement provider ran before the busy sweep lock returned")
     }
 }

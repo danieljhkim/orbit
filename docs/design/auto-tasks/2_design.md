@@ -1,7 +1,7 @@
 ---
 title: Auto-tasks — Design
 owner: claude
-last_updated: 2026-07-26
+last_updated: 2026-08-15
 last_validated: 2026-07-27
 status: Accepted
 feature: auto-tasks
@@ -11,7 +11,7 @@ summary: Current implementation of the auto-task record, due-math, host-local cu
 tags: [auto-tasks]
 paths: ["crates/orbit-core/src/auto_tasks/**"]
 related_features: [auto-tasks]
-related_artifacts: [ORB-10149, ORB-10439, ORB-10441, ORB-10446, ORB-10472, ADR-0218, ADR-0217, ADR-0286]
+related_artifacts: [ORB-10149, ORB-10439, ORB-10441, ORB-10446, ORB-10472, ORB-10583, ORB-10800]
 ---
 
 # Auto-tasks — Design
@@ -29,7 +29,7 @@ documented under `docs/design/routines/`.
 `updated_by/at`). `schedule` is an untagged enum — `{ cron: "…" }` or
 `{ every_minutes: N }`. `template` carries `title`, `description`,
 `acceptance_criteria`, `task_type`, `tags`, `priority`, `crew`, and `status`
-(default `backlog`). Per ADR-0217 there are **no turn-based knobs**; `deny_unknown_fields`
+(default `backlog`). Per [Run budgets are provider-neutral: wall-clock timeouts, never turn caps](./4_decisions.md#run-budgets-are-provider-neutral-wall-clock-timeouts-never-turn-caps) there are **no turn-based knobs**; `deny_unknown_fields`
 makes a stray `max_turns`/`turns` a hard parse error.
 
 Definitions live as `.orbit/auto_tasks/<name>.yaml` in the active checkout.
@@ -39,7 +39,7 @@ rejects any file whose stem ≠ its `name`, so the on-disk identity and the
 runtime, definition discovery and CRUD use `WorkspacePaths::local_dir`;
 host-local cursor state continues to use the shared root. This split makes
 definition edits ordinary branch content instead of transient tracked dirt in
-the registered primary checkout (ADR-0286).
+the registered primary checkout ([Route tracked auto-task definitions through the active worktree](./4_decisions.md#route-tracked-auto-task-definitions-through-the-active-worktree)).
 
 ## 2. Due computation and catch-up collapse
 
@@ -81,13 +81,30 @@ minutely). Because it is a routine, its fires flow to `GET /api/routines`.
 ## 5. CRUD surfaces
 
 `crud.rs` is the single choke point behind both the CLI (`orbit auto-task
-add/list/show/update/toggle`) and the MCP tools (`orbit.auto_task.*`). Add
+add/list/show/update/toggle`) and the registry tools (`orbit.auto_task.*`). Add
 rejects duplicate names; update patches present fields; toggle flips `enabled`
 (disabling is preserved, never a delete). Both surfaces validate the schedule
 (cron parse / interval > 0) and crew at write time, so a bad definition is never
 persisted. Successful writes replace the target atomically; a staging or rename
 failure leaves the previous definition bytes intact. In a primary checkout the
 local and shared roots are identical, preserving the operator-facing path.
+
+`list` is fail-closed-aware. The loader collects a per-file `AutoTaskLoadError`
+for every definition it rejects, and after [ORB-10800] those errors are no longer
+discarded: each is logged, and `list` errors outright only when *nothing* loaded,
+so one malformed file cannot hide the definitions that still work. A definition
+that silently stopped firing is discoverable as a `faulty` row on the
+`orbit doctor` artifacts surface rather than only via the one command that
+happens to touch it.
+
+### 5a. Managed seeding
+
+Default definitions are seeded manifest-aware after [ORB-10800] / [All five definition-artifact kinds carry managed provenance, and doctor reports it](../activity-job/4_decisions.md#all-five-definition-artifact-kinds-carry-managed-provenance-and-doctor-reports-it):
+`.orbit/auto_tasks/` carries a `.orbit-managed-assets.json` recording the digest
+Orbit wrote for each shipped default, so a default dropped from a later release
+can be retired by content provenance instead of remaining loadable forever.
+Seeding still never overwrites an existing definition, and an operator-edited
+default is preserved under `.retired-managed/auto_tasks/` rather than deleted.
 
 ## 5b. Manual mint — `mint` (ORB-10439, renamed by ORB-10446)
 
@@ -128,9 +145,14 @@ scheduler pass and defers that fire, exactly as an open fired instance does. The
 cursor does not advance, so the deferred occurrence fires once when the queue
 drains. This is the behavior the hand-copy workaround could not provide.
 
-`mint` is CLI-only. Per the mcp-bridge design (`docs/design/mcp-bridge/2_design.md`,
-auto_task placement row) the auto_task MCP tools manage the Git-versioned
-definition and do not mint tasks; no MCP tool was added.
+Advertisement follows who does the work [ORB-10798]. Authoring a Git-versioned
+definition (`add`, `show`, `update`, `toggle`) is human/admin work: those tools
+are `register_inactive`, reachable through their `orbit auto-task` subcommands
+but absent from MCP `tools/list`. Reading the definitions (`list`) and minting
+one on demand (`orbit.auto_task.mint`) are what an executing agent needs, so
+both are registered at `McpToolScope::WorkspaceRequired`. The MCP tool is a thin
+adapter over the same `auto_task_mint`, so the mint stays unconditional and
+cursor-neutral on every surface.
 
 ## 6. Concerns & Honest Limitations
 
@@ -140,7 +162,26 @@ asks the executor to validate recent changes hands-on and file real findings
 through Orbit. Its `no-diff-expected` tag lets workflow handoff succeed when the
 validation correctly produces only task-side effects.
 
-- **Definitions are not full-text indexed.** Unlike learnings/ADRs, auto-task
+The workspace-local `model-price-audit` definition (ORB-10583) is an enabled
+weekly report-only consumer: it runs Monday at 06:00 in the host-local timezone,
+uses `skip_if_open`, mints a backlog chore for crew `terra`, and carries
+`model-price-audit`, `pricing`, and `no-diff-expected`. Its template compares
+exact `InvocationRecord.model` strings and every current price-table row against
+authoritative provider pricing/model/cache documentation. It records source
+URLs, retrieval timestamps, rates, units, tiers, and effective boundaries; it
+never edits pricing. A proven material drift may produce at most one deduplicated
+proposed remediation task for normal human review, while unavailable,
+contradictory, or ambiguous official evidence produces a report without a
+remediation task. No routine or portable seeded default is added for this
+workspace-local definition.
+
+Operators may inspect it with `orbit auto-task show model-price-audit --json` and
+use scheduler dry-run inspection before the weekly slot. The generated task's
+`execution_summary` is the audit report and must include no-diff evidence,
+observed models, checked sources, and effective periods when the table is
+accurate.
+
+- **Definitions are not full-text indexed.** Unlike indexed docs, auto-task
   YAML is not in a SQLite/search index; discovery is a directory scan. Acceptable
   at the expected cardinality (a handful of chores per workspace).
 - **Workspace-scoped.** The scheduler processes the definitions of the workspace
@@ -156,5 +197,6 @@ validation correctly produces only task-side effects.
 - ORB-10439 — on-demand manual mint (renamed to `orbit auto-task mint <name>` by ORB-10446).
 - ORB-10441 — mint-time visible title provenance.
 - ORB-10472 — worktree-local, atomic definition refresh.
+- ORB-10583 — workspace-local weekly official model-price audit definition.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

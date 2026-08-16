@@ -21,6 +21,70 @@ fn seed_running_job_run(runtime: &OrbitRuntime, job_id: &str) -> String {
     run.run_id
 }
 
+fn runtime_with_recovery_config(config: &str) -> (tempfile::TempDir, OrbitRuntime) {
+    let root = tempfile::tempdir().expect("create tempdir");
+    let global = root.path().join("home/.orbit");
+    let workspace = root.path().join("repo/.orbit");
+    std::fs::create_dir_all(&global).expect("global orbit dir");
+    std::fs::create_dir_all(&workspace).expect("workspace orbit dir");
+    std::fs::write(workspace.join("config.toml"), config).expect("write recovery config");
+    let runtime = OrbitRuntime::from_roots(&global, &workspace).expect("build runtime");
+    (root, runtime)
+}
+
+#[test]
+fn system_crew_dispatch_uses_configuration_and_records_selected_provider_model() {
+    let config = r#"
+[workflow]
+default_crew = "sol"
+system_crew = "qa"
+
+[crews.sol]
+model = "gpt-5.6-sol"
+provider = "codex"
+backend = "cli"
+
+[crews.qa]
+model = "gpt-5.6-terra"
+provider = "codex"
+backend = "cli"
+"#;
+    let (_root, runtime) = runtime_with_recovery_config(config);
+    let run_id = seed_running_job_run(&runtime, "recovery_telemetry_job");
+    assert_eq!(
+        RuntimeHost::system_crew_for_dispatch(&runtime).as_deref(),
+        Some("qa")
+    );
+    let recovery = RuntimeHost::agent_crew_config_for_input(
+        &runtime,
+        &serde_json::json!({ "crew": "qa", "crew_config_key": "workflow.system_crew" }),
+    )
+    .expect("resolve configured system crew")
+    .expect("configured system crew exists");
+
+    RuntimeHost::persist_invocation_trace(
+        &runtime,
+        &run_id,
+        "step_failure_recovery",
+        recovery.provider.expect("configured provider").as_str(),
+        recovery.model.as_deref(),
+        &serde_json::json!({ "task_id": "ORB-10621" }),
+        &InvocationTrace::default(),
+    )
+    .expect("persist recovery invocation");
+
+    let records = runtime
+        .invocation_records(InvocationQuery {
+            job_run_id: Some(run_id),
+            limit: 1,
+            ..InvocationQuery::default()
+        })
+        .expect("query recovery invocation");
+    assert_eq!(records.len(), 1);
+    assert_eq!(records[0].agent, "codex");
+    assert_eq!(records[0].model.as_deref(), Some("gpt-5.6-terra"));
+}
+
 fn payload_tool_call(seq: u32, tool_name: &str, payload: Value) -> ToolCallTrace {
     ToolCallTrace {
         seq,
@@ -66,7 +130,7 @@ fn persist_invocation_trace_prefers_provider_model_over_requested_alias() {
         ..InvocationTrace::default()
     };
 
-    V2RuntimeHost::persist_invocation_trace(
+    RuntimeHost::persist_invocation_trace(
         &runtime,
         &run_id,
         "implement_one",
@@ -90,7 +154,7 @@ fn persist_invocation_trace_prefers_provider_model_over_requested_alias() {
 }
 
 fn persist_test_trace(runtime: &OrbitRuntime, run_id: &str, trace: &InvocationTrace) {
-    V2RuntimeHost::persist_invocation_trace(
+    RuntimeHost::persist_invocation_trace(
         runtime,
         run_id,
         "knowledge_step",
@@ -104,9 +168,9 @@ fn persist_test_trace(runtime: &OrbitRuntime, run_id: &str, trace: &InvocationTr
 
 #[test]
 fn persist_invocation_trace_no_longer_measures_removed_pack_tool() {
-    // ORB-00391: orbit.graph.pack was removed with orbit-knowledge (v1). A trace
-    // whose only payload tool is the former pack tool records no knowledge metrics,
-    // because merge_invocation_trace now measures fs.read exclusively.
+    // ORB-00391 / ORB-10828: retired measured builtins no longer produce
+    // knowledge metrics. A trace whose only payload tool is a former measured
+    // tool records none.
     let (_root, runtime, _repo_root) = runtime_with_workspace_layout();
     let run_id = seed_running_job_run(&runtime, "knowledge_pack_job");
     let trace = trace_with_tool_calls(
@@ -135,28 +199,24 @@ fn persist_invocation_trace_no_longer_measures_removed_pack_tool() {
 }
 
 #[test]
-fn persist_invocation_trace_records_fs_read_double_read_metrics() {
-    // ORB-00391: with the pack baseline gone, every fs.read is "double read"
-    // relative to itself, so double_read_rate is 1.0 for an fs.read-only run.
+fn persist_invocation_trace_does_not_record_retired_read_token_metrics() {
+    // ORB-10828: read-token gauges are historical only. A fresh trace must not
+    // invent knowledge metrics from a leftover measured-tool name.
     let (_root, runtime, _repo_root) = runtime_with_workspace_layout();
 
     let fallback_run_id = seed_running_job_run(&runtime, "knowledge_fallback_job");
-    let fallback_trace = trace_with_tool_calls(50, vec![byte_count_tool_call(1, "fs.read", 120)]);
+    let fallback_trace =
+        trace_with_tool_calls(50, vec![byte_count_tool_call(1, "orbit.task.show", 120)]);
 
     persist_test_trace(&runtime, &fallback_run_id, &fallback_trace);
 
     let fallback_run = runtime
         .show_job_run(&fallback_run_id)
         .expect("show fallback job run");
-    let metrics = fallback_run
-        .knowledge_metrics
-        .expect("fallback metrics recorded");
-    assert!(!metrics.knowledge_pack_used);
-    assert_eq!(metrics.raw_read_token_baseline, 30);
-    assert_eq!(metrics.knowledge_pack_tokens, None);
-    assert_eq!(metrics.actual_fs_read_tokens_during_run, 30);
-    assert_eq!(metrics.double_read_rate, Some(1.0));
-    assert_eq!(metrics.total_llm_input_tokens, 50);
+    assert!(
+        fallback_run.knowledge_metrics.is_none(),
+        "new traces must not populate retired read-token gauges"
+    );
 }
 
 #[test]
@@ -164,7 +224,7 @@ fn tool_context_for_activity_passes_proc_allowlist() {
     let (_root, runtime, _repo_root) = runtime_with_workspace_layout();
 
     // No allowlist -> not activity-scoped (legacy unrestricted path).
-    let unscoped = <OrbitRuntime as V2RuntimeHost>::tool_context_for_activity(
+    let unscoped = <OrbitRuntime as RuntimeHost>::tool_context_for_activity(
         &runtime,
         Some("run-allowlist-test"),
         None,
@@ -176,7 +236,7 @@ fn tool_context_for_activity_passes_proc_allowlist() {
 
     // Activity-scoped allowlist propagates verbatim and flips the bool.
     let programs = vec!["git".to_string(), "rg".to_string()];
-    let scoped = <OrbitRuntime as V2RuntimeHost>::tool_context_for_activity(
+    let scoped = <OrbitRuntime as RuntimeHost>::tool_context_for_activity(
         &runtime,
         Some("run-allowlist-test"),
         None,
@@ -187,7 +247,7 @@ fn tool_context_for_activity_passes_proc_allowlist() {
     assert!(scoped.proc_spawn_activity_scoped);
 
     // Empty Some([]) is meaningful: fail-closed when activity-scoped.
-    let empty_scoped = <OrbitRuntime as V2RuntimeHost>::tool_context_for_activity(
+    let empty_scoped = <OrbitRuntime as RuntimeHost>::tool_context_for_activity(
         &runtime,
         Some("run-allowlist-test"),
         None,

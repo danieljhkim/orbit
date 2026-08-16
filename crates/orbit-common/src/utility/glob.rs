@@ -1,8 +1,8 @@
-//! Glob-matching helpers shared between policy evaluation and learning scope.
+//! Glob-matching helpers shared by policy evaluation and artifact scopes.
 //!
 //! Originally lived as private helpers inside
 //! [`crate::types::policy_def`]; promoted here so `orbit-store`'s
-//! `learning_store` can reuse the same matcher without taking a dependency
+//! artifact stores can reuse the same matcher without taking a dependency
 //! on `orbit-policy` (which the architecture diagram forbids). The original
 //! call sites in `policy_def` now route through these public functions, so
 //! existing behavior is unchanged.

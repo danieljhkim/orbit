@@ -14,7 +14,7 @@
         <string>sweep</string>
     </array>
     <key>StartInterval</key>
-    <integer>60</integer>
+    <integer>{{CADENCE_SECONDS}}</integer>
     <key>RunAtLoad</key>
     <true/>
     <key>StandardOutPath</key>

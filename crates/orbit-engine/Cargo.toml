@@ -8,10 +8,6 @@ license.workspace = true
 [package.metadata.orbit]
 stability = "internal"
 
-[features]
-default = []
-replay = []
-
 [lints]
 workspace = true
 

@@ -37,7 +37,6 @@ fn summary_includes_zero_rows_for_known_families() {
 
     let grok = summary.agents.get("grok").expect("grok summary");
     assert_eq!(grok.tasks_completed, 0);
-    assert_eq!(grok.duels.participated, 0);
 }
 
 #[test]
@@ -210,50 +209,6 @@ fn summary_counts_tasks_created_and_planned_across_all_statuses() {
     // T5 has no created_by/planned_by — must not crash and must not
     // create a phantom agent bucket.
     assert!(!summary.agents.contains_key(""));
-}
-
-#[test]
-fn summary_counts_knowledge_artifacts_by_author_family() {
-    let temp = tempfile::tempdir().expect("create tempdir");
-    let learnings = vec![
-        test_learning("L-0015", Some(TEST_CODEX_MODEL)),
-        test_learning("L-0016", Some(TEST_CLAUDE_MODEL)),
-        test_learning("L-0003", None),
-    ];
-    let now = Utc::now();
-    let adrs = vec![
-        test_adr("ADR-0001", "codex", AdrStatus::Accepted, Some(now)),
-        test_adr("ADR-0002", TEST_CODEX_MODEL, AdrStatus::Proposed, None),
-        test_adr(
-            "ADR-0003",
-            TEST_CLAUDE_MODEL,
-            AdrStatus::Superseded,
-            Some(now),
-        ),
-    ];
-
-    let summary = generate_summary_with_inputs(
-        temp.path(),
-        &[],
-        &ScoreboardInputs {
-            learnings: &learnings,
-            adrs: &adrs,
-            ..ScoreboardInputs::default()
-        },
-    )
-    .expect("generate summary");
-
-    let codex = summary.agents.get("codex").expect("codex summary");
-    assert_eq!(codex.knowledge.learnings_created, 1);
-    assert_eq!(codex.knowledge.adrs_created, 2);
-    assert_eq!(codex.knowledge.adrs_accepted, 1);
-    assert_eq!(codex.knowledge.adrs_proposed_open, 1);
-
-    let claude = summary.agents.get("claude").expect("claude summary");
-    assert_eq!(claude.knowledge.learnings_created, 1);
-    assert_eq!(claude.knowledge.adrs_created, 1);
-    assert_eq!(claude.knowledge.adrs_accepted, 1);
-    assert_eq!(claude.knowledge.adrs_proposed_open, 0);
 }
 
 #[test]
@@ -511,48 +466,9 @@ fn test_task_no_attrib(id: &str, status: TaskStatus) -> orbit_common::types::Tas
         relations: Vec::new(),
         job_run_id: None,
         crew: None,
+        orchestrator: None,
         created_at: Utc::now(),
         updated_at: Utc::now(),
-    }
-}
-
-fn test_learning(id: &str, created_by: Option<&str>) -> Learning {
-    use orbit_common::types::{LearningScope, LearningStatus};
-    Learning {
-        id: id.to_string(),
-        status: LearningStatus::Active,
-        scope: LearningScope::default(),
-        summary: id.to_string(),
-        body: String::new(),
-        evidence: Vec::new(),
-        supersedes: None,
-        superseded_by: None,
-        legacy_ids: Vec::new(),
-        created_at: Utc::now(),
-        updated_at: Utc::now(),
-        created_by: created_by.map(str::to_string),
-        priority: None,
-    }
-}
-
-fn test_adr(id: &str, owner: &str, status: AdrStatus, accepted_at: Option<DateTime<Utc>>) -> Adr {
-    Adr {
-        id: id.to_string(),
-        title: id.to_string(),
-        status,
-        owner: owner.to_string(),
-        created_at: Utc::now(),
-        accepted_at,
-        last_updated: Utc::now(),
-        related_features: Vec::new(),
-        related_tasks: Vec::new(),
-        tags: Vec::new(),
-        paths: Vec::new(),
-        supersedes: Vec::new(),
-        superseded_by: None,
-        legacy_ids: Vec::new(),
-        validation_warnings: Vec::new(),
-        legacy_validation: Default::default(),
     }
 }
 
@@ -591,34 +507,14 @@ fn summary_exposes_friction_reported_counts_from_records() {
     // depend on disk state.
     let temp = tempfile::tempdir().expect("create tempdir");
 
-    let frictions: Vec<crate::friction_store::StoredFrictionRecord> = vec![
-        crate::friction_store::StoredFrictionRecord {
-            record: orbit_common::types::FrictionRecord {
-                id: "F001".to_string(),
-                model: "codex".to_string(),
-                created_at: Utc::now(),
-                status: orbit_common::types::FrictionStatus::Open,
-                tags: vec![],
-                resolved_at: None,
-                during_task: None,
-                resolved_by_task: None,
-                body: "seed for codex family".to_string(),
-            },
-            path: std::path::PathBuf::from("frictions/2026-05/F001.md"),
+    let friction_reported = vec![
+        crate::friction_store::FrictionReportedCount {
+            model: "codex".to_string(),
+            count: 1,
         },
-        crate::friction_store::StoredFrictionRecord {
-            record: orbit_common::types::FrictionRecord {
-                id: "F002".to_string(),
-                model: "claude-3-opus".to_string(),
-                created_at: Utc::now(),
-                status: orbit_common::types::FrictionStatus::Resolved,
-                tags: vec!["test".to_string()],
-                resolved_at: Some(Utc::now()),
-                during_task: None,
-                resolved_by_task: None,
-                body: "seed for claude family (normalized)".to_string(),
-            },
-            path: std::path::PathBuf::from("frictions/2026-05/F002.md"),
+        crate::friction_store::FrictionReportedCount {
+            model: "claude-3-opus".to_string(),
+            count: 1,
         },
     ];
 
@@ -626,7 +522,7 @@ fn summary_exposes_friction_reported_counts_from_records() {
         temp.path(),
         &[],
         &ScoreboardInputs {
-            frictions: &frictions,
+            friction_reported: &friction_reported,
             ..ScoreboardInputs::default()
         },
     )
@@ -876,4 +772,75 @@ fn window_string_round_trips_for_all_variants() {
         "bogus".parse::<ScoreboardWindow>(),
         Err(OrbitError::InvalidInput(_))
     ));
+}
+
+#[test]
+fn orchestration_section_is_independently_versioned_and_legacy_reads_default_it() {
+    let now = Utc::now();
+    let temp = tempfile::tempdir().expect("create tempdir");
+    let summary = generate_summary_with_inputs(
+        temp.path(),
+        &[],
+        &ScoreboardInputs {
+            orchestration: Some(OrchestrationSummary {
+                schema_version: ORCHESTRATION_SCHEMA_VERSION,
+                scope: "managed_execution".to_string(),
+                as_of: now,
+                since: Some(now - chrono::Duration::hours(1)),
+                until: now,
+                buckets: vec![OrchestrationBucketSummary {
+                    kind: OrchestrationBucketKind::Orchestrator,
+                    orchestrator: Some("sol".to_string()),
+                    invocation_count: 1,
+                    linked_task_count: 1,
+                    input_tokens: 0,
+                    cache_read_tokens: 0,
+                    cache_create_tokens: 0,
+                    cache_create_1h_tokens: 0,
+                    output_tokens: 0,
+                    provider_cost_usd: 0.0,
+                    provider_cost_count: 1,
+                    derived_cost_usd: 0.0,
+                    derived_cost_count: 0,
+                    comparable_provider_cost_usd: 0.0,
+                    comparable_derived_cost_usd: 0.0,
+                    comparable_cost_count: 0,
+                    comparable_cost_delta_usd: 0.0,
+                    missing_provider_count: 0,
+                    unpriced_derived_count: 1,
+                    normalized_tokens: NormalizedTokenSummary::default(),
+                    models: Vec::new(),
+                }],
+                normalized_tokens: NormalizedTokenSummary::default(),
+                previous_normalized_tokens: None,
+            }),
+            ..ScoreboardInputs::default()
+        },
+    )
+    .expect("generate summary");
+
+    let encoded = serde_json::to_value(&summary).expect("serialize summary");
+    assert_eq!(encoded["schema_version"], CURRENT_SCHEMA_VERSION);
+    assert!(encoded.get("duels").is_none());
+    assert!(encoded.get("planning_duels").is_none());
+    assert_eq!(
+        encoded["orchestration"]["schema_version"],
+        ORCHESTRATION_SCHEMA_VERSION
+    );
+    assert_eq!(
+        encoded["orchestration"]["buckets"][0]["provider_cost_usd"],
+        0.0
+    );
+    assert_eq!(
+        encoded["orchestration"]["buckets"][0]["unpriced_derived_count"],
+        1
+    );
+
+    let legacy: ScoreboardSummary = serde_json::from_value(serde_json::json!({
+        "schema_version": 6,
+        "generated_at": now.to_rfc3339(),
+        "agents": {}
+    }))
+    .expect("deserialize v6 summary without orchestration");
+    assert!(legacy.orchestration.is_none());
 }

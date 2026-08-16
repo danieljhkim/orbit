@@ -1,5 +1,5 @@
 use orbit_common::types::TaskStatus;
-use orbit_engine::V2RuntimeHost;
+use orbit_engine::{RuntimeHost, TaskAutomationUpdate, WORKFLOW_RUN_FAILED_EVENT};
 use serde_json::json;
 
 use crate::OrbitRuntime;
@@ -43,6 +43,52 @@ fn task_context_for_agent_input_embeds_canonical_task_with_input_overrides() {
     assert_eq!(context["repo_root"], "/override/repo");
     assert_eq!(context["status"], task.status.cli_name());
     assert_eq!(context["terminal"], false);
+    assert!(context.get("execution_summary").is_none());
+    assert!(context.get("status_note").is_none());
+
+    runtime
+        .update_task(
+            &task.id,
+            TaskUpdateParams {
+                execution_summary: Some("Prior attempt needs a missing capability.".to_string()),
+                ..Default::default()
+            },
+        )
+        .expect("record prior execution summary");
+    runtime
+        .apply_task_automation_update(
+            &task.id,
+            TaskAutomationUpdate {
+                status: Some(TaskStatus::Blocked),
+                status_event: Some(WORKFLOW_RUN_FAILED_EVENT.to_string()),
+                status_note: Some("workflow run failed: missing provider capability".to_string()),
+                ..TaskAutomationUpdate::default()
+            },
+        )
+        .expect("record workflow failure");
+    runtime
+        .update_task(
+            &task.id,
+            TaskUpdateParams {
+                status: Some(TaskStatus::InProgress),
+                ..Default::default()
+            },
+        )
+        .expect("redispatch task");
+
+    let redispatched_context = runtime
+        .task_context_for_agent_input(&json!({ "task_id": task.id.clone() }))
+        .expect("build redispatched task context")
+        .expect("task context present");
+
+    assert_eq!(
+        redispatched_context["execution_summary"],
+        "Prior attempt needs a missing capability."
+    );
+    assert_eq!(
+        redispatched_context["status_note"],
+        "workflow run failed: missing provider capability"
+    );
 }
 
 /// [ORB-10499]: `agent_implement` can be dispatched against a task that has

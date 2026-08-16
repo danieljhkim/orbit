@@ -1,58 +1,77 @@
+use std::borrow::Cow;
 use std::path::Path;
 
 use orbit_common::types::OrbitError;
 
-use orbit_common::utility::fs::write_text_with_parent;
-
 use crate::OrbitRuntime;
 use crate::skill_catalog::{LoadedSkill, SkillCatalogDoctorStatus};
 
-const DEFAULT_SKILL_FILES: [(&str, &str); 6] = [
-    ("orbit", include_str!("../../assets/skills/orbit/SKILL.md")),
+use super::{ManagedAssetLayout, ManagedAssetReconciliation, reconcile_managed_assets};
+
+/// Every shipped skill file, keyed by its path relative to the skills root.
+///
+/// Skills are directory trees rather than single documents, so their managed
+/// manifest keys on the relative path ([`ManagedAssetLayout::RelativePath`])
+/// instead of a bare definition name. Keep each skill's `SKILL.md` adjacent to
+/// its reference files: the ordering here is what a reader uses to see a
+/// skill's full shipped surface at a glance.
+pub(crate) const DEFAULT_SKILL_FILES: [(&str, &str); 11] = [
     (
-        "orbit-task",
+        "orbit/SKILL.md",
+        include_str!("../../assets/skills/orbit/SKILL.md"),
+    ),
+    (
+        "orbit/references/guide.md",
+        include_str!("../../assets/skills/orbit/references/guide.md"),
+    ),
+    (
+        "orbit-task/SKILL.md",
         include_str!("../../assets/skills/orbit-task/SKILL.md"),
     ),
     (
-        "orbit-task-pilot",
-        include_str!("../../assets/skills/orbit-task-pilot/SKILL.md"),
+        "orbit-task/references/review.md",
+        include_str!("../../assets/skills/orbit-task/references/review.md"),
     ),
     (
-        "orbit-workflow",
+        "orbit-task/references/friction.md",
+        include_str!("../../assets/skills/orbit-task/references/friction.md"),
+    ),
+    (
+        "orbit-workflow/SKILL.md",
         include_str!("../../assets/skills/orbit-workflow/SKILL.md"),
     ),
     (
-        "orbit-search",
-        include_str!("../../assets/skills/orbit-search/SKILL.md"),
-    ),
-    (
-        "orbit-knowledge",
-        include_str!("../../assets/skills/orbit-knowledge/SKILL.md"),
-    ),
-];
-
-const DEFAULT_SKILL_RESOURCE_FILES: [(&str, &str, &str); 4] = [
-    (
-        "orbit-workflow",
-        "references/debug-job-failure.md",
+        "orbit-workflow/references/debug-job-failure.md",
         include_str!("../../assets/skills/orbit-workflow/references/debug-job-failure.md"),
     ),
     (
-        "orbit-workflow",
-        "references/common_failures.md",
+        "orbit-workflow/references/common_failures.md",
         include_str!("../../assets/skills/orbit-workflow/references/common_failures.md"),
     ),
     (
-        "orbit-workflow",
-        "references/operational-logs.md",
+        "orbit-workflow/references/operational-logs.md",
         include_str!("../../assets/skills/orbit-workflow/references/operational-logs.md"),
     ),
     (
-        "orbit",
-        "references/guide.md",
-        include_str!("../../assets/skills/orbit/references/guide.md"),
+        "orbit-search/SKILL.md",
+        include_str!("../../assets/skills/orbit-search/SKILL.md"),
+    ),
+    (
+        "orbit-search/references/docs-corpus.md",
+        include_str!("../../assets/skills/orbit-search/references/docs-corpus.md"),
     ),
 ];
+
+/// The `SKILL.md` entry point of every shipped skill, as `(id, content)`.
+/// A skill id is the first path component of its managed asset paths.
+pub(crate) fn default_skill_files() -> Vec<(&'static str, &'static str)> {
+    DEFAULT_SKILL_FILES
+        .iter()
+        .filter_map(|(relative, content)| {
+            relative.strip_suffix("/SKILL.md").map(|id| (id, *content))
+        })
+        .collect()
+}
 
 use crate::paths::ORBIT_ROOT_TOKEN;
 
@@ -70,47 +89,39 @@ pub struct SkillDoctorResult {
     pub message: String,
 }
 
-pub(crate) fn default_skill_ids() -> [&'static str; 6] {
-    DEFAULT_SKILL_FILES.map(|(id, _)| id)
+pub(crate) fn default_skill_ids() -> Vec<&'static str> {
+    default_skill_files()
+        .into_iter()
+        .map(|(id, _)| id)
+        .collect()
 }
 
+/// Materialize the shipped skill trees under `skills_root`, recording the
+/// digest Orbit wrote for each file so a skill (or a single reference file)
+/// dropped from a later release can be retired by content provenance.
+///
+/// The digest covers the *rendered* document: `ORBIT_ROOT_TOKEN` resolves to
+/// the absolute root before the write, so an unchanged release re-seeds as a
+/// no-op on the same root.
+// ADR-0366: skills are managed by relative path, so a single reference
+// file can be retired independently of its SKILL.md.
 pub(crate) fn seed_default_skills(
     skills_root: &Path,
     orbit_root: &Path,
     overwrite: bool,
-) -> Result<usize, OrbitError> {
-    let mut count = 0usize;
-    for (id, content) in DEFAULT_SKILL_FILES {
-        let path = skills_root.join(id).join("SKILL.md");
-        if !overwrite && path.exists() {
-            continue;
-        }
-        let rendered = inject_skill_template_tokens(content, orbit_root);
-        write_text_with_parent(&path, &rendered)?;
-        seed_default_skill_resources(&skills_root.join(id), id, orbit_root, overwrite)?;
-        count += 1;
-    }
-    Ok(count)
-}
-
-fn seed_default_skill_resources(
-    skill_dir: &Path,
-    skill_id: &str,
-    orbit_root: &Path,
-    overwrite: bool,
-) -> Result<(), OrbitError> {
-    for (resource_skill_id, relative_path, content) in DEFAULT_SKILL_RESOURCE_FILES {
-        if resource_skill_id != skill_id {
-            continue;
-        }
-        let path = skill_dir.join(relative_path);
-        if !overwrite && path.exists() {
-            continue;
-        }
-        let rendered = inject_skill_template_tokens(content, orbit_root);
-        write_text_with_parent(&path, &rendered)?;
-    }
-    Ok(())
+) -> Result<ManagedAssetReconciliation, OrbitError> {
+    reconcile_managed_assets(
+        skills_root,
+        "skill",
+        ManagedAssetLayout::RelativePath,
+        &DEFAULT_SKILL_FILES,
+        overwrite,
+        |_, content| {
+            Ok(Cow::Owned(inject_skill_template_tokens(
+                content, orbit_root,
+            )))
+        },
+    )
 }
 
 pub(crate) fn is_default_skill_file_for_root(
@@ -118,8 +129,8 @@ pub(crate) fn is_default_skill_file_for_root(
     path: &Path,
     orbit_root: &Path,
 ) -> Result<bool, OrbitError> {
-    let Some((_, content)) = DEFAULT_SKILL_FILES
-        .iter()
+    let Some((_, content)) = default_skill_files()
+        .into_iter()
         .find(|(default_id, _)| *default_id == skill_id)
     else {
         return Ok(false);
@@ -131,7 +142,7 @@ pub(crate) fn is_default_skill_file_for_root(
     Ok(existing == inject_skill_template_tokens(content, orbit_root))
 }
 
-fn inject_skill_template_tokens(raw: &str, orbit_root: &Path) -> String {
+pub(crate) fn inject_skill_template_tokens(raw: &str, orbit_root: &Path) -> String {
     let orbit_root_value = orbit_root.to_string_lossy();
     raw.replace(ORBIT_ROOT_TOKEN, orbit_root_value.as_ref())
 }
@@ -170,7 +181,7 @@ mod tests {
     //! Plus a portability regression (`embedded_assets_are_repository_agnostic`)
     //! guarding the shipped skill *and* activity trees against leaking
     //! Orbit-source paths, private Constellation names, maintainers' personal
-    //! names, workspace-local artifact IDs (task/friction/learning/ADR), and
+    //! names, workspace-local artifact IDs (task/friction/ADR), and
     //! fixed consumer design-doc filenames into public consumer workspaces.
 
     use super::*;
@@ -257,6 +268,15 @@ mod tests {
         assert!(
             missing_from_registry.is_empty() && missing_from_disk.is_empty(),
             "skill catalogs disagree:\n  in assets/skills/ but NOT in default_skill_ids(): {missing_from_registry:?}\n  in default_skill_ids() but NOT in assets/skills/: {missing_from_disk:?}\nfix by editing crates/orbit-core/src/command/skill.rs::DEFAULT_SKILL_FILES or moving the asset directory under assets/skills/_archive/.",
+        );
+    }
+
+    #[test]
+    fn orbit_task_skill_matches_plugin_copy() {
+        assert_eq!(
+            include_str!("../../assets/skills/orbit-task/SKILL.md"),
+            include_str!("../../../../plugin/skills/orbit-task/SKILL.md"),
+            "the embedded and plugin copies of orbit-task must remain byte-identical"
         );
     }
 
@@ -453,11 +473,11 @@ mod tests {
     // paths (`.orbit/...`, `~/.orbit/...`) and placeholder IDs (`ORB-NNNN`,
     // `L-NNNN`, `<task-id>`).
 
-    /// Concrete workspace-local artifact IDs (task/friction/learning/decision)
+    /// Concrete workspace-local artifact IDs (task/friction/decision)
     /// that would become dangling references in a consumer workspace. Placeholder
     /// forms (`ORB-NNNN`, `L-NNNN`, `ADR-NNNN`, `<task-id>`) use non-digit
     /// stand-ins and are intentionally *not* matched.
-    fn find_artifact_ids(content: &str) -> Vec<String> {
+    fn find_artifact_ids(content: &str, task_prefixes: &BTreeSet<String>) -> Vec<String> {
         let b = content.as_bytes();
         let n = b.len();
         let boundary = |i: usize| i == 0 || !b[i - 1].is_ascii_alphanumeric();
@@ -475,27 +495,29 @@ mod tests {
         let mut i = 0;
         while i < n {
             if boundary(i) {
-                // ORB-<digit...> (task ids). ORB-NNNN / ORB-NNNNN placeholders
-                // have a non-digit after the dash and are skipped.
-                if starts(i, b"ORB-") && is_digit(i + 4) {
-                    let d = digit_run(i + 4);
-                    out.push(String::from_utf8_lossy(&b[i..i + 4 + d]).into_owned());
+                // <registered-prefix>-<digit...> (task ids). Prefixes that only
+                // look task-shaped are deliberately ignored: accepting every
+                // uppercase token is too weak against ordinary prose.
+                for prefix in task_prefixes {
+                    let prefix_bytes = prefix.as_bytes();
+                    let dash = i + prefix_bytes.len();
+                    let digits = dash + 1;
+                    if starts(i, prefix_bytes) && dash < n && b[dash] == b'-' && is_digit(digits) {
+                        let d = digit_run(digits);
+                        let end = digits + d;
+                        if end == n || !b[end].is_ascii_alphanumeric() {
+                            out.push(String::from_utf8_lossy(&b[i..end]).into_owned());
+                        }
+                    }
                 }
                 // ADR-<digit...> (decision-record ids). ADR ids are allocated
                 // per workspace, so a concrete one resolves to a different
-                // decision — or to nothing — in a consumer's `.orbit/adrs/`.
+                // decision — or to nothing — in a consumer's design docs.
                 // The ADR-NNNN placeholder has a non-digit after the dash and
                 // is skipped.
                 if starts(i, b"ADR-") && is_digit(i + 4) {
                     let d = digit_run(i + 4);
                     out.push(String::from_utf8_lossy(&b[i..i + 4 + d]).into_owned());
-                }
-                // L-<3+ digits> (learning ids). L-NNNN placeholder is skipped.
-                if starts(i, b"L-") {
-                    let d = digit_run(i + 2);
-                    if d >= 3 {
-                        out.push(String::from_utf8_lossy(&b[i..i + 2 + d]).into_owned());
-                    }
                 }
                 // F<yyyy>-<mm>-<nnn> (friction ids). F<YYYY>-<MM>-<NNN> is skipped.
                 if b[i] == b'F'
@@ -551,7 +573,10 @@ mod tests {
     const PRIVATE_PERSONAL_NAMES: &[&str] = &["Daniel"];
 
     /// Every reason `content` is not repository-agnostic. Empty == portable.
-    fn portability_violations(content: &str) -> Vec<String> {
+    fn portability_violations_with_task_prefixes(
+        content: &str,
+        task_prefixes: &BTreeSet<String>,
+    ) -> Vec<String> {
         let mut hits = Vec::new();
 
         // Unguarded Orbit source paths (crate tree only exists in a source clone).
@@ -594,11 +619,33 @@ mod tests {
         }
 
         // Workspace-local artifact IDs.
-        for id in find_artifact_ids(content) {
+        for id in find_artifact_ids(content, task_prefixes) {
             hits.push(format!("workspace-local artifact id `{id}`"));
         }
 
         hits
+    }
+
+    fn portability_violations(content: &str) -> Vec<String> {
+        portability_violations_with_task_prefixes(content, &BTreeSet::from(["ORB".to_string()]))
+    }
+
+    #[test]
+    fn task_id_scanner_matches_only_prefixes_known_to_the_local_registry() {
+        let root = tempfile::tempdir().expect("registry root");
+        let registry = orbit_store::sqlite::task_registry::TaskRegistryStore::open(
+            &orbit_store::sqlite::task_registry::task_registry_path(root.path()),
+        )
+        .expect("open task registry");
+        registry
+            .set_task_prefix("DE")
+            .expect("register task prefix");
+        let prefixes = registry.known_task_prefixes().expect("known task prefixes");
+
+        assert_eq!(
+            find_artifact_ids("known DE-100000 but unknown XY-12345", &prefixes),
+            vec!["DE-100000"]
+        );
     }
 
     #[test]
@@ -611,9 +658,7 @@ mod tests {
             "part of the Constellation",
             r#"{"model": "codex"}"#,
             "migrated by ORB-00200",
-            "see learning L-0065",
             "the runtime gate (ADR-0250) refuses the call",
-            "learnings are authored by the orchestrator or by Daniel",
             "silently drops it (F2026-05-024)",
             "--evidence task:T20260514-3",
             "docs/design/<feature>/4_decisions.md",
@@ -627,16 +672,14 @@ mod tests {
 
         // Allows genuine public Orbit runtime paths and placeholder IDs.
         for good in [
-            "artifacts live under `.orbit/adrs/{accepted,proposed}/`",
+            "decisions live under the feature's reviewed design folder",
             "scheduler state in `~/.orbit/orbit.db` is host-local",
             "evidence under `.orbit/state/job-runs/`",
             "dependencies: [\"ORB-NNNN\", ...] require ORB-NNNNN targets",
-            "drop a `// L-NNNN: <rationale>` citation",
-            "record the choice as ADR-NNNN once `orbit.adr.add` allocates it",
-            "learnings are curated by the workspace's orchestrator or owner",
+            "record the choice as a repo-local ADR-NNNN heading",
             "recommended layout: `docs/design/<feature>/`",
-            "resolve `context_files` selectors, then `fs.read` a `<task-id>`",
-            "run `orbit search --kind adr`",
+            "resolve `context_files` selectors, then read a `<task-id>`",
+            "run `orbit search --kind doc`",
         ] {
             assert!(
                 portability_violations(good).is_empty(),
@@ -646,22 +689,60 @@ mod tests {
         }
     }
 
-    /// Every portability violation in `root`, each prefixed with its path
-    /// relative to `crates/orbit-core/assets/` for a readable failure report.
-    fn portability_failures_under(label: &str, root: &Path) -> Vec<String> {
+    /// Portability violations and visibly skipped non-text files under `root`.
+    #[derive(Debug, PartialEq, Eq)]
+    struct PortabilityScan {
+        failures: Vec<String>,
+        skipped: Vec<String>,
+    }
+
+    /// Scan `root`, prefixing each result with its path relative to
+    /// `crates/orbit-core/assets/` for a readable failure report.
+    fn portability_scan_under(label: &str, root: &Path) -> PortabilityScan {
         let files = collect_relative_files(root)
             .unwrap_or_else(|e| panic!("collect_relative_files({}): {e}", root.display()));
 
         let mut failures = Vec::new();
+        let mut skipped = Vec::new();
         for relative in files {
             let path = root.join(&relative);
-            let content = std::fs::read_to_string(&path)
-                .unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
+            let content = match std::fs::read_to_string(&path) {
+                Ok(content) => content,
+                Err(error) if error.kind() == std::io::ErrorKind::InvalidData => {
+                    skipped.push(format!(
+                        "  {label}/{}: skipped non-UTF-8 file",
+                        relative.display()
+                    ));
+                    continue;
+                }
+                Err(error) => panic!("read {}: {error}", path.display()),
+            };
             for violation in portability_violations(&content) {
                 failures.push(format!("  {label}/{}: {violation}", relative.display()));
             }
         }
-        failures
+        PortabilityScan { failures, skipped }
+    }
+
+    #[test]
+    fn portability_checker_skips_non_utf8_files_without_hiding_text_violations() {
+        let root = tempfile::tempdir().expect("create temporary assets root");
+        std::fs::write(
+            root.path().join("bad.md"),
+            "See ORB-10530 before handoff.\n",
+        )
+        .expect("write text fixture");
+        std::fs::write(root.path().join("binary.dat"), [0xff, 0xfe]).expect("write binary fixture");
+
+        let scan = portability_scan_under("skills", root.path());
+        assert_eq!(
+            scan.failures,
+            vec!["  skills/bad.md: workspace-local artifact id `ORB-10530`"]
+        );
+        assert_eq!(
+            scan.skipped,
+            vec!["  skills/binary.dat: skipped non-UTF-8 file"]
+        );
     }
 
     #[test]
@@ -673,11 +754,10 @@ mod tests {
         // Activities were outside this check until a task description's own
         // wording — a maintainer's name plus a concrete ADR id — was copied
         // verbatim into `agent_implement.yaml` (PR #702).
-        let mut failures = portability_failures_under("skills", &assets_skills_dir());
-        failures.extend(portability_failures_under(
-            "activities",
-            &assets_activities_dir(),
-        ));
+        let skills = portability_scan_under("skills", &assets_skills_dir());
+        let activities = portability_scan_under("activities", &assets_activities_dir());
+        let mut failures = skills.failures;
+        failures.extend(activities.failures);
 
         assert!(
             failures.is_empty(),

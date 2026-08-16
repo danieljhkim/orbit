@@ -82,24 +82,22 @@ fn is_git_repo_root(path: &Path) -> bool {
 /// The Orbit-managed `.gitignore` block written by `orbit workspace init`.
 ///
 /// Blanket-ignores `.orbit/*`, then re-includes the artifact partitions that
-/// travel with the repo (accepted/deleted ADRs, learnings, auto-tasks,
-/// resources, routines, config). The `proposed/` and `superseded/` ADR
-/// partitions stay ignored — they are local-only until publication
-/// (ORB-10303). `.orbit/**/*.lock` keeps lock files out of the re-included
-/// directories. Order matters: the partition exclusions must follow the
-/// `!.orbit/adrs/` re-include, or git tracks them anyway.
+/// travel with the repo. Lock files remain excluded.
 const ORBIT_GITIGNORE_BLOCK: &[&str] = &[
     ".orbit/*",
-    "!.orbit/adrs/",
-    ".orbit/adrs/index.sqlite*",
-    ".orbit/adrs/proposed/",
-    ".orbit/adrs/superseded/",
-    "!.orbit/learnings/",
     "!.orbit/auto_tasks/",
     "!.orbit/resources/",
     "!.orbit/routines/",
     "!.orbit/config.toml",
     ".orbit/**/*.lock",
+];
+
+/// Lines earlier managed blocks wrote that the current policy retires.
+const RETIRED_ORBIT_BLOCK_LINES: &[&str] = &[
+    "!.orbit/adrs/",
+    ".orbit/adrs/index.sqlite*",
+    ".orbit/adrs/proposed/",
+    ".orbit/adrs/superseded/",
 ];
 
 /// Legacy bare `.orbit` ignore lines written by earlier `orbit workspace init`
@@ -125,19 +123,27 @@ fn write_orbit_gitignore_entry(gitignore_path: &Path) -> Result<(), OrbitError> 
         Err(error) => return Err(OrbitError::Io(error.to_string())),
     };
 
-    // Idempotent no-op: the full managed block is already present and no legacy
-    // bare `.orbit` line lingers (a bare line would defeat the re-includes).
-    if gitignore_has_managed_block(&content) && !gitignore_has_legacy_orbit_line(&content) {
+    // Idempotent no-op: the full managed block is already present and neither a
+    // legacy bare `.orbit` line (which would defeat the re-includes) nor a
+    // retired line from an older block lingers.
+    if gitignore_has_managed_block(&content)
+        && !gitignore_has_legacy_orbit_line(&content)
+        && !gitignore_has_retired_block_line(&content)
+    {
         return Ok(());
     }
 
-    // Rebuild: drop any legacy bare lines and any pre-existing managed-block
-    // lines (partial or full), preserving the operator's other content and
-    // order, then append the canonical block once at the end.
+    // Rebuild: drop any legacy bare lines, any line retired from an older
+    // managed block, and any pre-existing managed-block lines (partial or
+    // full), preserving the operator's other content and order, then append the
+    // canonical block once at the end.
     let mut next = String::new();
     for line in content.lines() {
         let trimmed = line.trim();
-        if LEGACY_ORBIT_LINES.contains(&trimmed) || ORBIT_GITIGNORE_BLOCK.contains(&trimmed) {
+        if LEGACY_ORBIT_LINES.contains(&trimmed)
+            || RETIRED_ORBIT_BLOCK_LINES.contains(&trimmed)
+            || ORBIT_GITIGNORE_BLOCK.contains(&trimmed)
+        {
             continue;
         }
         next.push_str(line);
@@ -158,4 +164,10 @@ fn gitignore_has_legacy_orbit_line(content: &str) -> bool {
     content
         .lines()
         .any(|line| LEGACY_ORBIT_LINES.contains(&line.trim()))
+}
+
+fn gitignore_has_retired_block_line(content: &str) -> bool {
+    content
+        .lines()
+        .any(|line| RETIRED_ORBIT_BLOCK_LINES.contains(&line.trim()))
 }

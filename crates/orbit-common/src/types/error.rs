@@ -26,7 +26,6 @@ pub enum NotFoundKind {
     Activity,
     Adr,
     DesignFeature,
-    Learning,
     AgentSession,
     Workspace,
 }
@@ -42,7 +41,6 @@ impl std::fmt::Display for NotFoundKind {
             Self::Activity => "activity",
             Self::Adr => "ADR",
             Self::DesignFeature => "design feature",
-            Self::Learning => "learning",
             Self::AgentSession => "agent session",
             Self::Workspace => "workspace",
         };
@@ -65,6 +63,27 @@ pub struct DependencyNotDelivered {
     pub base_ref: String,
     pub base_sha: String,
     pub detail: String,
+}
+
+/// Evidence behind [`OrbitError::WorkspaceClaimHeld`]: the refused operation,
+/// the incumbent holder, its claim id, and the instant the claim lapses.
+///
+/// The holder's token is deliberately absent. A refusal travels to the
+/// contender, and a contender that could read the token out of its own refusal
+/// would turn the claim into a formality.
+///
+/// Boxed into the error enum for the same reason as
+/// [`DependencyNotDelivered`]: four inline strings for one rare refusal would
+/// widen every `Result<_, OrbitError>` in the workspace.
+#[derive(Debug, Serialize)]
+pub struct WorkspaceClaimHeld {
+    /// The governed operation that was refused, e.g. `orbit.workflow.ship`.
+    pub operation: String,
+    /// The incumbent's actor label.
+    pub holder: String,
+    pub claim_id: String,
+    /// RFC 3339 instant at which the claim stops blocking on its own.
+    pub expires_at: String,
 }
 
 #[derive(Debug, Error, Serialize)]
@@ -117,11 +136,11 @@ pub enum OrbitError {
     AgentProtocolViolation(String),
     #[error("unsupported agent provider: {0}")]
     UnsupportedAgentProvider(String),
-    #[error("hub unavailable: {0}")]
-    HubUnavailable(String),
-    #[error("hub negotiation failed: {0}")]
-    HubNegotiation(String),
-    #[error("hub call outcome unknown for {mcp_call_id}: {message}")]
+    #[error("owner unavailable: {0}")]
+    OwnerUnavailable(String),
+    #[error("owner negotiation failed: {0}")]
+    OwnerNegotiation(String),
+    #[error("owner call outcome unknown for {mcp_call_id}: {message}")]
     OutcomeUnknown {
         mcp_call_id: String,
         message: String,
@@ -164,6 +183,26 @@ pub enum OrbitError {
         .0.task_id, .0.dependency_id, .0.base_ref, .0.base_sha, .0.detail
     )]
     DependencyNotDelivered(Box<DependencyNotDelivered>),
+    /// A ship submission naming explicit task ids was refused because one of
+    /// them is already carried by a non-terminal run [ORB-10544]. Raised by the
+    /// shared submission path, so every dispatch surface refuses the duplicate
+    /// identically; the payload names the contended task and the run that holds
+    /// it so a caller can wait on or cancel that run rather than re-dispatch.
+    #[error(
+        "task {task_id} already has an in-flight run ({run_id}); wait for it to finish or cancel it"
+    )]
+    ShipRunInFlight { task_id: String, run_id: String },
+    /// A governed workflow operation was refused because another operator holds
+    /// the exclusive workspace claim [ADR-0352, ORB-10709]. Raised by the shared
+    /// run-submission path, so the refusal is identical on every surface, and
+    /// the payload names the incumbent and the expiry instant so a caller can
+    /// wait it out, ask the holder, or force-release rather than retry blindly.
+    /// Contention rejects: never a silent queue, never a silent steal.
+    #[error(
+        "workspace claim is held by {} until {} ({}); {} requires that claim's token — present it as `claim_token`, wait for the claim to expire, or force-release it",
+        .0.holder, .0.expires_at, .0.claim_id, .0.operation
+    )]
+    WorkspaceClaimHeld(Box<WorkspaceClaimHeld>),
     #[error("invalid job run state transition: {0}")]
     JobRunStateTransition(String),
     #[error("workspace error: {0}")]
@@ -242,6 +281,26 @@ impl OrbitError {
             Self::InvalidInputDiagnostic { did_you_mean, .. } if !did_you_mean.is_empty() => {
                 Some(did_you_mean)
             }
+            _ => None,
+        }
+    }
+
+    /// The contended `(task_id, run_id)` of a ship duplicate-dispatch refusal,
+    /// so projections (HTTP 409 body, MCP structured error) can name both
+    /// without re-parsing the message.
+    pub fn ship_run_in_flight(&self) -> Option<(&str, &str)> {
+        match self {
+            Self::ShipRunInFlight { task_id, run_id } => Some((task_id, run_id)),
+            _ => None,
+        }
+    }
+
+    /// The refused operation, incumbent holder, claim id, and expiry of a
+    /// workspace-claim refusal, so projections (HTTP 409 body, MCP structured
+    /// error) can name them without re-parsing the message [ORB-10709].
+    pub fn workspace_claim_held(&self) -> Option<&WorkspaceClaimHeld> {
+        match self {
+            Self::WorkspaceClaimHeld(claim) => Some(claim),
             _ => None,
         }
     }

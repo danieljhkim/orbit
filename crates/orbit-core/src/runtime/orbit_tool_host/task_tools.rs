@@ -70,6 +70,7 @@ pub(super) fn add(
             external_refs: Vec::new(),
             source_task_id: None,
             crew: optional_string(&input, "crew")?,
+            orchestrator: optional_string(&input, "orchestrator")?,
         },
         agent,
         model,
@@ -302,6 +303,9 @@ pub(super) fn update(
             status: optional_string(&input, "status")?
                 .map(|value| parse_task_status("status", &value))
                 .transpose()?,
+            priority: optional_string(&input, "priority")?
+                .map(|value| parse_task_priority("priority", &value))
+                .transpose()?,
             complexity: optional_string(&input, "complexity")?
                 .map(|value| parse_task_complexity("complexity", &value))
                 .transpose()?,
@@ -319,6 +323,7 @@ pub(super) fn update(
             pr_status: optional_raw_string(&input, "pr_status")?.map(empty_string_to_none),
             job_run_id: optional_raw_string(&input, "job_run_id")?.map(empty_string_to_none),
             crew: optional_raw_string(&input, "crew")?.map(empty_string_to_none),
+            orchestrator: optional_raw_string(&input, "orchestrator")?.map(empty_string_to_none),
             context_files: optional_csv_or_string_list_alias(
                 &input,
                 &["context_files", "context"],

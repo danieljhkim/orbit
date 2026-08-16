@@ -9,6 +9,13 @@ use predicates::prelude::*;
 use tempfile::tempdir;
 
 const INACTIVE_TOOL_NAMES: &[&str] = &[
+    // ORB-10798: auto-task authoring is human/admin work on the CLI surface.
+    "orbit.auto_task.add",
+    "orbit.auto_task.show",
+    "orbit.auto_task.toggle",
+    "orbit.auto_task.update",
+    "orbit.friction.show",
+    "orbit.friction.tags",
     "orbit.docs.index",
     "orbit.docs.migrate",
     "orbit.docs.add",
@@ -20,8 +27,6 @@ const INACTIVE_TOOL_NAMES: &[&str] = &[
     "orbit.semantic.index",
     "orbit.semantic.install",
     "orbit.semantic.stats",
-    "orbit.learning.sync",
-    "orbit.learning.list",
     "orbit.friction.stats",
 ];
 
@@ -38,7 +43,11 @@ fn tool_list_all_shows_inactive_lock_reservation_with_required_input_shape() {
         .env("HOME", &home)
         .env("USERPROFILE", &home)
         .env_remove("ORBIT_ROOT")
-        .args(["tool", "list", "--all"])
+        // `--format table` because `assert_cmd` captures through a pipe, where
+        // `auto` resolves to the plain form and suppresses the header
+        // (`specs/output-modes.md` §2). The STATUS *column* is what this test
+        // is about, and naming the mode is how a piped caller asks for it.
+        .args(["tool", "list", "--all", "--format", "table"])
         .assert()
         .success()
         .stdout(predicate::str::contains("orbit.task.locks.reserve"))
@@ -136,6 +145,11 @@ fn tool_list_json_all_includes_parameter_schema_for_inactive_tools() {
         .clone();
 
     let tools: Vec<serde_json::Value> = serde_json::from_slice(&output).expect("tool list JSON");
+    let mint = tools
+        .iter()
+        .find(|tool| tool["name"] == "orbit.auto_task.mint")
+        .expect("mint tool");
+    assert_eq!(mint["status"], "active");
     let reserve = tools
         .iter()
         .find(|tool| tool["name"] == "orbit.task.locks.reserve")
@@ -235,11 +249,14 @@ fn tool_run_rejects_inactive_tools() {
         .args([
             "tool",
             "run",
-            "orbit.learning.list",
+            "orbit.semantic.uninstall",
             "--input",
             "{\"model\":\"codex\"}",
         ])
         .assert()
         .failure()
-        .stdout(predicate::str::contains("inactive"));
+        // The JSON error payload moved to stderr [ORB-10570]; stdout carries
+        // the payload and nothing else.
+        .stdout(predicate::str::is_empty())
+        .stderr(predicate::str::contains("inactive"));
 }

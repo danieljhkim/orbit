@@ -14,8 +14,9 @@ impl Tool for OrbitTaskShowTool {
             description:
                 "Optional field projection as a string or array of strings. When set, returns only \
                 the requested field(s) as JSON. Valid values: comments, plan, execution_summary, \
-                description, acceptance_criteria, dependencies, resolved_dependencies, history, \
-                context_files, artifacts."
+                description, acceptance_criteria, dependencies, resolved_dependencies, tags, \
+                history, context_files, crew, orchestrator, artifacts. `crew` is execution \
+                selection; `orchestrator` is separate orchestration attribution."
                     .to_string(),
             param_type: "string_list".to_string(),
             required: false,
@@ -49,7 +50,8 @@ impl Tool for OrbitTaskShowTool {
             name: "orbit.task.show".to_string(),
             description: "Fetch a single Orbit task as JSON. Use the optional `fields` projection \
                 (or single-field alias `field`) to retrieve only specific task fields, such as \
-                `field: \"artifacts\"`."
+                `field: \"orchestrator\"`. The `crew` field selects execution, while \
+                `orchestrator` records orchestration attribution."
                 .to_string(),
             parameters,
             builtin: true,

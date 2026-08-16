@@ -7,8 +7,8 @@ use orbit_store::TaskReservationReleaseReason;
 use crate::OrbitRuntime;
 
 use super::owner::{
-    pending_run_stale_reason, running_run_owner_is_stale, running_run_owner_stale_reason,
-    stale_job_run_message, stale_pending_run_message,
+    owner_identity_error_code, pending_run_stale_reason, running_run_owner_is_stale,
+    running_run_owner_stale_reason, stale_job_run_message, stale_pending_run_message,
 };
 
 impl OrbitRuntime {
@@ -96,21 +96,34 @@ impl OrbitRuntime {
         // or never claimed past the grace window) finalize exactly like
         // orphaned running runs.
         if let Some(reason) = pending_run_stale_reason(run) {
-            return self.finalize_orphaned_job_run(run, &stale_pending_run_message(run, reason));
+            return self.finalize_orphaned_job_run(
+                run,
+                reason.error_code(),
+                &stale_pending_run_message(run, reason),
+            );
         }
         if !running_run_owner_is_stale(run) {
             return Ok(false);
         }
         let stale_reason = running_run_owner_stale_reason(run);
-        self.finalize_orphaned_job_run(run, &stale_job_run_message(run, stale_reason))
+        self.finalize_orphaned_job_run(
+            run,
+            owner_identity_error_code(stale_reason),
+            &stale_job_run_message(run, stale_reason),
+        )
     }
 
     /// [ORB-10002] Orphaned runs (owner process conclusively gone) become
     /// `interrupted`, not `failed`: the job did not fail, its worker died.
     /// Interrupted runs are resumable from their step checkpoints via
     /// `orbit job resume <run_id>`.
-    fn finalize_orphaned_job_run(&self, run: &JobRun, message: &str) -> Result<bool, OrbitError> {
-        let finished_at = Utc::now();
+    fn finalize_orphaned_job_run(
+        &self,
+        run: &JobRun,
+        error_code: &str,
+        message: &str,
+    ) -> Result<bool, OrbitError> {
+        let finished_at = self.orphaned_run_finished_at(run);
         let duration_ms = run.started_at.map(|started_at| {
             finished_at
                 .signed_duration_since(started_at)
@@ -140,6 +153,7 @@ impl OrbitRuntime {
             run,
             step_started_at,
             finished_at,
+            Some(error_code),
             message,
             JobRunState::Interrupted,
         );
@@ -149,6 +163,42 @@ impl OrbitRuntime {
             state: JobRunState::Interrupted.to_string(),
         })?;
         Ok(true)
+    }
+
+    /// When an orphaned run actually stopped doing work.
+    ///
+    /// [ORB-10594] The sweep can notice a dead owner arbitrarily long after the
+    /// fact — orphan scans only run when some process opens the workspace — so
+    /// stamping `Utc::now()` records the moment of *detection*, not the end of
+    /// work, and inflates `duration_ms` by the whole detection lag. The run's
+    /// own audit trail stops when its work stopped, so its last event is the
+    /// better estimate. Falls back to now when the run left no trail, and
+    /// never accepts a timestamp outside `[started_at, now]` so a clock skew or
+    /// a back-dated event cannot produce a negative or absurd duration.
+    fn orphaned_run_finished_at(&self, run: &JobRun) -> DateTime<Utc> {
+        let now = Utc::now();
+        let floor = run.started_at.unwrap_or(run.scheduled_at);
+        self.last_run_activity_at(&run.run_id)
+            .unwrap_or_else(|error| {
+                tracing::debug!(
+                    target: "orbit.core.job_run",
+                    run_id = %run.run_id,
+                    error = %error,
+                    "orphaned run audit trail unreadable; stamping detection time",
+                );
+                None
+            })
+            .filter(|activity| *activity >= floor && *activity <= now)
+            .unwrap_or(now)
+    }
+
+    /// Timestamp of the most recent audit event recorded for a run.
+    fn last_run_activity_at(&self, run_id: &str) -> Result<Option<DateTime<Utc>>, OrbitError> {
+        Ok(self
+            .collect_run_audit_events(run_id)?
+            .into_iter()
+            .filter_map(|event| event.timestamp)
+            .max())
     }
 
     pub(super) fn reconcile_job_run_records(&self, runs: &[JobRun]) -> Result<usize, OrbitError> {

@@ -2,6 +2,7 @@
 title: Operations as Data — Migration Cookbook
 owner: claude
 last_updated: 2026-07-26
+last_validated: 2026-08-09
 status: Accepted
 feature: operations-as-data
 doc_role: reference
@@ -10,7 +11,7 @@ summary: Step-by-step procedure for migrating a noun to the operation registry, 
 tags: [operations-as-data, architecture, adr-0209, cookbook]
 paths: ["crates/orbit-common/src/friction/**", "crates/orbit-cli/src/command/operation_args.rs"]
 related_features: [operations-as-data]
-related_artifacts: [ORB-10358, ADR-0209]
+related_artifacts: [ORB-10358]
 ---
 
 # Operations as Data — Migration Cookbook
@@ -48,14 +49,14 @@ For a noun with verbs `v₁…vₙ`, find:
 
 | What | Where (friction example) |
 |------|--------------------------|
-| MCP `Tool` impls | `orbit-tools/src/builtin/orbit/<noun>/*.rs` |
-| MCP registration + exposure policy | `orbit-tools/src/builtin/orbit/mod.rs` |
-| Action enum variants | `orbit-tools/src/lib.rs` (`OrbitBuiltinAction`) |
-| Handler dispatch | `orbit-core/src/runtime/orbit_tool_host/dispatch.rs` |
-| Handlers | `orbit-core/src/runtime/orbit_tool_host/<noun>_tools.rs` |
-| CLI args + `Execute` impls | `orbit-cli/src/command/<noun>.rs` |
-| CLI audit metadata | `orbit-cli/src/command/operation.rs` |
-| Dashboard handlers | `orbit-dashboard/src/api/<noun>s.rs` |
+| MCP `Tool` impls | `crates/orbit-tools/src/builtin/orbit/<noun>/*.rs` |
+| MCP registration + workspace scope | `crates/orbit-tools/src/builtin/orbit/mod.rs` |
+| Action enum variants | `crates/orbit-tools/src/lib.rs` (`OrbitBuiltinAction`) |
+| Handler dispatch | `crates/orbit-core/src/runtime/orbit_tool_host/dispatch.rs` |
+| Handlers | `crates/orbit-core/src/runtime/orbit_tool_host/<noun>_tools.rs` |
+| CLI args + `Execute` impls | `crates/orbit-cli/src/command/<noun>.rs` |
+| CLI audit metadata | `crates/orbit-cli/src/command/operation.rs` |
+| Web handlers | `crates/orbit-web/src/api/<noun>s.rs` |
 
 Note where the *same* field is described differently in two places. Do **not**
 harmonize the wording during the migration — model the difference in the spec
@@ -171,7 +172,7 @@ description.
 
 ### Step 10. Record the outcome
 
-Append a pilot/migration note to ADR-0209 via `orbit tool run orbit.adr.update`
+Append a pilot/migration note directly to [North-star architecture bearing: operations as data behind an operation registry](../../orbit-core/4_decisions.md#north-star-architecture-bearing-operations-as-data-behind-an-operation-registry), citing the task that supplied the evidence.
 (never hand-edit `.orbit/`), and add the noun to this feature's docs. If the
 migration surfaced a cost the ADR does not already name, name it.
 

@@ -1,6 +1,6 @@
 use chrono::{DateTime, Utc};
 
-/// Shared CSV parsing for remaining non-ship/duel callers: task add/update
+/// Shared CSV parsing for task add/update
 /// context file parsing and `orbit job`'s `--env-extra` handling.
 pub fn csv_to_vec(raw: &str) -> Vec<String> {
     raw.split(',')

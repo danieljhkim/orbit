@@ -53,9 +53,9 @@ plus global `denyRead` / `denyModify` rules, evaluated by `orbit-policy`.
 
 **Enforcement layers differ by platform, and by backend:**
 
-For built-in Orbit tools (the `fs.*`/`proc.*` tool surface), `orbit-policy`
-evaluation applies on every platform and is the sole enforcement point for
-those tools' filesystem access.
+For built-in Orbit tools that still consult `orbit-policy` (today `proc.*`
+program allowlists, not a shipped `fs.*` family), evaluation applies on every
+platform and is the sole in-process enforcement point for those tools.
 
 For `backend: cli` agents (an agent CLI such as Codex/Claude/Gemini/Grok
 spawned as a subprocess, making its own syscalls outside Orbit's tool

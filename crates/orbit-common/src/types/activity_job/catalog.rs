@@ -22,7 +22,7 @@ use thiserror::Error;
 use crate::types::OrbitError;
 
 use super::activity_v2::ActivityV2;
-use super::asset_loader::{AssetLoadError, load_activity_asset, load_job_asset};
+use super::asset_loader::{ActivityAsset, AssetLoadError, load_activity_asset, load_job_asset};
 use super::job_v2::{JobV2, JobV2Step, JobV2StepBody, LoopBlock, TargetRef, TargetStep};
 use super::tool_allowlist::{
     ToolAllowlistError, validate_activity_tool_allowlist_against_registered_tools,
@@ -399,21 +399,54 @@ impl CatalogAdapter for ActivityCatalogAdapter {
         yaml: &str,
         skipped: &mut Vec<PathBuf>,
     ) -> Result<Option<LoadedCatalogAsset<Self::Asset>>, CatalogError> {
-        match load_activity_asset(yaml) {
-            Ok(asset) => Ok(Some(LoadedCatalogAsset {
+        match load_activity_catalog_asset(path, yaml, self.skip_retired)? {
+            Some(asset) => Ok(Some(LoadedCatalogAsset {
                 name: asset.name,
                 spec: asset.spec,
             })),
-            Err(AssetLoadError::RetiredVersion(_)) if self.skip_retired => {
+            None => {
                 skipped.push(path.to_path_buf());
                 Ok(None)
             }
-            Err(source) => Err(CatalogError::Parse {
-                path: path.to_path_buf(),
-                source,
-            }),
         }
     }
+}
+
+/// Load one activity YAML with the same parse and retired-schema rules the
+/// catalog uses while walking a directory. `Ok(None)` is the skipped
+/// schemaVersion 1 case when `skip_retired` is set; every other load
+/// failure is [`CatalogError::Parse`].
+pub fn load_activity_catalog_asset(
+    path: &Path,
+    yaml: &str,
+    skip_retired: bool,
+) -> Result<Option<ActivityAsset>, CatalogError> {
+    match load_activity_asset(yaml) {
+        Ok(asset) => Ok(Some(asset)),
+        Err(AssetLoadError::RetiredVersion(_)) if skip_retired => Ok(None),
+        Err(source) => Err(CatalogError::Parse {
+            path: path.to_path_buf(),
+            source,
+        }),
+    }
+}
+
+/// Validate one loaded activity's tool allowlist the same way
+/// [`V2ActivityCatalog::validate_tool_allowlists`] does for a full catalog.
+pub fn validate_catalog_activity_tools<'a, I>(
+    name: &str,
+    activity: &ActivityV2,
+    registered_tools: I,
+) -> Result<(), CatalogError>
+where
+    I: IntoIterator<Item = &'a str>,
+{
+    validate_activity_tool_allowlist_against_registered_tools(activity, registered_tools).map_err(
+        |source| CatalogError::ToolAllowlist {
+            name: name.to_string(),
+            source,
+        },
+    )
 }
 
 struct JobCatalogAdapter;
@@ -540,7 +573,6 @@ fn resolve_step(step: &mut JobV2Step, catalog: &V2ActivityCatalog) -> Result<(),
                     default_input: None,
                     timeout_seconds: 0,
                     session: None,
-                    role: None,
                 }),
             );
             let JobV2StepBody::TargetRef(r) = old else {
@@ -593,6 +625,5 @@ fn resolve_ref(
         default_input: r.default_input,
         timeout_seconds: r.timeout_seconds,
         session: r.session,
-        role: r.role,
     })
 }

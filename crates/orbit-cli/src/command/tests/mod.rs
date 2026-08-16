@@ -1,6 +1,7 @@
 // Content moved from inline #[cfg(test)] mod tests in command/mod.rs per ORB-00221.
 // tests/mod.rs can directly contain tests for the declaring parent module (exempt from orphan rules).
 
+mod doctor;
 mod friction;
 mod gc;
 mod init;
@@ -8,16 +9,13 @@ mod operation;
 mod operation_args;
 mod sweep;
 
-use clap::{Parser, error::ErrorKind};
-
-use orbit_common::types::McpCapability;
+use clap::{Command, CommandFactory, Parser, error::ErrorKind};
 
 use super::{
     Cli, Commands,
     docs::DocsSubcommand,
-    hook::HookSubcommand,
     mcp::McpSubcommand,
-    search::{SearchKindArg, SearchSubcommand},
+    search::SearchSubcommand,
     semantic::{SemanticIndexKindArg, SemanticSubcommand},
     web::WebSubcommand,
 };
@@ -32,6 +30,86 @@ fn assert_cli_rejects(args: &[&str], kind: ErrorKind, expected: &str) {
     assert!(message.contains(expected), "{message}");
 }
 
+fn contains_concrete_artifact_id(text: &str) -> bool {
+    let bytes = text.as_bytes();
+    let has_digits_after = |prefix: &[u8]| {
+        bytes.windows(prefix.len() + 1).any(|window| {
+            window[..prefix.len()] == *prefix && window[prefix.len()].is_ascii_digit()
+        })
+    };
+    has_digits_after(b"ORB-")
+        || has_digits_after(b"ADR-")
+        || has_digits_after(b"L-")
+        || bytes.windows(12).any(|window| {
+            window[0] == b'F'
+                && window[1..5].iter().all(u8::is_ascii_digit)
+                && window[5] == b'-'
+                && window[6..8].iter().all(u8::is_ascii_digit)
+                && window[8] == b'-'
+                && window[9..12].iter().all(u8::is_ascii_digit)
+        })
+}
+
+fn assert_help_tree_has_no_concrete_artifact_ids(command: &Command) {
+    let help = command.clone().render_long_help().to_string();
+    assert!(
+        !contains_concrete_artifact_id(&help),
+        "help for `{}` contains a concrete workspace-local artifact ID:\n{help}",
+        command.get_name()
+    );
+    for subcommand in command.get_subcommands() {
+        assert_help_tree_has_no_concrete_artifact_ids(subcommand);
+    }
+}
+
+#[test]
+fn recursive_cli_help_uses_only_placeholder_artifact_ids() {
+    assert_help_tree_has_no_concrete_artifact_ids(&Cli::command());
+}
+
+#[test]
+fn cli_help_advertises_workspace_selector_distinct_from_root() {
+    let help = match Cli::try_parse_from(["orbit", "--help"]) {
+        Ok(_) => panic!("--help exits before parsing"),
+        Err(error) => error.to_string(),
+    };
+    assert!(
+        help.contains("--workspace <SELECTOR>"),
+        "orbit --help must show a global --workspace selector: {help}"
+    );
+    assert!(
+        help.contains("--root <ROOT>"),
+        "orbit --help must keep --root as a data-dir override: {help}"
+    );
+    assert!(
+        help.contains("logical ID") || help.contains("ws_*"),
+        "orbit --help must describe the shared selector grammar: {help}"
+    );
+    assert!(
+        !help.contains("--root <SELECTOR>"),
+        "--root must not become a workspace selector: {help}"
+    );
+}
+
+#[test]
+fn cli_parses_top_level_workspace_selector_before_subcommand() {
+    let cli = Cli::parse_from([
+        "orbit",
+        "--workspace",
+        "orbit",
+        "task",
+        "list",
+        "--limit",
+        "1",
+    ]);
+    assert_eq!(cli.workspace.as_deref(), Some("orbit"));
+    assert!(cli.root.is_none());
+    match cli.command {
+        Commands::Task(_) => {}
+        _ => panic!("expected task command"),
+    }
+}
+
 #[test]
 fn cli_parses_doctor_stale_lock_cleanup() {
     let cli = Cli::parse_from([
@@ -44,23 +122,47 @@ fn cli_parses_doctor_stale_lock_cleanup() {
     match cli.command {
         Commands::Doctor(command) => {
             assert!(command.fix_stale_locks);
+            assert!(!command.fix_stale_task_locks);
             assert!(command.remove_graph);
             assert!(command.json);
             // [ORB-10501] Repairs are opt-in: an unflagged run only diagnoses.
-            assert!(!command.fix_orphaned_allocations);
         }
         _ => panic!("expected top-level doctor command"),
     }
 }
 
-/// [ORB-10501] The guarded repair for allocations pinned to a reaped worktree.
 #[test]
-fn cli_parses_doctor_orphaned_allocation_repair() {
-    let cli = Cli::parse_from(["orbit", "doctor", "--fix-orphaned-allocations"]);
+fn cli_parses_doctor_stale_task_lock_repair_without_blanket_fix() {
+    let cli = Cli::parse_from(["orbit", "doctor", "--fix-stale-task-locks"]);
     match cli.command {
         Commands::Doctor(command) => {
-            assert!(command.fix_orphaned_allocations);
+            assert!(command.fix_stale_task_locks);
             assert!(!command.fix_stale_locks);
+            assert!(!command.fix_retired_activity_backends);
+        }
+        _ => panic!("expected top-level doctor command"),
+    }
+
+    assert_cli_rejects(
+        &["orbit", "doctor", "--fix"],
+        ErrorKind::UnknownArgument,
+        "unexpected argument '--fix'",
+    );
+}
+
+#[test]
+fn cli_parses_doctor_retired_activity_backend_repair() {
+    let cli = Cli::parse_from([
+        "orbit",
+        "doctor",
+        "--fix-retired-activity-backends",
+        "--json",
+    ]);
+    match cli.command {
+        Commands::Doctor(command) => {
+            assert!(command.fix_retired_activity_backends);
+            assert!(!command.fix_stale_artifacts);
+            assert!(command.json);
         }
         _ => panic!("expected top-level doctor command"),
     }
@@ -91,38 +193,63 @@ fn cli_parses_mcp_serve() {
 }
 
 #[test]
-fn cli_parses_hub_mcp_serve_with_one_exact_capability() {
+fn cli_parses_mcp_listen_with_a_loopback_default() {
+    let cli = Cli::parse_from(["orbit", "mcp", "listen"]);
+    match cli.command {
+        Commands::Mcp(command) => match command.command {
+            McpSubcommand::Listen(args) => {
+                assert!(args.addr.ip().is_loopback());
+                assert!(!args.allow_non_loopback);
+            }
+            _ => panic!("expected mcp listen"),
+        },
+        _ => panic!("expected top-level mcp command"),
+    }
+
     let cli = Cli::parse_from([
         "orbit",
         "mcp",
-        "serve",
-        "--hub",
-        "--capabilities",
-        "operator",
+        "listen",
+        "0.0.0.0:9123",
+        "--allow-non-loopback",
     ]);
     match cli.command {
         Commands::Mcp(command) => match command.command {
-            McpSubcommand::Serve(args) => {
-                assert!(args.hub);
-                assert_eq!(args.capabilities, Some(McpCapability::Operator));
+            McpSubcommand::Listen(args) => {
+                assert_eq!(args.addr.to_string(), "0.0.0.0:9123");
+                assert!(args.allow_non_loopback);
             }
-            _ => panic!("expected mcp serve"),
+            _ => panic!("expected mcp listen"),
         },
         _ => panic!("expected top-level mcp command"),
     }
 }
 
 #[test]
-fn cli_rejects_mcp_capability_without_hub_and_unknown_values() {
+fn cli_keeps_mcp_serve_stdio_only() {
     assert_cli_rejects(
-        &["orbit", "mcp", "serve", "--capabilities", "agent"],
-        ErrorKind::MissingRequiredArgument,
+        &["orbit", "mcp", "serve", "--listen", "127.0.0.1:7879"],
+        ErrorKind::UnknownArgument,
+        "--listen",
+    );
+}
+
+#[test]
+fn cli_rejects_removed_mcp_role_and_capability_flags() {
+    assert_cli_rejects(
+        &["orbit", "mcp", "serve", "--hub"],
+        ErrorKind::UnknownArgument,
         "--hub",
     );
     assert_cli_rejects(
-        &["orbit", "mcp", "serve", "--hub", "--capabilities", "admin"],
-        ErrorKind::ValueValidation,
-        "admin",
+        &["orbit", "mcp", "serve", "--owner"],
+        ErrorKind::UnknownArgument,
+        "--owner",
+    );
+    assert_cli_rejects(
+        &["orbit", "mcp", "serve", "--capabilities", "operator"],
+        ErrorKind::UnknownArgument,
+        "--capabilities",
     );
 }
 
@@ -165,39 +292,6 @@ fn cli_parses_web_connect() {
             WebSubcommand::Serve(_) => panic!("expected connect"),
         },
         _ => panic!("expected top-level web command"),
-    }
-}
-
-#[test]
-fn cli_parses_hook_pretooluse() {
-    let cli = Cli::parse_from(["orbit", "hook", "pretooluse", "--format", "codex"]);
-    match cli.command {
-        Commands::Hook(command) => match command.command {
-            HookSubcommand::Pretooluse(_) => {}
-            _ => panic!("expected hook pretooluse"),
-        },
-        _ => panic!("expected top-level hook command"),
-    }
-}
-
-#[test]
-fn cli_parses_hook_install_and_uninstall() {
-    let cli = Cli::parse_from(["orbit", "hook", "install"]);
-    match cli.command {
-        Commands::Hook(command) => match command.command {
-            HookSubcommand::Install(_) => {}
-            _ => panic!("expected hook install"),
-        },
-        _ => panic!("expected top-level hook command"),
-    }
-
-    let cli = Cli::parse_from(["orbit", "hook", "uninstall"]);
-    match cli.command {
-        Commands::Hook(command) => match command.command {
-            HookSubcommand::Uninstall(_) => {}
-            _ => panic!("expected hook uninstall"),
-        },
-        _ => panic!("expected top-level hook command"),
     }
 }
 
@@ -256,7 +350,7 @@ fn cli_semantic_index_defaults_kind_to_tasks() {
 
 #[test]
 fn cli_semantic_index_rejects_singular_kinds_at_clap_layer() {
-    for kind in ["adr", "learning"] {
+    for kind in ["adr", "adrs", "learning"] {
         let error = match Cli::try_parse_from(["orbit", "semantic", "index", "--kind", kind]) {
             Ok(_) => panic!("singular kinds should be rejected"),
             Err(error) => error,
@@ -265,37 +359,7 @@ fn cli_semantic_index_rejects_singular_kinds_at_clap_layer() {
         assert!(message.contains("possible values"), "{message}");
         assert!(message.contains("tasks"), "{message}");
         assert!(message.contains("docs"), "{message}");
-        assert!(message.contains("adrs"), "{message}");
-        assert!(message.contains("learnings"), "{message}");
         assert!(message.contains("all"), "{message}");
-    }
-}
-
-#[test]
-fn cli_semantic_index_parses_adrs_kind() {
-    let cli = Cli::parse_from(["orbit", "semantic", "index", "--kind", "adrs"]);
-    match cli.command {
-        Commands::Semantic(command) => match command.command {
-            SemanticSubcommand::Index(args) => {
-                assert_eq!(args.kind, SemanticIndexKindArg::Adrs);
-            }
-            _ => panic!("expected semantic index"),
-        },
-        _ => panic!("expected top-level semantic command"),
-    }
-}
-
-#[test]
-fn cli_semantic_index_parses_learnings_kind() {
-    let cli = Cli::parse_from(["orbit", "semantic", "index", "--kind", "learnings"]);
-    match cli.command {
-        Commands::Semantic(command) => match command.command {
-            SemanticSubcommand::Index(args) => {
-                assert_eq!(args.kind, SemanticIndexKindArg::Learnings);
-            }
-            _ => panic!("expected semantic index"),
-        },
-        _ => panic!("expected top-level semantic command"),
     }
 }
 
@@ -308,7 +372,7 @@ fn cli_semantic_index_help_explains_kind_principle() {
     let help = error.to_string();
     assert!(
         help.contains(
-            "--kind selects corpus: tasks (default), docs (same as `orbit docs index`), adrs, learnings, all (rebuilds all indexed corpora)."
+            "--kind selects corpus: tasks (default), docs (same as `orbit docs index`), all (rebuilds all indexed corpora)."
         ),
         "{help}"
     );
@@ -341,9 +405,9 @@ fn cli_rejects_docs_reindex() {
 #[test]
 fn cli_rejects_learning_reindex() {
     assert_cli_rejects(
-        &["orbit", "learning", "reindex"],
+        &["orbit", "learning"],
         ErrorKind::InvalidSubcommand,
-        "unrecognized subcommand 'reindex'",
+        "unrecognized subcommand 'learning'",
     );
 }
 
@@ -402,16 +466,12 @@ fn cli_parses_top_level_search_path_lookup() {
 }
 
 #[test]
-fn cli_parses_top_level_search_tag_filter() {
-    let cli = Cli::parse_from(["orbit", "search", "perf", "--tag", "perf", "--kind", "adr"]);
-    match cli.command {
-        Commands::Search(args) => {
-            assert_eq!(args.query.as_deref(), Some("perf"));
-            assert_eq!(args.tags, vec!["perf"]);
-            assert_eq!(args.kind, SearchKindArg::Adr);
-        }
-        _ => panic!("expected top-level search command"),
-    }
+fn cli_rejects_retired_adr_search_kind() {
+    assert_cli_rejects(
+        &["orbit", "search", "perf", "--kind", "adr"],
+        ErrorKind::InvalidValue,
+        "invalid value 'adr'",
+    );
 }
 
 #[test]

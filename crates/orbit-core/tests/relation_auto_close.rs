@@ -4,10 +4,8 @@
 use chrono::{TimeZone, Utc};
 use orbit_common::types::{FrictionStatus, TaskStatus};
 use orbit_core::OrbitRuntime;
-use orbit_engine::{TaskAutomationUpdate, TaskWriteHost};
-use orbit_store::friction_store::{
-    FrictionAddParams, add_friction, resolve_friction_by_task, show_friction,
-};
+use orbit_engine::{RuntimeHost, TaskAutomationUpdate};
+use orbit_store::friction_store::{FrictionAddParams, FrictionStore};
 use serde_json::{Value, json};
 use tempfile::TempDir;
 
@@ -23,18 +21,29 @@ fn test_runtime() -> (TempDir, OrbitRuntime, std::path::PathBuf) {
     (root, runtime, repo_root)
 }
 
+/// The workspace-partitioned friction store this runtime reads and writes
+/// (ORB-10680): records live in the host-global database keyed by
+/// `(workspace_id, friction_id)`.
+fn frictions(runtime: &OrbitRuntime) -> FrictionStore {
+    FrictionStore::open(
+        runtime.sqlite_store().expect("store"),
+        runtime.workspace_id().expect("workspace id"),
+        runtime.data_root().join("frictions"),
+    )
+    .expect("open friction store")
+}
+
 fn add_test_friction(runtime: &OrbitRuntime) -> String {
-    let stored = add_friction(
-        &runtime.data_root().join("frictions"),
-        FrictionAddParams {
+    let stored = frictions(runtime)
+        .add(FrictionAddParams {
             model: "codex".to_string(),
+            title: None,
             body: "Approval should close this friction".to_string(),
             tags: vec!["tooling".to_string()],
             during_task: None,
             created_at: Utc.with_ymd_and_hms(2026, 5, 17, 4, 5, 0).unwrap(),
-        },
-    )
-    .expect("add friction");
+        })
+        .expect("add friction");
     stored.record.id
 }
 
@@ -203,12 +212,10 @@ fn approving_task_with_dangling_friction_relation_records_event_but_succeeds() {
                 })
     }));
     assert!(
-        !runtime
-            .data_root()
-            .join("frictions")
-            .join("9999-12")
-            .join("F999.md")
-            .exists()
+        frictions(&runtime)
+            .show("F9999-12-999")
+            .expect("show dangling target")
+            .is_none()
     );
 }
 
@@ -217,13 +224,9 @@ fn approving_task_does_not_overwrite_existing_friction_resolution() {
     let (_root, runtime, repo_root) = test_runtime();
     let friction_id = add_test_friction(&runtime);
     let original_resolved_at = Utc.with_ymd_and_hms(2026, 5, 17, 3, 0, 0).unwrap();
-    resolve_friction_by_task(
-        &runtime.data_root().join("frictions"),
-        &friction_id,
-        "ORB-99999",
-        original_resolved_at,
-    )
-    .expect("pre-resolve friction");
+    frictions(&runtime)
+        .resolve_by_task(&friction_id, "ORB-99999", original_resolved_at)
+        .expect("pre-resolve friction");
 
     let task_id = add_task_with_resolves(&runtime, &repo_root, &friction_id, "backlog");
     move_backlog_task_to_review(&runtime, &task_id);
@@ -234,7 +237,8 @@ fn approving_task_does_not_overwrite_existing_friction_resolution() {
         )
         .expect("approve task");
 
-    let stored = show_friction(&runtime.data_root().join("frictions"), &friction_id)
+    let stored = frictions(&runtime)
+        .show(&friction_id)
         .expect("show friction")
         .expect("friction exists");
     assert_eq!(stored.record.status, FrictionStatus::Resolved);
@@ -256,7 +260,8 @@ fn approving_proposed_task_does_not_resolve_friction() {
         .expect("approve proposed task");
     assert_eq!(approved["status"], json!("backlog"));
 
-    let stored = show_friction(&runtime.data_root().join("frictions"), &friction_id)
+    let stored = frictions(&runtime)
+        .show(&friction_id)
         .expect("show friction")
         .expect("friction exists");
     assert_eq!(stored.record.status, FrictionStatus::Open);

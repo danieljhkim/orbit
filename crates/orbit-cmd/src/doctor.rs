@@ -5,10 +5,10 @@
 //! integrity and schema-ledger version, free disk space on the volume
 //! holding `.orbit`, semantic-index staleness, leftover lock files from
 //! crashed holders, orphaned `running`/`pending` job runs, task
+//! reservations whose owner or terminal task association is conclusively
+//! inactive, task
 //! relation/dependency targets that no longer resolve in the registry
-//! (grandfathered relations that block index rebuilds — ORB-10305), and
-//! learning/ADR id allocations pinned to a worktree that has since been
-//! reaped (ORB-10501).
+//! (grandfathered relations that block index rebuilds — ORB-10305).
 //!
 //! Every check degrades rather than errors: subsystems that are absent in a
 //! fresh workspace report [`WorkspaceDoctorStatus::Skipped`], and probe
@@ -23,6 +23,7 @@ use std::path::{Path, PathBuf};
 use fs2::FileExt;
 use orbit_common::types::{OrbitError, WorkspacePaths};
 use orbit_core::OrbitRuntime;
+use orbit_core::command::artifact_health::{ArtifactFinding, RetiredActivityBackendRepair};
 use orbit_store::sqlite::migration::SUPPORTED_SCHEMA_VERSION;
 use serde::Serialize;
 
@@ -49,13 +50,38 @@ pub struct WorkspaceDoctorResult {
     pub status: WorkspaceDoctorStatus,
     /// Human-readable detail line.
     pub message: String,
+    /// Exact repair command or explicit manual next step for warning/error rows.
+    pub remediation: Option<String>,
 }
 
 fn check(name: &str, status: WorkspaceDoctorStatus, message: String) -> WorkspaceDoctorResult {
+    let remediation = matches!(
+        status,
+        WorkspaceDoctorStatus::Warning | WorkspaceDoctorStatus::Error
+    )
+    .then(|| {
+        "Address the condition named in the diagnostic details, then rerun `orbit doctor`."
+            .to_string()
+    });
     WorkspaceDoctorResult {
         check_name: name.to_string(),
         status,
         message,
+        remediation,
+    }
+}
+
+fn actionable_check(
+    name: &str,
+    status: WorkspaceDoctorStatus,
+    message: String,
+    remediation: String,
+) -> WorkspaceDoctorResult {
+    WorkspaceDoctorResult {
+        check_name: name.to_string(),
+        status,
+        message,
+        remediation: Some(remediation),
     }
 }
 
@@ -81,14 +107,22 @@ pub trait DoctorCommands {
     /// is currently held by another process.
     fn remove_stale_lock_files(&self) -> Result<usize, OrbitError>;
 
+    /// Release reservations that remain conclusively stale after a write-boundary recheck.
+    fn clear_stale_task_reservations(&self) -> Result<usize, OrbitError>;
+
     /// Remove retired graph state from the exact worktree-local and shared
     /// workspace locations. Missing locations are a successful no-op.
     fn remove_retired_graph_state(&self) -> Result<usize, OrbitError>;
 
-    /// [ORB-10501] Abandon every learning/ADR allocation whose pinned worktree
-    /// is gone and whose body is unreadable, returning how many rows were
-    /// retired. Each row is re-verified by the owning store before its write.
-    fn clear_orphaned_id_allocations(&self) -> Result<usize, OrbitError>;
+    /// Retire deprecated definition artifacts whose recorded digest proves
+    /// Orbit wrote them, preserving locally modified ones outside the active
+    /// catalog. Faulty and user-authored artifacts are never touched.
+    fn remove_stale_definition_artifacts(&self) -> Result<usize, OrbitError>;
+
+    /// Remove known retired `spec.backend` values from schemaVersion 2
+    /// agent-loop activities. Unknown backends and unrelated malformed
+    /// files are left untouched.
+    fn repair_retired_activity_backends(&self) -> Result<RetiredActivityBackendRepair, OrbitError>;
 
     /// Cheap store write probe for health endpoints: open the store and
     /// acquire + roll back the write lock without mutating anything.
@@ -97,16 +131,18 @@ pub trait DoctorCommands {
 
 impl DoctorCommands for OrbitRuntime {
     fn doctor_workspace(&self) -> Result<Vec<WorkspaceDoctorResult>, OrbitError> {
-        Ok(vec![
+        let mut results = vec![
             doctor_check_config(self),
             doctor_check_database(self),
             doctor_check_disk_space(self),
             doctor_check_semantic_index(self),
             doctor_check_stale_locks(self),
             doctor_check_job_runs(self),
+            doctor_check_task_reservations(self),
             doctor_check_task_relations(self),
-            doctor_check_id_allocations(self),
-        ])
+        ];
+        results.extend(doctor_check_definition_artifacts(self));
+        Ok(results)
     }
 
     fn remove_stale_lock_files(&self) -> Result<usize, OrbitError> {
@@ -117,6 +153,18 @@ impl DoctorCommands for OrbitRuntime {
             }
         }
         Ok(removed)
+    }
+
+    fn clear_stale_task_reservations(&self) -> Result<usize, OrbitError> {
+        self.release_stale_task_reservations()
+    }
+
+    fn remove_stale_definition_artifacts(&self) -> Result<usize, OrbitError> {
+        OrbitRuntime::remove_stale_definition_artifacts(self)
+    }
+
+    fn repair_retired_activity_backends(&self) -> Result<RetiredActivityBackendRepair, OrbitError> {
+        OrbitRuntime::repair_retired_activity_backends(self)
     }
 
     fn remove_retired_graph_state(&self) -> Result<usize, OrbitError> {
@@ -131,10 +179,6 @@ impl DoctorCommands for OrbitRuntime {
             }
         }
         Ok(removed)
-    }
-
-    fn clear_orphaned_id_allocations(&self) -> Result<usize, OrbitError> {
-        Ok(self.abandon_orphaned_id_allocations()?.len())
     }
 
     fn health_check_store_writable(&self) -> Result<String, OrbitError> {
@@ -217,7 +261,7 @@ fn doctor_check_disk_space(runtime: &OrbitRuntime) -> WorkspaceDoctorResult {
     disk_space_check(&root)
 }
 
-/// Semantic (docs/tasks/learnings) embedding index staleness, using the
+/// Semantic (docs/tasks) embedding index staleness, using the
 /// stale-row signal the vector store already tracks.
 fn doctor_check_semantic_index(runtime: &OrbitRuntime) -> WorkspaceDoctorResult {
     match runtime.semantic_stats() {
@@ -235,13 +279,14 @@ fn doctor_check_semantic_index(runtime: &OrbitRuntime) -> WorkspaceDoctorResult 
                     "no semantic embeddings indexed yet".to_string(),
                 )
             } else if stats.rows.stale_rows > 0 {
-                check(
+                actionable_check(
                     "semantic-index",
                     WorkspaceDoctorStatus::Warning,
                     format!(
                         "{} of {total} embedding rows are stale; re-run `orbit semantic index`",
                         stats.rows.stale_rows
                     ),
+                    "Run `orbit semantic index`, then rerun `orbit doctor`.".to_string(),
                 )
             } else {
                 check(
@@ -254,9 +299,10 @@ fn doctor_check_semantic_index(runtime: &OrbitRuntime) -> WorkspaceDoctorResult 
     }
 }
 
-/// Lock files whose recorded holder PID is dead. Advisory `flock`s are
-/// released by the OS on process death, so these are leftover metadata
-/// from crashed holders — a crash signal, not an availability problem.
+/// Lock files whose recorded holder PID is dead. Clean lock-guard releases
+/// clear their diagnostic metadata while still holding the advisory `flock`,
+/// so metadata found here is from an interrupted/crashed holder — a crash
+/// signal, not an availability problem.
 fn doctor_check_stale_locks(runtime: &OrbitRuntime) -> WorkspaceDoctorResult {
     let lock_files = collect_lock_files(runtime.paths());
     let mut stale = Vec::new();
@@ -281,7 +327,7 @@ fn doctor_check_stale_locks(runtime: &OrbitRuntime) -> WorkspaceDoctorResult {
             format!("{} lock file(s) scanned, none stale", lock_files.len()),
         )
     } else {
-        check(
+        actionable_check(
             "stale-locks",
             WorkspaceDoctorStatus::Warning,
             format!(
@@ -290,8 +336,61 @@ fn doctor_check_stale_locks(runtime: &OrbitRuntime) -> WorkspaceDoctorResult {
                 stale.len(),
                 stale.join("; ")
             ),
+            "Run `orbit doctor --fix-stale-locks`.".to_string(),
         )
     }
+}
+
+/// Active task reservations are diagnosed separately from filesystem lock
+/// files. The runtime classifier deliberately ignores fresh/live/ambiguous
+/// reservations and reports only owner/task states that prove inactivity.
+fn doctor_check_task_reservations(runtime: &OrbitRuntime) -> WorkspaceDoctorResult {
+    let stale = match runtime.list_stale_task_reservations() {
+        Ok(stale) => stale,
+        Err(error) => {
+            return actionable_check(
+                "task-reservations",
+                WorkspaceDoctorStatus::Warning,
+                format!("cannot inspect active task reservations: {error}"),
+                "Resolve the store/runtime error, then rerun `orbit doctor`.".to_string(),
+            );
+        }
+    };
+    if stale.is_empty() {
+        return check(
+            "task-reservations",
+            WorkspaceDoctorStatus::Ok,
+            "no conclusively stale active task reservations".to_string(),
+        );
+    }
+    let detail = stale
+        .iter()
+        .map(|reservation| {
+            let tasks = if reservation.task_ids.is_empty() {
+                "no associated tasks".to_string()
+            } else {
+                format!("tasks {}", reservation.task_ids.join(", "))
+            };
+            let owner = reservation
+                .owner_run_id
+                .as_deref()
+                .map_or_else(|| "unowned".to_string(), |run_id| format!("run {run_id}"));
+            format!(
+                "{} ({tasks}, {owner}): {}",
+                reservation.reservation_id, reservation.reason
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("; ");
+    actionable_check(
+        "task-reservations",
+        WorkspaceDoctorStatus::Warning,
+        format!(
+            "{} conclusively stale active task reservation(s): {detail}",
+            stale.len()
+        ),
+        "Run `orbit doctor --fix-stale-task-locks`.".to_string(),
+    )
 }
 
 /// Delete one dead-holder lock only after acquiring its advisory lock. A
@@ -442,10 +541,11 @@ fn doctor_check_job_runs(runtime: &OrbitRuntime) -> WorkspaceDoctorResult {
             ids.join(", ")
         ));
     }
-    check(
+    actionable_check(
         "job-runs",
         WorkspaceDoctorStatus::Warning,
         segments.join("; "),
+        "For each named running run use `orbit job resume <run_id>`; for each named pending run use `orbit run cancel <run_id>`.".to_string(),
     )
 }
 
@@ -488,7 +588,7 @@ fn doctor_check_task_relations(runtime: &OrbitRuntime) -> WorkspaceDoctorResult 
                 })
                 .collect::<Vec<_>>()
                 .join("; ");
-            check(
+            actionable_check(
                 "task-relations",
                 WorkspaceDoctorStatus::Warning,
                 format!(
@@ -496,67 +596,93 @@ fn doctor_check_task_relations(runtime: &OrbitRuntime) -> WorkspaceDoctorResult 
                      until fixed or removed: {detail}",
                     dangling.len()
                 ),
+                "Inspect each named source with `orbit task show <task-id>` and update or remove its unresolved relation/dependency target.".to_string(),
             )
         }
     }
 }
 
-/// How many orphaned allocations the doctor message names before summarizing
-/// the rest. A workspace can accumulate dozens; the row stays readable while
-/// still reporting the true total.
-const ORPHANED_ALLOCATION_DETAIL_LIMIT: usize = 10;
-
-/// Learning/ADR id allocations pinned to a worktree that no longer exists and
-/// whose body is unreadable anywhere locally (ORB-10501). These rows can never
-/// resolve again — the body died with its worktree — so they are permanent
-/// dead weight in `learning list --include-remote` and the ADR list until they
-/// are retired.
-fn doctor_check_id_allocations(runtime: &OrbitRuntime) -> WorkspaceDoctorResult {
-    let orphaned = match runtime.list_orphaned_id_allocations() {
-        Ok(orphaned) => orphaned,
+/// Definition-artifact health — one row per artifact kind (skills, jobs,
+/// activities, auto-tasks, routines) [ORB-10800].
+///
+/// Severity is deliberately asymmetric. A workspace-authored definition that
+/// fails to parse is the operator's own in-progress edit, and classifying it
+/// as `Error` would silently start failing `orbit doctor` in cron and CI for
+/// workspaces that were passing yesterday. Only an *unloadable shipped
+/// default* — provably Orbit-written content that no longer parses, i.e. a
+/// broken install — escalates to `Error`. Everything else warns.
+fn doctor_check_definition_artifacts(runtime: &OrbitRuntime) -> Vec<WorkspaceDoctorResult> {
+    let report = match runtime.inspect_definition_artifacts() {
+        Ok(report) => report,
         Err(error) => {
-            return check(
-                "id-allocations",
+            return vec![actionable_check(
+                "artifacts",
                 WorkspaceDoctorStatus::Warning,
-                format!("cannot inspect id allocations: {error}"),
-            );
+                format!("cannot inspect definition artifacts: {error}"),
+                "Resolve the store/runtime error, then rerun `orbit doctor`.".to_string(),
+            )];
         }
     };
-    if orphaned.is_empty() {
-        return check(
-            "id-allocations",
-            WorkspaceDoctorStatus::Ok,
-            "no learning/ADR allocations pinned to a missing worktree".to_string(),
-        );
-    }
-    let mut detail = orphaned
-        .iter()
-        .take(ORPHANED_ALLOCATION_DETAIL_LIMIT)
-        .map(|record| {
-            format!(
-                "{} ({}, worktree {})",
-                record.id,
-                record.status,
-                record.worktree_root.display()
+
+    report
+        .into_iter()
+        .map(|health| {
+            let check_name = format!("artifacts-{}", health.kind.as_str());
+            if health.findings.is_empty() {
+                let message = if health.scanned == 0 {
+                    format!("no {} on disk yet", health.kind.as_str())
+                } else {
+                    format!(
+                        "{} {} loaded, none stale, deprecated, or faulty",
+                        health.scanned,
+                        health.kind.as_str()
+                    )
+                };
+                let status = if health.scanned == 0 {
+                    WorkspaceDoctorStatus::Skipped
+                } else {
+                    WorkspaceDoctorStatus::Ok
+                };
+                return check(&check_name, status, message);
+            }
+
+            let status = if health
+                .findings
+                .iter()
+                .any(ArtifactFinding::is_unloadable_shipped_default)
+            {
+                WorkspaceDoctorStatus::Error
+            } else {
+                WorkspaceDoctorStatus::Warning
+            };
+            let detail = health
+                .findings
+                .iter()
+                .map(|finding| format!("{}: {}", finding.condition.as_str(), finding.detail))
+                .collect::<Vec<_>>()
+                .join("; ");
+            // Every finding carries its own exact repair command; dedupe so a
+            // kind with five stale copies names one command, not five.
+            let mut remediations: Vec<&str> = Vec::new();
+            for finding in &health.findings {
+                let remediation = finding.remediation.as_str();
+                if !remediations.contains(&remediation) {
+                    remediations.push(remediation);
+                }
+            }
+            actionable_check(
+                &check_name,
+                status,
+                format!(
+                    "{} of {} {} need attention — {detail}",
+                    health.findings.len(),
+                    health.scanned,
+                    health.kind.as_str()
+                ),
+                remediations.join(" "),
             )
         })
-        .collect::<Vec<_>>()
-        .join("; ");
-    if let Some(remaining) = orphaned.len().checked_sub(ORPHANED_ALLOCATION_DETAIL_LIMIT)
-        && remaining > 0
-    {
-        detail.push_str(&format!("; and {remaining} more"));
-    }
-    check(
-        "id-allocations",
-        WorkspaceDoctorStatus::Warning,
-        format!(
-            "{} learning/ADR allocation(s) pinned to a worktree that no longer exists, with no \
-             readable body — unrecoverable; clear with `orbit doctor \
-             --fix-orphaned-allocations`: {detail}",
-            orphaned.len()
-        ),
-    )
+        .collect()
 }
 
 /// Free/total space thresholds for the volume containing `path`.
@@ -596,15 +722,10 @@ pub(crate) fn disk_space_check(path: &Path) -> WorkspaceDoctorResult {
 }
 
 /// Lock files in the directories the file-backed stores lock in:
-/// `state/` (ID allocator), `tasks/` (v2 bundle locks), `learnings/`,
-/// and `adrs/.locks/`. Non-recursive on purpose — the lock layouts are flat.
+/// `state/` and `tasks/` (v2 bundle locks).
+/// Non-recursive on purpose — the lock layouts are flat.
 pub(crate) fn collect_lock_files(paths: &WorkspacePaths) -> Vec<PathBuf> {
-    let dirs = [
-        paths.state_dir.clone(),
-        paths.tasks_dir.clone(),
-        paths.learnings_dir.clone(),
-        paths.adrs_dir.join(".locks"),
-    ];
+    let dirs = [paths.state_dir.clone(), paths.tasks_dir.clone()];
     let mut lock_files = Vec::new();
     for dir in dirs {
         let Ok(entries) = std::fs::read_dir(&dir) else {

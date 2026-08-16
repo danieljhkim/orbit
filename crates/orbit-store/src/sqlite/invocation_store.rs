@@ -7,6 +7,7 @@ mod types;
 #[cfg(test)]
 pub(crate) use records::INVOCATION_INSERT_COLUMNS;
 pub use types::{
-    ActivityInvocationMetrics, AgentInvocationMetrics, InvocationInsertParams, InvocationQuery,
-    InvocationRecord, InvocationToolCallRecord, TaskInvocationMetrics, ToolInvocationMetrics,
+    ActivityInvocationMetrics, AgentInvocationMetrics, InvocationAccountingFact,
+    InvocationAccountingQuery, InvocationInsertParams, InvocationQuery, InvocationRecord,
+    InvocationToolCallRecord, TaskInvocationMetrics, ToolInvocationMetrics,
 };

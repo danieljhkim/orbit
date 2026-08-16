@@ -1,21 +1,18 @@
 use chrono::{DateTime, Utc};
 use orbit_common::types::{
-    Adr, AdrStatus, ArtifactManifestFileV2, AuditEvent, Crew, ExecutorDef, ExternalRef, JobRun,
-    JobRunState, KnowledgeRunMetrics, Learning, LearningEvidence, LearningScope, OrbitError,
-    OrbitId, PipelineState, PolicyDef, StoredTool, Task, TaskArtifact, TaskComment,
-    TaskHistoryEntry, TaskPriority, TaskStatus, normalize_task_tags, task_matches_tags,
+    ArtifactManifestFileV2, AuditEvent, Crew, ExecutorDef, ExternalRef, JobRun, JobRunState,
+    KnowledgeRunMetrics, OrbitError, OrbitId, PipelineState, PolicyDef, StoredTool, Task,
+    TaskArtifact, TaskComment, TaskHistoryEntry, TaskPriority, TaskStatus, normalize_task_tags,
+    task_matches_tags,
 };
 use serde_json::Value;
 use std::collections::BTreeMap;
 
 use super::params::*;
 
-use crate::sqlite::id_allocator::IdAllocationRecord;
-
 use crate::sqlite::audit_event_store::{
     AuditEventFilter, AuditEventInsertParams, AuditRoleAggregate, AuditToolAggregate,
     AuditToolCallCountsByRole, AuditToolCallCountsBySurfaceAndRole, AuditTopToolCall,
-    LearningUsageStat,
 };
 
 pub trait TaskStoreBackend: Send + Sync {
@@ -56,61 +53,6 @@ pub trait TaskStoreBackend: Send + Sync {
         Ok(tasks)
     }
     fn delete_task(&self, id: &str) -> Result<bool, OrbitError>;
-}
-
-pub trait AdrStoreBackend: Send + Sync {
-    fn add_adr(&self, params: AdrCreateParams) -> Result<Adr, OrbitError>;
-
-    /// [ORB-10330] Finalize a hub-preallocated ADR at the caller-supplied
-    /// canonical `id`. Unlike [`Self::add_adr`], the id is chosen upstream by
-    /// the hub sequence, so this never allocates, abandons, retries, or selects
-    /// a second id; a pre-existing artifact at `id` fails deterministically.
-    fn finalize_preallocated_adr(
-        &self,
-        id: &str,
-        params: AdrCreateParams,
-    ) -> Result<Adr, OrbitError>;
-    fn get_adr(&self, id: &str) -> Result<Option<Adr>, OrbitError>;
-    fn resolve_adr_artifact(&self, id: &str) -> Result<AdrArtifactResolution, OrbitError>;
-    fn list_adrs(&self) -> Result<Vec<Adr>, OrbitError>;
-    fn list_adrs_filtered(&self, filter: AdrListFilter<'_>) -> Result<Vec<Adr>, OrbitError>;
-    fn list_adr_entries_filtered(
-        &self,
-        filter: AdrListFilter<'_>,
-        include_remote: bool,
-    ) -> Result<Vec<AdrListEntry>, OrbitError>;
-    fn get_adr_remote_stub(&self, id: &str) -> Result<Option<RemoteArtifactStub>, OrbitError>;
-
-    /// [ORB-10501] Allocations pinned to a worktree that no longer exists and
-    /// whose bundle is not readable anywhere locally — permanently orphaned
-    /// index rows, reported by `orbit doctor`.
-    fn list_orphaned_adr_allocations(&self) -> Result<Vec<IdAllocationRecord>, OrbitError>;
-
-    /// [ORB-10501] Abandon one orphaned allocation row. `false` when the id
-    /// has no live allocation; an error when it is still recoverable.
-    fn abandon_orphaned_adr_allocation(&self, id: &str) -> Result<bool, OrbitError>;
-
-    fn update_adr_status(&self, id: &str, new_status: AdrStatus) -> Result<(), OrbitError>;
-    fn update_adr_document(
-        &self,
-        id: &str,
-        fields: &AdrDocumentUpdateParams,
-    ) -> Result<(), OrbitError>;
-    fn delete_adr(&self, id: &str) -> Result<bool, OrbitError>;
-    fn rebuild_index(&self) -> Result<(), OrbitError>;
-
-    /// Writes the bidirectional supersession edge between two ADRs.
-    ///
-    /// On success: `old.status = Superseded`, `old.superseded_by = Some(new)`,
-    /// `new.supersedes` contains `old`. The implementation acquires per-ADR
-    /// locks for the duration so concurrent writers serialize.
-    ///
-    /// **Atomicity caveat:** the filesystem writes that update both ADR
-    /// documents are sequential, not transactional. A crash between writes
-    /// leaves the filesystem source-of-truth in a recoverable state — both ADR
-    /// bundles survive, and `rebuild_index` reconstructs the SQLite index from
-    /// disk.
-    fn supersede_adr(&self, old_id: &str, new_id: &str) -> Result<(), OrbitError>;
 }
 
 pub trait TaskDocumentStoreBackend: Send + Sync {
@@ -158,6 +100,13 @@ pub trait TaskArtifactStoreBackend: Send + Sync {
 }
 
 pub trait TaskReservationStoreBackend: Send + Sync {
+    /// Read active reservations without expiring or otherwise mutating rows.
+    fn inspect_active_task_reservations(
+        &self,
+        workspace_orbit_dir: &str,
+        workspace_id: Option<&str>,
+    ) -> Result<Vec<ActiveTaskReservation>, OrbitError>;
+
     fn list_active_task_reservations(
         &self,
         workspace_orbit_dir: &str,
@@ -188,6 +137,34 @@ pub trait TaskReservationStoreBackend: Send + Sync {
         &self,
         params: TaskReservationOwnedConflictsParams,
     ) -> Result<TaskReservationOwnedConflictsResult, OrbitError>;
+
+    /// Take the exclusive workspace claim [ADR-0352, ORB-10709], or report the
+    /// incumbent that refused it.
+    fn acquire_workspace_claim(
+        &self,
+        params: WorkspaceClaimAcquireParams,
+    ) -> Result<WorkspaceClaimAcquireResult, OrbitError>;
+
+    /// Release the claim with its token, or force-release it.
+    fn release_workspace_claim(
+        &self,
+        params: WorkspaceClaimReleaseParams,
+    ) -> Result<WorkspaceClaimReleaseResult, OrbitError>;
+
+    /// The active claim after lazy expiry, or `None` when unclaimed.
+    fn show_workspace_claim(
+        &self,
+        workspace_orbit_dir: &str,
+        workspace_id: Option<&str>,
+    ) -> Result<WorkspaceClaimStatusResult, OrbitError>;
+
+    /// Whether a presented token satisfies the active claim. The comparison
+    /// stays inside the store so a refusal never has to carry the incumbent's
+    /// token back out.
+    fn check_workspace_claim(
+        &self,
+        params: WorkspaceClaimCheckParams,
+    ) -> Result<WorkspaceClaimCheckResult, OrbitError>;
 }
 
 pub trait JobRunStoreBackend: Send + Sync {
@@ -315,10 +292,6 @@ pub trait AuditEventStoreBackend: Send + Sync {
         &self,
         since: &DateTime<Utc>,
     ) -> Result<Vec<AuditRoleAggregate>, OrbitError>;
-    fn get_learning_usage_stats(
-        &self,
-        since: Option<&DateTime<Utc>>,
-    ) -> Result<Vec<LearningUsageStat>, OrbitError>;
     fn prune_audit_events(&self, older_than: &DateTime<Utc>) -> Result<usize, OrbitError>;
 }
 
@@ -332,103 +305,4 @@ pub trait PolicyDefStoreBackend: Send + Sync {
     fn list_policy_defs(&self) -> Result<Vec<PolicyDef>, OrbitError>;
     fn get_policy_def(&self, name: &str) -> Result<Option<PolicyDef>, OrbitError>;
     fn upsert_policy_def(&self, def: &PolicyDef) -> Result<(), OrbitError>;
-}
-
-/// Parameters for creating a new [`Learning`] record.
-#[derive(Debug, Clone)]
-pub struct LearningCreateParams {
-    pub summary: String,
-    pub scope: LearningScope,
-    pub body: String,
-    pub evidence: Vec<LearningEvidence>,
-    pub created_by: Option<String>,
-    /// Optional explicit priority. Used as a secondary key in `search`
-    /// ranking; `None` ranks below any `Some(_)`.
-    pub priority: Option<u8>,
-}
-
-/// Partial update to an existing learning. Fields that are `None` are left
-/// unchanged. Mirrors the `*UpdateParams` convention used for tasks.
-#[derive(Debug, Clone, Default)]
-pub struct LearningUpdateParams {
-    pub summary: Option<String>,
-    pub scope: Option<LearningScope>,
-    pub body: Option<String>,
-    pub evidence: Option<Vec<LearningEvidence>>,
-    /// `Some(Some(N))` sets the priority; `Some(None)` clears it; `None`
-    /// leaves it unchanged.
-    pub priority: Option<Option<u8>>,
-}
-
-/// Search query for [`LearningStoreBackend::search_learnings`]. All fields
-/// are optional; an empty query returns the active set unfiltered (capped
-/// by `limit`).
-#[derive(Debug, Clone, Default)]
-pub struct LearningSearchParams {
-    pub path: Option<String>,
-    pub tag: Option<String>,
-    pub query: Option<String>,
-    pub limit: Option<usize>,
-}
-
-/// Result row from [`LearningStoreBackend::search_learnings`]. Carries
-/// `matched_by` so callers can attribute matches to their scope axis (path
-/// vs. tag vs. query) per the design's §5.3 result shape.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct LearningSearchResult {
-    pub learning: Learning,
-    pub matched_by: Vec<String>,
-}
-
-pub trait LearningStoreBackend: Send + Sync {
-    fn create_learning(&self, params: LearningCreateParams) -> Result<Learning, OrbitError>;
-
-    /// [ORB-10330] Finalize a hub-preallocated learning at the caller-supplied
-    /// canonical `id`. Unlike [`Self::create_learning`], there is no allocation
-    /// loop and the id is never selected, abandoned, retried, or replaced; a
-    /// path collision fails deterministically and preserves the existing
-    /// artifact.
-    fn finalize_preallocated_learning(
-        &self,
-        id: &str,
-        params: LearningCreateParams,
-    ) -> Result<Learning, OrbitError>;
-    fn get_learning(&self, id: &str) -> Result<Option<Learning>, OrbitError>;
-    fn get_learning_federated(&self, id: &str) -> Result<Option<Learning>, OrbitError>;
-    fn list_learnings(
-        &self,
-        status: Option<orbit_common::types::LearningStatus>,
-    ) -> Result<Vec<Learning>, OrbitError>;
-    fn list_learning_entries(
-        &self,
-        status: Option<orbit_common::types::LearningStatus>,
-        include_remote: bool,
-    ) -> Result<Vec<LearningListEntry>, OrbitError>;
-    fn get_learning_remote_stub(&self, id: &str) -> Result<Option<RemoteArtifactStub>, OrbitError>;
-
-    /// [ORB-10501] Allocations pinned to a worktree that no longer exists and
-    /// whose body is not readable anywhere locally — permanently orphaned
-    /// index rows, reported by `orbit doctor`.
-    fn list_orphaned_learning_allocations(&self) -> Result<Vec<IdAllocationRecord>, OrbitError>;
-
-    /// [ORB-10501] Abandon one orphaned allocation row. `false` when the id
-    /// has no live allocation; an error when it is still recoverable.
-    fn abandon_orphaned_learning_allocation(&self, id: &str) -> Result<bool, OrbitError>;
-
-    fn search_learnings(
-        &self,
-        params: LearningSearchParams,
-    ) -> Result<Vec<LearningSearchResult>, OrbitError>;
-    fn update_learning(
-        &self,
-        id: &str,
-        params: LearningUpdateParams,
-    ) -> Result<Learning, OrbitError>;
-    fn supersede_learning(&self, old_id: &str, new_id: &str) -> Result<(), OrbitError>;
-    /// Archive a learning without a replacement record. Flips
-    /// `status = superseded` and sets `superseded_by = None`. Returns `false` when the record does not
-    /// exist. Used by `prune --delete` (§7.3).
-    fn archive_learning(&self, id: &str) -> Result<bool, OrbitError>;
-    fn delete_learning(&self, id: &str) -> Result<bool, OrbitError>;
-    fn sync_learnings(&self) -> Result<(), OrbitError>;
 }

@@ -4,28 +4,26 @@
 //! `list_triage_candidates` materializes the set of blocked tasks that are
 //! attributable to a terminally-failed job run (the coupling stamped by
 //! `worktree_setup` and flipped to `blocked` by
-//! `task_block_on_run_failure.rs` [ORB-10127]). `apply_triage_dispositions`
+//! `runtime::task::block_on_run_failure`). `apply_triage_dispositions`
 //! applies the triage agent's per-task verdicts under hard deterministic
 //! bounds: only listed candidates may be touched, only `environmental`
 //! classifications may re-backlog, and a durable per-task re-backlog budget
 //! (counted from `triage_rebacklogged` history events) stops the
-//! blocked → backlog → blocked ping-pong. The agent between the two steps
-//! never free-hands a lifecycle transition — its output is data, and this
-//! module is the only writer.
+//! blocked → backlog → blocked ping-pong. The agent's one direct lifecycle
+//! write is an evidence-gated blocked → done reconciliation; every other
+//! transition remains bounded here.
 
 use std::collections::{BTreeMap, BTreeSet};
 
 use chrono::Utc;
 use orbit_common::types::{JobRun, Task, TaskHistoryEntry, TaskStatus};
 use orbit_engine::DispatchError;
-use orbit_engine::{TaskAutomationUpdate, TaskWriteHost};
-use orbit_store::friction_store::{FrictionAddParams, add_friction};
+use orbit_engine::{RuntimeHost, TaskAutomationUpdate};
+use orbit_store::friction_store::FrictionAddParams;
 use serde_json::{Value, json};
 
 use crate::OrbitRuntime;
-use crate::runtime::task_block_on_run_failure::{
-    failed_run_error_context, is_workflow_failure_state,
-};
+use crate::runtime::{failed_run_error_context, is_workflow_failure_state};
 
 /// History event recorded when triage returns a blocked task to the backlog.
 pub(crate) const TRIAGE_REBACKLOGGED_EVENT: &str = "triage_rebacklogged";
@@ -76,6 +74,17 @@ fn triage_already_gave_up(history: &[TaskHistoryEntry]) -> bool {
         .any(|entry| entry.event == TRIAGE_GAVE_UP_EVENT)
 }
 
+fn triage_already_diagnosed_run(history: &[TaskHistoryEntry], run_id: &str) -> bool {
+    let note_prefix = format!("triage: failed run {run_id} ");
+    history.iter().any(|entry| {
+        entry.event == TRIAGE_DIAGNOSIS_EVENT
+            && entry
+                .note
+                .as_deref()
+                .is_some_and(|note| note.starts_with(&note_prefix))
+    })
+}
+
 /// Bound agent-supplied prose before it lands in a durable task note.
 fn clamp_agent_text(raw: &str) -> String {
     let trimmed = raw.trim();
@@ -117,22 +126,27 @@ fn mark_triage_gave_up(
         );
         return;
     }
-    if let Err(error) = add_friction(
-        &runtime.data_root().join("frictions"),
-        FrictionAddParams {
-            model: "system".to_string(),
-            body: format!(
-                "Triage exhausted its re-backlog budget ({max_rebacklogs}) for task {} — \
+    if let Err(error) = crate::runtime::orbit_tool_host::friction_tools::store_for(runtime)
+        .and_then(|frictions| {
+            frictions.add(FrictionAddParams {
+                model: "system".to_string(),
+                title: Some(format!(
+                    "Triage exhausted its re-backlog budget for task {}",
+                    task.id
+                )),
+                body: format!(
+                    "Triage exhausted its re-backlog budget ({max_rebacklogs}) for task {} — \
                  its workflow runs keep failing (latest: {run_id}). The task stays \
                  blocked until a human decides; the repeated failure likely has a \
                  systemic cause worth fixing.",
-                task.id
-            ),
-            tags: vec!["lifecycle".to_string()],
-            during_task: Some(task.id.to_string()),
-            created_at: Utc::now(),
-        },
-    ) {
+                    task.id
+                ),
+                tags: vec!["lifecycle".to_string()],
+                during_task: Some(task.id.to_string()),
+                created_at: Utc::now(),
+            })
+        })
+    {
         tracing::warn!(
             task_id = %task.id,
             run_id,
@@ -163,7 +177,9 @@ fn candidate_json(task: &Task, run: &JobRun, rebacklog_count: u64, max_rebacklog
 /// coupled run (or a non-failed one) and is never listed, so the agent step
 /// physically cannot see it. Tasks whose re-backlog budget is exhausted are
 /// diverted to the gave-up path here (durable note + friction, once) and
-/// reported under `exhausted` instead of `candidates`.
+/// reported under `exhausted` instead of `candidates`. An implicit scan also
+/// suppresses a task already diagnosed for its currently-coupled failed run;
+/// a new run id is fresh evidence, and explicit `task_ids` bypass suppression.
 ///
 /// Reuses `reconcile_stale_job_runs` up front so dead-owner runs are settled
 /// (`interrupted`, which keeps their tasks resumable and out of triage)
@@ -232,6 +248,9 @@ pub(super) fn list_triage_candidates(
         let history = runtime
             .get_task_history(&task.id)
             .map_err(|error| action_failed(action, format!("history for {}: {error}", task.id)))?;
+        if explicit_task_ids.is_empty() && triage_already_diagnosed_run(&history, run_id) {
+            continue;
+        }
         let rebacklog_count = triage_rebacklog_count(&history);
         if rebacklog_count >= max_rebacklogs {
             if !triage_already_gave_up(&history) {

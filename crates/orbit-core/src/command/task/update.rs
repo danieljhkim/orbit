@@ -4,8 +4,8 @@ use orbit_common::types::{
 };
 use orbit_engine::TaskActivityUpdate;
 
+use super::TaskRecordUpdateParams;
 use crate::OrbitRuntime;
-use crate::runtime::TaskRecordUpdateParams;
 
 use super::helpers::{
     SYSTEM_ACTOR_LABEL, TaskAttributionInput, assemble_task_attribution, build_task_comments,
@@ -30,6 +30,7 @@ impl OrbitRuntime {
         agent: Option<String>,
         model: Option<String>,
     ) -> Result<Task, OrbitError> {
+        self.ensure_coordination_task_write_permitted()?;
         self.update_task_with_status_note_and_identity(id, params, None, agent, model)
     }
 
@@ -100,6 +101,15 @@ impl OrbitRuntime {
         }
         if let Some(crew) = &params.crew {
             self.validate_crew_name(crew.as_deref())?;
+        }
+        if let Some(orchestrator) = &mut params.orchestrator {
+            *orchestrator = self.canonical_crew_name(orchestrator.as_deref())?;
+            if !matches!(task.status, TaskStatus::Proposed | TaskStatus::Backlog) {
+                return Err(OrbitError::InvalidInput(format!(
+                    "task {id} is {}; orchestrator can only be changed while proposed or backlog",
+                    task.status
+                )));
+            }
         }
         // Archived tasks accept exactly one mutation: the guarded restore to
         // backlog (formerly `orbit task unarchive`). Everything else requires

@@ -9,6 +9,17 @@ use serde_json::Value;
 
 use crate::{NotFoundKind, OrbitError, OrbitRuntime};
 
+/// Whether Core applies its capability registry before executing a tool.
+///
+/// MCP v1 deliberately defers this one policy while the server-side skeleton
+/// settles. The choice remains inside Core so a later authorization design can
+/// be enforced here without rebuilding transport-specific gates.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum CapabilityEnforcement {
+    Enforce,
+    DeferredForMcpV1,
+}
+
 impl OrbitRuntime {
     pub fn run_tool(&self, name: &str, input: Value) -> Result<Value, OrbitError> {
         self.run_tool_with_role(name, input, Role::Admin)
@@ -27,8 +38,25 @@ impl OrbitRuntime {
         &self,
         name: &str,
         input: Value,
+        role: Role,
+        tool_context: ToolContext,
+    ) -> Result<Value, OrbitError> {
+        self.run_tool_with_context_and_role_and_capability(
+            name,
+            input,
+            role,
+            tool_context,
+            CapabilityEnforcement::Enforce,
+        )
+    }
+
+    pub(crate) fn run_tool_with_context_and_role_and_capability(
+        &self,
+        name: &str,
+        input: Value,
         _role: Role,
         mut tool_context: ToolContext,
+        capability_enforcement: CapabilityEnforcement,
     ) -> Result<Value, OrbitError> {
         if tool_context.cwd.is_none() {
             tool_context.cwd = std::env::current_dir()
@@ -70,7 +98,9 @@ impl OrbitRuntime {
         // workspace reaches the registry through this function, so this is the
         // only place a governed tool operation is authorized — a per-command
         // guard would be reopened by the next entry point that skips it.
-        self.authorize_tool_operation(name, &tool_context.session_context)?;
+        if capability_enforcement == CapabilityEnforcement::Enforce {
+            self.authorize_tool_operation(name, &tool_context.session_context)?;
+        }
 
         if !tool_context.allowed_tools.is_empty()
             && !tool_allowed(name, &tool_context.allowed_tools)

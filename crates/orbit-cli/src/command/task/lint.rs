@@ -3,7 +3,7 @@ use orbit_core::command::task::TaskLintSeverity;
 use orbit_core::{OrbitError, OrbitRuntime, TaskStatus};
 use serde_json::{Value, json};
 
-use crate::command::Execute;
+use crate::command::{CommandOut, CommandOutput, Execute};
 
 /// Statuses swept when linting without a task ID (the former `prune-context`
 /// active set).
@@ -22,7 +22,7 @@ const SWEEP_ACTIVE_STATUSES: &[TaskStatus] = &[
 
 #[derive(Args)]
 #[command(
-    after_help = "Examples:\n  orbit task lint ORB-00042            # findings for one task\n  orbit task lint ORB-00042 --fix      # drop stale context_files entries, then report\n  orbit task lint                      # sweep active tasks for stale context_files (dry run)\n  orbit task lint --fix                # apply the sweep\n  orbit task lint --fix --status review"
+    after_help = "Examples:\n  orbit task lint <TASK_ID>            # findings for one task\n  orbit task lint <TASK_ID> --fix      # drop stale context_files entries, then report\n  orbit task lint                      # sweep active tasks for stale context_files (dry run)\n  orbit task lint --fix                # apply the sweep\n  orbit task lint --fix --status review"
 )]
 pub struct TaskLintArgs {
     /// Task ID. Omit to sweep all active tasks for stale `context_files` entries.
@@ -40,10 +40,16 @@ pub struct TaskLintArgs {
 }
 
 impl Execute for TaskLintArgs {
-    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+    fn execute(self, runtime: &OrbitRuntime) -> CommandOut {
         match &self.id {
-            Some(id) => lint_single_task(runtime, id, self.fix, self.json),
-            None => sweep_stale_context_files(runtime, self.fix, &self.statuses, self.json),
+            Some(id) => {
+                lint_single_task(runtime, id, self.fix, self.json)?;
+                Ok(CommandOutput::Silent)
+            }
+            None => {
+                sweep_stale_context_files(runtime, self.fix, &self.statuses, self.json)?;
+                Ok(CommandOutput::Silent)
+            }
         }
     }
 }

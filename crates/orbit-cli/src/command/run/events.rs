@@ -1,9 +1,9 @@
 use clap::Args;
+use orbit_core::OrbitRuntime;
 use orbit_core::runtime::run_audit::RunAuditEvent;
-use orbit_core::{OrbitError, OrbitRuntime};
 use serde_json::{Value, json};
 
-use crate::command::Execute;
+use crate::command::{CommandOut, Execute, Payload};
 
 use super::format::format_timestamp;
 use super::steps::{resolve_run, resolve_step_filter};
@@ -30,24 +30,22 @@ pub struct RunEventsArgs {
 }
 
 impl Execute for RunEventsArgs {
-    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
-        print_run_events(
+    fn execute(self, runtime: &OrbitRuntime) -> CommandOut {
+        run_events_payload(
             runtime,
             self.run_id.as_deref(),
             self.step_id.as_deref(),
             self.event_type.as_deref(),
-            self.json,
         )
     }
 }
 
-fn print_run_events(
+fn run_events_payload(
     runtime: &OrbitRuntime,
     run_id: Option<&str>,
     step_id: Option<&str>,
     event_type: Option<&str>,
-    json_output: bool,
-) -> Result<(), OrbitError> {
+) -> CommandOut {
     let run = resolve_run(runtime, run_id)?;
     let audit_steps = runtime.collect_run_audit_steps(&run.run_id)?;
     let step_filter = resolve_step_filter(&run, &audit_steps, step_id)?;
@@ -57,20 +55,21 @@ fn print_run_events(
         event_type,
     );
 
-    if json_output {
-        return crate::output::json::print_pretty(&json!({
-            "run_id": run.run_id,
-            "job_id": run.job_id,
-            "events": events.iter().map(RunAuditEvent::json_with_step_id).collect::<Vec<_>>(),
-        }));
-    }
+    let doc = json!({
+        "run_id": run.run_id,
+        "job_id": run.job_id,
+        "events": events.iter().map(RunAuditEvent::json_with_step_id).collect::<Vec<_>>(),
+    });
 
-    if events.is_empty() {
-        println!("No audit events recorded.");
-        return Ok(());
-    }
-
-    let mut table = crate::output::table::build_table(&["TS", "STEP", "EVENT_TYPE", "SUMMARY"]);
+    use crate::output::table::{Column, Table};
+    // `orbit run trace <run_id>` prints each event's untruncated payload.
+    let mut table = Table::new(vec![
+        Column::new("TS").fixed(),
+        Column::new("STEP").fixed(),
+        Column::new("EVENT_TYPE").fixed(),
+        Column::new("SUMMARY"),
+    ])
+    .empty_message("no audit events recorded");
     for event in &events {
         use comfy_table::Cell;
         table.add_row(vec![
@@ -80,8 +79,7 @@ fn print_run_events(
             Cell::new(summarize_audit_event(event)),
         ]);
     }
-    println!("{table}");
-    Ok(())
+    Ok(Payload::detail_table(doc, table).into())
 }
 
 pub(crate) fn filter_run_audit_events(

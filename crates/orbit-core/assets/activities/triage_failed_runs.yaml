@@ -48,6 +48,8 @@ spec:
               type: number
             max_rebacklogs:
               type: number
+      system_crew:
+        type: boolean
   output_schema_json:
     type: object
     required: [dispositions]
@@ -84,7 +86,7 @@ spec:
 
     1. Read the evidence. Start from `error_code` / `error_message`; use
        `orbit.task.show` for the task's history and prior triage notes, and
-       `fs.read` / `rg` (via proc.spawn) for run logs and workspace state
+       the provider-native file-read tool / `rg` (via proc.spawn) for run logs and workspace state
        under `.orbit/state/` when the message alone is inconclusive.
     2. Classify the failure:
        - `environmental` — provider auth failure (401/403), rate limit,
@@ -101,7 +103,7 @@ spec:
          bounded retry budget and re-runs a doomed pipeline.
     3. Mitigate, within hard bounds, only what is safe and clearly stale:
        delete an orphaned worktree directory left by the failed run
-       (`fs.delete` under `.orbit/state/worktrees/`), or file a friction
+       (provider-native delete under `.orbit/state/worktrees/`), or file a friction
        (`orbit.friction.add`, model `system`) for a systemic box-level cause
        that will keep failing runs. Stale runs, reservations, and task locks
        are already reconciled deterministically before you run — do not
@@ -112,9 +114,10 @@ spec:
          despite the failed run — e.g. the run failed at `pr_promote` /
          `pr_open` but the task's own PR is recorded as merged to the
          landing branch (task history/comments, run logs, `.orbit/state/`,
-         or the repo's git refs via `fs.read`) — set the task to `done`
-         via `orbit.task.update`, attaching a comment that cites the exact
-         evidence (PR number, merge commit, where you saw it). Then return
+         or the repo's git refs via the provider-native file-read tool) — set the task to `done`
+         via `orbit.task.update` with `status: "done"`, attaching a comment
+         that cites the exact evidence (PR number, merge commit, where you
+         saw it). Then return
          `stay_blocked` as the disposition: the apply step sees the task
          has left `blocked` and skips it. Never `rebacklog` landed work —
          a rerun redoes merged work and risks duplicate PRs. This is the
@@ -149,12 +152,8 @@ spec:
     - orbit.task.update
     - orbit.friction.add
     - orbit.search
-    - orbit.state.get
-    - fs.read
-    - fs.delete
     - proc.spawn
   proc_allowed_programs:
     - rg
   on_denial: terminate
-  role: reviewer
   wall_clock_timeout_seconds: 1200

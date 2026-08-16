@@ -1,131 +1,54 @@
 ---
-title: Host Registry — Vision
-owner: claude
-last_updated: 2026-07-18
-last_validated: 2026-07-27
+summary: "Host Registry — Vision"
+type: design
+title: "Host Registry — Vision"
+owner: codex
+last_updated: 2026-08-15
+last_validated: 2026-08-15
 status: Accepted
 feature: host-registry
 doc_role: vision
-type: design
-summary: Open questions (non-owner knowledge authoring, label taxonomy, ownership migration, coordination-plane distribution) and prior art (CI runner registration, cluster membership, the rejected task-sync design) for the host registry.
-tags: [host-registry, multi-host, dispatch]
-paths: ["crates/orbit-remote/**", "crates/orbit-core/**", "crates/orbit-store/**", "crates/orbit-mcp/**"]
-related_features: [host-registry, mcp-bridge, routines, remote-access]
-related_artifacts: [ORB-00424, ORB-10319, ADR-0226, ADR-0227, ADR-0228, ADR-0229, ADR-0230, ADR-0231, ADR-0232, ADR-0240]
+tags: [host-registry, machine-identity, workspace-catalog]
+paths: ["crates/orbit-common/src/types/host.rs", "crates/orbit-common/src/types/workspace.rs", "crates/orbit-registry/src/host_identity.rs", "crates/orbit-registry/src/workspace_registry/**", "crates/orbit-cmd/src/registry_runtime.rs"]
+related_features: [host-registry, mcp-session-context, remote-access]
+related_artifacts: []
 ---
 
 # Host Registry — Vision
 
-Forward-looking notes for the host registry. Everything here is unbuilt and most of
-it is deliberately deferred; the v1 posture is the smallest registry that makes
-placement validated, leased, and auditable, and dead pins visible. Speculation is
-labelled as such.
+Keep the registry small: one durable local machine identity, one validated local workspace catalog, and one shared composition seam for opening Core runtimes.
 
-These questions assume the current vertical boundary: `orbit-remote` owns the
-feature from registry persistence through MCP placement and registration, while
-Store and MCP remain neutral infrastructure ([ORB-10319], [ADR-0240]). A future
-transport or availability design should extend that feature boundary rather than
-redistribute its policy across kernels.
+## Stable direction
 
-## 1. Open Questions
+- Stable IDs remain logical and transport-free.
+- Logical workspace records remain separate from machine-local checkout paths.
+- Registry owns schema and persistence; orbit-cmd owns runtime composition.
+- CLI, Web and MCP reuse those seams rather than implementing their own lookup rules.
+- Malformed or future durable state fails closed without being overwritten.
+- Remote transport reaches the accepting server; it does not make local registry state authoritative for another machine.
 
-1. **Non-owner knowledge authoring.** V1 makes learnings/ADRs strictly one-writer
-   per workspace — the owner authors locally with a hub-allocated ID
-   ([2_design.md §5](./2_design.md)), and a non-owner routes anything actionable as
-   a task to the owner. Letting a non-owner author directly requires either a
-   reservation/finalization protocol (expiry, orphaned IDs, finalize/pull races) or
-   hub-relayed content writes. Design it only if the route-through-owner seam
-   demonstrably hurts.
-2. **Label taxonomy.** Free-form labels suffice for one operator who names things
-   consistently. Does placement ever need a structured capability schema (provider
-   versions, GPU, checkout freshness), or is that the over-engineering the crew
-   design avoided by choosing `description` + `tags`?
-3. **Ownership migration.** With coordination fixed at the hub, moving a
-   workspace's owner is lighter than full authority migration would have been:
-   ensure a checkout, flip both sides of the binding, reindex knowledge from files.
-   Still: supported `orbit host` operation or documented manual runbook?
-   (Speculation: runbook first; tooling only after it has been done twice.)
-4. **Distributing the coordination plane.** Ownership already distributes; the
-   hub does not. If the constellation ever outgrows one coordination host, does the
-   plane shard per-owner (each owner coordinates its own workspaces — reintroducing
-   multi-target orchestration) or replicate (reintroducing everything [ADR-0200]
-   rejected)? Current answer: neither; the hub is small enough to keep singular.
-5. **Runner credential lifecycle.** Satellites hold standing SSH identities with
-   `runner` capability. Rotation, revocation on retire, and scoping per satellite
-   are manual in v1; at what host count does that need tooling?
-6. **Poll cadence and backoff.** One minute matches the sweep and bounds placement
-   latency acceptably today. Do busy or battery-powered satellites need adaptive
-   cadence, and does the lease TTL interact with it?
-7. **Should placement ever auto-fail-over?** V1 returns an expired lease to
-   `placed` for the shepherd to re-place explicitly. Automatic re-placement to
-   another labelled host is attractive and is exactly how blind dispatch re-enters
-   the system; the triage policy (orchestrator-steered, explicit ids) argues
-   against it.
+## Questions that require evidence
 
-## 2. Prior Work
+### Old database cleanup
 
-### CI runner registration
+Remove obsolete registry tables and code only through a migration-safe change. Their historical presence does not justify reviving a fleet control plane.
 
-GitHub Actions self-hosted runners are the closest shape: machines register with a
-central coordinator, advertise labels, poll for work, and take leases; dead runners
-are visible in the inventory. The design borrows this wholesale — registration,
-labels, last-seen, *and* the pull-based lease. The deliberate difference: no
-queue-side auto-assignment — placement stays an orchestrator decision per run.
+### Host rename recovery
 
-### Cluster membership
+The current two-file rename is ordered but not transactional. If stale owner display names become operationally significant, add a deterministic repair/check command or one recoverable journal before expanding rename semantics.
 
-Nomad clients and Kubernetes nodes register with fingerprinted capabilities and
-heartbeat to a scheduler. Serf/memberlist solve liveness with gossip. Orbit wants
-the *inventory* half, not the *scheduler* half: one operator, single-digit hosts,
-and SSH as the only transport make gossip, leader election, and lease protocols
-beyond a simple TTL wildly oversized.
+### Legacy catalog repair
 
-### Orbit-internal
+Identity-bearing legacy catalogs with no explicit checkout role fail safely but lack an automatic inference path. A migration tool is justified only if real installations still carry that shape and the intended owner can be established without guessing.
 
-- [remote-access/4_decisions.md](../remote-access/4_decisions.md) — [ADR-0200]
-  rejected the git-orphan-branch task registry in favor of read-only viewing;
-  [ADR-0201] fixed the SSH-only, no-network-bind posture this design inherits.
-- `docs/design/_archive/task-sync/` — the fullest prior exploration of
-  cross-machine task state; its failure modes (ID collision, merge semantics) are
-  why tasks are MCP-only here rather than synced.
-- [routines/2_design.md](../routines/2_design.md) — explicit host pinning,
-  host-local scheduler state ([ADR-0208]), the load-time name-collision error, and
-  the minute-cadence clock unit the runner poll rides on.
-- [mcp-bridge/2_design.md](../mcp-bridge/2_design.md) ([ORB-00424]) — the
-  placement-aware local broker, client→hub transport, capability sets, and audit
-  context; this registry supplies stable identity, ownership bindings, and the
-  hub→satellite lease half.
+### Authenticated authorization
 
-## 3. What May Be Distinctive
+If Core later authorizes remote calls, it needs an authenticated principal or grant separate from machine_id, host_id, caller IP and SSH audit labels. Existing registry and session fields must not be promoted into credentials by implication.
 
-Possibly nothing algorithmically — registration, labels, leases, and freshness are
-standard runner machinery. The distinctive posture is *what is refused*: no network
-listener, no token auth, no scheduler, no auto-assignment, no machine-to-machine
-routes (the hub is a mailbox, not a proxy), and no daemon beyond the clock unit
-that already exists — identity and work distribution ride an existing SSH
-relationship at sweep cadence, and every placement decision stays with the
-orchestrator. Placement without replication; inventory without a control plane.
+### Checkoutless operations
 
-## 4. References
+If a future operation truly needs no checkout, define a narrow server-owned API and persistence contract for it. Do not weaken RegisteredRuntimeFactory or make the SSH proxy perform placement and workspace logic.
 
-**Orbit-internal**
+### Schema evolution
 
-- [1_overview.md](./1_overview.md), [2_design.md](./2_design.md)
-- [mcp-bridge/1_overview.md](../mcp-bridge/1_overview.md)
-- [remote-access/1_overview.md](../remote-access/1_overview.md)
-- [routines/2_design.md](../routines/2_design.md)
-
-**External**
-
-- GitHub Actions self-hosted runners — registration, labels, polling, runner groups.
-- HashiCorp Nomad client fingerprinting; Kubernetes node registration/heartbeats.
-- HashiCorp Serf / memberlist — gossip-based membership (considered, oversized).
-
-## Task References
-
-- [ORB-00424] — proposed the local/remote Orbit MCP unification this registry
-  complements.
-- [ORB-10319] — consolidates the registry and MCP bridge into the vertical
-  `orbit-remote` feature boundary assumed by these open questions.
-
-> Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.
+New host or catalog schema versions need explicit forward migration, crash-safe writes, future-version rejection tests and rollback classification.

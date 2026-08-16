@@ -1,6 +1,13 @@
+---
+type: design
+summary: "Spec: V2 Audit Envelope"
+tags: ["activity-job"]
+last_validated: 2026-08-01
+---
+
 # Spec: V2 Audit Envelope
 
-Activity / Job runs emit a structured v2 audit tree that describes run, step, activity, and control-flow structure. This tree is append-only JSONL and coexists with the lower-level loop transcript/blob sink rather than replacing it.
+Activity / Job runs emit a structured v2 audit tree that describes run, step, activity, and control-flow structure. This tree is stored as append-only SQLite audit rows and coexists with the lower-level loop-event/blob sink rather than replacing it.
 
 ## Why This Exists
 
@@ -36,24 +43,19 @@ Common event families are:
 
 `cli.invocation.started` includes redacted argv, stdin blob ref, optional model, wall-clock timeout, and optional `cwd`. When present, `cwd` is the subprocess working directory selected by Activity/Job's workspace resolver.
 
-Loop-engine HTTP and tool-call events remain in the lower-level sink and are related to the envelope tree by parentage and shared run identity.
+Loop-engine HTTP and tool-call events remain in the lower-level sink and can be correlated with the envelope rows by shared run identity. They are not v2-envelope descendants: the SQLite loop-event rows do not carry an envelope `parent_event_id`.
 
 ## Persistence Layout
 
-Envelope events append to:
+In production, envelope events append to the SQLite `v2_audit_events` table with `source: v2_envelope`.
+
+Loop-engine events use the same table with `source: loop_event`. Content-addressed blobs remain under:
 
 ```text
-.orbit/state/audit/v2_loop/<run_id>.jsonl
-```
-
-Loop-engine events and blobs continue to use the sibling audit layout under:
-
-```text
-.orbit/state/audit/loop/<run_id>.jsonl      created on first loop event
 .orbit/state/audit/blobs/<hh>/<hash>
 ```
 
-The v2 writer may also keep an in-memory snapshot for smoke assertions and CLI summaries.
+The v2 writer also keeps an in-memory snapshot for smoke assertions and CLI summaries. Its legacy `envelope_log_path()` hook returns `None` for the SQLite-backed production writer.
 
 ## CLI Inspection
 
@@ -65,7 +67,7 @@ The v2 writer may also keep an in-memory snapshot for smoke assertions and CLI s
 
 ## Invariants
 
-- Envelope writes are append-only, one JSON object per line.
+- Envelope writes are append-only rows whose payload is one JSON object.
 - Disk persistence failure should not crash the run by itself; the in-memory event stream is still load-bearing.
 - `workspace_path` is attached when the caller has a meaningful repo identity.
 - CLI invocation start events include `cwd` when the runtime selected a subprocess working directory.
@@ -74,13 +76,13 @@ The v2 writer may also keep an in-memory snapshot for smoke assertions and CLI s
 ## Failure Modes
 
 - Audit writer mutex poisoning surfaces as a structured audit failure.
-- JSONL persistence can fail independently of in-memory event capture.
-- Reviewers may need both the envelope JSONL and the lower-level loop JSONL/blob store to reconstruct a full run.
+- SQLite persistence can fail independently of in-memory event capture.
+- Reviewers may need both the envelope and loop-event rows, plus the blob store, to reconstruct a full run.
 
 ## Migration Notes
 
 - The envelope is additive. It does not retire or rewrite the existing loop-level audit sink.
-- CLI backend events are first-class envelope events, so CLI runs remain visible even when no HTTP transcript exists.
+- CLI agent events are first-class envelope events, so every agent run is visible in the envelope stream.
 - File-backed runtime traces moved from `.orbit/audit/` to `.orbit/state/audit/` in [T20260426-0519]. Existing `.orbit/audit/` files are legacy local artifacts rather than the current write target.
 
 ## Agent Signature

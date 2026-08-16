@@ -3,11 +3,11 @@
 use super::*;
 
 use orbit_common::test_fixtures::TEST_GEMINI_MODEL;
-use orbit_common::types::activity_job::{AgentLoopSpec, AgentRole, Backend, OnDenial, Provider};
+use orbit_common::types::activity_job::{AgentLoopSpec, OnDenial, Provider};
 
-use crate::AgentRoleConfig;
+use crate::CrewConfig;
 
-use super::role_overridden_recovery_spec;
+use super::crew_overridden_recovery_spec;
 
 /// [ORB-00414] Audit-write failures on the recovery path are recorded (counter
 /// + degraded flag) but never fatal: recovery still runs and the job succeeds.
@@ -208,58 +208,69 @@ fn step_level_recovery_activity_runs_without_job_level_recovery() {
 }
 
 #[test]
-fn recovery_agent_loop_uses_reviewer_role_config() {
-    let mut role_config = HashMap::new();
-    role_config.insert(
-        AgentRole::Reviewer,
-        AgentRoleConfig {
-            provider: Some(Provider::Gemini),
-            model: Some(TEST_GEMINI_MODEL.to_string()),
-            backend: Some(Backend::Cli),
-        },
-    );
-    let host = RecoveryHost::empty().with_role_config(role_config);
+fn recovery_agent_loop_uses_run_crew_config() {
+    let host = RecoveryHost::empty().with_recovery_config(CrewConfig {
+        provider: Some(Provider::Gemini),
+        model: Some(TEST_GEMINI_MODEL.to_string()),
+    });
     let ctx = recovery_exec_ctx(&host);
-    let recovery = agent_loop_recovery_activity(recovery_agent_loop_spec(
-        Some(AgentRole::Reviewer),
-        Provider::Claude,
-        Backend::Http,
-        None,
-    ));
+    let recovery = agent_loop_recovery_activity(recovery_agent_loop_spec(Provider::Claude, None));
 
-    let overridden = role_overridden_recovery_spec(&recovery, &ctx)
-        .expect("role-tagged recovery should resolve");
+    let overridden = crew_overridden_recovery_spec(&recovery, &ctx, &json!({}))
+        .expect("generic recovery crew resolution should succeed")
+        .expect("run crew should resolve");
 
     let ActivityV2Spec::AgentLoop(spec) = overridden else {
         panic!("expected agent_loop recovery spec");
     };
     assert_eq!(spec.provider, Provider::Gemini);
     assert_eq!(spec.model.as_deref(), Some(TEST_GEMINI_MODEL));
-    assert_eq!(spec.backend, Backend::Cli);
-    assert_eq!(host.observed_role_lookups(), vec![AgentRole::Reviewer]);
 }
 
 #[test]
-fn recovery_agent_loop_without_reviewer_config_keeps_inline_defaults() {
+fn step_failure_recovery_uses_the_lane_middleweight_config() {
+    for (provider, model) in [
+        (Provider::Codex, "gpt-5.6-terra"),
+        (Provider::Claude, "sonnet"),
+    ] {
+        let host = RecoveryHost::empty().with_recovery_config(CrewConfig {
+            provider: Some(provider),
+            model: Some(model.to_string()),
+        });
+        let ctx = recovery_exec_ctx(&host);
+        let recovery = step_failure_recovery_agent_loop_activity(recovery_agent_loop_spec(
+            Provider::Gemini,
+            Some("inline-model"),
+        ));
+
+        let overridden = crew_overridden_recovery_spec(
+            &recovery,
+            &ctx,
+            &json!({ "crew": "qa", "crew_config_key": "workflow.system_crew" }),
+        )
+        .expect("middleweight recovery config should resolve")
+        .expect("agent loop recovery should produce a dispatch spec");
+        let ActivityV2Spec::AgentLoop(spec) = overridden else {
+            panic!("expected agent_loop recovery spec");
+        };
+        assert_eq!(spec.provider, provider);
+        assert_eq!(spec.model.as_deref(), Some(model));
+    }
+}
+
+#[test]
+fn step_failure_recovery_requires_a_middleweight_config() {
     let host = RecoveryHost::empty();
     let ctx = recovery_exec_ctx(&host);
-    let recovery = agent_loop_recovery_activity(recovery_agent_loop_spec(
-        Some(AgentRole::Reviewer),
-        Provider::Claude,
-        Backend::Http,
-        None,
+    let recovery = step_failure_recovery_agent_loop_activity(recovery_agent_loop_spec(
+        Provider::Codex,
+        Some("gpt-5.6-sol"),
     ));
 
-    let overridden = role_overridden_recovery_spec(&recovery, &ctx)
-        .expect("role-tagged recovery should still produce dispatch spec");
+    let err = crew_overridden_recovery_spec(&recovery, &ctx, &json!({ "system_crew": true }))
+        .expect_err("step recovery must not fall back to its implementation crew");
 
-    let ActivityV2Spec::AgentLoop(spec) = overridden else {
-        panic!("expected agent_loop recovery spec");
-    };
-    assert_eq!(spec.provider, Provider::Claude);
-    assert_eq!(spec.model, None);
-    assert_eq!(spec.backend, Backend::Http);
-    assert_eq!(host.observed_role_lookups(), vec![AgentRole::Reviewer]);
+    assert!(err.to_string().contains("workflow.system_crew"));
 }
 
 #[test]
@@ -624,7 +635,6 @@ fn recovery_job(
                 default_input: None,
                 timeout_seconds: 0,
                 session: None,
-                role: None,
             }),
         }],
     }
@@ -650,36 +660,36 @@ fn agent_loop_recovery_activity(spec: AgentLoopSpec) -> ResolvedRecoveryActivity
     }
 }
 
-fn recovery_agent_loop_spec(
-    role: Option<AgentRole>,
-    provider: Provider,
-    backend: Backend,
-    model: Option<&str>,
-) -> AgentLoopSpec {
+fn step_failure_recovery_agent_loop_activity(spec: AgentLoopSpec) -> ResolvedRecoveryActivity {
+    ResolvedRecoveryActivity {
+        name: "step_failure_recovery".to_string(),
+        spec: ActivityV2Spec::AgentLoop(spec),
+    }
+}
+
+fn recovery_agent_loop_spec(provider: Provider, model: Option<&str>) -> AgentLoopSpec {
     AgentLoopSpec {
         instruction: "recover carefully".to_string(),
         tools: Vec::new(),
         on_denial: OnDenial::Terminate,
         model: model.map(str::to_string),
         max_iterations: 1,
-        backend,
+        backend: None,
         provider,
         wall_clock_timeout_seconds: 30,
         require_response_envelope: false,
         require_completion_envelope: true,
-        role,
         proc_allowed_programs: None,
     }
 }
 
-fn recovery_exec_ctx<'a>(host: &'a dyn V2RuntimeHost) -> ExecCtx<'a> {
+fn recovery_exec_ctx<'a>(host: &'a dyn RuntimeHost) -> ExecCtx<'a> {
     ExecCtx {
         run_id: "run-recovery-role".to_string(),
         audit: std::sync::Arc::new(test_writer("run-recovery-role")),
         host,
         input: json!({}),
         pipeline: std::sync::Arc::new(std::sync::Mutex::new(HashMap::new())),
-        sessions: std::sync::Arc::new(std::sync::Mutex::new(HashMap::new())),
         recovery_activity: None,
         failure_activity: None,
         item: None,
@@ -721,8 +731,7 @@ struct RecoveryHost {
     responses: StdMutex<HashMap<String, VecDeque<Result<Value, DispatchError>>>>,
     calls: StdMutex<Vec<DeterministicCall>>,
     pending_fs_profiles: StdMutex<VecDeque<Option<String>>>,
-    role_config: StdMutex<HashMap<AgentRole, AgentRoleConfig>>,
-    observed_role_lookups: StdMutex<Vec<AgentRole>>,
+    recovery_config: StdMutex<Option<CrewConfig>>,
 }
 
 impl RecoveryHost {
@@ -740,13 +749,12 @@ impl RecoveryHost {
             ),
             calls: StdMutex::new(Vec::new()),
             pending_fs_profiles: StdMutex::new(VecDeque::new()),
-            role_config: StdMutex::new(HashMap::new()),
-            observed_role_lookups: StdMutex::new(Vec::new()),
+            recovery_config: StdMutex::new(None),
         }
     }
 
-    fn with_role_config(self, config: HashMap<AgentRole, AgentRoleConfig>) -> Self {
-        *self.role_config.lock().expect("role config lock") = config;
+    fn with_recovery_config(self, config: CrewConfig) -> Self {
+        *self.recovery_config.lock().expect("recovery config lock") = Some(config);
         self
     }
 
@@ -785,16 +793,9 @@ impl RecoveryHost {
             .find(|call| call.action == action)
             .map(|call| call.fs_profile.clone())
     }
-
-    fn observed_role_lookups(&self) -> Vec<AgentRole> {
-        self.observed_role_lookups
-            .lock()
-            .expect("observed role lock")
-            .clone()
-    }
 }
 
-impl V2RuntimeHost for RecoveryHost {
+impl RuntimeHost for RecoveryHost {
     fn run_deterministic(
         &self,
         action: &str,
@@ -825,12 +826,6 @@ impl V2RuntimeHost for RecoveryHost {
             .unwrap_or_else(|| Ok(json!({"action": action})))
     }
 
-    fn api_key_for(&self, _provider: &str) -> Result<String, DispatchError> {
-        Err(DispatchError::AgentLoopFailed(
-            "test host: no credentials".into(),
-        ))
-    }
-
     fn resolve_cli_executor(
         &self,
         _provider: &str,
@@ -854,15 +849,23 @@ impl V2RuntimeHost for RecoveryHost {
         orbit_tools::ToolContext::default()
     }
 
-    fn agent_role_config(&self, role: AgentRole) -> Option<AgentRoleConfig> {
-        self.observed_role_lookups
+    fn system_crew_for_dispatch(&self) -> Option<String> {
+        Some("qa".to_string())
+    }
+
+    fn agent_crew_config_for_input(
+        &self,
+        _input: &Value,
+    ) -> Result<Option<CrewConfig>, DispatchError> {
+        self.recovery_config
             .lock()
-            .expect("observed role lock")
-            .push(role);
-        self.role_config
-            .lock()
-            .expect("role config lock")
-            .get(&role)
-            .cloned()
+            .expect("recovery config lock")
+            .clone()
+            .map(Some)
+            .ok_or_else(|| {
+                DispatchError::JobValidation(
+                    "workflow.system_crew test crew is unavailable".to_string(),
+                )
+            })
     }
 }

@@ -3,12 +3,14 @@
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command as StdCommand;
+use std::thread;
+use std::time::{Duration, Instant};
 
 use assert_cmd::Command as AssertCommand;
 use assert_cmd::cargo::cargo_bin_cmd;
-use serde_json::{Value, json};
+use serde_json::Value;
 use tempfile::tempdir;
 
 #[test]
@@ -81,6 +83,86 @@ fn config_show_reports_shared_and_local_roots_for_git_worktrees_and_overrides() 
     );
 }
 
+/// [ORB-10821] `orbit --root <custom> run job` must execute in that custom
+/// store. Before the fix the parent persisted the run under `--root` and
+/// reported `submitted`, then the detached worker rediscovered `$HOME/.orbit`
+/// and exited with `job run not found`, leaving the run pending forever.
+#[test]
+fn run_job_with_explicit_root_completes_instead_of_staying_pending() {
+    let temp = tempdir().expect("tempdir");
+    let home = temp.path().join("home");
+    let repo = temp.path().join("repo");
+    let custom_root = temp.path().join("custom-orbit");
+    fs::create_dir_all(&home).expect("create home");
+    fs::create_dir_all(&repo).expect("create repo");
+    init_git_repo(&repo);
+
+    run_orbit_success(
+        &repo,
+        &home,
+        &[
+            "--root",
+            custom_root.to_str().expect("utf8 custom root"),
+            "workspace",
+            "init",
+        ],
+        None,
+    );
+    pin_default_crew_for_isolated_root(&custom_root);
+
+    let job_path = repo.join("root-override-smoke.yaml");
+    fs::write(
+        &job_path,
+        r#"schemaVersion: 2
+kind: Job
+metadata:
+  name: root_override_smoke
+spec:
+  state: enabled
+  kind: workflow
+  steps:
+    - id: nap
+      default_input:
+        seconds: 0
+      spec:
+        type: deterministic
+        action: sleep
+        config: {}
+"#,
+    )
+    .expect("write smoke job");
+
+    let custom_root_arg = custom_root.to_string_lossy().into_owned();
+    let job_path_arg = job_path.to_string_lossy().into_owned();
+    let submitted = run_orbit_json(
+        &repo,
+        &home,
+        &[
+            "--root",
+            &custom_root_arg,
+            "run",
+            "job",
+            &job_path_arg,
+            "--json",
+        ],
+        None,
+    );
+    let run_id = submitted["run_id"]
+        .as_str()
+        .unwrap_or_else(|| panic!("expected run_id in {submitted}"))
+        .to_string();
+    assert_eq!(submitted["state"].as_str(), Some("submitted"));
+
+    let shown = wait_for_run_terminal_state(&repo, &home, &custom_root, &run_id);
+    let state = shown["run"]["state"].as_str().unwrap_or("missing");
+    assert_eq!(
+        state,
+        "success",
+        "{}",
+        detached_worker_diagnostic(&custom_root, &run_id, &shown)
+    );
+}
+
 #[test]
 fn doctor_graph_cleanup_uses_split_roots_and_keeps_json_stdout_clean() {
     let temp = tempdir().expect("tempdir");
@@ -147,211 +229,10 @@ fn doctor_graph_cleanup_uses_split_roots_and_keeps_json_stdout_clean() {
     );
 }
 
-#[test]
-fn linked_worktree_artifacts_write_locally_and_remote_lists_return_stubs() {
-    let temp = tempdir().expect("tempdir");
-    let home = temp.path().join("home");
-    let main_repo = temp.path().join("repo");
-    let linked_worktree = temp.path().join("repo-artifacts");
-    fs::create_dir_all(&home).expect("create home");
-    fs::create_dir_all(&main_repo).expect("create main repo");
-
-    init_git_repo(&main_repo);
-    run_git(
-        &main_repo,
-        &[
-            "worktree",
-            "add",
-            "-b",
-            "orbit-worktree-artifacts",
-            linked_worktree.to_str().expect("utf8 worktree path"),
-        ],
-    );
-    run_orbit_success(&main_repo, &home, &["workspace", "init"], None);
-
-    let main_repo = fs::canonicalize(&main_repo).expect("canonicalize main repo");
-    let linked_worktree = fs::canonicalize(&linked_worktree).expect("canonicalize linked worktree");
-    let main_orbit = main_repo.join(".orbit");
-    let linked_orbit = linked_worktree.join(".orbit");
-
-    let adr = run_orbit_json(
-        &linked_worktree,
-        &home,
-        &[
-            "tool",
-            "run",
-            "orbit.adr.add",
-            "--input",
-            r###"{"title":"Worktree artifact routing","owner":"codex","body":"## Context\nLinked worktree write.\n\n## Decision\nWrite locally.\n\n## Consequences\n- Body files are committable.\n- Cost: Readers need federation.\n","related_features":["worktree-artifacts"],"related_tasks":["ORB-00201"],"model":"codex"}"###,
-        ],
-        None,
-    );
-    let adr_id = string_field(&adr, "id").to_string();
-
-    let learning = run_orbit_json(
-        &linked_worktree,
-        &home,
-        &[
-            "learning",
-            "add",
-            "--summary",
-            "Stage worktree-local learning artifacts with the code change",
-            "--path",
-            "crates/**",
-            "--tag",
-            "worktree-artifacts",
-            "--evidence",
-            "task:ORB-00201",
-            "--json",
-        ],
-        None,
-    );
-    let learning_id = string_field(&learning, "id").to_string();
-    assert!(learning_id.starts_with("L-"));
-
-    let adr_dir = linked_orbit.join("adrs/proposed").join(&adr_id);
-    assert!(adr_dir.join("adr.yaml").is_file());
-    assert!(adr_dir.join("body.md").is_file());
-    assert!(!main_orbit.join("adrs/proposed").join(&adr_id).exists());
-
-    let learning_dir = linked_orbit.join("learnings").join(&learning_id);
-    assert!(learning_dir.join("learning.yaml").is_file());
-    assert!(!main_orbit.join("learnings").join(&learning_id).exists());
-
-    let local_orbit_entries = sorted_child_names(&linked_orbit);
-    assert_eq!(local_orbit_entries, vec!["adrs", "learnings"]);
-
-    let federated_show = run_orbit_json(
-        &main_repo,
-        &home,
-        &[
-            "tool",
-            "run",
-            "orbit.adr.show",
-            "--input",
-            &format!(r#"{{"id":"{adr_id}","model":"codex"}}"#),
-        ],
-        None,
-    );
-    assert_eq!(federated_show["id"], adr_id);
-    assert!(
-        federated_show["body"]
-            .as_str()
-            .expect("federated body")
-            .contains("Linked worktree write")
-    );
-    assert_eq!(federated_show["artifact_origin"]["mode"], "federated");
-    assert_eq!(
-        federated_show["artifact_origin"]["worktree_root"],
-        linked_worktree.to_string_lossy().as_ref()
-    );
-    assert_eq!(
-        federated_show["artifact_origin"]["branch"],
-        "orbit-worktree-artifacts"
-    );
-    assert!(federated_show["artifact_origin"].get("body_path").is_none());
-
-    let rejected_update = run_orbit_output(
-        &main_repo,
-        &home,
-        &[
-            "tool",
-            "run",
-            "orbit.adr.update",
-            "--input",
-            &format!(r#"{{"id":"{adr_id}","title":"must not mutate","model":"codex"}}"#),
-        ],
-        None,
-    );
-    assert!(!rejected_update.status.success());
-    let rejected_payload: Value =
-        serde_json::from_slice(&rejected_update.stdout).expect("structured update error");
-    assert_eq!(rejected_payload["code"], "artifact_not_local");
-    assert_eq!(rejected_payload["artifact_origin"]["mode"], "federated");
-    assert!(
-        rejected_payload["artifact_origin"]
-            .get("body_path")
-            .is_none()
-    );
-
-    run_git(
-        &main_repo,
-        &[
-            "worktree",
-            "remove",
-            "--force",
-            linked_worktree.to_str().expect("utf8 worktree path"),
-        ],
-    );
-
-    // ORB-00289: `orbit.adr.list` is inactive on the agent surface; admin
-    // workflows reach it through the dedicated `orbit adr list` CLI
-    // subcommand, which routes through `runtime.run_tool` and so bypasses
-    // `ensure_tool_agent_facing` while preserving the tool's filter
-    // semantics (including `--include-remote`).
-    let adr_default = run_orbit_json(&main_repo, &home, &["adr", "list"], None);
-    assert!(!array_contains_id(&adr_default, &adr_id));
-
-    let adr_remote = run_orbit_json(
-        &main_repo,
-        &home,
-        &["adr", "list", "--include-remote"],
-        None,
-    );
-    let adr_stub = find_id(&adr_remote, &adr_id);
-    assert_eq!(adr_stub["remote"], json!(true));
-    assert!(
-        adr_stub["remote_marker"]
-            .as_str()
-            .expect("marker")
-            .contains("[remote:")
-    );
-
-    let learning_default = run_orbit_json(&main_repo, &home, &["learning", "list", "--json"], None);
-    assert!(!array_contains_id(&learning_default, &learning_id));
-
-    let learning_remote = run_orbit_json(
-        &main_repo,
-        &home,
-        &["learning", "list", "--include-remote", "--json"],
-        None,
-    );
-    let learning_stub = find_id(&learning_remote, &learning_id);
-    assert_eq!(learning_stub["remote"], json!(true));
-    assert!(learning_stub["body"].is_null());
-
-    let show_output = run_orbit_output(
-        &main_repo,
-        &home,
-        &[
-            "tool",
-            "run",
-            "orbit.adr.show",
-            "--input",
-            &format!(r#"{{"id":"{adr_id}","model":"codex"}}"#),
-        ],
-        None,
-    );
-    assert!(!show_output.status.success());
-    let unavailable_payload: Value =
-        serde_json::from_slice(&show_output.stdout).expect("structured unavailable error");
-    assert_eq!(unavailable_payload["code"], "remote_artifact_unavailable");
-    assert_eq!(unavailable_payload["artifact_origin"]["mode"], "federated");
-    assert_eq!(
-        unavailable_payload["artifact_origin"]["worktree_root"],
-        linked_worktree.to_string_lossy().as_ref()
-    );
-    assert_eq!(
-        unavailable_payload["artifact_origin"]["branch"],
-        "orbit-worktree-artifacts"
-    );
-    assert!(
-        unavailable_payload["artifact_origin"]
-            .get("body_path")
-            .is_none()
-    );
-}
-
+/// ORB-10668: the operator path the tool surface could not serve — an ADR
+/// authored inside a job worktree, carried proposed -> accepted with `orbit adr`
+/// alone from that worktree, while the same command run from the hub still
+/// fails closed on the federation guard.
 fn assert_root_fields(value: &Value, shared_root: &Path, local_root: &Path) {
     let shared = shared_root.to_string_lossy();
     let local = local_root.to_string_lossy();
@@ -371,6 +252,80 @@ fn assert_root_fields(value: &Value, shared_root: &Path, local_root: &Path) {
     );
 }
 
+fn wait_for_run_terminal_state(cwd: &Path, home: &Path, custom_root: &Path, run_id: &str) -> Value {
+    let custom_root_arg = custom_root.to_string_lossy();
+    let deadline = Instant::now() + Duration::from_secs(15);
+    loop {
+        let last = run_orbit_json(
+            cwd,
+            home,
+            &[
+                "--root",
+                custom_root_arg.as_ref(),
+                "run",
+                "show",
+                run_id,
+                "--json",
+            ],
+            None,
+        );
+        if last["run"]["state"]
+            .as_str()
+            .is_some_and(|state| state != "pending" && state != "running")
+        {
+            return last;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "{}",
+            detached_worker_diagnostic(custom_root, run_id, &last)
+        );
+        thread::sleep(Duration::from_millis(50));
+    }
+}
+
+fn detached_worker_diagnostic(custom_root: &Path, run_id: &str, last: &Value) -> String {
+    let worker_log = custom_root
+        .join("state/logs")
+        .join(format!("{run_id}.worker.log"));
+    let worker_log_text = fs::read_to_string(&worker_log)
+        .unwrap_or_else(|error| format!("<missing worker log {}: {error}>", worker_log.display()));
+    let config = fs::read_to_string(custom_root.join("config.toml")).unwrap_or_default();
+    let state = last["run"]["state"].as_str().unwrap_or("missing");
+    let pid = last["run"]["pid"].clone();
+    let started_at = last["run"]["started_at"].clone();
+    format!(
+        "run {run_id} stayed non-terminal under --root {}; \
+         state={state} pid={pid} started_at={started_at}; last show={last}; \
+         config.toml:\n{config}\nworker log:\n{worker_log_text}",
+        custom_root.display()
+    )
+}
+
+/// `workspace init` only seeds `[crews]` / `default_crew` when it sees an agent
+/// CLI on PATH. The stub planted by [`plant_agent_cli_stub`] covers the common
+/// case; write the same contract into the isolated root so a detached worker
+/// cannot lose crew resolution if detection did not stick.
+fn pin_default_crew_for_isolated_root(custom_root: &Path) {
+    let config_path = custom_root.join("config.toml");
+    let existing = fs::read_to_string(&config_path).unwrap_or_default();
+    if existing.contains("default_crew") && existing.contains("[crews.") {
+        return;
+    }
+    fs::write(
+        &config_path,
+        r#"[workflow]
+default_crew = "codex"
+
+[crews.codex]
+provider = "codex"
+model = "gpt-5.4"
+backend = "cli"
+"#,
+    )
+    .expect("pin isolated-root default crew");
+}
+
 fn string_field<'a>(value: &'a Value, field: &str) -> &'a str {
     value
         .get(field)
@@ -382,6 +337,10 @@ fn run_orbit_success(cwd: &Path, home: &Path, args: &[&str], orbit_root: Option<
     let mut command = cargo_bin_cmd!("orbit");
     command
         .current_dir(cwd)
+        .env(
+            "PATH",
+            stub_first_path(&plant_agent_cli_stub(home, "codex")),
+        )
         .env("HOME", home)
         .env("USERPROFILE", home)
         .args(args);
@@ -393,6 +352,10 @@ fn run_orbit_json(cwd: &Path, home: &Path, args: &[&str], orbit_root: Option<&Pa
     let mut command = cargo_bin_cmd!("orbit");
     command
         .current_dir(cwd)
+        .env(
+            "PATH",
+            stub_first_path(&plant_agent_cli_stub(home, "codex")),
+        )
         .env("HOME", home)
         .env("USERPROFILE", home)
         .args(args);
@@ -402,35 +365,18 @@ fn run_orbit_json(cwd: &Path, home: &Path, args: &[&str], orbit_root: Option<&Pa
     serde_json::from_slice(&assert.get_output().stdout).expect("orbit json output")
 }
 
-fn run_orbit_output(
-    cwd: &Path,
-    home: &Path,
-    args: &[&str],
-    orbit_root: Option<&Path>,
-) -> std::process::Output {
-    let mut command = cargo_bin_cmd!("orbit");
-    command
-        .current_dir(cwd)
-        .env("HOME", home)
-        .env("USERPROFILE", home)
-        .args(args);
-    clear_agent_identity_env(&mut command);
-    set_orbit_root_env(&mut command, orbit_root);
-    command.output().expect("run orbit")
-}
-
-/// Declare a human caller context for the spawned `orbit` child.
-///
-/// [ORB-10364] gates `learning add`/`update`/`supersede` on the `ORBIT_AGENT_*`
-/// pair, and a child inherits whatever the suite was launched with — an agent
-/// running this suite inside a managed Orbit run would otherwise be refused
-/// (the ORB-10350 hazard). These tests cover worktree artifact routing, not the
-/// role gate, so they state the context they need rather than inheriting it.
+/// Prevent ambient managed-run identity from changing child command behavior.
 fn clear_agent_identity_env(command: &mut AssertCommand) {
     command
         .env_remove("ORBIT_AGENT_NAME")
         .env_remove("ORBIT_AGENT_MODEL")
-        .env_remove("ORBIT_LEARNING_AUTHOR");
+        .env_remove("ORBIT_MANAGED_RUN_CONTEXT")
+        .env_remove("ORBIT_RUN_ID")
+        .env_remove("ORBIT_TASK_ID")
+        .env_remove("ORBIT_ACTIVE_TASK_ID")
+        .env_remove("ORBIT_SESSION_ID")
+        .env_remove("ORBIT_BIN")
+        .env_remove("LLVM_PROFILE_FILE");
 }
 
 fn set_orbit_root_env(command: &mut AssertCommand, orbit_root: Option<&Path>) {
@@ -442,6 +388,39 @@ fn set_orbit_root_env(command: &mut AssertCommand, orbit_root: Option<&Path>) {
             command.env_remove("ORBIT_ROOT");
         }
     }
+}
+
+/// Write an executable no-op named `name` into `<home>/stub-bin`, standing in
+/// for an agent CLI during detection, and return that directory.
+///
+/// `orbit workspace init` freezes crew seeding to the agent CLIs it finds on
+/// `PATH`, so a host with none installed — every CI runner — seeds an empty
+/// `[crews]` table and leaves `[workflow].default_crew` unset. Any run that has
+/// to resolve a crew then dies with `no crew selected`. Planting on every
+/// invocation keeps the stub in place before `init` runs, whatever order the
+/// tests call the helpers in; nothing here dispatches an agent, so the stub only
+/// has to exist and be executable.
+fn plant_agent_cli_stub(home: &Path, name: &str) -> PathBuf {
+    let bin = home.join("stub-bin");
+    fs::create_dir_all(&bin).expect("create stub CLI directory");
+    let stub = bin.join(name);
+    fs::write(&stub, "#!/bin/sh\nexit 0\n").expect("write stub agent CLI");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&stub, fs::Permissions::from_mode(0o755))
+            .expect("mark the stub agent CLI executable");
+    }
+    bin
+}
+
+/// `PATH` with the fixture's stub directory first, so agent detection sees the
+/// stubs regardless of what the host has installed.
+fn stub_first_path(bin: &Path) -> std::ffi::OsString {
+    let inherited = std::env::var_os("PATH").unwrap_or_default();
+    let mut entries = vec![bin.to_path_buf()];
+    entries.extend(std::env::split_paths(&inherited));
+    std::env::join_paths(entries).expect("join PATH entries")
 }
 
 fn run_git(cwd: &Path, args: &[&str]) {
@@ -472,37 +451,4 @@ fn init_git_repo(main_repo: &Path) {
     fs::write(main_repo.join("README.md"), "# orbit\n").expect("write readme");
     run_git(main_repo, &["add", "README.md"]);
     run_git(main_repo, &["commit", "-m", "initial"]);
-}
-
-fn sorted_child_names(path: &Path) -> Vec<String> {
-    let mut entries = fs::read_dir(path)
-        .expect("read dir")
-        .map(|entry| {
-            entry
-                .expect("entry")
-                .file_name()
-                .to_str()
-                .expect("utf8")
-                .to_string()
-        })
-        .collect::<Vec<_>>();
-    entries.sort();
-    entries
-}
-
-fn array_contains_id(value: &Value, id: &str) -> bool {
-    value
-        .as_array()
-        .expect("array")
-        .iter()
-        .any(|item| item.get("id").and_then(Value::as_str) == Some(id))
-}
-
-fn find_id<'a>(value: &'a Value, id: &str) -> &'a Value {
-    value
-        .as_array()
-        .expect("array")
-        .iter()
-        .find(|item| item.get("id").and_then(Value::as_str) == Some(id))
-        .unwrap_or_else(|| panic!("missing id {id} in {value}"))
 }

@@ -94,7 +94,7 @@ fn job_replay_args_execute_creates_linked_run() {
     let runtime = OrbitRuntime::in_memory().expect("build runtime");
     let job_path = write_replay_job(&runtime, "cli_replay_success");
     let source = runtime
-        .run_job_v2_from_yaml(&job_path, json!({ "seconds": 0 }), None)
+        .run_job_v2_from_yaml(&job_path, json!({ "seconds": 0 }))
         .expect("source run");
 
     JobReplayArgs {
@@ -130,4 +130,111 @@ fn job_replay_args_execute_unknown_run_returns_error() {
             ..
         }
     ));
+}
+
+// --- [ORB-10801] submission-mode output and exit status ---------------------
+
+fn invoke_result(queued: bool) -> orbit_core::PipelineInvokeResult {
+    orbit_core::PipelineInvokeResult {
+        run_id: "jrun-20260815-0001".to_string(),
+        job_name: "task_pilot_pipeline".to_string(),
+        submitted_at: "2026-08-15T00:00:00Z".to_string(),
+        queued,
+    }
+}
+
+fn wait_entry(status: &str, error: Option<&str>) -> orbit_core::PipelineWaitEntry {
+    orbit_core::PipelineWaitEntry {
+        run_id: "jrun-20260815-0001".to_string(),
+        status: status.to_string(),
+        finished_at: Some("2026-08-15T00:01:00Z".to_string()),
+        pipeline: None,
+        error: error.map(ToOwned::to_owned),
+    }
+}
+
+/// The default submission tells an operator the run id, whether it started or
+/// queued, and how to look at it — the three things they need once the command
+/// stops blocking.
+#[test]
+fn submission_output_names_the_run_state_and_how_to_inspect_it() {
+    for (queued, expected_state) in [(false, "submitted"), (true, "queued")] {
+        let invoke = invoke_result(queued);
+        let state = submission_state(&invoke);
+        assert_eq!(state, expected_state);
+
+        let lines = submission_lines(&invoke, state).join("\n");
+        assert!(lines.contains("Run ID: jrun-20260815-0001"), "{lines}");
+        assert!(
+            lines.contains(&format!("State: {expected_state}")),
+            "{lines}"
+        );
+        assert!(
+            lines.contains("orbit run history -j task_pilot_pipeline"),
+            "{lines}"
+        );
+        assert!(
+            lines.contains("orbit run show jrun-20260815-0001"),
+            "{lines}"
+        );
+    }
+}
+
+/// Submission mode reports on the submission, not the eventual job outcome, so
+/// a successful submission always exits zero.
+#[test]
+fn submission_without_wait_succeeds() {
+    render_submission(&invoke_result(false), false).expect("submission renders and exits zero");
+    render_submission(&invoke_result(true), true).expect("queued submission exits zero too");
+}
+
+/// `--wait` is the only mode that reports the run's own outcome, and it maps
+/// every non-success terminal state onto a nonzero exit.
+#[test]
+fn wait_exits_nonzero_for_every_failing_terminal_state() {
+    for status in ["failed", "timeout", "cancelled", "interrupted"] {
+        let invoke = invoke_result(false);
+        let entry = wait_entry(status, Some("step_failed: implement blew up"));
+        let error = render_wait(&invoke, &entry, false)
+            .expect_err("a failing terminal state must fail the command");
+        let message = error.to_string();
+        assert!(
+            message.contains(status),
+            "exit must name the state: {message}"
+        );
+        assert!(
+            message.contains("jrun-20260815-0001"),
+            "exit must name the run: {message}"
+        );
+        assert!(
+            message.contains("implement blew up"),
+            "exit must carry the diagnostic: {message}"
+        );
+    }
+}
+
+#[test]
+fn wait_exits_zero_when_the_run_succeeded() {
+    render_wait(&invoke_result(false), &wait_entry("succeeded", None), false)
+        .expect("a successful run must exit zero");
+}
+
+/// Both text and the structured payload expose the terminal state and its
+/// diagnostic, so a script does not have to choose between them.
+#[test]
+fn wait_output_exposes_the_terminal_state_and_diagnostic() {
+    let invoke = invoke_result(false);
+    let entry = wait_entry("failed", Some("step_failed: implement\nblew up"));
+    let lines = wait_lines(&invoke, &entry).join("\n");
+
+    assert!(lines.contains("State: failed"), "{lines}");
+    assert!(lines.contains("Finished: 2026-08-15T00:01:00Z"), "{lines}");
+    assert!(
+        lines.contains("Error: step_failed: implement blew up"),
+        "a multi-line diagnostic must stay on one line: {lines}"
+    );
+    assert!(
+        lines.contains("orbit run show jrun-20260815-0001"),
+        "{lines}"
+    );
 }

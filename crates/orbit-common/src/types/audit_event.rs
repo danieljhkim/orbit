@@ -111,6 +111,15 @@ pub struct AuditEvent {
     pub origin_session_id: Option<String>,
     #[serde(default)]
     pub mcp_call_id: Option<String>,
+    /// Transport-neutral per-invocation correlation identifier. Legacy rows
+    /// and producers that predate the common invocation envelope leave this
+    /// unset.
+    #[serde(default)]
+    pub trace_id: Option<String>,
+    /// Caller network address observed by the accepting process, when the
+    /// transport exposes one. This is audit metadata, not caller identity.
+    #[serde(default)]
+    pub caller_ip: Option<String>,
     #[serde(default)]
     pub lease_id: Option<String>,
     /// Orbit task ID the invocation was executed under, if known. CLI retains

@@ -4,7 +4,7 @@ use orbit_core::{
     TaskStatus, TaskType,
 };
 
-use crate::command::Execute;
+use crate::command::{CommandOut, CommandOutput, Execute, Payload};
 
 use super::output::definition_to_json;
 use super::schedule_args::resolve_schedule;
@@ -71,7 +71,7 @@ impl AutoTaskUpdateArgs {
 }
 
 impl Execute for AutoTaskUpdateArgs {
-    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+    fn execute(self, runtime: &OrbitRuntime) -> CommandOut {
         let schedule = resolve_schedule(self.cron.clone(), self.every_minutes)?;
 
         // A template patch merges onto the current template so a single field
@@ -116,10 +116,10 @@ impl Execute for AutoTaskUpdateArgs {
         )?;
 
         if self.json {
-            crate::output::json::print_pretty(&definition_to_json(&definition))
+            Ok(Payload::document(definition_to_json(&definition)).into())
         } else {
             println!("{}", definition.name);
-            Ok(())
+            Ok(CommandOutput::Silent)
         }
     }
 }

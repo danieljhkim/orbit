@@ -1,16 +1,17 @@
 ---
 title: Routines — Overview
 owner: claude
-last_updated: 2026-07-18
+last_updated: 2026-08-15
+last_validated: 2026-08-15
 status: Accepted
 feature: routines
 doc_role: overview
 type: design
 summary: Durable, git-versioned scheduler primitive that fires catalog jobs/activities on cron triggers, per host, with local state.
 tags: [routines, scheduler]
-paths: ["crates/orbit-cli/src/command/routine/**", "crates/orbit-core/src/routines/**", "crates/orbit-remote/src/routines.rs", "crates/orbit-store/src/sqlite/routine_store/**"]
+paths: ["crates/orbit-cli/src/command/routine/**", "crates/orbit-core/src/routines/**", "crates/orbit-cmd/src/registry_routines.rs", "crates/orbit-cmd/src/registry_runtime.rs", "crates/orbit-registry/src/host_identity.rs", "crates/orbit-registry/src/workspace_registry/**", "crates/orbit-store/src/sqlite/routine_store/**"]
 related_features: [routines, activity-job, host-registry]
-related_artifacts: [ORB-10001, ORB-10021, ORB-10207, ORB-10270, ORB-10319, ADR-0223]
+related_artifacts: [ORB-10001, ORB-10021, ORB-10207, ORB-10270, ORB-10319, ORB-10739]
 ---
 
 # Routines — Overview
@@ -25,16 +26,18 @@ is host-local and never synced. [2_design.md](./2_design.md) is the v1 contract;
 [3_vision.md](./3_vision.md) holds what is deliberately out of scope for v1.
 
 > **Status.** v1 shipped in [ORB-10021]; the At a Glance table lists the actual home of
-> each concern. Targets are `job:<name>` in v1 — see [ADR-0206] for why `activity:` is
-> reserved. Registry/cache/identity composition now lives in `orbit-remote`; Core keeps the
-> registry-neutral scheduler, validation, and dispatch kernels. [ORB-10319]
+> each concern. Targets are `job:<name>` in v1 — see [Routine targets are catalog references only — no inline command payloads](./4_decisions.md#routine-targets-are-catalog-references-only-no-inline-command-payloads) for why `activity:` is
+> reserved. `orbit-cmd::registry_routines` composes local host identity and the workspace
+> catalog from `orbit-registry` with registered runtimes; Core keeps the registry-neutral
+> scheduler, validation, and dispatch kernels.
 
 `orbit workspace init` creates the complete default set (`auto_task_scheduler`,
-`task_triage`, and `ship_sweep`) under `.orbit/routines/`. Every default is
-`enabled: false`: scheduled execution is an explicit, versioned opt-in made by changing
-the reviewed definition to `enabled: true`. Re-init creates newly introduced missing
-defaults but never rewrites existing routine files; those files belong to the workspace
-after seeding. A destructive force initialization recreates templates from defaults.
+`task_triage`, `task_pilot`, `ship_sweep`, and `worktree_gc`) under
+`.orbit/routines/`. Every default is `enabled: false`: scheduled execution is an explicit,
+versioned opt-in made by changing the reviewed definition to `enabled: true`. Re-init
+creates newly introduced missing defaults but never rewrites existing routine files; those
+files belong to the workspace after seeding. A destructive force initialization recreates
+templates from defaults. [ORB-10739]
 
 ---
 
@@ -69,8 +72,8 @@ fragmentation this feature exists to end.
   target, `hosts`, `enabled`, and policy. The durable unit of scheduling.
 - **Target** — what fires: a reference into the existing catalog. v1 dispatches
   `job:<name>`; `activity:<name>` is reserved (wrap the activity in a one-step job — see
-  [ADR-0206]). Routines carry no inline commands; the `shell` activity variant was
-  removed fail-closed in [ORB-00374] (see [ADR-0194]), and routines inherit that posture.
+  [Routine targets are catalog references only — no inline command payloads](./4_decisions.md#routine-targets-are-catalog-references-only-no-inline-command-payloads)). Routines carry no inline commands; the `shell` activity variant was
+  removed fail-closed in [ORB-00374] (see [The v2 shell activity surface is removed, not sandboxed](../activity-job/4_decisions.md#the-v2-shell-activity-surface-is-removed-not-sandboxed)), and routines inherit that posture.
 - **Sweep** — `orbit sweep`, the stateless due-check pass the OS clock invokes every minute.
   Loads definitions, filters for this host, fires due routines, records state, exits.
 - **Routine source** — a registered workspace whose config opts in with
@@ -91,14 +94,14 @@ fragmentation this feature exists to end.
 |---------|------|------|
 | Routine definition type + fail-closed YAML parse | `crates/orbit-common/src/types/routine.rs` | [ORB-10021] |
 | Registry-neutral loading, due computation, dispatch, status, and pin validation | `crates/orbit-core/src/routines/` | [ORB-10021], [ORB-10270] |
-| Host identity, registry/cache projection, workspace discovery, and runtime construction | `crates/orbit-remote/src/routines.rs` | [ORB-10270], [ORB-10319] |
+| Local identity/catalog composition, workspace discovery, and runtime construction | `crates/orbit-cmd/src/registry_routines.rs`, `crates/orbit-cmd/src/registry_runtime.rs`, `crates/orbit-registry/src/` | [ORB-10270], [ORB-10319] |
 | Host-local scheduler state (fires, pauses) | `crates/orbit-store/src/sqlite/routine_store/` | [ORB-10021] |
 | Sweep advisory lock (flock, host-global) | `crates/orbit-store/src/sqlite/routine_store/mod.rs` | [ORB-10021] |
 | `orbit sweep` CLI entrypoint | `crates/orbit-cli/src/command/sweep.rs` | [ORB-10021] |
 | `orbit routine` CLI (`list/show/pause/resume/init`) | `crates/orbit-cli/src/command/routine/` | [ORB-10021] |
 | launchd/systemd unit templates + installer | `crates/orbit-core/assets/clock/` + `src/routines/clock.rs` | [ORB-10021] |
 | `[routines] role = "source"` config key | `crates/orbit-core/src/config/{raw,runtime}.rs` | [ORB-10021] |
-| Disabled default routine seeding + workspace ship wrapper | `crates/orbit-core/assets/{routines,jobs}/` | [ORB-10207] / [ADR-0223] |
+| Disabled default routine seeding + workspace ship wrapper | `crates/orbit-core/assets/{routines,jobs}/` | [ORB-10207] / [Delegate workspace ship routines through a synchronous wrapper job](./4_decisions.md#delegate-workspace-ship-routines-through-a-synchronous-wrapper-job) |
 
 ---
 
@@ -107,11 +110,14 @@ fragmentation this feature exists to end.
 - [ORB-10001] — authored this design-doc folder (proposal; no implementation).
 - [ORB-10021] — implemented routines v1 (types, store, sweep, CLI, clock units).
 - [ORB-10207] — seeded opt-in defaults and the workspace-local ship-sweep wrapper.
-- [ORB-10270] — added registry/cache-aware pin diagnostics and safe host reassignment:
+- [ORB-10270] — historically added fleet-aware pin diagnostics and safe host reassignment;
+  the current local-only projection preserves the no-backfill state behavior:
   the old host preserves its cursor/fire/pause state, while the new host baselines on first
   observation and starts at the next natural slot without backfill.
-- [ORB-10319] — moved Remote-specific identity, registry/cache, and workspace-runtime
-  composition out of Core without changing scheduler behavior.
+- [ORB-10319] — historical boundary extraction; current composition lives in `orbit-cmd`
+  over `orbit-registry` local files without fleet registry/cache state.
+- [ORB-10739] — added the disabled `task_pilot` default routine; its zero-input target
+  leaves eligibility and bounded partitioning to `prepare_task_pilot`.
 - [ORB-00374] — removed the `shell` activity variant and `run_shell` dispatch (fail-closed);
   routines inherit this constraint.
 

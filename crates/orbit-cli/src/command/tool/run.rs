@@ -1,8 +1,11 @@
 use clap::{Args, ValueEnum};
+use orbit_cmd::registry_runtime::RegisteredRuntimeFactory;
+use orbit_common::types::{McpTransport, ToolSessionContext, audit_execution_id};
 use orbit_core::{OrbitError, OrbitRuntime};
+use orbit_registry::{HostIdentityState, inspect_host_identity};
 use serde_json::{Map, Value};
 
-use crate::command::Execute;
+use crate::command::{CommandOut, CommandOutput, Execute, Payload};
 
 #[derive(Clone, ValueEnum, Default)]
 pub enum OutputFormat {
@@ -48,8 +51,8 @@ pub struct ToolRunArgs {
 }
 
 impl Execute for ToolRunArgs {
-    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
-        let input: Value = if let Some(path) = &self.input_file {
+    fn execute(self, runtime: &OrbitRuntime) -> CommandOut {
+        let mut input: Value = if let Some(path) = &self.input_file {
             let raw = std::fs::read_to_string(path).map_err(|e| {
                 OrbitError::InvalidInput(format!("cannot read input file '{path}': {e}"))
             })?;
@@ -62,6 +65,11 @@ impl Execute for ToolRunArgs {
                 None => Value::Object(Default::default()),
             }
         };
+
+        // Resolve `workspace` once above local CLI tools, then bind or fail
+        // closed. MCP uses its own server-side selector resolution.
+        let bound = RegisteredRuntimeFactory::bind_cli_tool_workspace(runtime, &mut input)?;
+        let runtime = bound.as_ref().unwrap_or(runtime);
 
         if self.dry_run {
             let result = runtime.run_tool_dry_run(&self.name, &input)?;
@@ -79,26 +87,69 @@ impl Execute for ToolRunArgs {
             } else {
                 println!("Missing params: {}", result.missing_params.join(", "));
             }
-            return Ok(());
+            return Ok(CommandOutput::Silent);
         }
 
-        let output =
-            runtime.execute_tool_command(&self.name, input.clone(), self.agent, self.model)?;
+        let session_context = local_tool_session_context(runtime)?;
+        let output = runtime.execute_tool_command_with_session_context(
+            &self.name,
+            input.clone(),
+            self.agent,
+            self.model,
+            session_context,
+        )?;
         let output = shape_tool_output(&self.name, &input, output, self.full, &self.fields);
 
         match self.output {
             OutputFormat::Json => {
                 if self.pretty {
-                    crate::output::json::print_pretty(&output)
+                    Ok(Payload::document(output).into())
                 } else {
-                    crate::output::json::print(&output)
+                    {
+                        crate::output::json::print(&output)?;
+                        Ok(CommandOutput::Silent)
+                    }
                 }
             }
             OutputFormat::Text => {
                 println!("{}", output);
-                Ok(())
+                Ok(CommandOutput::Silent)
             }
         }
+    }
+}
+
+pub(super) const LOCAL_MACHINE_ID_FALLBACK: &str = "host/local";
+
+pub(super) fn local_tool_session_context(
+    runtime: &OrbitRuntime,
+) -> Result<ToolSessionContext, OrbitError> {
+    let (machine_id, host_id) = local_machine_identity(&runtime.global_root())?;
+    Ok(ToolSessionContext {
+        workspace_id: runtime.workspace_id().ok(),
+        caller_machine_id: Some(machine_id.clone()),
+        caller_host_id: host_id.clone(),
+        process_machine_id: Some(machine_id),
+        process_host_id: host_id,
+        transport: Some(McpTransport::Local),
+        trace_id: Some(audit_execution_id("trace")),
+        ..ToolSessionContext::default()
+    })
+}
+
+pub(super) fn local_machine_identity(
+    global_root: &std::path::Path,
+) -> Result<(String, Option<String>), OrbitError> {
+    match inspect_host_identity(global_root)? {
+        HostIdentityState::Present(identity) => Ok((identity.machine_id, Some(identity.host_id))),
+        HostIdentityState::Legacy {
+            host_id,
+            machine_id,
+        } => Ok((
+            machine_id.unwrap_or_else(|| LOCAL_MACHINE_ID_FALLBACK.to_string()),
+            Some(host_id),
+        )),
+        HostIdentityState::Absent => Ok((LOCAL_MACHINE_ID_FALLBACK.to_string(), None)),
     }
 }
 

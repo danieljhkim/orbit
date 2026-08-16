@@ -1,7 +1,7 @@
 ---
 title: External Executor Protocol v1 (Retired)
 owner: claude
-last_updated: 2026-07-26
+last_updated: 2026-08-09
 last_validated: 2026-07-27
 status: Retired
 feature: executors
@@ -11,7 +11,7 @@ tags: [executors, extensibility, protocol, retired]
 paths:
   - "crates/orbit-common/src/types/executor_def.rs"
 related_features: [executors]
-related_artifacts: [ORB-00384, ORB-10395, ADR-0196]
+related_artifacts: [ORB-00384, ORB-10395]
 ---
 
 # Spec: External Executor Protocol v1 — RETIRED
@@ -30,7 +30,7 @@ related_artifacts: [ORB-00384, ORB-10395, ADR-0196]
 > document.** It is retained only so an operator who finds an old `external` def
 > can recognize what it was. A future out-of-process extension point would be a
 > new, separately decided contract on the v2 dispatch path — see
-> [4_decisions.md](../4_decisions.md) §ADR-0196 for the original rationale and
+> [4_decisions.md](../4_decisions.md) §[External Executor Protocol for dynamic out-of-process executor registration (retired)](../4_decisions.md#external-executor-protocol-for-dynamic-out-of-process-executor-registration-retired) for the original rationale and
 > its retirement note.
 
 ## Historical contract (no longer implemented)
@@ -41,7 +41,7 @@ an `executor_type: external` executor def pointing at a `command`; at run time
 Orbit spawns that command, writes a UTF-8 JSON **request envelope** to its
 **stdin**, and maps the process **exit code** to the activity outcome. It is the
 documented, config-only path for the common "wrapper around an internal CLI or
-service" case. See [4_decisions.md](../4_decisions.md) §ADR-0196 for rationale.
+service" case. See [4_decisions.md](../4_decisions.md) §[External Executor Protocol for dynamic out-of-process executor registration (retired)](../4_decisions.md#external-executor-protocol-for-dynamic-out-of-process-executor-registration-retired) for rationale.
 
 ## Why This Exists
 
@@ -152,7 +152,7 @@ canonicalize a strong/weak agent model pair for audit attribution.
   context carries no `FsProfile`, so the def's `sandbox` / `allow_fallback` fields
   are **inert** for `external` in v1. Real `FsProfile`→OS-sandbox enforcement for
   `external` is deferred to Tier 2, which needs the richer V2 activity context
-  (see [4_decisions.md](../4_decisions.md) §ADR-0196).
+  (see [4_decisions.md](../4_decisions.md) §[External Executor Protocol for dynamic out-of-process executor registration (retired)](../4_decisions.md#external-executor-protocol-for-dynamic-out-of-process-executor-registration-retired)).
 - **Registering an external executor is arbitrary code execution** with the
   runner's privileges. Treat executor defs as trusted configuration. Allowlisting
   or signature-gating registration in untrusted contexts is a follow-up, not part
@@ -164,8 +164,7 @@ canonicalize a strong/weak agent model pair for audit attribution.
 (`run_subprocess_executor`): identical command/args/env produce a byte-identical
 `ExecRequest`. They differ in identity and intent — `external` is a documented,
 versioned contract for non-agent executors and omits agent-family `model_pair`
-semantics, whereas `direct_agent` remains the agent-family path (and is currently
-exercised by the planning-duel flow).
+semantics, whereas `direct_agent` remains the agent-family path.
 
 ## Versioning
 

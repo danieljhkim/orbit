@@ -222,7 +222,7 @@ fn collect_run_audit_steps_reads_step_finished_error_message_and_tolerates_absen
             "body_kind": "step_finished",
             "step_id": "plan",
             "outcome": "error",
-            "error_message": "planning duel failed"
+            "error_message": "planning failed"
         }),
         json!({
             "event_id": "evt-step-two",
@@ -249,10 +249,7 @@ fn collect_run_audit_steps_reads_step_finished_error_message_and_tolerates_absen
     assert_eq!(steps.len(), 2);
     assert_eq!(steps[0].step_id, "plan");
     assert_eq!(steps[0].outcome.as_deref(), Some("error"));
-    assert_eq!(
-        steps[0].error_message.as_deref(),
-        Some("planning duel failed")
-    );
+    assert_eq!(steps[0].error_message.as_deref(), Some("planning failed"));
     assert_eq!(steps[1].step_id, "review");
     assert_eq!(steps[1].outcome.as_deref(), Some("success"));
     assert_eq!(steps[1].error_message, None);

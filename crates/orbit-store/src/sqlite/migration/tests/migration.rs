@@ -239,66 +239,68 @@ fn failed_host_registry_migration_rolls_back_schema_and_ledger() {
 }
 
 #[test]
-fn learnings_index_migration_rekeys_by_workspace_and_discards_legacy_rows() {
+fn fresh_schema_has_no_native_learning_tables() {
     let conn = Connection::open_in_memory().expect("open in-memory connection");
-    // Simulate a legacy database whose learning envelope index is keyed only
-    // by id — no workspace discriminator — carrying a row that cannot be
-    // attributed to any workspace (the `dk1` shape from ORB-10113).
-    conn.execute_batch(
-        r#"
-            CREATE TABLE learnings_index (
-                id          TEXT PRIMARY KEY,
-                status      TEXT NOT NULL,
-                paths       TEXT NOT NULL,
-                tags        TEXT NOT NULL,
-                summary     TEXT NOT NULL,
-                updated_at  TEXT NOT NULL,
-                priority    INTEGER
-            );
-            INSERT INTO learnings_index (id, status, paths, tags, summary, updated_at, priority)
-            VALUES ('L-0002', 'active', '[]', '[]', 'legacy orrery summary', '2026-07-11T00:00:00Z', NULL);
-        "#,
-    )
-    .expect("seed legacy learnings_index");
+    apply_schema(&conn).expect("apply schema");
 
-    apply_schema(&conn).expect("migrate legacy learnings_index");
-
-    // The index is now scoped: `workspace_id` exists and the primary key is
-    // the composite `(workspace_id, id)`.
-    assert!(
-        table_has_column(&conn, "learnings_index", "workspace_id").expect("workspace_id column")
-    );
-    let mut primary_key: Vec<(i64, String)> = conn
-        .prepare("PRAGMA table_info(learnings_index)")
-        .expect("prepare pragma")
-        .query_map([], |row| {
-            let name: String = row.get(1)?;
-            let pk: i64 = row.get(5)?;
-            Ok((pk, name))
-        })
-        .expect("query pragma")
-        .filter_map(|row| {
-            let (pk, name) = row.expect("pragma row");
-            (pk > 0).then_some((pk, name))
-        })
-        .collect();
-    primary_key.sort_by_key(|(pk, _)| *pk);
-    let pk_columns: Vec<String> = primary_key.into_iter().map(|(_, name)| name).collect();
-    assert_eq!(pk_columns, vec!["workspace_id", "id"]);
-
-    // Legacy rows are discarded (YAML is the source of truth; each runtime
-    // rebuilds its own rows via sync), and all migrations are recorded.
-    let remaining: i64 = conn
-        .query_row("SELECT COUNT(*) FROM learnings_index", [], |row| row.get(0))
-        .expect("count rows");
-    assert_eq!(
-        remaining, 0,
-        "legacy envelope rows must be discarded, not migrated"
-    );
+    for table in [
+        "learnings_index",
+        "session_learning_state",
+        "id_allocations",
+    ] {
+        assert!(
+            !table_exists(&conn, table).expect("inspect table"),
+            "{table}"
+        );
+    }
     assert_eq!(
         current_schema_version(&conn).expect("schema version"),
         SUPPORTED_SCHEMA_VERSION
     );
+}
+
+#[test]
+fn upgrade_removes_native_learning_tables_and_vector_rows() {
+    let conn = Connection::open_in_memory().expect("open in-memory connection");
+    conn.execute_batch(
+        r#"
+            CREATE TABLE schema_meta (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            INSERT INTO schema_meta(key, value, updated_at)
+            VALUES ('migration.v0013', 'workspace_claim_scope', '2026-08-12T00:00:00Z');
+            CREATE TABLE learnings_index (workspace_id TEXT, id TEXT);
+            CREATE TABLE session_learning_state (workspace_id TEXT, session_id TEXT);
+            CREATE TABLE id_allocations (kind TEXT, id TEXT);
+            CREATE TABLE embeddings (source_kind TEXT, source_id TEXT);
+            INSERT INTO embeddings(source_kind, source_id)
+            VALUES ('learning', 'L-0001'), ('task', 'ORB-1'), ('doc', 'guide');
+        "#,
+    )
+    .expect("seed schema v13 database");
+
+    apply_schema(&conn).expect("apply removal migration");
+
+    for table in [
+        "learnings_index",
+        "session_learning_state",
+        "id_allocations",
+    ] {
+        assert!(
+            !table_exists(&conn, table).expect("inspect table"),
+            "{table}"
+        );
+    }
+    let source_kinds = conn
+        .prepare("SELECT source_kind FROM embeddings ORDER BY source_kind")
+        .expect("prepare remaining vectors")
+        .query_map([], |row| row.get::<_, String>(0))
+        .expect("query remaining vectors")
+        .collect::<Result<Vec<_>, _>>()
+        .expect("collect remaining vectors");
+    assert_eq!(source_kinds, vec!["doc", "task"]);
 }
 
 // ── read-only ledger inspection for `orbit migrate --dry-run` [ORB-10012] ──

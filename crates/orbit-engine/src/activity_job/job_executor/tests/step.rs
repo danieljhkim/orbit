@@ -274,7 +274,7 @@ fn backoff_bound_grows_monotonically_to_cap_under_exponential() {
 
 // ----- [ORB-10449] Step-completion protocol -------------------------------
 
-use orbit_common::types::activity_job::{AgentLoopSpec, Backend, OnDenial, Provider};
+use orbit_common::types::activity_job::{AgentLoopSpec, OnDenial, Provider};
 
 /// Build the shipped `implement_one` shape: a `backend: cli` agent loop that is
 /// artifact-backed, so the *content* contract stays off and only the
@@ -286,12 +286,11 @@ fn agent_implement_shaped_step(id: &str, retry: Option<RetrySpec>) -> JobV2Step 
         on_denial: OnDenial::Terminate,
         model: None,
         max_iterations: 1,
-        backend: Backend::Cli,
+        backend: None,
         provider: Provider::Claude,
         wall_clock_timeout_seconds: 30,
         require_response_envelope: false,
         require_completion_envelope: true,
-        role: None,
         proc_allowed_programs: None,
     };
     JobV2Step {
@@ -307,7 +306,6 @@ fn agent_implement_shaped_step(id: &str, retry: Option<RetrySpec>) -> JobV2Step 
             default_input: None,
             timeout_seconds: 0,
             session: None,
-            role: None,
         }),
     }
 }
@@ -385,6 +383,62 @@ fn stalled_agent_step_fails_at_the_step_that_produced_it() {
                 if step_id == "implement_one" && outcome == "failed"
         )),
         "implement_one must finish as failed, never as a success checkpoint"
+    );
+}
+
+/// A valid failed envelope terminates the provider protocol, but it still
+/// represents a failed implementation outcome. It must audit the implementer
+/// as failed and stop before the delivery action can create a bad checkpoint.
+#[test]
+fn declared_failed_agent_step_is_audited_and_never_checkpointed() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let script = stalled_provider(
+        temp.path(),
+        "{\"schemaVersion\":1,\"status\":\"failed\",\"result\":{},\"error\":{\"code\":\"blocked\",\"message\":\"cannot proceed\"}}",
+    );
+    let host = ScriptedHost::new([("commit", vec![Action::Ok(json!({"committed": true}))])])
+        .with_cli_program(script.display().to_string());
+    let job = job_with_steps(vec![
+        agent_implement_shaped_step("implement_one", None),
+        target_step("git_commit", "commit"),
+    ]);
+    let writer = std::sync::Arc::new(test_writer("run-declared-failure"));
+
+    let outcome = execute_job(
+        &job,
+        json!({"task_id": "ORB-10733"}),
+        "run-declared-failure",
+        writer.clone(),
+        &host,
+    )
+    .expect("execute_job ok");
+
+    assert!(!outcome.success, "declared failure must fail implement_one");
+    let message = outcome.message.expect("terminal message");
+    assert!(message.contains("implement_one"), "{message}");
+    assert!(message.contains("failed"), "{message}");
+    assert_eq!(
+        host.call_count("commit"),
+        0,
+        "git_commit must not run after an explicit failed implementation"
+    );
+
+    let events = writer.events_snapshot().expect("audit");
+    assert!(
+        events.iter().any(|event| matches!(
+            &event.kind,
+            V2AuditEventKind::StepFinished { step_id, outcome, .. }
+                if step_id == "implement_one" && outcome == "failed"
+        )),
+        "implement_one must be audited as failed instead of checkpointed"
+    );
+    assert!(
+        !events.iter().any(|event| matches!(
+            &event.kind,
+            V2AuditEventKind::StepFinished { step_id, outcome, .. }
+                if step_id == "git_commit" && outcome == "succeeded"
+        )),
+        "git_commit must have no success checkpoint"
     );
 }
 

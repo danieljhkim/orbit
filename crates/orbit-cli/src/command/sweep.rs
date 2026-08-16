@@ -7,10 +7,10 @@
 //! errors — an unconfigured host logs one line and exits 0, because the OS
 //! clock will invoke it forever.
 
+use crate::command::{CommandOut, CommandOutput};
 use clap::Args;
-use orbit_core::OrbitError;
+use orbit_cmd::registry_routines::run_sweep;
 use orbit_core::routines::{RoutineSweepReport, SweepOptions, SweepOutcome};
-use orbit_remote::routines::run_sweep;
 use serde_json::json;
 
 #[derive(Args)]
@@ -74,26 +74,26 @@ impl SweepCommand {
     /// Runs without a pre-initialized runtime: the sweep resolves every
     /// workspace from the global registry (per-workspace runtimes are built
     /// inside orbit-core).
-    pub fn execute_without_runtime(self) -> Result<(), OrbitError> {
+    pub fn execute_without_runtime(self) -> CommandOut {
         let outcome = run_sweep(SweepOptions {
             dry_run: self.dry_run,
         })?;
 
         if self.json {
             crate::output::json::print_pretty(&outcome_json(&outcome, self.dry_run))?;
-            return Ok(());
+            return Ok(CommandOutput::Silent);
         }
 
         if outcome.lock_busy {
             println!("sweep: another pass holds the lock on this host; exiting");
-            return Ok(());
+            return Ok(CommandOutput::Silent);
         }
         if outcome.reports.is_empty()
             && outcome.load_errors.is_empty()
             && outcome.registry.diagnostics.is_empty()
         {
             println!("sweep[{}]: no routines configured", outcome.host_id);
-            return Ok(());
+            return Ok(CommandOutput::Silent);
         }
 
         // Quiet by default; a dry-run is interactive so it shows everything.
@@ -141,7 +141,7 @@ impl SweepCommand {
                 outcome.reports.len()
             );
         }
-        Ok(())
+        Ok(CommandOutput::Silent)
     }
 }
 

@@ -1,4 +1,4 @@
-mod catalog;
+pub(crate) mod catalog;
 mod exec;
 pub(crate) mod pipeline;
 mod resume;
@@ -10,4 +10,8 @@ mod tests;
 pub(crate) use catalog::seed_default_jobs;
 pub use catalog::{JobCatalogEntry, JobCatalogFilter};
 pub use exec::V2JobRunResult;
+pub use pipeline::{PipelineInvokeResult, PipelineWaitEntry, PipelineWaitResult};
+#[cfg(test)]
+pub(crate) use run::TERMINAL_OUTCOME_CONFLICT_CODE;
 pub use run::{JobRunCancelResult, JobRunListParams};
+pub(crate) use run::{RunOwnerLiveness, run_owner_liveness};

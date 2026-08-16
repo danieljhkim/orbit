@@ -1,5 +1,5 @@
 #![deny(clippy::print_stderr, clippy::print_stdout)]
-// ORB-00004: legacy tool-registry surfaces still need a focused documentation pass.
+// Legacy tool-registry surfaces still need a focused documentation pass.
 #![allow(missing_docs)]
 // Unit tests use unwrap/expect for fixture setup; production call sites remain linted.
 #![cfg_attr(test, allow(clippy::expect_used, clippy::unwrap_used))]
@@ -11,13 +11,13 @@
 //! Builtin tool registry providing the standard Orbit toolset for agents and jobs.
 //!
 //! Implements and registers all built-in tools that agents can invoke during
-//! activity execution: filesystem, git, GitHub, Orbit CLI, process, time, and
+//! activity execution: git, GitHub, Orbit CLI, process, time, and
 //! network tools. External (user-defined) tools are also supported via the registry.
 //!
 //! # Role
 //! Depends on `orbit-exec` for process spawning and `orbit-common` for shared
-//! types. Consumed by `orbit-engine`, `orbit-core`, and `orbit-remote`, which
-//! compose its workspace-scoped definitions with Remote-owned discovery tools.
+//! types. Consumed by `orbit-engine`, `orbit-core`, and `orbit-mcp`, which
+//! composes its workspace-scoped definitions with MCP discovery tools.
 //!
 //! # Key exports
 //! - [`ToolRegistry`] — central registry; call `register_builtins()` to load all standard tools
@@ -29,13 +29,13 @@
 //!
 //! # Registry contents
 //! The builtin registry wires together the standard Orbit tool families:
-//! filesystem mutation, git and GitHub helpers, Orbit task/job commands,
-//! process spawning, network fetches, and time utilities. Each tool executes
-//! inside a [`ToolContext`] that carries workspace boundaries, agent metadata,
+//! git and GitHub helpers, Orbit task/job commands, process spawning,
+//! network fetches, and time utilities. Each tool executes inside a
+//! [`ToolContext`] that carries workspace boundaries, agent metadata,
 //! process allowlists, and the narrow Orbit host surface used by Orbit builtins.
 //!
 //! # Dependency direction
-//! orbit-common / orbit-exec / orbit-policy → `orbit-tools` → orbit-engine, orbit-core, orbit-remote
+//! orbit-common / orbit-exec / orbit-policy → `orbit-tools` → orbit-engine, orbit-core, orbit-mcp
 
 pub(crate) mod builtin;
 pub mod external;
@@ -48,7 +48,7 @@ use orbit_policy::PolicyEngine;
 use serde_json::{Map, Value};
 
 use orbit_common::friction::FrictionVerb;
-use orbit_common::types::{OrbitError, RoleSlot, ToolSchema};
+use orbit_common::types::{OrbitError, ToolSchema};
 
 /// Fast operation timeout (1 s). Used for local command resolution (e.g. `which`).
 pub const TIMEOUT_FAST_MS: u64 = 1_000;
@@ -81,13 +81,16 @@ pub enum OrbitBuiltinAction {
     AdrAdd,
     AdrShow,
     AdrList,
+    AdrRestore,
     AdrUpdate,
     AdrSupersede,
     AutoTaskAdd,
     AutoTaskList,
+    AutoTaskMint,
     AutoTaskShow,
     AutoTaskUpdate,
     AutoTaskToggle,
+    CommandExec,
     DocsList,
     DocsShow,
     DocsAdd,
@@ -96,17 +99,12 @@ pub enum OrbitBuiltinAction {
     /// ADR-0209 bearing 1 [ORB-10358]: friction verbs are registry data, so one
     /// action variant carries the verb instead of one variant per verb.
     Friction(FrictionVerb),
-    LearningAdd,
-    LearningArchive,
-    LearningList,
-    LearningPrune,
-    LearningShow,
-    LearningSupersede,
-    LearningSync,
-    LearningUpdate,
     PipelineInvoke,
     PipelineWait,
     Search,
+    SessionLogAppend,
+    SessionLogList,
+    SessionLogResolve,
     SemanticIndex,
     SemanticInstall,
     SemanticStats,
@@ -125,6 +123,13 @@ pub enum OrbitBuiltinAction {
     TaskShow,
     TaskStart,
     TaskUpdate,
+    WorkflowRunList,
+    WorkflowRunResume,
+    WorkflowRunShow,
+    WorkflowShip,
+    WorkspaceClaimAcquire,
+    WorkspaceClaimRelease,
+    WorkspaceClaimShow,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -181,10 +186,8 @@ pub struct ToolContext {
     pub session_context: orbit_common::types::ToolSessionContext,
     /// If non-empty, only tools in this list may be called. Empty means unrestricted.
     pub allowed_tools: Vec<String>,
-    /// When set, fs tools enforce that all paths resolve inside this directory.
-    /// Symlink escapes are blocked because paths are canonicalized before the check.
-    /// If `None`, fs tools deny all access (fail-closed). The runtime pipeline
-    /// auto-populates this from the data root's parent directory.
+    /// Workspace root used by tools that enforce path containment.
+    /// The runtime pipeline auto-populates this from the data root's parent directory.
     pub workspace_root: Option<PathBuf>,
     /// Normalized agent name (e.g. `"claude"`). When set, GitHub tools auto-append
     /// an attribution footer to PR bodies and review comments.
@@ -192,9 +195,6 @@ pub struct ToolContext {
     /// Resolved model identifier (e.g. `"opus-4.6"`). Used alongside `agent_name`
     /// for the attribution footer.
     pub model_name: Option<String>,
-    /// Planning-duel slot asserted by the runtime envelope, when this tool call
-    /// is made from a planning-duel activity.
-    pub role_slot: Option<RoleSlot>,
     /// Program allowlist for `proc.spawn`. When `proc_spawn_activity_scoped`
     /// is `true`, an empty list denies every program (fail-closed). When
     /// `proc_spawn_activity_scoped` is `false`, an empty list preserves the
@@ -206,9 +206,11 @@ pub struct ToolContext {
     pub proc_spawn_activity_scoped: bool,
     /// Filesystem policy engine used by Orbit-managed agent runtimes.
     pub policy_engine: Option<Arc<PolicyEngine>>,
-    /// Active activity fsProfile name. `None` bypasses fsProfile checks.
+    /// Active activity fsProfile name. Used by the CLI sandbox compiler and
+    /// retained for historical `FsCallEvent` plumbing. `None` bypasses profile checks.
     pub fs_profile: Option<String>,
-    /// Optional audit hook for emitting per-fs-call envelope events.
+    /// Optional audit hook for historical / future-harness `FsCallEvent` emission.
+    /// No shipped builtin currently emits these events.
     pub fs_audit: Option<Arc<dyn FsAuditLogger>>,
     /// Trusted runtime-owned reservation metadata. Tool inputs cannot set this;
     /// only Orbit dispatch context or Orbit-managed CLI environments can.
@@ -227,7 +229,6 @@ impl std::fmt::Debug for ToolContext {
             .field("workspace_root", &self.workspace_root)
             .field("agent_name", &self.agent_name)
             .field("model_name", &self.model_name)
-            .field("role_slot", &self.role_slot)
             .field("proc_allowed_programs", &self.proc_allowed_programs)
             .field(
                 "proc_spawn_activity_scoped",

@@ -60,7 +60,11 @@ fn insert_then_read_round_trips_correlation_fields() {
     let store = Store::open_in_memory().expect("open store");
     let params = sample_params();
     store
-        .insert_audit_event_record(&params)
+        .insert_audit_event_record_with_invocation(
+            &params,
+            Some("trace-test-1"),
+            Some("192.0.2.10"),
+        )
         .expect("insert audit event");
 
     let events = store
@@ -82,6 +86,8 @@ fn insert_then_read_round_trips_correlation_fields() {
     );
     assert_eq!(event.origin_session_id.as_deref(), Some("mcp-session-abc"));
     assert_eq!(event.mcp_call_id.as_deref(), Some("mcall-abc"));
+    assert_eq!(event.trace_id.as_deref(), Some("trace-test-1"));
+    assert_eq!(event.caller_ip.as_deref(), Some("192.0.2.10"));
     assert_eq!(event.lease_id.as_deref(), Some("lease-abc"));
 
     let by_id = store
@@ -94,6 +100,8 @@ fn insert_then_read_round_trips_correlation_fields() {
     assert_eq!(by_id.step_index, Some(2));
     assert_eq!(by_id.workspace_id.as_deref(), Some("ws_orbit"));
     assert_eq!(by_id.mcp_call_id.as_deref(), Some("mcall-abc"));
+    assert_eq!(by_id.trace_id.as_deref(), Some("trace-test-1"));
+    assert_eq!(by_id.caller_ip.as_deref(), Some("192.0.2.10"));
 }
 
 #[test]
@@ -165,7 +173,7 @@ fn list_audit_events_filters_by_target_type_kind() {
     let store = Store::open_in_memory().expect("open store");
     let mut hook = sample_params();
     hook.execution_id = "exec-hook".to_string();
-    hook.target_type = Some("learning_injected".to_string());
+    hook.target_type = Some("hook_event".to_string());
     store
         .insert_audit_event_record(&hook)
         .expect("insert hook event");
@@ -179,99 +187,12 @@ fn list_audit_events_filters_by_target_type_kind() {
 
     let events = store
         .list_audit_events(&AuditEventFilter {
-            target_type: Some("learning_injected".to_string()),
+            target_type: Some("hook_event".to_string()),
             ..AuditEventFilter::default()
         })
         .expect("list audit events");
     assert_eq!(events.len(), 1);
     assert_eq!(events[0].execution_id, "exec-hook");
-}
-
-fn learning_injected_params(execution_id: &str, learning_ids: &[&str]) -> AuditEventInsertParams {
-    AuditEventInsertParams {
-        execution_id: execution_id.to_string(),
-        command: "hook".to_string(),
-        subcommand: Some("pretooluse".to_string()),
-        target_type: Some(LEARNING_INJECTED_TARGET_TYPE.to_string()),
-        target_id: Some("src/lib.rs".to_string()),
-        arguments_json: Some(serde_json::json!({ "learning_ids": learning_ids }).to_string()),
-        ..sample_params()
-    }
-}
-
-fn learning_shown_params(execution_id: &str, learning_id: &str) -> AuditEventInsertParams {
-    AuditEventInsertParams {
-        execution_id: execution_id.to_string(),
-        command: "learning".to_string(),
-        subcommand: Some("show".to_string()),
-        target_type: Some(LEARNING_SHOWN_TARGET_TYPE.to_string()),
-        target_id: Some(learning_id.to_string()),
-        arguments_json: None,
-        ..sample_params()
-    }
-}
-
-#[test]
-fn learning_usage_stats_fold_injections_and_shows_per_learning() {
-    let store = Store::open_in_memory().expect("open store");
-    for (execution_id, ids) in [
-        ("exec-inject-1", vec!["L-0001", "L-0002"]),
-        ("exec-inject-2", vec!["L-0001"]),
-        ("exec-inject-3", vec!["L-0001"]),
-    ] {
-        store
-            .insert_audit_event_record(&learning_injected_params(execution_id, &ids))
-            .expect("insert injection event");
-    }
-    store
-        .insert_audit_event_record(&learning_shown_params("exec-show-1", "L-0001"))
-        .expect("insert show event");
-
-    let stats = store
-        .get_learning_usage_stats(None)
-        .expect("learning usage stats");
-    assert_eq!(stats.len(), 2);
-
-    // Sorted by injected_count DESC: L-0001 (3) before L-0002 (1).
-    let first = &stats[0];
-    assert_eq!(first.learning_id, "L-0001");
-    assert_eq!(first.injected_count, 3);
-    assert_eq!(first.shown_count, 1);
-    assert_eq!(first.shown_ratio(), Some(1.0 / 3.0));
-    assert!(first.last_injected_at.is_some());
-    assert!(first.last_shown_at.is_some());
-
-    let second = &stats[1];
-    assert_eq!(second.learning_id, "L-0002");
-    assert_eq!(second.injected_count, 1);
-    assert_eq!(second.shown_count, 0);
-    assert_eq!(second.shown_ratio(), Some(0.0));
-    assert!(second.last_shown_at.is_none());
-}
-
-#[test]
-fn learning_usage_stats_skip_malformed_arguments_and_respect_since() {
-    let store = Store::open_in_memory().expect("open store");
-    let mut malformed = learning_injected_params("exec-malformed", &["L-0001"]);
-    malformed.arguments_json = Some("not-json".to_string());
-    store
-        .insert_audit_event_record(&malformed)
-        .expect("insert malformed event");
-    store
-        .insert_audit_event_record(&learning_injected_params("exec-ok", &["L-0002"]))
-        .expect("insert valid event");
-
-    let stats = store
-        .get_learning_usage_stats(None)
-        .expect("learning usage stats");
-    assert_eq!(stats.len(), 1);
-    assert_eq!(stats[0].learning_id, "L-0002");
-
-    let future = chrono::Utc::now() + chrono::Duration::days(1);
-    let stats = store
-        .get_learning_usage_stats(Some(&future))
-        .expect("learning usage stats since future");
-    assert!(stats.is_empty());
 }
 
 #[test]
@@ -338,6 +259,8 @@ fn migration_adds_correlation_columns_to_legacy_table() {
         "capabilities_json",
         "origin_session_id",
         "mcp_call_id",
+        "trace_id",
+        "caller_ip",
         "lease_id",
     ] {
         assert!(
@@ -358,6 +281,7 @@ fn migration_adds_correlation_columns_to_legacy_table() {
     assert!(indexes.iter().any(|i| i == "idx_audit_events_job_run_id"));
     assert!(indexes.iter().any(|i| i == "idx_audit_events_workspace_id"));
     assert!(indexes.iter().any(|i| i == "idx_audit_events_mcp_call_id"));
+    assert!(indexes.iter().any(|i| i == "idx_audit_events_trace_id"));
 
     let preserved: i64 = conn
         .query_row(
@@ -379,15 +303,34 @@ fn migration_adds_correlation_columns_to_legacy_table() {
         task_id.is_none(),
         "legacy row should have NULL task_id post-migration",
     );
-    let new_fields: (Option<String>, Option<String>, Option<String>) = conn
+    struct LegacyInvocationFields {
+        workspace_id: Option<String>,
+        capabilities_json: Option<String>,
+        mcp_call_id: Option<String>,
+        trace_id: Option<String>,
+        caller_ip: Option<String>,
+    }
+    let new_fields = conn
         .query_row(
-            "SELECT workspace_id, capabilities_json, mcp_call_id FROM audit_events \
+            "SELECT workspace_id, capabilities_json, mcp_call_id, trace_id, caller_ip FROM audit_events \
              WHERE execution_id = 'exec-legacy'",
             [],
-            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            |row| {
+                Ok(LegacyInvocationFields {
+                    workspace_id: row.get(0)?,
+                    capabilities_json: row.get(1)?,
+                    mcp_call_id: row.get(2)?,
+                    trace_id: row.get(3)?,
+                    caller_ip: row.get(4)?,
+                })
+            },
         )
         .expect("read legacy row additions");
-    assert_eq!(new_fields, (None, None, None));
+    assert!(new_fields.workspace_id.is_none());
+    assert!(new_fields.capabilities_json.is_none());
+    assert!(new_fields.mcp_call_id.is_none());
+    assert!(new_fields.trace_id.is_none());
+    assert!(new_fields.caller_ip.is_none());
 }
 
 #[test]
@@ -448,16 +391,14 @@ fn tool_call_counts_by_surface_and_role_extract_segment_after_orbit_prefix() {
         .insert_audit_event_record(&adr_show_failed)
         .expect("insert");
 
-    let mut learning_show = sample_params_with(
-        "exec-learning-show",
+    let mut docs_show = sample_params_with(
+        "exec-docs-show",
         TEST_CODEX_MODEL,
         AuditEventStatus::Success,
     );
-    learning_show.tool_name = Some("orbit.learning.show".to_string());
-    learning_show.target_id = Some("orbit.learning.show".to_string());
-    store
-        .insert_audit_event_record(&learning_show)
-        .expect("insert");
+    docs_show.tool_name = Some("orbit.docs.show".to_string());
+    docs_show.target_id = Some("orbit.docs.show".to_string());
+    store.insert_audit_event_record(&docs_show).expect("insert");
 
     let mut task_update = sample_params_with(
         "exec-task-update",
@@ -505,7 +446,7 @@ fn tool_call_counts_by_surface_and_role_extract_segment_after_orbit_prefix() {
                 failed: 1,
             },
             AuditToolCallCountsBySurfaceAndRole {
-                surface: "learning".to_string(),
+                surface: "docs".to_string(),
                 role: TEST_CODEX_MODEL.to_string(),
                 total: 1,
                 failed: 0,

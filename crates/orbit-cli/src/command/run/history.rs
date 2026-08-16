@@ -1,9 +1,10 @@
 use clap::Args;
+use orbit_core::OrbitRuntime;
 use orbit_core::command::job::JobRunListParams;
-use orbit_core::{OrbitError, OrbitRuntime};
 use serde_json::json;
 
-use crate::command::Execute;
+use crate::command::{Block, CommandOut, Execute, Payload};
+use crate::output::color::Domain;
 
 use super::format::{format_timestamp, format_waiting_line, summarize_error_message};
 use super::job::job_run_to_json_with_state;
@@ -29,17 +30,16 @@ pub struct RunHistoryArgs {
 }
 
 impl Execute for RunHistoryArgs {
-    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
-        print_run_history(runtime, self.job_id.as_deref(), Some(self.limit), self.json)
+    fn execute(self, runtime: &OrbitRuntime) -> CommandOut {
+        run_history_payload(runtime, self.job_id.as_deref(), Some(self.limit))
     }
 }
 
-pub(crate) fn print_run_history(
+pub(crate) fn run_history_payload(
     runtime: &OrbitRuntime,
     job_id: Option<&str>,
     limit: Option<usize>,
-    json_output: bool,
-) -> Result<(), OrbitError> {
+) -> CommandOut {
     let runs = match job_id {
         Some(job_id) => runtime.list_job_runs(JobRunListParams {
             job_id: Some(job_id.to_string()),
@@ -57,39 +57,29 @@ pub(crate) fn print_run_history(
         .map(|run| runtime.read_run_state(&run.run_id))
         .collect::<Result<Vec<_>, _>>()?;
 
-    if json_output {
-        let values = runs
-            .iter()
-            .zip(states.iter())
-            .map(|(run, state)| job_run_to_json_with_state(run, state.as_ref()))
-            .collect::<Vec<_>>();
-        return crate::output::json::print_pretty(&json!({ "runs": values }));
-    }
+    let values = runs
+        .iter()
+        .zip(states.iter())
+        .map(|(run, state)| job_run_to_json_with_state(run, state.as_ref()))
+        .collect::<Vec<_>>();
+    let doc = json!({ "runs": values });
 
+    use crate::output::table::{Column, Table};
     let include_job_id = job_id.is_none();
-    let headers = if include_job_id {
-        vec![
-            "RUN_ID",
-            "JOB_ID",
-            "ATTEMPT",
-            "STATE",
-            "STARTED_AT",
-            "FINISHED_AT",
-            "ERROR_CODE",
-            "ERROR_MESSAGE",
-        ]
-    } else {
-        vec![
-            "RUN_ID",
-            "ATTEMPT",
-            "STATE",
-            "STARTED_AT",
-            "FINISHED_AT",
-            "ERROR_CODE",
-            "ERROR_MESSAGE",
-        ]
-    };
-    let mut table = crate::output::table::build_table(&headers);
+    let mut columns = vec![Column::new("RUN_ID").fixed()];
+    if include_job_id {
+        columns.push(Column::new("JOB_ID").fixed());
+    }
+    // `orbit run show <run_id>` prints a run's untruncated error message.
+    columns.extend([
+        Column::new("ATTEMPT").number(),
+        Column::new("STATE").fixed(),
+        Column::new("STARTED_AT").fixed(),
+        Column::new("FINISHED_AT").fixed(),
+        Column::new("ERROR_CODE").fixed(),
+        Column::new("ERROR_MESSAGE"),
+    ]);
+    let mut table = Table::new(columns).empty_message("no runs recorded");
     for run in &runs {
         use comfy_table::Cell;
         let last = run.steps.last();
@@ -99,7 +89,7 @@ pub(crate) fn print_run_history(
         }
         row.extend([
             Cell::new(run.attempt.to_string()),
-            crate::output::color::job_state_color_cell(&run.state.to_string()),
+            crate::output::color::cell(&run.state.to_string(), Domain::JobState),
             Cell::new(format_timestamp(run.started_at)),
             Cell::new(format_timestamp(run.finished_at)),
             Cell::new(last.and_then(|s| s.error_code.as_deref()).unwrap_or("-")),
@@ -109,11 +99,14 @@ pub(crate) fn print_run_history(
         ]);
         table.add_row(row);
     }
-    println!("{table}");
-    for (run, state) in runs.iter().zip(states.iter()) {
-        if let Some(line) = format_waiting_line(run.state, state.as_ref()) {
-            println!("{line}");
-        }
+    let mut blocks = vec![Block::table(table)];
+    let waiting = runs
+        .iter()
+        .zip(states.iter())
+        .filter_map(|(run, state)| format_waiting_line(run.state, state.as_ref()))
+        .collect::<Vec<_>>();
+    if !waiting.is_empty() {
+        blocks.push(Block::text(waiting.join("\n")));
     }
-    Ok(())
+    Ok(Payload::blocks(doc, blocks).into())
 }

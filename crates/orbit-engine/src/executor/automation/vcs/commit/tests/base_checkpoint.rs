@@ -265,3 +265,69 @@ fn no_diff_expected_task_skips_the_phase_even_when_its_base_is_unreachable() {
         "the skip creates no commit"
     );
 }
+
+#[test]
+fn allow_empty_skips_a_clean_stage_without_the_no_diff_tag() {
+    let temp = initialized_git_repo();
+    let workspace = temp.path();
+    let base_sha = git_output(workspace, &["rev-parse", "HEAD"]).expect("read checkpoint");
+    git_success(workspace, &["checkout", "-b", "orbit/T1"]).expect("create task branch");
+
+    let task = task_with_file("T1", "Empty epic", "src/missing.txt", "claude");
+    let host = CommitTestHost::new(vec![task], workspace.to_path_buf());
+    let mut input = batch_input(workspace, &base_sha);
+    input["allow_empty"] = json!(true);
+
+    let result = git_commit(&host, &input).expect("allow_empty skips a clean stage");
+    assert_eq!(result["skipped_no_diff_expected"], json!(true));
+    assert_eq!(result["decision"], "skipped_no_diff_expected");
+}
+
+#[test]
+fn allow_moved_head_reports_already_committed_when_children_advanced_head() {
+    let temp = initialized_git_repo();
+    let workspace = temp.path();
+    let base_sha = git_output(workspace, &["rev-parse", "HEAD"]).expect("read checkpoint");
+    git_success(workspace, &["checkout", "-b", "epic/ORB-EPIC"]).expect("create epic branch");
+    fs::write(workspace.join("child.txt"), "landed child\n").unwrap();
+    let head_after_child = commit_all(workspace, "child landed into epic");
+
+    let task = task_with_file("T1", "Epic root", "child.txt", "claude");
+    let host = CommitTestHost::new(vec![task], workspace.to_path_buf());
+    let mut input = batch_input(workspace, &base_sha);
+    input["allow_empty"] = json!(true);
+    input["allow_moved_head"] = json!(true);
+
+    let result = git_commit(&host, &input).expect("moved HEAD with no leftover work");
+    assert_eq!(result["skipped_no_diff_expected"], json!(false));
+    assert_eq!(result["decision"], "already_committed");
+    assert_eq!(
+        git_output(workspace, &["rev-parse", "HEAD"]).expect("read head after"),
+        head_after_child
+    );
+}
+
+#[test]
+fn allow_moved_head_commits_leftover_finisher_work() {
+    let temp = initialized_git_repo();
+    let workspace = temp.path();
+    let base_sha = git_output(workspace, &["rev-parse", "HEAD"]).expect("read checkpoint");
+    git_success(workspace, &["checkout", "-b", "epic/ORB-EPIC"]).expect("create epic branch");
+    fs::write(workspace.join("child.txt"), "landed child\n").unwrap();
+    commit_all(workspace, "child landed into epic");
+    fs::write(workspace.join("finisher.txt"), "leftover finisher work\n").unwrap();
+
+    let task = task_with_file("T1", "Epic root", "finisher.txt", "claude");
+    let host = CommitTestHost::new(vec![task], workspace.to_path_buf());
+    let mut input = batch_input(workspace, &base_sha);
+    input["allow_empty"] = json!(true);
+    input["allow_moved_head"] = json!(true);
+
+    let result = git_commit(&host, &input).expect("leftover finisher work is committed");
+    assert_eq!(result["committed"], json!(true));
+    assert_eq!(result["skipped_no_diff_expected"], json!(false));
+    assert!(
+        workspace.join("finisher.txt").exists(),
+        "finisher file remains after commit"
+    );
+}

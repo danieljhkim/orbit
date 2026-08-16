@@ -1,8 +1,8 @@
 use clap::Args;
+use orbit_core::OrbitRuntime;
 use orbit_core::config::{ConfigScope, ConfigStore, WorkspaceInitMode};
-use orbit_core::{OrbitError, OrbitRuntime};
 
-use crate::command::Execute;
+use crate::command::{CommandOut, CommandOutput, Execute};
 
 use super::support::{global_config_path, workspace_config_path};
 
@@ -28,7 +28,7 @@ pub struct ConfigSetArgs {
 }
 
 impl Execute for ConfigSetArgs {
-    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+    fn execute(self, runtime: &OrbitRuntime) -> CommandOut {
         let mut store = if self.global {
             ConfigStore::open(ConfigScope::Global, global_config_path(runtime))?
         } else {
@@ -56,6 +56,6 @@ impl Execute for ConfigSetArgs {
             store.scope().label(),
             store.path().to_string_lossy()
         );
-        Ok(())
+        Ok(CommandOutput::Silent)
     }
 }

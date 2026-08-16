@@ -3,19 +3,21 @@ use std::path::{Path, PathBuf};
 use chrono::Utc;
 use clap::Args;
 use orbit_cmd::agent_rules::{InjectionAction, inject_agent_rules};
+use orbit_cmd::registry_runtime::RegisteredRuntimeFactory;
 use orbit_common::types::{
-    Workspace, WorkspaceCheckout, WorkspaceCheckoutRole, WorkspaceStatus, validate_machine_id,
+    Workspace, WorkspaceCheckout, WorkspaceCheckoutRole, WorkspaceRegistry, WorkspaceStatus,
+    validate_machine_id,
 };
 use orbit_common::utility::fs::atomic_write_text;
 use orbit_core::OrbitError;
 use orbit_core::command::init::{InitOptions, init_workspace_at_root};
-use orbit_remote::runtime::RemoteRuntimeFactory;
-use orbit_remote::workspace_registry;
-use orbit_remote::{HostIdentityState, HostMode, inspect_host_identity};
-use serde::Serialize;
+use orbit_registry::workspace_registry;
+use orbit_registry::{HostIdentityState, inspect_host_identity};
+use serde::{Deserialize, Serialize};
 
 use super::role::CliCheckoutRole;
 use super::support::{detect_git_remote, dir_name_or_fallback, ensure_orbit_gitignore_entry};
+use crate::command::{CommandOut, CommandOutput};
 
 #[derive(Args)]
 pub struct WorkspaceInitArgs {
@@ -29,7 +31,7 @@ pub struct WorkspaceInitArgs {
     #[arg(long)]
     pub base_branch: Option<String>,
     /// Ship-pipeline mode for this workspace: `pr` or `local`. When omitted, the
-    /// effective mode defaults to `local` (only PR-gated workspaces set `pr`).
+    /// effective mode defaults to `pr`; pass `--ship-mode local` for in-place delivery.
     #[arg(long, value_name = "MODE")]
     pub ship_mode: Option<String>,
     /// Explicit local checkout role. Omit for the compatible local-owner
@@ -54,12 +56,17 @@ pub struct WorkspaceInitArgs {
     /// No-op (kept for backwards compatibility — defaults are always refreshed on init)
     #[arg(long, hide = true)]
     pub refresh_defaults: bool,
+    /// Reconcile an already registered workspace after validating its complete
+    /// logical, checkout, and durable-identity binding, or replace a checkout
+    /// identity that no registration claims.
+    #[arg(long)]
+    pub force: bool,
 }
 
 impl WorkspaceInitArgs {
-    pub fn execute_without_runtime(self, root_override: Option<&Path>) -> Result<(), OrbitError> {
+    pub fn execute_without_runtime(self, root_override: Option<&Path>) -> CommandOut {
         let cwd = std::env::current_dir().map_err(|e| OrbitError::Io(e.to_string()))?;
-        let roots = RemoteRuntimeFactory::resolve_bootstrap_roots_for_cwd(&cwd, root_override)?;
+        let roots = RegisteredRuntimeFactory::resolve_bootstrap_roots_for_cwd(&cwd, root_override)?;
         let orbit_dir = roots.shared_root;
         let global_root = roots.global_root;
         let registry_path = workspace_registry::registry_path_for(&global_root);
@@ -117,7 +124,7 @@ impl WorkspaceInitArgs {
             }
         }
 
-        Ok(())
+        Ok(CommandOutput::Silent)
     }
 
     fn execute_at_path(
@@ -132,17 +139,12 @@ impl WorkspaceInitArgs {
         if let Some(mode) = self.ship_mode.as_deref() {
             orbit_core::ShipMode::parse(mode)?;
         }
-        let (local_machine_id, local_host_id, local_mode) =
-            match inspect_host_identity(global_root)? {
-                HostIdentityState::Present(identity) => (
-                    Some(identity.machine_id),
-                    Some(identity.host_id),
-                    identity.mode,
-                ),
-                HostIdentityState::Legacy { .. } | HostIdentityState::Absent => {
-                    (None, None, HostMode::Standalone)
-                }
-            };
+        let (local_machine_id, local_host_id) = match inspect_host_identity(global_root)? {
+            HostIdentityState::Present(identity) => {
+                (Some(identity.machine_id), Some(identity.host_id))
+            }
+            HostIdentityState::Legacy { .. } | HostIdentityState::Absent => (None, None),
+        };
         let explicit_role = self.role.map(WorkspaceCheckoutRole::from);
         match (explicit_role, self.owner.as_deref()) {
             (None, Some(_)) => {
@@ -161,11 +163,6 @@ impl WorkspaceInitArgs {
                 ));
             }
             (Some(WorkspaceCheckoutRole::Replica), Some(owner)) => {
-                if local_mode == HostMode::Standalone {
-                    return Err(OrbitError::InvalidInput(
-                        "--role replica is unavailable in standalone mode".to_string(),
-                    ));
-                }
                 validate_machine_id(owner)?;
                 if local_machine_id.as_deref() == Some(owner) {
                     return Err(OrbitError::InvalidInput(format!(
@@ -176,23 +173,84 @@ impl WorkspaceInitArgs {
             _ => {}
         }
 
+        let name = self.name.unwrap_or_else(|| dir_name_or_fallback(cwd));
+        let id = canonical_workspace_id(&name);
+        let git_remote = detect_git_remote(cwd);
+        let mut registry = workspace_registry::load_registry_from(registry_path)?;
+        let existing_workspace = registry
+            .workspaces
+            .iter()
+            .find(|workspace| workspace.id == id);
+        let existing_checkout = registry
+            .checkouts
+            .iter()
+            .find(|checkout| checkout.repo_root == cwd);
+        let reconciling_existing = existing_workspace.is_some() || existing_checkout.is_some();
+        let registered_shared_root = global_root == orbit_dir
+            && registry
+                .checkouts
+                .iter()
+                .any(|checkout| checkout.orbit_dir == orbit_dir);
+        if registered_shared_root {
+            validate_shared_root_identity(orbit_dir)?;
+        }
+
+        if reconciling_existing && !self.force {
+            return Err(OrbitError::WorkspaceError(format!(
+                "workspace registration already exists for '{}' or '{}'; rerun with --force to reconcile it",
+                id,
+                cwd.display()
+            )));
+        }
+
+        if reconciling_existing {
+            validate_existing_registration(
+                existing_workspace,
+                existing_checkout,
+                cwd,
+                orbit_dir,
+                &id,
+            )?;
+            if !registered_shared_root {
+                validate_workspace_identity(orbit_dir, &id)?;
+            }
+        } else if !registered_shared_root
+            && let Some(identity) = read_workspace_identity(orbit_dir)?
+            && identity.workspace_id != id
+        {
+            // A checkout can carry an identity the registry never recorded:
+            // any command that opens a runtime in an uninitialized checkout
+            // seeds a bootstrap id. Replacing one is explicit reconciliation,
+            // so it needs --force — but --force must not detach an identity a
+            // durable registration still claims.
+            if !self.force {
+                return Err(OrbitError::WorkspaceError(format!(
+                    "workspace identity '{}' at '{}' conflicts with requested workspace '{}'; rerun with --force to reconcile it",
+                    identity.workspace_id,
+                    orbit_dir.join("config.yaml").display(),
+                    id
+                )));
+            }
+            if registry_claims(&registry, &identity.workspace_id) {
+                return Err(OrbitError::WorkspaceError(format!(
+                    "cannot reconcile workspace '{}': checkout identity '{}' at '{}' is claimed by an existing registration",
+                    id,
+                    identity.workspace_id,
+                    orbit_dir.join("config.yaml").display()
+                )));
+            }
+        }
+
         init_workspace_at_root(
             orbit_dir,
             InitOptions {
                 refresh_defaults: true,
                 global_root_override: Some(global_root.to_path_buf()),
-                routine_host_id: local_host_id,
+                routine_host_id: local_host_id.clone(),
                 ..Default::default()
             },
         )?;
         ensure_orbit_gitignore_entry(cwd, orbit_dir)?;
-
-        let name = self.name.unwrap_or_else(|| dir_name_or_fallback(cwd));
-
-        let id = canonical_workspace_id(&name);
-        let git_remote = detect_git_remote(cwd);
-
-        let mut registry = workspace_registry::load_registry_from(registry_path)?;
         let mut checkout_added = false;
         if let Some(existing) = registry.workspaces.iter_mut().find(|w| w.id == id) {
             if let Some(ship_mode) = self.ship_mode {
@@ -243,16 +301,44 @@ impl WorkspaceInitArgs {
         // replica declaration supplies its stable owner in this same in-memory
         // mutation, so no transient local-owner binding is ever persisted.
         if checkout_added || explicit_role.is_some() {
+            let assigned_role = explicit_role.unwrap_or(WorkspaceCheckoutRole::Owner);
             workspace_registry::assign_checkout_role(
                 &mut registry,
                 &id,
-                explicit_role.unwrap_or(WorkspaceCheckoutRole::Owner),
+                assigned_role,
                 self.owner.as_deref(),
                 local_machine_id.as_deref(),
             )?;
+            match assigned_role {
+                WorkspaceCheckoutRole::Owner => {
+                    if let (Some(machine_id), Some(host_id)) =
+                        (local_machine_id.as_deref(), local_host_id.as_deref())
+                    {
+                        workspace_registry::rename_local_owner_host_id(
+                            &mut registry,
+                            machine_id,
+                            host_id,
+                        )?;
+                    }
+                }
+                WorkspaceCheckoutRole::Replica => {
+                    // v1 has no fleet lookup from stable machine id to display
+                    // name. Until the local record is enriched with a human
+                    // name, the explicit owner id is itself recognizable to
+                    // routine-pin diagnostics as a known-elsewhere owner.
+                    if let Some(owner) = self.owner.as_deref() {
+                        registry
+                            .owner_host_ids
+                            .entry(owner.to_string())
+                            .or_insert_with(|| owner.to_string());
+                    }
+                }
+            }
         }
         workspace_registry::save_registry_to(&registry, registry_path)?;
-        write_workspace_identity(orbit_dir, &id)?;
+        if !reconciling_existing && !registered_shared_root {
+            write_workspace_identity(orbit_dir, &id)?;
+        }
         orbit_core::runtime::HubCoordinationExecutor::register_workspace(global_root, &id, &name)?;
 
         Ok(WorkspaceInitResult {
@@ -292,6 +378,104 @@ pub(super) fn canonical_workspace_id(name: &str) -> String {
 struct WorkspaceIdentityDocument<'a> {
     schema_version: u32,
     workspace_id: &'a str,
+}
+
+#[derive(Deserialize)]
+struct StoredWorkspaceIdentity {
+    schema_version: u32,
+    workspace_id: String,
+}
+
+fn validate_existing_registration(
+    workspace: Option<&Workspace>,
+    checkout: Option<&WorkspaceCheckout>,
+    cwd: &Path,
+    orbit_dir: &Path,
+    workspace_id: &str,
+) -> Result<(), OrbitError> {
+    let workspace = workspace.ok_or_else(|| {
+        OrbitError::WorkspaceError(format!(
+            "cannot reconcile workspace '{workspace_id}': the target checkout is bound to a different durable workspace"
+        ))
+    })?;
+    let checkout = checkout.ok_or_else(|| {
+        OrbitError::WorkspaceError(format!(
+            "cannot reconcile workspace '{workspace_id}': its durable record has no target checkout binding"
+        ))
+    })?;
+    if checkout.workspace_id != workspace.id
+        || checkout.repo_root != cwd
+        || checkout.orbit_dir != orbit_dir
+    {
+        return Err(OrbitError::WorkspaceError(format!(
+            "cannot reconcile workspace '{workspace_id}': logical record and checkout binding do not match the requested checkout"
+        )));
+    }
+    Ok(())
+}
+
+/// True when either registry authority still binds `workspace_id`.
+fn registry_claims(registry: &WorkspaceRegistry, workspace_id: &str) -> bool {
+    registry
+        .workspaces
+        .iter()
+        .any(|workspace| workspace.id == workspace_id)
+        || registry
+            .checkouts
+            .iter()
+            .any(|checkout| checkout.workspace_id == workspace_id)
+}
+
+fn read_workspace_identity(
+    orbit_dir: &Path,
+) -> Result<Option<StoredWorkspaceIdentity>, OrbitError> {
+    let path = orbit_dir.join("config.yaml");
+    if !path.exists() {
+        return Ok(None);
+    }
+    let content =
+        std::fs::read_to_string(&path).map_err(|error| OrbitError::Io(error.to_string()))?;
+    let identity = serde_yaml::from_str(&content).map_err(|error| {
+        OrbitError::WorkspaceError(format!(
+            "invalid workspace identity '{}': {error}",
+            path.display()
+        ))
+    })?;
+    Ok(Some(identity))
+}
+
+fn validate_workspace_identity(orbit_dir: &Path, workspace_id: &str) -> Result<(), OrbitError> {
+    let path = orbit_dir.join("config.yaml");
+    let identity = read_workspace_identity(orbit_dir)?.ok_or_else(|| {
+        OrbitError::WorkspaceError(format!(
+            "cannot reconcile workspace '{workspace_id}': checkout identity '{}' is missing",
+            path.display()
+        ))
+    })?;
+    if identity.schema_version != 1 || identity.workspace_id != workspace_id {
+        return Err(OrbitError::WorkspaceError(format!(
+            "cannot reconcile workspace '{workspace_id}': checkout identity '{}' does not match",
+            path.display()
+        )));
+    }
+    Ok(())
+}
+
+fn validate_shared_root_identity(orbit_dir: &Path) -> Result<(), OrbitError> {
+    let path = orbit_dir.join("config.yaml");
+    let identity = read_workspace_identity(orbit_dir)?.ok_or_else(|| {
+        OrbitError::WorkspaceError(format!(
+            "cannot use registered shared root: runtime identity '{}' is missing",
+            path.display()
+        ))
+    })?;
+    if identity.schema_version != 1 || identity.workspace_id.trim().is_empty() {
+        return Err(OrbitError::WorkspaceError(format!(
+            "cannot use registered shared root: runtime identity '{}' is invalid",
+            path.display()
+        )));
+    }
+    Ok(())
 }
 
 fn write_workspace_identity(orbit_dir: &Path, workspace_id: &str) -> Result<(), OrbitError> {

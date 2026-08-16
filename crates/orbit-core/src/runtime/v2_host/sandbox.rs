@@ -1,23 +1,17 @@
 use std::path::Path;
-#[cfg(target_os = "macos")]
 use std::path::PathBuf;
 
-use orbit_common::types::ExecutorSandboxKind;
-#[cfg(target_os = "macos")]
-use orbit_common::types::{ResolvedFsProfile, UNRESTRICTED_FS_PROFILE};
-#[cfg(target_os = "macos")]
-use orbit_engine::EnvironmentHost;
+use orbit_common::types::{ExecutorSandboxKind, ResolvedFsProfile, UNRESTRICTED_FS_PROFILE};
+use orbit_engine::RuntimeHost;
 use orbit_engine::{DispatchError, ResolvedSandbox};
 
 use crate::OrbitRuntime;
 
-pub(super) fn resolve_executor_sandbox(
+pub(crate) fn resolve_executor_sandbox(
     runtime: &OrbitRuntime,
     provider: &str,
-    #[cfg(target_os = "macos")] fs_profile: Option<&str>,
-    #[cfg(not(target_os = "macos"))] _fs_profile: Option<&str>,
-    #[cfg(target_os = "macos")] subprocess_cwd: Option<&Path>,
-    #[cfg(not(target_os = "macos"))] _subprocess_cwd: Option<&Path>,
+    fs_profile: Option<&str>,
+    subprocess_cwd: Option<&Path>,
 ) -> Result<Option<ResolvedSandbox>, DispatchError> {
     let executor = runtime.get_executor_def(provider).map_err(|err| {
         DispatchError::CliInvocationFailed(format!(
@@ -42,7 +36,7 @@ pub(super) fn resolve_executor_sandbox(
             #[cfg(target_os = "macos")]
             {
                 let mut resolved =
-                    resolve_fs_profile_absolute(runtime, fs_profile).map_err(|err| {
+                    resolve_fs_profile_absolute(runtime, fs_profile, None).map_err(|err| {
                         DispatchError::CliInvocationFailed(format!(
                             "resolve fsProfile for sandbox: {err}"
                         ))
@@ -54,6 +48,53 @@ pub(super) fn resolve_executor_sandbox(
                     kind,
                     fs_profile: resolved,
                     allow_fallback: executor.allow_fallback,
+                    managed_worktree: false,
+                }))
+            }
+        }
+        ExecutorSandboxKind::LinuxBwrap => {
+            #[cfg(not(target_os = "linux"))]
+            {
+                Err(DispatchError::CliInvocationFailed(format!(
+                    "executor `{provider}` declares sandbox `linux-bwrap` but current platform is `{}`",
+                    std::env::consts::OS
+                )))
+            }
+            #[cfg(target_os = "linux")]
+            {
+                let mut resolved = resolve_fs_profile_absolute(runtime, fs_profile, subprocess_cwd)
+                    .map_err(|err| {
+                        DispatchError::CliInvocationFailed(format!(
+                            "resolve fsProfile for linux-bwrap: {err}"
+                        ))
+                    })?;
+                // Runtime and provider conveniences must not turn an activity
+                // profile with an empty modify surface into a workspace writer.
+                // Besides violating that profile, workspace re-allows make a
+                // direct Bubblewrap invocation unable to enforce global
+                // non-subtree denies such as `**/.env` for paths created after
+                // spawn. Provider state and global Orbit runtime roots remain
+                // available below; neither overlaps workspace-relative denies.
+                let grants_workspace_modify =
+                    resolved.modify.iter().any(|rule| !rule.starts_with('!'));
+                if grants_workspace_modify {
+                    append_codex_side_write_roots(runtime, provider, &mut resolved)?;
+                }
+                append_linux_runtime_write_roots(
+                    runtime,
+                    subprocess_cwd,
+                    grants_workspace_modify,
+                    &mut resolved,
+                )?;
+                append_linux_provider_state_roots(&mut resolved)?;
+                let managed_worktree = subprocess_cwd
+                    .and_then(|cwd| active_worktree_subpath(runtime, cwd))
+                    .is_some();
+                Ok(Some(ResolvedSandbox {
+                    kind,
+                    fs_profile: resolved,
+                    allow_fallback: executor.allow_fallback,
+                    managed_worktree,
                 }))
             }
         }
@@ -65,21 +106,25 @@ pub(super) fn resolve_executor_sandbox(
 /// the workspace root. The kernel's `subpath` predicate is meaningless for
 /// relative paths, so this is the layer that turns Orbit's policy into a
 /// payload `sandbox-exec` can enforce.
-#[cfg(target_os = "macos")]
 fn resolve_fs_profile_absolute(
     runtime: &OrbitRuntime,
     fs_profile: Option<&str>,
+    workspace_override: Option<&Path>,
 ) -> Result<ResolvedFsProfile, orbit_common::types::OrbitError> {
     let profile_name = fs_profile.unwrap_or(UNRESTRICTED_FS_PROFILE);
     let resolved = runtime
         .policy_engine()
         .def()
         .effective_profile(profile_name)?;
-    let workspace_root = runtime
-        .paths()
-        .repo_root
+    let workspace_root = workspace_override
+        .unwrap_or(&runtime.paths().repo_root)
         .canonicalize()
-        .unwrap_or_else(|_| runtime.paths().repo_root.clone());
+        .unwrap_or_else(|_| {
+            workspace_override.map_or_else(
+                || runtime.paths().repo_root.clone(),
+                std::path::Path::to_path_buf,
+            )
+        });
     let workspace_str = workspace_root.display().to_string();
 
     Ok(ResolvedFsProfile {
@@ -97,7 +142,6 @@ fn resolve_fs_profile_absolute(
     })
 }
 
-#[cfg(target_os = "macos")]
 fn append_codex_side_write_roots(
     runtime: &OrbitRuntime,
     provider: &str,
@@ -114,7 +158,7 @@ fn append_codex_side_write_roots(
         return Ok(());
     }
 
-    let config = EnvironmentHost::agent_provider_config(runtime);
+    let config = RuntimeHost::agent_provider_config(runtime);
     let Some(raw_dirs) = config.get("writable_dirs_json") else {
         return Ok(());
     };
@@ -182,10 +226,8 @@ fn append_orbit_child_runtime_write_roots(
         format!("{global}/orbit.db*"),
         format!("{global}/tasks/**"),
         format!("{workspace}/tasks/**"),
-        format!("{workspace}/learnings/**"),
         format!("{workspace}/frictions/**"),
         format!("{workspace}/state/audit/**"),
-        format!("{workspace}/state/.id_alloc.lock"),
         format!("{workspace}/state/logs/**"),
         format!("{workspace}/state/semantic.db*"),
     ] {
@@ -193,11 +235,112 @@ fn append_orbit_child_runtime_write_roots(
     }
 }
 
-#[cfg(target_os = "macos")]
 fn append_unique_modify_root(resolved: &mut ResolvedFsProfile, root: String) {
     if !resolved.modify.iter().any(|entry| entry == &root) {
         resolved.modify.push(root);
     }
+}
+
+#[cfg(target_os = "linux")]
+fn append_linux_runtime_write_roots(
+    runtime: &OrbitRuntime,
+    _subprocess_cwd: Option<&Path>,
+    grants_workspace_modify: bool,
+    resolved: &mut ResolvedFsProfile,
+) -> Result<(), DispatchError> {
+    let global = runtime
+        .paths()
+        .global_dir
+        .canonicalize()
+        .unwrap_or_else(|_| runtime.paths().global_dir.clone());
+    let workspace = runtime
+        .paths()
+        .orbit_dir
+        .canonicalize()
+        .unwrap_or_else(|_| runtime.paths().orbit_dir.clone());
+
+    for directory in [global.join("state/logs"), global.join("tasks")] {
+        ensure_owned_directory(&directory)?;
+        append_unique_modify_root(resolved, directory.display().to_string());
+    }
+    for file in [
+        global.join("orbit.db"),
+        global.join("orbit.db-wal"),
+        global.join("orbit.db-shm"),
+    ] {
+        if file.exists() {
+            append_unique_modify_root(resolved, file.display().to_string());
+        }
+    }
+
+    if !grants_workspace_modify {
+        return Ok(());
+    }
+
+    for directory in [
+        workspace.join("tasks"),
+        workspace.join("frictions"),
+        workspace.join("state/audit"),
+        workspace.join("state/logs"),
+        workspace.join("state/job-runs"),
+    ] {
+        ensure_owned_directory(&directory)?;
+        append_unique_modify_root(resolved, directory.display().to_string());
+    }
+    for file in [
+        workspace.join("state/semantic.db"),
+        workspace.join("state/semantic.db-wal"),
+        workspace.join("state/semantic.db-shm"),
+    ] {
+        if file.exists() {
+            append_unique_modify_root(resolved, file.display().to_string());
+        }
+    }
+
+    Ok(())
+}
+
+#[cfg(target_os = "linux")]
+fn append_linux_provider_state_roots(
+    resolved: &mut ResolvedFsProfile,
+) -> Result<(), DispatchError> {
+    let home = std::env::var_os("HOME").map(PathBuf::from);
+    let mut directories = Vec::new();
+    if let Some(path) = std::env::var_os("CODEX_HOME").map(PathBuf::from) {
+        directories.push(path);
+    } else if let Some(home) = &home {
+        directories.push(home.join(".codex"));
+    }
+    if let Some(path) = std::env::var_os("CLAUDE_CONFIG_DIR").map(PathBuf::from) {
+        directories.push(path);
+    } else if let Some(home) = &home {
+        directories.push(home.join(".claude"));
+    }
+    if let Some(home) = &home {
+        directories.push(home.join(".gemini"));
+        directories.push(home.join(".grok"));
+    }
+    for directory in directories {
+        ensure_owned_directory(&directory)?;
+        let canonical = directory.canonicalize().map_err(|error| {
+            DispatchError::CliInvocationPermanent(format!(
+                "canonicalize Linux provider state root `{}`: {error}",
+                directory.display()
+            ))
+        })?;
+        append_unique_modify_root(resolved, canonical.display().to_string());
+    }
+    Ok(())
+}
+
+#[cfg(target_os = "linux")]
+fn ensure_owned_directory(path: &Path) -> Result<(), DispatchError> {
+    std::fs::create_dir_all(path).map_err(|error| {
+        DispatchError::CliInvocationPermanent(format!(
+            "create Linux sandbox runtime root `{}`: {error}",
+            path.display()
+        ))
+    })
 }
 
 /// Re-allow the active job-run worktree under `<workspace>/.orbit/state/worktrees/`
@@ -230,8 +373,11 @@ fn append_active_worktree_root(
     resolved.modify.push(worktree_root);
 }
 
-#[cfg(target_os = "macos")]
 fn active_worktree_subpath(runtime: &OrbitRuntime, subprocess_cwd: &Path) -> Option<String> {
+    active_worktree_root(runtime, subprocess_cwd).map(|worktree| worktree.display().to_string())
+}
+
+fn active_worktree_root(runtime: &OrbitRuntime, subprocess_cwd: &Path) -> Option<PathBuf> {
     let cwd = subprocess_cwd
         .canonicalize()
         .unwrap_or_else(|_| subprocess_cwd.to_path_buf());
@@ -247,11 +393,9 @@ fn active_worktree_subpath(runtime: &OrbitRuntime, subprocess_cwd: &Path) -> Opt
     let relative = cwd.strip_prefix(&worktrees_root).ok()?;
     let mut components = relative.components();
     let first = components.next()?;
-    let worktree_dir = worktrees_root.join(first.as_os_str());
-    Some(worktree_dir.display().to_string())
+    Some(worktrees_root.join(first.as_os_str()))
 }
 
-#[cfg(target_os = "macos")]
 fn absolutize_side_write_root(workspace_root: &str, path: &str) -> Option<String> {
     let trimmed = path.trim();
     if trimmed.is_empty() {
@@ -271,7 +415,6 @@ fn absolutize_side_write_root(workspace_root: &str, path: &str) -> Option<String
     Some(normalized.display().to_string())
 }
 
-#[cfg(target_os = "macos")]
 fn absolutize_rule(workspace_root: &str, rule: &str) -> String {
     let (negated, body) = rule
         .strip_prefix('!')

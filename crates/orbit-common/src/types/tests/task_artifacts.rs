@@ -68,6 +68,7 @@ updated_at: 2026-05-10T12:00:00Z
             pr_status: None,
             job_run_id: None,
             crew: None,
+            orchestrator: None,
             relations: Vec::new(),
             tags: Vec::new(),
             context_files: Vec::new(),
@@ -113,6 +114,28 @@ updated_at: 2026-05-10T12:00:00Z
     }
 
     #[test]
+    fn version_one_envelope_defaults_missing_orchestrator() {
+        let envelope = serde_yaml::from_str::<TaskEnvelopeV2>(&valid_envelope_yaml("ORB-00001"))
+            .expect("legacy v1 envelope remains readable");
+        assert_eq!(envelope.schema_version, TASK_ARTIFACT_SCHEMA_VERSION);
+        assert_eq!(envelope.orchestrator, None);
+    }
+
+    #[test]
+    fn version_one_envelope_round_trips_orchestrator_without_schema_bump() {
+        let mut envelope = valid_envelope("ORB-00001");
+        envelope.orchestrator = Some("orchestration-crew".to_string());
+
+        let yaml = serde_yaml::to_string(&envelope).expect("serialize envelope");
+        assert!(yaml.contains("schema_version: 1"));
+        assert!(yaml.contains("orchestrator: orchestration-crew"));
+        assert_eq!(
+            serde_yaml::from_str::<TaskEnvelopeV2>(&yaml).expect("deserialize envelope"),
+            envelope
+        );
+    }
+
+    #[test]
     fn jsonl_rows_validate_schema_and_required_ids() {
         let event = TaskEventRowV2 {
             schema_version: TASK_ARTIFACT_SCHEMA_VERSION,
@@ -149,15 +172,22 @@ mod ids {
     use super::super::super::task_artifacts::*;
 
     #[test]
-    fn validates_and_formats_orb_task_ids() {
+    fn validates_and_formats_prefix_and_width_agnostic_task_ids() {
         assert!(is_valid_orb_task_id("ORB-00000"));
         assert!(is_valid_orb_task_id("ORB-99999"));
-        assert!(!is_valid_orb_task_id("ORB-100000"));
+        assert!(is_valid_orb_task_id("ORB-100000"));
+        assert!(is_valid_orb_task_id("DE-7"));
+        assert!(is_valid_orb_task_id("ALPHA-123456789"));
         assert!(!is_valid_orb_task_id("orb-00001"));
+        assert!(!is_valid_orb_task_id("A-00001"));
+        assert!(!is_valid_orb_task_id("ADR-0001"));
         assert_eq!(format_orb_task_id(42).unwrap(), "ORB-00042");
-        assert!(format_orb_task_id(100_000).is_err());
+        assert_eq!(format_orb_task_id(100_000).unwrap(), "ORB-100000");
+        assert_eq!(format_task_id("DE", 42).unwrap(), "DE-00042");
+        assert_eq!(task_id_prefix("DE-00042"), Some("DE"));
+        assert_eq!(parse_task_number("ORB-100000"), Some(100_000));
         assert!(validate_orb_task_id("ORB-12345").is_ok());
-        assert!(validate_orb_task_id("ORB-1234").is_err());
+        assert!(validate_orb_task_id("ORB-1234").is_ok());
     }
 }
 
@@ -217,8 +247,9 @@ mod relations {
 
     #[test]
     fn produces_and_resolves_accept_cross_artifact_targets() {
+        // Supported target families: task (ORB-), friction (FYYYY-MM-NNN), ADR (ADR-NNNN).
         for relation_type in [TaskRelationType::Produces, TaskRelationType::Resolves] {
-            for target in ["ORB-00002", "F2026-05-007", "L-0001", "ADR-0001"] {
+            for target in ["ORB-00002", "F2026-05-007", "ADR-0001"] {
                 let relations = vec![TaskRelation {
                     relation_type,
                     target: target.to_string(),
@@ -226,6 +257,24 @@ mod relations {
                 assert!(
                     validate_task_relations_for_source("ORB-00001", &relations, &[]).is_ok(),
                     "{relation_type:?} should accept {target}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn produces_and_resolves_reject_unsupported_targets() {
+        // "L-0001" is a retired learning-subsystem id; it must not be treated
+        // as an active relation contract even though it once was.
+        for relation_type in [TaskRelationType::Produces, TaskRelationType::Resolves] {
+            for target in ["L-0001", "not-an-id"] {
+                let relations = vec![TaskRelation {
+                    relation_type,
+                    target: target.to_string(),
+                }];
+                assert!(
+                    validate_task_relations_for_source("ORB-00001", &relations, &[]).is_err(),
+                    "{relation_type:?} should reject {target}"
                 );
             }
         }

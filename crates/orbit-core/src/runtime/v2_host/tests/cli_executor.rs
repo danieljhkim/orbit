@@ -1,4 +1,4 @@
-use orbit_engine::V2RuntimeHost;
+use orbit_engine::RuntimeHost;
 
 use crate::OrbitRuntime;
 use crate::runtime::v2_host::test_support::seed_executor;

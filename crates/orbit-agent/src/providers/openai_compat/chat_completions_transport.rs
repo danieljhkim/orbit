@@ -17,7 +17,8 @@ use crate::loop_engine::transport::{
 
 use super::wire::{
     ChatCompletionsRequest, ChatCompletionsResponse, FunctionDefinition, IncomingMessage,
-    IncomingToolCall, OutgoingFunctionCall, OutgoingToolCall, RequestMessage, ToolDefinition,
+    IncomingToolCall, IncomingUsage, OutgoingFunctionCall, OutgoingToolCall, RequestMessage,
+    ToolDefinition,
 };
 
 const DEFAULT_BASE_URL: &str = "https://api.openai.com";
@@ -146,16 +147,7 @@ impl LoopTransport for OpenAiCompatTransport {
             })?;
 
         let content = map_incoming_message(choice.message);
-        let usage = TurnUsage {
-            input_tokens: parsed.usage.prompt_tokens,
-            output_tokens: parsed.usage.completion_tokens,
-            cache_read_input_tokens: parsed
-                .usage
-                .prompt_tokens_details
-                .map(|details| details.cached_tokens)
-                .unwrap_or(0),
-            cache_creation_input_tokens: 0,
-        };
+        let usage = turn_usage_from_wire(parsed.usage);
 
         Ok(TurnResponse {
             content,
@@ -166,6 +158,20 @@ impl LoopTransport for OpenAiCompatTransport {
             endpoint,
             http_status,
         })
+    }
+}
+
+pub(super) fn turn_usage_from_wire(usage: IncomingUsage) -> TurnUsage {
+    let details = usage.prompt_tokens_details.unwrap_or_default();
+    TurnUsage {
+        input_tokens: usage.prompt_tokens,
+        output_tokens: usage.completion_tokens,
+        cache_read_input_tokens: details.cached_tokens,
+        // Compatibility layers use both placements. They may echo the same
+        // aggregate in both, so prefer the larger value instead of summing.
+        cache_creation_input_tokens: details
+            .cache_write_tokens
+            .max(usage.cache_creation_input_tokens),
     }
 }
 
