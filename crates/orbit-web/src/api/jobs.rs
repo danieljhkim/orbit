@@ -6,7 +6,7 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Json, Response};
 use chrono::{DateTime, Utc};
 use orbit_core::JobRunState;
-use orbit_core::command::job::JobRunListParams;
+use orbit_core::application::job::JobRunListParams;
 use serde::Deserialize;
 use serde_json::{Value, json};
 
@@ -44,7 +44,7 @@ impl JobRunListState {
 }
 
 pub(super) async fn list_jobs(Ws(runtime): Ws) -> Response {
-    use orbit_core::command::job::JobCatalogFilter;
+    use orbit_core::application::job::JobCatalogFilter;
     match runtime.list_job_catalog_with_last_run(true, JobCatalogFilter::All) {
         Ok(rows) => {
             let values: Vec<Value> = rows

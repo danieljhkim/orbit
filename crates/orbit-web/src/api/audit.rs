@@ -7,7 +7,7 @@ use crate::state::Ws;
 use axum::extract::Query;
 use axum::response::{IntoResponse, Json, Response};
 use chrono::{DateTime, Duration, Utc};
-use orbit_core::command::job::JobRunListParams;
+use orbit_core::application::job::JobRunListParams;
 use orbit_core::{
     AuditEventFilter, AuditEventStatus, AuditToolAggregate, FailureIncidentQuery, JobRunState,
     OrbitError, OrbitRuntime,
@@ -322,7 +322,7 @@ fn compute_audit_summary_bundle(
         let p95 = if t.tool_name == "unknown" {
             runtime
                 .audit_event_durations_null_tool(&since)
-                .map(|d| orbit_core::command::audit_event::compute_p95(&d))
+                .map(|d| orbit_core::application::audit_event::compute_p95(&d))
                 .unwrap_or(0)
         } else {
             runtime

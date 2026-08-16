@@ -1,5 +1,5 @@
 use orbit_core::JobRun;
-use orbit_core::command::job::{JobCatalogEntry, JobCatalogFilter};
+use orbit_core::application::job::{JobCatalogEntry, JobCatalogFilter};
 use orbit_types::workflow::{ActivityV2Spec, JobKind, JobV2Step, JobV2StepBody};
 use serde_json::{Value, json};
 

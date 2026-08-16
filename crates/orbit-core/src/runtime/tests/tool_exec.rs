@@ -50,7 +50,7 @@ fn run_tool_context_allowlist_honors_task_wildcard() {
             Role::Admin,
             ToolContext {
                 allowed_tools: vec!["orbit.task.*".to_string()],
-                orbit_host: Some(crate::runtime::build_orbit_tool_host(
+                orbit_host: Some(crate::adapter::tool_host::build_orbit_tool_host(
                     &runtime,
                     Some(task.id.clone()),
                     None,

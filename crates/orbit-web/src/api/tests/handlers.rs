@@ -3,7 +3,7 @@ use std::sync::Arc;
 use axum::body::Body;
 use axum::http::{Method, Request, StatusCode, header};
 use chrono::{Duration, Utc};
-use orbit_core::command::task::TaskAddParams;
+use orbit_core::application::task::TaskAddParams;
 use orbit_core::{JobRunState, OrbitRuntime, TaskStatus};
 use serde_json::json;
 use tower::ServiceExt;

@@ -1,7 +1,7 @@
 //! Task reservation and run-coupling behavior.
 
 mod block_on_run_failure;
-pub(super) mod locks;
+pub(crate) mod locks;
 mod reservation_cleanup;
 
 #[cfg(test)]

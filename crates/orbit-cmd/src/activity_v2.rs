@@ -19,7 +19,7 @@ use orbit_types::workflow::activity_job::{
 use serde_json::Value;
 
 use orbit_core::OrbitRuntime;
-use orbit_core::command::SYSTEM_AUDIT_IDENTITY;
+use orbit_core::application::SYSTEM_AUDIT_IDENTITY;
 
 #[derive(Debug)]
 pub struct V2ActivityRunResult {

@@ -23,9 +23,9 @@ on:
       # state so unreaped zombies do not look like surviving work.
       - "crates/orbit-common/src/utility/process_identity.rs"
       - "crates/orbit-common/src/utility/tests/process_identity.rs"
-      - "crates/orbit-core/src/command/job/run/owner.rs"
-      - "crates/orbit-core/src/command/job/run/tests/actions.rs"
-      - "crates/orbit-core/src/command/job/run/tests/owner.rs"
+      - "crates/orbit-core/src/application/job/run/owner.rs"
+      - "crates/orbit-core/src/application/job/run/tests/actions.rs"
+      - "crates/orbit-core/src/application/job/run/tests/owner.rs"
       - "Cargo.lock"
       - ".github/workflows/ci-macos.yml"
 

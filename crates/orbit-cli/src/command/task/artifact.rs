@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use clap::{Args, Subcommand};
 use orbit_common::task_artifact_from_source_file;
 use orbit_core::OrbitRuntime;
-use orbit_core::command::task::TaskUpdateParams;
+use orbit_core::application::task::TaskUpdateParams;
 
 use crate::command::{CommandOut, CommandOutput, Execute, Payload};
 

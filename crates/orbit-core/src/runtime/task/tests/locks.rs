@@ -5,13 +5,13 @@ use serde_json::{Value, json};
 use tempfile::TempDir;
 
 use crate::OrbitRuntime;
-use crate::command::task::TaskAddParams;
+use crate::application::task::TaskAddParams;
 
 use super::super::locks::{
     TaskLockReservationScope, parse_task_lock_reservation_scope, requested_task_files,
     task_lock_conflicts,
 };
-use crate::runtime::orbit_tool_host::test_support::{
+use crate::adapter::tool_host::test_support::{
     create_context_task, invalid_input_message, run_tool_as_operator, test_runtime,
     unmanaged_tool_env_guard,
 };

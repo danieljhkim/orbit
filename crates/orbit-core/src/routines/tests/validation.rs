@@ -9,7 +9,7 @@ use orbit_types::workflow::{JobRunState, RoutineDefinition};
 use tempfile::tempdir;
 
 use crate::OrbitError;
-use crate::command::job::RunOwnerLiveness;
+use crate::application::job::RunOwnerLiveness;
 use crate::routines::loader::{LoadedRoutine, RoutineCollection, RoutineOrigin};
 use crate::routines::sweep::{RoutineDispatch, SweepOptions, run_sweep_core_with_registry};
 use crate::routines::validation::{

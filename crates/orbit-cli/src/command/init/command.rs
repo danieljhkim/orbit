@@ -1,5 +1,5 @@
 use clap::Args;
-use orbit_core::command::init::{InitOptions, init_global};
+use orbit_core::bootstrap::init::{InitOptions, init_global};
 use orbit_core::{OrbitError, OrbitRuntime};
 use orbit_registry::workspace_registry::global_orbit_dir;
 use orbit_registry::{

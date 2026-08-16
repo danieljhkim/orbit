@@ -17,7 +17,7 @@ use orbit_common::protocol::yaml::parse_routine_yaml;
 use orbit_store::{RoutineFireIntentParams, RoutineFireState, Store};
 use orbit_types::workflow::{JobRunState, RoutineDefinition};
 
-use crate::command::job::RunOwnerLiveness;
+use crate::application::job::RunOwnerLiveness;
 use crate::routines::loader::{DiscoveredWorkspaces, RoutineWorkspaceProvider};
 use crate::routines::loader::{LoadedRoutine, RoutineCollection, RoutineOrigin};
 use crate::routines::sweep::{

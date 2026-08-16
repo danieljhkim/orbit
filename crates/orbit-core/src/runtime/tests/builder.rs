@@ -11,8 +11,8 @@ use orbit_types::task::TaskStatus;
 use tempfile::tempdir;
 
 use crate::OrbitRuntime;
-use crate::command::task::{TaskAddParams, TaskUpdateParams};
-use crate::command::workflow::ShipMode;
+use crate::application::task::{TaskAddParams, TaskUpdateParams};
+use crate::application::workflow::ShipMode;
 use crate::runtime::WorkspaceRuntimeBinding;
 
 fn v2_runtime() -> (tempfile::TempDir, PathBuf, PathBuf, OrbitRuntime) {

@@ -1,7 +1,7 @@
 use std::str::FromStr;
 
 use clap::{Args, Subcommand};
-use orbit_core::command::semantic::{IndexKind, SemanticIndexParams, SemanticIndexResult};
+use orbit_core::application::semantic::{IndexKind, SemanticIndexParams, SemanticIndexResult};
 use orbit_core::{DocType, OrbitError, OrbitRuntime};
 use serde::Serialize;
 use serde_json::Value;

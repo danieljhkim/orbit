@@ -8,7 +8,7 @@ use std::sync::{Arc, Barrier, Mutex};
 use axum::body::Body;
 use axum::http::{Method, Request, StatusCode, header};
 use chrono::Utc;
-use orbit_core::command::task::TaskAddParams;
+use orbit_core::application::task::TaskAddParams;
 use orbit_core::runtime::WorkspaceRuntimeBinding;
 use orbit_core::{ActorIdentity, OrbitRuntime, ShipMode, TaskStatus};
 use orbit_types::workspace::{Workspace, WorkspaceCheckout, WorkspaceRegistry, WorkspaceStatus};

@@ -16,7 +16,7 @@ use orbit_types::workflow::{JobRunState, OverlapPolicy};
 use serde_json::json;
 
 use crate::OrbitRuntime;
-use crate::command::job::{RunOwnerLiveness, run_owner_liveness};
+use crate::application::job::{RunOwnerLiveness, run_owner_liveness};
 
 use super::due::{DueDecision, due_decision, parse_cron};
 use super::loader::{

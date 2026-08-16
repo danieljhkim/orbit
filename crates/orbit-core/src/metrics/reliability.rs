@@ -367,7 +367,7 @@ impl OrbitRuntime {
     /// Disabled jobs are included: a job disabled midway through the window
     /// still produced the invocations being counted.
     fn catalog_activity_roles(&self) -> Result<JobActivityRoles, OrbitError> {
-        use crate::command::job::JobCatalogFilter;
+        use crate::application::job::JobCatalogFilter;
 
         let mut roles = JobActivityRoles::default();
         for (entry, _) in self.list_job_catalog_with_last_run(true, JobCatalogFilter::All)? {

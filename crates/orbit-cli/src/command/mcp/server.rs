@@ -14,7 +14,7 @@ use orbit_cmd::task_owner;
 use orbit_common::protocol::tool_input::required_string;
 use orbit_common::{NotFoundKind, OrbitError};
 use orbit_core::OrbitRuntime;
-use orbit_core::command::tool::{ToolEntryPoint, execute_global_in_process_tool_dispatch};
+use orbit_core::adapter::command::{ToolEntryPoint, execute_global_in_process_tool_dispatch};
 use orbit_core::runtime::resolve_global_root;
 use orbit_mcp::{ListenerExposure, McpHost, McpListener};
 use orbit_types::tool::{McpToolDefinition, McpToolScope, ToolSessionContext};

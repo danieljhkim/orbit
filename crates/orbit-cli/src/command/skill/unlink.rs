@@ -1,6 +1,6 @@
 use clap::Args;
 use orbit_core::OrbitRuntime;
-use orbit_core::command::init::UnlinkResult;
+use orbit_core::bootstrap::init::UnlinkResult;
 use serde_json::{Value, json};
 
 use crate::command::{CommandOut, CommandOutput, Execute, Payload};
@@ -13,7 +13,7 @@ pub struct SkillUnlinkArgs {
 
 impl Execute for SkillUnlinkArgs {
     fn execute(self, runtime: &OrbitRuntime) -> CommandOut {
-        let result = orbit_core::command::init::unlink_skills(&runtime.global_root())?;
+        let result = orbit_core::bootstrap::init::unlink_skills(&runtime.global_root())?;
         if self.json {
             Ok(Payload::document(unlink_result_json(&result)).into())
         } else {

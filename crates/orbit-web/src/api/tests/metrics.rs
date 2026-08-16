@@ -9,7 +9,7 @@ use axum::http::{Request, StatusCode};
 use axum::response::Response;
 use chrono::{Duration, SecondsFormat};
 use orbit_common::test_fixtures::TEST_CODEX_MODEL;
-use orbit_core::command::job::JobRunListParams;
+use orbit_core::application::job::JobRunListParams;
 use orbit_core::metrics::{KnowledgeStatsSummary, aggregate as aggregate_knowledge_stats};
 use orbit_core::{
     ActivityInvocationMetrics, InvocationInsertParams, InvocationQuery, InvocationRecord,

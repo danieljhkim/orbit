@@ -11,11 +11,11 @@ use orbit_types::telemetry::AuditEventStatus;
 use serde_json::{Value, json};
 
 use crate::OrbitRuntime;
-use crate::command::task::TaskAddParams;
-use crate::command::workflow::ShipMode;
-use crate::runtime::orbit_tool_host::test_support::{
+use crate::adapter::tool_host::test_support::{
     create_context_task, run_tool_as_operator, test_runtime, unmanaged_tool_env_guard,
 };
+use crate::application::task::TaskAddParams;
+use crate::application::workflow::ShipMode;
 use crate::runtime::workspace_claim::CLAIM_TOKEN_ENV;
 
 /// Acquire the claim and return its token.

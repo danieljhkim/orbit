@@ -264,7 +264,7 @@ fn audit_guard_event_json_shapes_are_snapshotted() {
 }
 
 fn audit_guard_event_json(status: AuditEventStatus) -> Value {
-    let _ = orbit_core::command::tool::take_tool_audit_recorded();
+    let _ = orbit_core::adapter::command::take_tool_audit_recorded();
     let runtime = OrbitRuntime::in_memory().expect("build in-memory runtime");
     {
         let mut guard = AuditGuard::new(&runtime, snapshot_meta());
@@ -335,7 +335,7 @@ fn normalize_audit_event_json(value: &mut Value) {
 /// audit row.
 mod cli_dedup_invariant {
     use super::*;
-    use orbit_core::command::tool::take_tool_audit_recorded;
+    use orbit_core::adapter::command::take_tool_audit_recorded;
     use serde_json::json;
 
     fn fresh_runtime() -> OrbitRuntime {

@@ -5,7 +5,7 @@ use axum::extract::{Path, Query};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Json, Response};
 use chrono::{DateTime, Utc};
-use orbit_core::command::job::JobRunListParams;
+use orbit_core::application::job::JobRunListParams;
 use orbit_core::metrics::aggregate as aggregate_knowledge_stats;
 use orbit_core::{InvocationInsertParams, InvocationQuery};
 use serde::Deserialize;
