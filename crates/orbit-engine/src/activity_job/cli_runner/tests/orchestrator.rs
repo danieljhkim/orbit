@@ -11,8 +11,6 @@ use std::time::Duration;
 use crate::activity_job::{load_activity_asset, load_job_asset};
 use orbit_agent::loop_engine::audit::AuditSink;
 use orbit_common::test_fixtures::TEST_CODEX_MODEL;
-#[cfg(target_os = "linux")]
-use orbit_exec::probe_bwrap;
 use orbit_store::Store;
 use orbit_types::workflow::activity_job::{ActivityV2Spec, JobV2StepBody, V2AuditEventKind};
 use tempfile::{TempDir, tempdir};
@@ -964,11 +962,8 @@ fn run_cli_backend_records_resolved_cwd_in_started_event() {
 
 #[cfg(target_os = "linux")]
 #[test]
+#[ignore = "requires unprivileged user namespaces; bwrap cannot nest inside Orbit's sandbox"]
 fn linux_bwrap_failed_invocation_names_ungranted_write_path_and_deny() {
-    if !probe_bwrap().available {
-        return;
-    }
-
     let temp = tempdir().expect("tempdir");
     let workspace = temp.path().join("worktree");
     let orbit = workspace.join(".orbit");
@@ -1038,9 +1033,10 @@ fn linux_bwrap_failed_invocation_names_ungranted_write_path_and_deny() {
 }
 
 /// [ORB-10879] The composition rule behind the exit-0 attribution, asserted
-/// without Bubblewrap: a host whose kernel forbids unprivileged user namespaces
-/// skips every `probe_bwrap`-gated test in this file, so the message contract
-/// gets a check that always runs.
+/// without Bubblewrap: the spawn-boundary tests below are `#[ignore]`d because
+/// a host whose kernel forbids unprivileged user namespaces (including every
+/// nested Orbit sandbox) cannot run them, so the message contract gets a check
+/// that always runs.
 #[test]
 fn sandbox_write_attribution_rides_along_with_the_frame_classification() {
     let denial = "Orbit linux-bwrap policy denied the attempted write: \
@@ -1075,11 +1071,8 @@ fn sandbox_write_attribution_rides_along_with_the_frame_classification() {
 /// guess ("remount the filesystem") and no path or rule anywhere in the record.
 #[cfg(target_os = "linux")]
 #[test]
+#[ignore = "requires unprivileged user namespaces; bwrap cannot nest inside Orbit's sandbox"]
 fn linux_bwrap_exit_zero_without_an_envelope_still_names_the_denied_write() {
-    if !probe_bwrap().available {
-        return;
-    }
-
     let temp = tempdir().expect("tempdir");
     let workspace = temp.path().join("worktree");
     let orbit = workspace.join(".orbit");
