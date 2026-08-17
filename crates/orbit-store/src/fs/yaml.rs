@@ -33,5 +33,5 @@ where
     F: FnOnce(serde_yaml::Error) -> OrbitError,
 {
     let yaml = serialize_yaml_with(value, invalid)?;
-    write_atomic(path, &yaml).map_err(Into::into)
+    write_atomic(path, &yaml).map_err(|err| OrbitError::from_write_io(path, err))
 }

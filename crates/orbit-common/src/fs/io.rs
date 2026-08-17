@@ -373,3 +373,27 @@ fn set_private_file_permissions(path: &Path) -> io::Result<()> {
 fn set_private_file_permissions(_path: &Path) -> io::Result<()> {
     Ok(())
 }
+
+/// True when `error` is a read-only filesystem or access denial.
+///
+/// Matches both [`io::ErrorKind`] and the raw Unix errno so callers do not
+/// have to re-derive EROFS/EACCES classification. Used to distinguish a
+/// sandbox or environment mount from a store defect.
+pub fn is_readonly_or_access_error(error: &io::Error) -> bool {
+    match error.kind() {
+        io::ErrorKind::PermissionDenied | io::ErrorKind::ReadOnlyFilesystem => true,
+        _ => error
+            .raw_os_error()
+            .is_some_and(is_readonly_or_access_errno),
+    }
+}
+
+#[cfg(unix)]
+fn is_readonly_or_access_errno(code: i32) -> bool {
+    code == libc::EROFS || code == libc::EACCES
+}
+
+#[cfg(not(unix))]
+fn is_readonly_or_access_errno(_code: i32) -> bool {
+    false
+}

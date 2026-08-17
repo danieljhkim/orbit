@@ -1,3 +1,5 @@
+use std::path::Path;
+
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -315,6 +317,23 @@ impl OrbitError {
             _ => None,
         }
     }
+
+    /// Translate a filesystem write failure.
+    ///
+    /// EROFS/EACCES name `path` and hint that this is likely a sandbox or
+    /// environment mount, not a store defect — the outer-sandbox counterpart
+    /// to `linux_bwrap_write_grant_diagnostic`. Other I/O stays a bare
+    /// [`Self::Io`] so read and capacity failures keep their existing text.
+    pub fn from_write_io(path: &Path, err: std::io::Error) -> Self {
+        if crate::fs::io::is_readonly_or_access_error(&err) {
+            Self::Io(format!(
+                "`{}` is not writable: {err}; this is likely a sandbox or environment condition, not an Orbit store defect",
+                path.display()
+            ))
+        } else {
+            Self::Io(err.to_string())
+        }
+    }
 }
 
 impl From<std::io::Error> for OrbitError {
@@ -388,3 +407,7 @@ impl From<RecordError> for OrbitError {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "tests/error.rs"]
+mod tests;
