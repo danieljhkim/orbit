@@ -23,7 +23,7 @@ fn test_runtime() -> (tempfile::TempDir, OrbitRuntime, PathBuf, PathBuf) {
 }
 
 #[test]
-fn orbit_root_env_selects_workspace_but_not_global_root() {
+fn orbit_root_env_pins_global_registry_root() {
     let home = tempdir().expect("home tempdir");
     let repo = tempdir().expect("repo tempdir");
     let workspace_root = repo.path().join(".orbit");
@@ -38,9 +38,14 @@ fn orbit_root_env_selects_workspace_but_not_global_root() {
     let resolved_roots =
         OrbitRuntime::resolve_roots_for_cwd(repo.path(), None).expect("resolve roots");
 
-    assert_eq!(resolved_roots.global_root, home.path().join(".orbit"));
+    // `ORBIT_ROOT` is documented as equivalent to `--root`: both pin the
+    // global registry root alongside the shared/local roots, so
+    // `ORBIT_ROOT=<dir> orbit workspace list` reads and writes
+    // `<dir>/workspaces.json` rather than `$HOME/.orbit` [ORB-10928].
+    assert_eq!(resolved_roots.global_root, workspace_root);
     assert_eq!(resolved_roots.shared_root, workspace_root);
     assert_eq!(resolved_roots.local_root, workspace_root);
+    assert_ne!(resolved_roots.global_root, home.path().join(".orbit"));
 }
 
 #[test]

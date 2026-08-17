@@ -13,7 +13,7 @@ use tempfile::tempdir;
 use crate::workspace_registry::{
     assign_checkout_role, find_checkout_by_path, find_workspace, find_workspace_by_path,
     load_registry_from, load_registry_from_with_writer, register_checkout,
-    rename_local_owner_host_id, resolve_logical_workspace, save_registry_to,
+    rename_local_owner_host_id, resolve_logical_workspace, save_registry_to, validate_workspaces,
 };
 
 fn timestamp() -> chrono::DateTime<Utc> {
@@ -779,4 +779,32 @@ fn replica_role_rejects_transport_shaped_owner_before_any_mutation() {
             "rejected owner {rejected:?} changed persisted bytes"
         );
     }
+}
+
+#[test]
+fn validate_workspaces_reports_whether_any_status_changed() {
+    let repo_root = tempdir().expect("repo tempdir");
+    let mut registry = WorkspaceRegistry {
+        workspaces: vec![logical_workspace("ws_orbit", None)],
+        checkouts: vec![WorkspaceCheckout::owner(
+            "ws_orbit".to_string(),
+            repo_root.path().to_path_buf(),
+            repo_root.path().join(".orbit"),
+        )],
+        ..Default::default()
+    };
+
+    // The checkout's repo_root exists and the workspace is already Active, so
+    // nothing should change — callers like `orbit workspace list` rely on
+    // this to skip an unnecessary registry write [ORB-10928].
+    assert!(!validate_workspaces(&mut registry));
+    assert_eq!(registry.workspaces[0].status, WorkspaceStatus::Active);
+
+    drop(repo_root);
+    assert!(validate_workspaces(&mut registry));
+    assert_eq!(registry.workspaces[0].status, WorkspaceStatus::Invalid);
+
+    // Once flagged invalid, re-validating with the same missing root is a
+    // no-op.
+    assert!(!validate_workspaces(&mut registry));
 }

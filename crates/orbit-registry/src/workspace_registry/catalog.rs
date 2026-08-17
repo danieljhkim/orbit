@@ -340,8 +340,12 @@ pub fn set_path_override(
 /// Validates local checkout paths, marking their logical workspace invalid
 /// when the local repository root no longer exists. Checkoutless logical
 /// workspaces retain their catalog status.
-pub fn validate_workspaces(registry: &mut WorkspaceRegistry) {
+///
+/// Returns `true` when any workspace status changed, so callers that only
+/// read the registry (e.g. `workspace list`) can skip writing it back.
+pub fn validate_workspaces(registry: &mut WorkspaceRegistry) -> bool {
     let now = Utc::now();
+    let mut changed = false;
     for ws in &mut registry.workspaces {
         let Some(checkout) = registry
             .checkouts
@@ -354,12 +358,15 @@ pub fn validate_workspaces(registry: &mut WorkspaceRegistry) {
             if ws.status == WorkspaceStatus::Invalid {
                 ws.status = WorkspaceStatus::Active;
                 ws.updated_at = now;
+                changed = true;
             }
         } else if ws.status == WorkspaceStatus::Active {
             ws.status = WorkspaceStatus::Invalid;
             ws.updated_at = now;
+            changed = true;
         }
     }
+    changed
 }
 
 /// Machine identity facts used while validating a local registry file.

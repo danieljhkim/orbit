@@ -46,7 +46,7 @@ impl OrbitRuntime {
     ) -> Result<OrbitRuntimeRoots, OrbitError> {
         roots_from_resolved(
             resolve_initialize_roots(cwd, root_override)?,
-            root_override.is_some(),
+            has_explicit_root_override(root_override),
         )
     }
 
@@ -57,7 +57,7 @@ impl OrbitRuntime {
     ) -> Result<OrbitRuntimeRoots, OrbitError> {
         roots_from_resolved(
             resolve_initialize_roots_with_hint(cwd, root_override, hint)?,
-            root_override.is_some(),
+            has_explicit_root_override(root_override),
         )
     }
 
