@@ -99,7 +99,7 @@ pub(crate) fn ensure_orbit_root_initialized(
             ..Default::default()
         },
     )?;
-    prepare_workspace_root_layout(workspace_root)?;
+    prepare_workspace_root_layout(workspace_root, global_root)?;
     if ResolvedConfig::load(&ConfigRoots::global_only(global_root))?.scoring_enabled {
         seed_scoreboard_templates(workspace_root)?;
     }
@@ -136,10 +136,21 @@ pub fn init_workspace_at_root(
     if options.force {
         remove_path_if_exists(&orbit_root)?;
     }
-    let layout = if options.global_only {
-        prepare_global_root_layout(&orbit_root)?
+    // The workspace branch needs its global root before laying out the
+    // workspace: skill reaping must know which catalog is the live global one.
+    let workspace_global_root = if options.global_only {
+        None
     } else {
-        prepare_workspace_root_layout(&orbit_root)?
+        Some(
+            options
+                .global_root_override
+                .clone()
+                .map_or_else(resolve_global_root, Ok::<PathBuf, OrbitError>)?,
+        )
+    };
+    let layout = match workspace_global_root.as_deref() {
+        None => prepare_global_root_layout(&orbit_root)?,
+        Some(global_root) => prepare_workspace_root_layout(&orbit_root, global_root)?,
     };
     let skills_root = if options.global_only {
         global_skills_dir(&orbit_root)
@@ -187,82 +198,83 @@ pub fn init_workspace_at_root(
         refreshed_default_executors,
         refreshed_default_policies,
         scoring_enabled,
-    ) = if options.global_only {
-        let executor_store = global_executor_def_store(layout.executors_dir.clone());
-        let policy_store = global_policy_def_store(layout.policies_dir.clone());
-        let refreshed_default_executors =
-            seed_default_executors(executor_store.as_ref(), overwrite)?;
-        let refreshed_default_policies = seed_default_policies(policy_store.as_ref(), overwrite)?;
-        let activity_reconciliation = seed_default_activities(&layout.activities_dir, overwrite)?;
-        let job_reconciliation = seed_default_jobs(&layout.jobs_dir, overwrite)?;
-        let mut managed_asset_warnings = std::mem::take(&mut skill_asset_warnings);
-        managed_asset_warnings.extend(activity_reconciliation.warnings);
-        managed_asset_warnings.extend(job_reconciliation.warnings);
-        (
-            activity_reconciliation.refreshed,
-            activity_reconciliation.retired,
-            job_reconciliation.refreshed,
-            job_reconciliation.retired,
-            managed_asset_warnings,
-            refreshed_default_executors,
-            refreshed_default_policies,
-            false,
-        )
-    } else {
-        let global_root = options
-            .global_root_override
-            .clone()
-            .map_or_else(resolve_global_root, Ok::<PathBuf, OrbitError>)?;
-        let global_result = init_workspace_at_root(
-            &global_root,
-            InitOptions {
-                refresh_defaults: options.refresh_defaults,
-                global_only: true,
-                link_global_skills: options.link_global_skills || options.refresh_defaults,
-                config_seed: options.config_seed.clone(),
-                ..Default::default()
-            },
-        )?;
-        refreshed_skill_files = global_result.refreshed_skill_files;
-        created_skills_symlink = global_result.created_skills_symlink;
-        // Routines and auto-tasks are workspace-scoped, so their managed-asset
-        // reconciliation happens here rather than in the global branch; fold
-        // their warnings in alongside the global (skill/activity/job) ones.
-        let mut managed_asset_warnings = global_result.managed_asset_warnings;
-        // Routines are workspace-authored (`.orbit/routines/`, no global
-        // directory), so defaults seed here rather than in the global branch.
-        // Host identity is owned by higher-level composition and injected;
-        // Core never opens host.toml or falls back to an OS hostname.
-        if let Some(host_id) = options.routine_host_id.as_deref() {
-            let reconciliation = seed_default_routines(
-                &orbit_root.join("routines"),
-                host_id,
-                workspace_slug_from_orbit_root(&orbit_root).as_deref(),
-                // Routine definitions become workspace-authored after
-                // seeding. Refresh global defaults without overwriting
-                // cadence, host pins, policy, or enabled choices here;
-                // destructive `force` already recreated the root.
-                options.force,
-            )?;
-            refreshed_default_routines = reconciliation.refreshed;
-            managed_asset_warnings.extend(reconciliation.warnings);
+    ) = match workspace_global_root {
+        None => {
+            let executor_store = global_executor_def_store(layout.executors_dir.clone());
+            let policy_store = global_policy_def_store(layout.policies_dir.clone());
+            let refreshed_default_executors =
+                seed_default_executors(executor_store.as_ref(), overwrite)?;
+            let refreshed_default_policies =
+                seed_default_policies(policy_store.as_ref(), overwrite)?;
+            let activity_reconciliation =
+                seed_default_activities(&layout.activities_dir, overwrite)?;
+            let job_reconciliation = seed_default_jobs(&layout.jobs_dir, overwrite)?;
+            let mut managed_asset_warnings = std::mem::take(&mut skill_asset_warnings);
+            managed_asset_warnings.extend(activity_reconciliation.warnings);
+            managed_asset_warnings.extend(job_reconciliation.warnings);
+            (
+                activity_reconciliation.refreshed,
+                activity_reconciliation.retired,
+                job_reconciliation.refreshed,
+                job_reconciliation.retired,
+                managed_asset_warnings,
+                refreshed_default_executors,
+                refreshed_default_policies,
+                false,
+            )
         }
-        // Auto-task definitions are workspace-authored after seeding. Never
-        // refresh an existing file: `workspace init --force` reconciles
-        // registration and must not overwrite an operator's definition.
-        let auto_task_reconciliation = seed_default_auto_tasks(&orbit_root)?;
-        seeded_default_auto_tasks = auto_task_reconciliation.refreshed;
-        managed_asset_warnings.extend(auto_task_reconciliation.warnings);
-        (
-            global_result.refreshed_default_activities,
-            global_result.retired_default_activities,
-            global_result.refreshed_default_jobs,
-            global_result.retired_default_jobs,
-            managed_asset_warnings,
-            global_result.refreshed_default_executors,
-            global_result.refreshed_default_policies,
-            ResolvedConfig::load(&ConfigRoots::new(&global_root, &orbit_root))?.scoring_enabled,
-        )
+        Some(global_root) => {
+            let global_result = init_workspace_at_root(
+                &global_root,
+                InitOptions {
+                    refresh_defaults: options.refresh_defaults,
+                    global_only: true,
+                    link_global_skills: options.link_global_skills || options.refresh_defaults,
+                    config_seed: options.config_seed.clone(),
+                    ..Default::default()
+                },
+            )?;
+            refreshed_skill_files = global_result.refreshed_skill_files;
+            created_skills_symlink = global_result.created_skills_symlink;
+            // Routines and auto-tasks are workspace-scoped, so their managed-asset
+            // reconciliation happens here rather than in the global branch; fold
+            // their warnings in alongside the global (skill/activity/job) ones.
+            let mut managed_asset_warnings = global_result.managed_asset_warnings;
+            // Routines are workspace-authored (`.orbit/routines/`, no global
+            // directory), so defaults seed here rather than in the global branch.
+            // Host identity is owned by higher-level composition and injected;
+            // Core never opens host.toml or falls back to an OS hostname.
+            if let Some(host_id) = options.routine_host_id.as_deref() {
+                let reconciliation = seed_default_routines(
+                    &orbit_root.join("routines"),
+                    host_id,
+                    workspace_slug_from_orbit_root(&orbit_root).as_deref(),
+                    // Routine definitions become workspace-authored after
+                    // seeding. Refresh global defaults without overwriting
+                    // cadence, host pins, policy, or enabled choices here;
+                    // destructive `force` already recreated the root.
+                    options.force,
+                )?;
+                refreshed_default_routines = reconciliation.refreshed;
+                managed_asset_warnings.extend(reconciliation.warnings);
+            }
+            // Auto-task definitions are workspace-authored after seeding. Never
+            // refresh an existing file: `workspace init --force` reconciles
+            // registration and must not overwrite an operator's definition.
+            let auto_task_reconciliation = seed_default_auto_tasks(&orbit_root)?;
+            seeded_default_auto_tasks = auto_task_reconciliation.refreshed;
+            managed_asset_warnings.extend(auto_task_reconciliation.warnings);
+            (
+                global_result.refreshed_default_activities,
+                global_result.retired_default_activities,
+                global_result.refreshed_default_jobs,
+                global_result.retired_default_jobs,
+                managed_asset_warnings,
+                global_result.refreshed_default_executors,
+                global_result.refreshed_default_policies,
+                ResolvedConfig::load(&ConfigRoots::new(&global_root, &orbit_root))?.scoring_enabled,
+            )
+        }
     };
 
     if scoring_enabled {
@@ -353,11 +365,14 @@ fn seed_scoreboard_templates(orbit_root: &Path) -> Result<(), OrbitError> {
     Ok(())
 }
 
-fn prepare_workspace_root_layout(orbit_root: &Path) -> Result<WorkspacePaths, OrbitError> {
+fn prepare_workspace_root_layout(
+    orbit_root: &Path,
+    global_root: &Path,
+) -> Result<WorkspacePaths, OrbitError> {
     fs::create_dir_all(orbit_root).map_err(|e| OrbitError::Io(e.to_string()))?;
     let layout = orbit_layout_paths(orbit_root);
     ensure_workspace_dirs(&layout)?;
-    remove_workspace_seeded_default_skills(orbit_root, &layout)?;
+    remove_workspace_seeded_default_skills(orbit_root, &layout, global_root)?;
     Ok(layout)
 }
 
@@ -395,12 +410,24 @@ fn ensure_workspace_dirs(paths: &WorkspacePaths) -> Result<(), OrbitError> {
     Ok(())
 }
 
+/// Reap skill trees left behind under a workspace root by older versions that
+/// seeded them there.
+///
+/// `global_root` names the root that owns the live catalog. It is normally a
+/// different path from `orbit_root`, but a `--root` scratch root makes one
+/// directory serve as both, and then `<root>/skills` *is* the global catalog
+/// seeded moments earlier in the same runtime open. Reaping it there deleted
+/// every shipped skill on the first command after init, so the live catalog is
+/// excluded from the candidate list. [ORB-10926]
 fn remove_workspace_seeded_default_skills(
     orbit_root: &Path,
     paths: &WorkspacePaths,
+    global_root: &Path,
 ) -> Result<(), OrbitError> {
-    for skills_dir in [&paths.skills_dir, &orbit_root.join("skills")] {
-        if !skills_dir.exists() {
+    let live_catalog = global_skills_dir(global_root);
+    for skills_dir in [paths.skills_dir.clone(), orbit_root.join("skills")] {
+        let skills_dir = skills_dir.as_path();
+        if !skills_dir.exists() || is_same_dir(skills_dir, &live_catalog) {
             continue;
         }
 
@@ -415,16 +442,28 @@ fn remove_workspace_seeded_default_skills(
             remove_path_if_exists(&skills_dir.join(skill_id))?;
         }
 
-        // Skills are only ever seeded into the *global* root, so a managed
-        // manifest here describes skill trees that were just removed. Drop it
-        // once nothing else remains, otherwise it would keep an otherwise-empty
-        // legacy workspace skills directory alive forever.
+        // Skills are never seeded into a workspace-only skills directory, so a
+        // managed manifest here describes skill trees that were just removed.
+        // Drop it once nothing else remains, otherwise it would keep an
+        // otherwise-empty legacy workspace skills directory alive forever.
         if directory_holds_only(skills_dir, MANAGED_ASSET_MANIFEST_FILE)? {
             remove_path_if_exists(&skills_dir.join(MANAGED_ASSET_MANIFEST_FILE))?;
         }
         remove_empty_dir(skills_dir)?;
     }
     Ok(())
+}
+
+/// Whether two paths name the same existing directory. Falls back to a literal
+/// comparison when either side cannot be canonicalized.
+fn is_same_dir(left: &Path, right: &Path) -> bool {
+    if left == right {
+        return true;
+    }
+    match (left.canonicalize(), right.canonicalize()) {
+        (Ok(left), Ok(right)) => left == right,
+        _ => false,
+    }
 }
 
 /// Whether `dir` contains exactly one entry, named `file_name`.
@@ -1023,6 +1062,50 @@ mod tests {
                 .exists()
         );
         assert_skill_link_exists(home.path().join(".claude").join("skills").join("orbit"));
+    }
+
+    /// A `--root` scratch root makes one directory serve as both the global and
+    /// the workspace root. Every runtime open seeds the global skill catalog and
+    /// then reaps workspace-seeded leftovers; when the two roots are the same
+    /// path, the reap used to delete the catalog it had just written.
+    /// [ORB-10926]
+    #[test]
+    fn runtime_open_keeps_global_skills_when_root_doubles_as_workspace() {
+        let temp = tempdir().expect("tempdir");
+        let root = temp.path().join("scratch-root");
+        let router = global_skills_dir(&root).join("orbit").join("SKILL.md");
+
+        ensure_orbit_root_initialized(&root, &root).expect("first runtime open");
+        assert!(
+            router.exists(),
+            "init must seed the global skill catalog at {}",
+            router.display()
+        );
+
+        // Legacy workspace-seeded skills still live in the resources tree of the
+        // same root, and must still be reaped.
+        let legacy_skills = root.join("resources").join("skills");
+        seed_default_skills(&legacy_skills, &root, true).expect("seed legacy workspace skills");
+        assert!(legacy_skills.join("orbit").join("SKILL.md").exists());
+
+        ensure_orbit_root_initialized(&root, &root).expect("second runtime open");
+
+        assert!(
+            router.exists(),
+            "a runtime open must not delete the global skill catalog it seeded"
+        );
+        assert!(
+            global_skills_dir(&root)
+                .join("orbit")
+                .join("references")
+                .join("run-debugging.md")
+                .exists(),
+            "reference files under the global catalog must survive too"
+        );
+        assert!(
+            !legacy_skills.exists(),
+            "legacy workspace-seeded skills must still be reaped"
+        );
     }
 
     #[test]
