@@ -50,6 +50,13 @@ fn collect_usage(
                 .and_then(Value::as_object)
                 .and_then(|tokens| usage_from_map(tokens, UsageKeyMode::TokenBlock))
                 .is_some();
+            // Claude CLI result docs put the same billed session totals on
+            // `usage` and again on `modelUsage`. Summing both doubled
+            // cache_read (ORB-10906 / F2026-08-031). Prefer the `usage`
+            // rollup so the cache-creation TTL split is kept; skip the
+            // sibling map. Sidecar-only tokens stay in `modelUsage` and
+            // are still collected when no sibling rollup is present.
+            let skip_model_usage = sibling_usage_rollup_present(map);
 
             for &key in USAGE_CHILD_KEYS {
                 if let Some(mode) = usage_key_mode(key)
@@ -63,6 +70,7 @@ fn collect_usage(
                 if key != "tool_calls"
                     && usage_key_mode(key).is_none()
                     && !(has_model_token_usage && key == "roles")
+                    && !(skip_model_usage && key == "modelUsage")
                 {
                     let allow_child = allow_direct_usage
                         || matches!(
@@ -101,6 +109,18 @@ fn add_usage(usage: &mut TokenUsage, found: TokenUsage) {
     usage.cache_create = usage.cache_create.saturating_add(found.cache_create);
     usage.cache_create_1h = usage.cache_create_1h.saturating_add(found.cache_create_1h);
     usage.output = usage.output.saturating_add(found.output);
+}
+
+fn sibling_usage_rollup_present(map: &JsonMap) -> bool {
+    USAGE_CHILD_KEYS.iter().any(|&key| {
+        let Some(mode) = usage_key_mode(key) else {
+            return false;
+        };
+        map.get(key)
+            .and_then(Value::as_object)
+            .and_then(|child| usage_from_map(child, mode))
+            .is_some()
+    })
 }
 
 fn usage_key_mode(key: &str) -> Option<UsageKeyMode> {
