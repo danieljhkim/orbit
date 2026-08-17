@@ -230,10 +230,9 @@ fn render_crews(seed: &ConfigSeed) -> Result<String, OrbitError> {
     Ok(rendered)
 }
 
-/// Seed the `qa` crew that predates the `system` lane. It stays seeded and
-/// keeps its interactive prompt because configs and workflows already name it;
-/// system activities moved to [`default_system_crew`] rather than repurposing
-/// this one.
+/// Seed the `qa` crew that predates the `system` lane. New inits no longer
+/// prompt for it; the lane stays silently auto-seeded so leftover `crew: qa`
+/// bindings keep loading. System activities use [`default_system_crew`].
 fn default_qa_crew(seed: &ConfigSeed) -> Option<CrewSeed> {
     let (provider, model) = if seed.has_family("codex") {
         ("codex", orbit_common::model_defaults::CODEX_DEFAULT_MODEL)

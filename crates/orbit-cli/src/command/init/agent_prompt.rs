@@ -1,5 +1,5 @@
-//! Interactive prompts that collect one default crew assignment during
-//! `orbit init`.
+//! Interactive prompts that collect the default crew and, when more than one
+//! cheap-tier family is detected, the system crew during `orbit init`.
 
 use std::io::{self, BufRead, Write};
 
@@ -81,26 +81,14 @@ pub fn collect_crew_setting(
     }
 }
 
-/// Choose the provider/model behind the seeded `[crews.qa]` entry. QA uses a
-/// deliberately economical default: Terra for Codex or Sonnet for Claude.
-pub fn collect_qa_crew_setting(
+/// Choose the assignment written as `[crews.system]`. Only cheap-tier options
+/// are offered: Codex Luna, Claude Sonnet, Grok, Gemini Flash. No Sol, Opus,
+/// Terra, or free-form custom provider.
+pub(crate) fn collect_system_crew_setting(
     detected: &DetectedAgents,
     prompter: &mut dyn Prompter,
 ) -> io::Result<Option<CrewSeed>> {
-    let mut options = Vec::new();
-    if detected.codex_cli {
-        options.push(CrewSeed {
-            provider: Some("codex".to_string()),
-            model: Some(orbit_common::model_defaults::CODEX_DEFAULT_MODEL.to_string()),
-        });
-    }
-    if detected.claude_cli {
-        options.push(CrewSeed {
-            provider: Some("claude".to_string()),
-            model: Some(orbit_common::model_defaults::CLAUDE_DEFAULT_WEAK.to_string()),
-        });
-    }
-
+    let mut options = system_crew_options(detected);
     if options.is_empty() {
         return Ok(None);
     }
@@ -108,15 +96,70 @@ pub fn collect_qa_crew_setting(
         return Ok(Some(options.remove(0)));
     }
 
-    prompter.message(
-        "Choose the detected agent for the QA crew:\n\n  1. Codex  terra\n  2. Claude sonnet",
-    )?;
+    prompter.message(&format_system_crew_options(&options))?;
+    let last = options.len();
     loop {
-        match prompter.prompt("QA crew [1]: ")?.trim() {
-            "" | "1" => return Ok(Some(options.remove(0))),
-            "2" => return Ok(Some(options.remove(1))),
-            _ => prompter.message("Please enter 1 or 2.")?,
+        let choice = prompter.prompt("System crew [1]: ")?;
+        let choice = choice.trim();
+        let selected = if choice.is_empty() {
+            Some(0)
+        } else {
+            choice.parse::<usize>().ok().and_then(|n| n.checked_sub(1))
+        };
+        if let Some(index) = selected.filter(|index| *index < options.len()) {
+            return Ok(Some(options.remove(index)));
         }
+        prompter.message(&format!("Please enter 1-{last}."))?;
+    }
+}
+
+/// Cheap-tier system options in the same preference order as
+/// `orbit-config::default_system_crew`: Codex Luna, Claude Sonnet, Grok,
+/// Gemini Flash.
+fn system_crew_options(detected: &DetectedAgents) -> Vec<CrewSeed> {
+    use orbit_common::model_defaults::{
+        CLAUDE_DEFAULT_WEAK, CODEX_LUNA_MODEL, GEMINI_CREW_MODEL, GROK_DEFAULT_MODEL,
+    };
+    let mut options = Vec::new();
+    for (enabled, provider, model) in [
+        (detected.codex_cli, "codex", CODEX_LUNA_MODEL),
+        (detected.claude_cli, "claude", CLAUDE_DEFAULT_WEAK),
+        (detected.grok_cli, "grok", GROK_DEFAULT_MODEL),
+        (detected.gemini_cli, "gemini", GEMINI_CREW_MODEL),
+    ] {
+        if enabled {
+            options.push(CrewSeed {
+                provider: Some(provider.to_string()),
+                model: Some(model.to_string()),
+            });
+        }
+    }
+    options
+}
+
+fn format_system_crew_options(options: &[CrewSeed]) -> String {
+    let mut lines = vec![
+        "Choose the cheap-tier agent for the system crew (recovery, triage, qa-sweep):".to_string(),
+        String::new(),
+    ];
+    for (index, option) in options.iter().enumerate() {
+        lines.push(format!(
+            "  {}. {:<8} {}",
+            index + 1,
+            system_crew_label(option),
+            option.model.as_deref().unwrap_or("(not set)")
+        ));
+    }
+    lines.join("\n")
+}
+
+fn system_crew_label(option: &CrewSeed) -> &'static str {
+    match option.provider.as_deref() {
+        Some("codex") => "Codex",
+        Some("claude") => "Claude",
+        Some("grok") => "Grok",
+        Some("gemini") => "Gemini",
+        _ => "Agent",
     }
 }
 

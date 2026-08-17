@@ -3,7 +3,10 @@ use std::fs;
 use tempfile::tempdir;
 
 use crate::command::init::agent_detect::{DetectedAgents, detect, testing::MockAgentEnvProbe};
-use crate::command::init::seed::{collect_crew_settings_for_init, config_seed_from_detection};
+use crate::command::init::agent_prompt::testing::CannedPrompter;
+use crate::command::init::seed::{
+    collect_crew_settings_for_init, collect_interactive_crew_settings, config_seed_from_detection,
+};
 use crate::tests::env_isolation::EnvGuard;
 
 /// `collect_crew_settings_for_init` short-circuits when --non-interactive
@@ -17,6 +20,45 @@ fn non_interactive_short_circuits_before_prompts() {
     let detected = DetectedAgents::default();
     let result = collect_crew_settings_for_init(Some(home.path()), false, true, &detected);
     assert!(matches!(result, Ok(None)));
+}
+
+/// Interactive init still asks for the default crew, then the system crew
+/// when more than one cheap-tier family is present. It never asks for QA,
+/// even on the Claude+Codex host that used to trigger that prompt.
+#[test]
+fn interactive_init_collects_system_crew_and_never_prompts_for_qa() {
+    let detected = DetectedAgents {
+        claude_cli: true,
+        codex_cli: true,
+        ..DetectedAgents::default()
+    };
+    let mut prompter = CannedPrompter::new(["", "2"]);
+    let collected =
+        collect_interactive_crew_settings(&detected, &mut prompter).expect("interactive crews");
+
+    assert_eq!(
+        collected
+            .get("custom")
+            .and_then(|crew| crew.provider.as_deref()),
+        Some("claude")
+    );
+    assert_eq!(
+        collected
+            .get("system")
+            .and_then(|crew| crew.provider.as_deref()),
+        Some("claude")
+    );
+    assert_eq!(
+        collected
+            .get("system")
+            .and_then(|crew| crew.model.as_deref()),
+        Some(orbit_common::model_defaults::CLAUDE_DEFAULT_WEAK)
+    );
+    assert!(!collected.contains_key("qa"));
+    let transcript = prompter.transcript();
+    assert!(transcript.contains("Use this default crew? [Y/n]: "));
+    assert!(transcript.contains("System crew [1]: "));
+    assert!(!transcript.contains("QA crew"));
 }
 
 /// When config.toml already exists and --force is unset, prompts are

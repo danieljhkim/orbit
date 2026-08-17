@@ -68,38 +68,65 @@ fn custom_provider_reprompts_for_blank_unknown_model() {
 }
 
 #[test]
-fn qa_crew_prompt_offers_only_detected_claude_and_codex_defaults() {
+fn system_crew_prompt_offers_only_detected_cheap_tier_options() {
     let detected = DetectedAgents {
         claude_cli: true,
         codex_cli: true,
         gemini_cli: true,
+        grok_cli: true,
         ..DetectedAgents::default()
     };
     let mut prompter = CannedPrompter::new(["2"]);
-    let qa = collect_qa_crew_setting(&detected, &mut prompter)
-        .expect("qa choice")
-        .expect("qa is available");
+    let system = collect_system_crew_setting(&detected, &mut prompter)
+        .expect("system choice")
+        .expect("system is available");
 
-    assert_eq!(qa.provider.as_deref(), Some("claude"));
+    assert_eq!(system.provider.as_deref(), Some("claude"));
     assert_eq!(
-        qa.model.as_deref(),
+        system.model.as_deref(),
         Some(orbit_common::model_defaults::CLAUDE_DEFAULT_WEAK)
     );
     let transcript = prompter.transcript();
-    assert!(transcript.contains("Codex  terra"));
-    assert!(transcript.contains("Claude sonnet"));
-    assert!(!transcript.contains("Gemini"));
+    assert!(transcript.contains("gpt-5.6-luna"));
+    assert!(transcript.contains("sonnet"));
+    assert!(transcript.contains("grok-4.6"));
+    assert!(transcript.contains("gemini-3.7-flash"));
+    assert!(transcript.contains("System crew [1]: "));
+    assert!(!transcript.contains("Custom"));
+    assert!(!transcript.contains("gpt-5.6-sol"));
+    assert!(!transcript.contains("opus"));
+    assert!(!transcript.contains("terra"));
+    assert!(!transcript.contains("QA crew"));
 }
 
 #[test]
-fn qa_crew_is_omitted_without_claude_or_codex_cli() {
+fn system_crew_auto_accepts_the_single_detected_family() {
     let detected = DetectedAgents {
-        gemini_cli: true,
+        grok_cli: true,
         ..DetectedAgents::default()
     };
     let mut prompter = CannedPrompter::new([] as [&str; 0]);
-    let qa = collect_qa_crew_setting(&detected, &mut prompter).expect("qa selection");
+    let system = collect_system_crew_setting(&detected, &mut prompter)
+        .expect("system selection")
+        .expect("system is available");
 
-    assert!(qa.is_none());
+    assert_eq!(system.provider.as_deref(), Some("grok"));
+    assert_eq!(
+        system.model.as_deref(),
+        Some(orbit_common::model_defaults::GROK_DEFAULT_MODEL)
+    );
+    assert!(prompter.transcript().is_empty());
+}
+
+#[test]
+fn system_crew_is_omitted_without_a_supported_family() {
+    let detected = DetectedAgents {
+        ollama_cli: true,
+        ..DetectedAgents::default()
+    };
+    let mut prompter = CannedPrompter::new([] as [&str; 0]);
+    let system = collect_system_crew_setting(&detected, &mut prompter).expect("system selection");
+
+    assert!(system.is_none());
     assert!(prompter.transcript().is_empty());
 }
