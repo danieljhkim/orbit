@@ -182,3 +182,70 @@ fn audit_record_carries_argv_working_directory_caller_and_workspace() {
     assert_eq!(payload["caller"], json!("claude"));
     assert_eq!(payload["workspace"], json!(repo_root.display().to_string()));
 }
+
+#[test]
+fn secret_argv_reaches_child_but_is_redacted_in_the_audit_record() {
+    let _env = unmanaged_tool_env_guard();
+    let (_root, runtime, repo_root) = test_runtime();
+    let token = acquire_claim(&runtime, "claude");
+    let secret = "sk-abcdefghijklmnopqrstuvwxyz012345";
+
+    let result = run_tool_as_operator(
+        &runtime,
+        "orbit.command.exec",
+        json!({
+            "argv": ["echo", secret],
+            "working_directory": repo_root.display().to_string(),
+            "claim_token": token,
+            "model": "claude",
+        }),
+    )
+    .expect("claim holder executes");
+
+    assert!(
+        result["stdout"]
+            .as_str()
+            .expect("stdout is a string")
+            .contains(secret),
+        "the raw secret must reach the controlled test child unchanged: {result}"
+    );
+
+    let events = runtime
+        .list_audit_events(None, None, None, None, 200)
+        .expect("read audit events");
+    let event = events
+        .iter()
+        .find(|event| event.command == "command.exec")
+        .expect("command execution is audited");
+    let payload: Value = event
+        .arguments_json
+        .as_deref()
+        .and_then(|raw| serde_json::from_str(raw).ok())
+        .expect("audit payload is recorded JSON");
+
+    let argv = payload["argv"]
+        .as_array()
+        .expect("argv is recorded as an array");
+    assert_eq!(argv[0], json!("echo"));
+    assert_ne!(
+        argv[1],
+        json!(secret),
+        "the raw secret must not be persisted in the durable audit record: {payload}"
+    );
+    assert!(
+        argv[1]
+            .as_str()
+            .expect("redacted arg is a string")
+            .contains("REDACTED"),
+        "unexpected redacted argv value: {payload}"
+    );
+
+    let raw_record = event
+        .arguments_json
+        .as_deref()
+        .expect("audit payload is recorded as raw JSON text");
+    assert!(
+        !raw_record.contains(secret),
+        "the raw secret must not appear anywhere in the durable audit record: {raw_record}"
+    );
+}
