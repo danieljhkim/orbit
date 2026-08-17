@@ -22,9 +22,19 @@ pub(super) struct EnvOverrides<'a> {
     pub(super) grok_home: Option<&'a str>,
 }
 
-pub(super) fn compile_with_env(resolved: &ResolvedFsProfile, env: EnvOverrides<'_>) -> String {
+/// Provider used by profile tests that are not about the per-provider
+/// credential carve-out. Codex keeps every default credential deny, so a test
+/// asserting the shared clauses sees them unmodified.
+pub(super) const NEUTRAL_PROVIDER: &str = "codex";
+
+pub(super) fn compile_with_env(
+    resolved: &ResolvedFsProfile,
+    provider: &str,
+    env: EnvOverrides<'_>,
+) -> String {
     compile_macos_sandbox_profile_with_env(
         resolved,
+        provider,
         SandboxCompileEnv {
             home: env.home.map(OsStr::new),
             codex_home: env.codex_home.map(OsStr::new),

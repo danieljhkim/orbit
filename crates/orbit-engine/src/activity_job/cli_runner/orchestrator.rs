@@ -27,8 +27,8 @@ use super::envelope::{
     task_id_from_input,
 };
 use super::spawn::{
-    linux_bwrap_failed_write_diagnostic, orbit_tool_env, prepare_sandbox_for_dispatch,
-    resolve_provider_launcher,
+    linux_bwrap_failed_write_diagnostic, macos_keychain_auth_diagnostic, orbit_tool_env,
+    prepare_sandbox_for_dispatch, resolve_provider_launcher,
 };
 use super::supervisor::{
     DEFAULT_WALL_CLOCK_TIMEOUT_SECONDS, SpawnTraceContext, SpawnWithTimeoutRequest,
@@ -414,21 +414,33 @@ pub fn run_cli_backend(
             timeout_seconds
         ))
     } else if !exit_success {
+        let stderr_text = String::from_utf8_lossy(stderr.protocol_bytes());
+        let exit_message = || format!("cli subprocess exited with code {exit_code:?}");
         Some(
             sandbox_write_diagnostic
                 .clone()
+                // A Keychain-backed provider login reads as "expired" whether it
+                // really expired or the sandbox hid the credential. Orbit
+                // compiled the profile, so it is the layer that can say which
+                // one this was — and the provider's own message cannot.
+                // [ORB-10929]
+                .or_else(|| {
+                    macos_keychain_auth_diagnostic(
+                        &provider,
+                        sandbox,
+                        &format!("{stdout_text}\n{stderr_text}"),
+                    )
+                    .map(|diagnostic| format!("{} {diagnostic}", exit_message()))
+                })
                 // [ORB-10746] A bare exit code cannot distinguish "this CLI
                 // has no --json-schema" from "the provider rejected Orbit's
                 // schema" from any other nonzero exit, and the first two are
                 // configuration faults an operator can act on immediately.
                 .or_else(|| {
-                    provider_invocation_diagnostic(
-                        stdout_text.as_ref(),
-                        String::from_utf8_lossy(stderr.protocol_bytes()).as_ref(),
-                    )
-                    .map(|diagnostic| bounded_diagnostic(&diagnostic, &redaction))
+                    provider_invocation_diagnostic(stdout_text.as_ref(), stderr_text.as_ref())
+                        .map(|diagnostic| bounded_diagnostic(&diagnostic, &redaction))
                 })
-                .unwrap_or_else(|| format!("cli subprocess exited with code {:?}", exit_code)),
+                .unwrap_or_else(exit_message),
         )
     } else if (spec.require_completion_envelope || spec.require_response_envelope)
         && matches!(envelope_status.as_deref(), Some("failed") | Some("timeout"))

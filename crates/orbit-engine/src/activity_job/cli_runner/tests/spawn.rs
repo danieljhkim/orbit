@@ -8,7 +8,8 @@ use tempfile::tempdir;
 
 use super::super::super::dispatcher::ResolvedSandbox;
 use super::super::spawn::{
-    SpawnError, SpawnedChild, linux_bwrap_failed_write_diagnostic, orbit_tool_env_with,
+    SpawnError, SpawnedChild, linux_bwrap_failed_write_diagnostic,
+    macos_keychain_auth_diagnostic_with, orbit_tool_env_with,
     prepare_linux_sandbox_for_dispatch_with_probe, reject_unsatisfiable_managed_grants,
     resolve_provider_launcher_with, spawn_bare, spawn_macos_sandboxed_with,
 };
@@ -214,10 +215,71 @@ fn spawn_bare_does_not_inherit_ambient_sensitive_env() {
     );
 }
 
+/// The failure an operator actually sees when a Keychain-backed login cannot be
+/// read: the provider says "expired", which is indistinguishable from a sandbox
+/// denial unless Orbit attributes it. Both branches must be reachable, because
+/// they call for different fixes.
+#[test]
+fn keychain_auth_diagnostic_separates_a_real_expiry_from_a_sandbox_denial() {
+    let sandbox = sandbox_for_test();
+    let failure = "Failed to authenticate: OAuth session expired and could not be refreshed";
+
+    let with_home = macos_keychain_auth_diagnostic_with(
+        "claude",
+        Some(&sandbox),
+        failure,
+        Some(std::ffi::OsStr::new("/Users/test")),
+    )
+    .expect("claude under sandbox-exec must be attributed");
+    assert!(
+        with_home.contains("real login failure"),
+        "a reachable keychain means re-authentication is the fix: {with_home}"
+    );
+
+    let without_home = macos_keychain_auth_diagnostic_with("claude", Some(&sandbox), failure, None)
+        .expect("a HOME-less compile cannot emit the keychain allow");
+    assert!(
+        without_home.contains("HOME is unset"),
+        "an unemitted keychain allow means re-authentication cannot help: {without_home}"
+    );
+}
+
+#[test]
+fn keychain_auth_diagnostic_stays_silent_outside_its_exact_failure_shape() {
+    let sandbox = sandbox_for_test();
+    let failure = "Failed to authenticate: OAuth session expired and could not be refreshed";
+    let home = std::ffi::OsStr::new("/Users/test");
+
+    // Providers that never read the keychain, unsandboxed runs, and unrelated
+    // failures must not collect a keychain explanation.
+    assert!(
+        macos_keychain_auth_diagnostic_with("codex", Some(&sandbox), failure, Some(home)).is_none()
+    );
+    assert!(macos_keychain_auth_diagnostic_with("claude", None, failure, Some(home)).is_none());
+    assert!(
+        macos_keychain_auth_diagnostic_with(
+            "claude",
+            Some(&linux_sandbox_for_test(false)),
+            failure,
+            Some(home)
+        )
+        .is_none()
+    );
+    assert!(
+        macos_keychain_auth_diagnostic_with(
+            "claude",
+            Some(&sandbox),
+            "error: request timed out",
+            Some(home)
+        )
+        .is_none()
+    );
+}
+
 #[test]
 fn spawn_macos_sandboxed_returns_error_when_sandbox_exec_missing_and_fallback_disabled() {
     let sandbox = sandbox_for_test();
-    let err = spawn_macos_sandboxed_with("/bin/sh", &[], &[], None, &sandbox, false)
+    let err = spawn_macos_sandboxed_with("/bin/sh", &[], &[], None, &sandbox, "claude", false)
         .expect_err("expected fallback-disabled error");
     assert!(
         err.permanent,
@@ -498,6 +560,7 @@ fn spawn_macos_sandboxed_falls_back_to_bare_exec_when_allow_fallback_set() {
         &[],
         None,
         &sandbox,
+        "claude",
         false,
     )
     .expect("fallback should succeed");

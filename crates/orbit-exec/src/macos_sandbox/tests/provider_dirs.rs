@@ -12,6 +12,7 @@ fn compile_grants_write_access_to_codex_home_when_set() {
     let resolved = profile("default", &["/Users/test/repo"], &["/Users/test/repo/src"]);
     let text = compile_with_env(
         &resolved,
+        NEUTRAL_PROVIDER,
         EnvOverrides {
             home: Some("/Users/test"),
             codex_home: Some("/var/folders/test/codex-home"),
@@ -33,6 +34,7 @@ fn compile_grants_write_access_to_home_codex_when_codex_home_missing() {
     let resolved = profile("default", &["/Users/test/repo"], &["/Users/test/repo/src"]);
     let text = compile_with_env(
         &resolved,
+        NEUTRAL_PROVIDER,
         EnvOverrides {
             home: Some("/Users/test"),
             ..Default::default()
@@ -49,6 +51,7 @@ fn compile_grants_write_access_to_claude_config_dir_when_set() {
     let resolved = profile("default", &["/Users/test/repo"], &["/Users/test/repo/src"]);
     let text = compile_with_env(
         &resolved,
+        NEUTRAL_PROVIDER,
         EnvOverrides {
             home: Some("/Users/test"),
             claude_config_dir: Some("/var/folders/test/claude-config"),
@@ -70,6 +73,7 @@ fn compile_grants_write_access_to_home_claude_when_claude_config_dir_missing() {
     let resolved = profile("default", &["/Users/test/repo"], &["/Users/test/repo/src"]);
     let text = compile_with_env(
         &resolved,
+        NEUTRAL_PROVIDER,
         EnvOverrides {
             home: Some("/Users/test"),
             ..Default::default()
@@ -86,6 +90,7 @@ fn compile_grants_write_access_to_home_claude_json_when_claude_config_dir_missin
     let resolved = profile("default", &["/Users/test/repo"], &["/Users/test/repo/src"]);
     let text = compile_with_env(
         &resolved,
+        NEUTRAL_PROVIDER,
         EnvOverrides {
             home: Some("/Users/test"),
             ..Default::default()
@@ -112,6 +117,7 @@ fn compile_does_not_emit_home_claude_json_allow_when_claude_config_dir_set() {
     let resolved = profile("default", &["/Users/test/repo"], &["/Users/test/repo/src"]);
     let text = compile_with_env(
         &resolved,
+        NEUTRAL_PROVIDER,
         EnvOverrides {
             home: Some("/Users/test"),
             claude_config_dir: Some("/var/folders/test/claude-config"),
@@ -129,6 +135,7 @@ fn compile_grants_write_access_to_home_gemini() {
     let resolved = profile("default", &["/Users/test/repo"], &["/Users/test/repo/src"]);
     let text = compile_with_env(
         &resolved,
+        NEUTRAL_PROVIDER,
         EnvOverrides {
             home: Some("/Users/test"),
             ..Default::default()
@@ -214,6 +221,7 @@ fn compile_grants_write_access_to_grok_home_when_set() {
     let resolved = profile("default", &["/Users/test/repo"], &["/Users/test/repo/src"]);
     let text = compile_with_env(
         &resolved,
+        NEUTRAL_PROVIDER,
         EnvOverrides {
             home: Some("/Users/test"),
             grok_home: Some("/var/folders/test/grok-home"),
@@ -235,6 +243,7 @@ fn compile_grants_write_access_to_home_grok_when_grok_home_missing() {
     let resolved = profile("default", &["/Users/test/repo"], &["/Users/test/repo/src"]);
     let text = compile_with_env(
         &resolved,
+        NEUTRAL_PROVIDER,
         EnvOverrides {
             home: Some("/Users/test"),
             ..Default::default()
@@ -251,6 +260,7 @@ fn compile_emits_explicit_grok_json_lock_and_tmp_allows() {
     let resolved = profile("default", &["/Users/test/repo"], &["/Users/test/repo/src"]);
     let text = compile_with_env(
         &resolved,
+        NEUTRAL_PROVIDER,
         EnvOverrides {
             home: Some("/Users/test"),
             ..Default::default()
@@ -290,6 +300,7 @@ fn compile_emits_all_provider_state_dirs() {
     let resolved = profile("default", &["/Users/test/repo"], &["/Users/test/repo/src"]);
     let text = compile_with_env(
         &resolved,
+        NEUTRAL_PROVIDER,
         EnvOverrides {
             home: Some("/Users/test"),
             ..Default::default()
@@ -338,6 +349,7 @@ fn compiled_profile_allows_writes_to_provider_state_dirs() {
     };
     let profile_text = compile_macos_sandbox_profile_with_env(
         &resolved,
+        NEUTRAL_PROVIDER,
         SandboxCompileEnv {
             home: Some(synthetic_home.path().as_os_str()),
             codex_home: None,
@@ -406,6 +418,7 @@ fn compiled_profile_allows_writes_to_grok_json_lock_and_tmp_files() {
     };
     let profile_text = compile_macos_sandbox_profile_with_env(
         &resolved,
+        NEUTRAL_PROVIDER,
         SandboxCompileEnv {
             home: Some(synthetic_home.path().as_os_str()),
             codex_home: None,
@@ -488,6 +501,7 @@ fn compiled_profile_allows_writes_to_claude_home_json_siblings() {
     };
     let profile_text = compile_macos_sandbox_profile_with_env(
         &resolved,
+        NEUTRAL_PROVIDER,
         SandboxCompileEnv {
             home: Some(synthetic_home.path().as_os_str()),
             codex_home: None,

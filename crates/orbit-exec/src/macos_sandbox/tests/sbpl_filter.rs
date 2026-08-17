@@ -7,7 +7,7 @@ fn compile_strips_glob_suffix_for_subpath_root() {
         &["/Users/test/repo"],
         &["/Users/test/repo/src/**"],
     );
-    let text = compile_with_env(&resolved, EnvOverrides::default());
+    let text = compile_with_env(&resolved, NEUTRAL_PROVIDER, EnvOverrides::default());
     assert!(
         text.contains("(allow file-write* (subpath \"/Users/test/repo/src\"))"),
         "expected glob-stripped subpath: {text}"
@@ -25,7 +25,7 @@ fn compile_uses_regex_for_non_subpath_positive_modify_glob() {
         &["/Users/test/repo"],
         &["/Users/test/.orbit/orbit.db*"],
     );
-    let text = compile_with_env(&resolved, EnvOverrides::default());
+    let text = compile_with_env(&resolved, NEUTRAL_PROVIDER, EnvOverrides::default());
     assert!(
         text.contains(
             "(allow file-write* (regex \"^/[Uu][Ss][Ee][Rr][Ss]/[Tt][Ee][Ss][Tt]/\\\\.[Oo][Rr][Bb][Ii][Tt]/[Oo][Rr][Bb][Ii][Tt]\\\\.[Dd][Bb][^/]*$\"))"
@@ -49,7 +49,7 @@ fn compile_uses_regex_for_non_subpath_positive_modify_glob() {
 fn compile_appends_explicit_deny_for_negated_modify_rule() {
     let mut resolved = profile("default", &["/Users/test/repo"], &["/Users/test/repo"]);
     resolved.modify.push("!/Users/test/repo/.env".to_string());
-    let text = compile_with_env(&resolved, EnvOverrides::default());
+    let text = compile_with_env(&resolved, NEUTRAL_PROVIDER, EnvOverrides::default());
     assert!(
         text.contains("(deny file-write* (subpath \"/Users/test/repo/.env\"))"),
         "missing deny clause: {text}"
@@ -75,7 +75,7 @@ fn compile_emits_explicit_read_deny_for_negated_read_rule() {
     // `compile_appends_explicit_deny_for_negated_modify_rule`.
     let mut resolved = profile("default", &["/Users/test/repo"], &["/Users/test/repo"]);
     resolved.read.push("!/Users/test/repo/.env".to_string());
-    let text = compile_with_env(&resolved, EnvOverrides::default());
+    let text = compile_with_env(&resolved, NEUTRAL_PROVIDER, EnvOverrides::default());
     assert!(
         text.contains("(deny file-read* (subpath \"/Users/test/repo/.env\"))"),
         "missing deny file-read* clause: {text}"
@@ -97,7 +97,7 @@ fn compile_uses_regex_for_non_subpath_negated_read_glob() {
     // collapsed subpath that would over-match.
     let mut resolved = profile("default", &["/Users/test/repo"], &["/Users/test/repo"]);
     resolved.read.push("!/Users/test/repo/**/*.env".to_string());
-    let text = compile_with_env(&resolved, EnvOverrides::default());
+    let text = compile_with_env(&resolved, NEUTRAL_PROVIDER, EnvOverrides::default());
     assert!(
         text.contains("(deny file-read* (regex \"^/[Uu][Ss][Ee][Rr][Ss]/[Tt][Ee][Ss][Tt]/[Rr][Ee][Pp][Oo]/(?:.*/)?[^/]*\\\\.[Ee][Nn][Vv]$\"))"),
         "missing regex read deny: {text}"
@@ -114,7 +114,7 @@ fn compile_uses_regex_for_non_subpath_negated_modify_glob() {
     resolved
         .modify
         .push("!/Users/test/repo/**/*.env".to_string());
-    let text = compile_with_env(&resolved, EnvOverrides::default());
+    let text = compile_with_env(&resolved, NEUTRAL_PROVIDER, EnvOverrides::default());
     assert!(
         text.contains(
             "(deny file-write* (regex \"^/[Uu][Ss][Ee][Rr][Ss]/[Tt][Ee][Ss][Tt]/[Rr][Ee][Pp][Oo]/(?:.*/)?[^/]*\\\\.[Ee][Nn][Vv]$\"))"

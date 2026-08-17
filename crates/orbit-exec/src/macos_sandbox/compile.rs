@@ -2,15 +2,24 @@ use std::ffi::OsStr;
 
 use orbit_common::OrbitError;
 use orbit_types::policy::ResolvedFsProfile;
+use orbit_types::workflow::Provider;
 
 /// Compile a [`ResolvedFsProfile`] into SBPL text suitable for
 /// `sandbox-exec -f`.
+///
+/// `provider` is the canonical provider name of the CLI this profile will
+/// confine (`claude`, `codex`, ...). It only selects the credential-store
+/// carve-out described in [`provider_reads_macos_login_keychain`]; every other
+/// clause is provider-independent. An unknown name compiles with the full
+/// default credential denylist, so a typo fails closed.
 ///
 /// The emitted profile:
 /// - denies everything by default;
 /// - allows broad reads (`file-read*`) for agent CLI compatibility, then
 ///   appends default read denies for well-known credential locations so those
-///   paths still lose under SBPL's last-match-wins evaluation;
+///   paths still lose under SBPL's last-match-wins evaluation, and finally
+///   re-allows the confined provider's own credential store if it lives in one
+///   of those locations;
 /// - allows the syscall classes agent CLIs rely on (process, signal, mach,
 ///   ipc, sysctl, iokit) and unrestricted network — agents call out to
 ///   provider APIs;
@@ -26,13 +35,17 @@ use orbit_types::policy::ResolvedFsProfile;
 /// Paths in `rules.modify` are emitted as-is. Callers must resolve
 /// workspace-relative globs to absolute paths before invoking this
 /// function — a relative `subpath` is meaningless to the kernel.
-pub fn compile_macos_sandbox_profile(rules: &ResolvedFsProfile) -> Result<String, OrbitError> {
+pub fn compile_macos_sandbox_profile(
+    rules: &ResolvedFsProfile,
+    provider: &str,
+) -> Result<String, OrbitError> {
     let home = std::env::var_os("HOME");
     let codex_home = std::env::var_os("CODEX_HOME");
     let claude_config_dir = std::env::var_os("CLAUDE_CONFIG_DIR");
     let grok_home = std::env::var_os("GROK_HOME");
     compile_macos_sandbox_profile_with_env(
         rules,
+        provider,
         SandboxCompileEnv {
             home: home.as_deref(),
             codex_home: codex_home.as_deref(),
@@ -55,6 +68,7 @@ pub(super) struct SandboxCompileEnv<'a> {
 
 pub(super) fn compile_macos_sandbox_profile_with_env(
     rules: &ResolvedFsProfile,
+    provider: &str,
     env: SandboxCompileEnv<'_>,
 ) -> Result<String, OrbitError> {
     let SandboxCompileEnv {
@@ -147,9 +161,66 @@ pub(super) fn compile_macos_sandbox_profile_with_env(
         }
     }
     emit_default_credential_read_denies(home, &mut out);
+    emit_provider_credential_read_reallow(provider, home, &mut out);
 
     Ok(out)
 }
+
+/// Whether `provider`'s CLI reads its own credentials from the macOS login
+/// Keychain, and therefore cannot run under the default Keychain read deny.
+///
+/// Only Claude Code does today: it keeps its OAuth session in the login
+/// keychain item `Claude Code-credentials` and leaves
+/// `~/.claude/.credentials.json` as an empty stub. Codex, Gemini, and Grok keep
+/// credentials in plain files under their own state directories, which are
+/// already granted, so they keep the deny. Names that do not resolve to a
+/// canonical [`Provider`] keep the deny too — the carve-out fails closed.
+/// [ORB-10929]
+pub fn provider_reads_macos_login_keychain(provider: &str) -> bool {
+    Provider::parse(provider).ok() == Some(Provider::Claude)
+}
+
+/// Re-allow the confined provider's own credential store after
+/// [`emit_default_credential_read_denies`], so last-match-wins grants it.
+///
+/// Without this, a sandboxed `claude` cannot see its Keychain item and reports
+/// `OAuth session expired and could not be refreshed` — an authentication
+/// failure no re-login can clear, because the credential is present and simply
+/// unreadable. The carve-out is deliberately narrow:
+/// - it applies to one provider, so a Codex or Grok agent still cannot read any
+///   keychain;
+/// - it covers only the *user* keychain directory; `/Library/Keychains` and
+///   `/System/Library/Keychains` stay denied for every provider;
+/// - it grants reads only. Nothing here makes the login keychain writable, so a
+///   sandboxed run can use a refreshed token in memory but cannot persist it
+///   back to the keychain; re-authentication stays an unsandboxed operation.
+///
+/// Reading the keychain file is not the same as reading its secrets: item
+/// contents stay encrypted and gated by their own per-item ACLs, which is why
+/// the grant is scoped to the provider that owns the item it needs.
+///
+/// Precedence: this is the last clause in the profile, so it also outranks an
+/// activity's own negated `read` rules. Nothing an activity declares can *widen*
+/// the grant — it depends only on the confined provider — but an activity cannot
+/// narrow it back either. Move this above the `rules.read` loop if a profile
+/// ever needs to deny a provider its own credential store.
+fn emit_provider_credential_read_reallow(provider: &str, home: Option<&OsStr>, out: &mut String) {
+    if !provider_reads_macos_login_keychain(provider) {
+        return;
+    }
+    let Some(home) = super::provider_dirs::non_empty_env_path(home) else {
+        return;
+    };
+    let keychains = format!("{}/{USER_KEYCHAINS_SUBPATH}", home.display());
+    out.push_str(&format!(
+        "(allow file-read* (subpath \"{}\"))\n",
+        super::sbpl_filter::sbpl_escape(&keychains)
+    ));
+}
+
+/// HOME-relative path of the per-user keychain directory. Shared by the default
+/// deny and the provider re-allow so the two clauses cannot drift.
+const USER_KEYCHAINS_SUBPATH: &str = "Library/Keychains";
 
 fn emit_default_credential_read_denies(home: Option<&OsStr>, out: &mut String) {
     if let Some(home) = super::provider_dirs::non_empty_env_path(home) {
@@ -158,7 +229,7 @@ fn emit_default_credential_read_denies(home: Option<&OsStr>, out: &mut String) {
             ".ssh",
             ".aws",
             ".config/gh",
-            "Library/Keychains",
+            USER_KEYCHAINS_SUBPATH,
             "Library/Application Support/Google/Chrome",
             "Library/Application Support/Chromium",
             "Library/Application Support/BraveSoftware/Brave-Browser",
