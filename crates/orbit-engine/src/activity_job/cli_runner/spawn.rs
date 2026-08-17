@@ -19,6 +19,12 @@ use super::super::dispatcher::ResolvedSandbox;
 
 const ORBIT_BIN_ENV: &str = "ORBIT_BIN";
 
+/// Conventional `$HOME` bin directories searched when a provider launcher
+/// is not on the inherited `PATH`, and backfilled into a spawned agent's
+/// `PATH` when those entries are absent. Keep this list shared so lookup
+/// and child-env construction cannot drift. [ORB-10909]
+const CONVENTIONAL_HOME_BIN_DIRS: &[&str] = &[".local/bin", ".orbit/bin", ".cargo/bin", "bin"];
+
 /// Typed spawn failure with a retryability classification (ORB-10006).
 ///
 /// `permanent: true` marks failures that retrying cannot fix — the step
@@ -181,10 +187,12 @@ pub(crate) fn orbit_tool_env() -> Result<Vec<(String, String)>, SpawnError> {
     })?;
     let configured = std::env::var_os(ORBIT_BIN_ENV);
     let inherited_path = std::env::var_os("PATH");
+    let home = std::env::var_os("HOME").map(PathBuf::from);
     orbit_tool_env_with(
         configured.as_deref(),
         &current_exe,
         inherited_path.as_deref(),
+        home.as_deref(),
     )
 }
 
@@ -193,6 +201,7 @@ pub(crate) fn orbit_tool_env_with(
     configured: Option<&OsStr>,
     current_exe: &Path,
     inherited_path: Option<&OsStr>,
+    home: Option<&Path>,
 ) -> Result<Vec<(String, String)>, SpawnError> {
     let selected = configured
         .filter(|value| !value.is_empty())
@@ -208,10 +217,25 @@ pub(crate) fn orbit_tool_env_with(
     };
 
     let mut path_entries = vec![bin_dir.to_path_buf()];
+    let mut seen = HashSet::new();
+    seen.insert(bin_dir.to_path_buf());
     if let Some(inherited_path) = inherited_path {
-        path_entries.extend(
-            std::env::split_paths(inherited_path).filter(|entry| entry.as_path() != bin_dir),
-        );
+        for entry in std::env::split_paths(inherited_path) {
+            if seen.insert(entry.clone()) {
+                path_entries.push(entry);
+            }
+        }
+    }
+    // Service/routine dispatch often inherits a PATH that omits cargo and
+    // other login-shell bins. Backfill the same conventional home dirs
+    // `resolve_provider_launcher_with` already searches so `cargo test`
+    // inside the spawned agent is not "command not found". [ORB-10909]
+    if let Some(home) = home {
+        for dir in conventional_home_bin_dirs(home) {
+            if seen.insert(dir.clone()) {
+                path_entries.push(dir);
+            }
+        }
     }
     let pinned_path = std::env::join_paths(path_entries)
         .map_err(|error| {
@@ -232,6 +256,12 @@ pub(crate) fn orbit_tool_env_with(
         (ORBIT_BIN_ENV.to_string(), selected_text),
         ("PATH".to_string(), pinned_path),
     ])
+}
+
+fn conventional_home_bin_dirs(home: &Path) -> impl Iterator<Item = PathBuf> + '_ {
+    CONVENTIONAL_HOME_BIN_DIRS
+        .iter()
+        .map(|relative| home.join(relative))
 }
 
 // pub(crate) widened for sibling tests under the repository's enforced test layout.
@@ -262,8 +292,7 @@ pub(crate) fn resolve_provider_launcher_with(
         }
     }
     if let Some(home) = home {
-        for relative in [".local/bin", ".orbit/bin", ".cargo/bin", "bin"] {
-            let dir = home.join(relative);
+        for dir in conventional_home_bin_dirs(home) {
             if seen.insert(dir.clone()) {
                 search_dirs.push(dir);
             }

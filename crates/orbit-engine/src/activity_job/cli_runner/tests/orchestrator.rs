@@ -876,6 +876,7 @@ fn run_cli_backend_returns_error_when_declared_workspace_path_missing() {
             "workspace_path": missing.display().to_string()
         })),
         workspace_root: None,
+        orbit_root: None,
     };
     let spec = test_agent_loop_spec(Duration::from_secs(5));
     let input = serde_json::json!({
@@ -935,6 +936,7 @@ fn run_cli_backend_records_resolved_cwd_in_started_event() {
             "workspace_path": workspace_string.clone()
         })),
         workspace_root: None,
+        orbit_root: None,
     };
     let spec = test_agent_loop_spec(Duration::from_secs(5));
 
@@ -1007,6 +1009,7 @@ fn linux_bwrap_failed_invocation_names_ungranted_write_path_and_deny() {
             "workspace_path": workspace.display().to_string()
         })),
         workspace_root: None,
+        orbit_root: None,
     };
     let spec = test_agent_loop_spec(Duration::from_secs(5));
 
@@ -1118,6 +1121,7 @@ fn linux_bwrap_exit_zero_without_an_envelope_still_names_the_denied_write() {
             "workspace_path": workspace.display().to_string()
         })),
         workspace_root: None,
+        orbit_root: None,
     };
     let spec = test_agent_loop_spec(Duration::from_secs(5));
 
@@ -1186,6 +1190,7 @@ fn run_cli_backend_emits_provider_pid_between_the_started_and_finished_events() 
         sandbox: None,
         task_context: None,
         workspace_root: None,
+        orbit_root: None,
     };
     let spec = test_agent_loop_spec(Duration::from_secs(5));
 
@@ -2985,6 +2990,7 @@ fn run_cli_backend_passes_provider_config_to_codex_runtime_args() {
         sandbox: None,
         task_context: None,
         workspace_root: None,
+        orbit_root: None,
     };
     let spec = test_agent_loop_spec(Duration::from_secs(5));
 
@@ -3057,6 +3063,7 @@ fn run_cli_backend_passes_model_to_grok_and_captures_well_formed_stdout() {
         sandbox: None,
         task_context: None,
         workspace_root: None,
+        orbit_root: None,
     };
     let mut spec = test_agent_loop_spec_for("grok", Duration::from_secs(5));
     spec.model = Some("grok-build".to_string());
@@ -3133,6 +3140,7 @@ fi
         sandbox: None,
         task_context: None,
         workspace_root: None,
+        orbit_root: None,
     };
     let mut spec = test_agent_loop_spec_for("grok", Duration::from_secs(5));
     spec.model = Some("grok-build".to_string());
@@ -3186,6 +3194,7 @@ fi
         sandbox: None,
         task_context: None,
         workspace_root: None,
+        orbit_root: None,
     };
     let mut spec = test_agent_loop_spec_for("grok", Duration::from_secs(5));
     spec.model = Some("grok-build".to_string());
@@ -3196,6 +3205,59 @@ fi
         "job-grok-telemetry",
         audit,
         &serde_json::json!({"prompt": "hi", "task_id": "ORB-10342"}),
+        None,
+    )
+    .expect("run succeeds");
+
+    assert!(outcome.success);
+    assert_eq!(outcome.output["provider"], "grok");
+}
+
+/// [ORB-10909] CLI-runner dispatch must inject ORBIT_ROOT from the host so a
+/// spawned agent whose HOME does not contain the Orbit registry can still
+/// resolve `orbit tool run` against the dispatching run's root.
+#[test]
+fn run_cli_backend_injects_orbit_root_from_host() {
+    let temp = tempdir().expect("tempdir");
+    let script = temp.path().join("grok");
+    write_executable(
+        &script,
+        r#"#!/bin/sh
+cat > /dev/null
+if [ "$ORBIT_ROOT" = "/resolved/orbit/root" ]; then
+  printf '%s\n' '{"schemaVersion":1,"status":"success","result":{"identity":"ok"},"error":null}'
+else
+  printf '%s\n' '{"schemaVersion":1,"status":"failed","error":{"code":"orbit_root_missing","message":"ORBIT_ROOT was not injected","details":null}}'
+  exit 1
+fi
+"#,
+    );
+
+    let sink = Arc::new(RecordingSink::default());
+    let sink_for_writer: Arc<dyn AuditSink> = sink;
+    let audit = Arc::new(V2AuditWriter::new(
+        "job-grok-orbit-root",
+        "grok:grok-build",
+        sink_for_writer,
+    ));
+    let host = TestHost {
+        command: script.display().to_string(),
+        executor_args: Vec::new(),
+        provider_config: HashMap::new(),
+        sandbox: None,
+        task_context: None,
+        workspace_root: None,
+        orbit_root: Some("/resolved/orbit/root".to_string()),
+    };
+    let mut spec = test_agent_loop_spec_for("grok", Duration::from_secs(5));
+    spec.model = Some("grok-build".to_string());
+
+    let outcome = run_cli_backend(
+        &host,
+        &spec,
+        "job-grok-orbit-root",
+        audit,
+        &serde_json::json!({"prompt": "hi"}),
         None,
     )
     .expect("run succeeds");

@@ -362,6 +362,7 @@ fn agent_tool_environment_prefers_dispatching_orbit_over_stale_path_entry() {
         None,
         std::path::Path::new("/home/test/.orbit/bin/orbit"),
         Some(&inherited),
+        None,
     )
     .expect("pin dispatching Orbit");
 
@@ -395,6 +396,7 @@ fn configured_orbit_bin_wins_and_its_path_entry_is_deduplicated() {
         Some(std::ffi::OsStr::new("/opt/orbit/bin/orbit")),
         std::path::Path::new("/home/test/.orbit/bin/orbit"),
         Some(&inherited),
+        None,
     )
     .expect("pin configured Orbit");
 
@@ -409,6 +411,35 @@ fn configured_orbit_bin_wins_and_its_path_entry_is_deduplicated() {
             std::path::PathBuf::from("/opt/orbit/bin"),
             std::path::PathBuf::from("/home/test/.cargo/bin"),
             std::path::PathBuf::from("/usr/bin"),
+        ]
+    );
+}
+
+#[test]
+fn agent_tool_environment_backfills_conventional_home_bin_dirs_missing_from_path() {
+    let inherited = std::env::join_paths(["/usr/bin"]).expect("construct inherited PATH");
+    let home = std::path::Path::new("/home/test");
+    let env = orbit_tool_env_with(
+        None,
+        std::path::Path::new("/home/test/.orbit/bin/orbit"),
+        Some(&inherited),
+        Some(home),
+    )
+    .expect("pin dispatching Orbit");
+
+    let pinned = env
+        .iter()
+        .find(|(name, _)| name == "PATH")
+        .map(|(_, value)| value)
+        .expect("PATH override");
+    assert_eq!(
+        std::env::split_paths(std::ffi::OsStr::new(pinned)).collect::<Vec<_>>(),
+        vec![
+            std::path::PathBuf::from("/home/test/.orbit/bin"),
+            std::path::PathBuf::from("/usr/bin"),
+            std::path::PathBuf::from("/home/test/.local/bin"),
+            std::path::PathBuf::from("/home/test/.cargo/bin"),
+            std::path::PathBuf::from("/home/test/bin"),
         ]
     );
 }
