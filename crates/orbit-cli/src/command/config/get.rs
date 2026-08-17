@@ -1,11 +1,11 @@
 use clap::Args;
-use orbit_core::config::{CONFIG_KEY_REGISTRY, load_effective_config};
+use orbit_config::{CONFIG_KEY_REGISTRY, load_effective_config};
 use orbit_core::{OrbitError, OrbitRuntime};
 use serde_json::json;
 
 use crate::command::{CommandOut, CommandOutput, Execute, Payload};
 
-use super::support::{ConfigScopeArg, open_store_for_scope};
+use super::support::{ConfigScopeArg, open_store_for_scope, runtime_config_roots};
 
 #[derive(Args)]
 pub struct ConfigGetArgs {
@@ -20,7 +20,7 @@ pub struct ConfigGetArgs {
 impl Execute for ConfigGetArgs {
     fn execute(self, runtime: &OrbitRuntime) -> CommandOut {
         if self.scope == ConfigScopeArg::Effective {
-            let effective = load_effective_config(&runtime.global_root(), &runtime.shared_root())?;
+            let effective = load_effective_config(&runtime_config_roots(runtime))?;
             let value = effective.value_for(&self.key).ok_or_else(|| {
                 OrbitError::invalid_input_with_suggestions(
                     format!("unknown config key '{}'", self.key),

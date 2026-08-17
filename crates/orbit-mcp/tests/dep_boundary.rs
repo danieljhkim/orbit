@@ -24,6 +24,7 @@ fn mcp_depends_only_on_its_leaf_domains() {
             "orbit-common".to_string(),
             "orbit-registry".to_string(),
             "orbit-tools".to_string(),
+            "orbit-types".to_string(),
         ]),
         "orbit-mcp must stay independent of command, runtime, and Web crates"
     );

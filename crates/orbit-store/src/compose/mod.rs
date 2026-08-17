@@ -1,0 +1,163 @@
+use std::path::PathBuf;
+use std::sync::Arc;
+
+use crate::Store;
+use crate::contracts::{
+    AuditEventStoreBackend, ExecutorDefStoreBackend, FrictionStoreBackend, InvocationStoreBackend,
+    JobRunStoreBackend, PolicyDefStoreBackend, RoutineStoreBackend, SessionLogStoreBackend,
+    TaskArtifactStoreBackend, TaskDocumentStoreBackend, TaskHistoryStoreBackend,
+    TaskReservationStoreBackend, TaskStoreBackend, ToolStoreBackend, V2AuditStoreBackend,
+};
+use crate::driver::file::executor_def_store::ExecutorDefFileStore;
+use crate::driver::file::policy_def_store::PolicyDefFileStore;
+use crate::driver::file::session_log_store::SessionLogStore;
+use crate::driver::sqlite::job_run_store::SqliteJobRunStore;
+use crate::driver::sqlite::task_registry::TaskRegistryStore;
+use crate::repository::friction::FrictionStore;
+use crate::repository::layered_policy::LayeredPolicyDefStore;
+use crate::repository::sqlite_backends::{
+    SqliteAuditEventStoreBackend, SqliteTaskReservationStoreBackend, SqliteToolStoreBackend,
+};
+use crate::repository::task::TaskV2Store;
+use crate::workflow::friction::import_workspace_frictions;
+
+pub struct WorkspaceTaskBackends {
+    pub task: Arc<dyn TaskStoreBackend>,
+    pub document: Arc<dyn TaskDocumentStoreBackend>,
+    pub history: Arc<dyn TaskHistoryStoreBackend>,
+    pub artifact: Arc<dyn TaskArtifactStoreBackend>,
+}
+
+pub fn workspace_task_backends(
+    registry: TaskRegistryStore,
+    workspace_id: String,
+    workspace_orbit_dir: PathBuf,
+    workspace_path: Option<String>,
+    repo_root: Option<String>,
+) -> WorkspaceTaskBackends {
+    let store = Arc::new(TaskV2Store::new(
+        registry,
+        workspace_id,
+        workspace_orbit_dir,
+        workspace_path,
+        repo_root,
+    ));
+    WorkspaceTaskBackends {
+        task: store.clone(),
+        document: store.clone(),
+        history: store.clone(),
+        artifact: store,
+    }
+}
+
+/// Constructs coordination-only task backends for a logical workspace that
+/// has no checkout on this machine. Canonical bundles and registry indexes
+/// remain available; checkout-local projections are intentionally omitted.
+pub fn coordination_task_backends(
+    registry: TaskRegistryStore,
+    workspace_id: String,
+) -> WorkspaceTaskBackends {
+    let store = Arc::new(TaskV2Store::new_checkoutless(registry, workspace_id));
+    WorkspaceTaskBackends {
+        task: store.clone(),
+        document: store.clone(),
+        history: store.clone(),
+        artifact: store,
+    }
+}
+
+pub fn workspace_job_run_store(
+    store: Store,
+    workspace_id: impl Into<String>,
+) -> Arc<dyn JobRunStoreBackend> {
+    Arc::new(SqliteJobRunStore::new(store, workspace_id))
+}
+
+/// Build the live friction repository after the explicit, idempotent legacy
+/// import workflow has committed (or reported an earlier completion).
+pub fn workspace_friction_store(
+    store: Store,
+    workspace_id: impl Into<String>,
+    files_root: impl Into<PathBuf>,
+) -> Result<Arc<dyn FrictionStoreBackend>, orbit_common::OrbitError> {
+    let workspace_id = workspace_id.into();
+    let files_root = files_root.into();
+    import_workspace_frictions(&store, &workspace_id, &files_root)?;
+    Ok(Arc::new(FrictionStore::open(
+        store,
+        workspace_id,
+        files_root,
+    )?))
+}
+
+pub fn workspace_friction_store_from_path(
+    database: &std::path::Path,
+    workspace_id: impl Into<String>,
+    files_root: impl Into<PathBuf>,
+) -> Result<Arc<dyn FrictionStoreBackend>, orbit_common::OrbitError> {
+    workspace_friction_store(Store::open(database)?, workspace_id, files_root)
+}
+
+pub fn ensure_sqlite_store_ready(
+    database: &std::path::Path,
+) -> Result<(), orbit_common::OrbitError> {
+    drop(Store::open(database)?);
+    Ok(())
+}
+
+pub fn global_executor_def_store(root: PathBuf) -> Arc<dyn ExecutorDefStoreBackend> {
+    Arc::new(ExecutorDefFileStore::new(root))
+}
+
+pub fn workspace_session_log_store(orbit_dir: PathBuf) -> Arc<dyn SessionLogStoreBackend> {
+    Arc::new(SessionLogStore::new(orbit_dir))
+}
+
+pub fn routine_store(
+    database: &std::path::Path,
+) -> Result<Arc<dyn RoutineStoreBackend>, orbit_common::OrbitError> {
+    Ok(Arc::new(Store::open(database)?))
+}
+
+pub fn invocation_store(
+    database: &std::path::Path,
+) -> Result<Arc<dyn InvocationStoreBackend>, orbit_common::OrbitError> {
+    Ok(Arc::new(Store::open(database)?))
+}
+
+pub fn v2_audit_store(
+    database: &std::path::Path,
+) -> Result<Arc<dyn V2AuditStoreBackend>, orbit_common::OrbitError> {
+    Ok(Arc::new(Store::open(database)?))
+}
+
+pub fn tool_store_sqlite(store: Store) -> Arc<dyn ToolStoreBackend> {
+    Arc::new(SqliteToolStoreBackend { store })
+}
+
+pub fn audit_event_store_sqlite(store: Store) -> Arc<dyn AuditEventStoreBackend> {
+    Arc::new(SqliteAuditEventStoreBackend { store })
+}
+
+pub fn task_reservation_store_sqlite(store: Store) -> Arc<dyn TaskReservationStoreBackend> {
+    Arc::new(SqliteTaskReservationStoreBackend { store })
+}
+
+pub fn global_policy_def_store(root: PathBuf) -> Arc<dyn PolicyDefStoreBackend> {
+    Arc::new(PolicyDefFileStore::new(root))
+}
+
+pub fn workspace_policy_def_store(root: PathBuf) -> Arc<dyn PolicyDefStoreBackend> {
+    Arc::new(PolicyDefFileStore::new(root))
+}
+
+pub fn layered_policy_def_store(
+    workspace: Arc<dyn PolicyDefStoreBackend>,
+    global: Arc<dyn PolicyDefStoreBackend>,
+) -> Arc<dyn PolicyDefStoreBackend> {
+    Arc::new(LayeredPolicyDefStore::new(workspace, global))
+}
+
+#[cfg(test)]
+#[cfg(test)]
+mod tests;

@@ -1,13 +1,16 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
-use orbit_common::types::{OrbitError, TokenUsage, normalize_token_usage};
-use orbit_store::scoreboard_summary::{NormalizedTokenSummary, OrchestrationModelSummary};
-use orbit_store::{
+use orbit_common::OrbitError;
+use orbit_common::model::pricing::normalize_token_usage;
+use orbit_store::contracts::{
     ActivityInvocationMetrics, AgentInvocationMetrics, InvocationAccountingFact,
-    InvocationAccountingQuery, InvocationInsertParams, InvocationQuery, InvocationRecord, Store,
-    TaskInvocationMetrics, ToolInvocationMetrics,
+    InvocationAccountingQuery, InvocationInsertParams, InvocationQuery, InvocationRecord,
+    InvocationStoreBackend, TaskInvocationMetrics, ToolInvocationMetrics,
 };
+use orbit_store::scoreboard_summary::{NormalizedTokenSummary, OrchestrationModelSummary};
+use orbit_types::telemetry::TokenUsage;
 use serde::{Deserialize, Serialize};
 
 use crate::OrbitRuntime;
@@ -375,6 +378,8 @@ fn valid_cost(cost: f64) -> bool {
     cost.is_finite() && cost >= 0.0
 }
 
-fn open_invocation_store(runtime: &OrbitRuntime) -> Result<Store, OrbitError> {
-    runtime.sqlite_store()
+fn open_invocation_store(
+    runtime: &OrbitRuntime,
+) -> Result<Arc<dyn InvocationStoreBackend>, OrbitError> {
+    orbit_store::compose::invocation_store(&runtime.context.persistence().audit_db)
 }

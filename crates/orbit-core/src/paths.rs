@@ -2,7 +2,7 @@ use std::ffi::OsStr;
 use std::path::{Component, Path, PathBuf};
 use std::process::Command;
 
-use orbit_common::types::OrbitError;
+use orbit_common::OrbitError;
 
 pub(crate) const ORBIT_ROOT_TOKEN: &str = "{{ORBIT_ROOT}}";
 
@@ -22,11 +22,6 @@ pub(crate) fn home_dir() -> Option<PathBuf> {
 
 pub(crate) fn cwd_orbit_root(cwd: &Path) -> PathBuf {
     normalize_path_components(&cwd.join(".orbit"))
-}
-
-pub(crate) fn current_dir_orbit_root() -> PathBuf {
-    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-    cwd_orbit_root(&cwd)
 }
 
 pub(crate) fn resolve_path_value(

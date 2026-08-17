@@ -4,9 +4,9 @@ use axum::response::Response;
 
 use crate::{
     DASHBOARD_CSP, serve_app_js, serve_audit_js, serve_common_js, serve_diagnostics_js,
-    serve_index, serve_log_tail_js, serve_markdown_js, serve_marked_js, serve_purify_js,
-    serve_reliability_js, serve_router_js, serve_run_detail_js, serve_runs_js, serve_scoreboard_js,
-    serve_tasks_js,
+    serve_index, serve_log_tail_js, serve_markdown_js, serve_marked_js, serve_operations_js,
+    serve_purify_js, serve_reliability_js, serve_router_js, serve_run_detail_js, serve_runs_js,
+    serve_scoreboard_js, serve_tasks_js,
 };
 
 #[tokio::test]
@@ -27,6 +27,7 @@ async fn dashboard_html_and_js_routes_emit_csp() {
         ("router", serve_router_js().await),
         ("runs", serve_runs_js().await),
         ("run_detail", serve_run_detail_js().await),
+        ("operations", serve_operations_js().await),
     ];
 
     for (name, response) in routes {
@@ -312,15 +313,16 @@ fn dashboard_guards_remaining_panels_in_aggregate_view() {
         "knowledge frictions must show a placeholder in aggregate mode"
     );
 
-    // Scoreboard: the tab body shows a placeholder, and the user-initiated window
-    // re-fetch is a no-op in aggregate mode (not just the auto-refresh boot fetch).
+    // Scoreboard: the tab body shows a placeholder. Window clicks write shared
+    // dashboard state; the per-workspace fetch stays on the refresh path, which
+    // is already aggregate-guarded above.
     assert!(
         app.contains(r#"renderPanelPlaceholder("scoreboard-body")"#),
         "scoreboard panel must show a placeholder in aggregate mode"
     );
     assert!(
-        scoreboard.contains("if (isAggregateView()) return;"),
-        "the scoreboard window selector must skip its re-fetch in aggregate mode"
+        !scoreboard.contains("fetchJson(`/api/scoreboard"),
+        "the scoreboard window selector must not fetch on its own"
     );
 
     // The guards read the live predicate before fetching (not a stale captured
@@ -373,7 +375,10 @@ fn dashboard_guards_diagnostics_and_detail_panels_in_aggregate_view() {
     for fetch in [
         "/api/diagnostics/metrics",
         "/api/diagnostics/errors",
+        // ORB-10871: the incidents subtab is per-workspace too (`Ws` extractor).
+        "/api/audit/incidents",
         "/api/diagnostics/implement_one",
+        "/api/tasks/completion-by-complexity",
         "fetchAndRenderRuns()",
     ] {
         let fetch_at = index_of(app, "app.js", fetch);
@@ -445,6 +450,28 @@ fn dashboard_guards_diagnostics_and_detail_panels_in_aggregate_view() {
 }
 
 #[test]
+fn dashboard_renders_complexity_as_its_own_dimension() {
+    let diagnostics = include_str!("../../assets/dashboard/diagnostics.js");
+    assert!(
+        diagnostics.contains("Task completion by complexity"),
+        "completion-by-complexity panel must exist"
+    );
+    assert!(
+        diagnostics.contains("unset (unlabeled)"),
+        "unset complexity must be a named bucket"
+    );
+    assert!(
+        diagnostics.contains("Average implement_one duration by actor (30d) · ${label} · n="),
+        "duration-by-actor must be faceted by complexity"
+    );
+    let app = include_str!("../../assets/dashboard/app.js");
+    assert!(
+        app.contains("/api/tasks/completion-by-complexity"),
+        "completion aggregate must be fetched from the generated index"
+    );
+}
+
+#[test]
 fn dashboard_recent_history_filters_before_limiting() {
     // ORB-10311: the recent-history panel must exclude legacy bare `commented`
     // stubs *before* applying the five-row limit, so meaningful status/workflow
@@ -482,13 +509,13 @@ fn dashboard_task_detail_shows_orchestrator_as_attribution_not_execution_crew() 
     );
 }
 
-/// ORB-10444: the top-level nav is exactly Tasks, Audit, Diagnostics, Knowledge.
+/// ORB-10444/ORB-10875: the top-level nav includes the bounded Operations view.
 /// A deprecated tab was retired outright — nav entry, route and pane — and
 /// Scoreboard, being a diagnostics-shaped view, moved under Diagnostics. A route
 /// left behind in `TABS` would resolve to a pane that no longer exists, so the
 /// router's tab list is asserted alongside the markup.
 #[tokio::test]
-async fn dashboard_top_level_nav_is_the_four_operator_tabs() {
+async fn dashboard_top_level_nav_matches_the_operator_tabs() {
     let body = response_body(serve_index().await).await;
     let router = include_str!("../../assets/dashboard/router.js");
 
@@ -502,16 +529,26 @@ async fn dashboard_top_level_nav_is_the_four_operator_tabs() {
             }
         })
         .collect();
-    assert_eq!(nav, vec!["tasks", "audit", "diagnostics", "knowledge"]);
+    assert_eq!(
+        nav,
+        vec!["tasks", "audit", "diagnostics", "operations", "knowledge"]
+    );
 
     assert!(
         router.contains(
-            r#"const TABS = ["tasks", "audit", "diagnostics", "knowledge", "run-detail"];"#
+            r#"const TABS = ["tasks", "audit", "diagnostics", "operations", "knowledge", "run-detail"];"#
         ),
         "the router's tab list must match the nav (plus the hash-only run-detail route)"
     );
     // Every routable tab must still have a pane to render into.
-    for tab in ["tasks", "audit", "diagnostics", "knowledge", "run-detail"] {
+    for tab in [
+        "tasks",
+        "audit",
+        "diagnostics",
+        "operations",
+        "knowledge",
+        "run-detail",
+    ] {
         assert!(
             body.contains(&format!(r#"<section class="tab-pane" data-tab="{tab}">"#)),
             "routable tab `{tab}` must have a pane"
@@ -521,6 +558,63 @@ async fn dashboard_top_level_nav_is_the_four_operator_tabs() {
         !body.contains(r#"data-tab="scoreboard""#),
         "Scoreboard must no longer be a top-level tab or pane"
     );
+}
+
+#[test]
+fn dashboard_operations_are_typed_guarded_and_responsive() {
+    let index = include_str!("../../assets/dashboard/index.html");
+    let operations = include_str!("../../assets/dashboard/operations.js");
+    let router = include_str!("../../assets/dashboard/router.js");
+    let css = include_str!("../../assets/dashboard/dashboard.css");
+
+    for id in [
+        "routines-body",
+        "clock-body",
+        "routine-operation-feedback",
+        "auto-tasks-body",
+        "auto-task-operation-feedback",
+        "operations-subtabs",
+    ] {
+        assert!(index.contains(&format!(r#"id="{id}""#)), "{id}");
+    }
+    assert!(operations.contains(r#"postJson("/api/routines/toggle""#));
+    assert!(operations.contains(r#"postJson("/api/routines/clock""#));
+    assert!(operations.contains(r#"postJson("/api/auto-tasks/toggle""#));
+    assert!(operations.contains(r#"postJson("/api/auto-tasks/mint""#));
+    assert!(operations.contains("pendingOperations.has(key)"));
+    assert!(operations.contains("window.confirm("));
+    assert!(operations.contains("All-workspace mode is read-only"));
+    assert!(operations.contains("routine.target"));
+    assert!(operations.contains("last_evaluated_slot"));
+    assert!(operations.contains("next_tick_at"));
+    assert!(operations.contains("acknowledge_unconditional: true"));
+    assert!(operations.contains("UNCONDITIONAL_MINT_WARNING"));
+    assert!(operations.contains(
+        "Manual mint ignores this definition's schedule, enabled flag, and scheduler dedupe policy."
+    ));
+    assert!(
+        operations.contains("An open instance already exists; this will create another open task.")
+    );
+    assert!(operations.contains("Minted") || operations.contains("result.message"));
+    assert!(operations.contains("Auto-task change failed"));
+    assert!(operations.contains("Manual mint failed"));
+    assert!(operations.contains("fetchJson(\"/api/auto-tasks\")"));
+    assert!(
+        !operations.contains("postJson(\"/api/auto-tasks")
+            || operations.contains("addEventListener(\"click\"")
+    );
+    assert!(
+        !operations.contains("hashchange") && !operations.contains("location.reload"),
+        "refresh/back must not replay a toggle or mint POST"
+    );
+    assert!(router.contains(r#"const OPERATIONS_SUBTABS = ["routines", "auto-tasks"];"#));
+    assert!(router.contains(r#"hash = `#operations/${sub}`;"#));
+    assert!(css.contains("@media (max-width: 720px)"));
+    assert!(css.contains("@media (max-width: 600px)"));
+    assert!(css.contains(".operation-grid { grid-template-columns: 1fr; }"));
+    assert!(css.contains("body.operations-active"));
+    assert!(css.contains(".operation-mint-warning"));
+    assert!(router.contains(r#"classList.toggle("operations-active", top === "operations")"#));
 }
 
 /// ORB-10444: Scoreboard content stays reachable after the move — as a
@@ -557,20 +651,23 @@ async fn dashboard_scoreboard_is_reachable_under_diagnostics() {
         "scoreboard-insights",
         "scoreboard-orchestration",
         "scoreboard-orchestration-count",
+        "scoreboard-highlights",
     ] {
         assert!(body.contains(&format!(r#"id="{id}""#)), "{id} must survive");
     }
     // ORB-10588 appended `reliability` to the same list.
     assert!(
         router.contains(
-            r#"const DIAG_SUBTABS = ["runs", "metrics", "errors", "reliability", "scoreboard"];"#
+            r#"const DIAG_SUBTABS = ["runs", "metrics", "errors", "incidents", "reliability", "scoreboard"];"#
         ),
         "the scoreboard must route as a diagnostics subtab"
     );
     assert!(
         app.contains(r#"if (activeDiagSubtab === "scoreboard")"#)
-            && app.contains(r#"fetchJson("/api/scoreboard?window=24h")"#),
-        "the scoreboard fetch must hang off the diagnostics subtab branch"
+            && app.contains(
+                r#"fetchJson(`/api/scoreboard?window=${encodeURIComponent(selectedWindow)}`)"#
+            ),
+        "the scoreboard fetch must hang off the diagnostics subtab branch and honor the shared window"
     );
 }
 
@@ -841,6 +938,164 @@ fn dashboard_task_write_actions_are_configuration_free() {
     );
 }
 
+/// ORB-10874: the Tasks count previously read an ambiguous `N/50` with no way
+/// to tell a total from a page size from a hard cap. It must now state which
+/// number means what, using the `/api/tasks` paging envelope
+/// (`{ items, total, limit, truncated }`, ORB-10400) when it is available.
+#[test]
+fn dashboard_task_count_states_shown_total_and_server_limit_explicitly() {
+    let tasks = include_str!("../../assets/dashboard/tasks.js");
+
+    assert!(
+        tasks.contains("export function formatTaskCount("),
+        "the count formatter must be a standalone, testable function"
+    );
+    assert!(
+        tasks.contains("shown") && tasks.contains("total") && tasks.contains("server limit"),
+        "the formatter must use explicit shown/total/server-limit language"
+    );
+    assert!(
+        !tasks.contains("filtered.length}/${tasks.length}"),
+        "the old ambiguous `N/M` shorthand must be gone"
+    );
+    assert!(
+        tasks.contains("$(\"tasks-count\").textContent = formatTaskCount("),
+        "the rendered count must go through the explicit formatter"
+    );
+}
+
+/// ORB-10874: the status chips and search box are represented in the tasks
+/// hash so a reload or the browser's back/forward button restores the same
+/// filtered view, mirroring the audit tab's existing buildAuditHash /
+/// applyAuditHashQuery pair. A visible summary line states the active filter
+/// in words, not just via chip color.
+#[test]
+fn dashboard_task_filters_are_represented_in_the_url_and_summarized() {
+    let tasks = include_str!("../../assets/dashboard/tasks.js");
+    let router = include_str!("../../assets/dashboard/router.js");
+    let index = include_str!("../../assets/dashboard/index.html");
+
+    assert!(
+        tasks.contains("export function buildTasksHash(")
+            && tasks.contains("export function applyTasksHashQuery(")
+            && tasks.contains("export function syncTaskControls("),
+        "tasks.js must expose a hash build/apply/sync trio like audit.js does"
+    );
+    assert!(
+        router.contains("ctx.applyTasksHashQuery(query)")
+            && router.contains("ctx.buildTasksHash()"),
+        "the router must apply and rebuild the tasks hash on every tasks-tab route"
+    );
+    assert!(
+        tasks.contains("function renderFilterSummary("),
+        "the active filter must be restated as text, not only via chip color"
+    );
+    assert!(
+        index.contains(r#"id="task-filter-summary""#) && index.contains(r#"aria-live="polite""#),
+        "the filter summary element must exist and announce updates to assistive tech"
+    );
+}
+
+/// ORB-10874: switching the workspace selector only updated in-memory state,
+/// so a reload silently fell back to the server's default workspace instead
+/// of the one the operator had selected.
+#[test]
+fn dashboard_workspace_selection_persists_to_the_url() {
+    let app = include_str!("../../assets/dashboard/app.js");
+
+    assert!(
+        app.contains("function persistWorkspaceToUrl(") && app.contains("persistScopeToUrl()"),
+        "the workspace selector must persist its choice to the URL on every change"
+    );
+}
+
+/// ORB-10874: the live `orbit.log` panel can now be collapsed and resized,
+/// and the presentation choice is remembered locally (not shared/synced
+/// state, so localStorage rather than the URL). The task list keeps an
+/// explicit minimum height so it can never be squeezed toward zero.
+#[test]
+fn dashboard_log_panel_is_collapsible_resizable_and_remembers_presentation() {
+    let log_tail = include_str!("../../assets/dashboard/log-tail.js");
+    let index = include_str!("../../assets/dashboard/index.html");
+    let css = include_str!("../../assets/dashboard/dashboard.css");
+
+    assert!(
+        log_tail.contains("orbit.dashboard.logPanel"),
+        "the log panel's collapsed/height preference must persist to localStorage"
+    );
+    assert!(
+        log_tail.contains("function wireLogPanelToggle(")
+            && log_tail.contains("function wireLogPanelResizeHandle("),
+        "the log panel must offer both a collapse toggle and a resize handle"
+    );
+    assert!(
+        index.contains(r#"id="log-panel-toggle""#) && index.contains(r#"id="log-panel-resize""#),
+        "the toggle and resize handle must exist in the markup"
+    );
+    assert!(
+        css.contains("#log-panel.collapsed") && css.contains(".log-resize-handle"),
+        "the collapsed state and the resize handle must be styled"
+    );
+    assert!(
+        css.contains("#tasks-panel > .body") && css.contains("min-height: 240px;"),
+        "the task list must keep a guaranteed minimum usable height regardless of log panel state"
+    );
+}
+
+/// ORB-10874: inline status/crew edits must show a pending state, refuse a
+/// second submission while one is in flight, report durable success/failure
+/// text (not just console.error), and offer a bounded undo while the prior
+/// value can still be safely restored.
+#[test]
+fn dashboard_inline_task_edits_report_pending_success_failure_and_offer_undo() {
+    let tasks = include_str!("../../assets/dashboard/tasks.js");
+
+    assert!(
+        tasks.contains(r#"{ kind: "pending", text: "saving…" }"#),
+        "a status/crew change must show a pending state"
+    );
+    assert!(
+        tasks.contains(r#"kind: "success""#) && tasks.contains(r#"kind: "error""#),
+        "a status/crew change must report durable success or failure feedback"
+    );
+    assert!(
+        tasks.contains("class: \"mutation-undo\", text: \"undo\""),
+        "a successful change must offer an undo control"
+    );
+    assert!(
+        tasks.contains("MUTATION_UNDO_WINDOW_MS") && tasks.contains("scheduleFeedbackExpiry("),
+        "undo must be bounded to a window, not offered indefinitely"
+    );
+    assert!(
+        tasks.contains("(feedback && feedback.kind === \"pending\")"),
+        "the control must disable itself while its own change is pending"
+    );
+}
+
+/// ORB-10874: in the aggregate ("All workspaces") view there is no ambient
+/// workspace to scope a status/crew mutation to. A task fetched through
+/// /api/tasks/all carries its own workspace_id (ORB-00037); mutation is
+/// refused unless that explicit, workspace-qualified target is available.
+#[test]
+fn dashboard_aggregate_view_guards_inline_task_mutations() {
+    let tasks = include_str!("../../assets/dashboard/tasks.js");
+
+    assert!(
+        tasks.contains("function canMutateTask(task) {")
+            && tasks.contains("!isAggregateView() || Boolean(task && task.workspace_id)"),
+        "mutation must be refused in aggregate mode unless the task names its own workspace"
+    );
+    assert!(
+        tasks.contains("function taskMutationPath(task"),
+        "an aggregate-mode mutation must target the task's own workspace explicitly, not the ambient one"
+    );
+    assert_eq!(
+        tasks.matches("!mutable").count(),
+        2,
+        "both the status and crew controls must be disabled when the task cannot be safely mutated"
+    );
+}
+
 /// ORB-10444: dashboard assets are a shipped, project-agnostic surface. A
 /// personal name, an Orbit/knowledge id, or a checkout path baked into them
 /// would ship to every install, so the served assets carry none.
@@ -891,6 +1146,10 @@ fn dashboard_assets_carry_no_project_specific_identifiers() {
             "reliability.js",
             include_str!("../../assets/dashboard/reliability.js"),
         ),
+        (
+            "operations.js",
+            include_str!("../../assets/dashboard/operations.js"),
+        ),
     ];
     // Personal names and layout paths of the machine Orbit is developed on, plus
     // the workspace names it registers. `orbit`/`ORB-` themselves are the
@@ -928,6 +1187,279 @@ fn dashboard_assets_carry_no_project_specific_identifiers() {
                 );
             }
         }
+    }
+}
+
+/// ORB-10872: workspace + window are one dashboard scope. Scoreboard and
+/// Managed Execution honor the same window; a mismatched 24h payload is
+/// refused under a 7d selection; Reliability labels Fleet-wide; Audit
+/// drill-downs expose removable chips; the URL restores the scope.
+#[test]
+fn dashboard_scope_is_shared_labeled_and_url_backed() {
+    let common = include_str!("../../assets/dashboard/common.js");
+    let app = include_str!("../../assets/dashboard/app.js");
+    let router = include_str!("../../assets/dashboard/router.js");
+    let scoreboard = include_str!("../../assets/dashboard/scoreboard.js");
+    let reliability = include_str!("../../assets/dashboard/reliability.js");
+    let audit = include_str!("../../assets/dashboard/audit.js");
+    let index = include_str!("../../assets/dashboard/index.html");
+    let css = include_str!("../../assets/dashboard/dashboard.css");
+
+    assert!(
+        common.contains("export function getWindow(")
+            && common.contains("export function setWindow(")
+            && common.contains("export function payloadHonorsWindow(")
+            && common.contains("export function persistScopeToUrl(")
+            && common.contains("export function reliabilityWindowFor("),
+        "common.js must own the shared dashboard window and payload-window guard"
+    );
+    assert!(
+        common.contains("if (typeof reported === \"string\") return reported === selected;")
+            && common.contains("reported.label === selected"),
+        "payloadHonorsWindow must reject a 24h body under an active 7d selection"
+    );
+    assert!(
+        app.contains("if (!payloadHonorsWindow(summary, selectedWindow))")
+            && scoreboard.contains("if (summary && !payloadHonorsWindow(summary, getWindow()))"),
+        "the scoreboard fetch and renderer must refuse a mismatched window payload"
+    );
+    assert!(
+        reliability.contains("Fleet-wide")
+            && index.contains(r#"id="reliability-scope-badge""#)
+            && index.contains("Fleet-wide")
+            && reliability.contains(r#"payload.scope === "workspace""#),
+        "Reliability must label Fleet-wide when it ignores the selected workspace"
+    );
+    assert!(
+        router.contains("markWorkspaceSelectorScope")
+            && router.contains("Reliability is Fleet-wide; workspace does not apply")
+            && css.contains(".workspace-select.scope-ignored")
+            && css.contains(".scope-badge.independent"),
+        "the workspace selector must not imply a scope Reliability does not use"
+    );
+    assert!(
+        audit.contains("function navigateToDrilldown(")
+            && audit.contains("function renderScopeChips(")
+            && audit.contains(r#"removableChip("actor""#)
+            && audit.contains(r#"removableChip("workspace""#)
+            && audit.contains(r#"removableChip("window""#)
+            && audit.contains(r#"removableChip("status""#)
+            && audit.contains(r#"removableChip("metric""#)
+            && index.contains(r#"id="audit-scope-chips""#),
+        "actor/metric drill-down must show removable actor/workspace/window/status/metric chips"
+    );
+    assert!(
+        router
+            .contains(r#"hash = `#diagnostics/${sub}?window=${encodeURIComponent(getWindow())}`"#)
+            && common.contains(r#"url.searchParams.set("window", currentWindow)"#)
+            && audit.contains("sp.set(\"metric\", auditFilter.metric)"),
+        "workspace, diagnostics subview, window, and drill-down filters must live in the URL"
+    );
+    assert!(
+        css.contains("@media (max-width: 720px)")
+            && css.contains("@media (max-width: 520px)")
+            && css.contains(".scope-chip-v")
+            && css.contains("max-width: 10ch"),
+        "scope badges and filter chips must stay legible at 480–720px"
+    );
+}
+
+/// ORB-10871: a repeated failure burst is one incident, not hundreds of
+/// independent quality failures. The dashboard must therefore (a) show the
+/// grouped count and the raw failed-event count side by side, each with its
+/// denominator and the selected window, (b) let an operator expand an incident
+/// down to the exact audit rows, actor, surfaces, run/task ids, first/last
+/// timestamps, and grouping signature, and (c) never imply that a propagated
+/// pipeline failure is its own root cause. All three live in the assets; this
+/// pins them so a later edit cannot quietly go back to counting raw rows.
+#[test]
+fn dashboard_failure_metrics_are_incident_aware_and_state_their_denominators() {
+    let index = include_str!("../../assets/dashboard/index.html");
+    let app = include_str!("../../assets/dashboard/app.js");
+    let router = include_str!("../../assets/dashboard/router.js");
+    let diagnostics = include_str!("../../assets/dashboard/diagnostics.js");
+    let scoreboard = include_str!("../../assets/dashboard/scoreboard.js");
+    let audit = include_str!("../../assets/dashboard/audit.js");
+    let css = include_str!("../../assets/dashboard/dashboard.css");
+
+    // Routed as a diagnostics subtab, fetched against the shared window.
+    assert!(
+        index.contains(r#"<button class="subtab" data-subtab="incidents" type="button">"#),
+        "Incidents must be offered as a diagnostics subtab"
+    );
+    assert!(
+        router.contains(r#""incidents""#),
+        "the incidents subtab must be routable"
+    );
+    assert!(
+        app.contains(r#"if (activeDiagSubtab === "incidents")"#)
+            && app.contains("/api/audit/incidents?since=${encodeURIComponent(selectedWindow)}"),
+        "the incidents fetch must hang off the diagnostics subtab branch and honor the shared window"
+    );
+
+    // Both counts, both denominators, and the window are rendered — never one
+    // number standing in for the other.
+    assert!(
+        diagnostics.contains("${asCount(payload.incident_count)} incidents / ${asCount(payload.raw_failed_events)} failed events"),
+        "the panel count must show grouped incidents and raw failed events together"
+    );
+    assert!(
+        diagnostics.contains("grouped from ${failed} failed events of ${total} audited events"),
+        "the incident count must state what it is out of"
+    );
+    assert!(
+        diagnostics.contains("`window ${window}`"),
+        "the incident summary must name the window it was measured over"
+    );
+    assert!(
+        diagnostics.contains("incident-class-chip") && diagnostics.contains("INCIDENT_CLASS_ORDER"),
+        "denials, expected negative paths, and unexpected failures must stay distinguishable"
+    );
+
+    // Expansion exposes the underlying evidence.
+    for needle in [
+        "grouping signature",
+        "first seen",
+        "last seen",
+        "\"actor\"",
+        "\"runs\"",
+        "\"tasks\"",
+        "Underlying audit events",
+    ] {
+        assert!(
+            diagnostics.contains(needle),
+            "incident expansion must reveal `{needle}`"
+        );
+    }
+    assert!(
+        diagnostics.contains("downstream failures, not independent root causes"),
+        "a propagation chain must be labeled as a chain, not as separate root causes"
+    );
+    assert!(
+        diagnostics.contains("navigateToDrilldown(")
+            && diagnostics.contains("Open raw audit events"),
+        "an incident must link out to the raw audit rows it collapsed"
+    );
+    assert!(
+        audit.contains("auditFilter.tool = opts.tool || null;"),
+        "the drill-down must carry the incident's surface into the raw Audit filter"
+    );
+
+    // Scoreboard keeps the raw failure column and gains the grouped one.
+    assert!(
+        scoreboard.contains(r#"left: "failed_tool_calls""#)
+            && scoreboard.contains(r#"right: "tool_calls""#),
+        "the raw failed/total tool-call pair must survive"
+    );
+    assert!(
+        scoreboard.contains(r#"key: "failure_incidents""#)
+            && scoreboard.contains(r#"left: "failure_incidents""#)
+            && scoreboard.contains(r#"right: "failure_incident_events""#),
+        "the scoreboard must show grouped incidents against the raw events they collapsed"
+    );
+    assert!(
+        scoreboard.contains("function allScoreboardSections()")
+            && scoreboard.contains("window ${window}"),
+        "every scoreboard section badge must name the selected window"
+    );
+
+    // Narrow-viewport presentation hooks (480–720px).
+    assert!(
+        css.contains(".incident-summary")
+            && css.contains(".incident-facts")
+            && css.contains(".incident-evidence"),
+        "the incident summary and its expansion need their own presentation hooks"
+    );
+    let responsive_at = css
+        .rfind("@media (max-width: 720px)")
+        .expect("a 720px breakpoint must exist");
+    assert!(
+        css[responsive_at..].contains(".incident-facts { grid-template-columns: minmax(0, 1fr);")
+            && css[responsive_at..].contains(".incident-evidence"),
+        "the incident expansion must reflow rather than clip below 720px"
+    );
+}
+
+/// ORB-10873: Scoreboard delivery highlights, honest empty-section coverage,
+/// accessible window tabs, and labeled abbreviations. Assets stay
+/// project-agnostic.
+#[test]
+fn dashboard_scoreboard_highlights_are_accessible_and_honest() {
+    let index = include_str!("../../assets/dashboard/index.html");
+    let scoreboard = include_str!("../../assets/dashboard/scoreboard.js");
+    let common = include_str!("../../assets/dashboard/common.js");
+    let css = include_str!("../../assets/dashboard/dashboard.css");
+
+    assert!(
+        index.contains(r#"id="scoreboard-window-selector" role="tablist" aria-label="Scoreboard time window""#)
+            && index.contains(r#"id="reliability-window-selector" role="tablist" aria-label="Reliability time window""#),
+        "window controls must be semantic tablists"
+    );
+    assert!(
+        index.contains(
+            r#"role="tab" class="scoreboard-window-seg on" data-window="24h" aria-selected="true""#
+        ) && common.contains("setAttribute(\"aria-selected\"")
+            && common.contains("ArrowRight")
+            && common.contains("ArrowLeft")
+            && common.contains("Home")
+            && common.contains("End"),
+        "window tabs must expose selected state and keyboard navigation"
+    );
+    assert!(
+        css.contains(".scoreboard-window-seg:focus-visible"),
+        "window tabs must have a visible focus ring"
+    );
+
+    assert!(
+        scoreboard.contains("Notable completions")
+            && scoreboard.contains("not a quality score")
+            && scoreboard.contains("No completion summary recorded.")
+            && scoreboard.contains("function renderNotableCompletions("),
+        "highlights must name the reading order and missing summaries"
+    );
+    assert!(
+        !scoreboard.contains("quality score") || scoreboard.contains("not a quality score"),
+        "the UI must not claim an objective quality score"
+    );
+    assert!(
+        scoreboard.contains("no observed review comments in this source")
+            && scoreboard.contains("coverage?.review?.availability === \"unavailable\"")
+            && scoreboard.contains("missing coverage, not zero activity"),
+        "empty Review must distinguish no events from incomplete coverage"
+    );
+    assert!(
+        scoreboard.contains("orbit.task.* tool-call count")
+            && scoreboard.contains("raw failed tool calls over total tool calls")
+            && scoreboard.contains("append-only friction reports filed by this agent")
+            && scoreboard.contains("Highest count in this row. Not a quality score."),
+        "abbreviated metrics and the leader mark need plain-language definitions"
+    );
+    assert!(
+        !scoreboard.contains("frict r"),
+        "the unexplained frict r abbreviation must be gone"
+    );
+
+    assert!(
+        css.contains(".scoreboard-highlights")
+            && css.contains(".scoreboard-highlight-excerpt")
+            && css.contains("overflow-wrap: anywhere;"),
+        "highlights must wrap instead of clipping"
+    );
+    let scoreboard_720 = css
+        .find("table.sb2-matrix col.metric { width: 132px; }")
+        .expect("narrow scoreboard metric column");
+    assert!(
+        css[..scoreboard_720].contains("@media (max-width: 720px)"),
+        "matrix labels must wrap at 480–720px"
+    );
+
+    for banned in ["constellation", "dk-server", "polaris", "SpaceX"] {
+        assert!(
+            !scoreboard
+                .to_ascii_lowercase()
+                .contains(&banned.to_ascii_lowercase()),
+            "scoreboard assets must stay project-agnostic; found {banned}"
+        );
     }
 }
 

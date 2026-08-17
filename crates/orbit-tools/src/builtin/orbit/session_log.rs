@@ -1,6 +1,7 @@
 //! Workspace session log [ADR-0363 / ORB-10784].
 
-use orbit_common::types::{OrbitError, ToolParam, ToolSchema};
+use orbit_common::OrbitError;
+use orbit_types::tool::{ToolParam, ToolSchema};
 use serde_json::Value;
 
 use crate::{OrbitBuiltinAction, Tool, ToolContext};

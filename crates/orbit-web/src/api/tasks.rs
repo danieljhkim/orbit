@@ -5,16 +5,16 @@ use axum::body::Body;
 use axum::extract::{Path, RawQuery};
 use axum::http::{HeaderName, HeaderValue, header};
 use axum::response::{IntoResponse, Json, Response};
-use orbit_common::types::task_artifacts::TaskRelation;
-use orbit_common::types::{
-    agent_family_from_cli, all_agent_families, infer_agent_family_from_model,
-    validate_relative_artifact_path,
-};
-use orbit_core::command::task::{TaskAddParams, TaskUpdateParams};
+use orbit_core::application::task::{TaskAddParams, TaskUpdateParams};
 use orbit_core::{
     DEFAULT_TASK_LIST_LIMIT, ExternalRef, OrbitRuntime, Task, TaskComplexity, TaskCreateStatus,
     TaskPriority, TaskStatus, TaskType,
 };
+use orbit_types::identity::{
+    agent_family_from_cli, all_agent_families, infer_agent_family_from_model,
+};
+use orbit_types::task::TaskRelation;
+use orbit_types::task::validate_relative_artifact_path;
 use serde::{Deserialize, Deserializer};
 use serde_json::{Map, Value, json};
 
@@ -90,8 +90,7 @@ pub(super) struct CreateTaskBody {
     workspace: Option<String>,
     #[serde(default = "default_priority")]
     priority: TaskPriority,
-    #[serde(default)]
-    complexity: Option<TaskComplexity>,
+    complexity: TaskComplexity,
     #[serde(default)]
     task_type: Option<TaskType>,
     #[serde(default)]
@@ -113,7 +112,7 @@ pub(super) struct CreateTaskBody {
     model: Option<String>,
     /// Retired create input, declared so it stays *knowingly* tolerated rather
     /// than falling into [`CreateTaskBody::unsupported`]. `comment` is one of
-    /// [`RETIRED_TASK_ADD_INPUT_FIELDS`](orbit_common::types::RETIRED_TASK_ADD_INPUT_FIELDS):
+    /// [`RETIRED_TASK_ADD_INPUT_FIELDS`](orbit_common::protocol::tool_input::RETIRED_TASK_ADD_INPUT_FIELDS):
     /// the native `orbit.task.add` tool strips it with a warning instead of
     /// failing, and this endpoint keeps that contract. Comment on a task with
     /// `POST /tasks/:id/comments`.
@@ -254,7 +253,7 @@ where
 ///   OR semantics across values; omitted means every lifecycle status.
 /// - `tag` (alias `tags`) — repeatable and/or comma-separated. AND semantics:
 ///   a task must carry every requested tag. Values go through Orbit's own
-///   [`normalize_task_tags`](orbit_common::types::normalize_task_tags) /
+///   [`normalize_task_tags`](orbit_types::task::normalize_task_tags) /
 ///   `task_matches_tags`, so a colon is ordinary tag content and
 ///   `auto-task:qa-sweep` matches that whole tag rather than being split.
 /// - `type` (alias `task_type`) — a single task type (`feature`/`bug`/
@@ -601,6 +600,10 @@ pub(super) async fn create_task_action(
             "ignored retired POST /api/tasks field; comment with POST /api/tasks/:id/comments"
         );
     }
+    let complexity = match body.complexity.require_assessed() {
+        Ok(complexity) => complexity,
+        Err(message) => return bad_request(message),
+    };
     let model = body.model.as_deref().and_then(non_empty_string);
     let params = TaskAddParams {
         parent_id: body.parent_id,
@@ -615,7 +618,7 @@ pub(super) async fn create_task_action(
         context_files: body.context_files,
         workspace_path: body.workspace_path,
         priority: body.priority,
-        complexity: body.complexity,
+        complexity,
         task_type: body.task_type,
         status: body.status.map(Into::into),
         system_created: false,
@@ -811,4 +814,63 @@ pub(super) async fn archive_task_action(Ws(runtime): Ws, Path(id): Path<String>)
         Ok(()) => Json(json!({ "ok": true, "id": id })).into_response(),
         Err(e) => map_runtime_error(e),
     }
+}
+
+/// Status distribution per complexity bucket, including the explicit `unset`
+/// band. Counts come from the generated task index — no per-request YAML reads.
+pub(super) async fn completion_by_complexity(Ws(runtime): Ws) -> Response {
+    let runtime_clone = runtime.clone();
+    let rows =
+        match tokio::task::spawn_blocking(move || runtime_clone.task_completion_by_complexity())
+            .await
+        {
+            Ok(Ok(rows)) => rows,
+            Ok(Err(e)) => return server_error(e),
+            Err(join_err) => {
+                return server_error(orbit_core::OrbitError::Execution(format!(
+                    "completion-by-complexity aggregation panicked: {join_err}"
+                )));
+            }
+        };
+
+    const REQUIRED_STATUSES: &[&str] = &["done", "rejected", "archived"];
+    let by_complexity: Vec<Value> = rows
+        .into_iter()
+        .map(|row| {
+            let mut statuses = Vec::new();
+            let mut seen = std::collections::BTreeSet::new();
+            for status in REQUIRED_STATUSES {
+                let count = row.by_status.get(*status).copied().unwrap_or(0);
+                statuses.push(status_rate_json(status, count, row.total));
+                seen.insert((*status).to_string());
+            }
+            for (status, count) in &row.by_status {
+                if seen.contains(status) {
+                    continue;
+                }
+                statuses.push(status_rate_json(status, *count, row.total));
+            }
+            json!({
+                "complexity": row.complexity,
+                "total": row.total,
+                "statuses": statuses,
+            })
+        })
+        .collect();
+
+    Json(json!({ "by_complexity": by_complexity })).into_response()
+}
+
+fn status_rate_json(status: &str, count: i64, total: i64) -> Value {
+    let rate = if total > 0 {
+        count as f64 / total as f64
+    } else {
+        0.0
+    };
+    json!({
+        "status": status,
+        "count": count,
+        "total": total,
+        "rate": rate,
+    })
 }

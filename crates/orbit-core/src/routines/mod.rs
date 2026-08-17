@@ -10,9 +10,10 @@
 //! synced (ADR-0204..ADR-0208; design in `docs/design/routines/`).
 
 use std::path::Path;
+use std::sync::Arc;
 
-use orbit_common::types::OrbitError;
-use orbit_store::Store;
+use orbit_common::OrbitError;
+use orbit_store::contracts::RoutineStoreBackend;
 
 pub mod clock;
 pub mod due;
@@ -31,8 +32,8 @@ pub use loader::{
     RoutineWorkspaceProvider, collect_routines,
 };
 pub use status::{
-    RoutineStatus, RoutineStatusReport, pause_routine, recent_fires, resume_routine,
-    routine_statuses_with_providers,
+    RoutineStatus, RoutineStatusReport, RoutineToggleOutcome, pause_routine, recent_fires,
+    resume_routine, routine_statuses_with_providers, set_routine_enabled,
 };
 pub use sweep::{
     RoutineSweepReport, SweepOptions, SweepOutcome, run_sweep_at_with_providers,
@@ -45,9 +46,10 @@ pub use validation::{
 };
 
 /// Open the config-resolved machine-local scheduler store.
-fn open_routine_store(global_root: &Path) -> Result<Store, OrbitError> {
-    let database = crate::config::resolved_audit_db_path(global_root, global_root)?;
-    Store::open(&database)
+fn open_routine_store(global_root: &Path) -> Result<Arc<dyn RoutineStoreBackend>, OrbitError> {
+    let database =
+        orbit_config::resolved_audit_db_path(&orbit_config::ConfigRoots::global_only(global_root))?;
+    orbit_store::compose::routine_store(&database)
 }
 
 #[cfg(test)]

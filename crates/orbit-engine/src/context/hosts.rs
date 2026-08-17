@@ -2,16 +2,20 @@
 //! implementors, plus the task-update param types those traits consume.
 
 use orbit_agent::AgentConfig;
-use orbit_common::types::activity_job::Provider;
-use orbit_common::types::{
-    ActivityV2, AgentModelPair, ExternalRef, InvocationTrace, JobRun, JobRunState, OrbitError,
-    OrbitEvent, PipelineState, Role, Task, TaskArtifact, TaskComment, TaskHistoryEntry,
-    TaskPriority, TaskStatus,
-};
-use orbit_exec::EnvironmentMode;
-use orbit_store::JobRunStepParams;
-use orbit_store::{InvocationQuery, InvocationRecord};
+use orbit_common::OrbitError;
+use orbit_common::security::child_env::allowlisted_child_env;
+use orbit_store::contracts::JobRunStepParams;
+use orbit_store::contracts::{InvocationQuery, InvocationRecord};
 use orbit_tools::{FsAuditLogger, ToolContext};
+use orbit_types::identity::AgentModelPair;
+use orbit_types::policy::Role;
+use orbit_types::record::OrbitEvent;
+use orbit_types::task::{
+    ExternalRef, Task, TaskArtifact, TaskComment, TaskHistoryEntry, TaskPriority, TaskStatus,
+};
+use orbit_types::telemetry::InvocationTrace;
+use orbit_types::workflow::activity_job::Provider;
+use orbit_types::workflow::{ActivityV2, JobRun, JobRunState, PipelineState};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::path::Path;
@@ -193,17 +197,20 @@ pub trait RuntimeHost: Send + Sync {
     fn agent_provider_config(&self) -> HashMap<String, String> {
         HashMap::new()
     }
-    fn execution_env_inherit(&self) -> bool {
-        true
-    }
-    fn hydrated_env_allowlist(&self, _env_extra: &[String]) -> Vec<(String, String)> {
-        Vec::new()
+    /// The complete environment an agent subprocess is launched with.
+    ///
+    /// Launchers clear the child environment and apply exactly what this
+    /// returns, so anything absent here does not reach the provider.
+    /// `required_env_vars` are the names the provider runtime declares it
+    /// needs. The default is the built-in baseline plus those extras: a host
+    /// with no configuration still starts a provider, but never forwards
+    /// ambient credentials. `OrbitRuntime` overrides it with the operator's
+    /// `[execution.env]` policy. [ORB-10917]
+    fn agent_subprocess_environment(&self, required_env_vars: &[&str]) -> Vec<(String, String)> {
+        allowlisted_child_env(&[], required_env_vars)
     }
     fn orbit_root(&self) -> Option<String> {
         None
-    }
-    fn cli_command_environment(&self, _env_extra: &[String]) -> Vec<(String, String)> {
-        Vec::new()
     }
     fn missing_required_environment_vars(&self, _required_env_vars: &[&str]) -> Vec<String> {
         Vec::new()
@@ -218,20 +225,6 @@ pub trait RuntimeHost: Send + Sync {
     ) -> Result<AgentConfig, OrbitError> {
         let config = self.agent_provider_config();
         AgentConfig::from_cli_config(agent_cli, model, &config)
-    }
-
-    fn execution_environment_mode(&self, env_extra: &[String]) -> EnvironmentMode {
-        if self.execution_env_inherit() {
-            EnvironmentMode::Inherit
-        } else {
-            let mut env = self.hydrated_env_allowlist(env_extra);
-            if let Some(orbit_root) = self.orbit_root()
-                && !env.iter().any(|(k, _)| k == "ORBIT_ROOT")
-            {
-                env.push(("ORBIT_ROOT".to_string(), orbit_root));
-            }
-            EnvironmentMode::ClearAndSet(env)
-        }
     }
 
     fn validate_agent_cli(&self, cli: &str, model: Option<&str>) -> Result<(), OrbitError> {

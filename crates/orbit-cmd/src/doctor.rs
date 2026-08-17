@@ -21,10 +21,11 @@ use std::fs::OpenOptions;
 use std::path::{Path, PathBuf};
 
 use fs2::FileExt;
-use orbit_common::types::{OrbitError, WorkspacePaths};
+use orbit_common::OrbitError;
 use orbit_core::OrbitRuntime;
-use orbit_core::command::artifact_health::{ArtifactFinding, RetiredActivityBackendRepair};
-use orbit_store::sqlite::migration::SUPPORTED_SCHEMA_VERSION;
+use orbit_core::application::artifact_health::{ArtifactFinding, RetiredActivityBackendRepair};
+use orbit_store::maintenance::migration::SUPPORTED_SCHEMA_VERSION;
+use orbit_types::workspace::WorkspacePaths;
 use serde::Serialize;
 
 /// Outcome of one workspace doctor check.
@@ -191,8 +192,10 @@ impl DoctorCommands for OrbitRuntime {
 /// Parse + validate the effective (workspace-over-global) `config.toml`.
 fn doctor_check_config(runtime: &OrbitRuntime) -> WorkspaceDoctorResult {
     let path = runtime.config_path();
-    match orbit_core::config::validate_layered_config(&runtime.global_root(), &runtime.data_root())
-    {
+    match orbit_config::validate_layered_config(&orbit_config::ConfigRoots::new(
+        runtime.global_root(),
+        runtime.data_root(),
+    )) {
         Ok(_) => check(
             "config",
             WorkspaceDoctorStatus::Ok,

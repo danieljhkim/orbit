@@ -12,6 +12,19 @@ template:
     feature paths as a user would; do not treat re-running the existing test
     suite as sufficient validation.
 
+    When those paths include `orbit init` or `orbit workspace init` and you
+    are inside the Cowork/agent-executor sandbox, `/` and `~/.orbit` are
+    mounted read-only. Do not init against the real home Orbit root — that
+    fails with EROFS. Put the Orbit root and any scratch git checkouts
+    under `/tmp` and use:
+
+        orbit --root /tmp/<scratch> init --non-interactive --host-name <name> --task-prefix <XXXX>
+        orbit --root /tmp/<scratch> workspace init
+
+    Root `init` hangs on stdin without `--non-interactive`. `workspace init`
+    does not need that flag and does not prompt non-interactively in
+    practice.
+
     Before filing anything, search open Orbit tasks tagged `qa-sweep`. For each
     real issue that is not already filed, create an Orbit task yourself through
     the Orbit MCP tools or the equivalent `orbit tool run orbit.task.add`
@@ -40,7 +53,9 @@ template:
   - qa-sweep
   - no-diff-expected
   priority: medium
-  crew: sonnet
+  # The portable system lane is seeded per machine and compatibility-aliased
+  # for configs written before that crew existed.
+  crew: system
   status: backlog
 dedupe: skip_if_open
 created_by: system

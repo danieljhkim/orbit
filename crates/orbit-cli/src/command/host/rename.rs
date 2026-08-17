@@ -1,9 +1,9 @@
 use clap::Args;
-use orbit_common::types::validate_host_id;
-use orbit_common::utility::fs::with_exclusive_file_lock;
+use orbit_common::fs::io::with_exclusive_file_lock;
 use orbit_core::{OrbitError, OrbitRuntime};
 use orbit_registry::workspace_registry;
 use orbit_registry::{HOST_TOML_FILE, load_host_identity, rename_current_host_identity};
+use orbit_types::identity::validate_host_id;
 
 use crate::command::{CommandOut, CommandOutput, Execute};
 

@@ -3,10 +3,13 @@
 // expect/assert for fixture setup and end-to-end validation.
 #![allow(clippy::expect_used)]
 
-use orbit_common::types::activity_job::{ActivityV2Spec, AgentLoopSpec, OnDenial, Provider};
-use orbit_common::types::{EXECUTOR_RESOURCE_SCHEMA_VERSION, ExecutorDef, ExecutorResource};
+use std::sync::Arc;
+
 use orbit_core::OrbitRuntime;
 use orbit_engine::{V2AuditWriter, V2DispatchInput, dispatch_v2_activity};
+use orbit_types::resource::{EXECUTOR_RESOURCE_SCHEMA_VERSION, ExecutorResource};
+use orbit_types::workflow::ExecutorDef;
+use orbit_types::workflow::activity_job::{ActivityV2Spec, AgentLoopSpec, OnDenial, Provider};
 
 fn seed_grok_executor(runtime: &OrbitRuntime) {
     let resource: ExecutorResource =
@@ -55,7 +58,7 @@ fn installed_grok_cli_backend_smoke_captures_stdout_artifact() {
     let audit_dir = tempfile::tempdir().expect("audit tempdir");
     let audit = V2AuditWriter::with_disk_sinks(
         audit_dir.path(),
-        orbit_store::Store::open_in_memory().expect("audit store"),
+        Arc::new(orbit_store::Store::open_in_memory().expect("audit store")),
         "ws_test",
         "grok-installed-smoke",
         "grok:grok-4.6".to_string(),

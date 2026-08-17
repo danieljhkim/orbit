@@ -4,7 +4,8 @@
 
 use std::path::PathBuf;
 
-use orbit_common::types::{AutoTaskSchedule, DedupePolicy, parse_auto_task_yaml};
+use orbit_common::protocol::yaml::parse_auto_task_yaml;
+use orbit_types::workflow::{AutoTaskSchedule, DedupePolicy};
 
 use crate::auto_tasks::DEFAULT_AUTO_TASK_FILES;
 
@@ -77,7 +78,7 @@ fn model_price_audit_is_weekly_report_only_and_routes_to_terra() {
     let definition = parse_auto_task_yaml(&yaml).expect("parse model-price-audit");
 
     assert_eq!(definition.name, "model-price-audit");
-    assert!(definition.enabled, "definition must be enabled");
+    assert!(!definition.enabled, "definition must ship disabled");
     assert_eq!(
         definition.schedule,
         AutoTaskSchedule::Cron {
@@ -88,7 +89,7 @@ fn model_price_audit_is_weekly_report_only_and_routes_to_terra() {
     assert_eq!(definition.template.crew.as_deref(), Some("terra"));
     assert_eq!(
         definition.template.status,
-        orbit_common::types::TaskStatus::Backlog
+        orbit_types::task::TaskStatus::Backlog
     );
     for required_tag in ["model-price-audit", "pricing", "no-diff-expected"] {
         assert!(
@@ -142,7 +143,13 @@ fn friction_curation_default_is_portable_and_inert() {
         "friction curation runs on a cron cadence"
     );
     assert!(matches!(definition.dedupe, DedupePolicy::SkipIfOpen));
-    assert_eq!(definition.template.crew.as_deref(), Some("luna"));
+    // [ORB-10877] `system` is a portable lane seeded for every detected family,
+    // rather than a family-specific crew such as Luna or Sonnet.
+    assert_eq!(definition.template.crew.as_deref(), Some("system"));
+    assert!(
+        yaml.contains("\n  crew: system"),
+        "default must name the portable system crew"
+    );
     assert!(
         !yaml.contains("/home/") && !yaml.contains("/Users/"),
         "default must not contain a machine-specific path"
@@ -183,10 +190,15 @@ fn qa_sweep_default_preserves_hands_on_validation_contract() {
     assert!(!definition.enabled);
     assert!(matches!(definition.schedule, AutoTaskSchedule::Cron { .. }));
     assert!(matches!(definition.dedupe, DedupePolicy::SkipIfOpen));
-    assert_eq!(definition.template.crew.as_deref(), Some("sonnet"));
+    // [ORB-10877] Same portable system-lane rule as friction-curation above.
+    assert_eq!(definition.template.crew.as_deref(), Some("system"));
+    assert!(
+        yaml.contains("\n  crew: system"),
+        "default must name the portable system crew"
+    );
     assert_eq!(
         definition.template.status,
-        orbit_common::types::TaskStatus::Backlog
+        orbit_types::task::TaskStatus::Backlog
     );
     assert!(definition.template.tags.iter().any(|tag| tag == "qa-sweep"));
     assert!(

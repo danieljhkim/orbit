@@ -177,6 +177,8 @@ impl TestWorkspace {
             title,
             "--description",
             "Shared tag-search marker.",
+            "--complexity",
+            "low",
             "--json",
         ];
         for tag in tags {

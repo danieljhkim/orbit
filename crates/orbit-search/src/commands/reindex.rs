@@ -1,4 +1,5 @@
-use orbit_common::types::{OrbitError, Task};
+use orbit_common::OrbitError;
+use orbit_types::task::Task;
 use serde::{Deserialize, Serialize};
 use std::str::FromStr;
 

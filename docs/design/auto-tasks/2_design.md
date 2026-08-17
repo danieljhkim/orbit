@@ -1,17 +1,17 @@
 ---
 title: Auto-tasks — Design
 owner: claude
-last_updated: 2026-08-15
-last_validated: 2026-07-27
+last_updated: 2026-08-16
+last_validated: 2026-08-16
 status: Accepted
 feature: auto-tasks
 doc_role: design
 type: design
-summary: Current implementation of the auto-task record, due-math, host-local cursor, generic scheduler, CRUD surfaces, and the on-demand manual mint.
+summary: Current implementation of the auto-task record, due-math, host-local cursor, generic scheduler, CRUD surfaces, the on-demand manual mint, and the dashboard Operations surface.
 tags: [auto-tasks]
-paths: ["crates/orbit-core/src/auto_tasks/**"]
+paths: ["crates/orbit-core/src/auto_tasks/**", "crates/orbit-web/src/api/auto_tasks.rs", "crates/orbit-web/assets/dashboard/operations.js"]
 related_features: [auto-tasks]
-related_artifacts: [ORB-10149, ORB-10439, ORB-10441, ORB-10446, ORB-10472, ORB-10583, ORB-10800]
+related_artifacts: [ORB-10149, ORB-10439, ORB-10441, ORB-10446, ORB-10472, ORB-10583, ORB-10800, ORB-10876]
 ---
 
 # Auto-tasks — Design
@@ -29,7 +29,10 @@ documented under `docs/design/routines/`.
 `updated_by/at`). `schedule` is an untagged enum — `{ cron: "…" }` or
 `{ every_minutes: N }`. `template` carries `title`, `description`,
 `acceptance_criteria`, `task_type`, `tags`, `priority`, `crew`, and `status`
-(default `backlog`). Per [Run budgets are provider-neutral: wall-clock timeouts, never turn caps](./4_decisions.md#run-budgets-are-provider-neutral-wall-clock-timeouts-never-turn-caps) there are **no turn-based knobs**; `deny_unknown_fields`
+(default `backlog`). Minted tasks always receive
+`complexity: unassessed` — an explicit non-answer, not a fabricated
+`low`/`medium`/`hard` assessment. Definitions do not carry complexity;
+the shared template-to-task mapping stamps the value. Per [Run budgets are provider-neutral: wall-clock timeouts, never turn caps](./4_decisions.md#run-budgets-are-provider-neutral-wall-clock-timeouts-never-turn-caps) there are **no turn-based knobs**; `deny_unknown_fields`
 makes a stray `max_turns`/`turns` a hard parse error.
 
 Definitions live as `.orbit/auto_tasks/<name>.yaml` in the active checkout.
@@ -68,7 +71,8 @@ fires nothing; otherwise it evaluates due-math. On `Fire`, if `dedupe =
 skip_if_open` and a task tagged `auto-task:<name>` is still open, it skips
 **without advancing the cursor** — so the pending occurrence fires (once,
 collapsed) the moment the queue drains. Otherwise it mints a `system_created`
-task from the template (tagged for provenance) and advances the cursor. Every
+task from the template (tagged for provenance, complexity `unassessed`)
+and advances the cursor. Every
 minted title is `[auto-task] ` followed by the template title; the prefix is
 applied at the shared template-to-task mapping, so definition YAML titles stay
 clean and an already-prefixed template is not double-prefixed.
@@ -154,6 +158,21 @@ both are registered at `McpToolScope::WorkspaceRequired`. The MCP tool is a thin
 adapter over the same `auto_task_mint`, so the mint stays unconditional and
 cursor-neutral on every surface.
 
+## 5c. Dashboard Operations surface [ORB-10876]
+
+The dashboard Operations tab exposes the same CRUD/mint runtime rather than a
+second scheduler. `#operations/auto-tasks` lists the selected workspace's
+definitions (name, enabled, schedule, template summary, dedupe, last
+evaluation/mint, last minted task id, next evaluation when the cursor makes
+that derivable). Enable/disable writes `enabled` through `auto_task_toggle`
+with `expected_enabled` compare-and-swap, operator authorization
+(`auto_task.toggle`), and a dashboard-operations audit row. `Mint now` calls
+`auto_task_mint` after the operator acknowledges the unconditional warning
+(`acknowledge_unconditional: true`); the request is refused without that
+disclosure. All-workspace and inactive/unknown workspace selections stay
+read-only. Refresh and hash navigation only GET — they never replay a toggle
+or mint.
+
 ## 6. Concerns & Honest Limitations
 
 The checked-in `qa-sweep` definition is the first concrete consumer. It files a
@@ -193,6 +212,7 @@ accurate.
 
 ## Task References
 
+- ORB-10876 — dashboard Operations inspection, toggle, and manual mint.
 - ORB-10149 — Auto-task primitive.
 - ORB-10439 — on-demand manual mint (renamed to `orbit auto-task mint <name>` by ORB-10446).
 - ORB-10441 — mint-time visible title provenance.

@@ -21,7 +21,7 @@ pub use worktree::{WorktreeGcOptions, WorktreeGcResult, collect_worktrees};
 pub(crate) fn run_private_operation(
     operation: &str,
     input: &serde_json::Value,
-) -> Result<serde_json::Value, orbit_common::types::OrbitError> {
+) -> Result<serde_json::Value, orbit_common::OrbitError> {
     operations::run(operation, input)
 }
 

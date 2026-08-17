@@ -1,6 +1,6 @@
 use std::fs;
 
-use orbit_core::config::ConfigScope;
+use orbit_config::ConfigScope;
 
 use super::super::support::{ConfigScopeArg, resolve_scope};
 use super::test_runtime;

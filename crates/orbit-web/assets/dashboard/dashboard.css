@@ -145,6 +145,89 @@
       }
       .workspace-select:hover { border-color: var(--accent); }
       .workspace-select:focus { border-color: var(--accent); outline: none; }
+      .workspace-select.scope-ignored {
+        opacity: 0.55;
+        border-style: dashed;
+      }
+      .workspace-scope-note {
+        font-family: var(--font-mono);
+        font-size: 10px;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        color: var(--accent-hi);
+        border: 1px solid var(--accent);
+        background: rgba(110, 159, 255, 0.12);
+        border-radius: 2px;
+        padding: 3px 8px;
+        white-space: nowrap;
+      }
+
+      .scope-badge {
+        display: inline-flex;
+        align-items: center;
+        flex: 0 0 auto;
+        font-family: var(--font-mono);
+        font-size: 10px;
+        letter-spacing: 0.05em;
+        text-transform: uppercase;
+        color: var(--fg);
+        border: 1px solid var(--border);
+        border-radius: 2px;
+        padding: 2px 7px;
+        white-space: nowrap;
+      }
+      .scope-badge.independent {
+        color: var(--accent-hi);
+        border-color: var(--accent);
+        background: rgba(110, 159, 255, 0.12);
+      }
+      .scope-chips {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        align-items: center;
+        min-width: 0;
+      }
+      .scope-chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        font: inherit;
+        font-family: var(--font-mono);
+        font-size: 11px;
+        line-height: 1.2;
+        padding: 3px 8px;
+        border: 1px solid var(--border);
+        border-radius: 2px;
+        background: var(--bg-elev);
+        color: var(--fg);
+        cursor: pointer;
+        max-width: 100%;
+      }
+      .scope-chip:hover {
+        border-color: var(--accent);
+      }
+      .scope-chip-k {
+        color: var(--fg-dim);
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        font-size: 9px;
+      }
+      .scope-chip-v {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        max-width: 14ch;
+      }
+      .scope-chip-x {
+        color: var(--fg-dim);
+        font-size: 13px;
+        line-height: 1;
+      }
+      .scope-chip.independent {
+        border-color: var(--accent);
+        background: rgba(110, 159, 255, 0.12);
+      }
       .ws-badge {
         display: inline-block;
         margin-right: 6px;
@@ -212,6 +295,8 @@
         display: flex;
         justify-content: space-between;
         align-items: center;
+        flex-wrap: wrap;
+        gap: 8px;
         background: #18181b;
       }
       
@@ -231,6 +316,10 @@
       
       #tasks-panel > .body {
         max-height: calc(100vh - 240px);
+        /* ORB-10874: floor so the task inventory stays usable (a few visible
+           rows) even on a short viewport or with the log panel expanded — it
+           never gets squeezed toward zero by the surrounding chrome. */
+        min-height: 240px;
         overflow-y: auto;
         overflow-x: auto;
         view-transition-name: task-list;
@@ -299,6 +388,46 @@
         color: var(--fg);
         border-color: var(--accent);
         background: rgba(110, 159, 255, 0.1);
+      }
+
+      @media (max-width: 720px) {
+        header .meta {
+          flex-wrap: wrap;
+          justify-content: flex-end;
+          max-width: min(100%, 420px);
+        }
+        .workspace-select {
+          max-width: 140px;
+        }
+        .workspace-scope-note,
+        .scope-badge {
+          font-size: 9px;
+          padding: 2px 6px;
+        }
+        #audit-events-controls {
+          flex-wrap: wrap;
+        }
+        .scope-chips,
+        #audit-filter {
+          flex-wrap: wrap;
+          width: 100%;
+        }
+        .scope-chip {
+          font-size: 10px;
+          padding: 3px 6px;
+        }
+        .scope-chip-v {
+          max-width: 10ch;
+        }
+      }
+
+      @media (max-width: 520px) {
+        .workspace-scope-note {
+          white-space: normal;
+        }
+        .scope-chip {
+          max-width: calc(50% - 6px);
+        }
       }
       
       .empty-state {
@@ -476,6 +605,59 @@
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
+      }
+
+      /* ORB-10874: inline pending/success/error feedback for the status/crew
+         selects. Never color-only — each state carries its own text, and
+         `success`/`error` additionally offer a bounded undo. */
+      .mutation-feedback {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        font-family: var(--font-mono);
+        font-size: 10px;
+        line-height: 1.25;
+      }
+      .mutation-feedback.pending { color: var(--fg-dim); font-style: italic; }
+      .mutation-feedback.success { color: var(--state-success); }
+      .mutation-feedback.error {
+        color: var(--state-failed);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .mutation-undo {
+        font: inherit;
+        color: var(--accent);
+        background: transparent;
+        border: 1px solid var(--accent);
+        border-radius: 2px;
+        padding: 0 5px;
+        cursor: pointer;
+        flex-shrink: 0;
+      }
+      .mutation-undo:hover { background: rgba(110, 159, 255, 0.1); }
+
+      /* ORB-10874: task/status controls must be usable without relying on
+         color alone — a visible focus ring on top of the existing
+         border-color change. */
+      .task-status-select:focus-visible,
+      .task-crew-select:focus-visible,
+      .chip:focus-visible,
+      .mutation-undo:focus-visible,
+      .log-panel-toggle:focus-visible,
+      .log-resize-handle:focus-visible {
+        outline: 2px solid var(--accent-hover);
+        outline-offset: 2px;
+      }
+
+      .filter-summary {
+        padding: 6px 16px;
+        font-family: var(--font-mono);
+        font-size: 11px;
+        color: var(--fg-dim);
+        border-bottom: 1px solid var(--border);
+        background: var(--bg);
       }
 
       .detail-side .complexity {
@@ -1424,16 +1606,29 @@
         cursor: not-allowed;
       }
       .scoreboard-window-seg {
+        appearance: none;
         padding: 4px 10px;
         color: var(--fg-dim);
         background: transparent;
+        border: 0;
         border-right: 1px solid var(--border);
+        border-radius: 0;
+        font: inherit;
+        letter-spacing: inherit;
+        text-transform: inherit;
+        cursor: pointer;
         user-select: none;
       }
       .scoreboard-window-seg:last-child { border-right: none; }
       .scoreboard-window-seg.on {
         color: var(--fg);
         background: var(--bg);
+      }
+      .scoreboard-window-seg:focus-visible {
+        outline: 2px solid var(--accent-hover);
+        outline-offset: -2px;
+        z-index: 1;
+        position: relative;
       }
 
       .scoreboard-controls {
@@ -1480,6 +1675,90 @@
       .scoreboard-insights .ag-tag.gemini { color: var(--ag-gemini); background: var(--ag-gemini-low); }
       .scoreboard-narrative .ag-tag.grok,
       .scoreboard-insights .ag-tag.grok { color: var(--ag-grok); background: var(--ag-grok-low); }
+
+      .scoreboard-highlights-host {
+        border-bottom: 1px solid var(--border);
+        background: var(--bg);
+        min-width: 0;
+      }
+      .scoreboard-highlights-host:empty { display: none; }
+      .scoreboard-highlights {
+        padding: 12px 16px 14px;
+        display: grid;
+        gap: 10px;
+        min-width: 0;
+      }
+      .scoreboard-highlights-heading {
+        display: grid;
+        gap: 4px;
+        min-width: 0;
+      }
+      .scoreboard-highlights-title {
+        margin: 0;
+        font-family: var(--font-sans);
+        font-size: 13px;
+        font-weight: 600;
+        color: var(--fg);
+      }
+      .scoreboard-highlights-rule {
+        margin: 0;
+        font-size: 12px;
+        line-height: 1.45;
+        color: var(--fg-dim);
+        overflow-wrap: anywhere;
+      }
+      .scoreboard-highlights-list {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+        display: grid;
+        gap: 8px;
+        min-width: 0;
+      }
+      .scoreboard-highlight {
+        display: grid;
+        gap: 4px;
+        min-width: 0;
+        padding: 8px 10px;
+        border: 1px solid var(--border);
+        border-radius: 2px;
+        background: var(--bg-elev, #111);
+      }
+      .scoreboard-highlight-head,
+      .scoreboard-highlight-meta {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px 12px;
+        align-items: baseline;
+        min-width: 0;
+      }
+      .scoreboard-highlight-id {
+        font-family: var(--font-mono);
+        font-size: 11px;
+        color: var(--accent-hover, var(--accent));
+      }
+      .scoreboard-highlight-title {
+        font-size: 13px;
+        color: var(--fg);
+        overflow-wrap: anywhere;
+        min-width: 0;
+      }
+      .scoreboard-highlight-meta {
+        font-family: var(--font-mono);
+        font-size: 11px;
+        color: var(--fg-dim);
+      }
+      .scoreboard-highlight-excerpt {
+        margin: 0;
+        font-size: 12.5px;
+        line-height: 1.45;
+        color: var(--fg);
+        overflow-wrap: anywhere;
+      }
+      .scoreboard-highlight-excerpt.missing {
+        color: var(--fg-dim);
+        font-style: italic;
+      }
 
       .scoreboard-agent-strip {
         border-bottom: 1px solid var(--border);
@@ -1583,6 +1862,19 @@
       @media (max-width: 1000px) {
         .scoreboard-agent-strip-inner {
           grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+      }
+      @media (max-width: 720px) {
+        table.sb2-matrix col.metric { width: 132px; }
+        table.sb2-matrix tr.group td,
+        table.sb2-matrix td.m-label {
+          white-space: normal;
+          overflow-wrap: anywhere;
+        }
+        table.sb2-matrix tr.group td .badge {
+          display: block;
+          margin-left: 0;
+          margin-top: 4px;
         }
       }
       @media (max-width: 620px) {
@@ -3196,6 +3488,23 @@
           grid-template-columns: minmax(0, 2fr) minmax(280px, 1.15fr) !important;
         }
       }
+      /* ORB-10874: below ~760px the two-column task/log layout has no room
+         left for either column, so stack them — the task list keeps its own
+         independently-scrolling, min-height-guaranteed body (below) and the
+         log panel follows underneath rather than both being squeezed into
+         slivers side by side. */
+      @media (max-width: 760px) {
+        main.tasks-layout {
+          grid-template-columns: 1fr !important;
+        }
+        .col-log {
+          min-height: auto;
+        }
+        #log-panel {
+          height: var(--log-panel-height, 260px);
+          max-height: var(--log-panel-height, 260px);
+        }
+      }
       .col-log {
         display: flex;
         flex-direction: column;
@@ -3279,9 +3588,59 @@
         white-space: nowrap;
       }
       #log-panel {
+        position: relative;
         height: var(--log-panel-height, calc(100dvh - 420px));
         max-height: var(--log-panel-height, calc(100dvh - 420px));
       }
+      /* ORB-10874: collapsed keeps only the header (with its toggle/filters
+         reachable via the header itself where relevant) so the operator can
+         still see the panel exists and re-expand it, without it occupying
+         the space a mid-height panel would. */
+      #log-panel.collapsed {
+        height: auto;
+        max-height: none;
+        flex: 0 0 auto;
+      }
+      #log-panel.collapsed .log-stream,
+      #log-panel.collapsed .log-foot {
+        display: none;
+      }
+      .log-resize-handle {
+        position: absolute;
+        top: -5px;
+        left: 0;
+        right: 0;
+        height: 10px;
+        cursor: row-resize;
+        z-index: 2;
+        touch-action: none;
+      }
+      .log-resize-handle::after {
+        content: "";
+        display: block;
+        margin: 4px auto 0;
+        width: 36px;
+        height: 3px;
+        border-radius: 2px;
+        background: var(--border);
+      }
+      .log-resize-handle:hover::after { background: var(--fg-dim); }
+      #log-panel.collapsed .log-resize-handle { cursor: default; pointer-events: none; }
+      .log-panel-toggle {
+        font: inherit;
+        font-family: var(--font-mono);
+        font-size: 10px;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        color: var(--fg-dim);
+        background: var(--bg-elev);
+        border: 1px solid var(--border);
+        border-radius: 3px;
+        padding: 2px 8px;
+        cursor: pointer;
+        margin-left: 6px;
+      }
+      .log-panel-toggle:hover { color: var(--fg); border-color: var(--fg-dim); }
       .col-log .panel > header .title {
         display: flex; align-items: center; gap: 10px;
       }
@@ -3468,3 +3827,180 @@
       .rel-role-step { color: var(--state-success); border-color: var(--state-success); }
       .rel-role-ambiguous { color: var(--priority-medium); border-color: var(--priority-medium); }
       .rel-role-unknown { color: var(--fg-dim); }
+
+      /* ORB-10875 / ORB-10876: routine, clock, and auto-task cards stay
+         visually separate so one state cannot read as another. */
+      .operations-layout {
+        grid-template-columns: minmax(0, 2fr) minmax(300px, 1fr);
+        align-items: start;
+      }
+      .operations-auto-tasks-layout { grid-template-columns: minmax(0, 1fr); }
+      body.operations-active { height: auto; min-height: 100vh; overflow-y: auto; }
+      .operations-layout .panel { min-width: 0; }
+      .tab-pane[data-tab="operations"] .subtabs { border-bottom: 1px solid var(--border); }
+      .operation-feedback {
+        min-height: 30px; padding: 7px 14px; border-bottom: 1px solid var(--border);
+        color: var(--fg-dim); font: 11px/1.4 var(--font-mono);
+      }
+      .operation-feedback:empty { display: none; }
+      .operation-feedback.pending { color: var(--priority-medium); }
+      .operation-feedback.success { color: var(--state-success); }
+      .operation-feedback.error { color: var(--state-failed); }
+      #routines-body, #clock-body, #auto-tasks-body { padding: 12px; background: var(--bg); }
+      .operation-card {
+        padding: 12px; margin-bottom: 10px; border: 1px solid var(--border);
+        border-radius: 4px; background: var(--bg-elev);
+      }
+      .operation-card:last-child { margin-bottom: 0; }
+      .operation-card-title, .operation-clock-summary, .operation-clock-actions, .operation-card-actions {
+        display: flex; align-items: center; justify-content: space-between; gap: 10px;
+      }
+      .operation-card-actions { justify-content: flex-end; flex-wrap: wrap; }
+      .operation-card-title > div, .operation-clock-summary { display: flex; align-items: center; gap: 8px; min-width: 0; }
+      .operation-card-title strong { overflow-wrap: anywhere; }
+      .operation-state {
+        padding: 2px 6px; border: 1px solid var(--border); border-radius: 999px;
+        color: var(--fg-dim); font: 10px var(--font-mono); text-transform: uppercase;
+      }
+      .operation-state.enabled, .operation-state.healthy { color: var(--state-success); border-color: var(--state-success); }
+      .operation-state.disabled, .operation-state.paused { color: var(--fg-dim); }
+      .operation-state.blocked, .operation-state.missed { color: var(--state-failed); border-color: var(--state-failed); }
+      .operation-target { margin: 8px 0 10px; color: var(--accent); overflow-wrap: anywhere; }
+      .operation-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 14px; }
+      .operation-field { min-width: 0; }
+      .operation-field-label {
+        display: block; margin-bottom: 2px; color: var(--fg-dim); font: 9px var(--font-sans);
+        text-transform: uppercase; letter-spacing: .08em;
+      }
+      .operation-field-value { display: block; color: var(--fg); font: 11px/1.4 var(--font-mono); overflow-wrap: anywhere; }
+      .operation-description, .operation-control-note, .operations-readonly-note {
+        margin: 10px 0 0; color: var(--fg-dim); font: 11px/1.5 var(--font-sans);
+      }
+      .operations-readonly-note { margin: 0 0 12px; padding: 9px; border: 1px dashed var(--border); }
+      .operation-control-note.error { color: var(--state-failed); }
+      .operation-mint-warning {
+        color: var(--priority-medium); border-left: 2px solid var(--priority-medium);
+        padding-left: 8px;
+      }
+      .operation-button, .operation-cadence {
+        min-height: 30px; padding: 5px 9px; border: 1px solid var(--border); border-radius: 3px;
+        background: var(--bg); color: var(--fg); font: 11px var(--font-mono);
+      }
+      .operation-button { cursor: pointer; white-space: nowrap; }
+      .operation-button:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+      .operation-button:disabled, .operation-cadence:disabled { opacity: .5; cursor: not-allowed; }
+      .operation-button.disable { color: var(--state-failed); }
+      .operation-button.enable { color: var(--state-success); }
+      .operation-clock-summary { justify-content: flex-start; margin-bottom: 14px; }
+      .operation-clock-actions { justify-content: flex-start; flex-wrap: wrap; margin-top: 14px; }
+
+      @media (max-width: 900px) {
+        .operations-layout { grid-template-columns: 1fr; }
+      }
+      @media (max-width: 720px) {
+        .operation-grid { grid-template-columns: 1fr; }
+        .operation-card-title { align-items: flex-start; flex-wrap: wrap; }
+        .operation-card-actions { width: 100%; }
+        .operation-mint-warning { overflow-wrap: anywhere; }
+      }
+      @media (max-width: 600px) {
+        .operations-layout { display: block; padding: 8px; }
+        .operations-layout .panel { margin-bottom: 8px; }
+        .operation-grid { grid-template-columns: 1fr; }
+        .operation-card-title { align-items: flex-start; }
+        .operation-card-title > div { align-items: flex-start; flex-direction: column; }
+        .operation-clock-actions, .operation-card-actions { align-items: stretch; }
+        .operation-clock-actions > *, .operation-card-actions > * { flex: 1 1 100%; }
+      }
+
+      /* ORB-10871: grouped failure incidents (Diagnostics → Incidents).
+         Every count renders next to what it is out of, and the class chips
+         keep denials, expected negative paths, and unexpected failures
+         visually separate. */
+      .incident-summary {
+        display: flex; flex-direction: column; gap: 8px;
+        padding: 12px 14px; border-bottom: 1px solid var(--border); background: var(--bg-alt, var(--bg));
+      }
+      .incident-summary-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px 12px; }
+      .incident-summary-headline { color: var(--fg); font: 13px var(--font-mono); }
+      .incident-summary-denominator { color: var(--fg-dim); font: 11px/1.5 var(--font-sans); }
+      .incident-summary-window {
+        padding: 2px 7px; border: 1px solid var(--border); border-radius: 999px;
+        color: var(--fg-dim); font: 10px var(--font-mono); white-space: nowrap;
+      }
+      .incident-class-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+      .incident-class-chip {
+        padding: 2px 8px; border: 1px solid var(--border); border-left-width: 2px; border-radius: 3px;
+        color: var(--fg-dim); font: 10px var(--font-mono); white-space: nowrap;
+      }
+      .incident-class-chip.unexpected { border-left-color: var(--state-failed); }
+      .incident-class-chip.expected { border-left-color: var(--fg-dim); }
+      .incident-class-chip.denied { border-left-color: var(--state-warn, var(--accent)); }
+      .incident-truncation-note { margin: 0; color: var(--state-warn, var(--fg-dim)); font: 11px/1.5 var(--font-sans); }
+
+      .incident-list { display: flex; flex-direction: column; }
+      .incident-row { border-bottom: 1px solid var(--border); padding: 10px 14px; }
+      .incident-row.unexpected { border-left: 2px solid var(--state-failed); }
+      .incident-row.expected { border-left: 2px solid var(--fg-dim); }
+      .incident-row.denied { border-left: 2px solid var(--state-warn, var(--accent)); }
+      .incident-head {
+        display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; width: 100%;
+        padding: 0; border: 0; background: none; color: var(--fg); text-align: left; cursor: pointer;
+      }
+      .incident-caret { color: var(--fg-dim); font: 10px var(--font-mono); }
+      .incident-class { font: 10px var(--font-mono); text-transform: lowercase; }
+      .incident-class.unexpected { color: var(--state-failed); }
+      .incident-class.expected { color: var(--fg-dim); }
+      .incident-class.denied { color: var(--state-warn, var(--accent)); }
+      .incident-surface { font: 12px var(--font-mono); overflow-wrap: anywhere; }
+      .incident-actor { color: var(--fg-dim); font: 11px var(--font-sans); }
+      .incident-count { margin-left: auto; color: var(--fg); font: 11px var(--font-mono); white-space: nowrap; }
+      .incident-when { color: var(--fg-dim); font: 10px var(--font-mono); white-space: nowrap; }
+      .incident-message {
+        margin-top: 4px; color: var(--fg-dim); font: 11px/1.5 var(--font-mono); overflow-wrap: anywhere;
+      }
+      .incident-detail {
+        display: flex; flex-direction: column; gap: 12px; margin-top: 10px;
+        padding: 10px; border: 1px solid var(--border); border-radius: 3px; overflow-x: auto;
+      }
+      .incident-facts {
+        display: grid; grid-template-columns: minmax(0, 9rem) minmax(0, 1fr); gap: 4px 12px; margin: 0;
+      }
+      .incident-facts dt { color: var(--fg-dim); font: 10px var(--font-sans); }
+      .incident-facts dd { margin: 0; color: var(--fg); font: 11px var(--font-mono); overflow-wrap: anywhere; }
+      .incident-section-title { color: var(--fg-dim); font: 10px var(--font-sans); }
+      .incident-propagation { display: flex; flex-direction: column; gap: 4px; }
+      .incident-propagation-link {
+        display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px;
+        padding-left: 10px; border-left: 1px dashed var(--border);
+      }
+      .incident-propagation-link .chain-mark { color: var(--fg-dim); }
+      .incident-propagation-link .chain-surface { font: 11px var(--font-mono); }
+      .incident-propagation-link .chain-count { color: var(--fg-dim); font: 10px var(--font-mono); }
+      .incident-propagation-link .chain-message {
+        flex: 1 1 12rem; color: var(--fg-dim); font: 10px/1.5 var(--font-mono); overflow-wrap: anywhere;
+      }
+      .incident-evidence { width: 100%; border-collapse: collapse; }
+      .incident-evidence th, .incident-evidence td {
+        padding: 4px 8px; border-bottom: 1px solid var(--border); text-align: left; vertical-align: top;
+      }
+      .incident-evidence th { color: var(--fg-dim); font: 10px var(--font-sans); }
+      .incident-evidence td { font: 10px/1.5 var(--font-mono); overflow-wrap: anywhere; }
+      .incident-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+
+      /* Narrow viewports: the incident summary and its expansion have to stay
+         scannable without clipping between 480 and 720px. */
+      @media (max-width: 720px) {
+        .incident-summary { padding: 10px; }
+        .incident-count { margin-left: 0; }
+        .incident-facts { grid-template-columns: minmax(0, 1fr); gap: 2px; }
+        .incident-facts dt { margin-top: 6px; }
+        .incident-evidence { display: block; overflow-x: auto; white-space: nowrap; }
+        .incident-evidence td.stderr { white-space: normal; min-width: 14rem; }
+      }
+      @media (max-width: 520px) {
+        .incident-row { padding: 10px; }
+        .incident-head { align-items: flex-start; }
+        .incident-surface { flex: 1 1 100%; }
+        .incident-actions > * { flex: 1 1 100%; }
+      }

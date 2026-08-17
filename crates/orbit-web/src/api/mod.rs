@@ -20,10 +20,12 @@ use serde_json::json;
 use url::Url;
 
 mod audit;
+mod auto_tasks;
 mod crews;
 mod denials;
 mod diagnostics;
 mod frictions;
+mod incidents;
 mod jobs;
 mod log;
 mod metrics;
@@ -373,6 +375,10 @@ pub(super) fn router() -> Router<crate::state::DashboardState> {
             get(tasks::list_tasks).post(tasks::create_task_action),
         )
         .route("/tasks/locks", get(tasks::list_task_locks))
+        .route(
+            "/tasks/completion-by-complexity",
+            get(tasks::completion_by_complexity),
+        )
         .route("/tasks/all", get(workspaces::list_all_tasks))
         .route("/workspaces", get(workspaces::list_workspaces))
         .route(
@@ -411,7 +417,13 @@ pub(super) fn router() -> Router<crate::state::DashboardState> {
         .route("/log", get(log::get_log))
         .route("/log/stream", get(log::stream_log))
         .route("/audit/summary", get(audit::audit_summary))
+        .route("/audit/incidents", get(incidents::list_failure_incidents))
         .route("/routines", get(routines::list_routine_health))
+        .route("/routines/toggle", post(routines::toggle_routine))
+        .route("/routines/clock", post(routines::control_clock))
+        .route("/auto-tasks", get(auto_tasks::list_auto_tasks))
+        .route("/auto-tasks/toggle", post(auto_tasks::toggle_auto_task))
+        .route("/auto-tasks/mint", post(auto_tasks::mint_auto_task))
         .route("/scoreboard", get(scoreboard::scoreboard))
         .route("/metrics/knowledge", get(metrics::knowledge_metrics))
         .route("/metrics/activity", get(metrics::activity_metrics))

@@ -4,16 +4,19 @@ use chrono::Utc;
 use clap::Args;
 use orbit_cmd::agent_rules::{InjectionAction, inject_agent_rules};
 use orbit_cmd::registry_runtime::RegisteredRuntimeFactory;
-use orbit_common::types::{
-    Workspace, WorkspaceCheckout, WorkspaceCheckoutRole, WorkspaceRegistry, WorkspaceStatus,
-    validate_machine_id,
-};
-use orbit_common::utility::fs::atomic_write_text;
+use orbit_common::fs::io::atomic_write_text;
 use orbit_core::OrbitError;
-use orbit_core::command::init::{InitOptions, init_workspace_at_root};
+use orbit_core::bootstrap::init::{InitOptions, init_workspace_at_root};
 use orbit_registry::workspace_registry;
 use orbit_registry::{HostIdentityState, inspect_host_identity};
+use orbit_types::identity::validate_machine_id;
+use orbit_types::workspace::{
+    Workspace, WorkspaceCheckout, WorkspaceCheckoutRole, WorkspaceRegistry, WorkspaceStatus,
+};
 use serde::{Deserialize, Serialize};
+
+use crate::command::init::agent_detect::{RealAgentEnvProbe, detect};
+use crate::command::init::config_seed_from_detection;
 
 use super::role::CliCheckoutRole;
 use super::support::{detect_git_remote, dir_name_or_fallback, ensure_orbit_gitignore_entry};
@@ -82,7 +85,7 @@ impl WorkspaceInitArgs {
 
         if let Some(start) = task_id_start {
             let outcome =
-                orbit_core::command::task_migration::seed_task_id_start(&global_root, start)?;
+                orbit_core::bootstrap::task_migration::seed_task_id_start(&global_root, start)?;
             if outcome.changed {
                 println!("  id_start:  allocator seeded to ORB-{:05}", outcome.next);
             } else {
@@ -247,6 +250,9 @@ impl WorkspaceInitArgs {
                 refresh_defaults: true,
                 global_root_override: Some(global_root.to_path_buf()),
                 routine_host_id: local_host_id.clone(),
+                // Host detection is a CLI concern: Core seeds config from the
+                // families this adapter reports, never by probing PATH itself.
+                config_seed: Some(config_seed_from_detection(&detect(&RealAgentEnvProbe))),
                 ..Default::default()
             },
         )?;
@@ -339,7 +345,7 @@ impl WorkspaceInitArgs {
         if !reconciling_existing && !registered_shared_root {
             write_workspace_identity(orbit_dir, &id)?;
         }
-        orbit_core::runtime::HubCoordinationExecutor::register_workspace(global_root, &id, &name)?;
+        orbit_core::adapter::HubCoordinationExecutor::register_workspace(global_root, &id, &name)?;
 
         Ok(WorkspaceInitResult {
             id,

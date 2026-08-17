@@ -29,15 +29,17 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use orbit_common::types::JobScheduleState;
-use orbit_common::types::activity_job::{
-    ActivityV2, ActivityV2Spec, JobKind, JobV2, JobV2Step, JobV2StepBody, LoopBlock, Provider,
-    ResolveError, TargetRef, V2ActivityCatalog, load_job_asset, resolve_job_target_refs,
-    validate_job_retired_sessions,
+use orbit_engine::activity_job::{
+    ResolveError, V2ActivityCatalog, load_job_asset, resolve_job_target_refs,
 };
 use orbit_engine::{
     DispatchError, ResolvedCliExecutor, RuntimeHost, V2AuditWriter, V2DispatchInput,
     dispatch_v2_activity,
+};
+use orbit_types::workflow::JobScheduleState;
+use orbit_types::workflow::activity_job::{
+    ActivityV2, ActivityV2Spec, JobKind, JobV2, JobV2Step, JobV2StepBody, LoopBlock, Provider,
+    TargetRef, validate_job_retired_sessions,
 };
 use serde_json::Value;
 
@@ -229,7 +231,7 @@ fn build_writer(
     std::fs::create_dir_all(&audit_root)?;
     let writer = V2AuditWriter::with_disk_sinks(
         &audit_root,
-        orbit_store::Store::open_in_memory()?,
+        Arc::new(orbit_store::Store::open_in_memory()?),
         "ws_smoke",
         run_id,
         "smoke".to_string(),
@@ -360,10 +362,12 @@ fn stub_deterministic_activity(name: &str) -> ActivityV2 {
         input_schema_json: serde_json::Value::Null,
         output_schema_json: serde_json::Value::Null,
         fs_profile: None,
-        spec: ActivityV2Spec::Deterministic(orbit_common::types::activity_job::DeterministicSpec {
-            action: "noop".to_string(),
-            config: serde_json::Value::Null,
-        }),
+        spec: ActivityV2Spec::Deterministic(
+            orbit_types::workflow::activity_job::DeterministicSpec {
+                action: "noop".to_string(),
+                config: serde_json::Value::Null,
+            },
+        ),
     }
 }
 

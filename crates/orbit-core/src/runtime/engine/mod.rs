@@ -2,8 +2,7 @@ mod crew;
 pub(crate) mod environment_host;
 mod identity;
 mod invocation;
-mod paths;
-mod runtime_host;
+pub(crate) mod paths;
 mod summary;
 
 #[cfg(test)]

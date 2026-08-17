@@ -36,6 +36,7 @@
       <button class="tab" data-tab="tasks" type="button">Tasks</button>
       <button class="tab" data-tab="audit" type="button">Audit</button>
       <button class="tab" data-tab="diagnostics" type="button">Diagnostics</button>
+      <button class="tab" data-tab="operations" type="button">Operations</button>
       <button class="tab" data-tab="knowledge" type="button">Knowledge</button>
     </nav>
     <section class="health-strip" id="health-strip" aria-label="Audit health summary">
@@ -67,9 +68,10 @@
           <section class="panel" id="tasks-panel">
             <header><span>Tasks</span><span class="count" id="tasks-count">-</span></header>
             <div class="controls">
-              <input type="search" id="task-search" placeholder="Search ID or title..." autocomplete="off" spellcheck="false" />
-              <div id="task-filter"></div>
+              <input type="search" id="task-search" placeholder="Search ID or title..." autocomplete="off" spellcheck="false" aria-label="Search tasks by ID or title" />
+              <div id="task-filter" role="group" aria-label="Filter tasks by status"></div>
             </div>
+            <div class="filter-summary" id="task-filter-summary" role="status" aria-live="polite"></div>
             <div class="body" id="tasks-body">
               <div class="skeleton-state">
                 <div class="skeleton skeleton-row"></div>
@@ -85,11 +87,13 @@
             <div class="body" id="locks-body"></div>
           </section>
           <section class="panel" id="log-panel">
+            <div class="log-resize-handle" id="log-panel-resize" role="separator" aria-orientation="horizontal" aria-label="Resize log panel" tabindex="0" title="Drag or use arrow keys to resize"></div>
             <header class="head">
               <div class="title"><span class="live-dot"></span>orbit.log <span style="color: var(--fg-dim); font-family: var(--font-mono); font-weight: 400; letter-spacing: 0; text-transform: none;">— tail -F</span></div>
               <div class="actions">
                 <span class="count" id="log-count" style="background: var(--bg-elev); padding: 1px 8px; border: 1px solid var(--border); border-radius: 3px; font-family: var(--font-mono); font-size: 11px;">0</span>
                 <span class="count" id="log-buffered-count" style="display: none; cursor: pointer; background: var(--bg-elev); padding: 1px 8px; border: 1px solid var(--border); border-radius: 3px; font-family: var(--font-mono); font-size: 11px; margin-left: 6px;">0 buffered</span>
+                <button type="button" class="log-panel-toggle" id="log-panel-toggle" aria-expanded="true" aria-controls="logInner" title="Collapse or expand the log panel">collapse</button>
               </div>
             </header>
             <div class="log-stream">
@@ -118,6 +122,7 @@
             </nav>
             <div class="controls" id="audit-events-controls">
               <input type="search" id="audit-search" placeholder="Search command, tool, target..." autocomplete="off" spellcheck="false" />
+              <div id="audit-scope-chips" class="scope-chips" aria-label="Active audit scope"></div>
               <div id="audit-filter"></div>
             </div>
             <div class="body scoreboard-table-wrap" id="audit-body">
@@ -180,6 +185,7 @@
               <button class="subtab" data-subtab="runs" type="button">Recent Runs</button>
               <button class="subtab" data-subtab="metrics" type="button">Metrics</button>
               <button class="subtab" data-subtab="errors" type="button">Errors</button>
+              <button class="subtab" data-subtab="incidents" type="button">Incidents</button>
               <button class="subtab" data-subtab="reliability" type="button">Reliability</button>
               <button class="subtab" data-subtab="scoreboard" type="button">Scoreboard</button>
             </nav>
@@ -213,17 +219,18 @@
         <section class="panel" id="reliability-panel">
           <header>
             <span>Pipeline Reliability</span>
+            <span class="scope-badge independent" id="reliability-scope-badge">Fleet-wide</span>
             <span class="count" id="reliability-count">-</span>
           </header>
           <div class="scoreboard-controls" id="reliability-controls">
             <div class="scoreboard-control-group">
               <span class="scoreboard-control-label">window</span>
-              <span class="scoreboard-window-selector" id="reliability-window-selector" title="window scope">
-                <span class="scoreboard-window-seg" data-window="1h">1h</span>
-                <span class="scoreboard-window-seg" data-window="24h">24h</span>
-                <span class="scoreboard-window-seg on" data-window="7d">7d</span>
-                <span class="scoreboard-window-seg" data-window="30d">30d</span>
-              </span>
+              <div class="scoreboard-window-selector" id="reliability-window-selector" role="tablist" aria-label="Reliability time window">
+                <button type="button" role="tab" class="scoreboard-window-seg" data-window="1h" aria-selected="false" tabindex="-1">1h</button>
+                <button type="button" role="tab" class="scoreboard-window-seg" data-window="24h" aria-selected="false" tabindex="-1">24h</button>
+                <button type="button" role="tab" class="scoreboard-window-seg on" data-window="7d" aria-selected="true" tabindex="0">7d</button>
+                <button type="button" role="tab" class="scoreboard-window-seg" data-window="30d" aria-selected="false" tabindex="-1">30d</button>
+              </div>
             </div>
             <span class="scoreboard-controls-spacer"></span>
             <span class="scoreboard-controls-meta" id="reliability-meta">-</span>
@@ -261,19 +268,20 @@
               <span class="scoreboard-control-label">window</span>
               <!-- Window selector — click a segment to refetch the
                    scoreboard scoped to that window. Wired in ORB-00337. -->
-              <span class="scoreboard-window-selector" id="scoreboard-window-selector" title="window scope">
-                <span class="scoreboard-window-seg" data-window="1h">1h</span>
-                <span class="scoreboard-window-seg on" data-window="24h">24h</span>
-                <span class="scoreboard-window-seg" data-window="7d">7d</span>
-                <span class="scoreboard-window-seg" data-window="30d">30d</span>
-                <span class="scoreboard-window-seg" data-window="all">all</span>
-              </span>
+              <div class="scoreboard-window-selector" id="scoreboard-window-selector" role="tablist" aria-label="Scoreboard time window">
+                <button type="button" role="tab" class="scoreboard-window-seg" data-window="1h" aria-selected="false" tabindex="-1">1h</button>
+                <button type="button" role="tab" class="scoreboard-window-seg on" data-window="24h" aria-selected="true" tabindex="0">24h</button>
+                <button type="button" role="tab" class="scoreboard-window-seg" data-window="7d" aria-selected="false" tabindex="-1">7d</button>
+                <button type="button" role="tab" class="scoreboard-window-seg" data-window="30d" aria-selected="false" tabindex="-1">30d</button>
+                <button type="button" role="tab" class="scoreboard-window-seg" data-window="all" aria-selected="false" tabindex="-1">all</button>
+              </div>
             </div>
             <span class="scoreboard-controls-spacer"></span>
             <span class="scoreboard-controls-meta" id="scoreboard-meta">-</span>
           </div>
           <div id="scoreboard-narrative" class="scoreboard-narrative"></div>
           <div id="scoreboard-agent-strip" class="scoreboard-agent-strip"></div>
+          <section id="scoreboard-highlights" class="scoreboard-highlights-host" aria-label="Notable completions"></section>
           <div class="body scoreboard-table-wrap" id="scoreboard-body">
             <div class="skeleton-state">
               <div class="skeleton skeleton-row"></div>
@@ -296,6 +304,43 @@
         <section class="panel" id="scoreboard-insights-panel">
           <header><span>Insights</span><span class="count" id="scoreboard-insights-count">—</span></header>
           <div id="scoreboard-insights"></div>
+        </section>
+      </main>
+    </section>
+    <section class="tab-pane" data-tab="operations">
+      <nav class="subtabs" id="operations-subtabs">
+        <button class="subtab active" data-subtab="routines" type="button">Routines</button>
+        <button class="subtab" data-subtab="auto-tasks" type="button">Auto-tasks</button>
+      </nav>
+      <main class="operations-layout" id="operations-routines-main">
+        <section class="panel" id="routines-panel">
+          <header>
+            <span>Scheduled Routines</span>
+            <span class="count" id="routines-count">-</span>
+          </header>
+          <div class="operation-feedback" id="routine-operation-feedback" role="status" aria-live="polite"></div>
+          <div class="body" id="routines-body">
+            <div class="skeleton-state"><div class="skeleton skeleton-row"></div></div>
+          </div>
+        </section>
+        <section class="panel" id="clock-panel">
+          <header><span>Host Sweep Clock</span><span class="count" id="clock-host">-</span></header>
+          <div class="operation-feedback" id="clock-operation-feedback" role="status" aria-live="polite"></div>
+          <div class="body" id="clock-body">
+            <div class="skeleton-state"><div class="skeleton skeleton-row"></div></div>
+          </div>
+        </section>
+      </main>
+      <main class="operations-layout operations-auto-tasks-layout" id="operations-auto-tasks-main" hidden>
+        <section class="panel" id="auto-tasks-panel">
+          <header>
+            <span>Auto-task Definitions</span>
+            <span class="count" id="auto-tasks-count">-</span>
+          </header>
+          <div class="operation-feedback" id="auto-task-operation-feedback" role="status" aria-live="polite"></div>
+          <div class="body" id="auto-tasks-body">
+            <div class="skeleton-state"><div class="skeleton skeleton-row"></div></div>
+          </div>
         </section>
       </main>
     </section>

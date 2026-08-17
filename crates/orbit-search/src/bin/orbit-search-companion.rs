@@ -14,7 +14,7 @@ use std::path::PathBuf;
 
 use clap::Parser;
 use fastembed::{EmbeddingModel, ModelTrait, TextEmbedding, TextInitOptions};
-use orbit_common::types::OrbitError;
+use orbit_common::OrbitError;
 use orbit_search::{CompanionPaths, ModelSpec, RpcError, RpcRequest, RpcResponse, RpcResult};
 
 #[derive(Debug, Parser)]

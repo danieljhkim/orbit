@@ -8,7 +8,7 @@
 // Existing expect calls in this module document local invariants; keep the allow scoped while the workspace lint is ratcheted.
 #![allow(clippy::expect_used)]
 
-use orbit_common::types::OrbitError;
+use orbit_common::OrbitError;
 
 pub const DEFAULT_MODEL: &str = "bge-small";
 

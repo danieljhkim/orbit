@@ -11,7 +11,7 @@ use std::time::{Duration, Instant};
 
 use super::super::dispatcher::ResolvedSandbox;
 use super::spawn::{SpawnError, SpawnedChild, spawn_child_with_optional_sandbox};
-use orbit_common::utility::output_capture::capture_limit_from_env;
+use orbit_common::process::output_capture::capture_limit_from_env;
 
 /// Default wall-clock timeout when `AgentLoopSpec::wall_clock_timeout_seconds`
 /// is zero. Matches §7.6 guidance: CLI subprocesses must have a mandatory
@@ -196,12 +196,11 @@ pub(super) fn spawn_with_timeout(
         mut child,
         // The temp profile must outlive the child — drop it after wait.
         _profile_temp,
-    } = spawn_child_with_optional_sandbox(program, args, env, cwd, sandbox).map_err(|err| {
-        SpawnError {
+    } = spawn_child_with_optional_sandbox(program, args, env, cwd, sandbox, trace.provider)
+        .map_err(|err| SpawnError {
             permanent: err.permanent,
             message: format!("spawn {program}: {}", err.message),
-        }
-    })?;
+        })?;
 
     // Report the PID before any blocking work: the whole point is to be
     // observable during a long invocation, and the child is already running.

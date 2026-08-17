@@ -1,6 +1,7 @@
 use std::path::{Path, PathBuf};
 
-use orbit_common::types::{FsOperation, OrbitError, PolicyDef};
+use orbit_common::OrbitError;
+use orbit_types::policy::{FsOperation, PolicyDef};
 
 use crate::evaluator;
 

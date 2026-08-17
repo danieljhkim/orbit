@@ -8,10 +8,10 @@ use std::sync::{Arc, Barrier, Mutex};
 use axum::body::Body;
 use axum::http::{Method, Request, StatusCode, header};
 use chrono::Utc;
-use orbit_common::types::{Workspace, WorkspaceCheckout, WorkspaceRegistry, WorkspaceStatus};
-use orbit_core::command::task::TaskAddParams;
+use orbit_core::application::task::TaskAddParams;
 use orbit_core::runtime::WorkspaceRuntimeBinding;
 use orbit_core::{ActorIdentity, OrbitRuntime, ShipMode, TaskStatus};
+use orbit_types::workspace::{Workspace, WorkspaceCheckout, WorkspaceRegistry, WorkspaceStatus};
 use serde_json::json;
 use tower::ServiceExt;
 use tracing_subscriber::Registry;
@@ -448,7 +448,7 @@ async fn create_task_with_workspace_param_binds_to_that_workspace() {
         .with_state(state.clone())
         .oneshot(post_json(
             "/tasks?workspace=beta",
-            json!({ "title": "routed to beta", "description": "ORB-00042" }),
+            json!({ "title": "routed to beta", "description": "ORB-00042", "complexity": "low" }),
         ))
         .await
         .expect("response");
@@ -472,7 +472,7 @@ async fn create_task_with_workspace_param_binds_to_that_workspace() {
         .with_state(state.clone())
         .oneshot(post_json(
             "/tasks",
-            json!({ "title": "defaulted to alpha", "description": "ORB-00042" }),
+            json!({ "title": "defaulted to alpha", "description": "ORB-00042", "complexity": "low" }),
         ))
         .await
         .expect("response");
@@ -499,7 +499,7 @@ async fn create_task_with_unknown_workspace_is_404_and_creates_nothing() {
         .with_state(state.clone())
         .oneshot(post_json(
             "/tasks?workspace=ghost",
-            json!({ "title": "lost", "description": "should not exist" }),
+            json!({ "title": "lost", "description": "should not exist", "complexity": "low" }),
         ))
         .await
         .expect("response");

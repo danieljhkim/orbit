@@ -1,44 +1,16 @@
 // Orbit dashboard scoreboard-domain rendering.
 // Pure vanilla JS, split into ES modules with no build step.
 
-import { el, syncNodes, fetchJson, isAggregateView } from './common.js';
-import { navigateToRole } from './audit.js';
+import { el, syncNodes, getWindow, payloadHonorsWindow, wireWindowSelector, syncWindowSelectors } from './common.js';
+import { navigateToDrilldown } from './audit.js';
 
-// ORB-00337: canonical scoreboard windows (mirror of
-// `orbit_store::scoreboard_summary::ScoreboardWindow::as_str`). The
-// boot fetch in app.js hardcodes `24h` to match the visually-highlighted
-// segment; subsequent fetches happen from the selector click handler.
-const SCOREBOARD_WINDOWS = ["1h", "24h", "7d", "30d", "all"];
-
+// ORB-00337/ORB-10872: selector writes the shared dashboard window; app.js
+// refresh is the single fetch path so delivery/operations and Managed
+// Execution cannot drift onto different cutoffs.
 function wireScoreboardWindowSelector() {
-  const selector = document.getElementById("scoreboard-window-selector");
-  if (!selector || selector.dataset.wired === "true") return;
-  selector.dataset.wired = "true";
-  selector.addEventListener("click", (event) => {
-    const seg = event.target && event.target.closest(".scoreboard-window-seg");
-    if (!seg || !selector.contains(seg)) return;
-    const next = seg.dataset.window;
-    if (!SCOREBOARD_WINDOWS.includes(next)) return;
-    if (seg.classList.contains("on")) return; // no-op refetch
-    // ORB-00040: /api/scoreboard is per-workspace and 400s without a concrete
-    // workspace. The auto-refresh boot fetch is already guarded in app.js; this
-    // guards the user-initiated window re-fetch too, so selecting a window in the
-    // aggregate ("All workspaces") view is a no-op (the panel shows the
-    // placeholder) rather than flipping conn-status to red.
-    if (isAggregateView()) return;
-    for (const peer of selector.querySelectorAll(".scoreboard-window-seg")) {
-      peer.classList.remove("on");
-    }
-    seg.classList.add("on");
-    fetchJson(`/api/scoreboard?window=${encodeURIComponent(next)}`)
-      .then(renderScoreboard)
-      .catch((err) => {
-        // Surface fetch failures in the console so the dashboard's "no
-        // console errors" verification step catches regressions; the UI
-        // keeps the previously-rendered scoreboard.
-        console.error("scoreboard window refetch failed:", err);
-      });
-  });
+  // Selector writes shared dashboard window even in aggregate view so the
+  // URL stays authoritative; app.js skips the per-workspace fetch there.
+  wireWindowSelector("scoreboard-window-selector", { allowAll: true });
 }
 
 const $ = (id) => document.getElementById(id);
@@ -103,7 +75,12 @@ const DELIVERY_SCOREBOARD_COLUMNS = [
 
 const PR_REVIEW_COLUMNS = [
   { key: "agent", label: "agent", num: false },
-  { key: "pr.review_comments", label: "pr rev", num: true },
+  {
+    key: "pr.review_comments",
+    label: "pr rev",
+    num: true,
+    title: "pull-request review comments from the lifetime snapshot",
+  },
 ];
 
 const OPERATIONS_SCOREBOARD_COLUMNS = [
@@ -120,7 +97,7 @@ const OPERATIONS_SCOREBOARD_COLUMNS = [
     label: "task calls",
     num: true,
     compute: (agent) => agent?.tool_calls_by_surface?.task ?? 0,
-    title: "orbit.task.* calls",
+    title: "orbit.task.* tool-call count",
   },
   {
     key: "tools",
@@ -129,16 +106,45 @@ const OPERATIONS_SCOREBOARD_COLUMNS = [
     format: "pair",
     left: "failed_tool_calls",
     right: "tool_calls",
-    title: "failed / total tool calls",
+    title: "raw failed tool calls over total tool calls",
+    help: "raw events",
   },
-  { key: "friction.reported", label: "frict r", num: true },
+  // ORB-10871: the same failures, grouped. A repeated burst is one incident
+  // with its raw event count beside it, so the left number answers "how many
+  // things went wrong" and the right one "how much evidence there is".
+  {
+    key: "failure_incidents",
+    label: "fail inc/events",
+    num: true,
+    format: "pair",
+    left: "failure_incidents",
+    right: "failure_incident_events",
+    tone: "warn",
+    title: "grouped failure incidents / raw failed events they collapsed",
+    help: "grouped",
+  },
+  {
+    key: "friction.reported",
+    label: "friction",
+    num: true,
+    title: "append-only friction reports filed by this agent",
+  },
 ];
 
-const ALL_SCOREBOARD_SECTIONS = [
-  { title: "Delivery", badge: "tasks created · planned · completed", columns: DELIVERY_SCOREBOARD_COLUMNS },
-  { title: "Review", badge: "review threads · PR comments", columns: PR_REVIEW_COLUMNS },
-  { title: "Operations", badge: "tool calls · failures · friction", columns: OPERATIONS_SCOREBOARD_COLUMNS },
-];
+function allScoreboardSections() {
+  // Badges name the window so a count is never read against an unstated
+  // cutoff; the Operations badge also states that its failures are grouped.
+  const window = getWindow();
+  return [
+    { title: "Delivery", badge: `tasks created · planned · completed · window ${window}`, columns: DELIVERY_SCOREBOARD_COLUMNS },
+    { title: "Review", badge: `review threads · PR comments · window ${window}`, columns: PR_REVIEW_COLUMNS },
+    {
+      title: "Operations",
+      badge: `tool calls · raw failed events and the incidents they group into · friction · window ${window}`,
+      columns: OPERATIONS_SCOREBOARD_COLUMNS,
+    },
+  ];
+}
 
 function readPath(obj, path) {
   let cur = obj;
@@ -153,10 +159,21 @@ function renderScoreboard(summary) {
   // ORB-00337: idempotent attach of the window-selector click handler
   // (guarded internally so re-renders don't double-bind).
   wireScoreboardWindowSelector();
+  syncWindowSelectors();
+
+  // ORB-10872: never paint a 24h body under an active 7d (or any other)
+  // selection. The fetch path also guards this; keep the renderer honest.
+  if (summary && !payloadHonorsWindow(summary, getWindow())) {
+    console.error(
+      `scoreboard payload window ${summary.window} rejected under ${getWindow()} selection`,
+    );
+    return;
+  }
 
   const body = $("scoreboard-body");
   const narrativeHost = $("scoreboard-narrative");
   const agentStrip = $("scoreboard-agent-strip");
+  const highlightsHost = $("scoreboard-highlights");
   const meta = $("scoreboard-meta");
   const insightsHost = $("scoreboard-insights");
   const insightsCount = $("scoreboard-insights-count");
@@ -174,6 +191,7 @@ function renderScoreboard(summary) {
     ])]);
     if (narrativeHost) syncNodes(narrativeHost, []);
     if (agentStrip) syncNodes(agentStrip, []);
+    if (highlightsHost) syncNodes(highlightsHost, [renderNotableCompletions(summary?.notable_completions)]);
     if (meta) meta.textContent = "-";
     if (insightsHost) syncNodes(insightsHost, []);
     if (insightsCount) insightsCount.textContent = "—";
@@ -190,8 +208,12 @@ function renderScoreboard(summary) {
   if (agentStrip) {
     syncNodes(agentStrip, [renderAgentStrip(canonicalRows)]);
   }
-  const matrix = buildLeaderboardMatrix(canonicalRows, ALL_SCOREBOARD_SECTIONS, {
+  if (highlightsHost) {
+    syncNodes(highlightsHost, [renderNotableCompletions(summary?.notable_completions)]);
+  }
+  const matrix = buildLeaderboardMatrix(canonicalRows, allScoreboardSections(), {
     showSectionDividers: true,
+    coverage: summary?.coverage,
   });
   syncNodes(body, [el("div", { class: "scoreboard-sections" }, [matrix])]);
 
@@ -378,9 +400,10 @@ function renderOrchestrationSummary(orchestration) {
     el("div", { class: "scoreboard-orchestration-context" }, [
       el("div", { class: "scoreboard-orchestration-scope" }, [
         el("span", { class: "scope-label", text: "Managed execution only" }),
+        el("span", { class: "scope-badge", text: `window ${getWindow()}` }),
         el("span", { text: "Direct interactive Codex or Claude orchestration-session overhead is excluded." }),
       ]),
-      el("div", { class: "scoreboard-orchestration-window", text: `Window: ${since} ≤ invocation < ${until} (exclusive cutoff; as of ${orchestration.as_of || "unknown"}).` }),
+      el("div", { class: "scoreboard-orchestration-window", text: `Window ${getWindow()}: ${since} ≤ invocation < ${until} (exclusive cutoff; as of ${orchestration.as_of || "unknown"}).` }),
       el("p", { class: "scoreboard-orchestration-policy", text: "Provider-first estimate policy: provider-reported values are primary; derived values remain explicitly labeled estimates with their own coverage. Only the explicitly comparable same-invocation population is safe to compare." }),
     ]),
     renderNormalizedTokenUsage(orchestration.normalized_tokens, orchestration.previous_normalized_tokens),
@@ -456,7 +479,7 @@ function renderAgentStrip(rows) {
       title: `${name} - click to filter audit by role`,
     }), name);
     card.type = "button";
-    card.addEventListener("click", () => navigateToRole(name));
+    card.addEventListener("click", () => navigateToDrilldown({ role: name }));
 
     card.appendChild(el("div", { class: "scoreboard-agent-rank", text: `#${String(index + 1).padStart(2, "0")} · activity` }));
     card.appendChild(el("div", { class: "scoreboard-agent-heading" }, [
@@ -509,7 +532,7 @@ function buildLeaderboardMatrix(rows, sectionList, opts = {}) {
       document.createTextNode(name),
       el("span", { class: "totals", text: `${fmtScoreboardCount(agentActivityTotal(agent))} activity` }),
     ]), name);
-    th.addEventListener("click", () => navigateToRole(name));
+    th.addEventListener("click", () => navigateToDrilldown({ role: name }));
     headRow.appendChild(th);
   }
   thead.appendChild(headRow);
@@ -523,7 +546,7 @@ function buildLeaderboardMatrix(rows, sectionList, opts = {}) {
       .filter((candidate) => metricHasActivity(rows, candidate));
     if (showSectionDividers) {
       const badge = metrics.length === 0
-        ? "no activity this window"
+        ? emptySectionBadge(section.title, opts.coverage)
         : section.badge;
       tbody.appendChild(sectionDividerRow(section.title, badge, columnCount));
     }
@@ -531,13 +554,15 @@ function buildLeaderboardMatrix(rows, sectionList, opts = {}) {
       const rowMax = rowMaxValue(rows, col);
       const tr = el("tr", { class: "metric" });
       tr.dataset.key = `scoreboard-${section.title}-${col.key}`;
-      tr.appendChild(el("td", {
+      const metricLabel = el("td", {
         class: "m-label",
         title: col.title || col.label,
       }, [
         document.createTextNode(col.label),
         ...(col.help ? [el("span", { class: "help", text: col.help })] : []),
-      ]));
+      ]);
+      metricLabel.setAttribute("aria-label", col.title || col.label);
+      tr.appendChild(metricLabel);
       for (const [name, agent] of rows) {
         const value = scoreboardColumnValue(agent, col);
         const isLeader = rowMax > 0 && value === rowMax;
@@ -546,6 +571,15 @@ function buildLeaderboardMatrix(rows, sectionList, opts = {}) {
           : metricCell(name, agent, col, rowMax, isLeader);
         td.dataset.agent = name;
         td.dataset.metric = col.key;
+        td.classList.add("clickable");
+        td.title = `${col.title || col.label}: click to filter audit`;
+        td.addEventListener("click", () => navigateToDrilldown({
+          role: name,
+          metric: col.key,
+          status: ["tools", "failed_tool_calls", "failure_incidents"].includes(col.key)
+            ? "failure"
+            : null,
+        }));
         tr.appendChild(td);
       }
       tbody.appendChild(tr);
@@ -627,7 +661,76 @@ function scoreboardCellNode(name, value, rowMax, isLeader, opts = {}) {
 }
 
 function leaderBadge() {
-  return el("span", { class: "lead-mark", text: "▲", title: "row leader" });
+  const mark = el("span", {
+    class: "lead-mark",
+    text: "▲",
+    title: "Highest count in this row. Not a quality score.",
+  });
+  mark.setAttribute("aria-label", "Highest count in this row. Not a quality score.");
+  return mark;
+}
+
+function emptySectionBadge(title, coverage) {
+  if (title === "Review") {
+    if (coverage?.review?.availability === "unavailable") {
+      return coverage.review.detail
+        || "review snapshot is not windowed; this is missing coverage, not zero activity";
+    }
+    return "no observed review comments in this source";
+  }
+  if (title === "Delivery") return "no observed task events this window";
+  if (title === "Operations") return "no observed tool calls or friction this window";
+  return "no observed events this window";
+}
+
+function formatHighlightTime(raw) {
+  if (!raw) return "completion time unknown";
+  const parsed = Date.parse(raw);
+  if (Number.isNaN(parsed)) return raw;
+  return new Date(parsed).toISOString().replace("T", " ").replace(/\.\d+Z$/, " UTC");
+}
+
+function renderHighlightItem(item) {
+  const bits = [item.priority, item.task_type, item.impact_tag].filter(Boolean);
+  const excerpt = item.summary_excerpt
+    ? el("p", { class: "scoreboard-highlight-excerpt", text: item.summary_excerpt })
+    : el("p", {
+      class: "scoreboard-highlight-excerpt missing",
+      text: "No completion summary recorded.",
+    });
+  const time = el("time", { class: "scoreboard-highlight-time", text: formatHighlightTime(item.completed_at) });
+  if (item.completed_at) time.setAttribute("datetime", item.completed_at);
+  return el("li", { class: "scoreboard-highlight" }, [
+    el("div", { class: "scoreboard-highlight-head" }, [
+      el("span", { class: "scoreboard-highlight-id", text: item.task_id || "unknown id" }),
+      el("span", { class: "scoreboard-highlight-title", text: item.title || "(untitled)" }),
+    ]),
+    el("div", { class: "scoreboard-highlight-meta" }, [
+      el("span", { class: "scoreboard-highlight-tags", text: bits.join(" · ") || "no priority or type" }),
+      time,
+    ]),
+    excerpt,
+  ]);
+}
+
+function renderNotableCompletions(block) {
+  const items = Array.isArray(block?.items) ? block.items : [];
+  const label = block?.label
+    || "Ordered by priority, then most recently completed. This is a reading order, not a quality score.";
+  const children = [
+    el("div", { class: "scoreboard-highlights-heading" }, [
+      el("h3", { class: "scoreboard-highlights-title", text: "Notable completions" }),
+      el("p", { class: "scoreboard-highlights-rule", text: label }),
+    ]),
+  ];
+  if (items.length === 0) {
+    children.push(el("div", { class: "empty-state compact" }, [
+      el("div", { class: "text", text: "No completed tasks observed in this window." }),
+    ]));
+  } else {
+    children.push(el("ul", { class: "scoreboard-highlights-list" }, items.map(renderHighlightItem)));
+  }
+  return el("section", { class: "scoreboard-highlights" }, children);
 }
 
 function emptyScoreboardNode() {

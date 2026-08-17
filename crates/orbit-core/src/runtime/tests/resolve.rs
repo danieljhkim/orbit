@@ -7,7 +7,7 @@ use std::sync::Mutex;
 
 use tempfile::{tempdir, tempdir_in};
 
-use orbit_common::types::OrbitError;
+use orbit_common::OrbitError;
 
 use super::super::resolve::{
     ResolvedOrbitRoots, WorkspaceRootHint, resolve_bootstrap_roots, resolve_initialize_roots,

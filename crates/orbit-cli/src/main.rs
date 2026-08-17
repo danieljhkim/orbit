@@ -163,7 +163,7 @@ fn parse_cli() -> (command::Cli, Option<FormatArg>, bool) {
 }
 
 fn main() {
-    orbit_common::utility::logging::init_default_subscriber("warn");
+    orbit_common::observability::logging::init_default_subscriber("warn");
     output::pipe::install_handler();
 
     let (cli, requested_format, legacy_json) = parse_cli();

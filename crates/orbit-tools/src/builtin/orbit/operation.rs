@@ -8,8 +8,8 @@
 //! It is generic over the verb type on purpose: the next noun to migrate reuses
 //! both functions unchanged and supplies only its own registry.
 
-use orbit_common::operation::OperationSpec;
-use orbit_common::types::{ToolParam, ToolSchema};
+use orbit_common::governance::operation::OperationSpec;
+use orbit_types::tool::{ToolParam, ToolSchema};
 
 use crate::ToolRegistry;
 

@@ -1,16 +1,17 @@
 // Orbit dashboard — terminal-dark, manually refreshed SPA.
 // Pure vanilla JS, split into ES modules with no build step.
 
-import { el, statusPill, stateCell, fetchJson, listItems, requestJson, postJson, patchJson, syncNodes, positiveIntParam, getWorkspace, setWorkspace, setMultiWorkspace, isAggregateView, renderPanelPlaceholder } from './common.js';
-import { buildChips, cacheCrewPayload, copyTaskIdWithNotice, hasCrewOptions, openVisibleTask, renderTasks, setPinnedExternalTask, wireSearch } from './tasks.js';
+import { el, statusPill, stateCell, fetchJson, listItems, requestJson, postJson, patchJson, syncNodes, positiveIntParam, getWorkspace, setWorkspace, setMultiWorkspace, isAggregateView, renderPanelPlaceholder, getWindow, persistScopeToUrl, setScopeChangeListener, syncWindowSelectors, payloadHonorsWindow } from './common.js';
+import { buildChips, buildTasksHash, applyTasksHashQuery, cacheCrewPayload, copyTaskIdWithNotice, hasCrewOptions, openVisibleTask, renderTasks, setPinnedExternalTask, syncTaskControls, wireSearch } from './tasks.js';
 import { applyAuditHashQuery, buildAuditChips, buildAuditHash, fetchAndRenderAudit, fetchAndRenderPolicy, getActiveAuditSubtab, navigateToAuditExecution, renderAuditSummary, setActiveAuditSubtabFromButton, setAuditSubtab, syncAuditControls, wireAuditSearch, } from './audit.js';
 import { renderScoreboard } from './scoreboard.js';
 import { fetchAndRenderReliability, wireReliabilityWindowSelector } from './reliability.js';
 import { initLogTail, fitLogPanelToViewport } from './log-tail.js';
-import { renderDiagnostics, renderImplementOneCard as renderImplOne, } from './diagnostics.js';
+import { renderDiagnostics } from './diagnostics.js';
 import { renderMarkdown } from './markdown.js';
 import { initRouter, initTabs as iT, navigateToRun as nTR, setActiveTab as sAT, setRunDetailSubtab, } from './router.js';
 import { initRuns, mergeRunsWithFriction, renderRuns, runIsCancellable, buildCancelRunButton, buildReplayRunButton } from './runs.js';
+import { fetchAndRenderOperations, initOperations } from './operations.js';
 import {
   renderRunDetailEmpty,
   renderRunDetailMeta,
@@ -49,6 +50,10 @@ const DEFAULT_INACTIVE_STATUSES = new Set(["someday"]);
 const STATUS_UPDATE_TARGETS = STATUS_ORDER
   .filter((status) => !["rejected", "archived"].includes(status))
   .concat(["done"]);
+// ORB-10874: the statuses shown when no `status` filter is represented in the
+// URL — a single source both the initial in-memory state and the hash-parsing
+// default (applyTasksHashQuery) read from, so they cannot drift apart.
+const DEFAULT_ACTIVE_STATUSES = STATUS_ORDER.filter((s) => !DEFAULT_INACTIVE_STATUSES.has(s));
 
 const JOB_RUN_LIMIT = positiveIntParam("runs", 25);
 const DIAG_LIMIT = positiveIntParam("diag", 50);
@@ -59,16 +64,20 @@ const FRICTION_STATUSES = ["open", "triaged", "resolved"];
 const $ = (id) => document.getElementById(id);
 
 let searchQuery = "";
-let activeStatuses = new Set(
-  STATUS_ORDER.filter((s) => !DEFAULT_INACTIVE_STATUSES.has(s)),
-);
+let activeStatuses = new Set(DEFAULT_ACTIVE_STATUSES);
 let lastTasks = [];
+// ORB-10874: paging metadata from the single-workspace `/api/tasks` envelope
+// (`{ items, total, limit, truncated }`) so the count can state a shown/total/
+// server-limit fact instead of an ambiguous `N/50`. Null for the aggregate
+// `/api/tasks/all` view, which answers a bare array with no such metadata.
+let lastTasksMeta = null;
 let lastRuns = [];
-let lastDiagnostics = { metrics: [], errors: [], implement_one: [] };
+let lastDiagnostics = { metrics: [], errors: [], incidents: null, implement_one: [], implement_one_by_complexity: [], completion_by_complexity: [] };
 let lastFrictionPayload = { stats: {}, tags: [], items: [] };
 let activeTab = "tasks";
 let activeDiagSubtab = "runs";
 let activeKnowledgeSubtab = "frictions";
+let activeOperationsSubtab = "routines";
 let isRefreshing = false;
 let activeFrictionId = null;
 let frictionSearchQuery = "";
@@ -83,6 +92,7 @@ let dashboardWorkspaces = [];
 function taskContext() {
   return {
     getTasks: () => lastTasks,
+    getTasksMeta: () => lastTasksMeta,
     replaceTask: (updatedTask) => {
       const index = lastTasks.findIndex((task) => task.id === updatedTask.id);
       if (index >= 0) {
@@ -94,6 +104,7 @@ function taskContext() {
     getActiveStatuses: () => activeStatuses,
     setActiveStatuses: (statuses) => { activeStatuses = statuses; },
     statusOrder: STATUS_ORDER,
+    defaultActiveStatuses: DEFAULT_ACTIVE_STATUSES,
     statusUpdateTargets: STATUS_UPDATE_TARGETS,
     fmtAbsTime,
     refreshDashboard,
@@ -119,6 +130,9 @@ function diagnosticsContext() {
     getActiveDiagSubtab: () => activeDiagSubtab,
     fmtRelative,
     fmtDuration,
+    // ORB-10871: incident expansion states exact first/last timestamps, not
+    // just "3h ago" — the raw evidence has to be locatable in the Audit view.
+    fmtAbsTime,
     truncate,
     setActiveTab: sAT,
     navigateToRun: nTR,
@@ -134,6 +148,8 @@ function routerContext() {
     setDiagSubtab: (v) => { activeDiagSubtab = v; },
     getKnowledgeSubtab: () => activeKnowledgeSubtab,
     setKnowledgeSubtab: (v) => { activeKnowledgeSubtab = v; },
+    getOperationsSubtab: () => activeOperationsSubtab,
+    setOperationsSubtab: (v) => { activeOperationsSubtab = v; },
     getRunId: getActiveRunId,
     setRunId: setActiveRunId,
     getRunSubtab: getActiveRunSubtab,
@@ -167,6 +183,13 @@ function routerContext() {
     setActiveAuditSubtabFromButton,
     buildAuditHash,
     syncAuditControls,
+
+    // ORB-10874: tasks pass-throughs (mirrors the audit ones above) so the
+    // status/search filters shown on the Tasks tab are represented in the
+    // hash and survive reload/back-navigation the same way audit's do.
+    applyTasksHashQuery: (query) => applyTasksHashQuery(query, taskContext()),
+    buildTasksHash: () => buildTasksHash(taskContext()),
+    syncTaskControls: () => syncTaskControls(taskContext()),
   };
 }
 
@@ -807,12 +830,27 @@ function fetchAndCacheCrews() {
   });
 }
 
+// ORB-10874: the single-workspace list endpoint filters server-side, so the
+// active status chips are sent as `?status=a,b` instead of over-fetching every
+// status and filtering client-side. That keeps the `total`/`limit`/`truncated`
+// envelope meaningful for the filter actually in effect (see formatTaskCount
+// in tasks.js). Omitted when every status (or none) is active, matching the
+// endpoint's own "status-neutral" default for the all-active case.
+function tasksListPath() {
+  const sp = new URLSearchParams();
+  if (activeStatuses.size > 0 && activeStatuses.size < STATUS_ORDER.length) {
+    sp.set("status", STATUS_ORDER.filter((s) => activeStatuses.has(s)).join(","));
+  }
+  const qs = sp.toString();
+  return qs ? `/api/tasks?${qs}` : "/api/tasks";
+}
+
 function fetchAndRenderTasks() {
   // In global mode with the aggregate ("All workspaces") view selected, pull
   // every workspace's tasks; otherwise the single/selected workspace's tasks
   // (the workspace query param is applied by fetchJson).
   const aggregate = isAggregateView();
-  const path = aggregate ? "/api/tasks/all" : "/api/tasks";
+  const path = aggregate ? "/api/tasks/all" : tasksListPath();
   // /api/crews is per-workspace and 400s without a concrete workspace, so in
   // aggregate mode skip the crew fetch and let the crew controls degrade to a
   // disabled "crew unavailable" fallback rather than rejecting the Promise.all
@@ -825,9 +863,13 @@ function fetchAndRenderTasks() {
     fetchJson(path),
     crews,
   ]).then(([payload]) => {
-    // /api/tasks answers `{ items, ... }` (ORB-10400); /api/tasks/all a bare array.
+    // /api/tasks answers `{ items, total, limit, truncated }` (ORB-10400);
+    // /api/tasks/all a bare array with no paging metadata.
     const tasks = listItems(payload);
     lastTasks = tasks;
+    lastTasksMeta = !aggregate && payload && !Array.isArray(payload)
+      ? { total: payload.total, limit: payload.limit, truncated: payload.truncated }
+      : null;
     renderTasks(tasks, taskContext());
   });
 }
@@ -847,7 +889,11 @@ async function initWorkspaceSelector() {
   // Feed the shared aggregate-view predicate (common.js): multi-workspace mode
   // is what makes the "All workspaces" (no concrete workspace) view possible.
   setMultiWorkspace(dashboardWorkspaces.length > 1);
-  if (dashboardWorkspaces.length <= 1) return; // single mode: no selector
+  if (dashboardWorkspaces.length <= 1) {
+    const only = dashboardWorkspaces.find((workspace) => workspace.status === "active");
+    if (only) setWorkspace(only.id);
+    return; // single mode: selected implicitly, no selector needed
+  }
 
   // Default to the workspace flagged by the server (the cwd workspace, if the
   // server was launched inside one) so every tab works out of the box; else the
@@ -883,11 +929,29 @@ function buildWorkspaceSelector() {
 
   select.addEventListener("change", () => {
     setWorkspace(select.value);
+    persistScopeToUrl();
     refreshDashboard();
   });
 
+  const note = el("span", {
+    class: "workspace-scope-note",
+    text: "Fleet-wide on Reliability",
+  });
+  note.id = "workspace-scope-note";
+  note.hidden = true;
+  note.title = "Reliability ignores the selected workspace";
+
   const meta = $("meta");
   meta.insertBefore(select, $("refresh-btn"));
+  meta.insertBefore(note, $("refresh-btn"));
+}
+
+// ORB-10874/ORB-10872: workspace + window live in the query string so a
+// reload or copied link restores the same dashboard scope. `persistScopeToUrl`
+// is the single writer; this wrapper stays for the existing call sites.
+function persistWorkspaceToUrl(id) {
+  setWorkspace(id);
+  persistScopeToUrl();
 }
 
 function activeRefreshJobs() {
@@ -929,6 +993,11 @@ function activeRefreshJobs() {
     return jobs;
   }
 
+  if (activeTab === "operations") {
+    jobs.push(fetchAndRenderOperations());
+    return jobs;
+  }
+
   if (activeTab === "run-detail") {
     if (!getActiveRunId()) {
       renderRunDetailEmpty("No run selected.");
@@ -965,12 +1034,22 @@ function activeRefreshJobs() {
     }
     if (activeDiagSubtab === "scoreboard") {
       // ORB-10444: Scoreboard folded in from the retired top-level tab.
-      // ORB-00337: the boot fetch matches the visually-highlighted segment
-      // (`24h`); picking a different window calls /api/scoreboard?window=...
-      // directly from scoreboard.js (itself aggregate-guarded, ORB-00040).
-      // The scoreboard subtab replaces the diagnostics two-column layout, so it
-      // returns early rather than also fetching the implement_one side card.
-      jobs.push(fetchJson("/api/scoreboard?window=24h").then(renderScoreboard));
+      // ORB-10872: every refresh honors the shared dashboard window so
+      // delivery/operations and Managed Execution stay on the same cutoff.
+      // A payload that reports a different window is refused rather than
+      // painted under a mismatched selector (the 7d-selected / 24h-body bug).
+      const selectedWindow = getWindow();
+      jobs.push(
+        fetchJson(`/api/scoreboard?window=${encodeURIComponent(selectedWindow)}`).then((summary) => {
+          if (!payloadHonorsWindow(summary, selectedWindow)) {
+            console.error(
+              `scoreboard payload window ${summary && summary.window} rejected under ${selectedWindow} selection`,
+            );
+            return;
+          }
+          renderScoreboard(summary);
+        }),
+      );
       return jobs;
     }
     if (activeDiagSubtab === "runs") {
@@ -989,15 +1068,33 @@ function activeRefreshJobs() {
           renderDiagnostics(diagnosticsContext());
         })
       );
+    } else if (activeDiagSubtab === "incidents") {
+      // ORB-10871: grouped failure incidents. Scoped to the shared dashboard
+      // window so the incident count and the raw failed-event count it states
+      // its denominator against are read off the same cutoff.
+      const selectedWindow = getWindow();
+      jobs.push(
+        fetchJson(`/api/audit/incidents?since=${encodeURIComponent(selectedWindow)}&limit=${DIAG_LIMIT}`).then((payload) => {
+          lastDiagnostics.incidents = payload;
+          renderDiagnostics(diagnosticsContext());
+        })
+      );
     }
 
     jobs.push(
-      fetchJson(`/api/diagnostics/implement_one`)
-        .then((implOne) => {
+      Promise.all([
+        fetchJson(`/api/diagnostics/implement_one`),
+        fetchJson(`/api/tasks/completion-by-complexity`).catch((e) => {
+          console.error("Failed to fetch completion-by-complexity", e);
+          return { by_complexity: [] };
+        }),
+      ])
+        .then(([implOne, completion]) => {
           lastDiagnostics.implement_one = implOne.implement_one_by_actor || [];
-          const sidePanel = $("diagnostics-side-panel");
-          if (sidePanel) {
-            renderImplOne($("diag-implement-one-body"), lastDiagnostics.implement_one, diagnosticsContext());
+          lastDiagnostics.implement_one_by_complexity = implOne.implement_one_by_complexity || [];
+          lastDiagnostics.completion_by_complexity = completion.by_complexity || [];
+          if ($("diagnostics-side-panel")) {
+            renderDiagnostics(diagnosticsContext());
           }
         })
         .catch(e => console.error("Failed to fetch implement_one metrics", e))
@@ -1187,6 +1284,22 @@ buildAuditChips(auditContext());
 wireAuditSearch(auditContext());
 $("refresh-btn").addEventListener("click", refreshDashboard);
 wireReliabilityWindowSelector();
+setScopeChangeListener(() => {
+  persistScopeToUrl();
+  syncWindowSelectors();
+  if (activeTab === "diagnostics") {
+    const url = new URL(window.location.href);
+    url.hash = `diagnostics/${activeDiagSubtab}?window=${encodeURIComponent(getWindow())}`;
+    if (url.href !== window.location.href) history.replaceState(null, "", url);
+  } else if (activeTab === "audit") {
+    const next = buildAuditHash();
+    const url = new URL(window.location.href);
+    url.hash = next.replace(/^#/, "");
+    if (url.href !== window.location.href) history.replaceState(null, "", url);
+  }
+  refreshDashboard();
+});
+initOperations({ getWorkspaces: () => dashboardWorkspaces, formatAbsoluteTime: fmtAbsTime });
 
 initRuns(runsContext());
 initRunDetail(runDetailContext());
@@ -1195,6 +1308,8 @@ initRouter(rctx);
 // Resolve workspaces before the router fires its first refresh so the initial
 // fetches carry the right workspace (top-level await; app.js is an ES module).
 await initWorkspaceSelector();
+persistScopeToUrl();
+syncWindowSelectors();
 iT();
 
 initLogTail();

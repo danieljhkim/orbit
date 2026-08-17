@@ -4,15 +4,15 @@
 //! `Args` struct plus an `Execute` impl that hand-built the tool input — the
 //! same names, help strings, and field mapping the MCP tool file and the
 //! dashboard handler each restated. All of that is now declared once in
-//! `orbit_common::friction::operations`, and the clap and input derivation is the
+//! `orbit_common::governance::friction::operations`, and the clap and input derivation is the
 //! noun-agnostic adapter in [`super::operation_args`].
 //!
 //! Adding a friction verb requires no edit here. What is left in this file is
 //! genuinely friction-specific: how to render a friction response as text.
 
 use clap::{ArgMatches, Args, Command, FromArgMatches, Subcommand};
-use orbit_common::friction::{FRICTION_OPERATIONS, FrictionVerb, friction_operation};
-use orbit_common::operation::CliRender;
+use orbit_common::governance::friction::{FRICTION_OPERATIONS, FrictionVerb, friction_operation};
+use orbit_common::governance::operation::CliRender;
 use orbit_core::OrbitRuntime;
 use serde_json::Value;
 

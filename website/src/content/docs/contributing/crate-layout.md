@@ -22,7 +22,8 @@ sidebar:
 | `orbit-store` | Generic YAML/SQLite stores, connection primitives, namespaced feature-migration ledger, and immutable historical bootstrap migrations. Feature crates own their active schemas and queries. |
 | `orbit-mcp` | RMCP framing, canonical discovery, server identity context, and direct SSH stdio proxy. |
 | `orbit-search` | Retrieval/ranking feature and workspace-local semantic index; also builds `orbit-search-companion`, a separately installed embedding companion binary, as an additional `[[bin]]` target. |
-| `orbit-common` | Leaf — shared domain types (`OrbitError`, IDs, activity/job schemas) and generic utilities (fs, redaction, logging, blob storage). |
+| `orbit-types` | Lowest contract leaf — domain-qualified shared types (`identity`, `workspace`, `task`, `workflow`, `policy`, `resource`, `tool`, `telemetry`, `record`) and `OrbitId`. No I/O or Orbit crate deps. |
+| `orbit-common` | Mechanism crate above `orbit-types` — `OrbitError`, governance, filesystem, process, storage, protocol, observability, and security helpers. |
 
 ## Dependency Direction
 
@@ -51,6 +52,7 @@ flowchart LR
   Store --> Common
   Exec --> Common
   Policy --> Common
+  Common --> Types["orbit-types"]
 ```
 
 Arrows show the principal layering edges rather than every manifest edge. Do not add cross-crate dependencies that

@@ -4,7 +4,7 @@ use super::test_support::*;
 
 use super::super::body::GITHUB_PR_BODY_BYTE_LIMIT;
 use crate::context::RuntimeHost;
-use orbit_common::types::TaskStatus;
+use orbit_types::task::TaskStatus;
 use serde_json::json;
 
 #[test]
@@ -67,7 +67,7 @@ fn no_diff_expected_bundle_promotes_without_pr_metadata() {
         "Outcome: success\nChanges:\n- Filed durable external state.",
     );
     task.tags
-        .push(orbit_common::types::NO_DIFF_EXPECTED_TAG.to_string());
+        .push(orbit_types::task::NO_DIFF_EXPECTED_TAG.to_string());
     let host = PrOpenTestHost::new(vec![task], workspace.repo.clone())
         .with_activity_implementer("codex", "codex");
 

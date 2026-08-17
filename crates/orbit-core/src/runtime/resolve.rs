@@ -1,14 +1,14 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use orbit_common::types::OrbitError;
+use orbit_common::OrbitError;
 use serde::Deserialize;
 
 use crate::paths;
 
 /// Returns the global orbit root at `~/.orbit/`.
 pub fn resolve_global_root() -> Result<PathBuf, OrbitError> {
-    orbit_common::utility::path::global_orbit_dir()
+    orbit_common::fs::path::global_orbit_dir()
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

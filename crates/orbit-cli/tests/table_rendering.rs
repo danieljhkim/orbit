@@ -212,6 +212,8 @@ impl TestWorkspace {
                 title,
                 "--description",
                 "A record whose rendered row must stay on one line.",
+                "--complexity",
+                "low",
                 "--json",
             ],
             "add task",

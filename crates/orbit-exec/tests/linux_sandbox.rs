@@ -5,19 +5,77 @@
 
 use std::process::Stdio;
 
-use orbit_common::types::ResolvedFsProfile;
 use orbit_exec::{
     LinuxBwrapPostRunGuard, LinuxBwrapSpawnRequest, WriteAnchorKind, bwrap_path,
     bwrap_program_for_audit, compile_linux_bwrap_argv, linux_bwrap_write_grant_diagnostic,
     linux_bwrap_write_grants, prepare_linux_bwrap_write_grants, probe_bwrap,
     spawn_under_linux_bwrap,
 };
+use orbit_types::policy::ResolvedFsProfile;
 
 fn profile(modify: Vec<String>) -> ResolvedFsProfile {
     ResolvedFsProfile {
         name: "test".to_string(),
         read: vec!["/**".to_string()],
         modify,
+    }
+}
+
+/// [ORB-10917] Bubblewrap forwards its own environment into the confined
+/// program, so the launcher must hand it exactly the environment the
+/// dispatcher composed. The ambient variables are set here rather than read
+/// from the developer's shell, and none carries a credential-shaped name — a
+/// denylist would forward every one of them.
+#[test]
+fn bwrap_child_gets_only_the_supplied_environment() {
+    let probe = probe_bwrap();
+    if !probe.available {
+        println!("skipping real Bubblewrap test: {}", probe.detail);
+        return;
+    }
+
+    let temp = tempfile::tempdir().expect("tempdir");
+    let workspace = temp.path().canonicalize().expect("canonical workspace");
+    let resolved = profile(vec![format!("{}/**", workspace.display())]);
+    let plan = compile_linux_bwrap_argv(&resolved, "/usr/bin/env", &[], Some(&workspace), false)
+        .expect("compile");
+
+    let _ambient = orbit_common::test_env::scoped([
+        ("DATABASE_URL", Some("postgres://svc:hunter2@db.internal")),
+        ("BILLING_ENDPOINT", Some("https://billing.internal.example")),
+        ("ORB_10917_AMBIENT", Some("leaked")),
+        ("ANTHROPIC_API_KEY", Some("sk-ant-000000000000000000000")),
+    ]);
+    let env = [
+        ("PATH".to_string(), "/usr/bin:/bin".to_string()),
+        ("ORB_10917_SUPPLIED".to_string(), "present".to_string()),
+    ];
+    let child = spawn_under_linux_bwrap(LinuxBwrapSpawnRequest {
+        plan: &plan,
+        env: &env,
+        cwd: Some(&workspace),
+        stdin: Stdio::null(),
+        stdout: Stdio::piped(),
+        stderr: Stdio::piped(),
+    })
+    .expect("spawn");
+    let output = child.wait_with_output().expect("wait");
+    let child_env = String::from_utf8_lossy(&output.stdout);
+
+    assert!(
+        child_env.contains("ORB_10917_SUPPLIED=present"),
+        "supplied vars must reach the confined child: {child_env}"
+    );
+    for leaked in [
+        "DATABASE_URL",
+        "BILLING_ENDPOINT",
+        "ORB_10917_AMBIENT",
+        "ANTHROPIC_API_KEY",
+    ] {
+        assert!(
+            !child_env.contains(leaked),
+            "{leaked} must not reach a Bubblewrap-confined provider child: {child_env}"
+        );
     }
 }
 

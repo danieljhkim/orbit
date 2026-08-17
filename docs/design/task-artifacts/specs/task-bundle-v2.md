@@ -1,3 +1,10 @@
+---
+type: design
+summary: "Spec: Task Bundle V2"
+tags: ["task-artifacts"]
+last_validated: 2026-08-16
+---
+
 # Spec: Task Bundle V2
 
 Task Bundle V2 defines the canonical on-disk contract for Orbit tasks after the schema reset. The contract is source-of-truth storage, not merely a rendering preference: implementations should expose the bundle shape below rather than maintaining long-lived compatibility with the previous task schema.
@@ -24,7 +31,7 @@ The workspace-local projection lives at:
 .orbit/tasks/<task-id> -> ~/.orbit/tasks/workspaces/<workspace-id>/<task-id>
 ```
 
-`<task-id>` must be the canonical ID inside the current allocation authority. The canonical v2 format is `ORB-` plus a five-digit decimal suffix (`ORB-00000` through `ORB-99999`). `<workspace-id>` is assigned once per workspace as `<slug>-<6char>` and stored in `.orbit/config.yaml`. Old `T<YYYYMMDD>-<N>` IDs are not valid v2 identifiers or lookup aliases.
+`<task-id>` must be the canonical ID inside the current allocation authority. The canonical v2 format is `ORB-` plus a decimal suffix formatted with at least five digits (for example, `ORB-00000`); parsers accept wider decimal suffixes and the allocator is bounded by `u32::MAX`. `<workspace-id>` is assigned once per workspace as `<slug>-<6char>` and stored in `.orbit/config.yaml`. Old `T<YYYYMMDD>-<N>` IDs are not valid v2 identifiers or lookup aliases.
 
 Required files:
 
@@ -91,7 +98,7 @@ title: Short title
 status: proposed
 type: chore
 priority: medium
-complexity: null
+complexity: null   # legacy unlabeled only; new creates always persist a value
 job_run_id: null
 crew: implementer-crew
 orchestrator: orchestration-crew
@@ -199,6 +206,8 @@ Relations are directed entries stored in the task envelope. The initial relation
 - `regression_from`: source task tracks a regression introduced by target task.
 - `supersedes`: source task replaces target task.
 - `related_to`: source task is associated with target task without stronger semantics.
+- `produces`: source task created a task, friction, or ADR artifact.
+- `resolves`: source task closed or superseded a task, friction, or ADR artifact.
 
 Writers must validate the relation type set, reject self-edges, reject duplicate `(type, target)` entries on one source task, and reject cycles for hierarchy and blocking relation families. Relation types are source-implied: create-subtask writes only `child_of -> parent` on the child, and create-dependent-task writes only `blocked_by -> dependency` on the blocked task. Inverse lookup is generated from indexes, not stored as peer records.
 
@@ -210,7 +219,7 @@ The local registry must maintain generated status and terminal-month views or re
 
 The initial registry projections are:
 
-- `task_bundle_index(task_id, workspace_id, status, priority, job_run_id, created_at, updated_at, terminal_month)`.
+- `task_bundle_index(task_id, workspace_id, status, priority, job_run_id, created_at, updated_at, terminal_month, complexity)`. `complexity` is `low`/`medium`/`hard`, or empty when the envelope left it unset. SQL `NULL` means the row has not been rewritten since the column was added.
 - `task_bundle_tags(task_id, workspace_id, tag)`.
 - `task_bundle_relations(source_task_id, workspace_id, relation_type, target_task_id)`. The physical column name is historical; `produces` and `resolves` rows may store non-task artifact IDs in `target_task_id`.
 

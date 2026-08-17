@@ -1,0 +1,306 @@
+use super::*;
+
+#[test]
+fn document_update_rewrites_v2_documents_and_envelope() {
+    let temp = TempDir::new().expect("tempdir");
+    let store = store(&temp);
+    store
+        .create_task(create_params("Original", TaskStatus::Backlog))
+        .expect("create task");
+
+    store
+        .update_task_document(
+            "ORB-00000",
+            &TaskDocumentUpdateParams {
+                actor: "codex:gpt-5.5".to_string(),
+                title: Some("Renamed".to_string()),
+                description: Some("Updated description".to_string()),
+                acceptance_criteria: Some(vec!["Updated criterion".to_string()]),
+                tags: Some(vec!["v2".to_string(), "store".to_string()]),
+                plan: Some("1. Updated plan".to_string()),
+                execution_summary: Some("Updated summary".to_string()),
+                priority: Some(TaskPriority::Low),
+                pr_status: Some(Some("approved".to_string())),
+                ..Default::default()
+            },
+        )
+        .expect("update document");
+
+    let task = store
+        .get_task("ORB-00000")
+        .expect("get task")
+        .expect("task exists");
+    assert_eq!(task.title, "Renamed");
+    assert_eq!(task.description, "Updated description");
+    assert_eq!(task.acceptance_criteria, vec!["Updated criterion"]);
+    assert_eq!(task.tags, vec!["v2", "store"]);
+    assert_eq!(task.plan, "1. Updated plan");
+    assert_eq!(task.execution_summary, "Updated summary");
+    assert_eq!(task.priority, TaskPriority::Low);
+    assert_eq!(task.pr_status.as_deref(), Some("approved"));
+    let renamed = store
+        .get_task_history("ORB-00000")
+        .expect("get history")
+        .expect("task exists")
+        .into_iter()
+        .find(|entry| entry.event == "renamed")
+        .expect("renamed event");
+    // ORB-10311: the rename note carries both the previous and replacement titles.
+    let note = renamed.note.expect("renamed note");
+    assert!(note.contains("Original"), "{note}");
+    assert!(note.contains("Renamed"), "{note}");
+    assert_eq!(
+        store
+            .list_tasks_by_tags(&["task-artifacts".to_string()])
+            .expect("old tag should leave generated index")
+            .len(),
+        0
+    );
+    assert_eq!(
+        store
+            .list_tasks_filtered(None, Some(TaskPriority::Low), None, None, None, None)
+            .expect("priority filter should use updated generated index")
+            .len(),
+        1
+    );
+}
+
+#[test]
+fn document_update_sets_and_clears_source_task_id() {
+    let temp = TempDir::new().expect("tempdir");
+    let store = store(&temp);
+    let source = store
+        .create_task(create_params("Source", TaskStatus::Done))
+        .expect("create source");
+    store
+        .create_task(create_params("Bug", TaskStatus::Backlog))
+        .expect("create bug");
+
+    store
+        .update_task_document(
+            "ORB-00001",
+            &TaskDocumentUpdateParams {
+                actor: "codex:gpt-5.5".to_string(),
+                source_task_id: Some(Some(source.id.clone())),
+                ..Default::default()
+            },
+        )
+        .expect("set source task");
+
+    let task = store
+        .get_task("ORB-00001")
+        .expect("get task")
+        .expect("task exists");
+    assert_eq!(task.source_task_id(), Some(source.id.as_str()));
+    let envelope = store
+        .bundle_store
+        .read_bundle("ORB-00001")
+        .expect("read bundle")
+        .envelope;
+    assert!(envelope.relations.iter().any(|relation| {
+        relation.relation_type == TaskRelationType::RegressionFrom && relation.target == source.id
+    }));
+
+    store
+        .update_task_document(
+            "ORB-00001",
+            &TaskDocumentUpdateParams {
+                actor: "codex:gpt-5.5".to_string(),
+                source_task_id: Some(None),
+                ..Default::default()
+            },
+        )
+        .expect("clear source task");
+
+    let task = store
+        .get_task("ORB-00001")
+        .expect("get task")
+        .expect("task exists");
+    assert_eq!(task.source_task_id(), None);
+    let envelope = store
+        .bundle_store
+        .read_bundle("ORB-00001")
+        .expect("read bundle")
+        .envelope;
+    assert!(
+        envelope
+            .relations
+            .iter()
+            .all(|relation| relation.relation_type != TaskRelationType::RegressionFrom)
+    );
+}
+
+#[test]
+fn history_update_appends_comments_and_status_events() {
+    let temp = TempDir::new().expect("tempdir");
+    let store = store(&temp);
+    store
+        .create_task(create_params("History", TaskStatus::Backlog))
+        .expect("create task");
+    let at = Utc.with_ymd_and_hms(2026, 5, 11, 13, 0, 0).unwrap();
+
+    store
+        .update_task_history(
+            "ORB-00000",
+            &TaskHistoryUpdateParams {
+                actor: "codex:gpt-5.5".to_string(),
+                status: Some(TaskStatus::InProgress),
+                status_note: Some("Starting".to_string()),
+                append_history: vec![TaskHistoryEntry {
+                    at,
+                    by: "codex:gpt-5.5".to_string(),
+                    event: "context_pruned".to_string(),
+                    note: Some("Dropped missing file".to_string()),
+                    from_status: None,
+                    to_status: None,
+                }],
+                append_comments: vec![TaskComment {
+                    at,
+                    by: "codex:gpt-5.5".to_string(),
+                    message: "Working on it".to_string(),
+                }],
+                ..Default::default()
+            },
+        )
+        .expect("update history");
+
+    let task = store
+        .get_task("ORB-00000")
+        .expect("get task")
+        .expect("task exists");
+    assert_eq!(task.status, TaskStatus::InProgress);
+    assert_eq!(
+        store
+            .list_tasks_filtered(Some(TaskStatus::InProgress), None, None, None, None, None,)
+            .expect("status filter should use updated generated index")
+            .len(),
+        1
+    );
+    let comments = store
+        .get_task_comments("ORB-00000")
+        .expect("get comments")
+        .expect("task exists");
+    assert!(
+        comments
+            .iter()
+            .any(|comment| comment.message == "Working on it")
+    );
+    let history = store
+        .get_task_history("ORB-00000")
+        .expect("get history")
+        .expect("task exists");
+    let status_event = history
+        .iter()
+        .find(|event| event.event == "status_changed")
+        .expect("status event");
+    assert_eq!(status_event.from_status, Some(TaskStatus::Backlog));
+    assert_eq!(status_event.to_status, Some(TaskStatus::InProgress));
+    assert_eq!(status_event.note.as_deref(), Some("Starting"));
+}
+
+#[test]
+fn artifact_update_writes_manifest_and_sorted_text_artifacts() {
+    let temp = TempDir::new().expect("tempdir");
+    let store = store(&temp);
+    store
+        .create_task(create_params("Artifacts", TaskStatus::Backlog))
+        .expect("create task");
+
+    store
+        .upsert_task_artifacts(
+            "ORB-00000",
+            &TaskArtifactUpdateParams {
+                actor: "codex:gpt-5.5".to_string(),
+                upsert_artifacts: vec![
+                    TaskArtifact::from_text("./reports/summary.md", "summary v1\n"),
+                    TaskArtifact::from_text("logs/output.txt", "output\n"),
+                ],
+            },
+        )
+        .expect("upsert artifacts");
+
+    store
+        .upsert_task_artifacts(
+            "ORB-00000",
+            &TaskArtifactUpdateParams {
+                actor: "codex:gpt-5.5".to_string(),
+                upsert_artifacts: vec![TaskArtifact::from_text(
+                    "reports/summary.md",
+                    "summary v2\n",
+                )],
+            },
+        )
+        .expect("overwrite artifact");
+
+    let artifacts = store
+        .get_task_artifacts("ORB-00000")
+        .expect("get artifacts")
+        .expect("task exists");
+    assert_eq!(
+        artifacts
+            .iter()
+            .map(|artifact| artifact.path.as_str())
+            .collect::<Vec<_>>(),
+        vec!["logs/output.txt", "reports/summary.md"]
+    );
+    assert_eq!(artifacts[1].text_content(), Some("summary v2\n"));
+
+    let bundle = store
+        .bundle_store
+        .read_bundle("ORB-00000")
+        .expect("read bundle");
+    let manifest = bundle.artifact_manifest.expect("manifest");
+    let summary = manifest
+        .files
+        .iter()
+        .find(|file| file.path == "reports/summary.md")
+        .expect("summary manifest entry");
+    assert_eq!(summary.blob, "files/reports/summary.md");
+    assert_eq!(summary.sha256.len(), 64);
+    assert!(
+        summary
+            .sha256
+            .chars()
+            .all(|ch| matches!(ch, '0'..='9' | 'a'..='f'))
+    );
+    assert_eq!(summary.created_by, "codex:gpt-5.5");
+
+    let err = store
+        .upsert_task_artifacts(
+            "ORB-00000",
+            &TaskArtifactUpdateParams {
+                actor: "codex:gpt-5.5".to_string(),
+                upsert_artifacts: vec![TaskArtifact::from_text("../escape.txt", "")],
+            },
+        )
+        .expect_err("reject unsafe artifact path");
+    assert!(err.to_string().contains(".."), "{err}");
+}
+
+#[cfg(unix)]
+#[test]
+fn document_update_on_readonly_bundle_dir_names_lock_path_and_hints_sandbox() {
+    let temp = TempDir::new().expect("tempdir");
+    let store = store(&temp);
+    store
+        .create_task(create_params("Original", TaskStatus::Backlog))
+        .expect("create task");
+    let bundle_dir = store
+        .bundle_store
+        .bundle_path("ORB-00000")
+        .expect("bundle path");
+    let lock_path = bundle_dir.join(".task.yaml.lock");
+    let _restore = make_readonly(&bundle_dir);
+
+    let err = store
+        .update_task_document(
+            "ORB-00000",
+            &TaskDocumentUpdateParams {
+                actor: "codex:gpt-5.5".to_string(),
+                title: Some("Renamed".to_string()),
+                ..Default::default()
+            },
+        )
+        .expect_err("update must fail on a read-only bundle dir");
+    assert_sandbox_write_io(&err, &lock_path.display().to_string());
+}

@@ -1,5 +1,5 @@
 use clap::{ArgAction, Args};
-use orbit_core::command::task::TaskAddParams;
+use orbit_core::application::task::TaskAddParams;
 use orbit_core::{
     ExternalRef, OrbitRuntime, TaskComplexity, TaskCreateStatus, TaskPriority, TaskType,
 };
@@ -44,9 +44,9 @@ pub struct TaskAddArgs {
     /// Priority level
     #[arg(long, value_enum, default_value_t = TaskPriority::Medium)]
     pub priority: TaskPriority,
-    /// Task complexity
+    /// Task complexity (low, medium, or hard)
     #[arg(long, value_enum)]
-    pub complexity: Option<TaskComplexity>,
+    pub complexity: TaskComplexity,
     /// Task type
     #[arg(long = "type", value_enum)]
     pub task_type: Option<TaskType>,

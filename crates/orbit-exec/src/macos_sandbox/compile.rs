@@ -1,15 +1,26 @@
 use std::ffi::OsStr;
 
-use orbit_common::types::{OrbitError, ResolvedFsProfile};
+use orbit_common::OrbitError;
+use orbit_types::policy::ResolvedFsProfile;
+use orbit_types::workflow::Provider;
 
 /// Compile a [`ResolvedFsProfile`] into SBPL text suitable for
 /// `sandbox-exec -f`.
+///
+/// `provider` is the canonical provider name of the CLI this profile will
+/// confine (`claude`, `codex`, ...). It only selects the credential-store
+/// carve-out described in [`macos_login_keychain_access`]; every other
+/// clause is provider-independent. An unknown name compiles with the full
+/// default credential denylist, so a typo fails closed.
 ///
 /// The emitted profile:
 /// - denies everything by default;
 /// - allows broad reads (`file-read*`) for agent CLI compatibility, then
 ///   appends default read denies for well-known credential locations so those
-///   paths still lose under SBPL's last-match-wins evaluation;
+///   paths still lose under SBPL's last-match-wins evaluation, then re-allows
+///   the confined provider's own credential store if it lives in one of those
+///   locations, and only then emits the activity's own negated `read` rules —
+///   so a policy-authored `denyRead` outranks the provider carve-out;
 /// - allows the syscall classes agent CLIs rely on (process, signal, mach,
 ///   ipc, sysctl, iokit) and unrestricted network — agents call out to
 ///   provider APIs;
@@ -25,13 +36,17 @@ use orbit_common::types::{OrbitError, ResolvedFsProfile};
 /// Paths in `rules.modify` are emitted as-is. Callers must resolve
 /// workspace-relative globs to absolute paths before invoking this
 /// function — a relative `subpath` is meaningless to the kernel.
-pub fn compile_macos_sandbox_profile(rules: &ResolvedFsProfile) -> Result<String, OrbitError> {
+pub fn compile_macos_sandbox_profile(
+    rules: &ResolvedFsProfile,
+    provider: &str,
+) -> Result<String, OrbitError> {
     let home = std::env::var_os("HOME");
     let codex_home = std::env::var_os("CODEX_HOME");
     let claude_config_dir = std::env::var_os("CLAUDE_CONFIG_DIR");
     let grok_home = std::env::var_os("GROK_HOME");
     compile_macos_sandbox_profile_with_env(
         rules,
+        provider,
         SandboxCompileEnv {
             home: home.as_deref(),
             codex_home: codex_home.as_deref(),
@@ -54,6 +69,7 @@ pub(super) struct SandboxCompileEnv<'a> {
 
 pub(super) fn compile_macos_sandbox_profile_with_env(
     rules: &ResolvedFsProfile,
+    provider: &str,
     env: SandboxCompileEnv<'_>,
 ) -> Result<String, OrbitError> {
     let SandboxCompileEnv {
@@ -137,6 +153,14 @@ pub(super) fn compile_macos_sandbox_profile_with_env(
         ));
     }
 
+    // Clause order below is the security contract, not a formatting choice.
+    // SBPL is last-match-wins, so the default credential denies come first, the
+    // confined provider's own credential carve-out re-allows on top of them,
+    // and the activity's negated `read` rules come last — an operator who
+    // writes `denyRead` for a credential path gets that denial even when the
+    // provider would otherwise be granted it. [ORB-10931]
+    emit_default_credential_read_denies(home, &mut out);
+    emit_provider_credential_read_reallow(provider, home, &mut out);
     for rule in &rules.read {
         if let Some(deny_path) = rule.strip_prefix('!') {
             out.push_str(&format!(
@@ -145,10 +169,127 @@ pub(super) fn compile_macos_sandbox_profile_with_env(
             ));
         }
     }
-    emit_default_credential_read_denies(home, &mut out);
 
     Ok(out)
 }
+
+/// Whether `provider`'s CLI reads its own credentials from the macOS login
+/// Keychain, and therefore cannot run under the default Keychain read deny.
+///
+/// Only Claude Code does today: it keeps its OAuth session in the login
+/// keychain item `Claude Code-credentials` and leaves
+/// `~/.claude/.credentials.json` as an empty stub. Codex, Gemini, and Grok keep
+/// credentials in plain files under their own state directories, which are
+/// already granted, so they keep the deny. Names that do not resolve to a
+/// canonical [`Provider`] keep the deny too — the carve-out fails closed.
+/// [ORB-10929]
+///
+/// Internal: callers outside this crate want [`macos_login_keychain_access`],
+/// which answers the question the compiled profile actually settles.
+fn provider_reads_macos_login_keychain(provider: &str) -> bool {
+    Provider::parse(provider).ok() == Some(Provider::Claude)
+}
+
+/// What the compiled profile decides about `provider` reading the *user* login
+/// keychain directory (`$HOME/Library/Keychains`).
+///
+/// This mirrors the clause order emitted by
+/// [`compile_macos_sandbox_profile`], so a caller can explain a failing run
+/// without re-deriving SBPL semantics. [ORB-10931]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum MacosLoginKeychainAccess {
+    /// The profile grants the read: the provider owns credentials there and no
+    /// activity rule takes it back.
+    Allowed,
+    /// The provider keeps the default credential deny — it does not store
+    /// credentials in the keychain, so it never receives the carve-out.
+    DeniedByDefaultPolicy,
+    /// `HOME` did not resolve, so the compiler had no path to re-allow and the
+    /// default deny stands.
+    HomeUnresolved,
+    /// The activity's own negated `read` rule denies the keychain directory.
+    /// It is emitted after the carve-out, so last-match-wins gives it priority.
+    DeniedByActivityRule {
+        /// The rule as authored in the resolved profile, `!`-prefix included.
+        rule: String,
+    },
+}
+
+/// Resolve [`MacosLoginKeychainAccess`] for a profile that would be compiled
+/// with the same `provider`, `home`, and `rules`.
+///
+/// Activity-rule coverage is judged from the longest non-glob prefix of each
+/// negated `read` rule, which bounds what the emitted `(subpath ...)` or
+/// `(regex ...)` deny clause can match. That is exact for the literal and
+/// trailing-`**` rules operators actually write, and conservative for interior
+/// globs: it may report a denial the kernel would only partially apply, but it
+/// never reports a keychain as reachable once a rule has denied it.
+pub fn macos_login_keychain_access(
+    provider: &str,
+    home: Option<&OsStr>,
+    rules: &ResolvedFsProfile,
+) -> MacosLoginKeychainAccess {
+    if !provider_reads_macos_login_keychain(provider) {
+        return MacosLoginKeychainAccess::DeniedByDefaultPolicy;
+    }
+    let Some(home) = super::provider_dirs::non_empty_env_path(home) else {
+        return MacosLoginKeychainAccess::HomeUnresolved;
+    };
+    let keychains = home.join(USER_KEYCHAINS_SUBPATH);
+    for rule in &rules.read {
+        let Some(deny_path) = rule.strip_prefix('!') else {
+            continue;
+        };
+        if super::sbpl_filter::deny_rule_reaches_path(deny_path, &keychains) {
+            return MacosLoginKeychainAccess::DeniedByActivityRule { rule: rule.clone() };
+        }
+    }
+    MacosLoginKeychainAccess::Allowed
+}
+
+/// Re-allow the confined provider's own credential store after
+/// [`emit_default_credential_read_denies`], so last-match-wins grants it.
+///
+/// Without this, a sandboxed `claude` cannot see its Keychain item and reports
+/// `OAuth session expired and could not be refreshed` — an authentication
+/// failure no re-login can clear, because the credential is present and simply
+/// unreadable. The carve-out is deliberately narrow:
+/// - it applies to one provider, so a Codex or Grok agent still cannot read any
+///   keychain;
+/// - it covers only the *user* keychain directory; `/Library/Keychains` and
+///   `/System/Library/Keychains` stay denied for every provider;
+/// - it grants reads only. Nothing here makes the login keychain writable, so a
+///   sandboxed run can use a refreshed token in memory but cannot persist it
+///   back to the keychain; re-authentication stays an unsandboxed operation.
+///
+/// Reading the keychain file is not the same as reading its secrets: item
+/// contents stay encrypted and gated by their own per-item ACLs, which is why
+/// the grant is scoped to the provider that owns the item it needs.
+///
+/// Precedence: this clause sits between the default credential denies and the
+/// activity's own negated `read` rules. Nothing an activity declares can
+/// *widen* the grant — it depends only on the confined provider — and an
+/// activity that denies the keychain directory (or any ancestor of it) narrows
+/// it back, because its deny is emitted afterwards and last-match-wins.
+/// [`macos_login_keychain_access`] reports which of those cases a given profile
+/// lands in. [ORB-10931]
+fn emit_provider_credential_read_reallow(provider: &str, home: Option<&OsStr>, out: &mut String) {
+    if !provider_reads_macos_login_keychain(provider) {
+        return;
+    }
+    let Some(home) = super::provider_dirs::non_empty_env_path(home) else {
+        return;
+    };
+    let keychains = format!("{}/{USER_KEYCHAINS_SUBPATH}", home.display());
+    out.push_str(&format!(
+        "(allow file-read* (subpath \"{}\"))\n",
+        super::sbpl_filter::sbpl_escape(&keychains)
+    ));
+}
+
+/// HOME-relative path of the per-user keychain directory. Shared by the default
+/// deny and the provider re-allow so the two clauses cannot drift.
+const USER_KEYCHAINS_SUBPATH: &str = "Library/Keychains";
 
 fn emit_default_credential_read_denies(home: Option<&OsStr>, out: &mut String) {
     if let Some(home) = super::provider_dirs::non_empty_env_path(home) {
@@ -157,7 +298,7 @@ fn emit_default_credential_read_denies(home: Option<&OsStr>, out: &mut String) {
             ".ssh",
             ".aws",
             ".config/gh",
-            "Library/Keychains",
+            USER_KEYCHAINS_SUBPATH,
             "Library/Application Support/Google/Chrome",
             "Library/Application Support/Chromium",
             "Library/Application Support/BraveSoftware/Brave-Browser",

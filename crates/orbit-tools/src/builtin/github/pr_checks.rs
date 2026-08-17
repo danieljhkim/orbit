@@ -1,4 +1,4 @@
-use orbit_common::types::OrbitError;
+use orbit_common::OrbitError;
 use orbit_exec::ExecRequest;
 use serde_json::{Value, json};
 

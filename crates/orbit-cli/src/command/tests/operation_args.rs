@@ -5,10 +5,10 @@
 //! falls out of the operation spec.
 
 use clap::Command;
-use orbit_common::operation::{
+use orbit_common::governance::operation::{
     CliArgKind, CliBinding, CliRender, Description, OperationSpec, ParamSpec, ParamType,
 };
-use orbit_common::types::McpToolScope;
+use orbit_types::tool::McpToolScope;
 use serde_json::json;
 
 use super::super::operation_args::{augment_subcommands, invocation_from_matches};

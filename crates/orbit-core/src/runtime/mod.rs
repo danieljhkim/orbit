@@ -14,19 +14,18 @@
 pub mod audit;
 mod authorization;
 pub mod builder;
-mod command_exec;
+pub(crate) mod command_exec;
 mod coordination_audit;
 pub mod engine;
 pub mod event_bus;
+pub(crate) mod friction;
 pub mod mutation;
-pub(crate) mod orbit_tool_host;
 mod resolve;
 pub mod run_audit;
 pub(crate) mod run_input;
-mod task;
+pub(crate) mod task;
 pub use task::StaleTaskReservation;
 pub(crate) mod tool_exec;
-mod v2_host;
 pub mod workspace_claim;
 
 #[cfg(test)]
@@ -36,23 +35,20 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use chrono::Utc;
-use orbit_common::types::activity_job::{CatalogDirectory, CatalogDirectoryList};
-use orbit_common::types::{
-    Audit, OrbitError, OrbitEvent, Workspace, WorkspaceCheckout, WorkspacePaths,
-};
-use orbit_store::{Store, V2AuditEventFilter, V2AuditEventRow, workspace_id_for_orbit_dir};
+use orbit_common::OrbitError;
+use orbit_engine::activity_job::{CatalogDirectory, CatalogDirectoryList};
+use orbit_store::contracts::{V2AuditEventFilter, V2AuditEventRow};
+use orbit_store::{Store, workspace_id_for_orbit_dir};
+use orbit_types::record::{Audit, OrbitEvent};
+use orbit_types::workspace::{Workspace, WorkspaceCheckout, WorkspacePaths};
 use serde_json::Value;
 
-use crate::command::activity::DEFAULT_ACTIVITY_FILES;
-use crate::command::init::ensure_orbit_root_initialized;
-use crate::command::workflow::{ShipMode, resolved_ship_mode};
+use crate::bootstrap::activity::DEFAULT_ACTIVITY_FILES;
 use crate::context::ActorIdentity;
 use crate::context::OrbitContext;
 use crate::context::OrbitStores;
-use crate::runtime::run_input::managed_run_context_from_env;
+use orbit_types::workflow::{ShipMode, resolved_ship_mode};
 
-pub use orbit_tool_host::HubCoordinationExecutor;
-pub(crate) use orbit_tool_host::build_orbit_tool_host;
 pub(crate) use resolve::{resolve_bootstrap_roots, resolve_initialize_roots};
 // `pub` for the runtime-less `orbit migrate --dry-run` inspection that moved
 // to `orbit-cmd` [ORB-10016].
@@ -67,7 +63,7 @@ pub(crate) use task::{failed_run_error_context, is_workflow_failure_state};
 
 #[derive(Clone)]
 pub struct OrbitRuntime {
-    context: OrbitContext,
+    pub(crate) context: OrbitContext,
     workspace_binding: Option<Arc<WorkspaceRuntimeBinding>>,
     /// A higher-level registry may mark this local checkout as a replica. Core
     /// stays registry-neutral; it only carries the refusal supplied by that
@@ -77,7 +73,7 @@ pub struct OrbitRuntime {
     /// Outcome of the [ORB-10012] workspace-layout pre-flight that ran when
     /// this runtime opened (empty `applied` when the layout was already
     /// current). Surfaced by `orbit migrate`.
-    layout_report: Arc<orbit_store::layout::LayoutUpgradeReport>,
+    layout_report: Arc<orbit_store::workflow::layout::LayoutUpgradeReport>,
     _temp_dir: Option<Arc<builder::TempDir>>,
 }
 
@@ -113,198 +109,57 @@ pub fn workspace_runtime_binding(
     })
 }
 
-impl OrbitRuntimeRoots {
-    fn new(global_root: PathBuf, resolved: ResolvedOrbitRoots) -> Self {
-        Self {
-            global_root,
-            shared_root: resolved.shared_root,
-            local_root: resolved.local_root,
-        }
-    }
-}
-
 impl OrbitRuntime {
-    pub fn initialize() -> Result<Self, OrbitError> {
-        Self::initialize_with_root_override(None)
-    }
-
-    pub fn initialize_with_root_override(root_override: Option<&Path>) -> Result<Self, OrbitError> {
-        let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-        let roots = Self::resolve_roots_for_cwd(&cwd, root_override)?;
-        Self::initialize_from_resolved_roots(roots, None)
-    }
-
-    /// Initialize from roots and optional higher-level workspace metadata.
-    /// This keeps bootstrap/layout behavior in Core while allowing a feature
-    /// owner to resolve catalog hints and bindings externally.
-    pub fn initialize_from_resolved_roots(
-        roots: OrbitRuntimeRoots,
-        binding: Option<WorkspaceRuntimeBinding>,
-    ) -> Result<Self, OrbitError> {
-        ensure_orbit_root_initialized(&roots.global_root, &roots.shared_root)?;
-        match binding {
-            Some(binding) => Self::from_resolved_roots_with_binding(
-                &roots.global_root,
-                &roots.shared_root,
-                &roots.local_root,
-                binding,
-            ),
-            None => {
-                Self::from_resolved_roots(&roots.global_root, &roots.shared_root, &roots.local_root)
-            }
-        }
-    }
-
-    pub fn resolve_roots_for_cwd(
-        cwd: &Path,
-        root_override: Option<&Path>,
-    ) -> Result<OrbitRuntimeRoots, OrbitError> {
-        let resolved = resolve_initialize_roots(cwd, root_override)?;
-        // Only the explicit `--root` flag pins the global registry root to the
-        // isolated root here, so `workspace list` / `show --root <r>` read
-        // `<r>/workspaces.json` — the same file `workspace init --root <r>`
-        // writes — instead of `$HOME/.orbit/workspaces.json` [ORB-10218].
-        // `ORBIT_ROOT` stays a workspace selector that leaves the global root at
-        // `$HOME/.orbit` (see `orbit_root_env_selects_workspace_but_not_global_root`).
-        Self::roots_from_resolved(resolved, root_override.is_some())
-    }
-
-    /// Resolve an initialized workspace using a registry-neutral catalog hint.
-    pub fn resolve_roots_for_cwd_with_hint(
-        cwd: &Path,
-        root_override: Option<&Path>,
-        hint: Option<&WorkspaceRootHint>,
-    ) -> Result<OrbitRuntimeRoots, OrbitError> {
-        let resolved = resolve_initialize_roots_with_hint(cwd, root_override, hint)?;
-        Self::roots_from_resolved(resolved, root_override.is_some())
-    }
-
-    pub fn resolve_bootstrap_roots_for_cwd(
-        cwd: &Path,
-        root_override: Option<&Path>,
-    ) -> Result<OrbitRuntimeRoots, OrbitError> {
-        let resolved = resolve_bootstrap_roots(cwd, root_override)?;
-        Self::roots_from_resolved(resolved, has_explicit_root_override(root_override))
-    }
-
-    /// Resolve bootstrap roots using a registry-neutral catalog hint.
-    pub fn resolve_bootstrap_roots_for_cwd_with_hint(
-        cwd: &Path,
-        root_override: Option<&Path>,
-        hint: Option<&WorkspaceRootHint>,
-    ) -> Result<OrbitRuntimeRoots, OrbitError> {
-        let resolved = resolve_bootstrap_roots_with_hint(cwd, root_override, hint)?;
-        Self::roots_from_resolved(resolved, has_explicit_root_override(root_override))
-    }
-
-    /// Selects the global root for a resolved workspace: when
-    /// `pin_global_to_shared` is set the global root is the isolated shared
-    /// root (registry lookups target the custom root), otherwise it falls back
-    /// to `$HOME/.orbit`.
-    fn roots_from_resolved(
-        resolved: ResolvedOrbitRoots,
-        pin_global_to_shared: bool,
-    ) -> Result<OrbitRuntimeRoots, OrbitError> {
-        let global_root = if pin_global_to_shared {
-            resolved.shared_root.clone()
-        } else {
-            resolve_global_root()?
-        };
-        Ok(OrbitRuntimeRoots::new(global_root, resolved))
-    }
-
-    pub fn from_roots(global_root: &Path, workspace_root: &Path) -> Result<Self, OrbitError> {
-        Self::from_resolved_roots(global_root, workspace_root, workspace_root)
-    }
-
-    /// Construct a runtime with registry-neutral workspace metadata supplied
-    /// by a higher-level catalog owner.
-    pub fn from_roots_with_binding(
-        global_root: &Path,
-        workspace_root: &Path,
-        binding: WorkspaceRuntimeBinding,
-    ) -> Result<Self, OrbitError> {
-        Self::from_resolved_roots_with_binding(global_root, workspace_root, workspace_root, binding)
-    }
-
-    pub fn from_resolved_roots(
-        global_root: &Path,
-        shared_root: &Path,
-        local_root: &Path,
-    ) -> Result<Self, OrbitError> {
-        Self::from_resolved_roots_inner(global_root, shared_root, local_root, None)
-    }
-
-    /// Construct a two-root runtime with registry-neutral workspace metadata.
-    pub fn from_resolved_roots_with_binding(
-        global_root: &Path,
-        shared_root: &Path,
-        local_root: &Path,
-        binding: WorkspaceRuntimeBinding,
-    ) -> Result<Self, OrbitError> {
-        Self::from_resolved_roots_inner(global_root, shared_root, local_root, Some(binding))
-    }
-
-    fn from_resolved_roots_inner(
+    pub(crate) fn build_from_resolved_config(
         global_root: &Path,
         shared_root: &Path,
         local_root: &Path,
         binding: Option<WorkspaceRuntimeBinding>,
+        runtime_config: &orbit_config::ResolvedConfig,
+        layout_report: orbit_store::workflow::layout::LayoutUpgradeReport,
     ) -> Result<Self, OrbitError> {
-        // [ORB-10012] Workspace-layout pre-flight: compare the `.orbit/`
-        // layout marker against this binary before anything opens the store.
-        // Older layouts auto-migrate here (matching how the SQLite schema
-        // ledger auto-applies inside `Store::open` below); a layout newer
-        // than this binary refuses with a downgrade-guard error. Runs before
-        // `build_context_from_roots` because a layout migration may need to
-        // restructure state the stores are about to open. Up-to-date cost:
-        // one marker-file read.
-        let layout_report = orbit_store::layout::upgrade_workspace_layout(shared_root)?;
         let context = builder::build_context_from_roots(
             global_root,
             shared_root,
             local_root,
             binding.as_ref(),
+            runtime_config,
         )?;
-        let runtime = Self {
+        Ok(Self {
             context,
             workspace_binding: binding.map(Arc::new),
             coordination_write_owner: None,
             event_log: event_bus::EventLog::default(),
             layout_report: Arc::new(layout_report),
             _temp_dir: None,
-        };
-        // [ORB-10002] Workspace-open orphan scan: job runs stuck in `running`
-        // whose recorded owner process is conclusively gone flip to
-        // `interrupted` so dashboards and `orbit job resume` see them.
-        // Best-effort — a scan failure must never block opening the runtime.
-        //
-        // A managed activity child can intentionally have a private PID
-        // namespace (for example, under Linux Bubblewrap), so it cannot
-        // adjudicate the host worker's liveness. Explicit recovery surfaces
-        // still reconcile; only this opportunistic workspace-open scan is
-        // skipped for the trusted managed-run envelope [ORB-10557].
-        if !managed_run_context_from_env() {
-            runtime.reconcile_stale_job_runs_on_open();
-        }
-        Ok(runtime)
+        })
     }
 
-    pub fn in_memory() -> Result<Self, OrbitError> {
-        let (context, temp_dir) = builder::build_context_in_memory()?;
+    pub(crate) fn build_in_memory_from_resolved_config(
+        data_root: &Path,
+        runtime_config: &orbit_config::ResolvedConfig,
+        temp_dir: builder::TempDir,
+    ) -> Result<Self, OrbitError> {
+        let context = builder::build_context_from_roots(
+            data_root,
+            data_root,
+            data_root,
+            None,
+            runtime_config,
+        )?;
         Ok(Self {
             context,
             workspace_binding: None,
             coordination_write_owner: None,
             event_log: event_bus::EventLog::default(),
-            layout_report: Arc::new(orbit_store::layout::LayoutUpgradeReport::default()),
+            layout_report: Arc::new(orbit_store::workflow::layout::LayoutUpgradeReport::default()),
             _temp_dir: Some(Arc::new(temp_dir)),
         })
     }
 
     /// Outcome of the workspace-layout pre-flight that ran when this runtime
     /// opened: which layout migrations (if any) were auto-applied.
-    pub fn layout_upgrade_report(&self) -> &orbit_store::layout::LayoutUpgradeReport {
+    pub fn layout_upgrade_report(&self) -> &orbit_store::workflow::layout::LayoutUpgradeReport {
         &self.layout_report
     }
 
@@ -389,6 +244,16 @@ impl OrbitRuntime {
         Store::open(&self.context.persistence().audit_db)
     }
 
+    pub fn v2_audit_store(
+        &self,
+    ) -> Result<Arc<dyn orbit_store::contracts::V2AuditStoreBackend>, OrbitError> {
+        orbit_store::compose::v2_audit_store(&self.context.persistence().audit_db)
+    }
+
+    pub fn ensure_persistence_ready(&self) -> Result<(), OrbitError> {
+        orbit_store::compose::ensure_sqlite_store_ready(&self.context.persistence().audit_db)
+    }
+
     pub fn workspace_id(&self) -> Result<String, OrbitError> {
         workspace_id_for_orbit_dir(&self.context.paths().orbit_dir)
     }
@@ -400,14 +265,14 @@ impl OrbitRuntime {
         if filter.workspace_id.trim().is_empty() {
             filter.workspace_id = self.workspace_id()?;
         }
-        self.sqlite_store()?.list_v2_audit_events(&filter)
+        self.v2_audit_store()?.list_v2_audit_events(&filter)
     }
 
     pub fn insert_v2_audit_event(
         &self,
-        params: &orbit_store::V2AuditEventInsertParams,
+        params: &orbit_store::contracts::V2AuditEventInsertParams,
     ) -> Result<(), OrbitError> {
-        self.sqlite_store()?.insert_v2_audit_event(params)
+        self.v2_audit_store()?.insert_v2_audit_event(params)
     }
 
     pub fn scoring_enabled(&self) -> bool {
@@ -464,10 +329,10 @@ impl OrbitRuntime {
     pub fn v2_activity_catalog(
         &self,
     ) -> Result<
-        orbit_common::types::activity_job::V2ActivityCatalog,
-        orbit_common::types::activity_job::CatalogError,
+        orbit_engine::activity_job::V2ActivityCatalog,
+        orbit_engine::activity_job::CatalogError,
     > {
-        use orbit_common::types::activity_job::V2ActivityCatalog;
+        use orbit_engine::activity_job::V2ActivityCatalog;
 
         let mut catalog = V2ActivityCatalog::new();
         for dir in self.v2_activity_catalog_dirs() {
@@ -586,54 +451,51 @@ impl OrbitRuntime {
         self.context.shared_root()
     }
 
-    pub(crate) fn execution_env_policy(&self) -> &crate::config::ExecutionEnvPolicy {
+    pub(crate) fn execution_env_policy(&self) -> &orbit_config::ExecutionEnvPolicy {
         self.context.execution_env_policy()
     }
 
-    pub(crate) fn codex_execution_policy(&self) -> &crate::config::CodexExecutionPolicy {
+    pub(crate) fn codex_execution_policy(&self) -> &orbit_config::CodexExecutionPolicy {
         self.context.codex_execution_policy()
     }
 
-    pub fn list_executor_defs(&self) -> Result<Vec<orbit_common::types::ExecutorDef>, OrbitError> {
+    pub fn list_executor_defs(
+        &self,
+    ) -> Result<Vec<orbit_types::workflow::ExecutorDef>, OrbitError> {
         self.stores().executors().list_executor_defs()
     }
 
     pub fn get_executor_def(
         &self,
         name: &str,
-    ) -> Result<Option<orbit_common::types::ExecutorDef>, OrbitError> {
+    ) -> Result<Option<orbit_types::workflow::ExecutorDef>, OrbitError> {
         self.stores().executors().get_executor_def(name)
     }
 
     pub fn upsert_executor_def(
         &self,
-        def: &orbit_common::types::ExecutorDef,
+        def: &orbit_types::workflow::ExecutorDef,
     ) -> Result<(), OrbitError> {
         self.stores().executors().upsert_executor_def(def)
     }
 
-    pub fn list_policy_defs(&self) -> Result<Vec<orbit_common::types::PolicyDef>, OrbitError> {
+    pub fn list_policy_defs(&self) -> Result<Vec<orbit_types::policy::PolicyDef>, OrbitError> {
         self.stores().policies().list_policy_defs()
     }
 
     pub fn get_policy_def(
         &self,
         name: &str,
-    ) -> Result<Option<orbit_common::types::PolicyDef>, OrbitError> {
+    ) -> Result<Option<orbit_types::policy::PolicyDef>, OrbitError> {
         self.stores().policies().get_policy_def(name)
     }
 
     pub fn upsert_policy_def(
         &self,
-        def: &orbit_common::types::PolicyDef,
+        def: &orbit_types::policy::PolicyDef,
     ) -> Result<(), OrbitError> {
         self.stores().policies().upsert_policy_def(def)
     }
-}
-
-fn has_explicit_root_override(root_override: Option<&Path>) -> bool {
-    root_override.is_some()
-        || std::env::var("ORBIT_ROOT").is_ok_and(|value| !value.trim().is_empty())
 }
 
 fn warn_skipped_retired_activity_assets(dir: &Path, skipped: Vec<PathBuf>) {

@@ -1,8 +1,8 @@
 //! Sibling tests for `run_audit.rs` (migrated per ORB-00246 / docs/design-patterns/test_layout.md).
 
 use crate::{OrbitRuntime, V2AuditEventInsertParams};
-use orbit_common::utility::blob_store::BlobStore;
-use orbit_common::utility::process_identity::ProcessLiveness;
+use orbit_common::process::identity::ProcessLiveness;
+use orbit_common::storage::blob_store::BlobStore;
 
 use serde_json::json;
 

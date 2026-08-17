@@ -9,12 +9,11 @@
 use std::collections::HashSet;
 use std::time::Instant;
 
-use orbit_common::types::{
-    OrbitError, ToolSchema,
-    activity_job::{tool_allowed, validate_tool_allowlist},
-    tool_input_schema,
-};
+use orbit_common::OrbitError;
+use orbit_common::protocol::tool_schema::tool_input_schema;
 use orbit_tools::{ToolContext, ToolRegistry};
+use orbit_types::tool::ToolSchema;
+use orbit_types::workflow::activity_job::{tool_allowed, validate_tool_allowlist};
 use serde_json::{Value, json};
 
 use super::transport::ToolSpec;

@@ -4,8 +4,11 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use orbit_common::types::{JobRun, OrbitError, OrbitEvent, Role};
+use orbit_common::OrbitError;
 use orbit_tools::ToolContext;
+use orbit_types::policy::Role;
+use orbit_types::record::OrbitEvent;
+use orbit_types::workflow::JobRun;
 use serde_json::{Value, json};
 use tempfile::tempdir;
 

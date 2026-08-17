@@ -7,8 +7,9 @@
     "task_auto_pipeline": "2326b59deff88fddea8950fb867f44b3c163cab4a58f08af117127ef3bd6be43",
     "task_gate_pipeline": "4945f11d4169f61aea8f68d9426bda002df89832567f224f0506e0a3bb7088f1",
     "task_local_pipeline": "04eb826fa57d2ff946e87e88283abbaa2e15d7deb6033da41fd9eef204c2a01f",
+    "task_pilot_pipeline": "68da78cbc62d744180295f23f81df1d0207d7279e83048d2d61ac8a7ae4abb31",
     "task_pr_pipeline": "617827a11007deb6609ffc9e4eeb247dec1fbfe79ddf6df0cd810c54608e1767",
-    "task_triage_pipeline": "8a7f61936e49781e9888884538a88d8b06d2407a61a218346c5cf7ccaff77b6d",
+    "task_triage_pipeline": "6ab349a2d79c1359a6faf37488b7a3880ad473d313cc54dd1e517a8b39994883",
     "workspace_auto_pipeline": "7094544f29b176c41f062fe20250de73304f3e93d5ba300b9670a148076e63db",
     "workspace_ship_pipeline": "8723039f684ac5f4aabf82ce20eab11b1f1b857815e0fc2fcb367dda6b876891",
     "worktree_gc_pipeline": "d4da0b7a9e8ae9a6f1cf3d19fc755c7ca43f1fd3ccf0c35484fe2cbb64054de3"

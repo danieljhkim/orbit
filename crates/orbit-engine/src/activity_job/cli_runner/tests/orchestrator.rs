@@ -8,14 +8,11 @@ use std::process::Command;
 use std::sync::Arc;
 use std::time::Duration;
 
+use crate::activity_job::{load_activity_asset, load_job_asset};
 use orbit_agent::loop_engine::audit::AuditSink;
 use orbit_common::test_fixtures::TEST_CODEX_MODEL;
-use orbit_common::types::activity_job::{
-    ActivityV2Spec, JobV2StepBody, V2AuditEventKind, load_activity_asset, load_job_asset,
-};
-#[cfg(target_os = "linux")]
-use orbit_exec::probe_bwrap;
 use orbit_store::Store;
+use orbit_types::workflow::activity_job::{ActivityV2Spec, JobV2StepBody, V2AuditEventKind};
 use tempfile::{TempDir, tempdir};
 
 use crate::context::{ProvenanceEnv, provenance_env};
@@ -804,7 +801,7 @@ fn run_cli_backend_redacts_live_env_values_in_stored_blobs() {
     );
 
     let loop_sink = Arc::new(V2SqliteSink::new(
-        Store::open_in_memory().expect("open sqlite store"),
+        Arc::new(Store::open_in_memory().expect("open sqlite store")),
         "ws-test",
         "job-cli-blob-redaction",
         "codex:gpt-5.5",
@@ -877,6 +874,7 @@ fn run_cli_backend_returns_error_when_declared_workspace_path_missing() {
             "workspace_path": missing.display().to_string()
         })),
         workspace_root: None,
+        orbit_root: None,
     };
     let spec = test_agent_loop_spec(Duration::from_secs(5));
     let input = serde_json::json!({
@@ -936,6 +934,7 @@ fn run_cli_backend_records_resolved_cwd_in_started_event() {
             "workspace_path": workspace_string.clone()
         })),
         workspace_root: None,
+        orbit_root: None,
     };
     let spec = test_agent_loop_spec(Duration::from_secs(5));
 
@@ -963,11 +962,8 @@ fn run_cli_backend_records_resolved_cwd_in_started_event() {
 
 #[cfg(target_os = "linux")]
 #[test]
+#[ignore = "requires unprivileged user namespaces; bwrap cannot nest inside Orbit's sandbox"]
 fn linux_bwrap_failed_invocation_names_ungranted_write_path_and_deny() {
-    if !probe_bwrap().available {
-        return;
-    }
-
     let temp = tempdir().expect("tempdir");
     let workspace = temp.path().join("worktree");
     let orbit = workspace.join(".orbit");
@@ -978,7 +974,7 @@ fn linux_bwrap_failed_invocation_names_ungranted_write_path_and_deny() {
         "#!/bin/sh\ncat > /dev/null\ntouch \"$PWD/.orbit/ungranted\"\n",
     );
     let blocked_path = orbit.join("ungranted");
-    let profile = orbit_common::types::ResolvedFsProfile {
+    let profile = orbit_types::policy::ResolvedFsProfile {
         name: "implementer".to_string(),
         read: vec![format!("{}/**", workspace.display())],
         modify: vec![
@@ -999,7 +995,7 @@ fn linux_bwrap_failed_invocation_names_ungranted_write_path_and_deny() {
         executor_args: Vec::new(),
         provider_config: HashMap::new(),
         sandbox: Some(ResolvedSandbox {
-            kind: orbit_common::types::ExecutorSandboxKind::LinuxBwrap,
+            kind: orbit_types::workflow::ExecutorSandboxKind::LinuxBwrap,
             fs_profile: profile,
             allow_fallback: false,
             managed_worktree: true,
@@ -1008,6 +1004,7 @@ fn linux_bwrap_failed_invocation_names_ungranted_write_path_and_deny() {
             "workspace_path": workspace.display().to_string()
         })),
         workspace_root: None,
+        orbit_root: None,
     };
     let spec = test_agent_loop_spec(Duration::from_secs(5));
 
@@ -1035,6 +1032,134 @@ fn linux_bwrap_failed_invocation_names_ungranted_write_path_and_deny() {
     assert!(!blocked_path.exists());
 }
 
+/// [ORB-10879] The composition rule behind the exit-0 attribution, asserted
+/// without Bubblewrap: the spawn-boundary tests below are `#[ignore]`d because
+/// a host whose kernel forbids unprivileged user namespaces (including every
+/// nested Orbit sandbox) cannot run them, so the message contract gets a check
+/// that always runs.
+#[test]
+fn sandbox_write_attribution_rides_along_with_the_frame_classification() {
+    let denial = "Orbit linux-bwrap policy denied the attempted write: \
+                  `/w/.orbit/x` is not writable inside the sandbox: denyModify rule `!/w/.orbit/**` shadows it";
+
+    let composed = super::super::orchestrator::with_sandbox_write_attribution(
+        "agent step did not complete".to_string(),
+        Some(denial),
+    );
+    assert!(
+        composed.starts_with("agent step did not complete"),
+        "the frame classification stays the head of the message: {composed}"
+    );
+    assert!(
+        composed.ends_with(denial),
+        "the denial text is appended verbatim, not reformatted: {composed}"
+    );
+
+    assert_eq!(
+        super::super::orchestrator::with_sandbox_write_attribution(
+            "agent step did not complete".to_string(),
+            None,
+        ),
+        "agent step did not complete",
+        "a step that hit no write denial keeps its message unchanged"
+    );
+}
+
+/// [ORB-10879] ORB-10878's exact shape: the agent hits a policy-denied write,
+/// narrates it, and exits 0 without a terminating envelope. Attribution used to
+/// be gated on a nonzero exit, so this run reached its operator with the model's
+/// guess ("remount the filesystem") and no path or rule anywhere in the record.
+#[cfg(target_os = "linux")]
+#[test]
+#[ignore = "requires unprivileged user namespaces; bwrap cannot nest inside Orbit's sandbox"]
+fn linux_bwrap_exit_zero_without_an_envelope_still_names_the_denied_write() {
+    let temp = tempdir().expect("tempdir");
+    let workspace = temp.path().join("worktree");
+    let orbit = workspace.join(".orbit");
+    fs::create_dir_all(&orbit).expect("denied Orbit root");
+    let script = workspace.join("codex");
+    // Exit 0 with no envelope on stdout — the provider "completed" cleanly.
+    write_executable(
+        &script,
+        "#!/bin/sh\ncat > /dev/null\ntouch \"$PWD/.orbit/ungranted\"\nexit 0\n",
+    );
+    let blocked_path = orbit.join("ungranted");
+    let profile = orbit_types::policy::ResolvedFsProfile {
+        name: "unrestricted".to_string(),
+        read: vec![format!("{}/**", workspace.display())],
+        modify: vec![
+            format!("{}/**", workspace.display()),
+            format!("!{}/**", orbit.display()),
+        ],
+    };
+
+    let sink = Arc::new(RecordingSink::default());
+    let sink_for_writer: Arc<dyn AuditSink> = sink;
+    let audit = Arc::new(V2AuditWriter::new(
+        "job-linux-exit-zero-denial",
+        "claude:test",
+        sink_for_writer,
+    ));
+    let host = TestHost {
+        command: script.display().to_string(),
+        executor_args: Vec::new(),
+        provider_config: HashMap::new(),
+        sandbox: Some(ResolvedSandbox {
+            kind: orbit_types::workflow::ExecutorSandboxKind::LinuxBwrap,
+            fs_profile: profile,
+            allow_fallback: false,
+            managed_worktree: true,
+        }),
+        task_context: Some(serde_json::json!({
+            "workspace_path": workspace.display().to_string()
+        })),
+        workspace_root: None,
+        orbit_root: None,
+    };
+    let spec = test_agent_loop_spec(Duration::from_secs(5));
+
+    let outcome = run_cli_backend(
+        &host,
+        &spec,
+        "job-linux-exit-zero-denial",
+        audit,
+        &serde_json::json!({"prompt": "attempt the write"}),
+        None,
+    )
+    .expect("the invocation outcome should be classified");
+
+    assert!(
+        !outcome.success,
+        "an agent that stopped mid-turn must not checkpoint success"
+    );
+    assert_eq!(outcome.output["exit_code"], serde_json::json!(0));
+    let diagnostic = outcome.output["sandbox_write_diagnostic"]
+        .as_str()
+        .expect("exit 0 must not suppress the write-denial attribution");
+    assert!(
+        diagnostic.contains(&blocked_path.display().to_string()),
+        "diagnostic must name the attempted path: {diagnostic}"
+    );
+    assert!(
+        diagnostic.contains("denyModify rule"),
+        "diagnostic must name the shadowing deny: {diagnostic}"
+    );
+
+    // The step message is what becomes `job_run_steps.error_message` and then
+    // the task's `workflow_run_failed` note, so the attribution has to be in it.
+    let message = outcome.message.expect("failed step carries a message");
+    assert!(
+        message.contains("did not complete"),
+        "the frame classification must survive: {message}"
+    );
+    assert!(
+        message.contains(&blocked_path.display().to_string())
+            && message.contains("denyModify rule"),
+        "the persisted step message must carry the denial attribution: {message}"
+    );
+    assert!(!blocked_path.exists());
+}
+
 #[test]
 fn run_cli_backend_emits_provider_pid_between_the_started_and_finished_events() {
     let temp = tempdir().expect("tempdir");
@@ -1058,6 +1183,7 @@ fn run_cli_backend_emits_provider_pid_between_the_started_and_finished_events() 
         sandbox: None,
         task_context: None,
         workspace_root: None,
+        orbit_root: None,
     };
     let spec = test_agent_loop_spec(Duration::from_secs(5));
 
@@ -2699,13 +2825,13 @@ fn rendered_finish_input_from_epic_pipeline(
     rendered
 }
 
-fn epic_orchestrator_spec(timeout: Duration) -> orbit_common::types::activity_job::AgentLoopSpec {
+fn epic_orchestrator_spec(timeout: Duration) -> orbit_types::workflow::activity_job::AgentLoopSpec {
     let asset = load_activity_asset(EPIC_ORCHESTRATOR_YAML).expect("parse epic orchestrator");
     let ActivityV2Spec::AgentLoop(mut spec) = asset.spec.spec else {
         panic!("epic_orchestrator must be an agent_loop");
     };
     spec.wall_clock_timeout_seconds = timeout.as_secs();
-    spec.provider = orbit_common::types::activity_job::Provider::Codex;
+    spec.provider = orbit_types::workflow::activity_job::Provider::Codex;
     spec
 }
 
@@ -2857,6 +2983,7 @@ fn run_cli_backend_passes_provider_config_to_codex_runtime_args() {
         sandbox: None,
         task_context: None,
         workspace_root: None,
+        orbit_root: None,
     };
     let spec = test_agent_loop_spec(Duration::from_secs(5));
 
@@ -2929,6 +3056,7 @@ fn run_cli_backend_passes_model_to_grok_and_captures_well_formed_stdout() {
         sandbox: None,
         task_context: None,
         workspace_root: None,
+        orbit_root: None,
     };
     let mut spec = test_agent_loop_spec_for("grok", Duration::from_secs(5));
     spec.model = Some("grok-build".to_string());
@@ -3005,6 +3133,7 @@ fi
         sandbox: None,
         task_context: None,
         workspace_root: None,
+        orbit_root: None,
     };
     let mut spec = test_agent_loop_spec_for("grok", Duration::from_secs(5));
     spec.model = Some("grok-build".to_string());
@@ -3058,6 +3187,7 @@ fi
         sandbox: None,
         task_context: None,
         workspace_root: None,
+        orbit_root: None,
     };
     let mut spec = test_agent_loop_spec_for("grok", Duration::from_secs(5));
     spec.model = Some("grok-build".to_string());
@@ -3076,13 +3206,128 @@ fi
     assert_eq!(outcome.output["provider"], "grok");
 }
 
+/// [ORB-10917] End-to-end guard for the composed dispatch environment: a
+/// benignly named ambient credential must not survive into the provider child.
+/// The ambient value is set by this test rather than inherited from the
+/// developer's shell, and the child reports what it actually saw so a
+/// regression fails loudly instead of silently forwarding.
+#[test]
+fn run_cli_backend_does_not_forward_benignly_named_ambient_credentials() {
+    let temp = tempdir().expect("tempdir");
+    let script = temp.path().join("grok");
+    write_executable(
+        &script,
+        r#"#!/bin/sh
+cat > /dev/null
+if [ -z "$DATABASE_URL" ] && [ -z "$BILLING_ENDPOINT" ] && [ -n "$PATH" ]; then
+  printf '%s\n' '{"schemaVersion":1,"status":"success","result":{"identity":"ok"},"error":null}'
+else
+  printf '{"schemaVersion":1,"status":"failed","error":{"code":"ambient_env_leaked","message":"DATABASE_URL=%s BILLING_ENDPOINT=%s","details":null}}\n' "$DATABASE_URL" "$BILLING_ENDPOINT"
+  exit 1
+fi
+"#,
+    );
+
+    let sink = Arc::new(RecordingSink::default());
+    let sink_for_writer: Arc<dyn AuditSink> = sink;
+    let audit = Arc::new(V2AuditWriter::new(
+        "job-grok-env-allowlist",
+        "grok:grok-build",
+        sink_for_writer,
+    ));
+    let host = TestHost {
+        command: script.display().to_string(),
+        executor_args: Vec::new(),
+        provider_config: HashMap::new(),
+        sandbox: None,
+        task_context: None,
+        workspace_root: None,
+        orbit_root: None,
+    };
+    let mut spec = test_agent_loop_spec_for("grok", Duration::from_secs(5));
+    spec.model = Some("grok-build".to_string());
+
+    let _ambient = orbit_common::test_env::scoped([
+        ("DATABASE_URL", Some("postgres://svc:hunter2@db.internal")),
+        ("BILLING_ENDPOINT", Some("https://billing.internal.example")),
+    ]);
+    let outcome = run_cli_backend(
+        &host,
+        &spec,
+        "job-grok-env-allowlist",
+        audit,
+        &serde_json::json!({"prompt": "hi"}),
+        None,
+    )
+    .expect("run succeeds");
+
+    assert!(
+        outcome.success,
+        "ambient credentials leaked into the provider child: {:?}",
+        outcome.output
+    );
+}
+
+/// [ORB-10909] CLI-runner dispatch must inject ORBIT_ROOT from the host so a
+/// spawned agent whose HOME does not contain the Orbit registry can still
+/// resolve `orbit tool run` against the dispatching run's root.
+#[test]
+fn run_cli_backend_injects_orbit_root_from_host() {
+    let temp = tempdir().expect("tempdir");
+    let script = temp.path().join("grok");
+    write_executable(
+        &script,
+        r#"#!/bin/sh
+cat > /dev/null
+if [ "$ORBIT_ROOT" = "/resolved/orbit/root" ]; then
+  printf '%s\n' '{"schemaVersion":1,"status":"success","result":{"identity":"ok"},"error":null}'
+else
+  printf '%s\n' '{"schemaVersion":1,"status":"failed","error":{"code":"orbit_root_missing","message":"ORBIT_ROOT was not injected","details":null}}'
+  exit 1
+fi
+"#,
+    );
+
+    let sink = Arc::new(RecordingSink::default());
+    let sink_for_writer: Arc<dyn AuditSink> = sink;
+    let audit = Arc::new(V2AuditWriter::new(
+        "job-grok-orbit-root",
+        "grok:grok-build",
+        sink_for_writer,
+    ));
+    let host = TestHost {
+        command: script.display().to_string(),
+        executor_args: Vec::new(),
+        provider_config: HashMap::new(),
+        sandbox: None,
+        task_context: None,
+        workspace_root: None,
+        orbit_root: Some("/resolved/orbit/root".to_string()),
+    };
+    let mut spec = test_agent_loop_spec_for("grok", Duration::from_secs(5));
+    spec.model = Some("grok-build".to_string());
+
+    let outcome = run_cli_backend(
+        &host,
+        &spec,
+        "job-grok-orbit-root",
+        audit,
+        &serde_json::json!({"prompt": "hi"}),
+        None,
+    )
+    .expect("run succeeds");
+
+    assert!(outcome.success);
+    assert_eq!(outcome.output["provider"], "grok");
+}
+
 /// AGENT_MODEL/AGENT_TASK must be omitted (unset), not set to an empty
 /// string, when the model or task id is unknown — mirrors ORB-10340's
 /// worker-side semantics. AGENT_RUN_ID is always known for a dispatched run.
-// Asserted at the builder boundary, not through a spawned child: provider spawns seed the
-// cleared environment with `non_sensitive_env_vars()`, so an Orbit-dispatched test run's own
-// AGENT_* telemetry can leak into the child and mask a correct omission. The positive
-// propagation case above still covers the wiring end-to-end.
+// Asserted at the builder boundary, not through a spawned child: the composed child env
+// forwards the whole `ORBIT_*` envelope, so an Orbit-dispatched test run's own run/task
+// identity can reach the child and mask a correct omission. The positive propagation case
+// above still covers the wiring end-to-end.
 #[test]
 fn run_cli_backend_omits_agent_model_and_task_env_vars_when_unknown() {
     let vars = provenance_env(ProvenanceEnv {

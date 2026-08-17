@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
-use orbit_core::command::task::TaskAddParams;
+use orbit_core::application::task::TaskAddParams;
 use orbit_core::{GlobalSearchKind, GlobalSearchParams, OrbitRuntime, TaskStatus};
 use serde_json::Value;
 use tower::ServiceExt;

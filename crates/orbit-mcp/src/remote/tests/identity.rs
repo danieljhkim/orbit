@@ -1,6 +1,10 @@
-use orbit_common::types::McpTransport;
+use std::collections::BTreeSet;
 
-use super::super::identity::{local_identity, mcp_server_identity, ssh_caller_ip};
+use orbit_types::tool::{McpCapability, McpTransport};
+
+use super::super::identity::{
+    McpSessionAuthority, local_identity, mcp_server_identity, ssh_caller_ip,
+};
 
 #[test]
 fn absent_host_identity_uses_explicit_local_fallbacks() {
@@ -42,8 +46,12 @@ fn ssh_connection_contributes_only_the_observed_caller_ip() {
 #[test]
 fn remote_context_keeps_identity_and_transport_concepts_separate() {
     let root = tempfile::tempdir().expect("global root");
-    let identity = mcp_server_identity(root.path(), Some("hm_caller".to_string()))
-        .expect("MCP server identity");
+    let identity = mcp_server_identity(
+        root.path(),
+        Some("hm_caller".to_string()),
+        McpSessionAuthority::Agent,
+    )
+    .expect("MCP server identity");
 
     assert_eq!(
         identity.session_context.caller_machine_id.as_deref(),
@@ -56,5 +64,32 @@ fn remote_context_keeps_identity_and_transport_concepts_separate() {
     assert_eq!(
         identity.session_context.transport,
         Some(McpTransport::SshMcp)
+    );
+}
+
+#[test]
+fn a_default_server_serves_agent_sessions_only() {
+    let root = tempfile::tempdir().expect("global root");
+
+    let identity = mcp_server_identity(root.path(), None, McpSessionAuthority::Agent)
+        .expect("MCP server identity");
+
+    assert_eq!(
+        identity.session_context.effective_capabilities,
+        BTreeSet::from([McpCapability::Agent]),
+        "an agent server must never stamp operator authority onto its sessions"
+    );
+}
+
+#[test]
+fn an_operator_server_grants_the_capability_governed_tools_require() {
+    let root = tempfile::tempdir().expect("global root");
+
+    let identity = mcp_server_identity(root.path(), None, McpSessionAuthority::Operator)
+        .expect("MCP server identity");
+
+    assert_eq!(
+        identity.session_context.effective_capabilities,
+        BTreeSet::from([McpCapability::Agent, McpCapability::Operator])
     );
 }

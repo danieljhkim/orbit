@@ -18,8 +18,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::thread;
 use std::time::Duration;
 
-use orbit_common::types::OrbitError;
-use orbit_common::utility::jitter::JitterRng;
+use orbit_common::OrbitError;
+use orbit_common::process::jitter::JitterRng;
 
 use crate::companion::locate_companion;
 use crate::embedder::{DEFAULT_MODEL, Embedder};

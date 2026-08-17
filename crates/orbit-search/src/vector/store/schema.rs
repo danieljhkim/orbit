@@ -4,7 +4,7 @@
 //! store module so future schema changes (e.g. swapping `embedding BLOB` for
 //! a `sqlite-vec` virtual table per ADR-002) live in one place.
 
-use orbit_common::types::OrbitError;
+use orbit_common::OrbitError;
 use rusqlite::Connection;
 
 pub fn ensure_vector_schema(conn: &Connection) -> Result<(), OrbitError> {

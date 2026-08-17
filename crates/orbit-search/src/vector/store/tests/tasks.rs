@@ -1,7 +1,7 @@
 //! Unit tests for `tasks` — sibling layout under store/tests/.
 
 use chrono::Utc;
-use orbit_common::types::{Task, TaskPriority, TaskStatus, TaskType};
+use orbit_types::task::{Task, TaskPriority, TaskStatus, TaskType};
 
 use crate::NoopEmbedder;
 use crate::vector::{SOURCE_KIND_TASK, VectorStore};

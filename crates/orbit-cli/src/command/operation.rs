@@ -8,8 +8,10 @@
 
 use std::path::Path;
 
-use orbit_common::types::{normalize_agent_family_for_model, normalize_optional_attribution_label};
 use orbit_core::{ActorIdentity, OrbitError, OrbitRuntime};
+use orbit_types::identity::{
+    normalize_agent_family_for_model, normalize_optional_attribution_label,
+};
 use serde_json::Value;
 
 use super::{CommandOut, CommandOutput, Commands, Execute};
@@ -84,7 +86,7 @@ pub struct CommandOperation {
     ///
     /// An arm sets this to name *which* operation is being invoked; it never
     /// names a capability. The requirement lives in
-    /// `orbit_common::authorization::GOVERNED_OPERATIONS` and the decision is
+    /// `orbit_common::governance::authorization::GOVERNED_OPERATIONS` and the decision is
     /// made once, in `main`, before dispatch.
     ///
     /// Commands whose destruction is flag-gated (`--confirm`) set it only for

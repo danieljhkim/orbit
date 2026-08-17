@@ -7,8 +7,8 @@ use axum::extract::Query;
 use axum::response::{IntoResponse, Json, Response};
 use chrono::DateTime;
 use orbit_cmd::DiagnosticsCommands;
-use orbit_common::utility::blob_store::BlobStore;
-use orbit_common::utility::redaction::redact_all;
+use orbit_common::security::redaction::redact_all;
+use orbit_common::storage::blob_store::BlobStore;
 use orbit_core::{InvocationQuery, InvocationRecord, OrbitRuntime, V2AuditEventFilter};
 use serde_json::{Value, json};
 
@@ -515,7 +515,7 @@ pub(super) async fn list_diagnostics_friction(
 
 pub(super) async fn diagnostics_implement_one(Ws(runtime): Ws) -> Response {
     let runtime_clone = runtime.clone();
-    let actor_vec =
+    let aggregation =
         match tokio::task::spawn_blocking(move || compute_implement_one_by_actor(&runtime_clone))
             .await
         {
@@ -529,14 +529,15 @@ pub(super) async fn diagnostics_implement_one(Ws(runtime): Ws) -> Response {
         };
 
     Json(json!({
-        "implement_one_by_actor": actor_vec,
+        "implement_one_by_actor": aggregation.by_actor,
+        "implement_one_by_complexity": aggregation.by_complexity,
     }))
     .into_response()
 }
 
 fn compute_implement_one_by_actor(
     runtime: &OrbitRuntime,
-) -> Result<Vec<serde_json::Value>, orbit_core::OrbitError> {
+) -> Result<ImplementOneAggregation, orbit_core::OrbitError> {
     let since = chrono::Utc::now() - chrono::Duration::days(30);
 
     let records = runtime.invocation_records(orbit_core::InvocationQuery {
@@ -546,17 +547,71 @@ fn compute_implement_one_by_actor(
         limit: 100_000,
         ..Default::default()
     })?;
+    let complexity_by_task = runtime.task_complexity_by_id()?;
 
-    let mut durations_by_actor: std::collections::HashMap<String, Vec<i64>> =
-        std::collections::HashMap::new();
+    let mut durations_by_actor: HashMap<String, Vec<i64>> = HashMap::new();
+    let mut durations_by_complexity_actor: HashMap<String, HashMap<String, Vec<i64>>> =
+        HashMap::new();
     for record in records {
         let actor = actor_label(&record.agent, record.model.as_deref());
+        let complexity = record
+            .task_ids
+            .first()
+            .and_then(|task_id| complexity_by_task.get(task_id).cloned())
+            .unwrap_or_else(|| orbit_types::task::UNSET_BUCKET.to_string());
         durations_by_actor
+            .entry(actor.clone())
+            .or_default()
+            .push(record.duration_ms as i64);
+        durations_by_complexity_actor
+            .entry(complexity)
+            .or_default()
             .entry(actor)
             .or_default()
             .push(record.duration_ms as i64);
     }
 
+    let by_actor = actor_duration_rows(durations_by_actor);
+    let mut by_complexity: Vec<Value> = durations_by_complexity_actor
+        .into_iter()
+        .map(|(complexity, actors)| {
+            let actor_rows = actor_duration_rows(actors);
+            let n: usize = actor_rows
+                .iter()
+                .map(|row| row["n"].as_u64().unwrap_or(0) as usize)
+                .sum();
+            json!({
+                "complexity": complexity,
+                "n": n,
+                "actors": actor_rows,
+            })
+        })
+        .collect();
+    by_complexity.sort_by(|left, right| {
+        orbit_types::task::complexity_bucket_ord(
+            left["complexity"]
+                .as_str()
+                .unwrap_or(orbit_types::task::UNSET_BUCKET),
+        )
+        .cmp(&orbit_types::task::complexity_bucket_ord(
+            right["complexity"]
+                .as_str()
+                .unwrap_or(orbit_types::task::UNSET_BUCKET),
+        ))
+    });
+
+    Ok(ImplementOneAggregation {
+        by_actor,
+        by_complexity,
+    })
+}
+
+struct ImplementOneAggregation {
+    by_actor: Vec<Value>,
+    by_complexity: Vec<Value>,
+}
+
+fn actor_duration_rows(durations_by_actor: HashMap<String, Vec<i64>>) -> Vec<Value> {
     let mut actor_vec: Vec<_> = durations_by_actor
         .into_iter()
         .map(|(actor, mut durations)| {
@@ -588,6 +643,5 @@ fn compute_implement_one_by_actor(
             .partial_cmp(&a["avg"].as_f64().unwrap_or(0.0))
             .unwrap_or(std::cmp::Ordering::Equal)
     });
-
-    Ok(actor_vec)
+    actor_vec
 }

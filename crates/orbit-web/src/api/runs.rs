@@ -4,7 +4,7 @@ use crate::state::Ws;
 use axum::extract::{Path, Query};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Json, Response};
-use orbit_common::utility::redaction::redact_all;
+use orbit_common::security::redaction::redact_all;
 use orbit_core::runtime::run_audit::{RunAuditStep, RunCliInvocationRecord, RunProviderProcess};
 use orbit_core::{JobRun, OrbitRuntime, V2AuditEventFilter};
 use serde_json::{Value, json};

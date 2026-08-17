@@ -1,12 +1,14 @@
 use clap::Args;
-use orbit_common::utility::redaction::redact_home_dir;
+use orbit_common::security::redaction::redact_home_dir;
+use orbit_config::{EffectiveConfigValue, load_effective_config};
 use orbit_core::OrbitRuntime;
-use orbit_core::config::{EffectiveConfigValue, load_effective_config};
 use serde_json::{Map, Value as JsonValue, json};
 
 use crate::command::{CommandOut, Execute, Payload};
 
-use super::support::{ConfigScopeArg, global_config_path, open_store_for_scope};
+use super::support::{
+    ConfigScopeArg, global_config_path, open_store_for_scope, runtime_config_roots,
+};
 
 #[derive(Args)]
 pub struct ConfigShowArgs {
@@ -19,7 +21,7 @@ pub struct ConfigShowArgs {
 impl Execute for ConfigShowArgs {
     fn execute(self, runtime: &OrbitRuntime) -> CommandOut {
         if self.scope == ConfigScopeArg::Effective {
-            let effective = load_effective_config(&runtime.global_root(), &runtime.shared_root())?;
+            let effective = load_effective_config(&runtime_config_roots(runtime))?;
             return Ok(Payload::detail(
                 effective_json(runtime, effective.values()),
                 effective_text(runtime, effective.values()),
@@ -150,8 +152,8 @@ fn effective_text(runtime: &OrbitRuntime, values: &[EffectiveConfigValue]) -> St
 
 fn scoped_json(
     runtime: &OrbitRuntime,
-    store: &orbit_core::config::ConfigStore,
-    snapshot: &orbit_core::config::ConfigSnapshot,
+    store: &orbit_config::ConfigStore,
+    snapshot: &orbit_config::ConfigSnapshot,
     settings: &[(&'static str, JsonValue)],
 ) -> JsonValue {
     let mut settings_obj = Map::new();
@@ -185,8 +187,8 @@ fn scoped_json(
 
 fn scoped_text(
     runtime: &OrbitRuntime,
-    store: &orbit_core::config::ConfigStore,
-    snapshot: &orbit_core::config::ConfigSnapshot,
+    store: &orbit_config::ConfigStore,
+    snapshot: &orbit_config::ConfigSnapshot,
     settings: &[(&'static str, JsonValue)],
 ) -> String {
     use std::fmt::Write as _;

@@ -1,6 +1,7 @@
-use orbit_common::types::{
-    AgentResponseEnvelope, AgentRunError, ExecutionResult, InvocationTrace, OrbitError,
-};
+use orbit_common::OrbitError;
+use orbit_types::telemetry::InvocationTrace;
+use orbit_types::tool::ExecutionResult;
+use orbit_types::workflow::{AgentResponseEnvelope, AgentRunError};
 use serde::Deserialize;
 use serde_json::{Deserializer, Value};
 

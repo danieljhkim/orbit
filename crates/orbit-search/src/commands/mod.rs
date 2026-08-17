@@ -28,7 +28,8 @@ pub use uninstall::{SemanticUninstallParams, SemanticUninstallResult};
 
 use std::fs;
 
-use orbit_common::types::{OrbitError, Task};
+use orbit_common::OrbitError;
+use orbit_types::task::Task;
 
 use crate::vector::{DocEmbeddingSource, VectorStore};
 use crate::{CompanionPaths, ModelSpec, default_model};

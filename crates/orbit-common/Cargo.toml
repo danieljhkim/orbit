@@ -12,7 +12,7 @@ stability = "stable"
 workspace = true
 
 [features]
-clap = ["dep:clap"]
+clap = ["orbit-types/clap"]
 # Shared SQLite connection defaults (utility::sqlite). Optional so that
 # non-SQLite consumers (orbit-policy, orbit-exec, ...) do not pull rusqlite.
 sqlite = ["dep:rusqlite"]
@@ -22,8 +22,8 @@ sqlite = ["dep:rusqlite"]
 test-util = []
 
 [dependencies]
+orbit-types = { path = "../orbit-types" }
 chrono.workspace = true
-clap = { workspace = true, optional = true }
 rusqlite = { workspace = true, optional = true }
 fs2.workspace = true
 regex.workspace = true
@@ -46,4 +46,4 @@ libc.workspace = true
 
 [dev-dependencies]
 proptest.workspace = true
-tempfile = "3"
+tempfile.workspace = true

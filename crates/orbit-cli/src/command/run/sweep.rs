@@ -8,9 +8,9 @@ use std::path::Path;
 
 use clap::Args;
 use orbit_cmd::registry_runtime::RegisteredRuntimeFactory;
-use orbit_common::types::{Workspace, WorkspaceCheckout, WorkspaceStatus};
 use orbit_core::{JobRunState, OrbitError, TaskStatus, task_dependencies_ready};
 use orbit_registry::workspace_registry;
+use orbit_types::workspace::{Workspace, WorkspaceCheckout, WorkspaceStatus};
 use serde_json::{Value, json};
 
 use super::ship::ShipMode;

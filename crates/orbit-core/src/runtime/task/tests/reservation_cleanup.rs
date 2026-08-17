@@ -2,16 +2,18 @@
 
 use crate::OrbitRuntime;
 use chrono::Utc;
-use orbit_common::types::JobRunState;
-use orbit_store::TaskReservationReleaseReason;
+use orbit_store::contracts::TaskReservationReleaseReason;
+use orbit_types::workflow::JobRunState;
 use serde_json::json;
 
 use super::super::locks::{workspace_orbit_dir, workspace_task_reservation_id};
 
 use chrono::Duration;
-use orbit_common::types::{AuditEventStatus, Role, TaskPriority, TaskStatus, TaskType};
 use orbit_store::{TaskCreateParams, TaskReservationReserveParams};
 use orbit_tools::{ReservationOwnerContext, ToolContext};
+use orbit_types::policy::Role;
+use orbit_types::task::{TaskPriority, TaskStatus, TaskType};
+use orbit_types::telemetry::AuditEventStatus;
 use serde_json::Value;
 use tempfile::tempdir;
 
@@ -111,7 +113,7 @@ fn insert_running_run(
     runtime: &OrbitRuntime,
     job_id: &str,
     pid: u32,
-) -> orbit_common::types::JobRun {
+) -> orbit_types::workflow::JobRun {
     let run = runtime
         .stores()
         .jobs()

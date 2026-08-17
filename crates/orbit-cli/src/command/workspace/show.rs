@@ -1,9 +1,9 @@
 use std::path::Path;
 
 use clap::Args;
-use orbit_common::types::{Workspace, WorkspaceCheckout, WorkspaceRegistry};
 use orbit_core::OrbitRuntime;
 use orbit_registry::workspace_registry;
+use orbit_types::workspace::{Workspace, WorkspaceCheckout, WorkspaceRegistry};
 use serde_json::{Value, json};
 
 use crate::command::{CommandOut, Execute, Payload};

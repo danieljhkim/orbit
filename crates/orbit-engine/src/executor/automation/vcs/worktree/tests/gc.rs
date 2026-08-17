@@ -6,10 +6,9 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use chrono::{Duration, Utc};
-use orbit_common::types::{
-    ExternalRef, JobRun, JobRunState, NotFoundKind, OrbitError, Task, TaskArtifact, TaskPriority,
-    TaskStatus, TaskType,
-};
+use orbit_common::{NotFoundKind, OrbitError};
+use orbit_types::task::{ExternalRef, Task, TaskArtifact, TaskPriority, TaskStatus, TaskType};
+use orbit_types::workflow::{JobRun, JobRunState};
 use serde_json::{Value, json};
 use tempfile::tempdir;
 

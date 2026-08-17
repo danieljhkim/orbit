@@ -3,7 +3,7 @@ use std::sync::Arc;
 use axum::body::Body;
 use axum::http::{Method, Request, StatusCode, header};
 use chrono::{Duration, Utc};
-use orbit_core::command::task::TaskAddParams;
+use orbit_core::application::task::TaskAddParams;
 use orbit_core::{JobRunState, OrbitRuntime, TaskStatus};
 use serde_json::json;
 use tower::ServiceExt;
@@ -323,13 +323,16 @@ async fn crews_endpoint_returns_sorted_runtime_registry() {
     let body = body_json(response).await;
     assert_eq!(body["default_crew"], json!("beta"));
     let crews = body["crews"].as_array().expect("crews array");
-    assert_eq!(crews.len(), 2);
+    assert_eq!(crews.len(), 3);
     assert_eq!(crews[0]["name"], json!("alpha"));
     assert_eq!(crews[0]["is_default"], json!(false));
     assert_eq!(crews[0]["model"], json!("alpha-model"));
     assert_eq!(crews[1]["name"], json!("beta"));
     assert_eq!(crews[1]["is_default"], json!(true));
     assert_eq!(crews[1]["model"], json!("codex-beta"));
+    assert_eq!(crews[2]["name"], json!("system"));
+    assert_eq!(crews[2]["is_default"], json!(false));
+    assert_eq!(crews[2]["model"], json!("codex-beta"));
 }
 
 #[tokio::test]

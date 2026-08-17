@@ -1,5 +1,5 @@
-use orbit_common::types::PipelineState;
 use orbit_core::{JobRun, OrbitError, OrbitRuntime, PipelineInvokeResult, PipelineWaitEntry};
+use orbit_types::workflow::PipelineState;
 use serde_json::{Value, json};
 
 use clap::Args;

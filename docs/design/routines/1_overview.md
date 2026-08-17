@@ -100,7 +100,7 @@ fragmentation this feature exists to end.
 | `orbit sweep` CLI entrypoint | `crates/orbit-cli/src/command/sweep.rs` | [ORB-10021] |
 | `orbit routine` CLI (`list/show/pause/resume/init`) | `crates/orbit-cli/src/command/routine/` | [ORB-10021] |
 | launchd/systemd unit templates + installer | `crates/orbit-core/assets/clock/` + `src/routines/clock.rs` | [ORB-10021] |
-| `[routines] role = "source"` config key | `crates/orbit-core/src/config/{raw,runtime}.rs` | [ORB-10021] |
+| `[routines] role = "source"` config key | `crates/orbit-config/src/{raw,resolved}.rs` | [ORB-10021] |
 | Disabled default routine seeding + workspace ship wrapper | `crates/orbit-core/assets/{routines,jobs}/` | [ORB-10207] / [Delegate workspace ship routines through a synchronous wrapper job](./4_decisions.md#delegate-workspace-ship-routines-through-a-synchronous-wrapper-job) |
 
 ---

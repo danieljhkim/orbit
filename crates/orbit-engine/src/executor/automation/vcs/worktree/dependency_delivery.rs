@@ -19,7 +19,7 @@
 use std::collections::BTreeSet;
 use std::path::Path;
 
-use orbit_common::types::{DependencyNotDelivered, OrbitError};
+use orbit_common::{DependencyNotDelivered, OrbitError};
 use serde_json::Value;
 
 use crate::context::RuntimeHost;

@@ -1,7 +1,7 @@
 // Orbit dashboard audit-domain rendering and actions.
 // Pure vanilla JS, split into ES modules with no build step.
 
-import { el, fetchJson, syncNodes, positiveIntParam, isAggregateView, renderPanelPlaceholder } from './common.js';
+import { el, fetchJson, syncNodes, positiveIntParam, isAggregateView, renderPanelPlaceholder, getWindow, setWindow, getWorkspace, setWorkspace, persistScopeToUrl, DEFAULT_DASHBOARD_WINDOW } from './common.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -24,6 +24,8 @@ let auditFilter = {
   // Time-window filter for the Events sub-tab. Accepts the same shorthands as
   // the API (`24h`, `7d`, `1w`, RFC3339); null means the API-side default.
   since: null,
+  // Source metric from a scoreboard drill-down (display + hash only).
+  metric: null,
   // Policy sub-tab only: scopes /api/diagnostics/denials to fs vs tool denials.
   policyKind: null,
 };
@@ -148,6 +150,7 @@ function buildAuditHash() {
     if (auditFilter.execution_id) sp.set("execution_id", auditFilter.execution_id);
     if (auditFilter.profile) sp.set("profile", auditFilter.profile);
     if (auditFilter.q) sp.set("q", auditFilter.q);
+    if (auditFilter.metric) sp.set("metric", auditFilter.metric);
   }
   const path = activeAuditSubtab && activeAuditSubtab !== "events"
     ? `audit/${activeAuditSubtab}`
@@ -181,6 +184,69 @@ function syncAuditControls() {
     const status = chip.dataset.status;
     chip.classList.toggle("active", auditFilter.status === status);
   }
+  renderScopeChips();
+}
+
+function removableChip(label, value, onRemove) {
+  const chip = el("button", {
+    class: "scope-chip",
+    title: `Remove ${label} filter`,
+  });
+  chip.type = "button";
+  chip.dataset.chip = label;
+  chip.appendChild(el("span", { class: "scope-chip-k", text: label }));
+  chip.appendChild(el("span", { class: "scope-chip-v", text: value }));
+  chip.appendChild(el("span", { class: "scope-chip-x", text: "×" }));
+  chip.addEventListener("click", (event) => {
+    event.preventDefault();
+    onRemove();
+  });
+  return chip;
+}
+
+function renderScopeChips() {
+  const host = $("audit-scope-chips");
+  if (!host) return;
+  host.innerHTML = "";
+  const workspace = getWorkspace();
+  if (workspace) {
+    host.appendChild(removableChip("workspace", workspace, () => {
+      setWorkspace(null);
+      persistScopeToUrl();
+      const select = $("workspace-select");
+      if (select) select.value = "";
+      window.location.hash = buildAuditHash();
+    }));
+  }
+  const windowLabel = effectiveAuditWindow();
+  if (windowLabel) {
+    const chip = removableChip("window", windowLabel, () => {
+      auditFilter.since = null;
+      setWindow(DEFAULT_DASHBOARD_WINDOW);
+      persistScopeToUrl();
+      window.location.hash = buildAuditHash();
+    });
+    if (windowLabel !== getWindow()) chip.classList.add("independent");
+    host.appendChild(chip);
+  }
+  if (auditFilter.role) {
+    host.appendChild(removableChip("actor", auditFilter.role, () => {
+      auditFilter.role = null;
+      window.location.hash = buildAuditHash();
+    }));
+  }
+  if (auditFilter.status) {
+    host.appendChild(removableChip("status", auditFilter.status, () => {
+      auditFilter.status = null;
+      window.location.hash = buildAuditHash();
+    }));
+  }
+  if (auditFilter.metric) {
+    host.appendChild(removableChip("metric", auditFilter.metric, () => {
+      auditFilter.metric = null;
+      window.location.hash = buildAuditHash();
+    }));
+  }
 }
 
 function applyAuditHashQuery(query) {
@@ -193,7 +259,8 @@ function applyAuditHashQuery(query) {
     query.get("execution_id") || query.get("run_id") || null;
   auditFilter.profile = query.get("profile") || null;
   auditFilter.q = query.get("q") || "";
-  auditFilter.since = query.get("since") || null;
+  auditFilter.since = query.get("since") || (getWindow() === "all" ? null : getWindow());
+  auditFilter.metric = query.get("metric") || null;
   const kindParam = query.get("kind");
   auditFilter.policyKind = kindParam === "fs" || kindParam === "tool" ? kindParam : null;
 }
@@ -218,7 +285,8 @@ function fetchAndRenderAudit(ctx) {
   }
   const sp = new URLSearchParams();
   sp.set("limit", String(AUDIT_LIMIT));
-  if (auditFilter.since) sp.set("since", auditFilter.since);
+  const since = effectiveAuditWindow();
+  if (since) sp.set("since", since);
   if (auditFilter.status) sp.set("status", auditFilter.status);
   if (auditFilter.tool) sp.set("tool", auditFilter.tool);
   if (auditFilter.role) sp.set("role", auditFilter.role);
@@ -301,7 +369,7 @@ function renderAuditSummary(data, ctx) {
       const table = el("table", { class: "summary-table" });
       const thead = el("thead");
       const tr = el("tr");
-      for (const c of cols) tr.appendChild(el("th", { class: c.num ? "num" : "", text: c.label }));
+      for (const c of cols) tr.appendChild(el("th", { class: c.num ? "num" : "", text: c.label, title: c.title }));
       thead.appendChild(tr);
       table.appendChild(thead);
 
@@ -386,7 +454,14 @@ function renderAuditSummary(data, ctx) {
   if (data.role_split) {
     container.appendChild(createCard("Role split", renderTable(
       data.role_split,
-      [{ key: "label", label: "role" }, { key: "count", label: "count", num: true }, { key: "mcp", label: "mcp", num: true }, { key: "cli", label: "cli", num: true }],
+      [
+        { key: "label", label: "role" },
+        { key: "count", label: "events", num: true, title: "All audit events in the window" },
+        { key: "mcp", label: "mcp", num: true, title: "Tool calls via MCP (subcommand = run-mcp)" },
+        { key: "cli", label: "cli", num: true, title: "Tool calls via CLI (subcommand = run)" },
+        { key: "other", label: "other", num: true, title: "Other CLI subcommands (non-tool, e.g. show/list)" },
+        { key: "no_subcommand", label: "internal", num: true, title: "Internal/system events with no subcommand (e.g. lock reservations)" },
+      ],
       (item) => {
         auditFilter.role = auditFilter.role === item.label ? null : item.label;
         syncAuditControls();
@@ -413,7 +488,7 @@ function fetchAndRenderPolicy(ctx) {
     return Promise.resolve();
   }
   const sp = new URLSearchParams();
-  sp.set("since", "24h");
+  sp.set("since", effectiveAuditWindow() || "24h");
   if (auditFilter.policyKind) sp.set("kind", auditFilter.policyKind);
   if (auditFilter.profile) sp.set("profile", auditFilter.profile);
   if (auditFilter.role) sp.set("agent", auditFilter.role);
@@ -431,7 +506,7 @@ function renderPolicy(data, ctx) {
   if (!data || (data.total || 0) === 0) {
     syncNodes(body, [el("div", { class: "empty-state" }, [
       el("div", { class: "icon", text: "✧" }),
-      el("div", { class: "text", text: "No denials in the last 24h." }),
+      el("div", { class: "text", text: `No denials in the last ${effectiveAuditWindow() || "24h"}.` }),
     ])]);
     return;
   }
@@ -637,17 +712,28 @@ function policyDetailText(row) {
   return parts.join(" · ") || row.denial_kind || "-";
 }
 
-function navigateToAuditExecution(executionId, ctx) {
-  auditFilter = {
+function effectiveAuditWindow() {
+  if (auditFilter.since) return auditFilter.since;
+  return getWindow() === "all" ? null : getWindow();
+}
+
+function emptyAuditFilter() {
+  return {
     status: null,
     q: "",
     tool: null,
     role: null,
-    execution_id: executionId,
+    execution_id: null,
     profile: null,
-    since: null,
+    since: getWindow() === "all" ? null : getWindow(),
+    metric: null,
     policyKind: null,
   };
+}
+
+function navigateToAuditExecution(executionId, ctx) {
+  auditFilter = emptyAuditFilter();
+  auditFilter.execution_id = executionId;
   activeAuditSubtab = "events";
   syncAuditControls();
   window.location.hash = buildAuditHash();
@@ -656,16 +742,21 @@ function navigateToAuditExecution(executionId, ctx) {
 /// Navigates to the Audit tab pre-filtered by `role` (audit `role` ≈ scoreboard
 /// agent name). Clears unrelated filters so the landing page is the role view.
 function navigateToRole(role, ctx) {
-  auditFilter = {
-    status: null,
-    q: "",
-    tool: null,
-    role,
-    execution_id: null,
-    profile: null,
-    since: null,
-    policyKind: null,
-  };
+  navigateToDrilldown({ role }, ctx);
+}
+
+/// Scoreboard actor/metric drill-down. Carries the shared dashboard window
+/// and records the source metric so the landing chips explain the scope.
+function navigateToDrilldown(opts = {}, ctx) {
+  auditFilter = emptyAuditFilter();
+  auditFilter.role = opts.role || null;
+  auditFilter.metric = opts.metric || null;
+  auditFilter.status = opts.status || null;
+  // ORB-10871: an incident names one surface, so its "open raw events" link
+  // lands on exactly the rows the incident collapsed rather than every failure
+  // by that actor.
+  auditFilter.tool = opts.tool || null;
+  if (opts.window) auditFilter.since = opts.window === "all" ? null : opts.window;
   activeAuditSubtab = "events";
   syncAuditControls();
   window.location.hash = buildAuditHash();
@@ -878,6 +969,7 @@ export {
   // cross-domain navigation
   navigateToAuditExecution,
   navigateToRole,
+  navigateToDrilldown,
   // state inspection used by setActiveTab + activeRefreshJobs
   getActiveAuditSubtab,
   setActiveAuditSubtabFromButton,

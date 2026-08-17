@@ -1,5 +1,5 @@
 use super::super::format::*;
-use orbit_common::types::{JobRunState, PipelineState};
+use orbit_types::workflow::{JobRunState, PipelineState};
 use serde_json::json;
 
 fn state_with_waiting(deps: Option<Vec<&str>>, locks: Option<Vec<&str>>) -> PipelineState {

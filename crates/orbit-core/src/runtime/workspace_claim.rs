@@ -26,14 +26,14 @@
 //! An unclaimed workspace gates nothing. The claim is an arbitration between
 //! operators who want one, not a mandatory ceremony before every dispatch.
 
-use orbit_common::types::{
-    AuditEventStatus, OrbitError, WorkspaceClaimHeld, normalize_optional_attribution_label,
-    optional_string, optional_u32_alias,
-};
-use orbit_store::{
+use orbit_common::protocol::tool_input::{optional_string, optional_u32_alias};
+use orbit_common::{OrbitError, WorkspaceClaimHeld};
+use orbit_store::contracts::{
     WorkspaceClaimAcquireParams, WorkspaceClaimCheckParams, WorkspaceClaimHolder,
     WorkspaceClaimReleaseParams,
 };
+use orbit_types::identity::normalize_optional_attribution_label;
+use orbit_types::telemetry::AuditEventStatus;
 use serde_json::{Value, json};
 
 use super::coordination_audit::{CoordinationAuditEvent, record_coordination_audit_event};
@@ -49,7 +49,7 @@ const DEFAULT_CLAIM_TTL_SECONDS: u32 = 3600;
 const MAX_CLAIM_TTL_SECONDS: u32 = 43_200;
 const CLAIM_TARGET_TYPE: &str = "workspace_claim";
 
-pub(super) fn acquire(
+pub(crate) fn acquire(
     runtime: &OrbitRuntime,
     input: Value,
     agent: Option<String>,
@@ -125,7 +125,7 @@ pub(super) fn acquire(
     }))
 }
 
-pub(super) fn release(
+pub(crate) fn release(
     runtime: &OrbitRuntime,
     input: Value,
     agent: Option<String>,
@@ -209,7 +209,7 @@ pub(super) fn release(
     }))
 }
 
-pub(super) fn show(runtime: &OrbitRuntime) -> Result<Value, OrbitError> {
+pub(crate) fn show(runtime: &OrbitRuntime) -> Result<Value, OrbitError> {
     let result = runtime.stores().task_reservations().show_workspace_claim(
         &workspace_orbit_dir(runtime),
         workspace_task_reservation_id(runtime)?.as_deref(),
@@ -313,7 +313,7 @@ fn claim_actor_label(runtime: &OrbitRuntime, agent: Option<&str>, model: Option<
 
 fn record_expired_claims(
     runtime: &OrbitRuntime,
-    expired: &[orbit_store::ExpiredTaskReservation],
+    expired: &[orbit_store::contracts::ExpiredTaskReservation],
 ) -> Result<(), OrbitError> {
     for claim in expired {
         record_claim_audit(

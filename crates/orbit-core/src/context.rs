@@ -1,19 +1,20 @@
 use std::path::Path;
 use std::sync::Arc;
 
-use orbit_common::types::{Crew, WorkspacePaths, normalize_agent_family_for_model};
 use orbit_engine::PrConfig;
 use orbit_policy::PolicyEngine;
 use orbit_search::{EmbedWorker, VectorStore};
-use orbit_store::{
+use orbit_store::contracts::{
     AuditEventStoreBackend, ExecutorDefStoreBackend, JobRunStoreBackend, PolicyDefStoreBackend,
     TaskArtifactStoreBackend, TaskDocumentStoreBackend, TaskHistoryStoreBackend,
     TaskReservationStoreBackend, TaskStoreBackend, ToolStoreBackend,
 };
 use orbit_tools::ToolRegistry;
+use orbit_types::identity::{Crew, normalize_agent_family_for_model};
+use orbit_types::workspace::WorkspacePaths;
 
-use crate::config::{CodexExecutionPolicy, ExecutionEnvPolicy, PersistenceConfig};
 use crate::skill_catalog::SkillCatalog;
+use orbit_config::{CodexExecutionPolicy, ExecutionEnvPolicy, PersistenceConfig};
 
 const ORBIT_AGENT_NAME: &str = "ORBIT_AGENT_NAME";
 const ORBIT_AGENT_MODEL: &str = "ORBIT_AGENT_MODEL";

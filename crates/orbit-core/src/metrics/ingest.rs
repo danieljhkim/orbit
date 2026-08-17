@@ -1,4 +1,5 @@
-use orbit_common::types::{InvocationTrace, KnowledgeRunMetrics};
+use orbit_types::telemetry::InvocationTrace;
+use orbit_types::workflow::KnowledgeRunMetrics;
 
 use super::summary::ratio;
 

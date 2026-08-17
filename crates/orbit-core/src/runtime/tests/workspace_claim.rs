@@ -5,15 +5,17 @@
 //! or protocol adapter in the picture — that placement is the whole point, and a
 //! test that went through one surface would not prove the others inherit it.
 
-use orbit_common::types::{AuditEventStatus, OrbitError, TaskStatus};
+use orbit_common::OrbitError;
+use orbit_types::task::TaskStatus;
+use orbit_types::telemetry::AuditEventStatus;
 use serde_json::{Value, json};
 
 use crate::OrbitRuntime;
-use crate::command::task::TaskAddParams;
-use crate::command::workflow::ShipMode;
-use crate::runtime::orbit_tool_host::test_support::{
+use crate::adapter::tool_host::test_support::{
     create_context_task, run_tool_as_operator, test_runtime, unmanaged_tool_env_guard,
 };
+use crate::application::task::TaskAddParams;
+use crate::application::workflow::ShipMode;
 use crate::runtime::workspace_claim::CLAIM_TOKEN_ENV;
 
 /// Acquire the claim and return its token.
@@ -179,6 +181,7 @@ fn non_workflow_operations_succeed_while_a_claim_is_held() {
             "description": "Filing, reading, and updating stay concurrent under ADR-0352.",
             "workspace": repo.display().to_string(),
             "model": "codex",
+            "complexity": "medium",
         }),
     )
     .expect("filing a task must not be gated by the workspace claim");

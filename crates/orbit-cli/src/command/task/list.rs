@@ -156,7 +156,7 @@ impl Execute for TaskListArgs {
 }
 
 fn validate_external_ref_system(system: &str) -> Result<String, OrbitError> {
-    ExternalRef::validate_system(system)
+    ExternalRef::validate_system(system).map_err(Into::into)
 }
 
 /// Parse the `--limit` value, rejecting a zero limit (which would return no

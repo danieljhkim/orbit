@@ -4,7 +4,9 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
 use chrono::{DateTime, Utc};
-use orbit_common::types::{JobRun, JobRunState, OrbitError, Task, TaskStatus};
+use orbit_common::OrbitError;
+use orbit_types::task::{Task, TaskStatus};
+use orbit_types::workflow::{JobRun, JobRunState};
 use serde::Serialize;
 use serde_json::Value;
 

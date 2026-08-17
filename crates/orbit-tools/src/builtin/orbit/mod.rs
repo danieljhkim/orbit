@@ -11,15 +11,16 @@ pub mod task;
 pub mod workflow;
 pub mod workspace_claim;
 
-use orbit_common::types::{
-    McpToolScope, OrbitError, ToolParam, normalize_agent_family_for_model,
-    normalize_optional_attribution_label,
+use orbit_common::OrbitError;
+use orbit_types::identity::{
+    normalize_agent_family_for_model, normalize_optional_attribution_label,
 };
+use orbit_types::tool::{McpToolScope, ToolParam};
 use serde_json::Value;
 
 use crate::{OrbitBuiltinAction, OrbitTaskScope, ToolContext, ToolRegistry};
 
-pub(super) use orbit_common::types::{optional_string_alias, required_string};
+pub(super) use orbit_common::protocol::tool_input::{optional_string_alias, required_string};
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(super) struct OrbitIdentity {

@@ -4,7 +4,7 @@ use std::sync::Mutex;
 
 use tempfile::tempdir;
 
-use orbit_common::types::OrbitError;
+use orbit_common::OrbitError;
 
 use super::super::clock::{
     ClockCommandRunner, ClockPlatform, ClockSettings, ManagerCommand, clock_status_with,
@@ -209,7 +209,7 @@ fn status_is_deterministic_for_each_manager_and_reports_configured_cadence() {
     let systemd = MockRunner::with_outputs(
         vec![Ok(true)],
         vec![Ok(Some(
-            "NextElapseUSecRealtime=\nNextElapseUSecMonotonic=5min".to_string(),
+            "LoadState=loaded\nActiveState=active\nNextElapseUSecRealtime=Sun 2026-08-16 04:30:00 UTC\nNextElapseUSecMonotonic=5min\nLastTriggerUSec=Sun 2026-08-16 04:29:00 UTC".to_string(),
         ))],
     );
     let status = clock_status_with(root.path(), ClockPlatform::Systemd, &systemd)
@@ -218,6 +218,16 @@ fn status_is_deterministic_for_each_manager_and_reports_configured_cadence() {
     assert!(status.schedulable);
     assert_eq!(status.effective_cadence_seconds, Some(60));
     assert!(status.health_issue.is_none());
+    assert!(status.loaded);
+    assert_eq!(status.running, Some(true));
+    assert_eq!(
+        status.last_tick_at.as_deref(),
+        Some("Sun 2026-08-16 04:29:00 UTC")
+    );
+    assert_eq!(
+        status.next_tick_at.as_deref(),
+        Some("Sun 2026-08-16 04:30:00 UTC")
+    );
     assert_eq!(status.platform, "systemd");
 }
 
@@ -244,9 +254,31 @@ fn enabled_systemd_timer_without_a_future_trigger_is_unhealthy() {
         runner.commands(),
         vec![
             "systemctl --user is-enabled orbit-sweep.timer",
-            "systemctl --user show orbit-sweep.timer --property=NextElapseUSecRealtime --property=NextElapseUSecMonotonic",
+            "systemctl --user show orbit-sweep.timer --property=LoadState --property=ActiveState --property=NextElapseUSecRealtime --property=NextElapseUSecMonotonic --property=LastTriggerUSec",
         ]
     );
+}
+
+#[test]
+fn disabled_systemd_timer_reports_loaded_state_without_becoming_schedulable() {
+    let root = tempdir().expect("create global root");
+    let runner = MockRunner::with_outputs(
+        vec![Ok(false)],
+        vec![Ok(Some(
+            "LoadState=loaded\nActiveState=inactive\nNextElapseUSecRealtime=Sun 2026-08-16 04:30:00 UTC"
+                .to_string(),
+        ))],
+    );
+
+    let status = clock_status_with(root.path(), ClockPlatform::Systemd, &runner)
+        .expect("read disabled timer status");
+
+    assert!(!status.enabled);
+    assert!(status.loaded);
+    assert_eq!(status.running, Some(false));
+    assert!(!status.schedulable);
+    assert_eq!(status.effective_cadence_seconds, None);
+    assert!(status.health_issue.is_none());
 }
 
 #[test]

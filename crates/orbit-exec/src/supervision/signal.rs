@@ -1,7 +1,7 @@
 use std::sync::atomic::{AtomicI32, Ordering};
 use std::sync::{Mutex, MutexGuard, OnceLock};
 
-use orbit_common::types::OrbitError;
+use orbit_common::OrbitError;
 
 static SIGNAL_HANDLER_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
 static SIGNAL_PIPE_WRITE_FD: AtomicI32 = AtomicI32::new(-1);

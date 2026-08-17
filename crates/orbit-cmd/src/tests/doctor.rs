@@ -5,7 +5,7 @@ use std::path::Path;
 
 use chrono::Utc;
 use fs2::FileExt;
-use orbit_common::types::{JobRun, JobRunState};
+use orbit_types::workflow::{JobRun, JobRunState};
 use sha2::{Digest, Sha256};
 
 use orbit_core::OrbitRuntime;
@@ -807,8 +807,5 @@ fn stale_shipped_activity_default_names_the_refresh_remediation() {
     assert_eq!(row.status, WorkspaceDoctorStatus::Error, "{row:?}");
     assert!(row.message.contains("stale"), "{}", row.message);
     assert!(row.message.contains("older release"), "{}", row.message);
-    assert_eq!(
-        row.remediation.as_deref(),
-        Some("Run `orbit init --refresh-defaults`.")
-    );
+    assert_eq!(row.remediation.as_deref(), Some("Run `orbit init`."));
 }

@@ -12,7 +12,9 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use orbit_common::types::{FrictionEntry, MetricsEntry, OrbitError};
+use orbit_common::OrbitError;
+use orbit_types::record::FrictionEntry;
+use orbit_types::telemetry::MetricsEntry;
 use serde::de::DeserializeOwned;
 
 use orbit_core::OrbitRuntime;

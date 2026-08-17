@@ -1,5 +1,5 @@
 use clap::{Args, Subcommand, ValueEnum};
-use orbit_core::command::semantic::{
+use orbit_core::application::semantic::{
     IndexKind, SemanticIndexParams, SemanticIndexResult, SemanticInstallParams,
     SemanticUninstallParams,
 };

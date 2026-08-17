@@ -1,4 +1,5 @@
-use orbit_common::types::{OrbitError, ToolSchema};
+use orbit_common::OrbitError;
+use orbit_types::tool::ToolSchema;
 use serde_json::Value;
 
 use crate::{Tool, ToolContext};

@@ -1,7 +1,7 @@
 use chrono::Utc;
-use orbit_common::types::{Workspace, WorkspaceCheckout, WorkspaceRegistry, WorkspaceStatus};
 use orbit_core::routines::RoutineRegistryView;
-use orbit_store::sqlite::task_registry::{WorkspaceConfig, write_workspace_config};
+use orbit_store::maintenance::task_registry::{WorkspaceConfig, write_workspace_config};
+use orbit_types::workspace::{Workspace, WorkspaceCheckout, WorkspaceRegistry, WorkspaceStatus};
 
 use orbit_registry::host_identity::load_host_identity;
 use orbit_registry::workspace_registry;

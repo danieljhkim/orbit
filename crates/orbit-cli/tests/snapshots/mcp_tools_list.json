@@ -456,7 +456,7 @@
           "description": "Optional acceptance criteria as a string or array of strings"
         },
         "complexity": {
-          "description": "Optional task complexity level (low, medium, or hard)",
+          "description": "Task complexity level (low, medium, or hard)",
           "enum": [
             "low",
             "medium",
@@ -543,7 +543,8 @@
       },
       "required": [
         "title",
-        "description"
+        "description",
+        "complexity"
       ],
       "type": "object"
     },

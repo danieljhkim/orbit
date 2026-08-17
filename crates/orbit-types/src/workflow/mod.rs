@@ -1,0 +1,51 @@
+//! Domain contracts for this Orbit types module.
+
+pub mod activity_job;
+mod auto_task;
+mod error;
+mod executor_def;
+mod job;
+mod routine;
+mod run_state;
+mod ship;
+mod skill;
+pub use error::WorkflowError;
+
+#[cfg(test)]
+mod tests;
+
+pub use activity_job::{
+    AUDIT_ENVELOPE_SCHEMA_VERSION, ActivityV2, ActivityV2Spec, AgentLoopSpec, BackoffStrategy,
+    BranchOutcome, CoreDeterministicAction, DeterministicAction, DeterministicSpec,
+    EngineDeterministicAction, FanInSpec, FanOutBlock, JobActivityRoles, JobKind, JobV2, JobV2Step,
+    JobV2StepBody, JoinMode, LoopBlock, OnDenial, ParallelBlock, PipelineRef, Provider,
+    ProviderAlias, ProviderDeprecation, ProviderDiagnostic, ProviderEntryPoint, ProviderIdentity,
+    ProviderParseError, ProviderResolution, ProviderResolveRequest, ProviderSource,
+    RETIRED_BACKEND_MIGRATION, RetiredAgentBackend, RetiredFeatureError, RetrySpec, SchemaHeader,
+    TargetRef, TargetStep, ToolAllowlistError, V2_DENIAL_EVENT_TYPES, V2_EVENT_TYPE_FS_CALL_DENIED,
+    V2_EVENT_TYPE_STEP_DENIED, V2_EVENT_TYPE_TOOL_DENIED,
+    V2_INTENTIONALLY_EMPTY_TOOL_WILDCARD_ROOTS, V2_TOOL_WILDCARD_ROOTS, V2AuditEnvelope,
+    V2AuditEvent, V2AuditEventKind, check_retired_backend_value, tool_allowed,
+    validate_activity_tool_allowlist, validate_activity_tool_allowlist_against_registered_tools,
+    validate_job_retired_sessions, validate_tool_allowlist,
+    validate_tool_allowlist_against_registered_tools,
+};
+pub use auto_task::{
+    AUTO_TASK_SCHEMA_VERSION, AUTO_TASK_TAG_PREFIX, AutoTaskDefinition, AutoTaskSchedule,
+    AutoTaskTemplate, DedupePolicy, auto_task_tag, is_valid_auto_task_name,
+};
+pub use executor_def::{
+    ExecutorDef, ExecutorSandboxKind, ExecutorType, ModelPairOverride, StdoutFormat,
+};
+pub use job::{
+    AgentCommitRequest, AgentResponseEnvelope, AgentRunError, Job, JobRun, JobRunState, JobRunStep,
+    JobScheduleState, JobStep, JobTargetType, KnowledgeRunMetrics, RunEvent, StepCondition,
+    default_job_max_active_runs, default_max_iterations, default_retry_backoff_seconds,
+};
+pub use routine::{
+    MissedRunPolicy, OverlapPolicy, ROUTINE_SCHEMA_VERSION, RoutineDefinition, RoutinePolicy,
+    RoutineRetries, RoutineTarget, RoutineTrigger,
+};
+pub use run_state::PipelineState;
+pub use ship::{ShipMode, resolved_ship_mode};
+pub use skill::Skill;

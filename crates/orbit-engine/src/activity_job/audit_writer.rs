@@ -6,13 +6,13 @@ use std::thread::ThreadId;
 
 use chrono::Utc;
 use orbit_agent::loop_engine::audit::{AuditSink, LoopAuditEvent};
-use orbit_common::types::OrbitError;
-use orbit_common::types::activity_job::{
+use orbit_common::OrbitError;
+use orbit_types::workflow::activity_job::{
     AUDIT_ENVELOPE_SCHEMA_VERSION, V2AuditEnvelope, V2AuditEvent, V2AuditEventKind,
 };
 use thiserror::Error;
 
-use orbit_store::Store;
+use orbit_store::contracts::V2AuditStoreBackend;
 
 use super::sqlite_sink::V2SqliteSink;
 
@@ -115,7 +115,7 @@ impl V2AuditWriter {
     /// `with_envelope_sink` directly.
     pub fn with_disk_sinks(
         audit_root: &Path,
-        store: Store,
+        store: Arc<dyn V2AuditStoreBackend>,
         workspace_id: impl Into<String>,
         run_id: impl Into<String>,
         agent_identity: impl Into<String>,

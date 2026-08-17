@@ -1,6 +1,7 @@
 use std::collections::BTreeSet;
 
-use orbit_common::types::{Task, infer_agent_family_from_model};
+use orbit_types::identity::infer_agent_family_from_model;
+use orbit_types::task::Task;
 
 #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub(super) struct GitAuthor {

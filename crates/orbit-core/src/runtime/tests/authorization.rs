@@ -6,16 +6,17 @@
 //! process signal, so a test that supplies them is deterministic whether it runs
 //! under CI, under a managed Orbit run, or from a developer's terminal. The
 //! process-signal precedence rules themselves are exercised as pure data in
-//! `orbit_common::authorization`.
+//! `orbit_common::governance::authorization`.
 
 use std::collections::BTreeSet;
 
-use orbit_common::types::{
-    AuditEventStatus, McpCapability, OrbitError, Role, TaskPriority, TaskStatus, TaskType,
-    ToolSessionContext,
-};
-use orbit_store::TaskCreateParams;
+use orbit_common::OrbitError;
+use orbit_store::contracts::TaskCreateParams;
 use orbit_tools::ToolContext;
+use orbit_types::policy::Role;
+use orbit_types::task::{TaskPriority, TaskStatus, TaskType};
+use orbit_types::telemetry::AuditEventStatus;
+use orbit_types::tool::{McpCapability, ToolSessionContext};
 use serde_json::json;
 
 use crate::OrbitRuntime;

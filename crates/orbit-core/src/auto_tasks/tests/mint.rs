@@ -4,7 +4,8 @@
 //! scheduler fire.
 
 use chrono::{DateTime, Duration, TimeZone, Utc};
-use orbit_common::types::{DedupePolicy, Task, TaskStatus, auto_task_tag};
+use orbit_types::task::{Task, TaskStatus};
+use orbit_types::workflow::{DedupePolicy, auto_task_tag};
 use serde_json::Value;
 
 use crate::OrbitRuntime;
@@ -89,6 +90,11 @@ fn mint_matches_a_scheduler_fire_field_for_field() {
         minted.status,
         TaskStatus::Backlog,
         "mint honors the template-supplied status default"
+    );
+    assert_eq!(
+        minted.complexity,
+        Some(orbit_types::task::TaskComplexity::Unassessed),
+        "automated mint writes the explicit non-answer, never a fabricated assessment"
     );
 }
 
@@ -244,7 +250,7 @@ fn an_open_manually_minted_instance_defers_the_next_fire_like_a_fired_one() {
     runtime
         .update_task(
             &minted.id,
-            crate::command::task::TaskUpdateParams {
+            crate::application::task::TaskUpdateParams {
                 status: Some(TaskStatus::Rejected),
                 ..Default::default()
             },

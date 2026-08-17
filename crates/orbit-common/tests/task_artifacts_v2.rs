@@ -5,7 +5,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use orbit_common::types::{ArtifactManifestV2, TaskCommentRowV2, TaskEnvelopeV2, TaskEventRowV2};
+use orbit_types::task::{ArtifactManifestV2, TaskCommentRowV2, TaskEnvelopeV2, TaskEventRowV2};
 
 #[test]
 fn task_artifact_v2_fixtures_parse_and_validate() {

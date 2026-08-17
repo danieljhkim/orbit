@@ -1,9 +1,11 @@
 use std::path::PathBuf;
 
 use chrono::Utc;
-use orbit_common::types::{
-    McpToolScope, NotFoundKind, OrbitError, Workspace, WorkspaceCheckout, WorkspaceCheckoutRole,
-    WorkspaceRegistry, WorkspaceStatus, tool_input_schema,
+use orbit_common::protocol::tool_schema::tool_input_schema;
+use orbit_common::{NotFoundKind, OrbitError};
+use orbit_types::tool::McpToolScope;
+use orbit_types::workspace::{
+    Workspace, WorkspaceCheckout, WorkspaceCheckoutRole, WorkspaceRegistry, WorkspaceStatus,
 };
 use serde_json::json;
 

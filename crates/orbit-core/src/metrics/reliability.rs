@@ -8,8 +8,8 @@
 //!
 //! Everything here derives from persisted `job_runs` and `invocations` rows.
 //! No agent-loop output, no token field, and no cost field is read — see
-//! [`orbit_store::JobRunOutcomeFact`] and
-//! [`orbit_store::ActivityInvocationCount`] for the projected column sets.
+//! [`orbit_store::contracts::JobRunOutcomeFact`] and
+//! [`orbit_store::contracts::ActivityInvocationCount`] for the projected column sets.
 //!
 //! # Outcome classification
 //!
@@ -52,8 +52,9 @@ use std::collections::{BTreeMap, BTreeSet};
 use chrono::{DateTime, Duration, Utc};
 use serde::Serialize;
 
-use orbit_common::types::{JobActivityRoles, JobRunState, OrbitError};
-use orbit_store::{ActivityInvocationCount, InvocationRunCoverage, JobRunOutcomeFact};
+use orbit_common::OrbitError;
+use orbit_store::contracts::{ActivityInvocationCount, InvocationRunCoverage, JobRunOutcomeFact};
+use orbit_types::workflow::{JobActivityRoles, JobRunState};
 
 use crate::runtime::OrbitRuntime;
 
@@ -366,7 +367,7 @@ impl OrbitRuntime {
     /// Disabled jobs are included: a job disabled midway through the window
     /// still produced the invocations being counted.
     fn catalog_activity_roles(&self) -> Result<JobActivityRoles, OrbitError> {
-        use crate::command::job::JobCatalogFilter;
+        use crate::application::job::JobCatalogFilter;
 
         let mut roles = JobActivityRoles::default();
         for (entry, _) in self.list_job_catalog_with_last_run(true, JobCatalogFilter::All)? {

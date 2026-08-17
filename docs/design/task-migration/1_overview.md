@@ -2,6 +2,7 @@
 title: Task Migration — Overview
 owner: claude
 last_updated: 2026-07-04
+last_validated: 2026-08-16
 status: Draft
 feature: task-migration
 doc_role: overview
@@ -38,8 +39,8 @@ machine a disjoint id range).
 ## 2. Core Concepts
 
 - **Canonical bundle** — the on-disk source of truth for one task (`task.yaml`
-  envelope + markdown bodies + `events`/`comments` JSONL + review-thread and
-  artifact sidecars). Export copies these verbatim.
+  envelope + markdown bodies + `events`/`comments` JSONL + legacy review-thread
+  and artifact sidecars). Export copies these verbatim.
 - **Manifest** — the single non-bundle entry in an archive: format/schema
   version, source workspace id + slug, task-id list, and `exported_at`.
 - **Global allocator** — one `local` authority in `allocator_state`. Task ids
@@ -63,7 +64,7 @@ machine a disjoint id range).
 | Allocator seed/bump primitives | [crates/orbit-store/src/sqlite/task_registry/store.rs](../../../crates/orbit-store/src/sqlite/task_registry/store.rs) | [ORB-00034] |
 | Runtime facades | [crates/orbit-core/src/command/task_migration.rs](../../../crates/orbit-core/src/command/task_migration.rs) | [ORB-00034] |
 | CLI surfaces | [crates/orbit-cli/src/command/task/export.rs](../../../crates/orbit-cli/src/command/task/export.rs) | [ORB-00034] |
-| `[tasks] id_start` config | [crates/orbit-core/src/config/raw.rs](../../../crates/orbit-core/src/config/raw.rs) | [ORB-00034] |
+| `[tasks] id_start` config | [crates/orbit-config/src/raw.rs](../../../crates/orbit-config/src/raw.rs) | [ORB-00034] |
 
 ## 4. The migration recipe
 
@@ -112,9 +113,9 @@ The counter only moves forward — a lower `--task-id-start` is refused. For a
 sticky floor across a shared config, set `[tasks] id_start = 10000` in
 `config.toml` (see [../../CONFIG.md](../../CONFIG.md)); it is applied as a
 forward-only floor on every runtime build and never errors on an already-
-advanced counter. Both paths cap at `ORB_TASK_ID_MAX` (99999): a start near the
-ceiling shrinks the machine's usable range, and the range is exhausted once the
-allocator reaches `100000`.
+advanced counter. Both paths cap at the allocator's `ORB_TASK_ID_MAX`
+(`u32::MAX`): five-digit padding is a minimum display width, not an exhaustion
+boundary.
 
 ### Recovering a drifted index
 

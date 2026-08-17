@@ -4,6 +4,7 @@ type: design
 title: "Worktree Artifacts - Design"
 owner: codex
 last_updated: 2026-08-15
+last_validated: 2026-08-17
 status: Accepted
 feature: worktree-artifacts
 doc_role: design
@@ -34,7 +35,7 @@ Explicit `--root` and `ORBIT_ROOT` overrides pin both roots to preserve the old 
 
 ## 2. Allocation Metadata
 
-In standalone/worktree mode, `id_allocations` lives in
+In the retired standalone/worktree implementation, `id_allocations` lived in
 `shared_root/.orbit/state/semantic.db`. The allocator serializes ID creation with a
 shared lock, then body writes update the row with:
 
@@ -42,11 +43,11 @@ shared lock, then body writes update the row with:
 - `branch`: best-effort current branch.
 - `body_path`: the body file path relative to `worktree_root`.
 
-Backfilled shared-root artifacts receive `body_path` during allocator initialization so old ADRs and migrated learnings remain readable from any worktree.
+Backfilled shared-root artifacts received `body_path` during allocator initialization so old ADRs and migrated learnings remained readable from any worktree. ORB-10736 removed this allocator and the native learning projections; current store migrations explicitly drop `id_allocations`, while any old `.orbit/learnings/` files remain inert historical data.
 
-This is the only allocator, and every create path uses it. [Workspace-scoped knowledge keys, no global knowledge IDs](../host-registry/4_decisions.md#workspace-scoped-knowledge-keys-no-global-knowledge-ids) keys
-knowledge `(workspace_id, artifact_key)`, so an ID is unique within its workspace
-and makes no claim outside it; [ORB-10725] deleted the hub-global sequence that
+The retired design had one allocator, and every create path used it. [Workspace-scoped knowledge keys, no global knowledge IDs](../host-registry/4_decisions.md#workspace-scoped-knowledge-keys-no-global-knowledge-ids) keyed
+knowledge `(workspace_id, artifact_key)`, so an ID was unique within its workspace
+and made no claim outside it; [ORB-10725] deleted the hub-global sequence that
 §2.1 and §2.2 once described.
 
 ### 2.1 The withdrawn hub-global sequence substrate
@@ -67,21 +68,21 @@ database that recorded it must still find it — but the slot is a no-op, and Re
 feature v3 drops the tables `IF EXISTS` so a database that applied the original v2
 converges on the same shape as a fresh one.
 
-What is left is the shape §2 already described: one workspace-local allocator per
+The retired design left the shape §2 described: one workspace-local allocator per
 workspace, reached only by the owning machine. `orbit.learning.add` and
-`orbit.adr.add` are single owner-local transactions — no reservation, no expiry, no
-orphaned ID, no finalize/pull race — and the [ORB-10364] authoring role gate sits on
-that one surface with nothing at stake on refusal.
+`orbit.adr.add` were single owner-local transactions — no reservation, no expiry,
+no orphaned ID, no finalize/pull race — and the [ORB-10364] authoring role gate
+sat on that one surface with nothing at stake on refusal.
 
 ## 3. Write Path
 
-ADR creation writes `adr.yaml` and `body.md` under `local_root/adrs/proposed/ADR-NNNN/`. Learning creation writes `learning.yaml`, `votes.jsonl`, and `comments.jsonl` under `local_root/learnings/L-NNNN/`.
+In the retired implementation, ADR creation wrote `adr.yaml` and `body.md` under `local_root/adrs/proposed/ADR-NNNN/`. Learning creation wrote `learning.yaml`, `votes.jsonl`, and `comments.jsonl` under `local_root/learnings/L-NNNN/`.
 
 The first write into a linked worktree creates only the subtree needed for the artifact type. It does not scaffold local `state/`, `audit/`, `tasks/`, scoreboards, or registry files.
 
 ## 4. Read Federation
 
-ADR `show` resolves the envelope and body together in the store and carries exactly one of four states through Core, HTTP, and local MCP:
+In the retired implementation, ADR `show` resolved the envelope and body together in the store and carried exactly one of four states through Core, HTTP, and local MCP:
 
 1. `local`: a structurally complete, non-empty bundle exists under the current local root. This wins over any readable sibling allocation, and the read does not rewrite the allocation row.
 2. `federated`: no current-local bundle exists and the allocation resolves to a structurally complete, readable sibling bundle.
@@ -106,17 +107,18 @@ List and search retain their existing defaults. Readable allocation-owned bundle
 
 ## 5. Mutation Boundary
 
-ADR document update, accept, and supersede are local-only. A federated or unavailable allocation-owned artifact fails preflight with `artifact_not_local` (HTTP 409 or the same local MCP code) before any bundle, allocation, lifecycle timestamp, index, or audit mutation. Supersede preflights both operands before its first write. Landing the bundle in the current checkout restores ordinary local mutation semantics; a sibling-owned allocation row remains unchanged.
+In the retired implementation, ADR document update, accept, and supersede were local-only. A federated or unavailable allocation-owned artifact failed preflight with `artifact_not_local` (HTTP 409 or the same local MCP code) before any bundle, allocation, lifecycle timestamp, index, or audit mutation. Supersede preflighted both operands before its first write. Landing the bundle in the current checkout restored ordinary local mutation semantics; a sibling-owned allocation row remained unchanged.
 
-Local-only is a boundary on *where* the write runs, not on which surface may run
-it. `orbit adr add`, `orbit adr update`, and `orbit adr supersede` ([orbit adr owns ADR authoring and lifecycle; reconcile stays the cross-checkout verb](./4_decisions.md#orbit-adr-owns-adr-authoring-and-lifecycle-reconcile-stays-the-cross-checkout-verb),
-[ORB-10668]) delegate to the same `orbit.adr.*` tools and so inherit this
-preflight unchanged; they exist so the checkout that owns a bundle can complete
-the lifecycle from a shell, which is the only place the 409 leaves open.
+In that retired design, local-only was a boundary on *where* the write ran, not
+on which surface could run it. `orbit adr add`, `orbit adr update`, and `orbit adr
+supersede` ([orbit adr owns ADR authoring and lifecycle; reconcile stays the
+cross-checkout verb](./4_decisions.md#orbit-adr-owns-adr-authoring-and-lifecycle-reconcile-stays-the-cross-checkout-verb),
+[ORB-10668]) delegated to the same `orbit.adr.*` tools and inherited this
+preflight unchanged.
 
 ### 5.1 Federated ADR reconciliation
 
-`orbit adr reconcile <id> --source-worktree <path>` localizes an already
+The retired `orbit adr reconcile <id> --source-worktree <path>` command localized an already
 published ADR bundle from an explicitly named registered sibling worktree. It
 does not allocate, reconstruct metadata, change lifecycle state, or repoint the
 allocation row. The store requires both checkouts to appear in the same Git
@@ -124,7 +126,7 @@ worktree registry, reads a complete non-empty bundle whose metadata status
 matches its lifecycle partition, and accepts an existing destination only when
 both files are byte-equivalent.
 
-The source and destination ADR locks cover validation, while the shared
+In the retired design, the source and destination ADR locks covered validation, while the shared
 allocator lock pins the complete allocation snapshot across the final atomic
 rename. A changed source, allocation, incomplete bundle, lifecycle mismatch,
 unregistered checkout, or divergent destination fails before the canonical
@@ -134,7 +136,7 @@ preserves a readable published bundle verbatim.
 
 ## 6. Publication Policy and Duplicate Partitions
 
-Every ADR lifecycle partition — `proposed/`, `accepted/`, `superseded/`,
+In the retired implementation, every ADR lifecycle partition — `proposed/`, `accepted/`, `superseded/`,
 `deleted/` — is tracked by git and travels with the repository [ORB-10669].
 Publishing `proposed/` puts the decision under review in the same PR as the
 change that motivates it, and means an ADR authored inside a managed job
@@ -162,10 +164,10 @@ artifact for an ID is refused, not resolved.
 
 ### 6.1 Managed job-worktree drafts
 
-A managed job-run worktree scaffolds a real `.orbit/adrs/proposed` for its run.
-Drafts written there are now tracked, so the on-box auto-commit sweeps them into
-the run's branch. That is the intended disposition for work that ships: the
-draft rides its PR and merges with the code. For a run that is abandoned or
+In the retired implementation, a managed job-run worktree scaffolded a real `.orbit/adrs/proposed` for its run.
+Drafts written there were tracked, so the on-box auto-commit swept them into
+the run's branch. That was the intended disposition for work that shipped: the
+draft rode its PR and merged with the code. For a run that was abandoned or
 whose PR is rejected, the disposition is that **the draft dies with the branch**
 — no operator cleanup step, no reconciliation. Nothing reaches `agent-main`
 unless the branch merges, and the ID allocation left behind is an ordinary valid
@@ -176,13 +178,13 @@ wants to keep a draft from a discarded branch pulls it over with
 
 ## 7. Indexing Behavior
 
-Learning reindex and docs/ADR search operate on locally readable bodies. Remote-only allocation rows are skipped without error; once the recorded worktree is present and readable again, the same list/reindex path can read and index the body.
+In the retired implementation, learning reindex and docs/ADR search operated on locally readable bodies. Remote-only allocation rows were skipped without error; once the recorded worktree was present and readable again, the same list/reindex path could read and index the body.
 
 ## 8. Concerns & Honest Limitations
 
-Remote stubs are intentionally envelope-poor. They expose allocation metadata, not the artifact title, summary, or body, because those fields live in the unreadable body file. Filters that require body fields can only apply to locally readable artifacts.
+The retired remote stubs were intentionally envelope-poor. They exposed allocation metadata, not the artifact title, summary, or body, because those fields lived in the unreadable body file. Filters that required body fields could only apply to locally readable artifacts.
 
-The `worktree_root` column preserves historical rows from earlier phases, so old shared-root rows may record a `.orbit/` path while new rows record a worktree root. Readers resolve `body_path` relative to the recorded value instead of normalizing that history away.
+The retired `worktree_root` column preserved historical rows from earlier phases, so old shared-root rows could record a `.orbit/` path while new rows recorded a worktree root. Retired readers resolved `body_path` relative to the recorded value instead of normalizing that history away.
 
 ## Task References
 

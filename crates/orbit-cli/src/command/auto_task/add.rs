@@ -58,6 +58,9 @@ pub struct AutoTaskAddArgs {
 impl Execute for AutoTaskAddArgs {
     fn execute(self, runtime: &OrbitRuntime) -> CommandOut {
         let schedule = require_schedule(self.cron, self.every_minutes)?;
+        // Minted tasks receive TaskComplexity::Unassessed (not a real
+        // assessment). Definitions do not carry complexity; the mint path
+        // stamps the explicit non-answer so create never produces a gap.
         let template = AutoTaskTemplate {
             title: self.title,
             description: self.body,

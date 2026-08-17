@@ -6,7 +6,8 @@
 
 use std::path::{Path, PathBuf};
 
-use orbit_common::types::{AutoTaskDefinition, parse_auto_task_yaml};
+use orbit_common::protocol::yaml::parse_auto_task_yaml;
+use orbit_types::workflow::AutoTaskDefinition;
 
 /// Directory under a workspace's `.orbit/` holding auto-task YAML files.
 pub const AUTO_TASKS_DIR: &str = "auto_tasks";

@@ -1,7 +1,8 @@
 use std::fs;
 use std::process::Command;
 
-use orbit_common::types::{OrbitError, TaskType};
+use orbit_common::OrbitError;
+use orbit_types::task::TaskType;
 use serde_json::json;
 
 use super::super::git_commit;
@@ -620,7 +621,7 @@ fn git_commit_batch_allows_empty_stage_for_no_diff_expected_task() {
 
     let mut task = task_with_file("T1", "QA validation", "src/missing.txt", "sonnet");
     task.tags
-        .push(orbit_common::types::NO_DIFF_EXPECTED_TAG.to_string());
+        .push(orbit_types::task::NO_DIFF_EXPECTED_TAG.to_string());
     let host = CommitTestHost::new(vec![task], workspace.to_path_buf());
     let input = json!({
         "scope": "all",

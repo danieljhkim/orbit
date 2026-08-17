@@ -5,10 +5,12 @@
 mod test_support;
 
 mod audit;
+mod auto_tasks;
 mod denials;
 mod diagnostics;
 mod frictions;
 mod handlers;
+mod incidents;
 mod log;
 mod metrics;
 mod reliability;

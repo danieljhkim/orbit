@@ -17,14 +17,18 @@
 //! [`AuditEventStatus::Denied`]; the two rows answer different questions
 //! ("what was refused" versus "what call failed").
 
-use orbit_common::authorization::{
+use orbit_common::OrbitError;
+use orbit_common::governance::authorization::{
     CallerCapabilities, CallerEnvelope, GovernedOperation, authorize, governed_command,
     governed_tool,
 };
-use orbit_common::types::{AuditEventStatus, OrbitError, ToolSessionContext, audit_execution_id};
-use orbit_store::AuditEventInsertParams;
+use orbit_common::observability::audit_id::audit_execution_id;
+use orbit_store::contracts::AuditEventInsertParams;
+use orbit_types::telemetry::AuditEventStatus;
+use orbit_types::tool::ToolSessionContext;
 
 use crate::OrbitRuntime;
+use crate::runtime::tool_exec::CapabilityEnforcement;
 
 impl OrbitRuntime {
     /// Authorize a governed tool call, or pass an ungoverned one straight
@@ -38,11 +42,16 @@ impl OrbitRuntime {
         &self,
         tool_name: &str,
         session_context: &ToolSessionContext,
+        capability_enforcement: CapabilityEnforcement,
     ) -> Result<(), OrbitError> {
         let Some(operation) = governed_tool(tool_name) else {
             return Ok(());
         };
-        self.decide(operation, session_context)
+        let envelope = match capability_enforcement {
+            CapabilityEnforcement::Enforce => CallerEnvelope::from_process_env(session_context),
+            CapabilityEnforcement::McpSessionOnly => CallerEnvelope::mcp_session(session_context),
+        };
+        self.decide_with_envelope(operation, envelope)
     }
 
     /// Authorize a governed CLI command, or pass an ungoverned one through.
@@ -67,8 +76,15 @@ impl OrbitRuntime {
         operation: &'static GovernedOperation,
         session_context: &ToolSessionContext,
     ) -> Result<(), OrbitError> {
-        let caller =
-            CallerCapabilities::resolve(&CallerEnvelope::from_process_env(session_context));
+        self.decide_with_envelope(operation, CallerEnvelope::from_process_env(session_context))
+    }
+
+    fn decide_with_envelope(
+        &self,
+        operation: &'static GovernedOperation,
+        envelope: CallerEnvelope,
+    ) -> Result<(), OrbitError> {
+        let caller = CallerCapabilities::resolve(&envelope);
 
         match authorize(operation, &caller) {
             Ok(()) => {

@@ -1,6 +1,6 @@
 use clap::Args;
 use orbit_core::OrbitRuntime;
-use orbit_core::command::init::LinkResult;
+use orbit_core::bootstrap::init::LinkResult;
 use serde_json::{Value, json};
 
 use crate::command::{CommandOut, CommandOutput, Execute, Payload};
@@ -13,7 +13,7 @@ pub struct SkillLinkArgs {
 
 impl Execute for SkillLinkArgs {
     fn execute(self, runtime: &OrbitRuntime) -> CommandOut {
-        let result = orbit_core::command::init::link_skills(&runtime.global_root())?;
+        let result = orbit_core::bootstrap::init::link_skills(&runtime.global_root())?;
         if self.json {
             Ok(Payload::document(link_result_json(&result)).into())
         } else {

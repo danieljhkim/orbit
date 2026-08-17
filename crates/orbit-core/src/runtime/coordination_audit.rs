@@ -4,7 +4,9 @@
 //! audit shape. The types live here so that generic coordination infrastructure
 //! is not owned by the task-lock module.
 
-use orbit_common::types::{AuditEventStatus, OrbitError, audit_execution_id};
+use orbit_common::OrbitError;
+use orbit_common::observability::audit_id::audit_execution_id;
+use orbit_types::telemetry::AuditEventStatus;
 use serde_json::Value;
 
 use crate::OrbitRuntime;

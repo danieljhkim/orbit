@@ -16,13 +16,13 @@
 //!   which is also how `skip_if_open` finds prior instances.
 
 use chrono::{DateTime, Utc};
-use orbit_common::types::{
-    AutoTaskDefinition, DedupePolicy, OrbitError, Task, TaskStatus, auto_task_tag,
-};
+use orbit_common::OrbitError;
+use orbit_types::task::{Task, TaskStatus};
+use orbit_types::workflow::{AutoTaskDefinition, DedupePolicy, auto_task_tag};
 use serde_json::{Value, json};
 
 use crate::OrbitRuntime;
-use crate::command::task::TaskAddParams;
+use crate::application::task::TaskAddParams;
 
 use super::loader::{AutoTaskLoadError, collect_auto_tasks};
 use super::schedule::{AutoTaskDueDecision, decide_due};
@@ -219,6 +219,9 @@ pub(super) fn mint_task(
         acceptance_criteria: template.acceptance_criteria.clone(),
         tags,
         priority: template.priority,
+        // Automated mint has no operator to assess; persist the explicit
+        // non-answer so aggregates can separate it from low/medium/hard.
+        complexity: orbit_types::task::TaskComplexity::Unassessed,
         task_type: Some(template.task_type),
         status: Some(template.status),
         crew: template.crew.clone(),

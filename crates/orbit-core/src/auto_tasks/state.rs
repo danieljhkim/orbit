@@ -14,7 +14,7 @@ use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 
 use fs2::FileExt;
-use orbit_common::types::OrbitError;
+use orbit_common::OrbitError;
 use serde::{Deserialize, Serialize};
 
 /// On-disk shape of `<orbit_dir>/state/auto-tasks.json`.

@@ -34,7 +34,7 @@ The constraints are the point — they're what keep agent-assisted code shippabl
 
 - **Conflict-aware parallel execution.** For `orbit run ship`, each agent run lands in its own git worktree per task, and the gate pipeline reserves task `context_files` as locks before fanning out, rejecting overlapping reservations up front instead of producing merge conflicts later (see [merge throughput chart](docs/assets/merge-throughput.png)). → [docs/design/activity-job/](docs/design/activity-job/)
 
-- **Sandboxed-by-default execution.** Dispatched agent CLIs run under an OS-level sandbox out of the box — FS access scoped to the worktree, network egress gated by per-activity policy. macOS uses `sandbox-exec`; Linux uses `linux-bwrap` through `/usr/bin/bwrap` after a capability probe. Windows and other unsupported platforms have no shipped OS-level backend, while in-process FS guards still cover HTTP tools. → [docs/design/policy-sandbox](docs/design/policy-sandbox/)
+- **Sandboxed-by-default execution.** Dispatched agent CLIs use a platform-specific OS boundary where supported. macOS uses `sandbox-exec`; Linux uses trusted `/usr/bin/bwrap` after a capability probe to enforce writes from the resolved policy. The Linux boundary leaves host filesystem reads and host network access available, so it does not provide worktree-only reads or policy-gated network egress. Windows and other unsupported platforms have no shipped OS-level backend, while in-process FS guards still cover HTTP tools. → [docs/design/policy-sandbox](docs/design/policy-sandbox/)
 
 ---
 
@@ -117,6 +117,7 @@ TASK_ID=$(orbit task add \
   --title "..." \
   --description "..." \
   --acceptance-criteria "..." \
+  --complexity medium \
   --workspace .)
 
 # or simply ask an agent to create a task:

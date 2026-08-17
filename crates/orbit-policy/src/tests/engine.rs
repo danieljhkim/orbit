@@ -9,10 +9,11 @@
 //! into sibling tests/engine.rs per ORB-00242 / docs/design-patterns/test_layout.md.
 
 use chrono::Utc;
-use orbit_common::types::policy_def::FsProfile;
+use orbit_types::policy::FsProfile;
 use std::collections::HashMap;
 
-use orbit_common::types::{FsOperation, OrbitError, PolicyDef};
+use orbit_common::OrbitError;
+use orbit_types::policy::{FsOperation, PolicyDef};
 
 use super::super::engine::PolicyEngine;
 

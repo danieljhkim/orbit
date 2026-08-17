@@ -1,6 +1,6 @@
-use orbit_common::types::{
-    OrbitError, ToolParam, ToolSchema, required_string, strip_retired_task_add_input_fields,
-};
+use orbit_common::OrbitError;
+use orbit_common::protocol::tool_input::{required_string, strip_retired_task_add_input_fields};
+use orbit_types::tool::{ToolParam, ToolSchema};
 use serde_json::Value;
 
 use crate::{OrbitBuiltinAction, Tool, ToolContext};
@@ -65,9 +65,9 @@ impl Tool for OrbitTaskAddTool {
             },
             ToolParam {
                 name: "complexity".to_string(),
-                description: "Optional task complexity level (low, medium, or hard)".to_string(),
+                description: "Task complexity level (low, medium, or hard)".to_string(),
                 param_type: "string".to_string(),
-                required: false,
+                required: true,
             },
             ToolParam {
                 name: "type".to_string(),
@@ -110,6 +110,7 @@ impl Tool for OrbitTaskAddTool {
         super::super::reject_agent_field(&input, "orbit.task.add")?;
         required_string(&input, &["title"], "title")?;
         required_string(&input, &["description"], "description")?;
+        required_string(&input, &["complexity"], "complexity")?;
         super::super::resolve_workspace_argument(ctx, &mut input, "orbit.task.add")?;
 
         let ignored_fields = strip_retired_task_add_input_fields(&mut input);

@@ -1,12 +1,12 @@
 ---
 type: context
 summary: Orbit Configuration
-last_validated: 2026-08-15
+last_validated: 2026-08-17
 ---
 
 # Orbit Configuration
 
-Reference for Orbit's runtime config — the `config.toml` consumed by `orbit run ship` and the activity-job dispatcher. The defaults shipped with the binary live in [`crates/orbit-core/assets/config/default-config.toml`](../crates/orbit-core/assets/config/default-config.toml).
+Reference for Orbit's runtime config — the `config.toml` consumed by `orbit run ship` and the activity-job dispatcher. The defaults shipped with the binary live in [`crates/orbit-config/assets/default-config.toml`](../crates/orbit-config/assets/default-config.toml).
 
 This doc focuses on the user-facing knobs: `[workflow]` and `[crews.*]`. Other sections are summarized at the end.
 
@@ -34,7 +34,7 @@ Three security-sensitive settings deliberately do not inherit from global whenev
 - `execution.codex.approval_policy`
 - `execution.env.pass`
 
-If the workspace file omits one of these, Orbit uses that setting's built-in default. This keeps repository agent sandboxing, approval, and environment passthrough deterministic instead of depending on a user's global policy. `execution.env.inherit` is not a configurable key: agent subprocesses always start from a cleared environment.
+If the workspace file omits one of these, Orbit uses that setting's built-in default. This keeps repository agent sandboxing, approval, and environment passthrough deterministic instead of depending on a user's global policy. `execution.env.inherit` is not a configurable key: an agent subprocess environment is always composed from an allowlist — see [`[execution.env]` — the agent subprocess environment](#executionenv--the-agent-subprocess-environment).
 
 Run `orbit config show` for the effective merged view. Every setting is annotated as `workspace`, `global`, `built-in`, or `environment`, including the source file path where one applies. `orbit config show --json` exposes the same attribution in its `provenance` object. Use `--scope global` or `--scope workspace` to inspect either physical file alone.
 
@@ -48,12 +48,14 @@ The workspace identity file `.orbit/config.yaml` is a separate artifact (it stor
 [workflow]
 base_branch = "main"        # default merge-base for ship
 default_crew = "sol"        # fallback crew when a task has no `crew` set
-system_crew = "qa"           # recovery and failed-run-triage crew
+system_crew = "system"      # crew for recovery paths with no job step to name one
 ```
 
 - **`base_branch`** — the branch `orbit run ship` rebases against and targets with PRs. Override per-invocation with `--base <branch>`. If your repo uses a two-branch pattern like this repo does (`main` = release, `agent-main` = dev integration), set `base_branch = "agent-main"`.
 - **`default_crew`** — name of the crew under `[crews.<name>]` used for any task whose own `crew` field is unset. Must match a defined crew or config load fails. See [Per-task crew override](#per-task-crew-override) for how individual tasks select a different crew.
-- **`system_crew`** — name of the crew for `step_failure_recovery` and `triage_failed_runs`; defaults to `qa`, which `orbit init` seeds when it can configure an agent. It is resolved at every dispatch through the activities' explicit crew input, so it does not inherit a failed task's crew or the workspace default. A missing or unusable crew leaves the original failed step failed and emits a diagnostic naming `workflow.system_crew` and the configured crew.
+- **`system_crew`** — name of the crew for system activities that are synthesized at runtime and so have no job step to name a crew on, principally `step_failure_recovery`. Defaults to `system`. Shipped pipelines such as `task_pilot_pipeline` and `task_triage_pipeline` do **not** read this key: their steps name `crew: system` directly, so the definition states which crew does the work. Either way the crew is resolved at dispatch through an explicit crew input, so system work never inherits a failed task's crew or the workspace default. A missing or unusable crew leaves the original failed step failed and emits a diagnostic naming `workflow.system_crew` and the configured crew.
+
+  **The `system` crew.** Interactive `orbit init` (or `--force` on a fresh rewrite) asks which detected cheap-tier family should back `[crews.system]`: Codex Luna (`gpt-5.6-luna`), Claude Sonnet, Gemini Flash (`gemini-3.7-flash`), or Grok (`grok-4.6`). It does not offer Sol, Opus, Terra, or a free-form custom provider, and it never prompts for a QA crew. `workflow.system_crew` stays `system`; only the assignment behind that name is chosen. A host with exactly one of those families auto-accepts it; a host with none omits `[crews.system]` rather than inventing a provider. `--non-interactive` never prompts and still auto-seeds `[crews.system]` from the preference order: Codex Luna, then Claude Sonnet, then Grok, then Gemini Flash — a preference list, not a strict price sort: Flash undercuts Sonnet and Grok per token but sits last because observed runs have failed outright on quota. To change what runs system work after init, edit `[crews.system]`. Configs written before this crew existed have no such table, so the name is resolved first onto the crew `system_crew` names when that crew exists. For Orbit's default or legacy lane names (`system` and `qa`), a missing crew falls back to an existing `qa` crew and then to the already-validated workspace default; the latter keeps old Gemini- and Grok-only configs working even though they never seeded `qa`. Unknown custom names are not substituted. A host that points `system_crew` at a defined cheap crew therefore keeps running system work there rather than being silently relocated. An explicit `[crews.system]` always wins. `[crews.qa]` remains a loadable compatibility lane: existing configs that define it keep working, and new inits may still silently auto-seed it (Terra if Codex is present, otherwise Sonnet if Claude is present) so leftover `crew: qa` bindings do not fail. That seed is not operator-chosen.
 
 ---
 
@@ -88,7 +90,7 @@ provider = "grok"
 
 The current Grok Build CLI lists `grok-4.6` as its default from `grok models`, so Orbit uses that live menu id. The older `grok-build` string is not retained as a default or alias.
 
-Fresh `orbit init` configuration advertises only detected provider CLIs. Claude seeds `opus`, `sonnet`, and `fable`; Codex seeds `sol`, `terra`, and `luna`; Gemini seeds `gemini`; and Grok seeds `grok`. When Codex or Claude is available, `qa` uses Terra or Sonnet respectively. If no supported provider CLI is detected, init leaves both the crew registry and `workflow.default_crew` unset instead of writing an unusable provider.
+Fresh `orbit init` configuration advertises only detected provider CLIs. Claude seeds `opus`, `sonnet`, and `fable`; Codex seeds `sol`, `terra`, and `luna`; Gemini seeds `gemini`; and Grok seeds `grok`. Interactive init still asks for the default crew (`[crews.custom]`) and, separately, for the cheap-tier system crew written as `[crews.system]`; it does not ask for QA. `--non-interactive` auto-seeds `[crews.system]` from the preference order above whenever a supported family is detected. When Codex or Claude is available, the legacy `qa` crew is still silently auto-seeded on Terra or Sonnet respectively as a compatibility lane. If no supported provider CLI is detected, init leaves both the crew registry and `workflow.default_crew` unset instead of writing an unusable provider.
 
 You can define any number of crews. Set the workspace-wide fallback with `workflow.default_crew`; assign a specific crew to individual tasks via the [per-task crew override](#per-task-crew-override). Crews are validated at load time: each crew must have non-empty `model` and `provider`; `workflow.default_crew` must name a defined crew.
 
@@ -119,7 +121,7 @@ registry database is involved.
 
 ## Provider identity and resolution
 
-Every `provider` string Orbit reads — in `[crews.<name>]`, in an activity's inline `provider`, and in setup detection — is parsed through **one canonical surface** (`orbit_common::types::activity_job::Provider`, ORB-10091). Centralizing parsing means the crew resolver, the CLI executor, and reconciliation cannot disagree with each other or with Worker/Bridge about what a provider name means.
+Every `provider` string Orbit reads — in `[crews.<name>]`, in an activity's inline `provider`, and in setup detection — is parsed through **one canonical surface** (`orbit_types::workflow::Provider`, ORB-10091). Centralizing parsing means the crew resolver, the CLI executor, and reconciliation cannot disagree with each other or with Worker/Bridge about what a provider name means.
 
 ### Canonical providers
 
@@ -190,7 +192,7 @@ An **unrecognized `[crews.<name>].provider` value** is the one non-fatal case: i
 4. `CONSTELLATION_DEFAULT_PROVIDER` if set (environment tier), otherwise
 5. the canonical `claude` system-default crew.
 
-This means you can mix-and-match in a single ship run: route a tricky refactor to `claude` while routing routine cleanups to `codex` — both go through the same `orbit run ship` invocation, each picking its own crew at dispatch time.
+This means you can mix-and-match in a single ship run: route a tricky refactor to `claude` while routing routine cleanups to `codex` — both go through the same `orbit run ship` invocation, each picking its own crew at dispatch time. `orbit run ship` fans singleton child runs, so each task's `crew` is recorded on that child (`orbit run show` → `resolved_crew`) and used by `implement_one`. A single child pipeline whose `task_ids` name more than one distinct crew (or mix set and unset crews) fails closed rather than inheriting `[workflow].default_crew`.
 
 ### Setting `task.crew`
 
@@ -215,11 +217,50 @@ The dropdown label `default: codex` in the dashboard means *the task has no `cre
 
 ---
 
+## `[execution.env]` — the agent subprocess environment
+
+Every agent subprocess — bare execution, the Linux Bubblewrap sandbox, and the
+macOS `sandbox-exec` sandbox alike — starts from a **cleared** environment and
+receives exactly four groups of variables, and nothing else:
+
+| Group | Contents |
+|---|---|
+| Baseline | `HOME`, `LANG`, `LC_ALL`, `LOGNAME`, `PATH`, `SHELL`, `TERM`, `TMPDIR`, `TZ`, `USER` — the minimum runtime context a provider CLI needs to start. `USER`/`LOGNAME` are resolved from the OS when the dispatching process has no login environment. |
+| `pass` | The names you list in `[execution.env].pass`. Default: `HOME`, `PATH`, `CODEX_HOME`, `TMPDIR`, `USER` (plus `__CF_USER_TEXT_ENCODING` on macOS). |
+| Provider extras | The variables the selected provider runtime declares it requires. |
+| `ORBIT_*` | Orbit's own execution envelope — run, task, and session identity, `ORBIT_ROOT`, and `ORBIT_BIN`. The dispatching run's values win over any inherited from an outer process. |
+
+A variable in none of those groups is **absent** from the child, whatever it is
+named. This is an allowlist, not a filter: Orbit does *not* forward "everything
+that does not look like a secret". A benignly named credential —
+`DATABASE_URL`, an internal service endpoint, a per-team API base URL — never
+reaches an agent subprocess unless you name it in `pass`. Agent subprocesses
+keep host network access, so this is the boundary that stops an accidental
+disclosure from becoming exfiltration.
+
+```toml
+[execution.env]
+pass = ["HOME", "PATH", "CODEX_HOME", "TMPDIR", "USER", "GITHUB_TOKEN"]
+```
+
+Adding a name to `pass` forwards it *when the dispatching process holds it*; a
+listed name that is unset is simply absent rather than empty. `pass` replaces
+rather than extends the built-in default, so include the baseline names you
+still want, and keep credentials opt-in one at a time.
+
+`execution.env.inherit` is not a configurable key. It was removed in ORB-00365
+because a workspace `config.toml` could set `inherit = true` and — since
+workspace config *replaces* global for security keys — silently flip every
+agent subprocess to full inheritance. Inheritance is fixed off; a stale
+`inherit` key in a config file is accepted and ignored.
+
+---
+
 ## Other sections (brief)
 
 | Section | Purpose |
 |---|---|
-| `[execution.env]` | Env vars passed to agent subprocesses. Only the explicit `pass` list crosses the boundary; the process environment is never inherited wholesale. |
+| `[execution.env]` | Env vars passed to agent subprocesses. The child environment is *composed from an allowlist*, never filtered out of Orbit's own — see [`[execution.env]` — the agent subprocess environment](#executionenv--the-agent-subprocess-environment). |
 | `[execution.codex]` | Codex CLI sandbox mode. Valid: `read-only`, `workspace-write` (default), `danger-full-access`. Optional `approval_policy = "on-request"` enables escalation prompts. |
 | `[tasks]` | `id_start = N` sets a floor for the local task-id allocator: on runtime build the counter is raised to at least `N` (never lowered), so machines can hold disjoint id ranges (e.g. one `0–9999`, another `10000+`) and avoid cross-machine collisions. Capped by `ORB_TASK_ID_MAX` (99999) — setting it near the ceiling shrinks the usable range. Prefer the one-shot `orbit workspace init --task-id-start N` for the initial seed; the config key keeps the floor sticky across machines that share a config. See [task-migration overview](design/task-migration/1_overview.md). |
 | `[scoring]` | `enabled = true` records per-agent scoreboard counters under `.orbit/state/scoreboard/`. |
@@ -240,4 +281,4 @@ Config is parsed at startup; invalid entries fail loud rather than silently fall
 
 The runtime parser intentionally accepts sections owned by other readers of the shared file, such as `[docs]`. Consequently, retired keys with no runtime reader can remain syntactically accepted but have no effect. Existing configs containing `[duel]` and `[duel.models]` still load during the compatibility window and emit a warning naming both retired tables; remove them. The keys `execution.env.inherit`, `task.approval.delegate_approval`, and `task.approval.required_for_agent` are also inert and should be removed; environment inheritance is fixed off, while agent approval is enforced by the capability/policy surfaces rather than these old flags.
 
-When in doubt, start with a minimal workspace file containing only genuine overrides. The annotated default ([`crates/orbit-core/assets/config/default-config.toml`](../crates/orbit-core/assets/config/default-config.toml)) is a reference for available settings, not a template that must be copied wholesale.
+When in doubt, start with a minimal workspace file containing only genuine overrides. The annotated default ([`crates/orbit-config/assets/default-config.toml`](../crates/orbit-config/assets/default-config.toml)) is a reference for available settings, not a template that must be copied wholesale.

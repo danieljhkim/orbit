@@ -1,6 +1,6 @@
 use chrono::{Duration, Utc};
-use orbit_common::types::activity_job::{V2_DENIAL_EVENT_TYPES, V2AuditEventKind};
 use orbit_core::{AuditEventStatus, OrbitRuntime, V2AuditEventInsertParams};
+use orbit_types::workflow::activity_job::{V2_DENIAL_EVENT_TYPES, V2AuditEventKind};
 use serde_json::json;
 
 use super::super::denials::{

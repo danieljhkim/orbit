@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use orbit_common::types::OrbitError;
+use orbit_common::OrbitError;
 use serde_json::Value;
 
 pub(super) fn required_input_string<'a>(

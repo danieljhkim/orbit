@@ -3,13 +3,14 @@
 //! ADR-0209 bearing 1 pilot [ORB-10358]. Every friction verb used to carry a
 //! hand-written `Tool` impl restating its name, description, and parameters —
 //! the same facts the CLI and dashboard restated again. All of that now lives
-//! once in `orbit_common::friction::operations`; this module is the adapter
+//! once in `orbit_common::governance::friction::operations`; this module is the adapter
 //! that turns each spec into a registered tool.
 //!
 //! Adding a friction verb requires no edit here.
 
-use orbit_common::friction::{FRICTION_OPERATIONS, FrictionOperation};
-use orbit_common::types::{OrbitError, ToolSchema};
+use orbit_common::OrbitError;
+use orbit_common::governance::friction::{FRICTION_OPERATIONS, FrictionOperation};
+use orbit_types::tool::ToolSchema;
 use serde_json::Value;
 
 use super::operation::{operation_tool_schema, register_operation};

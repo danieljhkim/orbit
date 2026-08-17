@@ -2084,11 +2084,12 @@ checksum = "04744f49eae99ab78e0d5c0b603ab218f515ea8cfe5a456d7629ad883a3b6e7d"
 
 [[package]]
 name = "orbit-agent"
-version = "0.12.1"
+version = "0.13.0"
 dependencies = [
  "chrono",
  "orbit-common",
  "orbit-tools",
+ "orbit-types",
  "regex",
  "reqwest",
  "serde",
@@ -2101,7 +2102,7 @@ dependencies = [
 
 [[package]]
 name = "orbit-cli"
-version = "0.12.1"
+version = "0.13.0"
 dependencies = [
  "assert_cmd",
  "chrono",
@@ -2112,9 +2113,11 @@ dependencies = [
  "libc",
  "orbit-cmd",
  "orbit-common",
+ "orbit-config",
  "orbit-core",
  "orbit-mcp",
  "orbit-registry",
+ "orbit-types",
  "orbit-web",
  "predicates",
  "regex",
@@ -2132,16 +2135,18 @@ dependencies = [
 
 [[package]]
 name = "orbit-cmd"
-version = "0.12.1"
+version = "0.13.0"
 dependencies = [
  "chrono",
  "fs2",
  "libc",
  "orbit-common",
+ "orbit-config",
  "orbit-core",
  "orbit-engine",
  "orbit-registry",
  "orbit-store",
+ "orbit-types",
  "serde",
  "serde_json",
  "sha2 0.10.9",
@@ -2152,12 +2157,12 @@ dependencies = [
 
 [[package]]
 name = "orbit-common"
-version = "0.12.1"
+version = "0.13.0"
 dependencies = [
  "chrono",
- "clap",
  "fs2",
  "libc",
+ "orbit-types",
  "proptest",
  "regex",
  "rusqlite",
@@ -2176,20 +2181,36 @@ dependencies = [
 ]
 
 [[package]]
+name = "orbit-config"
+version = "0.13.0"
+dependencies = [
+ "orbit-common",
+ "orbit-types",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "toml",
+ "toml_edit",
+ "tracing",
+]
+
+[[package]]
 name = "orbit-core"
-version = "0.12.1"
+version = "0.13.0"
 dependencies = [
  "chrono",
  "croner",
  "fs2",
  "libc",
  "orbit-common",
+ "orbit-config",
  "orbit-engine",
  "orbit-exec",
  "orbit-policy",
  "orbit-search",
  "orbit-store",
  "orbit-tools",
+ "orbit-types",
  "rusqlite",
  "serde",
  "serde_json",
@@ -2203,7 +2224,7 @@ dependencies = [
 
 [[package]]
 name = "orbit-engine"
-version = "0.12.1"
+version = "0.13.0"
 dependencies = [
  "chrono",
  "jsonschema",
@@ -2213,9 +2234,11 @@ dependencies = [
  "orbit-exec",
  "orbit-store",
  "orbit-tools",
+ "orbit-types",
  "regex",
  "serde",
  "serde_json",
+ "serde_yaml",
  "sha2 0.10.9",
  "tempfile",
  "thiserror",
@@ -2226,10 +2249,11 @@ dependencies = [
 
 [[package]]
 name = "orbit-exec"
-version = "0.12.1"
+version = "0.13.0"
 dependencies = [
  "libc",
  "orbit-common",
+ "orbit-types",
  "regex",
  "tempfile",
  "wait-timeout",
@@ -2237,12 +2261,13 @@ dependencies = [
 
 [[package]]
 name = "orbit-mcp"
-version = "0.12.1"
+version = "0.13.0"
 dependencies = [
  "chrono",
  "orbit-common",
  "orbit-registry",
  "orbit-tools",
+ "orbit-types",
  "rmcp",
  "serde_json",
  "tempfile",
@@ -2254,21 +2279,23 @@ dependencies = [
 
 [[package]]
 name = "orbit-policy"
-version = "0.12.1"
+version = "0.13.0"
 dependencies = [
  "chrono",
  "orbit-common",
+ "orbit-types",
  "serde",
  "tempfile",
 ]
 
 [[package]]
 name = "orbit-registry"
-version = "0.12.1"
+version = "0.13.0"
 dependencies = [
  "chrono",
  "hostname",
  "orbit-common",
+ "orbit-types",
  "serde",
  "serde_json",
  "tempfile",
@@ -2277,7 +2304,7 @@ dependencies = [
 
 [[package]]
 name = "orbit-search"
-version = "0.12.1"
+version = "0.13.0"
 dependencies = [
  "blake3",
  "chrono",
@@ -2285,6 +2312,7 @@ dependencies = [
  "fastembed",
  "libc",
  "orbit-common",
+ "orbit-types",
  "reqwest",
  "rsa",
  "rusqlite",
@@ -2297,13 +2325,14 @@ dependencies = [
 
 [[package]]
 name = "orbit-store"
-version = "0.12.1"
+version = "0.13.0"
 dependencies = [
  "blake3",
  "chrono",
  "fs2",
  "jsonschema",
  "orbit-common",
+ "orbit-types",
  "regex",
  "rusqlite",
  "serde",
@@ -2319,12 +2348,13 @@ dependencies = [
 
 [[package]]
 name = "orbit-tools"
-version = "0.12.1"
+version = "0.13.0"
 dependencies = [
  "chrono",
  "orbit-common",
  "orbit-exec",
  "orbit-policy",
+ "orbit-types",
  "regex",
  "rusqlite",
  "serde",
@@ -2337,8 +2367,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "orbit-types"
+version = "0.13.0"
+dependencies = [
+ "chrono",
+ "clap",
+ "proptest",
+ "regex",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "sha2 0.10.9",
+ "tempfile",
+ "thiserror",
+ "url",
+]
+
+[[package]]
 name = "orbit-web"
-version = "0.12.1"
+version = "0.13.0"
 dependencies = [
  "axum",
  "chrono",
@@ -2349,6 +2396,7 @@ dependencies = [
  "orbit-common",
  "orbit-core",
  "orbit-registry",
+ "orbit-types",
  "serde",
  "serde_json",
  "serde_yaml",

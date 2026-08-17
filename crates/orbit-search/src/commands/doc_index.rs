@@ -1,4 +1,4 @@
-use orbit_common::types::OrbitError;
+use orbit_common::OrbitError;
 use serde::{Deserialize, Serialize};
 
 use crate::commands::parse_model;

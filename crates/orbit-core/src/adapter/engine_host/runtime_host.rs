@@ -1,0 +1,664 @@
+use std::collections::HashMap;
+use std::path::Path;
+use std::sync::Arc;
+
+use chrono::{DateTime, Utc};
+use orbit_common::{NotFoundKind, OrbitError};
+use orbit_engine::{
+    CrewConfig, DispatchError, ResolvedCliExecutor, ResolvedSandbox, RuntimeHost,
+    TaskActivityUpdate, TaskAutomationUpdate, V2AuditWriter,
+};
+use orbit_store::contracts::{
+    InvocationInsertParams, InvocationQuery, InvocationRecord, JobRunStepParams,
+    TaskReservationReleaseReason,
+};
+use orbit_store::token_scoreboard;
+use orbit_tools::{FsAuditLogger, ReservationOwnerContext, ToolContext};
+use orbit_types::identity::AgentModelPair;
+use orbit_types::policy::{Role, UNRESTRICTED_FS_PROFILE};
+use orbit_types::record::OrbitEvent;
+use orbit_types::task::{
+    ExternalRef, Task, TaskComment, TaskHistoryEntry, TaskPriority, TaskStatus,
+    push_external_ref_if_missing,
+};
+use orbit_types::telemetry::InvocationTrace;
+use orbit_types::workflow::{ActivityV2, JobRun, JobRunState};
+use serde_json::Value;
+
+use crate::OrbitRuntime;
+use crate::adapter::engine_host::v2_host::{cli_executor, dispatch, sandbox, task_context};
+use crate::adapter::tool_host::build_orbit_tool_host;
+use crate::application::task::TaskRecordUpdateParams as StoreTaskUpdateParams;
+use crate::application::task::{
+    SYSTEM_ACTOR_LABEL, TaskAttributionInput, TaskUpdateParams, assemble_task_attribution,
+};
+use crate::runtime::engine::paths::{codex_workspace_write_writable_dirs, current_repo_root};
+
+impl RuntimeHost for OrbitRuntime {
+    fn insert_job_run(
+        &self,
+        job_id: &str,
+        attempt: u32,
+        scheduled_at: DateTime<Utc>,
+        input: Option<serde_json::Value>,
+        retry_source_run_id: Option<String>,
+    ) -> Result<JobRun, OrbitError> {
+        self.stores().jobs().insert_job_run(
+            job_id,
+            attempt,
+            scheduled_at,
+            input,
+            retry_source_run_id,
+        )
+    }
+
+    fn mark_job_run_running(
+        &self,
+        run_id: &str,
+        started_at: DateTime<Utc>,
+        pid: u32,
+    ) -> Result<bool, OrbitError> {
+        self.stores()
+            .jobs()
+            .mark_job_run_running(run_id, started_at, pid)
+    }
+
+    fn complete_job_run_step(
+        &self,
+        run_id: &str,
+        params: &JobRunStepParams,
+    ) -> Result<bool, OrbitError> {
+        self.stores().jobs().complete_job_run_step(run_id, params)
+    }
+
+    fn finalize_job_run(
+        &self,
+        run_id: &str,
+        state: JobRunState,
+        finished_at: DateTime<Utc>,
+        duration_ms: Option<u64>,
+    ) -> Result<bool, OrbitError> {
+        self.finalize_job_run_with_reservation_cleanup(
+            run_id,
+            state,
+            finished_at,
+            duration_ms,
+            TaskReservationReleaseReason::RunTerminal,
+        )
+    }
+
+    fn get_job_run(&self, run_id: &str) -> Result<Option<JobRun>, OrbitError> {
+        match self.show_job_run(run_id) {
+            Ok(run) => Ok(Some(run)),
+            Err(OrbitError::NotFound {
+                kind: NotFoundKind::JobRun,
+                ..
+            }) => Ok(None),
+            Err(error) => Err(error),
+        }
+    }
+
+    fn read_run_state(
+        &self,
+        run_id: &str,
+    ) -> Result<Option<orbit_types::workflow::PipelineState>, OrbitError> {
+        self.stores().jobs().read_run_state(run_id)
+    }
+
+    fn write_run_state(
+        &self,
+        run_id: &str,
+        state: &orbit_types::workflow::PipelineState,
+    ) -> Result<(), OrbitError> {
+        self.stores().jobs().write_run_state(run_id, state)
+    }
+
+    fn get_task(&self, task_id: &str) -> Result<Task, OrbitError> {
+        OrbitRuntime::get_task(self, task_id)
+    }
+
+    fn get_task_artifacts(
+        &self,
+        task_id: &str,
+    ) -> Result<Vec<orbit_types::task::TaskArtifact>, OrbitError> {
+        OrbitRuntime::get_task_artifacts(self, task_id)
+    }
+
+    fn get_task_comments(&self, task_id: &str) -> Result<Vec<TaskComment>, OrbitError> {
+        OrbitRuntime::get_task_comments(self, task_id)
+    }
+
+    fn get_task_history(&self, task_id: &str) -> Result<Vec<TaskHistoryEntry>, OrbitError> {
+        OrbitRuntime::get_task_history(self, task_id)
+    }
+
+    fn list_tasks_filtered(
+        &self,
+        status: Option<TaskStatus>,
+        priority: Option<TaskPriority>,
+        parent_id: Option<&str>,
+        job_run_id: Option<&str>,
+        external_ref: Option<&ExternalRef>,
+        has_external_ref_system: Option<&str>,
+    ) -> Result<Vec<Task>, OrbitError> {
+        OrbitRuntime::list_tasks_filtered(
+            self,
+            status,
+            priority,
+            parent_id,
+            job_run_id,
+            external_ref,
+            has_external_ref_system,
+        )
+    }
+
+    fn start_task(
+        &self,
+        task_id: &str,
+        note: Option<String>,
+        comment: Option<String>,
+    ) -> Result<Task, OrbitError> {
+        OrbitRuntime::start_task_as_system(self, task_id, note, comment)
+    }
+
+    fn admit_task_for_workflow(&self, task_id: &str, workflow: &str) -> Result<Task, OrbitError> {
+        OrbitRuntime::admit_task_for_workflow_as_system(self, task_id, workflow)
+    }
+
+    fn update_task_from_activity(
+        &self,
+        task_id: &str,
+        update: TaskActivityUpdate,
+    ) -> Result<Task, OrbitError> {
+        OrbitRuntime::update_task_from_activity(self, task_id, update)
+    }
+
+    fn apply_task_automation_update(
+        &self,
+        task_id: &str,
+        update: TaskAutomationUpdate,
+    ) -> Result<(), OrbitError> {
+        let existing_task = self.get_task(task_id)?;
+        if update.status == Some(TaskStatus::InProgress)
+            && crate::application::task::in_progress_transition_requires_plan(existing_task.status)
+        {
+            crate::application::task::ensure_task_has_execution_plan(
+                task_id,
+                existing_task.plan.as_str(),
+            )?;
+        }
+        let (agent, model) = self
+            .try_canonical_agent_model_identity(update.agent.as_deref(), update.model.as_deref())?;
+        let runtime_model_identity = <Self as RuntimeHost>::actor_model_identity(self);
+        let attribution = assemble_task_attribution(
+            &existing_task,
+            TaskAttributionInput {
+                default_actor_label: SYSTEM_ACTOR_LABEL,
+                actor_override: Some(SYSTEM_ACTOR_LABEL),
+                agent: agent.as_deref(),
+                model: model.as_deref(),
+                runtime_model_identity: runtime_model_identity.as_deref(),
+                plan_changed: update.plan.is_some(),
+                target_status: update.status,
+                explicit_planned_by: None,
+                explicit_implemented_by: None,
+            },
+        );
+        let task = self.with_mutation(|| {
+            let external_refs = if update.external_refs.is_empty() {
+                None
+            } else {
+                let mut refs = existing_task.external_refs.clone();
+                for external_ref in update.external_refs.clone() {
+                    push_external_ref_if_missing(&mut refs, external_ref);
+                }
+                Some(refs)
+            };
+            let task = self.stores().task_records().update(
+                task_id,
+                StoreTaskUpdateParams {
+                    actor: attribution.actor.clone(),
+                    planned_by: attribution.planned_by.clone(),
+                    implemented_by: attribution.implemented_by.clone(),
+                    external_refs,
+                    status_event: update.status_event.clone(),
+                    status_note: update.status_note.clone(),
+                    append_comments: update.append_comments.clone(),
+                    ..StoreTaskUpdateParams::from(TaskUpdateParams {
+                        execution_summary: update.execution_summary.clone(),
+                        plan: update.plan.clone(),
+                        context_files: update.context_files.clone(),
+                        status: update.status,
+                        job_run_id: update.job_run_id.clone().map(Some),
+                        ..Default::default()
+                    })
+                },
+            )?;
+            Ok((
+                task.clone(),
+                OrbitEvent::TaskUpdated {
+                    id: task_id.to_string(),
+                },
+            ))
+        })?;
+        if task.status == TaskStatus::Done {
+            self.record_resolves_side_effects(&task)?;
+        }
+        Ok(())
+    }
+
+    fn agent_provider_config(&self) -> std::collections::HashMap<String, String> {
+        let mut config = std::collections::HashMap::new();
+        let policy = self.codex_execution_policy();
+        config.insert("sandbox".to_string(), policy.sandbox().to_string());
+        if let Some(approval) = policy.approval_policy() {
+            config.insert("approval_policy".to_string(), approval.to_string());
+        }
+        if policy.sandbox() == "workspace-write" {
+            config.insert(
+                "writable_dirs_json".to_string(),
+                serde_json::to_string(&codex_workspace_write_writable_dirs(self.context.paths()))
+                    .unwrap_or_else(|_| "[]".to_string()),
+            );
+        }
+        config
+    }
+
+    fn agent_subprocess_environment(&self, required_env_vars: &[&str]) -> Vec<(String, String)> {
+        self.execution_env_policy()
+            .agent_subprocess_env(required_env_vars)
+    }
+
+    fn orbit_root(&self) -> Option<String> {
+        Some(
+            self.context
+                .paths()
+                .orbit_dir
+                .to_string_lossy()
+                .into_owned(),
+        )
+    }
+
+    fn missing_required_environment_vars(&self, required_env_vars: &[&str]) -> Vec<String> {
+        self.execution_env_policy()
+            .missing_required(required_env_vars)
+    }
+
+    fn record_event(&self, event: OrbitEvent) -> Result<(), OrbitError> {
+        OrbitRuntime::record_event(self, event)
+    }
+
+    fn repo_root(&self) -> Result<String, OrbitError> {
+        current_repo_root(self)
+    }
+
+    fn list_job_runs_for_gc(&self) -> Result<Vec<JobRun>, OrbitError> {
+        self.list_job_runs(crate::application::job::JobRunListParams::default())
+    }
+
+    fn data_root(&self) -> &std::path::Path {
+        self.context.data_root()
+    }
+
+    fn cancel_job_run(&self, run_id: &str) -> Result<(), OrbitError> {
+        OrbitRuntime::cancel_job_run(self, run_id).map(|_| ())
+    }
+
+    fn resolved_agent_model_pair(&self, agent_cli: &str) -> Option<AgentModelPair> {
+        self.configured_agent_model_pair(agent_cli)
+    }
+
+    fn canonical_model_name(&self, agent_cli: &str, model: Option<&str>) -> Option<String> {
+        let _ = agent_cli;
+        model
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(ToOwned::to_owned)
+    }
+
+    fn invocation_records(
+        &self,
+        query: InvocationQuery,
+    ) -> Result<Vec<InvocationRecord>, OrbitError> {
+        OrbitRuntime::invocation_records(self, query)
+    }
+
+    fn activity_implementer_identity(
+        &self,
+        input: &Value,
+    ) -> Result<(Option<String>, Option<String>), OrbitError> {
+        self.implementer_identity_for_activity_input(input)
+    }
+
+    fn resolved_crew_model(&self, run_id: &str) -> Result<Option<String>, OrbitError> {
+        Ok(self
+            .get_job_run_backend(run_id)?
+            .and_then(|run| run.crew_model)
+            .and_then(|model| {
+                let model = model.trim();
+                (!model.is_empty()).then(|| model.to_string())
+            }))
+    }
+
+    fn run_tool_with_context_and_role(
+        &self,
+        name: &str,
+        input: Value,
+        role: Role,
+        tool_context: ToolContext,
+    ) -> Result<Value, OrbitError> {
+        OrbitRuntime::run_tool_with_context_and_role(self, name, input, role, tool_context)
+    }
+
+    fn v2_runtime_host(&self) -> Result<&dyn RuntimeHost, OrbitError> {
+        Ok(self)
+    }
+
+    fn v2_activity(&self, name: &str) -> Result<ActivityV2, OrbitError> {
+        self.v2_activity_catalog()
+            .map_err(|error| {
+                OrbitError::InvalidInput(format!("build v2 activity catalog: {error}"))
+            })?
+            .get(name)
+            .cloned()
+            .ok_or_else(|| OrbitError::InvalidInput(format!("v2 activity '{name}' not found")))
+    }
+
+    fn v2_audit_writer(&self, run_id: &str) -> Result<Arc<V2AuditWriter>, OrbitError> {
+        V2AuditWriter::with_disk_sinks(
+            &self.paths().audit_dir,
+            self.v2_audit_store()?,
+            self.workspace_id()?,
+            run_id,
+            "system",
+            Some(self.paths().repo_root.as_path()),
+        )
+        .map_err(|error| OrbitError::Execution(format!("v2 audit sinks: {error}")))
+    }
+
+    fn maybe_create_failure_task(
+        &self,
+        _job_id: &str,
+        _run_id: &str,
+        _error_code: &str,
+        _error_message: &str,
+        _agent: Option<&str>,
+        _model: Option<&str>,
+    ) -> Result<(), OrbitError> {
+        Ok(())
+    }
+
+    fn scoring_enabled(&self) -> bool {
+        self.context.scoring_enabled()
+    }
+
+    fn actor_model_identity(&self) -> Option<String> {
+        matches!(self.actor().kind, crate::context::ActorKind::Agent)
+            .then(|| self.actor_label().trim())
+            .filter(|label| !label.is_empty())
+            .map(ToOwned::to_owned)
+    }
+
+    fn pr_config(&self) -> orbit_engine::PrConfig {
+        OrbitRuntime::pr_config(self).clone()
+    }
+
+    fn scoreboard_dir(&self) -> &std::path::Path {
+        &self.context.paths().scoreboard_dir
+    }
+
+    fn run_deterministic(
+        &self,
+        action: &str,
+        config: &Value,
+        input: &Value,
+        tool_context: ToolContext,
+    ) -> Result<Value, DispatchError> {
+        dispatch::run_deterministic(self, action, config, input, tool_context)
+    }
+
+    /// [ORB-10385] Report this binary's deterministic-action registry so job
+    /// validation can reject a catalog asset naming an action we cannot
+    /// dispatch, before the run admits a task or builds a worktree.
+    fn has_deterministic_action(&self, action: &str) -> bool {
+        dispatch::is_deterministic_action_registered(action)
+    }
+
+    fn resolve_cli_executor(&self, provider: &str) -> Result<ResolvedCliExecutor, DispatchError> {
+        cli_executor::resolve_cli_executor(self, provider)
+    }
+
+    fn provider_cli_config(&self, _provider: &str) -> HashMap<String, String> {
+        RuntimeHost::agent_provider_config(self)
+    }
+
+    fn resolve_executor_sandbox(
+        &self,
+        provider: &str,
+        #[cfg(target_os = "macos")] fs_profile: Option<&str>,
+        #[cfg(not(target_os = "macos"))] _fs_profile: Option<&str>,
+        #[cfg(target_os = "macos")] subprocess_cwd: Option<&Path>,
+        #[cfg(not(target_os = "macos"))] _subprocess_cwd: Option<&Path>,
+    ) -> Result<Option<ResolvedSandbox>, DispatchError> {
+        sandbox::resolve_executor_sandbox(
+            self,
+            provider,
+            #[cfg(target_os = "macos")]
+            fs_profile,
+            #[cfg(not(target_os = "macos"))]
+            _fs_profile,
+            #[cfg(target_os = "macos")]
+            subprocess_cwd,
+            #[cfg(not(target_os = "macos"))]
+            _subprocess_cwd,
+        )
+    }
+
+    fn task_context_for_agent_input(&self, input: &Value) -> Result<Option<Value>, DispatchError> {
+        task_context::task_context_for_agent_input(self, input)
+    }
+
+    /// [ORB-10002] Persist a per-step checkpoint into the run's
+    /// `PipelineState` so an interrupted run can be resumed without
+    /// re-executing completed steps. A missing run row (direct `execute_job`
+    /// callers that never persisted a run) is a silent no-op — there is
+    /// nothing durable to checkpoint into.
+    fn checkpoint_step(
+        &self,
+        run_id: &str,
+        step_index: u32,
+        step_id: &str,
+        output: &Value,
+        pipeline_snapshot: &Value,
+    ) -> Result<(), DispatchError> {
+        let Some(mut state) = self.read_run_state(run_id).map_err(|error| {
+            DispatchError::JobExecution(format!("read run state for checkpoint: {error}"))
+        })?
+        else {
+            return Ok(());
+        };
+        state.record_step(
+            step_index,
+            orbit_types::workflow::JobRunState::Success,
+            Some(output.clone()),
+            None,
+        );
+        state.sync_pipeline(pipeline_snapshot.clone());
+        self.stores()
+            .jobs()
+            .write_run_state(run_id, &state)
+            .map_err(|error| {
+                DispatchError::JobExecution(format!(
+                    "persist step checkpoint (run {run_id}, step {step_index} `{step_id}`): {error}"
+                ))
+            })
+    }
+
+    fn tool_context_for_activity(
+        &self,
+        run_id: Option<&str>,
+        fs_profile: Option<&str>,
+        fs_audit: Option<Arc<dyn FsAuditLogger>>,
+        proc_allowed_programs: Option<&[String]>,
+    ) -> ToolContext {
+        let workspace_root = self
+            .paths()
+            .repo_root
+            .canonicalize()
+            .unwrap_or_else(|_| self.paths().repo_root.clone());
+
+        let proc_spawn_activity_scoped = proc_allowed_programs.is_some();
+        let proc_allowed_programs = proc_allowed_programs
+            .map(|programs| programs.to_vec())
+            .unwrap_or_default();
+
+        ToolContext {
+            cwd: std::env::current_dir()
+                .ok()
+                .map(|cwd| cwd.to_string_lossy().into_owned()),
+            workspace_root: Some(workspace_root),
+            policy_engine: Some(Arc::new(self.policy_engine().clone())),
+            fs_profile: Some(fs_profile.unwrap_or(UNRESTRICTED_FS_PROFILE).to_string()),
+            fs_audit,
+            proc_allowed_programs,
+            proc_spawn_activity_scoped,
+            reservation_owner: run_id.map(str::trim).filter(|value| !value.is_empty()).map(
+                |owner_run_id| ReservationOwnerContext {
+                    owner_run_id: owner_run_id.to_string(),
+                    owner_metadata_json: Some(
+                        serde_json::json!({
+                            "source": "v2_activity",
+                            "fs_profile": fs_profile.unwrap_or(UNRESTRICTED_FS_PROFILE),
+                        })
+                        .to_string(),
+                    ),
+                },
+            ),
+            orbit_host: Some(build_orbit_tool_host(
+                self,
+                None,
+                run_id
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                    .map(ToOwned::to_owned),
+            )),
+            ..Default::default()
+        }
+    }
+
+    fn persist_invocation_trace(
+        &self,
+        job_run_id: &str,
+        activity_id: &str,
+        provider: &str,
+        model: Option<&str>,
+        input: &Value,
+        trace: &InvocationTrace,
+    ) -> Result<(), DispatchError> {
+        let (agent, model) = self.invocation_agent_model_identity(
+            provider,
+            model,
+            trace.provider_model.as_deref(),
+            job_run_id,
+            activity_id,
+        );
+        let store = orbit_store::compose::invocation_store(&self.context.persistence().audit_db)
+            .map_err(|error| {
+                DispatchError::JobExecution(format!("open invocation store: {error}"))
+            })?;
+        store
+            .insert_invocation_trace_record(&InvocationInsertParams {
+                job_run_id: job_run_id.to_string(),
+                activity_id: activity_id.to_string(),
+                agent: agent.unwrap_or_else(|| provider.to_ascii_lowercase()),
+                model,
+                task_ids: task_context::associated_task_ids(input),
+                trace: trace.clone(),
+            })
+            .map_err(|error| {
+                DispatchError::JobExecution(format!("persist invocation trace: {error}"))
+            })?;
+
+        if let Err(error) =
+            token_scoreboard::write_token_scoreboard(&self.paths().scoreboard_dir, store.as_ref())
+        {
+            tracing::warn!(
+                target: "orbit.core.scoreboard",
+                error = %error,
+                "failed to refresh tokens scoreboard",
+            );
+        }
+
+        let existing = self
+            .get_job_run_backend(job_run_id)
+            .map_err(|error| {
+                DispatchError::JobExecution(format!("read job run for knowledge metrics: {error}"))
+            })?
+            .and_then(|run| run.knowledge_metrics);
+        if let Some(metrics) = crate::metrics::merge_invocation_trace(existing.as_ref(), trace) {
+            self.stores()
+                .jobs()
+                .record_job_run_knowledge_metrics(job_run_id, metrics)
+                .map_err(|error| {
+                    DispatchError::JobExecution(format!(
+                        "record job-run knowledge metrics: {error}"
+                    ))
+                })?;
+        }
+
+        Ok(())
+    }
+
+    fn system_crew_for_dispatch(&self) -> Option<String> {
+        Some(self.context.settings().system_crew().to_string())
+    }
+
+    fn agent_crew_config_for_input(
+        &self,
+        input: &serde_json::Value,
+    ) -> Result<Option<CrewConfig>, DispatchError> {
+        let explicit = input
+            .get("crew")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty());
+        let config_key = input
+            .get("crew_config_key")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty());
+        let crew = match config_key {
+            Some("workflow.system_crew") => self
+                .resolve_crew_for_task(Some(self.context.settings().system_crew()), None)
+                .map_err(|error| {
+                    DispatchError::JobValidation(format!(
+                        "activity crew configured by `workflow.system_crew` cannot be resolved or used: {error}"
+                    ))
+                })?,
+            Some(other) => {
+                return Err(DispatchError::JobValidation(format!(
+                    "activity crew names unsupported configuration key `{other}`"
+                )));
+            }
+            None => match explicit {
+                Some(crew_name) => self
+                    .resolve_crew_for_task(Some(crew_name), None)
+                    .map_err(|error| {
+                        DispatchError::JobValidation(format!(
+                            "explicit activity crew `{crew_name}` cannot be resolved or used: {error}"
+                        ))
+                    })?,
+                None => self.resolve_crew_for_run_input(input).map_err(|error| {
+                    DispatchError::JobValidation(format!(
+                        "run crew cannot be resolved or used for activity dispatch: {error}"
+                    ))
+                })?,
+            },
+        };
+        Ok(Some(
+            crate::runtime::engine::environment_host::typed_crew_config_from_assignment(
+                &crew.assignment,
+            ),
+        ))
+    }
+}

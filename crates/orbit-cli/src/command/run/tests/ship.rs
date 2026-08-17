@@ -1,5 +1,5 @@
 use crate::command::Execute;
-use orbit_core::command::task::TaskAddParams;
+use orbit_core::application::task::TaskAddParams;
 use orbit_core::{OrbitError, OrbitRuntime, TaskStatus};
 use serde_json::json;
 

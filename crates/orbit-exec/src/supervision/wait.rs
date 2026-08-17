@@ -3,7 +3,7 @@ use std::sync::mpsc::{self, Receiver, TryRecvError};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
-use orbit_common::types::OrbitError;
+use orbit_common::OrbitError;
 use wait_timeout::ChildExt;
 
 #[cfg(unix)]

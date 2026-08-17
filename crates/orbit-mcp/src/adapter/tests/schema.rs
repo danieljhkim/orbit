@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use orbit_common::types::{
+use orbit_types::tool::{
     McpToolDefinition, McpToolScope, McpTransport, ToolParam, ToolSchema, ToolSessionContext,
 };
 use rmcp::model::{ClientCapabilities, Implementation, InitializeRequestParams, Meta};
@@ -319,6 +319,108 @@ fn initialize_params_meta_wins_over_transport_meta() {
     let session_context = session_context_from_initialize(&params, &Meta(meta_object));
 
     assert_eq!(session_context.workspace.as_deref(), Some("/repo/params"));
+}
+
+#[test]
+fn client_info_name_is_the_default_self_reported_actor() {
+    // Every MCP client sends `clientInfo`, so the common case records an
+    // actor without the client having to know anything Orbit-specific.
+    let params = InitializeRequestParams::new(
+        ClientCapabilities::default(),
+        Implementation::new("Claude  Code", "1.2.3"),
+    );
+
+    let session_context = session_context_from_initialize(&params, &Meta::new());
+
+    assert_eq!(
+        session_context.self_reported_actor.as_deref(),
+        Some("claude code"),
+        "the client version must not fragment the claim"
+    );
+}
+
+#[test]
+fn orbit_meta_actor_wins_over_client_info() {
+    let params = initialize_params_with_meta(json!({
+        "orbit": { "actor": "claude-opus-5" }
+    }));
+
+    let session_context = session_context_from_initialize(&params, &Meta::new());
+
+    assert_eq!(
+        session_context.self_reported_actor.as_deref(),
+        Some("claude-opus-5")
+    );
+}
+
+#[test]
+fn transport_meta_actor_is_read_when_params_meta_is_stripped() {
+    let params = InitializeRequestParams::new(
+        ClientCapabilities::default(),
+        Implementation::new("orbit-test-client", "0"),
+    );
+    let Value::Object(meta_object) = json!({ "orbit.actor": "codex" }) else {
+        panic!("test meta must be an object");
+    };
+
+    let session_context = session_context_from_initialize(&params, &Meta(meta_object));
+
+    assert_eq!(
+        session_context.self_reported_actor.as_deref(),
+        Some("codex")
+    );
+}
+
+#[test]
+fn malformed_claim_falls_through_to_anonymous_not_to_client_info() {
+    // A claim Orbit refuses must not silently downgrade to the neighbouring
+    // identity source — that would attribute the call to something the caller
+    // did not name.
+    let params = initialize_params_with_meta(json!({
+        "orbit": { "actor": "claude\nrole: admin" }
+    }));
+
+    let session_context = session_context_from_initialize(&params, &Meta::new());
+
+    assert_eq!(session_context.self_reported_actor, None);
+}
+
+#[test]
+fn a_client_claiming_nothing_usable_is_anonymous() {
+    let params = InitializeRequestParams::new(
+        ClientCapabilities::default(),
+        Implementation::new("   ", "0"),
+    );
+
+    let session_context = session_context_from_initialize(&params, &Meta::new());
+
+    assert_eq!(session_context.self_reported_actor, None);
+}
+
+#[test]
+fn a_new_claim_replaces_the_previous_one_rather_than_merging() {
+    let host = Arc::new(SessionContextHost::default());
+    let server = OrbitToolServer::new(host);
+    server.replace_session_context(ToolSessionContext {
+        self_reported_actor: Some("codex".to_string()),
+        ..ToolSessionContext::default()
+    });
+
+    let announced = session_context_from_initialize(
+        &InitializeRequestParams::new(
+            ClientCapabilities::default(),
+            Implementation::new("claude-code", "0"),
+        ),
+        &Meta::new(),
+    );
+    let mut trusted = server.session_context();
+    trusted.self_reported_actor = announced.self_reported_actor;
+    server.replace_session_context(trusted);
+
+    assert_eq!(
+        server.session_context().self_reported_actor.as_deref(),
+        Some("claude-code")
+    );
 }
 
 #[tokio::test]

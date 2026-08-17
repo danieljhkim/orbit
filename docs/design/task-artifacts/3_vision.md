@@ -4,6 +4,7 @@ type: design
 title: "Task Artifacts — Vision"
 owner: codex
 last_updated: 2026-08-15
+last_validated: 2026-08-16
 status: Draft
 feature: task-artifacts
 doc_role: vision
@@ -28,9 +29,9 @@ This document captures open questions for the task-artifacts reset, prior work t
 
 The v2 design picks the narrowest authority that serves the product surface being implemented. For OSS local-first, one machine-local allocator across all local workspaces is enough. For task sync, repository-registry-global is enough. Hosted Team may later introduce org-global or tenant-global allocation. A bare `ORB-00000` is therefore scoped by its authority; cross-authority references need registry or workspace context.
 
-### 1.2 What happens after `ORB-99999`?
+### 1.2 What happens beyond five digits?
 
-The v2 design deliberately keeps the initial format short: five decimal digits and flat task directories. Most local and team registries should never exhaust that range. If a registry reaches `ORB-99999`, the likely expansion path is to grow the decimal width (`ORB-100000`) while keeping the same flat layout, but that should be ratified by a later ADR rather than preloaded into the initial contract.
+The formatter uses five digits as a minimum display width, while task-id parsing accepts a wider decimal suffix and the allocator's numeric ceiling is `u32::MAX`. The open question is whether a hosted authority should impose a narrower policy cap while keeping the flat bundle layout.
 
 ### 1.3 How structured should acceptance criteria become?
 
@@ -48,7 +49,7 @@ The v2 artifact introduces append-only logs, but the envelope remains a snapshot
 
 ### 1.5 How much local execution context belongs in a task?
 
-`workspace_path` and `repo_root` are currently persisted in task YAML. In v2 they are local bindings, not task identity, and belong in the local task registry's workspace-binding table. The checkout points at that binding with `.orbit/config.yaml` and `workspace_id`. A future sync registry may add a portable workspace selector, but the task envelope should not carry machine-local paths.
+`workspace_path` and `repo_root` are local checkout bindings, not task identity, and belong in the local task registry's workspace-checkout table. The checkout points at that binding with `.orbit/config.yaml` and `workspace_id`. A future sync registry may add a portable workspace selector, but the task envelope should not carry machine-local paths.
 
 ### 1.6 Should old task IDs survive the reset?
 
@@ -56,7 +57,7 @@ No. Orbit is pre-release, so v2 should not carry old `T<YYYYMMDD>-<N>` IDs as su
 
 ### 1.7 Are review threads task artifacts or PR artifacts?
 
-Orbit currently stores review threads on tasks and can sync them with GitHub review comments. The v2 design moves them into task-local thread files. A future GitHub-native review mode may instead treat PR comments as the canonical source and task threads as a projection. The answer depends on whether Orbit remains the source of review truth or simply mirrors host review systems.
+Historical task records stored review threads on tasks. The current v2 contract treats legacy `review-threads/` directories as inert sidecars and the review-thread surface as retired. A future GitHub-native review mode may instead treat PR comments as the canonical source and task threads as a projection. The answer depends on whether Orbit remains the source of review truth or simply mirrors host review systems.
 
 ### 1.8 Should archived tasks be compacted?
 
@@ -78,7 +79,7 @@ The v2 design uses symlinks for `.orbit/tasks/<task-id>` so workspace-relative p
 
 ### 2.1 Orbit task store
 
-The existing `orbit-store::file::task_store` implementation is the baseline. It proves that directory-per-task bundles are inspectable, easy to back up, and easy for agents to reason about. Its main weakness is that it overuses `task.yaml` as both metadata envelope and append log.
+The pre-reset `orbit-store::file::task_store` implementation is the baseline. It proves that directory-per-task bundles are inspectable, easy to back up, and easy for agents to reason about. Its main weakness was that it overused `task.yaml` as both metadata envelope and append log.
 
 ### 2.2 Retired decision artifacts
 

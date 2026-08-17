@@ -8,9 +8,10 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use chrono::Utc;
-use orbit_common::types::{FsProfile, OrbitError, PolicyDef};
+use orbit_common::OrbitError;
 use orbit_policy::PolicyEngine;
 use orbit_tools::{ToolContext, ToolRegistry};
+use orbit_types::policy::{FsProfile, PolicyDef};
 use serde_json::{Value, json};
 use tempfile::tempdir;
 

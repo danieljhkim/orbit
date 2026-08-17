@@ -144,6 +144,7 @@ impl McpWorkspace {
             .env_remove("ORBIT_STEP_INDEX")
             .env_remove("ORBIT_AGENT_NAME")
             .env_remove("ORBIT_AGENT_MODEL")
+            .env_remove("ORBIT_OPERATOR")
             .env_remove("ORBIT_MANAGED_RUN_CONTEXT")
             .env_remove("ORBIT_TASK_ACTOR_KIND");
         command
@@ -157,9 +158,20 @@ impl McpWorkspace {
     }
 
     fn serve_with_args(&self, extra_args: &[&str]) -> McpClient {
+        self.serve_with_args_and_env(extra_args, &[])
+    }
+
+    /// Spawn the server with extra argv and extra environment. `env` exists to
+    /// pin what the MCP surface must *ignore*: the server's own process
+    /// environment never contributes capabilities to a session.
+    fn serve_with_args_and_env(&self, extra_args: &[&str], env: &[(&str, &str)]) -> McpClient {
         let mut args = vec!["mcp", "serve"];
         args.extend_from_slice(extra_args);
-        let child = Self::orbit_command(&self.work, &self.home)
+        let mut command = Self::orbit_command(&self.work, &self.home);
+        for (key, value) in env {
+            command.env(key, value);
+        }
+        let child = command
             .args(args)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -432,7 +444,7 @@ fn mcp_serve_tools_list_matches_production_snapshot() {
 }
 
 #[test]
-fn mcp_server_advertises_and_calls_the_workflow_family() {
+fn mcp_server_advertises_governed_tools_but_denies_an_unprivileged_session() {
     let workspace = McpWorkspace::init();
     let mut client = workspace.serve();
     let response = client.request("tools/list", Value::Null);
@@ -448,11 +460,57 @@ fn mcp_server_advertises_and_calls_the_workflow_family() {
         "orbit_workflow_run_show",
         "orbit_workflow_run_list",
         "orbit_workflow_run_resume",
+        "orbit_command_exec",
     ] {
         assert!(names.contains(expected), "missing {expected}: {names:?}");
     }
 
-    let listed = client.call_tool_ok("orbit_workflow_run_list", json!({}));
+    for (name, arguments) in [
+        ("orbit_workflow_ship", json!({ "task_ids": ["ORB-00001"] })),
+        ("orbit_workflow_run_show", json!({ "id": "jrun-missing" })),
+        ("orbit_workflow_run_list", json!({})),
+        ("orbit_workflow_run_resume", json!({ "id": "jrun-missing" })),
+    ] {
+        let denied = client.call_tool_err(name, arguments);
+        assert_eq!(denied["code"], "capability_denied", "{name}: {denied}");
+    }
+
+    let marker = workspace.work.join("command-exec-must-not-run");
+    let denied = client.call_tool_err(
+        "orbit_command_exec",
+        json!({
+            "argv": ["touch", marker.to_str().expect("utf8 marker")],
+            "working_directory": workspace.work,
+        }),
+    );
+    assert_eq!(denied["code"], "capability_denied", "{denied}");
+    assert!(!marker.exists(), "denied command reached domain execution");
+}
+
+/// The operator MCP surface, over the real transport: a server an operator
+/// started deliberately performs governed tools, and one an agent started does
+/// not — however the launching environment was set up.
+#[test]
+fn an_operator_served_mcp_session_reaches_a_governed_tool() {
+    let workspace = McpWorkspace::init();
+
+    // Same governed tool, same process environment that authorizes it on the
+    // CLI, but an ordinary session: still refused, and told the truth about it.
+    let mut agent = workspace.serve_with_args_and_env(&[], &[("ORBIT_OPERATOR", "1")]);
+    let denied = agent.call_tool_err("orbit_workflow_run_list", json!({}));
+    assert_eq!(denied["code"], "capability_denied", "{denied}");
+    let message = denied["message"]
+        .as_str()
+        .expect("denial carries a message");
+    assert!(
+        !message.contains("re-run it with ORBIT_OPERATOR=1"),
+        "the MCP surface ignores the override, so it must not advise it: {message}"
+    );
+    assert!(message.contains("orbit mcp serve --operator"), "{message}");
+    drop(agent);
+
+    let mut operator = workspace.serve_with_args(&["--operator"]);
+    let listed = operator.call_tool_ok("orbit_workflow_run_list", json!({}));
     assert_eq!(listed["items"], json!([]));
 }
 
@@ -588,6 +646,7 @@ fn ssh_marked_mcp_server_audits_caller_and_server_identity_separately() {
             "workspace": "ws_mcp-roundtrip",
             "title": "Remote server round trip",
             "description": "Created through the server-local runtime",
+            "complexity": "low",
             "model": "codex"
         }),
     );
@@ -698,6 +757,7 @@ fn mcp_listen_round_trips_over_a_loopback_socket_and_audits_the_peer_ip() {
         json!({
             "title": "Listener round trip",
             "description": "Created over the MCP TCP listener",
+            "complexity": "low",
             "model": "codex",
         }),
     );
@@ -766,6 +826,7 @@ fn mcp_serve_round_trips_records_against_a_temp_workspace() {
         json!({
             "title": "MCP round-trip task",
             "description": "Created over the MCP stdio transport",
+            "complexity": "medium",
             "type": "chore",
             "tags": ["mcp-roundtrip"],
             "crew": "sol",
@@ -865,8 +926,7 @@ fn mcp_serve_error_paths_return_tool_errors_and_keep_serving() {
         "error should name the missing field: {bad_params}"
     );
 
-    // v1 does not capability-filter governed tools; Core still performs normal
-    // domain validation after dispatch.
+    // Inactive tools remain absent from the advertised MCP registry.
     let unexposed = client.call_tool_err("orbit_task_delete", json!({ "id": "ORB-00000" }));
     assert_eq!(unexposed["code"], "tool_not_found");
 
@@ -906,13 +966,13 @@ fn mcp_calls_are_audited_once_including_unknown_raw_names() {
         "orbit_workflow_ship",
         json!({ "task_ids": ["ORB-00001"], "model": "codex" }),
     );
-    assert_ne!(workflow_failure["code"], "capability_denied");
+    assert_eq!(workflow_failure["code"], "capability_denied");
     drop(client);
 
     for (tool_name, status) in [
         ("orbit.search", "success"),
         ("orbit.task.add", "failure"),
-        ("orbit.workflow.ship", "failure"),
+        ("orbit.workflow.ship", "denied"),
     ] {
         let output = McpWorkspace::orbit_command(&workspace.work, &workspace.home)
             .args(["audit", "list", "--tool", tool_name, "--json"])
@@ -932,7 +992,7 @@ fn mcp_calls_are_audited_once_including_unknown_raw_names() {
         assert_eq!(row["status"], status);
         assert_eq!(row["role"], "unverified");
         assert_eq!(row["transport"], "local");
-        assert_eq!(row["effective_capabilities"], json!([]));
+        assert_eq!(row["effective_capabilities"], json!(["agent"]));
         assert!(row["workspace_id"].as_str().is_some());
         assert!(row["caller_machine_id"].as_str().is_some());
         assert_eq!(row["caller_machine_id"], row["process_machine_id"]);
@@ -957,7 +1017,7 @@ fn mcp_calls_are_audited_once_including_unknown_raw_names() {
     assert_eq!(row["status"], "denied");
     assert_eq!(row["role"], "unverified");
     assert_eq!(row["transport"], "local");
-    assert_eq!(row["effective_capabilities"], json!([]));
+    assert_eq!(row["effective_capabilities"], json!(["agent"]));
     assert!(row["workspace_id"].is_null());
     assert!(row["caller_machine_id"].as_str().is_some());
     assert_eq!(row["caller_machine_id"], row["process_machine_id"]);
@@ -1003,6 +1063,7 @@ fn worktree_backed_activity_routes_task_and_search_by_advertised_workspace_argum
         "title": "Worktree routing regression",
         "description": "Authored via the CLI fallback",
         "workspace": workspace.work.to_str().expect("utf8 checkout path"),
+        "complexity": "low",
         "model": "codex",
     })
     .to_string();
@@ -1156,6 +1217,7 @@ fn mcp_task_show_follows_the_global_id_and_explicit_workspace_stays_a_filter() {
         "title": "Owned by the other workspace",
         "description": "Addressed by ID from a session bound elsewhere",
         "workspace": elsewhere.to_str().expect("utf8 checkout path"),
+        "complexity": "low",
         "model": "codex",
     })
     .to_string();

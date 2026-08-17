@@ -1,14 +1,13 @@
 use std::path::{Path, PathBuf};
 
 use chrono::Utc;
-use orbit_common::types::{
-    NotFoundKind, OrbitError, Workspace, WorkspaceCheckout, WorkspaceRegistry, WorkspaceStatus,
-};
+use orbit_common::{NotFoundKind, OrbitError};
 use orbit_core::OrbitRuntime;
 use orbit_registry::workspace_registry::{registry_path_for, save_registry_to};
-use orbit_store::sqlite::task_registry::{
+use orbit_store::maintenance::task_registry::{
     WorkspaceConfig, workspace_config_path, write_workspace_config,
 };
+use orbit_types::workspace::{Workspace, WorkspaceCheckout, WorkspaceRegistry, WorkspaceStatus};
 use serde_json::json;
 use tempfile::TempDir;
 
@@ -63,6 +62,7 @@ fn owner_fixture() -> OwnerFixture {
             json!({
                 "title": "Beta-only task",
                 "description": "Filed in beta; addressable from anywhere by ID.",
+                "complexity": "low",
                 "workspace": checkout_beta.repo_root
             }),
             Some("codex".to_string()),

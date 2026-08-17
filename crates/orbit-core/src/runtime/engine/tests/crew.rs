@@ -3,13 +3,15 @@
 use std::sync::{Mutex, MutexGuard, OnceLock};
 
 use chrono::Utc;
-use orbit_common::types::activity_job::ProviderSource;
+use orbit_engine::RuntimeHost;
+use orbit_store::maintenance::task_registry::{TaskRegistryStore, task_registry_path};
+use orbit_types::workflow::activity_job::{Provider, ProviderSource};
 use serde_json::json;
 use tempfile::{TempDir, tempdir};
 
 use super::super::crew::select_crew_name;
 use crate::OrbitRuntime;
-use crate::command::task::TaskAddParams;
+use crate::application::task::TaskAddParams;
 
 const CONSTELLATION_DEFAULT_PROVIDER_ENV: &str = "CONSTELLATION_DEFAULT_PROVIDER";
 
@@ -73,20 +75,39 @@ fn crew_discovery_projects_the_open_runtime_configuration() {
             .iter()
             .map(|crew| crew.name.as_str())
             .collect::<Vec<_>>(),
-        ["beta", "gamma", "primary"]
+        ["beta", "gamma", "primary", "system"]
     );
+    let system = discovery
+        .crews
+        .iter()
+        .find(|crew| crew.name == "system")
+        .expect("legacy config gains the portable system alias");
+    assert_eq!(system.provider, "codex");
+    assert_eq!(system.model, "default-model");
 }
 
 fn add_task_with_crew(runtime: &OrbitRuntime, crew: &str) -> String {
+    add_task(runtime, Some(crew))
+}
+
+fn add_task(runtime: &OrbitRuntime, crew: Option<&str>) -> String {
     runtime
         .add_task(TaskAddParams {
-            title: format!("{crew} task"),
+            title: format!("{} task", crew.unwrap_or("default")),
             description: "Task fixture for crew resolution.".to_string(),
-            crew: Some(crew.to_string()),
+            crew: crew.map(ToOwned::to_owned),
             ..Default::default()
         })
         .expect("add task")
         .id
+}
+
+fn try_set_task_prefix(runtime: &OrbitRuntime, prefix: &str) {
+    let registry = TaskRegistryStore::open(&task_registry_path(&runtime.global_root()))
+        .expect("open task registry");
+    // Prefix is immutable after the first allocation. Tests that already
+    // created a task keep the host prefix; the lookup path is prefix-agnostic.
+    let _ = registry.set_task_prefix(prefix);
 }
 
 #[test]
@@ -141,19 +162,148 @@ fn explicit_crew_override_wins_over_singleton_task_ids_task_crew() {
 }
 
 #[test]
-fn multi_task_ids_without_override_falls_back_to_default_crew() {
+fn custom_prefix_task_ids_resolve_task_crew() {
+    let (_root, runtime) = runtime_with_named_crews();
+    try_set_task_prefix(&runtime, "DAN");
+    let task_id = add_task_with_crew(&runtime, "beta");
+
+    let crew = runtime
+        .resolve_crew_for_run_input(&json!({ "task_ids": [task_id] }))
+        .expect("resolve crew");
+
+    assert_eq!(crew.name, "beta");
+    assert_eq!(crew.assignment.model, "beta-model");
+}
+
+#[test]
+fn missing_task_ids_fall_back_to_default_crew() {
+    let (_root, runtime) = runtime_with_named_crews();
+
+    let crew = runtime
+        .resolve_crew_for_run_input(&json!({
+            "task_ids": ["DAN-10002", "T-crew"]
+        }))
+        .expect("missing fixture ids must not fail crew resolution");
+
+    assert_eq!(crew.name, "primary");
+    assert_eq!(crew.assignment.model, "default-model");
+}
+
+#[test]
+fn multi_task_ids_with_the_same_crew_use_that_crew() {
+    let (_root, runtime) = runtime_with_named_crews();
+    let first = add_task_with_crew(&runtime, "beta");
+    let second = add_task_with_crew(&runtime, "beta");
+
+    let crew = runtime
+        .resolve_crew_for_run_input(&json!({
+            "task_ids": [first, second]
+        }))
+        .expect("unanimous task crew");
+
+    assert_eq!(crew.name, "beta");
+    assert_eq!(crew.assignment.model, "beta-model");
+}
+
+#[test]
+fn multi_task_ids_without_crew_fall_back_to_default_crew() {
+    let (_root, runtime) = runtime_with_named_crews();
+    let first = add_task(&runtime, None);
+    let second = add_task(&runtime, None);
+
+    let crew = runtime
+        .resolve_crew_for_run_input(&json!({
+            "task_ids": [first, second]
+        }))
+        .expect("unset task crews use the workspace default");
+
+    assert_eq!(crew.name, "primary");
+    assert_eq!(crew.assignment.model, "default-model");
+}
+
+#[test]
+fn mixed_task_crews_fail_closed_instead_of_inheriting_default() {
     let (_root, runtime) = runtime_with_named_crews();
     let beta_task_id = add_task_with_crew(&runtime, "beta");
     let gamma_task_id = add_task_with_crew(&runtime, "gamma");
 
-    let crew = runtime
+    let error = runtime
         .resolve_crew_for_run_input(&json!({
             "task_ids": [beta_task_id, gamma_task_id]
         }))
-        .expect("resolve crew");
+        .expect_err("mixed crews must fail closed");
 
-    assert_eq!(crew.name, "primary");
-    assert_eq!(crew.assignment.model, "default-model");
+    let message = error.to_string();
+    assert!(
+        message.contains("mixes crews") && message.contains("workflow.default_crew"),
+        "unexpected mixed-crew error: {message}"
+    );
+}
+
+#[test]
+fn mixed_set_and_unset_task_crews_fail_closed() {
+    let (_root, runtime) = runtime_with_named_crews();
+    let assigned = add_task_with_crew(&runtime, "beta");
+    let unset = add_task(&runtime, None);
+
+    let error = runtime
+        .resolve_crew_for_run_input(&json!({
+            "task_ids": [assigned, unset]
+        }))
+        .expect_err("set vs unset is a mixed bundle");
+
+    let message = error.to_string();
+    assert!(
+        message.contains("mixes crews"),
+        "unexpected mixed-crew error: {message}"
+    );
+}
+
+#[test]
+fn implementer_dispatch_uses_task_crew_not_default_crew() {
+    let (_root, runtime) = runtime_with_named_crews();
+    try_set_task_prefix(&runtime, "DAN");
+    let task_id = add_task_with_crew(&runtime, "beta");
+    let run_input = json!({ "task_ids": [task_id] });
+    let run = runtime
+        .stores()
+        .jobs()
+        .insert_job_run(
+            "task_pr_pipeline",
+            1,
+            Utc::now(),
+            Some(run_input.clone()),
+            None,
+        )
+        .expect("insert implement_one parent run");
+
+    let persisted = runtime
+        .record_run_crew_from_input(&run.run_id, &run_input)
+        .expect("persist resolved crew");
+    let stored = runtime.show_job_run(&run.run_id).expect("show child run");
+    assert_eq!(persisted.name, "beta");
+    assert_eq!(stored.resolved_crew.as_deref(), Some("beta"));
+    assert_eq!(stored.crew_model.as_deref(), Some("beta-model"));
+
+    // implement_one has no activity `crew`; dispatch re-resolves from run input.
+    let config = RuntimeHost::agent_crew_config_for_input(&runtime, &run_input)
+        .expect("implementer dispatch")
+        .expect("crew config");
+    assert_eq!(config.model.as_deref(), Some("beta-model"));
+    assert_eq!(config.provider, Some(Provider::Codex));
+    assert_ne!(config.model.as_deref(), Some("default-model"));
+}
+
+#[test]
+fn implementer_dispatch_without_task_crew_uses_default_crew() {
+    let (_root, runtime) = runtime_with_named_crews();
+    let task_id = add_task(&runtime, None);
+    let config =
+        RuntimeHost::agent_crew_config_for_input(&runtime, &json!({ "task_ids": [task_id] }))
+            .expect("implementer dispatch")
+            .expect("crew config");
+    assert_eq!(config.model.as_deref(), Some("default-model"));
+    assert_eq!(config.provider, Some(Provider::Codex));
 }
 
 /// Table-driven proof of the crew-selection precedence (ORB-10091, contract §3)

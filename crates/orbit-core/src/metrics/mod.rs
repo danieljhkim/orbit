@@ -1,7 +1,7 @@
 //! Tool-invocation metrics derived from job-run traces.
 //!
 //! Migrated out of the decommissioned `orbit-knowledge` crate in ORB-00391.
-//! The persisted [`orbit_common::types::KnowledgeRunMetrics`] type and the
+//! The persisted [`orbit_types::workflow::KnowledgeRunMetrics`] type and the
 //! `JobRun::knowledge_metrics` field stay in `orbit-common`; this module owns
 //! the pure computation over invocation traces ([`merge_invocation_trace`])
 //! and the cross-run aggregation rendered by the dashboard ([`aggregate`]).

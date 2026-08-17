@@ -10,6 +10,10 @@ pub(super) fn run_target(
 ) -> Result<StepOutcome, DispatchError> {
     let tctx = ctx.template_ctx();
     let rendered_input = render_input(t.default_input.as_ref(), &ctx.input, &tctx)?;
+    // [ORB-10902] Rebind before dispatch so `system_crew: true` reaches the
+    // activity input, not only the local copy used to resolve crew settings.
+    // Recovery does the same; injection is independent of target spec type.
+    let rendered_input = inject_system_crew_input(ctx.host, &rendered_input)?;
 
     // A rendered activity `crew` selects a non-default assignment; otherwise
     // dispatch inherits the run's resolved crew.
@@ -22,7 +26,7 @@ pub(super) fn run_target(
         return Err(DispatchError::JobValidation(format!(
             "step `{}`: `session:` bindings are no longer supported; {}",
             step.id,
-            orbit_common::types::activity_job::RETIRED_BACKEND_MIGRATION
+            orbit_types::workflow::activity_job::RETIRED_BACKEND_MIGRATION
         )));
     }
 

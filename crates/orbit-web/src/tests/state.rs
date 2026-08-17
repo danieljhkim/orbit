@@ -5,8 +5,8 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use chrono::Utc;
-use orbit_common::types::{Workspace, WorkspaceCheckout, WorkspaceRegistry, WorkspaceStatus};
 use orbit_core::OrbitRuntime;
+use orbit_types::workspace::{Workspace, WorkspaceCheckout, WorkspaceRegistry, WorkspaceStatus};
 
 use crate::state::{DashboardState, WsEntry};
 use crate::{default_workspace_for_cwd, default_workspace_selection};

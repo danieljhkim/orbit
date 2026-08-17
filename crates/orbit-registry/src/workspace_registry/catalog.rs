@@ -4,10 +4,11 @@ use std::collections::{BTreeMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use chrono::{DateTime, Utc};
-use orbit_common::types::{
-    NotFoundKind, OrbitError, WORKSPACE_REGISTRY_SCHEMA_VERSION, Workspace, WorkspaceCheckout,
-    WorkspaceCheckoutRole, WorkspaceRegistry, WorkspaceStatus, validate_host_id,
-    validate_machine_id,
+use orbit_common::{NotFoundKind, OrbitError};
+use orbit_types::identity::{validate_host_id, validate_machine_id};
+use orbit_types::workspace::{
+    WORKSPACE_REGISTRY_SCHEMA_VERSION, Workspace, WorkspaceCheckout, WorkspaceCheckoutRole,
+    WorkspaceRegistry, WorkspaceStatus,
 };
 use serde::Deserialize;
 use serde_json::Value;
@@ -339,8 +340,12 @@ pub fn set_path_override(
 /// Validates local checkout paths, marking their logical workspace invalid
 /// when the local repository root no longer exists. Checkoutless logical
 /// workspaces retain their catalog status.
-pub fn validate_workspaces(registry: &mut WorkspaceRegistry) {
+///
+/// Returns `true` when any workspace status changed, so callers that only
+/// read the registry (e.g. `workspace list`) can skip writing it back.
+pub fn validate_workspaces(registry: &mut WorkspaceRegistry) -> bool {
     let now = Utc::now();
+    let mut changed = false;
     for ws in &mut registry.workspaces {
         let Some(checkout) = registry
             .checkouts
@@ -353,12 +358,15 @@ pub fn validate_workspaces(registry: &mut WorkspaceRegistry) {
             if ws.status == WorkspaceStatus::Invalid {
                 ws.status = WorkspaceStatus::Active;
                 ws.updated_at = now;
+                changed = true;
             }
         } else if ws.status == WorkspaceStatus::Active {
             ws.status = WorkspaceStatus::Invalid;
             ws.updated_at = now;
+            changed = true;
         }
     }
+    changed
 }
 
 /// Machine identity facts used while validating a local registry file.

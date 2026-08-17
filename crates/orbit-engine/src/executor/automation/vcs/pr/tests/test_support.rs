@@ -6,9 +6,11 @@ use std::sync::Mutex;
 
 use chrono::Utc;
 use orbit_common::test_fixtures::TEST_CODEX_MODEL;
-use orbit_common::types::{
-    ExternalRef, NotFoundKind, OrbitError, OrbitEvent, Task, TaskArtifact, TaskComment,
-    TaskPriority, TaskStatus, TaskType, push_external_ref_if_missing,
+use orbit_common::{NotFoundKind, OrbitError};
+use orbit_types::record::OrbitEvent;
+use orbit_types::task::{
+    ExternalRef, Task, TaskArtifact, TaskComment, TaskPriority, TaskStatus, TaskType,
+    push_external_ref_if_missing,
 };
 use serde_json::{Value, json};
 use tempfile::{TempDir, tempdir};
@@ -165,7 +167,7 @@ impl RuntimeHost for PrOpenTestHost {
         priority: Option<TaskPriority>,
         parent_id: Option<&str>,
         batch_id: Option<&str>,
-        external_ref: Option<&orbit_common::types::ExternalRef>,
+        external_ref: Option<&orbit_types::task::ExternalRef>,
         has_external_ref_system: Option<&str>,
     ) -> Result<Vec<Task>, OrbitError> {
         Ok(self

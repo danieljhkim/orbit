@@ -4,11 +4,11 @@
 // Sibling layout under `friction/tests/` follows
 // docs/design-patterns/test_layout.md.
 
-use orbit_common::friction::{
+use orbit_common::governance::friction::{
     DEFAULT_FRICTION_TAGS, FRICTION_OPERATIONS, FRICTION_TITLE_MAX_CHARS, FrictionVerb,
     friction_tags_literal,
 };
-use orbit_common::types::{McpToolScope, ToolSchema};
+use orbit_types::tool::{McpToolScope, ToolSchema};
 
 use super::super::FrictionOperationTool;
 use crate::{Tool, ToolRegistry};

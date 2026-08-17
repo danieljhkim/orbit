@@ -41,6 +41,20 @@ unit identity. On an activation failure Orbit reports the concrete native recove
 command rather than claiming the clock is active. launchd and systemd user managers are
 the supported platforms; there is no resident Orbit daemon ([Host-local sweep clock configuration](./4_decisions.md#host-local-sweep-clock-configuration)).
 
+The dashboard Operations view projects the same typed status and control functions
+[ORB-10875]. Routine definitions remain workspace-scoped and show their versioned
+`enabled` value; the host clock remains one independent host-scoped card. A routine
+toggle resolves its file from a freshly loaded `LoadedRoutine`, validates the displayed
+workspace, host, target, and expected prior state, changes only the top-level `enabled`
+field, reparses the document, and uses an atomic rename. Clock requests are a closed
+typed action set (`enable`, `disable`, `set_cadence`) over the existing launchd/systemd
+abstraction. The browser never supplies paths, programs, arguments, or shell text.
+
+Both mutation families require an operator capability and write an audit event with the
+selected workspace, concrete host, target, typed arguments, and authorization
+provenance. Aggregate workspace views are read-only; stale expected state returns a
+conflict so delayed or duplicate submissions cannot overwrite newer state.
+
 ---
 
 ## 1. Routine Definition
@@ -320,5 +334,6 @@ out of v1 scope for this reason.
 - [ORB-10207] — added disabled-by-default seeding and workspace-local ship sweep.
 - [ORB-00374] — removed the `shell` activity variant and `run_shell` dispatch (fail-closed);
   routines inherit this constraint.
+- [ORB-10875] — added dashboard routine and host-clock status and controls.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

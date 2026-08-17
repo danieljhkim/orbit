@@ -4,19 +4,20 @@ use std::collections::HashMap;
 #[cfg(target_os = "linux")]
 use std::process::Stdio;
 
+use crate::activity_job::load_activity_asset;
 #[cfg(target_os = "linux")]
 use chrono::Utc;
-#[cfg(target_os = "linux")]
-use orbit_common::types::{
-    ActivityV2Spec, ExecutorSandboxKind, FsOperation, PolicyDef, ResourceKind, load_activity_asset,
-    parse_policy_resource,
-};
+use orbit_common::protocol::yaml::parse_policy_resource;
 use orbit_exec::sandbox_exec_program_for_audit;
 #[cfg(target_os = "linux")]
 use orbit_exec::{
     LinuxBwrapSpawnRequest, bwrap_program_for_audit, compile_linux_bwrap_argv, probe_bwrap,
     spawn_under_linux_bwrap,
 };
+use orbit_types::policy::{FsOperation, PolicyDef};
+use orbit_types::resource::ResourceKind;
+#[cfg(target_os = "linux")]
+use orbit_types::workflow::{ActivityV2Spec, ExecutorSandboxKind};
 
 #[cfg(target_os = "linux")]
 use super::super::argv::try_audit_argv_for_dispatch;

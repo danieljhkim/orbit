@@ -17,11 +17,12 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use orbit_agent::loop_engine::InMemorySink;
-use orbit_common::types::activity_job::{ActivityV2, load_activity_asset};
+use orbit_engine::activity_job::load_activity_asset;
 use orbit_engine::{
     DispatchError, ResolvedCliExecutor, RuntimeHost, V2AuditWriter, V2DispatchInput, V2SqliteSink,
     dispatch_v2_activity,
 };
+use orbit_types::workflow::activity_job::ActivityV2;
 use serde_json::Value;
 
 #[test]
@@ -106,7 +107,7 @@ fn build_writer_and_sinks(
     let _ = std::fs::create_dir_all(&blob_dir);
     let inner = Arc::new(InMemorySink::new(blob_dir));
     let envelope = Arc::new(V2SqliteSink::for_audit_root(
-        orbit_store::Store::open_in_memory().expect("open sqlite sink"),
+        Arc::new(orbit_store::Store::open_in_memory().expect("open sqlite sink")),
         "ws_smoke",
         run_id,
         "smoke-agent",

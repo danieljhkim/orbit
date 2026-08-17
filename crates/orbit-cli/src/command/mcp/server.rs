@@ -11,21 +11,24 @@ use std::sync::Arc;
 
 use orbit_cmd::registry_runtime::{RegisteredRuntimeFactory, ResolvedWorkspaceSelection};
 use orbit_cmd::task_owner;
-use orbit_common::types::{
-    McpToolDefinition, McpToolScope, NotFoundKind, OrbitError, ToolSessionContext, required_string,
-};
+use orbit_common::protocol::tool_input::required_string;
+use orbit_common::{NotFoundKind, OrbitError};
 use orbit_core::OrbitRuntime;
-use orbit_core::command::tool::{ToolEntryPoint, execute_global_in_process_tool_dispatch};
+use orbit_core::adapter::command::{ToolEntryPoint, execute_global_in_process_tool_dispatch};
 use orbit_core::runtime::resolve_global_root;
-use orbit_mcp::{ListenerExposure, McpHost, McpListener};
+use orbit_mcp::{ListenerExposure, McpHost, McpListener, McpSessionAuthority};
+use orbit_types::tool::{McpToolDefinition, McpToolScope, ToolSessionContext};
 use serde_json::Value;
 
 /// The one tool whose target is a machine-global primary key, and therefore the
 /// one whose default binding follows the ID instead of the session [ORB-10797].
 const TASK_SHOW_TOOL: &str = "orbit.task.show";
 
-pub(super) fn serve_mcp_stdio(remote_caller_machine_id: Option<String>) -> Result<(), OrbitError> {
-    let (host, session_context) = compose_server(remote_caller_machine_id)?;
+pub(super) fn serve_mcp_stdio(
+    remote_caller_machine_id: Option<String>,
+    authority: McpSessionAuthority,
+) -> Result<(), OrbitError> {
+    let (host, session_context) = compose_server(remote_caller_machine_id, authority)?;
     block_on_server(orbit_mcp::serve_stdio_with_context(host, session_context))
 }
 
@@ -36,7 +39,11 @@ pub(super) fn serve_mcp_listener(
     // A listener has no forwarding proxy in front of it, so there is no caller
     // machine label to trust; each accepted connection contributes only the
     // peer address it was observed at.
-    let (host, session_context) = compose_server(None)?;
+    //
+    // For the same reason the socket serves agent authority only: it
+    // authenticates no client, so every accepted connection would otherwise
+    // inherit whatever authority the listening process was started with.
+    let (host, session_context) = compose_server(None, McpSessionAuthority::Agent)?;
     block_on_server(async move {
         let listener = McpListener::bind(addr, exposure, host, session_context).await?;
         tracing::info!(address = %listener.local_addr()?, "orbit mcp listener bound");
@@ -44,13 +51,16 @@ pub(super) fn serve_mcp_listener(
     })
 }
 
-/// Build the one MCP host this process serves, together with the trusted audit
-/// envelope derived from the accepting machine's identity.
+/// Build the one MCP host this process serves, together with the trusted
+/// session envelope derived from the accepting machine's identity and the
+/// authority this process was started with.
 fn compose_server(
     remote_caller_machine_id: Option<String>,
+    authority: McpSessionAuthority,
 ) -> Result<(Arc<dyn McpHost>, ToolSessionContext), OrbitError> {
     let global_root = resolve_global_root()?;
-    let identity = orbit_mcp::mcp_server_identity(&global_root, remote_caller_machine_id)?;
+    let identity =
+        orbit_mcp::mcp_server_identity(&global_root, remote_caller_machine_id, authority)?;
     let host = Arc::new(ServerMcpHost::new(
         global_root,
         identity.process_machine_id,

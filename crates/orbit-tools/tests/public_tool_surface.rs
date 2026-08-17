@@ -4,7 +4,7 @@
 
 use std::collections::BTreeSet;
 
-use orbit_common::types::RETIRED_TASK_ADD_INPUT_FIELDS;
+use orbit_common::protocol::tool_input::RETIRED_TASK_ADD_INPUT_FIELDS;
 use orbit_tools::{ToolContext, ToolRegistry};
 
 const RETIRED_AGENT_TOOL_NAMES: &[&str] = &[

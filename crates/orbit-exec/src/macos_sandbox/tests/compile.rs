@@ -1,9 +1,10 @@
+use super::super::compile::{MacosLoginKeychainAccess, macos_login_keychain_access};
 use super::super::test_support::*;
 
 #[test]
 fn compile_emits_deny_default_and_broad_read_with_modify_subpath() {
     let resolved = profile("default", &["/Users/test/repo"], &["/Users/test/repo/src"]);
-    let text = compile_with_env(&resolved, EnvOverrides::default());
+    let text = compile_with_env(&resolved, NEUTRAL_PROVIDER, EnvOverrides::default());
     assert!(text.contains("(deny default)"));
     assert!(text.contains("(allow file-read*)"));
     assert!(
@@ -17,6 +18,7 @@ fn compile_default_profile_denies_well_known_credential_reads() {
     let resolved = profile("default", &["/Users/test/repo"], &["/Users/test/repo/src"]);
     let text = compile_with_env(
         &resolved,
+        NEUTRAL_PROVIDER,
         EnvOverrides {
             home: Some("/Users/test"),
             ..Default::default()
@@ -50,6 +52,199 @@ fn compile_default_profile_denies_well_known_credential_reads() {
 }
 
 #[test]
+fn compile_for_claude_reallows_user_keychain_read_after_the_default_deny() {
+    // Claude Code's OAuth session lives in the macOS login keychain item
+    // `Claude Code-credentials`, not in `~/.claude/.credentials.json`. With the
+    // deny unqualified, every sandboxed Claude run on macOS died reporting an
+    // expired OAuth session that no re-login could clear.
+    let resolved = profile("default", &["/Users/test/repo"], &["/Users/test/repo/src"]);
+    let text = compile_with_env(
+        &resolved,
+        "claude",
+        EnvOverrides {
+            home: Some("/Users/test"),
+            ..Default::default()
+        },
+    );
+
+    let deny = "(deny file-read* (subpath \"/Users/test/Library/Keychains\"))";
+    let allow = "(allow file-read* (subpath \"/Users/test/Library/Keychains\"))";
+    let deny_pos = text.find(deny).expect("default user keychain read deny");
+    let allow_pos = text.find(allow).unwrap_or_else(|| {
+        panic!("missing claude user keychain read re-allow: {text}");
+    });
+    assert!(
+        deny_pos < allow_pos,
+        "the re-allow must follow the deny for SBPL last-match-wins: {text}"
+    );
+
+    // The carve-out is the user's keychain only.
+    for system_keychain in ["/Library/Keychains", "/System/Library/Keychains"] {
+        assert!(
+            !text.contains(&format!(
+                "(allow file-read* (subpath \"{system_keychain}\"))"
+            )),
+            "system keychain {system_keychain} must stay denied even for claude: {text}"
+        );
+    }
+    // Reading the credential never implies writing it.
+    assert!(
+        !text.contains("(allow file-write* (subpath \"/Users/test/Library/Keychains\"))"),
+        "keychain writes must stay denied: {text}"
+    );
+    // Unrelated credential stores keep their denies.
+    for other in [
+        "/Users/test/.ssh",
+        "/Users/test/.aws",
+        "/Users/test/.config/gh",
+    ] {
+        assert!(
+            text.contains(&format!("(deny file-read* (subpath \"{other}\"))")),
+            "missing credential read deny for {other}: {text}"
+        );
+        assert!(
+            !text.contains(&format!("(allow file-read* (subpath \"{other}\"))")),
+            "{other} must not be re-allowed: {text}"
+        );
+    }
+}
+
+/// [ORB-10931] The clause order *is* the policy under SBPL last-match-wins, so
+/// pin all three bands: default credential denies, then the provider carve-out,
+/// then the activity's own negated `read` rules. An operator who denies a
+/// credential path must not be silently overridden by the carve-out.
+#[test]
+fn compile_orders_activity_read_denies_after_the_claude_keychain_reallow() {
+    let allow = "(allow file-read* (subpath \"/Users/test/Library/Keychains\"))";
+    let default_deny = "(deny file-read* (subpath \"/Users/test/Library/Keychains\"))";
+
+    // Both the exact keychain directory and a broader ancestor must win.
+    for activity_deny in [
+        "!/Users/test/Library/Keychains",
+        "!/Users/test/Library",
+        "!/Users/test/Library/**",
+    ] {
+        let resolved = profile(
+            "hardened",
+            &["/Users/test/repo", activity_deny],
+            &["/Users/test/repo/src"],
+        );
+        let text = compile_with_env(
+            &resolved,
+            "claude",
+            EnvOverrides {
+                home: Some("/Users/test"),
+                ..Default::default()
+            },
+        );
+
+        let activity_clause = format!(
+            "(deny file-read* (subpath \"{}\"))",
+            activity_deny
+                .trim_start_matches('!')
+                .trim_end_matches("/**")
+        );
+        let default_deny_pos = text.find(default_deny).expect("default keychain read deny");
+        let allow_pos = text.find(allow).expect("claude keychain read re-allow");
+        let activity_pos = text
+            .rfind(&activity_clause)
+            .unwrap_or_else(|| panic!("missing activity read deny {activity_deny}: {text}"));
+        assert!(
+            default_deny_pos < allow_pos && allow_pos < activity_pos,
+            "order must be default deny -> provider re-allow -> activity deny for \
+             {activity_deny}: {text}"
+        );
+
+        assert_eq!(
+            macos_login_keychain_access(
+                "claude",
+                Some(std::ffi::OsStr::new("/Users/test")),
+                &resolved
+            ),
+            MacosLoginKeychainAccess::DeniedByActivityRule {
+                rule: activity_deny.to_string()
+            },
+            "the reported access must match the compiled clause order"
+        );
+    }
+}
+
+/// The narrowing above must not become the default: with no overlapping
+/// activity deny, Claude keeps the OAuth read that ORB-10929 delivered.
+#[test]
+fn keychain_access_stays_allowed_without_an_overlapping_activity_deny() {
+    let home = std::ffi::OsStr::new("/Users/test");
+    let unrelated = profile(
+        "default",
+        &["/Users/test/repo", "!/Users/test/.ssh", "!/Users/other"],
+        &["/Users/test/repo/src"],
+    );
+    assert_eq!(
+        macos_login_keychain_access("claude", Some(home), &unrelated),
+        MacosLoginKeychainAccess::Allowed
+    );
+    assert_eq!(
+        macos_login_keychain_access("codex", Some(home), &unrelated),
+        MacosLoginKeychainAccess::DeniedByDefaultPolicy
+    );
+    assert_eq!(
+        macos_login_keychain_access("claude", None, &unrelated),
+        MacosLoginKeychainAccess::HomeUnresolved
+    );
+    // A non-negated `read` entry naming the keychain is not a denial.
+    let positive = profile(
+        "default",
+        &["/Users/test/Library/Keychains"],
+        &["/Users/test/repo/src"],
+    );
+    assert_eq!(
+        macos_login_keychain_access("claude", Some(home), &positive),
+        MacosLoginKeychainAccess::Allowed
+    );
+}
+
+#[test]
+fn compile_for_non_claude_providers_keeps_the_user_keychain_denied() {
+    // The keychain grant is per-provider on purpose: it is the confined CLI's
+    // own credential store, not a shared allowance. Codex and Grok authenticate
+    // from files under their own state dirs and must never see the keychain.
+    let resolved = profile("default", &["/Users/test/repo"], &["/Users/test/repo/src"]);
+    let allow = "(allow file-read* (subpath \"/Users/test/Library/Keychains\"))";
+    for provider in ["codex", "grok", "gemini", "ollama", "not-a-provider", ""] {
+        let text = compile_with_env(
+            &resolved,
+            provider,
+            EnvOverrides {
+                home: Some("/Users/test"),
+                ..Default::default()
+            },
+        );
+        assert!(
+            text.contains("(deny file-read* (subpath \"/Users/test/Library/Keychains\"))"),
+            "provider {provider} must keep the user keychain read deny: {text}"
+        );
+        assert!(
+            !text.contains(allow),
+            "provider {provider} must not receive the keychain read re-allow: {text}"
+        );
+    }
+}
+
+#[test]
+fn compile_for_claude_without_home_emits_no_keychain_reallow() {
+    // Without HOME there is no path to re-allow. The profile must not fall back
+    // to a broader clause; the run fails the same way it did before instead.
+    let resolved = profile("default", &["/Users/test/repo"], &["/Users/test/repo/src"]);
+    let text = compile_with_env(&resolved, "claude", EnvOverrides::default());
+    assert!(
+        !text
+            .lines()
+            .any(|line| line.starts_with("(allow file-read*") && line.contains("Keychains")),
+        "no keychain read allow may be emitted without HOME: {text}"
+    );
+}
+
+#[test]
 fn compile_grants_write_access_to_global_orbit_log_dir() {
     // The agent CLI inherits the sandbox into `orbit mcp serve` and any
     // other `orbit ...` calls. The JSONL tracing layer resolves its
@@ -59,6 +254,7 @@ fn compile_grants_write_access_to_global_orbit_log_dir() {
     let resolved = profile("default", &["/Users/test/repo"], &["/Users/test/repo/src"]);
     let text = compile_with_env(
         &resolved,
+        NEUTRAL_PROVIDER,
         EnvOverrides {
             home: Some("/Users/test"),
             ..Default::default()
@@ -80,6 +276,7 @@ fn compile_with_env_does_not_mutate_process_home() {
     let resolved = profile("default", &["/Users/test/repo"], &["/Users/test/repo/src"]);
     let text = compile_with_env(
         &resolved,
+        NEUTRAL_PROVIDER,
         EnvOverrides {
             home: Some("/Users/test"),
             ..Default::default()
@@ -101,6 +298,7 @@ fn compile_allows_macos_sandbox_provenance_syscall() {
     let resolved = profile("default", &["/Users/test/repo"], &["/Users/test/repo/src"]);
     let text = compile_with_env(
         &resolved,
+        NEUTRAL_PROVIDER,
         EnvOverrides {
             home: Some("/Users/test"),
             ..Default::default()
@@ -120,7 +318,133 @@ fn compile_allows_macos_sandbox_provenance_syscall() {
 #[cfg(target_os = "macos")]
 use super::super::compile_macos_sandbox_profile;
 #[cfg(target_os = "macos")]
-use orbit_common::types::ResolvedFsProfile;
+use orbit_types::policy::ResolvedFsProfile;
+
+#[cfg(target_os = "macos")]
+#[test]
+fn compiled_profile_lets_only_claude_read_the_user_keychain_directory() {
+    // Kernel-level complement to the profile-text assertions: prove the
+    // last-match-wins ordering actually resolves the way the clauses read. A
+    // synthetic HOME stands in for the real login keychain so the test never
+    // touches the operator's credentials.
+    if !sandbox_exec_can_apply() {
+        return;
+    }
+
+    let fixture = SyntheticKeychainHome::create("keychain-read");
+    let resolved = ResolvedFsProfile {
+        name: "default".to_string(),
+        read: vec![fixture.home_text()],
+        modify: vec![],
+    };
+
+    for (provider, should_read) in [("claude", true), ("codex", false)] {
+        assert_eq!(
+            fixture.credential_readable(&resolved, provider),
+            should_read,
+            "provider {provider} keychain read should_succeed={should_read}"
+        );
+    }
+}
+
+/// [ORB-10931] The kernel-level half of the ordering contract: an activity that
+/// denies the keychain directory — or an ancestor of it — must actually lose
+/// Claude the read, while a profile without such a rule keeps it. Asserted
+/// through `sandbox-exec` because clause ordering is only a claim until the
+/// kernel resolves it.
+#[cfg(target_os = "macos")]
+#[test]
+fn compiled_profile_honors_an_activity_keychain_deny_for_claude() {
+    if !sandbox_exec_can_apply() {
+        return;
+    }
+
+    let fixture = SyntheticKeychainHome::create("keychain-deny");
+    let home_text = fixture.home_text();
+
+    let default_allow = ResolvedFsProfile {
+        name: "default".to_string(),
+        read: vec![home_text.clone()],
+        modify: vec![],
+    };
+    assert!(
+        fixture.credential_readable(&default_allow, "claude"),
+        "without an overlapping deny, claude keeps its OAuth keychain read"
+    );
+
+    for deny in [
+        format!("!{home_text}/Library/Keychains"),
+        format!("!{home_text}/Library"),
+    ] {
+        let hardened = ResolvedFsProfile {
+            name: "hardened".to_string(),
+            read: vec![home_text.clone(), deny.clone()],
+            modify: vec![],
+        };
+        assert!(
+            !fixture.credential_readable(&hardened, "claude"),
+            "activity rule {deny} must deny claude the keychain read"
+        );
+        assert_eq!(
+            macos_login_keychain_access(
+                "claude",
+                Some(std::ffi::OsStr::new(&home_text)),
+                &hardened
+            ),
+            MacosLoginKeychainAccess::DeniedByActivityRule { rule: deny.clone() },
+            "the reported access must match what the kernel enforced for {deny}"
+        );
+    }
+}
+
+/// A disposable `$HOME` holding a stand-in login keychain, so keychain tests
+/// exercise the real clause set without touching operator credentials.
+#[cfg(target_os = "macos")]
+struct SyntheticKeychainHome {
+    // Declaration order is drop order: the tempdir must go before the guard
+    // that removes its parent.
+    home: tempfile::TempDir,
+    _cleanup: ScopeGuard,
+    credential: std::path::PathBuf,
+}
+
+#[cfg(target_os = "macos")]
+impl SyntheticKeychainHome {
+    fn create(label: &str) -> Self {
+        let parent = sandbox_test_parent(label);
+        let cleanup = ScopeGuard(parent.clone());
+        let home = tempfile::Builder::new()
+            .prefix("synthetic-home-")
+            .tempdir_in(&parent)
+            .expect("synthetic home tempdir");
+        let keychains = home.path().join("Library/Keychains");
+        std::fs::create_dir_all(&keychains).expect("synthetic keychain dir");
+        let credential = keychains.join("login.keychain-db");
+        std::fs::write(&credential, b"synthetic-credential").expect("write synthetic credential");
+        Self {
+            home,
+            _cleanup: cleanup,
+            credential,
+        }
+    }
+
+    fn home_text(&self) -> String {
+        self.home.path().to_string_lossy().into_owned()
+    }
+
+    fn credential_readable(&self, resolved: &ResolvedFsProfile, provider: &str) -> bool {
+        let home = self.home_text();
+        let profile_text = compile_with_env(
+            resolved,
+            provider,
+            EnvOverrides {
+                home: Some(&home),
+                ..Default::default()
+            },
+        );
+        can_read_under_profile(&profile_text, &self.credential)
+    }
+}
 
 #[cfg(target_os = "macos")]
 #[test]
@@ -166,6 +490,7 @@ fn compiled_profile_allows_nested_orbit_runtime_writes_without_home_orbit_reallo
     let home_str = home.to_string_lossy().into_owned();
     let profile_text = compile_with_env(
         &resolved,
+        NEUTRAL_PROVIDER,
         EnvOverrides {
             home: Some(&home_str),
             ..Default::default()
@@ -260,7 +585,8 @@ fn compiled_profile_blocks_writes_outside_modify_scope() {
         read: vec![dir.path().display().to_string()],
         modify: vec![allowed.display().to_string()],
     };
-    let profile_text = compile_macos_sandbox_profile(&resolved).expect("compile sbpl");
+    let profile_text =
+        compile_macos_sandbox_profile(&resolved, NEUTRAL_PROVIDER).expect("compile sbpl");
     let mut profile_file = tempfile::Builder::new()
         .prefix("orbit-sandbox-test-")
         .suffix(".sb")
@@ -343,7 +669,8 @@ fn compiled_profile_denies_reads_to_negated_read_path() {
         ],
         modify: vec![],
     };
-    let profile_text = compile_macos_sandbox_profile(&resolved).expect("compile sbpl");
+    let profile_text =
+        compile_macos_sandbox_profile(&resolved, NEUTRAL_PROVIDER).expect("compile sbpl");
     let mut profile_file = tempfile::Builder::new()
         .prefix("orbit-sandbox-test-")
         .suffix(".sb")
@@ -415,7 +742,8 @@ fn compiled_profile_for_realistic_agent_loop_profile_allows_repo_writes_denies_d
             format!("!{}/.env", repo.path().display()),
         ],
     };
-    let profile_text = compile_macos_sandbox_profile(&resolved).expect("compile sbpl");
+    let profile_text =
+        compile_macos_sandbox_profile(&resolved, NEUTRAL_PROVIDER).expect("compile sbpl");
     let mut profile_file = tempfile::Builder::new()
         .prefix("orbit-sandbox-test-")
         .suffix(".sb")
@@ -486,7 +814,8 @@ fn compiled_profile_denies_env_glob_without_blocking_other_writes() {
             format!("!{}/**/*.env", dir.path().display()),
         ],
     };
-    let profile_text = compile_macos_sandbox_profile(&resolved).expect("compile sbpl");
+    let profile_text =
+        compile_macos_sandbox_profile(&resolved, NEUTRAL_PROVIDER).expect("compile sbpl");
     let mut profile_file = tempfile::Builder::new()
         .prefix("orbit-sandbox-test-")
         .suffix(".sb")
@@ -556,7 +885,8 @@ fn compiled_profile_with_mid_path_glob_rule_is_accepted_by_sandbox_exec() {
             "/Users/test/repo/**/*.env".to_string(),
         ],
     };
-    let profile_text = compile_macos_sandbox_profile(&resolved).expect("compile sbpl");
+    let profile_text =
+        compile_macos_sandbox_profile(&resolved, NEUTRAL_PROVIDER).expect("compile sbpl");
     assert!(
         !profile_text.contains("(?i)"),
         "compiled profile must not contain the unsupported (?i) inline flag: {profile_text}"

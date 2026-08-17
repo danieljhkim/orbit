@@ -1,0 +1,406 @@
+//! Tests for the dashboard auto-task JSON API [ORB-10876].
+
+use std::sync::Arc;
+
+use axum::body::Body;
+use axum::http::{Method, Request, StatusCode};
+use orbit_common::governance::authorization::OPERATOR_OVERRIDE_ENV;
+use orbit_core::auto_tasks::cursor_state_path;
+use orbit_core::{AutoTaskAddParams, OrbitRuntime};
+use orbit_types::task::{TaskPriority, TaskStatus, TaskType};
+use orbit_types::workflow::{AutoTaskSchedule, AutoTaskTemplate, DedupePolicy};
+use tower::ServiceExt;
+
+use super::super::router;
+use super::test_support::body_json;
+use crate::state::DashboardState;
+
+fn runtime() -> OrbitRuntime {
+    OrbitRuntime::in_memory().expect("build runtime")
+}
+
+fn chore_params(name: &str) -> AutoTaskAddParams {
+    AutoTaskAddParams {
+        name: name.to_string(),
+        description: format!("Definition {name}"),
+        schedule: AutoTaskSchedule::Interval { every_minutes: 60 },
+        template: AutoTaskTemplate {
+            title: format!("Chore {name}"),
+            description: "Recurring chore body.".to_string(),
+            acceptance_criteria: vec!["The chore is observable.".to_string()],
+            task_type: TaskType::Chore,
+            tags: vec![],
+            priority: TaskPriority::Medium,
+            crew: None,
+            status: TaskStatus::Backlog,
+        },
+        dedupe: DedupePolicy::SkipIfOpen,
+    }
+}
+
+fn state(runtime: OrbitRuntime) -> (DashboardState, Arc<OrbitRuntime>) {
+    let runtime = Arc::new(runtime);
+    (DashboardState::single(runtime.clone()), runtime)
+}
+
+async fn send(
+    state: DashboardState,
+    method: Method,
+    uri: &str,
+    body: Option<&str>,
+) -> axum::response::Response {
+    let mut builder = Request::builder().method(method.clone()).uri(uri);
+    if !matches!(method, Method::GET) {
+        builder = builder
+            .header("origin", "http://localhost:7878")
+            .header("content-type", "application/json");
+    }
+    router()
+        .with_state(state)
+        .oneshot(
+            builder
+                .body(Body::from(body.unwrap_or("").to_string()))
+                .expect("request"),
+        )
+        .await
+        .expect("response")
+}
+
+/// Pin the process signals `CallerCapabilities::resolve` reads, for the whole
+/// request rather than just its construction.
+///
+/// The guard in `orbit_common::test_env` is process-wide, so it serializes two
+/// tests only when *both* take it. Every case whose expected status depends on
+/// caller identity therefore goes through this helper — a case that merely
+/// reads `ORBIT_OPERATOR` without holding the guard can observe the override a
+/// sibling set concurrently and turn an expected 403 into a 200 [ORB-10894].
+#[allow(clippy::await_holding_lock)]
+async fn with_caller_env<'a, T>(
+    vars: impl IntoIterator<Item = (&'a str, Option<&'a str>)>,
+    fut: impl std::future::Future<Output = T>,
+) -> T {
+    let _env = orbit_common::test_env::scoped(vars);
+    fut.await
+}
+
+/// Resolve as an explicit operator. The override outranks every other signal,
+/// so nothing else needs pinning to reach `Operator`.
+async fn as_operator<T>(fut: impl std::future::Future<Output = T>) -> T {
+    with_caller_env([(OPERATOR_OVERRIDE_ENV, Some("1"))], fut).await
+}
+
+/// Resolve as an agent: override cleared, agent envelope declared.
+///
+/// The envelope is *set* rather than cleared on purpose. With nothing declared,
+/// resolution falls through to its interactive-terminal probe, and `cargo test`
+/// run from a terminal inherits both handles — the caller would resolve to
+/// `Operator` and the denial assertion would fail for a reason that has nothing
+/// to do with the code under test. Declaring the agent stops resolution one
+/// rule earlier, so the expected 403 holds in CI, in a managed run, and in an
+/// interactive shell alike. The unidentified-caller branch is covered without
+/// process state in `orbit_common::governance::tests::authorization`.
+async fn as_agent<T>(fut: impl std::future::Future<Output = T>) -> T {
+    with_caller_env(
+        [
+            (OPERATOR_OVERRIDE_ENV, None),
+            ("ORBIT_AGENT_NAME", Some("orbit-web-test")),
+            ("ORBIT_AGENT_MODEL", Some("orbit-web-test")),
+        ],
+        fut,
+    )
+    .await
+}
+
+#[tokio::test]
+async fn list_requires_a_concrete_workspace_and_stays_read_only_without_one() {
+    let (state, _) = state(runtime());
+    let response = send(state, Method::GET, "/auto-tasks", None).await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let json = body_json(response).await;
+    assert_eq!(json["definitions"], serde_json::json!([]));
+    assert_eq!(json["controls_authorized"], false);
+    assert!(
+        json["read_only_reason"]
+            .as_str()
+            .expect("reason")
+            .contains("All-workspace mode is read-only"),
+        "{json}"
+    );
+}
+
+#[tokio::test]
+async fn list_reports_enabled_and_disabled_definitions() {
+    let runtime = runtime();
+    runtime.auto_task_add(chore_params("nightly")).expect("add");
+    runtime.auto_task_toggle("nightly", false).expect("disable");
+    runtime.auto_task_add(chore_params("hourly")).expect("add");
+    let path = cursor_state_path(&runtime.paths().state_dir);
+    std::fs::create_dir_all(path.parent().expect("state dir")).expect("mkdir");
+    std::fs::write(
+        path,
+        r#"{
+  "definitions": {
+    "hourly": {
+      "baseline_at": "2026-01-01T00:00:00+00:00",
+      "last_slot": "2026-01-01T01:00:00+00:00",
+      "last_fired_at": "2026-01-01T01:00:05+00:00",
+      "last_task_id": "ORB-00001"
+    }
+  }
+}"#,
+    )
+    .expect("write cursor");
+
+    let (state, _) = state(runtime);
+    let response = send(state, Method::GET, "/auto-tasks?workspace=default", None).await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let json = body_json(response).await;
+    let items = json["definitions"].as_array().expect("definitions");
+    assert_eq!(items.len(), 2, "{json}");
+    let nightly = items
+        .iter()
+        .find(|item| item["name"] == "nightly")
+        .expect("nightly");
+    let hourly = items
+        .iter()
+        .find(|item| item["name"] == "hourly")
+        .expect("hourly");
+    assert_eq!(nightly["enabled"], false);
+    assert_eq!(hourly["enabled"], true);
+    assert_eq!(hourly["dedupe"], "skip_if_open");
+    assert!(
+        hourly["template_summary"]
+            .as_str()
+            .expect("summary")
+            .contains("[auto-task] Chore hourly"),
+        "{hourly}"
+    );
+    assert_eq!(hourly["last_evaluation"]["kind"], "fired");
+    assert_eq!(hourly["last_evaluation"]["last_task_id"], "ORB-00001");
+    assert_eq!(hourly["last_minted_task_id"], "ORB-00001");
+    assert!(hourly["next_evaluation"].as_str().is_some(), "{hourly}");
+    assert_eq!(hourly["schedule_summary"], "every 60 minutes");
+    assert_eq!(nightly["last_evaluation"], serde_json::Value::Null);
+}
+
+#[tokio::test]
+async fn unknown_workspace_stays_read_only() {
+    let (state, _) = state(runtime());
+    let response = send(state, Method::GET, "/auto-tasks?workspace=missing", None).await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let json = body_json(response).await;
+    assert_eq!(json["definitions"], serde_json::json!([]));
+    assert_eq!(json["controls_authorized"], false);
+    assert!(
+        json["read_only_reason"]
+            .as_str()
+            .expect("reason")
+            .contains("not a concrete active selection"),
+        "{json}"
+    );
+}
+
+#[tokio::test]
+async fn toggle_requires_an_explicit_workspace() {
+    let (state, _) = state(runtime());
+    let response = send(
+        state,
+        Method::POST,
+        "/auto-tasks/toggle",
+        Some(r#"{"name":"nightly","expected_enabled":true,"enabled":false}"#),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let json = body_json(response).await;
+    assert_eq!(json["code"], "workspace_required");
+}
+
+#[tokio::test]
+async fn toggle_denies_a_caller_without_operator_capability() {
+    let runtime = runtime();
+    runtime.auto_task_add(chore_params("nightly")).expect("add");
+    let (state, runtime) = state(runtime);
+    let response = as_agent(send(
+        state,
+        Method::POST,
+        "/auto-tasks/toggle?workspace=default",
+        Some(r#"{"name":"nightly","expected_enabled":true,"enabled":false}"#),
+    ))
+    .await;
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    let json = body_json(response).await;
+    assert_eq!(json["code"], "authorization_denied");
+    assert_eq!(json["operation"], "auto_task.toggle");
+    assert!(
+        runtime
+            .auto_task_show("nightly")
+            .expect("show")
+            .expect("present")
+            .enabled
+    );
+}
+
+#[tokio::test]
+async fn toggle_rolls_back_when_expected_state_is_stale() {
+    let runtime = runtime();
+    runtime.auto_task_add(chore_params("nightly")).expect("add");
+    runtime
+        .auto_task_toggle("nightly", false)
+        .expect("disable first");
+    let (state, runtime) = state(runtime);
+    let response = as_operator(send(
+        state,
+        Method::POST,
+        "/auto-tasks/toggle?workspace=default",
+        Some(r#"{"name":"nightly","expected_enabled":true,"enabled":false}"#),
+    ))
+    .await;
+    assert_eq!(response.status(), StatusCode::CONFLICT);
+    let json = body_json(response).await;
+    assert_eq!(json["code"], "stale_auto_task_state");
+    assert_eq!(json["actual_enabled"], false);
+    assert!(
+        !runtime
+            .auto_task_show("nightly")
+            .expect("show")
+            .expect("present")
+            .enabled
+    );
+}
+
+#[tokio::test]
+async fn authorized_toggle_disables_and_records_audit() {
+    let runtime = runtime();
+    runtime.auto_task_add(chore_params("nightly")).expect("add");
+    let (state, runtime) = state(runtime);
+    let response = as_operator(send(
+        state,
+        Method::POST,
+        "/auto-tasks/toggle?workspace=default",
+        Some(r#"{"name":"nightly","expected_enabled":true,"enabled":false}"#),
+    ))
+    .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let json = body_json(response).await;
+    assert_eq!(json["enabled"], false);
+    assert_eq!(json["changed"], true);
+    assert_eq!(json["message"], "Auto-task disabled");
+    assert!(
+        !runtime
+            .auto_task_show("nightly")
+            .expect("show")
+            .expect("present")
+            .enabled
+    );
+    let events = runtime
+        .list_audit_events_with_kind(
+            None,
+            None,
+            Some("auto_task.toggle".to_string()),
+            None,
+            None,
+            20,
+        )
+        .expect("audit");
+    assert!(
+        events
+            .iter()
+            .any(|event| event.status.to_string() == "success"
+                && event.target_id.as_deref() == Some("nightly")),
+        "{events:?}"
+    );
+}
+
+#[tokio::test]
+async fn mint_requires_unconditional_acknowledgement() {
+    let runtime = runtime();
+    runtime.auto_task_add(chore_params("nightly")).expect("add");
+    let (state, runtime) = state(runtime);
+    let response = as_operator(send(
+        state,
+        Method::POST,
+        "/auto-tasks/mint?workspace=default",
+        Some(r#"{"name":"nightly"}"#),
+    ))
+    .await;
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let json = body_json(response).await;
+    assert_eq!(json["code"], "unconditional_mint_not_acknowledged");
+    assert!(
+        json["error"]
+            .as_str()
+            .expect("error")
+            .contains("ignores this definition's schedule"),
+        "{json}"
+    );
+    assert!(
+        runtime
+            .list_tasks_by_tags(&["auto-task:nightly".into()])
+            .expect("list")
+            .is_empty()
+    );
+}
+
+#[tokio::test]
+async fn mint_denies_a_caller_without_operator_capability() {
+    let runtime = runtime();
+    runtime.auto_task_add(chore_params("nightly")).expect("add");
+    let (state, _) = state(runtime);
+    let response = as_agent(send(
+        state,
+        Method::POST,
+        "/auto-tasks/mint?workspace=default",
+        Some(r#"{"name":"nightly","acknowledge_unconditional":true}"#),
+    ))
+    .await;
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    let json = body_json(response).await;
+    assert_eq!(json["code"], "authorization_denied");
+    assert_eq!(json["operation"], "auto_task.mint");
+}
+
+#[tokio::test]
+async fn mint_returns_the_created_task_id() {
+    let runtime = runtime();
+    runtime.auto_task_add(chore_params("nightly")).expect("add");
+    let (state, runtime) = state(runtime);
+    let response = as_operator(send(
+        state,
+        Method::POST,
+        "/auto-tasks/mint?workspace=default",
+        Some(r#"{"name":"nightly","acknowledge_unconditional":true}"#),
+    ))
+    .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let json = body_json(response).await;
+    let task_id = json["task_id"].as_str().expect("task id");
+    assert!(!task_id.is_empty(), "{json}");
+    assert_eq!(json["status"], "backlog");
+    assert!(json["message"].as_str().expect("message").contains(task_id));
+    let tasks = runtime
+        .list_tasks_by_tags(&["auto-task:nightly".into()])
+        .expect("list");
+    assert_eq!(tasks.len(), 1);
+    assert_eq!(tasks[0].id.to_string(), task_id);
+}
+
+#[tokio::test]
+async fn mint_returns_the_exact_server_error() {
+    let (state, _) = state(runtime());
+    let response = as_operator(send(
+        state,
+        Method::POST,
+        "/auto-tasks/mint?workspace=default",
+        Some(r#"{"name":"missing","acknowledge_unconditional":true}"#),
+    ))
+    .await;
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let json = body_json(response).await;
+    assert!(
+        json["error"]
+            .as_str()
+            .expect("error")
+            .contains("no such auto-task 'missing'"),
+        "{json}"
+    );
+}

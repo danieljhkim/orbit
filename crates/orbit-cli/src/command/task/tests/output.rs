@@ -1,6 +1,6 @@
 //! Sibling tests for `task/output.rs` (docs/design-patterns/test_layout.md).
 
-use orbit_common::types::TaskHistoryEntry;
+use orbit_types::task::TaskHistoryEntry;
 use serde_json::json;
 
 use crate::command::task::output::{format_task_locks, is_human_visible_history_event};

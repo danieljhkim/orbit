@@ -73,4 +73,6 @@ Model-authored fields with names resembling audit fields do not override the sup
 
 ## 6. Explicitly deferred
 
-MCP v1 performs no capability authorization, lease validation, placement routing, broker negotiation, or Orbit principal authentication. McpCapability remains in shared execution and audit types for non-MCP authorization paths; it is not MCP exposure metadata in v1.
+MCP performs no lease validation, placement routing, broker negotiation, or Orbit principal authentication.
+
+Capability authorization is no longer deferred: Core's tool chokepoint authorizes a governed operation from the session's effective capabilities alone, and the serving process decides those once at startup — `orbit mcp serve` grants agent, `orbit mcp serve --operator` grants agent and operator ([ORB-10916], [ORB-10927]). McpCapability is still not MCP exposure metadata; `tools/list` advertises the same surface to every session.

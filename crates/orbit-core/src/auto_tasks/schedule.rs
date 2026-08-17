@@ -8,7 +8,8 @@
 //! interval schedules fire at most one task for the most recent boundary.
 
 use chrono::{DateTime, Duration, Local, Utc};
-use orbit_common::types::{AutoTaskSchedule, MissedRunPolicy, OrbitError};
+use orbit_common::OrbitError;
+use orbit_types::workflow::{AutoTaskSchedule, MissedRunPolicy};
 
 use crate::routines::due::{DueDecision, due_decision, parse_cron};
 

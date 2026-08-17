@@ -1,8 +1,7 @@
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 
-use orbit_common::types::OrbitError;
-use orbit_common::utility::redaction::non_sensitive_env_vars;
+use orbit_common::OrbitError;
 use tempfile::NamedTempFile;
 
 const TRUSTED_SANDBOX_EXEC_PATHS: &[&str] = &["/usr/bin/sandbox-exec"];
@@ -58,8 +57,11 @@ pub fn spawn_under_macos_sandbox(
         .arg(&profile_path)
         .arg(program)
         .args(args)
+        // `env` is the complete child environment the caller composed from the
+        // `[execution.env]` allowlist; `sandbox-exec` hands its own environment
+        // to the confined program, so nothing ambient may be seeded here.
+        // [ORB-10917]
         .env_clear()
-        .envs(non_sensitive_env_vars())
         .envs(env.iter().map(|(key, value)| (key, value)))
         .stdin(stdin)
         .stdout(stdout)

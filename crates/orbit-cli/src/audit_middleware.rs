@@ -1,7 +1,7 @@
 use std::time::Instant;
 
-use orbit_common::types::audit_execution_id;
-use orbit_core::command::tool::take_tool_audit_recorded;
+use orbit_common::observability::audit_id::audit_execution_id;
+use orbit_core::adapter::command::take_tool_audit_recorded;
 use orbit_core::{
     AuditEventInsertParams, AuditEventStatus, OrbitError, OrbitRuntime, redact_sensitive_env_text,
 };

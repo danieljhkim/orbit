@@ -18,6 +18,7 @@ clap.workspace = true
 futures-core.workspace = true
 orbit-cmd = { path = "../orbit-cmd" }
 orbit-common = { path = "../orbit-common" }
+orbit-types = { path = "../orbit-types" }
 orbit-core = { path = "../orbit-core" }
 orbit-registry = { path = "../orbit-registry" }
 serde.workspace = true

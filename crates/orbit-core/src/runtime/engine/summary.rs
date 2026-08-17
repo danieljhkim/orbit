@@ -1,6 +1,6 @@
 use chrono::{Duration, Utc};
-use orbit_common::types::OrbitError;
-use orbit_store::JobRunQuery;
+use orbit_common::OrbitError;
+use orbit_store::contracts::JobRunQuery;
 use orbit_store::scoreboard_summary::{
     ORCHESTRATION_SCHEMA_VERSION, OrchestrationSummary, ScoreboardInputs, ScoreboardWindow,
 };
@@ -53,9 +53,12 @@ impl OrbitRuntime {
         // Same cutoff `generate_summary_with_inputs` derives internally, applied
         // in SQL so the scoreboard never materializes the friction corpus
         // (ORB-10680).
-        let friction_reported = crate::runtime::orbit_tool_host::friction_tools::store_for(self)?
-            .reported_by_model(since_window)?;
+        let friction_reported =
+            crate::runtime::friction::store_for(self)?.reported_by_model(since_window)?;
 
+        // Notable completions and coverage notes are projected inside
+        // generate_summary_with_inputs from this same `tasks` slice — no extra
+        // store read, and no model inference (ORB-10873).
         let summary = orbit_store::scoreboard_summary::generate_summary_with_inputs(
             &self.paths().scoreboard_dir,
             &tasks,

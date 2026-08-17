@@ -7,9 +7,9 @@ use orbit_agent::{
     Agent, AgentConfig, AgentOperation, AgentRequest, peek_response_status,
     provider_invocation_diagnostic, response_envelope_protocol_check,
 };
-use orbit_common::types::activity_job::{AgentLoopSpec, V2AuditEventKind};
-use orbit_common::utility::process_identity::process_start_identity_token;
-use orbit_common::utility::redaction::{PatternRedactor, redact_sensitive_env_text};
+use orbit_common::process::identity::process_start_identity_token;
+use orbit_common::security::redaction::{PatternRedactor, redact_sensitive_env_text};
+use orbit_types::workflow::activity_job::{AgentLoopSpec, V2AuditEventKind};
 use serde_json::Value;
 
 use crate::context::{ProvenanceEnv, provenance_env};
@@ -27,8 +27,8 @@ use super::envelope::{
     task_id_from_input,
 };
 use super::spawn::{
-    linux_bwrap_failed_write_diagnostic, orbit_tool_env, prepare_sandbox_for_dispatch,
-    resolve_provider_launcher,
+    linux_bwrap_failed_write_diagnostic, macos_keychain_auth_diagnostic, orbit_tool_env,
+    prepare_sandbox_for_dispatch, resolve_provider_launcher,
 };
 use super::supervisor::{
     DEFAULT_WALL_CLOCK_TIMEOUT_SECONDS, SpawnTraceContext, SpawnWithTimeoutRequest,
@@ -205,7 +205,7 @@ pub fn run_cli_backend(
     // ADR-0182: external CLI agents get the same active-task hook binding as
     // direct-agent executions. The AGENT_* fields preserve ORB-10342's
     // commit-telemetry contract and omit unknown model/task values.
-    let mut child_env = provenance_env(ProvenanceEnv {
+    let mut dispatch_env = provenance_env(ProvenanceEnv {
         orbit_run_id: Some(run_id),
         orbit_managed_run_context: true,
         orbit_agent_name: tool_ctx.agent_name.as_deref(),
@@ -217,9 +217,27 @@ pub fn run_cli_backend(
         agent_model: model.as_deref(),
         agent_task_id: task_id,
     });
-    child_env.extend(
+    dispatch_env.extend(
         orbit_tool_env().map_err(|error| DispatchError::CliInvocationPermanent(error.message))?,
     );
+    // Spawned CLI agents resolve the Orbit registry from $HOME unless
+    // ORBIT_ROOT is set. A dispatching run already knows its root; inject it so
+    // a provider whose HOME is a tool-specific directory (e.g. ~/.codex) can
+    // still reach `orbit tool run`. [ORB-10909]
+    if let Some(orbit_root) = host.orbit_root()
+        && !dispatch_env.iter().any(|(key, _)| key == "ORBIT_ROOT")
+    {
+        dispatch_env.push(("ORBIT_ROOT".to_string(), orbit_root));
+    }
+    // The child's whole environment is composed here and applied to a cleared
+    // one by every launcher, so the `[execution.env]` allowlist governs what an
+    // untrusted provider subprocess can read. The provider's declared
+    // `required_env_vars` ride along as extras so a strict allowlist still
+    // starts the CLI. `dispatch_env` is appended last and later entries win, so
+    // this run's identity and tool pinning override any same-named value the
+    // allowlist forwarded from an outer process. [ORB-10917]
+    let mut child_env = host.agent_subprocess_environment(invocation.required_env_vars);
+    child_env.extend(dispatch_env);
     // [ORB-10496] Record the provider child's PID the moment it exists. Emitted
     // through the same writer, so it is persisted (and therefore readable by
     // `orbit run show` / the run-status API) while the invocation is still
@@ -236,7 +254,7 @@ pub fn run_cli_backend(
 
     let linux_post_run_guard = match sandbox {
         Some(sandbox)
-            if sandbox.kind == orbit_common::types::ExecutorSandboxKind::LinuxBwrap
+            if sandbox.kind == orbit_types::workflow::ExecutorSandboxKind::LinuxBwrap
                 && sandbox.managed_worktree =>
         {
             LinuxBwrapPostRunGuard::capture(&sandbox.fs_profile)
@@ -314,23 +332,24 @@ pub fn run_cli_backend(
     // and diagnostics, but only make them authoritative when the activity
     // explicitly declares that downstream templates require them.
     let exit_success = !timed_out && matches!(exit_code, Some(0));
-    let sandbox_write_diagnostic = if exit_success {
-        None
-    } else {
-        match sandbox {
-            Some(sandbox)
-                if sandbox.kind == orbit_common::types::ExecutorSandboxKind::LinuxBwrap =>
-            {
-                linux_bwrap_failed_write_diagnostic(
-                    &sandbox.fs_profile,
-                    stderr.protocol_bytes(),
-                    subprocess_cwd.as_deref(),
-                )
-                .map_err(|error| DispatchError::CliInvocationPermanent(error.to_string()))?
-                .map(|diagnostic| bounded_diagnostic(&diagnostic, &redaction))
-            }
-            _ => None,
+    // Attribution is deliberately not gated on the exit code. An agent that
+    // hits a policy-denied write mid-turn can still exit 0 — it narrates the
+    // denial and stops without emitting a terminating envelope — and that
+    // exit-0 shape is precisely the one that reached an operator with no path
+    // and no rule. Deriving the diagnostic here costs a substring scan of
+    // stderr (the helper skips any line without an EROFS marker) and keeps the
+    // Orbit-owned attribution available to every failure branch below.
+    let sandbox_write_diagnostic = match sandbox {
+        Some(sandbox) if sandbox.kind == orbit_types::workflow::ExecutorSandboxKind::LinuxBwrap => {
+            linux_bwrap_failed_write_diagnostic(
+                &sandbox.fs_profile,
+                stderr.protocol_bytes(),
+                subprocess_cwd.as_deref(),
+            )
+            .map_err(|error| DispatchError::CliInvocationPermanent(error.to_string()))?
+            .map(|diagnostic| bounded_diagnostic(&diagnostic, &redaction))
         }
+        _ => None,
     };
     // A truncated capture retains the final complete JSONL events separately
     // from its diagnostic prefix. Protocol parsing must use that tail so a
@@ -395,38 +414,57 @@ pub fn run_cli_backend(
             timeout_seconds
         ))
     } else if !exit_success {
+        let stderr_text = String::from_utf8_lossy(stderr.protocol_bytes());
+        let exit_message = || format!("cli subprocess exited with code {exit_code:?}");
         Some(
             sandbox_write_diagnostic
                 .clone()
+                // A Keychain-backed provider login reads as "expired" whether it
+                // really expired or the sandbox hid the credential. Orbit
+                // compiled the profile, so it is the layer that can say which
+                // one this was — and the provider's own message cannot.
+                // [ORB-10929]
+                .or_else(|| {
+                    macos_keychain_auth_diagnostic(
+                        &provider,
+                        sandbox,
+                        &format!("{stdout_text}\n{stderr_text}"),
+                    )
+                    .map(|diagnostic| format!("{} {diagnostic}", exit_message()))
+                })
                 // [ORB-10746] A bare exit code cannot distinguish "this CLI
                 // has no --json-schema" from "the provider rejected Orbit's
                 // schema" from any other nonzero exit, and the first two are
                 // configuration faults an operator can act on immediately.
                 .or_else(|| {
-                    provider_invocation_diagnostic(
-                        stdout_text.as_ref(),
-                        String::from_utf8_lossy(stderr.protocol_bytes()).as_ref(),
-                    )
-                    .map(|diagnostic| bounded_diagnostic(&diagnostic, &redaction))
+                    provider_invocation_diagnostic(stdout_text.as_ref(), stderr_text.as_ref())
+                        .map(|diagnostic| bounded_diagnostic(&diagnostic, &redaction))
                 })
-                .unwrap_or_else(|| format!("cli subprocess exited with code {:?}", exit_code)),
+                .unwrap_or_else(exit_message),
         )
     } else if (spec.require_completion_envelope || spec.require_response_envelope)
         && matches!(envelope_status.as_deref(), Some("failed") | Some("timeout"))
     {
-        Some(format!(
-            "cli subprocess reported declared envelope status={:?} despite exit 0",
-            envelope_status.as_deref().unwrap_or("unknown")
+        Some(with_sandbox_write_attribution(
+            format!(
+                "cli subprocess reported declared envelope status={:?} despite exit 0",
+                envelope_status.as_deref().unwrap_or("unknown")
+            ),
+            sandbox_write_diagnostic.as_deref(),
         ))
     } else if spec.require_response_envelope {
-        response_envelope_error.clone()
+        response_envelope_error
+            .clone()
+            .map(|error| with_sandbox_write_attribution(error, sandbox_write_diagnostic.as_deref()))
     } else if completion_protocol_violation {
         // Ordered last on purpose: an activity that opted into the content
         // contract already produced a strictly more specific diagnostic above,
         // and the two conditions largely overlap. This branch is what the
         // remaining activities — the ones that only ever had the advisory
         // parse — now report instead of silently checkpointing success.
-        completion_envelope_error.clone()
+        completion_envelope_error
+            .clone()
+            .map(|error| with_sandbox_write_attribution(error, sandbox_write_diagnostic.as_deref()))
     } else {
         None
     };
@@ -534,6 +572,28 @@ pub fn run_cli_backend(
             trace,
         }),
     })
+}
+
+/// Append the Orbit-owned write-denial attribution to a step message that was
+/// classified from the protocol frame alone.
+///
+/// A provider that exits 0 after a policy-denied write yields a frame-shaped
+/// message ("no terminating envelope") that says nothing about *why* the agent
+/// stopped. The sandbox diagnostic is the only text in the system that names
+/// the attempted path and the rule that shadowed it, so it rides along rather
+/// than replacing the frame classification — the step still failed for the
+/// protocol reason, and the denial is the cause worth acting on.
+///
+/// `diagnostic` is already the `linux_bwrap_write_grant_diagnostic` string
+/// (bounded and redacted); this deliberately does not reformat it, so operators
+/// and greps see one message format for a write denial regardless of which
+/// branch surfaced it.
+// pub(super) widened for tests/ layout under ORB-00225; test reaches via exposed surface.
+pub(super) fn with_sandbox_write_attribution(message: String, diagnostic: Option<&str>) -> String {
+    match diagnostic {
+        Some(diagnostic) => format!("{message} {diagnostic}"),
+        None => message,
+    }
 }
 
 fn response_diagnostic(error: &str, redactor: &PatternRedactor) -> String {

@@ -1,7 +1,7 @@
 use clap::Args;
-use orbit_common::types::WorkspaceRegistry;
 use orbit_core::OrbitRuntime;
 use orbit_registry::workspace_registry;
+use orbit_types::workspace::WorkspaceRegistry;
 use serde_json::{Value, json};
 
 use crate::command::{CommandOut, Execute, Payload};
@@ -18,10 +18,7 @@ impl Execute for WorkspaceListArgs {
         let global_root = runtime.global_root();
         let registry_path = workspace_registry::registry_path_for(&global_root);
         let mut registry = workspace_registry::load_registry_from(&registry_path)?;
-        workspace_registry::validate_workspaces(&mut registry);
-
-        if !registry.workspaces.is_empty() {
-            // Save back if staleness changed any status
+        if workspace_registry::validate_workspaces(&mut registry) {
             workspace_registry::save_registry_to(&registry, &registry_path)?;
         }
         Ok(Payload::detail(
@@ -43,7 +40,7 @@ pub(super) fn workspace_list_json(registry: &WorkspaceRegistry, include_replicas
             .filter(|workspace| {
                 include_replicas
                     || workspace_registry::find_checkout(registry, &workspace.id)
-                        .is_none_or(|checkout| checkout.role != Some(orbit_common::types::WorkspaceCheckoutRole::Replica))
+                        .is_none_or(|checkout| checkout.role != Some(orbit_types::workspace::WorkspaceCheckoutRole::Replica))
             })
             .map(|workspace| {
                 let checkout = workspace_registry::find_checkout(registry, &workspace.id);
@@ -72,7 +69,8 @@ pub(super) fn format_workspace_list(
             include_replicas
                 || workspace_registry::find_checkout(registry, &workspace.id).is_none_or(
                     |checkout| {
-                        checkout.role != Some(orbit_common::types::WorkspaceCheckoutRole::Replica)
+                        checkout.role
+                            != Some(orbit_types::workspace::WorkspaceCheckoutRole::Replica)
                     },
                 )
         })

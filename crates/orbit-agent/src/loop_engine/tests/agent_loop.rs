@@ -5,12 +5,12 @@ mod run {
 
     use std::sync::{Arc, Mutex};
 
-    use orbit_common::types::OrbitError;
-    use orbit_common::types::activity_job::OnDenial;
+    use orbit_common::OrbitError;
     use orbit_tools::{
         OrbitBuiltinAction, OrbitTaskScope, OrbitToolHost, ReservationOwnerContext, ToolContext,
         ToolRegistry,
     };
+    use orbit_types::workflow::activity_job::OnDenial;
     use serde_json::{Value, json};
 
     use super::super::super::agent_loop::*;

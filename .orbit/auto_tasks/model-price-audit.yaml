@@ -1,9 +1,8 @@
 schemaVersion: 1
 name: model-price-audit
 description: Weekly report-only reconciliation of the versioned model price table against official provider evidence
-enabled: true
+enabled: false
 schedule:
-  # Once weekly: Monday 06:00 in the host-local timezone used by the generic scheduler.
   cron: 0 6 * * 1
 template:
   title: Audit model prices against official provider evidence
@@ -97,5 +96,5 @@ template:
 dedupe: skip_if_open
 created_by: human
 created_at: 2026-08-02T00:00:00Z
-updated_by: codex
-updated_at: 2026-08-02T00:00:00Z
+updated_by: unknown
+updated_at: 2026-08-16T17:23:52.448628407+00:00

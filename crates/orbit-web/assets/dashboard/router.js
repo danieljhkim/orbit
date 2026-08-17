@@ -17,16 +17,31 @@
 //
 // Also exports parseHashRoute for symmetry (used only internally today).
 
-import { el, isAggregateView, renderPanelPlaceholder } from './common.js';
+import { el, isAggregateView, renderPanelPlaceholder, getWindow, setWindow, parseDashboardWindow, persistScopeToUrl, syncWindowSelectors } from './common.js';
 import { renderRuns } from './runs.js';
 
 const $ = (id) => document.getElementById(id);
 
+// ORB-10872: Reliability is fleet-wide. While that subtab is showing, the
+// header workspace selector must not look like it scopes the visible panel.
+function markWorkspaceSelectorScope(fleetWide) {
+  const select = $("workspace-select");
+  if (select) {
+    select.classList.toggle("scope-ignored", fleetWide);
+    select.title = fleetWide
+      ? "Reliability is Fleet-wide; workspace does not apply"
+      : "Workspace";
+  }
+  const note = $("workspace-scope-note");
+  if (note) note.hidden = !fleetWide;
+}
+
 // ORB-10444: the top-level nav is exactly these four tabs plus the hash-only
 // `run-detail` route. A deprecated tab was retired outright and `scoreboard`,
 // being diagnostics-shaped, now routes as `#diagnostics/scoreboard`.
-const TABS = ["tasks", "audit", "diagnostics", "knowledge", "run-detail"];
-const DIAG_SUBTABS = ["runs", "metrics", "errors", "reliability", "scoreboard"];
+const TABS = ["tasks", "audit", "diagnostics", "operations", "knowledge", "run-detail"];
+const DIAG_SUBTABS = ["runs", "metrics", "errors", "incidents", "reliability", "scoreboard"];
+const OPERATIONS_SUBTABS = ["routines", "auto-tasks"];
 // ORB-10444/ORB-10588: subtabs that replace the two-column diagnostics layout
 // with their own full-width <main>, keyed by the element they reveal.
 const DIAG_FULL_WIDTH_MAINS = {
@@ -97,6 +112,8 @@ function setDiagSubtabImpl(ctx, name) {
       ? "minmax(0, 1fr)"
       : "minmax(0, 2fr) minmax(280px, 1.15fr)";
   }
+  document.body.classList.toggle("reliability-active", name === "reliability");
+  markWorkspaceSelectorScope(name === "reliability");
   if (fullWidthMain) {
     $("diag-body").style.display = "none";
     $("runs-body").style.display = "none";
@@ -130,6 +147,18 @@ function setDiagSubtabImpl(ctx, name) {
       ctx.renderDiagnostics();
     }
   }
+}
+
+function setOperationsSubtabImpl(ctx, name) {
+  if (!OPERATIONS_SUBTABS.includes(name)) name = "routines";
+  ctx.setOperationsSubtab(name);
+  for (const btn of document.querySelectorAll("#operations-subtabs .subtab")) {
+    btn.classList.toggle("active", btn.dataset.subtab === name);
+  }
+  const routines = $("operations-routines-main");
+  const autoTasks = $("operations-auto-tasks-main");
+  if (routines) routines.hidden = name !== "routines";
+  if (autoTasks) autoTasks.hidden = name !== "auto-tasks";
 }
 
 function setKnowledgeSubtabImpl(ctx, name) {
@@ -183,6 +212,11 @@ function setActiveTabImpl(ctx, raw, opts = {}) {
     top = "tasks";
   }
   ctx.setTab(top);
+  document.body.classList.toggle("operations-active", top === "operations");
+  if (top !== "diagnostics") {
+    document.body.classList.remove("reliability-active");
+    markWorkspaceSelectorScope(false);
+  }
   for (const tab of document.querySelectorAll(".tab")) {
     tab.classList.toggle("active", tab.dataset.tab === top);
   }
@@ -206,8 +240,14 @@ function setActiveTabImpl(ctx, raw, opts = {}) {
   let hash;
   if (top === "diagnostics") {
     const sub = DIAG_SUBTABS.includes(segments[1]) ? segments[1] : ctx.getDiagSubtab();
+    const hashedWindow = parseDashboardWindow(query.get("window"));
+    if (hashedWindow && hashedWindow !== getWindow()) {
+      setWindow(hashedWindow);
+      persistScopeToUrl();
+      syncWindowSelectors();
+    }
     setDiagSubtabImpl(ctx, sub);
-    hash = `#diagnostics/${sub}`;
+    hash = `#diagnostics/${sub}?window=${encodeURIComponent(getWindow())}`;
   } else if (top === "audit") {
     ctx.applyAuditHashQuery(query);
     const sub = ["events", "policy"].includes(segments[1]) ? segments[1] : ctx.getActiveAuditSubtab();
@@ -223,6 +263,17 @@ function setActiveTabImpl(ctx, raw, opts = {}) {
     const sub = KNOWLEDGE_SUBTABS.includes(segments[1]) ? segments[1] : ctx.getKnowledgeSubtab();
     setKnowledgeSubtabImpl(ctx, sub);
     hash = `#knowledge/${sub}`;
+  } else if (top === "operations") {
+    const sub = OPERATIONS_SUBTABS.includes(segments[1]) ? segments[1] : ctx.getOperationsSubtab();
+    setOperationsSubtabImpl(ctx, sub);
+    hash = `#operations/${sub}`;
+  } else if (top === "tasks") {
+    // ORB-10874: the status chips and search box are represented in the hash
+    // (mirroring the audit tab) so they survive a reload or the browser's
+    // back/forward navigation instead of resetting to the in-memory default.
+    if (ctx.applyTasksHashQuery) ctx.applyTasksHashQuery(query);
+    if (ctx.syncTaskControls) ctx.syncTaskControls();
+    hash = ctx.buildTasksHash ? ctx.buildTasksHash() : "#tasks";
   } else {
     hash = `#${top}`;
   }
@@ -274,6 +325,11 @@ function initTabsImpl(ctx) {
   for (const btn of document.querySelectorAll("#knowledge-subtabs .subtab")) {
     btn.addEventListener("click", () =>
       setActiveTabImpl(ctx, `knowledge/${btn.dataset.subtab}`, { refresh: false }),
+    );
+  }
+  for (const btn of document.querySelectorAll("#operations-subtabs .subtab")) {
+    btn.addEventListener("click", () =>
+      setActiveTabImpl(ctx, `operations/${btn.dataset.subtab}`, { refresh: false }),
     );
   }
   window.addEventListener("hashchange", () => {

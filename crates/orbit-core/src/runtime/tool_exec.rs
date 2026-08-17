@@ -2,59 +2,31 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::Arc;
 
-use orbit_common::types::{OrbitEvent, Role, activity_job::tool_allowed};
-use orbit_common::utility::redaction::{redact_all_error, redact_sensitive_env_json};
+use orbit_common::security::redaction::{redact_all_error, redact_sensitive_env_json};
 use orbit_tools::ToolContext;
+use orbit_types::record::OrbitEvent;
+use orbit_types::workflow::tool_allowed;
 use serde_json::Value;
 
 use crate::{NotFoundKind, OrbitError, OrbitRuntime};
 
-/// Whether Core applies its capability registry before executing a tool.
+/// Which trusted inputs Core may use when applying its capability registry.
 ///
-/// MCP v1 deliberately defers this one policy while the server-side skeleton
-/// settles. The choice remains inside Core so a later authorization design can
-/// be enforced here without rebuilding transport-specific gates.
+/// Ordinary in-process and CLI calls may resolve capabilities from both their
+/// session context and the process envelope. MCP calls must use only the grants
+/// carried by their trusted session context: an empty or agent-only MCP session
+/// cannot inherit operator authority from the server process that hosts it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum CapabilityEnforcement {
     Enforce,
-    DeferredForMcpV1,
+    McpSessionOnly,
 }
 
 impl OrbitRuntime {
-    pub fn run_tool(&self, name: &str, input: Value) -> Result<Value, OrbitError> {
-        self.run_tool_with_role(name, input, Role::Admin)
-    }
-
-    pub(crate) fn run_tool_with_role(
+    pub(crate) fn execute_registered_tool(
         &self,
         name: &str,
         input: Value,
-        role: Role,
-    ) -> Result<Value, OrbitError> {
-        self.run_tool_with_context_and_role(name, input, role, ToolContext::default())
-    }
-
-    pub(crate) fn run_tool_with_context_and_role(
-        &self,
-        name: &str,
-        input: Value,
-        role: Role,
-        tool_context: ToolContext,
-    ) -> Result<Value, OrbitError> {
-        self.run_tool_with_context_and_role_and_capability(
-            name,
-            input,
-            role,
-            tool_context,
-            CapabilityEnforcement::Enforce,
-        )
-    }
-
-    pub(crate) fn run_tool_with_context_and_role_and_capability(
-        &self,
-        name: &str,
-        input: Value,
-        _role: Role,
         mut tool_context: ToolContext,
         capability_enforcement: CapabilityEnforcement,
     ) -> Result<Value, OrbitError> {
@@ -68,14 +40,6 @@ impl OrbitRuntime {
             Some(host) => host.task_scope().task_id,
             None => resolve_task_id_from_context(self, &tool_context)?,
         };
-
-        if tool_context.orbit_host.is_none() {
-            tool_context.orbit_host = Some(super::build_orbit_tool_host(
-                self,
-                resolved_task_id.clone(),
-                None,
-            ));
-        }
 
         // Ensure fs tools always have a workspace boundary for sandboxing.
         if tool_context.workspace_root.is_none() {
@@ -98,9 +62,7 @@ impl OrbitRuntime {
         // workspace reaches the registry through this function, so this is the
         // only place a governed tool operation is authorized — a per-command
         // guard would be reopened by the next entry point that skips it.
-        if capability_enforcement == CapabilityEnforcement::Enforce {
-            self.authorize_tool_operation(name, &tool_context.session_context)?;
-        }
+        self.authorize_tool_operation(name, &tool_context.session_context, capability_enforcement)?;
 
         if !tool_context.allowed_tools.is_empty()
             && !tool_allowed(name, &tool_context.allowed_tools)
@@ -205,7 +167,7 @@ impl OrbitRuntime {
     }
 }
 
-fn resolve_task_id_from_context(
+pub(crate) fn resolve_task_id_from_context(
     runtime: &OrbitRuntime,
     tool_context: &ToolContext,
 ) -> Result<Option<String>, OrbitError> {

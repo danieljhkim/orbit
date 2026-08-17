@@ -7,7 +7,7 @@
 //! break, not a test to re-bless.
 
 use clap::Parser;
-use orbit_common::friction::FrictionVerb;
+use orbit_common::governance::friction::FrictionVerb;
 use serde_json::{Value, json};
 
 use super::super::{Cli, Commands, operation::RuntimeNeed};

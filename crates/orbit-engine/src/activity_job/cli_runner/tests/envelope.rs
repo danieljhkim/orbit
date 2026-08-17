@@ -3,8 +3,8 @@
 use std::collections::HashMap;
 use std::time::Duration;
 
-use orbit_common::types::TokenUsage;
 use orbit_store::{InvocationInsertParams, InvocationQuery, Store};
+use orbit_types::telemetry::TokenUsage;
 use serde_json::Value;
 
 use super::super::envelope::{
@@ -52,6 +52,7 @@ fn cli_agent_envelope_carries_input_run_id_and_task_context() {
             "plan": "implement it"
         })),
         workspace_root: None,
+        orbit_root: None,
     };
     let mut spec = test_agent_loop_spec(Duration::from_secs(5));
     spec.instruction = "perform the requested task".to_string();

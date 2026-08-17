@@ -22,8 +22,10 @@
 use std::process::Command;
 use std::time::Instant;
 
-use orbit_common::types::{AuditEventStatus, ExecutionResult, OrbitError};
-use orbit_common::utility::redaction::is_sensitive_env_name;
+use orbit_common::OrbitError;
+use orbit_common::security::redaction::{PatternRedactor, is_sensitive_env_name};
+use orbit_types::telemetry::AuditEventStatus;
+use orbit_types::tool::ExecutionResult;
 use serde_json::json;
 
 use super::coordination_audit::{CoordinationAuditEvent, record_coordination_audit_event};
@@ -88,6 +90,11 @@ impl OrbitRuntime {
         } else {
             AuditEventStatus::Failure
         };
+        let redaction = PatternRedactor::with_argv_secrets();
+        let argv_redacted: Vec<String> = full_argv
+            .iter()
+            .map(|arg| redaction.apply_str(arg))
+            .collect();
         if let Err(audit_error) = record_coordination_audit_event(
             self,
             CoordinationAuditEvent {
@@ -98,7 +105,7 @@ impl OrbitRuntime {
                 task_id: None,
                 status,
                 payload: json!({
-                    "argv": full_argv,
+                    "argv": argv_redacted,
                     "working_directory": params.working_directory,
                     "caller": params.actor,
                     "workspace": self.paths().repo_root.to_string_lossy(),

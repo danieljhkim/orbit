@@ -1,7 +1,8 @@
 use std::path::Path;
 
 use chrono::Utc;
-use orbit_common::types::{ExternalRef, OrbitError, TaskComment, TaskStatus};
+use orbit_common::OrbitError;
+use orbit_types::task::{ExternalRef, TaskComment, TaskStatus};
 use serde_json::{Value, json};
 
 use crate::context::{RuntimeHost, TaskAutomationUpdate};

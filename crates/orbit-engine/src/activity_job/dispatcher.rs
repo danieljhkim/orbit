@@ -1,14 +1,15 @@
 use std::sync::Arc;
 
-use orbit_common::types::activity_job::V2AuditEventKind;
-use orbit_common::types::activity_job::{ActivityV2Spec, AgentLoopSpec, DeterministicSpec};
+use orbit_types::workflow::activity_job::V2AuditEventKind;
+use orbit_types::workflow::activity_job::{ActivityV2Spec, AgentLoopSpec, DeterministicSpec};
 
 use crate::context::RuntimeHost;
-use orbit_common::types::{
-    DeterministicAction, ExecutorSandboxKind, InvocationTrace, McpCapability, OrbitError,
-    ResolvedFsProfile,
-};
+use orbit_common::OrbitError;
 use orbit_tools::{FsAuditLogger, FsCallEvent, FsCallEventKind};
+use orbit_types::policy::ResolvedFsProfile;
+use orbit_types::telemetry::InvocationTrace;
+use orbit_types::tool::McpCapability;
+use orbit_types::workflow::{DeterministicAction, ExecutorSandboxKind};
 use serde_json::Value;
 use thiserror::Error;
 
@@ -227,7 +228,7 @@ fn dispatch_v2_activity_inner(
     let activity_event_id = input
         .audit
         .emit(
-            orbit_common::types::activity_job::V2AuditEventKind::ActivityStarted {
+            orbit_types::workflow::activity_job::V2AuditEventKind::ActivityStarted {
                 activity_name: input.activity_name.to_string(),
                 activity_type: activity_type.to_string(),
             },
@@ -268,7 +269,7 @@ fn dispatch_v2_activity_inner(
         Err(_) => "error",
     };
     input.audit.emit_lossy(
-        orbit_common::types::activity_job::V2AuditEventKind::ActivityFinished {
+        orbit_types::workflow::activity_job::V2AuditEventKind::ActivityFinished {
             activity_name: input.activity_name.to_string(),
             outcome: outcome_str.to_string(),
         },

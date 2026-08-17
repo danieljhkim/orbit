@@ -2,16 +2,177 @@
 
 use std::ffi::OsString;
 
-use orbit_common::types::ExecutorSandboxKind;
 use orbit_exec::BwrapProbeOutcome;
+use orbit_types::workflow::ExecutorSandboxKind;
 use tempfile::tempdir;
 
 use super::super::super::dispatcher::ResolvedSandbox;
 use super::super::spawn::{
-    SpawnError, SpawnedChild, orbit_tool_env_with, prepare_linux_sandbox_for_dispatch_with_probe,
+    SpawnError, SpawnedChild, linux_bwrap_failed_write_diagnostic,
+    macos_keychain_auth_diagnostic_with, orbit_tool_env_with,
+    prepare_linux_sandbox_for_dispatch_with_probe, reject_unsatisfiable_managed_grants,
     resolve_provider_launcher_with, spawn_bare, spawn_macos_sandboxed_with,
 };
 use super::test_support::{sandbox_for_test, sh_args};
+
+/// A profile shaped like a managed-worktree implementer: the worktree is
+/// writable, its `.orbit` store is not.
+fn worktree_profile(worktree: &std::path::Path) -> orbit_types::policy::ResolvedFsProfile {
+    orbit_types::policy::ResolvedFsProfile {
+        name: "unrestricted".to_string(),
+        read: vec![format!("{}/**", worktree.display())],
+        modify: vec![
+            format!("{}/**", worktree.display()),
+            format!("!{}/.orbit/**", worktree.display()),
+        ],
+    }
+}
+
+/// [ORB-10879] The attribution path an operator actually depends on, exercised
+/// without Bubblewrap and without consulting the host's mount table: a child
+/// that reported EROFS gets a denial naming the attempted path and the rule
+/// that shadowed it.
+#[test]
+fn failed_write_diagnostic_names_attempted_path_and_shadowing_rule() {
+    let worktree = std::path::Path::new("/tmp/orbit-jrun-attribution");
+    let profile = worktree_profile(worktree);
+    let stderr = b"touch: cannot touch '/tmp/orbit-jrun-attribution/.orbit/state/x': Read-only file system\n";
+
+    let diagnostic = linux_bwrap_failed_write_diagnostic(&profile, stderr, Some(worktree))
+        .expect("diagnostic derivation succeeds")
+        .expect("a denied write must be attributable");
+
+    assert!(
+        diagnostic.contains("/tmp/orbit-jrun-attribution/.orbit/state/x"),
+        "diagnostic must name the attempted path: {diagnostic}"
+    );
+    assert!(
+        diagnostic.contains("denyModify rule"),
+        "diagnostic must name the shadowing rule: {diagnostic}"
+    );
+    assert!(
+        diagnostic.contains(&format!("!{}/.orbit/**", worktree.display())),
+        "diagnostic must quote the exact deny that shadows the path: {diagnostic}"
+    );
+    // The wrapper prefix is Orbit's, but the explanation body is verbatim
+    // `linux_bwrap_write_grant_diagnostic` output — one message format.
+    let expected =
+        orbit_exec::linux_bwrap_write_grant_diagnostic(&profile, &worktree.join(".orbit/state/x"))
+            .expect("grant diagnostic")
+            .expect("path is denied");
+    assert!(
+        diagnostic.ends_with(&expected),
+        "diagnostic must reuse the existing grant-diagnostic text: {diagnostic}"
+    );
+}
+
+/// [ORB-10917] The bare launcher must hand the child exactly the environment
+/// the dispatcher composed. The ambient variables below are set by this test
+/// rather than read from the developer's shell, and none carries a
+/// credential-shaped name — a denylist would forward every one of them.
+#[cfg(unix)]
+#[test]
+fn spawn_bare_gives_the_child_only_the_supplied_environment() {
+    let _ambient = orbit_common::test_env::scoped([
+        ("DATABASE_URL", Some("postgres://svc:hunter2@db.internal")),
+        ("BILLING_ENDPOINT", Some("https://billing.internal.example")),
+        ("ORB_10917_AMBIENT", Some("leaked")),
+        ("ANTHROPIC_API_KEY", Some("sk-ant-000000000000000000000")),
+    ]);
+    let env = vec![
+        ("PATH".to_string(), "/usr/bin:/bin".to_string()),
+        ("ORB_10917_SUPPLIED".to_string(), "present".to_string()),
+    ];
+
+    let spawned = spawn_bare("/bin/sh", &sh_args("env"), &env, None).expect("spawn bare child");
+    let output = spawned
+        .child
+        .wait_with_output()
+        .expect("wait for bare child");
+    let child_env = String::from_utf8_lossy(&output.stdout);
+
+    assert!(
+        child_env.contains("ORB_10917_SUPPLIED=present"),
+        "supplied vars must reach the child: {child_env}"
+    );
+    for leaked in [
+        "DATABASE_URL",
+        "BILLING_ENDPOINT",
+        "ORB_10917_AMBIENT",
+        "ANTHROPIC_API_KEY",
+    ] {
+        assert!(
+            !child_env.contains(leaked),
+            "{leaked} must not reach a bare-exec provider child: {child_env}"
+        );
+    }
+}
+
+/// A path the profile *does* grant is not reported as a denial, so the
+/// diagnostic cannot manufacture an attribution for an unrelated EROFS.
+#[test]
+fn failed_write_diagnostic_stays_silent_for_a_granted_path() {
+    let worktree = std::path::Path::new("/tmp/orbit-jrun-attribution");
+    let profile = worktree_profile(worktree);
+    let stderr =
+        b"touch: cannot touch '/tmp/orbit-jrun-attribution/docs/x.md': Read-only file system\n";
+
+    let diagnostic = linux_bwrap_failed_write_diagnostic(&profile, stderr, Some(worktree))
+        .expect("diagnostic derivation succeeds");
+
+    assert!(
+        diagnostic.is_none(),
+        "a granted path must not be attributed to policy: {diagnostic:?}"
+    );
+}
+
+/// [ORB-10879] Regression guard for the managed-worktree pre-spawn check. Its
+/// whole purpose is that an unsatisfiable grant fails *before* the provider
+/// starts rather than surfacing as an EROFS mid-turn, so the rejection is
+/// asserted directly instead of through a spawn that would skip without bwrap.
+#[test]
+fn unsatisfiable_grant_in_a_managed_worktree_fails_before_the_provider_starts() {
+    let dropped = vec![orbit_exec::UnsatisfiedWriteGrant {
+        rule: "/tmp/orbit-jrun-attribution/.orbit/routines/**".to_string(),
+        anchor: std::path::PathBuf::from("/tmp/orbit-jrun-attribution/.orbit/routines"),
+        reason: "anchor is absent".to_string(),
+    }];
+
+    let error = reject_unsatisfiable_managed_grants(true, &dropped)
+        .expect_err("an unsatisfiable grant must not reach the provider");
+
+    assert!(
+        error.permanent,
+        "an unmountable grant set is deterministic config, not a transient fault"
+    );
+    assert!(
+        error.message.contains(".orbit/routines"),
+        "rejection must name the grant that could not be applied: {}",
+        error.message
+    );
+    assert!(
+        error
+            .message
+            .contains("could not apply 1 policy write grant"),
+        "rejection must count the dropped grants: {}",
+        error.message
+    );
+}
+
+/// Outside a managed worktree the same grant is host-owned, so it is reported
+/// rather than fatal — widening this check would fail runs the host can fix.
+#[test]
+fn unsatisfiable_grant_outside_a_managed_worktree_is_not_fatal() {
+    let dropped = vec![orbit_exec::UnsatisfiedWriteGrant {
+        rule: "/var/host-owned/**".to_string(),
+        anchor: std::path::PathBuf::from("/var/host-owned"),
+        reason: "anchor is absent".to_string(),
+    }];
+
+    reject_unsatisfiable_managed_grants(false, &dropped)
+        .expect("host-owned anchors stay reported, not fatal");
+    reject_unsatisfiable_managed_grants(true, &[]).expect("a fully satisfied grant set must spawn");
+}
 
 #[test]
 fn spawn_bare_runs_program_in_provided_cwd() {
@@ -54,10 +215,104 @@ fn spawn_bare_does_not_inherit_ambient_sensitive_env() {
     );
 }
 
+/// The failure an operator actually sees when a Keychain-backed login cannot be
+/// read: the provider says "expired", which is indistinguishable from a sandbox
+/// denial unless Orbit attributes it. Both branches must be reachable, because
+/// they call for different fixes.
+#[test]
+fn keychain_auth_diagnostic_separates_a_real_expiry_from_a_sandbox_denial() {
+    let sandbox = sandbox_for_test();
+    let failure = "Failed to authenticate: OAuth session expired and could not be refreshed";
+
+    let with_home = macos_keychain_auth_diagnostic_with(
+        "claude",
+        Some(&sandbox),
+        failure,
+        Some(std::ffi::OsStr::new("/Users/test")),
+    )
+    .expect("claude under sandbox-exec must be attributed");
+    assert!(
+        with_home.contains("real login failure"),
+        "a reachable keychain means re-authentication is the fix: {with_home}"
+    );
+
+    let without_home = macos_keychain_auth_diagnostic_with("claude", Some(&sandbox), failure, None)
+        .expect("a HOME-less compile cannot emit the keychain allow");
+    assert!(
+        without_home.contains("HOME is unset"),
+        "an unemitted keychain allow means re-authentication cannot help: {without_home}"
+    );
+}
+
+/// [ORB-10931] The third case: the operator's own `denyRead` outranks the
+/// provider carve-out, so Orbit — not the provider — hid the credential.
+/// Recommending re-authentication here sends the operator to a fix that cannot
+/// work, so the message must name the rule instead.
+#[test]
+fn keychain_auth_diagnostic_attributes_an_activity_deny_instead_of_a_relogin() {
+    let failure = "Failed to authenticate: OAuth session expired and could not be refreshed";
+    let home = std::ffi::OsStr::new("/Users/test");
+
+    for deny in ["!/Users/test/Library/Keychains", "!/Users/test/Library"] {
+        let mut sandbox = sandbox_for_test();
+        sandbox.fs_profile.name = "hardened".to_string();
+        sandbox.fs_profile.read.push(deny.to_string());
+
+        let diagnostic =
+            macos_keychain_auth_diagnostic_with("claude", Some(&sandbox), failure, Some(home))
+                .expect("an activity keychain deny must be attributed");
+
+        assert!(
+            diagnostic.contains(deny) && diagnostic.contains("hardened"),
+            "diagnostic must name the profile and the exact deny rule: {diagnostic}"
+        );
+        assert!(
+            diagnostic.contains("Re-authenticating will not help"),
+            "an Orbit-authored denial must not send the operator to re-login: {diagnostic}"
+        );
+        assert!(
+            !diagnostic.contains("real login failure"),
+            "a denied keychain must never be reported as reachable: {diagnostic}"
+        );
+    }
+}
+
+#[test]
+fn keychain_auth_diagnostic_stays_silent_outside_its_exact_failure_shape() {
+    let sandbox = sandbox_for_test();
+    let failure = "Failed to authenticate: OAuth session expired and could not be refreshed";
+    let home = std::ffi::OsStr::new("/Users/test");
+
+    // Providers that never read the keychain, unsandboxed runs, and unrelated
+    // failures must not collect a keychain explanation.
+    assert!(
+        macos_keychain_auth_diagnostic_with("codex", Some(&sandbox), failure, Some(home)).is_none()
+    );
+    assert!(macos_keychain_auth_diagnostic_with("claude", None, failure, Some(home)).is_none());
+    assert!(
+        macos_keychain_auth_diagnostic_with(
+            "claude",
+            Some(&linux_sandbox_for_test(false)),
+            failure,
+            Some(home)
+        )
+        .is_none()
+    );
+    assert!(
+        macos_keychain_auth_diagnostic_with(
+            "claude",
+            Some(&sandbox),
+            "error: request timed out",
+            Some(home)
+        )
+        .is_none()
+    );
+}
+
 #[test]
 fn spawn_macos_sandboxed_returns_error_when_sandbox_exec_missing_and_fallback_disabled() {
     let sandbox = sandbox_for_test();
-    let err = spawn_macos_sandboxed_with("/bin/sh", &[], &[], None, &sandbox, false)
+    let err = spawn_macos_sandboxed_with("/bin/sh", &[], &[], None, &sandbox, "claude", false)
         .expect_err("expected fallback-disabled error");
     assert!(
         err.permanent,
@@ -244,6 +499,7 @@ fn agent_tool_environment_prefers_dispatching_orbit_over_stale_path_entry() {
         None,
         std::path::Path::new("/home/test/.orbit/bin/orbit"),
         Some(&inherited),
+        None,
     )
     .expect("pin dispatching Orbit");
 
@@ -277,6 +533,7 @@ fn configured_orbit_bin_wins_and_its_path_entry_is_deduplicated() {
         Some(std::ffi::OsStr::new("/opt/orbit/bin/orbit")),
         std::path::Path::new("/home/test/.orbit/bin/orbit"),
         Some(&inherited),
+        None,
     )
     .expect("pin configured Orbit");
 
@@ -296,6 +553,35 @@ fn configured_orbit_bin_wins_and_its_path_entry_is_deduplicated() {
 }
 
 #[test]
+fn agent_tool_environment_backfills_conventional_home_bin_dirs_missing_from_path() {
+    let inherited = std::env::join_paths(["/usr/bin"]).expect("construct inherited PATH");
+    let home = std::path::Path::new("/home/test");
+    let env = orbit_tool_env_with(
+        None,
+        std::path::Path::new("/home/test/.orbit/bin/orbit"),
+        Some(&inherited),
+        Some(home),
+    )
+    .expect("pin dispatching Orbit");
+
+    let pinned = env
+        .iter()
+        .find(|(name, _)| name == "PATH")
+        .map(|(_, value)| value)
+        .expect("PATH override");
+    assert_eq!(
+        std::env::split_paths(std::ffi::OsStr::new(pinned)).collect::<Vec<_>>(),
+        vec![
+            std::path::PathBuf::from("/home/test/.orbit/bin"),
+            std::path::PathBuf::from("/usr/bin"),
+            std::path::PathBuf::from("/home/test/.local/bin"),
+            std::path::PathBuf::from("/home/test/.cargo/bin"),
+            std::path::PathBuf::from("/home/test/bin"),
+        ]
+    );
+}
+
+#[test]
 fn spawn_macos_sandboxed_falls_back_to_bare_exec_when_allow_fallback_set() {
     let sandbox = ResolvedSandbox {
         allow_fallback: true,
@@ -307,6 +593,7 @@ fn spawn_macos_sandboxed_falls_back_to_bare_exec_when_allow_fallback_set() {
         &[],
         None,
         &sandbox,
+        "claude",
         false,
     )
     .expect("fallback should succeed");

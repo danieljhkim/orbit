@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.13.0
+
+### Breaking Changes
+
+- **Store schema 15 → 16**: audit actor identity splits `role` into `actor_kind` plus a normalized actor. Workspaces migrate on open; a newer store still refuses an older binary. ([ORB-10888])
+- **Store schema 16 → 17**: unauthenticated MCP calls persist a self-reported actor. Same migrate-on-open / no-downgrade rule. ([ORB-10890])
+- **Task complexity is required**: CLI `task add`, web `POST /api/tasks`, and `orbit.task.add` reject a missing `complexity` — pass `low`, `medium`, or `hard`. ([ORB-10892])
+
+### Highlights
+
+- **Dashboard delivery controls**: inspect, toggle, and mint auto-tasks; operate routines and the sweep clock; the Tasks view is clearer with safer live-log and inline edits. ([ORB-10876])
+- **Complexity is first-class**: every new task must set it, and the dashboard charts it as a dimension. ([ORB-10892])
+- **Governed MCP tools need an operator**: unauthenticated sessions can no longer invoke those tools. ([ORB-10916])
+- **Claude Keychain OAuth under sandbox**: Claude can read the user Keychain for OAuth; an explicit `denyRead` still wins. ([ORB-10929])
+- **System crew is seeded**: jobs can name a portable `system` crew; `qa` stays for compatibility. ([ORB-10877])
+
 ## 0.12.1
 
 ### Highlights

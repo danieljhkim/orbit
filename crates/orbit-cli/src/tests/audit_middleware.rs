@@ -1,5 +1,5 @@
 use clap::Parser;
-use orbit_common::types::AuditEvent;
+use orbit_types::telemetry::AuditEvent;
 use serde_json::{Value, json};
 
 use crate::command::{Cli, Payload};
@@ -7,9 +7,9 @@ use crate::command::{Cli, Payload};
 use super::super::audit_middleware::*;
 use orbit_common::test_env::{self, AGENT_IDENTITY_ENV};
 use orbit_common::test_fixtures::TEST_CODEX_MODEL;
-use orbit_common::types::AuditEventStatus;
 use orbit_core::context::ActorKind;
 use orbit_core::{ActorIdentity, OrbitError, OrbitRuntime};
+use orbit_types::telemetry::AuditEventStatus;
 
 fn meta_for(args: &[&str]) -> CommandMeta {
     let cli = Cli::parse_from(args);
@@ -264,7 +264,7 @@ fn audit_guard_event_json_shapes_are_snapshotted() {
 }
 
 fn audit_guard_event_json(status: AuditEventStatus) -> Value {
-    let _ = orbit_core::command::tool::take_tool_audit_recorded();
+    let _ = orbit_core::adapter::command::take_tool_audit_recorded();
     let runtime = OrbitRuntime::in_memory().expect("build in-memory runtime");
     {
         let mut guard = AuditGuard::new(&runtime, snapshot_meta());
@@ -335,7 +335,7 @@ fn normalize_audit_event_json(value: &mut Value) {
 /// audit row.
 mod cli_dedup_invariant {
     use super::*;
-    use orbit_core::command::tool::take_tool_audit_recorded;
+    use orbit_core::adapter::command::take_tool_audit_recorded;
     use serde_json::json;
 
     fn fresh_runtime() -> OrbitRuntime {

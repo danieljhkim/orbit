@@ -19,7 +19,8 @@ pub(in crate::types) mod usage;
 // reintroducing a nested `response/tests` tree.
 pub(in crate::types) mod wrapper;
 
-use orbit_common::types::{OrbitError, ToolCallTrace};
+use orbit_common::OrbitError;
+use orbit_types::telemetry::ToolCallTrace;
 use serde_json::Value;
 
 pub use envelope::{
@@ -47,9 +48,9 @@ pub enum AgentResponseStatus {
 
 type ResponseParseResult = Result<
     (
-        orbit_common::types::AgentResponseEnvelope,
+        orbit_types::workflow::AgentResponseEnvelope,
         AgentResponseStatus,
-        orbit_common::types::InvocationTrace,
+        orbit_types::telemetry::InvocationTrace,
     ),
     OrbitError,
 >;

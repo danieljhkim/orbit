@@ -13,6 +13,7 @@ TASK_ID=$(orbit task add \
   --description "Document how fsProfile selection works for activity YAML." \
   --acceptance-criteria "The docs explain explicit and implicit fsProfile resolution." \
   --acceptance-criteria "The docs include a policy YAML example." \
+  --complexity medium \
   --workspace .)
 ```
 

@@ -1,6 +1,5 @@
-use orbit_common::types::{
-    AutoTaskSchedule, AutoTaskTemplate, DedupePolicy, TaskPriority, TaskType,
-};
+use orbit_types::task::{TaskPriority, TaskType};
+use orbit_types::workflow::{AutoTaskSchedule, AutoTaskTemplate, DedupePolicy};
 
 use crate::auto_tasks::crud::AutoTaskAddParams;
 
@@ -20,7 +19,7 @@ pub(super) fn template(title: &str) -> AutoTaskTemplate {
         tags: vec![],
         priority: TaskPriority::Medium,
         crew: None,
-        status: orbit_common::types::TaskStatus::Backlog,
+        status: orbit_types::task::TaskStatus::Backlog,
     }
 }
 

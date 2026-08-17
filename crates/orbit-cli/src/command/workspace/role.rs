@@ -1,8 +1,8 @@
 use clap::{Args, ValueEnum};
-use orbit_common::types::WorkspaceCheckoutRole;
 use orbit_core::OrbitRuntime;
 use orbit_registry::workspace_registry;
 use orbit_registry::{HostIdentityState, inspect_host_identity};
+use orbit_types::workspace::WorkspaceCheckoutRole;
 
 use crate::command::{CommandOut, CommandOutput, Execute};
 

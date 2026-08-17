@@ -8,7 +8,7 @@ use std::sync::{Arc, Mutex};
 
 use serde_json::{Value, json};
 
-use orbit_common::types::OrbitError;
+use orbit_common::OrbitError;
 
 use super::super::update::*;
 use crate::{OrbitBuiltinAction, OrbitTaskScope, OrbitToolHost, Tool, ToolContext};

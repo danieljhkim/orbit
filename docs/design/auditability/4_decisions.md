@@ -620,6 +620,22 @@ The result is clamped to `FRICTION_TITLE_MAX_CHARS` (120) at a word boundary. An
 - Cost: a consumer that read `path` as an always-present file location now sees `null` for post-cutover records and must treat it as an optional legacy pointer.
 - Rejected alternative: keeping the file store and adding a SQLite index sidecar. That would have preserved two sources of truth for the same records and left the full parse cost on every cold read and index rebuild.
 
+## Unauthenticated MCP callers get a second, explicitly-untrusted identity field
+
+**Recorded:** 2026-08-16 · [ORB-10890]
+**Paths:** `crates/orbit-types/src/telemetry/self_reported_actor.rs`, `crates/orbit-mcp/src/adapter/dispatch.rs`, `crates/orbit-store/src/driver/sqlite/audit_event_store/**`, [specs/self-reported-actor.md](specs/self-reported-actor.md)
+
+**Context.** 92.5% of MCP tool calls (1373 of 1485 over a 30d production window) record `role = 'unverified'` and no agent or model at all. The cause is structural, not a defective check: `ORBIT_MANAGED_RUN_CONTEXT` + `ORBIT_RUN_ID` are injected only on the engine CLI-runner spawn path, while `orbit mcp serve` is started by the MCP client from that client's own config. Managed runs drive agents over the CLI and configure no MCP for their children, so MCP is effectively the interactive surface and an interactive session cannot satisfy the managed-run trust boundary by construction. Any per-agent tool-call fail rate therefore silently excluded ~92% of that agent's MCP traffic while presenting a complete-looking denominator.
+
+**Decision.** Add a second field rather than relaxing the boundary. `role` — and the canonical actor projection derived from it ([Canonical audit actor identity](specs/actor-identity.md), ORB-10888) — stays the trusted, authenticated identity and keeps reading exactly the bytes it read before. A new nullable `self_reported_actor` column records whatever the client claims, sourced at MCP `initialize` from `_meta.orbit.actor` falling back to `clientInfo.name`, normalized through one gate that treats a blank, over-length, or control-character-bearing claim as anonymous rather than defaulting it. The two are never merged in storage, and `get_audit_tool_call_counts_by_attribution` classifies each tool-call row into disjoint `authenticated` / `self_reported` / `anonymous` buckets so a caller reads all three denominators — and their combination — off one result set.
+
+**Consequences.**
+- Interactive MCP traffic becomes attributable and countable without becoming trusted; a published per-agent number can now state which denominator it was computed over.
+- Migration v17 is additive with no backfill, so existing `unverified` rows stay valid and read as anonymous — there was no claim collected at the time to recover, and deriving one from `role` would retroactively attribute traffic Orbit never authenticated.
+- Cost: two rows can name the same agent under different attributions. That is the point, not a defect to dedupe, and every rendering surface must carry the marker — `orbit audit show` prints `(unverified)`, the JSON key is `self_reported_actor` rather than `actor`, and `attribution_split` rows carry both `attribution` and `verified`.
+- Rejected alternative: widening `audit_role_label_for_entry_point` to read caller-supplied JSON. That would make every published per-agent number forgeable by anyone who can reach the MCP server.
+- Rejected alternative: sourcing the claim per tool call. It would read model-authored JSON — the input the trust boundary already refuses for correlation — and would let one session present a different identity on every call.
+
 ## Tool-call provenance is model-first
 
 **Recorded:** 2026-05-11 02:06:39.325095Z · [T20260427-52]
@@ -682,5 +698,6 @@ Deprecate `agent` as a normal tool-call input, prefer exact `model`, infer the a
 
 - **[ORB-10590]** — Make the friction record handle an author-settable field and derive it structurally when omitted ([Friction records carry an author-settable title; derivation is a structural fallback](#friction-records-carry-an-author-settable-title-derivation-is-a-structural-fallback)).
 - **[ORB-10680]** — Moved hub friction records into the host-global SQLite store to bound scan memory ([Friction records move to SQLite with a legacy-evidence path projection](#friction-records-move-to-sqlite-with-a-legacy-evidence-path-projection)).
+- **[ORB-10890]** — Record an explicitly-untrusted self-reported actor beside the trusted `role` so unauthenticated MCP traffic is attributable-but-labelled ([Unauthenticated MCP callers get a second, explicitly-untrusted identity field](#unauthenticated-mcp-callers-get-a-second-explicitly-untrusted-identity-field)).
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

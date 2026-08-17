@@ -1,0 +1,52 @@
+[execution.env]
+# Ordinary workspace settings inherit from the global config per key. The
+# environment allowlist and the Codex sandbox/approval keys below are the
+# security exceptions: when a workspace config exists, omitted values use
+# built-in defaults instead of inheriting the global file.
+# Agent subprocesses start from a cleared environment and receive only: a
+# built-in baseline (HOME, LANG, LC_ALL, LOGNAME, PATH, SHELL, TERM, TMPDIR, TZ,
+# USER), the `pass` names below, the variables the selected provider declares it
+# requires, and Orbit's own ORBIT_* execution envelope. The orbit process's full
+# environment is never inherited (not configurable, by design).
+# This is an allowlist, not a secret filter: a variable that is not named here
+# does not reach an agent whatever it is called, so a benignly named credential
+# such as DATABASE_URL stays out unless you add it.
+# User-specific vars (GITHUB_TOKEN, ANTHROPIC_API_KEY, DATABASE_URL, etc.) are opt-in — add them as needed.
+pass = [
+    "HOME",
+    "PATH",
+    "CODEX_HOME",
+    "TMPDIR",
+    "USER",
+    "__CF_USER_TEXT_ENCODING",  # macOS: required by CoreFoundation
+]
+
+[execution.codex]
+sandbox = "danger-full-access"
+# Optional: enable escalation requests for workflows that legitimately need approval.
+# approval_policy = "on-request"
+
+[scoring]
+enabled = true
+
+[workflow]
+# Default base branch for `orbit run ship`.
+# Override per-invocation with `--base <branch>`.
+base_branch = "main"
+# Crew used by bounded system activities, such as step-failure recovery.
+# `orbit init` seeds a `system` crew whenever it detects a supported CLI,
+# choosing the cheapest tier that family offers. Shipped job steps name that
+# crew directly, so edit the seeded `system` crew below to change what runs
+# them. This key covers recovery paths that have no job step to name a crew on,
+# and re-points the `system` name itself on a config that never seeded it. Old
+# single-family configs without `system` or `qa` reuse their validated default.
+system_crew = "system"
+
+[runtime]
+# Rotation + retention for the global JSONL log (~/.orbit/state/logs/orbit.jsonl).
+# Applied opportunistically at process start. All optional; the conservative
+# defaults below are used when a key is omitted. Invalid values
+# (0, or log_max_file_mb > log_max_total_mb) are rejected at config load.
+# log_retention_days = 7    # delete archives older than N days (>= 1)
+# log_max_total_mb   = 500  # total MiB budget across archives; oldest pruned first (>= 1)
+# log_max_file_mb    = 100  # roll the active log once it exceeds N MiB (>= 1, <= log_max_total_mb)

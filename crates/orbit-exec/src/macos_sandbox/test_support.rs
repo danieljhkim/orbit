@@ -2,7 +2,7 @@ use std::ffi::OsStr;
 #[cfg(target_os = "macos")]
 use std::path::{Path, PathBuf};
 
-use orbit_common::types::ResolvedFsProfile;
+use orbit_types::policy::ResolvedFsProfile;
 
 use super::compile::{SandboxCompileEnv, compile_macos_sandbox_profile_with_env};
 
@@ -22,9 +22,19 @@ pub(super) struct EnvOverrides<'a> {
     pub(super) grok_home: Option<&'a str>,
 }
 
-pub(super) fn compile_with_env(resolved: &ResolvedFsProfile, env: EnvOverrides<'_>) -> String {
+/// Provider used by profile tests that are not about the per-provider
+/// credential carve-out. Codex keeps every default credential deny, so a test
+/// asserting the shared clauses sees them unmodified.
+pub(super) const NEUTRAL_PROVIDER: &str = "codex";
+
+pub(super) fn compile_with_env(
+    resolved: &ResolvedFsProfile,
+    provider: &str,
+    env: EnvOverrides<'_>,
+) -> String {
     compile_macos_sandbox_profile_with_env(
         resolved,
+        provider,
         SandboxCompileEnv {
             home: env.home.map(OsStr::new),
             codex_home: env.codex_home.map(OsStr::new),
@@ -44,6 +54,37 @@ pub(super) fn shell_escape(path: &Path) -> String {
 #[cfg(target_os = "macos")]
 pub(super) fn sandbox_exec_path_for_test() -> PathBuf {
     super::spawn::sandbox_exec_path().expect("trusted sandbox-exec path")
+}
+
+/// Apply `profile_text` with the trusted `sandbox-exec` and report whether a
+/// child could read `path`. Shared by the keychain ordering tests so each one
+/// asserts on the kernel's verdict rather than on profile text.
+#[cfg(target_os = "macos")]
+pub(super) fn can_read_under_profile(profile_text: &str, path: &Path) -> bool {
+    use std::io::Write;
+
+    let mut profile_file = tempfile::Builder::new()
+        .prefix("orbit-sandbox-keychain-")
+        .suffix(".sb")
+        .tempfile()
+        .expect("tempfile");
+    profile_file
+        .write_all(profile_text.as_bytes())
+        .expect("write profile");
+    profile_file.flush().expect("flush");
+
+    std::process::Command::new(sandbox_exec_path_for_test())
+        .arg("-f")
+        .arg(profile_file.path())
+        .arg("/bin/sh")
+        .arg("-c")
+        .arg(format!("cat {}", shell_escape(path)))
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .expect("run sandbox-exec")
+        .success()
 }
 
 #[cfg(target_os = "macos")]

@@ -7,7 +7,7 @@
 
 use std::collections::BTreeSet;
 
-use orbit_common::types::OrbitError;
+use orbit_common::OrbitError;
 use rusqlite::params;
 
 use super::VectorStore;

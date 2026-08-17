@@ -13,6 +13,7 @@ workspace = true
 
 [dependencies]
 orbit-common = { path = "../orbit-common" }
+orbit-types = { path = "../orbit-types" }
 orbit-registry = { path = "../orbit-registry" }
 orbit-tools = { path = "../orbit-tools" }
 rmcp = { version = "1.5", default-features = false, features = ["server", "transport-io"] }

@@ -1,17 +1,17 @@
 ---
 title: Operations as Data — Decisions
 owner: claude
-last_updated: 2026-08-13
-last_validated: 2026-08-09
+last_updated: 2026-08-16
+last_validated: 2026-08-16
 status: Accepted
 feature: operations-as-data
 doc_role: decisions
 type: design
 summary: Decision log for the operations-as-data registry — the split spec/handler table, what stayed hand-written, and the touch-it-move-it ratchet.
 tags: [operations-as-data, architecture, adr-0209]
-paths: ["crates/orbit-common/src/operation.rs", "crates/orbit-common/src/friction/**"]
+paths: ["crates/orbit-common/src/operation.rs", "crates/orbit-common/src/authorization.rs", "crates/orbit-common/src/friction/**", "crates/orbit-tools/src/builtin/orbit/tests/authorization.rs"]
 related_features: [operations-as-data]
-related_artifacts: [ORB-10358]
+related_artifacts: [ORB-10358, ORB-10453, ORB-10478]
 ---
 
 # Operations as Data — Decisions
@@ -27,6 +27,8 @@ the ratchet.
 - **[Split spec/handler table joined by a typed verb enum](#split-spechandler-table-joined-by-a-typed-verb-enum) — Split spec/handler table joined by a typed verb enum** — Accepted.
 - **[Renderers and HTTP routes stay hand-written](#renderers-and-http-routes-stay-hand-written) — Renderers and HTTP routes stay hand-written** — Accepted.
 - **[Freeze the pre-migration surface as fixtures before migrating](#freeze-the-pre-migration-surface-as-fixtures-before-migrating) — Freeze the pre-migration surface as fixtures before migrating** — Accepted.
+- **[Capability chokepoint for destructive operations outside MCP](#capability-chokepoint-for-destructive-operations-outside-mcp) — Capability chokepoint for destructive operations outside MCP** — Accepted.
+- **[MCP advertisement is placement; the capability chokepoint is permission](#mcp-advertisement-is-placement-the-capability-chokepoint-is-permission) — MCP advertisement is placement; the capability chokepoint is permission** — Accepted.
 
 ## Split spec/handler table joined by a typed verb enum
 
@@ -175,7 +177,7 @@ This is an **accident guard, not a security boundary**. Agents on a development 
 - **Per-subcommand guards.** Rejected: `orbit tool run` and every future entry point reopen the hole. This is the failure mode the task was filed against.
 - **A credential, password, or keychain gate.** Rejected on the framing above — no protection, and it would misrepresent the boundary.
 - **Making `ToolRegistry::execute` consult `ToolAvailability`.** Rejected: availability is an MCP advertisement concept, and enforcing it there would refuse operator callers the CLI legitimately serves, deepening rather than resolving the advertisement/enforcement conflation.
-- **Converting the `register_inactive` builtins to `operator_only` policies.** Attractive — advertisement would then derive from the same declaration — but it changes what operator MCP sessions can see, and the capability chokepoint closes the actual bypass without that blast radius. Filed as ORB-10478, which also owns the residual gap noted in Consequences.
+- **Converting the `register_inactive` builtins to `operator_only` policies.** Attractive — advertisement would then derive from the same declaration — but it changes what operator MCP sessions can see, and the capability chokepoint closes the actual bypass without that blast radius. Filed as ORB-10478, which also owns the residual gap noted in Consequences. Settled by [MCP advertisement is placement; the capability chokepoint is permission](#mcp-advertisement-is-placement-the-capability-chokepoint-is-permission): the two declarations stay separate, and a guardrail test pins their pairing.
 
 ### Consequences
 
@@ -184,8 +186,49 @@ This is an **accident guard, not a security boundary**. Agents on a development 
 - Cost: a non-interactive caller with no session grant and no agent envelope — a shell script, a cron entry, a test binary — is now refused governed operations and must set `ORBIT_OPERATOR=1`. This is a real behavior change for automation that previously worked silently, and it landed as churn in three CLI integration tests. It is the intended trade: an unidentified caller performing destruction is precisely the accident being guarded against.
 - Cost: the escape hatch is an environment variable an agent can set, so a *determined* agent is not stopped. That is by construction, not oversight — see the framing. The value delivered is the loud failure and the record, not prevention.
 - Cost: the `governed_when` predicate for flag-gated commands (`--confirm`) lives in the `Commands::operation` arm, so a new destructive CLI command must say that it is one. The requirement itself still lives only in the registry, but the invocation-to-operation mapping is a second thing to remember. The compiler cannot catch a missing mapping.
-- Residual gap, tracked as **ORB-10478**: tools declared `McpExposure::OperatorOnly` (`orbit.friction.list` / `show` / `update`) are refused by the hub MCP *call* path (`admitted()` in `crates/orbit-remote/src/mcp/hub.rs`) but are absent from the registry, so `orbit tool run` still performs them for any caller. They are left ungoverned deliberately: `OperatorOnly` currently encodes audience/placement rather than destructiveness, two of the three are non-destructive reads, and enforcing MCP `allowed_capabilities()` at the tool chokepoint would refuse agents ordinary `orbit friction list` reads — a regression, not a fix. Closing it means separating "who may see this" from "who may perform this", which is ORB-10478's job.
+- Residual gap, formerly tracked as **ORB-10478**, now closed: tools declared `McpExposure::OperatorOnly` (`orbit.friction.list` / `show` / `update`) were refused by the hub MCP *call* path (`admitted()`) but were absent from the registry, so `orbit tool run` still performed them for any caller. They were left ungoverned deliberately, because `OperatorOnly` encoded audience/placement rather than destructiveness and governing a read would have refused agents ordinary `orbit friction list`. See [MCP advertisement is placement; the capability chokepoint is permission](#mcp-advertisement-is-placement-the-capability-chokepoint-is-permission) for the resolution: `McpExposure` and `admitted()` no longer exist, the friction reads stay ungoverned on purpose, and the surviving pairing is pinned by a test.
 - The registry is intentionally small and opt-in. It names the operations whose accidental invocation destroys something, not every mutating tool; broadening it is a judgment call to be made deliberately, per operation.
+
+## MCP advertisement is placement; the capability chokepoint is permission
+
+**Recorded:** 2026-08 · [ORB-10478] · **Implemented** in [ORB-10478]
+**Paths:** `crates/orbit-common/src/authorization.rs`, `crates/orbit-common/src/operation.rs`, `crates/orbit-tools/src/builtin/orbit/tests/authorization.rs`
+
+### Context
+
+[Capability chokepoint for destructive operations outside MCP](#capability-chokepoint-for-destructive-operations-outside-mcp) closed the `orbit tool run` bypass but left one narrower question open, and ORB-10478 was filed to answer it: tools declared `McpExposure::OperatorOnly` were denied at the owner MCP *call* path by `admitted()`, yet were absent from `GOVERNED_OPERATIONS`, so the CLI performed them for any caller. Two surfaces encoded overlapping things, and one of them was acting as an authorization statement without being written as one.
+
+Between the filing and this decision, most of that shape was deleted rather than reconciled. `McpExposure`, `allowed_capabilities()`, `admitted()`, and the `orbit-remote` crate that hosted them are all gone with the owner-route recomposition and the MCP v1 ownership cleanup. What is left is two axes and no overlap between their declarations:
+
+- **Placement** — `OperationSpec::mcp_scope`, and `ToolRegistry::register_mcp` versus `register_inactive`. Decides which surfaces *list* a tool. `tools/list` performs no capability filtering, and `ToolRegistry::execute` never consults availability, so an unadvertised tool remains reachable through `orbit tool run`.
+- **Permission** — `GOVERNED_OPERATIONS`, evaluated by `authorize` at `OrbitRuntime::authorize_tool_operation`, which every tool caller traverses.
+
+The gap the earlier entry named has therefore closed by deletion, not by a fix: `orbit.friction.list` / `show` / `update` are ungoverned, no MCP path denies them, and an agent reads them from the CLI as before. What replaced it is the inverse pairing. `orbit.workflow.ship`, `orbit.workflow.run.{show,list,resume}` ([ORB-10534]) and `orbit.command.exec` ([ORB-10711]) are advertised to every MCP session and governed `operator` at the chokepoint, so an agent session is listed five tools it cannot perform.
+
+### Decision
+
+1. **Placement is not permission, and the two declarations stay separate.** MCP advertisement is an audience decision — what an agent reading `tools/list` is pointed at. It authorizes nothing. `GOVERNED_OPERATIONS` is the only authorization statement Orbit makes about a tool, and it is surface-independent by construction: the same answer for an MCP call, `orbit tool run`, the dashboard, and the deterministic dispatcher. This is stated once, in `orbit_common::authorization`'s module documentation, with a one-line pointer from the placement field so neither axis can be read as the whole story.
+
+2. **A disagreeing pairing is legitimate, but never accidental.** Advertised-and-governed is how the operator MCP surface is expressed; unadvertised-and-ungoverned is how `orbit friction show` is kept off the agent surface without being taken away from anyone. Both are fine. Silent drift into either is not, so `crates/orbit-tools/src/builtin/orbit/tests/authorization.rs` declares the placement of every governed tool operation as a table and asserts it against the live registry in both directions. Advertising a governed tool, governing an advertised one, or dropping either half fails the test until the table is updated. `orbit-tools` is the lowest crate that can see both axes, so the check needs no new dependency edge.
+
+3. **The agent-reachable friction reads stay ungoverned, and that is now a test.** Because the chokepoint is surface-independent, governing `orbit.friction.list` / `show` would refuse an agent the CLI read as well as the MCP one. A pin asserts they stay off the registry.
+
+4. **An advertised governed tool must not list `agent` among its allowed capabilities.** Governing an operation the ordinary MCP caller already holds the capability for buys nothing and dilutes the entries that do refuse. A second assertion enforces it.
+
+### Rejected alternatives
+
+- **Give the exposure declaration a second axis — "which surface advertises" versus "which capability may perform" — and derive chokepoint enforcement from the second** (ORB-10478 option 1). Rejected: there is no longer a second advertisement axis to split. `McpExposure` is gone and `mcp_scope` is a plain placement decision, so this would mean *introducing* a policy framework to unify two declarations that already have one enforcement point between them — speculative v2 machinery for a drift that a ten-line table catches.
+- **Narrow `OperatorOnly` to performable-only-by-operator, move the read-only friction triage tools to an agent exposure, and enforce `allowed_capabilities()` at the tool chokepoint** (option 2). Rejected: `OperatorOnly` no longer exists to narrow, and the chokepoint already enforces capabilities from a single declaration. The remaining content of the option — deriving enforcement from placement — would govern `orbit friction show` because it is unadvertised, which is precisely the CLI regression the earlier entry declined to ship.
+- **Reconsidering the owner-path `admitted()` denial** (option 3's own follow-through). Not rejected but already satisfied: that denial was removed with the owner route, so MCP placement no longer acts as an authorization statement anywhere and there is nothing left to reconsider.
+- **Leaving the pairing to a reader.** Rejected: it is exactly what the filing complained about — the relationship was true but only discoverable by holding two crates open, which is how it drifted in the first place.
+
+### Consequences
+
+- The question "may this caller perform this?" has one answer and one place to look, on every surface. "Will this caller be shown it?" is a different question with a different owner, and neither now implies the other by accident.
+- An agent MCP session still sees five tools it cannot call. This is the accepted cost of a single advertised tool list plus per-call capability enforcement, and it is recorded rather than papered over. Filtering `tools/list` by session capability would remove it, but that is an MCP-server change with its own surface implications and no current demand; it is deliberately not bundled here.
+- Cost: adding a governed tool now requires one more line — its placement — in the guardrail table. That is the intended friction: the line is where the advertise-or-not decision gets made explicitly.
+- An MCP session's capabilities are decided once, when its server process starts, and the process environment is never consulted per call: `orbit mcp serve` grants `agent`, `orbit mcp serve --operator` grants `agent` and `operator`, and `ORBIT_OPERATOR` in the server's environment grants nothing on this surface ([ORB-10927]). The flag is the only operator path over MCP — the deliberate act has to be in the argv the operator wrote, because an environment variable is inherited by whatever server an agent happens to launch. `orbit mcp listen` is agent-only for the stronger version of the same reason: the socket authenticates no client, so a listener started with operator authority would serve it to every accepted connection.
+- Because the MCP chokepoint discards the process envelope by design, its denial names the remedy that surface actually has (`orbit mcp serve --operator`, or the CLI) rather than the `ORBIT_OPERATOR` override that is inert there. That is `CapabilityResolution` in `orbit_common::governance::authorization`: one enum on the envelope, carried into the denial, changing the remedy sentence and nothing about the decision.
 
 ## Task References
 

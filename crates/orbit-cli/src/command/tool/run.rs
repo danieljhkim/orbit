@@ -1,8 +1,9 @@
 use clap::{Args, ValueEnum};
 use orbit_cmd::registry_runtime::RegisteredRuntimeFactory;
-use orbit_common::types::{McpTransport, ToolSessionContext, audit_execution_id};
+use orbit_common::observability::audit_id::audit_execution_id;
 use orbit_core::{OrbitError, OrbitRuntime};
 use orbit_registry::{HostIdentityState, inspect_host_identity};
+use orbit_types::tool::{McpTransport, ToolSessionContext};
 use serde_json::{Map, Value};
 
 use crate::command::{CommandOut, CommandOutput, Execute, Payload};

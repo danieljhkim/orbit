@@ -1,8 +1,9 @@
 use std::path::{Path, PathBuf};
 
-use orbit_common::types::{OrbitError, WorkspaceRegistry};
-use orbit_common::utility::fs::atomic_write_text;
-pub use orbit_common::utility::path::global_orbit_dir;
+use orbit_common::OrbitError;
+use orbit_common::fs::io::atomic_write_text;
+pub use orbit_common::fs::path::global_orbit_dir;
+use orbit_types::workspace::WorkspaceRegistry;
 
 use super::{WorkspaceRegistryHostContext, parse_workspace_registry, validate_workspace_registry};
 use crate::{HostIdentityState, inspect_host_identity};
@@ -78,5 +79,5 @@ fn registry_host_context(path: &Path) -> Result<WorkspaceRegistryHostContext, Or
 fn write_registry(registry: &WorkspaceRegistry, path: &Path) -> Result<(), OrbitError> {
     let content = serde_json::to_string_pretty(registry)
         .map_err(|error| OrbitError::WorkspaceError(format!("serialize registry: {error}")))?;
-    atomic_write_text(path, &content).map_err(Into::into)
+    atomic_write_text(path, &content).map_err(|error| OrbitError::from_write_io(path, error))
 }

@@ -1,16 +1,17 @@
-use orbit_common::types::{OrbitError, TaskStatus};
+use orbit_common::OrbitError;
 use orbit_store::{TaskLockConflict, TaskLockHolder};
+use orbit_types::task::TaskStatus;
 use serde_json::{Value, json};
 use tempfile::TempDir;
 
 use crate::OrbitRuntime;
-use crate::command::task::TaskAddParams;
+use crate::application::task::TaskAddParams;
 
 use super::super::locks::{
     TaskLockReservationScope, parse_task_lock_reservation_scope, requested_task_files,
     task_lock_conflicts,
 };
-use crate::runtime::orbit_tool_host::test_support::{
+use crate::adapter::tool_host::test_support::{
     create_context_task, invalid_input_message, run_tool_as_operator, test_runtime,
     unmanaged_tool_env_guard,
 };
@@ -546,8 +547,9 @@ fn files_shape_reservations_conflict_and_release_like_task_reservations() {
     assert_eq!(task_reserve["reserved"], true);
 }
 
-use orbit_common::types::{AuditEvent, Role};
 use orbit_tools::{ReservationOwnerContext, ToolContext};
+use orbit_types::policy::Role;
+use orbit_types::telemetry::AuditEvent;
 
 fn task_lock_audit_event(runtime: &OrbitRuntime, tool_name: &str, command: &str) -> AuditEvent {
     runtime

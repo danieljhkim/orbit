@@ -1,8 +1,9 @@
-use orbit_common::types::{OrbitError, WorkspacePaths};
+use orbit_common::OrbitError;
+use orbit_types::workspace::WorkspacePaths;
 
 use crate::OrbitRuntime;
 
-pub(super) fn current_repo_root(runtime: &OrbitRuntime) -> Result<String, OrbitError> {
+pub(crate) fn current_repo_root(runtime: &OrbitRuntime) -> Result<String, OrbitError> {
     Ok(runtime
         .context
         .paths()
@@ -11,7 +12,7 @@ pub(super) fn current_repo_root(runtime: &OrbitRuntime) -> Result<String, OrbitE
         .to_string())
 }
 
-pub(super) fn codex_workspace_write_writable_dirs(paths: &WorkspacePaths) -> Vec<String> {
+pub(crate) fn codex_workspace_write_writable_dirs(paths: &WorkspacePaths) -> Vec<String> {
     let mut dirs = Vec::new();
     for dir in [&paths.orbit_dir, &paths.global_dir] {
         let dir = dir.to_string_lossy().into_owned();

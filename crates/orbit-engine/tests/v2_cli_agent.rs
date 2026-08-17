@@ -27,14 +27,15 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use orbit_common::types::JobScheduleState;
-use orbit_common::types::activity_job::{
-    ActivityV2Spec, AgentLoopSpec, JobKind, JobV2, JobV2Step, JobV2StepBody, LoopBlock, OnDenial,
-    Provider, RetiredFeatureError, TargetStep, load_activity_asset, validate_job_retired_sessions,
-};
+use orbit_engine::activity_job::load_activity_asset;
 use orbit_engine::{
     DispatchError, ResolvedCliExecutor, RuntimeHost, V2AuditWriter, V2DispatchInput,
     dispatch_v2_activity,
+};
+use orbit_types::workflow::JobScheduleState;
+use orbit_types::workflow::activity_job::{
+    ActivityV2Spec, AgentLoopSpec, JobKind, JobV2, JobV2Step, JobV2StepBody, LoopBlock, OnDenial,
+    Provider, RetiredFeatureError, TargetStep, validate_job_retired_sessions,
 };
 use serde_json::Value;
 use tempfile::TempDir;
@@ -333,7 +334,7 @@ fn scenario_j_cli_executor_static_args_are_audited() -> Result<(), Box<dyn std::
     let argv = events
         .iter()
         .find_map(|event| match &event.kind {
-            orbit_common::types::activity_job::V2AuditEventKind::CliInvocationStarted {
+            orbit_types::workflow::activity_job::V2AuditEventKind::CliInvocationStarted {
                 argv_redacted,
                 ..
             } => Some(argv_redacted),
@@ -400,7 +401,7 @@ fn build_writer(
     fs::create_dir_all(&audit_root)?;
     let writer = V2AuditWriter::with_disk_sinks(
         &audit_root,
-        orbit_store::Store::open_in_memory()?,
+        Arc::new(orbit_store::Store::open_in_memory()?),
         "ws_smoke",
         run_id,
         "smoke".to_string(),

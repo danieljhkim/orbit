@@ -17,12 +17,12 @@
 
 use std::path::{Path, PathBuf};
 
-use orbit_common::types::OrbitError;
-use orbit_store::layout::{self, LayoutMigrationInfo, SUPPORTED_LAYOUT_VERSION};
-use orbit_store::sqlite::migration::{
+use orbit_common::OrbitError;
+use orbit_store::maintenance::migration::{
     PendingSchemaMigration, SUPPORTED_SCHEMA_VERSION, pending_schema_migrations_after,
     read_schema_ledger_status,
 };
+use orbit_store::workflow::layout::{self, LayoutMigrationInfo, SUPPORTED_LAYOUT_VERSION};
 
 use orbit_core::OrbitRuntime;
 
@@ -72,7 +72,10 @@ pub fn migrate_dry_run_at(
     global_root: &Path,
     orbit_dir: &Path,
 ) -> Result<MigrateStatus, OrbitError> {
-    let audit_db = orbit_core::config::resolved_audit_db_path(global_root, orbit_dir)?;
+    let audit_db = orbit_config::resolved_audit_db_path(&orbit_config::ConfigRoots::new(
+        global_root,
+        orbit_dir,
+    ))?;
     let ledger = read_schema_ledger_status(&audit_db)?;
 
     Ok(MigrateStatus {

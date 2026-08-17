@@ -3,12 +3,14 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use chrono::{DateTime, Utc};
-use orbit_common::types::{JobRunState, OrbitError, TaskStatus};
-use orbit_store::{
+use orbit_common::OrbitError;
+use orbit_store::contracts::{
     ActiveTaskReservation, ReleasedTaskReservation, TaskReservationOwnedConflictsParams,
     TaskReservationReleaseByOwnerParams, TaskReservationReleaseParams,
     TaskReservationReleaseReason,
 };
+use orbit_types::task::TaskStatus;
+use orbit_types::workflow::JobRunState;
 use serde_json::json;
 
 use crate::OrbitRuntime;

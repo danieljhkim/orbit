@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
-use orbit_common::types::{InvocationTrace, OrbitError};
+use orbit_common::OrbitError;
+use orbit_types::telemetry::InvocationTrace;
 
 use crate::agent::{AgentConfig, ProviderOptions};
 use crate::providers::claude::claude_cli::ClaudeCliTransport;

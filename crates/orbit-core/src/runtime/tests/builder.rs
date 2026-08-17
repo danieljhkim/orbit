@@ -2,16 +2,17 @@
 
 use std::path::PathBuf;
 
-use orbit_store::sqlite::task_registry::read_workspace_config_optional;
+use orbit_store::maintenance::task_registry::read_workspace_config_optional;
 
 use crate::OrbitError;
 
-use orbit_common::types::{NotFoundKind, TaskStatus};
+use orbit_common::NotFoundKind;
+use orbit_types::task::TaskStatus;
 use tempfile::tempdir;
 
 use crate::OrbitRuntime;
-use crate::command::task::{TaskAddParams, TaskUpdateParams};
-use crate::command::workflow::ShipMode;
+use crate::application::task::{TaskAddParams, TaskUpdateParams};
+use crate::application::workflow::ShipMode;
 use crate::runtime::WorkspaceRuntimeBinding;
 
 fn v2_runtime() -> (tempfile::TempDir, PathBuf, PathBuf, OrbitRuntime) {
@@ -55,9 +56,9 @@ fn registry_neutral_binding_rejects_a_conflicting_workspace_config() {
     let workspace_root = root.path().join("repo/.orbit");
     std::fs::create_dir_all(&global_root).expect("create global root");
     std::fs::create_dir_all(&workspace_root).expect("create workspace root");
-    orbit_store::sqlite::task_registry::write_workspace_config(
+    orbit_store::maintenance::task_registry::write_workspace_config(
         &workspace_root,
-        &orbit_store::sqlite::task_registry::WorkspaceConfig {
+        &orbit_store::maintenance::task_registry::WorkspaceConfig {
             schema_version: 1,
             workspace_id: "ws_configured".to_string(),
         },

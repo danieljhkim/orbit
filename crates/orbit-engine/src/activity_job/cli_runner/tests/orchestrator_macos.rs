@@ -5,8 +5,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use orbit_agent::loop_engine::audit::AuditSink;
-use orbit_common::types::activity_job::V2AuditEventKind;
 use orbit_exec::sandbox_exec_program_for_audit;
+use orbit_types::workflow::activity_job::V2AuditEventKind;
 use tempfile::tempdir;
 
 use super::super::super::audit_writer::V2AuditWriter;
@@ -45,6 +45,7 @@ fn run_cli_backend_audit_argv_starts_with_sandbox_exec_for_each_provider() {
             sandbox: Some(sandbox_for_test()),
             task_context: None,
             workspace_root: None,
+            orbit_root: None,
         };
         let spec = test_agent_loop_spec_for(provider_name, Duration::from_secs(5));
 
@@ -119,6 +120,7 @@ fn run_cli_backend_pins_codex_sandbox_under_outer_wrapper() {
         sandbox: Some(sandbox_for_test()),
         task_context: None,
         workspace_root: None,
+        orbit_root: None,
     };
     let spec = test_agent_loop_spec_for("codex", Duration::from_secs(5));
 
@@ -192,6 +194,7 @@ fn run_cli_backend_drops_gemini_sandbox_flag_under_outer_wrapper() {
         sandbox: Some(sandbox_for_test()),
         task_context: None,
         workspace_root: None,
+        orbit_root: None,
     };
     let spec = test_agent_loop_spec_for("gemini", Duration::from_secs(5));
 
@@ -258,6 +261,7 @@ fn run_cli_backend_drops_grok_sandbox_flag_under_outer_wrapper() {
         sandbox: Some(sandbox_for_test()),
         task_context: None,
         workspace_root: None,
+        orbit_root: None,
     };
     let spec = test_agent_loop_spec_for("grok", Duration::from_secs(5));
 
@@ -324,6 +328,7 @@ fn run_cli_backend_leaves_claude_argv_suffix_unchanged_under_sandbox() {
         sandbox: Some(sandbox_for_test()),
         task_context: None,
         workspace_root: None,
+        orbit_root: None,
     };
     let spec = test_agent_loop_spec_for("claude", Duration::from_secs(5));
 

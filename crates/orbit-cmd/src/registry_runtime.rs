@@ -2,15 +2,15 @@
 
 use std::path::{Path, PathBuf};
 
-use orbit_common::types::{
-    OrbitError, Workspace, WorkspaceCheckout, WorkspaceCheckoutRole, WorkspaceRegistry,
-    WorkspaceStatus,
-};
+use orbit_common::OrbitError;
 use orbit_core::OrbitRuntime;
 use orbit_core::runtime::{
     OrbitRuntimeRoots, ResolvedOrbitRoots, WorkspaceRootHint, WorkspaceRuntimeBinding,
 };
-use orbit_store::sqlite::task_registry::{TaskRegistryStore, task_registry_path};
+use orbit_store::maintenance::task_registry::{TaskRegistryStore, task_registry_path};
+use orbit_types::workspace::{
+    Workspace, WorkspaceCheckout, WorkspaceCheckoutRole, WorkspaceRegistry, WorkspaceStatus,
+};
 use serde_json::Value;
 
 use orbit_registry::{HOST_TOML_FILE, load_host_identity, workspace_registry};
