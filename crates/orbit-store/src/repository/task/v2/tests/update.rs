@@ -276,3 +276,31 @@ fn artifact_update_writes_manifest_and_sorted_text_artifacts() {
         .expect_err("reject unsafe artifact path");
     assert!(err.to_string().contains(".."), "{err}");
 }
+
+#[cfg(unix)]
+#[test]
+fn document_update_on_readonly_bundle_dir_names_lock_path_and_hints_sandbox() {
+    let temp = TempDir::new().expect("tempdir");
+    let store = store(&temp);
+    store
+        .create_task(create_params("Original", TaskStatus::Backlog))
+        .expect("create task");
+    let bundle_dir = store
+        .bundle_store
+        .bundle_path("ORB-00000")
+        .expect("bundle path");
+    let lock_path = bundle_dir.join(".task.yaml.lock");
+    let _restore = make_readonly(&bundle_dir);
+
+    let err = store
+        .update_task_document(
+            "ORB-00000",
+            &TaskDocumentUpdateParams {
+                actor: "codex:gpt-5.5".to_string(),
+                title: Some("Renamed".to_string()),
+                ..Default::default()
+            },
+        )
+        .expect_err("update must fail on a read-only bundle dir");
+    assert_sandbox_write_io(&err, &lock_path.display().to_string());
+}

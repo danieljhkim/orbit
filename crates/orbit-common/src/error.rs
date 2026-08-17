@@ -325,14 +325,10 @@ impl OrbitError {
     /// to `linux_bwrap_write_grant_diagnostic`. Other I/O stays a bare
     /// [`Self::Io`] so read and capacity failures keep their existing text.
     pub fn from_write_io(path: &Path, err: std::io::Error) -> Self {
-        if crate::fs::io::is_readonly_or_access_error(&err) {
-            Self::Io(format!(
-                "`{}` is not writable: {err}; this is likely a sandbox or environment condition, not an Orbit store defect",
-                path.display()
-            ))
-        } else {
-            Self::Io(err.to_string())
-        }
+        Self::Io(
+            crate::fs::io::write_access_error_message(path, &err)
+                .unwrap_or_else(|| err.to_string()),
+        )
     }
 }
 

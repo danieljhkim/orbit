@@ -200,7 +200,7 @@ impl TaskBundleStoreV2 {
         let removed_bundle = match fs::remove_dir_all(&bundle_dir) {
             Ok(()) => true,
             Err(err) if err.kind() == std::io::ErrorKind::NotFound => false,
-            Err(err) => return Err(OrbitError::Io(err.to_string())),
+            Err(err) => return Err(OrbitError::from_write_io(&bundle_dir, err)),
         };
         let removed_projection = match self.workspace_orbit_dir.as_deref() {
             Some(workspace_orbit_dir) => remove_projection_entry(workspace_orbit_dir, task_id)?,

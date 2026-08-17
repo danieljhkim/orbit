@@ -194,6 +194,48 @@ fn delete_task_removes_v2_bundle_and_index_rows() {
     assert!(!store.delete_task("ORB-00000").expect("delete missing"));
 }
 
+#[cfg(unix)]
+#[test]
+fn create_task_on_readonly_parent_dir_names_lock_path_and_hints_sandbox() {
+    let temp = TempDir::new().expect("tempdir");
+    let store = store(&temp);
+    store
+        .create_task(create_params("First", TaskStatus::Backlog))
+        .expect("create first");
+    let next_bundle = store
+        .bundle_store
+        .bundle_path("ORB-00001")
+        .expect("next bundle path");
+    let parent = next_bundle.parent().expect("tasks dir").to_path_buf();
+    let lock_path = parent.join(".ORB-00001.lock");
+    let _restore = make_readonly(&parent);
+
+    let err = store
+        .create_task(create_params("Second", TaskStatus::Backlog))
+        .expect_err("create must fail when the tasks dir is read-only");
+    assert_sandbox_write_io(&err, &lock_path.display().to_string());
+}
+
+#[cfg(unix)]
+#[test]
+fn delete_task_on_readonly_bundle_dir_names_path_and_hints_sandbox() {
+    let temp = TempDir::new().expect("tempdir");
+    let store = store(&temp);
+    store
+        .create_task(create_params("Delete me", TaskStatus::Rejected))
+        .expect("create task");
+    let bundle_dir = store
+        .bundle_store
+        .bundle_path("ORB-00000")
+        .expect("bundle path");
+    let _restore = make_readonly(&bundle_dir);
+
+    let err = store
+        .delete_task("ORB-00000")
+        .expect_err("delete must fail on a read-only bundle dir");
+    assert_sandbox_write_io(&err, &bundle_dir.display().to_string());
+}
+
 #[test]
 fn create_task_persists_lineage_relations() {
     let temp = TempDir::new().expect("tempdir");
