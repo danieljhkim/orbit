@@ -49,10 +49,7 @@ impl OrbitRuntime {
         };
         let envelope = match capability_enforcement {
             CapabilityEnforcement::Enforce => CallerEnvelope::from_process_env(session_context),
-            CapabilityEnforcement::McpSessionOnly => CallerEnvelope {
-                session_capabilities: session_context.effective_capabilities.clone(),
-                ..CallerEnvelope::default()
-            },
+            CapabilityEnforcement::McpSessionOnly => CallerEnvelope::mcp_session(session_context),
         };
         self.decide_with_envelope(operation, envelope)
     }

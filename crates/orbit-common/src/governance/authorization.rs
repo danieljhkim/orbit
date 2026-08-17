@@ -1,9 +1,10 @@
 //! Operation authorization shared by Orbit's execution surfaces.
 //!
 //! This module declares which operations are governed, which capabilities may
-//! perform them, and the decision function every enforcing surface calls. MCP
-//! v1 deliberately defers this authorization; CLI and managed-run paths still
-//! use the same capability vocabulary.
+//! perform them, and the decision function every enforcing surface calls. Every
+//! surface — CLI, MCP, dashboard, managed run — resolves the same capability
+//! vocabulary here; they differ only in which signals may contribute to it,
+//! which is [`CapabilityResolution`].
 //!
 //! # What this is, and what it is not
 //!
@@ -35,11 +36,12 @@
 //! MCP call, a CLI `tool run`, the dashboard, and the deterministic dispatcher.
 //!
 //! The two therefore need not agree, and deliberately do not. A tool may be
-//! advertised and governed (the operator MCP surface: an operator session sees
-//! and performs it, an agent session sees and is refused), or unadvertised and
-//! ungoverned (`orbit friction show` — kept off the agent MCP surface because
-//! `list` already returns what an agent needs, but freely readable from any
-//! CLI). What must never happen is for a pairing to change by accident. The
+//! advertised and governed (the operator MCP surface: a session served by
+//! `orbit mcp serve --operator` sees and performs it, an ordinary agent session
+//! sees and is refused), or unadvertised and ungoverned (`orbit friction show`
+//! — kept off the agent MCP surface because `list` already returns what an
+//! agent needs, but freely readable from any CLI).
+//! What must never happen is for a pairing to change by accident. The
 //! guardrail that pins every governed tool's placement is
 //! `crates/orbit-tools/src/builtin/orbit/tests/authorization.rs`, which lives
 //! in the lowest crate that can see both axes at once [ORB-10478].
@@ -344,12 +346,32 @@ impl Display for CallerProvenance {
     }
 }
 
+/// Which signals a surface allows to contribute to a caller's capabilities.
+///
+/// This is not a second authorization rule — [`authorize`] is unchanged by it.
+/// It records what the surface was willing to look at, which is exactly what a
+/// refused caller needs to know to act: the escape hatch works on one of these
+/// surfaces and is inert on the other.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum CapabilityResolution {
+    /// The hosting process's environment counts, so [`OPERATOR_OVERRIDE_ENV`]
+    /// and the agent envelope contribute. This is every non-MCP surface.
+    #[default]
+    ProcessEnvelope,
+    /// Only grants asserted by the trusted session count. The MCP surface
+    /// resolves this way so an agent session cannot inherit operator authority
+    /// from whatever process happens to host its server.
+    SessionOnly,
+}
+
 /// The raw signals a chokepoint observed about its caller.
 ///
 /// Kept as plain data so the resolution rules are testable without mutating
 /// process state, which no test can do safely in a threaded runner.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct CallerEnvelope {
+    /// Which signals this surface honors.
+    pub resolution: CapabilityResolution,
     /// Grants asserted by a trusted seam: a validated MCP session, or the run
     /// dispatcher stamping its own sanction onto a tool context.
     pub session_capabilities: BTreeSet<McpCapability>,
@@ -365,10 +387,25 @@ impl CallerEnvelope {
     /// Observe the current process, layered under `session`'s asserted grants.
     pub fn from_process_env(session: &ToolSessionContext) -> Self {
         Self {
+            resolution: CapabilityResolution::ProcessEnvelope,
             session_capabilities: session.effective_capabilities.clone(),
             operator_override: env_truthy(OPERATOR_OVERRIDE_ENV),
             agent_declared: agent_declared_in_env(),
             interactive_terminal: interactive_terminal(),
+        }
+    }
+
+    /// Read `session`'s grants and nothing else.
+    ///
+    /// The MCP chokepoint builds its envelope here. The server process decides
+    /// once, at startup, what authority it serves sessions with; discarding the
+    /// live process environment is what keeps that decision from being reopened
+    /// per call by whatever the hosting agent exported.
+    pub fn mcp_session(session: &ToolSessionContext) -> Self {
+        Self {
+            resolution: CapabilityResolution::SessionOnly,
+            session_capabilities: session.effective_capabilities.clone(),
+            ..Self::default()
         }
     }
 }
@@ -378,6 +415,7 @@ impl CallerEnvelope {
 pub struct CallerCapabilities {
     grants: BTreeSet<McpCapability>,
     provenance: CallerProvenance,
+    resolution: CapabilityResolution,
 }
 
 impl CallerCapabilities {
@@ -397,34 +435,40 @@ impl CallerCapabilities {
     /// 5. **Nothing.** An unidentified caller gets an empty set, and every
     ///    governed operation therefore denies. Ambiguity fails closed.
     pub fn resolve(envelope: &CallerEnvelope) -> Self {
+        let (grants, provenance) = Self::resolve_grants(envelope);
+        Self {
+            grants,
+            provenance,
+            resolution: envelope.resolution,
+        }
+    }
+
+    fn resolve_grants(envelope: &CallerEnvelope) -> (BTreeSet<McpCapability>, CallerProvenance) {
         if !envelope.session_capabilities.is_empty() {
-            return Self {
-                grants: envelope.session_capabilities.clone(),
-                provenance: CallerProvenance::Session,
-            };
+            return (
+                envelope.session_capabilities.clone(),
+                CallerProvenance::Session,
+            );
         }
         if envelope.operator_override {
-            return Self {
-                grants: BTreeSet::from([McpCapability::Operator]),
-                provenance: CallerProvenance::OperatorOverride,
-            };
+            return (
+                BTreeSet::from([McpCapability::Operator]),
+                CallerProvenance::OperatorOverride,
+            );
         }
         if envelope.agent_declared {
-            return Self {
-                grants: BTreeSet::from([McpCapability::Agent]),
-                provenance: CallerProvenance::AgentEnvelope,
-            };
+            return (
+                BTreeSet::from([McpCapability::Agent]),
+                CallerProvenance::AgentEnvelope,
+            );
         }
         if envelope.interactive_terminal {
-            return Self {
-                grants: BTreeSet::from([McpCapability::Operator]),
-                provenance: CallerProvenance::InteractiveTerminal,
-            };
+            return (
+                BTreeSet::from([McpCapability::Operator]),
+                CallerProvenance::InteractiveTerminal,
+            );
         }
-        Self {
-            grants: BTreeSet::new(),
-            provenance: CallerProvenance::Unknown,
-        }
+        (BTreeSet::new(), CallerProvenance::Unknown)
     }
 
     /// The resolved grants.
@@ -468,6 +512,31 @@ pub struct AuthorizationDenial {
     pub granted: String,
     /// How those grants were derived.
     pub provenance: CallerProvenance,
+    /// Which signals the refusing surface honored, and therefore which remedy
+    /// the caller actually has.
+    pub resolution: CapabilityResolution,
+}
+
+impl AuthorizationDenial {
+    /// The one documented way for this caller, on this surface, to proceed.
+    ///
+    /// The remedy is surface-specific because [`OPERATOR_OVERRIDE_ENV`] is
+    /// deliberately ignored under [`CapabilityResolution::SessionOnly`];
+    /// advising it there would send an operator in a circle.
+    fn remedy(&self) -> String {
+        match self.resolution {
+            CapabilityResolution::ProcessEnvelope => format!(
+                "If this is a deliberate operator action, re-run it with {OPERATOR_OVERRIDE_ENV}=1 \
+                 set — the override is recorded in the audit trail."
+            ),
+            CapabilityResolution::SessionOnly => format!(
+                "This MCP session's capabilities come from the server process it was served by, \
+                 and {OPERATOR_OVERRIDE_ENV} in that process's environment is deliberately \
+                 ignored. To perform this as an operator, serve the session from a server \
+                 started as `orbit mcp serve --operator`, or run the operation from the CLI."
+            ),
+        }
+    }
 }
 
 impl Display for AuthorizationDenial {
@@ -475,15 +544,13 @@ impl Display for AuthorizationDenial {
         write!(
             f,
             "operation '{operation}' requires the `{required}` capability ({rationale}); \
-             this caller was resolved as `{provenance}` holding [{granted}]. \
-             If this is a deliberate operator action, re-run it with {override_env}=1 set — \
-             the override is recorded in the audit trail.",
+             this caller was resolved as `{provenance}` holding [{granted}]. {remedy}",
             operation = self.operation.id,
             required = self.operation.allowed_label(),
             rationale = self.operation.rationale,
             provenance = self.provenance,
             granted = self.granted,
-            override_env = OPERATOR_OVERRIDE_ENV,
+            remedy = self.remedy(),
         )
     }
 }
@@ -504,6 +571,7 @@ pub fn authorize(
         operation,
         granted: caller.grants_label(),
         provenance: caller.provenance,
+        resolution: caller.resolution,
     })
 }
 
