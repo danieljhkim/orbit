@@ -113,6 +113,14 @@ impl ArtifactKind {
     }
 }
 
+/// Command that refreshes the catalog containing this artifact kind.
+fn init_command(kind: ArtifactKind) -> &'static str {
+    match kind {
+        ArtifactKind::Skill | ArtifactKind::Job | ArtifactKind::Activity => "orbit init",
+        ArtifactKind::AutoTask | ArtifactKind::Routine => "orbit workspace init",
+    }
+}
+
 /// Why an artifact is not healthy.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ArtifactCondition {
@@ -357,35 +365,36 @@ fn diagnose_catalog(runtime: &OrbitRuntime, catalog: &ManagedCatalog) -> Artifac
     }
 
     let manifest_path = catalog.dir.join(MANAGED_ASSET_MANIFEST_FILE);
-    let manifest = match load_managed_asset_manifest(
-        &manifest_path,
-        kind.asset_kind(),
-        kind.layout(),
-    ) {
-        Ok(manifest) => manifest,
-        Err(error) => {
-            // An unreadable manifest costs provenance for the whole kind, so
-            // say so instead of silently reporting every artifact as
-            // user-authored.
-            findings.push(ArtifactFinding {
-                kind,
-                name: MANAGED_ASSET_MANIFEST_FILE.to_string(),
-                path: manifest_path,
-                condition: ArtifactCondition::Faulty,
-                provenance: ArtifactProvenance::OrbitWritten,
-                detail: format!("managed {} manifest is unreadable: {error}", kind.singular()),
-                remediation: format!(
-                    "Repair or move aside the {} manifest, then run `orbit init --refresh-defaults`.",
-                    kind.singular()
-                ),
-            });
-            return ArtifactHealth {
-                kind,
-                scanned: 0,
-                findings,
-            };
-        }
-    };
+    let manifest =
+        match load_managed_asset_manifest(&manifest_path, kind.asset_kind(), kind.layout()) {
+            Ok(manifest) => manifest,
+            Err(error) => {
+                // An unreadable manifest costs provenance for the whole kind, so
+                // say so instead of silently reporting every artifact as
+                // user-authored.
+                findings.push(ArtifactFinding {
+                    kind,
+                    name: MANAGED_ASSET_MANIFEST_FILE.to_string(),
+                    path: manifest_path,
+                    condition: ArtifactCondition::Faulty,
+                    provenance: ArtifactProvenance::OrbitWritten,
+                    detail: format!(
+                        "managed {} manifest is unreadable: {error}",
+                        kind.singular()
+                    ),
+                    remediation: format!(
+                        "Repair or move aside the {} manifest, then run `{}`.",
+                        kind.singular(),
+                        init_command(kind)
+                    ),
+                });
+                return ArtifactHealth {
+                    kind,
+                    scanned: 0,
+                    findings,
+                };
+            }
+        };
     let tracked: BTreeMap<String, String> = manifest
         .as_ref()
         .map(|manifest| manifest.assets.clone())
@@ -448,7 +457,7 @@ fn diagnose_catalog(runtime: &OrbitRuntime, catalog: &ManagedCatalog) -> Artifac
                         "`{name}` is a stale shipped default: an Orbit-written copy of an older \
                          release that has drifted from the content this binary ships"
                     ),
-                    remediation: "Run `orbit init --refresh-defaults`.".to_string(),
+                    remediation: format!("Run `{}`.", init_command(kind)),
                 }),
                 // Edited after Orbit wrote it: intentional local authorship,
                 // not staleness. Refreshing would discard the edit, so this is
@@ -468,8 +477,9 @@ fn diagnose_catalog(runtime: &OrbitRuntime, catalog: &ManagedCatalog) -> Artifac
                         path.display()
                     ),
                     remediation: format!(
-                        "Move or rename `{}`, then run `orbit init --refresh-defaults` to install the bundled default.",
-                        path.display()
+                        "Move or rename `{}`, then run `{}` to install the bundled default.",
+                        path.display(),
+                        init_command(kind)
                     ),
                 }),
                 None => {}
@@ -505,11 +515,12 @@ fn finish_catalog_health(
         } else if let Some(command) = fault.repair_command {
             format!("Run `{command}`.")
         } else if stale_shipped_default {
-            "Run `orbit init --refresh-defaults`.".to_string()
+            format!("Run `{}`.", init_command(kind))
         } else if provenance == ArtifactProvenance::OrbitWritten {
             format!(
-                "A shipped {} default failed to load — reinstall or upgrade orbit, then run `orbit init --refresh-defaults`.",
-                kind.singular()
+                "A shipped {} default failed to load — reinstall or upgrade orbit, then run `{}`.",
+                kind.singular(),
+                init_command(kind)
             )
         } else {
             format!(

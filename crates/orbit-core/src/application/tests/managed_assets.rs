@@ -760,9 +760,7 @@ mod artifacts {
         assert_eq!(finding.provenance, ArtifactProvenance::OrbitWritten);
         assert!(finding.is_unloadable_shipped_default());
         assert!(
-            finding
-                .remediation
-                .contains("orbit init --refresh-defaults"),
+            finding.remediation.contains("orbit init"),
             "{}",
             finding.remediation
         );
@@ -800,9 +798,7 @@ mod artifacts {
         assert_eq!(finding.condition, ArtifactCondition::Stale);
         assert_eq!(finding.provenance, ArtifactProvenance::OrbitWritten);
         assert!(
-            finding
-                .remediation
-                .contains("orbit init --refresh-defaults"),
+            finding.remediation.contains("orbit workspace init"),
             "{}",
             finding.remediation
         );
