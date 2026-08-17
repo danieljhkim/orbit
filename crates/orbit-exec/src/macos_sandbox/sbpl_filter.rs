@@ -1,3 +1,5 @@
+use std::path::Path;
+
 pub(super) fn sbpl_escape(value: &str) -> String {
     value.replace('\\', "\\\\").replace('"', "\\\"")
 }
@@ -20,6 +22,22 @@ pub(super) fn sbpl_filter_for_allow_rule(rule: &str) -> String {
         let regex = glob_rule_to_regex(rule);
         format!("(regex \"{}\")", sbpl_escape(&regex))
     }
+}
+
+/// Whether the deny clause compiled from `rule` reaches `path` itself — that
+/// is, whether the rule denies `path` or an ancestor directory of it.
+///
+/// Both clause shapes [`sbpl_filter_for_deny_rule`] can emit are bounded above
+/// by the rule's longest non-glob prefix: `(subpath ROOT)` matches exactly
+/// `ROOT` and below, and a `(regex ...)` built from the same rule can only
+/// match paths under that prefix. Comparing against [`subpath_root`] therefore
+/// answers the question for literal and trailing-`**` rules exactly, and
+/// over-approximates for interior globs (`~/Library/*`), where the regex may
+/// only match part of the subtree. Callers use this to decide whether a
+/// credential path was denied, so over-approximating is the safe direction.
+/// [ORB-10931]
+pub(super) fn deny_rule_reaches_path(rule: &str, path: &Path) -> bool {
+    path.starts_with(subpath_root(rule))
 }
 
 fn rule_can_use_subpath(rule: &str) -> bool {

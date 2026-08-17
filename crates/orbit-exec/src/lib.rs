@@ -45,10 +45,10 @@ pub use linux_sandbox::{
     probe_bwrap, spawn_under_linux_bwrap,
 };
 pub use macos_sandbox::{
-    MacosSandboxSpawnRequest, claude_state_dir_from_env, compile_macos_sandbox_profile,
-    grok_state_dir_from_env, provider_reads_macos_login_keychain, sandbox_exec_available,
-    sandbox_exec_path, sandbox_exec_program_for_audit, sandbox_exec_unavailable_message,
-    spawn_under_macos_sandbox,
+    MacosLoginKeychainAccess, MacosSandboxSpawnRequest, claude_state_dir_from_env,
+    compile_macos_sandbox_profile, grok_state_dir_from_env, macos_login_keychain_access,
+    sandbox_exec_available, sandbox_exec_path, sandbox_exec_program_for_audit,
+    sandbox_exec_unavailable_message, spawn_under_macos_sandbox,
 };
 pub use result::ExecutionResult;
 pub use runner::{EnvironmentMode, ExecRequest, StdinMode, run_process};

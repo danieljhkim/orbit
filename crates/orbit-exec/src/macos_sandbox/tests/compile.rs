@@ -1,3 +1,4 @@
+use super::super::compile::{MacosLoginKeychainAccess, macos_login_keychain_access};
 use super::super::test_support::*;
 
 #[test]
@@ -106,6 +107,100 @@ fn compile_for_claude_reallows_user_keychain_read_after_the_default_deny() {
             "{other} must not be re-allowed: {text}"
         );
     }
+}
+
+/// [ORB-10931] The clause order *is* the policy under SBPL last-match-wins, so
+/// pin all three bands: default credential denies, then the provider carve-out,
+/// then the activity's own negated `read` rules. An operator who denies a
+/// credential path must not be silently overridden by the carve-out.
+#[test]
+fn compile_orders_activity_read_denies_after_the_claude_keychain_reallow() {
+    let allow = "(allow file-read* (subpath \"/Users/test/Library/Keychains\"))";
+    let default_deny = "(deny file-read* (subpath \"/Users/test/Library/Keychains\"))";
+
+    // Both the exact keychain directory and a broader ancestor must win.
+    for activity_deny in [
+        "!/Users/test/Library/Keychains",
+        "!/Users/test/Library",
+        "!/Users/test/Library/**",
+    ] {
+        let resolved = profile(
+            "hardened",
+            &["/Users/test/repo", activity_deny],
+            &["/Users/test/repo/src"],
+        );
+        let text = compile_with_env(
+            &resolved,
+            "claude",
+            EnvOverrides {
+                home: Some("/Users/test"),
+                ..Default::default()
+            },
+        );
+
+        let activity_clause = format!(
+            "(deny file-read* (subpath \"{}\"))",
+            activity_deny
+                .trim_start_matches('!')
+                .trim_end_matches("/**")
+        );
+        let default_deny_pos = text.find(default_deny).expect("default keychain read deny");
+        let allow_pos = text.find(allow).expect("claude keychain read re-allow");
+        let activity_pos = text
+            .rfind(&activity_clause)
+            .unwrap_or_else(|| panic!("missing activity read deny {activity_deny}: {text}"));
+        assert!(
+            default_deny_pos < allow_pos && allow_pos < activity_pos,
+            "order must be default deny -> provider re-allow -> activity deny for \
+             {activity_deny}: {text}"
+        );
+
+        assert_eq!(
+            macos_login_keychain_access(
+                "claude",
+                Some(std::ffi::OsStr::new("/Users/test")),
+                &resolved
+            ),
+            MacosLoginKeychainAccess::DeniedByActivityRule {
+                rule: activity_deny.to_string()
+            },
+            "the reported access must match the compiled clause order"
+        );
+    }
+}
+
+/// The narrowing above must not become the default: with no overlapping
+/// activity deny, Claude keeps the OAuth read that ORB-10929 delivered.
+#[test]
+fn keychain_access_stays_allowed_without_an_overlapping_activity_deny() {
+    let home = std::ffi::OsStr::new("/Users/test");
+    let unrelated = profile(
+        "default",
+        &["/Users/test/repo", "!/Users/test/.ssh", "!/Users/other"],
+        &["/Users/test/repo/src"],
+    );
+    assert_eq!(
+        macos_login_keychain_access("claude", Some(home), &unrelated),
+        MacosLoginKeychainAccess::Allowed
+    );
+    assert_eq!(
+        macos_login_keychain_access("codex", Some(home), &unrelated),
+        MacosLoginKeychainAccess::DeniedByDefaultPolicy
+    );
+    assert_eq!(
+        macos_login_keychain_access("claude", None, &unrelated),
+        MacosLoginKeychainAccess::HomeUnresolved
+    );
+    // A non-negated `read` entry naming the keychain is not a denial.
+    let positive = profile(
+        "default",
+        &["/Users/test/Library/Keychains"],
+        &["/Users/test/repo/src"],
+    );
+    assert_eq!(
+        macos_login_keychain_access("claude", Some(home), &positive),
+        MacosLoginKeychainAccess::Allowed
+    );
 }
 
 #[test]
@@ -232,65 +327,122 @@ fn compiled_profile_lets_only_claude_read_the_user_keychain_directory() {
     // last-match-wins ordering actually resolves the way the clauses read. A
     // synthetic HOME stands in for the real login keychain so the test never
     // touches the operator's credentials.
-    use std::process::Command;
-
     if !sandbox_exec_can_apply() {
         return;
     }
 
-    let parent = sandbox_test_parent("keychain-read");
-    let _cleanup = ScopeGuard(parent.clone());
-    let synthetic_home = tempfile::Builder::new()
-        .prefix("synthetic-home-")
-        .tempdir_in(&parent)
-        .expect("synthetic home tempdir");
-    let keychains = synthetic_home.path().join("Library/Keychains");
-    std::fs::create_dir_all(&keychains).expect("synthetic keychain dir");
-    let credential = keychains.join("login.keychain-db");
-    std::fs::write(&credential, b"synthetic-credential").expect("write synthetic credential");
-
+    let fixture = SyntheticKeychainHome::create("keychain-read");
     let resolved = ResolvedFsProfile {
         name: "default".to_string(),
-        read: vec![synthetic_home.path().display().to_string()],
+        read: vec![fixture.home_text()],
         modify: vec![],
     };
-    let home = synthetic_home.path().to_string_lossy().into_owned();
 
     for (provider, should_read) in [("claude", true), ("codex", false)] {
+        assert_eq!(
+            fixture.credential_readable(&resolved, provider),
+            should_read,
+            "provider {provider} keychain read should_succeed={should_read}"
+        );
+    }
+}
+
+/// [ORB-10931] The kernel-level half of the ordering contract: an activity that
+/// denies the keychain directory — or an ancestor of it — must actually lose
+/// Claude the read, while a profile without such a rule keeps it. Asserted
+/// through `sandbox-exec` because clause ordering is only a claim until the
+/// kernel resolves it.
+#[cfg(target_os = "macos")]
+#[test]
+fn compiled_profile_honors_an_activity_keychain_deny_for_claude() {
+    if !sandbox_exec_can_apply() {
+        return;
+    }
+
+    let fixture = SyntheticKeychainHome::create("keychain-deny");
+    let home_text = fixture.home_text();
+
+    let default_allow = ResolvedFsProfile {
+        name: "default".to_string(),
+        read: vec![home_text.clone()],
+        modify: vec![],
+    };
+    assert!(
+        fixture.credential_readable(&default_allow, "claude"),
+        "without an overlapping deny, claude keeps its OAuth keychain read"
+    );
+
+    for deny in [
+        format!("!{home_text}/Library/Keychains"),
+        format!("!{home_text}/Library"),
+    ] {
+        let hardened = ResolvedFsProfile {
+            name: "hardened".to_string(),
+            read: vec![home_text.clone(), deny.clone()],
+            modify: vec![],
+        };
+        assert!(
+            !fixture.credential_readable(&hardened, "claude"),
+            "activity rule {deny} must deny claude the keychain read"
+        );
+        assert_eq!(
+            macos_login_keychain_access(
+                "claude",
+                Some(std::ffi::OsStr::new(&home_text)),
+                &hardened
+            ),
+            MacosLoginKeychainAccess::DeniedByActivityRule { rule: deny.clone() },
+            "the reported access must match what the kernel enforced for {deny}"
+        );
+    }
+}
+
+/// A disposable `$HOME` holding a stand-in login keychain, so keychain tests
+/// exercise the real clause set without touching operator credentials.
+#[cfg(target_os = "macos")]
+struct SyntheticKeychainHome {
+    // Declaration order is drop order: the tempdir must go before the guard
+    // that removes its parent.
+    home: tempfile::TempDir,
+    _cleanup: ScopeGuard,
+    credential: std::path::PathBuf,
+}
+
+#[cfg(target_os = "macos")]
+impl SyntheticKeychainHome {
+    fn create(label: &str) -> Self {
+        let parent = sandbox_test_parent(label);
+        let cleanup = ScopeGuard(parent.clone());
+        let home = tempfile::Builder::new()
+            .prefix("synthetic-home-")
+            .tempdir_in(&parent)
+            .expect("synthetic home tempdir");
+        let keychains = home.path().join("Library/Keychains");
+        std::fs::create_dir_all(&keychains).expect("synthetic keychain dir");
+        let credential = keychains.join("login.keychain-db");
+        std::fs::write(&credential, b"synthetic-credential").expect("write synthetic credential");
+        Self {
+            home,
+            _cleanup: cleanup,
+            credential,
+        }
+    }
+
+    fn home_text(&self) -> String {
+        self.home.path().to_string_lossy().into_owned()
+    }
+
+    fn credential_readable(&self, resolved: &ResolvedFsProfile, provider: &str) -> bool {
+        let home = self.home_text();
         let profile_text = compile_with_env(
-            &resolved,
+            resolved,
             provider,
             EnvOverrides {
                 home: Some(&home),
                 ..Default::default()
             },
         );
-        let mut profile_file = tempfile::Builder::new()
-            .prefix("orbit-sandbox-keychain-")
-            .suffix(".sb")
-            .tempfile()
-            .expect("tempfile");
-        use std::io::Write;
-        profile_file
-            .write_all(profile_text.as_bytes())
-            .expect("write profile");
-        profile_file.flush().expect("flush");
-
-        let status = Command::new(sandbox_exec_path_for_test())
-            .arg("-f")
-            .arg(profile_file.path())
-            .arg("/bin/sh")
-            .arg("-c")
-            .arg(format!("cat {}", shell_escape(&credential)))
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .status()
-            .expect("run sandbox-exec");
-        assert_eq!(
-            status.success(),
-            should_read,
-            "provider {provider} keychain read should_succeed={should_read}; status={status:?}"
-        );
+        can_read_under_profile(&profile_text, &self.credential)
     }
 }
 

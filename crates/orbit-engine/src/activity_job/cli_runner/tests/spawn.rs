@@ -244,6 +244,39 @@ fn keychain_auth_diagnostic_separates_a_real_expiry_from_a_sandbox_denial() {
     );
 }
 
+/// [ORB-10931] The third case: the operator's own `denyRead` outranks the
+/// provider carve-out, so Orbit — not the provider — hid the credential.
+/// Recommending re-authentication here sends the operator to a fix that cannot
+/// work, so the message must name the rule instead.
+#[test]
+fn keychain_auth_diagnostic_attributes_an_activity_deny_instead_of_a_relogin() {
+    let failure = "Failed to authenticate: OAuth session expired and could not be refreshed";
+    let home = std::ffi::OsStr::new("/Users/test");
+
+    for deny in ["!/Users/test/Library/Keychains", "!/Users/test/Library"] {
+        let mut sandbox = sandbox_for_test();
+        sandbox.fs_profile.name = "hardened".to_string();
+        sandbox.fs_profile.read.push(deny.to_string());
+
+        let diagnostic =
+            macos_keychain_auth_diagnostic_with("claude", Some(&sandbox), failure, Some(home))
+                .expect("an activity keychain deny must be attributed");
+
+        assert!(
+            diagnostic.contains(deny) && diagnostic.contains("hardened"),
+            "diagnostic must name the profile and the exact deny rule: {diagnostic}"
+        );
+        assert!(
+            diagnostic.contains("Re-authenticating will not help"),
+            "an Orbit-authored denial must not send the operator to re-login: {diagnostic}"
+        );
+        assert!(
+            !diagnostic.contains("real login failure"),
+            "a denied keychain must never be reported as reachable: {diagnostic}"
+        );
+    }
+}
+
 #[test]
 fn keychain_auth_diagnostic_stays_silent_outside_its_exact_failure_shape() {
     let sandbox = sandbox_for_test();
