@@ -220,6 +220,16 @@ pub fn run_cli_backend(
     child_env.extend(
         orbit_tool_env().map_err(|error| DispatchError::CliInvocationPermanent(error.message))?,
     );
+    // Spawned CLI agents resolve the Orbit registry from $HOME unless
+    // ORBIT_ROOT is set. A dispatching run already knows its root; inject
+    // it the same way `RuntimeHost::execution_environment_mode` does so a
+    // provider whose HOME is a tool-specific directory (e.g. ~/.codex)
+    // can still reach `orbit tool run`. [ORB-10909]
+    if let Some(orbit_root) = host.orbit_root()
+        && !child_env.iter().any(|(key, _)| key == "ORBIT_ROOT")
+    {
+        child_env.push(("ORBIT_ROOT".to_string(), orbit_root));
+    }
     // [ORB-10496] Record the provider child's PID the moment it exists. Emitted
     // through the same writer, so it is persisted (and therefore readable by
     // `orbit run show` / the run-status API) while the invocation is still
