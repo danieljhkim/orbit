@@ -247,7 +247,7 @@ pub fn ensure_default_tag_taxonomy(frictions_root: &Path) -> Result<PathBuf, Orb
         for (tag, description) in DEFAULT_FRICTION_TAGS {
             body.push_str(&format!("{tag}: \"{description}\"\n"));
         }
-        atomic_write_text(&path, &body).map_err(|error| OrbitError::Io(error.to_string()))?;
+        atomic_write_text(&path, &body).map_err(|error| OrbitError::from_write_io(&path, error))?;
     }
     Ok(path)
 }
@@ -315,7 +315,7 @@ pub(crate) fn write_record_at(path: &Path, record: &FrictionRecord) -> Result<()
         OrbitError::Store(format!("serialize friction frontmatter: {error}"))
     })?;
     let content = format!("---\n{}---\n{}\n", yaml, record.body.trim_end());
-    atomic_write_text(path, &content).map_err(|error| OrbitError::Io(error.to_string()))?;
+    atomic_write_text(path, &content).map_err(|error| OrbitError::from_write_io(path, error))?;
     Ok(())
 }
 

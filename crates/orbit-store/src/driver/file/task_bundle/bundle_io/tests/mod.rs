@@ -94,6 +94,48 @@ fn interrupted_bundle_publish_never_exposes_partial_final_directory() {
 }
 
 #[test]
+fn erofs_bundle_publish_names_path_and_hints_sandbox() {
+    let temp = TempDir::new().expect("tempdir");
+    let store = bundle_store(&temp);
+    let bundle = sample_bundle("ORB-00000");
+    let bundle_dir = store.bundle_path("ORB-00000").expect("bundle path");
+
+    let error = write_bundle_atomically(&bundle_dir, &bundle, None, |_staging, _final_path| {
+        Err(std::io::Error::new(
+            std::io::ErrorKind::ReadOnlyFilesystem,
+            "Read-only file system",
+        ))
+    })
+    .expect_err("EROFS publish must fail");
+
+    match error {
+        OrbitError::Io(message) => {
+            assert!(
+                message.contains(&bundle_dir.display().to_string()),
+                "expected path in `{message}`"
+            );
+            assert!(
+                message.contains("is not writable"),
+                "expected writable attribution in `{message}`"
+            );
+            assert!(
+                message.contains("sandbox or environment"),
+                "expected sandbox/environment hint in `{message}`"
+            );
+            assert!(
+                message.contains("not an Orbit store defect"),
+                "expected store-defect negation in `{message}`"
+            );
+        }
+        other => panic!("expected Io, got {other}"),
+    }
+    assert!(
+        !bundle_dir.exists(),
+        "an EROFS writer must not expose the canonical bundle path"
+    );
+}
+
+#[test]
 fn append_jsonl_repairs_corrupt_tail_only() {
     let temp = TempDir::new().expect("tempdir");
     let store = bundle_store(&temp);

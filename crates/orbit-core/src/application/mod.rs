@@ -17,7 +17,9 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 use orbit_common::OrbitError;
-use orbit_common::fs::io::{atomic_write_text, write_text_with_parent};
+use orbit_common::fs::io::{
+    atomic_write_text, is_readonly_or_access_error, write_text_with_parent,
+};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
@@ -282,22 +284,7 @@ fn encode_managed_asset_manifest(manifest: &ManagedAssetManifest) -> Result<Stri
 /// deployment shape (immutable global root, sandboxed runner), not a
 /// reason to refuse a later read-only command.
 pub(crate) fn managed_manifest_write_is_skippable(error: &io::Error) -> bool {
-    match error.kind() {
-        io::ErrorKind::PermissionDenied | io::ErrorKind::ReadOnlyFilesystem => true,
-        _ => error
-            .raw_os_error()
-            .is_some_and(is_readonly_or_access_errno),
-    }
-}
-
-#[cfg(unix)]
-fn is_readonly_or_access_errno(code: i32) -> bool {
-    code == libc::EROFS || code == libc::EACCES
-}
-
-#[cfg(not(unix))]
-fn is_readonly_or_access_errno(_code: i32) -> bool {
-    false
+    is_readonly_or_access_error(error)
 }
 
 fn managed_asset_manifest_io_error(

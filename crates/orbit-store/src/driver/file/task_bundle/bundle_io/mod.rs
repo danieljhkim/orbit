@@ -82,7 +82,7 @@ where
         }
         read_bundle_for_id(&staging_dir, &bundle.envelope.id)?;
         sync_staged_bundle_dirs(&staging_dir)?;
-        publish(&staging_dir, bundle_dir).map_err(OrbitError::from)
+        publish(&staging_dir, bundle_dir).map_err(|err| OrbitError::from_write_io(bundle_dir, err))
     })();
 
     if let Err(error) = &result {
@@ -98,23 +98,18 @@ fn write_bundle_contents(bundle_dir: &Path, bundle: &TaskBundleV2) -> Result<(),
         &bundle.envelope,
         |err| OrbitError::Store(err.to_string()),
     )?;
-    atomic_write_text(
-        &bundle_dir.join(TASK_DESCRIPTION_FILE_NAME),
-        &bundle.description,
-    )
-    .map_err(|err| OrbitError::Io(err.to_string()))?;
-    atomic_write_text(
-        &bundle_dir.join(TASK_ACCEPTANCE_FILE_NAME),
-        &bundle.acceptance,
-    )
-    .map_err(|err| OrbitError::Io(err.to_string()))?;
-    atomic_write_text(&bundle_dir.join(TASK_PLAN_FILE_NAME), &bundle.plan)
-        .map_err(|err| OrbitError::Io(err.to_string()))?;
-    atomic_write_text(
-        &bundle_dir.join(TASK_EXECUTION_SUMMARY_FILE_NAME),
-        &bundle.execution_summary,
-    )
-    .map_err(|err| OrbitError::Io(err.to_string()))?;
+    let description_path = bundle_dir.join(TASK_DESCRIPTION_FILE_NAME);
+    atomic_write_text(&description_path, &bundle.description)
+        .map_err(|err| OrbitError::from_write_io(&description_path, err))?;
+    let acceptance_path = bundle_dir.join(TASK_ACCEPTANCE_FILE_NAME);
+    atomic_write_text(&acceptance_path, &bundle.acceptance)
+        .map_err(|err| OrbitError::from_write_io(&acceptance_path, err))?;
+    let plan_path = bundle_dir.join(TASK_PLAN_FILE_NAME);
+    atomic_write_text(&plan_path, &bundle.plan)
+        .map_err(|err| OrbitError::from_write_io(&plan_path, err))?;
+    let execution_summary_path = bundle_dir.join(TASK_EXECUTION_SUMMARY_FILE_NAME);
+    atomic_write_text(&execution_summary_path, &bundle.execution_summary)
+        .map_err(|err| OrbitError::from_write_io(&execution_summary_path, err))?;
 
     write_jsonl_file(&bundle_dir.join(TASK_EVENTS_FILE_NAME), &bundle.events)?;
     write_jsonl_file(&bundle_dir.join(TASK_COMMENTS_FILE_NAME), &bundle.comments)?;
@@ -138,7 +133,7 @@ fn create_staging_dir(bundle_dir: &Path) -> Result<PathBuf, OrbitError> {
             bundle_dir.display()
         ))
     })?;
-    fs::create_dir_all(parent).map_err(OrbitError::from)?;
+    fs::create_dir_all(parent).map_err(|error| OrbitError::from_write_io(parent, error))?;
     let bundle_name = bundle_dir
         .file_name()
         .and_then(|name| name.to_str())
@@ -156,7 +151,7 @@ fn create_staging_dir(bundle_dir: &Path) -> Result<PathBuf, OrbitError> {
         match fs::create_dir(&candidate) {
             Ok(()) => return Ok(candidate),
             Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
-            Err(error) => return Err(OrbitError::from(error)),
+            Err(error) => return Err(OrbitError::from_write_io(&candidate, error)),
         }
     }
     Err(OrbitError::Store(format!(
@@ -168,9 +163,10 @@ fn create_staging_dir(bundle_dir: &Path) -> Result<PathBuf, OrbitError> {
 fn sync_staged_bundle_dirs(staging_dir: &Path) -> Result<(), OrbitError> {
     let artifact_dir = staging_dir.join(TASK_ARTIFACTS_DIR_NAME);
     let artifact_files_dir = artifact_dir.join(TASK_ARTIFACT_FILES_DIR_NAME);
-    sync_parent_dir(&artifact_files_dir).map_err(OrbitError::from)?;
-    sync_parent_dir(&artifact_dir).map_err(OrbitError::from)?;
-    sync_parent_dir(staging_dir).map_err(OrbitError::from)
+    sync_parent_dir(&artifact_files_dir)
+        .map_err(|err| OrbitError::from_write_io(&artifact_files_dir, err))?;
+    sync_parent_dir(&artifact_dir).map_err(|err| OrbitError::from_write_io(&artifact_dir, err))?;
+    sync_parent_dir(staging_dir).map_err(|err| OrbitError::from_write_io(staging_dir, err))
 }
 
 fn publish_staged_bundle(staging_dir: &Path, bundle_dir: &Path) -> std::io::Result<()> {
@@ -259,13 +255,12 @@ fn validate_bundle_consistency(bundle: &TaskBundleV2) -> Result<(), OrbitError> 
 }
 
 fn ensure_bundle_dirs(bundle_dir: &Path) -> Result<(), OrbitError> {
-    fs::create_dir_all(bundle_dir).map_err(|err| OrbitError::Io(err.to_string()))?;
-    fs::create_dir_all(
-        bundle_dir
-            .join(TASK_ARTIFACTS_DIR_NAME)
-            .join(TASK_ARTIFACT_FILES_DIR_NAME),
-    )
-    .map_err(|err| OrbitError::Io(err.to_string()))?;
+    fs::create_dir_all(bundle_dir).map_err(|err| OrbitError::from_write_io(bundle_dir, err))?;
+    let artifact_files_dir = bundle_dir
+        .join(TASK_ARTIFACTS_DIR_NAME)
+        .join(TASK_ARTIFACT_FILES_DIR_NAME);
+    fs::create_dir_all(&artifact_files_dir)
+        .map_err(|err| OrbitError::from_write_io(&artifact_files_dir, err))?;
     Ok(())
 }
 
@@ -331,7 +326,7 @@ where
         );
         content.push('\n');
     }
-    atomic_write_text(path, &content).map_err(|err| OrbitError::Io(err.to_string()))
+    atomic_write_text(path, &content).map_err(|err| OrbitError::from_write_io(path, err))
 }
 
 fn read_task_events(path: &Path) -> Result<Vec<TaskEventRowV2>, OrbitError> {
@@ -369,12 +364,15 @@ where
             .create(true)
             .append(true)
             .open(path)
-            .map_err(OrbitError::from)?;
+            .map_err(|err| OrbitError::from_write_io(path, err))?;
         file.write_all(encoded.as_bytes())
-            .map_err(OrbitError::from)?;
-        file.write_all(b"\n").map_err(OrbitError::from)?;
-        file.flush().map_err(OrbitError::from)?;
-        file.sync_all().map_err(OrbitError::from)?;
+            .map_err(|err| OrbitError::from_write_io(path, err))?;
+        file.write_all(b"\n")
+            .map_err(|err| OrbitError::from_write_io(path, err))?;
+        file.flush()
+            .map_err(|err| OrbitError::from_write_io(path, err))?;
+        file.sync_all()
+            .map_err(|err| OrbitError::from_write_io(path, err))?;
         Ok(())
     })
 }
@@ -388,9 +386,12 @@ fn repair_jsonl_tail(path: &Path) -> Result<(), OrbitError> {
     file.read_to_string(&mut raw).map_err(OrbitError::from)?;
     let scan = scan_jsonl_tail(path, &raw)?;
     if scan.truncate_at < raw.len() as u64 {
-        file.set_len(scan.truncate_at).map_err(OrbitError::from)?;
-        file.seek(SeekFrom::End(0)).map_err(OrbitError::from)?;
-        file.sync_all().map_err(OrbitError::from)?;
+        file.set_len(scan.truncate_at)
+            .map_err(|err| OrbitError::from_write_io(path, err))?;
+        file.seek(SeekFrom::End(0))
+            .map_err(|err| OrbitError::from_write_io(path, err))?;
+        file.sync_all()
+            .map_err(|err| OrbitError::from_write_io(path, err))?;
     }
     Ok(())
 }
@@ -507,8 +508,9 @@ pub(crate) fn copy_artifact_blobs(
     }
     let source_artifact_dir = source_bundle_dir.join(TASK_ARTIFACTS_DIR_NAME);
     let dest_artifact_dir = dest_bundle_dir.join(TASK_ARTIFACTS_DIR_NAME);
-    fs::create_dir_all(dest_artifact_dir.join(TASK_ARTIFACT_FILES_DIR_NAME))
-        .map_err(|err| OrbitError::Io(err.to_string()))?;
+    let dest_files_dir = dest_artifact_dir.join(TASK_ARTIFACT_FILES_DIR_NAME);
+    fs::create_dir_all(&dest_files_dir)
+        .map_err(|err| OrbitError::from_write_io(&dest_files_dir, err))?;
     for file in &manifest.files {
         let source = source_artifact_dir.join(&file.blob);
         let bytes = fs::read(&source).map_err(|err| {
@@ -535,7 +537,7 @@ pub(crate) fn copy_artifact_blobs(
             )));
         }
         let dest = dest_artifact_dir.join(&file.blob);
-        atomic_write_bytes(&dest, &bytes).map_err(|err| OrbitError::Io(err.to_string()))?;
+        atomic_write_bytes(&dest, &bytes).map_err(|err| OrbitError::from_write_io(&dest, err))?;
     }
     Ok(())
 }
