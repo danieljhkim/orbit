@@ -28,6 +28,7 @@ use orbit_types::telemetry::AuditEventStatus;
 use orbit_types::tool::ToolSessionContext;
 
 use crate::OrbitRuntime;
+use crate::runtime::tool_exec::CapabilityEnforcement;
 
 impl OrbitRuntime {
     /// Authorize a governed tool call, or pass an ungoverned one straight
@@ -41,11 +42,19 @@ impl OrbitRuntime {
         &self,
         tool_name: &str,
         session_context: &ToolSessionContext,
+        capability_enforcement: CapabilityEnforcement,
     ) -> Result<(), OrbitError> {
         let Some(operation) = governed_tool(tool_name) else {
             return Ok(());
         };
-        self.decide(operation, session_context)
+        let envelope = match capability_enforcement {
+            CapabilityEnforcement::Enforce => CallerEnvelope::from_process_env(session_context),
+            CapabilityEnforcement::McpSessionOnly => CallerEnvelope {
+                session_capabilities: session_context.effective_capabilities.clone(),
+                ..CallerEnvelope::default()
+            },
+        };
+        self.decide_with_envelope(operation, envelope)
     }
 
     /// Authorize a governed CLI command, or pass an ungoverned one through.
@@ -70,8 +79,15 @@ impl OrbitRuntime {
         operation: &'static GovernedOperation,
         session_context: &ToolSessionContext,
     ) -> Result<(), OrbitError> {
-        let caller =
-            CallerCapabilities::resolve(&CallerEnvelope::from_process_env(session_context));
+        self.decide_with_envelope(operation, CallerEnvelope::from_process_env(session_context))
+    }
+
+    fn decide_with_envelope(
+        &self,
+        operation: &'static GovernedOperation,
+        envelope: CallerEnvelope,
+    ) -> Result<(), OrbitError> {
+        let caller = CallerCapabilities::resolve(&envelope);
 
         match authorize(operation, &caller) {
             Ok(()) => {

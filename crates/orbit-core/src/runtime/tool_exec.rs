@@ -10,15 +10,16 @@ use serde_json::Value;
 
 use crate::{NotFoundKind, OrbitError, OrbitRuntime};
 
-/// Whether Core applies its capability registry before executing a tool.
+/// Which trusted inputs Core may use when applying its capability registry.
 ///
-/// MCP v1 deliberately defers this one policy while the server-side skeleton
-/// settles. The choice remains inside Core so a later authorization design can
-/// be enforced here without rebuilding transport-specific gates.
+/// Ordinary in-process and CLI calls may resolve capabilities from both their
+/// session context and the process envelope. MCP calls must use only the grants
+/// carried by their trusted session context: an empty or agent-only MCP session
+/// cannot inherit operator authority from the server process that hosts it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum CapabilityEnforcement {
     Enforce,
-    DeferredForMcpV1,
+    McpSessionOnly,
 }
 
 impl OrbitRuntime {
@@ -61,9 +62,7 @@ impl OrbitRuntime {
         // workspace reaches the registry through this function, so this is the
         // only place a governed tool operation is authorized — a per-command
         // guard would be reopened by the next entry point that skips it.
-        if capability_enforcement == CapabilityEnforcement::Enforce {
-            self.authorize_tool_operation(name, &tool_context.session_context)?;
-        }
+        self.authorize_tool_operation(name, &tool_context.session_context, capability_enforcement)?;
 
         if !tool_context.allowed_tools.is_empty()
             && !tool_allowed(name, &tool_context.allowed_tools)

@@ -237,7 +237,7 @@ impl OrbitRuntime {
                 };
                 let capability_enforcement = match entry_point {
                     ToolEntryPoint::Cli => CapabilityEnforcement::Enforce,
-                    ToolEntryPoint::Mcp => CapabilityEnforcement::DeferredForMcpV1,
+                    ToolEntryPoint::Mcp => CapabilityEnforcement::McpSessionOnly,
                 };
                 self.run_tool_with_context_and_role_and_capability(
                     name,

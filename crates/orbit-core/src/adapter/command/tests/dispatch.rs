@@ -78,22 +78,107 @@ fn dispatch_records_failure_audit_when_tool_handler_errors() {
     assert_eq!(row.subcommand.as_deref(), Some("run-mcp"));
 }
 
+fn mcp_context(capabilities: impl IntoIterator<Item = McpCapability>) -> ToolSessionContext {
+    ToolSessionContext {
+        transport: Some(McpTransport::Local),
+        effective_capabilities: capabilities.into_iter().collect(),
+        ..ToolSessionContext::default()
+    }
+}
+
 #[test]
-fn mcp_v1_defers_capability_authorization_inside_core() {
+fn mcp_empty_session_is_denied_before_governed_tool_execution_and_audited() {
+    let _g = env_guard();
+    clear_identity_env();
+    let runtime = fresh_runtime();
+    let result = runtime
+        .execute_tool_command_dispatch_with_session_context(
+            "orbit.workflow.run.list",
+            json!({}),
+            None,
+            None,
+            ToolEntryPoint::Mcp,
+            mcp_context([]),
+        )
+        .expect_err("an empty MCP session must fail closed");
+
+    assert!(matches!(result, OrbitError::CapabilityDenied(_)));
+    let events = runtime
+        .list_audit_events(
+            None,
+            Some("orbit.workflow.run.list".to_string()),
+            None,
+            None,
+            1,
+        )
+        .expect("read denied MCP audit row");
+    let row = &events[0];
+    assert_eq!(row.status, AuditEventStatus::Denied);
+    assert_eq!(row.transport, Some(McpTransport::Local));
+    assert!(row.effective_capabilities.is_empty());
+}
+
+#[test]
+fn mcp_agent_session_is_denied_before_governed_tool_execution() {
+    let _g = env_guard();
+    let runtime = fresh_runtime();
+    let result = runtime
+        .execute_tool_command_dispatch_with_session_context(
+            "orbit.workflow.run.list",
+            json!({}),
+            None,
+            None,
+            ToolEntryPoint::Mcp,
+            mcp_context([McpCapability::Agent]),
+        )
+        .expect_err("an agent MCP session must not reach operator tools");
+
+    assert!(matches!(result, OrbitError::CapabilityDenied(_)));
+    let events = runtime
+        .list_audit_events(
+            None,
+            Some("orbit.workflow.run.list".to_string()),
+            None,
+            None,
+            1,
+        )
+        .expect("read agent MCP audit row");
+    let row = &events[0];
+    assert_eq!(row.status, AuditEventStatus::Denied);
+    assert_eq!(row.transport, Some(McpTransport::Local));
+    assert_eq!(
+        row.effective_capabilities,
+        BTreeSet::from([McpCapability::Agent])
+    );
+}
+
+#[test]
+fn mcp_operator_session_reaches_governed_tool_execution() {
     let _g = env_guard();
     let runtime = fresh_runtime();
     let result = runtime.execute_tool_command_dispatch_with_session_context(
-        "orbit.task.delete",
-        json!({ "id": "ORB-NOT-THERE" }),
+        "orbit.workflow.run.list",
+        json!({}),
         None,
         None,
         ToolEntryPoint::Mcp,
-        ToolSessionContext::default(),
+        mcp_context([McpCapability::Operator]),
     );
 
-    assert!(
-        !matches!(result, Err(OrbitError::CapabilityDenied(_))),
-        "MCP v1 reaches domain validation without a capability decision"
+    assert!(result.is_ok(), "operator session was denied: {result:?}");
+    let events = runtime
+        .list_audit_events(
+            None,
+            Some("orbit.workflow.run.list".to_string()),
+            None,
+            None,
+            1,
+        )
+        .expect("read operator MCP audit row");
+    assert_eq!(events[0].status, AuditEventStatus::Success);
+    assert_eq!(
+        events[0].effective_capabilities,
+        BTreeSet::from([McpCapability::Operator])
     );
 }
 

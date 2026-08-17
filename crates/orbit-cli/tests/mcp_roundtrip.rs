@@ -432,7 +432,7 @@ fn mcp_serve_tools_list_matches_production_snapshot() {
 }
 
 #[test]
-fn mcp_server_advertises_and_calls_the_workflow_family() {
+fn mcp_server_advertises_governed_tools_but_denies_an_unprivileged_session() {
     let workspace = McpWorkspace::init();
     let mut client = workspace.serve();
     let response = client.request("tools/list", Value::Null);
@@ -448,12 +448,31 @@ fn mcp_server_advertises_and_calls_the_workflow_family() {
         "orbit_workflow_run_show",
         "orbit_workflow_run_list",
         "orbit_workflow_run_resume",
+        "orbit_command_exec",
     ] {
         assert!(names.contains(expected), "missing {expected}: {names:?}");
     }
 
-    let listed = client.call_tool_ok("orbit_workflow_run_list", json!({}));
-    assert_eq!(listed["items"], json!([]));
+    for (name, arguments) in [
+        ("orbit_workflow_ship", json!({ "task_ids": ["ORB-00001"] })),
+        ("orbit_workflow_run_show", json!({ "id": "jrun-missing" })),
+        ("orbit_workflow_run_list", json!({})),
+        ("orbit_workflow_run_resume", json!({ "id": "jrun-missing" })),
+    ] {
+        let denied = client.call_tool_err(name, arguments);
+        assert_eq!(denied["code"], "capability_denied", "{name}: {denied}");
+    }
+
+    let marker = workspace.work.join("command-exec-must-not-run");
+    let denied = client.call_tool_err(
+        "orbit_command_exec",
+        json!({
+            "argv": ["touch", marker.to_str().expect("utf8 marker")],
+            "working_directory": workspace.work,
+        }),
+    );
+    assert_eq!(denied["code"], "capability_denied", "{denied}");
+    assert!(!marker.exists(), "denied command reached domain execution");
 }
 
 #[test]
@@ -868,8 +887,7 @@ fn mcp_serve_error_paths_return_tool_errors_and_keep_serving() {
         "error should name the missing field: {bad_params}"
     );
 
-    // v1 does not capability-filter governed tools; Core still performs normal
-    // domain validation after dispatch.
+    // Inactive tools remain absent from the advertised MCP registry.
     let unexposed = client.call_tool_err("orbit_task_delete", json!({ "id": "ORB-00000" }));
     assert_eq!(unexposed["code"], "tool_not_found");
 
@@ -909,13 +927,13 @@ fn mcp_calls_are_audited_once_including_unknown_raw_names() {
         "orbit_workflow_ship",
         json!({ "task_ids": ["ORB-00001"], "model": "codex" }),
     );
-    assert_ne!(workflow_failure["code"], "capability_denied");
+    assert_eq!(workflow_failure["code"], "capability_denied");
     drop(client);
 
     for (tool_name, status) in [
         ("orbit.search", "success"),
         ("orbit.task.add", "failure"),
-        ("orbit.workflow.ship", "failure"),
+        ("orbit.workflow.ship", "denied"),
     ] {
         let output = McpWorkspace::orbit_command(&workspace.work, &workspace.home)
             .args(["audit", "list", "--tool", tool_name, "--json"])
