@@ -5,11 +5,11 @@ use std::process::{Child, Command, Stdio};
 
 use orbit_common::OrbitError;
 use orbit_exec::{
-    BwrapProbeOutcome, LinuxBwrapSpawnRequest, MacosSandboxSpawnRequest, UnsatisfiedWriteGrant,
-    compile_linux_bwrap_argv, compile_macos_sandbox_profile, linux_bwrap_write_grant_diagnostic,
-    prepare_linux_bwrap_write_grants, probe_bwrap, provider_reads_macos_login_keychain,
-    sandbox_exec_available, sandbox_exec_unavailable_message, spawn_under_linux_bwrap,
-    spawn_under_macos_sandbox,
+    BwrapProbeOutcome, LinuxBwrapSpawnRequest, MacosLoginKeychainAccess, MacosSandboxSpawnRequest,
+    UnsatisfiedWriteGrant, compile_linux_bwrap_argv, compile_macos_sandbox_profile,
+    linux_bwrap_write_grant_diagnostic, macos_login_keychain_access,
+    prepare_linux_bwrap_write_grants, probe_bwrap, sandbox_exec_available,
+    sandbox_exec_unavailable_message, spawn_under_linux_bwrap, spawn_under_macos_sandbox,
 };
 use orbit_types::policy::ResolvedFsProfile;
 use orbit_types::workflow::ExecutorSandboxKind;
@@ -557,6 +557,11 @@ const KEYCHAIN_AUTH_FAILURE_MARKER: &str = "OAuth session expired";
 /// which cannot help. Orbit compiled the profile, so it is the only layer that
 /// knows whether the credential was actually reachable; say so next to the
 /// provider's message instead of leaving the operator to guess.
+///
+/// The verdict comes from `orbit_exec::macos_login_keychain_access`, which
+/// reads the same profile the kernel enforced. Only the `Allowed` case may
+/// recommend re-authentication: the other cases are Orbit's own denial, which
+/// no amount of re-logging in outside the sandbox will clear. [ORB-10931]
 pub(super) fn macos_keychain_auth_diagnostic(
     provider: &str,
     sandbox: Option<&ResolvedSandbox>,
@@ -577,27 +582,36 @@ pub(crate) fn macos_keychain_auth_diagnostic_with(
 ) -> Option<String> {
     let sandbox = sandbox?;
     if sandbox.kind != ExecutorSandboxKind::MacosSandboxExec
-        || !provider_reads_macos_login_keychain(provider)
         || !output.contains(KEYCHAIN_AUTH_FAILURE_MARKER)
     {
         return None;
     }
-    // The compiler emits the re-allow only when it can resolve HOME, so an
-    // Orbit process started without a login environment still produces the
-    // fake-expiry failure. That is a different fix from re-authenticating.
-    if home.is_some_and(|home| !home.is_empty()) {
-        Some(format!(
+    match macos_login_keychain_access(provider, home, &sandbox.fs_profile) {
+        // The provider does not keep credentials in the keychain, so this
+        // failure has nothing to do with the sandbox's keychain deny.
+        MacosLoginKeychainAccess::DeniedByDefaultPolicy => None,
+        MacosLoginKeychainAccess::Allowed => Some(format!(
             "Orbit's macOS sandbox profile allows `$HOME/Library/Keychains` reads for provider \
              `{provider}`, so the stored credential was reachable and this is a real login \
              failure: re-authenticate the provider CLI outside Orbit, then retry."
-        ))
-    } else {
-        Some(format!(
+        )),
+        // The compiler emits the re-allow only when it can resolve HOME, so an
+        // Orbit process started without a login environment still produces the
+        // fake-expiry failure. That is a different fix from re-authenticating.
+        MacosLoginKeychainAccess::HomeUnresolved => Some(format!(
             "HOME is unset for the Orbit process, so its macOS sandbox profile could not allow \
              `$HOME/Library/Keychains` reads for provider `{provider}`: the sandbox hid the \
              stored credential and the login is not necessarily expired. Start Orbit with a \
              login environment and retry before re-authenticating."
-        ))
+        )),
+        MacosLoginKeychainAccess::DeniedByActivityRule { rule } => Some(format!(
+            "The activity's fsProfile `{}` denies `$HOME/Library/Keychains` reads via rule \
+             `{rule}`, which outranks the `{provider}` credential carve-out, so Orbit's macOS \
+             sandbox hid the stored credential and the login is not necessarily expired. \
+             Re-authenticating will not help: drop or narrow that denyRead rule, or run this \
+             activity without the macOS sandbox.",
+            sandbox.fs_profile.name
+        )),
     }
 }
 
@@ -699,7 +713,7 @@ pub(crate) fn spawn_macos_sandboxed_with(
     //
     // `provider` reaches the compiler because the credential denylist has one
     // provider-scoped exception: the confined CLI's own credential store. See
-    // `orbit_exec::provider_reads_macos_login_keychain`. [ORB-10929]
+    // `orbit_exec::macos_login_keychain_access`. [ORB-10929]
     let profile_text = compile_macos_sandbox_profile(&sandbox.fs_profile, provider)
         .map_err(|err| SpawnError::permanent(err.to_string()))?;
     let (child, profile_temp) = spawn_under_macos_sandbox(MacosSandboxSpawnRequest {

@@ -56,6 +56,37 @@ pub(super) fn sandbox_exec_path_for_test() -> PathBuf {
     super::spawn::sandbox_exec_path().expect("trusted sandbox-exec path")
 }
 
+/// Apply `profile_text` with the trusted `sandbox-exec` and report whether a
+/// child could read `path`. Shared by the keychain ordering tests so each one
+/// asserts on the kernel's verdict rather than on profile text.
+#[cfg(target_os = "macos")]
+pub(super) fn can_read_under_profile(profile_text: &str, path: &Path) -> bool {
+    use std::io::Write;
+
+    let mut profile_file = tempfile::Builder::new()
+        .prefix("orbit-sandbox-keychain-")
+        .suffix(".sb")
+        .tempfile()
+        .expect("tempfile");
+    profile_file
+        .write_all(profile_text.as_bytes())
+        .expect("write profile");
+    profile_file.flush().expect("flush");
+
+    std::process::Command::new(sandbox_exec_path_for_test())
+        .arg("-f")
+        .arg(profile_file.path())
+        .arg("/bin/sh")
+        .arg("-c")
+        .arg(format!("cat {}", shell_escape(path)))
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .expect("run sandbox-exec")
+        .success()
+}
+
 #[cfg(target_os = "macos")]
 pub(super) fn sandbox_exec_can_apply() -> bool {
     if !super::spawn::sandbox_exec_available() {

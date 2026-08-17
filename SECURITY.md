@@ -87,9 +87,14 @@ refreshed token but cannot persist it — re-authentication remains an
 unsandboxed operation. Reading the keychain file is not the same as reading its
 secrets (items stay encrypted behind their own per-item ACLs), but this does
 widen a Claude agent's reach to the login keychain file itself, which is why it
-is scoped to the one provider that needs it. A failing run says which case it
-hit: Orbit attaches its own attribution to the provider's misleading "expired"
-message.
+is scoped to the one provider that needs it. The exception is a default, not an
+override: the compiled clause order is default credential denies, then the
+provider carve-out, then the activity's own negated `read` rules, so an
+`fsProfile` that denies `~/Library/Keychains` — or any ancestor of it, such as
+`~/Library` — takes the read back from Claude under SBPL last-match-wins. A
+failing run says which case it hit: Orbit attaches its own attribution to the
+provider's misleading "expired" message, and only recommends re-authenticating
+when the credential really was reachable.
 
 **Environment forwarding to sandboxed/subprocess agents is name-based, not
 value-shaped.** Orbit filters ambient environment variables passed to
