@@ -34,7 +34,7 @@ Three security-sensitive settings deliberately do not inherit from global whenev
 - `execution.codex.approval_policy`
 - `execution.env.pass`
 
-If the workspace file omits one of these, Orbit uses that setting's built-in default. This keeps repository agent sandboxing, approval, and environment passthrough deterministic instead of depending on a user's global policy. `execution.env.inherit` is not a configurable key: agent subprocesses always start from a cleared environment.
+If the workspace file omits one of these, Orbit uses that setting's built-in default. This keeps repository agent sandboxing, approval, and environment passthrough deterministic instead of depending on a user's global policy. `execution.env.inherit` is not a configurable key: an agent subprocess environment is always composed from an allowlist — see [`[execution.env]` — the agent subprocess environment](#executionenv--the-agent-subprocess-environment).
 
 Run `orbit config show` for the effective merged view. Every setting is annotated as `workspace`, `global`, `built-in`, or `environment`, including the source file path where one applies. `orbit config show --json` exposes the same attribution in its `provenance` object. Use `--scope global` or `--scope workspace` to inspect either physical file alone.
 
@@ -217,11 +217,50 @@ The dropdown label `default: codex` in the dashboard means *the task has no `cre
 
 ---
 
+## `[execution.env]` — the agent subprocess environment
+
+Every agent subprocess — bare execution, the Linux Bubblewrap sandbox, and the
+macOS `sandbox-exec` sandbox alike — starts from a **cleared** environment and
+receives exactly four groups of variables, and nothing else:
+
+| Group | Contents |
+|---|---|
+| Baseline | `HOME`, `LANG`, `LC_ALL`, `LOGNAME`, `PATH`, `SHELL`, `TERM`, `TMPDIR`, `TZ`, `USER` — the minimum runtime context a provider CLI needs to start. `USER`/`LOGNAME` are resolved from the OS when the dispatching process has no login environment. |
+| `pass` | The names you list in `[execution.env].pass`. Default: `HOME`, `PATH`, `CODEX_HOME`, `TMPDIR`, `USER` (plus `__CF_USER_TEXT_ENCODING` on macOS). |
+| Provider extras | The variables the selected provider runtime declares it requires. |
+| `ORBIT_*` | Orbit's own execution envelope — run, task, and session identity, `ORBIT_ROOT`, and `ORBIT_BIN`. The dispatching run's values win over any inherited from an outer process. |
+
+A variable in none of those groups is **absent** from the child, whatever it is
+named. This is an allowlist, not a filter: Orbit does *not* forward "everything
+that does not look like a secret". A benignly named credential —
+`DATABASE_URL`, an internal service endpoint, a per-team API base URL — never
+reaches an agent subprocess unless you name it in `pass`. Agent subprocesses
+keep host network access, so this is the boundary that stops an accidental
+disclosure from becoming exfiltration.
+
+```toml
+[execution.env]
+pass = ["HOME", "PATH", "CODEX_HOME", "TMPDIR", "USER", "GITHUB_TOKEN"]
+```
+
+Adding a name to `pass` forwards it *when the dispatching process holds it*; a
+listed name that is unset is simply absent rather than empty. `pass` replaces
+rather than extends the built-in default, so include the baseline names you
+still want, and keep credentials opt-in one at a time.
+
+`execution.env.inherit` is not a configurable key. It was removed in ORB-00365
+because a workspace `config.toml` could set `inherit = true` and — since
+workspace config *replaces* global for security keys — silently flip every
+agent subprocess to full inheritance. Inheritance is fixed off; a stale
+`inherit` key in a config file is accepted and ignored.
+
+---
+
 ## Other sections (brief)
 
 | Section | Purpose |
 |---|---|
-| `[execution.env]` | Env vars passed to agent subprocesses. Only the explicit `pass` list crosses the boundary; the process environment is never inherited wholesale. |
+| `[execution.env]` | Env vars passed to agent subprocesses. The child environment is *composed from an allowlist*, never filtered out of Orbit's own — see [`[execution.env]` — the agent subprocess environment](#executionenv--the-agent-subprocess-environment). |
 | `[execution.codex]` | Codex CLI sandbox mode. Valid: `read-only`, `workspace-write` (default), `danger-full-access`. Optional `approval_policy = "on-request"` enables escalation prompts. |
 | `[tasks]` | `id_start = N` sets a floor for the local task-id allocator: on runtime build the counter is raised to at least `N` (never lowered), so machines can hold disjoint id ranges (e.g. one `0–9999`, another `10000+`) and avoid cross-machine collisions. Capped by `ORB_TASK_ID_MAX` (99999) — setting it near the ceiling shrinks the usable range. Prefer the one-shot `orbit workspace init --task-id-start N` for the initial seed; the config key keeps the floor sticky across machines that share a config. See [task-migration overview](design/task-migration/1_overview.md). |
 | `[scoring]` | `enabled = true` records per-agent scoreboard counters under `.orbit/state/scoreboard/`. |

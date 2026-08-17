@@ -4,7 +4,6 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 
 use orbit_common::OrbitError;
-use orbit_common::security::redaction::non_sensitive_env_vars;
 use orbit_exec::{
     BwrapProbeOutcome, LinuxBwrapSpawnRequest, MacosSandboxSpawnRequest, UnsatisfiedWriteGrant,
     compile_linux_bwrap_argv, compile_macos_sandbox_profile, linux_bwrap_write_grant_diagnostic,
@@ -553,8 +552,11 @@ pub(crate) fn spawn_bare(
     let mut command = Command::new(program);
     command
         .args(args)
+        // `env` is the complete child environment, composed from the
+        // `[execution.env]` allowlist by the dispatcher. Nothing ambient is
+        // added here: seeding a cleared environment from the parent is what
+        // let benignly named credentials reach the provider. [ORB-10917]
         .env_clear()
-        .envs(non_sensitive_env_vars())
         .envs(env.iter().map(|(key, value)| (key, value)))
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())

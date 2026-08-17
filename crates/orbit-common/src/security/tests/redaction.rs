@@ -1,18 +1,9 @@
-use std::ffi::{OsStr, OsString};
 use std::sync::{Mutex, MutexGuard, OnceLock};
 
 use super::super::redaction::{
-    backfill_login_identity, credential_safe_location, is_high_confidence_single_token_credential,
-    is_redactable_value, is_sensitive_env_name, os_login_name, redact_all,
-    redact_sensitive_env_text,
+    credential_safe_location, is_high_confidence_single_token_credential, is_redactable_value,
+    is_sensitive_env_name, redact_all, redact_sensitive_env_text,
 };
-
-fn values_for(vars: &[(OsString, OsString)], key: &str) -> Vec<OsString> {
-    vars.iter()
-        .filter(|(name, _)| name == OsStr::new(key))
-        .map(|(_, value)| value.clone())
-        .collect()
-}
 
 #[test]
 fn redact_all_scrubs_key_query_params_case_insensitively() {
@@ -159,58 +150,10 @@ fn high_confidence_single_token_detection_covers_provider_scm_cloud_families() {
 }
 
 #[test]
-fn backfill_login_identity_fills_missing_user_and_logname() {
-    let Some(expected) = os_login_name() else {
-        // No resolvable login on this host; backfill is a no-op by design.
-        return;
-    };
-    let mut vars = vec![(OsString::from("PATH"), OsString::from("/usr/bin"))];
-
-    backfill_login_identity(&mut vars);
-
-    assert_eq!(values_for(&vars, "USER"), vec![OsString::from(&expected)]);
-    assert_eq!(
-        values_for(&vars, "LOGNAME"),
-        vec![OsString::from(&expected)]
-    );
-}
-
-#[test]
-fn backfill_login_identity_preserves_existing_nonempty_user() {
-    let mut vars = vec![
-        (OsString::from("USER"), OsString::from("explicit-user")),
-        (OsString::from("LOGNAME"), OsString::from("explicit-user")),
-    ];
-
-    backfill_login_identity(&mut vars);
-
-    assert_eq!(
-        values_for(&vars, "USER"),
-        vec![OsString::from("explicit-user")]
-    );
-    assert_eq!(
-        values_for(&vars, "LOGNAME"),
-        vec![OsString::from("explicit-user")]
-    );
-}
-
-#[test]
-fn backfill_login_identity_replaces_empty_user_without_duplicating() {
-    let Some(expected) = os_login_name() else {
-        return;
-    };
-    let mut vars = vec![(OsString::from("USER"), OsString::new())];
-
-    backfill_login_identity(&mut vars);
-
-    // Exactly one USER entry, carrying the resolved login (no empty leftover).
-    assert_eq!(values_for(&vars, "USER"), vec![OsString::from(&expected)]);
-}
-
-#[test]
-fn identity_backfill_does_not_weaken_credential_scrubbing() {
-    // ORB-00409 AC#4: known credential-shaped names stay classified sensitive,
-    // so they remain excluded from `non_sensitive_env_vars()` output.
+fn credential_shaped_names_stay_classified_sensitive() {
+    // Name classification governs which live env *values* get scrubbed out of
+    // persisted text. It is no longer an admission gate for child environments
+    // (see `security::child_env`), so this asserts only the redaction contract.
     for name in [
         "ANTHROPIC_API_KEY",
         "GH_TOKEN",
@@ -222,11 +165,11 @@ fn identity_backfill_does_not_weaken_credential_scrubbing() {
     ] {
         assert!(
             is_sensitive_env_name(name),
-            "{name} must be classified sensitive (excluded from the forwarded env)"
+            "{name} must be classified sensitive so its value is scrubbed"
         );
     }
-    // Identity / runtime-context vars are NOT sensitive — they pass through and
-    // are the ones the backfill guarantees.
+    // Identity / runtime-context vars are NOT sensitive: their values are
+    // ordinary paths and names that must stay readable in diagnostics.
     for name in ["USER", "LOGNAME", "HOME", "PATH"] {
         assert!(
             !is_sensitive_env_name(name),

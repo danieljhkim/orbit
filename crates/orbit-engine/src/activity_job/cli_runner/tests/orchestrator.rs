@@ -3206,6 +3206,68 @@ fi
     assert_eq!(outcome.output["provider"], "grok");
 }
 
+/// [ORB-10917] End-to-end guard for the composed dispatch environment: a
+/// benignly named ambient credential must not survive into the provider child.
+/// The ambient value is set by this test rather than inherited from the
+/// developer's shell, and the child reports what it actually saw so a
+/// regression fails loudly instead of silently forwarding.
+#[test]
+fn run_cli_backend_does_not_forward_benignly_named_ambient_credentials() {
+    let temp = tempdir().expect("tempdir");
+    let script = temp.path().join("grok");
+    write_executable(
+        &script,
+        r#"#!/bin/sh
+cat > /dev/null
+if [ -z "$DATABASE_URL" ] && [ -z "$BILLING_ENDPOINT" ] && [ -n "$PATH" ]; then
+  printf '%s\n' '{"schemaVersion":1,"status":"success","result":{"identity":"ok"},"error":null}'
+else
+  printf '{"schemaVersion":1,"status":"failed","error":{"code":"ambient_env_leaked","message":"DATABASE_URL=%s BILLING_ENDPOINT=%s","details":null}}\n' "$DATABASE_URL" "$BILLING_ENDPOINT"
+  exit 1
+fi
+"#,
+    );
+
+    let sink = Arc::new(RecordingSink::default());
+    let sink_for_writer: Arc<dyn AuditSink> = sink;
+    let audit = Arc::new(V2AuditWriter::new(
+        "job-grok-env-allowlist",
+        "grok:grok-build",
+        sink_for_writer,
+    ));
+    let host = TestHost {
+        command: script.display().to_string(),
+        executor_args: Vec::new(),
+        provider_config: HashMap::new(),
+        sandbox: None,
+        task_context: None,
+        workspace_root: None,
+        orbit_root: None,
+    };
+    let mut spec = test_agent_loop_spec_for("grok", Duration::from_secs(5));
+    spec.model = Some("grok-build".to_string());
+
+    let _ambient = orbit_common::test_env::scoped([
+        ("DATABASE_URL", Some("postgres://svc:hunter2@db.internal")),
+        ("BILLING_ENDPOINT", Some("https://billing.internal.example")),
+    ]);
+    let outcome = run_cli_backend(
+        &host,
+        &spec,
+        "job-grok-env-allowlist",
+        audit,
+        &serde_json::json!({"prompt": "hi"}),
+        None,
+    )
+    .expect("run succeeds");
+
+    assert!(
+        outcome.success,
+        "ambient credentials leaked into the provider child: {:?}",
+        outcome.output
+    );
+}
+
 /// [ORB-10909] CLI-runner dispatch must inject ORBIT_ROOT from the host so a
 /// spawned agent whose HOME does not contain the Orbit registry can still
 /// resolve `orbit tool run` against the dispatching run's root.
@@ -3262,10 +3324,10 @@ fi
 /// AGENT_MODEL/AGENT_TASK must be omitted (unset), not set to an empty
 /// string, when the model or task id is unknown — mirrors ORB-10340's
 /// worker-side semantics. AGENT_RUN_ID is always known for a dispatched run.
-// Asserted at the builder boundary, not through a spawned child: provider spawns seed the
-// cleared environment with `non_sensitive_env_vars()`, so an Orbit-dispatched test run's own
-// AGENT_* telemetry can leak into the child and mask a correct omission. The positive
-// propagation case above still covers the wiring end-to-end.
+// Asserted at the builder boundary, not through a spawned child: the composed child env
+// forwards the whole `ORBIT_*` envelope, so an Orbit-dispatched test run's own run/task
+// identity can reach the child and mask a correct omission. The positive propagation case
+// above still covers the wiring end-to-end.
 #[test]
 fn run_cli_backend_omits_agent_model_and_task_env_vars_when_unknown() {
     let vars = provenance_env(ProvenanceEnv {

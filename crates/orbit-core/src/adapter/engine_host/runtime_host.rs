@@ -264,13 +264,9 @@ impl RuntimeHost for OrbitRuntime {
         config
     }
 
-    fn execution_env_inherit(&self) -> bool {
-        self.execution_env_policy().inherit()
-    }
-
-    fn hydrated_env_allowlist(&self, env_extra: &[String]) -> Vec<(String, String)> {
+    fn agent_subprocess_environment(&self, required_env_vars: &[&str]) -> Vec<(String, String)> {
         self.execution_env_policy()
-            .hydrated_allowlist_env_with_extras(env_extra)
+            .agent_subprocess_env(required_env_vars)
     }
 
     fn orbit_root(&self) -> Option<String> {
@@ -281,11 +277,6 @@ impl RuntimeHost for OrbitRuntime {
                 .to_string_lossy()
                 .into_owned(),
         )
-    }
-
-    fn cli_command_environment(&self, env_extra: &[String]) -> Vec<(String, String)> {
-        self.execution_env_policy()
-            .hydrated_cli_command_env_with_extras(env_extra)
     }
 
     fn missing_required_environment_vars(&self, required_env_vars: &[&str]) -> Vec<String> {
