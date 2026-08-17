@@ -32,6 +32,11 @@ set -euo pipefail
 repo_root="${1:-${ORBIT_REPO_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}}"
 crates_dir="$repo_root/crates"
 
+if ! command -v rg >/dev/null 2>&1; then
+  echo "check-error-translation: ripgrep (rg) is required; install it before running" >&2
+  exit 1
+fi
+
 fail=0
 
 # --- Registry: boundary error type -> owning crate -> translator name. ---
