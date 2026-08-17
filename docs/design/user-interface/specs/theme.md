@@ -1,3 +1,10 @@
+---
+type: design
+summary: "Spec: Canon Refined Theme"
+tags: ["user-interface"]
+last_validated: 2026-08-17
+---
+
 # Spec: Canon Refined Theme
 
 This document defines the formal design tokens and visual language for the Orbit User Interface (Canon Refined aesthetic), superseding the deprecated Trading Terminal theme.
@@ -10,42 +17,42 @@ As Orbit matures, the extreme constraints of the "Trading Terminal" aesthetic (p
 
 ### Background & Elevation
 The theme uses a layered dark mode, relying on subtle lightness shifts rather than shadows.
-- `bg`: `#0a0a0a` (Base canvas)
-- `bg-elev`: `#17171a` (Cards, panels, buttons)
-- `bg-sunk`: `#060607` (Deep wells, expanded detail rows)
+- `--bg`: `#000000` (Base canvas)
+- `--bg-elev`: `#0a0a0a` (Cards, panels, buttons)
+- Expanded task details use `#050505`; there is no dedicated `--bg-sunk` token in the live stylesheet.
 
 ### Borders
 Borders delineate structure without heavy contrast.
-- `border`: `#26262b` (Standard dividers)
-- `border-strong`: `#3b3b42` (Active/focused inputs)
+- `--border`: `#333333` (Standard dividers)
+- Focused inputs use the `--accent` border; there is no dedicated `--border-strong` token.
 
 ### Typography
-- **Sans-serif (Primary):** `Inter`, used for prose, titles, and general UI text. Ensures high readability at small sizes.
-- **Monospace (Secondary/Data):** `JetBrains Mono`, strictly reserved for IDs, metrics, timestamps, and code snippets.
-- **Base Size:** `13px` with `1.5` line height.
+- **Sans-serif (Primary):** `Inter` with `Geist Sans` fallback, used for prose, titles, and general UI text.
+- **Monospace (Secondary/Data):** `Geist Mono` with `JetBrains Mono` fallback, used for IDs, metrics, timestamps, and code snippets.
+- **Base Size:** `14px` with `1.5` line height.
 
 ### Semantic Colors
 Colors are muted but distinct, avoiding harsh neon tones while maintaining semantic meaning.
-- **Text:** `--text` (`#ededf0`), `--text-muted` (`#9b9ba3`), `--text-faint` (`#686872`)
+- **Text:** `--fg` (`#dcdcdc`), `--fg-dim` (`#71717a`)
 - **Accent (Blue):** `--accent` (`#6e9fff`)
-- **Success/Done (Green):** `--status-done` (`#4cc38a`)
-- **In-Progress (Teal):** `--status-in-progress` (`#5ec8d4`)
-- **Review (Purple):** `--status-review` (`#c97cf0`)
-- **Warning/Proposed (Amber):** `--status-proposed` (`#f5b14a`)
-- **Error/Blocked (Red):** `--status-blocked` (`#ef6b6b`)
+- **Success/Done (Green):** `--status-done` (`#10b981`)
+- **In-Progress (Teal):** `--status-in-progress` (`#06b6d4`)
+- **Review (Purple):** `--status-review` (`#d946ef`)
+- **Warning/Proposed (Amber):** `--status-proposed` (`#f59e0b`)
+- **Error/Blocked (Red):** `--status-blocked` (`#ef4444`)
 
 ### Structural Rules
-- **Radii:** Standardized on `4px` for small elements (buttons, chips) and `6px` for large containers (panels).
+- **Radii:** The stylesheet uses `2px` for many controls, `4px` for small components, and `6px` for panel-like containers.
 - **Density:** Padding remains tight (e.g., `12px 16px` for headers, `8px` gaps), but text is allowed to breathe more than in the legacy terminal theme.
-- **Animation:** Minimal, purposeful motion. Used primarily for "live" indicators (e.g., a pulsing dot `animation: pulse 2s infinite`).
+- **Animation:** Minimal, purposeful motion. Used primarily for loading indicators (e.g., `pulse-skeleton 1.5s infinite ease-in-out`).
 
 ## Mechanism-specific sections
 
 ### Expandable Rows
-Data tables use expandable rows (`.row.open`). When expanded:
-- The row background shifts to an accent wash (`--accent-low`).
-- The expanded detail view drops into a sunken background (`--bg-sunk`) with a 2-column layout (main content + side metadata).
-- Caret icons rotate `90deg` for clear state indication.
+Data tables use expandable rows (`.row.expanded`). When expanded:
+- The row background shifts to an accent wash (`rgba(110, 159, 255, 0.05)`).
+- The expanded detail view uses `#050505` with a 2-column layout (main content + side metadata).
+- Collapsible field carets rotate `-90deg` for clear state indication.
 
 ## Agent Signature
 gemini

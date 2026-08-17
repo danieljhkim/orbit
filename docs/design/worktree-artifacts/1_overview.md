@@ -4,6 +4,7 @@ type: design
 title: "Worktree Artifacts - Overview"
 owner: codex
 last_updated: 2026-08-15
+last_validated: 2026-08-17
 status: Accepted
 feature: worktree-artifacts
 doc_role: overview
@@ -24,7 +25,7 @@ related_artifacts: ["ORB-00199", "ORB-00200", "ORB-00201", "ORB-10501", "ORB-105
 > into feature decision docs; [ORB-10805] removed the redundant tracked store and
 > its IDs.
 
-Historically, worktree artifacts let decision and learning body files travel with the branch that created them while preserving one shared ID authority for the repository. Tasks, audit, scoreboards, and allocator state stayed in the shared `.orbit/`; the now-retired body files lived in the current worktree's `.orbit/`.
+Historically, worktree artifacts let decision and learning body files travel with the branch that created them while preserving one shared ID authority for the repository. Tasks, audit, scoreboards, and allocator state stayed in the shared `.orbit/`; the now-retired body files lived in the current worktree's `.orbit/`. The ADR/learning stores and `id_allocations` surface described below were retired with the native learning subsystem; current Orbit retains the shared/local runtime-root split but no longer exposes those artifact commands or allocation tables.
 
 ## 1. Motivation
 
@@ -40,16 +41,16 @@ The three-task sequence split this apart:
 
 | Concept | Meaning |
 |---------|---------|
-| Shared root | The main checkout `.orbit/`, used for tasks, audit, scoreboards, semantic.db, and allocation authority. |
-| Local root | The current worktree `.orbit/`, used for ADR and learning body files. |
-| Allocation row | A row in `id_allocations` recording ID, kind, allocation status, recorded worktree, branch, and `body_path`. |
-| Local-readable artifact | An allocation whose recorded body path exists and can be read by the current process. |
-| Remote stub | A list row for an allocation whose body is not locally readable, shown only with `include_remote`. Assumes the body still exists in *some* worktree. |
-| Orphaned allocation | An allocation whose pinned worktree is gone from disk *and* whose body is unreadable everywhere locally — a remote stub that can never resolve again. Detected by the `id-allocations` doctor check and retired by `orbit doctor --fix-orphaned-allocations` [ORB-10501]. |
+| Shared root | The main checkout `.orbit/`, used for tasks, audit, scoreboards, semantic.db, and (historically) allocation authority. |
+| Local root | The current worktree `.orbit/`, used for (historically) ADR and learning body files. |
+| Allocation row | A historical `id_allocations` row recording ID, kind, allocation status, recorded worktree, branch, and `body_path`. |
+| Local-readable artifact | A historical allocation whose recorded body path exists and can be read by the current process. |
+| Remote stub | A historical list row for an allocation whose body is not locally readable, shown only with `include_remote`. |
+| Orphaned allocation | A historical allocation whose pinned worktree is gone from disk and whose body is unreadable everywhere locally; this was detected by the `id-allocations` doctor check and retired by `orbit doctor --fix-orphaned-allocations` [ORB-10501]. |
 
 ## 3. At a Glance
 
-| Concern | File | Task |
+| Historical concern | Historical implementation location | Task |
 |---------|------|------|
 | Root split | `crates/orbit-core/src/runtime/resolve.rs` | [ORB-00199] |
 | Allocator and body metadata | `crates/orbit-store/src/sqlite/id_allocator/` | [ORB-00200], [ORB-00201] |

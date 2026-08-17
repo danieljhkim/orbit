@@ -4,6 +4,7 @@ type: design
 title: "User Interface — Decisions"
 owner: gemini
 last_updated: 2026-08-11
+last_validated: 2026-08-17
 status: Draft
 feature: user-interface
 doc_role: decisions
@@ -169,7 +170,7 @@ Rejected alternative: workspace-prefixed route paths (`/api/:workspace/tasks`). 
 - Cost: handlers that need a concrete workspace now depend on the `Ws` extractor's selection rules; the aggregate task endpoint reopens each workspace's store per request (no cross-workspace caching of task lists yet).
 
 
-## Top-Level Dashboard Nav Is the Operator's Four Tabs
+## Top-Level Dashboard Nav Is the Operator's Five Tabs
 
 **Recorded:** 2026-07-26 19:14:18.916582Z · [ORB-10444]
 
@@ -177,7 +178,7 @@ Rejected alternative: workspace-prefixed route paths (`/api/:workspace/tasks`). 
 Top-level nav is the dashboard's scarcest surface, and two of its six entries were not earning a slot: a deprecated review-threads tab with no backing view, and Scoreboard, a diagnostics-shaped read-only telemetry view sitting beside the operator workflow tabs.
 
 ### Decision
-The top-level nav is exactly Tasks, Audit, Diagnostics, Knowledge (plus the hash-only run-detail route). The deprecated tab is removed outright rather than hidden. Scoreboard becomes a Diagnostics subtab routed as #diagnostics/scoreboard, with its markup moved verbatim so the /api/scoreboard contract is untouched.
+The top-level nav is exactly Tasks, Audit, Diagnostics, Operations, Knowledge (plus the hash-only run-detail route). The deprecated tab is removed outright rather than hidden. Scoreboard becomes a Diagnostics subtab routed as #diagnostics/scoreboard, with its markup moved verbatim so the /api/scoreboard contract is untouched.
 
 ### Consequences
 - The nav reads as the operator workflow; telemetry lives one level down.
