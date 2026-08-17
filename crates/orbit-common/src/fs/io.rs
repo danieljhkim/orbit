@@ -269,21 +269,27 @@ where
             format!("cannot determine parent for '{}'", target_path.display()),
         )
     })?;
-    create_private_dir_all(parent)?;
+    create_private_dir_all(parent).map_err(|e| classify_lock_io(parent, e))?;
 
     let lock_path = lock_path_for(target_path)?;
     let mut options = OpenOptions::new();
     options.create(true).read(true).write(true).truncate(false);
     apply_private_file_mode(&mut options);
     let lock_file = options.open(&lock_path).map_err(|e| {
-        io::Error::other(format!("open {label} lock '{}': {e}", lock_path.display()))
+        classify_or_wrap_lock_io(&lock_path, e, |e| {
+            format!("open {label} lock '{}': {e}", lock_path.display())
+        })
     })?;
     set_private_file_permissions(&lock_path).map_err(|e| {
-        io::Error::other(format!("chmod {label} lock '{}': {e}", lock_path.display()))
+        classify_or_wrap_lock_io(&lock_path, e, |e| {
+            format!("chmod {label} lock '{}': {e}", lock_path.display())
+        })
     })?;
-    lock_file
-        .lock_exclusive()
-        .map_err(|e| io::Error::other(format!("lock {label} '{}': {e}", lock_path.display())))?;
+    lock_file.lock_exclusive().map_err(|e| {
+        classify_or_wrap_lock_io(&lock_path, e, |e| {
+            format!("lock {label} '{}': {e}", lock_path.display())
+        })
+    })?;
 
     op()
 }
@@ -372,6 +378,38 @@ fn set_private_file_permissions(path: &Path) -> io::Result<()> {
 #[cfg(not(unix))]
 fn set_private_file_permissions(_path: &Path) -> io::Result<()> {
     Ok(())
+}
+
+/// Attributable write-access failure, or `None` when `err` is some other I/O.
+///
+/// Shared by [`crate::OrbitError::from_write_io`] and lock acquisition so
+/// EROFS/EACCES always names `path` and hints at a sandbox/environment
+/// condition instead of a store defect.
+pub(crate) fn write_access_error_message(path: &Path, err: &io::Error) -> Option<String> {
+    is_readonly_or_access_error(err).then(|| {
+        format!(
+            "`{}` is not writable: {err}; this is likely a sandbox or environment condition, not an Orbit store defect",
+            path.display()
+        )
+    })
+}
+
+fn classify_lock_io(path: &Path, err: io::Error) -> io::Error {
+    match write_access_error_message(path, &err) {
+        Some(message) => io::Error::new(err.kind(), message),
+        None => err,
+    }
+}
+
+fn classify_or_wrap_lock_io(
+    path: &Path,
+    err: io::Error,
+    fallback: impl FnOnce(&io::Error) -> String,
+) -> io::Error {
+    match write_access_error_message(path, &err) {
+        Some(message) => io::Error::new(err.kind(), message),
+        None => io::Error::other(fallback(&err)),
+    }
 }
 
 /// True when `error` is a read-only filesystem or access denial.
