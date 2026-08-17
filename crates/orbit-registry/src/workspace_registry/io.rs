@@ -79,5 +79,5 @@ fn registry_host_context(path: &Path) -> Result<WorkspaceRegistryHostContext, Or
 fn write_registry(registry: &WorkspaceRegistry, path: &Path) -> Result<(), OrbitError> {
     let content = serde_json::to_string_pretty(registry)
         .map_err(|error| OrbitError::WorkspaceError(format!("serialize registry: {error}")))?;
-    atomic_write_text(path, &content).map_err(Into::into)
+    atomic_write_text(path, &content).map_err(|error| OrbitError::from_write_io(path, error))
 }

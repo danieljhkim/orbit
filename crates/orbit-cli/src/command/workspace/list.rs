@@ -18,10 +18,7 @@ impl Execute for WorkspaceListArgs {
         let global_root = runtime.global_root();
         let registry_path = workspace_registry::registry_path_for(&global_root);
         let mut registry = workspace_registry::load_registry_from(&registry_path)?;
-        workspace_registry::validate_workspaces(&mut registry);
-
-        if !registry.workspaces.is_empty() {
-            // Save back if staleness changed any status
+        if workspace_registry::validate_workspaces(&mut registry) {
             workspace_registry::save_registry_to(&registry, &registry_path)?;
         }
         Ok(Payload::detail(
