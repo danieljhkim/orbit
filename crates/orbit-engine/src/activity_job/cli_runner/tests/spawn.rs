@@ -65,6 +65,48 @@ fn failed_write_diagnostic_names_attempted_path_and_shadowing_rule() {
     );
 }
 
+/// [ORB-10917] The bare launcher must hand the child exactly the environment
+/// the dispatcher composed. The ambient variables below are set by this test
+/// rather than read from the developer's shell, and none carries a
+/// credential-shaped name — a denylist would forward every one of them.
+#[cfg(unix)]
+#[test]
+fn spawn_bare_gives_the_child_only_the_supplied_environment() {
+    let _ambient = orbit_common::test_env::scoped([
+        ("DATABASE_URL", Some("postgres://svc:hunter2@db.internal")),
+        ("BILLING_ENDPOINT", Some("https://billing.internal.example")),
+        ("ORB_10917_AMBIENT", Some("leaked")),
+        ("ANTHROPIC_API_KEY", Some("sk-ant-000000000000000000000")),
+    ]);
+    let env = vec![
+        ("PATH".to_string(), "/usr/bin:/bin".to_string()),
+        ("ORB_10917_SUPPLIED".to_string(), "present".to_string()),
+    ];
+
+    let spawned = spawn_bare("/bin/sh", &sh_args("env"), &env, None).expect("spawn bare child");
+    let output = spawned
+        .child
+        .wait_with_output()
+        .expect("wait for bare child");
+    let child_env = String::from_utf8_lossy(&output.stdout);
+
+    assert!(
+        child_env.contains("ORB_10917_SUPPLIED=present"),
+        "supplied vars must reach the child: {child_env}"
+    );
+    for leaked in [
+        "DATABASE_URL",
+        "BILLING_ENDPOINT",
+        "ORB_10917_AMBIENT",
+        "ANTHROPIC_API_KEY",
+    ] {
+        assert!(
+            !child_env.contains(leaked),
+            "{leaked} must not reach a bare-exec provider child: {child_env}"
+        );
+    }
+}
+
 /// A path the profile *does* grant is not reported as a denial, so the
 /// diagnostic cannot manufacture an attribution for an unrelated EROFS.
 #[test]

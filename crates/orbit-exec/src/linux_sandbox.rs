@@ -11,7 +11,6 @@ use std::process::{Child, Command, Stdio};
 
 use orbit_common::OrbitError;
 use orbit_common::fs::glob::compile_glob_regex;
-use orbit_common::security::redaction::non_sensitive_env_vars;
 use orbit_types::policy::ResolvedFsProfile;
 
 const TRUSTED_BWRAP_PATH: &str = "/usr/bin/bwrap";
@@ -635,9 +634,12 @@ pub fn spawn_under_linux_bwrap(request: LinuxBwrapSpawnRequest<'_>) -> Result<Ch
     }
     let mut command = Command::new(TRUSTED_BWRAP_PATH);
     command
+        // `env` is the complete child environment the caller composed from the
+        // `[execution.env]` allowlist; the sandbox adds nothing ambient of its
+        // own. Bubblewrap passes its own environment through to the confined
+        // program, so anything seeded here reaches the provider. [ORB-10917]
         .args(&plan.args)
         .env_clear()
-        .envs(non_sensitive_env_vars())
         .envs(env.iter().map(|(key, value)| (key, value)))
         .stdin(stdin)
         .stdout(stdout)

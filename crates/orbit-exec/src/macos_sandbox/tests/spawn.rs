@@ -82,6 +82,60 @@ fn spawn_under_macos_sandbox_ignores_fake_sandbox_exec_on_path() {
     );
 }
 
+/// [ORB-10917] `sandbox-exec` hands its own environment to the confined
+/// program, so the launcher must apply exactly the environment the dispatcher
+/// composed. The ambient variables are set here rather than read from the
+/// developer's shell, and none carries a credential-shaped name — a denylist
+/// would forward every one of them.
+#[cfg(target_os = "macos")]
+#[test]
+fn spawn_under_macos_sandbox_gives_the_child_only_the_supplied_environment() {
+    if !sandbox_exec_can_apply() {
+        return;
+    }
+
+    let _ambient = orbit_common::test_env::scoped([
+        ("DATABASE_URL", Some("postgres://svc:hunter2@db.internal")),
+        ("BILLING_ENDPOINT", Some("https://billing.internal.example")),
+        ("ORB_10917_AMBIENT", Some("leaked")),
+        ("ANTHROPIC_API_KEY", Some("sk-ant-000000000000000000000")),
+    ]);
+    let args = ["-c".to_string(), "env".to_string()];
+    let env = [
+        ("PATH".to_string(), "/usr/bin:/bin".to_string()),
+        ("ORB_10917_SUPPLIED".to_string(), "present".to_string()),
+    ];
+    let (child, _profile_file) = spawn_under_macos_sandbox(MacosSandboxSpawnRequest {
+        profile_text: "(version 1)\n(allow default)\n",
+        program: "/bin/sh",
+        args: &args,
+        env: &env,
+        cwd: None,
+        stdin: Stdio::null(),
+        stdout: Stdio::piped(),
+        stderr: Stdio::piped(),
+    })
+    .expect("spawn sandboxed child");
+    let output = child.wait_with_output().expect("wait for child");
+    let child_env = String::from_utf8_lossy(&output.stdout);
+
+    assert!(
+        child_env.contains("ORB_10917_SUPPLIED=present"),
+        "supplied vars must reach the confined child: {child_env}"
+    );
+    for leaked in [
+        "DATABASE_URL",
+        "BILLING_ENDPOINT",
+        "ORB_10917_AMBIENT",
+        "ANTHROPIC_API_KEY",
+    ] {
+        assert!(
+            !child_env.contains(leaked),
+            "{leaked} must not reach a sandbox-exec provider child: {child_env}"
+        );
+    }
+}
+
 #[cfg(target_os = "macos")]
 #[test]
 fn spawn_under_macos_sandbox_runs_program_in_provided_cwd() {

@@ -205,7 +205,7 @@ pub fn run_cli_backend(
     // ADR-0182: external CLI agents get the same active-task hook binding as
     // direct-agent executions. The AGENT_* fields preserve ORB-10342's
     // commit-telemetry contract and omit unknown model/task values.
-    let mut child_env = provenance_env(ProvenanceEnv {
+    let mut dispatch_env = provenance_env(ProvenanceEnv {
         orbit_run_id: Some(run_id),
         orbit_managed_run_context: true,
         orbit_agent_name: tool_ctx.agent_name.as_deref(),
@@ -217,19 +217,27 @@ pub fn run_cli_backend(
         agent_model: model.as_deref(),
         agent_task_id: task_id,
     });
-    child_env.extend(
+    dispatch_env.extend(
         orbit_tool_env().map_err(|error| DispatchError::CliInvocationPermanent(error.message))?,
     );
     // Spawned CLI agents resolve the Orbit registry from $HOME unless
-    // ORBIT_ROOT is set. A dispatching run already knows its root; inject
-    // it the same way `RuntimeHost::execution_environment_mode` does so a
-    // provider whose HOME is a tool-specific directory (e.g. ~/.codex)
-    // can still reach `orbit tool run`. [ORB-10909]
+    // ORBIT_ROOT is set. A dispatching run already knows its root; inject it so
+    // a provider whose HOME is a tool-specific directory (e.g. ~/.codex) can
+    // still reach `orbit tool run`. [ORB-10909]
     if let Some(orbit_root) = host.orbit_root()
-        && !child_env.iter().any(|(key, _)| key == "ORBIT_ROOT")
+        && !dispatch_env.iter().any(|(key, _)| key == "ORBIT_ROOT")
     {
-        child_env.push(("ORBIT_ROOT".to_string(), orbit_root));
+        dispatch_env.push(("ORBIT_ROOT".to_string(), orbit_root));
     }
+    // The child's whole environment is composed here and applied to a cleared
+    // one by every launcher, so the `[execution.env]` allowlist governs what an
+    // untrusted provider subprocess can read. The provider's declared
+    // `required_env_vars` ride along as extras so a strict allowlist still
+    // starts the CLI. `dispatch_env` is appended last and later entries win, so
+    // this run's identity and tool pinning override any same-named value the
+    // allowlist forwarded from an outer process. [ORB-10917]
+    let mut child_env = host.agent_subprocess_environment(invocation.required_env_vars);
+    child_env.extend(dispatch_env);
     // [ORB-10496] Record the provider child's PID the moment it exists. Emitted
     // through the same writer, so it is persisted (and therefore readable by
     // `orbit run show` / the run-status API) while the invocation is still

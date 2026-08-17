@@ -17,6 +17,7 @@ use orbit_common::model_defaults::{
     CLAUDE_DEFAULT_STRONG, CLAUDE_DEFAULT_WEAK, CLAUDE_FABLE_MODEL, CODEX_LUNA_MODEL,
     CODEX_SOL_MODEL, CODEX_TERRA_MODEL, GEMINI_CREW_MODEL, GROK_DEFAULT_MODEL,
 };
+use orbit_common::security::child_env::{allowlisted_child_env, inherited_child_env};
 use orbit_common::security::redaction::redact_home_dir;
 use orbit_types::identity::{Crew, CrewAssignment};
 use orbit_types::workflow::activity_job::{RETIRED_BACKEND_MIGRATION, check_retired_backend_value};
@@ -476,8 +477,17 @@ impl CodexExecutionPolicy {
 /// `[execution.env]`.
 #[derive(Debug, Clone)]
 pub struct ExecutionEnvPolicy {
-    inherit: bool,
-    pass: Vec<String>,
+    /// Whether a child inherits the parent environment wholesale.
+    ///
+    /// `ConfigSnapshot::execution_env_inherit` is a derived invariant pinned to
+    /// `false` — `execution.env.inherit` stopped being settable in ORB-00365,
+    /// because a workspace `config.toml` could flip it and replace the global
+    /// value. The flag survives as the single seam that decides between full
+    /// inheritance and the allowlist, so the two behaviors stay one branch in
+    /// one place rather than two spawn paths.
+    pub(crate) inherit: bool,
+    /// `execution.env.pass`: the names an operator admits by name.
+    pub(crate) pass: Vec<String>,
 }
 
 impl Default for ExecutionEnvPolicy {
@@ -503,40 +513,18 @@ impl ExecutionEnvPolicy {
         self.inherit
     }
 
-    /// Allow-listed variables that are actually set, plus `extras`.
-    pub fn hydrated_allowlist_env_with_extras(&self, extras: &[String]) -> Vec<(String, String)> {
-        let mut names: std::collections::BTreeSet<&str> =
-            self.pass.iter().map(String::as_str).collect();
-        names.extend(extras.iter().map(String::as_str));
-        names
-            .iter()
-            .filter_map(|name| {
-                std::env::var(*name)
-                    .ok()
-                    .map(|value| (name.to_string(), value))
-            })
-            .collect()
-    }
-
-    /// The allow-listed environment for a CLI subprocess: a baseline locale
-    /// set, the configured allowlist plus `extras`, and every `ORBIT_*`
-    /// variable.
-    pub fn hydrated_cli_command_env_with_extras(&self, extras: &[String]) -> Vec<(String, String)> {
-        let mut env = std::collections::BTreeMap::new();
-        for name in cli_command_baseline_pass_list() {
-            if let Ok(value) = std::env::var(&name) {
-                env.insert(name.to_string(), value);
-            }
+    /// The complete environment an agent subprocess is launched with.
+    ///
+    /// This is the only place the policy becomes a concrete child environment,
+    /// and every subprocess launcher starts from a cleared environment and
+    /// applies exactly this — so `inherit = false` really is allowlist-based
+    /// rather than a filter over ambient variables. `extras` carries the names
+    /// a provider declares it requires.
+    pub fn agent_subprocess_env(&self, extras: &[&str]) -> Vec<(String, String)> {
+        if self.inherit {
+            return inherited_child_env();
         }
-        for (name, value) in self.hydrated_allowlist_env_with_extras(extras) {
-            env.insert(name, value);
-        }
-        for (name, value) in std::env::vars() {
-            if name.starts_with("ORBIT_") {
-                env.insert(name, value);
-            }
-        }
-        env.into_iter().collect()
+        allowlisted_child_env(&self.pass, extras)
     }
 
     /// Required variables that this policy would not deliver to a subprocess.
@@ -559,13 +547,4 @@ impl ExecutionEnvPolicy {
 
 fn default_pass_list() -> Vec<String> {
     ConfigSnapshot::default().execution_env_pass
-}
-
-fn cli_command_baseline_pass_list() -> Vec<String> {
-    let mut vars = default_pass_list();
-    vars.push("LANG".to_string());
-    vars.push("TZ".to_string());
-    vars.sort();
-    vars.dedup();
-    vars
 }

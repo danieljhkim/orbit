@@ -3,11 +3,15 @@
 # environment allowlist and the Codex sandbox/approval keys below are the
 # security exceptions: when a workspace config exists, omitted values use
 # built-in defaults instead of inheriting the global file.
-# Agent subprocesses always run with a cleared environment plus the allowlist
-# below — the orbit process's full environment is never inherited (not
-# configurable, by design).
-# Baseline env vars passed to agent subprocesses.
-# User-specific vars (GITHUB_TOKEN, ANTHROPIC_API_KEY, etc.) are opt-in — add them as needed.
+# Agent subprocesses start from a cleared environment and receive only: a
+# built-in baseline (HOME, LANG, LC_ALL, LOGNAME, PATH, SHELL, TERM, TMPDIR, TZ,
+# USER), the `pass` names below, the variables the selected provider declares it
+# requires, and Orbit's own ORBIT_* execution envelope. The orbit process's full
+# environment is never inherited (not configurable, by design).
+# This is an allowlist, not a secret filter: a variable that is not named here
+# does not reach an agent whatever it is called, so a benignly named credential
+# such as DATABASE_URL stays out unless you add it.
+# User-specific vars (GITHUB_TOKEN, ANTHROPIC_API_KEY, DATABASE_URL, etc.) are opt-in — add them as needed.
 pass = [
     "HOME",
     "PATH",
