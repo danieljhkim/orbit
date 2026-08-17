@@ -35,7 +35,7 @@ mod test_support;
 #[cfg(test)]
 mod tests;
 
-pub use compile::compile_macos_sandbox_profile;
+pub use compile::{compile_macos_sandbox_profile, provider_reads_macos_login_keychain};
 pub use provider_dirs::{claude_state_dir_from_env, grok_state_dir_from_env};
 pub use spawn::{
     MacosSandboxSpawnRequest, sandbox_exec_available, sandbox_exec_path,

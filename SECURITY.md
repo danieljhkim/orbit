@@ -73,6 +73,24 @@ run — a config or hook file dropped in another provider's state directory is
 a cross-session persistence vector, not scoped to the current agent's own
 provider. Tracked in `ORB-10234`.
 
+**The macOS credential denylist has one provider-scoped exception.** Claude
+Code stores its OAuth session in the macOS login Keychain (item
+`Claude Code-credentials`), not in a file under `~/.claude`, so the blanket
+`~/Library/Keychains` deny made every sandboxed Claude run fail with
+`OAuth session expired and could not be refreshed` — a login that is present
+and valid, merely unreadable. When (and only when) the confined CLI is Claude,
+the compiled profile re-allows **reads** of `~/Library/Keychains` after the
+deny. Codex, Gemini, Grok, and any unrecognized provider name keep the full
+deny; `/Library/Keychains` and `/System/Library/Keychains` stay denied for
+every provider; nothing grants keychain *writes*, so a sandboxed run can use a
+refreshed token but cannot persist it — re-authentication remains an
+unsandboxed operation. Reading the keychain file is not the same as reading its
+secrets (items stay encrypted behind their own per-item ACLs), but this does
+widen a Claude agent's reach to the login keychain file itself, which is why it
+is scoped to the one provider that needs it. A failing run says which case it
+hit: Orbit attaches its own attribution to the provider's misleading "expired"
+message.
+
 **Environment forwarding to sandboxed/subprocess agents is name-based, not
 value-shaped.** Orbit filters ambient environment variables passed to
 provider subprocesses by matching variable *names* against a fixed list of
