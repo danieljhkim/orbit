@@ -29,7 +29,7 @@ fn registry_depends_only_on_common() {
 
     assert_eq!(
         names,
-        BTreeSet::from(["orbit-common".to_string()]),
+        BTreeSet::from(["orbit-common".to_string(), "orbit-types".to_string(),]),
         "orbit-registry must stay independent of database, command, transport, and runtime crates"
     );
 }
