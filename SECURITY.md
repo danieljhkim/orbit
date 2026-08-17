@@ -64,7 +64,7 @@ surface), enforcement differs sharply by platform:
 | Platform | What actually constrains a `backend: cli` agent's own syscalls |
 | --- | --- |
 | **macOS** | The `orbit-exec` seatbelt (`sandbox-exec`) profile is a **write** boundary, not a meaningful **read** boundary. The compiled profile emits a blanket `(allow file-read*)` for the whole filesystem, minus a small fixed credential denylist (`~/.ssh`, `~/.aws`, `~/.config/gh`, browser keychains/profile stores, system Keychains) — the `fsProfile`'s positive `read` globs are never emitted into the seatbelt at all (only `read` *deny* entries are). Combined with the unrestricted `(allow network*)` the profile also grants (agents need to reach provider APIs), a `backend: cli` agent's read scope is effectively "everything except the denylist," with an open network egress path — an exfiltration exposure. The credential denylist is also known-incomplete: it does not cover `~/.netrc`, `~/.git-credentials`, `~/.gnupg`, `~/.docker/config.json`, `~/.kube/config`, `~/.npmrc`, or cloud-CLI credential caches (e.g. `~/.aws/sso/cache`, `~/.config/gcloud`, `~/.azure`). Treat the macOS seatbelt's read scoping as **advisory, not a security boundary**, for `backend: cli` agents. Tracked in `ORB-10233`. |
-| **Linux** | **No OS-level sandbox exists for `backend: cli` agents at all.** Orbit's policy governs only the built-in tool surface; a CLI agent's own syscalls (arbitrary file reads/writes, network egress, process spawn) are constrained by nothing Orbit provides. On Linux, a `backend: cli` agent has the full filesystem and network access of the user running Orbit. Tracked in `ORB-10236`. |
+| **Linux** | Orbit runs `backend: cli` agents through trusted `/usr/bin/bwrap` after a namespace-and-mount capability probe. Bubblewrap read-only binds the host root and applies ordered writable mounts from the resolved `modify` policy, so writes are confined while host filesystem reads remain available. It uses `--share-net`, so host network access remains available and network egress is not policy-gated by this boundary. If `/usr/bin/bwrap` is absent or the probe fails, dispatch fails closed unless the executor explicitly sets `allow_fallback: true`; that escape hatch runs the agent without Linux write confinement. |
 
 Additionally, on macOS the seatbelt profile allows writes to each supported
 provider's state directory (`~/.claude`, `~/.codex`, `~/.gemini`, `~/.grok`)
@@ -83,12 +83,13 @@ internal service URL with embedded credentials — is forwarded unredacted to
 any spawned agent, including `backend: cli` agents with open network access.
 Tracked in `ORB-10235`.
 
-**Follow-up remediation** (filed from the pre-release security review,
+**Remaining follow-up remediation** (filed from the pre-release security review,
 `SECURITY-REVIEW-2026-07-15.md`, findings H2/M6/M7/M9): `ORB-10233` (macOS
 seatbelt positive read allowlist), `ORB-10234` (scope provider state-dir
-writes to the active provider), `ORB-10235` (env forwarding allowlist instead
-of denylist), `ORB-10236` (Linux provider-native sandbox for `backend: cli`
-agents).
+writes to the active provider), and `ORB-10235` (env forwarding allowlist
+instead of denylist). Linux write confinement is provided by the
+`linux-bwrap` backend described above; read and network isolation remain
+delegated.
 
 **Symlink resolution.** Policy rules are matched against the *real*
 filesystem location, not the requested path. Before matching, the requested
