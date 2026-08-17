@@ -1,14 +1,42 @@
 //! Server-local identity facts attached to one MCP stdio session.
 
+use std::collections::BTreeSet;
 use std::path::Path;
 
 use orbit_common::OrbitError;
-use orbit_types::tool::{McpTransport, ToolSessionContext};
+use orbit_types::tool::{McpCapability, McpTransport, ToolSessionContext};
 
 use orbit_registry::{HostIdentityState, inspect_host_identity, os_hostname};
 
 const LOCAL_MACHINE_FALLBACK: &str = "host/local";
 const LOCAL_HOST_FALLBACK: &str = "local";
+
+/// The authority an MCP server process serves its sessions with.
+///
+/// This is the only place an MCP session acquires capabilities: the tool
+/// chokepoint resolves an MCP call from the session alone, so a server that
+/// stamps nothing here can never reach a governed operation. The choice is made
+/// once, when the server process starts, and never from the live process
+/// environment — an agent that launches its own `orbit mcp serve` gets
+/// [`Self::Agent`] no matter what the launching shell exported.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum McpSessionAuthority {
+    /// The ordinary agent surface.
+    #[default]
+    Agent,
+    /// A server an operator deliberately started for themselves. Sessions also
+    /// keep `agent`, because an operator may do everything an agent may.
+    Operator,
+}
+
+impl McpSessionAuthority {
+    fn capabilities(self) -> BTreeSet<McpCapability> {
+        match self {
+            Self::Agent => BTreeSet::from([McpCapability::Agent]),
+            Self::Operator => BTreeSet::from([McpCapability::Agent, McpCapability::Operator]),
+        }
+    }
+}
 
 /// Identity and trusted audit context derived by the accepting machine.
 pub struct McpServerIdentity {
@@ -17,7 +45,7 @@ pub struct McpServerIdentity {
     pub session_context: ToolSessionContext,
 }
 
-/// Resolve the accepting machine and build its audit-only session envelope.
+/// Resolve the accepting machine and build its trusted session envelope.
 ///
 /// `remote_caller_machine_id` is an opaque label forwarded by the SSH proxy,
 /// not an authenticated principal. `SSH_CONNECTION`, when present, contributes
@@ -25,6 +53,7 @@ pub struct McpServerIdentity {
 pub fn mcp_server_identity(
     global_root: &Path,
     remote_caller_machine_id: Option<String>,
+    authority: McpSessionAuthority,
 ) -> Result<McpServerIdentity, OrbitError> {
     let (process_machine_id, process_host_id) = local_identity(global_root)?;
     let is_remote = remote_caller_machine_id.is_some();
@@ -45,6 +74,7 @@ pub fn mcp_server_identity(
             McpTransport::Local
         }),
         caller_ip: is_remote.then(observed_ssh_caller_ip).flatten(),
+        effective_capabilities: authority.capabilities(),
         ..ToolSessionContext::default()
     };
     Ok(McpServerIdentity {

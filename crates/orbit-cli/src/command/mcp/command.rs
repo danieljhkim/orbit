@@ -2,7 +2,7 @@ use std::path::Path;
 
 use clap::{Args, Subcommand, ValueEnum};
 use orbit_core::{OrbitError, OrbitRuntime};
-use orbit_mcp::RemoteProxyArgs;
+use orbit_mcp::{McpSessionAuthority, RemoteProxyArgs};
 
 use crate::command::{CommandOut, CommandOutput, Execute};
 
@@ -85,6 +85,16 @@ pub struct ServeArgs {
     /// Presence also marks the server session's transport as SSH MCP.
     #[arg(long, value_name = "MACHINE_ID", hide = true, conflicts_with = "mode")]
     pub remote_caller_machine_id: Option<String>,
+    /// Serve sessions with operator authority, so they may perform governed
+    /// operations such as dispatching a workflow or deleting a task.
+    ///
+    /// Omit this for any server an agent launches: without it a session holds
+    /// the agent capability only, and governed operations are refused. The flag
+    /// is the deliberate act — `ORBIT_OPERATOR` in this process's environment is
+    /// ignored on the MCP surface, so an operator shell cannot grant operator
+    /// authority to an agent's server by accident.
+    #[arg(long, conflicts_with = "mode")]
+    pub operator: bool,
 }
 
 impl ServeArgs {
@@ -108,7 +118,14 @@ impl ServeArgs {
                 })?;
                 orbit_mcp::serve_mcp_remote_proxy(RemoteProxyArgs { ssh_host })?
             }
-            None => super::server::serve_mcp_stdio(self.remote_caller_machine_id)?,
+            None => super::server::serve_mcp_stdio(
+                self.remote_caller_machine_id,
+                if self.operator {
+                    McpSessionAuthority::Operator
+                } else {
+                    McpSessionAuthority::Agent
+                },
+            )?,
         }
         Ok(CommandOutput::Silent)
     }

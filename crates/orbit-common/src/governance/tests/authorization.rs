@@ -1,7 +1,7 @@
 use std::collections::BTreeSet;
 
 use super::super::authorization::*;
-use orbit_types::tool::McpCapability;
+use orbit_types::tool::{McpCapability, ToolSessionContext};
 
 fn envelope() -> CallerEnvelope {
     CallerEnvelope::default()
@@ -76,6 +76,7 @@ fn session_grants_win_over_process_signals() {
         agent_declared: true,
         interactive_terminal: true,
         operator_override: true,
+        ..envelope()
     });
     assert_eq!(caller.provenance(), CallerProvenance::Session);
     assert_eq!(caller.grants(), &BTreeSet::from([McpCapability::Runner]));
@@ -193,6 +194,53 @@ fn denial_names_the_capability_the_rationale_and_the_escape_hatch() {
     assert!(message.contains("same files"), "{message}");
     assert!(message.contains("agent-envelope"), "{message}");
     assert!(message.contains(OPERATOR_OVERRIDE_ENV), "{message}");
+}
+
+#[test]
+fn an_mcp_session_resolves_from_its_grants_alone() {
+    let session = ToolSessionContext {
+        effective_capabilities: BTreeSet::from([McpCapability::Agent]),
+        ..ToolSessionContext::default()
+    };
+    let envelope = CallerEnvelope::mcp_session(&session);
+
+    assert_eq!(envelope.resolution, CapabilityResolution::SessionOnly);
+    assert!(
+        !envelope.operator_override && !envelope.agent_declared && !envelope.interactive_terminal,
+        "the MCP envelope must observe nothing about the hosting process"
+    );
+
+    let caller = CallerCapabilities::resolve(&envelope);
+    assert_eq!(caller.provenance(), CallerProvenance::Session);
+    assert!(authorize(operation("orbit.workflow.run.list"), &caller).is_err());
+}
+
+#[test]
+fn an_operator_mcp_session_reaches_governed_tools() {
+    let session = ToolSessionContext {
+        effective_capabilities: BTreeSet::from([McpCapability::Agent, McpCapability::Operator]),
+        ..ToolSessionContext::default()
+    };
+    let caller = CallerCapabilities::resolve(&CallerEnvelope::mcp_session(&session));
+
+    assert!(authorize(operation("orbit.workflow.run.list"), &caller).is_ok());
+    assert!(authorize(operation("orbit.task.delete"), &caller).is_ok());
+}
+
+#[test]
+fn a_session_only_denial_does_not_advise_an_override_it_would_ignore() {
+    let caller =
+        CallerCapabilities::resolve(&CallerEnvelope::mcp_session(&ToolSessionContext::default()));
+    let denial =
+        authorize(operation("orbit.workflow.run.list"), &caller).expect_err("must be denied");
+    let message = denial.to_string();
+
+    assert_eq!(denial.resolution, CapabilityResolution::SessionOnly);
+    assert!(
+        !message.contains(&format!("re-run it with {OPERATOR_OVERRIDE_ENV}=1")),
+        "the MCP surface ignores the override, so it must not be advised: {message}"
+    );
+    assert!(message.contains("orbit mcp serve --operator"), "{message}");
 }
 
 #[test]

@@ -144,6 +144,7 @@ impl McpWorkspace {
             .env_remove("ORBIT_STEP_INDEX")
             .env_remove("ORBIT_AGENT_NAME")
             .env_remove("ORBIT_AGENT_MODEL")
+            .env_remove("ORBIT_OPERATOR")
             .env_remove("ORBIT_MANAGED_RUN_CONTEXT")
             .env_remove("ORBIT_TASK_ACTOR_KIND");
         command
@@ -157,9 +158,20 @@ impl McpWorkspace {
     }
 
     fn serve_with_args(&self, extra_args: &[&str]) -> McpClient {
+        self.serve_with_args_and_env(extra_args, &[])
+    }
+
+    /// Spawn the server with extra argv and extra environment. `env` exists to
+    /// pin what the MCP surface must *ignore*: the server's own process
+    /// environment never contributes capabilities to a session.
+    fn serve_with_args_and_env(&self, extra_args: &[&str], env: &[(&str, &str)]) -> McpClient {
         let mut args = vec!["mcp", "serve"];
         args.extend_from_slice(extra_args);
-        let child = Self::orbit_command(&self.work, &self.home)
+        let mut command = Self::orbit_command(&self.work, &self.home);
+        for (key, value) in env {
+            command.env(key, value);
+        }
+        let child = command
             .args(args)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -473,6 +485,33 @@ fn mcp_server_advertises_governed_tools_but_denies_an_unprivileged_session() {
     );
     assert_eq!(denied["code"], "capability_denied", "{denied}");
     assert!(!marker.exists(), "denied command reached domain execution");
+}
+
+/// The operator MCP surface, over the real transport: a server an operator
+/// started deliberately performs governed tools, and one an agent started does
+/// not — however the launching environment was set up.
+#[test]
+fn an_operator_served_mcp_session_reaches_a_governed_tool() {
+    let workspace = McpWorkspace::init();
+
+    // Same governed tool, same process environment that authorizes it on the
+    // CLI, but an ordinary session: still refused, and told the truth about it.
+    let mut agent = workspace.serve_with_args_and_env(&[], &[("ORBIT_OPERATOR", "1")]);
+    let denied = agent.call_tool_err("orbit_workflow_run_list", json!({}));
+    assert_eq!(denied["code"], "capability_denied", "{denied}");
+    let message = denied["message"]
+        .as_str()
+        .expect("denial carries a message");
+    assert!(
+        !message.contains("re-run it with ORBIT_OPERATOR=1"),
+        "the MCP surface ignores the override, so it must not advise it: {message}"
+    );
+    assert!(message.contains("orbit mcp serve --operator"), "{message}");
+    drop(agent);
+
+    let mut operator = workspace.serve_with_args(&["--operator"]);
+    let listed = operator.call_tool_ok("orbit_workflow_run_list", json!({}));
+    assert_eq!(listed["items"], json!([]));
 }
 
 #[test]
@@ -953,7 +992,7 @@ fn mcp_calls_are_audited_once_including_unknown_raw_names() {
         assert_eq!(row["status"], status);
         assert_eq!(row["role"], "unverified");
         assert_eq!(row["transport"], "local");
-        assert_eq!(row["effective_capabilities"], json!([]));
+        assert_eq!(row["effective_capabilities"], json!(["agent"]));
         assert!(row["workspace_id"].as_str().is_some());
         assert!(row["caller_machine_id"].as_str().is_some());
         assert_eq!(row["caller_machine_id"], row["process_machine_id"]);
@@ -978,7 +1017,7 @@ fn mcp_calls_are_audited_once_including_unknown_raw_names() {
     assert_eq!(row["status"], "denied");
     assert_eq!(row["role"], "unverified");
     assert_eq!(row["transport"], "local");
-    assert_eq!(row["effective_capabilities"], json!([]));
+    assert_eq!(row["effective_capabilities"], json!(["agent"]));
     assert!(row["workspace_id"].is_null());
     assert!(row["caller_machine_id"].as_str().is_some());
     assert_eq!(row["caller_machine_id"], row["process_machine_id"]);
