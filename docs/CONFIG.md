@@ -192,7 +192,7 @@ An **unrecognized `[crews.<name>].provider` value** is the one non-fatal case: i
 4. `CONSTELLATION_DEFAULT_PROVIDER` if set (environment tier), otherwise
 5. the canonical `claude` system-default crew.
 
-This means you can mix-and-match in a single ship run: route a tricky refactor to `claude` while routing routine cleanups to `codex` — both go through the same `orbit run ship` invocation, each picking its own crew at dispatch time.
+This means you can mix-and-match in a single ship run: route a tricky refactor to `claude` while routing routine cleanups to `codex` — both go through the same `orbit run ship` invocation, each picking its own crew at dispatch time. `orbit run ship` fans singleton child runs, so each task's `crew` is recorded on that child (`orbit run show` → `resolved_crew`) and used by `implement_one`. A single child pipeline whose `task_ids` name more than one distinct crew (or mix set and unset crews) fails closed rather than inheriting `[workflow].default_crew`.
 
 ### Setting `task.crew`
 

@@ -3,7 +3,7 @@ use orbit_types::identity::{
     Crew, CrewAssignment, all_agent_families, infer_agent_family_from_model, resolve_crew,
 };
 use orbit_types::record::{CREW_DISCOVERY_SCHEMA_VERSION, CrewDiscoveryEntryV1, CrewDiscoveryV1};
-use orbit_types::task::Task;
+use orbit_types::task::{Task, is_valid_orb_task_id};
 use orbit_types::workflow::activity_job::ProviderSource;
 use serde::Serialize;
 use serde_json::Value;
@@ -197,10 +197,7 @@ impl OrbitRuntime {
             .and_then(Value::as_str)
             .map(str::trim)
             .filter(|value| !value.is_empty());
-        let task_crew = self
-            .task_id_from_run_input(input)?
-            .map(|task| task.crew)
-            .unwrap_or_default();
+        let task_crew = self.task_crew_from_run_input(input)?;
         self.resolve_crew_for_task(cli_override, task_crew.as_deref())
     }
 
@@ -312,26 +309,101 @@ impl OrbitRuntime {
         Ok(crew)
     }
 
+    /// Unanimous `task.crew` across every stored task named by the run/activity
+    /// input. Missing fixture ids are skipped so fake implementer ids do not
+    /// fail resolution. Distinct crews — including a mix of set and unset —
+    /// fail closed instead of inheriting `workflow.default_crew`.
+    fn task_crew_from_run_input(&self, input: &Value) -> Result<Option<String>, OrbitError> {
+        let mut agreed: Option<Option<String>> = None;
+        for task_id in task_ids_for_crew_resolution(input) {
+            if !is_valid_orb_task_id(&task_id) {
+                continue;
+            }
+            let Some(task) = self.stores().tasks().get_task(&task_id)? else {
+                continue;
+            };
+            let crew = normalized_task_crew(task.crew.as_deref());
+            match &agreed {
+                None => agreed = Some(crew),
+                Some(existing) if existing == &crew => {}
+                Some(existing) => {
+                    return Err(OrbitError::InvalidInput(mixed_bundle_crew_error(
+                        existing.as_deref(),
+                        crew.as_deref(),
+                    )));
+                }
+            }
+        }
+        Ok(agreed.flatten())
+    }
+
     fn task_id_from_run_input(&self, input: &Value) -> Result<Option<Task>, OrbitError> {
         if let Some(task_id) = singular_task_id_from_input(input)
-            && task_id.starts_with("ORB-")
+            && is_valid_orb_task_id(task_id)
+            && let Some(task) = self.stores().tasks().get_task(task_id)?
         {
-            return self.get_task(task_id).map(Some);
+            return Ok(Some(task));
         }
 
         for key in ["task_id", "taskId", "id"] {
-            let Some(task_id) = input.get(key).and_then(Value::as_str) else {
+            let Some(task_id) = input.get(key).and_then(Value::as_str).and_then(non_empty) else {
                 continue;
             };
-            let Some(task_id) = non_empty(task_id) else {
-                continue;
-            };
-            if !task_id.starts_with("ORB-") {
-                continue;
+            if is_valid_orb_task_id(task_id)
+                && let Some(task) = self.stores().tasks().get_task(task_id)?
+            {
+                return Ok(Some(task));
             }
-            return self.get_task(task_id).map(Some);
         }
         Ok(None)
+    }
+}
+
+/// Collect `task_id` / `task.id` / `task_ids` entries. Generic `id` is left to
+/// [`OrbitRuntime::task_id_from_run_input`] so a non-task `id` cannot pollute
+/// mixed-crew detection.
+fn task_ids_for_crew_resolution(input: &Value) -> Vec<String> {
+    let mut ids = Vec::new();
+    let mut push = |raw: Option<&str>| {
+        if let Some(id) = raw.and_then(non_empty)
+            && !ids.iter().any(|existing| existing == id)
+        {
+            ids.push(id.to_string());
+        }
+    };
+    push(input.get("task_id").and_then(Value::as_str));
+    push(
+        input
+            .get("task")
+            .and_then(|task| task.get("id"))
+            .and_then(Value::as_str),
+    );
+    if let Some(items) = input.get("task_ids").and_then(Value::as_array) {
+        for item in items {
+            push(item.as_str());
+        }
+    }
+    ids
+}
+
+fn normalized_task_crew(crew: Option<&str>) -> Option<String> {
+    crew.map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned)
+}
+
+fn mixed_bundle_crew_error(left: Option<&str>, right: Option<&str>) -> String {
+    format!(
+        "task bundle mixes crews {} and {}; split the bundle or assign one crew instead of inheriting workflow.default_crew",
+        format_bundle_crew(left),
+        format_bundle_crew(right),
+    )
+}
+
+fn format_bundle_crew(crew: Option<&str>) -> String {
+    match crew {
+        Some(name) => format!("`{name}`"),
+        None => "the workspace default (no task.crew)".to_string(),
     }
 }
 
