@@ -5,7 +5,7 @@ summary: The engineering framework for AI coding agents — tasks for every chan
 status: active
 stack: Rust
 gate: pr
-agents: hohmann
+agents: "—"
 ---
 
 # orbit — codebase card
