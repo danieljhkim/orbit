@@ -206,6 +206,9 @@ pub fn redact_sensitive_env_error(error: OrbitError) -> OrbitError {
         OrbitError::JobRunStateTransition(m) => {
             OrbitError::JobRunStateTransition(redact_sensitive_env_text(&m))
         }
+        OrbitError::JobRunStartConflict(m) => {
+            OrbitError::JobRunStartConflict(redact_sensitive_env_text(&m))
+        }
         OrbitError::Io(m) => OrbitError::Io(redact_sensitive_env_text(&m)),
         OrbitError::WorkspaceError(m) => OrbitError::WorkspaceError(redact_sensitive_env_text(&m)),
         OrbitError::Migration(m) => OrbitError::Migration(redact_sensitive_env_text(&m)),
@@ -324,6 +327,7 @@ pub fn redact_all_error(error: OrbitError) -> OrbitError {
             OrbitError::WorkspaceClaimHeld(redact_workspace_claim_held(*claim, redact_all))
         }
         OrbitError::JobRunStateTransition(m) => OrbitError::JobRunStateTransition(redact_all(&m)),
+        OrbitError::JobRunStartConflict(m) => OrbitError::JobRunStartConflict(redact_all(&m)),
         OrbitError::Io(m) => OrbitError::Io(redact_all(&m)),
         OrbitError::WorkspaceError(m) => OrbitError::WorkspaceError(redact_all(&m)),
         OrbitError::Migration(m) => OrbitError::Migration(redact_all(&m)),

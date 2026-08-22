@@ -22,7 +22,7 @@ use orbit_types::task::{
     push_external_ref_if_missing,
 };
 use orbit_types::telemetry::InvocationTrace;
-use orbit_types::workflow::{ActivityV2, JobRun, JobRunState};
+use orbit_types::workflow::{ActivityV2, JobRun, JobRunStartOutcome, JobRunState};
 use serde_json::Value;
 
 use crate::OrbitRuntime;
@@ -57,7 +57,7 @@ impl RuntimeHost for OrbitRuntime {
         run_id: &str,
         started_at: DateTime<Utc>,
         pid: u32,
-    ) -> Result<bool, OrbitError> {
+    ) -> Result<JobRunStartOutcome, OrbitError> {
         self.stores()
             .jobs()
             .mark_job_run_running(run_id, started_at, pid)

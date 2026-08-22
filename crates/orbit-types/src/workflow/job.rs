@@ -102,6 +102,34 @@ pub enum JobRunState {
     Interrupted,
 }
 
+/// [ORB-10965] Outcome of applying a `Start` event to a job run.
+///
+/// Scheduling is at-least-once, so the same queued run can be delivered to two
+/// workers, or redelivered to the worker that already owns it. Start is
+/// therefore idempotent *per owner*: exactly one caller is granted execution
+/// authority, and a duplicate delivery from that same owner is a no-op rather
+/// than a state-machine violation. A duplicate from a *different* owner is a
+/// conflict — the incumbent keeps authority — and is reported separately so
+/// the caller can distinguish it from a genuinely illegal transition.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum JobRunStartOutcome {
+    /// This caller won the transition into `running` and owns execution.
+    Started,
+    /// The run had already been started by an equivalent owner. Nothing was
+    /// written; the first Start still owns execution.
+    AlreadyStarted,
+    /// No run with the requested id exists.
+    NotFound,
+}
+
+impl JobRunStartOutcome {
+    /// True only for the single caller that won the transition. Every other
+    /// outcome — including a same-owner redelivery — must not execute the run.
+    pub fn owns_execution(self) -> bool {
+        matches!(self, Self::Started)
+    }
+}
+
 /// Events that drive job run state transitions.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RunEvent {
@@ -459,4 +487,17 @@ pub struct JobRun {
     /// Step execution results; populated in-memory from step files, not stored in jrun.yaml.
     #[serde(skip)]
     pub steps: Vec<JobRunStep>,
+}
+
+impl JobRun {
+    /// [ORB-10965] Whether `pid` — paired with its process start-time identity
+    /// token, so a reused PID is not mistaken for the original — is the owner
+    /// already recorded on this run.
+    ///
+    /// Owner identity is the equivalence key for a duplicate `Start`. The
+    /// `started_at` instant deliberately is not: every redelivery carries a
+    /// fresh timestamp, and the incumbent's value stays authoritative.
+    pub fn is_owned_by(&self, pid: u32, pid_start_time: Option<&str>) -> bool {
+        self.pid == Some(pid) && self.pid_start_time.as_deref() == pid_start_time
+    }
 }

@@ -46,6 +46,16 @@ pub enum OrbitEvent {
         run_id: String,
         state: String,
     },
+    /// [ORB-10965] A duplicate `Start` delivery was recognized and dropped
+    /// without a second execution. At-least-once scheduling makes this an
+    /// expected outcome, so it is recorded as its own event rather than as a
+    /// failed run.
+    JobRunStartDeduplicated {
+        job_id: String,
+        run_id: String,
+        attempt: u32,
+        reason: String,
+    },
     JobProtocolViolation {
         job_id: String,
         run_id: String,
