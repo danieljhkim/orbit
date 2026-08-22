@@ -9,7 +9,7 @@ mod lint;
 mod list;
 pub(crate) mod output;
 mod reindex;
-mod show;
+pub(crate) mod show;
 mod update;
 
 pub use command::{TaskCommand, TaskSubcommand};

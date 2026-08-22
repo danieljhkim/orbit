@@ -270,6 +270,119 @@ fn task_show_follows_the_global_task_id_and_explicit_workspace_stays_a_filter() 
     );
 }
 
+/// `orbit tool run orbit.task.show` is the agent-facing twin of `orbit task show`
+/// and must follow the ID from a foreign checkout and from no workspace at all
+/// [ORB-10961]. An explicit `workspace` in the tool input stays a filter.
+#[test]
+fn tool_run_task_show_follows_the_global_task_id_and_explicit_workspace_stays_a_filter() {
+    let temp = tempdir().expect("tempdir");
+    let home = temp.path().join("home");
+    let orbit_repo = temp.path().join("orbit");
+    let other_repo = temp.path().join("other");
+    let elsewhere = temp.path().join("elsewhere");
+    fs::create_dir_all(&home).expect("home");
+    fs::create_dir_all(&elsewhere).expect("elsewhere");
+
+    init_git_repo(&orbit_repo);
+    init_git_repo(&other_repo);
+
+    run_orbit(
+        &orbit_repo,
+        &home,
+        &[
+            "init",
+            "--non-interactive",
+            "--host-name",
+            "selector-host",
+            "--task-prefix",
+            "SEL",
+        ],
+    )
+    .success();
+    run_orbit(
+        &orbit_repo,
+        &home,
+        &["workspace", "init", "--name", "orbit"],
+    )
+    .success();
+    run_orbit(
+        &other_repo,
+        &home,
+        &["workspace", "init", "--name", "other"],
+    )
+    .success();
+
+    let created = run_orbit_json(
+        &orbit_repo,
+        &home,
+        &[
+            "task",
+            "add",
+            "--title",
+            "Globally addressable task",
+            "--description",
+            "Reachable by ID from anywhere",
+            "--complexity",
+            "low",
+            "--json",
+        ],
+    );
+    let task_id = created["id"].as_str().expect("created id").to_string();
+    let show_input = format!(r#"{{"id":"{task_id}","model":"codex"}}"#);
+
+    for cwd in [&other_repo, &elsewhere] {
+        let shown = run_orbit_json(
+            cwd,
+            &home,
+            &["tool", "run", "orbit.task.show", "--input", &show_input],
+        );
+        assert_eq!(
+            shown["id"],
+            Value::String(task_id.clone()),
+            "tool run task show from {} must follow the id: {shown}",
+            cwd.display()
+        );
+        assert_eq!(shown["workspace"]["name"], "orbit");
+        assert_eq!(shown["workspace"]["id"], "ws_orbit");
+    }
+
+    let filtered_input = format!(r#"{{"id":"{task_id}","workspace":"other","model":"codex"}}"#);
+    let missed = run_orbit(
+        &elsewhere,
+        &home,
+        &["tool", "run", "orbit.task.show", "--input", &filtered_input],
+    )
+    .failure();
+    let missed_stdout = String::from_utf8_lossy(&missed.get_output().stdout);
+    assert!(
+        !missed_stdout.contains("Globally addressable task"),
+        "a foreign task must not be printed under workspace other: {missed_stdout}"
+    );
+    let missed_stderr = String::from_utf8_lossy(&missed.get_output().stderr);
+    assert!(
+        missed_stderr.contains(&task_id),
+        "the miss must name the task it looked for: {missed_stderr}"
+    );
+
+    let invalid = run_orbit(
+        &elsewhere,
+        &home,
+        &[
+            "tool",
+            "run",
+            "orbit.task.show",
+            "--input",
+            &format!(r#"{{"id":"{task_id}","workspace":"no-such-workspace","model":"codex"}}"#),
+        ],
+    )
+    .failure();
+    let invalid_stderr = String::from_utf8_lossy(&invalid.get_output().stderr);
+    assert!(
+        invalid_stderr.contains("no-such-workspace"),
+        "an invalid explicit selector must be named: {invalid_stderr}"
+    );
+}
+
 fn task_ids(value: &Value) -> Vec<String> {
     let items = value
         .as_array()

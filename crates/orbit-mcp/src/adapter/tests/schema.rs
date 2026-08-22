@@ -165,8 +165,8 @@ fn advertised_properties(definition: &McpToolDefinition) -> serde_json::Map<Stri
 #[test]
 fn workspace_scoped_tool_advertises_the_authoritative_server_selector() {
     let definition = definition_with_scope(
-        "orbit.task.show",
-        vec![param("id")],
+        "orbit.task.list",
+        vec![param("limit")],
         McpToolScope::WorkspaceRequired,
     );
 
@@ -195,6 +195,55 @@ fn workspace_scoped_tool_advertises_the_authoritative_server_selector() {
     assert!(
         description.contains("absolute path registered on that server"),
         "selector must document the server-side path form: {description}"
+    );
+}
+
+#[test]
+fn task_show_skips_generic_workspace_selector_injection() {
+    let definition = definition_with_scope(
+        "orbit.task.show",
+        vec![param("id")],
+        McpToolScope::WorkspaceRequired,
+    );
+
+    let properties = advertised_properties(&definition);
+    assert!(
+        !properties.contains_key("workspace"),
+        "generic workspace-selection machinery must not inject a selector on task.show: {properties:?}"
+    );
+}
+
+#[test]
+fn task_show_own_workspace_param_documents_global_id_resolution() {
+    let declared = ToolParam {
+        name: "workspace".to_string(),
+        description: "Optional explicit workspace filter. `id` is resolved globally by default"
+            .to_string(),
+        param_type: "string".to_string(),
+        required: false,
+    };
+    let definition = definition_with_scope(
+        "orbit.task.show",
+        vec![param("id"), declared],
+        McpToolScope::WorkspaceRequired,
+    );
+
+    let properties = advertised_properties(&definition);
+    let workspace = properties
+        .get("workspace")
+        .and_then(Value::as_object)
+        .expect("task.show declares its own optional workspace filter");
+    let description = workspace
+        .get("description")
+        .and_then(Value::as_str)
+        .expect("filter carries routing guidance");
+    assert!(
+        description.contains("resolved globally by default"),
+        "task.show must document global id resolution: {description}"
+    );
+    assert!(
+        !description.contains("_meta.orbit.workspace"),
+        "generic session-default copy must not replace the task.show filter docs: {description}"
     );
 }
 

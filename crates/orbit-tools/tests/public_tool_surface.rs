@@ -403,6 +403,34 @@ fn task_show_schema_distinguishes_execution_crew_from_orchestrator() {
     assert!(fields.description.contains("orchestrator"));
     assert!(schema.description.contains("execution"));
     assert!(schema.description.contains("orchestration attribution"));
+    assert!(
+        schema.description.contains("globally unique"),
+        "task show must advertise global id resolution: {}",
+        schema.description
+    );
+    let id = schema
+        .parameters
+        .iter()
+        .find(|param| param.name == "id")
+        .expect("task show id parameter");
+    assert!(
+        id.description.contains("Globally unique"),
+        "id help must not send callers through workspace selection: {}",
+        id.description
+    );
+    let workspace = schema
+        .parameters
+        .iter()
+        .find(|param| param.name == "workspace")
+        .expect("task show optional workspace filter");
+    assert!(!workspace.required);
+    assert!(
+        workspace
+            .description
+            .contains("resolved globally by default"),
+        "workspace help must stay an explicit filter: {}",
+        workspace.description
+    );
 }
 
 #[test]

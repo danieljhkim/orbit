@@ -241,6 +241,29 @@ impl Execute for TaskShowArgs {
     }
 }
 
+/// Name the owning workspace on an unprojected `orbit.task.show` result.
+///
+/// Human `orbit task show`, `orbit tool run orbit.task.show`, and MCP
+/// `orbit_task_show` share this so an id-only read reports the logical
+/// registry identity a later write can address [ORB-10797] [ORB-10961].
+pub(crate) fn attach_bound_workspace_identity(
+    tool_name: &str,
+    input: &Value,
+    runtime: &OrbitRuntime,
+    mut output: Value,
+) -> Result<Value, OrbitError> {
+    if tool_name != "orbit.task.show" {
+        return Ok(output);
+    }
+    if input.get("field").is_some() || input.get("fields").is_some() {
+        return Ok(output);
+    }
+    if let Some(owner) = bound_workspace_identity(runtime) {
+        insert_workspace_identity(&mut output, &owner)?;
+    }
+    Ok(output)
+}
+
 /// Name the owning workspace in the machine-readable projection, in the same
 /// `(name, logical id)` shape the human line prints, so a follow-up write can
 /// address it with `--workspace`.

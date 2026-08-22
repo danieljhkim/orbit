@@ -169,10 +169,12 @@ impl ServerMcpHost {
     /// Which registered workspace this call lands in.
     ///
     /// `orbit.task.show` follows the globally unique task ID unless the call
-    /// itself passes `workspace` [ORB-10797]: the session's announced workspace
-    /// is ambient, like cwd, and is the right default for authoring but the
-    /// wrong one for addressing an ID. An explicit per-call `workspace` stays a
-    /// filter on every tool, so a task owned elsewhere is not found there.
+    /// itself passes `workspace` [ORB-10797] [ORB-10961]: the session's
+    /// announced workspace is ambient, like cwd, and is the right default for
+    /// authoring but the wrong one for addressing an ID. Linked-worktree
+    /// runtime identities are also ambient and must not become a filter. An
+    /// explicit per-call `workspace` stays a filter on every tool, so a task
+    /// owned elsewhere is not found there.
     fn workspace_selection(
         &self,
         name: &str,
@@ -293,14 +295,15 @@ fn execute_core_tool(
     input: Value,
     context: ToolSessionContext,
 ) -> Result<Value, OrbitError> {
-    runtime
+    let output = runtime
         .execute_tool_command_dispatch_with_session_context(
             name,
-            input,
+            input.clone(),
             None,
             None,
             ToolEntryPoint::Mcp,
             context,
-        )
-        .map(|outcome| outcome.value)
+        )?
+        .value;
+    crate::command::task::show::attach_bound_workspace_identity(name, &input, runtime, output)
 }
