@@ -22,10 +22,15 @@ This is the author-facing inventory for the shipped artifact-write redactor. Red
 | `orbit.task.reject` | `note`, `comment` | - | `id` |
 | `orbit.friction.add` | `body` | - | `model`, `during_task`, tags |
 | `orbit.friction.update` | `body` | - | `id`, status, tags |
+| `orbit.auto_task.add` / `orbit.auto_task.update` | `description`, `template.title`, `template.description`, `template.acceptance_criteria[]` | - | name, schedule, dedupe, template enums/tags |
+| `orbit.session_log.append` | `body` | - | kind, related task/run ids |
+| `orbit.docs.add` | - | - | DocsAdd only registers a validated repo-relative path; it does not persist document content. |
 
 Task and friction tags are taxonomy fields and pass through verbatim.
 
-The table establishes the artifact boundary: ADRs, tasks, and frictions are covered on their listed add/update operations. Registered docs are ordinary repository files rather than an Orbit mutation primitive, so doc edits do not pass through this write sanitizer.
+The table establishes the artifact boundary: ADRs, tasks, frictions, auto-task definitions, and session-log entries are covered on their listed write operations. `DocsAdd` makes an explicit no-redaction decision because it only registers a checked path; registered docs remain ordinary repository files rather than a tool mutation primitive.
+
+`policy_for_action` exhaustively matches `OrbitBuiltinAction`. Adding any builtin action therefore fails to compile until it receives either a field policy or an explicit no-redaction decision, instead of falling through to an unredacted default.
 
 ## Pattern Set
 
