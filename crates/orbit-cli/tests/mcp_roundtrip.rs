@@ -851,6 +851,24 @@ fn mcp_serve_round_trips_records_against_a_temp_workspace() {
         ),
         json!({"crew": "sol", "orchestrator": "terra"})
     );
+    assert_eq!(
+        client.call_tool_ok(
+            "orbit_task_show",
+            json!({ "id": task_id, "fields": ["status"] })
+        ),
+        json!({ "value": "proposed" })
+    );
+    assert_eq!(
+        client.call_tool_ok(
+            "orbit_task_show",
+            json!({ "id": task_id, "fields": ["status", "title", "plan"] }),
+        ),
+        json!({
+            "status": "proposed",
+            "title": "MCP round-trip task",
+            "plan": "",
+        })
+    );
 
     let output = McpWorkspace::orbit_command(&workspace.work, &workspace.home)
         .args(["task", "show", &task_id])
@@ -882,6 +900,40 @@ fn mcp_serve_round_trips_records_against_a_temp_workspace() {
     assert_eq!(
         serde_json::from_slice::<Value>(&output.stdout).expect("orchestrator JSON"),
         json!("terra")
+    );
+
+    let output = McpWorkspace::orbit_command(&workspace.work, &workspace.home)
+        .args(["task", "show", &task_id, "--json", "--fields", "status"])
+        .output()
+        .expect("show status field through the CLI");
+    assert!(
+        output.status.success(),
+        "status field projection failed: {output:?}"
+    );
+    assert_eq!(
+        serde_json::from_slice::<Value>(&output.stdout).expect("status JSON"),
+        json!("proposed")
+    );
+
+    let tool_run = McpWorkspace::orbit_command(&workspace.work, &workspace.home)
+        .args([
+            "tool",
+            "run",
+            "orbit.task.show",
+            "--input",
+            &format!(r#"{{"id":"{task_id}","fields":["status"]}}"#),
+        ])
+        .output()
+        .expect("show status through orbit tool run");
+    assert!(
+        tool_run.status.success(),
+        "tool-run status projection failed\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&tool_run.stdout),
+        String::from_utf8_lossy(&tool_run.stderr)
+    );
+    assert_eq!(
+        serde_json::from_slice::<Value>(&tool_run.stdout).expect("tool-run status JSON"),
+        json!("proposed")
     );
 
     let listed = client.call_tool_ok("orbit_task_list", json!({}));

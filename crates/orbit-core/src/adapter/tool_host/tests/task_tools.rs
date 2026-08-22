@@ -1927,6 +1927,93 @@ fn task_show_tool_recovers_mcp_encoded_fields_array() {
 }
 
 #[test]
+fn task_show_tool_projects_status_as_a_bare_json_string() {
+    let (_root, runtime, repo_root) = test_runtime();
+    let task = create_task(
+        &runtime,
+        &repo_root,
+        "Show status",
+        "Exercise the observed fields:[status] call.",
+        TaskStatus::Backlog,
+        &[],
+    );
+
+    let output = runtime
+        .execute_tool_command(
+            "orbit.task.show",
+            json!({ "id": task.id, "fields": ["status"] }),
+            Some("codex".to_string()),
+            Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
+        )
+        .expect("fields:[status] must succeed");
+
+    assert_eq!(output, json!("backlog"));
+}
+
+#[test]
+fn task_show_tool_projects_mixed_top_level_and_sidecar_fields() {
+    let (_root, runtime, repo_root) = test_runtime();
+    let task = create_task(
+        &runtime,
+        &repo_root,
+        "Show mixed fields",
+        "Exercise mixed top-level and sidecar projection.",
+        TaskStatus::InProgress,
+        &["file:src/lib.rs"],
+    );
+
+    let output = runtime
+        .execute_tool_command(
+            "orbit.task.show",
+            json!({
+                "id": task.id,
+                "fields": ["status", "title", "context_files", "plan"],
+            }),
+            Some("codex".to_string()),
+            Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
+        )
+        .expect("mixed projection must succeed");
+
+    assert_eq!(
+        output,
+        json!({
+            "status": "in-progress",
+            "title": "Show mixed fields",
+            "context_files": ["file:src/lib.rs"],
+            "plan": "",
+        })
+    );
+}
+
+#[test]
+fn task_show_tool_rejects_unknown_projection_with_the_shared_vocabulary() {
+    let (_root, runtime, repo_root) = test_runtime();
+    let task = create_task(
+        &runtime,
+        &repo_root,
+        "Unknown projection",
+        "Exercise unknown field validation.",
+        TaskStatus::Backlog,
+        &[],
+    );
+
+    let message = invalid_input_message(runtime.execute_tool_command(
+        "orbit.task.show",
+        json!({ "id": task.id, "fields": ["not_a_field"] }),
+        Some("codex".to_string()),
+        Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
+    ));
+    assert!(
+        message.contains("unknown field selector `not_a_field`"),
+        "{message}"
+    );
+    assert!(
+        message.contains(orbit_types::task::TASK_SHOW_PROJECTION_FIELDS_CSV),
+        "{message}"
+    );
+}
+
+#[test]
 fn task_update_tool_allows_explicit_attribution_updates() {
     let (_root, runtime, repo_root) = test_runtime();
     let task = create_task(

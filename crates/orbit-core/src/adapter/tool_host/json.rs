@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use orbit_common::OrbitError;
 use orbit_types::task::{
     Task, TaskArtifact, TaskComment, TaskHistoryEntry, TaskStatus, resolve_task_dependencies,
-    resolve_task_relations,
+    resolve_task_relations, task_show_record_field_json, unknown_task_show_field_message,
 };
 use serde_json::{Map, Value, json};
 
@@ -144,9 +144,8 @@ fn task_field_to_json(
         "artifacts" => Ok(serialize_task_artifacts(
             &runtime.get_task_artifacts(&task.id)?,
         )),
-        other => Err(OrbitError::InvalidInput(format!(
-            "unknown field selector `{other}`. Valid values: comments, plan, execution_summary, description, acceptance_criteria, dependencies, resolved_dependencies, tags, history, context_files, crew, orchestrator, artifacts"
-        ))),
+        other => task_show_record_field_json(task, other)
+            .ok_or_else(|| OrbitError::InvalidInput(unknown_task_show_field_message(other))),
     }
 }
 

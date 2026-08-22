@@ -1,4 +1,5 @@
 use orbit_common::OrbitError;
+use orbit_types::task::TASK_SHOW_PROJECTION_FIELDS_CSV;
 use orbit_types::tool::{ToolParam, ToolSchema};
 use serde_json::Value;
 
@@ -23,13 +24,11 @@ impl Tool for OrbitTaskShowTool {
         parameters.extend(super::super::identity_params());
         parameters.push(ToolParam {
             name: "fields".to_string(),
-            description:
+            description: format!(
                 "Optional field projection as a string or array of strings. When set, returns only \
-                the requested field(s) as JSON. Valid values: comments, plan, execution_summary, \
-                description, acceptance_criteria, dependencies, resolved_dependencies, tags, \
-                history, context_files, crew, orchestrator, artifacts. `crew` is execution \
-                selection; `orchestrator` is separate orchestration attribution."
-                    .to_string(),
+                the requested field(s) as JSON. Valid values: {TASK_SHOW_PROJECTION_FIELDS_CSV}. \
+                `crew` is execution selection; `orchestrator` is separate orchestration attribution."
+            ),
             param_type: "string_list".to_string(),
             required: false,
         });

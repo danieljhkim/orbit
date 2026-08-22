@@ -33,7 +33,7 @@ use orbit_types::record::FrictionStatus;
 use orbit_types::task::{
     Task, TaskComment, TaskPriority, TaskStatus, TaskType, normalize_task_dependencies,
     normalize_task_tags, resolve_task_dependencies, task_dependencies_ready, task_matches_tags,
-    validate_task_dependencies,
+    task_show_record_field_json, unknown_task_show_field_message, validate_task_dependencies,
 };
 use orbit_types::tool::ToolSessionContext;
 use serde_json::{Map, Value, json};
@@ -577,6 +577,9 @@ impl HubCoordinationExecutor {
         };
         let status = self.inner.tasks.task.task_status_index()?;
         let one = |field: &str| -> Result<Value, OrbitError> {
+            if let Some(value) = task_show_record_field_json(&task, field) {
+                return Ok(value);
+            }
             match field {
                 "comments" => serde_json::to_value(
                     self.inner
@@ -617,8 +620,8 @@ impl HubCoordinationExecutor {
                 "context_files" => Ok(json!(task.context_files)),
                 "crew" => Ok(json!(task.crew)),
                 "orchestrator" => Ok(json!(task.orchestrator)),
-                other => Err(OrbitError::InvalidInput(format!(
-                    "unknown field selector `{other}`. Valid values: comments, plan, execution_summary, description, acceptance_criteria, dependencies, resolved_dependencies, tags, history, context_files, crew, orchestrator, artifacts"
+                other => Err(OrbitError::InvalidInput(unknown_task_show_field_message(
+                    other,
                 ))),
             }
         };
@@ -1035,6 +1038,50 @@ mod checkoutless_hub_tests {
             )
             .expect("empty string clears orchestrator");
         assert_eq!(cleared["orchestrator"], Value::Null);
+    }
+
+    #[test]
+    fn task_show_projects_status_and_mixed_fields_without_checkout() {
+        let (_root, executor, context) = executor();
+        let created = executor
+            .execute_tool(
+                "orbit.task.add",
+                json!({
+                    "workspace": "ws_checkoutless",
+                    "title": "Hub status projection",
+                    "description": "Exercise fields:[status] on the hub.",
+                    "complexity": "low",
+                    "model": "codex"
+                }),
+                context.clone(),
+            )
+            .expect("add checkoutless task");
+        let id = created["id"].as_str().expect("task id");
+
+        assert_eq!(
+            executor
+                .execute_tool(
+                    "orbit.task.show",
+                    json!({"id": id, "fields": ["status"]}),
+                    context.clone(),
+                )
+                .expect("fields:[status] must succeed"),
+            json!("proposed")
+        );
+        assert_eq!(
+            executor
+                .execute_tool(
+                    "orbit.task.show",
+                    json!({"id": id, "fields": ["status", "title", "plan"]}),
+                    context,
+                )
+                .expect("mixed projection must succeed"),
+            json!({
+                "status": "proposed",
+                "title": "Hub status projection",
+                "plan": "",
+            })
+        );
     }
 
     /// After ORB-10680 the partition is the `(workspace_id, friction_id)` key
