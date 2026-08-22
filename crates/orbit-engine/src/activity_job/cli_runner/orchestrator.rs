@@ -221,13 +221,21 @@ pub fn run_cli_backend(
         orbit_tool_env().map_err(|error| DispatchError::CliInvocationPermanent(error.message))?,
     );
     // Spawned CLI agents resolve the Orbit registry from $HOME unless
-    // ORBIT_ROOT is set. A dispatching run already knows its root; inject it so
-    // a provider whose HOME is a tool-specific directory (e.g. ~/.codex) can
-    // still reach `orbit tool run`. [ORB-10909]
-    if let Some(orbit_root) = host.orbit_root()
+    // ORBIT_ROOT is set. A dispatching run already knows its registry; inject
+    // it so a provider whose HOME is a tool-specific directory (e.g. ~/.codex)
+    // can still reach `orbit tool run`. [ORB-10909]
+    //
+    // The injected value is the authoritative shared registry root, never the
+    // dispatching checkout's workspace `.orbit`. A managed run's workspace
+    // state root is mounted read-only inside the sandbox and does not own the
+    // task store, so pinning a child there breaks the documented CLI fallback
+    // before any task work can start. Workspace routing is unchanged: a
+    // mutation still needs its own workspace selector and fails closed
+    // without a resolvable one. [ORB-10980]
+    if let Some(registry_root) = host.orbit_registry_root()
         && !dispatch_env.iter().any(|(key, _)| key == "ORBIT_ROOT")
     {
-        dispatch_env.push(("ORBIT_ROOT".to_string(), orbit_root));
+        dispatch_env.push(("ORBIT_ROOT".to_string(), registry_root));
     }
     // The child's whole environment is composed here and applied to a cleared
     // one by every launcher, so the `[execution.env]` allowlist governs what an

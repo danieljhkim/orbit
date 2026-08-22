@@ -1065,3 +1065,41 @@ fn direct_update_identity_prefers_model_for_authored_roles() {
         .expect("review task with explicit identity");
     assert_eq!(reviewed.implemented_by.as_deref(), Some("gpt-explicit"));
 }
+
+/// [ORB-10980] `ORBIT_ROOT` for a spawned CLI agent must name the authoritative
+/// shared registry root. A managed run's workspace `.orbit` and its
+/// worktree-local `.orbit` are both mounted read-only and neither owns the task
+/// store, so reporting either one strands the documented `orbit tool run`
+/// fallback before the agent can read or update its own task.
+#[test]
+fn orbit_registry_root_reports_the_registry_not_a_workspace_state_root() {
+    let root = tempdir().expect("create tempdir");
+    let registry_root = root.path().join("registry");
+    let repo_root = root.path().join("repo");
+    let workspace_state_root = repo_root.join(".orbit");
+    let worktree_state_root = workspace_state_root
+        .join("state/worktrees/jrun-fixture")
+        .join(".orbit");
+    for directory in [&registry_root, &workspace_state_root, &worktree_state_root] {
+        fs::create_dir_all(directory).expect("state root");
+    }
+
+    let runtime = OrbitRuntime::from_resolved_roots(
+        &registry_root,
+        &workspace_state_root,
+        &worktree_state_root,
+    )
+    .expect("linked-worktree runtime");
+    let reported = RuntimeHost::orbit_registry_root(&runtime).expect("registry root");
+    assert_eq!(Path::new(&reported), registry_root);
+    assert_ne!(
+        Path::new(&reported),
+        workspace_state_root,
+        "the workspace state root is read-only in a managed run and is not the registry"
+    );
+    assert_ne!(
+        Path::new(&reported),
+        worktree_state_root,
+        "the worktree-local state root is read-only in a managed run and is not the registry"
+    );
+}
