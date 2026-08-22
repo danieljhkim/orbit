@@ -521,3 +521,241 @@ fn task_ids(value: &Value) -> Vec<String> {
         })
         .collect()
 }
+
+/// [ORB-10980] A managed run executes its CLI agent in a linked worktree that
+/// is not a registered checkout and whose worktree-local `.orbit` is mounted
+/// read-only. The injected `ORBIT_ROOT` therefore has to be the authoritative
+/// registry root: that is what lets `orbit tool run orbit.task.show` find the
+/// injected task's owning checkout, and what a workspace-scoped mutation
+/// rebinds through. These tests pin that contract and the fail-closed
+/// behaviours around it.
+struct ManagedWorktreeFixture {
+    _root: tempfile::TempDir,
+    registry_root: PathBuf,
+    repo_root: PathBuf,
+    worktree_root: PathBuf,
+    task_id: String,
+}
+
+impl ManagedWorktreeFixture {
+    /// Roots as resolved when `ORBIT_ROOT` pins the registry: an explicit root
+    /// collapses global/shared/local onto the same directory.
+    fn pinned_registry_roots(&self) -> OrbitRuntimeRoots {
+        OrbitRuntimeRoots {
+            global_root: self.registry_root.clone(),
+            shared_root: self.registry_root.clone(),
+            local_root: self.registry_root.clone(),
+        }
+    }
+
+    /// Roots as resolved with no root override: the registry stays distinct
+    /// from the checkout's shared `.orbit` and the worktree-local one.
+    fn unpinned_roots(&self) -> OrbitRuntimeRoots {
+        OrbitRuntimeRoots {
+            global_root: self.registry_root.clone(),
+            shared_root: self.repo_root.join(".orbit"),
+            local_root: self.worktree_root.join(".orbit"),
+        }
+    }
+
+    fn task_store_dir(&self) -> PathBuf {
+        let partitions = self.registry_root.join("tasks/workspaces");
+        std::fs::read_dir(&partitions)
+            .expect("task partitions")
+            .filter_map(Result::ok)
+            .map(|entry| entry.path().join(&self.task_id))
+            .find(|candidate| candidate.is_dir())
+            .expect("authoritative task store directory")
+    }
+
+    fn show_runtime(&self) -> OrbitRuntime {
+        crate::task_owner::initialize_for_task_show(Some(&self.registry_root), None, &self.task_id)
+            .expect("task-show runtime from the registry root alone")
+    }
+
+    fn workspace_scoped_runtime(&self) -> OrbitRuntime {
+        RegisteredRuntimeFactory::initialize_with_overrides(
+            Some(&self.registry_root),
+            Some(&self.repo_root.to_string_lossy()),
+        )
+        .expect("workspace-scoped runtime")
+    }
+}
+
+fn run_tool(runtime: &OrbitRuntime, name: &str, input: Value) -> Result<Value, OrbitError> {
+    runtime.execute_tool_command(
+        name,
+        input,
+        Some("codex".to_string()),
+        Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
+    )
+}
+
+fn managed_worktree_fixture() -> ManagedWorktreeFixture {
+    let root = tempfile::tempdir().expect("root");
+    let registry_root = root.path().join("registry");
+    std::fs::create_dir_all(&registry_root).expect("registry root");
+    std::fs::write(
+        registry_root.join("host.toml"),
+        "schema_version = 2\nmachine_id = \"hm_managed\"\nhost_id = \"managed\"\ntask_prefix = \"ORB\"\n",
+    )
+    .expect("host identity");
+
+    let (workspace, checkout) =
+        registered_workspace(root.path(), "ws_managed", "managed", "hm_managed");
+    save_registry_to(
+        &WorkspaceRegistry {
+            workspaces: vec![workspace.clone()],
+            checkouts: vec![checkout.clone()],
+            ..Default::default()
+        },
+        &registry_path_for(&registry_root),
+    )
+    .expect("workspace registry");
+
+    let runtime =
+        RegisteredRuntimeFactory::open_registered_checkout(&registry_root, &workspace, &checkout)
+            .expect("registered runtime");
+    let created = run_tool(
+        &runtime,
+        "orbit.task.add",
+        json!({
+            "title": "Injected managed task",
+            "description": "Seeded into the authoritative registered store.",
+            "complexity": "low",
+            "workspace": checkout.repo_root
+        }),
+    )
+    .expect("seed managed task");
+
+    // The linked worktree is deliberately unregistered and its worktree-local
+    // `.orbit` is read-only, exactly as the managed sandbox mounts it.
+    let worktree_root = checkout
+        .repo_root
+        .join(".orbit/state/worktrees/jrun-managed-fixture");
+    let worktree_state = worktree_root.join(".orbit");
+    std::fs::create_dir_all(&worktree_state).expect("worktree state root");
+    set_readonly(&worktree_state, true);
+
+    ManagedWorktreeFixture {
+        _root: root,
+        registry_root,
+        repo_root: checkout.repo_root,
+        worktree_root,
+        task_id: created["id"].as_str().expect("seeded task id").to_string(),
+    }
+}
+
+fn set_readonly(path: &Path, readonly: bool) {
+    use std::os::unix::fs::PermissionsExt;
+
+    let mut permissions = std::fs::metadata(path)
+        .expect("fixture path metadata")
+        .permissions();
+    permissions.set_mode(if readonly { 0o555 } else { 0o755 });
+    std::fs::set_permissions(path, permissions).expect("fixture permissions");
+}
+
+#[test]
+fn managed_registry_root_serves_task_show_and_workspace_scoped_update() {
+    let fixture = managed_worktree_fixture();
+
+    let shown = run_tool(
+        &fixture.show_runtime(),
+        "orbit.task.show",
+        json!({ "id": fixture.task_id }),
+    )
+    .expect("registry root alone must resolve the injected task");
+    assert_eq!(shown["id"], fixture.task_id);
+
+    run_tool(
+        &fixture.workspace_scoped_runtime(),
+        "orbit.task.update",
+        json!({
+            "id": fixture.task_id,
+            "plan": "Authored through the documented CLI fallback."
+        }),
+    )
+    .expect("workspace-scoped update must reach the registered store");
+
+    let after = run_tool(
+        &fixture.show_runtime(),
+        "orbit.task.show",
+        json!({ "id": fixture.task_id, "field": "plan" }),
+    )
+    .expect("re-read through the registry");
+    assert_eq!(
+        after, "Authored through the documented CLI fallback.",
+        "the update must land in the authoritative registered store: {after}"
+    );
+}
+
+#[test]
+fn managed_worktree_cwd_without_a_selector_fails_closed_under_a_pinned_registry_root() {
+    let fixture = managed_worktree_fixture();
+
+    assert!(
+        select_workspace_for_cwd_and_roots(
+            &fixture.worktree_root,
+            &fixture.pinned_registry_roots()
+        )
+        .expect("selection")
+        .is_none(),
+        "an unregistered worktree cwd must not silently bind a workspace under a pinned root"
+    );
+
+    let unknown = match RegisteredRuntimeFactory::initialize_with_overrides(
+        Some(&fixture.registry_root),
+        Some("no-such-workspace"),
+    ) {
+        Ok(_) => panic!("an invalid selector must fail closed"),
+        Err(error) => error,
+    };
+    unsupported_workspace_message(unknown, "no-such-workspace");
+}
+
+#[test]
+fn read_only_authoritative_store_reports_a_path_attributed_permission_error() {
+    let fixture = managed_worktree_fixture();
+    let store_dir = fixture.task_store_dir();
+    let runtime = fixture.workspace_scoped_runtime();
+    set_readonly(&store_dir, true);
+
+    let error = run_tool(
+        &runtime,
+        "orbit.task.update",
+        json!({
+            "id": fixture.task_id,
+            "plan": "Must not be written to a read-only store."
+        }),
+    )
+    .expect_err("a genuine write against a read-only store must fail");
+    let message = error.to_string();
+    set_readonly(&store_dir, false);
+
+    assert!(
+        message.contains(&store_dir.display().to_string()),
+        "a permission failure must name the path it could not write: {message}"
+    );
+    assert!(
+        message.contains("Permission denied"),
+        "a read-only store must be reported as a permission failure, not a missing task: {message}"
+    );
+}
+
+#[test]
+fn unpinned_root_resolution_still_binds_the_registered_checkout() {
+    let fixture = managed_worktree_fixture();
+    let roots = fixture.unpinned_roots();
+
+    let from_checkout = select_workspace_for_cwd_and_roots(&fixture.repo_root, &roots)
+        .expect("selection from the registered checkout")
+        .expect("registered checkout must bind");
+    assert_eq!(from_checkout.workspace.id, "ws_managed");
+
+    let from_worktree = select_workspace_for_cwd_and_roots(&fixture.worktree_root, &roots)
+        .expect("selection from the linked worktree")
+        .expect("shared-root fallback must bind the registered checkout");
+    assert_eq!(from_worktree.workspace.id, "ws_managed");
+    assert_eq!(from_worktree.checkout.repo_root, fixture.repo_root);
+}

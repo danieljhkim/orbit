@@ -269,11 +269,11 @@ impl RuntimeHost for OrbitRuntime {
             .agent_subprocess_env(required_env_vars)
     }
 
-    fn orbit_root(&self) -> Option<String> {
+    fn orbit_registry_root(&self) -> Option<String> {
         Some(
             self.context
                 .paths()
-                .orbit_dir
+                .global_dir
                 .to_string_lossy()
                 .into_owned(),
         )
