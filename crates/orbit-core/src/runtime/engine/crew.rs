@@ -92,6 +92,24 @@ impl ResolvedCrewProjection {
     }
 }
 
+/// What a *read* surface should render for a task's crew.
+///
+/// Read surfaces must always render the task. Crew configuration is
+/// host-local: a task authored on another machine, or before a `[crews.*]`
+/// table was edited, legitimately names a crew this host cannot resolve. That
+/// is a configuration gap in the reader, not a corrupt task, so it downgrades
+/// to [`TaskCrewRead::Unresolved`] instead of failing the readout (ORB-10968).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TaskCrewRead {
+    /// Neither the task nor the workspace names a crew; readers omit the fields.
+    Absent,
+    /// The crew resolved to a concrete name/model pair.
+    Resolved(ResolvedCrewProjection),
+    /// A crew is named but this host cannot resolve it. Carries the resolution
+    /// error so readers can surface it as a non-fatal warning.
+    Unresolved { reason: String },
+}
+
 impl OrbitRuntime {
     /// Project the selected runtime's effective crew configuration for clients.
     ///
@@ -235,6 +253,30 @@ impl OrbitRuntime {
         self.resolve_crew_for_task(None, task.crew.as_deref())
             .map(ResolvedCrewProjection::from_crew)
             .map(Some)
+    }
+
+    /// Tolerant counterpart to [`OrbitRuntime::resolved_crew_projection`] for
+    /// read surfaces (`orbit task show`, `orbit.task.*` tool responses).
+    ///
+    /// This is the single owner of the "a task stays readable when its crew is
+    /// unavailable here" rule, so the CLI, the tool host, and MCP cannot drift
+    /// apart on it. Paths that actually need a crew — `start`, dispatch — keep
+    /// resolving strictly and still fail with the crew-validation error.
+    pub fn task_crew_read(&self, task: &Task) -> TaskCrewRead {
+        match self.resolved_crew_projection(task) {
+            Ok(Some(projection)) => TaskCrewRead::Resolved(projection),
+            Ok(None) => TaskCrewRead::Absent,
+            Err(error) => {
+                let reason = error.to_string();
+                tracing::warn!(
+                    task_id = %task.id,
+                    stored_crew = task.crew.as_deref().unwrap_or("<unset>"),
+                    reason = %reason,
+                    "task crew could not be resolved on this host; rendering it unresolved",
+                );
+                TaskCrewRead::Unresolved { reason }
+            }
+        }
     }
 
     pub(crate) fn record_run_crew_from_input(

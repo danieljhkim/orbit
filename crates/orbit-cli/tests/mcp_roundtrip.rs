@@ -1684,6 +1684,163 @@ fn task_show_is_global_by_default_across_tool_run_and_mcp() {
     );
 }
 
+/// ORB-10968: a stored crew this host has no `[crews.*]` entry for must not
+/// make the task unreadable.
+///
+/// Crew configuration is host-local, so the same task is routinely served by a
+/// machine that never defined its crew — over SSH-marked MCP most of all. The
+/// read surfaces render the raw `crew` and mark the projection unresolved; only
+/// paths that must actually dispatch (`orbit.task.start`) still fail closed.
+#[test]
+fn task_read_surfaces_tolerate_a_crew_this_host_does_not_define() {
+    let workspace = McpWorkspace::init();
+    let config_path = workspace.home.join(".orbit").join("config.toml");
+    let baseline = std::fs::read_to_string(&config_path).expect("read the seeded config");
+
+    // Author the task while the crew exists, the way its owning machine would.
+    std::fs::write(
+        &config_path,
+        format!("{baseline}\n[crews.remote-only]\nprovider = \"codex\"\nmodel = \"gpt-5.6-sol\"\n"),
+    )
+    .expect("define the authoring host's crew");
+    let add_input = json!({
+        "title": "Authored against a crew only the other host defines",
+        "description": "Read back from a host whose [crews.*] table lacks it",
+        "workspace": workspace.work.to_str().expect("utf8 checkout path"),
+        "complexity": "low",
+        "crew": "remote-only",
+        "model": "codex",
+    })
+    .to_string();
+    let output = McpWorkspace::orbit_command(&workspace.work, &workspace.home)
+        .args(["tool", "run", "orbit.task.add", "--input", &add_input])
+        .output()
+        .expect("author a task naming the remote crew");
+    assert!(
+        output.status.success(),
+        "task add failed\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let created: Value = serde_json::from_slice(&output.stdout).expect("parse created task");
+    let task_id = created["id"].as_str().expect("task id").to_string();
+
+    // Serve it from a host that never had that crew.
+    std::fs::write(&config_path, &baseline).expect("drop the crew from this host");
+    let show_input = json!({ "id": task_id, "model": "codex" }).to_string();
+
+    // (1) CLI tool-run, from a directory outside any workspace, so the read
+    // also goes through the global id lookup.
+    let scratch = workspace.home.join("scratch");
+    std::fs::create_dir_all(&scratch).expect("create a non-workspace directory");
+    // `--full` because tool-run projects a minimal task shape by default, and
+    // the crew fields are what this asserts.
+    let output = McpWorkspace::orbit_command(&scratch, &workspace.home)
+        .args([
+            "tool",
+            "run",
+            "orbit.task.show",
+            "--full",
+            "--input",
+            &show_input,
+        ])
+        .output()
+        .expect("run id-only task show");
+    assert!(
+        output.status.success(),
+        "tool-run show must stay readable\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_unresolved_crew_projection(
+        &serde_json::from_slice(&output.stdout).expect("parse tool run show"),
+    );
+
+    // (2) A local MCP session bound to the workspace.
+    let mut client = workspace.serve();
+    assert_unresolved_crew_projection(
+        &client.call_tool_ok("orbit_task_show", json!({ "id": task_id })),
+    );
+    let listed = client.call_tool_ok(
+        "orbit_task_list",
+        json!({ "workspace": workspace.work.to_str().expect("utf8 checkout path") }),
+    );
+    assert!(
+        listed["items"]
+            .as_array()
+            .expect("task list items")
+            .iter()
+            .any(|task| task["id"] == json!(task_id)),
+        "listing applies the same tolerant read contract: {listed}"
+    );
+    drop(client);
+
+    // (3) The SSH-marked remote session that first hit this (four failed
+    // `orbit.task.show` calls in one session).
+    let server_scratch = workspace.home.join("server-scratch");
+    std::fs::create_dir_all(&server_scratch).expect("create server launch dir");
+    let child = McpWorkspace::orbit_command(&server_scratch, &workspace.home)
+        .args(["mcp", "serve", "--remote-caller-machine-id", "hm_caller"])
+        .env("SSH_CONNECTION", "192.0.2.8 43100 198.51.100.2 22")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn SSH-marked MCP server");
+    let mut client = McpClient::new(child);
+    client.request(
+        "initialize",
+        json!({
+            "protocolVersion": "2025-06-18",
+            "capabilities": {},
+            "clientInfo": { "name": "remote-crew-roundtrip", "version": "0" },
+            "_meta": { "orbit": { "workspace": "ws_mcp-roundtrip" } },
+        }),
+    );
+    client.notify("notifications/initialized");
+    assert_unresolved_crew_projection(
+        &client.call_tool_ok("orbit_task_show", json!({ "id": task_id })),
+    );
+    drop(client);
+
+    // Execution still fails closed: starting the task needs a crew this host
+    // can actually dispatch to.
+    let started = McpWorkspace::orbit_command(&workspace.work, &workspace.home)
+        .args(["tool", "run", "orbit.task.start", "--input", &show_input])
+        .output()
+        .expect("run task start");
+    assert!(
+        !started.status.success(),
+        "start must not tolerate the crew"
+    );
+    let stderr = String::from_utf8_lossy(&started.stderr);
+    assert!(
+        stderr.contains("remote-only") && stderr.contains("not defined"),
+        "start must fail with the actionable crew-validation error: {stderr}"
+    );
+}
+
+/// The tolerant read contract: the stored crew stays verbatim, the resolved
+/// projection is withheld rather than guessed, and the reason is reported as a
+/// non-fatal field.
+fn assert_unresolved_crew_projection(shown: &Value) {
+    assert_eq!(
+        shown["crew"],
+        json!("remote-only"),
+        "the raw stored crew stays visible: {shown}"
+    );
+    assert!(
+        shown.get("resolved_crew").is_none() && shown.get("crew_model").is_none(),
+        "an unresolvable crew must not be projected: {shown}"
+    );
+    assert!(
+        shown["crew_unresolved"]
+            .as_str()
+            .is_some_and(|reason| reason.contains("remote-only")),
+        "the unresolved marker must name the crew: {shown}"
+    );
+}
+
 fn serve_mcp_from(cwd: &Path, home: &Path, initialize: Value) -> McpClient {
     let child = McpWorkspace::orbit_command(cwd, home)
         .args(["mcp", "serve"])

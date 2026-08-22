@@ -100,9 +100,9 @@ pub use orbit_store::{
 };
 // Routine fire records surfaced by the dashboard's routine-health JSON API.
 pub use orbit_store::{RoutineFireRecord, RoutineFireState};
-pub use runtime::engine::ResolvedCrewProjection;
 pub use runtime::engine::{
     OrchestratorInvocationMetrics, OrchestratorInvocationMetricsBucket,
     OrchestratorMetricsBucketKind,
 };
+pub use runtime::engine::{ResolvedCrewProjection, TaskCrewRead};
 pub use runtime::{OrbitRuntime, WorkspaceRootHint, WorkspaceRuntimeBinding};
