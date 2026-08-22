@@ -171,13 +171,17 @@ function incidentSummaryNode(payload) {
   const incidents = asCount(payload.incident_count);
   const failed = asCount(payload.raw_failed_events);
   const total = asCount(payload.total_events);
+  const runs = asCount(payload.affected_run_count);
   const window = payload.window || getWindow();
+  const lifecycleEvents = asCount(payload.job_run_lifecycle_events);
+  const lifecycleIncidents = asCount(payload.job_run_lifecycle_incidents);
+  const lifecycleLabel = payload.job_run_lifecycle_label || "job-run lifecycle";
 
   const head = el("div", { class: "incident-summary-head" }, [
     el("strong", { class: "incident-summary-headline", text: `${incidents} incidents` }),
     el("span", {
       class: "incident-summary-denominator",
-      text: `grouped from ${failed} failed events of ${total} audited events`,
+      text: `${failed} failed events · ${incidents} grouped incidents · ${runs} affected runs of ${total} audited events`,
     }),
     el("span", { class: "incident-summary-window", text: `window ${window}` }),
   ]);
@@ -199,6 +203,13 @@ function incidentSummaryNode(payload) {
 
   const children = [head];
   if (chips.childNodes.length > 0) children.push(chips);
+  if (lifecycleEvents > 0 || lifecycleIncidents > 0) {
+    children.push(el("div", {
+      class: "incident-lifecycle-note",
+      title: `${lifecycleLabel} rows have no tool identity and are excluded from tool denominators and rates`,
+      text: `${lifecycleLabel}: ${lifecycleEvents} failed events · ${lifecycleIncidents} incidents (excluded from tool rates)`,
+    }));
+  }
   if (payload.truncated) {
     children.push(el("p", {
       class: "incident-truncation-note",
@@ -212,7 +223,7 @@ function incidentEvidenceTable(events, ctx) {
   const table = el("table", { class: "incident-evidence" });
   const thead = el("thead");
   const headRow = el("tr");
-  for (const label of ["event", "time", "status", "actor", "surface", "run", "task", "message"]) {
+  for (const label of ["event", "time", "status", "actor", "surface", "tool", "run", "task", "message"]) {
     headRow.appendChild(el("th", { text: label }));
   }
   thead.appendChild(headRow);
@@ -225,6 +236,7 @@ function incidentEvidenceTable(events, ctx) {
     tr.appendChild(el("td", { text: event.status || "-" }));
     tr.appendChild(el("td", { text: event.actor || "-" }));
     tr.appendChild(el("td", { class: "mono", text: event.surface || "-" }));
+    tr.appendChild(el("td", { class: "mono", text: event.tool || "-" }));
     tr.appendChild(el("td", { class: "mono", text: event.run_id || "-" }));
     tr.appendChild(el("td", { class: "mono", text: event.task_id || "-" }));
     const message = el("td", { class: "stderr", text: truncateValue(ctx, event.message || "", 160) });
@@ -279,13 +291,19 @@ function incidentDetailNode(incident, ctx) {
     detail.appendChild(chain);
   }
 
-  const samples = Array.isArray(incident.sample_events) ? incident.sample_events : [];
-  if (samples.length > 0) {
+  const allEvents = Array.isArray(incident.events) && incident.events.length
+    ? incident.events
+    : [
+        ...(Array.isArray(incident.sample_events) ? incident.sample_events : []),
+        ...((Array.isArray(incident.propagation) ? incident.propagation : [])
+          .flatMap((link) => Array.isArray(link.sample_events) ? link.sample_events : [])),
+      ];
+  if (allEvents.length > 0) {
     detail.appendChild(el("div", {
       class: "incident-section-title",
-      text: `Underlying audit events (${samples.length} of ${asCount(incident.root_event_count)} shown)`,
+      text: `Underlying audit events (${allEvents.length} of ${asCount(incident.event_count)} shown)`,
     }));
-    detail.appendChild(incidentEvidenceTable(samples, ctx));
+    detail.appendChild(incidentEvidenceTable(allEvents, ctx));
   }
 
   const actions = el("div", { class: "incident-actions" });
@@ -379,7 +397,7 @@ function renderDiagnostics(ctx = {}) {
     // Both counts in the header: grouped incidents, and the raw failed events
     // they were derived from. Neither is inferable from the other.
     $("diag-count").textContent =
-      `${asCount(payload.incident_count)} incidents / ${asCount(payload.raw_failed_events)} failed events`;
+      `${asCount(payload.incident_count)} incidents / ${asCount(payload.raw_failed_events)} failed events / ${asCount(payload.affected_run_count)} affected runs`;
     renderIncidents(payload, ctx);
     renderDiagnosticsSideCard(last, ctx);
     return;
