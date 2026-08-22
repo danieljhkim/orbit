@@ -8,7 +8,9 @@
 //! store-specific overrides (e.g. the task registry's `synchronous=FULL`)
 //! on top.
 
-use rusqlite::Connection;
+use std::path::Path;
+
+use rusqlite::{Connection, OpenFlags};
 
 use crate::OrbitError;
 
@@ -25,6 +27,10 @@ pub struct PragmaOutcome {
     /// convention (`wal`, `memory` for in-memory databases, or a fallback
     /// such as `delete` when the filesystem refuses WAL sidecars).
     pub journal_mode: String,
+    /// The connection refused a persistence pragma because its backing store
+    /// is read-only. Callers that need sidecar-free reads should reopen it as
+    /// an immutable SQLite URI.
+    pub write_denied: bool,
 }
 
 impl PragmaOutcome {
@@ -48,20 +54,104 @@ impl PragmaOutcome {
 ///   that need commit-durable acks (e.g. the task registry) override to
 ///   `FULL` after calling this.
 pub fn apply_default_pragmas(conn: &Connection) -> Result<PragmaOutcome, OrbitError> {
-    let journal_mode = request_wal_journal_mode(conn);
+    let (journal_mode, mut write_denied) = request_wal_journal_mode(conn);
     conn.pragma_update(None, "busy_timeout", DEFAULT_BUSY_TIMEOUT_MS)
         .map_err(|e| OrbitError::Store(format!("failed to set busy_timeout: {e}")))?;
     conn.pragma_update(None, "foreign_keys", "ON")
         .map_err(|e| OrbitError::Store(format!("failed to enable foreign keys: {e}")))?;
-    conn.pragma_update(None, "synchronous", "NORMAL")
-        .map_err(|e| OrbitError::Store(format!("failed to set synchronous=NORMAL: {e}")))?;
-    Ok(PragmaOutcome { journal_mode })
+    if let Err(error) = conn.pragma_update(None, "synchronous", "NORMAL") {
+        let mapped = OrbitError::Store(format!("failed to set synchronous=NORMAL: {error}"));
+        if mapped.is_readonly_or_access_failure() {
+            write_denied = true;
+            tracing::warn!(
+                target: "orbit.common.sqlite",
+                error = %error,
+                "could not set synchronous=NORMAL on a read-only database; continuing for reads"
+            );
+        } else {
+            return Err(mapped);
+        }
+    }
+    Ok(PragmaOutcome {
+        journal_mode,
+        write_denied,
+    })
+}
+
+/// Open an existing SQLite database without creating WAL/SHM sidecars.
+///
+/// `immutable=1` is required for a database on a genuinely read-only mount:
+/// SQLite's ordinary read-only mode may still try to create WAL shared-memory
+/// state before the first SELECT.
+pub fn open_immutable(path: &Path) -> Result<Connection, OrbitError> {
+    let mut uri = url::Url::from_file_path(path).map_err(|()| {
+        OrbitError::Store(format!(
+            "cannot represent SQLite path '{}' as a file URI",
+            path.display()
+        ))
+    })?;
+    uri.query_pairs_mut().append_pair("immutable", "1");
+    let conn = Connection::open_with_flags(
+        uri.as_str(),
+        OpenFlags::SQLITE_OPEN_READ_ONLY
+            | OpenFlags::SQLITE_OPEN_NO_MUTEX
+            | OpenFlags::SQLITE_OPEN_URI,
+    )
+    .map_err(|error| {
+        OrbitError::Store(format!(
+            "cannot open SQLite database '{}' for immutable reads: {error}",
+            path.display()
+        ))
+    })?;
+    conn.pragma_update(None, "query_only", "ON")
+        .map_err(|error| OrbitError::Store(format!("failed to set query_only: {error}")))?;
+    conn.pragma_update(None, "busy_timeout", DEFAULT_BUSY_TIMEOUT_MS)
+        .map_err(|error| OrbitError::Store(format!("failed to set busy_timeout: {error}")))?;
+    conn.pragma_update(None, "foreign_keys", "ON")
+        .map_err(|error| OrbitError::Store(format!("failed to enable foreign keys: {error}")))?;
+    Ok(conn)
+}
+
+/// Whether `path` resides on a filesystem mounted read-only.
+///
+/// SQLite can successfully open a database with read-write flags on such a
+/// mount and only discover the restriction at its first real write. Detecting
+/// the mount flag lets read paths select immutable mode before SQLite attempts
+/// WAL/SHM sidecars or a pending schema migration.
+#[cfg(unix)]
+pub fn filesystem_is_read_only(path: &Path) -> Result<bool, OrbitError> {
+    use std::ffi::CString;
+    use std::mem::MaybeUninit;
+    use std::os::unix::ffi::OsStrExt;
+
+    let path_bytes = path.as_os_str().as_bytes();
+    let path = CString::new(path_bytes)
+        .map_err(|_| OrbitError::Store("SQLite path contains an interior NUL byte".to_string()))?;
+    let mut stats = MaybeUninit::<libc::statvfs>::uninit();
+    // SAFETY: `path` is a live NUL-terminated C string and `stats` points to
+    // writable storage for one `statvfs` value. A zero return initializes it.
+    let status = unsafe { libc::statvfs(path.as_ptr(), stats.as_mut_ptr()) };
+    if status != 0 {
+        return Err(OrbitError::Store(format!(
+            "cannot inspect SQLite filesystem for '{}': {}",
+            path.to_string_lossy(),
+            std::io::Error::last_os_error()
+        )));
+    }
+    // SAFETY: `statvfs` returned zero, so it initialized the output value.
+    let stats = unsafe { stats.assume_init() };
+    Ok(stats.f_flag & libc::ST_RDONLY != 0)
+}
+
+#[cfg(not(unix))]
+pub fn filesystem_is_read_only(_path: &Path) -> Result<bool, OrbitError> {
+    Ok(false)
 }
 
 /// Request WAL and report the journal mode SQLite settled on. Never fails:
 /// WAL is a performance/concurrency upgrade, not a correctness requirement,
 /// so refusals degrade to a warning plus the active mode.
-fn request_wal_journal_mode(conn: &Connection) -> String {
+fn request_wal_journal_mode(conn: &Connection) -> (String, bool) {
     match conn.pragma_update_and_check(None, "journal_mode", "WAL", |row| row.get::<_, String>(0)) {
         Ok(mode) => {
             if !mode.eq_ignore_ascii_case("wal") && !mode.eq_ignore_ascii_case("memory") {
@@ -71,7 +161,7 @@ fn request_wal_journal_mode(conn: &Connection) -> String {
                     "requested WAL mode, but SQLite kept the active journal mode",
                 );
             }
-            mode
+            (mode, false)
         }
         Err(error) => {
             tracing::warn!(
@@ -79,8 +169,12 @@ fn request_wal_journal_mode(conn: &Connection) -> String {
                 error = %error,
                 "could not set WAL mode; continuing with the active journal mode",
             );
-            conn.pragma_query_value(None, "journal_mode", |row| row.get::<_, String>(0))
-                .unwrap_or_else(|_| "unknown".to_string())
+            let write_denied = OrbitError::Store(error.to_string()).is_readonly_or_access_failure();
+            (
+                conn.pragma_query_value(None, "journal_mode", |row| row.get::<_, String>(0))
+                    .unwrap_or_else(|_| "unknown".to_string()),
+                write_denied,
+            )
         }
     }
 }

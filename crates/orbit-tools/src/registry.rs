@@ -8,7 +8,7 @@ use orbit_types::tool::{
 };
 use serde_json::Value;
 
-use crate::{Tool, ToolContext};
+use crate::{Tool, ToolContext, ToolExecutionKind};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ToolAvailability {
@@ -136,6 +136,12 @@ impl ToolRegistry {
     pub fn is_active(&self, name: &str) -> bool {
         self.availability(name)
             .is_some_and(ToolAvailability::is_active)
+    }
+
+    pub fn execution_kind(&self, name: &str) -> Option<ToolExecutionKind> {
+        self.tools
+            .get(name)
+            .map(|entry| entry.tool.execution_kind())
     }
 
     pub fn unregister(&mut self, name: &str) -> bool {

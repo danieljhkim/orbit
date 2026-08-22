@@ -128,7 +128,19 @@ fn build_runtime(
     local_root: &Path,
     binding: Option<WorkspaceRuntimeBinding>,
 ) -> Result<OrbitRuntime, OrbitError> {
-    let layout_report = orbit_store::workflow::layout::upgrade_workspace_layout(shared_root)?;
+    let layout_report = match orbit_store::workflow::layout::upgrade_workspace_layout(shared_root) {
+        Ok(report) => report,
+        Err(error) if error.is_readonly_or_access_failure() => {
+            tracing::warn!(
+                target: "orbit.core.bootstrap",
+                root = %shared_root.display(),
+                error = %error,
+                "skipped incidental workspace layout persistence"
+            );
+            orbit_store::workflow::layout::LayoutUpgradeReport::default()
+        }
+        Err(error) => return Err(error),
+    };
     let runtime_config = prepare_resolved_config(global_root, shared_root)?;
     let runtime = OrbitRuntime::build_from_resolved_config(
         global_root,
@@ -149,11 +161,33 @@ fn prepare_resolved_config(
     workspace_root: &Path,
 ) -> Result<ResolvedConfig, OrbitError> {
     let resolved = ResolvedConfig::load(&ConfigRoots::new(global_root, workspace_root))?;
-    if let Some(start) = resolved.tasks_id_start {
-        apply_configured_id_start(global_root, start)?;
+    if let Some(start) = resolved.tasks_id_start
+        && let Err(error) = apply_configured_id_start(global_root, start)
+    {
+        if error.is_readonly_or_access_failure() {
+            tracing::warn!(
+                target: "orbit.core.bootstrap",
+                root = %global_root.display(),
+                error = %error,
+                "skipped incidental task allocator bootstrap persistence"
+            );
+        } else {
+            return Err(error);
+        }
     }
     let global_policy_store = global_policy_def_store(resolved.persistence.policy_dir.clone());
-    seed_default_policies(global_policy_store.as_ref(), false)?;
+    if let Err(error) = seed_default_policies(global_policy_store.as_ref(), false) {
+        if error.is_readonly_or_access_failure() {
+            tracing::warn!(
+                target: "orbit.core.bootstrap",
+                root = %global_root.display(),
+                error = %error,
+                "skipped incidental default-policy persistence"
+            );
+        } else {
+            return Err(error);
+        }
+    }
     Ok(resolved)
 }
 

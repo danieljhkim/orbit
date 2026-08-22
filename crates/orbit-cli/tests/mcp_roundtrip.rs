@@ -1508,6 +1508,246 @@ fn serve_mcp_from(cwd: &Path, home: &Path, initialize: Value) -> McpClient {
     client
 }
 
+/// ORB-10963: managed executors may see the primary Orbit state through a
+/// read-only mount while their linked checkout remains writable. Exercise the
+/// production CLI and MCP entry points inside that mount namespace rather than
+/// approximating the boundary with permission bits.
+#[cfg(target_os = "linux")]
+#[test]
+fn readonly_state_mount_keeps_cli_and_mcp_reads_observational() {
+    if !bubblewrap_mount_namespaces_available() {
+        // Some nested container runners deny user/mount namespaces. The
+        // production behavior remains covered by the focused store and
+        // dispatch tests; an unrestricted Linux CI runner executes this path.
+        return;
+    }
+
+    let workspace = McpWorkspace::init();
+    let add_input = json!({
+        "title": "Read-only managed fixture",
+        "description": "State is warmed before it is remounted read-only",
+        "workspace": workspace.work,
+        "complexity": "low",
+        "model": "codex",
+    })
+    .to_string();
+    let created = McpWorkspace::orbit_command(&workspace.work, &workspace.home)
+        .args(["tool", "run", "orbit.task.add", "--input", &add_input])
+        .output()
+        .expect("create the fixture task");
+    assert_command_succeeded("fixture task add", &created);
+    let created: Value = serde_json::from_slice(&created.stdout).expect("parse fixture task");
+    let task_id = created["id"].as_str().expect("fixture task id");
+
+    // Materialize every optional cache/import/index before the mount changes.
+    // The assertions below still prove that opening and reading those stores
+    // does not require a new sidecar, access-time, or audit write.
+    let warm_search = McpWorkspace::orbit_command(&workspace.work, &workspace.home)
+        .args([
+            "tool",
+            "run",
+            "orbit.search",
+            "--input",
+            &json!({
+                "query": "read-only managed fixture",
+                "workspace": workspace.work,
+                "model": "codex"
+            })
+            .to_string(),
+        ])
+        .output()
+        .expect("warm fixture search state");
+    assert_command_succeeded("fixture search warmup", &warm_search);
+
+    let worktree = add_linked_worktree(&workspace.work);
+    let state_root = workspace.work.join(".orbit");
+
+    let tool_list = readonly_orbit_command(&worktree, &workspace.home, &state_root)
+        .args(["tool", "list", "--json"])
+        .output()
+        .expect("list tools through the read-only mount");
+    assert_command_succeeded("read-only orbit.tool.list", &tool_list);
+
+    for (name, input) in [
+        (
+            "orbit.task.show",
+            json!({ "id": task_id, "model": "codex" }),
+        ),
+        (
+            "orbit.task.list",
+            json!({ "workspace": workspace.work, "model": "codex" }),
+        ),
+        (
+            "orbit.search",
+            json!({
+                "query": "read-only managed fixture",
+                "workspace": workspace.work,
+                "model": "codex"
+            }),
+        ),
+    ] {
+        let output = readonly_orbit_command(&worktree, &workspace.home, &state_root)
+            .args([
+                "tool",
+                "run",
+                name,
+                "--root",
+                state_root.to_str().expect("utf8 Orbit root"),
+                "--input",
+                &input.to_string(),
+            ])
+            .output()
+            .unwrap_or_else(|error| panic!("run {name} through the read-only mount: {error}"));
+        assert_command_succeeded(name, &output);
+    }
+
+    let mutation = readonly_orbit_command(&worktree, &workspace.home, &state_root)
+        .args([
+            "tool",
+            "run",
+            "orbit.task.update",
+            "--root",
+            state_root.to_str().expect("utf8 Orbit root"),
+            "--input",
+            &json!({
+                "id": task_id,
+                "execution_summary": "must not persist",
+                "model": "codex"
+            })
+            .to_string(),
+        ])
+        .output()
+        .expect("attempt task mutation through the read-only mount");
+    assert_readonly_mutation_failed("CLI", &mutation);
+
+    let mut child = readonly_orbit_command(&worktree, &workspace.home, &state_root);
+    child
+        .args([
+            "mcp",
+            "serve",
+            "--root",
+            state_root.to_str().expect("utf8 Orbit root"),
+        ])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    let mut client = McpClient::new(child.spawn().expect("spawn read-only MCP server"));
+    let initialize = json!({
+        "protocolVersion": "2025-06-18",
+        "capabilities": {},
+        "clientInfo": { "name": "readonly-managed-executor", "version": "0" },
+        "_meta": { "orbit": { "workspace": worktree } },
+    });
+    let initialized = client.request("initialize", initialize);
+    assert_eq!(initialized["result"]["protocolVersion"], "2025-06-18");
+    client.notify("notifications/initialized");
+
+    let listed = client.request("tools/list", Value::Null);
+    assert!(listed["result"]["tools"].is_array(), "{listed}");
+    assert_eq!(
+        client.call_tool_ok("orbit_task_show", json!({ "id": task_id }))["id"],
+        task_id
+    );
+    assert!(client.call_tool_ok("orbit_task_list", json!({}))["items"].is_array());
+    assert_eq!(
+        client.call_tool_ok(
+            "orbit_search",
+            json!({ "query": "read-only managed fixture", "model": "codex" })
+        )["mode"],
+        "lexical"
+    );
+    let mutation = client.call_tool_err(
+        "orbit_task_update",
+        json!({
+            "id": task_id,
+            "execution_summary": "must not persist",
+            "model": "codex"
+        }),
+    );
+    assert_readonly_diagnostic("MCP", mutation["message"].as_str().unwrap_or_default());
+}
+
+#[cfg(target_os = "linux")]
+fn bubblewrap_mount_namespaces_available() -> bool {
+    Command::new("bwrap")
+        .args([
+            "--die-with-parent",
+            "--ro-bind",
+            "/",
+            "/",
+            "--",
+            "/bin/true",
+        ])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .is_ok_and(|status| status.success())
+}
+
+#[cfg(target_os = "linux")]
+fn readonly_orbit_command(worktree: &Path, home: &Path, state_root: &Path) -> Command {
+    let mut command = Command::new("bwrap");
+    command
+        .args(["--die-with-parent", "--bind", "/", "/"])
+        .arg("--ro-bind")
+        .arg(state_root)
+        .arg(state_root)
+        .arg("--ro-bind")
+        .arg(home.join(".orbit"))
+        .arg(home.join(".orbit"))
+        .arg("--chdir")
+        .arg(worktree)
+        .arg("--setenv")
+        .arg("HOME")
+        .arg(home)
+        .arg("--setenv")
+        .arg("USERPROFILE")
+        .arg(home)
+        .arg("--setenv")
+        .arg("PATH")
+        .arg(stub_first_path(&McpWorkspace::stub_bin_dir(home)))
+        .arg("--setenv")
+        .arg("ORBIT_ROOT")
+        .arg(state_root)
+        .arg("--")
+        .arg(env!("CARGO_BIN_EXE_orbit"));
+    command
+}
+
+#[cfg(target_os = "linux")]
+fn assert_command_succeeded(label: &str, output: &std::process::Output) {
+    assert!(
+        output.status.success(),
+        "{label} failed\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[cfg(target_os = "linux")]
+fn assert_readonly_mutation_failed(label: &str, output: &std::process::Output) {
+    assert!(
+        !output.status.success(),
+        "{label} mutation unexpectedly succeeded"
+    );
+    assert_readonly_diagnostic(label, &String::from_utf8_lossy(&output.stderr));
+}
+
+#[cfg(target_os = "linux")]
+fn assert_readonly_diagnostic(label: &str, diagnostic: &str) {
+    assert!(
+        diagnostic.contains(".task.yaml.lock"),
+        "{label} diagnostic must attribute the task path: {diagnostic}"
+    );
+    let normalized = diagnostic.to_ascii_lowercase();
+    assert!(
+        normalized.contains("read-only file system")
+            || normalized.contains("permission denied")
+            || normalized.contains("not writable"),
+        "{label} diagnostic must identify EROFS/EACCES: {diagnostic}"
+    );
+}
+
 /// Commit the checkout and attach a linked worktree, mirroring how the engine
 /// stages a managed run.
 fn add_linked_worktree(work: &Path) -> PathBuf {

@@ -338,6 +338,24 @@ impl OrbitError {
                 .unwrap_or_else(|| err.to_string()),
         )
     }
+
+    /// Whether an operation failed because its persistence target is mounted
+    /// read-only or denies writes.
+    ///
+    /// Filesystem and SQLite adapters currently translate their native errors
+    /// at different crate boundaries. Keep the recognition here so passive
+    /// bootstrap, cache, and telemetry callers do not each grow a partial list
+    /// of platform and SQLite spellings.
+    pub fn is_readonly_or_access_failure(&self) -> bool {
+        let message = self.to_string().to_ascii_lowercase();
+        message.contains("read-only file system")
+            || message.contains("readonly filesystem")
+            || message.contains("permission denied")
+            || message.contains("attempt to write a readonly database")
+            || message.contains("database is read-only")
+            || message.contains("database is readonly")
+            || message.contains(" is not writable:")
+    }
 }
 
 impl From<std::io::Error> for OrbitError {
