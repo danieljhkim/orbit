@@ -507,7 +507,12 @@ impl RuntimeHost for OrbitRuntime {
             .canonicalize()
             .unwrap_or_else(|_| self.paths().repo_root.clone());
 
-        let proc_spawn_activity_scoped = proc_allowed_programs.is_some();
+        // Every context built here belongs to a v2 activity, so `proc.spawn` is
+        // always activity-scoped: a missing `proc_allowed_programs` denies every
+        // program instead of degrading to allow-all. Asset load already refuses
+        // an activity that grants `proc.spawn` without the key ([ORB-10959]);
+        // this keeps the enforcement point fail-closed on its own.
+        let proc_spawn_activity_scoped = true;
         let proc_allowed_programs = proc_allowed_programs
             .map(|programs| programs.to_vec())
             .unwrap_or_default();
