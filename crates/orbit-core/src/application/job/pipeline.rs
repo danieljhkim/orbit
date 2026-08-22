@@ -15,7 +15,9 @@ use orbit_store::contracts::{
 };
 use orbit_types::record::OrbitEvent;
 use orbit_types::telemetry::AuditEventStatus;
-use orbit_types::workflow::{JobRun, JobRunState, JobScheduleState, JobTargetType};
+use orbit_types::workflow::{
+    JobRun, JobRunStartOutcome, JobRunState, JobScheduleState, JobTargetType,
+};
 use orbit_types::workspace::WorkspacePaths;
 use serde::Serialize;
 use serde_json::{Value, json};
@@ -642,15 +644,58 @@ impl OrbitRuntime {
             .max(PIPELINE_WAIT_MIN_POLL_SECONDS)
     }
 
+    /// [ORB-10965] Record a duplicate Start that was dropped without a second
+    /// execution.
+    ///
+    /// Delivery is at-least-once, so losing the Start race is an expected
+    /// outcome, not a fault: it is logged and audited as its own event and the
+    /// worker returns successfully, leaving the run's real state to the worker
+    /// that does own it.
+    fn record_deduplicated_start(&self, run: &JobRun, reason: &str) -> Result<(), OrbitError> {
+        tracing::info!(
+            target: "orbit.core.job_run",
+            run_id = %run.run_id,
+            job_id = %run.job_id,
+            attempt = run.attempt,
+            reason,
+            "duplicate job run start delivery deduplicated; the incumbent \
+             owner keeps execution authority",
+        );
+        self.record_event(OrbitEvent::JobRunStartDeduplicated {
+            job_id: run.job_id.clone(),
+            run_id: run.run_id.clone(),
+            attempt: run.attempt,
+            reason: reason.to_string(),
+        })
+    }
+
     fn execute_pipeline_run_now(&self, run: &JobRun, yaml_path: &Path) -> Result<(), OrbitError> {
         let started_at = Utc::now();
-        let changed = self.stores().jobs().mark_job_run_running(
+        // [ORB-10965] The state read in `execute_pipeline_run_worker` and this
+        // Start are separate transactions, so a second worker handed the same
+        // queued run can arrive here having also seen `pending`. The store
+        // arbitrates atomically; whoever does not win execution authority
+        // yields here, before any agent work.
+        let outcome = match self.stores().jobs().mark_job_run_running(
             &run.run_id,
             started_at,
             std::process::id(),
-        )?;
-        if !changed {
-            return Ok(());
+        ) {
+            Ok(outcome) => outcome,
+            Err(OrbitError::JobRunStartConflict(diagnostic)) => {
+                return self.record_deduplicated_start(run, &diagnostic);
+            }
+            Err(error) => return Err(error),
+        };
+        match outcome {
+            JobRunStartOutcome::Started => {}
+            JobRunStartOutcome::AlreadyStarted => {
+                return self.record_deduplicated_start(
+                    run,
+                    "this worker process had already started the run",
+                );
+            }
+            JobRunStartOutcome::NotFound => return Ok(()),
         }
         let input = run
             .input

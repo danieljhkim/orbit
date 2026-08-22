@@ -15,7 +15,7 @@ use orbit_types::task::{
 };
 use orbit_types::telemetry::InvocationTrace;
 use orbit_types::workflow::activity_job::Provider;
-use orbit_types::workflow::{ActivityV2, JobRun, JobRunState, PipelineState};
+use orbit_types::workflow::{ActivityV2, JobRun, JobRunStartOutcome, JobRunState, PipelineState};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::path::Path;
@@ -94,7 +94,7 @@ pub trait RuntimeHost: Send + Sync {
         run_id: &str,
         started_at: chrono::DateTime<chrono::Utc>,
         pid: u32,
-    ) -> Result<bool, OrbitError> {
+    ) -> Result<JobRunStartOutcome, OrbitError> {
         let _ = (run_id, started_at, pid);
         Err(unsupported_runtime_capability("mark_job_run_running"))
     }

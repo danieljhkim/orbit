@@ -207,6 +207,14 @@ pub enum OrbitError {
     WorkspaceClaimHeld(Box<WorkspaceClaimHeld>),
     #[error("invalid job run state transition: {0}")]
     JobRunStateTransition(String),
+    /// [ORB-10965] A duplicate `Start` was applied to a job run that a
+    /// *different* process already owns. Distinct from
+    /// [`OrbitError::JobRunStateTransition`] on purpose: at-least-once delivery
+    /// makes this an expected race whose loser must yield to the incumbent,
+    /// not a state-machine violation, so callers can tell the two apart
+    /// without matching on message text.
+    #[error("job run start conflict: {0}")]
+    JobRunStartConflict(String),
     #[error("workspace error: {0}")]
     WorkspaceError(String),
     #[error("io error: {0}")]

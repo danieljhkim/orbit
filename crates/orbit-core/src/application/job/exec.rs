@@ -16,7 +16,9 @@ use orbit_engine::{
 use orbit_store::contracts::{JobRunStepParams, TaskReservationReleaseReason};
 use orbit_types::record::OrbitEvent;
 use orbit_types::workflow::activity_job::{V2AuditEventKind, validate_job_retired_sessions};
-use orbit_types::workflow::{JobRun, JobRunState, JobTargetType, PipelineState};
+use orbit_types::workflow::{
+    JobRun, JobRunStartOutcome, JobRunState, JobTargetType, PipelineState,
+};
 use serde_json::{Value, json};
 
 use crate::OrbitRuntime;
@@ -139,13 +141,25 @@ impl OrbitRuntime {
         self.seed_v2_pipeline_run(&run, &input, resume)?;
 
         let started_at = chrono::Utc::now();
-        let changed = self.stores().jobs().mark_job_run_running(
+        // [ORB-10965] This run was inserted moments ago by this very process,
+        // so it must win its own Start. Anything else means another owner
+        // reached it first, and running it here would duplicate execution.
+        match self.stores().jobs().mark_job_run_running(
             &run.run_id,
             started_at,
             std::process::id(),
-        )?;
-        if !changed {
-            return Err(OrbitError::not_found(NotFoundKind::JobRun, run.run_id));
+        )? {
+            JobRunStartOutcome::Started => {}
+            JobRunStartOutcome::NotFound => {
+                return Err(OrbitError::not_found(NotFoundKind::JobRun, run.run_id));
+            }
+            JobRunStartOutcome::AlreadyStarted => {
+                return Err(OrbitError::JobRunStartConflict(format!(
+                    "run '{}' was already started by this process; \
+                     refusing to execute it a second time",
+                    run.run_id
+                )));
+            }
         }
         self.record_run_crew_from_input(&run.run_id, &input)?;
         self.record_event(OrbitEvent::JobRunStarted {
