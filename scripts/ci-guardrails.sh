@@ -43,3 +43,5 @@ fi
 "$repo_root/scripts/check-changelog-style.sh"
 "$repo_root/scripts/check-error-translation.sh"
 "$repo_root/scripts/check-orphan-modules.sh"
+"$repo_root/scripts/test-validate-codex-plugin.sh"
+"$repo_root/scripts/test-validate-agent-plugin.sh"
