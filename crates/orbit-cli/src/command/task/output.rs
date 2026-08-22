@@ -5,7 +5,10 @@ use chrono::{DateTime, Utc};
 use orbit_core::{
     OrbitError, OrbitRuntime, TaskStatus, resolve_task_dependencies, resolve_task_relations,
 };
-use orbit_types::task::{ArtifactManifestFileV2, TaskArtifact};
+use orbit_types::task::{
+    ArtifactManifestFileV2, TaskArtifact, task_show_record_field_json,
+    unknown_task_show_field_message,
+};
 use serde_json::{Value, json};
 
 use crate::output::color::Domain;
@@ -291,9 +294,8 @@ pub(super) fn task_field_to_json(
         "artifacts" => Ok(task_artifacts_to_json(
             &runtime.get_task_artifacts(&task.id)?,
         )),
-        other => Err(OrbitError::InvalidInput(format!(
-            "unknown field selector `{other}`. Valid values: comments, plan, execution_summary, description, acceptance_criteria, dependencies, resolved_dependencies, tags, history, context_files, crew, orchestrator, artifacts"
-        ))),
+        other => task_show_record_field_json(task, other)
+            .ok_or_else(|| OrbitError::InvalidInput(unknown_task_show_field_message(other))),
     }
 }
 
@@ -461,9 +463,20 @@ pub(super) fn print_single_task_field(
             }
             Ok(())
         }
-        other => Err(OrbitError::InvalidInput(format!(
-            "unknown field selector `{other}`. Valid values: comments, plan, execution_summary, description, acceptance_criteria, dependencies, resolved_dependencies, tags, history, context_files, crew, orchestrator, artifacts"
-        ))),
+        other => match task_show_record_field_json(task, other) {
+            Some(Value::String(text)) => {
+                print!("{text}");
+                Ok(())
+            }
+            Some(Value::Null) => Ok(()),
+            Some(value) => {
+                print!("{value}");
+                Ok(())
+            }
+            None => Err(OrbitError::InvalidInput(unknown_task_show_field_message(
+                other,
+            ))),
+        },
     }
 }
 

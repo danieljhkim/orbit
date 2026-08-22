@@ -1,6 +1,7 @@
 use clap::Args;
 use orbit_cmd::task_owner::{WorkspaceIdentity, bound_workspace_identity};
 use orbit_core::{OrbitError, OrbitRuntime, TaskRelatedDoc};
+use orbit_types::task::is_task_show_projection_field;
 use serde_json::{Value, json};
 
 use crate::command::{Block, CommandOut, CommandOutput, Execute, Payload};
@@ -17,13 +18,18 @@ pub struct TaskShowArgs {
     /// Output as JSON
     #[arg(long)]
     pub json: bool,
-    /// Print only the specified field projection(s). Valid values: comments, plan,
-    /// execution_summary, description, acceptance_criteria, dependencies,
-    /// resolved_dependencies, tags, history, context_files, crew, orchestrator,
-    /// artifacts.
-    /// Repeat the flag or use a comma-separated value list. Combined with --json,
-    /// a single field returns that field as JSON and multiple fields return a JSON object.
-    #[arg(long = "fields", alias = "field", value_delimiter = ',', num_args = 1..)]
+    #[arg(
+        long = "fields",
+        alias = "field",
+        value_delimiter = ',',
+        num_args = 1..,
+        help = concat!(
+            "Print only the specified field projection(s). Valid values: ",
+            orbit_types::task_show_projection_fields_csv!(),
+            ". Repeat the flag or use a comma-separated value list. Combined with --json, \
+             a single field returns that field as JSON and multiple fields return a JSON object."
+        )
+    )]
     pub fields: Vec<String>,
     /// Include docs matched from task context files and task feature tags
     #[arg(long)]
@@ -326,7 +332,7 @@ fn related_docs_blocks(related_docs: &[TaskRelatedDoc]) -> Vec<Block> {
     ]
 }
 
-fn normalize_task_show_fields(fields: &[String]) -> Result<Vec<String>, OrbitError> {
+pub(crate) fn normalize_task_show_fields(fields: &[String]) -> Result<Vec<String>, OrbitError> {
     let mut normalized = Vec::new();
     for field in fields {
         let trimmed = field.trim();
@@ -335,25 +341,10 @@ fn normalize_task_show_fields(fields: &[String]) -> Result<Vec<String>, OrbitErr
                 "task show field selectors must not be empty".to_string(),
             ));
         }
-        if !matches!(
-            trimmed,
-            "comments"
-                | "plan"
-                | "execution_summary"
-                | "description"
-                | "acceptance_criteria"
-                | "dependencies"
-                | "resolved_dependencies"
-                | "tags"
-                | "history"
-                | "context_files"
-                | "crew"
-                | "orchestrator"
-                | "artifacts"
-        ) {
-            return Err(OrbitError::InvalidInput(format!(
-                "unknown field selector `{trimmed}`. Valid values: comments, plan, execution_summary, description, acceptance_criteria, dependencies, resolved_dependencies, tags, history, context_files, crew, orchestrator, artifacts"
-            )));
+        if !is_task_show_projection_field(trimmed) {
+            return Err(OrbitError::InvalidInput(
+                orbit_types::task::unknown_task_show_field_message(trimmed),
+            ));
         }
         normalized.push(trimmed.to_string());
     }
