@@ -46,7 +46,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-repo_root = Path(sys.argv[1])
+repo_root = Path(sys.argv[1]).resolve()
 validator = Path(sys.argv[2])
 base_fixture = Path(sys.argv[3])
 
