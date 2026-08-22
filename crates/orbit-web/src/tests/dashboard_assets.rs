@@ -1143,9 +1143,10 @@ fn dashboard_nav_rail_preserves_the_router_selector_contract() {
         index.contains(r#"<div class="tabs" id="tabs">"#),
         "the router appends its indicator to .tabs; the container must remain"
     );
-    assert!(
-        index.contains(r#"id="diag-subtabs""#),
-        "Diagnostics' subtabs keep their id, now as visible rail children"
+    assert_eq!(
+        index.matches(r#"id="diag-subtabs""#).count(),
+        1,
+        "Diagnostics' subtabs must keep exactly one id, now as visible rail children"
     );
     assert!(
         css.contains(".rail .tab-indicator { display: none !important; }"),
