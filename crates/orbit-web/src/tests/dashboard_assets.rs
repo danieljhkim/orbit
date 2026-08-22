@@ -1120,6 +1120,11 @@ fn dashboard_log_dock_has_two_modes_and_an_always_on_status_bar() {
         css.contains("#tasks-panel > .body") && css.contains("min-height: 240px;"),
         "the task list must keep a guaranteed minimum usable height"
     );
+    assert!(
+        css.contains(".main-col > .tab-pane[data-tab=\"tasks\"] .col-tasks")
+            && css.contains(".col-tasks {\n        min-height: 0;"),
+        "the tasks column must be allowed to shrink so #tasks-body can scroll"
+    );
 }
 
 /// ORB-10972: the top-level nav is a left rail, and the vertical chrome above
