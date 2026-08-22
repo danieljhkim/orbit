@@ -87,9 +87,7 @@ pub(super) fn sanitize_tool_input(
     action: OrbitBuiltinAction,
     input: Value,
 ) -> Result<(Value, ArtifactRedactionReport), OrbitError> {
-    let Some(policy) = policy_for_action(action) else {
-        return Ok((input, ArtifactRedactionReport::default()));
-    };
+    let policy = policy_for_action(action);
     let Value::Object(mut object) = input else {
         return Ok((input, ArtifactRedactionReport::default()));
     };
@@ -109,6 +107,9 @@ pub(super) fn sanitize_tool_input(
     }
     for nested in policy.nested_arrays {
         sanitize_nested_string_array_field(&mut object, nested, &mut report)?;
+    }
+    for nested in policy.nested_objects {
+        sanitize_nested_object_fields(&mut object, nested, &mut report)?;
     }
     Ok((Value::Object(object), report))
 }
@@ -151,13 +152,30 @@ struct NestedArrayPolicy {
     mode: TextMode,
 }
 
+#[derive(Clone, Copy)]
+struct NestedObjectPolicy {
+    object_key: &'static str,
+    free_text_fields: &'static [&'static str],
+    free_text_arrays: &'static [&'static str],
+}
+
 struct ActionPolicy {
     free_text_fields: &'static [&'static str],
     free_text_arrays: &'static [&'static str],
     path_fields: &'static [&'static str],
     path_arrays: &'static [&'static str],
     nested_arrays: &'static [NestedArrayPolicy],
+    nested_objects: &'static [NestedObjectPolicy],
 }
+
+const NO_REDACTION: ActionPolicy = ActionPolicy {
+    free_text_fields: &[],
+    free_text_arrays: &[],
+    path_fields: &[],
+    path_arrays: &[],
+    nested_arrays: &[],
+    nested_objects: &[],
+};
 
 const TASK_ADD_NESTED: &[NestedArrayPolicy] = &[
     NestedArrayPolicy {
@@ -180,25 +198,38 @@ const TASK_ADD_NESTED: &[NestedArrayPolicy] = &[
     },
 ];
 
-fn policy_for_action(action: OrbitBuiltinAction) -> Option<ActionPolicy> {
+const AUTO_TASK_TEMPLATE: &[NestedObjectPolicy] = &[NestedObjectPolicy {
+    object_key: "template",
+    free_text_fields: &["title", "description"],
+    free_text_arrays: &["acceptance_criteria"],
+}];
+
+/// Every builtin action must make an explicit redaction decision here.
+///
+/// Keeping this match exhaustive makes an added action a compile failure until
+/// its persisted input fields have been reviewed. `NO_REDACTION` is deliberate
+/// for read-only actions and mutations that only persist structural values.
+fn policy_for_action(action: OrbitBuiltinAction) -> ActionPolicy {
     match action {
         OrbitBuiltinAction::AdrAdd
         | OrbitBuiltinAction::AdrRestore
-        | OrbitBuiltinAction::AdrUpdate => Some(ActionPolicy {
+        | OrbitBuiltinAction::AdrUpdate => ActionPolicy {
             free_text_fields: &["title", "body"],
             free_text_arrays: &[],
             path_fields: &[],
             path_arrays: &[],
             nested_arrays: &[],
-        }),
-        OrbitBuiltinAction::TaskAdd => Some(ActionPolicy {
+            nested_objects: &[],
+        },
+        OrbitBuiltinAction::TaskAdd => ActionPolicy {
             free_text_fields: &["title", "description", "plan", "comment"],
             free_text_arrays: &["acceptance_criteria"],
             path_fields: &[],
             path_arrays: &["context_files", "context"],
             nested_arrays: TASK_ADD_NESTED,
-        }),
-        OrbitBuiltinAction::TaskUpdate => Some(ActionPolicy {
+            nested_objects: &[],
+        },
+        OrbitBuiltinAction::TaskUpdate => ActionPolicy {
             free_text_fields: &[
                 "title",
                 "description",
@@ -210,36 +241,102 @@ fn policy_for_action(action: OrbitBuiltinAction) -> Option<ActionPolicy> {
             path_fields: &[],
             path_arrays: &["context_files", "context"],
             nested_arrays: &[],
-        }),
-        OrbitBuiltinAction::TaskReject => Some(ActionPolicy {
+            nested_objects: &[],
+        },
+        OrbitBuiltinAction::TaskReject => ActionPolicy {
             free_text_fields: &["note", "comment"],
             free_text_arrays: &[],
             path_fields: &[],
             path_arrays: &[],
             nested_arrays: &[],
-        }),
-        OrbitBuiltinAction::Friction(FrictionVerb::Add) => Some(ActionPolicy {
+            nested_objects: &[],
+        },
+        OrbitBuiltinAction::Friction(FrictionVerb::Add) => ActionPolicy {
             free_text_fields: &["body", "description"],
             free_text_arrays: &[],
             path_fields: &[],
             path_arrays: &[],
             nested_arrays: &[],
-        }),
-        OrbitBuiltinAction::Friction(FrictionVerb::Update) => Some(ActionPolicy {
+            nested_objects: &[],
+        },
+        OrbitBuiltinAction::Friction(FrictionVerb::Update) => ActionPolicy {
             free_text_fields: &["body"],
             free_text_arrays: &[],
             path_fields: &[],
             path_arrays: &[],
             nested_arrays: &[],
-        }),
-        OrbitBuiltinAction::AdrSupersede => Some(ActionPolicy {
+            nested_objects: &[],
+        },
+        OrbitBuiltinAction::AutoTaskAdd | OrbitBuiltinAction::AutoTaskUpdate => ActionPolicy {
+            free_text_fields: &["description"],
+            free_text_arrays: &[],
+            path_fields: &[],
+            path_arrays: &[],
+            nested_arrays: &[],
+            nested_objects: AUTO_TASK_TEMPLATE,
+        },
+        OrbitBuiltinAction::SessionLogAppend => ActionPolicy {
+            free_text_fields: &["body"],
+            free_text_arrays: &[],
+            path_fields: &[],
+            path_arrays: &[],
+            nested_arrays: &[],
+            nested_objects: &[],
+        },
+        OrbitBuiltinAction::AdrSupersede => ActionPolicy {
             free_text_fields: &[],
             free_text_arrays: &[],
             path_fields: &[],
             path_arrays: &[],
             nested_arrays: &[],
-        }),
-        _ => None,
+            nested_objects: &[],
+        },
+        OrbitBuiltinAction::AdrShow
+        | OrbitBuiltinAction::AdrList
+        | OrbitBuiltinAction::AutoTaskList
+        | OrbitBuiltinAction::AutoTaskMint
+        | OrbitBuiltinAction::AutoTaskShow
+        | OrbitBuiltinAction::AutoTaskToggle
+        | OrbitBuiltinAction::CommandExec
+        | OrbitBuiltinAction::DocsList
+        | OrbitBuiltinAction::DocsShow
+        // DocsAdd registers a checked, repo-relative path; it does not write
+        // document content, and HOME normalization would make the path invalid.
+        | OrbitBuiltinAction::DocsAdd
+        | OrbitBuiltinAction::DocsIndex
+        | OrbitBuiltinAction::DocsMigrate
+        | OrbitBuiltinAction::Friction(FrictionVerb::List)
+        | OrbitBuiltinAction::Friction(FrictionVerb::Show)
+        | OrbitBuiltinAction::Friction(FrictionVerb::Stats)
+        | OrbitBuiltinAction::Friction(FrictionVerb::Tags)
+        | OrbitBuiltinAction::Friction(FrictionVerb::Resolve)
+        | OrbitBuiltinAction::PipelineInvoke
+        | OrbitBuiltinAction::PipelineWait
+        | OrbitBuiltinAction::Search
+        | OrbitBuiltinAction::SessionLogList
+        | OrbitBuiltinAction::SessionLogResolve
+        | OrbitBuiltinAction::SemanticIndex
+        | OrbitBuiltinAction::SemanticInstall
+        | OrbitBuiltinAction::SemanticStats
+        | OrbitBuiltinAction::SemanticUninstall
+        | OrbitBuiltinAction::StateGet
+        | OrbitBuiltinAction::StateSet
+        | OrbitBuiltinAction::TaskApprove
+        | OrbitBuiltinAction::TaskDelete
+        | OrbitBuiltinAction::TaskLint
+        | OrbitBuiltinAction::TaskList
+        | OrbitBuiltinAction::TaskLocks
+        | OrbitBuiltinAction::TaskLocksRelease
+        | OrbitBuiltinAction::TaskLocksReserve
+        | OrbitBuiltinAction::TaskShow
+        | OrbitBuiltinAction::TaskStart
+        | OrbitBuiltinAction::WorkflowRunList
+        | OrbitBuiltinAction::WorkflowRunResume
+        | OrbitBuiltinAction::WorkflowRunShow
+        | OrbitBuiltinAction::WorkflowShip
+        | OrbitBuiltinAction::WorkspaceClaimAcquire
+        | OrbitBuiltinAction::WorkspaceClaimRelease
+        | OrbitBuiltinAction::WorkspaceClaimShow => NO_REDACTION,
     }
 }
 
@@ -253,6 +350,9 @@ fn is_covered_mutating_action(action: OrbitBuiltinAction) -> bool {
             | OrbitBuiltinAction::TaskAdd
             | OrbitBuiltinAction::TaskUpdate
             | OrbitBuiltinAction::TaskReject
+            | OrbitBuiltinAction::AutoTaskAdd
+            | OrbitBuiltinAction::AutoTaskUpdate
+            | OrbitBuiltinAction::SessionLogAppend
             | OrbitBuiltinAction::Friction(FrictionVerb::Add | FrictionVerb::Update)
     )
 }
@@ -304,6 +404,25 @@ fn sanitize_string_array_field(
             }
         }
         _ => {}
+    }
+    Ok(())
+}
+
+fn sanitize_nested_object_fields(
+    object: &mut Map<String, Value>,
+    policy: &NestedObjectPolicy,
+    report: &mut ArtifactRedactionReport,
+) -> Result<(), OrbitError> {
+    let Some(Value::Object(nested)) = object.get_mut(policy.object_key) else {
+        return Ok(());
+    };
+    for field in policy.free_text_fields {
+        let field_path = format!("{}.{}", policy.object_key, field);
+        sanitize_string_field(nested, field, &field_path, TextMode::Free, report)?;
+    }
+    for field in policy.free_text_arrays {
+        let field_path = format!("{}.{}", policy.object_key, field);
+        sanitize_string_array_field(nested, field, &field_path, TextMode::Free, report)?;
     }
     Ok(())
 }
@@ -532,6 +651,18 @@ fn artifact_target(
                 task_id: None,
             })
         }
+        OrbitBuiltinAction::AutoTaskAdd | OrbitBuiltinAction::AutoTaskUpdate => {
+            Ok(ArtifactTarget {
+                artifact_type: "auto_task",
+                artifact_id: response_string(response, "name")?,
+                task_id: None,
+            })
+        }
+        OrbitBuiltinAction::SessionLogAppend => Ok(ArtifactTarget {
+            artifact_type: "session_log",
+            artifact_id: response_string(response, "id")?,
+            task_id: None,
+        }),
         _ => Err(OrbitError::Execution(format!(
             "unsupported redaction audit action: {action:?}"
         ))),
@@ -555,6 +686,9 @@ fn tool_name(action: OrbitBuiltinAction) -> &'static str {
         OrbitBuiltinAction::TaskReject => "orbit.task.reject",
         OrbitBuiltinAction::Friction(FrictionVerb::Add) => "orbit.friction.add",
         OrbitBuiltinAction::Friction(FrictionVerb::Update) => "orbit.friction.update",
+        OrbitBuiltinAction::AutoTaskAdd => "orbit.auto_task.add",
+        OrbitBuiltinAction::AutoTaskUpdate => "orbit.auto_task.update",
+        OrbitBuiltinAction::SessionLogAppend => "orbit.session_log.append",
         _ => "orbit.unknown",
     }
 }
@@ -672,6 +806,33 @@ mod tests {
     }
 
     #[test]
+    fn sanitizer_covers_auto_task_definition_and_template_free_text() {
+        let input = json!({
+            "description": "definition sk-abcdefghijklmnopqrstuvwxyz",
+            "template": {
+                "title": "title sk-abcdefghijklmnopqrstuvwxyz",
+                "description": "description sk-abcdefghijklmnopqrstuvwxyz",
+                "acceptance_criteria": ["criterion sk-abcdefghijklmnopqrstuvwxyz"],
+            },
+        });
+
+        let (sanitized, report) =
+            sanitize_tool_input(OrbitBuiltinAction::AutoTaskAdd, input).expect("sanitize");
+
+        assert!(report.redactions_applied());
+        assert_eq!(sanitized["description"], "definition [REDACTED_SECRET]");
+        assert_eq!(sanitized["template"]["title"], "title [REDACTED_SECRET]");
+        assert_eq!(
+            sanitized["template"]["description"],
+            "description [REDACTED_SECRET]"
+        );
+        assert_eq!(
+            sanitized["template"]["acceptance_criteria"][0],
+            "criterion [REDACTED_SECRET]"
+        );
+    }
+
+    #[test]
     fn already_sanitized_input_is_idempotent() {
         let input = json!({
             "id": "ORB-00001",
@@ -773,6 +934,68 @@ mod tests {
             .expect("redaction audit payload");
         assert!(arguments.contains("\"field_path\":\"title\""));
         assert!(arguments.contains("\"env\""));
+        assert!(!arguments.contains(token));
+    }
+
+    #[test]
+    fn dispatch_redacts_session_log_body_and_emits_an_audit_report() {
+        let token = "orbit-session-log-secret-value";
+        let _env = EnvVarGuard::set("GITHUB_TOKEN", token);
+        let (_root, runtime, _repo_root) = test_runtime();
+
+        let output = runtime
+            .execute_tool_command(
+                "orbit.session_log.append",
+                json!({
+                    "kind": "note",
+                    "body": format!("captured {token}"),
+                }),
+                Some("codex".to_string()),
+                Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
+            )
+            .expect("session log append succeeds");
+
+        assert_eq!(output["redactions_applied"], true);
+        assert_eq!(output["body"], "captured [REDACTED_ENV]");
+        assert_eq!(
+            output["redactions"],
+            json!([{
+                "field_path": "body",
+                "redaction_kinds": ["env"],
+                "redaction_classes": ["sensitive_environment_value"]
+            }])
+        );
+        assert!(!output["body"].as_str().expect("body").contains(token));
+
+        let listed = runtime
+            .execute_tool_command(
+                "orbit.session_log.list",
+                json!({}),
+                Some("codex".to_string()),
+                Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
+            )
+            .expect("session log list succeeds");
+        assert_eq!(listed["entries"][0]["body"], "captured [REDACTED_ENV]");
+
+        let events = runtime
+            .list_audit_events(
+                None,
+                Some("orbit.session_log.append".to_string()),
+                None,
+                None,
+                16,
+            )
+            .expect("session-log redaction audit query succeeds");
+        let redaction_event = events
+            .iter()
+            .find(|event| event.command == "artifact_redaction")
+            .expect("session-log redaction audit event");
+        let arguments = redaction_event
+            .arguments_json
+            .as_deref()
+            .expect("session-log redaction audit payload");
+        assert!(arguments.contains("\"artifact_type\":\"session_log\""));
+        assert!(arguments.contains("\"field_path\":\"body\""));
         assert!(!arguments.contains(token));
     }
 
