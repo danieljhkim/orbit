@@ -341,8 +341,12 @@ export function buildTasksHash(context) {
   const sp = new URLSearchParams();
   const order = statusOrder(context);
   const activeStatuses = activeStatusSet(context);
-  if (activeStatuses.size !== order.length) {
-    const selected = order.filter((s) => activeStatuses.has(s));
+  const selected = order.filter((s) => activeStatuses.has(s));
+  if (selected.length === order.length) {
+    // An explicit all-status selection must not collapse to the omitted
+    // status query, which means the default set and excludes someday.
+    sp.set("status", "all");
+  } else {
     sp.set("status", selected.length > 0 ? selected.join(",") : "none");
   }
   const q = searchQueryValue(context);
@@ -358,6 +362,8 @@ export function applyTasksHashQuery(query, context) {
     setActiveStatuses(context, new Set(defaultActiveStatuses(context)));
   } else if (statusParam === "none") {
     setActiveStatuses(context, new Set());
+  } else if (statusParam === "all") {
+    setActiveStatuses(context, new Set(order));
   } else {
     const wanted = new Set(statusParam.split(",").map((s) => s.trim()).filter(Boolean));
     setActiveStatuses(context, new Set(order.filter((s) => wanted.has(s))));
