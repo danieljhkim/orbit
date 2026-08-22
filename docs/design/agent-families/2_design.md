@@ -46,7 +46,7 @@ The precedence chain is:
 
 This chain resolves the run crew. At activity dispatch there is one additional, explicit authoring choice: a rendered `crew` input selects a different named crew for that activity. With no such input, the run crew is the fallback. No role-keyed lookup participates in either selection.
 
-`orbit.task.show` surfaces the task field and, when the current registry resolves it, the effective crew name plus one `crew_model` string.
+`orbit.task.show` surfaces the task field and, when the current registry resolves it, the effective crew name plus one `crew_model` string. Crew configuration is host-local, so a read surface never fails on a crew this host cannot resolve: the stored `crew` is returned verbatim, `resolved_crew`/`crew_model` are withheld, and `crew_unresolved` carries the reason as a non-fatal warning [ORB-10968]. Listing and the global id lookup follow the same contract; `orbit.task.start` and dispatch still resolve strictly and fail with the crew-validation error.
 
 ## 4. Run Records
 
@@ -56,7 +56,7 @@ Legacy records without crew fields still deserialize because the run-record fiel
 
 ## 5. Concerns & Honest Limitations
 
-Crew names are workspace-local strings. Renaming or deleting a crew can break a task that still references the old name, though existing run records keep the resolved model strings.
+Crew names are workspace-local strings. Renaming or deleting a crew leaves a task naming the old one unable to *run* here, though it stays readable and existing run records keep the resolved model strings.
 
 An activity-specific crew is carried in rendered input rather than persisted as separate per-step routing metadata. Authors must ensure that input is visible in the job asset when a step intentionally differs from its run.
 

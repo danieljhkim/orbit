@@ -59,6 +59,33 @@ pub(super) fn create_task(
     status: TaskStatus,
     context_files: &[&str],
 ) -> Task {
+    create_task_with_crew(
+        runtime,
+        workspace_path,
+        title,
+        description,
+        status,
+        context_files,
+        None,
+    )
+}
+
+/// Create a task straight through the record store, keeping `crew` exactly as
+/// given.
+///
+/// `orbit.task.add` validates the crew against this host's `[crews.*]` table,
+/// so it cannot author the case read surfaces must tolerate: a stored crew this
+/// host has no entry for, because the task predates a config edit or was
+/// created on another machine (ORB-10968).
+pub(super) fn create_task_with_crew(
+    runtime: &OrbitRuntime,
+    workspace_path: &Path,
+    title: &str,
+    description: &str,
+    status: TaskStatus,
+    context_files: &[&str],
+    crew: Option<&str>,
+) -> Task {
     runtime
         .stores()
         .task_records()
@@ -88,7 +115,7 @@ pub(super) fn create_task(
             task_type: TaskType::Chore,
             external_refs: Vec::new(),
             source_task_id: None,
-            crew: None,
+            crew: crew.map(ToString::to_string),
             orchestrator: None,
             comments: Vec::new(),
         })
