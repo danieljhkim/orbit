@@ -99,6 +99,19 @@ pub struct ServeArgs {
     /// authority to an agent's server by accident.
     #[arg(long, conflicts_with = "mode")]
     pub operator: bool,
+    /// Bind this server's sessions to a registered workspace: a workspace
+    /// name, a logical workspace ID (`ws_*`), or an absolute registered
+    /// checkout path.
+    ///
+    /// Most MCP clients cannot announce `_meta.orbit.workspace` on their
+    /// initialize, so without this a workspace-scoped tool must repeat the
+    /// selector on every call. `orbit mcp init` and `orbit workspace init
+    /// --mcp` write this into the integrations they generate. A client that
+    /// does announce a workspace, and any explicit per-call `workspace`,
+    /// still take precedence. The selector is resolved against the accepting
+    /// server's registry per call, never from the server process cwd.
+    #[arg(long, value_name = "SELECTOR", conflicts_with = "mode")]
+    pub workspace: Option<String>,
 }
 
 impl ServeArgs {
@@ -129,6 +142,7 @@ impl ServeArgs {
                 } else {
                     McpSessionAuthority::Agent
                 },
+                self.workspace,
             )?,
         }
         Ok(CommandOutput::Silent)

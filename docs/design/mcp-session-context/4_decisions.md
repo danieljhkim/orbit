@@ -3,8 +3,8 @@ summary: "MCP Session Context — Decisions"
 type: design
 title: "MCP Session Context — Decisions"
 owner: codex
-last_updated: 2026-08-15
-last_validated: 2026-08-15
+last_updated: 2026-08-22
+last_validated: 2026-08-22
 status: Accepted
 feature: mcp-session-context
 doc_role: decisions
@@ -22,9 +22,19 @@ These are the current implementation choices for MCP v1.
 
 **Context.** A client must select server-side workspace state, but client input cannot establish a trusted logical identity.
 
-**Decision.** Accept workspace from explicit tool input first and initialize metadata second. Resolve it on the authoritative server, then set workspace_id. Never fall back to the server process cwd.
+**Decision.** Accept workspace from explicit tool input first, initialize metadata second, and the server's launch binding third. Resolve it on the authoritative server, then set workspace_id. Never fall back to the server process cwd.
 
 **Consequences.** Explicit addressing works from any client launch directory. Missing or unknown selectors fail clearly. Cost: every workspace-scoped call pays server-side resolution.
+
+## A managed integration binds its own workspace at launch
+
+**Context.** The MCP protocol gives a client exactly one place to announce a workspace — `_meta` on initialize — and general-purpose clients do not send it. A session that carried no binding therefore refused every workspace-scoped call, and the agent had to discover a selector Orbit already knew.
+
+**Decision.** `orbit mcp serve --workspace <selector>` binds the session before any client connects, and the config generators write it into the argv they register, using the logical `ws_*` ID. The binding is a default, not an authority: it never overrides an explicit per-call workspace or an announced one, and it is resolved against the registry like any other selector. A server launched without it stays fail-closed.
+
+**Alternative rejected.** Falling back to the server process cwd. That is the retired routing model: it makes the answer depend on where the client happened to launch, and a linked worktree would silently address a different partition than its registration. The launch binding is written once, by whoever registered the integration, and names a workspace rather than a directory.
+
+**Consequences.** A managed executor calls `orbit.task.update` with no workspace argument and lands in the workspace it was launched for. `tools/list` documents which of the two situations the caller is in. Cost: a stale binding (a workspace later deregistered or renamed) surfaces as a per-call resolution error naming the selector, rather than at startup.
 
 ## The accepting server owns provenance
 

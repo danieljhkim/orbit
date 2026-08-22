@@ -6,17 +6,17 @@ use crate::command::mcp::{ORBIT_MCP_SERVER_ID, safe_mcp_tool_names};
 
 use super::super::dispatch::ConfigTarget;
 use super::super::format::*;
-use super::common::server_args;
+use super::common::{ServerLaunch, server_args};
 
 pub(in crate::command::mcp::setup) fn apply_claude_init(
     target: &ConfigTarget,
-    operator: bool,
+    launch: ServerLaunch<'_>,
 ) -> Result<(), OrbitError> {
     let mut root = load_json_object(&target.mcp_path)?;
     let mcp_servers = ensure_json_object(&mut root, "mcpServers")?;
     mcp_servers.insert(
         ORBIT_MCP_SERVER_ID.to_string(),
-        claude_mcp_server_value(operator),
+        claude_mcp_server_value(launch),
     );
     write_json_object(&target.mcp_path, &root)?;
 
@@ -79,7 +79,7 @@ pub(in crate::command::mcp::setup) fn apply_claude_remove(
     Ok(())
 }
 
-pub(super) fn claude_mcp_server_value(operator: bool) -> JsonValue {
+pub(super) fn claude_mcp_server_value(launch: ServerLaunch<'_>) -> JsonValue {
     JsonValue::Object(JsonMap::from_iter([
         (
             "command".to_string(),
@@ -88,7 +88,7 @@ pub(super) fn claude_mcp_server_value(operator: bool) -> JsonValue {
         (
             "args".to_string(),
             JsonValue::Array(
-                server_args(operator)
+                server_args(launch)
                     .into_iter()
                     .map(JsonValue::String)
                     .collect(),

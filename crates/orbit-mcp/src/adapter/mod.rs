@@ -26,6 +26,17 @@ use crate::McpHost;
 /// before dispatch.
 pub struct OrbitToolServer {
     host: Arc<dyn McpHost>,
+    /// The workspace this server process was launched for, when the launching
+    /// configuration named one.
+    ///
+    /// A managed integration — what `orbit mcp init` and `orbit workspace init
+    /// --mcp` generate — knows its workspace before any client connects, and
+    /// most MCP clients cannot announce `_meta.orbit.workspace` at initialize
+    /// at all. Keeping the launch binding here, separate from the mutable
+    /// session context, lets `initialize` fall back to it instead of clearing
+    /// the selector, while a re-initialize still resets to the launch value
+    /// rather than inheriting the previous client's claim.
+    launch_workspace: Option<String>,
     session_context: RwLock<ToolSessionContext>,
 }
 
@@ -42,9 +53,19 @@ impl OrbitToolServer {
             trusted_context.origin_session_id = Some(audit_execution_id("mcp-session"));
         }
         trusted_context.trace_id = None;
+        trusted_context.workspace = normalized_selector(trusted_context.workspace.as_deref());
         Self {
             host,
+            launch_workspace: trusted_context.workspace.clone(),
             session_context: RwLock::new(trusted_context),
         }
     }
+}
+
+/// A selector is present only when it names something; blank is absent.
+fn normalized_selector(selector: Option<&str>) -> Option<String> {
+    selector
+        .map(str::trim)
+        .filter(|selector| !selector.is_empty())
+        .map(ToOwned::to_owned)
 }

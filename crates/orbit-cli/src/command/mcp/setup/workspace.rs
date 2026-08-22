@@ -2,6 +2,7 @@ use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use orbit_cmd::registry_runtime::RegisteredRuntimeFactory;
 use orbit_core::OrbitError;
 use orbit_registry::workspace_registry;
 
@@ -56,6 +57,26 @@ pub(super) fn resolve_workspace_layout_for_cwd(cwd: &Path) -> Result<WorkspaceLa
     Err(OrbitError::InvalidInput(
         "current directory is not inside an initialized Orbit workspace; run `orbit workspace init` first or pass `--root <path/to/.orbit>`".to_string(),
     ))
+}
+
+/// The logical workspace ID this checkout is registered under on this machine,
+/// or `None` when the machine registry does not know it.
+///
+/// This is what a generated integration binds its MCP server to. The logical
+/// `ws_*` ID is used rather than the checkout path so a linked worktree — whose
+/// own checkout identity may have diverged from the registration — still names
+/// one workspace, and so a config that travels with the repo does not carry an
+/// absolute path from the machine that wrote it.
+///
+/// An unregistered checkout is not an error here: the generated server simply
+/// stays unbound, exactly as it was before a binding existed, and every
+/// workspace-scoped call supplies its own selector.
+pub(super) fn registered_workspace_id(repo_root: &Path) -> Option<String> {
+    let global_root = workspace_registry::global_orbit_dir().ok()?;
+    let selector = repo_root.to_str()?;
+    RegisteredRuntimeFactory::resolve_workspace_selector(&global_root, selector)
+        .ok()
+        .map(|selected| selected.workspace.id)
 }
 
 fn is_global_orbit_dir(candidate: &Path) -> bool {

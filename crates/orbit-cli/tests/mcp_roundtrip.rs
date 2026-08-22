@@ -415,6 +415,11 @@ fn mcp_serve_tools_list_matches_production_snapshot() {
 
     // Snapshot guard for the full production agent surface: names AND input
     // schemas. Any diff here is a breaking MCP schema change per RELEASING.md.
+    //
+    // `tools/list` is answered per session, and this fixture announces a
+    // workspace at initialize, so the snapshot records the workspace-bound
+    // selector documentation. The unbound wording is asserted in
+    // `mcp_serve_lists_the_canonical_surface_outside_any_checkout`.
     let snapshot_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(SNAPSHOT_RELATIVE_PATH);
     if std::env::var("ORBIT_MCP_UPDATE_SNAPSHOT").as_deref() == Ok("1") {
         std::fs::create_dir_all(snapshot_path.parent().expect("snapshot dir"))
@@ -568,19 +573,23 @@ fn workspace_init_mcp_config_reaches_a_governed_tool_over_the_real_transport() {
         vec![
             "mcp".to_string(),
             "serve".to_string(),
-            "--operator".to_string()
+            "--operator".to_string(),
+            "--workspace".to_string(),
+            "ws_mcp-roundtrip".to_string(),
         ],
-        "orbit workspace init --mcp must write argv exactly `mcp serve --operator`"
+        "orbit workspace init --mcp must write the authority it grants and the workspace it \
+         registered"
     );
 
     // Re-running the same reconciliation path (`--force --mcp`, as a second
     // `orbit workspace init --mcp` bootstrap would do) must refresh the
-    // managed entry rather than append a second `--operator` argument.
+    // managed entry rather than append a second `--operator` argument or a
+    // second binding.
     reconcile();
     assert_eq!(
         read_generated_args(),
         args,
-        "refreshing the operator-authorized entry must not duplicate --operator"
+        "refreshing the operator-authorized entry must not duplicate its arguments"
     );
 
     // Spawn the exact argv the generated config launches, over the real MCP
@@ -642,12 +651,29 @@ fn mcp_serve_lists_the_canonical_surface_outside_any_checkout() {
             .is_some_and(|message| message.contains("ORB-00001")),
         "an unregistered id must be reported as not found: {missing}"
     );
-    // Every other workspace-scoped tool still requires one.
+    // Every other workspace-scoped tool still requires one. This session was
+    // launched with no `--workspace` and announced none at initialize, so it
+    // is unbound and must stay fail-closed [ORB-10967].
     let unscoped = client.call_tool_err("orbit_task_list", json!({}));
     assert!(unscoped["message"].as_str().is_some_and(|message| {
         message.contains("requires a workspace selector")
             && message.contains("MCP initialize metadata")
     }));
+    let description = tool_workspace_description(&listed, "orbit_task_list");
+    assert!(
+        description.contains("Required in this session"),
+        "an unbound session must advertise the selector as required: {description}"
+    );
+
+    // An explicit valid selector is the one way out, and it works.
+    let scoped = client.call_tool_ok(
+        "orbit_task_list",
+        json!({ "workspace": "ws_mcp-roundtrip", "limit": 1 }),
+    );
+    assert!(
+        scoped.get("items").is_some() || scoped.is_array(),
+        "an explicit selector must route an unbound session: {scoped}"
+    );
     drop(client);
 
     let connection =
@@ -1372,6 +1398,276 @@ fn worktree_backed_activity_routes_task_and_search_by_advertised_workspace_argum
     let shown: Value = serde_json::from_slice(&output.stdout).expect("parse CLI task show");
     assert_eq!(shown["id"], json!(task_id));
     assert_eq!(shown["execution_summary"], "Routed from a linked worktree");
+}
+
+/// ORB-10967: the managed-executor shape, end to end through the real
+/// generated integration.
+///
+/// ORB-10448 made the selector *advertised* so a schema-following caller could
+/// pass it. That is not enough: a general-purpose MCP client cannot announce
+/// `_meta.orbit.workspace` at initialize at all, so a session that carried no
+/// binding refused every workspace-scoped call with "requires a workspace
+/// selector". The generated integration knows its workspace, so it binds the
+/// server to it at launch and a silent client still routes.
+#[test]
+fn managed_mcp_config_updates_a_task_without_a_workspace_argument() {
+    let workspace = McpWorkspace::init();
+    let task_id = author_task(&workspace, "Managed executor routing");
+    let args = generate_managed_mcp_config(&workspace);
+
+    let mut client = spawn_generated_server(&workspace, &workspace.work, &args);
+
+    // The advertised schema must tell this session the truth: it is bound, so
+    // the selector is optional here.
+    let listed = client.request("tools/list", Value::Null);
+    let description = tool_workspace_description(&listed, "orbit_task_update");
+    assert!(
+        description.contains("Optional in this session"),
+        "a launch-bound session must advertise the selector as optional: {description}"
+    );
+
+    let updated = client.call_tool_ok(
+        "orbit_task_update",
+        json!({
+            "id": task_id,
+            "execution_summary": "Routed by the session's launch binding",
+            "model": "codex",
+        }),
+    );
+    assert_eq!(
+        updated["execution_summary"], "Routed by the session's launch binding",
+        "a managed session must update a task without naming a workspace"
+    );
+
+    // An explicit selector still overrides, and still validates: naming a
+    // workspace that does not exist fails closed rather than falling back to
+    // the binding.
+    let explicit = client.call_tool_ok(
+        "orbit_task_update",
+        json!({
+            "id": task_id,
+            "execution_summary": "Routed by an explicit selector",
+            "workspace": workspace.work.to_str().expect("utf8 checkout path"),
+            "model": "codex",
+        }),
+    );
+    assert_eq!(
+        explicit["execution_summary"],
+        "Routed by an explicit selector"
+    );
+    let rejected = client.call_tool_err(
+        "orbit_task_update",
+        json!({ "id": task_id, "workspace": "ws_not_registered", "model": "codex" }),
+    );
+    assert!(
+        rejected["message"]
+            .as_str()
+            .is_some_and(|message| message.contains("ws_not_registered")),
+        "an explicit selector must be validated, not silently replaced: {rejected}"
+    );
+    drop(client);
+
+    // The checkout-local CLI surface observes the same partition MCP wrote to.
+    assert_eq!(
+        cli_task_execution_summary(&workspace, &workspace.work, &task_id),
+        "Routed by an explicit selector"
+    );
+}
+
+/// ORB-10967 / ORB-10961: the same contract from a linked job worktree whose
+/// checkout identity diverged from the logical `ws_*` the registry knows.
+///
+/// The binding is that logical ID, so the ambient runtime identity of the
+/// worktree never becomes the route, and the managed run lands in the one
+/// partition the checkout-local surfaces use.
+#[test]
+fn managed_mcp_config_routes_a_linked_worktree_by_its_logical_workspace_id() {
+    let workspace = McpWorkspace::init();
+
+    // Diverge the logical registry ID from the checkout identity that keys the
+    // coordination task registry, then generate the integration, so the config
+    // is written for the diverged logical ID.
+    let registry_path = workspace.home.join(".orbit").join("workspaces.json");
+    let registry = std::fs::read_to_string(&registry_path).expect("read workspace registry");
+    std::fs::write(
+        &registry_path,
+        registry.replace("ws_mcp-roundtrip", "ws_legacy-logical"),
+    )
+    .expect("write diverged workspace registry");
+    let identity = std::fs::read_to_string(workspace.work.join(".orbit").join("config.yaml"))
+        .expect("read checkout identity");
+    assert!(
+        identity.contains("ws_mcp-roundtrip"),
+        "checkout identity must keep the pre-divergence ID: {identity}"
+    );
+
+    let identity_path = workspace.work.join(".orbit").join("config.yaml");
+    std::fs::write(
+        &identity_path,
+        identity.replace("ws_mcp-roundtrip", "orbit-5c61b3"),
+    )
+    .expect("diverge the runtime partition identity");
+
+    let task_id = author_task(&workspace, "Linked worktree routing");
+    // `orbit mcp init` is the agent-authority generation path; it resolves the
+    // binding from the registry rather than from the checkout's own identity.
+    let args = generate_agent_mcp_config(&workspace);
+    assert_eq!(
+        args,
+        vec![
+            "mcp".to_string(),
+            "serve".to_string(),
+            "--workspace".to_string(),
+            "ws_legacy-logical".to_string(),
+        ],
+        "the generated config must bind the logical registry ID, not the checkout identity"
+    );
+
+    let worktree = add_linked_worktree(&workspace.work);
+    let mut client = spawn_generated_server(&workspace, &worktree, &args);
+
+    let updated = client.call_tool_ok(
+        "orbit_task_update",
+        json!({
+            "id": task_id,
+            "execution_summary": "Routed from a linked worktree",
+            "model": "codex",
+        }),
+    );
+    assert_eq!(
+        updated["execution_summary"],
+        "Routed from a linked worktree"
+    );
+    drop(client);
+
+    // The `orbit tool run` fallback from the worktree observes the same write:
+    // both surfaces address one partition.
+    assert_eq!(
+        cli_task_execution_summary(&workspace, &worktree, &task_id),
+        "Routed from a linked worktree"
+    );
+}
+
+/// Author one task through the checkout-local CLI surface and return its ID.
+fn author_task(workspace: &McpWorkspace, title: &str) -> String {
+    let input = json!({
+        "title": title,
+        "description": "Authored via the CLI fallback",
+        "complexity": "low",
+        "workspace": workspace.work.to_str().expect("utf8 checkout path"),
+        "model": "codex",
+    })
+    .to_string();
+    let output = McpWorkspace::orbit_command(&workspace.work, &workspace.home)
+        .args(["tool", "run", "orbit.task.add", "--input", &input])
+        .output()
+        .expect("author task through the CLI fallback");
+    assert_command_succeeded("orbit.task.add", &output);
+    let created: Value = serde_json::from_slice(&output.stdout).expect("parse created task");
+    created["id"].as_str().expect("task id").to_string()
+}
+
+/// Run the operator-facing bootstrap (`orbit workspace init --mcp`) and return
+/// the exact argv the integration it generated launches Orbit with.
+fn generate_managed_mcp_config(workspace: &McpWorkspace) -> Vec<String> {
+    std::fs::create_dir_all(workspace.work.join(".claude")).expect("create .claude marker");
+    let output = McpWorkspace::orbit_command(&workspace.work, &workspace.home)
+        .args([
+            "workspace",
+            "init",
+            "--name",
+            "mcp-roundtrip",
+            "--force",
+            "--mcp",
+        ])
+        .output()
+        .expect("run workspace init --force --mcp");
+    assert_command_succeeded("workspace init --force --mcp", &output);
+    read_generated_claude_args(workspace)
+}
+
+/// Run the agent-authority registration (`orbit mcp init --claude`) and return
+/// the argv the integration it generated launches Orbit with.
+fn generate_agent_mcp_config(workspace: &McpWorkspace) -> Vec<String> {
+    let output = McpWorkspace::orbit_command(&workspace.work, &workspace.home)
+        .args(["mcp", "init", "--claude"])
+        .output()
+        .expect("run orbit mcp init --claude");
+    assert_command_succeeded("mcp init --claude", &output);
+    read_generated_claude_args(workspace)
+}
+
+fn read_generated_claude_args(workspace: &McpWorkspace) -> Vec<String> {
+    let claude_mcp: Value = serde_json::from_str(
+        &std::fs::read_to_string(workspace.work.join(".claude.json"))
+            .expect("read generated claude mcp config"),
+    )
+    .expect("parse generated claude mcp config");
+    claude_mcp["mcpServers"]["orbit"]["args"]
+        .as_array()
+        .expect("generated args array")
+        .iter()
+        .map(|value| value.as_str().expect("arg is a string").to_string())
+        .collect()
+}
+
+/// Spawn the generated argv from `cwd` and complete the handshake a real
+/// managed client performs: `clientInfo` only, no `_meta.orbit.workspace`.
+fn spawn_generated_server(workspace: &McpWorkspace, cwd: &Path, args: &[String]) -> McpClient {
+    let child = McpWorkspace::orbit_command(cwd, &workspace.home)
+        .args(args)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn the server launched by the generated config");
+    let mut client = McpClient::new(child);
+    client.request(
+        "initialize",
+        json!({
+            "protocolVersion": "2025-06-18",
+            "capabilities": {},
+            "clientInfo": { "name": "managed-executor", "version": "0" },
+        }),
+    );
+    client.notify("notifications/initialized");
+    client
+}
+
+/// Read one task's execution summary back through the CLI surface at `cwd`.
+fn cli_task_execution_summary(workspace: &McpWorkspace, cwd: &Path, task_id: &str) -> String {
+    let output = McpWorkspace::orbit_command(cwd, &workspace.home)
+        .args([
+            "tool",
+            "run",
+            "orbit.task.show",
+            "--input",
+            &format!(r#"{{"id":"{task_id}"}}"#),
+            "--fields",
+            "id,execution_summary",
+        ])
+        .output()
+        .expect("run the CLI fallback");
+    assert_command_succeeded("orbit.task.show", &output);
+    let shown: Value = serde_json::from_slice(&output.stdout).expect("parse CLI task show");
+    assert_eq!(shown["id"], json!(task_id));
+    shown["execution_summary"]
+        .as_str()
+        .expect("execution summary")
+        .to_string()
+}
+
+/// The advertised `workspace` selector documentation for one listed tool.
+fn tool_workspace_description(listed: &Value, tool_name: &str) -> String {
+    listed["result"]["tools"]
+        .as_array()
+        .expect("tools array")
+        .iter()
+        .find(|tool| tool["name"] == json!(tool_name))
+        .expect("tool listed")["inputSchema"]["properties"]["workspace"]["description"]
+        .as_str()
+        .expect("selector carries routing guidance")
+        .to_string()
 }
 
 /// ORB-10797: the constellation-orchestrator shape.

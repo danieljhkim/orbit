@@ -2,6 +2,8 @@ use tempfile::tempdir;
 
 use super::super::super::args::{McpAction, McpProvider, ProviderSelectionMode, ScopeArg};
 use super::super::super::dispatch::run_action;
+use super::super::common::ServerLaunch;
+use super::OPERATOR_LAUNCH;
 
 #[test]
 fn gemini_workspace_scope_init_and_remove_preserve_unrelated_entries() {
@@ -17,7 +19,7 @@ fn gemini_workspace_scope_init_and_remove_preserve_unrelated_entries() {
     std::fs::create_dir_all(&orbit_root).expect("create orbit root");
 
     run_action(
-        McpAction::Init { operator: false },
+        McpAction::Init(ServerLaunch::default()),
         repo.path(),
         &orbit_root,
         ProviderSelectionMode::Explicit(vec![McpProvider::Gemini]),
@@ -70,7 +72,7 @@ fn workspace_scope_gemini_init_is_idempotent() {
     std::fs::create_dir_all(&orbit_root).expect("create orbit root");
 
     run_action(
-        McpAction::Init { operator: false },
+        McpAction::Init(ServerLaunch::default()),
         repo.path(),
         &orbit_root,
         ProviderSelectionMode::Explicit(vec![McpProvider::Gemini]),
@@ -82,7 +84,7 @@ fn workspace_scope_gemini_init_is_idempotent() {
         .expect("read first settings");
 
     run_action(
-        McpAction::Init { operator: false },
+        McpAction::Init(ServerLaunch::default()),
         repo.path(),
         &orbit_root,
         ProviderSelectionMode::Explicit(vec![McpProvider::Gemini]),
@@ -105,7 +107,7 @@ fn gemini_operator_init_writes_single_operator_flag_and_refresh_is_idempotent() 
 
     let init = || {
         run_action(
-            McpAction::Init { operator: true },
+            McpAction::Init(OPERATOR_LAUNCH),
             repo.path(),
             &orbit_root,
             ProviderSelectionMode::Explicit(vec![McpProvider::Gemini]),

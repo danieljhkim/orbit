@@ -6,7 +6,7 @@ use super::args::{McpAction, McpProvider, ProviderSelectionMode, ScopeArg};
 use super::providers::*;
 
 pub(super) fn run_action(
-    action: McpAction,
+    action: McpAction<'_>,
     repo_root: &Path,
     orbit_root: &Path,
     selection: ProviderSelectionMode,
@@ -17,36 +17,28 @@ pub(super) fn run_action(
     for provider in &providers {
         let target = ConfigTarget::resolve(scope, provider, repo_root, home_dir.as_deref())?;
         match (action, provider) {
-            (McpAction::Init { operator }, McpProvider::Claude) => {
-                apply_claude_init(&target, operator)?
-            }
+            (McpAction::Init(launch), McpProvider::Claude) => apply_claude_init(&target, launch)?,
             (McpAction::Remove, McpProvider::Claude) => apply_claude_remove(&target)?,
-            (McpAction::Init { operator }, McpProvider::Codex) => {
-                apply_codex_init(&target, operator)?
-            }
+            (McpAction::Init(launch), McpProvider::Codex) => apply_codex_init(&target, launch)?,
             (McpAction::Remove, McpProvider::Codex) => apply_codex_remove(&target)?,
-            (McpAction::Init { operator }, McpProvider::Gemini) => {
-                apply_gemini_init(&target, operator)?
-            }
+            (McpAction::Init(launch), McpProvider::Gemini) => apply_gemini_init(&target, launch)?,
             (McpAction::Remove, McpProvider::Gemini) => apply_gemini_remove(&target)?,
-            (McpAction::Init { operator }, McpProvider::Grok) => {
-                apply_grok_init(&target, operator)?
-            }
+            (McpAction::Init(launch), McpProvider::Grok) => apply_grok_init(&target, launch)?,
             (McpAction::Remove, McpProvider::Grok) => apply_grok_remove(&target)?,
-            (McpAction::Init { operator }, McpProvider::Cursor) => {
-                apply_simple_json_init(&target, "mcpServers", operator)?
+            (McpAction::Init(launch), McpProvider::Cursor) => {
+                apply_simple_json_init(&target, "mcpServers", launch)?
             }
             (McpAction::Remove, McpProvider::Cursor) => {
                 apply_simple_json_remove(&target, "mcpServers")?
             }
-            (McpAction::Init { operator }, McpProvider::Vscode) => {
-                apply_simple_json_init(&target, "servers", operator)?
+            (McpAction::Init(launch), McpProvider::Vscode) => {
+                apply_simple_json_init(&target, "servers", launch)?
             }
             (McpAction::Remove, McpProvider::Vscode) => {
                 apply_simple_json_remove(&target, "servers")?
             }
-            (McpAction::Init { operator }, McpProvider::Windsurf) => {
-                apply_simple_json_init(&target, "mcpServers", operator)?
+            (McpAction::Init(launch), McpProvider::Windsurf) => {
+                apply_simple_json_init(&target, "mcpServers", launch)?
             }
             (McpAction::Remove, McpProvider::Windsurf) => {
                 apply_simple_json_remove(&target, "mcpServers")?
@@ -265,7 +257,7 @@ pub(super) fn auto_detected_providers(
     providers
 }
 
-pub(super) fn print_action_summary(action: McpAction, providers: &[McpProvider]) {
+pub(super) fn print_action_summary(action: McpAction<'_>, providers: &[McpProvider]) {
     if providers.is_empty() {
         println!("mcp {}: no providers selected", action.label());
         return;
