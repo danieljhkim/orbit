@@ -54,20 +54,29 @@ spec:
 
           - id: ship_leaves
             when: "{{ steps.admissible.output.has_leaves }} == true"
-            target: activity:invoke_and_wait
-            default_input:
-              job_name: task_auto_pipeline
-              run_input:
-                task_ids: "{{ steps.admissible.output.loose_task_ids }}"
-                mode: "{{ steps.resolve_ship_input.output.mode }}"
-                base_branch: "{{ steps.resolve_ship_input.output.base_branch }}"
+            fan_out:
+              items: "{{ steps.admissible.output.loose_task_dispatches }}"
+              max_workers: 5
+              worker:
+                id: leaf_invoke
+                target: activity:invoke_and_wait
+                default_input:
+                  job_name: task_auto_pipeline
+                  run_input:
+                    task_ids: "{{ item.task_ids }}"
+                    mode: "{{ steps.resolve_ship_input.output.mode }}"
+                    base_branch: "{{ steps.resolve_ship_input.output.base_branch }}"
+            fan_in:
+              join:
+                mode: all
+              collect: leaf_results
 
           - id: require_leaf_success
             when: "{{ steps.admissible.output.has_leaves }} == true"
             target: activity:pipeline_success_guard
             default_input:
               context: workspace auto leaf ship
-              result: "{{ steps.ship_leaves.output }}"
+              results: "{{ steps.leaf_results.output }}"
 
           # Detached: the next iteration keeps shipping leaves while the epic
           # assembles its branch. `classify_workspace_auto_tasks` re-observes

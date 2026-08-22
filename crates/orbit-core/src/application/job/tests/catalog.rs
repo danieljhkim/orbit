@@ -1040,13 +1040,29 @@ fn workspace_auto_pipeline_is_single_flight_and_conditionally_dispatches() {
         ship.when.as_deref(),
         Some("{{ steps.admissible.output.has_leaves }} == true")
     );
-    let JobV2StepBody::TargetRef(ship_target) = &ship.body else {
-        panic!("ship step must invoke and wait");
+    let JobV2StepBody::FanOut { fan_out, fan_in } = &ship.body else {
+        panic!("ship step must fan out crew-homogeneous dispatches");
+    };
+    assert_eq!(
+        fan_out.items,
+        "{{ steps.admissible.output.loose_task_dispatches }}"
+    );
+    assert_eq!(fan_out.max_workers, 5);
+    assert_eq!(fan_in.collect.as_deref(), Some("leaf_results"));
+    let JobV2StepBody::TargetRef(ship_target) = &fan_out.worker.body else {
+        panic!("each leaf partition must invoke and wait");
     };
     assert_eq!(ship_target.target, "activity:invoke_and_wait");
+    let ship_input = ship_target.default_input.as_ref().expect("ship input");
+    assert_eq!(ship_input["job_name"], "task_auto_pipeline");
+    assert_eq!(ship_input["run_input"]["task_ids"], "{{ item.task_ids }}");
+
+    let JobV2StepBody::TargetRef(guard) = &drain.steps[2].body else {
+        panic!("leaf success guard must be an activity reference");
+    };
     assert_eq!(
-        ship_target.default_input.as_ref().expect("ship input")["job_name"],
-        "task_auto_pipeline"
+        guard.default_input.as_ref().expect("guard input")["results"],
+        "{{ steps.leaf_results.output }}"
     );
 
     // The epic must NOT be waited on: blocking on a multi-hour epic would

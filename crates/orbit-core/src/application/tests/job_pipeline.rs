@@ -7,8 +7,9 @@ use std::time::{Duration, Instant};
 use chrono::Utc;
 use orbit_common::OrbitError;
 use orbit_store::maintenance::migration::SUPPORTED_SCHEMA_VERSION;
+use orbit_types::task::TaskStatus;
 use orbit_types::telemetry::AuditEventStatus;
-use orbit_types::workflow::JobRunState;
+use orbit_types::workflow::{JobRunStartOutcome, JobRunState};
 use orbit_types::workspace::WorkspacePaths;
 use tempfile::TempDir;
 
@@ -28,6 +29,40 @@ fn test_runtime() -> (TempDir, OrbitRuntime) {
     let workspace_root = root.path().join("repo/.orbit");
     std::fs::create_dir_all(&global_root).expect("create global root");
     std::fs::create_dir_all(&workspace_root).expect("create workspace root");
+    let runtime =
+        OrbitRuntime::from_roots(&global_root, &workspace_root).expect("build test runtime");
+    (root, runtime)
+}
+
+fn test_runtime_with_named_crews() -> (TempDir, OrbitRuntime) {
+    let root = TempDir::new().expect("tempdir");
+    let global_root = root.path().join("global");
+    let workspace_root = root.path().join("repo/.orbit");
+    std::fs::create_dir_all(&global_root).expect("create global root");
+    std::fs::create_dir_all(&workspace_root).expect("create workspace root");
+    std::fs::write(
+        workspace_root.join("config.toml"),
+        r#"
+[workflow]
+default_crew = "primary"
+
+[crews.primary]
+provider = "codex"
+backend = "cli"
+model = "default-model"
+
+[crews.terra]
+provider = "codex"
+backend = "cli"
+model = "terra-model"
+
+[crews.sol]
+provider = "codex"
+backend = "cli"
+model = "sol-model"
+"#,
+    )
+    .expect("write crew config");
     let runtime =
         OrbitRuntime::from_roots(&global_root, &workspace_root).expect("build test runtime");
     (root, runtime)
@@ -258,6 +293,179 @@ fn routine_style_detached_worker_is_claimed_within_ownership_window() {
     );
     let durable_output = wait_for_log_contains(&log_path, "routine worker startup");
     assert!(durable_output.contains("routine worker startup"));
+
+    let terminal = wait_for_worker_terminal(&runtime, &run.run_id);
+    assert_eq!(terminal.state, JobRunState::Interrupted);
+    let message = terminal
+        .steps
+        .last()
+        .and_then(|step| step.error_message.as_deref())
+        .expect("claimed exit diagnostic");
+    assert!(message.contains("after claiming"), "{message}");
+    assert_child_reaped(worker_pid);
+}
+
+#[cfg(unix)]
+#[test]
+fn worker_exit_after_mark_running_is_reaped_and_terminalizes_the_run() {
+    let (_root, runtime) = test_runtime();
+    let run = runtime
+        .stores()
+        .jobs()
+        .insert_job_run("task_auto_pipeline", 1, Utc::now(), None, None)
+        .expect("insert pending run");
+    let release_path = runtime.paths().logs_dir.join("release-claimed-worker");
+    let mut command = Command::new("sh");
+    command.env("ORBIT_TEST_WORKER_RELEASE", &release_path);
+    command.args([
+        "-c",
+        "while [ ! -f \"$ORBIT_TEST_WORKER_RELEASE\" ]; do sleep 0.01; done; \
+         printf 'post-claim validation exploded\\n' >&2; exit 29",
+    ]);
+    let log_path =
+        configure_pipeline_worker_stdio(&mut command, &runtime.paths().logs_dir, &run.run_id)
+            .expect("configure worker log");
+    let worker_pid = runtime
+        .spawn_pipeline_worker_process(&run.run_id, Some("test"), command, log_path)
+        .expect("spawn claimed worker fixture");
+    runtime
+        .stores()
+        .jobs()
+        .claim_pending_job_run_owner(&run.run_id, worker_pid)
+        .expect("claim run owner");
+    assert_eq!(
+        runtime
+            .stores()
+            .jobs()
+            .mark_job_run_running(&run.run_id, Utc::now(), worker_pid)
+            .expect("mark run running"),
+        JobRunStartOutcome::Started
+    );
+    assert_eq!(
+        runtime
+            .show_job_run(&run.run_id)
+            .expect("show running fixture")
+            .state,
+        JobRunState::Running
+    );
+    std::fs::write(&release_path, "release").expect("release claimed worker");
+
+    let terminal = wait_for_worker_terminal(&runtime, &run.run_id);
+    let message = terminal
+        .steps
+        .last()
+        .and_then(|step| step.error_message.as_deref())
+        .expect("post-claim diagnostic");
+    assert_eq!(terminal.state, JobRunState::Failed, "{message}");
+    assert!(terminal.finished_at.is_some());
+    assert!(message.contains("after claiming"), "{message}");
+    assert!(message.contains("exit status: 29"), "{message}");
+    assert!(
+        message.contains("post-claim validation exploded"),
+        "{message}"
+    );
+    assert_child_reaped(worker_pid);
+}
+
+#[test]
+fn mixed_crew_validation_after_start_terminalizes_without_admitting_tasks() {
+    let (_root, runtime) = test_runtime_with_named_crews();
+    let jobs_dir = runtime.paths().global_dir.join("resources/jobs");
+    std::fs::create_dir_all(&jobs_dir).expect("create jobs dir");
+    std::fs::write(
+        jobs_dir.join("task_auto_pipeline.yaml"),
+        r#"schemaVersion: 2
+kind: Job
+metadata:
+  name: task_auto_pipeline
+spec:
+  state: enabled
+  kind: workflow
+  max_active_runs: 10
+  steps:
+    - id: unreachable
+      spec:
+        type: deterministic
+        action: sleep
+        config: {}
+"#,
+    )
+    .expect("seed task_auto_pipeline definition");
+    let terra = runtime
+        .add_task(TaskAddParams {
+            title: "Terra task".to_string(),
+            description: "Mixed crew fixture".to_string(),
+            crew: Some("terra".to_string()),
+            status: Some(TaskStatus::Backlog),
+            ..Default::default()
+        })
+        .expect("add terra task");
+    let sol = runtime
+        .add_task(TaskAddParams {
+            title: "Sol task".to_string(),
+            description: "Mixed crew fixture".to_string(),
+            crew: Some("sol".to_string()),
+            status: Some(TaskStatus::Backlog),
+            ..Default::default()
+        })
+        .expect("add sol task");
+    let input = serde_json::json!({ "task_ids": [terra.id, sol.id] });
+    let run = runtime
+        .stores()
+        .jobs()
+        .insert_job_run(
+            "task_auto_pipeline",
+            1,
+            Utc::now(),
+            Some(input.clone()),
+            None,
+        )
+        .expect("insert mixed-crew run");
+    runtime
+        .seed_v2_pipeline_run(&run, &input, None)
+        .expect("seed pipeline state");
+
+    let error = runtime
+        .execute_pipeline_run_worker(&run.run_id)
+        .expect_err("direct mixed-crew input must fail closed");
+    let message = error.to_string();
+    assert!(message.contains("mixes crews"), "{message}");
+    assert!(message.contains("workflow.default_crew"), "{message}");
+
+    let terminal = runtime.show_job_run(&run.run_id).expect("show failed run");
+    assert_eq!(terminal.state, JobRunState::Failed);
+    assert!(terminal.finished_at.is_some());
+    assert!(terminal.resolved_crew.is_none());
+    let diagnostic = terminal.steps.last().expect("failure diagnostic");
+    assert!(
+        diagnostic
+            .error_message
+            .as_deref()
+            .is_some_and(|value| value.contains("mixes crews"))
+    );
+    for task_id in [&terra.id, &sol.id] {
+        assert_eq!(
+            runtime
+                .get_task(task_id)
+                .expect("task remains readable")
+                .status,
+            TaskStatus::Backlog,
+            "mixed-crew validation must happen before task admission"
+        );
+    }
+
+    let started = Instant::now();
+    let waited = runtime
+        .wait_pipeline_runs(std::slice::from_ref(&run.run_id), 10, 1, Some("test"))
+        .expect("terminal child is immediately observable");
+    assert!(started.elapsed() < Duration::from_secs(1));
+    assert_eq!(waited.results[0].status, "failed");
+    assert!(
+        waited.results[0]
+            .error
+            .as_deref()
+            .is_some_and(|value| value.contains("mixes crews"))
+    );
 }
 
 fn wait_for_worker_ownership_outcome(
@@ -266,7 +474,10 @@ fn wait_for_worker_ownership_outcome(
 ) -> orbit_types::workflow::JobRun {
     let deadline = Instant::now() + Duration::from_secs(2);
     loop {
-        let stored = runtime.show_job_run(run_id).expect("show worker run");
+        let stored = runtime
+            .get_job_run_backend(run_id)
+            .expect("read worker run")
+            .expect("worker run exists");
         if stored.pid.is_some() || stored.state != JobRunState::Pending {
             return stored;
         }
@@ -276,6 +487,38 @@ fn wait_for_worker_ownership_outcome(
         );
         thread::sleep(Duration::from_millis(10));
     }
+}
+
+fn wait_for_worker_terminal(runtime: &OrbitRuntime, run_id: &str) -> orbit_types::workflow::JobRun {
+    let deadline = Instant::now() + Duration::from_secs(2);
+    loop {
+        let stored = runtime
+            .get_job_run_backend(run_id)
+            .expect("read worker run")
+            .expect("worker run exists");
+        if stored.state.is_terminal() {
+            return stored;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "worker remained non-terminal beyond ownership window"
+        );
+        thread::sleep(Duration::from_millis(10));
+    }
+}
+
+#[cfg(unix)]
+fn assert_child_reaped(pid: u32) {
+    let mut status = 0;
+    // SAFETY: `waitpid` only inspects the explicitly spawned fixture PID and
+    // writes to the valid local status pointer.
+    let result = unsafe { libc::waitpid(pid as libc::pid_t, &mut status, libc::WNOHANG) };
+    assert_eq!(result, -1, "worker {pid} is still a waitable child");
+    assert_eq!(
+        std::io::Error::last_os_error().raw_os_error(),
+        Some(libc::ECHILD),
+        "worker {pid} must already have been reaped by the observer"
+    );
 }
 
 /// Retry a pipeline audit lookup instead of asserting on a single snapshot:
