@@ -104,6 +104,7 @@ impl WorkspaceInitArgs {
             let providers = crate::command::mcp::init_auto_for_workspace(
                 &init_result.root,
                 &init_result.orbit_dir,
+                &init_result.id,
             )?;
             if providers.is_empty() {
                 println!("  mcp:       no providers auto-detected");

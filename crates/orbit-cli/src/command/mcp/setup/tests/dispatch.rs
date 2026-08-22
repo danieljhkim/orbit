@@ -2,6 +2,7 @@ use tempfile::tempdir;
 
 use super::super::args::{McpAction, McpProvider, ProviderSelectionMode, ScopeArg};
 use super::super::dispatch::{auto_detected_providers, run_action, vscode_home_user_dir};
+use super::super::providers::ServerLaunch;
 
 #[test]
 fn auto_detects_expected_providers() {
@@ -61,7 +62,7 @@ fn home_scope_writes_to_home_paths_and_skips_repo_files() {
     std::fs::create_dir_all(&orbit_root).expect("create orbit root");
 
     run_action(
-        McpAction::Init { operator: false },
+        McpAction::Init(ServerLaunch::default()),
         repo.path(),
         &orbit_root,
         ProviderSelectionMode::Explicit(vec![
@@ -181,7 +182,7 @@ fn home_scope_remove_strips_only_orbit_entries() {
     std::fs::create_dir_all(&orbit_root).expect("create orbit root");
 
     run_action(
-        McpAction::Init { operator: false },
+        McpAction::Init(ServerLaunch::default()),
         repo.path(),
         &orbit_root,
         ProviderSelectionMode::Explicit(vec![
@@ -255,7 +256,7 @@ fn home_scope_without_home_dir_errors() {
     std::fs::create_dir_all(&orbit_root).expect("create orbit root");
 
     let err = run_action(
-        McpAction::Init { operator: false },
+        McpAction::Init(ServerLaunch::default()),
         repo.path(),
         &orbit_root,
         ProviderSelectionMode::Explicit(vec![McpProvider::Claude]),

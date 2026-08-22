@@ -18,13 +18,44 @@ pub(super) fn schema_to_tool(schema: ToolSchema, input_schema: JsonObject) -> To
 /// Canonical name of the authoritative server's workspace selector.
 pub(crate) const WORKSPACE_SELECTOR_PARAM: &str = "workspace";
 
-const WORKSPACE_SELECTOR_DESCRIPTION: &str = "Workspace selector for the authoritative server: a registered workspace name, a logical \
-     workspace ID (`ws_*`), or an absolute path registered on that server. Optional when the \
-     MCP session announced `_meta.orbit.workspace` at initialize; never inferred from the \
-     server process cwd.";
+/// Whether the session being served already carries a workspace selector.
+///
+/// The two states are advertised differently because they place different
+/// obligations on the caller: a bound session may omit the selector, an
+/// unbound one is refused without it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum WorkspaceBinding {
+    Bound,
+    Unbound,
+}
+
+const BOUND_SESSION_SELECTOR_DESCRIPTION: &str = "Workspace selector for the authoritative server: a registered workspace name, a logical \
+     workspace ID (`ws_*`), or an absolute path registered on that server. Optional in this \
+     session, which is already bound to a workspace — by `orbit mcp serve --workspace` at \
+     launch or `_meta.orbit.workspace` at initialize. Pass it to address a different \
+     registered workspace; never inferred from the server process cwd.";
+
+const UNBOUND_SESSION_SELECTOR_DESCRIPTION: &str = "Workspace selector for the authoritative server: a registered workspace name, a logical \
+     workspace ID (`ws_*`), or an absolute path registered on that server. Required in this \
+     session, which is bound to no workspace, so a call that omits it is refused. Sessions \
+     bound by `orbit mcp serve --workspace` at launch or `_meta.orbit.workspace` at \
+     initialize may omit it; never inferred from the server process cwd.";
+
+impl WorkspaceBinding {
+    fn selector_description(self) -> &'static str {
+        match self {
+            Self::Bound => BOUND_SESSION_SELECTOR_DESCRIPTION,
+            Self::Unbound => UNBOUND_SESSION_SELECTOR_DESCRIPTION,
+        }
+    }
+}
 
 /// Advertise the workspace selector on every workspace-scoped tool.
-pub(super) fn ensure_workspace_selector(schema: &mut JsonObject, definition: &McpToolDefinition) {
+pub(super) fn ensure_workspace_selector(
+    schema: &mut JsonObject,
+    definition: &McpToolDefinition,
+    binding: WorkspaceBinding,
+) {
     if definition.scope != McpToolScope::WorkspaceRequired {
         return;
     }
@@ -45,7 +76,7 @@ pub(super) fn ensure_workspace_selector(schema: &mut JsonObject, definition: &Mc
         WORKSPACE_SELECTOR_PARAM.to_string(),
         json!({
             "type": "string",
-            "description": WORKSPACE_SELECTOR_DESCRIPTION,
+            "description": binding.selector_description(),
         }),
     );
 }

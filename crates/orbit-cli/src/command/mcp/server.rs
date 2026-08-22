@@ -27,8 +27,10 @@ const TASK_SHOW_TOOL: &str = "orbit.task.show";
 pub(super) fn serve_mcp_stdio(
     remote_caller_machine_id: Option<String>,
     authority: McpSessionAuthority,
+    bound_workspace: Option<String>,
 ) -> Result<(), OrbitError> {
-    let (host, session_context) = compose_server(remote_caller_machine_id, authority)?;
+    let (host, session_context) =
+        compose_server(remote_caller_machine_id, authority, bound_workspace)?;
     block_on_server(orbit_mcp::serve_stdio_with_context(host, session_context))
 }
 
@@ -43,7 +45,10 @@ pub(super) fn serve_mcp_listener(
     // For the same reason the socket serves agent authority only: it
     // authenticates no client, so every accepted connection would otherwise
     // inherit whatever authority the listening process was started with.
-    let (host, session_context) = compose_server(None, McpSessionAuthority::Agent)?;
+    //
+    // For the same reason it binds no workspace: a socket is shared by
+    // whoever can reach it, so each session names its own workspace.
+    let (host, session_context) = compose_server(None, McpSessionAuthority::Agent, None)?;
     block_on_server(async move {
         let listener = McpListener::bind(addr, exposure, host, session_context).await?;
         tracing::info!(address = %listener.local_addr()?, "orbit mcp listener bound");
@@ -52,15 +57,29 @@ pub(super) fn serve_mcp_listener(
 }
 
 /// Build the one MCP host this process serves, together with the trusted
-/// session envelope derived from the accepting machine's identity and the
-/// authority this process was started with.
+/// session envelope derived from the accepting machine's identity, the
+/// authority this process was started with, and the workspace it was launched
+/// for.
+///
+/// `bound_workspace` is the launching configuration's answer to "which
+/// workspace is this server for" — the same selector a client could announce
+/// at initialize, supplied by whoever wrote the integration because most MCP
+/// clients cannot announce anything. It is still just a selector: it is
+/// resolved against this machine's registry on every call and overridden by an
+/// explicit per-call `workspace`.
 fn compose_server(
     remote_caller_machine_id: Option<String>,
     authority: McpSessionAuthority,
+    bound_workspace: Option<String>,
 ) -> Result<(Arc<dyn McpHost>, ToolSessionContext), OrbitError> {
     let global_root = resolve_global_root()?;
-    let identity =
+    let mut identity =
         orbit_mcp::mcp_server_identity(&global_root, remote_caller_machine_id, authority)?;
+    identity.session_context.workspace = bound_workspace
+        .as_deref()
+        .map(str::trim)
+        .filter(|selector| !selector.is_empty())
+        .map(ToOwned::to_owned);
     let host = Arc::new(ServerMcpHost::new(
         global_root,
         identity.process_machine_id,

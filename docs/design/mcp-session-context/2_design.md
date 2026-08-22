@@ -3,8 +3,8 @@ summary: "MCP Session Context — Design"
 type: design
 title: "MCP Session Context — Design"
 owner: codex
-last_updated: 2026-08-15
-last_validated: 2026-08-15
+last_updated: 2026-08-22
+last_validated: 2026-08-22
 status: Accepted
 feature: mcp-session-context
 doc_role: design
@@ -20,7 +20,7 @@ related_artifacts: []
 
 | Field | Source | Meaning |
 |---|---|---|
-| workspace | Tool input or initialize metadata | Untrusted address selector |
+| workspace | Tool input, initialize metadata, or the server's launch binding | Address selector, resolved per call against the accepting server's registry |
 | workspace_id | Authoritative server resolution | Stable logical workspace selected for execution |
 | caller_machine_id | Local identity or SSH proxy argument | Opaque audit correlation label |
 | caller_host_id | Local accepting server | Local display label; unset for a remote caller |
@@ -30,6 +30,8 @@ related_artifacts: []
 | trace_id | MCP adapter | Fresh correlation ID for one tools/call |
 
 Clients cannot populate trusted fields through initialize metadata or tool JSON. Initialize accepts only the workspace selector under _meta.orbit.workspace, plus the compatibility spelling _meta["orbit.workspace"].
+
+A session may also be bound at launch: `orbit mcp serve --workspace <selector>` seeds the trusted envelope's workspace before any client connects. That binding is decided by whoever wrote the launch configuration, not by the connecting client, but it is still only a selector — it is resolved against the registry on every call and overridden by an explicit per-call workspace.
 
 ## 2. Local and SSH sessions
 
@@ -49,7 +51,10 @@ For a workspace-scoped tool, the authoritative server chooses the first non-empt
 
 1. workspace in the tool input;
 2. workspace announced during initialize;
-3. otherwise, a missing-workspace error.
+3. the workspace this server was launched for (`orbit mcp serve --workspace`);
+4. otherwise, a missing-workspace error.
+
+Steps 2 and 3 are one session field, resolved once at initialize: an announced workspace replaces the launch binding for that session, and a client that announces nothing falls back to the binding rather than clearing it. The fallback is the immutable launch value, so a re-initialize never inherits the previous client's claim. Most MCP clients cannot put _meta on their initialize at all, which is why a managed integration — what `orbit mcp init` and `orbit workspace init --mcp` generate — writes the binding into the argv it registers, using the logical `ws_*` ID so a linked worktree whose checkout identity diverged still names one workspace. A server the operator launched with no binding stays unbound, and every workspace-scoped call there must name its own workspace.
 
 Process cwd is not an MCP fallback. The server resolves the selector against its registry, opens the selected local runtime, writes the resolved workspace_id into context, and normalizes an explicit workspace argument to the selected checkout path before Core dispatch.
 
@@ -62,6 +67,8 @@ orbit.task.show is the one exception to the precedence above. Task IDs are a mac
 OrbitToolServer holds one context for its stdio session. Initialize may replace only the workspace selector. For every tools/call, the adapter clones the session context and mints one fresh trace_id without writing it back.
 
 tools/list comes from the authoritative host on every request. Each definition carries a ToolSchema and one McpToolScope: Global or WorkspaceRequired. Scope controls only workspace-selector injection and server dispatch; it is not authorization metadata.
+
+Because tools/list is answered per session, the injected selector documents the session the caller is actually in: optional in a bound session, required in an unbound one. Both spellings describe the same server rule; only the obligation on the caller differs.
 
 ## 5. Core dispatch and audit
 

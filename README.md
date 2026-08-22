@@ -252,10 +252,11 @@ Cursor loads the same `plugin/skills/orbit` tree and `npx -y @orbit-tools/cli@la
 </details>
 
 > **Cowork users:** Orbit advertises its canonical MCP surface independently of the
-> server's launch directory. Workspace routing comes from MCP initialize/session
-> context or an explicit registered `workspace` on the tool call. Do not add the
-> global `--root` flag to `orbit mcp serve`; the server rejects launch-root routing
-> so a scratchpad cwd cannot silently select the wrong workspace.
+> server's launch directory. Workspace routing comes from the server's
+> `--workspace` binding, MCP initialize/session context, or an explicit registered
+> `workspace` on the tool call — never from cwd. Do not add the global `--root`
+> flag to `orbit mcp serve`; the server rejects launch-root routing so a
+> scratchpad cwd cannot silently select the wrong workspace.
 
 ---
 
@@ -276,7 +277,9 @@ First-time onboarding (`.orbit/` absent) and "what is orbit" tour requests are h
 
 ## Orbit MCP Surface
 
-`orbit workspace init --mcp` registers the Orbit MCP server with the local agent CLI (Claude Code, Codex, Gemini), same as the plugin. The registered server launches as `orbit mcp serve --operator`: it holds **operator authority**, so governed operations — dispatching a workflow (`orbit.workflow.ship`), observing/resuming a run, and `orbit.command.exec` — are authorized through it. Bare `orbit mcp serve` (and every worker/agent-launched MCP session) stays agent-only and is refused those governed tools; `orbit mcp init` also stays agent-only unless you pass `--operator` at the `orbit mcp serve` layer yourself.
+`orbit workspace init --mcp` registers the Orbit MCP server with the local agent CLI (Claude Code, Codex, Gemini), same as the plugin. The registered server launches as `orbit mcp serve --operator --workspace <ws_id>`: it holds **operator authority**, so governed operations — dispatching a workflow (`orbit.workflow.ship`), observing/resuming a run, and `orbit.command.exec` — are authorized through it. Bare `orbit mcp serve` (and every worker/agent-launched MCP session) stays agent-only and is refused those governed tools; `orbit mcp init` also stays agent-only unless you pass `--operator` at the `orbit mcp serve` layer yourself.
+
+`--workspace` is the workspace binding: most MCP clients cannot announce one at initialize, so the generated integration names the workspace it was registered for and workspace-scoped tools route without repeating a selector on every call. An explicit `workspace` on a tool call still overrides it, and a server launched without a binding still refuses a workspace-scoped call that names no workspace.
 
 `tools/list` is the authoritative MCP reference. Orbit composes that surface from
 the explicitly MCP-registered builtins in `orbit-tools` plus the two discovery
