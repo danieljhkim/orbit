@@ -201,9 +201,11 @@ pub struct ToolContext {
     /// `proc_spawn_activity_scoped` is `false`, an empty list preserves the
     /// legacy unrestricted behaviour for direct CLI / v1 callers.
     pub proc_allowed_programs: Vec<String>,
-    /// True when `proc.spawn` runs inside an activity-scoped context that
-    /// explicitly opted in to the allowlist. When set, an empty
-    /// `proc_allowed_programs` denies every program (fail-closed).
+    /// True when `proc.spawn` runs inside an activity-scoped context. Every v2
+    /// activity context sets it, so an empty `proc_allowed_programs` denies
+    /// every program (fail-closed) rather than degrading to allow-all when an
+    /// asset omits the key ([ORB-10959]). Only direct CLI / v1 callers leave it
+    /// `false`.
     pub proc_spawn_activity_scoped: bool,
     /// Filesystem policy engine used by Orbit-managed agent runtimes.
     pub policy_engine: Option<Arc<PolicyEngine>>,

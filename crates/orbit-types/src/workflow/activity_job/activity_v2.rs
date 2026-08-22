@@ -112,9 +112,13 @@ pub struct AgentLoopSpec {
     #[serde(default = "default_require_completion_envelope")]
     pub require_completion_envelope: bool,
     /// Program allowlist enforced before `proc.spawn` executes a request.
-    /// `None` means `proc.spawn` is not constrained at the activity layer
-    /// (legacy / human-driven paths); an empty `Some(vec![])` denies all
-    /// programs (fail-closed).
+    /// An empty `Some(vec![])` denies every program (fail-closed).
+    ///
+    /// `None` is only legal for an activity that does not grant `proc.spawn`:
+    /// asset load rejects the pairing of a `proc.spawn` grant with a missing
+    /// allowlist, so an author opts into deny-all by writing `[]` rather than
+    /// getting allow-all by forgetting the key. The v2 activity tool context
+    /// treats `None` as deny-all too. [ORB-10959]
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub proc_allowed_programs: Option<Vec<String>>,
 }

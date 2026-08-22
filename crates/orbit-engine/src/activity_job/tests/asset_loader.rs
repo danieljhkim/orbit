@@ -85,3 +85,32 @@ spec:
         "{message}"
     );
 }
+
+/// [ORB-10959] An asset that grants `proc.spawn` while omitting
+/// `proc_allowed_programs` is refused at load. Before this, the omitted key
+/// meant "unconstrained" while an explicit `[]` denied everything — the
+/// safer-looking asset was the more permissive one.
+#[test]
+fn load_activity_asset_rejects_proc_spawn_without_program_allowlist() {
+    let yaml = agent_loop_activity_yaml("unbounded_spawn", "    - proc.spawn\n");
+
+    let err = load_activity_asset(&yaml).expect_err("missing program allowlist should fail");
+    let message = err.to_string();
+
+    assert!(message.contains("proc.spawn"), "{message}");
+    assert!(message.contains("proc_allowed_programs"), "{message}");
+}
+
+/// Writing `proc_allowed_programs: []` is the supported way to grant the tool
+/// and deny every program, so it must still load.
+#[test]
+fn load_activity_asset_accepts_explicit_empty_program_allowlist() {
+    let yaml = format!(
+        "{}\n  proc_allowed_programs: []\n",
+        agent_loop_activity_yaml("deny_all_spawn", "    - proc.spawn\n")
+    );
+
+    let asset = load_activity_asset(&yaml).expect("explicit deny-all should load");
+
+    assert_eq!(asset.name, "deny_all_spawn");
+}
