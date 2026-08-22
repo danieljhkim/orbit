@@ -67,9 +67,9 @@ scheduler's cursor untouched — so it is the safe way to test a definition's
 wording before enabling it. Over MCP: `orbit_auto_task_list` and
 `orbit_auto_task_mint`.
 
-## The two seeded definitions
+## The three seeded definitions
 
-`orbit workspace init` seeds both, disabled:
+`orbit workspace init` seeds all three, disabled:
 
 - **`qa-sweep`** — hourly. Identifies recent changes, exercises them hands-on
   through their real user-facing paths rather than just re-running the test
@@ -77,6 +77,10 @@ wording before enabling it. Over MCP: `orbit_auto_task_list` and
 - **`friction-curation`** — daily. Deduplicates the open friction corpus against
   task history, verifies each survivor still reproduces, resolves the ones that
   don't, and files fix tasks for the ones that do. → [friction.md](../friction.md)
+- **`security-review`** — weekly. Reviews applicable application code,
+  dependencies, secret handling, and configuration with evidence; files a
+  durable Orbit task for each non-duplicate finding with severity and impact; a
+  clean review is a successful no-op.
 
 Read them before enabling. They are also the best worked examples of how much
 instruction a minted task's body should carry.
