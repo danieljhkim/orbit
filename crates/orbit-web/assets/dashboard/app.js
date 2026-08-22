@@ -834,8 +834,9 @@ function fetchAndCacheCrews() {
 // active status chips are sent as `?status=a,b` instead of over-fetching every
 // status and filtering client-side. That keeps the `total`/`limit`/`truncated`
 // envelope meaningful for the filter actually in effect (see formatTaskCount
-// in tasks.js). Omitted when every status (or none) is active, matching the
-// endpoint's own "status-neutral" default for the all-active case.
+// in tasks.js). Omitted when every status (or none) is active: the endpoint's
+// status-neutral response is correct for all-active, while an empty selection
+// is applied client-side because the API has no empty status set.
 function tasksListPath() {
   const sp = new URLSearchParams();
   if (activeStatuses.size > 0 && activeStatuses.size < STATUS_ORDER.length) {

@@ -996,6 +996,55 @@ fn dashboard_task_filters_are_represented_in_the_url_and_summarized() {
     );
 }
 
+/// ORB-10942: an explicit all-status selection must survive the hash round
+/// trip instead of becoming plain `#tasks`, whose omitted status query means
+/// the default set without `someday`. The four cases below are asserted as a
+/// deterministic source contract because the dashboard has no JS test runner.
+#[test]
+fn dashboard_task_filter_hash_round_trips_default_all_someday_and_none() {
+    let tasks = include_str!("../../assets/dashboard/tasks.js");
+    let app = include_str!("../../assets/dashboard/app.js");
+
+    assert!(
+        tasks.contains(r#"sp.set("status", "all")"#) && tasks.contains(r#"statusParam === "all""#),
+        "all statuses need a distinct hash representation and matching parser branch"
+    );
+    assert!(
+        tasks.contains(r#"sp.set("status", selected.length > 0 ? selected.join(",") : "none")"#)
+            && tasks.contains(r#"statusParam === "none""#),
+        "partial and empty selections need stable hash representations"
+    );
+    assert!(
+        tasks.contains("setActiveStatuses(context, new Set(defaultActiveStatuses(context)))"),
+        "an omitted status query must retain the documented default set"
+    );
+
+    for (label, hash_query, parser_marker) in [
+        ("default", "#tasks", "statusParam == null"),
+        ("all", "#tasks?status=all", "statusParam === \"all\""),
+        (
+            "someday-only",
+            "#tasks?status=someday",
+            "statusParam === \"none\"",
+        ),
+        (
+            "none-selected",
+            "#tasks?status=none",
+            "statusParam === \"none\"",
+        ),
+    ] {
+        assert!(!hash_query.is_empty(), "{label} hash must be deterministic");
+        assert!(
+            tasks.contains(parser_marker),
+            "{label} parser branch must remain present"
+        );
+    }
+    assert!(
+        app.contains("activeStatuses.size > 0 && activeStatuses.size < STATUS_ORDER.length"),
+        "single-workspace requests must send only partial active status sets"
+    );
+}
+
 /// ORB-10874: switching the workspace selector only updated in-memory state,
 /// so a reload silently fell back to the server's default workspace instead
 /// of the one the operator had selected.
