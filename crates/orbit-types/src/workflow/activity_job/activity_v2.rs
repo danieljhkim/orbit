@@ -178,6 +178,7 @@ pub enum Provider {
     Codex,
     Gemini,
     Grok,
+    Copilot,
     Ollama,
     #[serde(rename = "openai_compat", alias = "openai-compat")]
     OpenaiCompat,
@@ -221,11 +222,12 @@ impl std::error::Error for ProviderParseError {}
 impl Provider {
     /// Every canonical provider, in declaration order. Adding a variant here is
     /// a compile-time forcing function for the match arms below.
-    pub const ALL: [Provider; 6] = [
+    pub const ALL: [Provider; 7] = [
         Provider::Claude,
         Provider::Codex,
         Provider::Gemini,
         Provider::Grok,
+        Provider::Copilot,
         Provider::Ollama,
         Provider::OpenaiCompat,
     ];
@@ -238,6 +240,12 @@ impl Provider {
     /// canonical `openai_compat` id (it is also a serde alias on the enum).
     /// This table is **closed** — an unlisted string is `provider.unknown`,
     /// never guessed. New aliases require a contract bump.
+    ///
+    /// [ORB-10946] `copilot` deliberately has **no** alias row. `github` is not
+    /// an accepted spelling for it, and the vendor that supplies a Copilot
+    /// session's underlying model (OpenAI, Anthropic, Google, …) must never
+    /// resolve to `copilot` — nor `copilot` to them. Copilot is its own
+    /// execution lane, and its identity is independent of the model it runs.
     pub const ALIASES: &'static [ProviderAlias] = &[
         ProviderAlias {
             alias: "anthropic",
@@ -272,7 +280,8 @@ impl Provider {
     ];
 
     /// Human-readable canonical id list used in diagnostics.
-    pub const CANONICAL_LIST: &'static str = "claude, codex, gemini, grok, ollama, openai_compat";
+    pub const CANONICAL_LIST: &'static str =
+        "claude, codex, gemini, grok, copilot, ollama, openai_compat";
 
     pub fn as_str(self) -> &'static str {
         match self {
@@ -280,6 +289,7 @@ impl Provider {
             Provider::Codex => "codex",
             Provider::Gemini => "gemini",
             Provider::Grok => "grok",
+            Provider::Copilot => "copilot",
             Provider::Ollama => "ollama",
             Provider::OpenaiCompat => "openai_compat",
         }
@@ -341,10 +351,15 @@ impl Provider {
     }
 
     /// Whether the model-neutral Worker leaf executor can execute this
-    /// provider. Worker only wires the CLI agent families; `ollama` and
-    /// `openai_compat` are Orbit-canonical capabilities Worker does not run.
+    /// provider. Worker only wires the CLI agent families; `copilot`, `ollama`
+    /// and `openai_compat` are Orbit-canonical capabilities Worker does not run.
     /// Preserving this distinction is an explicit ORB-10091 constraint — Orbit
     /// keeps the wider set even though Worker cannot execute all of it.
+    ///
+    /// [ORB-10946] `copilot` returning `false` here is the stable
+    /// unavailable diagnostic, not a fallback: a Worker-routed step naming
+    /// `copilot` is refused by identity rather than silently re-pointed at
+    /// another family.
     pub fn is_worker_executable(self) -> bool {
         matches!(
             self,

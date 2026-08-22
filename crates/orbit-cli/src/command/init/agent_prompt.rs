@@ -115,10 +115,11 @@ pub(crate) fn collect_system_crew_setting(
 
 /// Cheap-tier system options in the same preference order as
 /// `orbit-config::default_system_crew`: Codex Luna, Claude Sonnet, Grok,
-/// Gemini Flash.
+/// Gemini Flash, Copilot Haiku.
 fn system_crew_options(detected: &DetectedAgents) -> Vec<CrewSeed> {
     use orbit_common::model_defaults::{
-        CLAUDE_DEFAULT_WEAK, CODEX_LUNA_MODEL, GEMINI_CREW_MODEL, GROK_DEFAULT_MODEL,
+        CLAUDE_DEFAULT_WEAK, CODEX_LUNA_MODEL, COPILOT_CREW_MODEL, GEMINI_CREW_MODEL,
+        GROK_DEFAULT_MODEL,
     };
     let mut options = Vec::new();
     for (enabled, provider, model) in [
@@ -126,6 +127,7 @@ fn system_crew_options(detected: &DetectedAgents) -> Vec<CrewSeed> {
         (detected.claude_cli, "claude", CLAUDE_DEFAULT_WEAK),
         (detected.grok_cli, "grok", GROK_DEFAULT_MODEL),
         (detected.gemini_cli, "gemini", GEMINI_CREW_MODEL),
+        (detected.copilot_cli, "copilot", COPILOT_CREW_MODEL),
     ] {
         if enabled {
             options.push(CrewSeed {
@@ -159,6 +161,7 @@ fn system_crew_label(option: &CrewSeed) -> &'static str {
         Some("claude") => "Claude",
         Some("grok") => "Grok",
         Some("gemini") => "Gemini",
+        Some("copilot") => "Copilot",
         _ => "Agent",
     }
 }
@@ -234,6 +237,7 @@ fn agent_options(detected: &DetectedAgents) -> Vec<AgentOption> {
         (detected.codex_cli, "Codex CLI", "codex"),
         (detected.gemini_cli, "Gemini CLI", "gemini"),
         (detected.grok_cli, "Grok CLI", "grok"),
+        (detected.copilot_cli, "Copilot CLI", "copilot"),
         (detected.ollama_cli, "Ollama CLI", "ollama"),
     ] {
         if enabled {
@@ -311,6 +315,7 @@ fn agent_display_name(config: &CrewSeed) -> String {
         "codex" => "Codex CLI".to_string(),
         "gemini" => "Gemini CLI".to_string(),
         "grok" => "Grok CLI".to_string(),
+        "copilot" => "Copilot CLI".to_string(),
         "ollama" => "Ollama CLI".to_string(),
         provider => format!("{provider} (CLI)"),
     }

@@ -62,6 +62,7 @@ mod types;
 
 pub use agent::{Agent, AgentConfig, ProviderOptions};
 pub use orbit_types::telemetry::{InvocationTrace, TokenUsage, ToolCallTrace};
+pub use providers::normalize_cli_stdout;
 pub use runtime::AgentRuntime;
 pub use types::{AgentInvocationSpec, AgentOperation, AgentRequest, AgentResponseStatus};
 pub use types::{

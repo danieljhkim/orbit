@@ -66,7 +66,7 @@ A **crew** is one provider-model assignment. Activities do not carry a model-sel
 | Field | Purpose | Values |
 |---|---|---|
 | `model` | Model identifier passed to the provider CLI | Provider-specific (e.g. `opus`, `sonnet`, `gpt-5.6-sol`, `gemini-3.7-flash`, `grok-4.6`) |
-| `provider` | Agent family | `claude`, `codex`, `gemini`, `grok` (the CLI-executable families; see [Provider identity and resolution](#provider-identity-and-resolution) for the full canonical set) |
+| `provider` | Agent family | `claude`, `codex`, `gemini`, `grok`, `copilot` (the CLI-executable families; see [Provider identity and resolution](#provider-identity-and-resolution) for the full canonical set) |
 | `description` | Optional human-facing crew summary | Any non-empty string after trimming |
 | `tags` | Optional discovery labels | Array of strings; normalized, sorted, and deduplicated |
 
@@ -90,7 +90,7 @@ provider = "grok"
 
 The current Grok Build CLI lists `grok-4.6` as its default from `grok models`, so Orbit uses that live menu id. The older `grok-build` string is not retained as a default or alias.
 
-Fresh `orbit init` configuration advertises only detected provider CLIs. Claude seeds `opus`, `sonnet`, and `fable`; Codex seeds `sol`, `terra`, and `luna`; Gemini seeds `gemini`; and Grok seeds `grok`. Interactive init still asks for the default crew (`[crews.custom]`) and, separately, for the cheap-tier system crew written as `[crews.system]`; it does not ask for QA. `--non-interactive` auto-seeds `[crews.system]` from the preference order above whenever a supported family is detected. When Codex or Claude is available, the legacy `qa` crew is still silently auto-seeded on Terra or Sonnet respectively as a compatibility lane. If no supported provider CLI is detected, init leaves both the crew registry and `workflow.default_crew` unset instead of writing an unusable provider.
+Fresh `orbit init` configuration advertises only detected provider CLIs. Claude seeds `opus`, `sonnet`, and `fable`; Codex seeds `sol`, `terra`, and `luna`; Gemini seeds `gemini`; Grok seeds `grok`; and Copilot seeds `copilot`. Copilot is last in every preference order, so installing the `copilot` CLI never changes the default crew, default provider, or system crew on a host that already has one of the other four families. Interactive init still asks for the default crew (`[crews.custom]`) and, separately, for the cheap-tier system crew written as `[crews.system]`; it does not ask for QA. `--non-interactive` auto-seeds `[crews.system]` from the preference order above whenever a supported family is detected. When Codex or Claude is available, the legacy `qa` crew is still silently auto-seeded on Terra or Sonnet respectively as a compatibility lane. If no supported provider CLI is detected, init leaves both the crew registry and `workflow.default_crew` unset instead of writing an unusable provider.
 
 You can define any number of crews. Set the workspace-wide fallback with `workflow.default_crew`; assign a specific crew to individual tasks via the [per-task crew override](#per-task-crew-override). Crews are validated at load time: each crew must have non-empty `model` and `provider`; `workflow.default_crew` must name a defined crew.
 
@@ -131,6 +131,7 @@ Every `provider` string Orbit reads — in `[crews.<name>]`, in an activity's in
 | `codex` | — | yes | no | yes |
 | `gemini` | — | yes | no | yes |
 | `grok` | — | yes | no | yes |
+| `copilot` | — | yes | no | **no** |
 | `ollama` | — | **unsupported at the Orbit CLI entry point** | no | **no** |
 | `openai_compat` | `openai-compat` | **no** (HTTP-only) | no | **no** |
 
@@ -144,7 +145,12 @@ Every `provider` string Orbit reads — in `[crews.<name>]`, in an activity's in
   | `google` | `gemini` |
   | `xai` | `grok` |
 
-- **Canonical ≠ Worker-executable.** Orbit's canonical set is deliberately wider than what the model-neutral Worker leaf executor can run: `ollama` and `openai_compat` are first-class Orbit providers but Worker does not execute them. This distinction is preserved on purpose — do not narrow the canonical set to Worker's subset.
+  `copilot` has **no** alias. `github` is not an accepted spelling for it, and
+  the vendor that supplies a Copilot session's underlying model never resolves
+  to `copilot` (nor `copilot` to that vendor) — see
+  [GitHub Copilot CLI](#github-copilot-cli).
+
+- **Canonical ≠ Worker-executable.** Orbit's canonical set is deliberately wider than what the model-neutral Worker leaf executor can run: `copilot`, `ollama`, and `openai_compat` are first-class Orbit providers but Worker does not execute them. This distinction is preserved on purpose — do not narrow the canonical set to Worker's subset. For `copilot` this is a *stable diagnostic*, not a fallback: a Worker-routed step naming `copilot` is refused by identity rather than silently re-pointed at another family.
 - **Known ≠ executable at this entry point.** The shared contract recognizes `ollama`, but the Orbit CLI capability set is the canonical cross-repo four; explicitly selecting `ollama` fails as `provider.unsupported` rather than falling back.
 - **`openai_compat` has no CLI runtime.** Every crew dispatches through the CLI agent path, so selecting it fails structurally (see below) rather than falling back.
 
@@ -176,9 +182,128 @@ Explicit selections that are unsupported or unavailable **fail with a stable dia
 
 - `provider openai_compat is unsupported by the Orbit CLI entry point (HTTP-only)` — a CLI-executable dispatch selected an HTTP-only provider.
 - `provider ollama is unsupported by the Orbit CLI entry point` — a known provider is outside this entry point's capability set.
-- `unknown provider '<x>'; expected one of claude, codex, gemini, grok, ollama, openai_compat — no CLI runtime registered` — the provider string did not resolve to a canonical id.
+- `unknown provider '<x>'; expected one of claude, codex, gemini, grok, copilot, ollama, openai_compat — no CLI runtime registered` — the provider string did not resolve to a canonical id.
 
 An **unrecognized `[crews.<name>].provider` value** is the one non-fatal case: it is logged (`orbit.config.crew` warn) and that field falls back to the activity's inline `provider`, because a config typo should not coerce dispatch onto a wrong runtime — the inline value is the known-good identity, not a default guess.
+
+---
+
+## GitHub Copilot CLI
+
+Orbit dispatches Copilot through the **standalone `copilot` CLI** (npm package
+`@github/copilot`), which provides a non-interactive programmatic mode.
+
+> **The retired `gh-copilot` extension is not supported.** `gh copilot` was a
+> shell-command *suggester*, not an agent: it could not edit files or run a
+> turn to completion, so it cannot satisfy Orbit's completion-envelope
+> contract. Orbit never probes for it, never dispatches to it, and installing
+> it does not make the `copilot` provider available.
+
+### Installation
+
+```sh
+npm install -g @github/copilot
+copilot --version
+```
+
+`orbit init` detects the `copilot` binary on `PATH` and offers the `copilot`
+crew. Detection is by binary presence only — see
+[Authentication](#authentication) for what a *working* run additionally needs.
+
+### Organization-policy prerequisites
+
+Copilot is organization-governed, and its policy checks happen server-side
+after the CLI starts. Two failures are common and are **not** Orbit
+misconfiguration:
+
+- **No Copilot entitlement.** The CLI exits non-zero with
+  `Error: Authentication failed` and advises checking the token's
+  `Copilot Requests` permission. Orbit reports the step as failed; it never
+  falls back to another provider.
+- **Third-party MCP servers disabled by policy.** The CLI emits a
+  `session.warning` frame with `warningType: "policy"` and continues with
+  built-in servers only.
+
+Both require a change by the GitHub organization administrator, not by Orbit.
+
+### Authentication
+
+Copilot resolves credentials in this documented order:
+
+1. `COPILOT_GITHUB_TOKEN`
+2. `GH_TOKEN`
+3. `GITHUB_TOKEN`
+4. Otherwise, the credentials stored by `copilot` itself via its `/login`
+   command, under `COPILOT_HOME` (default `$HOME/.copilot`).
+
+**Orbit does not forward those token variables on the provider's behalf.**
+Agent subprocesses get an allowlist-composed environment, and credentials are
+admitted only when an operator names them, so an unrelated `GITHUB_TOKEN` left
+in the environment cannot be silently borrowed by a Copilot run. To use
+token-based authentication, add the variable explicitly:
+
+```toml
+[execution.env]
+pass = ["COPILOT_GITHUB_TOKEN"]
+```
+
+Token *values* are never logged, recorded in audit argv, or included in error
+messages. The recommended setup is `copilot` `/login` once on the host, which
+needs no token in the environment at all.
+
+`COPILOT_HOME` is forwarded to the provider subprocess and is also what the
+sandbox grants, so the directory the CLI writes to and the directory Orbit
+allows cannot drift apart.
+
+### Model selection
+
+Orbit always passes `--model` explicitly, from the crew assignment. Without it
+the CLI would fall back to `COPILOT_MODEL` or its own persisted `/model`
+choice, which would make a run's model depend on ambient operator state rather
+than on configuration.
+
+```toml
+[crews.copilot]
+model = "claude-sonnet-4.5"
+provider = "copilot"
+```
+
+Copilot routes to several vendors' models (`claude-*`, `gpt-*`, `gemini-*`).
+**The provider identity stays `copilot` regardless.** A crew running
+`gpt-5.4` through Copilot is a `copilot` run, not a `codex` run: the execution
+lane, its authentication, its policy, and its sandbox grants are Copilot's.
+Run `copilot --model <id>` or the interactive `/model` command to see the ids
+your organization currently allows.
+
+### Sandbox and permissions
+
+Orbit's activity sandbox remains the security boundary. The shipped executor
+passes `--allow-all-tools` so the agent does not block waiting for approval,
+together with `--no-ask-user`. It deliberately does **not** pass `--allow-all`
+or `--yolo`: those also imply `--allow-all-paths` and `--allow-all-urls`, which
+would widen the agent's reach past what the enclosing Orbit sandbox granted.
+
+When a Copilot executor is the active provider, the sandbox additionally grants
+write access to `COPILOT_HOME` (default `$HOME/.copilot`) and to the launcher's
+package-extraction cache (`$XDG_CACHE_HOME/copilot`, default
+`$HOME/.cache/copilot`). Those grants are **gated on Copilot being the provider
+actually running** — other providers do not inherit them.
+
+Copilot is not granted read access to the GitHub CLI's credential store
+(`~/.config/gh`) or to the macOS login keychain; it authenticates from its own
+`COPILOT_HOME` or from an operator-passed token.
+
+### Prompt transport
+
+The Orbit execution envelope is written to the agent's **standard input**, not
+passed as `-p <text>`. Both are supported by the CLI, but argv is visible in
+process listings and is recorded in Orbit's audit argv, so the prompt — which
+carries task context and instructions — must not travel there.
+
+Copilot's stdout is JSONL agent events (`--output-format json`). Orbit reads
+completion evidence only from model-authored frames; a run that emits no
+assistant message has not completed its contract, and Orbit fails the step
+rather than inferring success from the session control plane.
 
 ---
 

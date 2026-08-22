@@ -654,3 +654,69 @@ fn resolve_executor_sandbox_rejects_bare_worktrees_root_cwd() {
         "bare worktrees-root cwd must not re-allow the registry: {modify:?}"
     );
 }
+
+// [ORB-10946] The Linux half of the Copilot state-root gate. Every entry this
+// returns is created by `ensure_owned_directory`, so an ungated entry would
+// mkdir a `~/.copilot` on hosts that never installed the CLI.
+#[cfg(target_os = "linux")]
+mod copilot_state_roots {
+    use std::path::{Path, PathBuf};
+
+    use crate::adapter::engine_host::v2_host::sandbox::linux_copilot_state_roots_with;
+
+    #[test]
+    fn active_copilot_gets_its_state_and_extraction_cache_roots() {
+        let roots =
+            linux_copilot_state_roots_with("copilot", Some(Path::new("/home/test")), None, None);
+
+        assert_eq!(
+            roots,
+            vec![
+                PathBuf::from("/home/test/.copilot"),
+                PathBuf::from("/home/test/.cache/copilot"),
+            ]
+        );
+    }
+
+    #[test]
+    fn overrides_are_honored() {
+        let roots = linux_copilot_state_roots_with(
+            "copilot",
+            Some(Path::new("/home/test")),
+            Some(Path::new("/srv/copilot-home")),
+            Some(Path::new("/srv/cache")),
+        );
+
+        assert_eq!(
+            roots,
+            vec![
+                PathBuf::from("/srv/copilot-home"),
+                PathBuf::from("/srv/cache/copilot"),
+            ]
+        );
+    }
+
+    #[test]
+    fn other_providers_get_nothing() {
+        for provider in ["claude", "codex", "gemini", "grok", "ollama", "local-shell"] {
+            assert!(
+                linux_copilot_state_roots_with(provider, Some(Path::new("/home/test")), None, None)
+                    .is_empty(),
+                "{provider} must not inherit copilot roots",
+            );
+        }
+    }
+
+    #[test]
+    fn unknown_provider_is_not_treated_as_copilot() {
+        assert!(
+            linux_copilot_state_roots_with(
+                "not-a-provider",
+                Some(Path::new("/home/test")),
+                None,
+                None
+            )
+            .is_empty()
+        );
+    }
+}
