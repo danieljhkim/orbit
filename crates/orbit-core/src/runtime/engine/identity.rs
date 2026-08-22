@@ -48,22 +48,29 @@ impl OrbitRuntime {
             .filter(|value| !value.is_empty())
             .map(ToOwned::to_owned);
 
-        if let (Some(requested_model), Some(provider_model)) =
-            (requested_model.as_deref(), provider_model.as_deref())
-            && requested_model != provider_model
-        {
-            tracing::warn!(
-                target: "orbit.core.invocation",
-                job_run_id,
-                activity_id,
-                agent_cli,
-                requested_model,
-                provider_model,
-                "provider-reported model differs from requested model",
-            );
-        }
+        let stored_model = match (requested_model.as_deref(), provider_model.as_deref()) {
+            (Some(requested), Some(provider))
+                if grok_build_ledger_aliases_requested(requested, provider) =>
+            {
+                Some(requested.to_string())
+            }
+            (Some(requested), Some(provider)) if requested != provider => {
+                tracing::warn!(
+                    target: "orbit.core.invocation",
+                    job_run_id,
+                    activity_id,
+                    agent_cli,
+                    requested_model = requested,
+                    provider_model = provider,
+                    "provider-reported model differs from requested model",
+                );
+                Some(provider.to_string())
+            }
+            (_, Some(provider)) => Some(provider.to_string()),
+            (_, None) => requested_model,
+        };
 
-        (agent, provider_model.or(requested_model))
+        (agent, stored_model)
     }
 
     pub(crate) fn try_canonical_agent_model_identity(
@@ -93,4 +100,14 @@ impl OrbitRuntime {
             .map(ToOwned::to_owned);
         (agent, model)
     }
+}
+
+/// Grok Build's usage ledger names requested public menu id `grok-X.Y` as
+/// `grok-X.Y-build`. That suffix is a billing label, not a different public
+/// model, so ingest stores the requested id used by the shipped price table.
+fn grok_build_ledger_aliases_requested(requested: &str, provider: &str) -> bool {
+    requested.starts_with("grok-")
+        && provider
+            .strip_suffix("-build")
+            .is_some_and(|public_id| public_id == requested)
 }

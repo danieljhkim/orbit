@@ -1103,8 +1103,7 @@ fn dashboard_log_dock_has_two_modes_and_an_always_on_status_bar() {
     // The always-on ambient line, present on every tab — including the ones
     // where the dock is not mounted.
     assert!(
-        index.contains(r#"id="log-statusbar""#)
-            && index.contains(r#"id="log-statusbar-message""#),
+        index.contains(r#"id="log-statusbar""#) && index.contains(r#"id="log-statusbar-message""#),
         "the bottom status bar must exist in the markup"
     );
     assert!(
@@ -1164,7 +1163,10 @@ fn dashboard_nav_rail_preserves_the_router_selector_contract() {
         "tile-failed-value",
         "tile-active-value",
     ] {
-        assert!(index.contains(&format!(r#"id="{id}""#)), "{id} must survive the move");
+        assert!(
+            index.contains(&format!(r#"id="{id}""#)),
+            "{id} must survive the move"
+        );
     }
 
     // Rail counts come from data the dashboard already fetches — no new endpoint.
@@ -1202,7 +1204,9 @@ fn dashboard_separates_panel_edges_from_internal_hairlines() {
         ".filter-summary {",
         ".panel > header {",
     ] {
-        let start = css.find(rule).unwrap_or_else(|| panic!("{rule} must exist"));
+        let start = css
+            .find(rule)
+            .unwrap_or_else(|| panic!("{rule} must exist"));
         let block = &css[start..start + 900.min(css.len() - start)];
         let end = block.find('}').map(|i| &block[..i]).unwrap_or(block);
         assert!(
