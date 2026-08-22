@@ -72,8 +72,9 @@ globally defined crew. A `default_crew` or `system_crew` naming an undefined cre
 fails config load — deliberately, since the alternative is silently dispatching
 to the wrong model.
 
-`orbit init` seeds crews for the agent CLIs it detects, including the `qa` crew
-that `system_crew` defaults to. Available providers:
+`orbit init` seeds crews for the agent CLIs it detects and uses `system` for
+newly initialized system work. A user-authored legacy `qa` crew remains
+loadable, but init never creates it. Available providers:
 
 ```bash
 orbit executor list

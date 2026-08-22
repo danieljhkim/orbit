@@ -47,8 +47,7 @@ pub(crate) fn config_seed_from_detection(detected: &DetectedAgents) -> ConfigSee
 }
 
 /// Decide whether to prompt for the default and system crew settings, and
-/// collect them when so. QA is never prompted: leftover `[crews.qa]` stays a
-/// silently auto-seeded compatibility crew.
+/// collect them when so.
 pub(crate) fn collect_crew_settings_for_init(
     root_override: Option<&Path>,
     force: bool,

@@ -13,7 +13,7 @@ use orbit_common::OrbitError;
 use orbit_common::fs::io::write_text_with_parent;
 
 use crate::raw::{CrewSeed, RawCrewEntry};
-use crate::registry::{DEFAULT_WORKFLOW_SYSTEM_CREW, LEGACY_WORKFLOW_SYSTEM_CREW};
+use crate::registry::DEFAULT_WORKFLOW_SYSTEM_CREW;
 use crate::resolved::default_crews;
 
 pub(crate) const DEFAULT_CONFIG_TEMPLATE: &str = include_str!("../assets/default-config.toml");
@@ -37,8 +37,8 @@ pub struct ConfigSeed {
     /// dispatch nothing avoids inheriting the built-in crews at load time.
     pub families: BTreeSet<String>,
     /// Crew assignments chosen by the caller, keyed by crew name. A `custom`
-    /// entry becomes `workflow.default_crew`; `qa` and `system` override the
-    /// family-derived default for those lanes.
+    /// entry becomes `workflow.default_crew`; `system` overrides the
+    /// family-derived default for that lane.
     pub crews: BTreeMap<String, CrewSeed>,
 }
 
@@ -200,13 +200,8 @@ fn render_crews(seed: &ConfigSeed) -> Result<String, OrbitError> {
         );
     }
 
-    for (name, fallback) in [
-        (LEGACY_WORKFLOW_SYSTEM_CREW, default_qa_crew(seed)),
-        (DEFAULT_WORKFLOW_SYSTEM_CREW, default_system_crew(seed)),
-    ] {
-        let Some(assignment) = seed.chosen_crew(name).or(fallback) else {
-            continue;
-        };
+    let name = DEFAULT_WORKFLOW_SYSTEM_CREW;
+    if let Some(assignment) = seed.chosen_crew(name).or_else(|| default_system_crew(seed)) {
         crews.insert(
             name.to_string(),
             RawCrewEntry {
@@ -232,23 +227,6 @@ fn render_crews(seed: &ConfigSeed) -> Result<String, OrbitError> {
         rendered.push_str("[crews]\n");
     }
     Ok(rendered)
-}
-
-/// Seed the `qa` crew that predates the `system` lane. New inits no longer
-/// prompt for it; the lane stays silently auto-seeded so leftover `crew: qa`
-/// bindings keep loading. System activities use [`default_system_crew`].
-fn default_qa_crew(seed: &ConfigSeed) -> Option<CrewSeed> {
-    let (provider, model) = if seed.has_family("codex") {
-        ("codex", orbit_common::model_defaults::CODEX_DEFAULT_MODEL)
-    } else if seed.has_family("claude") {
-        ("claude", orbit_common::model_defaults::CLAUDE_DEFAULT_WEAK)
-    } else {
-        return None;
-    };
-    Some(CrewSeed {
-        provider: Some(provider.to_string()),
-        model: Some(model.to_string()),
-    })
 }
 
 /// Seed the bounded system lane: step-failure recovery, failed-run triage, and

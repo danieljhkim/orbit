@@ -109,7 +109,6 @@ fn non_interactive_init_against_non_global_root_leaves_home_skill_links_untouche
         ("luna", "codex", "gpt-5.6-luna"),
         ("gemini", "gemini", "gemini-3.7-flash"),
         ("grok", "grok", "grok-4.6"),
-        ("qa", "", ""),
         ("system", "", ""),
     ];
     if let Some(crews) = crews {
@@ -122,21 +121,7 @@ fn non_interactive_init_against_non_global_root_leaves_home_skill_links_untouche
                 .unwrap_or_else(|| panic!("unexpected seeded crew {name}"));
             // [ORB-10801] Seeded crews carry no retired backend key.
             assert!(crew.get("backend").is_none());
-            if name == "qa" {
-                // `qa` predates the system lane and keeps the family default
-                // it has always been seeded with. It is only seeded for codex
-                // and claude, so no grok/gemini branch is reachable here.
-                let (provider, model) = if crews.contains_key("terra") {
-                    ("codex", "gpt-5.6-terra")
-                } else {
-                    ("claude", "sonnet")
-                };
-                assert_eq!(
-                    crew.get("provider").and_then(toml::Value::as_str),
-                    Some(provider),
-                );
-                assert_eq!(crew.get("model").and_then(toml::Value::as_str), Some(model),);
-            } else if name == "system" {
+            if name == "system" {
                 // Preference order: codex luna, then claude sonnet, then grok,
                 // then gemini flash. Cheapest tier per family, not the
                 // family default.
@@ -166,6 +151,7 @@ fn non_interactive_init_against_non_global_root_leaves_home_skill_links_untouche
             }
         }
     }
+    assert!(!contents.contains("[crews.qa]"));
     let default_crew = config
         .get("workflow")
         .and_then(|workflow| workflow.get("default_crew"))
@@ -181,6 +167,34 @@ fn non_interactive_init_against_non_global_root_leaves_home_skill_links_untouche
     drop(validation_home);
     assert_discovery_sentinel(&agents_link, &agents_target);
     assert_discovery_sentinel(&claude_link, &claude_target);
+}
+
+/// `--force` replaces a legacy config instead of carrying its compatibility
+/// crew forward into a newly generated configuration.
+#[test]
+fn forced_non_interactive_init_does_not_regenerate_legacy_qa_crew() {
+    let home = tempdir().expect("home tempdir");
+    let _env = EnvGuard::acquire().home(home.path());
+    let root = home.path().join(".orbit");
+
+    init_host(&root, Some("force-host"), Some("FC")).expect("initial init");
+    fs::write(
+        root.join("config.toml"),
+        "[crews.qa]\nprovider = \"codex\"\nmodel = \"gpt-5.6-terra\"\n",
+    )
+    .expect("write legacy config");
+
+    InitCommand {
+        force: true,
+        non_interactive: true,
+        host_name: Some("force-host".to_string()),
+        task_prefix: Some("FC".to_string()),
+    }
+    .execute_without_runtime(Some(&root))
+    .expect("forced init");
+
+    let contents = fs::read_to_string(root.join("config.toml")).expect("read regenerated config");
+    assert!(!contents.contains("[crews.qa]"), "{contents}");
 }
 
 fn init_host(
