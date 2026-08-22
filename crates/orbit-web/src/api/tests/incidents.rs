@@ -68,6 +68,109 @@ fn seed(
         .expect("seed audit event");
 }
 
+#[allow(clippy::too_many_arguments)]
+fn seed_lifecycle(
+    runtime: &OrbitRuntime,
+    execution_id: &str,
+    command: &str,
+    status: AuditEventStatus,
+    role: &str,
+    error_message: Option<&str>,
+    job_run_id: Option<&str>,
+    activity_id: Option<&str>,
+    task_id: Option<&str>,
+) {
+    runtime
+        .record_audit_event(&AuditEventInsertParams {
+            execution_id: execution_id.to_string(),
+            command: command.to_string(),
+            subcommand: (command != "Start").then(|| "run".to_string()),
+            tool_name: None,
+            target_type: Some("job_run".to_string()),
+            target_id: job_run_id.map(str::to_string),
+            role: role.to_string(),
+            status,
+            exit_code: 1,
+            duration_ms: 4,
+            working_directory: "/tmp/fixture".to_string(),
+            arguments_json: None,
+            stdout_truncated: None,
+            stderr_truncated: None,
+            error_message: error_message.map(str::to_string),
+            host: None,
+            pid: std::process::id(),
+            session_id: None,
+            workspace_id: None,
+            caller_machine_id: None,
+            caller_host_id: None,
+            process_machine_id: None,
+            process_host_id: None,
+            transport: None,
+            effective_capabilities: Default::default(),
+            origin_session_id: None,
+            mcp_call_id: None,
+            lease_id: None,
+            task_id: task_id.map(str::to_string),
+            job_run_id: job_run_id.map(str::to_string),
+            activity_id: activity_id.map(str::to_string),
+            step_index: None,
+        })
+        .expect("seed lifecycle audit event");
+}
+
+fn seed_ten_unknown_lifecycle_rows(runtime: &OrbitRuntime) {
+    seed_lifecycle(
+        runtime,
+        "exec-start-1",
+        "Start",
+        AuditEventStatus::Failure,
+        "actor-one",
+        Some("job run start failed"),
+        None,
+        None,
+        None,
+    );
+    seed_lifecycle(
+        runtime,
+        "exec-start-2",
+        "Start",
+        AuditEventStatus::Failure,
+        "actor-one",
+        Some("job run start failed"),
+        None,
+        None,
+        None,
+    );
+    for index in 0..4 {
+        let leaf = format!("jrun-leaf-{index}");
+        let parent = format!("jrun-parent-{index}");
+        seed_lifecycle(
+            runtime,
+            &format!("exec-leaf-{index}"),
+            "job",
+            AuditEventStatus::Failure,
+            "actor-one",
+            Some("child step returned a nonzero status"),
+            Some(&leaf),
+            Some("leaf-step"),
+            Some(&format!("REC-leaf-{index}")),
+        );
+        seed_lifecycle(
+            runtime,
+            &format!("exec-parent-{index}"),
+            "job",
+            AuditEventStatus::Failure,
+            "actor-one",
+            Some(&format!(
+                "pipeline child run did not succeed: result run {leaf} status failed: child step returned a nonzero status"
+            )),
+            Some(&parent),
+            Some("pipeline_success_guard"),
+            Some(&format!("REC-parent-{index}")),
+        );
+    }
+}
+
 async fn request(runtime: OrbitRuntime, uri: &str) -> axum::response::Response {
     router()
         .with_state(crate::state::DashboardState::single(Arc::new(runtime)))
@@ -324,4 +427,51 @@ async fn an_unknown_failure_class_is_a_client_error() {
     let response = request(runtime, "/audit/incidents?since=24h&class=bogus").await;
 
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+}
+
+/// ORB-10969: ten no-tool rows = 2 duplicate Starts + 8 cascade rows from 4
+/// leaf failures. The incidents API must report grouped counts, the lifecycle
+/// category, and every underlying row on expansion.
+#[tokio::test]
+async fn ten_unknown_lifecycle_rows_group_as_four_cascades_and_one_start() {
+    let runtime = OrbitRuntime::in_memory().expect("runtime");
+    seed_ten_unknown_lifecycle_rows(&runtime);
+
+    let body = body_json(request(runtime, "/audit/incidents?since=24h").await).await;
+
+    assert_eq!(body["raw_failed_events"].as_u64(), Some(10));
+    assert_eq!(body["incident_count"].as_u64(), Some(5));
+    assert_eq!(body["affected_run_count"].as_u64(), Some(8));
+    assert_eq!(body["job_run_lifecycle_events"].as_u64(), Some(10));
+    assert_eq!(body["job_run_lifecycle_incidents"].as_u64(), Some(5));
+    assert_eq!(body["job_run_lifecycle_label"], "job-run lifecycle");
+
+    let incidents = body["incidents"].as_array().expect("incidents");
+    assert_eq!(incidents.len(), 5);
+    let start = incidents
+        .iter()
+        .find(|incident| incident["surface"] == "Start")
+        .expect("Start incident");
+    assert_eq!(start["event_count"].as_u64(), Some(2));
+    assert_eq!(start["has_tool_identity"], false);
+
+    let cascades: Vec<_> = incidents
+        .iter()
+        .filter(|incident| incident["surface"] != "Start")
+        .collect();
+    assert_eq!(cascades.len(), 4);
+    for incident in cascades {
+        assert_eq!(incident["root_event_count"].as_u64(), Some(1));
+        assert_eq!(incident["propagated_event_count"].as_u64(), Some(1));
+        let events = incident["events"].as_array().expect("full event list");
+        assert_eq!(events.len(), 2, "expansion keeps every underlying row");
+        for event in events {
+            assert!(
+                event["tool"].is_null(),
+                "lifecycle rows have no tool identity"
+            );
+            assert!(event["run_id"].as_str().is_some(), "run id is present");
+            assert!(event["task_id"].as_str().is_some(), "task id is present");
+        }
+    }
 }

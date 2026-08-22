@@ -12,7 +12,7 @@ use orbit_types::telemetry::{AuditEvent, AuditEventStatus};
 use crate::Store;
 use crate::driver::sqlite::audit_event_store::incident::{
     CASCADE_WINDOW_SECS, FailureClass, FailureIncidentQuery, build_report, group_failure_incidents,
-    normalize_message, signature_for,
+    has_tool_identity, normalize_message, signature_for,
 };
 
 use super::super::AuditEventInsertParams;
@@ -26,12 +26,14 @@ fn base_ts() -> DateTime<Utc> {
 struct FailureFixture {
     id: i64,
     offset_secs: i64,
-    tool: &'static str,
+    tool: Option<&'static str>,
+    command: &'static str,
     role: &'static str,
     status: AuditEventStatus,
     message: Option<String>,
     run_id: Option<&'static str>,
     activity_id: Option<&'static str>,
+    task_id: Option<&'static str>,
 }
 
 impl FailureFixture {
@@ -39,13 +41,25 @@ impl FailureFixture {
         Self {
             id,
             offset_secs,
-            tool,
+            tool: Some(tool),
+            command: "tool",
             role: "actor-one",
             status: AuditEventStatus::Failure,
             message: Some("operation failed".to_string()),
             run_id: None,
             activity_id: None,
+            task_id: Some("REC-1"),
         }
+    }
+
+    fn no_tool(mut self) -> Self {
+        self.tool = None;
+        self
+    }
+
+    fn command(mut self, command: &'static str) -> Self {
+        self.command = command;
+        self
     }
 
     fn role(mut self, role: &'static str) -> Self {
@@ -74,11 +88,21 @@ impl FailureFixture {
             id: self.id,
             execution_id: format!("exec-{}", self.id),
             timestamp: base_ts() + Duration::seconds(self.offset_secs),
-            command: "tool".to_string(),
+            command: self.command.to_string(),
             subcommand: Some("run".to_string()),
-            tool_name: Some(self.tool.to_string()),
-            target_type: Some("tool".to_string()),
-            target_id: Some(self.tool.to_string()),
+            tool_name: self.tool.map(str::to_string),
+            target_type: Some(
+                if self.tool.is_some() {
+                    "tool"
+                } else {
+                    "job_run"
+                }
+                .to_string(),
+            ),
+            target_id: self
+                .tool
+                .map(str::to_string)
+                .or_else(|| self.run_id.map(str::to_string)),
             role: self.role.to_string(),
             status: self.status,
             exit_code: 1,
@@ -103,7 +127,7 @@ impl FailureFixture {
             trace_id: None,
             caller_ip: None,
             lease_id: None,
-            task_id: Some("REC-1".to_string()),
+            task_id: self.task_id.map(str::to_string),
             job_run_id: self.run_id.map(str::to_string),
             activity_id: self.activity_id.map(str::to_string),
             step_index: None,
@@ -503,4 +527,178 @@ fn a_truncated_scan_is_reported_rather_than_silently_capped() {
 
     assert!(report.truncated, "a capped scan must say so");
     assert_eq!(report.raw_failed_events, 2);
+}
+
+/// ORB-10969: ten no-tool rows that the dashboard used to label `unknown`.
+/// Two are duplicate Start events; the other eight are parent/child guard
+/// copies of four leaf failures. Grouping must not treat them as ten tool
+/// failures or as eight independent roots.
+fn ten_unknown_lifecycle_rows() -> Vec<AuditEvent> {
+    let start = |id: i64, offset_secs: i64| {
+        let mut event = FailureFixture::new(id, offset_secs, "unused")
+            .no_tool()
+            .command("Start")
+            .message("job run start failed")
+            .build();
+        event.subcommand = None;
+        event
+    };
+    let mut failures = vec![start(1, 0), start(2, 1)];
+    for index in 0..4 {
+        let leaf = format!("jrun-leaf-{index}");
+        let parent = format!("jrun-parent-{index}");
+        let leaf_id = 10 + index;
+        let parent_id = 20 + index;
+        let offset = 10 + index * 2;
+        let mut leaf_event = FailureFixture::new(leaf_id, offset, "unused")
+            .no_tool()
+            .command("job")
+            .message("child step returned a nonzero status")
+            .build();
+        leaf_event.job_run_id = Some(leaf.clone());
+        leaf_event.activity_id = Some("leaf-step".to_string());
+        leaf_event.task_id = Some(format!("REC-leaf-{index}"));
+        let mut parent_event = FailureFixture::new(parent_id, offset + 1, "unused")
+            .no_tool()
+            .command("job")
+            .message(format!(
+                "pipeline child run did not succeed: result run {leaf} status failed: child step returned a nonzero status"
+            ))
+            .build();
+        parent_event.job_run_id = Some(parent);
+        parent_event.activity_id = Some("pipeline_success_guard".to_string());
+        parent_event.task_id = Some(format!("REC-parent-{index}"));
+        failures.push(leaf_event);
+        failures.push(parent_event);
+    }
+    failures
+}
+
+#[test]
+fn ten_unknown_rows_group_as_lifecycle_with_four_cascades_and_one_start() {
+    let failures = ten_unknown_lifecycle_rows();
+    assert_eq!(failures.len(), 10);
+    assert!(
+        failures.iter().all(|event| !has_tool_identity(event)),
+        "the regression fixture is the no-tool-identity population"
+    );
+
+    let report = build_report(&failures, false);
+
+    assert_eq!(report.raw_failed_events, 10);
+    assert_eq!(
+        report.job_run_lifecycle_events, 10,
+        "no-tool rows are job-run lifecycle events, not tool `unknown`"
+    );
+    assert_eq!(
+        report.incident_count(),
+        5,
+        "2 duplicate Starts collapse; 8 cascade rows from 4 leaves are 4 roots"
+    );
+    assert_eq!(report.job_run_lifecycle_incidents, 5);
+    assert_eq!(
+        report.affected_run_count, 8,
+        "4 leaf runs + 4 parent runs; Starts carry no run id"
+    );
+
+    let start = report
+        .incidents
+        .iter()
+        .find(|incident| incident.surface == "Start")
+        .expect("duplicate Start incident");
+    assert_eq!(start.event_count, 2);
+    assert!(start.propagation.is_empty());
+    assert!(!start.has_tool_identity);
+    assert_eq!(start.events.len(), 2);
+
+    let cascades: Vec<_> = report
+        .incidents
+        .iter()
+        .filter(|incident| incident.surface != "Start")
+        .collect();
+    assert_eq!(cascades.len(), 4);
+    for incident in cascades {
+        assert_eq!(incident.root_event_count, 1);
+        assert_eq!(
+            incident.propagated_event_count(),
+            1,
+            "each leaf's parent guard is cascade, not a second root: {}",
+            incident.signature
+        );
+        assert_eq!(incident.event_count, 2);
+        assert_eq!(incident.propagation.len(), 1);
+        assert_eq!(incident.run_ids.len(), 2);
+        assert_eq!(
+            incident.events.len(),
+            2,
+            "expansion must keep every underlying row"
+        );
+        assert!(
+            incident
+                .events
+                .iter()
+                .all(|event| event.tool_name.is_none() && event.run_id.is_some()),
+            "every cascade row carries run identity and no tool name"
+        );
+        assert!(
+            incident.events.iter().any(|event| event
+                .task_id
+                .as_deref()
+                .is_some_and(|id| id.starts_with("REC-"))),
+            "task identifiers stay on the expanded rows"
+        );
+    }
+}
+
+#[test]
+fn the_store_query_categorizes_the_ten_unknown_lifecycle_rows() {
+    let store = Store::open_in_memory().expect("open store");
+    for event in ten_unknown_lifecycle_rows() {
+        store
+            .insert_audit_event_record(&AuditEventInsertParams {
+                execution_id: event.execution_id.clone(),
+                command: event.command.clone(),
+                subcommand: event.subcommand.clone(),
+                tool_name: event.tool_name.clone(),
+                target_type: event.target_type.clone(),
+                target_id: event.target_id.clone(),
+                role: event.role.clone(),
+                status: event.status,
+                exit_code: event.exit_code,
+                duration_ms: event.duration_ms,
+                working_directory: event.working_directory.clone(),
+                arguments_json: event.arguments_json.clone(),
+                stdout_truncated: None,
+                stderr_truncated: None,
+                error_message: event.error_message.clone(),
+                host: event.host.clone(),
+                pid: event.pid,
+                session_id: event.session_id.clone(),
+                workspace_id: event.workspace_id.clone(),
+                caller_machine_id: None,
+                caller_host_id: None,
+                process_machine_id: None,
+                process_host_id: None,
+                transport: None,
+                effective_capabilities: BTreeSet::new(),
+                origin_session_id: None,
+                mcp_call_id: None,
+                lease_id: None,
+                task_id: event.task_id.clone(),
+                job_run_id: event.job_run_id.clone(),
+                activity_id: event.activity_id.clone(),
+                step_index: event.step_index,
+            })
+            .expect("insert lifecycle audit event");
+    }
+
+    let report = store
+        .get_failure_incidents(&FailureIncidentQuery::default())
+        .expect("failure incidents");
+
+    assert_eq!(report.raw_failed_events, 10);
+    assert_eq!(report.incident_count(), 5);
+    assert_eq!(report.job_run_lifecycle_events, 10);
+    assert_eq!(report.job_run_lifecycle_incidents, 5);
+    assert_eq!(report.affected_run_count, 8);
 }

@@ -2911,6 +2911,10 @@
         font-size: 11px;
         color: var(--fg-dim);
       }
+      .lifecycle-failure-card .card-title { text-transform: none; }
+      .lifecycle-failure-counts {
+        font: 12px var(--font-mono); color: var(--fg); overflow-wrap: anywhere; margin-bottom: 6px;
+      }
 
       /* Run Detail — Gantt timeline */
       .gantt-panel {
@@ -3937,6 +3941,9 @@
       .incident-class-chip.expected { border-left-color: var(--fg-dim); }
       .incident-class-chip.denied { border-left-color: var(--state-warn, var(--accent)); }
       .incident-truncation-note { margin: 0; color: var(--state-warn, var(--fg-dim)); font: 11px/1.5 var(--font-sans); }
+      .incident-lifecycle-note {
+        color: var(--fg-dim); font: 11px/1.5 var(--font-sans); overflow-wrap: anywhere;
+      }
 
       .incident-list { display: flex; flex-direction: column; }
       .incident-row { border-bottom: 1px solid var(--border); padding: 10px 14px; }
@@ -3992,6 +3999,12 @@
          scannable without clipping between 480 and 720px. */
       @media (max-width: 720px) {
         .incident-summary { padding: 10px; }
+        .incident-summary-denominator, .incident-lifecycle-note, .lifecycle-failure-counts {
+          font-size: 11px; overflow-wrap: anywhere;
+        }
+        .tool-health-grid { grid-template-columns: minmax(0, 1fr); }
+        .health-card .card-header { flex-wrap: wrap; align-items: flex-start; }
+        .health-card .tool-name { white-space: normal; overflow-wrap: anywhere; }
         .incident-count { margin-left: 0; }
         .incident-facts { grid-template-columns: minmax(0, 1fr); gap: 2px; }
         .incident-facts dt { margin-top: 6px; }

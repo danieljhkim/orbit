@@ -171,6 +171,10 @@ pub(super) fn incidents_payload(
         "total_events": total_events,
         "raw_failed_events": report.raw_failed_events,
         "incident_count": report.incident_count(),
+        "affected_run_count": report.affected_run_count,
+        "job_run_lifecycle_events": report.job_run_lifecycle_events,
+        "job_run_lifecycle_incidents": report.job_run_lifecycle_incidents,
+        "job_run_lifecycle_label": "job-run lifecycle",
         "matching_incident_count": selected.len(),
         "shown_incident_count": shown.len(),
         "limit": limit,
@@ -203,8 +207,14 @@ fn incident_to_json(incident: &FailureIncident) -> Value {
         "last_ts": incident.last_ts.to_rfc3339(),
         "run_ids": incident.run_ids,
         "task_ids": incident.task_ids,
+        "has_tool_identity": incident.has_tool_identity,
         "sample_events": incident
             .sample_events
+            .iter()
+            .map(event_ref_to_json)
+            .collect::<Vec<_>>(),
+        "events": incident
+            .events
             .iter()
             .map(event_ref_to_json)
             .collect::<Vec<_>>(),
@@ -226,6 +236,7 @@ fn event_ref_to_json(event: &IncidentEventRef) -> Value {
         "surface": event.surface,
         "run_id": event.run_id,
         "task_id": event.task_id,
+        "tool": event.tool_name,
         "activity_id": event.activity_id,
         "message": event.message.as_deref().map(redact_all),
     })

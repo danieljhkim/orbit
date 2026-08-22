@@ -299,15 +299,23 @@ function fetchAndRenderAudit(ctx) {
   });
 }
 
+function isNamedTool(name) {
+  const trimmed = String(name || "").trim();
+  return trimmed.length > 0 && trimmed !== "unknown";
+}
+
 function renderFailuresByToolCard(rateRows, failuresRows, onCardClick) {
   const failByTool = new Map();
-  for (const f of failuresRows) failByTool.set(f.tool, f);
+  for (const f of failuresRows) {
+    if (isNamedTool(f.tool)) failByTool.set(f.tool, f);
+  }
 
   const container = el("div", { class: "audit-summary-container" });
   container.appendChild(el("h3", { class: "summary-title", text: "Failures by Tool (24H)" }));
   const grid = el("div", { class: "tool-health-grid" });
 
   for (const row of rateRows) {
+    if (!isNamedTool(row.tool)) continue;
     const rate = row.rate || 0;
     const severity = rate >= 0.14 ? "critical" : rate >= 0.05 ? "warning" : "normal";
     const card = el("div", { class: `health-card ${severity}` });
@@ -397,18 +405,40 @@ function renderAuditSummary(data, ctx) {
     window.location.hash = buildAuditHash();
   };
 
-  if (data.failure_rate_by_tool && data.failure_rate_by_tool.length) {
+  const namedRates = (data.failure_rate_by_tool || []).filter((row) => isNamedTool(row.tool));
+  const namedFailures = (data.failures_by_tool || []).filter((row) => isNamedTool(row.tool));
+  if (namedRates.length) {
     container.appendChild(renderFailuresByToolCard(
-      data.failure_rate_by_tool,
-      data.failures_by_tool || [],
+      namedRates,
+      namedFailures,
       filterByTool,
     ));
-  } else if (data.failures_by_tool) {
+  } else if (namedFailures.length) {
     container.appendChild(createCard("Failures by tool", renderTable(
-      data.failures_by_tool,
+      namedFailures,
       [{ key: "tool", label: "tool" }, { key: "count", label: "fails", num: true }, { key: "mcp", label: "mcp", num: true }, { key: "cli", label: "cli", num: true }],
       filterByTool
     )));
+  }
+
+  const lifecycleFailures = Number(data.job_run_lifecycle_failures) || 0;
+  const lifecycleIncidents = Number(data.job_run_lifecycle_incidents) || 0;
+  if (lifecycleFailures > 0 || lifecycleIncidents > 0) {
+    const label = data.job_run_lifecycle_label || "job-run lifecycle";
+    const window = data.window || "24h";
+    const lifecycleCard = el("div", { class: "audit-summary-card lifecycle-failure-card" });
+    lifecycleCard.appendChild(el("div", { class: "card-title", text: label }));
+    const body = el("div", { class: "card-body" });
+    body.appendChild(el("div", {
+      class: "lifecycle-failure-counts",
+      text: `${lifecycleFailures} failed events · ${lifecycleIncidents} incidents · ${Number(data.affected_run_count) || 0} affected runs`,
+    }));
+    body.appendChild(el("div", {
+      class: "metric-trend",
+      text: `Excluded from tool denominators and rates · window ${window}`,
+    }));
+    lifecycleCard.appendChild(body);
+    container.appendChild(lifecycleCard);
   }
 
   if (data.duration_by_tool) {

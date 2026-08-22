@@ -1349,12 +1349,12 @@ fn dashboard_failure_metrics_are_incident_aware_and_state_their_denominators() {
     // Both counts, both denominators, and the window are rendered — never one
     // number standing in for the other.
     assert!(
-        diagnostics.contains("${asCount(payload.incident_count)} incidents / ${asCount(payload.raw_failed_events)} failed events"),
-        "the panel count must show grouped incidents and raw failed events together"
+        diagnostics.contains("${asCount(payload.incident_count)} incidents / ${asCount(payload.raw_failed_events)} failed events / ${asCount(payload.affected_run_count)} affected runs"),
+        "the panel count must show grouped incidents, raw failed events, and affected runs together"
     );
     assert!(
-        diagnostics.contains("grouped from ${failed} failed events of ${total} audited events"),
-        "the incident count must state what it is out of"
+        diagnostics.contains("${failed} failed events · ${incidents} grouped incidents · ${runs} affected runs of ${total} audited events"),
+        "the incident count must state raw events, grouped incidents, and affected runs"
     );
     assert!(
         diagnostics.contains("`window ${window}`"),
@@ -1374,6 +1374,7 @@ fn dashboard_failure_metrics_are_incident_aware_and_state_their_denominators() {
         "\"runs\"",
         "\"tasks\"",
         "Underlying audit events",
+        "\"tool\"",
     ] {
         assert!(
             diagnostics.contains(needle),
@@ -1424,8 +1425,54 @@ fn dashboard_failure_metrics_are_incident_aware_and_state_their_denominators() {
         .expect("a 720px breakpoint must exist");
     assert!(
         css[responsive_at..].contains(".incident-facts { grid-template-columns: minmax(0, 1fr);")
-            && css[responsive_at..].contains(".incident-evidence"),
-        "the incident expansion must reflow rather than clip below 720px"
+            && css[responsive_at..].contains(".incident-evidence")
+            && css[responsive_at..].contains(".lifecycle-failure-counts")
+            && css[responsive_at..]
+                .contains(".tool-health-grid { grid-template-columns: minmax(0, 1fr); }"),
+        "the incident expansion and tool/lifecycle cards must reflow rather than clip below 720px"
+    );
+}
+
+/// ORB-10969: Failures-by-tool excludes the synthetic `unknown` bucket;
+/// job-run lifecycle failures are labeled on their own; expansion lists
+/// every underlying row's run/task/tool identifiers.
+#[test]
+fn dashboard_tool_metrics_exclude_unknown_and_label_lifecycle_failures() {
+    let audit = include_str!("../../assets/dashboard/audit.js");
+    let diagnostics = include_str!("../../assets/dashboard/diagnostics.js");
+    let preview = include_str!("../../assets/dashboard/_preview_failures_card.html");
+    let css = include_str!("../../assets/dashboard/dashboard.css");
+
+    assert!(
+        audit.contains("function isNamedTool(")
+            && audit.contains("trimmed !== \"unknown\"")
+            && audit.contains("job_run_lifecycle_failures")
+            && audit.contains("job-run lifecycle")
+            && audit.contains("Excluded from tool denominators and rates"),
+        "tool cards must drop `unknown` and name the job-run lifecycle category"
+    );
+    assert!(
+        audit.contains("${lifecycleFailures} failed events · ${lifecycleIncidents} incidents · ${Number(data.affected_run_count) || 0} affected runs"),
+        "the lifecycle card must distinguish raw events, incidents, and affected runs"
+    );
+    assert!(
+        diagnostics.contains("incident.events")
+            && diagnostics.contains("event.tool || \"-\"")
+            && diagnostics.contains("event.run_id || \"-\"")
+            && diagnostics.contains("event.task_id || \"-\""),
+        "incident expansion must expose run/task/tool identifiers for every row"
+    );
+    assert!(
+        preview.contains("job-run lifecycle")
+            && preview.contains("10 failed events · 5 incidents · 8 affected runs")
+            && preview.contains("isNamedTool"),
+        "the failures-card preview must render the lifecycle category and three counts"
+    );
+    assert!(
+        css.contains(".lifecycle-failure-card")
+            && css.contains(".lifecycle-failure-counts")
+            && css.contains(".incident-lifecycle-note"),
+        "lifecycle labels need their own presentation hooks"
     );
 }
 

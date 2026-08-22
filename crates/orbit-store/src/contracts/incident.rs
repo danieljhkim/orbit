@@ -31,6 +31,10 @@
 //!    are one incident, rooted at the earliest cluster, with the later ones
 //!    recorded as its propagation chain. A failure later in the same run,
 //!    beyond that window, stays an independent incident.
+//! 4. **Collapse cited-run cascades** across job runs: a later incident whose
+//!    raw message names another incident's `job_run_id` (parent/child guard
+//!    copies) folds onto that cited root. Matching is token ∩ known run ids,
+//!    not a special-cased tool or activity name.
 
 use std::borrow::Cow;
 use std::collections::BTreeMap;
@@ -128,6 +132,8 @@ pub struct IncidentEventRef {
     pub run_id: Option<String>,
     pub task_id: Option<String>,
     pub activity_id: Option<String>,
+    /// Tool name when the row had one; `None` for job-run lifecycle events.
+    pub tool_name: Option<String>,
     pub message: Option<String>,
 }
 
@@ -173,6 +179,13 @@ pub struct FailureIncident {
     pub task_ids: Vec<String>,
     /// Bounded sample of the root's raw rows, newest first.
     pub sample_events: Vec<IncidentEventRef>,
+    /// Every raw audit row collapsed into this incident, including the
+    /// propagation chain. Unbounded so expansion can show the full evidence
+    /// set; [`Self::sample_events`] stays the bounded root preview.
+    pub events: Vec<IncidentEventRef>,
+    /// False when the root row had no tool identity — a job-run lifecycle
+    /// failure, not a tool named `unknown`.
+    pub has_tool_identity: bool,
     /// Downstream failures collapsed beneath the root, in occurrence order.
     pub propagation: Vec<PropagationLink>,
 }
@@ -198,6 +211,13 @@ pub struct FailureIncidentQuery {
 /// Default cap on raw failure rows scanned for one aggregation.
 pub const DEFAULT_SCAN_LIMIT: usize = 20_000;
 
+/// Category key for failed audit rows with no tool identity. These are
+/// job-run / activity lifecycle events, not a synthetic tool named `unknown`.
+pub const JOB_RUN_LIFECYCLE_CATEGORY: &str = "job_run_lifecycle";
+
+/// Operator-facing label for [`JOB_RUN_LIFECYCLE_CATEGORY`].
+pub const JOB_RUN_LIFECYCLE_LABEL: &str = "job-run lifecycle";
+
 /// Result of one aggregation: the incidents plus the raw denominators they
 /// were derived from, so no surface has to re-derive (or guess) them.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -209,6 +229,12 @@ pub struct FailureIncidentReport {
     pub raw_events_by_class: BTreeMap<String, u64>,
     /// Incident count per class.
     pub incidents_by_class: BTreeMap<String, u64>,
+    /// Unique `job_run_id`s on the grouped incidents (the affected-run count).
+    pub affected_run_count: u64,
+    /// Raw failed rows with no tool identity.
+    pub job_run_lifecycle_events: u64,
+    /// Incidents whose root had no tool identity.
+    pub job_run_lifecycle_incidents: u64,
     /// True when the scan hit `max_events` and older rows were not read.
     pub truncated: bool,
 }
@@ -225,16 +251,28 @@ pub fn build_report(failures: &[AuditEvent], truncated: bool) -> FailureIncident
     let incidents = group_failure_incidents(failures);
 
     let mut raw_events_by_class: BTreeMap<String, u64> = BTreeMap::new();
+    let mut job_run_lifecycle_events: u64 = 0;
     for event in failures {
         *raw_events_by_class
             .entry(classify(event).as_str().to_string())
             .or_insert(0) += 1;
+        if !has_tool_identity(event) {
+            job_run_lifecycle_events += 1;
+        }
     }
     let mut incidents_by_class: BTreeMap<String, u64> = BTreeMap::new();
+    let mut run_ids: BTreeMap<String, ()> = BTreeMap::new();
+    let mut job_run_lifecycle_incidents: u64 = 0;
     for incident in &incidents {
         *incidents_by_class
             .entry(incident.class.as_str().to_string())
             .or_insert(0) += 1;
+        if !incident.has_tool_identity {
+            job_run_lifecycle_incidents += 1;
+        }
+        for run_id in &incident.run_ids {
+            run_ids.insert(run_id.clone(), ());
+        }
     }
 
     FailureIncidentReport {
@@ -242,6 +280,9 @@ pub fn build_report(failures: &[AuditEvent], truncated: bool) -> FailureIncident
         raw_events_by_class,
         incidents_by_class,
         incidents,
+        affected_run_count: run_ids.len() as u64,
+        job_run_lifecycle_events,
+        job_run_lifecycle_incidents,
         truncated,
     }
 }
@@ -272,6 +313,15 @@ pub fn classify(event: &AuditEvent) -> FailureClass {
         return FailureClass::Expected;
     }
     FailureClass::Unexpected
+}
+
+/// True when the row names a real tool. Empty/`NULL` tool names are job-run
+/// lifecycle events, not a tool called `unknown`.
+pub fn has_tool_identity(event: &AuditEvent) -> bool {
+    event
+        .tool_name
+        .as_deref()
+        .is_some_and(|name| !name.trim().is_empty())
 }
 
 /// The reporting surface of an audit row: its tool name when it has one,
@@ -447,6 +497,8 @@ struct Cluster {
     run_ids: Vec<String>,
     task_ids: Vec<String>,
     sample_events: Vec<IncidentEventRef>,
+    events: Vec<IncidentEventRef>,
+    has_tool_identity: bool,
 }
 
 impl Cluster {
@@ -462,9 +514,12 @@ impl Cluster {
         }
         push_unique(&mut self.run_ids, event.job_run_id.as_deref());
         push_unique(&mut self.task_ids, event.task_id.as_deref());
+        let reference = event_ref(event);
+        self.events.push(reference.clone());
         if self.sample_events.len() < MAX_SAMPLE_EVENTS {
-            self.sample_events.push(event_ref(event));
+            self.sample_events.push(reference);
         }
+        self.has_tool_identity |= has_tool_identity(event);
     }
 
     fn into_link(mut self) -> PropagationLink {
@@ -502,6 +557,12 @@ fn event_ref(event: &AuditEvent) -> IncidentEventRef {
         run_id: event.job_run_id.clone(),
         task_id: event.task_id.clone(),
         activity_id: event.activity_id.clone(),
+        tool_name: event
+            .tool_name
+            .as_deref()
+            .map(str::trim)
+            .filter(|name| !name.is_empty())
+            .map(ToOwned::to_owned),
         message: event.error_message.clone(),
     }
 }
@@ -540,6 +601,8 @@ pub fn group_failure_incidents(failures: &[AuditEvent]) -> Vec<FailureIncident> 
                     run_ids: Vec::new(),
                     task_ids: Vec::new(),
                     sample_events: Vec::new(),
+                    events: Vec::new(),
+                    has_tool_identity: false,
                 };
                 cluster.absorb(event);
                 cluster
@@ -587,6 +650,11 @@ pub fn group_failure_incidents(failures: &[AuditEvent]) -> Vec<FailureIncident> 
         }
     }
 
+    // Pass 4 — collapse parent/child propagation across job runs. A later
+    // incident whose raw message cites another incident's `job_run_id` is the
+    // same root cause (a guard copying a leaf failure), not a second incident.
+    incidents = collapse_cited_run_cascades(incidents);
+
     // Newest incident first; the deterministic id breaks ties so two incidents
     // sharing a last-seen timestamp never swap places between renders.
     incidents.sort_by(|a, b| {
@@ -608,10 +676,13 @@ fn partition_by_class(clusters: Vec<Cluster>) -> BTreeMap<FailureClass, Vec<Clus
 fn incident_from(run_scope: &str, root: Cluster, chain: Vec<Cluster>) -> FailureIncident {
     let mut root = root;
     sort_samples(&mut root.sample_events);
+    sort_samples(&mut root.events);
     let mut event_count = root.event_count;
     let mut last_ts = root.last_ts;
     let mut run_ids = root.run_ids.clone();
     let mut task_ids = root.task_ids.clone();
+    let mut events = root.events.clone();
+    let has_tool_identity = root.has_tool_identity;
 
     let mut propagation: Vec<PropagationLink> = Vec::with_capacity(chain.len());
     for cluster in chain {
@@ -623,6 +694,7 @@ fn incident_from(run_scope: &str, root: Cluster, chain: Vec<Cluster>) -> Failure
         for task_id in &cluster.task_ids {
             push_unique(&mut task_ids, Some(task_id));
         }
+        events.extend(cluster.events.iter().cloned());
         propagation.push(cluster.into_link());
     }
     propagation.sort_by(|a, b| {
@@ -630,6 +702,7 @@ fn incident_from(run_scope: &str, root: Cluster, chain: Vec<Cluster>) -> Failure
             .cmp(&b.first_ts)
             .then_with(|| a.signature.cmp(&b.signature))
     });
+    sort_samples(&mut events);
 
     FailureIncident {
         incident_id: incident_id(run_scope, &root.signature, root.first_ts),
@@ -646,6 +719,155 @@ fn incident_from(run_scope: &str, root: Cluster, chain: Vec<Cluster>) -> Failure
         run_ids,
         task_ids,
         sample_events: root.sample_events,
+        events,
+        has_tool_identity,
         propagation,
     }
+}
+
+/// Fold incidents whose raw messages cite another incident's `job_run_id`
+/// onto that cited incident. Parent/child pipeline guards are the motivating
+/// case; matching is by durable columns only (message tokens ∩ known run ids).
+fn collapse_cited_run_cascades(mut incidents: Vec<FailureIncident>) -> Vec<FailureIncident> {
+    if incidents.len() < 2 {
+        return incidents;
+    }
+    let cascade_window = Duration::seconds(CASCADE_WINDOW_SECS);
+    loop {
+        let known_runs = unique_run_index(&incidents);
+        if known_runs.is_empty() {
+            break;
+        }
+        let known_ids: BTreeMap<String, ()> = known_runs
+            .keys()
+            .cloned()
+            .map(|run_id| (run_id, ()))
+            .collect();
+        let mut merge: Option<(usize, usize)> = None;
+        for (from_idx, incident) in incidents.iter().enumerate() {
+            for cited in cited_known_run_ids_from_incident(incident, &known_ids) {
+                let Some(&onto_idx) = known_runs.get(&cited) else {
+                    continue;
+                };
+                if onto_idx == usize::MAX || onto_idx == from_idx {
+                    continue;
+                }
+                let onto = &incidents[onto_idx];
+                if onto.class != incident.class {
+                    continue;
+                }
+                if incident.first_ts < onto.first_ts {
+                    continue;
+                }
+                if incident.first_ts - onto.last_ts > cascade_window {
+                    continue;
+                }
+                merge = Some((from_idx, onto_idx));
+                break;
+            }
+            if merge.is_some() {
+                break;
+            }
+        }
+        let Some((from_idx, onto_idx)) = merge else {
+            break;
+        };
+        let from = incidents.remove(from_idx);
+        let onto_idx = if onto_idx > from_idx {
+            onto_idx - 1
+        } else {
+            onto_idx
+        };
+        merge_incident_into(&mut incidents[onto_idx], from);
+    }
+    incidents
+}
+
+fn unique_run_index(incidents: &[FailureIncident]) -> BTreeMap<String, usize> {
+    let mut known_runs: BTreeMap<String, usize> = BTreeMap::new();
+    for (idx, incident) in incidents.iter().enumerate() {
+        for run_id in &incident.run_ids {
+            known_runs
+                .entry(run_id.clone())
+                .and_modify(|existing| *existing = usize::MAX)
+                .or_insert(idx);
+        }
+    }
+    known_runs
+}
+
+fn cited_known_run_ids_from_incident(
+    incident: &FailureIncident,
+    known: &BTreeMap<String, ()>,
+) -> Vec<String> {
+    let mut found = Vec::new();
+    let mut consider = |message: Option<&str>| {
+        if let Some(message) = message {
+            for run_id in cited_known_run_ids(message, known) {
+                if !found.iter().any(|existing| existing == &run_id) {
+                    found.push(run_id);
+                }
+            }
+        }
+    };
+    consider(incident.message.as_deref());
+    for event in incident.events.iter().chain(incident.sample_events.iter()) {
+        consider(event.message.as_deref());
+    }
+    for link in &incident.propagation {
+        consider(link.message.as_deref());
+        for event in &link.sample_events {
+            consider(event.message.as_deref());
+        }
+    }
+    found
+}
+
+fn cited_known_run_ids(message: &str, known: &BTreeMap<String, ()>) -> Vec<String> {
+    if known.is_empty() {
+        return Vec::new();
+    }
+    let mut found = Vec::new();
+    for token in message.split_whitespace() {
+        let trimmed = token.trim_matches(['"', '\'', '`', '(', ')', ',', ':', ';']);
+        if known.contains_key(trimmed) && !found.iter().any(|existing| existing == trimmed) {
+            found.push(trimmed.to_string());
+        }
+    }
+    found
+}
+
+fn merge_incident_into(root: &mut FailureIncident, child: FailureIncident) {
+    root.event_count += child.event_count;
+    root.last_ts = root.last_ts.max(child.last_ts);
+    for run_id in &child.run_ids {
+        push_unique(&mut root.run_ids, Some(run_id));
+    }
+    for task_id in &child.task_ids {
+        push_unique(&mut root.task_ids, Some(task_id));
+    }
+    root.events.extend(child.events.iter().cloned());
+    sort_samples(&mut root.events);
+    let child_root_last = child
+        .sample_events
+        .iter()
+        .map(|event| event.ts)
+        .max()
+        .unwrap_or(child.last_ts);
+    root.propagation.push(PropagationLink {
+        signature: child.signature,
+        surface: child.surface,
+        activity_id: child.activity_id,
+        event_count: child.root_event_count,
+        first_ts: child.first_ts,
+        last_ts: child_root_last,
+        message: child.message,
+        sample_events: child.sample_events,
+    });
+    root.propagation.extend(child.propagation);
+    root.propagation.sort_by(|a, b| {
+        a.first_ts
+            .cmp(&b.first_ts)
+            .then_with(|| a.signature.cmp(&b.signature))
+    });
 }
