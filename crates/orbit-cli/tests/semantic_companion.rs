@@ -86,6 +86,50 @@ fn direct_search_semantic_command_surfaces_companion_stderr() {
     );
 }
 
+#[test]
+#[cfg(unix)]
+fn tool_run_hybrid_search_without_companion_returns_lexical_results() {
+    let workspace = TestWorkspace::new();
+    let task = workspace.add_task_without_companion();
+    let task_id = task["id"].as_str().expect("task id");
+    let embed_root = workspace.home.join(".orbit").join("embed");
+    assert!(
+        !embed_root.exists(),
+        "test must start without companion state"
+    );
+
+    let input = json!({
+        "query": "Noisy companion regression",
+        "hybrid": true,
+        "kind": "task",
+        "limit": 1,
+        "model": "codex"
+    })
+    .to_string();
+    let output = workspace.run_without_companion(
+        &["tool", "run", "orbit.search", "--input", &input, "--full"],
+        "tool run hybrid search without companion",
+    );
+    let response: Value = serde_json::from_slice(&output.stdout).expect("search JSON");
+
+    assert_eq!(response["mode"], "lexical");
+    assert_eq!(response["results"][0]["id"], task_id);
+    assert_eq!(response["results"][0]["source"], "lexical");
+    let notes = response["notes"].as_array().expect("fallback notes");
+    assert!(notes.iter().any(|note| {
+        note.as_str()
+            .is_some_and(|note| note.contains("falling back to lexical task search"))
+    }));
+    assert!(notes.iter().all(|note| {
+        note.as_str()
+            .is_some_and(|note| !note.contains("orbit semantic install"))
+    }));
+    assert!(
+        !embed_root.exists(),
+        "fallback must not install companion state"
+    );
+}
+
 struct TestWorkspace {
     _temp: TempDir,
     home: std::path::PathBuf,
