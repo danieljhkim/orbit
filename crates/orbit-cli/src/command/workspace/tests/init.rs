@@ -110,11 +110,23 @@ policy:
         seeded_qa_auto_task.contains("enabled: false"),
         "workspace initialization must not enable the QA default auto-task"
     );
+    let security_auto_task_path = workspace
+        .path()
+        .join(".orbit/auto_tasks/security-review.yaml");
+    let seeded_security_auto_task = std::fs::read_to_string(&security_auto_task_path)
+        .expect("read seeded security-review definition");
+    assert!(
+        seeded_security_auto_task.contains("enabled: false"),
+        "workspace initialization must not enable the security-review default auto-task"
+    );
     let authored_auto_task = "operator-authored auto-task definition\n";
     let authored_qa_auto_task = "operator-authored QA auto-task definition\n";
+    let authored_security_auto_task = "operator-authored security-review auto-task definition\n";
     std::fs::write(&auto_task_path, authored_auto_task).expect("author auto-task definition");
     std::fs::write(&qa_auto_task_path, authored_qa_auto_task)
         .expect("author QA auto-task definition");
+    std::fs::write(&security_auto_task_path, authored_security_auto_task)
+        .expect("author security-review auto-task definition");
 
     let registry_bytes = std::fs::read_to_string(&registry_path).expect("read protected registry");
     let identity_path = workspace.path().join(".orbit/config.yaml");
@@ -164,6 +176,12 @@ policy:
         std::fs::read_to_string(&qa_auto_task_path).expect("read authored QA auto-task definition"),
         authored_qa_auto_task,
         "workspace --force reconciliation must preserve an authored QA auto-task definition"
+    );
+    assert_eq!(
+        std::fs::read_to_string(&security_auto_task_path)
+            .expect("read authored security-review auto-task definition"),
+        authored_security_auto_task,
+        "workspace --force reconciliation must preserve an authored security-review auto-task definition"
     );
 
     init(None, None, true)

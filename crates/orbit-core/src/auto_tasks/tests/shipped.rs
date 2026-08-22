@@ -18,6 +18,16 @@ fn shipped_defaults_all_parse_and_are_disabled() {
         !DEFAULT_AUTO_TASK_FILES.is_empty(),
         "expected at least one shipped auto-task definition"
     );
+    let names: Vec<&str> = DEFAULT_AUTO_TASK_FILES
+        .iter()
+        .map(|(name, _)| *name)
+        .collect();
+    for required in ["friction-curation", "qa-sweep", "security-review"] {
+        assert!(
+            names.contains(&required),
+            "missing shipped default {required}"
+        );
+    }
     for (stem, yaml) in DEFAULT_AUTO_TASK_FILES {
         let definition =
             parse_auto_task_yaml(yaml).unwrap_or_else(|error| panic!("parse {stem}: {error}"));
@@ -246,5 +256,97 @@ fn qa_sweep_default_preserves_hands_on_validation_contract() {
                     && criterion.contains("production impact")
             }),
         "qa-sweep acceptance criteria must require filing breaking tests"
+    );
+}
+
+#[test]
+fn security_review_default_is_portable_weekly_and_inert() {
+    let (_, yaml) = DEFAULT_AUTO_TASK_FILES
+        .iter()
+        .find(|(name, _)| *name == "security-review")
+        .expect("security-review default");
+    let definition = parse_auto_task_yaml(yaml).expect("parse security-review");
+
+    assert_eq!(definition.name, "security-review");
+    assert!(!definition.enabled, "definition must ship disabled");
+    assert_eq!(
+        definition.schedule,
+        AutoTaskSchedule::Cron {
+            cron: "0 8 * * 1".to_string()
+        },
+        "security-review must use a documented weekly schedule"
+    );
+    assert!(matches!(definition.dedupe, DedupePolicy::SkipIfOpen));
+    assert_eq!(definition.template.crew.as_deref(), Some("system"));
+    assert!(
+        yaml.contains("\n  crew: system"),
+        "default must name the portable system crew"
+    );
+    assert_eq!(
+        definition.template.status,
+        orbit_types::task::TaskStatus::Backlog
+    );
+    assert!(
+        definition
+            .template
+            .tags
+            .iter()
+            .any(|tag| tag == "security-review"),
+        "minted tasks must carry the security-review tag"
+    );
+    assert!(
+        !yaml.contains("/home/") && !yaml.contains("/Users/"),
+        "default must not contain a machine-specific path"
+    );
+
+    let body = definition.template.description.to_lowercase();
+    for required in [
+        "application code",
+        "dependencies",
+        "secret handling",
+        "configuration",
+        "evidence",
+        "skip duplicates",
+        "severity",
+        "impact",
+        "narrative-only",
+        "no findings",
+        "no-op",
+        "orbit tool run orbit.task.add",
+        "orbit tool run orbit.search",
+        "orbit tool run orbit.task.show",
+        "orbit tool run orbit.task.list",
+    ] {
+        assert!(
+            body.contains(required),
+            "template should retain '{required}'"
+        );
+    }
+    assert!(!body.contains("orbit task add"));
+    assert!(!body.contains("orbit task list"));
+    assert!(!body.contains("orbit task show"));
+    assert!(
+        definition
+            .template
+            .acceptance_criteria
+            .iter()
+            .any(|criterion| {
+                let criterion = criterion.to_lowercase();
+                criterion.contains("durable")
+                    && criterion.contains("evidence")
+                    && criterion.contains("severity")
+                    && criterion.contains("impact")
+                    && criterion.contains("narrative-only")
+            }),
+        "security-review acceptance criteria must require durable filed findings"
+    );
+    assert!(
+        definition
+            .template
+            .acceptance_criteria
+            .iter()
+            .any(|criterion| criterion.to_lowercase().contains("no findings")
+                && criterion.to_lowercase().contains("no-op")),
+        "security-review acceptance criteria must treat a clean review as success"
     );
 }

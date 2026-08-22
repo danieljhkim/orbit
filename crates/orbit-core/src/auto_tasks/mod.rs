@@ -58,6 +58,10 @@ pub(crate) const DEFAULT_AUTO_TASK_FILES: &[(&str, &str)] = &[
         "qa-sweep",
         include_str!("../../assets/auto_tasks/qa-sweep.yaml"),
     ),
+    (
+        "security-review",
+        include_str!("../../assets/auto_tasks/security-review.yaml"),
+    ),
 ];
 
 /// Seed missing default auto-task definitions without changing an existing

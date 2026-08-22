@@ -859,9 +859,13 @@ mod tests {
 
         let initial = init_workspace_at_root(&orbit_root, options.clone())
             .expect("initialize fresh workspace");
-        assert_eq!(initial.seeded_default_auto_tasks, 2);
+        assert_eq!(
+            initial.seeded_default_auto_tasks,
+            crate::auto_tasks::DEFAULT_AUTO_TASK_FILES.len()
+        );
         let friction_path = orbit_root.join("auto_tasks/friction-curation.yaml");
         let qa_path = orbit_root.join("auto_tasks/qa-sweep.yaml");
+        let security_path = orbit_root.join("auto_tasks/security-review.yaml");
         let friction = fs::read_to_string(&friction_path).expect("read seeded friction definition");
         let friction_definition = orbit_common::protocol::yaml::parse_auto_task_yaml(&friction)
             .expect("seeded friction definition parses through loader schema");
@@ -890,13 +894,30 @@ mod tests {
             qa_definition.dedupe,
             orbit_types::workflow::DedupePolicy::SkipIfOpen
         ));
+        let security =
+            fs::read_to_string(&security_path).expect("read seeded security-review definition");
+        let security_definition = orbit_common::protocol::yaml::parse_auto_task_yaml(&security)
+            .expect("seeded security-review definition parses through loader schema");
+        assert!(!security_definition.enabled);
+        assert_eq!(security_definition.template.crew.as_deref(), Some("system"));
+        assert!(
+            security.contains("\n  crew: system"),
+            "seeded security-review default must name the system crew"
+        );
+        assert!(matches!(
+            security_definition.dedupe,
+            orbit_types::workflow::DedupePolicy::SkipIfOpen
+        ));
         assert!(!orbit_root.join("state/auto-tasks.json").exists());
         let loaded = crate::auto_tasks::collect_auto_tasks(&orbit_root);
         assert!(
             loaded.errors.is_empty(),
             "seeded definition must load cleanly"
         );
-        assert_eq!(loaded.definitions.len(), 2);
+        assert_eq!(
+            loaded.definitions.len(),
+            crate::auto_tasks::DEFAULT_AUTO_TASK_FILES.len()
+        );
         assert!(
             loaded
                 .definitions
@@ -909,11 +930,19 @@ mod tests {
                 .iter()
                 .any(|loaded| loaded.definition.name == "qa-sweep")
         );
+        assert!(
+            loaded
+                .definitions
+                .iter()
+                .any(|loaded| loaded.definition.name == "security-review")
+        );
 
         let authored_friction = "operator-authored friction definition\n";
         let authored_qa = "operator-authored QA definition\n";
+        let authored_security = "operator-authored security-review definition\n";
         fs::write(&friction_path, authored_friction).expect("write friction edit");
         fs::write(&qa_path, authored_qa).expect("write QA edit");
+        fs::write(&security_path, authored_security).expect("write security-review edit");
         let repeated =
             init_workspace_at_root(&orbit_root, options).expect("reinitialize workspace");
         assert_eq!(repeated.seeded_default_auto_tasks, 0);
@@ -924,6 +953,10 @@ mod tests {
         assert_eq!(
             fs::read_to_string(qa_path).expect("read preserved QA definition"),
             authored_qa
+        );
+        assert_eq!(
+            fs::read_to_string(security_path).expect("read preserved security-review definition"),
+            authored_security
         );
     }
 
