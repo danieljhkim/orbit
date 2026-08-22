@@ -8,13 +8,15 @@ related_features: [orbit-docs-plugin]
 
 # Release Orbit
 
-How to cut an Orbit release such that `/plugin install orbit` and
-`codex plugin add orbit@orbit` work against the new version. The version
-invariant is load-bearing: the npm package, the Claude and Codex plugin
+How to cut an Orbit release such that `/plugin install orbit`,
+`codex plugin add orbit@orbit`, and the Cursor Agent Plugin at
+`~/.cursor/plugins/local/orbit` work against the new version. The version
+invariant is load-bearing: the npm package, the Claude, Codex, and Agent Plugin
 manifests, and the GitHub Release tag must all agree, or the
 `npx -y @orbit-tools/cli@latest mcp serve` indirection in
-[`plugin/.mcp.json`](../../plugin/.mcp.json) and
-[`plugin/.codex-plugin/plugin.json`](../../plugin/.codex-plugin/plugin.json)
+[`plugin/.mcp.json`](../../plugin/.mcp.json),
+[`plugin/.codex-plugin/plugin.json`](../../plugin/.codex-plugin/plugin.json),
+and [`plugin/mcp.json`](../../plugin/mcp.json)
 downloads a binary that does not match the installed plugin manifest.
 
 See also [RELEASING.md](../../RELEASING.md) for the higher-level release runbook and versioning policy.
@@ -78,10 +80,11 @@ Each step names the exact file or command. Do them in order.
    any version fields. This runbook does not restate that policy.
 
 2. **Bump the plugin manifest versions** in
-   [`plugin/.claude-plugin/plugin.json`](../../plugin/.claude-plugin/plugin.json)
+   [`plugin/.claude-plugin/plugin.json`](../../plugin/.claude-plugin/plugin.json),
+   [`plugin/.codex-plugin/plugin.json`](../../plugin/.codex-plugin/plugin.json),
    and
-   [`plugin/.codex-plugin/plugin.json`](../../plugin/.codex-plugin/plugin.json)
-   (`.version`). Both must match step 1.
+   [`plugin/plugin.json`](../../plugin/plugin.json)
+   (`.version`). All three must match step 1.
 
 3. **Run `make release-check`.** Pre-tag, it will exit non-zero because
    `npm view @orbit-tools/cli version` and the latest `gh release list -L 1`
@@ -91,8 +94,8 @@ Each step names the exact file or command. Do them in order.
    in one of the files the check inspects.
 
 4. **Commit the version bumps** and merge to `agent-main`, the development
-   integration branch. One commit, one PR, one bump set — do not let the two
-   plugin manifests or the npm package drift across commits. If this cycle
+   integration branch. One commit, one PR, one bump set — do not let the Claude,
+   Codex, or Agent Plugin manifests or the npm package drift across commits. If this cycle
    changed any CLI the plugin-install smoke drives, land the
    [`scripts/smoke-plugin-install.sh`](../../scripts/smoke-plugin-install.sh)
    update in the same bump (or earlier). This is not the final release
@@ -354,19 +357,30 @@ asserts equality across these sources, when each is reachable:
 - `.version` in [`plugin/npm/package.json`](../../plugin/npm/package.json)
 - `.version` in [`plugin/.claude-plugin/plugin.json`](../../plugin/.claude-plugin/plugin.json)
 - `.version` in [`plugin/.codex-plugin/plugin.json`](../../plugin/.codex-plugin/plugin.json)
+- `.version` in [`plugin/plugin.json`](../../plugin/plugin.json)
 - `npm view @orbit-tools/cli version`
 - `gh release list -L 1` (latest tag, leading `v` stripped)
 
 It also runs
-[`scripts/validate-codex-plugin.sh`](../../scripts/validate-codex-plugin.sh),
-which checks the Codex manifest, repository marketplace entry, shared skill
-paths, and the absence of user-specific absolute paths or
-`CLAUDE_PROJECT_DIR` in Codex MCP configuration.
+[`scripts/validate-codex-plugin.sh`](../../scripts/validate-codex-plugin.sh)
+and
+[`scripts/validate-agent-plugin.sh`](../../scripts/validate-agent-plugin.sh).
+The Codex validator checks the Codex manifest, repository marketplace entry,
+shared skill paths, and the absence of user-specific absolute paths or
+`CLAUDE_PROJECT_DIR` in Codex MCP configuration. The Agent Plugin validator
+checks the official 1.0.0 `plugin.json` / `mcp.json` schemas, the shared
+`plugin/skills/orbit` skill, relative/portable paths, manifest version parity,
+and MCP command parity with Claude and Codex.
 
 Missing `npm` or `gh` is treated as a skip with a stderr note, not a hard
 failure, so the target stays usable on a fresh checkout without credentials.
 Mismatch across any reachable sources exits non-zero — so the pre-tag failure
 described in step 3 is by design.
+
+Cursor's local install path is the repository Agent Plugin at
+`plugin/`, symlinked to `~/.cursor/plugins/local/orbit`. Public Cursor
+Marketplace submission, publisher account setup, and listing review are a
+human follow-up and are not part of the release cut.
 
 ## Out-of-band fixes
 

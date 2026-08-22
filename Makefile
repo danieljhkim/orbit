@@ -128,6 +128,7 @@ ci-fast:
 	./scripts/check-orphan-modules.sh
 	./scripts/check-embedded-asset-portability.py
 	./scripts/test-validate-codex-plugin.sh
+	./scripts/test-validate-agent-plugin.sh
 
 # Compile-time pre-handoff gate for agents. Keep this invocation aligned with
 # the default workspace clippy pass in scripts/ci-guardrails.sh.
