@@ -2,9 +2,10 @@
 type: runbook
 summary: Query and interpret Orbit invocation, run, step, and activity audit history.
 tags: [operations, audit, observability, debugging]
-paths: ["crates/orbit-core/src/runtime/run_audit.rs", "crates/orbit-common/src/types/audit_event.rs"]
+paths: ["crates/orbit-core/src/runtime/run_audit.rs", "crates/orbit-types/src/telemetry/audit_event.rs"]
 related_features: [auditability, activity-job]
 related_artifacts: [ORB-10014, ORB-10227, ORB-10228]
+last_validated: 2026-08-22
 ---
 
 # Inspect the Audit Trail
@@ -38,7 +39,7 @@ orbit audit list --json --limit 100              # full event objects
 orbit audit show <id>
 orbit audit stats --since 7d
 orbit audit export --output audit.json           # JSON or --format csv
-orbit audit prune --older-than 90d
+orbit audit prune --older-than 90d --confirm
 ```
 
 Per-invocation fields include `id`, `execution_id`, `timestamp`, `command`, `subcommand`,

@@ -11,9 +11,15 @@ tags: ["worktree-artifacts"]
 paths: ["crates/orbit-core/**", "crates/orbit-store/**", "crates/orbit-cli/**"]
 related_features: ["worktree-artifacts"]
 related_artifacts: ["ORB-00199", "ORB-00200", "ORB-00201"]
+last_validated: 2026-08-22
 ---
 
 # Worktree Artifacts - Vision
+
+> This vision records retired ADR and learning-store behavior. ORB-10726 retired
+> the ADR store and tool surface, and ORB-10736 removed the native learning
+> subsystem; the shared/local runtime-root split remains, while current decisions
+> live in each feature's `4_decisions.md`.
 
 The worktree artifact model should make knowledge artifacts feel like ordinary branch files without weakening Orbit's shared coordination state.
 
@@ -36,7 +42,7 @@ The worktree artifact model should make knowledge artifacts feel like ordinary b
 
 ### Artifact Discipline
 
-The ADR and learning skills already require tool-mediated writes instead of direct YAML edits. [ORB-00201] changes where those tool-mediated writes land, not the authorship rule.
+The historical ADR and learning surfaces required tool-mediated writes instead of direct YAML edits. [ORB-00201] changed where those tool-mediated writes landed, not the authorship rule.
 
 ## 3. What May Be Distinctive
 

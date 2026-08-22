@@ -11,9 +11,16 @@ tags: ["worktree-artifacts"]
 paths: ["crates/orbit-core/**", "crates/orbit-store/**", "crates/orbit-engine/**", "crates/orbit-cli/**"]
 related_features: ["worktree-artifacts", "host-registry", "mcp-bridge"]
 related_artifacts: ["ORB-00199", "ORB-00200", "ORB-00201", "ORB-10272", "ORB-10297", "ORB-10330", "ORB-10501", "ORB-10535", "ORB-10545", "ORB-10668", "ORB-10669", "ORB-10725"]
+last_validated: 2026-08-22
 ---
 
 # Worktree Artifacts - Decisions
+
+> Entries about ADR/learning stores, allocation, federation, and publication are
+> retired history. ORB-10726 retired the ADR store and tool surface, and
+> ORB-10736 removed the native learning subsystem; current feature decisions live
+> in each feature's `4_decisions.md`. The stationary-primary and delivery-summary
+> decisions below describe current code paths.
 
 Decision log for worktree artifact storage. Entries are addressed by title; task references retain their implementation provenance.
 
