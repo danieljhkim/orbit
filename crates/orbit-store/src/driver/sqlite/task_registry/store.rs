@@ -18,7 +18,8 @@ use super::queries::{
     workspace_checkout_by_paths, write_task_index_rows,
 };
 use super::schema::{
-    apply_schema, assert_registry_user_version, reject_unsupported_registry_schema,
+    apply_schema, assert_registry_user_version, registry_user_version,
+    reject_unsupported_registry_schema,
 };
 use super::util::{
     normalize_path, now_string, parse_relation_type_name, path_to_string, relation_type_name,
@@ -46,8 +47,14 @@ impl TaskRegistryStore {
         fs::create_dir_all(&registry_dir).map_err(|e| OrbitError::Store(e.to_string()))?;
         fs::create_dir_all(&workspaces_dir).map_err(|e| OrbitError::Store(e.to_string()))?;
 
-        let conn = Connection::open(path).map_err(|e| OrbitError::Store(e.to_string()))?;
-        orbit_common::storage::sqlite::apply_default_pragmas(&conn)?;
+        let mut conn = Connection::open(path).map_err(|e| OrbitError::Store(e.to_string()))?;
+        let pragmas = orbit_common::storage::sqlite::apply_default_pragmas(&conn)?;
+        let read_only =
+            pragmas.write_denied || orbit_common::storage::sqlite::filesystem_is_read_only(path)?;
+        if read_only {
+            drop(conn);
+            conn = orbit_common::storage::sqlite::open_immutable(path)?;
+        }
         // The registry is the commit point that makes a created task official, so
         // its writes must be durable against power loss the moment they ack. WAL's
         // synchronous=NORMAL default only fsyncs the WAL at checkpoint, leaving an
@@ -56,10 +63,23 @@ impl TaskRegistryStore {
         // low-write (≈one commit per task create/bind/unregister), so the extra
         // fsync cost is negligible. Scoped to this connection only — the shared
         // Store::open stays at NORMAL for higher-write stores.
-        conn.pragma_update(None, "synchronous", "FULL")
-            .map_err(|e| OrbitError::Store(format!("failed to set synchronous=FULL: {e}")))?;
+        if !read_only && let Err(error) = conn.pragma_update(None, "synchronous", "FULL") {
+            let mapped = OrbitError::Store(format!("failed to set synchronous=FULL: {error}"));
+            if mapped.is_readonly_or_access_failure() {
+                orbit_common::tracing::warn!(
+                    target: "orbit.store.task_registry",
+                    path = %path.display(),
+                    error = %error,
+                    "could not set synchronous=FULL on a read-only task registry; continuing for reads"
+                );
+            } else {
+                return Err(mapped);
+            }
+        }
         reject_unsupported_registry_schema(&conn)?;
-        apply_schema(&conn)?;
+        if registry_user_version(&conn)? < super::REGISTRY_SCHEMA_VERSION {
+            apply_schema(&conn)?;
+        }
         assert_registry_user_version(&conn)?;
 
         Ok(Self {
@@ -81,6 +101,30 @@ impl TaskRegistryStore {
             .as_deref()
             .map(validate_workspace_id)
             .transpose()?;
+
+        // Runtime construction asks for the same binding on every command.
+        // Satisfy that observational fast path without opening a write
+        // transaction; a read-only mount must only fail when a real rebind is
+        // required.
+        {
+            let conn = self
+                .conn
+                .lock()
+                .map_err(|e| OrbitError::Store(format!("mutex poisoned: {e}")))?;
+            if let Some(existing) = workspace_by_orbit_dir(&conn, &orbit_dir)? {
+                if let Some(requested) = &requested_workspace_id
+                    && requested != &existing.workspace_id
+                {
+                    return Err(OrbitError::InvalidInput(format!(
+                        "orbit dir '{}' is already bound to workspace '{}', not '{}'",
+                        orbit_dir.display(),
+                        existing.workspace_id,
+                        requested
+                    )));
+                }
+                return Ok(existing);
+            }
+        }
 
         let mut conn = self
             .conn

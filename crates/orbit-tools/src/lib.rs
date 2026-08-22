@@ -245,7 +245,20 @@ impl std::fmt::Debug for ToolContext {
 
 pub trait Tool: Send + Sync {
     fn schema(&self) -> ToolSchema;
+    /// Whether a successful invocation can have externally visible side effects.
+    ///
+    /// The conservative default keeps audit persistence fail-closed for every
+    /// tool that has not explicitly proved it is observational only.
+    fn execution_kind(&self) -> ToolExecutionKind {
+        ToolExecutionKind::Mutating
+    }
     fn execute(&self, ctx: &ToolContext, input: Value) -> Result<Value, OrbitError>;
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ToolExecutionKind {
+    ReadOnly,
+    Mutating,
 }
 
 /// Extract a non-empty string field from a tool input value.

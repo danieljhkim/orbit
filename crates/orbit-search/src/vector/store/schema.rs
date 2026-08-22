@@ -8,6 +8,12 @@ use orbit_common::OrbitError;
 use rusqlite::Connection;
 
 pub fn ensure_vector_schema(conn: &Connection) -> Result<(), OrbitError> {
+    if table_exists(conn, "embeddings")?
+        && table_exists(conn, "corpus_fts")?
+        && !table_exists(conn, legacy_task_fts_table())?
+    {
+        return Ok(());
+    }
     conn.execute_batch(
         r#"
             CREATE TABLE IF NOT EXISTS embeddings (

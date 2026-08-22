@@ -67,11 +67,23 @@ pub(crate) fn build_context_from_roots(
         binding.map(|binding| binding.workspace_id.as_str()),
     )?;
     let workspace_id = workspace_id_for_orbit_dir(&paths.orbit_dir)?;
-    let import_report = orbit_store::workflow::legacy_state::import_legacy_v2_state(
+    let import_report = match orbit_store::workflow::legacy_state::import_legacy_v2_state(
         &store,
         &paths.orbit_dir,
         &workspace_id,
-    )?;
+    ) {
+        Ok(report) => report,
+        Err(error) if error.is_readonly_or_access_failure() => {
+            tracing::warn!(
+                target: "orbit.core.bootstrap",
+                root = %paths.orbit_dir.display(),
+                error = %error,
+                "skipped incidental legacy-state import persistence"
+            );
+            orbit_store::workflow::legacy_state::ImportReport::skipped()
+        }
+        Err(error) => return Err(error),
+    };
     if import_report.skipped_records() {
         tracing::warn!(
             workspace_id = %workspace_id,
@@ -102,7 +114,18 @@ pub(crate) fn build_context_from_roots(
 
     let skill_catalog =
         SkillCatalog::layered(persistence.skill_dir.clone(), global_root.join("skills"));
-    skill_catalog.ensure_layout()?;
+    if let Err(error) = skill_catalog.ensure_layout() {
+        if error.is_readonly_or_access_failure() {
+            tracing::warn!(
+                target: "orbit.core.bootstrap",
+                root = %global_root.display(),
+                error = %error,
+                "skipped incidental skill-catalog layout persistence"
+            );
+        } else {
+            return Err(error);
+        }
+    }
 
     let mut registry = ToolRegistry::new();
     registry.register_builtins();

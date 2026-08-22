@@ -44,9 +44,24 @@ impl VectorStore {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent).map_err(|e| OrbitError::Store(e.to_string()))?;
         }
-        let conn = Connection::open(path).map_err(|e| OrbitError::Store(e.to_string()))?;
-        orbit_common::storage::sqlite::apply_default_pragmas(&conn)?;
-        schema::ensure_vector_schema(&conn)?;
+        let mut conn = Connection::open(path).map_err(|e| OrbitError::Store(e.to_string()))?;
+        let pragmas = orbit_common::storage::sqlite::apply_default_pragmas(&conn)?;
+        if pragmas.write_denied || orbit_common::storage::sqlite::filesystem_is_read_only(path)? {
+            drop(conn);
+            conn = orbit_common::storage::sqlite::open_immutable(path)?;
+        }
+        if let Err(error) = schema::ensure_vector_schema(&conn) {
+            if error.is_readonly_or_access_failure() {
+                tracing::warn!(
+                    target: "orbit.search.vector",
+                    path = %path.display(),
+                    error = %error,
+                    "skipped incidental semantic-index schema persistence"
+                );
+            } else {
+                return Err(error);
+            }
+        }
         Ok(Self {
             conn: Arc::new(Mutex::new(conn)),
         })

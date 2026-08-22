@@ -161,16 +161,21 @@ pub(crate) fn run_migrations(
     migrations: &[Migration],
 ) -> Result<(), OrbitError> {
     validate_registry(migrations)?;
-    ensure_schema_meta_table(conn)?;
-
     let current = current_schema_version(conn)?;
     let supported = migrations.last().map(|m| m.version).unwrap_or(0);
     if current > supported {
         return Err(OrbitError::Migration(format!(
             "store database schema version {current} is newer than the newest version this \
-             orbit binary supports ({supported}); upgrade orbit to open this database"
+            orbit binary supports ({supported}); upgrade orbit to open this database"
         )));
     }
+    // A current store needs no write transaction. Return before the
+    // idempotent CREATE TABLE so read-only mounts remain genuinely readable.
+    if current == supported {
+        return Ok(());
+    }
+
+    ensure_schema_meta_table(conn)?;
 
     for migration in migrations.iter().filter(|m| m.version > current) {
         apply_one(conn, migration)?;

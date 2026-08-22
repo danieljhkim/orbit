@@ -1,4 +1,5 @@
 use orbit_common::OrbitError;
+use orbit_tools::ToolExecutionKind;
 use orbit_types::telemetry::AuditEventStatus;
 use orbit_types::tool::{McpCapability, McpTransport, ToolSessionContext};
 use std::collections::BTreeSet;
@@ -659,8 +660,13 @@ fn audit_context_returns_none_when_neither_source_supplies_values() {
 
 #[test]
 fn successful_dispatch_returns_value_when_audit_persists() {
-    let outcome = finalize_successful_dispatch("orbit.task.update", json!({"ok": true}), Ok(()))
-        .expect("audit persisted -> success");
+    let outcome = finalize_successful_dispatch(
+        "orbit.task.update",
+        ToolExecutionKind::Mutating,
+        json!({"ok": true}),
+        Ok(()),
+    )
+    .expect("audit persisted -> success");
 
     assert!(outcome.audit_recorded);
     assert_eq!(outcome.value, json!({"ok": true}));
@@ -672,8 +678,12 @@ fn successful_mutation_fails_when_audit_row_cannot_be_persisted() {
     // failed. Finding M1: the call must fail rather than surface a
     // successful, un-audited mutation.
     let audit_write = Err(OrbitError::Store("disk full".to_string()));
-    let result =
-        finalize_successful_dispatch("orbit.task.update", json!({"mutated": true}), audit_write);
+    let result = finalize_successful_dispatch(
+        "orbit.task.update",
+        ToolExecutionKind::Mutating,
+        json!({"mutated": true}),
+        audit_write,
+    );
 
     let err = result.expect_err("un-audited mutation must fail the call");
     let message = err.to_string();
@@ -681,6 +691,23 @@ fn successful_mutation_fails_when_audit_row_cannot_be_persisted() {
         message.contains("orbit.task.update") && message.contains("audit row"),
         "error names the tool and the missing audit row: {message}"
     );
+}
+
+#[test]
+fn successful_read_only_dispatch_survives_unwritable_audit_store() {
+    let value = json!({"items": []});
+    let outcome = finalize_successful_dispatch(
+        "orbit.task.list",
+        ToolExecutionKind::ReadOnly,
+        value.clone(),
+        Err(OrbitError::Store(
+            "attempt to write a readonly database".to_string(),
+        )),
+    )
+    .expect("passive telemetry must not change a read-only tool result");
+
+    assert_eq!(outcome.value, value);
+    assert!(!outcome.audit_recorded);
 }
 
 #[test]

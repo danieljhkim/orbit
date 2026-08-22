@@ -9,7 +9,7 @@ use orbit_common::observability::audit_id::audit_execution_id;
 use orbit_common::{NotFoundKind, OrbitError};
 use orbit_store::Store;
 use orbit_store::contracts::{AuditEventInsertParams, AuditInvocationFields};
-use orbit_tools::{ReservationOwnerContext, ToolContext};
+use orbit_tools::{ReservationOwnerContext, ToolContext, ToolExecutionKind};
 use orbit_types::identity::{
     normalize_agent_family_for_model, normalize_optional_attribution_label,
 };
@@ -73,6 +73,7 @@ where
     execute_tool_dispatch_with_audit_store(
         name,
         input,
+        ToolExecutionKind::Mutating,
         ToolDispatchAuditContext {
             agent_override: None,
             model_override: None,
@@ -290,13 +291,25 @@ impl OrbitRuntime {
     where
         F: FnOnce(Value) -> Result<Value, OrbitError>,
     {
-        execute_tool_dispatch_with_audit_store(name, input, audit, || self.sqlite_store(), dispatch)
+        let execution_kind = self
+            .tool_registry()
+            .execution_kind(name)
+            .unwrap_or(ToolExecutionKind::Mutating);
+        execute_tool_dispatch_with_audit_store(
+            name,
+            input,
+            execution_kind,
+            audit,
+            || self.sqlite_store(),
+            dispatch,
+        )
     }
 }
 
 fn execute_tool_dispatch_with_audit_store<F, S>(
     name: &str,
     input: Value,
+    execution_kind: ToolExecutionKind,
     audit: ToolDispatchAuditContext,
     open_audit_store: S,
     dispatch: F,
@@ -448,7 +461,7 @@ where
     // db, bad perms) yielded a successful, un-audited mutation with no
     // error surfaced. Fail the call instead so a committed change can
     // never surface without its audit row.
-    finalize_successful_dispatch(name, value, audit_write)
+    finalize_successful_dispatch(name, execution_kind, value, audit_write)
 }
 
 /// Fold a successful tool call together with its audit-write outcome into the
@@ -460,12 +473,9 @@ where
 /// for the per-thread dedup signal, which is set as soon as the row persists
 /// regardless of the tool's own outcome.
 ///
-/// No read-only/mutating split exists on the tool schema, so this fails closed
-/// for *every* successful call — strictly safer than the "at least mutating
-/// tools" floor the finding sets, at the cost of also failing a read-only call
-/// when the audit store is unwritable (an already-degraded state).
 pub(super) fn finalize_successful_dispatch(
     tool_name: &str,
+    execution_kind: ToolExecutionKind,
     value: Value,
     audit_write: Result<(), OrbitError>,
 ) -> Result<ToolDispatchOutcome, OrbitError> {
@@ -474,6 +484,16 @@ pub(super) fn finalize_successful_dispatch(
             value,
             audit_recorded: true,
         }),
+        Err(err) if execution_kind == ToolExecutionKind::ReadOnly => {
+            tracing::warn!(
+                tool = tool_name,
+                "read-only tool completed but its audit event could not be persisted: {err}"
+            );
+            Ok(ToolDispatchOutcome {
+                value,
+                audit_recorded: false,
+            })
+        }
         Err(err) => {
             tracing::error!(
                 tool = tool_name,
