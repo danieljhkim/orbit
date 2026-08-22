@@ -1,11 +1,11 @@
 ---
 type: pattern
 summary: "Command Pattern"
-last_validated: 2026-07-26
+last_validated: 2026-08-22
 ---
 # Command Pattern
 
-In this codebase, Command = the `Tool` trait at `crates/orbit-tools/src/lib.rs:243`:
+In this codebase, Command = the `Tool` trait at `crates/orbit-tools/src/lib.rs:246`:
 
 ```rust
 pub trait Tool: Send + Sync {
@@ -44,7 +44,7 @@ impl Tool for OrbitPipelineInvokeTool {
 }
 ```
 
-`execute_host_action` (`orbit/mod.rs:275`) resolves the caller's identity, requires a host on the context, and forwards `(action, input, agent, model, reservation_owner)` into the runtime.
+`execute_host_action` (`orbit/mod.rs:251`) resolves the caller's identity, requires a host on the context, and forwards `(action, input, agent, model, reservation_owner)` into the runtime.
 
 Patterns to copy:
 
