@@ -30,15 +30,14 @@ fn built_in_crews_use_standard_model_specific_names() {
     // lane. [ORB-10877] It is built in because shipped job steps name it
     // directly, so a config with no `[crews]` table must still resolve it.
     //
-    // `copilot` is the second exception: it names the *provider* lane, because
-    // Copilot's model is supplied by another vendor and naming the crew after
-    // that model would hide which execution lane the run actually uses.
-    // [ORB-10946]
+    // `copilot` and `cursor` are provider-lane exceptions: each can route to
+    // models supplied by several vendors, so the crew names retain the
+    // execution provider identity. [ORB-10946] [ORB-10945]
     assert_eq!(
         crews.keys().map(String::as_str).collect::<Vec<_>>(),
         vec![
-            "copilot", "fable", "gemini", "grok", "luna", "opus", "sol", "sonnet", "system",
-            "terra"
+            "copilot", "cursor", "fable", "gemini", "grok", "luna", "opus", "sol", "sonnet",
+            "system", "terra"
         ]
     );
     for (name, provider, model) in [
@@ -51,6 +50,7 @@ fn built_in_crews_use_standard_model_specific_names() {
         ("gemini", "gemini", "gemini-3.7-flash"),
         ("grok", "grok", "grok-4.6"),
         ("copilot", "copilot", "claude-sonnet-4.5"),
+        ("cursor", "cursor", "gpt-5"),
         ("system", "claude", "sonnet"),
     ] {
         let assignment = &crews.get(name).expect("built-in crew").assignment;
@@ -63,6 +63,7 @@ fn built_in_crews_use_standard_model_specific_names() {
     // vendor supplying its model, nor to GitHub. [ORB-10946]
     assert!(!crews.contains_key("github"));
     assert!(!crews.contains_key("claude-sonnet-4.5"));
+    assert!(!crews.contains_key("anysphere"));
 
     let config = ResolvedConfig::built_in(PersistenceConfig::default_for_data_root(Path::new(
         ".orbit",

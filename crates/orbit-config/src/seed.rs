@@ -20,10 +20,9 @@ pub(crate) const DEFAULT_CONFIG_TEMPLATE: &str = include_str!("../assets/default
 
 /// Crew families Orbit ships crews for, in the order a seeded config prefers
 /// them. `ollama` is deliberately absent: Orbit ships no `ollama` crew.
-/// [ORB-10946] `copilot` is appended last so adding it cannot move the
-/// default crew on any host that already had one of the four families
-/// installed.
-const CREW_FAMILY_PREFERENCE: &[&str] = &["claude", "codex", "gemini", "grok", "copilot"];
+/// Copilot and Cursor are appended after the original four families so adding
+/// either cannot move an existing host's default crew. [ORB-10946] [ORB-10945]
+const CREW_FAMILY_PREFERENCE: &[&str] = &["claude", "codex", "gemini", "grok", "copilot", "cursor"];
 
 /// Explicit, host-independent inputs for rendering a fresh `config.toml`.
 ///
@@ -158,6 +157,7 @@ fn default_crew_name(seed: &ConfigSeed) -> Option<&'static str> {
             "gemini" => "gemini",
             "grok" => "grok",
             "copilot" => "copilot",
+            "cursor" => "cursor",
             _ => unreachable!("available crew families are fixed"),
         })
 }
@@ -264,8 +264,8 @@ fn default_qa_crew(seed: &ConfigSeed) -> Option<CrewSeed> {
 /// special-case a family.
 fn default_system_crew(seed: &ConfigSeed) -> Option<CrewSeed> {
     use orbit_common::model_defaults::{
-        CLAUDE_DEFAULT_WEAK, CODEX_LUNA_MODEL, COPILOT_CREW_MODEL, GEMINI_CREW_MODEL,
-        GROK_DEFAULT_MODEL,
+        CLAUDE_DEFAULT_WEAK, CODEX_LUNA_MODEL, COPILOT_CREW_MODEL, CURSOR_CREW_MODEL,
+        GEMINI_CREW_MODEL, GROK_DEFAULT_MODEL,
     };
     let (provider, model) = if seed.has_family("codex") {
         ("codex", CODEX_LUNA_MODEL)
@@ -277,6 +277,8 @@ fn default_system_crew(seed: &ConfigSeed) -> Option<CrewSeed> {
         ("gemini", GEMINI_CREW_MODEL)
     } else if seed.has_family("copilot") {
         ("copilot", COPILOT_CREW_MODEL)
+    } else if seed.has_family("cursor") {
+        ("cursor", CURSOR_CREW_MODEL)
     } else {
         return None;
     };

@@ -12,6 +12,7 @@ pub(crate) const DEFAULT_EXECUTOR_FILES: &[(&str, &str)] = &[
         "copilot",
         include_str!("../../assets/executors/copilot.yaml"),
     ),
+    ("cursor", include_str!("../../assets/executors/cursor.yaml")),
     (
         "local-shell",
         include_str!("../../assets/executors/local-shell.yaml"),

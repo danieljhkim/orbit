@@ -636,7 +636,7 @@ fn compile_grants_copilot_dirs_only_to_an_active_copilot_executor() {
     );
 
     // No other provider inherits Copilot-specific write access.
-    for provider in ["claude", "codex", "gemini", "grok"] {
+    for provider in ["claude", "codex", "gemini", "grok", "cursor"] {
         let other = compile_with_env(
             &resolved,
             provider,
@@ -652,6 +652,47 @@ fn compile_grants_copilot_dirs_only_to_an_active_copilot_executor() {
         assert!(
             !other.contains("/Users/test/.cache/copilot"),
             "{provider} must not inherit the copilot extraction cache",
+        );
+    }
+}
+
+#[test]
+fn cursor_state_dir_defaults_under_home() {
+    assert_eq!(
+        cursor_state_dir(Some(OsStr::new("/Users/test"))),
+        Some(PathBuf::from("/Users/test/.cursor"))
+    );
+    assert_eq!(cursor_state_dir(None), None);
+}
+
+#[test]
+fn compile_grants_cursor_state_only_to_an_active_cursor_executor() {
+    let resolved = profile("default", &["/Users/test/repo"], &["/Users/test/repo/src"]);
+    let cursor_profile = compile_with_env(
+        &resolved,
+        "cursor",
+        EnvOverrides {
+            home: Some("/Users/test"),
+            ..Default::default()
+        },
+    );
+    assert!(
+        cursor_profile.contains("(allow file-write* (subpath \"/Users/test/.cursor\"))"),
+        "active Cursor must be granted its state directory",
+    );
+
+    for provider in ["claude", "codex", "gemini", "grok", "copilot"] {
+        let other = compile_with_env(
+            &resolved,
+            provider,
+            EnvOverrides {
+                home: Some("/Users/test"),
+                ..Default::default()
+            },
+        );
+        assert!(
+            !other.contains("/Users/test/.cursor"),
+            "{provider} must not inherit Cursor state write access",
         );
     }
 }
