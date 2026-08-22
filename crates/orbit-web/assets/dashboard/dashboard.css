@@ -2629,6 +2629,30 @@
       }
       .run-meta-grid .value { color: var(--fg); }
 
+      /* Child-run lineage (ORB-10971) */
+      .child-dispatch-panel {
+        padding: 12px 16px;
+        font-family: var(--font-mono);
+        font-size: 12px;
+        border-bottom: 1px solid var(--border);
+      }
+      .child-dispatch-panel .label {
+        color: var(--fg-dim);
+        font-size: 10px;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        margin-bottom: 6px;
+      }
+      .child-dispatch-row {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 8px;
+        margin-bottom: 4px;
+      }
+      .child-dispatch-meta { color: var(--fg-dim); }
+      .child-dispatch-error { color: var(--state-failed); }
+
       .step-row {
         display: grid;
         grid-template-columns: 60px 1fr 100px 80px 80px;

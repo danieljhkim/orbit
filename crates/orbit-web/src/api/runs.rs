@@ -13,7 +13,7 @@ use super::{
     HISTORY_DEFAULT_LIMIT, LimitQuery, RunEventsQuery, bad_request, bounded_limit,
     map_runtime_error, validate_id,
 };
-use crate::projections::job_run_to_json;
+use crate::projections::job_run_to_json_with_state;
 
 const RUN_EVENTS_DEFAULT_LIMIT: usize = 100;
 /// Hard cap on rows scanned from a single run's persisted v2 audit events.
@@ -146,7 +146,11 @@ pub(super) async fn replay_run_action(Ws(runtime): Ws, Path(id): Path<String>) -
 }
 
 pub(super) fn job_run_detail_to_json(runtime: &OrbitRuntime, run: &JobRun) -> Value {
-    let mut full = job_run_to_json(run);
+    // [ORB-10971] Read the run's pipeline state. This projection used to drop
+    // it entirely, so the dashboard could not see the waiting reasons or the
+    // child-dispatch lineage the CLI already showed.
+    let state = runtime.read_run_state(&run.run_id).ok().flatten();
+    let mut full = job_run_to_json_with_state(run, state.as_ref());
     // Reshape into `{run, steps}` per the dashboard contract: peel the
     // `steps` array off the flat `job_run_to_json` output.
     let stored_steps = full
@@ -160,7 +164,12 @@ pub(super) fn job_run_detail_to_json(runtime: &OrbitRuntime, run: &JobRun) -> Va
     let steps = if audit_steps.is_empty() {
         stored_steps
     } else {
-        Value::Array(audit_steps.iter().map(audit_step_to_json).collect())
+        Value::Array(
+            audit_steps
+                .iter()
+                .map(|step| audit_step_to_json(step, run.state))
+                .collect(),
+        )
     };
 
     // [ORB-10496] Provider subprocesses for this run's agent steps, with a
@@ -199,7 +208,16 @@ fn run_provider_process_to_json(record: &RunProviderProcess) -> Value {
     })
 }
 
-fn audit_step_to_json(step: &RunAuditStep) -> Value {
+/// Project one audit-derived step, reconciled against the run's own state.
+///
+/// [ORB-10971] Steps are rebuilt from `step_started` / `step_finished` audit
+/// events, so a run killed mid-step leaves a `step_started` with no partner
+/// and the step renders `running` forever. A cancelled parent blocked in a
+/// dispatch wait is exactly that case. A step cannot outlive its run: once the
+/// run is terminal, an unfinished step inherits the run's terminal state and is
+/// marked `interrupted` so the projection says what happened rather than
+/// implying work is still in flight.
+fn audit_step_to_json(step: &RunAuditStep, run_state: orbit_core::JobRunState) -> Value {
     let duration_ms = match (step.started_at, step.finished_at) {
         (Some(started), Some(finished)) => Some(
             finished
@@ -209,12 +227,23 @@ fn audit_step_to_json(step: &RunAuditStep) -> Value {
         ),
         _ => None,
     };
+    let unfinished = step.state.is_none();
+    let state = match step.state.as_deref() {
+        Some(state) => state.to_string(),
+        None if run_state.is_terminal() => run_state.to_string(),
+        None => "running".to_string(),
+    };
+    let outcome = match (&step.outcome, unfinished && run_state.is_terminal()) {
+        (Some(outcome), _) => Some(outcome.clone()),
+        (None, true) => Some("interrupted".to_string()),
+        (None, false) => None,
+    };
 
     json!({
         "step_index": step.step_index,
         "target_type": "activity",
         "target_id": step.step_id,
-        "state": step.state.as_deref().unwrap_or("running"),
+        "state": state,
         "started_at": step.started_at.map(|v| v.to_rfc3339()),
         "finished_at": step.finished_at.map(|v| v.to_rfc3339()),
         "duration_ms": duration_ms,
@@ -222,7 +251,7 @@ fn audit_step_to_json(step: &RunAuditStep) -> Value {
         "agent_response_json": null,
         "error_code": null,
         "error_message": step.error_message,
-        "outcome": step.outcome,
+        "outcome": outcome,
     })
 }
 

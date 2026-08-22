@@ -187,7 +187,50 @@ export function renderRunDetailMeta() {
   if (runIsCancellable(run)) actions.appendChild(buildCancelRunButton(run, wrap));
   wrap.appendChild(actions);
   wrap.appendChild(grid);
+  const children = buildChildDispatches(run);
+  if (children) wrap.appendChild(children);
   syncNodes(meta, [wrap]);
+}
+
+// [ORB-10971] The child Runs this run dispatched, from the durable dispatch
+// checkpoint the API projects as `run.child_dispatches`.
+//
+// This is the answer to "the parent has been sitting on a dispatch step for an
+// hour — did it actually submit anything?", so it is rendered from the moment
+// the child is submitted rather than only once the parent's wait returns, and
+// it stays visible after the parent terminalizes.
+function buildChildDispatches(run) {
+  const dispatches = Array.isArray(run.child_dispatches) ? run.child_dispatches : [];
+  if (dispatches.length === 0) return null;
+
+  const rows = dispatches.map((d) => {
+    const parts = [`job ${d.job_name || "?"}`, `phase ${d.phase || "?"}`];
+    if (d.parent_step_id) parts.push(`step ${d.parent_step_id}`);
+    if (d.queued) parts.push("queued");
+    if (d.child_status) parts.push(`status ${d.child_status}`);
+    if (d.cancellation) parts.push(`cancel ${d.cancellation.policy}/${d.cancellation.outcome}`);
+
+    const link = el("button", {
+      class: "back-action",
+      text: d.child_run_id,
+      title: `Open ${d.child_run_id}`,
+    });
+    link.addEventListener("click", () => navigateToRun(d.child_run_id));
+
+    const row = el("div", { class: "child-dispatch-row" }, [
+      link,
+      el("span", { class: "child-dispatch-meta", text: parts.join(" · ") }),
+    ]);
+    if (d.error) {
+      row.appendChild(el("span", { class: "child-dispatch-error", text: d.error }));
+    }
+    return row;
+  });
+
+  return el("div", { class: "child-dispatch-panel" }, [
+    el("div", { class: "label", text: `child runs (${dispatches.length})` }),
+    ...rows,
+  ]);
 }
 
 export function renderRunSteps() {

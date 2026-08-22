@@ -55,3 +55,43 @@ pub(crate) fn format_waiting_line(
     }
     (!parts.is_empty()).then(|| format!("Waiting on {}", parts.join("; ")))
 }
+
+/// One line per child Run this run dispatched [ORB-10971].
+///
+/// Unlike the waiting line above this is not filtered by the parent's state:
+/// the whole point of the dispatch checkpoint is that an operator staring at a
+/// stalled — or cancelled — parent can name its child immediately, so the
+/// lineage is printed for terminal runs too.
+pub(crate) fn format_child_dispatch_lines(state: Option<&PipelineState>) -> Vec<String> {
+    let Some(state) = state else {
+        return Vec::new();
+    };
+    state
+        .child_dispatches
+        .iter()
+        .map(|dispatch| {
+            let mut line = format!(
+                "Child {} job={} step={} phase={} queued={}",
+                dispatch.child_run_id,
+                dispatch.job_name,
+                dispatch.parent_step_id.as_deref().unwrap_or("-"),
+                dispatch.phase.as_str(),
+                dispatch.queued,
+            );
+            if let Some(status) = &dispatch.child_status {
+                line.push_str(&format!(" status={status}"));
+            }
+            if let Some(cancellation) = &dispatch.cancellation {
+                line.push_str(&format!(
+                    " cancellation={}/{}",
+                    cancellation.policy.as_str(),
+                    cancellation.outcome
+                ));
+            }
+            if let Some(error) = &dispatch.error {
+                line.push_str(&format!(" error={}", summarize_error_message(Some(error))));
+            }
+            line
+        })
+        .collect()
+}

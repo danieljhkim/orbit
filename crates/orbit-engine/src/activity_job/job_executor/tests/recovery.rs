@@ -75,6 +75,7 @@ fn recovery_success_runs_one_post_recovery_attempt_with_exact_input_and_fs_profi
         host.input_for_action("recover"),
         Some(json!({
             "failed_step_id": "build",
+            "step_id": "recover",
             "activity_name": "flaky",
             "error_message": original_error.to_string(),
             "attempt": 2,
@@ -364,6 +365,7 @@ fn worktree_integrity_failure_bypasses_retry_then_recovers_once() {
         host.input_for_action("recover"),
         Some(json!({
             "failed_step_id": "build",
+            "step_id": "recover",
             "activity_name": "flaky",
             "error_message": integrity_error.to_string(),
             "attempt": 1,

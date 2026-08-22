@@ -8,7 +8,8 @@ use crate::command::{CommandOut, Payload};
 use crate::output::color::Domain;
 
 use super::format::{
-    format_duration, format_timestamp, format_waiting_line, summarize_error_message,
+    format_child_dispatch_lines, format_duration, format_timestamp, format_waiting_line,
+    summarize_error_message,
 };
 
 pub(crate) fn resolve_run(
@@ -185,6 +186,7 @@ pub(crate) fn run_header_text_with_state(run: &JobRun, state: Option<&PipelineSt
     if let Some(line) = format_waiting_line(run.state, state) {
         lines.push(line);
     }
+    lines.extend(format_child_dispatch_lines(state));
     lines.join("\n")
 }
 

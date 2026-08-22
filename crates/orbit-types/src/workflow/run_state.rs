@@ -5,6 +5,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::workflow::JobRunState;
+use crate::workflow::child_dispatch::{
+    ChildCancellation, ChildCancellationPolicy, ChildDispatch, ChildDispatchPhase,
+};
 
 /// Persistent pipeline state for a job run.
 ///
@@ -46,6 +49,16 @@ pub struct PipelineState {
     /// Task lock resource identifiers currently blocking this run, when parked.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub waiting_on_locks: Option<Vec<String>>,
+    /// Child Runs this run dispatched, in submission order.
+    ///
+    /// Written the moment `orbit.pipeline.invoke` returns a durable child run
+    /// id — before a blocking parent enters its wait — so parent/child lineage
+    /// is observable for the whole life of the dispatch rather than only after
+    /// the step's output is finally persisted. Unlike the waiting reasons
+    /// above, this survives terminalization: a cancelled parent must still
+    /// name the child it left behind.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub child_dispatches: Vec<ChildDispatch>,
     pub updated_at: DateTime<Utc>,
 }
 
@@ -65,6 +78,7 @@ impl PipelineState {
             iteration: 0,
             waiting_on_deps: None,
             waiting_on_locks: None,
+            child_dispatches: Vec::new(),
             updated_at: Utc::now(),
         }
     }
@@ -119,6 +133,98 @@ impl PipelineState {
         self.waiting_on_deps = None;
         self.waiting_on_locks = None;
         self.updated_at = Utc::now();
+    }
+
+    /// Record a child dispatch, keyed by the child's run id.
+    ///
+    /// Upsert rather than push: a resumed or retried parent re-executing the
+    /// same dispatch step must not accumulate duplicate rows for one child.
+    /// A re-record keeps the original `submitted_at` so the observable
+    /// submission instant does not drift.
+    pub fn record_child_dispatch(&mut self, dispatch: ChildDispatch) {
+        match self
+            .child_dispatches
+            .iter_mut()
+            .find(|existing| existing.child_run_id == dispatch.child_run_id)
+        {
+            Some(existing) => {
+                let submitted_at = existing.submitted_at;
+                *existing = dispatch;
+                existing.submitted_at = submitted_at;
+            }
+            None => self.child_dispatches.push(dispatch),
+        }
+        self.updated_at = Utc::now();
+    }
+
+    /// Advance a recorded child dispatch. Returns false when no dispatch with
+    /// that child run id is recorded, so a caller can tell a lost checkpoint
+    /// from a successful update instead of silently succeeding.
+    pub fn advance_child_dispatch(
+        &mut self,
+        child_run_id: &str,
+        phase: ChildDispatchPhase,
+        child_status: Option<String>,
+        error: Option<String>,
+    ) -> bool {
+        let Some(dispatch) = self
+            .child_dispatches
+            .iter_mut()
+            .find(|dispatch| dispatch.child_run_id == child_run_id)
+        else {
+            return false;
+        };
+        dispatch.phase = phase;
+        if child_status.is_some() {
+            dispatch.child_status = child_status;
+        }
+        if error.is_some() {
+            dispatch.error = error;
+        }
+        dispatch.updated_at = Utc::now();
+        self.updated_at = Utc::now();
+        true
+    }
+
+    /// Every child dispatch the parent still considers open.
+    pub fn open_child_dispatches(&self) -> impl Iterator<Item = &ChildDispatch> {
+        self.child_dispatches
+            .iter()
+            .filter(|dispatch| dispatch.phase.is_open())
+    }
+
+    /// Close an open dispatch because the parent itself terminalized, and
+    /// record which cancellation policy was applied to the child.
+    ///
+    /// The linkage itself is never dropped: an operator who cancels a parent
+    /// mid-wait still needs the child run id, which is the only handle on the
+    /// work that outlived (or was stopped with) the parent.
+    pub fn terminalize_child_dispatch(
+        &mut self,
+        child_run_id: &str,
+        cancellation: ChildCancellation,
+    ) -> bool {
+        let Some(dispatch) = self
+            .child_dispatches
+            .iter_mut()
+            .find(|dispatch| dispatch.child_run_id == child_run_id)
+        else {
+            return false;
+        };
+        dispatch.phase = ChildDispatchPhase::Terminal;
+        dispatch.cancellation = Some(cancellation);
+        dispatch.updated_at = Utc::now();
+        self.updated_at = Utc::now();
+        true
+    }
+
+    /// The child run ids a terminalizing parent must cancel, per each
+    /// dispatch's own [`ChildCancellationPolicy`].
+    pub fn cascade_cancellation_targets(&self) -> Vec<String> {
+        self.open_child_dispatches()
+            .filter(|dispatch| dispatch.cancellation_policy() == ChildCancellationPolicy::Cascade)
+            .map(|dispatch| dispatch.child_run_id.clone())
+            .collect()
     }
 
     /// Rebuild the pipeline snapshot just before `step_index` executes.
