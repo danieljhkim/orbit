@@ -3,8 +3,8 @@ summary: "Auditability — Design"
 type: design
 title: "Auditability — Design"
 owner: codex
-last_updated: 2026-08-15
-last_validated: 2026-08-15
+last_updated: 2026-08-22
+last_validated: 2026-08-22
 status: Draft
 feature: auditability
 doc_role: design
@@ -164,7 +164,7 @@ remain separate from Fast/service-tier and long-context dimensions, which are
 not approximated into the base table. Direct Codex/Claude orchestration-session
 cost is outside the audit scope.
 
-After [ORB-10370], CLI response parsing also fills `InvocationTrace.provider_model` and `provider_cost_usd` directly from provider-owned result metadata. Claude exposes a `modelUsage` map and `total_cost_usd`; when Claude reports its internal helper model beside the requested model, Orbit selects the unique highest-cost map entry and preserves its key verbatim. Gemini exposes an exact model key under `stats.models` but no invocation USD total; Orbit accepts it only when the map has one entry. Codex JSONL and Grok's JSON wrapper do not currently report either value, so they remain `None`. At SQLite ingest, a non-empty provider model wins over the configured request/alias and the configured model remains the fallback. A disagreement emits a retained `WARN` event under `orbit.core.invocation` with job run, activity, CLI, requested model, and provider model fields. This structured mismatch event was chosen instead of a second invocation column: it makes provider routing drift detectable under the default logging filter without migrating or backfilling rows, while `invocations.model` remains the exact model used for pricing and aggregation.
+After [ORB-10370], CLI response parsing also fills `InvocationTrace.provider_model` and `provider_cost_usd` directly from provider-owned result metadata. Claude exposes a `modelUsage` map and `total_cost_usd`; when Claude reports its internal helper model beside the requested model, Orbit selects the unique highest-cost map entry and preserves its key verbatim. Gemini exposes an exact model key under `stats.models` but no invocation USD total; Orbit accepts it only when the map has one entry. Codex JSONL does not currently report either value, so those fields remain `None`. Grok Build CLI JSON (`grok` 1.0.5+) carries the same `modelUsage` / `total_cost_usd` wrapper fields as Claude. The ledger's only key is the requested public menu id with a `-build` suffix (`grok models` lists `grok-4.6` and `grok-4.5`; the usage map key is `grok-4.6-build` / `grok-4.5-build`). Parser extraction keeps that ledger key verbatim. Wrappers that omit both fields still leave `provider_model` and `provider_cost_usd` unset. At SQLite ingest, a non-empty provider model wins over the configured request/alias and the configured model remains the fallback, except Grok Build's `{public-id}-build` ledger name is canonicalized to the requested public menu id so `invocations.model` matches the shipped price row (`grok-4.6`, not `grok-4.6-build`). A disagreement emits a retained `WARN` event under `orbit.core.invocation` with job run, activity, CLI, requested model, and provider model fields. The Grok `{id}` vs `{id}-build` pair is not disagreement; requested `grok-4.6` vs ledger `grok-4.5-build` still warns. [ORB-10970] This structured mismatch event was chosen instead of a second invocation column: it makes provider routing drift detectable under the default logging filter without migrating or backfilling rows, while `invocations.model` remains the exact model used for pricing and aggregation.
 
 The local dashboard exposes two read-only API surfaces for these traces after [T20260508-14]: `GET /api/runs/:id/logs` returns bounded per-step CLI invocation previews, and `GET /api/diagnostics/errors` returns recent process ERROR rows plus structured agent-stderr error rows sorted newest first. Both endpoints use existing dashboard limit conventions and tolerate missing stored event rows, malformed event JSON, and missing blobs by returning empty or partial arrays.
 
@@ -235,6 +235,7 @@ Each record contains timestamp, level, target, and structured fields. After [T20
 - **[ORB-10337]** — Added dashboard HTTP ingestion for worker invocation records without changing the invocation schema.
 - **[ORB-10338]** — Added the versioned model price table and query-time `derived_cost_usd`, plus a persisted `provider_cost_usd` column for reconciliation.
 - **[ORB-10370]** — Parsed provider-reported CLI model/cost metadata, preferred the reported model at ingest, and retained structured mismatch evidence.
+- **[ORB-10970]** — Mapped Grok Build `modelUsage` ledger ids (`grok-X.Y-build`) to the requested public menu id at ingest identity so stored `invocations.model` prices against the shipped `grok-X.Y` row without warning on the ledger suffix.
 - **[ORB-10579]** — Corrected GPT-5.6 price periods and cache-write rates, added gross-input accounting, and retained OpenAI cache buckets for standard short-context estimates.
 - **[ORB-10581]** — Added reconciliation-safe managed invocation accounting by canonical task orchestrator ([Attribute managed execution cost to an explicit task orchestrator](../task-artifacts/4_decisions.md#attribute-managed-execution-cost-to-an-explicit-task-orchestrator)).
 - **[ORB-10582]** — Projected managed-execution orchestration accounting into the separately versioned dashboard scoreboard section without merging it into executor rankings.
