@@ -67,7 +67,7 @@ Paste the prompt below into your agent (Claude Code, Codex CLI, or Gemini CLI) *
 > 2. Verify the Rust toolchain. Run `cargo --version` and `rustc --version`. Orbit declares `rust-version = "1.89"` (MSRV), so I need Rust **1.89 or newer**. If cargo is missing, or rustc is older than 1.89, **stop and ask me before installing anything** — the canonical path is `rustup` (`curl https://sh.rustup.rs | sh`), but that modifies shell profile, so I want to confirm first. If rustup is already installed but the toolchain is old, suggest `rustup update stable` and confirm before running.
 > 3. Clone `https://github.com/danieljhkim/orbit` into the location from step 1, then run `make install`. This builds with cargo and copies the `orbit` binary to `$INSTALL_BIN_DIR` (default: `~/.cargo/bin`). Confirm the install path with me before running. Verify with `orbit --version`.
 > 4. Run `orbit init` to initialize global state at `~/.orbit`. It selects the host-appropriate sandbox for the shipped executor definitions: `macos-sandbox-exec` on macOS, `linux-bwrap` on Linux, and no OS-level backend on unsupported platforms. On Linux, after `orbit init`, follow the [Linux Bubblewrap host prerequisite](#linux-bubblewrap-host-prerequisite) below and require its capability probe to pass before dispatching agents.
-> 5. From *this* repository (not the Orbit clone), run `orbit workspace init --mcp`. This creates `.orbit/` here and auto-registers Orbit's MCP server with installed agent CLIs (Claude Code, Codex, Gemini).
+> 5. From *this* repository (not the Orbit clone), run `orbit workspace init --mcp`. This creates `.orbit/` here and auto-registers Orbit's MCP server with installed agent CLIs (Claude Code, Codex, Gemini). The registered server is **operator-authorized**: it can dispatch workflows (`orbit.workflow.ship`, run observation/resume) and run `orbit.command.exec`. Tell me before running this if you'd rather it stay agent-only (`orbit mcp init` instead).
 > 6. Ask me whether to enable semantic search (**optional**). `orbit semantic install` downloads a small embedder companion plus the default bge-small model (lives under `~/.orbit/embed/`) and powers `orbit search <query> --hybrid` / `orbit search similar <task-id>` over tasks. It requires macOS arm64 or Linux x86_64/aarch64 with glibc >= 2.38; Intel macOS is unsupported for semantic search. Don't install without my OK. If I accept and tasks already exist in this workspace, also run `orbit semantic index` to backfill the corpus.
 > 7. Read the key documents so you actually understand the model:
 >    - `README.md` — feature surface, install model, plugin vs CLI
@@ -114,7 +114,7 @@ curl -sSf https://raw.githubusercontent.com/danieljhkim/orbit/main/install.sh | 
 
 # initialize
 orbit init                                 # global state (~/.orbit)
-cd <repo> && orbit workspace init --mcp    # workspace state + MCP integration
+cd <repo> && orbit workspace init --mcp    # workspace state + operator-authorized MCP integration
 
 # create, approve, and ship a task
 TASK_ID=$(orbit task add \
@@ -276,19 +276,20 @@ First-time onboarding (`.orbit/` absent) and "what is orbit" tour requests are h
 
 ## Orbit MCP Surface
 
-`orbit workspace init --mcp` registers the Orbit MCP server with the local agent CLI (Claude Code, Codex, Gemini), same as the plugin.
+`orbit workspace init --mcp` registers the Orbit MCP server with the local agent CLI (Claude Code, Codex, Gemini), same as the plugin. The registered server launches as `orbit mcp serve --operator`: it holds **operator authority**, so governed operations — dispatching a workflow (`orbit.workflow.ship`), observing/resuming a run, and `orbit.command.exec` — are authorized through it. Bare `orbit mcp serve` (and every worker/agent-launched MCP session) stays agent-only and is refused those governed tools; `orbit mcp init` also stays agent-only unless you pass `--operator` at the `orbit mcp serve` layer yourself.
 
 `tools/list` is the authoritative MCP reference. Orbit composes that surface from
 the explicitly MCP-registered builtins in `orbit-tools` plus the two discovery
 tools `orbit.workspace.list` and `orbit.crew.list`. `orbit tool list` remains the
 broader registry reference, including tools deliberately kept off MCP.
 
-MCP v1 has no capability-specific advertisement or authorization tier. Local and
-SSH-originated sessions receive the same complete supported surface. Client
-permission profiles may auto-allow some names and prompt for others, but those
-settings are ergonomics, not a server security boundary. Domain validation,
-sandboxing, workspace claims, and other runtime checks still execute on the
-accepting server through Orbit Core.
+Every advertised tool is visible to every session regardless of authority tier;
+authorization is enforced at call time, not by hiding names from `tools/list`.
+Local and SSH-originated sessions receive the same complete supported surface.
+Client permission profiles may auto-allow some names and prompt for others, but
+those settings are ergonomics, not a server security boundary. Domain
+validation, sandboxing, workspace claims, and other runtime checks still
+execute on the accepting server through Orbit Core.
 
 Workspace-scoped tools accept a registered workspace name, logical `ws_*` ID, or
 absolute path registered on the accepting server. The selector may come from the

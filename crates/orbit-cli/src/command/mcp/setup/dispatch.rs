@@ -17,26 +17,36 @@ pub(super) fn run_action(
     for provider in &providers {
         let target = ConfigTarget::resolve(scope, provider, repo_root, home_dir.as_deref())?;
         match (action, provider) {
-            (McpAction::Init, McpProvider::Claude) => apply_claude_init(&target)?,
+            (McpAction::Init { operator }, McpProvider::Claude) => {
+                apply_claude_init(&target, operator)?
+            }
             (McpAction::Remove, McpProvider::Claude) => apply_claude_remove(&target)?,
-            (McpAction::Init, McpProvider::Codex) => apply_codex_init(&target)?,
+            (McpAction::Init { operator }, McpProvider::Codex) => {
+                apply_codex_init(&target, operator)?
+            }
             (McpAction::Remove, McpProvider::Codex) => apply_codex_remove(&target)?,
-            (McpAction::Init, McpProvider::Gemini) => apply_gemini_init(&target)?,
+            (McpAction::Init { operator }, McpProvider::Gemini) => {
+                apply_gemini_init(&target, operator)?
+            }
             (McpAction::Remove, McpProvider::Gemini) => apply_gemini_remove(&target)?,
-            (McpAction::Init, McpProvider::Grok) => apply_grok_init(&target)?,
+            (McpAction::Init { operator }, McpProvider::Grok) => {
+                apply_grok_init(&target, operator)?
+            }
             (McpAction::Remove, McpProvider::Grok) => apply_grok_remove(&target)?,
-            (McpAction::Init, McpProvider::Cursor) => {
-                apply_simple_json_init(&target, "mcpServers")?
+            (McpAction::Init { operator }, McpProvider::Cursor) => {
+                apply_simple_json_init(&target, "mcpServers", operator)?
             }
             (McpAction::Remove, McpProvider::Cursor) => {
                 apply_simple_json_remove(&target, "mcpServers")?
             }
-            (McpAction::Init, McpProvider::Vscode) => apply_simple_json_init(&target, "servers")?,
+            (McpAction::Init { operator }, McpProvider::Vscode) => {
+                apply_simple_json_init(&target, "servers", operator)?
+            }
             (McpAction::Remove, McpProvider::Vscode) => {
                 apply_simple_json_remove(&target, "servers")?
             }
-            (McpAction::Init, McpProvider::Windsurf) => {
-                apply_simple_json_init(&target, "mcpServers")?
+            (McpAction::Init { operator }, McpProvider::Windsurf) => {
+                apply_simple_json_init(&target, "mcpServers", operator)?
             }
             (McpAction::Remove, McpProvider::Windsurf) => {
                 apply_simple_json_remove(&target, "mcpServers")?

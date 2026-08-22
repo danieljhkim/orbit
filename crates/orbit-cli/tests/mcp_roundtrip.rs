@@ -514,6 +514,93 @@ fn an_operator_served_mcp_session_reaches_a_governed_tool() {
     assert_eq!(listed["items"], json!([]));
 }
 
+/// ORB-10960: `orbit workspace init --mcp` is the operator-facing bootstrap
+/// path. This proves it end to end — configuration output through server
+/// startup — rather than only unit-testing the argv string builder: it runs
+/// the real CLI to generate a Claude Code integration, extracts the exact
+/// argv that integration launches, spawns `orbit` with that argv over the
+/// real MCP stdio transport, and confirms a governed workflow tool is
+/// authorized. Re-running the same reconciliation path must refresh the
+/// entry to a single `--operator` argument rather than duplicating it.
+#[test]
+fn workspace_init_mcp_config_reaches_a_governed_tool_over_the_real_transport() {
+    let workspace = McpWorkspace::init();
+    std::fs::create_dir_all(workspace.work.join(".claude")).expect("create .claude marker");
+
+    let reconcile = || {
+        let output = McpWorkspace::orbit_command(&workspace.work, &workspace.home)
+            .args([
+                "workspace",
+                "init",
+                "--name",
+                "mcp-roundtrip",
+                "--force",
+                "--mcp",
+            ])
+            .output()
+            .expect("run workspace init --force --mcp");
+        assert!(
+            output.status.success(),
+            "workspace init --force --mcp failed\nstdout:\n{}\nstderr:\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    };
+
+    let read_generated_args = || -> Vec<String> {
+        let claude_mcp: Value = serde_json::from_str(
+            &std::fs::read_to_string(workspace.work.join(".claude.json"))
+                .expect("read generated claude mcp config"),
+        )
+        .expect("parse generated claude mcp config");
+        claude_mcp["mcpServers"]["orbit"]["args"]
+            .as_array()
+            .expect("generated args array")
+            .iter()
+            .map(|value| value.as_str().expect("arg is a string").to_string())
+            .collect()
+    };
+
+    reconcile();
+    let args = read_generated_args();
+    assert_eq!(
+        args,
+        vec![
+            "mcp".to_string(),
+            "serve".to_string(),
+            "--operator".to_string()
+        ],
+        "orbit workspace init --mcp must write argv exactly `mcp serve --operator`"
+    );
+
+    // Re-running the same reconciliation path (`--force --mcp`, as a second
+    // `orbit workspace init --mcp` bootstrap would do) must refresh the
+    // managed entry rather than append a second `--operator` argument.
+    reconcile();
+    assert_eq!(
+        read_generated_args(),
+        args,
+        "refreshing the operator-authorized entry must not duplicate --operator"
+    );
+
+    // Spawn the exact argv the generated config launches, over the real MCP
+    // stdio transport, and prove it reaches a governed workflow tool.
+    let mut command = McpWorkspace::orbit_command(&workspace.work, &workspace.home);
+    command
+        .args(&args)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    let child = command
+        .spawn()
+        .expect("spawn the server launched by the generated config");
+    let mut client = McpClient::new(child);
+    workspace.initialize(&mut client);
+
+    let listed = client.call_tool_ok("orbit_workflow_run_list", json!({}));
+    assert_eq!(listed["items"], json!([]));
+}
+
 #[test]
 fn mcp_serve_lists_the_canonical_surface_outside_any_checkout() {
     let workspace = McpWorkspace::init();
