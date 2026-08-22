@@ -1258,6 +1258,256 @@ fn mcp_task_show_follows_the_global_id_and_explicit_workspace_stays_a_filter() {
     );
 }
 
+/// ORB-10961: the ORB-10952 managed-worktree shape.
+///
+/// A linked worktree whose checkout identity (`orbit-5c61b3`) diverged from
+/// the logical registry ID must not turn that runtime identity into an
+/// `orbit.task.show` filter. Id-only tool-run and MCP calls follow the task
+/// ID; other workspace-scoped tools still require a registered selector.
+#[test]
+fn task_show_is_global_by_default_across_tool_run_and_mcp() {
+    let workspace = McpWorkspace::init();
+
+    let registry_path = workspace.home.join(".orbit").join("workspaces.json");
+    let registry = std::fs::read_to_string(&registry_path).expect("read workspace registry");
+    std::fs::write(
+        &registry_path,
+        registry.replace("ws_mcp-roundtrip", "ws_legacy-logical"),
+    )
+    .expect("diverge the logical registry id");
+    let identity_path = workspace.work.join(".orbit").join("config.yaml");
+    let identity = std::fs::read_to_string(&identity_path).expect("read checkout identity");
+    std::fs::write(
+        &identity_path,
+        identity.replace("ws_mcp-roundtrip", "orbit-5c61b3"),
+    )
+    .expect("diverge the runtime partition identity");
+
+    let elsewhere = workspace.home.join("elsewhere");
+    std::fs::create_dir_all(&elsewhere).expect("create the second checkout");
+    let output = Command::new("git")
+        .args(["init", "--quiet"])
+        .current_dir(&elsewhere)
+        .output()
+        .expect("initialize the second Git checkout");
+    assert!(output.status.success(), "git init failed: {output:?}");
+    let output = McpWorkspace::orbit_command(&elsewhere, &workspace.home)
+        .args(["workspace", "init", "--name", "mcp-elsewhere"])
+        .output()
+        .expect("register the second workspace");
+    assert!(
+        output.status.success(),
+        "second workspace init failed\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let add_input = json!({
+        "title": "Owned despite runtime identity orbit-5c61b3",
+        "description": "Addressed by ID from a linked worktree and a foreign cwd",
+        "workspace": workspace.work.to_str().expect("utf8 checkout path"),
+        "complexity": "low",
+        "model": "codex",
+    })
+    .to_string();
+    let output = McpWorkspace::orbit_command(&workspace.work, &workspace.home)
+        .args(["tool", "run", "orbit.task.add", "--input", &add_input])
+        .output()
+        .expect("author a task in the diverged workspace");
+    assert!(
+        output.status.success(),
+        "task add failed\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let created: Value = serde_json::from_slice(&output.stdout).expect("parse created task");
+    let task_id = created["id"].as_str().expect("task id").to_string();
+    let show_input = json!({ "id": task_id, "model": "codex" }).to_string();
+
+    let worktree = add_linked_worktree(&workspace.work);
+    let scratch = workspace.home.join("scratch");
+    std::fs::create_dir_all(&scratch).expect("create a non-workspace directory");
+
+    for cwd in [&worktree, &elsewhere, &scratch] {
+        let output = McpWorkspace::orbit_command(cwd, &workspace.home)
+            .args(["tool", "run", "orbit.task.show", "--input", &show_input])
+            .output()
+            .expect("run id-only task show");
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            output.status.success(),
+            "id-only tool run from {} must follow the task id\nstdout:\n{}\nstderr:\n{stderr}",
+            cwd.display(),
+            String::from_utf8_lossy(&output.stdout)
+        );
+        assert!(
+            !stderr.contains("orbit-5c61b3"),
+            "tool run must not promote the runtime identity into a selector from {}: {stderr}",
+            cwd.display()
+        );
+        let shown: Value = serde_json::from_slice(&output.stdout).expect("parse tool run show");
+        assert_eq!(shown["id"], json!(task_id));
+        assert_eq!(shown["workspace"]["id"], "ws_legacy-logical");
+        assert_eq!(shown["workspace"]["name"], "mcp-roundtrip");
+    }
+
+    let invalid = McpWorkspace::orbit_command(&scratch, &workspace.home)
+        .args([
+            "tool",
+            "run",
+            "orbit.task.show",
+            "--input",
+            &json!({
+                "id": task_id,
+                "workspace": "no-such-workspace",
+                "model": "codex"
+            })
+            .to_string(),
+        ])
+        .output()
+        .expect("run invalid explicit workspace filter");
+    assert!(!invalid.status.success());
+    let invalid_stderr = String::from_utf8_lossy(&invalid.stderr);
+    assert!(
+        invalid_stderr.contains("no-such-workspace"),
+        "an invalid explicit selector must be named: {invalid_stderr}"
+    );
+
+    let runtime_identity = McpWorkspace::orbit_command(&scratch, &workspace.home)
+        .args([
+            "tool",
+            "run",
+            "orbit.task.show",
+            "--input",
+            &json!({
+                "id": task_id,
+                "workspace": "orbit-5c61b3",
+                "model": "codex"
+            })
+            .to_string(),
+        ])
+        .output()
+        .expect("run runtime-identity explicit filter");
+    assert!(!runtime_identity.status.success());
+    let runtime_stderr = String::from_utf8_lossy(&runtime_identity.stderr);
+    assert!(
+        runtime_stderr.contains("orbit-5c61b3"),
+        "an explicit runtime identity remains fail-closed: {runtime_stderr}"
+    );
+
+    let mut client = serve_mcp_from(
+        &worktree,
+        &workspace.home,
+        json!({
+            "protocolVersion": "2025-06-18",
+            "capabilities": {},
+            "clientInfo": { "name": "managed-executor", "version": "0" },
+            "_meta": { "orbit": { "workspace": "orbit-5c61b3" } },
+        }),
+    );
+    let listed = client.request("tools/list", Value::Null);
+    let task_show = listed["result"]["tools"]
+        .as_array()
+        .expect("tools array")
+        .iter()
+        .find(|tool| tool["name"] == "orbit_task_show")
+        .expect("orbit_task_show advertised");
+    let description = task_show["description"].as_str().expect("description");
+    assert!(
+        description.contains("globally unique"),
+        "advertised help must say id is globally resolved: {description}"
+    );
+    let workspace_help = task_show["inputSchema"]["properties"]["workspace"]["description"]
+        .as_str()
+        .expect("optional workspace filter advertised");
+    assert!(
+        workspace_help.contains("resolved globally by default"),
+        "generic workspace-selection copy must not replace task.show help: {workspace_help}"
+    );
+    assert!(
+        !workspace_help.contains("_meta.orbit.workspace"),
+        "session-default copy would make clients inject ambient identity: {workspace_help}"
+    );
+
+    let shown = client.call_tool_ok("orbit_task_show", json!({ "id": task_id }));
+    assert_eq!(shown["id"], json!(task_id));
+    assert_eq!(shown["workspace"]["id"], "ws_legacy-logical");
+    assert_eq!(shown["workspace"]["name"], "mcp-roundtrip");
+
+    let listed_err = client.call_tool_err("orbit_task_list", json!({}));
+    assert!(
+        listed_err["message"]
+            .as_str()
+            .is_some_and(|message| message.contains("orbit-5c61b3")),
+        "task list must still fail-closed on the runtime identity: {listed_err}"
+    );
+    drop(client);
+
+    let mut client = serve_mcp_from(
+        &scratch,
+        &workspace.home,
+        json!({
+            "protocolVersion": "2025-06-18",
+            "capabilities": {},
+            "clientInfo": { "name": "no-initialize-workspace", "version": "0" },
+        }),
+    );
+    let shown = client.call_tool_ok("orbit_task_show", json!({ "id": task_id }));
+    assert_eq!(shown["id"], json!(task_id));
+    let unscoped = client.call_tool_err("orbit_task_list", json!({}));
+    assert!(unscoped["message"].as_str().is_some_and(|message| {
+        message.contains("requires a workspace selector")
+            && message.contains("MCP initialize metadata")
+    }));
+    drop(client);
+
+    let mut client = serve_mcp_from(
+        &scratch,
+        &workspace.home,
+        json!({
+            "protocolVersion": "2025-06-18",
+            "capabilities": {},
+            "clientInfo": { "name": "other-session", "version": "0" },
+            "_meta": {
+                "orbit": { "workspace": elsewhere.to_str().expect("utf8 elsewhere") }
+            },
+        }),
+    );
+    let shown = client.call_tool_ok("orbit_task_show", json!({ "id": task_id }));
+    assert_eq!(
+        shown["id"],
+        json!(task_id),
+        "id-only show must ignore a session bound to another workspace: {shown}"
+    );
+    let missed = client.call_tool_err(
+        "orbit_task_show",
+        json!({
+            "id": task_id,
+            "workspace": elsewhere.to_str().expect("utf8 elsewhere")
+        }),
+    );
+    assert!(
+        missed["message"]
+            .as_str()
+            .is_some_and(|message| message.contains(&task_id)),
+        "an explicit foreign workspace must filter: {missed}"
+    );
+}
+
+fn serve_mcp_from(cwd: &Path, home: &Path, initialize: Value) -> McpClient {
+    let child = McpWorkspace::orbit_command(cwd, home)
+        .args(["mcp", "serve"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn orbit mcp serve");
+    let mut client = McpClient::new(child);
+    client.request("initialize", initialize);
+    client.notify("notifications/initialized");
+    client
+}
+
 /// Commit the checkout and attach a linked worktree, mirroring how the engine
 /// stages a managed run.
 fn add_linked_worktree(work: &Path) -> PathBuf {

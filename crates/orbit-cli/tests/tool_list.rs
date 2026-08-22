@@ -205,6 +205,14 @@ fn tool_list_json_includes_task_show_context_parameters() {
             && param["param_type"] == "integer"
             && param["required"] == false
     }));
+    assert!(parameters.iter().any(|param| {
+        param["name"] == "workspace"
+            && param["param_type"] == "string"
+            && param["required"] == false
+            && param["description"]
+                .as_str()
+                .is_some_and(|description| description.contains("resolved globally by default"))
+    }));
 }
 
 #[test]

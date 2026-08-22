@@ -28,6 +28,13 @@ pub(super) fn ensure_workspace_selector(schema: &mut JsonObject, definition: &Mc
     if definition.scope != McpToolScope::WorkspaceRequired {
         return;
     }
+    // `orbit.task.show` still opens a workspace runtime, but `id` is globally
+    // resolved by default [ORB-10961]. The generic selector text would make
+    // clients inject cwd, initialize metadata, or a linked-worktree runtime
+    // identity. The tool declares its own optional filter instead.
+    if definition.schema.name == "orbit.task.show" {
+        return;
+    }
     let Some(properties) = schema.get_mut("properties").and_then(Value::as_object_mut) else {
         return;
     };

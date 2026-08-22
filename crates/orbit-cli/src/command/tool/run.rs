@@ -51,6 +51,31 @@ pub struct ToolRunArgs {
     pub output: OutputFormat,
 }
 
+impl ToolRunArgs {
+    /// Globally unique task ID from `orbit tool run orbit.task.show` input.
+    ///
+    /// The CLI bootstraps that one tool through the host task registry rather
+    /// than cwd, matching `orbit task show` [ORB-10961]. Other tools keep the
+    /// ordinary workspace runtime.
+    pub(crate) fn task_show_id(&self) -> Option<String> {
+        if self.name != "orbit.task.show" {
+            return None;
+        }
+        let raw = if let Some(path) = &self.input_file {
+            std::fs::read_to_string(path).ok()?
+        } else {
+            self.input.clone()?
+        };
+        let value: Value = serde_json::from_str(&raw).ok()?;
+        value
+            .get("id")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|id| !id.is_empty())
+            .map(ToOwned::to_owned)
+    }
+}
+
 impl Execute for ToolRunArgs {
     fn execute(self, runtime: &OrbitRuntime) -> CommandOut {
         let mut input: Value = if let Some(path) = &self.input_file {
@@ -69,6 +94,9 @@ impl Execute for ToolRunArgs {
 
         // Resolve `workspace` once above local CLI tools, then bind or fail
         // closed. MCP uses its own server-side selector resolution.
+        // `orbit.task.show` is bootstrapped via RuntimeNeed::TaskOwner so an
+        // id-only call is not cwd-bound [ORB-10961]. An explicit `workspace`
+        // in the tool input is still a fail-closed filter through this bind.
         let bound = RegisteredRuntimeFactory::bind_cli_tool_workspace(runtime, &mut input)?;
         let runtime = bound.as_ref().unwrap_or(runtime);
 
@@ -98,6 +126,9 @@ impl Execute for ToolRunArgs {
             self.agent,
             self.model,
             session_context,
+        )?;
+        let output = crate::command::task::show::attach_bound_workspace_identity(
+            &self.name, &input, runtime, output,
         )?;
         let output = shape_tool_output(&self.name, &input, output, self.full, &self.fields);
 
@@ -165,6 +196,7 @@ const MINIMAL_TASK_FIELDS: &[&str] = &[
     "implemented_by",
     "created_at",
     "updated_at",
+    "workspace",
 ];
 
 pub(super) fn shape_tool_output(
