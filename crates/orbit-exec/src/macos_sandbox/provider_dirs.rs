@@ -75,6 +75,58 @@ pub fn grok_state_dir_from_env() -> Option<PathBuf> {
     grok_state_dir(home.as_deref(), grok_home.as_deref())
 }
 
+/// Writable directories an **active** Copilot executor needs, in the order
+/// they are granted. [ORB-10946]
+///
+/// Unlike [`provider_state_dirs`], this is gated on the active provider by its
+/// caller. Copilot's cache entry is a package-extraction directory, not
+/// per-tool configuration, so granting it to every provider would hand each
+/// one a writable path it has no reason to touch.
+///
+/// 1. `$COPILOT_HOME`, else `$HOME/.copilot` — the CLI's documented
+///    configuration and state directory (credentials from `copilot /login`,
+///    session history, `mcp-config.json`, and `logs/`).
+/// 2. `$XDG_CACHE_HOME/copilot`, else `$HOME/.cache/copilot` — the standalone
+///    CLI ships as a launcher that extracts its bundled package here on first
+///    run. Without this the CLI aborts before it ever reads Orbit's envelope,
+///    with `ENOENT: no such file or directory, mkdir '<...>/.cache/copilot'`.
+pub(crate) fn copilot_state_dirs(
+    home: Option<&OsStr>,
+    copilot_home: Option<&OsStr>,
+    xdg_cache_home: Option<&OsStr>,
+) -> Vec<PathBuf> {
+    let mut dirs = Vec::with_capacity(2);
+    if let Some(dir) = copilot_state_dir(home, copilot_home) {
+        dirs.push(dir);
+    }
+    if let Some(dir) = copilot_cache_dir(home, xdg_cache_home) {
+        dirs.push(dir);
+    }
+    dirs
+}
+
+/// Copilot CLI documents `COPILOT_HOME` as the override for the directory
+/// where configuration and state files are stored; otherwise it uses
+/// `$HOME/.copilot`.
+pub(crate) fn copilot_state_dir(
+    home: Option<&OsStr>,
+    copilot_home: Option<&OsStr>,
+) -> Option<PathBuf> {
+    non_empty_env_path(copilot_home)
+        .or_else(|| non_empty_env_path(home).map(|path| path.join(".copilot")))
+}
+
+/// The Copilot launcher's bundled-package extraction directory. Honors
+/// `XDG_CACHE_HOME` before falling back to `$HOME/.cache`.
+pub(crate) fn copilot_cache_dir(
+    home: Option<&OsStr>,
+    xdg_cache_home: Option<&OsStr>,
+) -> Option<PathBuf> {
+    non_empty_env_path(xdg_cache_home)
+        .map(|path| path.join("copilot"))
+        .or_else(|| non_empty_env_path(home).map(|path| path.join(".cache").join("copilot")))
+}
+
 pub(super) fn non_empty_env_path(value: Option<&OsStr>) -> Option<PathBuf> {
     let value = value?;
     if value.to_string_lossy().is_empty() {

@@ -75,6 +75,11 @@ pub struct DetectedAgents {
     pub codex_cli: bool,
     pub gemini_cli: bool,
     pub grok_cli: bool,
+    /// The standalone `copilot` CLI (npm `@github/copilot`). The retired
+    /// `gh-copilot` gh extension is deliberately not probed: it is a shell
+    /// command *suggester*, not an agent, and Orbit never dispatches to it.
+    /// [ORB-10946]
+    pub copilot_cli: bool,
     pub ollama_cli: bool,
 }
 
@@ -86,6 +91,7 @@ pub fn detect(probe: &dyn AgentEnvProbe) -> DetectedAgents {
         codex_cli: probe.binary_on_path("codex"),
         gemini_cli: probe.binary_on_path("gemini"),
         grok_cli: probe.binary_on_path("grok"),
+        copilot_cli: probe.binary_on_path("copilot"),
         ollama_cli: probe.binary_on_path("ollama"),
     }
 }
@@ -109,6 +115,9 @@ pub fn available_crew_families(detected: &DetectedAgents) -> Vec<&'static str> {
     if detected.grok_cli {
         families.push("grok");
     }
+    if detected.copilot_cli {
+        families.push("copilot");
+    }
     families
 }
 
@@ -125,7 +134,9 @@ pub fn default_model_for(provider: &str) -> Option<&'static str> {
 /// Pick a default provider for the role given a detection snapshot.
 ///
 /// Preference order: first detected CLI in [claude, codex, gemini, grok,
-/// ollama], else `claude` as a last resort.
+/// copilot, ollama], else `claude` as a last resort. `copilot` sits after the
+/// four original families so installing it never changes an existing host's
+/// default provider. [ORB-10946]
 pub fn default_provider(detected: &DetectedAgents) -> &'static str {
     if detected.claude_cli {
         return "claude";
@@ -138,6 +149,9 @@ pub fn default_provider(detected: &DetectedAgents) -> &'static str {
     }
     if detected.grok_cli {
         return "grok";
+    }
+    if detected.copilot_cli {
+        return "copilot";
     }
     if detected.ollama_cli {
         return "ollama";

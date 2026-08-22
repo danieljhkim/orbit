@@ -355,6 +355,8 @@ fn compiled_profile_allows_writes_to_provider_state_dirs() {
             codex_home: None,
             claude_config_dir: None,
             grok_home: None,
+            copilot_home: None,
+            xdg_cache_home: None,
         },
     )
     .expect("compile sbpl");
@@ -424,6 +426,8 @@ fn compiled_profile_allows_writes_to_grok_json_lock_and_tmp_files() {
             codex_home: None,
             claude_config_dir: None,
             grok_home: None,
+            copilot_home: None,
+            xdg_cache_home: None,
         },
     )
     .expect("compile sbpl");
@@ -507,6 +511,8 @@ fn compiled_profile_allows_writes_to_claude_home_json_siblings() {
             codex_home: None,
             claude_config_dir: None,
             grok_home: None,
+            copilot_home: None,
+            xdg_cache_home: None,
         },
     )
     .expect("compile sbpl");
@@ -551,4 +557,144 @@ fn compiled_profile_allows_writes_to_claude_home_json_siblings() {
             "{label} target file was not written: {target:?}"
         );
     }
+}
+
+// [ORB-10946] Copilot's state grants are gated on the *active* provider, so
+// these assert both halves: present for copilot, absent for everyone else.
+
+#[test]
+fn copilot_state_dirs_default_under_home() {
+    let dirs = copilot_state_dirs(Some(OsStr::new("/Users/test")), None, None);
+
+    assert_eq!(
+        dirs,
+        vec![
+            PathBuf::from("/Users/test/.copilot"),
+            PathBuf::from("/Users/test/.cache/copilot"),
+        ]
+    );
+}
+
+#[test]
+fn copilot_state_dirs_honor_copilot_home_and_xdg_cache_home() {
+    let dirs = copilot_state_dirs(
+        Some(OsStr::new("/Users/test")),
+        Some(OsStr::new("/var/folders/test/copilot-home")),
+        Some(OsStr::new("/var/folders/test/cache")),
+    );
+
+    assert_eq!(
+        dirs,
+        vec![
+            PathBuf::from("/var/folders/test/copilot-home"),
+            PathBuf::from("/var/folders/test/cache/copilot"),
+        ]
+    );
+}
+
+#[test]
+fn copilot_state_dirs_ignore_empty_overrides() {
+    let dirs = copilot_state_dirs(
+        Some(OsStr::new("/Users/test")),
+        Some(OsStr::new("")),
+        Some(OsStr::new("")),
+    );
+
+    assert_eq!(
+        dirs,
+        vec![
+            PathBuf::from("/Users/test/.copilot"),
+            PathBuf::from("/Users/test/.cache/copilot"),
+        ]
+    );
+}
+
+#[test]
+fn copilot_state_dirs_are_empty_without_home_or_overrides() {
+    assert!(copilot_state_dirs(None, None, None).is_empty());
+}
+
+#[test]
+fn compile_grants_copilot_dirs_only_to_an_active_copilot_executor() {
+    let resolved = profile("default", &["/Users/test/repo"], &["/Users/test/repo/src"]);
+
+    let copilot_profile = compile_with_env(
+        &resolved,
+        "copilot",
+        EnvOverrides {
+            home: Some("/Users/test"),
+            ..Default::default()
+        },
+    );
+    assert!(
+        copilot_profile.contains("(allow file-write* (subpath \"/Users/test/.copilot\"))"),
+        "active copilot must be granted its state dir",
+    );
+    assert!(
+        copilot_profile.contains("(allow file-write* (subpath \"/Users/test/.cache/copilot\"))"),
+        "active copilot must be granted its package-extraction cache",
+    );
+
+    // No other provider inherits Copilot-specific write access.
+    for provider in ["claude", "codex", "gemini", "grok"] {
+        let other = compile_with_env(
+            &resolved,
+            provider,
+            EnvOverrides {
+                home: Some("/Users/test"),
+                ..Default::default()
+            },
+        );
+        assert!(
+            !other.contains("/Users/test/.copilot"),
+            "{provider} must not inherit the copilot state dir",
+        );
+        assert!(
+            !other.contains("/Users/test/.cache/copilot"),
+            "{provider} must not inherit the copilot extraction cache",
+        );
+    }
+}
+
+#[test]
+fn compile_uses_the_copilot_home_override_for_the_active_executor() {
+    let resolved = profile("default", &["/Users/test/repo"], &["/Users/test/repo/src"]);
+
+    let text = compile_with_env(
+        &resolved,
+        "copilot",
+        EnvOverrides {
+            home: Some("/Users/test"),
+            copilot_home: Some("/var/folders/test/copilot-home"),
+            xdg_cache_home: Some("/var/folders/test/cache"),
+            ..Default::default()
+        },
+    );
+
+    assert!(text.contains("(allow file-write* (subpath \"/var/folders/test/copilot-home\"))"));
+    assert!(text.contains("(allow file-write* (subpath \"/var/folders/test/cache/copilot\"))"));
+    // With the override set, the default location is not additionally granted.
+    assert!(!text.contains("\"/Users/test/.copilot\""));
+}
+
+#[test]
+fn copilot_does_not_receive_the_macos_keychain_carve_out() {
+    // Copilot stores its credentials under COPILOT_HOME, not the login
+    // keychain, so it keeps the default credential deny. It also must not be
+    // handed the GitHub CLI's credential store: borrowing another tool's
+    // credentials is exactly what the auth contract forbids.
+    let resolved = profile("default", &["/Users/test/repo"], &["/Users/test/repo/src"]);
+
+    let text = compile_with_env(
+        &resolved,
+        "copilot",
+        EnvOverrides {
+            home: Some("/Users/test"),
+            ..Default::default()
+        },
+    );
+
+    assert!(!text.contains("(allow file-read* (subpath \"/Users/test/Library/Keychains\"))"));
+    assert!(text.contains("(deny file-read* (subpath \"/Users/test/Library/Keychains\"))"));
+    assert!(text.contains("(deny file-read* (subpath \"/Users/test/.config/gh\"))"));
 }

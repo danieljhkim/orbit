@@ -16,6 +16,7 @@ pub enum ProviderOptions {
     },
     Gemini,
     Grok,
+    Copilot,
     Ollama,
     Mock,
 }

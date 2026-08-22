@@ -71,6 +71,19 @@ pub const GEMINI_PAIR_WEAK: &str = "gemini-3.7-flash";
 /// Default Grok Build model (the canonical model listed by `grok models`).
 pub const GROK_DEFAULT_MODEL: &str = "grok-4.6";
 
+/// Default model for the GitHub Copilot CLI lane.
+///
+/// Copilot routes to several vendors' models; Orbit pins an explicit id rather
+/// than letting the CLI fall back to `COPILOT_MODEL` or its persisted `/model`
+/// choice, so a run's model comes from the resolved crew and not from ambient
+/// operator state. Both ids below are present in the model catalog shipped
+/// with Copilot CLI 1.0.80. The provider identity stays `copilot` regardless of
+/// which vendor supplies the model. [ORB-10946]
+pub const COPILOT_DEFAULT_MODEL: &str = "claude-sonnet-4.5";
+
+/// Cheap-tier Copilot model used for the bounded system crew.
+pub const COPILOT_CREW_MODEL: &str = "claude-haiku-4.5";
+
 /// Cheap Claude model used by the orbit-agent HTTP examples.
 ///
 /// Version pinned like [`ANTHROPIC_HTTP_DEFAULT_MODEL`] because the examples
@@ -81,13 +94,14 @@ pub const ANTHROPIC_EXAMPLE_MODEL: &str = "claude-haiku-4-5-20251001";
 ///
 /// Mirrors the historical `agent_detect::default_model_for` map; `claude` now
 /// resolves to the unversioned [`CLAUDE_DEFAULT_STRONG`] alias. codex/gemini/
-/// grok use their provider-specific defaults.
+/// grok/copilot use their provider-specific defaults.
 pub fn default_model_for_provider(provider: &str) -> Option<&'static str> {
     match provider {
         "claude" => Some(CLAUDE_DEFAULT_STRONG),
         "codex" => Some(CODEX_DEFAULT_MODEL),
         "gemini" => Some(GEMINI_DEFAULT_MODEL),
         "grok" => Some(GROK_DEFAULT_MODEL),
+        "copilot" => Some(COPILOT_DEFAULT_MODEL),
         _ => None,
     }
 }

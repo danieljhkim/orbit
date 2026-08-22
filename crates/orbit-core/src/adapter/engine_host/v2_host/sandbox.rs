@@ -87,7 +87,7 @@ pub(crate) fn resolve_executor_sandbox(
                     grants_workspace_modify,
                     &mut resolved,
                 )?;
-                append_linux_provider_state_roots(&mut resolved)?;
+                append_linux_provider_state_roots(provider, &mut resolved)?;
                 let managed_worktree = subprocess_cwd
                     .and_then(|cwd| active_worktree_subpath(runtime, cwd))
                     .is_some();
@@ -303,6 +303,7 @@ fn append_linux_runtime_write_roots(
 
 #[cfg(target_os = "linux")]
 fn append_linux_provider_state_roots(
+    provider: &str,
     resolved: &mut ResolvedFsProfile,
 ) -> Result<(), DispatchError> {
     let home = std::env::var_os("HOME").map(PathBuf::from);
@@ -321,6 +322,12 @@ fn append_linux_provider_state_roots(
         directories.push(home.join(".gemini"));
         directories.push(home.join(".grok"));
     }
+    // [ORB-10946] Copilot's roots are appended only when Copilot is the
+    // provider being dispatched. This mirrors the macOS gate, and it matters
+    // more here than on macOS: every entry in this list is *created* by
+    // `ensure_owned_directory` below, so an unconditional entry would mkdir a
+    // `~/.copilot` on hosts that have never installed the CLI.
+    directories.extend(linux_copilot_state_roots(provider, home.as_deref()));
     for directory in directories {
         ensure_owned_directory(&directory)?;
         let canonical = directory.canonicalize().map_err(|error| {
@@ -332,6 +339,61 @@ fn append_linux_provider_state_roots(
         append_unique_modify_root(resolved, canonical.display().to_string());
     }
     Ok(())
+}
+
+/// Process-env wrapper around [`linux_copilot_state_roots_with`].
+#[cfg(target_os = "linux")]
+fn linux_copilot_state_roots(provider: &str, home: Option<&Path>) -> Vec<PathBuf> {
+    linux_copilot_state_roots_with(
+        provider,
+        home,
+        std::env::var_os("COPILOT_HOME")
+            .map(PathBuf::from)
+            .as_deref(),
+        std::env::var_os("XDG_CACHE_HOME")
+            .map(PathBuf::from)
+            .as_deref(),
+    )
+}
+
+/// Writable roots an active Copilot executor needs on Linux: its
+/// configuration/state directory (`$COPILOT_HOME`, else `$HOME/.copilot`) and
+/// the launcher's bundled-package extraction cache (`$XDG_CACHE_HOME/copilot`,
+/// else `$HOME/.cache/copilot`). Empty for every other provider. [ORB-10946]
+///
+/// The override values are parameters rather than direct env reads so the
+/// gate can be asserted without mutating process state from a test.
+// pub(super) widened for the sibling tests/ layout.
+#[cfg(target_os = "linux")]
+pub(super) fn linux_copilot_state_roots_with(
+    provider: &str,
+    home: Option<&Path>,
+    copilot_home: Option<&Path>,
+    xdg_cache_home: Option<&Path>,
+) -> Vec<PathBuf> {
+    if orbit_types::workflow::Provider::parse(provider).ok()
+        != Some(orbit_types::workflow::Provider::Copilot)
+    {
+        return Vec::new();
+    }
+    let mut roots = Vec::with_capacity(2);
+    match copilot_home {
+        Some(path) => roots.push(path.to_path_buf()),
+        None => {
+            if let Some(home) = home {
+                roots.push(home.join(".copilot"));
+            }
+        }
+    }
+    match xdg_cache_home {
+        Some(path) => roots.push(path.join("copilot")),
+        None => {
+            if let Some(home) = home {
+                roots.push(home.join(".cache").join("copilot"));
+            }
+        }
+    }
+    roots
 }
 
 #[cfg(target_os = "linux")]

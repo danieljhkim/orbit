@@ -4,7 +4,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use orbit_agent::{
-    Agent, AgentConfig, AgentOperation, AgentRequest, peek_response_status,
+    Agent, AgentConfig, AgentOperation, AgentRequest, normalize_cli_stdout, peek_response_status,
     provider_invocation_diagnostic, response_envelope_protocol_check,
 };
 use orbit_common::process::identity::process_start_identity_token;
@@ -354,12 +354,26 @@ pub fn run_cli_backend(
     // A truncated capture retains the final complete JSONL events separately
     // from its diagnostic prefix. Protocol parsing must use that tail so a
     // verbose provider's final Orbit envelope remains authoritative.
-    let stdout_text = String::from_utf8_lossy(stdout.protocol_bytes());
+    //
+    // [ORB-10946] Reduce the capture to the bytes this provider's protocol
+    // contract may be read from, once, so every check below agrees on what the
+    // agent actually emitted. For all providers but `copilot` this borrows the
+    // capture unchanged; `copilot` streams JSONL agent events that replay
+    // Orbit's own prompt — example envelope included — back as a `user.message`
+    // frame, which the reverse envelope scan would otherwise be free to read as
+    // completion evidence.
+    let protocol_stdout = normalize_cli_stdout(&provider, stdout.protocol_bytes());
+    let stdout_text = String::from_utf8_lossy(protocol_stdout.as_ref());
     let envelope_status = peek_response_status(stdout_text.as_ref());
-    let stdout_preview = stdout_text_preview(stdout_text.as_ref(), &redaction, stdout.truncated());
+    // The operator-facing preview stays on the *raw* capture: normalization
+    // drops the session control plane, and that is where a provider puts the
+    // policy and authentication failures an operator needs to see.
+    let raw_stdout_text = String::from_utf8_lossy(stdout.protocol_bytes());
+    let stdout_preview =
+        stdout_text_preview(raw_stdout_text.as_ref(), &redaction, stdout.truncated());
     let parsed_result = exit_success.then(|| {
         parse_cli_response_result(
-            stdout.protocol_bytes(),
+            protocol_stdout.as_ref(),
             stderr.protocol_bytes(),
             exit_code,
             duration.as_millis() as u64,
@@ -402,7 +416,7 @@ pub fn run_cli_backend(
         && !completion_status_failure
         && (!spec.require_response_envelope || response_envelope_valid);
     let trace = parse_cli_invocation_trace(
-        stdout.protocol_bytes(),
+        protocol_stdout.as_ref(),
         stderr.protocol_bytes(),
         exit_code,
         duration.as_millis() as u64,

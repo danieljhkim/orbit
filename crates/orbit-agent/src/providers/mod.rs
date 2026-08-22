@@ -2,7 +2,8 @@
 //!
 //! Two families live here:
 //!
-//! - **CLI transports** (`claude`, `codex`, `gemini`, `grok`, `ollama`, `mock_agent`):
+//! - **CLI transports** (`claude`, `codex`, `copilot`, `gemini`, `grok`, `ollama`,
+//!   `mock_agent`):
 //!   translate an [`AgentRequest`] into a CLI command invocation and stdin
 //!   envelope that the engine runs via `orbit-exec`.
 //! - **HTTP transports** (`anthropic`, `openai_compat`, `gemini_http`): implement the sibling
@@ -17,12 +18,15 @@ pub mod anthropic;
 pub(crate) mod claude;
 pub(crate) mod codex;
 mod common;
+pub(crate) mod copilot;
 pub(crate) mod gemini;
 pub mod gemini_http;
 pub(crate) mod grok;
 pub(crate) mod mock_agent;
 pub(crate) mod ollama;
 pub mod openai_compat;
+
+use std::borrow::Cow;
 
 use crate::types::AgentInvocationSpec;
 
@@ -42,5 +46,25 @@ pub(crate) fn build_invocation_spec(
         stdin,
         stdout_schema_json: None,
         required_env_vars,
+    }
+}
+
+/// Reduce a provider's raw stdout to the bytes Orbit's response/envelope
+/// contract may read.
+///
+/// Most providers emit their Orbit envelope directly and are returned
+/// borrowed and unchanged. `copilot` streams JSONL agent events that replay
+/// Orbit's own prompt back as a `user.message` frame, so its stream is
+/// reduced to model-authored frames first — see the `copilot::copilot_stream`
+/// module docs for why that reduction is a correctness requirement rather
+/// than tidying. [ORB-10946]
+///
+/// `provider` is the resolved canonical provider id. An unrecognized id is
+/// not an error here: normalization is a per-provider accommodation, and the
+/// default of "read stdout as-is" is what every other provider needs.
+pub fn normalize_cli_stdout<'a>(provider: &str, stdout: &'a [u8]) -> Cow<'a, [u8]> {
+    match provider {
+        "copilot" => Cow::Owned(copilot::normalize_copilot_stdout(stdout)),
+        _ => Cow::Borrowed(stdout),
     }
 }
