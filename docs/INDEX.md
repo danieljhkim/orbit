@@ -1,7 +1,7 @@
 ---
 type: context
 summary: Entry point for Orbit feature designs and operational runbooks.
-last_validated: 2026-07-26
+last_validated: 2026-08-22
 tags: [docs, index, design, operations, runbooks]
 related_features: [orbit-docs, activity-job, auditability, routines]
 related_artifacts: [ORB-10014]
@@ -17,7 +17,7 @@ Use this index to find active feature designs and day-2 operational procedures.
 
 Each runbook is scoped to one
 operator goal or tightly coupled failure mode. Commands ported from the original
-operations guide were verified against `orbit 0.9.2`; update the source runbook when
+operations guide were verified against `orbit 0.13.0`; update the source runbook when
 CLI behavior, state layout, or recovery semantics change.
 
 | Runbook | Purpose |

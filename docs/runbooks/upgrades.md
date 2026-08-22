@@ -2,9 +2,10 @@
 type: runbook
 summary: Review, apply, and verify Orbit workspace-layout and store-schema migrations safely.
 tags: [operations, upgrades, migrations, recovery]
-paths: ["crates/orbit-store/src/layout/**", "crates/orbit-store/src/sqlite/migration/**"]
+paths: ["crates/orbit-store/src/workflow/layout/**", "crates/orbit-store/src/driver/sqlite/migration/**"]
 related_features: [orbit-core]
 related_artifacts: [ORB-10014]
+last_validated: 2026-08-22
 ---
 
 # Upgrade Orbit Safely
@@ -17,10 +18,10 @@ store-schema migrations.
 Two ledgers guard `.orbit/` state and auto-apply on workspace open:
 
 - **Workspace layout:** `.orbit/state/layout.version` plus an ordered migration registry in
-  `orbit-store/src/layout/`. A missing marker means a pre-versioning workspace and is adopted
+  `crates/orbit-store/src/workflow/layout/`. A missing marker means a pre-versioning workspace and is adopted
   as v1. Upgraders serialize on `state/layout.lock`.
 - **Store schema:** the `schema_meta` ledger table inside `orbit.db`, backed by
-  `orbit-store/src/sqlite/migration/`. Each migration and its ledger row commit in one
+  `crates/orbit-store/src/driver/sqlite/migration/`. Each migration and its ledger row commit in one
   transaction.
 
 ## Back up before a major upgrade
@@ -49,11 +50,12 @@ Example dry run on a pre-upgrade workspace:
 ```text
 $ orbit migrate --dry-run
 │ COMPONENT          CURRENT   SUPPORTED │
-│ workspace layout   0         1         │
-│ store schema       0         1         │
+│ workspace layout   0         2         │
+│ store schema       0         17        │
 Pending migrations:
   layout v1 (baseline) — adopt the versioned .orbit/ layout (records the current shape; changes nothing)
-  schema v1 (baseline)
+  layout v2 (archive-friction-tasks) — rewrite removed friction statuses as archived
+  schema v1 (baseline) through schema v17 (audit_self_reported_actor)
 error: execution failed: 2 migration(s) pending; run `orbit migrate --confirm` to apply
 ```
 
