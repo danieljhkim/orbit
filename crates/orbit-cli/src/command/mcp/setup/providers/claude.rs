@@ -10,10 +10,14 @@ use super::common::server_args;
 
 pub(in crate::command::mcp::setup) fn apply_claude_init(
     target: &ConfigTarget,
+    operator: bool,
 ) -> Result<(), OrbitError> {
     let mut root = load_json_object(&target.mcp_path)?;
     let mcp_servers = ensure_json_object(&mut root, "mcpServers")?;
-    mcp_servers.insert(ORBIT_MCP_SERVER_ID.to_string(), claude_mcp_server_value());
+    mcp_servers.insert(
+        ORBIT_MCP_SERVER_ID.to_string(),
+        claude_mcp_server_value(operator),
+    );
     write_json_object(&target.mcp_path, &root)?;
 
     if let Some(settings_path) = &target.settings_path {
@@ -75,7 +79,7 @@ pub(in crate::command::mcp::setup) fn apply_claude_remove(
     Ok(())
 }
 
-pub(super) fn claude_mcp_server_value() -> JsonValue {
+pub(super) fn claude_mcp_server_value(operator: bool) -> JsonValue {
     JsonValue::Object(JsonMap::from_iter([
         (
             "command".to_string(),
@@ -83,7 +87,12 @@ pub(super) fn claude_mcp_server_value() -> JsonValue {
         ),
         (
             "args".to_string(),
-            JsonValue::Array(server_args().into_iter().map(JsonValue::String).collect()),
+            JsonValue::Array(
+                server_args(operator)
+                    .into_iter()
+                    .map(JsonValue::String)
+                    .collect(),
+            ),
         ),
     ]))
 }

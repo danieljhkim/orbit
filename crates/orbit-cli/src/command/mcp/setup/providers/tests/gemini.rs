@@ -17,7 +17,7 @@ fn gemini_workspace_scope_init_and_remove_preserve_unrelated_entries() {
     std::fs::create_dir_all(&orbit_root).expect("create orbit root");
 
     run_action(
-        McpAction::Init,
+        McpAction::Init { operator: false },
         repo.path(),
         &orbit_root,
         ProviderSelectionMode::Explicit(vec![McpProvider::Gemini]),
@@ -70,7 +70,7 @@ fn workspace_scope_gemini_init_is_idempotent() {
     std::fs::create_dir_all(&orbit_root).expect("create orbit root");
 
     run_action(
-        McpAction::Init,
+        McpAction::Init { operator: false },
         repo.path(),
         &orbit_root,
         ProviderSelectionMode::Explicit(vec![McpProvider::Gemini]),
@@ -82,7 +82,7 @@ fn workspace_scope_gemini_init_is_idempotent() {
         .expect("read first settings");
 
     run_action(
-        McpAction::Init,
+        McpAction::Init { operator: false },
         repo.path(),
         &orbit_root,
         ProviderSelectionMode::Explicit(vec![McpProvider::Gemini]),
@@ -94,4 +94,47 @@ fn workspace_scope_gemini_init_is_idempotent() {
         .expect("read second settings");
 
     assert_eq!(first, second);
+}
+
+#[test]
+fn gemini_operator_init_writes_single_operator_flag_and_refresh_is_idempotent() {
+    let repo = tempdir().expect("repo tempdir");
+    let home = tempdir().expect("home tempdir");
+    let orbit_root = repo.path().join(".orbit");
+    std::fs::create_dir_all(&orbit_root).expect("create orbit root");
+
+    let init = || {
+        run_action(
+            McpAction::Init { operator: true },
+            repo.path(),
+            &orbit_root,
+            ProviderSelectionMode::Explicit(vec![McpProvider::Gemini]),
+            Some(home.path().to_path_buf()),
+            ScopeArg::Workspace,
+        )
+        .expect("operator init gemini")
+    };
+    let assert_single_operator_entry = || {
+        let settings: serde_json::Value = serde_json::from_str(
+            &std::fs::read_to_string(repo.path().join(".gemini").join("settings.json"))
+                .expect("read settings"),
+        )
+        .expect("parse settings");
+        let args = settings["mcpServers"]["orbit"]["args"]
+            .as_array()
+            .expect("args array");
+        assert_eq!(
+            args,
+            &vec![
+                serde_json::json!("mcp"),
+                serde_json::json!("serve"),
+                serde_json::json!("--operator"),
+            ]
+        );
+    };
+
+    init();
+    assert_single_operator_entry();
+    init();
+    assert_single_operator_entry();
 }

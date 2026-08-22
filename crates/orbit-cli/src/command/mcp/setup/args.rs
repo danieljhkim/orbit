@@ -43,14 +43,21 @@ impl McpProvider {
 
 #[derive(Debug, Clone, Copy)]
 pub(super) enum McpAction {
-    Init,
+    /// `operator` selects the argv authority flag written into the generated
+    /// server entry: `true` emits `mcp serve --operator`, `false` emits plain
+    /// `mcp serve`. Carrying it on the variant (rather than as a separate
+    /// `run_action` parameter) makes every call site name its authority
+    /// explicitly instead of inheriting a default.
+    Init {
+        operator: bool,
+    },
     Remove,
 }
 
 impl McpAction {
     pub(super) fn label(self) -> &'static str {
         match self {
-            Self::Init => "init",
+            Self::Init { .. } => "init",
             Self::Remove => "remove",
         }
     }
@@ -177,15 +184,18 @@ pub struct InitArgs {
 impl InitArgs {
     pub fn execute_without_runtime(self, root_override: Option<&Path>) -> CommandOut {
         let layout = resolve_workspace_layout(root_override)?;
+        // Bare `orbit mcp init` keeps its pre-existing agent-only authority;
+        // only the `orbit workspace init --mcp` bootstrap path (below, via
+        // `init_auto_for_workspace`) selects operator authority.
         let providers = run_action(
-            McpAction::Init,
+            McpAction::Init { operator: false },
             &layout.repo_root,
             &layout.orbit_root,
             self.providers.resolve_mode()?,
             env_home_dir(),
             self.scope,
         )?;
-        print_action_summary(McpAction::Init, &providers);
+        print_action_summary(McpAction::Init { operator: false }, &providers);
         Ok(CommandOutput::Silent)
     }
 }
@@ -223,8 +233,13 @@ pub(crate) fn init_auto_for_workspace(
     // `orbit workspace init` is a per-workspace setup, so its auto-MCP path
     // writes repo-local files. `orbit mcp init` defaults to workspace scope
     // as well; pass `--scope home` for a user-level registration.
+    //
+    // This is the operator-facing orchestrator connection (ORB-10960): the
+    // explicit `--mcp` request from `orbit workspace init` is treated as
+    // deliberate operator setup, so the registered server is authorized for
+    // governed operations such as `orbit.workflow.ship` and `orbit.command.exec`.
     run_action(
-        McpAction::Init,
+        McpAction::Init { operator: true },
         repo_root,
         orbit_root,
         ProviderSelectionMode::Auto,

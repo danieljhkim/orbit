@@ -61,7 +61,7 @@ fn home_scope_writes_to_home_paths_and_skips_repo_files() {
     std::fs::create_dir_all(&orbit_root).expect("create orbit root");
 
     run_action(
-        McpAction::Init,
+        McpAction::Init { operator: false },
         repo.path(),
         &orbit_root,
         ProviderSelectionMode::Explicit(vec![
@@ -181,7 +181,7 @@ fn home_scope_remove_strips_only_orbit_entries() {
     std::fs::create_dir_all(&orbit_root).expect("create orbit root");
 
     run_action(
-        McpAction::Init,
+        McpAction::Init { operator: false },
         repo.path(),
         &orbit_root,
         ProviderSelectionMode::Explicit(vec![
@@ -255,7 +255,7 @@ fn home_scope_without_home_dir_errors() {
     std::fs::create_dir_all(&orbit_root).expect("create orbit root");
 
     let err = run_action(
-        McpAction::Init,
+        McpAction::Init { operator: false },
         repo.path(),
         &orbit_root,
         ProviderSelectionMode::Explicit(vec![McpProvider::Claude]),

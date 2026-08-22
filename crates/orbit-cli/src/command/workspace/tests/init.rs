@@ -884,6 +884,95 @@ fn workspace_init_seeds_auto_detected_mcp_configs() {
             .exists()
     );
     assert!(workspace.path().join(".grok").join("config.toml").exists());
+
+    // `--mcp` from `orbit workspace init` is the operator-facing orchestrator
+    // bootstrap path (ORB-10960): every auto-detected client must launch the
+    // Orbit server with `mcp serve --operator`, exactly.
+    let claude_mcp: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(workspace.path().join(".claude.json")).expect("read claude mcp"),
+    )
+    .expect("parse claude mcp");
+    assert_operator_argv(&claude_mcp["mcpServers"]["orbit"]["args"]);
+
+    let codex_config = std::fs::read_to_string(workspace.path().join(".codex/config.toml"))
+        .expect("read codex config");
+    let codex_parsed: toml::Value = toml::from_str(&codex_config).expect("parse codex config");
+    assert_operator_argv_toml(&codex_parsed["mcp_servers"]["orbit"]["args"]);
+
+    let gemini_settings: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(workspace.path().join(".gemini/settings.json"))
+            .expect("read gemini settings"),
+    )
+    .expect("parse gemini settings");
+    assert_operator_argv(&gemini_settings["mcpServers"]["orbit"]["args"]);
+
+    let grok_config = std::fs::read_to_string(workspace.path().join(".grok/config.toml"))
+        .expect("read grok config");
+    let grok_parsed: toml::Value = toml::from_str(&grok_config).expect("parse grok config");
+    assert_operator_argv_toml(&grok_parsed["mcp_servers"]["orbit"]["args"]);
+}
+
+/// Every generated integration's argv must be exactly `mcp serve --operator`.
+fn assert_operator_argv(args: &serde_json::Value) {
+    let args = args.as_array().expect("args array");
+    assert_eq!(
+        args,
+        &vec![
+            serde_json::json!("mcp"),
+            serde_json::json!("serve"),
+            serde_json::json!("--operator"),
+        ]
+    );
+}
+
+fn assert_operator_argv_toml(args: &toml::Value) {
+    let args = args.as_array().expect("args array");
+    assert_eq!(args.len(), 3);
+    assert_eq!(args[0].as_str(), Some("mcp"));
+    assert_eq!(args[1].as_str(), Some("serve"));
+    assert_eq!(args[2].as_str(), Some("--operator"));
+}
+
+#[test]
+fn workspace_reinit_with_force_mcp_refreshes_operator_argv_without_duplicating_it() {
+    let workspace = tempdir().expect("workspace tempdir");
+    let home = tempdir().expect("home tempdir");
+    std::fs::create_dir_all(workspace.path().join(".claude")).expect("create .claude");
+
+    let _env = EnvGuard::acquire().home(home.path()).cwd(workspace.path());
+
+    let init = |force| {
+        WorkspaceInitArgs {
+            name: None,
+            base_branch: Some("main".to_string()),
+            ship_mode: None,
+            role: None,
+            owner: None,
+            task_id_start: None,
+            mcp: true,
+            inject_agent_rules: false,
+            refresh_defaults: false,
+            force,
+        }
+        .execute_without_runtime(None)
+        .expect("workspace init with --mcp")
+    };
+
+    init(false);
+    let claude_path = workspace.path().join(".claude.json");
+    let first: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&claude_path).expect("read claude mcp"))
+            .expect("parse claude mcp");
+    assert_operator_argv(&first["mcpServers"]["orbit"]["args"]);
+
+    // Re-running the supported reconciliation path (`--force --mcp`) must
+    // refresh the managed Orbit entry to a single `--operator` argument, not
+    // append a second one, while leaving unrelated config untouched.
+    init(true);
+    let second: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&claude_path).expect("read claude mcp"))
+            .expect("parse claude mcp");
+    assert_operator_argv(&second["mcpServers"]["orbit"]["args"]);
 }
 
 #[test]

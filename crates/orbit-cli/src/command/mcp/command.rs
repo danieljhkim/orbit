@@ -29,6 +29,10 @@ impl Execute for McpCommand {
 #[derive(Subcommand)]
 pub enum McpSubcommand {
     /// Initialize MCP client integration for the current workspace
+    ///
+    /// Registers agent-only authority — the same as bare `orbit mcp serve`.
+    /// For the operator-authorized bootstrap integration (workflow dispatch,
+    /// `orbit.command.exec`), use `orbit workspace init --mcp` instead.
     Init(InitArgs),
     /// Remove MCP client integration for the current workspace
     Remove(RemoveArgs),

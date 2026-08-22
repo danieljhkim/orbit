@@ -5,8 +5,9 @@ use super::simple_json::{apply_simple_json_init, apply_simple_json_remove};
 
 pub(in crate::command::mcp::setup) fn apply_gemini_init(
     target: &ConfigTarget,
+    operator: bool,
 ) -> Result<(), OrbitError> {
-    apply_simple_json_init(target, "mcpServers")
+    apply_simple_json_init(target, "mcpServers", operator)
 }
 
 pub(in crate::command::mcp::setup) fn apply_gemini_remove(

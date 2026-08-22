@@ -50,7 +50,11 @@ pub struct WorkspaceInitArgs {
     /// a value below the current position is refused.
     #[arg(long, value_name = "N")]
     pub task_id_start: Option<u32>,
-    /// Set up MCP client integrations for auto-detected providers.
+    /// Set up MCP client integrations for auto-detected providers. The
+    /// registered server is granted OPERATOR authority: governed operations
+    /// such as `orbit.workflow.ship`, workflow run observation/resume, and
+    /// `orbit.command.exec` become reachable through it. Bare `orbit mcp
+    /// serve` and worker/agent MCP startup remain agent-only.
     #[arg(long)]
     pub mcp: bool,
     /// Inject (or refresh) an Orbit workflow-rules block in CLAUDE.md and AGENTS.md at the workspace root.
@@ -104,7 +108,10 @@ impl WorkspaceInitArgs {
             if providers.is_empty() {
                 println!("  mcp:       no providers auto-detected");
             } else {
-                println!("  mcp:       {}", providers.join(", "));
+                println!(
+                    "  mcp:       {} (operator-authorized: orbit.workflow.ship, run observe/resume, orbit.command.exec)",
+                    providers.join(", ")
+                );
             }
         } else {
             println!("  mcp:       skipped (pass --mcp to set up integrations)");

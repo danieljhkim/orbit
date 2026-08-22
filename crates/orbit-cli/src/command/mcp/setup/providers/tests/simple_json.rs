@@ -1,3 +1,4 @@
+use serde_json::json;
 use tempfile::tempdir;
 
 use super::super::super::args::{McpAction, McpProvider, ProviderSelectionMode, ScopeArg};
@@ -8,21 +9,44 @@ use super::super::simple_json::simple_mcp_server_value;
 
 #[test]
 fn server_value_builders_emit_mcp_serve_only() {
-    let claude = claude_mcp_server_value();
+    let claude = claude_mcp_server_value(false);
     let claude_args = claude["args"].as_array().expect("claude args");
     assert_eq!(claude_args.len(), 2);
     assert_eq!(claude_args[0].as_str(), Some("mcp"));
     assert_eq!(claude_args[1].as_str(), Some("serve"));
 
-    let gemini = simple_mcp_server_value();
+    let gemini = simple_mcp_server_value(false);
     let gemini_args = gemini["args"].as_array().expect("gemini args");
     assert_eq!(gemini_args.len(), 2);
     assert!(gemini.get("cwd").is_none());
 
-    let codex = codex_mcp_server_table();
+    let codex = codex_mcp_server_table(false);
     let codex_args = codex["args"].as_array().expect("codex args");
     assert_eq!(codex_args.len(), 2);
     assert!(codex.get("cwd").is_none());
+    assert_eq!(codex["enabled"].as_bool(), Some(true));
+}
+
+#[test]
+fn server_value_builders_append_operator_flag_when_authorized() {
+    let claude = claude_mcp_server_value(true);
+    let claude_args = claude["args"].as_array().expect("claude args");
+    assert_eq!(claude_args.len(), 3);
+    assert_eq!(claude_args[0].as_str(), Some("mcp"));
+    assert_eq!(claude_args[1].as_str(), Some("serve"));
+    assert_eq!(claude_args[2].as_str(), Some("--operator"));
+
+    let gemini = simple_mcp_server_value(true);
+    let gemini_args = gemini["args"].as_array().expect("gemini args");
+    assert_eq!(
+        gemini_args,
+        &vec![json!("mcp"), json!("serve"), json!("--operator")]
+    );
+
+    let codex = codex_mcp_server_table(true);
+    let codex_args = codex["args"].as_array().expect("codex args");
+    assert_eq!(codex_args.len(), 3);
+    assert_eq!(codex_args[2].as_str(), Some("--operator"));
     assert_eq!(codex["enabled"].as_bool(), Some(true));
 }
 
@@ -40,7 +64,7 @@ fn cursor_workspace_scope_init_and_remove_preserve_unrelated_entries() {
     std::fs::create_dir_all(&orbit_root).expect("create orbit root");
 
     run_action(
-        McpAction::Init,
+        McpAction::Init { operator: false },
         repo.path(),
         &orbit_root,
         ProviderSelectionMode::Explicit(vec![McpProvider::Cursor]),
@@ -91,7 +115,7 @@ fn cursor_home_scope_init_writes_resolved_home_path() {
     std::fs::create_dir_all(&orbit_root).expect("create orbit root");
 
     run_action(
-        McpAction::Init,
+        McpAction::Init { operator: false },
         repo.path(),
         &orbit_root,
         ProviderSelectionMode::Explicit(vec![McpProvider::Cursor]),
@@ -144,7 +168,7 @@ fn workspace_scope_cursor_init_is_idempotent() {
     std::fs::create_dir_all(&orbit_root).expect("create orbit root");
 
     run_action(
-        McpAction::Init,
+        McpAction::Init { operator: false },
         repo.path(),
         &orbit_root,
         ProviderSelectionMode::Explicit(vec![McpProvider::Cursor]),
@@ -156,7 +180,7 @@ fn workspace_scope_cursor_init_is_idempotent() {
         .expect("read first cursor");
 
     run_action(
-        McpAction::Init,
+        McpAction::Init { operator: false },
         repo.path(),
         &orbit_root,
         ProviderSelectionMode::Explicit(vec![McpProvider::Cursor]),
@@ -184,7 +208,7 @@ fn vscode_workspace_scope_init_and_remove_preserve_unrelated_entries() {
     std::fs::create_dir_all(&orbit_root).expect("create orbit root");
 
     run_action(
-        McpAction::Init,
+        McpAction::Init { operator: false },
         repo.path(),
         &orbit_root,
         ProviderSelectionMode::Explicit(vec![McpProvider::Vscode]),
@@ -239,7 +263,7 @@ fn vscode_home_scope_init_writes_resolved_home_path() {
     std::fs::create_dir_all(&orbit_root).expect("create orbit root");
 
     run_action(
-        McpAction::Init,
+        McpAction::Init { operator: false },
         repo.path(),
         &orbit_root,
         ProviderSelectionMode::Explicit(vec![McpProvider::Vscode]),
@@ -298,7 +322,7 @@ fn workspace_scope_vscode_init_is_idempotent() {
     std::fs::create_dir_all(&orbit_root).expect("create orbit root");
 
     run_action(
-        McpAction::Init,
+        McpAction::Init { operator: false },
         repo.path(),
         &orbit_root,
         ProviderSelectionMode::Explicit(vec![McpProvider::Vscode]),
@@ -310,7 +334,7 @@ fn workspace_scope_vscode_init_is_idempotent() {
         .expect("read first vscode");
 
     run_action(
-        McpAction::Init,
+        McpAction::Init { operator: false },
         repo.path(),
         &orbit_root,
         ProviderSelectionMode::Explicit(vec![McpProvider::Vscode]),
@@ -339,7 +363,7 @@ fn windsurf_workspace_scope_init_and_remove_preserve_unrelated_entries() {
     std::fs::create_dir_all(&orbit_root).expect("create orbit root");
 
     run_action(
-        McpAction::Init,
+        McpAction::Init { operator: false },
         repo.path(),
         &orbit_root,
         ProviderSelectionMode::Explicit(vec![McpProvider::Windsurf]),
@@ -390,7 +414,7 @@ fn windsurf_home_scope_init_writes_resolved_home_path() {
     std::fs::create_dir_all(&orbit_root).expect("create orbit root");
 
     run_action(
-        McpAction::Init,
+        McpAction::Init { operator: false },
         repo.path(),
         &orbit_root,
         ProviderSelectionMode::Explicit(vec![McpProvider::Windsurf]),
@@ -444,7 +468,7 @@ fn workspace_scope_windsurf_init_is_idempotent() {
     std::fs::create_dir_all(&orbit_root).expect("create orbit root");
 
     run_action(
-        McpAction::Init,
+        McpAction::Init { operator: false },
         repo.path(),
         &orbit_root,
         ProviderSelectionMode::Explicit(vec![McpProvider::Windsurf]),
@@ -460,7 +484,7 @@ fn workspace_scope_windsurf_init_is_idempotent() {
     let first = std::fs::read_to_string(&path).expect("read first windsurf");
 
     run_action(
-        McpAction::Init,
+        McpAction::Init { operator: false },
         repo.path(),
         &orbit_root,
         ProviderSelectionMode::Explicit(vec![McpProvider::Windsurf]),
@@ -471,4 +495,106 @@ fn workspace_scope_windsurf_init_is_idempotent() {
     let second = std::fs::read_to_string(&path).expect("read second windsurf");
 
     assert_eq!(first, second);
+}
+
+/// Shared assertion for the simple-JSON providers (cursor, vscode, windsurf):
+/// the written `orbit` server entry's `args` array is exactly `["mcp",
+/// "serve", "--operator"]` under the given top-level servers key.
+fn assert_single_operator_entry(config_path: &std::path::Path, top_level_key: &str) {
+    let config: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(config_path).expect("read config"))
+            .expect("parse config");
+    let args = config[top_level_key]["orbit"]["args"]
+        .as_array()
+        .expect("args array");
+    assert_eq!(
+        args,
+        &vec![
+            serde_json::json!("mcp"),
+            serde_json::json!("serve"),
+            serde_json::json!("--operator"),
+        ]
+    );
+}
+
+#[test]
+fn cursor_operator_init_writes_single_operator_flag_and_refresh_is_idempotent() {
+    let repo = tempdir().expect("repo tempdir");
+    let home = tempdir().expect("home tempdir");
+    let orbit_root = repo.path().join(".orbit");
+    std::fs::create_dir_all(&orbit_root).expect("create orbit root");
+    let path = repo.path().join(".cursor").join("mcp.json");
+
+    let init = || {
+        run_action(
+            McpAction::Init { operator: true },
+            repo.path(),
+            &orbit_root,
+            ProviderSelectionMode::Explicit(vec![McpProvider::Cursor]),
+            Some(home.path().to_path_buf()),
+            ScopeArg::Workspace,
+        )
+        .expect("operator init cursor")
+    };
+
+    init();
+    assert_single_operator_entry(&path, "mcpServers");
+    init();
+    assert_single_operator_entry(&path, "mcpServers");
+}
+
+#[test]
+fn vscode_operator_init_writes_single_operator_flag_and_refresh_is_idempotent() {
+    let repo = tempdir().expect("repo tempdir");
+    let home = tempdir().expect("home tempdir");
+    let orbit_root = repo.path().join(".orbit");
+    std::fs::create_dir_all(&orbit_root).expect("create orbit root");
+    let path = repo.path().join(".vscode").join("mcp.json");
+
+    let init = || {
+        run_action(
+            McpAction::Init { operator: true },
+            repo.path(),
+            &orbit_root,
+            ProviderSelectionMode::Explicit(vec![McpProvider::Vscode]),
+            Some(home.path().to_path_buf()),
+            ScopeArg::Workspace,
+        )
+        .expect("operator init vscode")
+    };
+
+    init();
+    assert_single_operator_entry(&path, "servers");
+    init();
+    assert_single_operator_entry(&path, "servers");
+}
+
+#[test]
+fn windsurf_operator_init_writes_single_operator_flag_and_refresh_is_idempotent() {
+    let repo = tempdir().expect("repo tempdir");
+    let home = tempdir().expect("home tempdir");
+    let orbit_root = repo.path().join(".orbit");
+    std::fs::create_dir_all(&orbit_root).expect("create orbit root");
+    let path = repo
+        .path()
+        .join(".codeium")
+        .join("windsurf")
+        .join("mcp_config.json");
+
+    let init = || {
+        run_action(
+            McpAction::Init { operator: true },
+            repo.path(),
+            &orbit_root,
+            ProviderSelectionMode::Explicit(vec![McpProvider::Windsurf]),
+            Some(home.path().to_path_buf()),
+            ScopeArg::Workspace,
+        )
+        .expect("operator init windsurf")
+    };
+
+    init();
+    assert_single_operator_entry(&path, "mcpServers");
+    init();
+    assert_single_operator_entry(&path, "mcpServers");
 }

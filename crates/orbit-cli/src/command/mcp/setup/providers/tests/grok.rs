@@ -17,7 +17,7 @@ fn grok_workspace_scope_init_and_remove_preserve_unrelated_entries() {
     std::fs::create_dir_all(&orbit_root).expect("create orbit root");
 
     run_action(
-        McpAction::Init,
+        McpAction::Init { operator: false },
         repo.path(),
         &orbit_root,
         ProviderSelectionMode::Explicit(vec![McpProvider::Grok]),
@@ -84,7 +84,7 @@ fn workspace_scope_grok_init_is_idempotent() {
     std::fs::create_dir_all(&orbit_root).expect("create orbit root");
 
     run_action(
-        McpAction::Init,
+        McpAction::Init { operator: false },
         repo.path(),
         &orbit_root,
         ProviderSelectionMode::Explicit(vec![McpProvider::Grok]),
@@ -96,7 +96,7 @@ fn workspace_scope_grok_init_is_idempotent() {
         .expect("read first config");
 
     run_action(
-        McpAction::Init,
+        McpAction::Init { operator: false },
         repo.path(),
         &orbit_root,
         ProviderSelectionMode::Explicit(vec![McpProvider::Grok]),
@@ -108,4 +108,41 @@ fn workspace_scope_grok_init_is_idempotent() {
         .expect("read second config");
 
     assert_eq!(first, second);
+}
+
+#[test]
+fn grok_operator_init_writes_single_operator_flag_and_refresh_is_idempotent() {
+    let repo = tempdir().expect("repo tempdir");
+    let home = tempdir().expect("home tempdir");
+    let orbit_root = repo.path().join(".orbit");
+    std::fs::create_dir_all(&orbit_root).expect("create orbit root");
+
+    let init = || {
+        run_action(
+            McpAction::Init { operator: true },
+            repo.path(),
+            &orbit_root,
+            ProviderSelectionMode::Explicit(vec![McpProvider::Grok]),
+            Some(home.path().to_path_buf()),
+            ScopeArg::Workspace,
+        )
+        .expect("operator init grok")
+    };
+    let assert_single_operator_entry = || {
+        let config = std::fs::read_to_string(repo.path().join(".grok").join("config.toml"))
+            .expect("read config");
+        let parsed: toml::Value = toml::from_str(&config).expect("parse config");
+        let args = parsed["mcp_servers"]["orbit"]["args"]
+            .as_array()
+            .expect("args array");
+        assert_eq!(args.len(), 3);
+        assert_eq!(args[0].as_str(), Some("mcp"));
+        assert_eq!(args[1].as_str(), Some("serve"));
+        assert_eq!(args[2].as_str(), Some("--operator"));
+    };
+
+    init();
+    assert_single_operator_entry();
+    init();
+    assert_single_operator_entry();
 }
