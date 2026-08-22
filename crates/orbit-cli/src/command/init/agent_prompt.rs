@@ -115,11 +115,11 @@ pub(crate) fn collect_system_crew_setting(
 
 /// Cheap-tier system options in the same preference order as
 /// `orbit-config::default_system_crew`: Codex Luna, Claude Sonnet, Grok,
-/// Gemini Flash, Copilot Haiku.
+/// Gemini Flash, Copilot Haiku, Cursor.
 fn system_crew_options(detected: &DetectedAgents) -> Vec<CrewSeed> {
     use orbit_common::model_defaults::{
-        CLAUDE_DEFAULT_WEAK, CODEX_LUNA_MODEL, COPILOT_CREW_MODEL, GEMINI_CREW_MODEL,
-        GROK_DEFAULT_MODEL,
+        CLAUDE_DEFAULT_WEAK, CODEX_LUNA_MODEL, COPILOT_CREW_MODEL, CURSOR_CREW_MODEL,
+        GEMINI_CREW_MODEL, GROK_DEFAULT_MODEL,
     };
     let mut options = Vec::new();
     for (enabled, provider, model) in [
@@ -128,6 +128,7 @@ fn system_crew_options(detected: &DetectedAgents) -> Vec<CrewSeed> {
         (detected.grok_cli, "grok", GROK_DEFAULT_MODEL),
         (detected.gemini_cli, "gemini", GEMINI_CREW_MODEL),
         (detected.copilot_cli, "copilot", COPILOT_CREW_MODEL),
+        (detected.cursor_cli, "cursor", CURSOR_CREW_MODEL),
     ] {
         if enabled {
             options.push(CrewSeed {
@@ -162,6 +163,7 @@ fn system_crew_label(option: &CrewSeed) -> &'static str {
         Some("grok") => "Grok",
         Some("gemini") => "Gemini",
         Some("copilot") => "Copilot",
+        Some("cursor") => "Cursor",
         _ => "Agent",
     }
 }
@@ -238,6 +240,7 @@ fn agent_options(detected: &DetectedAgents) -> Vec<AgentOption> {
         (detected.gemini_cli, "Gemini CLI", "gemini"),
         (detected.grok_cli, "Grok CLI", "grok"),
         (detected.copilot_cli, "Copilot CLI", "copilot"),
+        (detected.cursor_cli, "Cursor Agent CLI", "cursor"),
         (detected.ollama_cli, "Ollama CLI", "ollama"),
     ] {
         if enabled {
@@ -281,6 +284,7 @@ fn detection_lines(detected: &DetectedAgents) -> String {
         ("Codex CLI", detected.codex_cli),
         ("Gemini CLI", detected.gemini_cli),
         ("Grok CLI", detected.grok_cli),
+        ("Cursor Agent CLI", detected.cursor_cli),
         ("Ollama CLI", detected.ollama_cli),
     ]
     .into_iter()
@@ -316,6 +320,7 @@ fn agent_display_name(config: &CrewSeed) -> String {
         "gemini" => "Gemini CLI".to_string(),
         "grok" => "Grok CLI".to_string(),
         "copilot" => "Copilot CLI".to_string(),
+        "cursor" => "Cursor Agent CLI".to_string(),
         "ollama" => "Ollama CLI".to_string(),
         provider => format!("{provider} (CLI)"),
     }

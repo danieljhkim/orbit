@@ -161,6 +161,17 @@ pub(super) fn compile_macos_sandbox_profile_with_env(
             ));
         }
     }
+    // Cursor's logged-in CLI state and permissions live in `$HOME/.cursor`.
+    // Grant the directory only to the active Cursor executor; API-key auth is
+    // an explicit environment opt-in and needs no additional path. [ORB-10945]
+    if Provider::parse(provider).ok() == Some(Provider::Cursor)
+        && let Some(state_dir) = super::provider_dirs::cursor_state_dir(home)
+    {
+        out.push_str(&format!(
+            "(allow file-write* (subpath \"{}\"))\n",
+            super::sbpl_filter::sbpl_escape(&state_dir.display().to_string())
+        ));
+    }
     super::provider_dirs::emit_claude_home_json_allows(home, claude_config_dir, &mut out);
     super::provider_dirs::emit_grok_state_file_allows(home, grok_home, &mut out);
 

@@ -84,6 +84,18 @@ pub const COPILOT_DEFAULT_MODEL: &str = "claude-sonnet-4.5";
 /// Cheap-tier Copilot model used for the bounded system crew.
 pub const COPILOT_CREW_MODEL: &str = "claude-haiku-4.5";
 
+/// Default model for the Cursor execution lane.
+///
+/// Cursor routes to multiple model vendors, but the persisted provider remains
+/// `cursor`. Orbit passes this documented current CLI model id explicitly so a
+/// run never depends on an interactive session's ambient model selection.
+/// [ORB-10945]
+pub const CURSOR_DEFAULT_MODEL: &str = "gpt-5";
+
+/// Model used for Cursor's bounded system crew. Cursor does not publish a
+/// stable cheap-tier alias, so the known-good default is reused.
+pub const CURSOR_CREW_MODEL: &str = CURSOR_DEFAULT_MODEL;
+
 /// Cheap Claude model used by the orbit-agent HTTP examples.
 ///
 /// Version pinned like [`ANTHROPIC_HTTP_DEFAULT_MODEL`] because the examples
@@ -94,7 +106,7 @@ pub const ANTHROPIC_EXAMPLE_MODEL: &str = "claude-haiku-4-5-20251001";
 ///
 /// Mirrors the historical `agent_detect::default_model_for` map; `claude` now
 /// resolves to the unversioned [`CLAUDE_DEFAULT_STRONG`] alias. codex/gemini/
-/// grok/copilot use their provider-specific defaults.
+/// grok/copilot/cursor use their provider-specific defaults.
 pub fn default_model_for_provider(provider: &str) -> Option<&'static str> {
     match provider {
         "claude" => Some(CLAUDE_DEFAULT_STRONG),
@@ -102,6 +114,7 @@ pub fn default_model_for_provider(provider: &str) -> Option<&'static str> {
         "gemini" => Some(GEMINI_DEFAULT_MODEL),
         "grok" => Some(GROK_DEFAULT_MODEL),
         "copilot" => Some(COPILOT_DEFAULT_MODEL),
+        "cursor" => Some(CURSOR_DEFAULT_MODEL),
         _ => None,
     }
 }

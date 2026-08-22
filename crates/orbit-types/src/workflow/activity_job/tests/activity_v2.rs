@@ -80,11 +80,12 @@ fn provider_capability_predicates_match_contract() {
     // the only variants allowed to exist without a row are the ones named here.
     // An accidental new variant still fails this test.
     //
-    // [ORB-10946] `copilot` is such an identity. Adding it upstream is a
+    // Copilot and Cursor are such identities. Adding either upstream is a
     // cross-system change (Worker and Bridge resolve against the same rows);
-    // until that lands, Orbit can dispatch Copilot while Worker correctly
-    // refuses it — which is what `is_worker_executable() == false` encodes.
-    const ORBIT_ONLY_PROVIDERS: &[&str] = &["copilot"];
+    // until that lands, Orbit can dispatch them while Worker correctly refuses
+    // them — which is what `is_worker_executable() == false` encodes.
+    // [ORB-10946] [ORB-10945]
+    const ORBIT_ONLY_PROVIDERS: &[&str] = &["copilot", "cursor"];
 
     for name in &known {
         assert!(
@@ -121,8 +122,8 @@ fn provider_capability_predicates_match_contract() {
         );
     }
 
-    // The Orbit-only identities, asserted directly since no contract row
-    // covers them yet. [ORB-10946]
+    // Orbit-only identities are asserted directly since no shared contract row
+    // covers them yet. [ORB-10946] [ORB-10945]
     let copilot = Provider::parse("copilot").expect("copilot is canonical");
     assert_eq!(copilot.as_str(), "copilot");
     assert_eq!(copilot.to_string(), "copilot");
@@ -147,6 +148,28 @@ fn provider_capability_predicates_match_contract() {
         assert_ne!(
             resolved.provider, copilot,
             "vendor alias '{vendor_alias}' must not resolve to copilot",
+        );
+    }
+
+    let cursor = Provider::parse("cursor").expect("cursor is canonical");
+    assert_eq!(cursor.as_str(), "cursor");
+    assert_eq!(cursor.to_string(), "cursor");
+    assert!(cursor.has_cli_runtime(), "Orbit ships a Cursor CLI runtime");
+    assert!(
+        !cursor.is_worker_executable(),
+        "Worker has no Cursor lane, so it must refuse rather than fall back",
+    );
+    for spelling in ["cursor-agent", "cursor_cli", "anysphere"] {
+        assert!(
+            Provider::parse(spelling).is_err(),
+            "'{spelling}' must not alias the Cursor provider",
+        );
+    }
+    for vendor_alias in ["anthropic", "openai", "google", "xai"] {
+        let resolved = Provider::resolve_name(vendor_alias).expect("vendor alias resolves");
+        assert_ne!(
+            resolved.provider, cursor,
+            "vendor alias '{vendor_alias}' must not resolve to Cursor",
         );
     }
 }

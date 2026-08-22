@@ -328,6 +328,7 @@ fn append_linux_provider_state_roots(
     // `ensure_owned_directory` below, so an unconditional entry would mkdir a
     // `~/.copilot` on hosts that have never installed the CLI.
     directories.extend(linux_copilot_state_roots(provider, home.as_deref()));
+    directories.extend(linux_cursor_state_roots_with(provider, home.as_deref()));
     for directory in directories {
         ensure_owned_directory(&directory)?;
         let canonical = directory.canonicalize().map_err(|error| {
@@ -339,6 +340,20 @@ fn append_linux_provider_state_roots(
         append_unique_modify_root(resolved, canonical.display().to_string());
     }
     Ok(())
+}
+
+/// Writable state root for an active Cursor executor on Linux. The CLI stores
+/// logged-in authentication, settings, permissions, and sessions under
+/// `$HOME/.cursor`; no other provider receives this grant. [ORB-10945]
+#[cfg(target_os = "linux")]
+pub(super) fn linux_cursor_state_roots_with(provider: &str, home: Option<&Path>) -> Vec<PathBuf> {
+    if orbit_types::workflow::Provider::parse(provider).ok()
+        != Some(orbit_types::workflow::Provider::Cursor)
+    {
+        return Vec::new();
+    }
+    home.map(|home| vec![home.join(".cursor")])
+        .unwrap_or_default()
 }
 
 /// Process-env wrapper around [`linux_copilot_state_roots_with`].

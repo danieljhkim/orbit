@@ -109,6 +109,17 @@ fn grok_only_seeds_grok_and_a_system_crew() {
     assert_default_crew(&parsed, Some("grok"));
 }
 
+#[test]
+fn cursor_only_seeds_cursor_and_a_system_crew() {
+    let contents = seed_contents(&seed_for(&["cursor"]));
+    let parsed = parsed_config(&contents);
+
+    assert_eq!(crew_names(&parsed), vec!["cursor", "system"]);
+    assert_crew(&parsed, "cursor", "cursor", "gpt-5");
+    assert_crew(&parsed, "system", "cursor", "gpt-5");
+    assert_default_crew(&parsed, Some("cursor"));
+}
+
 /// Orbit ships no `ollama` crew, so a host whose only agent CLI is ollama
 /// seeds an explicitly empty registry rather than a dangling default.
 #[test]

@@ -698,7 +698,15 @@ mod copilot_state_roots {
 
     #[test]
     fn other_providers_get_nothing() {
-        for provider in ["claude", "codex", "gemini", "grok", "ollama", "local-shell"] {
+        for provider in [
+            "claude",
+            "codex",
+            "gemini",
+            "grok",
+            "cursor",
+            "ollama",
+            "local-shell",
+        ] {
             assert!(
                 linux_copilot_state_roots_with(provider, Some(Path::new("/home/test")), None, None)
                     .is_empty(),
@@ -718,5 +726,39 @@ mod copilot_state_roots {
             )
             .is_empty()
         );
+    }
+}
+
+#[cfg(target_os = "linux")]
+mod cursor_state_roots {
+    use std::path::{Path, PathBuf};
+
+    use crate::adapter::engine_host::v2_host::sandbox::linux_cursor_state_roots_with;
+
+    #[test]
+    fn active_cursor_gets_only_its_home_state_root() {
+        assert_eq!(
+            linux_cursor_state_roots_with("cursor", Some(Path::new("/home/test"))),
+            vec![PathBuf::from("/home/test/.cursor")]
+        );
+        assert!(linux_cursor_state_roots_with("cursor", None).is_empty());
+    }
+
+    #[test]
+    fn other_and_unknown_providers_get_nothing() {
+        for provider in [
+            "claude",
+            "codex",
+            "gemini",
+            "grok",
+            "copilot",
+            "ollama",
+            "not-a-provider",
+        ] {
+            assert!(
+                linux_cursor_state_roots_with(provider, Some(Path::new("/home/test"))).is_empty(),
+                "{provider} must not inherit Cursor state roots",
+            );
+        }
     }
 }

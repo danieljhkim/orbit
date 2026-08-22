@@ -28,11 +28,11 @@ Workspace config defines one concrete assignment under each `[crews.<name>]`: fl
 
 `crates/orbit-config/src/raw.rs` owns the TOML shape, and `crates/orbit-config/src/resolved.rs` materializes it into `Crew` values from `orbit-common`. Runtime loading rejects incomplete crews, retired `planner`/`implementer`/`reviewer` role sub-tables with guidance to write flat `model`, `provider`, and `backend` fields, and `[workflow].default_crew` values that do not name a defined crew.
 
-The built-in runtime registry uses model-specific standard crews: Claude provides `opus`, `sonnet`, and `fable`; Codex provides `sol`, `terra`, and `luna`; Gemini provides `gemini`; Grok provides `grok`; and Copilot provides `copilot`. Fresh `orbit init` config filters that registry by detected provider CLIs, always writes `backend = "cli"`, and chooses the first emitted standard crew as `[workflow].default_crew` (`opus`, `sol`, `gemini`, `grok`, or `copilot`).
+The built-in runtime registry uses model-specific standard crews: Claude provides `opus`, `sonnet`, and `fable`; Codex provides `sol`, `terra`, and `luna`; Gemini provides `gemini`; Grok provides `grok`; Copilot provides `copilot`; and Cursor provides `cursor`. Fresh `orbit init` config filters that registry by detected provider CLIs and chooses the first emitted standard crew as `[workflow].default_crew` (`opus`, `sol`, `gemini`, `grok`, `copilot`, or `cursor`).
 
 It adds `qa` on Terra when Codex is available, otherwise on Sonnet when Claude is available. With no supported provider CLI, initialization emits neither crews nor a dangling default.
 
-`copilot` is the one crew named for its *provider* rather than its model: Copilot's model is supplied by another vendor, so naming the crew after the model would hide which execution lane the run actually uses. It is last in every preference order, so adding it cannot move an existing host's defaults. See [CONFIG.md § GitHub Copilot CLI](../../CONFIG.md#github-copilot-cli) for installation, organization-policy prerequisites, authentication, and model selection. [ORB-10946]
+`copilot` and `cursor` are crews named for their *provider* rather than their model: both lanes can select models supplied by other vendors, so model-named crews would hide which execution lane actually runs. They are appended after the original four families (`copilot`, then `cursor`) so adding them cannot move an existing host's defaults. See [CONFIG.md § GitHub Copilot CLI](../../CONFIG.md#github-copilot-cli) and [§ Cursor Agent CLI](../../CONFIG.md#cursor-agent-cli) for installation, authentication, model selection, and runtime boundaries. [ORB-10946] [ORB-10945]
 
 ## 3. Task and Tool Surface
 
@@ -64,6 +64,7 @@ An activity-specific crew is carried in rendered input rather than persisted as 
 
 - ORB-00042: Onboard Grok (xAI) as a first-class supported agent family.
 - ORB-10946: Add the standalone GitHub Copilot CLI as a first-class workflow executor.
+- ORB-10945: Add Cursor Agent CLI as a first-class Orbit workflow executor.
 - ORB-00058: Introduce per-task crew override for agent model selection.
 - ORB-10315: Seed model-specific crews only for providers available during initialization.
 - ORB-10620: Reject retired crew role sub-tables during config load.
