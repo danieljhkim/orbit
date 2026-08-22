@@ -380,6 +380,45 @@ fn a_failed_child_stays_linked_with_its_terminal_status() {
 }
 
 #[test]
+fn mixed_crew_child_failure_closes_dispatch_and_fails_parent_guard_promptly() {
+    let (runtime, parent) = parent_runtime();
+    let concrete_error = "invalid input: task bundle mixes crews terra and sol; split the bundle or assign one crew instead of inheriting workflow.default_crew";
+    let started = std::time::Instant::now();
+
+    let output = invoke_and_wait_with(
+        &runtime,
+        "invoke_and_wait",
+        &ship_leaves_input(&parent),
+        |_| Ok(healthy_invoke_output()),
+        |_| {
+            Ok(json!({
+                "results": [{
+                    "run_id": CHILD_RUN,
+                    "status": "failed",
+                    "finished_at": "2026-08-22T23:00:00Z",
+                    "error": concrete_error,
+                }],
+            }))
+        },
+    )
+    .expect("terminal child failure is returned as data");
+
+    assert!(started.elapsed() < std::time::Duration::from_secs(1));
+    let dispatch = &recorded_dispatches(&runtime, &parent)[0];
+    assert_eq!(dispatch.phase, ChildDispatchPhase::Terminal);
+    assert_eq!(dispatch.child_status.as_deref(), Some("failed"));
+    assert_eq!(dispatch.error.as_deref(), Some(concrete_error));
+
+    let error = pipeline_success_guard(
+        "pipeline_success_guard",
+        &json!({ "context": "workspace auto leaf ship", "results": [output] }),
+    )
+    .expect_err("the parent must fail on the terminal mixed-crew child");
+    let message = action_failure_message(error, "pipeline_success_guard");
+    assert!(message.contains("mixes crews"), "{message}");
+}
+
+#[test]
 fn a_wait_that_errors_leaves_the_child_linked_without_claiming_it_failed() {
     let (runtime, parent) = parent_runtime();
 
