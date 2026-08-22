@@ -221,6 +221,93 @@ impl TaskRegistryStore {
         Ok(binding)
     }
 
+    /// Move `orbit_dir` onto `params.workspace_id`, replacing any checkout
+    /// currently bound to that directory.
+    ///
+    /// `bind_workspace` fails closed when the orbit dir already belongs to a
+    /// different workspace. Workspace `--force` reconciliation uses this to
+    /// finish a split-brain bind: a read-only command that minted a synthetic
+    /// checkout for `parent(data-dir)`, then `workspace init --force` claiming
+    /// the same data dir for a real git checkout.
+    pub fn rebind_checkout(
+        &self,
+        params: BindWorkspaceParams,
+    ) -> Result<WorkspaceCheckoutBinding, OrbitError> {
+        let repo_root = normalize_path(&params.repo_root);
+        let workspace_path = normalize_path(&params.workspace_path);
+        let orbit_dir = normalize_path(&params.orbit_dir);
+        let slug = sanitize_slug(&params.slug);
+        let workspace_id =
+            validate_workspace_id(params.workspace_id.as_deref().ok_or_else(|| {
+                OrbitError::InvalidInput("rebind_checkout requires an explicit workspace id".into())
+            })?)?;
+
+        let mut conn = self
+            .conn
+            .lock()
+            .map_err(|e| OrbitError::Store(format!("mutex poisoned: {e}")))?;
+        let tx = conn
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(|e| OrbitError::Store(e.to_string()))?;
+        let now = now_string();
+
+        if workspace_by_id(&tx, &workspace_id)?.is_none() {
+            tx.execute(
+                "INSERT INTO workspace_bindings (
+                    workspace_id, slug, repo_fingerprint, created_at, updated_at
+                ) VALUES (?1, ?2, ?3, ?4, ?4)",
+                params![workspace_id, slug, params.repo_fingerprint, now],
+            )
+            .map_err(|e| OrbitError::Store(e.to_string()))?;
+        }
+
+        if let Some(existing) = workspace_by_orbit_dir(&tx, &orbit_dir)?
+            && existing.workspace_id != workspace_id
+        {
+            tx.execute(
+                "DELETE FROM workspace_checkout_bindings WHERE orbit_dir = ?1",
+                [path_to_string(&orbit_dir)],
+            )
+            .map_err(|e| OrbitError::Store(e.to_string()))?;
+        }
+
+        if workspace_checkout_by_id(&tx, &workspace_id)?.is_some() {
+            tx.execute(
+                "UPDATE workspace_checkout_bindings
+                 SET repo_root = ?2, workspace_path = ?3, orbit_dir = ?4, updated_at = ?5
+                 WHERE workspace_id = ?1",
+                params![
+                    workspace_id,
+                    path_to_string(&repo_root),
+                    path_to_string(&workspace_path),
+                    path_to_string(&orbit_dir),
+                    now,
+                ],
+            )
+            .map_err(|e| OrbitError::Store(e.to_string()))?;
+        } else {
+            tx.execute(
+                "INSERT INTO workspace_checkout_bindings (
+                    workspace_id, repo_root, workspace_path, orbit_dir, created_at, updated_at
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?5)",
+                params![
+                    workspace_id,
+                    path_to_string(&repo_root),
+                    path_to_string(&workspace_path),
+                    path_to_string(&orbit_dir),
+                    now,
+                ],
+            )
+            .map_err(|e| OrbitError::Store(e.to_string()))?;
+        }
+
+        let binding = workspace_checkout_by_id(&tx, &workspace_id)?.ok_or_else(|| {
+            OrbitError::Store("failed to read rebound workspace checkout binding".into())
+        })?;
+        tx.commit().map_err(|e| OrbitError::Store(e.to_string()))?;
+        Ok(binding)
+    }
+
     /// Register a logical workspace in the coordination registry without
     /// inventing a machine-local checkout path.
     pub fn register_workspace(

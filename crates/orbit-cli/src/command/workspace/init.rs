@@ -349,11 +349,25 @@ impl WorkspaceInitArgs {
                 }
             }
         }
+        orbit_core::adapter::HubCoordinationExecutor::register_workspace(global_root, &id, &name)?;
+        // A first checkout for this data dir must land in sqlite before the
+        // JSON catalog is saved. Shared-root follow-on checkouts reuse one
+        // orbit_dir (UNIQUE) and must not steal that row. `--force` rebinds
+        // a leftover synthetic parent(data-dir) mint.
+        if !registered_shared_root {
+            orbit_core::adapter::HubCoordinationExecutor::bind_checkout(
+                global_root,
+                &id,
+                &name,
+                cwd,
+                orbit_dir,
+                self.force,
+            )?;
+        }
         workspace_registry::save_registry_to(&registry, registry_path)?;
         if !reconciling_existing && !registered_shared_root {
             write_workspace_identity(orbit_dir, &id)?;
         }
-        orbit_core::adapter::HubCoordinationExecutor::register_workspace(global_root, &id, &name)?;
 
         Ok(WorkspaceInitResult {
             id,

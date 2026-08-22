@@ -452,3 +452,301 @@ fn init_git_repo(main_repo: &Path) {
     run_git(main_repo, &["add", "README.md"]);
     run_git(main_repo, &["commit", "-m", "initial"]);
 }
+
+/// [ORB-10981] `orbit --root <data-dir> executor list` from a cwd that is not
+/// the intended git checkout must not mint a checkout for `parent(data-dir)`.
+#[test]
+fn executor_list_with_explicit_root_does_not_bind_parent_of_data_dir() {
+    let temp = tempdir().expect("tempdir");
+    let home = temp.path().join("home");
+    let data_dir = temp.path().join("qa-root");
+    let repo = temp.path().join("qa-ws");
+    fs::create_dir_all(&home).expect("create home");
+    fs::create_dir_all(&data_dir).expect("create data dir");
+    fs::create_dir_all(&repo).expect("create repo");
+    init_git_repo(&repo);
+
+    let data_dir_arg = data_dir.to_string_lossy().into_owned();
+    run_orbit_success(
+        &home,
+        &home,
+        &[
+            "init",
+            "--non-interactive",
+            "--host-name",
+            "qa",
+            "--task-prefix",
+            "QAZ",
+            "--root",
+            &data_dir_arg,
+        ],
+        None,
+    );
+    run_orbit_success(
+        &home,
+        &home,
+        &[
+            "--root",
+            &data_dir_arg,
+            "executor",
+            "list",
+            "--format",
+            "json",
+        ],
+        None,
+    );
+
+    let parent = canonicalize_or_original(data_dir.parent().expect("data dir parent"));
+    for (workspace_id, repo_root, orbit_dir) in checkout_bindings(&data_dir) {
+        assert_ne!(
+            canonicalize_or_original(Path::new(&repo_root)),
+            parent,
+            "executor list bound parent(data-dir) as {workspace_id} repo_root={repo_root} orbit_dir={orbit_dir}"
+        );
+    }
+
+    run_orbit_success(
+        &repo,
+        &home,
+        &[
+            "--root",
+            &data_dir_arg,
+            "workspace",
+            "init",
+            "--name",
+            "qa",
+            "--force",
+            "--format",
+            "json",
+        ],
+        None,
+    );
+    assert_workspace_commands_use_named_id(&repo, &home, &data_dir, "ws_qa");
+}
+
+/// [ORB-10981] Clean path: init + workspace init from the git checkout, no
+/// extra command from another cwd first.
+#[test]
+fn clean_root_workspace_init_then_auto_task_list_succeeds() {
+    let temp = tempdir().expect("tempdir");
+    let home = temp.path().join("home");
+    let data_dir = temp.path().join("qa-root");
+    let repo = temp.path().join("qa-ws");
+    fs::create_dir_all(&home).expect("create home");
+    fs::create_dir_all(&data_dir).expect("create data dir");
+    fs::create_dir_all(&repo).expect("create repo");
+    init_git_repo(&repo);
+
+    let data_dir_arg = data_dir.to_string_lossy().into_owned();
+    run_orbit_success(
+        &repo,
+        &home,
+        &[
+            "init",
+            "--non-interactive",
+            "--host-name",
+            "qa",
+            "--task-prefix",
+            "QAZ",
+            "--root",
+            &data_dir_arg,
+        ],
+        None,
+    );
+    run_orbit_success(
+        &repo,
+        &home,
+        &[
+            "--root",
+            &data_dir_arg,
+            "workspace",
+            "init",
+            "--name",
+            "qa",
+            "--format",
+            "json",
+        ],
+        None,
+    );
+    assert_workspace_commands_use_named_id(&repo, &home, &data_dir, "ws_qa");
+}
+
+/// [ORB-10981] `--force` must rebind a leftover synthetic sqlite checkout so
+/// later commands are not split-brain against `workspaces.json`.
+#[test]
+fn workspace_init_force_rebinds_synthetic_data_dir_checkout() {
+    let temp = tempdir().expect("tempdir");
+    let home = temp.path().join("home");
+    let data_dir = temp.path().join("qa-root");
+    let repo = temp.path().join("qa-ws");
+    fs::create_dir_all(&home).expect("create home");
+    fs::create_dir_all(&data_dir).expect("create data dir");
+    fs::create_dir_all(&repo).expect("create repo");
+    init_git_repo(&repo);
+
+    let data_dir_arg = data_dir.to_string_lossy().into_owned();
+    run_orbit_success(
+        &home,
+        &home,
+        &[
+            "init",
+            "--non-interactive",
+            "--host-name",
+            "qa",
+            "--task-prefix",
+            "QAZ",
+            "--root",
+            &data_dir_arg,
+        ],
+        None,
+    );
+    run_orbit_success(
+        &home,
+        &home,
+        &[
+            "--root",
+            &data_dir_arg,
+            "executor",
+            "list",
+            "--format",
+            "json",
+        ],
+        None,
+    );
+
+    seed_synthetic_data_dir_checkout(&data_dir);
+    run_orbit_success(
+        &repo,
+        &home,
+        &[
+            "--root",
+            &data_dir_arg,
+            "workspace",
+            "init",
+            "--name",
+            "qa",
+            "--force",
+            "--format",
+            "json",
+        ],
+        None,
+    );
+
+    let repo_canon = canonicalize_or_original(&repo);
+    let data_canon = canonicalize_or_original(&data_dir);
+    let bindings = checkout_bindings(&data_dir);
+    assert!(
+        bindings.iter().any(|(workspace_id, repo_root, orbit_dir)| {
+            workspace_id == "ws_qa"
+                && canonicalize_or_original(Path::new(repo_root)) == repo_canon
+                && canonicalize_or_original(Path::new(orbit_dir)) == data_canon
+        }),
+        "expected ws_qa checkout for the git repo; got {bindings:?}"
+    );
+    assert!(
+        bindings
+            .iter()
+            .all(|(workspace_id, _, orbit_dir)| workspace_id != "tmp-5b7149"
+                || canonicalize_or_original(Path::new(orbit_dir)) != data_canon),
+        "synthetic tmp-* row must not keep the data dir: {bindings:?}"
+    );
+    assert_workspace_commands_use_named_id(&repo, &home, &data_dir, "ws_qa");
+}
+
+fn assert_workspace_commands_use_named_id(repo: &Path, home: &Path, data_dir: &Path, id: &str) {
+    let data_dir_arg = data_dir.to_string_lossy().into_owned();
+    let listed = run_orbit_json(
+        repo,
+        home,
+        &[
+            "--root",
+            &data_dir_arg,
+            "workspace",
+            "list",
+            "--format",
+            "json",
+        ],
+        None,
+    );
+    let workspaces = listed
+        .as_array()
+        .unwrap_or_else(|| panic!("workspace list array: {listed}"));
+    assert!(
+        workspaces
+            .iter()
+            .any(|workspace| workspace["id"].as_str() == Some(id)),
+        "workspace list missing {id}: {listed}"
+    );
+    run_orbit_json(
+        repo,
+        home,
+        &[
+            "--root",
+            &data_dir_arg,
+            "auto-task",
+            "list",
+            "--format",
+            "json",
+        ],
+        None,
+    );
+}
+
+fn checkout_bindings(data_dir: &Path) -> Vec<(String, String, String)> {
+    let db = data_dir.join("tasks").join("index.sqlite");
+    if !db.is_file() {
+        return Vec::new();
+    }
+    let conn = rusqlite::Connection::open(&db).expect("open task registry");
+    let mut stmt = conn
+        .prepare("SELECT workspace_id, repo_root, orbit_dir FROM workspace_checkout_bindings")
+        .expect("prepare checkout query");
+    let rows = stmt
+        .query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+            ))
+        })
+        .expect("query checkout bindings");
+    rows.collect::<Result<Vec<_>, _>>()
+        .expect("collect checkout bindings")
+}
+
+fn seed_synthetic_data_dir_checkout(data_dir: &Path) {
+    let db = data_dir.join("tasks").join("index.sqlite");
+    let now = "2026-08-22T00:00:00+00:00";
+    let parent = canonicalize_or_original(data_dir.parent().expect("data dir parent"));
+    let data_canon = canonicalize_or_original(data_dir);
+    let conn = rusqlite::Connection::open(&db).expect("open task registry");
+    conn.execute(
+        "INSERT INTO workspace_bindings (
+            workspace_id, slug, repo_fingerprint, created_at, updated_at
+        ) VALUES (?1, ?2, NULL, ?3, ?3)",
+        rusqlite::params!["tmp-5b7149", "tmp", now],
+    )
+    .expect("insert synthetic workspace");
+    conn.execute(
+        "INSERT INTO workspace_checkout_bindings (
+            workspace_id, repo_root, workspace_path, orbit_dir, created_at, updated_at
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?5)",
+        rusqlite::params![
+            "tmp-5b7149",
+            parent.to_string_lossy().as_ref(),
+            parent.to_string_lossy().as_ref(),
+            data_canon.to_string_lossy().as_ref(),
+            now,
+        ],
+    )
+    .expect("insert synthetic checkout");
+    fs::write(
+        data_dir.join("config.yaml"),
+        "schema_version: 1\nworkspace_id: tmp-5b7149\n",
+    )
+    .expect("write synthetic identity");
+}
+
+fn canonicalize_or_original(path: &Path) -> PathBuf {
+    path.canonicalize().unwrap_or_else(|_| path.to_path_buf())
+}
