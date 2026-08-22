@@ -18,24 +18,23 @@ let logRows = []; // Keep track to enforce max 200 after 250 limit
 let activeLogFilters = new Set(["all"]);
 let logPanelResizeWired = false;
 
-// ORB-10874: the log pane can be collapsed and resized; both are local
-// presentation preferences (not shared/synced state), so they persist to
-// localStorage rather than the URL. `heightPx` is only present once the
-// operator has dragged the handle — until then the panel keeps auto-fitting
-// to the viewport exactly as before.
+// ORB-10972: the log lives in the Tasks tab's right dock, which has two modes
+// — Status (in-flight runs, locked files, sweep clock) and Log (the tail at
+// full dock height). The mode is a local presentation preference, not shared
+// state, so it persists to localStorage rather than the URL. This supersedes
+// ORB-10874's collapse toggle and height-resize handle: a full-height dock has
+// no height to negotiate, and the always-visible bottom status bar took over
+// the job the collapsed panel used to do.
 const LOG_PANEL_PREFS_KEY = "orbit.dashboard.logPanel";
-const LOG_PANEL_MIN_HEIGHT = 160;
+const DOCK_MODES = ["status", "log"];
 
 function loadLogPanelPrefs() {
   try {
     const raw = window.localStorage.getItem(LOG_PANEL_PREFS_KEY);
     const parsed = raw ? JSON.parse(raw) : {};
-    return {
-      collapsed: Boolean(parsed.collapsed),
-      heightPx: Number.isFinite(parsed.heightPx) ? parsed.heightPx : null,
-    };
+    return { dockMode: DOCK_MODES.includes(parsed.dockMode) ? parsed.dockMode : "status" };
   } catch (_) {
-    return { collapsed: false, heightPx: null };
+    return { dockMode: "status" };
   }
 }
 
@@ -49,116 +48,81 @@ function saveLogPanelPrefs(prefs) {
 
 let logPanelPrefs = loadLogPanelPrefs();
 
-function maxLogPanelHeight() {
-  const panel = $("log-panel");
-  if (!panel) return Infinity;
-  const top = panel.getBoundingClientRect().top;
-  return Math.max(LOG_PANEL_MIN_HEIGHT, Math.floor(window.innerHeight - top - 24));
-}
-
+// Kept as the exported name because app.js (refreshDashboard) and router.js
+// (setActiveTab) both call it. The dock is sized by the CSS grid now, so there
+// is no viewport arithmetic left — this only re-asserts the current mode.
 export function fitLogPanelToViewport() {
-  const panel = $("log-panel");
-  if (!panel) return;
-  applyLogPanelCollapsedState();
-  if (logPanelPrefs.collapsed) return;
-  const cap = maxLogPanelHeight();
-  const height = logPanelPrefs.heightPx != null
-    ? Math.min(Math.max(logPanelPrefs.heightPx, LOG_PANEL_MIN_HEIGHT), cap)
-    : cap;
-  panel.style.setProperty("--log-panel-height", `${height}px`);
+  applyDockMode();
 }
 
-function applyLogPanelCollapsedState() {
-  const panel = $("log-panel");
-  const toggle = $("log-panel-toggle");
-  if (!panel) return;
-  panel.classList.toggle("collapsed", logPanelPrefs.collapsed);
-  if (toggle) {
-    toggle.setAttribute("aria-expanded", logPanelPrefs.collapsed ? "false" : "true");
-    toggle.textContent = logPanelPrefs.collapsed ? "expand" : "collapse";
-  }
-  if (logPanelPrefs.collapsed) {
-    panel.style.removeProperty("--log-panel-height");
+function applyDockMode() {
+  const dock = $("side-dock");
+  if (!dock) return;
+  const mode = logPanelPrefs.dockMode;
+  dock.dataset.mode = mode;
+  for (const btn of document.querySelectorAll("#dock-mode-toggle .dock-seg")) {
+    const on = btn.dataset.mode === mode;
+    btn.classList.toggle("on", on);
+    btn.setAttribute("aria-selected", on ? "true" : "false");
+    btn.tabIndex = on ? 0 : -1;
   }
 }
 
-function wireLogPanelToggle() {
-  const toggle = $("log-panel-toggle");
+function setDockMode(mode) {
+  if (!DOCK_MODES.includes(mode)) return;
+  logPanelPrefs = { ...logPanelPrefs, dockMode: mode };
+  saveLogPanelPrefs(logPanelPrefs);
+  applyDockMode();
+}
+
+function wireDockModeToggle() {
+  const toggle = $("dock-mode-toggle");
   if (!toggle) return;
-  toggle.addEventListener("click", () => {
-    logPanelPrefs = { ...logPanelPrefs, collapsed: !logPanelPrefs.collapsed };
-    saveLogPanelPrefs(logPanelPrefs);
-    fitLogPanelToViewport();
+  for (const btn of toggle.querySelectorAll(".dock-seg")) {
+    btn.addEventListener("click", () => setDockMode(btn.dataset.mode));
+  }
+  // Arrow keys move between the two segments, matching the window selectors.
+  toggle.addEventListener("keydown", (event) => {
+    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+    event.preventDefault();
+    const idx = DOCK_MODES.indexOf(logPanelPrefs.dockMode);
+    const next = event.key === "ArrowLeft" ? idx - 1 : idx + 1;
+    const mode = DOCK_MODES[(next + DOCK_MODES.length) % DOCK_MODES.length];
+    setDockMode(mode);
+    const btn = toggle.querySelector(`.dock-seg[data-mode="${mode}"]`);
+    if (btn) btn.focus();
   });
 }
 
-// A pointer-driven drag handle on the log panel's top edge. Dragging sets an
-// explicit height (persisted), clamped so the panel can never be resized
-// smaller than LOG_PANEL_MIN_HEIGHT nor larger than the viewport allows —
-// the task list beside/above it keeps its own independent minimum height
-// (dashboard.css), so this clamp only protects the log panel itself.
-function wireLogPanelResizeHandle() {
-  const handle = $("log-panel-resize");
-  const panel = $("log-panel");
-  if (!handle || !panel) return;
-
-  let dragStartY = 0;
-  let dragStartHeight = 0;
-
-  const onPointerMove = (event) => {
-    const delta = event.clientY - dragStartY;
-    const cap = maxLogPanelHeight();
-    const next = Math.min(Math.max(dragStartHeight + delta, LOG_PANEL_MIN_HEIGHT), cap);
-    panel.style.setProperty("--log-panel-height", `${next}px`);
-  };
-
-  const onPointerUp = (event) => {
-    document.removeEventListener("pointermove", onPointerMove);
-    document.removeEventListener("pointerup", onPointerUp);
-    const rect = panel.getBoundingClientRect();
-    logPanelPrefs = { ...logPanelPrefs, heightPx: Math.round(rect.height), collapsed: false };
-    saveLogPanelPrefs(logPanelPrefs);
-    applyLogPanelCollapsedState();
-  };
-
-  handle.addEventListener("pointerdown", (event) => {
-    if (logPanelPrefs.collapsed) return;
-    event.preventDefault();
-    dragStartY = event.clientY;
-    dragStartHeight = panel.getBoundingClientRect().height;
-    document.addEventListener("pointermove", onPointerMove);
-    document.addEventListener("pointerup", onPointerUp);
-  });
-
-  // Keyboard resize (ArrowUp/ArrowDown) for operators who cannot drag.
-  handle.addEventListener("keydown", (event) => {
-    if (logPanelPrefs.collapsed) return;
-    const step = 32;
-    let delta = 0;
-    if (event.key === "ArrowUp") delta = -step;
-    else if (event.key === "ArrowDown") delta = step;
-    else return;
-    event.preventDefault();
-    const cap = maxLogPanelHeight();
-    const current = panel.getBoundingClientRect().height;
-    const next = Math.min(Math.max(current + delta, LOG_PANEL_MIN_HEIGHT), cap);
-    panel.style.setProperty("--log-panel-height", `${next}px`);
-    logPanelPrefs = { ...logPanelPrefs, heightPx: Math.round(next), collapsed: false };
-    saveLogPanelPrefs(logPanelPrefs);
-  });
+// ORB-10972: the bottom status bar carries the newest line on every tab, not
+// just the Tasks tab where the dock is mounted. The SSE connection is opened
+// once at boot and never torn down on a tab change, so mirroring here is
+// enough to keep the bar live everywhere.
+function updateLogStatusBar(ev) {
+  const bar = $("log-statusbar");
+  if (!bar || !ev) return;
+  let timeStr = ev.ts || "";
+  if (timeStr && timeStr.includes("T")) {
+    const d = new Date(timeStr);
+    if (!isNaN(d.getTime())) timeStr = d.toLocaleTimeString("en-US", { hour12: false });
+  }
+  const t = $("log-statusbar-time");
+  const ag = $("log-statusbar-source");
+  const m = $("log-statusbar-message");
+  if (t) t.textContent = timeStr;
+  if (ag) ag.textContent = ev.source || "";
+  if (m) {
+    m.innerHTML = ev.message_html || "";
+    m.dataset.level = getLogClass(ev.level, ev.code);
+  }
+  bar.classList.remove("empty");
 }
 
 function wireLogPanelResize() {
   if (logPanelResizeWired) return;
   logPanelResizeWired = true;
-  const scheduleFit = () => requestAnimationFrame(fitLogPanelToViewport);
-  window.addEventListener("resize", scheduleFit);
-  if (window.visualViewport) {
-    window.visualViewport.addEventListener("resize", scheduleFit);
-  }
-  wireLogPanelToggle();
-  wireLogPanelResizeHandle();
-  applyLogPanelCollapsedState();
+  wireDockModeToggle();
+  applyDockMode();
 }
 
 function getLogClass(level, code) {
@@ -185,7 +149,12 @@ function renderLogEvent(ev, isFresh) {
   const tSpan = el("span", { class: "t", text: timeStr });
   const agSpan = el("span", { class: "ag", text: ev.source || "" });
   const lvClass = getLogClass(ev.level, ev.code);
-  const lvSpan = el("span", { class: `lv ${lvClass}`, text: ev.code || "" });
+  // ORB-10972: the dock is 336px, so the level is carried by a coloured
+  // keyline on the row rather than a 42px text column — that width goes to the
+  // message instead. The class stays on the span for the filter code, which
+  // reads it back out of dataset.
+  row.classList.add(`lv-${lvClass}`);
+  const lvSpan = el("span", { class: `lv ${lvClass}`, title: ev.code || "", text: ev.code || "" });
   const mSpan = el("span", { class: "m" });
   mSpan.innerHTML = ev.message_html || "";
 
@@ -214,6 +183,7 @@ export function initLogTail() {
       logRows.push(row);
     });
     applyLogFilters();
+    if (events.length > 0) updateLogStatusBar(events[events.length - 1]);
     connectLogStream();
   }).catch(console.error);
   
@@ -235,7 +205,7 @@ export function initLogTail() {
     });
   }
 
-  document.querySelectorAll("#log-panel .filter-pill").forEach(pill => {
+  document.querySelectorAll("#side-dock .filter-pill").forEach(pill => {
     pill.addEventListener("click", (e) => {
       const filter = e.currentTarget.dataset.filter;
       if (filter === "all") {
@@ -253,7 +223,7 @@ export function initLogTail() {
         }
       }
       
-      document.querySelectorAll("#log-panel .filter-pill").forEach(p => {
+      document.querySelectorAll("#side-dock .filter-pill").forEach(p => {
         p.classList.toggle("on", activeLogFilters.has(p.dataset.filter));
       });
       applyLogFilters();
@@ -316,6 +286,7 @@ function connectLogStream() {
   logStream.onmessage = (e) => {
     try {
       const ev = JSON.parse(e.data);
+      updateLogStatusBar(ev);
       if (logFollowTail) {
         const inner = $("logInner");
         const row = renderLogEvent(ev, true);

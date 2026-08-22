@@ -5,9 +5,16 @@
         
         --bg: #000000;
         --bg-elev: #0a0a0a;
-        --border: #333333;
+        --bg-rail: #08080a;
+        /* ORB-10972 two-tier border scale. `--border` draws the edge of a
+           panel or control; `--hair` draws every hairline *inside* one (table
+           rows, group splits, log lines). Before this they were the same
+           #333333, which made the grid read as loud as its contents. */
+        --border: #2a2a2e;
+        --hair: #17171a;
         --fg: #dcdcdc;
         --fg-dim: #71717a;
+        --fg-mute: #4b4b52;
         --accent: #6e9fff;
         --accent-hover: #8ab3ff;
         --accent-hi: #a6cdff;
@@ -66,42 +73,200 @@
         height: 100vh;
         overflow-x: hidden;
       }
+
+      /* ORB-10972: the document is a vertical split — the two-column shell
+         above, the always-on log status bar pinned beneath it. */
+      body {
+        display: flex;
+        flex-direction: column;
+        min-height: 0;
+      }
       
 
 
       .mono { font-family: var(--font-mono); }
 
-      header {
-        border-bottom: 1px solid var(--border);
-        padding: 14px 24px;
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 16px;
-        background: #000000;
-        position: sticky;
-        top: 0;
-        z-index: 100;
+      /* ORB-10972: the app is a two-column shell — a fixed nav rail and a
+         content column that owns its own scrolling. */
+      .shell {
+        display: grid;
+        grid-template-columns: 216px minmax(0, 1fr);
+        flex: 1 1 auto;
+        min-height: 0;
       }
 
-      header .brand {
+      .rail {
+        background: var(--bg-rail);
+        border-right: 1px solid var(--border);
+        display: flex;
+        flex-direction: column;
+        min-height: 0;
+        overflow-y: auto;
+      }
+
+      .rail-brand { padding: 16px 18px 10px; }
+      .rail-brand svg { height: 22px; width: auto; }
+
+      .rail .tabs {
+        display: flex;
+        flex-direction: column;
+        padding: 4px 10px;
+        gap: 2px;
+      }
+
+      /* The router still appends #tab-indicator / #subtab-indicator to .tabs
+         and #diag-subtabs. In the rail the active entry is marked by its own
+         background, so the sliding underline is suppressed here rather than
+         removed from the router. */
+      .rail .tab-indicator { display: none !important; }
+
+      .rail-group { display: flex; flex-direction: column; gap: 1px; }
+
+      .rail-group-label {
+        font-size: 9.5px;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.12em;
+        color: var(--fg-mute);
+        padding: 12px 8px 5px;
+      }
+
+      .rail .tab {
         display: flex;
         align-items: center;
-        height: 24px;
-      }
-      header .brand svg {
-        height: 22px;
-        width: auto;
-      }
-      
-      header .meta {
-        font-family: var(--font-mono);
-        font-size: 12px;
-        color: var(--fg-dim);
-        display: inline-flex;
-        align-items: center;
         gap: 10px;
+        width: 100%;
+        padding: 7px 8px;
+        border: none;
+        border-radius: 4px;
+        background: transparent;
+        color: var(--fg-dim);
+        font: inherit;
+        font-size: 13px;
+        text-align: left;
+        cursor: pointer;
+        transition: background 0.15s ease, color 0.15s ease;
       }
+
+      .rail .tab:hover { color: var(--fg); background: rgba(255, 255, 255, 0.04); }
+
+      .rail .tab.active {
+        background: rgba(110, 159, 255, 0.12);
+        color: var(--fg);
+      }
+
+      .rail-ico { width: 15px; height: 15px; flex: 0 0 auto; }
+      .rail-label { flex: 1 1 auto; min-width: 0; }
+
+      .rail-count {
+        margin-left: auto;
+        font-family: var(--font-mono);
+        font-size: 10.5px;
+        font-variant-numeric: tabular-nums;
+        color: var(--fg-mute);
+      }
+      .rail .tab.active .rail-count { color: var(--accent-hi); }
+      .rail-count.alert { color: var(--status-blocked); }
+
+      .rail-subtabs {
+        display: flex;
+        flex-direction: column;
+        gap: 1px;
+        padding: 2px 0 2px 0;
+        border-bottom: none;
+        background: transparent;
+      }
+
+      /* Muted while Diagnostics is not the active destination: the remembered
+         subtab stays remembered, but the rail only ever shows one selection. */
+      .rail-subtabs.dimmed .subtab.active {
+        background: transparent;
+        color: var(--fg-mute);
+      }
+
+      .rail-subtabs .subtab {
+        display: flex;
+        align-items: center;
+        padding: 5px 8px 5px 33px;
+        border-radius: 4px;
+        font-size: 12px;
+        color: var(--fg-mute);
+        text-align: left;
+      }
+      .rail-subtabs .subtab .rail-count { font-size: 10.5px; }
+
+      .rail-foot {
+        margin-top: auto;
+        border-top: 1px solid var(--hair);
+        padding: 12px 14px;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+
+      .rail-workspace { display: flex; flex-direction: column; gap: 6px; }
+      .rail-workspace .workspace-select { max-width: 100%; margin: 0; width: 100%; }
+
+      .rail-conn {
+        display: flex;
+        align-items: center;
+        font-family: var(--font-mono);
+        font-size: 10.5px;
+        color: var(--fg-mute);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .main-col {
+        display: flex;
+        flex-direction: column;
+        min-width: 0;
+        min-height: 0;
+        overflow: hidden;
+      }
+
+      /* ORB-10972: one 52px bar replaces the old header + tabs + health strip
+         stack (~194px). The four health metrics ride inline in it. */
+      .topbar {
+        flex: 0 0 auto;
+        height: 52px;
+        border-bottom: 1px solid var(--border);
+        display: flex;
+        align-items: center;
+        gap: 18px;
+        padding: 0 20px;
+        background: var(--bg);
+      }
+
+      .topbar .crumb {
+        font-size: 15px;
+        font-weight: 600;
+        letter-spacing: -0.01em;
+        flex: 0 0 auto;
+      }
+
+      .topbar-spacer { flex: 1 1 auto; }
+
+      .kpis { display: flex; align-items: center; gap: 18px; min-width: 0; }
+
+      .kpi {
+        display: flex;
+        align-items: baseline;
+        gap: 7px;
+        font-family: var(--font-mono);
+        font-size: 11px;
+        white-space: nowrap;
+      }
+      .kpi .k { color: var(--fg-mute); letter-spacing: 0.04em; text-transform: uppercase; }
+      .kpi .v { font-size: 14px; color: var(--fg-dim); font-variant-numeric: tabular-nums; }
+      .kpi.tile-alert .k, .kpi.tile-alert .v { color: var(--state-failed); }
+
+      .kpi-spark { width: 64px; height: 20px; flex: 0 0 auto; }
+      .kpi-spark path { fill: none; stroke: var(--accent); stroke-width: 1.2px; }
+      .kpi-spark .baseline { stroke: var(--hair); stroke-width: 1px; }
+
+      .topbar .global-id-wrap { position: relative; display: inline-block; flex: 0 0 auto; }
 
       .refresh-btn {
         min-width: 74px;
@@ -259,10 +424,26 @@
       main {
         display: grid;
         grid-template-columns: minmax(0, 2.5fr) minmax(0, 1fr);
-        gap: 24px;
-        padding: 24px;
+        gap: 20px;
+        padding: 20px;
         max-width: 1800px;
         margin: 0 auto;
+        min-height: 0;
+      }
+
+      /* ORB-10972: the content column scrolls, not the document. The task
+         pane's main fills the column so the dock beside it can be full height. */
+      .main-col > .tab-pane { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
+      .main-col > .tab-pane[data-tab="tasks"] { overflow: hidden; }
+      .main-col > .tab-pane[data-tab="tasks"] > main.tasks-layout {
+        height: 100%;
+        align-items: stretch;
+      }
+      .main-col > .tab-pane[data-tab="tasks"] .col-tasks > .panel {
+        flex: 1 1 auto;
+        display: flex;
+        flex-direction: column;
+        min-height: 0;
       }
       
       @media (max-width: 1000px) {
@@ -285,7 +466,7 @@
       
       .panel > header {
         padding: 12px 16px;
-        border-bottom: 1px solid var(--border);
+        border-bottom: 1px solid var(--hair);
         font-family: var(--font-sans);
         font-size: 12px;
         font-weight: 600;
@@ -297,7 +478,7 @@
         align-items: center;
         flex-wrap: wrap;
         gap: 8px;
-        background: #18181b;
+        background: transparent;
       }
       
       .panel > header .count {
@@ -315,7 +496,8 @@
       }
       
       #tasks-panel > .body {
-        max-height: calc(100vh - 240px);
+        max-height: none;
+        flex: 1 1 auto;
         /* ORB-10874: floor so the task inventory stays usable (a few visible
            rows) even on a short viewport or with the log panel expanded — it
            never gets squeezed toward zero by the surrounding chrome. */
@@ -329,7 +511,7 @@
         display: flex;
         gap: 8px;
         padding: 12px 16px;
-        border-bottom: 1px solid var(--border);
+        border-bottom: 1px solid var(--hair);
         flex-wrap: wrap;
         align-items: center;
         background: var(--bg);
@@ -498,7 +680,7 @@
         align-items: center;
         cursor: pointer;
         transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-        border-bottom: 1px solid var(--border);
+        border-bottom: 1px solid var(--hair);
       }
 
       .row:hover { 
@@ -645,8 +827,8 @@
       .task-crew-select:focus-visible,
       .chip:focus-visible,
       .mutation-undo:focus-visible,
-      .log-panel-toggle:focus-visible,
-      .log-resize-handle:focus-visible {
+      .rail .tab:focus-visible,
+      .dock-seg:focus-visible {
         outline: 2px solid var(--accent-hover);
         outline-offset: 2px;
       }
@@ -656,7 +838,7 @@
         font-family: var(--font-mono);
         font-size: 11px;
         color: var(--fg-dim);
-        border-bottom: 1px solid var(--border);
+        border-bottom: 1px solid var(--hair);
         background: var(--bg);
       }
 
@@ -693,7 +875,7 @@
       .row.header {
         cursor: default;
         background: transparent;
-        border-bottom: 1px solid var(--border);
+        border-bottom: 1px solid var(--hair);
         padding: 2px 16px 6px;
         font-size: 10px;
         font-weight: 600;
@@ -704,7 +886,7 @@
       }
       .row.header:hover {
         background: transparent;
-        border-color: var(--border);
+        border-color: var(--hair);
       }
       .row.header .id,
       .row.header .title,
@@ -727,7 +909,7 @@
         display: grid;
         gap: 16px;
         font-size: 13px;
-        border-bottom: 1px solid var(--border);
+        border-bottom: 1px solid var(--hair);
         animation: fadeIn 0.3s ease;
       }
       
@@ -1308,17 +1490,6 @@
         font-family: var(--font-mono);
       }
       
-      .tabs {
-        display: flex;
-        gap: 8px;
-        padding: 0 24px;
-        border-bottom: 1px solid var(--border);
-        background: #000000;
-        position: sticky;
-        top: 61px; /* Just below header */
-        z-index: 90;
-      }
-      
       .tab-indicator {
         position: absolute;
         bottom: -1px;
@@ -1329,25 +1500,6 @@
         pointer-events: none;
       }
       
-      .tab {
-        background: transparent;
-        color: var(--fg-dim);
-        border: none;
-        padding: 12px 16px;
-        cursor: pointer;
-        font: inherit;
-        font-weight: 500;
-        font-size: 13px;
-        border-bottom: 2px solid transparent;
-        margin-bottom: -1px;
-        transition: color 0.2s ease;
-      }
-      
-      .tab:hover { color: var(--fg); }
-      
-      .tab.active {
-        color: var(--fg);
-      }
       
       .tab-pane { display: none; animation: fadeIn 0.3s ease; }
       .tab-pane.active { display: block; position: relative; z-index: 0; }
@@ -2337,7 +2489,7 @@
         display: flex;
         gap: 4px;
         padding: 8px 16px;
-        border-bottom: 1px solid var(--border);
+        border-bottom: 1px solid var(--hair);
         background: #000000;
         position: relative;
       }
@@ -2615,80 +2767,112 @@
       }
 
       /* Health strip — global header tile row */
-      .health-strip {
-        display: grid;
-        grid-template-columns: repeat(4, minmax(0, 1fr));
-        gap: 0;
-        padding: 0;
-        background: #000000;
-        border-bottom: 1px solid var(--border);
-        position: sticky;
-        top: 110px; /* below header (61px) + tabs (49px) */
-        z-index: 89;
+      /* ORB-10972: the dock. Two panes, one column width. `data-mode` on the
+         host swaps which pane is displayed; nothing about the column's own box
+         changes, so the task table beside it never reflows on a mode switch. */
+      #side-dock {
+        display: flex;
+        flex-direction: column;
+        min-height: 0;
+        background: var(--bg-elev);
+        border: 1px solid var(--border);
+        border-radius: 2px;
+        overflow: hidden;
       }
 
-      .tile {
-        display: grid;
-        grid-template-columns: 1fr auto;
-        grid-template-rows: auto auto;
-        column-gap: 14px;
-        padding: 10px 16px;
-        border-right: 1px solid var(--border);
-        background: var(--bg);
-        position: relative;
+      .dock-head {
+        flex: 0 0 auto;
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        padding: 9px 12px;
+        border-bottom: 1px solid var(--hair);
       }
 
-      .tile:last-child { border-right: none; }
+      .dock-seg-group { display: flex; align-items: center; gap: 4px; }
 
-      .tile .label {
-        grid-column: 1 / 2;
-        grid-row: 1 / 2;
-        font-family: var(--font-sans);
-        font-size: 10px;
-        font-weight: 600;
-        text-transform: uppercase;
-        letter-spacing: 0.1em;
-        color: var(--fg-dim);
+      .dock-seg {
+        border: none;
+        background: transparent;
+        color: var(--fg-mute);
+        font: inherit;
+        font-size: 12px;
+        padding: 4px 11px;
+        border-radius: 5px;
+        cursor: pointer;
+        transition: background 0.15s ease, color 0.15s ease;
       }
+      .dock-seg:hover { color: var(--fg); }
+      .dock-seg.on { color: var(--fg); background: var(--bg); }
+      .dock-seg:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 
-      .tile .value {
-        grid-column: 1 / 2;
-        grid-row: 2 / 3;
+      .dock-meta {
+        margin-left: auto;
+        display: inline-flex;
+        align-items: center;
+        gap: 7px;
         font-family: var(--font-mono);
-        font-size: 22px;
-        font-weight: 500;
-        color: var(--fg);
-        line-height: 1.1;
+        font-size: 10.5px;
+        font-variant-numeric: tabular-nums;
+        color: var(--fg-mute);
       }
 
-      .tile .glyph {
-        grid-column: 2 / 3;
-        grid-row: 1 / 3;
-        align-self: center;
+      .dock-pane { display: none; flex: 1 1 auto; min-height: 0; flex-direction: column; }
+      #side-dock[data-mode="status"] .dock-pane[data-pane="status"] { display: flex; }
+      #side-dock[data-mode="log"] .dock-pane[data-pane="log"] { display: flex; }
+
+      .dock-pane > .panel {
+        border: none;
+        border-radius: 0;
+        background: transparent;
+        flex: 1 1 auto;
+        min-height: 0;
+      }
+      .dock-pane #locks-body { overflow-y: auto; }
+
+      /* ORB-10972: always-on ambient line, present on every tab. Replaces what
+         the collapsed log panel used to do. */
+      .log-statusbar {
+        flex: 0 0 auto;
+        height: 30px;
+        border-top: 1px solid var(--border);
+        background: var(--bg-elev);
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 0 20px;
         font-family: var(--font-mono);
-        font-size: 10px;
+        font-size: 11px;
+        min-width: 0;
+      }
+      /* ORB-10972: the live dot is used in the dock header and the status bar
+         now, so it needs a rule of its own rather than one scoped to the log
+         panel header it used to live in. */
+      .live-dot {
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        flex: 0 0 auto;
+        background: var(--accent);
+        box-shadow: 0 0 0 3px rgba(110, 159, 255, 0.08);
+        animation: livePulse 2.4s ease-in-out infinite;
+      }
+      .log-statusbar .live-dot { flex: 0 0 auto; }
+      .log-statusbar .sb-label,
+      .log-statusbar .sb-t { color: var(--fg-mute); flex: 0 0 auto; font-variant-numeric: tabular-nums; }
+      .log-statusbar .sb-ag { color: var(--fg-dim); flex: 0 0 auto; }
+      .log-statusbar .sb-m {
         color: var(--fg-dim);
-        text-transform: uppercase;
-        letter-spacing: 0.08em;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        min-width: 0;
       }
-
-      .tile.tile-alert {
-        background: rgba(239, 68, 68, 0.06);
-      }
-      .tile.tile-alert .label,
-      .tile.tile-alert .glyph { color: var(--state-failed); }
-      .tile.tile-alert .value { color: var(--state-failed); }
-
-      .tile .sparkline {
-        grid-column: 1 / 3;
-        grid-row: 3 / 4;
-        height: 22px;
-        margin-top: 6px;
-        width: 100%;
-        display: block;
-      }
-      .tile .sparkline path { fill: none; stroke: var(--accent); stroke-width: 1.2px; }
-      .tile .sparkline .baseline { stroke: var(--border); stroke-width: 1px; }
+      .log-statusbar .sb-m b { color: var(--fg); font-weight: 500; }
+      .log-statusbar .sb-m[data-level="err"] { color: var(--status-blocked); }
+      .log-statusbar .sb-m[data-level="deny"] { color: var(--status-review); }
+      .log-statusbar .sb-m[data-level="warn"] { color: var(--status-proposed); }
+      .log-statusbar.empty .sb-label { opacity: 0.6; }
 
       /* Policy view (Audit sub-tab) */
       .policy-grid {
@@ -3501,18 +3685,11 @@
         main.tasks-layout {
           grid-template-columns: 1fr !important;
         }
-        .col-log {
-          min-height: auto;
-        }
-        #log-panel {
-          height: var(--log-panel-height, 260px);
-          max-height: var(--log-panel-height, 260px);
-        }
+        .col-log { min-height: 320px; }
       }
       .col-log {
         display: flex;
         flex-direction: column;
-        gap: 8px;
         min-height: 0;
         min-width: 0;
       }
@@ -3524,10 +3701,13 @@
         min-width: 0;
       }
       #locks-panel {
-        flex: 0 0 auto;
+        flex: 1 1 auto;
+        display: flex;
+        flex-direction: column;
+        min-height: 0;
       }
       #locks-body {
-        max-height: 180px;
+        max-height: none;
         overflow: auto;
       }
       .locks-empty {
@@ -3591,60 +3771,17 @@
         text-overflow: ellipsis;
         white-space: nowrap;
       }
+      /* ORB-10972: #log-panel is a pane of the dock now — it fills the dock's
+         height rather than negotiating its own. The ORB-10874 collapse toggle
+         and drag handle are gone with the geometry that needed them; the
+         always-on .log-statusbar and the dock's Status mode replaced them. */
       #log-panel {
         position: relative;
-        height: var(--log-panel-height, calc(100dvh - 420px));
-        max-height: var(--log-panel-height, calc(100dvh - 420px));
+        display: flex;
+        flex-direction: column;
+        min-height: 0;
+        height: 100%;
       }
-      /* ORB-10874: collapsed keeps only the header (with its toggle/filters
-         reachable via the header itself where relevant) so the operator can
-         still see the panel exists and re-expand it, without it occupying
-         the space a mid-height panel would. */
-      #log-panel.collapsed {
-        height: auto;
-        max-height: none;
-        flex: 0 0 auto;
-      }
-      #log-panel.collapsed .log-stream,
-      #log-panel.collapsed .log-foot {
-        display: none;
-      }
-      .log-resize-handle {
-        position: absolute;
-        top: -5px;
-        left: 0;
-        right: 0;
-        height: 10px;
-        cursor: row-resize;
-        z-index: 2;
-        touch-action: none;
-      }
-      .log-resize-handle::after {
-        content: "";
-        display: block;
-        margin: 4px auto 0;
-        width: 36px;
-        height: 3px;
-        border-radius: 2px;
-        background: var(--border);
-      }
-      .log-resize-handle:hover::after { background: var(--fg-dim); }
-      #log-panel.collapsed .log-resize-handle { cursor: default; pointer-events: none; }
-      .log-panel-toggle {
-        font: inherit;
-        font-family: var(--font-mono);
-        font-size: 10px;
-        text-transform: uppercase;
-        letter-spacing: 0.06em;
-        color: var(--fg-dim);
-        background: var(--bg-elev);
-        border: 1px solid var(--border);
-        border-radius: 3px;
-        padding: 2px 8px;
-        cursor: pointer;
-        margin-left: 6px;
-      }
-      .log-panel-toggle:hover { color: var(--fg); border-color: var(--fg-dim); }
       .col-log .panel > header .title {
         display: flex; align-items: center; gap: 10px;
       }
@@ -3673,9 +3810,10 @@
       }
       .log-line {
         display: grid;
-        grid-template-columns: 64px 72px 42px minmax(120px, 1fr);
+        grid-template-columns: 56px 62px minmax(0, 1fr);
         gap: 10px;
-        padding: 0 16px;
+        padding: 0 14px 0 12px;
+        border-left: 2px solid transparent;
         font-size: 11.5px; line-height: 22px;
         color: var(--fg);
         cursor: pointer;
@@ -3683,10 +3821,17 @@
         transition: background 0.15s ease;
       }
       .log-line:hover { background: rgba(255,255,255,0.03); }
-      .log-line.expanded { background: rgba(255,255,255,0.02); border-bottom-color: var(--border); }
+      .log-line.expanded { background: rgba(255,255,255,0.02); border-bottom-color: var(--hair); }
       .log-line .t  { color: var(--fg-dim); font-feature-settings: "tnum"; white-space: nowrap; }
-      .log-line .ag { color: var(--accent-hi); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-      .log-line .lv { font-weight: 500; letter-spacing: 0.04em; white-space: nowrap; }
+      .log-line .ag { color: var(--fg-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      /* The level text is replaced by the row keyline; the element stays for
+         assistive tech and for the title tooltip. */
+      .log-line .lv { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+      .log-line.lv-ok   { border-left-color: var(--status-done); }
+      .log-line.lv-info { border-left-color: transparent; }
+      .log-line.lv-warn { border-left-color: var(--status-proposed); }
+      .log-line.lv-err  { border-left-color: var(--status-blocked); }
+      .log-line.lv-deny { border-left-color: var(--status-review); }
       .log-line .lv.ok   { color: var(--status-done); }
       .log-line .lv.info { color: var(--status-in-progress); }
       .log-line .lv.warn { color: var(--status-proposed); }
@@ -3720,6 +3865,18 @@
         height: 18px; background: linear-gradient(var(--bg-elev), transparent);
         pointer-events: none;
       }
+      .log-filters {
+        flex: 0 0 auto;
+        border-top: none !important;
+        border-bottom: 1px solid var(--hair);
+        padding: 7px 12px;
+        gap: 5px;
+        flex-wrap: nowrap;
+        white-space: nowrap;
+        overflow: hidden;
+      }
+      .log-filters .filter-pill { padding: 2px 7px; }
+      .log-filters .seg.right { margin-left: auto; }
       .log-foot {
         border-top: 1px solid var(--border);
         padding: 9px 16px;

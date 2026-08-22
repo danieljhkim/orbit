@@ -1214,6 +1214,10 @@ export function renderTasks(tasks, context) {
 
   const filtered = filterTasks(tasks, context);
   $("tasks-count").textContent = formatTaskCount(filtered.length, tasks.length, tasksMeta(context));
+  // ORB-10972: the rail shows the same filtered count the panel header does,
+  // so the Tasks entry reads correctly from any other tab.
+  const railCount = document.getElementById("rail-count-tasks");
+  if (railCount) railCount.textContent = String(filtered.length);
   renderFilterSummary(context);
   if (filtered.length === 0 && frag.children.length === 0) {
     const defaultText = tasks.length === 0 ? "No tasks available." : "No tasks match filter.";
